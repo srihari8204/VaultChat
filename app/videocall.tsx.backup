@@ -1,0 +1,476 @@
+import React, { useState, useRef, useEffect } from 'react';
+import {
+  View, Text, TouchableOpacity, StyleSheet,
+  Animated, Dimensions, PanResponder,
+  Alert, StatusBar, Platform, PermissionsAndroid,
+} from 'react-native';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
+import {
+  RTCPeerConnection, RTCIceCandidate, RTCSessionDescription,
+  RTCView, mediaDevices, MediaStream,
+} from 'react-native-webrtc';
+import { io, Socket } from 'socket.io-client';
+import * as ScreenCapture from 'expo-screen-capture';
+
+const { width: W } = Dimensions.get('window');
+
+const ICE = { iceServers: [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+]};
+
+const Avatar = ({ name, size = 80 }: { name: string; size?: number }) => {
+  const i = name.split(' ').map((n: string) => n[0]).join('').slice(0,2).toUpperCase();
+  return (
+    <View style={{ width:size, height:size, borderRadius:size/2, overflow:'hidden' }}>
+      <LinearGradient colors={['#1D4ED8','#7C3AED']}
+        style={{ flex:1, justifyContent:'center', alignItems:'center' }}>
+        <Text style={{ color:'#fff', fontWeight:'900', fontSize:size*0.35 }}>{i}</Text>
+      </LinearGradient>
+    </View>
+  );
+};
+
+const Pulse = ({ size }: { size: number }) => {
+  const a = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.loop(Animated.sequence([
+      Animated.timing(a, { toValue:1, duration:1500, useNativeDriver:true }),
+      Animated.timing(a, { toValue:0, duration:0,    useNativeDriver:true }),
+    ])).start();
+  }, []);
+  return (
+    <Animated.View style={{
+      position:'absolute', width:size, height:size, borderRadius:size/2,
+      borderWidth:2, borderColor:'#4A9FFF',
+      transform:[{ scale: a.interpolate({ inputRange:[0,1], outputRange:[1,1.6] }) }],
+      opacity:        a.interpolate({ inputRange:[0,1], outputRange:[0.6,0] }),
+    }}/>
+  );
+};
+
+export default function VideoCallScreen() {
+  const router     = useRouter();
+  const params     = useLocalSearchParams();
+  const callerName = (params.name   as string) || 'Unknown';
+  const roomId     = (params.room   as string) || `vc-${Date.now()}`;
+  const serverUrl  = (params.server as string) || 'http://10.0.2.2:3001';
+
+  const [localStream,   setLocalStream]   = useState<MediaStream|null>(null);
+  const [remoteStream,  setRemoteStream]  = useState<MediaStream|null>(null);
+  const [callState,     setCallState]     = useState<'connecting'|'connected'|'failed'>('connecting');
+  const [callDuration,  setCallDuration]  = useState(0);
+  const [micOn,         setMicOn]         = useState(true);
+  const [camOn,         setCamOn]         = useState(true);
+  const [frontCam,      setFrontCam]      = useState(true);
+  const [screenSharing, setScreenSharing] = useState(false);
+  const [showReactions, setShowReactions] = useState(false);
+  const [reaction,      setReaction]      = useState<string|null>(null);
+
+  const pcRef      = useRef<RTCPeerConnection|null>(null);
+  const socketRef  = useRef<Socket|null>(null);
+  const timerRef   = useRef<ReturnType<typeof setInterval>|null>(null);
+  const ctrlRef    = useRef<ReturnType<typeof setTimeout>|null>(null);
+  const ctrlAnim   = useRef(new Animated.Value(1)).current;
+  const reactAnim  = useRef(new Animated.Value(0)).current;
+  const shareAnim  = useRef(new Animated.Value(0)).current;
+
+  const pipPos = useRef(new Animated.ValueXY({ x:W-130, y:60 })).current;
+  const pipPan = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onPanResponderGrant: () => {
+      pipPos.setOffset({ x:(pipPos.x as any)._value, y:(pipPos.y as any)._value });
+    },
+    onPanResponderMove: Animated.event(
+      [null, { dx:pipPos.x, dy:pipPos.y }], { useNativeDriver:false }
+    ),
+    onPanResponderRelease: () => pipPos.flattenOffset(),
+  })).current;
+
+  // -- Permissions ----------------------------------------------------------
+  const getPerms = async () => {
+    if (Platform.OS === 'android') {
+      await PermissionsAndroid.requestMultiple([
+        PermissionsAndroid.PERMISSIONS.CAMERA,
+        PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+      ]);
+    }
+  };
+
+  // -- Local stream ---------------------------------------------------------
+  const startLocalStream = async () => {
+    try {
+      const s = await mediaDevices.getUserMedia({
+        audio: true,
+        video: { facingMode:'user', width:{ ideal:1280 }, height:{ ideal:720 } },
+      });
+      setLocalStream(s);
+      return s;
+    } catch(e) {
+      Alert.alert('Camera Error','Could not access camera/mic.');
+      return null;
+    }
+  };
+
+  // -- Peer connection -------------------------------------------------------
+  const createPC = (stream: MediaStream) => {
+    const pc = new RTCPeerConnection(ICE);
+    stream.getTracks().forEach(t => pc.addTrack(t, stream));
+    pc.ontrack = (e: any) => {
+      if (e.streams?.[0]) { setRemoteStream(e.streams[0]); setCallState('connected'); }
+    };
+    pc.onicecandidate = (e: any) => {
+      if (e.candidate)
+        socketRef.current?.emit('ice-candidate', { room:roomId, candidate:e.candidate });
+    };
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected')
+        setCallState('failed');
+    };
+    pcRef.current = pc;
+    return pc;
+  };
+
+  // -- Socket signaling ------------------------------------------------------
+  const setupSocket = (pc: RTCPeerConnection) => {
+    const s = io(serverUrl, { transports:['websocket'] });
+    socketRef.current = s;
+    s.on('connect',      () => s.emit('join-room', { room:roomId }));
+    s.on('user-joined',  async () => {
+      const offer = await pc.createOffer({ offerToReceiveAudio:true, offerToReceiveVideo:true });
+      await pc.setLocalDescription(offer);
+      s.emit('offer', { room:roomId, offer });
+    });
+    s.on('offer', async ({ offer }: any) => {
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      s.emit('answer', { room:roomId, answer });
+    });
+    s.on('answer',        async ({ answer }: any) =>
+      pc.setRemoteDescription(new RTCSessionDescription(answer)));
+    s.on('ice-candidate', async ({ candidate }: any) =>
+      pc.addIceCandidate(new RTCIceCandidate(candidate)));
+    s.on('user-left',     () => { setRemoteStream(null); setCallState('connecting'); });
+  };
+
+  // -- Init ------------------------------------------------------------------
+  useEffect(() => {
+    // Block screen recording during call
+    ScreenCapture.preventScreenCaptureAsync();
+    const init = async () => {
+      await getPerms();
+      const stream = await startLocalStream();
+      if (!stream) return;
+      const pc = createPC(stream);
+      setupSocket(pc);
+    };
+    init();
+    resetCtrl();
+    return () => {
+      ScreenCapture.allowScreenCaptureAsync();
+      localStream?.getTracks().forEach(t => t.stop());
+      pcRef.current?.close();
+      socketRef.current?.disconnect();
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (ctrlRef.current)  clearTimeout(ctrlRef.current);
+    };
+  }, []);
+
+  // -- Timer -----------------------------------------------------------------
+  useEffect(() => {
+    if (callState === 'connected') {
+      timerRef.current = setInterval(() => setCallDuration(d => d+1), 1000);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [callState]);
+
+  // -- Controls auto-hide ----------------------------------------------------
+  const resetCtrl = () => {
+    if (ctrlRef.current) clearTimeout(ctrlRef.current);
+    Animated.timing(ctrlAnim,{ toValue:1, duration:200, useNativeDriver:true }).start();
+    ctrlRef.current = setTimeout(() =>
+      Animated.timing(ctrlAnim,{ toValue:0, duration:400, useNativeDriver:true }).start()
+    , 5000);
+  };
+
+  // -- Controls --------------------------------------------------------------
+  const toggleMic = () => {
+    localStream?.getAudioTracks().forEach(t => { t.enabled = !micOn; });
+    setMicOn(m => !m);
+  };
+  const toggleCam = () => {
+    localStream?.getVideoTracks().forEach(t => { t.enabled = !camOn; });
+    setCamOn(c => !c);
+  };
+  const flipCam = () => {
+    localStream?.getVideoTracks().forEach((t: any) => t._switchCamera?.());
+    setFrontCam(f => !f);
+  };
+
+  // -- Screen share (real — native only) ------------------------------------
+  const toggleShare = () => {
+    if (screenSharing) {
+      setScreenSharing(false);
+      Animated.timing(shareAnim,{ toValue:0, duration:300, useNativeDriver:true }).start();
+      // restore camera track
+      startLocalStream().then(s => {
+        if (!s) return;
+        const track = s.getVideoTracks()[0];
+        pcRef.current?.getSenders().find((x:any) => x.track?.kind==='video')
+          ?.replaceTrack(track);
+        setLocalStream(s);
+      });
+    } else {
+      Alert.alert('Share Screen','Your entire screen will be visible to the other person.',[
+        { text:'Cancel', style:'cancel' },
+        { text:'Start Sharing', onPress: async () => {
+          try {
+            const s = await (mediaDevices as any).getDisplayMedia({ video:true });
+            const t = s.getVideoTracks()[0];
+            pcRef.current?.getSenders().find((x:any) => x.track?.kind==='video')
+              ?.replaceTrack(t);
+            setLocalStream(s);
+            setScreenSharing(true);
+            Animated.timing(shareAnim,{ toValue:1, duration:300, useNativeDriver:true }).start();
+          } catch { Alert.alert('Error','Screen share failed.'); }
+        }},
+      ]);
+    }
+  };
+
+  // -- Reactions -------------------------------------------------------------
+  const sendReaction = (e: string) => {
+    setReaction(e); setShowReactions(false); reactAnim.setValue(0);
+    Animated.sequence([
+      Animated.spring(reactAnim,{ toValue:1, useNativeDriver:true, tension:80 }),
+      Animated.delay(1800),
+      Animated.timing(reactAnim,{ toValue:0, duration:400, useNativeDriver:true }),
+    ]).start(() => setReaction(null));
+    socketRef.current?.emit('reaction',{ room:roomId, emoji:e });
+  };
+
+  const endCall = () => {
+    Alert.alert('End Call','Are you sure?',[
+      { text:'Cancel', style:'cancel' },
+      { text:'End Call', style:'destructive', onPress:() => {
+        localStream?.getTracks().forEach(t => t.stop());
+        pcRef.current?.close();
+        socketRef.current?.emit('leave-room',{ room:roomId });
+        socketRef.current?.disconnect();
+        router.back();
+      }},
+    ]);
+  };
+
+  const fmt = (s: number) =>
+    `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+
+  // -- Render ----------------------------------------------------------------
+  return (
+    <View style={s.root} onTouchStart={resetCtrl}>
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent/>
+
+      {/* Remote video */}
+      {remoteStream ? (
+        <RTCView streamURL={remoteStream.toURL()} style={StyleSheet.absoluteFillObject}
+          objectFit="cover"/>
+      ) : (
+        <LinearGradient colors={['#0a1220','#071020','#040c1a']}
+          style={[StyleSheet.absoluteFillObject,{ justifyContent:'center', alignItems:'center', gap:16 }]}>
+          <Pulse size={110}/>
+          <Avatar name={callerName} size={100}/>
+          <Text style={{ color:'rgba(255,255,255,0.6)', fontSize:15, marginTop:12 }}>
+            {callState==='connecting'?'Connecting…':callState==='failed'?'Call failed':callerName}
+          </Text>
+        </LinearGradient>
+      )}
+
+      {/* Share banner */}
+      {screenSharing && (
+        <Animated.View style={[s.shareBanner,{
+          opacity:shareAnim,
+          transform:[{translateY:shareAnim.interpolate({inputRange:[0,1],outputRange:[-50,0]})}],
+        }]}>
+          <View style={s.shareBannerInner}>
+            <View style={s.shareDot}/>
+            <Text style={s.shareBannerText}>You are sharing your screen</Text>
+            <TouchableOpacity onPress={toggleShare} style={s.stopBtn}>
+              <Text style={s.stopText}>Stop</Text>
+            </TouchableOpacity>
+          </View>
+        </Animated.View>
+      )}
+
+      {/* Security badge */}
+      <View style={s.secBadge}>
+        <Text style={s.secText}>?? End-to-End Encrypted</Text>
+      </View>
+
+      {/* Top info */}
+      <Animated.View style={[s.topInfo,{ opacity:ctrlAnim }]} pointerEvents="box-none">
+        <LinearGradient colors={['rgba(1,8,18,0.85)','transparent']} style={s.topGrad}>
+          <View style={{ flexDirection:'row', alignItems:'flex-start' }}>
+            <View style={{ flex:1 }}>
+              <Text style={{ color:'#fff', fontSize:20, fontWeight:'900' }}>{callerName}</Text>
+              {callState==='connected' ? (
+                <View style={{ flexDirection:'row', alignItems:'center', gap:6, marginTop:4 }}>
+                  <View style={{ width:6, height:6, borderRadius:3, backgroundColor:'#10B981' }}/>
+                  <Text style={{ color:'rgba(255,255,255,0.7)', fontSize:13, fontWeight:'700' }}>{fmt(callDuration)}</Text>
+                  <Text style={{ color:'#10B981', fontSize:11, fontWeight:'800',
+                    backgroundColor:'rgba(16,185,129,0.15)', paddingHorizontal:6, borderRadius:4 }}>HD</Text>
+                </View>
+              ) : (
+                <Text style={{ color:'rgba(255,255,255,0.5)', fontSize:13, marginTop:4 }}>
+                  {callState==='connecting'?'Connecting…':'Call failed'}
+                </Text>
+              )}
+            </View>
+            <TouchableOpacity style={{ width:36, height:36, justifyContent:'center', alignItems:'center' }}
+              onPress={()=>Alert.alert('Options','',[
+                {text:'Switch to Audio',onPress:()=>{}},
+                {text:'Cancel',style:'cancel'},
+              ])}>
+              <Text style={{ color:'#fff', fontSize:22 }}>?</Text>
+            </TouchableOpacity>
+          </View>
+        </LinearGradient>
+      </Animated.View>
+
+      {/* Local PiP */}
+      {localStream && (
+        <Animated.View style={[s.pip,{ transform:pipPos.getTranslateTransform() }]}
+          {...pipPan.panHandlers}>
+          {camOn ? (
+            <RTCView streamURL={localStream.toURL()} style={s.pipInner}
+              objectFit="cover" mirror={frontCam}/>
+          ) : (
+            <View style={[s.pipInner,{ backgroundColor:'#111', justifyContent:'center', alignItems:'center' }]}>
+              <Text style={{ fontSize:22 }}>??</Text>
+            </View>
+          )}
+          <TouchableOpacity style={s.flipBtn} onPress={flipCam}>
+            <Text style={{ fontSize:12 }}>??</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      )}
+
+      {/* Reaction float */}
+      {reaction && (
+        <Animated.View style={[s.reactFloat,{
+          transform:[
+            {scale:reactAnim.interpolate({inputRange:[0,0.3,1],outputRange:[0,1.4,1]})},
+            {translateY:reactAnim.interpolate({inputRange:[0,1],outputRange:[0,-60]})},
+          ],
+          opacity:reactAnim,
+        }]}>
+          <Text style={{ fontSize:52 }}>{reaction}</Text>
+        </Animated.View>
+      )}
+
+      {/* Reaction picker */}
+      {showReactions && (
+        <View style={s.reactPicker}>
+          {['??','??','??','??','??','??'].map(e=>(
+            <TouchableOpacity key={e} onPress={()=>sendReaction(e)} style={{ padding:4 }}>
+              <Text style={{ fontSize:28 }}>{e}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
+      {/* Controls */}
+      <Animated.View style={[s.controls,{ opacity:ctrlAnim }]}>
+        <LinearGradient colors={['transparent','rgba(1,8,18,0.92)','#010812']}
+          style={s.ctrlGrad}>
+          {/* Row 1 */}
+          <View style={s.ctrlRow}>
+            <SBtn icon="??"  label="Speaker"  onPress={()=>{}}/>
+            <SBtn icon="??"  label="React"    onPress={()=>setShowReactions(v=>!v)} active={showReactions}/>
+            <SBtn icon="??"  label={screenSharing?'Sharing':'Share'} onPress={toggleShare}
+              active={screenSharing} activeColor="#8B5CF6"/>
+            <SBtn icon="??"  label="Flip"     onPress={flipCam}/>
+          </View>
+          {/* Row 2 */}
+          <View style={s.ctrlRowMain}>
+            <LBtn icon={micOn?'???':'??'} label={micOn?'Mute':'Unmute'} onPress={toggleMic} off={!micOn}/>
+            <LBtn icon={camOn?'??':'??'} label={camOn?'Cam off':'Cam on'} onPress={toggleCam} off={!camOn}/>
+            <TouchableOpacity onPress={endCall}>
+              <LinearGradient colors={['#dc2626','#b91c1c']}
+                style={{ width:72, height:72, borderRadius:36, justifyContent:'center', alignItems:'center' }}>
+                <Text style={{ fontSize:24 }}>??</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        </LinearGradient>
+      </Animated.View>
+
+    </View>
+  );
+}
+
+const SBtn = ({icon,label,onPress,active,activeColor}:{
+  icon:string;label:string;onPress:()=>void;active?:boolean;activeColor?:string;
+}) => (
+  <TouchableOpacity onPress={onPress} style={{ alignItems:'center', gap:6 }}>
+    <View style={{ width:54, height:54, borderRadius:27,
+      backgroundColor:active?(activeColor+'40'||'rgba(255,255,255,0.2)'):'rgba(255,255,255,0.1)',
+      justifyContent:'center', alignItems:'center',
+      borderWidth:active?1.5:0, borderColor:activeColor||'rgba(255,255,255,0.4)' }}>
+      <Text style={{ fontSize:20 }}>{icon}</Text>
+    </View>
+    <Text style={{ color:active?(activeColor||'#fff'):'rgba(255,255,255,0.6)',
+      fontSize:10, fontWeight:'700', textAlign:'center' }}>{label}</Text>
+  </TouchableOpacity>
+);
+
+const LBtn = ({icon,label,onPress,off}:{
+  icon:string;label:string;onPress:()=>void;off:boolean;
+}) => (
+  <TouchableOpacity onPress={onPress} style={{ alignItems:'center', gap:6 }}>
+    <View style={{ width:64, height:64, borderRadius:32,
+      backgroundColor:off?'rgba(239,68,68,0.25)':'rgba(255,255,255,0.12)',
+      justifyContent:'center', alignItems:'center',
+      borderWidth:off?1.5:0, borderColor:'rgba(239,68,68,0.5)' }}>
+      <Text style={{ fontSize:22 }}>{icon}</Text>
+    </View>
+    <Text style={{ color:'rgba(255,255,255,0.6)', fontSize:10, fontWeight:'700' }}>{label}</Text>
+  </TouchableOpacity>
+);
+
+const s = StyleSheet.create({
+  root:            { flex:1, backgroundColor:'#010812' },
+  shareBanner:     { position:'absolute', top:0, left:0, right:0, zIndex:100 },
+  shareBannerInner:{ flexDirection:'row', alignItems:'center', backgroundColor:'#8B5CF6',
+                     paddingTop:Platform.OS==='ios'?50:30, paddingBottom:12,
+                     paddingHorizontal:18, gap:10 },
+  shareDot:        { width:8, height:8, borderRadius:4, backgroundColor:'#fff' },
+  shareBannerText: { flex:1, color:'#fff', fontSize:13, fontWeight:'800' },
+  stopBtn:         { backgroundColor:'rgba(255,255,255,0.25)', borderRadius:8,
+                     paddingHorizontal:14, paddingVertical:6 },
+  stopText:        { color:'#fff', fontSize:12, fontWeight:'900' },
+  secBadge:        { position:'absolute', top:Platform.OS==='ios'?52:32, alignSelf:'center', zIndex:50,
+                     backgroundColor:'rgba(10,22,40,0.75)', borderRadius:20,
+                     paddingHorizontal:12, paddingVertical:4,
+                     borderWidth:1, borderColor:'rgba(16,185,129,0.3)' },
+  secText:         { color:'rgba(16,185,129,0.9)', fontSize:10, fontWeight:'800' },
+  topInfo:         { position:'absolute', top:0, left:0, right:0 },
+  topGrad:         { paddingTop:Platform.OS==='ios'?56:40, paddingBottom:30, paddingHorizontal:18 },
+  pip:             { position:'absolute', width:110, height:150, zIndex:200 },
+  pipInner:        { flex:1, borderRadius:16, overflow:'hidden',
+                     borderWidth:2, borderColor:'rgba(255,255,255,0.2)' },
+  flipBtn:         { position:'absolute', bottom:8, right:8, width:26, height:26, borderRadius:13,
+                     backgroundColor:'rgba(0,0,0,0.5)', justifyContent:'center', alignItems:'center' },
+  reactFloat:      { position:'absolute', bottom:200, alignSelf:'center', zIndex:300 },
+  reactPicker:     { position:'absolute', bottom:220, alignSelf:'center', flexDirection:'row',
+                     gap:8, zIndex:250, backgroundColor:'rgba(10,22,40,0.95)',
+                     borderRadius:40, paddingHorizontal:16, paddingVertical:12,
+                     borderWidth:1, borderColor:'rgba(255,255,255,0.1)' },
+  controls:        { position:'absolute', bottom:0, left:0, right:0 },
+  ctrlGrad:        { paddingBottom:Platform.OS==='ios'?38:24, paddingHorizontal:20, gap:20 },
+  ctrlRow:         { flexDirection:'row', justifyContent:'space-around', alignItems:'center' },
+  ctrlRowMain:     { flexDirection:'row', justifyContent:'center', alignItems:'center', gap:28 },
+});

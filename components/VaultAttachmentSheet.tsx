@@ -1,0 +1,394 @@
+﻿import React, { useRef, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Modal,
+  Pressable,
+  Animated,
+  Dimensions,
+  Alert,
+  Platform,
+} from 'react-native';
+import { useRouter } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
+import * as Location from 'expo-location';
+
+const { width: SW } = Dimensions.get('window');
+
+// Props
+interface Props {
+  visible: boolean;
+  onClose: () => void;
+  chatId?: string;
+  onMediaSelected?: (type: string, uri: string, name?: string) => void;
+  onLocationShared?: (coords: { lat: number; lng: number; mode: string }) => void;
+}
+
+// Grid items
+const GRID = [
+  { id: 'camera',           icon: '📷', label: 'Camera',     color: '#E85D75', bg: '#1A0A0E' },
+  { id: 'gallery',          icon: '🖼️', label: 'Gallery',    color: '#4A9FFF', bg: '#080F1A' },
+  { id: 'scanner',          icon: '🔍', label: 'Scan Doc',  color: '#00D4AA', bg: '#001A15' },
+  { id: 'location-current', icon: '📍', label: 'Location',  color: '#F59E0B', bg: '#1A1000' },
+  { id: 'location-live',    icon: '📡', label: 'Live Track',color: '#FF6B35', bg: '#1A0800' },
+  { id: 'sync-contact',     icon: '🔒', label: 'Contact',   color: '#A78BFA', bg: '#0E0A1A' },
+  { id: 'audio',            icon: '🎵', label: 'Audio',     color: '#10B981', bg: '#001A0E' },
+  { id: 'vaultdrop',        icon: '📦', label: 'VaultDrop', color: '#EC4899', bg: '#1A0010' },
+] as const;
+
+type GridId = (typeof GRID)[number]['id'];
+
+export default function VaultAttachmentSheet({
+  visible,
+  onClose,
+  chatId,
+  onMediaSelected,
+  onLocationShared,
+}: Props) {
+  const router = useRouter();
+  const slideAnim = useRef(new Animated.Value(400)).current;
+  const fadeAnim  = useRef(new Animated.Value(0)).current;
+  const itemAnims = useRef<Animated.Value[]>(
+    GRID.map(() => new Animated.Value(0))
+  ).current;
+
+  // Animate sheet open/close
+  useEffect(() => {
+    if (visible) {
+      Animated.parallel([
+        Animated.spring(slideAnim, {
+          toValue: 0, tension: 60, friction: 12, useNativeDriver: true,
+        }),
+        Animated.timing(fadeAnim, {
+          toValue: 1, duration: 200, useNativeDriver: true,
+        }),
+      ]).start();
+      GRID.forEach((_, i) => {
+        Animated.spring(itemAnims[i], {
+          toValue: 1, tension: 80, friction: 10,
+          delay: i * 45, useNativeDriver: true,
+        }).start();
+      });
+    } else {
+      Animated.parallel([
+        Animated.timing(slideAnim, { toValue: 400, duration: 220, useNativeDriver: true }),
+        Animated.timing(fadeAnim,  { toValue: 0,   duration: 200, useNativeDriver: true }),
+      ]).start();
+      itemAnims.forEach(a => a.setValue(0));
+    }
+  }, [visible]);
+
+  // Handle button presses
+  const handlePress = async (id: GridId) => {
+    switch (id) {
+
+      case 'camera': {
+        onClose();
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission Needed', 'Camera access is required.');
+          return;
+        }
+        const result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ['images', 'videos'],  // SDK 50+ (replaces deprecated MediaTypeOptions)
+          quality: 0.85,
+        });
+        if (!result.canceled && result.assets[0]) {
+          onMediaSelected?.('image', result.assets[0].uri, 'photo.jpg');
+        }
+        break;
+      }
+
+      case 'gallery': {
+        onClose();
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission Needed', 'Gallery access is required.');
+          return;
+        }
+        const result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ['images', 'videos'],  // SDK 50+ API
+          quality: 0.85,
+        });
+        if (!result.canceled && result.assets[0]) {
+          const asset = result.assets[0];
+          onMediaSelected?.('image', asset.uri, asset.fileName ?? 'media');
+        }
+        break;
+      }
+
+      case 'scanner': {
+        onClose();
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission Needed', 'Camera access is required to scan.');
+          return;
+        }
+        const result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ['images'],
+          quality: 1,
+          allowsEditing: true,
+          aspect: [3, 4],
+        });
+        if (!result.canceled && result.assets[0]) {
+          onMediaSelected?.('document', result.assets[0].uri, 'scanned_doc.jpg');
+          Alert.alert('Document Scanned', 'Captured. PDF export available in v1.5.');
+        }
+        break;
+      }
+
+      case 'location-current': {
+        onClose();
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission Needed', 'Location access is required.');
+          return;
+        }
+        const loc = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
+        });
+        onLocationShared?.({
+          lat:  loc.coords.latitude,
+          lng:  loc.coords.longitude,
+          mode: 'current',
+        });
+        Alert.alert(
+          '📍 Location Shared',
+          `Lat: ${loc.coords.latitude.toFixed(5)}\nLng: ${loc.coords.longitude.toFixed(5)}`
+        );
+        break;
+      }
+
+      case 'location-live': {
+        onClose();
+        const dest = chatId
+          ? (`/location-sharing?chatId=${chatId}` as any)
+          : ('/location-sharing' as any);
+        router.push(dest);
+        break;
+      }
+
+      case 'sync-contact': {
+        onClose();
+        const dest = chatId
+          ? (`/sync-contact?chatId=${chatId}` as any)
+          : ('/sync-contact' as any);
+        router.push(dest);
+        break;
+      }
+
+      case 'audio': {
+        onClose();
+        const result = await DocumentPicker.getDocumentAsync({ type: 'audio/*' });
+        if (!result.canceled && result.assets?.[0]) {
+          onMediaSelected?.('audio', result.assets[0].uri, result.assets[0].name);
+        }
+        break;
+      }
+
+      case 'vaultdrop': {
+        onClose();
+        const dest = chatId
+          ? (`/vaultdrop?chatId=${chatId}` as any)
+          : ('/vaultdrop' as any);
+        router.push(dest);
+        break;
+      }
+    }
+  };
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="none"
+      statusBarTranslucent
+      onRequestClose={onClose}
+    >
+      {/* Backdrop */}
+      <Animated.View style={[styles.backdrop, { opacity: fadeAnim }]}>
+        <Pressable style={StyleSheet.absoluteFillObject} onPress={onClose} />
+      </Animated.View>
+
+      {/* Sheet */}
+      <Animated.View
+        style={[styles.sheet, { transform: [{ translateY: slideAnim }] }]}
+      >
+        <View style={styles.handle} />
+
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Share</Text>
+          <Text style={styles.headerSub}>Choose what to send</Text>
+          <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
+            <Text style={styles.closeTxt}>✕</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.grid}>
+          {GRID.map((item, i) => (
+            <Animated.View
+              key={item.id}
+              style={{
+                opacity: itemAnims[i],
+                transform: [{
+                  scale: itemAnims[i].interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.65, 1],
+                  }),
+                }],
+              }}
+            >
+              <TouchableOpacity
+                style={styles.gridItem}
+                onPress={() => handlePress(item.id)}
+                activeOpacity={0.7}
+              >
+                <View
+                  style={[
+                    styles.iconWrap,
+                    { backgroundColor: item.bg, borderColor: item.color + '30' },
+                  ]}
+                >
+                  <View style={[styles.glowRing, { borderColor: item.color + '18' }]} />
+                  <Text style={styles.iconEmoji}>{item.icon}</Text>
+                </View>
+                <Text style={[styles.itemLabel, { color: item.color }]}>
+                  {item.label}
+                </Text>
+              </TouchableOpacity>
+            </Animated.View>
+          ))}
+        </View>
+
+        <View style={styles.footer}>
+          <View style={styles.footerLine} />
+          <Text style={styles.footerTxt}>🔒 END-TO-END ENCRYPTED</Text>
+          <View style={styles.footerLine} />
+        </View>
+      </Animated.View>
+    </Modal>
+  );
+}
+
+// Styles
+const COLS   = 4;
+const ITEM_W = (SW - 32 - (COLS - 1) * 12) / COLS;
+
+const styles = StyleSheet.create({
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+  },
+  sheet: {
+    position:             'absolute',
+    bottom:               0,
+    left:                 0,
+    right:                0,
+    backgroundColor:      '#060D1A',
+    borderTopLeftRadius:  26,
+    borderTopRightRadius: 26,
+    borderWidth:          1,
+    borderColor:          'rgba(74,159,255,0.12)',
+    paddingBottom:        Platform.OS === 'ios' ? 34 : 20,
+  },
+  handle: {
+    width:           36,
+    height:          4,
+    borderRadius:    2,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    alignSelf:       'center',
+    marginTop:       10,
+    marginBottom:    4,
+  },
+  header: {
+    flexDirection:     'row',
+    alignItems:        'center',
+    paddingHorizontal: 20,
+    paddingVertical:   12,
+    gap:               8,
+  },
+  headerTitle: {
+    fontSize:      18,
+    fontWeight:    '900',
+    color:         '#fff',
+    letterSpacing: -0.3,
+  },
+  headerSub: {
+    fontSize:  11,
+    color:     'rgba(255,255,255,0.35)',
+    flex:      1,
+    marginTop: 2,
+  },
+  closeBtn: {
+    width:           26,
+    height:          26,
+    borderRadius:    13,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    alignItems:      'center',
+    justifyContent:  'center',
+  },
+  closeTxt: {
+    color:    'rgba(255,255,255,0.5)',
+    fontSize: 14,
+  },
+  grid: {
+    flexDirection:     'row',
+    flexWrap:          'wrap',
+    paddingHorizontal: 16,
+    gap:               12,
+    paddingBottom:     16,
+  },
+  gridItem: {
+    width:      ITEM_W,
+    alignItems: 'center',
+    gap:        7,
+  },
+  iconWrap: {
+    width:          ITEM_W,
+    height:         ITEM_W,
+    borderRadius:   22,
+    alignItems:     'center',
+    justifyContent: 'center',
+    borderWidth:    1,
+    position:       'relative',
+  },
+  glowRing: {
+    position:     'absolute',
+    top:          -3,
+    left:         -3,
+    right:        -3,
+    bottom:       -3,
+    borderRadius: 25,
+    borderWidth:  1.5,
+  },
+  iconEmoji: {
+    fontSize: 28,
+  },
+  itemLabel: {
+    fontSize:      10,
+    fontWeight:    '700',
+    letterSpacing: 0.3,
+    textAlign:     'center',
+  },
+  footer: {
+    flexDirection:    'row',
+    alignItems:       'center',
+    marginHorizontal: 20,
+    marginTop:        4,
+    gap:              8,
+  },
+  footerLine: {
+    flex:            1,
+    height:          1,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  footerTxt: {
+    fontSize:      9,
+    fontWeight:    '700',
+    color:         'rgba(255,255,255,0.2)',
+    letterSpacing: 1,
+  },
+});

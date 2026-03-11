@@ -1,0 +1,89 @@
+{
+  "expo": {
+    "name": "VaultChat",
+    "slug": "VaultChat",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "vaultchat",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": false
+    },
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "VaultChat needs camera for video calls and face scan",
+        "NSMicrophoneUsageDescription": "VaultChat needs microphone for voice and video calls",
+        "NSFaceIDUsageDescription": "VaultChat uses Face ID to protect your messages"
+      }
+    },
+    "android": {
+      "package": "com.vaultchat.app",
+      "googleServicesFile": "./google-services.json",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundImage": "./assets/images/android-icon-background.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.VIBRATE",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
+      ]
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#4A9FFF"
+        }
+      ],
+      "expo-secure-store",
+      "expo-local-authentication",
+      "expo-font",
+      "expo-router",
+      "expo-web-browser",
+      "@sentry/react-native",
+      [
+        "@sentry/react-native/expo",
+        {
+          "url": "https://sentry.io/",
+          "project": "react-native",
+          "organization": "corefinite-tech-solutions-llp"
+        }
+      ],
+      "react-native-vision-camera"
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "144570a3-de88-48f0-b7e1-ecda63618199"
+      }
+    },
+    "owner": "srihari9999",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/144570a3-de88-48f0-b7e1-ecda63618199"
+    }
+  }
+}

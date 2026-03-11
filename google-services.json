@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "207307621485",
+    "project_id": "vaultchat-ce9e3",
+    "storage_bucket": "vaultchat-ce9e3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:207307621485:android:56aa1a7927a5a77bdeab64",
+        "android_client_info": {
+          "package_name": "com.vaultchat.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDKic9s-_fyg4OeAttQgZVBj4mT-4UkGSc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

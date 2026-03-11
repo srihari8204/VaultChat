@@ -1,0 +1,70 @@
+import { LinearGradient } from 'expo-linear-gradient';
+import { Stack } from 'expo-router';
+import { useEffect, useState } from 'react';
+import { Animated, StyleSheet, View } from 'react-native';
+import * as Sentry from '@sentry/react-native';
+
+Sentry.init({
+  dsn: 'https://94ec592aefab9d7fdacf954fd4a5ec94@o4511015938555904.ingest.de.sentry.io/4511015943667792',
+
+  // Adds more context data to events (IP address, cookies, user, etc.)
+  // For more information, visit: https://docs.sentry.io/platforms/react-native/data-management/data-collected/
+  sendDefaultPii: true,
+
+  // Enable Logs
+  enableLogs: true,
+
+  // uncomment the line below to enable Spotlight (https://spotlightjs.com)
+  // spotlight: __DEV__,
+});
+
+function SplashScreen({ onDone }) {
+  const scale = new Animated.Value(0.8);
+  const opacity = new Animated.Value(0);
+  useEffect(() => {
+    Animated.parallel([
+      Animated.spring(scale,   { toValue: 1, tension: 60, friction: 8, useNativeDriver: true }),
+      Animated.timing(opacity, { toValue: 1, duration: 400, useNativeDriver: true }),
+    ]).start();
+    setTimeout(onDone, 1200);
+  }, []);
+  return (
+    <View style={{ flex: 1, backgroundColor: '#010812', justifyContent: 'center', alignItems: 'center' }}>
+      <LinearGradient colors={['#010812', '#020B18']} style={StyleSheet.absoluteFillObject} />
+      <Animated.View style={{ transform: [{ scale }], opacity, alignItems: 'center', gap: 16 }}>
+        <View style={{ width: 90, height: 90, borderRadius: 45, backgroundColor: 'rgba(74,159,255,0.15)', borderWidth: 2, borderColor: 'rgba(74,159,255,0.4)', justifyContent: 'center', alignItems: 'center' }}>
+          <Animated.Text style={{ fontSize: 44 }}>&#128274;</Animated.Text>
+        </View>
+        <Animated.Text style={{ color: '#fff', fontSize: 30, fontWeight: '900', letterSpacing: -0.5 }}>VaultChat</Animated.Text>
+        <Animated.Text style={{ color: 'rgba(74,159,255,0.6)', fontSize: 11, letterSpacing: 3, fontWeight: '600' }}>SECURE MESSENGER</Animated.Text>
+      </Animated.View>
+    </View>
+  );
+}
+
+export default Sentry.wrap(function RootLayout() {
+  const [showSplash, setShowSplash] = useState(true);
+  if (showSplash) return <SplashScreen onDone={() => setShowSplash(false)} />;
+  return (
+    <Stack screenOptions={{ headerShown: false, animation: 'fade', contentStyle: { backgroundColor: '#020B18' } }} initialRouteName="welcome">
+      <Stack.Screen name="welcome" />
+      <Stack.Screen name="login" />
+      <Stack.Screen name="signup" />
+      <Stack.Screen name="forgot" />
+      <Stack.Screen name="recovery" />
+      <Stack.Screen name="facescan" />
+      <Stack.Screen name="chats" />
+      <Stack.Screen name="chat" />
+      <Stack.Screen name="dashboard" />
+      <Stack.Screen name="communities" />
+      <Stack.Screen name="notifications" />
+      <Stack.Screen name="trustscore" />
+      <Stack.Screen name="filevault" />
+      <Stack.Screen name="breachguard" />
+      <Stack.Screen name="vaultdrop" />
+      <Stack.Screen name="profile" />
+      <Stack.Screen name="status" />
+      <Stack.Screen name="docscanner" />
+    </Stack>
+  );
+});
