@@ -333,14 +333,18 @@ server.listen(PORT, () => {
 
 
 const vaultdropRoutes = require('./routes/vaultdrop');
+app.use('/api/secretcode', require('./routes/secretcode'));
 app.use('/api/face', require('./routes/face'));
 app.use('/api/vaultdrop', vaultdropRoutes);
 
 const locationRoutes = require('./routes/location');
+app.use('/api/secretcode', require('./routes/secretcode'));
 app.use('/api/face', require('./routes/face'));
 app.use('/api/location', locationRoutes);
 
 const syncContactRoutes = require('./routes/sync-contact');
+app.use('/api/secretcode', require('./routes/secretcode'));
 app.use('/api/face', require('./routes/face'));
 app.use('/api/sync-contact', syncContactRoutes);
+
 
