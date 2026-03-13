@@ -1,312 +1,291 @@
-import { CAMERA_AVAILABLE, isExpoGo } from '../lib/compat';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
-import { Animated, Dimensions, Easing, StyleSheet, Text, View } from 'react-native';
+/**
+ * app/facescan.tsx — DEMO VERSION
+ * No camera. No native modules. Pure UI simulation.
+ * Works in Expo Go and dev client instantly.
+ */
 
-const { width: SW, height: SH } = Dimensions.get('window');
-const CX = SW / 2;
-const CY = SH * 0.42;
+import React, { useRef, useState, useEffect } from 'react';
+import {
+  View, Text, StyleSheet, TouchableOpacity,
+  Animated, Dimensions, Platform, StatusBar,
+} from 'react-native';
+import Svg, { Circle, Line, Ellipse } from 'react-native-svg';
+import { router } from 'expo-router';
 
-// Face mesh node positions (relative to CX/CY)
-const REGIONS = [
-  {
-    id: 'face', color: '#4A9FFF', label: 'FACE CONTOUR', delay: 0,
-    pts: [[-72,-110],[-90,-70],[-98,-22],[-95,30],[-85,80],[-60,118],[-30,138],[0,144],[30,138],[60,118],[85,80],[95,30],[98,-22],[90,-70],[72,-110],[50,-128],[20,-136],[0,-138],[-20,-136],[-50,-128]],
-  },
-  {
-    id: 'leye', color: '#00EEFF', label: 'LEFT EYE', delay: 220,
-    pts: [[-58,-42],[-46,-52],[-30,-54],[-16,-50],[-14,-42],[-16,-34],[-30,-30],[-46,-34]],
-  },
-  {
-    id: 'reye', color: '#00EEFF', label: 'RIGHT EYE', delay: 280,
-    pts: [[58,-42],[46,-52],[30,-54],[16,-50],[14,-42],[16,-34],[30,-30],[46,-34]],
-  },
-  {
-    id: 'lbrow', color: '#A855F7', label: 'LEFT BROW', delay: 440,
-    pts: [[-70,-68],[-58,-74],[-44,-76],[-30,-74],[-18,-68]],
-  },
-  {
-    id: 'rbrow', color: '#A855F7', label: 'RIGHT BROW', delay: 500,
-    pts: [[70,-68],[58,-74],[44,-76],[30,-74],[18,-68]],
-  },
-  {
-    id: 'nose', color: '#FACC15', label: 'NOSE', delay: 640,
-    pts: [[0,-38],[0,-22],[0,-6],[-14,4],[-8,10],[0,12],[8,10],[14,4]],
-  },
-  {
-    id: 'mouth', color: '#F87171', label: 'MOUTH', delay: 860,
-    pts: [[-32,48],[-20,42],[-8,40],[0,42],[8,40],[20,42],[32,48],[20,52],[0,54],[-20,52],[-28,56],[0,64],[28,56]],
-  },
-  {
-    id: 'cheeks', color: '#34D399', label: 'CHEEKS', delay: 1060,
-    pts: [[-68,20],[-74,40],[-70,60],[68,20],[74,40],[70,60]],
-  },
-];
+const C = {
+  bg: '#060E1E', panel: '#0D1F3C', cyan: '#00E5FF',
+  cyan2: '#00B4D8', green: '#00FF9D', coral: '#FF4D6D',
+  white: '#FFFFFF', muted: '#7BA7C4', dark: '#030A14',
+};
+const { width: SW } = Dimensions.get('window');
+const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
 
-const STATUS_STEPS = [
-  { t: 0,    txt: 'Initialising biometric engine...' },
-  { t: 200,  txt: 'Face geometry detected' },
-  { t: 440,  txt: 'Mapping eye structures...' },
-  { t: 640,  txt: 'Capturing brow topology...' },
-  { t: 840,  txt: 'Nose landmark analysis...' },
-  { t: 1060, txt: 'Lip contour extraction...' },
-  { t: 1260, txt: 'Finalising mesh — 133 pts' },
-  { t: 1500, txt: 'Biometric identity confirmed ✓' },
-];
+const PHASE = { INTRO: 'INTRO', SCANNING: 'SCANNING', CONFIRMED: 'CONFIRMED' } as const;
+type P = typeof PHASE[keyof typeof PHASE];
 
+// ── 3D Mesh ───────────────────────────────────────────────────────────────────
+const MW = SW * 0.72, MH = MW * 1.24;
+function buildGrid() {
+  const g: { x: number; y: number }[][] = [];
+  for (let r = 0; r <= 10; r++) {
+    const t = r / 10, tp = t > 0.68 ? Math.max(1 - (t - 0.68) * 2.4, 0.04) : 1;
+    const row: { x: number; y: number }[] = [];
+    for (let c = 0; c <= 10; c++) {
+      const a = Math.PI + (c / 10) * Math.PI;
+      row.push({ x: MW / 2 + MW * 0.36 * tp * Math.cos(a), y: MH * 0.44 - MH * 0.46 + t * MH * 0.92 });
+    }
+    g.push(row);
+  }
+  return g;
+}
+const GRID = buildGrid();
+
+function FaceMesh({ anim }: { anim: Animated.Value }) {
+  const [op, setOp] = useState(0);
+  useEffect(() => {
+    const id = anim.addListener(({ value }) => setOp(value));
+    return () => anim.removeListener(id);
+  }, [anim]);
+  return (
+    <Svg width={MW} height={MH}>
+      <Ellipse cx={MW / 2} cy={MH * 0.44} rx={MW * 0.38} ry={MH * 0.47}
+        stroke={C.cyan} strokeWidth={1.5} strokeOpacity={0.6 * op} fill="none" />
+      {GRID.map((row, r) => row.slice(0, -1).map((pt, c) => (
+        <Line key={`h${r}${c}`} x1={pt.x} y1={pt.y} x2={row[c + 1].x} y2={row[c + 1].y}
+          stroke={C.cyan} strokeWidth={0.9} strokeOpacity={0.45 * op} />
+      )))}
+      {GRID.slice(0, -1).map((row, r) => row.map((pt, c) => (
+        <Line key={`v${r}${c}`} x1={pt.x} y1={pt.y} x2={GRID[r + 1][c].x} y2={GRID[r + 1][c].y}
+          stroke={C.cyan} strokeWidth={0.9} strokeOpacity={0.45 * op} />
+      )))}
+      {GRID.map((row, r) => row.map((pt, c) => (
+        <Circle key={`d${r}${c}`} cx={pt.x} cy={pt.y} r={2.4}
+          fill={C.cyan} fillOpacity={0.95 * op} />
+      )))}
+    </Svg>
+  );
+}
+
+function Brackets({ color, pulse }: { color: string; pulse: Animated.Value }) {
+  const sz = SW * 0.64;
+  const corners = [
+    { top: 0, left: 0, borderTopWidth: 3, borderLeftWidth: 3 },
+    { top: 0, right: 0, borderTopWidth: 3, borderRightWidth: 3 },
+    { bottom: 0, left: 0, borderBottomWidth: 3, borderLeftWidth: 3 },
+    { bottom: 0, right: 0, borderBottomWidth: 3, borderRightWidth: 3 },
+  ];
+  return (
+    <View style={{ width: sz, height: sz * 1.28, position: 'relative' }}>
+      {corners.map((c, i) => (
+        <Animated.View key={i} style={[{
+          position: 'absolute', width: 34, height: 34,
+          borderColor: color, borderStyle: 'solid', opacity: pulse,
+        }, c]} />
+      ))}
+    </View>
+  );
+}
+
+function Arc({ pct }: { pct: number }) {
+  const r = 40, circ = 2 * Math.PI * r, p = Math.min(pct, 1);
+  return (
+    <Svg width={96} height={96} style={{ position: 'absolute', top: -8, left: -8 }}>
+      <Circle cx={48} cy={48} r={r} stroke="#0D1F3C" strokeWidth={5} fill="none" />
+      <Circle cx={48} cy={48} r={r}
+        stroke={p >= 1 ? C.green : C.cyan} strokeWidth={5} fill="none"
+        strokeDasharray={`${circ * p} ${circ * (1 - p)}`}
+        strokeDashoffset={circ * 0.25} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+function ScanLine() {
+  const y = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.loop(Animated.sequence([
+      Animated.timing(y, { toValue: SW * 0.7, duration: 1800, useNativeDriver: true }),
+      Animated.timing(y, { toValue: 0, duration: 1800, useNativeDriver: true }),
+    ])).start();
+  }, []);
+  return (
+    <Animated.View pointerEvents="none"
+      style={{ position: 'absolute', left: SW * 0.18, right: SW * 0.18, top: SW * 0.12, transform: [{ translateY: y }] }}>
+      <View style={{ height: 2, backgroundColor: 'rgba(0,229,255,0.55)', borderRadius: 1 }} />
+    </Animated.View>
+  );
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
 export default function FaceScanScreen() {
-  const router = useRouter();
-  const [visibleRegions, setVisibleRegions] = useState({});
-  const [status, setStatus]   = useState(STATUS_STEPS[0].txt);
-  const [phase, setPhase]     = useState(0);
-  const [ptCount, setPtCount] = useState(0);
+  const [phase, setPhase] = useState<P>(PHASE.SCANNING);
+  const [pct, setPct] = useState(0);
+  const [hint, setHint] = useState('Centre your face in the frame');
 
-  const fadeAnim    = useRef(new Animated.Value(0)).current;
-  const scanLine    = useRef(new Animated.Value(0)).current;
-  const pulseAnim   = useRef(new Animated.Value(1)).current;
-  const glowAnim    = useRef(new Animated.Value(0)).current;
-  const successAnim = useRef(new Animated.Value(0)).current;
-  const timers      = useRef([]);
+  const fadeIn  = useRef(new Animated.Value(0)).current;
+  const pulse   = useRef(new Animated.Value(1)).current;
+  const meshA   = useRef(new Animated.Value(0)).current;
+  const okOp    = useRef(new Animated.Value(0)).current;
+  const okSc    = useRef(new Animated.Value(0.88)).current;
+  const pctRef  = useRef(0);
+  const timer   = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    Animated.timing(fadeAnim, { toValue: 1, duration: 500, useNativeDriver: true }).start();
-
-    Animated.loop(Animated.timing(scanLine, {
-      toValue: 1, duration: 1200, easing: Easing.inOut(Easing.ease), useNativeDriver: false,
-    })).start();
-
-    Animated.loop(Animated.sequence([
-      Animated.timing(glowAnim,  { toValue: 1, duration: 1800, useNativeDriver: false }),
-      Animated.timing(glowAnim,  { toValue: 0, duration: 1800, useNativeDriver: false }),
-    ])).start();
-
-    Animated.loop(Animated.sequence([
-      Animated.timing(pulseAnim, { toValue: 1.05, duration: 1400, useNativeDriver: true }),
-      Animated.timing(pulseAnim, { toValue: 1,    duration: 1400, useNativeDriver: true }),
-    ])).start();
-
-    REGIONS.forEach(r => {
-      timers.current.push(setTimeout(() => {
-        setVisibleRegions(prev => ({ ...prev, [r.id]: true }));
-        setPtCount(c => c + r.pts.length);
-      }, r.delay));
-    });
-
-    STATUS_STEPS.forEach(s => {
-      timers.current.push(setTimeout(() => setStatus(s.txt), s.t));
-    });
-
-    timers.current.push(setTimeout(() => {
-      setPhase(1);
-      Animated.spring(successAnim, { toValue: 1, tension: 55, friction: 8, useNativeDriver: true }).start();
-      setTimeout(() => router.replace('/chats'), 900);
-    }, 1600));
-
-    return () => timers.current.forEach(clearTimeout);
+    Animated.timing(fadeIn, { toValue: 1, duration: 400, useNativeDriver: true }).start();
+    startScan();
+    return () => { if (timer.current) clearInterval(timer.current); };
   }, []);
 
-  const scanY = scanLine.interpolate({ inputRange: [0, 1], outputRange: [CY - 140, CY + 150] });
-  const isOK  = phase === 1;
+  useEffect(() => {
+    if (phase !== PHASE.SCANNING) return;
+    const lp = Animated.loop(Animated.sequence([
+      Animated.timing(pulse, { toValue: 0.3, duration: 850, useNativeDriver: true }),
+      Animated.timing(pulse, { toValue: 1.0, duration: 850, useNativeDriver: true }),
+    ]));
+    lp.start();
+    return () => lp.stop();
+  }, [phase]);
 
-  const BADGES = [
-    { lbl: 'EYES',   color: '#00EEFF', done: visibleRegions.leye },
-    { lbl: 'BROWS',  color: '#A855F7', done: visibleRegions.lbrow },
-    { lbl: 'NOSE',   color: '#FACC15', done: visibleRegions.nose },
-    { lbl: 'MOUTH',  color: '#F87171', done: visibleRegions.mouth },
-    { lbl: 'CHEEKS', color: '#34D399', done: visibleRegions.cheeks },
-  ];
+  useEffect(() => {
+    if (pct < 0.01)      setHint('Centre your face in the frame');
+    else if (pct < 0.35) setHint('Hold still — scanning…');
+    else if (pct < 0.75) setHint('Almost there…');
+    else if (pct < 1)    setHint('Keep still…');
+    else                 setHint('Face scan complete!');
+  }, [pct]);
 
-  return (
-    <View style={S.root}>
-      <LinearGradient colors={['#010812', '#030E1E', '#010812']} style={StyleSheet.absoluteFillObject} />
+  const startScan = () => {
+    pctRef.current = 0;
+    setPct(0);
+    setPhase(PHASE.SCANNING);
+    timer.current = setInterval(() => {
+      pctRef.current = Math.min(pctRef.current + 0.05, 1);
+      setPct(pctRef.current);
+      if (pctRef.current >= 1) {
+        clearInterval(timer.current!);
+        setTimeout(() => {
+          setPhase(PHASE.CONFIRMED);
+          Animated.parallel([
+            Animated.timing(meshA,  { toValue: 1, duration: 1400, useNativeDriver: false }),
+            Animated.spring(okOp,   { toValue: 1, tension: 40, friction: 8, useNativeDriver: true }),
+            Animated.spring(okSc,   { toValue: 1, tension: 40, friction: 8, useNativeDriver: true }),
+          ]).start();
+        }, 600);
+      }
+    }, 30);
+  };
 
-      {/* Background grid dots */}
-      {Array.from({ length: 80 }).map((_, i) => (
-        <View key={i} style={{
-          position: 'absolute',
-          left: (i % 10) * (SW / 10) + 6,
-          top:  Math.floor(i / 10) * 90 + 8,
-          width: 1.5, height: 1.5, borderRadius: 1,
-          backgroundColor: `rgba(74,159,255,${0.04 + (i % 3) * 0.02})`,
-        }} />
-      ))}
+  const reset = () => {
+    if (timer.current) clearInterval(timer.current);
+    pctRef.current = 0; setPct(0);
+    meshA.setValue(0); okOp.setValue(0); okSc.setValue(0.88);
+    setPhase(PHASE.INTRO);
+  };
 
-      {/* Ambient glow */}
-      <Animated.View style={{
-        position: 'absolute', alignSelf: 'center', top: CY - 160,
-        width: 320, height: 320, borderRadius: 160,
-        backgroundColor: glowAnim.interpolate({ inputRange: [0,1], outputRange: ['rgba(74,159,255,0.04)','rgba(74,159,255,0.13)'] }),
-      }} />
-
-      {/* Concentric reference rings */}
-      {[160, 148, 136].map((r, i) => (
-        <View key={i} style={{
-          position: 'absolute', left: CX - r, top: CY - r,
-          width: r * 2, height: r * 2, borderRadius: r,
-          borderWidth: 0.8, borderColor: `rgba(74,159,255,${0.05 + i * 0.03})`,
-          borderStyle: 'solid',
-        }} />
-      ))}
-
-      <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
-
-        {/* Header */}
-        <View style={S.header}>
-          <Text style={S.hTitle}>Biometric Authentication</Text>
-          <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
-            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: isOK ? '#10B981' : '#4A9FFF' }} />
-            <Text style={S.hSub}>{isOK ? 'IDENTITY CONFIRMED' : 'SCANNING FACE MESH'}</Text>
-          </View>
-        </View>
-
-        {/* Mesh dots — all regions */}
-        {REGIONS.map(r => visibleRegions[r.id] && r.pts.map((p, i) => {
-          const dotSize = r.id === 'leye' || r.id === 'reye' || r.id === 'mouth' ? 5 : r.id === 'face' ? 3 : 4;
-          return (
-            <View key={r.id + i} style={{
-              position: 'absolute',
-              left: CX + p[0] - dotSize / 2,
-              top:  CY + p[1] - dotSize / 2,
-              width: dotSize, height: dotSize, borderRadius: dotSize / 2,
-              backgroundColor: r.color,
-              opacity: 0.92,
-              zIndex: 10,
-            }} />
-          );
-        }))}
-
-        {/* Mesh connection lines between consecutive face outline pts */}
-        {visibleRegions.face && REGIONS[0].pts.map((p, i) => {
-          const next = REGIONS[0].pts[(i + 1) % REGIONS[0].pts.length];
-          const x1 = CX + p[0], y1 = CY + p[1];
-          const x2 = CX + next[0], y2 = CY + next[1];
-          const len = Math.sqrt((x2-x1)**2 + (y2-y1)**2);
-          const angle = Math.atan2(y2-y1, x2-x1) * 180 / Math.PI;
-          return (
-            <View key={'fl'+i} style={{
-              position: 'absolute', left: x1, top: y1 - 0.6,
-              width: len, height: 1.2,
-              backgroundColor: 'rgba(74,159,255,0.35)',
-              transform: [{ rotate: angle + 'deg' }, { translateX: 0 }],
-              transformOrigin: 'left center',
-              zIndex: 5,
-            }} />
-          );
-        })}
-
-        {/* Eye contour lines */}
-        {['leye','reye'].map(id => {
-          const region = REGIONS.find(r=>r.id===id);
-          if (!visibleRegions[id]) return null;
-          return region.pts.map((p, i) => {
-            const next = region.pts[(i + 1) % region.pts.length];
-            const x1 = CX+p[0], y1 = CY+p[1], x2 = CX+next[0], y2 = CY+next[1];
-            const len = Math.sqrt((x2-x1)**2+(y2-y1)**2);
-            const angle = Math.atan2(y2-y1,x2-x1)*180/Math.PI;
-            return (
-              <View key={id+'l'+i} style={{
-                position:'absolute', left:x1, top:y1-0.5,
-                width:len, height:1, backgroundColor:'rgba(0,238,255,0.55)',
-                transform:[{rotate:angle+'deg'}], transformOrigin:'left center', zIndex:5,
-              }}/>
-            );
-          });
-        })}
-
-        {/* Cross-axis lines */}
-        <View style={{ position: 'absolute', left: CX - 130, top: CY - 0.4, width: 260, height: 0.8, backgroundColor: 'rgba(74,159,255,0.1)' }} />
-        <View style={{ position: 'absolute', left: CX - 0.4, top: CY - 145, width: 0.8, height: 295, backgroundColor: 'rgba(74,159,255,0.1)' }} />
-        <View style={{ position: 'absolute', left: CX - 4, top: CY - 4, width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(74,159,255,0.3)' }} />
-
-        {/* Success checkmark ring */}
-        {isOK && (
-          <Animated.View style={{
-            position: 'absolute', left: CX - 68, top: CY - 68,
-            width: 136, height: 136, borderRadius: 68,
-            borderWidth: 2, borderColor: '#10B981',
-            backgroundColor: 'rgba(16,185,129,0.1)',
-            justifyContent: 'center', alignItems: 'center',
-            transform: [{ scale: successAnim }], zIndex: 20,
-          }}>
-            <Text style={{ color: '#10B981', fontSize: 52, fontWeight: '900' }}>✓</Text>
-          </Animated.View>
-        )}
-
-        {/* Scan line */}
-        {!isOK && (
-          <Animated.View style={[S.scanLine, { top: scanY }]} />
-        )}
-
-        {/* Corner brackets */}
+  // ── INTRO ─────────────────────────────────────────────────────────────────
+  if (phase === PHASE.INTRO) return (
+    <View style={s.root}>
+      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+      <Animated.View style={[s.center, { opacity: fadeIn }]}>
+        <Text style={s.label}>V A U L T C H A T</Text>
+        <Text style={s.title}>Face ID{'\n'}Setup</Text>
+        <Text style={s.sub}>Offline face scan + device biometric.{'\n'}No cloud. No API.</Text>
         {[
-          { top: CY - 148, left: CX - 140 },
-          { top: CY - 148, left: CX + 112, scaleX: -1 },
-          { top: CY + 122, left: CX - 140, scaleY: -1 },
-          { top: CY + 122, left: CX + 112, scaleX: -1, scaleY: -1 },
-        ].map(({ scaleX=1, scaleY=1, ...pos }, i) => (
-          <View key={i} style={[S.bracket, pos, { transform: [{ scaleX }, { scaleY }] }]}>
-            <View style={[S.bH, isOK && { backgroundColor: '#10B981' }]} />
-            <View style={[S.bV, isOK && { backgroundColor: '#10B981' }]} />
+          { n: '01', t: 'Look at camera',          d: 'Face scan captures your geometry' },
+          { n: '02', t: 'Phone confirms identity',  d: 'Uses your device biometric chip'  },
+          { n: '03', t: 'Stored on device',         d: 'Never uploaded anywhere'           },
+        ].map(st => (
+          <View key={st.n} style={s.card}>
+            <View style={s.badge}><Text style={s.bnum}>{st.n}</Text></View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.ctitle}>{st.t}</Text>
+              <Text style={s.csub}>{st.d}</Text>
+            </View>
           </View>
         ))}
+        <TouchableOpacity style={s.btn} onPress={startScan} activeOpacity={0.82}>
+          <Text style={s.btxt}>Begin Face Scan</Text>
+        </TouchableOpacity>
+      </Animated.View>
+    </View>
+  );
 
-        {/* Spacer to push stats down */}
-        <View style={{ flex: 1 }} />
+  // ── SCANNING ──────────────────────────────────────────────────────────────
+  if (phase === PHASE.SCANNING) return (
+    <View style={{ flex: 1, backgroundColor: '#080f1c' }}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
 
-        {/* Feature badges */}
-        <View style={S.badgesRow}>
-          {BADGES.map((b, i) => (
-            <View key={i} style={[S.badge, b.done && { borderColor: b.color + '55', backgroundColor: b.color + '10' }]}>
-              <View style={[S.badgeDot, { backgroundColor: b.done ? b.color : 'rgba(255,255,255,0.12)' }]} />
-              <Text style={[S.badgeLbl, { color: b.done ? b.color : 'rgba(255,255,255,0.2)' }]}>{b.lbl}</Text>
-            </View>
-          ))}
-        </View>
+      {/* Fake face oval */}
+      <View style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center' }]} pointerEvents="none">
+        <View style={{ width: SW * 0.48, height: SW * 0.62, borderRadius: SW * 0.26, borderWidth: 1, borderColor: 'rgba(0,229,255,0.12)' }} />
+      </View>
 
-        {/* Stats row */}
-        <View style={S.statsRow}>
-          {[
-            { lbl: 'LANDMARKS', val: ptCount > 0 ? ptCount.toString() : '--',           color: ptCount >= 80 ? '#10B981' : '#4A9FFF' },
-            { lbl: 'CONFIDENCE', val: isOK ? '99.8%' : ptCount > 30 ? `${Math.min(99, 55 + ptCount).toFixed(0)}%` : '--', color: '#A855F7' },
-            { lbl: 'DEEPFAKE',   val: ptCount > 30 ? 'REAL' : 'SCAN',                  color: ptCount > 30 ? '#10B981' : '#F59E0B' },
-          ].map((s, i) => (
-            <View key={i} style={S.statCard}>
-              <Text style={S.statLabel}>{s.lbl}</Text>
-              <Text style={[S.statVal, { color: s.color }]}>{s.val}</Text>
-            </View>
-          ))}
-        </View>
+      <ScanLine />
 
-        {/* Status */}
-        <View style={S.statusRow}>
-          <View style={[S.statusDot, { backgroundColor: isOK ? '#10B981' : '#4A9FFF' }]} />
-          <Text style={S.statusTxt}>{status}</Text>
-        </View>
+      <View style={s.topOv} pointerEvents="none" />
+      <View style={s.topBar} pointerEvents="none">
+        <Text style={s.labelSm}>V A U L T C H A T</Text>
+        <Text style={s.camT}>Scanning Your Face…</Text>
+      </View>
 
+      <View style={[StyleSheet.absoluteFill, s.bwrap]} pointerEvents="none">
+        <Brackets color={pct > 0.5 ? C.cyan : C.cyan2} pulse={pulse} />
+      </View>
+
+      <View style={s.ringWrap} pointerEvents="none">
+        <Arc pct={pct} />
+        <Text style={[s.ringT, pct >= 1 && { color: C.green }]}>{Math.round(pct * 100)}%</Text>
+      </View>
+
+      <View style={s.hintWrap} pointerEvents="none">
+        <View style={s.hintPill}><Text style={s.hintT}>{hint}</Text></View>
+      </View>
+    </View>
+  );
+
+  // ── CONFIRMED ─────────────────────────────────────────────────────────────
+  return (
+    <View style={s.root}>
+      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+      <Animated.View style={[s.center, { opacity: okOp, transform: [{ scale: okSc }] }]}>
+        <Text style={s.label}>V A U L T C H A T</Text>
+        <Text style={s.title}>Face ID{'\n'}Registered</Text>
+        <View style={{ marginVertical: 14 }}><FaceMesh anim={meshA} /></View>
+        <Text style={s.ok}>✓  Secured with device biometrics</Text>
+        <TouchableOpacity style={[s.btn, { backgroundColor: C.green }]}
+          onPress={() => router.replace('/chats')} activeOpacity={0.82}>
+          <Text style={[s.btxt, { color: C.dark }]}>Open VaultChat</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[s.btn, { backgroundColor: C.panel, marginTop: 10 }]}
+          onPress={reset} activeOpacity={0.82}>
+          <Text style={[s.btxt, { color: C.muted }]}>Scan Again</Text>
+        </TouchableOpacity>
       </Animated.View>
     </View>
   );
 }
 
-const S = StyleSheet.create({
-  root:      { flex: 1, backgroundColor: '#010812' },
-  header:    { paddingTop: 52, paddingBottom: 10, alignItems: 'center', gap: 5 },
-  hTitle:    { color: '#fff', fontSize: 17, fontWeight: '900', letterSpacing: 0.3 },
-  hSub:      { color: 'rgba(74,159,255,0.65)', fontSize: 9, fontWeight: '700', letterSpacing: 2.5 },
-  scanLine:  { position: 'absolute', left: CX - 140, width: 280, height: 1.5, backgroundColor: '#4A9FFF', opacity: 0.7 },
-  bracket:   { position: 'absolute', width: 28, height: 28, zIndex: 20 },
-  bH:        { position: 'absolute', top: 0, left: 0, width: 28, height: 3, backgroundColor: '#4A9FFF', borderRadius: 2 },
-  bV:        { position: 'absolute', top: 0, left: 0, width: 3, height: 28, backgroundColor: '#4A9FFF', borderRadius: 2 },
-  badgesRow: { flexDirection: 'row', paddingHorizontal: 20, gap: 7, marginBottom: 12 },
-  badge:     { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(10,22,40,0.8)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 7, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
-  badgeDot:  { width: 5, height: 5, borderRadius: 2.5 },
-  badgeLbl:  { fontSize: 8, fontWeight: '800', letterSpacing: 0.5 },
-  statsRow:  { flexDirection: 'row', paddingHorizontal: 20, gap: 10, marginBottom: 10 },
-  statCard:  { flex: 1, backgroundColor: 'rgba(10,22,40,0.85)', borderRadius: 14, padding: 11, alignItems: 'center', gap: 3, borderWidth: 1, borderColor: 'rgba(74,159,255,0.1)' },
-  statLabel: { color: 'rgba(255,255,255,0.3)', fontSize: 7, fontWeight: '800', letterSpacing: 1 },
-  statVal:   { fontSize: 14, fontWeight: '900' },
-  statusRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingBottom: 40 },
-  statusDot: { width: 7, height: 7, borderRadius: 3.5 },
-  statusTxt: { color: 'rgba(255,255,255,0.4)', fontSize: 12 },
+const s = StyleSheet.create({
+  root:     { flex: 1, backgroundColor: C.bg, paddingTop: TOP },
+  center:   { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
+  label:    { fontSize: 11, letterSpacing: 7, color: C.cyan, marginBottom: 6, fontWeight: '600' },
+  labelSm:  { fontSize: 10, letterSpacing: 5, color: C.cyan, fontWeight: '500', marginBottom: 3 },
+  title:    { fontSize: 40, fontWeight: '800', color: C.white, textAlign: 'center', lineHeight: 48, marginBottom: 10 },
+  sub:      { fontSize: 14, color: C.muted, textAlign: 'center', lineHeight: 22, marginBottom: 24 },
+  ok:       { fontSize: 15, fontWeight: '600', color: C.green, marginBottom: 22 },
+  card:     { flexDirection: 'row', alignItems: 'flex-start', width: '100%', backgroundColor: C.panel, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#0E2A48', marginBottom: 10 },
+  badge:    { width: 32, height: 32, borderRadius: 16, backgroundColor: C.cyan2, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  bnum:     { fontSize: 10, fontWeight: '800', color: C.dark },
+  ctitle:   { fontSize: 13, fontWeight: '700', color: C.white, marginBottom: 2 },
+  csub:     { fontSize: 11, color: C.muted },
+  btn:      { marginTop: 8, backgroundColor: C.cyan, paddingVertical: 15, borderRadius: 13, width: '100%', alignItems: 'center' },
+  btxt:     { fontSize: 16, fontWeight: '700', color: C.dark },
+  topOv:    { position: 'absolute', top: 0, left: 0, right: 0, height: 155, backgroundColor: 'rgba(6,14,30,0.68)' },
+  topBar:   { position: 'absolute', top: TOP + 10, left: 0, right: 0, alignItems: 'center' },
+  camT:     { fontSize: 20, fontWeight: '700', color: C.white },
+  bwrap:    { alignItems: 'center', justifyContent: 'center' },
+  ringWrap: { position: 'absolute', bottom: 155, alignSelf: 'center', width: 80, height: 80, alignItems: 'center', justifyContent: 'center' },
+  ringT:    { fontSize: 17, fontWeight: '800', color: C.cyan },
+  hintWrap: { position: 'absolute', bottom: 88, left: 0, right: 0, alignItems: 'center' },
+  hintPill: { backgroundColor: 'rgba(6,14,30,0.82)', paddingHorizontal: 20, paddingVertical: 9, borderRadius: 22, borderWidth: 1, borderColor: 'rgba(0,229,255,0.20)' },
+  hintT:    { fontSize: 14, fontWeight: '600', color: C.white },
 });

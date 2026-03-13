@@ -1,331 +1,359 @@
+// app/calls.tsx
+// Real call history from Firestore
+// Missed / Incoming / Outgoing with icons
+// Tap row → calls back
+// Long press → delete from history
+// Filter tabs: All / Missed / Video / Voice
 
-import { LinearGradient } from 'expo-linear-gradient';
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  View, Text, TouchableOpacity, StyleSheet,
+  FlatList, Alert, ActivityIndicator,
+} from 'react-native';
 import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
-import { Alert, Animated, Easing, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { ErrorBoundary } from '../components/ErrorBoundary';
-import webrtcService, { CallHistoryEntry, CallSession } from '../constants/webrtcService';
+import auth from '@react-native-firebase/auth';
+import firestore from '@react-native-firebase/firestore';
+import { BottomNav } from './chats';
 
-const CONTACTS = [
-  { id: '1', name: 'Alice', emoji: '👩', online: true },
-  { id: '2', name: 'Bob', emoji: '👨', online: true },
-  { id: '3', name: 'Sarah', emoji: '👧', online: false },
-  { id: '4', name: 'Mike', emoji: '👦', online: false },
-  { id: '5', name: 'VaultBot', emoji: '🤖', online: true },
-];
+// ─────────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────────
 
-const TIME_LIMITS = [
-  { label: 'No limit', value: 0 },
-  { label: '5 min', value: 5 },
-  { label: '10 min', value: 10 },
-  { label: '15 min', value: 15 },
-  { label: '30 min', value: 30 },
-  { label: '1 hour', value: 60 },
-];
+type CallType   = 'video' | 'voice';
+type CallStatus = 'missed' | 'incoming' | 'outgoing' | 'declined';
+type FilterTab  = 'All' | 'Missed' | 'Video' | 'Voice';
 
-function CallsContent() {
-  const router = useRouter();
-  const [history, setHistory] = useState<CallHistoryEntry[]>([]);
-  const [activeCall, setActiveCall] = useState<CallSession | null>(null);
-  const [callDuration, setCallDuration] = useState(0);
-  const [showNewCall, setShowNewCall] = useState(false);
-  const [showCallOptions, setShowCallOptions] = useState(false);
-  const [selectedContact, setSelectedContact] = useState<typeof CONTACTS[0] | null>(null);
-  const [isAnonymous, setIsAnonymous] = useState(false);
-  const [timeLimit, setTimeLimit] = useState(0);
-  const [showTimeLimits, setShowTimeLimits] = useState(false);
-  const fadeIn = useRef(new Animated.Value(0)).current;
-  const pulseAnim = useRef(new Animated.Value(1)).current;
+interface CallRecord {
+  id:          string;
+  peerUid:     string;
+  peerName:    string;
+  chatId:      string;
+  callType:    CallType;
+  callStatus:  CallStatus;
+  duration:    number;   // seconds — 0 if missed/declined
+  startedAt:   any;      // Firestore timestamp
+}
 
-  useEffect(() => {
-    Animated.timing(fadeIn, { toValue: 1, duration: 500, useNativeDriver: true }).start();
-    setHistory(webrtcService.getHistory());
+const TABS: FilterTab[] = ['All', 'Missed', 'Video', 'Voice'];
 
-    const onStateChange = (session: CallSession) => setActiveCall({ ...session });
-    const onDuration = (d: number) => setCallDuration(d);
-    const onEnded = () => { setActiveCall(null); setCallDuration(0); setHistory(webrtcService.getHistory()); };
+// ─────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────
 
-    webrtcService.on('callStateChanged', onStateChange);
-    webrtcService.on('durationUpdate', onDuration);
-    webrtcService.on('callEnded', onEnded);
+function formatDuration(s: number): string {
+  if (s === 0) return '';
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  if (m === 0) return `${sec}s`;
+  return `${m}m ${sec}s`;
+}
 
-    return () => {
-      webrtcService.off('callStateChanged', onStateChange);
-      webrtcService.off('durationUpdate', onDuration);
-      webrtcService.off('callEnded', onEnded);
-    };
-  }, []);
+function formatCallTime(ts: any): string {
+  if (!ts) return '';
+  const d: Date = ts.toDate ? ts.toDate() : new Date(ts);
+  const now  = new Date();
+  const diff = now.getTime() - d.getTime();
+  const days = Math.floor(diff / 86400000);
 
-  useEffect(() => {
-    if (activeCall?.state === 'calling') {
-      Animated.loop(Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 1.15, duration: 800, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1.0, duration: 800, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-      ])).start();
-    } else {
-      pulseAnim.setValue(1);
+  if (days === 0) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (days === 1) return 'Yesterday';
+  if (days < 7)  return d.toLocaleDateString([], { weekday: 'short' });
+  return d.toLocaleDateString([], { day: '2-digit', month: 'short' });
+}
+
+function statusIcon(status: CallStatus, type: CallType): string {
+  if (type === 'video') {
+    switch (status) {
+      case 'missed':   return '📹';
+      case 'incoming': return '📹';
+      case 'outgoing': return '📹';
+      case 'declined': return '📹';
     }
-  }, [activeCall?.state]);
+  }
+  switch (status) {
+    case 'missed':   return '📞';
+    case 'incoming': return '📞';
+    case 'outgoing': return '📞';
+    case 'declined': return '📞';
+  }
+}
 
-  const startCall = (type: 'audio' | 'video') => {
-    if (!selectedContact) return;
-    setShowCallOptions(false);
-    setShowNewCall(false);
-    webrtcService.startCall({
-      contactId: selectedContact.id,
-      contactName: selectedContact.name,
-      contactEmoji: selectedContact.emoji,
-      type,
-      isAnonymous,
-      timeLimitMinutes: timeLimit > 0 ? timeLimit : undefined,
+function statusColor(status: CallStatus): string {
+  switch (status) {
+    case 'missed':   return '#FF4D6D';
+    case 'declined': return '#FF4D6D';
+    case 'incoming': return '#00D4AA';
+    case 'outgoing': return '#64748B';
+  }
+}
+
+function statusLabel(status: CallStatus): string {
+  switch (status) {
+    case 'missed':   return '↙ Missed';
+    case 'incoming': return '↙ Incoming';
+    case 'outgoing': return '↗ Outgoing';
+    case 'declined': return '↙ Declined';
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Main Screen
+// ─────────────────────────────────────────────────────────────────
+
+export default function CallsScreen() {
+  const router = useRouter();
+  const uid    = auth().currentUser?.uid || '';
+
+  const [calls,   setCalls]   = useState<CallRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [tab,     setTab]     = useState<FilterTab>('All');
+
+  // ── Real-time Firestore listener ──────────────────────────────
+  useEffect(() => {
+    if (!uid) return;
+
+    const unsub = firestore()
+      .collection('users')
+      .doc(uid)
+      .collection('callHistory')
+      .orderBy('startedAt', 'desc')
+      .limit(100)
+      .onSnapshot(snap => {
+        const data: CallRecord[] = snap.docs.map(doc => ({
+          id: doc.id,
+          ...(doc.data() as Omit<CallRecord, 'id'>),
+        }));
+        setCalls(data);
+        setLoading(false);
+      }, err => {
+        console.error('[Calls]', err);
+        setLoading(false);
+      });
+
+    return () => unsub();
+  }, [uid]);
+
+  // ── Filter ────────────────────────────────────────────────────
+  const filtered = calls.filter(c => {
+    switch (tab) {
+      case 'Missed': return c.callStatus === 'missed' || c.callStatus === 'declined';
+      case 'Video':  return c.callType === 'video';
+      case 'Voice':  return c.callType === 'voice';
+      default:       return true;
+    }
+  });
+
+  // ── Counts for tab badges ─────────────────────────────────────
+  const missedCount = calls.filter(
+    c => c.callStatus === 'missed' || c.callStatus === 'declined'
+  ).length;
+
+  // ── Call back ─────────────────────────────────────────────────
+  const callBack = (record: CallRecord) => {
+    router.push({
+      pathname: record.callType === 'video' ? '/videocall' : '/voicecall',
+      params: { chatId: record.chatId, name: record.peerName },
     });
   };
 
-  const formatDuration = (s: number) => webrtcService.formatDuration(s);
-
-  const formatHistoryTime = (ts: number) => {
-    const d = Date.now() - ts;
-    if (d < 3600000) return Math.floor(d / 60000) + 'm ago';
-    if (d < 86400000) return Math.floor(d / 3600000) + 'h ago';
-    return Math.floor(d / 86400000) + 'd ago';
+  // ── Delete call record ────────────────────────────────────────
+  const deleteRecord = (record: CallRecord) => {
+    Alert.alert(
+      'Delete',
+      `Remove this call with ${record.peerName} from history?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete', style: 'destructive',
+          onPress: () => {
+            firestore()
+              .collection('users')
+              .doc(uid)
+              .collection('callHistory')
+              .doc(record.id)
+              .delete()
+              .catch(() => {});
+          },
+        },
+      ]
+    );
   };
 
-  const getCallIcon = (entry: CallHistoryEntry) => {
-    if (entry.direction === 'missed') return '📵';
-    if (entry.type === 'video') return entry.direction === 'incoming' ? '📹' : '🎥';
-    return entry.direction === 'incoming' ? '📲' : '📞';
-  };
+  // ── Render row ────────────────────────────────────────────────
+  const renderCall = useCallback(({ item }: { item: CallRecord }) => (
+    <TouchableOpacity
+      style={styles.callRow}
+      onPress={() => callBack(item)}
+      onLongPress={() => deleteRecord(item)}
+      activeOpacity={0.7}
+    >
+      {/* Avatar */}
+      <View style={styles.avatarCircle}>
+        <Text style={styles.avatarText}>
+          {item.peerName.slice(0, 2).toUpperCase()}
+        </Text>
+      </View>
 
-  const getCallColor = (entry: CallHistoryEntry) => {
-    if (entry.direction === 'missed') return '#EF4444';
-    if (entry.direction === 'incoming') return '#10B981';
-    return '#4A9FFF';
-  };
-
-  return (
-    <LinearGradient colors={['#020B18', '#040F20', '#060F24']} style={{ flex: 1 }}>
-      <Animated.View style={{ flex: 1, opacity: fadeIn }}>
-        <View style={S.header}>
-          <TouchableOpacity onPress={() => router.push('/chats' as any)} style={S.backBtn}>
-            <Text style={{ color: '#4A9FFF', fontSize: 18 }}>←</Text>
-          </TouchableOpacity>
-          <View style={{ flex: 1 }}>
-            <Text style={S.title}>Calls</Text>
-            <Text style={{ color: '#3D5A7A', fontSize: 10, letterSpacing: 1 }}>END-TO-END ENCRYPTED</Text>
-          </View>
-          <TouchableOpacity onPress={() => setShowNewCall(true)} style={S.newCallBtn}>
-            <Text style={{ color: '#fff', fontSize: 22, fontWeight: '900' }}>+</Text>
-          </TouchableOpacity>
+      {/* Info */}
+      <View style={styles.callInfo}>
+        <Text style={styles.peerName}>{item.peerName}</Text>
+        <View style={styles.callMeta}>
+          <Text style={[styles.callStatus, { color: statusColor(item.callStatus) }]}>
+            {statusLabel(item.callStatus)}
+          </Text>
+          {item.duration > 0 && (
+            <Text style={styles.callDuration}> · {formatDuration(item.duration)}</Text>
+          )}
         </View>
+      </View>
 
-        {activeCall && (
-          <View style={[S.activeCallBanner, { backgroundColor: activeCall.state === 'connected' ? '#052E16' : '#1a0a00', borderColor: activeCall.state === 'connected' ? '#166534' : '#F59E0B' }]}>
-            <Animated.View style={{ transform: [{ scale: activeCall.state === 'calling' ? pulseAnim : new Animated.Value(1) }] }}>
-              <Text style={{ fontSize: 28 }}>{activeCall.isAnonymous ? '👻' : activeCall.contactEmoji}</Text>
-            </Animated.View>
-            <View style={{ flex: 1, marginLeft: 10 }}>
-              <Text style={{ color: '#fff', fontSize: 14, fontWeight: '800' }}>
-                {activeCall.isAnonymous ? 'Anonymous Call' : activeCall.contactName}
-              </Text>
-              <Text style={{ color: activeCall.state === 'connected' ? '#10B981' : '#F59E0B', fontSize: 12, fontWeight: '700' }}>
-                {activeCall.state === 'calling' ? 'Calling...' : formatDuration(callDuration)}
-              </Text>
-            </View>
-            <TouchableOpacity onPress={() => router.push('/videocall' as any)} style={S.returnBtn}>
-              <Text style={{ color: '#4A9FFF', fontSize: 12, fontWeight: '700' }}>Return</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => webrtcService.endCall()} style={S.endBanner}>
-              <Text style={{ fontSize: 20 }}>📵</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 30 }}>
-          <View style={S.statsRow}>
-            {[
-              { label: 'Total Calls', value: history.length.toString(), icon: '📞' },
-              { label: 'Video Calls', value: history.filter(h => h.type === 'video').length.toString(), icon: '🎥' },
-              { label: 'Anonymous', value: history.filter(h => h.isAnonymous).length.toString(), icon: '👻' },
-              { label: 'Encrypted', value: history.filter(h => h.isEncrypted).length.toString(), icon: '🔐' },
-            ].map((s, i) => (
-              <View key={i} style={S.statCard}>
-                <Text style={{ fontSize: 22 }}>{s.icon}</Text>
-                <Text style={{ color: '#fff', fontSize: 18, fontWeight: '900', marginTop: 4 }}>{s.value}</Text>
-                <Text style={{ color: '#3D5A7A', fontSize: 10, marginTop: 2, textAlign: 'center' }}>{s.label}</Text>
-              </View>
-            ))}
-          </View>
-
-          <TouchableOpacity onPress={() => setShowNewCall(true)} style={{ marginHorizontal: 18, marginBottom: 16 }}>
-            <LinearGradient colors={['#1D4ED8', '#7C3AED']} style={S.newCallCard}>
-              <Text style={{ fontSize: 36 }}>📞</Text>
-              <View style={{ flex: 1, marginLeft: 16 }}>
-                <Text style={{ color: '#fff', fontSize: 18, fontWeight: '900' }}>New Secure Call</Text>
-                <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 2 }}>Audio • Video • Anonymous • Encrypted</Text>
-              </View>
-              <Text style={{ color: '#fff', fontSize: 24 }}>→</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-
-          <View style={S.section}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <Text style={S.sectionTitle}>Recent Calls</Text>
-              {history.length > 0 && (
-                <TouchableOpacity onPress={() => { webrtcService.clearHistory(); setHistory([]); }}>
-                  <Text style={{ color: '#EF4444', fontSize: 12 }}>Clear</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-            {history.length === 0 ? (
-              <View style={S.emptyCard}>
-                <Text style={{ fontSize: 40, marginBottom: 10 }}>📋</Text>
-                <Text style={{ color: '#3D5A7A', fontSize: 14 }}>No calls yet</Text>
-                <Text style={{ color: '#1D2D44', fontSize: 12, marginTop: 4 }}>Make your first encrypted call</Text>
-              </View>
-            ) : (
-              history.map((entry, i) => (
-                <TouchableOpacity key={i} style={S.historyRow} onPress={() => {
-                  const c = CONTACTS.find(x => x.id === entry.contactId);
-                  if (c) { setSelectedContact(c); setIsAnonymous(entry.isAnonymous); setShowCallOptions(true); }
-                }}>
-                  <View style={[S.callIconBox, { backgroundColor: getCallColor(entry) + '22', borderColor: getCallColor(entry) + '44' }]}>
-                    <Text style={{ fontSize: 22 }}>{getCallIcon(entry)}</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <Text style={{ fontSize: 18 }}>{entry.contactEmoji}</Text>
-                      <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>{entry.contactName}</Text>
-                      {entry.isAnonymous && <View style={S.anonBadge}><Text style={{ color: '#A78BFA', fontSize: 9, fontWeight: '800' }}>ANON</Text></View>}
-                      {entry.isEncrypted && <Text style={{ fontSize: 12 }}>🔐</Text>}
-                    </View>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 3 }}>
-                      <Text style={{ color: getCallColor(entry), fontSize: 11 }}>
-                        {entry.direction === 'incoming' ? '↙️ Incoming' : entry.direction === 'missed' ? '❌ Missed' : '↗️ Outgoing'}
-                      </Text>
-                      <Text style={{ color: '#3D5A7A', fontSize: 11 }}>• {entry.type === 'video' ? 'Video' : 'Audio'}</Text>
-                      {entry.duration > 0 && <Text style={{ color: '#3D5A7A', fontSize: 11 }}>• {formatDuration(entry.duration)}</Text>}
-                    </View>
-                  </View>
-                  <Text style={{ color: '#3D5A7A', fontSize: 11 }}>{formatHistoryTime(entry.timestamp)}</Text>
-                </TouchableOpacity>
-              ))
-            )}
-          </View>
-        </ScrollView>
-      </Animated.View>
-
-      <Modal visible={showNewCall} transparent animationType="slide">
-        <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' }} activeOpacity={1} onPress={() => setShowNewCall(false)}>
-          <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
-            <LinearGradient colors={['#0A1628', '#0D1E3A']} style={{ borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: 44 }}>
-              <Text style={{ color: '#fff', fontSize: 18, fontWeight: '900', marginBottom: 4 }}>New Secure Call</Text>
-              <Text style={{ color: '#3D5A7A', fontSize: 12, marginBottom: 20 }}>All calls are end-to-end encrypted</Text>
-              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
-                <TouchableOpacity onPress={() => setIsAnonymous(false)} style={{ flex: 1, backgroundColor: !isAnonymous ? '#1D4ED8' : '#060E22', borderRadius: 14, padding: 14, alignItems: 'center', borderWidth: 1.5, borderColor: !isAnonymous ? '#3B82F6' : '#0D1E3A' }}>
-                  <Text style={{ fontSize: 24 }}>👤</Text>
-                  <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700', marginTop: 4 }}>Normal</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => setIsAnonymous(true)} style={{ flex: 1, backgroundColor: isAnonymous ? '#7C3AED' : '#060E22', borderRadius: 14, padding: 14, alignItems: 'center', borderWidth: 1.5, borderColor: isAnonymous ? '#A78BFA' : '#0D1E3A' }}>
-                  <Text style={{ fontSize: 24 }}>👻</Text>
-                  <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700', marginTop: 4 }}>Anonymous</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => setShowTimeLimits(true)} style={{ flex: 1, backgroundColor: timeLimit > 0 ? '#F59E0B22' : '#060E22', borderRadius: 14, padding: 14, alignItems: 'center', borderWidth: 1.5, borderColor: timeLimit > 0 ? '#F59E0B' : '#0D1E3A' }}>
-                  <Text style={{ fontSize: 24 }}>⏱️</Text>
-                  <Text style={{ color: timeLimit > 0 ? '#F59E0B' : '#fff', fontSize: 12, fontWeight: '700', marginTop: 4 }}>{timeLimit > 0 ? timeLimit + ' min' : 'Time Limit'}</Text>
-                </TouchableOpacity>
-              </View>
-              <Text style={{ color: '#3D5A7A', fontSize: 11, letterSpacing: 1, marginBottom: 12 }}>SELECT CONTACT</Text>
-              {CONTACTS.map((c, i) => (
-                <TouchableOpacity key={i} onPress={() => { setSelectedContact(c); setShowNewCall(false); setShowCallOptions(true); }} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#060E22', borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: '#0D1E3A', gap: 12 }}>
-                  <View style={{ position: 'relative' }}>
-                    <Text style={{ fontSize: 28 }}>{c.emoji}</Text>
-                    {c.online && <View style={{ position: 'absolute', bottom: 0, right: 0, width: 10, height: 10, borderRadius: 5, backgroundColor: '#10B981', borderWidth: 2, borderColor: '#060E22' }} />}
-                  </View>
-                  <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700', flex: 1 }}>{c.name}</Text>
-                  <Text style={{ color: c.online ? '#10B981' : '#3D5A7A', fontSize: 11 }}>{c.online ? 'Online' : 'Offline'}</Text>
-                  <Text style={{ fontSize: 16 }}>📞</Text>
-                </TouchableOpacity>
-              ))}
-            </LinearGradient>
-          </View>
+      {/* Right side */}
+      <View style={styles.callRight}>
+        <Text style={styles.callTime}>{formatCallTime(item.startedAt)}</Text>
+        {/* Call back icon */}
+        <TouchableOpacity
+          style={[
+            styles.callBackBtn,
+            { borderColor: item.callType === 'video' ? '#9B5DE5' : '#00D4AA' },
+          ]}
+          onPress={() => callBack(item)}
+        >
+          <Text style={styles.callBackIcon}>
+            {item.callType === 'video' ? '📹' : '📞'}
+          </Text>
         </TouchableOpacity>
-      </Modal>
+      </View>
+    </TouchableOpacity>
+  ), [uid]);
 
-      <Modal visible={showTimeLimits} transparent animationType="slide">
-        <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' }} activeOpacity={1} onPress={() => setShowTimeLimits(false)}>
-          <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
-            <LinearGradient colors={['#0A1628', '#0D1E3A']} style={{ borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: 44 }}>
-              <Text style={{ color: '#fff', fontSize: 18, fontWeight: '900', marginBottom: 16 }}>Call Time Limit</Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-                {TIME_LIMITS.map((t, i) => (
-                  <TouchableOpacity key={i} onPress={() => { setTimeLimit(t.value); setShowTimeLimits(false); }} style={{ backgroundColor: timeLimit === t.value ? '#F59E0B' : '#060E22', borderRadius: 12, paddingHorizontal: 20, paddingVertical: 12, borderWidth: 1.5, borderColor: timeLimit === t.value ? '#F59E0B' : '#0D1E3A' }}>
-                    <Text style={{ color: timeLimit === t.value ? '#000' : '#fff', fontSize: 14, fontWeight: '700' }}>{t.label}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </LinearGradient>
-          </View>
-        </TouchableOpacity>
-      </Modal>
-
-      <Modal visible={showCallOptions && selectedContact !== null} transparent animationType="slide">
-        <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' }} activeOpacity={1} onPress={() => setShowCallOptions(false)}>
-          <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
-            <LinearGradient colors={['#0A1628', '#0D1E3A']} style={{ borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: 44 }}>
-              <View style={{ alignItems: 'center', marginBottom: 24 }}>
-                <Text style={{ fontSize: 56 }}>{isAnonymous ? '👻' : selectedContact?.emoji}</Text>
-                <Text style={{ color: '#fff', fontSize: 22, fontWeight: '900', marginTop: 10 }}>{isAnonymous ? 'Anonymous Call' : selectedContact?.name}</Text>
-                <View style={{ flexDirection: 'row', gap: 8, marginTop: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
-                  {isAnonymous && <View style={{ backgroundColor: '#2D1B69', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 }}><Text style={{ color: '#A78BFA', fontSize: 11, fontWeight: '700' }}>👻 ANONYMOUS</Text></View>}
-                  <View style={{ backgroundColor: '#052E16', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 }}><Text style={{ color: '#10B981', fontSize: 11, fontWeight: '700' }}>🔐 ENCRYPTED</Text></View>
-                  {timeLimit > 0 && <View style={{ backgroundColor: '#1a0a00', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 }}><Text style={{ color: '#F59E0B', fontSize: 11, fontWeight: '700' }}>⏱️ {timeLimit} MIN</Text></View>}
-                </View>
-              </View>
-              <View style={{ flexDirection: 'row', gap: 20, justifyContent: 'center' }}>
-                <TouchableOpacity onPress={() => startCall('audio')} style={{ alignItems: 'center', gap: 10 }}>
-                  <LinearGradient colors={['#1D4ED8', '#3B82F6']} style={{ width: 74, height: 74, borderRadius: 37, justifyContent: 'center', alignItems: 'center' }}>
-                    <Text style={{ fontSize: 34 }}>📞</Text>
-                  </LinearGradient>
-                  <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>Audio Call</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => startCall('video')} style={{ alignItems: 'center', gap: 10 }}>
-                  <LinearGradient colors={['#7C3AED', '#A78BFA']} style={{ width: 74, height: 74, borderRadius: 37, justifyContent: 'center', alignItems: 'center' }}>
-                    <Text style={{ fontSize: 34 }}>🎥</Text>
-                  </LinearGradient>
-                  <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>Video Call</Text>
-                </TouchableOpacity>
-              </View>
-            </LinearGradient>
-          </View>
-        </TouchableOpacity>
-      </Modal>
-    </LinearGradient>
-  );
-}
-
-export default function CallsScreen() {
+  // ─────────────────────────────────────────────────────────────
+  // Render
+  // ─────────────────────────────────────────────────────────────
   return (
-    <ErrorBoundary fallbackTitle="Calls Error" fallbackMessage="The calls screen had a problem. Other features still work.">
-      <CallsContent />
-    </ErrorBoundary>
+    <View style={styles.container}>
+
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Calls</Text>
+        <Text style={styles.headerSub}>ENCRYPTED CALL HISTORY</Text>
+      </View>
+
+      {/* Filter tabs */}
+      <View style={styles.tabs}>
+        {TABS.map(t => (
+          <TouchableOpacity
+            key={t}
+            style={[styles.tab, tab === t && styles.tabActive]}
+            onPress={() => setTab(t)}
+          >
+            <Text style={[styles.tabText, tab === t && styles.tabTextActive]}>
+              {t}
+            </Text>
+            {t === 'Missed' && missedCount > 0 && (
+              <View style={styles.tabBadge}>
+                <Text style={styles.tabBadgeText}>{missedCount}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {loading ? (
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator color="#00D4AA" />
+        </View>
+      ) : (
+        <FlatList
+          data={filtered}
+          keyExtractor={c => c.id}
+          renderItem={renderCall}
+          contentContainerStyle={styles.listContent}
+          ItemSeparatorComponent={() => <View style={styles.sep} />}
+          ListEmptyComponent={
+            <View style={styles.emptyWrap}>
+              <Text style={styles.emptyIcon}>
+                {tab === 'Missed' ? '📵' : '📞'}
+              </Text>
+              <Text style={styles.emptyText}>
+                {tab === 'Missed'
+                  ? 'No missed calls'
+                  : 'No call history yet'}
+              </Text>
+            </View>
+          }
+        />
+      )}
+
+      <BottomNav active="Calls" />
+    </View>
   );
 }
 
-const S = StyleSheet.create({
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, paddingTop: 50, paddingBottom: 12, gap: 10 },
-  title: { color: '#fff', fontSize: 22, fontWeight: '900' },
-  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#0A1628', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#0D1E3A' },
-  newCallBtn: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', backgroundColor: '#1D4ED8' },
-  activeCallBanner: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 18, marginBottom: 12, borderRadius: 16, padding: 14, borderWidth: 1.5 },
-  returnBtn: { backgroundColor: '#0A1628', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, marginRight: 8 },
-  endBanner: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#EF4444', justifyContent: 'center', alignItems: 'center' },
-  statsRow: { flexDirection: 'row', paddingHorizontal: 14, gap: 8, marginBottom: 16 },
-  statCard: { flex: 1, backgroundColor: '#0A1628', borderRadius: 14, padding: 12, alignItems: 'center', borderWidth: 1, borderColor: '#0D1E3A' },
-  newCallCard: { borderRadius: 20, padding: 20, flexDirection: 'row', alignItems: 'center' },
-  section: { paddingHorizontal: 18 },
-  sectionTitle: { color: '#fff', fontSize: 16, fontWeight: '900' },
-  emptyCard: { backgroundColor: '#0A1628', borderRadius: 18, padding: 40, alignItems: 'center', borderWidth: 1, borderColor: '#0D1E3A' },
-  historyRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0A1628', borderRadius: 16, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: '#0D1E3A', gap: 12 },
-  callIconBox: { width: 46, height: 46, borderRadius: 23, justifyContent: 'center', alignItems: 'center', borderWidth: 1 },
-  anonBadge: { backgroundColor: '#2D1B69', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 },
+// ─────────────────────────────────────────────────────────────────
+// Styles
+// ─────────────────────────────────────────────────────────────────
+
+const styles = StyleSheet.create({
+  container:    { flex: 1, backgroundColor: '#0A0E1A' },
+  header: {
+    backgroundColor: '#111827',
+    paddingTop: 48, paddingBottom: 12, paddingHorizontal: 16,
+    borderBottomWidth: 0.5, borderBottomColor: '#1E293B',
+  },
+  headerTitle:  { fontSize: 20, fontWeight: 'bold', color: '#FFFFFF' },
+  headerSub:    { fontSize: 9, color: '#00D4AA', marginTop: 2, fontWeight: 'bold' },
+
+  // Tabs
+  tabs: {
+    flexDirection: 'row',
+    borderBottomWidth: 0.5, borderBottomColor: '#1E293B',
+  },
+  tab: {
+    flex: 1, alignItems: 'center', paddingVertical: 12,
+    flexDirection: 'row', justifyContent: 'center', gap: 5,
+  },
+  tabActive:        { borderBottomWidth: 2, borderBottomColor: '#00D4AA' },
+  tabText:          { fontSize: 13, color: '#64748B' },
+  tabTextActive:    { color: '#00D4AA', fontWeight: 'bold' },
+  tabBadge: {
+    backgroundColor: '#FF4D6D', borderRadius: 8,
+    minWidth: 16, height: 16, justifyContent: 'center',
+    alignItems: 'center', paddingHorizontal: 4,
+  },
+  tabBadgeText:     { fontSize: 9, color: '#FFFFFF', fontWeight: 'bold' },
+
+  loadingWrap:      { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  listContent:      { padding: 14, paddingBottom: 100, flexGrow: 1 },
+
+  callRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: 10, gap: 12,
+  },
+  avatarCircle: {
+    width: 48, height: 48, borderRadius: 24,
+    backgroundColor: '#111827',
+    borderWidth: 1.5, borderColor: '#1E293B',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  avatarText:   { fontSize: 14, fontWeight: 'bold', color: '#00D4AA' },
+  callInfo:     { flex: 1 },
+  peerName:     { fontSize: 15, fontWeight: 'bold', color: '#FFFFFF', marginBottom: 4 },
+  callMeta:     { flexDirection: 'row', alignItems: 'center' },
+  callStatus:   { fontSize: 12 },
+  callDuration: { fontSize: 12, color: '#374151' },
+  callRight:    { alignItems: 'flex-end', gap: 6 },
+  callTime:     { fontSize: 11, color: '#374151' },
+  callBackBtn: {
+    width: 34, height: 34, borderRadius: 17,
+    backgroundColor: '#111827', borderWidth: 1,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  callBackIcon: { fontSize: 16 },
+
+  sep: {
+    height: 0.5, backgroundColor: '#111827', marginLeft: 60,
+  },
+  emptyWrap:  { flex: 1, alignItems: 'center', paddingTop: 80, gap: 12 },
+  emptyIcon:  { fontSize: 48 },
+  emptyText:  { fontSize: 14, color: '#374151' },
 });

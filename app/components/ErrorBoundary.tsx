@@ -1,15 +1,15 @@
 import React from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 
-export class ErrorBoundary extends React.Component {
-  constructor(props) {
+export class ErrorBoundary extends React.Component<any, any> {
+  constructor(props: any) {
     super(props);
     this.state = { hasError: false, error: null };
   }
-  static getDerivedStateFromError(error) {
+  static getDerivedStateFromError(error: any) {
     return { hasError: true, error };
   }
-  componentDidCatch(error, info) {
+  componentDidCatch(error: any, info: any) {
     console.error('ErrorBoundary caught:', error, info);
   }
   render() {
@@ -35,3 +35,6 @@ export class ErrorBoundary extends React.Component {
     return this.props.children;
   }
 }
+
+// ✅ Required: default export to suppress expo-router route warning
+export default ErrorBoundary;

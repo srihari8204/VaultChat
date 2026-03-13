@@ -1,137 +1,308 @@
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+// app/voicecall.tsx
+// Real WebRTC voice call (audio only)
+// Same TURN server as videocall.tsx
+// Speaker / earpiece toggle, mute, call timer
+
+import React, { useState, useEffect, useRef } from 'react';
 import {
-    Animated,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  View, Text, TouchableOpacity, StyleSheet,
+  Alert, StatusBar,
 } from 'react-native';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import {
+  RTCPeerConnection,
+  RTCIceCandidate,
+  RTCSessionDescription,
+  mediaDevices,
+} from 'react-native-webrtc';
+import { io, Socket } from 'socket.io-client';
+import auth from '@react-native-firebase/auth';
+import firestore from '@react-native-firebase/firestore';
+import { Audio } from 'expo-av';
+
+// ── Same ICE config as videocall.tsx ─────────────────────────────
+const ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  {
+    urls:       'turn:openrelay.metered.ca:80',
+    username:   '597bc91ac20a6dbd23f2ceba',
+    credential: '6PIgpt3wvCkVMngH',
+  },
+  {
+    urls:       'turn:openrelay.metered.ca:80?transport=tcp',
+    username:   '597bc91ac20a6dbd23f2ceba',
+    credential: '6PIgpt3wvCkVMngH',
+  },
+  {
+    urls:       'turns:openrelay.metered.ca:443',
+    username:   '597bc91ac20a6dbd23f2ceba',
+    credential: '6PIgpt3wvCkVMngH',
+  },
+  {
+    urls:       'turns:openrelay.metered.ca:443?transport=tcp',
+    username:   '597bc91ac20a6dbd23f2ceba',
+    credential: '6PIgpt3wvCkVMngH',
+  },
+];
+
+const BACKEND_URL = 'https://vaultchat.onrender.com';
+type CallState = 'connecting' | 'ringing' | 'connected' | 'ended';
 
 export default function VoiceCallScreen() {
   const router = useRouter();
-  const { name, avatar } = useLocalSearchParams();
-  const [callStatus, setCallStatus] = useState<'calling' | 'connected' | 'ended'>('calling');
-  const [isMuted, setIsMuted] = useState(false);
-  const [isSpeaker, setIsSpeaker] = useState(false);
-  const [duration, setDuration] = useState(0);
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-  const timerRef = useRef<any>(null);
+  const { chatId, name, isIncoming, remoteSocketId } =
+    useLocalSearchParams<{
+      chatId: string;
+      name: string;
+      isIncoming?: string;
+      remoteSocketId?: string;
+    }>();
+
+  const uid = auth().currentUser?.uid || '';
+
+  const [callState,  setCallState]  = useState<CallState>('connecting');
+  const [muted,      setMuted]      = useState(false);
+  const [speaker,    setSpeaker]    = useState(false); // earpiece by default for voice
+  const [seconds,    setSeconds]    = useState(0);
+
+  const pcRef       = useRef<RTCPeerConnection | null>(null);
+  const socketRef   = useRef<Socket | null>(null);
+  const timerRef    = useRef<NodeJS.Timeout | null>(null);
+  const remoteIdRef = useRef<string>(remoteSocketId || '');
+  const localStreamRef = useRef<any>(null);
 
   useEffect(() => {
-    // Pulse animation
-    const pulse = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 1.2, duration: 800, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
-      ])
-    );
-    pulse.start();
+    let mounted = true;
 
-    // Auto connect after 2 seconds
-    setTimeout(() => {
-      setCallStatus('connected');
-      timerRef.current = setInterval(() => setDuration(d => d + 1), 1000);
-    }, 2000);
+    const setup = async () => {
+      try {
+        // Audio mode — earpiece for private voice calls
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS:         true,
+          playsInSilentModeIOS:       true,
+          playThroughEarpieceAndroid: true, // earpiece default
+        });
 
-    return () => {
-      pulse.stop();
-      if (timerRef.current) clearInterval(timerRef.current);
+        // Audio only — no video track
+        const stream = await mediaDevices.getUserMedia({
+          audio: true,
+          video: false,
+        });
+
+        if (!mounted) return;
+        localStreamRef.current = stream;
+
+        const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+        pcRef.current = pc;
+
+        stream.getTracks().forEach((track: any) => pc.addTrack(track, stream));
+
+        // Remote audio plays automatically via WebRTC
+        pc.ontrack = () => {
+          setCallState('connected');
+          startTimer();
+        };
+
+        const socket = io(BACKEND_URL, { transports: ['websocket'] });
+        socketRef.current = socket;
+
+        socket.on('connect', async () => {
+          socket.emit('register', uid);
+
+          if (isIncoming === 'true') {
+            setCallState('ringing');
+            socket.on('call_offer_for_you', async ({ offer, fromSocketId }: any) => {
+              remoteIdRef.current = fromSocketId;
+              await pc.setRemoteDescription(new RTCSessionDescription(offer));
+              const answer = await pc.createAnswer();
+              await pc.setLocalDescription(answer);
+              socket.emit('call_answer', { toSocketId: fromSocketId, answer });
+            });
+          } else {
+            setCallState('ringing');
+            await makeCall(pc, socket);
+          }
+        });
+
+        socket.on('ice_candidate', async ({ candidate }: any) => {
+          if (candidate && pcRef.current) {
+            await pcRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+          }
+        });
+
+        socket.on('call_answered', async ({ answer }: any) => {
+          await pcRef.current?.setRemoteDescription(new RTCSessionDescription(answer));
+          setCallState('connected');
+          startTimer();
+        });
+
+        socket.on('call_ended', () => endCall(false));
+
+        pc.onicecandidate = (event: any) => {
+          if (event.candidate && remoteIdRef.current) {
+            socket.emit('ice_candidate', {
+              toSocketId: remoteIdRef.current,
+              candidate:  event.candidate,
+            });
+          }
+        };
+
+        pc.onconnectionstatechange = () => {
+          if (pc.connectionState === 'failed' ||
+              pc.connectionState === 'disconnected') {
+            endCall(true);
+          }
+        };
+
+      } catch (e: any) {
+        Alert.alert('Error', e.message || 'Could not access microphone');
+        router.back();
+      }
     };
+
+    setup();
+    return () => { mounted = false; cleanup(); };
   }, []);
 
-  const formatDuration = (s: number) => {
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    return `${m}:${sec.toString().padStart(2, '0')}`;
+  const makeCall = async (pc: RTCPeerConnection, socket: Socket) => {
+    const chatDoc = await firestore().collection('chats').doc(chatId).get();
+    const participants: string[] = chatDoc.data()?.participants || [];
+    const recipientUid = participants.find(p => p !== uid);
+    if (!recipientUid) return;
+
+    const userDoc = await firestore().collection('users').doc(recipientUid).get();
+    remoteIdRef.current = userDoc.data()?.socketId || '';
+
+    const offer = await pc.createOffer({
+      offerToReceiveAudio: true,
+      offerToReceiveVideo: false,
+    });
+    await pc.setLocalDescription(offer);
+
+    socket.emit('call_offer', {
+      toSocketId: remoteIdRef.current,
+      offer,
+      callType:   'voice',
+      callerName: auth().currentUser?.displayName || 'VaultChat User',
+      chatId,
+    });
   };
 
-  const endCall = () => {
+  const startTimer = () => {
+    timerRef.current = setInterval(() => setSeconds(s => s + 1), 1000);
+  };
+
+  const fmt = (s: number) => {
+    const m = Math.floor(s / 60).toString().padStart(2, '0');
+    return `${m}:${(s % 60).toString().padStart(2, '0')}`;
+  };
+
+  const toggleMute = () => {
+    localStreamRef.current?.getAudioTracks().forEach((t: any) => {
+      t.enabled = muted;
+    });
+    setMuted(m => !m);
+  };
+
+  const toggleSpeaker = async () => {
+    const next = !speaker;
+    setSpeaker(next);
+    await Audio.setAudioModeAsync({
+      playThroughEarpieceAndroid: !next,
+      allowsRecordingIOS:         true,
+      playsInSilentModeIOS:       true,
+    });
+  };
+
+  const endCall = (notify = true) => {
+    if (notify && socketRef.current && remoteIdRef.current) {
+      socketRef.current.emit('call_end', { toSocketId: remoteIdRef.current });
+    }
+    cleanup();
+    router.back();
+  };
+
+  const cleanup = () => {
     if (timerRef.current) clearInterval(timerRef.current);
-    setCallStatus('ended');
-    setTimeout(() => router.back(), 1000);
+    localStreamRef.current?.getTracks().forEach((t: any) => t.stop());
+    pcRef.current?.close();
+    socketRef.current?.disconnect();
+  };
+
+  const stateLabel: Record<CallState, string> = {
+    connecting: 'Connecting...',
+    ringing:    'Ringing...',
+    connected:  fmt(seconds),
+    ended:      'Call Ended',
   };
 
   return (
     <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="#0A0E1A" />
 
-      {/* DeepFake Shield Banner */}
-      <View style={styles.deepfakeBanner}>
-        <Text style={styles.deepfakeText}>
-          🎭 DeepFake Shield: ACTIVE — Real person verified ✅
-        </Text>
-      </View>
-
-      {/* Encryption badge */}
-      <View style={styles.encryptBadge}>
-        <Text style={styles.encryptText}>🔒 VoiceCloak ON  ·  E2E Encrypted</Text>
+      {/* D2DE badge */}
+      <View style={styles.d2deBadge}>
+        <Text style={styles.d2deText}>🛡️ D2DE · Encrypted Voice</Text>
       </View>
 
       {/* Avatar */}
-      <View style={styles.avatarArea}>
-        <Animated.View style={[
-          styles.pulseRing,
-          { transform: [{ scale: pulseAnim }],
-            opacity: callStatus === 'connected' ? 0.3 : 0.6 }
-        ]} />
-        <View style={styles.avatar}>
-          <Text style={styles.avatarEmoji}>{avatar || '👤'}</Text>
-        </View>
+      <View style={styles.avatarCircle}>
+        <Text style={styles.avatarText}>{name?.slice(0,2).toUpperCase()}</Text>
       </View>
 
-      {/* Name & Status */}
-      <Text style={styles.callerName}>{name || 'Unknown'}</Text>
+      <Text style={styles.callerName}>{name}</Text>
+
+      {/* Status / timer */}
       <Text style={[
         styles.callStatus,
-        callStatus === 'connected' && { color: '#22C55E' },
-        callStatus === 'ended' && { color: '#EF4444' },
+        callState === 'connected' && styles.callStatusActive,
       ]}>
-        {callStatus === 'calling' ? '📞 Calling...' :
-         callStatus === 'ended' ? 'Call ended' :
-         `🔒 Encrypted · ${formatDuration(duration)}`}
+        {callState === 'connected' ? `● ${stateLabel.connected}` : stateLabel[callState]}
       </Text>
 
-      {/* Voice wave (when connected) */}
-      {callStatus === 'connected' && (
-        <View style={styles.waveRow}>
-          {[1,2,3,4,5,6,7].map(i => (
-            <View key={i} style={[
-              styles.wavebar,
-              { height: isMuted ? 4 : [20,35,25,40,20,30,15][i-1] }
-            ]} />
+      {/* Signal strength visual */}
+      {callState === 'connected' && (
+        <View style={styles.signalRow}>
+          {[1,2,3,4,5].map(i => (
+            <View key={i} style={[styles.signalBar, { height: 6 + i * 3 }]} />
           ))}
+          <Text style={styles.signalLabel}>HD Voice</Text>
         </View>
       )}
 
       {/* Controls */}
       <View style={styles.controls}>
-        <View style={styles.controlsRow}>
-          {[
-            { icon: isMuted ? '🔇' : '🎤', label: isMuted ? 'Unmute' : 'Mute',
-              active: isMuted, onPress: () => setIsMuted(!isMuted) },
-            { icon: isSpeaker ? '🔊' : '🔈', label: 'Speaker',
-              active: isSpeaker, onPress: () => setIsSpeaker(!isSpeaker) },
-            { icon: '🎥', label: 'Video',
-              active: false, onPress: () => router.replace({ pathname: '/videocall' as any, params: { name, avatar } }) },
-            { icon: '⌨️', label: 'Keypad', active: false, onPress: () => {} },
-          ].map((btn, i) => (
-            <TouchableOpacity
-              key={i}
-              style={[styles.controlBtn, btn.active && styles.controlBtnActive]}
-              onPress={btn.onPress}
-            >
-              <Text style={styles.controlIcon}>{btn.icon}</Text>
-              <Text style={styles.controlLabel}>{btn.label}</Text>
-            </TouchableOpacity>
-          ))}
+        {/* Mute */}
+        <View style={styles.ctrlWrap}>
+          <TouchableOpacity
+            style={[styles.ctrlBtn, muted && styles.ctrlBtnActive]}
+            onPress={toggleMute}
+          >
+            <Text style={styles.ctrlIcon}>{muted ? '🔇' : '🎤'}</Text>
+          </TouchableOpacity>
+          <Text style={styles.ctrlLabel}>{muted ? 'Unmute' : 'Mute'}</Text>
         </View>
 
-        {/* End Call */}
-        <TouchableOpacity style={styles.endCallBtn} onPress={endCall}>
-          <Text style={styles.endCallIcon}>📵</Text>
-        </TouchableOpacity>
-      </View>
+        {/* End call */}
+        <View style={styles.ctrlWrap}>
+          <TouchableOpacity style={styles.endBtn} onPress={() => endCall(true)}>
+            <Text style={styles.endBtnIcon}>📵</Text>
+          </TouchableOpacity>
+          <Text style={[styles.ctrlLabel, { color: '#FF4D6D' }]}>End</Text>
+        </View>
 
+        {/* Speaker */}
+        <View style={styles.ctrlWrap}>
+          <TouchableOpacity
+            style={[styles.ctrlBtn, speaker && styles.ctrlBtnActive]}
+            onPress={toggleSpeaker}
+          >
+            <Text style={styles.ctrlIcon}>{speaker ? '🔊' : '🔉'}</Text>
+          </TouchableOpacity>
+          <Text style={styles.ctrlLabel}>{speaker ? 'Speaker' : 'Earpiece'}</Text>
+        </View>
+      </View>
     </View>
   );
 }
@@ -139,119 +310,114 @@ export default function VoiceCallScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#050D1F',
+    backgroundColor: '#0A0E1A',
     alignItems: 'center',
-    paddingTop: 60,
-  },
-  deepfakeBanner: {
-    backgroundColor: '#052e16',
-    paddingVertical: 8,
-    paddingHorizontal: 20,
-    borderRadius: 20,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: '#166534',
-  },
-  deepfakeText: { color: '#4ade80', fontSize: 12, fontWeight: '600' },
-  encryptBadge: {
-    backgroundColor: '#0F1729',
-    paddingVertical: 6,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    marginBottom: 48,
-    borderWidth: 1,
-    borderColor: '#1E293B',
-  },
-  encryptText: { color: '#475569', fontSize: 12 },
-  avatarArea: {
-    width: 160,
-    height: 160,
     justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 24,
   },
-  pulseRing: {
+  d2deBadge: {
     position: 'absolute',
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    borderWidth: 2,
-    borderColor: '#1D4ED8',
+    top: 52,
+    backgroundColor: '#003328',
+    borderWidth: 0.5,
+    borderColor: '#00D4AA',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
   },
-  avatar: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: '#0F1729',
+  d2deText: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#00D4AA',
+  },
+  avatarCircle: {
+    width: 110,
+    height: 110,
+    borderRadius: 55,
+    backgroundColor: '#003328',
+    borderWidth: 3,
+    borderColor: '#00D4AA',
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 3,
-    borderColor: '#1D4ED8',
+    marginBottom: 20,
   },
-  avatarEmoji: { fontSize: 60 },
-  callerName: {
-    color: '#FFFFFF',
-    fontSize: 28,
+  avatarText: {
+    fontSize: 38,
     fontWeight: 'bold',
+    color: '#00D4AA',
+  },
+  callerName: {
+    fontSize: 26,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
     marginBottom: 8,
   },
   callStatus: {
-    color: '#94A3B8',
-    fontSize: 16,
-    marginBottom: 32,
+    fontSize: 15,
+    color: '#64748B',
+    marginBottom: 16,
   },
-  waveRow: {
+  callStatusActive: {
+    color: '#00D4AA',
+    fontWeight: 'bold',
+  },
+  signalRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    marginBottom: 40,
-    height: 48,
+    alignItems: 'flex-end',
+    gap: 3,
+    marginBottom: 60,
   },
-  wavebar: {
+  signalBar: {
     width: 4,
-    backgroundColor: '#1D4ED8',
+    backgroundColor: '#00D4AA',
     borderRadius: 2,
+  },
+  signalLabel: {
+    fontSize: 11,
+    color: '#00D4AA',
+    marginLeft: 6,
+    fontWeight: 'bold',
   },
   controls: {
     position: 'absolute',
-    bottom: 60,
-    width: '100%',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-  },
-  controlsRow: {
+    bottom: 48,
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    width: '100%',
-    marginBottom: 32,
-  },
-  controlBtn: {
+    gap: 36,
     alignItems: 'center',
-    backgroundColor: '#0F1729',
-    borderRadius: 16,
-    padding: 16,
-    minWidth: 72,
-    borderWidth: 1,
+  },
+  ctrlWrap: {
+    alignItems: 'center',
+    gap: 6,
+  },
+  ctrlBtn: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#1A2235',
+    borderWidth: 0.5,
     borderColor: '#1E293B',
-  },
-  controlBtnActive: {
-    backgroundColor: '#1D4ED8',
-    borderColor: '#3B82F6',
-  },
-  controlIcon: { fontSize: 28, marginBottom: 6 },
-  controlLabel: { color: '#94A3B8', fontSize: 11 },
-  endCallBtn: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: '#EF4444',
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 8,
-    shadowColor: '#EF4444',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
   },
-  endCallIcon: { fontSize: 32 },
+  ctrlBtnActive: {
+    backgroundColor: '#003328',
+    borderColor: '#00D4AA',
+  },
+  ctrlIcon: {
+    fontSize: 24,
+  },
+  ctrlLabel: {
+    fontSize: 11,
+    color: '#64748B',
+  },
+  endBtn: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: '#FF4D6D',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  endBtnIcon: {
+    fontSize: 28,
+  },
 });

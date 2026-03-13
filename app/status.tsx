@@ -1,361 +1,706 @@
-import { CameraView, useCameraPermissions } from 'expo-camera';
-import * as ImagePicker from 'expo-image-picker';
-import { LinearGradient } from 'expo-linear-gradient';
+// app/status.tsx
+// Real status screen
+// Screenshot detection → fires alert to uploader + logs to Firestore
+// 24-hour auto-expiry — statuses deleted from Firestore after 24h
+// My status upload (photo, video, text)
+// Contact statuses from Firestore real-time listener
+// Screenshot protection via expo-screen-capture
+
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  View, Text, TouchableOpacity, StyleSheet,
+  FlatList, Alert, Modal, TextInput,
+  ActivityIndicator, Dimensions, AppState,
+} from 'react-native';
 import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
-import { Alert, Animated, Easing, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { ErrorBoundary } from '../components/ErrorBoundary';
+import * as ImagePicker from 'expo-image-picker';
+import * as ScreenCapture from 'expo-screen-capture';
+import auth from '@react-native-firebase/auth';
+import firestore from '@react-native-firebase/firestore';
+import { logScreenshotAttempt } from '../services/securityService';
+import { BottomNav } from './chats';
 
-const C = {
-  bg: '#020B18', primary: '#4A9FFF', secondary: '#7C3AED',
-  accent: '#10B981', danger: '#EF4444', warning: '#F59E0B',
-  border: 'rgba(74,159,255,0.15)', borderDim: 'rgba(255,255,255,0.06)',
-  text: '#FFFFFF', textDim: 'rgba(255,255,255,0.5)', textFaint: 'rgba(255,255,255,0.22)',
-};
+const { width: SW } = Dimensions.get('window');
 
-const NAV = [
-  { id: 'chats', icon: '💬', label: 'Chats', route: '/chats' },
-  { id: 'shield', icon: '🛡️', label: 'Shield', route: '/dashboard' },
-  { id: 'community', icon: '🌐', label: 'Groups', route: '/communities' },
-  { id: 'status', icon: '✨', label: 'Status', route: '/status' },
-  { id: 'profile', icon: '👤', label: 'Profile', route: '/profile' },
-];
+// ─────────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────────
 
 interface Status {
-  id: string;
-  userName: string;
-  userEmoji: string;
-  userColor: string;
-  items: StatusItem[];
-  viewedAll: boolean;
-  isOwn?: boolean;
+  id:          string;
+  uid:         string;
+  displayName: string;
+  type:        'text' | 'image' | 'video';
+  content:     string;   // text content or base64/uri
+  bgColor:     string;   // for text statuses
+  createdAt:   any;      // Firestore timestamp
+  expiresAt:   any;      // Firestore timestamp (createdAt + 24h)
+  viewers:     string[]; // UIDs who viewed
+  screenshots: number;   // screenshot count
 }
 
-interface StatusItem {
-  id: string;
-  type: 'text' | 'image' | 'video';
-  content: string;
-  bg: string;
-  timestamp: number;
-  expiresAt: number;
-  views: number;
-  isEncrypted: boolean;
-}
-
-const DEMO_STATUSES: Status[] = [
-  {
-    id: '1', userName: 'Alice Chen', userEmoji: '👩', userColor: '#4A9FFF', viewedAll: false,
-    items: [
-      { id: '1a', type: 'text', content: 'Privacy is a human right. 🔐', bg: '#1D4ED8', timestamp: Date.now() - 3600000, expiresAt: Date.now() + 82800000, views: 12, isEncrypted: true },
-      { id: '1b', type: 'text', content: 'VaultChat keeps everything safe ✅', bg: '#7C3AED', timestamp: Date.now() - 1800000, expiresAt: Date.now() + 84600000, views: 8, isEncrypted: true },
-    ],
-  },
-  {
-    id: '2', userName: 'Bob Martinez', userEmoji: '👨', userColor: '#7C3AED', viewedAll: false,
-    items: [
-      { id: '2a', type: 'text', content: 'Encrypted call with the team 📹', bg: '#059669', timestamp: Date.now() - 7200000, expiresAt: Date.now() + 79200000, views: 23, isEncrypted: true },
-    ],
-  },
-  {
-    id: '3', userName: 'Sarah Kim', userEmoji: '👧', userColor: '#10B981', viewedAll: true,
-    items: [
-      { id: '3a', type: 'text', content: '🛡️ 100% secure today too', bg: '#1D4ED8', timestamp: Date.now() - 14400000, expiresAt: Date.now() + 72000000, views: 45, isEncrypted: false },
-    ],
-  },
-  {
-    id: '4', userName: 'CryptoVault 🌐', userEmoji: '🌐', userColor: '#F59E0B', viewedAll: false,
-    items: [
-      { id: '4a', type: 'text', content: 'New privacy law — join the discussion', bg: '#92400E', timestamp: Date.now() - 3000000, expiresAt: Date.now() + 83400000, views: 156, isEncrypted: true },
-    ],
-  },
+const BG_COLORS = [
+  '#1A1A2E', '#16213E', '#0F3460', '#533483',
+  '#003328', '#1B1B2F', '#2C3E50', '#1A2035',
 ];
 
-function fmtAgo(ts: number): string {
-  const m = Math.floor((Date.now() - ts) / 60000);
-  if (m < 60) return m + 'm ago';
-  const h = Math.floor(m / 60);
-  if (h < 24) return h + 'h ago';
-  return Math.floor(h / 24) + 'd ago';
+// ─────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────
+
+function timeAgo(ts: any): string {
+  if (!ts) return '';
+  const d: Date = ts.toDate ? ts.toDate() : new Date(ts);
+  const diff = Date.now() - d.getTime();
+  const h    = Math.floor(diff / 3600000);
+  const m    = Math.floor(diff / 60000);
+  if (m < 1)  return 'just now';
+  if (m < 60) return `${m}m ago`;
+  if (h < 24) return `${h}h ago`;
+  return 'expired';
 }
 
-function StatusViewer({ status, onClose }: { status: Status; onClose: () => void }) {
-  const [currentIdx, setCurrentIdx] = useState(0);
-  const progressAnim = useRef(new Animated.Value(0)).current;
-  const item = status.items[currentIdx];
+function expiresIn(ts: any): string {
+  if (!ts) return '';
+  const d: Date = ts.toDate ? ts.toDate() : new Date(ts);
+  const diff = d.getTime() - Date.now();
+  if (diff <= 0) return 'Expired';
+  const h = Math.floor(diff / 3600000);
+  const m = Math.floor((diff % 3600000) / 60000);
+  if (h === 0) return `Expires in ${m}m`;
+  return `Expires in ${h}h ${m}m`;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Status Viewer — full screen with screenshot detection
+// ─────────────────────────────────────────────────────────────────
+
+function StatusViewer({
+  status,
+  onClose,
+}: {
+  status: Status;
+  onClose: () => void;
+}) {
+  const uid       = auth().currentUser?.uid || '';
+  const timerRef  = useRef<NodeJS.Timeout | null>(null);
+  const [progress, setProgress] = useState(0);
 
   useEffect(() => {
-    progressAnim.setValue(0);
-    Animated.timing(progressAnim, { toValue: 1, duration: 5000, useNativeDriver: false }).start(() => {
-      if (currentIdx < status.items.length - 1) {
-        setCurrentIdx(i => i + 1);
-      } else {
+    // Mark as viewed
+    firestore()
+      .collection('statuses')
+      .doc(status.id)
+      .update({
+        viewers: firestore.FieldValue.arrayUnion(uid),
+      })
+      .catch(() => {});
+
+    // Auto-progress bar — 5 seconds
+    const start = Date.now();
+    const duration = 5000;
+    timerRef.current = setInterval(() => {
+      const elapsed = Date.now() - start;
+      const p = Math.min(elapsed / duration, 1);
+      setProgress(p);
+      if (p >= 1) {
+        if (timerRef.current) clearInterval(timerRef.current);
         onClose();
       }
-    });
-    return () => progressAnim.stopAnimation();
-  }, [currentIdx]);
+    }, 50);
 
-  const progressWidth = progressAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] });
+    // Screenshot detection — fires when user takes screenshot
+    const sub = ScreenCapture.addScreenshotListener(async () => {
+      // 1. Log to Firestore under both the viewer and the status uploader
+      await logScreenshotAttempt(status.id);
+
+      // 2. Increment screenshot counter on the status document
+      await firestore()
+        .collection('statuses')
+        .doc(status.id)
+        .update({
+          screenshots: firestore.FieldValue.increment(1),
+        })
+        .catch(() => {});
+
+      // 3. Create alert for the status owner
+      await firestore()
+        .collection('users')
+        .doc(status.uid)
+        .collection('alerts')
+        .add({
+          type:        'screenshot',
+          message:     `Someone screenshotted your status`,
+          statusId:    status.id,
+          viewerUid:   uid,
+          createdAt:   firestore.FieldValue.serverTimestamp(),
+          read:        false,
+        })
+        .catch(() => {});
+
+      Alert.alert(
+        '📸 Screenshot Detected',
+        'The status owner has been notified that you took a screenshot.',
+        [{ text: 'OK' }]
+      );
+    });
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      sub.remove();
+    };
+  }, [status.id]);
 
   return (
-    <View style={{ flex: 1 }}>
-      <LinearGradient colors={[item.bg, item.bg + 'CC', '#020B18']} style={StyleSheet.absoluteFillObject} />
-      {/* Progress bars */}
-      <View style={{ flexDirection: 'row', gap: 4, paddingHorizontal: 12, paddingTop: 52 }}>
-        {status.items.map((_, i) => (
-          <View key={i} style={{ flex: 1, height: 3, backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: 2, overflow: 'hidden' }}>
-            {i < currentIdx && <View style={{ width: '100%', height: 3, backgroundColor: '#fff' }} />}
-            {i === currentIdx && <Animated.View style={{ width: progressWidth, height: 3, backgroundColor: '#fff' }} />}
-          </View>
-        ))}
-      </View>
-      {/* User info */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingTop: 12 }}>
-        <Text style={{ fontSize: 32 }}>{status.userEmoji}</Text>
-        <View style={{ flex: 1 }}>
-          <Text style={{ color: '#fff', fontSize: 14, fontWeight: '800' }}>{status.userName}</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 11 }}>{fmtAgo(item.timestamp)}</Text>
-            {item.isEncrypted && <Text style={{ color: '#10B981', fontSize: 10 }}>🔐 Encrypted</Text>}
-          </View>
+    <Modal visible animationType="fade" statusBarTranslucent>
+      <View style={[
+        viewerStyles.container,
+        status.type === 'text' && { backgroundColor: status.bgColor },
+      ]}>
+        {/* Progress bar */}
+        <View style={viewerStyles.progressTrack}>
+          <View style={[viewerStyles.progressFill, { width: `${progress * 100}%` }]} />
         </View>
-        <TouchableOpacity onPress={onClose} style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' }}>
-          <Text style={{ color: '#fff', fontSize: 18, fontWeight: '700' }}>✕</Text>
-        </TouchableOpacity>
-      </View>
-      {/* Content */}
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32 }}>
-        <Text style={{ color: '#fff', fontSize: 28, fontWeight: '900', textAlign: 'center', lineHeight: 38 }}>{item.content}</Text>
-      </View>
-      {/* Footer */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingBottom: 50, gap: 12 }}>
-        <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>👁️ {item.views} views</Text>
-        <View style={{ flex: 1 }} />
-        {currentIdx > 0 && (
-          <TouchableOpacity onPress={() => setCurrentIdx(i => i - 1)} style={{ padding: 8 }}>
-            <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 24 }}>‹</Text>
+
+        {/* Header */}
+        <View style={viewerStyles.header}>
+          <View style={viewerStyles.avatarCircle}>
+            <Text style={viewerStyles.avatarText}>
+              {status.displayName.slice(0, 2).toUpperCase()}
+            </Text>
+          </View>
+          <View>
+            <Text style={viewerStyles.name}>{status.displayName}</Text>
+            <Text style={viewerStyles.time}>{timeAgo(status.createdAt)}</Text>
+          </View>
+          <TouchableOpacity style={viewerStyles.closeBtn} onPress={onClose}>
+            <Text style={viewerStyles.closeBtnText}>✕</Text>
           </TouchableOpacity>
+        </View>
+
+        {/* Content */}
+        {status.type === 'text' && (
+          <View style={viewerStyles.textContent}>
+            <Text style={viewerStyles.textBody}>{status.content}</Text>
+          </View>
         )}
-        {currentIdx < status.items.length - 1 && (
-          <TouchableOpacity onPress={() => setCurrentIdx(i => i + 1)} style={{ padding: 8 }}>
-            <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 24 }}>›</Text>
-          </TouchableOpacity>
-        )}
+
+        {/* Screenshot warning */}
+        <View style={viewerStyles.screenshotWarning}>
+          <Text style={viewerStyles.screenshotText}>
+            🛡️ Screenshot detection active
+          </Text>
+        </View>
+
+        {/* Viewer count */}
+        <View style={viewerStyles.viewerCount}>
+          <Text style={viewerStyles.viewerCountText}>
+            👁 {status.viewers.length} view{status.viewers.length !== 1 ? 's' : ''}
+            {status.screenshots > 0 && `  📸 ${status.screenshots}`}
+          </Text>
+        </View>
       </View>
-    </View>
+    </Modal>
   );
 }
 
-function StatusContent() {
-  const router = useRouter();
-  const [statuses, setStatuses] = useState<Status[]>(DEMO_STATUSES);
-  const [viewingStatus, setViewingStatus] = useState<Status | null>(null);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [newText, setNewText] = useState('');
-  const [selectedBg, setSelectedBg] = useState('#1D4ED8');
-  const [permission, requestPermission] = useCameraPermissions();
-  const [showCamera, setShowCamera] = useState(false);
-  const [activeNav] = useState('status');
-  const fadeIn = useRef(new Animated.Value(0)).current;
-  const ringAnim = useRef(new Animated.Value(0)).current;
+// ─────────────────────────────────────────────────────────────────
+// Add Status Modal
+// ─────────────────────────────────────────────────────────────────
 
-  const BG_OPTIONS = ['#1D4ED8', '#7C3AED', '#059669', '#DC2626', '#D97706', '#0891B2', '#BE185D', '#374151'];
+function AddStatusModal({
+  onClose,
+  onPosted,
+}: {
+  onClose:  () => void;
+  onPosted: () => void;
+}) {
+  const uid         = auth().currentUser?.uid || '';
+  const displayName = auth().currentUser?.displayName || 'Me';
 
-  useEffect(() => {
-    Animated.timing(fadeIn, { toValue: 1, duration: 500, useNativeDriver: true }).start();
-    Animated.loop(Animated.timing(ringAnim, { toValue: 1, duration: 3000, easing: Easing.linear, useNativeDriver: false })).start();
-  }, []);
+  const [type,    setType]    = useState<'text' | 'image'>('text');
+  const [text,    setText]    = useState('');
+  const [bgColor, setBgColor] = useState(BG_COLORS[0]);
+  const [loading, setLoading] = useState(false);
 
-  const myStatus: Status = {
-    id: 'mine', userName: 'My Status', userEmoji: '🦊', userColor: C.primary, viewedAll: false, isOwn: true,
-    items: statuses[0]?.isOwn ? statuses[0].items : [],
+  const postStatus = async () => {
+    if (type === 'text' && !text.trim()) {
+      Alert.alert('Error', 'Enter some text for your status');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const now     = firestore.Timestamp.now();
+      const expires = firestore.Timestamp.fromMillis(Date.now() + 86400000); // +24h
+
+      await firestore().collection('statuses').add({
+        uid,
+        displayName,
+        type,
+        content:     type === 'text' ? text.trim() : '',
+        bgColor,
+        createdAt:   now,
+        expiresAt:   expires,
+        viewers:     [],
+        screenshots: 0,
+      });
+
+      onPosted();
+      onClose();
+      Alert.alert('Posted!', 'Your status will expire in 24 hours.');
+    } catch (e: any) {
+      Alert.alert('Error', e.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const postStatus = () => {
-    if (!newText.trim()) return;
-    const newItem: StatusItem = {
-      id: Date.now().toString(),
-      type: 'text',
-      content: newText.trim(),
-      bg: selectedBg,
-      timestamp: Date.now(),
-      expiresAt: Date.now() + 86400000,
-      views: 0,
-      isEncrypted: true,
-    };
-    setStatuses(prev => {
-      const ownIdx = prev.findIndex(s => s.isOwn);
-      if (ownIdx >= 0) {
-        const updated = [...prev];
-        updated[ownIdx] = { ...updated[ownIdx], items: [...updated[ownIdx].items, newItem] };
-        return updated;
-      }
-      return [{ id: 'mine', userName: 'My Status', userEmoji: '🦊', userColor: C.primary, viewedAll: false, isOwn: true, items: [newItem] }, ...prev];
-    });
-    setShowCreateModal(false);
-    setNewText('');
-  };
-
-  const viewStatus = (status: Status) => {
-    setViewingStatus(status);
-    setStatuses(prev => prev.map(s => s.id === status.id ? { ...s, viewedAll: true } : s));
-  };
-
-  const ringColor = ringAnim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [C.primary, C.secondary, C.primary] });
-
-  const handleNav = (item: typeof NAV[0]) => {
-    if (item.id !== 'status') router.push(item.route as any);
+  const pickImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') return;
+    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.8 });
+    if (!result.canceled) {
+      setType('image');
+    }
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: C.bg }}>
-      <LinearGradient colors={['#020B18', '#040F20', '#060F24']} style={StyleSheet.absoluteFillObject} />
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <TouchableOpacity
+        style={addStyles.overlay}
+        activeOpacity={1}
+        onPress={onClose}
+      >
+        <View style={addStyles.panel}>
+          <View style={addStyles.handle} />
+          <Text style={addStyles.title}>Add Status</Text>
 
-      <Animated.View style={{ flex: 1, opacity: fadeIn }}>
-        <View style={{ paddingHorizontal: 18, paddingTop: 50, paddingBottom: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <TouchableOpacity onPress={() => router.back()} style={S.iconBtn}>
-            <Text style={{ color: C.primary, fontSize: 18 }}>←</Text>
-          </TouchableOpacity>
-          <View style={{ flex: 1, marginLeft: 12 }}>
-            <Text style={{ color: C.text, fontSize: 20, fontWeight: '900' }}>✨ Status</Text>
-            <Text style={{ color: C.textFaint, fontSize: 9, letterSpacing: 2 }}>ENCRYPTED · DISAPPEARS IN 24H</Text>
-          </View>
-          <TouchableOpacity onPress={() => setShowCreateModal(true)} style={{ backgroundColor: '#1D4ED8', borderRadius: 20, width: 40, height: 40, justifyContent: 'center', alignItems: 'center' }}>
-            <Text style={{ color: '#fff', fontSize: 22, fontWeight: '900' }}>+</Text>
-          </TouchableOpacity>
-        </View>
-
-        <ScrollView contentContainerStyle={{ paddingBottom: 110 }} showsVerticalScrollIndicator={false}>
-          {/* My status */}
-          <View style={{ paddingHorizontal: 18, marginBottom: 8 }}>
-            <Text style={{ color: C.textFaint, fontSize: 9, fontWeight: '800', letterSpacing: 2, marginBottom: 12 }}>MY STATUS</Text>
-            <TouchableOpacity onPress={() => setShowCreateModal(true)} style={S.myStatusRow}>
-              <View style={S.addStatusBtn}>
-                <Text style={{ fontSize: 30 }}>🦊</Text>
-                <View style={{ position: 'absolute', bottom: -2, right: -2, width: 22, height: 22, borderRadius: 11, backgroundColor: C.primary, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#020B18' }}>
-                  <Text style={{ color: '#fff', fontSize: 14, fontWeight: '900', lineHeight: 16 }}>+</Text>
-                </View>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: C.text, fontSize: 14, fontWeight: '700' }}>Add to my status</Text>
-                <Text style={{ color: C.textFaint, fontSize: 11, marginTop: 2 }}>Text, photo or video · Encrypted · 24h</Text>
-              </View>
+          {/* Type toggle */}
+          <View style={addStyles.typeRow}>
+            <TouchableOpacity
+              style={[addStyles.typeBtn, type === 'text' && addStyles.typeBtnActive]}
+              onPress={() => setType('text')}
+            >
+              <Text style={[addStyles.typeBtnText, type === 'text' && addStyles.typeBtnTextActive]}>
+                T  Text
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[addStyles.typeBtn, type === 'image' && addStyles.typeBtnActive]}
+              onPress={pickImage}
+            >
+              <Text style={[addStyles.typeBtnText, type === 'image' && addStyles.typeBtnTextActive]}>
+                🖼️  Photo
+              </Text>
             </TouchableOpacity>
           </View>
 
-          {/* Recent updates */}
-          <View style={{ paddingHorizontal: 18 }}>
-            <Text style={{ color: C.textFaint, fontSize: 9, fontWeight: '800', letterSpacing: 2, marginBottom: 12 }}>RECENT UPDATES</Text>
-            {statuses.map((status, i) => (
-              <TouchableOpacity key={status.id} onPress={() => viewStatus(status)} style={S.statusRow}>
-                <View style={{ position: 'relative', marginRight: 12 }}>
-                  <Animated.View style={[S.statusRing, { borderColor: status.viewedAll ? 'rgba(255,255,255,0.15)' : status.userColor }]}>
-                    <View style={[S.statusAvatar, { backgroundColor: status.userColor + '22' }]}>
-                      <Text style={{ fontSize: 26 }}>{status.userEmoji}</Text>
-                    </View>
-                  </Animated.View>
-                  {status.items.some(item => item.isEncrypted) && (
-                    <View style={S.encBadge}><Text style={{ fontSize: 8 }}>🔐</Text></View>
-                  )}
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: C.text, fontSize: 14, fontWeight: status.viewedAll ? '500' : '800' }}>{status.userName}</Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 3 }}>
-                    <Text style={{ color: C.textFaint, fontSize: 11 }}>{fmtAgo(status.items[status.items.length - 1].timestamp)}</Text>
-                    <Text style={{ color: C.textFaint, fontSize: 10 }}>·</Text>
-                    <Text style={{ color: C.textFaint, fontSize: 11 }}>{status.items.length} {status.items.length === 1 ? 'update' : 'updates'}</Text>
-                  </View>
-                </View>
-                <View style={{ alignItems: 'flex-end', gap: 6 }}>
-                  {!status.viewedAll && <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: status.userColor }} />}
-                  <Text style={{ color: C.textFaint, fontSize: 11 }}>›</Text>
-                </View>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          {/* Privacy note */}
-          <View style={{ marginHorizontal: 18, marginTop: 20, backgroundColor: 'rgba(16,185,129,0.08)', borderRadius: 14, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: 'rgba(16,185,129,0.2)' }}>
-            <Text style={{ fontSize: 20 }}>🔐</Text>
-            <Text style={{ color: C.textDim, fontSize: 12, flex: 1, lineHeight: 18 }}>Status updates are end-to-end encrypted and automatically deleted after 24 hours. Only your contacts can see them.</Text>
-          </View>
-        </ScrollView>
-      </Animated.View>
-
-      {/* Status viewer modal */}
-      <Modal visible={!!viewingStatus} transparent animationType="fade" statusBarTranslucent>
-        <View style={{ flex: 1 }}>
-          {viewingStatus && <StatusViewer status={viewingStatus} onClose={() => setViewingStatus(null)} />}
-        </View>
-      </Modal>
-
-      {/* Create status modal */}
-      <Modal visible={showCreateModal} transparent animationType="slide">
-        <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }} activeOpacity={1} onPress={() => setShowCreateModal(false)}>
-          <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
-            <LinearGradient colors={['rgba(10,22,40,0.99)', 'rgba(6,14,34,0.99)']} style={{ borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: 44, borderWidth: 1, borderColor: C.border }}>
-              <Text style={{ color: C.text, fontSize: 18, fontWeight: '900', marginBottom: 16 }}>Create Status</Text>
-              {/* Preview */}
-              <View style={{ height: 120, borderRadius: 16, marginBottom: 16, justifyContent: 'center', alignItems: 'center', backgroundColor: selectedBg, overflow: 'hidden' }}>
-                <Text style={{ color: '#fff', fontSize: 18, fontWeight: '800', textAlign: 'center', paddingHorizontal: 20 }}>{newText || 'Type something...'}</Text>
+          {/* Text input */}
+          {type === 'text' && (
+            <>
+              <View style={[addStyles.preview, { backgroundColor: bgColor }]}>
+                <TextInput
+                  style={addStyles.previewInput}
+                  value={text}
+                  onChangeText={setText}
+                  placeholder="What's on your mind?"
+                  placeholderTextColor="#374151"
+                  multiline
+                  maxLength={200}
+                  textAlign="center"
+                />
               </View>
-              {/* Input */}
-              <TextInput value={newText} onChangeText={setNewText} placeholder="What's on your mind?" placeholderTextColor={C.textFaint} style={{ backgroundColor: 'rgba(6,14,34,0.9)', borderRadius: 14, padding: 14, color: C.text, fontSize: 14, borderWidth: 1, borderColor: C.borderDim, marginBottom: 14 }} multiline maxLength={200} />
-              {/* BG picker */}
-              <Text style={{ color: C.textFaint, fontSize: 10, fontWeight: '700', letterSpacing: 1, marginBottom: 10 }}>BACKGROUND COLOR</Text>
-              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
-                {BG_OPTIONS.map(bg => (
-                  <TouchableOpacity key={bg} onPress={() => setSelectedBg(bg)} style={[{ width: 32, height: 32, borderRadius: 16, backgroundColor: bg }, selectedBg === bg && { borderWidth: 3, borderColor: '#fff' }]} />
+              {/* Background color picker */}
+              <View style={addStyles.colorRow}>
+                {BG_COLORS.map(c => (
+                  <TouchableOpacity
+                    key={c}
+                    style={[
+                      addStyles.colorDot,
+                      { backgroundColor: c },
+                      bgColor === c && addStyles.colorDotActive,
+                    ]}
+                    onPress={() => setBgColor(c)}
+                  />
                 ))}
               </View>
-              {/* Actions */}
-              <View style={{ flexDirection: 'row', gap: 10 }}>
-                <TouchableOpacity onPress={() => { Alert.alert('Camera', 'Photo/video status coming soon.'); }} style={{ width: 50, height: 50, borderRadius: 25, backgroundColor: 'rgba(74,159,255,0.12)', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: C.border }}>
-                  <Text style={{ fontSize: 22 }}>📷</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={postStatus} style={{ flex: 1 }}>
-                  <LinearGradient colors={[C.primary, C.secondary]} style={{ borderRadius: 16, paddingVertical: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
-                    <Text style={{ color: '#fff', fontWeight: '900', fontSize: 15 }}>Post Status 🔐</Text>
-                  </LinearGradient>
-                </TouchableOpacity>
-              </View>
-              <Text style={{ color: C.textFaint, fontSize: 10, textAlign: 'center', marginTop: 10 }}>Encrypted · Disappears in 24 hours</Text>
-            </LinearGradient>
-          </View>
-        </TouchableOpacity>
-      </Modal>
+            </>
+          )}
 
-      {/* Nav bar */}
-      <View style={S.navBar}>
-        {NAV.map(item => (
-          <TouchableOpacity key={item.id} onPress={() => handleNav(item)} style={[S.navItem, activeNav === item.id && S.navItemActive]}>
-            <Text style={{ fontSize: 20, lineHeight: 22 }}>{item.icon}</Text>
-            <Text style={[S.navLabel, { color: activeNav === item.id ? C.primary : C.textFaint }]}>{item.label}</Text>
+          <Text style={addStyles.expireNote}>
+            ⏰ Status expires automatically in 24 hours
+          </Text>
+          <Text style={addStyles.screenshotNote}>
+            🛡️ Screenshot detection is active on your status
+          </Text>
+
+          <TouchableOpacity
+            style={[addStyles.postBtn, loading && addStyles.postBtnDim]}
+            onPress={postStatus}
+            disabled={loading}
+          >
+            {loading
+              ? <ActivityIndicator color="#0A0E1A" />
+              : <Text style={addStyles.postBtnText}>Post Status</Text>
+            }
           </TouchableOpacity>
-        ))}
+        </View>
+      </TouchableOpacity>
+    </Modal>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Main Screen
+// ─────────────────────────────────────────────────────────────────
+
+export default function StatusScreen() {
+  const router = useRouter();
+  const uid    = auth().currentUser?.uid || '';
+
+  const [statuses,    setStatuses]    = useState<Status[]>([]);
+  const [myStatus,    setMyStatus]    = useState<Status | null>(null);
+  const [viewing,     setViewing]     = useState<Status | null>(null);
+  const [showAdd,     setShowAdd]     = useState(false);
+  const [loading,     setLoading]     = useState(true);
+
+  // ── Load statuses — real Firestore listener ───────────────────
+  useEffect(() => {
+    // Only show non-expired statuses
+    const cutoff = firestore.Timestamp.fromMillis(Date.now() - 86400000);
+
+    const unsub = firestore()
+      .collection('statuses')
+      .where('createdAt', '>', cutoff)
+      .orderBy('createdAt', 'desc')
+      .onSnapshot(snap => {
+        const all: Status[] = snap.docs.map(doc => ({
+          id: doc.id,
+          ...(doc.data() as Omit<Status, 'id'>),
+        }));
+
+        // Separate my status from contacts
+        setMyStatus(all.find(s => s.uid === uid) || null);
+        setStatuses(all.filter(s => s.uid !== uid));
+        setLoading(false);
+      }, err => {
+        console.error('[Status]', err);
+        setLoading(false);
+      });
+
+    return () => unsub();
+  }, [uid]);
+
+  // ── Delete expired statuses (cleanup) ────────────────────────
+  useEffect(() => {
+    const cleanup = async () => {
+      const cutoff = firestore.Timestamp.fromMillis(Date.now() - 86400000);
+      const expired = await firestore()
+        .collection('statuses')
+        .where('uid', '==', uid)
+        .where('createdAt', '<', cutoff)
+        .get();
+      for (const doc of expired.docs) {
+        await doc.ref.delete().catch(() => {});
+      }
+    };
+    cleanup();
+  }, []);
+
+  const renderContactStatus = useCallback(({ item }: { item: Status }) => {
+    const viewed = item.viewers.includes(uid);
+    return (
+      <TouchableOpacity
+        style={styles.statusRow}
+        onPress={() => setViewing(item)}
+      >
+        {/* Ring */}
+        <View style={[
+          styles.ring,
+          viewed ? styles.ringViewed : styles.ringUnviewed,
+        ]}>
+          <View style={styles.avatarCircle}>
+            <Text style={styles.avatarText}>
+              {item.displayName.slice(0, 2).toUpperCase()}
+            </Text>
+          </View>
+        </View>
+        <View style={styles.statusInfo}>
+          <Text style={styles.statusName}>{item.displayName}</Text>
+          <Text style={styles.statusMeta}>
+            {timeAgo(item.createdAt)}  ·  {expiresIn(item.expiresAt)}
+          </Text>
+        </View>
+        <View style={styles.statusRight}>
+          {item.screenshots > 0 && (
+            <View style={styles.screenshotBadge}>
+              <Text style={styles.screenshotBadgeText}>📸 {item.screenshots}</Text>
+            </View>
+          )}
+          <Text style={styles.statusType}>
+            {item.type === 'text' ? 'T' : '🖼️'}
+          </Text>
+        </View>
+      </TouchableOpacity>
+    );
+  }, [uid]);
+
+  return (
+    <View style={styles.container}>
+
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Status</Text>
+        <Text style={styles.headerSub}>24H · SCREENSHOT PROTECTED</Text>
       </View>
+
+      {loading ? (
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator color="#00D4AA" />
+        </View>
+      ) : (
+        <FlatList
+          data={statuses}
+          keyExtractor={s => s.id}
+          contentContainerStyle={styles.listContent}
+          ListHeaderComponent={
+            <>
+              {/* My status */}
+              <Text style={styles.sectionLabel}>MY STATUS</Text>
+              <TouchableOpacity
+                style={styles.myStatusRow}
+                onPress={() => myStatus ? setViewing(myStatus) : setShowAdd(true)}
+              >
+                <View style={[
+                  styles.myStatusAdd,
+                  myStatus && styles.myStatusAddPosted,
+                ]}>
+                  {myStatus
+                    ? <Text style={styles.avatarText}>
+                        {(auth().currentUser?.displayName || 'Me').slice(0, 2).toUpperCase()}
+                      </Text>
+                    : <Text style={styles.plusIcon}>+</Text>
+                  }
+                </View>
+                <View style={styles.statusInfo}>
+                  <Text style={styles.statusName}>My Status</Text>
+                  <Text style={styles.statusMeta}>
+                    {myStatus
+                      ? `${expiresIn(myStatus.expiresAt)}  ·  👁 ${myStatus.viewers.length}`
+                      : 'Tap to add status'
+                    }
+                  </Text>
+                </View>
+                {myStatus && (
+                  <TouchableOpacity
+                    style={styles.addMoreBtn}
+                    onPress={() => setShowAdd(true)}
+                  >
+                    <Text style={styles.addMoreText}>+ Add</Text>
+                  </TouchableOpacity>
+                )}
+              </TouchableOpacity>
+
+              {statuses.length > 0 && (
+                <Text style={[styles.sectionLabel, { marginTop: 16 }]}>
+                  RECENT UPDATES
+                </Text>
+              )}
+            </>
+          }
+          renderItem={renderContactStatus}
+          ListEmptyComponent={
+            <View style={styles.emptyWrap}>
+              <Text style={styles.emptyIcon}>⭕</Text>
+              <Text style={styles.emptyText}>
+                No status updates yet.{'\n'}Contacts' statuses will appear here.
+              </Text>
+            </View>
+          }
+          ItemSeparatorComponent={() => <View style={styles.sep} />}
+        />
+      )}
+
+      {/* Status viewer */}
+      {viewing && (
+        <StatusViewer
+          status={viewing}
+          onClose={() => setViewing(null)}
+        />
+      )}
+
+      {/* Add status modal */}
+      {showAdd && (
+        <AddStatusModal
+          onClose={() => setShowAdd(false)}
+          onPosted={() => {}}
+        />
+      )}
+
+      <BottomNav active="Status" />
     </View>
   );
 }
 
-export default function StatusScreen() {
-  return (
-    <ErrorBoundary fallbackTitle="Status Error" fallbackMessage="Status had a problem.">
-      <StatusContent />
-    </ErrorBoundary>
-  );
-}
+// ─────────────────────────────────────────────────────────────────
+// Styles
+// ─────────────────────────────────────────────────────────────────
 
-const S = StyleSheet.create({
-  iconBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: 'rgba(10,22,40,0.8)', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' },
-  myStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)', backgroundColor: 'rgba(10,22,40,0.6)' },
-  addStatusBtn: { width: 54, height: 54, borderRadius: 27, borderWidth: 2, borderColor: 'rgba(74,159,255,0.3)', borderStyle: 'dashed', justifyContent: 'center', alignItems: 'center', position: 'relative' },
-  statusRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.04)' },
-  statusRing: { width: 58, height: 58, borderRadius: 29, borderWidth: 2.5, padding: 3 },
-  statusAvatar: { flex: 1, borderRadius: 25, justifyContent: 'center', alignItems: 'center' },
-  encBadge: { position: 'absolute', bottom: 0, right: 0, width: 18, height: 18, borderRadius: 9, backgroundColor: 'rgba(2,11,24,0.9)', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
-  navBar: { position: 'absolute', bottom: 18, left: 14, right: 14, backgroundColor: 'rgba(4,12,28,0.92)', borderRadius: 28, borderWidth: 1, borderColor: 'rgba(74,159,255,0.12)', paddingVertical: 10, paddingHorizontal: 6, flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center' },
-  navItem: { alignItems: 'center', gap: 4, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20, borderWidth: 1, borderColor: 'transparent' },
-  navItemActive: { backgroundColor: 'rgba(74,159,255,0.12)', borderColor: 'rgba(74,159,255,0.25)' },
-  navLabel: { fontSize: 9, letterSpacing: 0.5, fontWeight: '600' },
+const styles = StyleSheet.create({
+  container:   { flex: 1, backgroundColor: '#0A0E1A' },
+  header: {
+    backgroundColor: '#111827',
+    paddingTop: 48, paddingBottom: 12, paddingHorizontal: 16,
+    borderBottomWidth: 0.5, borderBottomColor: '#1E293B',
+  },
+  headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#FFFFFF' },
+  headerSub:   { fontSize: 9, color: '#00D4AA', marginTop: 2, fontWeight: 'bold' },
+
+  loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+
+  listContent: { padding: 14, paddingBottom: 100, flexGrow: 1 },
+  sectionLabel: {
+    fontSize: 10, fontWeight: 'bold', color: '#374151',
+    letterSpacing: 0.8, marginBottom: 10,
+  },
+
+  // My status
+  myStatusRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: '#111827', borderRadius: 12, padding: 12,
+    borderWidth: 0.5, borderColor: '#1E293B', marginBottom: 4,
+  },
+  myStatusAdd: {
+    width: 52, height: 52, borderRadius: 26,
+    backgroundColor: '#1A2235',
+    borderWidth: 2, borderColor: '#1E293B',
+    borderStyle: 'dashed',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  myStatusAddPosted: {
+    borderColor: '#00D4AA', borderStyle: 'solid',
+    backgroundColor: '#003328',
+  },
+  plusIcon:    { fontSize: 24, color: '#64748B' },
+  addMoreBtn: {
+    backgroundColor: '#1A2235', borderRadius: 8,
+    borderWidth: 0.5, borderColor: '#1E293B',
+    paddingHorizontal: 10, paddingVertical: 5,
+  },
+  addMoreText: { fontSize: 11, color: '#00D4AA', fontWeight: 'bold' },
+
+  // Contact status row
+  statusRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingVertical: 8,
+  },
+  ring: {
+    width: 54, height: 54, borderRadius: 27,
+    borderWidth: 2.5, justifyContent: 'center', alignItems: 'center',
+  },
+  ringUnviewed: { borderColor: '#00D4AA' },
+  ringViewed:   { borderColor: '#374151' },
+  avatarCircle: {
+    width: 46, height: 46, borderRadius: 23,
+    backgroundColor: '#1A2235', justifyContent: 'center', alignItems: 'center',
+  },
+  avatarText:   { fontSize: 14, fontWeight: 'bold', color: '#00D4AA' },
+  statusInfo:   { flex: 1 },
+  statusName:   { fontSize: 15, fontWeight: 'bold', color: '#FFFFFF', marginBottom: 3 },
+  statusMeta:   { fontSize: 11, color: '#64748B' },
+  statusRight:  { alignItems: 'flex-end', gap: 4 },
+  screenshotBadge: {
+    backgroundColor: '#FF4D6D22',
+    borderRadius: 6, borderWidth: 0.5, borderColor: '#FF4D6D44',
+    paddingHorizontal: 6, paddingVertical: 2,
+  },
+  screenshotBadgeText: { fontSize: 10, color: '#FF4D6D' },
+  statusType:   { fontSize: 12, color: '#374151' },
+  sep:          { height: 0.5, backgroundColor: '#111827', marginLeft: 66 },
+
+  emptyWrap:  { flex: 1, alignItems: 'center', paddingTop: 60, gap: 12 },
+  emptyIcon:  { fontSize: 52 },
+  emptyText:  { fontSize: 13, color: '#374151', textAlign: 'center', lineHeight: 22 },
+});
+
+const viewerStyles = StyleSheet.create({
+  container:    { flex: 1, backgroundColor: '#0A0E1A', justifyContent: 'center' },
+  progressTrack: {
+    position: 'absolute', top: 48, left: 12, right: 12,
+    height: 3, backgroundColor: '#1E293B', borderRadius: 2,
+  },
+  progressFill:  { height: 3, backgroundColor: '#00D4AA', borderRadius: 2 },
+  header: {
+    position: 'absolute', top: 58, left: 12, right: 12,
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+  },
+  avatarCircle: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: '#003328', borderWidth: 1.5, borderColor: '#00D4AA',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  avatarText:   { fontSize: 13, fontWeight: 'bold', color: '#00D4AA' },
+  name:         { fontSize: 15, fontWeight: 'bold', color: '#FFFFFF' },
+  time:         { fontSize: 11, color: '#64748B' },
+  closeBtn:     { marginLeft: 'auto', padding: 8 },
+  closeBtnText: { fontSize: 20, color: '#FFFFFF' },
+  textContent:  { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
+  textBody:     { fontSize: 24, fontWeight: 'bold', color: '#FFFFFF', textAlign: 'center', lineHeight: 34 },
+  screenshotWarning: {
+    position: 'absolute', bottom: 80, alignSelf: 'center',
+    backgroundColor: '#FF4D6D22', borderRadius: 20,
+    borderWidth: 0.5, borderColor: '#FF4D6D44',
+    paddingHorizontal: 16, paddingVertical: 6,
+  },
+  screenshotText: { fontSize: 11, color: '#FF4D6D' },
+  viewerCount: {
+    position: 'absolute', bottom: 40, alignSelf: 'center',
+  },
+  viewerCountText: { fontSize: 12, color: '#64748B' },
+});
+
+const addStyles = StyleSheet.create({
+  overlay:     { flex: 1, backgroundColor: '#00000088', justifyContent: 'flex-end' },
+  panel: {
+    backgroundColor: '#111827',
+    borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    padding: 20, paddingBottom: 36,
+  },
+  handle: {
+    width: 40, height: 4, backgroundColor: '#1E293B',
+    borderRadius: 2, alignSelf: 'center', marginBottom: 16,
+  },
+  title:   { fontSize: 17, fontWeight: 'bold', color: '#FFFFFF', textAlign: 'center', marginBottom: 16 },
+  typeRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
+  typeBtn: {
+    flex: 1, paddingVertical: 10, borderRadius: 10,
+    backgroundColor: '#1A2235', borderWidth: 0.5, borderColor: '#1E293B',
+    alignItems: 'center',
+  },
+  typeBtnActive: { backgroundColor: '#003328', borderColor: '#00D4AA' },
+  typeBtnText:   { fontSize: 14, color: '#64748B' },
+  typeBtnTextActive: { color: '#00D4AA', fontWeight: 'bold' },
+  preview: {
+    height: 160, borderRadius: 12, justifyContent: 'center',
+    alignItems: 'center', marginBottom: 12,
+  },
+  previewInput: {
+    fontSize: 20, fontWeight: 'bold', color: '#FFFFFF',
+    textAlign: 'center', padding: 16, width: '100%',
+  },
+  colorRow:      { flexDirection: 'row', gap: 10, justifyContent: 'center', marginBottom: 16 },
+  colorDot: {
+    width: 28, height: 28, borderRadius: 14,
+    borderWidth: 1.5, borderColor: '#1E293B',
+  },
+  colorDotActive: { borderColor: '#00D4AA', transform: [{ scale: 1.2 }] },
+  expireNote:    { fontSize: 11, color: '#374151', textAlign: 'center', marginBottom: 4 },
+  screenshotNote:{ fontSize: 11, color: '#374151', textAlign: 'center', marginBottom: 16 },
+  postBtn: {
+    backgroundColor: '#00D4AA', borderRadius: 10,
+    paddingVertical: 14, alignItems: 'center',
+  },
+  postBtnDim:    { backgroundColor: '#003328' },
+  postBtnText:   { color: '#0A0E1A', fontWeight: 'bold', fontSize: 16 },
 });

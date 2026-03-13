@@ -70,7 +70,13 @@
           "organization": "corefinite-tech-solutions-llp"
         }
       ],
-      "react-native-vision-camera"
+      [
+        "react-native-vision-camera",
+        {
+          "cameraPermissionText": "VaultChat needs camera for Face ID",
+          "enableMicrophonePermission": false
+        }
+      ]
     ],
     "extra": {
       "router": {},

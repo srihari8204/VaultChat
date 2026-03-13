@@ -1,269 +1,718 @@
-﻿import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+// app/videocall.tsx
+// Real WebRTC video call
+// TURN server: openrelay.metered.ca (credentials hardcoded below)
+// Signaling: Socket.io → vaultchat.onrender.com
+// Beauty filters: UI toggle (Soft / Smooth / Glow)
+// Speaker toggle, camera flip, screen share, mute
+// D2DE session badge
+
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  Alert, Animated, Modal, StyleSheet, Text,
-  TouchableOpacity, TouchableWithoutFeedback, View,
+  View, Text, TouchableOpacity, StyleSheet,
+  Alert, Platform, StatusBar,
 } from 'react-native';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import {
+  RTCPeerConnection,
+  RTCIceCandidate,
+  RTCSessionDescription,
+  mediaDevices,
+  RTCView,
+  MediaStream,
+} from 'react-native-webrtc';
+import { io, Socket } from 'socket.io-client';
+import auth from '@react-native-firebase/auth';
+import firestore from '@react-native-firebase/firestore';
+import { Audio } from 'expo-av';
 
-const EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '👏'];
+// ─────────────────────────────────────────────────────────────────
+// TURN / ICE Server Configuration
+// Credentials from metered.ca — active
+// ─────────────────────────────────────────────────────────────────
 
-interface FloatingEmoji {
-  id: number;
-  emoji: string;
-  x: Animated.Value;
-  y: Animated.Value;
-  opacity: Animated.Value;
-}
+const ICE_SERVERS = [
+  // Google STUN — works on WiFi / same network
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  // Metered TURN — works on 4G/5G/different networks
+  {
+    urls:       'turn:openrelay.metered.ca:80',
+    username:   '597bc91ac20a6dbd23f2ceba',
+    credential: '6PIgpt3wvCkVMngH',
+  },
+  {
+    urls:       'turn:openrelay.metered.ca:80?transport=tcp',
+    username:   '597bc91ac20a6dbd23f2ceba',
+    credential: '6PIgpt3wvCkVMngH',
+  },
+  {
+    urls:       'turns:openrelay.metered.ca:443',
+    username:   '597bc91ac20a6dbd23f2ceba',
+    credential: '6PIgpt3wvCkVMngH',
+  },
+  {
+    urls:       'turns:openrelay.metered.ca:443?transport=tcp',
+    username:   '597bc91ac20a6dbd23f2ceba',
+    credential: '6PIgpt3wvCkVMngH',
+  },
+];
+
+const BACKEND_URL = 'https://vaultchat.onrender.com';
+
+type Beauty = 'Off' | 'Soft' | 'Smooth' | 'Glow';
+type CallState = 'connecting' | 'ringing' | 'connected' | 'ended';
+
+// ─────────────────────────────────────────────────────────────────
+// Component
+// ─────────────────────────────────────────────────────────────────
 
 export default function VideoCallScreen() {
-  const router = useRouter();
-  const [muted, setMuted] = useState(false);
-  const [cameraOff, setCameraOff] = useState(false);
+  const router  = useRouter();
+  const { chatId, name, isIncoming, remoteSocketId } =
+    useLocalSearchParams<{
+      chatId: string;
+      name: string;
+      isIncoming?: string;
+      remoteSocketId?: string;
+    }>();
+
+  const uid = auth().currentUser?.uid || '';
+
+  // ── State ──────────────────────────────────────────────────────
+  const [callState,   setCallState]   = useState<CallState>('connecting');
+  const [muted,       setMuted]       = useState(false);
+  const [cameraOff,   setCameraOff]   = useState(false);
+  const [speaker,     setSpeaker]     = useState(true);
   const [frontCamera, setFrontCamera] = useState(true);
-  const [speaker, setSpeaker] = useState(true);
-  const [controlsVisible, setControlsVisible] = useState(true);
-  const [showMoreMenu, setShowMoreMenu] = useState(false);
-  const [showEmojiTray, setShowEmojiTray] = useState(false);
-  const [seconds, setSeconds] = useState(0);
-  const [floatingEmojis, setFloatingEmojis] = useState<FloatingEmoji[]>([]);
-  const emojiIdRef = useRef(0);
-  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const controlsOpacity = useRef(new Animated.Value(1)).current;
+  const [beauty,      setBeauty]      = useState<Beauty>('Soft');
+  const [seconds,     setSeconds]     = useState(0);
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [remoteStream,setRemoteStream]= useState<MediaStream | null>(null);
 
+  // ── Refs ───────────────────────────────────────────────────────
+  const pcRef         = useRef<RTCPeerConnection | null>(null);
+  const socketRef     = useRef<Socket | null>(null);
+  const timerRef      = useRef<NodeJS.Timeout | null>(null);
+  const remoteIdRef   = useRef<string>(remoteSocketId || '');
+
+  // ─────────────────────────────────────────────────────────────
+  // Setup — camera, socket, peer connection
+  // ─────────────────────────────────────────────────────────────
   useEffect(() => {
-    const interval = setInterval(() => setSeconds(s => s + 1), 1000);
-    return () => clearInterval(interval);
+    let mounted = true;
+
+    const setup = async () => {
+      try {
+        // 1. Set audio mode — speaker by default for video calls
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS:       true,
+          playsInSilentModeIOS:     true,
+          playThroughEarpieceAndroid: false, // speaker = true
+        });
+
+        // 2. Get local camera + mic stream
+        const stream = await mediaDevices.getUserMedia({
+          audio: true,
+          video: {
+            facingMode:  frontCamera ? 'user' : 'environment',
+            width:       { ideal: 1280 },
+            height:      { ideal: 720 },
+            frameRate:   { ideal: 30 },
+          },
+        });
+
+        if (!mounted) return;
+        setLocalStream(stream);
+
+        // 3. Create RTCPeerConnection
+        const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+        pcRef.current = pc;
+
+        // Add local tracks to connection
+        stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+        // Handle remote stream
+        pc.ontrack = (event: any) => {
+          if (event.streams && event.streams[0]) {
+            setRemoteStream(event.streams[0]);
+            setCallState('connected');
+            startTimer();
+          }
+        };
+
+        // 4. Connect to signaling server
+        const socket = io(BACKEND_URL, {
+          transports: ['websocket'],
+          reconnection: true,
+        });
+        socketRef.current = socket;
+
+        socket.on('connect', async () => {
+          console.log('[Call] Socket connected:', socket.id);
+
+          // Register with our UID
+          socket.emit('register', uid);
+
+          if (isIncoming === 'true') {
+            // ── Incoming call — we are the callee ─────────────
+            setCallState('ringing');
+            // Answer is triggered by user tapping Accept
+            // (in this flow we auto-answer — add answer UI if needed)
+            await answerCall(pc, socket);
+          } else {
+            // ── Outgoing call — we are the caller ─────────────
+            setCallState('ringing');
+            await initiateCall(pc, socket);
+          }
+        });
+
+        // ICE candidate from remote peer
+        socket.on('ice_candidate', async ({ candidate }: any) => {
+          try {
+            if (candidate && pcRef.current) {
+              await pcRef.current.addIceCandidate(
+                new RTCIceCandidate(candidate)
+              );
+            }
+          } catch (e) {
+            console.warn('[Call] addIceCandidate error:', e);
+          }
+        });
+
+        // Call answered (outgoing)
+        socket.on('call_answered', async ({ answer }: any) => {
+          try {
+            if (pcRef.current) {
+              await pcRef.current.setRemoteDescription(
+                new RTCSessionDescription(answer)
+              );
+              setCallState('connected');
+              startTimer();
+            }
+          } catch (e) {
+            console.warn('[Call] setRemoteDescription error:', e);
+          }
+        });
+
+        // Remote peer ended the call
+        socket.on('call_ended', () => {
+          endCall(false);
+        });
+
+        // Send ICE candidates to remote peer as they are discovered
+        pc.onicecandidate = (event: any) => {
+          if (event.candidate && remoteIdRef.current) {
+            socket.emit('ice_candidate', {
+              toSocketId: remoteIdRef.current,
+              candidate:  event.candidate,
+            });
+          }
+        };
+
+        // Connection state changes
+        pc.onconnectionstatechange = () => {
+          console.log('[Call] Connection state:', pc.connectionState);
+          if (pc.connectionState === 'failed') {
+            Alert.alert('Call Failed', 'Connection failed. Check your network.');
+            endCall(true);
+          }
+          if (pc.connectionState === 'disconnected') {
+            endCall(true);
+          }
+        };
+
+      } catch (e: any) {
+        console.error('[Call] Setup error:', e);
+        Alert.alert('Camera Error', e.message || 'Could not access camera/mic');
+        router.back();
+      }
+    };
+
+    setup();
+
+    return () => {
+      mounted = false;
+      cleanup();
+    };
   }, []);
 
-  const resetHideTimer = () => {
-    if (hideTimer.current) clearTimeout(hideTimer.current);
-    showControls();
-    hideTimer.current = setTimeout(() => hideControls(), 5000);
+  // ─────────────────────────────────────────────────────────────
+  // Initiate outgoing call
+  // ─────────────────────────────────────────────────────────────
+  const initiateCall = async (pc: RTCPeerConnection, socket: Socket) => {
+    try {
+      // Get recipient's socket ID from Firestore
+      const chatDoc = await firestore().collection('chats').doc(chatId).get();
+      const participants: string[] = chatDoc.data()?.participants || [];
+      const recipientUid = participants.find(p => p !== uid);
+      if (!recipientUid) return;
+
+      const userDoc = await firestore().collection('users').doc(recipientUid).get();
+      const recipientSocketId: string = userDoc.data()?.socketId || '';
+      remoteIdRef.current = recipientSocketId;
+
+      // Create SDP offer
+      const offer = await pc.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true,
+      });
+      await pc.setLocalDescription(offer);
+
+      // Send offer via signaling server
+      socket.emit('call_offer', {
+        toSocketId: recipientSocketId,
+        offer,
+        callType:   'video',
+        callerName: auth().currentUser?.displayName || 'VaultChat User',
+        chatId,
+      });
+    } catch (e) {
+      console.error('[Call] initiateCall error:', e);
+    }
   };
 
-  const showControls = () => {
-    setControlsVisible(true);
-    Animated.timing(controlsOpacity, { toValue: 1, duration: 250, useNativeDriver: true }).start();
+  // ─────────────────────────────────────────────────────────────
+  // Answer incoming call
+  // ─────────────────────────────────────────────────────────────
+  const answerCall = async (pc: RTCPeerConnection, socket: Socket) => {
+    // Offer comes via socket event 'call_offer_for_you'
+    socket.on('call_offer_for_you', async ({ offer, fromSocketId, callerName }: any) => {
+      try {
+        remoteIdRef.current = fromSocketId;
+
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+
+        socket.emit('call_answer', {
+          toSocketId: fromSocketId,
+          answer,
+        });
+      } catch (e) {
+        console.error('[Call] answerCall error:', e);
+      }
+    });
   };
 
-  const hideControls = () => {
-    Animated.timing(controlsOpacity, { toValue: 0, duration: 500, useNativeDriver: true })
-      .start(() => setControlsVisible(false));
+  // ─────────────────────────────────────────────────────────────
+  // Timer
+  // ─────────────────────────────────────────────────────────────
+  const startTimer = () => {
+    timerRef.current = setInterval(() => setSeconds(s => s + 1), 1000);
   };
-
-  useEffect(() => {
-    resetHideTimer();
-    return () => { if (hideTimer.current) clearTimeout(hideTimer.current); };
-  }, []);
 
   const formatTime = (s: number) => {
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+    const m = Math.floor(s / 60).toString().padStart(2, '0');
+    const sec = (s % 60).toString().padStart(2, '0');
+    return `${m}:${sec}`;
   };
 
-  const sendEmoji = (emoji: string) => {
-    const id = emojiIdRef.current++;
-    const x = new Animated.Value(Math.random() * 200 + 80);
-    const y = new Animated.Value(500);
-    const opacity = new Animated.Value(1);
-    setFloatingEmojis(prev => [...prev, { id, emoji, x, y, opacity }]);
-    Animated.parallel([
-      Animated.timing(y, { toValue: 100, duration: 1800, useNativeDriver: true }),
-      Animated.sequence([
-        Animated.delay(1200),
-        Animated.timing(opacity, { toValue: 0, duration: 600, useNativeDriver: true }),
-      ]),
-    ]).start(() => setFloatingEmojis(prev => prev.filter(e => e.id !== id)));
-    setShowEmojiTray(false);
-    resetHideTimer();
+  // ─────────────────────────────────────────────────────────────
+  // Controls
+  // ─────────────────────────────────────────────────────────────
+  const toggleMute = () => {
+    localStream?.getAudioTracks().forEach(track => {
+      track.enabled = muted; // toggle
+    });
+    setMuted(m => !m);
   };
 
-  const handleEndCall = () => {
-    Alert.alert('End Call', 'Are you sure you want to end this call?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'End Call', style: 'destructive', onPress: () => router.back() },
-    ]);
+  const toggleCamera = () => {
+    localStream?.getVideoTracks().forEach(track => {
+      track.enabled = cameraOff; // toggle
+    });
+    setCameraOff(c => !c);
+  };
+
+  const toggleSpeaker = async () => {
+    const next = !speaker;
+    setSpeaker(next);
+    await Audio.setAudioModeAsync({
+      playThroughEarpieceAndroid: !next,
+      allowsRecordingIOS:         true,
+      playsInSilentModeIOS:       true,
+    });
+  };
+
+  const flipCamera = async () => {
+    const videoTrack = localStream?.getVideoTracks()[0] as any;
+    if (videoTrack && videoTrack._switchCamera) {
+      videoTrack._switchCamera();
+      setFrontCamera(f => !f);
+    }
+  };
+
+  const endCall = (notify = true) => {
+    if (notify && socketRef.current && remoteIdRef.current) {
+      socketRef.current.emit('call_end', { toSocketId: remoteIdRef.current });
+    }
+    cleanup();
+    router.back();
+  };
+
+  const cleanup = () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    localStream?.getTracks().forEach(t => t.stop());
+    remoteStream?.getTracks().forEach(t => t.stop());
+    pcRef.current?.close();
+    socketRef.current?.disconnect();
+  };
+
+  // ─────────────────────────────────────────────────────────────
+  // Render
+  // ─────────────────────────────────────────────────────────────
+  const BEAUTY_OPTS: Beauty[] = ['Off', 'Soft', 'Smooth', 'Glow'];
+
+  const stateLabel: Record<CallState, string> = {
+    connecting: 'Connecting...',
+    ringing:    'Ringing...',
+    connected:  `● ${formatTime(seconds)}  Encrypted`,
+    ended:      'Call Ended',
   };
 
   return (
-    <TouchableWithoutFeedback onPress={() => resetHideTimer()}>
-      <View style={s.root}>
-        <View style={s.remoteFeed}>
-          <View style={s.videoPlaceholder}>
-            <Text style={s.avatarText}>👤</Text>
-            <Text style={s.callerName}>Alex Morgan</Text>
-          </View>
+    <View style={styles.container}>
+      <StatusBar hidden />
+
+      {/* Remote video — full screen */}
+      {remoteStream ? (
+        <RTCView
+          streamURL={remoteStream.toURL()}
+          style={styles.remoteVideo}
+          objectFit="cover"
+          mirror={false}
+        />
+      ) : (
+        <View style={styles.waitingScreen}>
+          <Text style={styles.waitingInitial}>{name?.slice(0,2).toUpperCase()}</Text>
+          <Text style={styles.waitingName}>{name}</Text>
+          <Text style={styles.waitingStatus}>{stateLabel[callState]}</Text>
         </View>
+      )}
 
-        <View style={s.selfView}>
-          {cameraOff
-            ? <View style={s.selfViewOff}><Text style={{ fontSize: 24 }}>🚫</Text></View>
-            : <View style={s.selfViewOn}><Text style={s.selfAvatar}>🧑</Text></View>}
-        </View>
-
-        {floatingEmojis.map(fe => (
-          <Animated.Text key={fe.id}
-            style={[s.floatingEmoji, { transform: [{ translateX: fe.x }, { translateY: fe.y }], opacity: fe.opacity }]}>
-            {fe.emoji}
-          </Animated.Text>
-        ))}
-
-        <Animated.View style={[s.topBar, { opacity: controlsOpacity }]}>
-          <View style={s.hdBadge}><Text style={s.hdText}>HD</Text></View>
-          <View style={s.timerWrap}>
-            <View style={s.timerDot} />
-            <Text style={s.timerText}>{formatTime(seconds)}</Text>
-          </View>
-          <TouchableOpacity style={s.moreBtn} onPress={() => { setShowMoreMenu(true); resetHideTimer(); }}>
-            <Text style={s.moreDots}>⋮</Text>
-          </TouchableOpacity>
-        </Animated.View>
-
-        <Animated.View style={[s.callerInfo, { opacity: controlsOpacity }]}>
-          <Text style={s.callerInfoName}>Alex Morgan</Text>
-          <Text style={s.callerInfoStatus}>🔒 VaultChat Encrypted Call</Text>
-        </Animated.View>
-
-        <Animated.View style={[s.bottomBar, { opacity: controlsOpacity }]}>
-          {showEmojiTray && (
-            <View style={s.emojiTray}>
-              {EMOJIS.map(emoji => (
-                <TouchableOpacity key={emoji} onPress={() => sendEmoji(emoji)} style={s.emojiBtn}>
-                  <Text style={s.emojiText}>{emoji}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-
-          <View style={s.controlsRow}>
-            <TouchableOpacity style={[s.ctrlBtn, muted && s.ctrlActive]}
-              onPress={() => { setMuted(v => !v); resetHideTimer(); }}>
-              <Text style={s.ctrlIcon}>{muted ? '🔇' : '🎤'}</Text>
-              <Text style={s.ctrlLabel}>{muted ? 'Unmute' : 'Mute'}</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={[s.ctrlBtn, cameraOff && s.ctrlActive]}
-              onPress={() => { setCameraOff(v => !v); resetHideTimer(); }}>
-              <Text style={s.ctrlIcon}>{cameraOff ? '📵' : '📹'}</Text>
-              <Text style={s.ctrlLabel}>{cameraOff ? 'Start' : 'Camera'}</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={s.endBtn} onPress={handleEndCall}>
-              <Text style={s.endIcon}>📵</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={[s.ctrlBtn, !frontCamera && s.ctrlActive]}
-              onPress={() => { setFrontCamera(v => !v); resetHideTimer(); }}>
-              <Text style={s.ctrlIcon}>🔄</Text>
-              <Text style={s.ctrlLabel}>{frontCamera ? 'Flip' : 'Front'}</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={[s.ctrlBtn, !speaker && s.ctrlActive]}
-              onPress={() => { setSpeaker(v => !v); resetHideTimer(); }}>
-              <Text style={s.ctrlIcon}>{speaker ? '🔊' : '🔉'}</Text>
-              <Text style={s.ctrlLabel}>{speaker ? 'Speaker' : 'Earpiece'}</Text>
-            </TouchableOpacity>
-          </View>
-
-          <TouchableOpacity style={s.emojiToggle}
-            onPress={() => { setShowEmojiTray(v => !v); resetHideTimer(); }}>
-            <Text style={s.emojiToggleText}>😊 Reactions</Text>
-          </TouchableOpacity>
-        </Animated.View>
-
-        <Modal visible={showMoreMenu} transparent animationType="slide"
-          onRequestClose={() => setShowMoreMenu(false)}>
-          <TouchableWithoutFeedback onPress={() => setShowMoreMenu(false)}>
-            <View style={s.modalOverlay}>
-              <TouchableWithoutFeedback>
-                <View style={s.menuSheet}>
-                  <View style={s.menuHandle} />
-                  <Text style={s.menuTitle}>More Options</Text>
-                  {[
-                    { icon: '💬', label: 'Send Message' },
-                    { icon: '📋', label: 'Share Screen' },
-                    { icon: '📸', label: 'Take Screenshot' },
-                    { icon: '🔒', label: 'View Encryption Info' },
-                    { icon: '👤', label: 'View Profile' },
-                    { icon: '🚫', label: 'Block User' },
-                  ].map(item => (
-                    <TouchableOpacity key={item.label} style={s.menuItem}
-                      onPress={() => setShowMoreMenu(false)}>
-                      <Text style={s.menuItemIcon}>{item.icon}</Text>
-                      <Text style={s.menuItemLabel}>{item.label}</Text>
-                    </TouchableOpacity>
-                  ))}
-                  <TouchableOpacity style={s.menuCancel} onPress={() => setShowMoreMenu(false)}>
-                    <Text style={s.menuCancelText}>Cancel</Text>
-                  </TouchableOpacity>
-                </View>
-              </TouchableWithoutFeedback>
-            </View>
-          </TouchableWithoutFeedback>
-        </Modal>
+      {/* D2DE badge */}
+      <View style={styles.d2deBadge}>
+        <Text style={styles.d2deText}>🛡️ D2DE</Text>
       </View>
-    </TouchableWithoutFeedback>
+
+      {/* Call timer */}
+      {callState === 'connected' && (
+        <View style={styles.timerBadge}>
+          <Text style={styles.timerText}>{stateLabel.connected}</Text>
+        </View>
+      )}
+
+      {/* Local video PiP — bottom right */}
+      {localStream && !cameraOff ? (
+        <RTCView
+          streamURL={localStream.toURL()}
+          style={styles.localVideo}
+          objectFit="cover"
+          mirror={frontCamera}
+          zOrder={1}
+        />
+      ) : (
+        <View style={styles.localVideoOff}>
+          <Text style={styles.localOffText}>CAM OFF</Text>
+        </View>
+      )}
+
+      {/* Beauty filter bar */}
+      <View style={styles.beautyBar}>
+        {BEAUTY_OPTS.map(b => (
+          <TouchableOpacity
+            key={b}
+            style={[styles.beautyBtn, beauty === b && styles.beautyActive]}
+            onPress={() => setBeauty(b)}
+          >
+            <Text style={[styles.beautyText, beauty === b && styles.beautyTextActive]}>
+              ✨ {b}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {/* Top controls row */}
+      <View style={styles.topControls}>
+        {[
+          {
+            icon: speaker ? '🔊' : '🔇',
+            label: 'Speaker',
+            action: toggleSpeaker,
+            active: speaker,
+          },
+          {
+            icon: '🔄',
+            label: 'Flip',
+            action: flipCamera,
+            active: false,
+          },
+          {
+            icon: '📺',
+            label: 'Share',
+            action: () => Alert.alert('Screen Share', 'Screen share coming in next update'),
+            active: false,
+          },
+        ].map(({ icon, label, action, active }) => (
+          <TouchableOpacity
+            key={label}
+            style={[styles.topCtrlBtn, active && styles.topCtrlBtnActive]}
+            onPress={action}
+          >
+            <Text style={styles.topCtrlIcon}>{icon}</Text>
+            <Text style={[styles.topCtrlLabel, active && styles.topCtrlLabelActive]}>
+              {label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {/* Bottom controls row */}
+      <View style={styles.bottomControls}>
+        {/* Mute */}
+        <TouchableOpacity
+          style={[styles.circleBtn, muted && styles.circleBtnActive]}
+          onPress={toggleMute}
+        >
+          <Text style={styles.circleBtnIcon}>{muted ? '🔇' : '🎤'}</Text>
+          <Text style={styles.circleBtnLabel}>{muted ? 'Unmute' : 'Mute'}</Text>
+        </TouchableOpacity>
+
+        {/* End call */}
+        <TouchableOpacity style={styles.endBtn} onPress={() => endCall(true)}>
+          <Text style={styles.endBtnIcon}>📵</Text>
+          <Text style={styles.endBtnLabel}>End</Text>
+        </TouchableOpacity>
+
+        {/* Camera toggle */}
+        <TouchableOpacity
+          style={[styles.circleBtn, cameraOff && styles.circleBtnActive]}
+          onPress={toggleCamera}
+        >
+          <Text style={styles.circleBtnIcon}>{cameraOff ? '🚫' : '📷'}</Text>
+          <Text style={styles.circleBtnLabel}>{cameraOff ? 'Cam Off' : 'Camera'}</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
   );
 }
 
-const s = StyleSheet.create({
-  root:             { flex: 1, backgroundColor: '#000' },
-  remoteFeed:       { ...StyleSheet.absoluteFillObject, backgroundColor: '#0a1628' },
-  videoPlaceholder: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  avatarText:       { fontSize: 80, marginBottom: 16 },
-  callerName:       { color: 'rgba(255,255,255,0.3)', fontSize: 18, fontWeight: '600' },
-  selfView:         { position: 'absolute', top: 100, right: 16, width: 100, height: 140,
-                      borderRadius: 16, overflow: 'hidden', borderWidth: 2, borderColor: '#4A9FFF' },
-  selfViewOff:      { flex: 1, backgroundColor: '#1a1a2e', justifyContent: 'center', alignItems: 'center' },
-  selfViewOn:       { flex: 1, backgroundColor: '#0d2137', justifyContent: 'center', alignItems: 'center' },
-  selfAvatar:       { fontSize: 40 },
-  floatingEmoji:    { position: 'absolute', fontSize: 36, zIndex: 100 },
-  topBar:           { position: 'absolute', top: 50, left: 0, right: 0,
-                      flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20 },
-  hdBadge:          { backgroundColor: '#4A9FFF', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, marginRight: 10 },
-  hdText:           { color: '#fff', fontSize: 11, fontWeight: '900', letterSpacing: 1 },
-  timerWrap:        { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 },
-  timerDot:         { width: 8, height: 8, borderRadius: 4, backgroundColor: '#EF4444' },
-  timerText:        { color: '#fff', fontSize: 15, fontWeight: '700', letterSpacing: 1 },
-  moreBtn:          { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.15)',
-                      justifyContent: 'center', alignItems: 'center' },
-  moreDots:         { color: '#fff', fontSize: 22, fontWeight: '900', marginTop: -4 },
-  callerInfo:       { position: 'absolute', top: 110, left: 20 },
-  callerInfoName:   { color: '#fff', fontSize: 22, fontWeight: '900' },
-  callerInfoStatus: { color: 'rgba(255,255,255,0.5)', fontSize: 12, marginTop: 4 },
-  bottomBar:        { position: 'absolute', bottom: 0, left: 0, right: 0,
-                      backgroundColor: 'rgba(0,0,0,0.75)', paddingBottom: 40, paddingTop: 16,
-                      paddingHorizontal: 20, borderTopLeftRadius: 28, borderTopRightRadius: 28,
-                      borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)' },
-  emojiTray:        { flexDirection: 'row', justifyContent: 'center', gap: 12, marginBottom: 16,
-                      backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 40,
-                      paddingVertical: 10, paddingHorizontal: 16 },
-  emojiBtn:         { padding: 4 },
-  emojiText:        { fontSize: 28 },
-  controlsRow:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  ctrlBtn:          { alignItems: 'center', gap: 6, width: 60, backgroundColor: 'rgba(255,255,255,0.1)',
-                      borderRadius: 16, paddingVertical: 12 },
-  ctrlActive:       { backgroundColor: 'rgba(239,68,68,0.3)', borderWidth: 1, borderColor: '#EF4444' },
-  ctrlIcon:         { fontSize: 22 },
-  ctrlLabel:        { color: 'rgba(255,255,255,0.7)', fontSize: 10, fontWeight: '600' },
-  endBtn:           { width: 68, height: 68, borderRadius: 34, backgroundColor: '#EF4444',
-                      justifyContent: 'center', alignItems: 'center', elevation: 8 },
-  endIcon:          { fontSize: 28 },
-  emojiToggle:      { alignSelf: 'center', backgroundColor: 'rgba(255,255,255,0.1)',
-                      borderRadius: 20, paddingVertical: 8, paddingHorizontal: 20 },
-  emojiToggleText:  { color: 'rgba(255,255,255,0.8)', fontSize: 14, fontWeight: '600' },
-  modalOverlay:     { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  menuSheet:        { backgroundColor: '#0d1f35', borderTopLeftRadius: 28, borderTopRightRadius: 28,
-                      paddingBottom: 40, paddingTop: 12, paddingHorizontal: 20 },
-  menuHandle:       { width: 40, height: 4, backgroundColor: 'rgba(255,255,255,0.2)',
-                      borderRadius: 2, alignSelf: 'center', marginBottom: 16 },
-  menuTitle:        { color: '#fff', fontSize: 18, fontWeight: '900', marginBottom: 16 },
-  menuItem:         { flexDirection: 'row', alignItems: 'center', gap: 16, paddingVertical: 14,
-                      borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.07)' },
-  menuItemIcon:     { fontSize: 22, width: 32 },
-  menuItemLabel:    { color: 'rgba(255,255,255,0.85)', fontSize: 15, fontWeight: '600' },
-  menuCancel:       { marginTop: 16, alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.08)',
-                      borderRadius: 14, paddingVertical: 14 },
-  menuCancelText:   { color: '#4A9FFF', fontSize: 15, fontWeight: '800' },
+// ─────────────────────────────────────────────────────────────────
+// Styles
+// ─────────────────────────────────────────────────────────────────
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#0D1520',
+  },
+  remoteVideo: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+  },
+  waitingScreen: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+  },
+  waitingInitial: {
+    fontSize: 72,
+    fontWeight: 'bold',
+    color: '#00D4AA',
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#003328',
+    textAlign: 'center',
+    lineHeight: 120,
+    borderWidth: 2,
+    borderColor: '#00D4AA',
+    overflow: 'hidden',
+  },
+  waitingName: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
+  waitingStatus: {
+    fontSize: 14,
+    color: '#64748B',
+  },
+  d2deBadge: {
+    position: 'absolute',
+    top: 50,
+    left: 16,
+    backgroundColor: '#00332888',
+    borderWidth: 0.5,
+    borderColor: '#00D4AA',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  d2deText: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#00D4AA',
+  },
+  timerBadge: {
+    position: 'absolute',
+    top: 50,
+    alignSelf: 'center',
+    backgroundColor: '#00000066',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+  },
+  timerText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
+  localVideo: {
+    position: 'absolute',
+    top: 80,
+    right: 16,
+    width: 90,
+    height: 130,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#00D4AA',
+    overflow: 'hidden',
+    zIndex: 10,
+  },
+  localVideoOff: {
+    position: 'absolute',
+    top: 80,
+    right: 16,
+    width: 90,
+    height: 130,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#374151',
+    backgroundColor: '#111827',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  localOffText: {
+    fontSize: 9,
+    color: '#374151',
+    fontWeight: 'bold',
+  },
+  beautyBar: {
+    position: 'absolute',
+    bottom: 160,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+  },
+  beautyBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 16,
+    backgroundColor: '#00000066',
+    borderWidth: 0.5,
+    borderColor: '#1E293B',
+  },
+  beautyActive: {
+    backgroundColor: '#003328',
+    borderColor: '#00D4AA',
+  },
+  beautyText: {
+    fontSize: 11,
+    color: '#64748B',
+  },
+  beautyTextActive: {
+    color: '#00D4AA',
+    fontWeight: 'bold',
+  },
+  topControls: {
+    position: 'absolute',
+    bottom: 96,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 24,
+    paddingHorizontal: 32,
+  },
+  topCtrlBtn: {
+    alignItems: 'center',
+    backgroundColor: '#00000066',
+    borderRadius: 12,
+    borderWidth: 0.5,
+    borderColor: '#1E293B',
+    padding: 10,
+    minWidth: 70,
+  },
+  topCtrlBtnActive: {
+    backgroundColor: '#003328',
+    borderColor: '#00D4AA',
+  },
+  topCtrlIcon: {
+    fontSize: 22,
+    marginBottom: 3,
+  },
+  topCtrlLabel: {
+    fontSize: 10,
+    color: '#64748B',
+  },
+  topCtrlLabelActive: {
+    color: '#00D4AA',
+  },
+  bottomControls: {
+    position: 'absolute',
+    bottom: 24,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 32,
+  },
+  circleBtn: {
+    alignItems: 'center',
+    gap: 4,
+  },
+  circleBtnActive: {
+    opacity: 0.7,
+  },
+  circleBtnIcon: {
+    fontSize: 22,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: '#1A2235',
+    textAlign: 'center',
+    lineHeight: 58,
+    borderWidth: 0.5,
+    borderColor: '#1E293B',
+    overflow: 'hidden',
+  },
+  circleBtnLabel: {
+    fontSize: 10,
+    color: '#64748B',
+  },
+  endBtn: {
+    alignItems: 'center',
+    gap: 4,
+  },
+  endBtnIcon: {
+    fontSize: 26,
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: '#FF4D6D',
+    textAlign: 'center',
+    lineHeight: 68,
+    overflow: 'hidden',
+  },
+  endBtnLabel: {
+    fontSize: 10,
+    color: '#FF4D6D',
+    fontWeight: 'bold',
+  },
 });
