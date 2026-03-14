@@ -67,7 +67,7 @@ export default function SettingsScreen() {
 
   const saveDuressPin = async () => {
     if (duressInput.length < 4) { Alert.alert('Duress PIN must be at least 4 digits'); return; }
-    // Hash the duress PIN before storing â€” never store raw PIN
+    // Hash the duress PIN before storing Ã¢â‚¬â€ never store raw PIN
     const hash = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, 'vaultchat-duress-' + duressInput);
     await firestore().collection('users').doc(myUid).update({ duressPinHash: hash });
     setDuressPin(hash);
@@ -103,13 +103,13 @@ export default function SettingsScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'âš™ï¸ Settings', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
+      <Stack.Screen options={{ title: 'Ã¢Å¡â„¢Ã¯Â¸Â Settings', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
       <ScrollView style={s.screen}>
 
         {/* Privacy */}
         <Text style={s.sectionTitle}>PRIVACY</Text>
         <Row label="Read Receipts (Blue ticks)" value={readReceipts} onValueChange={v => { setReadReceipts(v); saveSettings('readReceipts', v); }} desc="Let others know when you've read their messages" />
-        <Row label="Typing Indicator" value={typingIndicator} onValueChange={v => { setTypingIndicator(v); saveSettings('typingIndicator', v); }} desc="Show 'typingâ€¦' when you're composing a message" />
+        <Row label="Typing Indicator" value={typingIndicator} onValueChange={v => { setTypingIndicator(v); saveSettings('typingIndicator', v); }} desc="Show 'typingÃ¢â‚¬Â¦' when you're composing a message" />
         <Row label="Last Seen / Online" value={lastSeen} onValueChange={v => { setLastSeen(v); saveSettings('lastSeen', v); }} desc="Show your online status and last seen time" />
 
         {/* AI */}
@@ -144,7 +144,7 @@ export default function SettingsScreen() {
         <Text style={[s.sectionTitle, { marginTop: 24 }]}>DURESS PIN</Text>
         <View style={s.vaultIdSection}>
           <Text style={s.desc}>Set a secondary PIN. If entered under coercion, it silently wipes your messages and shows an empty decoy app.</Text>
-          {duressPin ? <Text style={[s.currentId, { color: '#FF3C6E' }]}>âœ“ Duress PIN is set</Text> : null}
+          {duressPin ? <Text style={[s.currentId, { color: '#FF3C6E' }]}>Ã¢Å“â€œ Duress PIN is set</Text> : null}
           <View style={s.idRow}>
             <TextInput
               style={[s.idInput, { flex: 1 }]}
@@ -170,23 +170,23 @@ export default function SettingsScreen() {
           <TouchableOpacity style={[s.saveBtn, { width: '100%', paddingVertical: 12, marginTop: 8 }]} onPress={startBackup} disabled={backingUp}>
             {backingUp
               ? <ActivityIndicator color="#000" />
-              : <Text style={s.saveBtnTxt}>ðŸ“¦ Export Encrypted Backup</Text>
+              : <Text style={s.saveBtnTxt}>Ã°Å¸â€œÂ¦ Export Encrypted Backup</Text>
             }
           </TouchableOpacity>
         </View>
 
         {/* Danger zone */}
         <Text style={[s.sectionTitle, { marginTop: 24, color: '#FF3C6E' }]}>ACCOUNT</Text>
-        <TouchableOpacity style={s.dangerRow} onPress={() => router.push('/search')}>
-          <Text style={s.dangerTxt}>ðŸ” Search Messages</Text>
+        <TouchableOpacity style={s.dangerRow} onPress={() => router.push('/search' as any)}>
+          <Text style={s.dangerTxt}>Ã°Å¸â€Â Search Messages</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={s.dangerRow} onPress={() => router.push('/starred')}>
-          <Text style={s.dangerTxt}>â­ Starred Messages</Text>
+        <TouchableOpacity style={s.dangerRow} onPress={() => router.push('/starred' as any)}>
+          <Text style={s.dangerTxt}>Ã¢Â­Â Starred Messages</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[s.dangerRow, { borderTopColor: '#FF3C6E44' }]} onPress={() => {
           Alert.alert('Sign Out?', '', [{ text: 'Cancel', style: 'cancel' }, { text: 'Sign Out', style: 'destructive', onPress: () => auth().signOut() }]);
         }}>
-          <Text style={[s.dangerTxt, { color: '#FF3C6E' }]}>ðŸšª Sign Out</Text>
+          <Text style={[s.dangerTxt, { color: '#FF3C6E' }]}>Ã°Å¸Å¡Âª Sign Out</Text>
         </TouchableOpacity>
 
         <View style={{ height: 50 }} />

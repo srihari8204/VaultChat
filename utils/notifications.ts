@@ -1,5 +1,5 @@
 /**
- * VaultChat — Real Push + Local Notifications
+ * VaultChat â€” Real Push + Local Notifications
  * Uses expo-notifications
  * Works in native build
  */
@@ -13,6 +13,8 @@ Notifications.setNotificationHandler({
     shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge:  true,
+    shouldShowBanner: true,
+    shouldShowList:   true,
   }),
 });
 
@@ -74,7 +76,7 @@ export const notifyNewMessage = async (
   await Notifications.scheduleNotificationAsync({
     content: {
       title:    senderName,
-      body:     preview,          // Never show actual content — privacy first
+      body:     preview,          // Never show actual content â€” privacy first
       sound:    'default',
       badge:    1,
       data:     { type: 'message' },
