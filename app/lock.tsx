@@ -1,4 +1,4 @@
-﻿import { LinearGradient } from "expo-linear-gradient";
+import { LinearGradient } from "expo-linear-gradient";
 import * as LocalAuthentication from "expo-local-authentication";
 import * as SecureStore from "expo-secure-store";
 import * as Crypto from "expo-crypto";
@@ -53,7 +53,7 @@ export default function LockScreen() {
       if (result.success) {
         await recordAuthTime();
         router.replace("/chats");
-      } else if (result.error === "user_fallback") {
+      } else if ((result as any).error === "user_fallback") {
         setStage("code");
       } else {
         handleFail();

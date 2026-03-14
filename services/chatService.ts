@@ -1,5 +1,7 @@
-﻿import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, setDoc, getDoc, getDocs, where, updateDoc, Timestamp } from 'firebase/firestore';
-import { db, auth } from './firebase';
+import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, setDoc, getDoc, getDocs, where, updateDoc, Timestamp } from 'firebase/firestore';
+import auth from '@react-native-firebase/auth';
+import firestore from '@react-native-firebase/firestore';
+const db = firestore();
 
 export const getChatId = (uid1: string, uid2: string): string => [uid1, uid2].sort().join('_');
 

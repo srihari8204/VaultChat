@@ -2,8 +2,8 @@
 // Real 8-PIN gated secure storage
 // AES-256-GCM encrypted files via d2deService
 // Tabs: Documents / Photos / Voice / Videos
-// Upload files — stored encrypted in app's secure directory
-// 30-day auto backup — email option
+// Upload files â€” stored encrypted in app's secure directory
+// 30-day auto backup â€” email option
 // PIN stored in hardware-backed SecureStore
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -20,12 +20,10 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
-import { d2deService } from '../services/d2deService';
-import { BottomNav } from './chats';
 
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Types
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type VaultTab = 'Documents' | 'Photos' | 'Voice' | 'Videos';
 
@@ -39,18 +37,18 @@ interface VaultFile {
   mimeType:    string;
 }
 
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Helpers
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const TAB_CONFIG: Record<VaultTab, { icon: string; color: string; accept: string }> = {
-  Documents: { icon: '📄', color: '#3B82F6', accept: '*/*' },
-  Photos:    { icon: '🖼️', color: '#F5C842', accept: 'image/*' },
-  Voice:     { icon: '🎵', color: '#EC4899', accept: 'audio/*' },
-  Videos:    { icon: '🎥', color: '#F97316', accept: 'video/*' },
+  Documents: { icon: 'ðŸ“„', color: '#3B82F6', accept: '*/*' },
+  Photos:    { icon: 'ðŸ–¼ï¸', color: '#F5C842', accept: 'image/*' },
+  Voice:     { icon: 'ðŸŽµ', color: '#EC4899', accept: 'audio/*' },
+  Videos:    { icon: 'ðŸŽ¥', color: '#F97316', accept: 'video/*' },
 };
 
-const VAULT_DIR = FileSystem.documentDirectory + 'vault/';
+const VAULT_DIR = (FileSystem as any).documentDirectory + 'vault/';
 const MANIFEST_KEY = 'vault_manifest'; // SecureStore key for file list
 
 function formatSize(bytes: number): string {
@@ -65,9 +63,9 @@ function formatDate(ms: number): string {
   });
 }
 
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // PIN Entry Component
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function PinGate({ onUnlock }: { onUnlock: () => void }) {
   const [pin,   setPin]   = useState<string[]>([]);
@@ -106,7 +104,7 @@ function PinGate({ onUnlock }: { onUnlock: () => void }) {
 
   return (
     <View style={pinStyles.container}>
-      <Text style={pinStyles.lockIcon}>🔒</Text>
+      <Text style={pinStyles.lockIcon}>ðŸ”’</Text>
       <Text style={pinStyles.title}>Vault</Text>
       <Text style={pinStyles.sub}>Enter 8-digit PIN to access</Text>
 
@@ -137,7 +135,7 @@ function PinGate({ onUnlock }: { onUnlock: () => void }) {
                 onPress={() => handleKey(k)}
               >
                 <Text style={pinStyles.keyText}>
-                  {k === 'back' ? '⌫' : k}
+                  {k === 'back' ? 'âŒ«' : k}
                 </Text>
               </TouchableOpacity>
             );
@@ -146,15 +144,15 @@ function PinGate({ onUnlock }: { onUnlock: () => void }) {
       ))}
 
       <Text style={pinStyles.note}>
-        🔐 Files are AES-256-GCM encrypted
+        ðŸ” Files are AES-256-GCM encrypted
       </Text>
     </View>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Main Vault Screen
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export default function VaultScreen() {
   const router = useRouter();
@@ -168,7 +166,7 @@ export default function VaultScreen() {
   const [backupEmail, setBackupEmail] = useState('');
   const [lastBackup,  setLastBackup]  = useState<string | null>(null);
 
-  // ── Load manifest on unlock ───────────────────────────────────
+  // â”€â”€ Load manifest on unlock â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     if (unlocked) {
       ensureVaultDir();
@@ -201,7 +199,7 @@ export default function VaultScreen() {
     if (d) setLastBackup(d);
   };
 
-  // ── File encryption + save ────────────────────────────────────
+  // â”€â”€ File encryption + save â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const encryptAndSave = async (
     uri:      string,
     name:     string,
@@ -213,7 +211,7 @@ export default function VaultScreen() {
     try {
       // 1. Read file as base64
       const base64 = await FileSystem.readAsStringAsync(uri, {
-        encoding: FileSystem.EncodingType.Base64,
+        encoding: 'base64',
       });
 
       // 2. Encrypt with AES-256-GCM using vault session
@@ -226,7 +224,7 @@ export default function VaultScreen() {
       await FileSystem.writeAsStringAsync(
         encPath,
         JSON.stringify(encrypted),
-        { encoding: FileSystem.EncodingType.UTF8 }
+        { encoding: 'utf8' }
       );
 
       // 4. Add to manifest
@@ -245,7 +243,7 @@ export default function VaultScreen() {
     }
   };
 
-  // ── Add file handlers per tab ─────────────────────────────────
+  // â”€â”€ Add file handlers per tab â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleAdd = async () => {
     if (activeTab === 'Photos') {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -281,7 +279,7 @@ export default function VaultScreen() {
         );
       }
     } else {
-      // Documents and Voice — use document picker
+      // Documents and Voice â€” use document picker
       const result = await DocumentPicker.getDocumentAsync({
         multiple: false,
         copyToCacheDirectory: true,
@@ -299,13 +297,13 @@ export default function VaultScreen() {
     }
   };
 
-  // ── Decrypt and open file ─────────────────────────────────────
+  // â”€â”€ Decrypt and open file â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleOpen = async (file: VaultFile) => {
     setLoading(true);
     try {
       // 1. Read encrypted payload from disk
       const raw = await FileSystem.readAsStringAsync(file.encPath, {
-        encoding: FileSystem.EncodingType.UTF8,
+        encoding: 'utf8',
       });
       const payload = JSON.parse(raw);
 
@@ -313,9 +311,9 @@ export default function VaultScreen() {
       const base64 = await d2deService.decrypt(`vault_${uid}`, payload);
 
       // 3. Write decrypted file to temp location
-      const tempPath = FileSystem.cacheDirectory + file.name;
+      const tempPath = (FileSystem as any).cacheDirectory + file.name;
       await FileSystem.writeAsStringAsync(tempPath, base64, {
-        encoding: FileSystem.EncodingType.Base64,
+        encoding: 'base64',
       });
 
       // 4. Share/open with system viewer
@@ -335,7 +333,7 @@ export default function VaultScreen() {
     }
   };
 
-  // ── Delete file ───────────────────────────────────────────────
+  // â”€â”€ Delete file â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleDelete = (file: VaultFile) => {
     Alert.alert(
       'Delete File',
@@ -356,7 +354,7 @@ export default function VaultScreen() {
     );
   };
 
-  // ── Backup ────────────────────────────────────────────────────
+  // â”€â”€ Backup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleBackup = async () => {
     if (!backupEmail.trim() || !backupEmail.includes('@')) {
       Alert.alert('Error', 'Enter a valid email address');
@@ -395,26 +393,26 @@ export default function VaultScreen() {
     }
   };
 
-  // ── Filtered files for active tab ─────────────────────────────
+  // â”€â”€ Filtered files for active tab â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const tabFiles = files.filter(f => f.type === activeTab);
 
-  // ─────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Show PIN gate until unlocked
-  // ─────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (!unlocked) {
     return <PinGate onUnlock={() => setUnlocked(true)} />;
   }
 
-  // ─────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Main Vault UI
-  // ─────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   return (
     <View style={styles.container}>
 
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.back}>‹</Text>
+          <Text style={styles.back}>â€¹</Text>
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>Vault</Text>
@@ -424,7 +422,7 @@ export default function VaultScreen() {
           style={styles.backupBtn}
           onPress={() => setShowBackup(true)}
         >
-          <Text style={styles.backupBtnText}>💾</Text>
+          <Text style={styles.backupBtnText}>ðŸ’¾</Text>
         </TouchableOpacity>
       </View>
 
@@ -515,18 +513,18 @@ export default function VaultScreen() {
                   {item.name}
                 </Text>
                 <Text style={styles.fileMeta}>
-                  {formatSize(item.size)}  ·  {formatDate(item.addedAt)}
+                  {formatSize(item.size)}  Â·  {formatDate(item.addedAt)}
                 </Text>
               </View>
               <View style={styles.fileActions}>
                 <View style={styles.encBadge}>
-                  <Text style={styles.encBadgeText}>🔐 ENC</Text>
+                  <Text style={styles.encBadgeText}>ðŸ” ENC</Text>
                 </View>
                 <TouchableOpacity
                   style={styles.deleteBtn}
                   onPress={() => handleDelete(item)}
                 >
-                  <Text style={styles.deleteBtnText}>🗑️</Text>
+                  <Text style={styles.deleteBtnText}>ðŸ—‘ï¸</Text>
                 </TouchableOpacity>
               </View>
             </TouchableOpacity>
@@ -556,7 +554,7 @@ export default function VaultScreen() {
             <Text style={styles.backupTitle}>30-Day Backup</Text>
             <Text style={styles.backupDesc}>
               An encrypted backup of your {files.length} vault files will be
-              sent to your email. The backup is AES-256-GCM encrypted —
+              sent to your email. The backup is AES-256-GCM encrypted â€”
               only you can open it.
             </Text>
 
@@ -597,20 +595,20 @@ export default function VaultScreen() {
             )}
 
             <Text style={styles.backupNote}>
-              Auto-backup runs every 30 days · Local storage only
+              Auto-backup runs every 30 days Â· Local storage only
             </Text>
           </View>
         </TouchableOpacity>
       </Modal>
 
-      <BottomNav active="Vault" />
+      
     </View>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Styles
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const pinStyles = StyleSheet.create({
   container: {

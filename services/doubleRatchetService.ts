@@ -1,21 +1,21 @@
 /**
  * services/doubleRatchetService.ts
- * ─────────────────────────────────────────────────────────────────────────────
- * Double Ratchet Algorithm — VaultChat D2DE
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+ * Double Ratchet Algorithm â€” VaultChat D2DE
  * Same core algorithm used by Signal Protocol
  *
  * How it works:
- *   1. KDF Chain Ratchet  — derives new key for every message sent
- *   2. DH Ratchet         — rotates root key when other side replies
- *   3. Result             — every message has a UNIQUE key
+ *   1. KDF Chain Ratchet  â€” derives new key for every message sent
+ *   2. DH Ratchet         â€” rotates root key when other side replies
+ *   3. Result             â€” every message has a UNIQUE key
  *                           past messages safe even if current key stolen
  *                           future messages safe even if past key stolen
  *
  * This gives VaultChat:
- *   ✅ Forward Secrecy    — can't decrypt past messages
- *   ✅ Break-in Recovery  — can't decrypt future messages
- *   ✅ Per-message keys   — each message encrypted with different key
- * ─────────────────────────────────────────────────────────────────────────────
+ *   âœ… Forward Secrecy    â€” can't decrypt past messages
+ *   âœ… Break-in Recovery  â€” can't decrypt future messages
+ *   âœ… Per-message keys   â€” each message encrypted with different key
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  */
 
 import {
@@ -26,7 +26,7 @@ import {
 } from 'react-native-quick-crypto';
 import * as SecureStore from 'expo-secure-store';
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export interface RatchetState {
   // DH Ratchet keys
@@ -34,7 +34,7 @@ export interface RatchetState {
   DHRecvKey:    string;   // their current DH public key (hex)
 
   // Root chain
-  rootKey:      string;   // 32-byte hex — top of the ratchet chain
+  rootKey:      string;   // 32-byte hex â€” top of the ratchet chain
 
   // Sending chain
   sendChainKey: string;   // 32-byte hex
@@ -64,7 +64,7 @@ export interface RatchetMessage {
   hmac:         string;   // HMAC over entire header
 }
 
-// ── KDF Functions ─────────────────────────────────────────────────────────────
+// â”€â”€ KDF Functions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
  * HKDF-like key derivation using HMAC-SHA256
@@ -76,18 +76,18 @@ function kdfChain(chainKey: string): { newChainKey: string; msgKey: string } {
   // Message key = HMAC(chainKey, 0x01)
   const mkHmac = createHmac('sha256', ck);
   mkHmac.update(Buffer.from([0x01]));
-  const msgKey = (mkHmac.digest() as Buffer).toString('hex');
+  const msgKey = (.digest() as any).toString('hex');
 
   // Next chain key = HMAC(chainKey, 0x02)
   const ckHmac = createHmac('sha256', ck);
   ckHmac.update(Buffer.from([0x02]));
-  const newChainKey = (ckHmac.digest() as Buffer).toString('hex');
+  const newChainKey = (.digest() as any).toString('hex');
 
   return { newChainKey, msgKey };
 }
 
 /**
- * Root KDF — derives new root key and chain key from DH output
+ * Root KDF â€” derives new root key and chain key from DH output
  */
 function kdfRoot(rootKey: string, dhOutput: string): { newRootKey: string; newChainKey: string } {
   const rk  = Buffer.from(rootKey,   'hex');
@@ -96,12 +96,12 @@ function kdfRoot(rootKey: string, dhOutput: string): { newRootKey: string; newCh
   // New root key = HMAC(rootKey, dhOutput || 0x01)
   const rkHmac = createHmac('sha256', rk);
   rkHmac.update(Buffer.concat([dh, Buffer.from([0x01])]));
-  const newRootKey = (rkHmac.digest() as Buffer).toString('hex');
+  const newRootKey = (.digest() as any).toString('hex');
 
   // New chain key = HMAC(rootKey, dhOutput || 0x02)
   const ckHmac = createHmac('sha256', rk);
   ckHmac.update(Buffer.concat([dh, Buffer.from([0x02])]));
-  const newChainKey = (ckHmac.digest() as Buffer).toString('hex');
+  const newChainKey = (.digest() as any).toString('hex');
 
   return { newRootKey, newChainKey };
 }
@@ -113,10 +113,10 @@ function kdfRoot(rootKey: string, dhOutput: string): { newRootKey: string; newCh
 function dhExchange(ourPrivKey: string, theirPubKey: string): string {
   const hmac = createHmac('sha256', Buffer.from(ourPrivKey, 'hex'));
   hmac.update(Buffer.from(theirPubKey, 'hex'));
-  return (hmac.digest() as Buffer).toString('hex');
+  return (.digest() as any).toString('hex');
 }
 
-// ── Session Init ──────────────────────────────────────────────────────────────
+// â”€â”€ Session Init â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
  * Initialize a new Double Ratchet session
@@ -152,10 +152,10 @@ export function initRatchet(
   return state;
 }
 
-// ── Encrypt (Ratchet Forward) ─────────────────────────────────────────────────
+// â”€â”€ Encrypt (Ratchet Forward) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
- * Encrypt a message — advances the sending chain ratchet
+ * Encrypt a message â€” advances the sending chain ratchet
  * Each call produces a DIFFERENT message key
  */
 export function ratchetEncrypt(
@@ -163,7 +163,7 @@ export function ratchetEncrypt(
   message: string,
 ): { encrypted: RatchetMessage; newState: RatchetState } {
 
-  // Advance sending chain — get unique message key
+  // Advance sending chain â€” get unique message key
   const { newChainKey, msgKey } = kdfChain(state.sendChainKey);
 
   // AES-256-GCM encrypt with this unique message key
@@ -187,7 +187,7 @@ export function ratchetEncrypt(
   const headerData = `${state.sendMsgCount}:${state.recvMsgCount}:${state.DHSendKey.substring(0,16)}`;
   const hmacObj    = createHmac('sha256', keyBuf);
   hmacObj.update(headerData);
-  const hmac = (hmacObj.digest() as Buffer).toString('base64');
+  const hmac = (.digest() as any).toString('base64');
 
   const encrypted: RatchetMessage = {
     ciphertext:  ctB64,
@@ -201,7 +201,7 @@ export function ratchetEncrypt(
     hmac,
   };
 
-  // Update state — chain advances, old key gone
+  // Update state â€” chain advances, old key gone
   const newState: RatchetState = {
     ...state,
     sendChainKey: newChainKey,
@@ -211,10 +211,10 @@ export function ratchetEncrypt(
   return { encrypted, newState };
 }
 
-// ── Decrypt (Ratchet Forward) ─────────────────────────────────────────────────
+// â”€â”€ Decrypt (Ratchet Forward) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
- * Decrypt a message — advances receiving chain ratchet
+ * Decrypt a message â€” advances receiving chain ratchet
  * Handles out-of-order messages via skipped key cache
  */
 export function ratchetDecrypt(
@@ -275,7 +275,7 @@ export function ratchetDecrypt(
   return { plaintext, newState };
 }
 
-// ── AES-256-GCM decrypt helper ────────────────────────────────────────────────
+// â”€â”€ AES-256-GCM decrypt helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function aesDecrypt(msg: RatchetMessage, msgKey: string): string | null {
   try {
@@ -299,7 +299,7 @@ function aesDecrypt(msg: RatchetMessage, msgKey: string): string | null {
   }
 }
 
-// ── Skip message keys (out-of-order support) ──────────────────────────────────
+// â”€â”€ Skip message keys (out-of-order support) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function skipMessageKeys(state: RatchetState, until: number): RatchetState {
   if (until - state.recvMsgCount > 100) return state; // safety limit
@@ -317,7 +317,7 @@ function skipMessageKeys(state: RatchetState, until: number): RatchetState {
   return { ...state, recvChainKey: chainKey, recvMsgCount: count, skippedKeys: skipped };
 }
 
-// ── Persist ratchet state ─────────────────────────────────────────────────────
+// â”€â”€ Persist ratchet state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function saveRatchetState(state: RatchetState): Promise<void> {
   await SecureStore.setItemAsync(
@@ -337,7 +337,7 @@ export async function deleteRatchetState(sessionId: string): Promise<void> {
   await SecureStore.deleteItemAsync(`ratchet_${sessionId}`).catch(() => {});
 }
 
-// ── Self test ─────────────────────────────────────────────────────────────────
+// â”€â”€ Self test â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export function testDoubleRatchet(): boolean {
   try {
@@ -348,7 +348,7 @@ export function testDoubleRatchet(): boolean {
     let alice = initRatchet(sessionId, 'bob',   sharedSecret, true);
     let bob   = initRatchet(sessionId, 'alice', sharedSecret, false);
 
-    // Alice sends 3 messages — each gets a DIFFERENT key
+    // Alice sends 3 messages â€” each gets a DIFFERENT key
     const { encrypted: m1, newState: a1 } = ratchetEncrypt(alice,  'Hello Bob!');
     const { encrypted: m2, newState: a2 } = ratchetEncrypt(a1,     'How are you?');
     const { encrypted: m3, newState: a3 } = ratchetEncrypt(a2,     'D2DE is real!');
@@ -367,8 +367,8 @@ export function testDoubleRatchet(): boolean {
 
     const ok = p1 === 'Hello Bob!' && p2 === 'How are you?' && p3 === 'D2DE is real!' && keysAllDifferent;
 
-    console.log('[DoubleRatchet] Self-test:', ok ? 'PASSED ✅' : 'FAILED ❌');
-    console.log('[DoubleRatchet] Message 1 key differs from Message 2:', m1.ciphertext.substring(0,10) !== m2.ciphertext.substring(0,10) ? 'YES ✅' : 'NO ❌');
+    console.log('[DoubleRatchet] Self-test:', ok ? 'PASSED âœ…' : 'FAILED âŒ');
+    console.log('[DoubleRatchet] Message 1 key differs from Message 2:', m1.ciphertext.substring(0,10) !== m2.ciphertext.substring(0,10) ? 'YES âœ…' : 'NO âŒ');
     console.log('[DoubleRatchet] Decrypted:', p1, '|', p2, '|', p3);
     return ok;
   } catch (e) {

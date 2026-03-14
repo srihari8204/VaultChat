@@ -14,7 +14,7 @@ export async function initFaceModel(): Promise<void> {
 
 async function uriToTensor(uri: string): Promise<tf.Tensor3D | null> {
   try {
-    const b64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+    const b64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
     const raw = tf.util.decodeString(b64, "base64");
     const arr = new Uint8Array(raw);
     // Find JPEG image data and create a simple pixel tensor

@@ -1,34 +1,27 @@
-import { useEffect, useRef, useState } from 'react';
-import { Animated } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet } from 'react-native';
+import NetInfo from '@react-native-community/netinfo';
 
-export function NetworkBanner() {
-  const [netState, setNetState] = useState<NetworkState>('online');
-  const slideAnim = useRef(new Animated.Value(-48)).current;
+export default function NetworkBanner() {
+  const [online, setOnline] = useState(true);
 
   useEffect(() => {
-    const unsub = subscribeNetwork(s => {
-      setNetState(s);
-      Animated.spring(slideAnim, {
-        toValue: s !== 'online' ? 0 : -48,
-        useNativeDriver: true, tension: 80, friction: 12,
-      }).start();
+    const unsub = NetInfo.addEventListener(state => {
+      setOnline(state.isConnected ?? true);
     });
     return unsub;
   }, []);
 
-  const bg    = netState === 'offline' ? '#EF4444' : '#F59E0B';
-  const label = netState === 'offline' ? '📵 No internet connection' : '⚠️ Weak connection — messages may delay';
+  if (online) return null;
 
   return (
-    <Animated.View style={{
-      position:'absolute', top:0, left:0, right:0, zIndex:999,
-      backgroundColor: bg, paddingVertical:8, paddingHorizontal:16,
-      transform:[{translateY:slideAnim}],
-    }}>
-      <Text style={{ color:'#fff', fontSize:12, fontWeight:'800', textAlign:'center' }}>
-        {label}
-      </Text>
-    </Animated.View>
+    <View style={s.banner}>
+      <Text style={s.txt}>No internet connection</Text>
+    </View>
   );
 }
 
+const s = StyleSheet.create({
+  banner: { backgroundColor: '#FF3C6E', paddingVertical: 6, alignItems: 'center' },
+  txt:    { color: '#fff', fontSize: 12, fontWeight: '800' },
+});

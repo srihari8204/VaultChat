@@ -1,7 +1,7 @@
 // app/videocall.tsx
 // Real WebRTC video call
 // TURN server: openrelay.metered.ca (credentials hardcoded below)
-// Signaling: Socket.io → vaultchat.onrender.com
+// Signaling: Socket.io â†’ vaultchat.onrender.com
 // Beauty filters: UI toggle (Soft / Smooth / Glow)
 // Speaker toggle, camera flip, screen share, mute
 // D2DE session badge
@@ -25,16 +25,16 @@ import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import { Audio } from 'expo-av';
 
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // TURN / ICE Server Configuration
-// Credentials from metered.ca — active
-// ─────────────────────────────────────────────────────────────────
+// Credentials from metered.ca â€” active
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const ICE_SERVERS = [
-  // Google STUN — works on WiFi / same network
+  // Google STUN â€” works on WiFi / same network
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
-  // Metered TURN — works on 4G/5G/different networks
+  // Metered TURN â€” works on 4G/5G/different networks
   {
     urls:       'turn:openrelay.metered.ca:80',
     username:   '597bc91ac20a6dbd23f2ceba',
@@ -62,9 +62,9 @@ const BACKEND_URL = 'https://vaultchat.onrender.com';
 type Beauty = 'Off' | 'Soft' | 'Smooth' | 'Glow';
 type CallState = 'connecting' | 'ringing' | 'connected' | 'ended';
 
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Component
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export default function VideoCallScreen() {
   const router  = useRouter();
@@ -78,7 +78,7 @@ export default function VideoCallScreen() {
 
   const uid = auth().currentUser?.uid || '';
 
-  // ── State ──────────────────────────────────────────────────────
+  // â”€â”€ State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [callState,   setCallState]   = useState<CallState>('connecting');
   const [muted,       setMuted]       = useState(false);
   const [cameraOff,   setCameraOff]   = useState(false);
@@ -89,21 +89,21 @@ export default function VideoCallScreen() {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream,setRemoteStream]= useState<MediaStream | null>(null);
 
-  // ── Refs ───────────────────────────────────────────────────────
+  // â”€â”€ Refs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const pcRef         = useRef<RTCPeerConnection | null>(null);
   const socketRef     = useRef<Socket | null>(null);
-  const timerRef      = useRef<NodeJS.Timeout | null>(null);
+  const timerRef      = useRef<any>(null);
   const remoteIdRef   = useRef<string>(remoteSocketId || '');
 
-  // ─────────────────────────────────────────────────────────────
-  // Setup — camera, socket, peer connection
-  // ─────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Setup â€” camera, socket, peer connection
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     let mounted = true;
 
     const setup = async () => {
       try {
-        // 1. Set audio mode — speaker by default for video calls
+        // 1. Set audio mode â€” speaker by default for video calls
         await Audio.setAudioModeAsync({
           allowsRecordingIOS:       true,
           playsInSilentModeIOS:     true,
@@ -132,7 +132,7 @@ export default function VideoCallScreen() {
         stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
         // Handle remote stream
-        pc.ontrack = (event: any) => {
+        (pc as any).ontrack = (event: any) => {
           if (event.streams && event.streams[0]) {
             setRemoteStream(event.streams[0]);
             setCallState('connected');
@@ -154,13 +154,13 @@ export default function VideoCallScreen() {
           socket.emit('register', uid);
 
           if (isIncoming === 'true') {
-            // ── Incoming call — we are the callee ─────────────
+            // â”€â”€ Incoming call â€” we are the callee â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             setCallState('ringing');
             // Answer is triggered by user tapping Accept
-            // (in this flow we auto-answer — add answer UI if needed)
+            // (in this flow we auto-answer â€” add answer UI if needed)
             await answerCall(pc, socket);
           } else {
-            // ── Outgoing call — we are the caller ─────────────
+            // â”€â”€ Outgoing call â€” we are the caller â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             setCallState('ringing');
             await initiateCall(pc, socket);
           }
@@ -200,7 +200,7 @@ export default function VideoCallScreen() {
         });
 
         // Send ICE candidates to remote peer as they are discovered
-        pc.onicecandidate = (event: any) => {
+        (pc as any).onicecandidate = (event: any) => {
           if (event.candidate && remoteIdRef.current) {
             socket.emit('ice_candidate', {
               toSocketId: remoteIdRef.current,
@@ -210,7 +210,7 @@ export default function VideoCallScreen() {
         };
 
         // Connection state changes
-        pc.onconnectionstatechange = () => {
+        (pc as any).onconnectionstatechange = () => {
           console.log('[Call] Connection state:', pc.connectionState);
           if (pc.connectionState === 'failed') {
             Alert.alert('Call Failed', 'Connection failed. Check your network.');
@@ -236,9 +236,9 @@ export default function VideoCallScreen() {
     };
   }, []);
 
-  // ─────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Initiate outgoing call
-  // ─────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const initiateCall = async (pc: RTCPeerConnection, socket: Socket) => {
     try {
       // Get recipient's socket ID from Firestore
@@ -271,9 +271,9 @@ export default function VideoCallScreen() {
     }
   };
 
-  // ─────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Answer incoming call
-  // ─────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const answerCall = async (pc: RTCPeerConnection, socket: Socket) => {
     // Offer comes via socket event 'call_offer_for_you'
     socket.on('call_offer_for_you', async ({ offer, fromSocketId, callerName }: any) => {
@@ -294,9 +294,9 @@ export default function VideoCallScreen() {
     });
   };
 
-  // ─────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Timer
-  // ─────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const startTimer = () => {
     timerRef.current = setInterval(() => setSeconds(s => s + 1), 1000);
   };
@@ -307,9 +307,9 @@ export default function VideoCallScreen() {
     return `${m}:${sec}`;
   };
 
-  // ─────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Controls
-  // ─────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const toggleMute = () => {
     localStream?.getAudioTracks().forEach(track => {
       track.enabled = muted; // toggle
@@ -358,15 +358,15 @@ export default function VideoCallScreen() {
     socketRef.current?.disconnect();
   };
 
-  // ─────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Render
-  // ─────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const BEAUTY_OPTS: Beauty[] = ['Off', 'Soft', 'Smooth', 'Glow'];
 
   const stateLabel: Record<CallState, string> = {
     connecting: 'Connecting...',
     ringing:    'Ringing...',
-    connected:  `● ${formatTime(seconds)}  Encrypted`,
+    connected:  `â— ${formatTime(seconds)}  Encrypted`,
     ended:      'Call Ended',
   };
 
@@ -374,7 +374,7 @@ export default function VideoCallScreen() {
     <View style={styles.container}>
       <StatusBar hidden />
 
-      {/* Remote video — full screen */}
+      {/* Remote video â€” full screen */}
       {remoteStream ? (
         <RTCView
           streamURL={remoteStream.toURL()}
@@ -392,7 +392,7 @@ export default function VideoCallScreen() {
 
       {/* D2DE badge */}
       <View style={styles.d2deBadge}>
-        <Text style={styles.d2deText}>🛡️ D2DE</Text>
+        <Text style={styles.d2deText}>ðŸ›¡ï¸ D2DE</Text>
       </View>
 
       {/* Call timer */}
@@ -402,7 +402,7 @@ export default function VideoCallScreen() {
         </View>
       )}
 
-      {/* Local video PiP — bottom right */}
+      {/* Local video PiP â€” bottom right */}
       {localStream && !cameraOff ? (
         <RTCView
           streamURL={localStream.toURL()}
@@ -426,7 +426,7 @@ export default function VideoCallScreen() {
             onPress={() => setBeauty(b)}
           >
             <Text style={[styles.beautyText, beauty === b && styles.beautyTextActive]}>
-              ✨ {b}
+              âœ¨ {b}
             </Text>
           </TouchableOpacity>
         ))}
@@ -436,19 +436,19 @@ export default function VideoCallScreen() {
       <View style={styles.topControls}>
         {[
           {
-            icon: speaker ? '🔊' : '🔇',
+            icon: speaker ? 'ðŸ”Š' : 'ðŸ”‡',
             label: 'Speaker',
             action: toggleSpeaker,
             active: speaker,
           },
           {
-            icon: '🔄',
+            icon: 'ðŸ”„',
             label: 'Flip',
             action: flipCamera,
             active: false,
           },
           {
-            icon: '📺',
+            icon: 'ðŸ“º',
             label: 'Share',
             action: () => Alert.alert('Screen Share', 'Screen share coming in next update'),
             active: false,
@@ -474,13 +474,13 @@ export default function VideoCallScreen() {
           style={[styles.circleBtn, muted && styles.circleBtnActive]}
           onPress={toggleMute}
         >
-          <Text style={styles.circleBtnIcon}>{muted ? '🔇' : '🎤'}</Text>
+          <Text style={styles.circleBtnIcon}>{muted ? 'ðŸ”‡' : 'ðŸŽ¤'}</Text>
           <Text style={styles.circleBtnLabel}>{muted ? 'Unmute' : 'Mute'}</Text>
         </TouchableOpacity>
 
         {/* End call */}
         <TouchableOpacity style={styles.endBtn} onPress={() => endCall(true)}>
-          <Text style={styles.endBtnIcon}>📵</Text>
+          <Text style={styles.endBtnIcon}>ðŸ“µ</Text>
           <Text style={styles.endBtnLabel}>End</Text>
         </TouchableOpacity>
 
@@ -489,7 +489,7 @@ export default function VideoCallScreen() {
           style={[styles.circleBtn, cameraOff && styles.circleBtnActive]}
           onPress={toggleCamera}
         >
-          <Text style={styles.circleBtnIcon}>{cameraOff ? '🚫' : '📷'}</Text>
+          <Text style={styles.circleBtnIcon}>{cameraOff ? 'ðŸš«' : 'ðŸ“·'}</Text>
           <Text style={styles.circleBtnLabel}>{cameraOff ? 'Cam Off' : 'Camera'}</Text>
         </TouchableOpacity>
       </View>
@@ -497,9 +497,9 @@ export default function VideoCallScreen() {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Styles
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const styles = StyleSheet.create({
   container: {
     flex: 1,

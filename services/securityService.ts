@@ -8,9 +8,9 @@ import firestore from '@react-native-firebase/firestore';
 import auth from '@react-native-firebase/auth';
 import DeviceInfo from 'react-native-device-info';
 
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Types
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export type ThreatType =
   | 'ROOT_DETECTED'
@@ -35,7 +35,7 @@ export interface SecurityReport {
   deviceModel: string;
 }
 
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // 1. Root / Jailbreak Detection
 //    Uses react-native-device-info which checks 20+ native indicators:
 //    - su binary in /system/xbin/su, /system/bin/su, /sbin/su etc.
@@ -43,19 +43,19 @@ export interface SecurityReport {
 //    - Dangerous system properties
 //    - /system writeable check
 //    - Build tags containing "test-keys"
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function checkRootJailbreak(): Promise<ThreatDetail[]> {
   const threats: ThreatDetail[] = [];
 
   try {
-    // Primary check — react-native-device-info isRooted()
+    // Primary check â€” react-native-device-info isRooted()
     // This is a native call that checks 20+ root indicators
-    const rooted = await DeviceInfo.isRooted();
+    const rooted = await (DeviceInfo as any).isRooted();
     if (rooted) {
       threats.push({
         type: 'ROOT_DETECTED',
-        detail: 'Device is rooted — react-native-device-info confirmed root indicators',
+        detail: 'Device is rooted â€” react-native-device-info confirmed root indicators',
       });
     }
   } catch (e) {
@@ -63,7 +63,7 @@ async function checkRootJailbreak(): Promise<ThreatDetail[]> {
     console.warn('[Security] isRooted() call failed:', e);
   }
 
-  // Secondary check — build fingerprint for test-keys
+  // Secondary check â€” build fingerprint for test-keys
   // Test-keys means the ROM was compiled with debug keys = modified/rooted ROM
   try {
     const fingerprint = await DeviceInfo.getFingerprint();
@@ -77,14 +77,14 @@ async function checkRootJailbreak(): Promise<ThreatDetail[]> {
     console.warn('[Security] getFingerprint() failed:', e);
   }
 
-  // Tertiary check — ADB enabled check (suspicious on production devices)
+  // Tertiary check â€” ADB enabled check (suspicious on production devices)
   // ADB being enabled doesn't mean rooted but is a red flag worth logging
   try {
-    const adbEnabled = await DeviceInfo.isAdbEnabled();
+    const adbEnabled = await (DeviceInfo as any).isAdbEnabled();
     if (adbEnabled) {
       threats.push({
         type: 'ADB_ENABLED',
-        detail: 'ADB debugging is enabled — possible developer/attacker access',
+        detail: 'ADB debugging is enabled â€” possible developer/attacker access',
       });
     }
   } catch (e) {
@@ -94,23 +94,23 @@ async function checkRootJailbreak(): Promise<ThreatDetail[]> {
   return threats;
 }
 
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // 2. Frida / Anti-Instrumentation Detection
 //    Frida injects a server on port 27042 by default.
-//    We attempt a TCP connection — if anything responds, Frida is present.
+//    We attempt a TCP connection â€” if anything responds, Frida is present.
 //    We also check for the Frida gadget response header.
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function checkFrida(): Promise<ThreatDetail[]> {
   const threats: ThreatDetail[] = [];
 
-  // Method A — TCP port probe (most reliable)
+  // Method A â€” TCP port probe (most reliable)
   // Frida server listens on 127.0.0.1:27042
   // Normal device: connection refused immediately (error = clean)
   // Frida present: connection succeeds or returns data
   try {
     const controller = new AbortController();
-    // 800ms timeout — Frida responds immediately if present
+    // 800ms timeout â€” Frida responds immediately if present
     const timeoutId = setTimeout(() => controller.abort(), 800);
 
     const response = await fetch('http://127.0.0.1:27042', {
@@ -123,21 +123,21 @@ async function checkFrida(): Promise<ThreatDetail[]> {
     // If we got ANY response, Frida is listening
     threats.push({
       type: 'FRIDA_PORT_27042',
-      detail: `Frida server responded on port 27042 — status ${response.status}`,
+      detail: `Frida server responded on port 27042 â€” status ${response.status}`,
     });
 
   } catch (err: any) {
-    // AbortError = timeout (port may be open but slow — flag it)
+    // AbortError = timeout (port may be open but slow â€” flag it)
     if (err?.name === 'AbortError') {
-      // Timeout after 800ms is suspicious — Frida sometimes delays
+      // Timeout after 800ms is suspicious â€” Frida sometimes delays
       // Don't flag this as a threat, but log it
-      console.warn('[Security] Port 27042 timeout — inconclusive');
+      console.warn('[Security] Port 27042 timeout â€” inconclusive');
     }
     // Network error / connection refused = clean (expected on normal device)
     // 'TypeError: Network request failed' = port closed = safe
   }
 
-  // Method B — Check Frida gadget well-known response
+  // Method B â€” Check Frida gadget well-known response
   // Frida returns a specific string when queried
   try {
     const controller2 = new AbortController();
@@ -156,7 +156,7 @@ async function checkFrida(): Promise<ThreatDetail[]> {
     if (text && (text.includes('frida') || text.includes('session') || text.length > 0)) {
       threats.push({
         type: 'FRIDA_SERVER_RESPONSE',
-        detail: `Frida server returned data on /enumerate — instrumentation confirmed`,
+        detail: `Frida server returned data on /enumerate â€” instrumentation confirmed`,
       });
     }
   } catch {
@@ -166,10 +166,10 @@ async function checkFrida(): Promise<ThreatDetail[]> {
   return threats;
 }
 
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // 3. Emulator Check
-//    Real-device-only enforcement — emulator attacks are common
-// ─────────────────────────────────────────────────────────────────
+//    Real-device-only enforcement â€” emulator attacks are common
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function checkEmulator(): Promise<ThreatDetail[]> {
   const threats: ThreatDetail[] = [];
@@ -178,7 +178,7 @@ async function checkEmulator(): Promise<ThreatDetail[]> {
     if (isEmulator) {
       threats.push({
         type: 'EMULATOR_DETECTED',
-        detail: 'App is running on an emulator — not permitted in production',
+        detail: 'App is running on an emulator â€” not permitted in production',
       });
     }
   } catch (e) {
@@ -187,15 +187,15 @@ async function checkEmulator(): Promise<ThreatDetail[]> {
   return threats;
 }
 
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // 4. Key Wipe
 //    Called immediately when any threat is detected.
 //    Deletes ALL session keys, ratchet states, and vault PIN
 //    from hardware-backed SecureStore.
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function wipeAllKeys(): Promise<void> {
-  console.warn('[SECURITY] THREAT DETECTED — WIPING ALL KEYS');
+  console.warn('[SECURITY] THREAT DETECTED â€” WIPING ALL KEYS');
 
   const keysToDelete = [
     'vault_pin',
@@ -210,7 +210,7 @@ export async function wipeAllKeys(): Promise<void> {
     try {
       await SecureStore.deleteItemAsync(key);
     } catch {
-      // Key may not exist — continue
+      // Key may not exist â€” continue
     }
   }
 
@@ -229,7 +229,7 @@ export async function wipeAllKeys(): Promise<void> {
   } catch {}
 
   // Also wipe any numbered session keys (brute cleanup)
-  // SecureStore doesn't support listing — we clean up to 200 possible chats
+  // SecureStore doesn't support listing â€” we clean up to 200 possible chats
   // In production, maintain your own key manifest
   for (let i = 0; i < 50; i++) {
     try { await SecureStore.deleteItemAsync(`d2de_key_chat_${i}`); } catch {}
@@ -239,10 +239,10 @@ export async function wipeAllKeys(): Promise<void> {
   console.warn('[SECURITY] All keys wiped successfully');
 }
 
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // 5. Log Security Event to Firestore
 //    Logged under users/{uid}/securityEvents/{auto-id}
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function logThreatToFirestore(report: SecurityReport): Promise<void> {
   try {
@@ -270,12 +270,12 @@ async function logThreatToFirestore(report: SecurityReport): Promise<void> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────
-// 6. Main Entry — runSecurityCheck()
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// 6. Main Entry â€” runSecurityCheck()
 //    Call this in _layout.tsx on every app mount.
 //    Returns SecurityReport.
-//    If clean = false → navigate to /blocked screen.
-// ─────────────────────────────────────────────────────────────────
+//    If clean = false â†’ navigate to /blocked screen.
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function runSecurityCheck(): Promise<SecurityReport> {
   const deviceModel = DeviceInfo.getModel();
@@ -300,26 +300,26 @@ export async function runSecurityCheck(): Promise<SecurityReport> {
   report.clean = report.threats.length === 0;
 
   if (!report.clean) {
-    // 1. Wipe all keys immediately — before logging, before anything else
+    // 1. Wipe all keys immediately â€” before logging, before anything else
     await wipeAllKeys();
 
-    // 2. Log to Firestore (non-blocking — don't await in critical path)
+    // 2. Log to Firestore (non-blocking â€” don't await in critical path)
     logThreatToFirestore(report).catch(() => {});
 
     console.warn('[SECURITY] THREATS FOUND:', report.threats.map(t => t.type));
   } else {
-    console.log('[Security] Device clean — no threats detected');
+    console.log('[Security] Device clean â€” no threats detected');
   }
 
   return report;
 }
 
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // 7. Screenshot Detection Logger
 //    Called from chat.tsx when FLAG_SECURE is bypassed.
-//    expo-screen-capture blocks screenshots natively —
+//    expo-screen-capture blocks screenshots natively â€”
 //    this logs attempts that get through (e.g. via ADB screencap).
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function logScreenshotAttempt(chatId: string): Promise<void> {
   try {

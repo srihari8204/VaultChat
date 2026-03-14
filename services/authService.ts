@@ -1,5 +1,5 @@
-﻿import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, updateProfile, sendEmailVerification, User } from 'firebase/auth';
-import { auth } from './firebase';
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, updateProfile, sendEmailVerification, User } from 'firebase/auth';
+import auth from '@react-native-firebase/auth';
 
 export const registerUser = async (email: string, password: string, displayName: string, phone: string = '') => {
   const cred = await createUserWithEmailAndPassword(auth, email, password);

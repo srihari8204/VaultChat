@@ -1,4 +1,4 @@
-// app/chats.tsx
+﻿// app/chats.tsx
 // Chat list: 1:1 + groups, search, starred, mute, archive, online status,
 // note-to-self, swipe actions
 
@@ -63,7 +63,7 @@ export default function ChatsScreen() {
             } as ChatItem;
           }
 
-          // 1:1 â€” get peer info
+          // 1:1 Ã¢â‚¬â€ get peer info
           const peerUid = (d.participants as string[]).find(u => u !== myUid) ?? '';
           let name = d.participantNames?.[peerUid] ?? 'Unknown';
           let photo = '';
@@ -147,7 +147,7 @@ export default function ChatsScreen() {
       .where('isNoteToSelf', '==', true)
       .get();
     if (!chatSnap.empty) {
-      router.push({ pathname: '/chat', params: { chatId: chatSnap.docs[0].id, peerUid: myUid, peerName: 'ðŸ“‹ Note to Self' } });
+      router.push({ pathname: '/chat', params: { chatId: chatSnap.docs[0].id, peerUid: myUid, peerName: 'Ã°Å¸â€œâ€¹ Note to Self' } });
     }
   };
 
@@ -171,7 +171,7 @@ export default function ChatsScreen() {
           {item.photoURL
             ? <Image source={{ uri: item.photoURL }} style={s.avatar} />
             : <View style={[s.avatar, s.avatarFallback]}>
-                <Text style={s.avatarTxt}>{item.isGroup ? 'ðŸ‘¥' : item.name[0]?.toUpperCase()}</Text>
+                <Text style={s.avatarTxt}>{item.isGroup ? 'Ã°Å¸â€˜Â¥' : item.name[0]?.toUpperCase()}</Text>
               </View>
           }
           {item.online && !item.isGroup && <View style={s.onlineDot} />}
@@ -181,8 +181,8 @@ export default function ChatsScreen() {
         <View style={s.chatBody}>
           <View style={s.chatTop}>
             <View style={s.nameRow}>
-              {item.pinned && <Text style={s.pinIcon}>ðŸ“Œ </Text>}
-              {item.muted  && <Text style={s.muteIcon}>ðŸ”• </Text>}
+              {item.pinned && <Text style={s.pinIcon}>Ã°Å¸â€œÅ’ </Text>}
+              {item.muted  && <Text style={s.muteIcon}>Ã°Å¸â€â€¢ </Text>}
               <Text style={s.chatName} numberOfLines={1}>{item.name}</Text>
             </View>
             <Text style={s.chatTime}>{fmt(item.lastTime)}</Text>
@@ -205,13 +205,13 @@ export default function ChatsScreen() {
       <Pressable style={s.overlay} onPress={() => setLongPress(null)}>
         <View style={s.sheet}>
           <TouchableOpacity style={s.sheetRow} onPress={() => { pinChat(longPress.id, !longPress.pinned); setLongPress(null); }}>
-            <Text style={s.sheetTxt}>{longPress.pinned ? 'ðŸ“Œ Unpin' : 'ðŸ“Œ Pin to top'}</Text>
+            <Text style={s.sheetTxt}>{longPress.pinned ? 'Ã°Å¸â€œÅ’ Unpin' : 'Ã°Å¸â€œÅ’ Pin to top'}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={s.sheetRow} onPress={() => { muteChat(longPress.id, !longPress.muted); setLongPress(null); }}>
-            <Text style={s.sheetTxt}>{longPress.muted ? 'ðŸ”” Unmute' : 'ðŸ”• Mute'}</Text>
+            <Text style={s.sheetTxt}>{longPress.muted ? 'Ã°Å¸â€â€ Unmute' : 'Ã°Å¸â€â€¢ Mute'}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={s.sheetRow} onPress={() => { archiveChat(longPress.id, !longPress.archived); setLongPress(null); }}>
-            <Text style={s.sheetTxt}>{longPress.archived ? 'ðŸ“‚ Unarchive' : 'ðŸ—„ Archive'}</Text>
+            <Text style={s.sheetTxt}>{longPress.archived ? 'Ã°Å¸â€œâ€š Unarchive' : 'Ã°Å¸â€”â€ž Archive'}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={s.sheetRow} onPress={() => setLongPress(null)}>
             <Text style={[s.sheetTxt, { color: '#555' }]}>Cancel</Text>
@@ -228,32 +228,32 @@ export default function ChatsScreen() {
         headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff',
         headerRight: () => (
           <View style={{ flexDirection: 'row', gap: 14, marginRight: 14 }}>
-            <TouchableOpacity onPress={ensureNoteToSelf}><Text style={{ color: '#00E5FF', fontSize: 18 }}>ðŸ“‹</Text></TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push('/create-group')}><Text style={{ color: '#00E5FF', fontSize: 22 }}>ðŸ‘¥</Text></TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push('/profile')}><Text style={{ color: '#00E5FF', fontSize: 22 }}>âš™ï¸</Text></TouchableOpacity>
+            <TouchableOpacity onPress={ensureNoteToSelf}><Text style={{ color: '#00E5FF', fontSize: 18 }}>Ã°Å¸â€œâ€¹</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/create-group')}><Text style={{ color: '#00E5FF', fontSize: 22 }}>Ã°Å¸â€˜Â¥</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/profile')}><Text style={{ color: '#00E5FF', fontSize: 22 }}>Ã¢Å¡â„¢Ã¯Â¸Â</Text></TouchableOpacity>
           </View>
         ),
       }} />
       <View style={s.screen}>
         {/* Search */}
         <View style={s.searchBar}>
-          <Text style={s.searchIcon}>ðŸ”</Text>
+          <Text style={s.searchIcon}>Ã°Å¸â€Â</Text>
           <TextInput
             style={s.searchInput}
-            placeholder="Search chatsâ€¦"
+            placeholder="Search chatsÃ¢â‚¬Â¦"
             placeholderTextColor="#444"
             value={search}
             onChangeText={setSearch}
           />
           {search.length > 0 && (
-            <TouchableOpacity onPress={() => setSearch('')}><Text style={{ color: '#555', fontSize: 18 }}>âœ•</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => setSearch('')}><Text style={{ color: '#555', fontSize: 18 }}>Ã¢Å“â€¢</Text></TouchableOpacity>
           )}
         </View>
 
         {/* Archive toggle */}
         {chats.some(c => c.archived) && (
           <TouchableOpacity style={s.archiveToggle} onPress={() => setShowArchive(p => !p)}>
-            <Text style={s.archiveTxt}>{showArchive ? 'â† Back to chats' : `ðŸ—„ Archived (${chats.filter(c => c.archived).length})`}</Text>
+            <Text style={s.archiveTxt}>{showArchive ? 'Ã¢â€ Â Back to chats' : `Ã°Å¸â€”â€ž Archived (${chats.filter(c => c.archived).length})`}</Text>
           </TouchableOpacity>
         )}
 
@@ -264,9 +264,9 @@ export default function ChatsScreen() {
           refreshControl={<RefreshControl refreshing={loading} colors={['#00E5FF']} tintColor="#00E5FF" />}
           ListEmptyComponent={
             <View style={s.empty}>
-              <Text style={s.emptyIcon}>ðŸ’¬</Text>
+              <Text style={s.emptyIcon}>Ã°Å¸â€™Â¬</Text>
               <Text style={s.emptyTxt}>{search ? 'No chats found' : 'No chats yet'}</Text>
-              <Text style={s.emptySub}>Tap ðŸ‘¥ to create a group or start a new chat</Text>
+              <Text style={s.emptySub}>Tap the groups icon to create a group or start a new chat</Text>
             </View>
           }
         />

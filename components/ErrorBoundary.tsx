@@ -1,47 +1,45 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 
-interface State { hasError: boolean; error: string; screen: string }
+interface Props {
+  children: React.ReactNode;
+  screen?: string;
+  fallbackTitle?: string;
+  fallbackMessage?: string;
+}
+interface State { hasError: boolean; }
 
-export class ErrorBoundary extends React.Component<
-  { children: React.ReactNode; screen?: string },
-  State
-> {
-  state: State = { hasError: false, error: '', screen: '' };
+export class ErrorBoundary extends React.Component<Props, State> {
+  constructor(props: Props) { super(props); this.state = { hasError: false }; }
 
-  static getDerivedStateFromError(error: Error): Partial<State> {
-    return { hasError: true, error: error.message };
-  }
+  static getDerivedStateFromError(): State { return { hasError: true }; }
 
-  componentDidCatch(error: Error) {
-    errorHandler.log(this.props.screen || 'unknown', error);
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error('[ErrorBoundary]', this.props.screen, error.message, info);
   }
 
   render() {
-    if (!this.state.hasError) return this.props.children;
-    return (
-      <View style={EBss.root}>
-        <LinearGradient colors={['#010812','#020B18']} style={StyleSheet.absoluteFillObject}/>
-        <Text style={EBss.icon}>⚠️</Text>
-        <Text style={EBss.title}>Something went wrong</Text>
-        <Text style={EBss.msg}>{this.state.error}</Text>
-        <TouchableOpacity
-          onPress={() => this.setState({ hasError: false, error: '' })}
-          style={EBss.btn}>
-          <Text style={EBss.btnTxt}>Try Again</Text>
-        </TouchableOpacity>
-      </View>
-    );
+    if (this.state.hasError) {
+      return (
+        <View style={s.wrap}>
+          <Text style={s.title}>{this.props.fallbackTitle ?? 'Something went wrong'}</Text>
+          <Text style={s.msg}>{this.props.fallbackMessage ?? 'Please restart the app.'}</Text>
+          <TouchableOpacity style={s.btn} onPress={() => this.setState({ hasError: false })}>
+            <Text style={s.btnTxt}>Try Again</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    return this.props.children;
   }
 }
 
-const EBss = StyleSheet.create({
-  root:   { flex:1, justifyContent:'center', alignItems:'center', gap:16, padding:32 },
-  icon:   { fontSize:48 },
-  title:  { color:'#fff', fontSize:18, fontWeight:'900', textAlign:'center' },
-  msg:    { color:'rgba(255,255,255,0.5)', fontSize:12, textAlign:'center', fontFamily:'monospace' },
-  btn:    { backgroundColor:'rgba(74,159,255,0.2)', borderRadius:14, paddingHorizontal:28, paddingVertical:13, borderWidth:1, borderColor:'rgba(74,159,255,0.4)' },
-  btnTxt: { color:'#4A9FFF', fontSize:14, fontWeight:'900' },
-});
+export default ErrorBoundary;
 
+const s = StyleSheet.create({
+  wrap:   { flex: 1, backgroundColor: '#03030E', alignItems: 'center', justifyContent: 'center', padding: 32 },
+  title:  { color: '#FF3C6E', fontSize: 20, fontWeight: 'bold', marginBottom: 12, textAlign: 'center' },
+  msg:    { color: '#888', fontSize: 14, textAlign: 'center', lineHeight: 22, marginBottom: 24 },
+  btn:    { backgroundColor: '#00E5FF', borderRadius: 10, paddingHorizontal: 24, paddingVertical: 12 },
+  btnTxt: { color: '#000', fontSize: 15, fontWeight: 'bold' },
+});

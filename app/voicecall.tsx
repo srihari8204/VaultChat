@@ -20,7 +20,7 @@ import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import { Audio } from 'expo-av';
 
-// ── Same ICE config as videocall.tsx ─────────────────────────────
+// â”€â”€ Same ICE config as videocall.tsx â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
@@ -68,7 +68,7 @@ export default function VoiceCallScreen() {
 
   const pcRef       = useRef<RTCPeerConnection | null>(null);
   const socketRef   = useRef<Socket | null>(null);
-  const timerRef    = useRef<NodeJS.Timeout | null>(null);
+  const timerRef    = useRef<any>(null);
   const remoteIdRef = useRef<string>(remoteSocketId || '');
   const localStreamRef = useRef<any>(null);
 
@@ -77,14 +77,14 @@ export default function VoiceCallScreen() {
 
     const setup = async () => {
       try {
-        // Audio mode — earpiece for private voice calls
+        // Audio mode â€” earpiece for private voice calls
         await Audio.setAudioModeAsync({
           allowsRecordingIOS:         true,
           playsInSilentModeIOS:       true,
           playThroughEarpieceAndroid: true, // earpiece default
         });
 
-        // Audio only — no video track
+        // Audio only â€” no video track
         const stream = await mediaDevices.getUserMedia({
           audio: true,
           video: false,
@@ -99,7 +99,7 @@ export default function VoiceCallScreen() {
         stream.getTracks().forEach((track: any) => pc.addTrack(track, stream));
 
         // Remote audio plays automatically via WebRTC
-        pc.ontrack = () => {
+        (pc as any).ontrack = () => {
           setCallState('connected');
           startTimer();
         };
@@ -139,7 +139,7 @@ export default function VoiceCallScreen() {
 
         socket.on('call_ended', () => endCall(false));
 
-        pc.onicecandidate = (event: any) => {
+        (pc as any).onicecandidate = (event: any) => {
           if (event.candidate && remoteIdRef.current) {
             socket.emit('ice_candidate', {
               toSocketId: remoteIdRef.current,
@@ -148,7 +148,7 @@ export default function VoiceCallScreen() {
           }
         };
 
-        pc.onconnectionstatechange = () => {
+        (pc as any).onconnectionstatechange = () => {
           if (pc.connectionState === 'failed' ||
               pc.connectionState === 'disconnected') {
             endCall(true);
@@ -243,7 +243,7 @@ export default function VoiceCallScreen() {
 
       {/* D2DE badge */}
       <View style={styles.d2deBadge}>
-        <Text style={styles.d2deText}>🛡️ D2DE · Encrypted Voice</Text>
+        <Text style={styles.d2deText}>ðŸ›¡ï¸ D2DE Â· Encrypted Voice</Text>
       </View>
 
       {/* Avatar */}
@@ -258,7 +258,7 @@ export default function VoiceCallScreen() {
         styles.callStatus,
         callState === 'connected' && styles.callStatusActive,
       ]}>
-        {callState === 'connected' ? `● ${stateLabel.connected}` : stateLabel[callState]}
+        {callState === 'connected' ? `â— ${stateLabel.connected}` : stateLabel[callState]}
       </Text>
 
       {/* Signal strength visual */}
@@ -279,7 +279,7 @@ export default function VoiceCallScreen() {
             style={[styles.ctrlBtn, muted && styles.ctrlBtnActive]}
             onPress={toggleMute}
           >
-            <Text style={styles.ctrlIcon}>{muted ? '🔇' : '🎤'}</Text>
+            <Text style={styles.ctrlIcon}>{muted ? 'ðŸ”‡' : 'ðŸŽ¤'}</Text>
           </TouchableOpacity>
           <Text style={styles.ctrlLabel}>{muted ? 'Unmute' : 'Mute'}</Text>
         </View>
@@ -287,7 +287,7 @@ export default function VoiceCallScreen() {
         {/* End call */}
         <View style={styles.ctrlWrap}>
           <TouchableOpacity style={styles.endBtn} onPress={() => endCall(true)}>
-            <Text style={styles.endBtnIcon}>📵</Text>
+            <Text style={styles.endBtnIcon}>ðŸ“µ</Text>
           </TouchableOpacity>
           <Text style={[styles.ctrlLabel, { color: '#FF4D6D' }]}>End</Text>
         </View>
@@ -298,7 +298,7 @@ export default function VoiceCallScreen() {
             style={[styles.ctrlBtn, speaker && styles.ctrlBtnActive]}
             onPress={toggleSpeaker}
           >
-            <Text style={styles.ctrlIcon}>{speaker ? '🔊' : '🔉'}</Text>
+            <Text style={styles.ctrlIcon}>{speaker ? 'ðŸ”Š' : 'ðŸ”‰'}</Text>
           </TouchableOpacity>
           <Text style={styles.ctrlLabel}>{speaker ? 'Speaker' : 'Earpiece'}</Text>
         </View>

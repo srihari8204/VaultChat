@@ -1,5 +1,5 @@
 /**
- * VaultChat — Document Scanner
+ * VaultChat â€” Document Scanner
  * Step 1: Scan (camera / gallery)
  * Step 2: Enhance (filters + adjustments)
  * Step 3: Export (8 formats + 6 share targets)
@@ -157,7 +157,7 @@ export default function ScannerScreen() {
       // Copy image to cache with chosen format name
       const fmt  = FORMATS[selectedFmt];
       const date = new Date().toLocaleDateString("en-GB").replace(/\//g, "-");
-      const dest = `${FileSystem.cacheDirectory}VaultScan_${date}.${fmt.ext.toLowerCase()}`;
+      const dest = `${(FileSystem as any).cacheDirectory}VaultScan_${date}.${fmt.ext.toLowerCase()}`;
 
       if (imageUri) {
         await FileSystem.copyAsync({ from: imageUri, to: dest });
@@ -296,7 +296,7 @@ export default function ScannerScreen() {
             </ScrollView>
 
             <View style={s.infoBox}>
-              <Text style={s.infoText}>?? Tap camera to scan · ??? Import from gallery · Page count: {pages}</Text>
+              <Text style={s.infoText}>?? Tap camera to scan Â· ??? Import from gallery Â· Page count: {pages}</Text>
             </View>
           </View>
         )}
@@ -314,7 +314,7 @@ export default function ScannerScreen() {
                 </LinearGradient>
               )}
               <View style={s.previewBadge}>
-                <Text style={s.previewBadgeText}>{pages} page{pages>1?"s":""} · {FILTERS[activeFilter].name}</Text>
+                <Text style={s.previewBadgeText}>{pages} page{pages>1?"s":""} Â· {FILTERS[activeFilter].name}</Text>
               </View>
             </View>
 
@@ -421,7 +421,7 @@ export default function ScannerScreen() {
                   VaultScan_{new Date().toLocaleDateString("en-GB").replace(/\//g,"-")}.{fmt.ext.toLowerCase()}
                 </Text>
                 <Text style={s.fileCardMeta}>
-                  {pages} page{pages>1?"s":""} · ~{(pages*0.4+0.3).toFixed(1)} MB · ?? AES-256
+                  {pages} page{pages>1?"s":""} Â· ~{(pages*0.4+0.3).toFixed(1)} MB Â· ?? AES-256
                 </Text>
               </View>
             </View>
@@ -467,7 +467,7 @@ export default function ScannerScreen() {
               {fmt.ext} exported via {SHARE_APPS[selectedApp].name} and sent to {chatName}.
             </Text>
             <View style={s.doneEncBadge}>
-              <Text style={s.doneEncText}>?? AES-256 Encrypted · Zero Server Storage</Text>
+              <Text style={s.doneEncText}>?? AES-256 Encrypted Â· Zero Server Storage</Text>
             </View>
             <View style={s.rowBtns}>
               <TouchableOpacity onPress={reset} style={{ flex:1 }}>
@@ -518,7 +518,7 @@ const s = StyleSheet.create({
   scroll:            { padding:16, paddingBottom:48 },
   sectionLabel:      { color:"rgba(255,255,255,0.4)", fontSize:10, fontWeight:"700",
                        textTransform:"uppercase", letterSpacing:0.8, marginBottom:8 },
-  // Step 0 — scan
+  // Step 0 â€” scan
   viewfinder:        { borderRadius:16, overflow:"hidden", marginBottom:14, height:200 },
   viewfinderInner:   { flex:1, justifyContent:"center", alignItems:"center",
                        borderWidth:1, borderColor:"rgba(255,255,255,0.07)", borderRadius:16 },
@@ -565,7 +565,7 @@ const s = StyleSheet.create({
   infoBox:           { backgroundColor:"rgba(74,159,255,0.06)", borderRadius:10,
                        padding:10, borderWidth:1, borderColor:"rgba(74,159,255,0.12)" },
   infoText:          { color:"rgba(255,255,255,0.35)", fontSize:11, textAlign:"center" },
-  // Step 1 — enhance
+  // Step 1 â€” enhance
   previewBox:        { height:180, borderRadius:16, overflow:"hidden", marginBottom:14, position:"relative" },
   previewImg:        { width:"100%", height:"100%" },
   previewPlaceholder:{ flex:1, justifyContent:"center", alignItems:"center" },
@@ -592,7 +592,7 @@ const s = StyleSheet.create({
                        borderRadius:8, alignItems:"center", borderWidth:1,
                        borderColor:"rgba(255,255,255,0.08)" },
   sliderAdjText:     { color:"#4A9FFF", fontSize:16, fontWeight:"900" },
-  // Step 2 — export
+  // Step 2 â€” export
   exportPreview:     { height:120, borderRadius:14, overflow:"hidden", marginBottom:14 },
   exportImg:         { width:"100%", height:"100%" },
   exportPlaceholder: { flex:1, justifyContent:"center", alignItems:"center" },

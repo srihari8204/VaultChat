@@ -1,7 +1,7 @@
 
 import QuickCrypto from 'react-native-quick-crypto';
 
-// ── Key derivation ────────────────────────────────────────────────
+// â”€â”€ Key derivation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Derives a 256-bit AES key from a VaultID + shared secret using PBKDF2
 export async function deriveKey(vaultId: string, secret: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -19,7 +19,7 @@ export async function deriveKey(vaultId: string, secret: string): Promise<Buffer
   });
 }
 
-// ── AES-256-GCM encrypt ───────────────────────────────────────────
+// â”€â”€ AES-256-GCM encrypt â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Returns base64 string: IV(12) + AuthTag(16) + Ciphertext
 export function encryptMessage(plaintext: string, key: Buffer): string {
   // Generate random 12-byte IV
@@ -30,19 +30,19 @@ export function encryptMessage(plaintext: string, key: Buffer): string {
 
   // Encrypt
   const encrypted = Buffer.concat([
-    cipher.update(plaintext, 'utf8') as Buffer,
-    cipher.final() as Buffer,
+    cipher.update(plaintext, 'utf8') as any,
+    cipher.final() as any,
   ]);
 
-  // Get auth tag (16 bytes — prevents tampering)
+  // Get auth tag (16 bytes â€” prevents tampering)
   const authTag = (cipher as any).getAuthTag();
 
-  // Combine: IV + AuthTag + Ciphertext → base64
+  // Combine: IV + AuthTag + Ciphertext â†’ base64
   const combined = Buffer.concat([iv, authTag, encrypted]);
   return combined.toString('base64');
 }
 
-// ── AES-256-GCM decrypt ───────────────────────────────────────────
+// â”€â”€ AES-256-GCM decrypt â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export function decryptMessage(encryptedBase64: string, key: Buffer): string {
   const combined = Buffer.from(encryptedBase64, 'base64');
 
@@ -57,14 +57,14 @@ export function decryptMessage(encryptedBase64: string, key: Buffer): string {
 
   // Decrypt
   const decrypted = Buffer.concat([
-    decipher.update(ciphertext) as Buffer,
-    decipher.final() as Buffer,
+    decipher.update(ciphertext) as any,
+    decipher.final() as any,
   ]);
 
   return decrypted.toString('utf8');
 }
 
-// ── ECDH key exchange ─────────────────────────────────────────────
+// â”€â”€ ECDH key exchange â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Each user generates an ECDH keypair on first install
 // Public keys are exchanged via server, private keys never leave device
 export function generateKeyPair(): { publicKey: string; privateKey: string } {
@@ -72,7 +72,7 @@ export function generateKeyPair(): { publicKey: string; privateKey: string } {
   ecdh.generateKeys();
   return {
     publicKey:  ecdh.getPublicKey('base64') as string,
-    privateKey: ecdh.getPrivateKey('base64') as string,
+    privateKey: ecdh.getPrivateKey() as unknown as string,
   };
 }
 
@@ -85,10 +85,10 @@ export function computeSharedSecret(
   ecdh.setPrivateKey(Buffer.from(myPrivateKeyBase64, 'base64'));
   return ecdh.computeSecret(
     Buffer.from(theirPublicKeyBase64, 'base64')
-  ) as Buffer;
+  ) as any;
 }
 
-// ── Vault file encryption ─────────────────────────────────────────
+// â”€â”€ Vault file encryption â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Encrypts the full .vault backup payload
 export function encryptVaultFile(jsonData: object, vaultId: string): string {
   const key       = QuickCrypto.randomBytes(32); // ephemeral key
@@ -96,8 +96,8 @@ export function encryptVaultFile(jsonData: object, vaultId: string): string {
   const plaintext = JSON.stringify(jsonData);
   const cipher    = QuickCrypto.createCipheriv('aes-256-gcm', key, iv);
   const encrypted = Buffer.concat([
-    cipher.update(plaintext, 'utf8') as Buffer,
-    cipher.final() as Buffer,
+    cipher.update(plaintext, 'utf8') as any,
+    cipher.final() as any,
   ]);
   const authTag = (cipher as any).getAuthTag();
 
@@ -126,20 +126,20 @@ export function decryptVaultFile(raw: string, vaultId: string): object {
   (decipher as any).setAuthTag(authTag);
 
   const dec = Buffer.concat([
-    decipher.update(ciphered) as Buffer,
-    decipher.final() as Buffer,
+    decipher.update(ciphered) as any,
+    decipher.final() as any,
   ]);
   return JSON.parse(dec.toString('utf8'));
 }
 
-// ── Random secure token (for VaultID, session tokens) ────────────
+// â”€â”€ Random secure token (for VaultID, session tokens) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export function generateSecureToken(length: number = 32): string {
   return QuickCrypto.randomBytes(length).toString('hex');
 }
 
-// ── Hash (SHA-256, for checksums/VaultID anchoring) ──────────────
+// â”€â”€ Hash (SHA-256, for checksums/VaultID anchoring) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export function sha256(input: string): string {
   return QuickCrypto.createHash('sha256')
     .update(input)
-    .digest('hex') as string;
+    .digest('hex') as unknown as string;
 }
