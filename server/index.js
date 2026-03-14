@@ -1,4 +1,4 @@
-﻿const express    = require('express');
+const express    = require('express');
 const http       = require('http');
 const { Server } = require('socket.io');
 const admin      = require('firebase-admin');
@@ -84,6 +84,8 @@ io.on('connection', socket => {
   });
 
   socket.on('message_edited',  d => socket.to(`chat:${d.chatId}`).emit('message_edited',  d));
+  
+  socket.on('reaction_updated', d => socket.to(`chat:${d.chatId}`).emit('reaction_updated', d));
   socket.on('message_deleted', d => socket.to(`chat:${d.chatId}`).emit('message_deleted', d));
 
   socket.on('disconnect', () => {

@@ -1,16 +1,36 @@
-﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
+// app/chat.tsx
+// Phase 1 + Phase 2: E2E encryption, ticks, typing, reply, edit, delete,
+// photos, videos, files, voice messages, GIFs, emoji reactions,
+// message formatting (bold, italic, code)
+
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, TextInput, FlatList, TouchableOpacity,
   KeyboardAvoidingView, Platform, StyleSheet, Alert,
-  ActivityIndicator, Pressable,
+  ActivityIndicator, Pressable, Image,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
+import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import { io, Socket } from 'socket.io-client';
 import { encryptMessage, decryptMessage, EncryptedPayload } from '../services/d2deService';
+import { uploadMedia } from '../services/mediaService';
+import AttachmentSheet from '../components/AttachmentSheet';
+import VoiceRecorder   from '../components/VoiceRecorder';
+import GifPicker       from '../components/GifPicker';
+import ReactionPicker  from '../components/ReactionPicker';
+import MediaMessage    from '../components/MediaMessage';
 
 const BACKEND = 'https://vaultchat.onrender.com';
+
+// â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+type MsgStatus = 'sending' | 'sent' | 'delivered' | 'read';
+type MsgType   = 'text' | 'image' | 'video' | 'audio' | 'file' | 'gif';
+
+interface Reactions { [emoji: string]: string[]; }
 
 interface Message {
   id: string;
@@ -18,13 +38,35 @@ interface Message {
   plaintext: string;
   ciphertext: string;
   iv: string;
-  status: 'sending' | 'sent' | 'delivered' | 'read';
+  status: MsgStatus;
   createdAt: any;
   isEdited?: boolean;
   isDeleted?: boolean;
   replyTo?: { id: string; senderId: string; plaintext: string };
-  msgType: 'text' | 'image' | 'audio' | 'file';
+  msgType: MsgType;
+  mediaUrl?: string;
+  filename?: string;
+  audioDuration?: number;
+  reactions?: Reactions;
 }
+
+// â”€â”€ Formatting helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+function renderFormatted(text: string): React.ReactNode {
+  // bold: *text*, italic: _text_, code: `text`
+  const parts = text.split(/(\*[^*]+\*|_[^_]+_|`[^`]+`)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith('*') && part.endsWith('*'))
+      return <Text key={i} style={{ fontWeight: 'bold' }}>{part.slice(1, -1)}</Text>;
+    if (part.startsWith('_') && part.endsWith('_'))
+      return <Text key={i} style={{ fontStyle: 'italic' }}>{part.slice(1, -1)}</Text>;
+    if (part.startsWith('`') && part.endsWith('`'))
+      return <Text key={i} style={{ fontFamily: 'monospace', backgroundColor: '#111', color: '#00E5FF' }}>{part.slice(1, -1)}</Text>;
+    return <Text key={i}>{part}</Text>;
+  });
+}
+
+// â”€â”€ Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export default function ChatScreen() {
   const { chatId, peerUid, peerName } = useLocalSearchParams<{
@@ -33,21 +75,28 @@ export default function ChatScreen() {
   const router = useRouter();
   const myUid  = auth().currentUser?.uid ?? '';
 
-  const [messages,     setMessages]     = useState<Message[]>([]);
-  const [inputText,    setInputText]    = useState('');
-  const [loading,      setLoading]      = useState(true);
-  const [sending,      setSending]      = useState(false);
-  const [peerTyping,   setPeerTyping]   = useState(false);
-  const [replyTarget,  setReplyTarget]  = useState<Message | null>(null);
-  const [editTarget,   setEditTarget]   = useState<Message | null>(null);
-  const [longPressMsg, setLongPressMsg] = useState<Message | null>(null);
+  const [messages,      setMessages]      = useState<Message[]>([]);
+  const [inputText,     setInputText]     = useState('');
+  const [loading,       setLoading]       = useState(true);
+  const [sending,       setSending]       = useState(false);
+  const [uploading,     setUploading]     = useState(false);
+  const [uploadPct,     setUploadPct]     = useState(0);
+  const [peerTyping,    setPeerTyping]    = useState(false);
+  const [replyTarget,   setReplyTarget]   = useState<Message | null>(null);
+  const [editTarget,    setEditTarget]    = useState<Message | null>(null);
+  const [longPressMsg,  setLongPressMsg]  = useState<Message | null>(null);
+  const [showAttach,    setShowAttach]    = useState(false);
+  const [showVoice,     setShowVoice]     = useState(false);
+  const [showGif,       setShowGif]       = useState(false);
+  const [showReactions, setShowReactions] = useState(false);
+  const [reactionTarget,setReactionTarget]= useState<Message | null>(null);
 
   const flatRef     = useRef<FlatList>(null);
   const socketRef   = useRef<Socket | null>(null);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTyping    = useRef(false);
 
-  // Connect socket
+  // â”€â”€ Socket â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     let sock: Socket;
     (async () => {
@@ -57,48 +106,40 @@ export default function ChatScreen() {
 
       sock.on('typing_start',      ({ uid }: any) => { if (uid !== myUid) setPeerTyping(true);  });
       sock.on('typing_stop',       ({ uid }: any) => { if (uid !== myUid) setPeerTyping(false); });
-      sock.on('message_delivered', ({ messageId }: any) => {
-        setMessages(p => p.map(m => m.id === messageId && m.status === 'sent' ? { ...m, status: 'delivered' } : m));
-      });
-      sock.on('message_read', ({ messageId }: any) => {
-        setMessages(p => p.map(m => m.id === messageId ? { ...m, status: 'read' } : m));
-      });
-      sock.on('message_edited', ({ messageId, newPlaintext }: any) => {
-        setMessages(p => p.map(m => m.id === messageId ? { ...m, plaintext: newPlaintext, isEdited: true } : m));
-      });
-      sock.on('message_deleted', ({ messageId }: any) => {
-        setMessages(p => p.map(m => m.id === messageId ? { ...m, isDeleted: true, plaintext: '' } : m));
-      });
+      sock.on('message_delivered', ({ messageId }: any) =>
+        setMessages(p => p.map(m => m.id === messageId && m.status === 'sent' ? { ...m, status: 'delivered' } : m)));
+      sock.on('message_read', ({ messageId }: any) =>
+        setMessages(p => p.map(m => m.id === messageId ? { ...m, status: 'read' } : m)));
+      sock.on('message_edited', ({ messageId, newPlaintext }: any) =>
+        setMessages(p => p.map(m => m.id === messageId ? { ...m, plaintext: newPlaintext, isEdited: true } : m)));
+      sock.on('message_deleted', ({ messageId }: any) =>
+        setMessages(p => p.map(m => m.id === messageId ? { ...m, isDeleted: true, plaintext: '' } : m)));
+      sock.on('reaction_updated', ({ messageId, reactions }: any) =>
+        setMessages(p => p.map(m => m.id === messageId ? { ...m, reactions } : m)));
+
       socketRef.current = sock;
     })();
     return () => { sock?.disconnect(); };
   }, [chatId, myUid]);
 
-  // Firestore listener
+  // â”€â”€ Firestore â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     const unsub = firestore()
       .collection('chats').doc(chatId)
       .collection('messages').orderBy('createdAt', 'asc')
       .onSnapshot(async snap => {
-        const decrypted = await Promise.all(snap.docs.map(async doc => {
+        const msgs = await Promise.all(snap.docs.map(async doc => {
           const d = doc.data() as any;
-          if (d.isDeleted) return {
-            id: doc.id, senderId: d.senderId, plaintext: '', ciphertext: '',
-            iv: '', status: d.status ?? 'sent', createdAt: d.createdAt,
-            isDeleted: true, msgType: 'text',
-          } as Message;
+          if (d.isDeleted) return { id: doc.id, senderId: d.senderId, plaintext: '', ciphertext: '', iv: '', status: d.status ?? 'sent', createdAt: d.createdAt, isDeleted: true, msgType: d.msgType ?? 'text' } as Message;
 
           let plaintext = '';
-          try {
-            if (d.ciphertext && d.iv) {
-              plaintext = await decryptMessage(
-                { ciphertext: d.ciphertext, iv: d.iv, tag: d.tag ?? '', keyId: d.keyId ?? 'v1-pbkdf2', v: d.v ?? 1 },
-                myUid, peerUid
-              );
-            } else {
-              plaintext = d.plaintext ?? '';
-            }
-          } catch { plaintext = '[Decryption failed]'; }
+          if (d.msgType === 'text') {
+            try {
+              if (d.ciphertext && d.iv) {
+                plaintext = await decryptMessage({ ciphertext: d.ciphertext, iv: d.iv, tag: d.tag ?? '', keyId: d.keyId ?? 'v1-pbkdf2', v: d.v ?? 1 }, myUid, peerUid);
+              } else { plaintext = d.plaintext ?? ''; }
+            } catch { plaintext = '[Decryption failed]'; }
+          }
 
           return {
             id: doc.id, senderId: d.senderId, plaintext,
@@ -106,10 +147,12 @@ export default function ChatScreen() {
             status: d.status ?? 'sent', createdAt: d.createdAt,
             isEdited: d.isEdited ?? false, isDeleted: false,
             replyTo: d.replyTo ?? null, msgType: d.msgType ?? 'text',
+            mediaUrl: d.mediaUrl, filename: d.filename,
+            audioDuration: d.audioDuration,
+            reactions: d.reactions ?? {},
           } as Message;
         }));
-
-        setMessages(decrypted);
+        setMessages(msgs);
         setLoading(false);
         markRead(snap.docs);
         setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 80);
@@ -122,69 +165,91 @@ export default function ChatScreen() {
     docs.forEach(doc => {
       if (doc.data().senderId !== myUid && doc.data().status !== 'read') {
         batch.update(doc.ref, { status: 'read' });
-        socketRef.current?.emit('message_read', {
-          chatId, messageId: doc.id, readerUid: myUid, senderUid: peerUid,
-        });
+        socketRef.current?.emit('message_read', { chatId, messageId: doc.id, readerUid: myUid, senderUid: peerUid });
       }
     });
     batch.commit().catch(() => {});
   }, [chatId, myUid, peerUid]);
 
+  // â”€â”€ Typing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleTyping = (text: string) => {
     setInputText(text);
-    if (!isTyping.current) {
-      isTyping.current = true;
-      socketRef.current?.emit('typing_start', { chatId, uid: myUid });
-    }
+    if (!isTyping.current) { isTyping.current = true; socketRef.current?.emit('typing_start', { chatId, uid: myUid }); }
     if (typingTimer.current) clearTimeout(typingTimer.current);
-    typingTimer.current = setTimeout(() => {
-      isTyping.current = false;
-      socketRef.current?.emit('typing_stop', { chatId, uid: myUid });
-    }, 2000);
+    typingTimer.current = setTimeout(() => { isTyping.current = false; socketRef.current?.emit('typing_stop', { chatId, uid: myUid }); }, 2000);
   };
 
-  const sendMessage = async () => {
-    const text = inputText.trim();
-    if (!text || sending) return;
-    if (editTarget) { await saveEdit(text); return; }
-
+  // â”€â”€ Core send (text) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const sendTextMessage = async (text: string, reply?: Message | null) => {
     setSending(true);
-    setInputText('');
-    const reply = replyTarget;
-    setReplyTarget(null);
     isTyping.current = false;
     socketRef.current?.emit('typing_stop', { chatId, uid: myUid });
-
     try {
       const payload = await encryptMessage(text, myUid, peerUid);
       const data: any = {
-        senderId: myUid,
-        ciphertext: payload.ciphertext, iv: payload.iv,
+        senderId: myUid, ciphertext: payload.ciphertext, iv: payload.iv,
         tag: payload.tag, keyId: payload.keyId, v: payload.v,
         msgType: 'text', status: 'sent', isDeleted: false,
+        reactions: {},
         createdAt: firestore.FieldValue.serverTimestamp(),
       };
       if (reply) data.replyTo = { id: reply.id, senderId: reply.senderId, plaintext: reply.plaintext.substring(0, 80) };
-
       const ref = await firestore().collection('chats').doc(chatId).collection('messages').add(data);
       await firestore().collection('chats').doc(chatId).update({
-        lastMsg: text.substring(0, 60),
-        lastTime: firestore.FieldValue.serverTimestamp(),
+        lastMsg: text.substring(0, 60), lastTime: firestore.FieldValue.serverTimestamp(),
         [`unread.${peerUid}`]: firestore.FieldValue.increment(1),
       });
-      socketRef.current?.emit('new_message', {
-        chatId, messageId: ref.id, senderUid: myUid,
-        recipientUid: peerUid, preview: text.substring(0, 40),
-      });
-    } catch (e: any) {
-      Alert.alert('Error', 'Send failed: ' + e.message);
-    } finally { setSending(false); }
+      socketRef.current?.emit('new_message', { chatId, messageId: ref.id, senderUid: myUid, recipientUid: peerUid, preview: text.substring(0, 40) });
+    } catch (e: any) { Alert.alert('Error', e.message); }
+    finally { setSending(false); }
   };
 
+  // â”€â”€ Send media message (photo/video/audio/file/gif) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const sendMediaMessage = async (
+    localUri: string,
+    type: 'image' | 'video' | 'audio' | 'file' | 'gif',
+    opts?: { filename?: string; duration?: number; gifUrl?: string }
+  ) => {
+    setUploading(true); setUploadPct(0);
+    try {
+      let downloadURL = opts?.gifUrl ?? '';
+      let filename    = opts?.filename ?? '';
+      if (!downloadURL) {
+        const result = await uploadMedia(localUri, chatId, type === 'gif' ? 'image' : type, opts?.filename, pct => setUploadPct(pct));
+        downloadURL = result.downloadURL;
+        filename    = result.filename;
+      }
+      const data: any = {
+        senderId: myUid, msgType: type, mediaUrl: downloadURL,
+        filename, status: 'sent', isDeleted: false, reactions: {},
+        createdAt: firestore.FieldValue.serverTimestamp(),
+      };
+      if (type === 'audio' && opts?.duration) data.audioDuration = opts.duration;
+      const ref = await firestore().collection('chats').doc(chatId).collection('messages').add(data);
+      const preview = type === 'audio' ? 'ðŸŽ¤ Voice message' : type === 'gif' ? 'ðŸŽžï¸ GIF' : type === 'file' ? `ðŸ“„ ${filename}` : `ðŸ“· ${type}`;
+      await firestore().collection('chats').doc(chatId).update({
+        lastMsg: preview, lastTime: firestore.FieldValue.serverTimestamp(),
+        [`unread.${peerUid}`]: firestore.FieldValue.increment(1),
+      });
+      socketRef.current?.emit('new_message', { chatId, messageId: ref.id, senderUid: myUid, recipientUid: peerUid, preview });
+    } catch (e: any) { Alert.alert('Upload error', e.message); }
+    finally { setUploading(false); }
+  };
+
+  // â”€â”€ Send button â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const onSend = async () => {
+    const text = inputText.trim();
+    if (!text || sending) return;
+    if (editTarget) { await saveEdit(text); return; }
+    setInputText('');
+    const reply = replyTarget; setReplyTarget(null);
+    await sendTextMessage(text, reply);
+  };
+
+  // â”€â”€ Edit / Delete â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const startEdit  = (m: Message) => { setEditTarget(m); setLongPressMsg(null); setInputText(m.plaintext); };
   const cancelEdit = () => { setEditTarget(null); setInputText(''); };
-
-  const saveEdit = async (newText: string) => {
+  const saveEdit   = async (newText: string) => {
     if (!editTarget) return;
     setSending(true); setEditTarget(null); setInputText('');
     try {
@@ -192,7 +257,7 @@ export default function ChatScreen() {
       await firestore().collection('chats').doc(chatId).collection('messages').doc(editTarget.id)
         .update({ ciphertext: payload.ciphertext, iv: payload.iv, isEdited: true, editedAt: firestore.FieldValue.serverTimestamp() });
       socketRef.current?.emit('message_edited', { chatId, messageId: editTarget.id, newPlaintext: newText });
-    } catch (e: any) { Alert.alert('Error', 'Edit failed: ' + e.message); }
+    } catch (e: any) { Alert.alert('Error', e.message); }
     finally { setSending(false); }
   };
 
@@ -203,23 +268,71 @@ export default function ChatScreen() {
       { text: 'Delete', style: 'destructive', onPress: async () => {
         try {
           await firestore().collection('chats').doc(chatId).collection('messages').doc(m.id)
-            .update({
-              ciphertext: firestore.FieldValue.delete(),
-              iv: firestore.FieldValue.delete(),
-              plaintext: firestore.FieldValue.delete(),
-              isDeleted: true,
-            });
+            .update({ ciphertext: firestore.FieldValue.delete(), iv: firestore.FieldValue.delete(), mediaUrl: firestore.FieldValue.delete(), isDeleted: true });
           socketRef.current?.emit('message_deleted', { chatId, messageId: m.id, deleterUid: myUid });
         } catch (e: any) { Alert.alert('Error', e.message); }
       }},
     ]);
   };
 
-  const Ticks = ({ status }: { status: Message['status'] }) => {
+  // â”€â”€ Reactions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const addReaction = async (msg: Message, emoji: string) => {
+    setShowReactions(false); setReactionTarget(null); setLongPressMsg(null);
+    const existing: Reactions = msg.reactions ?? {};
+    const users: string[] = existing[emoji] ?? [];
+    let updated: Reactions;
+    if (users.includes(myUid)) {
+      // toggle off
+      const filtered = users.filter(u => u !== myUid);
+      updated = { ...existing };
+      if (filtered.length === 0) delete updated[emoji];
+      else updated[emoji] = filtered;
+    } else {
+      updated = { ...existing, [emoji]: [...users, myUid] };
+    }
+    await firestore().collection('chats').doc(chatId).collection('messages').doc(msg.id)
+      .update({ reactions: updated });
+    socketRef.current?.emit('reaction_updated', { chatId, messageId: msg.id, reactions: updated });
+  };
+
+  // â”€â”€ Pickers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const pickPhoto = async () => {
+    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 1 });
+    if (!res.canceled && res.assets[0]) await sendMediaMessage(res.assets[0].uri, 'image');
+  };
+
+  const pickVideo = async () => {
+    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Videos });
+    if (!res.canceled && res.assets[0]) await sendMediaMessage(res.assets[0].uri, 'video');
+  };
+
+  const pickFile = async () => {
+    const res = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
+    if (!res.canceled && res.assets[0]) await sendMediaMessage(res.assets[0].uri, 'file', { filename: res.assets[0].name });
+  };
+
+  // â”€â”€ Render message â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const Ticks = ({ status }: { status: MsgStatus }) => {
     if (status === 'sending')   return <Text style={s.tick}>â—‹</Text>;
     if (status === 'sent')      return <Text style={s.tick}>âœ“</Text>;
     if (status === 'delivered') return <Text style={s.tick}>âœ“âœ“</Text>;
     return <Text style={[s.tick, { color: '#00E5FF' }]}>âœ“âœ“</Text>;
+  };
+
+  const ReactionRow = ({ msg }: { msg: Message }) => {
+    const reactions = msg.reactions ?? {};
+    const entries   = Object.entries(reactions).filter(([, uids]) => uids.length > 0);
+    if (entries.length === 0) return null;
+    return (
+      <View style={s.reactionRow}>
+        {entries.map(([emoji, uids]) => (
+          <TouchableOpacity key={emoji} onPress={() => addReaction(msg, emoji)} style={[s.reactionChip, uids.includes(myUid) && s.reactionChipMine]}>
+            <Text style={s.reactionEmoji}>{emoji}</Text>
+            {uids.length > 1 && <Text style={s.reactionCount}>{uids.length}</Text>}
+          </TouchableOpacity>
+        ))}
+      </View>
+    );
   };
 
   const renderMsg = ({ item: m }: { item: Message }) => {
@@ -231,45 +344,60 @@ export default function ChatScreen() {
         </View>
       </View>
     );
+
     return (
-      <Pressable onLongPress={() => setLongPressMsg(m)} delayLongPress={350}>
+      <Pressable onLongPress={() => { setLongPressMsg(m); }} delayLongPress={350}>
         <View style={[s.row, isMe ? s.rowR : s.rowL]}>
-          <View style={[s.bubble, isMe ? s.bMe : s.bPeer]}>
-            {m.replyTo && (
-              <View style={s.replyBar}>
-                <Text style={s.replyName}>{m.replyTo.senderId === myUid ? 'You' : peerName}</Text>
-                <Text style={s.replyPrev} numberOfLines={1}>{m.replyTo.plaintext}</Text>
+          <View>
+            <View style={[s.bubble, isMe ? s.bMe : s.bPeer]}>
+              {m.replyTo && (
+                <View style={s.replyBar}>
+                  <Text style={s.replyName}>{m.replyTo.senderId === myUid ? 'You' : peerName}</Text>
+                  <Text style={s.replyPrev} numberOfLines={1}>{m.replyTo.plaintext}</Text>
+                </View>
+              )}
+
+              {m.msgType !== 'text' && m.mediaUrl
+                ? <MediaMessage url={m.mediaUrl} msgType={m.msgType} filename={m.filename} duration={m.audioDuration} />
+                : <Text style={s.msgTxt}>{renderFormatted(m.plaintext)}</Text>
+              }
+
+              <View style={s.meta}>
+                {m.isEdited && <Text style={s.edited}>edited Â· </Text>}
+                <Text style={s.time}>{m.createdAt?.toDate?.().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) ?? ''}</Text>
+                {isMe && <Ticks status={m.status} />}
               </View>
-            )}
-            <Text style={s.msgTxt}>{m.plaintext}</Text>
-            <View style={s.meta}>
-              {m.isEdited && <Text style={s.edited}>edited Â· </Text>}
-              <Text style={s.time}>
-                {m.createdAt?.toDate?.().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) ?? ''}
-              </Text>
-              {isMe && <Ticks status={m.status} />}
             </View>
+            <ReactionRow msg={m} />
           </View>
         </View>
       </Pressable>
     );
   };
 
+  // â”€â”€ Long press sheet â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const Sheet = () => {
     if (!longPressMsg) return null;
     const isMe = longPressMsg.senderId === myUid;
     return (
       <Pressable style={s.overlay} onPress={() => setLongPressMsg(null)}>
         <View style={s.sheet}>
+          <TouchableOpacity style={s.sheetRow} onPress={() => { setReactionTarget(longPressMsg); setShowReactions(true); setLongPressMsg(null); }}>
+            <Text style={s.sheetTxt}>ðŸ˜Š  React</Text>
+          </TouchableOpacity>
           <TouchableOpacity style={s.sheetRow} onPress={() => { setReplyTarget(longPressMsg); setLongPressMsg(null); }}>
             <Text style={s.sheetTxt}>â†©  Reply</Text>
           </TouchableOpacity>
-          {isMe && <TouchableOpacity style={s.sheetRow} onPress={() => startEdit(longPressMsg)}>
-            <Text style={s.sheetTxt}>âœï¸  Edit</Text>
-          </TouchableOpacity>}
-          {isMe && <TouchableOpacity style={s.sheetRow} onPress={() => deleteForEveryone(longPressMsg)}>
-            <Text style={[s.sheetTxt, { color: '#FF3C6E' }]}>ðŸ—‘  Delete for Everyone</Text>
-          </TouchableOpacity>}
+          {isMe && longPressMsg.msgType === 'text' && (
+            <TouchableOpacity style={s.sheetRow} onPress={() => startEdit(longPressMsg)}>
+              <Text style={s.sheetTxt}>âœï¸  Edit</Text>
+            </TouchableOpacity>
+          )}
+          {isMe && (
+            <TouchableOpacity style={s.sheetRow} onPress={() => deleteForEveryone(longPressMsg)}>
+              <Text style={[s.sheetTxt, { color: '#FF3C6E' }]}>ðŸ—‘  Delete for Everyone</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={s.sheetRow} onPress={() => setLongPressMsg(null)}>
             <Text style={[s.sheetTxt, { color: '#555' }]}>Cancel</Text>
           </TouchableOpacity>
@@ -278,37 +406,34 @@ export default function ChatScreen() {
     );
   };
 
+  // â”€â”€ Main render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   return (
     <>
       <Stack.Screen options={{
         title: peerName ?? 'Chat',
-        headerStyle: { backgroundColor: '#0C0C1A' },
-        headerTintColor: '#fff',
+        headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff',
         headerRight: () => (
-          <TouchableOpacity
-            onPress={() => router.push({ pathname: '/videocall', params: { chatId, peerUid, peerName } })}
-            style={{ marginRight: 12 }}>
+          <TouchableOpacity onPress={() => router.push({ pathname: '/videocall', params: { chatId, peerUid, peerName } })} style={{ marginRight: 12 }}>
             <Text style={{ color: '#00E5FF', fontSize: 18 }}>ðŸ“¹</Text>
           </TouchableOpacity>
         ),
       }} />
-      <KeyboardAvoidingView
-        style={s.screen}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={90}>
-        {loading
-          ? <ActivityIndicator color="#00E5FF" style={{ flex: 1 }} />
-          : <FlatList
-              ref={flatRef} data={messages} keyExtractor={m => m.id}
-              renderItem={renderMsg} contentContainerStyle={s.list}
-              onContentSizeChange={() => flatRef.current?.scrollToEnd({ animated: false })}
-            />}
 
-        {peerTyping && (
-          <View style={s.typingRow}>
-            <Text style={s.typingTxt}>{peerName} is typingâ€¦</Text>
+      <KeyboardAvoidingView style={s.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={90}>
+
+        {loading ? <ActivityIndicator color="#00E5FF" style={{ flex: 1 }} /> :
+          <FlatList ref={flatRef} data={messages} keyExtractor={m => m.id} renderItem={renderMsg}
+            contentContainerStyle={s.list} onContentSizeChange={() => flatRef.current?.scrollToEnd({ animated: false })} />
+        }
+
+        {uploading && (
+          <View style={s.uploadBar}>
+            <Text style={s.uploadTxt}>Uploadingâ€¦ {uploadPct}%</Text>
+            <View style={[s.uploadFill, { width: `${uploadPct}%` as any }]} />
           </View>
         )}
+
+        {peerTyping && <View style={s.typingRow}><Text style={s.typingTxt}>{peerName} is typingâ€¦</Text></View>}
 
         {replyTarget && (
           <View style={s.banner}>
@@ -316,9 +441,7 @@ export default function ChatScreen() {
               <Text style={s.bannerTitle}>Replying to {replyTarget.senderId === myUid ? 'yourself' : peerName}</Text>
               <Text style={s.bannerPrev} numberOfLines={1}>{replyTarget.plaintext}</Text>
             </View>
-            <TouchableOpacity onPress={() => setReplyTarget(null)}>
-              <Text style={s.bannerX}>âœ•</Text>
-            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setReplyTarget(null)}><Text style={s.bannerX}>âœ•</Text></TouchableOpacity>
           </View>
         )}
 
@@ -329,58 +452,97 @@ export default function ChatScreen() {
           </View>
         )}
 
-        <View style={s.bar}>
-          <TextInput
-            style={s.input} value={inputText} onChangeText={handleTyping}
-            placeholder="Messageâ€¦" placeholderTextColor="#444"
-            multiline maxLength={4000}
-          />
-          <TouchableOpacity
-            style={[s.sendBtn, (!inputText.trim() || sending) && s.sendOff]}
-            onPress={sendMessage} disabled={!inputText.trim() || sending}>
-            {sending
-              ? <ActivityIndicator color="#000" size="small" />
-              : <Text style={s.sendIco}>{editTarget ? 'âœ“' : 'âž¤'}</Text>}
-          </TouchableOpacity>
-        </View>
+        {showVoice
+          ? <VoiceRecorder
+              onSend={(uri, dur) => { setShowVoice(false); sendMediaMessage(uri, 'audio', { duration: dur }); }}
+              onCancel={() => setShowVoice(false)}
+            />
+          : <View style={s.bar}>
+              <TouchableOpacity onPress={() => setShowAttach(true)} style={s.attachBtn}>
+                <Text style={{ fontSize: 22, color: '#555' }}>ï¼‹</Text>
+              </TouchableOpacity>
+              <TextInput
+                style={s.input} value={inputText} onChangeText={handleTyping}
+                placeholder="Messageâ€¦" placeholderTextColor="#444" multiline maxLength={4000}
+              />
+              {inputText.trim()
+                ? <TouchableOpacity style={[s.sendBtn, sending && s.sendOff]} onPress={onSend} disabled={sending}>
+                    {sending ? <ActivityIndicator color="#000" size="small" /> : <Text style={s.sendIco}>{editTarget ? 'âœ“' : 'âž¤'}</Text>}
+                  </TouchableOpacity>
+                : <TouchableOpacity style={s.sendBtn} onPress={() => setShowVoice(true)}>
+                    <Text style={s.sendIco}>ðŸŽ¤</Text>
+                  </TouchableOpacity>
+              }
+            </View>
+        }
+
         <Sheet />
+
+        <AttachmentSheet
+          visible={showAttach} onClose={() => setShowAttach(false)}
+          onPhoto={pickPhoto} onVideo={pickVideo} onFile={pickFile}
+          onGif={() => { setShowAttach(false); setShowGif(true); }}
+          onVoice={() => { setShowAttach(false); setShowVoice(true); }}
+        />
+
+        <GifPicker
+          visible={showGif} onClose={() => setShowGif(false)}
+          onSelect={(url) => sendMediaMessage(url, 'gif', { gifUrl: url })}
+        />
+
+        <ReactionPicker
+          visible={showReactions} onClose={() => { setShowReactions(false); setReactionTarget(null); }}
+          onSelect={(emoji) => { if (reactionTarget) addReaction(reactionTarget, emoji); }}
+        />
+
       </KeyboardAvoidingView>
     </>
   );
 }
 
+// â”€â”€ Styles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
 const s = StyleSheet.create({
-  screen:   { flex: 1, backgroundColor: '#03030E' },
-  list:     { padding: 12, paddingBottom: 8 },
-  row:      { marginBottom: 6 },
-  rowR:     { alignItems: 'flex-end' },
-  rowL:     { alignItems: 'flex-start' },
-  bubble:   { maxWidth: '78%', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8 },
-  bMe:      { backgroundColor: '#003D2A', borderBottomRightRadius: 2 },
-  bPeer:    { backgroundColor: '#111127', borderBottomLeftRadius: 2 },
-  bubbleDel:{ backgroundColor: '#111', borderWidth: 1, borderColor: '#222' },
-  msgTxt:   { color: '#E0E0F0', fontSize: 15, lineHeight: 21 },
-  delTxt:   { color: '#444', fontSize: 14, fontStyle: 'italic' },
-  meta:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: 3 },
-  time:     { color: '#444', fontSize: 11, marginRight: 3 },
-  edited:   { color: '#555', fontSize: 11 },
-  tick:     { color: '#555', fontSize: 12 },
-  replyBar: { backgroundColor: '#00000044', borderLeftWidth: 3, borderLeftColor: '#00E5FF', borderRadius: 6, padding: 6, marginBottom: 6 },
-  replyName:{ color: '#00E5FF', fontSize: 11, fontWeight: 'bold', marginBottom: 1 },
-  replyPrev:{ color: '#888', fontSize: 12 },
-  typingRow:{ paddingHorizontal: 16, paddingBottom: 6 },
-  typingTxt:{ color: '#555', fontSize: 13, fontStyle: 'italic' },
-  banner:   { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0C0C1A', borderTopWidth: 1, borderTopColor: '#00E5FF33', paddingHorizontal: 14, paddingVertical: 8 },
-  bannerTitle:{ color: '#00E5FF', fontSize: 12, fontWeight: 'bold' },
-  bannerPrev: { color: '#888', fontSize: 12 },
-  bannerX:    { color: '#555', fontSize: 20, paddingHorizontal: 8 },
-  bar:      { flexDirection: 'row', alignItems: 'flex-end', backgroundColor: '#0C0C1A', paddingHorizontal: 10, paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#111' },
-  input:    { flex: 1, backgroundColor: '#111127', color: '#E0E0F0', borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10, fontSize: 15, maxHeight: 120, marginRight: 8 },
-  sendBtn:  { width: 44, height: 44, borderRadius: 22, backgroundColor: '#00E5FF', alignItems: 'center', justifyContent: 'center' },
-  sendOff:  { backgroundColor: '#111127' },
-  sendIco:  { color: '#000', fontSize: 18, fontWeight: 'bold' },
-  overlay:  { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#00000088', justifyContent: 'flex-end' },
-  sheet:    { backgroundColor: '#0E0E20', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 36, paddingTop: 8 },
-  sheetRow: { padding: 18, borderBottomWidth: 1, borderBottomColor: '#111' },
-  sheetTxt: { color: '#E0E0F0', fontSize: 16 },
+  screen:      { flex: 1, backgroundColor: '#03030E' },
+  list:        { padding: 12, paddingBottom: 8 },
+  row:         { marginBottom: 6 },
+  rowR:        { alignItems: 'flex-end' },
+  rowL:        { alignItems: 'flex-start' },
+  bubble:      { maxWidth: '80%', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8 },
+  bMe:         { backgroundColor: '#003D2A', borderBottomRightRadius: 2 },
+  bPeer:       { backgroundColor: '#111127', borderBottomLeftRadius: 2 },
+  bubbleDel:   { backgroundColor: '#111', borderWidth: 1, borderColor: '#222' },
+  msgTxt:      { color: '#E0E0F0', fontSize: 15, lineHeight: 21 },
+  delTxt:      { color: '#444', fontSize: 14, fontStyle: 'italic' },
+  meta:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: 3 },
+  time:        { color: '#444', fontSize: 11, marginRight: 3 },
+  edited:      { color: '#555', fontSize: 11 },
+  tick:        { color: '#555', fontSize: 12 },
+  replyBar:    { backgroundColor: '#00000044', borderLeftWidth: 3, borderLeftColor: '#00E5FF', borderRadius: 6, padding: 6, marginBottom: 6 },
+  replyName:   { color: '#00E5FF', fontSize: 11, fontWeight: 'bold', marginBottom: 1 },
+  replyPrev:   { color: '#888', fontSize: 12 },
+  reactionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 4 },
+  reactionChip:     { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1A1A30', borderRadius: 12, paddingHorizontal: 7, paddingVertical: 3, borderWidth: 1, borderColor: '#333' },
+  reactionChipMine: { borderColor: '#00E5FF', backgroundColor: '#00E5FF11' },
+  reactionEmoji:    { fontSize: 14 },
+  reactionCount:    { color: '#888', fontSize: 11, marginLeft: 3 },
+  uploadBar:   { backgroundColor: '#0C0C1A', paddingHorizontal: 14, paddingVertical: 6 },
+  uploadTxt:   { color: '#00E5FF', fontSize: 12, marginBottom: 4 },
+  uploadFill:  { height: 2, backgroundColor: '#00E5FF', borderRadius: 1 },
+  typingRow:   { paddingHorizontal: 16, paddingBottom: 6 },
+  typingTxt:   { color: '#555', fontSize: 13, fontStyle: 'italic' },
+  banner:      { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0C0C1A', borderTopWidth: 1, borderTopColor: '#00E5FF33', paddingHorizontal: 14, paddingVertical: 8 },
+  bannerTitle: { color: '#00E5FF', fontSize: 12, fontWeight: 'bold' },
+  bannerPrev:  { color: '#888', fontSize: 12 },
+  bannerX:     { color: '#555', fontSize: 20, paddingHorizontal: 8 },
+  bar:         { flexDirection: 'row', alignItems: 'flex-end', backgroundColor: '#0C0C1A', paddingHorizontal: 10, paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#111' },
+  attachBtn:   { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  input:       { flex: 1, backgroundColor: '#111127', color: '#E0E0F0', borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10, fontSize: 15, maxHeight: 120, marginHorizontal: 6 },
+  sendBtn:     { width: 44, height: 44, borderRadius: 22, backgroundColor: '#00E5FF', alignItems: 'center', justifyContent: 'center' },
+  sendOff:     { backgroundColor: '#111127' },
+  sendIco:     { color: '#000', fontSize: 18, fontWeight: 'bold' },
+  overlay:     { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#00000088', justifyContent: 'flex-end' },
+  sheet:       { backgroundColor: '#0E0E20', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 36, paddingTop: 8 },
+  sheetRow:    { padding: 18, borderBottomWidth: 1, borderBottomColor: '#111' },
+  sheetTxt:    { color: '#E0E0F0', fontSize: 16 },
 });
