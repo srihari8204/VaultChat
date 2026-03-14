@@ -1,128 +1,132 @@
-import { LinearGradient } from "expo-linear-gradient";
-import { useRouter } from "expo-router";
-import { useRef, useState } from "react";
+// app/pinentry.tsx
+// PIN entry screen â€” detects duress PIN and wipes messages
+
+import React, { useState, useRef } from 'react';
 import {
-  Alert, StyleSheet, Text, TextInput,
-  TouchableOpacity, View, Vibration,
-} from "react-native";
-import { verifyPIN } from "./(constants)/authService";
+  View, Text, TouchableOpacity, StyleSheet, Alert, Vibration, Animated,
+} from 'react-native';
+import { useRouter } from 'expo-router';
+import auth from '@react-native-firebase/auth';
+import firestore from '@react-native-firebase/firestore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Crypto from 'expo-crypto';
 
-export default function PINEntryScreen() {
-  const router = useRouter();
-  const [pin,     setPin]     = useState("");
-  const [attempts,setAttempts]= useState(0);
-  const [shake,   setShake]   = useState(false);
-  const inputRef = useRef<TextInput>(null);
+const PIN_KEY     = '@vaultchat_pin_hash';
+const DURESS_KEY  = 'duressPinHash';
 
-  const MAX_ATTEMPTS = 5;
+export default function PinEntryScreen() {
+  const router    = useRouter();
+  const [pin,     setPin]     = useState('');
+  const [error,   setError]   = useState('');
+  const shakeAnim = useRef(new Animated.Value(0)).current;
 
-  const handleChange = (t: string) => {
-    const digits = t.replace(/\D/g, "").slice(0, 8);
-    setPin(digits);
-    if (digits.length === 8) handleVerify(digits);
+  const shake = () => {
+    Animated.sequence([
+      Animated.timing(shakeAnim, { toValue: 10,  duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: -10, duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: 10,  duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: 0,   duration: 50, useNativeDriver: true }),
+    ]).start();
   };
 
-  const handleVerify = async (code: string) => {
-    const ok = await verifyPIN(code);
-    if (ok) {
-      router.replace({ pathname: "/facescan", params: { mode: "verify" } });
+  const press = async (digit: string) => {
+    const next = pin + digit;
+    setPin(next);
+    if (next.length < 4) return;
+
+    const myUid   = auth().currentUser?.uid ?? '';
+    const entered = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, 'vaultchat-' + next);
+    const duress  = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, 'vaultchat-duress-' + next);
+
+    // Check duress PIN first
+    const userSnap = await firestore().collection('users').doc(myUid).get();
+    const duressPinHash = userSnap.data()?.duressPinHash;
+
+    if (duressPinHash && duress === duressPinHash) {
+      // DURESS â€” silently wipe and show empty decoy
+      await wipeSensitiveData(myUid);
+      router.replace('/chats');
+      return;
+    }
+
+    // Check normal PIN
+    const storedHash = await AsyncStorage.getItem(PIN_KEY);
+    if (!storedHash || entered === storedHash) {
+      router.replace('/chats');
     } else {
-      const newAttempts = attempts + 1;
-      setAttempts(newAttempts);
-      Vibration.vibrate(300);
-      setPin("");
-      if (newAttempts >= MAX_ATTEMPTS) {
-        Alert.alert(
-          "Account Locked",
-          "Too many wrong attempts. Please try again later.",
-          [{ text: "OK", onPress: () => router.replace("/login") }]
-        );
-      } else {
-        Alert.alert("Wrong PIN", (MAX_ATTEMPTS - newAttempts) + " attempt(s) remaining.");
-      }
+      setPin('');
+      setError('Wrong PIN');
+      shake();
+      Vibration.vibrate(400);
+      setTimeout(() => setError(''), 1500);
     }
   };
 
-  const digits = pin.split("");
-  const boxRows = [[0,1,2,3], [4,5,6,7]];
+  const del = () => setPin(p => p.slice(0, -1));
+
+  // Called when duress PIN detected â€” wipe silently
+  const wipeSensitiveData = async (myUid: string) => {
+    try {
+      const chatsSnap = await firestore()
+        .collection('chats')
+        .where('participants', 'array-contains', myUid)
+        .get();
+      const batch = firestore().batch();
+      // Mark all as deleted â€” actual wipe happens lazily
+      chatsSnap.docs.forEach(doc => {
+        batch.update(doc.ref, { wipedByDuress: true });
+      });
+      await batch.commit();
+    } catch {}
+  };
+
+  const KEYS = [['1','2','3'],['4','5','6'],['7','8','9'],['','0','âŒ«']];
 
   return (
-    <LinearGradient colors={["#010812", "#071020", "#020B18"]} style={{ flex: 1 }}>
-      <View style={S.container}>
+    <View style={s.screen}>
+      <Text style={s.logo}>ðŸ”’</Text>
+      <Text style={s.title}>VaultChat</Text>
+      <Text style={s.sub}>Enter your PIN</Text>
 
-        {/* Icon */}
-        <View style={S.iconWrap}>
-          <LinearGradient colors={["#7C3AED", "#1D4ED8"]} style={S.iconCircle}>
-            <Text style={{ fontSize: 38 }}>🔑</Text>
-          </LinearGradient>
+      <Animated.View style={[s.dots, { transform: [{ translateX: shakeAnim }] }]}>
+        {[0,1,2,3].map(i => (
+          <View key={i} style={[s.dot, pin.length > i && s.dotFilled]} />
+        ))}
+      </Animated.View>
+
+      {error ? <Text style={s.error}>{error}</Text> : null}
+
+      {KEYS.map((row, ri) => (
+        <View key={ri} style={s.row}>
+          {row.map((k, ki) => {
+            if (k === '') return <View key={ki} style={s.keyPlaceholder} />;
+            return (
+              <TouchableOpacity
+                key={ki}
+                style={s.key}
+                onPress={() => k === 'âŒ«' ? del() : press(k)}
+              >
+                <Text style={[s.keyTxt, k === 'âŒ«' && { color: '#555' }]}>{k}</Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
-
-        <Text style={S.title}>Enter Secret PIN</Text>
-        <Text style={S.sub}>
-          {attempts > 0
-            ? "⚠️  Wrong PIN — " + (MAX_ATTEMPTS - attempts) + " attempt(s) left"
-            : "8-digit PIN set during account creation"}
-        </Text>
-
-        {/* PIN display boxes */}
-        <TouchableOpacity onPress={() => inputRef.current?.focus()} activeOpacity={1}>
-          {boxRows.map((row, ri) => (
-            <View key={ri} style={S.row}>
-              {row.map(i => (
-                <View key={i} style={[S.box, digits[i] ? S.boxFilled : null, attempts > 0 && pin === "" && S.boxError]}>
-                  <View style={[S.pinDot, digits[i] ? S.pinDotFilled : null]} />
-                </View>
-              ))}
-            </View>
-          ))}
-        </TouchableOpacity>
-
-        <TextInput
-          ref={inputRef}
-          value={pin}
-          onChangeText={handleChange}
-          keyboardType="number-pad"
-          maxLength={8}
-          style={{ position: "absolute", opacity: 0, width: 1, height: 1 }}
-          autoFocus
-          caretHidden
-        />
-
-        <Text style={S.hint}>
-          {pin.length}/8 digits entered
-        </Text>
-
-        <View style={S.infoBox}>
-          <Text style={S.infoTxt}>
-            📝  This is the same 8-digit PIN you set when creating your VaultChat account.
-            It is also used to access Vault documents.
-          </Text>
-        </View>
-
-        <TouchableOpacity style={S.forgotBtn} onPress={() => router.replace("/login")}>
-          <Text style={S.forgotTxt}>Use a different account</Text>
-        </TouchableOpacity>
-
-      </View>
-    </LinearGradient>
+      ))}
+    </View>
   );
 }
 
-const S = StyleSheet.create({
-  container:   { flex: 1, padding: 32, paddingTop: 80, alignItems: "center" },
-  iconWrap:    { marginBottom: 24 },
-  iconCircle:  { width: 90, height: 90, borderRadius: 45, justifyContent: "center", alignItems: "center" },
-  title:       { color: "#fff", fontSize: 26, fontWeight: "900", marginBottom: 8 },
-  sub:         { color: "rgba(255,255,255,0.45)", fontSize: 14, marginBottom: 36, textAlign: "center" },
-  row:         { flexDirection: "row", gap: 12, marginBottom: 12 },
-  box:         { width: 58, height: 64, borderRadius: 14, borderWidth: 1.5, borderColor: "rgba(255,255,255,0.15)", backgroundColor: "rgba(255,255,255,0.05)", justifyContent: "center", alignItems: "center" },
-  boxFilled:   { borderColor: "#7C3AED", backgroundColor: "rgba(124,58,237,0.15)" },
-  boxError:    { borderColor: "#EF4444", backgroundColor: "rgba(239,68,68,0.08)" },
-  pinDot:      { width: 12, height: 12, borderRadius: 6, backgroundColor: "rgba(255,255,255,0.1)" },
-  pinDotFilled:{ backgroundColor: "#7C3AED" },
-  hint:        { color: "rgba(255,255,255,0.3)", fontSize: 12, marginTop: 8, marginBottom: 28 },
-  infoBox:     { backgroundColor: "rgba(124,58,237,0.08)", borderRadius: 12, padding: 14, borderWidth: 1, borderColor: "rgba(124,58,237,0.2)", width: "100%", marginBottom: 20 },
-  infoTxt:     { color: "rgba(255,255,255,0.5)", fontSize: 12, lineHeight: 18, textAlign: "center" },
-  forgotBtn:   { padding: 12 },
-  forgotTxt:   { color: "#4A9FFF", fontSize: 14, fontWeight: "700" },
+const s = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: '#03030E', alignItems: 'center', justifyContent: 'center' },
+  logo:   { fontSize: 48, marginBottom: 8 },
+  title:  { color: '#fff', fontSize: 26, fontWeight: 'bold', marginBottom: 4 },
+  sub:    { color: '#555', fontSize: 15, marginBottom: 40 },
+  dots:   { flexDirection: 'row', gap: 18, marginBottom: 16 },
+  dot:    { width: 14, height: 14, borderRadius: 7, backgroundColor: '#222', borderWidth: 2, borderColor: '#444' },
+  dotFilled: { backgroundColor: '#00E5FF', borderColor: '#00E5FF' },
+  error:  { color: '#FF3C6E', fontSize: 14, marginBottom: 8 },
+  row:    { flexDirection: 'row', gap: 20, marginBottom: 16 },
+  key:    { width: 72, height: 72, borderRadius: 36, backgroundColor: '#0C0C1A', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#1A1A30' },
+  keyTxt: { color: '#E0E0F0', fontSize: 26, fontWeight: '300' },
+  keyPlaceholder: { width: 72, height: 72 },
 });
