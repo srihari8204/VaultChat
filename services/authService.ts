@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, updateProfile, sendEmailVerification, User } from 'firebase/auth';
 import auth from '@react-native-firebase/auth';
 

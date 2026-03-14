@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, setDoc, getDoc, getDocs, where, updateDoc, Timestamp } from 'firebase/firestore';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';

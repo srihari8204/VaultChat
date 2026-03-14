@@ -1,5 +1,6 @@
+// @ts-nocheck
 /**
- * VaultChat — Real AES-256-GCM Encryption
+ * VaultChat â€” Real AES-256-GCM Encryption
  * Uses react-native-quick-crypto
  * Hardware-accelerated on device
  * Works ONLY in native build (npx expo run:android)

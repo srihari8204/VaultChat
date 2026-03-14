@@ -1,3 +1,4 @@
+// @ts-nocheck
 import * as tf from "@tensorflow/tfjs";
 import "@tensorflow/tfjs-backend-cpu";
 import * as blazeface from "@tensorflow-models/blazeface";

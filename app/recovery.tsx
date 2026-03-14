@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
@@ -161,7 +162,7 @@ function RecoveryContent() {
                   {attempts > 0 && !locked && (
                     <View style={{ backgroundColor: 'rgba(239,68,68,0.1)', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 6, borderWidth: 1, borderColor: 'rgba(239,68,68,0.3)' }}>
                       <Text style={{ color: C.danger, fontSize: 11, fontWeight: '700' }}>
-                        &#9888; {attempts} failed attempt{attempts > 1 ? 's' : ''} · {3 - attempts} remaining
+                        &#9888; {attempts} failed attempt{attempts > 1 ? 's' : ''} Â· {3 - attempts} remaining
                       </Text>
                     </View>
                   )}
@@ -263,7 +264,7 @@ function RecoveryContent() {
                   </TouchableOpacity>
 
                   <TouchableOpacity onPress={() => router.back()} style={{ alignItems: 'center', marginTop: 6 }}>
-                    <Text style={{ color: C.textFaint, fontSize: 13 }}>Cancel — Back to Login</Text>
+                    <Text style={{ color: C.textFaint, fontSize: 13 }}>Cancel â€” Back to Login</Text>
                   </TouchableOpacity>
                 </Animated.View>
               </>

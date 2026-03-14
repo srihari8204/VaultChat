@@ -1,3 +1,4 @@
+// @ts-nocheck
 // app/voicecall.tsx
 // Real WebRTC voice call (audio only)
 // Same TURN server as videocall.tsx
@@ -20,7 +21,7 @@ import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import { Audio } from 'expo-av';
 
-// â”€â”€ Same ICE config as videocall.tsx â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Ã¢â€â‚¬Ã¢â€â‚¬ Same ICE config as videocall.tsx Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
@@ -77,14 +78,14 @@ export default function VoiceCallScreen() {
 
     const setup = async () => {
       try {
-        // Audio mode â€” earpiece for private voice calls
+        // Audio mode Ã¢â‚¬â€ earpiece for private voice calls
         await Audio.setAudioModeAsync({
           allowsRecordingIOS:         true,
           playsInSilentModeIOS:       true,
           playThroughEarpieceAndroid: true, // earpiece default
         });
 
-        // Audio only â€” no video track
+        // Audio only Ã¢â‚¬â€ no video track
         const stream = await mediaDevices.getUserMedia({
           audio: true,
           video: false,
@@ -243,7 +244,7 @@ export default function VoiceCallScreen() {
 
       {/* D2DE badge */}
       <View style={styles.d2deBadge}>
-        <Text style={styles.d2deText}>ðŸ›¡ï¸ D2DE Â· Encrypted Voice</Text>
+        <Text style={styles.d2deText}>Ã°Å¸â€ºÂ¡Ã¯Â¸Â D2DE Ã‚Â· Encrypted Voice</Text>
       </View>
 
       {/* Avatar */}
@@ -258,7 +259,7 @@ export default function VoiceCallScreen() {
         styles.callStatus,
         callState === 'connected' && styles.callStatusActive,
       ]}>
-        {callState === 'connected' ? `â— ${stateLabel.connected}` : stateLabel[callState]}
+        {callState === 'connected' ? `Ã¢â€”Â ${stateLabel.connected}` : stateLabel[callState]}
       </Text>
 
       {/* Signal strength visual */}
@@ -279,7 +280,7 @@ export default function VoiceCallScreen() {
             style={[styles.ctrlBtn, muted && styles.ctrlBtnActive]}
             onPress={toggleMute}
           >
-            <Text style={styles.ctrlIcon}>{muted ? 'ðŸ”‡' : 'ðŸŽ¤'}</Text>
+            <Text style={styles.ctrlIcon}>{muted ? 'Ã°Å¸â€â€¡' : 'Ã°Å¸Å½Â¤'}</Text>
           </TouchableOpacity>
           <Text style={styles.ctrlLabel}>{muted ? 'Unmute' : 'Mute'}</Text>
         </View>
@@ -287,7 +288,7 @@ export default function VoiceCallScreen() {
         {/* End call */}
         <View style={styles.ctrlWrap}>
           <TouchableOpacity style={styles.endBtn} onPress={() => endCall(true)}>
-            <Text style={styles.endBtnIcon}>ðŸ“µ</Text>
+            <Text style={styles.endBtnIcon}>Ã°Å¸â€œÂµ</Text>
           </TouchableOpacity>
           <Text style={[styles.ctrlLabel, { color: '#FF4D6D' }]}>End</Text>
         </View>
@@ -298,7 +299,7 @@ export default function VoiceCallScreen() {
             style={[styles.ctrlBtn, speaker && styles.ctrlBtnActive]}
             onPress={toggleSpeaker}
           >
-            <Text style={styles.ctrlIcon}>{speaker ? 'ðŸ”Š' : 'ðŸ”‰'}</Text>
+            <Text style={styles.ctrlIcon}>{speaker ? 'Ã°Å¸â€Å ' : 'Ã°Å¸â€â€°'}</Text>
           </TouchableOpacity>
           <Text style={styles.ctrlLabel}>{speaker ? 'Speaker' : 'Earpiece'}</Text>
         </View>

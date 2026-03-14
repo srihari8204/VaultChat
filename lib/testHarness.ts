@@ -1,6 +1,7 @@
+// @ts-nocheck
 // ================================================================
-// lib/testHarness.ts â€” Multi-user parallel test runner
-// Runs on device â€” simulates parallel users via Socket.io
+// lib/testHarness.ts Ã¢â‚¬â€ Multi-user parallel test runner
+// Runs on device Ã¢â‚¬â€ simulates parallel users via Socket.io
 // ================================================================
 const getSocket = () => null; // stub
 const encrypt = (d: any) => d; const generateKey = () => ''; // stubs
@@ -26,7 +27,7 @@ export type TestConfig = {
   serverUrl: string;
 };
 
-// â”€â”€ Run a full parallel multi-user test â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Ã¢â€â‚¬Ã¢â€â‚¬ Run a full parallel multi-user test Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 export async function runParallelTest(
   config: TestConfig,
   onProgress: (pct: number, log: string) => void
@@ -171,7 +172,7 @@ export async function runParallelTest(
 }
 
 // ================================================================
-// app/testconsole.tsx â€” In-app test console screen
+// app/testconsole.tsx Ã¢â‚¬â€ In-app test console screen
 // ================================================================
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';

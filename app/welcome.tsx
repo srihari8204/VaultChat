@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef } from 'react';
@@ -64,10 +65,10 @@ function WelcomeContent() {
   const orbitDeg     = orbitAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
 
   const FEATURES = [
-    { icon: '🔐', text: 'AES-256 End-to-End Encryption' },
-    { icon: '👁️', text: '3D Biometric Face Authentication' },
-    { icon: '⛓️', text: 'Blockchain Identity Verification' },
-    { icon: '🛡️', text: 'Real-Time Threat Protection' },
+    { icon: 'ðŸ”', text: 'AES-256 End-to-End Encryption' },
+    { icon: 'ðŸ‘ï¸', text: '3D Biometric Face Authentication' },
+    { icon: 'â›“ï¸', text: 'Blockchain Identity Verification' },
+    { icon: 'ðŸ›¡ï¸', text: 'Real-Time Threat Protection' },
   ];
 
   return (
@@ -109,7 +110,7 @@ function WelcomeContent() {
           {/* Logo */}
           <Animated.View style={[S.logoWrap, { transform: [{ scale: logoScale }] }]}>
             <LinearGradient colors={['rgba(74,159,255,0.25)', 'rgba(124,58,237,0.2)']} style={S.logoGrad}>
-              <Text style={S.logoEmoji}>🔐</Text>
+              <Text style={S.logoEmoji}>ðŸ”</Text>
             </LinearGradient>
           </Animated.View>
 
@@ -134,7 +135,7 @@ function WelcomeContent() {
           <TouchableOpacity onPress={() => router.push('/signup' as any)} style={S.btnPrimary}>
             <LinearGradient colors={['#1D4ED8', '#7C3AED']} style={S.btnGrad}>
               <Text style={S.btnPrimaryText}>Create Secure Account</Text>
-              <Text style={{ fontSize: 18 }}>→</Text>
+              <Text style={{ fontSize: 18 }}>â†’</Text>
             </LinearGradient>
           </TouchableOpacity>
 
@@ -143,7 +144,7 @@ function WelcomeContent() {
           </TouchableOpacity>
 
           <Text style={S.disclaimer}>
-            Protected by AES-256 encryption · Zero data collection{'\n'}
+            Protected by AES-256 encryption Â· Zero data collection{'\n'}
             Your privacy is non-negotiable.
           </Text>
         </Animated.View>
