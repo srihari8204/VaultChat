@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { ErrorBoundary } from '../components/ErrorBoundary';
-ï»¿// app/vaultid.tsx â€” Blockchain VaultID Screen
+
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
