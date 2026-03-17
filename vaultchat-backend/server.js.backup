@@ -40,11 +40,6 @@ function log(type, data) {
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', users: users.size, uptime: process.uptime() });
-
-// Contact sync — phone hash matching
-const contactsRoute = require("./routes/contacts");
-app.use("/api/contacts", contactsRoute);
-
 });
 
 // Register user
