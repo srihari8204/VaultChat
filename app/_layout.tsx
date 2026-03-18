@@ -126,6 +126,17 @@ export default function RootLayout() {
         <Stack.Screen name="voice-transcribe" />
         <Stack.Screen name="smart-notifications" />
         <Stack.Screen name="tone-detector" />
+        <Stack.Screen name="group-chat" />
+        <Stack.Screen name="lock" />
+        <Stack.Screen name="ai-assistant" />
+        <Stack.Screen name="chat-summary" />
+        <Stack.Screen name="translate" />
+        <Stack.Screen name="media-viewer" />
+        <Stack.Screen name="whiteboard" />
+        <Stack.Screen name="bookmarks" />
+        <Stack.Screen name="receipt-control" />
+        <Stack.Screen name="voice-effects" />
+        <Stack.Screen name="auto-reply" />
         <Stack.Screen name="chat-themes" />
         <Stack.Screen name="chat-export" />
         <Stack.Screen name="stickers" />
