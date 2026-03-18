@@ -1,8 +1,8 @@
-import { ErrorBoundary } from '../components/ErrorBoundary';
-﻿import { LinearGradient } from 'expo-linear-gradient';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Animated, Dimensions, Easing, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import { BehaviorAlert, TypingPattern, analyzeTypingPattern, getAlertColor, getAlertIcon, loadAlerts, loadTypingPattern, recordKeystroke, resetPattern } from '../constants/behavioralSecurity';
 
 const { width } = Dimensions.get('window');
@@ -113,7 +113,7 @@ function BehavioralScreenContent() {
               </Text>
             </View>
             <View style={{ marginTop: 10, height: 4, backgroundColor: '#0A1628', borderRadius: 2 }}>
-              <View style={{ height: 4, borderRadius: 2, backgroundColor: alertColor, width: ((keyCount % 10) / 10 * 100) + '%' }} />
+              <View style={{ height: 4, borderRadius: 2, backgroundColor: alertColor, width: (((keyCount % 10) / 10 * 100) + '%') as any}} />
             </View>
           </View>
 

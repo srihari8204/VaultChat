@@ -2,7 +2,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Animated, Easing, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Animated, Easing, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 
 const C = {
@@ -267,7 +267,7 @@ function DocScannerContent() {
           {step === 'processing' && (
             <View style={{ gap: 20, alignItems: 'center' }}>
               <Animated.View style={[S.processingCard, { transform: [{ scale: pulseAnim }] }]}>
-                <LinearGradient colors={[C.primary + '18', C.secondary + '12']} style={StyleSheet.absoluteFillObject} borderRadius={20} />
+                <LinearGradient colors={[C.primary + '18', C.secondary + '12']} style={[StyleSheet.absoluteFillObject, {borderRadius:20}]} />
                 {/* Simulated doc preview */}
                 <View style={S.docPreview}>
                   <View style={{ height: 16, backgroundColor: 'rgba(74,159,255,0.3)', borderRadius: 4, marginBottom: 10, width: '60%' }} />
@@ -285,7 +285,7 @@ function DocScannerContent() {
 
               <View style={{ width: '100%', gap: 10 }}>
                 <View style={{ height: 6, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 3, overflow: 'hidden' }}>
-                  <View style={{ width: processingProgress + '%', height: 6, backgroundColor: C.primary, borderRadius: 3 }} />
+                  <View style={{ width:(processingProgress+'%') as any, height: 6, backgroundColor: C.primary, borderRadius: 3 }} />
                 </View>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                   <Text style={{ color: C.primary, fontSize: 12, fontWeight: '700' }}>{processingPhase}</Text>
@@ -325,15 +325,15 @@ function DocScannerContent() {
               </View>
 
               <View style={S.docPreviewLarge}>
-                <LinearGradient colors={['rgba(4,20,50,0.95)', 'rgba(2,14,38,0.95)']} style={StyleSheet.absoluteFillObject} borderRadius={16} />
+                <LinearGradient colors={['rgba(4,20,50,0.95)', 'rgba(2,14,38,0.95)']} style={[StyleSheet.absoluteFillObject, {borderRadius:16}]} />
                 <View style={{ padding: 16 }}>
                   <Text style={{ color: C.primary, fontSize: 14, fontWeight: '900', marginBottom: 12 }}>{currentDoc.title}</Text>
                   {Array.from({ length: 6 }).map((_, i) => (
-                    <View key={i} style={{ height: 8, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 3, marginBottom: 8, width: [100, 85, 92, 78, 95, 60][i] + '%' }} />
+                    <View key={i} style={{ height: 8, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 3, marginBottom: 8, width: ([100, 85, 92, 78, 95, 60][i] + '%') as any }} />
                   ))}
                   <View style={{ height: 50, backgroundColor: 'rgba(74,159,255,0.08)', borderRadius: 8, marginVertical: 12, borderWidth: 1, borderColor: 'rgba(74,159,255,0.15)' }} />
                   {Array.from({ length: 3 }).map((_, i) => (
-                    <View key={i} style={{ height: 8, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 3, marginBottom: 8, width: [88, 70, 45][i] + '%' }} />
+                    <View key={i} style={{ height: 8, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 3, marginBottom: 8, width: ([88, 70, 45][i] + '%') as any }} />
                   ))}
                   <View style={{ position: 'absolute', bottom: 12, right: 12, flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                     <Text style={{ color: C.accent, fontSize: 9 }}>🔐 AES-256</Text>

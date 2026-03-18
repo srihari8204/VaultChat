@@ -1,34 +1,27 @@
 // app/group-chat.tsx
 // Group chat: E2E encrypted, polls, disappearing messages, pinned, reactions
 
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  View, Text, TextInput, FlatList, TouchableOpacity,
+  KeyboardAvoidingView, Platform, StyleSheet, Alert,
+  ActivityIndicator, Pressable, Modal,
+} from 'react-native';
+import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
-import * as DocumentPicker from 'expo-document-picker';
-import * as ImagePicker from 'expo-image-picker';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text, TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
 import { io, Socket } from 'socket.io-client';
+import { encryptMessage, decryptMessage } from '../services/d2deService';
+import { pinMessage, setDisappearingTimer } from '../services/groupService';
 import AttachmentSheet from '../components/AttachmentSheet';
-import MediaMessage from '../components/MediaMessage';
-import PollMessage from '../components/PollMessage';
-import ReactionPicker from '../components/ReactionPicker';
-import VoiceRecorder from '../components/VoiceRecorder';
-import { decryptMessage, encryptMessage } from '../services/d2deService';
-import { pinMessage } from '../services/groupService';
+import MediaMessage    from '../components/MediaMessage';
+import PollMessage     from '../components/PollMessage';
+import ReactionPicker  from '../components/ReactionPicker';
 import { uploadMedia } from '../services/mediaService';
+import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
+import { Audio } from 'expo-av';
+import VoiceRecorder from '../components/VoiceRecorder';
 
 const BACKEND = 'https://vaultchat.onrender.com';
 
@@ -46,18 +39,11 @@ interface Message {
   replyTo?: { id: string; senderId: string; senderName: string; plaintext: string };
   msgType: MsgType;
   mediaUrl?: string;
-  viewOnce?: boolean;
-  viewOnceOpened?: boolean;
   filename?: string;
   audioDuration?: number;
   reactions?: Record<string, string[]>;
   poll?: any;
   expiresAt?: any;
-  ciphertext?: string;
-  iv?: string;
-  tag?: string;
-  keyId?: string;
-  v?: number;
 }
 
 export default function GroupChatScreen() {
@@ -74,8 +60,6 @@ export default function GroupChatScreen() {
   const [replyTarget,   setReplyTarget]   = useState<Message | null>(null);
   const [editTarget,    setEditTarget]    = useState<Message | null>(null);
   const [longPressMsg,  setLongPressMsg]  = useState<Message | null>(null);
-  const [forwardMsg,    setForwardMsg]    = useState<Message | null>(null);
-  const [forwardChats,  setForwardChats]  = useState<any[]>([]);
   const [showAttach,    setShowAttach]    = useState(false);
   const [showVoice,     setShowVoice]     = useState(false);
   const [showReaction,  setShowReaction]  = useState(false);
@@ -167,7 +151,6 @@ export default function GroupChatScreen() {
             replyTo: d.replyTo ?? null,
             msgType: d.msgType ?? 'text',
             mediaUrl: d.mediaUrl,
-            viewOnce: d.viewOnce || false, viewOnceOpened: d.viewOnceOpened || false,
             filename: d.filename,
             audioDuration: d.audioDuration,
             reactions: d.reactions ?? {},
@@ -274,38 +257,7 @@ export default function GroupChatScreen() {
     await firestore().collection('chats').doc(chatId).update({ lastMsg: `ðŸ“Š Poll: ${q}`, lastTime: firestore.FieldValue.serverTimestamp() });
   };
 
-  
-  const startForward = async (m: Message) => {
-    setLongPressMsg(null); setForwardMsg(m);
-    try {
-      const snap = await firestore().collection('chats')
-        .where('participants', 'array-contains', myUid)
-        .orderBy('lastTime', 'desc').limit(20).get();
-      const list: any[] = [];
-      for (const d of snap.docs) {
-        if (d.id === chatId) continue;
-        const data = d.data();
-        const otherId = (data.participants || []).find((p: string) => p !== myUid);
-        let nm = data.groupName || '';
-        if (!nm && otherId) { const u = await firestore().collection('users').doc(otherId).get(); nm = u.data()?.name || otherId.slice(0,8); }
-        list.push({ chatId: d.id, peerUid: otherId, name: nm, groupName: data.groupName });
-      }
-      setForwardChats(list);
-    } catch { Alert.alert('Error','Could not load chats'); setForwardMsg(null); }
-  };
-  const doForward = async (target: any) => {
-    if (!forwardMsg) return;
-    try {
-      const d: any = { senderId: myUid, msgType: forwardMsg.msgType||'text', status:'sent', isDeleted:false, reactions:{}, isForwarded:true, createdAt: firestore.FieldValue.serverTimestamp() };
-      if (forwardMsg.msgType==='text'||!forwardMsg.mediaUrl) { d.ciphertext=forwardMsg.ciphertext; d.iv=forwardMsg.iv; d.plaintext=forwardMsg.plaintext; }
-      else { d.mediaUrl=forwardMsg.mediaUrl; d.filename=forwardMsg.filename; if(forwardMsg.audioDuration) d.audioDuration=forwardMsg.audioDuration; }
-      await firestore().collection('chats').doc(target.chatId).collection('messages').add(d);
-      await firestore().collection('chats').doc(target.chatId).update({ lastMsg: (forwardMsg.plaintext||forwardMsg.filename||'media').substring(0,40), lastTime: firestore.FieldValue.serverTimestamp() });
-      setForwardMsg(null); setForwardChats([]);
-      Alert.alert('Forwarded!','Message sent to '+(target.groupName||target.name));
-    } catch(e:any) { Alert.alert('Error',e.message); }
-  };
-const sendMedia = async (localUri: string, type: 'image'|'video'|'audio'|'file'|'gif', opts?: any) => {
+  const sendMedia = async (localUri: string, type: 'image'|'video'|'audio'|'file'|'gif', opts?: any) => {
     setUploading(true);
     try {
       const result = await uploadMedia(localUri, chatId, type === 'gif' ? 'image' : type, opts?.filename);
@@ -379,7 +331,6 @@ const sendMedia = async (localUri: string, type: 'image'|'video'|'audio'|'file'|
         <View style={s.sheet}>
           <TouchableOpacity style={s.sheetRow} onPress={() => { setReactTarget(longPressMsg); setShowReaction(true); setLongPressMsg(null); }}><Text style={s.sheetTxt}>ðŸ˜Š  React</Text></TouchableOpacity>
           <TouchableOpacity style={s.sheetRow} onPress={() => { setReplyTarget(longPressMsg); setLongPressMsg(null); }}><Text style={s.sheetTxt}>â†©  Reply</Text></TouchableOpacity>
-          <TouchableOpacity style={s.sheetRow} onPress={() => startForward(longPressMsg)}><Text style={s.sheetTxt}>{"\u27A1\uFE0F  Forward"}</Text></TouchableOpacity>
           <TouchableOpacity style={s.sheetRow} onPress={() => { pinMessage(chatId, longPressMsg.id); setLongPressMsg(null); Alert.alert('Pinned!'); }}><Text style={s.sheetTxt}>ðŸ“Œ  Pin Message</Text></TouchableOpacity>
           {isMe && longPressMsg.msgType === 'text' && <TouchableOpacity style={s.sheetRow} onPress={() => { setEditTarget(longPressMsg); setLongPressMsg(null); setInputText(longPressMsg.plaintext); }}><Text style={s.sheetTxt}>âœï¸  Edit</Text></TouchableOpacity>}
           {isMe && <TouchableOpacity style={s.sheetRow} onPress={() => deleteMsg(longPressMsg)}><Text style={[s.sheetTxt, { color: '#FF3C6E' }]}>ðŸ—‘  Delete</Text></TouchableOpacity>}
@@ -412,35 +363,7 @@ const sendMedia = async (localUri: string, type: 'image'|'video'|'audio'|'file'|
     </Modal>
   );
 
-  
-  const ForwardModal = () => {
-    if (!forwardMsg) return null;
-    return (
-      <Modal visible={true} transparent animationType="slide" onRequestClose={() => { setForwardMsg(null); setForwardChats([]); }}>
-        <Pressable style={s.overlay} onPress={() => { setForwardMsg(null); setForwardChats([]); }}>
-          <View style={[s.sheet, { maxHeight: '70%' }]}>
-            <Text style={{ color: '#fff', fontSize: 16, fontWeight: '800', marginBottom: 12 }}>Forward to...</Text>
-            {forwardChats.length === 0
-              ? <ActivityIndicator color="#00E5FF" style={{ padding: 20 }} />
-              : <FlatList data={forwardChats} keyExtractor={(c:any) => c.chatId}
-                  renderItem={({ item }:any) => (
-                    <TouchableOpacity style={[s.sheetRow,{flexDirection:'row',alignItems:'center',gap:10}]} onPress={() => doForward(item)}>
-                      <View style={{width:36,height:36,borderRadius:18,backgroundColor:'#7C3AED',justifyContent:'center',alignItems:'center'}}>
-                        <Text style={{color:'#fff',fontWeight:'900',fontSize:14}}>{(item.groupName||item.name||'?')[0].toUpperCase()}</Text>
-                      </View>
-                      <Text style={s.sheetTxt}>{item.groupName||item.name}</Text>
-                    </TouchableOpacity>
-                  )} />
-            }
-            <TouchableOpacity style={s.sheetRow} onPress={() => { setForwardMsg(null); setForwardChats([]); }}>
-              <Text style={[s.sheetTxt,{color:'#555'}]}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </Pressable>
-      </Modal>
-    );
-  };
-return (
+  return (
     <>
       <Stack.Screen options={{
         title: groupName ?? 'Group',
@@ -526,8 +449,7 @@ return (
           onSelect={(emoji) => { if (reactTarget) addReaction(reactTarget, emoji); }}
         />
       </KeyboardAvoidingView>
-          <ForwardModal />
-      </>
+    </>
   );
 }
 

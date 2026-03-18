@@ -116,7 +116,7 @@ function DashboardContent() {
           {scanning&&(
             <View style={{width:'65%',marginTop:16}}>
               <View style={{height:3,backgroundColor:'rgba(255,255,255,0.06)',borderRadius:2,overflow:'hidden'}}>
-                <View style={{width:scanProgress+'%',height:3,backgroundColor:C.primary,borderRadius:2}}/>
+                <View style={{width:(scanProgress+'%') as any,height:3,backgroundColor:C.primary,borderRadius:2}}/>
               </View>
               <Text style={{color:C.textFaint,fontSize:9,letterSpacing:1,marginTop:5,textAlign:'center'}}>SCANNING {Math.floor(scanProgress)}%</Text>
             </View>
@@ -161,7 +161,7 @@ function DashboardContent() {
                 </View>
                 <Text style={{color:C.textFaint,fontSize:10,marginBottom:6}}>{mod.desc}</Text>
                 <View style={{height:3,backgroundColor:'rgba(255,255,255,0.06)',borderRadius:2,overflow:'hidden'}}>
-                  <View style={{width:mod.score+'%',height:3,backgroundColor:getStatusColor(mod.status),borderRadius:2}}/>
+                  <View style={{width:(mod.score+'%') as any,height:3,backgroundColor:getStatusColor(mod.status),borderRadius:2}}/>
                 </View>
               </View>
               <Text style={{color:getStatusColor(mod.status),fontSize:16,fontWeight:'900',marginLeft:10}}>{mod.score}</Text>

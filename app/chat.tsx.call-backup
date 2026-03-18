@@ -515,14 +515,9 @@ return (
         title: peerName ?? 'Chat',
         headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff',
         headerRight: () => (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, marginRight: 12 }}>
-            <TouchableOpacity onPress={() => router.push({ pathname: '/voicecall' as any, params: { chatId, name: peerName } })}>
-              <Text style={{ color: '#00E5FF', fontSize: 20 }}>{"\u260E\uFE0F"}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push({ pathname: '/videocall', params: { chatId, peerUid, peerName } })}>
-              <Text style={{ color: '#00E5FF', fontSize: 20 }}>{"\uD83D\uDCF9"}</Text>
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity onPress={() => router.push({ pathname: '/videocall', params: { chatId, peerUid, peerName } })} style={{ marginRight: 12 }}>
+            <Text style={{ color: '#00E5FF', fontSize: 18 }}>ðŸ“¹</Text>
+          </TouchableOpacity>
         ),
       }} />
 

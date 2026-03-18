@@ -1,4 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 ﻿// app/chats.tsx
 // Chat list: 1:1 + groups, search, starred, mute, archive, online status,
 // note-to-self, swipe actions
@@ -117,18 +116,6 @@ export default function ChatsScreen() {
     return unsub;
   }, [myUid]);
 
-  // Filter out hidden chats
-  useEffect(() => {
-    (async () => {
-      const raw = await AsyncStorage.getItem('vc_hidden_chats');
-      const hidden: string[] = raw ? JSON.parse(raw) : [];
-      if (hidden.length > 0) {
-        setChats(prev => prev.filter(c => !hidden.includes(c.id)));
-      }
-    })();
-  }, [chats.length]);
-
-
   useEffect(() => {
     let list = chats.filter(c => showArchive ? c.archived : !c.archived);
     if (search.trim()) {
@@ -198,17 +185,7 @@ export default function ChatsScreen() {
     </Pressable>
   );
 
-  
-  const hideChat = async (chatId: string) => {
-    const raw = await AsyncStorage.getItem('vc_hidden_chats');
-    const ids: string[] = raw ? JSON.parse(raw) : [];
-    if (!ids.includes(chatId)) ids.push(chatId);
-    await AsyncStorage.setItem('vc_hidden_chats', JSON.stringify(ids));
-    setChats(prev => prev.filter(c => c.id !== chatId));
-    setLongPress(null);
-  };
-
-const LongPressSheet = () => {
+  const LongPressSheet = () => {
     if (!longPress) return null;
     return (
       <Pressable style={s.overlay} onPress={() => setLongPress(null)}>
@@ -221,9 +198,6 @@ const LongPressSheet = () => {
           </TouchableOpacity>
           <TouchableOpacity style={s.sheetRow} onPress={() => { archiveChat(longPress.id, !longPress.archived); setLongPress(null); }}>
             <Text style={s.sheetTxt}>{longPress.archived ? '📚 Unarchive' : '🗄 Archive'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={s.sheetRow} onPress={() => { hideChat(longPress.id); }}>
-            <Text style={s.sheetTxt}>{"\uD83D\uDD12 Hide Chat"}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={s.sheetRow} onPress={() => setLongPress(null)}>
             <Text style={[s.sheetTxt, { color: '#555' }]}>Cancel</Text>

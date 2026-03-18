@@ -25,8 +25,6 @@ interface Props {
   chatId?: string;
   onMediaSelected?: (type: string, uri: string, name?: string) => void;
   onLocationShared?: (coords: { lat: number; lng: number; mode: string }) => void;
-  onViewOnceToggle?: () => void;
-  onCameraOpen?: () => void;
 }
 
 // Grid items
@@ -39,7 +37,6 @@ const GRID = [
   { id: 'sync-contact',     icon: '🔒', label: 'Contact',   color: '#A78BFA', bg: '#0E0A1A' },
   { id: 'audio',            icon: '🎵', label: 'Audio',     color: '#10B981', bg: '#001A0E' },
   { id: 'vaultdrop',        icon: '📦', label: 'VaultDrop', color: '#EC4899', bg: '#1A0010' },
-  { id: 'view-once',        icon: '👁', label: 'View Once', color: '#00D4AA', bg: '#001A15' },
 ] as const;
 
 type GridId = (typeof GRID)[number]['id'];
@@ -50,8 +47,6 @@ export default function VaultAttachmentSheet({
   chatId,
   onMediaSelected,
   onLocationShared,
-  onViewOnceToggle,
-  onCameraOpen,
 }: Props) {
   const router = useRouter();
   const slideAnim = useRef(new Animated.Value(400)).current;
@@ -92,13 +87,17 @@ export default function VaultAttachmentSheet({
 
       case 'camera': {
         onClose();
-        if (onCameraOpen) {
-          onCameraOpen();
-        } else {
-          const { status } = await ImagePicker.requestCameraPermissionsAsync();
-          if (status !== 'granted') { Alert.alert('Permission Needed', 'Camera access is required.'); return; }
-          const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images', 'videos'], quality: 0.85 });
-          if (!result.canceled && result.assets[0]) { onMediaSelected?.('image', result.assets[0].uri, 'photo.jpg'); }
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission Needed', 'Camera access is required.');
+          return;
+        }
+        const result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ['images', 'videos'],  // SDK 50+ (replaces deprecated MediaTypeOptions)
+          quality: 0.85,
+        });
+        if (!result.canceled && result.assets[0]) {
+          onMediaSelected?.('image', result.assets[0].uri, 'photo.jpg');
         }
         break;
       }
@@ -196,13 +195,6 @@ export default function VaultAttachmentSheet({
           ? (`/vaultdrop?chatId=${chatId}` as any)
           : ('/vaultdrop' as any);
         router.push(dest);
-        break;
-      }
-
-      case 'view-once': {
-        onClose();
-        onViewOnceToggle?.();
-        Alert.alert('\uD83D\uDC41 View Once Mode', 'Next photo or video you send will disappear after recipient views it once.');
         break;
       }
     }

@@ -1,23 +1,27 @@
-// app/calls.tsx
+﻿// app/calls.tsx
 // Real call history from Firestore
 // Missed / Incoming / Outgoing with icons
-// Tap row → calls back
-// Long press → delete from history
+// Tap row â†’ calls back
+// Long press â†’ delete from history
 // Filter tabs: All / Missed / Video / Voice
 
-import React, { useState, useEffect, useCallback } from 'react';
-import {
-  View, Text, TouchableOpacity, StyleSheet,
-  FlatList, Alert, ActivityIndicator,
-} from 'react-native';
-import { useRouter } from 'expo-router';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
-import { BottomNav } from './chats';
+import { useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  StyleSheet,
+  Text, TouchableOpacity,
+  View,
+} from 'react-native';
+import BottomNav from './chats';
 
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Types
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type CallType   = 'video' | 'voice';
 type CallStatus = 'missed' | 'incoming' | 'outgoing' | 'declined';
@@ -30,15 +34,15 @@ interface CallRecord {
   chatId:      string;
   callType:    CallType;
   callStatus:  CallStatus;
-  duration:    number;   // seconds — 0 if missed/declined
+  duration:    number;   // seconds â€” 0 if missed/declined
   startedAt:   any;      // Firestore timestamp
 }
 
 const TABS: FilterTab[] = ['All', 'Missed', 'Video', 'Voice'];
 
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Helpers
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function formatDuration(s: number): string {
   if (s === 0) return '';
@@ -64,17 +68,17 @@ function formatCallTime(ts: any): string {
 function statusIcon(status: CallStatus, type: CallType): string {
   if (type === 'video') {
     switch (status) {
-      case 'missed':   return '📹';
-      case 'incoming': return '📹';
-      case 'outgoing': return '📹';
-      case 'declined': return '📹';
+      case 'missed':   return 'ðŸ“¹';
+      case 'incoming': return 'ðŸ“¹';
+      case 'outgoing': return 'ðŸ“¹';
+      case 'declined': return 'ðŸ“¹';
     }
   }
   switch (status) {
-    case 'missed':   return '📞';
-    case 'incoming': return '📞';
-    case 'outgoing': return '📞';
-    case 'declined': return '📞';
+    case 'missed':   return 'ðŸ“ž';
+    case 'incoming': return 'ðŸ“ž';
+    case 'outgoing': return 'ðŸ“ž';
+    case 'declined': return 'ðŸ“ž';
   }
 }
 
@@ -89,16 +93,16 @@ function statusColor(status: CallStatus): string {
 
 function statusLabel(status: CallStatus): string {
   switch (status) {
-    case 'missed':   return '↙ Missed';
-    case 'incoming': return '↙ Incoming';
-    case 'outgoing': return '↗ Outgoing';
-    case 'declined': return '↙ Declined';
+    case 'missed':   return 'â†™ Missed';
+    case 'incoming': return 'â†™ Incoming';
+    case 'outgoing': return 'â†— Outgoing';
+    case 'declined': return 'â†™ Declined';
   }
 }
 
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Main Screen
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export default function CallsScreen() {
   const router = useRouter();
@@ -108,7 +112,7 @@ export default function CallsScreen() {
   const [loading, setLoading] = useState(true);
   const [tab,     setTab]     = useState<FilterTab>('All');
 
-  // ── Real-time Firestore listener ──────────────────────────────
+  // â”€â”€ Real-time Firestore listener â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     if (!uid) return;
 
@@ -133,7 +137,7 @@ export default function CallsScreen() {
     return () => unsub();
   }, [uid]);
 
-  // ── Filter ────────────────────────────────────────────────────
+  // â”€â”€ Filter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const filtered = calls.filter(c => {
     switch (tab) {
       case 'Missed': return c.callStatus === 'missed' || c.callStatus === 'declined';
@@ -143,12 +147,12 @@ export default function CallsScreen() {
     }
   });
 
-  // ── Counts for tab badges ─────────────────────────────────────
+  // â”€â”€ Counts for tab badges â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const missedCount = calls.filter(
     c => c.callStatus === 'missed' || c.callStatus === 'declined'
   ).length;
 
-  // ── Call back ─────────────────────────────────────────────────
+  // â”€â”€ Call back â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const callBack = (record: CallRecord) => {
     router.push({
       pathname: record.callType === 'video' ? '/videocall' : '/voicecall',
@@ -156,7 +160,7 @@ export default function CallsScreen() {
     });
   };
 
-  // ── Delete call record ────────────────────────────────────────
+  // â”€â”€ Delete call record â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const deleteRecord = (record: CallRecord) => {
     Alert.alert(
       'Delete',
@@ -179,7 +183,7 @@ export default function CallsScreen() {
     );
   };
 
-  // ── Render row ────────────────────────────────────────────────
+  // â”€â”€ Render row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const renderCall = useCallback(({ item }: { item: CallRecord }) => (
     <TouchableOpacity
       style={styles.callRow}
@@ -202,7 +206,7 @@ export default function CallsScreen() {
             {statusLabel(item.callStatus)}
           </Text>
           {item.duration > 0 && (
-            <Text style={styles.callDuration}> · {formatDuration(item.duration)}</Text>
+            <Text style={styles.callDuration}> Â· {formatDuration(item.duration)}</Text>
           )}
         </View>
       </View>
@@ -219,16 +223,16 @@ export default function CallsScreen() {
           onPress={() => callBack(item)}
         >
           <Text style={styles.callBackIcon}>
-            {item.callType === 'video' ? '📹' : '📞'}
+            {item.callType === 'video' ? 'ðŸ“¹' : 'ðŸ“ž'}
           </Text>
         </TouchableOpacity>
       </View>
     </TouchableOpacity>
   ), [uid]);
 
-  // ─────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Render
-  // ─────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   return (
     <View style={styles.container}>
 
@@ -272,7 +276,7 @@ export default function CallsScreen() {
           ListEmptyComponent={
             <View style={styles.emptyWrap}>
               <Text style={styles.emptyIcon}>
-                {tab === 'Missed' ? '📵' : '📞'}
+                {tab === 'Missed' ? 'ðŸ“µ' : 'ðŸ“ž'}
               </Text>
               <Text style={styles.emptyText}>
                 {tab === 'Missed'
@@ -284,14 +288,14 @@ export default function CallsScreen() {
         />
       )}
 
-      <BottomNav active="Calls" />
+      <BottomNav {...{ active: 'Calls' } as any} />
     </View>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Styles
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const styles = StyleSheet.create({
   container:    { flex: 1, backgroundColor: '#0A0E1A' },
@@ -357,3 +361,4 @@ const styles = StyleSheet.create({
   emptyIcon:  { fontSize: 48 },
   emptyText:  { fontSize: 14, color: '#374151' },
 });
+

@@ -10,7 +10,7 @@ import { useRouter } from 'expo-router';
 import { getAuth } from 'firebase/auth';
 
 // REPLACE with your actual backend IP
-const API = 'http://YOUR_BACKEND_IP:3001/api/sync-contact';
+const API = 'https://vaultchat.onrender.com/api/sync-contact';
 
 const C = {
   purple: '#A78BFA',
@@ -140,7 +140,7 @@ export default function SyncContactScreen() {
     }
   };
 
-  // FIX: was Clipboard.setString (deprecated) — now uses expo-clipboard async API
+  // FIX: was Clipboard.setString (deprecated) ï¿½ now uses expo-clipboard async API
   const copyCode = async () => {
     await Clipboard.setStringAsync(myCode);
     Alert.alert('Copied!', 'Code copied to clipboard');
@@ -214,7 +214,7 @@ export default function SyncContactScreen() {
           {[
             ['1??', 'Person A taps "Show My Code" and shares the 6-digit code verbally'],
             ['2??', 'Person B taps "Enter Their Code" and types it in'],
-            ['3??', 'Both contacts are saved — mutual consent confirmed'],
+            ['3??', 'Both contacts are saved ï¿½ mutual consent confirmed'],
           ].map(([icon, text]) => (
             <View key={icon} style={{ flexDirection: 'row', gap: 10, marginBottom: 8 }}>
               <Text style={{ fontSize: 16 }}>{icon}</Text>
@@ -257,7 +257,7 @@ export default function SyncContactScreen() {
             {phase === 'generating' && (
               <View style={{ alignItems: 'center', padding: 20 }}>
                 <ActivityIndicator color={C.purple} size="large" />
-                <Text style={[s.sub, { marginTop: 12 }]}>Generating secure code…</Text>
+                <Text style={[s.sub, { marginTop: 12 }]}>Generating secure codeï¿½</Text>
               </View>
             )}
 
@@ -274,7 +274,7 @@ export default function SyncContactScreen() {
 
             {phase === 'waiting' && myCode.length > 0 && (
               <>
-                <Text style={[s.label, { textAlign: 'center', marginBottom: 12 }]}>YOUR CODE — SHARE VERBALLY</Text>
+                <Text style={[s.label, { textAlign: 'center', marginBottom: 12 }]}>YOUR CODE ï¿½ SHARE VERBALLY</Text>
                 <View style={[s.codeBox, { borderColor: `${C.purple}55` }]}>
                   <Text style={[s.codeText, { color: C.purple }]}>
                     {myCode.slice(0, 3)}  {myCode.slice(3)}
@@ -294,7 +294,7 @@ export default function SyncContactScreen() {
                 </View>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   <ActivityIndicator color={C.purple} size="small" />
-                  <Text style={[s.sub, { flex: 1 }]}>Waiting for the other person to enter this code…</Text>
+                  <Text style={[s.sub, { flex: 1 }]}>Waiting for the other person to enter this codeï¿½</Text>
                 </View>
               </>
             )}
@@ -351,7 +351,7 @@ export default function SyncContactScreen() {
             {phase === 'verifying' && (
               <View style={{ alignItems: 'center', padding: 20 }}>
                 <ActivityIndicator color={C.purple} size="large" />
-                <Text style={[s.sub, { marginTop: 12 }]}>Verifying code…</Text>
+                <Text style={[s.sub, { marginTop: 12 }]}>Verifying codeï¿½</Text>
               </View>
             )}
           </View>

@@ -118,6 +118,9 @@ export default function RootLayout() {
         <Stack.Screen name="chat" />
         <Stack.Screen name="videocall" />
         <Stack.Screen name="voicecall" />
+        <Stack.Screen name="qr-contact" />
+        <Stack.Screen name="hidden-chats" />
+        <Stack.Screen name="camera" options={{ headerShown: false }} />
         <Stack.Screen name="status" />
         <Stack.Screen name="calls" />
         <Stack.Screen name="vault" />

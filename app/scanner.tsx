@@ -154,7 +154,6 @@ export default function ScannerScreen() {
   const handleExport = async () => {
     setProcessing(true);
     try {
-      // Copy image to cache with chosen format name
       const fmt  = FORMATS[selectedFmt];
       const date = new Date().toLocaleDateString("en-GB").replace(/\//g, "-");
       const dest = `${(FileSystem as any).cacheDirectory}VaultScan_${date}.${fmt.ext.toLowerCase()}`;
@@ -163,11 +162,9 @@ export default function ScannerScreen() {
         await FileSystem.copyAsync({ from: imageUri, to: dest });
       }
 
-      await new Promise(r => setTimeout(r, 1200)); // simulate processing
+      await new Promise(r => setTimeout(r, 1200));
 
-      // Share
       if (selectedApp === 0) {
-        // Share back to VaultChat chat
         Alert.alert("? Document Scanned", `Sending ${fmt.ext} to ${chatName}...`);
       } else {
         const canShare = await Sharing.isAvailableAsync();
@@ -227,13 +224,11 @@ export default function ScannerScreen() {
         {/* -- STEP 0: SCAN ----------------------------------------------- */}
         {step === 0 && (
           <View>
-            {/* Viewfinder */}
             <View style={s.viewfinder}>
               <LinearGradient colors={["#0d1929","#0a1420"]} style={s.viewfinderInner}>
                 <Text style={{ fontSize: 52, marginBottom: 14 }}>??</Text>
                 <Text style={s.vfTitle}>Position your document</Text>
                 <Text style={s.vfSub}>Make sure it's well lit and flat</Text>
-                {/* Corner brackets */}
                 {[[0,0],[1,0],[0,1],[1,1]].map(([x,y], i) => (
                   <View key={i} style={[s.corner,
                     x===1 && { right:16, left:undefined },
@@ -246,7 +241,6 @@ export default function ScannerScreen() {
               </LinearGradient>
             </View>
 
-            {/* Camera / Gallery buttons */}
             <View style={s.captureRow}>
               <TouchableOpacity onPress={openGallery} style={s.galleryBtn}>
                 <Text style={{ fontSize: 22 }}>???</Text>
@@ -269,7 +263,6 @@ export default function ScannerScreen() {
               </View>
             </View>
 
-            {/* Tools */}
             <View style={s.toolRow}>
               {[{i:"?",l:"Auto\nEdge"},{i:"??",l:"HDR"},{i:"??",l:"Crop"},{i:"??",l:"Grid"},{i:"??",l:"Flash"}].map((t,i) => (
                 <TouchableOpacity key={i} style={s.toolBtn}>
@@ -279,7 +272,6 @@ export default function ScannerScreen() {
               ))}
             </View>
 
-            {/* Format selector */}
             <Text style={s.sectionLabel}>Export Format</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
               <View style={{ flexDirection:"row", gap:8, paddingHorizontal:2 }}>
@@ -287,7 +279,6 @@ export default function ScannerScreen() {
               </View>
             </ScrollView>
 
-            {/* Share selector */}
             <Text style={s.sectionLabel}>Share Via</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
               <View style={{ flexDirection:"row", gap:8, paddingHorizontal:2 }}>
@@ -304,7 +295,6 @@ export default function ScannerScreen() {
         {/* -- STEP 1: ENHANCE -------------------------------------------- */}
         {step === 1 && (
           <View>
-            {/* Image preview */}
             <View style={s.previewBox}>
               {imageUri ? (
                 <Image source={{ uri: imageUri }} style={s.previewImg} resizeMode="cover" />
@@ -318,7 +308,6 @@ export default function ScannerScreen() {
               </View>
             </View>
 
-            {/* Filters */}
             <Text style={s.sectionLabel}>Enhancement Filter</Text>
             <View style={s.filterRow}>
               {FILTERS.map((f,i) => (
@@ -329,7 +318,6 @@ export default function ScannerScreen() {
               ))}
             </View>
 
-            {/* Sliders */}
             {[
               { label:"Brightness", icon:"??", val:brightness, set:setBrightness },
               { label:"Contrast",   icon:"?",  val:contrast,   set:setContrast   },
@@ -341,9 +329,9 @@ export default function ScannerScreen() {
                   <Text style={s.sliderVal}>{item.val}%</Text>
                 </View>
                 <View style={s.sliderTrack}>
-                  <View style={[s.sliderFill, { width:`${item.val}%` as any }]} />
+                  <View style={[s.sliderFill, { width:(`${item.val}%`) as any }]} />
                   <TouchableOpacity
-                    style={[s.sliderThumb, { left:`${item.val}%` as any }]}
+                    style={[s.sliderThumb, { left:(`${item.val}%`) as any }]}
                     onPress={() => item.set(v => Math.min(100, v + 5))}
                   />
                 </View>
@@ -354,7 +342,6 @@ export default function ScannerScreen() {
               </View>
             ))}
 
-            {/* Format + Share */}
             <Text style={s.sectionLabel}>Export Format</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom:14 }}>
               <View style={{ flexDirection:"row", gap:8, paddingHorizontal:2 }}>
@@ -385,7 +372,6 @@ export default function ScannerScreen() {
         {/* -- STEP 2: EXPORT --------------------------------------------- */}
         {step === 2 && !done && (
           <View>
-            {/* Preview */}
             <View style={s.exportPreview}>
               {imageUri
                 ? <Image source={{ uri: imageUri }} style={s.exportImg} resizeMode="cover" />
@@ -393,7 +379,6 @@ export default function ScannerScreen() {
               }
             </View>
 
-            {/* Format grid */}
             <Text style={s.sectionLabel}>Choose Format</Text>
             <View style={s.fmtGrid}>
               {FORMATS.map((f,i) => (
@@ -411,7 +396,6 @@ export default function ScannerScreen() {
               ))}
             </View>
 
-            {/* File info card */}
             <View style={s.fileCard}>
               <LinearGradient colors={[`${fmt.color}25`,`${fmt.color}10`]} style={s.fileCardIcon}>
                 <Text style={{ fontSize:22 }}>{fmt.icon}</Text>
@@ -426,7 +410,6 @@ export default function ScannerScreen() {
               </View>
             </View>
 
-            {/* Share via */}
             <Text style={s.sectionLabel}>Share Via</Text>
             <View style={s.shareGrid}>
               {SHARE_APPS.map((a,i) => (
@@ -518,7 +501,6 @@ const s = StyleSheet.create({
   scroll:            { padding:16, paddingBottom:48 },
   sectionLabel:      { color:"rgba(255,255,255,0.4)", fontSize:10, fontWeight:"700",
                        textTransform:"uppercase", letterSpacing:0.8, marginBottom:8 },
-  // Step 0 — scan
   viewfinder:        { borderRadius:16, overflow:"hidden", marginBottom:14, height:200 },
   viewfinderInner:   { flex:1, justifyContent:"center", alignItems:"center",
                        borderWidth:1, borderColor:"rgba(255,255,255,0.07)", borderRadius:16 },
@@ -550,7 +532,6 @@ const s = StyleSheet.create({
   toolBtn:           { alignItems:"center", gap:4, padding:"4px 6px" as any },
   toolLabel:         { color:"rgba(255,255,255,0.35)", fontSize:9, fontWeight:"700",
                        textAlign:"center" },
-  // Chips
   fmtChip:           { alignItems:"center", gap:3, backgroundColor:"rgba(255,255,255,0.06)",
                        borderRadius:12, padding:10, borderWidth:1,
                        borderColor:"rgba(255,255,255,0.08)", minWidth:60 },
@@ -565,7 +546,6 @@ const s = StyleSheet.create({
   infoBox:           { backgroundColor:"rgba(74,159,255,0.06)", borderRadius:10,
                        padding:10, borderWidth:1, borderColor:"rgba(74,159,255,0.12)" },
   infoText:          { color:"rgba(255,255,255,0.35)", fontSize:11, textAlign:"center" },
-  // Step 1 — enhance
   previewBox:        { height:180, borderRadius:16, overflow:"hidden", marginBottom:14, position:"relative" },
   previewImg:        { width:"100%", height:"100%" },
   previewPlaceholder:{ flex:1, justifyContent:"center", alignItems:"center" },
@@ -584,15 +564,13 @@ const s = StyleSheet.create({
   sliderLabel:       { color:"rgba(255,255,255,0.5)", fontSize:12 },
   sliderVal:         { color:"#4A9FFF", fontSize:12, fontWeight:"700" },
   sliderTrack:       { height:4, backgroundColor:"rgba(255,255,255,0.08)", borderRadius:2, overflow:"hidden" },
-  sliderFill:        { height:"100%", background:"linear-gradient(90deg,#4A9FFF,#7C3AED)" as any,
-                       backgroundColor:"#4A9FFF", borderRadius:2 },
+  sliderFill:        { height:"100%" as any, backgroundColor:"#4A9FFF", borderRadius:2 },
   sliderThumb:       { display:"none" as any },
   sliderBtns:        { flexDirection:"row", gap:6, marginTop:4 },
   sliderAdjBtn:      { flex:1, paddingVertical:5, backgroundColor:"rgba(255,255,255,0.06)",
                        borderRadius:8, alignItems:"center", borderWidth:1,
                        borderColor:"rgba(255,255,255,0.08)" },
   sliderAdjText:     { color:"#4A9FFF", fontSize:16, fontWeight:"900" },
-  // Step 2 — export
   exportPreview:     { height:120, borderRadius:14, overflow:"hidden", marginBottom:14 },
   exportImg:         { width:"100%", height:"100%" },
   exportPlaceholder: { flex:1, justifyContent:"center", alignItems:"center" },
@@ -616,7 +594,6 @@ const s = StyleSheet.create({
                        borderRadius:12, backgroundColor:"rgba(255,255,255,0.04)",
                        borderWidth:1, borderColor:"rgba(255,255,255,0.07)" },
   shareGridName:     { color:"rgba(255,255,255,0.45)", fontSize:10, fontWeight:"700" },
-  // Shared
   rowBtns:           { flexDirection:"row", gap:10, marginTop:4 },
   backStepBtn:       { justifyContent:"center", alignItems:"center",
                        backgroundColor:"rgba(255,255,255,0.07)", borderRadius:14,
@@ -625,7 +602,6 @@ const s = StyleSheet.create({
   backStepText:      { color:"rgba(255,255,255,0.6)", fontWeight:"800", fontSize:13 },
   nextBtn:           { paddingVertical:14, alignItems:"center", borderRadius:14 },
   nextBtnText:       { color:"#fff", fontSize:14, fontWeight:"900" },
-  // Done
   doneWrap:          { alignItems:"center", paddingVertical:24 },
   doneTitle:         { color:"#fff", fontSize:20, fontWeight:"900", marginBottom:8 },
   doneSub:           { color:"rgba(255,255,255,0.4)", fontSize:13, textAlign:"center",

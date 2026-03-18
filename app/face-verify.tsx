@@ -4,17 +4,20 @@
  * Zero vision-camera imports. Zero new packages.
  */
 
-import React, { useRef, useState, useEffect, useCallback } from 'react';
-import {
-  View, Text, StyleSheet, TouchableOpacity,
-  Animated, Dimensions, Platform, StatusBar,
-} from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as FaceDetector from 'expo-face-detector';
-import * as LocalAuthentication from 'expo-local-authentication';
 import * as Haptics from 'expo-haptics';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as LocalAuthentication from 'expo-local-authentication';
 import { router } from 'expo-router';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  Animated, Dimensions, Platform, StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 
 const C = {
   bg:'#060E1E', panel:'#0D1F3C', cyan:'#00E5FF',
@@ -84,7 +87,7 @@ export default function FaceVerifyScreen() {
     Haptics.notificationAsync(matched
       ?Haptics.NotificationFeedbackType.Success
       :Haptics.NotificationFeedbackType.Error);
-    if(matched) setTimeout(()=>router.replace('/(tabs)'),1500);
+    if(matched) setTimeout(()=>router.replace('/(tabs)/chats' as any),1500);
   };
 
   const triggerBio=async()=>{
@@ -126,14 +129,16 @@ export default function FaceVerifyScreen() {
           <CameraView
             style={StyleSheet.absoluteFill}
             facing="front"
-            onFacesDetected={onFaces}
-            faceDetectorSettings={{
-              mode:FaceDetector.FaceDetectorMode.accurate,
-              detectLandmarks:FaceDetector.FaceDetectorLandmarks.none,
-              runClassifications:FaceDetector.FaceDetectorClassifications.none,
-              minDetectionInterval:120,
-              tracking:true,
-            }}
+            {...{
+              onFacesDetected: onFaces,
+              faceDetectorSettings: {
+                mode: FaceDetector.FaceDetectorMode.accurate,
+                detectLandmarks: FaceDetector.FaceDetectorLandmarks.none,
+                runClassifications: FaceDetector.FaceDetectorClassifications.none,
+                minDetectionInterval: 120,
+                tracking: true,
+              },
+            } as any}
           />
         )}
         <View style={{position:'absolute',top:0,left:0,right:0,height:160,backgroundColor:'rgba(6,14,30,0.70)'}} pointerEvents="none"/>
@@ -159,7 +164,7 @@ export default function FaceVerifyScreen() {
         {phase===PHASE.SCANNING&&(
           <View style={{position:'absolute',bottom:100,left:32,right:32}} pointerEvents="none">
             <View style={{height:5,backgroundColor:'#112233',borderRadius:3,overflow:'hidden',marginBottom:10}}>
-              <View style={{height:'100%',width:`${Math.round(pct*100)}%`,backgroundColor:C.cyan,borderRadius:3}}/>
+              <View style={{height:'100%' as any,width:(`${Math.round(pct*100)}%`) as any,backgroundColor:C.cyan,borderRadius:3}}/>
             </View>
             <Text style={{fontSize:14,fontWeight:'600',color:C.white,textAlign:'center'}}>
               {fc===0?'Look at camera to unlock…':`Scanning ${Math.round(pct*100)}%`}
@@ -193,7 +198,7 @@ export default function FaceVerifyScreen() {
         <Text style={s.btxt}>Try Again</Text>
       </TouchableOpacity>
       <TouchableOpacity style={[s.btn,{backgroundColor:C.panel,marginTop:12}]}
-        onPress={()=>router.replace('/pinentry')}>
+        onPress={()=>router.replace('/pinentry' as any)}>
         <Text style={[s.btxt,{color:C.muted}]}>Use PIN Instead</Text>
       </TouchableOpacity>
     </View>
@@ -204,7 +209,7 @@ export default function FaceVerifyScreen() {
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
       <Text style={{fontSize:26,fontWeight:'800',color:C.coral,textAlign:'center',marginBottom:12}}>Face ID Not Set Up</Text>
       <Text style={{fontSize:14,color:C.muted,textAlign:'center',marginBottom:32}}>Set up Face ID first.</Text>
-      <TouchableOpacity style={s.btn} onPress={()=>router.replace('/facescan')}>
+      <TouchableOpacity style={s.btn} onPress={()=>router.replace('/facescan' as any)}>
         <Text style={s.btxt}>Set Up Face ID</Text>
       </TouchableOpacity>
     </View>

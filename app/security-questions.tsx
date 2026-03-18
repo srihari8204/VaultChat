@@ -18,7 +18,7 @@ export default function SecurityQuestionsScreen() {
     if (ans.some(a=>a.trim().length<2)){setError("All answers must be at least 2 characters");return;}
     if (new Set(sel).size<3){setError("Please select 3 different questions");return;}
     setError("");
-    await saveSecurityAnswers(SECURITY_QUESTIONS[sel[0]],ans[0],SECURITY_QUESTIONS[sel[1]],ans[1],SECURITY_QUESTIONS[sel[2]],ans[2]);
+   await saveSecurityAnswers({q1:SECURITY_QUESTIONS[sel[0]],a1:ans[0],q2:SECURITY_QUESTIONS[sel[1]],a2:ans[1],q3:SECURITY_QUESTIONS[sel[2]],a3:ans[2]});
     router.push("/backup-pin");
   };
 

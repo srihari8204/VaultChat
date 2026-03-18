@@ -20,7 +20,7 @@ import {
   VaultContact,
 } from '../lib/contactSync';
 
-const SERVER = 'https://vaultchat.onrender.com';
+const SERVER = 'http://10.94.177.151:3001';
 const C = {
   bg:'#020B18', primary:'#4A9FFF', accent:'#10B981',
   dim:'rgba(255,255,255,0.45)', faint:'rgba(255,255,255,0.12)',
@@ -255,22 +255,7 @@ export default function ContactsScreen() {
                 </Text>
               </View>}
           />}
-    
-        {/* QR Code floating button */}
-        <TouchableOpacity
-          onPress={() => router.push('/qr-contact' as any)}
-          style={{
-            position: 'absolute', bottom: 24, right: 24,
-            width: 56, height: 56, borderRadius: 28,
-            backgroundColor: '#00D4AA', justifyContent: 'center',
-            alignItems: 'center', elevation: 8,
-            shadowColor: '#00D4AA', shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.4, shadowRadius: 8,
-          }}
-        >
-          <Text style={{ fontSize: 24 }}>{"\uD83D\uDCF1"}</Text>
-        </TouchableOpacity>
-</View>
+    </View>
   );
 }
 

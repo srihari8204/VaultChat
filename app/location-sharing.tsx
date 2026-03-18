@@ -1,28 +1,44 @@
 /**
  * app/location-sharing.tsx
- * VaultChat â€” Location Sharing Session Manager
- * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
- * D2DE encrypted â€” server sees ZERO plaintext coordinates
- * Three modes: Static snapshot Â· Live stream Â· Until I stop
- * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+ * VaultChat — Location Sharing Session Manager
+ * D2DE encrypted — server sees ZERO plaintext coordinates
+ * Three modes: Static snapshot · Live stream · Until I stop
  */
 
-import React, { useState, useEffect, useRef } from 'react';
-import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  Alert, ActivityIndicator, SafeAreaView, Platform,
-} from 'react-native';
-import * as Location from 'expo-location';
-import { useRouter, useLocalSearchParams } from 'expo-router';
-import { getFirestore, doc, setDoc, deleteDoc } from '@react-native-firebase/firestore';
 import { getAuth } from '@react-native-firebase/auth';
-// d2de location stubs
-const createSession = async () => ({ id: '', key: '' });
-const encryptLocation = async (s: any, l: any) => '';
-const encodeSessionLink = (s: any) => '';
-const deleteSession = async (id: string) => {};
+import { deleteDoc, doc, getFirestore, setDoc } from '@react-native-firebase/firestore';
+import * as Location from 'expo-location';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+
+// ─── D2DE stubs ───────────────────────────────────────────────
 type D2DESession = { id: string; key: string };
-type LocationPayload = { lat: number; lng: number; ts: number };
+type LocationPayload = {
+  lat:        number;
+  lng:        number;
+  ts:         number;
+  accuracy?:  number;
+  address?:   string;
+  type?:      string;
+  expiresAt?: number;
+};
+
+const createSession = async (_uid?: string): Promise<D2DESession> => ({ id: '', key: '' });
+const encryptLocation = async (payload: LocationPayload, sess: D2DESession): Promise<string> => '';
+const encodeSessionLink = (sess: D2DESession): string => '';
+const deleteSession = async (id: string): Promise<void> => {};
+// ──────────────────────────────────────────────────────────────
 
 const C = {
   current: '#00D4AA',
@@ -52,19 +68,22 @@ export default function LocationSharingScreen() {
   const router  = useRouter();
   const params  = useLocalSearchParams();
 
-  const [screen,    setScreen]    = useState<Screen>('picker');
-  const [mode,      setMode]      = useState<Mode>('current');
-  const [selDur,    setSelDur]    = useState<number | null>(null);
-  const [session,   setSession]   = useState<D2DESession | null>(null);
-  const [timeLeft,  setTimeLeft]  = useState(0);
-  const [loading,   setLoading]   = useState(false);
-  const [myCoords,  setMyCoords]  = useState<{ lat: number; lng: number } | null>(null);
-  const [address,   setAddress]   = useState('Getting your locationâ€¦');
+  const [screen,   setScreen]   = useState<Screen>('picker');
+  const [mode,     setMode]     = useState<Mode>('current');
+  const [selDur,   setSelDur]   = useState<number | null>(null);
+  const [session,  setSession]  = useState<D2DESession | null>(null);
+  const [timeLeft, setTimeLeft] = useState(0);
+  const [loading,  setLoading]  = useState(false);
+  const [myCoords, setMyCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [address,  setAddress]  = useState('Getting your location…');
 
   const liveSubRef = useRef<Location.LocationSubscription | null>(null);
   const updateRef  = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // ── Initial location fetch ──────────────────────────────────
   useEffect(() => {
+    let mounted = true;
+
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
@@ -72,20 +91,27 @@ export default function LocationSharingScreen() {
         return;
       }
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      if (!mounted) return;
       setMyCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude });
+
       const geo = await Location.reverseGeocodeAsync({
         latitude:  loc.coords.latitude,
         longitude: loc.coords.longitude,
       });
+      if (!mounted) return;
       if (geo.length > 0) {
         const g = geo[0];
         setAddress([g.name, g.street, g.city, g.region].filter(Boolean).join(', '));
       }
     })();
-    return () => stopSharing();
+
+    return () => {
+      mounted = false;
+      stopSharing();
+    };
   }, []);
 
-  // Countdown timer
+  // ── Countdown timer ─────────────────────────────────────────
   useEffect(() => {
     if (screen !== 'active' || mode === 'manual') return;
     if (timeLeft <= 0) { stopSharing(); return; }
@@ -93,16 +119,17 @@ export default function LocationSharingScreen() {
     return () => clearInterval(t);
   }, [screen, timeLeft, mode]);
 
-  // Live location push every 30s
+  // ── Live location push every 30s ────────────────────────────
   useEffect(() => {
     if (screen !== 'active' || mode === 'current' || !session) return;
-    updateRef.current = setInterval(() => pushLiveLocation(session), 30000);
+    const sess = session;
+    updateRef.current = setInterval(() => pushLiveLocation(sess), 30000);
     return () => { if (updateRef.current) clearInterval(updateRef.current); };
   }, [screen, session, mode]);
 
   const fmt = (s: number) =>
     s >= 99999
-      ? 'âˆž'
+      ? '∞'
       : `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
   const pushLiveLocation = async (sess: D2DESession) => {
@@ -113,16 +140,16 @@ export default function LocationSharingScreen() {
       const payload: LocationPayload = {
         lat:      loc.coords.latitude,
         lng:      loc.coords.longitude,
+        ts:       Date.now(),
         accuracy: loc.coords.accuracy ?? undefined,
         address,
         type:     'live',
       };
 
-      // D2DE encrypt before pushing
-      const encrypted = await encryptLocation(payload, sess.sessionKey, sess.sessionId);
+      const encrypted = await encryptLocation(payload, sess);
 
       const db = getFirestore();
-      await setDoc(doc(db, 'live_location', sess.sessionId), {
+      await setDoc(doc(db, 'live_location', sess.id), {
         payload:   JSON.stringify(encrypted),
         updatedAt: Date.now(),
       });
@@ -133,7 +160,7 @@ export default function LocationSharingScreen() {
 
   const startSharing = async (m: Mode, dur: number | null) => {
     if (!myCoords) {
-      Alert.alert('Waiting', 'Getting your location, please waitâ€¦');
+      Alert.alert('Waiting', 'Getting your location, please wait…');
       return;
     }
     setLoading(true);
@@ -143,27 +170,25 @@ export default function LocationSharingScreen() {
       setSession(sess);
 
       const payload: LocationPayload = {
-        lat:      myCoords.lat,
-        lng:      myCoords.lng,
+        lat:       myCoords.lat,
+        lng:       myCoords.lng,
+        ts:        Date.now(),
         address,
-        type:     m === 'current' ? 'static' : 'live',
+        type:      m === 'current' ? 'static' : 'live',
         expiresAt: dur ? Date.now() + dur * 60000 : undefined,
       };
 
-      // D2DE encrypt the initial location
-      const encrypted = await encryptLocation(payload, sess.sessionKey, sess.sessionId);
-      const sessionLink = encodeSessionLink(sess); // send this via Double Ratchet in chat
+      const encrypted   = await encryptLocation(payload, sess);
+      const sessionLink = encodeSessionLink(sess);
 
       const db = getFirestore();
-      await setDoc(doc(db, 'location_shares', sess.sessionId), {
+      await setDoc(doc(db, 'location_shares', sess.id), {
         payload:   JSON.stringify(encrypted),
         mode:      m,
         sentAt:    Date.now(),
         expiresAt: payload.expiresAt ?? null,
-        // sessionLink is transmitted via E2EE chat, NOT stored on server
       });
 
-      // Start live watching if needed
       if (m !== 'current') {
         await Location.requestBackgroundPermissionsAsync().catch(() => {});
         liveSubRef.current = await Location.watchPositionAsync(
@@ -191,14 +216,12 @@ export default function LocationSharingScreen() {
     if (updateRef.current) clearInterval(updateRef.current);
 
     if (session) {
-      // Wipe from Firestore â€” no trace left on server
       const db = getFirestore();
       await Promise.all([
-        deleteDoc(doc(db, 'location_shares', session.sessionId)).catch(() => {}),
-        deleteDoc(doc(db, 'live_location',   session.sessionId)).catch(() => {}),
+        deleteDoc(doc(db, 'location_shares', session.id)).catch(() => {}),
+        deleteDoc(doc(db, 'live_location',   session.id)).catch(() => {}),
       ]);
-      // Wipe session key from secure storage
-      await deleteSession(session.sessionId);
+      await deleteSession(session.id);
       setSession(null);
     }
 
@@ -208,27 +231,25 @@ export default function LocationSharingScreen() {
   if (loading) return (
     <SafeAreaView style={[s.root, { justifyContent: 'center', alignItems: 'center' }]}>
       <ActivityIndicator color={C.current} size="large" />
-      <Text style={[s.sub, { marginTop: 12 }]}>Starting D2DE sessionâ€¦</Text>
+      <Text style={[s.sub, { marginTop: 12 }]}>Starting D2DE session…</Text>
     </SafeAreaView>
   );
 
-  // â”€â”€ Active Sharing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Active Sharing ──────────────────────────────────────────
   if (screen === 'active') {
     const col = C[mode];
     return (
       <SafeAreaView style={s.root}>
         <View style={{ flex: 1, padding: 20, alignItems: 'center', justifyContent: 'center' }}>
 
-          {/* Pulse rings */}
           <View style={[s.pulseOuter, { borderColor: `${col}40` }]}>
             <View style={[s.pulseInner, { backgroundColor: `${col}15`, borderColor: `${col}55` }]}>
               <View style={[s.pin, { backgroundColor: col }]}>
-                <Text style={{ fontSize: 26 }}>ðŸ“</Text>
+                <Text style={{ fontSize: 26 }}>📍</Text>
               </View>
             </View>
           </View>
 
-          {/* Status badge */}
           <View style={[s.badge, { backgroundColor: `${col}15`, borderColor: `${col}33`, marginBottom: 10 }]}>
             <View style={[s.dot, { backgroundColor: col }]} />
             <Text style={[s.badgeText, { color: col }]}>
@@ -239,37 +260,35 @@ export default function LocationSharingScreen() {
           <Text style={[s.heading, { textAlign: 'center', marginBottom: 4 }]}>{address}</Text>
           <Text style={[s.sub, { marginBottom: 6, textAlign: 'center' }]}>
             {mode === 'current' ? `Expires in ${fmt(timeLeft)}` :
-             mode === 'live'    ? `Live Â· ${fmt(timeLeft)} remaining` :
+             mode === 'live'    ? `Live · ${fmt(timeLeft)} remaining` :
              'Sharing until you stop'}
           </Text>
 
-          {/* D2DE Status */}
           <View style={[s.card, { width: '100%', marginBottom: 14, borderColor: `${col}22` }]}>
             <Text style={[s.lbl, { marginBottom: 6 }]}>D2DE ENCRYPTION STATUS</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-              <Text style={{ fontSize: 14 }}>ðŸ”</Text>
+              <Text style={{ fontSize: 14 }}>🔐</Text>
               <Text style={{ color: C.current, fontSize: 12, fontWeight: '700' }}>AES-256-GCM Active</Text>
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-              <Text style={{ fontSize: 14 }}>ðŸ”‘</Text>
-              <Text style={{ color: C.current, fontSize: 12, fontWeight: '700' }}>Per-session key Â· Never stored on server</Text>
+              <Text style={{ fontSize: 14 }}>🔑</Text>
+              <Text style={{ color: C.current, fontSize: 12, fontWeight: '700' }}>Per-session key · Never stored on server</Text>
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Text style={{ fontSize: 14 }}>ðŸ›¡ï¸</Text>
+              <Text style={{ fontSize: 14 }}>🛡️</Text>
               <Text style={{ color: C.current, fontSize: 12, fontWeight: '700' }}>Server sees ciphertext only</Text>
             </View>
           </View>
 
-          {/* Session ID */}
           {session && (
             <View style={[s.card, { width: '100%', marginBottom: 20 }]}>
               <Text style={s.lbl}>SESSION ID</Text>
               <Text style={{ color: col, fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
                 fontSize: 11, fontWeight: '700', marginTop: 4 }}>
-                {session.sessionId}
+                {session.id}
               </Text>
               <Text style={[s.sub, { fontSize: 10, marginTop: 4 }]}>
-                Session key transmitted via E2EE chat â€” not stored anywhere
+                Session key transmitted via E2EE chat — not stored anywhere
               </Text>
             </View>
           )}
@@ -278,21 +297,21 @@ export default function LocationSharingScreen() {
             style={[s.btn, { backgroundColor: `${col}15`, borderColor: `${col}33`, borderWidth: 1, width: '100%' }]}
             onPress={stopSharing}
           >
-            <Text style={[s.btnTxt, { color: col }]}>â¹  Stop & Wipe Session</Text>
+            <Text style={[s.btnTxt, { color: col }]}>⏹ Stop & Wipe Session</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
   }
 
-  // â”€â”€ Duration picker â€” Current â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Duration picker — Current ───────────────────────────────
   if (screen === 'dur-current') return (
     <SafeAreaView style={s.root}>
       <ScrollView contentContainerStyle={{ padding: 20 }}>
         <TouchableOpacity onPress={() => setScreen('picker')} style={{ marginBottom: 16 }}>
-          <Text style={{ color: C.link, fontSize: 15 }}>â€¹ Back</Text>
+          <Text style={{ color: C.link, fontSize: 15 }}>‹ Back</Text>
         </TouchableOpacity>
-        <Text style={s.heading}>ðŸ“Œ Current Location</Text>
+        <Text style={s.heading}>📌 Current Location</Text>
         <Text style={[s.sub, { marginBottom: 20 }]}>How long can the recipient view it?</Text>
         <View style={s.durGrid}>
           {DURATIONS.map(d => (
@@ -306,29 +325,29 @@ export default function LocationSharingScreen() {
         <View style={[s.card, { marginBottom: 16 }]}>
           <Text style={s.lbl}>D2DE PROTECTION</Text>
           <Text style={{ color: C.current, fontSize: 12, fontWeight: '700', marginTop: 6 }}>
-            ðŸ” Coordinates AES-256-GCM encrypted{'\n'}
-            ðŸ”‘ Session key delivered via E2EE chat{'\n'}
-            ðŸ—‘ï¸ Auto-wiped after expiry
+            🔐 Coordinates AES-256-GCM encrypted{'\n'}
+            🔑 Session key delivered via E2EE chat{'\n'}
+            🗑️ Auto-wiped after expiry
           </Text>
         </View>
         <TouchableOpacity
           style={[s.btn, { backgroundColor: selDur ? C.current : 'rgba(255,255,255,0.06)' }]}
           onPress={() => { if (selDur) startSharing('current', selDur); }}
           disabled={!selDur}>
-          <Text style={[s.btnTxt, { color: selDur ? '#fff' : C.sub }]}>ðŸ“Œ Share Current Location</Text>
+          <Text style={[s.btnTxt, { color: selDur ? '#fff' : C.sub }]}>📌 Share Current Location</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
 
-  // â”€â”€ Duration picker â€” Live â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Duration picker — Live ──────────────────────────────────
   if (screen === 'dur-live') return (
     <SafeAreaView style={s.root}>
       <ScrollView contentContainerStyle={{ padding: 20 }}>
         <TouchableOpacity onPress={() => setScreen('picker')} style={{ marginBottom: 16 }}>
-          <Text style={{ color: C.live, fontSize: 15 }}>â€¹ Back</Text>
+          <Text style={{ color: C.live, fontSize: 15 }}>‹ Back</Text>
         </TouchableOpacity>
-        <Text style={[s.heading, { color: C.live }]}>ðŸ”´ Live Location</Text>
+        <Text style={[s.heading, { color: C.live }]}>🔴 Live Location</Text>
         <Text style={[s.sub, { marginBottom: 20 }]}>How long to share for?</Text>
         <View style={s.durGrid}>
           {DURATIONS.map(d => (
@@ -343,76 +362,75 @@ export default function LocationSharingScreen() {
           style={[s.card, { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16,
             ...(selDur === -1 && { borderColor: `${C.live}44`, backgroundColor: `${C.live}0a` }) }]}
           onPress={() => setSelDur(-1)}>
-          <Text style={{ fontSize: 26 }}>â™¾ï¸</Text>
+          <Text style={{ fontSize: 26 }}>♾️</Text>
           <View style={{ flex: 1 }}>
             <Text style={[s.optTitle, { color: selDur === -1 ? C.live : '#fff' }]}>Until I Stop</Text>
             <Text style={s.sub}>Share until you manually end it</Text>
           </View>
-          {selDur === -1 && <Text style={{ color: C.live, fontSize: 18 }}>âœ“</Text>}
+          {selDur === -1 && <Text style={{ color: C.live, fontSize: 18 }}>✓</Text>}
         </TouchableOpacity>
         <TouchableOpacity
           style={[s.btn, { backgroundColor: selDur !== null ? C.live : 'rgba(255,255,255,0.06)' }]}
           onPress={() => { if (selDur !== null) startSharing('live', selDur === -1 ? null : selDur); }}
           disabled={selDur === null}>
-          <Text style={[s.btnTxt, { color: selDur !== null ? '#fff' : C.sub }]}>ðŸ”´ Start Live Location</Text>
+          <Text style={[s.btnTxt, { color: selDur !== null ? '#fff' : C.sub }]}>🔴 Start Live Location</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
 
-  // â”€â”€ Mode Picker (home) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Mode Picker (home) ──────────────────────────────────────
   return (
     <SafeAreaView style={s.root}>
       <ScrollView contentContainerStyle={{ padding: 20 }}>
         <TouchableOpacity onPress={() => router.back()} style={{ marginBottom: 16 }}>
-          <Text style={{ color: C.link, fontSize: 15 }}>â€¹ Back</Text>
+          <Text style={{ color: C.link, fontSize: 15 }}>‹ Back</Text>
         </TouchableOpacity>
 
         <Text style={s.lbl}>LOCATION SHARING</Text>
         <Text style={s.heading}>Share Location</Text>
         <Text style={[s.sub, { marginBottom: 6 }]}>
-          {address !== 'Getting your locationâ€¦' ? `ðŸ“ ${address}` : 'ðŸ“ Getting your locationâ€¦'}
+          {address !== 'Getting your location…' ? `📍 ${address}` : '📍 Getting your location…'}
         </Text>
 
-        {/* D2DE notice */}
         <View style={[s.card, { backgroundColor: 'rgba(0,212,170,0.07)', borderColor: 'rgba(0,212,170,0.2)', marginBottom: 20 }]}>
           <Text style={{ color: C.current, fontSize: 12, fontWeight: '800' }}>
-            ðŸ” D2DE Protected Â· AES-256-GCM Â· Server sees zero plaintext
+            🔐 D2DE Protected · AES-256-GCM · Server sees zero plaintext
           </Text>
         </View>
 
-        {[
+        {([
           {
             mode:    'current' as Mode,
-            icon:    'ðŸ“Œ',
+            icon:    '📌',
             title:   'Current Location',
             badge:   'SNAPSHOT',
             color:   C.current,
-            desc:    'Static pin Â· Not tracking Â· Expires on timer',
+            desc:    'Static pin · Not tracking · Expires on timer',
             tags:    ['One-time', 'Auto-expires', 'No tracking'],
             onPress: () => setScreen('dur-current'),
           },
           {
             mode:    'live' as Mode,
-            icon:    'ðŸ”´',
+            icon:    '🔴',
             title:   'Live Location',
             badge:   'MOVING',
             color:   C.live,
-            desc:    'Pin moves as you move Â· Updates every 30s',
+            desc:    'Pin moves as you move · Updates every 30s',
             tags:    ['Real-time', 'Time limit', '30s updates'],
             onPress: () => setScreen('dur-live'),
           },
           {
             mode:    'manual' as Mode,
-            icon:    'â™¾ï¸',
+            icon:    '♾️',
             title:   'Until I Stop',
             badge:   'MANUAL',
             color:   C.manual,
-            desc:    'Live indefinitely Â· Tap Stop when done',
+            desc:    'Live indefinitely · Tap Stop when done',
             tags:    ['No limit', 'You stop it', 'Continuous'],
             onPress: () => startSharing('manual', null),
           },
-        ].map(opt => (
+        ] as const).map(opt => (
           <TouchableOpacity key={opt.mode}
             style={[s.modeCard, { borderColor: `${opt.color}33` }]}
             onPress={opt.onPress}>
@@ -435,7 +453,7 @@ export default function LocationSharingScreen() {
                 ))}
               </View>
             </View>
-            <Text style={{ color: 'rgba(255,255,255,0.2)', fontSize: 20 }}>â€º</Text>
+            <Text style={{ color: 'rgba(255,255,255,0.2)', fontSize: 20 }}>›</Text>
           </TouchableOpacity>
         ))}
       </ScrollView>

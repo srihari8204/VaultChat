@@ -76,14 +76,11 @@ export async function clearPendingSignup() {
 export async function saveUserProfile(d: SignupData) {
   const uid = auth.currentUser?.uid;
   if (!uid) throw new Error("Not authenticated");
-  // Hash phone for privacy-safe contact matching
-  const phoneHash = await sha256(d.mobile);
   await setDoc(doc(db, "users", uid), {
     name:       d.name.trim(),
     dob:        d.dob,
     email:      d.email.trim().toLowerCase(),
     mobile:     d.mobile,
-    phoneHash:  phoneHash,
     securityQ1: d.securityQ1,
     securityA1: await sha256(d.securityA1.toLowerCase().trim()),
     securityQ2: d.securityQ2,

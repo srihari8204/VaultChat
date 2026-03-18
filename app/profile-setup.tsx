@@ -1,10 +1,8 @@
-﻿import { LinearGradient } from "expo-linear-gradient";
-import * as ImagePicker from "expo-image-picker";
-import { router } from "expo-router";
+﻿import * as ImagePicker from "expo-image-picker";
+import { LinearGradient } from "expo-linear-gradient";
 import { useState } from "react";
 import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { updateUserProfile } from "./(constants)/authService";
-import { saveProfile } from "../services/securityService";
+import { saveUserProfile } from "./(constants)/authService";
 
 export default function ProfileSetupScreen() {
   const [name,setName]     = useState("");
@@ -20,8 +18,7 @@ export default function ProfileSetupScreen() {
 
   const handleNext = async () => {
     setLoading(true);
-    try { await updateUserProfile(name.trim(), photo); await saveProfile("", name.trim(), photo); } catch {}
-    router.push("/security-questions");
+    try { await saveUserProfile({ name: name.trim() } as any); } catch {}
     setLoading(false);
   };
 

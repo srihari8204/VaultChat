@@ -26,7 +26,6 @@ interface Props {
   onMediaSelected?: (type: string, uri: string, name?: string) => void;
   onLocationShared?: (coords: { lat: number; lng: number; mode: string }) => void;
   onViewOnceToggle?: () => void;
-  onCameraOpen?: () => void;
 }
 
 // Grid items
@@ -51,7 +50,6 @@ export default function VaultAttachmentSheet({
   onMediaSelected,
   onLocationShared,
   onViewOnceToggle,
-  onCameraOpen,
 }: Props) {
   const router = useRouter();
   const slideAnim = useRef(new Animated.Value(400)).current;
@@ -92,13 +90,17 @@ export default function VaultAttachmentSheet({
 
       case 'camera': {
         onClose();
-        if (onCameraOpen) {
-          onCameraOpen();
-        } else {
-          const { status } = await ImagePicker.requestCameraPermissionsAsync();
-          if (status !== 'granted') { Alert.alert('Permission Needed', 'Camera access is required.'); return; }
-          const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images', 'videos'], quality: 0.85 });
-          if (!result.canceled && result.assets[0]) { onMediaSelected?.('image', result.assets[0].uri, 'photo.jpg'); }
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission Needed', 'Camera access is required.');
+          return;
+        }
+        const result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ['images', 'videos'],  // SDK 50+ (replaces deprecated MediaTypeOptions)
+          quality: 0.85,
+        });
+        if (!result.canceled && result.assets[0]) {
+          onMediaSelected?.('image', result.assets[0].uri, 'photo.jpg');
         }
         break;
       }

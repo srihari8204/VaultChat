@@ -3,33 +3,25 @@
 // photos, videos, files, voice messages, GIFs, emoji reactions,
 // message formatting (bold, italic, code)
 
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  View, Text, TextInput, FlatList, TouchableOpacity,
+  KeyboardAvoidingView, Platform, StyleSheet, Alert,
+  ActivityIndicator, Pressable, Image,
+} from 'react-native';
+import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
-import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text, TextInput,
-  TouchableOpacity,
-  View
-} from 'react-native';
+import * as DocumentPicker from 'expo-document-picker';
 import { io, Socket } from 'socket.io-client';
-import AttachmentSheet from '../components/AttachmentSheet';
-import GifPicker from '../components/GifPicker';
-import MediaMessage from '../components/MediaMessage';
-import ReactionPicker from '../components/ReactionPicker';
-import VoiceRecorder from '../components/VoiceRecorder';
-import { decryptMessage, encryptMessage } from '../services/d2deService';
+import { encryptMessage, decryptMessage, EncryptedPayload } from '../services/d2deService';
 import { uploadMedia } from '../services/mediaService';
+import AttachmentSheet from '../components/AttachmentSheet';
+import VoiceRecorder   from '../components/VoiceRecorder';
+import GifPicker       from '../components/GifPicker';
+import ReactionPicker  from '../components/ReactionPicker';
+import MediaMessage    from '../components/MediaMessage';
 
 const BACKEND = 'https://vaultchat.onrender.com';
 
@@ -46,9 +38,6 @@ interface Message {
   plaintext: string;
   ciphertext: string;
   iv: string;
-  tag?: string;
-  keyId?: string;
-  v?: number;
   status: MsgStatus;
   createdAt: any;
   isEdited?: boolean;
@@ -96,8 +85,6 @@ export default function ChatScreen() {
   const [replyTarget,   setReplyTarget]   = useState<Message | null>(null);
   const [editTarget,    setEditTarget]    = useState<Message | null>(null);
   const [longPressMsg,  setLongPressMsg]  = useState<Message | null>(null);
-  const [forwardMsg,    setForwardMsg]    = useState<Message | null>(null);
-  const [forwardChats,  setForwardChats]  = useState<any[]>([]);
   const [showAttach,    setShowAttach]    = useState(false);
   const [showVoice,     setShowVoice]     = useState(false);
   const [showGif,       setShowGif]       = useState(false);
@@ -389,64 +376,7 @@ export default function ChatScreen() {
   };
 
   // â”€â”€ Long press sheet â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  
-  // -- Forward message to another chat --
-  const startForward = async (m: Message) => {
-    setLongPressMsg(null);
-    setForwardMsg(m);
-    try {
-      const snap = await firestore().collection('chats')
-        .where('participants', 'array-contains', myUid)
-        .orderBy('lastTime', 'desc').limit(20).get();
-      const list: any[] = [];
-      for (const d of snap.docs) {
-        if (d.id === chatId) continue;
-        const data = d.data();
-        const otherId = (data.participants || []).find((p: string) => p !== myUid);
-        if (!otherId && !data.groupName) continue;
-        let name = data.groupName || '';
-        if (!name && otherId) {
-          const uSnap = await firestore().collection('users').doc(otherId).get();
-          name = uSnap.data()?.name || uSnap.data()?.displayName || otherId.slice(0, 8);
-        }
-        list.push({ chatId: d.id, peerUid: otherId, name, groupName: data.groupName });
-      }
-      setForwardChats(list);
-    } catch (e) { Alert.alert('Error', 'Could not load chats'); setForwardMsg(null); }
-  };
-
-  const doForward = async (target: any) => {
-    if (!forwardMsg) return;
-    try {
-      const fwdData: any = {
-        senderId: myUid,
-        msgType: forwardMsg.msgType || 'text',
-        status: 'sent', isDeleted: false, reactions: {},
-        isForwarded: true,
-        createdAt: firestore.FieldValue.serverTimestamp(),
-      };
-      if (forwardMsg.msgType === 'text' || !forwardMsg.mediaUrl) {
-        fwdData.ciphertext = forwardMsg.ciphertext;
-        fwdData.iv = forwardMsg.iv;
-        fwdData.tag = forwardMsg.tag;
-        fwdData.keyId = forwardMsg.keyId;
-        fwdData.v = forwardMsg.v;
-        fwdData.plaintext = forwardMsg.plaintext;
-      } else {
-        fwdData.mediaUrl = forwardMsg.mediaUrl;
-        fwdData.filename = forwardMsg.filename;
-        if (forwardMsg.audioDuration) fwdData.audioDuration = forwardMsg.audioDuration;
-      }
-      await firestore().collection('chats').doc(target.chatId).collection('messages').add(fwdData);
-      const preview = forwardMsg.plaintext ? forwardMsg.plaintext.substring(0, 40) : forwardMsg.filename || forwardMsg.msgType;
-      await firestore().collection('chats').doc(target.chatId).update({
-        lastMsg: preview, lastTime: firestore.FieldValue.serverTimestamp(),
-      });
-      setForwardMsg(null); setForwardChats([]);
-      Alert.alert('Forwarded!', 'Message sent to ' + (target.groupName || target.name));
-    } catch (e: any) { Alert.alert('Error', e.message); }
-  };
-const Sheet = () => {
+  const Sheet = () => {
     if (!longPressMsg) return null;
     const isMe = longPressMsg.senderId === myUid;
     return (
@@ -457,9 +387,6 @@ const Sheet = () => {
           </TouchableOpacity>
           <TouchableOpacity style={s.sheetRow} onPress={() => { setReplyTarget(longPressMsg); setLongPressMsg(null); }}>
             <Text style={s.sheetTxt}>â†©  Reply</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={s.sheetRow} onPress={() => startForward(longPressMsg)}>
-            <Text style={s.sheetTxt}>{"\u27A1\uFE0F  Forward"}</Text>
           </TouchableOpacity>
           {isMe && longPressMsg.msgType === 'text' && (
             <TouchableOpacity style={s.sheetRow} onPress={() => startEdit(longPressMsg)}>
@@ -480,49 +407,15 @@ const Sheet = () => {
   };
 
   // â”€â”€ Main render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  
-  const ForwardModal = () => {
-    if (!forwardMsg) return null;
-    return (
-      <Modal visible={true} transparent animationType="slide" onRequestClose={() => { setForwardMsg(null); setForwardChats([]); }}>
-        <Pressable style={s.overlay} onPress={() => { setForwardMsg(null); setForwardChats([]); }}>
-          <View style={[s.sheet, { maxHeight: '70%' }]}>
-            <Text style={{ color: '#fff', fontSize: 16, fontWeight: '800', marginBottom: 12 }}>Forward to...</Text>
-            {forwardChats.length === 0
-              ? <ActivityIndicator color="#00E5FF" style={{ padding: 20 }} />
-              : <FlatList data={forwardChats} keyExtractor={c => c.chatId}
-                  renderItem={({ item }) => (
-                    <TouchableOpacity style={[s.sheetRow, { flexDirection: 'row', alignItems: 'center', gap: 10 }]} onPress={() => doForward(item)}>
-                      <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#1D4ED8', justifyContent: 'center', alignItems: 'center' }}>
-                        <Text style={{ color: '#fff', fontWeight: '900', fontSize: 14 }}>{(item.groupName || item.name || '?')[0].toUpperCase()}</Text>
-                      </View>
-                      <Text style={s.sheetTxt}>{item.groupName || item.name}</Text>
-                    </TouchableOpacity>
-                  )}
-                />
-            }
-            <TouchableOpacity style={s.sheetRow} onPress={() => { setForwardMsg(null); setForwardChats([]); }}>
-              <Text style={[s.sheetTxt, { color: '#555' }]}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </Pressable>
-      </Modal>
-    );
-  };
-return (
+  return (
     <>
       <Stack.Screen options={{
         title: peerName ?? 'Chat',
         headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff',
         headerRight: () => (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, marginRight: 12 }}>
-            <TouchableOpacity onPress={() => router.push({ pathname: '/voicecall' as any, params: { chatId, name: peerName } })}>
-              <Text style={{ color: '#00E5FF', fontSize: 20 }}>{"\u260E\uFE0F"}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push({ pathname: '/videocall', params: { chatId, peerUid, peerName } })}>
-              <Text style={{ color: '#00E5FF', fontSize: 20 }}>{"\uD83D\uDCF9"}</Text>
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity onPress={() => router.push({ pathname: '/videocall', params: { chatId, peerUid, peerName } })} style={{ marginRight: 12 }}>
+            <Text style={{ color: '#00E5FF', fontSize: 18 }}>ðŸ“¹</Text>
+          </TouchableOpacity>
         ),
       }} />
 
@@ -584,7 +477,6 @@ return (
         }
 
         <Sheet />
-        <ForwardModal />
 
         <AttachmentSheet
           visible={showAttach} onClose={() => setShowAttach(false)}

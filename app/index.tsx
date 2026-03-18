@@ -1,7 +1,7 @@
-﻿import { router } from "expo-router";
+﻿import AsyncStorage from "@react-native-async-storage/async-storage";
+import { router } from "expo-router";
 import { useEffect } from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
-import { shouldLock } from "../services/lockService";
 
 const SERVER_URL = "http://192.168.29.58:3001";
 
@@ -9,6 +9,14 @@ export default function IndexScreen() {
   useEffect(() => {
     (async () => {
       try {
+        // ── Test mode bypass ──────────────────────────────────
+        const testDone = await AsyncStorage.getItem('test_auth_done');
+        if (testDone === 'true') {
+          router.replace('/chats' as any);
+          return;
+        }
+
+        // ── Normal flow ───────────────────────────────────────
         const { isSetupComplete } = await import("../services/securityService");
         const setup = await isSetupComplete();
         if (!setup) { router.replace("/welcome"); return; }
@@ -21,7 +29,6 @@ export default function IndexScreen() {
         const known = await isKnownDevice(user.uid, SERVER_URL);
         if (!known) { router.replace("/phone"); return; }
 
-        // Always show lock on every open
         router.replace("/lock");
       } catch {
         router.replace("/welcome");

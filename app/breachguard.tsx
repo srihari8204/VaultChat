@@ -82,7 +82,7 @@ function BreachGuardContent() {
         {scanning&&(
           <View style={{marginHorizontal:18,marginBottom:10}}>
             <View style={{height:3,backgroundColor:'rgba(255,255,255,0.06)',borderRadius:2,overflow:'hidden',marginBottom:5}}>
-              <View style={{width:scanProgress+'%',height:3,backgroundColor:C.primary,borderRadius:2}}/>
+              <View style={{width:(scanProgress+'%') as any,height:3,backgroundColor:C.primary,borderRadius:2}}/>
             </View>
             <Text style={{color:C.textFaint,fontSize:9,letterSpacing:1}}>{scanPhase}</Text>
           </View>

@@ -1,4 +1,4 @@
-ï»¿// constants/vaultID.ts â€” Blockchain VaultID System
+// constants/vaultID.ts — Blockchain VaultID System
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -20,7 +20,7 @@ export interface VaultID {
 const VAULT_ID_KEY = 'vaultchat_vault_id';
 const PRIVATE_KEY_SECURE = 'vaultchat_private_key';
 
-// Generate a new VaultID â€” no phone number needed!
+// Generate a new VaultID — no phone number needed!
 export const generateVaultID = async (displayName: string, avatar: string, bio: string): Promise<VaultID> => {
   // Create real ethereum wallet (blockchain keypair)
   const wallet = ethers.Wallet.createRandom();
@@ -69,7 +69,7 @@ export const saveVaultID = async (vaultID: VaultID): Promise<void> => {
   await AsyncStorage.setItem(VAULT_ID_KEY, JSON.stringify(vaultID));
 };
 
-// Delete VaultID (MemoryShield â€” complete destruction)
+// Delete VaultID (MemoryShield — complete destruction)
 export const destroyVaultID = async (): Promise<void> => {
   await AsyncStorage.removeItem(VAULT_ID_KEY);
   await SecureStore.deleteItemAsync(PRIVATE_KEY_SECURE);
@@ -86,7 +86,7 @@ export const signMessage = async (message: string): Promise<string> => {
 // Verify a signed message
 export const verifySignature = (message: string, signature: string, expectedAddress: string): boolean => {
   try {
-    const recovered = ethers.utils.verifyMessage(message, signature);
+    const recovered = ethers.verifyMessage(message, signature);
     return recovered.toLowerCase() === expectedAddress.toLowerCase();
   } catch { return false; }
 };

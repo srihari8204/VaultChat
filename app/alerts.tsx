@@ -1,23 +1,27 @@
-// app/alerts.tsx
+﻿// app/alerts.tsx
 // Real security alerts from Firestore
 // Types: screenshot / breach / jailbreak / login / system
-// Real-time listener — badge updates instantly
+// Real-time listener â€” badge updates instantly
 // Tap to mark read, long-press to delete
 // Filter: All / Unread / Security / System
 
-import React, { useState, useEffect, useCallback } from 'react';
-import {
-  View, Text, TouchableOpacity, StyleSheet,
-  FlatList, Alert, ActivityIndicator,
-} from 'react-native';
-import { useRouter } from 'expo-router';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
-import { BottomNav } from './chats';
+import { useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  StyleSheet,
+  Text, TouchableOpacity,
+  View,
+} from 'react-native';
+import BottomNav from './chats';
 
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Types
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type AlertType   = 'screenshot' | 'breach' | 'jailbreak' | 'login' | 'system' | 'frida' | 'root';
 type AlertFilter = 'All' | 'Unread' | 'Security' | 'System';
@@ -34,20 +38,20 @@ interface SecurityAlert {
 
 const FILTERS: AlertFilter[] = ['All', 'Unread', 'Security', 'System'];
 
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Config per alert type
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const ALERT_CONFIG: Record<AlertType, {
   icon: string; color: string; label: string;
 }> = {
-  screenshot: { icon: '📸', color: '#F97316', label: 'Screenshot' },
-  breach:     { icon: '🌑', color: '#FF4D6D', label: 'Data Breach' },
-  jailbreak:  { icon: '⚠️', color: '#FF4D6D', label: 'Jailbreak' },
-  frida:      { icon: '🔴', color: '#FF4D6D', label: 'Frida Detected' },
-  root:       { icon: '⛔', color: '#FF4D6D', label: 'Root Detected' },
-  login:      { icon: '🔐', color: '#3B82F6', label: 'Login' },
-  system:     { icon: '🛡️', color: '#00D4AA', label: 'System' },
+  screenshot: { icon: 'ðŸ“¸', color: '#F97316', label: 'Screenshot' },
+  breach:     { icon: 'ðŸŒ‘', color: '#FF4D6D', label: 'Data Breach' },
+  jailbreak:  { icon: 'âš ï¸', color: '#FF4D6D', label: 'Jailbreak' },
+  frida:      { icon: 'ðŸ”´', color: '#FF4D6D', label: 'Frida Detected' },
+  root:       { icon: 'â›”', color: '#FF4D6D', label: 'Root Detected' },
+  login:      { icon: 'ðŸ”', color: '#3B82F6', label: 'Login' },
+  system:     { icon: 'ðŸ›¡ï¸', color: '#00D4AA', label: 'System' },
 };
 
 function formatAlertTime(ts: any): string {
@@ -64,9 +68,9 @@ function formatAlertTime(ts: any): string {
   return d.toLocaleDateString([], { day: '2-digit', month: 'short' });
 }
 
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Main Screen
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export default function AlertsScreen() {
   const router = useRouter();
@@ -76,7 +80,7 @@ export default function AlertsScreen() {
   const [loading, setLoading] = useState(true);
   const [filter,  setFilter]  = useState<AlertFilter>('All');
 
-  // ── Real-time listener ────────────────────────────────────────
+  // â”€â”€ Real-time listener â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     if (!uid) return;
 
@@ -101,7 +105,7 @@ export default function AlertsScreen() {
     return () => unsub();
   }, [uid]);
 
-  // ── Filter ────────────────────────────────────────────────────
+  // â”€â”€ Filter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const SECURITY_TYPES: AlertType[] = ['screenshot', 'breach', 'jailbreak', 'frida', 'root'];
   const SYSTEM_TYPES:   AlertType[] = ['login', 'system'];
 
@@ -116,7 +120,7 @@ export default function AlertsScreen() {
 
   const unreadCount = alerts.filter(a => !a.read).length;
 
-  // ── Mark read ─────────────────────────────────────────────────
+  // â”€â”€ Mark read â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const markRead = async (alert: SecurityAlert) => {
     if (alert.read) return;
     await firestore()
@@ -126,7 +130,7 @@ export default function AlertsScreen() {
       .catch(() => {});
   };
 
-  // ── Mark all read ─────────────────────────────────────────────
+  // â”€â”€ Mark all read â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const markAllRead = async () => {
     const unread = alerts.filter(a => !a.read);
     const batch  = firestore().batch();
@@ -139,7 +143,7 @@ export default function AlertsScreen() {
     await batch.commit().catch(() => {});
   };
 
-  // ── Delete alert ──────────────────────────────────────────────
+  // â”€â”€ Delete alert â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const deleteAlert = (alert: SecurityAlert) => {
     Alert.alert('Delete Alert', 'Remove this alert?', [
       { text: 'Cancel', style: 'cancel' },
@@ -156,7 +160,7 @@ export default function AlertsScreen() {
     ]);
   };
 
-  // ── Clear all ─────────────────────────────────────────────────
+  // â”€â”€ Clear all â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const clearAll = () => {
     Alert.alert('Clear All Alerts', 'Delete all alerts? This cannot be undone.', [
       { text: 'Cancel', style: 'cancel' },
@@ -176,7 +180,7 @@ export default function AlertsScreen() {
     ]);
   };
 
-  // ── Render row ────────────────────────────────────────────────
+  // â”€â”€ Render row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const renderAlert = useCallback(({ item }: { item: SecurityAlert }) => {
     const cfg = ALERT_CONFIG[item.type] || ALERT_CONFIG.system;
 
@@ -226,9 +230,9 @@ export default function AlertsScreen() {
     );
   }, [uid]);
 
-  // ─────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Render
-  // ─────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   return (
     <View style={styles.container}>
 
@@ -245,7 +249,7 @@ export default function AlertsScreen() {
         )}
         {alerts.length > 0 && (
           <TouchableOpacity style={styles.clearBtn} onPress={clearAll}>
-            <Text style={styles.clearBtnText}>🗑️</Text>
+            <Text style={styles.clearBtnText}>ðŸ—‘ï¸</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -283,7 +287,7 @@ export default function AlertsScreen() {
           ItemSeparatorComponent={() => <View style={styles.sep} />}
           ListEmptyComponent={
             <View style={styles.emptyWrap}>
-              <Text style={styles.emptyIcon}>🛡️</Text>
+              <Text style={styles.emptyIcon}>ðŸ›¡ï¸</Text>
               <Text style={styles.emptyTitle}>All Clear</Text>
               <Text style={styles.emptyText}>
                 {filter === 'Unread'
@@ -295,14 +299,14 @@ export default function AlertsScreen() {
         />
       )}
 
-      <BottomNav active="Alerts" />
+      <BottomNav {...{ active: 'Alerts' } as any} />
     </View>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Styles
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const styles = StyleSheet.create({
   container:    { flex: 1, backgroundColor: '#0A0E1A' },
@@ -390,3 +394,4 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 18, fontWeight: 'bold', color: '#FFFFFF' },
   emptyText:  { fontSize: 13, color: '#374151' },
 });
+

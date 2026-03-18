@@ -46,8 +46,6 @@ interface Message {
   replyTo?: { id: string; senderId: string; senderName: string; plaintext: string };
   msgType: MsgType;
   mediaUrl?: string;
-  viewOnce?: boolean;
-  viewOnceOpened?: boolean;
   filename?: string;
   audioDuration?: number;
   reactions?: Record<string, string[]>;
@@ -167,7 +165,6 @@ export default function GroupChatScreen() {
             replyTo: d.replyTo ?? null,
             msgType: d.msgType ?? 'text',
             mediaUrl: d.mediaUrl,
-            viewOnce: d.viewOnce || false, viewOnceOpened: d.viewOnceOpened || false,
             filename: d.filename,
             audioDuration: d.audioDuration,
             reactions: d.reactions ?? {},
