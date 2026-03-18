@@ -121,6 +121,9 @@ export default function RootLayout() {
         <Stack.Screen name="videocall" />
         <Stack.Screen name="voicecall" />
         <Stack.Screen name="qr-contact" />
+        <Stack.Screen name="voice-transcribe" />
+        <Stack.Screen name="smart-notifications" />
+        <Stack.Screen name="tone-detector" />
         <Stack.Screen name="chat-themes" />
         <Stack.Screen name="chat-export" />
         <Stack.Screen name="stickers" />
