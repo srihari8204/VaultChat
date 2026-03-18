@@ -166,7 +166,19 @@ export default function SettingsScreen() {
         
         {/* Trusted Contacts */}
         <Text style={[s.sectionTitle, { marginTop: 24 }]}>TRUSTED CONTACTS</Text>
+        
+        {/* Chat Themes */}
         <TouchableOpacity style={{ backgroundColor: '#0A1628', borderRadius: 14, padding: 16, marginBottom: 8, borderWidth: 1, borderColor: '#111', flexDirection: 'row', alignItems: 'center' }}
+          onPress={() => router.push('/chat-themes' as any)}>
+          <Text style={{ fontSize: 22, marginRight: 12 }}>{"\uD83C\uDFA8"}</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: '#E0E0F0', fontSize: 15, fontWeight: '700' }}>Chat Themes</Text>
+            <Text style={{ color: '#555', fontSize: 12, marginTop: 2 }}>Customize backgrounds and bubble colors</Text>
+          </View>
+          <Text style={{ color: '#555', fontSize: 18 }}>{"\u203A"}</Text>
+        </TouchableOpacity>
+
+<TouchableOpacity style={{ backgroundColor: '#0A1628', borderRadius: 14, padding: 16, marginBottom: 8, borderWidth: 1, borderColor: '#111', flexDirection: 'row', alignItems: 'center' }}
           onPress={() => router.push('/trusted-contacts' as any)}>
           <Text style={{ fontSize: 22, marginRight: 12 }}>{"\uD83D\uDEE1\uFE0F"}</Text>
           <View style={{ flex: 1 }}>
