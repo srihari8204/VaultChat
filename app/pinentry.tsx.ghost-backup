@@ -10,8 +10,6 @@ import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Crypto from 'expo-crypto';
-import * as Location from 'expo-location';
-import { activateGhost, deactivateGhost } from '../lib/ghostProtocol';
 
 const PIN_KEY     = '@vaultchat_pin_hash';
 const DURESS_KEY  = 'duressPinHash';
@@ -45,24 +43,15 @@ export default function PinEntryScreen() {
     const duressPinHash = userSnap.data()?.duressPinHash;
 
     if (duressPinHash && duress === duressPinHash) {
-      // GHOST PROTOCOL ACTIVATED — show perfect decoy
-      await activateGhost();
-
-      // Silent background wipe (non-blocking)
-      wipeSensitiveData(myUid).catch(() => {});
-
-      // Silent location alert to trusted contact (non-blocking)
-      sendDuressAlert(myUid).catch(() => {});
-
-      // Navigate to decoy — looks identical to real app
-      router.replace('/decoy-chats' as any);
+      // DURESS â€” silently wipe and show empty decoy
+      await wipeSensitiveData(myUid);
+      router.replace('/chats');
       return;
     }
 
     // Check normal PIN
     const storedHash = await AsyncStorage.getItem(PIN_KEY);
     if (!storedHash || entered === storedHash) {
-      await deactivateGhost();
       router.replace('/chats');
     } else {
       setPin('');
@@ -76,38 +65,7 @@ export default function PinEntryScreen() {
   const del = () => setPin(p => p.slice(0, -1));
 
   // Called when duress PIN detected â€” wipe silently
-  
-  // Silent GPS alert to trusted contacts
-  const sendDuressAlert = async (uid: string) => {
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') return;
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      // Log duress event with location to Firestore
-      const firestore = (await import('@react-native-firebase/firestore')).default;
-      await firestore().collection('users').doc(uid)
-        .collection('securityEvents').add({
-          type: 'duress_activated',
-          lat: loc.coords.latitude,
-          lng: loc.coords.longitude,
-          timestamp: firestore.FieldValue.serverTimestamp(),
-          deviceInfo: { platform: 'android' },
-        });
-      // Send push notification to trusted contacts
-      const userDoc = await firestore().collection('users').doc(uid).get();
-      const trustedContacts = userDoc.data()?.trustedContacts || [];
-      for (const contactUid of trustedContacts) {
-        const contactDoc = await firestore().collection('users').doc(contactUid).get();
-        const pushToken = contactDoc.data()?.pushToken;
-        if (pushToken) {
-          // Silent alert — "Emergency: [name] may need help"
-          // Location shared via security events
-        }
-      }
-    } catch {}
-  };
-
-const wipeSensitiveData = async (myUid: string) => {
+  const wipeSensitiveData = async (myUid: string) => {
     try {
       const chatsSnap = await firestore()
         .collection('chats')
