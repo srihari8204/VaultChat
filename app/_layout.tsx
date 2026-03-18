@@ -121,6 +121,9 @@ export default function RootLayout() {
         <Stack.Screen name="videocall" />
         <Stack.Screen name="voicecall" />
         <Stack.Screen name="qr-contact" />
+        <Stack.Screen name="broadcast" />
+        <Stack.Screen name="media-gallery" />
+        <Stack.Screen name="invite-link" />
         <Stack.Screen name="trusted-contacts" />
         <Stack.Screen name="login-history" />
         <Stack.Screen name="decoy-chats" />
