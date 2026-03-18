@@ -21,6 +21,7 @@ import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import auth from '@react-native-firebase/auth';
 
 import { runSecurityCheck } from '../services/securityService';
+import { recordLogin } from '../lib/loginTracker';
 import {
   registerForPushNotifications,
   setupNotificationListeners,
@@ -62,6 +63,7 @@ export default function RootLayout() {
       // from otp.tsx after successful OTP confirm
       const uid = auth().currentUser?.uid;
       if (uid) {
+        recordLogin(uid).catch(() => {});
         registerForPushNotifications().catch(e =>
           console.warn('[Layout] Push registration failed:', e)
         );
@@ -119,6 +121,8 @@ export default function RootLayout() {
         <Stack.Screen name="videocall" />
         <Stack.Screen name="voicecall" />
         <Stack.Screen name="qr-contact" />
+        <Stack.Screen name="trusted-contacts" />
+        <Stack.Screen name="login-history" />
         <Stack.Screen name="decoy-chats" />
         <Stack.Screen name="decoy-chat" />
         <Stack.Screen name="hidden-chats" />

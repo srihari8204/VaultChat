@@ -163,7 +163,31 @@ export default function SettingsScreen() {
         </View>
 
         {/* Backup */}
-        <Text style={[s.sectionTitle, { marginTop: 24 }]}>ENCRYPTED BACKUP</Text>
+        
+        {/* Trusted Contacts */}
+        <Text style={[s.sectionTitle, { marginTop: 24 }]}>TRUSTED CONTACTS</Text>
+        <TouchableOpacity style={{ backgroundColor: '#0A1628', borderRadius: 14, padding: 16, marginBottom: 8, borderWidth: 1, borderColor: '#111', flexDirection: 'row', alignItems: 'center' }}
+          onPress={() => router.push('/trusted-contacts' as any)}>
+          <Text style={{ fontSize: 22, marginRight: 12 }}>{"\uD83D\uDEE1\uFE0F"}</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: '#E0E0F0', fontSize: 15, fontWeight: '700' }}>Manage Trusted Contacts</Text>
+            <Text style={{ color: '#555', fontSize: 12, marginTop: 2 }}>Up to 3 emergency contacts for duress alerts</Text>
+          </View>
+          <Text style={{ color: '#555', fontSize: 18 }}>{"\u203A"}</Text>
+        </TouchableOpacity>
+
+        {/* Login History */}
+        <TouchableOpacity style={{ backgroundColor: '#0A1628', borderRadius: 14, padding: 16, marginBottom: 8, borderWidth: 1, borderColor: '#111', flexDirection: 'row', alignItems: 'center' }}
+          onPress={() => router.push('/login-history' as any)}>
+          <Text style={{ fontSize: 22, marginRight: 12 }}>{"\uD83D\uDD10"}</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: '#E0E0F0', fontSize: 15, fontWeight: '700' }}>Login History</Text>
+            <Text style={{ color: '#555', fontSize: 12, marginTop: 2 }}>View active sessions, revoke devices</Text>
+          </View>
+          <Text style={{ color: '#555', fontSize: 18 }}>{"\u203A"}</Text>
+        </TouchableOpacity>
+
+<Text style={[s.sectionTitle, { marginTop: 24 }]}>ENCRYPTED BACKUP</Text>
         <View style={s.vaultIdSection}>
           <Text style={s.desc}>Export all your chats as an AES-256 encrypted file. Only you can decrypt it with your backup password.</Text>
           {backingUp && <Text style={s.progressTxt}>{backupProgress}</Text>}
