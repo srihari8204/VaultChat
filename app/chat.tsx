@@ -514,6 +514,14 @@ return (
       <Stack.Screen options={{
         title: peerName ?? 'Chat',
         headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff',
+        headerTitle: () => (
+          <View style={{ alignItems: 'flex-start' }}>
+            <Text style={{ color: '#fff', fontSize: 17, fontWeight: '700' }} numberOfLines={1}>{peerName ?? 'Chat'}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Text style={{ color: '#00D4AA', fontSize: 9, fontWeight: '700' }}>{"\uD83D\uDD12"} END-TO-END ENCRYPTED</Text>
+            </View>
+          </View>
+        ),
         headerRight: () => (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, marginRight: 12 }}>
             <TouchableOpacity onPress={() => router.push({ pathname: '/voicecall' as any, params: { chatId, name: peerName } })}>

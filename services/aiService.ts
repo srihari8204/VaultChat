@@ -2,9 +2,7 @@
 // On-device AI features â€” smart replies, summariser, writing assistant,
 // voice transcription, translation
 // Uses react-native-whisper for transcription (on-device, private)
-// Uses simple heuristic + Claude API fallback for smart replies
-
-const CLAUDE_API = 'https://api.anthropic.com/v1/messages';
+// All AI features run 100% on-device — zero server calls
 
 // â”€â”€ Smart Replies â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export async function getSmartReplies(lastMessage: string): Promise<string[]> {

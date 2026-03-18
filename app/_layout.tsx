@@ -114,6 +114,7 @@ export default function RootLayout() {
         <Stack.Screen name="otp" />
         <Stack.Screen name="facescan" />
         <Stack.Screen name="biometric-setup" />
+        <Stack.Screen name="three-factor-verify" options={{ gestureEnabled: false }} />
 
         {/* Main app */}
         <Stack.Screen name="chats" />
@@ -138,7 +139,11 @@ export default function RootLayout() {
         <Stack.Screen name="voice-effects" />
         <Stack.Screen name="auto-reply" />
         <Stack.Screen name="chat-themes" />
+        <Stack.Screen name="chat-wallpaper" />
         <Stack.Screen name="chat-export" />
+        <Stack.Screen name="in-chat-search" />
+        <Stack.Screen name="message-reminder" />
+        <Stack.Screen name="contact-info" />
         <Stack.Screen name="stickers" />
         <Stack.Screen name="create-poll" />
         <Stack.Screen name="schedule-message" />
@@ -170,6 +175,36 @@ export default function RootLayout() {
         <Stack.Screen name="deepfake" />
         <Stack.Screen name="trustscore" />
         <Stack.Screen name="vault-id" />
+        <Stack.Screen name="meeting-scheduler" />
+        <Stack.Screen name="three-factor-verify" />
+        <Stack.Screen name="zero-knowledge" />
+        <Stack.Screen name="decentralized-id" />
+        <Stack.Screen name="bot-api" />
+        <Stack.Screen name="mini-apps" />
+        <Stack.Screen name="email-bridge" />
+        <Stack.Screen name="creator-channels" />
+        <Stack.Screen name="group-admin" />
+        <Stack.Screen name="call-recording" />
+        <Stack.Screen name="app-lock-chats" />
+        <Stack.Screen name="privacy-dashboard" />
+        <Stack.Screen name="storage-manager" />
+        <Stack.Screen name="chat-backup" />
+        <Stack.Screen name="last-seen-privacy" />
+        <Stack.Screen name="offline-mode" />
+        <Stack.Screen name="image-editor" />
+        <Stack.Screen name="digital-wellbeing" />
+        <Stack.Screen name="emergency-sos" />
+        <Stack.Screen name="network-test" />
+        <Stack.Screen name="file-viewer" />
+        <Stack.Screen name="video-player" />
+        <Stack.Screen name="in-chat-search" />
+        <Stack.Screen name="message-reminder" />
+        <Stack.Screen name="contact-info" />
+        <Stack.Screen name="chat-wallpaper" />
+        <Stack.Screen name="voice-speed" />
+        <Stack.Screen name="video-notes" />
+        <Stack.Screen name="slideshow" />
+        <Stack.Screen name="group-calls" />
       </Stack>
     </>
   );

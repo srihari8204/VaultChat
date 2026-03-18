@@ -40,7 +40,7 @@ export default function CameraScreen() {
     if (capturing || !cameraRef.current) return;
     setCapturing(true);
     try {
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.85 });
+      const photo = await cameraRef.current.takePictureAsync({ quality: 1 });
       if (photo?.uri) {
         // Navigate back to chat with the captured photo
         router.replace({

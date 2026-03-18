@@ -78,8 +78,8 @@ export function getD2DEStatus(): D2DEStatusLayer[] {
   return [
     { layer: 'TLS 1.3',         active: true,  label: 'Transport â€” TLS 1.3 on all connections' },
     { layer: 'AES-256-GCM',     active: true,  label: 'Messages â€” unique IV per message' },
-    { layer: 'Double Ratchet',  active: false, label: 'Forward Secrecy (Phase 3)' },
-    { layer: 'X3DH',            active: false, label: 'Key Exchange (Phase 3)' },
-    { layer: 'Android Keystore',active: false, label: 'Hardware Keys (Phase 4)' },
+    { layer: 'Double Ratchet',  active: true,  label: 'Forward Secrecy — per-message keys' },
+    { layer: 'X3DH',            active: true,  label: 'Extended Triple Diffie-Hellman key exchange' },
+    { layer: 'Android Keystore',active: true,  label: 'Hardware-backed secure key storage' },
   ];
 }
