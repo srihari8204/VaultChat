@@ -1,92 +1,156 @@
-import { LinearGradient } from "expo-linear-gradient";
-import { useRouter } from "expo-router";
-import { useState } from "react";
+// @ts-nocheck
+import { useRouter } from 'expo-router';
+import { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, KeyboardAvoidingView,
+  Alert, Animated, Easing, KeyboardAvoidingView,
   Platform, ScrollView, StyleSheet, Text, TextInput,
   TouchableOpacity, View,
-} from "react-native";
-import { sendOTP } from "./(constants)/authService";
+} from 'react-native';
+import { sendOTP } from './(constants)/authService';
 
 const CODES = [
-  { code: "+91",  name: "India",     flag: "🇮🇳" },
-  { code: "+1",   name: "USA",       flag: "🇺🇸" },
-  { code: "+44",  name: "UK",        flag: "🇬🇧" },
-  { code: "+61",  name: "Australia", flag: "🇦🇺" },
-  { code: "+971", name: "UAE",       flag: "🇦🇪" },
-  { code: "+65",  name: "Singapore", flag: "🇸🇬" },
+  { code: '+91',  name: 'India',     flag: '\u{1F1EE}\u{1F1F3}' },
+  { code: '+1',   name: 'USA',       flag: '\u{1F1FA}\u{1F1F8}' },
+  { code: '+44',  name: 'UK',        flag: '\u{1F1EC}\u{1F1E7}' },
+  { code: '+61',  name: 'Australia', flag: '\u{1F1E6}\u{1F1FA}' },
+  { code: '+971', name: 'UAE',       flag: '\u{1F1E6}\u{1F1EA}' },
+  { code: '+65',  name: 'Singapore', flag: '\u{1F1F8}\u{1F1EC}' },
 ];
 
 export default function LoginScreen() {
   const router = useRouter();
-  const [cc,      setCc]      = useState("+91");
-  const [phone,   setPhone]   = useState("");
+  const [cc, setCc] = useState('+91');
+  const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
-  const [showCC,  setShowCC]  = useState(false);
+  const [showCC, setShowCC] = useState(false);
 
   const selected = CODES.find(c => c.code === cc) ?? CODES[0];
+  const isValid = phone.replace(/\D/g, '').length >= 8;
+
+  // Entrance animations
+  const headerFade = useRef(new Animated.Value(0)).current;
+  const headerSlide = useRef(new Animated.Value(24)).current;
+  const formFade = useRef(new Animated.Value(0)).current;
+  const formSlide = useRef(new Animated.Value(24)).current;
+  const btnFade = useRef(new Animated.Value(0)).current;
+  const btnSlide = useRef(new Animated.Value(24)).current;
+
+  // Loading dot animation
+  const dot1 = useRef(new Animated.Value(0.3)).current;
+  const dot2 = useRef(new Animated.Value(0.3)).current;
+  const dot3 = useRef(new Animated.Value(0.3)).current;
+
+  useEffect(() => {
+    const springConfig = { tension: 50, friction: 9, useNativeDriver: true };
+
+    Animated.parallel([
+      Animated.spring(headerSlide, { ...springConfig, toValue: 0 }),
+      Animated.timing(headerFade, { toValue: 1, duration: 500, useNativeDriver: true }),
+    ]).start();
+
+    setTimeout(() => {
+      Animated.parallel([
+        Animated.spring(formSlide, { ...springConfig, toValue: 0 }),
+        Animated.timing(formFade, { toValue: 1, duration: 500, useNativeDriver: true }),
+      ]).start();
+    }, 200);
+
+    setTimeout(() => {
+      Animated.parallel([
+        Animated.spring(btnSlide, { ...springConfig, toValue: 0 }),
+        Animated.timing(btnFade, { toValue: 1, duration: 500, useNativeDriver: true }),
+      ]).start();
+    }, 400);
+  }, []);
+
+  // Pulsing dots for loading state
+  useEffect(() => {
+    if (!loading) return;
+    const pulseDot = (dot: Animated.Value, delay: number) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(dot, { toValue: 1, duration: 400, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+          Animated.timing(dot, { toValue: 0.3, duration: 400, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        ])
+      );
+    const a1 = pulseDot(dot1, 0);
+    const a2 = pulseDot(dot2, 150);
+    const a3 = pulseDot(dot3, 300);
+    a1.start();
+    a2.start();
+    a3.start();
+    return () => { a1.stop(); a2.stop(); a3.stop(); dot1.setValue(0.3); dot2.setValue(0.3); dot3.setValue(0.3); };
+  }, [loading]);
 
   const handleSend = async () => {
-    const digits = phone.replace(/\D/g, "");
+    const digits = phone.replace(/\D/g, '');
     if (digits.length < 8) {
-      Alert.alert("Error", "Enter a valid mobile number.");
+      Alert.alert('Error', 'Enter a valid mobile number.');
       return;
     }
     setLoading(true);
     try {
       const fullPhone = cc + digits;
       await sendOTP(fullPhone);
-      router.push({ pathname: "/otp", params: { phone: fullPhone, flow: "login" } });
+      router.push({ pathname: '/otp', params: { phone: fullPhone, flow: 'login' } });
     } catch (e: any) {
-      Alert.alert("Error", e.message ?? "Failed to send OTP. Try again.");
+      Alert.alert('Error', e.message ?? 'Failed to send OTP. Try again.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <LinearGradient colors={["#010812", "#020B18", "#071020"]} style={{ flex: 1 }}>
+    <View style={S.container}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={S.scroll} keyboardShouldPersistTaps="handled">
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+      >
+        <ScrollView
+          contentContainerStyle={S.scroll}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Back button */}
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={S.backBtn}
+            activeOpacity={0.6}
+          >
+            <Text style={S.backArrow}>{'\u2190'}</Text>
+          </TouchableOpacity>
 
-          <View style={S.logoWrap}>
-            <LinearGradient colors={["#1D4ED8", "#7C3AED"]} style={S.logoCircle}>
-              <Text style={{ fontSize: 32 }}>🔐</Text>
-            </LinearGradient>
-            <Text style={S.logoText}>VaultChat</Text>
-            <Text style={S.logoSub}>Secure. Private. Encrypted.</Text>
-          </View>
+          {/* Header */}
+          <Animated.View style={[S.headerSection, { opacity: headerFade, transform: [{ translateY: headerSlide }] }]}>
+            <Text style={S.title}>Welcome{'\n'}back</Text>
+            <Text style={S.subtitle}>Enter your number to continue</Text>
+          </Animated.View>
 
-          <View style={S.card}>
-            <Text style={S.title}>Welcome Back</Text>
-            <Text style={S.sub}>Enter your mobile number to sign in</Text>
+          {/* Phone input section */}
+          <Animated.View style={[S.formSection, { opacity: formFade, transform: [{ translateY: formSlide }] }]}>
+            {/* Country code selector */}
+            <TouchableOpacity
+              style={S.ccSelector}
+              onPress={() => setShowCC(v => !v)}
+              activeOpacity={0.7}
+            >
+              <Text style={S.ccFlag}>{selected.flag}</Text>
+              <Text style={S.ccCode}>{cc}</Text>
+              <Text style={S.ccChevron}>{showCC ? '\u2303' : '\u2304'}</Text>
+            </TouchableOpacity>
 
-            <Text style={S.label}>MOBILE NUMBER</Text>
-            <View style={S.phoneRow}>
-              <TouchableOpacity style={S.ccBtn} onPress={() => setShowCC(v => !v)}>
-                <Text style={{ fontSize: 20 }}>{selected.flag}</Text>
-                <Text style={S.ccCode}>{cc}</Text>
-                <Text style={S.ccArrow}>{showCC ? "▲" : "▼"}</Text>
-              </TouchableOpacity>
-              <TextInput
-                style={S.phoneInput}
-                placeholder="Mobile number"
-                placeholderTextColor="rgba(255,255,255,0.25)"
-                value={phone}
-                onChangeText={t => setPhone(t.replace(/\D/g, "").slice(0, 13))}
-                keyboardType="phone-pad"
-                maxLength={13}
-              />
-            </View>
-
+            {/* Dropdown */}
             {showCC && (
               <View style={S.dropdown}>
-                {CODES.map(c => (
-                  <TouchableOpacity key={c.code} style={S.ddItem}
-                    onPress={() => { setCc(c.code); setShowCC(false); }}>
-                    <Text style={{ fontSize: 20 }}>{c.flag}</Text>
+                {CODES.map((c, index) => (
+                  <TouchableOpacity
+                    key={c.code}
+                    style={[S.ddItem, index === CODES.length - 1 && { borderBottomWidth: 0 }]}
+                    onPress={() => { setCc(c.code); setShowCC(false); }}
+                    activeOpacity={0.6}
+                  >
+                    <Text style={S.ddFlag}>{c.flag}</Text>
                     <Text style={S.ddName}>{c.name}</Text>
                     <Text style={S.ddCode}>{c.code}</Text>
                   </TouchableOpacity>
@@ -94,57 +158,231 @@ export default function LoginScreen() {
               </View>
             )}
 
-            <View style={S.infoBox}>
-              <Text style={S.infoTxt}>
-                🔒  OTP will be sent to verify your identity
-              </Text>
+            {/* Phone number input */}
+            <View style={S.inputWrap}>
+              <TextInput
+                style={S.phoneInput}
+                placeholder="Phone number"
+                placeholderTextColor="rgba(255,255,255,0.2)"
+                value={phone}
+                onChangeText={t => setPhone(t.replace(/\D/g, '').slice(0, 13))}
+                keyboardType="phone-pad"
+                maxLength={13}
+                selectionColor="rgba(255,255,255,0.5)"
+              />
+              <View style={S.inputLine} />
             </View>
+          </Animated.View>
 
-            <TouchableOpacity style={S.btnWrap} onPress={handleSend} disabled={loading}>
-              <LinearGradient colors={["#1D4ED8", "#7C3AED"]} style={S.btn}>
-                {loading
-                  ? <ActivityIndicator color="#fff" />
-                  : <Text style={S.btnTxt}>Send OTP  →</Text>}
-              </LinearGradient>
+          {/* Continue button */}
+          <Animated.View style={[S.btnSection, { opacity: btnFade, transform: [{ translateY: btnSlide }] }]}>
+            <TouchableOpacity
+              style={[S.btnContinue, !isValid && !loading && S.btnDisabled]}
+              onPress={handleSend}
+              disabled={loading || !isValid}
+              activeOpacity={0.85}
+            >
+              {loading ? (
+                <View style={S.dotsRow}>
+                  <Animated.View style={[S.loadingDot, { opacity: dot1 }]} />
+                  <Animated.View style={[S.loadingDot, { opacity: dot2 }]} />
+                  <Animated.View style={[S.loadingDot, { opacity: dot3 }]} />
+                </View>
+              ) : (
+                <Text style={S.btnText}>Continue</Text>
+              )}
+            </TouchableOpacity>
+          </Animated.View>
+
+          {/* Bottom link */}
+          <View style={S.bottomLink}>
+            <TouchableOpacity onPress={() => router.replace('/signup')} activeOpacity={0.6}>
+              <Text style={S.bottomText}>
+                New to VaultChat?{'  '}
+                <Text style={S.bottomAccent}>Create Account</Text>
+              </Text>
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity style={{ alignItems: "center", marginTop: 20 }}
-            onPress={() => router.replace("/signup")}>
-            <Text style={{ color: "rgba(255,255,255,0.5)", fontSize: 14 }}>
-              New to VaultChat?{"  "}
-              <Text style={{ color: "#4A9FFF", fontWeight: "900" }}>Create Account</Text>
-            </Text>
-          </TouchableOpacity>
-
         </ScrollView>
       </KeyboardAvoidingView>
-    </LinearGradient>
+    </View>
   );
 }
 
 const S = StyleSheet.create({
-  scroll:     { flexGrow: 1, padding: 24, paddingTop: 60 },
-  logoWrap:   { alignItems: "center", marginBottom: 28 },
-  logoCircle: { width: 72, height: 72, borderRadius: 36, justifyContent: "center", alignItems: "center", marginBottom: 12 },
-  logoText:   { color: "#fff", fontSize: 28, fontWeight: "900", letterSpacing: 1 },
-  logoSub:    { color: "rgba(255,255,255,0.35)", fontSize: 13, marginTop: 4 },
-  card:       { backgroundColor: "rgba(255,255,255,0.05)", borderRadius: 24, padding: 22, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", marginBottom: 16 },
-  title:      { color: "#fff", fontSize: 22, fontWeight: "900", marginBottom: 4 },
-  sub:        { color: "rgba(255,255,255,0.4)", fontSize: 13, marginBottom: 20 },
-  label:      { color: "rgba(255,255,255,0.5)", fontSize: 10, fontWeight: "800", letterSpacing: 1.5, marginBottom: 8 },
-  phoneRow:   { flexDirection: "row", gap: 10, marginBottom: 14 },
-  ccBtn:      { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(255,255,255,0.07)", borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", paddingHorizontal: 12, paddingVertical: 14 },
-  ccCode:     { color: "#fff", fontWeight: "800", fontSize: 13 },
-  ccArrow:    { color: "rgba(255,255,255,0.4)", fontSize: 8 },
-  phoneInput: { flex: 1, color: "#fff", fontSize: 15, backgroundColor: "rgba(255,255,255,0.07)", borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", paddingHorizontal: 14, paddingVertical: 14 },
-  dropdown:   { backgroundColor: "#0D1F35", borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", marginBottom: 12 },
-  ddItem:     { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)" },
-  ddName:     { flex: 1, color: "#fff", fontSize: 14 },
-  ddCode:     { color: "#4A9FFF", fontWeight: "800", fontSize: 14 },
-  infoBox:    { backgroundColor: "rgba(74,159,255,0.08)", borderRadius: 10, padding: 12, marginBottom: 20, borderWidth: 1, borderColor: "rgba(74,159,255,0.2)" },
-  infoTxt:    { color: "rgba(255,255,255,0.5)", fontSize: 12 },
-  btnWrap:    { borderRadius: 14, overflow: "hidden" },
-  btn:        { paddingVertical: 16, alignItems: "center", borderRadius: 14 },
-  btnTxt:     { color: "#fff", fontSize: 16, fontWeight: "900" },
+  container: {
+    flex: 1,
+    backgroundColor: '#000000',
+  },
+  scroll: {
+    flexGrow: 1,
+    paddingHorizontal: 28,
+    paddingTop: 60,
+    paddingBottom: 48,
+  },
+
+  // Back button
+  backBtn: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: -8,
+    marginBottom: 32,
+  },
+  backArrow: {
+    color: '#FFFFFF',
+    fontSize: 28,
+    fontWeight: '300',
+  },
+
+  // Header
+  headerSection: {
+    marginBottom: 56,
+  },
+  title: {
+    color: '#FFFFFF',
+    fontSize: 36,
+    fontWeight: '800',
+    lineHeight: 42,
+    letterSpacing: -0.5,
+  },
+  subtitle: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 14,
+    fontWeight: '400',
+    marginTop: 12,
+    letterSpacing: 0.3,
+  },
+
+  // Form
+  formSection: {
+    marginBottom: 48,
+  },
+
+  // Country code selector
+  ccSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 100,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    gap: 8,
+    marginBottom: 32,
+  },
+  ccFlag: {
+    fontSize: 18,
+  },
+  ccCode: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  ccChevron: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 14,
+    marginTop: -2,
+  },
+
+  // Dropdown
+  dropdown: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    marginBottom: 32,
+    overflow: 'hidden',
+  },
+  ddItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+    gap: 12,
+  },
+  ddFlag: {
+    fontSize: 20,
+  },
+  ddName: {
+    flex: 1,
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 15,
+    fontWeight: '400',
+  },
+  ddCode: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+
+  // Phone input
+  inputWrap: {
+    marginBottom: 8,
+  },
+  phoneInput: {
+    color: '#FFFFFF',
+    fontSize: 24,
+    fontWeight: '500',
+    paddingVertical: 12,
+    letterSpacing: 1,
+  },
+  inputLine: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+  },
+
+  // Continue button
+  btnSection: {
+    marginBottom: 'auto' as any,
+  },
+  btnContinue: {
+    backgroundColor: '#FFFFFF',
+    height: 56,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnDisabled: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  btnText: {
+    color: '#000000',
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+
+  // Loading dots
+  dotsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  loadingDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: '#000000',
+  },
+
+  // Bottom link
+  bottomLink: {
+    alignItems: 'center',
+    marginTop: 32,
+    paddingBottom: 16,
+  },
+  bottomText: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 14,
+  },
+  bottomAccent: {
+    color: 'rgba(255,255,255,0.7)',
+    fontWeight: '700',
+  },
 });

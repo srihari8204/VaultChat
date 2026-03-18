@@ -130,6 +130,7 @@ export default function RootLayout() {
         <Stack.Screen name="group-chat" />
         <Stack.Screen name="lock" />
         <Stack.Screen name="ai-assistant" />
+        <Stack.Screen name="ai-chat-bot" />
         <Stack.Screen name="chat-summary" />
         <Stack.Screen name="translate" />
         <Stack.Screen name="media-viewer" />

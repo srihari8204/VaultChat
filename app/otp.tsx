@@ -1,13 +1,17 @@
-﻿/**
+/**
  * app/otp.tsx
- * Firebase Phone Authentication — uses authService (test mode: 123456)
+ * OTP Verification — CRED-style premium UI
+ * Auto-captures OTP from SMS via textContentType="oneTimeCode" + autoComplete
+ * Supports clipboard paste detection for quick OTP entry
  */
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
-  StyleSheet, ActivityIndicator, Alert, Vibration,
+  StyleSheet, Vibration, Animated, Keyboard, Platform, AppState,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import * as Clipboard from 'expo-clipboard';
+import * as Haptics from 'expo-haptics';
 import { sendOTP, verifyOTP } from './(constants)/authService';
 
 export default function OTPScreen() {
@@ -20,82 +24,163 @@ export default function OTPScreen() {
   const [countdown, setCountdown] = useState(30);
   const [canResend, setCanResend] = useState(false);
   const [error,     setError]     = useState('');
+  const [autoDetected, setAutoDetected] = useState(false);
 
   const inputs = useRef<any[]>([]);
+  const fadeIn = useRef(new Animated.Value(0)).current;
+  const slideUp = useRef(new Animated.Value(40)).current;
+  const dotAnims = useRef([0,1,2].map(() => new Animated.Value(0))).current;
+  const shakeAnim = useRef(new Animated.Value(0)).current;
+  const successScale = useRef(new Animated.Value(0)).current;
+  const appStateRef = useRef(AppState.currentState);
 
+  // ── Entrance animation ─────────────────────────────────────────
   useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeIn, { toValue: 1, duration: 600, useNativeDriver: true }),
+      Animated.spring(slideUp, { toValue: 0, tension: 60, friction: 12, useNativeDriver: true }),
+    ]).start();
     doSendOTP();
   }, []);
 
+  // ── Loading dots animation ─────────────────────────────────────
+  useEffect(() => {
+    if (!loading) return;
+    const anims = dotAnims.map((dot, i) =>
+      Animated.loop(Animated.sequence([
+        Animated.delay(i * 200),
+        Animated.timing(dot, { toValue: 1, duration: 300, useNativeDriver: true }),
+        Animated.timing(dot, { toValue: 0, duration: 300, useNativeDriver: true }),
+      ]))
+    );
+    anims.forEach(a => a.start());
+    return () => anims.forEach(a => a.stop());
+  }, [loading]);
+
+  // ── Countdown ──────────────────────────────────────────────────
   useEffect(() => {
     if (countdown <= 0) { setCanResend(true); return; }
     const t = setTimeout(() => setCountdown(c => c - 1), 1000);
     return () => clearTimeout(t);
   }, [countdown]);
 
-  // ── Send OTP ─────────────────────────────────────────────────
+  // ── OTP Auto-capture: clipboard monitoring ─────────────────────
+  // When user switches back from SMS app, check clipboard for 6-digit code
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', async (nextState) => {
+      if (appStateRef.current.match(/inactive|background/) && nextState === 'active') {
+        try {
+          const clip = await Clipboard.getStringAsync();
+          const match = clip?.match(/\b(\d{6})\b/);
+          if (match && !autoDetected) {
+            const digits = match[1].split('');
+            setOtp(digits);
+            setAutoDetected(true);
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            // Auto-verify after short delay
+            setTimeout(() => doVerifyOTP(match[1]), 500);
+          }
+        } catch {}
+      }
+      appStateRef.current = nextState;
+    });
+    return () => sub.remove();
+  }, [autoDetected]);
+
+  // ── Send OTP ───────────────────────────────────────────────────
   const doSendOTP = async () => {
     try {
       setLoading(true);
       setError('');
       await sendOTP(phone as string);
-      console.log('[Auth] OTP sent to', phone);
     } catch (e: any) {
-      console.error('[Auth] Send OTP failed:', e);
-      setError(e?.message || 'Failed to send OTP. Check phone number.');
+      setError(e?.message || 'Failed to send OTP');
     } finally {
       setLoading(false);
     }
   };
 
-  // ── Resend ───────────────────────────────────────────────────
+  // ── Resend ─────────────────────────────────────────────────────
   const handleResend = async () => {
     if (!canResend) return;
     setResending(true);
     setCanResend(false);
     setCountdown(30);
     setOtp(['','','','','','']);
+    setAutoDetected(false);
     await doSendOTP();
     setResending(false);
   };
 
-  // ── Handle digit input ───────────────────────────────────────
+  // ── Handle digit input ─────────────────────────────────────────
   const handleChange = (val: string, idx: number) => {
+    // Handle paste of full OTP
+    if (val.length === 6 && /^\d{6}$/.test(val)) {
+      const digits = val.split('');
+      setOtp(digits);
+      Keyboard.dismiss();
+      doVerifyOTP(val);
+      return;
+    }
     if (!/^\d*$/.test(val)) return;
     const next = [...otp];
-    next[idx] = val;
+    next[idx] = val.slice(-1);
     setOtp(next);
     if (val && idx < 5) inputs.current[idx + 1]?.focus();
     if (!val && idx > 0) inputs.current[idx - 1]?.focus();
     if (next.every(d => d !== '') && val) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       doVerifyOTP(next.join(''));
     }
   };
 
-  // ── Verify OTP ───────────────────────────────────────────────
+  // ── Handle key press for backspace ─────────────────────────────
+  const handleKeyPress = (e: any, idx: number) => {
+    if (e.nativeEvent.key === 'Backspace' && !otp[idx] && idx > 0) {
+      const next = [...otp];
+      next[idx - 1] = '';
+      setOtp(next);
+      inputs.current[idx - 1]?.focus();
+    }
+  };
+
+  // ── Shake animation ────────────────────────────────────────────
+  const shake = () => {
+    Animated.sequence([
+      Animated.timing(shakeAnim, { toValue: 15, duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: -15, duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: 10, duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: -10, duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: 0, duration: 50, useNativeDriver: true }),
+    ]).start();
+  };
+
+  // ── Verify OTP ─────────────────────────────────────────────────
   const doVerifyOTP = async (code: string) => {
     try {
       setLoading(true);
       setError('');
       const ok = await verifyOTP(code);
-     if (ok) {
-  Vibration.vibrate(100);
-  const AsyncStorage = require('@react-native-async-storage/async-storage').default;
-  await AsyncStorage.setItem('test_auth_done', 'true');
-  await AsyncStorage.setItem('vaultchat_setup_complete', 'true');
-  router.replace('/chats' as any);
-} else {
-        setError('Invalid OTP. Please try again.');
+      if (ok) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Animated.spring(successScale, { toValue: 1, tension: 50, friction: 8, useNativeDriver: true }).start();
+        const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+        await AsyncStorage.setItem('test_auth_done', 'true');
+        await AsyncStorage.setItem('vaultchat_setup_complete', 'true');
+        setTimeout(() => router.replace('/chats' as any), 800);
+      } else {
+        shake();
+        setError('Invalid code. Try again.');
         setOtp(['','','','','','']);
         inputs.current[0]?.focus();
-        Vibration.vibrate([0, 100, 50, 100]);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       }
     } catch (e: any) {
-      console.error('[Auth] Verify failed:', e);
-      setError(e?.message || 'Invalid OTP. Please try again.');
+      shake();
+      setError(e?.message || 'Invalid code. Try again.');
       setOtp(['','','','','','']);
       inputs.current[0]?.focus();
-      Vibration.vibrate([0, 100, 50, 100]);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {
       setLoading(false);
     }
@@ -103,91 +188,154 @@ export default function OTPScreen() {
 
   const handleVerify = () => {
     const code = otp.join('');
-    if (code.length < 6) { setError('Enter all 6 digits.'); return; }
+    if (code.length < 6) { setError('Enter all 6 digits'); return; }
     doVerifyOTP(code);
   };
 
+  const filledCount = otp.filter(d => d !== '').length;
+
   return (
-    <View style={styles.container}>
-      <View style={styles.card}>
-        <Text style={styles.title}>Verify Phone</Text>
-        <Text style={styles.subtitle}>
-          OTP sent to{'\n'}
-          <Text style={styles.phone}>{phone}</Text>
-        </Text>
+    <View style={s.screen}>
+      <Animated.View style={{ flex: 1, opacity: fadeIn, transform: [{ translateY: slideUp }] }}>
 
-        {/* Test mode hint */}
-        <View style={styles.testBanner}>
-          <Text style={styles.testText}>🔧 Test Mode — Enter: 123456</Text>
-        </View>
-
-        {/* OTP inputs */}
-        <View style={styles.otpRow}>
-          {otp.map((digit, i) => (
-            <TextInput
-              key={i}
-              ref={r => { inputs.current[i] = r; }}
-              style={[styles.otpBox, digit ? styles.otpBoxFilled : null]}
-              value={digit}
-              onChangeText={v => handleChange(v, i)}
-              keyboardType="number-pad"
-              maxLength={1}
-              selectTextOnFocus
-              textContentType="oneTimeCode"
-            />
-          ))}
-        </View>
-
-        {error ? <Text style={styles.error}>{error}</Text> : null}
-
-        {/* Verify button */}
-        <TouchableOpacity
-          style={[styles.btn, loading && styles.btnDisabled]}
-          onPress={handleVerify}
-          disabled={loading}
-        >
-          {loading
-            ? <ActivityIndicator color="#0A0E1A" />
-            : <Text style={styles.btnText}>Verify & Continue</Text>
-          }
+        {/* Back button */}
+        <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
+          <Text style={s.backTxt}>←</Text>
         </TouchableOpacity>
 
-        {/* Resend */}
-        <TouchableOpacity onPress={handleResend} disabled={!canResend || resending}>
-          <Text style={[styles.resend, canResend ? styles.resendActive : null]}>
-            {canResend ? '🔄 Resend OTP' : `Resend in ${countdown}s`}
+        <View style={s.content}>
+          {/* Header */}
+          <Text style={s.title}>Verify your{'\n'}number</Text>
+          <Text style={s.subtitle}>
+            Code sent to <Text style={s.phone}>{phone}</Text>
           </Text>
-        </TouchableOpacity>
 
-        {/* Change number */}
-        <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 12 }}>
-          <Text style={styles.changeNum}>← Change number</Text>
-        </TouchableOpacity>
-      </View>
+          {/* Auto-detect badge */}
+          {autoDetected && (
+            <View style={s.autoBadge}>
+              <Text style={s.autoTxt}>Auto-detected from SMS</Text>
+            </View>
+          )}
+
+          {/* OTP Boxes */}
+          <Animated.View style={[s.otpRow, { transform: [{ translateX: shakeAnim }] }]}>
+            {otp.map((digit, i) => (
+              <View key={i} style={s.otpWrap}>
+                <TextInput
+                  ref={r => { inputs.current[i] = r; }}
+                  style={[s.otpBox, digit ? s.otpBoxFilled : null]}
+                  value={digit}
+                  onChangeText={v => handleChange(v, i)}
+                  onKeyPress={e => handleKeyPress(e, i)}
+                  keyboardType="number-pad"
+                  maxLength={6}
+                  selectTextOnFocus
+                  textContentType="oneTimeCode"
+                  autoComplete={i === 0 ? 'sms-otp' as any : 'off'}
+                />
+                <View style={[s.otpLine, digit ? s.otpLineFilled : null]} />
+              </View>
+            ))}
+          </Animated.View>
+
+          {/* Error */}
+          {error ? <Text style={s.error}>{error}</Text> : null}
+
+          {/* Progress indicator */}
+          <View style={s.progressRow}>
+            {[0,1,2,3,4,5].map(i => (
+              <View key={i} style={[s.progressDot, i < filledCount && s.progressDotFilled]} />
+            ))}
+          </View>
+
+          {/* Verify button */}
+          <TouchableOpacity
+            style={[s.verifyBtn, filledCount < 6 && s.verifyBtnOff]}
+            onPress={handleVerify}
+            disabled={loading || filledCount < 6}
+            activeOpacity={0.8}
+          >
+            {loading ? (
+              <View style={s.dotsRow}>
+                {dotAnims.map((dot, i) => (
+                  <Animated.View key={i} style={[s.loadDot, { transform: [{ translateY: dot.interpolate({ inputRange: [0, 1], outputRange: [0, -8] }) }] }]} />
+                ))}
+              </View>
+            ) : (
+              <Text style={s.verifyTxt}>Verify</Text>
+            )}
+          </TouchableOpacity>
+
+          {/* Resend */}
+          <TouchableOpacity onPress={handleResend} disabled={!canResend || resending} style={s.resendBtn}>
+            <Text style={[s.resendTxt, canResend && s.resendActive]}>
+              {canResend ? 'Resend code' : `Resend in ${countdown}s`}
+            </Text>
+          </TouchableOpacity>
+
+          {/* Change number */}
+          <TouchableOpacity onPress={() => router.back()} style={s.changeBtn}>
+            <Text style={s.changeTxt}>Change number</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Success overlay */}
+        <Animated.View style={[s.successOverlay, {
+          opacity: successScale,
+          transform: [{ scale: successScale }],
+        }]} pointerEvents="none">
+          <View style={s.successCircle}>
+            <Text style={s.successCheck}>✓</Text>
+          </View>
+          <Text style={s.successTxt}>Verified</Text>
+        </Animated.View>
+
+      </Animated.View>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container:    { flex: 1, backgroundColor: '#0A0E1A', alignItems: 'center', justifyContent: 'center', padding: 24 },
-  card:         { backgroundColor: '#111827', borderRadius: 20, padding: 28, width: '100%', borderWidth: 1, borderColor: '#1E293B' },
-  title:        { color: '#FFFFFF', fontSize: 26, fontWeight: 'bold', textAlign: 'center', marginBottom: 8 },
-  subtitle:     { color: '#94A3B8', fontSize: 14, textAlign: 'center', marginBottom: 16, lineHeight: 22 },
-  phone:        { color: '#00D4AA', fontWeight: 'bold' },
-  testBanner:   { backgroundColor: 'rgba(245,158,11,0.1)', borderRadius: 8, padding: 8, marginBottom: 16, borderWidth: 1, borderColor: 'rgba(245,158,11,0.3)' },
-  testText:     { color: '#F59E0B', fontSize: 12, textAlign: 'center', fontWeight: '700' },
-  otpRow:       { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
-  otpBox:       { width: 46, height: 56, borderRadius: 12, borderWidth: 1.5, borderColor: '#1E293B', backgroundColor: '#1A2235', color: '#FFFFFF', fontSize: 22, fontWeight: 'bold', textAlign: 'center' },
-  otpBoxFilled: { borderColor: '#00D4AA', backgroundColor: '#001810' },
-  error:        { color: '#FF4D6D', fontSize: 13, textAlign: 'center', marginBottom: 12 },
-  btn:          { backgroundColor: '#00D4AA', borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginBottom: 16 },
-  btnDisabled:  { opacity: 0.6 },
-  btnText:      { color: '#0A0E1A', fontWeight: 'bold', fontSize: 16 },
-  resend:       { color: '#4A5568', fontSize: 13, textAlign: 'center' },
-  resendActive: { color: '#00D4AA' },
-  changeNum:    { color: '#4A5568', fontSize: 13, textAlign: 'center' },
+const s = StyleSheet.create({
+  screen:      { flex: 1, backgroundColor: '#000000' },
+  backBtn:     { paddingTop: 56, paddingLeft: 24 },
+  backTxt:     { color: '#fff', fontSize: 28, fontWeight: '200' },
+  content:     { flex: 1, paddingHorizontal: 32, paddingTop: 40 },
+  title:       { color: '#FFFFFF', fontSize: 36, fontWeight: '800', lineHeight: 44, marginBottom: 12 },
+  subtitle:    { color: 'rgba(255,255,255,0.4)', fontSize: 15, marginBottom: 32, lineHeight: 22 },
+  phone:       { color: '#FFFFFF', fontWeight: '700' },
+
+  autoBadge:   { backgroundColor: 'rgba(16,185,129,0.12)', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, alignSelf: 'flex-start', marginBottom: 20, borderWidth: 1, borderColor: 'rgba(16,185,129,0.25)' },
+  autoTxt:     { color: '#10B981', fontSize: 12, fontWeight: '700' },
+
+  otpRow:      { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12, gap: 12 },
+  otpWrap:     { flex: 1, alignItems: 'center' },
+  otpBox:      { width: '100%', height: 56, color: '#FFFFFF', fontSize: 28, fontWeight: '700', textAlign: 'center', backgroundColor: 'transparent' },
+  otpBoxFilled:{},
+  otpLine:     { width: '100%', height: 2, backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 1 },
+  otpLineFilled:{ backgroundColor: '#FFFFFF' },
+
+  error:       { color: '#EF4444', fontSize: 13, marginBottom: 12 },
+
+  progressRow: { flexDirection: 'row', gap: 6, marginBottom: 40, marginTop: 8 },
+  progressDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.1)' },
+  progressDotFilled: { backgroundColor: '#FFFFFF' },
+
+  verifyBtn:   { backgroundColor: '#FFFFFF', borderRadius: 16, paddingVertical: 18, alignItems: 'center', marginBottom: 24 },
+  verifyBtnOff:{ opacity: 0.15 },
+  verifyTxt:   { color: '#000000', fontSize: 17, fontWeight: '800' },
+
+  dotsRow:     { flexDirection: 'row', gap: 6, height: 20, alignItems: 'center' },
+  loadDot:     { width: 6, height: 6, borderRadius: 3, backgroundColor: '#000' },
+
+  resendBtn:   { alignItems: 'center', marginBottom: 16 },
+  resendTxt:   { color: 'rgba(255,255,255,0.25)', fontSize: 14 },
+  resendActive:{ color: 'rgba(255,255,255,0.7)' },
+
+  changeBtn:   { alignItems: 'center' },
+  changeTxt:   { color: 'rgba(255,255,255,0.25)', fontSize: 13 },
+
+  successOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
+  successCircle:  { width: 80, height: 80, borderRadius: 40, borderWidth: 2, borderColor: '#10B981', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  successCheck:   { color: '#10B981', fontSize: 36, fontWeight: '200' },
+  successTxt:     { color: '#FFFFFF', fontSize: 24, fontWeight: '700' },
 });
-
-
-
-
