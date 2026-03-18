@@ -2,7 +2,7 @@
   "expo": {
     "name": "VaultChat",
     "slug": "VaultChat",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "vaultchat",
@@ -42,7 +42,8 @@
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.USE_BIOMETRIC",
         "android.permission.USE_FINGERPRINT"
-      ]
+      ],
+      "versionCode": 2
     },
     "web": {
       "output": "static",

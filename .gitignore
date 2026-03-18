@@ -48,3 +48,10 @@ vaultchat-backend/.env
 *.env
 
 .env.local
+
+# Build scripts & backups
+*.backup
+add_*.js
+fix_*.js
+*.ghost-backup
+*.vo-backup
