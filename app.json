@@ -67,7 +67,8 @@
         {
           "url": "https://sentry.io/",
           "project": "react-native",
-          "organization": "corefinite-tech-solutions-llp"
+          "organization": "corefinite-tech-solutions-llp",
+          "uploadSourceMaps": false
         }
       ],
       [
