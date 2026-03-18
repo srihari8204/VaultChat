@@ -108,18 +108,22 @@ export default function VoiceCallScreen() {
         const socket = io(BACKEND_URL, { transports: ['websocket'] });
         socketRef.current = socket;
 
+        // Register call_offer listener BEFORE connect to avoid missing events
+        if (isIncoming === 'true') {
+          socket.on('call_offer_for_you', async ({ offer, fromSocketId }: any) => {
+            remoteIdRef.current = fromSocketId;
+            await pc.setRemoteDescription(new RTCSessionDescription(offer));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            socket.emit('call_answer', { toSocketId: fromSocketId, answer });
+          });
+        }
+
         socket.on('connect', async () => {
           socket.emit('register', uid);
 
           if (isIncoming === 'true') {
             setCallState('ringing');
-            socket.on('call_offer_for_you', async ({ offer, fromSocketId }: any) => {
-              remoteIdRef.current = fromSocketId;
-              await pc.setRemoteDescription(new RTCSessionDescription(offer));
-              const answer = await pc.createAnswer();
-              await pc.setLocalDescription(answer);
-              socket.emit('call_answer', { toSocketId: fromSocketId, answer });
-            });
           } else {
             setCallState('ringing');
             await makeCall(pc, socket);

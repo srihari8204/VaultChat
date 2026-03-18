@@ -6,7 +6,8 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import * as FaceDetector from 'expo-face-detector';
+// expo-face-detector is deprecated (removed in SDK 51+)
+// Face detection is handled via biometric prompt instead
 import * as Haptics from 'expo-haptics';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { router } from 'expo-router';
@@ -87,7 +88,7 @@ export default function FaceVerifyScreen() {
     Haptics.notificationAsync(matched
       ?Haptics.NotificationFeedbackType.Success
       :Haptics.NotificationFeedbackType.Error);
-    if(matched) setTimeout(()=>router.replace('/(tabs)/chats' as any),1500);
+    if(matched) setTimeout(()=>router.replace('/chats' as any),1500);
   };
 
   const triggerBio=async()=>{
@@ -103,16 +104,21 @@ export default function FaceVerifyScreen() {
     } catch { showResult(false); }
   };
 
-  const onFaces=useCallback(({faces}:{faces:any[]})=>{
-    if(doneRef.current||phase!==PHASE.SCANNING) return;
-    if(!faces?.length) return;
-    fcRef.current+=1;
-    setFc(fcRef.current);
-    if(fcRef.current>=DETECT_FRAMES){
-      doneRef.current=true;
-      triggerBio();
-    }
-  },[phase]);
+  // Simulate face scanning progress, then trigger biometric auth
+  useEffect(()=>{
+    if(phase!==PHASE.SCANNING||doneRef.current||!perm?.granted) return;
+    const interval=setInterval(()=>{
+      if(doneRef.current) return;
+      fcRef.current+=1;
+      setFc(fcRef.current);
+      if(fcRef.current>=DETECT_FRAMES){
+        doneRef.current=true;
+        clearInterval(interval);
+        triggerBio();
+      }
+    },300);
+    return ()=>clearInterval(interval);
+  },[phase,perm?.granted]);
 
   const retry=()=>{
     fcRef.current=0; doneRef.current=false;
@@ -129,16 +135,6 @@ export default function FaceVerifyScreen() {
           <CameraView
             style={StyleSheet.absoluteFill}
             facing="front"
-            {...{
-              onFacesDetected: onFaces,
-              faceDetectorSettings: {
-                mode: FaceDetector.FaceDetectorMode.accurate,
-                detectLandmarks: FaceDetector.FaceDetectorLandmarks.none,
-                runClassifications: FaceDetector.FaceDetectorClassifications.none,
-                minDetectionInterval: 120,
-                tracking: true,
-              },
-            } as any}
           />
         )}
         <View style={{position:'absolute',top:0,left:0,right:0,height:160,backgroundColor:'rgba(6,14,30,0.70)'}} pointerEvents="none"/>

@@ -74,7 +74,7 @@ export default function CameraScreen() {
             <Text style={s.topIcon}>{"\u2715"}</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setFlash(f => f === 'off' ? 'on' : 'off')} style={s.topBtn}>
-            <Text style={s.topIcon}>{flash === 'on' ? '{"\u26A1"}' : '{"\u26A1"}OFF'}</Text>
+            <Text style={s.topIcon}>{flash === 'on' ? "\u26A1" : "\u26A1 OFF"}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             onPress={() => setViewOnce(v => !v)}

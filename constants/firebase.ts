@@ -1,20 +1,10 @@
-import { getApp, getApps, initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { getApp } from '@react-native-firebase/app';
+import { getAuth } from '@react-native-firebase/auth';
+import { getFirestore } from '@react-native-firebase/firestore';
 
-const firebaseConfig = {
-  apiKey: "AIzaSyDKic9s-_fyg4OeAttQgZVBj4mT-4UkGSc",
-  authDomain: "vaultchat-ce9e3.firebaseapp.com",
-  projectId: "vaultchat-ce9e3",
-  storageBucket: "vaultchat-ce9e3.appspot.com",
-  messagingSenderId: "207307621485",
-  appId: "1:207307621485:android:56aa1a7927a5a77bdeab64"
-};
-
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+const app = getApp();
 const auth = getAuth(app);
 const db = getFirestore(app);
 
 export { auth, db };
 export default app;
-

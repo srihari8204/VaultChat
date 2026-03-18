@@ -117,26 +117,27 @@ export default function ChatsScreen() {
     return unsub;
   }, [myUid]);
 
-  // Filter out hidden chats
+  // Filter out hidden chats (runs once on mount, not on chats change)
+  const [hiddenIds, setHiddenIds] = useState<string[]>([]);
   useEffect(() => {
     (async () => {
       const raw = await AsyncStorage.getItem('vc_hidden_chats');
       const hidden: string[] = raw ? JSON.parse(raw) : [];
-      if (hidden.length > 0) {
-        setChats(prev => prev.filter(c => !hidden.includes(c.id)));
-      }
+      setHiddenIds(hidden);
     })();
-  }, [chats.length]);
+  }, []);
 
 
   useEffect(() => {
-    let list = chats.filter(c => showArchive ? c.archived : !c.archived);
+    let list = chats
+      .filter(c => !hiddenIds.includes(c.id))
+      .filter(c => showArchive ? c.archived : !c.archived);
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter(c => c.name.toLowerCase().includes(q) || c.lastMsg.toLowerCase().includes(q));
     }
     setFiltered(list);
-  }, [chats, search, showArchive]);
+  }, [chats, search, showArchive, hiddenIds]);
 
   const openChat = (item: ChatItem) => {
     if (item.isGroup) {
@@ -204,7 +205,7 @@ export default function ChatsScreen() {
     const ids: string[] = raw ? JSON.parse(raw) : [];
     if (!ids.includes(chatId)) ids.push(chatId);
     await AsyncStorage.setItem('vc_hidden_chats', JSON.stringify(ids));
-    setChats(prev => prev.filter(c => c.id !== chatId));
+    setHiddenIds(ids);
     setLongPress(null);
   };
 
@@ -268,7 +269,8 @@ const LongPressSheet = () => {
         )}
 
         <FlatList
-          data={filtered}
+contentContainerStyle={{ paddingBottom: 100 }}
+                    data={filtered}
           keyExtractor={c => c.id}
           renderItem={renderChat}
           refreshControl={<RefreshControl refreshing={loading} colors={['#00E5FF']} tintColor="#00E5FF" />}
@@ -281,12 +283,83 @@ const LongPressSheet = () => {
           }
         />
         <LongPressSheet />
+
+        {/* Bottom Tab Bar */}
+        <View style={s.tabBar}>
+          <TouchableOpacity style={s.tabItem} onPress={() => {}}>
+            <Text style={[s.tabIcon, { color: '#4A9FFF' }]}>{'💬'}</Text>
+            <Text style={[s.tabLbl, { color: '#4A9FFF' }]}>Chats</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.tabItem} onPress={() => router.push('/contacts' as any)}>
+            <Text style={s.tabIcon}>{'👥'}</Text>
+            <Text style={s.tabLbl}>Contacts</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.tabItem} onPress={() => router.push('/status' as any)}>
+            <Text style={s.tabIcon}>{'📷'}</Text>
+            <Text style={s.tabLbl}>Status</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.tabItem} onPress={() => router.push('/broadcast' as any)}>
+            <Text style={s.tabIcon}>{'📢'}</Text>
+            <Text style={s.tabLbl}>Channels</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.tabItem} onPress={() => router.push('/settings' as any)}>
+            <Text style={s.tabIcon}>{'⚙️'}</Text>
+            <Text style={s.tabLbl}>Settings</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* FAB - New Chat */}
+        <TouchableOpacity style={s.fab} onPress={() => router.push('/contacts' as any)} activeOpacity={0.8}>
+          <Text style={s.fabTxt}>{'✏️'}</Text>
+        </TouchableOpacity>
+
       </View>
     </>
   );
 }
 
+interface BottomNavProps {
+  active: string;
+}
+
+export function BottomNav({ active }: BottomNavProps) {
+  const router = useRouter();
+
+  const tabs = [
+    { key: 'Chats', icon: '💬', route: '/chats' },
+    { key: 'Calls', icon: '📞', route: '/calls' },
+    { key: 'Status', icon: '📱', route: '/status' },
+    { key: 'Alerts', icon: '🚨', route: '/alerts' },
+  ];
+
+  return (
+    <View style={s.tabBar}>
+      {tabs.map(tab => (
+        <TouchableOpacity
+          key={tab.key}
+          style={s.tabItem}
+          onPress={() => router.push(tab.route as any)}
+        >
+          <Text style={[s.tabIcon, active === tab.key && { color: '#00E5FF' }]}>
+            {tab.icon}
+          </Text>
+          <Text style={[s.tabLbl, active === tab.key && { color: '#00E5FF' }]}>
+            {tab.key}
+          </Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}
+
 const s = StyleSheet.create({
+  tabBar:  { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row', backgroundColor: '#070D18', borderTopWidth: 1, borderTopColor: '#111', paddingVertical: 8, paddingBottom: 28 },
+  tabItem: { flex: 1, alignItems: 'center', gap: 2 },
+  tabIcon: { fontSize: 20, color: '#555' },
+  tabLbl:  { fontSize: 10, color: '#555', fontWeight: '600' },
+  fab:     { position: 'absolute', bottom: 90, right: 20, width: 56, height: 56, borderRadius: 28, backgroundColor: '#4A9FFF', justifyContent: 'center', alignItems: 'center', elevation: 8, shadowColor: '#4A9FFF', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8 },
+  fabTxt:  { fontSize: 24, color: '#fff' },
+
   screen:        { flex: 1, backgroundColor: '#03030E' },
   searchBar:     { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0C0C1A', paddingHorizontal: 12, paddingVertical: 8, gap: 8, borderBottomWidth: 1, borderBottomColor: '#111' },
   searchIcon:    { fontSize: 16 },

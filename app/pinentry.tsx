@@ -61,7 +61,16 @@ export default function PinEntryScreen() {
 
     // Check normal PIN
     const storedHash = await AsyncStorage.getItem(PIN_KEY);
-    if (!storedHash || entered === storedHash) {
+    if (!storedHash) {
+      // No PIN set — force user to set one (should not happen in normal flow)
+      setPin('');
+      setError('PIN not configured');
+      shake();
+      Vibration.vibrate(400);
+      setTimeout(() => setError(''), 1500);
+      return;
+    }
+    if (entered === storedHash) {
       await deactivateGhost();
       router.replace('/chats');
     } else {

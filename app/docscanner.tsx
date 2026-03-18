@@ -267,7 +267,7 @@ function DocScannerContent() {
           {step === 'processing' && (
             <View style={{ gap: 20, alignItems: 'center' }}>
               <Animated.View style={[S.processingCard, { transform: [{ scale: pulseAnim }] }]}>
-                <LinearGradient colors={[C.primary + '18', C.secondary + '12']} style={[StyleSheet.absoluteFillObject, {borderRadius:20}]} />
+                <LinearGradient colors={[C.primary + '18', C.secondary + '12']} style={{ ...StyleSheet.absoluteFillObject, borderRadius:20 }} />
                 {/* Simulated doc preview */}
                 <View style={S.docPreview}>
                   <View style={{ height: 16, backgroundColor: 'rgba(74,159,255,0.3)', borderRadius: 4, marginBottom: 10, width: '60%' }} />
@@ -283,7 +283,7 @@ function DocScannerContent() {
                 </View>
               </Animated.View>
 
-              <View style={{ width: '100%', gap: 10 }}>
+              <View style={{ flex: 1, gap: 10 }}>
                 <View style={{ height: 6, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 3, overflow: 'hidden' }}>
                   <View style={{ width:(processingProgress+'%') as any, height: 6, backgroundColor: C.primary, borderRadius: 3 }} />
                 </View>
@@ -325,7 +325,7 @@ function DocScannerContent() {
               </View>
 
               <View style={S.docPreviewLarge}>
-                <LinearGradient colors={['rgba(4,20,50,0.95)', 'rgba(2,14,38,0.95)']} style={[StyleSheet.absoluteFillObject, {borderRadius:16}]} />
+                <LinearGradient colors={['rgba(4,20,50,0.95)', 'rgba(2,14,38,0.95)']} style={{ ...StyleSheet.absoluteFillObject, borderRadius:16 }} />
                 <View style={{ padding: 16 }}>
                   <Text style={{ color: C.primary, fontSize: 14, fontWeight: '900', marginBottom: 12 }}>{currentDoc.title}</Text>
                   {Array.from({ length: 6 }).map((_, i) => (

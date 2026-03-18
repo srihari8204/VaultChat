@@ -1,4 +1,4 @@
-﻿import 'react-native-get-random-values';
+import 'react-native-get-random-values';
 import { Buffer } from 'buffer';
 
 export interface EncryptedPayload {
@@ -47,10 +47,16 @@ export async function encryptMessage(
   const encrypted = await crypto.subtle.encrypt(
     { name: 'AES-GCM', iv, tagLength: 128 }, key, enc.encode(plaintext)
   );
+  // Web Crypto AES-GCM appends the auth tag to the ciphertext automatically.
+  // The tag field is kept for protocol compatibility but is embedded in ciphertext.
+  const encBytes = new Uint8Array(encrypted);
+  const tagStart = encBytes.length - 16; // 128-bit tag = 16 bytes
+  const ciphertextOnly = encBytes.slice(0, tagStart);
+  const tagBytes = encBytes.slice(tagStart);
   return {
-    ciphertext: Buffer.from(new Uint8Array(encrypted)).toString('base64'),
+    ciphertext: Buffer.from(encBytes).toString('base64'),
     iv:   Buffer.from(iv).toString('base64'),
-    tag:  '',
+    tag:  Buffer.from(tagBytes).toString('base64'),
     keyId: 'v1-pbkdf2',
     v: 1,
   };
