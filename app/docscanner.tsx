@@ -2,7 +2,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Animated, Easing, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Animated, Easing, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 
 const C = {
@@ -45,19 +45,22 @@ function DocScannerContent() {
   const [currentDoc, setCurrentDoc] = useState<ScannedDoc | null>(null);
 
   const fadeIn = useRef(new Animated.Value(0)).current;
-  const scanAnim = useRef(new Animated.Value(0)).current;
   const scanLine = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     Animated.timing(fadeIn, { toValue: 1, duration: 400, useNativeDriver: true }).start();
-  }, []);
+  }, [fadeIn]);
 
   const pickPhoto = async (source: 'camera' | 'gallery') => {
     try {
       let result;
       if (source === 'camera') {
-        result = await ImagePicker.launchCameraAsync({ quality: 1, allowsEditing: false });
+        if (Platform.OS === 'web') {
+          result = await ImagePicker.launchImageLibraryAsync({ quality: 1, allowsEditing: false });
+        } else {
+          result = await ImagePicker.launchCameraAsync({ quality: 1, allowsEditing: false });
+        }
       } else {
         result = await ImagePicker.launchImageLibraryAsync({ quality: 1, allowsMultipleSelection: true });
       }

@@ -4,18 +4,15 @@
  */
 
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import firestore from '@react-native-firebase/firestore';
 import auth from '@react-native-firebase/auth';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Animated,
-  Dimensions,
-  FlatList,
   Platform,
   ScrollView,
   StatusBar,
@@ -42,7 +39,6 @@ const C = {
   border: 'rgba(74,159,255,0.15)',
 };
 
-const SW = Dimensions.get('window').width;
 const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
 
 type MemberRole = 'owner' | 'admin' | 'moderator' | 'member';
@@ -114,29 +110,28 @@ export default function GroupAdminScreen() {
 
   useEffect(() => {
     Animated.timing(fadeIn, { toValue: 1, duration: 400, useNativeDriver: true }).start();
-    loadGroupData();
-  }, []);
-
-  const loadGroupData = async () => {
-    try {
-      if (!chatId) return;
-      const doc = await firestore().collection('groups').doc(chatId).get();
-      if (doc.exists) {
-        const data = doc.data()!;
-        if (data.name) setGroupName(data.name);
-        if (data.description) setDescription(data.description);
-        if (data.permissions) setPermissions({ ...permissions, ...data.permissions });
-        if (data.slowMode !== undefined) setSlowMode(data.slowMode);
-        if (data.approveNewMembers !== undefined) setApproveNewMembers(data.approveNewMembers);
-        if (data.antiSpamLinks !== undefined) setAntiSpamLinks(data.antiSpamLinks);
-        if (data.members && Array.isArray(data.members)) setMembers(data.members);
+    const loadGroupData = async () => {
+      try {
+        if (!chatId) return;
+        const doc = await firestore().collection('groups').doc(chatId).get();
+        if (doc.exists) {
+          const data = doc.data()!;
+          if (data.name) setGroupName(data.name);
+          if (data.description) setDescription(data.description);
+          if (data.permissions) setPermissions(prev => ({ ...prev, ...data.permissions }));
+          if (data.slowMode !== undefined) setSlowMode(data.slowMode);
+          if (data.approveNewMembers !== undefined) setApproveNewMembers(data.approveNewMembers);
+          if (data.antiSpamLinks !== undefined) setAntiSpamLinks(data.antiSpamLinks);
+          if (data.members && Array.isArray(data.members)) setMembers(data.members);
+        }
+      } catch (e) {
+        console.warn('[GroupAdmin] Load error:', e);
+      } finally {
+        setLoading(false);
       }
-    } catch (e) {
-      console.warn('[GroupAdmin] Load error:', e);
-    } finally {
-      setLoading(false);
-    }
-  };
+    };
+    loadGroupData();
+  }, [fadeIn, chatId]);
 
   const saveSettings = async () => {
     setSaving(true);

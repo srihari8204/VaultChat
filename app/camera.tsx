@@ -53,7 +53,7 @@ export default function CameraScreen() {
           },
         });
       }
-    } catch (e) {
+    } catch {
       Alert.alert('Error', 'Could not capture photo');
     }
     setCapturing(false);

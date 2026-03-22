@@ -3,7 +3,7 @@
 // View ANY file without leaving the app: images, videos, PDFs, Office docs,
 // code/text files, audio — all rendered inline with premium UI.
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated,
   Dimensions,
@@ -20,7 +20,7 @@ import {
 import { Image } from 'expo-image';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Audio } from 'expo-av';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { LinearGradient } from 'expo-linear-gradient';
 import { WebView } from 'react-native-webview';
@@ -107,7 +107,7 @@ function SkeletonShimmer({ width: w, height: h, style }: any) {
     Animated.loop(
       Animated.timing(shimmer, { toValue: 1, duration: 1200, easing: Easing.linear, useNativeDriver: true })
     ).start();
-  }, []);
+  }, [shimmer]);
   const translateX = shimmer.interpolate({ inputRange: [0, 1], outputRange: [-(w || SW), (w || SW)] });
   return (
     <View style={[{ width: w || SW, height: h || 200, borderRadius: 8, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.04)' }, style]}>
@@ -178,9 +178,63 @@ export default function FileViewerScreen() {
       Animated.timing(fadeIn, { toValue: 1, duration: 350, useNativeDriver: true }),
       Animated.timing(slideUp, { toValue: 0, duration: 350, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
     ]).start();
+    const loadTextContentInEffect = async () => {
+      try {
+        let content: string;
+        if (fileUri.startsWith('http')) {
+          const dl = await FileSystem.downloadAsync(fileUri, FileSystem.cacheDirectory + 'temp_view_' + Date.now());
+          content = await FileSystem.readAsStringAsync(dl.uri);
+        } else {
+          content = await FileSystem.readAsStringAsync(fileUri);
+        }
+        setTextContent(content);
+      } catch {
+        setError('Could not read file contents');
+      }
+    };
+    const loadAudioInEffect = async () => {
+      try {
+        await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true, staysActiveInBackground: true });
+        const { sound: snd } = await Audio.Sound.createAsync(
+          { uri: fileUri },
+          { shouldPlay: false },
+          (status) => {
+            if (status.isLoaded) {
+              setAudioPosition(status.positionMillis || 0);
+              setAudioDuration(status.durationMillis || 0);
+              setAudioPlaying(status.isPlaying);
+            }
+          }
+        );
+        setSound(snd);
+      } catch {
+        setError('Could not load audio');
+      }
+    };
+    const loadFileMeta = async () => {
+      try {
+        if (fileUri.startsWith('file://') || fileUri.startsWith(FileSystem.documentDirectory || '')) {
+          const info = await FileSystem.getInfoAsync(fileUri);
+          if (info.exists && info.size) setFileSize(info.size);
+        }
+        if (fileType === 'text') await loadTextContentInEffect();
+        if (fileType === 'audio') await loadAudioInEffect();
+        setLoading(false);
+      } catch (e: any) {
+        setError(e.message || 'Failed to load file');
+        setLoading(false);
+      }
+    };
     loadFileMeta();
     return () => { sound?.unloadAsync(); };
-  }, []);
+  }, [fadeIn, slideUp, fileUri, fileType, sound]);
+
+  // Redirect to dedicated video player when file type is video
+  useEffect(() => {
+    if (fileType === 'video') {
+      router.replace({ pathname: '/media-viewer', params: { uri: fileUri, filename: fileName, msgType: 'video' } });
+    }
+  }, [fileType, fileName, fileUri, router]);
 
   // ── Load file metadata ─────────────────────────────────────────
   const loadFileMeta = async () => {
@@ -345,16 +399,11 @@ export default function FileViewerScreen() {
   // ══════════════════════════════════════════════════════════════
   // ██  RENDER: Video — route to dedicated player
   // ══════════════════════════════════════════════════════════════
-  const renderVideo = () => {
-    useEffect(() => {
-      router.replace({ pathname: '/media-viewer', params: { uri: fileUri, filename: fileName, msgType: 'video' } });
-    }, []);
-    return (
-      <View style={[s.centered, { flex: 1 }]}>
-        <Text style={s.loadingText}>Opening video player...</Text>
-      </View>
-    );
-  };
+  const renderVideo = () => (
+    <View style={[s.centered, { flex: 1 }]}>
+      <Text style={s.loadingText}>Opening video player...</Text>
+    </View>
+  );
 
   // ══════════════════════════════════════════════════════════════
   // ██  RENDER: PDF via WebView
@@ -514,7 +563,7 @@ export default function FileViewerScreen() {
       <Text style={[s.errorTitle, { marginTop: 16 }]}>{fileName}</Text>
       {fileSize > 0 && <Text style={s.audioMeta}>{formatBytes(fileSize)}</Text>}
       <Text style={[s.loadingText, { marginTop: 12, textAlign: 'center' }]}>
-        This file type cannot be previewed in-app.{'\n'}Use "Open With..." to view it externally.
+        This file type cannot be previewed in-app.{'\n'}Use &quot;Open With...&quot; to view it externally.
       </Text>
     </View>
   );

@@ -1,8 +1,8 @@
-﻿import { LinearGradient } from "expo-linear-gradient";
+import { LinearGradient } from "expo-linear-gradient";
 import * as LocalAuthentication from "expo-local-authentication";
 import { router } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { Animated, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Animated, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 export default function BiometricSetupScreen() {
   const [status,setStatus] = useState<"idle"|"scanning"|"success"|"failed"|"unavailable">("idle");
@@ -16,15 +16,17 @@ export default function BiometricSetupScreen() {
     ]));
     loop.start();
     (async()=>{
+      if(Platform.OS==='web'){setStatus("unavailable");setMsg("No biometrics on this device. Skip to use PIN only.");return;}
       const has=await LocalAuthentication.hasHardwareAsync();
       const enr=await LocalAuthentication.isEnrolledAsync();
       if(!has||!enr){setStatus("unavailable");setMsg("No biometrics on this device. Skip to use PIN only.");}
     })();
     return ()=>loop.stop();
-  },[]);
+  },[pulse]);
 
   const handleRegister = async () => {
     if(status==="unavailable"){router.push("/permissions");return;}
+    if(Platform.OS==='web'){router.push("/permissions");return;}
     setStatus("scanning");setMsg("Scanning...");
     try {
       const r=await LocalAuthentication.authenticateAsync({promptMessage:"Register your biometric for VaultChat",fallbackLabel:"Use PIN instead",cancelLabel:"Skip",disableDeviceFallback:false});

@@ -14,7 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 
-const { width: SW, height: SH } = Dimensions.get('window');
+const { width: SW } = Dimensions.get('window');
 const C = { bg: '#020B18', accent: '#4A9FFF', cyan: '#00E5FF', card: '#0A1628', border: '#112240' };
 const COLOR_SIZE = (SW - 64 - 4 * 12) / 5;
 const PRESET_W = (SW - 48 - 8) / 3;
@@ -59,17 +59,16 @@ export default function ChatWallpaperScreen() {
   const [tab, setTab] = useState<'solid' | 'gradient' | 'custom'>('solid');
 
   useEffect(() => {
+    const loadWallpaper = async () => {
+      try {
+        const raw = await AsyncStorage.getItem(storageKey);
+        if (raw) setSelected(JSON.parse(raw));
+      } catch (e) {
+        console.warn('[Wallpaper] load error:', e);
+      }
+    };
     loadWallpaper();
-  }, []);
-
-  const loadWallpaper = async () => {
-    try {
-      const raw = await AsyncStorage.getItem(storageKey);
-      if (raw) setSelected(JSON.parse(raw));
-    } catch (e) {
-      console.warn('[Wallpaper] load error:', e);
-    }
-  };
+  }, [storageKey]);
 
   const saveWallpaper = async () => {
     try {

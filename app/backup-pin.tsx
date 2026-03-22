@@ -1,8 +1,8 @@
-﻿import { LinearGradient } from "expo-linear-gradient";
+import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import { useState } from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { savePIN } from "../services/securityService";
 
 const KEYS = ["1","2","3","4","5","6","7","8","9","","0","⌫"];
@@ -17,7 +17,7 @@ export default function BackupPINScreen() {
   const setter  = stage==="set"?setPin:setConfirm;
 
   const handleKey = (k:string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (k==="⌫"){setter(p=>p.slice(0,-1));setError("");return;}
     if (k===""||current.length>=6) return;
     const next=current+k; setter(next);

@@ -41,7 +41,7 @@ function RecoveryContent() {
 
   useEffect(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: 500, useNativeDriver: true }).start();
-  }, []);
+  }, [fadeAnim]);
 
   useEffect(() => {
     if (!locked) return;
@@ -63,7 +63,7 @@ function RecoveryContent() {
       }
     }, 1000);
     return () => clearInterval(iv);
-  }, [locked]);
+  }, [locked, lockAnim]);
 
   const shake = () => {
     shakeAnim.setValue(0);
@@ -131,7 +131,6 @@ function RecoveryContent() {
     setErrors(e => ({ ...e, [id]: undefined, general: undefined }));
   };
 
-  const lockBorderColor = lockAnim.interpolate({ inputRange:[0,1], outputRange:['rgba(239,68,68,0.3)','rgba(239,68,68,0.8)'] });
   const loadDeg = loadAnim.interpolate({ inputRange:[0,1], outputRange:['0deg','360deg'] });
 
   return (

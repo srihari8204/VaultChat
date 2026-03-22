@@ -4,7 +4,7 @@
 
 import { Audio } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated, StyleSheet, Text, TouchableOpacity, View,
@@ -13,7 +13,6 @@ import {
 const SPEEDS = [0.5, 1, 1.25, 1.5, 2];
 
 export default function VoiceSpeedPlayer() {
-  const router = useRouter();
   const { uri, duration: durParam, senderName } = useLocalSearchParams<{
     uri: string; duration?: string; senderName?: string;
   }>();
@@ -29,39 +28,37 @@ export default function VoiceSpeedPlayer() {
   const bars = useRef(Array.from({ length: 40 }, () => Math.random() * 0.7 + 0.3)).current;
 
   useEffect(() => {
+    const onPlaybackUpdateInEffect = (status: any) => {
+      if (!status.isLoaded) return;
+      const pos = Math.floor((status.positionMillis || 0) / 1000);
+      setPosition(pos);
+      setIsPlaying(status.isPlaying);
+      if (status.durationMillis) {
+        const pct = status.positionMillis / status.durationMillis;
+        progressAnim.setValue(pct);
+      }
+      if (status.didJustFinish) {
+        setIsPlaying(false);
+        setPosition(0);
+        progressAnim.setValue(0);
+      }
+    };
+    const loadAudio = async () => {
+      try {
+        const { sound, status } = await Audio.Sound.createAsync(
+          { uri: uri as string },
+          { shouldPlay: false, rate: speed, shouldCorrectPitch: true },
+          onPlaybackUpdateInEffect
+        );
+        soundRef.current = sound;
+        if (status.isLoaded && status.durationMillis) {
+          setDuration(Math.floor(status.durationMillis / 1000));
+        }
+      } catch {}
+    };
     loadAudio();
     return () => { soundRef.current?.unloadAsync(); };
-  }, []);
-
-  const loadAudio = async () => {
-    try {
-      const { sound, status } = await Audio.Sound.createAsync(
-        { uri: uri as string },
-        { shouldPlay: false, rate: speed, shouldCorrectPitch: true },
-        onPlaybackUpdate
-      );
-      soundRef.current = sound;
-      if (status.isLoaded && status.durationMillis) {
-        setDuration(Math.floor(status.durationMillis / 1000));
-      }
-    } catch {}
-  };
-
-  const onPlaybackUpdate = (status: any) => {
-    if (!status.isLoaded) return;
-    const pos = Math.floor((status.positionMillis || 0) / 1000);
-    setPosition(pos);
-    setIsPlaying(status.isPlaying);
-    if (status.durationMillis) {
-      const pct = status.positionMillis / status.durationMillis;
-      progressAnim.setValue(pct);
-    }
-    if (status.didJustFinish) {
-      setIsPlaying(false);
-      setPosition(0);
-      progressAnim.setValue(0);
-    }
-  };
+  }, [uri, speed, progressAnim]);
 
   const togglePlay = async () => {
     if (!soundRef.current) return;
@@ -70,21 +67,6 @@ export default function VoiceSpeedPlayer() {
     } else {
       await soundRef.current.playAsync();
     }
-  };
-
-  const changeSpeed = async () => {
-    const idx = SPEEDS.indexOf(speed);
-    const next = SPEEDS[(idx + 1) % SPEEDS.length];
-    setSpeed(next);
-    if (soundRef.current) {
-      await soundRef.current.setRateAsync(next, true);
-    }
-  };
-
-  const seekTo = async (pct: number) => {
-    if (!soundRef.current || !duration) return;
-    const ms = pct * duration * 1000;
-    await soundRef.current.setPositionAsync(ms);
   };
 
   const skip = async (secs: number) => {

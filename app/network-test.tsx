@@ -19,7 +19,6 @@ const C = { bg: '#020B18', accent: '#4A9FFF', cyan: '#00E5FF', card: '#0A1628', 
 const STORAGE_KEY = 'vaultchat_speedtest_history';
 const GAUGE_SIZE = 220;
 const GAUGE_STROKE = 12;
-const TEST_FILE_URL = 'https://speed.cloudflare.com/__down?bytes=5000000'; // 5MB
 const UPLOAD_URL = 'https://speed.cloudflare.com/__up';
 
 type TestResult = {
@@ -45,7 +44,7 @@ export default function NetworkTestScreen() {
   const [upload, setUpload] = useState(0);
   const [ping, setPing] = useState(0);
   const [jitter, setJitter] = useState(0);
-  const [connectionType, setConnectionType] = useState('Unknown');
+  const [, setConnectionType] = useState('Unknown');
   const [connectionDetails, setConnectionDetails] = useState('');
   const [history, setHistory] = useState<TestResult[]>([]);
   const [serverOnline, setServerOnline] = useState<boolean | null>(null);
@@ -67,7 +66,7 @@ export default function NetworkTestScreen() {
       easing: Easing.out(Easing.quad),
       useNativeDriver: false,
     }).start();
-  }, [download, upload, phase]);
+  }, [download, upload, phase, needleAnim]);
 
   const checkConnection = async () => {
     const state = await NetInfo.fetch();

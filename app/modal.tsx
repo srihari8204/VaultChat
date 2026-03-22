@@ -43,14 +43,14 @@ export default function PhoneLoginScreen() {
       <View style={styles.logoArea}>
         <Text style={styles.logo}>🛡️</Text>
         <Text style={styles.appName}>VaultChat</Text>
-        <Text style={styles.tagline}>The World's Most Secure Messenger</Text>
+        <Text style={styles.tagline}>The World&apos;s Most Secure Messenger</Text>
       </View>
 
       {/* Form Area */}
       <View style={styles.formArea}>
         <Text style={styles.title}>Enter Your Phone Number</Text>
         <Text style={styles.subtitle}>
-          We'll send a verification code to confirm your number
+          We&apos;ll send a verification code to confirm your number
         </Text>
 
         {/* Phone Input */}

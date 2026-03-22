@@ -1,4 +1,4 @@
-﻿import { LinearGradient } from "expo-linear-gradient";
+import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { useEffect, useRef } from "react";
 import { Animated, StyleSheet, Text, TouchableOpacity, View } from "react-native";
@@ -13,7 +13,7 @@ export default function SetupCompleteScreen() {
       Animated.spring(scale,  {toValue:1,tension:50,friction:7,useNativeDriver:true}),
       Animated.timing(opacity,{toValue:1,duration:500,useNativeDriver:true}),
     ]).start();
-  },[]);
+  },[opacity, scale]);
 
   const features = [
     {icon:"📱",text:"Mobile number verified"},

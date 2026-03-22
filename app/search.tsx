@@ -57,7 +57,7 @@ export default function SearchScreen() {
         });
       }));
       setResults(matches);
-    } catch (e) { setResults([]); }
+    } catch { setResults([]); }
     finally { setLoading(false); }
   };
 
@@ -97,7 +97,7 @@ export default function SearchScreen() {
             </TouchableOpacity>
           )}
           ListEmptyComponent={query.length >= 2 && !loading
-            ? <View style={s.empty}><Text style={s.emptyTxt}>No results for "{query}"</Text></View>
+            ? <View style={s.empty}><Text style={s.emptyTxt}>No results for &quot;{query}&quot;</Text></View>
             : query.length < 2
               ? <View style={s.empty}><Text style={s.emptyTxt}>Type at least 2 characters</Text></View>
               : null

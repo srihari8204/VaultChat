@@ -8,7 +8,7 @@ import {
   View, Text, TouchableOpacity, StyleSheet, FlatList,
   Alert, StatusBar, TextInput, Modal, Share, ActivityIndicator,
 } from 'react-native';
-import { useRouter, Stack } from 'expo-router';
+import { Stack } from 'expo-router';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 
@@ -17,7 +17,6 @@ const CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const genCode = () => { let s = ''; for (let i = 0; i < 8; i++) { if (i === 4) s += '-'; s += CHARS[Math.floor(Math.random() * CHARS.length)]; } return s; };
 
 export default function BroadcastScreen() {
-  const router = useRouter();
   const myUid = auth().currentUser?.uid || '';
   const [channels, setChannels] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -38,7 +37,7 @@ export default function BroadcastScreen() {
         setLoading(false);
       }, () => setLoading(false));
     return unsub;
-  }, []);
+  }, [myUid]);
 
   const createChannel = async () => {
     if (!name.trim()) return;
@@ -60,7 +59,7 @@ export default function BroadcastScreen() {
       });
       setShowCreate(false); setName(''); setDesc('');
       Alert.alert('Channel Created!', 'Invite code: ' + code + '\nShare this to let people subscribe.');
-    } catch (e) { Alert.alert('Error', 'Could not create channel'); }
+    } catch { Alert.alert('Error', 'Could not create channel'); }
   };
 
   const openChannel = async (ch) => {
@@ -89,7 +88,7 @@ export default function BroadcastScreen() {
       });
       setPosts(prev => [{ id: Date.now().toString(), text: postText.trim(), authorName: myName, createdAt: { toDate: () => new Date() } }, ...prev]);
       setPostText('');
-    } catch (e) { Alert.alert('Error', 'Could not post'); }
+    } catch { Alert.alert('Error', 'Could not post'); }
     setPosting(false);
   };
 

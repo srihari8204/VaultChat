@@ -8,9 +8,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Audio } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   Animated,
   Dimensions,
@@ -60,7 +59,7 @@ export default function CallRecordingScreen() {
   const [state, setState] = useState<ScreenState>('idle');
   const [elapsed, setElapsed] = useState(0);
   const [recordings, setRecordings] = useState<RecordingMeta[]>([]);
-  const [currentUri, setCurrentUri] = useState<string | null>(null);
+  const [, setCurrentUri] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackProgress, setPlaybackProgress] = useState(0);
 
@@ -78,7 +77,7 @@ export default function CallRecordingScreen() {
       stopTimerInterval();
       cleanupSound();
     };
-  }, []);
+  }, [fadeIn]);
 
   // Pulsing red dot animation
   useEffect(() => {
@@ -93,7 +92,7 @@ export default function CallRecordingScreen() {
       return () => loop.stop();
     }
     pulseAnim.setValue(1);
-  }, [state]);
+  }, [state, pulseAnim]);
 
   // Fake waveform animation during recording
   useEffect(() => {
@@ -117,7 +116,7 @@ export default function CallRecordingScreen() {
       anims.forEach(a => a.start());
       return () => anims.forEach(a => a.stop());
     }
-  }, [state]);
+  }, [state, waveAnims]);
 
   const loadRecordings = async () => {
     try {
@@ -154,6 +153,7 @@ export default function CallRecordingScreen() {
   // ── Recording controls ──
 
   const startRecording = async () => {
+    if (Platform.OS === 'web') { Alert.alert('Not supported', 'Recording is not available on web'); return; }
     try {
       const perm = await Audio.requestPermissionsAsync();
       if (!perm.granted) {
@@ -262,7 +262,7 @@ export default function CallRecordingScreen() {
 
       await sound.playAsync();
       setIsPlaying(true);
-    } catch (e) {
+    } catch {
       Alert.alert('Error', 'Failed to play recording.');
     }
   };

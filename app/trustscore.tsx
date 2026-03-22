@@ -34,8 +34,8 @@ function TrustScoreContent() {
   const fadeIn=useRef(new Animated.Value(0)).current;
   const scoreAnim=useRef(new Animated.Value(0)).current;
 
-  useEffect(()=>{ Animated.timing(fadeIn,{toValue:1,duration:500,useNativeDriver:true}).start(); },[]);
-  useEffect(()=>{ if(selected){ scoreAnim.setValue(0); Animated.timing(scoreAnim,{toValue:selected.score,duration:900,useNativeDriver:false}).start(); } },[selected]);
+  useEffect(()=>{ Animated.timing(fadeIn,{toValue:1,duration:500,useNativeDriver:true}).start(); },[fadeIn]);
+  useEffect(()=>{ if(selected){ scoreAnim.setValue(0); Animated.timing(scoreAnim,{toValue:selected.score,duration:900,useNativeDriver:false}).start(); } },[selected, scoreAnim]);
 
   const verifyOnBlockchain=(entry:any)=>{ const hash=genHash(); const updated={...entry,verified:true,blockchainHash:hash,lastVerified:'Just now'}; setSelected(updated); setEntries(prev=>prev.map(e=>e.id===entry.id?updated:e)); Alert.alert('Verified on Blockchain','Trust score for '+entry.contactName+' has been cryptographically signed. Hash: '+hash); };
   const adjustScore=(entry:any,delta:number)=>{ const ns=Math.max(0,Math.min(100,entry.score+delta)); const lvl=getLevel(ns); const updated={...entry,score:ns,level:lvl.level}; setSelected(updated); setEntries(prev=>prev.map(e=>e.id===entry.id?updated:e)); };
@@ -121,7 +121,7 @@ function TrustScoreContent() {
                       </TouchableOpacity>
                     ))}
                   </View>
-                  {selected.notes?<Text style={{color:C.textDim,fontSize:12,marginBottom:14,fontStyle:'italic'}}>"{selected.notes}"</Text>:null}
+                  {selected.notes?<Text style={{color:C.textDim,fontSize:12,marginBottom:14,fontStyle:'italic'}}>&quot;{selected.notes}&quot;</Text>:null}
                   {selected.blockchainHash?<View style={{backgroundColor:'rgba(167,139,250,0.08)',borderRadius:12,padding:12,marginBottom:14,borderWidth:1,borderColor:'rgba(167,139,250,0.25)'}}><Text style={{color:'#A78BFA',fontSize:9,fontWeight:'700',letterSpacing:1,marginBottom:4}}>BLOCKCHAIN HASH</Text><Text style={{color:C.textFaint,fontSize:10}}>{selected.blockchainHash}</Text></View>:null}
                   <View style={{flexDirection:'row',gap:8}}>
                     {!selected.verified&&<TouchableOpacity onPress={()=>verifyOnBlockchain(selected)} style={{flex:1}}><LinearGradient colors={['#A78BFA','#7C3AED']} style={{borderRadius:14,paddingVertical:13,alignItems:'center'}}><Text style={{color:'#fff',fontSize:13,fontWeight:'800'}}>â›“ï¸ Verify on Chain</Text></LinearGradient></TouchableOpacity>}

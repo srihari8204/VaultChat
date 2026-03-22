@@ -1,0 +1,67 @@
+env: load .env.local
+env: export SENTRY_AUTH_TOKEN EXPO_PUBLIC_SUPABASE_URL EXPO_PUBLIC_SUPABASE_ANON_KEY
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\alerts.tsx
+   19:8  warning  Using exported name 'BottomNav' as identifier for default import                                                                                                                                                                        import/no-named-as-default
+  122:9  warning  The 'markRead' function makes the dependencies of useCallback Hook (at line 229) change on every render. Move it inside the useCallback callback. Alternatively, wrap the definition of 'markRead' in its own useCallback() Hook        react-hooks/exhaustive-deps
+  145:9  warning  The 'deleteAlert' function makes the dependencies of useCallback Hook (at line 229) change on every render. Move it inside the useCallback callback. Alternatively, wrap the definition of 'deleteAlert' in its own useCallback() Hook  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\calls.tsx
+   20:8  warning  Using exported name 'BottomNav' as identifier for default import                                                                                                                                                                          import/no-named-as-default
+  140:9  warning  The 'callBack' function makes the dependencies of useCallback Hook (at line 215) change on every render. Move it inside the useCallback callback. Alternatively, wrap the definition of 'callBack' in its own useCallback() Hook          react-hooks/exhaustive-deps
+  148:9  warning  The 'deleteRecord' function makes the dependencies of useCallback Hook (at line 215) change on every render. Move it inside the useCallback callback. Alternatively, wrap the definition of 'deleteRecord' in its own useCallback() Hook  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\contacts.tsx
+  109:10  warning  '_reqCount' is assigned a value but never used                                                             @typescript-eslint/no-unused-vars
+  121:5   warning  React Hook useEffect has a missing dependency: 'doSync'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\deepfake.tsx
+  75:5  warning  React Hook useEffect has a missing dependency: 'startScanAnimation'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\digital-wellbeing.tsx
+  135:9  warning  'ringRadius' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\emergency-sos.tsx
+  140:6  warning  React Hook useEffect has a missing dependency: 'triggerSOS'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\face-verify.tsx
+  120:5  warning  React Hook useEffect has a missing dependency: 'showResult'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\family.tsx
+  3:10  warning  'useRef' is defined but never used    @typescript-eslint/no-unused-vars
+  5:12  warning  'Animated' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\file-viewer.tsx
+  197:6  warning  React Hook useEffect has missing dependencies: 'loadAudio' and 'loadTextContent'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\location-sharing.tsx
+  121:6  warning  React Hook useEffect has a missing dependency: 'stopSharing'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\lock.tsx
+  148:6  warning  React Hook useEffect has a missing dependency: 'handleFail'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\media-gallery.tsx
+  52:9  warning  'tabData' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\otp.tsx
+  128:6  warning  React Hook useEffect has a missing dependency: 'shake'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\scanner.tsx
+   7:27  warning  'useRef' is defined but never used    @typescript-eslint/no-unused-vars
+  11:20  warning  'Animated' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\slideshow.tsx
+  9:10  warning  'Animated' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\videocall.tsx
+  300:9  warning  'initiateCall' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  335:9  warning  'answerCall' is assigned a value but never used    @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\voice-speed.tsx
+  46:6  warning  React Hook useEffect has missing dependencies: 'onPlaybackUpdate' and 'speed'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\voicecall.tsx
+  212:9  warning  'makeCall' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+✖ 26 problems (0 errors, 26 warnings)
+

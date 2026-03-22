@@ -10,7 +10,6 @@ import {
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
 
 interface VaultFile {
   id:       string;
@@ -78,7 +77,7 @@ export default function VaultDropScreen() {
         status: 'ready',
       }));
       setFiles(prev => [...newFiles, ...prev]);
-    } catch (e) {
+    } catch {
       Alert.alert('Error', 'Could not pick file.');
     } finally {
       setPicking(false);

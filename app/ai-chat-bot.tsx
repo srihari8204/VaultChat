@@ -383,7 +383,7 @@ function TypingIndicator() {
       a2.stop();
       a3.stop();
     };
-  }, []);
+  }, [dot1, dot2, dot3]);
 
   return (
     <View style={S.typingRow}>
@@ -419,7 +419,7 @@ export default function AriaChatBot() {
       duration: 600,
       useNativeDriver: true,
     }).start();
-  }, []);
+  }, [fadeAnim]);
 
   const loadMessages = async () => {
     try {

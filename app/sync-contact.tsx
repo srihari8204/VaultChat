@@ -53,7 +53,7 @@ export default function SyncContactScreen() {
       });
     }, 1000);
     return () => clearInterval(t);
-  }, [phase]);
+  }, [phase, timeLeft]);
 
   // Poll for other user verifying
   useEffect(() => {

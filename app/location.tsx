@@ -65,12 +65,20 @@ export default function LocationScreen() {
   const timerRef=useRef<ReturnType<typeof setInterval>|null>(null);
   const pulseAnim=useRef(new Animated.Value(1)).current;
 
-  useEffect(()=>{requestLocation();return()=>stopLive();},[]);
+  useEffect(()=>{
+    const doRequestLocation=async()=>{
+      setLoading(true);
+      const {status}=await Location.requestForegroundPermissionsAsync();
+      if(status!=='granted'){setPermDenied(true);setLoading(false);return;}
+      await fetchLocation();
+    };
+    doRequestLocation();return()=>stopLive();
+  },[]);
   useEffect(()=>{
     if(!liveSharing){pulseAnim.setValue(1);return;}
     const lp=Animated.loop(Animated.sequence([Animated.timing(pulseAnim,{toValue:1.4,duration:800,useNativeDriver:true}),Animated.timing(pulseAnim,{toValue:1.0,duration:800,useNativeDriver:true})]));
     lp.start();return()=>lp.stop();
-  },[liveSharing]);
+  },[liveSharing, pulseAnim]);
 
   const requestLocation=async()=>{
     setLoading(true);

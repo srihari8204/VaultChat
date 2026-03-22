@@ -2,7 +2,7 @@
 // Rephrase, shorten, make formal/casual/emoji
 
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Pressable } from 'react-native';
+import { Text, TouchableOpacity, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { rewriteMessage, WriteMode } from '../services/aiService';
 
 const MODES: { label: string; mode: WriteMode; icon: string }[] = [

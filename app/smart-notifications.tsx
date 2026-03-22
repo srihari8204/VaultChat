@@ -5,8 +5,8 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, FlatList,
-  StatusBar, Switch, Alert, ScrollView,
+  View, Text, StyleSheet,
+  StatusBar, Switch, ScrollView,
 } from 'react-native';
 import { Stack } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -36,7 +36,7 @@ const SETTINGS_KEY = 'vc_smart_notif_rules';
 export default function SmartNotificationsScreen() {
   const [rules, setRules] = useState(SMART_RULES);
   const [dnd, setDnd] = useState(false);
-  const [stats, setStats] = useState({ urgent: 2, important: 15, social: 47, low: 128 });
+  const [stats] = useState({ urgent: 2, important: 15, social: 47, low: 128 });
 
   useEffect(() => {
     (async () => {
@@ -72,7 +72,7 @@ export default function SmartNotificationsScreen() {
         </View>
 
         {/* Priority Breakdown */}
-        <Text style={s.sectionTitle}>TODAY'S BREAKDOWN</Text>
+        <Text style={s.sectionTitle}>TODAY&apos;S BREAKDOWN</Text>
         <View style={s.statsRow}>
           {PRIORITY_LEVELS.map(p => (
             <View key={p.id} style={s.statCard}>

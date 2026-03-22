@@ -32,7 +32,7 @@ function CommunitiesContent() {
   const fadeIn=useRef(new Animated.Value(0)).current;
   const myAnon=useRef(genAnon());
 
-  useEffect(()=>{ Animated.timing(fadeIn,{toValue:1,duration:500,useNativeDriver:true}).start(); },[]);
+  useEffect(()=>{ Animated.timing(fadeIn,{toValue:1,duration:500,useNativeDriver:true}).start(); },[fadeIn]);
 
   const fmtTime=(ts:number)=>{ const d=Date.now()-ts; if(d<60000)return 'now'; if(d<3600000)return Math.floor(d/60000)+'m'; if(d<86400000)return Math.floor(d/3600000)+'h'; return Math.floor(d/86400000)+'d'; };
 

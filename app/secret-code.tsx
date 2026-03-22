@@ -1,4 +1,4 @@
-﻿import { LinearGradient } from "expo-linear-gradient";
+import { LinearGradient } from "expo-linear-gradient";
 import * as Crypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
 import { router } from "expo-router";
@@ -26,7 +26,7 @@ export default function SecretCodeScreen() {
     ]));
     loop.start();
     return () => loop.stop();
-  }, []);
+  }, [pulse]);
 
   const handleSaved = async () => {
     setSaving(true);

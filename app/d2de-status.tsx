@@ -2,8 +2,8 @@
 // Live D2DE encryption status screen â€” unique to VaultChat
 
 import React from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
+import { View, Text, ScrollView, StyleSheet } from 'react-native';
+import { Stack } from 'expo-router';
 import { getD2DEStatus } from '../services/d2deService';
 
 const LAYER_INFO: Record<string, string> = {

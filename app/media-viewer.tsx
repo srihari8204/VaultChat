@@ -5,12 +5,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, StatusBar,
-  ActivityIndicator, Dimensions, ScrollView, Image, Animated,
+  ActivityIndicator, Dimensions, ScrollView, Animated,
   PanResponder, Alert, Share,
 } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Video, Audio, ResizeMode } from 'expo-av';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as MediaLibrary from 'expo-media-library';
 
@@ -42,7 +42,7 @@ export default function MediaViewerScreen() {
 
   useEffect(() => {
     if (fileUri.startsWith('http')) fetch(fileUri, { method: 'HEAD' }).then(r => setFileSize(parseInt(r.headers.get('content-length') || '0'))).catch(() => {});
-  }, []);
+  }, [fileUri]);
 
   const saveToDevice = async () => {
     try {
@@ -93,7 +93,7 @@ export default function MediaViewerScreen() {
         {st.isBuffering && !st.isPlaying && <View style={s.bufOverlay}><ActivityIndicator color={C.accent} size="large" /><Text style={s.bufTxt}>Streaming...</Text></View>}
         {ctrl && (
           <View style={s.vidCtrl}>
-            <TouchableOpacity style={s.playBtn} onPress={async () => { if (!videoRef.current) return; st.isPlaying ? await videoRef.current.pauseAsync() : await videoRef.current.playAsync(); }}>
+            <TouchableOpacity style={s.playBtn} onPress={async () => { if (!videoRef.current) return; if (st.isPlaying) { await videoRef.current.pauseAsync(); } else { await videoRef.current.playAsync(); } }}>
               <Text style={{ fontSize: 32 }}>{st.isPlaying ? '\u23F8' : '\u25B6\uFE0F'}</Text>
             </TouchableOpacity>
             <View style={s.progRow}>
@@ -133,7 +133,7 @@ export default function MediaViewerScreen() {
           <View style={s.audioTimeRow}><Text style={s.audioTime}>{formatDur(ast.positionMillis)}</Text><Text style={s.audioTime}>{formatDur(ast.durationMillis)}</Text></View>
           <View style={s.audioCtrlRow}>
             <TouchableOpacity onPress={async()=>{if(!soundRef.current)return;const p=Math.max(0,prog-0.1);await soundRef.current.setPositionAsync(p*(ast.durationMillis||0));}}><Text style={{fontSize:24}}>{"\u23EA"}</Text></TouchableOpacity>
-            <TouchableOpacity style={s.audioPlayBtn} onPress={async()=>{if(!soundRef.current)return;ast.isPlaying?await soundRef.current.pauseAsync():await soundRef.current.playAsync();}}>
+            <TouchableOpacity style={s.audioPlayBtn} onPress={async()=>{if(!soundRef.current)return;if(ast.isPlaying){await soundRef.current.pauseAsync();}else{await soundRef.current.playAsync();}}}>
               <Text style={{fontSize:28}}>{ast.isPlaying?'\u23F8':'\u25B6\uFE0F'}</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={async()=>{if(!soundRef.current)return;const p=Math.min(1,prog+0.1);await soundRef.current.setPositionAsync(p*(ast.durationMillis||0));}}><Text style={{fontSize:24}}>{"\u23E9"}</Text></TouchableOpacity>

@@ -41,7 +41,7 @@ const C = {
   dark: '#030A14',
 };
 
-const { width: SW, height: SH } = Dimensions.get('window');
+const { width: SW } = Dimensions.get('window');
 const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
 const CODE_LEN = 8;
 
@@ -115,7 +115,7 @@ function ProgressBar({ step }: { step: Step | 'done' }) {
       duration: 400,
       useNativeDriver: false,
     }).start();
-  }, [step]);
+  }, [step, widthAnim]);
 
   return (
     <View style={styles.progressOuter}>
@@ -171,7 +171,7 @@ export default function ThreeFactorVerifyScreen() {
     );
     loop.start();
     return () => loop.stop();
-  }, []);
+  }, [pulseAnim]);
 
   // ── scan line animation ─────────────────────────────────────
   useEffect(() => {
@@ -186,7 +186,7 @@ export default function ThreeFactorVerifyScreen() {
     );
     loop.start();
     return () => loop.stop();
-  }, [step]);
+  }, [step, scanLineAnim]);
 
   // ── step 1: request camera permission and auto-progress ─────
   useEffect(() => {
@@ -203,13 +203,14 @@ export default function ThreeFactorVerifyScreen() {
     return () => {
       if (scanTimerRef.current) clearTimeout(scanTimerRef.current);
     };
-  }, [step, cameraPermission?.granted]);
+  }, [step, cameraPermission?.granted, requestPermission, transitionTo]);
 
   // ── step 2: biometric prompt ────────────────────────────────
   useEffect(() => {
     if (step !== 2) return;
 
     const runBiometric = async () => {
+      if (Platform.OS === 'web') { setError('Biometric not available on web'); return; }
       try {
         const hasHardware = await LocalAuthentication.hasHardwareAsync();
         const enrolled = await LocalAuthentication.isEnrolledAsync();
@@ -232,7 +233,7 @@ export default function ThreeFactorVerifyScreen() {
         } else {
           setError('Biometric verification failed. Try again.');
         }
-      } catch (e) {
+      } catch {
         setError('Biometric error. Please try again.');
       }
     };
@@ -240,7 +241,7 @@ export default function ThreeFactorVerifyScreen() {
     // slight delay so the UI settles
     const t = setTimeout(runBiometric, 600);
     return () => clearTimeout(t);
-  }, [step]);
+  }, [step, transitionTo]);
 
   // ── step transition with fade ───────────────────────────────
   const transitionTo = useCallback(
@@ -285,11 +286,11 @@ export default function ThreeFactorVerifyScreen() {
         setError('Incorrect code. Please try again.');
         setCode('');
       }
-    } catch (e) {
+    } catch {
       setError('Verification error. Please try again.');
       setCode('');
     }
-  }, []);
+  }, [showSuccess]);
 
   // ── success animation ───────────────────────────────────────
   const showSuccess = useCallback(() => {
@@ -311,7 +312,7 @@ export default function ThreeFactorVerifyScreen() {
         router.replace('/chats');
       }, 1200);
     });
-  }, []);
+  }, [successOpacity, successScale]);
 
   // ── handle code input ───────────────────────────────────────
   const onCodeChange = useCallback(
@@ -328,6 +329,7 @@ export default function ThreeFactorVerifyScreen() {
 
   // ── retry biometric ─────────────────────────────────────────
   const retryBiometric = useCallback(async () => {
+    if (Platform.OS === 'web') { setError('Biometric not available on web'); return; }
     setError('');
     const result = await LocalAuthentication.authenticateAsync({
       promptMessage: 'VaultChat — Verify Your Identity',

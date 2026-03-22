@@ -22,20 +22,21 @@ export default function BookmarksScreen() {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
 
-  useEffect(() => { loadBookmarks(); }, []);
-
-  const loadBookmarks = async () => {
-    setLoading(true);
-    try {
-      const snap = await firestore().collection('users').doc(myUid)
-        .collection('bookmarks')
-        .orderBy('savedAt', 'desc')
-        .limit(100)
-        .get();
-      setBookmarks(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    } catch {}
-    setLoading(false);
-  };
+  useEffect(() => {
+    const loadBookmarks = async () => {
+      setLoading(true);
+      try {
+        const snap = await firestore().collection('users').doc(myUid)
+          .collection('bookmarks')
+          .orderBy('savedAt', 'desc')
+          .limit(100)
+          .get();
+        setBookmarks(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch {}
+      setLoading(false);
+    };
+    loadBookmarks();
+  }, [myUid]);
 
   const removeBookmark = (bm) => {
     Alert.alert('Remove Bookmark?', 'Remove this saved message?', [
@@ -126,7 +127,7 @@ export default function BookmarksScreen() {
               <View style={{ alignItems: 'center', padding: 40 }}>
                 <Text style={{ fontSize: 40 }}>{"\uD83D\uDD16"}</Text>
                 <Text style={{ color: '#555', marginTop: 12 }}>No bookmarks yet</Text>
-                <Text style={{ color: '#444', fontSize: 12, marginTop: 4 }}>Long-press any message in a chat and tap "Bookmark"</Text>
+                <Text style={{ color: '#444', fontSize: 12, marginTop: 4 }}>Long-press any message in a chat and tap &quot;Bookmark&quot;</Text>
               </View>
             }
           />

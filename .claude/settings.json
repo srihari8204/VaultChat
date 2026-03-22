@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/ADMIN/AppData/Local/Temp/claude/c--Users-ADMIN-Desktop-Vaultchat-backup/94f8610e-ba70-4540-9989-ec8d1e6a10ce/tasks/**)"
+    ]
+  }
+}

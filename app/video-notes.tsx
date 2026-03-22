@@ -21,12 +21,11 @@ export default function VideoNotesScreen() {
   const cameraRef = useRef<CameraView>(null);
   const timerRef = useRef<any>(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const progressAnim = useRef(new Animated.Value(0)).current;
   const ringAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (!permission?.granted) requestPermission();
-  }, []);
+  }, [permission?.granted, requestPermission]);
 
   useEffect(() => {
     if (recording) {
@@ -53,7 +52,7 @@ export default function VideoNotesScreen() {
         ringAnim.stopAnimation();
       };
     }
-  }, [recording]);
+  }, [recording, pulseAnim, ringAnim]);
 
   const startRecording = async () => {
     if (!cameraRef.current) return;

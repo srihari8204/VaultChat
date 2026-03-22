@@ -8,7 +8,7 @@ import {
   View, Text, TouchableOpacity, StyleSheet, FlatList,
   StatusBar, Dimensions, Alert, ScrollView,
 } from 'react-native';
-import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
+import { useLocalSearchParams, Stack } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -50,7 +50,6 @@ const GLOBAL_KEY = 'vc_global_theme';
 const BUBBLE_KEY = 'vc_bubble_color_';
 
 export default function ChatThemesScreen() {
-  const router = useRouter();
   const { chatId } = useLocalSearchParams();
   const isGlobal = !chatId;
   const [selectedTheme, setSelectedTheme] = useState('default');
@@ -65,7 +64,7 @@ export default function ChatThemesScreen() {
       const bSaved = await AsyncStorage.getItem(bKey);
       if (bSaved) setSelectedBubble(bSaved);
     })();
-  }, []);
+  }, [chatId, isGlobal]);
 
   const applyTheme = async (themeId) => {
     setSelectedTheme(themeId);
@@ -95,7 +94,7 @@ export default function ChatThemesScreen() {
             <Text style={s.previewTime}>10:30 AM</Text>
           </View>
           <View style={[s.previewBubbleR, { backgroundColor: BUBBLE_COLORS.find(b => b.id === selectedBubble)?.mine || '#003D2A' }]}>
-            <Text style={s.previewTxt}>I'm great! Love this new theme</Text>
+            <Text style={s.previewTxt}>I&apos;m great! Love this new theme</Text>
             <Text style={s.previewTime}>10:31 AM</Text>
           </View>
           <View style={[s.previewBubbleL, { backgroundColor: BUBBLE_COLORS.find(b => b.id === selectedBubble)?.peer || '#111127' }]}>

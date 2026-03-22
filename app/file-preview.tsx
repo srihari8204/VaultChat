@@ -7,13 +7,12 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  StatusBar, ActivityIndicator, Share, Alert, Dimensions,
+  StatusBar, ActivityIndicator, Share, Alert,
 } from 'react-native';
 import { useLocalSearchParams, Stack } from 'expo-router';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Clipboard from 'expo-clipboard';
 
-const { width: SW } = Dimensions.get('window');
 const C = { bg: '#0D1117', accent: '#4A9FFF', card: '#161B22', green: '#10B981' };
 
 // Syntax color themes per token type
@@ -138,29 +137,30 @@ export default function FilePreviewScreen() {
   const [lang, setLang] = useState('text');
   const [wordWrap, setWordWrap] = useState(true);
 
-  useEffect(() => { loadFile(); }, []);
+  useEffect(() => {
+    const loadFile = async () => {
+      try {
+        const ext = ((filename || uri || '') + '').split('.').pop()?.toLowerCase() || 'txt';
+        setLang(LANG_MAP[ext] || 'text');
 
-  const loadFile = async () => {
-    try {
-      const ext = ((filename || uri || '') + '').split('.').pop()?.toLowerCase() || 'txt';
-      setLang(LANG_MAP[ext] || 'text');
-
-      const fileUri = (uri || mediaUrl || '') + '';
-      if (fileUri.startsWith('http')) {
-        // Download from URL first
-        const localPath = FileSystem.cacheDirectory + 'preview_' + Date.now() + '.' + ext;
-        await FileSystem.downloadAsync(fileUri, localPath);
-        const text = await FileSystem.readAsStringAsync(localPath);
-        setContent(text);
-      } else if (fileUri) {
-        const text = await FileSystem.readAsStringAsync(fileUri);
-        setContent(text);
+        const fileUri = (uri || mediaUrl || '') + '';
+        if (fileUri.startsWith('http')) {
+          // Download from URL first
+          const localPath = FileSystem.cacheDirectory + 'preview_' + Date.now() + '.' + ext;
+          await FileSystem.downloadAsync(fileUri, localPath);
+          const text = await FileSystem.readAsStringAsync(localPath);
+          setContent(text);
+        } else if (fileUri) {
+          const text = await FileSystem.readAsStringAsync(fileUri);
+          setContent(text);
+        }
+      } catch (e) {
+        setContent('// Error loading file: ' + (e.message || 'Unknown error'));
       }
-    } catch (e) {
-      setContent('// Error loading file: ' + (e.message || 'Unknown error'));
-    }
-    setLoading(false);
-  };
+      setLoading(false);
+    };
+    loadFile();
+  }, [filename, uri, mediaUrl]);
 
   const copyAll = async () => {
     await Clipboard.setStringAsync(content);

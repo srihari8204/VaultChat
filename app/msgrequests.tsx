@@ -58,7 +58,7 @@ function RequestCard({ req, allContacts, onAccept, onDecline }: {
   const slide = useRef(new Animated.Value(0)).current;
   useEffect(()=>{
     Animated.spring(slide,{toValue:1,tension:80,friction:12,useNativeDriver:true}).start();
-  },[]);
+  },[slide]);
 
   const initials = profile.displayName.split(' ')
     .map(w=>w[0]||'').join('').slice(0,2).toUpperCase()||'??';
@@ -109,7 +109,7 @@ function RequestCard({ req, allContacts, onAccept, onDecline }: {
           borderColor:'rgba(255,255,255,0.08)'}}>
           <Text style={{color:'rgba(255,255,255,0.6)',fontSize:12,fontStyle:'italic',
             lineHeight:18}} numberOfLines={3}>
-            "{req.preview}"
+            &quot;{req.preview}&quot;
           </Text>
         </View>
 

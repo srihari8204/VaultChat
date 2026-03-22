@@ -93,7 +93,6 @@ export default function VaultFeaturesScreen() {
   const uid    = auth().currentUser?.uid || '';
 
   const [settings,      setSettings]      = useState<VaultSettings>(DEFAULT_SETTINGS);
-  const [saving,        setSaving]        = useState(false);
 
   // Temp chat code
   const [chatCode,      setChatCode]      = useState<string | null>(null);

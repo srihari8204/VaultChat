@@ -3,11 +3,11 @@
 // Stores meetings in AsyncStorage under 'vc_meetings'
 // Supports: "tomorrow at 3pm", "next Monday 10am", "Friday 2:30pm", etc.
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, TextInput,
-  Alert, FlatList, ActivityIndicator, Keyboard,
-  ScrollView, Platform,
+  Alert, ActivityIndicator, Keyboard,
+  ScrollView,
 } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -440,7 +440,7 @@ export default function MeetingSchedulerScreen() {
       setShowCalendar(false);
       Keyboard.dismiss();
       Alert.alert('Meeting Created', `"${newMeeting.title}" scheduled for ${formatDateTime(parsedDate)}`);
-    } catch (e) {
+    } catch {
       Alert.alert('Error', 'Failed to save meeting.');
     }
     setSaving(false);
@@ -569,7 +569,7 @@ export default function MeetingSchedulerScreen() {
           <View style={[s.previewCard, { borderColor: C.danger }]}>
             <Ionicons name="alert-circle" size={20} color={C.danger} />
             <Text style={[s.previewDate, { marginLeft: 10, color: C.danger }]}>
-              Could not parse date. Try "tomorrow 3pm" or "next Friday".
+              Could not parse date. Try &quot;tomorrow 3pm&quot; or &quot;next Friday&quot;.
             </Text>
           </View>
         )}

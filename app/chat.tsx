@@ -171,7 +171,7 @@ export default function ChatScreen() {
         setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 80);
       });
     return unsub;
-  }, [chatId, myUid, peerUid]);
+  }, [chatId, myUid, peerUid, markRead]);
 
   const markRead = useCallback((docs: any[]) => {
     const batch = firestore().batch();
@@ -412,7 +412,7 @@ export default function ChatScreen() {
         list.push({ chatId: d.id, peerUid: otherId, name, groupName: data.groupName });
       }
       setForwardChats(list);
-    } catch (e) { Alert.alert('Error', 'Could not load chats'); setForwardMsg(null); }
+    } catch { Alert.alert('Error', 'Could not load chats'); setForwardMsg(null); }
   };
 
   const doForward = async (target: any) => {

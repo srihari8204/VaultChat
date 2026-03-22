@@ -20,7 +20,7 @@ function ForgotContent() {
       Animated.timing(fadeAnim,  { toValue: 1, duration: 500, useNativeDriver: true }),
       Animated.timing(slideAnim, { toValue: 0, duration: 500, useNativeDriver: true }),
     ]).start();
-  }, []);
+  }, [fadeAnim, slideAnim]);
 
   const STEPS = [
     { n: '1', icon: '&#128737;', label: 'Verify Identity', desc: 'Answer 2 of your recovery security questions', color: C.warning },

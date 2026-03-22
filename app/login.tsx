@@ -12,9 +12,6 @@ const CODES = [
   { code: '+91',  name: 'India',     flag: '\u{1F1EE}\u{1F1F3}' },
   { code: '+1',   name: 'USA',       flag: '\u{1F1FA}\u{1F1F8}' },
   { code: '+44',  name: 'UK',        flag: '\u{1F1EC}\u{1F1E7}' },
-  { code: '+61',  name: 'Australia', flag: '\u{1F1E6}\u{1F1FA}' },
-  { code: '+971', name: 'UAE',       flag: '\u{1F1E6}\u{1F1EA}' },
-  { code: '+65',  name: 'Singapore', flag: '\u{1F1F8}\u{1F1EC}' },
 ];
 
 export default function LoginScreen() {
@@ -61,7 +58,7 @@ export default function LoginScreen() {
         Animated.timing(btnFade, { toValue: 1, duration: 500, useNativeDriver: true }),
       ]).start();
     }, 400);
-  }, []);
+  }, [btnFade, btnSlide, formFade, formSlide, headerFade, headerSlide]);
 
   // Pulsing dots for loading state
   useEffect(() => {
@@ -81,7 +78,7 @@ export default function LoginScreen() {
     a2.start();
     a3.start();
     return () => { a1.stop(); a2.stop(); a3.stop(); dot1.setValue(0.3); dot2.setValue(0.3); dot3.setValue(0.3); };
-  }, [loading]);
+  }, [loading, dot1, dot2, dot3]);
 
   const handleSend = async () => {
     const digits = phone.replace(/\D/g, '');
@@ -163,7 +160,7 @@ export default function LoginScreen() {
               <TextInput
                 style={S.phoneInput}
                 placeholder="Phone number"
-                placeholderTextColor="rgba(255,255,255,0.2)"
+                placeholderTextColor="rgba(3, 3, 3, 0.2)"
                 value={phone}
                 onChangeText={t => setPhone(t.replace(/\D/g, '').slice(0, 13))}
                 keyboardType="phone-pad"
@@ -213,13 +210,14 @@ export default function LoginScreen() {
 const S = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000000',
+    backgroundColor: '#FFFFFF',
   },
   scroll: {
-    flexGrow: 1,
-    paddingHorizontal: 28,
-    paddingTop: 60,
-    paddingBottom: 48,
+    // flexGrow: 1,
+    padding:12
+    // paddingHorizontal: 28,
+    // paddingTop: 60,
+    // paddingBottom: 48,
   },
 
   // Back button
@@ -232,24 +230,24 @@ const S = StyleSheet.create({
     marginBottom: 32,
   },
   backArrow: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 28,
     fontWeight: '300',
   },
 
   // Header
   headerSection: {
-    marginBottom: 56,
+    marginBottom: 36,
   },
   title: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 36,
     fontWeight: '800',
     lineHeight: 42,
     letterSpacing: -0.5,
   },
   subtitle: {
-    color: 'rgba(255,255,255,0.4)',
+    color: 'rgba(0, 0, 0, 0.6)',
     fontSize: 14,
     fontWeight: '400',
     marginTop: 12,
@@ -267,7 +265,7 @@ const S = StyleSheet.create({
     alignItems: 'center',
     alignSelf: 'flex-start',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
+    borderColor: 'rgba(0, 0, 0, 0.2)',
     borderRadius: 100,
     paddingHorizontal: 16,
     paddingVertical: 10,
@@ -278,22 +276,22 @@ const S = StyleSheet.create({
     fontSize: 18,
   },
   ccCode: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 14,
     fontWeight: '600',
   },
   ccChevron: {
-    color: 'rgba(255,255,255,0.4)',
+    color: 'rgba(0, 0, 0, 0.6)',
     fontSize: 14,
     marginTop: -2,
   },
 
   // Dropdown
   dropdown: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: 'rgba(0, 0, 0, 0.1)',
     marginBottom: 32,
     overflow: 'hidden',
   },
@@ -303,7 +301,7 @@ const S = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
+    borderBottomColor: 'rgba(0, 0, 0, 0.05)',
     gap: 12,
   },
   ddFlag: {
@@ -311,12 +309,12 @@ const S = StyleSheet.create({
   },
   ddName: {
     flex: 1,
-    color: 'rgba(255,255,255,0.7)',
+    color: 'rgba(0, 0, 0, 0.7)',
     fontSize: 15,
     fontWeight: '400',
   },
   ddCode: {
-    color: 'rgba(255,255,255,0.4)',
+    color: 'rgba(0, 0, 0, 0.4)',
     fontSize: 14,
     fontWeight: '600',
   },
@@ -326,7 +324,7 @@ const S = StyleSheet.create({
     marginBottom: 8,
   },
   phoneInput: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 24,
     fontWeight: '500',
     paddingVertical: 12,
@@ -334,7 +332,7 @@ const S = StyleSheet.create({
   },
   inputLine: {
     height: 1,
-    backgroundColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: 'rgba(0, 0, 0, 0.15)',
   },
 
   // Continue button
@@ -342,17 +340,17 @@ const S = StyleSheet.create({
     marginBottom: 'auto' as any,
   },
   btnContinue: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#000000',
     height: 56,
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
   btnDisabled: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(0, 0, 0, 0.1)',
   },
   btnText: {
-    color: '#000000',
+    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '800',
     letterSpacing: 0.5,
@@ -368,7 +366,7 @@ const S = StyleSheet.create({
     width: 7,
     height: 7,
     borderRadius: 3.5,
-    backgroundColor: '#000000',
+    backgroundColor: '#FFFFFF',
   },
 
   // Bottom link
@@ -378,11 +376,11 @@ const S = StyleSheet.create({
     paddingBottom: 16,
   },
   bottomText: {
-    color: 'rgba(255,255,255,0.35)',
+    color: 'rgba(0, 0, 0, 0.5)',
     fontSize: 14,
   },
   bottomAccent: {
-    color: 'rgba(255,255,255,0.7)',
+    color: 'rgba(0, 0, 0, 0.8)',
     fontWeight: '700',
   },
 });

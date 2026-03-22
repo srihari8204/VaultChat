@@ -20,20 +20,21 @@ export default function LoginHistoryScreen() {
   const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => { loadSessions(); }, []);
-
-  const loadSessions = async () => {
-    setLoading(true);
-    try {
-      const snap = await firestore().collection('users').doc(myUid)
-        .collection('loginHistory')
-        .orderBy('loginAt', 'desc')
-        .limit(20)
-        .get();
-      setSessions(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    } catch {}
-    setLoading(false);
-  };
+  useEffect(() => {
+    const loadSessions = async () => {
+      setLoading(true);
+      try {
+        const snap = await firestore().collection('users').doc(myUid)
+          .collection('loginHistory')
+          .orderBy('loginAt', 'desc')
+          .limit(20)
+          .get();
+        setSessions(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch {}
+      setLoading(false);
+    };
+    loadSessions();
+  }, [myUid]);
 
   const revokeSession = (session: any) => {
     Alert.alert(

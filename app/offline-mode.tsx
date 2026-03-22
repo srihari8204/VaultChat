@@ -6,7 +6,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   StatusBar, Platform, Alert, ActivityIndicator, Animated,
-  Dimensions, FlatList,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -78,19 +77,15 @@ export default function OfflineModeScreen() {
     });
 
     loadQueueAndCache();
-    startPulse();
-
-    return () => unsub();
-  }, []);
-
-  const startPulse = () => {
     Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, { toValue: 0.4, duration: 1000, useNativeDriver: true }),
         Animated.timing(pulseAnim, { toValue: 1, duration: 1000, useNativeDriver: true }),
       ])
     ).start();
-  };
+
+    return () => unsub();
+  }, [queue.length, pulseAnim]);
 
   const loadQueueAndCache = async () => {
     try {

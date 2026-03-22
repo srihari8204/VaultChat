@@ -6,14 +6,13 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  FlatList, StatusBar, Dimensions, ActivityIndicator,
+  FlatList, StatusBar, ActivityIndicator,
 } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import firestore from '@react-native-firebase/firestore';
 import { Ionicons } from '@expo/vector-icons';
 
-const { width: SW } = Dimensions.get('window');
 const C = { bg: '#020B18', accent: '#4A9FFF', cyan: '#00E5FF', card: '#0A1628', border: '#112240' };
 
 interface Message {
@@ -104,9 +103,7 @@ export default function InChatSearchScreen() {
     const idx = lower.indexOf(q.toLowerCase());
     if (idx === -1) return <Text style={s.msgText}>{text}</Text>;
 
-    const before = text.substring(0, idx);
     const match = text.substring(idx, idx + q.length);
-    const after = text.substring(idx + q.length);
 
     // Show context around match (max 40 chars before, 60 after)
     const startCtx = Math.max(0, idx - 40);
@@ -207,7 +204,7 @@ export default function InChatSearchScreen() {
           <Ionicons name="document-text-outline" size={64} color="#1a2a40" />
           <Text style={s.emptyTitle}>No Results</Text>
           <Text style={s.emptySubtitle}>
-            No messages match "{query}"
+            No messages match &quot;{query}&quot;
           </Text>
         </View>
       ) : (

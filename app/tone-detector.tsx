@@ -7,7 +7,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, TextInput,
-  StatusBar, ScrollView, Animated,
+  StatusBar, ScrollView,
 } from 'react-native';
 import { Stack } from 'expo-router';
 
@@ -171,7 +171,7 @@ export default function ToneDetectorScreen() {
             {/* Original text */}
             <View style={s.originalBox}>
               <Text style={s.originalLabel}>Analyzed message:</Text>
-              <Text style={s.originalText}>"{result.text}"</Text>
+              <Text style={s.originalText}>&quot;{result.text}&quot;</Text>
             </View>
           </View>
         )}

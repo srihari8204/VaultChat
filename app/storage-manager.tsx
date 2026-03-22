@@ -2,18 +2,16 @@
 // app/storage-manager.tsx — Storage Manager
 // View storage breakdown, manage cache, auto-download & quality settings
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   StatusBar, Platform, Alert, ActivityIndicator, Switch,
-  Dimensions,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 
-const { width: SW } = Dimensions.get('window');
 const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
 
 const C = {
@@ -78,11 +76,7 @@ export default function StorageManagerScreen() {
     try {
       // Calculate AsyncStorage usage
       const keys = await AsyncStorage.getAllKeys();
-      let totalBytes = 0;
       const pairs = await AsyncStorage.multiGet(keys);
-      for (const [k, v] of pairs) {
-        totalBytes += (k?.length ?? 0) + (v?.length ?? 0);
-      }
 
       // Simulate category breakdown based on key prefixes
       let imgSize = 0, vidSize = 0, audSize = 0, fileSize = 0, otherSize = 0;
@@ -115,7 +109,6 @@ export default function StorageManagerScreen() {
       setFreeSpace(4_200_000_000); // Simulated free space
 
       // Simulate per-chat storage
-      const chatKeys = keys.filter(k => k.startsWith('chat_') || k.includes('messages'));
       const chats = [
         { name: 'Alice Chen', size: 18_500_000 },
         { name: 'Dev Team Group', size: 32_100_000 },

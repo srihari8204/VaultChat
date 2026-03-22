@@ -1,13 +1,12 @@
 // app/slideshow.tsx
 // Slideshow viewer for multiple images — swipe through with transitions
 
-import { LinearGradient } from 'expo-linear-gradient';
 import * as MediaLibrary from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useRef, useState } from 'react';
 import {
-  Alert, Animated, Dimensions, FlatList, Image, StyleSheet,
+  Alert, Dimensions, FlatList, Image, StyleSheet,
   Text, TouchableOpacity, View,
 } from 'react-native';
 
@@ -27,7 +26,6 @@ export default function SlideshowScreen() {
   const [autoplay, setAutoplay] = useState(false);
   const flatRef = useRef<FlatList>(null);
   const autoplayTimer = useRef<any>(null);
-  const fadeAnim = useRef(new Animated.Value(1)).current;
 
   const goTo = (idx: number) => {
     if (idx >= 0 && idx < imageList.length) {

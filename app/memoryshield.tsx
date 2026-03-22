@@ -2,7 +2,7 @@ import { ErrorBoundary } from '../components/ErrorBoundary';
 ﻿import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Animated, Dimensions, Easing, Modal, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Animated, Easing, Modal, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { DestructionLog, ShieldStatus, executeMemoryShield, loadDestructionLogs, loadShieldStatus, reasonLabels, saveShieldStatus } from '../constants/memoryShield';
 
 function MemoryShieldScreenContent() {
@@ -33,7 +33,7 @@ function MemoryShieldScreenContent() {
     Animated.loop(Animated.timing(shieldAnim, { toValue: 1, duration: 8000, easing: Easing.linear, useNativeDriver: true })).start();
     load();
     return () => { if (countTimer.current) clearInterval(countTimer.current); };
-  }, []);
+  }, [fadeIn, pulseRed, shieldAnim]);
 
   const load = async () => {
     const s = await loadShieldStatus();
@@ -70,7 +70,7 @@ function MemoryShieldScreenContent() {
     try {
       const log = await executeMemoryShield(reason);
       setLastLog(log); setDestroyed(true); setLogs(prev => [log, ...prev]);
-    } catch (e) { Alert.alert('Error', 'Destruction failed.'); }
+    } catch { Alert.alert('Error', 'Destruction failed.'); }
     setDestroying(false);
   };
 

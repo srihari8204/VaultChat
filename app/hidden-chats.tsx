@@ -3,7 +3,7 @@
 // PIN-protected list of hidden chats
 // Access: Settings -> "Hidden Chats" or long-press chat -> "Hide"
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList,
   Alert, TextInput, StatusBar, ActivityIndicator,
@@ -139,7 +139,7 @@ export default function HiddenChatsScreen() {
           <Text style={{ fontSize: 40, marginBottom: 12 }}>{"\uD83D\uDC7B"}</Text>
           <Text style={{ color: '#555', fontSize: 15 }}>No hidden chats</Text>
           <Text style={{ color: '#444', fontSize: 12, marginTop: 6, textAlign: 'center', paddingHorizontal: 40 }}>
-            Long press any chat and tap "Hide" to move it here
+            Long press any chat and tap &quot;Hide&quot; to move it here
           </Text>
         </View>
       ) : (

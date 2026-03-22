@@ -1,11 +1,11 @@
-﻿import { LinearGradient } from "expo-linear-gradient";
+import { LinearGradient } from "expo-linear-gradient";
 import * as LocalAuthentication from "expo-local-authentication";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { Animated, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Animated, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { verifyPIN } from "../services/securityService";
 import { trustCurrentDevice } from "../services/deviceService";
-import { generateMockFaceVector, isFaceMatch } from "../services/faceService";
+import { generateMockFaceVector } from "../services/faceService";
 
 const SERVER_URL = "http://192.168.29.58:3001";
 
@@ -26,7 +26,7 @@ export default function FaceVerifyNewDeviceScreen() {
     ]));
     loop.start();
     return () => loop.stop();
-  }, []);
+  }, [pulse]);
 
   const handlePinKey = async (k: string) => {
     if (k === "⌫") { setPin(p => p.slice(0, -1)); return; }
@@ -41,6 +41,7 @@ export default function FaceVerifyNewDeviceScreen() {
   };
 
   const handleFaceScan = async () => {
+    if (Platform.OS === 'web') { handleFail(); return; }
     setStage("scanning");
     setMsg("Scanning face...");
     try {
@@ -116,7 +117,7 @@ export default function FaceVerifyNewDeviceScreen() {
         {/* Device warning */}
         <View style={S.warn}>
           <Text style={S.warnTxt}>
-            This device is not recognized. For your security, we need to confirm it's really you before granting access.
+            This device is not recognized. For your security, we need to confirm it&apos;s really you before granting access.
           </Text>
         </View>
 

@@ -6,21 +6,18 @@
 import React, { useState, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, PanResponder,
-  Dimensions, StatusBar, Alert, Share,
+  StatusBar, Alert,
 } from 'react-native';
-import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
+import { Stack } from 'expo-router';
 import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
-import * as FileSystem from 'expo-file-system';
 
-const { width: SW, height: SH } = Dimensions.get('window');
 const C = { bg: '#0D1117', accent: '#4A9FFF' };
 
 const COLORS = ['#FFFFFF', '#FF3C6E', '#00E5FF', '#10B981', '#F59E0B', '#A78BFA', '#FF6B35', '#EC4899', '#8B5CF6'];
 const BRUSH_SIZES = [2, 4, 8, 14, 22];
 
 export default function WhiteboardScreen() {
-  const router = useRouter();
   const canvasRef = useRef(null);
   const [paths, setPaths] = useState([]);
   const [currentPath, setCurrentPath] = useState([]);
@@ -62,7 +59,7 @@ export default function WhiteboardScreen() {
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(uri, { mimeType: 'image/png' });
       }
-    } catch (e) {
+    } catch {
       Alert.alert('Error', 'Could not save drawing. Make sure react-native-view-shot is installed.');
     }
   };

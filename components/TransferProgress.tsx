@@ -25,7 +25,7 @@ export default function TransferProgress({ visible, progress, filename, type = '
       duration: 300,
       useNativeDriver: false,
     }).start();
-  }, [progress]);
+  }, [progress, widthAnim]);
 
   useEffect(() => {
     if (visible) {
@@ -38,7 +38,7 @@ export default function TransferProgress({ visible, progress, filename, type = '
       pulse.start();
       return () => pulse.stop();
     }
-  }, [visible]);
+  }, [visible, pulseAnim]);
 
   if (!visible) return null;
 

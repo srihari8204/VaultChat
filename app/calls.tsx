@@ -1,4 +1,4 @@
-﻿// app/calls.tsx
+// app/calls.tsx
 // Real call history from Firestore
 // Missed / Incoming / Outgoing with icons
 // Tap row â†’ calls back
@@ -65,22 +65,6 @@ function formatCallTime(ts: any): string {
   return d.toLocaleDateString([], { day: '2-digit', month: 'short' });
 }
 
-function statusIcon(status: CallStatus, type: CallType): string {
-  if (type === 'video') {
-    switch (status) {
-      case 'missed':   return 'ðŸ“¹';
-      case 'incoming': return 'ðŸ“¹';
-      case 'outgoing': return 'ðŸ“¹';
-      case 'declined': return 'ðŸ“¹';
-    }
-  }
-  switch (status) {
-    case 'missed':   return 'ðŸ“ž';
-    case 'incoming': return 'ðŸ“ž';
-    case 'outgoing': return 'ðŸ“ž';
-    case 'declined': return 'ðŸ“ž';
-  }
-}
 
 function statusColor(status: CallStatus): string {
   switch (status) {
@@ -152,39 +136,38 @@ export default function CallsScreen() {
     c => c.callStatus === 'missed' || c.callStatus === 'declined'
   ).length;
 
-  // â”€â”€ Call back â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const callBack = (record: CallRecord) => {
-    router.push({
-      pathname: record.callType === 'video' ? '/videocall' : '/voicecall',
-      params: { chatId: record.chatId, name: record.peerName },
-    });
-  };
-
-  // â”€â”€ Delete call record â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const deleteRecord = (record: CallRecord) => {
-    Alert.alert(
-      'Delete',
-      `Remove this call with ${record.peerName} from history?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete', style: 'destructive',
-          onPress: () => {
-            firestore()
-              .collection('users')
-              .doc(uid)
-              .collection('callHistory')
-              .doc(record.id)
-              .delete()
-              .catch(() => {});
-          },
-        },
-      ]
-    );
-  };
-
   // â”€â”€ Render row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const renderCall = useCallback(({ item }: { item: CallRecord }) => (
+  const renderCall = useCallback(({ item }: { item: CallRecord }) => {
+    const callBack = (record: CallRecord) => {
+      router.push({
+        pathname: record.callType === 'video' ? '/videocall' : '/voicecall',
+        params: { chatId: record.chatId, name: record.peerName },
+      });
+    };
+
+    const deleteRecord = (record: CallRecord) => {
+      Alert.alert(
+        'Delete',
+        `Remove this call with ${record.peerName} from history?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete', style: 'destructive',
+            onPress: () => {
+              firestore()
+                .collection('users')
+                .doc(uid)
+                .collection('callHistory')
+                .doc(record.id)
+                .delete()
+                .catch(() => {});
+            },
+          },
+        ]
+      );
+    };
+
+    return (
     <TouchableOpacity
       style={styles.callRow}
       onPress={() => callBack(item)}
@@ -228,7 +211,8 @@ export default function CallsScreen() {
         </TouchableOpacity>
       </View>
     </TouchableOpacity>
-  ), [uid]);
+    );
+  }, [router, uid]);
 
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Render

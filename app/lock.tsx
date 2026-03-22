@@ -10,16 +10,14 @@ import { useEffect, useRef, useState } from "react";
 import {
   Animated,
   Easing,
+  Platform,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
-  Dimensions,
 } from "react-native";
 import { recordAuthTime } from "../services/lockService";
-
-const { width: SCREEN_W } = Dimensions.get("window");
 
 // CRED palette
 const CLR = {
@@ -77,7 +75,7 @@ export default function LockScreen() {
         useNativeDriver: true,
       }),
     ]).start();
-  }, []);
+  }, [fadeIn, slideUp]);
 
   // Pulse animation for scan ring
   useEffect(() => {
@@ -99,7 +97,7 @@ export default function LockScreen() {
     );
     loop.start();
     return () => loop.stop();
-  }, []);
+  }, [pulseAnim]);
 
   // Subtle ring rotation
   useEffect(() => {
@@ -113,14 +111,54 @@ export default function LockScreen() {
     );
     loop.start();
     return () => loop.stop();
-  }, []);
+  }, [ringRotate]);
 
   // Auto-trigger biometric
   useEffect(() => {
+    const handleFailInEffect = () => {
+      const next = fails + 1;
+      setFails(next);
+      if (next >= 5) {
+        setStage("locked");
+        setError("Too many attempts. Locked for 30 minutes.");
+      }
+    };
+    const handleBiometric = async () => {
+      if (Platform.OS === 'web') { setStage("code"); return; }
+      setStage("scanning");
+      setError("");
+      try {
+        const supported = await LocalAuthentication.hasHardwareAsync();
+        const enrolled = await LocalAuthentication.isEnrolledAsync();
+        if (!supported || !enrolled) {
+          setStage("code");
+          return;
+        }
+
+        const result = await LocalAuthentication.authenticateAsync({
+          promptMessage: "Scan your face to open VaultChat",
+          fallbackLabel: "Use Secret Code",
+          cancelLabel: "Cancel",
+          disableDeviceFallback: false,
+        });
+
+        if (result.success) {
+          await recordAuthTime();
+          router.replace("/chats");
+        } else if ((result as any).error === "user_fallback") {
+          setStage("code");
+        } else {
+          handleFailInEffect();
+        }
+      } catch {
+        setStage("code");
+      }
+    };
     setTimeout(() => handleBiometric(), 400);
-  }, []);
+  }, [fails]);
 
   const handleBiometric = async () => {
+    if (Platform.OS === 'web') { setStage("code"); return; }
     setStage("scanning");
     setError("");
     try {

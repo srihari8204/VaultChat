@@ -6,13 +6,12 @@
 import React, { useState, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList,
-  TextInput, KeyboardAvoidingView, Platform, StatusBar,
+  TextInput, KeyboardAvoidingView, Platform,
 } from 'react-native';
-import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
+import { useLocalSearchParams, Stack } from 'expo-router';
 import { generateDecoyMessages } from '../lib/ghostProtocol';
 
 export default function DecoyChatScreen() {
-  const router = useRouter();
   const { chatId, name } = useLocalSearchParams();
   const [messages, setMessages] = useState(() => generateDecoyMessages(chatId as string));
   const [input, setInput] = useState('');

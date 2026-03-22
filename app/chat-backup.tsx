@@ -6,14 +6,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   StatusBar, Platform, Alert, ActivityIndicator, Switch,
-  Animated, Dimensions,
+  Animated,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 
-const { width: SW } = Dimensions.get('window');
 const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
 
 const C = {

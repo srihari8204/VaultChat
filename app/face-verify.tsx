@@ -11,7 +11,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { router } from 'expo-router';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated, Dimensions, Platform, StatusBar,
   StyleSheet,
@@ -68,7 +68,7 @@ export default function FaceVerifyScreen() {
       if(!v) setPhase(PHASE.NOT_SET);
     });
     if(!perm?.granted) reqPerm();
-  },[]);
+  },[perm?.granted, reqPerm]);
 
   useEffect(()=>{
     if(phase!==PHASE.SCANNING) return;
@@ -77,36 +77,35 @@ export default function FaceVerifyScreen() {
       Animated.timing(pulse,{toValue:1.0,duration:800,useNativeDriver:true}),
     ]));
     lp.start(); return ()=>lp.stop();
-  },[phase]);
-
-  const showResult=(matched:boolean)=>{
-    setPhase(matched?PHASE.MATCH:PHASE.NO_MATCH);
-    Animated.parallel([
-      Animated.spring(resOp,{toValue:1,tension:50,friction:8,useNativeDriver:true}),
-      Animated.spring(resSc,{toValue:1,tension:50,friction:8,useNativeDriver:true}),
-    ]).start();
-    Haptics.notificationAsync(matched
-      ?Haptics.NotificationFeedbackType.Success
-      :Haptics.NotificationFeedbackType.Error);
-    if(matched) setTimeout(()=>router.replace('/chats' as any),1500);
-  };
-
-  const triggerBio=async()=>{
-    setPhase(PHASE.BIOMETRIC);
-    try {
-      const res=await LocalAuthentication.authenticateAsync({
-        promptMessage:'Unlock VaultChat',
-        fallbackLabel:'Use PIN',
-        cancelLabel:'Cancel',
-        disableDeviceFallback:false,
-      });
-      showResult(res.success);
-    } catch { showResult(false); }
-  };
+  },[phase, pulse]);
 
   // Simulate face scanning progress, then trigger biometric auth
   useEffect(()=>{
     if(phase!==PHASE.SCANNING||doneRef.current||!perm?.granted) return;
+    const showResultInEffect=(matched:boolean)=>{
+      setPhase(matched?PHASE.MATCH:PHASE.NO_MATCH);
+      Animated.parallel([
+        Animated.spring(resOp,{toValue:1,tension:50,friction:8,useNativeDriver:true}),
+        Animated.spring(resSc,{toValue:1,tension:50,friction:8,useNativeDriver:true}),
+      ]).start();
+      if (Platform.OS !== 'web') Haptics.notificationAsync(matched
+        ?Haptics.NotificationFeedbackType.Success
+        :Haptics.NotificationFeedbackType.Error);
+      if(matched) setTimeout(()=>router.replace('/chats' as any),1500);
+    };
+    const triggerBio=async()=>{
+      if(Platform.OS==='web'){showResultInEffect(false);return;}
+      setPhase(PHASE.BIOMETRIC);
+      try {
+        const res=await LocalAuthentication.authenticateAsync({
+          promptMessage:'Unlock VaultChat',
+          fallbackLabel:'Use PIN',
+          cancelLabel:'Cancel',
+          disableDeviceFallback:false,
+        });
+        showResultInEffect(res.success);
+      } catch { showResultInEffect(false); }
+    };
     const interval=setInterval(()=>{
       if(doneRef.current) return;
       fcRef.current+=1;
@@ -118,7 +117,7 @@ export default function FaceVerifyScreen() {
       }
     },300);
     return ()=>clearInterval(interval);
-  },[phase,perm?.granted]);
+  },[phase,perm?.granted,resOp,resSc,router]);
 
   const retry=()=>{
     fcRef.current=0; doneRef.current=false;

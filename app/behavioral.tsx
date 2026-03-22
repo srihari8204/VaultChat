@@ -1,11 +1,9 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Animated, Dimensions, Easing, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Animated, Easing, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { BehaviorAlert, TypingPattern, analyzeTypingPattern, getAlertColor, getAlertIcon, loadAlerts, loadTypingPattern, recordKeystroke, resetPattern } from '../constants/behavioralSecurity';
-
-const { width } = Dimensions.get('window');
 
 function BehavioralScreenContent() {
   const router = useRouter();
@@ -27,7 +25,7 @@ function BehavioralScreenContent() {
     ])).start();
     Animated.loop(Animated.timing(brainAnim, { toValue: 1, duration: 6000, easing: Easing.linear, useNativeDriver: true })).start();
     load();
-  }, []);
+  }, [brainAnim, fadeIn, pulseAnim]);
 
   const load = async () => {
     const p = await loadTypingPattern();

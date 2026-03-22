@@ -3,7 +3,7 @@
 
 import React, { useState, useRef } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, Alert, Vibration, Animated,
+  View, Text, TouchableOpacity, StyleSheet, Vibration, Animated, Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import auth from '@react-native-firebase/auth';
@@ -14,7 +14,6 @@ import * as Location from 'expo-location';
 import { activateGhost, deactivateGhost } from '../lib/ghostProtocol';
 
 const PIN_KEY     = '@vaultchat_pin_hash';
-const DURESS_KEY  = 'duressPinHash';
 
 export default function PinEntryScreen() {
   const router    = useRouter();
@@ -66,7 +65,7 @@ export default function PinEntryScreen() {
       setPin('');
       setError('PIN not configured');
       shake();
-      Vibration.vibrate(400);
+      if (Platform.OS !== 'web') Vibration.vibrate(400);
       setTimeout(() => setError(''), 1500);
       return;
     }
@@ -77,7 +76,7 @@ export default function PinEntryScreen() {
       setPin('');
       setError('Wrong PIN');
       shake();
-      Vibration.vibrate(400);
+      if (Platform.OS !== 'web') Vibration.vibrate(400);
       setTimeout(() => setError(''), 1500);
     }
   };

@@ -10,7 +10,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
-  Alert, Platform, StatusBar,
+  Alert, StatusBar,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import {
@@ -102,6 +102,63 @@ export default function VideoCallScreen() {
   useEffect(() => {
     let mounted = true;
 
+    const initiateCallInner = async (pc: RTCPeerConnection, socket: Socket) => {
+      try {
+        const chatDoc = await firestore().collection('chats').doc(chatId).get();
+        const participants: string[] = chatDoc.data()?.participants || [];
+        const recipientUid = participants.find(p => p !== uid);
+        if (!recipientUid) return;
+
+        const userDoc = await firestore().collection('users').doc(recipientUid).get();
+        const recipientSocketId: string = userDoc.data()?.socketId || '';
+        remoteIdRef.current = recipientSocketId;
+
+        const offer = await pc.createOffer({
+          offerToReceiveAudio: true,
+          offerToReceiveVideo: true,
+        });
+        await pc.setLocalDescription(offer);
+
+        socket.emit('call_offer', {
+          toSocketId: recipientSocketId,
+          offer,
+          callType:   'video',
+          callerName: auth().currentUser?.displayName || 'VaultChat User',
+          chatId,
+        });
+      } catch (e) {
+        console.error('[Call] initiateCall error:', e);
+      }
+    };
+
+    const cleanupInner = () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      pcRef.current?.close();
+      socketRef.current?.disconnect();
+    };
+
+    const endCallInner = (notify = true) => {
+      if (notify && socketRef.current && remoteIdRef.current) {
+        socketRef.current.emit('call_end', { toSocketId: remoteIdRef.current });
+      }
+      cleanupInner();
+      router.back();
+    };
+
+    const answerCallInner = async (pc: RTCPeerConnection, socket: Socket) => {
+      socket.on('call_offer_for_you', async ({ offer, fromSocketId }: any) => {
+        try {
+          remoteIdRef.current = fromSocketId;
+          await pc.setRemoteDescription(new RTCSessionDescription(offer));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          socket.emit('call_answer', { toSocketId: fromSocketId, answer });
+        } catch (e) {
+          console.error('[Call] answerCall error:', e);
+        }
+      });
+    };
+
     const setup = async () => {
       try {
         // 1. Set audio mode Ã¢â‚¬â€ speaker by default for video calls
@@ -159,11 +216,11 @@ export default function VideoCallScreen() {
             setCallState('ringing');
             // Answer is triggered by user tapping Accept
             // (in this flow we auto-answer Ã¢â‚¬â€ add answer UI if needed)
-            await answerCall(pc, socket);
+            await answerCallInner(pc, socket);
           } else {
             // Ã¢â€â‚¬Ã¢â€â‚¬ Outgoing call Ã¢â‚¬â€ we are the caller Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
             setCallState('ringing');
-            await initiateCall(pc, socket);
+            await initiateCallInner(pc, socket);
           }
         });
 
@@ -197,7 +254,7 @@ export default function VideoCallScreen() {
 
         // Remote peer ended the call
         socket.on('call_ended', () => {
-          endCall(false);
+          endCallInner(false);
         });
 
         // Send ICE candidates to remote peer as they are discovered
@@ -215,10 +272,10 @@ export default function VideoCallScreen() {
           console.log('[Call] Connection state:', pc.connectionState);
           if (pc.connectionState === 'failed') {
             Alert.alert('Call Failed', 'Connection failed. Check your network.');
-            endCall(true);
+            endCallInner(true);
           }
           if (pc.connectionState === 'disconnected') {
-            endCall(true);
+            endCallInner(true);
           }
         };
 
@@ -233,67 +290,9 @@ export default function VideoCallScreen() {
 
     return () => {
       mounted = false;
-      cleanup();
+      cleanupInner();
     };
-  }, []);
-
-  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-  // Initiate outgoing call
-  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-  const initiateCall = async (pc: RTCPeerConnection, socket: Socket) => {
-    try {
-      // Get recipient's socket ID from Firestore
-      const chatDoc = await firestore().collection('chats').doc(chatId).get();
-      const participants: string[] = chatDoc.data()?.participants || [];
-      const recipientUid = participants.find(p => p !== uid);
-      if (!recipientUid) return;
-
-      const userDoc = await firestore().collection('users').doc(recipientUid).get();
-      const recipientSocketId: string = userDoc.data()?.socketId || '';
-      remoteIdRef.current = recipientSocketId;
-
-      // Create SDP offer
-      const offer = await pc.createOffer({
-        offerToReceiveAudio: true,
-        offerToReceiveVideo: true,
-      });
-      await pc.setLocalDescription(offer);
-
-      // Send offer via signaling server
-      socket.emit('call_offer', {
-        toSocketId: recipientSocketId,
-        offer,
-        callType:   'video',
-        callerName: auth().currentUser?.displayName || 'VaultChat User',
-        chatId,
-      });
-    } catch (e) {
-      console.error('[Call] initiateCall error:', e);
-    }
-  };
-
-  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-  // Answer incoming call
-  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-  const answerCall = async (pc: RTCPeerConnection, socket: Socket) => {
-    // Offer comes via socket event 'call_offer_for_you'
-    socket.on('call_offer_for_you', async ({ offer, fromSocketId, callerName }: any) => {
-      try {
-        remoteIdRef.current = fromSocketId;
-
-        await pc.setRemoteDescription(new RTCSessionDescription(offer));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-
-        socket.emit('call_answer', {
-          toSocketId: fromSocketId,
-          answer,
-        });
-      } catch (e) {
-        console.error('[Call] answerCall error:', e);
-      }
-    });
-  };
+  }, [frontCamera, isIncoming, router, uid, chatId]);
 
   // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   // Timer

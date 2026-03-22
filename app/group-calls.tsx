@@ -6,7 +6,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Alert, FlatList, StyleSheet, Text, TouchableOpacity, View,
+  FlatList, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 
 type CallMode = 'voice' | 'video';
@@ -23,7 +23,7 @@ interface Participant {
 
 export default function GroupCallsScreen() {
   const router = useRouter();
-  const { chatId, groupName, mode: modeParam } = useLocalSearchParams<{
+  const { groupName, mode: modeParam } = useLocalSearchParams<{
     chatId: string; groupName: string; mode?: string;
   }>();
   const myUid = auth().currentUser?.uid || '';

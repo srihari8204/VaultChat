@@ -7,11 +7,11 @@
 // 30-day auto backup Ã¢â‚¬â€ email option
 // PIN stored in hardware-backed SecureStore
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
   FlatList, Alert, Vibration, ActivityIndicator,
-  Modal, TextInput, ScrollView,
+  Modal, TextInput,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';

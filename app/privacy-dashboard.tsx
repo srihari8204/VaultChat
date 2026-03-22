@@ -11,7 +11,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
-  Dimensions,
   Platform,
   ScrollView,
   StatusBar,
@@ -37,7 +36,6 @@ const C = {
   border: 'rgba(74,159,255,0.15)',
 };
 
-const SW = Dimensions.get('window').width;
 const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
 const STORAGE_KEY = 'vc_privacy_settings';
 
@@ -98,13 +96,12 @@ const FEATURES: FeatureItem[] = [
   { key: 'readReceiptsOff', label: 'Read Receipts Off', points: 10, suggestion: 'Turn off read receipts for more privacy.' },
 ];
 
-const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 export default function PrivacyDashboardScreen() {
   const router = useRouter();
 
   const [settings, setSettings] = useState<PrivacySettings>(DEFAULT_SETTINGS);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
 
   const fadeIn = useRef(new Animated.Value(0)).current;
   const scoreAnim = useRef(new Animated.Value(0)).current;
@@ -112,7 +109,7 @@ export default function PrivacyDashboardScreen() {
   useEffect(() => {
     Animated.timing(fadeIn, { toValue: 1, duration: 400, useNativeDriver: true }).start();
     loadSettings();
-  }, []);
+  }, [fadeIn]);
 
   const loadSettings = async () => {
     try {
@@ -149,7 +146,7 @@ export default function PrivacyDashboardScreen() {
 
   useEffect(() => {
     Animated.timing(scoreAnim, { toValue: score, duration: 1200, useNativeDriver: false }).start();
-  }, [score]);
+  }, [score, scoreAnim]);
 
   const getScoreColor = () => {
     if (score >= 80) return C.green;

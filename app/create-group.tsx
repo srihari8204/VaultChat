@@ -36,12 +36,12 @@ export default function CreateGroupScreen() {
       setContacts(list);
       setLoading(false);
     });
-  }, []);
+  }, [myUid]);
 
   const toggle = (uid: string) => {
     setSelected(prev => {
       const next = new Set(prev);
-      next.has(uid) ? next.delete(uid) : next.add(uid);
+      if (next.has(uid)) { next.delete(uid); } else { next.add(uid); }
       return next;
     });
   };

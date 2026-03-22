@@ -3,7 +3,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Stack, useRouter } from 'expo-router';
+import { Stack } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   Alert, ScrollView, StyleSheet, Text, TextInput,
@@ -43,7 +43,6 @@ const BENEFITS = [
 ];
 
 export default function DecentralizedIDScreen() {
-  const router = useRouter();
   const [did, setDid] = useState<DIDRecord | null>(null);
   const [displayName, setDisplayName] = useState('');
   const [selectedChain, setSelectedChain] = useState('polygon');

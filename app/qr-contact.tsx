@@ -40,7 +40,7 @@ export default function QRContactScreen() {
       } catch {}
       setLoading(false);
     })();
-  }, []);
+  }, [myUid]);
 
   const qrData = 'vaultchat://add/' + myVaultId + '/' + encodeURIComponent(myName);
 
@@ -116,7 +116,7 @@ export default function QRContactScreen() {
           },
         ]
       );
-    } catch (e) {
+    } catch {
       Alert.alert('Error', 'Could not process QR code');
       setScanned(false);
     }

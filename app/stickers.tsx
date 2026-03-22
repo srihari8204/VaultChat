@@ -36,8 +36,6 @@ export default function StickerScreen() {
   const [loading, setLoading] = useState(false);
   const [showPreview, setShowPreview] = useState(null);
 
-  useEffect(() => { loadCustomPacks(); }, []);
-
   const loadCustomPacks = async () => {
     try {
       const snap = await firestore().collection('stickerPacks')
@@ -46,6 +44,9 @@ export default function StickerScreen() {
       setCustomPacks(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch {}
   };
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { loadCustomPacks(); }, [myUid]);
 
   const createCustomPack = async () => {
     Alert.prompt('New Sticker Pack', 'Enter a name for your pack:', async (name) => {
@@ -60,7 +61,7 @@ export default function StickerScreen() {
         });
         await loadCustomPacks();
         Alert.alert('Created!', 'Now add stickers from your photos');
-      } catch (e) { Alert.alert('Error', 'Could not create pack'); }
+      } catch { Alert.alert('Error', 'Could not create pack'); }
     });
   };
 
@@ -78,7 +79,7 @@ export default function StickerScreen() {
         stickers: firestore.FieldValue.arrayUnion(url),
       });
       await loadCustomPacks();
-    } catch (e) { Alert.alert('Error', 'Could not upload sticker'); }
+    } catch { Alert.alert('Error', 'Could not upload sticker'); }
     setLoading(false);
   };
 

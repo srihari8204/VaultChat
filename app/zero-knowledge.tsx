@@ -80,7 +80,7 @@ export default function ZeroKnowledgeScreen() {
           <View style={st.card}>
             <Text style={st.cardTitle}>What is Zero-Knowledge?</Text>
             <Text style={st.cardDesc}>
-              Zero-Knowledge means VaultChat's servers process your data without ever being able to read it.
+              Zero-Knowledge means VaultChat&apos;s servers process your data without ever being able to read it.
               Your messages, files, and identity stay encrypted with keys only YOU control.
               Even if our servers are seized, your data remains mathematically unreadable.
             </Text>

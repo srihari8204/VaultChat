@@ -7,7 +7,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList,
-  StatusBar, Switch, ActivityIndicator, Alert, TextInput,
+  StatusBar, ActivityIndicator, TextInput,
 } from 'react-native';
 import { Stack } from 'expo-router';
 import auth from '@react-native-firebase/auth';
@@ -22,39 +22,40 @@ export default function ReceiptControlScreen() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        // Load recent chats as contacts
+        const chatSnap = await firestore().collection('chats')
+          .where('participants', 'array-contains', myUid)
+          .orderBy('lastTime', 'desc')
+          .limit(50)
+          .get();
 
-  const loadData = async () => {
-    setLoading(true);
-    try {
-      // Load recent chats as contacts
-      const chatSnap = await firestore().collection('chats')
-        .where('participants', 'array-contains', myUid)
-        .orderBy('lastTime', 'desc')
-        .limit(50)
-        .get();
-
-      const contactList = [];
-      for (const doc of chatSnap.docs) {
-        const data = doc.data();
-        const peerUid = (data.participants || []).find(p => p !== myUid);
-        if (peerUid) {
-          const peerDoc = await firestore().collection('users').doc(peerUid).get();
-          const peerData = peerDoc.data() || {};
-          contactList.push({ uid: peerUid, name: peerData.name || peerData.vaultId || 'User', phone: peerData.phone || '' });
+        const contactList = [];
+        for (const doc of chatSnap.docs) {
+          const data = doc.data();
+          const peerUid = (data.participants || []).find(p => p !== myUid);
+          if (peerUid) {
+            const peerDoc = await firestore().collection('users').doc(peerUid).get();
+            const peerData = peerDoc.data() || {};
+            contactList.push({ uid: peerUid, name: peerData.name || peerData.vaultId || 'User', phone: peerData.phone || '' });
+          }
         }
-      }
-      setContacts(contactList);
+        setContacts(contactList);
 
-      // Load existing rules
-      const rulesSnap = await firestore().collection('users').doc(myUid)
-        .collection('privacyRules').get();
-      const rulesMap = {};
-      rulesSnap.docs.forEach(d => { rulesMap[d.id] = d.data(); });
-      setRules(rulesMap);
-    } catch {}
-    setLoading(false);
-  };
+        // Load existing rules
+        const rulesSnap = await firestore().collection('users').doc(myUid)
+          .collection('privacyRules').get();
+        const rulesMap = {};
+        rulesSnap.docs.forEach(d => { rulesMap[d.id] = d.data(); });
+        setRules(rulesMap);
+      } catch {}
+      setLoading(false);
+    };
+    loadData();
+  }, [myUid]);
 
   const toggleRule = async (contactUid, field) => {
     const current = rules[contactUid] || { readReceipts: true, typing: true, lastSeen: true };

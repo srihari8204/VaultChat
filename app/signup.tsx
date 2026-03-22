@@ -2,15 +2,14 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator, Alert, Animated, Dimensions, KeyboardAvoidingView,
+  ActivityIndicator, Alert, Animated, KeyboardAvoidingView,
   Modal, Platform, ScrollView, StyleSheet, Text, TextInput,
   TouchableOpacity, View,
 } from "react-native";
 import {
-  savePendingSignup, savePIN, sendOTP,
+  savePendingSignup, savePIN,
 } from "./(constants)/authService";
 
-const { width: SCREEN_W } = Dimensions.get("window");
 
 const QUESTIONS = [
   "What was your first pet's name?",
@@ -32,8 +31,6 @@ const CODES = [
   { code: "+91",  flag: "IN", name: "India" },
   { code: "+1",   flag: "US", name: "USA" },
   { code: "+44",  flag: "GB", name: "UK" },
-  { code: "+61",  flag: "AU", name: "Australia" },
-  { code: "+971", flag: "AE", name: "UAE" },
 ];
 
 // ── Fade wrapper for step transitions ────────────────────────────────────────
@@ -54,7 +51,7 @@ function FadeIn({ children, delay = 0 }: { children: React.ReactNode; delay?: nu
         speed: 14, bounciness: 2,
       }),
     ]).start();
-  }, []);
+  }, [delay, opacity, translateY]);
 
   return (
     <Animated.View style={{ opacity, transform: [{ translateY }] }}>
@@ -63,37 +60,15 @@ function FadeIn({ children, delay = 0 }: { children: React.ReactNode; delay?: nu
   );
 }
 
-// ── Step Indicator: 3 circles with connecting lines ──────────────────────────
+// ── Step Indicator: Progress bar ──────────────────────────
 function StepIndicator({ step }: { step: number }) {
+  const progress = (step / 3) * 100;
   return (
-    <View style={S.stepRow}>
-      {[1, 2, 3].map((n) => (
-        <View key={n} style={{ flexDirection: "row", alignItems: "center" }}>
-          {n > 1 && (
-            <View style={[
-              S.stepLine,
-              step >= n && S.stepLineActive,
-            ]} />
-          )}
-          <View style={[
-            S.stepCircle,
-            step >= n && S.stepCircleActive,
-          ]}>
-            <Text style={[
-              S.stepNum,
-              step >= n && S.stepNumActive,
-            ]}>
-              {n}
-            </Text>
-          </View>
-          {n < 3 && (
-            <View style={[
-              S.stepLine,
-              step > n && S.stepLineActive,
-            ]} />
-          )}
-        </View>
-      ))}
+    <View style={S.stepContainer}>
+      <View style={S.stepBar}>
+        <View style={[S.stepProgress, { width: `${progress}%` }]} />
+      </View>
+      <Text style={S.stepText}>Step {step} of 3</Text>
     </View>
   );
 }
@@ -344,7 +319,7 @@ export default function SignupScreen() {
 
   // Step titles
   const titles: Record<number, string> = {
-    1: "Create your\naccount",
+    1: "Create Your Account",
     2: "Security\nquestions",
     3: "Set your\nPIN",
   };
@@ -353,7 +328,7 @@ export default function SignupScreen() {
     <View style={S.root}>
       {/* Subtle gradient overlay at top */}
       <LinearGradient
-        colors={["rgba(255,255,255,0.03)", "transparent"]}
+        colors={["rgba(0,0,0,0.03)", "transparent"]}
         style={S.topGlow}
       />
 
@@ -375,13 +350,15 @@ export default function SignupScreen() {
 
           {/* Step Title */}
           <FadeIn key={`title-${stepKey}`}>
-            <Text style={S.title}>{titles[step]}</Text>
+            <View style={S.titleCard}>
+              <Text style={S.title}>{titles[step]}</Text>
+            </View>
           </FadeIn>
 
           {/* ── STEP 1: Personal ── */}
           {step === 1 && (
             <FadeIn key={`step1-${stepKey}`} delay={80}>
-              <View style={S.section}>
+              <View style={S.formCard}>
                 <UnderlineInput
                   label="FULL NAME"
                   value={name}
@@ -396,7 +373,7 @@ export default function SignupScreen() {
                   <TextInput
                     style={[S.underlineInput, { flex: 1, textAlign: "center" }]}
                     placeholder="DD"
-                    placeholderTextColor="rgba(255,255,255,0.2)"
+                    placeholderTextColor="rgba(0,0,0,0.3)"
                     value={day}
                     onChangeText={t => setDay(t.replace(/\D/g, "").slice(0, 2))}
                     keyboardType="number-pad"
@@ -408,7 +385,7 @@ export default function SignupScreen() {
                     activeOpacity={0.7}
                   >
                     <Text style={{
-                      color: month ? "#fff" : "rgba(255,255,255,0.2)",
+                      color: month ? "#000" : "rgba(0,0,0,0.3)",
                       fontSize: 16,
                       textAlign: "center",
                     }}>
@@ -418,7 +395,7 @@ export default function SignupScreen() {
                   <TextInput
                     style={[S.underlineInput, { flex: 1.2, textAlign: "center" }]}
                     placeholder="YYYY"
-                    placeholderTextColor="rgba(255,255,255,0.2)"
+                    placeholderTextColor="rgba(0,0,0,0.3)"
                     value={year}
                     onChangeText={t => setYear(t.replace(/\D/g, "").slice(0, 4))}
                     keyboardType="number-pad"
@@ -456,7 +433,7 @@ export default function SignupScreen() {
                   <TextInput
                     style={[S.underlineInput, { flex: 1, marginBottom: 0 }]}
                     placeholder="Mobile number"
-                    placeholderTextColor="rgba(255,255,255,0.2)"
+                    placeholderTextColor="rgba(0,0,0,0.3)"
                     value={mobile}
                     onChangeText={t => setMobile(t.replace(/\D/g, "").slice(0, 13))}
                     keyboardType="phone-pad"
@@ -483,8 +460,9 @@ export default function SignupScreen() {
 
                 {/* Continue button */}
                 <TouchableOpacity
-                  style={S.primaryBtn}
+                  style={[S.primaryBtn, (!name.trim() || !day || !month || !year || mobile.replace(/\D/g, "").length < 8) && S.btnDisabled]}
                   onPress={() => validateStep1() && goStep(2)}
+                  disabled={!name.trim() || !day || !month || !year || mobile.replace(/\D/g, "").length < 8}
                   activeOpacity={0.85}
                 >
                   <Text style={S.primaryBtnText}>Continue</Text>
@@ -496,7 +474,7 @@ export default function SignupScreen() {
           {/* ── STEP 2: Security Questions ── */}
           {step === 2 && (
             <FadeIn key={`step2-${stepKey}`} delay={80}>
-              <View style={S.section}>
+              <View style={S.formCard}>
                 <DropdownSelector
                   label="QUESTION 1"
                   selected={q1}
@@ -565,7 +543,7 @@ export default function SignupScreen() {
           {/* ── STEP 3: 8-Digit PIN ── */}
           {step === 3 && (
             <FadeIn key={`step3-${stepKey}`} delay={80}>
-              <View style={S.section}>
+              <View style={S.formCard}>
                 <PINInput
                   value={pin}
                   onChangeText={setPin}
@@ -642,7 +620,7 @@ export default function SignupScreen() {
 const S = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: "#000",
+    backgroundColor: "#FFFFFF",
   },
   topGlow: {
     position: "absolute",
@@ -664,68 +642,74 @@ const S = StyleSheet.create({
     marginBottom: 36,
   },
   brand: {
-    color: "rgba(255,255,255,0.35)",
+    color: "rgba(0,0,0,0.35)",
     fontSize: 11,
     fontWeight: "700",
     letterSpacing: 6,
   },
 
-  // Step indicator
-  stepRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
+  // Step indicator (progress bar)
+  stepContainer: {
     marginBottom: 40,
-  },
-  stepCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
-    justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "transparent",
   },
-  stepCircleActive: {
-    borderColor: "#fff",
-    backgroundColor: "#fff",
+  stepBar: {
+    width: "80%",
+    height: 4,
+    backgroundColor: "rgba(0,0,0,0.1)",
+    borderRadius: 2,
+    overflow: "hidden",
   },
-  stepNum: {
-    color: "rgba(255,255,255,0.25)",
-    fontSize: 13,
-    fontWeight: "700",
+  stepProgress: {
+    height: "100%",
+    backgroundColor: "#000",
+    borderRadius: 2,
   },
-  stepNumActive: {
-    color: "#000",
-  },
-  stepLine: {
-    width: 40,
-    height: 1,
-    backgroundColor: "rgba(255,255,255,0.1)",
-  },
-  stepLineActive: {
-    backgroundColor: "#fff",
+  stepText: {
+    marginTop: 8,
+    fontSize: 14,
+    color: "rgba(0,0,0,0.6)",
+    fontWeight: "600",
   },
 
   // Title
   title: {
-    color: "#fff",
-    fontSize: 32,
+    color: "#000",
+    fontSize: 24,
     fontWeight: "800",
-    lineHeight: 40,
-    marginBottom: 40,
-    letterSpacing: -0.5,
+    padding:5
+    // lineHeight: 40,
+    // marginBottom: 40,
+    // letterSpacing: -0.5,
   },
 
   // Section
   section: {
     marginBottom: 16,
   },
+  formCard: {
+    backgroundColor: "#F9F9F9",
+    borderRadius: 16,
+    padding: 24,
+    marginBottom: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  titleCard: {
+    backgroundColor: "#F0F0F0",
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    marginBottom: 24,
+    alignItems: "center",
+  },
 
   // Input label
   inputLabel: {
-    color: "rgba(255,255,255,0.4)",
+    color: "rgba(0,0,0,0.4)",
     fontSize: 11,
     fontWeight: "600",
     letterSpacing: 2,
@@ -734,12 +718,12 @@ const S = StyleSheet.create({
 
   // Underline input
   underlineInput: {
-    color: "#fff",
+    color: "#000",
     fontSize: 16,
     fontWeight: "500",
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: "rgba(255,255,255,0.12)",
+    borderBottomColor: "rgba(0,0,0,0.12)",
     marginBottom: 28,
   },
 
@@ -764,29 +748,29 @@ const S = StyleSheet.create({
     alignItems: "center",
     gap: 6,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
+    borderColor: "rgba(0,0,0,0.15)",
     borderRadius: 20,
     paddingHorizontal: 14,
     paddingVertical: 10,
     marginBottom: 2,
   },
   ccPillText: {
-    color: "rgba(255,255,255,0.6)",
+    color: "rgba(0,0,0,0.6)",
     fontSize: 12,
     fontWeight: "700",
     letterSpacing: 1,
   },
   ccPillCode: {
-    color: "#fff",
+    color: "#000",
     fontSize: 14,
     fontWeight: "700",
   },
 
   // Country code dropdown
   ccDropdown: {
-    backgroundColor: "#0a0a0a",
+    backgroundColor: "#F5F5F5",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
+    borderColor: "rgba(0,0,0,0.1)",
     borderRadius: 12,
     marginBottom: 24,
     overflow: "hidden",
@@ -797,23 +781,23 @@ const S = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: "rgba(255,255,255,0.05)",
+    borderBottomColor: "rgba(0,0,0,0.05)",
   },
   ccDropdownFlag: {
-    color: "rgba(255,255,255,0.5)",
+    color: "rgba(0,0,0,0.5)",
     fontSize: 12,
     fontWeight: "700",
     letterSpacing: 1,
     width: 28,
   },
   ccDropdownName: {
-    color: "rgba(255,255,255,0.6)",
+    color: "rgba(0,0,0,0.6)",
     fontSize: 14,
     flex: 1,
     marginLeft: 8,
   },
   ccDropdownCode: {
-    color: "#fff",
+    color: "#000",
     fontSize: 14,
     fontWeight: "700",
   },
@@ -824,23 +808,23 @@ const S = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: "rgba(255,255,255,0.12)",
+    borderBottomColor: "rgba(0,0,0,0.12)",
   },
   dropdownText: {
     flex: 1,
-    color: "#fff",
+    color: "#000",
     fontSize: 14,
     fontWeight: "500",
   },
   dropdownChevron: {
-    color: "rgba(255,255,255,0.3)",
+    color: "rgba(0,0,0,0.3)",
     fontSize: 16,
     marginLeft: 8,
   },
   dropdownList: {
-    backgroundColor: "#0a0a0a",
+    backgroundColor: "#F5F5F5",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: "rgba(0,0,0,0.08)",
     borderRadius: 12,
     marginTop: 8,
     overflow: "hidden",
@@ -849,10 +833,10 @@ const S = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: "rgba(255,255,255,0.04)",
+    borderBottomColor: "rgba(0,0,0,0.04)",
   },
   dropdownItemText: {
-    color: "rgba(255,255,255,0.5)",
+    color: "rgba(0,0,0,0.5)",
     fontSize: 14,
   },
 
@@ -873,14 +857,14 @@ const S = StyleSheet.create({
   pinDash: {
     width: 20,
     height: 2,
-    backgroundColor: "rgba(255,255,255,0.15)",
+    backgroundColor: "rgba(0,0,0,0.15)",
     borderRadius: 1,
   },
   pinDotFilled: {
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: "#fff",
+    backgroundColor: "#000",
   },
 
   // Match text
@@ -894,13 +878,13 @@ const S = StyleSheet.create({
   // Info card
   infoCard: {
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: "rgba(0,0,0,0.08)",
     borderRadius: 12,
     padding: 16,
     marginBottom: 32,
   },
   infoCardText: {
-    color: "rgba(255,255,255,0.35)",
+    color: "rgba(0,0,0,0.35)",
     fontSize: 12,
     lineHeight: 18,
     fontWeight: "400",
@@ -908,14 +892,17 @@ const S = StyleSheet.create({
 
   // Buttons
   primaryBtn: {
-    backgroundColor: "#fff",
+    backgroundColor: "#000",
     borderRadius: 14,
     height: 56,
     justifyContent: "center",
     alignItems: "center",
   },
+  btnDisabled: {
+    backgroundColor: "rgba(0,0,0,0.3)",
+  },
   primaryBtnText: {
-    color: "#000",
+    color: "#FFFFFF",
     fontSize: 16,
     fontWeight: "700",
     letterSpacing: 0.3,
@@ -927,7 +914,7 @@ const S = StyleSheet.create({
     alignItems: "center",
   },
   backBtnText: {
-    color: "rgba(255,255,255,0.4)",
+    color: "rgba(0,0,0,0.4)",
     fontSize: 15,
     fontWeight: "600",
   },
@@ -944,11 +931,11 @@ const S = StyleSheet.create({
     marginBottom: 32,
   },
   signInText: {
-    color: "rgba(255,255,255,0.35)",
+    color: "rgba(0,0,0,0.35)",
     fontSize: 14,
   },
   signInLink: {
-    color: "#fff",
+    color: "#000",
     fontWeight: "700",
   },
 
@@ -961,16 +948,16 @@ const S = StyleSheet.create({
     padding: 32,
   },
   modalContent: {
-    backgroundColor: "#0a0a0a",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
+    borderColor: "rgba(0,0,0,0.1)",
     borderRadius: 20,
     padding: 28,
     width: "100%",
     maxWidth: 340,
   },
   modalTitle: {
-    color: "#fff",
+    color: "#000",
     fontSize: 22,
     fontWeight: "700",
     marginBottom: 24,
@@ -987,19 +974,19 @@ const S = StyleSheet.create({
     alignItems: "center",
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: "rgba(0,0,0,0.08)",
   },
   monthItemActive: {
-    backgroundColor: "#fff",
-    borderColor: "#fff",
+    backgroundColor: "#000",
+    borderColor: "#000",
   },
   monthText: {
-    color: "rgba(255,255,255,0.5)",
+    color: "rgba(0,0,0,0.5)",
     fontSize: 14,
     fontWeight: "600",
   },
   monthTextActive: {
-    color: "#000",
+    color: "#FFFFFF",
     fontWeight: "700",
   },
 });

@@ -3,7 +3,7 @@
 // One tap → summarizes 100+ unread messages into key points
 // Groups by topic, extracts action items, decisions, questions
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
   StatusBar, ScrollView, ActivityIndicator, Alert,
@@ -76,7 +76,7 @@ export default function ChatSummaryScreen() {
   const myUid = auth().currentUser?.uid || '';
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [msgCount, setMsgCount] = useState(0);
+  const [, setMsgCount] = useState(0);
 
   const generateChatSummary = async (limit) => {
     setLoading(true);
@@ -95,7 +95,7 @@ export default function ChatSummaryScreen() {
       setMsgCount(msgs.length);
       const result = generateSummary(msgs, peerName);
       setSummary(result);
-    } catch (e) { Alert.alert('Error', 'Could not load messages'); }
+    } catch { Alert.alert('Error', 'Could not load messages'); }
     setLoading(false);
   };
 
@@ -169,7 +169,7 @@ export default function ChatSummaryScreen() {
             <Text style={[s.sectionTitle, { marginTop: 16 }]}>{"\uD83D\uDCAC"} KEY MESSAGES</Text>
             {summary.keyMessages.map((m, i) => (
               <View key={i} style={s.keyMsgRow}>
-                <Text style={s.keyMsgTxt}>"{m}"</Text>
+                <Text style={s.keyMsgTxt}>&quot;{m}&quot;</Text>
               </View>
             ))}
 

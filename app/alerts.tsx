@@ -1,4 +1,4 @@
-﻿// app/alerts.tsx
+// app/alerts.tsx
 // Real security alerts from Firestore
 // Types: screenshot / breach / jailbreak / login / system
 // Real-time listener â€” badge updates instantly
@@ -7,7 +7,6 @@
 
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
-import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -73,7 +72,6 @@ function formatAlertTime(ts: any): string {
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export default function AlertsScreen() {
-  const router = useRouter();
   const uid    = auth().currentUser?.uid || '';
 
   const [alerts,  setAlerts]  = useState<SecurityAlert[]>([]);
@@ -120,16 +118,6 @@ export default function AlertsScreen() {
 
   const unreadCount = alerts.filter(a => !a.read).length;
 
-  // â”€â”€ Mark read â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const markRead = async (alert: SecurityAlert) => {
-    if (alert.read) return;
-    await firestore()
-      .collection('users').doc(uid)
-      .collection('alerts').doc(alert.id)
-      .update({ read: true })
-      .catch(() => {});
-  };
-
   // â”€â”€ Mark all read â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const markAllRead = async () => {
     const unread = alerts.filter(a => !a.read);
@@ -141,23 +129,6 @@ export default function AlertsScreen() {
       batch.update(ref, { read: true });
     });
     await batch.commit().catch(() => {});
-  };
-
-  // â”€â”€ Delete alert â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const deleteAlert = (alert: SecurityAlert) => {
-    Alert.alert('Delete Alert', 'Remove this alert?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete', style: 'destructive',
-        onPress: () => {
-          firestore()
-            .collection('users').doc(uid)
-            .collection('alerts').doc(alert.id)
-            .delete()
-            .catch(() => {});
-        },
-      },
-    ]);
   };
 
   // â”€â”€ Clear all â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -183,6 +154,31 @@ export default function AlertsScreen() {
   // â”€â”€ Render row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const renderAlert = useCallback(({ item }: { item: SecurityAlert }) => {
     const cfg = ALERT_CONFIG[item.type] || ALERT_CONFIG.system;
+
+    const markRead = async (alert: SecurityAlert) => {
+      if (alert.read) return;
+      await firestore()
+        .collection('users').doc(uid)
+        .collection('alerts').doc(alert.id)
+        .update({ read: true })
+        .catch(() => {});
+    };
+
+    const deleteAlert = (alert: SecurityAlert) => {
+      Alert.alert('Delete Alert', 'Remove this alert?', [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete', style: 'destructive',
+          onPress: () => {
+            firestore()
+              .collection('users').doc(uid)
+              .collection('alerts').doc(alert.id)
+              .delete()
+              .catch(() => {});
+          },
+        },
+      ]);
+    };
 
     return (
       <TouchableOpacity

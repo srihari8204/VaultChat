@@ -80,7 +80,7 @@ export default function BlockedScreen() {
     });
 
     return () => handler.remove();
-  }, []);
+  }, [params.threats]);
 
   const handleContactSupport = () => {
     Alert.alert(

@@ -18,13 +18,11 @@ const CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
 const genLinkCode = () => { let s = ''; for (let i = 0; i < 12; i++) s += CHARS[Math.floor(Math.random() * CHARS.length)]; return s; };
 
 export default function InviteLinkScreen() {
-  const { chatId, groupName, isGroup } = useLocalSearchParams();
+  const { chatId, groupName } = useLocalSearchParams();
   const myUid = auth().currentUser?.uid || '';
   const [links, setLinks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
-
-  useEffect(() => { loadLinks(); }, []);
 
   const loadLinks = async () => {
     setLoading(true);
@@ -38,6 +36,9 @@ export default function InviteLinkScreen() {
     } catch {}
     setLoading(false);
   };
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { loadLinks(); }, [chatId, myUid]);
 
   const createLink = async (expiry) => {
     setCreating(true);
@@ -57,7 +58,7 @@ export default function InviteLinkScreen() {
       });
       await loadLinks();
       Alert.alert('Link Created!', 'https://vaultchat.app/join/' + code);
-    } catch (e) { Alert.alert('Error', 'Could not create link'); }
+    } catch { Alert.alert('Error', 'Could not create link'); }
     setCreating(false);
   };
 

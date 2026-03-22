@@ -6,7 +6,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
-  StatusBar, Animated, Dimensions, Alert, ScrollView,
+  StatusBar, Animated, Dimensions, Alert, ScrollView, Platform,
 } from 'react-native';
 import { Stack } from 'expo-router';
 import { Audio } from 'expo-av';
@@ -55,9 +55,10 @@ export default function VoiceEffectsScreen() {
       pulse.start();
       return () => pulse.stop();
     }
-  }, [recording]);
+  }, [recording, pulseAnim]);
 
   const startRecord = async () => {
+    if (Platform.OS === 'web') { Alert.alert('Not supported', 'Recording is not available on web'); return; }
     try {
       const { granted } = await Audio.requestPermissionsAsync();
       if (!granted) { Alert.alert('Permission needed'); return; }

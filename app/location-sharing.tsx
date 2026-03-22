@@ -8,7 +8,7 @@
 import { getAuth } from '@react-native-firebase/auth';
 import { deleteDoc, doc, getFirestore, setDoc } from '@react-native-firebase/firestore';
 import * as Location from 'expo-location';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -36,7 +36,6 @@ type LocationPayload = {
 
 const createSession = async (_uid?: string): Promise<D2DESession> => ({ id: '', key: '' });
 const encryptLocation = async (payload: LocationPayload, sess: D2DESession): Promise<string> => '';
-const encodeSessionLink = (sess: D2DESession): string => '';
 const deleteSession = async (id: string): Promise<void> => {};
 // ──────────────────────────────────────────────────────────────
 
@@ -66,7 +65,6 @@ type Screen = 'picker' | 'dur-current' | 'dur-live' | 'active';
 
 export default function LocationSharingScreen() {
   const router  = useRouter();
-  const params  = useLocalSearchParams();
 
   const [screen,   setScreen]   = useState<Screen>('picker');
   const [mode,     setMode]     = useState<Mode>('current');
@@ -107,56 +105,72 @@ export default function LocationSharingScreen() {
 
     return () => {
       mounted = false;
-      stopSharing();
+      // inline cleanup for initial mount
+      liveSubRef.current?.remove();
+      liveSubRef.current = null;
+      if (updateRef.current) clearInterval(updateRef.current);
     };
   }, []);
 
   // ── Countdown timer ─────────────────────────────────────────
   useEffect(() => {
     if (screen !== 'active' || mode === 'manual') return;
-    if (timeLeft <= 0) { stopSharing(); return; }
+    if (timeLeft <= 0) {
+      // Inline stopSharing logic
+      liveSubRef.current?.remove();
+      liveSubRef.current = null;
+      if (updateRef.current) clearInterval(updateRef.current);
+      if (session) {
+        const db = getFirestore();
+        Promise.all([
+          deleteDoc(doc(db, 'location_shares', session.id)).catch(() => {}),
+          deleteDoc(doc(db, 'live_location',   session.id)).catch(() => {}),
+        ]).then(() => deleteSession(session.id)).then(() => setSession(null));
+      }
+      router.back();
+      return;
+    }
     const t = setInterval(() => setTimeLeft(v => v - 1), 1000);
     return () => clearInterval(t);
-  }, [screen, timeLeft, mode]);
+  }, [screen, timeLeft, mode, session, router]);
 
   // ── Live location push every 30s ────────────────────────────
   useEffect(() => {
     if (screen !== 'active' || mode === 'current' || !session) return;
     const sess = session;
+    const pushLiveLocation = async (s: D2DESession) => {
+      try {
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+        setMyCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude });
+
+        const payload: LocationPayload = {
+          lat:      loc.coords.latitude,
+          lng:      loc.coords.longitude,
+          ts:       Date.now(),
+          accuracy: loc.coords.accuracy ?? undefined,
+          address,
+          type:     'live',
+        };
+
+        const encrypted = await encryptLocation(payload, s);
+
+        const db = getFirestore();
+        await setDoc(doc(db, 'live_location', s.id), {
+          payload:   JSON.stringify(encrypted),
+          updatedAt: Date.now(),
+        });
+      } catch (e) {
+        console.warn('[LocationSharing] Live update failed:', e);
+      }
+    };
     updateRef.current = setInterval(() => pushLiveLocation(sess), 30000);
     return () => { if (updateRef.current) clearInterval(updateRef.current); };
-  }, [screen, session, mode]);
+  }, [screen, session, mode, address]);
 
   const fmt = (s: number) =>
     s >= 99999
       ? '∞'
       : `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
-
-  const pushLiveLocation = async (sess: D2DESession) => {
-    try {
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      setMyCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude });
-
-      const payload: LocationPayload = {
-        lat:      loc.coords.latitude,
-        lng:      loc.coords.longitude,
-        ts:       Date.now(),
-        accuracy: loc.coords.accuracy ?? undefined,
-        address,
-        type:     'live',
-      };
-
-      const encrypted = await encryptLocation(payload, sess);
-
-      const db = getFirestore();
-      await setDoc(doc(db, 'live_location', sess.id), {
-        payload:   JSON.stringify(encrypted),
-        updatedAt: Date.now(),
-      });
-    } catch (e) {
-      console.warn('[LocationSharing] Live update failed:', e);
-    }
-  };
 
   const startSharing = async (m: Mode, dur: number | null) => {
     if (!myCoords) {
@@ -179,7 +193,6 @@ export default function LocationSharingScreen() {
       };
 
       const encrypted   = await encryptLocation(payload, sess);
-      const sessionLink = encodeSessionLink(sess);
 
       const db = getFirestore();
       await setDoc(doc(db, 'location_shares', sess.id), {

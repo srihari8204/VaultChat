@@ -11,13 +11,12 @@
 //   6. Handle notification that launched app from killed state
 
 import { Buffer } from 'buffer';
-global.Buffer = Buffer;
 
 import { Stack, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import * as ScreenCapture from 'expo-screen-capture';
 import { StatusBar } from 'expo-status-bar';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, Platform } from 'react-native';
 import auth from '@react-native-firebase/auth';
 
 import { runSecurityCheck } from '../services/securityService';
@@ -27,6 +26,7 @@ import {
   setupNotificationListeners,
   handleInitialNotification,
 } from '../services/notificationService';
+global.Buffer = Buffer;
 
 export default function RootLayout() {
   const router = useRouter();
@@ -34,7 +34,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     // ── 1. Block screenshots app-wide ─────────────────────────
-    ScreenCapture.preventScreenCaptureAsync();
+    if (Platform.OS !== 'web') ScreenCapture.preventScreenCaptureAsync();
 
     // ── 2. Run security scan BEFORE showing any screen ─────────
     const runStartup = async () => {
@@ -83,7 +83,7 @@ export default function RootLayout() {
       ScreenCapture.allowScreenCaptureAsync();
       cleanupListeners();
     };
-  }, []);
+  }, [router]);
 
   // Show spinner while security check runs
   // Prevents any screen flashing before check completes
@@ -114,8 +114,6 @@ export default function RootLayout() {
         <Stack.Screen name="otp" />
         <Stack.Screen name="facescan" />
         <Stack.Screen name="biometric-setup" />
-        <Stack.Screen name="three-factor-verify" options={{ gestureEnabled: false }} />
-
         {/* Main app */}
         <Stack.Screen name="chats" />
         <Stack.Screen name="chat" />
@@ -177,7 +175,7 @@ export default function RootLayout() {
         <Stack.Screen name="trustscore" />
         <Stack.Screen name="vault-id" />
         <Stack.Screen name="meeting-scheduler" />
-        <Stack.Screen name="three-factor-verify" />
+        <Stack.Screen name="three-factor-verify" options={{ gestureEnabled: false }} />
         <Stack.Screen name="zero-knowledge" />
         <Stack.Screen name="decentralized-id" />
         <Stack.Screen name="bot-api" />
@@ -198,10 +196,6 @@ export default function RootLayout() {
         <Stack.Screen name="network-test" />
         <Stack.Screen name="file-viewer" />
         <Stack.Screen name="video-player" />
-        <Stack.Screen name="in-chat-search" />
-        <Stack.Screen name="message-reminder" />
-        <Stack.Screen name="contact-info" />
-        <Stack.Screen name="chat-wallpaper" />
         <Stack.Screen name="voice-speed" />
         <Stack.Screen name="video-notes" />
         <Stack.Screen name="slideshow" />

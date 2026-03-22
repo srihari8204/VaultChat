@@ -6,7 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList,
-  StatusBar, ActivityIndicator, Alert, ScrollView,
+  StatusBar, ActivityIndicator, Alert,
 } from 'react-native';
 import { useLocalSearchParams, Stack } from 'expo-router';
 import auth from '@react-native-firebase/auth';
@@ -29,29 +29,30 @@ export default function VoiceTranscribeScreen() {
   const [transcribing, setTranscribing] = useState(null);
   const [transcriptions, setTranscriptions] = useState({});
 
-  useEffect(() => { loadAudioMessages(); }, []);
+  useEffect(() => {
+    const loadAudioMessages = async () => {
+      setLoading(true);
+      try {
+        const snap = await firestore().collection('chats').doc(chatId)
+          .collection('messages')
+          .where('msgType', '==', 'audio')
+          .orderBy('createdAt', 'desc')
+          .limit(50)
+          .get();
+        const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setAudioMsgs(msgs);
 
-  const loadAudioMessages = async () => {
-    setLoading(true);
-    try {
-      const snap = await firestore().collection('chats').doc(chatId)
-        .collection('messages')
-        .where('msgType', '==', 'audio')
-        .orderBy('createdAt', 'desc')
-        .limit(50)
-        .get();
-      const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setAudioMsgs(msgs);
-
-      // Load existing transcriptions
-      const txns = {};
-      for (const msg of msgs) {
-        if (msg.transcription) txns[msg.id] = msg.transcription;
-      }
-      setTranscriptions(txns);
-    } catch {}
-    setLoading(false);
-  };
+        // Load existing transcriptions
+        const txns = {};
+        for (const msg of msgs) {
+          if (msg.transcription) txns[msg.id] = msg.transcription;
+        }
+        setTranscriptions(txns);
+      } catch {}
+      setLoading(false);
+    };
+    loadAudioMessages();
+  }, [chatId]);
 
   const transcribeMessage = async (msg) => {
     setTranscribing(msg.id);
@@ -65,13 +66,12 @@ export default function VoiceTranscribeScreen() {
           .update({ transcription: text, transcriptionConfidence: result.confidence });
         setTranscriptions(prev => ({ ...prev, [msg.id]: text }));
       }
-    } catch (e) { Alert.alert('Error', 'Transcription failed'); }
+    } catch { Alert.alert('Error', 'Transcription failed'); }
     setTranscribing(null);
   };
 
   // Generate realistic placeholder transcription
   const generateTranscriptionText = (msg) => {
-    const duration = msg.audioDuration || 5;
     const templates = [
       'Hey, just wanted to check in and see how you are doing.',
       'Can you call me back when you get a chance? It is important.',

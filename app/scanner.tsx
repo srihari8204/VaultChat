@@ -4,11 +4,11 @@
  * Step 2: Enhance (filters + adjustments)
  * Step 3: Export (8 formats + 6 share targets)
  */
-import React, { useState, useRef } from "react";
+import React, { useState } from "react";
 import {
   View, Text, TouchableOpacity, StyleSheet,
   ScrollView, Alert, ActivityIndicator,
-  Image, Platform, Animated, Share,
+  Image, Platform, Share,
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
@@ -117,7 +117,6 @@ export default function ScannerScreen() {
   const [processing,   setProcessing]   = useState(false);
   const [done,         setDone]         = useState(false);
 
-  const scaleAnim = useRef(new Animated.Value(1)).current;
 
   // -- Camera ------------------------------------------------------------------
   const openCamera = async () => {
@@ -126,11 +125,17 @@ export default function ScannerScreen() {
       Alert.alert("Permission needed", "Camera access required to scan documents.");
       return;
     }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ["images"],
-      quality: 1,
-      allowsEditing: true,
-    });
+    const result = Platform.OS === 'web'
+      ? await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ["images"],
+          quality: 1,
+          allowsEditing: true,
+        })
+      : await ImagePicker.launchCameraAsync({
+          mediaTypes: ["images"],
+          quality: 1,
+          allowsEditing: true,
+        });
     if (!result.canceled && result.assets[0]) {
       setImageUri(result.assets[0].uri);
       setTimeout(() => setStep(1), 400);
@@ -179,7 +184,7 @@ export default function ScannerScreen() {
       }
 
       setDone(true);
-    } catch (e) {
+    } catch {
       Alert.alert("Error", "Could not export document. Please try again.");
     } finally {
       setProcessing(false);
@@ -228,7 +233,7 @@ export default function ScannerScreen() {
               <LinearGradient colors={["#0d1929","#0a1420"]} style={s.viewfinderInner}>
                 <Text style={{ fontSize: 52, marginBottom: 14 }}>??</Text>
                 <Text style={s.vfTitle}>Position your document</Text>
-                <Text style={s.vfSub}>Make sure it's well lit and flat</Text>
+                <Text style={s.vfSub}>Make sure it&apos;s well lit and flat</Text>
                 {[[0,0],[1,0],[0,1],[1,1]].map(([x,y], i) => (
                   <View key={i} style={[s.corner,
                     x===1 && { right:16, left:undefined },

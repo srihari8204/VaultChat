@@ -40,7 +40,7 @@ export default function VideoPlayerScreen() {
   const lastTapRight = useRef(0);
 
   // Playback state
-  const [status, setStatus] = useState<AVPlaybackStatus | null>(null);
+  const [, setStatus] = useState<AVPlaybackStatus | null>(null);
   const [isPlaying, setIsPlaying] = useState(true);
   const [positionMs, setPositionMs] = useState(0);
   const [durationMs, setDurationMs] = useState(0);
@@ -109,7 +109,7 @@ export default function VideoPlayerScreen() {
       pinchRef.current = { active: true, initialDistance: dist };
       baseScale.current = (videoScale as any).__getValue ? (videoScale as any).__getValue() : 1;
     }
-  }, []);
+  }, [videoScale]);
 
   const onTouchMove = useCallback((e: any) => {
     if (pinchRef.current.active && e.nativeEvent.touches.length === 2) {
@@ -118,7 +118,7 @@ export default function VideoPlayerScreen() {
       const scale = Math.min(Math.max((dist / pinchRef.current.initialDistance) * baseScale.current, 0.5), 4);
       videoScale.setValue(scale);
     }
-  }, []);
+  }, [videoScale]);
 
   const onTouchEnd = useCallback(() => {
     if (pinchRef.current.active) {
@@ -128,7 +128,7 @@ export default function VideoPlayerScreen() {
         Animated.spring(videoScale, { toValue: 1, useNativeDriver: true }).start();
       }
     }
-  }, []);
+  }, [videoScale]);
 
   // --- Controls visibility ---
   const scheduleHideControls = useCallback(() => {
@@ -140,7 +140,7 @@ export default function VideoPlayerScreen() {
         });
       }
     }, 3000);
-  }, [isPlaying, isSeeking]);
+  }, [isPlaying, isSeeking, controlsOpacity]);
 
   const toggleControls = useCallback(() => {
     if (showControls) {
@@ -153,7 +153,7 @@ export default function VideoPlayerScreen() {
       Animated.timing(controlsOpacity, { toValue: 1, duration: 250, useNativeDriver: true }).start();
       scheduleHideControls();
     }
-  }, [showControls, scheduleHideControls]);
+  }, [showControls, scheduleHideControls, controlsOpacity]);
 
   useEffect(() => {
     if (showControls && isPlaying) scheduleHideControls();
@@ -186,7 +186,7 @@ export default function VideoPlayerScreen() {
     } else {
       await videoRef.current.playAsync();
     }
-  }, [isPlaying]);
+  }, [isPlaying, playBtnScale]);
 
   const seekRelative = useCallback(async (deltaMs: number) => {
     if (!videoRef.current) return;
@@ -226,7 +226,7 @@ export default function VideoPlayerScreen() {
   const handleClose = useCallback(async () => {
     try { await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP); } catch {}
     router.back();
-  }, []);
+  }, [router]);
 
   const handleShare = useCallback(async () => {
     try {
@@ -248,18 +248,17 @@ export default function VideoPlayerScreen() {
   }, []);
 
   // --- Double tap detection ---
-  const fireRipple = (side: 'left' | 'right') => {
-    const scaleAnim = side === 'left' ? rippleLeftScale : rippleRightScale;
-    const opacityAnim = side === 'left' ? rippleLeftOpacity : rippleRightOpacity;
-    scaleAnim.setValue(0);
-    opacityAnim.setValue(0.5);
-    Animated.parallel([
-      Animated.timing(scaleAnim, { toValue: 1, duration: 400, useNativeDriver: true }),
-      Animated.timing(opacityAnim, { toValue: 0, duration: 400, useNativeDriver: true }),
-    ]).start();
-  };
-
   const handleAreaTap = useCallback((side: 'left' | 'right') => {
+    const fireRipple = (s: 'left' | 'right') => {
+      const scaleAnim = s === 'left' ? rippleLeftScale : rippleRightScale;
+      const opacityAnim = s === 'left' ? rippleLeftOpacity : rippleRightOpacity;
+      scaleAnim.setValue(0);
+      opacityAnim.setValue(0.5);
+      Animated.parallel([
+        Animated.timing(scaleAnim, { toValue: 1, duration: 400, useNativeDriver: true }),
+        Animated.timing(opacityAnim, { toValue: 0, duration: 400, useNativeDriver: true }),
+      ]).start();
+    };
     const now = Date.now();
     const lastTap = side === 'left' ? lastTapLeft : lastTapRight;
     if (now - lastTap.current < 300) {
@@ -281,7 +280,7 @@ export default function VideoPlayerScreen() {
         }
       }, 300);
     }
-  }, [seekRelative, toggleControls]);
+  }, [seekRelative, toggleControls, rippleLeftScale, rippleRightScale, rippleLeftOpacity, rippleRightOpacity]);
 
   // --- Seek bar pan responder ---
   const seekBarWidth = useRef(SCREEN_W - 120);

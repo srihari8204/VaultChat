@@ -16,7 +16,7 @@ const C = { bg: '#020B18', accent: '#4A9FFF', green: '#10B981', card: '#0A1628',
 
 export default function CreatePollScreen() {
   const router = useRouter();
-  const { chatId, groupName } = useLocalSearchParams();
+  const { chatId } = useLocalSearchParams();
   const myUid = auth().currentUser?.uid || '';
   const [question, setQuestion] = useState('');
   const [options, setOptions] = useState(['', '']);
@@ -78,7 +78,7 @@ export default function CreatePollScreen() {
       });
 
       router.back();
-    } catch (e) { Alert.alert('Error', 'Could not create poll'); }
+    } catch { Alert.alert('Error', 'Could not create poll'); }
     setCreating(false);
   };
 

@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Animated, Dimensions, Easing, Modal, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { VaultID, destroyVaultID, generateIdentityCertificate, generateVaultID, getShareableVaultID, loadVaultID, saveVaultID, shortAddress, signMessage, updateTrustScore } from '../constants/vaultID';
+import { VaultID, destroyVaultID, generateIdentityCertificate, generateVaultID, loadVaultID, shortAddress, signMessage, updateTrustScore } from '../constants/vaultID';
 
 const { width } = Dimensions.get('window');
 
@@ -42,7 +42,7 @@ function VaultIDScreenContent() {
       Animated.timing(chainAnim,{toValue:0,duration:2000,useNativeDriver:true}),
     ])).start();
     loadID();
-  },[]);
+  },[chainAnim, fadeIn, pulse, rotate]);
 
   const loadID = async () => {
     const id = await loadVaultID();
@@ -60,7 +60,7 @@ function VaultIDScreenContent() {
       setShowCreate(false);
       setDisplayName(''); setBio('');
       Alert.alert('ðŸ§¬ VaultID Created!', 'Your blockchain identity is ready.\n\nNo phone number needed â€” ever!\n\nYour VaultTag: ' + id.vaultTag);
-    } catch(e) {
+    } catch {
       Alert.alert('Error','Failed to create VaultID. Try again.');
     }
     setCreating(false);
@@ -72,7 +72,7 @@ function VaultIDScreenContent() {
       const cert = await generateIdentityCertificate(vaultID);
       setCertificate(cert);
       setShowCert(true);
-    } catch(e) { Alert.alert('Error','Could not generate certificate'); }
+    } catch { Alert.alert('Error','Could not generate certificate'); }
   };
 
   const handleSign = async () => {
@@ -81,7 +81,7 @@ function VaultIDScreenContent() {
       const sig = await signMessage(msg);
       setSignedMsg(sig.substring(0,40)+'...');
       Alert.alert('âœ… Signed!','Message signed with your blockchain private key.\n\nThis proves you own this VaultID without revealing your private key.');
-    } catch(e) { Alert.alert('Error','Could not sign message'); }
+    } catch { Alert.alert('Error','Could not sign message'); }
   };
 
   const handleShare = async () => {

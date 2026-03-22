@@ -1,10 +1,9 @@
 // @ts-nocheck
 import { useRouter } from 'expo-router';
 import { useEffect, useRef } from 'react';
-import { Animated, Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 const FEATURES = [
   'Military-grade encryption',
@@ -67,7 +66,7 @@ function WelcomeContent() {
     setTimeout(() => {
       Animated.timing(disclaimerFade, { toValue: 1, duration: 800, useNativeDriver: true }).start();
     }, 800);
-  }, []);
+  }, [btnFade, btnSlide, disclaimerFade, featuresFade, featuresSlide, logoFade, logoSlide, titleFade, titleSlide]);
 
   return (
     <View style={S.container}>

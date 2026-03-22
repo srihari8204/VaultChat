@@ -64,7 +64,7 @@ function ContactRow({ c, all, onPress }: {
   const fade    = useRef(new Animated.Value(0)).current;
   useEffect(()=>{
     Animated.timing(fade,{toValue:1,duration:280,useNativeDriver:true}).start();
-  },[]);
+  },[fade]);
   return (
     <Animated.View style={{opacity:fade}}>
       <TouchableOpacity onPress={()=>onPress(c)} style={Ss.row} activeOpacity={0.7}>
@@ -106,19 +106,46 @@ export default function ContactsScreen() {
   const [syncing,  setSyncing]  = useState(false);
   const [tab,      setTab]      = useState<'all'|'vault'|'invite'>('all');
   const [myId,     setMyId]     = useState('');
-  const [reqCount, setReqCount] = useState(0);
+  const [, setReqCount] = useState(0);
 
-  useEffect(()=>{ init(); },[]);
-  useEffect(()=>{ applyFilter(); },[contacts,search,tab]);
-
-  const init = async () => {
-    const id = await AsyncStorage.getItem('vaultId')||'';
-    setMyId(id);
-    const cached = await getCachedContacts();
-    if (cached.length) { setContacts(cached); countReqs(cached); }
-    setLoading(false);
-    doSync(id, false);
-  };
+  useEffect(()=>{
+    const doSyncInEffect = async (id:string, show=true) => {
+      if (show) setSyncing(true);
+      try {
+        const ph = await readPhoneContacts();
+        const cs = await syncContactsWithServer(SERVER, id, ph);
+        setContacts(cs); countReqs(cs);
+      } catch(e:any) { console.warn('Sync:', e.message); }
+      finally { setSyncing(false); }
+    };
+    const init = async () => {
+      const id = await AsyncStorage.getItem('vaultId')||'';
+      setMyId(id);
+      const cached = await getCachedContacts();
+      if (cached.length) { setContacts(cached); countReqs(cached); }
+      setLoading(false);
+      doSyncInEffect(id, false);
+    };
+    init();
+  },[]);
+  useEffect(()=>{
+    const applyFilter = () => {
+      let list = contacts;
+      if (search.trim()) {
+        const q = search.toLowerCase();
+        list = list.filter(c =>
+          c.name.toLowerCase().includes(q) || c.phone.includes(q));
+      }
+      if (tab==='vault')  list = list.filter(c=>c.isOnVault);
+      if (tab==='invite') list = list.filter(c=>!c.isOnVault);
+      list = [...list].sort((a,b)=>{
+        if (a.isOnVault !== b.isOnVault) return a.isOnVault ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+      setFiltered(list);
+    };
+    applyFilter();
+  },[contacts,search,tab]);
 
   const doSync = async (id:string, show=true) => {
     if (show) setSyncing(true);
@@ -133,22 +160,6 @@ export default function ContactsScreen() {
   const countReqs = (list:VaultContact[]) => {
     // Requests from server come via socket — this counts locally cached ones
     setReqCount(0); // actual count managed by msgrequests screen
-  };
-
-  const applyFilter = () => {
-    let list = contacts;
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter(c =>
-        c.name.toLowerCase().includes(q) || c.phone.includes(q));
-    }
-    if (tab==='vault')  list = list.filter(c=>c.isOnVault);
-    if (tab==='invite') list = list.filter(c=>!c.isOnVault);
-    list = [...list].sort((a,b)=>{
-      if (a.isOnVault !== b.isOnVault) return a.isOnVault ? -1 : 1;
-      return a.name.localeCompare(b.name);
-    });
-    setFiltered(list);
   };
 
   const onPress = (c:VaultContact) => {

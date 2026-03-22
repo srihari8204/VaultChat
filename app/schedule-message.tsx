@@ -8,7 +8,7 @@ import {
   View, Text, TouchableOpacity, StyleSheet, TextInput,
   Alert, StatusBar, FlatList, ActivityIndicator,
 } from 'react-native';
-import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
+import { useLocalSearchParams, Stack } from 'expo-router';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 
@@ -23,29 +23,29 @@ const QUICK_TIMES = [
 ];
 
 export default function ScheduleMessageScreen() {
-  const router = useRouter();
   const { chatId, peerName } = useLocalSearchParams();
   const myUid = auth().currentUser?.uid || '';
   const [message, setMessage] = useState('');
   const [scheduled, setScheduled] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
   const [scheduling, setScheduling] = useState(false);
   const [tab, setTab] = useState('new');
 
-  useEffect(() => { loadScheduled(); }, []);
-
-  const loadScheduled = async () => {
-    setLoading(true);
-    try {
-      const snap = await firestore().collection('users').doc(myUid)
-        .collection('scheduledMessages')
-        .where('sent', '==', false)
-        .orderBy('sendAt', 'asc')
-        .get();
-      setScheduled(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    } catch {}
-    setLoading(false);
-  };
+  useEffect(() => {
+    const loadScheduled = async () => {
+      setLoading(true);
+      try {
+        const snap = await firestore().collection('users').doc(myUid)
+          .collection('scheduledMessages')
+          .where('sent', '==', false)
+          .orderBy('sendAt', 'asc')
+          .get();
+        setScheduled(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch {}
+      setLoading(false);
+    };
+    loadScheduled();
+  }, [myUid]);
 
   const getScheduleTime = (mins) => {
     const now = new Date();
@@ -81,7 +81,7 @@ export default function ScheduleMessageScreen() {
       setMessage('');
       await loadScheduled();
       Alert.alert('Scheduled!', 'Message will be sent at ' + sendAt.toLocaleString());
-    } catch (e) { Alert.alert('Error', 'Could not schedule message'); }
+    } catch { Alert.alert('Error', 'Could not schedule message'); }
     setScheduling(false);
   };
 

@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
+import { Stack } from 'expo-router';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 
@@ -19,7 +19,6 @@ interface StarredMsg {
 }
 
 export default function StarredScreen() {
-  const router  = useRouter();
   const myUid   = auth().currentUser?.uid ?? '';
   const [items, setItems] = useState<StarredMsg[]>([]);
   const [loading, setLoading] = useState(true);

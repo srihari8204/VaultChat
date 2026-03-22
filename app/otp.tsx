@@ -7,11 +7,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
-  StyleSheet, Vibration, Animated, Keyboard, Platform, AppState,
+  StyleSheet, Animated, Keyboard, AppState, Platform,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { sendOTP, verifyOTP } from './(constants)/authService';
 
 export default function OTPScreen() {
@@ -40,8 +41,19 @@ export default function OTPScreen() {
       Animated.timing(fadeIn, { toValue: 1, duration: 600, useNativeDriver: true }),
       Animated.spring(slideUp, { toValue: 0, tension: 60, friction: 12, useNativeDriver: true }),
     ]).start();
-    doSendOTP();
-  }, []);
+    const doInitialSend = async () => {
+      try {
+        setLoading(true);
+        setError('');
+        await sendOTP(phone as string);
+      } catch (e: any) {
+        setError(e?.message || 'Failed to send OTP');
+      } finally {
+        setLoading(false);
+      }
+    };
+    doInitialSend();
+  }, [fadeIn, slideUp, phone]);
 
   // ── Loading dots animation ─────────────────────────────────────
   useEffect(() => {
@@ -55,7 +67,7 @@ export default function OTPScreen() {
     );
     anims.forEach(a => a.start());
     return () => anims.forEach(a => a.stop());
-  }, [loading]);
+  }, [loading, dotAnims]);
 
   // ── Countdown ──────────────────────────────────────────────────
   useEffect(() => {
@@ -67,6 +79,43 @@ export default function OTPScreen() {
   // ── OTP Auto-capture: clipboard monitoring ─────────────────────
   // When user switches back from SMS app, check clipboard for 6-digit code
   useEffect(() => {
+    const shakeInEffect = () => {
+      Animated.sequence([
+        Animated.timing(shakeAnim, { toValue: 15, duration: 50, useNativeDriver: true }),
+        Animated.timing(shakeAnim, { toValue: -15, duration: 50, useNativeDriver: true }),
+        Animated.timing(shakeAnim, { toValue: 10, duration: 50, useNativeDriver: true }),
+        Animated.timing(shakeAnim, { toValue: -10, duration: 50, useNativeDriver: true }),
+        Animated.timing(shakeAnim, { toValue: 0, duration: 50, useNativeDriver: true }),
+      ]).start();
+    };
+    const doVerify = async (code: string) => {
+      try {
+        setLoading(true);
+        setError('');
+        const ok = await verifyOTP(code);
+        if (ok) {
+          if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          Animated.spring(successScale, { toValue: 1, tension: 50, friction: 8, useNativeDriver: true }).start();
+          await AsyncStorage.setItem('test_auth_done', 'true');
+          await AsyncStorage.setItem('vaultchat_setup_complete', 'true');
+          setTimeout(() => router.replace('/chats' as any), 800);
+        } else {
+          shakeInEffect();
+          setError('Invalid code. Try again.');
+          setOtp(['','','','','','']);
+          inputs.current[0]?.focus();
+          if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        }
+      } catch (e: any) {
+        shakeInEffect();
+        setError(e?.message || 'Invalid code. Try again.');
+        setOtp(['','','','','','']);
+        inputs.current[0]?.focus();
+        if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      } finally {
+        setLoading(false);
+      }
+    };
     const sub = AppState.addEventListener('change', async (nextState) => {
       if (appStateRef.current.match(/inactive|background/) && nextState === 'active') {
         try {
@@ -76,16 +125,16 @@ export default function OTPScreen() {
             const digits = match[1].split('');
             setOtp(digits);
             setAutoDetected(true);
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             // Auto-verify after short delay
-            setTimeout(() => doVerifyOTP(match[1]), 500);
+            setTimeout(() => doVerify(match[1]), 500);
           }
         } catch {}
       }
       appStateRef.current = nextState;
     });
     return () => sub.remove();
-  }, [autoDetected]);
+  }, [autoDetected, router, successScale, shakeAnim]);
 
   // ── Send OTP ───────────────────────────────────────────────────
   const doSendOTP = async () => {
@@ -129,7 +178,7 @@ export default function OTPScreen() {
     if (val && idx < 5) inputs.current[idx + 1]?.focus();
     if (!val && idx > 0) inputs.current[idx - 1]?.focus();
     if (next.every(d => d !== '') && val) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       doVerifyOTP(next.join(''));
     }
   };
@@ -162,9 +211,8 @@ export default function OTPScreen() {
       setError('');
       const ok = await verifyOTP(code);
       if (ok) {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Animated.spring(successScale, { toValue: 1, tension: 50, friction: 8, useNativeDriver: true }).start();
-        const AsyncStorage = require('@react-native-async-storage/async-storage').default;
         await AsyncStorage.setItem('test_auth_done', 'true');
         await AsyncStorage.setItem('vaultchat_setup_complete', 'true');
         setTimeout(() => router.replace('/chats' as any), 800);
@@ -173,14 +221,14 @@ export default function OTPScreen() {
         setError('Invalid code. Try again.');
         setOtp(['','','','','','']);
         inputs.current[0]?.focus();
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       }
     } catch (e: any) {
       shake();
       setError(e?.message || 'Invalid code. Try again.');
       setOtp(['','','','','','']);
       inputs.current[0]?.focus();
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {
       setLoading(false);
     }

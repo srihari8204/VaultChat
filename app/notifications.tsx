@@ -50,7 +50,7 @@ function NotificationsContent() {
       Animated.timing(glowAnim,{toValue:1,duration:1800,easing:Easing.inOut(Easing.ease),useNativeDriver:false}),
       Animated.timing(glowAnim,{toValue:0,duration:1800,easing:Easing.inOut(Easing.ease),useNativeDriver:false}),
     ])).start();
-  },[]);
+  },[fadeIn, glowAnim]);
 
   useEffect(()=>{
     if(panicCountdown<=0)return;

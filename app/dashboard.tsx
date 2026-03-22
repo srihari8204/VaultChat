@@ -58,7 +58,7 @@ function DashboardContent() {
       Animated.timing(pulseAnim,{toValue:1,duration:2500,easing:Easing.inOut(Easing.ease),useNativeDriver:true}),
     ])).start();
     Animated.timing(scoreAnim,{toValue:94,duration:1400,useNativeDriver:false}).start();
-  },[]);
+  },[fadeAnim, pulseAnim, radarAnim, scoreAnim]);
 
   const runScan = () => {
     if(scanning) return;

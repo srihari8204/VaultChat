@@ -11,7 +11,7 @@ import {
   View, Text, TouchableOpacity, StyleSheet, FlatList,
   Alert, StatusBar, ActivityIndicator, TextInput,
 } from 'react-native';
-import { useRouter, Stack } from 'expo-router';
+import { Stack } from 'expo-router';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 
@@ -19,7 +19,6 @@ const MAX_TRUSTED = 3;
 const C = { bg: '#020B18', accent: '#00D4AA', danger: '#FF3C6E', primary: '#4A9FFF', card: '#0A1628' };
 
 export default function TrustedContactsScreen() {
-  const router = useRouter();
   const myUid = auth().currentUser?.uid || '';
   const [trusted, setTrusted] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,25 +26,26 @@ export default function TrustedContactsScreen() {
   const [searchId, setSearchId] = useState('');
   const [searching, setSearching] = useState(false);
 
-  useEffect(() => { loadTrusted(); }, []);
-
-  const loadTrusted = async () => {
-    setLoading(true);
-    try {
-      const snap = await firestore().collection('users').doc(myUid).get();
-      const ids: string[] = snap.data()?.trustedContacts || [];
-      const list: any[] = [];
-      for (const uid of ids) {
-        try {
-          const uSnap = await firestore().collection('users').doc(uid).get();
-          const d = uSnap.data();
-          list.push({ uid, name: d?.name || 'Unknown', vaultId: d?.vaultId || uid.slice(0, 8), online: d?.online || false });
-        } catch {}
-      }
-      setTrusted(list);
-    } catch {}
-    setLoading(false);
-  };
+  useEffect(() => {
+    const loadTrusted = async () => {
+      setLoading(true);
+      try {
+        const snap = await firestore().collection('users').doc(myUid).get();
+        const ids: string[] = snap.data()?.trustedContacts || [];
+        const list: any[] = [];
+        for (const uid of ids) {
+          try {
+            const uSnap = await firestore().collection('users').doc(uid).get();
+            const d = uSnap.data();
+            list.push({ uid, name: d?.name || 'Unknown', vaultId: d?.vaultId || uid.slice(0, 8), online: d?.online || false });
+          } catch {}
+        }
+        setTrusted(list);
+      } catch {}
+      setLoading(false);
+    };
+    loadTrusted();
+  }, [myUid]);
 
   const addByVaultId = async () => {
     const id = searchId.trim().toLowerCase().replace('@', '');
@@ -77,7 +77,7 @@ export default function TrustedContactsScreen() {
       setSearchId('');
       setAdding(false);
       Alert.alert('Added!', (peer.name || id) + ' is now a trusted contact. They will receive alerts if you activate duress mode.');
-    } catch (e) { Alert.alert('Error', 'Could not add contact'); }
+    } catch { Alert.alert('Error', 'Could not add contact'); }
     setSearching(false);
   };
 

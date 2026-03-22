@@ -1,0 +1,255 @@
+env: load .env.local
+env: export SENTRY_AUTH_TOKEN EXPO_PUBLIC_SUPABASE_URL EXPO_PUBLIC_SUPABASE_ANON_KEY
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\alerts.tsx
+   20:8  warning  Using exported name 'BottomNav' as identifier for default import                                               import/no-named-as-default
+   76:9  warning  '_router' is assigned a value but never used                                                                   @typescript-eslint/no-unused-vars
+  231:6  warning  React Hook useCallback has an unnecessary dependency: 'uid'. Either exclude it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\app-lock-chats.tsx
+  42:7   warning  '_SW' is assigned a value but never used            @typescript-eslint/no-unused-vars
+  93:10  warning  '_hasBiometric' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\behavioral.tsx
+  8:16  warning  '_width' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\bookmarks.tsx
+  27:9  warning  The 'loadBookmarks' function makes the dependencies of useEffect Hook (at line 25) change on every render. Move it inside the useEffect callback. Alternatively, wrap the definition of 'loadBookmarks' in its own useCallback() Hook  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\broadcast.tsx
+  20:9   warning  '_router' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  63:14  warning  '_e' is defined but never used                @typescript-eslint/no-unused-vars
+  92:14  warning  '_e' is defined but never used                @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\call-recording.tsx
+   62:10  warning  '_currentUri' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  264:14  warning  '_e' is defined but never used                    @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\calls.tsx
+   20:8   warning  Using exported name 'BottomNav' as identifier for default import                                               import/no-named-as-default
+   68:10  warning  '_statusIcon' is defined but never used                                                                        @typescript-eslint/no-unused-vars
+  231:6   warning  React Hook useCallback has an unnecessary dependency: 'uid'. Either exclude it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\camera.tsx
+  56:14  warning  '_e' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\chat-backup.tsx
+  16:16  warning  '_SW' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\chat-summary.tsx
+  79:10  warning  '_msgCount' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  98:14  warning  '_e' is defined but never used                  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\chat-themes.tsx
+  53:9  warning  '_router' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\chat-wallpaper.tsx
+  65:9  warning  The 'loadWallpaper' function makes the dependencies of useEffect Hook (at line 63) change on every render. Move it inside the useEffect callback. Alternatively, wrap the definition of 'loadWallpaper' in its own useCallback() Hook  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\chat.tsx
+  415:14  warning  '_e' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\contacts.tsx
+  109:10  warning  '_reqCount' is assigned a value but never used                                                                                                                                                                                      @typescript-eslint/no-unused-vars
+  114:9   warning  The 'init' function makes the dependencies of useEffect Hook (at line 111) change on every render. Move it inside the useEffect callback. Alternatively, wrap the definition of 'init' in its own useCallback() Hook                react-hooks/exhaustive-deps
+  138:9   warning  The 'applyFilter' function makes the dependencies of useEffect Hook (at line 112) change on every render. Move it inside the useEffect callback. Alternatively, wrap the definition of 'applyFilter' in its own useCallback() Hook  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\create-poll.tsx
+  19:30  warning  '_groupName' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  81:14  warning  '_e' is defined but never used                   @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\decentralized-id.tsx
+  46:9  warning  '_router' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\deepfake.tsx
+  74:9  warning  The 'captureAndAnalyze' function makes the dependencies of useEffect Hook (at line 52) change on every render. To fix this, wrap the definition of 'captureAndAnalyze' in its own useCallback() Hook  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\digital-wellbeing.tsx
+  136:9  warning  '_ringCircumference' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\docscanner.tsx
+  48:9  warning  '_scanAnim' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\email-bridge.tsx
+  20:16  warning  '_width' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\emergency-sos.tsx
+   20:16  warning  '_SW' is assigned a value but never used                                                                                                                                                                                                           @typescript-eslint/no-unused-vars
+   93:9   warning  The 'loadTrustedContacts' function makes the dependencies of useEffect Hook (at line 65) change on every render. Move it inside the useEffect callback. Alternatively, wrap the definition of 'loadTrustedContacts' in its own useCallback() Hook  react-hooks/exhaustive-deps
+  112:9   warning  The 'loadHistory' function makes the dependencies of useEffect Hook (at line 65) change on every render. To fix this, wrap the definition of 'loadHistory' in its own useCallback() Hook                                                           react-hooks/exhaustive-deps
+  129:9   warning  The 'startCountdown' function makes the dependencies of useEffect Hook (at line 91) change on every render. To fix this, wrap the definition of 'startCountdown' in its own useCallback() Hook                                                     react-hooks/exhaustive-deps
+  217:14  warning  '_e' is defined but never used                                                                                                                                                                                                                     @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\face-verify.tsx
+  94:9  warning  The 'triggerBio' function makes the dependencies of useEffect Hook (at line 121) change on every render. Move it inside the useEffect callback. Alternatively, wrap the definition of 'triggerBio' in its own useCallback() Hook  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\facescan.tsx
+  156:9  warning  The 'startScan' function makes the dependencies of useEffect Hook (at line 136) change on every render. To fix this, wrap the definition of 'startScan' in its own useCallback() Hook  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\family.tsx
+  43:9  warning  '_pulseAnim' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\file-preview.tsx
+   16:16  warning  '_SW' is assigned a value but never used                                                                                                                                                                                      @typescript-eslint/no-unused-vars
+  143:9   warning  The 'loadFile' function makes the dependencies of useEffect Hook (at line 141) change on every render. Move it inside the useEffect callback. Alternatively, wrap the definition of 'loadFile' in its own useCallback() Hook  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\file-viewer.tsx
+  193:9  warning  The 'loadFileMeta' function makes the dependencies of useEffect Hook (at line 183) change on every render. To fix this, wrap the definition of 'loadFileMeta' in its own useCallback() Hook  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\filevault.tsx
+  59:1126  warning  '_e' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\group-admin.tsx
+   43:7  warning  '_SW' is assigned a value but never used                                                                                                                                                                                                @typescript-eslint/no-unused-vars
+  118:9  warning  The 'loadGroupData' function makes the dependencies of useEffect Hook (at line 116) change on every render. Move it inside the useEffect callback. Alternatively, wrap the definition of 'loadGroupData' in its own useCallback() Hook  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\group-calls.tsx
+  26:19  warning  '_chatId' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\image-editor.tsx
+   61:10  warning  '_draggingTextId' is assigned a value but never used     @typescript-eslint/no-unused-vars
+   61:27  warning  '_setDraggingTextId' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  103:14  warning  '_e' is defined but never used                           @typescript-eslint/no-unused-vars
+  206:15  warning  '_bFactor' is assigned a value but never used            @typescript-eslint/no-unused-vars
+  220:14  warning  '_e' is defined but never used                           @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\in-chat-search.tsx
+   16:16  warning  '_SW' is assigned a value but never used      @typescript-eslint/no-unused-vars
+  107:11  warning  '_before' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  109:11  warning  '_after' is assigned a value but never used   @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\invite-link.tsx
+  21:39  warning  '_isGroup' is assigned a value but never used                                                                                                                                         @typescript-eslint/no-unused-vars
+  29:9   warning  The 'loadLinks' function makes the dependencies of useEffect Hook (at line 27) change on every render. To fix this, wrap the definition of 'loadLinks' in its own useCallback() Hook  react-hooks/exhaustive-deps
+  60:14  warning  '_e' is defined but never used                                                                                                                                                        @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\location-sharing.tsx
+   69:9   warning  '_params' is assigned a value but never used                                                                                                                                                         @typescript-eslint/no-unused-vars
+  135:9   warning  The 'pushLiveLocation' function makes the dependencies of useEffect Hook (at line 128) change on every render. To fix this, wrap the definition of 'pushLiveLocation' in its own useCallback() Hook  react-hooks/exhaustive-deps
+  182:13  warning  '_sessionLink' is assigned a value but never used                                                                                                                                                    @typescript-eslint/no-unused-vars
+  213:9   warning  The 'stopSharing' function makes the dependencies of useEffect Hook (at line 112) change on every render. To fix this, wrap the definition of 'stopSharing' in its own useCallback() Hook            react-hooks/exhaustive-deps
+  213:9   warning  The 'stopSharing' function makes the dependencies of useEffect Hook (at line 120) change on every render. To fix this, wrap the definition of 'stopSharing' in its own useCallback() Hook            react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\location.tsx
+  75:9  warning  The 'requestLocation' function makes the dependencies of useEffect Hook (at line 68) change on every render. To fix this, wrap the definition of 'requestLocation' in its own useCallback() Hook  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\lock.tsx
+   22:16  warning  '_SCREEN_W' is assigned a value but never used                                                                                                                                                     @typescript-eslint/no-unused-vars
+  123:9   warning  The 'handleBiometric' function makes the dependencies of useEffect Hook (at line 121) change on every render. To fix this, wrap the definition of 'handleBiometric' in its own useCallback() Hook  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\login-history.tsx
+  25:9  warning  The 'loadSessions' function makes the dependencies of useEffect Hook (at line 23) change on every render. Move it inside the useEffect callback. Alternatively, wrap the definition of 'loadSessions' in its own useCallback() Hook  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\media-gallery.tsx
+  29:9  warning  The 'loadMedia' function makes the dependencies of useEffect Hook (at line 27) change on every render. Move it inside the useEffect callback. Alternatively, wrap the definition of 'loadMedia' in its own useCallback() Hook  react-hooks/exhaustive-deps
+  52:9  warning  '_current' is assigned a value but never used                                                                                                                                                                                  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\meeting-scheduler.tsx
+  443:14  warning  '_e' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\memoryshield.tsx
+  73:14  warning  '_e' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\network-test.tsx
+  47:10  warning  '_connectionType' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\offline-mode.tsx
+  85:9  warning  The 'startPulse' function makes the dependencies of useEffect Hook (at line 83) change on every render. Move it inside the useEffect callback. Alternatively, wrap the definition of 'startPulse' in its own useCallback() Hook  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\otp.tsx
+   92:9  warning  The 'doSendOTP' function makes the dependencies of useEffect Hook (at line 45) change on every render. To fix this, wrap the definition of 'doSendOTP' in its own useCallback() Hook      react-hooks/exhaustive-deps
+  160:9  warning  The 'doVerifyOTP' function makes the dependencies of useEffect Hook (at line 89) change on every render. To fix this, wrap the definition of 'doVerifyOTP' in its own useCallback() Hook  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\privacy-dashboard.tsx
+   40:7   warning  '_SW' is assigned a value but never used              @typescript-eslint/no-unused-vars
+  101:7   warning  '_AnimatedCircle' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  107:10  warning  '_loading' is assigned a value but never used         @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\receipt-control.tsx
+  27:9  warning  The 'loadData' function makes the dependencies of useEffect Hook (at line 25) change on every render. Move it inside the useEffect callback. Alternatively, wrap the definition of 'loadData' in its own useCallback() Hook  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\recovery.tsx
+  134:9  warning  '_lockBorderColor' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\scanner.tsx
+  120:9  warning  '_scaleAnim' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\schedule-message.tsx
+  26:9   warning  '_router' is assigned a value but never used                                                                                                                                                  @typescript-eslint/no-unused-vars
+  31:10  warning  '_loading' is assigned a value but never used                                                                                                                                                 @typescript-eslint/no-unused-vars
+  37:9   warning  The 'loadScheduled' function makes the dependencies of useEffect Hook (at line 35) change on every render. To fix this, wrap the definition of 'loadScheduled' in its own useCallback() Hook  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\signup.tsx
+  13:16  warning  '_SCREEN_W' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\slideshow.tsx
+  29:9  warning  '_fadeAnim' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\smart-notifications.tsx
+  39:17  warning  '_setStats' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\starred.tsx
+  22:9  warning  '_router' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\status.tsx
+   24:16  warning  '_SW' is assigned a value but never used      @typescript-eslint/no-unused-vars
+  360:9   warning  '_router' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\stickers.tsx
+  41:9  warning  The 'loadCustomPacks' function makes the dependencies of useEffect Hook (at line 39) change on every render. To fix this, wrap the definition of 'loadCustomPacks' in its own useCallback() Hook  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\storage-manager.tsx
+   16:16  warning  '_SW' is assigned a value but never used          @typescript-eslint/no-unused-vars
+   84:9   warning  '_totalBytes' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  118:13  warning  '_chatKeys' is assigned a value but never used    @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\three-factor-verify.tsx
+  44:28  warning  '_SH' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\trusted-contacts.tsx
+  22:9  warning  '_router' is assigned a value but never used                                                                                                                                                                                       @typescript-eslint/no-unused-vars
+  32:9  warning  The 'loadTrusted' function makes the dependencies of useEffect Hook (at line 30) change on every render. Move it inside the useEffect callback. Alternatively, wrap the definition of 'loadTrusted' in its own useCallback() Hook  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\vault-features.tsx
+  96:10  warning  '_saving' is assigned a value but never used     @typescript-eslint/no-unused-vars
+  96:26  warning  '_setSaving' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\vaultbeam.tsx
+  24:9  warning  '_router' is assigned a value but never used                                                                                                                                                                                                   @typescript-eslint/no-unused-vars
+  63:9  warning  The 'listenForIncoming' function makes the dependencies of useEffect Hook (at line 37) change on every render. Move it inside the useEffect callback. Alternatively, wrap the definition of 'listenForIncoming' in its own useCallback() Hook  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\video-notes.tsx
+  24:9  warning  '_progressAnim' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\video-player.tsx
+   43:10  warning  '_status' is assigned a value but never used                                                                                                                                                                                          @typescript-eslint/no-unused-vars
+  251:9   warning  The 'fireRipple' function makes the dependencies of useCallback Hook (at line 284) change on every render. Move it inside the useCallback callback. Alternatively, wrap the definition of 'fireRipple' in its own useCallback() Hook  react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\videocall.tsx
+  243:9  warning  The 'initiateCall' function makes the dependencies of useEffect Hook (at line 238) change on every render. Move it inside the useEffect callback. Alternatively, wrap the definition of 'initiateCall' in its own useCallback() Hook  react-hooks/exhaustive-deps
+  346:9  warning  The 'endCall' function makes the dependencies of useEffect Hook (at line 238) change on every render. To fix this, wrap the definition of 'endCall' in its own useCallback() Hook                                                     react-hooks/exhaustive-deps
+  354:9  warning  The 'cleanup' function makes the dependencies of useEffect Hook (at line 238) change on every render. To fix this, wrap the definition of 'cleanup' in its own useCallback() Hook                                                     react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\voice-speed.tsx
+  16:9  warning  '_router' is assigned a value but never used                                                                                                                                                                                   @typescript-eslint/no-unused-vars
+  36:9  warning  The 'loadAudio' function makes the dependencies of useEffect Hook (at line 34) change on every render. Move it inside the useEffect callback. Alternatively, wrap the definition of 'loadAudio' in its own useCallback() Hook  react-hooks/exhaustive-deps
+  75:9  warning  '_changeSpeed' is assigned a value but never used                                                                                                                                                                              @typescript-eslint/no-unused-vars
+  84:9  warning  '_seekTo' is assigned a value but never used                                                                                                                                                                                   @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\voice-transcribe.tsx
+  34:9   warning  The 'loadAudioMessages' function makes the dependencies of useEffect Hook (at line 32) change on every render. Move it inside the useEffect callback. Alternatively, wrap the definition of 'loadAudioMessages' in its own useCallback() Hook  react-hooks/exhaustive-deps
+  74:11  warning  '_duration' is assigned a value but never used                                                                                                                                                                                                 @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\voicecall.tsx
+  173:9  warning  The 'makeCall' function makes the dependencies of useEffect Hook (at line 171) change on every render. Move it inside the useEffect callback. Alternatively, wrap the definition of 'makeCall' in its own useCallback() Hook  react-hooks/exhaustive-deps
+  223:9  warning  The 'endCall' function makes the dependencies of useEffect Hook (at line 171) change on every render. To fix this, wrap the definition of 'endCall' in its own useCallback() Hook                                             react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\welcome.tsx
+  7:16  warning  '_SCREEN_WIDTH' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\Vaultchat backup\app\whiteboard.tsx
+  15:16  warning  '_SW' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  15:29  warning  '_SH' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+✖ 118 problems (0 errors, 118 warnings)
+

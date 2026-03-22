@@ -7,9 +7,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList,
-  StatusBar, Alert, ActivityIndicator, Animated,
+  StatusBar, Alert, Animated,
 } from 'react-native';
-import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
+import { useLocalSearchParams, Stack } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import auth from '@react-native-firebase/auth';
@@ -21,7 +21,6 @@ const CHUNK_SIZE = 16384; // 16KB chunks for WebRTC
 const TRANSFER_KEY = 'vc_active_transfers';
 
 export default function VaultBeamScreen() {
-  const router = useRouter();
   const { chatId, peerUid, peerName } = useLocalSearchParams();
   const myUid = auth().currentUser?.uid || '';
   const [tab, setTab] = useState('send');
@@ -34,7 +33,24 @@ export default function VaultBeamScreen() {
   const [pendingReceive, setPendingReceive] = useState([]);
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
-  useEffect(() => { loadHistory(); listenForIncoming(); }, []);
+  useEffect(() => {
+    const loadHistory = async () => {
+      try {
+        const raw = await AsyncStorage.getItem(TRANSFER_KEY);
+        if (raw) setHistory(JSON.parse(raw));
+      } catch {}
+    };
+    loadHistory();
+    if (!chatId) return;
+    const unsub = firestore().collection('chats').doc(chatId)
+      .collection('vaultbeam')
+      .where('recipientUid', '==', myUid)
+      .where('status', '==', 'pending')
+      .onSnapshot(snap => {
+        setPendingReceive(snap?.docs.map(d => ({ id: d.id, ...d.data() })) || []);
+      }, () => {});
+    return () => unsub();
+  }, [chatId, myUid]);
 
   useEffect(() => {
     if (sending || receiving) {
@@ -45,31 +61,12 @@ export default function VaultBeamScreen() {
       pulse.start();
       return () => pulse.stop();
     }
-  }, [sending, receiving]);
-
-  const loadHistory = async () => {
-    try {
-      const raw = await AsyncStorage.getItem(TRANSFER_KEY);
-      if (raw) setHistory(JSON.parse(raw));
-    } catch {}
-  };
+  }, [sending, receiving, pulseAnim]);
 
   const saveHistory = async (entry) => {
     const updated = [entry, ...history].slice(0, 50);
     setHistory(updated);
     await AsyncStorage.setItem(TRANSFER_KEY, JSON.stringify(updated));
-  };
-
-  const listenForIncoming = () => {
-    if (!chatId) return;
-    const unsub = firestore().collection('chats').doc(chatId)
-      .collection('vaultbeam')
-      .where('recipientUid', '==', myUid)
-      .where('status', '==', 'pending')
-      .onSnapshot(snap => {
-        setPendingReceive(snap?.docs.map(d => ({ id: d.id, ...d.data() })) || []);
-      }, () => {});
-    return unsub;
   };
 
   const pickAndSend = async () => {
@@ -191,7 +188,7 @@ export default function VaultBeamScreen() {
       setReceiving(false);
       setProgress(0);
       Alert.alert('File Received!', transfer.fileName + ' saved securely');
-    } catch (e) {
+    } catch {
       setReceiving(false);
       Alert.alert('Error', 'Transfer failed');
     }

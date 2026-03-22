@@ -3,7 +3,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Animated, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Animated, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 
 const C = { bg:'#020B18',surface:'rgba(10,22,40,0.85)',primary:'#4A9FFF',secondary:'#7C3AED',accent:'#10B981',danger:'#EF4444',warning:'#F59E0B',border:'rgba(74,159,255,0.15)',borderDim:'rgba(255,255,255,0.06)',text:'#FFFFFF',textDim:'rgba(255,255,255,0.5)',textFaint:'rgba(255,255,255,0.22)' };
@@ -45,7 +45,7 @@ function FileVaultContent() {
   const [navTab,setNavTab]=useState('vault');
   const fadeIn=useRef(new Animated.Value(0)).current;
 
-  useEffect(()=>{ Animated.timing(fadeIn,{toValue:1,duration:500,useNativeDriver:true}).start(); },[]);
+  useEffect(()=>{ Animated.timing(fadeIn,{toValue:1,duration:500,useNativeDriver:true}).start(); },[fadeIn]);
 
   const fmtTime=(ts:number)=>{ const d=Date.now()-ts; if(d<3600000)return Math.floor(d/60000)+'m ago'; if(d<86400000)return Math.floor(d/3600000)+'h ago'; return Math.floor(d/86400000)+'d ago'; };
 
@@ -56,7 +56,7 @@ function FileVaultContent() {
   const deleteFile=(file:any)=>{ Alert.alert('Delete File','Permanently delete '+file.name+'?',[{text:'Cancel',style:'cancel'},{text:'Delete',style:'destructive',onPress:()=>{ setFiles(prev=>prev.filter((f:any)=>f.id!==file.id)); setFolders(prev=>prev.map((fo:any)=>fo.id===file.folderId?{...fo,fileCount:Math.max(0,fo.fileCount-1)}:fo)); }}]); };
   const createFolder=()=>{ if(!newFolderName.trim())return; const colors=[C.primary,C.secondary,C.accent,C.warning,C.danger]; const newFolder={id:Date.now().toString(),name:newFolderName.trim(),emoji:'📁',isLocked:newFolderLocked,fileCount:0,color:colors[Math.floor(Math.random()*colors.length)]}; setFolders(prev=>[newFolder,...prev]); setShowCreateFolder(false); setNewFolderName(''); setNewFolderLocked(false); setNewFolderPassword(''); };
 
-  const addFile=async(source:'camera'|'gallery'|'document')=>{ setShowAddFile(false); try { let name='',size='',type='other'; if(source==='camera'){ const r=await ImagePicker.launchCameraAsync({quality:0.8}); if(r.canceled)return; name='photo_'+Date.now()+'.jpg'; size='~2 MB'; type='image'; } else if(source==='gallery'){ const r=await ImagePicker.launchImageLibraryAsync({quality:0.8}); if(r.canceled)return; name=r.assets[0].fileName||'media_'+Date.now(); size='~1 MB'; type=r.assets[0].type==='video'?'video':'image'; } else { const r=await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true }); if(r.canceled)return; name=r.assets[0].name; size='~1 MB'; type='document'; } const newFile={id:Date.now().toString(),name,size,type,folderId:activeFolder?.id||'2',addedAt:Date.now(),autoDestruct,viewCount:0,maxViews:autoDestruct?parseInt(maxViews)||1:undefined,isEncrypted:true}; setFiles((prev:any[])=>[newFile,...prev]); setFolders(prev=>prev.map((f:any)=>f.id===activeFolder?.id?{...f,fileCount:f.fileCount+1}:f)); Alert.alert('File Added',name+' has been encrypted and stored securely.'); } catch(e){ Alert.alert('Error','Could not add file.'); } };
+  const addFile=async(source:'camera'|'gallery'|'document')=>{ setShowAddFile(false); try { let name='',size='',type='other'; if(source==='camera'){ const r=Platform.OS==='web'?await ImagePicker.launchImageLibraryAsync({quality:0.8}):await ImagePicker.launchCameraAsync({quality:0.8}); if(r.canceled)return; name='photo_'+Date.now()+'.jpg'; size='~2 MB'; type='image'; } else if(source==='gallery'){ const r=await ImagePicker.launchImageLibraryAsync({quality:0.8}); if(r.canceled)return; name=r.assets[0].fileName||'media_'+Date.now(); size='~1 MB'; type=r.assets[0].type==='video'?'video':'image'; } else { const r=await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true }); if(r.canceled)return; name=r.assets[0].name; size='~1 MB'; type='document'; } const newFile={id:Date.now().toString(),name,size,type,folderId:activeFolder?.id||'2',addedAt:Date.now(),autoDestruct,viewCount:0,maxViews:autoDestruct?parseInt(maxViews)||1:undefined,isEncrypted:true}; setFiles((prev:any[])=>[newFile,...prev]); setFolders(prev=>prev.map((f:any)=>f.id===activeFolder?.id?{...f,fileCount:f.fileCount+1}:f)); Alert.alert('File Added',name+' has been encrypted and stored securely.'); } catch{ Alert.alert('Error','Could not add file.'); } };
 
   const handleNav=(item:typeof NAV[0])=>{ setNavTab(item.id); if(item.id!=='vault')router.push(item.route as any); };
   const folderFiles=files.filter((f:any)=>f.folderId===activeFolder?.id);

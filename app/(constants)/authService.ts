@@ -1,5 +1,5 @@
 import { getApp } from "@react-native-firebase/app";
-import { getAuth, signInWithPhoneNumber } from "@react-native-firebase/auth";
+import { getAuth } from "@react-native-firebase/auth";
 import { getFirestore, doc, setDoc, getDoc, serverTimestamp } from "@react-native-firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";

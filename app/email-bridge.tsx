@@ -12,12 +12,10 @@ import {
   Alert,
   StyleSheet,
   StatusBar,
-  Dimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
 
-const { width } = Dimensions.get('window');
 
 // ── Mock inbox data ────────────────────────────────────────────
 const MOCK_INBOX = [
@@ -148,7 +146,7 @@ export default function EmailBridgeScreen() {
         >
           <Text style={styles.infoIcon}>{'\uD83D\uDD12'}</Text>
           <Text style={styles.infoText}>
-            Messages sent to email addresses are encrypted with the recipient's public key. Only they can decrypt.
+            Messages sent to email addresses are encrypted with the recipient&apos;s public key. Only they can decrypt.
           </Text>
         </LinearGradient>
 

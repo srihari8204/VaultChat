@@ -120,7 +120,7 @@ export default function DuressPin() {
   };
 
   const triggerShake = (msg?: string) => {
-    if (Platform.OS === 'android') Vibration.vibrate(200);
+    if (Platform.OS !== 'web') Vibration.vibrate(200);
     Animated.sequence([
       Animated.timing(shakeAnim,{toValue:12, duration:60,useNativeDriver:true}),
       Animated.timing(shakeAnim,{toValue:-12,duration:60,useNativeDriver:true}),

@@ -2,7 +2,7 @@
 // Shows 3 smart reply chips above the input bar
 
 import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
 import { getSmartReplies } from '../services/aiService';
 
 interface Props {

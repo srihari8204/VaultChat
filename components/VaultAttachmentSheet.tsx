@@ -1,4 +1,4 @@
-﻿import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -84,7 +84,7 @@ export default function VaultAttachmentSheet({
       ]).start();
       itemAnims.forEach(a => a.setValue(0));
     }
-  }, [visible]);
+  }, [visible, fadeAnim, itemAnims, slideAnim]);
 
   // Handle button presses
   const handlePress = async (id: GridId) => {
@@ -97,7 +97,9 @@ export default function VaultAttachmentSheet({
         } else {
           const { status } = await ImagePicker.requestCameraPermissionsAsync();
           if (status !== 'granted') { Alert.alert('Permission Needed', 'Camera access is required.'); return; }
-          const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images', 'videos'], quality: 0.85 });
+          const result = Platform.OS === 'web'
+            ? await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images', 'videos'], quality: 0.85 })
+            : await ImagePicker.launchCameraAsync({ mediaTypes: ['images', 'videos'], quality: 0.85 });
           if (!result.canceled && result.assets[0]) { onMediaSelected?.('image', result.assets[0].uri, 'photo.jpg'); }
         }
         break;
@@ -128,12 +130,18 @@ export default function VaultAttachmentSheet({
           Alert.alert('Permission Needed', 'Camera access is required to scan.');
           return;
         }
-        const result = await ImagePicker.launchCameraAsync({
-          mediaTypes: ['images'],
-          quality: 1,
-          allowsEditing: true,
-          aspect: [3, 4],
-        });
+        const result = Platform.OS === 'web'
+          ? await ImagePicker.launchImageLibraryAsync({
+              mediaTypes: ['images'],
+              quality: 1,
+              allowsEditing: true,
+            })
+          : await ImagePicker.launchCameraAsync({
+              mediaTypes: ['images'],
+              quality: 1,
+              allowsEditing: true,
+              aspect: [3, 4],
+            });
         if (!result.canceled && result.assets[0]) {
           onMediaSelected?.('document', result.assets[0].uri, 'scanned_doc.jpg');
           Alert.alert('Document Scanned', 'Captured. PDF export available in v1.5.');

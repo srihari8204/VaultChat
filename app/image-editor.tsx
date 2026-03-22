@@ -3,7 +3,7 @@
 // Crop, Rotate, Draw, Text overlay, Filters, Brightness/Contrast
 // Uses expo-image-manipulator for transforms, react-native-view-shot to capture
 
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Image, ScrollView,
   Dimensions, PanResponder, TextInput, Alert, ActivityIndicator,
@@ -58,7 +58,6 @@ export default function ImageEditorScreen() {
   const [editingText, setEditingText] = useState('');
   const [textColor, setTextColor] = useState('#FFFFFF');
   const [textFontSize, setTextFontSize] = useState(24);
-  const [draggingTextId, setDraggingTextId] = useState<string | null>(null);
 
   // Filters
   const [activeFilter, setActiveFilter] = useState('Original');
@@ -100,7 +99,7 @@ export default function ImageEditorScreen() {
       );
       setImageUri(result.uri);
       setRotation((rotation + 90) % 360);
-    } catch (e) {
+    } catch {
       Alert.alert('Error', 'Failed to rotate image');
     }
     setProcessing(false);
@@ -203,7 +202,6 @@ export default function ImageEditorScreen() {
       // Apply brightness/contrast via manipulator
       if (brightness !== 0 || contrast !== 0) {
         // Approximate brightness via lightness adjustment
-        const bFactor = 1 + brightness / 100;
         const result = await ImageManipulator.manipulateAsync(
           finalUri,
           [{ resize: { width: SW * 2 } }],
@@ -217,7 +215,7 @@ export default function ImageEditorScreen() {
       if (router.canGoBack()) {
         router.setParams({ editedUri: finalUri });
       }
-    } catch (e) {
+    } catch {
       Alert.alert('Error', 'Failed to save edited image');
     }
     setProcessing(false);

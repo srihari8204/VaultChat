@@ -106,7 +106,7 @@ function ScanLine() {
       Animated.timing(y, { toValue: SW * 0.7, duration: 1800, useNativeDriver: true }),
       Animated.timing(y, { toValue: 0, duration: 1800, useNativeDriver: true }),
     ])).start();
-  }, []);
+  }, [y]);
   return (
     <Animated.View pointerEvents="none"
       style={{ position: 'absolute', left: SW * 0.18, right: SW * 0.18, top: SW * 0.12, transform: [{ translateY: y }] }}>
@@ -131,9 +131,29 @@ export default function FaceScanScreen() {
 
   useEffect(() => {
     Animated.timing(fadeIn, { toValue: 1, duration: 400, useNativeDriver: true }).start();
-    startScan();
+    const doStartScan = () => {
+      pctRef.current = 0;
+      setPct(0);
+      setPhase(PHASE.SCANNING);
+      timer.current = setInterval(() => {
+        pctRef.current = Math.min(pctRef.current + 0.05, 1);
+        setPct(pctRef.current);
+        if (pctRef.current >= 1) {
+          clearInterval(timer.current!);
+          setTimeout(() => {
+            setPhase(PHASE.CONFIRMED);
+            Animated.parallel([
+              Animated.timing(meshA,  { toValue: 1, duration: 1400, useNativeDriver: false }),
+              Animated.spring(okOp,   { toValue: 1, tension: 40, friction: 8, useNativeDriver: true }),
+              Animated.spring(okSc,   { toValue: 1, tension: 40, friction: 8, useNativeDriver: true }),
+            ]).start();
+          }, 600);
+        }
+      }, 30);
+    };
+    doStartScan();
     return () => { if (timer.current) clearInterval(timer.current); };
-  }, []);
+  }, [fadeIn, meshA, okOp, okSc]);
 
   useEffect(() => {
     if (phase !== PHASE.SCANNING) return;
@@ -143,7 +163,7 @@ export default function FaceScanScreen() {
     ]));
     lp.start();
     return () => lp.stop();
-  }, [phase]);
+  }, [phase, pulse]);
 
   useEffect(() => {
     if (pct < 0.01)      setHint('Centre your face in the frame');

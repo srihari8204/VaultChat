@@ -3,9 +3,9 @@
 // Set a timed reminder for a specific message. Presets + custom picker.
 // Saves to AsyncStorage, schedules local notification via expo-notifications.
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, FlatList,
+  View, Text, TouchableOpacity, StyleSheet,
   StatusBar, Alert, ScrollView, Platform,
 } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';

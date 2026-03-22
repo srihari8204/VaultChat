@@ -42,7 +42,7 @@ function BreachGuardContent() {
       Animated.timing(pulseAnim,{toValue:1.05,duration:2000,easing:Easing.inOut(Easing.ease),useNativeDriver:true}),
       Animated.timing(pulseAnim,{toValue:1,duration:2000,easing:Easing.inOut(Easing.ease),useNativeDriver:true}),
     ])).start();
-  },[]);
+  },[fadeIn, pulseAnim]);
 
   const runScan=()=>{ if(scanning)return; setScanning(true); setScanProgress(0); const phases=['Querying HaveIBeenPwned...','Checking DeHashed database...','Scanning IntelligenceX...','Analyzing breach patterns...','Finalizing report...']; let p=0,phaseIdx=0; Animated.loop(Animated.timing(scanAnim,{toValue:1,duration:1200,easing:Easing.linear,useNativeDriver:true})).start(); const iv=setInterval(()=>{ p+=Math.random()*3+1; setScanProgress(Math.min(p,100)); const idx=Math.floor(p/20); if(idx!==phaseIdx&&idx<phases.length){ phaseIdx=idx; setScanPhase(phases[idx]); } if(p>=100){ clearInterval(iv); scanAnim.stopAnimation(); setScanning(false); setScanPhase('Scan complete'); Alert.alert('Scan Complete','Dark web scan finished. Found '+alerts.filter(a=>!a.fixed).length+' active breach alerts requiring attention.'); } },80); };
 

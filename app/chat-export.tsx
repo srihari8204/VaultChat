@@ -11,7 +11,7 @@ import {
 import { useLocalSearchParams, Stack } from 'expo-router';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 
 const C = { bg: '#020B18', accent: '#4A9FFF', green: '#10B981', card: '#0A1628' };
@@ -198,7 +198,7 @@ export default function ChatExportScreen() {
 
         <View style={s.noteBox}>
           <Text style={s.noteTitle}>Privacy Note</Text>
-          <Text style={s.noteDesc}>Exported files are NOT encrypted. Only export chats you're comfortable saving in plain text. The export happens entirely on your device.</Text>
+          <Text style={s.noteDesc}>Exported files are NOT encrypted. Only export chats you&apos;re comfortable saving in plain text. The export happens entirely on your device.</Text>
         </View>
       </View>
     </>

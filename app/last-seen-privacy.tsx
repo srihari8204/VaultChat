@@ -5,7 +5,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  StatusBar, Platform, Alert, Switch, Dimensions,
+  StatusBar, Platform, Alert, Switch,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -214,7 +214,7 @@ export default function LastSeenPrivacyScreen() {
             <View style={s.warningCard}>
               <Ionicons name="warning-outline" size={16} color={C.yellow} />
               <Text style={s.warningText}>
-                You won't see others' read receipts either when this is turned off.
+                You won&apos;t see others&apos; read receipts either when this is turned off.
               </Text>
             </View>
           )}

@@ -76,6 +76,45 @@ export default function VoiceCallScreen() {
   useEffect(() => {
     let mounted = true;
 
+    const makeCallInner = async (pc: RTCPeerConnection, socket: Socket) => {
+      const chatDoc = await firestore().collection('chats').doc(chatId).get();
+      const participants: string[] = chatDoc.data()?.participants || [];
+      const recipientUid = participants.find(p => p !== uid);
+      if (!recipientUid) return;
+
+      const userDoc = await firestore().collection('users').doc(recipientUid).get();
+      remoteIdRef.current = userDoc.data()?.socketId || '';
+
+      const offer = await pc.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: false,
+      });
+      await pc.setLocalDescription(offer);
+
+      socket.emit('call_offer', {
+        toSocketId: remoteIdRef.current,
+        offer,
+        callType:   'voice',
+        callerName: auth().currentUser?.displayName || 'VaultChat User',
+        chatId,
+      });
+    };
+
+    const cleanupInner = () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      localStreamRef.current?.getTracks().forEach((t: any) => t.stop());
+      pcRef.current?.close();
+      socketRef.current?.disconnect();
+    };
+
+    const endCallInner = (notify = true) => {
+      if (notify && socketRef.current && remoteIdRef.current) {
+        socketRef.current.emit('call_end', { toSocketId: remoteIdRef.current });
+      }
+      cleanupInner();
+      router.back();
+    };
+
     const setup = async () => {
       try {
         // Audio mode Ã¢â‚¬â€ earpiece for private voice calls
@@ -126,7 +165,7 @@ export default function VoiceCallScreen() {
             setCallState('ringing');
           } else {
             setCallState('ringing');
-            await makeCall(pc, socket);
+            await makeCallInner(pc, socket);
           }
         });
 
@@ -142,7 +181,7 @@ export default function VoiceCallScreen() {
           startTimer();
         });
 
-        socket.on('call_ended', () => endCall(false));
+        socket.on('call_ended', () => endCallInner(false));
 
         (pc as any).onicecandidate = (event: any) => {
           if (event.candidate && remoteIdRef.current) {
@@ -156,7 +195,7 @@ export default function VoiceCallScreen() {
         (pc as any).onconnectionstatechange = () => {
           if (pc.connectionState === 'failed' ||
               pc.connectionState === 'disconnected') {
-            endCall(true);
+            endCallInner(true);
           }
         };
 
@@ -167,32 +206,8 @@ export default function VoiceCallScreen() {
     };
 
     setup();
-    return () => { mounted = false; cleanup(); };
-  }, []);
-
-  const makeCall = async (pc: RTCPeerConnection, socket: Socket) => {
-    const chatDoc = await firestore().collection('chats').doc(chatId).get();
-    const participants: string[] = chatDoc.data()?.participants || [];
-    const recipientUid = participants.find(p => p !== uid);
-    if (!recipientUid) return;
-
-    const userDoc = await firestore().collection('users').doc(recipientUid).get();
-    remoteIdRef.current = userDoc.data()?.socketId || '';
-
-    const offer = await pc.createOffer({
-      offerToReceiveAudio: true,
-      offerToReceiveVideo: false,
-    });
-    await pc.setLocalDescription(offer);
-
-    socket.emit('call_offer', {
-      toSocketId: remoteIdRef.current,
-      offer,
-      callType:   'voice',
-      callerName: auth().currentUser?.displayName || 'VaultChat User',
-      chatId,
-    });
-  };
+    return () => { mounted = false; cleanupInner(); };
+  }, [isIncoming, router, uid, chatId]);
 
   const startTimer = () => {
     timerRef.current = setInterval(() => setSeconds(s => s + 1), 1000);

@@ -12,7 +12,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
-  Dimensions,
   FlatList,
   Platform,
   StatusBar,
@@ -39,7 +38,6 @@ const C = {
   border: 'rgba(74,159,255,0.15)',
 };
 
-const SW = Dimensions.get('window').width;
 const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
 const STORAGE_KEY = 'vc_locked_chats';
 
@@ -90,7 +88,9 @@ export default function AppLockChatsScreen() {
   const [lockedChats, setLockedChats] = useState<Record<string, LockedChat>>({});
   const [configChat, setConfigChat] = useState<string | null>(null);
   const [pinInput, setPinInput] = useState('');
-  const [hasBiometric, setHasBiometric] = useState(false);
+  const [, setHasBiometric] = useState(false);
+  const [configMethod, setConfigMethod] = useState<LockMethod>('biometric');
+  const [configTimer, setConfigTimer] = useState<AutoLockTimer>(0);
 
   const fadeIn = useRef(new Animated.Value(0)).current;
 
@@ -98,9 +98,10 @@ export default function AppLockChatsScreen() {
     Animated.timing(fadeIn, { toValue: 1, duration: 400, useNativeDriver: true }).start();
     loadSettings();
     checkBiometric();
-  }, []);
+  }, [fadeIn]);
 
   const checkBiometric = async () => {
+    if (Platform.OS === 'web') { setHasBiometric(false); return; }
     try {
       const compatible = await LocalAuthentication.hasHardwareAsync();
       const enrolled = await LocalAuthentication.isEnrolledAsync();
@@ -133,11 +134,15 @@ export default function AppLockChatsScreen() {
       await saveSettings(updated);
     } else {
       // Enable lock — show config
+      const ex = lockedChats[chat.id];
+      setConfigMethod(ex?.lockMethod || 'biometric');
+      setConfigTimer(ex?.autoLockTimer || 0);
       setConfigChat(chat.id);
     }
   };
 
   const verifyAuth = async (config: LockedChat): Promise<boolean> => {
+    if (Platform.OS === 'web') return true;
     if (config.lockMethod === 'biometric' || config.lockMethod === 'both') {
       const result = await LocalAuthentication.authenticateAsync({
         promptMessage: 'Verify to unlock chat',
@@ -174,14 +179,15 @@ export default function AppLockChatsScreen() {
   const renderConfigPanel = () => {
     if (!configChat) return null;
     const chat = DEMO_CHATS.find(c => c.id === configChat);
-    const existing = lockedChats[configChat];
-    const [method, setMethod] = useState<LockMethod>(existing?.lockMethod || 'biometric');
-    const [timer, setTimer] = useState<AutoLockTimer>(existing?.autoLockTimer || 0);
+    const method = configMethod;
+    const setMethod = setConfigMethod;
+    const timer = configTimer;
+    const setTimer = setConfigTimer;
 
     return (
       <View style={s.overlay}>
         <View style={s.configPanel}>
-          <Text style={s.configTitle}>Lock "{chat?.name}"</Text>
+          <Text style={s.configTitle}>Lock &quot;{chat?.name}&quot;</Text>
 
           <Text style={s.configLabel}>Lock Method</Text>
           <View style={s.chipRow}>

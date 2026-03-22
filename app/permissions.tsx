@@ -1,11 +1,11 @@
-﻿import { LinearGradient } from "expo-linear-gradient";
+import { LinearGradient } from "expo-linear-gradient";
 import { Camera } from "expo-camera";
 import * as Contacts from "expo-contacts";
 import * as Location from "expo-location";
 import * as Notifications from "expo-notifications";
 import { router } from "expo-router";
 import { useState } from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 const PERMS = [
   {key:"camera",   icon:"📷",label:"Camera",       sub:"Face scan and photo sharing"},
@@ -25,7 +25,7 @@ export default function PermissionsScreen() {
     try {
       r.camera   = (await Camera.requestCameraPermissionsAsync()).granted;
       r.mic      = (await Camera.requestMicrophonePermissionsAsync()).granted;
-      r.contacts = (await Contacts.requestPermissionsAsync()).granted;
+      r.contacts = Platform.OS === 'web' ? true : (await Contacts.requestPermissionsAsync()).granted;
       r.location = (await Location.requestForegroundPermissionsAsync()).granted;
       r.notifs   = (await Notifications.requestPermissionsAsync()).granted;
       setGranted(r);

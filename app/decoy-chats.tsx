@@ -3,7 +3,7 @@
 // Looks IDENTICAL to real chats.tsx but shows fake data
 // No visual indicator of duress mode — pixel-perfect clone
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList,
   StatusBar, TextInput, SafeAreaView,

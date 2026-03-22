@@ -55,7 +55,7 @@ export default function AIGuardianScreen() {
     ).start();
     // Score count up
     Animated.timing(scoreAnim, { toValue: aiScore, duration: 1500, useNativeDriver: false }).start();
-  }, []);
+  }, [aiScore, glowAnim, pulseAnim, scoreAnim]);
 
   const runAnalysis = () => {
     setIsAnalyzing(true);

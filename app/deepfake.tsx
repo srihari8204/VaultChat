@@ -40,16 +40,47 @@ function DeepFakeScreenContent() {
       if(autoTimer.current) clearInterval(autoTimer.current);
       clearFrameHistory();
     };
-  },[]);
+  },[fadeIn, radarAnim, pulseAnim]);
 
   useEffect(()=>{
+    const startScanAnimationInEffect = () => {
+      scanAnim.setValue(0);
+      scanAnimRef.current = Animated.loop(Animated.sequence([
+        Animated.timing(scanAnim,{toValue:1,duration:1200,easing:Easing.inOut(Easing.quad),useNativeDriver:false}),
+        Animated.timing(scanAnim,{toValue:0,duration:1200,easing:Easing.inOut(Easing.quad),useNativeDriver:false}),
+      ]));
+      scanAnimRef.current.start();
+    };
+    const captureAndAnalyzeAuto = async () => {
+      if(isAnalyzing || !cameraRef.current) return;
+      setIsAnalyzing(true);
+      startScanAnimationInEffect();
+      try {
+        const photo = await cameraRef.current.takePictureAsync({
+          quality:0.4, base64:false, skipProcessing:true,
+        });
+        if(!photo?.uri) return;
+        setFrameCount(f=>f+1);
+        const res = await analyzeFrame(photo.uri);
+        setResult(res);
+        setHistory(prev=>[res,...prev].slice(0,10));
+        if(res.riskLevel==='CRITICAL'){
+          Alert.alert(
+            '🚨 DEEPFAKE DETECTED',
+            'Critical: AI-generated face detected on this call.\n\nRecommendation: End the call immediately.',
+            [{text:'End Call',style:'destructive',onPress:()=>router.back()},{text:'Continue Monitoring',style:'cancel'}]
+          );
+        }
+      } catch(e){ console.log('Analysis error:',e); }
+      finally{ setIsAnalyzing(false); scanAnimRef.current?.stop(); }
+    };
     if(autoMode){
-      autoTimer.current = setInterval(()=>captureAndAnalyze(),3000);
+      autoTimer.current = setInterval(()=>captureAndAnalyzeAuto(),3000);
     } else {
       if(autoTimer.current){ clearInterval(autoTimer.current); autoTimer.current=null; }
     }
     return ()=>{ if(autoTimer.current) clearInterval(autoTimer.current); };
-  },[autoMode]);
+  },[autoMode, isAnalyzing, router, scanAnim]);
 
   useEffect(()=>{
     if(result && (result.riskLevel==='HIGH'||result.riskLevel==='CRITICAL')){
@@ -60,7 +91,7 @@ function DeepFakeScreenContent() {
         Animated.timing(alertAnim,{toValue:0,duration:200,useNativeDriver:true}),
       ]).start();
     }
-  },[result]);
+  },[result, alertAnim]);
 
   const startScanAnimation = () => {
     scanAnim.setValue(0);

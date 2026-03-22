@@ -1,8 +1,8 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import {
-    Alert, Animated, Image,
+    Alert, Image,
     ScrollView,
     StyleSheet,
     Switch,
@@ -40,7 +40,6 @@ export default function FamilyScreen() {
   const [safeSearch, setSafeSearch]           = useState(true);
   const [bedtimeMode, setBedtimeMode]         = useState(true);
   const [selectedMember, setSelectedMember]   = useState<string | null>(null);
-  const pulseAnim = useRef(new Animated.Value(1)).current;
 
   const toggleFilter = (id: string) => {
     setFilters(prev => prev.map(f => f.id === id ? { ...f, blocked: !f.blocked } : f));

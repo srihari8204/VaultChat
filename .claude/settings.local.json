@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx expo:*)",
+      "Bash(node -e \":*)",
+      "Bash(cd /tmp)",
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)",
+      "Bash(grep -E \"\\(warning|^C:\\\\\\\\\\)\")",
+      "Bash(./gradlew assembleDebug)"
+    ]
+  }
+}

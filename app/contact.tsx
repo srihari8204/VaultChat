@@ -45,7 +45,7 @@ export default function ContactScreen() {
         <Text style={styles.contactName}>{name || 'Contact'}</Text>
         <Text style={styles.contactPhone}>+91 98765 43210</Text>
         <Text style={styles.contactStatus}>
-          "Privacy is not a luxury — it's a right 🛡️"
+          &quot;Privacy is not a luxury — it&apos;s a right 🛡️&quot;
         </Text>
 
         {/* Action Buttons Row */}

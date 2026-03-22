@@ -10,7 +10,6 @@ import {
   Dimensions, StatusBar, ActivityIndicator, Linking, Image,
 } from 'react-native';
 import { useLocalSearchParams, Stack } from 'expo-router';
-import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 
 const { width: SW } = Dimensions.get('window');
@@ -25,21 +24,22 @@ export default function MediaGalleryScreen() {
   const [media, setMedia] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => { loadMedia(); }, []);
-
-  const loadMedia = async () => {
-    setLoading(true);
-    try {
-      const snap = await firestore().collection('chats').doc(chatId as string)
-        .collection('messages')
-        .orderBy('createdAt', 'desc')
-        .limit(200)
-        .get();
-      const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setMedia(all);
-    } catch {}
-    setLoading(false);
-  };
+  useEffect(() => {
+    const loadMedia = async () => {
+      setLoading(true);
+      try {
+        const snap = await firestore().collection('chats').doc(chatId as string)
+          .collection('messages')
+          .orderBy('createdAt', 'desc')
+          .limit(200)
+          .get();
+        const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setMedia(all);
+      } catch {}
+      setLoading(false);
+    };
+    loadMedia();
+  }, [chatId]);
 
   const photos = media.filter(m => m.msgType === 'image' && m.mediaUrl && !m.isDeleted);
   const videos = media.filter(m => m.msgType === 'video' && m.mediaUrl && !m.isDeleted);
@@ -48,9 +48,6 @@ export default function MediaGalleryScreen() {
     const txt = m.ciphertext || m.plaintext || '';
     return txt.match(/https?:\/\//i) && !m.isDeleted;
   });
-
-  const tabData = { photos, videos, files, links };
-  const current = tabData[tab];
 
   const formatDate = (ts) => {
     if (!ts?.toDate) return '';

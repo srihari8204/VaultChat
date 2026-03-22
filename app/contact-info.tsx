@@ -5,8 +5,8 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, Image,
-  StatusBar, ScrollView, Dimensions, Alert, Switch,
+  View, Text, TouchableOpacity, StyleSheet,
+  StatusBar, ScrollView, Dimensions, Alert,
 } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';

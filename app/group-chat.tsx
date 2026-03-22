@@ -123,8 +123,8 @@ export default function GroupChatScreen() {
       sock.on('typing_start', ({ uid, name }: any) => {
         if (uid !== myUid) setPeerTyping(p => [...new Set([...p, name ?? uid])]);
       });
-      sock.on('typing_stop', ({ uid }: any) => {
-        if (uid !== myUid) setPeerTyping(p => p.filter(n => n !== (participants[uid] ?? uid)));
+      sock.on('typing_stop', ({ uid: typingUid }: any) => {
+        if (typingUid !== myUid) setPeerTyping(p => p.filter(n => n !== (participants[typingUid] ?? typingUid)));
       });
       sock.on('message_deleted', ({ messageId }: any) =>
         setMessages(p => p.map(m => m.id === messageId ? { ...m, isDeleted: true, plaintext: '' } : m)));
@@ -133,7 +133,7 @@ export default function GroupChatScreen() {
       sockRef.current = sock;
     })();
     return () => { sock?.disconnect(); };
-  }, [chatId, myUid]);
+  }, [chatId, myUid, participants]);
 
   // Messages listener
   useEffect(() => {

@@ -57,7 +57,7 @@ export default function DigitalWellbeingScreen() {
       easing: Easing.out(Easing.cubic),
       useNativeDriver: false,
     }).start();
-  }, [todayMinutes, dailyLimit]);
+  }, [todayMinutes, dailyLimit, progressAnim]);
 
   const loadData = async () => {
     try {
@@ -132,9 +132,6 @@ export default function DigitalWellbeingScreen() {
   // Circular progress
   const ringSize = 160;
   const ringStroke = 10;
-  const ringRadius = (ringSize - ringStroke) / 2;
-  const ringCircumference = 2 * Math.PI * ringRadius;
-
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
@@ -178,7 +175,7 @@ export default function DigitalWellbeingScreen() {
 
         {/* Today's Stats */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Today's Stats</Text>
+          <Text style={styles.sectionTitle}>Today&apos;s Stats</Text>
           <View style={styles.statsGrid}>
             <View style={styles.statCard}>
               <Text style={styles.statIcon}>⏱</Text>
