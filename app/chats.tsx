@@ -23,9 +23,9 @@ import {
 } from 'react-native';
 import { archiveChat, muteChat, pinChat } from '../services/groupService';
 
-const app  = getApp();
+const app = getApp();
 const auth = getAuth(app);
-const db   = getFirestore(app);
+const db = getFirestore(app);
 
 // ── Gradient palette for avatars ─────────────────────────────────
 const AVATAR_GRADIENTS: [string, string][] = [
@@ -49,10 +49,10 @@ function getGradient(name: string): [string, string] {
 type ChatFilter = 'All' | 'Unread' | 'Groups' | 'Pinned' | 'Archive';
 
 const FILTERS: { key: ChatFilter; label: string; icon: string }[] = [
-  { key: 'All',     label: 'All',     icon: '💬' },
-  { key: 'Unread',  label: 'Unread',  icon: '🔵' },
-  { key: 'Groups',  label: 'Groups',  icon: '👥' },
-  { key: 'Pinned',  label: 'Pinned',  icon: '📌' },
+  { key: 'All', label: 'All', icon: '💬' },
+  { key: 'Unread', label: 'Unread', icon: '🔵' },
+  { key: 'Groups', label: 'Groups', icon: '👥' },
+  { key: 'Pinned', label: 'Pinned', icon: '📌' },
   { key: 'Archive', label: 'Archive', icon: '🗄' },
 ];
 
@@ -60,9 +60,9 @@ const FILTERS: { key: ChatFilter; label: string; icon: string }[] = [
 type FolderKey = 'all' | 'work' | 'family' | 'friends' | 'unread';
 
 const FOLDERS: { key: FolderKey; label: string; icon: string }[] = [
-  { key: 'all',     label: 'All',     icon: '📂' },
-  { key: 'work',    label: 'Work',    icon: '💼' },
-  { key: 'family',  label: 'Family',  icon: '🏠' },
+  { key: 'all', label: 'All', icon: '📂' },
+  { key: 'work', label: 'Work', icon: '💼' },
+  { key: 'family', label: 'Family', icon: '🏠' },
   { key: 'friends', label: 'Friends', icon: '🤝' },
 ];
 
@@ -84,16 +84,16 @@ interface ChatItem {
 
 export default function ChatsScreen() {
   const router = useRouter();
-  const myUid  = auth.currentUser?.uid ?? '';
+  const myUid = auth.currentUser?.uid ?? '';
 
-  const [chats,       setChats]       = useState<ChatItem[]>([]);
-  const [filtered,    setFiltered]    = useState<ChatItem[]>([]);
-  const [search,      setSearch]      = useState('');
+  const [chats, setChats] = useState<ChatItem[]>([]);
+  const [filtered, setFiltered] = useState<ChatItem[]>([]);
+  const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<ChatFilter>('All');
   const [activeFolder, setActiveFolder] = useState<FolderKey>('all');
-  const [loading,     setLoading]     = useState(true);
-  const [longPress,   setLongPress]   = useState<ChatItem | null>(null);
-  const [folderMap,   setFolderMap]   = useState<Record<string, FolderKey>>({});
+  const [loading, setLoading] = useState(true);
+  const [longPress, setLongPress] = useState<ChatItem | null>(null);
+  const [folderMap, setFolderMap] = useState<Record<string, FolderKey>>({});
   const [showFolderPicker, setShowFolderPicker] = useState(false);
 
   // Load folder assignments from AsyncStorage
@@ -125,7 +125,7 @@ export default function ChatsScreen() {
       const items = await Promise.all(snap.docs.map(async d => {
         const data = d.data() as any;
         const isGroup = data.isGroup === true;
-        const unread  = data.unread?.[myUid] ?? 0;
+        const unread = data.unread?.[myUid] ?? 0;
 
         if (isGroup) {
           return {
@@ -148,10 +148,10 @@ export default function ChatsScreen() {
         try {
           const peerSnap = await getDoc(doc(db, 'users', peerUid));
           const pd = peerSnap.data();
-          name   = pd?.name ?? name;
-          photo  = pd?.photoURL ?? '';
+          name = pd?.name ?? name;
+          photo = pd?.photoURL ?? '';
           online = pd?.online ?? false;
-        } catch {}
+        } catch { }
 
         return {
           id: d.id, isGroup: false, peerUid,
@@ -194,11 +194,11 @@ export default function ChatsScreen() {
 
     // Smart filter
     switch (activeFilter) {
-      case 'Unread':  list = list.filter(c => c.unreadCount > 0 && !c.archived); break;
-      case 'Groups':  list = list.filter(c => c.isGroup && !c.archived); break;
-      case 'Pinned':  list = list.filter(c => c.pinned && !c.archived); break;
+      case 'Unread': list = list.filter(c => c.unreadCount > 0 && !c.archived); break;
+      case 'Groups': list = list.filter(c => c.isGroup && !c.archived); break;
+      case 'Pinned': list = list.filter(c => c.pinned && !c.archived); break;
       case 'Archive': list = list.filter(c => c.archived); break;
-      default:        list = list.filter(c => !c.archived); break;
+      default: list = list.filter(c => !c.archived); break;
     }
 
     // Folder filter
@@ -221,7 +221,7 @@ export default function ChatsScreen() {
     } else {
       router.push({ pathname: '/chat', params: { chatId: item.id, peerUid: item.peerUid ?? '', peerName: item.name } });
     }
-    updateDoc(doc(db, 'chats', item.id), { [`unread.${myUid}`]: 0 }).catch(() => {});
+    updateDoc(doc(db, 'chats', item.id), { [`unread.${myUid}`]: 0 }).catch(() => { });
   };
 
   const ensureNoteToSelf = async () => {
@@ -261,7 +261,7 @@ export default function ChatsScreen() {
           <View style={s.chatTop}>
             <View style={s.nameRow}>
               {item.pinned && <Text style={s.pinIcon}>📌 </Text>}
-              {item.muted  && <Text style={s.muteIcon}>🔕 </Text>}
+              {item.muted && <Text style={s.muteIcon}>🔕 </Text>}
               <Text style={s.chatName} numberOfLines={1}>{item.name}</Text>
             </View>
             <Text style={s.chatTime}>{fmt(item.lastTime)}</Text>
@@ -292,14 +292,14 @@ export default function ChatsScreen() {
     return (
       <Pressable style={s.overlay} onPress={() => setShowFolderPicker(false)}>
         <View style={s.sheet}>
-          <Text style={{ color: '#fff', fontSize: 16, fontWeight: '800', padding: 18, paddingBottom: 8 }}>Move to Folder</Text>
+          <Text style={{ color: '#212529', fontSize: 18, fontWeight: '700', padding: 16, paddingBottom: 8 }}>Move to Folder</Text>
           {FOLDERS.map(f => (
             <TouchableOpacity key={f.key} style={s.sheetRow} onPress={() => assignFolder(longPress.id, f.key)}>
               <Text style={s.sheetTxt}>{f.icon}  {f.label}</Text>
             </TouchableOpacity>
           ))}
           <TouchableOpacity style={s.sheetRow} onPress={() => setShowFolderPicker(false)}>
-            <Text style={[s.sheetTxt, { color: '#555' }]}>Cancel</Text>
+            <Text style={[s.sheetTxt, { color: '#6C757D' }]}>Cancel</Text>
           </TouchableOpacity>
         </View>
       </Pressable>
@@ -327,7 +327,7 @@ export default function ChatsScreen() {
             <Text style={s.sheetTxt}>{"\uD83D\uDD12 Hide Chat"}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={s.sheetRow} onPress={() => setLongPress(null)}>
-            <Text style={[s.sheetTxt, { color: '#555' }]}>Cancel</Text>
+            <Text style={[s.sheetTxt, { color: '#6C757D' }]}>Cancel</Text>
           </TouchableOpacity>
         </View>
       </Pressable>
@@ -336,15 +336,15 @@ export default function ChatsScreen() {
 
   // ── Filter badge counts ─────────────────────────────────────────
   const unreadCount = chats.filter(c => c.unreadCount > 0 && !c.archived).length;
-  const groupCount  = chats.filter(c => c.isGroup && !c.archived).length;
+  const groupCount = chats.filter(c => c.isGroup && !c.archived).length;
   const pinnedCount = chats.filter(c => c.pinned && !c.archived).length;
   const archiveCount = chats.filter(c => c.archived).length;
 
   const getBadge = (key: ChatFilter): number | null => {
     switch (key) {
-      case 'Unread':  return unreadCount || null;
-      case 'Groups':  return groupCount || null;
-      case 'Pinned':  return pinnedCount || null;
+      case 'Unread': return unreadCount || null;
+      case 'Groups': return groupCount || null;
+      case 'Pinned': return pinnedCount || null;
       case 'Archive': return archiveCount || null;
       default: return null;
     }
@@ -354,11 +354,13 @@ export default function ChatsScreen() {
     <>
       <Stack.Screen options={{
         title: 'VaultChat',
-        headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff',
+        headerStyle: { backgroundColor: '#FFFFFF' },
+        headerTintColor: '#212529',
+        headerTitleStyle: { fontSize: 18, fontWeight: '600' },
         headerRight: () => (
-          <View style={{ flexDirection: 'row', gap: 14, marginRight: 14 }}>
-            <TouchableOpacity onPress={() => router.push('/d2de-status' as any)}><Text style={{ color: '#00D4AA', fontSize: 18 }}>🛡️</Text></TouchableOpacity>
-            <TouchableOpacity onPress={ensureNoteToSelf}><Text style={{ color: '#00E5FF', fontSize: 18 }}>📝</Text></TouchableOpacity>
+          <View style={{ flexDirection: 'row', gap: 12, marginRight: 0}}>
+            <TouchableOpacity onPress={() => router.push('/d2de-status' as any)}><Text style={{ color: '#00D4AA', fontSize: 20 }}>🛡️</Text></TouchableOpacity>
+            <TouchableOpacity onPress={ensureNoteToSelf}><Text style={{ color: '#00E5FF', fontSize: 20 }}>📝</Text></TouchableOpacity>
             <TouchableOpacity onPress={() => router.push('/create-group')}><Text style={{ color: '#00E5FF', fontSize: 22 }}>👥</Text></TouchableOpacity>
             <TouchableOpacity onPress={() => router.push('/profile')}><Text style={{ color: '#00E5FF', fontSize: 22 }}>⚙️</Text></TouchableOpacity>
           </View>
@@ -381,7 +383,7 @@ export default function ChatsScreen() {
         </View>
 
         {/* Smart Filters */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterRow}>
+        <ScrollView horizontal style={{flexGrow:0}} showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterRow}>
           {FILTERS.map(f => {
             const isActive = activeFilter === f.key;
             const badge = getBadge(f.key);
@@ -391,7 +393,7 @@ export default function ChatsScreen() {
                 style={[s.filterChip, isActive && s.filterChipActive]}
                 onPress={() => setActiveFilter(f.key)}
               >
-                <Text style={{ fontSize: 12 }}>{f.icon}</Text>
+                <Text style={{ fontSize: 10 }}>{f.icon}</Text>
                 <Text style={[s.filterTxt, isActive && s.filterTxtActive]}>{f.label}</Text>
                 {badge != null && (
                   <View style={[s.filterBadge, isActive && s.filterBadgeActive]}>
@@ -404,7 +406,7 @@ export default function ChatsScreen() {
         </ScrollView>
 
         {/* Chat Folders */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.folderRow}>
+        <ScrollView horizontal style={{flexGrow:0}} showsHorizontalScrollIndicator={false} contentContainerStyle={s.folderRow}>
           {FOLDERS.map(f => {
             const isActive = activeFolder === f.key;
             return (
@@ -413,33 +415,35 @@ export default function ChatsScreen() {
                 style={[s.folderChip, isActive && s.folderChipActive]}
                 onPress={() => setActiveFolder(f.key)}
               >
-                <Text style={{ fontSize: 11 }}>{f.icon}</Text>
+                <Text style={{ fontSize: 9 }}>{f.icon}</Text>
                 <Text style={[s.folderTxt, isActive && s.folderTxtActive]}>{f.label}</Text>
               </TouchableOpacity>
             );
           })}
         </ScrollView>
 
-        <FlatList
-          contentContainerStyle={{ paddingBottom: 100 }}
-          data={filtered}
-          keyExtractor={c => c.id}
-          renderItem={renderChat}
-          refreshControl={<RefreshControl refreshing={loading} colors={['#00E5FF']} tintColor="#00E5FF" />}
-          ListEmptyComponent={
-            <View style={s.empty}>
-              <Text style={s.emptyIcon}>💬</Text>
-              <Text style={s.emptyTxt}>{search ? 'No chats found' : activeFilter !== 'All' ? `No ${activeFilter.toLowerCase()} chats` : 'No chats yet'}</Text>
-              <Text style={s.emptySub}>Tap the groups icon to create a group or start a new chat</Text>
-            </View>
-          }
-        />
+        <View style={s.chatContainer}>
+          <FlatList
+            contentContainerStyle={{ flexGrow: 1 }}
+            data={filtered}
+            keyExtractor={c => c.id}
+            renderItem={renderChat}
+            refreshControl={<RefreshControl refreshing={loading} colors={['#00E5FF']} tintColor="#00E5FF" />}
+            ListEmptyComponent={
+              <View style={s.empty}>
+                <Text style={s.emptyIcon}>💬</Text>
+                <Text style={s.emptyTxt}>{search ? 'No chats found' : activeFilter !== 'All' ? `No ${activeFilter.toLowerCase()} chats` : 'No chats yet'}</Text>
+                <Text style={s.emptySub}>Tap the groups icon to create a group or start a new chat</Text>
+              </View>
+            }
+          />
+        </View>
         <LongPressSheet />
         <FolderPickerSheet />
 
         {/* Bottom Tab Bar — 6 tabs */}
         <View style={s.tabBar}>
-          <TouchableOpacity style={s.tabItem} onPress={() => {}}>
+          <TouchableOpacity style={s.tabItem} onPress={() => { }}>
             <Text style={[s.tabIcon, { color: '#4A9FFF' }]}>{'💬'}</Text>
             <Text style={[s.tabLbl, { color: '#4A9FFF' }]}>Chats</Text>
           </TouchableOpacity>
@@ -512,60 +516,64 @@ export function BottomNav({ active }: BottomNavProps) {
 }
 
 const s = StyleSheet.create({
-  tabBar:  { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row', backgroundColor: '#070D18', borderTopWidth: 1, borderTopColor: '#111', paddingVertical: 8, paddingBottom: 28 },
+  tabBar: { position: 'absolute', bottom: 50, left: 0, right: 0, flexDirection: 'row', backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: '#E9ECEF', paddingVertical: 6, paddingBottom: 24, shadowColor: '#000', shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 8 },
   tabItem: { flex: 1, alignItems: 'center', gap: 2 },
-  tabIcon: { fontSize: 20, color: '#555' },
-  tabLbl:  { fontSize: 10, color: '#555', fontWeight: '600' },
-  fab:     { position: 'absolute', bottom: 90, right: 20, width: 56, height: 56, borderRadius: 28, backgroundColor: '#4A9FFF', justifyContent: 'center', alignItems: 'center', elevation: 8, shadowColor: '#4A9FFF', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8 },
-  fabTxt:  { fontSize: 24, color: '#fff' },
+  tabIcon: { fontSize: 18, color: '#ADB5BD' },
+  tabLbl: { fontSize: 11, color: '#ADB5BD', fontWeight: '500' },
+  fab: { position: 'absolute', bottom: 80, right: 16, width: 52, height: 52, borderRadius: 26, backgroundColor: '#4A9FFF', justifyContent: 'center', alignItems: 'center', elevation: 6, shadowColor: '#4A9FFF', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.25, shadowRadius: 6 },
+  fabTxt: { fontSize: 22, color: '#FFFFFF' },
 
-  screen:        { flex: 1, backgroundColor: '#03030E' },
-  searchBar:     { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0C0C1A', paddingHorizontal: 12, paddingVertical: 8, gap: 8, borderBottomWidth: 1, borderBottomColor: '#111' },
-  searchIcon:    { fontSize: 16 },
-  searchInput:   { flex: 1, color: '#E0E0F0', fontSize: 15 },
+  screen: { flex: 1, backgroundColor: '#FFFFFF', padding:3 },
+  searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8F9FA', paddingHorizontal: 16, paddingVertical: 10, gap: 8, borderBottomWidth: 1, borderBottomColor: '#E9ECEF' },
+  searchIcon: { fontSize: 16, color: '#6C757D' },
+  searchInput: { flex: 1, color: '#000000', fontSize: 16 },
+
+  chatContainer: { flex: 1 },
 
   // Smart filters
-  filterRow:     { paddingHorizontal: 12, paddingVertical: 8, gap: 8, borderBottomWidth: 1, borderBottomColor: '#0A0A18' },
-  filterChip:    { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#0C0C1A', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7, borderWidth: 1, borderColor: '#1A1A30' },
-  filterChipActive: { backgroundColor: '#4A9FFF18', borderColor: '#4A9FFF' },
-  filterTxt:     { color: '#666', fontSize: 12, fontWeight: '600' },
+  filterRow: { paddingHorizontal: 16, paddingVertical: 2, gap: 4, borderBottomWidth: 0, marginBottom: 0, maxHeight: 34, flexGrow: 0 },
+  filterChip: { 
+    flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8F9FA', borderRadius: 12, borderWidth: 1, borderColor: '#DEE2E6', paddingHorizontal: 8, paddingVertical: 4, maxHeight: 32
+  },
+  filterChipActive: { backgroundColor: '#4A9FFF15', borderColor: '#4A9FFF' },
+  filterTxt: { color: '#495057', fontSize: 12, fontWeight: '500', maxHeight: 16 },
   filterTxtActive: { color: '#4A9FFF' },
-  filterBadge:   { backgroundColor: '#333', borderRadius: 8, minWidth: 16, height: 16, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  filterBadge: { backgroundColor: '#ADB5BD', borderRadius: 4, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3, marginLeft: 3 },
   filterBadgeActive: { backgroundColor: '#4A9FFF' },
-  filterBadgeTxt: { color: '#fff', fontSize: 9, fontWeight: 'bold' },
+  filterBadgeTxt: { color: '#FFFFFF', fontSize: 9, fontWeight: '600' },
 
   // Chat folders
-  folderRow:     { paddingHorizontal: 12, paddingVertical: 6, gap: 6, borderBottomWidth: 1, borderBottomColor: '#0A0A18' },
-  folderChip:    { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#080814', borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: '#151528' },
-  folderChipActive: { backgroundColor: '#7C3AED18', borderColor: '#7C3AED' },
-  folderTxt:     { color: '#555', fontSize: 11, fontWeight: '600' },
+  folderRow: { paddingHorizontal: 16, paddingVertical: 2, gap: 3,  marginBottom: 0, maxHeight: 34, flexGrow: 0 },
+  folderChip: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#F8F9FA', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 3, borderWidth: 1, borderColor: '#DEE2E6' },
+  folderChipActive: { backgroundColor: '#7C3AED15', borderColor: '#7C3AED' },
+  folderTxt: { color: '#495057', fontSize: 11, fontWeight: '500' },
   folderTxtActive: { color: '#7C3AED' },
 
-  archiveToggle: { paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#111' },
-  archiveTxt:    { color: '#00E5FF', fontSize: 13 },
-  chatRow:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#07070F' },
-  avatarWrap:    { position: 'relative', marginRight: 12 },
-  avatar:        { width: 50, height: 50, borderRadius: 25 },
-  avatarFallback:{ backgroundColor: '#111127', alignItems: 'center', justifyContent: 'center' },
-  avatarTxt:     { color: '#fff', fontSize: 20, fontWeight: 'bold' },
-  onlineDot:     { position: 'absolute', bottom: 1, right: 1, width: 12, height: 12, borderRadius: 6, backgroundColor: '#00FF88', borderWidth: 2, borderColor: '#03030E' },
-  chatBody:      { flex: 1 },
-  chatTop:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
-  nameRow:       { flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8 },
-  pinIcon:       { color: '#FF8C42', fontSize: 12 },
-  muteIcon:      { color: '#555', fontSize: 12 },
-  chatName:      { color: '#E0E0F0', fontSize: 16, fontWeight: '600', flex: 1 },
-  chatTime:      { color: '#555', fontSize: 12 },
-  chatBottom:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  chatPreview:   { color: '#555', fontSize: 13, flex: 1, marginRight: 8 },
-  badge:         { backgroundColor: '#00E5FF', borderRadius: 10, minWidth: 20, height: 20, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
-  badgeTxt:      { color: '#000', fontSize: 11, fontWeight: 'bold' },
-  empty:         { flex: 1, alignItems: 'center', paddingTop: 80 },
-  emptyIcon:     { fontSize: 48, marginBottom: 12 },
-  emptyTxt:      { color: '#E0E0F0', fontSize: 18, fontWeight: '600', marginBottom: 6 },
-  emptySub:      { color: '#555', fontSize: 13, textAlign: 'center', paddingHorizontal: 32 },
-  overlay:       { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#00000088', justifyContent: 'flex-end' },
-  sheet:         { backgroundColor: '#0E0E20', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 36, paddingTop: 8 },
-  sheetRow:      { padding: 18, borderBottomWidth: 1, borderBottomColor: '#111' },
-  sheetTxt:      { color: '#E0E0F0', fontSize: 16 },
+  archiveToggle: { paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#E9ECEF' },
+  archiveTxt: { color: '#00E5FF', fontSize: 14, fontWeight: '500' },
+  chatRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F1F3F4' },
+  avatarWrap: { position: 'relative', marginRight: 12 },
+  avatar: { width: 42, height: 42, borderRadius: 21 },
+  avatarFallback: { backgroundColor: '#E9ECEF', alignItems: 'center', justifyContent: 'center' },
+  avatarTxt: { color: '#495057', fontSize: 18, fontWeight: '600' },
+  onlineDot: { position: 'absolute', bottom: 0, right: 0, width: 10, height: 10, borderRadius: 5, backgroundColor: '#00FF88', borderWidth: 2, borderColor: '#FFFFFF' },
+  chatBody: { flex: 1 },
+  chatTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 0 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8 },
+  pinIcon: { color: '#FF8C42', fontSize: 11 },
+  muteIcon: { color: '#ADB5BD', fontSize: 11 },
+  chatName: { color: '#212529', fontSize: 15, fontWeight: '600', flex: 1 },
+  chatTime: { color: '#6C757D', fontSize: 12 },
+  chatBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  chatPreview: { color: '#6C757D', fontSize: 13, flex: 1, marginRight: 8 },
+  badge: { backgroundColor: '#4A9FFF', borderRadius: 8, minWidth: 18, height: 18, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  badgeTxt: { color: '#FFFFFF', fontSize: 11, fontWeight: '600' },
+  empty: { flex: 1, alignItems: 'center', paddingTop: 60 },
+  emptyIcon: { fontSize: 40, marginBottom: 0 },
+  emptyTxt: { color: '#212529', fontSize: 16, fontWeight: '600', marginBottom: 4 },
+  emptySub: { color: '#6C757D', fontSize: 14, textAlign: 'center', paddingHorizontal: 32 },
+  overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#00000060', justifyContent: 'flex-end' },
+  sheet: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 16, borderTopRightRadius: 16, paddingBottom: 24, paddingTop: 12, shadowColor: '#000', shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 16 },
+  sheetRow: { padding: 16, borderBottomWidth: 1, borderBottomColor: '#F1F3F4' },
+  sheetTxt: { color: '#212529', fontSize: 16 },
 });

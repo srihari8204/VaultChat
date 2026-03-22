@@ -709,7 +709,7 @@ const styles = StyleSheet.create({
   },
   back:          { fontSize: 28, color: '#00D4AA', fontWeight: 'bold' },
   headerCenter:  { flex: 1 },
-  headerTitle:   { fontSize: 18, fontWeight: 'bold', color: '#FFFFFF' },
+  headerTitle:   { fontSize: 18, fontWeight: 'bold', color: '#000000' },
   headerSub:     { fontSize: 9, color: '#00D4AA', marginTop: 1, fontWeight: 'bold' },
   headerBadge:   { fontSize: 22 },
 
@@ -726,7 +726,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 14,
   },
   sectionIcon:   { fontSize: 26, marginTop: 2 },
-  sectionTitle:  { fontSize: 15, fontWeight: 'bold', color: '#FFFFFF', marginBottom: 3 },
+  sectionTitle:  { fontSize: 15, fontWeight: 'bold', color: '#000000', marginBottom: 3 },
   sectionDesc:   { fontSize: 12, color: '#64748B', lineHeight: 17 },
 
   // Temp chat code
@@ -748,7 +748,7 @@ const styles = StyleSheet.create({
   },
   codeBtnCopied:    { backgroundColor: '#003328', borderColor: '#00D4AA' },
   codeBtnRevoke:    { borderColor: '#FF4D6D44' },
-  codeBtnText:      { fontSize: 12, color: '#FFFFFF' },
+  codeBtnText:      { fontSize: 12, color: '#000000' },
   codeBtnTextRevoke:{ color: '#FF4D6D' },
 
   actionBtn: {
@@ -765,7 +765,7 @@ const styles = StyleSheet.create({
     borderWidth: 0.5, borderColor: '#1E293B',
     paddingHorizontal: 14, paddingVertical: 12,
   },
-  pickerLabel:      { fontSize: 14, color: '#FFFFFF' },
+  pickerLabel:      { fontSize: 14, color: '#000000' },
   pickerValue:      { flexDirection: 'row', alignItems: 'center', gap: 6 },
   pickerValueText:  { fontSize: 14, color: '#00D4AA', fontWeight: 'bold' },
   pickerChevron:    { fontSize: 18, color: '#374151' },
@@ -790,7 +790,7 @@ const styles = StyleSheet.create({
   },
   toggleIcon:   { fontSize: 20 },
   toggleInfo:   { flex: 1 },
-  toggleTitle:  { fontSize: 13, fontWeight: 'bold', color: '#FFFFFF', marginBottom: 2 },
+  toggleTitle:  { fontSize: 13, fontWeight: 'bold', color: '#000000', marginBottom: 2 },
   toggleDesc:   { fontSize: 11, color: '#374151', lineHeight: 15 },
 
   // Export rows
@@ -801,7 +801,7 @@ const styles = StyleSheet.create({
   },
   exportIcon:    { fontSize: 22 },
   exportInfo:    { flex: 1 },
-  exportTitle:   { fontSize: 13, fontWeight: 'bold', color: '#FFFFFF', marginBottom: 2 },
+  exportTitle:   { fontSize: 13, fontWeight: 'bold', color: '#000000', marginBottom: 2 },
   exportDesc:    { fontSize: 11, color: '#374151' },
   exportChevron: { fontSize: 18, color: '#374151' },
 });
@@ -818,7 +818,7 @@ const modalStyles = StyleSheet.create({
     borderRadius: 2, alignSelf: 'center', marginBottom: 16,
   },
   title: {
-    fontSize: 17, fontWeight: 'bold', color: '#FFFFFF',
+    fontSize: 17, fontWeight: 'bold', color: '#000000',
     textAlign: 'center', marginBottom: 8,
   },
   subtitle: {
@@ -832,7 +832,7 @@ const modalStyles = StyleSheet.create({
     borderWidth: 0.5, borderColor: '#1E293B',
   },
   optionActive:     { backgroundColor: '#003328', borderColor: '#00D4AA' },
-  optionText:       { fontSize: 15, color: '#FFFFFF' },
+  optionText:       { fontSize: 15, color: '#000000' },
   optionTextActive: { color: '#00D4AA', fontWeight: 'bold' },
   checkmark:        { fontSize: 16, color: '#00D4AA', fontWeight: 'bold' },
   inputLabel:       { fontSize: 11, color: '#64748B', marginBottom: 6, marginTop: 4 },
@@ -840,7 +840,7 @@ const modalStyles = StyleSheet.create({
     backgroundColor: '#1A2235', borderRadius: 10,
     borderWidth: 0.5, borderColor: '#1E293B',
     paddingHorizontal: 14, paddingVertical: 11,
-    color: '#FFFFFF', fontSize: 20,
+    color: '#000000', fontSize: 20,
     letterSpacing: 4, textAlign: 'center', marginBottom: 12,
   },
   btnRow:       { flexDirection: 'row', gap: 10, marginTop: 8 },

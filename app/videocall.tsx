@@ -532,7 +532,7 @@ const styles = StyleSheet.create({
   waitingName: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: '#000000',
   },
   waitingStatus: {
     fontSize: 14,
@@ -566,7 +566,7 @@ const styles = StyleSheet.create({
   timerText: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: '#000000',
   },
   localVideo: {
     position: 'absolute',

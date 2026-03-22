@@ -206,7 +206,7 @@ const styles = StyleSheet.create({
   },
   backBtn: { padding: 4 },
   backText: { color: '#1D4ED8', fontSize: 24, fontWeight: 'bold' },
-  headerTitle: { color: '#FFFFFF', fontSize: 17, fontWeight: 'bold' },
+  headerTitle: { color: '#000000', fontSize: 17, fontWeight: 'bold' },
   editBtn: { padding: 4 },
   editText: { color: '#1D4ED8', fontSize: 15 },
   profileCard: {
@@ -238,7 +238,7 @@ const styles = StyleSheet.create({
   },
   onlineBadgeText: { color: '#22C55E', fontSize: 10, fontWeight: 'bold' },
   contactName: {
-    color: '#FFFFFF', fontSize: 24, fontWeight: 'bold', marginTop: 8
+    color: '#000000', fontSize: 24, fontWeight: 'bold', marginTop: 8
   },
   contactPhone: { color: '#64748B', fontSize: 14, marginTop: 4 },
   contactStatus: {
@@ -281,7 +281,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   trustLeft: { flex: 1 },
-  trustTitle: { color: '#FFFFFF', fontSize: 16, fontWeight: 'bold' },
+  trustTitle: { color: '#000000', fontSize: 16, fontWeight: 'bold' },
   trustDesc: { color: '#475569', fontSize: 12, marginTop: 4, lineHeight: 16 },
   trustScoreCircle: {
     alignItems: 'center',
@@ -362,7 +362,7 @@ const styles = StyleSheet.create({
     borderColor: '#1E293B',
   },
   settingIcon: { fontSize: 20, marginRight: 12 },
-  settingLabel: { color: '#FFFFFF', fontSize: 15, flex: 1 },
+  settingLabel: { color: '#000000', fontSize: 15, flex: 1 },
   settingValue: { fontSize: 13, marginRight: 8 },
   settingArrow: { color: '#475569', fontSize: 18 },
   dangerBtn: {

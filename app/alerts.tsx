@@ -313,7 +313,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0.5, borderBottomColor: '#1E293B',
     gap: 8,
   },
-  headerTitle:  { fontSize: 18, fontWeight: 'bold', color: '#FFFFFF' },
+  headerTitle:  { fontSize: 18, fontWeight: 'bold', color: '#000000' },
   headerSub:    { fontSize: 9, color: '#00D4AA', marginTop: 2, fontWeight: 'bold' },
   markAllBtn: {
     marginLeft: 'auto', backgroundColor: '#1A2235',
@@ -345,7 +345,7 @@ const styles = StyleSheet.create({
     minWidth: 14, height: 14,
     justifyContent: 'center', alignItems: 'center', paddingHorizontal: 3,
   },
-  tabBadgeText:  { fontSize: 8, color: '#FFFFFF', fontWeight: 'bold' },
+  tabBadgeText:  { fontSize: 8, color: '#000000', fontWeight: 'bold' },
 
   loadingWrap:   { flex: 1, justifyContent: 'center', alignItems: 'center' },
   listContent:   { padding: 12, paddingBottom: 100, flexGrow: 1 },
@@ -376,7 +376,7 @@ const styles = StyleSheet.create({
   },
   alertType:    { fontSize: 11, fontWeight: 'bold' },
   alertTime:    { fontSize: 10, color: '#374151' },
-  alertMessage: { fontSize: 13, color: '#FFFFFF', lineHeight: 18, marginBottom: 2 },
+  alertMessage: { fontSize: 13, color: '#000000', lineHeight: 18, marginBottom: 2 },
   alertDetail:  { fontSize: 11, color: '#374151' },
   unreadDot: {
     width: 8, height: 8, borderRadius: 4,
@@ -387,7 +387,7 @@ const styles = StyleSheet.create({
 
   emptyWrap:  { flex: 1, alignItems: 'center', paddingTop: 80, gap: 10 },
   emptyIcon:  { fontSize: 52 },
-  emptyTitle: { fontSize: 18, fontWeight: 'bold', color: '#FFFFFF' },
+  emptyTitle: { fontSize: 18, fontWeight: 'bold', color: '#000000' },
   emptyText:  { fontSize: 13, color: '#374151' },
 });
 

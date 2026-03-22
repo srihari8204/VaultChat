@@ -201,7 +201,7 @@ const styles = StyleSheet.create({
   topBarText: {
     fontSize: 13,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: '#000000',
     letterSpacing: 2,
   },
   scroll: {
@@ -227,7 +227,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: '#000000',
     marginBottom: 12,
     textAlign: 'center',
   },

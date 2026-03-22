@@ -117,7 +117,7 @@ const styles = StyleSheet.create({
   appName: {
     fontSize: 36,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: '#000000',
     marginTop: 12,
     letterSpacing: 1,
   },
@@ -137,7 +137,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 22,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: '#000000',
     marginBottom: 8,
   },
   subtitle: {
@@ -161,7 +161,7 @@ const styles = StyleSheet.create({
     borderColor: '#334155',
   },
   countryCodeText: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -171,7 +171,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 16,
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 18,
     letterSpacing: 2,
     borderWidth: 1,
@@ -201,7 +201,7 @@ const styles = StyleSheet.create({
     elevation: 0,
   },
   buttonText: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 16,
     fontWeight: 'bold',
     letterSpacing: 0.5,

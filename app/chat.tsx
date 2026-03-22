@@ -136,6 +136,17 @@ export default function ChatScreen() {
   }, [chatId, myUid]);
 
   // â”€â”€ Firestore â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const markRead = useCallback((docs: any[]) => {
+    const batch = firestore().batch();
+    docs.forEach(doc => {
+      if (doc.data().senderId !== myUid && doc.data().status !== 'read') {
+        batch.update(doc.ref, { status: 'read' });
+        socketRef.current?.emit('message_read', { chatId, messageId: doc.id, readerUid: myUid, senderUid: peerUid });
+      }
+    });
+    batch.commit().catch(() => {});
+  }, [chatId, myUid, peerUid]);
+
   useEffect(() => {
     const unsub = firestore()
       .collection('chats').doc(chatId)
@@ -172,17 +183,6 @@ export default function ChatScreen() {
       });
     return unsub;
   }, [chatId, myUid, peerUid, markRead]);
-
-  const markRead = useCallback((docs: any[]) => {
-    const batch = firestore().batch();
-    docs.forEach(doc => {
-      if (doc.data().senderId !== myUid && doc.data().status !== 'read') {
-        batch.update(doc.ref, { status: 'read' });
-        socketRef.current?.emit('message_read', { chatId, messageId: doc.id, readerUid: myUid, senderUid: peerUid });
-      }
-    });
-    batch.commit().catch(() => {});
-  }, [chatId, myUid, peerUid]);
 
   // â”€â”€ Typing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleTyping = (text: string) => {
@@ -453,7 +453,7 @@ const Sheet = () => {
       <Pressable style={s.overlay} onPress={() => setLongPressMsg(null)}>
         <View style={s.sheet}>
           <TouchableOpacity style={s.sheetRow} onPress={() => { setReactionTarget(longPressMsg); setShowReactions(true); setLongPressMsg(null); }}>
-            <Text style={s.sheetTxt}>ðŸ˜Š  React</Text>
+            <Text style={s.sheetTxt}>React</Text>
           </TouchableOpacity>
           <TouchableOpacity style={s.sheetRow} onPress={() => { setReplyTarget(longPressMsg); setLongPressMsg(null); }}>
             <Text style={s.sheetTxt}>â†©  Reply</Text>

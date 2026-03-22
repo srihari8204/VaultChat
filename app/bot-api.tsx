@@ -346,7 +346,7 @@ const styles = StyleSheet.create({
     fontSize: 20,
   },
   headerTitle: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 26,
     fontWeight: '700',
   },
@@ -356,7 +356,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   sectionTitle: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 18,
     fontWeight: '700',
     marginBottom: 14,
@@ -386,7 +386,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   botName: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 15,
     fontWeight: '600',
   },
@@ -413,7 +413,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   addBtnTextActive: {
-    color: '#FFFFFF',
+    color: '#000000',
   },
   formCard: {
     backgroundColor: '#0A1628',
@@ -436,7 +436,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1,
     borderColor: '#1A2744',
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 14,
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -452,7 +452,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   createBtnText: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 15,
     fontWeight: '700',
   },
@@ -511,7 +511,7 @@ const styles = StyleSheet.create({
     borderColor: '#1A2744',
   },
   docsTitle: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 14,
     fontWeight: '700',
     marginBottom: 6,

@@ -552,7 +552,7 @@ const styles = StyleSheet.create({
     paddingTop: 48, paddingBottom: 12, paddingHorizontal: 16,
     borderBottomWidth: 0.5, borderBottomColor: '#1E293B',
   },
-  headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#FFFFFF' },
+  headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#000000' },
   headerSub:   { fontSize: 9, color: '#00D4AA', marginTop: 2, fontWeight: 'bold' },
 
   loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center' },
@@ -605,7 +605,7 @@ const styles = StyleSheet.create({
   },
   avatarText:   { fontSize: 14, fontWeight: 'bold', color: '#00D4AA' },
   statusInfo:   { flex: 1 },
-  statusName:   { fontSize: 15, fontWeight: 'bold', color: '#FFFFFF', marginBottom: 3 },
+  statusName:   { fontSize: 15, fontWeight: 'bold', color: '#000000', marginBottom: 3 },
   statusMeta:   { fontSize: 11, color: '#64748B' },
   statusRight:  { alignItems: 'flex-end', gap: 4 },
   screenshotBadge: {
@@ -639,12 +639,12 @@ const viewerStyles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center',
   },
   avatarText:   { fontSize: 13, fontWeight: 'bold', color: '#00D4AA' },
-  name:         { fontSize: 15, fontWeight: 'bold', color: '#FFFFFF' },
+  name:         { fontSize: 15, fontWeight: 'bold', color: '#000000' },
   time:         { fontSize: 11, color: '#64748B' },
   closeBtn:     { marginLeft: 'auto', padding: 8 },
-  closeBtnText: { fontSize: 20, color: '#FFFFFF' },
+  closeBtnText: { fontSize: 20, color: '#000000' },
   textContent:  { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
-  textBody:     { fontSize: 24, fontWeight: 'bold', color: '#FFFFFF', textAlign: 'center', lineHeight: 34 },
+  textBody:     { fontSize: 24, fontWeight: 'bold', color: '#000000', textAlign: 'center', lineHeight: 34 },
   screenshotWarning: {
     position: 'absolute', bottom: 80, alignSelf: 'center',
     backgroundColor: '#FF4D6D22', borderRadius: 20,
@@ -669,7 +669,7 @@ const addStyles = StyleSheet.create({
     width: 40, height: 4, backgroundColor: '#1E293B',
     borderRadius: 2, alignSelf: 'center', marginBottom: 16,
   },
-  title:   { fontSize: 17, fontWeight: 'bold', color: '#FFFFFF', textAlign: 'center', marginBottom: 16 },
+  title:   { fontSize: 17, fontWeight: 'bold', color: '#000000', textAlign: 'center', marginBottom: 16 },
   typeRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
   typeBtn: {
     flex: 1, paddingVertical: 10, borderRadius: 10,
@@ -684,7 +684,7 @@ const addStyles = StyleSheet.create({
     alignItems: 'center', marginBottom: 12,
   },
   previewInput: {
-    fontSize: 20, fontWeight: 'bold', color: '#FFFFFF',
+    fontSize: 20, fontWeight: 'bold', color: '#000000',
     textAlign: 'center', padding: 16, width: '100%',
   },
   colorRow:      { flexDirection: 'row', gap: 10, justifyContent: 'center', marginBottom: 16 },

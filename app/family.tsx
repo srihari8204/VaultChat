@@ -281,11 +281,11 @@ const styles = StyleSheet.create({
   },
   backBtn: { padding: 6 },
   backArrow: { color: '#4A9FFF', fontSize: 26, fontWeight: '300' },
-  headerTitle: { color: '#FFFFFF', fontSize: 17, fontWeight: '800', textAlign: 'center' },
+  headerTitle: { color: '#000000', fontSize: 17, fontWeight: '800', textAlign: 'center' },
   headerSub: { color: '#2D4A6B', fontSize: 11, textAlign: 'center' },
   addBtn: { borderRadius: 10, overflow: 'hidden' },
   addBtnGrad: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
-  addBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
+  addBtnText: { color: '#000000', fontSize: 13, fontWeight: '700' },
 
   // SAFE SCORE CARD
   safeScoreCard: {
@@ -296,7 +296,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3, shadowRadius: 12,
   },
   safeScoreLeft: { flex: 1, gap: 6 },
-  safeScoreTitle:    { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
+  safeScoreTitle:    { color: '#000000', fontSize: 16, fontWeight: '800' },
   safeScoreSubtitle: { color: 'rgba(255,255,255,0.7)', fontSize: 12 },
   safeScoreBarBg: {
     height: 6, backgroundColor: 'rgba(255,255,255,0.2)',
@@ -343,7 +343,7 @@ const styles = StyleSheet.create({
   },
   memberInfo: { flex: 1, gap: 4 },
   memberRow1: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  memberName: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  memberName: { color: '#000000', fontSize: 14, fontWeight: '700' },
   memberAge:  { color: '#2D4A6B', fontSize: 11 },
   memberRow2: { flexDirection: 'row', gap: 12 },
   memberLocation: { color: '#3D5A7A', fontSize: 11 },
@@ -369,7 +369,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center',
   },
   filterIcon:   { fontSize: 18 },
-  filterLabel:  { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
+  filterLabel:  { color: '#000000', fontSize: 14, fontWeight: '600' },
   filterStatus: { fontSize: 11, marginTop: 2 },
 
   // CONTROLS
@@ -385,7 +385,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#0D1E3A',
   },
   controlIcon:  { fontSize: 18 },
-  controlLabel: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
+  controlLabel: { color: '#000000', fontSize: 14, fontWeight: '600' },
   controlSub:   { color: '#3D5A7A', fontSize: 11, marginTop: 2 },
 
   // ACTIONS GRID
@@ -396,7 +396,7 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: '#1D4ED820',
   },
   actionCardIcon:  { fontSize: 28 },
-  actionCardLabel: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
+  actionCardLabel: { color: '#000000', fontSize: 13, fontWeight: '700' },
 
   // WORLD FIRST BADGE
   worldFirstBadge: {
@@ -405,6 +405,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 14,
   },
   worldFirstEmoji: { fontSize: 36 },
-  worldFirstTitle: { color: '#FFFFFF', fontSize: 15, fontWeight: '800' },
+  worldFirstTitle: { color: '#000000', fontSize: 15, fontWeight: '800' },
   worldFirstSub:   { color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 2 },
 });

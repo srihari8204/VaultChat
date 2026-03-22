@@ -368,7 +368,7 @@ const styles = StyleSheet.create({
   callerName: {
     fontSize: 26,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: '#000000',
     marginBottom: 8,
   },
   callStatus: {

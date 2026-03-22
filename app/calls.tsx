@@ -288,7 +288,7 @@ const styles = StyleSheet.create({
     paddingTop: 48, paddingBottom: 12, paddingHorizontal: 16,
     borderBottomWidth: 0.5, borderBottomColor: '#1E293B',
   },
-  headerTitle:  { fontSize: 20, fontWeight: 'bold', color: '#FFFFFF' },
+  headerTitle:  { fontSize: 20, fontWeight: 'bold', color: '#000000' },
   headerSub:    { fontSize: 9, color: '#00D4AA', marginTop: 2, fontWeight: 'bold' },
 
   // Tabs
@@ -308,7 +308,7 @@ const styles = StyleSheet.create({
     minWidth: 16, height: 16, justifyContent: 'center',
     alignItems: 'center', paddingHorizontal: 4,
   },
-  tabBadgeText:     { fontSize: 9, color: '#FFFFFF', fontWeight: 'bold' },
+  tabBadgeText:     { fontSize: 9, color: '#000000', fontWeight: 'bold' },
 
   loadingWrap:      { flex: 1, justifyContent: 'center', alignItems: 'center' },
   listContent:      { padding: 14, paddingBottom: 100, flexGrow: 1 },
@@ -325,7 +325,7 @@ const styles = StyleSheet.create({
   },
   avatarText:   { fontSize: 14, fontWeight: 'bold', color: '#00D4AA' },
   callInfo:     { flex: 1 },
-  peerName:     { fontSize: 15, fontWeight: 'bold', color: '#FFFFFF', marginBottom: 4 },
+  peerName:     { fontSize: 15, fontWeight: 'bold', color: '#000000', marginBottom: 4 },
   callMeta:     { flexDirection: 'row', alignItems: 'center' },
   callStatus:   { fontSize: 12 },
   callDuration: { fontSize: 12, color: '#374151' },

@@ -617,7 +617,7 @@ const pinStyles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   lockIcon:  { fontSize: 52, marginBottom: 12 },
-  title:     { fontSize: 26, fontWeight: 'bold', color: '#FFFFFF', marginBottom: 4 },
+  title:     { fontSize: 26, fontWeight: 'bold', color: '#000000', marginBottom: 4 },
   sub:       { fontSize: 13, color: '#64748B', marginBottom: 32 },
   dotsRow:   { flexDirection: 'row', gap: 12, marginBottom: 10 },
   shake:     { transform: [{ translateX: 8 }] },
@@ -636,7 +636,7 @@ const pinStyles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center',
   },
   keyEmpty:  { width: 72, height: 72 },
-  keyText:   { fontSize: 24, color: '#FFFFFF', fontWeight: '600' },
+  keyText:   { fontSize: 24, color: '#000000', fontWeight: '600' },
   note:      { marginTop: 28, color: '#374151', fontSize: 11 },
 });
 
@@ -653,7 +653,7 @@ const styles = StyleSheet.create({
   },
   back:         { fontSize: 28, color: '#00D4AA', fontWeight: 'bold' },
   headerCenter: { flex: 1 },
-  headerTitle:  { fontSize: 18, fontWeight: 'bold', color: '#FFFFFF' },
+  headerTitle:  { fontSize: 18, fontWeight: 'bold', color: '#000000' },
   headerSub:    { fontSize: 9, color: '#00D4AA', marginTop: 1 },
   backupBtn: {
     width: 36, height: 36, backgroundColor: '#1A2235',
@@ -669,7 +669,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0.5, borderBottomColor: '#1E293B',
   },
   statItem:    { flex: 1, alignItems: 'center' },
-  statNum:     { fontSize: 15, fontWeight: 'bold', color: '#FFFFFF' },
+  statNum:     { fontSize: 15, fontWeight: 'bold', color: '#000000' },
   statLabel:   { fontSize: 10, color: '#64748B', marginTop: 2 },
   statDivider: { width: 0.5, backgroundColor: '#1E293B', marginVertical: 4 },
 
@@ -722,7 +722,7 @@ const styles = StyleSheet.create({
   },
   fileIconText:  { fontSize: 22 },
   fileInfo:      { flex: 1 },
-  fileName:      { fontSize: 14, fontWeight: 'bold', color: '#FFFFFF', marginBottom: 3 },
+  fileName:      { fontSize: 14, fontWeight: 'bold', color: '#000000', marginBottom: 3 },
   fileMeta:      { fontSize: 11, color: '#64748B' },
   fileActions:   { flexDirection: 'row', alignItems: 'center', gap: 8 },
   encBadge: {
@@ -758,7 +758,7 @@ const styles = StyleSheet.create({
     borderRadius: 2, alignSelf: 'center', marginBottom: 16,
   },
   backupTitle: {
-    fontSize: 17, fontWeight: 'bold', color: '#FFFFFF',
+    fontSize: 17, fontWeight: 'bold', color: '#000000',
     textAlign: 'center', marginBottom: 8,
   },
   backupDesc: {
@@ -770,7 +770,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#1A2235', borderRadius: 10,
     borderWidth: 0.5, borderColor: '#1E293B',
     paddingHorizontal: 14, paddingVertical: 11,
-    color: '#FFFFFF', fontSize: 15, marginBottom: 16,
+    color: '#000000', fontSize: 15, marginBottom: 16,
   },
   backupBtnRow:  { flexDirection: 'row', gap: 10, marginBottom: 12 },
   backupCancelBtn: {

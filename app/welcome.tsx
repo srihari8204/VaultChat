@@ -142,7 +142,7 @@ export default function WelcomeScreen() {
 const S = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000000',
+    backgroundcolor: '#000000',
     paddingHorizontal: 28,
     paddingTop: 80,
     paddingBottom: 48,
@@ -207,7 +207,7 @@ const S = StyleSheet.create({
     alignItems: 'center',
   },
   appName: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 44,
     fontWeight: '900',
     letterSpacing: 3,
@@ -256,7 +256,7 @@ const S = StyleSheet.create({
     gap: 14,
   },
   btnPrimary: {
-    backgroundColor: '#FFFFFF',
+    backgroundcolor: '#000000',
     height: 56,
     borderRadius: 16,
     alignItems: 'center',
@@ -278,7 +278,7 @@ const S = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   btnSecondaryText: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 16,
     fontWeight: '600',
     letterSpacing: 0.5,

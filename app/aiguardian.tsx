@@ -293,7 +293,7 @@ const styles = StyleSheet.create({
   },
   backBtn: { padding: 6 },
   backArrow: { color: '#4A9FFF', fontSize: 26, fontWeight: '300' },
-  headerTitle: { color: '#FFFFFF', fontSize: 17, fontWeight: '800', textAlign: 'center' },
+  headerTitle: { color: '#000000', fontSize: 17, fontWeight: '800', textAlign: 'center' },
   headerSub:   { color: '#2D4A6B', fontSize: 11, textAlign: 'center' },
 
   // HERO CARD
@@ -317,7 +317,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.6, shadowRadius: 12,
   },
   brainEmoji: { fontSize: 36 },
-  heroTitle:  { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+  heroTitle:  { color: '#000000', fontSize: 16, fontWeight: '700' },
 
   scoreRingWrap: {},
   scoreRingOuter: {
@@ -332,7 +332,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#030A18',
     justifyContent: 'center', alignItems: 'center',
   },
-  scoreNumber: { color: '#FFFFFF', fontSize: 32, fontWeight: '900', lineHeight: 36 },
+  scoreNumber: { color: '#000000', fontSize: 32, fontWeight: '900', lineHeight: 36 },
   scoreMax:    { color: '#2D4A6B', fontSize: 13, textAlign: 'center' },
 
   heroStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
@@ -356,7 +356,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.5, shadowRadius: 10,
   },
   analyzeBtnIcon: { fontSize: 22 },
-  analyzeBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
+  analyzeBtnText: { color: '#000000', fontSize: 16, fontWeight: '800' },
 
   // SECTIONS
   section: { marginHorizontal: 16, marginBottom: 20 },
@@ -383,7 +383,7 @@ const styles = StyleSheet.create({
   },
   eventIcon:   { fontSize: 20 },
   eventInfo:   { flex: 1 },
-  eventType:   { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
+  eventType:   { color: '#000000', fontSize: 13, fontWeight: '700' },
   eventDetail: { color: '#3D5A7A', fontSize: 11, marginTop: 2 },
   eventTime:   { color: '#2D4A6B', fontSize: 10 },
 
@@ -398,7 +398,7 @@ const styles = StyleSheet.create({
   },
   featureIcon:  { fontSize: 18 },
   featureInfo:  { flex: 1 },
-  featureTitle: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
+  featureTitle: { color: '#000000', fontSize: 13, fontWeight: '600' },
   featureDesc:  { color: '#3D5A7A', fontSize: 11, marginTop: 2 },
   featureStatusBadge: {
     borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4,
@@ -416,7 +416,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center',
     flexShrink: 0,
   },
-  howStepNum: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
+  howStepNum: { color: '#000000', fontSize: 13, fontWeight: '800' },
   howText:    { color: '#4A6B8A', fontSize: 13, lineHeight: 20, flex: 1 },
 
   // WORLD FIRST
@@ -426,6 +426,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 14,
   },
   worldFirstEmoji: { fontSize: 36 },
-  worldFirstTitle: { color: '#FFFFFF', fontSize: 15, fontWeight: '800' },
+  worldFirstTitle: { color: '#000000', fontSize: 15, fontWeight: '800' },
   worldFirstSub:   { color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 2 },
 });

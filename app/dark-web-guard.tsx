@@ -554,7 +554,7 @@ const styles = StyleSheet.create({
   },
   back:         { fontSize: 28, color: '#00D4AA', fontWeight: 'bold' },
   headerCenter: { flex: 1 },
-  headerTitle:  { fontSize: 18, fontWeight: 'bold', color: '#FFFFFF' },
+  headerTitle:  { fontSize: 18, fontWeight: 'bold', color: '#000000' },
   headerSub:    { fontSize: 9, color: '#00D4AA', marginTop: 1, fontWeight: 'bold' },
 
   scroll:       { flex: 1 },
@@ -563,7 +563,7 @@ const styles = StyleSheet.create({
   // Hero
   hero: { alignItems: 'center', paddingVertical: 24 },
   heroIcon:  { fontSize: 56, marginBottom: 12 },
-  heroTitle: { fontSize: 22, fontWeight: 'bold', color: '#FFFFFF', marginBottom: 8 },
+  heroTitle: { fontSize: 22, fontWeight: 'bold', color: '#000000', marginBottom: 8 },
   heroSub: {
     fontSize: 13, color: '#64748B', textAlign: 'center',
     lineHeight: 20, paddingHorizontal: 16, marginBottom: 12,
@@ -587,7 +587,7 @@ const styles = StyleSheet.create({
     flex: 1, backgroundColor: '#1A2235',
     borderRadius: 10, borderWidth: 0.5, borderColor: '#1E293B',
     paddingHorizontal: 14, paddingVertical: 11,
-    color: '#FFFFFF', fontSize: 14,
+    color: '#000000', fontSize: 14,
   },
   scanBtn: {
     backgroundColor: '#00D4AA', borderRadius: 10,
@@ -602,7 +602,7 @@ const styles = StyleSheet.create({
   scanningWrap: {
     alignItems: 'center', paddingVertical: 32, gap: 10,
   },
-  scanningText: { fontSize: 14, color: '#FFFFFF', fontWeight: 'bold' },
+  scanningText: { fontSize: 14, color: '#000000', fontWeight: 'bold' },
   scanningHint: { fontSize: 11, color: '#374151' },
 
   // Summary
@@ -613,7 +613,7 @@ const styles = StyleSheet.create({
   summaryClean:    { backgroundColor: '#00332820', borderColor: '#00D4AA44' },
   summaryBreached: { backgroundColor: '#FF4D6D11', borderColor: '#FF4D6D44' },
   summaryIcon:     { fontSize: 40 },
-  summaryTitle:    { fontSize: 18, fontWeight: 'bold', color: '#FFFFFF' },
+  summaryTitle:    { fontSize: 18, fontWeight: 'bold', color: '#000000' },
   summarySub:      { fontSize: 13, color: '#64748B', textAlign: 'center', lineHeight: 19 },
 
   sectionLabel: {
@@ -641,7 +641,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center',
     justifyContent: 'space-between', marginBottom: 3,
   },
-  breachName:     { fontSize: 15, fontWeight: 'bold', color: '#FFFFFF' },
+  breachName:     { fontSize: 15, fontWeight: 'bold', color: '#000000' },
   breachSeverity: { fontSize: 10, fontWeight: 'bold' },
   breachMeta:     { fontSize: 11, color: '#374151', marginBottom: 6 },
   tagsRow:        { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
@@ -660,7 +660,7 @@ const styles = StyleSheet.create({
     borderWidth: 0.5, borderColor: '#1E293B',
     padding: 16, marginTop: 12, gap: 8,
   },
-  actionsTitle: { fontSize: 13, fontWeight: 'bold', color: '#FFFFFF', marginBottom: 4 },
+  actionsTitle: { fontSize: 13, fontWeight: 'bold', color: '#000000', marginBottom: 4 },
   actionText:   { fontSize: 13, color: '#64748B', lineHeight: 20 },
 
   // Monitored emails
@@ -670,7 +670,7 @@ const styles = StyleSheet.create({
     borderWidth: 0.5, borderColor: '#1E293B',
     paddingHorizontal: 14, paddingVertical: 12, marginBottom: 8,
   },
-  monitoredEmail:  { fontSize: 14, color: '#FFFFFF' },
+  monitoredEmail:  { fontSize: 14, color: '#000000' },
   monitoredRescan: { fontSize: 12, color: '#00D4AA' },
 });
 
@@ -694,7 +694,7 @@ const detailStyles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center',
   },
   domainInitial: { fontSize: 20, fontWeight: 'bold', color: '#64748B' },
-  breachName:    { fontSize: 17, fontWeight: 'bold', color: '#FFFFFF' },
+  breachName:    { fontSize: 17, fontWeight: 'bold', color: '#000000' },
   breachDomain:  { fontSize: 12, color: '#374151' },
   severityPill: {
     marginLeft: 'auto', borderRadius: 10,
@@ -706,7 +706,7 @@ const detailStyles = StyleSheet.create({
     borderRadius: 12, padding: 14, marginBottom: 16,
   },
   stat:      { flex: 1, alignItems: 'center' },
-  statNum:   { fontSize: 16, fontWeight: 'bold', color: '#FFFFFF', marginBottom: 2 },
+  statNum:   { fontSize: 16, fontWeight: 'bold', color: '#000000', marginBottom: 2 },
   statLabel: { fontSize: 10, color: '#374151' },
   statDiv:   { width: 0.5, backgroundColor: '#1E293B', marginVertical: 4 },
   sectionLabel: {
@@ -719,7 +719,7 @@ const detailStyles = StyleSheet.create({
     borderWidth: 0.5, borderColor: '#1E293B',
     paddingHorizontal: 10, paddingVertical: 4,
   },
-  tagText:     { fontSize: 12, color: '#FFFFFF' },
+  tagText:     { fontSize: 12, color: '#000000' },
   description: { fontSize: 13, color: '#64748B', lineHeight: 20, marginBottom: 4 },
   action:      { fontSize: 13, color: '#64748B', lineHeight: 22 },
   closeBtn: {
@@ -727,5 +727,5 @@ const detailStyles = StyleSheet.create({
     borderWidth: 0.5, borderColor: '#1E293B',
     paddingVertical: 13, alignItems: 'center', marginTop: 16,
   },
-  closeBtnText: { color: '#FFFFFF', fontWeight: 'bold', fontSize: 15 },
+  closeBtnText: { color: '#000000', fontWeight: 'bold', fontSize: 15 },
 });

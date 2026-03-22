@@ -4,15 +4,21 @@
  * Auto-captures OTP from SMS via textContentType="oneTimeCode" + autoComplete
  * Supports clipboard paste detection for quick OTP entry
  */
-import React, { useState, useEffect, useRef } from 'react';
-import {
-  View, Text, TextInput, TouchableOpacity,
-  StyleSheet, Animated, Keyboard, AppState, Platform,
-} from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  Animated,
+  AppState,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  Text, TextInput, TouchableOpacity,
+  View,
+} from 'react-native';
 import { sendOTP, verifyOTP } from './(constants)/authService';
 
 export default function OTPScreen() {
@@ -243,8 +249,12 @@ export default function OTPScreen() {
   const filledCount = otp.filter(d => d !== '').length;
 
   return (
-    <View style={s.screen}>
-      <Animated.View style={{ flex: 1, opacity: fadeIn, transform: [{ translateY: slideUp }] }}>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={{ flex: 1 }}
+    >
+      <View style={s.screen}>
+        <Animated.View style={{ flex: 1, opacity: fadeIn, transform: [{ translateY: slideUp }] }}>
 
         {/* Back button */}
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
@@ -339,51 +349,52 @@ export default function OTPScreen() {
         </Animated.View>
 
       </Animated.View>
-    </View>
+      </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const s = StyleSheet.create({
-  screen:      { flex: 1, backgroundColor: '#000000' },
+  screen:      { flex: 1, backgroundColor: '#FFFFFF' },
   backBtn:     { paddingTop: 56, paddingLeft: 24 },
-  backTxt:     { color: '#fff', fontSize: 28, fontWeight: '200' },
+  backTxt:     { color: '#000000', fontSize: 28, fontWeight: '200' },
   content:     { flex: 1, paddingHorizontal: 32, paddingTop: 40 },
-  title:       { color: '#FFFFFF', fontSize: 36, fontWeight: '800', lineHeight: 44, marginBottom: 12 },
-  subtitle:    { color: 'rgba(255,255,255,0.4)', fontSize: 15, marginBottom: 32, lineHeight: 22 },
-  phone:       { color: '#FFFFFF', fontWeight: '700' },
+  title:       { color: '#000000', fontSize: 36, fontWeight: '800', lineHeight: 44, marginBottom: 12 },
+  subtitle:    { color: 'rgba(0,0,0,0.4)', fontSize: 15, marginBottom: 32, lineHeight: 22 },
+  phone:       { color: '#000000', fontWeight: '700' },
 
   autoBadge:   { backgroundColor: 'rgba(16,185,129,0.12)', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, alignSelf: 'flex-start', marginBottom: 20, borderWidth: 1, borderColor: 'rgba(16,185,129,0.25)' },
   autoTxt:     { color: '#10B981', fontSize: 12, fontWeight: '700' },
 
   otpRow:      { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12, gap: 12 },
   otpWrap:     { flex: 1, alignItems: 'center' },
-  otpBox:      { width: '100%', height: 56, color: '#FFFFFF', fontSize: 28, fontWeight: '700', textAlign: 'center', backgroundColor: 'transparent' },
+  otpBox:      { width: '100%', height: 56, color: '#000000', fontSize: 28, fontWeight: '700', textAlign: 'center', backgroundColor: 'transparent' },
   otpBoxFilled:{},
-  otpLine:     { width: '100%', height: 2, backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 1 },
-  otpLineFilled:{ backgroundColor: '#FFFFFF' },
+  otpLine:     { width: '100%', height: 2, backgroundColor: 'rgba(0,0,0,0.12)', borderRadius: 1 },
+  otpLineFilled:{ backgroundColor: '#000000' },
 
   error:       { color: '#EF4444', fontSize: 13, marginBottom: 12 },
 
   progressRow: { flexDirection: 'row', gap: 6, marginBottom: 40, marginTop: 8 },
-  progressDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.1)' },
-  progressDotFilled: { backgroundColor: '#FFFFFF' },
+  progressDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(0,0,0,0.1)' },
+  progressDotFilled: { backgroundColor: '#000000' },
 
-  verifyBtn:   { backgroundColor: '#FFFFFF', borderRadius: 16, paddingVertical: 18, alignItems: 'center', marginBottom: 24 },
+  verifyBtn:   { backgroundColor: '#000000', borderRadius: 16, paddingVertical: 18, alignItems: 'center', marginBottom: 24 },
   verifyBtnOff:{ opacity: 0.15 },
-  verifyTxt:   { color: '#000000', fontSize: 17, fontWeight: '800' },
+  verifyTxt:   { color: '#FFFFFF', fontSize: 17, fontWeight: '800' },
 
   dotsRow:     { flexDirection: 'row', gap: 6, height: 20, alignItems: 'center' },
-  loadDot:     { width: 6, height: 6, borderRadius: 3, backgroundColor: '#000' },
+  loadDot:     { width: 6, height: 6, borderRadius: 3, backgroundColor: '#FFFFFF' },
 
   resendBtn:   { alignItems: 'center', marginBottom: 16 },
-  resendTxt:   { color: 'rgba(255,255,255,0.25)', fontSize: 14 },
-  resendActive:{ color: 'rgba(255,255,255,0.7)' },
+  resendTxt:   { color: 'rgba(0,0,0,0.25)', fontSize: 14 },
+  resendActive:{ color: 'rgba(0,0,0,0.7)' },
 
   changeBtn:   { alignItems: 'center' },
-  changeTxt:   { color: 'rgba(255,255,255,0.25)', fontSize: 13 },
+  changeTxt:   { color: 'rgba(0,0,0,0.25)', fontSize: 13 },
 
-  successOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
+  successOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center' },
   successCircle:  { width: 80, height: 80, borderRadius: 40, borderWidth: 2, borderColor: '#10B981', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
   successCheck:   { color: '#10B981', fontSize: 36, fontWeight: '200' },
-  successTxt:     { color: '#FFFFFF', fontSize: 24, fontWeight: '700' },
+  successTxt:     { color: '#000000', fontSize: 24, fontWeight: '700' },
 });

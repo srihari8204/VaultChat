@@ -16,29 +16,29 @@ import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Animated,
-  Dimensions,
-  Easing,
-  Keyboard,
-  Platform,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    Animated,
+    Dimensions,
+    Easing,
+    Keyboard,
+    Platform,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 
 // ── colours ────────────────────────────────────────────────────
 const C = {
-  bg: '#060E1E',
-  panel: '#0D1F3C',
+  bg: '#FFFFFF',
+  panel: '#F8F9FA',
   cyan: '#00E5FF',
   green: '#00FF9D',
   coral: '#FF4D6D',
   white: '#FFFFFF',
-  muted: '#7BA7C4',
-  dark: '#030A14',
+  muted: '#666666',
+  dark: '#E8F4FD',
 };
 
 const { width: SW } = Dimensions.get('window');
@@ -153,6 +153,26 @@ export default function ThreeFactorVerifyScreen() {
   const hiddenInputRef = useRef<TextInput>(null);
   const scanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ── step transition with fade ───────────────────────────────
+  const transitionTo = useCallback(
+    (next: Step) => {
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }).start(() => {
+        setStep(next);
+        setError('');
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }).start();
+      });
+    },
+    [fadeAnim]
+  );
+
   // ── pulse animation for brackets ────────────────────────────
   useEffect(() => {
     const loop = Animated.loop(
@@ -243,25 +263,25 @@ export default function ThreeFactorVerifyScreen() {
     return () => clearTimeout(t);
   }, [step, transitionTo]);
 
-  // ── step transition with fade ───────────────────────────────
-  const transitionTo = useCallback(
-    (next: Step) => {
-      Animated.timing(fadeAnim, {
-        toValue: 0,
-        duration: 200,
+  // ── success animation ───────────────────────────────────────
+  const showSuccess = useCallback(() => {
+    setDone(true);
+    Animated.parallel([
+      Animated.spring(successScale, {
+        toValue: 1,
+        friction: 4,
+        tension: 60,
         useNativeDriver: true,
-      }).start(() => {
-        setStep(next);
-        setError('');
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: true,
-        }).start();
-      });
-    },
-    [fadeAnim]
-  );
+      }),
+      Animated.timing(successOpacity, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setTimeout(() => router.replace('/chats'), 1000);
+    });
+  }, [successScale, successOpacity]);
 
   // ── step 3: verify secret code ──────────────────────────────
   const verifyCode = useCallback(async (input: string) => {
@@ -291,28 +311,6 @@ export default function ThreeFactorVerifyScreen() {
       setCode('');
     }
   }, [showSuccess]);
-
-  // ── success animation ───────────────────────────────────────
-  const showSuccess = useCallback(() => {
-    setDone(true);
-    Animated.parallel([
-      Animated.spring(successScale, {
-        toValue: 1,
-        friction: 4,
-        tension: 60,
-        useNativeDriver: true,
-      }),
-      Animated.timing(successOpacity, {
-        toValue: 1,
-        duration: 300,
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      setTimeout(() => {
-        router.replace('/chats');
-      }, 1200);
-    });
-  }, [successOpacity, successScale]);
 
   // ── handle code input ───────────────────────────────────────
   const onCodeChange = useCallback(

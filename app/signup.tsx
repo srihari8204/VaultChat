@@ -631,10 +631,10 @@ const S = StyleSheet.create({
     zIndex: 0,
   },
   scroll: {
-    flexGrow: 1,
-    paddingHorizontal: 28,
-    paddingTop: Platform.OS === "ios" ? 64 : 48,
-    paddingBottom: 40,
+    // flexGrow: 1,
+    // paddingHorizontal: 28,
+    // paddingTop: Platform.OS === "ios" ? 64 : 48,
+    // paddingBottom: 40,
   },
 
   // Header

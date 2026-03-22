@@ -367,7 +367,7 @@ const styles = StyleSheet.create({
     fontSize: 20,
   },
   headerTitle: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 26,
     fontWeight: '700',
   },
@@ -377,7 +377,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   sectionTitle: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 18,
     fontWeight: '700',
     marginBottom: 14,
@@ -411,7 +411,7 @@ const styles = StyleSheet.create({
     fontSize: 28,
   },
   appName: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 14,
     fontWeight: '600',
     marginBottom: 10,
@@ -447,7 +447,7 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   devTitle: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 18,
     fontWeight: '700',
     marginBottom: 6,
@@ -470,7 +470,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   devBtnText: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 14,
     fontWeight: '700',
   },
@@ -501,7 +501,7 @@ const styles = StyleSheet.create({
     borderColor: '#1A2744',
   },
   calcDisplayText: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 42,
     fontWeight: '300',
   },
@@ -536,21 +536,21 @@ const styles = StyleSheet.create({
     borderRadius: 36,
   },
   calcBtnText: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 26,
     fontWeight: '500',
   },
   calcBtnTextOp: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontWeight: '600',
   },
   calcBtnTextFunc: {
-    color: '#FFFFFF',
+    color: '#000000',
   },
 
   // ── Todo List ─────────────────────────────────────
   todoTitle: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 24,
     fontWeight: '700',
     marginBottom: 4,
@@ -570,7 +570,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#1A2744',
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 14,
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -585,7 +585,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   todoAddBtnText: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 24,
     fontWeight: '600',
   },
@@ -614,13 +614,13 @@ const styles = StyleSheet.create({
     borderColor: '#4A9FFF',
   },
   todoCheckMark: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 14,
     fontWeight: '700',
   },
   todoText: {
     flex: 1,
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 14,
   },
   todoTextDone: {

@@ -210,7 +210,7 @@ export default function LoginScreen() {
 const S = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundcolor: '#000000',
   },
   scroll: {
     // flexGrow: 1,
@@ -340,7 +340,7 @@ const S = StyleSheet.create({
     marginBottom: 'auto' as any,
   },
   btnContinue: {
-    backgroundColor: '#000000',
+    backgroundcolor: '#000000',
     height: 56,
     borderRadius: 16,
     alignItems: 'center',
@@ -350,7 +350,7 @@ const S = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.1)',
   },
   btnText: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 16,
     fontWeight: '800',
     letterSpacing: 0.5,
@@ -366,7 +366,7 @@ const S = StyleSheet.create({
     width: 7,
     height: 7,
     borderRadius: 3.5,
-    backgroundColor: '#FFFFFF',
+    backgroundcolor: '#000000',
   },
 
   // Bottom link

@@ -583,7 +583,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   headerTitle: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 22,
     fontWeight: '800',
     flex: 1,
@@ -625,7 +625,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   sectionTitle: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 17,
     fontWeight: '700',
     flex: 1,
@@ -639,7 +639,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   countBadgeText: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 12,
     fontWeight: '700',
   },
@@ -669,7 +669,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 15,
     borderWidth: 1,
     borderColor: '#1A2A4A',
@@ -690,7 +690,7 @@ const styles = StyleSheet.create({
     borderColor: '#1A2A4A',
   },
   pickerBtnText: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 15,
   },
   pickerArrow: {
@@ -731,7 +731,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   createBtnText: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 16,
     fontWeight: '700',
   },
@@ -765,7 +765,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   channelName: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 16,
     fontWeight: '700',
   },
@@ -850,7 +850,7 @@ const styles = StyleSheet.create({
     fontSize: 22,
   },
   discoverName: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 14,
     fontWeight: '700',
     textAlign: 'center',
@@ -888,7 +888,7 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   subscribeBtnText: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 13,
     fontWeight: '700',
   },
@@ -909,7 +909,7 @@ const styles = StyleSheet.create({
     borderColor: '#1A2A4A',
   },
   pickerModalTitle: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 18,
     fontWeight: '700',
     marginBottom: 16,
