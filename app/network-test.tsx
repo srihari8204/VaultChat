@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/network-test.tsx — Built-in Network Speed Test
 // Download/upload speed, ping/latency, jitter, animated gauge
 // Connection type from NetInfo, history in AsyncStorage
@@ -14,7 +13,7 @@ import NetInfo from '@react-native-community/netinfo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width: SW } = Dimensions.get('window');
-const C = { bg: '#020B18', accent: '#4A9FFF', cyan: '#00E5FF', card: '#0A1628', danger: '#FF3C6E', green: '#10B981', text: '#FFFFFF', muted: '#8A9BBF', yellow: '#FBBF24' };
+const C = { bg: '#FFFFFF', accent: '#4A9FFF', cyan: '#4A9FFF', card: '#F9FAFB', danger: '#FF3C6E', green: '#10B981', text: '#FFFFFF', muted: '#8A9BBF', yellow: '#FBBF24' };
 
 const STORAGE_KEY = 'vaultchat_speedtest_history';
 const GAUGE_SIZE = 220;
@@ -289,7 +288,7 @@ export default function NetworkTestScreen() {
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <LinearGradient colors={['#020B18', '#0A1628', '#020B18']} style={StyleSheet.absoluteFill} />
+      <LinearGradient colors={['#FFFFFF', '#F9FAFB', '#FFFFFF']} style={StyleSheet.absoluteFill} />
 
       {/* Header */}
       <View style={styles.header}>
@@ -331,7 +330,7 @@ export default function NetworkTestScreen() {
           style={[styles.testButton, (phase !== 'idle' && phase !== 'done') && styles.testButtonDisabled]}
         >
           <LinearGradient
-            colors={(phase !== 'idle' && phase !== 'done') ? ['#333', '#222'] : [C.accent, '#2D7AE0']}
+            colors={(phase !== 'idle' && phase !== 'done') ? ['#D1D5DB', '#E5E7EB'] : [C.accent, '#2D7AE0']}
             style={styles.testButtonGradient}
           >
             {(phase !== 'idle' && phase !== 'done') ? (

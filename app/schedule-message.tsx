@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/schedule-message.tsx — Schedule Messages to Send Later
 // Stores in Firestore: users/{uid}/scheduledMessages/{id}
 // A background check sends them when time arrives
@@ -12,7 +11,7 @@ import { useLocalSearchParams, Stack } from 'expo-router';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 
-const C = { bg: '#020B18', accent: '#4A9FFF', green: '#10B981', card: '#0A1628', danger: '#FF3C6E' };
+const C = { bg: '#FFFFFF', accent: '#4A9FFF', green: '#10B981', card: '#F9FAFB', danger: '#FF3C6E' };
 
 const QUICK_TIMES = [
   { label: 'In 30 min', mins: 30 },
@@ -109,7 +108,7 @@ export default function ScheduleMessageScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Schedule Message', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
+      <Stack.Screen options={{ title: 'Schedule Message', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
       <View style={s.container}>
         <StatusBar barStyle="light-content" />
 
@@ -128,7 +127,7 @@ export default function ScheduleMessageScreen() {
 
             <View style={s.msgBox}>
               <TextInput style={s.msgInput} value={message} onChangeText={setMessage}
-                placeholder="Type your message..." placeholderTextColor="#555" multiline maxLength={2000} />
+                placeholder="Type your message..." placeholderTextColor="#6B7280" multiline maxLength={2000} />
             </View>
 
             <Text style={s.quickLabel}>SEND AT</Text>
@@ -158,7 +157,7 @@ export default function ScheduleMessageScreen() {
               </View>
             )}
             contentContainerStyle={{ padding: 12 }}
-            ListEmptyComponent={<View style={{ alignItems: 'center', padding: 40 }}><Text style={{ color: '#555' }}>No scheduled messages</Text></View>}
+            ListEmptyComponent={<View style={{ alignItems: 'center', padding: 40 }}><Text style={{ color: '#6B7280' }}>No scheduled messages</Text></View>}
           />
         )}
       </View>
@@ -169,20 +168,20 @@ export default function ScheduleMessageScreen() {
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg, padding: 16 },
   tabs: { flexDirection: 'row', gap: 6, marginBottom: 16 },
-  tab: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: '#0A1628' },
+  tab: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: '#F9FAFB' },
   tabActive: { backgroundColor: C.accent },
-  tabTxt: { color: '#888', fontSize: 13, fontWeight: '700' },
+  tabTxt: { color: '#6B7280', fontSize: 13, fontWeight: '700' },
   tabTxtActive: { color: '#000' },
   toLabel: { color: C.accent, fontSize: 14, fontWeight: '700', marginBottom: 8 },
-  msgBox: { backgroundColor: C.card, borderRadius: 14, padding: 4, borderWidth: 1, borderColor: '#111', marginBottom: 16 },
+  msgBox: { backgroundColor: C.card, borderRadius: 14, padding: 4, borderWidth: 1, borderColor: '#E5E7EB', marginBottom: 16 },
   msgInput: { color: '#fff', fontSize: 15, minHeight: 100, padding: 12, textAlignVertical: 'top' },
-  quickLabel: { color: '#555', fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 8 },
+  quickLabel: { color: '#6B7280', fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 8 },
   quickGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   quickBtn: { backgroundColor: '#4A9FFF22', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 16, borderWidth: 1, borderColor: '#4A9FFF44' },
   quickTxt: { color: C.accent, fontSize: 13, fontWeight: '600' },
-  pendingRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: '#111' },
+  pendingRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: '#E5E7EB' },
   pendingTo: { color: C.accent, fontSize: 12, fontWeight: '700' },
-  pendingMsg: { color: '#E0E0F0', fontSize: 14, marginTop: 4 },
-  pendingTime: { color: '#888', fontSize: 11, marginTop: 6 },
+  pendingMsg: { color: '#1F2937', fontSize: 14, marginTop: 4 },
+  pendingTime: { color: '#6B7280', fontSize: 11, marginTop: 6 },
   cancelBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: '#FF3C6E15', borderWidth: 1, borderColor: '#FF3C6E33' },
 });

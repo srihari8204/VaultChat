@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/media-viewer.tsx — Universal In-App Media Viewer
 // Images: zoom, pan | Videos: stream while loading | Audio: built-in player | Code: inline preview
 
@@ -15,7 +14,7 @@ import * as Sharing from 'expo-sharing';
 import * as MediaLibrary from 'expo-media-library';
 
 const { width: SW, height: SH } = Dimensions.get('window');
-const C = { bg: '#000', accent: '#00E5FF', green: '#10B981' };
+const C = { bg: '#000', accent: '#4A9FFF', green: '#10B981' };
 
 const getFileType = (name) => {
   const ext = (name || '').split('.').pop()?.toLowerCase() || '';
@@ -129,7 +128,7 @@ export default function MediaViewerScreen() {
           <Text style={{ fontSize: 48 }}>{"\uD83C\uDFB5"}</Text>
           <Text style={s.audioName}>{fileName}</Text>
           <Text style={s.audioMeta}>{formatSize(fileSize)}{ast.durationMillis ? ' | ' + formatDur(ast.durationMillis) : ''}</Text>
-          <View style={s.waveform}>{Array.from({length:40}).map((_,i) => <View key={i} style={[s.waveBar,{height:8+Math.random()*28,backgroundColor:i/40<prog?C.accent:'#333'}]}/>)}</View>
+          <View style={s.waveform}>{Array.from({length:40}).map((_,i) => <View key={i} style={[s.waveBar,{height:8+Math.random()*28,backgroundColor:i/40<prog?C.accent:'#D1D5DB'}]}/>)}</View>
           <View style={s.audioTimeRow}><Text style={s.audioTime}>{formatDur(ast.positionMillis)}</Text><Text style={s.audioTime}>{formatDur(ast.durationMillis)}</Text></View>
           <View style={s.audioCtrlRow}>
             <TouchableOpacity onPress={async()=>{if(!soundRef.current)return;const p=Math.max(0,prog-0.1);await soundRef.current.setPositionAsync(p*(ast.durationMillis||0));}}><Text style={{fontSize:24}}>{"\u23EA"}</Text></TouchableOpacity>
@@ -157,9 +156,9 @@ export default function MediaViewerScreen() {
     }, []);
     const lines = content.split('\n');
     return (
-      <ScrollView style={{flex:1,background:'#0D1117'}}>
+      <ScrollView style={{flex:1,background:'#FFFFFF'}}>
         <View style={{padding:12,background:'#161B22',borderBottomWidth:1,borderBottomColor:'#21262D'}}>
-          <Text style={{color:'#E0E0F0',fontSize:14,fontWeight:800}}>{fileName}</Text>
+          <Text style={{color:'#1F2937',fontSize:14,fontWeight:800}}>{fileName}</Text>
           <Text style={{color:'#8B949E',fontSize:11,marginTop:4}}>{lines.length} lines | {formatSize(content.length)}</Text>
           <TouchableOpacity style={{marginTop:10,background:'#4A9FFF22',borderRadius:10,paddingVertical:10,alignItems:'center',borderWidth:1,borderColor:'#4A9FFF44'}}
             onPress={()=>router.push({pathname:'/file-preview',params:{uri:fileUri,filename:fileName,mediaUrl:fileUri}})}>
@@ -182,7 +181,7 @@ export default function MediaViewerScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: fileName, headerStyle: { backgroundColor: '#000' }, headerTintColor: '#fff',
+      <Stack.Screen options={{ title: fileName, headerStyle: { backgroundColor: '#000' }, headerTintColor: '#1F2937',
         headerRight: () => <View style={{flexDirection:'row',gap:14,marginRight:8}}>
           <TouchableOpacity onPress={()=>Share.share({url:fileUri,message:fileName})}><Text style={{color:C.accent,fontSize:13,fontWeight:700}}>Share</Text></TouchableOpacity>
           <TouchableOpacity onPress={saveToDevice}><Text style={{color:C.accent,fontSize:13,fontWeight:700}}>Save</Text></TouchableOpacity>
@@ -209,22 +208,22 @@ const s = StyleSheet.create({
   fullImg:{width:SW,height:SH-100},
   fullVid:{width:SW,height:SH-100},
   bufOverlay:{position:'absolute',justifyContent:'center',alignItems:'center'},
-  bufTxt:{color:'#888',fontSize:12,marginTop:8},
+  bufTxt:{color:'#6B7280',fontSize:12,marginTop:8},
   vidCtrl:{position:'absolute',bottom:0,left:0,right:0,backgroundColor:'#000000AA',padding:16,paddingBottom:30},
   playBtn:{alignSelf:'center',marginBottom:12},
   progRow:{flexDirection:'row',alignItems:'center',gap:8},
   timeTxt:{color:'#ccc',fontSize:11,width:40},
-  seekBg:{flex:1,height:4,backgroundColor:'#333',borderRadius:2,overflow:'hidden'},
-  seekBuf:{position:'absolute',height:'100%',backgroundColor:'#555',borderRadius:2},
+  seekBg:{flex:1,height:4,backgroundColor:'#D1D5DB',borderRadius:2,overflow:'hidden'},
+  seekBuf:{position:'absolute',height:'100%',backgroundColor:'#6B7280',borderRadius:2},
   seekFill:{height:'100%',backgroundColor:C.accent,borderRadius:2},
   audioWrap:{flex:1,justifyContent:'center',padding:24},
-  audioCard:{backgroundColor:'#0A1628',borderRadius:24,padding:32,alignItems:'center',borderWidth:1,borderColor:'#111'},
-  audioName:{color:'#E0E0F0',fontSize:16,fontWeight:800,marginTop:12,textAlign:'center'},
-  audioMeta:{color:'#666',fontSize:12,marginTop:4},
+  audioCard:{backgroundColor:'#F9FAFB',borderRadius:24,padding:32,alignItems:'center',borderWidth:1,borderColor:'#E5E7EB'},
+  audioName:{color:'#1F2937',fontSize:16,fontWeight:800,marginTop:12,textAlign:'center'},
+  audioMeta:{color:'#9CA3AF',fontSize:12,marginTop:4},
   waveform:{flexDirection:'row',alignItems:'center',gap:2,marginTop:24,height:40},
   waveBar:{width:3,borderRadius:2},
   audioTimeRow:{flexDirection:'row',justifyContent:'space-between',width:'100%',marginTop:8},
-  audioTime:{color:'#666',fontSize:11},
+  audioTime:{color:'#9CA3AF',fontSize:11},
   audioCtrlRow:{flexDirection:'row',alignItems:'center',gap:24,marginTop:20},
   audioPlayBtn:{width:64,height:64,borderRadius:32,backgroundColor:C.accent,justifyContent:'center',alignItems:'center'},
 });

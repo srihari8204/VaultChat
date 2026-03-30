@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 // lib/screenSharePrivacy.ts
 // Screen Share Privacy Ã¢â‚¬â€ hides VaultChat content during screen share
@@ -38,13 +37,10 @@ class ScreenSharePrivacy {
         const { ScreenSecure } = NativeModules;
         if (ScreenSecure?.enable) {
           await ScreenSecure.enable();
-          console.log('[ScreenSharePrivacy] FLAG_SECURE enabled');
         } else {
           // Fallback Ã¢â‚¬â€ notify UI to show overlay
-          console.log('[ScreenSharePrivacy] Native module missing Ã¢â‚¬â€ using overlay fallback');
         }
       } catch (e) {
-        console.warn('[ScreenSharePrivacy] Error:', e);
       }
     }
 
@@ -84,7 +80,6 @@ class ScreenSharePrivacy {
     await this.enableProtection();
     const socket = getSocket();
     socket.emit('screen_share_start', { from: myVaultId, to: toVaultId });
-    console.log('[ScreenSharePrivacy] Own screen share started Ã¢â‚¬â€ chats protected');
   }
 
   async stopOwnScreenShare(myVaultId: string, toVaultId: string) {

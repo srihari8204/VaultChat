@@ -78,7 +78,7 @@ function MemoryShieldScreenContent() {
   const warningOpacity = warningAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.6] });
 
   if (destroyed) return (
-    <LinearGradient colors={['#020B18', '#060F24']} style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 30 }}>
+    <LinearGradient colors={['#FFFFFF', '#060F24']} style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 30 }}>
       <Text style={{ fontSize: 80, marginBottom: 20 }}>💀</Text>
       <Text style={{ color: '#EF4444', fontSize: 26, fontWeight: '900', textAlign: 'center', marginBottom: 20 }}>MEMORY SHIELD EXECUTED</Text>
       <View style={{ backgroundColor: '#3B0A0A', borderRadius: 16, padding: 20, width: '100%', borderWidth: 1, borderColor: '#7F1D1D', marginBottom: 20 }}>
@@ -111,7 +111,7 @@ function MemoryShieldScreenContent() {
   );
 
   return (
-    <LinearGradient colors={['#020B18', '#040F20', '#060F24']} style={{ flex: 1 }}>
+    <LinearGradient colors={['#FFFFFF', '#040F20', '#060F24']} style={{ flex: 1 }}>
       <Animated.View style={{ flex: 1, opacity: fadeIn }}>
         <ScrollView contentContainerStyle={S.container}>
           <View style={S.header}>
@@ -125,7 +125,7 @@ function MemoryShieldScreenContent() {
           </View>
 
           <Animated.View style={[S.shieldContainer, { transform: [{ scale: pulseRed }] }]}>
-            <LinearGradient colors={['#1a0000', '#2d0606', '#0A1628']} style={S.shieldCard}>
+            <LinearGradient colors={['#1a0000', '#2d0606', '#F9FAFB']} style={S.shieldCard}>
               <Animated.View style={[S.shieldRing, { transform: [{ rotate: rotateStr }] }]} />
               <Text style={{ fontSize: 70, marginBottom: 8 }}>💀</Text>
               <Text style={{ color: '#EF4444', fontSize: 20, fontWeight: '900', letterSpacing: 2 }}>MEMORYSHIELD</Text>
@@ -270,7 +270,7 @@ function MemoryShieldScreenContent() {
 
       <Modal visible={showPanicSetup} transparent animationType="slide">
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', justifyContent: 'flex-end' }}>
-          <LinearGradient colors={['#0A1628', '#0D1E3A']} style={{ borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: 44 }}>
+          <LinearGradient colors={['#F9FAFB', '#0D1E3A']} style={{ borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: 44 }}>
             <Text style={{ color: '#fff', fontSize: 20, fontWeight: '900', marginBottom: 4 }}>Set Panic Word</Text>
             <Text style={{ color: '#3D5A7A', fontSize: 13, marginBottom: 20, lineHeight: 20 }}>Choose a secret word. Typing it anywhere will trigger MemoryShield instantly.</Text>
             <TextInput value={panicInput} onChangeText={setPanicInput} placeholder="e.g. DANGER, HELP, SHIELD" placeholderTextColor="#1D2D44" style={{ backgroundColor: '#060E22', borderRadius: 12, padding: 14, color: '#EF4444', fontSize: 16, fontWeight: '900', borderWidth: 1.5, borderColor: '#7F1D1D', marginBottom: 20, textAlign: 'center', letterSpacing: 2 }} autoCapitalize="characters" />
@@ -292,7 +292,7 @@ function MemoryShieldScreenContent() {
 const S = StyleSheet.create({
   container: { paddingHorizontal: 18, paddingTop: 50, paddingBottom: 20 },
   header: { flexDirection: 'row', alignItems: 'center', marginBottom: 16, gap: 10 },
-  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#0A1628', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#0D1E3A' },
+  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F9FAFB', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#0D1E3A' },
   title: { color: '#fff', fontSize: 20, fontWeight: '900' },
   shieldContainer: { marginBottom: 16, borderRadius: 24 },
   shieldCard: { borderRadius: 24, padding: 28, alignItems: 'center', borderWidth: 1.5, borderColor: '#7F1D1D', overflow: 'hidden' },
@@ -300,16 +300,16 @@ const S = StyleSheet.create({
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, backgroundColor: '#052E16', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 6 },
   statusDot: { width: 8, height: 8, borderRadius: 4 },
   nuclearBtn: { borderRadius: 18, padding: 18, flexDirection: 'row', alignItems: 'center' },
-  settingsCard: { backgroundColor: '#0A1628', borderRadius: 18, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#0D1E3A' },
+  settingsCard: { backgroundColor: '#F9FAFB', borderRadius: 18, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#0D1E3A' },
   settingsTitle: { color: '#fff', fontSize: 14, fontWeight: '800', marginBottom: 14 },
   settingRow: { flexDirection: 'row', alignItems: 'center' },
   settingLabel: { color: '#fff', fontSize: 13, fontWeight: '700' },
   settingDesc: { color: '#3D5A7A', fontSize: 11, marginTop: 2 },
   timerRow: { flexDirection: 'row', gap: 8, marginTop: 10, flexWrap: 'wrap' },
   timerChip: { borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1.5 },
-  destroyCard: { backgroundColor: '#0A1628', borderRadius: 18, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#7F1D1D' },
+  destroyCard: { backgroundColor: '#F9FAFB', borderRadius: 18, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#7F1D1D' },
   destroyRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#0D1E3A', gap: 8 },
-  logsCard: { backgroundColor: '#0A1628', borderRadius: 18, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#0D1E3A' },
+  logsCard: { backgroundColor: '#F9FAFB', borderRadius: 18, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#0D1E3A' },
   logRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#0D1E3A' },
 });
 

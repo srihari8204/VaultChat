@@ -113,7 +113,7 @@ export default function ChatsScreen() {
   };
 
   useEffect(() => {
-    if (!myUid) { setLoading(false); return; }
+    if (!myUid) { setLoading(false); router.replace('/welcome'); return; }
 
     const q = query(
       collection(db, 'chats'),
@@ -135,9 +135,9 @@ export default function ChatsScreen() {
             lastMsg: data.lastMsg ?? '',
             lastTime: data.lastTime,
             unreadCount: unread,
-            pinned: data.pinned ?? false,
-            archived: data.archived ?? false,
-            muted: data.muted ?? false,
+            pinned: data.pinned_by?.[myUid] ?? data.pinned ?? false,
+            archived: data.archived_by?.[myUid] ?? data.archived ?? false,
+            muted: data.muted_by?.[myUid] ?? data.muted ?? false,
           } as ChatItem;
         }
 
@@ -159,9 +159,9 @@ export default function ChatsScreen() {
           lastMsg: data.lastMsg ?? '',
           lastTime: data.lastTime,
           unreadCount: unread,
-          pinned: data.pinned ?? false,
-          archived: data.archived ?? false,
-          muted: data.muted ?? false,
+          pinned: data.pinned_by?.[myUid] ?? data.pinned ?? false,
+          archived: data.archived_by?.[myUid] ?? data.archived ?? false,
+          muted: data.muted_by?.[myUid] ?? data.muted ?? false,
           online,
         } as ChatItem;
       }));
@@ -360,9 +360,9 @@ export default function ChatsScreen() {
         headerRight: () => (
           <View style={{ flexDirection: 'row', gap: 12, marginRight: 0}}>
             <TouchableOpacity onPress={() => router.push('/d2de-status' as any)}><Text style={{ color: '#00D4AA', fontSize: 20 }}>🛡️</Text></TouchableOpacity>
-            <TouchableOpacity onPress={ensureNoteToSelf}><Text style={{ color: '#00E5FF', fontSize: 20 }}>📝</Text></TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push('/create-group')}><Text style={{ color: '#00E5FF', fontSize: 22 }}>👥</Text></TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push('/profile')}><Text style={{ color: '#00E5FF', fontSize: 22 }}>⚙️</Text></TouchableOpacity>
+            <TouchableOpacity onPress={ensureNoteToSelf}><Text style={{ color: '#4A9FFF', fontSize: 20 }}>📝</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/create-group')}><Text style={{ color: '#4A9FFF', fontSize: 22 }}>👥</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/profile')}><Text style={{ color: '#4A9FFF', fontSize: 22 }}>⚙️</Text></TouchableOpacity>
           </View>
         ),
       }} />
@@ -503,10 +503,10 @@ export function BottomNav({ active }: BottomNavProps) {
           style={s.tabItem}
           onPress={() => router.push(tab.route as any)}
         >
-          <Text style={[s.tabIcon, active === tab.key && { color: '#00E5FF' }]}>
+          <Text style={[s.tabIcon, active === tab.key && { color: '#4A9FFF' }]}>
             {tab.icon}
           </Text>
-          <Text style={[s.tabLbl, active === tab.key && { color: '#00E5FF' }]}>
+          <Text style={[s.tabLbl, active === tab.key && { color: '#4A9FFF' }]}>
             {tab.key}
           </Text>
         </TouchableOpacity>
@@ -550,7 +550,7 @@ const s = StyleSheet.create({
   folderTxtActive: { color: '#7C3AED' },
 
   archiveToggle: { paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#E9ECEF' },
-  archiveTxt: { color: '#00E5FF', fontSize: 14, fontWeight: '500' },
+  archiveTxt: { color: '#4A9FFF', fontSize: 14, fontWeight: '500' },
   chatRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F1F3F4' },
   avatarWrap: { position: 'relative', marginRight: 12 },
   avatar: { width: 42, height: 42, borderRadius: 21 },

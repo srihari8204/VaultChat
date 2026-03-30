@@ -84,15 +84,15 @@ export default function VideoNotesScreen() {
 
   const fmt = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
 
-  const ringColor = ringAnim.interpolate({ inputRange: [0, 0.7, 1], outputRange: ['#00E5FF', '#F59E0B', '#EF4444'] });
+  const ringColor = ringAnim.interpolate({ inputRange: [0, 0.7, 1], outputRange: ['#4A9FFF', '#F59E0B', '#EF4444'] });
 
   if (!permission?.granted) {
     return (
       <View style={[st.screen, { justifyContent: 'center', alignItems: 'center' }]}>
-        <Stack.Screen options={{ title: 'Video Note', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
+        <Stack.Screen options={{ title: 'Video Note', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
         <Text style={{ color: '#fff', fontSize: 16, marginBottom: 20 }}>Camera permission needed</Text>
         <TouchableOpacity onPress={requestPermission} style={st.permBtn}>
-          <Text style={{ color: '#00E5FF', fontWeight: '800' }}>Grant Access</Text>
+          <Text style={{ color: '#4A9FFF', fontWeight: '800' }}>Grant Access</Text>
         </TouchableOpacity>
       </View>
     );
@@ -100,7 +100,7 @@ export default function VideoNotesScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Video Note', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
+      <Stack.Screen options={{ title: 'Video Note', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
       <View style={st.screen}>
         <Text style={st.title}>🎥 Video Note</Text>
         <Text style={st.subtitle}>Record a round video message (up to {MAX_DURATION}s)</Text>
@@ -109,7 +109,7 @@ export default function VideoNotesScreen() {
         <View style={st.cameraWrap}>
           <Animated.View style={[st.ringOuter, {
             transform: [{ scale: recording ? pulseAnim : 1 }],
-            borderColor: recording ? (ringColor as any) : '#00E5FF44',
+            borderColor: recording ? (ringColor as any) : '#4A9FFF44',
           }]}>
             <View style={st.cameraCircle}>
               {!recorded ? (
@@ -120,9 +120,9 @@ export default function VideoNotesScreen() {
                   mode="video"
                 />
               ) : (
-                <View style={[st.camera, { backgroundColor: '#111', justifyContent: 'center', alignItems: 'center' }]}>
+                <View style={[st.camera, { backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center' }]}>
                   <Text style={{ fontSize: 48 }}>✅</Text>
-                  <Text style={{ color: '#00E5FF', fontSize: 14, fontWeight: '700', marginTop: 8 }}>Recorded!</Text>
+                  <Text style={{ color: '#4A9FFF', fontSize: 14, fontWeight: '700', marginTop: 8 }}>Recorded!</Text>
                 </View>
               )}
             </View>
@@ -142,7 +142,7 @@ export default function VideoNotesScreen() {
           {!recorded ? (
             <>
               <TouchableOpacity onPress={() => router.back()} style={st.cancelBtn}>
-                <Text style={{ color: '#888', fontSize: 14 }}>Cancel</Text>
+                <Text style={{ color: '#6B7280', fontSize: 14 }}>Cancel</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -150,7 +150,7 @@ export default function VideoNotesScreen() {
                 style={st.recordOuter}
               >
                 <LinearGradient
-                  colors={recording ? ['#EF4444', '#DC2626'] : ['#00E5FF', '#4A9FFF']}
+                  colors={recording ? ['#EF4444', '#DC2626'] : ['#4A9FFF', '#4A9FFF']}
                   style={st.recordInner}
                 >
                   {recording ? (
@@ -170,13 +170,13 @@ export default function VideoNotesScreen() {
               </TouchableOpacity>
 
               <TouchableOpacity onPress={sendNote}>
-                <LinearGradient colors={['#00E5FF', '#4A9FFF']} style={st.sendBtn}>
+                <LinearGradient colors={['#4A9FFF', '#4A9FFF']} style={st.sendBtn}>
                   <Text style={{ color: '#000', fontSize: 16, fontWeight: '900' }}>Send ➤</Text>
                 </LinearGradient>
               </TouchableOpacity>
 
               <TouchableOpacity onPress={() => router.back()} style={st.actionBtn}>
-                <Text style={{ color: '#888', fontSize: 14 }}>Cancel</Text>
+                <Text style={{ color: '#6B7280', fontSize: 14 }}>Cancel</Text>
               </TouchableOpacity>
             </>
           )}
@@ -191,15 +191,15 @@ export default function VideoNotesScreen() {
 }
 
 const st = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#020B18', alignItems: 'center', paddingTop: 20 },
+  screen: { flex: 1, backgroundColor: '#FFFFFF', alignItems: 'center', paddingTop: 20 },
   title: { color: '#fff', fontSize: 22, fontWeight: '900', marginBottom: 4 },
   subtitle: { color: 'rgba(255,255,255,0.4)', fontSize: 13, marginBottom: 30 },
   cameraWrap: { alignItems: 'center', marginBottom: 40 },
   ringOuter: { width: 260, height: 260, borderRadius: 130, borderWidth: 4, justifyContent: 'center', alignItems: 'center' },
   cameraCircle: { width: 240, height: 240, borderRadius: 120, overflow: 'hidden' },
   camera: { width: 240, height: 240 },
-  timerBadge: { position: 'absolute', bottom: -10, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#0C0C1A', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
-  recDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#333' },
+  timerBadge: { position: 'absolute', bottom: -10, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FFFFFF', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  recDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#D1D5DB' },
   timerTxt: { color: '#fff', fontSize: 14, fontWeight: '700', fontFamily: 'monospace' },
   controls: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 24 },
   cancelBtn: { width: 60, alignItems: 'center' },
@@ -209,5 +209,5 @@ const st = StyleSheet.create({
   actionBtn: { paddingHorizontal: 16, paddingVertical: 10 },
   sendBtn: { borderRadius: 24, paddingHorizontal: 28, paddingVertical: 14 },
   hint: { color: 'rgba(255,255,255,0.3)', fontSize: 13, marginTop: 20 },
-  permBtn: { paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: '#00E5FF44', backgroundColor: '#00E5FF12' },
+  permBtn: { paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: '#4A9FFF44', backgroundColor: '#4A9FFF12' },
 });

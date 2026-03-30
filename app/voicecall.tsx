@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/voicecall.tsx
 // Real WebRTC voice call (audio only)
 // Same TURN server as videocall.tsx
@@ -47,7 +46,7 @@ const ICE_SERVERS = [
   },
 ];
 
-const BACKEND_URL = 'https://vaultchat.onrender.com';
+import { SERVER_URL as BACKEND_URL } from '../constants/server';
 type CallState = 'connecting' | 'ringing' | 'connected' | 'ended';
 
 export default function VoiceCallScreen() {
@@ -259,7 +258,7 @@ export default function VoiceCallScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#0A0E1A" />
+      <StatusBar barStyle="light-content" backgroundColor="#FFFFFF" />
 
       {/* D2DE badge */}
       <View style={styles.d2deBadge}>
@@ -330,16 +329,16 @@ export default function VoiceCallScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0A0E1A',
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
   },
   d2deBadge: {
     position: 'absolute',
     top: 52,
-    backgroundColor: '#003328',
+    backgroundColor: '#D1FAE5',
     borderWidth: 0.5,
-    borderColor: '#00D4AA',
+    borderColor: '#10B981',
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 4,
@@ -347,15 +346,15 @@ const styles = StyleSheet.create({
   d2deText: {
     fontSize: 11,
     fontWeight: 'bold',
-    color: '#00D4AA',
+    color: '#10B981',
   },
   avatarCircle: {
     width: 110,
     height: 110,
     borderRadius: 55,
-    backgroundColor: '#003328',
+    backgroundColor: '#D1FAE5',
     borderWidth: 3,
-    borderColor: '#00D4AA',
+    borderColor: '#10B981',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 20,
@@ -363,7 +362,7 @@ const styles = StyleSheet.create({
   avatarText: {
     fontSize: 38,
     fontWeight: 'bold',
-    color: '#00D4AA',
+    color: '#10B981',
   },
   callerName: {
     fontSize: 26,
@@ -373,11 +372,11 @@ const styles = StyleSheet.create({
   },
   callStatus: {
     fontSize: 15,
-    color: '#64748B',
+    color: '#6B7280',
     marginBottom: 16,
   },
   callStatusActive: {
-    color: '#00D4AA',
+    color: '#10B981',
     fontWeight: 'bold',
   },
   signalRow: {
@@ -388,12 +387,12 @@ const styles = StyleSheet.create({
   },
   signalBar: {
     width: 4,
-    backgroundColor: '#00D4AA',
+    backgroundColor: '#10B981',
     borderRadius: 2,
   },
   signalLabel: {
     fontSize: 11,
-    color: '#00D4AA',
+    color: '#10B981',
     marginLeft: 6,
     fontWeight: 'bold',
   },
@@ -412,22 +411,22 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: '#1A2235',
+    backgroundColor: '#F3F4F6',
     borderWidth: 0.5,
-    borderColor: '#1E293B',
+    borderColor: '#E5E7EB',
     justifyContent: 'center',
     alignItems: 'center',
   },
   ctrlBtnActive: {
-    backgroundColor: '#003328',
-    borderColor: '#00D4AA',
+    backgroundColor: '#D1FAE5',
+    borderColor: '#10B981',
   },
   ctrlIcon: {
     fontSize: 24,
   },
   ctrlLabel: {
     fontSize: 11,
-    color: '#64748B',
+    color: '#6B7280',
   },
   endBtn: {
     width: 70,

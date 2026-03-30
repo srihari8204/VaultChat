@@ -70,19 +70,19 @@ export default function CreateGroupScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'New Group', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
+      <Stack.Screen options={{ title: 'New Group', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
       <View style={s.screen}>
         <TextInput
           style={s.nameInput}
           placeholder="Group nameâ€¦"
-          placeholderTextColor="#444"
+          placeholderTextColor="#9CA3AF"
           value={groupName}
           onChangeText={setGroupName}
           maxLength={50}
         />
         <Text style={s.label}>SELECT MEMBERS ({selected.size} selected)</Text>
         {loading
-          ? <ActivityIndicator color="#00E5FF" style={{ marginTop: 40 }} />
+          ? <ActivityIndicator color="#4A9FFF" style={{ marginTop: 40 }} />
           : <FlatList
               data={contacts}
               keyExtractor={c => c.uid}
@@ -90,7 +90,7 @@ export default function CreateGroupScreen() {
                 const sel = selected.has(c.uid);
                 return (
                   <TouchableOpacity style={s.row} onPress={() => toggle(c.uid)}>
-                    <View style={[s.avatar, { backgroundColor: sel ? '#00E5FF22' : '#111127' }]}>
+                    <View style={[s.avatar, { backgroundColor: sel ? '#4A9FFF22' : '#F3F4F6' }]}>
                       {c.photoURL
                         ? <Image source={{ uri: c.photoURL }} style={s.avatarImg} />
                         : <Text style={s.avatarTxt}>{c.name[0]?.toUpperCase()}</Text>
@@ -124,19 +124,19 @@ export default function CreateGroupScreen() {
 }
 
 const s = StyleSheet.create({
-  screen:      { flex: 1, backgroundColor: '#03030E' },
-  nameInput:   { backgroundColor: '#0C0C1A', color: '#E0E0F0', fontSize: 16, paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#111' },
-  label:       { color: '#555', fontSize: 11, fontWeight: '600', letterSpacing: 1, paddingHorizontal: 16, paddingVertical: 10 },
+  screen:      { flex: 1, backgroundColor: '#FFFFFF' },
+  nameInput:   { backgroundColor: '#FFFFFF', color: '#1F2937', fontSize: 16, paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
+  label:       { color: '#6B7280', fontSize: 11, fontWeight: '600', letterSpacing: 1, paddingHorizontal: 16, paddingVertical: 10 },
   row:         { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#0A0A18' },
   avatar:      { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
   avatarImg:   { width: 46, height: 46, borderRadius: 23 },
-  avatarTxt:   { color: '#00E5FF', fontSize: 18, fontWeight: 'bold' },
-  name:        { color: '#E0E0F0', fontSize: 15, fontWeight: '600' },
-  phone:       { color: '#555', fontSize: 12, marginTop: 2 },
-  check:       { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: '#333', alignItems: 'center', justifyContent: 'center' },
-  checkSel:    { backgroundColor: '#00E5FF', borderColor: '#00E5FF' },
+  avatarTxt:   { color: '#4A9FFF', fontSize: 18, fontWeight: 'bold' },
+  name:        { color: '#1F2937', fontSize: 15, fontWeight: '600' },
+  phone:       { color: '#6B7280', fontSize: 12, marginTop: 2 },
+  check:       { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: '#D1D5DB', alignItems: 'center', justifyContent: 'center' },
+  checkSel:    { backgroundColor: '#4A9FFF', borderColor: '#4A9FFF' },
   checkMark:   { color: '#000', fontSize: 14, fontWeight: 'bold' },
-  createBtn:   { margin: 16, backgroundColor: '#00E5FF', borderRadius: 12, paddingVertical: 15, alignItems: 'center' },
-  createBtnOff:{ backgroundColor: '#111127' },
+  createBtn:   { margin: 16, backgroundColor: '#4A9FFF', borderRadius: 12, paddingVertical: 15, alignItems: 'center' },
+  createBtnOff:{ backgroundColor: '#F3F4F6' },
   createTxt:   { color: '#000', fontSize: 16, fontWeight: 'bold' },
 });

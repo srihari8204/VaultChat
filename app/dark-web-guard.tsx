@@ -147,7 +147,7 @@ function severityColor(s: Breach['severity']): string {
     case 'critical': return '#FF4D6D';
     case 'high':     return '#F97316';
     case 'medium':   return '#F5C842';
-    case 'low':      return '#00D4AA';
+    case 'low':      return '#10B981';
   }
 }
 
@@ -390,7 +390,7 @@ export default function DarkWebGuardScreen() {
               value={email}
               onChangeText={setEmail}
               placeholder="your@email.com"
-              placeholderTextColor="#374151"
+              placeholderTextColor="#6B7280"
               keyboardType="email-address"
               autoCapitalize="none"
               editable={!scanning}
@@ -401,7 +401,7 @@ export default function DarkWebGuardScreen() {
               disabled={scanning}
             >
               {scanning
-                ? <ActivityIndicator color="#0A0E1A" size="small" />
+                ? <ActivityIndicator color="#FFFFFF" size="small" />
                 : <Text style={styles.scanBtnText}>Scan</Text>
               }
             </TouchableOpacity>
@@ -414,7 +414,7 @@ export default function DarkWebGuardScreen() {
         {/* Scanning animation */}
         {scanning && (
           <View style={styles.scanningWrap}>
-            <ActivityIndicator color="#00D4AA" size="large" />
+            <ActivityIndicator color="#10B981" size="large" />
             <Text style={styles.scanningText}>Scanning dark web databases...</Text>
             <Text style={styles.scanningHint}>Checking 12+ billion compromised accounts</Text>
           </View>
@@ -545,17 +545,17 @@ export default function DarkWebGuardScreen() {
 // ─────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container:   { flex: 1, backgroundColor: '#0A0E1A' },
+  container:   { flex: 1, backgroundColor: '#FFFFFF' },
   header: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#111827',
+    backgroundColor: '#F9FAFB',
     paddingTop: 48, paddingBottom: 12, paddingHorizontal: 16,
-    borderBottomWidth: 0.5, borderBottomColor: '#1E293B', gap: 12,
+    borderBottomWidth: 0.5, borderBottomColor: '#E5E7EB', gap: 12,
   },
-  back:         { fontSize: 28, color: '#00D4AA', fontWeight: 'bold' },
+  back:         { fontSize: 28, color: '#10B981', fontWeight: 'bold' },
   headerCenter: { flex: 1 },
   headerTitle:  { fontSize: 18, fontWeight: 'bold', color: '#000000' },
-  headerSub:    { fontSize: 9, color: '#00D4AA', marginTop: 1, fontWeight: 'bold' },
+  headerSub:    { fontSize: 9, color: '#10B981', marginTop: 1, fontWeight: 'bold' },
 
   scroll:       { flex: 1 },
   scrollContent:{ padding: 16, paddingBottom: 60 },
@@ -565,7 +565,7 @@ const styles = StyleSheet.create({
   heroIcon:  { fontSize: 56, marginBottom: 12 },
   heroTitle: { fontSize: 22, fontWeight: 'bold', color: '#000000', marginBottom: 8 },
   heroSub: {
-    fontSize: 13, color: '#64748B', textAlign: 'center',
+    fontSize: 13, color: '#6B7280', textAlign: 'center',
     lineHeight: 20, paddingHorizontal: 16, marginBottom: 12,
   },
   demoBanner: {
@@ -577,65 +577,65 @@ const styles = StyleSheet.create({
 
   // Scan card
   scanCard: {
-    backgroundColor: '#111827', borderRadius: 14,
-    borderWidth: 0.5, borderColor: '#1E293B',
+    backgroundColor: '#F9FAFB', borderRadius: 14,
+    borderWidth: 0.5, borderColor: '#E5E7EB',
     padding: 16, marginBottom: 20,
   },
-  scanLabel:  { fontSize: 11, color: '#64748B', marginBottom: 8 },
+  scanLabel:  { fontSize: 11, color: '#6B7280', marginBottom: 8 },
   scanRow:    { flexDirection: 'row', gap: 10 },
   scanInput: {
-    flex: 1, backgroundColor: '#1A2235',
-    borderRadius: 10, borderWidth: 0.5, borderColor: '#1E293B',
+    flex: 1, backgroundColor: '#F3F4F6',
+    borderRadius: 10, borderWidth: 0.5, borderColor: '#E5E7EB',
     paddingHorizontal: 14, paddingVertical: 11,
     color: '#000000', fontSize: 14,
   },
   scanBtn: {
-    backgroundColor: '#00D4AA', borderRadius: 10,
+    backgroundColor: '#10B981', borderRadius: 10,
     paddingHorizontal: 18, justifyContent: 'center', alignItems: 'center',
     minWidth: 70,
   },
-  scanBtnDim:  { backgroundColor: '#003328' },
-  scanBtnText: { color: '#0A0E1A', fontWeight: 'bold', fontSize: 14 },
-  lastScanned: { fontSize: 10, color: '#374151', marginTop: 8 },
+  scanBtnDim:  { backgroundColor: '#D1FAE5' },
+  scanBtnText: { color: '#FFFFFF', fontWeight: 'bold', fontSize: 14 },
+  lastScanned: { fontSize: 10, color: '#6B7280', marginTop: 8 },
 
   // Scanning
   scanningWrap: {
     alignItems: 'center', paddingVertical: 32, gap: 10,
   },
   scanningText: { fontSize: 14, color: '#000000', fontWeight: 'bold' },
-  scanningHint: { fontSize: 11, color: '#374151' },
+  scanningHint: { fontSize: 11, color: '#6B7280' },
 
   // Summary
   summaryCard: {
     borderRadius: 14, borderWidth: 0.5,
     padding: 20, alignItems: 'center', marginBottom: 20, gap: 8,
   },
-  summaryClean:    { backgroundColor: '#00332820', borderColor: '#00D4AA44' },
+  summaryClean:    { backgroundColor: '#D1FAE520', borderColor: '#10B98144' },
   summaryBreached: { backgroundColor: '#FF4D6D11', borderColor: '#FF4D6D44' },
   summaryIcon:     { fontSize: 40 },
   summaryTitle:    { fontSize: 18, fontWeight: 'bold', color: '#000000' },
-  summarySub:      { fontSize: 13, color: '#64748B', textAlign: 'center', lineHeight: 19 },
+  summarySub:      { fontSize: 13, color: '#6B7280', textAlign: 'center', lineHeight: 19 },
 
   sectionLabel: {
-    fontSize: 10, fontWeight: 'bold', color: '#374151',
+    fontSize: 10, fontWeight: 'bold', color: '#6B7280',
     letterSpacing: 0.8, marginBottom: 10, marginTop: 4,
   },
 
   // Breach card
   breachCard: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#111827', borderRadius: 12,
-    borderWidth: 0.5, borderColor: '#1E293B',
+    backgroundColor: '#F9FAFB', borderRadius: 12,
+    borderWidth: 0.5, borderColor: '#E5E7EB',
     padding: 12, marginBottom: 8, gap: 10,
     overflow: 'hidden',
   },
   severityBar:   { position: 'absolute', left: 0, top: 0, bottom: 0, width: 3 },
   breachCircle: {
     width: 42, height: 42, borderRadius: 21,
-    backgroundColor: '#1A2235', borderWidth: 1, borderColor: '#1E293B',
+    backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E5E7EB',
     justifyContent: 'center', alignItems: 'center',
   },
-  breachInitial: { fontSize: 18, fontWeight: 'bold', color: '#64748B' },
+  breachInitial: { fontSize: 18, fontWeight: 'bold', color: '#6B7280' },
   breachInfo:    { flex: 1 },
   breachTop: {
     flexDirection: 'row', alignItems: 'center',
@@ -643,46 +643,46 @@ const styles = StyleSheet.create({
   },
   breachName:     { fontSize: 15, fontWeight: 'bold', color: '#000000' },
   breachSeverity: { fontSize: 10, fontWeight: 'bold' },
-  breachMeta:     { fontSize: 11, color: '#374151', marginBottom: 6 },
+  breachMeta:     { fontSize: 11, color: '#6B7280', marginBottom: 6 },
   tagsRow:        { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
   miniTag: {
-    backgroundColor: '#1A2235', borderRadius: 6,
+    backgroundColor: '#F3F4F6', borderRadius: 6,
     paddingHorizontal: 6, paddingVertical: 2,
-    borderWidth: 0.5, borderColor: '#1E293B',
+    borderWidth: 0.5, borderColor: '#E5E7EB',
   },
-  miniTagText:   { fontSize: 9, color: '#64748B' },
-  moreTag:       { fontSize: 10, color: '#374151', alignSelf: 'center' },
-  chevron:       { fontSize: 20, color: '#374151' },
+  miniTagText:   { fontSize: 9, color: '#6B7280' },
+  moreTag:       { fontSize: 10, color: '#6B7280', alignSelf: 'center' },
+  chevron:       { fontSize: 20, color: '#6B7280' },
 
   // Actions card
   actionsCard: {
-    backgroundColor: '#111827', borderRadius: 12,
-    borderWidth: 0.5, borderColor: '#1E293B',
+    backgroundColor: '#F9FAFB', borderRadius: 12,
+    borderWidth: 0.5, borderColor: '#E5E7EB',
     padding: 16, marginTop: 12, gap: 8,
   },
   actionsTitle: { fontSize: 13, fontWeight: 'bold', color: '#000000', marginBottom: 4 },
-  actionText:   { fontSize: 13, color: '#64748B', lineHeight: 20 },
+  actionText:   { fontSize: 13, color: '#6B7280', lineHeight: 20 },
 
   // Monitored emails
   monitoredRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    backgroundColor: '#111827', borderRadius: 10,
-    borderWidth: 0.5, borderColor: '#1E293B',
+    backgroundColor: '#F9FAFB', borderRadius: 10,
+    borderWidth: 0.5, borderColor: '#E5E7EB',
     paddingHorizontal: 14, paddingVertical: 12, marginBottom: 8,
   },
   monitoredEmail:  { fontSize: 14, color: '#000000' },
-  monitoredRescan: { fontSize: 12, color: '#00D4AA' },
+  monitoredRescan: { fontSize: 12, color: '#10B981' },
 });
 
 const detailStyles = StyleSheet.create({
   overlay:  { flex: 1, backgroundColor: '#00000088', justifyContent: 'flex-end' },
   panel: {
-    backgroundColor: '#111827',
+    backgroundColor: '#F9FAFB',
     borderTopLeftRadius: 20, borderTopRightRadius: 20,
     padding: 20, paddingBottom: 36, maxHeight: '90%',
   },
   handle: {
-    width: 40, height: 4, backgroundColor: '#1E293B',
+    width: 40, height: 4, backgroundColor: '#E5E7EB',
     borderRadius: 2, alignSelf: 'center', marginBottom: 16,
   },
   titleRow: {
@@ -690,41 +690,41 @@ const detailStyles = StyleSheet.create({
   },
   domainCircle: {
     width: 44, height: 44, borderRadius: 22,
-    backgroundColor: '#1A2235', borderWidth: 1, borderColor: '#1E293B',
+    backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E5E7EB',
     justifyContent: 'center', alignItems: 'center',
   },
-  domainInitial: { fontSize: 20, fontWeight: 'bold', color: '#64748B' },
+  domainInitial: { fontSize: 20, fontWeight: 'bold', color: '#6B7280' },
   breachName:    { fontSize: 17, fontWeight: 'bold', color: '#000000' },
-  breachDomain:  { fontSize: 12, color: '#374151' },
+  breachDomain:  { fontSize: 12, color: '#6B7280' },
   severityPill: {
     marginLeft: 'auto', borderRadius: 10,
     borderWidth: 0.5, paddingHorizontal: 8, paddingVertical: 3,
   },
   severityPillText: { fontSize: 10, fontWeight: 'bold' },
   statsRow: {
-    flexDirection: 'row', backgroundColor: '#1A2235',
+    flexDirection: 'row', backgroundColor: '#F3F4F6',
     borderRadius: 12, padding: 14, marginBottom: 16,
   },
   stat:      { flex: 1, alignItems: 'center' },
   statNum:   { fontSize: 16, fontWeight: 'bold', color: '#000000', marginBottom: 2 },
-  statLabel: { fontSize: 10, color: '#374151' },
-  statDiv:   { width: 0.5, backgroundColor: '#1E293B', marginVertical: 4 },
+  statLabel: { fontSize: 10, color: '#6B7280' },
+  statDiv:   { width: 0.5, backgroundColor: '#E5E7EB', marginVertical: 4 },
   sectionLabel: {
-    fontSize: 10, fontWeight: 'bold', color: '#374151',
+    fontSize: 10, fontWeight: 'bold', color: '#6B7280',
     letterSpacing: 0.8, marginBottom: 8, marginTop: 12,
   },
   tagsWrap:  { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 4 },
   tag: {
-    backgroundColor: '#1A2235', borderRadius: 8,
-    borderWidth: 0.5, borderColor: '#1E293B',
+    backgroundColor: '#F3F4F6', borderRadius: 8,
+    borderWidth: 0.5, borderColor: '#E5E7EB',
     paddingHorizontal: 10, paddingVertical: 4,
   },
   tagText:     { fontSize: 12, color: '#000000' },
-  description: { fontSize: 13, color: '#64748B', lineHeight: 20, marginBottom: 4 },
-  action:      { fontSize: 13, color: '#64748B', lineHeight: 22 },
+  description: { fontSize: 13, color: '#6B7280', lineHeight: 20, marginBottom: 4 },
+  action:      { fontSize: 13, color: '#6B7280', lineHeight: 22 },
   closeBtn: {
-    backgroundColor: '#1A2235', borderRadius: 10,
-    borderWidth: 0.5, borderColor: '#1E293B',
+    backgroundColor: '#F3F4F6', borderRadius: 10,
+    borderWidth: 0.5, borderColor: '#E5E7EB',
     paddingVertical: 13, alignItems: 'center', marginTop: 16,
   },
   closeBtnText: { color: '#000000', fontWeight: 'bold', fontSize: 15 },

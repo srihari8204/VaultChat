@@ -4,7 +4,6 @@
  * Auto-captures OTP from SMS via textContentType="oneTimeCode" + autoComplete
  * Supports clipboard paste detection for quick OTP entry
  */
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -20,6 +19,7 @@ import {
   View,
 } from 'react-native';
 import { sendOTP, verifyOTP } from './(constants)/authService';
+import { markSetupComplete } from '../services/securityService';
 
 export default function OTPScreen() {
   const { phone } = useLocalSearchParams();
@@ -102,8 +102,7 @@ export default function OTPScreen() {
         if (ok) {
           if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           Animated.spring(successScale, { toValue: 1, tension: 50, friction: 8, useNativeDriver: true }).start();
-          await AsyncStorage.setItem('test_auth_done', 'true');
-          await AsyncStorage.setItem('vaultchat_setup_complete', 'true');
+          await markSetupComplete();
           setTimeout(() => router.replace('/chats' as any), 800);
         } else {
           shakeInEffect();
@@ -219,8 +218,7 @@ export default function OTPScreen() {
       if (ok) {
         if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Animated.spring(successScale, { toValue: 1, tension: 50, friction: 8, useNativeDriver: true }).start();
-        await AsyncStorage.setItem('test_auth_done', 'true');
-        await AsyncStorage.setItem('vaultchat_setup_complete', 'true');
+        await markSetupComplete();
         setTimeout(() => router.replace('/chats' as any), 800);
       } else {
         shake();

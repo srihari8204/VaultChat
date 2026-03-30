@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/lock.tsx — CRED-inspired premium lock screen
 // Pure black, massive typography, glassmorphic elements, platinum accents
 

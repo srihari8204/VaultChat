@@ -64,11 +64,11 @@ export default function GroupInfoScreen() {
     return '30 days';
   };
 
-  if (loading) return <View style={{ flex: 1, backgroundColor: '#03030E', alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator color="#00E5FF" /></View>;
+  if (loading) return <View style={{ flex: 1, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator color="#4A9FFF" /></View>;
 
   return (
     <>
-      <Stack.Screen options={{ title: groupName ?? 'Group Info', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
+      <Stack.Screen options={{ title: groupName ?? 'Group Info', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
       <View style={s.screen}>
         <View style={s.section}>
           <Text style={s.sectionTitle}>DISAPPEARING MESSAGES</Text>
@@ -112,16 +112,16 @@ export default function GroupInfoScreen() {
 }
 
 const s = StyleSheet.create({
-  screen:          { flex: 1, backgroundColor: '#03030E' },
+  screen:          { flex: 1, backgroundColor: '#FFFFFF' },
   section:         { marginTop: 20 },
-  sectionTitle:    { color: '#555', fontSize: 11, fontWeight: '700', letterSpacing: 1, paddingHorizontal: 16, paddingBottom: 8 },
-  row:             { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#0C0C1A', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#111' },
-  rowLabel:        { color: '#E0E0F0', fontSize: 15 },
-  rowValue:        { color: '#00E5FF', fontSize: 14 },
-  memberRow:       { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0C0C1A', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#111' },
-  memberAvatar:    { width: 40, height: 40, borderRadius: 20, backgroundColor: '#111127', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
-  memberAvatarTxt: { color: '#00E5FF', fontSize: 16, fontWeight: 'bold' },
-  memberName:      { color: '#E0E0F0', fontSize: 15 },
+  sectionTitle:    { color: '#6B7280', fontSize: 11, fontWeight: '700', letterSpacing: 1, paddingHorizontal: 16, paddingBottom: 8 },
+  row:             { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
+  rowLabel:        { color: '#1F2937', fontSize: 15 },
+  rowValue:        { color: '#4A9FFF', fontSize: 14 },
+  memberRow:       { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
+  memberAvatar:    { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  memberAvatarTxt: { color: '#4A9FFF', fontSize: 16, fontWeight: 'bold' },
+  memberName:      { color: '#1F2937', fontSize: 15 },
   adminBadge:      { color: '#FF8C42', fontSize: 11, marginTop: 2 },
   leaveBtn:        { margin: 20, backgroundColor: '#FF3C6E22', borderRadius: 12, paddingVertical: 14, alignItems: 'center', borderWidth: 1, borderColor: '#FF3C6E44' },
   leaveTxt:        { color: '#FF3C6E', fontSize: 15, fontWeight: '600' },

@@ -32,10 +32,10 @@ export default function ScheduledScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'ðŸ“… Scheduled', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
-      <View style={{ flex: 1, backgroundColor: '#03030E' }}>
+      <Stack.Screen options={{ title: 'ðŸ“… Scheduled', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
+      <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
         {loading
-          ? <ActivityIndicator color="#00E5FF" style={{ marginTop: 40 }} />
+          ? <ActivityIndicator color="#4A9FFF" style={{ marginTop: 40 }} />
           : <FlatList
               data={items}
               keyExtractor={i => i.id}
@@ -54,8 +54,8 @@ export default function ScheduledScreen() {
               ListEmptyComponent={
                 <View style={{ alignItems: 'center', paddingTop: 80 }}>
                   <Text style={{ fontSize: 40, marginBottom: 12 }}>ðŸ“…</Text>
-                  <Text style={{ color: '#E0E0F0', fontSize: 16, fontWeight: '600' }}>No scheduled messages</Text>
-                  <Text style={{ color: '#555', fontSize: 13, marginTop: 6 }}>Long press Send in chat to schedule</Text>
+                  <Text style={{ color: '#1F2937', fontSize: 16, fontWeight: '600' }}>No scheduled messages</Text>
+                  <Text style={{ color: '#6B7280', fontSize: 13, marginTop: 6 }}>Long press Send in chat to schedule</Text>
                 </View>
               }
             />
@@ -67,7 +67,7 @@ export default function ScheduledScreen() {
 
 const s = StyleSheet.create({
   item:      { flexDirection: 'row', alignItems: 'center', padding: 14, borderBottomWidth: 1, borderBottomColor: '#0A0A18' },
-  chatName:  { color: '#00E5FF', fontSize: 13, fontWeight: 'bold', marginBottom: 4 },
+  chatName:  { color: '#4A9FFF', fontSize: 13, fontWeight: 'bold', marginBottom: 4 },
   msg:       { color: '#C0C0E0', fontSize: 14, marginBottom: 4 },
   time:      { color: '#FF8C42', fontSize: 12 },
   cancelBtn: { padding: 8 },

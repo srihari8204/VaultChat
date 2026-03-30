@@ -88,7 +88,7 @@ export default function GroupCallsScreen() {
       <>
         <Stack.Screen options={{ headerShown: false }} />
         <View style={st.screen}>
-          <LinearGradient colors={['#020B18', '#0A1628']} style={StyleSheet.absoluteFill} />
+          <LinearGradient colors={['#FFFFFF', '#F9FAFB']} style={StyleSheet.absoluteFill} />
           <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
             <Text style={{ fontSize: 60 }}>{mode === 'video' ? '📹' : '📞'}</Text>
             <Text style={st.title}>{groupName}</Text>
@@ -103,14 +103,14 @@ export default function GroupCallsScreen() {
                 onPress={() => { setMode('voice'); setVideoOn(false); }}
               >
                 <Text style={{ fontSize: 18 }}>🎤</Text>
-                <Text style={[st.modeTxt, mode === 'voice' && { color: '#00E5FF' }]}>Voice</Text>
+                <Text style={[st.modeTxt, mode === 'voice' && { color: '#4A9FFF' }]}>Voice</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[st.modeBtn, mode === 'video' && st.modeBtnActive]}
                 onPress={() => { setMode('video'); setVideoOn(true); }}
               >
                 <Text style={{ fontSize: 18 }}>📹</Text>
-                <Text style={[st.modeTxt, mode === 'video' && { color: '#00E5FF' }]}>Video</Text>
+                <Text style={[st.modeTxt, mode === 'video' && { color: '#4A9FFF' }]}>Video</Text>
               </TouchableOpacity>
             </View>
 
@@ -135,13 +135,13 @@ export default function GroupCallsScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 16 }}>
-              <Text style={{ color: '#888', fontSize: 14 }}>Cancel</Text>
+              <Text style={{ color: '#6B7280', fontSize: 14 }}>Cancel</Text>
             </TouchableOpacity>
           </View>
 
           {/* D2DE badge */}
           <View style={st.d2de}>
-            <Text style={{ color: '#00D4AA', fontSize: 10, fontWeight: '700' }}>🛡️ D2DE · E2E Encrypted Call</Text>
+            <Text style={{ color: '#10B981', fontSize: 10, fontWeight: '700' }}>🛡️ D2DE · E2E Encrypted Call</Text>
           </View>
         </View>
       </>
@@ -153,13 +153,13 @@ export default function GroupCallsScreen() {
     <>
       <Stack.Screen options={{ headerShown: false }} />
       <View style={st.screen}>
-        <LinearGradient colors={['#020B18', '#0A1628']} style={StyleSheet.absoluteFill} />
+        <LinearGradient colors={['#FFFFFF', '#F9FAFB']} style={StyleSheet.absoluteFill} />
 
         {/* Header */}
         <View style={st.header}>
           <View>
             <Text style={st.title}>{groupName}</Text>
-            <Text style={{ color: state === 'connected' ? '#00E5FF' : '#F59E0B', fontSize: 13, fontWeight: '600' }}>
+            <Text style={{ color: state === 'connected' ? '#4A9FFF' : '#F59E0B', fontSize: 13, fontWeight: '600' }}>
               {state === 'ringing' ? 'Calling...' : `${fmt(seconds)} · ${participants.length} participants`}
             </Text>
           </View>
@@ -212,7 +212,7 @@ export default function GroupCallsScreen() {
         </View>
 
         <View style={st.d2de}>
-          <Text style={{ color: '#00D4AA', fontSize: 10, fontWeight: '700' }}>🛡️ D2DE · E2E Encrypted</Text>
+          <Text style={{ color: '#10B981', fontSize: 10, fontWeight: '700' }}>🛡️ D2DE · E2E Encrypted</Text>
         </View>
       </View>
     </>
@@ -220,24 +220,24 @@ export default function GroupCallsScreen() {
 }
 
 const st = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#020B18' },
+  screen: { flex: 1, backgroundColor: '#FFFFFF' },
   header: { paddingTop: 56, paddingHorizontal: 20, paddingBottom: 12 },
   title: { color: '#fff', fontSize: 22, fontWeight: '900' },
   modeRow: { flexDirection: 'row', gap: 12, marginBottom: 24 },
   modeBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
-  modeBtnActive: { borderColor: '#00E5FF', backgroundColor: '#00E5FF12' },
-  modeTxt: { color: '#888', fontSize: 14, fontWeight: '700' },
+  modeBtnActive: { borderColor: '#4A9FFF', backgroundColor: '#4A9FFF12' },
+  modeTxt: { color: '#6B7280', fontSize: 14, fontWeight: '700' },
   preControls: { flexDirection: 'row', gap: 16 },
   preBtn: { alignItems: 'center', gap: 6, padding: 16, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', width: 80 },
   preBtnOff: { backgroundColor: 'rgba(239,68,68,0.15)', borderColor: 'rgba(239,68,68,0.3)' },
-  preLbl: { color: '#888', fontSize: 10, fontWeight: '600' },
+  preLbl: { color: '#6B7280', fontSize: 10, fontWeight: '600' },
   startBtn: { borderRadius: 20, paddingHorizontal: 48, paddingVertical: 18 },
   participantCard: { marginBottom: 8 },
   participantGrad: { borderRadius: 16, padding: 16, alignItems: 'center', justifyContent: 'center', flex: 1 },
   pName: { color: '#fff', fontSize: 14, fontWeight: '700', marginTop: 8 },
   controls: { position: 'absolute', bottom: 40, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', gap: 16, paddingBottom: 20 },
-  ctrlBtn: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#1A2235', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#1E293B' },
-  ctrlBtnActive: { backgroundColor: '#003328', borderColor: '#00D4AA' },
+  ctrlBtn: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB' },
+  ctrlBtnActive: { backgroundColor: '#D1FAE5', borderColor: '#10B981' },
   endBtn: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#EF4444', justifyContent: 'center', alignItems: 'center' },
-  d2de: { position: 'absolute', top: 52, right: 16, backgroundColor: '#003328', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 0.5, borderColor: '#00D4AA' },
+  d2de: { position: 'absolute', top: 52, right: 16, backgroundColor: '#D1FAE5', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 0.5, borderColor: '#10B981' },
 });

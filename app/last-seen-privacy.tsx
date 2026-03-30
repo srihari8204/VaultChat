@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/last-seen-privacy.tsx — Last Seen & Online Privacy Settings
 // All settings saved to AsyncStorage 'vc_privacy_settings'
 
@@ -15,8 +14,8 @@ import { Ionicons } from '@expo/vector-icons';
 const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
 
 const C = {
-  bg: '#020B18', accent: '#4A9FFF', cyan: '#00E5FF',
-  card: '#0A1628', cardBorder: '#112240', white: '#FFFFFF',
+  bg: '#FFFFFF', accent: '#4A9FFF', cyan: '#4A9FFF',
+  card: '#F9FAFB', cardBorder: '#112240', white: '#FFFFFF',
   muted: '#7B8CA8', green: '#10B981', red: '#FF4D6D',
   orange: '#FF9F43', yellow: '#FBBF24',
 };
@@ -118,7 +117,7 @@ export default function LastSeenPrivacyScreen() {
       <Stack.Screen options={{ headerShown: false }} />
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
 
-      <LinearGradient colors={['#0A1628', C.bg]} style={s.header}>
+      <LinearGradient colors={['#F9FAFB', C.bg]} style={s.header}>
         <View style={[s.headerRow, { marginTop: TOP }]}>
           <TouchableOpacity onPress={() => router.back()} hitSlop={16}>
             <Ionicons name="arrow-back" size={24} color={C.white} />
@@ -135,7 +134,7 @@ export default function LastSeenPrivacyScreen() {
       <ScrollView style={s.scroll} contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
 
         {/* ── Last Seen ──────────────────────────────── */}
-        <LinearGradient colors={['#0F2847', '#0A1628']} style={s.card}>
+        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.sectionHeader}>
             <Ionicons name="time-outline" size={20} color={C.cyan} />
             <Text style={s.cardTitle}>Last Seen</Text>
@@ -145,7 +144,7 @@ export default function LastSeenPrivacyScreen() {
         </LinearGradient>
 
         {/* ── Online Status ──────────────────────────── */}
-        <LinearGradient colors={['#0F2847', '#0A1628']} style={s.card}>
+        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.sectionHeader}>
             <Ionicons name="radio-button-on-outline" size={20} color={C.green} />
             <Text style={s.cardTitle}>Online Status</Text>
@@ -157,13 +156,13 @@ export default function LastSeenPrivacyScreen() {
               value={settings.onlineStatus}
               onValueChange={(v) => update({ onlineStatus: v })}
               trackColor={{ false: '#1A2A44', true: C.green }}
-              thumbColor={settings.onlineStatus ? C.white : '#555'}
+              thumbColor={settings.onlineStatus ? C.white : '#6B7280'}
             />
           </View>
         </LinearGradient>
 
         {/* ── Profile Photo ──────────────────────────── */}
-        <LinearGradient colors={['#0F2847', '#0A1628']} style={s.card}>
+        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.sectionHeader}>
             <Ionicons name="person-circle-outline" size={20} color={C.accent} />
             <Text style={s.cardTitle}>Profile Photo</Text>
@@ -173,7 +172,7 @@ export default function LastSeenPrivacyScreen() {
         </LinearGradient>
 
         {/* ── About / Bio ────────────────────────────── */}
-        <LinearGradient colors={['#0F2847', '#0A1628']} style={s.card}>
+        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.sectionHeader}>
             <Ionicons name="text-outline" size={20} color={C.orange} />
             <Text style={s.cardTitle}>About / Bio</Text>
@@ -183,7 +182,7 @@ export default function LastSeenPrivacyScreen() {
         </LinearGradient>
 
         {/* ── Read Receipts ──────────────────────────── */}
-        <LinearGradient colors={['#0F2847', '#0A1628']} style={s.card}>
+        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.sectionHeader}>
             <Ionicons name="checkmark-done-outline" size={20} color={C.accent} />
             <Text style={s.cardTitle}>Read Receipts</Text>
@@ -207,7 +206,7 @@ export default function LastSeenPrivacyScreen() {
                 }
               }}
               trackColor={{ false: '#1A2A44', true: C.accent }}
-              thumbColor={settings.readReceipts ? C.white : '#555'}
+              thumbColor={settings.readReceipts ? C.white : '#6B7280'}
             />
           </View>
           {!settings.readReceipts && (
@@ -221,7 +220,7 @@ export default function LastSeenPrivacyScreen() {
         </LinearGradient>
 
         {/* ── Typing Indicator ───────────────────────── */}
-        <LinearGradient colors={['#0F2847', '#0A1628']} style={s.card}>
+        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.sectionHeader}>
             <Ionicons name="chatbubble-ellipses-outline" size={20} color={C.cyan} />
             <Text style={s.cardTitle}>Typing Indicator</Text>
@@ -233,13 +232,13 @@ export default function LastSeenPrivacyScreen() {
               value={settings.typingIndicator}
               onValueChange={(v) => update({ typingIndicator: v })}
               trackColor={{ false: '#1A2A44', true: C.cyan }}
-              thumbColor={settings.typingIndicator ? C.white : '#555'}
+              thumbColor={settings.typingIndicator ? C.white : '#6B7280'}
             />
           </View>
         </LinearGradient>
 
         {/* ── Groups ─────────────────────────────────── */}
-        <LinearGradient colors={['#0F2847', '#0A1628']} style={s.card}>
+        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.sectionHeader}>
             <Ionicons name="people-outline" size={20} color={C.accent} />
             <Text style={s.cardTitle}>Groups</Text>
@@ -249,7 +248,7 @@ export default function LastSeenPrivacyScreen() {
         </LinearGradient>
 
         {/* ── Live Location Duration ─────────────────── */}
-        <LinearGradient colors={['#0F2847', '#0A1628']} style={s.card}>
+        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.sectionHeader}>
             <Ionicons name="location-outline" size={20} color={C.red} />
             <Text style={s.cardTitle}>Live Location</Text>
@@ -272,7 +271,7 @@ export default function LastSeenPrivacyScreen() {
         </LinearGradient>
 
         {/* ── Profile Preview ────────────────────────── */}
-        <LinearGradient colors={['#0F2847', '#0A1628']} style={s.card}>
+        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.sectionHeader}>
             <Ionicons name="eye-outline" size={20} color={C.cyan} />
             <Text style={s.cardTitle}>Profile Preview</Text>
@@ -313,7 +312,7 @@ export default function LastSeenPrivacyScreen() {
         </LinearGradient>
 
         {/* ── Apply to All ───────────────────────────── */}
-        <LinearGradient colors={['#0F2847', '#0A1628']} style={s.card}>
+        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <Text style={s.cardTitle}>Quick Apply</Text>
           <Text style={s.cardDesc}>Set all visibility options at once:</Text>
           <View style={s.applyRow}>

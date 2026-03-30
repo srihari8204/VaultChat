@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/contact-info.tsx — Contact Info Page
 // Detailed contact profile with shared media, files, links,
 // groups in common, encryption info, block/report.
@@ -14,7 +13,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import firestore from '@react-native-firebase/firestore';
 
 const { width: SW } = Dimensions.get('window');
-const C = { bg: '#020B18', accent: '#4A9FFF', cyan: '#00E5FF', card: '#0A1628', border: '#112240' };
+const C = { bg: '#FFFFFF', accent: '#4A9FFF', cyan: '#4A9FFF', card: '#F9FAFB', border: '#112240' };
 const MEDIA_SIZE = (SW - 48 - 8) / 3;
 
 // Mock shared media placeholders
@@ -133,7 +132,7 @@ export default function ContactInfoScreen() {
       <ScrollView contentContainerStyle={{ paddingBottom: 60 }}>
         {/* Hero section */}
         <LinearGradient
-          colors={['#0D2137', '#0A1628', C.bg]}
+          colors={['#0D2137', '#F9FAFB', C.bg]}
           style={s.hero}
         >
           <TouchableOpacity
@@ -338,7 +337,7 @@ const s = StyleSheet.create({
   avatarInner: {
     flex: 1,
     borderRadius: 48,
-    backgroundColor: '#0A1628',
+    backgroundColor: '#F9FAFB',
     justifyContent: 'center',
     alignItems: 'center',
   },

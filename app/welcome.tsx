@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { useRouter } from 'expo-router';
 import { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -16,7 +15,7 @@ function WelcomeContent() {
   const router = useRouter();
 
   // Animation values
-  const logoFade = useRef(new Animated.Value(0)).current;
+  const logoFade = useRef(new Animated.Value(10)).current;
   const logoSlide = useRef(new Animated.Value(30)).current;
   const titleFade = useRef(new Animated.Value(0)).current;
   const titleSlide = useRef(new Animated.Value(30)).current;
@@ -91,7 +90,7 @@ function WelcomeContent() {
       </View>
 
       {/* Features list */}
-      <Animated.View style={[S.featuresSection, { opacity: featuresFade, transform: [{ translateY: featuresSlide }] }]}>
+      {/* <Animated.View style={[S.featuresSection, { opacity: featuresFade, transform: [{ translateY: featuresSlide }] }]}>
         {FEATURES.map((feature, index) => (
           <View key={index}>
             <View style={S.featureRow}>
@@ -101,7 +100,7 @@ function WelcomeContent() {
             {index < FEATURES.length - 1 && <View style={S.featureDivider} />}
           </View>
         ))}
-      </Animated.View>
+      </Animated.View> */}
 
       {/* Buttons section */}
       <Animated.View style={[S.btnSection, { opacity: btnFade, transform: [{ translateY: btnSlide }] }]}>
@@ -142,7 +141,7 @@ export default function WelcomeScreen() {
 const S = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundcolor: '#000000',
+    backgroundColor: '#ffffff',
     paddingHorizontal: 28,
     paddingTop: 80,
     paddingBottom: 48,
@@ -163,10 +162,10 @@ const S = StyleSheet.create({
     borderBottomLeftRadius: 4,
     borderBottomRightRadius: 4,
     borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.9)',
+    // borderColor: 'rgba(255,255,255,0.9)',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'transparent',
+    // backgroundColor: 'transparent',
   },
   shieldInner: {
     width: 56,
@@ -175,7 +174,7 @@ const S = StyleSheet.create({
     borderBottomLeftRadius: 2,
     borderBottomRightRadius: 2,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
+    // borderColor: 'rgba(255,255,255,0.15)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -190,7 +189,7 @@ const S = StyleSheet.create({
     left: 2,
     width: 18,
     height: 2,
-    backgroundColor: 'rgba(255,255,255,0.8)',
+    // backgroundColor: 'rgba(255,255,255,0.8)',
     transform: [{ rotate: '-45deg' }],
   },
   checkShort: {
@@ -199,7 +198,7 @@ const S = StyleSheet.create({
     left: 0,
     width: 10,
     height: 2,
-    backgroundColor: 'rgba(255,255,255,0.8)',
+    // backgroundColor: 'rgba(255,255,255,0.8)',
     transform: [{ rotate: '45deg' }],
   },
 
@@ -214,7 +213,7 @@ const S = StyleSheet.create({
     textAlign: 'center',
   },
   tagline: {
-    color: 'rgba(255,255,255,0.4)',
+    // color: 'rgba(255,255,255,0.4)',
     fontSize: 13,
     fontWeight: '400',
     letterSpacing: 1,
@@ -237,11 +236,11 @@ const S = StyleSheet.create({
     width: 5,
     height: 5,
     borderRadius: 2.5,
-    backgroundColor: 'rgba(255,255,255,0.35)',
+    // backgroundColor: 'rgba(255,255,255,0.35)',
     marginRight: 16,
   },
   featureText: {
-    color: 'rgba(255,255,255,0.55)',
+    // color: 'rgba(255,255,255,0.55)',
     fontSize: 15,
     fontWeight: '500',
     letterSpacing: 0.3,
@@ -256,14 +255,14 @@ const S = StyleSheet.create({
     gap: 14,
   },
   btnPrimary: {
-    backgroundcolor: '#000000',
+    // backgroundColor: '#000000',
     height: 56,
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
   btnPrimaryText: {
-    color: '#000000',
+    // color: '#000000',
     fontSize: 16,
     fontWeight: '800',
     letterSpacing: 0.5,
@@ -274,17 +273,17 @@ const S = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
+    // borderColor: 'rgba(255,255,255,0.2)',
     backgroundColor: 'transparent',
   },
   btnSecondaryText: {
-    color: '#000000',
+    // color: '#000000',
     fontSize: 16,
     fontWeight: '600',
     letterSpacing: 0.5,
   },
   disclaimer: {
-    color: 'rgba(255,255,255,0.2)',
+    // color: 'rgba(255,255,255,0.2)',
     fontSize: 10,
     textAlign: 'center',
     lineHeight: 16,

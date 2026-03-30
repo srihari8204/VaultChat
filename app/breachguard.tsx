@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert, Animated, Easing, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 
-const C = { bg:'#020B18',surface:'rgba(10,22,40,0.85)',primary:'#4A9FFF',secondary:'#7C3AED',accent:'#10B981',danger:'#EF4444',warning:'#F59E0B',border:'rgba(74,159,255,0.15)',borderDim:'rgba(255,255,255,0.06)',text:'#FFFFFF',textDim:'rgba(255,255,255,0.5)',textFaint:'rgba(255,255,255,0.22)' };
+const C = { bg:'#FFFFFF',surface:'rgba(10,22,40,0.85)',primary:'#4A9FFF',secondary:'#7C3AED',accent:'#10B981',danger:'#EF4444',warning:'#F59E0B',border:'rgba(74,159,255,0.15)',borderDim:'rgba(255,255,255,0.06)',text:'#FFFFFF',textDim:'rgba(255,255,255,0.5)',textFaint:'rgba(255,255,255,0.22)' };
 const NAV = [{id:'chats',icon:'💬',label:'Chats',route:'/chats'},{id:'shield',icon:'🛡️',label:'Shield',route:'/dashboard'},{id:'community',icon:'🌐',label:'Community',route:'/communities'},{id:'vault',icon:'📦',label:'Vault',route:'/filevault'},{id:'alerts',icon:'🔔',label:'Alerts',route:'/notifications'}];
 
 const BREACH_ALERTS = [
@@ -55,7 +55,7 @@ function BreachGuardContent() {
 
   return (
     <View style={S.container}>
-      <LinearGradient colors={['#020B18','#040F20','#060F24']} style={StyleSheet.absoluteFillObject}/>
+      <LinearGradient colors={['#FFFFFF','#040F20','#060F24']} style={StyleSheet.absoluteFillObject}/>
       <View style={{position:'absolute',top:-40,alignSelf:'center',width:280,height:280,borderRadius:140,backgroundColor:activeBreaches>0?'rgba(239,68,68,0.05)':'rgba(16,185,129,0.04)'}}/>
       <Animated.View style={{flex:1,opacity:fadeIn}}>
         <View style={S.header}>
@@ -186,7 +186,7 @@ export default function BreachGuardScreen() {
 }
 
 const S = StyleSheet.create({
-  container:{flex:1,backgroundColor:'#020B18'},
+  container:{flex:1,backgroundColor:'#FFFFFF'},
   header:{flexDirection:'row',alignItems:'center',paddingHorizontal:18,paddingTop:50,paddingBottom:14,gap:10},
   title:{color:'#fff',fontSize:20,fontWeight:'900'},
   backBtn:{width:36,height:36,borderRadius:18,backgroundColor:'rgba(10,22,40,0.8)',justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:'rgba(255,255,255,0.06)'},

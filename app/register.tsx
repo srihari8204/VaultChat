@@ -13,10 +13,10 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const SERVER = 'http://10.94.177.151:3001'; // auto-patched by TWO_DEVICE_TEST.ps1
+import { SERVER_URL as SERVER } from '../constants/server';
 
 const C = {
-  bg:'#020B18', card:'rgba(10,22,40,0.92)',
+  bg:'#FFFFFF', card:'rgba(10,22,40,0.92)',
   primary:'#4A9FFF', accent:'#10B981',
   border:'rgba(74,159,255,0.2)', dim:'rgba(255,255,255,0.45)',
   faint:'rgba(255,255,255,0.1)', red:'#EF4444',
@@ -126,7 +126,7 @@ export default function Register() {
   // ── FORM STEP ─────────────────────────────────────────────────
   if (step === 'form') return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      <LinearGradient colors={['#010812', '#020B18', '#030E1E']}
+      <LinearGradient colors={['#FFFFFF', '#FFFFFF', '#030E1E']}
         style={StyleSheet.absoluteFillObject} />
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}>
@@ -181,7 +181,7 @@ export default function Register() {
   // ── OTP STEP ──────────────────────────────────────────────────
   if (step === 'otp') return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      <LinearGradient colors={['#010812', '#020B18']}
+      <LinearGradient colors={['#FFFFFF', '#FFFFFF']}
         style={StyleSheet.absoluteFillObject} />
       <View style={Ss.container}>
         <Text style={Ss.logo}>📱</Text>
@@ -215,7 +215,7 @@ export default function Register() {
   return (
     <View style={{ flex: 1, backgroundColor: C.bg,
       justifyContent: 'center', alignItems: 'center', gap: 16 }}>
-      <LinearGradient colors={['#010812', '#020B18']}
+      <LinearGradient colors={['#FFFFFF', '#FFFFFF']}
         style={StyleSheet.absoluteFillObject} />
       <Text style={{ fontSize: 60 }}>✅</Text>
       <Text style={{ color: '#fff', fontSize: 22, fontWeight: '900' }}>

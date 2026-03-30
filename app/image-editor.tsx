@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/image-editor.tsx — Image Editor before sending
 // Crop, Rotate, Draw, Text overlay, Filters, Brightness/Contrast
 // Uses expo-image-manipulator for transforms, react-native-view-shot to capture
@@ -15,7 +14,7 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import ViewShot from 'react-native-view-shot';
 
 const { width: SW, height: SH } = Dimensions.get('window');
-const C = { bg: '#020B18', accent: '#4A9FFF', cyan: '#00E5FF', card: '#0A1628', danger: '#FF3C6E', text: '#FFFFFF', muted: '#8A9BBF' };
+const C = { bg: '#FFFFFF', accent: '#4A9FFF', cyan: '#4A9FFF', card: '#F9FAFB', danger: '#FF3C6E', text: '#FFFFFF', muted: '#8A9BBF' };
 
 const DRAW_COLORS = ['#FFFFFF', '#FF3C3C', '#4A9FFF', '#10B981', '#FBBF24'];
 const FILTER_LIST = ['Original', 'B&W', 'Warm', 'Cool', 'Vivid'];
@@ -278,7 +277,7 @@ export default function ImageEditorScreen() {
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <LinearGradient colors={['#020B18', '#0A1628', '#020B18']} style={StyleSheet.absoluteFill} />
+      <LinearGradient colors={['#FFFFFF', '#F9FAFB', '#FFFFFF']} style={StyleSheet.absoluteFill} />
 
       {/* Top bar */}
       <View style={styles.topBar}>
@@ -467,7 +466,7 @@ export default function ImageEditorScreen() {
                 style={[styles.filterBtn, activeFilter === f && styles.filterBtnActive]}
                 onPress={() => applyFilter(f)}
               >
-                <View style={[styles.filterPreview, f === 'B&W' && { backgroundColor: '#888' }, f === 'Warm' && { backgroundColor: '#FF8C32' }, f === 'Cool' && { backgroundColor: '#3264FF' }, f === 'Vivid' && { backgroundColor: '#FF32C8' }]} />
+                <View style={[styles.filterPreview, f === 'B&W' && { backgroundColor: '#6B7280' }, f === 'Warm' && { backgroundColor: '#FF8C32' }, f === 'Cool' && { backgroundColor: '#3264FF' }, f === 'Vivid' && { backgroundColor: '#FF32C8' }]} />
                 <Text style={[styles.filterLabel, activeFilter === f && { color: C.cyan }]}>{f}</Text>
               </TouchableOpacity>
             ))}

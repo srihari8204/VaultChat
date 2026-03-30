@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/digital-wellbeing.tsx — Digital Wellbeing / Screen Time
 // Daily usage chart, stats, heatmap, focus mode, daily limit
 // All data from AsyncStorage
@@ -13,7 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width: SW } = Dimensions.get('window');
-const C = { bg: '#020B18', accent: '#4A9FFF', cyan: '#00E5FF', card: '#0A1628', danger: '#FF3C6E', green: '#10B981', text: '#FFFFFF', muted: '#8A9BBF', yellow: '#FBBF24' };
+const C = { bg: '#FFFFFF', accent: '#4A9FFF', cyan: '#4A9FFF', card: '#F9FAFB', danger: '#FF3C6E', green: '#10B981', text: '#FFFFFF', muted: '#8A9BBF', yellow: '#FBBF24' };
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
@@ -135,7 +134,7 @@ export default function DigitalWellbeingScreen() {
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <LinearGradient colors={['#020B18', '#0A1628', '#020B18']} style={StyleSheet.absoluteFill} />
+      <LinearGradient colors={['#FFFFFF', '#F9FAFB', '#FFFFFF']} style={StyleSheet.absoluteFill} />
 
       {/* Header */}
       <View style={styles.header}>
@@ -277,7 +276,7 @@ export default function DigitalWellbeingScreen() {
                 value={focusMode}
                 onValueChange={toggleFocusMode}
                 trackColor={{ false: 'rgba(255,255,255,0.1)', true: 'rgba(0,229,255,0.3)' }}
-                thumbColor={focusMode ? C.cyan : '#555'}
+                thumbColor={focusMode ? C.cyan : '#6B7280'}
               />
             </View>
             <View style={styles.focusDurationRow}>

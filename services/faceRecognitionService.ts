@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as tf from "@tensorflow/tfjs";
 import "@tensorflow/tfjs-backend-cpu";
 import * as blazeface from "@tensorflow-models/blazeface";
@@ -51,7 +50,7 @@ export async function extractEmbedding(photoUri: string): Promise<Float32Array |
     const embedding = await tensor.data() as Float32Array;
     tensor.dispose();
     return embedding;
-  } catch (e) { console.error("Embedding error:", e); return null; }
+  } catch { return null; }
 }
 
 export async function enrollFaceEmbedding(photoUri: string): Promise<boolean> {
@@ -68,9 +67,8 @@ export async function enrollFaceEmbedding(photoUri: string): Promise<boolean> {
       const chunk = arr.slice(i * chunkSize, (i + 1) * chunkSize);
       await SecureStore.setItemAsync("vc_face_emb_" + i, JSON.stringify(chunk));
     }
-    console.log("Face enrolled: embedding stored in", chunks, "chunks");
     return true;
-  } catch (e) { console.error("Enroll error:", e); return false; }
+  } catch { return false; }
 }
 
 export async function verifyFaceEmbedding(photoUri: string): Promise<{ match: boolean; score: number }> {
@@ -87,10 +85,9 @@ export async function verifyFaceEmbedding(photoUri: string): Promise<{ match: bo
     const current = await extractEmbedding(photoUri);
     if (!current) return { match: false, score: 0 };
     const score = cosineSimilarity(stored, current);
-    console.log("Face similarity score:", score.toFixed(4));
     // Threshold: 0.92 for same person (pixel-level similarity)
     return { match: score >= 0.92, score };
-  } catch (e) { console.error("Verify error:", e); return { match: false, score: 0 }; }
+  } catch { return { match: false, score: 0 }; }
 }
 
 export async function hasFaceEmbedding(): Promise<boolean> {

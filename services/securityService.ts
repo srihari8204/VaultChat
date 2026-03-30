@@ -1,4 +1,3 @@
-// @ts-nocheck
 // services/securityService.ts
 // Real jailbreak / root / Frida detection + key wipe
 // Runs on every app launch before any screen is shown
@@ -58,7 +57,6 @@ async function checkRootJailbreak(): Promise<ThreatDetail[]> {
       });
     }
   } catch (e) {
-    console.warn('[Security] isRooted() call failed:', e);
   }
 
   try {
@@ -70,7 +68,6 @@ async function checkRootJailbreak(): Promise<ThreatDetail[]> {
       });
     }
   } catch (e) {
-    console.warn('[Security] getFingerprint() failed:', e);
   }
 
   try {
@@ -82,7 +79,6 @@ async function checkRootJailbreak(): Promise<ThreatDetail[]> {
       });
     }
   } catch (e) {
-    console.warn('[Security] isAdbEnabled() failed:', e);
   }
 
   return threats;
@@ -114,7 +110,6 @@ async function checkFrida(): Promise<ThreatDetail[]> {
     });
   } catch (err: any) {
     if (err?.name === 'AbortError') {
-      console.warn('[Security] Port 27042 timeout — inconclusive');
     }
   }
 
@@ -160,7 +155,6 @@ async function checkEmulator(): Promise<ThreatDetail[]> {
       });
     }
   } catch (e) {
-    console.warn('[Security] isEmulator() failed:', e);
   }
   return threats;
 }
@@ -173,7 +167,6 @@ async function checkEmulator(): Promise<ThreatDetail[]> {
 // ─────────────────────────────────────────────────────────────
 
 export async function wipeAllKeys(): Promise<void> {
-  console.warn('[SECURITY] THREAT DETECTED — WIPING ALL KEYS');
 
   const keysToDelete = [
     'vault_pin',
@@ -210,7 +203,6 @@ export async function wipeAllKeys(): Promise<void> {
     try { await SecureStore.deleteItemAsync(`ratchet_chat_${i}`); } catch {}
   }
 
-  console.warn('[SECURITY] All keys wiped successfully');
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -238,7 +230,6 @@ async function logThreatToFirestore(report: SecurityReport): Promise<void> {
         buildNumber: await DeviceInfo.getBuildNumber(),
       });
   } catch (e) {
-    console.warn('[Security] Failed to log threat to Firestore:', e);
   }
 }
 
@@ -272,9 +263,7 @@ export async function runSecurityCheck(): Promise<SecurityReport> {
   if (!report.clean) {
     await wipeAllKeys();
     logThreatToFirestore(report).catch(() => {});
-    console.warn('[SECURITY] THREATS FOUND:', report.threats.map(t => t.type));
   } else {
-    console.log('[Security] Device clean — no threats detected');
   }
 
   return report;
@@ -310,7 +299,6 @@ export async function logScreenshotAttempt(chatId: string): Promise<void> {
         timestamp: firestore.FieldValue.serverTimestamp(),
       });
   } catch (e) {
-    console.warn('[Security] logScreenshotAttempt failed:', e);
   }
 }
 

@@ -24,7 +24,7 @@ import {
 } from '../lib/contactPrivacy';
 
 const C = {
-  bg:'#020B18', primary:'#4A9FFF', green:'#10B981',
+  bg:'#FFFFFF', primary:'#4A9FFF', green:'#10B981',
   red:'#EF4444', yellow:'#F59E0B',
   dim:'rgba(255,255,255,0.45)', faint:'rgba(255,255,255,0.12)',
 };
@@ -75,7 +75,7 @@ function RequestCard({ req, allContacts, onAccept, onDecline }: {
           {/* Avatar — shown because context = 'request' */}
           {profile.showPhoto && profile.photoUri
             ? <View style={{width:56,height:56,borderRadius:28,
-                backgroundColor:'#333',overflow:'hidden',
+                backgroundColor:'#D1D5DB',overflow:'hidden',
                 justifyContent:'center',alignItems:'center'}}>
                 <Text style={{fontSize:20,color:'#fff',fontWeight:'900'}}>{initials}</Text>
               </View>
@@ -204,7 +204,7 @@ export default function MsgRequests() {
 
   return (
     <View style={{flex:1,backgroundColor:C.bg}}>
-      <LinearGradient colors={['#010812','#020B18']} style={StyleSheet.absoluteFillObject}/>
+      <LinearGradient colors={['#FFFFFF','#FFFFFF']} style={StyleSheet.absoluteFillObject}/>
 
       {/* Header */}
       <View style={Ss.header}>

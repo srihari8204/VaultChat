@@ -240,9 +240,9 @@ const styles = StyleSheet.create({
   contactName: {
     color: '#000000', fontSize: 24, fontWeight: 'bold', marginTop: 8
   },
-  contactPhone: { color: '#64748B', fontSize: 14, marginTop: 4 },
+  contactPhone: { color: '#6B7280', fontSize: 14, marginTop: 4 },
   contactStatus: {
-    color: '#94A3B8', fontSize: 13, marginTop: 8,
+    color: '#6B7280', fontSize: 13, marginTop: 8,
     textAlign: 'center', fontStyle: 'italic'
   },
   actionRow: {
@@ -257,16 +257,16 @@ const styles = StyleSheet.create({
     padding: 16,
     minWidth: 68,
     borderWidth: 1,
-    borderColor: '#1E293B',
+    borderColor: '#E5E7EB',
   },
   actionIcon: { fontSize: 24, marginBottom: 6 },
-  actionLabel: { color: '#94A3B8', fontSize: 12 },
+  actionLabel: { color: '#6B7280', fontSize: 12 },
   section: {
     marginHorizontal: 16,
     marginTop: 20,
   },
   sectionTitle: {
-    color: '#64748B', fontSize: 13,
+    color: '#6B7280', fontSize: 13,
     fontWeight: '600', marginBottom: 12,
     textTransform: 'uppercase', letterSpacing: 0.5,
   },
@@ -276,7 +276,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#1E293B',
+    borderColor: '#E5E7EB',
     marginBottom: 12,
     alignItems: 'center',
   },
@@ -301,10 +301,10 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     gap: 8,
   },
-  scoreLabel: { color: '#94A3B8', fontSize: 12, width: 120 },
+  scoreLabel: { color: '#6B7280', fontSize: 12, width: 120 },
   scoreBar: {
     flex: 1, height: 6,
-    backgroundColor: '#1E293B',
+    backgroundColor: '#E5E7EB',
     borderRadius: 3,
     overflow: 'hidden',
   },
@@ -315,9 +315,9 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#1E293B',
+    borderColor: '#E5E7EB',
   },
-  vaultIdLabel: { color: '#64748B', fontSize: 12 },
+  vaultIdLabel: { color: '#6B7280', fontSize: 12 },
   vaultIdValue: {
     color: '#3B82F6', fontSize: 14,
     fontFamily: 'monospace', marginTop: 4,
@@ -346,7 +346,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#1E293B',
+    borderColor: '#E5E7EB',
   },
   mediaIcon: { fontSize: 32 },
   viewAllBtn: { alignItems: 'center', paddingVertical: 8 },
@@ -359,7 +359,7 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: '#1E293B',
+    borderColor: '#E5E7EB',
   },
   settingIcon: { fontSize: 20, marginRight: 12 },
   settingLabel: { color: '#000000', fontSize: 15, flex: 1 },

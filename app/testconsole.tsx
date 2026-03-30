@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React, { useState, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Animated } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -56,7 +55,7 @@ export default function TestConsole() {
 
   return (
     <View style={{flex:1,backgroundColor:C.bg}}>
-      <LinearGradient colors={['#010812','#020B18','#030E1E']} style={StyleSheet.absoluteFillObject}/>
+      <LinearGradient colors={['#FFFFFF','#FFFFFF','#030E1E']} style={StyleSheet.absoluteFillObject}/>
 
       {/* Header */}
       <View style={Ss.header}>

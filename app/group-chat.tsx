@@ -30,7 +30,7 @@ import { decryptMessage, encryptMessage } from '../services/d2deService';
 import { pinMessage } from '../services/groupService';
 import { uploadMedia } from '../services/mediaService';
 
-const BACKEND = 'https://vaultchat.onrender.com';
+import { SERVER_URL as BACKEND } from '../constants/server';
 
 type MsgType = 'text' | 'image' | 'video' | 'audio' | 'file' | 'gif' | 'poll';
 
@@ -323,7 +323,7 @@ const sendMedia = async (localUri: string, type: 'image'|'video'|'audio'|'file'|
   const Ticks = ({ status }: { status: string }) => {
     if (status === 'sent') return <Text style={s.tick}>âœ“</Text>;
     if (status === 'delivered') return <Text style={s.tick}>âœ“âœ“</Text>;
-    return <Text style={[s.tick, { color: '#00E5FF' }]}>âœ“âœ“</Text>;
+    return <Text style={[s.tick, { color: '#4A9FFF' }]}>âœ“âœ“</Text>;
   };
 
   const renderMsg = ({ item: m }: { item: Message }) => {
@@ -401,7 +401,7 @@ const sendMedia = async (localUri: string, type: 'image'|'video'|'audio'|'file'|
           ))}
           {pollOptions.length < 5 && (
             <TouchableOpacity onPress={() => setPollOptions(p => [...p, ''])} style={s.addOptBtn}>
-              <Text style={{ color: '#00E5FF', fontSize: 14 }}>+ Add option</Text>
+              <Text style={{ color: '#4A9FFF', fontSize: 14 }}>+ Add option</Text>
             </TouchableOpacity>
           )}
           <TouchableOpacity style={s.pollSendBtn} onPress={sendPoll}>
@@ -444,10 +444,10 @@ return (
     <>
       <Stack.Screen options={{
         title: groupName ?? 'Group',
-        headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff',
+        headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937',
         headerRight: () => (
           <TouchableOpacity onPress={() => router.push({ pathname: '/group-info', params: { chatId, groupName } })} style={{ marginRight: 12 }}>
-            <Text style={{ color: '#00E5FF', fontSize: 14 }}>â„¹ï¸</Text>
+            <Text style={{ color: '#4A9FFF', fontSize: 14 }}>â„¹ï¸</Text>
           </TouchableOpacity>
         ),
       }} />
@@ -532,56 +532,56 @@ return (
 }
 
 const s = StyleSheet.create({
-  screen:       { flex: 1, backgroundColor: '#03030E' },
+  screen:       { flex: 1, backgroundColor: '#FFFFFF' },
   list:         { padding: 12, paddingBottom: 8 },
   row:          { marginBottom: 6 },
   rowR:         { alignItems: 'flex-end' },
   rowL:         { alignItems: 'flex-start' },
   bubble:       { maxWidth: '80%', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8 },
-  bMe:          { backgroundColor: '#003D2A', borderBottomRightRadius: 2 },
-  bPeer:        { backgroundColor: '#111127', borderBottomLeftRadius: 2 },
-  bubbleDel:    { backgroundColor: '#111', borderWidth: 1, borderColor: '#222' },
-  senderName:   { color: '#00E5FF', fontSize: 12, fontWeight: 'bold', marginBottom: 3 },
-  msgTxt:       { color: '#E0E0F0', fontSize: 15, lineHeight: 21 },
-  delTxt:       { color: '#444', fontSize: 14, fontStyle: 'italic' },
+  bMe:          { backgroundColor: '#DCF8C6', borderBottomRightRadius: 2 },
+  bPeer:        { backgroundColor: '#F0F0F0', borderBottomLeftRadius: 2 },
+  bubbleDel:    { backgroundColor: '#F5F5F5', borderWidth: 1, borderColor: '#E0E0E0' },
+  senderName:   { color: '#4A9FFF', fontSize: 12, fontWeight: 'bold', marginBottom: 3 },
+  msgTxt:       { color: '#1F2937', fontSize: 15, lineHeight: 21 },
+  delTxt:       { color: '#9CA3AF', fontSize: 14, fontStyle: 'italic' },
   expiry:       { color: '#FF8C42', fontSize: 10, marginTop: 2 },
   meta:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: 3 },
-  time:         { color: '#444', fontSize: 11, marginRight: 3 },
-  edited:       { color: '#555', fontSize: 11 },
-  tick:         { color: '#555', fontSize: 12 },
-  replyBar:     { backgroundColor: '#00000044', borderLeftWidth: 3, borderLeftColor: '#00E5FF', borderRadius: 6, padding: 6, marginBottom: 6 },
-  replyName:    { color: '#00E5FF', fontSize: 11, fontWeight: 'bold', marginBottom: 1 },
-  replyPrev:    { color: '#888', fontSize: 12 },
+  time:         { color: '#9CA3AF', fontSize: 11, marginRight: 3 },
+  edited:       { color: '#9CA3AF', fontSize: 11 },
+  tick:         { color: '#9CA3AF', fontSize: 12 },
+  replyBar:     { backgroundColor: '#F3F4F6', borderLeftWidth: 3, borderLeftColor: '#4A9FFF', borderRadius: 6, padding: 6, marginBottom: 6 },
+  replyName:    { color: '#4A9FFF', fontSize: 11, fontWeight: 'bold', marginBottom: 1 },
+  replyPrev:    { color: '#6B7280', fontSize: 12 },
   reactionRow:  { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 4 },
-  reactionChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1A1A30', borderRadius: 12, paddingHorizontal: 7, paddingVertical: 3, borderWidth: 1, borderColor: '#333' },
-  reactionMine: { borderColor: '#00E5FF', backgroundColor: '#00E5FF11' },
-  reactionCnt:  { color: '#888', fontSize: 11, marginLeft: 3 },
-  pinnedBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0C0C1A', borderBottomWidth: 1, borderBottomColor: '#FF8C4233', paddingHorizontal: 12, paddingVertical: 10, gap: 8 },
+  reactionChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F4F6', borderRadius: 12, paddingHorizontal: 7, paddingVertical: 3, borderWidth: 1, borderColor: '#E5E7EB' },
+  reactionMine: { borderColor: '#4A9FFF', backgroundColor: '#4A9FFF11' },
+  reactionCnt:  { color: '#6B7280', fontSize: 11, marginLeft: 3 },
+  pinnedBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF7ED', borderBottomWidth: 1, borderBottomColor: '#FF8C4233', paddingHorizontal: 12, paddingVertical: 10, gap: 8 },
   pinnedIcon:   { fontSize: 16 },
   pinnedName:   { color: '#FF8C42', fontSize: 12, fontWeight: 'bold' },
-  pinnedTxt:    { color: '#888', fontSize: 12 },
-  uploadBar:    { backgroundColor: '#0C0C1A', padding: 8, alignItems: 'center' },
-  uploadTxt:    { color: '#00E5FF', fontSize: 12 },
+  pinnedTxt:    { color: '#6B7280', fontSize: 12 },
+  uploadBar:    { backgroundColor: '#F9FAFB', padding: 8, alignItems: 'center' },
+  uploadTxt:    { color: '#4A9FFF', fontSize: 12 },
   typingRow:    { paddingHorizontal: 16, paddingBottom: 6 },
-  typingTxt:    { color: '#555', fontSize: 13, fontStyle: 'italic' },
-  banner:       { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0C0C1A', borderTopWidth: 1, borderTopColor: '#00E5FF33', paddingHorizontal: 14, paddingVertical: 8 },
-  bannerTitle:  { color: '#00E5FF', fontSize: 12, fontWeight: 'bold' },
-  bannerPrev:   { color: '#888', fontSize: 12 },
-  bannerX:      { color: '#555', fontSize: 20, paddingHorizontal: 8 },
-  bar:          { flexDirection: 'row', alignItems: 'flex-end', backgroundColor: '#0C0C1A', paddingHorizontal: 8, paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#111' },
+  typingTxt:    { color: '#9CA3AF', fontSize: 13, fontStyle: 'italic' },
+  banner:       { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F9FAFB', borderTopWidth: 1, borderTopColor: '#E5E7EB', paddingHorizontal: 14, paddingVertical: 8 },
+  bannerTitle:  { color: '#4A9FFF', fontSize: 12, fontWeight: 'bold' },
+  bannerPrev:   { color: '#6B7280', fontSize: 12 },
+  bannerX:      { color: '#9CA3AF', fontSize: 20, paddingHorizontal: 8 },
+  bar:          { flexDirection: 'row', alignItems: 'flex-end', backgroundColor: '#FFFFFF', paddingHorizontal: 8, paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
   attachBtn:    { width: 36, height: 40, alignItems: 'center', justifyContent: 'center' },
-  input:        { flex: 1, backgroundColor: '#111127', color: '#E0E0F0', borderRadius: 22, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, maxHeight: 120, marginHorizontal: 4 },
-  sendBtn:      { width: 44, height: 44, borderRadius: 22, backgroundColor: '#00E5FF', alignItems: 'center', justifyContent: 'center' },
-  sendOff:      { backgroundColor: '#111127' },
-  sendIco:      { color: '#000', fontSize: 18, fontWeight: 'bold' },
-  overlay:      { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#00000088', justifyContent: 'flex-end' },
-  sheet:        { backgroundColor: '#0E0E20', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 36, paddingTop: 8 },
-  sheetRow:     { padding: 18, borderBottomWidth: 1, borderBottomColor: '#111' },
-  sheetTxt:     { color: '#E0E0F0', fontSize: 16 },
-  pollModal:    { backgroundColor: '#0E0E20', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, paddingBottom: 36 },
-  pollTitle:    { color: '#E0E0F0', fontSize: 18, fontWeight: 'bold', marginBottom: 14 },
-  pollInput:    { backgroundColor: '#111127', color: '#E0E0F0', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14, marginBottom: 8 },
+  input:        { flex: 1, backgroundColor: '#F3F4F6', color: '#1F2937', borderRadius: 22, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, maxHeight: 120, marginHorizontal: 4 },
+  sendBtn:      { width: 44, height: 44, borderRadius: 22, backgroundColor: '#4A9FFF', alignItems: 'center', justifyContent: 'center' },
+  sendOff:      { backgroundColor: '#E5E7EB' },
+  sendIco:      { color: '#FFFFFF', fontSize: 18, fontWeight: 'bold' },
+  overlay:      { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#00000044', justifyContent: 'flex-end' },
+  sheet:        { backgroundColor: '#FFFFFF', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 36, paddingTop: 8 },
+  sheetRow:     { padding: 18, borderBottomWidth: 1, borderBottomColor: '#F1F3F4' },
+  sheetTxt:     { color: '#1F2937', fontSize: 16 },
+  pollModal:    { backgroundColor: '#FFFFFF', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, paddingBottom: 36 },
+  pollTitle:    { color: '#1F2937', fontSize: 18, fontWeight: 'bold', marginBottom: 14 },
+  pollInput:    { backgroundColor: '#F3F4F6', color: '#1F2937', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14, marginBottom: 8 },
   addOptBtn:    { paddingVertical: 8, alignItems: 'center' },
-  pollSendBtn:  { backgroundColor: '#00E5FF', borderRadius: 10, paddingVertical: 13, alignItems: 'center', marginTop: 8 },
-  pollSendTxt:  { color: '#000', fontSize: 15, fontWeight: 'bold' },
+  pollSendBtn:  { backgroundColor: '#4A9FFF', borderRadius: 10, paddingVertical: 13, alignItems: 'center', marginTop: 8 },
+  pollSendTxt:  { color: '#FFFFFF', fontSize: 15, fontWeight: 'bold' },
 });

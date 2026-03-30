@@ -1,4 +1,3 @@
-// @ts-nocheck
 import auth from '@react-native-firebase/auth';
 
 export const registerUser = async (email: string, password: string, displayName: string, phone: string = '') => {

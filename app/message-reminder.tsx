@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/message-reminder.tsx — Message Reminder
 // Set a timed reminder for a specific message. Presets + custom picker.
 // Saves to AsyncStorage, schedules local notification via expo-notifications.
@@ -17,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import 'react-native-get-random-values';
 import { v4 as uuid } from 'uuid';
 
-const C = { bg: '#020B18', accent: '#4A9FFF', cyan: '#00E5FF', card: '#0A1628', border: '#112240' };
+const C = { bg: '#FFFFFF', accent: '#4A9FFF', cyan: '#4A9FFF', card: '#F9FAFB', border: '#112240' };
 const STORAGE_KEY = 'vc_reminders';
 
 interface Reminder {
@@ -67,7 +66,6 @@ export default function MessageReminderScreen() {
         setReminders(active);
       }
     } catch (e) {
-      console.warn('[Reminder] load error:', e);
     }
   };
 
@@ -117,7 +115,6 @@ export default function MessageReminderScreen() {
       setReminders(prev => [...prev, newReminder]);
       Alert.alert('Reminder Set', `You'll be reminded ${formatRelative(remindAt)}.`);
     } catch (e) {
-      console.warn('[Reminder] save error:', e);
       Alert.alert('Error', 'Failed to set reminder.');
     }
   };
@@ -134,7 +131,6 @@ export default function MessageReminderScreen() {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
       setReminders(prev => prev.filter(r => r.id !== reminder.id));
     } catch (e) {
-      console.warn('[Reminder] delete error:', e);
     }
   };
 
@@ -203,7 +199,7 @@ export default function MessageReminderScreen() {
       <Stack.Screen options={{ headerShown: false }} />
 
       {/* Header */}
-      <LinearGradient colors={['#0A1628', C.bg]} style={s.header}>
+      <LinearGradient colors={['#F9FAFB', C.bg]} style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>

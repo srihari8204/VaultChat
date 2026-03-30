@@ -44,6 +44,7 @@ app-example
 
 
 vaultchat-backend/.env
+vaultchat-backend/serviceAccountKey.json
 .env
 *.env
 

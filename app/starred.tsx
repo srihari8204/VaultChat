@@ -38,11 +38,11 @@ export default function StarredScreen() {
 
   const fmt = (ts: any) => ts?.toDate?.().toLocaleDateString() ?? '';
 
-  if (loading) return <View style={s.center}><ActivityIndicator color="#00E5FF" /></View>;
+  if (loading) return <View style={s.center}><ActivityIndicator color="#4A9FFF" /></View>;
 
   return (
     <>
-      <Stack.Screen options={{ title: 'â­ Starred Messages', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
+      <Stack.Screen options={{ title: 'â­ Starred Messages', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
       <View style={s.screen}>
         <FlatList
           data={items}
@@ -67,12 +67,12 @@ export default function StarredScreen() {
 }
 
 const s = StyleSheet.create({
-  screen:    { flex: 1, backgroundColor: '#03030E' },
+  screen:    { flex: 1, backgroundColor: '#FFFFFF' },
   center:    { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 },
   item:      { flexDirection: 'row', alignItems: 'flex-start', padding: 14, borderBottomWidth: 1, borderBottomColor: '#0A0A18' },
-  chatName:  { color: '#00E5FF', fontSize: 13, fontWeight: 'bold', marginBottom: 2 },
-  sender:    { color: '#555', fontSize: 11, marginBottom: 4 },
+  chatName:  { color: '#4A9FFF', fontSize: 13, fontWeight: 'bold', marginBottom: 2 },
+  sender:    { color: '#6B7280', fontSize: 11, marginBottom: 4 },
   msg:       { color: '#C0C0E0', fontSize: 14 },
   unstarBtn: { padding: 6 },
-  emptyTxt:  { color: '#555', fontSize: 14, textAlign: 'center', lineHeight: 22 },
+  emptyTxt:  { color: '#6B7280', fontSize: 14, textAlign: 'center', lineHeight: 22 },
 });

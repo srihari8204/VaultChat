@@ -156,7 +156,7 @@ export default function BotApiScreen() {
         {BUILT_IN_BOTS.map(bot => (
           <LinearGradient
             key={bot.id}
-            colors={['#0A1628', '#0F1D32']}
+            colors={['#F9FAFB', '#0F1D32']}
             style={styles.botCard}
           >
             <LinearGradient colors={bot.gradient} style={styles.botIcon}>
@@ -321,7 +321,7 @@ Content-Type: application/json
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#020B18',
+    backgroundColor: '#FFFFFF',
   },
   scroll: {
     padding: 20,
@@ -336,7 +336,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#0A1628',
+    backgroundColor: '#F9FAFB',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -416,7 +416,7 @@ const styles = StyleSheet.create({
     color: '#000000',
   },
   formCard: {
-    backgroundColor: '#0A1628',
+    backgroundColor: '#F9FAFB',
     borderRadius: 14,
     padding: 18,
     borderWidth: 1,
@@ -432,7 +432,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   input: {
-    backgroundColor: '#020B18',
+    backgroundColor: '#FFFFFF',
     borderRadius: 10,
     borderWidth: 1,
     borderColor: '#1A2744',
@@ -459,7 +459,7 @@ const styles = StyleSheet.create({
   customBotCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#0A1628',
+    backgroundColor: '#F9FAFB',
     borderRadius: 14,
     padding: 14,
     marginBottom: 10,
@@ -491,7 +491,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   docsToggle: {
-    backgroundColor: '#0A1628',
+    backgroundColor: '#F9FAFB',
     borderRadius: 10,
     padding: 14,
     borderWidth: 1,
@@ -503,7 +503,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   docsCard: {
-    backgroundColor: '#0A1628',
+    backgroundColor: '#F9FAFB',
     borderRadius: 14,
     padding: 18,
     marginTop: 10,
@@ -523,7 +523,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   codeBlock: {
-    backgroundColor: '#020B18',
+    backgroundColor: '#FFFFFF',
     borderRadius: 10,
     padding: 14,
     borderWidth: 1,

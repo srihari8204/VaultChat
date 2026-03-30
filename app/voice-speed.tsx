@@ -86,8 +86,8 @@ export default function VoiceSpeedPlayer() {
     <>
       <Stack.Screen options={{
         title: 'Voice Message',
-        headerStyle: { backgroundColor: '#0C0C1A' },
-        headerTintColor: '#fff',
+        headerStyle: { backgroundColor: '#FFFFFF' },
+        headerTintColor: '#1F2937',
       }} />
       <View style={st.screen}>
         <View style={st.card}>
@@ -103,7 +103,7 @@ export default function VoiceSpeedPlayer() {
                   key={i}
                   style={[st.bar, {
                     height: h * 60,
-                    backgroundColor: i <= activeIdx ? '#00E5FF' : 'rgba(255,255,255,0.15)',
+                    backgroundColor: i <= activeIdx ? '#4A9FFF' : 'rgba(255,255,255,0.15)',
                   }]}
                 />
               );
@@ -128,7 +128,7 @@ export default function VoiceSpeedPlayer() {
             </TouchableOpacity>
 
             <TouchableOpacity onPress={togglePlay} style={st.playBtn}>
-              <LinearGradient colors={['#00E5FF', '#4A9FFF']} style={st.playGrad}>
+              <LinearGradient colors={['#4A9FFF', '#4A9FFF']} style={st.playGrad}>
                 <Text style={st.playIcon}>{isPlaying ? '⏸' : '▶'}</Text>
               </LinearGradient>
             </TouchableOpacity>
@@ -167,13 +167,13 @@ export default function VoiceSpeedPlayer() {
 }
 
 const st = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#020B18', justifyContent: 'center', padding: 20 },
+  screen: { flex: 1, backgroundColor: '#FFFFFF', justifyContent: 'center', padding: 20 },
   card: { backgroundColor: 'rgba(10,22,40,0.9)', borderRadius: 24, padding: 24, borderWidth: 1, borderColor: 'rgba(0,229,255,0.15)' },
   sender: { color: '#fff', fontSize: 18, fontWeight: '800', textAlign: 'center', marginBottom: 20 },
   waveform: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 60, gap: 2, marginBottom: 16 },
   bar: { width: 4, borderRadius: 2 },
   progressBg: { height: 4, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 2, overflow: 'hidden', marginBottom: 8 },
-  progressFill: { height: 4, backgroundColor: '#00E5FF', borderRadius: 2 },
+  progressFill: { height: 4, backgroundColor: '#4A9FFF', borderRadius: 2 },
   timeRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
   time: { color: 'rgba(255,255,255,0.4)', fontSize: 12, fontFamily: 'monospace' },
   controls: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 24, marginBottom: 20 },
@@ -184,8 +184,8 @@ const st = StyleSheet.create({
   playIcon: { fontSize: 28, color: '#000' },
   speedRow: { flexDirection: 'row', justifyContent: 'center', gap: 8 },
   speedChip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
-  speedChipActive: { backgroundColor: '#00E5FF22', borderColor: '#00E5FF' },
+  speedChipActive: { backgroundColor: '#4A9FFF22', borderColor: '#4A9FFF' },
   speedTxt: { color: 'rgba(255,255,255,0.5)', fontSize: 13, fontWeight: '700' },
-  speedTxtActive: { color: '#00E5FF' },
+  speedTxtActive: { color: '#4A9FFF' },
   infoCard: { marginTop: 16, alignItems: 'center' },
 });

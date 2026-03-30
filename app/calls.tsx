@@ -17,7 +17,7 @@ import {
   Text, TouchableOpacity,
   View,
 } from 'react-native';
-import BottomNav from './chats';
+import { BottomNav } from './chats';
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Types
@@ -70,8 +70,8 @@ function statusColor(status: CallStatus): string {
   switch (status) {
     case 'missed':   return '#FF4D6D';
     case 'declined': return '#FF4D6D';
-    case 'incoming': return '#00D4AA';
-    case 'outgoing': return '#64748B';
+    case 'incoming': return '#10B981';
+    case 'outgoing': return '#6B7280';
   }
 }
 
@@ -114,7 +114,6 @@ export default function CallsScreen() {
         setCalls(data);
         setLoading(false);
       }, err => {
-        console.error('[Calls]', err);
         setLoading(false);
       });
 
@@ -201,7 +200,7 @@ export default function CallsScreen() {
         <TouchableOpacity
           style={[
             styles.callBackBtn,
-            { borderColor: item.callType === 'video' ? '#9B5DE5' : '#00D4AA' },
+            { borderColor: item.callType === 'video' ? '#9B5DE5' : '#10B981' },
           ]}
           onPress={() => callBack(item)}
         >
@@ -248,7 +247,7 @@ export default function CallsScreen() {
 
       {loading ? (
         <View style={styles.loadingWrap}>
-          <ActivityIndicator color="#00D4AA" />
+          <ActivityIndicator color="#10B981" />
         </View>
       ) : (
         <FlatList
@@ -286,23 +285,23 @@ const styles = StyleSheet.create({
   header: {
     backgroundColor: '#ffffff',
     paddingTop: 48, paddingBottom: 12, paddingHorizontal: 16,
-    borderBottomWidth: 0.5, borderBottomColor: '#1E293B',
+    borderBottomWidth: 0.5, borderBottomColor: '#E5E7EB',
   },
   headerTitle:  { fontSize: 20, fontWeight: 'bold', color: '#000000' },
-  headerSub:    { fontSize: 9, color: '#00D4AA', marginTop: 2, fontWeight: 'bold' },
+  headerSub:    { fontSize: 9, color: '#10B981', marginTop: 2, fontWeight: 'bold' },
 
   // Tabs
   tabs: {
     flexDirection: 'row',
-    borderBottomWidth: 0.5, borderBottomColor: '#1E293B',
+    borderBottomWidth: 0.5, borderBottomColor: '#E5E7EB',
   },
   tab: {
     flex: 1, alignItems: 'center', paddingVertical: 12,
     flexDirection: 'row', justifyContent: 'center', gap: 5,
   },
-  tabActive:        { borderBottomWidth: 2, borderBottomColor: '#00D4AA' },
-  tabText:          { fontSize: 13, color: '#64748B' },
-  tabTextActive:    { color: '#00D4AA', fontWeight: 'bold' },
+  tabActive:        { borderBottomWidth: 2, borderBottomColor: '#10B981' },
+  tabText:          { fontSize: 13, color: '#6B7280' },
+  tabTextActive:    { color: '#10B981', fontWeight: 'bold' },
   tabBadge: {
     backgroundColor: '#FF4D6D', borderRadius: 8,
     minWidth: 16, height: 16, justifyContent: 'center',
@@ -319,30 +318,30 @@ const styles = StyleSheet.create({
   },
   avatarCircle: {
     width: 48, height: 48, borderRadius: 24,
-    backgroundColor: '#111827',
-    borderWidth: 1.5, borderColor: '#1E293B',
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1.5, borderColor: '#E5E7EB',
     justifyContent: 'center', alignItems: 'center',
   },
-  avatarText:   { fontSize: 14, fontWeight: 'bold', color: '#00D4AA' },
+  avatarText:   { fontSize: 14, fontWeight: 'bold', color: '#10B981' },
   callInfo:     { flex: 1 },
   peerName:     { fontSize: 15, fontWeight: 'bold', color: '#000000', marginBottom: 4 },
   callMeta:     { flexDirection: 'row', alignItems: 'center' },
   callStatus:   { fontSize: 12 },
-  callDuration: { fontSize: 12, color: '#374151' },
+  callDuration: { fontSize: 12, color: '#6B7280' },
   callRight:    { alignItems: 'flex-end', gap: 6 },
-  callTime:     { fontSize: 11, color: '#374151' },
+  callTime:     { fontSize: 11, color: '#6B7280' },
   callBackBtn: {
     width: 34, height: 34, borderRadius: 17,
-    backgroundColor: '#111827', borderWidth: 1,
+    backgroundColor: '#F9FAFB', borderWidth: 1,
     justifyContent: 'center', alignItems: 'center',
   },
   callBackIcon: { fontSize: 16 },
 
   sep: {
-    height: 0.5, backgroundColor: '#111827', marginLeft: 60,
+    height: 0.5, backgroundColor: '#F9FAFB', marginLeft: 60,
   },
   emptyWrap:  { flex: 1, alignItems: 'center', paddingTop: 80, gap: 12 },
   emptyIcon:  { fontSize: 48 },
-  emptyText:  { fontSize: 14, color: '#374151' },
+  emptyText:  { fontSize: 14, color: '#6B7280' },
 });
 

@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/status.tsx
 // Real status screen
 // Screenshot detection ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ fires alert to uploader + logs to Firestore
@@ -340,7 +339,7 @@ function AddStatusModal({
             disabled={loading}
           >
             {loading
-              ? <ActivityIndicator color="#0A0E1A" />
+              ? <ActivityIndicator color="#FFFFFF" />
               : <Text style={addStyles.postBtnText}>Post Status</Text>
             }
           </TouchableOpacity>
@@ -383,7 +382,6 @@ export default function StatusScreen() {
         setStatuses(all.filter(s => s.uid !== uid));
         setLoading(false);
       }, err => {
-        console.error('[Status]', err);
         setLoading(false);
       });
 
@@ -546,47 +544,47 @@ export default function StatusScreen() {
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
 const styles = StyleSheet.create({
-  container:   { flex: 1, backgroundColor: '#0A0E1A' },
+  container:   { flex: 1, backgroundColor: '#FFFFFF' },
   header: {
-    backgroundColor: '#111827',
+    backgroundColor: '#FFFFFF',
     paddingTop: 48, paddingBottom: 12, paddingHorizontal: 16,
-    borderBottomWidth: 0.5, borderBottomColor: '#1E293B',
+    borderBottomWidth: 0.5, borderBottomColor: '#E5E7EB',
   },
-  headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#000000' },
-  headerSub:   { fontSize: 9, color: '#00D4AA', marginTop: 2, fontWeight: 'bold' },
+  headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#1F2937' },
+  headerSub:   { fontSize: 9, color: '#10B981', marginTop: 2, fontWeight: 'bold' },
 
   loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
   listContent: { padding: 14, paddingBottom: 100, flexGrow: 1 },
   sectionLabel: {
-    fontSize: 10, fontWeight: 'bold', color: '#374151',
+    fontSize: 10, fontWeight: 'bold', color: '#6B7280',
     letterSpacing: 0.8, marginBottom: 10,
   },
 
   // My status
   myStatusRow: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: '#111827', borderRadius: 12, padding: 12,
-    borderWidth: 0.5, borderColor: '#1E293B', marginBottom: 4,
+    backgroundColor: '#F9FAFB', borderRadius: 12, padding: 12,
+    borderWidth: 0.5, borderColor: '#E5E7EB', marginBottom: 4,
   },
   myStatusAdd: {
     width: 52, height: 52, borderRadius: 26,
-    backgroundColor: '#1A2235',
-    borderWidth: 2, borderColor: '#1E293B',
+    backgroundColor: '#F3F4F6',
+    borderWidth: 2, borderColor: '#D1D5DB',
     borderStyle: 'dashed',
     justifyContent: 'center', alignItems: 'center',
   },
   myStatusAddPosted: {
-    borderColor: '#00D4AA', borderStyle: 'solid',
-    backgroundColor: '#003328',
+    borderColor: '#10B981', borderStyle: 'solid',
+    backgroundColor: '#D1FAE5',
   },
-  plusIcon:    { fontSize: 24, color: '#64748B' },
+  plusIcon:    { fontSize: 24, color: '#9CA3AF' },
   addMoreBtn: {
-    backgroundColor: '#1A2235', borderRadius: 8,
-    borderWidth: 0.5, borderColor: '#1E293B',
+    backgroundColor: '#F3F4F6', borderRadius: 8,
+    borderWidth: 0.5, borderColor: '#E5E7EB',
     paddingHorizontal: 10, paddingVertical: 5,
   },
-  addMoreText: { fontSize: 11, color: '#00D4AA', fontWeight: 'bold' },
+  addMoreText: { fontSize: 11, color: '#10B981', fontWeight: 'bold' },
 
   // Contact status row
   statusRow: {
@@ -597,108 +595,108 @@ const styles = StyleSheet.create({
     width: 54, height: 54, borderRadius: 27,
     borderWidth: 2.5, justifyContent: 'center', alignItems: 'center',
   },
-  ringUnviewed: { borderColor: '#00D4AA' },
-  ringViewed:   { borderColor: '#374151' },
+  ringUnviewed: { borderColor: '#10B981' },
+  ringViewed:   { borderColor: '#D1D5DB' },
   avatarCircle: {
     width: 46, height: 46, borderRadius: 23,
-    backgroundColor: '#1A2235', justifyContent: 'center', alignItems: 'center',
+    backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center',
   },
-  avatarText:   { fontSize: 14, fontWeight: 'bold', color: '#00D4AA' },
+  avatarText:   { fontSize: 14, fontWeight: 'bold', color: '#4A9FFF' },
   statusInfo:   { flex: 1 },
-  statusName:   { fontSize: 15, fontWeight: 'bold', color: '#000000', marginBottom: 3 },
-  statusMeta:   { fontSize: 11, color: '#64748B' },
+  statusName:   { fontSize: 15, fontWeight: 'bold', color: '#1F2937', marginBottom: 3 },
+  statusMeta:   { fontSize: 11, color: '#6B7280' },
   statusRight:  { alignItems: 'flex-end', gap: 4 },
   screenshotBadge: {
-    backgroundColor: '#FF4D6D22',
-    borderRadius: 6, borderWidth: 0.5, borderColor: '#FF4D6D44',
+    backgroundColor: '#FEE2E2',
+    borderRadius: 6, borderWidth: 0.5, borderColor: '#FECACA',
     paddingHorizontal: 6, paddingVertical: 2,
   },
-  screenshotBadgeText: { fontSize: 10, color: '#FF4D6D' },
-  statusType:   { fontSize: 12, color: '#374151' },
-  sep:          { height: 0.5, backgroundColor: '#111827', marginLeft: 66 },
+  screenshotBadgeText: { fontSize: 10, color: '#EF4444' },
+  statusType:   { fontSize: 12, color: '#6B7280' },
+  sep:          { height: 0.5, backgroundColor: '#F1F3F4', marginLeft: 66 },
 
   emptyWrap:  { flex: 1, alignItems: 'center', paddingTop: 60, gap: 12 },
   emptyIcon:  { fontSize: 52 },
-  emptyText:  { fontSize: 13, color: '#374151', textAlign: 'center', lineHeight: 22 },
+  emptyText:  { fontSize: 13, color: '#6B7280', textAlign: 'center', lineHeight: 22 },
 });
 
 const viewerStyles = StyleSheet.create({
-  container:    { flex: 1, backgroundColor: '#0A0E1A', justifyContent: 'center' },
+  container:    { flex: 1, backgroundColor: '#FFFFFF', justifyContent: 'center' },
   progressTrack: {
     position: 'absolute', top: 48, left: 12, right: 12,
-    height: 3, backgroundColor: '#1E293B', borderRadius: 2,
+    height: 3, backgroundColor: '#E5E7EB', borderRadius: 2,
   },
-  progressFill:  { height: 3, backgroundColor: '#00D4AA', borderRadius: 2 },
+  progressFill:  { height: 3, backgroundColor: '#10B981', borderRadius: 2 },
   header: {
     position: 'absolute', top: 58, left: 12, right: 12,
     flexDirection: 'row', alignItems: 'center', gap: 10,
   },
   avatarCircle: {
     width: 40, height: 40, borderRadius: 20,
-    backgroundColor: '#003328', borderWidth: 1.5, borderColor: '#00D4AA',
+    backgroundColor: '#D1FAE5', borderWidth: 1.5, borderColor: '#10B981',
     justifyContent: 'center', alignItems: 'center',
   },
-  avatarText:   { fontSize: 13, fontWeight: 'bold', color: '#00D4AA' },
-  name:         { fontSize: 15, fontWeight: 'bold', color: '#000000' },
-  time:         { fontSize: 11, color: '#64748B' },
+  avatarText:   { fontSize: 13, fontWeight: 'bold', color: '#10B981' },
+  name:         { fontSize: 15, fontWeight: 'bold', color: '#1F2937' },
+  time:         { fontSize: 11, color: '#6B7280' },
   closeBtn:     { marginLeft: 'auto', padding: 8 },
-  closeBtnText: { fontSize: 20, color: '#000000' },
+  closeBtnText: { fontSize: 20, color: '#1F2937' },
   textContent:  { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
-  textBody:     { fontSize: 24, fontWeight: 'bold', color: '#000000', textAlign: 'center', lineHeight: 34 },
+  textBody:     { fontSize: 24, fontWeight: 'bold', color: '#1F2937', textAlign: 'center', lineHeight: 34 },
   screenshotWarning: {
     position: 'absolute', bottom: 80, alignSelf: 'center',
-    backgroundColor: '#FF4D6D22', borderRadius: 20,
-    borderWidth: 0.5, borderColor: '#FF4D6D44',
+    backgroundColor: '#FEE2E2', borderRadius: 20,
+    borderWidth: 0.5, borderColor: '#FECACA',
     paddingHorizontal: 16, paddingVertical: 6,
   },
-  screenshotText: { fontSize: 11, color: '#FF4D6D' },
+  screenshotText: { fontSize: 11, color: '#EF4444' },
   viewerCount: {
     position: 'absolute', bottom: 40, alignSelf: 'center',
   },
-  viewerCountText: { fontSize: 12, color: '#64748B' },
+  viewerCountText: { fontSize: 12, color: '#6B7280' },
 });
 
 const addStyles = StyleSheet.create({
-  overlay:     { flex: 1, backgroundColor: '#00000088', justifyContent: 'flex-end' },
+  overlay:     { flex: 1, backgroundColor: '#00000044', justifyContent: 'flex-end' },
   panel: {
-    backgroundColor: '#111827',
+    backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 20, borderTopRightRadius: 20,
     padding: 20, paddingBottom: 36,
   },
   handle: {
-    width: 40, height: 4, backgroundColor: '#1E293B',
+    width: 40, height: 4, backgroundColor: '#E5E7EB',
     borderRadius: 2, alignSelf: 'center', marginBottom: 16,
   },
-  title:   { fontSize: 17, fontWeight: 'bold', color: '#000000', textAlign: 'center', marginBottom: 16 },
+  title:   { fontSize: 17, fontWeight: 'bold', color: '#1F2937', textAlign: 'center', marginBottom: 16 },
   typeRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
   typeBtn: {
     flex: 1, paddingVertical: 10, borderRadius: 10,
-    backgroundColor: '#1A2235', borderWidth: 0.5, borderColor: '#1E293B',
+    backgroundColor: '#F3F4F6', borderWidth: 0.5, borderColor: '#E5E7EB',
     alignItems: 'center',
   },
-  typeBtnActive: { backgroundColor: '#003328', borderColor: '#00D4AA' },
-  typeBtnText:   { fontSize: 14, color: '#64748B' },
-  typeBtnTextActive: { color: '#00D4AA', fontWeight: 'bold' },
+  typeBtnActive: { backgroundColor: '#D1FAE5', borderColor: '#10B981' },
+  typeBtnText:   { fontSize: 14, color: '#6B7280' },
+  typeBtnTextActive: { color: '#10B981', fontWeight: 'bold' },
   preview: {
     height: 160, borderRadius: 12, justifyContent: 'center',
     alignItems: 'center', marginBottom: 12,
   },
   previewInput: {
-    fontSize: 20, fontWeight: 'bold', color: '#000000',
+    fontSize: 20, fontWeight: 'bold', color: '#1F2937',
     textAlign: 'center', padding: 16, width: '100%',
   },
   colorRow:      { flexDirection: 'row', gap: 10, justifyContent: 'center', marginBottom: 16 },
   colorDot: {
     width: 28, height: 28, borderRadius: 14,
-    borderWidth: 1.5, borderColor: '#1E293B',
+    borderWidth: 1.5, borderColor: '#E5E7EB',
   },
-  colorDotActive: { borderColor: '#00D4AA', transform: [{ scale: 1.2 }] },
-  expireNote:    { fontSize: 11, color: '#374151', textAlign: 'center', marginBottom: 4 },
-  screenshotNote:{ fontSize: 11, color: '#374151', textAlign: 'center', marginBottom: 16 },
+  colorDotActive: { borderColor: '#10B981', transform: [{ scale: 1.2 }] },
+  expireNote:    { fontSize: 11, color: '#6B7280', textAlign: 'center', marginBottom: 4 },
+  screenshotNote:{ fontSize: 11, color: '#6B7280', textAlign: 'center', marginBottom: 16 },
   postBtn: {
-    backgroundColor: '#00D4AA', borderRadius: 10,
+    backgroundColor: '#10B981', borderRadius: 10,
     paddingVertical: 14, alignItems: 'center',
   },
-  postBtnDim:    { backgroundColor: '#003328' },
-  postBtnText:   { color: '#0A0E1A', fontWeight: 'bold', fontSize: 16 },
+  postBtnDim:    { backgroundColor: '#D1FAE5' },
+  postBtnText:   { color: '#FFFFFF', fontWeight: 'bold', fontSize: 16 },
 });

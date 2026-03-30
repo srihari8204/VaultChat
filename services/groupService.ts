@@ -49,9 +49,9 @@ export async function createGroup(
     lastMsg: `${memberNames[myUid] ?? 'Someone'} created the group`,
     lastTime: firestore.FieldValue.serverTimestamp(),
     unread,
-    pinned: false,
-    archived: false,
-    muted: false,
+    pinned_by: {},
+    archived_by: {},
+    muted_by: {},
     disappearingTimer: 0,
     createdAt: firestore.FieldValue.serverTimestamp(),
   });
@@ -82,13 +82,19 @@ export async function pinMessage(chatId: string, messageId: string) {
 }
 
 export async function muteChat(chatId: string, muted: boolean) {
-  await firestore().collection('chats').doc(chatId).update({ muted });
+  const uid = auth().currentUser?.uid;
+  if (!uid) return;
+  await firestore().collection('chats').doc(chatId).update({ [`muted_by.${uid}`]: muted });
 }
 
 export async function archiveChat(chatId: string, archived: boolean) {
-  await firestore().collection('chats').doc(chatId).update({ archived });
+  const uid = auth().currentUser?.uid;
+  if (!uid) return;
+  await firestore().collection('chats').doc(chatId).update({ [`archived_by.${uid}`]: archived });
 }
 
 export async function pinChat(chatId: string, pinned: boolean) {
-  await firestore().collection('chats').doc(chatId).update({ pinned });
+  const uid = auth().currentUser?.uid;
+  if (!uid) return;
+  await firestore().collection('chats').doc(chatId).update({ [`pinned_by.${uid}`]: pinned });
 }

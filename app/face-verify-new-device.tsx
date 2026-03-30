@@ -7,7 +7,7 @@ import { verifyPIN } from "../services/securityService";
 import { trustCurrentDevice } from "../services/deviceService";
 import { generateMockFaceVector } from "../services/faceService";
 
-const SERVER_URL = "http://192.168.29.58:3001";
+import { SERVER_URL } from "../constants/server";
 
 type Stage = "intro" | "pin" | "scanning" | "success" | "failed" | "locked";
 
@@ -102,7 +102,7 @@ export default function FaceVerifyNewDeviceScreen() {
   }[stage];
 
   return (
-    <LinearGradient colors={["#010812","#020E1A","#010812"]} style={{flex:1}}>
+    <LinearGradient colors={["#FFFFFF","#020E1A","#FFFFFF"]} style={{flex:1}}>
       <View style={S.container}>
 
         {/* Header */}

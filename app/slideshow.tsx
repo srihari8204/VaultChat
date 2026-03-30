@@ -156,7 +156,7 @@ export default function SlideshowScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity onPress={toggleAutoplay} style={[st.autoBtn, autoplay && st.autoBtnActive]}>
-              <Text style={{ color: autoplay ? '#000' : '#00E5FF', fontWeight: '800', fontSize: 13 }}>
+              <Text style={{ color: autoplay ? '#000' : '#4A9FFF', fontWeight: '800', fontSize: 13 }}>
                 {autoplay ? '⏸ Stop' : '▶ Slideshow'}
               </Text>
             </TouchableOpacity>
@@ -187,13 +187,13 @@ const st = StyleSheet.create({
   counter: { color: '#fff', fontSize: 16, fontWeight: '700' },
   bottomBar: { position: 'absolute', bottom: 0, left: 0, right: 0, paddingBottom: 36, backgroundColor: 'rgba(0,0,0,0.7)' },
   thumb: { width: 50, height: 50, borderRadius: 8, borderWidth: 2, borderColor: 'transparent' },
-  thumbActive: { borderColor: '#00E5FF' },
+  thumbActive: { borderColor: '#4A9FFF' },
   controlRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20 },
   navBtn: { paddingHorizontal: 16, paddingVertical: 10 },
   navTxt: { color: '#fff', fontSize: 14, fontWeight: '600' },
-  autoBtn: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20, borderWidth: 1, borderColor: '#00E5FF', backgroundColor: 'rgba(0,229,255,0.1)' },
-  autoBtnActive: { backgroundColor: '#00E5FF', borderColor: '#00E5FF' },
+  autoBtn: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20, borderWidth: 1, borderColor: '#4A9FFF', backgroundColor: 'rgba(0,229,255,0.1)' },
+  autoBtnActive: { backgroundColor: '#4A9FFF', borderColor: '#4A9FFF' },
   dots: { position: 'absolute', bottom: 130, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', gap: 6 },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.3)' },
-  dotActive: { backgroundColor: '#00E5FF', width: 18, borderRadius: 3 },
+  dotActive: { backgroundColor: '#4A9FFF', width: 18, borderRadius: 3 },
 });

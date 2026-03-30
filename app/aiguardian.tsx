@@ -239,7 +239,7 @@ export default function AIGuardianScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>💡 HOW AI GUARDIAN WORKS</Text>
           <LinearGradient
-            colors={['#0A1628', '#0D1E3A']}
+            colors={['#F9FAFB', '#0D1E3A']}
             style={styles.howCard}
           >
             {[
@@ -365,7 +365,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1, marginBottom: 10, marginLeft: 4,
   },
   card: {
-    backgroundColor: '#0A1628', borderRadius: 16,
+    backgroundColor: '#F9FAFB', borderRadius: 16,
     borderWidth: 1, borderColor: '#0D1E3A', overflow: 'hidden',
   },
   divider: { height: 1, backgroundColor: '#0D1E3A', marginLeft: 56 },

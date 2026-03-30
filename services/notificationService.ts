@@ -39,7 +39,6 @@ Notifications.setNotificationHandler({
 export async function registerForPushNotifications(): Promise<string | null> {
   // Push notifications only work on real physical devices
   if (!Device.isDevice) {
-    console.log('[Push] Skipping â€” not a physical device');
     return null;
   }
 
@@ -53,7 +52,6 @@ export async function registerForPushNotifications(): Promise<string | null> {
   }
 
   if (finalStatus !== 'granted') {
-    console.warn('[Push] Permission denied by user');
     return null;
   }
 
@@ -85,9 +83,7 @@ export async function registerForPushNotifications(): Promise<string | null> {
       projectId: '144570a3-de88-48f0-b7e1-ecda63618199', // EAS project ID
     });
     token = response.data;
-    console.log('[Push] Token registered:', token);
   } catch (e) {
-    console.error('[Push] Failed to get token:', e);
     return null;
   }
 
@@ -153,7 +149,6 @@ export async function sendPushToUser(
       .filter(Boolean) as string[];
 
     if (tokens.length === 0) {
-      console.log('[Push] No tokens found for recipients');
       return;
     }
 
@@ -190,7 +185,6 @@ export async function sendPushToUser(
         ? result.data.filter((r: any) => r.status === 'error')
         : [];
       if (errors.length > 0) {
-        console.warn('[Push] Some tokens failed:', errors);
         // Clean up expired tokens from Firestore
         for (const err of errors) {
           if (err.details?.error === 'DeviceNotRegistered') {
@@ -201,7 +195,6 @@ export async function sendPushToUser(
     }
   } catch (e) {
     // Push failure must NEVER block the send flow
-    console.warn('[Push] sendPushToUser failed (non-critical):', e);
   }
 }
 
@@ -247,7 +240,6 @@ export async function sendCallNotification(
       }))),
     });
   } catch (e) {
-    console.warn('[Push] sendCallNotification failed:', e);
   }
 }
 
@@ -261,7 +253,6 @@ export function setupNotificationListeners(router: Router): () => void {
   // Listener A â€” notification received while app is OPEN (foreground)
   const foregroundSub = Notifications.addNotificationReceivedListener(notification => {
     const data = notification.request.content.data;
-    console.log('[Push] Foreground notification:', data);
     // We don't navigate here â€” user is already in the app
     // The Firestore listener in chat.tsx will update messages automatically
   });
@@ -364,8 +355,6 @@ async function removeExpiredToken(expiredToken: string): Promise<void> {
         pushToken: firestore.FieldValue.delete(),
       });
     }
-    console.log('[Push] Removed expired token');
   } catch (e) {
-    console.warn('[Push] Failed to remove expired token:', e);
   }
 }

@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/decoy-chats.tsx — Ghost Protocol Decoy Chat List
 // Looks IDENTICAL to real chats.tsx but shows fake data
 // No visual indicator of duress mode — pixel-perfect clone
@@ -12,7 +11,7 @@ import { useRouter } from 'expo-router';
 import { generateDecoyChats } from '../lib/ghostProtocol';
 
 const C = {
-  bg: '#020B18', primary: '#4A9FFF', accent: '#10B981',
+  bg: '#FFFFFF', primary: '#4A9FFF', accent: '#10B981',
   dim: 'rgba(255,255,255,0.45)', card: 'rgba(10,22,40,0.88)',
 };
 
@@ -55,7 +54,7 @@ export default function DecoyChatList() {
             {item.unread > 0 && (
               <View style={s.badge}><Text style={s.badgeTxt}>{item.unread}</Text></View>
             )}
-            {item.muted && <Text style={{ color: '#555', fontSize: 12 }}>{"\uD83D\uDD15"}</Text>}
+            {item.muted && <Text style={{ color: '#6B7280', fontSize: 12 }}>{"\uD83D\uDD15"}</Text>}
           </View>
         </View>
       </TouchableOpacity>
@@ -96,7 +95,7 @@ export default function DecoyChatList() {
         <TextInput
           style={s.searchInput}
           placeholder="Search chats..."
-          placeholderTextColor="#444"
+          placeholderTextColor="#9CA3AF"
           value={search}
           onChangeText={setSearch}
         />
@@ -128,25 +127,25 @@ const s = StyleSheet.create({
   title: { color: '#fff', fontSize: 24, fontWeight: '900', letterSpacing: -0.5 },
   headerRight: { flexDirection: 'row', alignItems: 'center' },
   filters: { flexDirection: 'row', paddingHorizontal: 16, gap: 8, marginBottom: 8 },
-  filterBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, backgroundColor: '#0A1628' },
+  filterBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, backgroundColor: '#F9FAFB' },
   filterActive: { backgroundColor: '#4A9FFF' },
-  filterTxt: { color: '#888', fontSize: 13, fontWeight: '600' },
+  filterTxt: { color: '#6B7280', fontSize: 13, fontWeight: '600' },
   filterActiveTxt: { color: '#000' },
   searchBar: { paddingHorizontal: 16, marginBottom: 8 },
-  searchInput: { backgroundColor: '#0A1628', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, color: '#fff', fontSize: 14, borderWidth: 1, borderColor: '#111' },
+  searchInput: { backgroundColor: '#F9FAFB', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, color: '#fff', fontSize: 14, borderWidth: 1, borderColor: '#E5E7EB' },
   chatRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12 },
   avatar: { width: 50, height: 50, borderRadius: 25, justifyContent: 'center', alignItems: 'center' },
   avatarTxt: { color: '#fff', fontWeight: '900', fontSize: 17 },
   chatInfo: { flex: 1, marginLeft: 12 },
   chatTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  chatName: { color: '#E0E0F0', fontSize: 15, fontWeight: '700', flex: 1 },
-  chatTime: { color: '#555', fontSize: 11 },
+  chatName: { color: '#1F2937', fontSize: 15, fontWeight: '700', flex: 1 },
+  chatTime: { color: '#6B7280', fontSize: 11 },
   chatBottom: { flexDirection: 'row', alignItems: 'center', marginTop: 3 },
-  chatMsg: { color: '#666', fontSize: 13, flex: 1 },
+  chatMsg: { color: '#9CA3AF', fontSize: 13, flex: 1 },
   badge: { backgroundColor: '#10B981', borderRadius: 10, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 6, marginLeft: 8 },
   badgeTxt: { color: '#fff', fontSize: 11, fontWeight: '800' },
-  tabBar: { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row', backgroundColor: '#070D18', borderTopWidth: 1, borderTopColor: '#111', paddingVertical: 8, paddingBottom: 24 },
+  tabBar: { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row', backgroundColor: '#070D18', borderTopWidth: 1, borderTopColor: '#E5E7EB', paddingVertical: 8, paddingBottom: 24 },
   tab: { flex: 1, alignItems: 'center', gap: 2 },
-  tabIcon: { fontSize: 20, color: '#555' },
-  tabLabel: { fontSize: 10, color: '#555', fontWeight: '600' },
+  tabIcon: { fontSize: 20, color: '#6B7280' },
+  tabLabel: { fontSize: 10, color: '#6B7280', fontWeight: '600' },
 });

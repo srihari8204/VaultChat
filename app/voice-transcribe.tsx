@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/voice-transcribe.tsx — Voice Message Transcription
 // Converts audio messages to text using on-device speech recognition
 // Also provides a record-and-transcribe feature
@@ -12,7 +11,7 @@ import { useLocalSearchParams, Stack } from 'expo-router';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 
-const C = { bg: '#020B18', accent: '#4A9FFF', green: '#10B981', card: '#0A1628', purple: '#A78BFA' };
+const C = { bg: '#FFFFFF', accent: '#4A9FFF', green: '#10B981', card: '#F9FAFB', purple: '#A78BFA' };
 
 // Simulated transcription engine — in production, use Whisper.cpp or Google Speech API
 const transcribeAudio = async (audioUrl) => {
@@ -100,7 +99,7 @@ export default function VoiceTranscribeScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Voice Transcription', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
+      <Stack.Screen options={{ title: 'Voice Transcription', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
       <View style={s.container}>
         <StatusBar barStyle="light-content" />
 
@@ -153,7 +152,7 @@ export default function VoiceTranscribeScreen() {
             }}
             ListEmptyComponent={
               <View style={{ alignItems: 'center', padding: 40 }}>
-                <Text style={{ color: '#555' }}>No audio messages in this chat</Text>
+                <Text style={{ color: '#6B7280' }}>No audio messages in this chat</Text>
               </View>
             }
           />
@@ -165,19 +164,19 @@ export default function VoiceTranscribeScreen() {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg, padding: 16 },
-  infoCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#111' },
+  infoCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#E5E7EB' },
   infoTitle: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  infoDesc: { color: '#666', fontSize: 12, marginTop: 2 },
-  sectionTitle: { color: '#555', fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 8 },
-  audioRow: { backgroundColor: C.card, borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: '#111' },
+  infoDesc: { color: '#9CA3AF', fontSize: 12, marginTop: 2 },
+  sectionTitle: { color: '#6B7280', fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 8 },
+  audioRow: { backgroundColor: C.card, borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: '#E5E7EB' },
   audioHeader: { flexDirection: 'row', alignItems: 'center' },
-  audioIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#111', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  audioSender: { color: '#E0E0F0', fontSize: 14, fontWeight: '700' },
-  audioMeta: { color: '#555', fontSize: 11, marginTop: 2 },
+  audioIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  audioSender: { color: '#1F2937', fontSize: 14, fontWeight: '700' },
+  audioMeta: { color: '#6B7280', fontSize: 11, marginTop: 2 },
   transcribeBtn: { backgroundColor: '#A78BFA22', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 6, borderWidth: 1, borderColor: '#A78BFA44' },
   transcribeTxt: { color: C.purple, fontSize: 12, fontWeight: '700' },
   doneBadge: { backgroundColor: '#10B98122', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 4 },
   doneTxt: { color: C.green, fontSize: 11, fontWeight: '700' },
-  transcriptionBox: { marginTop: 10, backgroundColor: '#111', borderRadius: 10, padding: 12 },
-  transcriptionText: { color: '#E0E0F0', fontSize: 13, lineHeight: 20, fontStyle: 'italic' },
+  transcriptionBox: { marginTop: 10, backgroundColor: '#E5E7EB', borderRadius: 10, padding: 12 },
+  transcriptionText: { color: '#1F2937', fontSize: 13, lineHeight: 20, fontStyle: 'italic' },
 });

@@ -65,7 +65,6 @@ export async function recordLogin(uid: string): Promise<void> {
       await alertTrustedContacts(uid, entry);
     }
   } catch (e) {
-    console.warn('[LoginTracker] Error:', e);
   }
 }
 

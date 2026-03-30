@@ -7,7 +7,7 @@ import { View, Text, TouchableOpacity, StyleSheet, Alert, Animated, ScrollView, 
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as Location from 'expo-location';
 
-const C = { bg:'#030912',card:'#0D1B2E',border:'rgba(255,255,255,0.09)',cyan:'#00D4AA',red:'#EF4444',blue:'#4A9FFF',sub:'rgba(255,255,255,0.45)',green:'#10B981' };
+const C = { bg:'#030912',card:'#0D1B2E',border:'rgba(255,255,255,0.09)',cyan:'#10B981',red:'#EF4444',blue:'#4A9FFF',sub:'rgba(255,255,255,0.45)',green:'#10B981' };
 const DURATIONS = [{label:'15 min',seconds:900},{label:'1 hour',seconds:3600},{label:'8 hours',seconds:28800}];
 
 function MapPreview({lat,lng,label,encrypted,live}:{lat:number;lng:number;label:string;encrypted:boolean;live:boolean}) {
@@ -42,7 +42,7 @@ const mp = StyleSheet.create({
   labelBg:{backgroundColor:'rgba(0,0,0,0.7)',borderRadius:10,paddingHorizontal:12,paddingVertical:5,maxWidth:240},
   pinLabel:{color:'#fff',fontSize:12,fontWeight:'800',textAlign:'center'},
   encBadge:{backgroundColor:'rgba(0,212,170,0.2)',borderRadius:8,paddingHorizontal:8,paddingVertical:4,borderWidth:1,borderColor:'rgba(0,212,170,0.4)'},
-  encText:{color:'#00D4AA',fontSize:10,fontWeight:'800'},
+  encText:{color:'#10B981',fontSize:10,fontWeight:'800'},
   coordBox:{position:'absolute',bottom:8,left:10,backgroundColor:'rgba(0,0,0,0.6)',borderRadius:6,paddingHorizontal:8,paddingVertical:4},
   coordText:{color:'rgba(255,255,255,0.6)',fontSize:10,fontWeight:'700'},
   openBtn:{backgroundColor:'rgba(74,159,255,0.08)',padding:13,alignItems:'center',borderTopWidth:1,borderTopColor:'rgba(255,255,255,0.06)'},
@@ -244,7 +244,7 @@ const s = StyleSheet.create({
   headerTitle:{color:'#fff',fontSize:17,fontWeight:'900'},
   headerSub:{color:'rgba(255,255,255,0.45)',fontSize:12,marginTop:1},
   encBadge:{backgroundColor:'rgba(0,212,170,0.12)',borderRadius:10,paddingHorizontal:10,paddingVertical:5,borderWidth:1,borderColor:'rgba(0,212,170,0.35)'},
-  encText:{color:'#00D4AA',fontSize:10,fontWeight:'800'},
+  encText:{color:'#10B981',fontSize:10,fontWeight:'800'},
   scroll:{padding:16,paddingBottom:52},
   liveBanner:{flexDirection:'row',alignItems:'center',gap:12,backgroundColor:'rgba(239,68,68,0.12)',borderRadius:14,padding:14,marginBottom:16,borderWidth:1,borderColor:'rgba(239,68,68,0.35)'},
   liveDot:{width:12,height:12,borderRadius:6,backgroundColor:'#EF4444'},
@@ -257,7 +257,7 @@ const s = StyleSheet.create({
   permBtn:{backgroundColor:'#4A9FFF',borderRadius:14,paddingHorizontal:28,paddingVertical:14},
   card:{backgroundColor:'#0D1B2E',borderRadius:16,padding:16,marginBottom:14,borderWidth:1,borderColor:'rgba(255,255,255,0.09)'},
   d2deCard:{backgroundColor:'rgba(0,212,170,0.07)',borderRadius:14,padding:14,marginBottom:14,borderWidth:1,borderColor:'rgba(0,212,170,0.22)'},
-  d2deTitle:{color:'#00D4AA',fontSize:14,fontWeight:'800',marginBottom:6},
+  d2deTitle:{color:'#10B981',fontSize:14,fontWeight:'800',marginBottom:6},
   d2deSub:{color:'rgba(0,212,170,0.7)',fontSize:12,lineHeight:19},
   row:{flexDirection:'row',alignItems:'flex-start',gap:12},
   ico:{fontSize:20,marginTop:2},

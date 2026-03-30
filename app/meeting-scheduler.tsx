@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/meeting-scheduler.tsx — Meeting Scheduler with Natural Language Date Parsing
 // Stores meetings in AsyncStorage under 'vc_meetings'
 // Supports: "tomorrow at 3pm", "next Monday 10am", "Friday 2:30pm", etc.
@@ -16,8 +15,8 @@ import { Ionicons } from '@expo/vector-icons';
 
 // ── Theme ────────────────────────────────────────────────────────
 const C = {
-  bg: '#020B18',
-  card: '#0A1628',
+  bg: '#FFFFFF',
+  card: '#F9FAFB',
   cardBorder: '#1A2744',
   accent: '#4A9FFF',
   purple: '#7C3AED',
@@ -392,7 +391,6 @@ export default function MeetingSchedulerScreen() {
         setMeetings(all);
       }
     } catch (e) {
-      console.warn('[MeetingScheduler] Load error:', e);
     }
     setLoading(false);
   };

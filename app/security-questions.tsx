@@ -24,7 +24,7 @@ export default function SecurityQuestionsScreen() {
 
   return (
     <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==="ios"?"padding":undefined}>
-      <LinearGradient colors={["#010812","#020E1A","#010812"]} style={StyleSheet.absoluteFillObject}/>
+      <LinearGradient colors={["#FFFFFF","#020E1A","#FFFFFF"]} style={StyleSheet.absoluteFillObject}/>
       <ScrollView contentContainerStyle={S.scroll} keyboardShouldPersistTaps="handled">
         <View style={S.header}>
           <View style={S.badge}><Text style={{fontSize:36}}>🛡️</Text></View>
@@ -79,7 +79,7 @@ const S = StyleSheet.create({
   qNum:     { color:"#4A9FFF",fontSize:12,fontWeight:"700",marginBottom:6,letterSpacing:1 },
   qSel:     { flexDirection:"row",justifyContent:"space-between",alignItems:"center",backgroundColor:"rgba(255,255,255,0.05)",borderWidth:1,borderColor:"rgba(255,255,255,0.1)",borderRadius:12,padding:12,marginBottom:6 },
   qSelTxt:  { flex:1,color:"#fff",fontSize:13,lineHeight:18 },
-  drop:     { backgroundColor:"#0D1117",borderWidth:1,borderColor:"rgba(74,159,255,0.2)",borderRadius:12,marginBottom:6,maxHeight:260,overflow:"hidden" },
+  drop:     { backgroundColor:"#FFFFFF",borderWidth:1,borderColor:"rgba(74,159,255,0.2)",borderRadius:12,marginBottom:6,maxHeight:260,overflow:"hidden" },
   dropItem: { padding:12,borderBottomWidth:1,borderBottomColor:"rgba(255,255,255,0.05)" },
   dropActive:{ backgroundColor:"rgba(74,159,255,0.12)" },
   ans:      { backgroundColor:"rgba(255,255,255,0.05)",borderWidth:1,borderColor:"rgba(255,255,255,0.1)",borderRadius:12,padding:14,color:"#fff",fontSize:15 },

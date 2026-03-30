@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/login-history.tsx — Login History & Device Management
 // Shows all login sessions with device info, location, time
 // Can revoke sessions remotely
@@ -13,7 +12,7 @@ import { Stack } from 'expo-router';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 
-const C = { bg: '#020B18', accent: '#4A9FFF', danger: '#FF3C6E', card: '#0A1628', green: '#10B981' };
+const C = { bg: '#FFFFFF', accent: '#4A9FFF', danger: '#FF3C6E', card: '#F9FAFB', green: '#10B981' };
 
 export default function LoginHistoryScreen() {
   const myUid = auth().currentUser?.uid || '';
@@ -75,7 +74,7 @@ export default function LoginHistoryScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Login History', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
+      <Stack.Screen options={{ title: 'Login History', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
       <View style={s.container}>
         <StatusBar barStyle="light-content" />
 
@@ -122,7 +121,7 @@ export default function LoginHistoryScreen() {
             }}
             ListEmptyComponent={
               <View style={{ alignItems: 'center', paddingVertical: 40 }}>
-                <Text style={{ color: '#555' }}>No login history yet</Text>
+                <Text style={{ color: '#6B7280' }}>No login history yet</Text>
               </View>
             }
           />
@@ -134,16 +133,16 @@ export default function LoginHistoryScreen() {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg, padding: 16 },
-  summary: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#111' },
+  summary: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#E5E7EB' },
   summaryTitle: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  summaryDesc: { color: '#666', fontSize: 12, marginTop: 2 },
-  sessionRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: '#111' },
-  sessionIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#111', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  deviceName: { color: '#E0E0F0', fontSize: 14, fontWeight: '700' },
-  deviceInfo: { color: '#666', fontSize: 11, marginTop: 2 },
-  loginTime: { color: '#555', fontSize: 11, marginTop: 1 },
+  summaryDesc: { color: '#9CA3AF', fontSize: 12, marginTop: 2 },
+  sessionRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: '#E5E7EB' },
+  sessionIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  deviceName: { color: '#1F2937', fontSize: 14, fontWeight: '700' },
+  deviceInfo: { color: '#9CA3AF', fontSize: 11, marginTop: 2 },
+  loginTime: { color: '#6B7280', fontSize: 11, marginTop: 1 },
   location: { color: '#4A9FFF', fontSize: 11, marginTop: 2 },
-  ipText: { color: '#444', fontSize: 10, marginTop: 1, fontFamily: 'monospace' },
+  ipText: { color: '#9CA3AF', fontSize: 10, marginTop: 1, fontFamily: 'monospace' },
   currentBadge: { backgroundColor: '#10B98122', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
   currentTxt: { color: '#10B981', fontSize: 10, fontWeight: '800' },
   revokeBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: '#FF3C6E15', borderWidth: 1, borderColor: '#FF3C6E33' },

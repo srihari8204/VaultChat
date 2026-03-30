@@ -20,7 +20,6 @@ class StealthMode {
     if (this.active) return;
     this.active = true;
     await AsyncStorage.setItem('stealthActive', 'true');
-    console.log('[StealthMode] ACTIVATED:', reason);
     this.onActivateCbs.forEach(cb => { try { cb(); } catch {} });
   }
 
@@ -28,7 +27,6 @@ class StealthMode {
   async deactivate() {
     this.active = false;
     await AsyncStorage.removeItem('stealthActive');
-    console.log('[StealthMode] Deactivated');
     this.onDeactivateCbs.forEach(cb => { try { cb(); } catch {} });
   }
 

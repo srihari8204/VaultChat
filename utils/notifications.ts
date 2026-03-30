@@ -21,7 +21,6 @@ Notifications.setNotificationHandler({
 // -- Request permission --------------------------------------------------------
 export const requestNotificationPermission = async (): Promise<boolean> => {
   if (!Device.isDevice) {
-    console.warn('Notifications only work on physical device or emulator');
     return false;
   }
 
@@ -63,7 +62,6 @@ export const getPushToken = async (): Promise<string | null> => {
     const token = await Notifications.getExpoPushTokenAsync();
     return token.data;
   } catch (e) {
-    console.error('Push token error:', e);
     return null;
   }
 };

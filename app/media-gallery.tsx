@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/media-gallery.tsx — Media Gallery per Chat
 // Shows all photos, videos, files shared in a conversation
 // Tab view: Photos | Videos | Files | Links
@@ -14,7 +13,7 @@ import firestore from '@react-native-firebase/firestore';
 
 const { width: SW } = Dimensions.get('window');
 const TILE = (SW - 48) / 3;
-const C = { bg: '#020B18', accent: '#4A9FFF', card: '#0A1628' };
+const C = { bg: '#FFFFFF', accent: '#4A9FFF', card: '#F9FAFB' };
 
 type TabId = 'photos' | 'videos' | 'files' | 'links';
 
@@ -62,9 +61,9 @@ export default function MediaGalleryScreen() {
 
   const renderVideo = ({ item }) => (
     <TouchableOpacity style={s.tile} onPress={() => Linking.openURL(item.mediaUrl).catch(() => {})}>
-      <View style={[s.tileImg, { backgroundColor: '#111', justifyContent: 'center', alignItems: 'center' }]}>
+      <View style={[s.tileImg, { backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center' }]}>
         <Text style={{ fontSize: 28 }}>{"\u25B6\uFE0F"}</Text>
-        <Text style={{ color: '#888', fontSize: 10, marginTop: 4 }}>{item.filename || 'Video'}</Text>
+        <Text style={{ color: '#6B7280', fontSize: 10, marginTop: 4 }}>{item.filename || 'Video'}</Text>
       </View>
     </TouchableOpacity>
   );
@@ -104,7 +103,7 @@ export default function MediaGalleryScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: (peerName as string || 'Chat') + ' Media', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
+      <Stack.Screen options={{ title: (peerName as string || 'Chat') + ' Media', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
       <View style={s.container}>
         <StatusBar barStyle="light-content" />
         <View style={s.tabs}>
@@ -137,22 +136,22 @@ export default function MediaGalleryScreen() {
 
 const Empty = ({ label }: { label: string }) => (
   <View style={{ alignItems: 'center', paddingVertical: 60 }}>
-    <Text style={{ color: '#555', fontSize: 14 }}>{label}</Text>
+    <Text style={{ color: '#6B7280', fontSize: 14 }}>{label}</Text>
   </View>
 );
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   tabs: { flexDirection: 'row', paddingHorizontal: 12, paddingTop: 8, gap: 6 },
-  tab: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: '#0A1628' },
+  tab: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: '#F9FAFB' },
   tabActive: { backgroundColor: C.accent },
-  tabTxt: { color: '#888', fontSize: 12, fontWeight: '700' },
+  tabTxt: { color: '#6B7280', fontSize: 12, fontWeight: '700' },
   tabTxtActive: { color: '#000' },
-  tabCount: { color: '#555', fontSize: 10, marginTop: 2 },
+  tabCount: { color: '#6B7280', fontSize: 10, marginTop: 2 },
   tile: { width: TILE, height: TILE, margin: 4, borderRadius: 8, overflow: 'hidden' },
-  tileImg: { width: '100%', height: '100%', backgroundColor: '#111' },
-  fileRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 12, marginBottom: 6, borderWidth: 1, borderColor: '#111' },
-  fileIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#111', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  fileName: { color: '#E0E0F0', fontSize: 13, fontWeight: '600' },
-  fileDate: { color: '#555', fontSize: 11, marginTop: 2 },
+  tileImg: { width: '100%', height: '100%', backgroundColor: '#E5E7EB' },
+  fileRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 12, marginBottom: 6, borderWidth: 1, borderColor: '#E5E7EB' },
+  fileIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  fileName: { color: '#1F2937', fontSize: 13, fontWeight: '600' },
+  fileDate: { color: '#6B7280', fontSize: 11, marginTop: 2 },
 });

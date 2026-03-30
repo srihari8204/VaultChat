@@ -20,11 +20,11 @@ import {
   VaultContact,
 } from '../lib/contactSync';
 
-const SERVER = 'https://vaultchat.onrender.com';
+import { SERVER_URL as SERVER } from '../constants/server';
 const C = {
-  bg:'#020B18', primary:'#4A9FFF', accent:'#10B981',
-  dim:'rgba(255,255,255,0.45)', faint:'rgba(255,255,255,0.12)',
-  card:'rgba(10,22,40,0.88)', border:'rgba(74,159,255,0.12)',
+  bg:'#FFFFFF', primary:'#4A9FFF', accent:'#10B981',
+  dim:'#6B7280', faint:'#D1D5DB',
+  card:'#F9FAFB', border:'#E5E7EB',
 };
 const GRADS = [
   ['#1D4ED8','#7C3AED'],['#059669','#0EA5E9'],['#DC2626','#F97316'],
@@ -37,10 +37,10 @@ function Avatar({ name, uri, size=48, show }: {
   if (!show) {
     return (
       <View style={{width:size,height:size,borderRadius:size/2,
-        backgroundColor:'rgba(255,255,255,0.07)',
+        backgroundColor:'#F3F4F6',
         justifyContent:'center',alignItems:'center',
-        borderWidth:1.5,borderColor:'rgba(255,255,255,0.1)'}}>
-        <Text style={{fontSize:20,color:'rgba(255,255,255,0.25)'}}>?</Text>
+        borderWidth:1.5,borderColor:'#E5E7EB'}}>
+        <Text style={{fontSize:20,color:'#9CA3AF'}}>?</Text>
       </View>
     );
   }
@@ -50,7 +50,7 @@ function Avatar({ name, uri, size=48, show }: {
     <LinearGradient colors={g as any}
       style={{width:size,height:size,borderRadius:size/2,
         justifyContent:'center',alignItems:'center'}}>
-      <Text style={{color:'#fff',fontSize:size*0.35,fontWeight:'900'}}>{initials}</Text>
+      <Text style={{color:'#1F2937',fontSize:size*0.35,fontWeight:'900'}}>{initials}</Text>
     </LinearGradient>
   );
 }
@@ -115,7 +115,7 @@ export default function ContactsScreen() {
         const ph = await readPhoneContacts();
         const cs = await syncContactsWithServer(SERVER, id, ph);
         setContacts(cs); countReqs(cs);
-      } catch(e:any) { console.warn('Sync:', e.message); }
+      } catch { }
       finally { setSyncing(false); }
     };
     const init = async () => {
@@ -153,7 +153,7 @@ export default function ContactsScreen() {
       const ph = await readPhoneContacts();
       const cs = await syncContactsWithServer(SERVER, id, ph);
       setContacts(cs); countReqs(cs);
-    } catch(e:any) { console.warn('Sync:', e.message); }
+    } catch { }
     finally { setSyncing(false); }
   };
 
@@ -179,8 +179,6 @@ export default function ContactsScreen() {
 
   return (
     <View style={{flex:1,backgroundColor:C.bg}}>
-      <LinearGradient colors={['#010812','#020B18','#030E1E']}
-        style={StyleSheet.absoluteFillObject}/>
 
       {/* Header */}
       <View style={Ss.header}>
@@ -204,7 +202,7 @@ export default function ContactsScreen() {
         onPress={()=>router.push('/msgrequests')}>
         <Text style={{fontSize:20}}>📩</Text>
         <View style={{flex:1}}>
-          <Text style={{color:'#fff',fontSize:13,fontWeight:'800'}}>
+          <Text style={{color:'#1F2937',fontSize:13,fontWeight:'800'}}>
             Message Requests
           </Text>
           <Text style={{color:C.dim,fontSize:11,marginTop:1}}>
@@ -217,7 +215,7 @@ export default function ContactsScreen() {
       {/* Search */}
       <View style={Ss.search}>
         <Text style={{color:C.dim,marginRight:8}}>🔍</Text>
-        <TextInput style={{flex:1,color:'#fff',fontSize:14}}
+        <TextInput style={{flex:1,color:'#1F2937',fontSize:14}}
           placeholder="Search contacts..."
           placeholderTextColor={C.faint}
           value={search} onChangeText={setSearch}/>
@@ -254,11 +252,11 @@ export default function ContactsScreen() {
               <RefreshControl refreshing={syncing}
                 onRefresh={()=>doSync(myId,true)} tintColor={C.primary}/>}
             ItemSeparatorComponent={()=>
-              <View style={{height:1,backgroundColor:'rgba(255,255,255,0.04)',marginLeft:76}}/>}
+              <View style={{height:1,backgroundColor:'#F1F3F4',marginLeft:76}}/>}
             ListEmptyComponent={
               <View style={{alignItems:'center',paddingTop:60,gap:10}}>
                 <Text style={{fontSize:40}}>👥</Text>
-                <Text style={{color:'#fff',fontSize:15,fontWeight:'800'}}>
+                <Text style={{color:'#1F2937',fontSize:15,fontWeight:'800'}}>
                   {search?'No contacts found':'No contacts yet'}
                 </Text>
                 <Text style={{color:C.dim,fontSize:12,textAlign:'center',paddingHorizontal:32}}>
@@ -288,31 +286,31 @@ export default function ContactsScreen() {
 const Ss = StyleSheet.create({
   header:  {paddingTop:52,paddingBottom:12,paddingHorizontal:18,
              flexDirection:'row',alignItems:'center',gap:12,
-             borderBottomWidth:1,borderBottomColor:'rgba(74,159,255,0.1)'},
+             borderBottomWidth:1,borderBottomColor:'#E5E7EB'},
   backBtn: {width:36,height:36,borderRadius:18,
-             backgroundColor:'rgba(10,22,40,0.8)',
+             backgroundColor:'#F3F4F6',
              justifyContent:'center',alignItems:'center'},
-  title:   {color:'#fff',fontSize:19,fontWeight:'900'},
-  sub:     {color:'rgba(255,255,255,0.35)',fontSize:8,fontWeight:'800',
+  title:   {color:'#1F2937',fontSize:19,fontWeight:'900'},
+  sub:     {color:'#9CA3AF',fontSize:8,fontWeight:'800',
              letterSpacing:1.5,marginTop:2},
   reqBanner:{flexDirection:'row',alignItems:'center',gap:12,
               margin:12,padding:14,borderRadius:16,
-              backgroundColor:'rgba(74,159,255,0.07)',
-              borderWidth:1,borderColor:'rgba(74,159,255,0.18)'},
+              backgroundColor:'#EFF6FF',
+              borderWidth:1,borderColor:'#BFDBFE'},
   search:  {flexDirection:'row',alignItems:'center',
              marginHorizontal:16,marginBottom:10,
-             backgroundColor:'rgba(10,22,40,0.9)',
+             backgroundColor:'#F3F4F6',
              borderRadius:14,paddingHorizontal:14,paddingVertical:10,
-             borderWidth:1.5,borderColor:'rgba(74,159,255,0.15)'},
+             borderWidth:1.5,borderColor:'#E5E7EB'},
   pill:    {paddingHorizontal:12,paddingVertical:6,borderRadius:20,
-             backgroundColor:'rgba(10,22,40,0.8)',
-             borderWidth:1,borderColor:'rgba(255,255,255,0.08)'},
-  pillOn:  {backgroundColor:'rgba(74,159,255,0.2)',
-             borderColor:'rgba(74,159,255,0.5)'},
+             backgroundColor:'#F3F4F6',
+             borderWidth:1,borderColor:'#E5E7EB'},
+  pillOn:  {backgroundColor:'#4A9FFF',
+             borderColor:'#4A9FFF'},
   row:     {flexDirection:'row',alignItems:'center',paddingVertical:12,paddingHorizontal:4},
-  name:    {color:'#fff',fontSize:15,fontWeight:'700'},
+  name:    {color:'#1F2937',fontSize:15,fontWeight:'700'},
   onlineDot:{position:'absolute',bottom:0,right:0,width:12,height:12,
               borderRadius:6,backgroundColor:'#10B981',
-              borderWidth:2,borderColor:'#020B18'},
+              borderWidth:2,borderColor:'#FFFFFF'},
   badge:   {paddingHorizontal:10,paddingVertical:6,borderRadius:10,borderWidth:1},
 });

@@ -200,7 +200,7 @@ export default function ScannerScreen() {
 
   // -- Render ------------------------------------------------------------------
   return (
-    <LinearGradient colors={["#010812","#071020","#0a1628"]} style={s.root}>
+    <LinearGradient colors={["#FFFFFF","#071020","#0a1628"]} style={s.root}>
 
       {/* Header */}
       <View style={s.header}>

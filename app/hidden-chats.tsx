@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/hidden-chats.tsx — Hidden Locked Chats
 // PIN-protected list of hidden chats
 // Access: Settings -> "Hidden Chats" or long-press chat -> "Hide"
@@ -15,8 +14,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Crypto from 'expo-crypto';
 
 const C = {
-  bg: '#020B18', accent: '#FF3C6E', primary: '#4A9FFF',
-  card: '#0A1628', dim: '#888',
+  bg: '#FFFFFF', accent: '#FF3C6E', primary: '#4A9FFF',
+  card: '#F9FAFB', dim: '#6B7280',
 };
 
 export default function HiddenChatsScreen() {
@@ -103,7 +102,7 @@ export default function HiddenChatsScreen() {
           value={pin}
           onChangeText={setPin}
           placeholder="Enter PIN"
-          placeholderTextColor="#555"
+          placeholderTextColor="#6B7280"
           secureTextEntry
           keyboardType="number-pad"
           maxLength={8}
@@ -113,7 +112,7 @@ export default function HiddenChatsScreen() {
           <Text style={s.unlockTxt}>Unlock</Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 20 }}>
-          <Text style={{ color: '#555' }}>Cancel</Text>
+          <Text style={{ color: '#6B7280' }}>Cancel</Text>
         </TouchableOpacity>
         <Text style={s.firstTimeHint}>First time? Your PIN will be set on first entry.</Text>
       </View>
@@ -137,8 +136,8 @@ export default function HiddenChatsScreen() {
       ) : chats.length === 0 ? (
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
           <Text style={{ fontSize: 40, marginBottom: 12 }}>{"\uD83D\uDC7B"}</Text>
-          <Text style={{ color: '#555', fontSize: 15 }}>No hidden chats</Text>
-          <Text style={{ color: '#444', fontSize: 12, marginTop: 6, textAlign: 'center', paddingHorizontal: 40 }}>
+          <Text style={{ color: '#6B7280', fontSize: 15 }}>No hidden chats</Text>
+          <Text style={{ color: '#9CA3AF', fontSize: 12, marginTop: 6, textAlign: 'center', paddingHorizontal: 40 }}>
             Long press any chat and tap &quot;Hide&quot; to move it here
           </Text>
         </View>
@@ -180,13 +179,13 @@ const s = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 50, paddingHorizontal: 16, paddingBottom: 12 },
   title: { color: '#fff', fontSize: 18, fontWeight: '800' },
   lockTitle: { color: '#fff', fontSize: 22, fontWeight: '900', marginBottom: 6 },
-  lockSub: { color: '#888', fontSize: 14, marginBottom: 24 },
-  pinInput: { width: 200, height: 52, backgroundColor: '#0A1628', borderRadius: 14, color: '#fff', fontSize: 22, textAlign: 'center', letterSpacing: 8, borderWidth: 1, borderColor: '#222' },
+  lockSub: { color: '#6B7280', fontSize: 14, marginBottom: 24 },
+  pinInput: { width: 200, height: 52, backgroundColor: '#F9FAFB', borderRadius: 14, color: '#fff', fontSize: 22, textAlign: 'center', letterSpacing: 8, borderWidth: 1, borderColor: '#E5E7EB' },
   unlockBtn: { marginTop: 20, backgroundColor: C.accent, paddingHorizontal: 40, paddingVertical: 14, borderRadius: 14 },
   unlockTxt: { color: '#fff', fontWeight: '800', fontSize: 16 },
-  firstTimeHint: { color: '#444', fontSize: 11, marginTop: 30, textAlign: 'center', paddingHorizontal: 40 },
-  chatRow: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#111' },
+  firstTimeHint: { color: '#9CA3AF', fontSize: 11, marginTop: 30, textAlign: 'center', paddingHorizontal: 40 },
+  chatRow: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
   chatAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#1D4ED8', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  chatName: { color: '#E0E0F0', fontSize: 15, fontWeight: '700' },
-  chatPreview: { color: '#555', fontSize: 13, marginTop: 2 },
+  chatName: { color: '#1F2937', fontSize: 15, fontWeight: '700' },
+  chatPreview: { color: '#6B7280', fontSize: 13, marginTop: 2 },
 });

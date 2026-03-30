@@ -16,7 +16,7 @@ import {
   Text, TouchableOpacity,
   View,
 } from 'react-native';
-import BottomNav from './chats';
+import { BottomNav } from './chats';
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Types
@@ -96,7 +96,6 @@ export default function AlertsScreen() {
         setAlerts(data);
         setLoading(false);
       }, err => {
-        console.error('[Alerts]', err);
         setLoading(false);
       });
 
@@ -305,25 +304,25 @@ export default function AlertsScreen() {
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const styles = StyleSheet.create({
-  container:    { flex: 1, backgroundColor: '#0A0E1A' },
+  container:    { flex: 1, backgroundColor: '#FFFFFF' },
   header: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#111827',
+    backgroundColor: '#FFFFFF',
     paddingTop: 48, paddingBottom: 12, paddingHorizontal: 16,
-    borderBottomWidth: 0.5, borderBottomColor: '#1E293B',
+    borderBottomWidth: 0.5, borderBottomColor: '#E5E7EB',
     gap: 8,
   },
-  headerTitle:  { fontSize: 18, fontWeight: 'bold', color: '#000000' },
-  headerSub:    { fontSize: 9, color: '#00D4AA', marginTop: 2, fontWeight: 'bold' },
+  headerTitle:  { fontSize: 18, fontWeight: 'bold', color: '#1F2937' },
+  headerSub:    { fontSize: 9, color: '#10B981', marginTop: 2, fontWeight: 'bold' },
   markAllBtn: {
-    marginLeft: 'auto', backgroundColor: '#1A2235',
-    borderRadius: 8, borderWidth: 0.5, borderColor: '#1E293B',
+    marginLeft: 'auto', backgroundColor: '#F3F4F6',
+    borderRadius: 8, borderWidth: 0.5, borderColor: '#E5E7EB',
     paddingHorizontal: 10, paddingVertical: 5,
   },
-  markAllText:  { fontSize: 11, color: '#00D4AA' },
+  markAllText:  { fontSize: 11, color: '#10B981' },
   clearBtn: {
-    width: 32, height: 32, backgroundColor: '#1A2235',
-    borderRadius: 8, borderWidth: 0.5, borderColor: '#1E293B',
+    width: 32, height: 32, backgroundColor: '#F3F4F6',
+    borderRadius: 8, borderWidth: 0.5, borderColor: '#E5E7EB',
     justifyContent: 'center', alignItems: 'center',
   },
   clearBtnText: { fontSize: 16 },
@@ -331,35 +330,35 @@ const styles = StyleSheet.create({
   // Tabs
   tabs: {
     flexDirection: 'row',
-    borderBottomWidth: 0.5, borderBottomColor: '#1E293B',
+    borderBottomWidth: 0.5, borderBottomColor: '#E5E7EB',
   },
   tab: {
     flex: 1, alignItems: 'center', paddingVertical: 11,
     flexDirection: 'row', justifyContent: 'center', gap: 5,
   },
-  tabActive:     { borderBottomWidth: 2, borderBottomColor: '#00D4AA' },
-  tabText:       { fontSize: 12, color: '#64748B' },
-  tabTextActive: { color: '#00D4AA', fontWeight: 'bold' },
+  tabActive:     { borderBottomWidth: 2, borderBottomColor: '#4A9FFF' },
+  tabText:       { fontSize: 12, color: '#9CA3AF' },
+  tabTextActive: { color: '#4A9FFF', fontWeight: 'bold' },
   tabBadge: {
-    backgroundColor: '#FF4D6D', borderRadius: 7,
+    backgroundColor: '#EF4444', borderRadius: 7,
     minWidth: 14, height: 14,
     justifyContent: 'center', alignItems: 'center', paddingHorizontal: 3,
   },
-  tabBadgeText:  { fontSize: 8, color: '#000000', fontWeight: 'bold' },
+  tabBadgeText:  { fontSize: 8, color: '#FFFFFF', fontWeight: 'bold' },
 
   loadingWrap:   { flex: 1, justifyContent: 'center', alignItems: 'center' },
   listContent:   { padding: 12, paddingBottom: 100, flexGrow: 1 },
 
   alertRow: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#0D1117',
+    backgroundColor: '#FFFFFF',
     borderRadius: 12, padding: 12, gap: 10,
-    borderWidth: 0.5, borderColor: '#1E293B',
+    borderWidth: 0.5, borderColor: '#E5E7EB',
     overflow: 'hidden',
   },
   alertRowUnread: {
-    backgroundColor: '#111827',
-    borderColor: '#1E293B',
+    backgroundColor: '#F9FAFB',
+    borderColor: '#E5E7EB',
   },
   severityBar: {
     position: 'absolute', left: 0, top: 0, bottom: 0, width: 3,
@@ -375,19 +374,19 @@ const styles = StyleSheet.create({
     alignItems: 'center', marginBottom: 4,
   },
   alertType:    { fontSize: 11, fontWeight: 'bold' },
-  alertTime:    { fontSize: 10, color: '#374151' },
-  alertMessage: { fontSize: 13, color: '#000000', lineHeight: 18, marginBottom: 2 },
-  alertDetail:  { fontSize: 11, color: '#374151' },
+  alertTime:    { fontSize: 10, color: '#6B7280' },
+  alertMessage: { fontSize: 13, color: '#1F2937', lineHeight: 18, marginBottom: 2 },
+  alertDetail:  { fontSize: 11, color: '#6B7280' },
   unreadDot: {
     width: 8, height: 8, borderRadius: 4,
-    backgroundColor: '#00D4AA',
+    backgroundColor: '#4A9FFF',
     position: 'absolute', top: 12, right: 12,
   },
   sep: { height: 6 },
 
   emptyWrap:  { flex: 1, alignItems: 'center', paddingTop: 80, gap: 10 },
   emptyIcon:  { fontSize: 52 },
-  emptyTitle: { fontSize: 18, fontWeight: 'bold', color: '#000000' },
-  emptyText:  { fontSize: 13, color: '#374151' },
+  emptyTitle: { fontSize: 18, fontWeight: 'bold', color: '#1F2937' },
+  emptyText:  { fontSize: 13, color: '#6B7280' },
 });
 

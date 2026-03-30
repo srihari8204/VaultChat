@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/decoy-chat.tsx — Ghost Protocol Decoy Conversation
 // Pixel-perfect clone of real chat.tsx but with fake messages
 // Even allows "typing" fake messages that disappear on reload
@@ -39,7 +38,7 @@ export default function DecoyChatScreen() {
         <Text style={s.msgTxt}>{item.text}</Text>
         <View style={s.meta}>
           <Text style={s.time}>{item.time}</Text>
-          {item.sent && <Text style={[s.tick, item.delivered && { color: '#00E5FF' }]}>{item.delivered ? '\u2713\u2713' : '\u2713'}</Text>}
+          {item.sent && <Text style={[s.tick, item.delivered && { color: '#4A9FFF' }]}>{item.delivered ? '\u2713\u2713' : '\u2713'}</Text>}
         </View>
       </View>
     </View>
@@ -49,12 +48,12 @@ export default function DecoyChatScreen() {
     <>
       <Stack.Screen options={{
         title: (name as string) || 'Chat',
-        headerStyle: { backgroundColor: '#0C0C1A' },
-        headerTintColor: '#fff',
+        headerStyle: { backgroundColor: '#FFFFFF' },
+        headerTintColor: '#1F2937',
         headerRight: () => (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, marginRight: 12 }}>
-            <TouchableOpacity><Text style={{ color: '#00E5FF', fontSize: 20 }}>{"\u260E\uFE0F"}</Text></TouchableOpacity>
-            <TouchableOpacity><Text style={{ color: '#00E5FF', fontSize: 20 }}>{"\uD83D\uDCF9"}</Text></TouchableOpacity>
+            <TouchableOpacity><Text style={{ color: '#4A9FFF', fontSize: 20 }}>{"\u260E\uFE0F"}</Text></TouchableOpacity>
+            <TouchableOpacity><Text style={{ color: '#4A9FFF', fontSize: 20 }}>{"\uD83D\uDCF9"}</Text></TouchableOpacity>
           </View>
         ),
       }} />
@@ -74,7 +73,7 @@ export default function DecoyChatScreen() {
             value={input}
             onChangeText={setInput}
             placeholder="Type a message..."
-            placeholderTextColor="#555"
+            placeholderTextColor="#6B7280"
             multiline
           />
           <TouchableOpacity style={[s.sendBtn, !input.trim() && s.sendOff]} onPress={send} disabled={!input.trim()}>
@@ -87,22 +86,22 @@ export default function DecoyChatScreen() {
 }
 
 const s = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#03030E' },
+  screen: { flex: 1, backgroundColor: '#FFFFFF' },
   list: { padding: 12, paddingBottom: 8 },
   row: { marginBottom: 6 },
   rowR: { alignItems: 'flex-end' },
   rowL: { alignItems: 'flex-start' },
   bubble: { maxWidth: '80%', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8 },
-  bMe: { backgroundColor: '#003D2A', borderBottomRightRadius: 2 },
-  bPeer: { backgroundColor: '#111127', borderBottomLeftRadius: 2 },
-  msgTxt: { color: '#E0E0F0', fontSize: 15, lineHeight: 21 },
+  bMe: { backgroundColor: '#DCF8C6', borderBottomRightRadius: 2 },
+  bPeer: { backgroundColor: '#F3F4F6', borderBottomLeftRadius: 2 },
+  msgTxt: { color: '#1F2937', fontSize: 15, lineHeight: 21 },
   meta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: 3 },
-  time: { color: '#444', fontSize: 11, marginRight: 3 },
-  tick: { color: '#555', fontSize: 12 },
-  bar: { flexDirection: 'row', alignItems: 'flex-end', backgroundColor: '#0C0C1A', paddingHorizontal: 10, paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#111' },
+  time: { color: '#9CA3AF', fontSize: 11, marginRight: 3 },
+  tick: { color: '#6B7280', fontSize: 12 },
+  bar: { flexDirection: 'row', alignItems: 'flex-end', backgroundColor: '#FFFFFF', paddingHorizontal: 10, paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
   attachBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  input: { flex: 1, backgroundColor: '#111127', color: '#E0E0F0', borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10, fontSize: 15, maxHeight: 120, marginHorizontal: 6 },
-  sendBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#00E5FF', alignItems: 'center', justifyContent: 'center' },
-  sendOff: { backgroundColor: '#111127' },
+  input: { flex: 1, backgroundColor: '#F3F4F6', color: '#1F2937', borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10, fontSize: 15, maxHeight: 120, marginHorizontal: 6 },
+  sendBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#4A9FFF', alignItems: 'center', justifyContent: 'center' },
+  sendOff: { backgroundColor: '#F3F4F6' },
   sendIco: { color: '#000', fontSize: 18, fontWeight: 'bold' },
 });

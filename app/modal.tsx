@@ -61,7 +61,7 @@ export default function PhoneLoginScreen() {
           <TextInput
             style={styles.input}
             placeholder="Enter phone number"
-            placeholderTextColor="#94A3B8"
+            placeholderTextColor="#6B7280"
             keyboardType="phone-pad"
             maxLength={10}
             value={phone}
@@ -123,7 +123,7 @@ const styles = StyleSheet.create({
   },
   tagline: {
     fontSize: 14,
-    color: '#64748B',
+    color: '#6B7280',
     marginTop: 8,
     textAlign: 'center',
   },
@@ -132,7 +132,7 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     padding: 24,
     borderWidth: 1,
-    borderColor: '#1E293B',
+    borderColor: '#E5E7EB',
   },
   title: {
     fontSize: 22,
@@ -142,7 +142,7 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: 14,
-    color: '#94A3B8',
+    color: '#6B7280',
     marginBottom: 24,
     lineHeight: 20,
   },
@@ -152,7 +152,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   countryCode: {
-    backgroundColor: '#1E293B',
+    backgroundColor: '#E5E7EB',
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 16,
@@ -167,7 +167,7 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    backgroundColor: '#1E293B',
+    backgroundColor: '#E5E7EB',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 16,
@@ -196,7 +196,7 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   buttonDisabled: {
-    backgroundColor: '#1E293B',
+    backgroundColor: '#E5E7EB',
     shadowOpacity: 0,
     elevation: 0,
   },

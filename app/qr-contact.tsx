@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/qr-contact.tsx — QR Code Add Contact
 // Tab 1: "My QR" shows your VaultID as a QR code
 // Tab 2: "Scan" uses expo-camera CameraView with barcode scanning
@@ -15,7 +14,7 @@ import QRCode from 'react-native-qrcode-svg';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 
 const C = {
-  bg: '#020B18', primary: '#4A9FFF', accent: '#00D4AA',
+  bg: '#FFFFFF', primary: '#4A9FFF', accent: '#10B981',
   card: 'rgba(10,22,40,0.88)', dim: 'rgba(255,255,255,0.45)',
 };
 
@@ -164,7 +163,7 @@ export default function QRContactScreen() {
                     value={qrData}
                     size={200}
                     backgroundColor="#FFFFFF"
-                    color="#020B18"
+                    color="#FFFFFF"
                   />
                 </View>
                 <Text style={s.qrHint}>Show this to add you on VaultChat</Text>
@@ -221,15 +220,15 @@ const s = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 50, paddingHorizontal: 16, paddingBottom: 12 },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
   title: { color: '#fff', fontSize: 18, fontWeight: '800' },
-  tabs: { flexDirection: 'row', marginHorizontal: 16, backgroundColor: '#0A1628', borderRadius: 12, padding: 3 },
+  tabs: { flexDirection: 'row', marginHorizontal: 16, backgroundColor: '#F9FAFB', borderRadius: 12, padding: 3 },
   tab: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 10 },
   tabActive: { backgroundColor: C.accent },
-  tabTxt: { color: '#888', fontSize: 14, fontWeight: '700' },
+  tabTxt: { color: '#6B7280', fontSize: 14, fontWeight: '700' },
   tabTxtActive: { color: '#000' },
   myQR: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   qrCard: { backgroundColor: '#fff', borderRadius: 24, padding: 32, alignItems: 'center', width: '100%', maxWidth: 320 },
-  qrName: { color: '#020B18', fontSize: 20, fontWeight: '900', marginBottom: 4 },
-  qrId: { color: '#666', fontSize: 14, marginBottom: 20 },
+  qrName: { color: '#FFFFFF', fontSize: 20, fontWeight: '900', marginBottom: 4 },
+  qrId: { color: '#9CA3AF', fontSize: 14, marginBottom: 20 },
   qrBox: { padding: 12, backgroundColor: '#fff', borderRadius: 12 },
   qrHint: { color: '#999', fontSize: 12, marginTop: 16, textAlign: 'center' },
   shareBtn: { marginTop: 24, backgroundColor: C.accent + '22', borderRadius: 14, paddingVertical: 14, paddingHorizontal: 28, borderWidth: 1, borderColor: C.accent + '44' },
@@ -240,5 +239,5 @@ const s = StyleSheet.create({
   scanFrame: { width: 250, height: 250, borderWidth: 2, borderColor: C.accent, borderRadius: 20, backgroundColor: 'transparent' },
   scanHint: { color: '#fff', fontSize: 14, marginTop: 20, textAlign: 'center', fontWeight: '600', textShadowColor: '#000', textShadowRadius: 4 },
   noPerm: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
-  noPermTxt: { color: '#888', fontSize: 15, textAlign: 'center', marginBottom: 20 },
+  noPermTxt: { color: '#6B7280', fontSize: 15, textAlign: 'center', marginBottom: 20 },
 });

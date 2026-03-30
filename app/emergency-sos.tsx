@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/emergency-sos.tsx — Emergency SOS
 // Big red SOS button, shake detection, GPS alert to trusted contacts
 // Countdown before sending, test mode, history
@@ -17,7 +16,7 @@ import { Accelerometer } from 'expo-sensors';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 
-const C = { bg: '#020B18', accent: '#4A9FFF', cyan: '#00E5FF', card: '#0A1628', danger: '#FF3C6E', green: '#10B981', text: '#FFFFFF', muted: '#8A9BBF', red: '#FF2D2D' };
+const C = { bg: '#FFFFFF', accent: '#4A9FFF', cyan: '#4A9FFF', card: '#F9FAFB', danger: '#FF3C6E', green: '#10B981', text: '#FFFFFF', muted: '#8A9BBF', red: '#FF2D2D' };
 
 const SOS_MESSAGE = (name: string, lat: number, lng: number) =>
   `\u{1F6A8} EMERGENCY: ${name} needs help. Location: https://maps.google.com/?q=${lat},${lng}`;
@@ -304,7 +303,7 @@ export default function EmergencySOSScreen() {
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <LinearGradient colors={['#020B18', '#0D0A18', '#020B18']} style={StyleSheet.absoluteFill} />
+      <LinearGradient colors={['#FFFFFF', '#0D0A18', '#FFFFFF']} style={StyleSheet.absoluteFill} />
 
       {/* Header */}
       <View style={styles.header}>

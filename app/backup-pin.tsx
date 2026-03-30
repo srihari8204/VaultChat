@@ -34,7 +34,7 @@ export default function BackupPINScreen() {
   const dots = Array(6).fill(0).map((_,i)=>({filled:i<current.length}));
 
   return (
-    <LinearGradient colors={["#010812","#020E1A","#010812"]} style={{flex:1}}>
+    <LinearGradient colors={["#FFFFFF","#020E1A","#FFFFFF"]} style={{flex:1}}>
       <View style={S.container}>
         <View style={S.header}>
           <View style={S.badge}><Text style={{fontSize:36}}>🔢</Text></View>

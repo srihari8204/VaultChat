@@ -1,4 +1,7 @@
-import firebaseConfig, { auth, db } from '../../constants/firebase';
+// app/(constants)/firebase.ts
+// Re-export from root constants for app/ imports
+
+import app, { auth, db } from '../../constants/firebase';
 
 export { auth, db };
-export default firebaseConfig;
+export default app;

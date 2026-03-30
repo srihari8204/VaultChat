@@ -17,8 +17,12 @@
       "infoPlist": {
         "NSCameraUsageDescription": "VaultChat needs camera for video calls and face scan",
         "NSMicrophoneUsageDescription": "VaultChat needs microphone for voice and video calls",
-        "NSFaceIDUsageDescription": "VaultChat uses Face ID to protect your messages"
-      }
+        "NSFaceIDUsageDescription": "VaultChat uses Face ID to protect your messages",
+        "NSContactsUsageDescription": "VaultChat needs contacts to find people you know",
+        "NSLocationWhenInUseUsageDescription": "VaultChat needs location to share your position with contacts",
+        "NSPhotoLibraryUsageDescription": "VaultChat needs photo access to send and save media"
+      },
+      "bundleIdentifier": "com.vaultchat.app"
     },
     "android": {
       "package": "com.vaultchat.app",
@@ -41,7 +45,13 @@
         "android.permission.RECEIVE_BOOT_COMPLETED",
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.USE_BIOMETRIC",
-        "android.permission.USE_FINGERPRINT"
+        "android.permission.USE_FINGERPRINT",
+        "android.permission.READ_CONTACTS",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.NFC"
       ],
       "versionCode": 2
     },

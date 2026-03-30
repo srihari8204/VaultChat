@@ -64,8 +64,8 @@ export default function ZeroKnowledgeScreen() {
     <>
       <Stack.Screen options={{
         title: 'Zero-Knowledge',
-        headerStyle: { backgroundColor: '#0C0C1A' },
-        headerTintColor: '#fff',
+        headerStyle: { backgroundColor: '#FFFFFF' },
+        headerTintColor: '#1F2937',
       }} />
       <View style={st.screen}>
         <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
@@ -127,7 +127,7 @@ export default function ZeroKnowledgeScreen() {
 }
 
 const st = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#03030E' },
+  screen: { flex: 1, backgroundColor: '#FFFFFF' },
   heroBanner: { borderRadius: 20, padding: 24, alignItems: 'center', marginBottom: 20, gap: 10 },
   heroTitle: { color: '#fff', fontSize: 22, fontWeight: '900', textAlign: 'center' },
   heroSub: { color: 'rgba(255,255,255,0.7)', fontSize: 13, textAlign: 'center', lineHeight: 20 },

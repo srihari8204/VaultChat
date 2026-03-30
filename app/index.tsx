@@ -1,21 +1,12 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
 import { useEffect } from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
-
-const SERVER_URL = "http://192.168.29.58:3001";
+import { SERVER_URL } from "../constants/server";
 
 export default function IndexScreen() {
   useEffect(() => {
     (async () => {
       try {
-        // ── Test mode bypass ──────────────────────────────────
-        const testDone = await AsyncStorage.getItem('test_auth_done');
-        if (testDone === 'true') {
-          router.replace('/chats' as any);
-          return;
-        }
-
         // ── Normal flow ───────────────────────────────────────
         const { isSetupComplete } = await import("../services/securityService");
         const setup = await isSetupComplete();
@@ -44,5 +35,5 @@ export default function IndexScreen() {
 }
 
 const S = StyleSheet.create({
-  bg: { flex:1, backgroundColor:"#010812", justifyContent:"center", alignItems:"center" },
+  bg: { flex:1, backgroundColor:"#FFFFFF", justifyContent:"center", alignItems:"center" },
 });

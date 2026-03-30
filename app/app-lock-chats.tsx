@@ -24,11 +24,11 @@ import {
 } from 'react-native';
 
 const C = {
-  bg: '#020B18',
-  card: '#0A1628',
+  bg: '#FFFFFF',
+  card: '#F9FAFB',
   cardAlt: '#111D32',
   accent: '#4A9FFF',
-  cyan: '#00E5FF',
+  cyan: '#4A9FFF',
   green: '#10B981',
   red: '#EF4444',
   orange: '#F59E0B',
@@ -298,8 +298,8 @@ export default function AppLockChatsScreen() {
         <Switch
           value={isLocked}
           onValueChange={() => toggleLock(item)}
-          trackColor={{ false: '#333', true: 'rgba(74,159,255,0.4)' }}
-          thumbColor={isLocked ? C.accent : '#666'}
+          trackColor={{ false: '#D1D5DB', true: 'rgba(74,159,255,0.4)' }}
+          thumbColor={isLocked ? C.accent : '#9CA3AF'}
         />
       </View>
     );
@@ -310,7 +310,7 @@ export default function AppLockChatsScreen() {
   return (
     <View style={s.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <LinearGradient colors={[C.bg, '#0A1628', C.bg]} style={StyleSheet.absoluteFill} />
+      <LinearGradient colors={[C.bg, '#F9FAFB', C.bg]} style={StyleSheet.absoluteFill} />
 
       <Animated.View style={{ flex: 1, opacity: fadeIn }}>
         {/* Header */}

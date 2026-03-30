@@ -45,7 +45,11 @@ export default function SettingsScreen() {
   }, [myUid]);
 
   const saveSettings = async (key: string, value: any) => {
-    await firestore().collection('users').doc(myUid).update({ [`settings.${key}`]: value }).catch(() => {});
+    try {
+      await firestore().collection('users').doc(myUid).update({ [`settings.${key}`]: value });
+    } catch {
+      Alert.alert('Save failed', 'Could not update setting. Check your connection.');
+    }
   };
 
   const saveVaultId = async () => {
@@ -97,13 +101,13 @@ export default function SettingsScreen() {
         <Text style={s.rowLabel}>{label}</Text>
         {desc && <Text style={s.rowDesc}>{desc}</Text>}
       </View>
-      <Switch value={value} onValueChange={v => { onValueChange(v); }} thumbColor={value ? '#00E5FF' : '#555'} trackColor={{ false: '#222', true: '#00E5FF44' }} />
+      <Switch value={value} onValueChange={v => { onValueChange(v); }} thumbColor={value ? '#4A9FFF' : '#D1D5DB'} trackColor={{ false: '#E5E7EB', true: '#4A9FFF44' }} />
     </View>
   );
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Ã¢Å¡â„¢Ã¯Â¸Â Settings', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
+      <Stack.Screen options={{ title: 'Ã¢Å¡â„¢Ã¯Â¸Â Settings', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
       <ScrollView style={s.screen}>
 
         {/* Privacy */}
@@ -168,35 +172,35 @@ export default function SettingsScreen() {
         <Text style={[s.sectionTitle, { marginTop: 24 }]}>TRUSTED CONTACTS</Text>
         
         {/* Chat Themes */}
-        <TouchableOpacity style={{ backgroundColor: '#0A1628', borderRadius: 14, padding: 16, marginBottom: 8, borderWidth: 1, borderColor: '#111', flexDirection: 'row', alignItems: 'center' }}
+        <TouchableOpacity style={{ backgroundColor: '#F9FAFB', borderRadius: 14, padding: 16, marginBottom: 8, borderWidth: 1, borderColor: '#E5E7EB', flexDirection: 'row', alignItems: 'center' }}
           onPress={() => router.push('/chat-themes' as any)}>
           <Text style={{ fontSize: 22, marginRight: 12 }}>{"\uD83C\uDFA8"}</Text>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: '#E0E0F0', fontSize: 15, fontWeight: '700' }}>Chat Themes</Text>
-            <Text style={{ color: '#555', fontSize: 12, marginTop: 2 }}>Customize backgrounds and bubble colors</Text>
+            <Text style={{ color: '#1F2937', fontSize: 15, fontWeight: '700' }}>Chat Themes</Text>
+            <Text style={{ color: '#6B7280', fontSize: 12, marginTop: 2 }}>Customize backgrounds and bubble colors</Text>
           </View>
-          <Text style={{ color: '#555', fontSize: 18 }}>{"\u203A"}</Text>
+          <Text style={{ color: '#6B7280', fontSize: 18 }}>{"\u203A"}</Text>
         </TouchableOpacity>
 
-<TouchableOpacity style={{ backgroundColor: '#0A1628', borderRadius: 14, padding: 16, marginBottom: 8, borderWidth: 1, borderColor: '#111', flexDirection: 'row', alignItems: 'center' }}
+<TouchableOpacity style={{ backgroundColor: '#F9FAFB', borderRadius: 14, padding: 16, marginBottom: 8, borderWidth: 1, borderColor: '#E5E7EB', flexDirection: 'row', alignItems: 'center' }}
           onPress={() => router.push('/trusted-contacts' as any)}>
           <Text style={{ fontSize: 22, marginRight: 12 }}>{"\uD83D\uDEE1\uFE0F"}</Text>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: '#E0E0F0', fontSize: 15, fontWeight: '700' }}>Manage Trusted Contacts</Text>
-            <Text style={{ color: '#555', fontSize: 12, marginTop: 2 }}>Up to 3 emergency contacts for duress alerts</Text>
+            <Text style={{ color: '#1F2937', fontSize: 15, fontWeight: '700' }}>Manage Trusted Contacts</Text>
+            <Text style={{ color: '#6B7280', fontSize: 12, marginTop: 2 }}>Up to 3 emergency contacts for duress alerts</Text>
           </View>
-          <Text style={{ color: '#555', fontSize: 18 }}>{"\u203A"}</Text>
+          <Text style={{ color: '#6B7280', fontSize: 18 }}>{"\u203A"}</Text>
         </TouchableOpacity>
 
         {/* Login History */}
-        <TouchableOpacity style={{ backgroundColor: '#0A1628', borderRadius: 14, padding: 16, marginBottom: 8, borderWidth: 1, borderColor: '#111', flexDirection: 'row', alignItems: 'center' }}
+        <TouchableOpacity style={{ backgroundColor: '#F9FAFB', borderRadius: 14, padding: 16, marginBottom: 8, borderWidth: 1, borderColor: '#E5E7EB', flexDirection: 'row', alignItems: 'center' }}
           onPress={() => router.push('/login-history' as any)}>
           <Text style={{ fontSize: 22, marginRight: 12 }}>{"\uD83D\uDD10"}</Text>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: '#E0E0F0', fontSize: 15, fontWeight: '700' }}>Login History</Text>
-            <Text style={{ color: '#555', fontSize: 12, marginTop: 2 }}>View active sessions, revoke devices</Text>
+            <Text style={{ color: '#1F2937', fontSize: 15, fontWeight: '700' }}>Login History</Text>
+            <Text style={{ color: '#6B7280', fontSize: 12, marginTop: 2 }}>View active sessions, revoke devices</Text>
           </View>
-          <Text style={{ color: '#555', fontSize: 18 }}>{"\u203A"}</Text>
+          <Text style={{ color: '#6B7280', fontSize: 18 }}>{"\u203A"}</Text>
         </TouchableOpacity>
 
 <Text style={[s.sectionTitle, { marginTop: 24 }]}>ENCRYPTED BACKUP</Text>
@@ -232,20 +236,20 @@ export default function SettingsScreen() {
 }
 
 const s = StyleSheet.create({
-  screen:       { flex: 1, backgroundColor: '#03030E' },
-  sectionTitle: { color: '#555', fontSize: 11, fontWeight: '700', letterSpacing: 1.2, paddingHorizontal: 16, paddingTop: 20, paddingBottom: 8 },
-  row:          { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0C0C1A', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#111' },
-  rowLabel:     { color: '#E0E0F0', fontSize: 15, marginBottom: 2 },
-  rowDesc:      { color: '#555', fontSize: 12 },
-  vaultIdSection:{ backgroundColor: '#0C0C1A', padding: 16, borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#111' },
-  desc:         { color: '#555', fontSize: 12, lineHeight: 18, marginBottom: 10 },
-  currentId:    { color: '#00E5FF', fontSize: 13, fontWeight: 'bold', marginBottom: 8 },
+  screen:       { flex: 1, backgroundColor: '#FFFFFF' },
+  sectionTitle: { color: '#6B7280', fontSize: 11, fontWeight: '700', letterSpacing: 1.2, paddingHorizontal: 16, paddingTop: 20, paddingBottom: 8 },
+  row:          { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F1F3F4' },
+  rowLabel:     { color: '#1F2937', fontSize: 15, marginBottom: 2 },
+  rowDesc:      { color: '#6B7280', fontSize: 12 },
+  vaultIdSection:{ backgroundColor: '#FFFFFF', padding: 16, borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#F1F3F4' },
+  desc:         { color: '#6B7280', fontSize: 12, lineHeight: 18, marginBottom: 10 },
+  currentId:    { color: '#4A9FFF', fontSize: 13, fontWeight: 'bold', marginBottom: 8 },
   idRow:        { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  atSign:       { color: '#555', fontSize: 18, fontWeight: 'bold' },
-  idInput:      { flex: 1, backgroundColor: '#111127', color: '#E0E0F0', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
-  saveBtn:      { backgroundColor: '#00E5FF', borderRadius: 8, paddingHorizontal: 16, paddingVertical: 10, alignItems: 'center' },
+  atSign:       { color: '#6B7280', fontSize: 18, fontWeight: 'bold' },
+  idInput:      { flex: 1, backgroundColor: '#F3F4F6', color: '#1F2937', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
+  saveBtn:      { backgroundColor: '#4A9FFF', borderRadius: 8, paddingHorizontal: 16, paddingVertical: 10, alignItems: 'center' },
   saveBtnTxt:   { color: '#000', fontSize: 14, fontWeight: 'bold' },
-  progressTxt:  { color: '#00E5FF', fontSize: 12, marginBottom: 8 },
-  dangerRow:    { backgroundColor: '#0C0C1A', paddingHorizontal: 16, paddingVertical: 14, borderTopWidth: 1, borderTopColor: '#111' },
-  dangerTxt:    { color: '#E0E0F0', fontSize: 15 },
+  progressTxt:  { color: '#4A9FFF', fontSize: 12, marginBottom: 8 },
+  dangerRow:    { backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 14, borderTopWidth: 1, borderTopColor: '#F1F3F4' },
+  dangerTxt:    { color: '#1F2937', fontSize: 15 },
 });

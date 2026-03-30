@@ -175,7 +175,6 @@ export default function CreatorChannelsScreen() {
         setMyChannels(JSON.parse(stored));
       }
     } catch (e) {
-      console.warn('[CreatorChannels] Load error:', e);
     }
   };
 
@@ -183,7 +182,6 @@ export default function CreatorChannelsScreen() {
     try {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(channels));
     } catch (e) {
-      console.warn('[CreatorChannels] Save error:', e);
     }
   };
 
@@ -260,7 +258,7 @@ export default function CreatorChannelsScreen() {
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="light-content" backgroundColor="#020B18" />
+      <StatusBar barStyle="light-content" backgroundColor="#FFFFFF" />
 
       <ScrollView
         style={styles.scroll}
@@ -279,21 +277,21 @@ export default function CreatorChannelsScreen() {
         {myChannels.length > 0 && (
           <View style={styles.analyticsRow}>
             <LinearGradient
-              colors={['#0D2847', '#0A1628']}
+              colors={['#0D2847', '#F9FAFB']}
               style={styles.analyticsCard}
             >
               <Text style={styles.analyticsValue}>{formatCount(totalSubscribers)}</Text>
               <Text style={styles.analyticsLabel}>Subscribers</Text>
             </LinearGradient>
             <LinearGradient
-              colors={['#0D2847', '#0A1628']}
+              colors={['#0D2847', '#F9FAFB']}
               style={styles.analyticsCard}
             >
               <Text style={styles.analyticsValue}>{'\u20B9'}{totalRevenue.toLocaleString()}</Text>
               <Text style={styles.analyticsLabel}>Revenue</Text>
             </LinearGradient>
             <LinearGradient
-              colors={['#0D2847', '#0A1628']}
+              colors={['#0D2847', '#F9FAFB']}
               style={styles.analyticsCard}
             >
               <Text style={[styles.analyticsValue, { color: '#10B981' }]}>
@@ -552,7 +550,7 @@ const cardWidth = (width - 48) / 2;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#020B18',
+    backgroundColor: '#FFFFFF',
   },
   scroll: {
     flex: 1,
@@ -646,7 +644,7 @@ const styles = StyleSheet.create({
 
   // Create card
   createCard: {
-    backgroundColor: '#0A1628',
+    backgroundColor: '#F9FAFB',
     borderRadius: 16,
     padding: 18,
     marginBottom: 24,
@@ -738,7 +736,7 @@ const styles = StyleSheet.create({
 
   // Channel cards (My Channels)
   channelCard: {
-    backgroundColor: '#0A1628',
+    backgroundColor: '#F9FAFB',
     borderRadius: 16,
     padding: 16,
     marginBottom: 12,
@@ -830,7 +828,7 @@ const styles = StyleSheet.create({
   },
   discoverCard: {
     width: cardWidth,
-    backgroundColor: '#0A1628',
+    backgroundColor: '#F9FAFB',
     borderRadius: 16,
     padding: 14,
     marginBottom: 12,
@@ -901,7 +899,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   pickerModal: {
-    backgroundColor: '#0A1628',
+    backgroundColor: '#F9FAFB',
     borderRadius: 20,
     padding: 20,
     width: width - 60,

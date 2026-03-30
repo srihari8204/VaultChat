@@ -5,7 +5,7 @@ import { router } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { Animated, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
-const SERVER_URL = "http://192.168.29.58:3001";
+import { SERVER_URL } from "../constants/server";
 const CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 function generateCode(): string {
@@ -55,7 +55,7 @@ export default function SecretCodeScreen() {
   };
 
   return (
-    <LinearGradient colors={["#010812","#020E1A","#010812"]} style={S.bg}>
+    <LinearGradient colors={["#FFFFFF","#020E1A","#FFFFFF"]} style={S.bg}>
       <View style={S.container}>
         <View style={S.header}>
           <Animated.View style={[S.badge, { transform:[{scale:pulse}] }]}>
@@ -130,6 +130,6 @@ const S = StyleSheet.create({
   warnItem:   { color:"rgba(255,255,255,0.5)", fontSize:13 },
   error:      { color:"#EF4444", fontSize:13, textAlign:"center", marginBottom:8 },
   btn:        { backgroundColor:"#F59E0B", borderRadius:14, paddingVertical:17, alignItems:"center", marginBottom:12 },
-  btnTxt:     { color:"#010812", fontSize:16, fontWeight:"900" },
+  btnTxt:     { color:"#FFFFFF", fontSize:16, fontWeight:"900" },
   tip:        { color:"rgba(255,255,255,0.22)", fontSize:12, textAlign:"center" },
 });

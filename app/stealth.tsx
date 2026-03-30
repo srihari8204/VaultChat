@@ -191,7 +191,7 @@ const Ss = StyleSheet.create({
   grid:       {paddingHorizontal:16,gap:12},
   row:        {flexDirection:'row',justifyContent:'space-between'},
   btn:        {width:BTN,height:BTN,borderRadius:BTN/2,
-               backgroundColor:'#333',justifyContent:'center',alignItems:'center'},
+               backgroundColor:'#D1D5DB',justifyContent:'center',alignItems:'center'},
   btnOp:      {backgroundColor:'#FF9F0A'},
   btnOpActive:{backgroundColor:'#fff'},
   btnGray:    {backgroundColor:'#A5A5A5'},

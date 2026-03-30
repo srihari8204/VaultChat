@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/tone-detector.tsx — AI Message Tone Analyzer
 // Analyzes emotional tone of messages before sending
 // Detects: Friendly, Professional, Aggressive, Sarcastic, Sad, Neutral
@@ -11,7 +10,7 @@ import {
 } from 'react-native';
 import { Stack } from 'expo-router';
 
-const C = { bg: '#020B18', accent: '#4A9FFF', green: '#10B981', card: '#0A1628', purple: '#A78BFA' };
+const C = { bg: '#FFFFFF', accent: '#4A9FFF', green: '#10B981', card: '#F9FAFB', purple: '#A78BFA' };
 
 const TONES = {
   friendly: { label: 'Friendly', emoji: '\uD83D\uDE0A', color: '#10B981', desc: 'Warm, approachable, positive' },
@@ -19,7 +18,7 @@ const TONES = {
   aggressive: { label: 'Aggressive', emoji: '\uD83D\uDE20', color: '#FF3C6E', desc: 'Harsh, confrontational, angry' },
   sarcastic: { label: 'Sarcastic', emoji: '\uD83D\uDE0F', color: '#F59E0B', desc: 'Ironic, mocking, passive-aggressive' },
   sad: { label: 'Sad', emoji: '\uD83D\uDE22', color: '#8B8BCC', desc: 'Melancholy, disappointed, hurt' },
-  neutral: { label: 'Neutral', emoji: '\uD83D\uDE10', color: '#888', desc: 'Factual, objective, no emotion' },
+  neutral: { label: 'Neutral', emoji: '\uD83D\uDE10', color: '#6B7280', desc: 'Factual, objective, no emotion' },
   excited: { label: 'Excited', emoji: '\uD83E\uDD29', color: '#A78BFA', desc: 'Enthusiastic, energetic, thrilled' },
   anxious: { label: 'Anxious', emoji: '\uD83D\uDE1F', color: '#F59E0B', desc: 'Worried, nervous, uncertain' },
 };
@@ -114,7 +113,7 @@ export default function ToneDetectorScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Tone Detector', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
+      <Stack.Screen options={{ title: 'Tone Detector', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
       <ScrollView style={s.container}>
         <StatusBar barStyle="light-content" />
 
@@ -128,7 +127,7 @@ export default function ToneDetectorScreen() {
 
         <View style={s.inputBox}>
           <TextInput style={s.input} value={input} onChangeText={setInput}
-            placeholder="Type a message to analyze..." placeholderTextColor="#555"
+            placeholder="Type a message to analyze..." placeholderTextColor="#6B7280"
             multiline maxLength={500} />
           <TouchableOpacity style={[s.analyzeBtn, !input.trim() && { opacity: 0.4 }]} onPress={analyze} disabled={!input.trim()}>
             <Text style={s.analyzeTxt}>{"\uD83D\uDD0D  Analyze Tone"}</Text>
@@ -152,9 +151,9 @@ export default function ToneDetectorScreen() {
                 return (
                   <View key={i} style={s.breakdownRow}>
                     <Text style={{ fontSize: 16 }}>{td?.emoji || '?'}</Text>
-                    <Text style={[s.breakdownLabel, { color: td?.color || '#888' }]}>{td?.label || t.tone}</Text>
+                    <Text style={[s.breakdownLabel, { color: td?.color || '#6B7280' }]}>{td?.label || t.tone}</Text>
                     <View style={s.breakdownBarBg}>
-                      <View style={[s.breakdownBarFill, { width: t.score + '%', backgroundColor: td?.color || '#888' }]} />
+                      <View style={[s.breakdownBarFill, { width: t.score + '%', backgroundColor: td?.color || '#6B7280' }]} />
                     </View>
                     <Text style={s.breakdownPct}>{t.score}%</Text>
                   </View>
@@ -201,32 +200,32 @@ export default function ToneDetectorScreen() {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg, padding: 16 },
-  infoCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#111' },
+  infoCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#E5E7EB' },
   infoTitle: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  infoDesc: { color: '#666', fontSize: 12, marginTop: 2, lineHeight: 18 },
-  inputBox: { backgroundColor: C.card, borderRadius: 14, padding: 4, borderWidth: 1, borderColor: '#111', marginBottom: 16 },
+  infoDesc: { color: '#9CA3AF', fontSize: 12, marginTop: 2, lineHeight: 18 },
+  inputBox: { backgroundColor: C.card, borderRadius: 14, padding: 4, borderWidth: 1, borderColor: '#E5E7EB', marginBottom: 16 },
   input: { color: '#fff', fontSize: 15, minHeight: 80, padding: 12, textAlignVertical: 'top' },
   analyzeBtn: { backgroundColor: C.purple, borderRadius: 10, paddingVertical: 12, alignItems: 'center', margin: 8 },
   analyzeTxt: { color: '#fff', fontSize: 14, fontWeight: '800' },
   resultCard: { backgroundColor: C.card, borderRadius: 16, padding: 16, borderWidth: 1 },
   resultHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
   resultTone: { fontSize: 22, fontWeight: '900' },
-  resultConfidence: { color: '#888', fontSize: 12, marginTop: 2 },
+  resultConfidence: { color: '#6B7280', fontSize: 12, marginTop: 2 },
   breakdown: { marginBottom: 16 },
   breakdownRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 8 },
   breakdownLabel: { fontSize: 12, fontWeight: '700', width: 80 },
-  breakdownBarBg: { flex: 1, height: 6, backgroundColor: '#111', borderRadius: 3, overflow: 'hidden' },
+  breakdownBarBg: { flex: 1, height: 6, backgroundColor: '#E5E7EB', borderRadius: 3, overflow: 'hidden' },
   breakdownBarFill: { height: '100%', borderRadius: 3 },
-  breakdownPct: { color: '#666', fontSize: 11, width: 30, textAlign: 'right' },
-  suggestion: { backgroundColor: '#111', borderRadius: 10, padding: 12, marginBottom: 12 },
+  breakdownPct: { color: '#9CA3AF', fontSize: 11, width: 30, textAlign: 'right' },
+  suggestion: { backgroundColor: '#E5E7EB', borderRadius: 10, padding: 12, marginBottom: 12 },
   suggestionTitle: { color: '#F59E0B', fontSize: 12, fontWeight: '800', marginBottom: 4 },
   suggestionText: { color: '#ccc', fontSize: 12, lineHeight: 18 },
-  originalBox: { backgroundColor: '#111', borderRadius: 10, padding: 12 },
-  originalLabel: { color: '#555', fontSize: 10, marginBottom: 4 },
-  originalText: { color: '#888', fontSize: 12, fontStyle: 'italic' },
-  sectionTitle: { color: '#555', fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 8 },
-  historyRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 10, padding: 10, marginBottom: 4, gap: 8, borderWidth: 1, borderColor: '#111' },
+  originalBox: { backgroundColor: '#E5E7EB', borderRadius: 10, padding: 12 },
+  originalLabel: { color: '#6B7280', fontSize: 10, marginBottom: 4 },
+  originalText: { color: '#6B7280', fontSize: 12, fontStyle: 'italic' },
+  sectionTitle: { color: '#6B7280', fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 8 },
+  historyRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 10, padding: 10, marginBottom: 4, gap: 8, borderWidth: 1, borderColor: '#E5E7EB' },
   historyTone: { fontSize: 11, fontWeight: '700', width: 70 },
-  historyText: { flex: 1, color: '#666', fontSize: 11 },
-  historyPct: { color: '#555', fontSize: 10 },
+  historyText: { flex: 1, color: '#9CA3AF', fontSize: 11 },
+  historyPct: { color: '#6B7280', fontSize: 10 },
 });

@@ -79,9 +79,7 @@ export const sendMessage = async (
     });
 
     await batch.commit();
-    console.log('[CHAT] Message sent from', sender.uid, 'to', receiverId);
   } catch (error) {
-    console.error('[CHAT] sendMessage failed:', error);
     throw new Error(error?.message || 'Failed to send message');
   }
 };
@@ -123,17 +121,14 @@ export const listenToMessages = (
           });
           callback(msgs);
         } catch (error) {
-          console.error('[LISTEN_MESSAGES] Processing error:', error);
         }
       },
       (error) => {
-        console.error('[LISTEN_MESSAGES] Listener error:', error);
       }
     );
 
     return unsubscribe; // ✅ Proper cleanup function
   } catch (error) {
-    console.error('[LISTEN_MESSAGES] Setup failed:', error);
     return () => {};
   }
 };
@@ -185,7 +180,6 @@ export const listenToChats = (callback: (chats: any[]) => void) => {
                   otherId,
                 };
               } catch (error) {
-                console.error('[LISTEN_CHATS] Failed to fetch user', otherId, error);
                 return null;
               }
             })
@@ -194,17 +188,14 @@ export const listenToChats = (callback: (chats: any[]) => void) => {
           // Filter out null entries
           callback(chats.filter(Boolean));
         } catch (error) {
-          console.error('[LISTEN_CHATS] Processing error:', error);
         }
       },
       (error) => {
-        console.error('[LISTEN_CHATS] Listener error:', error);
       }
     );
 
     return unsubscribe; // ✅ Proper cleanup
   } catch (error) {
-    console.error('[LISTEN_CHATS] Setup failed:', error);
     return () => {};
   }
 };
@@ -235,9 +226,7 @@ export const markAsRead = async (receiverId: string) => {
     });
 
     await batch.commit();
-    console.log('[CHAT] Marked', snap.docs.length, 'messages as read');
   } catch (error) {
-    console.error('[CHAT] markAsRead failed:', error);
     throw new Error(error?.message || 'Failed to mark messages as read');
   }
 };
@@ -261,7 +250,6 @@ export const searchUsers = async (email: string) => {
       ...d.data(),
     }));
   } catch (error) {
-    console.error('[CHAT] searchUsers failed:', error);
     throw new Error(error?.message || 'Search failed');
   }
 };
@@ -286,9 +274,7 @@ export const deleteChat = async (chatId: string) => {
     batch.delete(doc(db, 'chats', chatId));
 
     await batch.commit();
-    console.log('[CHAT] Chat deleted:', chatId, '(', messageSnap.docs.length, 'messages)');
   } catch (error) {
-    console.error('[CHAT] deleteChat failed:', error);
     throw new Error(error?.message || 'Failed to delete chat');
   }
 };
@@ -308,7 +294,6 @@ export const getChatCount = async (uid: string): Promise<number> => {
     const snap = await getDocs(q);
     return snap.docs.length;
   } catch (error) {
-    console.error('[CHAT] getChatCount failed:', error);
     return 0;
   }
 };
@@ -330,7 +315,6 @@ export const getUnreadCount = async (chatId: string, uid: string): Promise<numbe
     const snap = await getDocs(q);
     return snap.docs.length;
   } catch (error) {
-    console.error('[CHAT] getUnreadCount failed:', error);
     return 0;
   }
 };

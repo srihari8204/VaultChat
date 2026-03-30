@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/broadcast.tsx — Broadcast Channels (Telegram-style)
 // Admin posts, subscribers read. One-to-many encrypted messaging.
 // Firestore: channels/{id} + channels/{id}/posts/{postId}
@@ -12,7 +11,7 @@ import { Stack } from 'expo-router';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 
-const C = { bg: '#020B18', accent: '#4A9FFF', green: '#10B981', card: '#0A1628', danger: '#FF3C6E' };
+const C = { bg: '#FFFFFF', accent: '#4A9FFF', green: '#10B981', card: '#F9FAFB', danger: '#FF3C6E' };
 const CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const genCode = () => { let s = ''; for (let i = 0; i < 8; i++) { if (i === 4) s += '-'; s += CHARS[Math.floor(Math.random() * CHARS.length)]; } return s; };
 
@@ -116,7 +115,7 @@ export default function BroadcastScreen() {
     const isAdmin = selectedChannel.adminUid === myUid;
     return (
       <>
-        <Stack.Screen options={{ title: selectedChannel.name, headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff',
+        <Stack.Screen options={{ title: selectedChannel.name, headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937',
           headerRight: () => (
             <TouchableOpacity onPress={() => shareInvite(selectedChannel)} style={{ marginRight: 12 }}>
               <Text style={{ color: C.accent, fontSize: 14, fontWeight: '700' }}>Share</Text>
@@ -160,7 +159,7 @@ export default function BroadcastScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Broadcast Channels', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
+      <Stack.Screen options={{ title: 'Broadcast Channels', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
       <View style={s.container}>
         <StatusBar barStyle="light-content" />
         <View style={s.topBtns}>
@@ -210,27 +209,27 @@ export default function BroadcastScreen() {
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   topBtns: { flexDirection: 'row', gap: 8, padding: 12 },
-  createBtn: { flex: 1, backgroundColor: '#4A9FFF22', borderRadius: 12, paddingVertical: 12, alignItems: 'center', borderWidth: 1, borderColor: '#4A9FFF44' },
+  createBtn: { flex: 1, backgroundColor: '#EFF6FF', borderRadius: 12, paddingVertical: 12, alignItems: 'center', borderWidth: 1, borderColor: '#BFDBFE' },
   createTxt: { color: C.accent, fontSize: 13, fontWeight: '700' },
-  chRow: { flexDirection: 'row', alignItems: 'center', padding: 14, marginHorizontal: 12, marginBottom: 6, backgroundColor: C.card, borderRadius: 14, borderWidth: 1, borderColor: '#111' },
-  chAvatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#111', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  chName: { color: '#E0E0F0', fontSize: 15, fontWeight: '700' },
-  chSubs: { color: '#555', fontSize: 11 },
-  chLast: { color: '#666', fontSize: 12, marginTop: 2 },
-  adminBadge: { backgroundColor: '#4A9FFF22', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2, marginLeft: 8 },
+  chRow: { flexDirection: 'row', alignItems: 'center', padding: 14, marginHorizontal: 12, marginBottom: 6, backgroundColor: C.card, borderRadius: 14, borderWidth: 1, borderColor: '#E5E7EB' },
+  chAvatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  chName: { color: '#1F2937', fontSize: 15, fontWeight: '700' },
+  chSubs: { color: '#6B7280', fontSize: 11 },
+  chLast: { color: '#9CA3AF', fontSize: 12, marginTop: 2 },
+  adminBadge: { backgroundColor: '#EFF6FF', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2, marginLeft: 8 },
   adminTxt: { color: C.accent, fontSize: 10, fontWeight: '800' },
-  channelInfo: { padding: 12, backgroundColor: C.card, borderBottomWidth: 1, borderBottomColor: '#111' },
-  postCard: { backgroundColor: C.card, borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: '#111' },
+  channelInfo: { padding: 12, backgroundColor: C.card, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
+  postCard: { backgroundColor: C.card, borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: '#E5E7EB' },
   postAuthor: { color: C.accent, fontSize: 12, fontWeight: '700', marginBottom: 4 },
-  postText: { color: '#E0E0F0', fontSize: 15, lineHeight: 22 },
-  postTime: { color: '#444', fontSize: 10, marginTop: 6, textAlign: 'right' },
-  postBar: { flexDirection: 'row', alignItems: 'flex-end', padding: 10, backgroundColor: '#0C0C1A', borderTopWidth: 1, borderTopColor: '#111' },
-  postInput: { flex: 1, backgroundColor: '#111127', color: '#E0E0F0', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14, maxHeight: 100, marginRight: 8 },
+  postText: { color: '#1F2937', fontSize: 15, lineHeight: 22 },
+  postTime: { color: '#9CA3AF', fontSize: 10, marginTop: 6, textAlign: 'right' },
+  postBar: { flexDirection: 'row', alignItems: 'flex-end', padding: 10, backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: '#E5E7EB' },
+  postInput: { flex: 1, backgroundColor: '#F3F4F6', color: '#1F2937', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14, maxHeight: 100, marginRight: 8 },
   postBtn: { backgroundColor: C.accent, borderRadius: 12, paddingHorizontal: 18, paddingVertical: 10 },
-  readOnly: { padding: 14, alignItems: 'center', backgroundColor: '#0C0C1A', borderTopWidth: 1, borderTopColor: '#111' },
-  modalBg: { flex: 1, backgroundColor: '#000000AA', justifyContent: 'flex-end' },
-  modal: { backgroundColor: '#0E0E20', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 },
-  modalTitle: { color: '#fff', fontSize: 18, fontWeight: '900', marginBottom: 16 },
-  modalInput: { backgroundColor: '#111', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, color: '#fff', fontSize: 14, marginBottom: 12, borderWidth: 1, borderColor: '#222' },
+  readOnly: { padding: 14, alignItems: 'center', backgroundColor: '#F9FAFB', borderTopWidth: 1, borderTopColor: '#E5E7EB' },
+  modalBg: { flex: 1, backgroundColor: '#00000044', justifyContent: 'flex-end' },
+  modal: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 },
+  modalTitle: { color: '#1F2937', fontSize: 18, fontWeight: '900', marginBottom: 16 },
+  modalInput: { backgroundColor: '#F3F4F6', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, color: '#1F2937', fontSize: 14, marginBottom: 12, borderWidth: 1, borderColor: '#E5E7EB' },
   modalBtn: { backgroundColor: C.accent, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
 });

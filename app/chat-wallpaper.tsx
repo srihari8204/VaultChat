@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/chat-wallpaper.tsx — Per-Chat Wallpaper Selector
 // Solid colors, gradient presets, custom image from gallery.
 // Preview with sample chat bubbles. Saves per chatId in AsyncStorage.
@@ -15,15 +14,15 @@ import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 
 const { width: SW } = Dimensions.get('window');
-const C = { bg: '#020B18', accent: '#4A9FFF', cyan: '#00E5FF', card: '#0A1628', border: '#112240' };
+const C = { bg: '#FFFFFF', accent: '#4A9FFF', cyan: '#4A9FFF', card: '#F9FAFB', border: '#112240' };
 const COLOR_SIZE = (SW - 64 - 4 * 12) / 5;
 const PRESET_W = (SW - 48 - 8) / 3;
 
 const SOLID_COLORS = [
-  '#020B18', '#0A0E1A', '#0D1B2A', '#111827', '#1A1A2E',
+  '#FFFFFF', '#FFFFFF', '#0D1B2A', '#F9FAFB', '#1A1A2E',
   '#0A192F', '#0B0C10', '#1B1B2F', '#162447', '#1F4068',
   '#0F0E0E', '#1A1A1A', '#2D2D2D', '#0D0D0D', '#121212',
-  '#0A1628', '#0E2433', '#102030', '#071420', '#050D15',
+  '#F9FAFB', '#0E2433', '#102030', '#071420', '#050D15',
 ];
 
 const GRADIENT_PRESETS = [
@@ -64,7 +63,6 @@ export default function ChatWallpaperScreen() {
         const raw = await AsyncStorage.getItem(storageKey);
         if (raw) setSelected(JSON.parse(raw));
       } catch (e) {
-        console.warn('[Wallpaper] load error:', e);
       }
     };
     loadWallpaper();
@@ -76,7 +74,6 @@ export default function ChatWallpaperScreen() {
       Alert.alert('Wallpaper Set', 'Chat wallpaper has been updated.');
       router.back();
     } catch (e) {
-      console.warn('[Wallpaper] save error:', e);
       Alert.alert('Error', 'Failed to save wallpaper.');
     }
   };
@@ -87,7 +84,6 @@ export default function ChatWallpaperScreen() {
       setSelected({ type: 'solid', value: C.bg });
       Alert.alert('Reset', 'Wallpaper has been reset to default.');
     } catch (e) {
-      console.warn('[Wallpaper] reset error:', e);
     }
   };
 
@@ -142,7 +138,7 @@ export default function ChatWallpaperScreen() {
       <Stack.Screen options={{ headerShown: false }} />
 
       {/* Header */}
-      <LinearGradient colors={['#0A1628', C.bg]} style={s.header}>
+      <LinearGradient colors={['#F9FAFB', C.bg]} style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
@@ -311,7 +307,7 @@ const s = StyleSheet.create({
   },
   peerBubble: {
     alignSelf: 'flex-start',
-    backgroundColor: '#111127',
+    backgroundColor: '#F3F4F6',
     borderRadius: 14,
     borderTopLeftRadius: 4,
     paddingHorizontal: 12,
@@ -321,7 +317,7 @@ const s = StyleSheet.create({
   },
   myBubble: {
     alignSelf: 'flex-end',
-    backgroundColor: '#003D2A',
+    backgroundColor: '#DCF8C6',
     borderRadius: 14,
     borderTopRightRadius: 4,
     paddingHorizontal: 12,

@@ -1,4 +1,3 @@
-// @ts-nocheck
 // components/TransferProgress.tsx — Animated File Transfer Progress Bar
 // Shows upload/download % with animated bar, file name, speed, ETA
 // Use: <TransferProgress visible={uploading} progress={0.65} filename="photo.jpg" type="upload" />

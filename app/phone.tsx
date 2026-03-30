@@ -34,7 +34,7 @@ export default function PhoneScreen() {
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <LinearGradient colors={["#010812", "#020E1A", "#010812"]} style={StyleSheet.absoluteFillObject} />
+      <LinearGradient colors={["#FFFFFF", "#020E1A", "#FFFFFF"]} style={StyleSheet.absoluteFillObject} />
       <ScrollView contentContainerStyle={S.scroll} keyboardShouldPersistTaps="handled">
         <View style={S.header}>
           <View style={S.badge}><Text style={{ fontSize: 36 }}>🔐</Text></View>
@@ -86,7 +86,7 @@ const S = StyleSheet.create({
   stepLbl:  { color:"rgba(74,159,255,0.7)", fontSize:11, textAlign:"center", marginBottom:28 },
   ccBtn:    { flexDirection:"row", justifyContent:"space-between", alignItems:"center", backgroundColor:"rgba(255,255,255,0.05)", borderWidth:1, borderColor:"rgba(255,255,255,0.1)", borderRadius:12, padding:14, marginBottom:8 },
   ccTxt:    { color:"#fff", fontSize:15 },
-  ccDrop:   { backgroundColor:"#0D1117", borderWidth:1, borderColor:"rgba(74,159,255,0.2)", borderRadius:12, marginBottom:8 },
+  ccDrop:   { backgroundColor:"#FFFFFF", borderWidth:1, borderColor:"rgba(74,159,255,0.2)", borderRadius:12, marginBottom:8 },
   ccItem:   { padding:14, borderBottomWidth:1, borderBottomColor:"rgba(255,255,255,0.05)" },
   ccActive: { backgroundColor:"rgba(74,159,255,0.1)" },
   inputRow: { flexDirection:"row", alignItems:"center", backgroundColor:"rgba(255,255,255,0.05)", borderWidth:1, borderColor:"rgba(255,255,255,0.1)", borderRadius:12, marginBottom:12, paddingHorizontal:14 },

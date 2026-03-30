@@ -40,7 +40,7 @@ const deleteSession = async (id: string): Promise<void> => {};
 // ──────────────────────────────────────────────────────────────
 
 const C = {
-  current: '#00D4AA',
+  current: '#10B981',
   live:    '#FF6B35',
   manual:  '#A78BFA',
   link:    '#4A9FFF',
@@ -100,7 +100,6 @@ export default function LocationSharingScreen() {
         updatedAt: Date.now(),
       });
     } catch (e) {
-      console.warn('[LocationSharing] Live update failed:', e);
     }
   }, [address]);
 

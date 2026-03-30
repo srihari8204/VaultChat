@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/create-poll.tsx — Create & Vote on Polls
 // Works in group chats. Stored in Firestore: chats/{id}/polls/{pollId}
 // Real-time vote updates via Firestore listener
@@ -12,7 +11,7 @@ import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 
-const C = { bg: '#020B18', accent: '#4A9FFF', green: '#10B981', card: '#0A1628', danger: '#FF3C6E' };
+const C = { bg: '#FFFFFF', accent: '#4A9FFF', green: '#10B981', card: '#F9FAFB', danger: '#FF3C6E' };
 
 export default function CreatePollScreen() {
   const router = useRouter();
@@ -84,14 +83,14 @@ export default function CreatePollScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Create Poll', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
+      <Stack.Screen options={{ title: 'Create Poll', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
       <ScrollView style={s.container}>
         <StatusBar barStyle="light-content" />
 
         <View style={s.section}>
           <Text style={s.label}>Question</Text>
           <TextInput style={s.questionInput} value={question} onChangeText={setQuestion}
-            placeholder="Ask a question..." placeholderTextColor="#555" multiline maxLength={300} />
+            placeholder="Ask a question..." placeholderTextColor="#6B7280" multiline maxLength={300} />
         </View>
 
         <View style={s.section}>
@@ -100,7 +99,7 @@ export default function CreatePollScreen() {
             <View key={i} style={s.optRow}>
               <View style={s.optNum}><Text style={s.optNumTxt}>{i + 1}</Text></View>
               <TextInput style={s.optInput} value={opt} onChangeText={t => updateOption(i, t)}
-                placeholder={'Option ' + (i + 1)} placeholderTextColor="#555" maxLength={100} />
+                placeholder={'Option ' + (i + 1)} placeholderTextColor="#6B7280" maxLength={100} />
               {options.length > 2 && (
                 <TouchableOpacity onPress={() => removeOption(i)} style={s.removeOpt}>
                   <Text style={{ color: C.danger, fontSize: 18 }}>{"\u2715"}</Text>
@@ -122,14 +121,14 @@ export default function CreatePollScreen() {
               <Text style={s.settLabel}>Allow Multiple Votes</Text>
               <Text style={s.settDesc}>Members can vote for more than one option</Text>
             </View>
-            <Switch value={multiVote} onValueChange={setMultiVote} thumbColor={multiVote ? C.accent : '#555'} trackColor={{ false: '#222', true: '#4A9FFF44' }} />
+            <Switch value={multiVote} onValueChange={setMultiVote} thumbColor={multiVote ? C.accent : '#6B7280'} trackColor={{ false: '#E5E7EB', true: '#4A9FFF44' }} />
           </View>
           <View style={s.settRow}>
             <View style={{ flex: 1 }}>
               <Text style={s.settLabel}>Anonymous Voting</Text>
               <Text style={s.settDesc}>Hide who voted for what</Text>
             </View>
-            <Switch value={anonymous} onValueChange={setAnonymous} thumbColor={anonymous ? C.accent : '#555'} trackColor={{ false: '#222', true: '#4A9FFF44' }} />
+            <Switch value={anonymous} onValueChange={setAnonymous} thumbColor={anonymous ? C.accent : '#6B7280'} trackColor={{ false: '#E5E7EB', true: '#4A9FFF44' }} />
           </View>
         </View>
 
@@ -146,18 +145,18 @@ export default function CreatePollScreen() {
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg, padding: 16 },
   section: { marginBottom: 20 },
-  label: { color: '#555', fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 8 },
-  questionInput: { backgroundColor: C.card, borderRadius: 14, padding: 16, color: '#fff', fontSize: 16, minHeight: 80, borderWidth: 1, borderColor: '#111', textAlignVertical: 'top' },
+  label: { color: '#6B7280', fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 8 },
+  questionInput: { backgroundColor: C.card, borderRadius: 14, padding: 16, color: '#fff', fontSize: 16, minHeight: 80, borderWidth: 1, borderColor: '#E5E7EB', textAlignVertical: 'top' },
   optRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 8 },
-  optNum: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#111', justifyContent: 'center', alignItems: 'center' },
-  optNumTxt: { color: '#555', fontSize: 12, fontWeight: '800' },
-  optInput: { flex: 1, backgroundColor: C.card, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, color: '#fff', fontSize: 14, borderWidth: 1, borderColor: '#111' },
+  optNum: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center' },
+  optNumTxt: { color: '#6B7280', fontSize: 12, fontWeight: '800' },
+  optInput: { flex: 1, backgroundColor: C.card, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, color: '#fff', fontSize: 14, borderWidth: 1, borderColor: '#E5E7EB' },
   removeOpt: { width: 32, height: 32, justifyContent: 'center', alignItems: 'center' },
   addOptBtn: { backgroundColor: '#4A9FFF15', borderRadius: 10, paddingVertical: 12, alignItems: 'center', borderWidth: 1, borderColor: '#4A9FFF33', borderStyle: 'dashed' },
   addOptTxt: { color: C.accent, fontSize: 13, fontWeight: '600' },
-  settRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: '#111' },
-  settLabel: { color: '#E0E0F0', fontSize: 14, fontWeight: '600' },
-  settDesc: { color: '#555', fontSize: 11, marginTop: 2 },
+  settRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: '#E5E7EB' },
+  settLabel: { color: '#1F2937', fontSize: 14, fontWeight: '600' },
+  settDesc: { color: '#6B7280', fontSize: 11, marginTop: 2 },
   createBtn: { backgroundColor: C.accent, borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
   createTxt: { color: '#000', fontSize: 16, fontWeight: '900' },
 });

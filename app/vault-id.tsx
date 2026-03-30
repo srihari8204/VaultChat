@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { useState } from "react";
@@ -35,7 +34,7 @@ export default function VaultIdScreen() {
 
   return (
     <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==="ios"?"padding":undefined}>
-      <LinearGradient colors={["#010812","#020E1A","#010812"]} style={StyleSheet.absoluteFillObject}/>
+      <LinearGradient colors={["#FFFFFF","#020E1A","#FFFFFF"]} style={StyleSheet.absoluteFillObject}/>
       <View style={S.container}>
         <View style={S.header}>
           <View style={S.badge}><Text style={{fontSize:36}}>🆔</Text></View>

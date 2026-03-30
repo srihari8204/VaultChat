@@ -20,7 +20,6 @@ class ErrorHandler {
     try {
       await AsyncStorage.setItem('errorLogs', JSON.stringify(this.logs.slice(0, 50)));
     } catch {}
-    console.error(`[VaultChat][${screen}]`, entry.error);
   }
 
   async getLogs(): Promise<ErrorLog[]> {

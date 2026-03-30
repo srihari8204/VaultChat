@@ -25,7 +25,7 @@ export default function SetupCompleteScreen() {
   ];
 
   return (
-    <LinearGradient colors={["#010812","#020E1A","#010812"]} style={{flex:1}}>
+    <LinearGradient colors={["#FFFFFF","#020E1A","#FFFFFF"]} style={{flex:1}}>
       <View style={S.container}>
         <Animated.View style={[S.content,{opacity,transform:[{scale}]}]}>
           <View style={S.circle}><Text style={{fontSize:52}}>🔐</Text></View>

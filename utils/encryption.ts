@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * VaultChat â€” Real AES-256-GCM Encryption
  * Uses react-native-quick-crypto
@@ -47,7 +46,6 @@ export const encryptMessage = (plaintext: string, keyBase64: string): string => 
       enc1 + enc2,
     ].join(':');
   } catch (e) {
-    console.error('Encrypt error:', e);
     return '';
   }
 };
@@ -67,7 +65,6 @@ export const decryptMessage = (ciphertext: string, keyBase64: string): string =>
     const dec2 = decipher.final('utf8');
     return dec1 + dec2;
   } catch (e) {
-    console.error('Decrypt error:', e);
     return '[Decryption failed]';
   }
 };

@@ -1,4 +1,3 @@
-﻿
 const express    = require('express');
 const http       = require('http');
 const { Server } = require('socket.io');
@@ -16,16 +15,26 @@ const io     = new Server(server, {
 app.use(cors());
 app.use(express.json());
 
+// Initialize Firebase Admin (must be before routes)
+require('./firebaseAdmin');
+
 // Serve admin panel
 app.use(express.static(__dirname));
 app.get('/', (req, res) => res.sendFile(__dirname + '/admin.html'));
 
+// ── Routes ───────────────────────────────────────────────────
+app.use('/api/contacts', require('./routes/contacts'));
+app.use('/api/face', require('./routes/face'));
+app.use('/api/secretcode', require('./routes/secretcode'));
+app.use('/api/vaultdrop', require('./routes/vaultdrop'));
+app.use('/api/location', require('./routes/location'));
+app.use('/api/sync-contact', require('./routes/sync-contact'));
 
-// â”€â”€ In-memory store (replace with Firebase in production) â”€â”€â”€â”€â”€â”€â”€â”€
-const users    = new Map(); // vaultId -> { name, socketId, online, joinedAt, msgCount, lastSeen }
-const messages = new Map(); // msgId -> { from, to, encrypted, ts, delivered }
-const sessions = new Map(); // sessionId -> { users[], startedAt, msgCount, active }
-const queue    = new Map(); // vaultId -> [pending msgs]
+// ── In-memory store ──────────────────────────────────────────
+const users    = new Map();
+const messages = new Map();
+const sessions = new Map();
+const queue    = new Map();
 const testLogs = [];
 
 function log(type, data) {
@@ -35,16 +44,11 @@ function log(type, data) {
   io.to('admin').emit('log', entry);
 }
 
-// â”€â”€ REST API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── REST API ─────────────────────────────────────────────────
 
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', users: users.size, uptime: process.uptime() });
-
-// Contact sync — phone hash matching
-const contactsRoute = require("./routes/contacts");
-app.use("/api/contacts", contactsRoute);
-
 });
 
 // Register user
@@ -117,7 +121,7 @@ app.post('/api/admin/create-test-users', (req, res) => {
 
 // Admin: broadcast test message to all users
 app.post('/api/admin/broadcast', (req, res) => {
-  const { message, fromAdmin = true } = req.body;
+  const { message } = req.body;
   const msgId = crypto.randomUUID();
   let sent = 0;
   users.forEach((u, vaultId) => {
@@ -172,7 +176,10 @@ app.post('/api/admin/reset', (req, res) => {
   res.json({ success: true });
 });
 
-// â”€â”€ WebSocket â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── WebSocket ────────────────────────────────────────────────
+// Track which socket is in which chat room
+const socketChatMap = new Map(); // socketId -> { uid, chatId }
+
 io.on('connection', (socket) => {
   let currentUser = null;
 
@@ -185,22 +192,66 @@ io.on('connection', (socket) => {
     log('admin_connect', { socketId: socket.id });
   });
 
-  // User identifies themselves
-  
+  // ── Chat events (used by chat.tsx / group-chat.tsx) ────────
+
+  // Join a chat room
+  socket.on('join_chat', ({ chatId, uid }) => {
+    socket.join(`chat:${chatId}`);
+    socketChatMap.set(socket.id, { uid, chatId });
+    socket.data = { ...socket.data, uid, chatId };
+  });
+
+  // Typing indicators
+  socket.on('typing_start', ({ chatId, uid }) => {
+    socket.to(`chat:${chatId}`).emit('typing_start', { uid });
+  });
+
+  socket.on('typing_stop', ({ chatId, uid }) => {
+    socket.to(`chat:${chatId}`).emit('typing_stop', { uid });
+  });
+
+  // New message notification (Firestore handles storage, this is for real-time push)
+  socket.on('new_message', ({ chatId, messageId, senderUid, recipientUid, preview }) => {
+    socket.to(`chat:${chatId}`).emit('message_delivered', { messageId });
+    log('msg_realtime', { chatId, messageId, from: senderUid });
+  });
+
+  // Message read acknowledgment
+  socket.on('message_read', ({ chatId, messageId, readerUid, senderUid }) => {
+    socket.to(`chat:${chatId}`).emit('message_read', { messageId });
+  });
+
+  // Message edit notification
+  socket.on('message_edited', ({ chatId, messageId, newPlaintext }) => {
+    socket.to(`chat:${chatId}`).emit('message_edited', { messageId, newPlaintext });
+  });
+
+  // Message delete notification
+  socket.on('message_deleted', ({ chatId, messageId }) => {
+    socket.to(`chat:${chatId}`).emit('message_deleted', { messageId });
+  });
+
+  // Reaction update
+  socket.on('reaction_updated', ({ chatId, messageId, reactions }) => {
+    socket.to(`chat:${chatId}`).emit('reaction_updated', { messageId, reactions });
+  });
+
+  // ── WebRTC signaling (calls) ───────────────────────────────
   socket.on('screen_share_start', data => {
-    const target = [...io.sockets.sockets.values()].find(s=>s.data?.vaultId===data.to);
+    const target = [...io.sockets.sockets.values()].find(s => s.data?.vaultId === data.to);
     if (target) target.emit('screen_share_start', data);
   });
   socket.on('screen_share_stop', data => {
-    const target = [...io.sockets.sockets.values()].find(s=>s.data?.vaultId===data.to);
+    const target = [...io.sockets.sockets.values()].find(s => s.data?.vaultId === data.to);
     if (target) target.emit('screen_share_stop', data);
   });
-  socket.on('webrtc_offer',  data => { const t=[...io.sockets.sockets.values()].find(s=>s.data?.vaultId===data.to); if(t) t.emit('webrtc_offer',data); });
-  socket.on('webrtc_answer', data => { const t=[...io.sockets.sockets.values()].find(s=>s.data?.vaultId===data.to); if(t) t.emit('webrtc_answer',data); });
-  socket.on('webrtc_ice',    data => { const t=[...io.sockets.sockets.values()].find(s=>s.data?.vaultId===data.to); if(t) t.emit('webrtc_ice',data); });
-  socket.on('webrtc_end',    data => { const t=[...io.sockets.sockets.values()].find(s=>s.data?.vaultId===data.to); if(t) t.emit('webrtc_end',data); });
-  socket.on('call_incoming', data => { const t=[...io.sockets.sockets.values()].find(s=>s.data?.vaultId===data.to); if(t) t.emit('call_incoming',data); });
+  socket.on('webrtc_offer',  data => { const t = [...io.sockets.sockets.values()].find(s => s.data?.vaultId === data.to); if (t) t.emit('webrtc_offer', data); });
+  socket.on('webrtc_answer', data => { const t = [...io.sockets.sockets.values()].find(s => s.data?.vaultId === data.to); if (t) t.emit('webrtc_answer', data); });
+  socket.on('webrtc_ice',    data => { const t = [...io.sockets.sockets.values()].find(s => s.data?.vaultId === data.to); if (t) t.emit('webrtc_ice', data); });
+  socket.on('webrtc_end',    data => { const t = [...io.sockets.sockets.values()].find(s => s.data?.vaultId === data.to); if (t) t.emit('webrtc_end', data); });
+  socket.on('call_incoming', data => { const t = [...io.sockets.sockets.values()].find(s => s.data?.vaultId === data.to); if (t) t.emit('call_incoming', data); });
 
+  // ── Legacy test console events ─────────────────────────────
   socket.on('identify', ({ vaultId }) => {
     const user = users.get(vaultId);
     if (!user) { socket.emit('error', { msg: 'Unknown VaultID' }); return; }
@@ -208,6 +259,7 @@ io.on('connection', (socket) => {
     user.socketId = socket.id;
     user.online   = true;
     user.lastSeen = Date.now();
+    socket.data = { ...socket.data, vaultId };
     socket.join(`user:${vaultId}`);
     log('user_online', { name: user.name, vaultId });
     io.to('admin').emit('users_update', getUserList());
@@ -226,7 +278,7 @@ io.on('connection', (socket) => {
     socket.emit('identify_ok', { name: user.name, queued: pending.length });
   });
 
-  // Send message
+  // Send message (legacy test console)
   socket.on('send_message', ({ to, encrypted, msgId }) => {
     if (!currentUser) return;
     const from = users.get(currentUser);
@@ -245,7 +297,6 @@ io.on('connection', (socket) => {
     messages.set(msg.id, msg);
     from.msgCount++;
 
-    // Update session count
     sessions.forEach(s => {
       if (s.active && s.users.includes(currentUser)) s.msgCount++;
     });
@@ -261,13 +312,12 @@ io.on('connection', (socket) => {
       log('msg_queued', { from: from.name, to: toUser.name, id: msg.id });
     }
 
-    // Ack to sender
     socket.emit('msg_ack', { id: msg.id, delivered: msg.delivered });
     io.to('admin').emit('users_update', getUserList());
     io.to('admin').emit('stats_update', getStats());
   });
 
-  // Typing indicator
+  // Typing indicator (legacy)
   socket.on('typing', ({ to, isTyping }) => {
     if (!currentUser) return;
     const toUser = users.get(to);
@@ -278,6 +328,7 @@ io.on('connection', (socket) => {
 
   // Disconnect
   socket.on('disconnect', () => {
+    socketChatMap.delete(socket.id);
     if (currentUser) {
       const user = users.get(currentUser);
       if (user) {
@@ -289,14 +340,14 @@ io.on('connection', (socket) => {
       }
     }
   });
-
-  // Stats ping every 5s to admin
-  setInterval(() => {
-    io.to('admin').emit('stats_update', getStats());
-  }, 5000);
 });
 
-// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Stats broadcast to admin every 5s
+setInterval(() => {
+  io.to('admin').emit('stats_update', getStats());
+}, 5000);
+
+// ── Helpers ──────────────────────────────────────────────────
 function getUserList() {
   return [...users.values()].map(u => ({
     name: u.name, vaultId: u.vaultId, online: u.online,
@@ -327,29 +378,8 @@ function getStats() {
   };
 }
 
-// â”€â”€ Start server â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-const PORT = process.env.PORT || 3001;
+// ── Start server ─────────────────────────────────────────────
+const PORT = process.env.PORT || 3002;
 server.listen(PORT, () => {
   console.log(`VaultChat Backend running on http://localhost:${PORT}`);
-  console.log(`Admin panel: open admin.html in browser`);
 });
-
-
-
-
-const vaultdropRoutes = require('./routes/vaultdrop');
-app.use('/api/secretcode', require('./routes/secretcode'));
-app.use('/api/face', require('./routes/face'));
-app.use('/api/vaultdrop', vaultdropRoutes);
-
-const locationRoutes = require('./routes/location');
-app.use('/api/secretcode', require('./routes/secretcode'));
-app.use('/api/face', require('./routes/face'));
-app.use('/api/location', locationRoutes);
-
-const syncContactRoutes = require('./routes/sync-contact');
-app.use('/api/secretcode', require('./routes/secretcode'));
-app.use('/api/face', require('./routes/face'));
-app.use('/api/sync-contact', syncContactRoutes);
-
-

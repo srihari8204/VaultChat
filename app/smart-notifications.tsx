@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/smart-notifications.tsx — AI Smart Notification Manager
 // Categorizes notifications: Urgent, Important, Social, Low Priority
 // Learns from user behavior, supports Do Not Disturb with exceptions
@@ -11,13 +10,13 @@ import {
 import { Stack } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const C = { bg: '#020B18', accent: '#4A9FFF', green: '#10B981', card: '#0A1628', danger: '#FF3C6E', purple: '#A78BFA', orange: '#F59E0B' };
+const C = { bg: '#FFFFFF', accent: '#4A9FFF', green: '#10B981', card: '#F9FAFB', danger: '#FF3C6E', purple: '#A78BFA', orange: '#F59E0B' };
 
 const PRIORITY_LEVELS = [
   { id: 'urgent', name: 'Urgent', icon: '\uD83D\uDD34', color: '#FF3C6E', desc: 'Duress alerts, panic, trusted contacts', sound: 'Always ring', override: true },
   { id: 'important', name: 'Important', icon: '\uD83D\uDFE0', color: '#F59E0B', desc: 'Direct messages from frequent contacts', sound: 'Normal sound', override: false },
   { id: 'social', name: 'Social', icon: '\uD83D\uDD35', color: '#4A9FFF', desc: 'Group chats, channels, reactions', sound: 'Soft ping', override: false },
-  { id: 'low', name: 'Low Priority', icon: '\u26AA', color: '#666', desc: 'Read receipts, typing indicators, status updates', sound: 'Silent', override: false },
+  { id: 'low', name: 'Low Priority', icon: '\u26AA', color: '#9CA3AF', desc: 'Read receipts, typing indicators, status updates', sound: 'Silent', override: false },
 ];
 
 const SMART_RULES = [
@@ -58,7 +57,7 @@ export default function SmartNotificationsScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Smart Notifications', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
+      <Stack.Screen options={{ title: 'Smart Notifications', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
       <ScrollView style={s.container}>
         <StatusBar barStyle="light-content" />
 
@@ -105,7 +104,7 @@ export default function SmartNotificationsScreen() {
               <Text style={s.ruleDesc}>{r.desc}</Text>
             </View>
             <Switch value={r.enabled} onValueChange={() => toggleRule(r.id)}
-              thumbColor={r.enabled ? C.accent : '#555'} trackColor={{ false: '#222', true: '#4A9FFF44' }} />
+              thumbColor={r.enabled ? C.accent : '#6B7280'} trackColor={{ false: '#E5E7EB', true: '#4A9FFF44' }} />
           </View>
         ))}
 
@@ -117,7 +116,7 @@ export default function SmartNotificationsScreen() {
             <Text style={s.dndDesc}>Silence all except urgent. Trusted contacts always ring.</Text>
           </View>
           <Switch value={dnd} onValueChange={setDnd}
-            thumbColor={dnd ? C.danger : '#555'} trackColor={{ false: '#222', true: '#FF3C6E44' }} />
+            thumbColor={dnd ? C.danger : '#6B7280'} trackColor={{ false: '#E5E7EB', true: '#FF3C6E44' }} />
         </View>
 
         <View style={{ height: 40 }} />
@@ -128,22 +127,22 @@ export default function SmartNotificationsScreen() {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg, padding: 16 },
-  summaryCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#111' },
+  summaryCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#E5E7EB' },
   summaryTitle: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  summaryDesc: { color: '#666', fontSize: 12, marginTop: 4, lineHeight: 18 },
-  sectionTitle: { color: '#555', fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 8 },
+  summaryDesc: { color: '#9CA3AF', fontSize: 12, marginTop: 4, lineHeight: 18 },
+  sectionTitle: { color: '#6B7280', fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 8 },
   statsRow: { flexDirection: 'row', gap: 8 },
-  statCard: { flex: 1, backgroundColor: C.card, borderRadius: 12, padding: 12, alignItems: 'center', borderWidth: 1, borderColor: '#111' },
+  statCard: { flex: 1, backgroundColor: C.card, borderRadius: 12, padding: 12, alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB' },
   statNum: { fontSize: 20, fontWeight: '900', marginTop: 4 },
-  statLabel: { color: '#666', fontSize: 9, marginTop: 2, fontWeight: '700' },
-  priorityRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 14, marginBottom: 6, borderWidth: 1, borderColor: '#111' },
+  statLabel: { color: '#9CA3AF', fontSize: 9, marginTop: 2, fontWeight: '700' },
+  priorityRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 14, marginBottom: 6, borderWidth: 1, borderColor: '#E5E7EB' },
   priorityName: { fontSize: 14, fontWeight: '700' },
-  priorityDesc: { color: '#666', fontSize: 11, marginTop: 2 },
-  prioritySound: { color: '#444', fontSize: 10, marginTop: 2, fontStyle: 'italic' },
-  ruleRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 14, marginBottom: 6, borderWidth: 1, borderColor: '#111' },
-  ruleName: { color: '#E0E0F0', fontSize: 13, fontWeight: '700' },
-  ruleDesc: { color: '#555', fontSize: 11, marginTop: 2 },
+  priorityDesc: { color: '#9CA3AF', fontSize: 11, marginTop: 2 },
+  prioritySound: { color: '#9CA3AF', fontSize: 10, marginTop: 2, fontStyle: 'italic' },
+  ruleRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 14, marginBottom: 6, borderWidth: 1, borderColor: '#E5E7EB' },
+  ruleName: { color: '#1F2937', fontSize: 13, fontWeight: '700' },
+  ruleDesc: { color: '#6B7280', fontSize: 11, marginTop: 2 },
   dndCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FF3C6E10', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#FF3C6E22' },
   dndTitle: { color: '#FF3C6E', fontSize: 15, fontWeight: '800' },
-  dndDesc: { color: '#888', fontSize: 11, marginTop: 4 },
+  dndDesc: { color: '#6B7280', fontSize: 11, marginTop: 4 },
 });

@@ -44,7 +44,6 @@ if (!isExpoGo) {
       dec     += decipher.final('utf8');
       return dec;
     };
-    console.log('[Crypto] AES-256-GCM (react-native-quick-crypto)');
   } catch {
     // Fall through to Expo crypto fallback
     isExpoGo = true;
@@ -77,7 +76,6 @@ if (isExpoGo) {
   };
   _encrypt = xorEncrypt;
   _decrypt = xorDecrypt;
-  console.log('[Crypto] XOR fallback (Expo Go mode)');
 }
 
 export const encrypt    = (text: string, key: string)                          => _encrypt(text,key);

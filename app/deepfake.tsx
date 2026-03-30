@@ -71,7 +71,7 @@ function DeepFakeScreenContent() {
             [{text:'End Call',style:'destructive',onPress:()=>router.back()},{text:'Continue Monitoring',style:'cancel'}]
           );
         }
-      } catch(e){ console.log('Analysis error:',e); }
+      } catch { }
       finally{ setIsAnalyzing(false); scanAnimRef.current?.stop(); }
     };
     if(autoMode){
@@ -122,7 +122,7 @@ function DeepFakeScreenContent() {
           [{text:'End Call',style:'destructive',onPress:()=>router.back()},{text:'Continue Monitoring',style:'cancel'}]
         );
       }
-    } catch(e){ console.log('Analysis error:',e); }
+    } catch { }
     finally{ setIsAnalyzing(false); scanAnimRef.current?.stop(); }
   };
 
@@ -132,13 +132,13 @@ function DeepFakeScreenContent() {
   const alertOpacity = alertAnim.interpolate({inputRange:[0,1],outputRange:[0,0.3]});
 
   if(!permission) return (
-    <LinearGradient colors={['#020B18','#060F24']} style={{flex:1,justifyContent:'center',alignItems:'center'}}>
+    <LinearGradient colors={['#FFFFFF','#060F24']} style={{flex:1,justifyContent:'center',alignItems:'center'}}>
       <Text style={{color:'#fff'}}>Loading...</Text>
     </LinearGradient>
   );
 
   if(!permission.granted) return (
-    <LinearGradient colors={['#020B18','#040F20','#060F24']} style={{flex:1,justifyContent:'center',alignItems:'center',padding:32}}>
+    <LinearGradient colors={['#FFFFFF','#040F20','#060F24']} style={{flex:1,justifyContent:'center',alignItems:'center',padding:32}}>
       <Text style={{fontSize:60,marginBottom:20}}>🎭</Text>
       <Text style={{color:'#fff',fontSize:22,fontWeight:'900',textAlign:'center',marginBottom:10}}>Camera Required</Text>
       <Text style={{color:'#3D5A7A',fontSize:14,textAlign:'center',marginBottom:30,lineHeight:22}}>DeepFake Detection needs camera access to analyze video frames in real-time.</Text>
@@ -151,7 +151,7 @@ function DeepFakeScreenContent() {
   );
 
   return (
-    <LinearGradient colors={['#020B18','#040F20','#060F24']} style={{flex:1}}>
+    <LinearGradient colors={['#FFFFFF','#040F20','#060F24']} style={{flex:1}}>
       <Animated.View style={{flex:1,opacity:fadeIn}}>
         <ScrollView contentContainerStyle={S.container}>
 
@@ -263,7 +263,7 @@ function DeepFakeScreenContent() {
               style={{flex:1}}
             >
               <LinearGradient
-                colors={autoMode?['#7C3AED','#6D28D9']:['#0A1628','#0D1E3A']}
+                colors={autoMode?['#7C3AED','#6D28D9']:['#F9FAFB','#0D1E3A']}
                 style={S.scanBtn}
               >
                 <Text style={{fontSize:22}}>{autoMode?'⏸️':'▶️'}</Text>
@@ -351,7 +351,7 @@ function DeepFakeScreenContent() {
       {/* Full Report Modal */}
       <Modal visible={showDetails} transparent animationType="slide">
         <View style={{flex:1,backgroundColor:'rgba(0,0,0,0.92)',justifyContent:'flex-end'}}>
-          <LinearGradient colors={['#0A1628','#0D1E3A']} style={{borderTopLeftRadius:28,borderTopRightRadius:28,padding:24,paddingBottom:44,maxHeight:'80%'}}>
+          <LinearGradient colors={['#F9FAFB','#0D1E3A']} style={{borderTopLeftRadius:28,borderTopRightRadius:28,padding:24,paddingBottom:44,maxHeight:'80%'}}>
             <ScrollView>
               <Text style={{color:'#fff',fontSize:20,fontWeight:'900',marginBottom:4}}>📊 Full Analysis Report</Text>
               <Text style={{color:'#3D5A7A',fontSize:12,marginBottom:16}}>Frame #{frameCount} · {result?.analysisTime}ms analysis time</Text>
@@ -391,8 +391,8 @@ function DeepFakeScreenContent() {
 const S = StyleSheet.create({
   container:{paddingHorizontal:18,paddingTop:50,paddingBottom:20},
   header:{flexDirection:'row',alignItems:'center',marginBottom:14,gap:10},
-  backBtn:{width:36,height:36,borderRadius:18,backgroundColor:'#0A1628',justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:'#0D1E3A'},
-  flipBtn:{width:36,height:36,borderRadius:18,backgroundColor:'#0A1628',justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:'#0D1E3A'},
+  backBtn:{width:36,height:36,borderRadius:18,backgroundColor:'#F9FAFB',justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:'#0D1E3A'},
+  flipBtn:{width:36,height:36,borderRadius:18,backgroundColor:'#F9FAFB',justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:'#0D1E3A'},
   title:{color:'#fff',fontSize:18,fontWeight:'900'},
   statusBanner:{flexDirection:'row',alignItems:'center',borderRadius:14,padding:14,marginBottom:14,borderWidth:1.5},
   statusTitle:{fontSize:13,fontWeight:'900',letterSpacing:0.5},
@@ -412,7 +412,7 @@ const S = StyleSheet.create({
   controls:{flexDirection:'row',gap:10,marginBottom:14},
   scanBtn:{borderRadius:16,padding:16,alignItems:'center',flexDirection:'row',justifyContent:'center',gap:8},
   scanBtnText:{color:'#fff',fontSize:14,fontWeight:'800'},
-  metricsCard:{backgroundColor:'#0A1628',borderRadius:18,padding:16,marginBottom:14,borderWidth:1,borderColor:'#0D1E3A'},
+  metricsCard:{backgroundColor:'#F9FAFB',borderRadius:18,padding:16,marginBottom:14,borderWidth:1,borderColor:'#0D1E3A'},
   metricsTitle:{color:'#fff',fontSize:14,fontWeight:'800',marginBottom:14},
   metricRow:{flexDirection:'row',alignItems:'center',marginBottom:10,gap:8},
   metricLabel:{color:'#3D5A7A',fontSize:11,flex:1},
@@ -421,11 +421,11 @@ const S = StyleSheet.create({
   metricValue:{color:'#fff',fontSize:11,fontWeight:'700',width:28,textAlign:'right'},
   alertsBox:{backgroundColor:'#3B0A0A',borderRadius:10,padding:12,marginTop:8,borderWidth:1,borderColor:'#7F1D1D'},
   alertText:{color:'#FCA5A5',fontSize:11,marginBottom:3},
-  historyCard:{backgroundColor:'#0A1628',borderRadius:18,padding:16,marginBottom:14,borderWidth:1,borderColor:'#0D1E3A'},
+  historyCard:{backgroundColor:'#F9FAFB',borderRadius:18,padding:16,marginBottom:14,borderWidth:1,borderColor:'#0D1E3A'},
   historyRow:{flexDirection:'row',alignItems:'center',paddingVertical:8,borderLeftWidth:3,paddingLeft:10,marginBottom:4,gap:8},
   historyDot:{width:8,height:8,borderRadius:4},
   infoGrid:{flexDirection:'row',flexWrap:'wrap',gap:10,marginBottom:14},
-  infoCard:{width:(width-46)/2,backgroundColor:'#0A1628',borderRadius:14,padding:14,alignItems:'center',borderWidth:1,borderColor:'#0D1E3A'},
+  infoCard:{width:(width-46)/2,backgroundColor:'#F9FAFB',borderRadius:14,padding:14,alignItems:'center',borderWidth:1,borderColor:'#0D1E3A'},
 });
 
 export default function DeepFakeScreen() {

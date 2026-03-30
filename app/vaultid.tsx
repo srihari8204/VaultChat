@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { ErrorBoundary } from '../components/ErrorBoundary';
 
 import { LinearGradient } from 'expo-linear-gradient';
@@ -108,14 +107,14 @@ function VaultIDScreenContent() {
   const chainOpacity = chainAnim.interpolate({inputRange:[0,1],outputRange:[0.3,1]});
 
   if(loading) return (
-    <LinearGradient colors={['#020B18','#060F24']} style={{flex:1,justifyContent:'center',alignItems:'center'}}>
+    <LinearGradient colors={['#FFFFFF','#060F24']} style={{flex:1,justifyContent:'center',alignItems:'center'}}>
       <Text style={{color:'#7C3AED',fontSize:40}}>ðŸ§¬</Text>
       <Text style={{color:'#4A9FFF',fontSize:14,marginTop:12,letterSpacing:2}}>LOADING VAULT ID...</Text>
     </LinearGradient>
   );
 
   return (
-    <LinearGradient colors={['#020B18','#040F20','#060F24']} style={{flex:1}}>
+    <LinearGradient colors={['#FFFFFF','#040F20','#060F24']} style={{flex:1}}>
       <Animated.ScrollView style={[{flex:1,opacity:fadeIn}]} contentContainerStyle={S.container}>
 
         {/* Header */}
@@ -136,7 +135,7 @@ function VaultIDScreenContent() {
 
           {/* Main ID Card */}
           <Animated.View style={[S.idCard,{transform:[{scale:pulse}]}]}>
-            <LinearGradient colors={['#0D1E3A','#0A1628','#060F20']} style={S.idCardInner}>
+            <LinearGradient colors={['#0D1E3A','#F9FAFB','#060F20']} style={S.idCardInner}>
 
               {/* Blockchain spinning ring */}
               <Animated.View style={[S.chainRing,{transform:[{rotate:rotateStr}]}]}/>
@@ -285,7 +284,7 @@ function VaultIDScreenContent() {
       {/* Create Modal */}
       <Modal visible={showCreate} transparent animationType="slide">
         <View style={{flex:1,backgroundColor:'rgba(0,0,0,0.92)',justifyContent:'flex-end'}}>
-          <LinearGradient colors={['#0A1628','#0D1E3A']} style={{borderTopLeftRadius:28,borderTopRightRadius:28,padding:24,paddingBottom:44}}>
+          <LinearGradient colors={['#F9FAFB','#0D1E3A']} style={{borderTopLeftRadius:28,borderTopRightRadius:28,padding:24,paddingBottom:44}}>
             <Text style={{color:'#fff',fontSize:22,fontWeight:'900',marginBottom:4}}>ðŸ§¬ Create VaultID</Text>
             <Text style={{color:'#3D5A7A',fontSize:13,marginBottom:20}}>Your blockchain identity â€” no phone number needed</Text>
 
@@ -329,7 +328,7 @@ function VaultIDScreenContent() {
       {/* Details Modal */}
       <Modal visible={showDetails} transparent animationType="slide">
         <View style={{flex:1,backgroundColor:'rgba(0,0,0,0.92)',justifyContent:'flex-end'}}>
-          <LinearGradient colors={['#0A1628','#0D1E3A']} style={{borderTopLeftRadius:28,borderTopRightRadius:28,padding:24,paddingBottom:44,maxHeight:'85%'}}>
+          <LinearGradient colors={['#F9FAFB','#0D1E3A']} style={{borderTopLeftRadius:28,borderTopRightRadius:28,padding:24,paddingBottom:44,maxHeight:'85%'}}>
             <ScrollView>
               <Text style={{color:'#fff',fontSize:20,fontWeight:'900',marginBottom:16}}>ðŸ” VaultID Details</Text>
               {vaultID&&[
@@ -362,7 +361,7 @@ function VaultIDScreenContent() {
       {/* Certificate Modal */}
       <Modal visible={showCert} transparent animationType="slide">
         <View style={{flex:1,backgroundColor:'rgba(0,0,0,0.92)',justifyContent:'flex-end'}}>
-          <LinearGradient colors={['#0A1628','#0D1E3A']} style={{borderTopLeftRadius:28,borderTopRightRadius:28,padding:24,paddingBottom:44}}>
+          <LinearGradient colors={['#F9FAFB','#0D1E3A']} style={{borderTopLeftRadius:28,borderTopRightRadius:28,padding:24,paddingBottom:44}}>
             <Text style={{color:'#fff',fontSize:20,fontWeight:'900',marginBottom:4}}>ðŸ“œ Blockchain Certificate</Text>
             <Text style={{color:'#3D5A7A',fontSize:12,marginBottom:16}}>Cryptographic proof of your VaultID ownership</Text>
             <ScrollView style={{backgroundColor:'#060E22',borderRadius:12,padding:14,maxHeight:200,marginBottom:16}}>
@@ -387,7 +386,7 @@ function VaultIDScreenContent() {
 const S = StyleSheet.create({
   container:{paddingHorizontal:20,paddingTop:50,paddingBottom:40},
   header:{flexDirection:'row',alignItems:'center',marginBottom:20,gap:12},
-  backBtn:{width:36,height:36,borderRadius:18,backgroundColor:'#0A1628',justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:'#0D1E3A'},
+  backBtn:{width:36,height:36,borderRadius:18,backgroundColor:'#F9FAFB',justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:'#0D1E3A'},
   headerTitle:{color:'#fff',fontSize:20,fontWeight:'900'},
   shareBtn:{backgroundColor:'#0D1E3A',borderRadius:10,paddingHorizontal:14,paddingVertical:7,borderWidth:1,borderColor:'#1D4ED8'},
   idCard:{borderRadius:24,marginBottom:16,elevation:20,shadowColor:'#7C3AED',shadowOffset:{width:0,height:0},shadowOpacity:0.8,shadowRadius:20},
@@ -405,13 +404,13 @@ const S = StyleSheet.create({
   walletAddr:{color:'#4A9FFF',fontSize:12,fontFamily:'monospace',fontWeight:'700',flex:1},
   blockchainDot:{width:8,height:8,borderRadius:4,backgroundColor:'#10B981'},
   trustRow:{width:'100%',gap:6,marginBottom:12},
-  trustBar:{height:6,backgroundColor:'#0A1628',borderRadius:3,flex:1,overflow:'hidden'},
+  trustBar:{height:6,backgroundColor:'#F9FAFB',borderRadius:3,flex:1,overflow:'hidden'},
   trustFill:{height:6,borderRadius:3},
   trustScore:{fontSize:14,fontWeight:'900'},
   chainBlocks:{flexDirection:'row',gap:4,marginBottom:8},
   nophone:{backgroundColor:'#052E16',borderRadius:8,paddingHorizontal:12,paddingVertical:4,borderWidth:1,borderColor:'#166534'},
   statsRow:{flexDirection:'row',gap:10,marginBottom:16},
-  statCard:{flex:1,backgroundColor:'#0A1628',borderRadius:14,padding:12,alignItems:'center',borderWidth:1,borderColor:'#0D1E3A'},
+  statCard:{flex:1,backgroundColor:'#F9FAFB',borderRadius:14,padding:12,alignItems:'center',borderWidth:1,borderColor:'#0D1E3A'},
   statValue:{color:'#fff',fontSize:13,fontWeight:'800',marginBottom:2},
   statLabel:{color:'#3D5A7A',fontSize:9,letterSpacing:1},
   actions:{flexDirection:'row',gap:10,marginBottom:16},
@@ -419,9 +418,9 @@ const S = StyleSheet.create({
   actionGrad:{borderRadius:16,padding:14,alignItems:'center'},
   actionText:{color:'#fff',fontSize:11,fontWeight:'800',marginTop:4},
   actionSub:{color:'rgba(255,255,255,0.5)',fontSize:9,marginTop:2},
-  trustActions:{backgroundColor:'#0A1628',borderRadius:16,padding:16,marginBottom:16,borderWidth:1,borderColor:'#0D1E3A'},
+  trustActions:{backgroundColor:'#F9FAFB',borderRadius:16,padding:16,marginBottom:16,borderWidth:1,borderColor:'#0D1E3A'},
   featuresGrid:{flexDirection:'row',flexWrap:'wrap',gap:10,marginBottom:16},
-  featureCard:{width:(width-50)/3,backgroundColor:'#0A1628',borderRadius:14,padding:12,alignItems:'center',borderWidth:1,borderColor:'#0D1E3A'},
+  featureCard:{width:(width-50)/3,backgroundColor:'#F9FAFB',borderRadius:14,padding:12,alignItems:'center',borderWidth:1,borderColor:'#0D1E3A'},
   destroyBtn:{backgroundColor:'#3B0A0A',borderRadius:14,padding:16,alignItems:'center',borderWidth:1,borderColor:'#7F1D1D',marginBottom:20},
 });
 

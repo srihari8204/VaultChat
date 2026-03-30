@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/chat-export.tsx — Export Chat as Text/HTML
 // Pulls messages from Firestore, formats, shares via system share sheet
 // Options: Text, HTML with styling
@@ -14,7 +13,7 @@ import firestore from '@react-native-firebase/firestore';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 
-const C = { bg: '#020B18', accent: '#4A9FFF', green: '#10B981', card: '#0A1628' };
+const C = { bg: '#FFFFFF', accent: '#4A9FFF', green: '#10B981', card: '#F9FAFB' };
 
 export default function ChatExportScreen() {
   const { chatId, peerName } = useLocalSearchParams();
@@ -99,12 +98,12 @@ export default function ChatExportScreen() {
       setProgress('Building HTML...');
 
       let html = '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>VaultChat Export</title>';
-      html += '<style>body{font-family:-apple-system,sans-serif;background:#03030E;color:#E0E0F0;max-width:600px;margin:0 auto;padding:16px}';
+      html += '<style>body{font-family:-apple-system,sans-serif;background:#FFFFFF;color:#1F2937;max-width:600px;margin:0 auto;padding:16px}';
       html += '.header{text-align:center;padding:20px;border-bottom:1px solid #222;margin-bottom:20px}';
       html += '.header h1{color:#4A9FFF;margin:0}.header p{color:#666;font-size:12px}';
       html += '.msg{margin:4px 0;padding:8px 12px;border-radius:14px;max-width:80%}';
-      html += '.mine{background:#003D2A;margin-left:auto;border-bottom-right-radius:2px}';
-      html += '.peer{background:#111127;margin-right:auto;border-bottom-left-radius:2px}';
+      html += '.mine{background:#DCF8C6;margin-left:auto;border-bottom-right-radius:2px}';
+      html += '.peer{background:#F3F4F6;margin-right:auto;border-bottom-left-radius:2px}';
       html += '.time{color:#555;font-size:10px;margin-top:4px;text-align:right}';
       html += '.sender{color:#4A9FFF;font-size:11px;font-weight:700;margin-bottom:2px}';
       html += '.meta{color:#666;font-size:10px;font-style:italic}';
@@ -160,7 +159,7 @@ export default function ChatExportScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Export Chat', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
+      <Stack.Screen options={{ title: 'Export Chat', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
       <View style={s.container}>
         <StatusBar barStyle="light-content" />
 
@@ -207,17 +206,17 @@ export default function ChatExportScreen() {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg, padding: 16 },
-  infoCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 20, borderWidth: 1, borderColor: '#111' },
+  infoCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 20, borderWidth: 1, borderColor: '#E5E7EB' },
   infoTitle: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  infoDesc: { color: '#666', fontSize: 12, marginTop: 2 },
-  exportBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 10, borderWidth: 1, borderColor: '#111' },
-  exportIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#111', justifyContent: 'center', alignItems: 'center', marginRight: 14 },
-  exportTitle: { color: '#E0E0F0', fontSize: 15, fontWeight: '700' },
-  exportDesc: { color: '#666', fontSize: 12, marginTop: 2 },
+  infoDesc: { color: '#9CA3AF', fontSize: 12, marginTop: 2 },
+  exportBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 10, borderWidth: 1, borderColor: '#E5E7EB' },
+  exportIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center', marginRight: 14 },
+  exportTitle: { color: '#1F2937', fontSize: 15, fontWeight: '700' },
+  exportDesc: { color: '#9CA3AF', fontSize: 12, marginTop: 2 },
   progressBox: { alignItems: 'center', padding: 20, marginTop: 10 },
-  progressTxt: { color: '#888', fontSize: 13, marginTop: 8 },
-  progressCount: { color: '#555', fontSize: 11, marginTop: 4 },
+  progressTxt: { color: '#6B7280', fontSize: 13, marginTop: 8 },
+  progressCount: { color: '#6B7280', fontSize: 11, marginTop: 4 },
   noteBox: { marginTop: 24, backgroundColor: '#FF3C6E10', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#FF3C6E22' },
   noteTitle: { color: '#FF3C6E', fontSize: 12, fontWeight: '800', marginBottom: 4 },
-  noteDesc: { color: '#888', fontSize: 11, lineHeight: 18 },
+  noteDesc: { color: '#6B7280', fontSize: 11, lineHeight: 18 },
 });

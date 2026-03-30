@@ -119,7 +119,7 @@ export default function EmailBridgeScreen() {
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="light-content" backgroundColor="#020B18" />
+      <StatusBar barStyle="light-content" backgroundColor="#FFFFFF" />
 
       <ScrollView
         style={styles.scroll}
@@ -139,7 +139,7 @@ export default function EmailBridgeScreen() {
 
         {/* ── Info Card ───────────────────────────────── */}
         <LinearGradient
-          colors={['#0D1B3E', '#0A1628']}
+          colors={['#0D1B3E', '#F9FAFB']}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={styles.infoCard}
@@ -359,7 +359,7 @@ export default function EmailBridgeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#020B18',
+    backgroundColor: '#FFFFFF',
   },
   scroll: {
     flex: 1,
@@ -460,7 +460,7 @@ const styles = StyleSheet.create({
 
   // Compose
   composeCard: {
-    backgroundColor: '#0A1628',
+    backgroundColor: '#F9FAFB',
     borderRadius: 16,
     padding: 18,
     marginBottom: 24,
@@ -506,7 +506,7 @@ const styles = StyleSheet.create({
 
   // Email cards
   emailCard: {
-    backgroundColor: '#0A1628',
+    backgroundColor: '#F9FAFB',
     borderRadius: 16,
     padding: 16,
     marginBottom: 12,
@@ -594,7 +594,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContainer: {
-    backgroundColor: '#0A1628',
+    backgroundColor: '#F9FAFB',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     maxHeight: '85%',

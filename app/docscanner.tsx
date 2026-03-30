@@ -6,7 +6,7 @@ import { Alert, Animated, Easing, Platform, ScrollView, StyleSheet, Text, TextIn
 import { ErrorBoundary } from '../components/ErrorBoundary';
 
 const C = {
-  bg: '#020B18', primary: '#4A9FFF', secondary: '#7C3AED',
+  bg: '#FFFFFF', primary: '#4A9FFF', secondary: '#7C3AED',
   accent: '#10B981', danger: '#EF4444', warning: '#F59E0B',
   border: 'rgba(74,159,255,0.15)', borderDim: 'rgba(255,255,255,0.06)',
   text: '#FFFFFF', textDim: 'rgba(255,255,255,0.5)', textFaint: 'rgba(255,255,255,0.22)',
@@ -147,7 +147,7 @@ function DocScannerContent() {
 
   return (
     <View style={S.container}>
-      <LinearGradient colors={['#020B18', '#040F20', '#060F24']} style={StyleSheet.absoluteFillObject} />
+      <LinearGradient colors={['#FFFFFF', '#040F20', '#060F24']} style={StyleSheet.absoluteFillObject} />
 
       <Animated.View style={{ flex: 1, opacity: fadeIn }}>
         <View style={S.header}>
@@ -404,7 +404,7 @@ export default function DocScannerScreen() {
 }
 
 const S = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#020B18' },
+  container: { flex: 1, backgroundColor: '#FFFFFF' },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, paddingTop: 50, paddingBottom: 14, gap: 10 },
   title: { color: '#fff', fontSize: 20, fontWeight: '900' },
   backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(10,22,40,0.8)', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },

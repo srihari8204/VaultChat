@@ -60,7 +60,7 @@ function BehavioralScreenContent() {
   const brainRotate = brainAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
 
   return (
-    <LinearGradient colors={['#020B18', '#040F20', '#060F24']} style={{ flex: 1 }}>
+    <LinearGradient colors={['#FFFFFF', '#040F20', '#060F24']} style={{ flex: 1 }}>
       <Animated.View style={{ flex: 1, opacity: fadeIn }}>
         <ScrollView contentContainerStyle={S.container}>
           <View style={S.header}>
@@ -74,7 +74,7 @@ function BehavioralScreenContent() {
           </View>
 
           <Animated.View style={[S.brainCard, { transform: [{ scale: pulseAnim }] }]}>
-            <LinearGradient colors={['#0D1E3A', '#0A1628']} style={S.brainInner}>
+            <LinearGradient colors={['#0D1E3A', '#F9FAFB']} style={S.brainInner}>
               <Animated.View style={[S.brainRing, { transform: [{ rotate: brainRotate }] }]} />
               <Text style={{ fontSize: 60, marginBottom: 8 }}>🧠</Text>
               <Text style={{ color: '#4A9FFF', fontSize: 18, fontWeight: '900' }}>BEHAVIORAL AI</Text>
@@ -110,7 +110,7 @@ function BehavioralScreenContent() {
                 {isAnalyzing ? 'Analyzing...' : 'Next at ' + (Math.ceil((keyCount + 1) / 10) * 10) + ' keys'}
               </Text>
             </View>
-            <View style={{ marginTop: 10, height: 4, backgroundColor: '#0A1628', borderRadius: 2 }}>
+            <View style={{ marginTop: 10, height: 4, backgroundColor: '#F9FAFB', borderRadius: 2 }}>
               <View style={{ height: 4, borderRadius: 2, backgroundColor: alertColor, width: (((keyCount % 10) / 10 * 100) + '%') as any}} />
             </View>
           </View>
@@ -164,7 +164,7 @@ function BehavioralScreenContent() {
 const S = StyleSheet.create({
   container: { paddingHorizontal: 18, paddingTop: 50, paddingBottom: 20 },
   header: { flexDirection: 'row', alignItems: 'center', marginBottom: 16, gap: 10 },
-  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#0A1628', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#0D1E3A' },
+  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F9FAFB', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#0D1E3A' },
   title: { color: '#fff', fontSize: 18, fontWeight: '900' },
   brainCard: { marginBottom: 16, borderRadius: 24 },
   brainInner: { borderRadius: 24, padding: 28, alignItems: 'center', borderWidth: 1.5, borderColor: '#0D1E3A', overflow: 'hidden' },
@@ -172,12 +172,12 @@ const S = StyleSheet.create({
   statusPill: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 6, borderWidth: 1, marginTop: 12 },
   statusDot: { width: 8, height: 8, borderRadius: 4 },
   alertBanner: { flexDirection: 'row', alignItems: 'center', borderRadius: 14, padding: 14, marginBottom: 14, borderWidth: 1.5 },
-  testCard: { backgroundColor: '#0A1628', borderRadius: 18, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#0D1E3A' },
+  testCard: { backgroundColor: '#F9FAFB', borderRadius: 18, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#0D1E3A' },
   cardTitle: { color: '#fff', fontSize: 14, fontWeight: '800', marginBottom: 12 },
   testInput: { backgroundColor: '#060E22', borderRadius: 14, padding: 14, color: '#fff', fontSize: 14, borderWidth: 1.5, borderColor: '#0D1E3A', minHeight: 100, textAlignVertical: 'top' },
-  metricsCard: { backgroundColor: '#0A1628', borderRadius: 18, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#0D1E3A' },
+  metricsCard: { backgroundColor: '#F9FAFB', borderRadius: 18, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#0D1E3A' },
   metricRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#060E22', gap: 8 },
-  historyCard: { backgroundColor: '#0A1628', borderRadius: 18, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#0D1E3A' },
+  historyCard: { backgroundColor: '#F9FAFB', borderRadius: 18, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#0D1E3A' },
   historyRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderLeftWidth: 3, paddingLeft: 10, marginBottom: 4 },
   resetBtn: { backgroundColor: '#3B0A0A', borderRadius: 14, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: '#7F1D1D', marginBottom: 14 },
 });

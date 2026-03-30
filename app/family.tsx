@@ -177,7 +177,7 @@ export default function FamilyScreen() {
                   <Switch
                     value={filter.blocked}
                     onValueChange={() => toggleFilter(filter.id)}
-                    trackColor={{ false: '#1E293B', true: '#EF4444' }}
+                    trackColor={{ false: '#E5E7EB', true: '#EF4444' }}
                     thumbColor="#FFFFFF"
                   />
                 </View>
@@ -211,7 +211,7 @@ export default function FamilyScreen() {
                   <Switch
                     value={item.val}
                     onValueChange={() => item.set(!item.val)}
-                    trackColor={{ false: '#1E293B', true: '#1D4ED8' }}
+                    trackColor={{ false: '#E5E7EB', true: '#1D4ED8' }}
                     thumbColor={item.val ? '#FFFFFF' : '#475569'}
                   />
                 </View>
@@ -315,14 +315,14 @@ const styles = StyleSheet.create({
     letterSpacing: 1, marginBottom: 10, marginLeft: 4,
   },
   card: {
-    backgroundColor: '#0A1628', borderRadius: 16,
+    backgroundColor: '#F9FAFB', borderRadius: 16,
     borderWidth: 1, borderColor: '#0D1E3A', overflow: 'hidden',
   },
   divider: { height: 1, backgroundColor: '#0D1E3A', marginLeft: 56 },
 
   // MEMBER CARD
   memberCard: {
-    backgroundColor: '#0A1628', borderRadius: 16,
+    backgroundColor: '#F9FAFB', borderRadius: 16,
     borderWidth: 1, borderColor: '#0D1E3A',
     padding: 14, marginBottom: 10,
     flexDirection: 'row', alignItems: 'center', gap: 12,

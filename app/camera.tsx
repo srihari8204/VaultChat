@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/camera.tsx — In-App Camera
 // Full-screen camera with photo/video, flip, flash, viewOnce toggle
 // Returns captured media URI back to chat via router params
@@ -27,10 +26,10 @@ export default function CameraScreen() {
       <View style={[s.container, { justifyContent: 'center', alignItems: 'center' }]}>
         <Text style={{ color: '#fff', fontSize: 16, marginBottom: 20 }}>Camera permission needed</Text>
         <TouchableOpacity onPress={requestPermission} style={s.permBtn}>
-          <Text style={{ color: '#00D4AA', fontWeight: '800', fontSize: 16 }}>Grant Access</Text>
+          <Text style={{ color: '#10B981', fontWeight: '800', fontSize: 16 }}>Grant Access</Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 16 }}>
-          <Text style={{ color: '#888' }}>Go Back</Text>
+          <Text style={{ color: '#6B7280' }}>Go Back</Text>
         </TouchableOpacity>
       </View>
     );
@@ -78,9 +77,9 @@ export default function CameraScreen() {
           </TouchableOpacity>
           <TouchableOpacity
             onPress={() => setViewOnce(v => !v)}
-            style={[s.topBtn, viewOnce && { backgroundColor: '#00D4AA44' }]}
+            style={[s.topBtn, viewOnce && { backgroundColor: '#10B98144' }]}
           >
-            <Text style={[s.topIcon, viewOnce && { color: '#00D4AA' }]}>{"\uD83D\uDC41"}</Text>
+            <Text style={[s.topIcon, viewOnce && { color: '#10B981' }]}>{"\uD83D\uDC41"}</Text>
           </TouchableOpacity>
         </View>
 
@@ -122,7 +121,7 @@ const s = StyleSheet.create({
   captureBtn: { width: 76, height: 76, borderRadius: 38, borderWidth: 4, borderColor: '#fff', justifyContent: 'center', alignItems: 'center' },
   captureInner: { width: 62, height: 62, borderRadius: 31, backgroundColor: '#fff' },
   flipBtn: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#00000066', justifyContent: 'center', alignItems: 'center' },
-  permBtn: { paddingHorizontal: 28, paddingVertical: 14, borderRadius: 14, borderWidth: 1, borderColor: '#00D4AA44', backgroundColor: '#00D4AA15' },
-  voBadge: { position: 'absolute', top: 100, alignSelf: 'center', backgroundColor: '#00D4AA33', paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20 },
-  voTxt: { color: '#00D4AA', fontSize: 13, fontWeight: '700' },
+  permBtn: { paddingHorizontal: 28, paddingVertical: 14, borderRadius: 14, borderWidth: 1, borderColor: '#10B98144', backgroundColor: '#10B98115' },
+  voBadge: { position: 'absolute', top: 100, alignSelf: 'center', backgroundColor: '#10B98133', paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20 },
+  voTxt: { color: '#10B981', fontSize: 13, fontWeight: '700' },
 });

@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/receipt-control.tsx — Per-Contact Read Receipt Control
 // Show blue ticks to some contacts, hide from others
 // Also controls typing indicator and last seen per contact
@@ -13,7 +12,7 @@ import { Stack } from 'expo-router';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 
-const C = { bg: '#020B18', accent: '#4A9FFF', card: '#0A1628', green: '#10B981', danger: '#FF3C6E' };
+const C = { bg: '#FFFFFF', accent: '#4A9FFF', card: '#F9FAFB', green: '#10B981', danger: '#FF3C6E' };
 
 export default function ReceiptControlScreen() {
   const myUid = auth().currentUser?.uid || '';
@@ -71,7 +70,7 @@ export default function ReceiptControlScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Privacy per Contact', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
+      <Stack.Screen options={{ title: 'Privacy per Contact', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
       <View style={s.container}>
         <StatusBar barStyle="light-content" />
 
@@ -84,7 +83,7 @@ export default function ReceiptControlScreen() {
         </View>
 
         <TextInput style={s.searchInput} value={search} onChangeText={setSearch}
-          placeholder="Search contacts..." placeholderTextColor="#555" />
+          placeholder="Search contacts..." placeholderTextColor="#6B7280" />
 
         {/* Legend */}
         <View style={s.legendRow}>
@@ -123,7 +122,7 @@ export default function ReceiptControlScreen() {
                 </View>
               );
             }}
-            ListEmptyComponent={<View style={{ alignItems: 'center', padding: 40 }}><Text style={{ color: '#555' }}>No contacts found</Text></View>}
+            ListEmptyComponent={<View style={{ alignItems: 'center', padding: 40 }}><Text style={{ color: '#6B7280' }}>No contacts found</Text></View>}
           />
         )}
       </View>
@@ -133,20 +132,20 @@ export default function ReceiptControlScreen() {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg, padding: 16 },
-  infoCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: '#111' },
+  infoCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: '#E5E7EB' },
   infoTitle: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  infoDesc: { color: '#666', fontSize: 12, marginTop: 2, lineHeight: 18 },
-  searchInput: { backgroundColor: C.card, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, color: '#fff', fontSize: 14, marginBottom: 8, borderWidth: 1, borderColor: '#111' },
+  infoDesc: { color: '#9CA3AF', fontSize: 12, marginTop: 2, lineHeight: 18 },
+  searchInput: { backgroundColor: C.card, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, color: '#fff', fontSize: 14, marginBottom: 8, borderWidth: 1, borderColor: '#E5E7EB' },
   legendRow: { flexDirection: 'row', gap: 16, marginBottom: 10, paddingLeft: 4 },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   legendDot: { width: 8, height: 8, borderRadius: 4 },
-  legendTxt: { color: '#666', fontSize: 10 },
-  contactRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 12, marginBottom: 6, borderWidth: 1, borderColor: '#111' },
-  avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#111', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  contactName: { color: '#E0E0F0', fontSize: 14, fontWeight: '700' },
-  contactPhone: { color: '#555', fontSize: 11, marginTop: 2 },
+  legendTxt: { color: '#9CA3AF', fontSize: 10 },
+  contactRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 12, marginBottom: 6, borderWidth: 1, borderColor: '#E5E7EB' },
+  avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  contactName: { color: '#1F2937', fontSize: 14, fontWeight: '700' },
+  contactPhone: { color: '#6B7280', fontSize: 11, marginTop: 2 },
   toggleGroup: { flexDirection: 'row', gap: 6 },
-  toggleBtn: { width: 32, height: 32, borderRadius: 8, backgroundColor: '#111', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#222' },
+  toggleBtn: { width: 32, height: 32, borderRadius: 8, backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB' },
   toggleOn: {},
-  toggleIcon: { fontSize: 12, color: '#555' },
+  toggleIcon: { fontSize: 12, color: '#6B7280' },
 });

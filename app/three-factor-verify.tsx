@@ -33,7 +33,7 @@ import {
 const C = {
   bg: '#FFFFFF',
   panel: '#F8F9FA',
-  cyan: '#00E5FF',
+  cyan: '#4A9FFF',
   green: '#00FF9D',
   coral: '#FF4D6D',
   white: '#FFFFFF',

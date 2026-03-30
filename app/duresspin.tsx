@@ -28,7 +28,7 @@ const REAL_PIN_KEY   = 'vaultRealPin';
 const DURESS_PIN_KEY = 'vaultDuressPin';
 
 const C = {
-  bg:'#010812', primary:'#4A9FFF',
+  bg:'#FFFFFF', primary:'#4A9FFF',
   dim:'rgba(255,255,255,0.4)', faint:'rgba(255,255,255,0.15)',
 };
 
@@ -131,7 +131,7 @@ export default function DuressPin() {
 
   return (
     <View style={{flex:1,backgroundColor:C.bg}}>
-      <LinearGradient colors={['#010812','#020B18']} style={StyleSheet.absoluteFillObject}/>
+      <LinearGradient colors={['#FFFFFF','#FFFFFF']} style={StyleSheet.absoluteFillObject}/>
       <View style={Ss.root}>
 
         {/* Icon */}

@@ -24,11 +24,11 @@ import {
 } from 'react-native';
 
 const C = {
-  bg: '#020B18',
-  card: '#0A1628',
+  bg: '#FFFFFF',
+  card: '#F9FAFB',
   cardAlt: '#111D32',
   accent: '#4A9FFF',
-  cyan: '#00E5FF',
+  cyan: '#4A9FFF',
   red: '#EF4444',
   green: '#10B981',
   orange: '#F59E0B',
@@ -179,7 +179,6 @@ export default function CallRecordingScreen() {
       }, 1000);
     } catch (e) {
       Alert.alert('Error', 'Failed to start recording.');
-      console.warn('[CallRecording] Start error:', e);
     }
   };
 
@@ -191,7 +190,6 @@ export default function CallRecordingScreen() {
         setState('paused');
       }
     } catch (e) {
-      console.warn('[CallRecording] Pause error:', e);
     }
   };
 
@@ -205,7 +203,6 @@ export default function CallRecordingScreen() {
         }, 1000);
       }
     } catch (e) {
-      console.warn('[CallRecording] Resume error:', e);
     }
   };
 
@@ -235,7 +232,6 @@ export default function CallRecordingScreen() {
         setState('finished');
       }
     } catch (e) {
-      console.warn('[CallRecording] Stop error:', e);
       setState('finished');
     }
   };
@@ -465,7 +461,7 @@ export default function CallRecordingScreen() {
   return (
     <View style={s.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <LinearGradient colors={[C.bg, '#0A1628', C.bg]} style={StyleSheet.absoluteFill} />
+      <LinearGradient colors={[C.bg, '#F9FAFB', C.bg]} style={StyleSheet.absoluteFill} />
 
       <Animated.View style={{ flex: 1, opacity: fadeIn }}>
         {renderHeader()}

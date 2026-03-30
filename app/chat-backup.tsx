@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/chat-backup.tsx — Chat Backup & Restore
 // Simulated backup system using AsyncStorage for chat metadata
 
@@ -16,8 +15,8 @@ import { Ionicons } from '@expo/vector-icons';
 const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
 
 const C = {
-  bg: '#020B18', accent: '#4A9FFF', cyan: '#00E5FF',
-  card: '#0A1628', cardBorder: '#112240', white: '#FFFFFF',
+  bg: '#FFFFFF', accent: '#4A9FFF', cyan: '#4A9FFF',
+  card: '#F9FAFB', cardBorder: '#112240', white: '#FFFFFF',
   muted: '#7B8CA8', green: '#10B981', red: '#FF4D6D',
   orange: '#FF9F43', yellow: '#FBBF24',
 };
@@ -183,7 +182,7 @@ export default function ChatBackupScreen() {
       <Stack.Screen options={{ headerShown: false }} />
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
 
-      <LinearGradient colors={['#0A1628', C.bg]} style={s.header}>
+      <LinearGradient colors={['#F9FAFB', C.bg]} style={s.header}>
         <View style={[s.headerRow, { marginTop: TOP }]}>
           <TouchableOpacity onPress={() => router.back()} hitSlop={16}>
             <Ionicons name="arrow-back" size={24} color={C.white} />
@@ -196,7 +195,7 @@ export default function ChatBackupScreen() {
       <ScrollView style={s.scroll} contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
 
         {/* ── Backup Status Card ──────────────────────── */}
-        <LinearGradient colors={['#0F2847', '#0A1628']} style={s.card}>
+        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.statusRow}>
             <View style={[s.statusIcon, { backgroundColor: lastBackup ? C.green + '20' : C.orange + '20' }]}>
               <Ionicons name={lastBackup ? 'cloud-done' : 'cloud-offline'} size={28}
@@ -223,7 +222,7 @@ export default function ChatBackupScreen() {
         </LinearGradient>
 
         {/* ── Backup Now ─────────────────────────────── */}
-        <LinearGradient colors={['#0F2847', '#0A1628']} style={s.card}>
+        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <Text style={s.cardTitle}>Backup Now</Text>
           <Text style={s.cardDesc}>Includes: Messages, Media, Settings</Text>
 
@@ -254,7 +253,7 @@ export default function ChatBackupScreen() {
         </LinearGradient>
 
         {/* ── Backup Settings ────────────────────────── */}
-        <LinearGradient colors={['#0F2847', '#0A1628']} style={s.card}>
+        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <Text style={s.cardTitle}>Backup Settings</Text>
 
           <Text style={s.sectionLabel}>Backup Frequency</Text>
@@ -279,13 +278,13 @@ export default function ChatBackupScreen() {
               value={settings.includeVideos}
               onValueChange={(v) => saveSetting({ ...settings, includeVideos: v })}
               trackColor={{ false: '#1A2A44', true: C.accent }}
-              thumbColor={settings.includeVideos ? C.white : '#555'}
+              thumbColor={settings.includeVideos ? C.white : '#6B7280'}
             />
           </View>
         </LinearGradient>
 
         {/* ── Restore ────────────────────────────────── */}
-        <LinearGradient colors={['#0F2847', '#0A1628']} style={s.card}>
+        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <Text style={s.cardTitle}>Restore</Text>
           <Text style={s.cardDesc}>Restore your messages and media from a previous backup.</Text>
 
@@ -314,7 +313,7 @@ export default function ChatBackupScreen() {
 
         {/* ── Backup History ─────────────────────────── */}
         {backups.length > 0 && (
-          <LinearGradient colors={['#0F2847', '#0A1628']} style={s.card}>
+          <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
             <Text style={s.cardTitle}>Backup History</Text>
             {backups.map((b, i) => (
               <TouchableOpacity key={b.id} style={s.historyRow} onPress={() => restoreBackup(b)} activeOpacity={0.7}>

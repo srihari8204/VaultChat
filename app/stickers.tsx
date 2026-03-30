@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/stickers.tsx — Sticker Pack Manager
 // Built-in packs + create custom stickers from photos
 // Stickers stored in Firestore: stickerPacks/{packId}/stickers/{id}
@@ -16,7 +15,7 @@ import storage from '@react-native-firebase/storage';
 
 const { width: SW } = Dimensions.get('window');
 const TILE = (SW - 60) / 4;
-const C = { bg: '#020B18', accent: '#4A9FFF', green: '#10B981', card: '#0A1628' };
+const C = { bg: '#FFFFFF', accent: '#4A9FFF', green: '#10B981', card: '#F9FAFB' };
 
 // Built-in emoji sticker packs
 const BUILTIN_PACKS = [
@@ -104,7 +103,7 @@ export default function StickerScreen() {
     const stickers = selectedPack.stickers || [];
     return (
       <>
-        <Stack.Screen options={{ title: selectedPack.name, headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
+        <Stack.Screen options={{ title: selectedPack.name, headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
         <View style={s.container}>
           <FlatList
             data={stickers}
@@ -127,7 +126,7 @@ export default function StickerScreen() {
             </TouchableOpacity>
           )}
           <TouchableOpacity onPress={() => setSelectedPack(null)} style={{ padding: 16, alignItems: 'center' }}>
-            <Text style={{ color: '#555' }}>Back to Packs</Text>
+            <Text style={{ color: '#6B7280' }}>Back to Packs</Text>
           </TouchableOpacity>
           <Modal visible={!!showPreview} transparent animationType="fade" onRequestClose={() => setShowPreview(null)}>
             <TouchableOpacity style={s.previewBg} activeOpacity={1} onPress={() => setShowPreview(null)}>
@@ -145,7 +144,7 @@ export default function StickerScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Sticker Packs', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
+      <Stack.Screen options={{ title: 'Sticker Packs', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
       <View style={s.container}>
         <StatusBar barStyle="light-content" />
         <View style={s.tabs}>
@@ -162,7 +161,7 @@ export default function StickerScreen() {
           <>
             <FlatList data={customPacks} keyExtractor={p => p.id} renderItem={renderCustomPack}
               contentContainerStyle={{ padding: 12 }}
-              ListEmptyComponent={<View style={{ alignItems: 'center', padding: 40 }}><Text style={{ color: '#555' }}>No custom packs yet</Text></View>}
+              ListEmptyComponent={<View style={{ alignItems: 'center', padding: 40 }}><Text style={{ color: '#6B7280' }}>No custom packs yet</Text></View>}
             />
             <TouchableOpacity style={s.createPackBtn} onPress={createCustomPack}>
               <Text style={s.createPackTxt}>{"\u2795  Create Sticker Pack"}</Text>
@@ -177,15 +176,15 @@ export default function StickerScreen() {
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   tabs: { flexDirection: 'row', paddingHorizontal: 12, paddingTop: 8, gap: 6 },
-  tab: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: '#0A1628' },
+  tab: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: '#F9FAFB' },
   tabActive: { backgroundColor: C.accent },
-  tabTxt: { color: '#888', fontSize: 13, fontWeight: '700' },
+  tabTxt: { color: '#6B7280', fontSize: 13, fontWeight: '700' },
   tabTxtActive: { color: '#000' },
-  packCard: { backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 8, borderWidth: 1, borderColor: '#111', flexDirection: 'row', alignItems: 'center', gap: 12 },
+  packCard: { backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 8, borderWidth: 1, borderColor: '#E5E7EB', flexDirection: 'row', alignItems: 'center', gap: 12 },
   packEmoji: { fontSize: 32 },
-  packName: { color: '#E0E0F0', fontSize: 15, fontWeight: '700', flex: 1 },
-  packCount: { color: '#555', fontSize: 12 },
-  stickerTile: { width: TILE, height: TILE, margin: 4, borderRadius: 12, backgroundColor: '#0A1628', justifyContent: 'center', alignItems: 'center' },
+  packName: { color: '#1F2937', fontSize: 15, fontWeight: '700', flex: 1 },
+  packCount: { color: '#6B7280', fontSize: 12 },
+  stickerTile: { width: TILE, height: TILE, margin: 4, borderRadius: 12, backgroundColor: '#F9FAFB', justifyContent: 'center', alignItems: 'center' },
   stickerEmoji: { fontSize: 36 },
   stickerImg: { width: TILE - 8, height: TILE - 8, borderRadius: 10 },
   addStickerBtn: { margin: 12, backgroundColor: C.accent, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },

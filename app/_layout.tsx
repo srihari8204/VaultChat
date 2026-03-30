@@ -33,54 +33,59 @@ export default function RootLayout() {
   const [securityChecked, setSecurityChecked] = useState(false);
 
   useEffect(() => {
-    // ── 1. Block screenshots app-wide ─────────────────────────
-    if (Platform.OS !== 'web') ScreenCapture.preventScreenCaptureAsync();
+    // ── 1. Block screenshots app-wide (native only) ──────────
+    if (Platform.OS !== 'web') {
+      ScreenCapture.preventScreenCaptureAsync().catch(() => {});
+    }
 
     // ── 2. Run security scan BEFORE showing any screen ─────────
     const runStartup = async () => {
-      try {
-        const report = await runSecurityCheck();
+      // Skip security checks on web — they require native APIs
+      if (Platform.OS !== 'web') {
+        try {
+          const report = await runSecurityCheck();
 
-        if (!report.clean) {
-          // Keys already wiped inside runSecurityCheck()
-          // Navigate to blocked screen — user cannot dismiss it
-          router.replace({
-            pathname: '/blocked',
-            params: { threats: JSON.stringify(report.threats) },
-          });
-          return; // Don't proceed with push registration
+          if (!report.clean) {
+            router.replace({
+              pathname: '/blocked',
+              params: { threats: JSON.stringify(report.threats) },
+            });
+            return;
+          }
+        } catch {
+          // Security check error — fail open
         }
-      } catch (e) {
-        // Security check error — fail open (log but don't block)
-        console.warn('[Layout] Security check error:', e);
-      } finally {
-        setSecurityChecked(true);
       }
+
+      setSecurityChecked(true);
 
       // ── 3. Register push notifications (after security cleared) ──
-      // Only register if user is already logged in
-      // For new users, registerForPushNotifications() is called
-      // from otp.tsx after successful OTP confirm
-      const uid = auth().currentUser?.uid;
-      if (uid) {
-        recordLogin(uid).catch(() => {});
-        registerForPushNotifications().catch(e =>
-          console.warn('[Layout] Push registration failed:', e)
-        );
-      }
+      if (Platform.OS !== 'web') {
+        const uid = auth().currentUser?.uid;
+        if (uid) {
+          recordLogin(uid).catch(() => {});
+          registerForPushNotifications().catch(() => {});
+        }
 
-      // ── 4. Handle notification that opened app from killed state ──
-      handleInitialNotification(router).catch(() => {});
+        // ── 4. Handle notification that opened app from killed state ──
+        handleInitialNotification(router).catch(() => {});
+      } else {
+        // Web: just mark ready
+      }
     };
 
     runStartup();
 
-    // ── 5. Wire notification tap listeners ────────────────────────
-    // Returns a cleanup function
-    const cleanupListeners = setupNotificationListeners(router);
+    // ── 5. Wire notification tap listeners (native only) ─────
+    let cleanupListeners = () => {};
+    if (Platform.OS !== 'web') {
+      cleanupListeners = setupNotificationListeners(router);
+    }
 
     return () => {
-      ScreenCapture.allowScreenCaptureAsync();
+      if (Platform.OS !== 'web') {
+        ScreenCapture.allowScreenCaptureAsync().catch(() => {});
+      }
       cleanupListeners();
     };
   }, [router]);
@@ -90,15 +95,15 @@ export default function RootLayout() {
   if (!securityChecked) {
     return (
       <View style={styles.loading}>
-        <StatusBar style="light" backgroundColor="#0A0E1A" />
-        <ActivityIndicator size="large" color="#00D4AA" />
+        <StatusBar style="dark" backgroundColor="#FFFFFF" />
+        <ActivityIndicator size="large" color="#4A9FFF" />
       </View>
     );
   }
 
   return (
     <>
-      <StatusBar style="light" backgroundColor="#0A0E1A" />
+      <StatusBar style="dark" backgroundColor="#FFFFFF" />
       <Stack screenOptions={{ headerShown: false }}>
 
         {/* Security — gesture disabled so user can't swipe back */}
@@ -200,6 +205,48 @@ export default function RootLayout() {
         <Stack.Screen name="video-notes" />
         <Stack.Screen name="slideshow" />
         <Stack.Screen name="group-calls" />
+        <Stack.Screen name="group-info" />
+
+        {/* Auth extras */}
+        <Stack.Screen name="welcome" />
+        <Stack.Screen name="phone" />
+        <Stack.Screen name="register" />
+        <Stack.Screen name="forgot" />
+        <Stack.Screen name="recovery" />
+        <Stack.Screen name="setup-complete" />
+        <Stack.Screen name="face-verify" />
+        <Stack.Screen name="face-verify-new-device" />
+        <Stack.Screen name="secret-code" />
+
+        {/* Security & Privacy */}
+        <Stack.Screen name="aiguardian" />
+        <Stack.Screen name="backup-pin" />
+        <Stack.Screen name="behavioral" />
+        <Stack.Screen name="duresspin" />
+        <Stack.Screen name="stealth" />
+        <Stack.Screen name="permissions" />
+        <Stack.Screen name="memoryshield" />
+
+        {/* Social & Contacts */}
+        <Stack.Screen name="contact" />
+        <Stack.Screen name="communities" />
+        <Stack.Screen name="sync-contact" />
+        <Stack.Screen name="msgrequests" />
+        <Stack.Screen name="family" />
+        <Stack.Screen name="create-group" />
+
+        {/* Utility */}
+        <Stack.Screen name="search" />
+        <Stack.Screen name="starred" />
+        <Stack.Screen name="scheduled" />
+        <Stack.Screen name="scanner" />
+        <Stack.Screen name="docscanner" />
+        <Stack.Screen name="notifications" />
+        <Stack.Screen name="location" />
+        <Stack.Screen name="modal" />
+        <Stack.Screen name="filevault" />
+        <Stack.Screen name="vaultid" />
+        <Stack.Screen name="testconsole" />
       </Stack>
     </>
   );
@@ -208,7 +255,7 @@ export default function RootLayout() {
 const styles = StyleSheet.create({
   loading: {
     flex: 1,
-    backgroundColor: '#0A0E1A',
+    backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
   },

@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/invite-link.tsx — Generate & manage invite links for groups
 // Creates shareable links: vaultchat.app/join/CODE
 // Supports expiry, max uses, revoke
@@ -13,7 +12,7 @@ import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import * as Clipboard from 'expo-clipboard';
 
-const C = { bg: '#020B18', accent: '#4A9FFF', green: '#10B981', card: '#0A1628', danger: '#FF3C6E' };
+const C = { bg: '#FFFFFF', accent: '#4A9FFF', green: '#10B981', card: '#F9FAFB', danger: '#FF3C6E' };
 const CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
 const genLinkCode = () => { let s = ''; for (let i = 0; i < 12; i++) s += CHARS[Math.floor(Math.random() * CHARS.length)]; return s; };
 
@@ -93,7 +92,7 @@ export default function InviteLinkScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Invite Links', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
+      <Stack.Screen options={{ title: 'Invite Links', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
       <View style={s.container}>
         <StatusBar barStyle="light-content" />
 
@@ -149,7 +148,7 @@ export default function InviteLinkScreen() {
                 )}
               </View>
             )}
-            ListEmptyComponent={<View style={{ alignItems: 'center', padding: 30 }}><Text style={{ color: '#555' }}>No invite links yet</Text></View>}
+            ListEmptyComponent={<View style={{ alignItems: 'center', padding: 30 }}><Text style={{ color: '#6B7280' }}>No invite links yet</Text></View>}
           />
         )}
       </View>
@@ -159,16 +158,16 @@ export default function InviteLinkScreen() {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg, padding: 16 },
-  infoCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#111' },
+  infoCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#E5E7EB' },
   infoTitle: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  infoDesc: { color: '#666', fontSize: 12, marginTop: 2 },
-  sectionTitle: { color: '#555', fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 8 },
+  infoDesc: { color: '#9CA3AF', fontSize: 12, marginTop: 2 },
+  sectionTitle: { color: '#6B7280', fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 8 },
   createRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
   createOpt: { backgroundColor: '#4A9FFF22', borderRadius: 10, paddingVertical: 10, paddingHorizontal: 16, borderWidth: 1, borderColor: '#4A9FFF44' },
   createOptTxt: { color: C.accent, fontSize: 12, fontWeight: '700' },
-  linkRow: { backgroundColor: C.card, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: '#111' },
-  linkCode: { color: '#E0E0F0', fontSize: 13, fontWeight: '600', fontFamily: 'monospace' },
-  linkMeta: { color: '#555', fontSize: 11 },
+  linkRow: { backgroundColor: C.card, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: '#E5E7EB' },
+  linkCode: { color: '#1F2937', fontSize: 13, fontWeight: '600', fontFamily: 'monospace' },
+  linkMeta: { color: '#6B7280', fontSize: 11 },
   linkBtn: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#4A9FFF44' },
   linkBtnTxt: { color: C.accent, fontSize: 11, fontWeight: '700' },
 });

@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/file-preview.tsx — File Preview with Syntax Highlighting
 // Opens code files, text, JSON, markdown with colored syntax
 // Supports: JS, TS, Python, Java, C, Go, Rust, SQL, HTML, CSS, JSON, YAML, MD, TXT
@@ -13,7 +12,7 @@ import { useLocalSearchParams, Stack } from 'expo-router';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Clipboard from 'expo-clipboard';
 
-const C = { bg: '#0D1117', accent: '#4A9FFF', card: '#161B22', green: '#10B981' };
+const C = { bg: '#FFFFFF', accent: '#4A9FFF', card: '#161B22', green: '#10B981' };
 
 // Syntax color themes per token type
 const TOKEN_COLORS = {
@@ -178,12 +177,12 @@ export default function FilePreviewScreen() {
     <>
       <Stack.Screen options={{
         title: (filename || 'Preview') + '',
-        headerStyle: { backgroundColor: '#0D1117' },
-        headerTintColor: '#fff',
+        headerStyle: { backgroundColor: '#FFFFFF' },
+        headerTintColor: '#1F2937',
         headerRight: () => (
           <View style={{ flexDirection: 'row', gap: 12, marginRight: 8 }}>
             <TouchableOpacity onPress={() => setWordWrap(!wordWrap)}>
-              <Text style={{ color: wordWrap ? C.accent : '#555', fontSize: 12, fontWeight: '700' }}>Wrap</Text>
+              <Text style={{ color: wordWrap ? C.accent : '#6B7280', fontSize: 12, fontWeight: '700' }}>Wrap</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={copyAll}>
               <Text style={{ color: C.accent, fontSize: 12, fontWeight: '700' }}>Copy</Text>
@@ -239,6 +238,6 @@ const s = StyleSheet.create({
   sizeInfo: { color: '#8B949E', fontSize: 11 },
   codeScroll: { flex: 1 },
   lineRow: { flexDirection: 'row', minHeight: 22 },
-  lineNum: { color: '#484F58', fontSize: 12, fontFamily: 'monospace', textAlign: 'right', paddingRight: 12, paddingTop: 2, backgroundColor: '#0D1117', borderRightWidth: 1, borderRightColor: '#21262D' },
+  lineNum: { color: '#484F58', fontSize: 12, fontFamily: 'monospace', textAlign: 'right', paddingRight: 12, paddingTop: 2, backgroundColor: '#FFFFFF', borderRightWidth: 1, borderRightColor: '#21262D' },
   codeLine: { fontSize: 12, fontFamily: 'monospace', paddingLeft: 12, paddingTop: 2, color: '#C9D1D9' },
 });

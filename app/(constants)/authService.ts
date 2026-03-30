@@ -16,7 +16,7 @@ export interface SignupData {
 }
 
 // ─── Configuration ──────────────────────────────────────────────
-const IS_TEST_MODE = __DEV__; // Set to false for production
+const IS_TEST_MODE = false; // Set to true for dev testing with OTP "123456"
 const TEST_OTP = "123456";
 const MAX_OTP_ATTEMPTS = 5;
 const OTP_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
@@ -47,14 +47,9 @@ export async function sendOTP(phone: string) {
       throw new Error("Invalid phone number. Use format: +1234567890");
     }
 
-    console.log("[AUTH] Sending OTP to", phone);
 
     // Test mode for development
     if (IS_TEST_MODE) {
-      console.warn(
-        "[AUTH] ⚠️  TEST MODE ACTIVE — Enter 123456 as OTP\n" +
-        "To disable, set IS_TEST_MODE = false in authService.ts"
-      );
       otpState = {
         confirmationResult: null,
         phone,
@@ -78,9 +73,7 @@ export async function sendOTP(phone: string) {
       testMode: false,
     };
 
-    console.log("[AUTH] OTP sent successfully to", phone);
   } catch (error: any) {
-    console.error("[AUTH] sendOTP failed:", error?.message);
     throw new Error(
       error?.message?.includes("too-many-requests")
         ? "Too many attempts. Please try again later."
@@ -123,7 +116,6 @@ export async function verifyOTP(code: string): Promise<boolean> {
     // Test mode verification
     if (otpState.testMode) {
       if (code === TEST_OTP) {
-        console.log("[AUTH] ✓ Test OTP verified");
         otpState = null;
         return true;
       } else {
@@ -142,11 +134,9 @@ export async function verifyOTP(code: string): Promise<boolean> {
       throw new Error("Verification failed. User not created.");
     }
 
-    console.log("[AUTH] ✓ OTP verified successfully for user:", result.user.uid);
     otpState = null;
     return true;
   } catch (error: any) {
-    console.error("[AUTH] verifyOTP failed:", error?.message);
     throw new Error(
       error?.message?.includes("invalid-verification-code")
         ? "Invalid OTP. Please try again."
@@ -160,7 +150,6 @@ export async function verifyOTP(code: string): Promise<boolean> {
  */
 export function clearOTPState() {
   otpState = null;
-  console.log("[AUTH] OTP state cleared");
 }
 
 
@@ -180,9 +169,7 @@ export async function savePIN(pin: string) {
     }
     const hash = await sha256(pin);
     await SecureStore.setItemAsync("vc_pin_hash", hash);
-    console.log("[AUTH] PIN saved securely");
   } catch (error: any) {
-    console.error("[AUTH] savePIN failed:", error?.message);
     throw new Error(error?.message || "Failed to save PIN");
   }
 }
@@ -199,7 +186,6 @@ export async function verifyPIN(pin: string): Promise<boolean> {
     const hash = await sha256(pin);
     return hash === stored;
   } catch (error: any) {
-    console.error("[AUTH] verifyPIN failed:", error?.message);
     return false;
   }
 }
@@ -223,9 +209,7 @@ export async function savePendingSignup(d: SignupData) {
   try {
     validateSignupData(d);
     await AsyncStorage.setItem("vc_pending_signup", JSON.stringify(d));
-    console.log("[AUTH] Pending signup saved");
   } catch (error: any) {
-    console.error("[AUTH] savePendingSignup failed:", error?.message);
     throw new Error(error?.message || "Failed to save signup data");
   }
 }
@@ -238,7 +222,6 @@ export async function getPendingSignup(): Promise<SignupData | null> {
     const r = await AsyncStorage.getItem("vc_pending_signup");
     return r ? JSON.parse(r) : null;
   } catch (error: any) {
-    console.error("[AUTH] getPendingSignup failed:", error?.message);
     return null;
   }
 }
@@ -249,9 +232,7 @@ export async function getPendingSignup(): Promise<SignupData | null> {
 export async function clearPendingSignup() {
   try {
     await AsyncStorage.removeItem("vc_pending_signup");
-    console.log("[AUTH] Pending signup cleared");
   } catch (error: any) {
-    console.error("[AUTH] clearPendingSignup failed:", error?.message);
   }
 }
 
@@ -296,9 +277,7 @@ export async function saveUserProfile(d: SignupData) {
     };
 
     await setDoc(doc(db, "users", uid), userData);
-    console.log("[AUTH] User profile saved for", uid);
   } catch (error: any) {
-    console.error("[AUTH] saveUserProfile failed:", error?.message);
     throw new Error(error?.message || "Failed to save user profile");
   }
 }
@@ -314,7 +293,6 @@ export async function isSetupComplete(): Promise<boolean> {
     const docSnap = await getDoc(doc_ref);
     return docSnap.exists();
   } catch (error: any) {
-    console.error("[AUTH] isSetupComplete check failed:", error?.message);
     return false;
   }
 }
@@ -329,9 +307,7 @@ export async function enrollFace(uri: string, index: number) {
     if (index < 0 || index > 2) throw new Error("Face index must be 0-2");
     if (!uri) throw new Error("Face URI required");
     await AsyncStorage.setItem("vc_face_" + index, uri);
-    console.log("[AUTH] Face enrolled at index", index);
   } catch (error: any) {
-    console.error("[AUTH] enrollFace failed:", error?.message);
     throw new Error(error?.message || "Failed to enroll face");
   }
 }
@@ -347,7 +323,6 @@ export async function getEnrolledFaceCount(): Promise<number> {
     }
     return c;
   } catch (error: any) {
-    console.error("[AUTH] getEnrolledFaceCount failed:", error?.message);
     return 0;
   }
 }
@@ -400,9 +375,7 @@ export async function logoutUser() {
     // Clear OTP state
     clearOTPState();
     
-    console.log("[AUTH] User logged out and local data cleared");
   } catch (error: any) {
-    console.error("[AUTH] logoutUser failed:", error?.message);
     throw new Error(error?.message || "Failed to logout");
   }
 }

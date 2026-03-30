@@ -65,19 +65,19 @@ export default function SearchScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Search', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
+      <Stack.Screen options={{ title: 'Search', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
       <View style={s.screen}>
         <View style={s.searchBar}>
           <Text style={{ fontSize: 16, marginRight: 8 }}>ðŸ”</Text>
           <TextInput
             style={s.input}
             placeholder="Search messagesâ€¦"
-            placeholderTextColor="#444"
+            placeholderTextColor="#9CA3AF"
             value={query}
             onChangeText={search}
             autoFocus
           />
-          {loading && <ActivityIndicator color="#00E5FF" size="small" />}
+          {loading && <ActivityIndicator color="#4A9FFF" size="small" />}
         </View>
         <FlatList
           data={results}
@@ -109,13 +109,13 @@ export default function SearchScreen() {
 }
 
 const s = StyleSheet.create({
-  screen:   { flex: 1, backgroundColor: '#03030E' },
-  searchBar:{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#0C0C1A', padding: 12, borderBottomWidth: 1, borderBottomColor: '#111' },
-  input:    { flex: 1, color: '#E0E0F0', fontSize: 16 },
+  screen:   { flex: 1, backgroundColor: '#FFFFFF' },
+  searchBar:{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', padding: 12, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
+  input:    { flex: 1, color: '#1F2937', fontSize: 16 },
   result:   { padding: 14, borderBottomWidth: 1, borderBottomColor: '#0A0A18' },
-  chatName: { color: '#00E5FF', fontSize: 13, fontWeight: 'bold', marginBottom: 2 },
-  date:     { color: '#555', fontSize: 11, marginBottom: 4 },
+  chatName: { color: '#4A9FFF', fontSize: 13, fontWeight: 'bold', marginBottom: 2 },
+  date:     { color: '#6B7280', fontSize: 11, marginBottom: 4 },
   preview:  { color: '#C0C0E0', fontSize: 14 },
   empty:    { padding: 40, alignItems: 'center' },
-  emptyTxt: { color: '#555', fontSize: 14 },
+  emptyTxt: { color: '#6B7280', fontSize: 14 },
 });

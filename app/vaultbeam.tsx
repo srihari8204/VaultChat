@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/vaultbeam.tsx — VaultBeam P2P Direct File Transfer
 // Device-to-device encrypted file transfer via WebRTC data channels
 // No server storage — files go directly between devices
@@ -16,7 +15,7 @@ import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const C = { bg: '#020B18', accent: '#00E5FF', green: '#10B981', card: '#0A1628', danger: '#FF3C6E', purple: '#A78BFA' };
+const C = { bg: '#FFFFFF', accent: '#4A9FFF', green: '#10B981', card: '#F9FAFB', danger: '#FF3C6E', purple: '#A78BFA' };
 const CHUNK_SIZE = 16384; // 16KB chunks for WebRTC
 const TRANSFER_KEY = 'vc_active_transfers';
 
@@ -206,7 +205,7 @@ export default function VaultBeamScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'VaultBeam P2P', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
+      <Stack.Screen options={{ title: 'VaultBeam P2P', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
       <View style={s.container}>
         <StatusBar barStyle="light-content" />
 
@@ -290,8 +289,8 @@ export default function VaultBeamScreen() {
                 ListEmptyComponent={
                   <View style={{ alignItems: 'center', padding: 40 }}>
                     <Text style={{ fontSize: 40 }}>{"\uD83D\uDCE1"}</Text>
-                    <Text style={{ color: '#555', marginTop: 12 }}>Waiting for incoming files...</Text>
-                    <Text style={{ color: '#444', fontSize: 11, marginTop: 4 }}>Ask {peerName || 'peer'} to send a file via VaultBeam</Text>
+                    <Text style={{ color: '#6B7280', marginTop: 12 }}>Waiting for incoming files...</Text>
+                    <Text style={{ color: '#9CA3AF', fontSize: 11, marginTop: 4 }}>Ask {peerName || 'peer'} to send a file via VaultBeam</Text>
                   </View>
                 }
               />
@@ -316,7 +315,7 @@ export default function VaultBeamScreen() {
                   </View>
                 )}
                 contentContainerStyle={{ padding: 12 }}
-                ListEmptyComponent={<View style={{ alignItems: 'center', padding: 40 }}><Text style={{ color: '#555' }}>No transfer history</Text></View>}
+                ListEmptyComponent={<View style={{ alignItems: 'center', padding: 40 }}><Text style={{ color: '#6B7280' }}>No transfer history</Text></View>}
               />
             )}
           </>
@@ -329,36 +328,36 @@ export default function VaultBeamScreen() {
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   tabs: { flexDirection: 'row', paddingHorizontal: 12, paddingTop: 8, gap: 6 },
-  tab: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: '#0A1628' },
+  tab: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: '#F9FAFB' },
   tabActive: { backgroundColor: C.accent },
-  tabTxt: { color: '#888', fontSize: 13, fontWeight: '700' },
+  tabTxt: { color: '#6B7280', fontSize: 13, fontWeight: '700' },
   tabTxtActive: { color: '#000' },
   activeCard: { alignItems: 'center', padding: 24, margin: 16, backgroundColor: C.card, borderRadius: 20, borderWidth: 1, borderColor: C.accent + '44' },
   beamIcon: { marginBottom: 12 },
   activeTitle: { color: C.accent, fontSize: 18, fontWeight: '900' },
-  activeFile: { color: '#E0E0F0', fontSize: 14, marginTop: 4 },
-  activeSize: { color: '#888', fontSize: 12, marginTop: 4 },
-  progressBarBg: { width: '100%', height: 6, backgroundColor: '#111', borderRadius: 3, marginTop: 16, overflow: 'hidden' },
+  activeFile: { color: '#1F2937', fontSize: 14, marginTop: 4 },
+  activeSize: { color: '#6B7280', fontSize: 12, marginTop: 4 },
+  progressBarBg: { width: '100%', height: 6, backgroundColor: '#E5E7EB', borderRadius: 3, marginTop: 16, overflow: 'hidden' },
   progressBarFill: { height: '100%', backgroundColor: C.accent, borderRadius: 3 },
   progressPct: { color: C.accent, fontSize: 20, fontWeight: '900', marginTop: 8 },
-  encBadge: { marginTop: 12, backgroundColor: '#00E5FF11', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 6 },
+  encBadge: { marginTop: 12, backgroundColor: '#4A9FFF11', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 6 },
   encTxt: { color: C.accent, fontSize: 11, fontWeight: '600' },
   sendArea: { flex: 1, alignItems: 'center', padding: 24 },
   beamLogo: { marginTop: 20, marginBottom: 8 },
   sendTitle: { color: C.accent, fontSize: 28, fontWeight: '900', letterSpacing: -1 },
-  sendDesc: { color: '#888', fontSize: 13, textAlign: 'center', marginTop: 8, lineHeight: 20, paddingHorizontal: 12 },
+  sendDesc: { color: '#6B7280', fontSize: 13, textAlign: 'center', marginTop: 8, lineHeight: 20, paddingHorizontal: 12 },
   featureList: { marginTop: 20, alignSelf: 'stretch' },
-  featureItem: { color: '#666', fontSize: 12, lineHeight: 26 },
+  featureItem: { color: '#9CA3AF', fontSize: 12, lineHeight: 26 },
   sendBtn: { marginTop: 24, backgroundColor: C.accent, borderRadius: 16, paddingVertical: 16, paddingHorizontal: 32, width: '100%', alignItems: 'center' },
   sendBtnTxt: { color: '#000', fontSize: 16, fontWeight: '900' },
-  receiveRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: '#111' },
-  receiveIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#111', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  receiveName: { color: '#E0E0F0', fontSize: 14, fontWeight: '700' },
-  receiveMeta: { color: '#555', fontSize: 11, marginTop: 2 },
+  receiveRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: '#E5E7EB' },
+  receiveIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  receiveName: { color: '#1F2937', fontSize: 14, fontWeight: '700' },
+  receiveMeta: { color: '#6B7280', fontSize: 11, marginTop: 2 },
   acceptBtn: { backgroundColor: C.green, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 8 },
   acceptTxt: { color: '#000', fontSize: 12, fontWeight: '800' },
-  historyRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 12, marginBottom: 6, borderWidth: 1, borderColor: '#111' },
-  historyName: { color: '#E0E0F0', fontSize: 13, fontWeight: '600' },
-  historyMeta: { color: '#555', fontSize: 10, marginTop: 2 },
+  historyRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 12, marginBottom: 6, borderWidth: 1, borderColor: '#E5E7EB' },
+  historyName: { color: '#1F2937', fontSize: 13, fontWeight: '600' },
+  historyMeta: { color: '#6B7280', fontSize: 10, marginTop: 2 },
   statusBadge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
 });

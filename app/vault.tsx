@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/vault.tsx
 // Real 8-PIN gated secure storage
 // AES-256-GCM encrypted files via d2deService
@@ -478,7 +477,7 @@ export default function VaultScreen() {
       {/* File list */}
       {loading ? (
         <View style={styles.loadingWrap}>
-          <ActivityIndicator color="#00D4AA" size="large" />
+          <ActivityIndicator color="#10B981" size="large" />
           <Text style={styles.loadingText}>Encrypting...</Text>
         </View>
       ) : (
@@ -565,7 +564,7 @@ export default function VaultScreen() {
               value={backupEmail}
               onChangeText={setBackupEmail}
               placeholder="your@email.com"
-              placeholderTextColor="#374151"
+              placeholderTextColor="#6B7280"
               keyboardType="email-address"
               autoCapitalize="none"
             />
@@ -583,7 +582,7 @@ export default function VaultScreen() {
                 disabled={loading}
               >
                 {loading
-                  ? <ActivityIndicator color="#0A0E1A" size="small" />
+                  ? <ActivityIndicator color="#FFFFFF" size="small" />
                   : <Text style={styles.backupConfirmText}>Send Backup</Text>
                 }
               </TouchableOpacity>
@@ -613,80 +612,80 @@ export default function VaultScreen() {
 
 const pinStyles = StyleSheet.create({
   container: {
-    flex: 1, backgroundColor: '#0A0E1A',
+    flex: 1, backgroundColor: '#FFFFFF',
     alignItems: 'center', justifyContent: 'center',
   },
   lockIcon:  { fontSize: 52, marginBottom: 12 },
   title:     { fontSize: 26, fontWeight: 'bold', color: '#000000', marginBottom: 4 },
-  sub:       { fontSize: 13, color: '#64748B', marginBottom: 32 },
+  sub:       { fontSize: 13, color: '#6B7280', marginBottom: 32 },
   dotsRow:   { flexDirection: 'row', gap: 12, marginBottom: 10 },
   shake:     { transform: [{ translateX: 8 }] },
   dot: {
     width: 14, height: 14, borderRadius: 7,
-    backgroundColor: '#1A2235',
-    borderWidth: 1.5, borderColor: '#1E293B',
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1.5, borderColor: '#E5E7EB',
   },
-  dotFilled: { backgroundColor: '#00D4AA', borderColor: '#00D4AA' },
+  dotFilled: { backgroundColor: '#10B981', borderColor: '#10B981' },
   error:     { color: '#FF4D6D', fontSize: 13, marginBottom: 12 },
   keyRow:    { flexDirection: 'row', gap: 20, marginBottom: 14 },
   key: {
     width: 72, height: 72, borderRadius: 36,
-    backgroundColor: '#111827',
-    borderWidth: 1, borderColor: '#1E293B',
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1, borderColor: '#E5E7EB',
     justifyContent: 'center', alignItems: 'center',
   },
   keyEmpty:  { width: 72, height: 72 },
   keyText:   { fontSize: 24, color: '#000000', fontWeight: '600' },
-  note:      { marginTop: 28, color: '#374151', fontSize: 11 },
+  note:      { marginTop: 28, color: '#6B7280', fontSize: 11 },
 });
 
 const styles = StyleSheet.create({
-  container:    { flex: 1, backgroundColor: '#0A0E1A' },
+  container:    { flex: 1, backgroundColor: '#FFFFFF' },
 
   // Header
   header: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#111827',
+    backgroundColor: '#F9FAFB',
     paddingTop: 48, paddingBottom: 12, paddingHorizontal: 16,
-    borderBottomWidth: 0.5, borderBottomColor: '#1E293B',
+    borderBottomWidth: 0.5, borderBottomColor: '#E5E7EB',
     gap: 12,
   },
-  back:         { fontSize: 28, color: '#00D4AA', fontWeight: 'bold' },
+  back:         { fontSize: 28, color: '#10B981', fontWeight: 'bold' },
   headerCenter: { flex: 1 },
   headerTitle:  { fontSize: 18, fontWeight: 'bold', color: '#000000' },
-  headerSub:    { fontSize: 9, color: '#00D4AA', marginTop: 1 },
+  headerSub:    { fontSize: 9, color: '#10B981', marginTop: 1 },
   backupBtn: {
-    width: 36, height: 36, backgroundColor: '#1A2235',
-    borderRadius: 9, borderWidth: 0.5, borderColor: '#1E293B',
+    width: 36, height: 36, backgroundColor: '#F3F4F6',
+    borderRadius: 9, borderWidth: 0.5, borderColor: '#E5E7EB',
     justifyContent: 'center', alignItems: 'center',
   },
   backupBtnText: { fontSize: 18 },
 
   // Stats
   statsBar: {
-    flexDirection: 'row', backgroundColor: '#111827',
+    flexDirection: 'row', backgroundColor: '#F9FAFB',
     paddingVertical: 12, paddingHorizontal: 20,
-    borderBottomWidth: 0.5, borderBottomColor: '#1E293B',
+    borderBottomWidth: 0.5, borderBottomColor: '#E5E7EB',
   },
   statItem:    { flex: 1, alignItems: 'center' },
   statNum:     { fontSize: 15, fontWeight: 'bold', color: '#000000' },
-  statLabel:   { fontSize: 10, color: '#64748B', marginTop: 2 },
-  statDivider: { width: 0.5, backgroundColor: '#1E293B', marginVertical: 4 },
+  statLabel:   { fontSize: 10, color: '#6B7280', marginTop: 2 },
+  statDivider: { width: 0.5, backgroundColor: '#E5E7EB', marginVertical: 4 },
 
   // Tabs
   tabs: {
     flexDirection: 'row',
-    borderBottomWidth: 0.5, borderBottomColor: '#1E293B',
+    borderBottomWidth: 0.5, borderBottomColor: '#E5E7EB',
   },
   tab: {
     flex: 1, alignItems: 'center', paddingVertical: 10, gap: 3,
   },
   tabActive: {
-    borderBottomWidth: 2, borderBottomColor: '#00D4AA',
+    borderBottomWidth: 2, borderBottomColor: '#10B981',
   },
   tabIcon:       { fontSize: 20 },
-  tabText:       { fontSize: 10, color: '#64748B' },
-  tabTextActive: { color: '#00D4AA', fontWeight: 'bold' },
+  tabText:       { fontSize: 10, color: '#6B7280' },
+  tabTextActive: { color: '#10B981', fontWeight: 'bold' },
   tabCount: {
     borderRadius: 8, paddingHorizontal: 5, paddingVertical: 1,
   },
@@ -696,7 +695,7 @@ const styles = StyleSheet.create({
   loadingWrap: {
     flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12,
   },
-  loadingText: { fontSize: 13, color: '#64748B' },
+  loadingText: { fontSize: 13, color: '#6B7280' },
 
   // List
   listContent: { padding: 14, paddingBottom: 100, flexGrow: 1 },
@@ -706,15 +705,15 @@ const styles = StyleSheet.create({
     flex: 1, alignItems: 'center', paddingTop: 64, gap: 10,
   },
   emptyIcon:  { fontSize: 52 },
-  emptyTitle: { fontSize: 16, fontWeight: 'bold', color: '#64748B' },
-  emptyHint:  { fontSize: 12, color: '#374151', textAlign: 'center' },
+  emptyTitle: { fontSize: 16, fontWeight: 'bold', color: '#6B7280' },
+  emptyHint:  { fontSize: 12, color: '#6B7280', textAlign: 'center' },
 
   // File row
   fileRow: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#111827',
+    backgroundColor: '#F9FAFB',
     borderRadius: 12, padding: 12, marginBottom: 8,
-    borderWidth: 0.5, borderColor: '#1E293B',
+    borderWidth: 0.5, borderColor: '#E5E7EB',
   },
   fileIcon: {
     width: 44, height: 44, borderRadius: 10,
@@ -723,14 +722,14 @@ const styles = StyleSheet.create({
   fileIconText:  { fontSize: 22 },
   fileInfo:      { flex: 1 },
   fileName:      { fontSize: 14, fontWeight: 'bold', color: '#000000', marginBottom: 3 },
-  fileMeta:      { fontSize: 11, color: '#64748B' },
+  fileMeta:      { fontSize: 11, color: '#6B7280' },
   fileActions:   { flexDirection: 'row', alignItems: 'center', gap: 8 },
   encBadge: {
-    backgroundColor: '#003328', borderRadius: 6,
-    borderWidth: 0.5, borderColor: '#00D4AA44',
+    backgroundColor: '#D1FAE5', borderRadius: 6,
+    borderWidth: 0.5, borderColor: '#10B98144',
     paddingHorizontal: 6, paddingVertical: 2,
   },
-  encBadgeText:  { fontSize: 9, color: '#00D4AA', fontWeight: 'bold' },
+  encBadgeText:  { fontSize: 9, color: '#10B981', fontWeight: 'bold' },
   deleteBtn:     { padding: 4 },
   deleteBtnText: { fontSize: 16 },
 
@@ -738,23 +737,23 @@ const styles = StyleSheet.create({
   fab: {
     position: 'absolute', right: 18, bottom: 74,
     width: 54, height: 54, borderRadius: 27,
-    backgroundColor: '#00D4AA',
+    backgroundColor: '#10B981',
     justifyContent: 'center', alignItems: 'center',
     elevation: 6,
   },
-  fabText: { fontSize: 28, color: '#0A0E1A', fontWeight: 'bold', lineHeight: 32 },
+  fabText: { fontSize: 28, color: '#FFFFFF', fontWeight: 'bold', lineHeight: 32 },
 
   // Backup modal
   modalOverlay: {
     flex: 1, backgroundColor: '#00000088', justifyContent: 'flex-end',
   },
   backupPanel: {
-    backgroundColor: '#111827',
+    backgroundColor: '#F9FAFB',
     borderTopLeftRadius: 20, borderTopRightRadius: 20,
     padding: 20, paddingBottom: 36,
   },
   backupHandle: {
-    width: 40, height: 4, backgroundColor: '#1E293B',
+    width: 40, height: 4, backgroundColor: '#E5E7EB',
     borderRadius: 2, alignSelf: 'center', marginBottom: 16,
   },
   backupTitle: {
@@ -762,28 +761,28 @@ const styles = StyleSheet.create({
     textAlign: 'center', marginBottom: 8,
   },
   backupDesc: {
-    fontSize: 13, color: '#64748B', lineHeight: 20,
+    fontSize: 13, color: '#6B7280', lineHeight: 20,
     textAlign: 'center', marginBottom: 20,
   },
-  backupLabel:   { fontSize: 12, color: '#64748B', marginBottom: 6 },
+  backupLabel:   { fontSize: 12, color: '#6B7280', marginBottom: 6 },
   backupInput: {
-    backgroundColor: '#1A2235', borderRadius: 10,
-    borderWidth: 0.5, borderColor: '#1E293B',
+    backgroundColor: '#F3F4F6', borderRadius: 10,
+    borderWidth: 0.5, borderColor: '#E5E7EB',
     paddingHorizontal: 14, paddingVertical: 11,
     color: '#000000', fontSize: 15, marginBottom: 16,
   },
   backupBtnRow:  { flexDirection: 'row', gap: 10, marginBottom: 12 },
   backupCancelBtn: {
-    flex: 1, backgroundColor: '#1A2235',
-    borderRadius: 10, borderWidth: 0.5, borderColor: '#1E293B',
+    flex: 1, backgroundColor: '#F3F4F6',
+    borderRadius: 10, borderWidth: 0.5, borderColor: '#E5E7EB',
     paddingVertical: 13, alignItems: 'center',
   },
-  backupCancelText:  { color: '#64748B', fontWeight: 'bold' },
+  backupCancelText:  { color: '#6B7280', fontWeight: 'bold' },
   backupConfirmBtn: {
-    flex: 1, backgroundColor: '#00D4AA',
+    flex: 1, backgroundColor: '#10B981',
     borderRadius: 10, paddingVertical: 13, alignItems: 'center',
   },
-  backupConfirmText: { color: '#0A0E1A', fontWeight: 'bold', fontSize: 15 },
-  backupLastText:    { fontSize: 11, color: '#374151', textAlign: 'center' },
-  backupNote:        { fontSize: 10, color: '#1E293B', textAlign: 'center', marginTop: 6 },
+  backupConfirmText: { color: '#FFFFFF', fontWeight: 'bold', fontSize: 15 },
+  backupLastText:    { fontSize: 11, color: '#6B7280', textAlign: 'center' },
+  backupNote:        { fontSize: 10, color: '#E5E7EB', textAlign: 'center', marginTop: 6 },
 });

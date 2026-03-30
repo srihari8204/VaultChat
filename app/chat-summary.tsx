@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/chat-summary.tsx — AI Chat Summary
 // One tap → summarizes 100+ unread messages into key points
 // Groups by topic, extracts action items, decisions, questions
@@ -12,7 +11,7 @@ import { useLocalSearchParams, Stack } from 'expo-router';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 
-const C = { bg: '#020B18', accent: '#4A9FFF', card: '#0A1628', green: '#10B981', purple: '#A78BFA' };
+const C = { bg: '#FFFFFF', accent: '#4A9FFF', card: '#F9FAFB', green: '#10B981', purple: '#A78BFA' };
 
 // On-device summarization engine
 const generateSummary = (messages, peerName) => {
@@ -101,7 +100,7 @@ export default function ChatSummaryScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Chat Summary', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
+      <Stack.Screen options={{ title: 'Chat Summary', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
       <ScrollView style={s.container}>
         <StatusBar barStyle="light-content" />
 
@@ -188,29 +187,29 @@ export default function ChatSummaryScreen() {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg, padding: 16 },
-  headerCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 16, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#111' },
+  headerCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 16, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#E5E7EB' },
   headerTitle: { color: '#fff', fontSize: 18, fontWeight: '900' },
-  headerDesc: { color: '#666', fontSize: 12, marginTop: 2 },
-  optionsCard: { backgroundColor: C.card, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#111' },
-  optionsTitle: { color: '#E0E0F0', fontSize: 15, fontWeight: '700', marginBottom: 12 },
+  headerDesc: { color: '#9CA3AF', fontSize: 12, marginTop: 2 },
+  optionsCard: { backgroundColor: C.card, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#E5E7EB' },
+  optionsTitle: { color: '#1F2937', fontSize: 15, fontWeight: '700', marginBottom: 12 },
   optionBtn: { backgroundColor: '#4A9FFF22', borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginBottom: 8, borderWidth: 1, borderColor: '#4A9FFF33' },
   optionTxt: { color: C.accent, fontSize: 14, fontWeight: '700' },
   loadingCard: { alignItems: 'center', padding: 40 },
-  loadingTxt: { color: '#888', marginTop: 12, fontSize: 14 },
+  loadingTxt: { color: '#6B7280', marginTop: 12, fontSize: 14 },
   statsRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
-  statCard: { flex: 1, backgroundColor: C.card, borderRadius: 12, padding: 12, alignItems: 'center', borderWidth: 1, borderColor: '#111' },
+  statCard: { flex: 1, backgroundColor: C.card, borderRadius: 12, padding: 12, alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB' },
   statNum: { color: C.accent, fontSize: 22, fontWeight: '900' },
-  statLabel: { color: '#666', fontSize: 10, marginTop: 2 },
+  statLabel: { color: '#9CA3AF', fontSize: 10, marginTop: 2 },
   metaRow: { paddingVertical: 8 },
-  metaTxt: { color: '#555', fontSize: 11, textAlign: 'center' },
-  sectionTitle: { color: '#888', fontSize: 12, fontWeight: '800', marginBottom: 8 },
+  metaTxt: { color: '#6B7280', fontSize: 11, textAlign: 'center' },
+  sectionTitle: { color: '#6B7280', fontSize: 12, fontWeight: '800', marginBottom: 8 },
   topicRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   topicBadge: { backgroundColor: '#A78BFA22', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: '#A78BFA33' },
   topicTxt: { color: C.purple, fontSize: 12, fontWeight: '600' },
-  actionRow: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: C.card, borderRadius: 10, padding: 12, marginBottom: 4, gap: 10, borderWidth: 1, borderColor: '#111' },
+  actionRow: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: C.card, borderRadius: 10, padding: 12, marginBottom: 4, gap: 10, borderWidth: 1, borderColor: '#E5E7EB' },
   actionNum: { color: C.green, fontSize: 14, fontWeight: '900', width: 20 },
-  actionTxt: { color: '#E0E0F0', fontSize: 13, flex: 1, lineHeight: 19 },
-  keyMsgRow: { backgroundColor: C.card, borderRadius: 10, padding: 12, marginBottom: 4, borderWidth: 1, borderColor: '#111' },
+  actionTxt: { color: '#1F2937', fontSize: 13, flex: 1, lineHeight: 19 },
+  keyMsgRow: { backgroundColor: C.card, borderRadius: 10, padding: 12, marginBottom: 4, borderWidth: 1, borderColor: '#E5E7EB' },
   keyMsgTxt: { color: '#ccc', fontSize: 13, fontStyle: 'italic', lineHeight: 19 },
   regenBtn: { marginTop: 20, backgroundColor: '#4A9FFF15', borderRadius: 12, paddingVertical: 14, alignItems: 'center', borderWidth: 1, borderColor: '#4A9FFF33' },
   regenTxt: { color: C.accent, fontSize: 13, fontWeight: '700' },

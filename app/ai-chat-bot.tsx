@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/ai-chat-bot.tsx — Aria AI Chat Bot
 // CRED-inspired premium dark UI, on-device AI with pattern matching
 // Persistent messages via AsyncStorage

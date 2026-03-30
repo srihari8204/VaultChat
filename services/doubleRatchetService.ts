@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * services/doubleRatchetService.ts
  * Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
@@ -368,12 +367,8 @@ export function testDoubleRatchet(): boolean {
 
     const ok = p1 === 'Hello Bob!' && p2 === 'How are you?' && p3 === 'D2DE is real!' && keysAllDifferent;
 
-    console.log('[DoubleRatchet] Self-test:', ok ? 'PASSED Ã¢Å“â€¦' : 'FAILED Ã¢ÂÅ’');
-    console.log('[DoubleRatchet] Message 1 key differs from Message 2:', m1.ciphertext.substring(0,10) !== m2.ciphertext.substring(0,10) ? 'YES Ã¢Å“â€¦' : 'NO Ã¢ÂÅ’');
-    console.log('[DoubleRatchet] Decrypted:', p1, '|', p2, '|', p3);
     return ok;
   } catch (e) {
-    console.error('[DoubleRatchet] Self-test error:', e);
     return false;
   }
 }

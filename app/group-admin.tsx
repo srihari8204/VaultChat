@@ -25,11 +25,11 @@ import {
 } from 'react-native';
 
 const C = {
-  bg: '#020B18',
-  card: '#0A1628',
+  bg: '#FFFFFF',
+  card: '#F9FAFB',
   cardAlt: '#111D32',
   accent: '#4A9FFF',
-  cyan: '#00E5FF',
+  cyan: '#4A9FFF',
   green: '#10B981',
   red: '#EF4444',
   orange: '#F59E0B',
@@ -125,7 +125,6 @@ export default function GroupAdminScreen() {
           if (data.members && Array.isArray(data.members)) setMembers(data.members);
         }
       } catch (e) {
-        console.warn('[GroupAdmin] Load error:', e);
       } finally {
         setLoading(false);
       }
@@ -153,7 +152,6 @@ export default function GroupAdminScreen() {
       Alert.alert('Saved', 'Group settings updated successfully.');
     } catch (e) {
       Alert.alert('Error', 'Failed to save settings.');
-      console.warn('[GroupAdmin] Save error:', e);
     } finally {
       setSaving(false);
     }
@@ -288,8 +286,8 @@ export default function GroupAdminScreen() {
         <Switch
           value={approveNewMembers}
           onValueChange={setApproveNewMembers}
-          trackColor={{ false: '#333', true: 'rgba(74,159,255,0.4)' }}
-          thumbColor={approveNewMembers ? C.accent : '#666'}
+          trackColor={{ false: '#D1D5DB', true: 'rgba(74,159,255,0.4)' }}
+          thumbColor={approveNewMembers ? C.accent : '#9CA3AF'}
         />
       </View>
 
@@ -301,8 +299,8 @@ export default function GroupAdminScreen() {
         <Switch
           value={antiSpamLinks}
           onValueChange={setAntiSpamLinks}
-          trackColor={{ false: '#333', true: 'rgba(74,159,255,0.4)' }}
-          thumbColor={antiSpamLinks ? C.accent : '#666'}
+          trackColor={{ false: '#D1D5DB', true: 'rgba(74,159,255,0.4)' }}
+          thumbColor={antiSpamLinks ? C.accent : '#9CA3AF'}
         />
       </View>
     </View>
@@ -371,7 +369,7 @@ export default function GroupAdminScreen() {
   return (
     <View style={s.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <LinearGradient colors={[C.bg, '#0A1628', C.bg]} style={StyleSheet.absoluteFill} />
+      <LinearGradient colors={[C.bg, '#F9FAFB', C.bg]} style={StyleSheet.absoluteFill} />
 
       <Animated.View style={{ flex: 1, opacity: fadeIn }}>
         {renderHeader()}

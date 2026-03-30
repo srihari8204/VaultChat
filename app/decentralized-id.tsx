@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 
 const C = {
-  bg: '#020B18', primary: '#4A9FFF', secondary: '#7C3AED',
+  bg: '#FFFFFF', primary: '#4A9FFF', secondary: '#7C3AED',
   accent: '#10B981', gold: '#F59E0B', text: '#fff',
   dim: 'rgba(255,255,255,0.5)', faint: 'rgba(255,255,255,0.2)',
   card: 'rgba(10,22,40,0.8)', border: 'rgba(255,255,255,0.06)',
@@ -92,8 +92,8 @@ export default function DecentralizedIDScreen() {
     <>
       <Stack.Screen options={{
         title: 'Decentralised ID',
-        headerStyle: { backgroundColor: '#0C0C1A' },
-        headerTintColor: '#fff',
+        headerStyle: { backgroundColor: '#FFFFFF' },
+        headerTintColor: '#1F2937',
       }} />
       <View style={st.screen}>
         <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>

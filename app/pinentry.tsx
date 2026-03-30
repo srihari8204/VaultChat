@@ -156,7 +156,7 @@ const wipeSensitiveData = async (myUid: string) => {
                 style={s.key}
                 onPress={() => k === 'âŒ«' ? del() : press(k)}
               >
-                <Text style={[s.keyTxt, k === 'âŒ«' && { color: '#555' }]}>{k}</Text>
+                <Text style={[s.keyTxt, k === 'âŒ«' && { color: '#6B7280' }]}>{k}</Text>
               </TouchableOpacity>
             );
           })}
@@ -167,16 +167,16 @@ const wipeSensitiveData = async (myUid: string) => {
 }
 
 const s = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#03030E', alignItems: 'center', justifyContent: 'center' },
+  screen: { flex: 1, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
   logo:   { fontSize: 48, marginBottom: 8 },
   title:  { color: '#fff', fontSize: 26, fontWeight: 'bold', marginBottom: 4 },
-  sub:    { color: '#555', fontSize: 15, marginBottom: 40 },
+  sub:    { color: '#6B7280', fontSize: 15, marginBottom: 40 },
   dots:   { flexDirection: 'row', gap: 18, marginBottom: 16 },
-  dot:    { width: 14, height: 14, borderRadius: 7, backgroundColor: '#222', borderWidth: 2, borderColor: '#444' },
-  dotFilled: { backgroundColor: '#00E5FF', borderColor: '#00E5FF' },
+  dot:    { width: 14, height: 14, borderRadius: 7, backgroundColor: '#E5E7EB', borderWidth: 2, borderColor: '#9CA3AF' },
+  dotFilled: { backgroundColor: '#4A9FFF', borderColor: '#4A9FFF' },
   error:  { color: '#FF3C6E', fontSize: 14, marginBottom: 8 },
   row:    { flexDirection: 'row', gap: 20, marginBottom: 16 },
-  key:    { width: 72, height: 72, borderRadius: 36, backgroundColor: '#0C0C1A', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#1A1A30' },
-  keyTxt: { color: '#E0E0F0', fontSize: 26, fontWeight: '300' },
+  key:    { width: 72, height: 72, borderRadius: 36, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#F3F4F6' },
+  keyTxt: { color: '#1F2937', fontSize: 26, fontWeight: '300' },
   keyPlaceholder: { width: 72, height: 72 },
 });

@@ -305,7 +305,7 @@ export default function MiniAppsScreen() {
         {/* ── Developer Section ─────────────────────── */}
         <Text style={[styles.sectionTitle, { marginTop: 28 }]}>Developer</Text>
         <LinearGradient
-          colors={['#0F1D32', '#0A1628']}
+          colors={['#0F1D32', '#F9FAFB']}
           style={styles.devCard}
         >
           <View style={styles.devIconWrap}>
@@ -342,7 +342,7 @@ export default function MiniAppsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#020B18',
+    backgroundColor: '#FFFFFF',
   },
   scroll: {
     padding: 20,
@@ -357,7 +357,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#0A1628',
+    backgroundColor: '#F9FAFB',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -391,7 +391,7 @@ const styles = StyleSheet.create({
   },
   appCard: {
     width: '48%',
-    backgroundColor: '#0A1628',
+    backgroundColor: '#F9FAFB',
     borderRadius: 16,
     padding: 18,
     alignItems: 'center',
@@ -490,7 +490,7 @@ const styles = StyleSheet.create({
 
   // ── Calculator ────────────────────────────────────
   calcDisplay: {
-    backgroundColor: '#0A1628',
+    backgroundColor: '#F9FAFB',
     borderRadius: 16,
     padding: 20,
     marginBottom: 16,
@@ -566,7 +566,7 @@ const styles = StyleSheet.create({
   },
   todoInput: {
     flex: 1,
-    backgroundColor: '#0A1628',
+    backgroundColor: '#F9FAFB',
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#1A2744',
@@ -592,7 +592,7 @@ const styles = StyleSheet.create({
   todoItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#0A1628',
+    backgroundColor: '#F9FAFB',
     borderRadius: 12,
     padding: 14,
     marginBottom: 8,

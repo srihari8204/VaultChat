@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/translate.tsx — Real-Time Message Translation
 // Tap any message -> instant translation to 50+ languages
 // Uses on-device dictionary for common phrases, no API needed
@@ -12,7 +11,7 @@ import {
 import { useLocalSearchParams, Stack } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 
-const C = { bg: '#020B18', accent: '#4A9FFF', card: '#0A1628', green: '#10B981' };
+const C = { bg: '#FFFFFF', accent: '#4A9FFF', card: '#F9FAFB', green: '#10B981' };
 
 const LANGUAGES = [
   { code: 'en', name: 'English', flag: '\uD83C\uDDFA\uD83C\uDDF8' },
@@ -103,7 +102,7 @@ export default function TranslateScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Translate', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
+      <Stack.Screen options={{ title: 'Translate', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
       <ScrollView style={s.container}>
         <StatusBar barStyle="light-content" />
 
@@ -113,7 +112,7 @@ export default function TranslateScreen() {
             <Text style={s.langLabel}>{"\uD83C\uDDFA\uD83C\uDDF8"} English</Text>
           </View>
           <TextInput style={s.textInput} value={inputText} onChangeText={setInputText}
-            placeholder="Enter text to translate..." placeholderTextColor="#555" multiline maxLength={1000} />
+            placeholder="Enter text to translate..." placeholderTextColor="#6B7280" multiline maxLength={1000} />
         </View>
 
         {/* Swap + Target */}
@@ -126,7 +125,7 @@ export default function TranslateScreen() {
         <View style={s.card}>
           <TouchableOpacity style={s.cardHeader} onPress={() => setShowLangs(!showLangs)}>
             <Text style={s.langLabel}>{selectedLang?.flag} {selectedLang?.name}</Text>
-            <Text style={{ color: '#555' }}>{"\u25BC"}</Text>
+            <Text style={{ color: '#6B7280' }}>{"\u25BC"}</Text>
           </TouchableOpacity>
 
           {showLangs && (
@@ -154,7 +153,7 @@ export default function TranslateScreen() {
             </TouchableOpacity>
           ) : (
             <View style={s.resultBox}>
-              <Text style={{ color: '#444' }}>Translation will appear here</Text>
+              <Text style={{ color: '#9CA3AF' }}>Translation will appear here</Text>
             </View>
           )}
         </View>
@@ -182,23 +181,23 @@ export default function TranslateScreen() {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg, padding: 16 },
-  card: { backgroundColor: C.card, borderRadius: 16, borderWidth: 1, borderColor: '#111', overflow: 'hidden', marginBottom: 4 },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: '#111' },
-  langLabel: { color: '#E0E0F0', fontSize: 14, fontWeight: '700' },
+  card: { backgroundColor: C.card, borderRadius: 16, borderWidth: 1, borderColor: '#E5E7EB', overflow: 'hidden', marginBottom: 4 },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
+  langLabel: { color: '#1F2937', fontSize: 14, fontWeight: '700' },
   textInput: { padding: 14, color: '#fff', fontSize: 15, minHeight: 80, textAlignVertical: 'top' },
   swapRow: { alignItems: 'center', paddingVertical: 4 },
-  swapBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: C.card, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#222' },
+  swapBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: C.card, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB' },
   langOption: { flex: 1, flexDirection: 'row', alignItems: 'center', padding: 10, borderRadius: 8, gap: 8, margin: 2 },
   langOptionActive: { backgroundColor: '#4A9FFF22' },
   langFlag: { fontSize: 18 },
   langName: { color: '#ccc', fontSize: 12, fontWeight: '600' },
   resultBox: { padding: 14, minHeight: 80 },
-  resultTxt: { color: '#E0E0F0', fontSize: 15, lineHeight: 22 },
-  copyHint: { color: '#444', fontSize: 10, marginTop: 8, textAlign: 'right' },
+  resultTxt: { color: '#1F2937', fontSize: 15, lineHeight: 22 },
+  copyHint: { color: '#9CA3AF', fontSize: 10, marginTop: 8, textAlign: 'right' },
   translateBtn: { backgroundColor: C.accent, borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 12 },
   translateBtnTxt: { color: '#000', fontSize: 16, fontWeight: '900' },
-  sectionTitle: { color: '#555', fontSize: 11, fontWeight: '800', letterSpacing: 1, marginTop: 20, marginBottom: 8 },
-  historyRow: { backgroundColor: C.card, borderRadius: 10, padding: 10, marginBottom: 4, borderWidth: 1, borderColor: '#111' },
-  historyFrom: { color: '#888', fontSize: 12 },
-  historyTo: { color: '#E0E0F0', fontSize: 12, marginTop: 2 },
+  sectionTitle: { color: '#6B7280', fontSize: 11, fontWeight: '800', letterSpacing: 1, marginTop: 20, marginBottom: 8 },
+  historyRow: { backgroundColor: C.card, borderRadius: 10, padding: 10, marginBottom: 4, borderWidth: 1, borderColor: '#E5E7EB' },
+  historyFrom: { color: '#6B7280', fontSize: 12 },
+  historyTo: { color: '#1F2937', fontSize: 12, marginTop: 2 },
 });

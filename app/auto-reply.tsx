@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/auto-reply.tsx — Auto-Reply Bot
 // Set custom auto-replies when busy
 // Schedule-based: work hours, sleep, custom
@@ -12,7 +11,7 @@ import {
 import { Stack } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const C = { bg: '#020B18', accent: '#4A9FFF', card: '#0A1628', green: '#10B981', danger: '#FF3C6E' };
+const C = { bg: '#FFFFFF', accent: '#4A9FFF', card: '#F9FAFB', green: '#10B981', danger: '#FF3C6E' };
 const STORAGE_KEY = 'vc_auto_reply';
 
 const TEMPLATES = [
@@ -65,7 +64,7 @@ export default function AutoReplyScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Auto-Reply', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
+      <Stack.Screen options={{ title: 'Auto-Reply', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
       <ScrollView style={s.container}>
         <StatusBar barStyle="light-content" />
 
@@ -76,14 +75,14 @@ export default function AutoReplyScreen() {
             <Text style={s.masterDesc}>{enabled ? 'Active — sending auto-replies' : 'Disabled — manual replies only'}</Text>
           </View>
           <Switch value={enabled} onValueChange={v => { setEnabled(v); }}
-            thumbColor={enabled ? C.green : '#555'} trackColor={{ false: '#222', true: '#10B98144' }} />
+            thumbColor={enabled ? C.green : '#6B7280'} trackColor={{ false: '#E5E7EB', true: '#10B98144' }} />
         </View>
 
         {/* Message */}
         <Text style={s.sectionTitle}>YOUR MESSAGE</Text>
         <View style={s.msgBox}>
           <TextInput style={s.msgInput} value={message} onChangeText={setMessage}
-            placeholder="Type your auto-reply message..." placeholderTextColor="#555"
+            placeholder="Type your auto-reply message..." placeholderTextColor="#6B7280"
             multiline maxLength={500} />
           <Text style={s.charCount}>{message.length}/500</Text>
         </View>
@@ -122,7 +121,7 @@ export default function AutoReplyScreen() {
             <Text style={s.settDesc}>Only auto-reply once per person until you manually reply</Text>
           </View>
           <Switch value={replyOnce} onValueChange={setReplyOnce}
-            thumbColor={replyOnce ? C.accent : '#555'} trackColor={{ false: '#222', true: '#4A9FFF44' }} />
+            thumbColor={replyOnce ? C.accent : '#6B7280'} trackColor={{ false: '#E5E7EB', true: '#4A9FFF44' }} />
         </View>
         <View style={s.settRow}>
           <View style={{ flex: 1 }}>
@@ -130,7 +129,7 @@ export default function AutoReplyScreen() {
             <Text style={s.settDesc}>Skip auto-reply for your trusted contacts</Text>
           </View>
           <Switch value={excludeTrusted} onValueChange={setExcludeTrusted}
-            thumbColor={excludeTrusted ? C.accent : '#555'} trackColor={{ false: '#222', true: '#4A9FFF44' }} />
+            thumbColor={excludeTrusted ? C.accent : '#6B7280'} trackColor={{ false: '#E5E7EB', true: '#4A9FFF44' }} />
         </View>
 
         <TouchableOpacity style={s.saveBtn} onPress={save}>
@@ -145,23 +144,23 @@ export default function AutoReplyScreen() {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg, padding: 16 },
-  masterCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 16, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#111' },
+  masterCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 16, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#E5E7EB' },
   masterTitle: { color: '#fff', fontSize: 18, fontWeight: '900' },
-  masterDesc: { color: '#666', fontSize: 12, marginTop: 4 },
-  sectionTitle: { color: '#555', fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 8 },
-  msgBox: { backgroundColor: C.card, borderRadius: 14, padding: 4, borderWidth: 1, borderColor: '#111' },
+  masterDesc: { color: '#9CA3AF', fontSize: 12, marginTop: 4 },
+  sectionTitle: { color: '#6B7280', fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 8 },
+  msgBox: { backgroundColor: C.card, borderRadius: 14, padding: 4, borderWidth: 1, borderColor: '#E5E7EB' },
   msgInput: { color: '#fff', fontSize: 15, padding: 12, minHeight: 80, textAlignVertical: 'top' },
-  charCount: { color: '#444', fontSize: 10, textAlign: 'right', padding: 8 },
+  charCount: { color: '#9CA3AF', fontSize: 10, textAlign: 'right', padding: 8 },
   templateBtn: { backgroundColor: '#4A9FFF22', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: '#4A9FFF33' },
   templateLabel: { color: C.accent, fontSize: 12, fontWeight: '600' },
-  scheduleRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 14, marginBottom: 6, borderWidth: 1, borderColor: '#111', gap: 12 },
+  scheduleRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 14, marginBottom: 6, borderWidth: 1, borderColor: '#E5E7EB', gap: 12 },
   scheduleActive: { borderColor: '#4A9FFF44', backgroundColor: '#4A9FFF08' },
   scheduleIcon: { fontSize: 20 },
-  scheduleName: { color: '#E0E0F0', fontSize: 14, fontWeight: '700' },
-  scheduleDesc: { color: '#555', fontSize: 11, marginTop: 2 },
-  settRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 14, marginBottom: 6, borderWidth: 1, borderColor: '#111' },
-  settName: { color: '#E0E0F0', fontSize: 13, fontWeight: '700' },
-  settDesc: { color: '#555', fontSize: 11, marginTop: 2 },
+  scheduleName: { color: '#1F2937', fontSize: 14, fontWeight: '700' },
+  scheduleDesc: { color: '#6B7280', fontSize: 11, marginTop: 2 },
+  settRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 14, marginBottom: 6, borderWidth: 1, borderColor: '#E5E7EB' },
+  settName: { color: '#1F2937', fontSize: 13, fontWeight: '700' },
+  settDesc: { color: '#6B7280', fontSize: 11, marginTop: 2 },
   saveBtn: { backgroundColor: C.accent, borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 16 },
   saveTxt: { color: '#000', fontSize: 16, fontWeight: '900' },
 });

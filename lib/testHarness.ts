@@ -1,4 +1,3 @@
-// @ts-nocheck
 // ================================================================
 // lib/testHarness.ts Ã¢â‚¬â€ Multi-user parallel test runner
 // Runs on device Ã¢â‚¬â€ simulates parallel users via Socket.io

@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/trusted-contacts.tsx — Trusted Contacts Manager
 // Up to 3 emergency contacts who receive:
 //   - GPS alert on duress PIN activation
@@ -16,7 +15,7 @@ import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 
 const MAX_TRUSTED = 3;
-const C = { bg: '#020B18', accent: '#00D4AA', danger: '#FF3C6E', primary: '#4A9FFF', card: '#0A1628' };
+const C = { bg: '#FFFFFF', accent: '#10B981', danger: '#FF3C6E', primary: '#4A9FFF', card: '#F9FAFB' };
 
 export default function TrustedContactsScreen() {
   const myUid = auth().currentUser?.uid || '';
@@ -97,7 +96,7 @@ export default function TrustedContactsScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Trusted Contacts', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
+      <Stack.Screen options={{ title: 'Trusted Contacts', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
       <View style={s.container}>
         <StatusBar barStyle="light-content" />
 
@@ -130,7 +129,7 @@ export default function TrustedContactsScreen() {
                   <Text style={s.contactName}>{item.name}</Text>
                   <Text style={s.contactId}>@{item.vaultId}</Text>
                 </View>
-                <View style={[s.statusDot, { backgroundColor: item.online ? '#10B981' : '#333' }]} />
+                <View style={[s.statusDot, { backgroundColor: item.online ? '#10B981' : '#D1D5DB' }]} />
                 <TouchableOpacity onPress={() => removeTrusted(item.uid, item.name)} style={s.removeBtn}>
                   <Text style={{ color: C.danger, fontSize: 12, fontWeight: '700' }}>Remove</Text>
                 </TouchableOpacity>
@@ -138,8 +137,8 @@ export default function TrustedContactsScreen() {
             )}
             ListEmptyComponent={
               <View style={{ alignItems: 'center', paddingVertical: 30 }}>
-                <Text style={{ color: '#555', fontSize: 14 }}>No trusted contacts yet</Text>
-                <Text style={{ color: '#444', fontSize: 12, marginTop: 4 }}>Add up to {MAX_TRUSTED} emergency contacts</Text>
+                <Text style={{ color: '#6B7280', fontSize: 14 }}>No trusted contacts yet</Text>
+                <Text style={{ color: '#9CA3AF', fontSize: 12, marginTop: 4 }}>Add up to {MAX_TRUSTED} emergency contacts</Text>
               </View>
             }
           />
@@ -157,13 +156,13 @@ export default function TrustedContactsScreen() {
           <View style={s.addForm}>
             <Text style={s.addLabel}>Enter their VaultID</Text>
             <View style={s.addRow}>
-              <Text style={{ color: '#888', fontSize: 18 }}>@</Text>
+              <Text style={{ color: '#6B7280', fontSize: 18 }}>@</Text>
               <TextInput
                 style={s.addInput}
                 value={searchId}
                 onChangeText={setSearchId}
                 placeholder="vaultid"
-                placeholderTextColor="#444"
+                placeholderTextColor="#9CA3AF"
                 autoCapitalize="none"
                 autoFocus
               />
@@ -172,7 +171,7 @@ export default function TrustedContactsScreen() {
               </TouchableOpacity>
             </View>
             <TouchableOpacity onPress={() => { setAdding(false); setSearchId(''); }}>
-              <Text style={{ color: '#555', textAlign: 'center', marginTop: 12 }}>Cancel</Text>
+              <Text style={{ color: '#6B7280', textAlign: 'center', marginTop: 12 }}>Cancel</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -191,25 +190,25 @@ export default function TrustedContactsScreen() {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg, padding: 16 },
-  infoCard: { backgroundColor: C.card, borderRadius: 16, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: '#111' },
+  infoCard: { backgroundColor: C.card, borderRadius: 16, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: '#E5E7EB' },
   infoTitle: { color: '#fff', fontSize: 18, fontWeight: '900', marginBottom: 6 },
-  infoDesc: { color: '#888', fontSize: 13, lineHeight: 20 },
+  infoDesc: { color: '#6B7280', fontSize: 13, lineHeight: 20 },
   infoStats: { marginTop: 12, flexDirection: 'row' },
   infoStat: { color: C.accent, fontSize: 13, fontWeight: '700' },
-  contactRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: '#111' },
+  contactRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: '#E5E7EB' },
   contactAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#1D4ED8', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  contactName: { color: '#E0E0F0', fontSize: 15, fontWeight: '700' },
-  contactId: { color: '#555', fontSize: 12, marginTop: 2 },
+  contactName: { color: '#1F2937', fontSize: 15, fontWeight: '700' },
+  contactId: { color: '#6B7280', fontSize: 12, marginTop: 2 },
   statusDot: { width: 8, height: 8, borderRadius: 4, marginRight: 12 },
   removeBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: '#FF3C6E15', borderWidth: 1, borderColor: '#FF3C6E33' },
   addBtn: { backgroundColor: C.accent + '22', borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 12, borderWidth: 1, borderColor: C.accent + '44' },
   addBtnTxt: { color: C.accent, fontSize: 14, fontWeight: '700' },
-  addForm: { backgroundColor: C.card, borderRadius: 14, padding: 16, marginTop: 12, borderWidth: 1, borderColor: '#111' },
-  addLabel: { color: '#888', fontSize: 13, marginBottom: 10 },
+  addForm: { backgroundColor: C.card, borderRadius: 14, padding: 16, marginTop: 12, borderWidth: 1, borderColor: '#E5E7EB' },
+  addLabel: { color: '#6B7280', fontSize: 13, marginBottom: 10 },
   addRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  addInput: { flex: 1, backgroundColor: '#111', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, color: '#fff', fontSize: 15 },
+  addInput: { flex: 1, backgroundColor: '#E5E7EB', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, color: '#fff', fontSize: 15 },
   addConfirm: { backgroundColor: C.accent, borderRadius: 10, paddingHorizontal: 20, paddingVertical: 10 },
-  alertInfo: { marginTop: 20, backgroundColor: C.card, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#111' },
-  alertTitle: { color: '#888', fontSize: 12, fontWeight: '700', marginBottom: 10 },
-  alertItem: { color: '#666', fontSize: 12, lineHeight: 22 },
+  alertInfo: { marginTop: 20, backgroundColor: C.card, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#E5E7EB' },
+  alertTitle: { color: '#6B7280', fontSize: 12, fontWeight: '700', marginBottom: 10 },
+  alertItem: { color: '#9CA3AF', fontSize: 12, lineHeight: 22 },
 });

@@ -7,10 +7,11 @@ import {
 // FIX: replaced deprecated Clipboard from 'react-native' with expo-clipboard
 import * as Clipboard from 'expo-clipboard';
 import { useRouter } from 'expo-router';
-import { getAuth } from 'firebase/auth';
+import { getAuth } from '@react-native-firebase/auth';
 
 // REPLACE with your actual backend IP
-const API = 'https://vaultchat.onrender.com/api/sync-contact';
+import { SERVER_URL } from '../constants/server';
+const API = `${SERVER_URL}/api/sync-contact`;
 
 const C = {
   purple: '#A78BFA',

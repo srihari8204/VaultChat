@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/file-viewer.tsx — Universal File Viewer for VaultChat
 // View ANY file without leaving the app: images, videos, PDFs, Office docs,
 // code/text files, audio — all rendered inline with premium UI.
@@ -29,7 +28,7 @@ const { width: SW, height: SH } = Dimensions.get('window');
 
 // ── Design tokens ────────────────────────────────────────────────
 const C = {
-  bg: '#020B18',
+  bg: '#FFFFFF',
   bgPure: '#000000',
   primary: '#4A9FFF',
   secondary: '#7C3AED',

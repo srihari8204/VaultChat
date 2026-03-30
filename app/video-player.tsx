@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/video-player.tsx — World-class Video Player for VaultChat
 // Full-featured playback: controls overlay, PiP, double-tap seek, pinch-zoom, swipe dismiss
 
@@ -14,7 +13,7 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import * as Sharing from 'expo-sharing';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
-const ACCENT = '#00E5FF';
+const ACCENT = '#4A9FFF';
 const BG = '#000000';
 const OVERLAY = 'rgba(0,0,0,0.55)';
 const SPEEDS = [0.5, 1, 1.25, 1.5, 2];

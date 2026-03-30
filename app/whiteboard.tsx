@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/whiteboard.tsx — Drawing Whiteboard
 // Draw sketches, annotate, share in chat
 // Touch-based drawing with color picker, brush sizes, undo, clear
@@ -12,9 +11,9 @@ import { Stack } from 'expo-router';
 import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
 
-const C = { bg: '#0D1117', accent: '#4A9FFF' };
+const C = { bg: '#FFFFFF', accent: '#4A9FFF' };
 
-const COLORS = ['#FFFFFF', '#FF3C6E', '#00E5FF', '#10B981', '#F59E0B', '#A78BFA', '#FF6B35', '#EC4899', '#8B5CF6'];
+const COLORS = ['#FFFFFF', '#FF3C6E', '#4A9FFF', '#10B981', '#F59E0B', '#A78BFA', '#FF6B35', '#EC4899', '#8B5CF6'];
 const BRUSH_SIZES = [2, 4, 8, 14, 22];
 
 export default function WhiteboardScreen() {
@@ -38,7 +37,7 @@ export default function WhiteboardScreen() {
     },
     onPanResponderRelease: () => {
       if (currentPath.length > 0) {
-        setPaths(prev => [...prev, { points: currentPath, color: tool === 'eraser' ? '#0D1117' : color, width: tool === 'eraser' ? brushSize * 3 : brushSize }]);
+        setPaths(prev => [...prev, { points: currentPath, color: tool === 'eraser' ? '#FFFFFF' : color, width: tool === 'eraser' ? brushSize * 3 : brushSize }]);
         setCurrentPath([]);
       }
     },
@@ -88,7 +87,7 @@ export default function WhiteboardScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Whiteboard', headerStyle: { backgroundColor: '#0D1117' }, headerTintColor: '#fff',
+      <Stack.Screen options={{ title: 'Whiteboard', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937',
         headerRight: () => (
           <View style={{ flexDirection: 'row', gap: 14, marginRight: 8 }}>
             <TouchableOpacity onPress={undo}><Text style={{ color: '#4A9FFF', fontSize: 13, fontWeight: '700' }}>Undo</Text></TouchableOpacity>
@@ -102,7 +101,7 @@ export default function WhiteboardScreen() {
         {/* Canvas */}
         <View ref={canvasRef} style={s.canvas} {...panResponder.panHandlers}>
           {paths.map((p, i) => renderPath(p, i))}
-          {currentPath.length > 0 && renderPath({ points: currentPath, color: tool === 'eraser' ? '#0D1117' : color, width: tool === 'eraser' ? brushSize * 3 : brushSize }, 'current')}
+          {currentPath.length > 0 && renderPath({ points: currentPath, color: tool === 'eraser' ? '#FFFFFF' : color, width: tool === 'eraser' ? brushSize * 3 : brushSize }, 'current')}
         </View>
 
         {/* Toolbar */}

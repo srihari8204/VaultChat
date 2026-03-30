@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/offline-mode.tsx — Offline Mode Manager
 // Connection status, message queue, sync progress, cache management
 
@@ -16,8 +15,8 @@ import NetInfo from '@react-native-community/netinfo';
 const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
 
 const C = {
-  bg: '#020B18', accent: '#4A9FFF', cyan: '#00E5FF',
-  card: '#0A1628', cardBorder: '#112240', white: '#FFFFFF',
+  bg: '#FFFFFF', accent: '#4A9FFF', cyan: '#4A9FFF',
+  card: '#F9FAFB', cardBorder: '#112240', white: '#FFFFFF',
   muted: '#7B8CA8', green: '#10B981', red: '#FF4D6D',
   orange: '#FF9F43', yellow: '#FBBF24',
 };
@@ -186,7 +185,7 @@ export default function OfflineModeScreen() {
       <Stack.Screen options={{ headerShown: false }} />
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
 
-      <LinearGradient colors={['#0A1628', C.bg]} style={s.header}>
+      <LinearGradient colors={['#F9FAFB', C.bg]} style={s.header}>
         <View style={[s.headerRow, { marginTop: TOP }]}>
           <TouchableOpacity onPress={() => router.back()} hitSlop={16}>
             <Ionicons name="arrow-back" size={24} color={C.white} />
@@ -200,7 +199,7 @@ export default function OfflineModeScreen() {
 
         {/* ── Connection Status ───────────────────────── */}
         <LinearGradient
-          colors={isOnline ? ['#0A2E1A', '#0A1628'] : ['#2E0A0A', '#0A1628']}
+          colors={isOnline ? ['#0A2E1A', '#F9FAFB'] : ['#2E0A0A', '#F9FAFB']}
           style={s.card}
         >
           <View style={s.statusRow}>
@@ -227,7 +226,7 @@ export default function OfflineModeScreen() {
         </LinearGradient>
 
         {/* ── Message Queue ──────────────────────────── */}
-        <LinearGradient colors={['#0F2847', '#0A1628']} style={s.card}>
+        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.sectionHeader}>
             <Ionicons name="mail-outline" size={20} color={C.accent} />
             <Text style={s.cardTitle}>Message Queue</Text>
@@ -304,7 +303,7 @@ export default function OfflineModeScreen() {
 
         {/* ── Sync Progress ──────────────────────────── */}
         {syncing && (
-          <LinearGradient colors={['#0F2847', '#0A1628']} style={s.card}>
+          <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
             <Text style={s.cardTitlePlain}>Syncing Data...</Text>
             <View style={s.syncBarBg}>
               <Animated.View style={[s.syncBarFill, { width: syncProgressWidth }]} />
@@ -314,7 +313,7 @@ export default function OfflineModeScreen() {
         )}
 
         {/* ── Last Sync ──────────────────────────────── */}
-        <LinearGradient colors={['#0F2847', '#0A1628']} style={s.card}>
+        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.sectionHeader}>
             <Ionicons name="sync-outline" size={20} color={C.cyan} />
             <Text style={s.cardTitle}>Last Sync</Text>
@@ -330,7 +329,7 @@ export default function OfflineModeScreen() {
         </LinearGradient>
 
         {/* ── Offline Features Available ──────────────── */}
-        <LinearGradient colors={['#0F2847', '#0A1628']} style={s.card}>
+        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.sectionHeader}>
             <Ionicons name="apps-outline" size={20} color={C.accent} />
             <Text style={s.cardTitle}>Available Offline</Text>
@@ -359,7 +358,7 @@ export default function OfflineModeScreen() {
         </LinearGradient>
 
         {/* ── Cache Management ────────────────────────── */}
-        <LinearGradient colors={['#0F2847', '#0A1628']} style={s.card}>
+        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.sectionHeader}>
             <Ionicons name="folder-outline" size={20} color={C.orange} />
             <Text style={s.cardTitle}>Cache</Text>

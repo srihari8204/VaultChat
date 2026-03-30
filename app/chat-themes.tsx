@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/chat-themes.tsx — Chat Themes & Wallpapers
 // Per-chat or global theme. Gradient backgrounds, solid colors, patterns.
 // Stored in AsyncStorage per chatId + global default.
@@ -14,10 +13,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 const { width: SW } = Dimensions.get('window');
 const TILE = (SW - 56) / 3;
-const C = { bg: '#020B18', accent: '#4A9FFF', card: '#0A1628' };
+const C = { bg: '#FFFFFF', accent: '#4A9FFF', card: '#F9FAFB' };
 
 const THEMES = [
-  { id: 'default', name: 'Default Dark', colors: ['#03030E', '#03030E'], type: 'solid' },
+  { id: 'default', name: 'Default Dark', colors: ['#FFFFFF', '#FFFFFF'], type: 'solid' },
   { id: 'midnight', name: 'Midnight Blue', colors: ['#0a0a2e', '#1a1a4e'], type: 'gradient' },
   { id: 'ocean', name: 'Deep Ocean', colors: ['#001427', '#003459'], type: 'gradient' },
   { id: 'forest', name: 'Dark Forest', colors: ['#0b1a0b', '#1a3a1a'], type: 'gradient' },
@@ -35,12 +34,12 @@ const THEMES = [
 ];
 
 const BUBBLE_COLORS = [
-  { id: 'default', name: 'Default Green', mine: '#003D2A', peer: '#111127' },
-  { id: 'blue', name: 'Blue', mine: '#0a2a4a', peer: '#111127' },
-  { id: 'purple', name: 'Purple', mine: '#2a0a3a', peer: '#111127' },
-  { id: 'red', name: 'Crimson', mine: '#3a0a0a', peer: '#111127' },
-  { id: 'teal', name: 'Teal', mine: '#0a3a3a', peer: '#111127' },
-  { id: 'orange', name: 'Orange', mine: '#3a2a0a', peer: '#111127' },
+  { id: 'default', name: 'Default Green', mine: '#DCF8C6', peer: '#F3F4F6' },
+  { id: 'blue', name: 'Blue', mine: '#0a2a4a', peer: '#F3F4F6' },
+  { id: 'purple', name: 'Purple', mine: '#2a0a3a', peer: '#F3F4F6' },
+  { id: 'red', name: 'Crimson', mine: '#3a0a0a', peer: '#F3F4F6' },
+  { id: 'teal', name: 'Teal', mine: '#0a3a3a', peer: '#F3F4F6' },
+  { id: 'orange', name: 'Orange', mine: '#3a2a0a', peer: '#F3F4F6' },
   { id: 'pink', name: 'Pink', mine: '#3a0a2a', peer: '#0e0e20' },
   { id: 'gray', name: 'Gray', mine: '#2a2a2a', peer: '#1a1a1a' },
 ];
@@ -82,22 +81,22 @@ export default function ChatThemesScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: isGlobal ? 'Global Theme' : 'Chat Theme', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
+      <Stack.Screen options={{ title: isGlobal ? 'Global Theme' : 'Chat Theme', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
       <ScrollView style={s.container}>
         <StatusBar barStyle="light-content" />
 
         {/* Preview */}
         <Text style={s.sectionTitle}>PREVIEW</Text>
         <LinearGradient colors={currentTheme.colors} style={s.preview}>
-          <View style={[s.previewBubbleL, { backgroundColor: BUBBLE_COLORS.find(b => b.id === selectedBubble)?.peer || '#111127' }]}>
+          <View style={[s.previewBubbleL, { backgroundColor: BUBBLE_COLORS.find(b => b.id === selectedBubble)?.peer || '#F3F4F6' }]}>
             <Text style={s.previewTxt}>Hey, how are you?</Text>
             <Text style={s.previewTime}>10:30 AM</Text>
           </View>
-          <View style={[s.previewBubbleR, { backgroundColor: BUBBLE_COLORS.find(b => b.id === selectedBubble)?.mine || '#003D2A' }]}>
+          <View style={[s.previewBubbleR, { backgroundColor: BUBBLE_COLORS.find(b => b.id === selectedBubble)?.mine || '#DCF8C6' }]}>
             <Text style={s.previewTxt}>I&apos;m great! Love this new theme</Text>
             <Text style={s.previewTime}>10:31 AM</Text>
           </View>
-          <View style={[s.previewBubbleL, { backgroundColor: BUBBLE_COLORS.find(b => b.id === selectedBubble)?.peer || '#111127' }]}>
+          <View style={[s.previewBubbleL, { backgroundColor: BUBBLE_COLORS.find(b => b.id === selectedBubble)?.peer || '#F3F4F6' }]}>
             <Text style={s.previewTxt}>It looks amazing!</Text>
             <Text style={s.previewTime}>10:32 AM</Text>
           </View>
@@ -151,21 +150,21 @@ export default function ChatThemesScreen() {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg, padding: 16 },
-  sectionTitle: { color: '#555', fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 8 },
+  sectionTitle: { color: '#6B7280', fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 8 },
   preview: { borderRadius: 16, padding: 16, minHeight: 180 },
   previewBubbleL: { alignSelf: 'flex-start', maxWidth: '75%', borderRadius: 14, borderBottomLeftRadius: 2, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 6 },
   previewBubbleR: { alignSelf: 'flex-end', maxWidth: '75%', borderRadius: 14, borderBottomRightRadius: 2, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 6 },
-  previewTxt: { color: '#E0E0F0', fontSize: 14 },
-  previewTime: { color: '#555', fontSize: 10, marginTop: 3, textAlign: 'right' },
+  previewTxt: { color: '#1F2937', fontSize: 14 },
+  previewTime: { color: '#6B7280', fontSize: 10, marginTop: 3, textAlign: 'right' },
   themeTile: { width: TILE, marginBottom: 8, marginRight: 8 },
   themeTileActive: { borderWidth: 2, borderColor: C.accent, borderRadius: 14 },
   themeTileGrad: { width: '100%', height: 70, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   checkmark: { color: '#fff', fontSize: 20, fontWeight: '900' },
-  themeTileName: { color: '#888', fontSize: 10, textAlign: 'center', marginTop: 4 },
+  themeTileName: { color: '#6B7280', fontSize: 10, textAlign: 'center', marginTop: 4 },
   bubbleTile: { alignItems: 'center', padding: 8 },
   bubbleTileActive: { backgroundColor: '#4A9FFF22', borderRadius: 10 },
   bubblePreview: { width: 40, height: 40, borderRadius: 10 },
-  bubbleName: { color: '#888', fontSize: 10, marginTop: 4 },
+  bubbleName: { color: '#6B7280', fontSize: 10, marginTop: 4 },
   resetBtn: { marginTop: 20, padding: 14, borderRadius: 12, backgroundColor: '#FF3C6E15', borderWidth: 1, borderColor: '#FF3C6E33', alignItems: 'center' },
   resetTxt: { color: '#FF3C6E', fontSize: 13, fontWeight: '700' },
 });

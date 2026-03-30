@@ -4,7 +4,7 @@
 // Phone numbers are NEVER sent raw — SHA-256 hashed only
 
 const express = require("express");
-const admin   = require("firebase-admin");
+const admin   = require("../firebaseAdmin");
 const router  = express.Router();
 
 // POST /api/contacts/match

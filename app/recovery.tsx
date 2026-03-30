@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
@@ -6,7 +5,7 @@ import { Animated, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text,
 import { ErrorBoundary } from '../components/ErrorBoundary';
 
 const C = {
-  bg: '#020B18', primary: '#4A9FFF', secondary: '#7C3AED',
+  bg: '#FFFFFF', primary: '#4A9FFF', secondary: '#7C3AED',
   accent: '#10B981', danger: '#EF4444', warning: '#F59E0B',
   textFaint: 'rgba(255,255,255,0.22)', textDim: 'rgba(255,255,255,0.5)',
 };
@@ -135,7 +134,7 @@ function RecoveryContent() {
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      <LinearGradient colors={['#010812','#020B18','#040F20']} style={S.fill} />
+      <LinearGradient colors={['#FFFFFF','#FFFFFF','#040F20']} style={S.fill} />
       <View style={{ position: 'absolute', top: -60, alignSelf: 'center', width: 300, height: 300, borderRadius: 150, backgroundColor: 'rgba(245,158,11,0.04)' }} />
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>

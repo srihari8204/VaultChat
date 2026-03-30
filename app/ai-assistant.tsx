@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/ai-assistant.tsx — In-Chat AI Assistant
 // Summarize conversations, draft replies, answer questions, translate
 // Works offline with preset smart responses + online with API when available
@@ -11,7 +10,7 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, Stack } from 'expo-router';
 
-const C = { bg: '#020B18', accent: '#A78BFA', card: '#0A1628', green: '#10B981' };
+const C = { bg: '#FFFFFF', accent: '#A78BFA', card: '#F9FAFB', green: '#10B981' };
 
 const QUICK_PROMPTS = [
   { id: 'summarize', label: 'Summarize Chat', icon: '\uD83D\uDCDD', prompt: 'Summarize the key points from this conversation' },
@@ -103,7 +102,7 @@ export default function AIAssistantScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'AI Assistant', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
+      <Stack.Screen options={{ title: 'AI Assistant', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
       <KeyboardAvoidingView style={s.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={90}>
         <StatusBar barStyle="light-content" />
 
@@ -154,7 +153,7 @@ export default function AIAssistantScreen() {
         {/* Input */}
         <View style={s.inputBar}>
           <TextInput style={s.input} value={input} onChangeText={setInput}
-            placeholder="Ask AI anything..." placeholderTextColor="#555" multiline />
+            placeholder="Ask AI anything..." placeholderTextColor="#6B7280" multiline />
           <TouchableOpacity style={[s.sendBtn, !input.trim() && { opacity: 0.3 }]} onPress={() => send()} disabled={!input.trim() || thinking}>
             <Text style={s.sendTxt}>{"\u2191"}</Text>
           </TouchableOpacity>
@@ -166,10 +165,10 @@ export default function AIAssistantScreen() {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
-  contextBar: { backgroundColor: '#A78BFA15', paddingHorizontal: 14, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#111' },
+  contextBar: { backgroundColor: '#A78BFA15', paddingHorizontal: 14, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
   contextTxt: { color: C.accent, fontSize: 11, fontWeight: '600' },
   quickRow: { paddingHorizontal: 12, paddingVertical: 8, gap: 8 },
-  quickBtn: { backgroundColor: C.card, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: '#111' },
+  quickBtn: { backgroundColor: C.card, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: '#E5E7EB' },
   quickIcon: { fontSize: 14 },
   quickLabel: { color: '#ccc', fontSize: 12, fontWeight: '600' },
   msgRow: { marginBottom: 8, flexDirection: 'row', alignItems: 'flex-end', gap: 6 },
@@ -178,13 +177,13 @@ const s = StyleSheet.create({
   aiAvatar: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#A78BFA22', justifyContent: 'center', alignItems: 'center' },
   bubble: { maxWidth: '82%', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10 },
   aiBubble: { backgroundColor: C.card, borderBottomLeftRadius: 2 },
-  userBubble: { backgroundColor: '#003D2A', borderBottomRightRadius: 2 },
-  msgTxt: { color: '#E0E0F0', fontSize: 14, lineHeight: 21 },
+  userBubble: { backgroundColor: '#DCF8C6', borderBottomRightRadius: 2 },
+  msgTxt: { color: '#1F2937', fontSize: 14, lineHeight: 21 },
   thinkingRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingBottom: 8 },
   thinkingBubble: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.card, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10 },
-  thinkingTxt: { color: '#888', fontSize: 13 },
-  inputBar: { flexDirection: 'row', alignItems: 'flex-end', backgroundColor: '#0C0C1A', padding: 10, borderTopWidth: 1, borderTopColor: '#111' },
-  input: { flex: 1, backgroundColor: '#111127', color: '#E0E0F0', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, fontSize: 14, maxHeight: 100, marginRight: 8 },
+  thinkingTxt: { color: '#6B7280', fontSize: 13 },
+  inputBar: { flexDirection: 'row', alignItems: 'flex-end', backgroundColor: '#FFFFFF', padding: 10, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
+  input: { flex: 1, backgroundColor: '#F3F4F6', color: '#1F2937', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, fontSize: 14, maxHeight: 100, marginRight: 8 },
   sendBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: C.accent, justifyContent: 'center', alignItems: 'center' },
   sendTxt: { color: '#000', fontSize: 18, fontWeight: '900' },
 });

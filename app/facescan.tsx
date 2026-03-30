@@ -13,7 +13,7 @@ import Svg, { Circle, Line, Ellipse } from 'react-native-svg';
 import { router } from 'expo-router';
 
 const C = {
-  bg: '#060E1E', panel: '#0D1F3C', cyan: '#00E5FF',
+  bg: '#060E1E', panel: '#0D1F3C', cyan: '#4A9FFF',
   cyan2: '#00B4D8', green: '#00FF9D', coral: '#FF4D6D',
   white: '#FFFFFF', muted: '#7BA7C4', dark: '#030A14',
 };

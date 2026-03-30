@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/videocall.tsx
 // Real WebRTC video call
 // TURN server: openrelay.metered.ca (credentials hardcoded below)
@@ -58,7 +57,7 @@ const ICE_SERVERS = [
   },
 ];
 
-const BACKEND_URL = 'https://vaultchat.onrender.com';
+import { SERVER_URL as BACKEND_URL } from '../constants/server';
 
 type Beauty = 'Off' | 'Soft' | 'Smooth' | 'Glow';
 type CallState = 'connecting' | 'ringing' | 'connected' | 'ended';
@@ -127,7 +126,6 @@ export default function VideoCallScreen() {
           chatId,
         });
       } catch (e) {
-        console.error('[Call] initiateCall error:', e);
       }
     };
 
@@ -154,7 +152,6 @@ export default function VideoCallScreen() {
           await pc.setLocalDescription(answer);
           socket.emit('call_answer', { toSocketId: fromSocketId, answer });
         } catch (e) {
-          console.error('[Call] answerCall error:', e);
         }
       });
     };
@@ -206,7 +203,6 @@ export default function VideoCallScreen() {
         socketRef.current = socket;
 
         socket.on('connect', async () => {
-          console.log('[Call] Socket connected:', socket.id);
 
           // Register with our UID
           socket.emit('register', uid);
@@ -233,7 +229,6 @@ export default function VideoCallScreen() {
               );
             }
           } catch (e) {
-            console.warn('[Call] addIceCandidate error:', e);
           }
         });
 
@@ -248,7 +243,6 @@ export default function VideoCallScreen() {
               startTimer();
             }
           } catch (e) {
-            console.warn('[Call] setRemoteDescription error:', e);
           }
         });
 
@@ -269,7 +263,6 @@ export default function VideoCallScreen() {
 
         // Connection state changes
         (pc as any).onconnectionstatechange = () => {
-          console.log('[Call] Connection state:', pc.connectionState);
           if (pc.connectionState === 'failed') {
             Alert.alert('Call Failed', 'Connection failed. Check your network.');
             endCallInner(true);
@@ -280,7 +273,6 @@ export default function VideoCallScreen() {
         };
 
       } catch (e: any) {
-        console.error('[Call] Setup error:', e);
         Alert.alert('Camera Error', e.message || 'Could not access camera/mic');
         router.back();
       }
@@ -518,15 +510,15 @@ const styles = StyleSheet.create({
   waitingInitial: {
     fontSize: 72,
     fontWeight: 'bold',
-    color: '#00D4AA',
+    color: '#10B981',
     width: 120,
     height: 120,
     borderRadius: 60,
-    backgroundColor: '#003328',
+    backgroundColor: '#D1FAE5',
     textAlign: 'center',
     lineHeight: 120,
     borderWidth: 2,
-    borderColor: '#00D4AA',
+    borderColor: '#10B981',
     overflow: 'hidden',
   },
   waitingName: {
@@ -536,15 +528,15 @@ const styles = StyleSheet.create({
   },
   waitingStatus: {
     fontSize: 14,
-    color: '#64748B',
+    color: '#6B7280',
   },
   d2deBadge: {
     position: 'absolute',
     top: 50,
     left: 16,
-    backgroundColor: '#00332888',
+    backgroundColor: '#D1FAE588',
     borderWidth: 0.5,
-    borderColor: '#00D4AA',
+    borderColor: '#10B981',
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 4,
@@ -552,7 +544,7 @@ const styles = StyleSheet.create({
   d2deText: {
     fontSize: 11,
     fontWeight: 'bold',
-    color: '#00D4AA',
+    color: '#10B981',
   },
   timerBadge: {
     position: 'absolute',
@@ -576,7 +568,7 @@ const styles = StyleSheet.create({
     height: 130,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: '#00D4AA',
+    borderColor: '#10B981',
     overflow: 'hidden',
     zIndex: 10,
   },
@@ -588,15 +580,15 @@ const styles = StyleSheet.create({
     height: 130,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: '#374151',
-    backgroundColor: '#111827',
+    borderColor: '#6B7280',
+    backgroundColor: '#F9FAFB',
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 10,
   },
   localOffText: {
     fontSize: 9,
-    color: '#374151',
+    color: '#6B7280',
     fontWeight: 'bold',
   },
   beautyBar: {
@@ -615,18 +607,18 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     backgroundColor: '#00000066',
     borderWidth: 0.5,
-    borderColor: '#1E293B',
+    borderColor: '#E5E7EB',
   },
   beautyActive: {
-    backgroundColor: '#003328',
-    borderColor: '#00D4AA',
+    backgroundColor: '#D1FAE5',
+    borderColor: '#10B981',
   },
   beautyText: {
     fontSize: 11,
-    color: '#64748B',
+    color: '#6B7280',
   },
   beautyTextActive: {
-    color: '#00D4AA',
+    color: '#10B981',
     fontWeight: 'bold',
   },
   topControls: {
@@ -644,13 +636,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#00000066',
     borderRadius: 12,
     borderWidth: 0.5,
-    borderColor: '#1E293B',
+    borderColor: '#E5E7EB',
     padding: 10,
     minWidth: 70,
   },
   topCtrlBtnActive: {
-    backgroundColor: '#003328',
-    borderColor: '#00D4AA',
+    backgroundColor: '#D1FAE5',
+    borderColor: '#10B981',
   },
   topCtrlIcon: {
     fontSize: 22,
@@ -658,10 +650,10 @@ const styles = StyleSheet.create({
   },
   topCtrlLabel: {
     fontSize: 10,
-    color: '#64748B',
+    color: '#6B7280',
   },
   topCtrlLabelActive: {
-    color: '#00D4AA',
+    color: '#10B981',
   },
   bottomControls: {
     position: 'absolute',
@@ -685,16 +677,16 @@ const styles = StyleSheet.create({
     width: 58,
     height: 58,
     borderRadius: 29,
-    backgroundColor: '#1A2235',
+    backgroundColor: '#F3F4F6',
     textAlign: 'center',
     lineHeight: 58,
     borderWidth: 0.5,
-    borderColor: '#1E293B',
+    borderColor: '#E5E7EB',
     overflow: 'hidden',
   },
   circleBtnLabel: {
     fontSize: 10,
-    color: '#64748B',
+    color: '#6B7280',
   },
   endBtn: {
     alignItems: 'center',

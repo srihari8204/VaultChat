@@ -1,8 +1,8 @@
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
 import { useState } from "react";
-import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { saveUserProfile } from "./(constants)/authService";
+import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { saveUserProfile, getPendingSignup } from "./(constants)/authService";
 
 export default function ProfileSetupScreen() {
   const [name,setName]     = useState("");
@@ -18,13 +18,21 @@ export default function ProfileSetupScreen() {
 
   const handleNext = async () => {
     setLoading(true);
-    try { await saveUserProfile({ name: name.trim() } as any); } catch {}
+    try {
+      const pending = await getPendingSignup();
+      if (pending) {
+        pending.name = name.trim() || pending.name;
+        await saveUserProfile(pending);
+      }
+    } catch (e: any) {
+      Alert.alert('Profile Error', e?.message || 'Failed to save profile');
+    }
     setLoading(false);
   };
 
   return (
     <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==="ios"?"padding":undefined}>
-      <LinearGradient colors={["#010812","#020E1A","#010812"]} style={StyleSheet.absoluteFillObject}/>
+      <LinearGradient colors={["#FFFFFF","#020E1A","#FFFFFF"]} style={StyleSheet.absoluteFillObject}/>
       <View style={S.container}>
         <View style={S.header}>
           <View style={S.badge}><Text style={{fontSize:36}}>👤</Text></View>

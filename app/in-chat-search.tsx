@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/in-chat-search.tsx — In-Chat Message Search
 // Search through messages in a specific chat. Real-time filtering,
 // highlighted matches, tap to jump to message in chat.
@@ -13,7 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import firestore from '@react-native-firebase/firestore';
 import { Ionicons } from '@expo/vector-icons';
 
-const C = { bg: '#020B18', accent: '#4A9FFF', cyan: '#00E5FF', card: '#0A1628', border: '#112240' };
+const C = { bg: '#FFFFFF', accent: '#4A9FFF', cyan: '#4A9FFF', card: '#F9FAFB', border: '#112240' };
 
 interface Message {
   id: string;
@@ -60,7 +59,6 @@ export default function InChatSearchScreen() {
           setLoading(false);
         },
         err => {
-          console.warn('[InChatSearch] snapshot error:', err);
           setLoading(false);
         },
       );
@@ -148,7 +146,7 @@ export default function InChatSearchScreen() {
       <Stack.Screen options={{ headerShown: false }} />
 
       {/* Header */}
-      <LinearGradient colors={['#0A1628', C.bg]} style={s.header}>
+      <LinearGradient colors={['#F9FAFB', C.bg]} style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
@@ -288,7 +286,7 @@ const s = StyleSheet.create({
     lineHeight: 20,
   },
   resultCard: {
-    backgroundColor: '#0A1628',
+    backgroundColor: '#F9FAFB',
     borderRadius: 12,
     borderWidth: 1,
     borderColor: C.border,

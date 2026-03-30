@@ -5,7 +5,7 @@ import { Alert, Animated, Easing, ScrollView, StyleSheet, Text, TouchableOpacity
 import { ErrorBoundary } from '../components/ErrorBoundary';
 
 const C = {
-  bg:'#020B18', surface:'rgba(10,22,40,0.85)', surface2:'rgba(6,14,34,0.9)',
+  bg:'#FFFFFF', surface:'rgba(10,22,40,0.85)', surface2:'rgba(6,14,34,0.9)',
   primary:'#4A9FFF', secondary:'#7C3AED', accent:'#10B981', danger:'#EF4444', warning:'#F59E0B',
   border:'rgba(74,159,255,0.15)', borderDim:'rgba(255,255,255,0.06)',
   text:'#FFFFFF', textDim:'rgba(255,255,255,0.5)', textFaint:'rgba(255,255,255,0.22)',
@@ -82,7 +82,7 @@ function DashboardContent() {
 
   return (
     <View style={S.container}>
-      <LinearGradient colors={['#020B18','#040F20','#060F24']} style={StyleSheet.absoluteFillObject}/>
+      <LinearGradient colors={['#FFFFFF','#040F20','#060F24']} style={StyleSheet.absoluteFillObject}/>
       <View style={S.glowTop}/>
 
       <Animated.View style={[{flex:1},{ opacity:fadeAnim}]}>
@@ -211,7 +211,7 @@ export default function DashboardScreen() {
 }
 
 const S = StyleSheet.create({
-  container:{flex:1,backgroundColor:'#020B18'},
+  container:{flex:1,backgroundColor:'#FFFFFF'},
   glowTop:{position:'absolute',top:-40,alignSelf:'center',width:300,height:300,borderRadius:150,backgroundColor:'rgba(74,159,255,0.06)'},
   header:{flexDirection:'row',alignItems:'center',paddingHorizontal:18,paddingTop:50,paddingBottom:14,gap:10},
   title:{color:'#fff',fontSize:20,fontWeight:'900'},

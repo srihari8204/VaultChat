@@ -69,7 +69,7 @@ export default function ProfileScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Profile', headerStyle: { backgroundColor: '#0C0C1A' }, headerTintColor: '#fff' }} />
+      <Stack.Screen options={{ title: 'Profile', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
       <ScrollView style={s.screen}>
 
         {/* Avatar */}
@@ -121,24 +121,24 @@ export default function ProfileScreen() {
 }
 
 const s = StyleSheet.create({
-  screen:          { flex: 1, backgroundColor: '#03030E' },
-  avatarSection:   { alignItems: 'center', paddingTop: 32, paddingBottom: 24, borderBottomWidth: 1, borderBottomColor: '#0A0A18' },
+  screen:          { flex: 1, backgroundColor: '#FFFFFF' },
+  avatarSection:   { alignItems: 'center', paddingTop: 32, paddingBottom: 24, borderBottomWidth: 1, borderBottomColor: '#F1F3F4' },
   avatarWrap:      { position: 'relative', marginBottom: 14 },
   avatar:          { width: 96, height: 96, borderRadius: 48 },
-  avatarFallback:  { backgroundColor: '#111127', alignItems: 'center', justifyContent: 'center' },
-  avatarFallbackTxt:{ color: '#00E5FF', fontSize: 38, fontWeight: 'bold' },
-  editBadge:       { position: 'absolute', bottom: 0, right: 0, width: 30, height: 30, borderRadius: 15, backgroundColor: '#00E5FF', alignItems: 'center', justifyContent: 'center' },
-  onlineDot:       { position: 'absolute', top: 4, right: 4, width: 14, height: 14, borderRadius: 7, backgroundColor: '#00FF88', borderWidth: 2, borderColor: '#03030E' },
-  name:            { color: '#E0E0F0', fontSize: 22, fontWeight: 'bold', textAlign: 'center' },
-  nameSub:         { color: '#555', fontSize: 12, textAlign: 'center', marginTop: 2 },
+  avatarFallback:  { backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center' },
+  avatarFallbackTxt:{ color: '#4A9FFF', fontSize: 38, fontWeight: 'bold' },
+  editBadge:       { position: 'absolute', bottom: 0, right: 0, width: 30, height: 30, borderRadius: 15, backgroundColor: '#4A9FFF', alignItems: 'center', justifyContent: 'center' },
+  onlineDot:       { position: 'absolute', top: 4, right: 4, width: 14, height: 14, borderRadius: 7, backgroundColor: '#00FF88', borderWidth: 2, borderColor: '#FFFFFF' },
+  name:            { color: '#1F2937', fontSize: 22, fontWeight: 'bold', textAlign: 'center' },
+  nameSub:         { color: '#9CA3AF', fontSize: 12, textAlign: 'center', marginTop: 2 },
   nameEdit:        { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
-  nameInput:       { backgroundColor: '#111127', color: '#E0E0F0', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, fontSize: 18, minWidth: 180 },
-  nameSaveBtn:     { backgroundColor: '#00E5FF', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
-  phone:           { color: '#555', fontSize: 14, marginTop: 4 },
-  vaultId:         { color: '#00E5FF', fontSize: 13, marginTop: 4 },
-  sectionLabel:    { color: '#555', fontSize: 11, fontWeight: '700', letterSpacing: 1.2, paddingHorizontal: 16, paddingTop: 20, paddingBottom: 8 },
-  menuItem:        { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0C0C1A', paddingHorizontal: 16, paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#111' },
+  nameInput:       { backgroundColor: '#F3F4F6', color: '#1F2937', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, fontSize: 18, minWidth: 180 },
+  nameSaveBtn:     { backgroundColor: '#4A9FFF', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
+  phone:           { color: '#6B7280', fontSize: 14, marginTop: 4 },
+  vaultId:         { color: '#4A9FFF', fontSize: 13, marginTop: 4 },
+  sectionLabel:    { color: '#6B7280', fontSize: 11, fontWeight: '700', letterSpacing: 1.2, paddingHorizontal: 16, paddingTop: 20, paddingBottom: 8 },
+  menuItem:        { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#F1F3F4' },
   menuIcon:        { fontSize: 20, marginRight: 14, width: 28, textAlign: 'center' },
-  menuLabel:       { color: '#E0E0F0', fontSize: 15, flex: 1 },
-  menuArrow:       { color: '#333', fontSize: 22 },
+  menuLabel:       { color: '#1F2937', fontSize: 15, flex: 1 },
+  menuArrow:       { color: '#D1D5DB', fontSize: 22 },
 });

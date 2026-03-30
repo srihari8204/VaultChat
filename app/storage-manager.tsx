@@ -1,4 +1,3 @@
-// @ts-nocheck
 // app/storage-manager.tsx — Storage Manager
 // View storage breakdown, manage cache, auto-download & quality settings
 
@@ -15,8 +14,8 @@ import { Ionicons } from '@expo/vector-icons';
 const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
 
 const C = {
-  bg: '#020B18', accent: '#4A9FFF', cyan: '#00E5FF',
-  card: '#0A1628', cardBorder: '#112240', white: '#FFFFFF',
+  bg: '#FFFFFF', accent: '#4A9FFF', cyan: '#4A9FFF',
+  card: '#F9FAFB', cardBorder: '#112240', white: '#FFFFFF',
   muted: '#7B8CA8', green: '#10B981', red: '#FF4D6D',
   orange: '#FF9F43', purple: '#A855F7', pink: '#EC4899',
   yellow: '#FBBF24',
@@ -119,7 +118,6 @@ export default function StorageManagerScreen() {
       setChatStorages(chats);
 
     } catch (e) {
-      console.warn('[StorageManager] load error:', e);
     } finally {
       setLoading(false);
     }
@@ -206,7 +204,7 @@ export default function StorageManagerScreen() {
       <Stack.Screen options={{ headerShown: false }} />
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
 
-      <LinearGradient colors={['#0A1628', C.bg]} style={s.header}>
+      <LinearGradient colors={['#F9FAFB', C.bg]} style={s.header}>
         <View style={[s.headerRow, { marginTop: TOP }]}>
           <TouchableOpacity onPress={() => router.back()} hitSlop={16}>
             <Ionicons name="arrow-back" size={24} color={C.white} />
@@ -219,7 +217,7 @@ export default function StorageManagerScreen() {
       <ScrollView style={s.scroll} contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
 
         {/* ── Total Storage Card ─────────────────────── */}
-        <LinearGradient colors={['#0F2847', '#0A1628']} style={s.card}>
+        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.storageHeader}>
             <Ionicons name="pie-chart-outline" size={28} color={C.cyan} />
             <View style={{ marginLeft: 12, flex: 1 }}>
@@ -234,7 +232,7 @@ export default function StorageManagerScreen() {
         </LinearGradient>
 
         {/* ── Category Breakdown ─────────────────────── */}
-        <LinearGradient colors={['#0F2847', '#0A1628']} style={s.card}>
+        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <Text style={s.cardTitle}>Storage Breakdown</Text>
           {categories.map((cat, i) => (
             <View key={i} style={s.catRow}>
@@ -251,7 +249,7 @@ export default function StorageManagerScreen() {
         </LinearGradient>
 
         {/* ── Per-Chat Storage ────────────────────────── */}
-        <LinearGradient colors={['#0F2847', '#0A1628']} style={s.card}>
+        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <Text style={s.cardTitle}>Per-Chat Storage</Text>
           {chatStorages.map((ch, i) => (
             <View key={i} style={s.chatRow}>
@@ -265,7 +263,7 @@ export default function StorageManagerScreen() {
         </LinearGradient>
 
         {/* ── Cache Actions ───────────────────────────── */}
-        <LinearGradient colors={['#0F2847', '#0A1628']} style={s.card}>
+        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <Text style={s.cardTitle}>Cache Management</Text>
 
           <TouchableOpacity style={s.actionBtn} onPress={clearCache} disabled={clearing} activeOpacity={0.7}>
@@ -294,7 +292,7 @@ export default function StorageManagerScreen() {
         </LinearGradient>
 
         {/* ── Auto-Download Settings ─────────────────── */}
-        <LinearGradient colors={['#0F2847', '#0A1628']} style={s.card}>
+        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <Text style={s.cardTitle}>Auto-Download</Text>
 
           <Text style={s.sectionLabel}>Download Mode</Text>
@@ -321,14 +319,14 @@ export default function StorageManagerScreen() {
                 value={settings[key]}
                 onValueChange={(v) => saveSettings({ ...settings, [key]: v })}
                 trackColor={{ false: '#1A2A44', true: C.accent }}
-                thumbColor={settings[key] ? C.white : '#555'}
+                thumbColor={settings[key] ? C.white : '#6B7280'}
               />
             </View>
           ))}
         </LinearGradient>
 
         {/* ── Quality Settings ────────────────────────── */}
-        <LinearGradient colors={['#0F2847', '#0A1628']} style={s.card}>
+        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <Text style={s.cardTitle}>Media Quality</Text>
 
           <Text style={s.sectionLabel}>Photo Quality</Text>
