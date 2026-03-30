@@ -282,9 +282,9 @@ export default function CallsScreen() {
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const styles = StyleSheet.create({
-  container:    { flex: 1, backgroundColor: '#0A0E1A' },
+  container:    { flex: 1, backgroundColor: '#ffffff' },
   header: {
-    backgroundColor: '#111827',
+    backgroundColor: '#ffffff',
     paddingTop: 48, paddingBottom: 12, paddingHorizontal: 16,
     borderBottomWidth: 0.5, borderBottomColor: '#1E293B',
   },
