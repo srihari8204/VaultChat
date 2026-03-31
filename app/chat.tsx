@@ -28,6 +28,7 @@ import GifPicker from '../components/GifPicker';
 import MediaMessage from '../components/MediaMessage';
 import ReactionPicker from '../components/ReactionPicker';
 import VoiceRecorder from '../components/VoiceRecorder';
+import { getGhostSettings, GhostSettings } from '../services/ghostModeService';
 import { decryptMessage, encryptMessage } from '../services/d2deService';
 import { uploadMedia } from '../services/mediaService';
 
@@ -104,10 +105,20 @@ export default function ChatScreen() {
   const [showReactions, setShowReactions] = useState(false);
   const [reactionTarget,setReactionTarget]= useState<Message | null>(null);
 
+  const [ghostSettings, setGhostSettingsState] = useState<GhostSettings | null>(null);
+
   const flatRef     = useRef<FlatList>(null);
   const socketRef   = useRef<Socket | null>(null);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTyping    = useRef(false);
+
+  // Ghost Mode — load per-contact privacy settings
+  useEffect(() => {
+    if (!peerUid) return;
+    getGhostSettings(peerUid).then(setGhostSettingsState).catch(() => {});
+  }, [peerUid]);
+
+  const isGhosted = ghostSettings?.enabled ?? false;
 
   // â”€â”€ Socket â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
@@ -137,6 +148,8 @@ export default function ChatScreen() {
 
   // â”€â”€ Firestore â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const markRead = useCallback((docs: any[]) => {
+    // Ghost Mode: suppress read receipts when ghosted
+    if (isGhosted && ghostSettings?.hideReadReceipts) return;
     const batch = firestore().batch();
     docs.forEach(doc => {
       if (doc.data().senderId !== myUid && doc.data().status !== 'read') {
@@ -145,7 +158,7 @@ export default function ChatScreen() {
       }
     });
     batch.commit().catch(() => {});
-  }, [chatId, myUid, peerUid]);
+  }, [chatId, myUid, peerUid, isGhosted, ghostSettings]);
 
   useEffect(() => {
     const unsub = firestore()
@@ -187,6 +200,8 @@ export default function ChatScreen() {
   // â”€â”€ Typing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleTyping = (text: string) => {
     setInputText(text);
+    // Ghost Mode: suppress typing indicators when ghosted
+    if (isGhosted && ghostSettings?.hideTyping) return;
     if (!isTyping.current) { isTyping.current = true; socketRef.current?.emit('typing_start', { chatId, uid: myUid }); }
     if (typingTimer.current) clearTimeout(typingTimer.current);
     typingTimer.current = setTimeout(() => { isTyping.current = false; socketRef.current?.emit('typing_stop', { chatId, uid: myUid }); }, 2000);
@@ -528,14 +543,21 @@ return (
         headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937',
         headerTitle: () => (
           <View style={{ alignItems: 'flex-start' }}>
-            <Text style={{ color: '#fff', fontSize: 17, fontWeight: '700' }} numberOfLines={1}>{peerName ?? 'Chat'}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={{ color: '#fff', fontSize: 17, fontWeight: '700' }} numberOfLines={1}>{peerName ?? 'Chat'}</Text>
+              {isGhosted && <Text style={{ fontSize: 14 }}>{'\uD83D\uDC7B'}</Text>}
+            </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
               <Text style={{ color: '#00D4AA', fontSize: 9, fontWeight: '700' }}>{"\uD83D\uDD12"} END-TO-END ENCRYPTED</Text>
+              {isGhosted && <Text style={{ color: '#9CA3AF', fontSize: 9 }}> | GHOST</Text>}
             </View>
           </View>
         ),
         headerRight: () => (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, marginRight: 12 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginRight: 12 }}>
+            <TouchableOpacity onPress={() => router.push({ pathname: '/ghost-mode' as any, params: { contactUid: peerUid, contactName: peerName } })}>
+              <Text style={{ fontSize: 18, opacity: isGhosted ? 1 : 0.4 }}>{'\uD83D\uDC7B'}</Text>
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => router.push({ pathname: '/voicecall' as any, params: { chatId, name: peerName } })}>
               <Text style={{ color: '#4A9FFF', fontSize: 20 }}>{"\u260E\uFE0F"}</Text>
             </TouchableOpacity>

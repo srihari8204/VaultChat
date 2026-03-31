@@ -43,7 +43,7 @@ export default function SetupCompleteScreen() {
           <View style={S.badge}>
             <Text style={S.badgeTxt}>Protected by D2DE + E2EE + Biometric Lock</Text>
           </View>
-          <TouchableOpacity style={S.btn} onPress={()=>router.replace("/chats")} activeOpacity={0.85}>
+          <TouchableOpacity style={S.btn} onPress={()=>router.replace("/(tabs)/chats")} activeOpacity={0.85}>
             <Text style={S.btnTxt}>Enter VaultChat</Text>
           </TouchableOpacity>
         </Animated.View>

@@ -12,7 +12,7 @@ const C = {
 };
 
 const NAV = [
-  {id:'chats',icon:'💬',label:'Chats',route:'/chats'},
+  {id:'chats',icon:'💬',label:'Chats',route:'/(tabs)/chats'},
   {id:'shield',icon:'🛡️',label:'Shield',route:'/dashboard'},
   {id:'community',icon:'🌐',label:'Community',route:'/communities'},
   {id:'vault',icon:'📦',label:'Vault',route:'/filevault'},

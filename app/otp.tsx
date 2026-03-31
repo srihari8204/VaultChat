@@ -103,7 +103,7 @@ export default function OTPScreen() {
           if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           Animated.spring(successScale, { toValue: 1, tension: 50, friction: 8, useNativeDriver: true }).start();
           await markSetupComplete();
-          setTimeout(() => router.replace('/chats' as any), 800);
+          setTimeout(() => router.replace('/(tabs)/chats' as any), 800);
         } else {
           shakeInEffect();
           setError('Invalid code. Try again.');
@@ -219,7 +219,7 @@ export default function OTPScreen() {
         if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Animated.spring(successScale, { toValue: 1, tension: 50, friction: 8, useNativeDriver: true }).start();
         await markSetupComplete();
-        setTimeout(() => router.replace('/chats' as any), 800);
+        setTimeout(() => router.replace('/(tabs)/chats' as any), 800);
       } else {
         shake();
         setError('Invalid code. Try again.');

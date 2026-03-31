@@ -119,8 +119,8 @@ export default function RootLayout() {
         <Stack.Screen name="otp" />
         <Stack.Screen name="facescan" />
         <Stack.Screen name="biometric-setup" />
-        {/* Main app */}
-        <Stack.Screen name="chats" />
+        {/* Main app — 6-tab navigation */}
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="chat" />
         <Stack.Screen name="videocall" />
         <Stack.Screen name="voicecall" />
@@ -160,12 +160,10 @@ export default function RootLayout() {
         <Stack.Screen name="decoy-chat" />
         <Stack.Screen name="hidden-chats" />
         <Stack.Screen name="camera" options={{ headerShown: false }} />
-        <Stack.Screen name="status" />
-        <Stack.Screen name="calls" />
+        {/* status, calls now in (tabs) */}
         <Stack.Screen name="vault" />
         <Stack.Screen name="vaultdrop" />
-        <Stack.Screen name="alerts" />
-        <Stack.Screen name="profile" />
+        {/* alerts, profile now in (tabs) */}
 
         {/* Features */}
         <Stack.Screen name="d2de-status" />
@@ -219,6 +217,7 @@ export default function RootLayout() {
         <Stack.Screen name="secret-code" />
 
         {/* Security & Privacy */}
+        <Stack.Screen name="ghost-mode" />
         <Stack.Screen name="aiguardian" />
         <Stack.Screen name="backup-pin" />
         <Stack.Screen name="behavioral" />

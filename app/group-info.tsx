@@ -39,7 +39,7 @@ export default function GroupInfoScreen() {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Leave', style: 'destructive', onPress: async () => {
         await removeMember(chatId, myUid);
-        router.replace('/chats');
+        router.replace('/(tabs)/chats');
       }},
     ]);
   };

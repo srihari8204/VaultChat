@@ -1,13 +1,17 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getApp } from "@react-native-firebase/app";
-import { getAuth, signInWithPhoneNumber } from "@react-native-firebase/auth";
+import { getAuth, signInWithPhoneNumber, RecaptchaVerifier } from "@react-native-firebase/auth";
 import { doc, getDoc, getFirestore, serverTimestamp, setDoc } from "@react-native-firebase/firestore";
 import * as Crypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
+import { Platform } from "react-native";
 
 const app  = getApp();
 const auth = getAuth(app);
 const db   = getFirestore(app);
+
+// Web reCAPTCHA verifier (needed for phone auth on web)
+let webRecaptchaVerifier: any = null;
 
 export interface SignupData {
   name: string; dob: string; email: string; mobile: string;
@@ -16,7 +20,8 @@ export interface SignupData {
 }
 
 // ─── Configuration ──────────────────────────────────────────────
-const IS_TEST_MODE = false; // Set to true for dev testing with OTP "123456"
+// Set to true for dev/web testing — OTP will be "123456" and no SMS sent
+const IS_TEST_MODE = Platform.OS === 'web'; // Auto-enable test mode on web
 const TEST_OTP = "123456";
 const MAX_OTP_ATTEMPTS = 5;
 const OTP_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
@@ -63,8 +68,43 @@ export async function sendOTP(phone: string) {
     // Production: Use Firebase Phone Authentication
     if (!auth) throw new Error("Firebase Auth not initialized");
 
-    const confirmationResult = await signInWithPhoneNumber(auth, phone);
-    
+    let confirmationResult;
+
+    if (Platform.OS === 'web') {
+      // Web requires RecaptchaVerifier for phone auth
+      // Create invisible reCAPTCHA on a container div
+      try {
+        // Clean up previous verifier if exists
+        if (webRecaptchaVerifier) {
+          try { webRecaptchaVerifier.clear(); } catch {}
+        }
+
+        // Ensure container div exists
+        let container = document.getElementById('recaptcha-container');
+        if (!container) {
+          container = document.createElement('div');
+          container.id = 'recaptcha-container';
+          document.body.appendChild(container);
+        }
+
+        webRecaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
+          size: 'invisible',
+          callback: () => {
+            // reCAPTCHA solved — will proceed with signInWithPhoneNumber
+          },
+        });
+
+        confirmationResult = await signInWithPhoneNumber(auth, phone, webRecaptchaVerifier);
+      } catch (webErr: any) {
+        // If RecaptchaVerifier fails (e.g. import issue), try without it
+        console.warn('RecaptchaVerifier failed, trying direct:', webErr.message);
+        confirmationResult = await signInWithPhoneNumber(auth, phone);
+      }
+    } else {
+      // Native (iOS/Android) — reCAPTCHA is handled automatically
+      confirmationResult = await signInWithPhoneNumber(auth, phone);
+    }
+
     otpState = {
       confirmationResult,
       phone,

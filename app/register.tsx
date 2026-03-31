@@ -115,7 +115,7 @@ export default function Register() {
       await AsyncStorage.setItem('registered',   'true');
 
       setStep('done');
-      setTimeout(() => router.replace('/chats'), 1500);
+      setTimeout(() => router.replace('/(tabs)/chats'), 1500);
     } catch (e: any) {
       Alert.alert('Error', e.message);
     } finally {

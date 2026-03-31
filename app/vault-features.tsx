@@ -515,7 +515,7 @@ export default function VaultFeaturesScreen() {
             onPress={() => Alert.alert(
               'Export Chat',
               'Select a chat to export an encrypted transcript.',
-              [{ text: 'OK', onPress: () => router.push('/chats') }]
+              [{ text: 'OK', onPress: () => router.push('/(tabs)/chats') }]
             )}
           >
             <Text style={styles.exportIcon}>📧</Text>

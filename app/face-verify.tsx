@@ -91,7 +91,7 @@ export default function FaceVerifyScreen() {
       if (Platform.OS !== 'web') Haptics.notificationAsync(matched
         ?Haptics.NotificationFeedbackType.Success
         :Haptics.NotificationFeedbackType.Error);
-      if(matched) setTimeout(()=>router.replace('/chats' as any),1500);
+      if(matched) setTimeout(()=>router.replace('/(tabs)/chats' as any),1500);
     };
     const triggerBio=async()=>{
       if(Platform.OS==='web'){showResultInEffect(false);return;}

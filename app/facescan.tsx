@@ -272,7 +272,7 @@ export default function FaceScanScreen() {
         <View style={{ marginVertical: 14 }}><FaceMesh anim={meshA} /></View>
         <Text style={s.ok}>✓  Secured with device biometrics</Text>
         <TouchableOpacity style={[s.btn, { backgroundColor: C.green }]}
-          onPress={() => router.replace('/chats')} activeOpacity={0.82}>
+          onPress={() => router.replace('/(tabs)/chats')} activeOpacity={0.82}>
           <Text style={[s.btxt, { color: C.dark }]}>Open VaultChat</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[s.btn, { backgroundColor: C.panel, marginTop: 10 }]}

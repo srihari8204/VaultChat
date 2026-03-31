@@ -5,7 +5,7 @@ import { Alert, Animated, Modal, ScrollView, StyleSheet, Text, TextInput, Toucha
 import { ErrorBoundary } from '../components/ErrorBoundary';
 
 const C = { bg:'#FFFFFF',surface:'rgba(10,22,40,0.85)',primary:'#4A9FFF',secondary:'#7C3AED',accent:'#10B981',danger:'#EF4444',warning:'#F59E0B',border:'rgba(74,159,255,0.15)',borderDim:'rgba(255,255,255,0.06)',text:'#FFFFFF',textDim:'rgba(255,255,255,0.5)',textFaint:'rgba(255,255,255,0.22)' };
-const NAV = [{id:'chats',icon:'ðŸ’¬',label:'Chats',route:'/chats'},{id:'shield',icon:'ðŸ›¡ï¸',label:'Shield',route:'/dashboard'},{id:'community',icon:'ðŸŒ',label:'Community',route:'/communities'},{id:'vault',icon:'ðŸ“¦',label:'Vault',route:'/filevault'},{id:'alerts',icon:'ðŸ””',label:'Alerts',route:'/notifications'}];
+const NAV = [{id:'chats',icon:'ðŸ’¬',label:'Chats',route:'/(tabs)/chats'},{id:'shield',icon:'ðŸ›¡ï¸',label:'Shield',route:'/dashboard'},{id:'community',icon:'ðŸŒ',label:'Community',route:'/communities'},{id:'vault',icon:'ðŸ“¦',label:'Vault',route:'/filevault'},{id:'alerts',icon:'ðŸ””',label:'Alerts',route:'/notifications'}];
 
 const TRUST_LEVELS=[{level:'Untrusted',min:0,max:20,color:'#EF4444',icon:'â›”'},{level:'Low',min:21,max:40,color:'#F59E0B',icon:'âš ï¸'},{level:'Moderate',min:41,max:60,color:'#4A9FFF',icon:'ðŸ”µ'},{level:'High',min:61,max:80,color:'#10B981',icon:'âœ…'},{level:'Verified',min:81,max:100,color:'#A78BFA',icon:'ðŸ’Ž'}];
 const getLevel=(score:number)=>TRUST_LEVELS.find(l=>score>=l.min&&score<=l.max)||TRUST_LEVELS[0];

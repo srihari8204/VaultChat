@@ -71,7 +71,7 @@ export default function PinEntryScreen() {
     }
     if (entered === storedHash) {
       await deactivateGhost();
-      router.replace('/chats');
+      router.replace('/(tabs)/chats');
     } else {
       setPin('');
       setError('Wrong PIN');

@@ -91,6 +91,7 @@ export default function LoginScreen() {
       await sendOTP(fullPhone);
       router.push({ pathname: '/otp', params: { phone: fullPhone, flow: 'login' } });
     } catch (e: any) {
+      console.error('Login OTP error:', e);
       Alert.alert('Error', e.message ?? 'Failed to send OTP. Try again.');
     } finally {
       setLoading(false);

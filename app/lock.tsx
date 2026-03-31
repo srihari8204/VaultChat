@@ -143,7 +143,7 @@ export default function LockScreen() {
 
         if (result.success) {
           await recordAuthTime();
-          router.replace("/chats");
+          router.replace("/(tabs)/chats");
         } else if ((result as any).error === "user_fallback") {
           setStage("code");
         } else {
@@ -177,7 +177,7 @@ export default function LockScreen() {
 
       if (result.success) {
         await recordAuthTime();
-        router.replace("/chats");
+        router.replace("/(tabs)/chats");
       } else if ((result as any).error === "user_fallback") {
         setStage("code");
       } else {
@@ -201,7 +201,7 @@ export default function LockScreen() {
       const stored = await SecureStore.getItemAsync("vc_secret_code_hash");
       if (hash === stored) {
         await recordAuthTime();
-        router.replace("/chats");
+        router.replace("/(tabs)/chats");
       } else {
         handleFail();
         setCode("");

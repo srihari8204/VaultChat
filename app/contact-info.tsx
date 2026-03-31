@@ -294,6 +294,23 @@ export default function ContactInfoScreen() {
           </View>
         </View>
 
+        {/* Ghost Mode */}
+        <View style={s.section}>
+          <TouchableOpacity
+            style={[s.encryptionCard, { borderColor: '#6C63FF30' }]}
+            activeOpacity={0.7}
+            onPress={() => router.push({ pathname: '/ghost-mode' as any, params: { contactUid: peerUid, contactName: peerName } })}
+          >
+            <Text style={{ fontSize: 22 }}>{'\uD83D\uDC7B'}</Text>
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={[s.encTitle, { color: '#6C63FF' }]}>Ghost Mode</Text>
+              <Text style={s.encSubtitle}>
+                Hide your online status, typing, read receipts, and last seen from this contact.
+              </Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+
         {/* Block & Report */}
         <View style={[s.section, { marginBottom: 20 }]}>
           <TouchableOpacity style={s.dangerBtn} activeOpacity={0.7} onPress={handleBlock}>

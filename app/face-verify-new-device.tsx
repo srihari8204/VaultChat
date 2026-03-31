@@ -68,7 +68,7 @@ export default function FaceVerifyNewDeviceScreen() {
         await trustCurrentDevice(uid ?? "", SERVER_URL);
         setStage("success");
         setMsg("Identity verified");
-        setTimeout(() => router.replace("/chats"), 1200);
+        setTimeout(() => router.replace("/(tabs)/chats"), 1200);
       } else {
         handleFail();
       }

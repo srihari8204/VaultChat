@@ -279,7 +279,7 @@ export default function ThreeFactorVerifyScreen() {
         useNativeDriver: true,
       }),
     ]).start(() => {
-      setTimeout(() => router.replace('/chats'), 1000);
+      setTimeout(() => router.replace('/(tabs)/chats'), 1000);
     });
   }, [successScale, successOpacity]);
 

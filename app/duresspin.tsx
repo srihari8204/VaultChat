@@ -104,7 +104,7 @@ export default function DuressPin() {
     if (pin === realPin) {
       // ✅ Real PIN — open VaultChat normally
       await stealthMode.deactivate();
-      router.replace('/chats');
+      router.replace('/(tabs)/chats');
 
     } else if (pin === duressPin) {
       // 🔮 Duress PIN — activate stealth, show calculator
