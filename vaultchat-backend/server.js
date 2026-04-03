@@ -37,6 +37,14 @@ const sessions = new Map();
 const queue    = new Map();
 const testLogs = [];
 
+// Walkie-Talkie rooms
+const walkieRooms = new Map(); // roomId -> { id, pin, host, participants[] }
+
+// Gaming Platform
+const gamePlayers    = new Map(); // uid -> { uid, name, socketId, coins, wins, inGame }
+const gameRooms      = new Map(); // roomId -> { id, gameType, bet, players[], state, turn, startedAt }
+const gameMatchQueue = new Map(); // "gameType_bet" -> { uid, name, socketId, gameType, bet }
+
 function log(type, data) {
   const entry = { type, data, ts: Date.now(), id: crypto.randomUUID() };
   testLogs.unshift(entry);
@@ -251,6 +259,172 @@ io.on('connection', (socket) => {
   socket.on('webrtc_end',    data => { const t = [...io.sockets.sockets.values()].find(s => s.data?.vaultId === data.to); if (t) t.emit('webrtc_end', data); });
   socket.on('call_incoming', data => { const t = [...io.sockets.sockets.values()].find(s => s.data?.vaultId === data.to); if (t) t.emit('call_incoming', data); });
 
+  // ── Walkie-Talkie events ───────────────────────────────────
+  socket.on('walkie_join', ({ roomId, uid, name, pin }) => {
+    const room = walkieRooms.get(roomId);
+    if (room && room.pin && room.pin !== pin) {
+      socket.emit('walkie_error', { message: 'Invalid room PIN' });
+      return;
+    }
+    if (!room) {
+      walkieRooms.set(roomId, { id: roomId, pin: pin || '', host: uid, participants: [] });
+    }
+    const r = walkieRooms.get(roomId);
+    r.participants = r.participants.filter(p => p.uid !== uid);
+    r.participants.push({ uid, name, isTalking: false, isMuted: false, socketId: socket.id });
+    socket.join(`walkie:${roomId}`);
+    io.to(`walkie:${roomId}`).emit('walkie_participants', r.participants.map(p => ({ uid: p.uid, name: p.name, isTalking: p.isTalking, isMuted: p.isMuted })));
+    socket.to(`walkie:${roomId}`).emit('walkie_user_joined', { uid, name });
+    log('walkie_join', { roomId, uid, name });
+  });
+
+  socket.on('walkie_leave', ({ roomId, uid }) => {
+    const r = walkieRooms.get(roomId);
+    if (r) {
+      r.participants = r.participants.filter(p => p.uid !== uid);
+      if (r.participants.length === 0) walkieRooms.delete(roomId);
+      else io.to(`walkie:${roomId}`).emit('walkie_user_left', { uid });
+    }
+    socket.leave(`walkie:${roomId}`);
+  });
+
+  socket.on('walkie_talk_start', ({ roomId, uid }) => {
+    const r = walkieRooms.get(roomId);
+    if (r) {
+      const p = r.participants.find(x => x.uid === uid);
+      if (p) p.isTalking = true;
+      socket.to(`walkie:${roomId}`).emit('walkie_talk_start', { uid });
+    }
+  });
+
+  socket.on('walkie_talk_stop', ({ roomId, uid }) => {
+    const r = walkieRooms.get(roomId);
+    if (r) {
+      const p = r.participants.find(x => x.uid === uid);
+      if (p) p.isTalking = false;
+      socket.to(`walkie:${roomId}`).emit('walkie_talk_stop', { uid });
+    }
+  });
+
+  socket.on('walkie_mute', ({ roomId, uid, muted }) => {
+    const r = walkieRooms.get(roomId);
+    if (r) {
+      const p = r.participants.find(x => x.uid === uid);
+      if (p) p.isMuted = muted;
+    }
+  });
+
+  socket.on('walkie_ping', ({ roomId, from }) => {
+    socket.to(`walkie:${roomId}`).emit('walkie_ping', { from });
+  });
+
+  // ── Gaming Platform events ────────────────────────────────
+  socket.on('game_join_lobby', ({ uid, name }) => {
+    gamePlayers.set(uid, { uid, name, socketId: socket.id, coins: gamePlayers.get(uid)?.coins ?? 1000, wins: 0, inGame: false });
+    socket.join('game_lobby');
+    socket.emit('game_coins', { coins: gamePlayers.get(uid).coins });
+    io.to('game_lobby').emit('game_lobby_players', getGameLobbyList());
+    log('game_join_lobby', { uid, name });
+  });
+
+  socket.on('game_leave_lobby', ({ uid }) => {
+    socket.leave('game_lobby');
+  });
+
+  socket.on('game_quick_match', ({ uid, gameType, bet }) => {
+    const player = gamePlayers.get(uid);
+    if (!player) return;
+    if (player.coins < bet) { socket.emit('game_error', { message: 'Not enough coins' }); return; }
+
+    // Check if someone is already waiting for this game type
+    const waitKey = `${gameType}_${bet}`;
+    const waiting = gameMatchQueue.get(waitKey);
+    if (waiting && waiting.uid !== uid) {
+      // Match found!
+      gameMatchQueue.delete(waitKey);
+      const roomId = `GAME-${Date.now().toString(36).toUpperCase()}`;
+      const gameRoom = {
+        id: roomId, gameType, bet,
+        players: [{ uid: waiting.uid, name: waiting.name, socketId: waiting.socketId }, { uid, name: player.name, socketId: socket.id }],
+        state: {}, turn: waiting.uid, startedAt: Date.now(),
+      };
+      gameRooms.set(roomId, gameRoom);
+
+      // Deduct bets
+      gamePlayers.get(waiting.uid).coins -= bet;
+      player.coins -= bet;
+      gamePlayers.get(waiting.uid).inGame = true;
+      player.inGame = true;
+
+      // Notify both players
+      const waitingSocket = io.sockets.sockets.get(waiting.socketId);
+      if (waitingSocket) waitingSocket.emit('game_matched', { roomId, gameType, bet, opponent: { uid, name: player.name }, yourTurn: true });
+      socket.emit('game_matched', { roomId, gameType, bet, opponent: { uid: waiting.uid, name: waiting.name }, yourTurn: false });
+
+      socket.join(`game:${roomId}`);
+      if (waitingSocket) waitingSocket.join(`game:${roomId}`);
+
+      log('game_matched', { roomId, gameType, bet, p1: waiting.uid, p2: uid });
+    } else {
+      // No match — add to queue
+      gameMatchQueue.set(waitKey, { uid, name: player.name, socketId: socket.id, gameType, bet });
+      socket.emit('game_waiting', { gameType, bet });
+      log('game_queued', { uid, gameType, bet });
+    }
+  });
+
+  socket.on('game_cancel_match', ({ uid, gameType, bet }) => {
+    const waitKey = `${gameType}_${bet}`;
+    const waiting = gameMatchQueue.get(waitKey);
+    if (waiting && waiting.uid === uid) gameMatchQueue.delete(waitKey);
+    socket.emit('game_match_cancelled');
+  });
+
+  socket.on('game_move', ({ roomId, uid, move }) => {
+    const room = gameRooms.get(roomId);
+    if (!room) return;
+    // Relay move to opponent
+    socket.to(`game:${roomId}`).emit('game_move', { uid, move });
+    // Update turn
+    room.turn = room.players.find(p => p.uid !== uid)?.uid ?? uid;
+    log('game_move', { roomId, uid, move });
+  });
+
+  socket.on('game_end', ({ roomId, winnerId, reason }) => {
+    const room = gameRooms.get(roomId);
+    if (!room) return;
+    const totalPot = room.bet * 2;
+    // Award coins to winner
+    const winner = gamePlayers.get(winnerId);
+    if (winner) { winner.coins += totalPot; winner.wins++; winner.inGame = false; }
+    // Mark loser
+    const loserId = room.players.find(p => p.uid !== winnerId)?.uid;
+    if (loserId) { const loser = gamePlayers.get(loserId); if (loser) loser.inGame = false; }
+
+    io.to(`game:${roomId}`).emit('game_ended', { winnerId, totalPot, reason });
+
+    // Cleanup
+    room.players.forEach(p => {
+      const s = io.sockets.sockets.get(p.socketId);
+      if (s) { s.leave(`game:${roomId}`); s.emit('game_coins', { coins: gamePlayers.get(p.uid)?.coins ?? 0 }); }
+    });
+    gameRooms.delete(roomId);
+    log('game_end', { roomId, winnerId, totalPot, reason });
+  });
+
+  socket.on('game_chat', ({ roomId, uid, text }) => {
+    socket.to(`game:${roomId}`).emit('game_chat', { uid, text });
+  });
+
+  // ── In-call features ──────────────────────────────────────
+  socket.on('call_emoji', ({ chatId, emoji, from }) => {
+    socket.to(`chat:${chatId}`).emit('call_emoji', { emoji, from });
+  });
+
+  socket.on('call_chat', ({ chatId, text, from }) => {
+    socket.to(`chat:${chatId}`).emit('call_chat', { text, from });
+  });
+
   // ── Legacy test console events ─────────────────────────────
   socket.on('identify', ({ vaultId }) => {
     const user = users.get(vaultId);
@@ -362,6 +536,12 @@ function getSessionList() {
     id: s.id, users: s.users.length, startedAt: s.startedAt,
     endedAt: s.endedAt, msgCount: s.msgCount, active: s.active,
     duration: s.endedAt ? s.endedAt - s.startedAt : Date.now() - s.startedAt,
+  }));
+}
+
+function getGameLobbyList() {
+  return [...gamePlayers.values()].filter(p => !p.inGame).map(p => ({
+    uid: p.uid, name: p.name, coins: p.coins, wins: p.wins,
   }));
 }
 
