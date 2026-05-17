@@ -38,7 +38,13 @@ export default function RootLayout() {
       ScreenCapture.preventScreenCaptureAsync().catch(() => {});
     }
 
-    // ── 2. Run security scan BEFORE showing any screen ─────────
+    // ── 2. Configure Google Sign-In ────────────────────────────
+    try {
+      const { configureGoogleSignIn } = require('./(constants)/authService');
+      configureGoogleSignIn();
+    } catch {}
+
+    // ── 3. Run security scan BEFORE showing any screen ─────────
     const runStartup = async () => {
       // Skip security checks on web — they require native APIs
       if (Platform.OS !== 'web') {
@@ -246,6 +252,15 @@ export default function RootLayout() {
         <Stack.Screen name="filevault" />
         <Stack.Screen name="vaultid" />
         <Stack.Screen name="testconsole" />
+
+        {/* Mini Apps destinations */}
+        <Stack.Screen name="encrypted-notes" />
+        <Stack.Screen name="watch-together" />
+        <Stack.Screen name="walkie-talkie" />
+        <Stack.Screen name="screen-share" />
+        <Stack.Screen name="current-location" />
+        <Stack.Screen name="game-lobby" />
+        <Stack.Screen name="game-play" />
       </Stack>
     </>
   );

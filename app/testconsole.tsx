@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Animated } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
+import { SERVER_URL } from '../constants/server';
 
 export default function TestConsole() {
   const router = useRouter();
@@ -13,7 +14,7 @@ export default function TestConsole() {
   const [msgsPerUser,setMsgsPerUser]= useState('10');
   const [interval,   setInterval2]  = useState('500');
   const [testType,   setTestType]   = useState<TestConfig['testType']>('round_robin');
-  const [serverUrl,  setServerUrl]  = useState('http://10.94.177.151:3001');
+  const [serverUrl,  setServerUrl]  = useState(SERVER_URL);
   const progAnim = useRef(new Animated.Value(0)).current;
   const scrollRef = useRef<ScrollView>(null);
 

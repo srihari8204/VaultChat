@@ -12,7 +12,20 @@
           "package_name": "com.vaultchat.app"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "207307621485-cgcu41rebb1495ik0fqfb6d78crd9v4e.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.vaultchat.app",
+            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+          }
+        },
+        {
+          "client_id": "207307621485-53m82dlcolfctpfagjnddnsq1euvvmpe.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyDKic9s-_fyg4OeAttQgZVBj4mT-4UkGSc"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "207307621485-53m82dlcolfctpfagjnddnsq1euvvmpe.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

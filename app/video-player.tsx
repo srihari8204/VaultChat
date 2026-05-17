@@ -11,6 +11,7 @@ import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import * as Sharing from 'expo-sharing';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 const ACCENT = '#4A9FFF';
@@ -51,6 +52,30 @@ export default function VideoPlayerScreen() {
   const [showControls, setShowControls] = useState(true);
   const [isSeeking, setIsSeeking] = useState(false);
   const [seekPosition, setSeekPosition] = useState(0);
+
+  // Resume from last position
+  useEffect(() => {
+    if (!videoUri) return;
+    const key = `vc_video_pos_${btoa(videoUri).substring(0, 40)}`;
+    AsyncStorage.getItem(key).then(saved => {
+      if (saved) {
+        const pos = parseInt(saved, 10);
+        if (pos > 1000 && videoRef.current) {
+          videoRef.current.setPositionAsync(pos).catch(() => {});
+        }
+      }
+    }).catch(() => {});
+  }, [videoUri]);
+
+  // Save position on unmount or pause
+  useEffect(() => {
+    return () => {
+      if (videoUri && positionMs > 1000) {
+        const key = `vc_video_pos_${btoa(videoUri).substring(0, 40)}`;
+        AsyncStorage.setItem(key, String(positionMs)).catch(() => {});
+      }
+    };
+  }, [videoUri, positionMs]);
 
   // PiP state
   const [pipActive, setPipActive] = useState(false);

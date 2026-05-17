@@ -12,20 +12,23 @@ interface Props {
   onFile: () => void;
   onGif: () => void;
   onVoice: () => void;
+  onViewOnce?: () => void;
 }
 
 const OPTS = [
-  { label: 'Photo',  icon: 'ðŸ–¼ï¸',  key: 'photo'  },
-  { label: 'Video',  icon: 'ðŸŽ¬',  key: 'video'  },
-  { label: 'File',   icon: 'ðŸ“„',  key: 'file'   },
-  { label: 'GIF',    icon: 'ðŸŽžï¸',  key: 'gif'    },
-  { label: 'Voice',  icon: 'ðŸŽ¤',  key: 'voice'  },
+  { label: 'Photo',     icon: '\uD83D\uDDBC\uFE0F', key: 'photo'    },
+  { label: 'Video',     icon: '\uD83C\uDFAC',        key: 'video'    },
+  { label: 'View Once', icon: '\uD83D\uDC41',        key: 'viewOnce' },
+  { label: 'File',      icon: '\uD83D\uDCC4',        key: 'file'     },
+  { label: 'GIF',       icon: '\uD83C\uDFDE\uFE0F',  key: 'gif'      },
+  { label: 'Voice',     icon: '\uD83C\uDFA4',        key: 'voice'    },
 ];
 
-export default function AttachmentSheet({ visible, onClose, onPhoto, onVideo, onFile, onGif, onVoice }: Props) {
+export default function AttachmentSheet({ visible, onClose, onPhoto, onVideo, onFile, onGif, onVoice, onViewOnce }: Props) {
   if (!visible) return null;
   const handlers: Record<string, () => void> = {
     photo: onPhoto, video: onVideo, file: onFile, gif: onGif, voice: onVoice,
+    viewOnce: onViewOnce ?? onPhoto,
   };
   return (
     <Pressable style={s.overlay} onPress={onClose}>
@@ -35,8 +38,10 @@ export default function AttachmentSheet({ visible, onClose, onPhoto, onVideo, on
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.row}>
           {OPTS.map(o => (
             <TouchableOpacity key={o.key} style={s.btn} onPress={() => { onClose(); handlers[o.key](); }}>
-              <View style={s.circle}><Text style={s.icon}>{o.icon}</Text></View>
-              <Text style={s.lbl}>{o.label}</Text>
+              <View style={[s.circle, o.key === 'viewOnce' && s.circleViewOnce]}>
+                <Text style={s.icon}>{o.icon}</Text>
+              </View>
+              <Text style={[s.lbl, o.key === 'viewOnce' && s.lblViewOnce]}>{o.label}</Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
@@ -53,6 +58,8 @@ const s = StyleSheet.create({
   row:     { paddingHorizontal: 16, gap: 16 },
   btn:     { alignItems: 'center', gap: 8 },
   circle:  { width: 60, height: 60, borderRadius: 30, backgroundColor: '#181830', alignItems: 'center', justifyContent: 'center' },
+  circleViewOnce: { backgroundColor: '#6C63FF20', borderWidth: 1, borderColor: '#6C63FF40' },
   icon:    { fontSize: 26 },
   lbl:     { color: '#C0C0E0', fontSize: 12 },
+  lblViewOnce: { color: '#A78BFA' },
 });

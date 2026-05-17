@@ -189,24 +189,46 @@ export default function LockScreen() {
   };
 
   const handleCodeVerify = async () => {
-    if (code.length !== 8) {
-      setError("Enter your 8-digit secret code");
+    if (code.length < 4) {
+      setError("Enter your secret code (4-8 digits)");
       return;
     }
     try {
+      // Check PIN first (4-6 digits)
+      const { verifyPIN } = await import("./(constants)/authService");
+      const pinOk = await verifyPIN(code);
+      if (pinOk) {
+        await recordAuthTime();
+        router.replace("/(tabs)/chats");
+        return;
+      }
+
+      // Check 8-digit secret code
       const hash = await Crypto.digestStringAsync(
         Crypto.CryptoDigestAlgorithm.SHA256,
         code.toUpperCase() + "vc_secret_salt_v1"
       );
       const stored = await SecureStore.getItemAsync("vc_secret_code_hash");
-      if (hash === stored) {
+      if (stored && hash === stored) {
         await recordAuthTime();
         router.replace("/(tabs)/chats");
-      } else {
-        handleFail();
-        setCode("");
-        setError("Wrong code. Try again.");
+        return;
       }
+
+      // If no PIN and no secret code set, allow first-time access
+      const { hasPIN } = await import("./(constants)/authService");
+      const hasPin = await hasPIN();
+      const hasSecret = !!stored;
+      if (!hasPin && !hasSecret) {
+        // First-time user — no PIN set yet, let them in
+        await recordAuthTime();
+        router.replace("/(tabs)/chats");
+        return;
+      }
+
+      handleFail();
+      setCode("");
+      setError("Wrong code. Try again.");
     } catch {
       setError("Verification failed. Try again.");
     }

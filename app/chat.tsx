@@ -29,6 +29,9 @@ import MediaMessage from '../components/MediaMessage';
 import ReactionPicker from '../components/ReactionPicker';
 import VoiceRecorder from '../components/VoiceRecorder';
 import { getGhostSettings, GhostSettings } from '../services/ghostModeService';
+import { toggleVanishMode, deleteVanishedMessages, addVanishSystemMessage } from '../services/vanishModeService';
+import InvisibleInk from '../components/InvisibleInk';
+import ViewOnceMedia from '../components/ViewOnceMedia';
 import { decryptMessage, encryptMessage } from '../services/d2deService';
 import { uploadMedia } from '../services/mediaService';
 
@@ -60,6 +63,10 @@ interface Message {
   filename?: string;
   audioDuration?: number;
   reactions?: Reactions;
+  isInvisibleInk?: boolean;
+  isSystem?: boolean;
+  isViewOnce?: boolean;
+  viewedBy?: string[];
 }
 
 // â”€â”€ Formatting helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -104,8 +111,11 @@ export default function ChatScreen() {
   const [showGif,       setShowGif]       = useState(false);
   const [showReactions, setShowReactions] = useState(false);
   const [reactionTarget,setReactionTarget]= useState<Message | null>(null);
+  const [invisibleInkMode, setInvisibleInkMode] = useState(false);
+  const [silentMode, setSilentMode] = useState(false);
 
   const [ghostSettings, setGhostSettingsState] = useState<GhostSettings | null>(null);
+  const [vanishMode, setVanishMode] = useState(false);
 
   const flatRef     = useRef<FlatList>(null);
   const socketRef   = useRef<Socket | null>(null);
@@ -117,6 +127,15 @@ export default function ChatScreen() {
     if (!peerUid) return;
     getGhostSettings(peerUid).then(setGhostSettingsState).catch(() => {});
   }, [peerUid]);
+
+  // Vanish Mode — load chat vanish setting + listen for changes
+  useEffect(() => {
+    if (!chatId) return;
+    const unsub = firestore().collection('chats').doc(chatId).onSnapshot(snap => {
+      setVanishMode(snap.data()?.vanishMode === true);
+    });
+    return unsub;
+  }, [chatId]);
 
   const isGhosted = ghostSettings?.enabled ?? false;
 
@@ -151,14 +170,21 @@ export default function ChatScreen() {
     // Ghost Mode: suppress read receipts when ghosted
     if (isGhosted && ghostSettings?.hideReadReceipts) return;
     const batch = firestore().batch();
+    let anyMarked = false;
     docs.forEach(doc => {
       if (doc.data().senderId !== myUid && doc.data().status !== 'read') {
         batch.update(doc.ref, { status: 'read' });
         socketRef.current?.emit('message_read', { chatId, messageId: doc.id, readerUid: myUid, senderUid: peerUid });
+        anyMarked = true;
       }
     });
-    batch.commit().catch(() => {});
-  }, [chatId, myUid, peerUid, isGhosted, ghostSettings]);
+    batch.commit().then(() => {
+      // Vanish Mode: delete messages after both have read them
+      if (vanishMode && anyMarked) {
+        setTimeout(() => deleteVanishedMessages(chatId).catch(() => {}), 1500);
+      }
+    }).catch(() => {});
+  }, [chatId, myUid, peerUid, isGhosted, ghostSettings, vanishMode]);
 
   useEffect(() => {
     const unsub = firestore()
@@ -187,6 +213,10 @@ export default function ChatScreen() {
             mediaUrl: d.mediaUrl, filename: d.filename,
             audioDuration: d.audioDuration,
             reactions: d.reactions ?? {},
+            isInvisibleInk: d.isInvisibleInk ?? false,
+            isSystem: d.isSystem ?? false,
+            isViewOnce: d.isViewOnce ?? false,
+            viewedBy: d.viewedBy ?? [],
           } as Message;
         }));
         setMessages(msgs);
@@ -214,18 +244,23 @@ export default function ChatScreen() {
     socketRef.current?.emit('typing_stop', { chatId, uid: myUid });
     const tempId = `temp_${Date.now()}`;
     // Optimistically add message to UI
+    const isInk = invisibleInkMode;
     const optimistic: Message = {
       id: tempId, senderId: myUid, plaintext: text, ciphertext: '', iv: '',
       status: 'sending', createdAt: { toDate: () => new Date() }, msgType: 'text',
       replyTo: reply ? { id: reply.id, senderId: reply.senderId, plaintext: reply.plaintext.substring(0, 80) } : undefined,
+      isInvisibleInk: isInk,
     };
     setMessages(prev => [...prev, optimistic]);
+    if (isInk) setInvisibleInkMode(false); // Reset after sending
     try {
       const payload = await encryptMessage(text, myUid, peerUid);
       const data: any = {
         senderId: myUid, ciphertext: payload.ciphertext, iv: payload.iv,
         tag: payload.tag, keyId: payload.keyId, v: payload.v,
         msgType: 'text', status: 'sent', isDeleted: false,
+        isInvisibleInk: isInk,
+        isSilent: silentMode,
         reactions: {},
         createdAt: firestore.FieldValue.serverTimestamp(),
       };
@@ -248,7 +283,7 @@ export default function ChatScreen() {
   const sendMediaMessage = async (
     localUri: string,
     type: 'image' | 'video' | 'audio' | 'file' | 'gif',
-    opts?: { filename?: string; duration?: number; gifUrl?: string }
+    opts?: { filename?: string; duration?: number; gifUrl?: string; viewOnce?: boolean }
   ) => {
     setUploading(true); setUploadPct(0);
     try {
@@ -265,6 +300,7 @@ export default function ChatScreen() {
         createdAt: firestore.FieldValue.serverTimestamp(),
       };
       if (type === 'audio' && opts?.duration) data.audioDuration = opts.duration;
+      if (opts?.viewOnce) { data.isViewOnce = true; data.viewedBy = [myUid]; }
       const ref = await firestore().collection('chats').doc(chatId).collection('messages').add(data);
       const preview = type === 'audio' ? 'ðŸŽ¤ Voice message' : type === 'gif' ? 'ðŸŽžï¸ GIF' : type === 'file' ? `ðŸ“„ ${filename}` : `ðŸ“· ${type}`;
       await firestore().collection('chats').doc(chatId).update({
@@ -351,6 +387,16 @@ export default function ChatScreen() {
     if (!res.canceled && res.assets[0]) await sendMediaMessage(res.assets[0].uri, 'file', { filename: res.assets[0].name });
   };
 
+  const pickViewOnce = async () => {
+    setShowAttach(false);
+    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images', 'videos'], quality: 0.8 });
+    if (!res.canceled && res.assets[0]) {
+      const asset = res.assets[0];
+      const type = asset.type === 'video' ? 'video' : 'image';
+      await sendMediaMessage(asset.uri, type, { viewOnce: true });
+    }
+  };
+
   // â”€â”€ Render message â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const Ticks = ({ status }: { status: MsgStatus }) => {
     if (status === 'sending')   return <Text style={s.tick}>â—‹</Text>;
@@ -377,6 +423,16 @@ export default function ChatScreen() {
 
   const renderMsg = ({ item: m }: { item: Message }) => {
     const isMe = m.senderId === myUid;
+
+    // System messages (vanish mode toggle, etc.)
+    if (m.isSystem) return (
+      <View style={[s.row, { alignItems: 'center' }]}>
+        <View style={s.systemBubble}>
+          <Text style={s.systemTxt}>{m.plaintext}</Text>
+        </View>
+      </View>
+    );
+
     if (m.isDeleted) return (
       <View style={[s.row, isMe ? s.rowR : s.rowL]}>
         <View style={[s.bubble, s.bubbleDel]}>
@@ -397,9 +453,19 @@ export default function ChatScreen() {
                 </View>
               )}
 
-              {m.msgType !== 'text' && m.mediaUrl
-                ? <MediaMessage url={m.mediaUrl} msgType={m.msgType} filename={m.filename} duration={m.audioDuration} />
-                : <Text style={s.msgTxt}>{renderFormatted(m.plaintext)}</Text>
+              {/* View Once media */}
+              {m.isViewOnce && m.mediaUrl && (m.msgType === 'image' || m.msgType === 'video')
+                ? <ViewOnceMedia
+                    messageId={m.id} chatId={chatId} mediaUrl={m.mediaUrl}
+                    msgType={m.msgType as 'image' | 'video'} isMe={isMe}
+                    viewedBy={m.viewedBy} currentUid={myUid}
+                  />
+              /* Invisible Ink message */
+              : m.isInvisibleInk
+                ? <InvisibleInk text={m.plaintext} isMe={isMe} />
+                : m.msgType !== 'text' && m.mediaUrl
+                  ? <MediaMessage url={m.mediaUrl} msgType={m.msgType} filename={m.filename} duration={m.audioDuration} />
+                  : <Text style={s.msgTxt}>{renderFormatted(m.plaintext)}</Text>
               }
 
               <View style={s.meta}>
@@ -550,11 +616,18 @@ return (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
               <Text style={{ color: '#00D4AA', fontSize: 9, fontWeight: '700' }}>{"\uD83D\uDD12"} END-TO-END ENCRYPTED</Text>
               {isGhosted && <Text style={{ color: '#9CA3AF', fontSize: 9 }}> | GHOST</Text>}
+              {vanishMode && <Text style={{ color: '#A78BFA', fontSize: 9 }}> | VANISH</Text>}
             </View>
           </View>
         ),
         headerRight: () => (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginRight: 12 }}>
+            <TouchableOpacity onPress={async () => {
+              const newVal = await toggleVanishMode(chatId);
+              await addVanishSystemMessage(chatId, newVal);
+            }}>
+              <Text style={{ fontSize: 18, opacity: vanishMode ? 1 : 0.4 }}>{'\uD83D\uDCAD'}</Text>
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => router.push({ pathname: '/ghost-mode' as any, params: { contactUid: peerUid, contactName: peerName } })}>
               <Text style={{ fontSize: 18, opacity: isGhosted ? 1 : 0.4 }}>{'\uD83D\uDC7B'}</Text>
             </TouchableOpacity>
@@ -569,6 +642,13 @@ return (
       }} />
 
       <KeyboardAvoidingView style={s.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={90}>
+
+        {/* Vanish Mode Banner */}
+        {vanishMode && (
+          <View style={s.vanishBanner}>
+            <Text style={s.vanishBannerTxt}>{'\uD83D\uDCAD'} Vanish Mode ON — messages disappear after both read</Text>
+          </View>
+        )}
 
         {loading ? <ActivityIndicator color="#00E5FF" style={{ flex: 1 }} /> :
           <FlatList ref={flatRef} data={messages} keyExtractor={m => m.id} renderItem={renderMsg}
@@ -610,9 +690,17 @@ return (
               <TouchableOpacity onPress={() => setShowAttach(true)} style={s.attachBtn}>
                 <Text style={{ fontSize: 22, color: '#555' }}>ï¼‹</Text>
               </TouchableOpacity>
+              <TouchableOpacity onPress={() => setSilentMode(v => !v)} style={{ paddingHorizontal: 2 }}>
+                <Text style={{ fontSize: 16, opacity: silentMode ? 1 : 0.3 }}>{silentMode ? '\uD83D\uDD15' : '\uD83D\uDD14'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setInvisibleInkMode(v => !v)} style={{ paddingHorizontal: 4 }}>
+                <Text style={{ fontSize: 18, opacity: invisibleInkMode ? 1 : 0.3 }}>{'\u270D\uFE0F'}</Text>
+              </TouchableOpacity>
               <TextInput
-                style={s.input} value={inputText} onChangeText={handleTyping}
-                placeholder="Messageâ€¦" placeholderTextColor="#444" multiline maxLength={4000}
+                style={[s.input, invisibleInkMode && { backgroundColor: '#A78BFA15', borderColor: '#A78BFA40', borderWidth: 1 }]}
+                value={inputText} onChangeText={handleTyping}
+                placeholder={invisibleInkMode ? "Invisible ink message\u2026" : "Message\u2026"}
+                placeholderTextColor={invisibleInkMode ? '#A78BFA' : '#444'} multiline maxLength={4000}
               />
               {inputText.trim()
                 ? <TouchableOpacity style={[s.sendBtn, sending && s.sendOff]} onPress={onSend} disabled={sending}>
@@ -633,6 +721,7 @@ return (
           onPhoto={pickPhoto} onVideo={pickVideo} onFile={pickFile}
           onGif={() => { setShowAttach(false); setShowGif(true); }}
           onVoice={() => { setShowAttach(false); setShowVoice(true); }}
+          onViewOnce={pickViewOnce}
         />
 
         <GifPicker
@@ -654,6 +743,10 @@ return (
 
 const s = StyleSheet.create({
   screen:      { flex: 1, backgroundColor: '#FFFFFF' },
+  vanishBanner: { backgroundColor: '#A78BFA20', paddingVertical: 6, paddingHorizontal: 12, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#A78BFA30' },
+  vanishBannerTxt: { color: '#7C3AED', fontSize: 11, fontWeight: '600' },
+  systemBubble: { backgroundColor: '#F3F4F6', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 6, marginVertical: 4, maxWidth: '85%' },
+  systemTxt: { color: '#6B7280', fontSize: 12, textAlign: 'center', fontStyle: 'italic' },
   list:        { padding: 12, paddingBottom: 8 },
   row:         { marginBottom: 6 },
   rowR:        { alignItems: 'flex-end' },

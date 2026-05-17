@@ -1,10 +1,12 @@
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
+import { useRouter } from "expo-router";
 import { useState } from "react";
 import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { saveUserProfile, getPendingSignup } from "./(constants)/authService";
 
 export default function ProfileSetupScreen() {
+  const router = useRouter();
   const [name,setName]     = useState("");
   const [photo,setPhoto]   = useState("");
   const [loading,setLoading] = useState(false);
@@ -24,10 +26,12 @@ export default function ProfileSetupScreen() {
         pending.name = name.trim() || pending.name;
         await saveUserProfile(pending);
       }
+      // Navigate to security questions (next step in signup)
+      router.replace('/security-questions' as any);
     } catch (e: any) {
       Alert.alert('Profile Error', e?.message || 'Failed to save profile');
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   return (

@@ -1,7 +1,9 @@
 import { useRouter } from 'expo-router';
-import { useEffect, useRef } from 'react';
-import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { ErrorBoundary } from '../components/ErrorBoundary';
+import { signInWithGoogle, configureGoogleSignIn, hasPIN } from './(constants)/authService';
+import { markSetupComplete } from '../services/securityService';
 
 
 const FEATURES = [
@@ -118,6 +120,29 @@ function WelcomeContent() {
           activeOpacity={0.7}
         >
           <Text style={S.btnSecondaryText}>Sign In</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={async () => {
+            try {
+              configureGoogleSignIn();
+              const result = await signInWithGoogle();
+              await markSetupComplete();
+              if (result.isNewUser) {
+                router.replace('/profile-setup' as any);
+              } else {
+                const hasPin = await hasPIN();
+                router.replace(hasPin ? '/lock' : '/(tabs)/chats' as any);
+              }
+            } catch (e: any) {
+              if (!e.message?.includes('cancelled')) Alert.alert('Error', e.message);
+            }
+          }}
+          style={S.btnGoogle}
+          activeOpacity={0.85}
+        >
+          <Text style={S.btnGoogleIcon}>G</Text>
+          <Text style={S.btnGoogleText}>Continue with Google</Text>
         </TouchableOpacity>
 
         <Animated.View style={{ opacity: disclaimerFade }}>
@@ -281,6 +306,26 @@ const S = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     letterSpacing: 0.5,
+  },
+  btnGoogle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 54,
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    marginTop: 12,
+    gap: 10,
+  },
+  btnGoogleIcon: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#4285F4',
+  },
+  btnGoogleText: {
+    color: '#000000',
+    fontSize: 16,
+    fontWeight: '600',
   },
   disclaimer: {
     // color: 'rgba(255,255,255,0.2)',

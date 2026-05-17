@@ -22,8 +22,20 @@ import { sendOTP, verifyOTP } from './(constants)/authService';
 import { markSetupComplete } from '../services/securityService';
 
 export default function OTPScreen() {
-  const { phone } = useLocalSearchParams();
+  const { phone, flow } = useLocalSearchParams<{ phone: string; flow?: string }>();
   const router    = useRouter();
+
+  // Determine where to go after OTP verified
+  const getPostVerifyRoute = async () => {
+    if (flow === 'signup') return '/profile-setup';
+    // Login flow: check if PIN exists, if so go to lock, otherwise straight to chats
+    try {
+      const { hasPIN } = await import('./(constants)/authService');
+      const hasPin = await hasPIN();
+      if (hasPin) return '/lock';
+    } catch {}
+    return '/(tabs)/chats';
+  };
 
   const [otp,       setOtp]       = useState(['','','','','','']);
   const [loading,   setLoading]   = useState(false);
@@ -102,8 +114,12 @@ export default function OTPScreen() {
         if (ok) {
           if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           Animated.spring(successScale, { toValue: 1, tension: 50, friction: 8, useNativeDriver: true }).start();
-          await markSetupComplete();
-          setTimeout(() => router.replace('/(tabs)/chats' as any), 800);
+          if (flow !== 'signup') {
+            try { await markSetupComplete(); } catch {}
+          }
+          let route: string;
+          try { route = await getPostVerifyRoute(); } catch { route = '/(tabs)/chats'; }
+          setTimeout(() => router.replace(route as any), 800);
         } else {
           shakeInEffect();
           setError('Invalid code. Try again.');
@@ -214,12 +230,16 @@ export default function OTPScreen() {
     try {
       setLoading(true);
       setError('');
+      console.log('[OTP] Verifying code:', code, 'flow:', flow);
       const ok = await verifyOTP(code);
+      console.log('[OTP] Verify result:', ok);
       if (ok) {
         if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Animated.spring(successScale, { toValue: 1, tension: 50, friction: 8, useNativeDriver: true }).start();
-        await markSetupComplete();
-        setTimeout(() => router.replace('/(tabs)/chats' as any), 800);
+        if (flow !== 'signup') await markSetupComplete();
+        const route = await getPostVerifyRoute();
+        console.log('[OTP] Navigating to:', route);
+        setTimeout(() => router.replace(route as any), 800);
       } else {
         shake();
         setError('Invalid code. Try again.');

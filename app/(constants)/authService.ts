@@ -1,7 +1,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getApp } from "@react-native-firebase/app";
-import { getAuth, signInWithPhoneNumber, RecaptchaVerifier } from "@react-native-firebase/auth";
+import { getAuth, GoogleAuthProvider, RecaptchaVerifier, signInWithCredential, signInWithPhoneNumber } from "@react-native-firebase/auth";
 import { doc, getDoc, getFirestore, serverTimestamp, setDoc } from "@react-native-firebase/firestore";
+import { GoogleSignin, statusCodes } from "@react-native-google-signin/google-signin";
 import * as Crypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
@@ -12,6 +13,100 @@ const db   = getFirestore(app);
 
 // Web reCAPTCHA verifier (needed for phone auth on web)
 let webRecaptchaVerifier: any = null;
+
+// ─── Google Sign-In Configuration ─────────────────────────────
+// Configure Google Sign-In (call once on app start)
+export function configureGoogleSignIn() {
+  GoogleSignin.configure({
+    // Web Client ID from Firebase Console → Authentication → Sign-in method → Google
+    // Go to: https://console.firebase.google.com → your project → Authentication → Sign-in method → Google → Web client ID
+    webClientId: '207307621485-53m82dlcolfctpfagjnddnsq1euvvmpe.apps.googleusercontent.com',
+    offlineAccess: true,
+  });
+}
+
+/**
+ * Sign in with Google — no OTP required
+ * Returns { isNewUser, user } so caller can decide navigation
+ */
+export async function signInWithGoogle(): Promise<{
+  isNewUser: boolean;
+  user: any;
+  displayName: string;
+  email: string;
+  photoURL: string | null;
+}> {
+  try {
+    // Check Play Services availability
+    await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+
+    // Trigger Google Sign-In UI
+    const signInResult = await GoogleSignin.signIn();
+
+    // Get the ID token
+    const idToken = signInResult?.data?.idToken;
+    if (!idToken) {
+      throw new Error('Failed to get Google ID token');
+    }
+
+    // Create Firebase credential from Google token
+    const googleCredential = GoogleAuthProvider.credential(idToken);
+
+    // Sign in to Firebase with the Google credential
+    const firebaseResult = await signInWithCredential(auth, googleCredential);
+    const user = firebaseResult.user;
+
+    // Check if user profile exists in Firestore
+    const userDoc = await getDoc(doc(db, "users", user.uid));
+    const isNewUser = !userDoc.exists();
+
+    // If new user, create a basic profile in Firestore
+    if (isNewUser) {
+      const phoneHash = user.phoneNumber
+        ? await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, user.phoneNumber)
+        : '';
+
+      await setDoc(doc(db, "users", user.uid), {
+        name: user.displayName ?? '',
+        email: user.email ?? '',
+        mobile: user.phoneNumber ?? '',
+        phoneHash,
+        photoURL: user.photoURL ?? '',
+        authProvider: 'google',
+        faceCount: 0,
+        createdAt: serverTimestamp(),
+      });
+    }
+
+    return {
+      isNewUser,
+      user,
+      displayName: user.displayName ?? '',
+      email: user.email ?? '',
+      photoURL: user.photoURL ?? null,
+    };
+  } catch (error: any) {
+    if (error?.code === statusCodes.SIGN_IN_CANCELLED) {
+      throw new Error('Google sign-in was cancelled');
+    }
+    if (error?.code === statusCodes.IN_PROGRESS) {
+      throw new Error('Google sign-in already in progress');
+    }
+    if (error?.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+      throw new Error('Google Play Services not available');
+    }
+    throw new Error(error?.message ?? 'Google sign-in failed');
+  }
+}
+
+/**
+ * Sign out from Google
+ */
+export async function signOutGoogle(): Promise<void> {
+  try {
+    await GoogleSignin.signOut();
+  } catch {}
+}
 
 export interface SignupData {
   name: string; dob: string; email: string; mobile: string;
@@ -156,6 +251,16 @@ export async function verifyOTP(code: string): Promise<boolean> {
     // Test mode verification
     if (otpState.testMode) {
       if (code === TEST_OTP) {
+        // In test mode, sign in anonymously so auth().currentUser is set
+        // This allows subsequent Firestore queries to work
+        if (!auth.currentUser) {
+          try {
+            const { signInAnonymously } = await import('@react-native-firebase/auth');
+            await signInAnonymously(auth);
+          } catch (e: any) {
+            console.warn('Test mode: anonymous sign-in failed, trying without auth:', e.message);
+          }
+        }
         otpState = null;
         return true;
       } else {
@@ -399,19 +504,22 @@ export function onAuthChange(cb: (u: any) => void) {
  */
 export async function logoutUser() {
   try {
+    // Sign out from Google if signed in
+    await signOutGoogle();
+
     await auth.signOut();
-    
+
     // Clear enrolled faces
     for (let i = 0; i < 3; i++) {
       await AsyncStorage.removeItem("vc_face_" + i).catch(() => {});
     }
-    
+
     // Clear PIN
     await SecureStore.deleteItemAsync("vc_pin_hash").catch(() => {});
-    
+
     // Clear pending data
     await AsyncStorage.removeItem("vc_pending_signup").catch(() => {});
-    
+
     // Clear OTP state
     clearOTPState();
     

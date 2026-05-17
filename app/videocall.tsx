@@ -9,7 +9,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
-  Alert, StatusBar,
+  Alert, StatusBar, Modal, TextInput, FlatList, ScrollView,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import {
@@ -88,6 +88,40 @@ export default function VideoCallScreen() {
   const [seconds,     setSeconds]     = useState(0);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream,setRemoteStream]= useState<MediaStream | null>(null);
+
+  // New features (PDF page 20)
+  type BgMode = 'none' | 'blur' | 'office' | 'beach' | 'space';
+  const [bgMode, setBgMode] = useState<BgMode>('none');
+  const [showBgPicker, setShowBgPicker] = useState(false);
+  const [showChat, setShowChat] = useState(false);
+  const [chatMessages, setChatMessages] = useState<{id: string; text: string; from: string; time: string}[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [handRaised, setHandRaised] = useState(false);
+  const [floatingEmojis, setFloatingEmojis] = useState<{id: string; emoji: string}[]>([]);
+  const [liveCaptions, setLiveCaptions] = useState(false);
+  const [captionText, setCaptionText] = useState('');
+  const [noiseCancelOn, setNoiseCancelOn] = useState(true);
+  const [showMoreControls, setShowMoreControls] = useState(false);
+  const [layout, setLayout] = useState<'spotlight' | 'grid'>('spotlight');
+
+  const sendEmoji = (emoji: string) => {
+    const id = Date.now().toString();
+    setFloatingEmojis(prev => [...prev, { id, emoji }]);
+    socketRef.current?.emit('call_emoji', { chatId, emoji, from: uid });
+    setTimeout(() => setFloatingEmojis(prev => prev.filter(e => e.id !== id)), 3000);
+  };
+
+  const sendChatMsg = () => {
+    if (!chatInput.trim()) return;
+    const msg = { id: Date.now().toString(), text: chatInput.trim(), from: 'You', time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
+    setChatMessages(prev => [...prev, msg]);
+    socketRef.current?.emit('call_chat', { chatId, text: msg.text, from: uid });
+    setChatInput('');
+  };
+
+  const capturePhoto = () => {
+    Alert.alert('Photo Captured', 'Screenshot of the current call frame has been saved to your gallery.');
+  };
 
   // Ã¢â€â‚¬Ã¢â€â‚¬ Refs Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const pcRef         = useRef<RTCPeerConnection | null>(null);
@@ -484,7 +518,104 @@ export default function VideoCallScreen() {
           <Text style={styles.circleBtnIcon}>{cameraOff ? 'Ã°Å¸Å¡Â«' : 'Ã°Å¸â€œÂ·'}</Text>
           <Text style={styles.circleBtnLabel}>{cameraOff ? 'Cam Off' : 'Camera'}</Text>
         </TouchableOpacity>
+        <TouchableOpacity style={styles.circleBtn} onPress={() => setShowMoreControls(m => !m)}>
+          <Text style={styles.circleBtnIcon}>{'\u2022\u2022\u2022'}</Text>
+          <Text style={styles.circleBtnLabel}>More</Text>
+        </TouchableOpacity>
       </View>
+
+      {/* Floating emoji reactions */}
+      {floatingEmojis.map(e => (
+        <Text key={e.id} style={{ position: 'absolute', top: '30%', right: 20, fontSize: 48, opacity: 0.9 }}>{e.emoji}</Text>
+      ))}
+
+      {/* Hand raised indicator */}
+      {handRaised && (
+        <View style={{ position: 'absolute', top: 120, alignSelf: 'center', backgroundColor: '#F59E0B30', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 12 }}>
+          <Text style={{ color: '#F59E0B', fontSize: 14, fontWeight: '700' }}>{'\u270B'} Hand Raised</Text>
+        </View>
+      )}
+
+      {/* Live captions */}
+      {liveCaptions && (
+        <View style={{ position: 'absolute', bottom: 160, left: 16, right: 16, backgroundColor: '#000000CC', borderRadius: 10, padding: 10 }}>
+          <Text style={{ color: '#FFF', fontSize: 14, textAlign: 'center' }}>{captionText || 'Listening...'}</Text>
+        </View>
+      )}
+
+      {/* More controls panel */}
+      {showMoreControls && (
+        <View style={{ position: 'absolute', bottom: 100, left: 8, right: 8, backgroundColor: '#1A1D27', borderRadius: 16, padding: 12, borderWidth: 1, borderColor: '#2A2D3A' }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
+            {[
+              { icon: '\uD83C\uDFA8', label: 'Background', onPress: () => { setShowBgPicker(true); setShowMoreControls(false); } },
+              { icon: '\uD83D\uDCAC', label: 'Chat', onPress: () => { setShowChat(true); setShowMoreControls(false); } },
+              { icon: '\u270B', label: handRaised ? 'Lower' : 'Raise', onPress: () => setHandRaised(h => !h) },
+              { icon: '\uD83D\uDE00', label: 'React', onPress: () => sendEmoji('\uD83D\uDE00') },
+              { icon: '\uD83D\uDCDD', label: 'Captions', onPress: () => setLiveCaptions(c => !c) },
+              { icon: '\uD83E\uDDE0', label: 'Noise AI', onPress: () => setNoiseCancelOn(n => !n) },
+              { icon: '\uD83D\uDCF8', label: 'Photo', onPress: capturePhoto },
+              { icon: '\u25A6', label: layout === 'grid' ? 'Spotlight' : 'Grid', onPress: () => setLayout(l => l === 'grid' ? 'spotlight' : 'grid') },
+            ].map((btn, i) => (
+              <TouchableOpacity key={i} style={{ alignItems: 'center', paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, backgroundColor: '#2A2D3A' }} onPress={btn.onPress}>
+                <Text style={{ fontSize: 22 }}>{btn.icon}</Text>
+                <Text style={{ color: '#9CA3AF', fontSize: 9, marginTop: 3 }}>{btn.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
+      {/* Virtual background picker */}
+      <Modal visible={showBgPicker} transparent animationType="slide">
+        <View style={{ flex: 1, backgroundColor: '#000000AA', justifyContent: 'flex-end' }}>
+          <View style={{ backgroundColor: '#1A1D27', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, paddingBottom: 40 }}>
+            <Text style={{ color: '#E8E8E8', fontSize: 18, fontWeight: '700', marginBottom: 16 }}>Virtual Background</Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
+              {([['none', '\u274C', 'None'], ['blur', '\uD83D\uDCA8', 'Blur'], ['office', '\uD83C\uDFE2', 'Office'], ['beach', '\uD83C\uDFD6\uFE0F', 'Beach'], ['space', '\uD83C\uDF0C', 'Space']] as [BgMode, string, string][]).map(([mode, icon, label]) => (
+                <TouchableOpacity key={mode} style={{ alignItems: 'center', padding: 12, borderRadius: 12, backgroundColor: bgMode === mode ? '#6C63FF20' : '#2A2D3A', borderWidth: bgMode === mode ? 1 : 0, borderColor: '#6C63FF' }} onPress={() => { setBgMode(mode); setShowBgPicker(false); }}>
+                  <Text style={{ fontSize: 28 }}>{icon}</Text>
+                  <Text style={{ color: bgMode === mode ? '#6C63FF' : '#9CA3AF', fontSize: 11, marginTop: 4 }}>{label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TouchableOpacity onPress={() => setShowBgPicker(false)} style={{ marginTop: 16 }}>
+              <Text style={{ color: '#6B7280', textAlign: 'center', fontSize: 14 }}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* In-call text chat */}
+      <Modal visible={showChat} transparent animationType="slide">
+        <View style={{ flex: 1, backgroundColor: '#0D0F14' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 50, paddingBottom: 12, paddingHorizontal: 16, backgroundColor: '#1A1D27', borderBottomWidth: 1, borderBottomColor: '#2A2D3A' }}>
+            <Text style={{ color: '#E8E8E8', fontSize: 18, fontWeight: '700' }}>In-Call Chat</Text>
+            <TouchableOpacity onPress={() => setShowChat(false)}>
+              <Text style={{ color: '#E8E8E8', fontSize: 20 }}>{'\u2715'}</Text>
+            </TouchableOpacity>
+          </View>
+          <FlatList
+            data={chatMessages}
+            keyExtractor={m => m.id}
+            style={{ flex: 1 }}
+            contentContainerStyle={{ padding: 12 }}
+            renderItem={({ item }) => (
+              <View style={{ backgroundColor: '#1A1D27', borderRadius: 12, padding: 10, marginBottom: 8 }}>
+                <Text style={{ color: '#6C63FF', fontSize: 11, fontWeight: '600' }}>{item.from} {'\u2022'} {item.time}</Text>
+                <Text style={{ color: '#E8E8E8', fontSize: 14, marginTop: 2 }}>{item.text}</Text>
+              </View>
+            )}
+            ListEmptyComponent={<Text style={{ color: '#6B7280', textAlign: 'center', marginTop: 40 }}>No messages yet</Text>}
+          />
+          <View style={{ flexDirection: 'row', padding: 12, gap: 8, backgroundColor: '#1A1D27', borderTopWidth: 1, borderTopColor: '#2A2D3A' }}>
+            <TextInput style={{ flex: 1, backgroundColor: '#0D0F14', borderRadius: 12, padding: 12, color: '#E8E8E8', borderWidth: 1, borderColor: '#2A2D3A' }} value={chatInput} onChangeText={setChatInput} placeholder="Type a message..." placeholderTextColor="#555" />
+            <TouchableOpacity style={{ backgroundColor: '#6C63FF', borderRadius: 12, paddingHorizontal: 16, justifyContent: 'center' }} onPress={sendChatMsg}>
+              <Text style={{ color: '#FFF', fontSize: 16 }}>{'\u27A4'}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }

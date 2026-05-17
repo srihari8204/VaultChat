@@ -7,8 +7,9 @@ import {
   TouchableOpacity, View,
 } from "react-native";
 import {
-  savePendingSignup, savePIN,
+  savePendingSignup, savePIN, signInWithGoogle, configureGoogleSignIn,
 } from "./(constants)/authService";
+import { markSetupComplete } from "../services/securityService";
 
 
 const QUESTIONS = [
@@ -247,6 +248,29 @@ export default function SignupScreen() {
   const router = useRouter();
   const [step, setStep]       = useState(1);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+
+  useEffect(() => {
+    try { configureGoogleSignIn(); } catch {}
+  }, []);
+
+  const handleGoogleSignUp = async () => {
+    setGoogleLoading(true);
+    try {
+      const result = await signInWithGoogle();
+      console.log('[SIGNUP] Google sign-up success:', result.displayName);
+      await markSetupComplete();
+      // Google creates profile automatically, go straight to chats
+      router.replace('/(tabs)/chats' as any);
+    } catch (e: any) {
+      console.error('[SIGNUP] Google sign-up error:', e);
+      if (!e.message?.includes('cancelled')) {
+        Alert.alert('Google Sign-In Error', e.message ?? 'Failed');
+      }
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
   const [stepKey, setStepKey] = useState(0);
 
   // Step 1
@@ -596,6 +620,23 @@ export default function SignupScreen() {
                 </View>
               </View>
             </FadeIn>
+          )}
+
+          {/* Google Sign-Up (only show on step 1) */}
+          {step === 1 && (
+            <>
+              <View style={S.dividerRow}>
+                <View style={S.dividerLine} />
+                <Text style={S.dividerTxt}>or</Text>
+                <View style={S.dividerLine} />
+              </View>
+              <TouchableOpacity style={S.googleBtn} onPress={handleGoogleSignUp} disabled={googleLoading} activeOpacity={0.85}>
+                {googleLoading
+                  ? <Text style={S.googleBtnTxt}>Signing up...</Text>
+                  : <><Text style={S.googleIcon}>G</Text><Text style={S.googleBtnTxt}>Sign up with Google</Text></>
+                }
+              </TouchableOpacity>
+            </>
           )}
 
           {/* Sign in link */}
@@ -989,4 +1030,12 @@ const S = StyleSheet.create({
     color: "#FFFFFF",
     fontWeight: "700",
   },
+
+  // Google + Divider
+  dividerRow: { flexDirection: 'row', alignItems: 'center', marginVertical: 16, gap: 12, paddingHorizontal: 4 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: 'rgba(0,0,0,0.1)' },
+  dividerTxt: { color: 'rgba(0,0,0,0.3)', fontSize: 13, fontWeight: '500' },
+  googleBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 54, borderRadius: 16, backgroundColor: '#FFFFFF', borderWidth: 1.5, borderColor: 'rgba(0,0,0,0.12)', gap: 10, marginBottom: 8 },
+  googleIcon: { fontSize: 20, fontWeight: '700', color: '#4285F4' },
+  googleBtnTxt: { color: '#000', fontSize: 16, fontWeight: '600' },
 });

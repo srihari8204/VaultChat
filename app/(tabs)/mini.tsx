@@ -15,14 +15,29 @@ import {
   View,
 } from 'react-native';
 
-// ── Featured mini apps ───────────────────────────────────────────
-const MINI_APPS = [
-  { id: 'calculator', icon: '🧮', name: 'Calculator',      gradient: ['#4A9FFF', '#1D4ED8'] as [string, string] },
-  { id: 'todo',       icon: '✅', name: 'Todo List',        gradient: ['#10B981', '#059669'] as [string, string] },
-  { id: 'pomodoro',   icon: '🍅', name: 'Pomodoro Timer',   gradient: ['#F97316', '#DC2626'] as [string, string] },
-  { id: 'expense',    icon: '💰', name: 'Expense Tracker',  gradient: ['#7C3AED', '#EC4899'] as [string, string] },
-  { id: 'notes',      icon: '📝', name: 'Notes',            gradient: ['#F59E0B', '#D97706'] as [string, string] },
-  { id: 'qr',         icon: '📱', name: 'QR Generator',     gradient: ['#06B6D4', '#0891B2'] as [string, string] },
+// ── Mini Apps matching PDF (page 12) ─────────────────────────────
+// Row 1: Watch, Walkie, Screen
+// Row 2: Notes, Scanner, Location
+// Row 3: Current Loc, Cloud, Pegasus
+const MINI_APPS_MAIN = [
+  { id: 'watch',       icon: '\uD83C\uDFAC', name: 'Watch',       route: '/watch-together', gradient: ['#7C3AED', '#6C63FF'] as [string, string] },
+  { id: 'walkie',      icon: '\uD83D\uDCFB', name: 'Walkie',      route: '/walkie-talkie',  gradient: ['#059669', '#10B981'] as [string, string] },
+  { id: 'screen',      icon: '\uD83D\uDCBB', name: 'Screen',      route: '/screen-share',   gradient: ['#0891B2', '#06B6D4'] as [string, string] },
+  { id: 'notes',       icon: '\uD83D\uDCDD', name: 'Notes',       route: '/encrypted-notes', gradient: ['#F59E0B', '#D97706'] as [string, string] },
+  { id: 'scanner',     icon: '\uD83D\uDCC4', name: 'Scanner',     route: '/scanner',        gradient: ['#4A9FFF', '#1D4ED8'] as [string, string] },
+  { id: 'location',    icon: '\uD83D\uDCCD', name: 'Location',    route: '/location-sharing', gradient: ['#DC2626', '#F97316'] as [string, string] },
+  { id: 'currentloc',  icon: '\uD83D\uDCCC', name: 'Current Loc', route: '/current-location', gradient: ['#EC4899', '#F472B6'] as [string, string] },
+  { id: 'cloud',       icon: '\u2601\uFE0F', name: 'Cloud',       route: null,              gradient: ['#6B7280', '#4B5563'] as [string, string] },
+  { id: 'pegasus',     icon: '\uD83E\uDD85', name: 'Pegasus',     route: '/aiguardian',     gradient: ['#B91C1C', '#DC2626'] as [string, string] },
+];
+
+// ── Built-in utility mini apps ──────────────────────────────────
+const MINI_APPS_UTILS = [
+  { id: 'calculator', icon: '\uD83E\uDDEE', name: 'Calculator',      gradient: ['#4A9FFF', '#1D4ED8'] as [string, string] },
+  { id: 'todo',       icon: '\u2705',        name: 'Todo List',        gradient: ['#10B981', '#059669'] as [string, string] },
+  { id: 'pomodoro',   icon: '\uD83C\uDF45',  name: 'Pomodoro Timer',   gradient: ['#F97316', '#DC2626'] as [string, string] },
+  { id: 'expense',    icon: '\uD83D\uDCB0',  name: 'Expense Tracker',  gradient: ['#7C3AED', '#EC4899'] as [string, string] },
+  { id: 'qr',         icon: '\uD83D\uDCF1',  name: 'QR Generator',     gradient: ['#06B6D4', '#0891B2'] as [string, string] },
 ];
 
 const TODO_STORAGE_KEY = 'vc_miniapp_todos';
@@ -243,9 +258,19 @@ export default function MiniAppsScreen() {
   const handleOpenApp = (appId: string) => {
     if (appId === 'calculator' || appId === 'todo') {
       setActiveApp(appId);
-    } else {
-      Alert.alert('Coming Soon', 'This mini app is under development.');
+      return;
     }
+    // Main mini apps — navigate to their routes
+    const mainApp = MINI_APPS_MAIN.find(a => a.id === appId);
+    if (mainApp?.route) {
+      router.push(mainApp.route as any);
+      return;
+    }
+    if (mainApp && !mainApp.route) {
+      Alert.alert('Coming Soon', `${mainApp.name} is under development.`);
+      return;
+    }
+    Alert.alert('Coming Soon', 'This mini app is under development.');
   };
 
   // ── If a mini app is active, show it fullscreen ───────────────
@@ -283,22 +308,46 @@ export default function MiniAppsScreen() {
           </View>
         </View>
 
-        {/* ── Featured Apps Grid ────────────────────── */}
-        <Text style={styles.sectionTitle}>Featured Apps</Text>
+        {/* ── Mini Apps 3x3 Grid (matching PDF page 12) ─── */}
+        <Text style={styles.sectionTitle}>{'\uD83E\uDDE9'} Mini Apps</Text>
         <View style={styles.grid}>
-          {MINI_APPS.map(app => (
-            <View key={app.id} style={styles.appCard}>
+          {MINI_APPS_MAIN.map(app => (
+            <TouchableOpacity key={app.id} style={styles.appCard} onPress={() => handleOpenApp(app.id)} activeOpacity={0.7}>
               <LinearGradient colors={app.gradient} style={styles.appIconWrap}>
                 <Text style={styles.appEmoji}>{app.icon}</Text>
               </LinearGradient>
               <Text style={styles.appName}>{app.name}</Text>
-              <TouchableOpacity
-                style={styles.openBtn}
-                onPress={() => handleOpenApp(app.id)}
-              >
-                <Text style={styles.openBtnText}>Open</Text>
-              </TouchableOpacity>
-            </View>
+              {!app.route && <Text style={styles.comingSoon}>Soon</Text>}
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* ── Top Games Banner (matching PDF) ────────── */}
+        <TouchableOpacity
+          style={styles.gamesBanner}
+          activeOpacity={0.8}
+          onPress={() => router.push('/game-lobby' as any)}
+        >
+          <LinearGradient
+            colors={['#F97316', '#D97706']}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+            style={styles.gamesBannerGrad}
+          >
+            <Text style={styles.gamesBannerIcon}>{'\uD83C\uDFC6'}</Text>
+            <Text style={styles.gamesBannerTxt}>Top Games {'\u2192'} 19 games {'\u2022'} 6 continents</Text>
+          </LinearGradient>
+        </TouchableOpacity>
+
+        {/* ── Utility Apps ───────────────────────────── */}
+        <Text style={[styles.sectionTitle, { marginTop: 24 }]}>Tools</Text>
+        <View style={styles.grid}>
+          {MINI_APPS_UTILS.map(app => (
+            <TouchableOpacity key={app.id} style={styles.appCard} onPress={() => handleOpenApp(app.id)} activeOpacity={0.7}>
+              <LinearGradient colors={app.gradient} style={styles.appIconWrap}>
+                <Text style={styles.appEmoji}>{app.icon}</Text>
+              </LinearGradient>
+              <Text style={styles.appName}>{app.name}</Text>
+            </TouchableOpacity>
           ))}
         </View>
 
@@ -342,7 +391,7 @@ export default function MiniAppsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#0D0F14',
   },
   scroll: {
     padding: 20,
@@ -357,77 +406,86 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: '#1A1D27',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
   },
   backArrow: {
-    color: '#fff',
+    color: '#E8E8E8',
     fontSize: 20,
   },
   headerTitle: {
-    color: '#000000',
+    color: '#E8E8E8',
     fontSize: 26,
     fontWeight: '700',
   },
   headerSub: {
-    color: '#8899AA',
+    color: '#6B7280',
     fontSize: 13,
     marginTop: 2,
   },
   sectionTitle: {
-    color: '#000000',
+    color: '#E8E8E8',
     fontSize: 18,
     fontWeight: '700',
     marginBottom: 14,
   },
 
-  // ── Grid ──────────────────────────────────────────
+  // ── 3-column Grid (matching PDF page 12) ───────────
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
+    gap: 10,
   },
   appCard: {
-    width: '48%',
-    backgroundColor: '#F9FAFB',
-    borderRadius: 16,
-    padding: 18,
+    width: '30%',
+    backgroundColor: '#1A1D27',
+    borderRadius: 14,
+    padding: 14,
     alignItems: 'center',
-    marginBottom: 14,
     borderWidth: 1,
-    borderColor: '#1A2744',
+    borderColor: '#2A2D3A',
   },
   appIconWrap: {
-    width: 56,
-    height: 56,
-    borderRadius: 16,
+    width: 48,
+    height: 48,
+    borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 8,
   },
   appEmoji: {
-    fontSize: 28,
+    fontSize: 24,
   },
   appName: {
-    color: '#000000',
-    fontSize: 14,
+    color: '#E8E8E8',
+    fontSize: 11,
     fontWeight: '600',
-    marginBottom: 10,
+    textAlign: 'center',
   },
-  openBtn: {
-    paddingHorizontal: 22,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#4A9FFF',
+  comingSoon: {
+    color: '#6B7280',
+    fontSize: 9,
+    marginTop: 2,
+    fontStyle: 'italic',
   },
-  openBtnText: {
-    color: '#4A9FFF',
-    fontSize: 13,
-    fontWeight: '600',
+  // ── Games Banner ─────────────────────────────────────
+  gamesBanner: {
+    marginTop: 20,
+    marginBottom: 8,
+    borderRadius: 14,
+    overflow: 'hidden',
   },
+  gamesBannerGrad: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    gap: 10,
+  },
+  gamesBannerIcon: { fontSize: 22 },
+  gamesBannerTxt: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
 
   // ── Developer card ────────────────────────────────
   devCard: {

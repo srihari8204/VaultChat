@@ -34,6 +34,8 @@ interface Status {
   expiresAt:   any;      // Firestore timestamp (createdAt + 24h)
   viewers:     string[]; // UIDs who viewed
   screenshots: number;   // screenshot count
+  downloads:   number;   // download count
+  downloadedBy: string[]; // UIDs who downloaded
 }
 
 const BG_COLORS = [
@@ -193,7 +195,8 @@ function StatusViewer({
         <View style={viewerStyles.viewerCount}>
           <Text style={viewerStyles.viewerCountText}>
             ÃƒÂ°Ã…Â¸Ã¢â‚¬ËœÃ‚Â {status.viewers.length} view{status.viewers.length !== 1 ? 's' : ''}
-            {status.screenshots > 0 && `  ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã‚Â¸ ${status.screenshots}`}
+            {status.screenshots > 0 && `  \uD83D\uDCF8 ${status.screenshots}`}
+            {status.downloads > 0 && `  \uD83D\uDCE5 ${status.downloads} downloaded`}
           </Text>
         </View>
       </View>
@@ -241,6 +244,8 @@ function AddStatusModal({
         expiresAt:   expires,
         viewers:     [],
         screenshots: 0,
+        downloads:   0,
+        downloadedBy: [],
       });
 
       onPosted();

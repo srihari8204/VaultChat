@@ -23,9 +23,15 @@ import {
 } from 'react-native';
 import { archiveChat, muteChat, pinChat } from '../../services/groupService';
 
-const app = getApp();
-const auth = getAuth(app);
-const db = getFirestore(app);
+let app: any, auth: any, db: any;
+try {
+  app = getApp();
+  auth = getAuth(app);
+  db = getFirestore(app);
+} catch {
+  // @react-native-firebase is not available on web — fall through
+  app = null; auth = null; db = null;
+}
 
 // ── Gradient palette for avatars ─────────────────────────────────
 const AVATAR_GRADIENTS: [string, string][] = [

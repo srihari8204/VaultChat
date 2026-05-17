@@ -26,7 +26,7 @@ import firestore from '@react-native-firebase/firestore';
 // Types
 // ─────────────────────────────────────────────────────────────────
 
-type DisappearTimer = 'off' | '5m' | '1h' | '24h' | '7d' | '30d';
+type DisappearTimer = 'off' | '5m' | '1h' | '24h' | '7d' | '30d' | '90d';
 type LockTimer      = '1m' | '5m' | '15m' | '30m' | 'never';
 
 interface VaultSettings {
@@ -50,6 +50,7 @@ const DISAPPEAR_OPTIONS: { label: string; value: DisappearTimer }[] = [
   { label: '24 hours',value: '24h' },
   { label: '7 days',  value: '7d'  },
   { label: '30 days', value: '30d' },
+  { label: '90 days', value: '90d' },
 ];
 
 const LOCK_OPTIONS: { label: string; value: LockTimer }[] = [

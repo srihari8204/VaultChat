@@ -5,7 +5,9 @@ import {
   Platform, ScrollView, StyleSheet, Text, TextInput,
   TouchableOpacity, View,
 } from 'react-native';
-import { sendOTP } from './(constants)/authService';
+import { sendOTP, signInWithGoogle, configureGoogleSignIn } from './(constants)/authService';
+import { markSetupComplete } from '../services/securityService';
+import { hasPIN } from './(constants)/authService';
 
 const CODES = [
   { code: '+91',  name: 'India',     flag: '\u{1F1EE}\u{1F1F3}' },
@@ -19,6 +21,42 @@ export default function LoginScreen() {
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [showCC, setShowCC] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+
+  // Configure Google Sign-In on mount
+  useEffect(() => {
+    try { configureGoogleSignIn(); } catch {}
+  }, []);
+
+  // Google Sign-In handler — no OTP required
+  const handleGoogleSignIn = async () => {
+    setGoogleLoading(true);
+    try {
+      const result = await signInWithGoogle();
+      console.log('[LOGIN] Google sign-in success:', result.displayName, 'isNew:', result.isNewUser);
+      await markSetupComplete();
+
+      if (result.isNewUser) {
+        // New user — go to profile setup to complete registration
+        router.replace('/profile-setup' as any);
+      } else {
+        // Existing user — check if PIN exists
+        const hasPin = await hasPIN();
+        if (hasPin) {
+          router.replace('/lock' as any);
+        } else {
+          router.replace('/(tabs)/chats' as any);
+        }
+      }
+    } catch (e: any) {
+      console.error('[LOGIN] Google sign-in error:', e);
+      if (!e.message?.includes('cancelled')) {
+        Alert.alert('Google Sign-In Error', e.message ?? 'Failed to sign in with Google');
+      }
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
 
   const selected = CODES.find(c => c.code === cc) ?? CODES[0];
   const isValid = phone.replace(/\D/g, '').length >= 8;
@@ -88,10 +126,12 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       const fullPhone = cc + digits;
+      console.log('[LOGIN] Sending OTP to:', fullPhone);
       await sendOTP(fullPhone);
+      console.log('[LOGIN] OTP sent, navigating to OTP screen');
       router.push({ pathname: '/otp', params: { phone: fullPhone, flow: 'login' } });
     } catch (e: any) {
-      console.error('Login OTP error:', e);
+      console.error('[LOGIN] OTP error:', e);
       Alert.alert('Error', e.message ?? 'Failed to send OTP. Try again.');
     } finally {
       setLoading(false);
@@ -190,6 +230,30 @@ export default function LoginScreen() {
               )}
             </TouchableOpacity>
           </Animated.View>
+
+          {/* Divider */}
+          <View style={S.dividerRow}>
+            <View style={S.dividerLine} />
+            <Text style={S.dividerText}>or</Text>
+            <View style={S.dividerLine} />
+          </View>
+
+          {/* Google Sign-In Button */}
+          <TouchableOpacity
+            style={S.googleBtn}
+            onPress={handleGoogleSignIn}
+            disabled={googleLoading}
+            activeOpacity={0.85}
+          >
+            {googleLoading ? (
+              <Text style={S.googleBtnText}>Signing in...</Text>
+            ) : (
+              <>
+                <Text style={S.googleIcon}>G</Text>
+                <Text style={S.googleBtnText}>Sign in with Google</Text>
+              </>
+            )}
+          </TouchableOpacity>
 
           {/* Bottom link */}
           <View style={S.bottomLink}>
@@ -369,10 +433,52 @@ const S = StyleSheet.create({
     backgroundcolor: '#000000',
   },
 
+  // Divider
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 20,
+    gap: 12,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.1)',
+  },
+  dividerText: {
+    color: 'rgba(0, 0, 0, 0.3)',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+
+  // Google button
+  googleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 56,
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: 'rgba(0, 0, 0, 0.12)',
+    gap: 10,
+    marginBottom: 8,
+  },
+  googleIcon: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#4285F4',
+  },
+  googleBtnText: {
+    color: '#000000',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+
   // Bottom link
   bottomLink: {
     alignItems: 'center',
-    marginTop: 32,
+    marginTop: 20,
     paddingBottom: 16,
   },
   bottomText: {
