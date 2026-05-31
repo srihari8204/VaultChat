@@ -9,4 +9,5 @@ temp_uploads/
 logs/
 dist/
 *.backup
+*.legacy
 .DS_Store
