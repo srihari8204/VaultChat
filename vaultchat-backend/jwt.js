@@ -9,6 +9,7 @@
 const jwt    = require('jsonwebtoken');
 const crypto = require('crypto');
 const bcrypt = require('bcrypt');
+const db     = require('./db');
 
 const SECRET           = process.env.JWT_SECRET || '';
 const ACCESS_TTL_SEC   = parseInt(process.env.JWT_ACCESS_TTL  || (15 * 60).toString(), 10);
@@ -51,6 +52,13 @@ function requireAuth(req, res, next) {
   try {
     const payload = verifyAccess(m[1]);
     req.user = { id: payload.sub, email: payload.email };
+
+    // Per-request DB helpers that bind RLS to this user. Routes should
+    // prefer these over db.query/db.transaction for any read or write
+    // on RLS-enabled tables (chats, chat_members, messages, attachments).
+    req.dbTx    = (fn)         => db.withUser(req.user.id, fn);
+    req.dbQuery = (sql, params) => db.queryAs(req.user.id, sql, params);
+
     return next();
   } catch (err) {
     const code = err.name === 'TokenExpiredError' ? 'token_expired' : 'invalid_token';

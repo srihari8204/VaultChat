@@ -1,7 +1,11 @@
 // Postgres connection — single shared Pool.
 // Env: DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASS (see .env.example).
-// In production behind PgBouncer in transaction mode, set
-// PG_STATEMENT_TIMEOUT=10000 to bound long queries.
+//
+// Note: PgBouncer in transaction mode rejects `statement_timeout` as a
+// startup parameter. To bound long queries enforce it server-side with:
+//   ALTER USER vaultchat_app SET statement_timeout = '10s';
+// (applied as the user's default — works through PgBouncer without
+// any startup-parameter forwarding).
 
 const { Pool } = require('pg');
 
@@ -14,7 +18,6 @@ const pool = new Pool({
   max: 10,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
-  statement_timeout: parseInt(process.env.PG_STATEMENT_TIMEOUT || '10000', 10),
 });
 
 pool.on('error', (err) => {
@@ -59,4 +62,38 @@ async function shutdown() {
   await pool.end();
 }
 
-module.exports = { pool, query, transaction, ping, shutdown };
+// ── User-bound transaction (RLS) ───────────────────────────
+// Acquires a dedicated pool client, BEGINs a transaction, sets
+// `app.current_user_id` so the RLS policies in 004_rls.sql can see
+// who is making the request, runs the callback, COMMITs, releases.
+//
+// Usage:
+//   const rows = await db.withUser(req.user.id, async (c) => {
+//     const r = await c.query('SELECT * FROM messages WHERE chat_id = $1', [chatId]);
+//     return r.rows;
+//   });
+//
+// Throws and ROLLBACKs on any error. Idempotent if the callback is.
+async function withUser(userId, fn) {
+  if (!userId) throw new Error('withUser requires a userId');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`SET LOCAL app.current_user_id = '${String(userId).replace(/'/g, "''")}'`);
+    const result = await fn(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch {}
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// Convenience: single-query under a user binding.
+async function queryAs(userId, text, params) {
+  return withUser(userId, (c) => c.query(text, params));
+}
+
+module.exports = { pool, query, transaction, withUser, queryAs, ping, shutdown };

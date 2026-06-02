@@ -1,791 +1,764 @@
-// app/chat.tsx
-// Phase 1 + Phase 2: E2E encryption, ticks, typing, reply, edit, delete,
-// photos, videos, files, voice messages, GIFs, emoji reactions,
-// message formatting (bold, italic, code)
+// app/chat.tsx — Phase 3a message thread (Postgres + Socket.IO).
+//
+// Loads:
+//   GET /chats/:id           — chat metadata + members (for sender names)
+//   GET /chats/:id/messages  — newest 50, keyset paginate older on scroll-up
+//
+// Live:
+//   socket `new_message`     — append if for this chat, scroll to bottom
+//   socket `message_edited`  — patch existing message in-list
+//   socket `message_deleted` — mark as deleted in-list
+//
+// Send:
+//   POST /chats/:id/messages — content is currently plaintext; Phase 3b
+//   wraps with E2EE in lib/chatService.ts (sendMessage already calls the
+//   encryptForChat seam).
+//
+// Read receipts:
+//   POST /chats/:id/read with the latest visible message id, debounced.
 
-import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
-import * as DocumentPicker from 'expo-document-picker';
+import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Image,
   KeyboardAvoidingView,
-  Modal,
   Platform,
-  Pressable,
   StyleSheet,
-  Text, TextInput,
-  TouchableOpacity,
-  View
+  Text, TextInput, TouchableOpacity,
+  View,
 } from 'react-native';
-import { io, Socket } from 'socket.io-client';
-import AttachmentSheet from '../components/AttachmentSheet';
-import GifPicker from '../components/GifPicker';
-import MediaMessage from '../components/MediaMessage';
-import ReactionPicker from '../components/ReactionPicker';
-import VoiceRecorder from '../components/VoiceRecorder';
-import { getGhostSettings, GhostSettings } from '../services/ghostModeService';
-import { toggleVanishMode, deleteVanishedMessages, addVanishSystemMessage } from '../services/vanishModeService';
-import InvisibleInk from '../components/InvisibleInk';
-import ViewOnceMedia from '../components/ViewOnceMedia';
-import { decryptMessage, encryptMessage } from '../services/d2deService';
-import { uploadMedia } from '../services/mediaService';
+import { getCurrentUserAsync } from './(constants)/authService';
+import { getAccessToken } from '../lib/api';
+import {
+  attachmentUrl,
+  decryptFromChat,
+  deleteMessage,
+  editMessage,
+  getChat,
+  getMessages,
+  markDelivered,
+  markRead,
+  sendMessage,
+  uploadAttachment,
+  type ChatDetail,
+  type ChatMember,
+  type Message,
+} from '../lib/chatService';
+import {
+  cancel as queueCancel,
+  enqueueText,
+  initQueue,
+  on as onQueue,
+  pendingForChat,
+  retry as queueRetry,
+} from '../lib/messageQueue';
+import {
+  emitTypingStart,
+  emitTypingStop,
+  getSocket,
+  joinChatRoom,
+  leaveChatRoom,
+} from '../lib/socket';
 
-import { SERVER_URL as BACKEND } from '../constants/server';
+// Optimistic bubbles carry a few extra fields beyond a server Message.
+type DisplayMessage = Message & {
+  _tempId?: string;
+  _state?: 'pending' | 'failed';
+  _error?: string;
+};
 
-// â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+const TYPING_IDLE_MS = 2500;
 
-type MsgStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
-type MsgType   = 'text' | 'image' | 'video' | 'audio' | 'file' | 'gif';
-
-interface Reactions { [emoji: string]: string[]; }
-
-interface Message {
-  id: string;
-  senderId: string;
-  plaintext: string;
-  ciphertext: string;
-  iv: string;
-  tag?: string;
-  keyId?: string;
-  v?: number;
-  status: MsgStatus;
-  createdAt: any;
-  isEdited?: boolean;
-  isDeleted?: boolean;
-  replyTo?: { id: string; senderId: string; plaintext: string };
-  msgType: MsgType;
-  mediaUrl?: string;
-  filename?: string;
-  audioDuration?: number;
-  reactions?: Reactions;
-  isInvisibleInk?: boolean;
-  isSystem?: boolean;
-  isViewOnce?: boolean;
-  viewedBy?: string[];
-}
-
-// â”€â”€ Formatting helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-function renderFormatted(text: string): React.ReactNode {
-  // bold: *text*, italic: _text_, code: `text`
-  const parts = text.split(/(\*[^*]+\*|_[^_]+_|`[^`]+`)/g);
-  return parts.map((part, i) => {
-    if (part.startsWith('*') && part.endsWith('*'))
-      return <Text key={i} style={{ fontWeight: 'bold' }}>{part.slice(1, -1)}</Text>;
-    if (part.startsWith('_') && part.endsWith('_'))
-      return <Text key={i} style={{ fontStyle: 'italic' }}>{part.slice(1, -1)}</Text>;
-    if (part.startsWith('`') && part.endsWith('`'))
-      return <Text key={i} style={{ fontFamily: 'monospace', backgroundColor: '#F3F4F6', color: '#4A9FFF' }}>{part.slice(1, -1)}</Text>;
-    return <Text key={i}>{part}</Text>;
-  });
-}
-
-// â”€â”€ Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+const PAGE_SIZE = 50;
 
 export default function ChatScreen() {
-  const { chatId, peerUid, peerName } = useLocalSearchParams<{
-    chatId: string; peerUid: string; peerName: string;
-  }>();
+  const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const myUid  = auth().currentUser?.uid ?? '';
+  const chatId = (id ?? '') as string;
 
-  const [messages,      setMessages]      = useState<Message[]>([]);
-  const [inputText,     setInputText]     = useState('');
-  const [loading,       setLoading]       = useState(true);
-  const [sending,       setSending]       = useState(false);
-  const [uploading,     setUploading]     = useState(false);
-  const [uploadPct,     setUploadPct]     = useState(0);
-  const [peerTyping,    setPeerTyping]    = useState(false);
-  const [replyTarget,   setReplyTarget]   = useState<Message | null>(null);
-  const [editTarget,    setEditTarget]    = useState<Message | null>(null);
-  const [longPressMsg,  setLongPressMsg]  = useState<Message | null>(null);
-  const [forwardMsg,    setForwardMsg]    = useState<Message | null>(null);
-  const [forwardChats,  setForwardChats]  = useState<any[]>([]);
-  const [showAttach,    setShowAttach]    = useState(false);
-  const [showVoice,     setShowVoice]     = useState(false);
-  const [showGif,       setShowGif]       = useState(false);
-  const [showReactions, setShowReactions] = useState(false);
-  const [reactionTarget,setReactionTarget]= useState<Message | null>(null);
-  const [invisibleInkMode, setInvisibleInkMode] = useState(false);
-  const [silentMode, setSilentMode] = useState(false);
+  const [meId,      setMeId]      = useState<string | null>(null);
+  const [chat,      setChat]      = useState<ChatDetail | null>(null);
+  const [messages,  setMessages]  = useState<DisplayMessage[]>([]);
+  const [loading,   setLoading]   = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [hasMore,   setHasMore]   = useState(true);
+  const [input,     setInput]     = useState('');
+  const [sending,   setSending]   = useState(false);
+  const [error,     setError]     = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [typingUids, setTypingUids] = useState<Set<string>>(new Set());
 
-  const [ghostSettings, setGhostSettingsState] = useState<GhostSettings | null>(null);
-  const [vanishMode, setVanishMode] = useState(false);
+  const listRef = useRef<FlatList>(null);
+  const readDebounce = useRef<any>(null);
+  const lastReadSent = useRef<number>(0);
+  const typingIdleTimer = useRef<any>(null);
+  const typingActiveRef = useRef(false);
 
-  const flatRef     = useRef<FlatList>(null);
-  const socketRef   = useRef<Socket | null>(null);
-  const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isTyping    = useRef(false);
+  const membersById = useMemo(() => {
+    const m = new Map<string, ChatMember>();
+    chat?.members.forEach(x => m.set(x.userId, x));
+    return m;
+  }, [chat]);
 
-  // Ghost Mode — load per-contact privacy settings
-  useEffect(() => {
-    if (!peerUid) return;
-    getGhostSettings(peerUid).then(setGhostSettingsState).catch(() => {});
-  }, [peerUid]);
+  // Members of this chat that aren't me — used to compute outgoing-message
+  // tick state (any → delivered / any → read, MVP semantics).
+  const otherMembers = useMemo(
+    () => chat?.members.filter(m => m.userId !== meId) ?? [],
+    [chat, meId],
+  );
 
-  // Vanish Mode — load chat vanish setting + listen for changes
+  // ── Initial load ──────────────────────────────────────────
   useEffect(() => {
     if (!chatId) return;
-    const unsub = firestore().collection('chats').doc(chatId).onSnapshot(snap => {
-      setVanishMode(snap.data()?.vanishMode === true);
-    });
-    return unsub;
+    (async () => {
+      try {
+        setLoading(true);
+        // Start the queue subsystem once (safe to call repeatedly).
+        initQueue();
+
+        const [me, c, msgs, pendingQ] = await Promise.all([
+          getCurrentUserAsync(),
+          getChat(chatId),
+          getMessages(chatId, { limit: PAGE_SIZE }),
+          pendingForChat(chatId),
+        ]);
+        setMeId(me?.id ?? null);
+        setChat(c);
+
+        // Prepend any locally-queued messages as optimistic bubbles so
+        // they show up immediately after a cold start where the network
+        // is still flaky.
+        const pendingBubbles: DisplayMessage[] = pendingQ.map(q => ({
+          id:        0,
+          chatId:    q.chatId,
+          senderId:  me?.id ?? '',
+          type:      q.type,
+          content:   q.plaintext,
+          meta:      null,
+          replyToId: q.replyToId,
+          editedAt:  null,
+          deletedAt: null,
+          createdAt: new Date(q.createdAt).toISOString(),
+          _tempId:   q.tempId,
+          _state:    q.attempts >= 1 ? 'pending' : 'pending',
+        }));
+
+        // Inverted list: newest first. Pendings are newest (just sent).
+        setMessages([...pendingBubbles.reverse(), ...msgs]);
+        setHasMore(msgs.length === PAGE_SIZE);
+        setError(null);
+      } catch (e: any) {
+        setError(e?.message ?? 'Failed to load chat');
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, [chatId]);
 
-  const isGhosted = ghostSettings?.enabled ?? false;
-
-  // â”€â”€ Socket â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Queue events: replace pending bubble with real, or mark failed ──
   useEffect(() => {
-    let sock: Socket;
-    (async () => {
-      const token = await auth().currentUser?.getIdToken();
-      sock = io(BACKEND, { auth: { token }, transports: ['websocket'] });
-      sock.emit('join_chat', { chatId, uid: myUid });
-
-      sock.on('typing_start',      ({ uid }: any) => { if (uid !== myUid) setPeerTyping(true);  });
-      sock.on('typing_stop',       ({ uid }: any) => { if (uid !== myUid) setPeerTyping(false); });
-      sock.on('message_delivered', ({ messageId }: any) =>
-        setMessages(p => p.map(m => m.id === messageId && m.status === 'sent' ? { ...m, status: 'delivered' } : m)));
-      sock.on('message_read', ({ messageId }: any) =>
-        setMessages(p => p.map(m => m.id === messageId ? { ...m, status: 'read' } : m)));
-      sock.on('message_edited', ({ messageId, newPlaintext }: any) =>
-        setMessages(p => p.map(m => m.id === messageId ? { ...m, plaintext: newPlaintext, isEdited: true } : m)));
-      sock.on('message_deleted', ({ messageId }: any) =>
-        setMessages(p => p.map(m => m.id === messageId ? { ...m, isDeleted: true, plaintext: '' } : m)));
-      sock.on('reaction_updated', ({ messageId, reactions }: any) =>
-        setMessages(p => p.map(m => m.id === messageId ? { ...m, reactions } : m)));
-
-      socketRef.current = sock;
-    })();
-    return () => { sock?.disconnect(); };
-  }, [chatId, myUid]);
-
-  // â”€â”€ Firestore â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const markRead = useCallback((docs: any[]) => {
-    // Ghost Mode: suppress read receipts when ghosted
-    if (isGhosted && ghostSettings?.hideReadReceipts) return;
-    const batch = firestore().batch();
-    let anyMarked = false;
-    docs.forEach(doc => {
-      if (doc.data().senderId !== myUid && doc.data().status !== 'read') {
-        batch.update(doc.ref, { status: 'read' });
-        socketRef.current?.emit('message_read', { chatId, messageId: doc.id, readerUid: myUid, senderUid: peerUid });
-        anyMarked = true;
-      }
+    if (!chatId) return;
+    const offSent = onQueue('sent', ({ tempId, chatId: cid, real }) => {
+      if (cid !== chatId) return;
+      setMessages(prev => {
+        // If real already arrived via Socket.IO, just drop the temp.
+        if (prev.some(x => x.id === real.id)) {
+          return prev.filter(x => x._tempId !== tempId);
+        }
+        return prev.map(x => x._tempId === tempId
+          ? ({ ...real, _tempId: undefined, _state: undefined, _error: undefined } as DisplayMessage)
+          : x);
+      });
     });
-    batch.commit().then(() => {
-      // Vanish Mode: delete messages after both have read them
-      if (vanishMode && anyMarked) {
-        setTimeout(() => deleteVanishedMessages(chatId).catch(() => {}), 1500);
-      }
-    }).catch(() => {});
-  }, [chatId, myUid, peerUid, isGhosted, ghostSettings, vanishMode]);
+    const offFailed = onQueue('failed', ({ tempId, chatId: cid, error }) => {
+      if (cid !== chatId) return;
+      setMessages(prev => prev.map(x => x._tempId === tempId
+        ? { ...x, _state: 'failed', _error: error } : x));
+    });
+    return () => { offSent(); offFailed(); };
+  }, [chatId]);
 
+  // ── Socket: join chat room + listen for live events ───────
   useEffect(() => {
-    const unsub = firestore()
-      .collection('chats').doc(chatId)
-      .collection('messages').orderBy('createdAt', 'asc')
-      .onSnapshot(async snap => {
-        const msgs = await Promise.all(snap.docs.map(async doc => {
-          const d = doc.data() as any;
-          if (d.isDeleted) return { id: doc.id, senderId: d.senderId, plaintext: '', ciphertext: '', iv: '', status: d.status ?? 'sent', createdAt: d.createdAt, isDeleted: true, msgType: d.msgType ?? 'text' } as Message;
+    if (!chatId) return;
+    let off: Array<() => void> = [];
+    let cancelled = false;
 
-          let plaintext = '';
-          if (d.msgType === 'text') {
-            try {
-              if (d.ciphertext && d.iv) {
-                plaintext = await decryptMessage({ ciphertext: d.ciphertext, iv: d.iv, tag: d.tag ?? '', keyId: d.keyId ?? 'v1-pbkdf2', v: d.v ?? 1 }, myUid, peerUid);
-              } else { plaintext = d.plaintext ?? ''; }
-            } catch { plaintext = '[Decryption failed]'; }
+    (async () => {
+      try {
+        const s = await getSocket();
+        await joinChatRoom(chatId);
+        if (cancelled) return;
+
+        const onNew = (m: Message) => {
+          if (m.chatId !== chatId) return;
+          setMessages(prev => {
+            // Dedupe in case we already appended optimistically
+            if (prev.some(x => x.id === m.id)) return prev;
+            return [m, ...prev];
+          });
+          // Auto-acknowledge delivery as soon as the message lands on this
+          // device — independent of whether the user has the chat open.
+          // The sender's UI flips from "sent" to "delivered" via the
+          // message_delivered broadcast that follows.
+          if (m.senderId !== meId) {
+            markDelivered(chatId, m.id).catch(() => {});
           }
+        };
+        const onMemberDelivered = (e: { userId: string; lastDeliveredMessageId: number }) => {
+          if (!e?.userId) return;
+          setChat(prev => prev ? {
+            ...prev,
+            members: prev.members.map(mem => mem.userId === e.userId
+              ? { ...mem, lastDeliveredMessageId: e.lastDeliveredMessageId }
+              : mem),
+          } : prev);
+        };
+        const onMemberRead = (e: { userId: string; lastReadMessageId: number }) => {
+          if (!e?.userId) return;
+          setChat(prev => prev ? {
+            ...prev,
+            members: prev.members.map(mem => mem.userId === e.userId
+              ? { ...mem, lastReadMessageId: e.lastReadMessageId }
+              : mem),
+          } : prev);
+        };
+        const onEdit = (e: { id: number; content: string; editedAt: string }) => {
+          setMessages(prev => prev.map(x =>
+            x.id === e.id ? { ...x, content: e.content, editedAt: e.editedAt } : x
+          ));
+        };
+        const onDelete = (e: { id: number; deletedAt: string }) => {
+          setMessages(prev => prev.map(x =>
+            x.id === e.id ? { ...x, content: null, deletedAt: e.deletedAt, type: 'system' } : x
+          ));
+        };
+        const onTypingStart = (e: { uid: string }) => {
+          if (!e?.uid || e.uid === meId) return;
+          setTypingUids(prev => {
+            if (prev.has(e.uid)) return prev;
+            const next = new Set(prev); next.add(e.uid); return next;
+          });
+        };
+        const onTypingStop = (e: { uid: string }) => {
+          if (!e?.uid) return;
+          setTypingUids(prev => {
+            if (!prev.has(e.uid)) return prev;
+            const next = new Set(prev); next.delete(e.uid); return next;
+          });
+        };
 
-          return {
-            id: doc.id, senderId: d.senderId, plaintext,
-            ciphertext: d.ciphertext ?? '', iv: d.iv ?? '',
-            status: d.status ?? 'sent', createdAt: d.createdAt,
-            isEdited: d.isEdited ?? false, isDeleted: false,
-            replyTo: d.replyTo ?? null, msgType: d.msgType ?? 'text',
-            mediaUrl: d.mediaUrl, filename: d.filename,
-            audioDuration: d.audioDuration,
-            reactions: d.reactions ?? {},
-            isInvisibleInk: d.isInvisibleInk ?? false,
-            isSystem: d.isSystem ?? false,
-            isViewOnce: d.isViewOnce ?? false,
-            viewedBy: d.viewedBy ?? [],
-          } as Message;
-        }));
-        setMessages(msgs);
-        setLoading(false);
-        markRead(snap.docs);
-        setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 80);
-      });
-    return unsub;
-  }, [chatId, myUid, peerUid, markRead]);
+        s.on('new_message',       onNew);
+        s.on('message_edited',    onEdit);
+        s.on('message_deleted',   onDelete);
+        s.on('message_delivered', onMemberDelivered);
+        s.on('message_read',      onMemberRead);
+        s.on('typing_start',      onTypingStart);
+        s.on('typing_stop',       onTypingStop);
 
-  // â”€â”€ Typing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const handleTyping = (text: string) => {
-    setInputText(text);
-    // Ghost Mode: suppress typing indicators when ghosted
-    if (isGhosted && ghostSettings?.hideTyping) return;
-    if (!isTyping.current) { isTyping.current = true; socketRef.current?.emit('typing_start', { chatId, uid: myUid }); }
-    if (typingTimer.current) clearTimeout(typingTimer.current);
-    typingTimer.current = setTimeout(() => { isTyping.current = false; socketRef.current?.emit('typing_stop', { chatId, uid: myUid }); }, 2000);
-  };
+        off.push(() => s.off('new_message',       onNew));
+        off.push(() => s.off('message_edited',    onEdit));
+        off.push(() => s.off('message_deleted',   onDelete));
+        off.push(() => s.off('message_delivered', onMemberDelivered));
+        off.push(() => s.off('message_read',      onMemberRead));
+        off.push(() => s.off('typing_start',      onTypingStart));
+        off.push(() => s.off('typing_stop',       onTypingStop));
+      } catch (e) {
+        if (!cancelled) console.warn('[chat] socket setup failed:', (e as any)?.message);
+      }
+    })();
 
-  // â”€â”€ Core send (text) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const sendTextMessage = async (text: string, reply?: Message | null) => {
-    setSending(true);
-    isTyping.current = false;
-    socketRef.current?.emit('typing_stop', { chatId, uid: myUid });
-    const tempId = `temp_${Date.now()}`;
-    // Optimistically add message to UI
-    const isInk = invisibleInkMode;
-    const optimistic: Message = {
-      id: tempId, senderId: myUid, plaintext: text, ciphertext: '', iv: '',
-      status: 'sending', createdAt: { toDate: () => new Date() }, msgType: 'text',
-      replyTo: reply ? { id: reply.id, senderId: reply.senderId, plaintext: reply.plaintext.substring(0, 80) } : undefined,
-      isInvisibleInk: isInk,
+    return () => {
+      cancelled = true;
+      off.forEach(fn => fn());
+      leaveChatRoom(chatId).catch(() => {});
     };
-    setMessages(prev => [...prev, optimistic]);
-    if (isInk) setInvisibleInkMode(false); // Reset after sending
-    try {
-      const payload = await encryptMessage(text, myUid, peerUid);
-      const data: any = {
-        senderId: myUid, ciphertext: payload.ciphertext, iv: payload.iv,
-        tag: payload.tag, keyId: payload.keyId, v: payload.v,
-        msgType: 'text', status: 'sent', isDeleted: false,
-        isInvisibleInk: isInk,
-        isSilent: silentMode,
-        reactions: {},
-        createdAt: firestore.FieldValue.serverTimestamp(),
-      };
-      if (reply) data.replyTo = { id: reply.id, senderId: reply.senderId, plaintext: reply.plaintext.substring(0, 80) };
-      const ref = await firestore().collection('chats').doc(chatId).collection('messages').add(data);
-      await firestore().collection('chats').doc(chatId).update({
-        lastMsg: text.substring(0, 60), lastTime: firestore.FieldValue.serverTimestamp(),
-        [`unread.${peerUid}`]: firestore.FieldValue.increment(1),
-      });
-      socketRef.current?.emit('new_message', { chatId, messageId: ref.id, senderUid: myUid, recipientUid: peerUid, preview: text.substring(0, 40) });
-    } catch (e: any) {
-      // Mark optimistic message as failed
-      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'failed' as MsgStatus } : m));
-      Alert.alert('Error', e.message);
+  }, [chatId]);
+
+  // ── Mark-as-read (debounced) ──────────────────────────────
+  useEffect(() => {
+    if (!chatId || messages.length === 0) return;
+    const latestId = messages[0]?.id; // inverted list — index 0 is newest
+    if (!latestId || latestId <= lastReadSent.current) return;
+    if (readDebounce.current) clearTimeout(readDebounce.current);
+    readDebounce.current = setTimeout(() => {
+      lastReadSent.current = latestId;
+      markRead(chatId, latestId).catch(() => {});
+    }, 800);
+    return () => { if (readDebounce.current) clearTimeout(readDebounce.current); };
+  }, [chatId, messages]);
+
+  // ── Typing indicator (emit start, then debounced stop) ────
+  const stopTypingIfActive = useCallback(() => {
+    if (typingActiveRef.current && meId) {
+      emitTypingStop(chatId, meId).catch(() => {});
+      typingActiveRef.current = false;
     }
-    finally { setSending(false); }
-  };
+  }, [chatId, meId]);
 
-  // â”€â”€ Send media message (photo/video/audio/file/gif) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const sendMediaMessage = async (
-    localUri: string,
-    type: 'image' | 'video' | 'audio' | 'file' | 'gif',
-    opts?: { filename?: string; duration?: number; gifUrl?: string; viewOnce?: boolean }
-  ) => {
-    setUploading(true); setUploadPct(0);
-    try {
-      let downloadURL = opts?.gifUrl ?? '';
-      let filename    = opts?.filename ?? '';
-      if (!downloadURL) {
-        const result = await uploadMedia(localUri, chatId, type === 'gif' ? 'image' : type, opts?.filename, pct => setUploadPct(pct));
-        downloadURL = result.downloadURL;
-        filename    = result.filename;
-      }
-      const data: any = {
-        senderId: myUid, msgType: type, mediaUrl: downloadURL,
-        filename, status: 'sent', isDeleted: false, reactions: {},
-        createdAt: firestore.FieldValue.serverTimestamp(),
-      };
-      if (type === 'audio' && opts?.duration) data.audioDuration = opts.duration;
-      if (opts?.viewOnce) { data.isViewOnce = true; data.viewedBy = [myUid]; }
-      const ref = await firestore().collection('chats').doc(chatId).collection('messages').add(data);
-      const preview = type === 'audio' ? 'ðŸŽ¤ Voice message' : type === 'gif' ? 'ðŸŽžï¸ GIF' : type === 'file' ? `ðŸ“„ ${filename}` : `ðŸ“· ${type}`;
-      await firestore().collection('chats').doc(chatId).update({
-        lastMsg: preview, lastTime: firestore.FieldValue.serverTimestamp(),
-        [`unread.${peerUid}`]: firestore.FieldValue.increment(1),
-      });
-      socketRef.current?.emit('new_message', { chatId, messageId: ref.id, senderUid: myUid, recipientUid: peerUid, preview });
-    } catch (e: any) { Alert.alert('Upload error', e.message); }
-    finally { setUploading(false); }
-  };
+  const onInputChange = useCallback((text: string) => {
+    setInput(text);
+    if (!meId) return;
+    if (!typingActiveRef.current && text.length > 0) {
+      typingActiveRef.current = true;
+      emitTypingStart(chatId, meId).catch(() => {});
+    }
+    if (typingIdleTimer.current) clearTimeout(typingIdleTimer.current);
+    typingIdleTimer.current = setTimeout(stopTypingIfActive, TYPING_IDLE_MS);
+  }, [chatId, meId, stopTypingIfActive]);
 
-  // â”€â”€ Send button â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const onSend = async () => {
-    const text = inputText.trim();
+  // ── Send / Edit ───────────────────────────────────────────
+  const onSend = useCallback(async () => {
+    const text = input.trim();
     if (!text || sending) return;
-    if (editTarget) { await saveEdit(text); return; }
-    setInputText('');
-    const reply = replyTarget; setReplyTarget(null);
-    await sendTextMessage(text, reply);
-  };
-
-  // â”€â”€ Edit / Delete â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const startEdit  = (m: Message) => { setEditTarget(m); setLongPressMsg(null); setInputText(m.plaintext); };
-  const cancelEdit = () => { setEditTarget(null); setInputText(''); };
-  const saveEdit   = async (newText: string) => {
-    if (!editTarget) return;
-    setSending(true); setEditTarget(null); setInputText('');
+    setSending(true);
+    stopTypingIfActive();
     try {
-      const payload = await encryptMessage(newText, myUid, peerUid);
-      await firestore().collection('chats').doc(chatId).collection('messages').doc(editTarget.id)
-        .update({ ciphertext: payload.ciphertext, iv: payload.iv, isEdited: true, editedAt: firestore.FieldValue.serverTimestamp() });
-      socketRef.current?.emit('message_edited', { chatId, messageId: editTarget.id, newPlaintext: newText });
-    } catch (e: any) { Alert.alert('Error', e.message); }
-    finally { setSending(false); }
-  };
-
-  const deleteForEveryone = (m: Message) => {
-    setLongPressMsg(null);
-    Alert.alert('Delete for Everyone?', 'Permanently removed for both users.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
-        try {
-          await firestore().collection('chats').doc(chatId).collection('messages').doc(m.id)
-            .update({ ciphertext: firestore.FieldValue.delete(), iv: firestore.FieldValue.delete(), mediaUrl: firestore.FieldValue.delete(), isDeleted: true });
-          socketRef.current?.emit('message_deleted', { chatId, messageId: m.id, deleterUid: myUid });
-        } catch (e: any) { Alert.alert('Error', e.message); }
-      }},
-    ]);
-  };
-
-  // â”€â”€ Reactions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const addReaction = async (msg: Message, emoji: string) => {
-    setShowReactions(false); setReactionTarget(null); setLongPressMsg(null);
-    const existing: Reactions = msg.reactions ?? {};
-    const users: string[] = existing[emoji] ?? [];
-    let updated: Reactions;
-    if (users.includes(myUid)) {
-      // toggle off
-      const filtered = users.filter(u => u !== myUid);
-      updated = { ...existing };
-      if (filtered.length === 0) delete updated[emoji];
-      else updated[emoji] = filtered;
-    } else {
-      updated = { ...existing, [emoji]: [...users, myUid] };
-    }
-    await firestore().collection('chats').doc(chatId).collection('messages').doc(msg.id)
-      .update({ reactions: updated });
-    socketRef.current?.emit('reaction_updated', { chatId, messageId: msg.id, reactions: updated });
-  };
-
-  // â”€â”€ Pickers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const pickPhoto = async () => {
-    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 1 });
-    if (!res.canceled && res.assets[0]) await sendMediaMessage(res.assets[0].uri, 'image');
-  };
-
-  const pickVideo = async () => {
-    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Videos });
-    if (!res.canceled && res.assets[0]) await sendMediaMessage(res.assets[0].uri, 'video');
-  };
-
-  const pickFile = async () => {
-    const res = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
-    if (!res.canceled && res.assets[0]) await sendMediaMessage(res.assets[0].uri, 'file', { filename: res.assets[0].name });
-  };
-
-  const pickViewOnce = async () => {
-    setShowAttach(false);
-    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images', 'videos'], quality: 0.8 });
-    if (!res.canceled && res.assets[0]) {
-      const asset = res.assets[0];
-      const type = asset.type === 'video' ? 'video' : 'image';
-      await sendMediaMessage(asset.uri, type, { viewOnce: true });
-    }
-  };
-
-  // â”€â”€ Render message â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const Ticks = ({ status }: { status: MsgStatus }) => {
-    if (status === 'sending')   return <Text style={s.tick}>â—‹</Text>;
-    if (status === 'sent')      return <Text style={s.tick}>âœ“</Text>;
-    if (status === 'delivered') return <Text style={s.tick}>âœ“âœ“</Text>;
-    return <Text style={[s.tick, { color: '#4A9FFF' }]}>âœ“âœ“</Text>;
-  };
-
-  const ReactionRow = ({ msg }: { msg: Message }) => {
-    const reactions = msg.reactions ?? {};
-    const entries   = Object.entries(reactions).filter(([, uids]) => uids.length > 0);
-    if (entries.length === 0) return null;
-    return (
-      <View style={s.reactionRow}>
-        {entries.map(([emoji, uids]) => (
-          <TouchableOpacity key={emoji} onPress={() => addReaction(msg, emoji)} style={[s.reactionChip, uids.includes(myUid) && s.reactionChipMine]}>
-            <Text style={s.reactionEmoji}>{emoji}</Text>
-            {uids.length > 1 && <Text style={s.reactionCount}>{uids.length}</Text>}
-          </TouchableOpacity>
-        ))}
-      </View>
-    );
-  };
-
-  const renderMsg = ({ item: m }: { item: Message }) => {
-    const isMe = m.senderId === myUid;
-
-    // System messages (vanish mode toggle, etc.)
-    if (m.isSystem) return (
-      <View style={[s.row, { alignItems: 'center' }]}>
-        <View style={s.systemBubble}>
-          <Text style={s.systemTxt}>{m.plaintext}</Text>
-        </View>
-      </View>
-    );
-
-    if (m.isDeleted) return (
-      <View style={[s.row, isMe ? s.rowR : s.rowL]}>
-        <View style={[s.bubble, s.bubbleDel]}>
-          <Text style={s.delTxt}>ðŸš« Message deleted</Text>
-        </View>
-      </View>
-    );
-
-    return (
-      <Pressable onLongPress={() => { setLongPressMsg(m); }} delayLongPress={350}>
-        <View style={[s.row, isMe ? s.rowR : s.rowL]}>
-          <View>
-            <View style={[s.bubble, isMe ? s.bMe : s.bPeer]}>
-              {m.replyTo && (
-                <View style={s.replyBar}>
-                  <Text style={s.replyName}>{m.replyTo.senderId === myUid ? 'You' : peerName}</Text>
-                  <Text style={s.replyPrev} numberOfLines={1}>{m.replyTo.plaintext}</Text>
-                </View>
-              )}
-
-              {/* View Once media */}
-              {m.isViewOnce && m.mediaUrl && (m.msgType === 'image' || m.msgType === 'video')
-                ? <ViewOnceMedia
-                    messageId={m.id} chatId={chatId} mediaUrl={m.mediaUrl}
-                    msgType={m.msgType as 'image' | 'video'} isMe={isMe}
-                    viewedBy={m.viewedBy} currentUid={myUid}
-                  />
-              /* Invisible Ink message */
-              : m.isInvisibleInk
-                ? <InvisibleInk text={m.plaintext} isMe={isMe} />
-                : m.msgType !== 'text' && m.mediaUrl
-                  ? <MediaMessage url={m.mediaUrl} msgType={m.msgType} filename={m.filename} duration={m.audioDuration} />
-                  : <Text style={s.msgTxt}>{renderFormatted(m.plaintext)}</Text>
-              }
-
-              <View style={s.meta}>
-                {m.isEdited && <Text style={s.edited}>edited Â· </Text>}
-                <Text style={s.time}>{m.createdAt?.toDate?.().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) ?? ''}</Text>
-                {isMe && <Ticks status={m.status} />}
-              </View>
-            </View>
-            <ReactionRow msg={m} />
-          </View>
-        </View>
-      </Pressable>
-    );
-  };
-
-  // â”€â”€ Long press sheet â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  
-  // -- Forward message to another chat --
-  const startForward = async (m: Message) => {
-    setLongPressMsg(null);
-    setForwardMsg(m);
-    try {
-      const snap = await firestore().collection('chats')
-        .where('participants', 'array-contains', myUid)
-        .orderBy('lastTime', 'desc').limit(20).get();
-      const list: any[] = [];
-      for (const d of snap.docs) {
-        if (d.id === chatId) continue;
-        const data = d.data();
-        const otherId = (data.participants || []).find((p: string) => p !== myUid);
-        if (!otherId && !data.groupName) continue;
-        let name = data.groupName || '';
-        if (!name && otherId) {
-          const uSnap = await firestore().collection('users').doc(otherId).get();
-          name = uSnap.data()?.name || uSnap.data()?.displayName || otherId.slice(0, 8);
-        }
-        list.push({ chatId: d.id, peerUid: otherId, name, groupName: data.groupName });
-      }
-      setForwardChats(list);
-    } catch { Alert.alert('Error', 'Could not load chats'); setForwardMsg(null); }
-  };
-
-  const doForward = async (target: any) => {
-    if (!forwardMsg) return;
-    try {
-      const fwdData: any = {
-        senderId: myUid,
-        msgType: forwardMsg.msgType || 'text',
-        status: 'sent', isDeleted: false, reactions: {},
-        isForwarded: true,
-        createdAt: firestore.FieldValue.serverTimestamp(),
-      };
-      if (forwardMsg.msgType === 'text' || !forwardMsg.mediaUrl) {
-        fwdData.ciphertext = forwardMsg.ciphertext;
-        fwdData.iv = forwardMsg.iv;
-        fwdData.tag = forwardMsg.tag;
-        fwdData.keyId = forwardMsg.keyId;
-        fwdData.v = forwardMsg.v;
-        fwdData.plaintext = forwardMsg.plaintext;
+      if (editingId != null) {
+        // Edits go straight to the backend (no offline-queue support yet).
+        const updated = await editMessage(chatId, editingId, text);
+        setMessages(prev => prev.map(x => x.id === editingId ? { ...x, ...updated } : x));
+        setEditingId(null);
+        setInput('');
       } else {
-        fwdData.mediaUrl = forwardMsg.mediaUrl;
-        fwdData.filename = forwardMsg.filename;
-        if (forwardMsg.audioDuration) fwdData.audioDuration = forwardMsg.audioDuration;
+        // Enqueue + add optimistic bubble immediately.
+        const q = await enqueueText(chatId, text);
+        const optimistic: DisplayMessage = {
+          id:        0,
+          chatId,
+          senderId:  meId ?? '',
+          type:      'text',
+          content:   text,
+          meta:      null,
+          replyToId: null,
+          editedAt:  null,
+          deletedAt: null,
+          createdAt: new Date().toISOString(),
+          _tempId:   q.tempId,
+          _state:    'pending',
+        };
+        setMessages(prev => [optimistic, ...prev]);
+        setInput('');
+        // The 'sent' / 'failed' queue events update this bubble's state.
       }
-      await firestore().collection('chats').doc(target.chatId).collection('messages').add(fwdData);
-      const preview = forwardMsg.plaintext ? forwardMsg.plaintext.substring(0, 40) : forwardMsg.filename || forwardMsg.msgType;
-      await firestore().collection('chats').doc(target.chatId).update({
-        lastMsg: preview, lastTime: firestore.FieldValue.serverTimestamp(),
+    } catch (e: any) {
+      Alert.alert(editingId != null ? 'Edit failed' : 'Send failed', e?.message ?? 'Try again');
+    } finally {
+      setSending(false);
+    }
+  }, [input, sending, chatId, editingId, meId, stopTypingIfActive]);
+
+  // ── Long-press menu on a message bubble ───────────────────
+  const onLongPressMessage = useCallback((msg: DisplayMessage, plain: string) => {
+    const isMine = msg.senderId === meId;
+
+    // Failed (queued) bubble: offer Retry / Cancel-and-remove.
+    if (msg._state === 'failed' && msg._tempId) {
+      Alert.alert(
+        'Message failed',
+        msg._error || 'Could not send',
+        [
+          { text: 'Retry', onPress: () => queueRetry(msg._tempId!) },
+          { text: 'Delete', style: 'destructive', onPress: async () => {
+              await queueCancel(msg._tempId!);
+              setMessages(prev => prev.filter(x => x._tempId !== msg._tempId));
+          }},
+          { text: 'Cancel', style: 'cancel' },
+        ]
+      );
+      return;
+    }
+
+    // Pending (still in queue): only allow Cancel.
+    if (msg._state === 'pending' && msg._tempId) {
+      Alert.alert(
+        'Message sending…',
+        'This message hasn\'t been confirmed by the server yet.',
+        [
+          { text: 'Cancel send', style: 'destructive', onPress: async () => {
+              await queueCancel(msg._tempId!);
+              setMessages(prev => prev.filter(x => x._tempId !== msg._tempId));
+          }},
+          { text: 'OK', style: 'cancel' },
+        ]
+      );
+      return;
+    }
+
+    // Normal server-confirmed bubble: Copy / Edit / Delete.
+    const buttons: any[] = [
+      { text: 'Copy text', onPress: () => Clipboard.setStringAsync(plain) },
+    ];
+    if (isMine && !msg.deletedAt) {
+      buttons.push({ text: 'Edit', onPress: () => { setEditingId(msg.id); setInput(plain); } });
+      buttons.push({ text: 'Delete', style: 'destructive', onPress: async () => {
+        try {
+          await deleteMessage(chatId, msg.id);
+          setMessages(prev => prev.map(x => x.id === msg.id
+            ? { ...x, content: null, deletedAt: new Date().toISOString(), type: 'system' } : x));
+        } catch (e: any) {
+          Alert.alert('Delete failed', e?.message ?? 'Try again');
+        }
+      }});
+    }
+    buttons.push({ text: 'Cancel', style: 'cancel' });
+    Alert.alert('Message', undefined, buttons);
+  }, [meId, chatId]);
+
+  const onCancelEdit = useCallback(() => {
+    setEditingId(null);
+    setInput('');
+  }, []);
+
+  // ── Attach image ──────────────────────────────────────────
+  const onPickImage = useCallback(async () => {
+    if (sending) return;
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('Permission needed', 'Allow photo library access to attach images.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.7,
+      allowsEditing: false,
+    });
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+
+    setSending(true);
+    try {
+      const filename = asset.fileName || `photo-${Date.now()}.jpg`;
+      const mime     = asset.mimeType || 'image/jpeg';
+      const up = await uploadAttachment(asset.uri, filename, mime);
+      const msg = await sendMessage(chatId, '', 'image', {
+        meta: { attachmentId: up.id, mime: up.mime, size: up.size, filename: up.filename,
+                width: asset.width, height: asset.height },
       });
-      setForwardMsg(null); setForwardChats([]);
-      Alert.alert('Forwarded!', 'Message sent to ' + (target.groupName || target.name));
-    } catch (e: any) { Alert.alert('Error', e.message); }
-  };
-const Sheet = () => {
-    if (!longPressMsg) return null;
-    const isMe = longPressMsg.senderId === myUid;
+      setMessages(prev => prev.some(x => x.id === msg.id) ? prev : [msg, ...prev]);
+    } catch (e: any) {
+      Alert.alert('Upload failed', e?.message ?? 'Try again');
+    } finally {
+      setSending(false);
+    }
+  }, [chatId, sending]);
+
+  // ── Load older on scroll-up ───────────────────────────────
+  const onEndReached = useCallback(async () => {
+    if (loadingOlder || !hasMore || messages.length === 0) return;
+    const oldest = messages[messages.length - 1]?.id;
+    if (!oldest) return;
+    setLoadingOlder(true);
+    try {
+      const older = await getMessages(chatId, { before: oldest, limit: PAGE_SIZE });
+      setMessages(prev => [...prev, ...older]);
+      if (older.length < PAGE_SIZE) setHasMore(false);
+    } catch {}
+    finally { setLoadingOlder(false); }
+  }, [chatId, hasMore, loadingOlder, messages]);
+
+  const title = useMemo(() => {
+    if (!chat) return '…';
+    if (chat.name) return chat.name;
+    if (chat.type === 'direct' && meId) {
+      const other = chat.members.find(m => m.userId !== meId);
+      return other?.name || other?.email || 'Direct chat';
+    }
+    return chat.type === 'group' ? 'Group' : 'Direct chat';
+  }, [chat, meId]);
+
+  if (loading) {
     return (
-      <Pressable style={s.overlay} onPress={() => setLongPressMsg(null)}>
-        <View style={s.sheet}>
-          <TouchableOpacity style={s.sheetRow} onPress={() => { setReactionTarget(longPressMsg); setShowReactions(true); setLongPressMsg(null); }}>
-            <Text style={s.sheetTxt}>React</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={s.sheetRow} onPress={() => { setReplyTarget(longPressMsg); setLongPressMsg(null); }}>
-            <Text style={s.sheetTxt}>â†©  Reply</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={s.sheetRow} onPress={() => startForward(longPressMsg)}>
-            <Text style={s.sheetTxt}>{"\u27A1\uFE0F  Forward"}</Text>
-          </TouchableOpacity>
-          {isMe && longPressMsg.msgType === 'text' && (
-            <TouchableOpacity style={s.sheetRow} onPress={() => startEdit(longPressMsg)}>
-              <Text style={s.sheetTxt}>âœï¸  Edit</Text>
-            </TouchableOpacity>
+      <View style={[S.screen, S.center]}>
+        <ActivityIndicator color={ACCENT} size="large" />
+      </View>
+    );
+  }
+
+  return (
+    <KeyboardAvoidingView
+      style={S.screen}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+    >
+      {/* Header */}
+      <View style={S.header}>
+        <TouchableOpacity onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7}>
+          <Text style={S.backTxt}>←</Text>
+        </TouchableOpacity>
+        <View style={{ flex: 1 }}>
+          <Text style={S.title} numberOfLines={1}>{title}</Text>
+          {chat && (
+            <Text style={S.sub}>
+              {chat.type === 'group' ? `${chat.members.length} members` : 'Direct chat'}
+            </Text>
           )}
-          {isMe && (
-            <TouchableOpacity style={s.sheetRow} onPress={() => deleteForEveryone(longPressMsg)}>
-              <Text style={[s.sheetTxt, { color: '#FF3C6E' }]}>ðŸ—‘  Delete for Everyone</Text>
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity style={s.sheetRow} onPress={() => setLongPressMsg(null)}>
-            <Text style={[s.sheetTxt, { color: '#555' }]}>Cancel</Text>
+        </View>
+      </View>
+
+      {error && (
+        <View style={S.errorBar}>
+          <Text style={S.errorTxt}>{error}</Text>
+        </View>
+      )}
+
+      {/* Messages (inverted — newest at top of the array, visually at bottom) */}
+      <FlatList
+        ref={listRef}
+        data={messages}
+        keyExtractor={(m) => String(m.id)}
+        inverted
+        contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 8 }}
+        renderItem={({ item }) => (
+          <MessageBubble
+            msg={item}
+            meId={meId}
+            member={membersById.get(item.senderId)}
+            chatId={chatId}
+            otherMembers={otherMembers}
+            onLongPress={onLongPressMessage}
+          />
+        )}
+        onEndReached={onEndReached}
+        onEndReachedThreshold={0.4}
+        ListFooterComponent={loadingOlder ? <ActivityIndicator color={ACCENT} style={{ paddingVertical: 12 }} /> : null}
+      />
+
+      {/* Typing indicator */}
+      {typingUids.size > 0 && (
+        <View style={S.typingBar}>
+          <Text style={S.typingTxt}>
+            {Array.from(typingUids).map(uid => {
+              const m = membersById.get(uid);
+              return m?.name || m?.email || uid.slice(0, 8);
+            }).join(', ')} {typingUids.size === 1 ? 'is' : 'are'} typing…
+          </Text>
+        </View>
+      )}
+
+      {/* Edit-mode banner */}
+      {editingId != null && (
+        <View style={S.editBar}>
+          <Text style={S.editTxt}>Editing message #{editingId}</Text>
+          <TouchableOpacity onPress={onCancelEdit} hitSlop={8}>
+            <Text style={S.editCancelTxt}>Cancel</Text>
           </TouchableOpacity>
         </View>
-      </Pressable>
-    );
-  };
+      )}
 
-  // â”€â”€ Main render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  
-  const ForwardModal = () => {
-    if (!forwardMsg) return null;
-    return (
-      <Modal visible={true} transparent animationType="slide" onRequestClose={() => { setForwardMsg(null); setForwardChats([]); }}>
-        <Pressable style={s.overlay} onPress={() => { setForwardMsg(null); setForwardChats([]); }}>
-          <View style={[s.sheet, { maxHeight: '70%' }]}>
-            <Text style={{ color: '#fff', fontSize: 16, fontWeight: '800', marginBottom: 12 }}>Forward to...</Text>
-            {forwardChats.length === 0
-              ? <ActivityIndicator color="#00E5FF" style={{ padding: 20 }} />
-              : <FlatList data={forwardChats} keyExtractor={c => c.chatId}
-                  renderItem={({ item }) => (
-                    <TouchableOpacity style={[s.sheetRow, { flexDirection: 'row', alignItems: 'center', gap: 10 }]} onPress={() => doForward(item)}>
-                      <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#1D4ED8', justifyContent: 'center', alignItems: 'center' }}>
-                        <Text style={{ color: '#fff', fontWeight: '900', fontSize: 14 }}>{(item.groupName || item.name || '?')[0].toUpperCase()}</Text>
-                      </View>
-                      <Text style={s.sheetTxt}>{item.groupName || item.name}</Text>
-                    </TouchableOpacity>
-                  )}
-                />
-            }
-            <TouchableOpacity style={s.sheetRow} onPress={() => { setForwardMsg(null); setForwardChats([]); }}>
-              <Text style={[s.sheetTxt, { color: '#555' }]}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </Pressable>
-      </Modal>
-    );
-  };
-return (
-    <>
-      <Stack.Screen options={{
-        title: peerName ?? 'Chat',
-        headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937',
-        headerTitle: () => (
-          <View style={{ alignItems: 'flex-start' }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={{ color: '#fff', fontSize: 17, fontWeight: '700' }} numberOfLines={1}>{peerName ?? 'Chat'}</Text>
-              {isGhosted && <Text style={{ fontSize: 14 }}>{'\uD83D\uDC7B'}</Text>}
-            </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-              <Text style={{ color: '#00D4AA', fontSize: 9, fontWeight: '700' }}>{"\uD83D\uDD12"} END-TO-END ENCRYPTED</Text>
-              {isGhosted && <Text style={{ color: '#9CA3AF', fontSize: 9 }}> | GHOST</Text>}
-              {vanishMode && <Text style={{ color: '#A78BFA', fontSize: 9 }}> | VANISH</Text>}
-            </View>
-          </View>
-        ),
-        headerRight: () => (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginRight: 12 }}>
-            <TouchableOpacity onPress={async () => {
-              const newVal = await toggleVanishMode(chatId);
-              await addVanishSystemMessage(chatId, newVal);
-            }}>
-              <Text style={{ fontSize: 18, opacity: vanishMode ? 1 : 0.4 }}>{'\uD83D\uDCAD'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push({ pathname: '/ghost-mode' as any, params: { contactUid: peerUid, contactName: peerName } })}>
-              <Text style={{ fontSize: 18, opacity: isGhosted ? 1 : 0.4 }}>{'\uD83D\uDC7B'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push({ pathname: '/voicecall' as any, params: { chatId, name: peerName } })}>
-              <Text style={{ color: '#4A9FFF', fontSize: 20 }}>{"\u260E\uFE0F"}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push({ pathname: '/videocall', params: { chatId, peerUid, peerName } })}>
-              <Text style={{ color: '#4A9FFF', fontSize: 20 }}>{"\uD83D\uDCF9"}</Text>
-            </TouchableOpacity>
-          </View>
-        ),
-      }} />
-
-      <KeyboardAvoidingView style={s.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={90}>
-
-        {/* Vanish Mode Banner */}
-        {vanishMode && (
-          <View style={s.vanishBanner}>
-            <Text style={s.vanishBannerTxt}>{'\uD83D\uDCAD'} Vanish Mode ON — messages disappear after both read</Text>
-          </View>
+      {/* Composer */}
+      <View style={S.composer}>
+        {editingId == null && (
+          <TouchableOpacity
+            style={S.attachBtn}
+            onPress={onPickImage}
+            disabled={sending}
+            activeOpacity={0.7}
+          >
+            <Text style={S.attachTxt}>📎</Text>
+          </TouchableOpacity>
         )}
-
-        {loading ? <ActivityIndicator color="#00E5FF" style={{ flex: 1 }} /> :
-          <FlatList ref={flatRef} data={messages} keyExtractor={m => m.id} renderItem={renderMsg}
-            contentContainerStyle={s.list} onContentSizeChange={() => flatRef.current?.scrollToEnd({ animated: false })} />
-        }
-
-        {uploading && (
-          <View style={s.uploadBar}>
-            <Text style={s.uploadTxt}>Uploadingâ€¦ {uploadPct}%</Text>
-            <View style={[s.uploadFill, { width: `${uploadPct}%` as any }]} />
-          </View>
-        )}
-
-        {peerTyping && <View style={s.typingRow}><Text style={s.typingTxt}>{peerName} is typingâ€¦</Text></View>}
-
-        {replyTarget && (
-          <View style={s.banner}>
-            <View style={{ flex: 1 }}>
-              <Text style={s.bannerTitle}>Replying to {replyTarget.senderId === myUid ? 'yourself' : peerName}</Text>
-              <Text style={s.bannerPrev} numberOfLines={1}>{replyTarget.plaintext}</Text>
-            </View>
-            <TouchableOpacity onPress={() => setReplyTarget(null)}><Text style={s.bannerX}>âœ•</Text></TouchableOpacity>
-          </View>
-        )}
-
-        {editTarget && (
-          <View style={[s.banner, { borderTopColor: '#4F8FFF33' }]}>
-            <Text style={[s.bannerTitle, { color: '#4F8FFF', flex: 1 }]}>âœï¸  Editing message</Text>
-            <TouchableOpacity onPress={cancelEdit}><Text style={s.bannerX}>âœ•</Text></TouchableOpacity>
-          </View>
-        )}
-
-        {showVoice
-          ? <VoiceRecorder
-              onSend={(uri, dur) => { setShowVoice(false); sendMediaMessage(uri, 'audio', { duration: dur }); }}
-              onCancel={() => setShowVoice(false)}
-            />
-          : <View style={s.bar}>
-              <TouchableOpacity onPress={() => setShowAttach(true)} style={s.attachBtn}>
-                <Text style={{ fontSize: 22, color: '#555' }}>ï¼‹</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => setSilentMode(v => !v)} style={{ paddingHorizontal: 2 }}>
-                <Text style={{ fontSize: 16, opacity: silentMode ? 1 : 0.3 }}>{silentMode ? '\uD83D\uDD15' : '\uD83D\uDD14'}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => setInvisibleInkMode(v => !v)} style={{ paddingHorizontal: 4 }}>
-                <Text style={{ fontSize: 18, opacity: invisibleInkMode ? 1 : 0.3 }}>{'\u270D\uFE0F'}</Text>
-              </TouchableOpacity>
-              <TextInput
-                style={[s.input, invisibleInkMode && { backgroundColor: '#A78BFA15', borderColor: '#A78BFA40', borderWidth: 1 }]}
-                value={inputText} onChangeText={handleTyping}
-                placeholder={invisibleInkMode ? "Invisible ink message\u2026" : "Message\u2026"}
-                placeholderTextColor={invisibleInkMode ? '#A78BFA' : '#444'} multiline maxLength={4000}
-              />
-              {inputText.trim()
-                ? <TouchableOpacity style={[s.sendBtn, sending && s.sendOff]} onPress={onSend} disabled={sending}>
-                    {sending ? <ActivityIndicator color="#000" size="small" /> : <Text style={s.sendIco}>{editTarget ? 'âœ“' : 'âž¤'}</Text>}
-                  </TouchableOpacity>
-                : <TouchableOpacity style={s.sendBtn} onPress={() => setShowVoice(true)}>
-                    <Text style={s.sendIco}>ðŸŽ¤</Text>
-                  </TouchableOpacity>
-              }
-            </View>
-        }
-
-        <Sheet />
-        <ForwardModal />
-
-        <AttachmentSheet
-          visible={showAttach} onClose={() => setShowAttach(false)}
-          onPhoto={pickPhoto} onVideo={pickVideo} onFile={pickFile}
-          onGif={() => { setShowAttach(false); setShowGif(true); }}
-          onVoice={() => { setShowAttach(false); setShowVoice(true); }}
-          onViewOnce={pickViewOnce}
+        <TextInput
+          style={S.input}
+          placeholder={editingId != null ? 'Edit message…' : 'Message'}
+          placeholderTextColor={SUBTLE}
+          value={input}
+          onChangeText={onInputChange}
+          multiline
+          maxLength={4000}
         />
-
-        <GifPicker
-          visible={showGif} onClose={() => setShowGif(false)}
-          onSelect={(url) => sendMediaMessage(url, 'gif', { gifUrl: url })}
-        />
-
-        <ReactionPicker
-          visible={showReactions} onClose={() => { setShowReactions(false); setReactionTarget(null); }}
-          onSelect={(emoji) => { if (reactionTarget) addReaction(reactionTarget, emoji); }}
-        />
-
-      </KeyboardAvoidingView>
-    </>
+        <TouchableOpacity
+          style={[S.sendBtn, (!input.trim() || sending) && S.sendBtnOff]}
+          onPress={onSend}
+          disabled={!input.trim() || sending}
+          activeOpacity={0.85}
+        >
+          <Text style={S.sendTxt}>{sending ? '…' : editingId != null ? 'Save' : 'Send'}</Text>
+        </TouchableOpacity>
+      </View>
+    </KeyboardAvoidingView>
   );
 }
 
-// â”€â”€ Styles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function MessageBubble({
+  msg, meId, member, chatId, otherMembers, onLongPress,
+}: {
+  msg: DisplayMessage;
+  meId: string | null;
+  member?: ChatMember;
+  chatId: string;
+  otherMembers: ChatMember[];
+  onLongPress: (msg: DisplayMessage, plain: string) => void;
+}) {
+  const isMine = msg.senderId === meId;
+  const [plain, setPlain] = useState<string>('');
+  const [authHeader, setAuthHeader] = useState<string | null>(null);
 
-const s = StyleSheet.create({
-  screen:      { flex: 1, backgroundColor: '#FFFFFF' },
-  vanishBanner: { backgroundColor: '#A78BFA20', paddingVertical: 6, paddingHorizontal: 12, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#A78BFA30' },
-  vanishBannerTxt: { color: '#7C3AED', fontSize: 11, fontWeight: '600' },
-  systemBubble: { backgroundColor: '#F3F4F6', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 6, marginVertical: 4, maxWidth: '85%' },
-  systemTxt: { color: '#6B7280', fontSize: 12, textAlign: 'center', fontStyle: 'italic' },
-  list:        { padding: 12, paddingBottom: 8 },
-  row:         { marginBottom: 6 },
-  rowR:        { alignItems: 'flex-end' },
-  rowL:        { alignItems: 'flex-start' },
-  bubble:      { maxWidth: '80%', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8 },
-  bMe:         { backgroundColor: '#DCF8C6', borderBottomRightRadius: 2 },
-  bPeer:       { backgroundColor: '#F0F0F0', borderBottomLeftRadius: 2 },
-  bubbleDel:   { backgroundColor: '#F5F5F5', borderWidth: 1, borderColor: '#E0E0E0' },
-  msgTxt:      { color: '#1F2937', fontSize: 15, lineHeight: 21 },
-  delTxt:      { color: '#9CA3AF', fontSize: 14, fontStyle: 'italic' },
-  meta:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: 3 },
-  time:        { color: '#9CA3AF', fontSize: 11, marginRight: 3 },
-  edited:      { color: '#9CA3AF', fontSize: 11 },
-  tick:        { color: '#9CA3AF', fontSize: 12 },
-  replyBar:    { backgroundColor: '#F3F4F6', borderLeftWidth: 3, borderLeftColor: '#4A9FFF', borderRadius: 6, padding: 6, marginBottom: 6 },
-  replyName:   { color: '#4A9FFF', fontSize: 11, fontWeight: 'bold', marginBottom: 1 },
-  replyPrev:   { color: '#6B7280', fontSize: 12 },
-  reactionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 4 },
-  reactionChip:     { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F4F6', borderRadius: 12, paddingHorizontal: 7, paddingVertical: 3, borderWidth: 1, borderColor: '#E5E7EB' },
-  reactionChipMine: { borderColor: '#4A9FFF', backgroundColor: '#4A9FFF11' },
-  reactionEmoji:    { fontSize: 14 },
-  reactionCount:    { color: '#6B7280', fontSize: 11, marginLeft: 3 },
-  uploadBar:   { backgroundColor: '#F9FAFB', paddingHorizontal: 14, paddingVertical: 6 },
-  uploadTxt:   { color: '#4A9FFF', fontSize: 12, marginBottom: 4 },
-  uploadFill:  { height: 2, backgroundColor: '#4A9FFF', borderRadius: 1 },
-  typingRow:   { paddingHorizontal: 16, paddingBottom: 6 },
-  typingTxt:   { color: '#9CA3AF', fontSize: 13, fontStyle: 'italic' },
-  banner:      { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F9FAFB', borderTopWidth: 1, borderTopColor: '#E5E7EB', paddingHorizontal: 14, paddingVertical: 8 },
-  bannerTitle: { color: '#4A9FFF', fontSize: 12, fontWeight: 'bold' },
-  bannerPrev:  { color: '#6B7280', fontSize: 12 },
-  bannerX:     { color: '#9CA3AF', fontSize: 20, paddingHorizontal: 8 },
-  bar:         { flexDirection: 'row', alignItems: 'flex-end', backgroundColor: '#FFFFFF', paddingHorizontal: 10, paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
-  attachBtn:   { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  input:       { flex: 1, backgroundColor: '#F3F4F6', color: '#1F2937', borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10, fontSize: 15, maxHeight: 120, marginHorizontal: 6 },
-  sendBtn:     { width: 44, height: 44, borderRadius: 22, backgroundColor: '#4A9FFF', alignItems: 'center', justifyContent: 'center' },
-  sendOff:     { backgroundColor: '#E5E7EB' },
-  sendIco:     { color: '#FFFFFF', fontSize: 18, fontWeight: 'bold' },
-  overlay:     { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#00000044', justifyContent: 'flex-end' },
-  sheet:       { backgroundColor: '#FFFFFF', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 36, paddingTop: 8 },
-  sheetRow:    { padding: 18, borderBottomWidth: 1, borderBottomColor: '#F1F3F4' },
-  sheetTxt:    { color: '#1F2937', fontSize: 16 },
+  // Tick state — only meaningful for own server-confirmed messages.
+  // Group MVP semantic: "any other member" rather than "all members".
+  // Tightening to "all" is a UX polish once we observe usage.
+  let tickState: 'pending' | 'sent' | 'delivered' | 'read' | null = null;
+  if (isMine && msg.id > 0 && !msg.deletedAt) {
+    if (msg._state === 'pending' || msg._state === 'failed') {
+      tickState = msg._state === 'pending' ? 'pending' : null;
+    } else if (otherMembers.some(m => (m.lastReadMessageId ?? 0) >= msg.id)) {
+      tickState = 'read';
+    } else if (otherMembers.some(m => (m.lastDeliveredMessageId ?? 0) >= msg.id)) {
+      tickState = 'delivered';
+    } else {
+      tickState = 'sent';
+    }
+  }
+
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      const text = await decryptFromChat(chatId, msg.senderId, msg.content);
+      if (!cancel) setPlain(text);
+    })();
+    return () => { cancel = true; };
+  }, [msg.content, msg.senderId, chatId]);
+
+  // For image bubbles, prepare the Authorization header so RN's Image can
+  // fetch the auth-gated /uploads endpoint.
+  useEffect(() => {
+    if (msg.type !== 'image') return;
+    let cancel = false;
+    (async () => {
+      const tok = await getAccessToken();
+      if (!cancel) setAuthHeader(tok ? `Bearer ${tok}` : null);
+    })();
+    return () => { cancel = true; };
+  }, [msg.type]);
+
+  if (msg.deletedAt) {
+    return (
+      <View style={[S.bubble, S.bubbleSystem]}>
+        <Text style={S.bubbleSystemTxt}>Message deleted</Text>
+      </View>
+    );
+  }
+
+  const isImage = msg.type === 'image' && msg.meta?.attachmentId;
+
+  return (
+    <View style={[S.bubbleRow, isMine ? S.bubbleRowMine : S.bubbleRowTheirs]}>
+      <TouchableOpacity
+        style={[
+          S.bubble,
+          isMine ? S.bubbleMine : S.bubbleTheirs,
+          isImage && S.imageBubble,
+          msg._state === 'pending' && S.bubblePending,
+          msg._state === 'failed'  && S.bubbleFailed,
+        ]}
+        onPress={() => { if (msg._state === 'failed') onLongPress(msg, plain); }}
+        onLongPress={() => onLongPress(msg, plain)}
+        delayLongPress={250}
+        activeOpacity={0.85}
+      >
+        {!isMine && member && (
+          <Text style={S.senderTag}>{member.name || member.email || msg.senderId.slice(0, 8)}</Text>
+        )}
+
+        {isImage ? (
+          authHeader ? (
+            <Image
+              source={{
+                uri: attachmentUrl(msg.meta.attachmentId),
+                headers: { Authorization: authHeader },
+              }}
+              style={S.attachedImage}
+              resizeMode="cover"
+            />
+          ) : (
+            <View style={S.imageError}>
+              <Text style={S.imageErrorTxt}>Loading image…</Text>
+            </View>
+          )
+        ) : (
+          plain ? (
+            <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine]}>{plain}</Text>
+          ) : null
+        )}
+
+        <Text style={S.bubbleMeta}>
+          {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          {msg.editedAt ? ' · edited' : ''}
+          {msg._state === 'pending' ? ' · sending…' : ''}
+          {msg._state === 'failed'  ? ' · failed (tap to retry)' : ''}
+          {tickState && (
+            <Text style={tickState === 'read' ? S.tickRead : S.tick}>
+              {' '}
+              {tickState === 'pending'   ? '⏳'
+                : tickState === 'sent'   ? '✓'
+                : '✓✓'}
+            </Text>
+          )}
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+const DARK_BG = '#0D0F14';
+const BORDER  = '#1F2937';
+const TEXT    = '#E5E7EB';
+const SUBTLE  = '#9CA3AF';
+const ACCENT  = '#6C63FF';
+const DANGER  = '#EF4444';
+
+const S = StyleSheet.create({
+  screen:        { flex: 1, backgroundColor: DARK_BG },
+  center:        { justifyContent: 'center', alignItems: 'center' },
+
+  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER, gap: 8 },
+  backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  backTxt:       { color: TEXT, fontSize: 24 },
+  title:         { color: TEXT, fontSize: 18, fontWeight: '700' },
+  sub:           { color: SUBTLE, fontSize: 12 },
+
+  errorBar:      { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.4)', borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 10 },
+  errorTxt:      { color: DANGER, fontSize: 12 },
+
+  bubbleRow:     { marginVertical: 4, flexDirection: 'row' },
+  bubbleRowMine: { justifyContent: 'flex-end' },
+  bubbleRowTheirs:{ justifyContent: 'flex-start' },
+  bubble:        { maxWidth: '78%', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 16, gap: 2 },
+  bubbleMine:    { backgroundColor: ACCENT, borderTopRightRadius: 4 },
+  bubbleTheirs:  { backgroundColor: '#1F2937', borderTopLeftRadius: 4 },
+  bubblePending: { opacity: 0.6 },
+  bubbleFailed:  { borderWidth: 1, borderColor: DANGER, opacity: 0.85 },
+  bubbleSystem:  { alignSelf: 'center', backgroundColor: 'transparent', paddingVertical: 4 },
+  bubbleSystemTxt:{ color: SUBTLE, fontSize: 11, fontStyle: 'italic' },
+  senderTag:     { color: SUBTLE, fontSize: 11, fontWeight: '600', marginBottom: 2 },
+  bubbleTxt:     { color: TEXT, fontSize: 15, lineHeight: 20 },
+  bubbleTxtMine: { color: '#fff' },
+  bubbleMeta:    { color: 'rgba(255,255,255,0.5)', fontSize: 10, alignSelf: 'flex-end', marginTop: 2 },
+  tick:          { color: 'rgba(255,255,255,0.7)', fontSize: 11, fontWeight: '700' },
+  tickRead:      { color: '#3B82F6',               fontSize: 11, fontWeight: '700' },
+
+  typingBar:     { paddingHorizontal: 16, paddingBottom: 4 },
+  typingTxt:     { color: SUBTLE, fontSize: 12, fontStyle: 'italic' },
+
+  editBar:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8, backgroundColor: 'rgba(108,99,255,0.12)', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: BORDER },
+  editTxt:       { color: ACCENT, fontSize: 12, fontWeight: '600' },
+  editCancelTxt: { color: SUBTLE, fontSize: 12 },
+
+  composer:      { flexDirection: 'row', alignItems: 'flex-end', padding: 12, gap: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: BORDER, backgroundColor: '#0F1217' },
+  attachBtn:     { width: 40, height: 40, borderRadius: 20, backgroundColor: '#1F2937', alignItems: 'center', justifyContent: 'center' },
+  attachTxt:     { fontSize: 18 },
+  input:         { flex: 1, color: TEXT, backgroundColor: '#1F2937', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, maxHeight: 120, fontSize: 15 },
+  sendBtn:       { backgroundColor: ACCENT, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, justifyContent: 'center' },
+  sendBtnOff:    { backgroundColor: '#374151' },
+  sendTxt:       { color: '#fff', fontWeight: '700' },
+
+  imageBubble:   { padding: 4, borderRadius: 12 },
+  attachedImage: { width: 220, height: 220, borderRadius: 8, backgroundColor: '#0F1217' },
+  imageError:    { width: 180, padding: 16, alignItems: 'center', gap: 4 },
+  imageErrorTxt: { color: SUBTLE, fontSize: 12 },
 });

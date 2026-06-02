@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
@@ -7,7 +8,7 @@ import {
   TouchableOpacity, View,
 } from "react-native";
 import {
-  savePendingSignup, savePIN, signInWithGoogle, configureGoogleSignIn,
+  savePendingSignup, signInWithGoogle, configureGoogleSignIn,
 } from "./(constants)/authService";
 import { markSetupComplete } from "../services/securityService";
 
@@ -260,7 +261,7 @@ export default function SignupScreen() {
       const result = await signInWithGoogle();
       console.log('[SIGNUP] Google sign-up success:', result.displayName);
       await markSetupComplete();
-      // Google creates profile automatically, go straight to chats
+      // Phase 3a: chats is back online (Postgres-backed).
       router.replace('/(tabs)/chats' as any);
     } catch (e: any) {
       console.error('[SIGNUP] Google sign-up error:', e);
@@ -308,8 +309,10 @@ export default function SignupScreen() {
     const d = parseInt(day), y = parseInt(year);
     if (d < 1 || d > 31)          { Alert.alert("Error", "Invalid day.");                  return false; }
     if (y < 1900 || y > 2015)     { Alert.alert("Error", "Enter a valid birth year.");      return false; }
-    const digits = mobile.replace(/\D/g, "");
-    if (digits.length < 8)        { Alert.alert("Error", "Enter a valid mobile number.");  return false; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      Alert.alert("Error", "Enter a valid email address.");
+      return false;
+    }
     return true;
   };
 
@@ -330,10 +333,13 @@ export default function SignupScreen() {
 
     setLoading(true);
     try {
-      const fullPhone = cc + mobile.replace(/\D/g, "");
-      await savePendingSignup({ name, dob, email, mobile: fullPhone, securityQ1: q1, securityA1: a1, securityQ2: q2, securityA2: a2 });
-      await savePIN(pin);
-      router.push({ pathname: "/otp", params: { phone: fullPhone, flow: "signup" } });
+      const cleanEmail = email.trim().toLowerCase();
+      // Phone is no longer the auth identifier — kept only as optional profile.
+      await savePendingSignup({ name, dob, email: cleanEmail, mobile: "", securityQ1: q1, securityA1: a1, securityQ2: q2, securityA2: a2 });
+      // PIN is saved AFTER OTP verify so backend has a user_id to attach it to.
+      // We stash it temporarily so the OTP screen can call savePIN after verify.
+      await AsyncStorage.setItem("vc_pending_pin", pin);
+      router.push({ pathname: "/otp", params: { phone: cleanEmail, flow: "signup" } });
     } catch (e: any) {
       Alert.alert("Error", e.message ?? "Something went wrong. Try again.");
     } finally {
@@ -435,58 +441,19 @@ export default function SignupScreen() {
                 />
 
                 <UnderlineInput
-                  label="EMAIL (OPTIONAL)"
+                  label="EMAIL"
                   value={email}
                   onChangeText={setEmail}
-                  placeholder="For account recovery"
+                  placeholder="you@example.com"
                   keyboardType="email-address"
                   autoCapitalize="none"
                 />
 
-                {/* Mobile with country code pill */}
-                <Text style={S.inputLabel}>MOBILE NUMBER</Text>
-                <View style={S.mobileRow}>
-                  <TouchableOpacity
-                    style={S.ccPill}
-                    onPress={() => setShowCC(v => !v)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={S.ccPillText}>{selected.flag}</Text>
-                    <Text style={S.ccPillCode}>{cc}</Text>
-                  </TouchableOpacity>
-                  <TextInput
-                    style={[S.underlineInput, { flex: 1, marginBottom: 0 }]}
-                    placeholder="Mobile number"
-                    placeholderTextColor="rgba(0,0,0,0.3)"
-                    value={mobile}
-                    onChangeText={t => setMobile(t.replace(/\D/g, "").slice(0, 13))}
-                    keyboardType="phone-pad"
-                    maxLength={13}
-                  />
-                </View>
-
-                {showCC && (
-                  <View style={S.ccDropdown}>
-                    {CODES.map(c => (
-                      <TouchableOpacity
-                        key={c.code}
-                        style={S.ccDropdownItem}
-                        onPress={() => { setCc(c.code); setShowCC(false); }}
-                        activeOpacity={0.6}
-                      >
-                        <Text style={S.ccDropdownFlag}>{c.flag}</Text>
-                        <Text style={S.ccDropdownName}>{c.name}</Text>
-                        <Text style={S.ccDropdownCode}>{c.code}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                )}
-
                 {/* Continue button */}
                 <TouchableOpacity
-                  style={[S.primaryBtn, (!name.trim() || !day || !month || !year || mobile.replace(/\D/g, "").length < 8) && S.btnDisabled]}
+                  style={[S.primaryBtn, (!name.trim() || !day || !month || !year || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) && S.btnDisabled]}
                   onPress={() => validateStep1() && goStep(2)}
-                  disabled={!name.trim() || !day || !month || !year || mobile.replace(/\D/g, "").length < 8}
+                  disabled={!name.trim() || !day || !month || !year || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())}
                   activeOpacity={0.85}
                 >
                   <Text style={S.primaryBtnText}>Continue</Text>

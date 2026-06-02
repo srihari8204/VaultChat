@@ -9,18 +9,10 @@ import { sendOTP, signInWithGoogle, configureGoogleSignIn } from './(constants)/
 import { markSetupComplete } from '../services/securityService';
 import { hasPIN } from './(constants)/authService';
 
-const CODES = [
-  { code: '+91',  name: 'India',     flag: '\u{1F1EE}\u{1F1F3}' },
-  { code: '+1',   name: 'USA',       flag: '\u{1F1FA}\u{1F1F8}' },
-  { code: '+44',  name: 'UK',        flag: '\u{1F1EC}\u{1F1E7}' },
-];
-
 export default function LoginScreen() {
   const router = useRouter();
-  const [cc, setCc] = useState('+91');
-  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
-  const [showCC, setShowCC] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
 
   // Configure Google Sign-In on mount
@@ -36,18 +28,8 @@ export default function LoginScreen() {
       console.log('[LOGIN] Google sign-in success:', result.displayName, 'isNew:', result.isNewUser);
       await markSetupComplete();
 
-      if (result.isNewUser) {
-        // New user — go to profile setup to complete registration
-        router.replace('/profile-setup' as any);
-      } else {
-        // Existing user — check if PIN exists
-        const hasPin = await hasPIN();
-        if (hasPin) {
-          router.replace('/lock' as any);
-        } else {
-          router.replace('/(tabs)/chats' as any);
-        }
-      }
+      // Phase 3a: chats is back online (Postgres-backed).
+      router.replace('/(tabs)/chats' as any);
     } catch (e: any) {
       console.error('[LOGIN] Google sign-in error:', e);
       if (!e.message?.includes('cancelled')) {
@@ -58,8 +40,7 @@ export default function LoginScreen() {
     }
   };
 
-  const selected = CODES.find(c => c.code === cc) ?? CODES[0];
-  const isValid = phone.replace(/\D/g, '').length >= 8;
+  const isValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
   // Entrance animations
   const headerFade = useRef(new Animated.Value(0)).current;
@@ -118,21 +99,22 @@ export default function LoginScreen() {
   }, [loading, dot1, dot2, dot3]);
 
   const handleSend = async () => {
-    const digits = phone.replace(/\D/g, '');
-    if (digits.length < 8) {
-      Alert.alert('Error', 'Enter a valid mobile number.');
+    const e = email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) {
+      Alert.alert('Error', 'Enter a valid email address.');
       return;
     }
     setLoading(true);
     try {
-      const fullPhone = cc + digits;
-      console.log('[LOGIN] Sending OTP to:', fullPhone);
-      await sendOTP(fullPhone);
+      console.log('[LOGIN] Sending OTP to:', e);
+      await sendOTP(e);
       console.log('[LOGIN] OTP sent, navigating to OTP screen');
-      router.push({ pathname: '/otp', params: { phone: fullPhone, flow: 'login' } });
-    } catch (e: any) {
-      console.error('[LOGIN] OTP error:', e);
-      Alert.alert('Error', e.message ?? 'Failed to send OTP. Try again.');
+      // OTP screen still uses `phone` as the URL param name for now —
+      // it carries the email for the email-OTP flow.
+      router.push({ pathname: '/otp', params: { phone: e, flow: 'login' } });
+    } catch (err: any) {
+      console.error('[LOGIN] OTP error:', err);
+      Alert.alert('Error', err.message ?? 'Failed to send code. Try again.');
     } finally {
       setLoading(false);
     }
@@ -161,50 +143,24 @@ export default function LoginScreen() {
           {/* Header */}
           <Animated.View style={[S.headerSection, { opacity: headerFade, transform: [{ translateY: headerSlide }] }]}>
             <Text style={S.title}>Welcome{'\n'}back</Text>
-            <Text style={S.subtitle}>Enter your number to continue</Text>
+            <Text style={S.subtitle}>Enter your email to continue</Text>
           </Animated.View>
 
-          {/* Phone input section */}
+          {/* Email input section */}
           <Animated.View style={[S.formSection, { opacity: formFade, transform: [{ translateY: formSlide }] }]}>
-            {/* Country code selector */}
-            <TouchableOpacity
-              style={S.ccSelector}
-              onPress={() => setShowCC(v => !v)}
-              activeOpacity={0.7}
-            >
-              <Text style={S.ccFlag}>{selected.flag}</Text>
-              <Text style={S.ccCode}>{cc}</Text>
-              <Text style={S.ccChevron}>{showCC ? '\u2303' : '\u2304'}</Text>
-            </TouchableOpacity>
-
-            {/* Dropdown */}
-            {showCC && (
-              <View style={S.dropdown}>
-                {CODES.map((c, index) => (
-                  <TouchableOpacity
-                    key={c.code}
-                    style={[S.ddItem, index === CODES.length - 1 && { borderBottomWidth: 0 }]}
-                    onPress={() => { setCc(c.code); setShowCC(false); }}
-                    activeOpacity={0.6}
-                  >
-                    <Text style={S.ddFlag}>{c.flag}</Text>
-                    <Text style={S.ddName}>{c.name}</Text>
-                    <Text style={S.ddCode}>{c.code}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-
-            {/* Phone number input */}
             <View style={S.inputWrap}>
               <TextInput
                 style={S.phoneInput}
-                placeholder="Phone number"
+                placeholder="you@example.com"
                 placeholderTextColor="rgba(3, 3, 3, 0.2)"
-                value={phone}
-                onChangeText={t => setPhone(t.replace(/\D/g, '').slice(0, 13))}
-                keyboardType="phone-pad"
-                maxLength={13}
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="email"
+                textContentType="emailAddress"
+                maxLength={120}
                 selectionColor="rgba(255,255,255,0.5)"
               />
               <View style={S.inputLine} />

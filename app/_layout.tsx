@@ -17,15 +17,9 @@ import { useEffect, useState } from 'react';
 import * as ScreenCapture from 'expo-screen-capture';
 import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet, Platform } from 'react-native';
-import auth from '@react-native-firebase/auth';
 
 import { runSecurityCheck } from '../services/securityService';
-import { recordLogin } from '../lib/loginTracker';
-import {
-  registerForPushNotifications,
-  setupNotificationListeners,
-  handleInitialNotification,
-} from '../services/notificationService';
+import { attachTapHandler } from '../lib/push';
 global.Buffer = Buffer;
 
 export default function RootLayout() {
@@ -64,28 +58,19 @@ export default function RootLayout() {
       }
 
       setSecurityChecked(true);
-
-      // ── 3. Register push notifications (after security cleared) ──
-      if (Platform.OS !== 'web') {
-        const uid = auth().currentUser?.uid;
-        if (uid) {
-          recordLogin(uid).catch(() => {});
-          registerForPushNotifications().catch(() => {});
-        }
-
-        // ── 4. Handle notification that opened app from killed state ──
-        handleInitialNotification(router).catch(() => {});
-      } else {
-        // Web: just mark ready
-      }
+      // Push token registration happens on the chats-screen mount
+      // (lib/push.ts:registerPushToken) — needs a valid JWT, which we
+      // only have after sign-in.
     };
 
     runStartup();
 
-    // ── 5. Wire notification tap listeners (native only) ─────
+    // ── Notification tap → open the chat. Survives across screens. ──
     let cleanupListeners = () => {};
     if (Platform.OS !== 'web') {
-      cleanupListeners = setupNotificationListeners(router);
+      cleanupListeners = attachTapHandler((chatId) => {
+        router.push({ pathname: '/chat', params: { id: chatId } } as any);
+      });
     }
 
     return () => {

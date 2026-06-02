@@ -8,13 +8,30 @@
 
 require('dotenv').config();
 
+// Sentry first — must be imported before any other module so the
+// auto-instrumentation can wrap http/express/pg before they load.
+const Sentry = require('@sentry/node');
+if (process.env.SENTRY_DSN) {
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    environment: process.env.NODE_ENV || 'production',
+    release: process.env.SENTRY_RELEASE,
+    tracesSampleRate: parseFloat(process.env.SENTRY_TRACES_SAMPLE_RATE || '0.1'),
+    sendDefaultPii: false,
+  });
+  console.log('[sentry] initialised');
+} else {
+  console.log('[sentry] SENTRY_DSN not set — error tracking disabled');
+}
+
 const express    = require('express');
 const http       = require('http');
 const { Server } = require('socket.io');
 const cors       = require('cors');
 
-const db    = require('./db');
-const redis = require('./redis');
+const db      = require('./db');
+const redis   = require('./redis');
+const jwtUtil = require('./jwt');
 
 const app    = express();
 const server = http.createServer(app);
@@ -22,16 +39,34 @@ const io     = new Server(server, {
   cors: { origin: '*', methods: ['GET', 'POST'] },
   pingInterval: 10000,
   pingTimeout:  5000,
+  maxHttpBufferSize: 2 * 1024 * 1024,  // 2 MB — accommodates encrypted media metadata
 });
 
 app.use(cors());
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '2mb' }));
 
 redis.connect().catch(() => {});
 
 // ── Routes ───────────────────────────────────────────────────
-app.use('/auth', require('./routes/auth'));
-app.use('/user', require('./routes/user'));
+app.use('/auth',     require('./routes/auth'));
+app.use('/user',     require('./routes/user'));
+app.use('/uploads',  require('./routes/uploads'));
+app.use('/contacts', require('./routes/contacts'));
+const chatsRouter = require('./routes/chats');
+app.use('/chats',    chatsRouter);
+
+// Wire the chats router so its REST writes broadcast over sockets.
+chatsRouter.setBroadcasters({
+  newMessage: (chatId, payload) => fanOutToChat(chatId, 'new_message', payload),
+  chatEvent:  (chatId, event, payload) => fanOutToChat(chatId, event, payload),
+});
+
+// Sentry's Express error handler — catches everything that bubbles up
+// from route handlers and ships it to Sentry. Must be mounted AFTER
+// the routes. No-op if SENTRY_DSN was not set at init.
+if (process.env.SENTRY_DSN) {
+  Sentry.setupExpressErrorHandler(app);
+}
 
 // Health check — db + redis status for monitoring / Nginx probes
 app.get('/health', async (_req, res) => {
@@ -47,33 +82,84 @@ app.get('/health', async (_req, res) => {
 });
 
 // ── Socket.IO ────────────────────────────────────────────────
-// Pure message relays. None of these touch Firebase. Clients send/receive
-// realtime events via Socket.IO rooms; storage (Firestore / Postgres) is
-// handled by the client (today) and the backend (after Phase 4+).
+// Phase 3a:
+//   * JWT-authed handshake — sockets must present a Bearer token at connect
+//   * Multi-device fan-out — a user can have N concurrent sockets; we track
+//     them in a Set keyed by user id and broadcast to all of them
+//   * Chat-room rooms — joined dynamically when client opens a chat;
+//     `new_message` broadcasts hit `chat:${chatId}` AND every connected
+//     socket of every chat member (via fanOutToChat below) so background
+//     devices still receive updates without an open chat room
 
-// Maps a connected socket to its claimed identity. Clients call `identify`
-// with their uid (their own — no auth on socket yet; tighten in Phase 2+
-// by extracting uid from the JWT on socket handshake).
-const uidToSocket = new Map();
+// userId → Set of socket.id values
+const userSockets = new Map();
+
+function trackSocket(socket) {
+  const uid = socket.data?.uid;
+  if (!uid) return;
+  let set = userSockets.get(uid);
+  if (!set) { set = new Set(); userSockets.set(uid, set); }
+  set.add(socket.id);
+}
+
+function untrackSocket(socket) {
+  const uid = socket.data?.uid;
+  if (!uid) return;
+  const set = userSockets.get(uid);
+  if (!set) return;
+  set.delete(socket.id);
+  if (set.size === 0) userSockets.delete(uid);
+}
 
 function emitToUid(uid, event, data) {
-  const socketId = uidToSocket.get(uid);
-  if (!socketId) return false;
-  io.to(socketId).emit(event, data);
+  const set = userSockets.get(uid);
+  if (!set || set.size === 0) return false;
+  for (const sid of set) io.to(sid).emit(event, data);
   return true;
 }
 
+// Fan a chat-scoped event to every connected socket of every chat member.
+// `chat:${chatId}` room only contains sockets that explicitly joined it
+// (i.e. have the chat open). For background notifications we want every
+// device of every member to receive the event — hence the DB lookup.
+async function fanOutToChat(chatId, event, data) {
+  try {
+    // Always emit to the room for active viewers
+    io.to(`chat:${chatId}`).emit(event, data);
+    // Also fan to background sockets of all members. Uses the SECURITY
+    // DEFINER helper from 004_rls.sql so this system query bypasses RLS
+    // without needing a user-bound transaction.
+    const r = await db.query(`SELECT * FROM vc_chat_member_ids($1)`, [chatId]);
+    for (const row of r.rows) {
+      // The function returns SETOF UUID — column name is the function name
+      const uid = row.vc_chat_member_ids;
+      if (uid) emitToUid(uid, event, data);
+    }
+  } catch (err) {
+    console.error('[fanOutToChat]', err.message);
+  }
+}
+
+// JWT handshake middleware — runs on every new connection BEFORE 'connection'
+io.use((socket, next) => {
+  try {
+    const token =
+      socket.handshake.auth?.token ||
+      (socket.handshake.headers?.authorization || '').replace(/^Bearer\s+/i, '');
+    if (!token) return next(new Error('auth_required'));
+    const payload = jwtUtil.verifyAccess(token);
+    socket.data = { uid: payload.sub, email: payload.email };
+    return next();
+  } catch (err) {
+    return next(new Error(err.name === 'TokenExpiredError' ? 'token_expired' : 'invalid_token'));
+  }
+});
+
 io.on('connection', (socket) => {
-  // ── Identify socket → uid ──────────────────────────────────
-  // Lightweight registration so other clients can target this socket.
-  socket.on('identify', ({ uid, vaultId }) => {
-    const id = uid || vaultId;
-    if (!id) return;
-    socket.data = { ...socket.data, uid: id, vaultId: id };
-    uidToSocket.set(id, socket.id);
-    socket.join(`user:${id}`);
-    socket.emit('identify_ok');
-  });
+  trackSocket(socket);
+  // Personal room — useful for direct user-targeted events (e.g. invitations)
+  socket.join(`user:${socket.data.uid}`);
+  socket.emit('ready', { uid: socket.data.uid });
 
   // ── Chat real-time events ──────────────────────────────────
   socket.on('join_chat', ({ chatId }) => {
@@ -312,10 +398,7 @@ io.on('connection', (socket) => {
 
   // ── Disconnect cleanup ────────────────────────────────────
   socket.on('disconnect', () => {
-    const uid = socket.data?.uid;
-    if (uid && uidToSocket.get(uid) === socket.id) {
-      uidToSocket.delete(uid);
-    }
+    untrackSocket(socket);
   });
 });
 

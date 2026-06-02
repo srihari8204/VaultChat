@@ -4,6 +4,7 @@
  * Auto-captures OTP from SMS via textContentType="oneTimeCode" + autoComplete
  * Supports clipboard paste detection for quick OTP entry
  */
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -18,22 +19,53 @@ import {
   Text, TextInput, TouchableOpacity,
   View,
 } from 'react-native';
-import { sendOTP, verifyOTP } from './(constants)/authService';
+import {
+  clearPendingSignup,
+  getPendingSignup,
+  savePIN,
+  saveUserProfile,
+  sendOTP,
+  verifyOTP,
+} from './(constants)/authService';
 import { markSetupComplete } from '../services/securityService';
+
+/**
+ * Verify the OTP and, for signup flow, finish the profile setup.
+ * `phone` carries the email address (the URL param keeps its old name
+ * for backwards compatibility with existing routes).
+ */
+async function submitOtpForFlow(email: string, code: string, isSignup: boolean): Promise<boolean> {
+  let name: string | undefined;
+  let pending: Awaited<ReturnType<typeof getPendingSignup>> = null;
+  if (isSignup) {
+    pending = await getPendingSignup();
+    name = pending?.name;
+  }
+  const result = await verifyOTP(email, code, name);
+  if (!result?.user) return false;
+
+  if (isSignup) {
+    if (pending) {
+      try { await saveUserProfile(pending); } catch (e) { console.warn('[OTP] profile save failed', e); }
+    }
+    try {
+      const pendingPin = await AsyncStorage.getItem('vc_pending_pin');
+      if (pendingPin) {
+        await savePIN(pendingPin);
+        await AsyncStorage.removeItem('vc_pending_pin').catch(() => {});
+      }
+    } catch (e) { console.warn('[OTP] PIN save failed', e); }
+    await clearPendingSignup();
+  }
+  return true;
+}
 
 export default function OTPScreen() {
   const { phone, flow } = useLocalSearchParams<{ phone: string; flow?: string }>();
   const router    = useRouter();
 
-  // Determine where to go after OTP verified
+  // Phase 3a: chats is back online (Postgres-backed), land users there.
   const getPostVerifyRoute = async () => {
-    if (flow === 'signup') return '/profile-setup';
-    // Login flow: check if PIN exists, if so go to lock, otherwise straight to chats
-    try {
-      const { hasPIN } = await import('./(constants)/authService');
-      const hasPin = await hasPIN();
-      if (hasPin) return '/lock';
-    } catch {}
     return '/(tabs)/chats';
   };
 
@@ -110,7 +142,7 @@ export default function OTPScreen() {
       try {
         setLoading(true);
         setError('');
-        const ok = await verifyOTP(code);
+        const ok = await submitOtpForFlow(phone as string, code, flow === 'signup');
         if (ok) {
           if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           Animated.spring(successScale, { toValue: 1, tension: 50, friction: 8, useNativeDriver: true }).start();
@@ -231,7 +263,7 @@ export default function OTPScreen() {
       setLoading(true);
       setError('');
       console.log('[OTP] Verifying code:', code, 'flow:', flow);
-      const ok = await verifyOTP(code);
+      const ok = await submitOtpForFlow(phone as string, code, flow === 'signup');
       console.log('[OTP] Verify result:', ok);
       if (ok) {
         if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);

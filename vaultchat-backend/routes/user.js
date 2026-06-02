@@ -87,9 +87,14 @@ router.put('/profile', async (req, res) => {
       sets.push(`dob = $${params.length}`);
     }
 
-    // Phone hash for contact-matching lookup (Phase 5+)
+    // Phone — normalize (digits-only, India default for 10-digit input),
+    // store hash for contact lookup. Same normalization used by
+    // routes/chats.js so writes and lookups produce matching hashes.
     if (b.phone) {
-      const h = await sha256Hex(b.phone.toString().trim());
+      const raw = b.phone.toString();
+      let digits = raw.replace(/\D/g, '');
+      if (digits.length === 10) digits = '91' + digits;
+      const h = crypto.createHash('sha256').update(digits, 'utf8').digest('hex');
       params.push(h);
       sets.push(`phone_hash = $${params.length}`);
     }
@@ -153,6 +158,56 @@ router.post('/pin/verify', async (req, res) => {
   } catch (err) {
     console.error('[user/pin/verify]', err.message);
     return res.status(500).json({ error: 'PIN verification failed' });
+  }
+});
+
+// ─── Push notification devices ───────────────────────────────
+// POST /user/devices  { pushToken, platform, deviceName?, appVersion? }
+//   Register or refresh a push token for the current user. Idempotent —
+//   safe to call on every cold start.
+router.post('/devices', async (req, res) => {
+  try {
+    const pushToken  = (req.body?.pushToken  || '').toString().trim();
+    const platform   = (req.body?.platform   || '').toString().trim().toLowerCase();
+    const deviceName = req.body?.deviceName  ? String(req.body.deviceName).slice(0, 100) : null;
+    const appVersion = req.body?.appVersion  ? String(req.body.appVersion).slice(0, 32)  : null;
+
+    if (!pushToken) return res.status(400).json({ error: 'pushToken required' });
+    if (!['ios', 'android', 'web'].includes(platform)) {
+      return res.status(400).json({ error: 'platform must be ios | android | web' });
+    }
+
+    const r = await db.query(
+      `INSERT INTO devices (user_id, push_token, platform, device_name, app_version)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (user_id, push_token) DO UPDATE SET
+         platform     = EXCLUDED.platform,
+         device_name  = COALESCE(EXCLUDED.device_name, devices.device_name),
+         app_version  = COALESCE(EXCLUDED.app_version, devices.app_version),
+         last_seen_at = NOW()
+       RETURNING id`,
+      [req.user.id, pushToken, platform, deviceName, appVersion]
+    );
+    res.json({ id: r.rows[0].id });
+  } catch (err) {
+    console.error('[devices POST]', err.message);
+    res.status(500).json({ error: 'Failed to register device' });
+  }
+});
+
+// DELETE /user/devices  { pushToken }   — unregister (call on sign-out)
+router.delete('/devices', async (req, res) => {
+  try {
+    const pushToken = (req.body?.pushToken || '').toString().trim();
+    if (!pushToken) return res.status(400).json({ error: 'pushToken required' });
+    await db.query(
+      `DELETE FROM devices WHERE user_id = $1 AND push_token = $2`,
+      [req.user.id, pushToken]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[devices DELETE]', err.message);
+    res.status(500).json({ error: 'Failed to unregister device' });
   }
 });
 
