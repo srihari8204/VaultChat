@@ -54,6 +54,9 @@ const MAX_PAGE        = 200;
 // ─── helpers ────────────────────────────────────────────────────────
 
 function publicMember(row) {
+  // Honor the user's privacy: when last_seen_visible = FALSE we still
+  // expose online (binary), just blank lastSeenAt.
+  const lastSeenAt = (row.last_seen_visible === false) ? null : (row.last_seen_at ?? null);
   return {
     userId:                  row.user_id,
     role:                    row.role,
@@ -66,6 +69,8 @@ function publicMember(row) {
     email:                   row.email,
     name:                    row.name,
     photoURL:                row.photo_url,
+    online:                  row.online ?? false,
+    lastSeenAt,
   };
 }
 
@@ -102,10 +107,18 @@ async function loadChatMembership(req, chatId) {
 // when needed) — here we just fetch devices for known member uids.
 async function sendChatMessagePush(chatId, senderId, msg, chatType) {
   try {
-    // Recipients = chat members minus the sender
+    // Recipients = chat members minus the sender; AND who haven't muted
+    // this chat; AND who haven't blocked the sender.
     const memR = await db.query(
-      `SELECT user_id FROM chat_members
-       WHERE chat_id = $1 AND user_id <> $2 AND left_at IS NULL`,
+      `SELECT cm.user_id FROM chat_members cm
+        WHERE cm.chat_id = $1
+          AND cm.user_id <> $2
+          AND cm.left_at IS NULL
+          AND cm.muted = FALSE
+          AND NOT EXISTS (
+            SELECT 1 FROM user_blocks ub
+             WHERE ub.blocker_id = cm.user_id AND ub.blocked_id = $2
+          )`,
       [chatId, senderId]
     );
     if (memR.rows.length === 0) return;
@@ -134,7 +147,7 @@ async function sendChatMessagePush(chatId, senderId, msg, chatType) {
     const title = chatType === 'group' && chatName ? `${senderName} in ${chatName}` : senderName;
     const body  = msg.type === 'image' ? '📷 Photo'
                 : msg.type === 'video' ? '🎥 Video'
-                : msg.type === 'audio' ? '🎵 Audio'
+                : msg.type === 'audio' ? '🎙️ Voice message'
                 : msg.type === 'file'  ? '📎 File'
                 : 'New message';
 
@@ -165,11 +178,17 @@ function setBroadcasters(funcs) {
 // GET /chats — list current user's chats, newest activity first
 router.get('/', async (req, res) => {
   try {
+    // For direct chats, also fetch the other member's name + photo so the
+    // chat list can render avatars without one round-trip per row. Done
+    // via a LATERAL subquery to keep this single-pass.
     const r = await req.dbQuery(
       `SELECT
          c.id, c.type, c.name, c.photo_url, c.created_by, c.created_at,
          c.last_message_id, c.last_message_at, c.updated_at,
          cm.role, cm.last_read_message_id, cm.muted, cm.joined_at,
+         peer.user_id   AS peer_user_id,
+         peer.peer_name AS peer_name,
+         peer.peer_photo AS peer_photo,
          (SELECT COUNT(*) FROM messages m
             WHERE m.chat_id = c.id
               AND m.id > COALESCE(cm.last_read_message_id, 0)
@@ -178,6 +197,20 @@ router.get('/', async (req, res) => {
          ) AS unread_count
        FROM chats c
        JOIN chat_members cm ON cm.chat_id = c.id AND cm.user_id = $1
+       LEFT JOIN LATERAL (
+         SELECT u.id AS user_id,
+                u.name AS peer_name,
+                u.photo_url AS peer_photo,
+                u.online   AS peer_online,
+                CASE WHEN u.last_seen_visible THEN u.last_seen_at ELSE NULL END AS peer_last_seen
+           FROM chat_members cm2
+           JOIN users u ON u.id = cm2.user_id
+          WHERE cm2.chat_id = c.id
+            AND cm2.user_id <> $1
+            AND cm2.left_at IS NULL
+            AND c.type = 'direct'
+          LIMIT 1
+       ) peer ON TRUE
        WHERE cm.left_at IS NULL
        ORDER BY COALESCE(c.last_message_at, c.created_at) DESC
        LIMIT 200`,
@@ -197,6 +230,12 @@ router.get('/', async (req, res) => {
       myLastReadId:    row.last_read_message_id,
       muted:           row.muted,
       unreadCount:     parseInt(row.unread_count, 10) || 0,
+      // direct-chat peer info (null for groups)
+      peerUserId:      row.peer_user_id ?? null,
+      peerName:        row.peer_name    ?? null,
+      peerPhotoURL:    row.peer_photo   ?? null,
+      peerOnline:      row.peer_online  ?? false,
+      peerLastSeenAt:  row.peer_last_seen ?? null,
     })));
   } catch (err) {
     console.error('[chats GET]', err.message);
@@ -243,6 +282,16 @@ router.post('/', async (req, res) => {
       }
       if (!otherId) return res.status(404).json({ error: 'User not found' });
       if (otherId === req.user.id) return res.status(400).json({ error: 'Cannot DM yourself' });
+
+      // Block check — either side blocking the other prevents a new direct chat.
+      const blk = await db.query(
+        `SELECT 1 FROM user_blocks
+           WHERE (blocker_id = $1 AND blocked_id = $2)
+              OR (blocker_id = $2 AND blocked_id = $1)
+           LIMIT 1`,
+        [req.user.id, otherId]
+      );
+      if (blk.rows[0]) return res.status(403).json({ error: 'Blocked' });
 
       // Find existing direct chat between the two users
       const existing = await req.dbQuery(
@@ -344,6 +393,74 @@ router.post('/', async (req, res) => {
   }
 });
 
+// ─── Search (Day 13) ──────────────────────────────────────────────
+// GET /chats/search?q=...&limit=20
+//   - matches chat names + message content + member names
+//   - membership-scoped: only chats this user is a member of
+//
+// MUST stay above GET /:id so Express doesn't treat 'search' as a chat id.
+//
+// TEMPORARY: works because Phase 3a stores content as plaintext. When real
+// E2EE ships (Phase 3b) the message-content search will need to move
+// client-side; this endpoint will then only return chat / member matches.
+router.get('/search', async (req, res) => {
+  try {
+    const q = (req.query.q || '').toString().trim();
+    if (!q) return res.json({ chats: [], messages: [] });
+    if (q.length > 200) return res.status(400).json({ error: 'query too long' });
+    const limit = Math.min(parseInt(req.query.limit || '20', 10), 100);
+    const like = `%${q.replace(/[%_]/g, '\\$&')}%`;
+
+    const chatsR = await req.dbQuery(
+      `SELECT DISTINCT c.id, c.type, c.name, c.photo_url, c.last_message_at
+         FROM chats c
+         JOIN chat_members cm ON cm.chat_id = c.id AND cm.user_id = $1 AND cm.left_at IS NULL
+         LEFT JOIN chat_members cm2 ON cm2.chat_id = c.id AND cm2.user_id <> $1 AND cm2.left_at IS NULL
+         LEFT JOIN users u ON u.id = cm2.user_id
+        WHERE (c.name ILIKE $2 OR u.name ILIKE $2 OR u.email ILIKE $2)
+        ORDER BY c.last_message_at DESC NULLS LAST
+        LIMIT $3`,
+      [req.user.id, like, limit]
+    );
+
+    const msgsR = await req.dbQuery(
+      `SELECT m.id, m.chat_id, m.sender_id, m.content, m.created_at, m.type,
+              c.type AS chat_type, c.name AS chat_name
+         FROM messages m
+         JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1 AND cm.left_at IS NULL
+         JOIN chats c ON c.id = m.chat_id
+        WHERE m.deleted_at IS NULL
+          AND m.content ILIKE $2
+        ORDER BY m.id DESC
+        LIMIT $3`,
+      [req.user.id, like, limit]
+    );
+
+    res.json({
+      chats: chatsR.rows.map(r => ({
+        id:            r.id,
+        type:          r.type,
+        name:          r.name,
+        photoURL:      r.photo_url,
+        lastMessageAt: r.last_message_at,
+      })),
+      messages: msgsR.rows.map(r => ({
+        id:        r.id,
+        chatId:    r.chat_id,
+        chatName:  r.chat_name,
+        chatType:  r.chat_type,
+        senderId:  r.sender_id,
+        type:      r.type,
+        snippet:   (r.content || '').slice(0, 240),
+        createdAt: r.created_at,
+      })),
+    });
+  } catch (err) {
+    console.error('[chats search]', err.message);
+    res.status(500).json({ error: 'Search failed' });
+  }
+});
+
 // GET /chats/:id — chat + members (no messages, that's a separate call)
 router.get('/:id', async (req, res) => {
   try {
@@ -355,7 +472,7 @@ router.get('/:id', async (req, res) => {
     if (!chat) return res.status(404).json({ error: 'Chat not found' });
 
     const membersR = await req.dbQuery(
-      `SELECT cm.*, u.email, u.name, u.photo_url
+      `SELECT cm.*, u.email, u.name, u.photo_url, u.online, u.last_seen_at, u.last_seen_visible
        FROM chat_members cm
        JOIN users u ON u.id = cm.user_id
        WHERE cm.chat_id = $1
@@ -630,6 +747,61 @@ router.post('/:id/members', async (req, res) => {
   }
 });
 
+// PATCH /chats/:id  { name?, photoURL? }  — group rename / re-photo (Day 14)
+// Admin/owner only. Direct chats can't be renamed.
+router.patch('/:id', async (req, res) => {
+  try {
+    const mem = await loadChatMembership(req, req.params.id);
+    if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
+    if (mem.chat_type !== 'group') return res.status(400).json({ error: 'Only group chats can be edited' });
+    if (mem.role !== 'admin' && mem.role !== 'owner') {
+      return res.status(403).json({ error: 'Admin only' });
+    }
+
+    const b = req.body || {};
+    const sets = [];
+    const params = [req.params.id];
+    if (typeof b.name === 'string') {
+      const n = b.name.trim().slice(0, 100);
+      if (!n) return res.status(400).json({ error: 'name cannot be empty' });
+      params.push(n);
+      sets.push(`name = $${params.length}`);
+    }
+    if (typeof b.photoURL === 'string') {
+      const p = b.photoURL.trim().slice(0, 1024);
+      params.push(p || null);
+      sets.push(`photo_url = $${params.length}`);
+    }
+    if (sets.length === 0) return res.json({ ok: true, noop: true });
+    await req.dbQuery(`UPDATE chats SET ${sets.join(', ')} WHERE id = $1`, params);
+    broadcastChatEvent(req.params.id, 'chat_updated', {
+      chatId: req.params.id, name: b.name, photoURL: b.photoURL,
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[chats PATCH]', err.message);
+    res.status(500).json({ error: 'Failed to update chat' });
+  }
+});
+
+// POST /chats/:id/mute  { muted: boolean }  — per-user toggle (Day 11)
+router.post('/:id/mute', async (req, res) => {
+  try {
+    const mem = await loadChatMembership(req, req.params.id);
+    if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
+    const muted = !!req.body?.muted;
+    await req.dbQuery(
+      `UPDATE chat_members SET muted = $1
+        WHERE chat_id = $2 AND user_id = $3`,
+      [muted, req.params.id, req.user.id]
+    );
+    res.json({ ok: true, muted });
+  } catch (err) {
+    console.error('[chats mute]', err.message);
+    res.status(500).json({ error: 'Failed to update mute' });
+  }
+});
+
 // DELETE /chats/:id/members/:userId — remove (admin) or leave (self)
 router.delete('/:id/members/:userId', async (req, res) => {
   try {
@@ -654,6 +826,161 @@ router.delete('/:id/members/:userId', async (req, res) => {
   } catch (err) {
     console.error('[members DELETE]', err.message);
     res.status(500).json({ error: 'Failed to remove member' });
+  }
+});
+
+// ─── Search (Day 13) ──────────────────────────────────────────────
+//
+// GET /chats/search?q=...&limit=20
+//   - matches chat names + message content + member names
+//   - groups by chat, returns most-recent match per chat first
+//   - membership-scoped (RLS enforces this; we also guard via JOIN)
+//
+// TEMPORARY: works because Phase 3a stores content as plaintext. When
+// Phase 3b ships real E2EE this endpoint will return only chat-name and
+// member-name hits; message content search will need to move client-side.
+// ─── Reactions (Day 8) ─────────────────────────────────────────────
+// One row per (message, user, emoji). Toggling the same emoji removes it;
+// stacking different emojis is allowed.
+//
+// PUT    /chats/:id/messages/:msgId/reactions   { emoji }  → upsert (toggle on)
+// DELETE /chats/:id/messages/:msgId/reactions   { emoji }  → remove
+// GET    /chats/:id/messages/:msgId/reactions             → list reactors
+// GET    /chats/:id/reactions?messageIds=1,2,3            → bulk counts
+
+const MAX_EMOJI_BYTES = 16;
+
+router.put('/:id/messages/:msgId/reactions', async (req, res) => {
+  try {
+    const mem = await loadChatMembership(req, req.params.id);
+    if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
+
+    const emoji = (req.body?.emoji || '').toString();
+    if (!emoji || emoji.length === 0 || Buffer.byteLength(emoji, 'utf8') > MAX_EMOJI_BYTES) {
+      return res.status(400).json({ error: 'emoji required (1–16 bytes)' });
+    }
+    const msgId = parseInt(req.params.msgId, 10);
+    if (!Number.isFinite(msgId)) return res.status(400).json({ error: 'invalid msgId' });
+
+    // Verify the message belongs to this chat (RLS will also enforce, but
+    // a 404 is friendlier than a 500 from a write that filters nothing).
+    const mr = await req.dbQuery(
+      `SELECT 1 FROM messages WHERE id = $1 AND chat_id = $2`,
+      [msgId, req.params.id]
+    );
+    if (mr.rowCount === 0) return res.status(404).json({ error: 'Message not found' });
+
+    await req.dbQuery(
+      `INSERT INTO message_reactions (message_id, user_id, emoji)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (message_id, user_id, emoji) DO NOTHING`,
+      [msgId, req.user.id, emoji]
+    );
+    broadcastChatEvent(req.params.id, 'reaction_added', {
+      chatId: req.params.id, messageId: msgId, userId: req.user.id, emoji,
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[reactions PUT]', err.message);
+    res.status(500).json({ error: 'Failed to react' });
+  }
+});
+
+router.delete('/:id/messages/:msgId/reactions', async (req, res) => {
+  try {
+    const mem = await loadChatMembership(req, req.params.id);
+    if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
+
+    const emoji = (req.body?.emoji || req.query?.emoji || '').toString();
+    if (!emoji) return res.status(400).json({ error: 'emoji required' });
+
+    const msgId = parseInt(req.params.msgId, 10);
+    if (!Number.isFinite(msgId)) return res.status(400).json({ error: 'invalid msgId' });
+
+    await req.dbQuery(
+      `DELETE FROM message_reactions
+        WHERE message_id = $1 AND user_id = $2 AND emoji = $3`,
+      [msgId, req.user.id, emoji]
+    );
+    broadcastChatEvent(req.params.id, 'reaction_removed', {
+      chatId: req.params.id, messageId: msgId, userId: req.user.id, emoji,
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[reactions DELETE]', err.message);
+    res.status(500).json({ error: 'Failed to un-react' });
+  }
+});
+
+// GET reactors for a single message (used by the long-press details sheet)
+router.get('/:id/messages/:msgId/reactions', async (req, res) => {
+  try {
+    const mem = await loadChatMembership(req, req.params.id);
+    if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
+
+    const msgId = parseInt(req.params.msgId, 10);
+    if (!Number.isFinite(msgId)) return res.status(400).json({ error: 'invalid msgId' });
+
+    const r = await req.dbQuery(
+      `SELECT mr.emoji, mr.user_id, u.name, u.email
+         FROM message_reactions mr
+         JOIN users u ON u.id = mr.user_id
+        WHERE mr.message_id = $1
+        ORDER BY mr.created_at ASC`,
+      [msgId]
+    );
+    res.json(r.rows.map(row => ({
+      emoji:  row.emoji,
+      userId: row.user_id,
+      name:   row.name,
+      email:  row.email,
+    })));
+  } catch (err) {
+    console.error('[reactions GET]', err.message);
+    res.status(500).json({ error: 'Failed to load reactions' });
+  }
+});
+
+// GET bulk reaction counts for a list of message ids — used after loading
+// a message page to hydrate the bubbles with their reaction state in a
+// single round-trip.
+router.get('/:id/reactions', async (req, res) => {
+  try {
+    const mem = await loadChatMembership(req, req.params.id);
+    if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
+
+    const ids = String(req.query.messageIds || '')
+      .split(',')
+      .map(s => parseInt(s.trim(), 10))
+      .filter(n => Number.isFinite(n))
+      .slice(0, 500);
+    if (ids.length === 0) return res.json({});
+
+    const r = await req.dbQuery(
+      `SELECT mr.message_id, mr.emoji, mr.user_id
+         FROM message_reactions mr
+         JOIN messages m ON m.id = mr.message_id
+        WHERE m.chat_id = $1 AND mr.message_id = ANY($2::bigint[])`,
+      [req.params.id, ids]
+    );
+    // Shape: { messageId: [{emoji, count, mine}] }
+    const byMsg = Object.create(null);
+    for (const row of r.rows) {
+      const k = String(row.message_id);
+      if (!byMsg[k]) byMsg[k] = {};
+      if (!byMsg[k][row.emoji]) byMsg[k][row.emoji] = { count: 0, mine: false };
+      byMsg[k][row.emoji].count += 1;
+      if (row.user_id === req.user.id) byMsg[k][row.emoji].mine = true;
+    }
+    // Flatten emoji map → array per message
+    const out = {};
+    for (const [k, m] of Object.entries(byMsg)) {
+      out[k] = Object.entries(m).map(([emoji, v]) => ({ emoji, count: v.count, mine: v.mine }));
+    }
+    res.json(out);
+  } catch (err) {
+    console.error('[reactions GET bulk]', err.message);
+    res.status(500).json({ error: 'Failed to load reactions' });
   }
 });
 

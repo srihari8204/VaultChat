@@ -1,4 +1,27 @@
 /**
+ * ⚠️⚠️⚠️ DO NOT USE FOR REAL TRAFFIC ⚠️⚠️⚠️
+ *
+ * This file is the SKELETON of a double-ratchet implementation. It is
+ * NOT cryptographically sound today. Specifically:
+ *
+ *  1. `dhExchange()` is HMAC(privKey, pubKey), NOT Diffie-Hellman. Two
+ *     parties CANNOT establish the same shared secret with this function.
+ *  2. The "DH key pair" in `initRatchet()` is two unrelated random buffers
+ *     — the public key is not derived from the private key.
+ *  3. As a consequence, every `RatchetState` produced here has the security
+ *     properties of "two devices both holding random data". No forward
+ *     secrecy. No break-in recovery. No confidentiality.
+ *
+ * The structure (KDF chains, message counters, skipped-key cache, AES-GCM
+ * envelope) is fine. Replace `dhExchange` and the keypair generation with
+ * real X25519 (`react-native-quick-crypto` exposes `createECDH('x25519')`)
+ * before any production use.
+ *
+ * Wiring status: nothing currently imports this file. `lib/chatService.ts`
+ * still uses the pass-through `encryptForChat / decryptFromChat` seam.
+ *
+ * See [memory/backlog_real_e2ee.md] for the full Phase-3b plan.
+ *
  * services/doubleRatchetService.ts
  * Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
  * Double Ratchet Algorithm Ã¢â‚¬â€ VaultChat D2DE
@@ -76,12 +99,12 @@ function kdfChain(chainKey: string): { newChainKey: string; msgKey: string } {
   // Message key = HMAC(chainKey, 0x01)
   const mkHmac = createHmac('sha256', ck);
   mkHmac.update(Buffer.from([0x01]));
-  const msgKey = (hmac.digest() as any).toString('hex');
+  const msgKey = (mkHmac.digest() as any).toString('hex');
 
   // Next chain key = HMAC(chainKey, 0x02)
   const ckHmac = createHmac('sha256', ck);
   ckHmac.update(Buffer.from([0x02]));
-  const newChainKey = (hmac.digest() as any).toString('hex');
+  const newChainKey = (ckHmac.digest() as any).toString('hex');
 
   return { newChainKey, msgKey };
 }
@@ -96,12 +119,12 @@ function kdfRoot(rootKey: string, dhOutput: string): { newRootKey: string; newCh
   // New root key = HMAC(rootKey, dhOutput || 0x01)
   const rkHmac = createHmac('sha256', rk);
   rkHmac.update(Buffer.concat([dh, Buffer.from([0x01])]));
-  const newRootKey = (hmac.digest() as any).toString('hex');
+  const newRootKey = (rkHmac.digest() as any).toString('hex');
 
   // New chain key = HMAC(rootKey, dhOutput || 0x02)
   const ckHmac = createHmac('sha256', rk);
   ckHmac.update(Buffer.concat([dh, Buffer.from([0x02])]));
-  const newChainKey = (hmac.digest() as any).toString('hex');
+  const newChainKey = (ckHmac.digest() as any).toString('hex');
 
   return { newRootKey, newChainKey };
 }
@@ -187,7 +210,7 @@ export function ratchetEncrypt(
   const headerData = `${state.sendMsgCount}:${state.recvMsgCount}:${state.DHSendKey.substring(0,16)}`;
   const hmacObj    = createHmac('sha256', keyBuf);
   hmacObj.update(headerData);
-  const hmac = (hmac.digest() as any).toString('base64');
+  const hmac = (hmacObj.digest() as any).toString('base64');
 
   const encrypted: RatchetMessage = {
     ciphertext:  ctB64,

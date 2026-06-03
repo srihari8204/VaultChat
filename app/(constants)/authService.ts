@@ -121,6 +121,44 @@ export async function verifyOTP(
 // Old phone-flow state machine is gone. Stub kept so existing imports compile.
 export function clearOTPState() {}
 
+// ─── Phone OTP (Day 17) ─────────────────────────────────────
+// Same shape as email OTP. The backend either issues tokens (signup) or
+// stamps the verified phone onto the currently-authenticated user (link).
+export async function sendPhoneOTP(phone: string): Promise<{ dev?: boolean }> {
+  const p = (phone ?? '').trim();
+  if (!p) throw new Error('Enter a phone number');
+  return api<{ ok: true; dev?: boolean }>('/auth/send-otp-phone', {
+    method: 'POST',
+    json: { phone: p },
+    auth: false,
+  });
+}
+
+export async function verifyPhoneOTP(
+  phone: string,
+  code: string,
+  opts: { link?: boolean; name?: string } = {},
+): Promise<{ isNewUser?: boolean; linked?: boolean; user?: any }> {
+  const p = (phone ?? '').trim();
+  if (!/^\d{6}$/.test(code ?? '')) throw new Error('OTP must be 6 digits');
+
+  // When `link` is true, the call is authenticated so the backend stamps
+  // the phone onto the existing user. Otherwise it's signup-by-phone.
+  const r = await api<{
+    accessToken?: string; refreshToken?: string;
+    user?: any; isNewUser?: boolean; linked?: boolean;
+  }>('/auth/verify-otp-phone', {
+    method: 'POST',
+    json: { phone: p, otp: code, name: opts.name?.trim() || undefined },
+    auth: !!opts.link,
+  });
+  if (r.accessToken && r.refreshToken) {
+    await setTokens(r.accessToken, r.refreshToken);
+  }
+  if (r.user) await setCachedUser(r.user);
+  return { isNewUser: r.isNewUser, linked: r.linked, user: r.user };
+}
+
 // ─── Signup pending data (multi-step UI) ─────────────────────
 export interface SignupData {
   name: string; dob: string; email: string; mobile: string;

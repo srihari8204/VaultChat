@@ -20,6 +20,12 @@ export interface ChatSummary {
   myLastReadId:  number | null;
   muted:         boolean;
   unreadCount:   number;
+  // Direct-chat only — the other user's profile snapshot (null for groups)
+  peerUserId?:     string | null;
+  peerName?:       string | null;
+  peerPhotoURL?:   string | null;
+  peerOnline?:     boolean;
+  peerLastSeenAt?: string | null;
 }
 
 export interface ChatMember {
@@ -33,6 +39,8 @@ export interface ChatMember {
   email?:                 string;
   name?:                  string | null;
   photoURL?:              string | null;
+  online?:                boolean;
+  lastSeenAt?:            string | null;
 }
 
 export interface ChatDetail extends ChatSummary {
@@ -151,6 +159,179 @@ export async function markDelivered(chatId: string, lastDeliveredMessageId: numb
     method: 'POST',
     json: { lastDeliveredMessageId },
   });
+}
+
+// ─── GDPR export / account delete (Day 15) ──────────────────────────
+export async function deleteAccount(): Promise<void> {
+  await api('/user/account', { method: 'DELETE' });
+}
+
+// Returns the export as a raw JSON string (consumer can write it to disk
+// via expo-file-system + share). We return a string rather than parsed
+// JSON so the on-disk artifact matches byte-for-byte what the server sent.
+export async function exportMyData(): Promise<string> {
+  const tok = await getAccessToken();
+  const res = await fetch(`${SERVER_URL}/user/export`, {
+    headers: tok ? { Authorization: `Bearer ${tok}` } : undefined,
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Export failed (${res.status}): ${body.slice(0, 200)}`);
+  }
+  return res.text();
+}
+
+// ─── Group admin (Day 14) ───────────────────────────────────────────
+export async function updateChat(
+  chatId: string,
+  patch: { name?: string; photoURL?: string },
+): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}`, { method: 'PATCH', json: patch });
+}
+
+export async function addChatMembers(
+  chatId: string,
+  userIds: string[],
+): Promise<{ added: string[] }> {
+  return api(`/chats/${encodeURIComponent(chatId)}/members`, {
+    method: 'POST',
+    json: { userIds },
+  });
+}
+
+export async function removeChatMember(chatId: string, userId: string): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/members/${encodeURIComponent(userId)}`, {
+    method: 'DELETE',
+  });
+}
+
+// ─── Search (Day 13) ────────────────────────────────────────────────
+export interface SearchChatHit {
+  id:            string;
+  type:          'direct' | 'group';
+  name:          string | null;
+  photoURL:      string | null;
+  lastMessageAt: string | null;
+}
+export interface SearchMessageHit {
+  id:        number;
+  chatId:    string;
+  chatName:  string | null;
+  chatType:  'direct' | 'group';
+  senderId:  string;
+  type:      Message['type'];
+  snippet:   string;
+  createdAt: string;
+}
+export interface SearchResults {
+  chats:    SearchChatHit[];
+  messages: SearchMessageHit[];
+}
+export async function searchAll(q: string, limit = 20): Promise<SearchResults> {
+  const params = new URLSearchParams({ q, limit: String(limit) }).toString();
+  return api<SearchResults>(`/chats/search?${params}`);
+}
+
+// ─── Mute (Day 11) ──────────────────────────────────────────────────
+export async function muteChat(chatId: string, muted: boolean): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/mute`, {
+    method: 'POST',
+    json: { muted },
+  });
+}
+
+// ─── Settings / Privacy (Day 11) ────────────────────────────────────
+export interface UserSettings {
+  discoverable:        boolean;
+  lastSeenVisible:     boolean;
+  readReceipts:        boolean;
+  profilePhotoVisible: boolean;
+}
+export async function getSettings(): Promise<UserSettings> {
+  return api<UserSettings>('/user/settings');
+}
+export async function updateSettings(patch: Partial<UserSettings>): Promise<void> {
+  await api('/user/settings', { method: 'PUT', json: patch });
+}
+
+// ─── Blocks (Day 11) ────────────────────────────────────────────────
+export interface BlockedUser {
+  userId:    string;
+  name:      string | null;
+  email:     string | null;
+  photoURL:  string | null;
+  createdAt: string;
+}
+export async function listBlocks(): Promise<BlockedUser[]> {
+  return api<BlockedUser[]>('/user/blocks');
+}
+export async function blockUser(userId: string): Promise<void> {
+  await api('/user/blocks', { method: 'POST', json: { userId } });
+}
+export async function unblockUser(userId: string): Promise<void> {
+  await api(`/user/blocks/${encodeURIComponent(userId)}`, { method: 'DELETE' });
+}
+
+// ─── Reactions (Day 8) ──────────────────────────────────────────────
+export interface ReactionSummary { emoji: string; count: number; mine: boolean }
+export interface Reactor          { emoji: string; userId: string; name: string | null; email: string | null }
+
+export async function addReaction(chatId: string, msgId: number, emoji: string): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/messages/${msgId}/reactions`, {
+    method: 'PUT',
+    json: { emoji },
+  });
+}
+
+export async function removeReaction(chatId: string, msgId: number, emoji: string): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/messages/${msgId}/reactions`, {
+    method: 'DELETE',
+    json: { emoji },
+  });
+}
+
+export async function listReactors(chatId: string, msgId: number): Promise<Reactor[]> {
+  return api(`/chats/${encodeURIComponent(chatId)}/messages/${msgId}/reactions`);
+}
+
+export async function getReactionCounts(
+  chatId: string, messageIds: number[],
+): Promise<Record<string, ReactionSummary[]>> {
+  if (messageIds.length === 0) return {};
+  const ids = messageIds.join(',');
+  return api(`/chats/${encodeURIComponent(chatId)}/reactions?messageIds=${ids}`);
+}
+
+// ─── Forward (Day 8) ────────────────────────────────────────────────
+// Server-side it's still a normal POST /messages — we just preserve the
+// original sender/chat in meta.forwardedFrom so the receiving bubble can
+// render a "Forwarded" label.
+export async function forwardMessage(
+  source: { id: number; chatId: string; senderId: string; type: Message['type']; content: string | null; meta?: any },
+  targetChatId: string,
+): Promise<Message> {
+  return sendMessage(targetChatId, source.content ?? '', source.type, {
+    meta: {
+      ...(source.meta ?? {}),
+      forwardedFrom: { messageId: source.id, chatId: source.chatId, senderId: source.senderId },
+    },
+  });
+}
+
+// ─── WebRTC ICE config (calls) ──────────────────────────────────────
+export interface IceServer {
+  urls: string | string[];
+  username?: string;
+  credential?: string;
+}
+export interface TurnConfig {
+  iceServers: IceServer[];
+  ttl?: number;
+}
+
+/** Fetch ephemeral TURN credentials. Cache for ~12h on the client. */
+export async function getTurnConfig(): Promise<TurnConfig> {
+  return api<TurnConfig>('/user/turn');
 }
 
 // ─── Phone normalization + hash (Day 5 — must match backend) ────────

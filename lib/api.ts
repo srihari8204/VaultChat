@@ -5,6 +5,7 @@
 // The cached user profile lives there too so the app can render an
 // authenticated shell on cold start before the first /user/profile call.
 
+import * as Sentry from '@sentry/react-native';
 import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { SERVER_URL } from '../constants/server';
@@ -36,9 +37,19 @@ export async function clearTokens(): Promise<void> {
 export async function setCachedUser(user: any | null): Promise<void> {
   if (!user) {
     await SecureStore.deleteItemAsync(USER_KEY).catch(() => {});
+    try { Sentry.setUser(null); } catch {}
     return;
   }
   await SecureStore.setItemAsync(USER_KEY, JSON.stringify(user));
+  // Tag every subsequent Sentry event with this user id so crashes are
+  // attributable. No-op if Sentry isn't init'd.
+  try {
+    Sentry.setUser({
+      id:       user.id    ?? undefined,
+      email:    user.email ?? undefined,
+      username: user.name  ?? undefined,
+    });
+  } catch {}
 }
 
 export async function getCachedUser(): Promise<any | null> {

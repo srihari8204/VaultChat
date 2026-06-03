@@ -9,13 +9,15 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Image,
   RefreshControl,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
-import { listChats, type ChatSummary } from '../../lib/chatService';
+import { getAccessToken } from '../../lib/api';
+import { attachmentUrl, listChats, type ChatSummary } from '../../lib/chatService';
 import { registerPushToken } from '../../lib/push';
 import { getSocket } from '../../lib/socket';
 
@@ -25,6 +27,17 @@ export default function ChatsScreen() {
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [authHeader, setAuthHeader] = useState<string | null>(null);
+
+  // Auth header for the <Image> source so avatars come through /uploads.
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      const tok = await getAccessToken();
+      if (!cancel) setAuthHeader(tok ? `Bearer ${tok}` : null);
+    })();
+    return () => { cancel = true; };
+  }, []);
 
   const fetchList = useCallback(async () => {
     try {
@@ -52,25 +65,34 @@ export default function ChatsScreen() {
   }, []);
 
   // Live updates: any new message anywhere → refresh list (cheap, ~one query)
+  // Presence updates: patch the peer's online/lastSeenAt in place — no refetch.
   useEffect(() => {
     let off: (() => void) | null = null;
     let cancelled = false;
     (async () => {
       try {
         const s = await getSocket();
-        const handler = () => { fetchList(); };
-        s.on('new_message',     handler);
-        s.on('message_deleted', handler);
-        s.on('message_edited',  handler);
+        const refresh = () => { fetchList(); };
+        const onPresence = (e: { userId: string; online: boolean; lastSeenAt: string | null }) => {
+          if (!e?.userId) return;
+          setChats(prev => prev.map(c => c.peerUserId === e.userId
+            ? { ...c, peerOnline: e.online, peerLastSeenAt: e.lastSeenAt ?? c.peerLastSeenAt }
+            : c
+          ));
+        };
+        s.on('new_message',       refresh);
+        s.on('message_deleted',   refresh);
+        s.on('message_edited',    refresh);
+        s.on('presence_changed',  onPresence);
         if (!cancelled) {
           off = () => {
-            s.off('new_message',     handler);
-            s.off('message_deleted', handler);
-            s.off('message_edited',  handler);
+            s.off('new_message',     refresh);
+            s.off('message_deleted', refresh);
+            s.off('message_edited',  refresh);
+            s.off('presence_changed', onPresence);
           };
         }
       } catch (e: any) {
-        // Socket not connectable (e.g. not signed in). Non-fatal.
         if (!cancelled) setError(e?.message ?? 'Realtime unavailable');
       }
     })();
@@ -102,6 +124,9 @@ export default function ChatsScreen() {
       <View style={S.header}>
         <Text style={S.title}>Chats</Text>
         <View style={{ flexDirection: 'row', gap: 8 }}>
+          <TouchableOpacity onPress={() => router.push('/search' as any)} activeOpacity={0.7} style={S.headerBtn}>
+            <Text style={S.headerBtnTxt}>🔍</Text>
+          </TouchableOpacity>
           <TouchableOpacity onPress={() => router.push('/contacts' as any)} activeOpacity={0.7} style={S.headerBtn}>
             <Text style={S.headerBtnTxt}>📇</Text>
           </TouchableOpacity>
@@ -129,7 +154,7 @@ export default function ChatsScreen() {
         <FlatList
           data={chats}
           keyExtractor={(c) => c.id}
-          renderItem={({ item }) => <ChatRow chat={item} onPress={() => onOpenChat(item.id)} />}
+          renderItem={({ item }) => <ChatRow chat={item} authHeader={authHeader} onPress={() => onOpenChat(item.id)} />}
           contentContainerStyle={{ paddingBottom: 24 }}
           refreshControl={<RefreshControl tintColor={ACCENT} refreshing={refreshing} onRefresh={onRefresh} />}
         />
@@ -142,17 +167,33 @@ export default function ChatsScreen() {
   );
 }
 
-function ChatRow({ chat, onPress }: { chat: ChatSummary; onPress: () => void }) {
-  const title = chat.name || (chat.type === 'direct' ? 'Direct chat' : 'Group chat');
+function ChatRow({ chat, authHeader, onPress }: { chat: ChatSummary; authHeader: string | null; onPress: () => void }) {
+  // For direct chats prefer the peer's name. For groups use the chat name.
+  const title = chat.type === 'direct'
+    ? (chat.peerName || chat.name || 'Direct chat')
+    : (chat.name || 'Group chat');
   const subtitle = chat.lastMessageAt
     ? formatRelative(chat.lastMessageAt)
     : `Created ${formatRelative(chat.createdAt)}`;
   const avatarLetter = useMemo(() => (title.trim()[0] ?? '#').toUpperCase(), [title]);
+  // photo: groups use chat.photoURL, directs use peerPhotoURL
+  const photoId = chat.type === 'direct' ? chat.peerPhotoURL : chat.photoURL;
+  const showPhoto = !!photoId && !!authHeader;
 
   return (
     <TouchableOpacity style={S.row} onPress={onPress} activeOpacity={0.7}>
-      <View style={[S.avatar, chat.type === 'group' && S.avatarGroup]}>
-        <Text style={S.avatarTxt}>{avatarLetter}</Text>
+      <View style={S.avatarWrap}>
+        <View style={[S.avatar, chat.type === 'group' && S.avatarGroup]}>
+          {showPhoto ? (
+            <Image
+              source={{ uri: attachmentUrl(photoId!), headers: { Authorization: authHeader! } }}
+              style={S.avatarImg}
+            />
+          ) : (
+            <Text style={S.avatarTxt}>{avatarLetter}</Text>
+          )}
+        </View>
+        {chat.type === 'direct' && chat.peerOnline && <View style={S.presenceDot} />}
       </View>
       <View style={S.rowBody}>
         <View style={S.rowTop}>
@@ -210,9 +251,12 @@ const S = StyleSheet.create({
   emptyBtnTxt:   { color: '#fff', fontWeight: '700', fontSize: 14 },
 
   row:           { flexDirection: 'row', paddingVertical: 14, paddingHorizontal: 20, alignItems: 'center', gap: 12 },
-  avatar:        { width: 52, height: 52, borderRadius: 26, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center' },
+  avatarWrap:    { width: 52, height: 52 },
+  avatar:        { width: 52, height: 52, borderRadius: 26, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   avatarGroup:   { backgroundColor: '#22C55E' },
+  avatarImg:     { width: '100%', height: '100%' },
   avatarTxt:     { color: '#fff', fontSize: 20, fontWeight: '700' },
+  presenceDot:   { position: 'absolute', right: 0, bottom: 0, width: 14, height: 14, borderRadius: 7, backgroundColor: '#22C55E', borderWidth: 2, borderColor: DARK_BG },
   rowBody:       { flex: 1, gap: 4 },
   rowTop:        { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
   rowName:       { color: TEXT, fontSize: 16, fontWeight: '600', flex: 1 },

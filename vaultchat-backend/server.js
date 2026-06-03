@@ -57,7 +57,9 @@ app.use('/chats',    chatsRouter);
 
 // Wire the chats router so its REST writes broadcast over sockets.
 chatsRouter.setBroadcasters({
-  newMessage: (chatId, payload) => fanOutToChat(chatId, 'new_message', payload),
+  // payload.senderId drives block-list suppression in fanOutToChat. Other
+  // chat events (typing, delivery, read, reactions) are sender-agnostic.
+  newMessage: (chatId, payload) => fanOutToChat(chatId, 'new_message', payload, payload?.senderId ?? null),
   chatEvent:  (chatId, event, payload) => fanOutToChat(chatId, event, payload),
 });
 
@@ -99,7 +101,10 @@ function trackSocket(socket) {
   if (!uid) return;
   let set = userSockets.get(uid);
   if (!set) { set = new Set(); userSockets.set(uid, set); }
+  const wasEmpty = set.size === 0;
   set.add(socket.id);
+  // First socket for this user → presence went online
+  if (wasEmpty) onUserOnline(uid).catch(err => console.error('[presence on]', err.message));
 }
 
 function untrackSocket(socket) {
@@ -108,7 +113,61 @@ function untrackSocket(socket) {
   const set = userSockets.get(uid);
   if (!set) return;
   set.delete(socket.id);
-  if (set.size === 0) userSockets.delete(uid);
+  if (set.size === 0) {
+    userSockets.delete(uid);
+    // Last socket gone → presence went offline
+    onUserOffline(uid).catch(err => console.error('[presence off]', err.message));
+  }
+}
+
+// ─── Presence (Day 12) ─────────────────────────────────────────────
+// First connection → flip users.online = TRUE + broadcast.
+// Last disconnect → flip users.online = FALSE + stamp last_seen_at + broadcast.
+// We broadcast 'presence_changed' to every chat-mate of the affected user,
+// so chat lists / chat headers update in real time without polling.
+async function onUserOnline(uid) {
+  await db.query(
+    `UPDATE users SET online = TRUE WHERE id = $1 AND COALESCE(online, FALSE) = FALSE`,
+    [uid]
+  );
+  await broadcastPresence(uid, { userId: uid, online: true, lastSeenAt: null });
+}
+
+async function onUserOffline(uid) {
+  const now = new Date().toISOString();
+  await db.query(
+    `UPDATE users SET online = FALSE, last_seen_at = NOW() WHERE id = $1`,
+    [uid]
+  );
+  await broadcastPresence(uid, { userId: uid, online: false, lastSeenAt: now });
+}
+
+async function broadcastPresence(uid, payload) {
+  try {
+    // Respect the user's privacy: if last_seen_visible = FALSE, blank
+    // lastSeenAt before broadcasting (online status itself is still shared).
+    const r = await db.query(
+      `SELECT last_seen_visible FROM users WHERE id = $1`,
+      [uid]
+    );
+    if (r.rows[0] && r.rows[0].last_seen_visible === false) {
+      payload = { ...payload, lastSeenAt: null };
+    }
+    // Find all distinct other-users this user shares any chat with.
+    const m = await db.query(
+      `SELECT DISTINCT cm2.user_id
+         FROM chat_members cm1
+         JOIN chat_members cm2 ON cm2.chat_id = cm1.chat_id
+        WHERE cm1.user_id = $1
+          AND cm2.user_id <> $1
+          AND cm1.left_at IS NULL
+          AND cm2.left_at IS NULL`,
+      [uid]
+    );
+    for (const row of m.rows) emitToUid(row.user_id, 'presence_changed', payload);
+  } catch (err) {
+    console.error('[broadcastPresence]', err.message);
+  }
 }
 
 function emitToUid(uid, event, data) {
@@ -122,18 +181,45 @@ function emitToUid(uid, event, data) {
 // `chat:${chatId}` room only contains sockets that explicitly joined it
 // (i.e. have the chat open). For background notifications we want every
 // device of every member to receive the event — hence the DB lookup.
-async function fanOutToChat(chatId, event, data) {
+//
+// senderId (optional, Day 11): when provided, recipients who have blocked
+// the sender are skipped. Used for `new_message` so a block stops chats
+// from reaching the blocker; non-message events (typing, delivery, read)
+// pass senderId=null and fan to everyone (we don't suppress those).
+async function fanOutToChat(chatId, event, data, senderId = null) {
   try {
-    // Always emit to the room for active viewers
-    io.to(`chat:${chatId}`).emit(event, data);
-    // Also fan to background sockets of all members. Uses the SECURITY
-    // DEFINER helper from 004_rls.sql so this system query bypasses RLS
-    // without needing a user-bound transaction.
+    // Always emit to the room for active viewers. The viewer's client
+    // could still see this; we'll also filter by block-list below for
+    // the broader fan-out. For message events, room emit is skipped —
+    // the targeted emitToUid path applies the block check.
+    if (!senderId) {
+      io.to(`chat:${chatId}`).emit(event, data);
+    }
+
+    // Members of this chat
     const r = await db.query(`SELECT * FROM vc_chat_member_ids($1)`, [chatId]);
-    for (const row of r.rows) {
-      // The function returns SETOF UUID — column name is the function name
-      const uid = row.vc_chat_member_ids;
-      if (uid) emitToUid(uid, event, data);
+    const memberIds = r.rows.map(row => row.vc_chat_member_ids).filter(Boolean);
+
+    // Block-list of viewers who blocked the sender — drop those.
+    let blockerSet = new Set();
+    if (senderId && memberIds.length) {
+      const blk = await db.query(
+        `SELECT blocker_id FROM user_blocks
+          WHERE blocked_id = $1 AND blocker_id = ANY($2::uuid[])`,
+        [senderId, memberIds]
+      );
+      blockerSet = new Set(blk.rows.map(b => b.blocker_id));
+    }
+
+    for (const uid of memberIds) {
+      if (blockerSet.has(uid)) continue;
+      emitToUid(uid, event, data);
+    }
+    // For sender-aware events, also re-emit into the room for non-blockers
+    if (senderId) {
+      // The targeted emits above cover all online sockets; the room emit is
+      // skipped to avoid double-delivery. Sockets that joined the room but
+      // are offline (impossible) don't need handling.
     }
   } catch (err) {
     console.error('[fanOutToChat]', err.message);

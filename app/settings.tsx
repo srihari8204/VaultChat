@@ -1,255 +1,343 @@
-// app/settings.tsx
-// Privacy settings: read receipts, typing indicator, last seen,
-// VaultID username, duress PIN setup, backup, scheduled messages
+// app/settings.tsx — Day 11 privacy / settings screen.
+//
+// Backed by:
+//   GET  /user/settings   { discoverable, lastSeenVisible, readReceipts, profilePhotoVisible }
+//   PUT  /user/settings   (any subset of the above as a Partial<UserSettings>)
+//   GET  /user/blocks     [{ userId, name, email, photoURL, createdAt }]
+//   DELETE /user/blocks/:userId
+//
+// No Firebase, no Firestore — pure Postgres + JWT.
 
-import React, { useState, useEffect } from 'react';
+import * as FileSystem from 'expo-file-system';
+import { useRouter } from 'expo-router';
+import * as Sharing from 'expo-sharing';
+import { useCallback, useEffect, useState } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, Switch,
-  TextInput, Alert, ScrollView, ActivityIndicator,
+  ActivityIndicator,
+  Alert,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
-import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
-import * as Crypto from 'expo-crypto';
-import { exportEncryptedBackup } from '../services/backupService';
+import { logoutUser } from './(constants)/authService';
+import { getAccessToken } from '../lib/api';
+import {
+  attachmentUrl,
+  deleteAccount,
+  exportMyData,
+  getSettings,
+  listBlocks,
+  unblockUser,
+  updateSettings,
+  type BlockedUser,
+  type UserSettings,
+} from '../lib/chatService';
+import { unregisterPushToken } from '../lib/push';
+import { disconnect as disconnectSocket } from '../lib/socket';
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const myUid  = auth().currentUser?.uid ?? '';
 
-  const [readReceipts,   setReadReceipts]   = useState(true);
-  const [typingIndicator,setTypingIndicator]= useState(true);
-  const [lastSeen,       setLastSeen]       = useState(true);
-  const [vaultId,        setVaultId]        = useState('');
-  const [vaultIdInput,   setVaultIdInput]   = useState('');
-  const [savingId,       setSavingId]       = useState(false);
-  const [backingUp,      setBackingUp]      = useState(false);
-  const [backupProgress, setBackupProgress] = useState('');
-  const [duressPin,      setDuressPin]      = useState('');
-  const [duressInput,    setDuressInput]    = useState('');
-  const [smartReplies,   setSmartReplies]   = useState(true);
-  const [linkPreviews,   setLinkPreviews]   = useState(true);
+  const [settings, setSettings] = useState<UserSettings | null>(null);
+  const [blocks,   setBlocks]   = useState<BlockedUser[]>([]);
+  const [loading,  setLoading]  = useState(true);
+  const [saving,   setSaving]   = useState<null | keyof UserSettings>(null);
+  const [authHeader, setAuthHeader] = useState<string | null>(null);
 
+  // Initial fetch — settings + blocks in parallel + auth header
   useEffect(() => {
-    firestore().collection('users').doc(myUid).get().then(snap => {
-      const d = snap.data();
-      if (!d) return;
-      setReadReceipts(d.settings?.readReceipts ?? true);
-      setTypingIndicator(d.settings?.typingIndicator ?? true);
-      setLastSeen(d.settings?.lastSeen ?? true);
-      setVaultId(d.vaultId ?? '');
-      setVaultIdInput(d.vaultId ?? '');
-      setSmartReplies(d.settings?.smartReplies ?? true);
-      setLinkPreviews(d.settings?.linkPreviews ?? true);
-    });
-  }, [myUid]);
-
-  const saveSettings = async (key: string, value: any) => {
-    try {
-      await firestore().collection('users').doc(myUid).update({ [`settings.${key}`]: value });
-    } catch {
-      Alert.alert('Save failed', 'Could not update setting. Check your connection.');
-    }
-  };
-
-  const saveVaultId = async () => {
-    const id = vaultIdInput.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
-    if (id.length < 4) { Alert.alert('VaultID must be at least 4 characters'); return; }
-    setSavingId(true);
-    try {
-      // Check uniqueness
-      const snap = await firestore().collection('users').where('vaultId', '==', id).get();
-      if (!snap.empty && snap.docs[0].id !== myUid) {
-        Alert.alert('That VaultID is taken. Choose another.'); return;
+    let cancel = false;
+    (async () => {
+      try {
+        const [s, b, tok] = await Promise.all([getSettings(), listBlocks(), getAccessToken()]);
+        if (cancel) return;
+        setSettings(s);
+        setBlocks(b);
+        setAuthHeader(tok ? `Bearer ${tok}` : null);
+      } catch (e: any) {
+        Alert.alert('Could not load settings', e?.message ?? 'Try again');
+      } finally {
+        if (!cancel) setLoading(false);
       }
-      await firestore().collection('users').doc(myUid).update({ vaultId: id });
-      setVaultId(id);
-      Alert.alert('VaultID saved!', `Your ID is @${id}`);
-    } catch (e: any) { Alert.alert('Error', e.message); }
-    finally { setSavingId(false); }
-  };
+    })();
+    return () => { cancel = true; };
+  }, []);
 
-  const saveDuressPin = async () => {
-    if (duressInput.length < 4) { Alert.alert('Duress PIN must be at least 4 digits'); return; }
-    // Hash the duress PIN before storing Ã¢â‚¬â€ never store raw PIN
-    const hash = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, 'vaultchat-duress-' + duressInput);
-    await firestore().collection('users').doc(myUid).update({ duressPinHash: hash });
-    setDuressPin(hash);
-    setDuressInput('');
-    Alert.alert('Duress PIN set', 'Entering this PIN will show an empty decoy app and silently wipe messages.');
-  };
+  // Toggle one flag — optimistic, with rollback on failure.
+  const toggle = useCallback(async (key: keyof UserSettings) => {
+    if (!settings || saving) return;
+    const next = { ...settings, [key]: !settings[key] };
+    setSettings(next);
+    setSaving(key);
+    try {
+      await updateSettings({ [key]: next[key] });
+    } catch (e: any) {
+      setSettings(settings); // rollback
+      Alert.alert('Save failed', e?.message ?? 'Try again');
+    } finally {
+      setSaving(null);
+    }
+  }, [settings, saving]);
 
-  const startBackup = async () => {
-    Alert.prompt(
-      'Backup Password',
-      'Enter a password to encrypt your backup. You will need this to restore.',
-      async (pin) => {
-        if (!pin || pin.length < 4) { Alert.alert('Password must be at least 4 characters'); return; }
-        setBackingUp(true);
-        try {
-          await exportEncryptedBackup(pin, msg => setBackupProgress(msg));
-        } catch (e: any) { Alert.alert('Backup failed', e.message); }
-        finally { setBackingUp(false); setBackupProgress(''); }
-      },
-      'secure-text'
+  const [exporting, setExporting] = useState(false);
+  const [deleting,  setDeleting]  = useState(false);
+
+  // GDPR export → write to cache → share sheet (user picks where to save).
+  const onExport = useCallback(async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const json = await exportMyData();
+      const fname = `vaultchat-export-${Date.now()}.json`;
+      const dest  = `${(FileSystem as any).cacheDirectory}${fname}`;
+      await (FileSystem as any).writeAsStringAsync(dest, json, { encoding: 'utf8' });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(dest, { mimeType: 'application/json', dialogTitle: 'Save your VaultChat data' });
+      } else {
+        Alert.alert('Saved', `Export saved to ${dest}`);
+      }
+    } catch (e: any) {
+      Alert.alert('Export failed', e?.message ?? 'Try again');
+    } finally {
+      setExporting(false);
+    }
+  }, [exporting]);
+
+  // Delete account → confirm twice → soft-delete server-side → sign out.
+  const onDeleteAccount = useCallback(() => {
+    if (deleting) return;
+    Alert.alert(
+      'Delete account?',
+      'This will permanently disable your VaultChat account. Existing chat history with other members remains on their devices but you will no longer be reachable.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: () => {
+            Alert.alert(
+              'Are you absolutely sure?',
+              'This cannot be undone.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Yes, delete', style: 'destructive', onPress: async () => {
+                    setDeleting(true);
+                    try {
+                      await deleteAccount();
+                      try { await unregisterPushToken(); } catch {}
+                      try { disconnectSocket(); } catch {}
+                      await logoutUser();
+                      router.replace('/welcome' as any);
+                    } catch (e: any) {
+                      setDeleting(false);
+                      Alert.alert('Delete failed', e?.message ?? 'Try again');
+                    }
+                  }
+                },
+              ],
+            );
+          }
+        },
+      ],
     );
-  };
+  }, [deleting, router]);
 
-  const Row = ({ label, value, onValueChange, desc }: { label: string; value: boolean; onValueChange: (v: boolean) => void; desc?: string }) => (
-    <View style={s.row}>
-      <View style={{ flex: 1 }}>
-        <Text style={s.rowLabel}>{label}</Text>
-        {desc && <Text style={s.rowDesc}>{desc}</Text>}
+  const onUnblock = useCallback((u: BlockedUser) => {
+    Alert.alert('Unblock?', `${u.name || u.email || 'This user'} will be able to message you again.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Unblock', style: 'destructive', onPress: async () => {
+          try {
+            await unblockUser(u.userId);
+            setBlocks(prev => prev.filter(x => x.userId !== u.userId));
+          } catch (e: any) {
+            Alert.alert('Could not unblock', e?.message ?? 'Try again');
+          }
+        }
+      },
+    ]);
+  }, []);
+
+  if (loading || !settings) {
+    return (
+      <View style={[S.screen, S.center]}>
+        <ActivityIndicator color={ACCENT} size="large" />
       </View>
-      <Switch value={value} onValueChange={v => { onValueChange(v); }} thumbColor={value ? '#4A9FFF' : '#D1D5DB'} trackColor={{ false: '#E5E7EB', true: '#4A9FFF44' }} />
-    </View>
-  );
+    );
+  }
 
   return (
-    <>
-      <Stack.Screen options={{ title: 'Ã¢Å¡â„¢Ã¯Â¸Â Settings', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
-      <ScrollView style={s.screen}>
-
-        {/* Privacy */}
-        <Text style={s.sectionTitle}>PRIVACY</Text>
-        <Row label="Read Receipts (Blue ticks)" value={readReceipts} onValueChange={v => { setReadReceipts(v); saveSettings('readReceipts', v); }} desc="Let others know when you've read their messages" />
-        <Row label="Typing Indicator" value={typingIndicator} onValueChange={v => { setTypingIndicator(v); saveSettings('typingIndicator', v); }} desc="Show 'typingÃ¢â‚¬Â¦' when you're composing a message" />
-        <Row label="Last Seen / Online" value={lastSeen} onValueChange={v => { setLastSeen(v); saveSettings('lastSeen', v); }} desc="Show your online status and last seen time" />
-
-        {/* AI */}
-        <Text style={[s.sectionTitle, { marginTop: 24 }]}>AI FEATURES</Text>
-        <Row label="Smart Replies" value={smartReplies} onValueChange={v => { setSmartReplies(v); saveSettings('smartReplies', v); }} desc="Suggest quick replies based on message context" />
-        <Row label="Link Previews" value={linkPreviews} onValueChange={v => { setLinkPreviews(v); saveSettings('linkPreviews', v); }} desc="Show preview cards for URLs in messages" />
-
-        {/* VaultID */}
-        <Text style={[s.sectionTitle, { marginTop: 24 }]}>VAULT ID</Text>
-        <View style={s.vaultIdSection}>
-          <Text style={s.desc}>Choose a unique username so people can find you without sharing your phone number.</Text>
-          {vaultId ? <Text style={s.currentId}>Current: @{vaultId}</Text> : null}
-          <View style={s.idRow}>
-            <Text style={s.atSign}>@</Text>
-            <TextInput
-              style={s.idInput}
-              value={vaultIdInput}
-              onChangeText={setVaultIdInput}
-              placeholder="yourname"
-              placeholderTextColor="#444"
-              autoCapitalize="none"
-              autoCorrect={false}
-              maxLength={30}
-            />
-            <TouchableOpacity style={s.saveBtn} onPress={saveVaultId} disabled={savingId}>
-              {savingId ? <ActivityIndicator color="#000" size="small" /> : <Text style={s.saveBtnTxt}>Save</Text>}
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Duress PIN */}
-        <Text style={[s.sectionTitle, { marginTop: 24 }]}>DURESS PIN</Text>
-        <View style={s.vaultIdSection}>
-          <Text style={s.desc}>Set a secondary PIN. If entered under coercion, it silently wipes your messages and shows an empty decoy app.</Text>
-          {duressPin ? <Text style={[s.currentId, { color: '#FF3C6E' }]}>Ã¢Å“â€œ Duress PIN is set</Text> : null}
-          <View style={s.idRow}>
-            <TextInput
-              style={[s.idInput, { flex: 1 }]}
-              value={duressInput}
-              onChangeText={setDuressInput}
-              placeholder="Enter 4+ digit duress PIN"
-              placeholderTextColor="#444"
-              keyboardType="number-pad"
-              secureTextEntry
-              maxLength={8}
-            />
-            <TouchableOpacity style={[s.saveBtn, { backgroundColor: '#FF3C6E' }]} onPress={saveDuressPin}>
-              <Text style={s.saveBtnTxt}>Set</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Backup */}
-        
-        {/* Trusted Contacts */}
-        <Text style={[s.sectionTitle, { marginTop: 24 }]}>TRUSTED CONTACTS</Text>
-        
-        {/* Chat Themes */}
-        <TouchableOpacity style={{ backgroundColor: '#F9FAFB', borderRadius: 14, padding: 16, marginBottom: 8, borderWidth: 1, borderColor: '#E5E7EB', flexDirection: 'row', alignItems: 'center' }}
-          onPress={() => router.push('/chat-themes' as any)}>
-          <Text style={{ fontSize: 22, marginRight: 12 }}>{"\uD83C\uDFA8"}</Text>
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: '#1F2937', fontSize: 15, fontWeight: '700' }}>Chat Themes</Text>
-            <Text style={{ color: '#6B7280', fontSize: 12, marginTop: 2 }}>Customize backgrounds and bubble colors</Text>
-          </View>
-          <Text style={{ color: '#6B7280', fontSize: 18 }}>{"\u203A"}</Text>
+    <ScrollView style={S.screen} contentContainerStyle={{ paddingBottom: 64 }}>
+      <View style={S.header}>
+        <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn} activeOpacity={0.7}>
+          <Text style={S.backTxt}>←</Text>
         </TouchableOpacity>
+        <Text style={S.title}>Settings</Text>
+      </View>
 
-<TouchableOpacity style={{ backgroundColor: '#F9FAFB', borderRadius: 14, padding: 16, marginBottom: 8, borderWidth: 1, borderColor: '#E5E7EB', flexDirection: 'row', alignItems: 'center' }}
-          onPress={() => router.push('/trusted-contacts' as any)}>
-          <Text style={{ fontSize: 22, marginRight: 12 }}>{"\uD83D\uDEE1\uFE0F"}</Text>
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: '#1F2937', fontSize: 15, fontWeight: '700' }}>Manage Trusted Contacts</Text>
-            <Text style={{ color: '#6B7280', fontSize: 12, marginTop: 2 }}>Up to 3 emergency contacts for duress alerts</Text>
-          </View>
-          <Text style={{ color: '#6B7280', fontSize: 18 }}>{"\u203A"}</Text>
-        </TouchableOpacity>
+      <View style={S.section}>
+        <Text style={S.label}>PRIVACY</Text>
 
-        {/* Login History */}
-        <TouchableOpacity style={{ backgroundColor: '#F9FAFB', borderRadius: 14, padding: 16, marginBottom: 8, borderWidth: 1, borderColor: '#E5E7EB', flexDirection: 'row', alignItems: 'center' }}
-          onPress={() => router.push('/login-history' as any)}>
-          <Text style={{ fontSize: 22, marginRight: 12 }}>{"\uD83D\uDD10"}</Text>
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: '#1F2937', fontSize: 15, fontWeight: '700' }}>Login History</Text>
-            <Text style={{ color: '#6B7280', fontSize: 12, marginTop: 2 }}>View active sessions, revoke devices</Text>
-          </View>
-          <Text style={{ color: '#6B7280', fontSize: 18 }}>{"\u203A"}</Text>
-        </TouchableOpacity>
+        <ToggleRow
+          title="Discoverable by phone"
+          sub="Allow others who have your number to find your VaultChat account when they tap Contacts."
+          value={settings.discoverable}
+          busy={saving === 'discoverable'}
+          onValueChange={() => toggle('discoverable')}
+        />
+        <ToggleRow
+          title="Show last seen"
+          sub="Other users will see when you were last online."
+          value={settings.lastSeenVisible}
+          busy={saving === 'lastSeenVisible'}
+          onValueChange={() => toggle('lastSeenVisible')}
+        />
+        <ToggleRow
+          title="Send read receipts"
+          sub="Senders see ✓✓ blue when you read their message."
+          value={settings.readReceipts}
+          busy={saving === 'readReceipts'}
+          onValueChange={() => toggle('readReceipts')}
+        />
+        <ToggleRow
+          title="Show profile photo to everyone"
+          sub="When off, only people you've chatted with see your photo."
+          value={settings.profilePhotoVisible}
+          busy={saving === 'profilePhotoVisible'}
+          onValueChange={() => toggle('profilePhotoVisible')}
+        />
+      </View>
 
-<Text style={[s.sectionTitle, { marginTop: 24 }]}>ENCRYPTED BACKUP</Text>
-        <View style={s.vaultIdSection}>
-          <Text style={s.desc}>Export all your chats as an AES-256 encrypted file. Only you can decrypt it with your backup password.</Text>
-          {backingUp && <Text style={s.progressTxt}>{backupProgress}</Text>}
-          <TouchableOpacity style={[s.saveBtn, { width: '100%', paddingVertical: 12, marginTop: 8 }]} onPress={startBackup} disabled={backingUp}>
-            {backingUp
-              ? <ActivityIndicator color="#000" />
-              : <Text style={s.saveBtnTxt}>Ã°Å¸â€œÂ¦ Export Encrypted Backup</Text>
-            }
-          </TouchableOpacity>
-        </View>
+      <View style={S.section}>
+        <Text style={S.label}>DATA & ACCOUNT</Text>
 
-        {/* Danger zone */}
-        <Text style={[s.sectionTitle, { marginTop: 24, color: '#FF3C6E' }]}>ACCOUNT</Text>
-        <TouchableOpacity style={s.dangerRow} onPress={() => router.push('/search' as any)}>
-          <Text style={s.dangerTxt}>Ã°Å¸â€Â Search Messages</Text>
+        <TouchableOpacity
+          style={S.dataBtn}
+          onPress={onExport}
+          disabled={exporting}
+          activeOpacity={0.85}
+        >
+          {exporting ? <ActivityIndicator color={ACCENT} /> : (
+            <Text style={S.dataBtnTxt}>📦 Export my data</Text>
+          )}
         </TouchableOpacity>
-        <TouchableOpacity style={s.dangerRow} onPress={() => router.push('/starred' as any)}>
-          <Text style={s.dangerTxt}>Ã¢Â­Â Starred Messages</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[s.dangerRow, { borderTopColor: '#FF3C6E44' }]} onPress={() => {
-          Alert.alert('Sign Out?', '', [{ text: 'Cancel', style: 'cancel' }, { text: 'Sign Out', style: 'destructive', onPress: () => auth().signOut() }]);
-        }}>
-          <Text style={[s.dangerTxt, { color: '#FF3C6E' }]}>Ã°Å¸Å¡Âª Sign Out</Text>
-        </TouchableOpacity>
+        <Text style={S.dataHint}>
+          Download a JSON file containing your profile, chats, messages, and settings.
+          Attachments are listed by id — fetch them separately.
+        </Text>
 
-        <View style={{ height: 50 }} />
-      </ScrollView>
-    </>
+        <TouchableOpacity
+          style={S.deleteBtn}
+          onPress={onDeleteAccount}
+          disabled={deleting}
+          activeOpacity={0.85}
+        >
+          {deleting ? <ActivityIndicator color={DANGER} /> : (
+            <Text style={S.deleteBtnTxt}>Delete my account</Text>
+          )}
+        </TouchableOpacity>
+      </View>
+
+      <View style={S.section}>
+        <Text style={S.label}>BLOCKED USERS</Text>
+        {blocks.length === 0 ? (
+          <Text style={S.emptySub}>You haven't blocked anyone. To block someone, open their chat → menu → Block.</Text>
+        ) : (
+          blocks.map(u => (
+            <View key={u.userId} style={S.blockRow}>
+              <View style={S.blockAvatar}>
+                {u.photoURL && authHeader ? (
+                  <Image
+                    source={{ uri: attachmentUrl(u.photoURL), headers: { Authorization: authHeader } }}
+                    style={S.blockAvatarImg}
+                  />
+                ) : (
+                  <Text style={S.blockAvatarTxt}>{(u.name || u.email || '?').trim()[0].toUpperCase()}</Text>
+                )}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={S.blockName} numberOfLines={1}>{u.name || u.email || u.userId.slice(0, 8)}</Text>
+                {u.email && u.name && <Text style={S.blockEmail} numberOfLines={1}>{u.email}</Text>}
+              </View>
+              <TouchableOpacity onPress={() => onUnblock(u)} style={S.unblockBtn} activeOpacity={0.7}>
+                <Text style={S.unblockTxt}>Unblock</Text>
+              </TouchableOpacity>
+            </View>
+          ))
+        )}
+      </View>
+    </ScrollView>
   );
 }
 
-const s = StyleSheet.create({
-  screen:       { flex: 1, backgroundColor: '#FFFFFF' },
-  sectionTitle: { color: '#6B7280', fontSize: 11, fontWeight: '700', letterSpacing: 1.2, paddingHorizontal: 16, paddingTop: 20, paddingBottom: 8 },
-  row:          { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F1F3F4' },
-  rowLabel:     { color: '#1F2937', fontSize: 15, marginBottom: 2 },
-  rowDesc:      { color: '#6B7280', fontSize: 12 },
-  vaultIdSection:{ backgroundColor: '#FFFFFF', padding: 16, borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#F1F3F4' },
-  desc:         { color: '#6B7280', fontSize: 12, lineHeight: 18, marginBottom: 10 },
-  currentId:    { color: '#4A9FFF', fontSize: 13, fontWeight: 'bold', marginBottom: 8 },
-  idRow:        { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  atSign:       { color: '#6B7280', fontSize: 18, fontWeight: 'bold' },
-  idInput:      { flex: 1, backgroundColor: '#F3F4F6', color: '#1F2937', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
-  saveBtn:      { backgroundColor: '#4A9FFF', borderRadius: 8, paddingHorizontal: 16, paddingVertical: 10, alignItems: 'center' },
-  saveBtnTxt:   { color: '#000', fontSize: 14, fontWeight: 'bold' },
-  progressTxt:  { color: '#4A9FFF', fontSize: 12, marginBottom: 8 },
-  dangerRow:    { backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 14, borderTopWidth: 1, borderTopColor: '#F1F3F4' },
-  dangerTxt:    { color: '#1F2937', fontSize: 15 },
+function ToggleRow({
+  title, sub, value, busy, onValueChange,
+}: {
+  title:         string;
+  sub:           string;
+  value:         boolean;
+  busy:          boolean;
+  onValueChange: () => void;
+}) {
+  return (
+    <View style={S.toggleRow}>
+      <View style={{ flex: 1 }}>
+        <Text style={S.toggleTitle}>{title}</Text>
+        <Text style={S.toggleSub}>{sub}</Text>
+      </View>
+      {busy ? (
+        <ActivityIndicator color={ACCENT} style={{ marginLeft: 8 }} />
+      ) : (
+        <Switch
+          value={value}
+          onValueChange={onValueChange}
+          trackColor={{ true: ACCENT, false: '#374151' }}
+          thumbColor="#fff"
+        />
+      )}
+    </View>
+  );
+}
+
+const DARK_BG = '#0D0F14';
+const CARD_BG = '#161A22';
+const BORDER  = '#1F2937';
+const TEXT    = '#E5E7EB';
+const SUBTLE  = '#9CA3AF';
+const ACCENT  = '#6C63FF';
+const DANGER  = '#EF4444';
+
+const S = StyleSheet.create({
+  screen:        { flex: 1, backgroundColor: DARK_BG },
+  center:        { justifyContent: 'center', alignItems: 'center' },
+
+  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8 },
+  backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  backTxt:       { color: TEXT, fontSize: 26, fontWeight: '600' },
+  title:         { color: TEXT, fontSize: 22, fontWeight: '800' },
+
+  section:       { paddingHorizontal: 16, marginTop: 16 },
+  label:         { color: SUBTLE, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 8 },
+
+  toggleRow:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
+  toggleTitle:   { color: TEXT, fontSize: 15, fontWeight: '600' },
+  toggleSub:     { color: SUBTLE, fontSize: 12, lineHeight: 16, marginTop: 2 },
+
+  blockRow:      { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
+  blockAvatar:   { width: 40, height: 40, borderRadius: 20, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  blockAvatarImg:{ width: '100%', height: '100%' },
+  blockAvatarTxt:{ color: '#fff', fontWeight: '700' },
+  blockName:     { color: TEXT, fontSize: 15, fontWeight: '600' },
+  blockEmail:    { color: SUBTLE, fontSize: 12, marginTop: 2 },
+  unblockBtn:    { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, borderWidth: 1, borderColor: DANGER },
+  unblockTxt:    { color: DANGER, fontSize: 12, fontWeight: '700' },
+
+  emptySub:      { color: SUBTLE, fontSize: 13, lineHeight: 18, paddingVertical: 16 },
+
+  // Data & account section
+  dataBtn:       { marginTop: 8, padding: 12, borderRadius: 12, backgroundColor: CARD_BG, borderWidth: 1, borderColor: BORDER, alignItems: 'center' },
+  dataBtnTxt:    { color: ACCENT, fontWeight: '700' },
+  dataHint:      { color: SUBTLE, fontSize: 12, lineHeight: 16, marginTop: 6 },
+  deleteBtn:     { marginTop: 16, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: DANGER, alignItems: 'center' },
+  deleteBtnTxt:  { color: DANGER, fontWeight: '700' },
 });

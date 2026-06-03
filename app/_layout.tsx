@@ -3,26 +3,46 @@
 //
 // Order of operations:
 //   1. Buffer polyfill (crypto needs this)
-//   2. Block screenshots app-wide (FLAG_SECURE)
-//   3. Security scan — jailbreak / Frida / root
+//   2. Sentry init — must happen BEFORE any other code that might throw
+//   3. Block screenshots app-wide (FLAG_SECURE)
+//   4. Security scan — jailbreak / Frida / root
 //      → if threat found → /blocked (keys already wiped)
-//   4. Register push notifications (physical device only)
-//   5. Wire notification tap listeners → navigate to correct chat
-//   6. Handle notification that launched app from killed state
+//   5. Register push notifications (physical device only)
+//   6. Wire notification tap listeners → navigate to correct chat
+//   7. Handle notification that launched app from killed state
 
 import { Buffer } from 'buffer';
 
 import { Stack, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import * as ScreenCapture from 'expo-screen-capture';
+import * as Sentry from '@sentry/react-native';
 import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet, Platform } from 'react-native';
 
 import { runSecurityCheck } from '../services/securityService';
 import { attachTapHandler } from '../lib/push';
+import { getSocket } from '../lib/socket';
 global.Buffer = Buffer;
 
-export default function RootLayout() {
+// ── Sentry frontend init (Day 16) ──────────────────────────────────
+// Reads EXPO_PUBLIC_SENTRY_DSN from EAS env. If unset (dev), Sentry is
+// a no-op — events are dropped, no errors. Wrap every screen via the
+// HOC at module level so unhandled errors get captured.
+const SENTRY_DSN = process.env.EXPO_PUBLIC_SENTRY_DSN;
+if (SENTRY_DSN) {
+  Sentry.init({
+    dsn:                SENTRY_DSN,
+    enableAutoSessionTracking: true,
+    // Sample rate kept conservative for launch; ratchet down if quota tight.
+    tracesSampleRate:   0.2,
+    // Sentry captures Hermes JS errors; native crashes via React Native's
+    // own native bridge — no extra config needed.
+    environment:        process.env.EXPO_PUBLIC_ENV || 'production',
+  });
+}
+
+function RootLayout() {
   const router = useRouter();
   const [securityChecked, setSecurityChecked] = useState(false);
 
@@ -73,11 +93,39 @@ export default function RootLayout() {
       });
     }
 
+    // ── Incoming-call listener (Socket.IO). Pushes to the full-screen
+    //    accept/decline overlay while the app is open. (When the app is
+    //    closed, the existing push-notification arrives and tapping it
+    //    opens the chat — full lock-screen call UI is a Phase-7 polish
+    //    that needs a Notifee high-importance fullscreen intent.)
+    let cleanupCallListener: () => void = () => {};
+    (async () => {
+      try {
+        const s = await getSocket();
+        const onIncoming = (data: any) => {
+          if (!data?.from || !data?.chatId) return;
+          router.push({
+            pathname: '/incoming-call' as any,
+            params: {
+              chatId:   data.chatId,
+              peerUid:  data.from,
+              peerName: data.callerName ?? 'VaultChat user',
+              type:     data.type === 'video' ? 'video' : 'audio',
+              offer:    data.offer ? JSON.stringify(data.offer) : '',
+            },
+          });
+        };
+        s.on('call_incoming', onIncoming);
+        cleanupCallListener = () => { try { s.off('call_incoming', onIncoming); } catch {} };
+      } catch { /* not signed-in yet — listener will arm when chats mounts */ }
+    })();
+
     return () => {
       if (Platform.OS !== 'web') {
         ScreenCapture.allowScreenCaptureAsync().catch(() => {});
       }
       cleanupListeners();
+      cleanupCallListener();
     };
   }, [router]);
 
@@ -259,3 +307,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 });
+
+// Sentry.wrap forwards refs + injects a top-level error boundary that
+// reports to Sentry before re-throwing. No-op when Sentry isn't init'd.
+export default SENTRY_DSN ? Sentry.wrap(RootLayout) : RootLayout;

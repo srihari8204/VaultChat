@@ -113,9 +113,10 @@ router.get('/:id', jwtUtil.requireAuth, async (req, res) => {
     const att = r.rows[0];
     if (!att) return res.status(404).json({ error: 'Not found' });
 
-    // Permission: owner, OR member of any chat that references this attachment in messages.meta
+    // Permission: owner, OR member of any chat that references this attachment in messages.meta,
+    // OR any signed-in user when this attachment is currently used as someone's profile photo.
     if (att.owner_user_id !== req.user.id) {
-      const ok = await req.dbQuery(
+      const inChat = await req.dbQuery(
         `SELECT 1
          FROM messages m
          JOIN chat_members cm ON cm.chat_id = m.chat_id
@@ -125,7 +126,13 @@ router.get('/:id', jwtUtil.requireAuth, async (req, res) => {
          LIMIT 1`,
         [String(att.id), req.user.id]
       );
-      if (!ok.rows[0]) return res.status(403).json({ error: 'Forbidden' });
+      if (!inChat.rows[0]) {
+        const asPhoto = await req.dbQuery(
+          `SELECT 1 FROM users WHERE photo_url = $1 LIMIT 1`,
+          [String(att.id)]
+        );
+        if (!asPhoto.rows[0]) return res.status(403).json({ error: 'Forbidden' });
+      }
     }
 
     const absPath = path.join(UPLOAD_DIR, att.storage_path);

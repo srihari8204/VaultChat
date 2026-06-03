@@ -7,11 +7,13 @@
 // Email is the canonical identity. Phone is a profile field only.
 
 const express  = require('express');
+const crypto   = require('crypto');
 const { OAuth2Client } = require('google-auth-library');
 
 const db        = require('../db');
 const otp       = require('../otp');
 const email     = require('../email');
+const sms       = require('../sms');
 const jwtUtil   = require('../jwt');
 const rateLimit = require('../rateLimit');
 
@@ -301,6 +303,157 @@ router.post('/logout', async (req, res) => {
   } catch (err) {
     console.error('[auth/logout]', err.message);
     return res.status(500).json({ error: 'Logout failed' });
+  }
+});
+
+// ─── Phone OTP (Day 17) ──────────────────────────────────────────
+// Same flow as email OTP, but the OTP row carries phone_hash instead of
+// email. On verify, either issues tokens (new signup-by-phone) OR — if
+// the caller is already authenticated with a Bearer token — stamps the
+// verified phone onto the existing account.
+//
+// Normalisation: digits only, 10-digit numbers assumed Indian (prepend 91).
+// E.164 leading + is stripped; clients may pass either format.
+function normalizePhone(raw) {
+  if (!raw) return null;
+  let d = String(raw).replace(/\D/g, '');
+  if (!d) return null;
+  if (d.length === 10) d = '91' + d;
+  return d;
+}
+function hashPhone(norm) {
+  return crypto.createHash('sha256').update(norm, 'utf8').digest('hex');
+}
+
+router.post('/send-otp-phone', async (req, res) => {
+  try {
+    const norm = normalizePhone(req.body?.phone);
+    if (!norm || norm.length < 8) return res.status(400).json({ error: 'Invalid phone' });
+    const ph = hashPhone(norm);
+
+    const perPhone = await rateLimit.consume(`otp:phone:${ph}`, 3, 3600);
+    if (!perPhone.allowed) return res.status(429).json({ error: 'Too many requests. Try again later.', retryAfter: perPhone.resetInSec });
+    const perIP = await rateLimit.consume(`otp:phone-ip:${req.ip}`, 10, 3600);
+    if (!perIP.allowed) return res.status(429).json({ error: 'Too many requests. Try again later.', retryAfter: perIP.resetInSec });
+
+    const code     = otp.generate();
+    const codeHash = await otp.hash(code);
+
+    await db.transaction(async (client) => {
+      await client.query(
+        `UPDATE otp_codes SET consumed_at = NOW()
+         WHERE phone_hash = $1 AND consumed_at IS NULL`,
+        [ph]
+      );
+      await client.query(
+        `INSERT INTO otp_codes (phone_hash, code_hash, expires_at)
+         VALUES ($1, $2, NOW() + ($3 || ' seconds')::INTERVAL)`,
+        [ph, codeHash, otp.OTP_TTL_SECONDS.toString()]
+      );
+    });
+
+    // Send via SMS. Prefix with '+' so Twilio sees E.164.
+    await sms.sendOTP(`+${norm}`, code);
+    return res.json({ ok: true, dev: !sms.isConfigured() });
+  } catch (err) {
+    console.error('[auth/send-otp-phone]', err.message);
+    return res.status(500).json({ error: 'Failed to send code' });
+  }
+});
+
+router.post('/verify-otp-phone', async (req, res) => {
+  try {
+    const norm = normalizePhone(req.body?.phone);
+    const code = (req.body?.otp || '').toString().trim();
+    const name = (req.body?.name || '').toString().trim() || null;
+    if (!norm) return res.status(400).json({ error: 'Invalid phone' });
+    if (!/^\d{6}$/.test(code)) return res.status(400).json({ error: 'OTP must be 6 digits' });
+
+    const ph = hashPhone(norm);
+
+    const sel = await db.query(
+      `SELECT id, code_hash, expires_at, attempts
+         FROM otp_codes
+         WHERE phone_hash = $1 AND consumed_at IS NULL AND expires_at > NOW()
+         ORDER BY id DESC
+         LIMIT 1`,
+      [ph]
+    );
+    const row = sel.rows[0];
+    if (!row) return res.status(400).json({ error: 'OTP expired or not found. Request a new one.' });
+
+    if (row.attempts >= otp.MAX_ATTEMPTS) {
+      await db.query(`UPDATE otp_codes SET consumed_at = NOW() WHERE id = $1`, [row.id]);
+      return res.status(429).json({ error: 'Too many attempts. Request a new code.' });
+    }
+
+    const match = await otp.verify(code, row.code_hash);
+    if (!match) {
+      await db.query(`UPDATE otp_codes SET attempts = attempts + 1 WHERE id = $1`, [row.id]);
+      return res.status(400).json({ error: 'Invalid code' });
+    }
+
+    await db.query(`UPDATE otp_codes SET consumed_at = NOW() WHERE id = $1`, [row.id]);
+
+    // Two modes: linking (caller authenticated) vs signup (no auth header).
+    const authHeader = (req.headers.authorization || '').trim();
+    let actingUserId = null;
+    if (authHeader.startsWith('Bearer ')) {
+      try {
+        const payload = jwtUtil.verifyAccess(authHeader.slice(7));
+        actingUserId = payload.sub;
+      } catch { /* fall through to signup mode if token bad */ }
+    }
+
+    if (actingUserId) {
+      // Linking — stamp the phone onto the existing account. Idempotent.
+      // Refuse if another account already claims this phone.
+      const conflict = await db.query(
+        `SELECT id FROM users WHERE phone_hash = $1 AND id <> $2 AND is_deleted = FALSE LIMIT 1`,
+        [ph, actingUserId]
+      );
+      if (conflict.rows[0]) return res.status(409).json({ error: 'Phone already linked to another account' });
+
+      await db.query(
+        `UPDATE users SET phone = $1, phone_hash = $2 WHERE id = $3`,
+        [`+${norm}`, ph, actingUserId]
+      );
+      return res.json({ ok: true, linked: true });
+    }
+
+    // Signup-by-phone: phone is canonical only when no other account claims it.
+    const existing = await db.query(
+      `SELECT * FROM users WHERE phone_hash = $1 AND is_deleted = FALSE LIMIT 1`,
+      [ph]
+    );
+    let user, isNewUser;
+    if (existing.rows[0]) {
+      user = existing.rows[0];
+      isNewUser = false;
+    } else {
+      // No existing account → create a phone-only user (no email). Need to
+      // generate a placeholder email since the column is UNIQUE NOT NULL.
+      // Use the phone hash as a deterministic-but-opaque local-part so the
+      // user can later add a real email via /user/profile.
+      const placeholderEmail = `phone+${ph.slice(0, 12)}@vaultchat.local`;
+      const ins = await db.query(
+        `INSERT INTO users (email, phone, phone_hash, auth_provider)
+         VALUES ($1, $2, $3, 'phone') RETURNING *`,
+        [placeholderEmail, `+${norm}`, ph]
+      );
+      user = ins.rows[0];
+      isNewUser = true;
+      if (name) {
+        await db.query(`UPDATE users SET name = $1 WHERE id = $2`, [name, user.id]);
+        user.name = name;
+      }
+    }
+
+    const tokens = await issueTokens(user, req);
+    return res.json({ ...tokens, user: publicUser(user), isNewUser });
+  } catch (err) {
+    console.error('[auth/verify-otp-phone]', err.message);
+    return res.status(500).json({ error: 'Verification failed' });
   }
 });
 

@@ -1,128 +1,375 @@
-// app/group-info.tsx
-// Group info: member list, add member, disappearing timer, leave group
+// app/group-info.tsx — Day 14 group info screen.
+//
+// Shows:
+//   * group photo + name (editable by admin/owner; tap → image picker / rename)
+//   * member list with name + email + presence dot
+//   * "Add members" button (admin/owner only) — pastes a user id, picks from contacts
+//   * Per-row "Remove" (admin/owner only; owner can't be removed)
+//   * "Leave group" (any member)
+//
+// Backend: GET /chats/:id, PATCH /chats/:id, POST /chats/:id/members,
+// DELETE /chats/:id/members/:userId
 
-import React, { useState, useEffect } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
-import { removeMember, setDisappearingTimer } from '../services/groupService';
+import * as ImagePicker from 'expo-image-picker';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { getCurrentUserAsync } from './(constants)/authService';
+import { getAccessToken } from '../lib/api';
+import {
+  addChatMembers,
+  attachmentUrl,
+  getChat,
+  removeChatMember,
+  updateChat,
+  uploadAttachment,
+  type ChatDetail,
+  type ChatMember,
+} from '../lib/chatService';
 
 export default function GroupInfoScreen() {
-  const { chatId, groupName } = useLocalSearchParams<{ chatId: string; groupName: string }>();
+  const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const myUid  = auth().currentUser?.uid ?? '';
+  const chatId = (id ?? '').toString();
 
-  const [members,   setMembers]   = useState<{ uid: string; name: string; isAdmin: boolean }[]>([]);
-  const [admins,    setAdmins]    = useState<string[]>([]);
+  const [chat, setChat]   = useState<ChatDetail | null>(null);
+  const [meId, setMeId]   = useState<string | null>(null);
+  const [authHeader, setAuthHeader] = useState<string | null>(null);
+
   const [loading,   setLoading]   = useState(true);
-  const [timer,     setTimer]     = useState(0);
+  const [renaming,  setRenaming]  = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [photoBusy, setPhotoBusy] = useState(false);
 
-  useEffect(() => {
-    const unsub = firestore().collection('chats').doc(chatId).onSnapshot(snap => {
-      const d = snap.data();
-      if (!d) return;
-      const ads = d.admins ?? [];
-      setAdmins(ads);
-      setTimer(d.disappearingTimer ?? 0);
-      const list = (d.participants as string[]).map(uid => ({
-        uid, name: d.participantNames?.[uid] ?? 'Unknown', isAdmin: ads.includes(uid),
-      }));
-      setMembers(list);
+  const load = useCallback(async () => {
+    try {
+      setLoading(true);
+      const [c, me, tok] = await Promise.all([
+        getChat(chatId), getCurrentUserAsync(), getAccessToken(),
+      ]);
+      setChat(c);
+      setMeId(me?.id ?? null);
+      setAuthHeader(tok ? `Bearer ${tok}` : null);
+      setNameDraft(c.name ?? '');
+    } catch (e: any) {
+      Alert.alert('Could not load group', e?.message ?? 'Try again');
+    } finally {
       setLoading(false);
-    });
-    return unsub;
+    }
   }, [chatId]);
 
-  const leave = () => {
-    Alert.alert('Leave Group?', 'You will be removed from this group.', [
+  useEffect(() => { load(); }, [load]);
+
+  const myRole = chat?.members.find(m => m.userId === meId)?.role;
+  const isAdmin = myRole === 'admin' || myRole === 'owner';
+
+  const onRename = useCallback(async () => {
+    if (!chat || !isAdmin) return;
+    const n = nameDraft.trim();
+    if (!n || n === chat.name) { setRenaming(false); return; }
+    try {
+      await updateChat(chat.id, { name: n });
+      setChat(prev => prev ? { ...prev, name: n } : prev);
+    } catch (e: any) {
+      Alert.alert('Rename failed', e?.message ?? 'Try again');
+    } finally {
+      setRenaming(false);
+    }
+  }, [chat, isAdmin, nameDraft]);
+
+  const onChangePhoto = useCallback(async () => {
+    if (!chat || !isAdmin || photoBusy) return;
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('Permission needed', 'Allow photo library access to set the group photo.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'], quality: 0.7, allowsEditing: true, aspect: [1, 1],
+    });
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+    setPhotoBusy(true);
+    try {
+      const up = await uploadAttachment(
+        asset.uri,
+        asset.fileName || `group-${Date.now()}.jpg`,
+        asset.mimeType || 'image/jpeg',
+      );
+      await updateChat(chat.id, { photoURL: up.id });
+      setChat(prev => prev ? { ...prev, photoURL: up.id } : prev);
+    } catch (e: any) {
+      Alert.alert('Photo upload failed', e?.message ?? 'Try again');
+    } finally {
+      setPhotoBusy(false);
+    }
+  }, [chat, isAdmin, photoBusy]);
+
+  const onRemoveMember = useCallback((m: ChatMember) => {
+    if (!chat || !isAdmin) return;
+    Alert.alert(
+      'Remove from group?',
+      `${m.name || m.email || 'This user'} will no longer be a member.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Remove', style: 'destructive', onPress: async () => {
+            try {
+              await removeChatMember(chat.id, m.userId);
+              setChat(prev => prev ? {
+                ...prev,
+                members: prev.members.map(x => x.userId === m.userId ? { ...x, leftAt: new Date().toISOString() } : x),
+              } : prev);
+            } catch (e: any) {
+              Alert.alert('Remove failed', e?.message ?? 'Try again');
+            }
+          }
+        },
+      ],
+    );
+  }, [chat, isAdmin]);
+
+  const onLeave = useCallback(() => {
+    if (!chat || !meId) return;
+    Alert.alert('Leave group?', 'You will lose access to future messages.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Leave', style: 'destructive', onPress: async () => {
-        await removeMember(chatId, myUid);
-        router.replace('/(tabs)/chats');
-      }},
+          try {
+            await removeChatMember(chat.id, meId);
+            router.replace('/(tabs)/chats' as any);
+          } catch (e: any) {
+            Alert.alert('Leave failed', e?.message ?? 'Try again');
+          }
+        }
+      },
     ]);
-  };
+  }, [chat, meId, router]);
 
-  const changeTimer = () => {
-    const options = [
-      { label: 'Off', value: 0 },
-      { label: '24 hours', value: 86400 },
-      { label: '7 days', value: 604800 },
-      { label: '30 days', value: 2592000 },
-    ];
-    Alert.alert('Disappearing Messages', 'Choose timer for all messages', options.map(o => ({
-      text: o.label + (timer === o.value ? ' âœ“' : ''),
-      onPress: () => { setDisappearingTimer(chatId, o.value); setTimer(o.value); },
-    })));
-  };
+  // Add by user id — iOS-only Alert.prompt for a quick path, with a
+  // Contacts-screen fallback for Android. Adding-from-contacts is the
+  // intended primary flow.
+  const onAddMember = useCallback(() => {
+    if (!chat || !isAdmin) return;
+    if (typeof Alert.prompt === 'function') {
+      Alert.prompt(
+        'Add member',
+        'Paste the user id (from Profile → User ID), or pick from Contacts.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Contacts', onPress: () => router.push('/contacts' as any) },
+          {
+            text: 'Add', onPress: async (uid?: string) => {
+              const id = (uid || '').trim();
+              if (!id) return;
+              try {
+                await addChatMembers(chat.id, [id]);
+                await load();
+              } catch (e: any) {
+                Alert.alert('Add failed', e?.message ?? 'Try again');
+              }
+            },
+          },
+        ],
+        'plain-text',
+      );
+    } else {
+      router.push('/contacts' as any);
+    }
+  }, [chat, isAdmin, load, router]);
 
-  const timerLabel = () => {
-    if (timer === 0) return 'Off';
-    if (timer === 86400) return '24 hours';
-    if (timer === 604800) return '7 days';
-    return '30 days';
-  };
+  if (loading || !chat) {
+    return <View style={[S.screen, S.center]}><ActivityIndicator color={ACCENT} size="large" /></View>;
+  }
 
-  if (loading) return <View style={{ flex: 1, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator color="#4A9FFF" /></View>;
+  const activeMembers = chat.members.filter(m => !m.leftAt);
 
   return (
-    <>
-      <Stack.Screen options={{ title: groupName ?? 'Group Info', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
-      <View style={s.screen}>
-        <View style={s.section}>
-          <Text style={s.sectionTitle}>DISAPPEARING MESSAGES</Text>
-          <TouchableOpacity style={s.row} onPress={changeTimer}>
-            <Text style={s.rowLabel}>â±  Timer</Text>
-            <Text style={s.rowValue}>{timerLabel()}</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={s.section}>
-          <Text style={s.sectionTitle}>{members.length} MEMBERS</Text>
-          <FlatList
-            data={members}
-            keyExtractor={m => m.uid}
-            scrollEnabled={false}
-            renderItem={({ item: m }) => (
-              <View style={s.memberRow}>
-                <View style={s.memberAvatar}>
-                  <Text style={s.memberAvatarTxt}>{m.name[0]?.toUpperCase()}</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.memberName}>{m.name}{m.uid === myUid ? ' (You)' : ''}</Text>
-                  {m.isAdmin && <Text style={s.adminBadge}>Admin</Text>}
-                </View>
-                {admins.includes(myUid) && m.uid !== myUid && (
-                  <TouchableOpacity onPress={() => { Alert.alert('Remove?', '', [{ text: 'Cancel', style: 'cancel' }, { text: 'Remove', style: 'destructive', onPress: () => removeMember(chatId, m.uid) }]); }}>
-                    <Text style={{ color: '#FF3C6E', fontSize: 13 }}>Remove</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            )}
-          />
-        </View>
-
-        <TouchableOpacity style={s.leaveBtn} onPress={leave}>
-          <Text style={s.leaveTxt}>ðŸšª Leave Group</Text>
+    <ScrollView style={S.screen} contentContainerStyle={{ paddingBottom: 64 }}>
+      <View style={S.header}>
+        <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
+          <Text style={S.backTxt}>←</Text>
         </TouchableOpacity>
+        <Text style={S.titleBar}>Group info</Text>
       </View>
-    </>
+
+      <View style={S.heroWrap}>
+        <TouchableOpacity onPress={onChangePhoto} disabled={!isAdmin || photoBusy} activeOpacity={0.85}>
+          <View style={S.hero}>
+            {chat.photoURL && authHeader ? (
+              <Image
+                source={{ uri: attachmentUrl(chat.photoURL), headers: { Authorization: authHeader } }}
+                style={S.heroImg}
+              />
+            ) : (
+              <Text style={S.heroTxt}>{(chat.name?.trim()[0] ?? '#').toUpperCase()}</Text>
+            )}
+            {photoBusy && (
+              <View style={S.heroBusy}><ActivityIndicator color="#fff" /></View>
+            )}
+            {isAdmin && <View style={S.heroEditPill}><Text>📷</Text></View>}
+          </View>
+        </TouchableOpacity>
+
+        {renaming ? (
+          <View style={S.renameRow}>
+            <TextInput
+              style={S.renameInput}
+              value={nameDraft}
+              onChangeText={setNameDraft}
+              placeholder="Group name"
+              placeholderTextColor={SUBTLE}
+              autoFocus
+              maxLength={100}
+              onSubmitEditing={onRename}
+            />
+            <TouchableOpacity onPress={onRename} style={S.saveBtn}>
+              <Text style={S.saveBtnTxt}>Save</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity disabled={!isAdmin} onPress={() => setRenaming(true)} activeOpacity={isAdmin ? 0.7 : 1}>
+            <Text style={S.groupName}>{chat.name || 'Untitled group'}</Text>
+          </TouchableOpacity>
+        )}
+        <Text style={S.subInfo}>{activeMembers.length} members</Text>
+      </View>
+
+      {isAdmin && (
+        <TouchableOpacity style={S.addBtn} onPress={onAddMember} activeOpacity={0.85}>
+          <Text style={S.addBtnTxt}>＋ Add member</Text>
+        </TouchableOpacity>
+      )}
+
+      <View style={S.section}>
+        <Text style={S.label}>MEMBERS</Text>
+        <FlatList
+          data={activeMembers}
+          scrollEnabled={false}
+          keyExtractor={m => m.userId}
+          renderItem={({ item: m }) => (
+            <MemberRow
+              member={m}
+              meId={meId}
+              isAdmin={isAdmin}
+              authHeader={authHeader}
+              onRemove={() => onRemoveMember(m)}
+            />
+          )}
+        />
+      </View>
+
+      <TouchableOpacity style={S.leaveBtn} onPress={onLeave} activeOpacity={0.85}>
+        <Text style={S.leaveTxt}>Leave group</Text>
+      </TouchableOpacity>
+    </ScrollView>
   );
 }
 
-const s = StyleSheet.create({
-  screen:          { flex: 1, backgroundColor: '#FFFFFF' },
-  section:         { marginTop: 20 },
-  sectionTitle:    { color: '#6B7280', fontSize: 11, fontWeight: '700', letterSpacing: 1, paddingHorizontal: 16, paddingBottom: 8 },
-  row:             { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
-  rowLabel:        { color: '#1F2937', fontSize: 15 },
-  rowValue:        { color: '#4A9FFF', fontSize: 14 },
-  memberRow:       { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
-  memberAvatar:    { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
-  memberAvatarTxt: { color: '#4A9FFF', fontSize: 16, fontWeight: 'bold' },
-  memberName:      { color: '#1F2937', fontSize: 15 },
-  adminBadge:      { color: '#FF8C42', fontSize: 11, marginTop: 2 },
-  leaveBtn:        { margin: 20, backgroundColor: '#FF3C6E22', borderRadius: 12, paddingVertical: 14, alignItems: 'center', borderWidth: 1, borderColor: '#FF3C6E44' },
-  leaveTxt:        { color: '#FF3C6E', fontSize: 15, fontWeight: '600' },
+function MemberRow({
+  member, meId, isAdmin, authHeader, onRemove,
+}: {
+  member:     ChatMember;
+  meId:       string | null;
+  isAdmin:    boolean;
+  authHeader: string | null;
+  onRemove:   () => void;
+}) {
+  const isMe = member.userId === meId;
+  const showRemove = isAdmin && !isMe && member.role !== 'owner';
+  const letter = (member.name?.trim()[0] || member.email?.trim()[0] || '?').toUpperCase();
+  return (
+    <View style={S.memberRow}>
+      <View style={S.memberAvatarWrap}>
+        <View style={S.memberAvatar}>
+          {member.photoURL && authHeader ? (
+            <Image
+              source={{ uri: attachmentUrl(member.photoURL), headers: { Authorization: authHeader } }}
+              style={S.memberAvatarImg}
+            />
+          ) : (
+            <Text style={S.memberAvatarTxt}>{letter}</Text>
+          )}
+        </View>
+        {member.online && <View style={S.memberPresenceDot} />}
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={S.memberName} numberOfLines={1}>
+          {member.name || member.email || member.userId.slice(0, 8)}
+          {isMe && <Text style={S.memberMeTag}> (you)</Text>}
+        </Text>
+        <Text style={S.memberSub} numberOfLines={1}>
+          {member.role !== 'member' && `${member.role} · `}
+          {member.email || member.userId.slice(0, 12)}
+        </Text>
+      </View>
+      {showRemove && (
+        <TouchableOpacity onPress={onRemove} style={S.removeBtn} activeOpacity={0.7}>
+          <Text style={S.removeBtnTxt}>Remove</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+}
+
+const DARK_BG = '#0D0F14';
+const CARD_BG = '#161A22';
+const BORDER  = '#1F2937';
+const TEXT    = '#E5E7EB';
+const SUBTLE  = '#9CA3AF';
+const ACCENT  = '#6C63FF';
+const DANGER  = '#EF4444';
+
+const S = StyleSheet.create({
+  screen:        { flex: 1, backgroundColor: DARK_BG },
+  center:        { justifyContent: 'center', alignItems: 'center' },
+
+  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 8, gap: 8 },
+  backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  backTxt:       { color: TEXT, fontSize: 26, fontWeight: '600' },
+  titleBar:      { color: TEXT, fontSize: 22, fontWeight: '800' },
+
+  heroWrap:      { alignItems: 'center', paddingVertical: 20, gap: 8 },
+  hero:          { width: 112, height: 112, borderRadius: 56, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  heroImg:       { width: '100%', height: '100%' },
+  heroTxt:       { color: '#fff', fontSize: 48, fontWeight: '800' },
+  heroBusy:      { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.4)' },
+  heroEditPill:  { position: 'absolute', right: 0, bottom: 0, backgroundColor: '#1F2937', borderRadius: 14, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 2, borderColor: DARK_BG },
+  groupName:     { color: TEXT, fontSize: 22, fontWeight: '700' },
+  subInfo:       { color: SUBTLE, fontSize: 12 },
+
+  renameRow:     { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, width: '100%' },
+  renameInput:   { flex: 1, color: TEXT, backgroundColor: CARD_BG, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16 },
+  saveBtn:       { backgroundColor: ACCENT, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10 },
+  saveBtnTxt:    { color: '#fff', fontWeight: '700' },
+
+  addBtn:        { marginHorizontal: 16, marginTop: 8, padding: 12, borderRadius: 12, backgroundColor: CARD_BG, borderWidth: 1, borderColor: BORDER, alignItems: 'center' },
+  addBtnTxt:     { color: ACCENT, fontWeight: '700' },
+
+  section:       { paddingHorizontal: 16, marginTop: 16 },
+  label:         { color: SUBTLE, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 8 },
+
+  memberRow:     { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
+  memberAvatarWrap: { width: 44, height: 44 },
+  memberAvatar:  { width: 44, height: 44, borderRadius: 22, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  memberAvatarImg: { width: '100%', height: '100%' },
+  memberAvatarTxt: { color: '#fff', fontWeight: '700', fontSize: 17 },
+  memberPresenceDot: { position: 'absolute', right: 0, bottom: 0, width: 12, height: 12, borderRadius: 6, backgroundColor: '#22C55E', borderWidth: 2, borderColor: DARK_BG },
+  memberName:    { color: TEXT, fontSize: 15, fontWeight: '600' },
+  memberMeTag:   { color: SUBTLE, fontSize: 12, fontWeight: '400' },
+  memberSub:     { color: SUBTLE, fontSize: 12, marginTop: 2 },
+  removeBtn:     { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, borderWidth: 1, borderColor: DANGER },
+  removeBtnTxt:  { color: DANGER, fontSize: 11, fontWeight: '700' },
+
+  leaveBtn:      { marginHorizontal: 16, marginTop: 32, padding: 14, borderRadius: 24, borderWidth: 1, borderColor: DANGER, alignItems: 'center' },
+  leaveTxt:      { color: DANGER, fontWeight: '700' },
 });
