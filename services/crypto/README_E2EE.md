@@ -70,3 +70,26 @@ All 14 currently pass.
 - `MAX_SKIP` is 1000; tune against expected out-of-order windows.
 - No replay cache beyond the ratchet’s own monotonic chain semantics; the
   transport (authenticated REST + per-message AEAD) is relied on for that.
+
+## Wiring-time gotchas (discovered 2026-06-05)
+
+- **Metro resolution: cleared.** `metro.config.js` already sets
+  `resolver.unstable_enablePackageExports = true` (Expo SDK 54), so noble v2’s
+  `.js`-subpath exports (`@noble/hashes/hkdf.js`, etc.) resolve. The crypto
+  modules are currently NOT reachable from the app entry, so Metro doesn’t
+  bundle them yet — the first import from `chatService` is what activates them.
+- **SecureStore size limit.** expo-secure-store warns/fails above ~2048 bytes
+  per value (Android). The identity blob with a 20-key OTPK pool (~5 KB) will
+  NOT fit in one item. Storage strategy for the RN bindings:
+  - long-term identity (IK/signing/SPK privates + SPK sig/id): one SecureStore
+    item (small, must stay encrypted-at-rest);
+  - OTPK private pool: chunk across multiple SecureStore items (e.g. 1 key per
+    item, or batches of ≤5), or a smaller `OPK_BATCH`;
+  - per-peer ratchet session: one SecureStore item per peer (bounded — prune
+    `MKSKIPPED`); large skipped-key sets may also need chunking.
+  Do NOT fall back to plain AsyncStorage for any private key (not encrypted).
+- **Verification gates before enabling** (cannot be done headless): run
+  `npx expo export --platform android` to confirm Metro bundles the noble
+  imports, then an on-device round-trip between two real installs before
+  flipping the seam from plaintext to E2EE. Ship the seam behind a default-OFF
+  flag first.
