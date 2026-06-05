@@ -11,9 +11,29 @@ Hermes/React Native — no native module, no Node↔RN crypto divergence.
 
 ## Status: PROVEN, not yet wired
 
-The core is complete and unit-tested but **not connected** to the live message
-path. `lib/chatService.ts`’s `encryptForChat` / `decryptFromChat` are still
-pass-through. Nothing imports `e2ee.ts` yet, so this is non-breaking.
+Built + Node-tested (40/40 across three suites), **not connected** to the live
+message path — `lib/chatService.ts`’s `encryptForChat` / `decryptFromChat` are
+still pass-through, and nothing in the app graph imports any of it, so this is
+non-breaking:
+
+| Module | What | Tested by |
+|--------|------|-----------|
+| `e2ee.ts` | X3DH + Double Ratchet core | `e2ee.selftest.ts` (14) |
+| `e2eeSession.ts` | identity/session manager (pure, injectable) | `e2eeSession.selftest.ts` (15) |
+| `e2eeStorage.ts` | chunked KV (SecureStore 2 KB-cap workaround) | `e2eeStorage.selftest.ts` (11) |
+| `e2eeSession.rn.ts` | RN bindings: SecureStore + api() + singleton `e2ee` | (RN-only; composes tested logic) |
+
+### ⚠️ The hard remaining piece: a local plaintext message store
+
+The seam swap is **not** just `encryptForChat`/`decryptFromChat`. A forward-secret
+ratchet means you **cannot** recover plaintext you already sent, nor re-decrypt
+old messages on reload (the chain has advanced, keys are erased). So the app
+needs a **local, on-device plaintext message store** (keyed by message id):
+write plaintext on send (local echo) and on first successful decrypt; render
+history from it; the server only ever holds ciphertext + the ratchet header.
+Without this, own-sent bubbles and reloaded history render as undecryptable.
+This is the main architectural work left and is why wiring is a dedicated,
+device-tested session — not a flag flip.
 
 ## Run the self-test
 
