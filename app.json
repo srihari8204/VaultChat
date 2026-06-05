@@ -53,7 +53,7 @@
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.NFC"
       ],
-      "versionCode": 8
+      "versionCode": 9
     },
     "web": {
       "bundler": "metro",
