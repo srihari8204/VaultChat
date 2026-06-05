@@ -7,6 +7,8 @@ import firestore from '@react-native-firebase/firestore';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import DeviceInfo from 'react-native-device-info';
+import { assessThreats, signal as toSignal, type ThreatSignal } from './security/threatEngine';
+import { createDuressPinTracker } from './security/duressPin';
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -20,7 +22,13 @@ export type ThreatType =
   | 'FRIDA_PORT_27042'
   | 'FRIDA_SERVER_RESPONSE'
   | 'EMULATOR_DETECTED'
-  | 'ADB_ENABLED';
+  | 'ADB_ENABLED'
+  | 'DEBUGGER_ATTACHED'
+  | 'HOOK_FRAMEWORK'
+  | 'OVERLAY_DETECTED'
+  | 'SUSPICIOUS_IME'
+  | 'PIN_BRUTEFORCE'
+  | 'DURESS_PIN_REPEATED';
 
 export interface ThreatDetail {
   type: ThreatType;
@@ -30,10 +38,26 @@ export interface ThreatDetail {
 export interface SecurityReport {
   clean: boolean;
   threats: ThreatDetail[];
+  // Graded response from the multi-indicator threat engine:
+  //   clean    — no signals
+  //   monitor  — weak signal(s); allow but flag
+  //   restrict — block access (navigate to /blocked) without wiping
+  //   wipe     — self-destruct: all keys wiped, then blocked
+  level: 'clean' | 'monitor' | 'restrict' | 'wipe';
+  score: number;
   checkedAt: number;
   platform: string;
   deviceModel: string;
 }
+
+// SecureStore-backed duress-PIN tracker (repeated failed/duress PIN entries
+// escalate toward self-destruct). Exposed so the PIN screens can also query it.
+const _duressKV = {
+  get: (k: string) => SecureStore.getItemAsync(k),
+  set: (k: string, v: string) => SecureStore.setItemAsync(k, v),
+  del: (k: string) => SecureStore.deleteItemAsync(k).then(() => undefined),
+};
+export const duressPin = createDuressPinTracker(_duressKV);
 
 // ─────────────────────────────────────────────────────────────
 // 1. Root / Jailbreak Detection
@@ -243,27 +267,42 @@ async function logThreatToFirestore(report: SecurityReport): Promise<void> {
 export async function runSecurityCheck(): Promise<SecurityReport> {
   const deviceModel = DeviceInfo.getModel();
 
-  const report: SecurityReport = {
-    clean: true,
-    threats: [],
-    checkedAt: Date.now(),
-    platform: Platform.OS,
-    deviceModel,
-  };
-
   const [rootThreats, fridaThreats, emulatorThreats] = await Promise.all([
     checkRootJailbreak(),
     checkFrida(),
     checkEmulator(),
   ]);
+  const detected: ThreatDetail[] = [...rootThreats, ...fridaThreats, ...emulatorThreats];
 
-  report.threats = [...rootThreats, ...fridaThreats, ...emulatorThreats];
-  report.clean = report.threats.length === 0;
+  // Grade the device-integrity signals + the accumulated PIN-failure signal,
+  // then let the engine pick a proportional response.
+  const signals: ThreatSignal[] = detected.map(d => toSignal(d.type, d.detail));
+  const pinSignal = await duressPin.getSignal();
+  if (pinSignal) {
+    detected.push({ type: pinSignal.type as ThreatType, detail: pinSignal.detail ?? '' });
+    signals.push(pinSignal);
+  }
+  const assessment = assessThreats(signals);
 
-  if (!report.clean) {
+  const report: SecurityReport = {
+    clean: assessment.level === 'clean',
+    threats: detected,
+    level: assessment.level,
+    score: assessment.score,
+    checkedAt: Date.now(),
+    platform: Platform.OS,
+    deviceModel,
+  };
+
+  // Self-destruct only on a wipe-level assessment (root / Frida / duress PIN /
+  // strong combinations). Weaker lone signals (emulator, ADB) restrict access
+  // — caller still routes to /blocked — without destroying data on a possible
+  // false positive.
+  if (assessment.level === 'wipe') {
     await wipeAllKeys();
+  }
+  if (!report.clean) {
     logThreatToFirestore(report).catch(() => {});
-  } else {
   }
 
   return report;
@@ -312,7 +351,12 @@ export async function savePIN(pin: string): Promise<void> {
 
 export async function verifyPIN(pin: string): Promise<boolean> {
   const stored = await SecureStore.getItemAsync('vault_pin');
-  return stored === pin;
+  const ok = stored === pin;
+  // Feed the duress-PIN tracker: consecutive failures escalate toward a
+  // self-destruct on the next runSecurityCheck().
+  if (ok) await duressPin.recordSuccess();
+  else await duressPin.recordFailure();
+  return ok;
 }
 
 // ─────────────────────────────────────────────────────────────
