@@ -9,19 +9,29 @@ skeleton in `services/doubleRatchetService.ts`, whose `dhExchange` was HMAC
 Because it is pure JS, the same code runs in Node (where it is tested) and in
 Hermes/React Native — no native module, no Node↔RN crypto divergence.
 
-## Status: PROVEN, not yet wired
+## Status: WIRED behind a default-OFF flag (bundle-verified, awaiting device test)
 
-Built + Node-tested (40/40 across three suites), **not connected** to the live
-message path — `lib/chatService.ts`’s `encryptForChat` / `decryptFromChat` are
-still pass-through, and nothing in the app graph imports any of it, so this is
-non-breaking:
+Built + Node-tested (47/47 across four suites) and now **wired into the live
+seam behind `E2EE_ENABLED` (constants/flags.ts), which is `false`**. With the
+flag off the message path is byte-identical to pre-E2EE and none of the crypto
+runs at runtime (it's lazy-imported inside the enabled branch). `expo export`
+confirms the whole crypto chain bundles cleanly in Metro (noble v2 subpath
+exports resolve; Hermes compiles it). Remaining before flipping the flag on:
+search index, group sender-keys, attachment encryption, and a two-device
+round-trip on real hardware.
 
 | Module | What | Tested by |
 |--------|------|-----------|
 | `e2ee.ts` | X3DH + Double Ratchet core | `e2ee.selftest.ts` (14) |
 | `e2eeSession.ts` | identity/session manager (pure, injectable) | `e2eeSession.selftest.ts` (15) |
 | `e2eeStorage.ts` | chunked KV (SecureStore 2 KB-cap workaround) | `e2eeStorage.selftest.ts` (11) |
-| `e2eeSession.rn.ts` | RN bindings: SecureStore + api() + singleton `e2ee` | (RN-only; composes tested logic) |
+| `messageStore.ts` | plaintext cache + per-peer serialization lock | `messageStore.selftest.ts` (7) |
+| `e2eeSession.rn.ts` | RN bindings + `e2eeEncrypt`/`e2eeDecrypt` glue | (RN-only; composes tested logic) |
+
+Seam touch-points: `lib/chatService.ts` (`encryptForChat`/`decryptFromChat`,
+`chatId→peer` cache, own-plaintext caching), `lib/messageQueue.ts` (cache on
+queued send), `app/chat.tsx` (passes messageId to decrypt; provisions the key
+bundle on chat open).
 
 ### ⚠️ The hard remaining piece: a local plaintext message store
 
@@ -113,3 +123,4 @@ All 14 currently pass.
   imports, then an on-device round-trip between two real installs before
   flipping the seam from plaintext to E2EE. Ship the seam behind a default-OFF
   flag first.
+/

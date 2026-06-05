@@ -27,6 +27,7 @@ import { DeviceMotion } from 'expo-sensors';
 import * as Sharing from 'expo-sharing';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { E2EE_ENABLED } from '../constants/flags';
 import {
   ActivityIndicator,
   Alert,
@@ -190,6 +191,13 @@ export default function ChatScreen() {
         setLoading(true);
         // Start the queue subsystem once (safe to call repeatedly).
         initQueue();
+        // Provision/publish this device's E2EE key bundle (no-op unless the
+        // flag is on; idempotent + cheap after the first call this session).
+        if (E2EE_ENABLED) {
+          import('../services/crypto/e2eeSession.rn')
+            .then(m => m.provisionE2EEIdentity())
+            .catch(() => {});
+        }
 
         const [me, c, msgs, pendingQ] = await Promise.all([
           getCurrentUserAsync(),
@@ -2092,7 +2100,7 @@ function MessageBubble({
   useEffect(() => {
     let cancel = false;
     (async () => {
-      const text = await decryptFromChat(chatId, msg.senderId, msg.content);
+      const text = await decryptFromChat(chatId, msg.senderId, msg.content, msg.id);
       if (!cancel) setPlain(text);
     })();
     return () => { cancel = true; };
@@ -2102,7 +2110,7 @@ function MessageBubble({
     if (!replyTarget) { setReplyPlain(''); return; }
     let cancel = false;
     (async () => {
-      const t = await decryptFromChat(chatId, replyTarget.senderId, replyTarget.content);
+      const t = await decryptFromChat(chatId, replyTarget.senderId, replyTarget.content, replyTarget.id);
       if (!cancel) setReplyPlain(t);
     })();
     return () => { cancel = true; };

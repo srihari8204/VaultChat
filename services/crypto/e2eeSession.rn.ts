@@ -17,6 +17,7 @@ import { api } from '../../lib/api';
 import { createE2EESession } from './e2eeSession';
 import type { KVStore, KeyBundleTransport, PublishBundle, FetchedBundle } from './e2eeSession';
 import { chunkedKV } from './e2eeStorage';
+import { createMessageStore, createKeyedLock } from './messageStore';
 
 // SecureStore keys must match /^[A-Za-z0-9._-]+$/ — our keys (vc_e2ee_*,
 // peer UUIDs, and `__cN` chunk suffixes) all comply.
@@ -48,13 +49,53 @@ export const e2ee = createE2EESession({
   transport: apiTransport,
 });
 
+// ── high-level glue used by lib/chatService.ts ─────────────────────────
+// Plaintext cache (forward secrecy → can't re-derive old keys) + per-peer
+// serialization (chat.tsx decrypts every visible bubble concurrently).
+const msgStore = createMessageStore(chunkedKV(secureStoreKV));
+const withLock = createKeyedLock();
+
+export function isEnvelope(wire: string | null | undefined): boolean {
+  return e2ee.isEnvelope(wire);
+}
+
+/** Encrypt one outgoing message for a direct-chat peer (serialized per peer). */
+export function e2eeEncrypt(_chatId: string, peerId: string, plaintext: string): Promise<string> {
+  return withLock(peerId, () => e2ee.encryptForPeer(peerId, plaintext));
+}
+
+/** Decrypt one incoming message; cache-first by (chatId, messageId). */
+export function e2eeDecrypt(chatId: string, peerId: string, messageId: number, wire: string): Promise<string> {
+  return withLock(peerId, async () => {
+    if (messageId > 0) {
+      const cached = await msgStore.get(chatId, messageId);
+      if (cached !== null) return cached;
+    }
+    const plaintext = await e2ee.decryptFromPeer(peerId, wire);
+    if (messageId > 0) await msgStore.put(chatId, messageId, plaintext);
+    return plaintext;
+  });
+}
+
+/** Cache the plaintext of an own-sent message once the server assigns its id. */
+export async function e2eeCachePlaintext(chatId: string, messageId: number, plaintext: string): Promise<void> {
+  if (messageId > 0) await msgStore.put(chatId, messageId, plaintext);
+}
+
 /**
- * Call once after sign-in (and periodically) to make sure this device has a
- * published key bundle so peers can start E2EE sessions with it. Safe to call
- * repeatedly — it only regenerates if no identity exists and tops up OTPKs.
+ * Provision + publish this device's key bundle so peers can start E2EE
+ * sessions. Idempotent and cheap after the first successful call this session.
  */
+let _provisioned = false;
 export async function provisionE2EEIdentity(): Promise<void> {
-  await e2ee.ensurePublished();
+  if (_provisioned) return;
+  try {
+    await e2ee.ensurePublished();
+    _provisioned = true;
+  } catch (e) {
+    _provisioned = false; // allow a later retry
+    throw e;
+  }
 }
 
 export default e2ee;

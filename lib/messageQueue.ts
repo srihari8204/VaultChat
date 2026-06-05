@@ -18,7 +18,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import { api } from './api';
-import { encryptForChat, type Message } from './chatService';
+import { encryptForChat, cacheOwnPlaintext, type Message } from './chatService';
 
 const STORAGE_KEY      = 'vc_msg_queue_v1';
 const MAX_ATTEMPTS     = 5;
@@ -135,10 +135,12 @@ let flushScheduled: any = null;
 
 async function postOnce(item: QueuedMessage): Promise<Message> {
   const content = await encryptForChat(item.chatId, item.plaintext);
-  return api<Message>(`/chats/${encodeURIComponent(item.chatId)}/messages`, {
+  const real = await api<Message>(`/chats/${encodeURIComponent(item.chatId)}/messages`, {
     method: 'POST',
     json: { content, type: item.type, replyToId: item.replyToId, meta: item.meta ?? null },
   });
+  if (content !== item.plaintext) await cacheOwnPlaintext(item.chatId, real?.id, item.plaintext);
+  return real;
 }
 
 /**

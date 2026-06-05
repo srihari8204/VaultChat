@@ -5,6 +5,7 @@
 import * as Crypto from 'expo-crypto';
 import { api, getAccessToken } from './api';
 import { SERVER_URL } from '../constants/server';
+import { E2EE_ENABLED } from '../constants/flags';
 
 export interface ChatSummary {
   id:            string;
@@ -99,29 +100,78 @@ export interface Message {
   vanishAfterRead?: boolean;       // Vanish Mode: delete once every non-sender member has read it
 }
 
-// ─── Encryption seam (Phase 3b: replace these with real crypto) ──────
-// For now content goes over the wire as plaintext. The server stores it
-// opaque either way — no schema change when we swap to real ciphertext.
+// ─── Encryption seam (P0.1: real E2EE, behind E2EE_ENABLED) ──────────
+// OFF (default): pure pass-through — identical to the pre-E2EE behaviour and
+// none of the crypto is loaded at runtime. ON: direct-chat messages use the
+// per-peer Double Ratchet (services/crypto). Groups + pre-E2EE history stay
+// plaintext. Everything is lazy-imported and every failure falls back to
+// plaintext, so messaging never breaks.
 
-export async function encryptForChat(_chatId: string, plaintext: string): Promise<string> {
-  // TODO Phase 3b: encrypt with the chat's group key / double-ratchet session.
-  return plaintext;
+// chatId → direct-chat peer, populated by listChats/getChat below.
+const _chatPeer = new Map<string, { type: 'direct' | 'group'; peerId: string | null }>();
+function rememberChatPeer(c: { id: string; type: 'direct' | 'group'; peerUserId?: string | null }): void {
+  _chatPeer.set(c.id, { type: c.type, peerId: c.peerUserId ?? null });
+}
+function directPeerOf(chatId: string): string | null {
+  const e = _chatPeer.get(chatId);
+  return e && e.type === 'direct' ? e.peerId : null;
 }
 
-export async function decryptFromChat(_chatId: string, _senderId: string, ciphertext: string | null): Promise<string> {
-  // TODO Phase 3b: decrypt with the sender's session keys.
-  return ciphertext ?? '';
+export async function encryptForChat(chatId: string, plaintext: string): Promise<string> {
+  if (!E2EE_ENABLED) return plaintext;
+  const peerId = directPeerOf(chatId);
+  if (!peerId) return plaintext; // group / unknown chat → not yet E2EE
+  try {
+    const e2ee = await import('../services/crypto/e2eeSession.rn');
+    return await e2ee.e2eeEncrypt(chatId, peerId, plaintext);
+  } catch (err) {
+    if (__DEV__) console.warn('[e2ee] encrypt fell back to plaintext:', (err as any)?.message);
+    return plaintext; // never block sending
+  }
+}
+
+export async function decryptFromChat(
+  chatId: string,
+  senderId: string,
+  ciphertext: string | null,
+  messageId?: number,
+): Promise<string> {
+  if (ciphertext == null) return '';
+  if (!E2EE_ENABLED) return ciphertext;
+  try {
+    const e2ee = await import('../services/crypto/e2eeSession.rn');
+    if (!e2ee.isEnvelope(ciphertext)) return ciphertext; // pre-E2EE plaintext history
+    const peerId = directPeerOf(chatId) ?? senderId;     // peer = the other party
+    return await e2ee.e2eeDecrypt(chatId, peerId, messageId ?? 0, ciphertext);
+  } catch (err) {
+    if (__DEV__) console.warn('[e2ee] decrypt failed:', (err as any)?.message);
+    return '🔒 unable to decrypt';
+  }
+}
+
+// Cache an own-sent message's plaintext once the server assigns its id, so the
+// sender renders it from the local store (server content is ciphertext).
+export async function cacheOwnPlaintext(chatId: string, messageId: number | undefined, plaintext: string): Promise<void> {
+  if (!E2EE_ENABLED || !messageId || messageId <= 0) return;
+  try {
+    const e2ee = await import('../services/crypto/e2eeSession.rn');
+    await e2ee.e2eeCachePlaintext(chatId, messageId, plaintext);
+  } catch {}
 }
 
 // ─── REST ───────────────────────────────────────────────────────────
 
 export async function listChats(opts: { includeHidden?: boolean } = {}): Promise<ChatSummary[]> {
   const qs = opts.includeHidden ? '?includeHidden=1' : '';
-  return api<ChatSummary[]>(`/chats${qs}`);
+  const rows = await api<ChatSummary[]>(`/chats${qs}`);
+  for (const r of rows) rememberChatPeer(r);
+  return rows;
 }
 
 export async function getChat(chatId: string): Promise<ChatDetail> {
-  return api<ChatDetail>(`/chats/${encodeURIComponent(chatId)}`);
+  const c = await api<ChatDetail>(`/chats/${encodeURIComponent(chatId)}`);
+  rememberChatPeer(c);
+  return c;
 }
 
 /**
@@ -169,10 +219,12 @@ export async function sendMessage(
   opts: { replyToId?: number | null; meta?: any } = {},
 ): Promise<Message> {
   const content = await encryptForChat(chatId, plaintext);
-  return api<Message>(`/chats/${encodeURIComponent(chatId)}/messages`, {
+  const msg = await api<Message>(`/chats/${encodeURIComponent(chatId)}/messages`, {
     method: 'POST',
     json: { content, type, replyToId: opts.replyToId ?? null, meta: opts.meta ?? null },
   });
+  if (content !== plaintext) await cacheOwnPlaintext(chatId, msg?.id, plaintext);
+  return msg;
 }
 
 export async function editMessage(chatId: string, msgId: number, plaintext: string): Promise<Message> {
