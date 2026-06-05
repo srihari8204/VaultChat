@@ -1,0 +1,72 @@
+# VaultChat real E2EE — core + integration plan
+
+`services/crypto/e2ee.ts` is the **genuine** end-to-end-encryption core: real
+X3DH key agreement + Double Ratchet, built on audited pure-JS primitives
+(`@noble/curves`, `@noble/hashes`, `@noble/ciphers`). It replaces the fake
+skeleton in `services/doubleRatchetService.ts`, whose `dhExchange` was HMAC
+(not Diffie–Hellman) and therefore provided **no** confidentiality.
+
+Because it is pure JS, the same code runs in Node (where it is tested) and in
+Hermes/React Native — no native module, no Node↔RN crypto divergence.
+
+## Status: PROVEN, not yet wired
+
+The core is complete and unit-tested but **not connected** to the live message
+path. `lib/chatService.ts`’s `encryptForChat` / `decryptFromChat` are still
+pass-through. Nothing imports `e2ee.ts` yet, so this is non-breaking.
+
+## Run the self-test
+
+```bash
+# Node ≥ 22 (native TS):
+node --experimental-strip-types services/crypto/e2ee.selftest.ts
+
+# Any Node 18–20 (transpile via the backend's esbuild):
+node -e "require('./vaultchat-backend/node_modules/esbuild').buildSync({entryPoints:['services/crypto/e2ee.selftest.ts'],bundle:true,platform:'node',format:'cjs',outfile:'services/crypto/_selftest.cjs'})" && node services/crypto/_selftest.cjs && rm services/crypto/_selftest.cjs
+```
+
+Covers: X3DH SK agreement (±OPK), forged-prekey rejection, bidirectional
+ratcheting, distinct per-message keys, out-of-order delivery, AEAD tamper
+rejection, wrong-recipient confidentiality, state serialization, wire encode.
+All 14 currently pass.
+
+## Wiring plan (the remaining work)
+
+1. **Identity provisioning.** On first login, generate IK (X25519), a signing
+   key (Ed25519), an SPK (X25519, signed), and a batch of OPKs. Upload publics
+   via the live `POST /user/keybundle`; keep privates in SecureStore. Confirm
+   the backend bundle field names map to `PreKeyBundle` (identityKey,
+   signingKey, signedPreKey, signedPreKeySig, oneTimePreKey[+id]) — adjust the
+   adapter, **not** the routes (they store opaque blobs).
+2. **Session bootstrap.** First message to a peer: `GET /user/:id/keybundle`
+   → `x3dhInitiator` → `ratchetInitAlice`. Send the `InitialHeader`
+   (ephemeral + IK + consumed OPK id) in `meta.x3dh` alongside the first
+   `encodeEnvelope(...)` ciphertext. Receiver runs `x3dhResponder` +
+   `ratchetInitBob` on first inbound message.
+3. **Seam swap.** Implement `encryptForChat`/`decryptFromChat` over a
+   per-(chatId, peerId) `RatchetState` persisted via `serializeState` /
+   `deserializeState` in SecureStore. Keep call sites unchanged.
+4. **Versioning / migration.** Mark encrypted messages (e.g. `meta.enc='dr1'`)
+   so pre-E2EE plaintext history still renders. `decryptFromChat` returns
+   plaintext as-is when the marker is absent.
+5. **Offline queue** (`lib/messageQueue.ts`) — encrypt-on-enqueue so queued
+   blobs are already ciphertext; the ratchet advance must be committed
+   atomically with the enqueue to avoid key reuse.
+6. **Search** (`app/search.tsx`) — server `LIKE` over `content` returns nothing
+   once content is ciphertext. Switch to a local AsyncStorage index built from
+   decrypted messages.
+7. **Groups** — sender-keys: one symmetric chain per sender, the sender key
+   distributed to members over the pairwise ratchet sessions on join.
+8. **Attachments** — per-file AES-GCM; wrap the file key inside the message
+   envelope.
+
+## Security notes / not-yet-done
+
+- **No third-party review.** Do not advertise "Signal Protocol" in the store
+  listing until the wiring above is complete and independently reviewed.
+- Identity model uses an X25519 IK for DH + a separate Ed25519 key for SPK
+  signatures (rather than XEdDSA over a single key). Safety-number / key
+  verification UI is future work.
+- `MAX_SKIP` is 1000; tune against expected out-of-order windows.
+- No replay cache beyond the ratchet’s own monotonic chain semantics; the
+  transport (authenticated REST + per-message AEAD) is relied on for that.
