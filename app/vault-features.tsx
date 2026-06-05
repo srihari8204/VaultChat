@@ -18,7 +18,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-import * as Clipboard from 'expo-clipboard';
+import { copyAndAutoClear } from '../lib/clipboardSafe';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 
@@ -190,7 +190,7 @@ export default function VaultFeaturesScreen() {
 
   const handleCopyCode = async () => {
     if (!chatCode) return;
-    await Clipboard.setStringAsync(chatCode);
+    await copyAndAutoClear(chatCode);
     setCodeCopied(true);
     setTimeout(() => setCodeCopied(false), 2000);
   };

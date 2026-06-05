@@ -17,10 +17,16 @@ export interface RecordingResult {
   filename:   string;
   mime:       string;
   durationMs: number;
+  // 0..1 normalized amplitude samples, downsampled to <= 48 bars so the
+  // bubble UI can render a Telegram-style waveform without parsing PCM.
+  // Empty array if the platform didn't deliver metering data.
+  waveform:   number[];
 }
 
 let current: Audio.Recording | null = null;
 let startedAt = 0;
+// Raw dB samples accumulated by the status callback; dropped on cancel/stop.
+let meterSamples: number[] = [];
 
 async function ensureMicPermission(): Promise<void> {
   const perm = await Audio.requestPermissionsAsync();
@@ -65,9 +71,41 @@ export async function start(): Promise<void> {
     },
     web: { mimeType: 'audio/webm', bitsPerSecond: 96000 },
   });
+  // Sample meter ~10 times per second. expo-av emits `metering` in dB
+  // (-160 = silence, 0 = peak). We collect raw and downsample on stop.
+  meterSamples = [];
+  recording.setProgressUpdateInterval(100);
+  recording.setOnRecordingStatusUpdate((status: any) => {
+    if (!status?.isRecording) return;
+    const m = (status as any).metering;
+    if (typeof m === 'number' && Number.isFinite(m)) meterSamples.push(m);
+  });
+
   await recording.startAsync();
   current = recording;
   startedAt = Date.now();
+}
+
+// Reduce a long dB stream to ~32 normalized [0..1] bars by averaging
+// chunks. dB values are typically [-60..0]; clamp + scale so anything
+// quieter than -60 dB reads as 0 and 0 dB reads as 1.
+function downsampleMeters(raw: number[], bars: number): number[] {
+  if (raw.length === 0) return [];
+  const targetBars = Math.min(bars, raw.length);
+  const chunkSize  = raw.length / targetBars;
+  const out: number[] = [];
+  for (let i = 0; i < targetBars; i++) {
+    const start = Math.floor(i * chunkSize);
+    const end   = Math.floor((i + 1) * chunkSize);
+    let sum = 0, n = 0;
+    for (let j = start; j < end && j < raw.length; j++) { sum += raw[j]; n++; }
+    const avgDb = n > 0 ? sum / n : -60;
+    const clamped = Math.max(-60, Math.min(0, avgDb));
+    // Map [-60..0] dB → [0..1] amplitude. Floor at 0.05 so a "silent"
+    // bar still renders a hint of itself (more visually consistent).
+    out.push(Math.max(0.05, (clamped + 60) / 60));
+  }
+  return out;
 }
 
 /**
@@ -86,10 +124,12 @@ export async function stop(): Promise<RecordingResult | null> {
   const uri = recording.getURI();
   if (!uri) return null;
   const durationMs = Math.max(500, Date.now() - startedAt);
+  const waveform   = downsampleMeters(meterSamples, 32);
+  meterSamples = [];
   startedAt = 0;
   const filename = `voice-${Date.now()}.m4a`;
   const mime     = Platform.OS === 'web' ? 'audio/webm' : 'audio/m4a';
-  return { uri, filename, mime, durationMs };
+  return { uri, filename, mime, durationMs, waveform };
 }
 
 /** Throw away the active recording. */
@@ -98,6 +138,7 @@ export async function cancel(): Promise<void> {
   const recording = current;
   current = null;
   startedAt = 0;
+  meterSamples = [];
   try { await recording.stopAndUnloadAsync(); } catch {}
 }
 

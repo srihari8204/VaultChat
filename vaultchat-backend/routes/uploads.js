@@ -28,7 +28,9 @@ const jwtUtil = require('../jwt');
 const router = express.Router();
 
 const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR || path.join(process.cwd(), 'uploads'));
-const MAX_BYTES  = parseInt(process.env.UPLOAD_MAX_BYTES || (20 * 1024 * 1024).toString(), 10);
+// 50 MB default so a ~30 second 1080p clip fits without bumping env.
+// Override via env in production once we know real distribution.
+const MAX_BYTES  = parseInt(process.env.UPLOAD_MAX_BYTES || (50 * 1024 * 1024).toString(), 10);
 
 // Ensure base dir exists at module load
 try { fs.mkdirSync(UPLOAD_DIR, { recursive: true }); } catch {}
@@ -64,21 +66,26 @@ const upload = multer({
 });
 
 // ── POST /uploads ────────────────────────────────────────────
+//   ?viewOnce=1  marks the attachment view-once (first non-owner GET
+//                triggers a one-way flip of viewed_at; subsequent GETs
+//                from non-owners get 410 Gone).
 router.post('/', jwtUtil.requireAuth, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'file (multipart) required' });
     const relPath = path.relative(UPLOAD_DIR, req.file.path);
+    const viewOnce = req.query?.viewOnce === '1' || req.query?.viewOnce === 'true';
 
     const r = await req.dbQuery(
-      `INSERT INTO attachments (owner_user_id, filename, mime_type, size_bytes, storage_path)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, mime_type, size_bytes, filename`,
+      `INSERT INTO attachments (owner_user_id, filename, mime_type, size_bytes, storage_path, view_once)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, mime_type, size_bytes, filename, view_once`,
       [
         req.user.id,
         (req.file.originalname || '').slice(0, 255),
         (req.file.mimetype    || 'application/octet-stream').slice(0, 100),
         req.file.size,
         relPath,
+        viewOnce,
       ]
     );
 
@@ -88,6 +95,7 @@ router.post('/', jwtUtil.requireAuth, upload.single('file'), async (req, res) =>
       mime:     row.mime_type,
       size:     row.size_bytes,
       filename: row.filename,
+      viewOnce: !!row.view_once,
     });
   } catch (err) {
     console.error('[uploads POST]', err.message);
@@ -106,7 +114,8 @@ router.post('/', jwtUtil.requireAuth, upload.single('file'), async (req, res) =>
 router.get('/:id', jwtUtil.requireAuth, async (req, res) => {
   try {
     const r = await req.dbQuery(
-      `SELECT id, owner_user_id, filename, mime_type, size_bytes, storage_path
+      `SELECT id, owner_user_id, filename, mime_type, size_bytes, storage_path,
+              view_once, viewed_at
        FROM attachments WHERE id = $1 LIMIT 1`,
       [req.params.id]
     );
@@ -133,6 +142,12 @@ router.get('/:id', jwtUtil.requireAuth, async (req, res) => {
         );
         if (!asPhoto.rows[0]) return res.status(403).json({ error: 'Forbidden' });
       }
+
+      // View-once gate: non-owner after consumption gets 410 Gone.
+      // Owners can always re-fetch (so the sender can review their send).
+      if (att.view_once && att.viewed_at) {
+        return res.status(410).json({ error: 'This media has already been viewed and is no longer available.' });
+      }
     }
 
     const absPath = path.join(UPLOAD_DIR, att.storage_path);
@@ -150,6 +165,36 @@ router.get('/:id', jwtUtil.requireAuth, async (req, res) => {
   } catch (err) {
     console.error('[uploads GET]', err.message);
     res.status(500).json({ error: 'Download failed' });
+  }
+});
+
+// ── POST /uploads/:id/viewed ─────────────────────────────────
+// Recipient client calls this when the view-once bubble reveals the media.
+// Idempotent: only the first call (non-owner, view_once=TRUE, not yet
+// viewed) actually flips viewed_at. After that the row is "consumed" and
+// subsequent GETs from non-owners get 410.
+router.post('/:id/viewed', jwtUtil.requireAuth, async (req, res) => {
+  try {
+    const r = await req.dbQuery(
+      `SELECT id, owner_user_id, view_once, viewed_at FROM attachments WHERE id = $1 LIMIT 1`,
+      [req.params.id]
+    );
+    const att = r.rows[0];
+    if (!att) return res.status(404).json({ error: 'Not found' });
+    if (!att.view_once) return res.json({ ok: true, noop: true });
+    // Owners don't "consume" their own uploads.
+    if (att.owner_user_id === req.user.id) return res.json({ ok: true, noop: true });
+    if (att.viewed_at) return res.json({ ok: true, alreadyViewed: true });
+
+    await req.dbQuery(
+      `UPDATE attachments SET viewed_at = NOW()
+        WHERE id = $1 AND view_once = TRUE AND viewed_at IS NULL`,
+      [req.params.id]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[uploads viewed]', err.message);
+    res.status(500).json({ error: 'Failed to mark viewed' });
   }
 });
 

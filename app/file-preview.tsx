@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, Stack } from 'expo-router';
 import * as FileSystem from 'expo-file-system/legacy';
-import * as Clipboard from 'expo-clipboard';
+import { copyAndAutoClear } from '../lib/clipboardSafe';
 
 const C = { bg: '#FFFFFF', accent: '#4A9FFF', card: '#161B22', green: '#10B981' };
 
@@ -162,7 +162,7 @@ export default function FilePreviewScreen() {
   }, [filename, uri, mediaUrl]);
 
   const copyAll = async () => {
-    await Clipboard.setStringAsync(content);
+    await copyAndAutoClear(content);
     Alert.alert('Copied!', 'File content copied to clipboard');
   };
 

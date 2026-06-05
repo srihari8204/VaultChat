@@ -10,10 +10,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, FlatList, TextInput,
-  Alert, Modal, Platform, ScrollView, Clipboard,
+  Alert, Modal, Platform, ScrollView,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { copyAndAutoClear } from '../lib/clipboardSafe';
 
 const DARK = '#0D0F14';
 const CARD = '#1A1D27';
@@ -162,11 +163,10 @@ export default function EncryptedNotesScreen() {
     setShowPassGen(true);
   };
 
-  // Copy with auto-clear (30s)
+  // Copy with auto-clear (30s) — delegates to the shared clipboardSafe util
   const copyWithAutoClear = (text: string) => {
-    Clipboard.setString(text);
+    copyAndAutoClear(text);
     Alert.alert('Copied', 'Clipboard will auto-clear in 30 seconds');
-    setTimeout(() => { Clipboard.setString(''); }, 30000);
   };
 
   // Filter notes

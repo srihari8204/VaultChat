@@ -4,8 +4,7 @@ import {
   Alert, SafeAreaView, ScrollView, Share, Platform,
   ActivityIndicator
 } from 'react-native';
-// FIX: replaced deprecated Clipboard from 'react-native' with expo-clipboard
-import * as Clipboard from 'expo-clipboard';
+import { copyAndAutoClear } from '../lib/clipboardSafe';
 import { useRouter } from 'expo-router';
 import { getAuth } from '@react-native-firebase/auth';
 
@@ -143,7 +142,7 @@ export default function SyncContactScreen() {
 
   // FIX: was Clipboard.setString (deprecated) � now uses expo-clipboard async API
   const copyCode = async () => {
-    await Clipboard.setStringAsync(myCode);
+    await copyAndAutoClear(myCode);
     Alert.alert('Copied!', 'Code copied to clipboard');
   };
 

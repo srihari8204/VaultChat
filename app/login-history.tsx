@@ -1,149 +1,226 @@
-// app/login-history.tsx — Login History & Device Management
-// Shows all login sessions with device info, location, time
-// Can revoke sessions remotely
-// Alerts trusted contacts on new device login
+// app/login-history.tsx — Active sessions + remote sign-out (Postgres).
+//
+// Backed by:
+//   GET    /user/sessions               — list active refresh tokens
+//   DELETE /user/sessions/:id           — revoke one
+//   DELETE /user/sessions               — revoke all except current
+//
+// "Session" = one non-revoked refresh token = one signed-in device.
+// The row flagged isCurrent is the device this app is running on.
 
-import React, { useState, useEffect } from 'react';
+import { useRouter } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, FlatList,
-  Alert, StatusBar, ActivityIndicator,
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { Stack } from 'expo-router';
-import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
-
-const C = { bg: '#FFFFFF', accent: '#4A9FFF', danger: '#FF3C6E', card: '#F9FAFB', green: '#10B981' };
+import {
+  listSessions,
+  revokeAllOtherSessions,
+  revokeSession,
+  type SessionRow,
+} from '../lib/chatService';
 
 export default function LoginHistoryScreen() {
-  const myUid = auth().currentUser?.uid || '';
-  const [sessions, setSessions] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const router = useRouter();
+  const [rows,       setRows]       = useState<SessionRow[]>([]);
+  const [loading,    setLoading]    = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error,      setError]      = useState<string | null>(null);
+
+  const fetchAll = useCallback(async () => {
+    try {
+      const list = await listSessions();
+      setRows(list);
+      setError(null);
+    } catch (e: any) {
+      setError(e?.message ?? 'Failed to load sessions');
+    }
+  }, []);
 
   useEffect(() => {
-    const loadSessions = async () => {
-      setLoading(true);
-      try {
-        const snap = await firestore().collection('users').doc(myUid)
-          .collection('loginHistory')
-          .orderBy('loginAt', 'desc')
-          .limit(20)
-          .get();
-        setSessions(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      } catch {}
-      setLoading(false);
-    };
-    loadSessions();
-  }, [myUid]);
+    (async () => { setLoading(true); await fetchAll(); setLoading(false); })();
+  }, [fetchAll]);
 
-  const revokeSession = (session: any) => {
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchAll();
+    setRefreshing(false);
+  }, [fetchAll]);
+
+  const onRevoke = useCallback((row: SessionRow) => {
+    if (row.isCurrent) return; // guarded in the UI too
     Alert.alert(
-      'Revoke Session?',
-      'End this login session on ' + (session.deviceName || 'Unknown device') + '?\n\nThis will force a re-login on that device.',
+      'Sign out this device?',
+      `${describeDevice(row.userAgent)} will be signed out immediately and need to log in again to access this account.`,
       [
-        { text: 'Cancel' },
-        { text: 'Revoke', style: 'destructive', onPress: async () => {
-          try {
-            await firestore().collection('users').doc(myUid)
-              .collection('loginHistory').doc(session.id)
-              .update({ revoked: true, revokedAt: firestore.FieldValue.serverTimestamp() });
-            setSessions(prev => prev.map(s => s.id === session.id ? { ...s, revoked: true } : s));
-            Alert.alert('Session Revoked', 'The device will need to re-authenticate.');
-          } catch {}
-        }},
-      ]
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Sign out', style: 'destructive', onPress: async () => {
+            try {
+              await revokeSession(row.id);
+              setRows(prev => prev.filter(r => r.id !== row.id));
+            } catch (e: any) {
+              Alert.alert('Could not revoke', e?.message ?? 'Try again');
+            }
+          }
+        },
+      ],
     );
-  };
+  }, []);
 
-  const formatTime = (ts: any) => {
-    if (!ts?.toDate) return 'Unknown';
-    const d = ts.toDate();
-    const now = Date.now();
-    const diff = now - d.getTime();
-    if (diff < 60000) return 'Just now';
-    if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
-    if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
-    return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
+  const onRevokeAllOthers = useCallback(() => {
+    Alert.alert(
+      'Sign out other devices?',
+      'Every other signed-in device will be revoked immediately. This device stays signed in.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Sign out others', style: 'destructive', onPress: async () => {
+            try {
+              const r = await revokeAllOtherSessions();
+              Alert.alert('Done', `${r.revoked} device(s) signed out.`);
+              await fetchAll();
+            } catch (e: any) {
+              Alert.alert('Failed', e?.message ?? 'Try again');
+            }
+          }
+        },
+      ],
+    );
+  }, [fetchAll]);
 
-  const getDeviceIcon = (platform: string) => {
-    if (platform === 'ios') return '\uD83D\uDCF1';
-    if (platform === 'android') return '\uD83E\uDD16';
-    if (platform === 'web') return '\uD83D\uDCBB';
-    return '\uD83D\uDCF1';
-  };
+  if (loading) {
+    return (
+      <View style={[S.screen, S.center]}>
+        <ActivityIndicator color={ACCENT} size="large" />
+      </View>
+    );
+  }
+
+  const others = rows.filter(r => !r.isCurrent);
 
   return (
-    <>
-      <Stack.Screen options={{ title: 'Login History', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
-      <View style={s.container}>
-        <StatusBar barStyle="light-content" />
-
-        {/* Summary */}
-        <View style={s.summary}>
-          <Text style={{ fontSize: 24 }}>{"\uD83D\uDD10"}</Text>
-          <View style={{ flex: 1, marginLeft: 12 }}>
-            <Text style={s.summaryTitle}>{sessions.filter(s => !s.revoked).length} active sessions</Text>
-            <Text style={s.summaryDesc}>New device logins alert your trusted contacts</Text>
-          </View>
-        </View>
-
-        {loading ? (
-          <ActivityIndicator color={C.accent} style={{ marginTop: 30 }} />
-        ) : (
-          <FlatList
-            data={sessions}
-            keyExtractor={s => s.id}
-            renderItem={({ item, index }) => {
-              const isCurrent = index === 0 && !item.revoked;
-              return (
-                <View style={[s.sessionRow, item.revoked && { opacity: 0.4 }]}>
-                  <View style={s.sessionIcon}>
-                    <Text style={{ fontSize: 24 }}>{getDeviceIcon(item.platform)}</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      <Text style={s.deviceName}>{item.deviceName || 'Unknown Device'}</Text>
-                      {isCurrent && <View style={s.currentBadge}><Text style={s.currentTxt}>Current</Text></View>}
-                      {item.revoked && <View style={[s.currentBadge, { backgroundColor: '#FF3C6E22' }]}><Text style={[s.currentTxt, { color: '#FF3C6E' }]}>Revoked</Text></View>}
-                    </View>
-                    <Text style={s.deviceInfo}>{item.platform || 'unknown'} {item.osVersion ? 'v' + item.osVersion : ''}</Text>
-                    <Text style={s.loginTime}>{formatTime(item.loginAt)}</Text>
-                    {item.location && <Text style={s.location}>{"\uD83D\uDCCD"} {item.location}</Text>}
-                    {item.ip && <Text style={s.ipText}>IP: {item.ip}</Text>}
-                  </View>
-                  {!isCurrent && !item.revoked && (
-                    <TouchableOpacity style={s.revokeBtn} onPress={() => revokeSession(item)}>
-                      <Text style={{ color: C.danger, fontSize: 11, fontWeight: '800' }}>Revoke</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              );
-            }}
-            ListEmptyComponent={
-              <View style={{ alignItems: 'center', paddingVertical: 40 }}>
-                <Text style={{ color: '#6B7280' }}>No login history yet</Text>
-              </View>
-            }
-          />
-        )}
+    <View style={S.screen}>
+      <View style={S.header}>
+        <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
+          <Text style={S.backTxt}>←</Text>
+        </TouchableOpacity>
+        <Text style={S.title}>Active devices</Text>
       </View>
-    </>
+
+      {error && <Text style={S.errorTxt}>{error}</Text>}
+
+      <FlatList
+        data={rows}
+        keyExtractor={(r) => r.id}
+        refreshControl={<RefreshControl tintColor={ACCENT} refreshing={refreshing} onRefresh={onRefresh} />}
+        contentContainerStyle={{ paddingBottom: 24 }}
+        ListHeaderComponent={
+          <View style={S.intro}>
+            <Text style={S.introTxt}>
+              {rows.length} signed-in device{rows.length === 1 ? '' : 's'}. Tap any other device to sign it out remotely.
+            </Text>
+          </View>
+        }
+        renderItem={({ item: r }) => (
+          <TouchableOpacity
+            style={[S.row, r.isCurrent && S.rowCurrent]}
+            onPress={() => onRevoke(r)}
+            activeOpacity={r.isCurrent ? 1 : 0.7}
+            disabled={r.isCurrent}
+          >
+            <View style={{ flex: 1 }}>
+              <View style={S.rowTop}>
+                <Text style={S.rowDevice} numberOfLines={1}>{describeDevice(r.userAgent)}</Text>
+                {r.isCurrent && <Text style={S.currentTag}>this device</Text>}
+              </View>
+              <Text style={S.rowSub} numberOfLines={1}>
+                {r.ip || 'IP unknown'} · last active {formatRelative(r.lastUsedAt || r.createdAt)}
+              </Text>
+              <Text style={S.rowSubSmall}>Signed in {formatRelative(r.createdAt)} · expires {formatRelative(r.expiresAt)}</Text>
+            </View>
+            {!r.isCurrent && <Text style={S.revokeTxt}>Sign out</Text>}
+          </TouchableOpacity>
+        )}
+        ListFooterComponent={
+          others.length > 0 ? (
+            <TouchableOpacity style={S.revokeAllBtn} onPress={onRevokeAllOthers} activeOpacity={0.85}>
+              <Text style={S.revokeAllTxt}>Sign out all other devices ({others.length})</Text>
+            </TouchableOpacity>
+          ) : null
+        }
+      />
+    </View>
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg, padding: 16 },
-  summary: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#E5E7EB' },
-  summaryTitle: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  summaryDesc: { color: '#9CA3AF', fontSize: 12, marginTop: 2 },
-  sessionRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: '#E5E7EB' },
-  sessionIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  deviceName: { color: '#1F2937', fontSize: 14, fontWeight: '700' },
-  deviceInfo: { color: '#9CA3AF', fontSize: 11, marginTop: 2 },
-  loginTime: { color: '#6B7280', fontSize: 11, marginTop: 1 },
-  location: { color: '#4A9FFF', fontSize: 11, marginTop: 2 },
-  ipText: { color: '#9CA3AF', fontSize: 10, marginTop: 1, fontFamily: 'monospace' },
-  currentBadge: { backgroundColor: '#10B98122', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
-  currentTxt: { color: '#10B981', fontSize: 10, fontWeight: '800' },
-  revokeBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: '#FF3C6E15', borderWidth: 1, borderColor: '#FF3C6E33' },
+// Squash a User-Agent string into a short device label. Order matters —
+// we check the most-specific tokens first ("iPhone" before "Mobile").
+function describeDevice(ua: string | null | undefined): string {
+  if (!ua) return 'Unknown device';
+  if (/Pixel/i.test(ua))            return `Android · Pixel`;
+  if (/Samsung|SM-/i.test(ua))      return `Android · Samsung`;
+  if (/OnePlus/i.test(ua))          return `Android · OnePlus`;
+  if (/iPhone/i.test(ua))           return `iPhone`;
+  if (/iPad/i.test(ua))             return `iPad`;
+  if (/Android/i.test(ua))          return `Android`;
+  if (/iOS/i.test(ua))              return `iOS`;
+  if (/VaultChat/i.test(ua))        return `VaultChat (mobile)`;
+  if (/Mac OS X/i.test(ua))         return `macOS`;
+  if (/Windows/i.test(ua))          return `Windows`;
+  return ua.length > 40 ? `${ua.slice(0, 40)}…` : ua;
+}
+
+function formatRelative(iso: string | null): string {
+  if (!iso) return 'never';
+  try {
+    const t = new Date(iso).getTime();
+    const diff = t - Date.now();
+    const abs  = Math.abs(diff);
+    if (abs < 60_000)      return diff > 0 ? 'in <1m' : 'just now';
+    if (abs < 3600_000)    return `${diff > 0 ? 'in ' : ''}${Math.floor(abs / 60_000)}m${diff > 0 ? '' : ' ago'}`;
+    if (abs < 86400_000)   return `${diff > 0 ? 'in ' : ''}${Math.floor(abs / 3600_000)}h${diff > 0 ? '' : ' ago'}`;
+    if (abs < 7 * 86400_000) return `${diff > 0 ? 'in ' : ''}${Math.floor(abs / 86400_000)}d${diff > 0 ? '' : ' ago'}`;
+    return new Date(iso).toLocaleDateString();
+  } catch { return ''; }
+}
+
+const DARK_BG = '#0D0F14';
+const CARD_BG = '#161A22';
+const BORDER  = '#1F2937';
+const TEXT    = '#E5E7EB';
+const SUBTLE  = '#9CA3AF';
+const ACCENT  = '#6C63FF';
+const DANGER  = '#EF4444';
+
+const S = StyleSheet.create({
+  screen:        { flex: 1, backgroundColor: DARK_BG },
+  center:        { justifyContent: 'center', alignItems: 'center' },
+
+  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
+  backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  backTxt:       { color: TEXT, fontSize: 26, fontWeight: '600' },
+  title:         { color: TEXT, fontSize: 22, fontWeight: '800' },
+
+  errorTxt:      { color: DANGER, paddingHorizontal: 16, paddingVertical: 8, fontSize: 12 },
+
+  intro:         { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4 },
+  introTxt:      { color: SUBTLE, fontSize: 12, lineHeight: 16 },
+
+  row:           { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
+  rowCurrent:    { backgroundColor: 'rgba(108,99,255,0.08)' },
+  rowTop:        { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  rowDevice:     { color: TEXT, fontSize: 15, fontWeight: '600', flex: 1 },
+  currentTag:    { color: ACCENT, fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1, borderColor: ACCENT, borderWidth: 1, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, overflow: 'hidden' },
+  rowSub:        { color: SUBTLE, fontSize: 12, marginTop: 4 },
+  rowSubSmall:   { color: SUBTLE, fontSize: 11, marginTop: 2, opacity: 0.7 },
+  revokeTxt:     { color: DANGER, fontSize: 12, fontWeight: '700' },
+
+  revokeAllBtn:  { marginHorizontal: 20, marginTop: 24, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: DANGER, backgroundColor: CARD_BG, alignItems: 'center' },
+  revokeAllTxt:  { color: DANGER, fontWeight: '700' },
 });

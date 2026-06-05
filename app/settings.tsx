@@ -213,6 +213,72 @@ export default function SettingsScreen() {
 
         <TouchableOpacity
           style={S.dataBtn}
+          onPress={() => router.push('/scheduled' as any)}
+          activeOpacity={0.85}
+        >
+          <Text style={S.dataBtnTxt}>📅 Scheduled messages</Text>
+        </TouchableOpacity>
+        <Text style={S.dataHint}>
+          Review and cancel any messages waiting to send at a future time.
+        </Text>
+
+        <TouchableOpacity
+          style={[S.dataBtn, { marginTop: 12 }]}
+          onPress={() => router.push('/bookmarks' as any)}
+          activeOpacity={0.85}
+        >
+          <Text style={S.dataBtnTxt}>🔖 Bookmarks</Text>
+        </TouchableOpacity>
+        <Text style={S.dataHint}>
+          Messages you've saved across all chats.
+        </Text>
+
+        <TouchableOpacity
+          style={[S.dataBtn, { marginTop: 12 }]}
+          onPress={() => router.push('/message-reminder' as any)}
+          activeOpacity={0.85}
+        >
+          <Text style={S.dataBtnTxt}>⏰ Message reminders</Text>
+        </TouchableOpacity>
+        <Text style={S.dataHint}>
+          Notifications you've scheduled for specific messages.
+        </Text>
+
+        <TouchableOpacity
+          style={[S.dataBtn, { marginTop: 12 }]}
+          onPress={() => router.push('/hidden-chats' as any)}
+          activeOpacity={0.85}
+        >
+          <Text style={S.dataBtnTxt}>🕶️ Hidden chats</Text>
+        </TouchableOpacity>
+        <Text style={S.dataHint}>
+          PIN-gated. Hidden chats stay invisible in the main list until you unlock them here.
+        </Text>
+
+        <TouchableOpacity
+          style={[S.dataBtn, { marginTop: 12 }]}
+          onPress={() => router.push('/login-history' as any)}
+          activeOpacity={0.85}
+        >
+          <Text style={S.dataBtnTxt}>🖥️ Active devices</Text>
+        </TouchableOpacity>
+        <Text style={S.dataHint}>
+          See where you're signed in and remotely sign out other devices.
+        </Text>
+
+        <TouchableOpacity
+          style={[S.dataBtn, { marginTop: 12 }]}
+          onPress={() => router.push('/ghost-mode' as any)}
+          activeOpacity={0.85}
+        >
+          <Text style={S.dataBtnTxt}>👻 Ghost Mode contacts</Text>
+        </TouchableOpacity>
+        <Text style={S.dataHint}>
+          People for whom you've hidden online, typing, read, or last-seen.
+        </Text>
+
+        <TouchableOpacity
+          style={[S.dataBtn, { marginTop: 12 }]}
           onPress={onExport}
           disabled={exporting}
           activeOpacity={0.85}

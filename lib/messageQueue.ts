@@ -31,6 +31,9 @@ export interface QueuedMessage {
   type:      'text';                 // only text for MVP
   plaintext: string;
   replyToId: number | null;
+  // Optional non-PII metadata (invisibleInk, etc.). Encrypted-server seam
+  // doesn't touch this — it travels through as-is into messages.meta.
+  meta:      any | null;
   attempts:  number;
   createdAt: number;
   lastError: string | null;
@@ -80,7 +83,7 @@ function newTempId(): string {
 export async function enqueueText(
   chatId: string,
   plaintext: string,
-  opts: { replyToId?: number | null } = {},
+  opts: { replyToId?: number | null; meta?: any | null } = {},
 ): Promise<QueuedMessage> {
   const msg: QueuedMessage = {
     tempId:    newTempId(),
@@ -88,6 +91,7 @@ export async function enqueueText(
     type:      'text',
     plaintext,
     replyToId: opts.replyToId ?? null,
+    meta:      opts.meta       ?? null,
     attempts:  0,
     createdAt: Date.now(),
     lastError: null,
@@ -133,7 +137,7 @@ async function postOnce(item: QueuedMessage): Promise<Message> {
   const content = await encryptForChat(item.chatId, item.plaintext);
   return api<Message>(`/chats/${encodeURIComponent(item.chatId)}/messages`, {
     method: 'POST',
-    json: { content, type: item.type, replyToId: item.replyToId, meta: null },
+    json: { content, type: item.type, replyToId: item.replyToId, meta: item.meta ?? null },
   });
 }
 

@@ -19,6 +19,9 @@ export interface ChatSummary {
   myRole:        'member' | 'admin' | 'owner';
   myLastReadId:  number | null;
   muted:         boolean;
+  pinned:        boolean;
+  archived:      boolean;
+  hidden:        boolean;
   unreadCount:   number;
   // Direct-chat only — the other user's profile snapshot (null for groups)
   peerUserId?:     string | null;
@@ -26,6 +29,38 @@ export interface ChatSummary {
   peerPhotoURL?:   string | null;
   peerOnline?:     boolean;
   peerLastSeenAt?: string | null;
+  // Per-user screenshot policy for this chat. Backend defaults to 'block'.
+  screenshotMode?: 'allow' | 'allow_notify' | 'block' | 'block_silent';
+  // Per-user Vanish Mode: while ON, new messages I send are flagged for
+  // hard-delete-on-all-read.
+  vanishMode?: boolean;
+}
+
+export type ScreenshotMode = 'allow' | 'allow_notify' | 'block' | 'block_silent';
+
+export async function setScreenshotMode(chatId: string, mode: ScreenshotMode): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/screenshot-mode`, {
+    method: 'PATCH',
+    json: { mode },
+  });
+}
+
+// Called by the chat screen when expo-screen-capture's listener fires
+// AND the current mode is `allow_notify` (or `block` on iOS where the
+// black-frame protection still lets the OS take a screenshot). Server
+// broadcasts a `screenshot_captured` socket event to chat-mates.
+export async function reportScreenshotCaptured(chatId: string): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/screenshot-captured`, { method: 'POST' });
+}
+
+// Vanish Mode (per-user, per-chat). While ON, every new message I send
+// in this chat is stamped vanish_after_read = TRUE and is hard-deleted
+// once every non-sender active member has read it.
+export async function setVanishMode(chatId: string, enabled: boolean): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/vanish-mode`, {
+    method: 'PATCH',
+    json: { enabled },
+  });
 }
 
 export interface ChatMember {
@@ -44,20 +79,24 @@ export interface ChatMember {
 }
 
 export interface ChatDetail extends ChatSummary {
-  members: ChatMember[];
+  members:              ChatMember[];
+  // Chat-level disappearing-messages timer. null = off.
+  disappearingSeconds?: number | null;
 }
 
 export interface Message {
   id:        number;
   chatId:    string;
   senderId:  string;
-  type:      'text' | 'image' | 'video' | 'audio' | 'file' | 'location' | 'system';
+  type:      'text' | 'image' | 'video' | 'audio' | 'file' | 'location' | 'system' | 'sticker' | 'poll';
   content:   string | null;        // opaque ciphertext (currently plaintext during Phase 3a)
   meta?:     any;
   replyToId: number | null;
   editedAt:  string | null;
   deletedAt: string | null;
   createdAt: string;
+  expiresAt?: string | null;       // disappearing-messages: hard-delete on/after this time
+  vanishAfterRead?: boolean;       // Vanish Mode: delete once every non-sender member has read it
 }
 
 // ─── Encryption seam (Phase 3b: replace these with real crypto) ──────
@@ -76,8 +115,9 @@ export async function decryptFromChat(_chatId: string, _senderId: string, cipher
 
 // ─── REST ───────────────────────────────────────────────────────────
 
-export async function listChats(): Promise<ChatSummary[]> {
-  return api<ChatSummary[]>('/chats');
+export async function listChats(opts: { includeHidden?: boolean } = {}): Promise<ChatSummary[]> {
+  const qs = opts.includeHidden ? '?includeHidden=1' : '';
+  return api<ChatSummary[]>(`/chats${qs}`);
 }
 
 export async function getChat(chatId: string): Promise<ChatDetail> {
@@ -161,6 +201,252 @@ export async function markDelivered(chatId: string, lastDeliveredMessageId: numb
   });
 }
 
+// ─── Polls ──────────────────────────────────────────────────────────
+// A poll is a message of type 'poll' whose content is the question and
+// whose meta.options is a string[] of choice labels. Votes are stored
+// separately keyed by message_id.
+export interface PollVoteSummary {
+  counts: Record<string, number>;  // optionIndex (string) → count
+  mine:   number[];                 // option indices I voted for
+  total:  number;
+}
+
+// Send a poll message. Allowed lengths: question ≤ 200, 2..10 options each ≤ 100.
+export async function createPoll(
+  chatId: string,
+  question: string,
+  options: string[],
+  allowMultiple = false,
+): Promise<Message> {
+  return sendMessage(chatId, question, 'poll', {
+    meta: { options, allowMultiple },
+  });
+}
+
+export async function voteOnPoll(
+  chatId: string, messageId: number, optionIndex: number,
+): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/messages/${messageId}/vote`, {
+    method: 'POST',
+    json:   { optionIndex },
+  });
+}
+
+export async function unvotePoll(
+  chatId: string, messageId: number, optionIndex: number,
+): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/messages/${messageId}/vote/${optionIndex}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function getPollVotes(
+  chatId: string, messageId: number,
+): Promise<PollVoteSummary> {
+  return api(`/chats/${encodeURIComponent(chatId)}/messages/${messageId}/votes`);
+}
+
+export async function getPollVotesBulk(
+  chatId: string, messageIds: number[],
+): Promise<Record<string, PollVoteSummary>> {
+  if (messageIds.length === 0) return {};
+  return api(`/chats/${encodeURIComponent(chatId)}/poll-votes?messageIds=${messageIds.join(',')}`);
+}
+
+// ─── Bookmarks (saved messages) ─────────────────────────────────────
+export interface BookmarkRow {
+  id:        string;
+  note:      string | null;
+  createdAt: string;
+  message:   {
+    id:        number;
+    chatId:    string;
+    chatType:  'direct' | 'group';
+    chatName:  string | null;
+    senderId:  string;
+    type:      Message['type'];
+    content:   string | null;
+    meta?:     any;
+    createdAt: string;
+    deletedAt: string | null;
+  } | null;
+}
+
+export async function listBookmarks(): Promise<BookmarkRow[]> {
+  return api<BookmarkRow[]>('/user/bookmarks');
+}
+
+export async function addBookmark(messageId: number, note?: string | null): Promise<{ id: string }> {
+  return api('/user/bookmarks', { method: 'POST', json: { messageId, note: note ?? null } });
+}
+
+export async function removeBookmark(id: string): Promise<void> {
+  await api(`/user/bookmarks/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+// ─── Stories (24-hour ephemeral posts) ──────────────────────────────
+export interface StoryItem {
+  id:           string;
+  attachmentId: string;
+  mediaType:    'image' | 'video';
+  caption:      string | null;
+  createdAt:    string;
+  expiresAt:    string;
+  seen:         boolean;
+}
+export interface StoryFeedEntry {
+  userId:    string;
+  name:      string | null;
+  email:     string | null;
+  photoURL:  string | null;
+  isMine:    boolean;
+  seenAll:   boolean;
+  latestAt:  string;
+  stories:   StoryItem[];
+}
+export interface StoryViewer {
+  userId:    string;
+  name:      string | null;
+  email:     string | null;
+  photoURL:  string | null;
+  viewedAt:  string;
+}
+
+export async function addStory(
+  attachmentId: string,
+  mediaType: 'image' | 'video',
+  caption?: string,
+): Promise<StoryItem> {
+  return api('/stories', { method: 'POST', json: { attachmentId, mediaType, caption } });
+}
+
+export async function listStoriesFeed(): Promise<StoryFeedEntry[]> {
+  return api('/stories/feed');
+}
+
+export async function listStoryViews(storyId: string): Promise<StoryViewer[]> {
+  return api(`/stories/${encodeURIComponent(storyId)}/views`);
+}
+
+export async function markStoryViewed(storyId: string): Promise<void> {
+  await api(`/stories/${encodeURIComponent(storyId)}/viewed`, { method: 'POST' });
+}
+
+export async function deleteStory(storyId: string): Promise<void> {
+  await api(`/stories/${encodeURIComponent(storyId)}`, { method: 'DELETE' });
+}
+
+// ─── Scheduled messages ─────────────────────────────────────────────
+// Server holds the row in scheduled_messages; a worker delivers it at
+// send_at. POST returns the pending row; GET lists mine (pending + sent
+// in last 7 days); DELETE cancels a still-pending row.
+export interface ScheduledMessageRow {
+  id:         string;
+  chatId:     string;
+  chatName?:  string | null;
+  chatType?:  'direct' | 'group';
+  type:       Message['type'];
+  content:    string | null;
+  meta?:      any;
+  replyToId:  number | null;
+  sendAt:     string;
+  sentAt?:    string | null;
+  messageId?: number | null;
+  createdAt:  string;
+}
+
+export async function listScheduledMessages(): Promise<ScheduledMessageRow[]> {
+  return api<ScheduledMessageRow[]>('/user/scheduled-messages');
+}
+
+export async function scheduleMessage(opts: {
+  chatId:    string;
+  sendAt:    string;                 // ISO timestamp
+  type?:     Message['type'];        // default 'text'
+  content?:  string | null;
+  meta?:     any;
+  replyToId?: number | null;
+}): Promise<ScheduledMessageRow> {
+  return api('/user/scheduled-messages', { method: 'POST', json: opts });
+}
+
+export async function cancelScheduledMessage(id: string): Promise<void> {
+  await api(`/user/scheduled-messages/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+// ─── Ghost Mode (per-contact privacy overrides) ─────────────────────
+export interface GhostMode {
+  targetId:      string;
+  hideOnline:    boolean;
+  hideTyping:    boolean;
+  hideRead:      boolean;
+  hideLastSeen:  boolean;
+  updatedAt?:    string;
+  // Joined-from-users fields (only present in /ghost-mode list endpoint)
+  name?:         string | null;
+  email?:        string | null;
+  photoURL?:     string | null;
+}
+
+export async function listGhostMode(): Promise<GhostMode[]> {
+  return api<GhostMode[]>('/user/ghost-mode');
+}
+
+export async function getGhostMode(targetId: string): Promise<GhostMode> {
+  return api<GhostMode>(`/user/ghost-mode/${encodeURIComponent(targetId)}`);
+}
+
+export async function setGhostMode(
+  targetId: string,
+  patch: Partial<Pick<GhostMode, 'hideOnline' | 'hideTyping' | 'hideRead' | 'hideLastSeen'>>,
+): Promise<void> {
+  await api(`/user/ghost-mode/${encodeURIComponent(targetId)}`, {
+    method: 'PUT',
+    json: patch,
+  });
+}
+
+export async function clearGhostMode(targetId: string): Promise<void> {
+  await api(`/user/ghost-mode/${encodeURIComponent(targetId)}`, { method: 'DELETE' });
+}
+
+// ─── Sessions (login alerts + remote kill) ──────────────────────────
+export interface SessionRow {
+  id:         string;
+  userAgent:  string | null;
+  ip:         string | null;
+  createdAt:  string;
+  lastUsedAt: string | null;
+  expiresAt:  string;
+  isCurrent:  boolean;
+}
+
+// Pass the user's own refresh token in X-Current-Refresh so the server
+// can flag which row is "current" (and so revoke-all-others can preserve
+// it). We pull from SecureStore via getRefreshToken().
+async function currentRefreshHeader(): Promise<Record<string, string>> {
+  const { getRefreshToken } = await import('./api');
+  const t = await getRefreshToken();
+  return t ? { 'X-Current-Refresh': t } : {};
+}
+
+export async function listSessions(): Promise<SessionRow[]> {
+  return api<SessionRow[]>('/user/sessions', {
+    headers: await currentRefreshHeader(),
+  });
+}
+
+export async function revokeSession(id: string): Promise<void> {
+  await api(`/user/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export async function revokeAllOtherSessions(): Promise<{ revoked: number }> {
+  return api('/user/sessions', {
+    method: 'DELETE',
+    headers: await currentRefreshHeader(),
+  });
+}
+
 // ─── GDPR export / account delete (Day 15) ──────────────────────────
 export async function deleteAccount(): Promise<void> {
   await api('/user/account', { method: 'DELETE' });
@@ -184,9 +470,15 @@ export async function exportMyData(): Promise<string> {
 // ─── Group admin (Day 14) ───────────────────────────────────────────
 export async function updateChat(
   chatId: string,
-  patch: { name?: string; photoURL?: string },
+  patch: { name?: string; photoURL?: string; disappearingSeconds?: number | null },
 ): Promise<void> {
   await api(`/chats/${encodeURIComponent(chatId)}`, { method: 'PATCH', json: patch });
+}
+
+// Convenience: set or clear the chat's disappearing-messages timer.
+// Pass null/0 to turn off.
+export async function setDisappearing(chatId: string, seconds: number | null): Promise<void> {
+  await updateChat(chatId, { disappearingSeconds: seconds });
 }
 
 export async function addChatMembers(
@@ -238,6 +530,40 @@ export async function muteChat(chatId: string, muted: boolean): Promise<void> {
     method: 'POST',
     json: { muted },
   });
+}
+
+// ─── Pin / Archive (P1 polish) ──────────────────────────────────────
+export async function pinChat(chatId: string, pinned: boolean): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/pin`, {
+    method: 'POST',
+    json: { pinned },
+  });
+}
+export async function archiveChat(chatId: string, archived: boolean): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/archive`, {
+    method: 'POST',
+    json: { archived },
+  });
+}
+// Hide / unhide a chat. Hidden chats vanish from the default GET /chats
+// response and the realtime list refresh; they're still reachable via
+// the PIN-gated /hidden-chats screen.
+export async function setHidden(chatId: string, hidden: boolean): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/hidden`, {
+    method: 'PATCH',
+    json: { hidden },
+  });
+}
+
+// Verify the user's saved profile PIN. Returns { ok: true|false } —
+// the server-side route is hash-only so we can't recover the PIN, just
+// check it. Used by the hidden-chats screen as a gate.
+export async function verifyPin(pin: string): Promise<boolean> {
+  const r = await api<{ ok: boolean }>('/user/pin/verify', {
+    method: 'POST',
+    json: { pin },
+  });
+  return !!r?.ok;
 }
 
 // ─── Settings / Privacy (Day 11) ────────────────────────────────────
@@ -396,6 +722,7 @@ export async function uploadAttachment(
   uri: string,
   filename: string,
   mime: string,
+  opts: { viewOnce?: boolean } = {},
 ): Promise<UploadResult> {
   const token = await getAccessToken();
   if (!token) throw new Error('Not signed in');
@@ -404,7 +731,10 @@ export async function uploadAttachment(
   // React Native's FormData accepts {uri, name, type} objects for files
   form.append('file', { uri, name: filename, type: mime } as any);
 
-  const res = await fetch(`${SERVER_URL}/uploads`, {
+  // viewOnce=1 tells the backend to set attachments.view_once=TRUE so the
+  // first non-owner GET hard-blocks subsequent reads.
+  const qs = opts.viewOnce ? '?viewOnce=1' : '';
+  const res = await fetch(`${SERVER_URL}/uploads${qs}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
     body: form,
@@ -415,6 +745,13 @@ export async function uploadAttachment(
     throw new Error(msg);
   }
   return res.json() as Promise<UploadResult>;
+}
+
+// Mark a view-once attachment as consumed. Called by the recipient's
+// client when the bubble first reveals the media. Server-side, idempotent
+// — only the first call actually flips the flag.
+export async function markAttachmentViewed(attachmentId: string): Promise<void> {
+  await api(`/uploads/${encodeURIComponent(attachmentId)}/viewed`, { method: 'POST' });
 }
 
 /**

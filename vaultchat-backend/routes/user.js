@@ -395,6 +395,443 @@ router.delete('/account', async (req, res) => {
   }
 });
 
+// ─── Ghost Mode (per-contact privacy overrides) ───────────────
+//
+// Lets a user hide specific live signals from a specific other user.
+// Flags are AND-ed with the user's global privacy toggles — turning
+// off a flag here does NOT unhide a signal that's already hidden
+// globally.
+//
+// GET    /user/ghost-mode             → list (mine = owner)
+// GET    /user/ghost-mode/:targetId   → single row (or default)
+// PUT    /user/ghost-mode/:targetId   { hideOnline?, hideTyping?,
+//                                       hideRead?, hideLastSeen? }
+// DELETE /user/ghost-mode/:targetId   → clear all overrides for target
+
+const GM_DEFAULT = {
+  hideOnline:    false,
+  hideTyping:    false,
+  hideRead:      false,
+  hideLastSeen:  false,
+};
+
+function publicGhost(row) {
+  if (!row) return null;
+  return {
+    targetId:      row.target_id,
+    hideOnline:    !!row.hide_online,
+    hideTyping:    !!row.hide_typing,
+    hideRead:      !!row.hide_read,
+    hideLastSeen:  !!row.hide_last_seen,
+    updatedAt:     row.updated_at,
+  };
+}
+
+router.get('/ghost-mode', async (req, res) => {
+  try {
+    const r = await db.query(
+      `SELECT g.target_id, g.hide_online, g.hide_typing, g.hide_read, g.hide_last_seen, g.updated_at,
+              u.name, u.email, u.photo_url
+         FROM ghost_mode g
+         JOIN users u ON u.id = g.target_id
+        WHERE g.owner_id = $1
+          AND (g.hide_online OR g.hide_typing OR g.hide_read OR g.hide_last_seen)
+        ORDER BY g.updated_at DESC`,
+      [req.user.id]
+    );
+    res.json(r.rows.map(row => ({
+      ...publicGhost(row),
+      name:     row.name,
+      email:    row.email,
+      photoURL: row.photo_url,
+    })));
+  } catch (err) {
+    console.error('[ghost-mode GET-list]', err.message);
+    res.status(500).json({ error: 'Failed to load ghost mode list' });
+  }
+});
+
+router.get('/ghost-mode/:targetId', async (req, res) => {
+  try {
+    if (req.params.targetId === req.user.id) {
+      return res.status(400).json({ error: 'Cannot ghost-mode yourself' });
+    }
+    const r = await db.query(
+      `SELECT * FROM ghost_mode WHERE owner_id = $1 AND target_id = $2`,
+      [req.user.id, req.params.targetId]
+    );
+    res.json(r.rows[0] ? publicGhost(r.rows[0]) : { targetId: req.params.targetId, ...GM_DEFAULT });
+  } catch (err) {
+    console.error('[ghost-mode GET]', err.message);
+    res.status(500).json({ error: 'Failed to load ghost mode' });
+  }
+});
+
+router.put('/ghost-mode/:targetId', async (req, res) => {
+  try {
+    const targetId = req.params.targetId;
+    if (targetId === req.user.id) return res.status(400).json({ error: 'Cannot ghost-mode yourself' });
+
+    const b = req.body || {};
+    const ho = b.hideOnline    === undefined ? null : !!b.hideOnline;
+    const ht = b.hideTyping    === undefined ? null : !!b.hideTyping;
+    const hr = b.hideRead      === undefined ? null : !!b.hideRead;
+    const hl = b.hideLastSeen  === undefined ? null : !!b.hideLastSeen;
+    if (ho === null && ht === null && hr === null && hl === null) {
+      return res.status(400).json({ error: 'At least one flag required' });
+    }
+
+    // Upsert with COALESCE so a partial body doesn't clobber other flags.
+    await db.query(
+      `INSERT INTO ghost_mode (owner_id, target_id, hide_online, hide_typing, hide_read, hide_last_seen)
+       VALUES ($1, $2, COALESCE($3, FALSE), COALESCE($4, FALSE), COALESCE($5, FALSE), COALESCE($6, FALSE))
+       ON CONFLICT (owner_id, target_id) DO UPDATE
+         SET hide_online    = COALESCE($3, ghost_mode.hide_online),
+             hide_typing    = COALESCE($4, ghost_mode.hide_typing),
+             hide_read      = COALESCE($5, ghost_mode.hide_read),
+             hide_last_seen = COALESCE($6, ghost_mode.hide_last_seen)`,
+      [req.user.id, targetId, ho, ht, hr, hl]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[ghost-mode PUT]', err.message);
+    res.status(500).json({ error: 'Failed to save ghost mode' });
+  }
+});
+
+router.delete('/ghost-mode/:targetId', async (req, res) => {
+  try {
+    await db.query(
+      `DELETE FROM ghost_mode WHERE owner_id = $1 AND target_id = $2`,
+      [req.user.id, req.params.targetId]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[ghost-mode DELETE]', err.message);
+    res.status(500).json({ error: 'Failed to clear ghost mode' });
+  }
+});
+
+// ─── Bookmarks (saved messages) ───────────────────────────────
+//
+// GET    /user/bookmarks                        — list mine, newest first
+// POST   /user/bookmarks   { messageId, note? } — save (must be a
+//                                                 message in a chat I'm
+//                                                 still a member of)
+// DELETE /user/bookmarks/:id                    — remove (mine only)
+
+const MAX_BOOKMARK_NOTE = 280;
+
+router.get('/bookmarks', async (req, res) => {
+  try {
+    const r = await db.query(
+      `SELECT b.id, b.note, b.created_at,
+              m.id   AS message_id,
+              m.chat_id, m.sender_id, m.type, m.content, m.meta,
+              m.created_at AS message_created_at, m.deleted_at,
+              c.type AS chat_type, c.name AS chat_name
+         FROM bookmarks b
+         LEFT JOIN messages m ON m.id = b.message_id
+         LEFT JOIN chats    c ON c.id = m.chat_id
+        WHERE b.user_id = $1
+        ORDER BY b.created_at DESC
+        LIMIT 500`,
+      [req.user.id]
+    );
+    res.json(r.rows.map(row => ({
+      id:         String(row.id),
+      note:       row.note,
+      createdAt:  row.created_at,
+      // Snapshot of the referenced message at fetch time. Nulls mean the
+      // source row was cascade-deleted (e.g. vanish/disappearing) — client
+      // shows a "(message no longer available)" tombstone in that case.
+      message: row.message_id ? {
+        id:        Number(row.message_id),
+        chatId:    row.chat_id,
+        chatType:  row.chat_type,
+        chatName:  row.chat_name,
+        senderId:  row.sender_id,
+        type:      row.type,
+        content:   row.content,
+        meta:      row.meta,
+        createdAt: row.message_created_at,
+        deletedAt: row.deleted_at,
+      } : null,
+    })));
+  } catch (err) {
+    console.error('[bookmarks GET]', err.message);
+    res.status(500).json({ error: 'Failed to load bookmarks' });
+  }
+});
+
+router.post('/bookmarks', async (req, res) => {
+  try {
+    const messageId = parseInt(req.body?.messageId, 10);
+    const note      = req.body?.note != null ? String(req.body.note).slice(0, MAX_BOOKMARK_NOTE) : null;
+    if (!Number.isFinite(messageId)) return res.status(400).json({ error: 'messageId required' });
+
+    // Verify the caller is still an active member of the message's chat.
+    // Two-step so we return 404 for unknown messages vs 403 for member-loss.
+    const m = await db.query(
+      `SELECT m.id, m.chat_id FROM messages m WHERE m.id = $1 LIMIT 1`,
+      [messageId]
+    );
+    if (!m.rows[0]) return res.status(404).json({ error: 'Message not found' });
+    const mem = await db.query(
+      `SELECT 1 FROM chat_members
+        WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL`,
+      [m.rows[0].chat_id, req.user.id]
+    );
+    if (!mem.rows[0]) return res.status(403).json({ error: 'Not a member of this chat' });
+
+    const r = await db.query(
+      `INSERT INTO bookmarks (user_id, message_id, note)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, message_id)
+         DO UPDATE SET note = COALESCE(EXCLUDED.note, bookmarks.note)
+       RETURNING id, note, created_at`,
+      [req.user.id, messageId, note]
+    );
+    res.json({
+      id:        String(r.rows[0].id),
+      note:      r.rows[0].note,
+      createdAt: r.rows[0].created_at,
+    });
+  } catch (err) {
+    console.error('[bookmarks POST]', err.message);
+    res.status(500).json({ error: 'Failed to save bookmark' });
+  }
+});
+
+router.delete('/bookmarks/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+    const r = await db.query(
+      `DELETE FROM bookmarks WHERE id = $1 AND user_id = $2 RETURNING id`,
+      [id, req.user.id]
+    );
+    if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[bookmarks DELETE]', err.message);
+    res.status(500).json({ error: 'Failed to remove bookmark' });
+  }
+});
+
+// ─── Sessions (P1 polish — replaces Firebase login-history) ───
+//
+// GET    /user/sessions               → list this user's live refresh
+//                                       tokens (one row per device); the
+//                                       client may pass its own refresh
+//                                       token in `X-Current-Refresh` so
+//                                       the response flags which row is
+//                                       "current" (we never put the raw
+//                                       token in URL/log).
+// DELETE /user/sessions/:id           → revoke that session
+// DELETE /user/sessions               → revoke ALL except the caller's
+//                                       current one ("sign out other
+//                                       devices"). Requires the
+//                                       X-Current-Refresh header so we
+//                                       don't lock the user out.
+//
+// "Session" = a non-revoked, non-expired row in refresh_tokens.
+// `created_at` of the latest rotation is the freshest activity signal.
+
+async function hashCurrentRefresh(rawHeader) {
+  const tok = (rawHeader || '').toString().trim();
+  if (!tok) return null;
+  try { return await jwtUtil.hashRefresh(tok); }
+  catch { return null; }
+}
+
+router.get('/sessions', async (req, res) => {
+  try {
+    const currentHash = await hashCurrentRefresh(req.headers['x-current-refresh']);
+    const r = await db.query(
+      `SELECT id, user_agent, ip, created_at, last_used_at, expires_at,
+              token_hash = $2 AS is_current
+         FROM refresh_tokens
+        WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > NOW()
+        ORDER BY COALESCE(last_used_at, created_at) DESC`,
+      [req.user.id, currentHash || '']
+    );
+    res.json(r.rows.map(row => ({
+      id:         String(row.id),
+      userAgent:  row.user_agent,
+      ip:         row.ip,
+      createdAt:  row.created_at,
+      lastUsedAt: row.last_used_at,
+      expiresAt:  row.expires_at,
+      isCurrent:  !!row.is_current,
+    })));
+  } catch (err) {
+    console.error('[user/sessions GET]', err.message);
+    res.status(500).json({ error: 'Failed to list sessions' });
+  }
+});
+
+router.delete('/sessions/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid session id' });
+    const r = await db.query(
+      `UPDATE refresh_tokens SET revoked_at = NOW()
+        WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL
+        RETURNING id`,
+      [id, req.user.id]
+    );
+    if (!r.rows[0]) return res.status(404).json({ error: 'Session not found or already revoked' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[user/sessions DELETE]', err.message);
+    res.status(500).json({ error: 'Failed to revoke session' });
+  }
+});
+
+router.delete('/sessions', async (req, res) => {
+  try {
+    const currentHash = await hashCurrentRefresh(req.headers['x-current-refresh']);
+    if (!currentHash) {
+      return res.status(400).json({ error: 'X-Current-Refresh header required so we don\'t lock you out' });
+    }
+    const r = await db.query(
+      `UPDATE refresh_tokens SET revoked_at = NOW()
+        WHERE user_id = $1 AND revoked_at IS NULL AND token_hash <> $2
+        RETURNING id`,
+      [req.user.id, currentHash]
+    );
+    res.json({ ok: true, revoked: r.rowCount });
+  } catch (err) {
+    console.error('[user/sessions DELETE-all]', err.message);
+    res.status(500).json({ error: 'Failed to revoke other sessions' });
+  }
+});
+
+// ─── Scheduled messages (server-side worker delivers on time) ─
+//
+// GET    /user/scheduled-messages              → list mine (pending + recently-sent)
+// POST   /user/scheduled-messages              { chatId, sendAt, type?, content?, meta?, replyToId? }
+// DELETE /user/scheduled-messages/:id          → cancel a pending row
+//
+// The server.js worker sweeps every 30 s for rows where send_at <= NOW()
+// and sent_at IS NULL, then inserts a real message + broadcasts.
+
+const SCHED_TYPES = ['text', 'image', 'video', 'audio', 'file', 'location', 'system', 'sticker'];
+
+router.get('/scheduled-messages', async (req, res) => {
+  try {
+    const r = await db.query(
+      `SELECT s.*, c.type AS chat_type, c.name AS chat_name
+         FROM scheduled_messages s
+         JOIN chats c ON c.id = s.chat_id
+        WHERE s.user_id = $1
+          AND (s.sent_at IS NULL OR s.sent_at > NOW() - INTERVAL '7 days')
+        ORDER BY COALESCE(s.sent_at, s.send_at) DESC
+        LIMIT 200`,
+      [req.user.id]
+    );
+    res.json(r.rows.map(row => ({
+      id:         String(row.id),
+      chatId:     row.chat_id,
+      chatName:   row.chat_name,
+      chatType:   row.chat_type,
+      type:       row.type,
+      content:    row.content,
+      meta:       row.meta,
+      replyToId:  row.reply_to_id,
+      sendAt:     row.send_at,
+      sentAt:     row.sent_at,
+      messageId:  row.message_id,
+      createdAt:  row.created_at,
+    })));
+  } catch (err) {
+    console.error('[scheduled GET]', err.message);
+    res.status(500).json({ error: 'Failed to load scheduled messages' });
+  }
+});
+
+router.post('/scheduled-messages', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const chatId    = (b.chatId  || '').toString();
+    const sendAtRaw = b.sendAt;
+    const type      = (b.type    || 'text').toString();
+    const content   = b.content !== undefined ? (b.content === null ? null : String(b.content)) : null;
+    const meta      = b.meta && typeof b.meta === 'object' ? b.meta : null;
+    const replyTo   = b.replyToId ? parseInt(b.replyToId, 10) : null;
+
+    if (!chatId)               return res.status(400).json({ error: 'chatId required' });
+    if (!sendAtRaw)            return res.status(400).json({ error: 'sendAt required (ISO timestamp)' });
+    if (!SCHED_TYPES.includes(type)) return res.status(400).json({ error: 'invalid type' });
+    const sendAt = new Date(sendAtRaw);
+    if (Number.isNaN(sendAt.getTime())) return res.status(400).json({ error: 'sendAt is not a valid date' });
+    if (sendAt.getTime() < Date.now() + 5_000) {
+      return res.status(400).json({ error: 'sendAt must be at least 5 seconds in the future' });
+    }
+    if (sendAt.getTime() > Date.now() + 365 * 24 * 60 * 60 * 1000) {
+      return res.status(400).json({ error: 'sendAt cannot be more than 1 year out' });
+    }
+
+    // Verify the caller is still a member of the chat right now. Worker
+    // re-checks at fire time too, in case they leave between schedule
+    // and delivery.
+    const memR = await db.query(
+      `SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL`,
+      [chatId, req.user.id]
+    );
+    if (!memR.rows[0]) return res.status(403).json({ error: 'Not a member of this chat' });
+
+    // Type-specific validation matches POST /chats/:id/messages
+    const isMedia = type !== 'text' && type !== 'system';
+    if (type === 'text' && (!content || typeof content !== 'string')) {
+      return res.status(400).json({ error: 'content required for text messages' });
+    }
+    if (isMedia && (!meta || !meta.attachmentId)) {
+      return res.status(400).json({ error: 'meta.attachmentId required for media messages' });
+    }
+
+    const r = await db.query(
+      `INSERT INTO scheduled_messages (user_id, chat_id, type, content, meta, reply_to_id, send_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING *`,
+      [req.user.id, chatId, type, content, meta, replyTo, sendAt.toISOString()]
+    );
+    const row = r.rows[0];
+    res.json({
+      id:        String(row.id),
+      chatId:    row.chat_id,
+      type:      row.type,
+      content:   row.content,
+      meta:      row.meta,
+      replyToId: row.reply_to_id,
+      sendAt:    row.send_at,
+      createdAt: row.created_at,
+    });
+  } catch (err) {
+    console.error('[scheduled POST]', err.message);
+    res.status(500).json({ error: 'Failed to schedule message' });
+  }
+});
+
+router.delete('/scheduled-messages/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+    const r = await db.query(
+      `DELETE FROM scheduled_messages
+        WHERE id = $1 AND user_id = $2 AND sent_at IS NULL
+        RETURNING id`,
+      [id, req.user.id]
+    );
+    if (!r.rows[0]) return res.status(404).json({ error: 'Not found or already sent' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[scheduled DELETE]', err.message);
+    res.status(500).json({ error: 'Failed to cancel scheduled message' });
+  }
+});
+
 // ─── Key bundles (Phase 3b foundation) ────────────────────────
 //
 // X3DH-style prekey bundle distribution. Stored blobs are opaque to the

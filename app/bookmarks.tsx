@@ -1,156 +1,188 @@
-// app/bookmarks.tsx — Message Bookmarks
-// Save important messages across all chats into one searchable collection
-// Stored in Firestore: users/{uid}/bookmarks/{id}
+// app/bookmarks.tsx — Saved messages (Postgres).
+//
+// Lists every bookmark across all chats, newest first. Tap a row to jump
+// to that chat (we don't auto-scroll to the bookmarked message yet — the
+// chat thread loads from newest). Long-press to remove. Each row shows
+// chat name + sender + the message preview + relative time.
 
-import React, { useState, useEffect } from 'react';
+import { useRouter } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, FlatList,
-  StatusBar, TextInput, ActivityIndicator, Alert,
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
-import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
-
-const C = { bg: '#FFFFFF', accent: '#F59E0B', card: '#F9FAFB', green: '#10B981' };
+import {
+  listBookmarks,
+  removeBookmark,
+  type BookmarkRow,
+} from '../lib/chatService';
 
 export default function BookmarksScreen() {
   const router = useRouter();
-  const myUid = auth().currentUser?.uid || '';
-  const [bookmarks, setBookmarks] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState('all');
+  const [rows,       setRows]       = useState<BookmarkRow[]>([]);
+  const [loading,    setLoading]    = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error,      setError]      = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setRows(await listBookmarks());
+      setError(null);
+    } catch (e: any) {
+      setError(e?.message ?? 'Failed to load bookmarks');
+    }
+  }, []);
 
   useEffect(() => {
-    const loadBookmarks = async () => {
-      setLoading(true);
-      try {
-        const snap = await firestore().collection('users').doc(myUid)
-          .collection('bookmarks')
-          .orderBy('savedAt', 'desc')
-          .limit(100)
-          .get();
-        setBookmarks(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      } catch {}
-      setLoading(false);
-    };
-    loadBookmarks();
-  }, [myUid]);
+    (async () => { setLoading(true); await load(); setLoading(false); })();
+  }, [load]);
 
-  const removeBookmark = (bm) => {
-    Alert.alert('Remove Bookmark?', 'Remove this saved message?', [
-      { text: 'Cancel' },
-      { text: 'Remove', style: 'destructive', onPress: async () => {
-        await firestore().collection('users').doc(myUid).collection('bookmarks').doc(bm.id).delete();
-        setBookmarks(prev => prev.filter(b => b.id !== bm.id));
-      }},
-    ]);
-  };
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }, [load]);
 
-  const filtered = bookmarks.filter(bm => {
-    if (search) {
-      const q = search.toLowerCase();
-      if (!bm.text?.toLowerCase().includes(q) && !bm.chatName?.toLowerCase().includes(q)) return false;
+  const onRow = useCallback((b: BookmarkRow) => {
+    if (!b.message) {
+      Alert.alert('Unavailable', 'The original message is no longer available.');
+      return;
     }
-    if (filter === 'media' && !bm.hasMedia) return false;
-    if (filter === 'links' && !bm.hasLink) return false;
-    return true;
-  });
+    router.push({ pathname: '/chat', params: { id: b.message.chatId } } as any);
+  }, [router]);
 
-  const formatDate = (ts) => {
-    if (!ts?.toDate) return '';
-    const d = ts.toDate();
-    const now = Date.now();
-    const diff = now - d.getTime();
-    if (diff < 86400000) return 'Today';
-    if (diff < 172800000) return 'Yesterday';
-    return d.toLocaleDateString();
-  };
+  const onLongPress = useCallback((b: BookmarkRow) => {
+    Alert.alert(
+      'Remove bookmark?',
+      'The saved message will be removed from your bookmarks. The original message is not affected.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Remove', style: 'destructive', onPress: async () => {
+            try {
+              await removeBookmark(b.id);
+              setRows(prev => prev.filter(r => r.id !== b.id));
+            } catch (e: any) {
+              Alert.alert('Failed', e?.message ?? 'Try again');
+            }
+          }
+        },
+      ],
+    );
+  }, []);
 
-  const getMsgIcon = (bm) => {
-    if (bm.msgType === 'image') return '\uD83D\uDDBC\uFE0F';
-    if (bm.msgType === 'video') return '\uD83C\uDFA5';
-    if (bm.msgType === 'audio') return '\uD83C\uDF99\uFE0F';
-    if (bm.msgType === 'file') return '\uD83D\uDCC4';
-    if (bm.hasLink) return '\uD83D\uDD17';
-    return '\uD83D\uDCAC';
-  };
+  if (loading) {
+    return <View style={[S.screen, S.center]}><ActivityIndicator color={ACCENT} size="large" /></View>;
+  }
 
   return (
-    <>
-      <Stack.Screen options={{ title: 'Bookmarks', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
-      <View style={s.container}>
-        <StatusBar barStyle="light-content" />
-
-        <View style={s.header}>
-          <Text style={{ fontSize: 24 }}>{"\uD83D\uDD16"}</Text>
-          <View style={{ flex: 1, marginLeft: 12 }}>
-            <Text style={s.headerTitle}>{bookmarks.length} Saved Messages</Text>
-            <Text style={s.headerDesc}>Important messages from all your chats</Text>
-          </View>
-        </View>
-
-        {/* Search */}
-        <TextInput style={s.searchInput} value={search} onChangeText={setSearch}
-          placeholder="Search bookmarks..." placeholderTextColor="#6B7280" />
-
-        {/* Filters */}
-        <View style={s.filters}>
-          {['all', 'media', 'links'].map(f => (
-            <TouchableOpacity key={f} style={[s.filterBtn, filter === f && s.filterActive]} onPress={() => setFilter(f)}>
-              <Text style={[s.filterTxt, filter === f && s.filterActiveTxt]}>{f === 'all' ? 'All' : f === 'media' ? 'Media' : 'Links'}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {loading ? <ActivityIndicator color={C.accent} style={{ marginTop: 30 }} /> : (
-          <FlatList
-            data={filtered}
-            keyExtractor={b => b.id}
-            renderItem={({ item }) => (
-              <TouchableOpacity style={s.bmRow}
-                onPress={() => { if (item.chatId) router.push({ pathname: '/chat' as any, params: { chatId: item.chatId, peerName: item.chatName } }); }}
-                onLongPress={() => removeBookmark(item)}>
-                <View style={s.bmIcon}><Text style={{ fontSize: 18 }}>{getMsgIcon(item)}</Text></View>
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                    <Text style={s.bmChat}>{item.chatName || 'Chat'}</Text>
-                    <Text style={s.bmDate}>{formatDate(item.savedAt)}</Text>
-                  </View>
-                  <Text style={s.bmText} numberOfLines={3}>{item.text || '[' + (item.msgType || 'message') + ']'}</Text>
-                  {item.note && <Text style={s.bmNote}>{"\uD83D\uDCDD"} {item.note}</Text>}
-                </View>
-              </TouchableOpacity>
-            )}
-            ListEmptyComponent={
-              <View style={{ alignItems: 'center', padding: 40 }}>
-                <Text style={{ fontSize: 40 }}>{"\uD83D\uDD16"}</Text>
-                <Text style={{ color: '#6B7280', marginTop: 12 }}>No bookmarks yet</Text>
-                <Text style={{ color: '#9CA3AF', fontSize: 12, marginTop: 4 }}>Long-press any message in a chat and tap &quot;Bookmark&quot;</Text>
-              </View>
-            }
-          />
-        )}
+    <View style={S.screen}>
+      <View style={S.header}>
+        <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
+          <Text style={S.backTxt}>←</Text>
+        </TouchableOpacity>
+        <Text style={S.title}>Bookmarks</Text>
       </View>
-    </>
+
+      {error && <Text style={S.errorTxt}>{error}</Text>}
+
+      {rows.length === 0 ? (
+        <View style={[S.center, { flex: 1, paddingHorizontal: 32 }]}>
+          <Text style={S.emptyTitle}>No bookmarks yet</Text>
+          <Text style={S.emptySub}>
+            Long-press any message in a chat → 🔖 Bookmark to save it here.
+          </Text>
+        </View>
+      ) : (
+        <FlatList
+          data={rows}
+          keyExtractor={(b) => b.id}
+          refreshControl={<RefreshControl tintColor={ACCENT} refreshing={refreshing} onRefresh={onRefresh} />}
+          contentContainerStyle={{ paddingBottom: 32 }}
+          renderItem={({ item: b }) => (
+            <TouchableOpacity
+              style={S.row}
+              onPress={() => onRow(b)}
+              onLongPress={() => onLongPress(b)}
+              delayLongPress={300}
+              activeOpacity={0.7}
+            >
+              <View style={S.iconBox}><Text style={S.iconTxt}>🔖</Text></View>
+              <View style={{ flex: 1 }}>
+                <Text style={S.rowChat} numberOfLines={1}>
+                  {b.message?.chatName
+                    || (b.message?.chatType === 'group' ? 'Group' : 'Direct chat')
+                    || '(deleted chat)'}
+                </Text>
+                <Text style={S.rowContent} numberOfLines={2}>
+                  {b.message
+                    ? b.message.deletedAt
+                      ? '(message deleted by sender)'
+                      : (b.message.content || typeLabel(b.message.type))
+                    : '(message no longer available)'}
+                </Text>
+                <Text style={S.rowWhen}>Saved {formatAgo(b.createdAt)}</Text>
+              </View>
+            </TouchableOpacity>
+          )}
+        />
+      )}
+    </View>
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg, padding: 16 },
-  header: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
-  headerTitle: { color: '#fff', fontSize: 18, fontWeight: '900' },
-  headerDesc: { color: '#9CA3AF', fontSize: 12, marginTop: 2 },
-  searchInput: { backgroundColor: C.card, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, color: '#fff', fontSize: 14, marginBottom: 8, borderWidth: 1, borderColor: '#E5E7EB' },
-  filters: { flexDirection: 'row', gap: 6, marginBottom: 12 },
-  filterBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, backgroundColor: '#F9FAFB' },
-  filterActive: { backgroundColor: C.accent },
-  filterTxt: { color: '#6B7280', fontSize: 12, fontWeight: '600' },
-  filterActiveTxt: { color: '#000' },
-  bmRow: { flexDirection: 'row', backgroundColor: C.card, borderRadius: 14, padding: 14, marginBottom: 6, borderWidth: 1, borderColor: '#E5E7EB' },
-  bmIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  bmChat: { color: C.accent, fontSize: 12, fontWeight: '700' },
-  bmDate: { color: '#6B7280', fontSize: 10 },
-  bmText: { color: '#1F2937', fontSize: 13, marginTop: 4, lineHeight: 19 },
-  bmNote: { color: '#6B7280', fontSize: 11, marginTop: 4, fontStyle: 'italic' },
+function typeLabel(t: string): string {
+  switch (t) {
+    case 'image':   return '📷 Photo';
+    case 'video':   return '🎥 Video';
+    case 'audio':   return '🎙️ Voice message';
+    case 'file':    return '📎 File';
+    case 'sticker': return '🎨 Sticker';
+    default:        return '(no text)';
+  }
+}
+
+function formatAgo(iso: string): string {
+  try {
+    const diff = Date.now() - new Date(iso).getTime();
+    if (diff < 60_000)    return 'just now';
+    if (diff < 3600_000)  return `${Math.floor(diff / 60_000)}m ago`;
+    if (diff < 86400_000) return `${Math.floor(diff / 3600_000)}h ago`;
+    if (diff < 7 * 86400_000) return `${Math.floor(diff / 86400_000)}d ago`;
+    return new Date(iso).toLocaleDateString();
+  } catch { return ''; }
+}
+
+const DARK_BG = '#0D0F14';
+const CARD_BG = '#161A22';
+const BORDER  = '#1F2937';
+const TEXT    = '#E5E7EB';
+const SUBTLE  = '#9CA3AF';
+const ACCENT  = '#6C63FF';
+const DANGER  = '#EF4444';
+
+const S = StyleSheet.create({
+  screen:       { flex: 1, backgroundColor: DARK_BG },
+  center:       { justifyContent: 'center', alignItems: 'center' },
+
+  header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
+  backBtn:      { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  backTxt:      { color: TEXT, fontSize: 26, fontWeight: '600' },
+  title:        { color: TEXT, fontSize: 22, fontWeight: '800' },
+
+  errorTxt:     { color: DANGER, paddingHorizontal: 16, paddingVertical: 8, fontSize: 12 },
+  emptyTitle:   { color: TEXT, fontSize: 16, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
+  emptySub:     { color: SUBTLE, fontSize: 13, lineHeight: 18, textAlign: 'center' },
+
+  row:          { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
+  iconBox:      { width: 36, height: 36, borderRadius: 18, backgroundColor: CARD_BG, alignItems: 'center', justifyContent: 'center' },
+  iconTxt:      { fontSize: 18 },
+  rowChat:      { color: TEXT, fontSize: 14, fontWeight: '700' },
+  rowContent:   { color: TEXT, fontSize: 13, marginTop: 4 },
+  rowWhen:      { color: SUBTLE, fontSize: 11, marginTop: 4 },
 });

@@ -8,18 +8,35 @@ import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Image,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { getAccessToken } from '../../lib/api';
-import { attachmentUrl, listChats, type ChatSummary } from '../../lib/chatService';
+import {
+  archiveChat,
+  attachmentUrl,
+  listChats,
+  pinChat,
+  type ChatSummary,
+} from '../../lib/chatService';
 import { registerPushToken } from '../../lib/push';
 import { getSocket } from '../../lib/socket';
+
+type FolderId = 'all' | 'unread' | 'groups' | 'pinned' | 'archive';
+const FOLDERS: { id: FolderId; label: string }[] = [
+  { id: 'all',     label: 'All'     },
+  { id: 'unread',  label: 'Unread'  },
+  { id: 'groups',  label: 'Groups'  },
+  { id: 'pinned',  label: 'Pinned'  },
+  { id: 'archive', label: 'Archive' },
+];
 
 export default function ChatsScreen() {
   const router = useRouter();
@@ -28,6 +45,7 @@ export default function ChatsScreen() {
   const [error,   setError]   = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [authHeader, setAuthHeader] = useState<string | null>(null);
+  const [folder,  setFolder]  = useState<FolderId>('all');
 
   // Auth header for the <Image> source so avatars come through /uploads.
   useEffect(() => {
@@ -111,6 +129,52 @@ export default function ChatsScreen() {
 
   const onNewChat = () => router.push('/new-chat' as any);
 
+  // Long-press a row → action sheet with Pin/Archive (and the inverse if
+  // already pinned/archived). Optimistic update; rollback on failure.
+  const onLongPressChat = useCallback((chat: ChatSummary) => {
+    const buttons: any[] = [
+      {
+        text: chat.pinned ? '📌 Unpin' : '📌 Pin to top',
+        onPress: async () => {
+          const next = !chat.pinned;
+          setChats(prev => prev.map(c => c.id === chat.id ? { ...c, pinned: next } : c));
+          try { await pinChat(chat.id, next); await fetchList(); }
+          catch (e: any) {
+            setChats(prev => prev.map(c => c.id === chat.id ? { ...c, pinned: !next } : c));
+            Alert.alert('Pin failed', e?.message ?? 'Try again');
+          }
+        },
+      },
+      {
+        text: chat.archived ? '🗂️ Unarchive' : '🗂️ Archive',
+        onPress: async () => {
+          const next = !chat.archived;
+          setChats(prev => prev.map(c => c.id === chat.id ? { ...c, archived: next } : c));
+          try { await archiveChat(chat.id, next); await fetchList(); }
+          catch (e: any) {
+            setChats(prev => prev.map(c => c.id === chat.id ? { ...c, archived: !next } : c));
+            Alert.alert('Archive failed', e?.message ?? 'Try again');
+          }
+        },
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ];
+    Alert.alert(chat.peerName || chat.name || 'Chat', undefined, buttons);
+  }, [fetchList]);
+
+  // Apply the folder filter to the chat list. Archive folder shows archived
+  // chats exclusively; every other folder hides them.
+  const visibleChats = useMemo(() => {
+    if (folder === 'archive') return chats.filter(c => c.archived);
+    const base = chats.filter(c => !c.archived);
+    switch (folder) {
+      case 'unread': return base.filter(c => c.unreadCount > 0);
+      case 'groups': return base.filter(c => c.type === 'group');
+      case 'pinned': return base.filter(c => c.pinned);
+      default:       return base;
+    }
+  }, [chats, folder]);
+
   if (loading) {
     return (
       <View style={[S.screen, S.center]}>
@@ -142,6 +206,34 @@ export default function ChatsScreen() {
         </View>
       )}
 
+      {/* Folder tabs */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={S.folderRow}
+      >
+        {FOLDERS.map(f => {
+          const count = f.id === 'unread'  ? chats.filter(c => !c.archived && c.unreadCount > 0).length
+                      : f.id === 'pinned'  ? chats.filter(c => !c.archived && c.pinned).length
+                      : f.id === 'archive' ? chats.filter(c => c.archived).length
+                      : 0;
+          const active = folder === f.id;
+          return (
+            <TouchableOpacity
+              key={f.id}
+              onPress={() => setFolder(f.id)}
+              activeOpacity={0.7}
+              style={[S.folderChip, active && S.folderChipActive]}
+            >
+              <Text style={[S.folderTxt, active && S.folderTxtActive]}>{f.label}</Text>
+              {count > 0 && f.id !== 'all' && f.id !== 'groups' && (
+                <Text style={[S.folderCount, active && S.folderCountActive]}>{count}</Text>
+              )}
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+
       {chats.length === 0 ? (
         <View style={[S.center, { flex: 1, paddingHorizontal: 32 }]}>
           <Text style={S.emptyTitle}>No chats yet</Text>
@@ -150,11 +242,23 @@ export default function ChatsScreen() {
             <Text style={S.emptyBtnTxt}>Start a chat</Text>
           </TouchableOpacity>
         </View>
+      ) : visibleChats.length === 0 ? (
+        <View style={[S.center, { flex: 1, paddingHorizontal: 32 }]}>
+          <Text style={S.emptyTitle}>Nothing here</Text>
+          <Text style={S.emptySub}>No chats match the "{FOLDERS.find(f => f.id === folder)?.label}" folder right now.</Text>
+        </View>
       ) : (
         <FlatList
-          data={chats}
+          data={visibleChats}
           keyExtractor={(c) => c.id}
-          renderItem={({ item }) => <ChatRow chat={item} authHeader={authHeader} onPress={() => onOpenChat(item.id)} />}
+          renderItem={({ item }) => (
+            <ChatRow
+              chat={item}
+              authHeader={authHeader}
+              onPress={() => onOpenChat(item.id)}
+              onLongPress={() => onLongPressChat(item)}
+            />
+          )}
           contentContainerStyle={{ paddingBottom: 24 }}
           refreshControl={<RefreshControl tintColor={ACCENT} refreshing={refreshing} onRefresh={onRefresh} />}
         />
@@ -167,7 +271,14 @@ export default function ChatsScreen() {
   );
 }
 
-function ChatRow({ chat, authHeader, onPress }: { chat: ChatSummary; authHeader: string | null; onPress: () => void }) {
+function ChatRow({
+  chat, authHeader, onPress, onLongPress,
+}: {
+  chat: ChatSummary;
+  authHeader: string | null;
+  onPress: () => void;
+  onLongPress?: () => void;
+}) {
   // For direct chats prefer the peer's name. For groups use the chat name.
   const title = chat.type === 'direct'
     ? (chat.peerName || chat.name || 'Direct chat')
@@ -181,7 +292,13 @@ function ChatRow({ chat, authHeader, onPress }: { chat: ChatSummary; authHeader:
   const showPhoto = !!photoId && !!authHeader;
 
   return (
-    <TouchableOpacity style={S.row} onPress={onPress} activeOpacity={0.7}>
+    <TouchableOpacity
+      style={S.row}
+      onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={250}
+      activeOpacity={0.7}
+    >
       <View style={S.avatarWrap}>
         <View style={[S.avatar, chat.type === 'group' && S.avatarGroup]}>
           {showPhoto ? (
@@ -197,7 +314,9 @@ function ChatRow({ chat, authHeader, onPress }: { chat: ChatSummary; authHeader:
       </View>
       <View style={S.rowBody}>
         <View style={S.rowTop}>
+          {chat.pinned && <Text style={S.rowPin}>📌</Text>}
           <Text style={S.rowName} numberOfLines={1}>{title}</Text>
+          {chat.muted && <Text style={S.rowMuted}>🔕</Text>}
           <Text style={S.rowTime}>{subtitle}</Text>
         </View>
         <View style={S.rowBottom}>
@@ -258,9 +377,20 @@ const S = StyleSheet.create({
   avatarTxt:     { color: '#fff', fontSize: 20, fontWeight: '700' },
   presenceDot:   { position: 'absolute', right: 0, bottom: 0, width: 14, height: 14, borderRadius: 7, backgroundColor: '#22C55E', borderWidth: 2, borderColor: DARK_BG },
   rowBody:       { flex: 1, gap: 4 },
-  rowTop:        { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
+  rowTop:        { flexDirection: 'row', alignItems: 'baseline', gap: 6 },
   rowName:       { color: TEXT, fontSize: 16, fontWeight: '600', flex: 1 },
-  rowTime:       { color: SUBTLE, fontSize: 12, marginLeft: 8 },
+  rowTime:       { color: SUBTLE, fontSize: 12, marginLeft: 'auto' },
+  rowPin:        { fontSize: 11, marginRight: 2 },
+  rowMuted:      { fontSize: 11, marginLeft: 4 },
+
+  // Folder tabs (P1 polish)
+  folderRow:     { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 8, gap: 8 },
+  folderChip:    { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 18, backgroundColor: CARD_BG, borderWidth: 1, borderColor: BORDER },
+  folderChipActive: { backgroundColor: ACCENT, borderColor: ACCENT },
+  folderTxt:     { color: SUBTLE, fontSize: 13, fontWeight: '600' },
+  folderTxtActive: { color: '#fff' },
+  folderCount:   { color: SUBTLE, fontSize: 11, fontWeight: '700', backgroundColor: '#1F2937', paddingHorizontal: 6, borderRadius: 8, overflow: 'hidden', minWidth: 18, textAlign: 'center' },
+  folderCountActive: { color: ACCENT, backgroundColor: '#fff' },
   rowBottom:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   rowPreview:    { color: SUBTLE, fontSize: 13, flex: 1 },
   unreadBadge:   { backgroundColor: ACCENT, borderRadius: 10, minWidth: 20, paddingHorizontal: 6, paddingVertical: 2, alignItems: 'center' },

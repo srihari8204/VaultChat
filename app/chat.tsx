@@ -17,11 +17,13 @@
 // Read receipts:
 //   POST /chats/:id/read with the latest visible message id, debounced.
 
-import { Audio } from 'expo-av';
-import * as Clipboard from 'expo-clipboard';
+import { Audio, ResizeMode, Video } from 'expo-av';
+import { copyAndAutoClear } from '../lib/clipboardSafe';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
+import * as ScreenCapture from 'expo-screen-capture';
+import { DeviceMotion } from 'expo-sensors';
 import * as Sharing from 'expo-sharing';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -31,6 +33,7 @@ import {
   FlatList,
   Image,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -41,8 +44,13 @@ import {
 import { getCurrentUserAsync } from './(constants)/authService';
 import { getAccessToken } from '../lib/api';
 import {
+  addBookmark,
   addReaction,
   attachmentUrl,
+  getPollVotesBulk,
+  type PollVoteSummary,
+  unvotePoll,
+  voteOnPoll,
   blockUser,
   decryptFromChat,
   deleteMessage,
@@ -52,12 +60,19 @@ import {
   getMessages,
   getReactionCounts,
   listChats,
+  markAttachmentViewed,
   markDelivered,
   markRead,
   muteChat,
   removeReaction,
+  reportScreenshotCaptured,
   sendMessage,
+  setDisappearing,
+  setHidden,
+  setScreenshotMode,
+  setVanishMode,
   uploadAttachment,
+  type ScreenshotMode,
   type ChatDetail,
   type ChatMember,
   type ChatSummary,
@@ -121,6 +136,24 @@ export default function ChatScreen() {
   // Day 13 — in-chat search
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQ,    setSearchQ]    = useState('');
+
+  // Invisible Ink — one-shot toggle for the next outbound message.
+  // When the toggle is on, the next send gets meta.invisibleInk = true
+  // and the bubble renders obscured text until the receiver tilts the
+  // device past ~45°. Sender always sees the plaintext.
+  const [nextInvisibleInk, setNextInvisibleInk] = useState(false);
+  // Global "tilt revealed" state — flips true when the gyro reports any
+  // axis past ~45° (~0.78 rad). Shared by every invisible-ink bubble on
+  // screen, so a single tilt reveals all of them at once.
+  const [tiltRevealed, setTiltRevealed] = useState(false);
+
+  // Memory Bubbles — dismissed per-session so the same anniversary doesn't
+  // pop back up every time the user re-enters the chat in one sitting.
+  const [dismissedMemoryIds, setDismissedMemoryIds] = useState<Set<number>>(new Set());
+
+  // Poll vote summaries keyed by message id. Hydrated once per page load
+  // via the bulk endpoint, then patched in place by socket events.
+  const [pollVotes, setPollVotes] = useState<Record<number, PollVoteSummary>>({});
 
   // Day 8 — reactions, reply, forward
   const [reactions, setReactions] = useState<Record<number, ReactionSummary[]>>({});
@@ -308,6 +341,25 @@ export default function ChatScreen() {
           if (!e?.messageId || !e?.emoji) return;
           setReactions(prev => bumpReaction(prev, e.messageId, e.emoji, -1, e.userId === meId));
         };
+        const onScreenshotCaptured = (e: { chatId: string; capturedBy: string; capturedAt: string }) => {
+          // Server already filters to chat members — but ignore the
+          // echo of our own capture and any cross-chat noise.
+          if (!e || e.chatId !== chatId || e.capturedBy === meId) return;
+          setScreenshotBanner({ by: e.capturedBy, at: e.capturedAt });
+        };
+        // Poll-vote live updates. Server emits one event per (user, option)
+        // change; for single-vote polls a "switch" arrives as one
+        // poll_unvoted (old option) immediately followed by one poll_voted
+        // (new option). Each handler patches counts + the caller's `mine`
+        // set in place — no refetch needed.
+        const onPollVoted = (e: { messageId: number; userId: string; optionIndex: number }) => {
+          if (!e?.messageId) return;
+          setPollVotes(prev => bumpPollVote(prev, e.messageId, e.optionIndex, +1, e.userId === meId));
+        };
+        const onPollUnvoted = (e: { messageId: number; userId: string; optionIndex: number }) => {
+          if (!e?.messageId) return;
+          setPollVotes(prev => bumpPollVote(prev, e.messageId, e.optionIndex, -1, e.userId === meId));
+        };
 
         s.on('new_message',       onNew);
         s.on('message_edited',    onEdit);
@@ -319,6 +371,9 @@ export default function ChatScreen() {
         s.on('reaction_added',    onReactionAdded);
         s.on('reaction_removed',  onReactionRemoved);
         s.on('presence_changed',  onPresence);
+        s.on('screenshot_captured', onScreenshotCaptured);
+        s.on('poll_voted',        onPollVoted);
+        s.on('poll_unvoted',      onPollUnvoted);
 
         off.push(() => s.off('new_message',       onNew));
         off.push(() => s.off('message_edited',    onEdit));
@@ -330,6 +385,9 @@ export default function ChatScreen() {
         off.push(() => s.off('reaction_added',    onReactionAdded));
         off.push(() => s.off('reaction_removed',  onReactionRemoved));
         off.push(() => s.off('presence_changed',  onPresence));
+        off.push(() => s.off('screenshot_captured', onScreenshotCaptured));
+        off.push(() => s.off('poll_voted',        onPollVoted));
+        off.push(() => s.off('poll_unvoted',      onPollUnvoted));
       } catch (e) {
         if (!cancelled) console.warn('[chat] socket setup failed:', (e as any)?.message);
       }
@@ -357,6 +415,26 @@ export default function ChatScreen() {
       const next: Record<number, ReactionSummary[]> = {};
       for (const [k, v] of Object.entries(map)) next[Number(k)] = v;
       setReactions(next);
+    }).catch(() => {});
+    return () => { cancel = true; };
+  }, [chatId, messages]);
+
+  // ── Hydrate poll votes for visible polls ─────────────────
+  // Same pattern as reactions — bulk fetch once per message-id change.
+  // Bulk endpoint returns nothing for non-poll ids, so passing the whole
+  // page is safe.
+  useEffect(() => {
+    if (!chatId) return;
+    const pollIds = messages
+      .filter(m => m.type === 'poll' && typeof m.id === 'number' && m.id > 0)
+      .map(m => m.id);
+    if (pollIds.length === 0) return;
+    let cancel = false;
+    getPollVotesBulk(chatId, pollIds).then(map => {
+      if (cancel) return;
+      const next: Record<number, PollVoteSummary> = {};
+      for (const [k, v] of Object.entries(map)) next[Number(k)] = v;
+      setPollVotes(prev => ({ ...prev, ...next }));
     }).catch(() => {});
     return () => { cancel = true; };
   }, [chatId, messages]);
@@ -407,16 +485,18 @@ export default function ChatScreen() {
         setEditingId(null);
         setInput('');
       } else {
-        // Enqueue + add optimistic bubble immediately.
+        // Enqueue + add optimistic bubble immediately. If the one-shot
+        // Invisible Ink toggle was on, stamp meta.invisibleInk and reset.
         const replyToId = replyTo?.id ?? null;
-        const q = await enqueueText(chatId, text, { replyToId });
+        const meta = nextInvisibleInk ? { invisibleInk: true } : null;
+        const q = await enqueueText(chatId, text, { replyToId, meta });
         const optimistic: DisplayMessage = {
           id:        0,
           chatId,
           senderId:  meId ?? '',
           type:      'text',
           content:   text,
-          meta:      null,
+          meta,
           replyToId,
           editedAt:  null,
           deletedAt: null,
@@ -425,6 +505,7 @@ export default function ChatScreen() {
           _state:    'pending',
         };
         setReplyTo(null);
+        setNextInvisibleInk(false);
         setMessages(prev => [optimistic, ...prev]);
         setInput('');
         // The 'sent' / 'failed' queue events update this bubble's state.
@@ -434,7 +515,7 @@ export default function ChatScreen() {
     } finally {
       setSending(false);
     }
-  }, [input, sending, chatId, editingId, meId, replyTo, stopTypingIfActive]);
+  }, [input, sending, chatId, editingId, meId, replyTo, nextInvisibleInk, stopTypingIfActive]);
 
   // ── Long-press menu on a message bubble ───────────────────
   const onLongPressMessage = useCallback((msg: DisplayMessage, plain: string) => {
@@ -473,12 +554,34 @@ export default function ChatScreen() {
       return;
     }
 
-    // Normal server-confirmed bubble: React / Reply / Forward / Copy / Edit / Delete.
+    // Normal server-confirmed bubble: React / Reply / Forward / Copy / Bookmark / Remind / Edit / Delete.
     const buttons: any[] = [
       { text: 'React',   onPress: () => setReactPicker(msg) },
       { text: 'Reply',   onPress: () => setReplyTo(msg) },
       { text: 'Forward', onPress: () => openForward(msg) },
-      { text: 'Copy text', onPress: () => Clipboard.setStringAsync(plain) },
+      { text: 'Copy text', onPress: () => copyAndAutoClear(plain) },
+      {
+        text: '🔖 Bookmark',
+        onPress: async () => {
+          try {
+            await addBookmark(msg.id, null);
+            Alert.alert('Bookmarked', 'Saved to your bookmarks.');
+          } catch (e: any) {
+            Alert.alert('Could not bookmark', e?.message ?? 'Try again');
+          }
+        },
+      },
+      {
+        text: '⏰ Remind me about this',
+        onPress: () => router.push({
+          pathname: '/message-reminder' as any,
+          params: {
+            chatId,
+            messageId: String(msg.id),
+            preview:   (plain || msg.type).slice(0, 200),
+          },
+        }),
+      },
     ];
     if (isMine && !msg.deletedAt) {
       buttons.push({ text: 'Edit', onPress: () => { setEditingId(msg.id); setInput(plain); } });
@@ -495,6 +598,117 @@ export default function ChatScreen() {
     buttons.push({ text: 'Cancel', style: 'cancel' });
     Alert.alert('Message', undefined, buttons);
   }, [meId, chatId]);
+
+  // ── Screenshot mode (P1 polish) ──────────────────────────
+  // Apply the chat's per-user screenshot policy on mount, restore the
+  // global-block default on unmount. While the chat is open AND mode is
+  // `allow_notify` or `block` (where iOS still lets the OS screenshot),
+  // subscribe to expo-screen-capture's screenshot listener and POST
+  // /screenshot-captured so the other side gets a banner.
+  //
+  // Modes:
+  //   allow / allow_notify → allowScreenCaptureAsync (no FLAG_SECURE)
+  //   block / block_silent → preventScreenCaptureAsync (FLAG_SECURE)
+  //   *_notify (and block on iOS) → also listen + report
+  const [screenshotBanner, setScreenshotBanner] = useState<{ by: string; at: string } | null>(null);
+  useEffect(() => {
+    if (Platform.OS === 'web' || !chat) return;
+    const mode: ScreenshotMode = (chat.screenshotMode as ScreenshotMode) || 'block';
+    const allowsCapture = mode === 'allow' || mode === 'allow_notify';
+    const reportsCapture = mode === 'allow_notify' || mode === 'block';
+
+    if (allowsCapture) {
+      ScreenCapture.allowScreenCaptureAsync().catch(() => {});
+    } else {
+      ScreenCapture.preventScreenCaptureAsync().catch(() => {});
+    }
+
+    let sub: { remove: () => void } | null = null;
+    if (reportsCapture) {
+      try {
+        sub = ScreenCapture.addScreenshotListener(() => {
+          reportScreenshotCaptured(chatId).catch(() => {});
+          if (mode === 'allow_notify') {
+            Alert.alert('Screenshot captured', 'The other side has been notified.');
+          }
+        });
+      } catch { /* listener unsupported on some platforms — non-fatal */ }
+    }
+
+    return () => {
+      sub?.remove();
+      // Restore the global-block posture (matches _layout.tsx default)
+      ScreenCapture.preventScreenCaptureAsync().catch(() => {});
+    };
+  }, [chat?.screenshotMode, chatId]);
+
+  // Auto-dismiss the inbound screenshot banner after 4 seconds.
+  useEffect(() => {
+    if (!screenshotBanner) return;
+    const t = setTimeout(() => setScreenshotBanner(null), 4000);
+    return () => clearTimeout(t);
+  }, [screenshotBanner]);
+
+  // Screenshot-mode picker (header menu entry)
+  const openScreenshotPicker = useCallback(() => {
+    if (!chat) return;
+    const current = (chat.screenshotMode as ScreenshotMode) || 'block';
+    const opts: { label: string; mode: ScreenshotMode }[] = [
+      { label: 'Allow screenshots',          mode: 'allow' },
+      { label: 'Allow & notify chat',        mode: 'allow_notify' },
+      { label: 'Block screenshots',          mode: 'block' },
+      { label: 'Block silently (no alert)',  mode: 'block_silent' },
+    ];
+    Alert.alert(
+      'Screenshots in this chat',
+      'Choose how screenshots are handled while you have this chat open.',
+      [
+        ...opts.map(o => ({
+          text: `${current === o.mode ? '✓ ' : '   '}${o.label}`,
+          onPress: async () => {
+            if (current === o.mode) return;
+            setChat(prev => prev ? { ...prev, screenshotMode: o.mode } : prev);
+            try {
+              await setScreenshotMode(chatId, o.mode);
+            } catch (e: any) {
+              setChat(prev => prev ? { ...prev, screenshotMode: current } : prev);
+              Alert.alert('Save failed', e?.message ?? 'Try again');
+            }
+          },
+        })),
+        { text: 'Cancel', style: 'cancel' },
+      ],
+    );
+  }, [chat, chatId]);
+
+  // Disappearing-messages picker — Alert sheet, Off / 24h / 7d / 90d.
+  // Any member can change the timer (privacy is shared, not admin-gated).
+  // Existing messages keep whatever expires_at they got at insert time —
+  // the new timer only affects future messages.
+  const openDisappearingPicker = useCallback(() => {
+    if (!chat) return;
+    const current = chat.disappearingSeconds ?? null;
+    const buttons: any[] = DISAPPEARING_PRESETS.map(opt => ({
+      text: `${current === opt.seconds ? '✓ ' : '   '}${opt.label}`,
+      onPress: async () => {
+        if (current === opt.seconds) return;
+        // Optimistic update; rollback on failure.
+        setChat(prev => prev ? { ...prev, disappearingSeconds: opt.seconds } : prev);
+        try {
+          await setDisappearing(chatId, opt.seconds);
+        } catch (e: any) {
+          setChat(prev => prev ? { ...prev, disappearingSeconds: current } : prev);
+          Alert.alert('Could not update', e?.message ?? 'Try again');
+        }
+      },
+    }));
+    buttons.push({ text: 'Cancel', style: 'cancel' });
+    Alert.alert(
+      'Disappearing messages',
+      'New messages in this chat will auto-delete after the chosen time. Existing messages are unaffected.',
+      buttons,
+    );
+  }, [chat, chatId]);
 
   // ── Chat-level overflow menu: Mute / Block / Leave (Day 11) ──
   const onPressMenu = useCallback(() => {
@@ -516,6 +730,53 @@ export default function ChatScreen() {
           }
         },
       },
+      {
+        text: chat.disappearingSeconds
+          ? `⏱️ Disappearing: ${formatDisappearing(chat.disappearingSeconds)}`
+          : '⏱️ Disappearing messages',
+        onPress: () => openDisappearingPicker(),
+      },
+      {
+        text: chat.vanishMode
+          ? '💨 Vanish Mode: ON'
+          : '💨 Vanish Mode: Off',
+        onPress: async () => {
+          const next = !chat.vanishMode;
+          setChat(prev => prev ? { ...prev, vanishMode: next } : prev);
+          try {
+            await setVanishMode(chatId, next);
+          } catch (e: any) {
+            setChat(prev => prev ? { ...prev, vanishMode: !next } : prev);
+            Alert.alert('Could not update Vanish Mode', e?.message ?? 'Try again');
+          }
+        },
+      },
+      {
+        text: `📸 Screenshots: ${formatScreenshotMode((chat.screenshotMode as ScreenshotMode) || 'block')}`,
+        onPress: () => openScreenshotPicker(),
+      },
+      {
+        text: chat.hidden ? '👁️ Unhide chat' : '🕶️ Hide chat',
+        onPress: async () => {
+          const next = !chat.hidden;
+          try {
+            await setHidden(chatId, next);
+            // If we just hid, drop back to the chat list — the chat won't
+            // appear there any more (only via PIN-gated /hidden-chats).
+            if (next) router.replace('/(tabs)/chats' as any);
+            else setChat(prev => prev ? { ...prev, hidden: next } : prev);
+          } catch (e: any) {
+            Alert.alert('Could not update', e?.message ?? 'Try again');
+          }
+        },
+      },
+      {
+        text: '📅 Schedule a message',
+        onPress: () => router.push({
+          pathname: '/schedule-message' as any,
+          params: { chatId, peerName: peer?.name ?? chat.name ?? '' },
+        }),
+      },
     ];
 
     if (chat.type === 'group') {
@@ -526,6 +787,13 @@ export default function ChatScreen() {
     }
 
     if (peer) {
+      buttons.push({
+        text: '👻 Ghost Mode',
+        onPress: () => router.push({
+          pathname: '/ghost-mode' as any,
+          params: { targetId: peer.userId, targetName: peer.name ?? peer.email ?? '' },
+        }),
+      });
       buttons.push({
         text: '🚫 Block user',
         style: 'destructive',
@@ -638,7 +906,13 @@ export default function ChatScreen() {
       }
       const up = await uploadAttachment(r.uri, r.filename, r.mime);
       const msg = await sendMessage(chatId, '', 'audio', {
-        meta: { attachmentId: up.id, mime: up.mime, size: up.size, filename: up.filename, durationMs: r.durationMs },
+        meta: {
+          attachmentId: up.id, mime: up.mime, size: up.size, filename: up.filename,
+          durationMs: r.durationMs,
+          // Pre-computed 0..1 amplitude bars (length up to 32). Bubble
+          // renders these without re-parsing the audio file.
+          waveform: r.waveform,
+        },
       });
       setMessages(prev => prev.some(x => x.id === msg.id) ? prev : [msg, ...prev]);
       setRecElapsedMs(0);
@@ -657,31 +931,84 @@ export default function ChatScreen() {
     };
   }, []);
 
-  // ── Attach image ──────────────────────────────────────────
-  const onPickImage = useCallback(async () => {
+  // ── Invisible Ink: tilt-to-reveal subscription ────────────
+  // Subscribe to DeviceMotion at ~100 ms cadence whenever an
+  // invisible-ink message is on screen. Flip `tiltRevealed` true when
+  // beta (front-back) or gamma (left-right) exceeds ~45° (0.78 rad).
+  // We don't need the rotation history — just the current pose. Skipped
+  // entirely on web (the API isn't available).
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    const hasAny = messages.some(m => m.meta?.invisibleInk);
+    if (!hasAny) {
+      if (tiltRevealed) setTiltRevealed(false);
+      return;
+    }
+    let sub: { remove(): void } | null = null;
+    let alive = true;
+    (async () => {
+      const ok = await DeviceMotion.isAvailableAsync().catch(() => false);
+      if (!alive || !ok) return;
+      DeviceMotion.setUpdateInterval(100);
+      sub = DeviceMotion.addListener(({ rotation }) => {
+        if (!rotation) return;
+        const REVEAL_RAD = 0.78; // ~45°
+        const revealed =
+          Math.abs(rotation.beta  ?? 0) > REVEAL_RAD ||
+          Math.abs(rotation.gamma ?? 0) > REVEAL_RAD;
+        setTiltRevealed(prev => prev === revealed ? prev : revealed);
+      });
+    })();
+    return () => { alive = false; sub?.remove(); };
+  // intentional: only re-evaluate when the *presence* of invisible-ink
+  // messages changes, not on every messages-array mutation
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages.some(m => m.meta?.invisibleInk)]);
+
+  // ── Attach photo / video (with optional view-once) ────────
+  // One unified picker. kind='images' → photo upload, type='image' message.
+  //                    kind='videos' → video upload, type='video' message.
+  // viewOnce=true sets a flag on the upload AND on the message meta so the
+  // receiving bubble can render the "Tap to view once" UI and the server
+  // can 410 the bytes after first non-owner view.
+  const onPickMedia = useCallback(async (
+    kind: 'images' | 'videos',
+    opts: { viewOnce?: boolean } = {},
+  ) => {
     if (sending) return;
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert('Permission needed', 'Allow photo library access to attach images.');
+      Alert.alert('Permission needed', `Allow ${kind === 'videos' ? 'video' : 'photo'} library access to attach.`);
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      quality: 0.7,
+      mediaTypes: [kind],
+      quality:    kind === 'videos' ? 1 : 0.7,
       allowsEditing: false,
+      videoMaxDuration: 60, // hard cap to keep upload size sane on free plan
     });
     if (result.canceled || !result.assets?.[0]) return;
     const asset = result.assets[0];
+    const isVideo = kind === 'videos';
 
     setSending(true);
     try {
-      const filename = asset.fileName || `photo-${Date.now()}.jpg`;
-      const mime     = asset.mimeType || 'image/jpeg';
-      const up = await uploadAttachment(asset.uri, filename, mime);
-      const msg = await sendMessage(chatId, '', 'image', {
-        meta: { attachmentId: up.id, mime: up.mime, size: up.size, filename: up.filename,
-                width: asset.width, height: asset.height },
-      });
+      const filename = asset.fileName ||
+        (isVideo ? `video-${Date.now()}.mp4` : `photo-${Date.now()}.jpg`);
+      const mime = asset.mimeType ||
+        (isVideo ? 'video/mp4' : 'image/jpeg');
+      const up = await uploadAttachment(asset.uri, filename, mime, { viewOnce: !!opts.viewOnce });
+      const meta: any = {
+        attachmentId: up.id,
+        mime: up.mime,
+        size: up.size,
+        filename: up.filename,
+        width:  asset.width,
+        height: asset.height,
+      };
+      if (isVideo && asset.duration) meta.durationMs = asset.duration;
+      if (opts.viewOnce) meta.viewOnce = true;
+      const msg = await sendMessage(chatId, '', isVideo ? 'video' : 'image', { meta });
       setMessages(prev => prev.some(x => x.id === msg.id) ? prev : [msg, ...prev]);
     } catch (e: any) {
       Alert.alert('Upload failed', e?.message ?? 'Try again');
@@ -720,16 +1047,40 @@ export default function ChatScreen() {
   }, [chatId, sending]);
 
   // ── Attach menu ───────────────────────────────────────────
-  // Single attach button → Alert with "Photo" / "File" choices. Keeps the
-  // composer tidy and matches WhatsApp/Telegram flow.
+  // Photo / Video / View-once photo / View-once video / Sticker / File.
   const onPressAttach = useCallback(() => {
     if (sending) return;
     Alert.alert('Attach', undefined, [
-      { text: '📷 Photo', onPress: onPickImage },
-      { text: '📎 File',  onPress: onPickFile  },
+      { text: '📷 Photo',           onPress: () => onPickMedia('images') },
+      { text: '🎥 Video',           onPress: () => onPickMedia('videos') },
+      { text: '👁️ View-once photo', onPress: () => onPickMedia('images', { viewOnce: true }) },
+      { text: '👁️ View-once video', onPress: () => onPickMedia('videos', { viewOnce: true }) },
+      { text: '🎨 Sticker', onPress: () => {
+        const peer = chat?.type === 'direct' && meId
+          ? chat.members.find(m => m.userId !== meId)
+          : null;
+        router.push({
+          pathname: '/stickers' as any,
+          params: { chatId, peerName: peer?.name || chat?.name || '' },
+        });
+      }},
+      {
+        text: nextInvisibleInk ? '✨ Invisible Ink: armed — disarm' : '✨ Invisible Ink (next message)',
+        onPress: () => setNextInvisibleInk(v => !v),
+      },
+      { text: '📊 Poll', onPress: () => {
+        const peer = chat?.type === 'direct' && meId
+          ? chat.members.find(m => m.userId !== meId)
+          : null;
+        router.push({
+          pathname: '/create-poll' as any,
+          params: { chatId, peerName: peer?.name || chat?.name || '' },
+        });
+      }},
+      { text: '📎 File',            onPress: onPickFile  },
       { text: 'Cancel', style: 'cancel' },
     ]);
-  }, [sending, onPickImage, onPickFile]);
+  }, [sending, onPickMedia, onPickFile, router, chatId, chat, meId, nextInvisibleInk]);
 
   // ── Load older on scroll-up ───────────────────────────────
   const onEndReached = useCallback(async () => {
@@ -783,6 +1134,33 @@ export default function ChatScreen() {
     return 'Direct chat';
   }, [chat, peerPresence]);
 
+  // ── Memory Bubble (Emotional AI spec item) ────────────────
+  // Pick the longest-ago message in this chat whose calendar (month, day)
+  // matches today's. Skip messages younger than 364 days so "yesterday"
+  // never qualifies. Returns null if nothing matches or the surfaced
+  // candidate has already been dismissed this session.
+  const memoryBubble = useMemo(() => {
+    if (!messages.length) return null;
+    const today = new Date();
+    const todayMonth = today.getMonth();
+    const todayDate  = today.getDate();
+    const todayMs    = today.getTime();
+    let pick: { msg: DisplayMessage; yearsAgo: number } | null = null;
+    for (const m of messages) {
+      if (!m.createdAt || !m.content || m.deletedAt) continue;
+      if (m.type !== 'text') continue;                  // anniversary banner is text-only
+      if (dismissedMemoryIds.has(m.id)) continue;
+      const d = new Date(m.createdAt);
+      if (Number.isNaN(d.getTime())) continue;
+      if (d.getMonth() !== todayMonth || d.getDate() !== todayDate) continue;
+      const ageMs = todayMs - d.getTime();
+      if (ageMs < 364 * 86_400_000) continue;           // must be ≥1 year old
+      const yearsAgo = Math.max(1, Math.round(ageMs / (365 * 86_400_000)));
+      if (!pick || yearsAgo > pick.yearsAgo) pick = { msg: m, yearsAgo };
+    }
+    return pick;
+  }, [messages, dismissedMemoryIds]);
+
   const [screenAuthHeader, setScreenAuthHeader] = useState<string | null>(null);
   useEffect(() => {
     let cancel = false;
@@ -827,7 +1205,12 @@ export default function ChatScreen() {
         </View>
         <View style={{ flex: 1 }}>
           <Text style={S.title} numberOfLines={1}>{title}</Text>
-          {chat && <Text style={S.sub}>{headerSub}</Text>}
+          {chat && (
+            <Text style={S.sub}>
+              {headerSub}
+              <Text style={S.e2eBadge}>  ·  🔒 secured</Text>
+            </Text>
+          )}
         </View>
         {chat?.type === 'direct' && meId && (() => {
           const peer = chat.members.find(m => m.userId !== meId);
@@ -890,6 +1273,42 @@ export default function ChatScreen() {
         </View>
       )}
 
+      {/* Inbound screenshot alert — auto-dismisses after 4s */}
+      {screenshotBanner && (
+        <View style={S.screenshotBanner}>
+          <Text style={S.screenshotBannerTxt}>
+            📸 {(() => {
+              const who = membersById.get(screenshotBanner.by);
+              return who?.name || who?.email || 'Someone';
+            })()} just captured a screenshot of this chat.
+          </Text>
+        </View>
+      )}
+
+      {/* Memory Bubble — anniversary of a past message in this chat */}
+      {memoryBubble && (
+        <TouchableOpacity
+          style={S.memoryBubble}
+          onPress={() => setDismissedMemoryIds(prev => {
+            const next = new Set(prev); next.add(memoryBubble.msg.id); return next;
+          })}
+          activeOpacity={0.85}
+        >
+          <Text style={S.memoryBubbleTitle}>
+            📅 {memoryBubble.yearsAgo === 1 ? '1 year ago today' : `${memoryBubble.yearsAgo} years ago today`}
+            {(() => {
+              const who = membersById.get(memoryBubble.msg.senderId);
+              const name = who?.name || who?.email;
+              return name ? ` · ${name} said` : '';
+            })()}
+          </Text>
+          <Text style={S.memoryBubbleBody} numberOfLines={2}>
+            “{memoryBubble.msg.content}”
+          </Text>
+          <Text style={S.memoryBubbleDismiss}>Tap to dismiss</Text>
+        </TouchableOpacity>
+      )}
+
       {/* Messages (inverted — newest at top of the array, visually at bottom) */}
       <FlatList
         ref={listRef}
@@ -915,6 +1334,9 @@ export default function ChatScreen() {
                 })()
               : undefined}
             highlight={searchOpen && searchQ.trim().length > 0 ? searchQ.trim() : null}
+            tiltRevealed={tiltRevealed}
+            pollVotesForMsg={pollVotes[item.id]}
+            onPollVoteChange={(next) => setPollVotes(prev => ({ ...prev, [item.id]: next }))}
           />
         )}
         onEndReached={onEndReached}
@@ -942,6 +1364,28 @@ export default function ChatScreen() {
             <Text style={S.editCancelTxt}>Cancel</Text>
           </TouchableOpacity>
         </View>
+      )}
+
+      {/* Vanish Mode banner — shown above the composer when ON */}
+      {chat?.vanishMode && (
+        <View style={S.vanishBar}>
+          <Text style={S.vanishBarTxt}>
+            💨 Vanish Mode — new messages disappear after everyone reads them
+          </Text>
+        </View>
+      )}
+
+      {/* Invisible Ink banner — armed for one message; tap to disarm */}
+      {nextInvisibleInk && (
+        <TouchableOpacity
+          style={S.inkBar}
+          onPress={() => setNextInvisibleInk(false)}
+          activeOpacity={0.7}
+        >
+          <Text style={S.inkBarTxt}>
+            ✨ Next message will be Invisible Ink — recipient must tilt phone to read. Tap to disarm.
+          </Text>
+        </TouchableOpacity>
       )}
 
       {/* Reply-to banner */}
@@ -1111,6 +1555,91 @@ function renderWithHighlight(body: string, q: string | null | undefined): any {
   return parts;
 }
 
+// Detect URLs in `body` and tokenise into alternating plain / link chunks.
+// Each link chunk becomes a tappable <Text> that opens the URL via Linking.
+// Trailing punctuation (.,!?;:) is excluded from the link match so a URL
+// at the end of a sentence doesn't include the trailing dot.
+// Privacy: no remote fetch — we render the URL inline, not a rich card.
+// (Server-proxied OG previews are a follow-up; opengraph.io with a sample
+// key would leak every messaged URL to a third party.)
+const URL_RE = /https?:\/\/[^\s]+?(?=[.,!?;:)]*(?:\s|$))/g;
+function renderRichText(body: string, q: string | null | undefined): any {
+  if (!body) return body;
+  // No URLs? Defer to the existing highlight renderer.
+  URL_RE.lastIndex = 0;
+  if (!URL_RE.test(body)) return renderWithHighlight(body, q);
+
+  URL_RE.lastIndex = 0;
+  const parts: any[] = [];
+  let cursor = 0;
+  let m: RegExpExecArray | null;
+  while ((m = URL_RE.exec(body)) !== null) {
+    if (m.index > cursor) {
+      parts.push(renderWithHighlight(body.slice(cursor, m.index), q));
+    }
+    const url = m[0];
+    parts.push(
+      <Text
+        key={`u${m.index}`}
+        style={S.link}
+        onPress={() => Linking.openURL(url).catch(() => {})}
+      >
+        {renderWithHighlight(url, q)}
+      </Text>,
+    );
+    cursor = m.index + url.length;
+  }
+  if (cursor < body.length) parts.push(renderWithHighlight(body.slice(cursor), q));
+  return parts;
+}
+
+// Invisible Ink: replace each non-whitespace char with a bullet. Keep
+// whitespace as-is so word boundaries are preserved (otherwise the
+// obscured text reads as one long blob).
+function obscureForInk(plain: string): string {
+  return plain.replace(/\S/g, '●');
+}
+
+// Pretty-print the screenshot-mode for header-menu display.
+function formatScreenshotMode(mode: ScreenshotMode): string {
+  switch (mode) {
+    case 'allow':         return 'Allowed';
+    case 'allow_notify':  return 'Allowed + notify';
+    case 'block_silent':  return 'Blocked silently';
+    case 'block':
+    default:              return 'Blocked';
+  }
+}
+
+// Pretty-print a disappearing-messages timer (e.g. "24 h", "7 d", "90 d").
+function formatDisappearing(seconds: number | null | undefined): string {
+  if (!seconds) return 'Off';
+  if (seconds % 86400 === 0) return `${seconds / 86400} d`;
+  if (seconds % 3600  === 0) return `${seconds / 3600} h`;
+  if (seconds % 60    === 0) return `${seconds / 60} m`;
+  return `${seconds} s`;
+}
+
+const DISAPPEARING_PRESETS: { label: string; seconds: number | null }[] = [
+  { label: 'Off',      seconds: null },
+  { label: '24 hours', seconds: 86400 },
+  { label: '7 days',   seconds: 7 * 86400 },
+  { label: '90 days',  seconds: 90 * 86400 },
+];
+
+// Time-to-live remaining on an expiring message ("23h", "5d", "2m").
+// Past-due returns "expiring" so the bubble visibly indicates pending wipe.
+function formatTtlRemaining(iso: string): string {
+  try {
+    const ms = new Date(iso).getTime() - Date.now();
+    if (ms <= 0) return 'expiring';
+    if (ms < 60_000)        return `${Math.max(1, Math.floor(ms / 1000))}s`;
+    if (ms < 3600_000)      return `${Math.floor(ms / 60_000)}m`;
+    if (ms < 86400_000)     return `${Math.floor(ms / 3600_000)}h`;
+    return `${Math.floor(ms / 86400_000)}d`;
+  } catch { return ''; }
+}
+
 // Human-friendly "last seen" — same scale as the chat-list relative time.
 function formatLastSeen(iso: string): string {
   try {
@@ -1157,6 +1686,145 @@ function bumpReaction(
   const next = { ...prev };
   if (list.length === 0) delete next[messageId]; else next[messageId] = list;
   return next;
+}
+
+// Apply a ±1 patch to the per-message poll vote summary, optimistic-style.
+// Used both by the user's own tap (via PollBubble.onChange) and by inbound
+// socket events. Removes the bucket entirely when the count hits zero so
+// the UI doesn't render a "0" pill. `fromMe` updates the caller's `mine`
+// list (which drives the radio/check selected state).
+function bumpPollVote(
+  prev: Record<number, PollVoteSummary>,
+  messageId: number,
+  optionIndex: number,
+  delta: 1 | -1,
+  fromMe: boolean,
+): Record<number, PollVoteSummary> {
+  const cur = prev[messageId] ?? { counts: {}, mine: [], total: 0 };
+  const key = String(optionIndex);
+  const oldCount = cur.counts[key] || 0;
+  const newCount = Math.max(0, oldCount + delta);
+  const counts = { ...cur.counts };
+  if (newCount === 0) delete counts[key]; else counts[key] = newCount;
+  let mine = cur.mine;
+  if (fromMe) {
+    if (delta > 0) {
+      if (!mine.includes(optionIndex)) mine = [...mine, optionIndex];
+    } else {
+      mine = mine.filter(x => x !== optionIndex);
+    }
+  }
+  const total = Math.max(0, cur.total + delta);
+  return { ...prev, [messageId]: { counts, mine, total } };
+}
+
+// ─── Poll bubble (in-chat voting) ────────────────────────────
+// Renders the question + the options as horizontal rows with a fill bar
+// per option (proportional to votes/total). Tapping an option toggles
+// the caller's vote; single-vote polls auto-switch the active option.
+// The PollBubble is "dumb" — it reads `votes` from props and calls
+// `onChange` with the optimistic next state. The chat screen owns the
+// authoritative store + socket reconciliation.
+function PollBubble({
+  chatId, msg, isMine, votes, onChange,
+}: {
+  chatId:   string;
+  msg:      DisplayMessage;
+  isMine:   boolean;
+  votes?:   PollVoteSummary;
+  onChange?: (next: PollVoteSummary) => void;
+}) {
+  const options: string[]    = Array.isArray(msg.meta?.options) ? msg.meta.options : [];
+  const allowMultiple = !!msg.meta?.allowMultiple;
+  const counts = votes?.counts ?? {};
+  const mine   = votes?.mine ?? [];
+  const total  = votes?.total ?? 0;
+
+  const [pending, setPending] = useState<number | null>(null);
+
+  const toggle = useCallback(async (idx: number) => {
+    if (pending != null) return;
+    const wasMine = mine.includes(idx);
+
+    // Optimistic patch — pivots immediately, server reconciles via
+    // 'poll_voted' / 'poll_unvoted' events on the socket.
+    let next: PollVoteSummary = { counts: { ...counts }, mine: [...mine], total };
+    if (wasMine) {
+      next = bumpPollVote({ [msg.id]: next }, msg.id, idx, -1, true)[msg.id];
+    } else {
+      // Single-vote polls: remove existing mine vote(s) first.
+      if (!allowMultiple) {
+        for (const otherIdx of mine) {
+          next = bumpPollVote({ [msg.id]: next }, msg.id, otherIdx, -1, true)[msg.id];
+        }
+      }
+      next = bumpPollVote({ [msg.id]: next }, msg.id, idx, +1, true)[msg.id];
+    }
+    onChange?.(next);
+
+    setPending(idx);
+    try {
+      if (wasMine) {
+        await unvotePoll(chatId, msg.id, idx);
+      } else {
+        await voteOnPoll(chatId, msg.id, idx);
+      }
+    } catch (e: any) {
+      // Rollback — server reject means our optimistic state is wrong.
+      Alert.alert('Vote failed', e?.message ?? 'Try again');
+      onChange?.({ counts, mine, total });
+    } finally {
+      setPending(null);
+    }
+  }, [pending, mine, counts, total, allowMultiple, chatId, msg.id, onChange]);
+
+  return (
+    <View style={S.pollWrap}>
+      <Text style={[S.pollQuestion, isMine && S.pollQuestionMine]} numberOfLines={3}>
+        {msg.content}
+      </Text>
+      {options.map((label, idx) => {
+        const c       = counts[String(idx)] || 0;
+        const pct     = total > 0 ? c / total : 0;
+        const checked = mine.includes(idx);
+        return (
+          <TouchableOpacity
+            key={idx}
+            style={S.pollOptionRow}
+            onPress={() => toggle(idx)}
+            activeOpacity={0.7}
+            disabled={pending != null}
+          >
+            <Text style={[S.pollOptionMark, checked && S.pollOptionMarkOn]}>
+              {checked ? (allowMultiple ? '☑' : '◉') : (allowMultiple ? '☐' : '○')}
+            </Text>
+            <View style={{ flex: 1 }}>
+              <View style={S.pollOptionLine}>
+                <Text style={[S.pollOptionLabel, isMine && S.pollOptionLabelMine]} numberOfLines={2}>
+                  {label}
+                </Text>
+                <Text style={[S.pollOptionCount, isMine && S.pollOptionCountMine]}>
+                  {c}
+                </Text>
+              </View>
+              <View style={S.pollBarTrack}>
+                <View
+                  style={[
+                    S.pollBarFill,
+                    isMine && S.pollBarFillMine,
+                    { width: `${Math.round(pct * 100)}%` },
+                  ]}
+                />
+              </View>
+            </View>
+          </TouchableOpacity>
+        );
+      })}
+      <Text style={[S.pollFooter, isMine && S.pollFooterMine]}>
+        {total} {total === 1 ? 'vote' : 'votes'} · {allowMultiple ? 'multiple answers' : 'single answer'}
+      </Text>
+    </View>
+  );
 }
 
 // ─── File bubble (documents) ─────────────────────────────────
@@ -1227,10 +1895,11 @@ function formatBytes(n: number): string {
 // auth-gated /uploads endpoint with a Bearer header. Mono speaker icon
 // stays bold while playing, otherwise dim.
 function AudioBubble({
-  attachmentId, durationMs, authHeader, isMine,
+  attachmentId, durationMs, waveform, authHeader, isMine,
 }: {
   attachmentId: string;
   durationMs:   number;
+  waveform?:    number[];
   authHeader:   string | null;
   isMine:       boolean;
 }) {
@@ -1295,9 +1964,32 @@ function AudioBubble({
         <Text style={S.audioPlayIcon}>{playing ? '▌▌' : '▶'}</Text>
       </TouchableOpacity>
       <View style={S.audioMeter}>
-        <View style={S.audioTrack}>
-          <View style={[S.audioFill, { width: `${pct * 100}%` }, isMine && S.audioFillMine]} />
-        </View>
+        {waveform && waveform.length > 0 ? (
+          // Telegram-style bars. Each bar height is amplitude*MAX. Bars
+          // up to playback position are filled; the rest are dimmed.
+          <View style={S.waveBars}>
+            {waveform.map((amp, i) => {
+              const barPct = (i + 0.5) / waveform.length;
+              const played = barPct <= pct;
+              return (
+                <View
+                  key={i}
+                  style={[
+                    S.waveBar,
+                    { height: Math.max(3, Math.min(1, amp) * 24) },
+                    isMine
+                      ? (played ? S.waveBarPlayedMine : S.waveBarUnplayedMine)
+                      : (played ? S.waveBarPlayedTheirs : S.waveBarUnplayedTheirs),
+                  ]}
+                />
+              );
+            })}
+          </View>
+        ) : (
+          <View style={S.audioTrack}>
+            <View style={[S.audioFill, { width: `${pct * 100}%` }, isMine && S.audioFillMine]} />
+          </View>
+        )}
         <Text style={[S.audioTime, isMine && S.audioTimeMine]}>
           {playing
             ? `${formatRecDuration(position)} / ${formatRecDuration(durationMs)}`
@@ -1308,11 +2000,54 @@ function AudioBubble({
   );
 }
 
+// ─── Video bubble ────────────────────────────────────────────
+// Inline player using expo-av's <Video>. Tap = native controls, no
+// autoplay. Streams the auth-gated /uploads endpoint via the Bearer
+// header. onLoadError surfaces 410-Gone (view-once consumed) so the
+// MessageBubble can flip to a "Viewed" tombstone without an extra
+// HEAD round-trip.
+function VideoBubble({
+  attachmentId, durationMs, authHeader, onErrorOnce,
+}: {
+  attachmentId:  string;
+  durationMs:    number;
+  authHeader:    string | null;
+  onErrorOnce?:  () => void;
+}) {
+  if (!authHeader) {
+    return (
+      <View style={S.videoLoading}>
+        <ActivityIndicator color={ACCENT} />
+      </View>
+    );
+  }
+  return (
+    <View style={S.videoWrap}>
+      <Video
+        source={{
+          uri: attachmentUrl(attachmentId),
+          headers: { Authorization: authHeader },
+        }}
+        style={S.videoView}
+        useNativeControls
+        resizeMode={ResizeMode.COVER}
+        isLooping={false}
+        shouldPlay={false}
+        onError={() => onErrorOnce?.()}
+      />
+      {durationMs > 0 && (
+        <Text style={S.videoDuration}>{formatRecDuration(durationMs)}</Text>
+      )}
+    </View>
+  );
+}
+
 function MessageBubble({
   msg, meId, member, chatId, otherMembers, onLongPress,
   reactionsForMsg, onToggleReaction,
   replyTarget, replyTargetMember,
-  highlight,
+  highlight, tiltRevealed,
+  pollVotesForMsg, onPollVoteChange,
 }: {
   msg: DisplayMessage;
   meId: string | null;
@@ -1325,6 +2060,13 @@ function MessageBubble({
   replyTarget?: DisplayMessage | null;
   replyTargetMember?: ChatMember;
   highlight?: string | null;
+  // Recipient-only Invisible Ink reveal — flipped true by the chat-screen
+  // DeviceMotion subscription when phone is tilted past ~45°.
+  tiltRevealed?: boolean;
+  // Poll-bubble plumbing: vote summary for this message + a callback the
+  // bubble can call after a successful vote/unvote to patch screen state.
+  pollVotesForMsg?: PollVoteSummary;
+  onPollVoteChange?: (next: PollVoteSummary) => void;
 }) {
   const isMine = msg.senderId === meId;
   const [plain, setPlain] = useState<string>('');
@@ -1387,8 +2129,26 @@ function MessageBubble({
   }
 
   const isImage = msg.type === 'image' && msg.meta?.attachmentId;
+  const isVideo = msg.type === 'video' && msg.meta?.attachmentId;
   const isAudio = msg.type === 'audio' && msg.meta?.attachmentId;
   const isFile  = msg.type === 'file'  && msg.meta?.attachmentId;
+  const isSticker = msg.type === 'sticker' && !!msg.content;
+  const isPoll  = msg.type === 'poll' && Array.isArray(msg.meta?.options);
+
+  // ── View-once gate (P1) ──────────────────────────────────
+  // Only photo/video honor view-once. Owner (sender) sees the media
+  // normally — they can re-watch their own send. Non-owners get a
+  // tap-to-reveal shield; on tap we POST /viewed and reveal once.
+  // If the GET returns 410 (already consumed by another viewer) the
+  // Image/Video onError fires and we flip to the tombstone.
+  const isViewOnceMedia = !!msg.meta?.viewOnce && (isImage || isVideo);
+  const [revealed,  setRevealed]  = useState<boolean>(!isViewOnceMedia || isMine);
+  const [tombstoned, setTombstoned] = useState<boolean>(false);
+  const handleRevealViewOnce = useCallback(async () => {
+    if (revealed) return;
+    setRevealed(true);
+    try { await markAttachmentViewed(msg.meta.attachmentId); } catch { /* best-effort */ }
+  }, [revealed, msg.meta?.attachmentId]);
 
   return (
     <View style={[S.bubbleRow, isMine ? S.bubbleRowMine : S.bubbleRowTheirs]}>
@@ -1396,7 +2156,8 @@ function MessageBubble({
         style={[
           S.bubble,
           isMine ? S.bubbleMine : S.bubbleTheirs,
-          isImage && S.imageBubble,
+          isImage   && S.imageBubble,
+          isSticker && S.stickerBubble,
           msg._state === 'pending' && S.bubblePending,
           msg._state === 'failed'  && S.bubbleFailed,
         ]}
@@ -1405,7 +2166,7 @@ function MessageBubble({
         delayLongPress={250}
         activeOpacity={0.85}
       >
-        {!isMine && member && (
+        {!isMine && member && !isSticker && (
           <Text style={S.senderTag}>{member.name || member.email || msg.senderId.slice(0, 8)}</Text>
         )}
 
@@ -1433,7 +2194,24 @@ function MessageBubble({
           </View>
         )}
 
-        {isImage ? (
+        {/* View-once tombstone — replaces media after it's been viewed */}
+        {(isImage || isVideo) && tombstoned ? (
+          <View style={S.viewOnceTombstone}>
+            <Text style={S.viewOnceTombstoneTxt}>👁️ {isImage ? 'Photo' : 'Video'} viewed</Text>
+          </View>
+        ) : isViewOnceMedia && !revealed ? (
+          <TouchableOpacity
+            style={S.viewOnceShield}
+            onPress={handleRevealViewOnce}
+            activeOpacity={0.7}
+          >
+            <Text style={S.viewOnceShieldIcon}>👁️</Text>
+            <Text style={S.viewOnceShieldTxt}>Tap to view {isImage ? 'photo' : 'video'} once</Text>
+            <Text style={S.viewOnceShieldHint}>
+              From {member?.name || member?.email || 'sender'} · disappears after one view
+            </Text>
+          </TouchableOpacity>
+        ) : isImage ? (
           authHeader ? (
             <Image
               source={{
@@ -1442,16 +2220,25 @@ function MessageBubble({
               }}
               style={S.attachedImage}
               resizeMode="cover"
+              onError={() => { if (isViewOnceMedia && !isMine) setTombstoned(true); }}
             />
           ) : (
             <View style={S.imageError}>
               <Text style={S.imageErrorTxt}>Loading image…</Text>
             </View>
           )
+        ) : isVideo ? (
+          <VideoBubble
+            attachmentId={msg.meta.attachmentId}
+            durationMs={Number(msg.meta?.durationMs) || 0}
+            authHeader={authHeader}
+            onErrorOnce={() => { if (isViewOnceMedia && !isMine) setTombstoned(true); }}
+          />
         ) : isAudio ? (
           <AudioBubble
             attachmentId={msg.meta.attachmentId}
             durationMs={Number(msg.meta?.durationMs) || 0}
+            waveform={Array.isArray(msg.meta?.waveform) ? msg.meta.waveform : undefined}
             authHeader={authHeader}
             isMine={isMine}
           />
@@ -1464,11 +2251,30 @@ function MessageBubble({
             authHeader={authHeader}
             isMine={isMine}
           />
+        ) : isSticker ? (
+          <Text style={S.stickerEmoji}>{msg.content}</Text>
+        ) : isPoll ? (
+          <PollBubble
+            chatId={chatId}
+            msg={msg}
+            isMine={isMine}
+            votes={pollVotesForMsg}
+            onChange={onPollVoteChange}
+          />
         ) : (
           plain ? (
-            <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine]}>
-              {renderWithHighlight(plain, highlight)}
-            </Text>
+            // Invisible Ink: recipient sees ●●●● until they tilt the
+            // phone past 45°. Sender (isMine) always sees plaintext —
+            // they obviously know what they sent.
+            msg.meta?.invisibleInk && !isMine && !tiltRevealed ? (
+              <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, S.invisibleInk]}>
+                {obscureForInk(plain)}
+              </Text>
+            ) : (
+              <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine]}>
+                {renderRichText(plain, highlight)}
+              </Text>
+            )
           ) : null
         )}
 
@@ -1477,6 +2283,12 @@ function MessageBubble({
           {msg.editedAt ? ' · edited' : ''}
           {msg._state === 'pending' ? ' · sending…' : ''}
           {msg._state === 'failed'  ? ' · failed (tap to retry)' : ''}
+          {msg.expiresAt && (
+            <Text style={S.ttlBadge}> · ⏱️ {formatTtlRemaining(msg.expiresAt)}</Text>
+          )}
+          {msg.vanishAfterRead && (
+            <Text style={S.vanishBadge}> · 💨 vanish</Text>
+          )}
           {tickState && (
             <Text style={tickState === 'read' ? S.tickRead : S.tick}>
               {' '}
@@ -1533,13 +2345,24 @@ const S = StyleSheet.create({
   inChatSearchInput:  { flex: 1, color: TEXT, backgroundColor: '#1F2937', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 8, fontSize: 14 },
   inChatSearchCount:  { color: SUBTLE, fontSize: 11, fontWeight: '600' },
   highlight:          { backgroundColor: 'rgba(252, 211, 77, 0.45)', color: '#111' },
+  link:               { color: '#7DD3FC', textDecorationLine: 'underline' },
   backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   backTxt:       { color: TEXT, fontSize: 24 },
   title:         { color: TEXT, fontSize: 18, fontWeight: '700' },
   sub:           { color: SUBTLE, fontSize: 12 },
+  e2eBadge:      { color: '#22C55E', fontSize: 11, fontWeight: '600' },
 
   errorBar:      { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.4)', borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 10 },
   errorTxt:      { color: DANGER, fontSize: 12 },
+  screenshotBanner:    { backgroundColor: 'rgba(252,211,77,0.14)', borderColor: 'rgba(252,211,77,0.5)', borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 10 },
+  // Memory Bubble — anniversary banner under the chat header. Distinct
+  // from screenshot/error banners (purple) so the user reads it as a
+  // "nostalgia" moment rather than an alert.
+  memoryBubble:        { backgroundColor: 'rgba(180,160,255,0.10)', borderColor: 'rgba(180,160,255,0.35)', borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 12, borderRadius: 10 },
+  memoryBubbleTitle:   { color: '#C4B5FD', fontSize: 12, fontWeight: '700' },
+  memoryBubbleBody:    { color: TEXT, fontSize: 13, marginTop: 4, fontStyle: 'italic' },
+  memoryBubbleDismiss: { color: SUBTLE, fontSize: 10, marginTop: 6 },
+  screenshotBannerTxt: { color: '#FCD34D', fontSize: 12, fontWeight: '600' },
 
   bubbleRow:     { marginVertical: 4, flexDirection: 'row' },
   bubbleRowMine: { justifyContent: 'flex-end' },
@@ -1555,6 +2378,7 @@ const S = StyleSheet.create({
   bubbleTxt:     { color: TEXT, fontSize: 15, lineHeight: 20 },
   bubbleTxtMine: { color: '#fff' },
   bubbleMeta:    { color: 'rgba(255,255,255,0.5)', fontSize: 10, alignSelf: 'flex-end', marginTop: 2 },
+  ttlBadge:      { color: '#FCD34D', fontSize: 10, fontWeight: '700' },
   tick:          { color: 'rgba(255,255,255,0.7)', fontSize: 11, fontWeight: '700' },
   tickRead:      { color: '#3B82F6',               fontSize: 11, fontWeight: '700' },
 
@@ -1562,6 +2386,17 @@ const S = StyleSheet.create({
   typingTxt:     { color: SUBTLE, fontSize: 12, fontStyle: 'italic' },
 
   editBar:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8, backgroundColor: 'rgba(108,99,255,0.12)', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: BORDER },
+  // Vanish-Mode banner above the composer when chat.vanishMode is ON.
+  vanishBar:     { paddingHorizontal: 16, paddingVertical: 8, backgroundColor: 'rgba(252,211,77,0.10)', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(252,211,77,0.40)' },
+  vanishBarTxt:  { color: '#FCD34D', fontSize: 12, fontWeight: '600' },
+  // 💨 badge inside the bubble meta line for messages stamped vanish_after_read.
+  vanishBadge:   { color: '#FCD34D', fontSize: 10, fontWeight: '700' },
+  // Invisible Ink obscured text: bullets render slightly tighter and a
+  // touch dimmer than normal text so the bubble visibly reads as "covered".
+  invisibleInk:  { letterSpacing: 1, opacity: 0.75 },
+  // Composer banner when Invisible Ink is armed (matches vanishBar shape).
+  inkBar:        { paddingHorizontal: 16, paddingVertical: 8, backgroundColor: 'rgba(180,160,255,0.12)', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(180,160,255,0.45)' },
+  inkBarTxt:     { color: '#C4B5FD', fontSize: 12, fontWeight: '600' },
   editTxt:       { color: ACCENT, fontSize: 12, fontWeight: '600' },
   editCancelTxt: { color: SUBTLE, fontSize: 12 },
 
@@ -1588,6 +2423,16 @@ const S = StyleSheet.create({
   audioMeter:         { flex: 1, gap: 4 },
   audioTrack:         { height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.18)', overflow: 'hidden' },
   audioFill:          { height: 4, backgroundColor: ACCENT, borderRadius: 2 },
+
+  // Waveform bars (Day 7 polish): 32 vertical bars sized by amplitude.
+  // Played bars use the accent color; unplayed are dim so the playhead
+  // is implicit. flex-end alignItems so all bars sit on the baseline.
+  waveBars:               { flexDirection: 'row', alignItems: 'flex-end', height: 24, gap: 2 },
+  waveBar:                { width: 3, borderRadius: 1.5 },
+  waveBarPlayedMine:      { backgroundColor: '#fff' },
+  waveBarUnplayedMine:    { backgroundColor: 'rgba(255,255,255,0.35)' },
+  waveBarPlayedTheirs:    { backgroundColor: ACCENT },
+  waveBarUnplayedTheirs:  { backgroundColor: 'rgba(108,99,255,0.35)' },
   audioFillMine:      { backgroundColor: '#fff' },
   audioTime:          { color: SUBTLE, fontSize: 11 },
   audioTimeMine:      { color: 'rgba(255,255,255,0.85)' },
@@ -1598,9 +2443,47 @@ const S = StyleSheet.create({
   sendTxt:       { color: '#fff', fontWeight: '700' },
 
   imageBubble:   { padding: 4, borderRadius: 12 },
+  // Sticker: WhatsApp-style — transparent backdrop, no padding, just a
+  // big emoji glyph. The bubble component still wraps it so long-press
+  // (forward/reply/delete) works the same as any other message.
+  stickerBubble: { backgroundColor: 'transparent', padding: 0 },
+  stickerEmoji:  { fontSize: 72, lineHeight: 84 },
+
+  // Poll bubble: question on top, options as rows with a horizontal fill
+  // bar proportional to vote count, footer with totals + mode hint.
+  pollWrap:               { minWidth: 240, maxWidth: 300, gap: 8 },
+  pollQuestion:           { color: TEXT, fontSize: 14, fontWeight: '700', marginBottom: 6 },
+  pollQuestionMine:       { color: '#fff' },
+  pollOptionRow:          { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 },
+  pollOptionMark:         { color: SUBTLE, fontSize: 16, width: 18, textAlign: 'center' },
+  pollOptionMarkOn:       { color: ACCENT },
+  pollOptionLine:         { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
+  pollOptionLabel:        { color: TEXT, fontSize: 13, flex: 1 },
+  pollOptionLabelMine:    { color: '#fff' },
+  pollOptionCount:        { color: SUBTLE, fontSize: 11, fontWeight: '700' },
+  pollOptionCountMine:    { color: 'rgba(255,255,255,0.85)' },
+  pollBarTrack:           { height: 4, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 2, marginTop: 4, overflow: 'hidden' },
+  pollBarFill:            { height: 4, backgroundColor: ACCENT, borderRadius: 2 },
+  pollBarFillMine:        { backgroundColor: '#fff' },
+  pollFooter:             { color: SUBTLE, fontSize: 11, marginTop: 6 },
+  pollFooterMine:         { color: 'rgba(255,255,255,0.7)' },
   attachedImage: { width: 220, height: 220, borderRadius: 8, backgroundColor: '#0F1217' },
   imageError:    { width: 180, padding: 16, alignItems: 'center', gap: 4 },
   imageErrorTxt: { color: SUBTLE, fontSize: 12 },
+
+  // Video bubble — inline player with native controls + duration pill
+  videoWrap:     { width: 240, height: 240, borderRadius: 8, overflow: 'hidden', backgroundColor: '#000', position: 'relative' },
+  videoView:     { width: '100%', height: '100%' },
+  videoDuration: { position: 'absolute', right: 8, bottom: 8, color: '#fff', fontSize: 11, fontWeight: '700', backgroundColor: 'rgba(0,0,0,0.55)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, overflow: 'hidden' },
+  videoLoading:  { width: 240, height: 240, borderRadius: 8, backgroundColor: '#0F1217', alignItems: 'center', justifyContent: 'center' },
+
+  // View-once shield (before tap) + tombstone (after view)
+  viewOnceShield:        { width: 220, padding: 20, borderRadius: 12, alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: 'rgba(108,99,255,0.15)', borderWidth: 1, borderColor: ACCENT, borderStyle: 'dashed' },
+  viewOnceShieldIcon:    { fontSize: 28 },
+  viewOnceShieldTxt:     { color: TEXT, fontSize: 14, fontWeight: '700' },
+  viewOnceShieldHint:    { color: SUBTLE, fontSize: 11, textAlign: 'center' },
+  viewOnceTombstone:     { width: 220, padding: 16, borderRadius: 12, alignItems: 'center', backgroundColor: '#0F1217', borderWidth: StyleSheet.hairlineWidth, borderColor: BORDER },
+  viewOnceTombstoneTxt:  { color: SUBTLE, fontSize: 12, fontStyle: 'italic' },
 
   // Day 9 — file bubble (documents)
   fileRow:        { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 220, maxWidth: 280 },

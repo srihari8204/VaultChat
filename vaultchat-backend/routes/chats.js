@@ -86,6 +86,8 @@ function publicMessage(row) {
     editedAt:  row.edited_at,
     deletedAt: row.deleted_at,
     createdAt: row.created_at,
+    expiresAt: row.expires_at ?? null,
+    vanishAfterRead: !!row.vanish_after_read,
   };
 }
 
@@ -178,6 +180,13 @@ function setBroadcasters(funcs) {
 // GET /chats — list current user's chats, newest activity first
 router.get('/', async (req, res) => {
   try {
+    // ?includeHidden=1 from the hidden-chats screen returns hidden rows
+    // ONLY. Default behaviour excludes them so the main chat list stays
+    // clean. (We don't union both because the user has already crossed
+    // the PIN gate to see hidden ones, and showing them mixed in would
+    // defeat the point.)
+    const wantHidden = req.query?.includeHidden === '1' || req.query?.includeHidden === 'true';
+
     // For direct chats, also fetch the other member's name + photo so the
     // chat list can render avatars without one round-trip per row. Done
     // via a LATERAL subquery to keep this single-pass.
@@ -186,9 +195,13 @@ router.get('/', async (req, res) => {
          c.id, c.type, c.name, c.photo_url, c.created_by, c.created_at,
          c.last_message_id, c.last_message_at, c.updated_at,
          cm.role, cm.last_read_message_id, cm.muted, cm.joined_at,
+         cm.pinned, cm.pinned_at, cm.archived, cm.hidden,
+         cm.screenshot_mode, cm.vanish_mode,
          peer.user_id   AS peer_user_id,
          peer.peer_name AS peer_name,
          peer.peer_photo AS peer_photo,
+         peer.peer_online AS peer_online,
+         peer.peer_last_seen AS peer_last_seen,
          (SELECT COUNT(*) FROM messages m
             WHERE m.chat_id = c.id
               AND m.id > COALESCE(cm.last_read_message_id, 0)
@@ -202,7 +215,17 @@ router.get('/', async (req, res) => {
                 u.name AS peer_name,
                 u.photo_url AS peer_photo,
                 u.online   AS peer_online,
-                CASE WHEN u.last_seen_visible THEN u.last_seen_at ELSE NULL END AS peer_last_seen
+                -- Last-seen visibility: global toggle AND no ghost-mode
+                -- override from the peer toward me.
+                CASE
+                  WHEN u.last_seen_visible
+                   AND NOT COALESCE((
+                     SELECT g.hide_last_seen FROM ghost_mode g
+                      WHERE g.owner_id = u.id AND g.target_id = $1
+                   ), FALSE)
+                  THEN u.last_seen_at
+                  ELSE NULL
+                END AS peer_last_seen
            FROM chat_members cm2
            JOIN users u ON u.id = cm2.user_id
           WHERE cm2.chat_id = c.id
@@ -212,9 +235,12 @@ router.get('/', async (req, res) => {
           LIMIT 1
        ) peer ON TRUE
        WHERE cm.left_at IS NULL
-       ORDER BY COALESCE(c.last_message_at, c.created_at) DESC
+         AND cm.hidden = $2
+       ORDER BY cm.pinned DESC,
+                cm.pinned_at DESC NULLS LAST,
+                COALESCE(c.last_message_at, c.created_at) DESC
        LIMIT 200`,
-      [req.user.id]
+      [req.user.id, wantHidden]
     );
     res.json(r.rows.map(row => ({
       id:              row.id,
@@ -229,6 +255,11 @@ router.get('/', async (req, res) => {
       myRole:          row.role,
       myLastReadId:    row.last_read_message_id,
       muted:           row.muted,
+      pinned:          !!row.pinned,
+      archived:        !!row.archived,
+      hidden:          !!row.hidden,
+      screenshotMode:  row.screenshot_mode ?? 'block',
+      vanishMode:      !!row.vanish_mode,
       unreadCount:     parseInt(row.unread_count, 10) || 0,
       // direct-chat peer info (null for groups)
       peerUserId:      row.peer_user_id ?? null,
@@ -481,18 +512,22 @@ router.get('/:id', async (req, res) => {
     );
 
     res.json({
-      id:              chat.id,
-      type:            chat.type,
-      name:            chat.name,
-      photoURL:        chat.photo_url,
-      createdBy:       chat.created_by,
-      createdAt:       chat.created_at,
-      updatedAt:       chat.updated_at,
-      lastMessageId:   chat.last_message_id,
-      lastMessageAt:   chat.last_message_at,
-      members:         membersR.rows.map(publicMember),
-      myRole:          mem.role,
-      myLastReadId:    mem.last_read_message_id,
+      id:                   chat.id,
+      type:                 chat.type,
+      name:                 chat.name,
+      photoURL:             chat.photo_url,
+      createdBy:            chat.created_by,
+      createdAt:            chat.created_at,
+      updatedAt:            chat.updated_at,
+      lastMessageId:        chat.last_message_id,
+      lastMessageAt:        chat.last_message_at,
+      disappearingSeconds:  chat.disappearing_seconds ?? null,
+      members:              membersR.rows.map(publicMember),
+      myRole:               mem.role,
+      myLastReadId:         mem.last_read_message_id,
+      hidden:               !!mem.hidden,
+      screenshotMode:       mem.screenshot_mode ?? 'block',
+      vanishMode:           !!mem.vanish_mode,
     });
   } catch (err) {
     console.error('[chats GET/:id]', err.message);
@@ -512,7 +547,7 @@ router.post('/:id/messages', async (req, res) => {
     const replyTo   = b.replyToId ? parseInt(b.replyToId, 10) : null;
     const meta      = b.meta && typeof b.meta === 'object' ? b.meta : null;
 
-    if (!['text','image','video','audio','file','location','system'].includes(type)) {
+    if (!['text','image','video','audio','file','location','system','sticker','poll'].includes(type)) {
       return res.status(400).json({ error: 'invalid type' });
     }
 
@@ -523,6 +558,34 @@ router.post('/:id/messages', async (req, res) => {
     if (type === 'text') {
       if (!content || typeof content !== 'string') {
         return res.status(400).json({ error: 'content required for text messages' });
+      }
+    } else if (type === 'sticker') {
+      // Sticker messages carry the emoji/asset id in `content`. Cap length
+      // so a stray "sticker" isn't a 1 MB blob.
+      if (!content || typeof content !== 'string') {
+        return res.status(400).json({ error: 'content (sticker id) required' });
+      }
+      if (content.length > 64) {
+        return res.status(400).json({ error: 'sticker id too long' });
+      }
+    } else if (type === 'poll') {
+      // content = the poll question; meta.options = string[] of 2..10
+      // choice labels. meta.allowMultiple optional (default single-vote).
+      // Votes live in poll_votes keyed by (message_id, user_id, option_index).
+      if (!content || typeof content !== 'string') {
+        return res.status(400).json({ error: 'content (poll question) required' });
+      }
+      if (content.length > 200) {
+        return res.status(400).json({ error: 'poll question too long (max 200)' });
+      }
+      const opts = meta?.options;
+      if (!Array.isArray(opts) || opts.length < 2 || opts.length > 10) {
+        return res.status(400).json({ error: 'meta.options must be an array of 2-10 strings' });
+      }
+      for (const o of opts) {
+        if (typeof o !== 'string' || o.length === 0 || o.length > 100) {
+          return res.status(400).json({ error: 'each option must be a non-empty string ≤ 100 chars' });
+        }
       }
     } else if (isMedia) {
       if (!meta || !meta.attachmentId) {
@@ -543,12 +606,22 @@ router.post('/:id/messages', async (req, res) => {
     }
 
     const inserted = await req.dbTx(async (client) => {
+      // Look up the chat's disappearing-messages timer + sender's vanish
+      // mode and stamp both on the new row. Single statement to keep
+      // the round-trip count flat.
       const m = await client.query(
-        `INSERT INTO messages (chat_id, sender_id, type, content, meta, reply_to_id)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        `INSERT INTO messages (chat_id, sender_id, type, content, meta, reply_to_id, expires_at, vanish_after_read)
+         SELECT $1, $2, $3, $4, $5, $6,
+                CASE WHEN c.disappearing_seconds IS NOT NULL
+                     THEN NOW() + (c.disappearing_seconds || ' seconds')::INTERVAL
+                     ELSE NULL END,
+                COALESCE(cm.vanish_mode, FALSE)
+           FROM chats c
+           LEFT JOIN chat_members cm ON cm.chat_id = c.id AND cm.user_id = $2
+          WHERE c.id = $1
+         RETURNING *`,
         [req.params.id, req.user.id, type, content, meta, replyTo]
       );
-      // Update chat's last_message pointers (denormalized for chat list sort)
       await client.query(
         `UPDATE chats SET last_message_id = $1, last_message_at = $2 WHERE id = $3`,
         [m.rows[0].id, m.rows[0].created_at, req.params.id]
@@ -581,7 +654,9 @@ router.get('/:id/messages', async (req, res) => {
     const limit  = Math.min(parseInt(req.query.limit || DEFAULT_PAGE, 10), MAX_PAGE);
 
     const params = [req.params.id];
-    let where = `chat_id = $1`;
+    // Filter expired ephemeral messages on the lazy path (cleanup loop
+    // hard-deletes them every 5 min; this catches the gap).
+    let where = `chat_id = $1 AND (expires_at IS NULL OR expires_at > NOW())`;
     if (before && Number.isFinite(before)) {
       params.push(before);
       where += ` AND id < $${params.length}`;
@@ -704,6 +779,30 @@ router.post('/:id/read', async (req, res) => {
         userId: req.user.id,
         lastReadMessageId: r.rows[0].last_read_message_id,
       });
+
+      // Vanish-Mode trigger: any vanish_after_read messages in this chat
+      // that have NO non-sender members lagging behind get expires_at =
+      // NOW(). The existing 5-minute sweep loop hard-deletes them on its
+      // next pass; the lazy filter in GET /messages hides them in the
+      // meantime so the now-fully-read recipient stops seeing them too.
+      //
+      // The NOT EXISTS subquery is the load-bearing clause: "no non-sender
+      // active member has last_read_message_id less than this message id".
+      await req.dbQuery(
+        `UPDATE messages m SET expires_at = NOW()
+          WHERE m.chat_id = $1
+            AND m.vanish_after_read = TRUE
+            AND m.expires_at IS NULL
+            AND m.id <= $2
+            AND NOT EXISTS (
+              SELECT 1 FROM chat_members cm2
+               WHERE cm2.chat_id = m.chat_id
+                 AND cm2.user_id <> m.sender_id
+                 AND cm2.left_at IS NULL
+                 AND COALESCE(cm2.last_read_message_id, 0) < m.id
+            )`,
+        [req.params.id, lastReadMessageId]
+      );
     }
     res.json({ ok: true });
   } catch (err) {
@@ -747,40 +846,185 @@ router.post('/:id/members', async (req, res) => {
   }
 });
 
-// PATCH /chats/:id  { name?, photoURL? }  — group rename / re-photo (Day 14)
-// Admin/owner only. Direct chats can't be renamed.
+// PATCH /chats/:id  { name?, photoURL?, disappearingSeconds? }
+// name / photoURL: group-admin only. disappearingSeconds: any member.
+// Direct chats may only set disappearingSeconds.
 router.patch('/:id', async (req, res) => {
   try {
     const mem = await loadChatMembership(req, req.params.id);
     if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
-    if (mem.chat_type !== 'group') return res.status(400).json({ error: 'Only group chats can be edited' });
-    if (mem.role !== 'admin' && mem.role !== 'owner') {
-      return res.status(403).json({ error: 'Admin only' });
-    }
 
     const b = req.body || {};
+    const isAdmin = mem.role === 'admin' || mem.role === 'owner';
     const sets = [];
     const params = [req.params.id];
+
+    // Group-admin-only fields
     if (typeof b.name === 'string') {
+      if (mem.chat_type !== 'group') return res.status(400).json({ error: 'Direct chats cannot be renamed' });
+      if (!isAdmin) return res.status(403).json({ error: 'Admin only' });
       const n = b.name.trim().slice(0, 100);
       if (!n) return res.status(400).json({ error: 'name cannot be empty' });
       params.push(n);
       sets.push(`name = $${params.length}`);
     }
     if (typeof b.photoURL === 'string') {
+      if (mem.chat_type !== 'group') return res.status(400).json({ error: 'Direct chats use peer photo' });
+      if (!isAdmin) return res.status(403).json({ error: 'Admin only' });
       const p = b.photoURL.trim().slice(0, 1024);
       params.push(p || null);
       sets.push(`photo_url = $${params.length}`);
     }
+
+    // Disappearing-messages timer: any member can set/clear it. Null/0
+    // turns it off; otherwise must be a positive integer (seconds).
+    if (b.disappearingSeconds !== undefined) {
+      let s = b.disappearingSeconds;
+      if (s === null || s === 0) {
+        params.push(null);
+      } else if (typeof s !== 'number' || !Number.isFinite(s) || s < 0) {
+        return res.status(400).json({ error: 'disappearingSeconds must be a non-negative number or null' });
+      } else {
+        // Cap at 1 year so a typo doesn't create permanent "ephemeral" messages
+        params.push(Math.min(Math.round(s), 365 * 24 * 60 * 60));
+      }
+      sets.push(`disappearing_seconds = $${params.length}`);
+    }
+
     if (sets.length === 0) return res.json({ ok: true, noop: true });
     await req.dbQuery(`UPDATE chats SET ${sets.join(', ')} WHERE id = $1`, params);
     broadcastChatEvent(req.params.id, 'chat_updated', {
-      chatId: req.params.id, name: b.name, photoURL: b.photoURL,
+      chatId: req.params.id,
+      name: b.name,
+      photoURL: b.photoURL,
+      disappearingSeconds: b.disappearingSeconds,
     });
     res.json({ ok: true });
   } catch (err) {
     console.error('[chats PATCH]', err.message);
     res.status(500).json({ error: 'Failed to update chat' });
+  }
+});
+
+// POST /chats/:id/pin     { pinned: boolean }    — per-user pin (P1 polish)
+router.post('/:id/pin', async (req, res) => {
+  try {
+    const mem = await loadChatMembership(req, req.params.id);
+    if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
+    const pinned = !!req.body?.pinned;
+    await req.dbQuery(
+      `UPDATE chat_members
+          SET pinned = $1,
+              pinned_at = CASE WHEN $1 THEN NOW() ELSE NULL END
+        WHERE chat_id = $2 AND user_id = $3`,
+      [pinned, req.params.id, req.user.id]
+    );
+    res.json({ ok: true, pinned });
+  } catch (err) {
+    console.error('[chats pin]', err.message);
+    res.status(500).json({ error: 'Failed to pin chat' });
+  }
+});
+
+// POST /chats/:id/archive { archived: boolean }  — per-user archive
+router.post('/:id/archive', async (req, res) => {
+  try {
+    const mem = await loadChatMembership(req, req.params.id);
+    if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
+    const archived = !!req.body?.archived;
+    await req.dbQuery(
+      `UPDATE chat_members SET archived = $1
+        WHERE chat_id = $2 AND user_id = $3`,
+      [archived, req.params.id, req.user.id]
+    );
+    res.json({ ok: true, archived });
+  } catch (err) {
+    console.error('[chats archive]', err.message);
+    res.status(500).json({ error: 'Failed to archive chat' });
+  }
+});
+
+// PATCH /chats/:id/hidden  { hidden: boolean }  — per-user
+//
+// Hiding a chat removes it from the default GET /chats result and the
+// realtime list refresh. The user can still receive messages + push;
+// they reach the chat again via /hidden-chats (PIN-gated).
+router.patch('/:id/hidden', async (req, res) => {
+  try {
+    const mem = await loadChatMembership(req, req.params.id);
+    if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
+    const hidden = !!req.body?.hidden;
+    await req.dbQuery(
+      `UPDATE chat_members SET hidden = $1 WHERE chat_id = $2 AND user_id = $3`,
+      [hidden, req.params.id, req.user.id]
+    );
+    res.json({ ok: true, hidden });
+  } catch (err) {
+    console.error('[chats hidden]', err.message);
+    res.status(500).json({ error: 'Failed to update hidden state' });
+  }
+});
+
+// PATCH /chats/:id/screenshot-mode  { mode: 'allow'|'allow_notify'|'block'|'block_silent' }
+// Per-user (each side picks their own posture).
+const SCREENSHOT_MODES = ['allow', 'allow_notify', 'block', 'block_silent'];
+router.patch('/:id/screenshot-mode', async (req, res) => {
+  try {
+    const mem = await loadChatMembership(req, req.params.id);
+    if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
+    const mode = (req.body?.mode || '').toString();
+    if (!SCREENSHOT_MODES.includes(mode)) {
+      return res.status(400).json({ error: `mode must be one of ${SCREENSHOT_MODES.join(', ')}` });
+    }
+    await req.dbQuery(
+      `UPDATE chat_members SET screenshot_mode = $1 WHERE chat_id = $2 AND user_id = $3`,
+      [mode, req.params.id, req.user.id]
+    );
+    res.json({ ok: true, mode });
+  } catch (err) {
+    console.error('[chats screenshot-mode]', err.message);
+    res.status(500).json({ error: 'Failed to update screenshot mode' });
+  }
+});
+
+// POST /chats/:id/screenshot-captured  — client tells server a screenshot
+// just happened; server broadcasts a 'screenshot_captured' socket event
+// to other members so their UI can flash a banner. We do NOT persist this
+// as a chat message (the spec's "show captured image" idea is infeasible
+// — the OS doesn't expose screenshot bytes to apps).
+router.post('/:id/screenshot-captured', async (req, res) => {
+  try {
+    const mem = await loadChatMembership(req, req.params.id);
+    if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
+    broadcastChatEvent(req.params.id, 'screenshot_captured', {
+      chatId:     req.params.id,
+      capturedBy: req.user.id,
+      capturedAt: new Date().toISOString(),
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[chats screenshot-captured]', err.message);
+    res.status(500).json({ error: 'Failed to report screenshot' });
+  }
+});
+
+// PATCH /chats/:id/vanish-mode  { enabled: boolean }
+// Per-user toggle. While ON, every new message you send in this chat
+// gets messages.vanish_after_read = TRUE — meaning the message is
+// hard-deleted as soon as every non-sender member has read it.
+router.patch('/:id/vanish-mode', async (req, res) => {
+  try {
+    const mem = await loadChatMembership(req, req.params.id);
+    if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
+    const enabled = !!req.body?.enabled;
+    await req.dbQuery(
+      `UPDATE chat_members SET vanish_mode = $1 WHERE chat_id = $2 AND user_id = $3`,
+      [enabled, req.params.id, req.user.id]
+    );
+    res.json({ ok: true, enabled });
+  } catch (err) {
+    console.error('[chats vanish-mode]', err.message);
+    res.status(500).json({ error: 'Failed to update vanish mode' });
   }
 });
 
@@ -981,6 +1225,156 @@ router.get('/:id/reactions', async (req, res) => {
   } catch (err) {
     console.error('[reactions GET bulk]', err.message);
     res.status(500).json({ error: 'Failed to load reactions' });
+  }
+});
+
+// ─── Polls (in-chat voting) ────────────────────────────────────────
+// Voting is a separate endpoint from message edit because the message
+// itself stays immutable — votes accumulate in poll_votes and the chat
+// bubble queries counts at render time (via the bulk endpoint below).
+//
+// POST   /chats/:id/messages/:msgId/vote    { optionIndex }       → toggle
+// DELETE /chats/:id/messages/:msgId/vote/:optionIndex              → un-vote
+// GET    /chats/:id/messages/:msgId/votes                          → counts
+// GET    /chats/:id/poll-votes?messageIds=1,2,3                    → bulk
+
+router.post('/:id/messages/:msgId/vote', async (req, res) => {
+  try {
+    const mem = await loadChatMembership(req, req.params.id);
+    if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
+    const msgId        = parseInt(req.params.msgId, 10);
+    const optionIndex  = parseInt(req.body?.optionIndex, 10);
+    if (!Number.isFinite(msgId))        return res.status(400).json({ error: 'invalid msgId' });
+    if (!Number.isFinite(optionIndex) || optionIndex < 0) {
+      return res.status(400).json({ error: 'optionIndex must be a non-negative integer' });
+    }
+
+    // Load the poll message to know its option count + allowMultiple flag.
+    const mr = await req.dbQuery(
+      `SELECT type, meta FROM messages WHERE id = $1 AND chat_id = $2 LIMIT 1`,
+      [msgId, req.params.id]
+    );
+    const m = mr.rows[0];
+    if (!m) return res.status(404).json({ error: 'Poll not found' });
+    if (m.type !== 'poll') return res.status(400).json({ error: 'Not a poll message' });
+    const options = Array.isArray(m.meta?.options) ? m.meta.options : [];
+    if (optionIndex >= options.length) {
+      return res.status(400).json({ error: 'optionIndex out of range' });
+    }
+    const allowMultiple = !!m.meta?.allowMultiple;
+
+    // Single-vote polls: clear any other votes from this user before adding.
+    // Multi-vote: just upsert this option (idempotent via PK).
+    await req.dbQuery(
+      allowMultiple
+        ? `INSERT INTO poll_votes (message_id, user_id, option_index)
+           VALUES ($1, $2, $3)
+           ON CONFLICT DO NOTHING`
+        : `WITH cleared AS (
+             DELETE FROM poll_votes
+              WHERE message_id = $1 AND user_id = $2 AND option_index <> $3
+           )
+           INSERT INTO poll_votes (message_id, user_id, option_index)
+           VALUES ($1, $2, $3)
+           ON CONFLICT DO NOTHING`,
+      [msgId, req.user.id, optionIndex]
+    );
+
+    broadcastChatEvent(req.params.id, 'poll_voted', {
+      chatId: req.params.id, messageId: msgId, userId: req.user.id, optionIndex,
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[poll vote POST]', err.message);
+    res.status(500).json({ error: 'Failed to vote' });
+  }
+});
+
+router.delete('/:id/messages/:msgId/vote/:optionIndex', async (req, res) => {
+  try {
+    const mem = await loadChatMembership(req, req.params.id);
+    if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
+    const msgId       = parseInt(req.params.msgId, 10);
+    const optionIndex = parseInt(req.params.optionIndex, 10);
+    if (!Number.isFinite(msgId) || !Number.isFinite(optionIndex)) {
+      return res.status(400).json({ error: 'invalid id or optionIndex' });
+    }
+    await req.dbQuery(
+      `DELETE FROM poll_votes
+        WHERE message_id = $1 AND user_id = $2 AND option_index = $3`,
+      [msgId, req.user.id, optionIndex]
+    );
+    broadcastChatEvent(req.params.id, 'poll_unvoted', {
+      chatId: req.params.id, messageId: msgId, userId: req.user.id, optionIndex,
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[poll vote DELETE]', err.message);
+    res.status(500).json({ error: 'Failed to un-vote' });
+  }
+});
+
+// Vote breakdown for a single poll: counts per option + which options
+// the caller themselves voted for (for the radio/check UI state).
+router.get('/:id/messages/:msgId/votes', async (req, res) => {
+  try {
+    const mem = await loadChatMembership(req, req.params.id);
+    if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
+    const msgId = parseInt(req.params.msgId, 10);
+    if (!Number.isFinite(msgId)) return res.status(400).json({ error: 'invalid msgId' });
+
+    const r = await req.dbQuery(
+      `SELECT option_index, user_id FROM poll_votes WHERE message_id = $1`,
+      [msgId]
+    );
+    const counts = {};
+    const mine = [];
+    for (const row of r.rows) {
+      const k = String(row.option_index);
+      counts[k] = (counts[k] || 0) + 1;
+      if (row.user_id === req.user.id) mine.push(row.option_index);
+    }
+    res.json({ counts, mine, total: r.rows.length });
+  } catch (err) {
+    console.error('[poll votes GET]', err.message);
+    res.status(500).json({ error: 'Failed to load votes' });
+  }
+});
+
+// Bulk variant — hydrate every visible poll in one round-trip after a
+// message page load. Same shape as the reactions bulk endpoint.
+router.get('/:id/poll-votes', async (req, res) => {
+  try {
+    const mem = await loadChatMembership(req, req.params.id);
+    if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
+    const ids = String(req.query.messageIds || '')
+      .split(',')
+      .map(s => parseInt(s.trim(), 10))
+      .filter(n => Number.isFinite(n))
+      .slice(0, 500);
+    if (ids.length === 0) return res.json({});
+
+    const r = await req.dbQuery(
+      `SELECT pv.message_id, pv.option_index, pv.user_id
+         FROM poll_votes pv
+         JOIN messages m ON m.id = pv.message_id
+        WHERE m.chat_id = $1 AND pv.message_id = ANY($2::bigint[])`,
+      [req.params.id, ids]
+    );
+    const out = {};
+    for (const row of r.rows) {
+      const k = String(row.message_id);
+      if (!out[k]) out[k] = { counts: {}, mine: [], total: 0 };
+      const bucket = out[k];
+      const okey = String(row.option_index);
+      bucket.counts[okey] = (bucket.counts[okey] || 0) + 1;
+      bucket.total += 1;
+      if (row.user_id === req.user.id) bucket.mine.push(row.option_index);
+    }
+    res.json(out);
+  } catch (err) {
+    console.error('[poll votes bulk]', err.message);
+    res.status(500).json({ error: 'Failed to load votes' });
   }
 });
 

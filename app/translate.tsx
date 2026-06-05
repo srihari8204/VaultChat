@@ -9,7 +9,7 @@ import {
   FlatList, StatusBar, ScrollView, Alert,
 } from 'react-native';
 import { useLocalSearchParams, Stack } from 'expo-router';
-import * as Clipboard from 'expo-clipboard';
+import { copyAndAutoClear } from '../lib/clipboardSafe';
 
 const C = { bg: '#FFFFFF', accent: '#4A9FFF', card: '#F9FAFB', green: '#10B981' };
 
@@ -86,7 +86,7 @@ export default function TranslateScreen() {
 
   const copyTranslation = async () => {
     if (translated) {
-      await Clipboard.setStringAsync(translated);
+      await copyAndAutoClear(translated);
       Alert.alert('Copied!', 'Translation copied to clipboard');
     }
   };

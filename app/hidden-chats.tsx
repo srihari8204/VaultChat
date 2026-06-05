@@ -1,191 +1,297 @@
-// app/hidden-chats.tsx — Hidden Locked Chats
-// PIN-protected list of hidden chats
-// Access: Settings -> "Hidden Chats" or long-press chat -> "Hide"
+// app/hidden-chats.tsx — PIN-gated list of hidden chats (Postgres).
+//
+// Two-stage screen:
+//   1. PIN gate — POST /user/pin/verify. 5 wrong attempts → kicked back.
+//      If the user has no PIN set yet, we tell them to set one in Profile.
+//   2. List — fetches GET /chats?includeHidden=1 (server returns hidden
+//      rows ONLY when the flag is set). Tap a row to open the chat.
+//      Long-press → unhide back into the regular list.
+//
+// PIN session is screen-scoped: leaving the screen requires re-entering.
 
-import React, { useState } from 'react';
-import {
-  View, Text, TouchableOpacity, StyleSheet, FlatList,
-  Alert, TextInput, StatusBar, ActivityIndicator,
-} from 'react-native';
 import { useRouter } from 'expo-router';
-import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Crypto from 'expo-crypto';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Image,
+  RefreshControl,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { getAccessToken } from '../lib/api';
+import {
+  attachmentUrl,
+  listChats,
+  setHidden,
+  verifyPin,
+  type ChatSummary,
+} from '../lib/chatService';
 
-const C = {
-  bg: '#FFFFFF', accent: '#FF3C6E', primary: '#4A9FFF',
-  card: '#F9FAFB', dim: '#6B7280',
-};
+const MAX_ATTEMPTS = 5;
 
 export default function HiddenChatsScreen() {
   const router = useRouter();
-  const myUid = auth().currentUser?.uid || '';
-  const [unlocked, setUnlocked] = useState(false);
-  const [pin, setPin] = useState('');
-  const [chats, setChats] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [stage, setStage] = useState<'pin' | 'list'>('pin');
 
-  const verifyPin = async () => {
-    if (pin.length < 4) { Alert.alert('Enter your PIN'); return; }
-    const hash = await Crypto.digestStringAsync(
-      Crypto.CryptoDigestAlgorithm.SHA256, 'vaultchat-hidden-' + pin
-    );
-    const stored = await AsyncStorage.getItem('vc_hidden_pin_hash');
-    if (!stored) {
-      // First time — set the PIN
-      await AsyncStorage.setItem('vc_hidden_pin_hash', hash);
-      setUnlocked(true);
-      loadHiddenChats();
+  if (stage === 'pin') {
+    return <PinGate router={router} onPass={() => setStage('list')} />;
+  }
+  return <HiddenList router={router} />;
+}
+
+function PinGate({
+  router, onPass,
+}: { router: any; onPass: () => void }) {
+  const [pin,       setPin]       = useState('');
+  const [busy,      setBusy]      = useState(false);
+  const [attempts,  setAttempts]  = useState(0);
+  const [error,     setError]     = useState<string | null>(null);
+  const inputRef = useRef<TextInput | null>(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => inputRef.current?.focus(), 200);
+    return () => clearTimeout(t);
+  }, []);
+
+  const submit = useCallback(async () => {
+    if (busy) return;
+    if (!/^\d{4,8}$/.test(pin)) {
+      setError('PIN must be 4–8 digits');
       return;
     }
-    if (hash === stored) {
-      setUnlocked(true);
-      loadHiddenChats();
-    } else {
-      Alert.alert('Wrong PIN', 'Incorrect hidden chats PIN');
-      setPin('');
-    }
-  };
-
-  const loadHiddenChats = async () => {
-    setLoading(true);
+    setBusy(true);
+    setError(null);
     try {
-      const raw = await AsyncStorage.getItem('vc_hidden_chats');
-      const hiddenIds: string[] = raw ? JSON.parse(raw) : [];
-      if (hiddenIds.length === 0) { setChats([]); setLoading(false); return; }
-
-      const list: any[] = [];
-      for (const chatId of hiddenIds) {
-        try {
-          const chatDoc = await firestore().collection('chats').doc(chatId).get();
-          if (!chatDoc.exists) continue;
-          const data = chatDoc.data();
-          const otherId = (data.participants || []).find((p: string) => p !== myUid);
-          let name = data.groupName || '';
-          if (!name && otherId) {
-            const uSnap = await firestore().collection('users').doc(otherId).get();
-            name = uSnap.data()?.name || otherId.slice(0, 8);
-          }
-          list.push({
-            chatId,
-            name: name || 'Chat',
-            lastMsg: data.lastMsg || '',
-            peerUid: otherId,
-            isGroup: !!data.groupName,
-          });
-        } catch {}
+      const ok = await verifyPin(pin);
+      if (ok) {
+        onPass();
+        return;
       }
-      setChats(list);
-    } catch {}
-    setLoading(false);
-  };
+      const next = attempts + 1;
+      setAttempts(next);
+      setPin('');
+      if (next >= MAX_ATTEMPTS) {
+        Alert.alert(
+          'Too many attempts',
+          'Returning to chats. Try again later.',
+          [{ text: 'OK', onPress: () => router.back() }],
+        );
+      } else {
+        setError(`Incorrect PIN. ${MAX_ATTEMPTS - next} attempts left.`);
+      }
+    } catch (e: any) {
+      setError(e?.message ?? 'Verification failed');
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, pin, attempts, onPass, router]);
 
-  const unhideChat = async (chatId: string) => {
-    const raw = await AsyncStorage.getItem('vc_hidden_chats');
-    const ids: string[] = raw ? JSON.parse(raw) : [];
-    await AsyncStorage.setItem('vc_hidden_chats', JSON.stringify(ids.filter(id => id !== chatId)));
-    setChats(prev => prev.filter(c => c.chatId !== chatId));
-    Alert.alert('Chat unhidden', 'This chat will appear in your main list again.');
-  };
+  return (
+    <View style={[S.screen, S.center, { paddingHorizontal: 32 }]}>
+      <StatusBar barStyle="light-content" />
+      <Text style={S.gateIcon}>🔒</Text>
+      <Text style={S.gateTitle}>Enter your PIN</Text>
+      <Text style={S.gateSub}>Hidden chats are protected by your profile PIN.</Text>
 
-  // PIN Entry screen
-  if (!unlocked) {
-    return (
-      <View style={[s.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <StatusBar barStyle="light-content" />
-        <Text style={{ fontSize: 40, marginBottom: 12 }}>{"\uD83D\uDD12"}</Text>
-        <Text style={s.lockTitle}>Hidden Chats</Text>
-        <Text style={s.lockSub}>Enter PIN to access hidden chats</Text>
-        <TextInput
-          style={s.pinInput}
-          value={pin}
-          onChangeText={setPin}
-          placeholder="Enter PIN"
-          placeholderTextColor="#6B7280"
-          secureTextEntry
-          keyboardType="number-pad"
-          maxLength={8}
-          autoFocus
-        />
-        <TouchableOpacity style={s.unlockBtn} onPress={verifyPin}>
-          <Text style={s.unlockTxt}>Unlock</Text>
+      <TextInput
+        ref={inputRef}
+        style={S.pinInput}
+        value={pin}
+        onChangeText={(v) => setPin(v.replace(/\D/g, '').slice(0, 8))}
+        placeholder="••••••"
+        placeholderTextColor={SUBTLE}
+        keyboardType="number-pad"
+        secureTextEntry
+        maxLength={8}
+        onSubmitEditing={submit}
+        editable={!busy}
+      />
+
+      {error && <Text style={S.errorTxt}>{error}</Text>}
+
+      <View style={S.gateBtnRow}>
+        <TouchableOpacity onPress={() => router.back()} style={S.gateCancel} activeOpacity={0.7}>
+          <Text style={S.gateCancelTxt}>Cancel</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 20 }}>
-          <Text style={{ color: '#6B7280' }}>Cancel</Text>
+        <TouchableOpacity
+          onPress={submit}
+          disabled={busy || pin.length < 4}
+          style={[S.gateUnlock, (busy || pin.length < 4) && S.gateUnlockOff]}
+          activeOpacity={0.85}
+        >
+          {busy ? <ActivityIndicator color="#fff" /> : <Text style={S.gateUnlockTxt}>Unlock</Text>}
         </TouchableOpacity>
-        <Text style={s.firstTimeHint}>First time? Your PIN will be set on first entry.</Text>
       </View>
+    </View>
+  );
+}
+
+function HiddenList({ router }: { router: any }) {
+  const [rows,       setRows]       = useState<ChatSummary[]>([]);
+  const [loading,    setLoading]    = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [authHeader, setAuthHeader] = useState<string | null>(null);
+  const [error,      setError]      = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const [list, tok] = await Promise.all([
+        listChats({ includeHidden: true }),
+        getAccessToken(),
+      ]);
+      setRows(list);
+      setAuthHeader(tok ? `Bearer ${tok}` : null);
+      setError(null);
+    } catch (e: any) {
+      setError(e?.message ?? 'Failed to load');
+    }
+  }, []);
+
+  useEffect(() => {
+    (async () => { setLoading(true); await load(); setLoading(false); })();
+  }, [load]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }, [load]);
+
+  const onOpen = useCallback((id: string) => {
+    router.push({ pathname: '/chat', params: { id } } as any);
+  }, [router]);
+
+  const onUnhide = useCallback((c: ChatSummary) => {
+    Alert.alert(
+      'Unhide this chat?',
+      'It will appear in your main chats list again.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Unhide', onPress: async () => {
+            try {
+              await setHidden(c.id, false);
+              setRows(prev => prev.filter(r => r.id !== c.id));
+            } catch (e: any) {
+              Alert.alert('Failed', e?.message ?? 'Try again');
+            }
+          }
+        },
+      ],
     );
+  }, []);
+
+  if (loading) {
+    return <View style={[S.screen, S.center]}><ActivityIndicator color={ACCENT} size="large" /></View>;
   }
 
-  // Chat list
   return (
-    <View style={s.container}>
+    <View style={S.screen}>
       <StatusBar barStyle="light-content" />
-      <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text style={{ color: '#fff', fontSize: 24 }}>{"\u2190"}</Text>
+      <View style={S.header}>
+        <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
+          <Text style={S.backTxt}>←</Text>
         </TouchableOpacity>
-        <Text style={s.title}>{"\uD83D\uDD12"} Hidden Chats</Text>
-        <View style={{ width: 30 }} />
+        <Text style={S.title}>Hidden chats</Text>
       </View>
 
-      {loading ? (
-        <ActivityIndicator color={C.primary} style={{ flex: 1 }} />
-      ) : chats.length === 0 ? (
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-          <Text style={{ fontSize: 40, marginBottom: 12 }}>{"\uD83D\uDC7B"}</Text>
-          <Text style={{ color: '#6B7280', fontSize: 15 }}>No hidden chats</Text>
-          <Text style={{ color: '#9CA3AF', fontSize: 12, marginTop: 6, textAlign: 'center', paddingHorizontal: 40 }}>
-            Long press any chat and tap &quot;Hide&quot; to move it here
+      {error && <Text style={S.errorTxt}>{error}</Text>}
+
+      {rows.length === 0 ? (
+        <View style={[S.center, { flex: 1, paddingHorizontal: 32 }]}>
+          <Text style={S.emptyTitle}>Nothing hidden</Text>
+          <Text style={S.emptySub}>
+            Open any chat → ⋮ menu → 🕶️ Hide chat to move it here.
           </Text>
         </View>
       ) : (
         <FlatList
-          data={chats}
-          keyExtractor={c => c.chatId}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={s.chatRow}
-              onPress={() => router.push({
-                pathname: (item.isGroup ? '/group-chat' : '/chat') as any,
-                params: { chatId: item.chatId, peerUid: item.peerUid, peerName: item.name },
-              })}
-              onLongPress={() => Alert.alert('Unhide?', 'Move this chat back to main list?', [
-                { text: 'Cancel' },
-                { text: 'Unhide', onPress: () => unhideChat(item.chatId) },
-              ])}
-            >
-              <View style={s.chatAvatar}>
-                <Text style={{ color: '#fff', fontWeight: '900', fontSize: 16 }}>
-                  {(item.name || '?')[0].toUpperCase()}
-                </Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={s.chatName}>{item.name}</Text>
-                <Text style={s.chatPreview} numberOfLines={1}>{item.lastMsg || 'No messages'}</Text>
-              </View>
-            </TouchableOpacity>
-          )}
+          data={rows}
+          keyExtractor={(c) => c.id}
+          refreshControl={<RefreshControl tintColor={ACCENT} refreshing={refreshing} onRefresh={onRefresh} />}
+          contentContainerStyle={{ paddingBottom: 32 }}
+          renderItem={({ item: c }) => {
+            const title = c.type === 'direct'
+              ? (c.peerName || c.name || 'Direct chat')
+              : (c.name || 'Group chat');
+            const photoId = c.type === 'direct' ? c.peerPhotoURL : c.photoURL;
+            return (
+              <TouchableOpacity
+                style={S.row}
+                onPress={() => onOpen(c.id)}
+                onLongPress={() => onUnhide(c)}
+                delayLongPress={300}
+                activeOpacity={0.7}
+              >
+                <View style={[S.avatar, c.type === 'group' && S.avatarGroup]}>
+                  {photoId && authHeader ? (
+                    <Image
+                      source={{ uri: attachmentUrl(photoId), headers: { Authorization: authHeader } }}
+                      style={S.avatarImg}
+                    />
+                  ) : (
+                    <Text style={S.avatarTxt}>{(title.trim()[0] ?? '#').toUpperCase()}</Text>
+                  )}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={S.rowName} numberOfLines={1}>{title}</Text>
+                  <Text style={S.rowSub} numberOfLines={1}>
+                    {c.unreadCount > 0 ? `${c.unreadCount} unread · ` : ''}
+                    long-press to unhide
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            );
+          }}
         />
       )}
     </View>
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 50, paddingHorizontal: 16, paddingBottom: 12 },
-  title: { color: '#fff', fontSize: 18, fontWeight: '800' },
-  lockTitle: { color: '#fff', fontSize: 22, fontWeight: '900', marginBottom: 6 },
-  lockSub: { color: '#6B7280', fontSize: 14, marginBottom: 24 },
-  pinInput: { width: 200, height: 52, backgroundColor: '#F9FAFB', borderRadius: 14, color: '#fff', fontSize: 22, textAlign: 'center', letterSpacing: 8, borderWidth: 1, borderColor: '#E5E7EB' },
-  unlockBtn: { marginTop: 20, backgroundColor: C.accent, paddingHorizontal: 40, paddingVertical: 14, borderRadius: 14 },
-  unlockTxt: { color: '#fff', fontWeight: '800', fontSize: 16 },
-  firstTimeHint: { color: '#9CA3AF', fontSize: 11, marginTop: 30, textAlign: 'center', paddingHorizontal: 40 },
-  chatRow: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
-  chatAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#1D4ED8', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  chatName: { color: '#1F2937', fontSize: 15, fontWeight: '700' },
-  chatPreview: { color: '#6B7280', fontSize: 13, marginTop: 2 },
+const DARK_BG = '#0D0F14';
+const CARD_BG = '#161A22';
+const BORDER  = '#1F2937';
+const TEXT    = '#E5E7EB';
+const SUBTLE  = '#9CA3AF';
+const ACCENT  = '#6C63FF';
+const DANGER  = '#EF4444';
+
+const S = StyleSheet.create({
+  screen:       { flex: 1, backgroundColor: DARK_BG },
+  center:       { justifyContent: 'center', alignItems: 'center' },
+
+  // PIN gate
+  gateIcon:     { fontSize: 48, marginBottom: 16 },
+  gateTitle:    { color: TEXT, fontSize: 22, fontWeight: '800', marginBottom: 6 },
+  gateSub:      { color: SUBTLE, fontSize: 13, textAlign: 'center', marginBottom: 24 },
+  pinInput:     { color: TEXT, fontSize: 28, letterSpacing: 10, textAlign: 'center', backgroundColor: CARD_BG, borderColor: BORDER, borderWidth: 1, borderRadius: 12, paddingHorizontal: 20, paddingVertical: 14, width: '100%', maxWidth: 280 },
+  errorTxt:     { color: DANGER, paddingHorizontal: 16, paddingTop: 12, fontSize: 12, textAlign: 'center' },
+  gateBtnRow:   { flexDirection: 'row', gap: 12, marginTop: 24, width: '100%', maxWidth: 280 },
+  gateCancel:   { flex: 1, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: BORDER, alignItems: 'center' },
+  gateCancelTxt: { color: TEXT, fontWeight: '700' },
+  gateUnlock:    { flex: 1, padding: 14, borderRadius: 12, backgroundColor: ACCENT, alignItems: 'center' },
+  gateUnlockOff: { backgroundColor: '#374151' },
+  gateUnlockTxt: { color: '#fff', fontWeight: '700' },
+
+  // List
+  header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
+  backBtn:      { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  backTxt:      { color: TEXT, fontSize: 26, fontWeight: '600' },
+  title:        { color: TEXT, fontSize: 22, fontWeight: '800' },
+  emptyTitle:   { color: TEXT, fontSize: 16, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
+  emptySub:     { color: SUBTLE, fontSize: 13, lineHeight: 18, textAlign: 'center' },
+
+  row:          { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
+  avatar:       { width: 52, height: 52, borderRadius: 26, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  avatarGroup:  { backgroundColor: '#22C55E' },
+  avatarImg:    { width: '100%', height: '100%' },
+  avatarTxt:    { color: '#fff', fontSize: 20, fontWeight: '700' },
+  rowName:      { color: TEXT, fontSize: 16, fontWeight: '600' },
+  rowSub:       { color: SUBTLE, fontSize: 12, marginTop: 4 },
 });

@@ -1,470 +1,304 @@
-// app/message-reminder.tsx — Message Reminder
-// Set a timed reminder for a specific message. Presets + custom picker.
-// Saves to AsyncStorage, schedules local notification via expo-notifications.
+// app/message-reminder.tsx — Per-message reminders (client-only).
+//
+// Two modes:
+//   With ?chatId + ?messageId + ?preview   → composer: pick a time, save.
+//   Without params                         → list: pending reminders + cancel.
+//
+// Storage: AsyncStorage list of { id, chatId, messageId, preview, when }.
+// Schedule: expo-notifications scheduleNotificationAsync with
+//   data: { chatId, messageId } so the existing root tap handler routes
+//   back into the chat when the user taps the notification.
 
-import React, { useState, useEffect } from 'react';
-import {
-  View, Text, TouchableOpacity, StyleSheet,
-  StatusBar, Alert, ScrollView, Platform,
-} from 'react-native';
-import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { LinearGradient } from 'expo-linear-gradient';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Notifications from 'expo-notifications';
-import DateTimePicker from '@react-native-community/datetimepicker';
-import { Ionicons } from '@expo/vector-icons';
-import 'react-native-get-random-values';
-import { v4 as uuid } from 'uuid';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 
-const C = { bg: '#FFFFFF', accent: '#4A9FFF', cyan: '#4A9FFF', card: '#F9FAFB', border: '#112240' };
-const STORAGE_KEY = 'vc_reminders';
+const STORAGE_KEY = 'vc_message_reminders_v1';
 
-interface Reminder {
-  id: string;
-  messageText: string;
-  chatId: string;
+interface ReminderRow {
+  id:        string;     // expo-notifications identifier
+  chatId:    string;
   messageId: string;
-  remindAt: number; // timestamp ms
-  createdAt: number;
-  notifId?: string;
+  preview:   string;
+  when:      string;     // ISO timestamp
+  createdAt: string;
 }
 
-// Ensure notifications show in foreground
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+const PRESETS: { label: string; mins: number }[] = [
+  { label: 'In 30 minutes', mins: 30 },
+  { label: 'In 1 hour',     mins: 60 },
+  { label: 'In 3 hours',    mins: 180 },
+  { label: 'Tonight at 8 PM',  mins: -1 },
+  { label: 'Tomorrow 9 AM',    mins: -2 },
+];
+
+function whenFor(mins: number): Date {
+  const now = new Date();
+  if (mins === -1) {
+    const t = new Date(now); t.setHours(20, 0, 0, 0);
+    if (t.getTime() <= now.getTime() + 60_000) t.setDate(t.getDate() + 1);
+    return t;
+  }
+  if (mins === -2) {
+    const t = new Date(now); t.setDate(t.getDate() + 1); t.setHours(9, 0, 0, 0);
+    return t;
+  }
+  return new Date(now.getTime() + mins * 60_000);
+}
+
+async function loadReminders(): Promise<ReminderRow[]> {
+  try {
+    const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const list = JSON.parse(raw) as ReminderRow[];
+    // Drop any rows whose scheduled time has already passed (the notification
+    // either fired or was cancelled; we don't need to keep them around).
+    const now = Date.now();
+    return list.filter(r => new Date(r.when).getTime() > now - 60_000);
+  } catch { return []; }
+}
+
+async function saveReminders(list: ReminderRow[]): Promise<void> {
+  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+}
 
 export default function MessageReminderScreen() {
   const router = useRouter();
-  const { messageText, chatId, messageId } = useLocalSearchParams<{
-    messageText: string;
-    chatId: string;
-    messageId: string;
+  const { chatId, messageId, preview } = useLocalSearchParams<{
+    chatId?: string; messageId?: string; preview?: string;
   }>();
 
-  const [reminders, setReminders] = useState<Reminder[]>([]);
-  const [showCustomPicker, setShowCustomPicker] = useState(false);
-  const [customDate, setCustomDate] = useState(new Date(Date.now() + 3600000));
-  const [pickerMode, setPickerMode] = useState<'date' | 'time'>('date');
+  const composeMode = !!(chatId && messageId);
 
-  // Load existing reminders
-  useEffect(() => {
-    loadReminders();
-  }, []);
+  if (composeMode) return <Composer chatId={chatId!} messageId={messageId!} preview={preview ?? ''} router={router} />;
+  return <RemindersList router={router} />;
+}
 
-  const loadReminders = async () => {
-    try {
-      const raw = await AsyncStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const all: Reminder[] = JSON.parse(raw);
-        // Filter out expired reminders
-        const active = all.filter(r => r.remindAt > Date.now());
-        setReminders(active);
-      }
-    } catch (e) {
-    }
-  };
+function Composer({
+  chatId, messageId, preview, router,
+}: {
+  chatId: string; messageId: string; preview: string; router: any;
+}) {
+  const [busy, setBusy] = useState(false);
 
-  const saveReminder = async (remindAt: Date) => {
-    if (remindAt.getTime() <= Date.now()) {
-      Alert.alert('Invalid Time', 'Please select a future time.');
+  const schedule = useCallback(async (mins: number) => {
+    if (busy) return;
+    const when = whenFor(mins);
+    if (when.getTime() <= Date.now()) {
+      Alert.alert('Pick a future time', 'That preset has already passed today.');
       return;
     }
-
-    try {
-      // Request notification permissions
-      const { status } = await Notifications.requestPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Enable notifications to use reminders.');
+    const perm = await Notifications.getPermissionsAsync();
+    if (!perm.granted) {
+      const req = await Notifications.requestPermissionsAsync();
+      if (!req.granted) {
+        Alert.alert('Permission needed', 'Allow notifications so we can remind you on time.');
         return;
       }
+    }
 
-      // Schedule local notification
-      const notifId = await Notifications.scheduleNotificationAsync({
+    setBusy(true);
+    try {
+      const id = await Notifications.scheduleNotificationAsync({
         content: {
-          title: 'Message Reminder',
-          body: (messageText || '').substring(0, 100),
-          data: { chatId, messageId, type: 'message_reminder' },
-          sound: 'default',
+          title: '🔖 Message reminder',
+          body:  preview ? `"${preview.slice(0, 140)}"` : 'You wanted a reminder about this message.',
+          // Root layout's attachTapHandler reads data.chatId and routes
+          // to /chat?id=<chatId> when the user taps the notification.
+          data:  { chatId, messageId },
         },
-        trigger: {
-          date: remindAt,
-          type: Notifications.SchedulableTriggerInputTypes.DATE,
-        },
+        trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: when } as any,
       });
 
-      const newReminder: Reminder = {
-        id: uuid(),
-        messageText: messageText || '',
-        chatId: chatId || '',
-        messageId: messageId || '',
-        remindAt: remindAt.getTime(),
-        createdAt: Date.now(),
-        notifId,
-      };
+      const list = await loadReminders();
+      list.push({
+        id, chatId, messageId, preview, when: when.toISOString(),
+        createdAt: new Date().toISOString(),
+      });
+      await saveReminders(list);
 
-      const raw = await AsyncStorage.getItem(STORAGE_KEY);
-      const all: Reminder[] = raw ? JSON.parse(raw) : [];
-      all.push(newReminder);
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(all));
-
-      setReminders(prev => [...prev, newReminder]);
-      Alert.alert('Reminder Set', `You'll be reminded ${formatRelative(remindAt)}.`);
-    } catch (e) {
-      Alert.alert('Error', 'Failed to set reminder.');
+      Alert.alert('Reminder set', `We'll notify you ${when.toLocaleString()}.`, [
+        { text: 'OK', onPress: () => router.back() },
+      ]);
+    } catch (e: any) {
+      Alert.alert('Could not schedule', e?.message ?? 'Try again');
+    } finally {
+      setBusy(false);
     }
-  };
-
-  const deleteReminder = async (reminder: Reminder) => {
-    try {
-      // Cancel scheduled notification
-      if (reminder.notifId) {
-        await Notifications.cancelScheduledNotificationAsync(reminder.notifId);
-      }
-      const raw = await AsyncStorage.getItem(STORAGE_KEY);
-      const all: Reminder[] = raw ? JSON.parse(raw) : [];
-      const updated = all.filter(r => r.id !== reminder.id);
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-      setReminders(prev => prev.filter(r => r.id !== reminder.id));
-    } catch (e) {
-    }
-  };
-
-  const formatRelative = (date: Date) => {
-    const diff = date.getTime() - Date.now();
-    const mins = Math.round(diff / 60000);
-    if (mins < 60) return `in ${mins} min`;
-    const hrs = Math.round(mins / 60);
-    if (hrs < 24) return `in ${hrs} hour${hrs > 1 ? 's' : ''}`;
-    const days = Math.round(hrs / 24);
-    return `in ${days} day${days > 1 ? 's' : ''}`;
-  };
-
-  const formatDate = (ts: number) => {
-    const d = new Date(ts);
-    return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) +
-      ' at ' +
-      d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
-
-  // Preset calculations
-  const getPresets = () => {
-    const now = new Date();
-    const tomorrow = new Date(now);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(9, 0, 0, 0);
-
-    const nextMonday = new Date(now);
-    const dayOfWeek = nextMonday.getDay();
-    const daysUntilMonday = dayOfWeek === 0 ? 1 : (8 - dayOfWeek);
-    nextMonday.setDate(nextMonday.getDate() + daysUntilMonday);
-    nextMonday.setHours(9, 0, 0, 0);
-
-    return [
-      { label: 'In 30 minutes', icon: 'time-outline', date: new Date(now.getTime() + 30 * 60000) },
-      { label: 'In 1 hour', icon: 'time-outline', date: new Date(now.getTime() + 60 * 60000) },
-      { label: 'In 3 hours', icon: 'time-outline', date: new Date(now.getTime() + 180 * 60000) },
-      { label: 'Tomorrow 9 AM', icon: 'sunny-outline', date: tomorrow },
-      { label: 'Next Monday', icon: 'calendar-outline', date: nextMonday },
-    ];
-  };
-
-  const handleCustomDateChange = (_: any, selected?: Date) => {
-    if (Platform.OS === 'android') {
-      if (!selected) {
-        setShowCustomPicker(false);
-        return;
-      }
-      if (pickerMode === 'date') {
-        setCustomDate(selected);
-        setPickerMode('time');
-      } else {
-        setCustomDate(selected);
-        setShowCustomPicker(false);
-        setPickerMode('date');
-        saveReminder(selected);
-      }
-    } else {
-      if (selected) setCustomDate(selected);
-    }
-  };
+  }, [busy, chatId, messageId, preview, router]);
 
   return (
-    <View style={s.root}>
-      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
-      <Stack.Screen options={{ headerShown: false }} />
-
-      {/* Header */}
-      <LinearGradient colors={['#F9FAFB', C.bg]} style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
+    <View style={S.screen}>
+      <StatusBar barStyle="light-content" />
+      <View style={S.header}>
+        <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
+          <Text style={S.backTxt}>←</Text>
         </TouchableOpacity>
-        <Text style={s.headerTitle}>Set Reminder</Text>
-        <View style={{ width: 36 }} />
-      </LinearGradient>
+        <Text style={S.title}>Remind me about</Text>
+      </View>
 
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
-        {/* Message preview */}
-        {messageText ? (
-          <View style={s.previewCard}>
-            <View style={s.previewHeader}>
-              <Ionicons name="chatbubble-outline" size={16} color={C.cyan} />
-              <Text style={s.previewLabel}>Message</Text>
-            </View>
-            <Text style={s.previewText} numberOfLines={4}>
-              {messageText}
-            </Text>
-          </View>
-        ) : null}
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }}>
+        <View style={S.previewCard}>
+          <Text style={S.previewLabel}>MESSAGE</Text>
+          <Text style={S.previewBody} numberOfLines={4}>{preview || '(no preview)'}</Text>
+        </View>
 
-        {/* Quick presets */}
-        <Text style={s.sectionTitle}>Quick Remind</Text>
-        {getPresets().map((preset, i) => (
-          <TouchableOpacity
-            key={i}
-            style={s.presetBtn}
-            activeOpacity={0.7}
-            onPress={() => saveReminder(preset.date)}
-          >
-            <View style={s.presetLeft}>
-              <View style={s.presetIcon}>
-                <Ionicons name={preset.icon as any} size={20} color={C.accent} />
-              </View>
-              <Text style={s.presetLabel}>{preset.label}</Text>
-            </View>
-            <Text style={s.presetTime}>
-              {preset.date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-            </Text>
-          </TouchableOpacity>
-        ))}
+        <Text style={[S.previewLabel, { marginTop: 20 }]}>WHEN</Text>
+        <View style={S.gridCol}>
+          {PRESETS.map(p => {
+            const when = whenFor(p.mins);
+            return (
+              <TouchableOpacity
+                key={p.label}
+                style={[S.preset, busy && S.presetOff]}
+                onPress={() => schedule(p.mins)}
+                disabled={busy}
+                activeOpacity={0.85}
+              >
+                <Text style={S.presetLabel}>{p.label}</Text>
+                <Text style={S.presetSub}>{when.toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
 
-        {/* Custom picker */}
-        <Text style={[s.sectionTitle, { marginTop: 24 }]}>Custom Time</Text>
-        <TouchableOpacity
-          style={s.customBtn}
-          activeOpacity={0.7}
-          onPress={() => {
-            setShowCustomPicker(true);
-            setPickerMode('date');
-          }}
-        >
-          <Ionicons name="calendar" size={20} color={C.cyan} />
-          <Text style={s.customBtnText}>Pick Date & Time</Text>
-        </TouchableOpacity>
-
-        {showCustomPicker && (
-          <View style={s.pickerWrap}>
-            <DateTimePicker
-              value={customDate}
-              mode={pickerMode}
-              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-              minimumDate={new Date()}
-              onChange={handleCustomDateChange}
-              textColor="#fff"
-              themeVariant="dark"
-            />
-            {Platform.OS === 'ios' && (
-              <View style={s.iosPickerActions}>
-                <TouchableOpacity onPress={() => setShowCustomPicker(false)}>
-                  <Text style={[s.iosBtn, { color: '#889' }]}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => {
-                  setShowCustomPicker(false);
-                  saveReminder(customDate);
-                }}>
-                  <Text style={s.iosBtn}>Set Reminder</Text>
-                </TouchableOpacity>
-              </View>
-            )}
+        {busy && (
+          <View style={S.busy}>
+            <ActivityIndicator color={ACCENT} />
+            <Text style={S.busyTxt}>Scheduling…</Text>
           </View>
         )}
 
-        {/* Active reminders */}
-        {reminders.length > 0 && (
-          <>
-            <Text style={[s.sectionTitle, { marginTop: 28 }]}>
-              Active Reminders ({reminders.length})
-            </Text>
-            {reminders.map(r => (
-              <View key={r.id} style={s.reminderCard}>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.reminderMsg} numberOfLines={2}>{r.messageText}</Text>
-                  <View style={s.reminderMeta}>
-                    <Ionicons name="alarm-outline" size={13} color={C.accent} />
-                    <Text style={s.reminderTime}>{formatDate(r.remindAt)}</Text>
-                  </View>
-                </View>
-                <TouchableOpacity
-                  onPress={() =>
-                    Alert.alert('Delete Reminder', 'Remove this reminder?', [
-                      { text: 'Cancel', style: 'cancel' },
-                      { text: 'Delete', style: 'destructive', onPress: () => deleteReminder(r) },
-                    ])
-                  }
-                  style={s.deleteBtn}
-                >
-                  <Ionicons name="trash-outline" size={18} color="#F44" />
-                </TouchableOpacity>
-              </View>
-            ))}
-          </>
-        )}
+        <Text style={S.note}>
+          Reminders are device-only — they fire as a local notification at the
+          chosen time and tap-open the chat. See all pending at <Text style={{ color: ACCENT }}>/message-reminder</Text>.
+        </Text>
       </ScrollView>
     </View>
   );
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: C.bg },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 54,
-    paddingHorizontal: 16,
-    paddingBottom: 14,
-  },
-  backBtn: { width: 36 },
-  headerTitle: { color: '#fff', fontSize: 18, fontWeight: '700' },
-  previewCard: {
-    backgroundColor: C.card,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: C.border,
-    padding: 14,
-    marginBottom: 24,
-  },
-  previewHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  previewLabel: {
-    color: C.cyan,
-    fontSize: 12,
-    fontWeight: '600',
-    marginLeft: 6,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  previewText: {
-    color: '#CCD',
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  sectionTitle: {
-    color: '#8899AA',
-    fontSize: 13,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 12,
-  },
-  presetBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: C.card,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: C.border,
-    padding: 14,
-    marginBottom: 8,
-  },
-  presetLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  presetIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: C.accent + '15',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  presetLabel: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '500',
-  },
-  presetTime: {
-    color: '#667',
-    fontSize: 13,
-  },
-  customBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: C.card,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: C.cyan + '33',
-    padding: 14,
-    gap: 8,
-  },
-  customBtnText: {
-    color: C.cyan,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  pickerWrap: {
-    backgroundColor: C.card,
-    borderRadius: 12,
-    marginTop: 12,
-    padding: 8,
-    borderWidth: 1,
-    borderColor: C.border,
-  },
-  iosPickerActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-  },
-  iosBtn: {
-    color: C.accent,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  reminderCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: C.card,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: C.border,
-    padding: 14,
-    marginBottom: 8,
-  },
-  reminderMsg: {
-    color: '#CCD',
-    fontSize: 14,
-    lineHeight: 19,
-    marginBottom: 6,
-  },
-  reminderMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  reminderTime: {
-    color: C.accent,
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  deleteBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: '#F4414115',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginLeft: 10,
-  },
+function RemindersList({ router }: { router: any }) {
+  const [rows,    setRows]    = useState<ReminderRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    const list = await loadReminders();
+    setRows(list.sort((a, b) => new Date(a.when).getTime() - new Date(b.when).getTime()));
+  }, []);
+
+  useEffect(() => {
+    (async () => { setLoading(true); await load(); setLoading(false); })();
+  }, [load]);
+
+  const cancel = useCallback((r: ReminderRow) => {
+    Alert.alert('Cancel reminder?', r.preview || 'You won\'t be notified at the chosen time.', [
+      { text: 'Keep', style: 'cancel' },
+      { text: 'Cancel', style: 'destructive', onPress: async () => {
+          try { await Notifications.cancelScheduledNotificationAsync(r.id); } catch {}
+          const next = (await loadReminders()).filter(x => x.id !== r.id);
+          await saveReminders(next);
+          setRows(next);
+        }
+      },
+    ]);
+  }, []);
+
+  if (loading) {
+    return <View style={[S.screen, S.center]}><ActivityIndicator color={ACCENT} size="large" /></View>;
+  }
+
+  return (
+    <View style={S.screen}>
+      <StatusBar barStyle="light-content" />
+      <View style={S.header}>
+        <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
+          <Text style={S.backTxt}>←</Text>
+        </TouchableOpacity>
+        <Text style={S.title}>Reminders</Text>
+      </View>
+
+      {rows.length === 0 ? (
+        <View style={[S.center, { flex: 1, paddingHorizontal: 32 }]}>
+          <Text style={S.emptyTitle}>No reminders set</Text>
+          <Text style={S.emptySub}>
+            Long-press any message in a chat → ⏰ Remind me about this — pick a time.
+          </Text>
+        </View>
+      ) : (
+        <FlatList
+          data={rows}
+          keyExtractor={(r) => r.id}
+          contentContainerStyle={{ paddingBottom: 32 }}
+          renderItem={({ item: r }) => (
+            <TouchableOpacity style={S.row} onPress={() => cancel(r)} activeOpacity={0.7}>
+              <View style={S.iconBox}><Text style={S.iconTxt}>⏰</Text></View>
+              <View style={{ flex: 1 }}>
+                <Text style={S.rowWhen} numberOfLines={1}>
+                  Fires {new Date(r.when).toLocaleString()}
+                </Text>
+                <Text style={S.rowPreview} numberOfLines={2}>
+                  {r.preview || '(no preview)'}
+                </Text>
+                <Text style={S.rowSub}>Tap to cancel</Text>
+              </View>
+            </TouchableOpacity>
+          )}
+        />
+      )}
+    </View>
+  );
+}
+
+const DARK_BG = '#0D0F14';
+const CARD_BG = '#161A22';
+const BORDER  = '#1F2937';
+const TEXT    = '#E5E7EB';
+const SUBTLE  = '#9CA3AF';
+const ACCENT  = '#6C63FF';
+
+const S = StyleSheet.create({
+  screen:       { flex: 1, backgroundColor: DARK_BG },
+  center:       { justifyContent: 'center', alignItems: 'center' },
+
+  header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
+  backBtn:      { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  backTxt:      { color: TEXT, fontSize: 26, fontWeight: '600' },
+  title:        { color: TEXT, fontSize: 22, fontWeight: '800' },
+
+  previewCard:  { backgroundColor: CARD_BG, borderColor: BORDER, borderWidth: 1, borderRadius: 12, padding: 12 },
+  previewLabel: { color: SUBTLE, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 6 },
+  previewBody:  { color: TEXT, fontSize: 14, lineHeight: 20 },
+
+  gridCol:      { gap: 8 },
+  preset:       { backgroundColor: CARD_BG, borderColor: BORDER, borderWidth: 1, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 16 },
+  presetOff:    { opacity: 0.5 },
+  presetLabel:  { color: TEXT, fontSize: 15, fontWeight: '700' },
+  presetSub:    { color: SUBTLE, fontSize: 12, marginTop: 2 },
+
+  busy:         { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 16, justifyContent: 'center' },
+  busyTxt:      { color: SUBTLE, fontSize: 12 },
+  note:         { color: SUBTLE, fontSize: 12, lineHeight: 16, marginTop: 24 },
+
+  emptyTitle:   { color: TEXT, fontSize: 16, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
+  emptySub:     { color: SUBTLE, fontSize: 13, lineHeight: 18, textAlign: 'center' },
+
+  row:          { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
+  iconBox:      { width: 36, height: 36, borderRadius: 18, backgroundColor: CARD_BG, alignItems: 'center', justifyContent: 'center' },
+  iconTxt:      { fontSize: 18 },
+  rowWhen:      { color: TEXT, fontSize: 14, fontWeight: '700' },
+  rowPreview:   { color: TEXT, fontSize: 13, marginTop: 4 },
+  rowSub:       { color: SUBTLE, fontSize: 11, marginTop: 6 },
 });

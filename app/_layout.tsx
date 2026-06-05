@@ -212,6 +212,7 @@ function RootLayout() {
         <Stack.Screen name="vault-features" />
         <Stack.Screen name="dashboard" />
         <Stack.Screen name="settings" />
+        <Stack.Screen name="story-viewer" />
         <Stack.Screen name="breachguard" />
         <Stack.Screen name="deepfake" />
         <Stack.Screen name="trustscore" />

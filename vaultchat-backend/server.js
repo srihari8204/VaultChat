@@ -54,6 +54,7 @@ app.use('/uploads',  require('./routes/uploads'));
 app.use('/contacts', require('./routes/contacts'));
 const chatsRouter = require('./routes/chats');
 app.use('/chats',    chatsRouter);
+app.use('/stories',  require('./routes/stories'));
 
 // Wire the chats router so its REST writes broadcast over sockets.
 chatsRouter.setBroadcasters({
@@ -62,6 +63,133 @@ chatsRouter.setBroadcasters({
   newMessage: (chatId, payload) => fanOutToChat(chatId, 'new_message', payload, payload?.senderId ?? null),
   chatEvent:  (chatId, event, payload) => fanOutToChat(chatId, event, payload),
 });
+
+// ─── Disappearing messages — periodic cleanup ──────────────────────
+// Hard-deletes rows whose expires_at <= NOW(). The lazy filter on
+// `GET /messages` covers the gap between expiry and next sweep, so
+// users never see expired content even if the sweeper is briefly stuck.
+// We don't broadcast a message_deleted event here — the lazy filter on
+// reload handles the UI side, and broadcasting tens of thousands of ids
+// after a long cluster lag would flood clients.
+const SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+async function sweepExpiredMessages() {
+  try {
+    const r = await db.query(
+      `DELETE FROM messages
+        WHERE expires_at IS NOT NULL AND expires_at <= NOW()
+        RETURNING id`
+    );
+    if (r.rowCount > 0) console.log(`[sweep] hard-deleted ${r.rowCount} expired message(s)`);
+  } catch (err) {
+    console.error('[sweep] failed:', err.message);
+  }
+}
+const sweepTimer = setInterval(sweepExpiredMessages, SWEEP_INTERVAL_MS);
+// Kick off an immediate sweep on boot so a long downtime doesn't leave
+// stale ephemeral content visible.
+sweepExpiredMessages().catch(() => {});
+
+// ─── Scheduled-messages worker ─────────────────────────────────────
+// Every 30 s, claim any rows in `scheduled_messages` whose send_at <= NOW()
+// that haven't fired yet, insert them as real `messages`, broadcast
+// `new_message`, and stamp `sent_at` so the same row doesn't fire twice.
+// FOR UPDATE SKIP LOCKED makes this safe under multiple replicas.
+const SCHED_SWEEP_MS  = 30 * 1000;
+const SCHED_BATCH     = 50;
+const SCHED_PRUNE_DAYS = 30;
+async function sweepScheduledMessages() {
+  try {
+    // Claim a batch
+    const claim = await db.query(
+      `SELECT id, user_id, chat_id, type, content, meta, reply_to_id
+         FROM scheduled_messages
+        WHERE sent_at IS NULL AND send_at <= NOW()
+        ORDER BY send_at
+        FOR UPDATE SKIP LOCKED
+        LIMIT $1`,
+      [SCHED_BATCH]
+    );
+    for (const row of claim.rows) {
+      try {
+        // Skip if the sender is no longer a member (left after scheduling).
+        const memR = await db.query(
+          `SELECT 1 FROM chat_members
+            WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL`,
+          [row.chat_id, row.user_id]
+        );
+        if (!memR.rows[0]) {
+          // Mark as sent with no message_id so it doesn't reappear; visible in audit.
+          await db.query(`UPDATE scheduled_messages SET sent_at = NOW() WHERE id = $1`, [row.id]);
+          continue;
+        }
+        // Insert the real message (mirrors INSERT in POST /chats/:id/messages).
+        const mR = await db.query(
+          `INSERT INTO messages (chat_id, sender_id, type, content, meta, reply_to_id, expires_at)
+           SELECT $1, $2, $3, $4, $5, $6,
+                  CASE WHEN c.disappearing_seconds IS NOT NULL
+                       THEN NOW() + (c.disappearing_seconds || ' seconds')::INTERVAL
+                       ELSE NULL END
+             FROM chats c WHERE c.id = $1
+           RETURNING *`,
+          [row.chat_id, row.user_id, row.type, row.content, row.meta, row.reply_to_id]
+        );
+        const m = mR.rows[0];
+        await db.query(
+          `UPDATE chats SET last_message_id = $1, last_message_at = $2 WHERE id = $3`,
+          [m.id, m.created_at, row.chat_id]
+        );
+        await db.query(
+          `UPDATE scheduled_messages SET sent_at = NOW(), message_id = $2 WHERE id = $1`,
+          [row.id, m.id]
+        );
+        // Broadcast the new message — same shape as publicMessage() in chats.js.
+        const payload = {
+          id:        m.id,
+          chatId:    m.chat_id,
+          senderId:  m.sender_id,
+          type:      m.type,
+          content:   m.content,
+          meta:      m.meta,
+          replyToId: m.reply_to_id,
+          editedAt:  m.edited_at,
+          deletedAt: m.deleted_at,
+          createdAt: m.created_at,
+          expiresAt: m.expires_at ?? null,
+        };
+        await fanOutToChat(row.chat_id, 'new_message', payload, row.user_id);
+      } catch (perRowErr) {
+        console.error(`[sched ${row.id}]`, perRowErr.message);
+      }
+    }
+    if (claim.rowCount > 0) console.log(`[sched] delivered ${claim.rowCount} scheduled message(s)`);
+
+    // Prune sent rows older than 30 d.
+    await db.query(
+      `DELETE FROM scheduled_messages
+        WHERE sent_at IS NOT NULL AND sent_at < NOW() - INTERVAL '${SCHED_PRUNE_DAYS} days'`
+    );
+  } catch (err) {
+    console.error('[sched sweep]', err.message);
+  }
+}
+const schedTimer = setInterval(sweepScheduledMessages, SCHED_SWEEP_MS);
+sweepScheduledMessages().catch(() => {});
+
+// ─── Stories — periodic prune ──────────────────────────────────────
+// Hard-deletes stories whose 24h TTL has elapsed. ON DELETE CASCADE
+// cleans up story_views. Same cadence as the messages sweep.
+async function sweepExpiredStories() {
+  try {
+    const r = await db.query(
+      `DELETE FROM stories WHERE expires_at <= NOW() RETURNING id`
+    );
+    if (r.rowCount > 0) console.log(`[sweep] hard-deleted ${r.rowCount} expired stor${r.rowCount === 1 ? 'y' : 'ies'}`);
+  } catch (err) {
+    console.error('[sweep stories]', err.message);
+  }
+}
+const storiesTimer = setInterval(sweepExpiredStories, SWEEP_INTERVAL_MS);
+sweepExpiredStories().catch(() => {});
 
 // Sentry's Express error handler — catches everything that bubbles up
 // from route handlers and ships it to Sentry. Must be mounted AFTER
@@ -164,9 +292,34 @@ async function broadcastPresence(uid, payload) {
           AND cm2.left_at IS NULL`,
       [uid]
     );
-    for (const row of m.rows) emitToUid(row.user_id, 'presence_changed', payload);
+    // Ghost Mode: skip recipients who have hidden `uid`'s online status.
+    // The owner of the ghost-mode row is `uid` (the appearing user);
+    // target is the recipient who should be kept in the dark.
+    const ghosted = await loadGhostTargets(uid, 'hide_online');
+    for (const row of m.rows) {
+      if (ghosted.has(row.user_id)) continue;
+      emitToUid(row.user_id, 'presence_changed', payload);
+    }
   } catch (err) {
     console.error('[broadcastPresence]', err.message);
+  }
+}
+
+// Look up which target users have been ghosted for a specific signal.
+// Returns a Set of user_id strings — the recipients to *skip* when fanning
+// `senderId`'s signals.
+const GHOST_COLS = ['hide_online', 'hide_typing', 'hide_read', 'hide_last_seen'];
+async function loadGhostTargets(senderId, column) {
+  if (!senderId || !GHOST_COLS.includes(column)) return new Set();
+  try {
+    const r = await db.query(
+      `SELECT target_id FROM ghost_mode WHERE owner_id = $1 AND ${column} = TRUE`,
+      [senderId]
+    );
+    return new Set(r.rows.map(row => row.target_id));
+  } catch (err) {
+    console.error('[loadGhostTargets]', err.message);
+    return new Set();
   }
 }
 
@@ -186,13 +339,34 @@ function emitToUid(uid, event, data) {
 // the sender are skipped. Used for `new_message` so a block stops chats
 // from reaching the blocker; non-message events (typing, delivery, read)
 // pass senderId=null and fan to everyone (we don't suppress those).
+// Per-event hint for which ghost-mode column suppresses this signal.
+// Events absent from this map are sender-agnostic (delivery, reactions,
+// member events, etc.) and always fan to everyone.
+const EVENT_TO_GHOST_COL = {
+  typing_start:  'hide_typing',
+  typing_stop:   'hide_typing',
+  message_read:  'hide_read',
+};
+// Different events stash the originating user under different keys.
+function senderOfEvent(event, data) {
+  if (!data) return null;
+  if (event === 'typing_start' || event === 'typing_stop') return data.uid ?? null;
+  if (event === 'message_read') return data.userId ?? null;
+  return null;
+}
+
 async function fanOutToChat(chatId, event, data, senderId = null) {
   try {
-    // Always emit to the room for active viewers. The viewer's client
-    // could still see this; we'll also filter by block-list below for
-    // the broader fan-out. For message events, room emit is skipped —
-    // the targeted emitToUid path applies the block check.
-    if (!senderId) {
+    // Determine whether this event should respect ghost mode, and which
+    // signal column to consult. senderId arg wins (used by new_message);
+    // otherwise we autodetect from the event name.
+    const ghostCol = EVENT_TO_GHOST_COL[event] || null;
+    const effectiveSender = senderId || senderOfEvent(event, data);
+    const filtered = !!senderId || !!ghostCol;
+
+    // Room emit only when the event is filter-free — otherwise we route
+    // entirely via emitToUid so the per-recipient skips actually apply.
+    if (!filtered) {
       io.to(`chat:${chatId}`).emit(event, data);
     }
 
@@ -211,15 +385,16 @@ async function fanOutToChat(chatId, event, data, senderId = null) {
       blockerSet = new Set(blk.rows.map(b => b.blocker_id));
     }
 
+    // Ghost-mode targets for the signal in question.
+    let ghostedSet = new Set();
+    if (ghostCol && effectiveSender) {
+      ghostedSet = await loadGhostTargets(effectiveSender, ghostCol);
+    }
+
     for (const uid of memberIds) {
       if (blockerSet.has(uid)) continue;
+      if (ghostedSet.has(uid))  continue;
       emitToUid(uid, event, data);
-    }
-    // For sender-aware events, also re-emit into the room for non-blockers
-    if (senderId) {
-      // The targeted emits above cover all online sockets; the room emit is
-      // skipped to avoid double-delivery. Sockets that joined the room but
-      // are offline (impossible) don't need handling.
     }
   } catch (err) {
     console.error('[fanOutToChat]', err.message);
@@ -494,6 +669,9 @@ async function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`[server] ${signal} received, shutting down`);
+  clearInterval(sweepTimer);
+  clearInterval(schedTimer);
+  clearInterval(storiesTimer);
   io.close();
   server.close();
   try { await db.shutdown();    } catch (e) { console.error('[server] db.shutdown:',    e.message); }

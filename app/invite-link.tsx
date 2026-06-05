@@ -10,7 +10,7 @@ import {
 import { useLocalSearchParams, Stack } from 'expo-router';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
-import * as Clipboard from 'expo-clipboard';
+import { copyAndAutoClear } from '../lib/clipboardSafe';
 
 const C = { bg: '#FFFFFF', accent: '#4A9FFF', green: '#10B981', card: '#F9FAFB', danger: '#FF3C6E' };
 const CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
@@ -67,7 +67,7 @@ export default function InviteLinkScreen() {
   };
 
   const copyLink = async (code) => {
-    await Clipboard.setStringAsync('https://vaultchat.app/join/' + code);
+    await copyAndAutoClear('https://vaultchat.app/join/' + code);
     Alert.alert('Copied!', 'Invite link copied to clipboard');
   };
 
