@@ -615,6 +615,38 @@ export async function searchAll(q: string, limit = 20): Promise<SearchResults> {
   return api<SearchResults>(`/chats/search?${params}`);
 }
 
+// ─── Invite links ───────────────────────────────────────────────────
+export interface InviteLink {
+  id:        number;
+  code:      string;
+  chatId:    string;
+  createdBy: string;
+  createdAt: string;
+  expiresAt: string | null;
+  maxUses:   number;
+  uses:      number;
+  revoked:   boolean;
+}
+export async function listInviteLinks(chatId: string): Promise<InviteLink[]> {
+  return api<InviteLink[]>(`/chats/${encodeURIComponent(chatId)}/invite-links`);
+}
+export async function createInviteLink(
+  chatId: string,
+  opts: { expiresInHours?: number; maxUses?: number } = {},
+): Promise<InviteLink> {
+  return api<InviteLink>(`/chats/${encodeURIComponent(chatId)}/invite-links`, {
+    method: 'POST',
+    json: { expiresInHours: opts.expiresInHours ?? 0, maxUses: opts.maxUses ?? 0 },
+  });
+}
+export async function revokeInviteLink(chatId: string, linkId: number): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/invite-links/${linkId}`, { method: 'DELETE' });
+}
+// Redeem a code and join the group. Returns the joined chat id.
+export async function joinViaInvite(code: string): Promise<{ chatId: string }> {
+  return api<{ chatId: string }>(`/chats/join/${encodeURIComponent(code)}`, { method: 'POST' });
+}
+
 // In-chat message search — matches text content within a single chat.
 export interface InChatMessageHit {
   id:         number;

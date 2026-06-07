@@ -424,6 +424,49 @@ router.post('/', async (req, res) => {
   }
 });
 
+// ─── Invite links ──────────────────────────────────────────────────
+const INVITE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+function genInviteCode() {
+  const bytes = crypto.randomBytes(12);
+  let s = '';
+  for (let i = 0; i < 12; i++) s += INVITE_ALPHABET[bytes[i] % INVITE_ALPHABET.length];
+  return s;
+}
+function publicInvite(row) {
+  return {
+    id:        row.id,
+    code:      row.code,
+    chatId:    row.chat_id,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+    maxUses:   row.max_uses,
+    uses:      row.uses,
+    revoked:   row.revoked,
+  };
+}
+
+// POST /chats/join/:code — redeem an invite link and join the group.
+// Declared above GET /:id so 'join' is never mistaken for a chat id.
+router.post('/join/:code', async (req, res) => {
+  try {
+    const code = String(req.params.code || '').trim();
+    if (!code) return res.status(400).json({ error: 'code required' });
+    // SECURITY DEFINER helper bypasses chat_members RLS for the self-join.
+    const r = await db.query(`SELECT chat_id, status FROM vc_redeem_invite($1, $2)`, [code, req.user.id]);
+    const row = r.rows[0];
+    if (!row || row.status !== 'ok') {
+      const map = { invalid: 'Invalid or revoked link', expired: 'Link has expired', used: 'Link has reached its use limit' };
+      return res.status(410).json({ error: map[row?.status] || 'Invalid link' });
+    }
+    broadcastChatEvent(row.chat_id, 'members_added', { added: [req.user.id], by: req.user.id });
+    res.json({ chatId: row.chat_id });
+  } catch (err) {
+    console.error('[chats join]', err.message);
+    res.status(500).json({ error: 'Failed to join via link' });
+  }
+});
+
 // ─── Search (Day 13) ──────────────────────────────────────────────
 // GET /chats/search?q=...&limit=20
 //   - matches chat names + message content + member names
@@ -945,6 +988,74 @@ router.patch('/:id/members/:userId/role', async (req, res) => {
   } catch (err) {
     console.error('[member role PATCH]', err.message);
     res.status(500).json({ error: 'Failed to change role' });
+  }
+});
+
+// POST /chats/:id/invite-links  { expiresInHours?, maxUses? }  — admin only
+router.post('/:id/invite-links', async (req, res) => {
+  try {
+    const mem = await loadChatMembership(req, req.params.id);
+    if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
+    if (mem.chat_type !== 'group') return res.status(400).json({ error: 'Only group chats have invite links' });
+    if (mem.role !== 'admin' && mem.role !== 'owner') return res.status(403).json({ error: 'Admin only' });
+
+    const hours = parseInt(req.body?.expiresInHours, 10);
+    const expiresAt = (Number.isFinite(hours) && hours > 0)
+      ? new Date(Date.now() + Math.min(hours, 24 * 365) * 3600000) : null;
+    let maxUses = parseInt(req.body?.maxUses, 10);
+    if (!Number.isFinite(maxUses) || maxUses < 0) maxUses = 0;
+
+    for (let i = 0; i < 5; i++) {
+      try {
+        const r = await req.dbQuery(
+          `INSERT INTO invite_links (code, chat_id, created_by, expires_at, max_uses)
+           VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+          [genInviteCode(), req.params.id, req.user.id, expiresAt, maxUses]
+        );
+        return res.json(publicInvite(r.rows[0]));
+      } catch (e) {
+        if (i === 4) throw e; // exhausted retries on the unique-code collision
+      }
+    }
+  } catch (err) {
+    console.error('[invite-links POST]', err.message);
+    res.status(500).json({ error: 'Failed to create invite link' });
+  }
+});
+
+// GET /chats/:id/invite-links  — admin only
+router.get('/:id/invite-links', async (req, res) => {
+  try {
+    const mem = await loadChatMembership(req, req.params.id);
+    if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
+    if (mem.role !== 'admin' && mem.role !== 'owner') return res.status(403).json({ error: 'Admin only' });
+    const r = await req.dbQuery(
+      `SELECT * FROM invite_links WHERE chat_id = $1 ORDER BY created_at DESC LIMIT 50`,
+      [req.params.id]
+    );
+    res.json(r.rows.map(publicInvite));
+  } catch (err) {
+    console.error('[invite-links GET]', err.message);
+    res.status(500).json({ error: 'Failed to list invite links' });
+  }
+});
+
+// DELETE /chats/:id/invite-links/:linkId  — revoke (admin only)
+router.delete('/:id/invite-links/:linkId', async (req, res) => {
+  try {
+    const mem = await loadChatMembership(req, req.params.id);
+    if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
+    if (mem.role !== 'admin' && mem.role !== 'owner') return res.status(403).json({ error: 'Admin only' });
+    const linkId = parseInt(req.params.linkId, 10);
+    if (!Number.isFinite(linkId)) return res.status(400).json({ error: 'invalid linkId' });
+    await req.dbQuery(
+      `UPDATE invite_links SET revoked = TRUE WHERE id = $1 AND chat_id = $2`,
+      [linkId, req.params.id]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[invite-links DELETE]', err.message);
+    res.status(500).json({ error: 'Failed to revoke invite link' });
   }
 });
 
