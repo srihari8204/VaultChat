@@ -204,6 +204,32 @@ export async function createGroupChat(
   });
 }
 
+// ─── Profile / VaultID ──────────────────────────────────────────────
+export interface MyProfile {
+  id:       string;
+  email:    string | null;
+  name:     string | null;
+  phone:    string | null;
+  photoURL: string | null;
+  vaultId:  string | null;
+  status:   string | null;
+}
+export async function getMyProfile(): Promise<MyProfile> {
+  return api<MyProfile>('/user/profile');
+}
+
+export interface ResolvedVault {
+  userId:   string;
+  name:     string | null;
+  photoURL: string | null;
+  vaultId:  string;
+}
+// Resolve a public VaultID handle (leading '@' tolerated) to a user stub.
+export async function resolveVaultId(vaultId: string): Promise<ResolvedVault> {
+  const vid = vaultId.replace(/^@/, '').trim();
+  return api<ResolvedVault>(`/user/by-vault/${encodeURIComponent(vid)}`);
+}
+
 export async function getMessages(chatId: string, opts: { before?: number; limit?: number } = {}): Promise<Message[]> {
   const params: string[] = [];
   if (opts.before) params.push(`before=${opts.before}`);

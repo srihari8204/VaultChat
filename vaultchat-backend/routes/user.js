@@ -25,6 +25,7 @@ function publicUser(row) {
     name:      row.name,
     phone:     row.phone,
     photoURL:  row.photo_url,
+    vaultId:   row.vault_id,
     dob:       row.dob,
     status:    row.status,
     online:    row.online,
@@ -41,18 +42,67 @@ async function sha256Hex(s) {
   return crypto.createHash('sha256').update(s, 'utf8').digest('hex');
 }
 
+// Generate a random, URL-safe VaultID handle (e.g. "v3f9a1c7e2b4").
+function genVaultId() {
+  return 'v' + crypto.randomBytes(6).toString('hex');
+}
+
 // GET /user/profile
 router.get('/profile', async (req, res) => {
   try {
-    const r = await db.query(
+    let r = await db.query(
       `SELECT * FROM users WHERE id = $1 AND is_deleted = FALSE LIMIT 1`,
       [req.user.id]
     );
     if (!r.rows[0]) return res.status(404).json({ error: 'User not found' });
+
+    // Lazily assign a VaultID the first time a user is seen without one
+    // (covers accounts created after the 024 backfill). Retry on the rare
+    // unique-index collision.
+    if (!r.rows[0].vault_id) {
+      for (let i = 0; i < 5; i++) {
+        try {
+          const u = await db.query(
+            `UPDATE users SET vault_id = $1 WHERE id = $2 AND vault_id IS NULL RETURNING *`,
+            [genVaultId(), req.user.id]
+          );
+          if (u.rows[0]) { r = u; break; }
+          // Concurrently assigned — reload and stop.
+          r = await db.query(`SELECT * FROM users WHERE id = $1 LIMIT 1`, [req.user.id]);
+          break;
+        } catch (e) {
+          if (i === 4) throw e; // give up after retries; surface as 500
+        }
+      }
+    }
     return res.json(publicUser(r.rows[0]));
   } catch (err) {
     console.error('[user/profile GET]', err.message);
     return res.status(500).json({ error: 'Failed to fetch profile' });
+  }
+});
+
+// GET /user/by-vault/:vaultId — resolve a VaultID handle to a public user
+// stub (for QR / invite-link contact adds). Leading '@' is tolerated.
+router.get('/by-vault/:vaultId', async (req, res) => {
+  try {
+    const vid = String(req.params.vaultId || '').replace(/^@/, '').trim();
+    if (!vid) return res.status(400).json({ error: 'vaultId required' });
+    const r = await db.query(
+      `SELECT id, name, photo_url, vault_id FROM users
+        WHERE vault_id = $1 AND is_deleted = FALSE LIMIT 1`,
+      [vid]
+    );
+    if (!r.rows[0]) return res.status(404).json({ error: 'No user with that VaultID' });
+    return res.json({
+      userId:   r.rows[0].id,
+      name:     r.rows[0].name,
+      photoURL: r.rows[0].photo_url,
+      vaultId:  r.rows[0].vault_id,
+    });
+  } catch (err) {
+    console.error('[user/by-vault GET]', err.message);
+    return res.status(500).json({ error: 'Failed to resolve VaultID' });
   }
 });
 
