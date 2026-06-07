@@ -25,7 +25,8 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ScreenCapture from 'expo-screen-capture';
 import { DeviceMotion } from 'expo-sensors';
 import * as Sharing from 'expo-sharing';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { consumePendingJump } from '../lib/chatJump';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { E2EE_ENABLED } from '../constants/flags';
 import { saveDraft, getDraft, clearDraft } from '../lib/drafts';
@@ -168,6 +169,8 @@ export default function ChatScreen() {
   const [forwardLoading, setForwardLoading] = useState(false);
 
   const listRef = useRef<FlatList>(null);
+  const messagesRef = useRef<DisplayMessage[]>([]);
+  const [flashId, setFlashId] = useState<number | null>(null);
   const readDebounce = useRef<any>(null);
   const lastReadSent = useRef<number>(0);
   const typingIdleTimer = useRef<any>(null);
@@ -1111,6 +1114,43 @@ export default function ChatScreen() {
     finally { setLoadingOlder(false); }
   }, [chatId, hasMore, loadingOlder, messages]);
 
+  // Keep a ref to loaded messages for the jump-to-message paging loop.
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
+
+  // Jump to a specific message (from in-chat search): page older until it's
+  // loaded, scroll to it, and briefly flash it.
+  const jumpToMessage = useCallback(async (targetId: number) => {
+    let idx = messagesRef.current.findIndex(m => m.id === targetId);
+    let guard = 0;
+    while (idx < 0 && guard < 12) {
+      guard++;
+      const oldest = messagesRef.current[messagesRef.current.length - 1]?.id;
+      if (!oldest) break;
+      let older;
+      try { older = await getMessages(chatId, { before: oldest, limit: PAGE_SIZE }); }
+      catch { break; }
+      if (!older.length) { setHasMore(false); break; }
+      const next = [...messagesRef.current, ...older];
+      messagesRef.current = next;
+      setMessages(next);
+      if (older.length < PAGE_SIZE) setHasMore(false);
+      idx = next.findIndex(m => m.id === targetId);
+    }
+    if (idx < 0) return;
+    const at = idx;
+    requestAnimationFrame(() => {
+      try { listRef.current?.scrollToIndex({ index: at, animated: true, viewPosition: 0.5 }); } catch {}
+    });
+    setFlashId(targetId);
+    setTimeout(() => setFlashId(null), 2500);
+  }, [chatId]);
+
+  // Consume a pending jump when the screen regains focus (e.g. back from search).
+  useFocusEffect(useCallback(() => {
+    const target = consumePendingJump(chatId);
+    if (target) jumpToMessage(target);
+  }, [chatId, jumpToMessage]));
+
   const title = useMemo(() => {
     if (!chat) return '…';
     if (chat.name) return chat.name;
@@ -1332,6 +1372,7 @@ export default function ChatScreen() {
         inverted
         contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 8 }}
         renderItem={({ item }) => (
+          <View style={item.id === flashId ? { backgroundColor: 'rgba(16,185,129,0.18)', borderRadius: 12 } : undefined}>
           <MessageBubble
             msg={item}
             meId={meId}
@@ -1353,7 +1394,14 @@ export default function ChatScreen() {
             pollVotesForMsg={pollVotes[item.id]}
             onPollVoteChange={(next) => setPollVotes(prev => ({ ...prev, [item.id]: next }))}
           />
+          </View>
         )}
+        onScrollToIndexFailed={(info) => {
+          // Inverted, variable-height rows have no getItemLayout — approximate
+          // then retry the precise scroll once layout settles.
+          try { listRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: false }); } catch {}
+          setTimeout(() => { try { listRef.current?.scrollToIndex({ index: info.index, animated: true, viewPosition: 0.5 }); } catch {} }, 350);
+        }}
         onEndReached={onEndReached}
         onEndReachedThreshold={0.4}
         ListFooterComponent={loadingOlder ? <ActivityIndicator color={ACCENT} style={{ paddingVertical: 12 }} /> : null}

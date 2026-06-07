@@ -18,6 +18,7 @@ import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Aurora } from '../constants/theme';
 import { searchInChat, type InChatMessageHit } from '../lib/chatService';
+import { setPendingJump } from '../lib/chatJump';
 
 export default function InChatSearchScreen() {
   const router = useRouter();
@@ -89,13 +90,14 @@ export default function InChatSearchScreen() {
     );
   };
 
-  const onTapResult = () => {
-    // Return to the chat. (Scroll-to-message is a tracked follow-up.)
+  const onTapResult = (messageId: number) => {
+    // Hand the target to the chat screen, then return to it; it scrolls there.
+    if (chatId) setPendingJump(chatId, messageId);
     router.back();
   };
 
   const renderItem = ({ item }: { item: InChatMessageHit }) => (
-    <TouchableOpacity style={s.resultCard} activeOpacity={0.7} onPress={onTapResult}>
+    <TouchableOpacity style={s.resultCard} activeOpacity={0.7} onPress={() => onTapResult(item.id)}>
       <View style={s.resultHeader}>
         <Text style={s.senderName} numberOfLines={1}>{item.senderName || 'Unknown'}</Text>
         <Text style={s.timestamp}>{formatTime(item.createdAt)}</Text>
