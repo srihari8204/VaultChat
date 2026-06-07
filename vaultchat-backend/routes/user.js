@@ -10,6 +10,7 @@ const bcrypt  = require('bcrypt');
 
 const db      = require('../db');
 const jwtUtil = require('../jwt');
+const { sendPushToTokens } = require('../push');
 
 const router = express.Router();
 
@@ -79,6 +80,75 @@ router.get('/profile', async (req, res) => {
   } catch (err) {
     console.error('[user/profile GET]', err.message);
     return res.status(500).json({ error: 'Failed to fetch profile' });
+  }
+});
+
+// POST /user/sos  { latitude?, longitude?, test?, contactIds? }
+// Dispatches an emergency (or test) SOS: pushes an alert to the sender's
+// trusted contacts (optionally a selected subset) and records the event.
+router.post('/sos', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const test = !!b.test;
+    const lat = typeof b.latitude === 'number' ? b.latitude : null;
+    const lng = typeof b.longitude === 'number' ? b.longitude : null;
+    const subset = Array.isArray(b.contactIds) ? b.contactIds.filter(x => typeof x === 'string') : null;
+
+    const tcR = await db.query(`SELECT contact_id FROM trusted_contacts WHERE owner_id = $1`, [req.user.id]);
+    let recipients = tcR.rows.map(r => r.contact_id);
+    if (subset && subset.length) recipients = recipients.filter(id => subset.includes(id));
+
+    const meR = await db.query(
+      `SELECT COALESCE(NULLIF(name, ''), email) AS n FROM users WHERE id = $1`, [req.user.id]
+    );
+    const myName = meR.rows[0]?.n || 'VaultChat User';
+
+    let notified = 0;
+    if (recipients.length) {
+      const tokR = await db.query(`SELECT push_token FROM devices WHERE user_id = ANY($1::uuid[])`, [recipients]);
+      const tokens = tokR.rows.map(r => r.push_token).filter(Boolean);
+      if (tokens.length) {
+        const mapUrl = (lat != null && lng != null) ? ` https://maps.google.com/?q=${lat},${lng}` : '';
+        await sendPushToTokens(tokens, {
+          title: test ? '[TEST] SOS' : '🚨 EMERGENCY SOS',
+          body:  `${myName} ${test ? 'sent a test SOS' : 'needs help'}.${mapUrl}`,
+          data:  { type: 'sos', test, fromUserId: req.user.id, latitude: lat, longitude: lng },
+        }).catch(err => console.error('[sos push]', err.message));
+      }
+      notified = recipients.length;
+    }
+
+    const ins = await db.query(
+      `INSERT INTO sos_events (user_id, type, latitude, longitude, contacts_notified)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id, created_at`,
+      [req.user.id, test ? 'test' : 'emergency', lat, lng, notified]
+    );
+    res.json({ contactsNotified: notified, id: ins.rows[0].id, createdAt: ins.rows[0].created_at });
+  } catch (err) {
+    console.error('[user/sos POST]', err.message);
+    res.status(500).json({ error: 'Failed to send SOS' });
+  }
+});
+
+// GET /user/sos — recent SOS history
+router.get('/sos', async (req, res) => {
+  try {
+    const r = await db.query(
+      `SELECT id, type, latitude, longitude, contacts_notified, created_at
+         FROM sos_events WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20`,
+      [req.user.id]
+    );
+    res.json(r.rows.map(row => ({
+      id:               row.id,
+      type:             row.type,
+      latitude:         row.latitude,
+      longitude:        row.longitude,
+      contactsNotified: row.contacts_notified,
+      createdAt:        row.created_at,
+    })));
+  } catch (err) {
+    console.error('[user/sos GET]', err.message);
+    res.status(500).json({ error: 'Failed to load SOS history' });
   }
 });
 

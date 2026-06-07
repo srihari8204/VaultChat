@@ -13,8 +13,7 @@ import { useRouter, Stack } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import { Accelerometer } from 'expo-sensors';
-import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
+import { listTrustedContacts, sendSOS, listSOSHistory } from '../lib/chatService';
 
 const C = { bg: '#FFFFFF', accent: '#4A9FFF', cyan: '#4A9FFF', card: '#F9FAFB', danger: '#FF3C6E', green: '#10B981', text: '#FFFFFF', muted: '#8A9BBF', red: '#FF2D2D' };
 
@@ -26,7 +25,6 @@ const TEST_MESSAGE = (name: string, lat: number, lng: number) =>
 
 export default function EmergencySOSScreen() {
   const router = useRouter();
-  const myUid = auth().currentUser?.uid || '';
 
   // State
   const [trustedContacts, setTrustedContacts] = useState<any[]>([]);
@@ -61,34 +59,19 @@ export default function EmergencySOSScreen() {
     const loadTrustedContacts = async () => {
       setLoading(true);
       try {
-        const snap = await firestore().collection('users').doc(myUid).get();
-        const ids: string[] = snap.data()?.trustedContacts || [];
-        const contacts: any[] = [];
-        for (const uid of ids) {
-          try {
-            const uSnap = await firestore().collection('users').doc(uid).get();
-            const d = uSnap.data();
-            contacts.push({ uid, name: d?.name || 'Unknown', vaultId: d?.vaultId || uid.slice(0, 8) });
-          } catch {}
-        }
+        const tc = await listTrustedContacts();
+        const contacts = tc.map(c => ({ uid: c.userId, name: c.name || 'Unknown', vaultId: c.vaultId || c.userId.slice(0, 8) }));
         setTrustedContacts(contacts);
         setSelectedContacts(contacts.map(c => c.uid));
       } catch {}
       setLoading(false);
     };
     const loadHistory = async () => {
-      try {
-        const snap = await firestore().collection('users').doc(myUid)
-          .collection('sosHistory')
-          .orderBy('createdAt', 'desc')
-          .limit(20)
-          .get();
-        setHistory(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      } catch {}
+      try { setHistory(await listSOSHistory()); } catch {}
     };
     loadTrustedContacts();
     loadHistory();
-  }, [myUid]);
+  }, []);
 
   // Shake detection
   useEffect(() => {
@@ -98,44 +81,16 @@ export default function EmergencySOSScreen() {
       setSending(true);
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
-        let lat = 0, lng = 0;
+        let lat: number | null = null, lng: number | null = null;
         if (status === 'granted') {
           const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
           lat = loc.coords.latitude;
           lng = loc.coords.longitude;
         }
-        const mySnap = await firestore().collection('users').doc(myUid).get();
-        const myName = mySnap.data()?.name || 'VaultChat User';
-        const message = isTest ? TEST_MESSAGE(myName, lat, lng) : SOS_MESSAGE(myName, lat, lng);
-        for (const uid of selectedContacts) {
-          try {
-            await firestore().collection('users').doc(uid).collection('alerts').add({
-              type: isTest ? 'sos_test' : 'sos_emergency',
-              fromUid: myUid, fromName: myName, message,
-              latitude: lat, longitude: lng,
-              createdAt: firestore.FieldValue.serverTimestamp(), read: false,
-            });
-          } catch {}
-        }
-        await firestore().collection('securityEvents').add({
-          type: isTest ? 'sos_test' : 'sos_emergency',
-          uid: myUid, name: myName, latitude: lat, longitude: lng,
-          contactsNotified: selectedContacts.length,
-          createdAt: firestore.FieldValue.serverTimestamp(),
-        });
-        await firestore().collection('users').doc(myUid).collection('sosHistory').add({
-          type: isTest ? 'test' : 'emergency',
-          latitude: lat, longitude: lng,
-          contactsNotified: selectedContacts.length,
-          createdAt: firestore.FieldValue.serverTimestamp(),
-        });
+        await sendSOS(lat, lng, isTest, selectedContacts);
         setSent(true);
         Vibration.vibrate([0, 500, 200, 500]);
-        try {
-          const hSnap = await firestore().collection('users').doc(myUid)
-            .collection('sosHistory').orderBy('createdAt', 'desc').limit(20).get();
-          setHistory(hSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-        } catch {}
+        try { setHistory(await listSOSHistory()); } catch {}
       } catch {
         Alert.alert('Error', 'Failed to send SOS. Please try again.');
       }
@@ -184,7 +139,7 @@ export default function EmergencySOSScreen() {
     });
     Accelerometer.setUpdateInterval(100);
     return () => subscription.remove();
-  }, [shakeEnabled, countdown, sending, sent, selectedContacts, myUid]);
+  }, [shakeEnabled, countdown, sending, sent, selectedContacts]);
 
   const toggleContact = (uid: string) => {
     setSelectedContacts(prev =>
@@ -226,68 +181,21 @@ export default function EmergencySOSScreen() {
   const triggerSOS = async (isTest: boolean) => {
     setSending(true);
     try {
-      // Get location
+      // Get location (best-effort; SOS still sends without it)
       const { status } = await Location.requestForegroundPermissionsAsync();
-      let lat = 0, lng = 0;
+      let lat: number | null = null, lng: number | null = null;
       if (status === 'granted') {
         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
         lat = loc.coords.latitude;
         lng = loc.coords.longitude;
       }
 
-      // Get user name
-      const mySnap = await firestore().collection('users').doc(myUid).get();
-      const myName = mySnap.data()?.name || 'VaultChat User';
-
-      const message = isTest ? TEST_MESSAGE(myName, lat, lng) : SOS_MESSAGE(myName, lat, lng);
-
-      // Send to each selected trusted contact
-      for (const uid of selectedContacts) {
-        try {
-          await firestore().collection('users').doc(uid).collection('alerts').add({
-            type: isTest ? 'sos_test' : 'sos_emergency',
-            fromUid: myUid,
-            fromName: myName,
-            message,
-            latitude: lat,
-            longitude: lng,
-            createdAt: firestore.FieldValue.serverTimestamp(),
-            read: false,
-          });
-        } catch {}
-      }
-
-      // Log to securityEvents
-      await firestore().collection('securityEvents').add({
-        type: isTest ? 'sos_test' : 'sos_emergency',
-        uid: myUid,
-        name: myName,
-        latitude: lat,
-        longitude: lng,
-        contactsNotified: selectedContacts.length,
-        createdAt: firestore.FieldValue.serverTimestamp(),
-      });
-
-      // Save to SOS history
-      await firestore().collection('users').doc(myUid).collection('sosHistory').add({
-        type: isTest ? 'test' : 'emergency',
-        latitude: lat,
-        longitude: lng,
-        contactsNotified: selectedContacts.length,
-        createdAt: firestore.FieldValue.serverTimestamp(),
-      });
+      // Dispatch via backend — pushes to the selected trusted contacts.
+      await sendSOS(lat, lng, isTest, selectedContacts);
 
       setSent(true);
       Vibration.vibrate([0, 500, 200, 500]);
-      // Reload history inline
-      try {
-        const hSnap = await firestore().collection('users').doc(myUid)
-          .collection('sosHistory')
-          .orderBy('createdAt', 'desc')
-          .limit(20)
-          .get();
-        setHistory(hSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-      } catch {}
+      try { setHistory(await listSOSHistory()); } catch {}
     } catch {
       Alert.alert('Error', 'Failed to send SOS. Please try again.');
     }
@@ -295,9 +203,11 @@ export default function EmergencySOSScreen() {
   };
 
   const formatTime = (ts: any) => {
-    if (!ts?.toDate) return 'Unknown';
-    const d = ts.toDate();
-    return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (!ts) return 'Unknown';
+    try {
+      const d = new Date(ts.toDate ? ts.toDate() : ts);
+      return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch { return 'Unknown'; }
   };
 
   return (
@@ -421,7 +331,7 @@ export default function EmergencySOSScreen() {
           ) : (
             history.map(item => (
               <View key={item.id} style={styles.historyRow}>
-                <View style={[styles.historyDot, { backgroundColor: item.type === 'test' ? C.yellow : C.danger }]} />
+                <View style={[styles.historyDot, { backgroundColor: item.type === 'test' ? C.green : C.danger }]} />
                 <View style={styles.historyInfo}>
                   <Text style={styles.historyType}>
                     {item.type === 'test' ? 'Test SOS' : 'Emergency SOS'}

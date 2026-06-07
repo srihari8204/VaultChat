@@ -204,6 +204,24 @@ export async function createGroupChat(
   });
 }
 
+// ─── Emergency SOS ──────────────────────────────────────────────────
+export interface SOSHistoryItem {
+  id:               number;
+  type:             'emergency' | 'test';
+  latitude:         number | null;
+  longitude:        number | null;
+  contactsNotified: number;
+  createdAt:        string;
+}
+export async function sendSOS(
+  latitude: number | null, longitude: number | null, test: boolean, contactIds?: string[],
+): Promise<{ contactsNotified: number; id: number; createdAt: string }> {
+  return api('/user/sos', { method: 'POST', json: { latitude, longitude, test, contactIds } });
+}
+export async function listSOSHistory(): Promise<SOSHistoryItem[]> {
+  return api<SOSHistoryItem[]>('/user/sos');
+}
+
 // ─── Trusted (emergency) contacts ───────────────────────────────────
 export interface TrustedContact {
   userId:  string;
