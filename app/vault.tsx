@@ -18,8 +18,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
+import { vaultEncrypt, vaultDecrypt } from '../lib/vaultCrypto';
 
 // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 // Types
@@ -67,7 +66,7 @@ function formatDate(ms: number): string {
 // PIN Entry Component
 // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
-function PinGate({ onUnlock }: { onUnlock: () => void }) {
+function PinGate({ onUnlock }: { onUnlock: (pin: string) => void }) {
   const [pin,   setPin]   = useState<string[]>([]);
   const [error, setError] = useState('');
   const [shake, setShake] = useState(false);
@@ -84,7 +83,7 @@ function PinGate({ onUnlock }: { onUnlock: () => void }) {
     if (next.length === 8) {
       const saved = await SecureStore.getItemAsync('vault_pin');
       if (next.join('') === saved) {
-        onUnlock();
+        onUnlock(next.join(''));
       } else {
         Vibration.vibrate([0, 100, 100, 100]);
         setError('Incorrect PIN. Try again.');
@@ -156,14 +155,13 @@ function PinGate({ onUnlock }: { onUnlock: () => void }) {
 
 export default function VaultScreen() {
   const router = useRouter();
-  const uid    = auth().currentUser?.uid || '';
 
   const [unlocked,    setUnlocked]    = useState(false);
+  const [vaultPin,    setVaultPin]    = useState('');
   const [activeTab,   setActiveTab]   = useState<VaultTab>('Documents');
   const [files,       setFiles]       = useState<VaultFile[]>([]);
   const [loading,     setLoading]     = useState(false);
   const [showBackup,  setShowBackup]  = useState(false);
-  const [backupEmail, setBackupEmail] = useState('');
   const [lastBackup,  setLastBackup]  = useState<string | null>(null);
 
   // Ã¢â€â‚¬Ã¢â€â‚¬ Load manifest on unlock Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
@@ -214,8 +212,8 @@ export default function VaultScreen() {
         encoding: 'base64',
       });
 
-      // 2. Encrypt with AES-256-GCM using vault session
-      const encrypted = await d2deService.encrypt(`vault_${uid}`, base64);
+      // 2. Encrypt with AES-256-GCM using a key derived from the Vault PIN
+      const encrypted = vaultEncrypt(vaultPin, base64);
 
       // 3. Save encrypted payload to disk
       const fileId  = `vault_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -307,8 +305,8 @@ export default function VaultScreen() {
       });
       const payload = JSON.parse(raw);
 
-      // 2. Decrypt
-      const base64 = await d2deService.decrypt(`vault_${uid}`, payload);
+      // 2. Decrypt with the PIN-derived key
+      const base64 = vaultDecrypt(vaultPin, payload);
 
       // 3. Write decrypted file to temp location
       const tempPath = (FileSystem as any).cacheDirectory + file.name;
@@ -355,37 +353,27 @@ export default function VaultScreen() {
   };
 
   // Ã¢â€â‚¬Ã¢â€â‚¬ Backup Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+  // The Vault is local-first: there is no server backup endpoint, so a
+  // "backup" exports the encrypted manifest via the system share sheet so the
+  // user can stash it wherever they like. The files themselves stay in the
+  // app's encrypted vault directory.
   const handleBackup = async () => {
-    if (!backupEmail.trim() || !backupEmail.includes('@')) {
-      Alert.alert('Error', 'Enter a valid email address');
-      return;
-    }
-
     setLoading(true);
     try {
       const now = new Date().toLocaleDateString();
+      const manifestRaw = (await SecureStore.getItemAsync(MANIFEST_KEY)) || '[]';
+      const exportPath = (FileSystem as any).cacheDirectory + `vault_manifest_${Date.now()}.json`;
+      await FileSystem.writeAsStringAsync(exportPath, manifestRaw, { encoding: 'utf8' });
 
-      // Log backup request to Firestore
-      await firestore()
-        .collection('users')
-        .doc(uid)
-        .collection('backups')
-        .add({
-          email:       backupEmail,
-          fileCount:   files.length,
-          requestedAt: firestore.FieldValue.serverTimestamp(),
-          status:      'requested',
-        });
-
-      // Save last backup date
       await SecureStore.setItemAsync('vault_last_backup', now);
       setLastBackup(now);
       setShowBackup(false);
 
-      Alert.alert(
-        'Backup Requested',
-        `An encrypted backup link will be sent to ${backupEmail} within a few minutes.`
-      );
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(exportPath, { mimeType: 'application/json', dialogTitle: 'Export Vault manifest' });
+      } else {
+        Alert.alert('Saved', `Vault manifest exported to:\n${exportPath}`);
+      }
     } catch (e: any) {
       Alert.alert('Error', e.message);
     } finally {
@@ -400,7 +388,7 @@ export default function VaultScreen() {
   // Show PIN gate until unlocked
   // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   if (!unlocked) {
-    return <PinGate onUnlock={() => setUnlocked(true)} />;
+    return <PinGate onUnlock={(pin) => { setVaultPin(pin); setUnlocked(true); }} />;
   }
 
   // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
@@ -551,23 +539,12 @@ export default function VaultScreen() {
         >
           <View style={styles.backupPanel}>
             <View style={styles.backupHandle} />
-            <Text style={styles.backupTitle}>30-Day Backup</Text>
+            <Text style={styles.backupTitle}>Export Vault</Text>
             <Text style={styles.backupDesc}>
-              An encrypted backup of your {files.length} vault files will be
-              sent to your email. The backup is AES-256-GCM encrypted Ã¢â‚¬â€
+              Export a manifest of your {files.length} vault files via the
+              share sheet. Files are AES-256-GCM encrypted with your Vault PIN Ã¢â‚¬â€
               only you can open it.
             </Text>
-
-            <Text style={styles.backupLabel}>Email address</Text>
-            <TextInput
-              style={styles.backupInput}
-              value={backupEmail}
-              onChangeText={setBackupEmail}
-              placeholder="your@email.com"
-              placeholderTextColor="#6B7280"
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
 
             <View style={styles.backupBtnRow}>
               <TouchableOpacity
@@ -583,14 +560,14 @@ export default function VaultScreen() {
               >
                 {loading
                   ? <ActivityIndicator color="#FFFFFF" size="small" />
-                  : <Text style={styles.backupConfirmText}>Send Backup</Text>
+                  : <Text style={styles.backupConfirmText}>Export</Text>
                 }
               </TouchableOpacity>
             </View>
 
             {lastBackup && (
               <Text style={styles.backupLastText}>
-                Last backup: {lastBackup}
+                Last export: {lastBackup}
               </Text>
             )}
 
