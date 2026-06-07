@@ -1,98 +1,116 @@
-// app/media-gallery.tsx — Media Gallery per Chat
-// Shows all photos, videos, files shared in a conversation
-// Tab view: Photos | Videos | Files | Links
-// Pulls from Firestore messages with mediaUrl
+// app/media-gallery.tsx — Media Gallery per Chat (Postgres-backed).
+//
+// Photos / Videos / Files / Links shared in a conversation, pulled from the
+// real message history (GET /chats/:id/messages) and filtered by type.
+// Thumbnails load through the auth'd attachment endpoint; tapping a photo
+// opens it in a self-contained full-screen viewer (no dependency on other
+// screens). Links open externally. No Firestore.
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, FlatList,
-  Dimensions, StatusBar, ActivityIndicator, Linking, Image,
+  View, Text, TouchableOpacity, StyleSheet, FlatList, Dimensions, StatusBar,
+  ActivityIndicator, Linking, Image, Modal,
 } from 'react-native';
-import { useLocalSearchParams, Stack } from 'expo-router';
-import firestore from '@react-native-firebase/firestore';
+import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import { Aurora } from '../constants/theme';
+import { getAccessToken } from '../lib/api';
+import { getMessages, attachmentUrl, type Message } from '../lib/chatService';
 
 const { width: SW } = Dimensions.get('window');
-const TILE = (SW - 48) / 3;
-const C = { bg: '#FFFFFF', accent: '#4A9FFF', card: '#F9FAFB' };
+const TILE = (SW - 40) / 3;
+const PAGE = 200;
 
 type TabId = 'photos' | 'videos' | 'files' | 'links';
+interface LinkItem { id: number; url: string; createdAt: string }
 
 export default function MediaGalleryScreen() {
-  const { chatId, peerName } = useLocalSearchParams();
+  const router = useRouter();
+  const { chatId, id: idParam, peerName } = useLocalSearchParams<{ chatId?: string; id?: string; peerName?: string }>();
+  const cid = String(chatId ?? idParam ?? '');
+
   const [tab, setTab] = useState<TabId>('photos');
-  const [media, setMedia] = useState([]);
+  const [authHeader, setAuthHeader] = useState<string | null>(null);
+  const [photos, setPhotos] = useState<Message[]>([]);
+  const [videos, setVideos] = useState<Message[]>([]);
+  const [files, setFiles] = useState<Message[]>([]);
+  const [links, setLinks] = useState<LinkItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [viewer, setViewer] = useState<string | null>(null); // attachmentId being viewed
 
   useEffect(() => {
-    const loadMedia = async () => {
-      setLoading(true);
+    let active = true;
+    (async () => {
       try {
-        const snap = await firestore().collection('chats').doc(chatId as string)
-          .collection('messages')
-          .orderBy('createdAt', 'desc')
-          .limit(200)
-          .get();
-        const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        setMedia(all);
-      } catch {}
-      setLoading(false);
-    };
-    loadMedia();
-  }, [chatId]);
+        const tok = await getAccessToken();
+        if (active) setAuthHeader(tok ? `Bearer ${tok}` : null);
+        if (!cid) { setLoading(false); return; }
 
-  const photos = media.filter(m => m.msgType === 'image' && m.mediaUrl && !m.isDeleted);
-  const videos = media.filter(m => m.msgType === 'video' && m.mediaUrl && !m.isDeleted);
-  const files = media.filter(m => m.msgType === 'file' && m.mediaUrl && !m.isDeleted);
-  const links = media.filter(m => {
-    const txt = m.ciphertext || m.plaintext || '';
-    return txt.match(/https?:\/\//i) && !m.isDeleted;
-  });
+        // Walk the history (cap a few pages) and bucket by type.
+        const all: Message[] = [];
+        let before: number | undefined;
+        for (let i = 0; i < 5; i++) {
+          const page = await getMessages(cid, { before, limit: PAGE });
+          all.push(...page);
+          if (page.length < PAGE) break;
+          before = page[page.length - 1].id;
+        }
+        if (!active) return;
+        const ph: Message[] = [], vd: Message[] = [], fl: Message[] = [], lk: LinkItem[] = [];
+        for (const m of all) {
+          if (m.deletedAt) continue;
+          if (m.type === 'image' && m.meta?.attachmentId) ph.push(m);
+          else if (m.type === 'video' && m.meta?.attachmentId) vd.push(m);
+          else if (m.type === 'file' && m.meta?.attachmentId) fl.push(m);
+          else if (m.type === 'text' && m.content) {
+            const found = m.content.match(/https?:\/\/[^\s]+/gi);
+            if (found) for (const u of found) lk.push({ id: m.id, url: u, createdAt: m.createdAt });
+          }
+        }
+        setPhotos(ph); setVideos(vd); setFiles(fl); setLinks(lk);
+      } catch { /* leaves empties */ } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [cid]);
 
-  const formatDate = (ts) => {
-    if (!ts?.toDate) return '';
-    return ts.toDate().toLocaleDateString();
-  };
+  const fmtDate = useCallback((iso: string) => { try { return new Date(iso).toLocaleDateString(); } catch { return ''; } }, []);
+  const thumb = (aid: string) => ({ uri: attachmentUrl(aid), headers: authHeader ? { Authorization: authHeader } : undefined });
 
-  const renderPhoto = ({ item }) => (
-    <TouchableOpacity style={s.tile} onPress={() => Linking.openURL(item.mediaUrl).catch(() => {})}>
-      <Image source={{ uri: item.mediaUrl }} style={s.tileImg} resizeMode="cover" />
+  const renderPhoto = ({ item }: { item: Message }) => (
+    <TouchableOpacity style={s.tile} onPress={() => setViewer(item.meta.attachmentId)} activeOpacity={0.8}>
+      <Image source={thumb(item.meta.attachmentId)} style={s.tileImg} resizeMode="cover" />
     </TouchableOpacity>
   );
 
-  const renderVideo = ({ item }) => (
-    <TouchableOpacity style={s.tile} onPress={() => Linking.openURL(item.mediaUrl).catch(() => {})}>
-      <View style={[s.tileImg, { backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center' }]}>
-        <Text style={{ fontSize: 28 }}>{"\u25B6\uFE0F"}</Text>
-        <Text style={{ color: '#6B7280', fontSize: 10, marginTop: 4 }}>{item.filename || 'Video'}</Text>
-      </View>
+  const renderVideo = ({ item }: { item: Message }) => (
+    <TouchableOpacity style={s.tile} onPress={() => setViewer(item.meta.attachmentId)} activeOpacity={0.8}>
+      <Image source={thumb(item.meta.attachmentId)} style={s.tileImg} resizeMode="cover" />
+      <View style={s.playBadge}><Ionicons name="play" size={16} color="#fff" /></View>
     </TouchableOpacity>
   );
 
-  const renderFile = ({ item }) => (
-    <TouchableOpacity style={s.fileRow} onPress={() => Linking.openURL(item.mediaUrl).catch(() => {})}>
-      <View style={s.fileIcon}><Text style={{ fontSize: 22 }}>{"\uD83D\uDCC4"}</Text></View>
+  const renderFile = ({ item }: { item: Message }) => (
+    <TouchableOpacity style={s.fileRow} onPress={() => Linking.openURL(attachmentUrl(item.meta.attachmentId)).catch(() => {})}>
+      <View style={s.fileIcon}><Ionicons name="document-text-outline" size={22} color={Aurora.accent} /></View>
       <View style={{ flex: 1 }}>
-        <Text style={s.fileName} numberOfLines={1}>{item.filename || 'File'}</Text>
-        <Text style={s.fileDate}>{formatDate(item.createdAt)}</Text>
+        <Text style={s.fileName} numberOfLines={1}>{item.meta?.fileName || item.meta?.name || 'File'}</Text>
+        <Text style={s.fileDate}>{fmtDate(item.createdAt)}</Text>
       </View>
-      <Text style={{ color: C.accent, fontSize: 12 }}>{"\u2193"}</Text>
+      <Ionicons name="download-outline" size={18} color={Aurora.textDim} />
     </TouchableOpacity>
   );
 
-  const renderLink = ({ item }) => {
-    const txt = item.ciphertext || item.plaintext || '';
-    const match = txt.match(/https?:\/\/[^\s]+/i);
-    const url = match ? match[0] : '';
-    return (
-      <TouchableOpacity style={s.fileRow} onPress={() => Linking.openURL(url).catch(() => {})}>
-        <View style={s.fileIcon}><Text style={{ fontSize: 22 }}>{"\uD83D\uDD17"}</Text></View>
-        <View style={{ flex: 1 }}>
-          <Text style={s.fileName} numberOfLines={2}>{url}</Text>
-          <Text style={s.fileDate}>{formatDate(item.createdAt)}</Text>
-        </View>
-      </TouchableOpacity>
-    );
-  };
+  const renderLink = ({ item }: { item: LinkItem }) => (
+    <TouchableOpacity style={s.fileRow} onPress={() => Linking.openURL(item.url).catch(() => {})}>
+      <View style={s.fileIcon}><Ionicons name="link-outline" size={20} color={Aurora.accent} /></View>
+      <View style={{ flex: 1 }}>
+        <Text style={[s.fileName, { color: Aurora.accent }]} numberOfLines={2}>{item.url}</Text>
+        <Text style={s.fileDate}>{fmtDate(item.createdAt)}</Text>
+      </View>
+    </TouchableOpacity>
+  );
 
   const TABS: { id: TabId; label: string; count: number }[] = [
     { id: 'photos', label: 'Photos', count: photos.length },
@@ -102,56 +120,81 @@ export default function MediaGalleryScreen() {
   ];
 
   return (
-    <>
-      <Stack.Screen options={{ title: (peerName as string || 'Chat') + ' Media', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
-      <View style={s.container}>
-        <StatusBar barStyle="light-content" />
-        <View style={s.tabs}>
-          {TABS.map(t => (
-            <TouchableOpacity key={t.id} style={[s.tab, tab === t.id && s.tabActive]} onPress={() => setTab(t.id)}>
-              <Text style={[s.tabTxt, tab === t.id && s.tabTxtActive]}>{t.label}</Text>
-              <Text style={[s.tabCount, tab === t.id && { color: '#000' }]}>{t.count}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-        {loading ? <ActivityIndicator color={C.accent} style={{ marginTop: 40 }} /> : (
-          tab === 'photos' ? (
-            <FlatList data={photos} numColumns={3} keyExtractor={m => m.id} renderItem={renderPhoto}
-              contentContainerStyle={{ padding: 12 }} ListEmptyComponent={<Empty label="No photos shared yet" />} />
-          ) : tab === 'videos' ? (
-            <FlatList data={videos} numColumns={3} keyExtractor={m => m.id} renderItem={renderVideo}
-              contentContainerStyle={{ padding: 12 }} ListEmptyComponent={<Empty label="No videos shared yet" />} />
-          ) : tab === 'files' ? (
-            <FlatList data={files} keyExtractor={m => m.id} renderItem={renderFile}
-              contentContainerStyle={{ padding: 12 }} ListEmptyComponent={<Empty label="No files shared yet" />} />
-          ) : (
-            <FlatList data={links} keyExtractor={m => m.id} renderItem={renderLink}
-              contentContainerStyle={{ padding: 12 }} ListEmptyComponent={<Empty label="No links shared yet" />} />
-          )
-        )}
+    <View style={s.container}>
+      <Stack.Screen options={{ headerShown: false }} />
+      <StatusBar barStyle="light-content" />
+
+      <View style={s.header}>
+        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
+          <Ionicons name="arrow-back" size={24} color={Aurora.text} />
+        </TouchableOpacity>
+        <Text style={s.title} numberOfLines={1}>{(peerName as string) || 'Shared'} Media</Text>
+        <View style={{ width: 40 }} />
       </View>
-    </>
+
+      <View style={s.tabs}>
+        {TABS.map(t => (
+          <TouchableOpacity key={t.id} style={[s.tab, tab === t.id && s.tabActive]} onPress={() => setTab(t.id)}>
+            <Text style={[s.tabTxt, tab === t.id && s.tabTxtActive]}>{t.label}</Text>
+            <Text style={[s.tabCount, tab === t.id && { color: '#04130D' }]}>{t.count}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {loading ? (
+        <ActivityIndicator color={Aurora.primary} style={{ marginTop: 40 }} />
+      ) : tab === 'photos' ? (
+        <FlatList data={photos} numColumns={3} keyExtractor={m => String(m.id)} renderItem={renderPhoto}
+          contentContainerStyle={{ padding: 8 }} ListEmptyComponent={<Empty label="No photos shared yet" />} />
+      ) : tab === 'videos' ? (
+        <FlatList data={videos} numColumns={3} keyExtractor={m => String(m.id)} renderItem={renderVideo}
+          contentContainerStyle={{ padding: 8 }} ListEmptyComponent={<Empty label="No videos shared yet" />} />
+      ) : tab === 'files' ? (
+        <FlatList data={files} keyExtractor={m => String(m.id)} renderItem={renderFile}
+          contentContainerStyle={{ padding: 12 }} ListEmptyComponent={<Empty label="No files shared yet" />} />
+      ) : (
+        <FlatList data={links} keyExtractor={(l, i) => `${l.id}-${i}`} renderItem={renderLink}
+          contentContainerStyle={{ padding: 12 }} ListEmptyComponent={<Empty label="No links shared yet" />} />
+      )}
+
+      {/* Self-contained full-screen photo viewer */}
+      <Modal visible={!!viewer} transparent animationType="fade" onRequestClose={() => setViewer(null)}>
+        <View style={s.viewerBg}>
+          <TouchableOpacity style={s.viewerClose} onPress={() => setViewer(null)} hitSlop={12}>
+            <Ionicons name="close" size={28} color="#fff" />
+          </TouchableOpacity>
+          {viewer && <Image source={thumb(viewer)} style={s.viewerImg} resizeMode="contain" />}
+        </View>
+      </Modal>
+    </View>
   );
 }
 
 const Empty = ({ label }: { label: string }) => (
   <View style={{ alignItems: 'center', paddingVertical: 60 }}>
-    <Text style={{ color: '#6B7280', fontSize: 14 }}>{label}</Text>
+    <Text style={{ color: Aurora.textDim, fontSize: 14 }}>{label}</Text>
   </View>
 );
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg },
+  container: { flex: 1, backgroundColor: Aurora.bg },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingHorizontal: 16, paddingBottom: 8, gap: 12 },
+  backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
+  title: { color: Aurora.text, fontSize: 18, fontWeight: '800', flex: 1 },
   tabs: { flexDirection: 'row', paddingHorizontal: 12, paddingTop: 8, gap: 6 },
-  tab: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: '#F9FAFB' },
-  tabActive: { backgroundColor: C.accent },
-  tabTxt: { color: '#6B7280', fontSize: 12, fontWeight: '700' },
-  tabTxtActive: { color: '#000' },
-  tabCount: { color: '#6B7280', fontSize: 10, marginTop: 2 },
-  tile: { width: TILE, height: TILE, margin: 4, borderRadius: 8, overflow: 'hidden' },
-  tileImg: { width: '100%', height: '100%', backgroundColor: '#E5E7EB' },
-  fileRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 12, marginBottom: 6, borderWidth: 1, borderColor: '#E5E7EB' },
-  fileIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  fileName: { color: '#1F2937', fontSize: 13, fontWeight: '600' },
-  fileDate: { color: '#6B7280', fontSize: 11, marginTop: 2 },
+  tab: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: Aurora.surface, borderWidth: 1, borderColor: Aurora.border },
+  tabActive: { backgroundColor: Aurora.primary, borderColor: Aurora.primary },
+  tabTxt: { color: Aurora.textDim, fontSize: 12, fontWeight: '700' },
+  tabTxtActive: { color: '#04130D' },
+  tabCount: { color: Aurora.textDim, fontSize: 10, marginTop: 2 },
+  tile: { width: TILE, height: TILE, margin: 4, borderRadius: 8, overflow: 'hidden', backgroundColor: Aurora.surfaceSolid },
+  tileImg: { width: '100%', height: '100%' },
+  playBadge: { position: 'absolute', top: '50%', left: '50%', marginLeft: -16, marginTop: -16, width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  fileRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: Aurora.card, borderRadius: 12, padding: 12, marginBottom: 6, borderWidth: 1, borderColor: Aurora.border, gap: 12 },
+  fileIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: Aurora.surface, justifyContent: 'center', alignItems: 'center' },
+  fileName: { color: Aurora.text, fontSize: 13, fontWeight: '600' },
+  fileDate: { color: Aurora.textDim, fontSize: 11, marginTop: 2 },
+  viewerBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' },
+  viewerClose: { position: 'absolute', top: 54, right: 20, zIndex: 10 },
+  viewerImg: { width: '100%', height: '80%' },
 });
