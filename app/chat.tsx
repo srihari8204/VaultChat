@@ -28,6 +28,7 @@ import * as Sharing from 'expo-sharing';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { E2EE_ENABLED } from '../constants/flags';
+import { saveDraft, getDraft, clearDraft } from '../lib/drafts';
 import {
   ActivityIndicator,
   Alert,
@@ -43,6 +44,7 @@ import {
   View,
 } from 'react-native';
 import { getCurrentUserAsync } from './(constants)/authService';
+import { MessageActionSheet, type SheetAction } from '../components/MessageActionSheet';
 import { getAccessToken } from '../lib/api';
 import {
   addBookmark,
@@ -159,6 +161,7 @@ export default function ChatScreen() {
   // Day 8 — reactions, reply, forward
   const [reactions, setReactions] = useState<Record<number, ReactionSummary[]>>({});
   const [reactPicker, setReactPicker] = useState<DisplayMessage | null>(null);
+  const [actionSheet, setActionSheet] = useState<{ msg: DisplayMessage; plain: string } | null>(null);
   const [replyTo, setReplyTo]         = useState<DisplayMessage | null>(null);
   const [forwardMsg, setForwardMsg]   = useState<DisplayMessage | null>(null);
   const [forwardChats, setForwardChats] = useState<ChatSummary[]>([]);
@@ -461,6 +464,21 @@ export default function ChatScreen() {
   }, [chatId, messages]);
 
   // ── Typing indicator (emit start, then debounced stop) ────
+  // ── Draft auto-save (feature 66) ──────────────────────────
+  const inputRef = useRef(input);
+  useEffect(() => { inputRef.current = input; }, [input]);
+  const draftTimer = useRef<any>(null);
+  useEffect(() => {
+    let active = true;
+    getDraft(chatId).then(d => { if (active && d) setInput(d); });
+    return () => {
+      active = false;
+      if (draftTimer.current) clearTimeout(draftTimer.current);
+      saveDraft(chatId, inputRef.current).catch(() => {});
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatId]);
+
   const stopTypingIfActive = useCallback(() => {
     if (typingActiveRef.current && meId) {
       emitTypingStop(chatId, meId).catch(() => {});
@@ -470,6 +488,8 @@ export default function ChatScreen() {
 
   const onInputChange = useCallback((text: string) => {
     setInput(text);
+    if (draftTimer.current) clearTimeout(draftTimer.current);
+    draftTimer.current = setTimeout(() => { saveDraft(chatId, text).catch(() => {}); }, 400);
     if (!meId) return;
     if (!typingActiveRef.current && text.length > 0) {
       typingActiveRef.current = true;
@@ -485,6 +505,8 @@ export default function ChatScreen() {
     if (!text || sending) return;
     setSending(true);
     stopTypingIfActive();
+    if (draftTimer.current) clearTimeout(draftTimer.current);
+    clearDraft(chatId).catch(() => {});
     try {
       if (editingId != null) {
         // Edits go straight to the backend (no offline-queue support yet).
@@ -527,8 +549,6 @@ export default function ChatScreen() {
 
   // ── Long-press menu on a message bubble ───────────────────
   const onLongPressMessage = useCallback((msg: DisplayMessage, plain: string) => {
-    const isMine = msg.senderId === meId;
-
     // Failed (queued) bubble: offer Retry / Cancel-and-remove.
     if (msg._state === 'failed' && msg._tempId) {
       Alert.alert(
@@ -562,50 +582,37 @@ export default function ChatScreen() {
       return;
     }
 
-    // Normal server-confirmed bubble: React / Reply / Forward / Copy / Bookmark / Remind / Edit / Delete.
-    const buttons: any[] = [
-      { text: 'React',   onPress: () => setReactPicker(msg) },
-      { text: 'Reply',   onPress: () => setReplyTo(msg) },
-      { text: 'Forward', onPress: () => openForward(msg) },
-      { text: 'Copy text', onPress: () => copyAndAutoClear(plain) },
-      {
-        text: '🔖 Bookmark',
-        onPress: async () => {
-          try {
-            await addBookmark(msg.id, null);
-            Alert.alert('Bookmarked', 'Saved to your bookmarks.');
-          } catch (e: any) {
-            Alert.alert('Could not bookmark', e?.message ?? 'Try again');
-          }
-        },
-      },
-      {
-        text: '⏰ Remind me about this',
-        onPress: () => router.push({
+    // Normal server-confirmed bubble → custom bottom-sheet action menu.
+    setActionSheet({ msg, plain });
+  }, [meId, chatId]);
+
+  // Build the action-sheet tiles for a message — reuses the existing handlers.
+  const buildSheetActions = useCallback((msg: DisplayMessage, plain: string): SheetAction[] => {
+    const isMine = msg.senderId === meId;
+    const acts: SheetAction[] = [
+      { key: 'reply',   label: 'Reply',   icon: '↩️', onPress: () => setReplyTo(msg) },
+      { key: 'forward', label: 'Forward', icon: '↪️', onPress: () => openForward(msg) },
+      { key: 'copy',    label: 'Copy',    icon: '📋', onPress: () => copyAndAutoClear(plain) },
+      { key: 'star',    label: 'Star',    icon: '🔖', onPress: async () => {
+          try { await addBookmark(msg.id, null); } catch (e: any) { Alert.alert('Could not save', e?.message ?? 'Try again'); }
+        } },
+      { key: 'remind',  label: 'Remind',  icon: '⏰', onPress: () => router.push({
           pathname: '/message-reminder' as any,
-          params: {
-            chatId,
-            messageId: String(msg.id),
-            preview:   (plain || msg.type).slice(0, 200),
-          },
-        }),
-      },
+          params: { chatId, messageId: String(msg.id), preview: (plain || msg.type).slice(0, 200) },
+        }) },
     ];
     if (isMine && !msg.deletedAt) {
-      buttons.push({ text: 'Edit', onPress: () => { setEditingId(msg.id); setInput(plain); } });
-      buttons.push({ text: 'Delete', style: 'destructive', onPress: async () => {
-        try {
-          await deleteMessage(chatId, msg.id);
-          setMessages(prev => prev.map(x => x.id === msg.id
-            ? { ...x, content: null, deletedAt: new Date().toISOString(), type: 'system' } : x));
-        } catch (e: any) {
-          Alert.alert('Delete failed', e?.message ?? 'Try again');
-        }
-      }});
+      acts.push({ key: 'edit', label: 'Edit', icon: '✏️', onPress: () => { setEditingId(msg.id); setInput(plain); } });
+      acts.push({ key: 'delete', label: 'Delete', icon: '🗑️', danger: true, onPress: async () => {
+          try {
+            await deleteMessage(chatId, msg.id);
+            setMessages(prev => prev.map(x => x.id === msg.id
+              ? { ...x, content: null, deletedAt: new Date().toISOString(), type: 'system' } : x));
+          } catch (e: any) { Alert.alert('Delete failed', e?.message ?? 'Try again'); }
+        } });
     }
-    buttons.push({ text: 'Cancel', style: 'cancel' });
-    Alert.alert('Message', undefined, buttons);
-  }, [meId, chatId]);
+    return acts;
+  }, [meId, chatId, router]);
 
   // ── Screenshot mode (P1 polish) ──────────────────────────
   // Apply the chat's per-user screenshot policy on mount, restore the
@@ -1497,6 +1504,14 @@ export default function ChatScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Long-press action sheet (reactions + action grid) */}
+      <MessageActionSheet
+        visible={actionSheet != null}
+        onClose={() => setActionSheet(null)}
+        onReact={(e) => { if (actionSheet) toggleReaction(actionSheet.msg, e); }}
+        actions={actionSheet ? buildSheetActions(actionSheet.msg, actionSheet.plain) : []}
+      />
 
       {/* Forward chat picker */}
       <Modal
