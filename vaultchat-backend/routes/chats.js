@@ -673,6 +673,62 @@ router.get('/:id/messages', async (req, res) => {
   }
 });
 
+// GET /chats/:id/messages/search?q=...&limit=50 — in-chat message search.
+//
+// Membership-scoped (must be a member to search). Matches text-message
+// content (case-insensitive) within this single chat, newest first, and
+// joins the sender's display name so the result list can render it without
+// a second round-trip.
+//
+// MUST be declared before PATCH/DELETE '/:id/messages/:msgId' is irrelevant
+// (those are not GET), but it is declared after GET '/:id/messages' — Express
+// matches the longer, more specific path here because the extra '/search'
+// segment makes it distinct from '/:id/messages'.
+//
+// TEMPORARY (same caveat as the global /chats/search): relies on Phase 3a
+// plaintext content. Under real E2EE (Phase 3b) in-chat search moves
+// fully client-side over the local message store.
+router.get('/:id/messages/search', async (req, res) => {
+  try {
+    const mem = await loadChatMembership(req, req.params.id);
+    if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member of this chat' });
+
+    const q = (req.query.q || '').toString().trim();
+    if (!q) return res.json({ messages: [] });
+    if (q.length > 200) return res.status(400).json({ error: 'query too long' });
+    const limit = Math.min(parseInt(req.query.limit || '50', 10), 100);
+    const like = `%${q.replace(/[%_]/g, '\\$&')}%`;
+
+    const r = await req.dbQuery(
+      `SELECT m.id, m.sender_id, m.content, m.type, m.created_at,
+              COALESCE(NULLIF(u.name, ''), u.email) AS sender_name
+         FROM messages m
+         JOIN users u ON u.id = m.sender_id
+        WHERE m.chat_id = $1
+          AND m.deleted_at IS NULL
+          AND m.type = 'text'
+          AND m.content ILIKE $2
+        ORDER BY m.id DESC
+        LIMIT $3`,
+      [req.params.id, like, limit]
+    );
+
+    res.json({
+      messages: r.rows.map(row => ({
+        id:         row.id,
+        senderId:   row.sender_id,
+        senderName: row.sender_name,
+        content:    row.content || '',
+        type:       row.type,
+        createdAt:  row.created_at,
+      })),
+    });
+  } catch (err) {
+    console.error('[in-chat search]', err.message);
+    res.status(500).json({ error: 'Search failed' });
+  }
+});
+
 // PATCH /chats/:id/messages/:msgId — edit content (sender, within EDIT_WINDOW_MS)
 router.patch('/:id/messages/:msgId', async (req, res) => {
   try {

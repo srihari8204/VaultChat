@@ -576,6 +576,23 @@ export async function searchAll(q: string, limit = 20): Promise<SearchResults> {
   return api<SearchResults>(`/chats/search?${params}`);
 }
 
+// In-chat message search — matches text content within a single chat.
+export interface InChatMessageHit {
+  id:         number;
+  senderId:   string;
+  senderName: string | null;
+  content:    string;
+  type:       Message['type'];
+  createdAt:  string;
+}
+export async function searchInChat(chatId: string, q: string, limit = 50): Promise<InChatMessageHit[]> {
+  const params = new URLSearchParams({ q, limit: String(limit) }).toString();
+  const r = await api<{ messages: InChatMessageHit[] }>(
+    `/chats/${encodeURIComponent(chatId)}/messages/search?${params}`,
+  );
+  return r.messages || [];
+}
+
 // ─── Mute (Day 11) ──────────────────────────────────────────────────
 export async function muteChat(chatId: string, muted: boolean): Promise<void> {
   await api(`/chats/${encodeURIComponent(chatId)}/mute`, {
