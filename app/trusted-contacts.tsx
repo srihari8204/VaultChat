@@ -1,214 +1,188 @@
-// app/trusted-contacts.tsx — Trusted Contacts Manager
-// Up to 3 emergency contacts who receive:
-//   - GPS alert on duress PIN activation
-//   - New device login notifications
-//   - Panic button alerts
-// Stored in Firestore: users/{uid}.trustedContacts[]
+// app/trusted-contacts.tsx — Trusted (emergency) Contacts (Postgres-backed).
+//
+// Up to 3 contacts alerted on duress-PIN / new-device / panic events.
+// Backed by /contacts/trusted (list/add-by-VaultID/remove). No Firestore.
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, FlatList,
-  Alert, StatusBar, ActivityIndicator, TextInput,
+  View, Text, TouchableOpacity, StyleSheet, FlatList, Alert, StatusBar, ActivityIndicator, TextInput,
 } from 'react-native';
-import { Stack } from 'expo-router';
-import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
+import { Stack, useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import { Aurora } from '../constants/theme';
+import { listTrustedContacts, addTrustedContact, removeTrustedContact, type TrustedContact } from '../lib/chatService';
 
 const MAX_TRUSTED = 3;
-const C = { bg: '#FFFFFF', accent: '#10B981', danger: '#FF3C6E', primary: '#4A9FFF', card: '#F9FAFB' };
 
 export default function TrustedContactsScreen() {
-  const myUid = auth().currentUser?.uid || '';
-  const [trusted, setTrusted] = useState<any[]>([]);
+  const router = useRouter();
+  const [trusted, setTrusted] = useState<TrustedContact[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [searchId, setSearchId] = useState('');
   const [searching, setSearching] = useState(false);
 
-  useEffect(() => {
-    const loadTrusted = async () => {
-      setLoading(true);
-      try {
-        const snap = await firestore().collection('users').doc(myUid).get();
-        const ids: string[] = snap.data()?.trustedContacts || [];
-        const list: any[] = [];
-        for (const uid of ids) {
-          try {
-            const uSnap = await firestore().collection('users').doc(uid).get();
-            const d = uSnap.data();
-            list.push({ uid, name: d?.name || 'Unknown', vaultId: d?.vaultId || uid.slice(0, 8), online: d?.online || false });
-          } catch {}
-        }
-        setTrusted(list);
-      } catch {}
-      setLoading(false);
-    };
-    loadTrusted();
-  }, [myUid]);
+  const load = useCallback(async () => {
+    try { setTrusted(await listTrustedContacts()); }
+    catch (e: any) { Alert.alert('Error', e?.message ?? 'Failed to load'); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
 
   const addByVaultId = async () => {
     const id = searchId.trim().toLowerCase().replace('@', '');
     if (!id) return;
-    if (trusted.length >= MAX_TRUSTED) { Alert.alert('Maximum Reached', 'You can have up to ' + MAX_TRUSTED + ' trusted contacts.'); return; }
+    if (trusted.length >= MAX_TRUSTED) { Alert.alert('Maximum reached', `You can have up to ${MAX_TRUSTED} trusted contacts.`); return; }
     setSearching(true);
     try {
-      const snap = await firestore().collection('users').where('vaultId', '==', id).get();
-      if (snap.empty) { Alert.alert('Not Found', 'No user with VaultID @' + id); setSearching(false); return; }
-      const doc = snap.docs[0];
-      const peerUid = doc.id;
-      if (peerUid === myUid) { Alert.alert('Error', "You can't add yourself"); setSearching(false); return; }
-      if (trusted.some(t => t.uid === peerUid)) { Alert.alert('Already Added', 'This contact is already trusted.'); setSearching(false); return; }
-      const peer = doc.data();
-      // Add to Firestore
-      await firestore().collection('users').doc(myUid).update({
-        trustedContacts: firestore.FieldValue.arrayUnion(peerUid),
-      });
-      // Notify the trusted contact
-      await firestore().collection('users').doc(peerUid).collection('alerts').add({
-        type: 'trusted_added',
-        fromUid: myUid,
-        fromName: (await firestore().collection('users').doc(myUid).get()).data()?.name || 'Someone',
-        message: 'You have been added as a trusted emergency contact',
-        createdAt: firestore.FieldValue.serverTimestamp(),
-        read: false,
-      });
-      setTrusted(prev => [...prev, { uid: peerUid, name: peer.name || id, vaultId: peer.vaultId || id, online: peer.online || false }]);
-      setSearchId('');
-      setAdding(false);
-      Alert.alert('Added!', (peer.name || id) + ' is now a trusted contact. They will receive alerts if you activate duress mode.');
-    } catch { Alert.alert('Error', 'Could not add contact'); }
-    setSearching(false);
+      const added = await addTrustedContact(id);
+      setTrusted(prev => [...prev, added]);
+      setSearchId(''); setAdding(false);
+      Alert.alert('Added', `${added.name || id} is now a trusted contact.`);
+    } catch (e: any) {
+      Alert.alert('Could not add', e?.message ?? 'Try again');
+    } finally {
+      setSearching(false);
+    }
   };
 
-  const removeTrusted = (uid: string, name: string) => {
-    Alert.alert('Remove Trusted Contact?', 'Remove ' + name + ' from your emergency contacts?', [
-      { text: 'Cancel' },
+  const removeTrusted = (c: TrustedContact) => {
+    Alert.alert('Remove trusted contact?', `Remove ${c.name || 'this contact'} from your emergency contacts?`, [
+      { text: 'Cancel', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: async () => {
-        try {
-          await firestore().collection('users').doc(myUid).update({
-            trustedContacts: firestore.FieldValue.arrayRemove(uid),
-          });
-          setTrusted(prev => prev.filter(t => t.uid !== uid));
-        } catch {}
-      }},
+        const prev = trusted;
+        setTrusted(list => list.filter(t => t.userId !== c.userId));
+        try { await removeTrustedContact(c.userId); }
+        catch (e: any) { setTrusted(prev); Alert.alert('Error', e?.message ?? 'Failed'); }
+      } },
     ]);
   };
 
   return (
-    <>
-      <Stack.Screen options={{ title: 'Trusted Contacts', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
-      <View style={s.container}>
-        <StatusBar barStyle="light-content" />
+    <View style={s.container}>
+      <Stack.Screen options={{ headerShown: false }} />
+      <StatusBar barStyle="light-content" />
 
-        {/* Info Card */}
+      <View style={s.header}>
+        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
+          <Ionicons name="arrow-back" size={24} color={Aurora.text} />
+        </TouchableOpacity>
+        <Text style={s.headerTitle}>Trusted Contacts</Text>
+        <View style={{ width: 40 }} />
+      </View>
+
+      <View style={s.body}>
         <View style={s.infoCard}>
-          <Text style={{ fontSize: 28, marginBottom: 8 }}>{"\uD83D\uDEE1\uFE0F"}</Text>
+          <Ionicons name="shield-checkmark" size={26} color={Aurora.primary} />
           <Text style={s.infoTitle}>Emergency Contacts</Text>
           <Text style={s.infoDesc}>
-            These contacts will be silently notified with your GPS location if you activate the duress PIN (Ghost Protocol).
-            They also receive alerts when your account is accessed from a new device.
+            These contacts are silently notified with your location if you activate the duress PIN, and when your account is accessed from a new device.
           </Text>
-          <View style={s.infoStats}>
-            <Text style={s.infoStat}>{trusted.length}/{MAX_TRUSTED} contacts set</Text>
-          </View>
+          <Text style={s.infoStat}>{trusted.length}/{MAX_TRUSTED} contacts set</Text>
         </View>
 
-        {/* Trusted List */}
         {loading ? (
-          <ActivityIndicator color={C.accent} style={{ marginTop: 30 }} />
+          <ActivityIndicator color={Aurora.primary} style={{ marginTop: 30 }} />
         ) : (
           <FlatList
             data={trusted}
-            keyExtractor={t => t.uid}
+            keyExtractor={t => t.userId}
             renderItem={({ item }) => (
               <View style={s.contactRow}>
                 <View style={s.contactAvatar}>
-                  <Text style={{ color: '#fff', fontWeight: '900', fontSize: 18 }}>{(item.name || '?')[0].toUpperCase()}</Text>
+                  <Text style={s.contactAvatarTxt}>{(item.name || '?')[0].toUpperCase()}</Text>
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={s.contactName}>{item.name}</Text>
-                  <Text style={s.contactId}>@{item.vaultId}</Text>
+                  <Text style={s.contactName}>{item.name || 'Contact'}</Text>
+                  <Text style={s.contactId}>@{item.vaultId || '—'}</Text>
                 </View>
-                <View style={[s.statusDot, { backgroundColor: item.online ? '#10B981' : '#D1D5DB' }]} />
-                <TouchableOpacity onPress={() => removeTrusted(item.uid, item.name)} style={s.removeBtn}>
-                  <Text style={{ color: C.danger, fontSize: 12, fontWeight: '700' }}>Remove</Text>
+                <View style={[s.statusDot, { backgroundColor: item.online ? Aurora.online : Aurora.textFaint }]} />
+                <TouchableOpacity onPress={() => removeTrusted(item)} style={s.removeBtn}>
+                  <Text style={s.removeTxt}>Remove</Text>
                 </TouchableOpacity>
               </View>
             )}
             ListEmptyComponent={
               <View style={{ alignItems: 'center', paddingVertical: 30 }}>
-                <Text style={{ color: '#6B7280', fontSize: 14 }}>No trusted contacts yet</Text>
-                <Text style={{ color: '#9CA3AF', fontSize: 12, marginTop: 4 }}>Add up to {MAX_TRUSTED} emergency contacts</Text>
+                <Text style={s.emptyTxt}>No trusted contacts yet</Text>
+                <Text style={s.emptySub}>Add up to {MAX_TRUSTED} emergency contacts</Text>
               </View>
             }
           />
         )}
 
-        {/* Add Button */}
         {!adding && trusted.length < MAX_TRUSTED && (
           <TouchableOpacity style={s.addBtn} onPress={() => setAdding(true)}>
-            <Text style={s.addBtnTxt}>{"\u2795  Add Trusted Contact"}</Text>
+            <Text style={s.addBtnTxt}>＋  Add Trusted Contact</Text>
           </TouchableOpacity>
         )}
 
-        {/* Add Form */}
         {adding && (
           <View style={s.addForm}>
             <Text style={s.addLabel}>Enter their VaultID</Text>
             <View style={s.addRow}>
-              <Text style={{ color: '#6B7280', fontSize: 18 }}>@</Text>
+              <Text style={{ color: Aurora.textDim, fontSize: 18 }}>@</Text>
               <TextInput
                 style={s.addInput}
                 value={searchId}
                 onChangeText={setSearchId}
                 placeholder="vaultid"
-                placeholderTextColor="#9CA3AF"
+                placeholderTextColor={Aurora.textFaint}
                 autoCapitalize="none"
                 autoFocus
               />
               <TouchableOpacity style={s.addConfirm} onPress={addByVaultId} disabled={searching}>
-                {searching ? <ActivityIndicator color="#000" size="small" /> : <Text style={{ color: '#000', fontWeight: '800' }}>Add</Text>}
+                {searching ? <ActivityIndicator color="#04130D" size="small" /> : <Text style={s.addConfirmTxt}>Add</Text>}
               </TouchableOpacity>
             </View>
             <TouchableOpacity onPress={() => { setAdding(false); setSearchId(''); }}>
-              <Text style={{ color: '#6B7280', textAlign: 'center', marginTop: 12 }}>Cancel</Text>
+              <Text style={s.cancelTxt}>Cancel</Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* What they receive */}
         <View style={s.alertInfo}>
           <Text style={s.alertTitle}>What trusted contacts receive:</Text>
-          <Text style={s.alertItem}>{"\uD83D\uDEA8"} Duress PIN activation — GPS + emergency alert</Text>
-          <Text style={s.alertItem}>{"\uD83D\uDCF1"} New device login — device info + location</Text>
-          <Text style={s.alertItem}>{"\uD83C\uDD98"} Panic button — instant location share</Text>
+          <Text style={s.alertItem}>🚨 Duress PIN activation — location + emergency alert</Text>
+          <Text style={s.alertItem}>📱 New device login — device info + location</Text>
+          <Text style={s.alertItem}>🆘 Panic button — instant location share</Text>
         </View>
       </View>
-    </>
+    </View>
   );
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg, padding: 16 },
-  infoCard: { backgroundColor: C.card, borderRadius: 16, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: '#E5E7EB' },
-  infoTitle: { color: '#fff', fontSize: 18, fontWeight: '900', marginBottom: 6 },
-  infoDesc: { color: '#6B7280', fontSize: 13, lineHeight: 20 },
-  infoStats: { marginTop: 12, flexDirection: 'row' },
-  infoStat: { color: C.accent, fontSize: 13, fontWeight: '700' },
-  contactRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: '#E5E7EB' },
-  contactAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#1D4ED8', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  contactName: { color: '#1F2937', fontSize: 15, fontWeight: '700' },
-  contactId: { color: '#6B7280', fontSize: 12, marginTop: 2 },
+  container: { flex: 1, backgroundColor: Aurora.bg },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingHorizontal: 16, paddingBottom: 8 },
+  backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
+  headerTitle: { color: Aurora.text, fontSize: 18, fontWeight: '700' },
+  body: { flex: 1, padding: 16 },
+  infoCard: { backgroundColor: Aurora.card, borderRadius: 16, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: Aurora.border, alignItems: 'flex-start' },
+  infoTitle: { color: Aurora.text, fontSize: 18, fontWeight: '900', marginTop: 8, marginBottom: 6 },
+  infoDesc: { color: Aurora.textDim, fontSize: 13, lineHeight: 20 },
+  infoStat: { color: Aurora.primary, fontSize: 13, fontWeight: '700', marginTop: 12 },
+  contactRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: Aurora.card, borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: Aurora.border },
+  contactAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: Aurora.primary, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  contactAvatarTxt: { color: '#04130D', fontWeight: '900', fontSize: 18 },
+  contactName: { color: Aurora.text, fontSize: 15, fontWeight: '700' },
+  contactId: { color: Aurora.textDim, fontSize: 12, marginTop: 2 },
   statusDot: { width: 8, height: 8, borderRadius: 4, marginRight: 12 },
-  removeBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: '#FF3C6E15', borderWidth: 1, borderColor: '#FF3C6E33' },
-  addBtn: { backgroundColor: C.accent + '22', borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 12, borderWidth: 1, borderColor: C.accent + '44' },
-  addBtnTxt: { color: C.accent, fontSize: 14, fontWeight: '700' },
-  addForm: { backgroundColor: C.card, borderRadius: 14, padding: 16, marginTop: 12, borderWidth: 1, borderColor: '#E5E7EB' },
-  addLabel: { color: '#6B7280', fontSize: 13, marginBottom: 10 },
+  removeBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: 'rgba(239,68,68,0.1)', borderWidth: 1, borderColor: 'rgba(239,68,68,0.3)' },
+  removeTxt: { color: Aurora.danger, fontSize: 12, fontWeight: '700' },
+  addBtn: { backgroundColor: 'rgba(16,185,129,0.13)', borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 12, borderWidth: 1, borderColor: 'rgba(16,185,129,0.3)' },
+  addBtnTxt: { color: Aurora.primary, fontSize: 14, fontWeight: '700' },
+  addForm: { backgroundColor: Aurora.card, borderRadius: 14, padding: 16, marginTop: 12, borderWidth: 1, borderColor: Aurora.border },
+  addLabel: { color: Aurora.textDim, fontSize: 13, marginBottom: 10 },
   addRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  addInput: { flex: 1, backgroundColor: '#E5E7EB', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, color: '#fff', fontSize: 15 },
-  addConfirm: { backgroundColor: C.accent, borderRadius: 10, paddingHorizontal: 20, paddingVertical: 10 },
-  alertInfo: { marginTop: 20, backgroundColor: C.card, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#E5E7EB' },
-  alertTitle: { color: '#6B7280', fontSize: 12, fontWeight: '700', marginBottom: 10 },
-  alertItem: { color: '#9CA3AF', fontSize: 12, lineHeight: 22 },
+  addInput: { flex: 1, backgroundColor: Aurora.surface, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, color: Aurora.text, fontSize: 15, borderWidth: 1, borderColor: Aurora.border },
+  addConfirm: { backgroundColor: Aurora.primary, borderRadius: 10, paddingHorizontal: 20, paddingVertical: 11 },
+  addConfirmTxt: { color: '#04130D', fontWeight: '800' },
+  cancelTxt: { color: Aurora.textDim, textAlign: 'center', marginTop: 12 },
+  emptyTxt: { color: Aurora.textDim, fontSize: 14 },
+  emptySub: { color: Aurora.textFaint, fontSize: 12, marginTop: 4 },
+  alertInfo: { marginTop: 20, backgroundColor: Aurora.card, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: Aurora.border },
+  alertTitle: { color: Aurora.textDim, fontSize: 12, fontWeight: '700', marginBottom: 10 },
+  alertItem: { color: Aurora.textDim, fontSize: 12, lineHeight: 22 },
 });

@@ -204,6 +204,23 @@ export async function createGroupChat(
   });
 }
 
+// ─── Trusted (emergency) contacts ───────────────────────────────────
+export interface TrustedContact {
+  userId:  string;
+  name:    string | null;
+  vaultId: string | null;
+  online:  boolean;
+}
+export async function listTrustedContacts(): Promise<TrustedContact[]> {
+  return api<TrustedContact[]>('/contacts/trusted');
+}
+export async function addTrustedContact(vaultId: string): Promise<TrustedContact> {
+  return api<TrustedContact>('/contacts/trusted', { method: 'POST', json: { vaultId: vaultId.replace(/^@/, '') } });
+}
+export async function removeTrustedContact(userId: string): Promise<void> {
+  await api(`/contacts/trusted/${encodeURIComponent(userId)}`, { method: 'DELETE' });
+}
+
 // ─── Mutual-consent contact sync ────────────────────────────────────
 export interface SyncInitiator {
   userId:      string;

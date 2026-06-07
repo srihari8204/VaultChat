@@ -150,4 +150,76 @@ router.post('/sync/verify', async (req, res) => {
   }
 });
 
+// ─── Trusted (emergency) contacts ──────────────────────────────────
+const MAX_TRUSTED = 3;
+
+// GET /contacts/trusted — list with public detail
+router.get('/trusted', async (req, res) => {
+  try {
+    const r = await db.query(
+      `SELECT tc.contact_id, u.name, u.vault_id, u.online
+         FROM trusted_contacts tc JOIN users u ON u.id = tc.contact_id
+        WHERE tc.owner_id = $1
+        ORDER BY tc.created_at`,
+      [req.user.id]
+    );
+    res.json(r.rows.map(row => ({
+      userId:  row.contact_id,
+      name:    row.name,
+      vaultId: row.vault_id,
+      online:  !!row.online,
+    })));
+  } catch (err) {
+    console.error('[trusted GET]', err.message);
+    res.status(500).json({ error: 'Failed to load trusted contacts' });
+  }
+});
+
+// POST /contacts/trusted { vaultId } — add by VaultID handle (max 3)
+router.post('/trusted', async (req, res) => {
+  try {
+    const vid = (req.body?.vaultId || '').toString().replace(/^@/, '').trim();
+    if (!vid) return res.status(400).json({ error: 'vaultId required' });
+
+    const u = await db.query(
+      `SELECT id, name, vault_id, online FROM users WHERE vault_id = $1 AND is_deleted = FALSE LIMIT 1`,
+      [vid]
+    );
+    const peer = u.rows[0];
+    if (!peer) return res.status(404).json({ error: 'No user with that VaultID' });
+    if (peer.id === req.user.id) return res.status(400).json({ error: "You can't add yourself" });
+
+    const cnt = await db.query(`SELECT COUNT(*)::int AS n FROM trusted_contacts WHERE owner_id = $1`, [req.user.id]);
+    if (cnt.rows[0].n >= MAX_TRUSTED) {
+      return res.status(409).json({ error: `Maximum ${MAX_TRUSTED} trusted contacts` });
+    }
+
+    const ins = await db.query(
+      `INSERT INTO trusted_contacts (owner_id, contact_id) VALUES ($1, $2)
+       ON CONFLICT DO NOTHING RETURNING contact_id`,
+      [req.user.id, peer.id]
+    );
+    if (ins.rowCount === 0) return res.status(409).json({ error: 'Already a trusted contact' });
+
+    res.json({ userId: peer.id, name: peer.name, vaultId: peer.vault_id, online: !!peer.online });
+  } catch (err) {
+    console.error('[trusted POST]', err.message);
+    res.status(500).json({ error: 'Failed to add trusted contact' });
+  }
+});
+
+// DELETE /contacts/trusted/:userId — remove
+router.delete('/trusted/:userId', async (req, res) => {
+  try {
+    await db.query(
+      `DELETE FROM trusted_contacts WHERE owner_id = $1 AND contact_id = $2`,
+      [req.user.id, req.params.userId]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[trusted DELETE]', err.message);
+    res.status(500).json({ error: 'Failed to remove trusted contact' });
+  }
+});
+
 module.exports = router;
