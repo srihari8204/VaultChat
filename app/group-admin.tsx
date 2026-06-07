@@ -1,564 +1,293 @@
 /**
- * app/group-admin.tsx
- * Group Admin Controls — manage members, permissions, slow mode, anti-spam.
+ * app/group-admin.tsx — Group Admin Controls (Postgres-backed).
+ *
+ * Scoped to what the backend actually persists today:
+ *   - Group Info: rename the group (admin/owner only) via PATCH /chats/:id
+ *   - Members: per-member role + actions via /chats/:id/members*
+ *       • promote member → admin / demote admin → member (owner-gated)
+ *       • remove member (admin/owner)
+ *
+ * Permission-matrix, slow-mode and moderation toggles from the old Firebase
+ * screen are intentionally omitted: there are no Postgres tables backing them
+ * yet, so rendering fake switches would be dishonest. They return when the
+ * backend grows the tables to support them.
  */
 
 import { Ionicons } from '@expo/vector-icons';
-import firestore from '@react-native-firebase/firestore';
-import auth from '@react-native-firebase/auth';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Platform,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Switch,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+  ActivityIndicator, Alert, Platform, ScrollView, StatusBar,
+  StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
-
-const C = {
-  bg: '#FFFFFF',
-  card: '#F9FAFB',
-  cardAlt: '#111D32',
-  accent: '#4A9FFF',
-  cyan: '#4A9FFF',
-  green: '#10B981',
-  red: '#EF4444',
-  orange: '#F59E0B',
-  text: '#FFFFFF',
-  textDim: 'rgba(255,255,255,0.5)',
-  textFaint: 'rgba(255,255,255,0.22)',
-  border: 'rgba(74,159,255,0.15)',
-};
+import { Aurora } from '../constants/theme';
+import { getCurrentUserAsync } from './(constants)/authService';
+import {
+  getChat, removeChatMember, setMemberRole, updateChat,
+  type ChatMember,
+} from '../lib/chatService';
 
 const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
 
-type MemberRole = 'owner' | 'admin' | 'moderator' | 'member';
-interface Member {
-  uid: string;
-  name: string;
-  avatar?: string;
-  role: MemberRole;
-}
-
-const ROLE_COLORS: Record<MemberRole, string> = {
+type Role = 'owner' | 'admin' | 'member';
+const ROLE_COLORS: Record<Role, string> = {
   owner: '#F59E0B',
-  admin: '#4A9FFF',
-  moderator: '#10B981',
-  member: 'rgba(255,255,255,0.4)',
+  admin: Aurora.accent,
+  member: Aurora.textDim,
 };
-
-const ROLE_LABELS: Record<MemberRole, string> = {
-  owner: 'Owner',
-  admin: 'Admin',
-  moderator: 'Moderator',
-  member: 'Member',
-};
-
-const ROLE_ORDER: MemberRole[] = ['owner', 'admin', 'moderator', 'member'];
-
-type PermOption = 'everyone' | 'admins';
-interface GroupPermissions {
-  sendMessages: PermOption;
-  addMembers: PermOption;
-  editGroupInfo: PermOption;
-  pinMessages: PermOption;
-  sendMedia: PermOption;
-  mentionAll: PermOption;
-}
-
-const SLOW_MODE_OPTIONS = [
-  { label: 'Off', value: 0 },
-  { label: '10s', value: 10 },
-  { label: '30s', value: 30 },
-  { label: '1 min', value: 60 },
-  { label: '5 min', value: 300 },
-  { label: '15 min', value: 900 },
-];
+const ROLE_LABELS: Record<Role, string> = { owner: 'Owner', admin: 'Admin', member: 'Member' };
 
 export default function GroupAdminScreen() {
   const router = useRouter();
   const { chatId, groupName: initialName } = useLocalSearchParams<{ chatId: string; groupName: string }>();
 
+  const [myId, setMyId] = useState('');
+  const [myRole, setMyRole] = useState<Role>('member');
   const [groupName, setGroupName] = useState(initialName || 'Group');
-  const [description, setDescription] = useState('');
-  const [members, setMembers] = useState<Member[]>([]);
-  const [permissions, setPermissions] = useState<GroupPermissions>({
-    sendMessages: 'everyone',
-    addMembers: 'everyone',
-    editGroupInfo: 'everyone',
-    pinMessages: 'everyone',
-    sendMedia: 'everyone',
-    mentionAll: 'everyone',
-  });
-  const [slowMode, setSlowMode] = useState(0);
-  const [approveNewMembers, setApproveNewMembers] = useState(false);
-  const [antiSpamLinks, setAntiSpamLinks] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [savedName, setSavedName] = useState(initialName || 'Group');
+  const [members, setMembers] = useState<ChatMember[]>([]);
   const [loading, setLoading] = useState(true);
+  const [savingName, setSavingName] = useState(false);
+  const [banner, setBanner] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [roleMenuUid, setRoleMenuUid] = useState<string | null>(null);
 
-  const fadeIn = useRef(new Animated.Value(0)).current;
+  const flash = useCallback((kind: 'ok' | 'err', text: string) => {
+    setBanner({ kind, text });
+    setTimeout(() => setBanner(null), 2600);
+  }, []);
 
-  useEffect(() => {
-    Animated.timing(fadeIn, { toValue: 1, duration: 400, useNativeDriver: true }).start();
-    const loadGroupData = async () => {
-      try {
-        if (!chatId) return;
-        const doc = await firestore().collection('groups').doc(chatId).get();
-        if (doc.exists) {
-          const data = doc.data()!;
-          if (data.name) setGroupName(data.name);
-          if (data.description) setDescription(data.description);
-          if (data.permissions) setPermissions(prev => ({ ...prev, ...data.permissions }));
-          if (data.slowMode !== undefined) setSlowMode(data.slowMode);
-          if (data.approveNewMembers !== undefined) setApproveNewMembers(data.approveNewMembers);
-          if (data.antiSpamLinks !== undefined) setAntiSpamLinks(data.antiSpamLinks);
-          if (data.members && Array.isArray(data.members)) setMembers(data.members);
-        }
-      } catch (e) {
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadGroupData();
-  }, [fadeIn, chatId]);
-
-  const saveSettings = async () => {
-    setSaving(true);
+  const load = useCallback(async () => {
+    if (!chatId) { setLoading(false); return; }
     try {
-      await firestore().collection('groups').doc(chatId).set(
-        {
-          name: groupName,
-          description,
-          permissions,
-          slowMode,
-          approveNewMembers,
-          antiSpamLinks,
-          members,
-          updatedAt: firestore.FieldValue.serverTimestamp(),
-          updatedBy: auth().currentUser?.uid,
-        },
-        { merge: true }
-      );
-      Alert.alert('Saved', 'Group settings updated successfully.');
-    } catch (e) {
-      Alert.alert('Error', 'Failed to save settings.');
+      const [chat, me] = await Promise.all([getChat(chatId), getCurrentUserAsync()]);
+      const active = chat.members.filter(m => !m.leftAt);
+      setMembers(active);
+      setMyId(me?.id ?? '');
+      setMyRole((chat.myRole as Role) ?? 'member');
+      if (chat.name) { setGroupName(chat.name); setSavedName(chat.name); }
+    } catch (e: any) {
+      flash('err', e?.message ?? 'Failed to load group');
     } finally {
-      setSaving(false);
+      setLoading(false);
+    }
+  }, [chatId, flash]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const isAdmin = myRole === 'admin' || myRole === 'owner';
+
+  const saveName = async () => {
+    const name = groupName.trim();
+    if (!name || name === savedName) return;
+    setSavingName(true);
+    try {
+      await updateChat(chatId!, { name });
+      setSavedName(name);
+      flash('ok', 'Group name updated');
+    } catch (e: any) {
+      flash('err', e?.message ?? 'Rename failed');
+      setGroupName(savedName);
+    } finally {
+      setSavingName(false);
     }
   };
 
-  const changeRole = (uid: string, newRole: MemberRole) => {
-    setMembers(prev => prev.map(m => (m.uid === uid ? { ...m, role: newRole } : m)));
+  const changeRole = async (m: ChatMember, role: 'admin' | 'member') => {
     setRoleMenuUid(null);
+    if (m.role === role) return;
+    const prev = members;
+    setMembers(list => list.map(x => x.userId === m.userId ? { ...x, role } : x));
+    try {
+      await setMemberRole(chatId!, m.userId, role);
+      flash('ok', `${m.name || 'Member'} is now ${ROLE_LABELS[role]}`);
+    } catch (e: any) {
+      setMembers(prev);
+      flash('err', e?.message ?? 'Role change failed');
+    }
   };
 
-  const removeMember = (uid: string, name: string) => {
-    Alert.alert('Remove Member', `Remove ${name} from the group?`, [
+  const removeMember = (m: ChatMember) => {
+    const name = m.name || m.email || 'this member';
+    Alert.alert('Remove member', `Remove ${name} from the group?`, [
       { text: 'Cancel', style: 'cancel' },
       {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: () => setMembers(prev => prev.filter(m => m.uid !== uid)),
+        text: 'Remove', style: 'destructive', onPress: async () => {
+          const prev = members;
+          setMembers(list => list.filter(x => x.userId !== m.userId));
+          try {
+            await removeChatMember(chatId!, m.userId);
+            flash('ok', `Removed ${name}`);
+          } catch (e: any) {
+            setMembers(prev);
+            flash('err', e?.message ?? 'Remove failed');
+          }
+        },
       },
     ]);
   };
 
-  const togglePerm = (key: keyof GroupPermissions) => {
-    setPermissions(prev => ({
-      ...prev,
-      [key]: prev[key] === 'everyone' ? 'admins' : 'everyone',
-    }));
-  };
-
-  // ── Section renderers ──
-
-  const renderHeader = () => (
-    <View style={s.header}>
-      <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-        <Ionicons name="arrow-back" size={24} color={C.text} />
-      </TouchableOpacity>
-      <Text style={s.headerTitle}>Group Admin</Text>
-      <View style={{ width: 40 }} />
-    </View>
-  );
-
-  const renderGroupInfo = () => (
-    <View style={s.section}>
-      <Text style={s.sectionTitle}>Group Info</Text>
-
-      <TouchableOpacity style={s.photoCircle}>
-        <Ionicons name="camera" size={28} color={C.accent} />
-        <Text style={s.photoLabel}>Change Photo</Text>
-      </TouchableOpacity>
-
-      <Text style={s.label}>Group Name</Text>
-      <TextInput
-        style={s.input}
-        value={groupName}
-        onChangeText={setGroupName}
-        placeholderTextColor={C.textFaint}
-        placeholder="Group name"
-        maxLength={50}
-      />
-
-      <Text style={s.label}>Description</Text>
-      <TextInput
-        style={[s.input, { height: 80, textAlignVertical: 'top' }]}
-        value={description}
-        onChangeText={setDescription}
-        placeholderTextColor={C.textFaint}
-        placeholder="What's this group about?"
-        multiline
-        maxLength={200}
-      />
-    </View>
-  );
-
-  const renderPermissions = () => {
-    const perms: { key: keyof GroupPermissions; label: string; icon: string }[] = [
-      { key: 'sendMessages', label: 'Who can send messages', icon: 'chatbubble' },
-      { key: 'addMembers', label: 'Who can add members', icon: 'person-add' },
-      { key: 'editGroupInfo', label: 'Who can edit group info', icon: 'create' },
-      { key: 'pinMessages', label: 'Who can pin messages', icon: 'pin' },
-      { key: 'sendMedia', label: 'Who can send media', icon: 'image' },
-      { key: 'mentionAll', label: '@Mention settings', icon: 'at' },
-    ];
-
-    return (
-      <View style={s.section}>
-        <Text style={s.sectionTitle}>Permissions</Text>
-        {perms.map(p => (
-          <TouchableOpacity key={p.key} style={s.permRow} onPress={() => togglePerm(p.key)}>
-            <View style={s.permLeft}>
-              <Ionicons name={p.icon as any} size={20} color={C.accent} style={{ marginRight: 12 }} />
-              <Text style={s.permLabel}>{p.label}</Text>
-            </View>
-            <View style={[s.permBadge, permissions[p.key] === 'admins' && { backgroundColor: 'rgba(74,159,255,0.2)' }]}>
-              <Text style={[s.permBadgeText, permissions[p.key] === 'admins' && { color: C.accent }]}>
-                {permissions[p.key] === 'everyone' ? 'Everyone' : 'Admins Only'}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        ))}
-      </View>
-    );
-  };
-
-  const renderSlowMode = () => (
-    <View style={s.section}>
-      <Text style={s.sectionTitle}>Slow Mode</Text>
-      <Text style={s.hint}>Limit how often members can send messages.</Text>
-      <View style={s.slowRow}>
-        {SLOW_MODE_OPTIONS.map(opt => (
-          <TouchableOpacity
-            key={opt.value}
-            style={[s.slowChip, slowMode === opt.value && s.slowChipActive]}
-            onPress={() => setSlowMode(opt.value)}
-          >
-            <Text style={[s.slowChipText, slowMode === opt.value && s.slowChipTextActive]}>
-              {opt.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-    </View>
-  );
-
-  const renderModeration = () => (
-    <View style={s.section}>
-      <Text style={s.sectionTitle}>Moderation</Text>
-
-      <View style={s.toggleRow}>
-        <View style={{ flex: 1 }}>
-          <Text style={s.toggleLabel}>Approve New Members</Text>
-          <Text style={s.hint}>Admin must approve before new members can join.</Text>
-        </View>
-        <Switch
-          value={approveNewMembers}
-          onValueChange={setApproveNewMembers}
-          trackColor={{ false: '#D1D5DB', true: 'rgba(74,159,255,0.4)' }}
-          thumbColor={approveNewMembers ? C.accent : '#9CA3AF'}
-        />
-      </View>
-
-      <View style={s.toggleRow}>
-        <View style={{ flex: 1 }}>
-          <Text style={s.toggleLabel}>Anti-Spam: Auto-delete Links</Text>
-          <Text style={s.hint}>Automatically remove links from members who joined less than 24h ago.</Text>
-        </View>
-        <Switch
-          value={antiSpamLinks}
-          onValueChange={setAntiSpamLinks}
-          trackColor={{ false: '#D1D5DB', true: 'rgba(74,159,255,0.4)' }}
-          thumbColor={antiSpamLinks ? C.accent : '#9CA3AF'}
-        />
-      </View>
-    </View>
-  );
-
-  const renderMembers = () => (
-    <View style={s.section}>
-      <Text style={s.sectionTitle}>Members ({members.length})</Text>
-      {members.length === 0 && (
-        <Text style={[s.hint, { textAlign: 'center', marginVertical: 16 }]}>
-          No members loaded. Members will appear once group data is synced.
-        </Text>
-      )}
-      {members.map(m => (
-        <View key={m.uid}>
-          <TouchableOpacity
-            style={s.memberRow}
-            onLongPress={() => m.role !== 'owner' && setRoleMenuUid(m.uid === roleMenuUid ? null : m.uid)}
-          >
-            <View style={s.avatar}>
-              <Text style={s.avatarText}>{m.name.charAt(0).toUpperCase()}</Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={s.memberName}>{m.name}</Text>
-              <Text style={[s.roleBadgeText, { color: ROLE_COLORS[m.role] }]}>
-                {ROLE_LABELS[m.role]}
-              </Text>
-            </View>
-            {m.role !== 'owner' && (
-              <TouchableOpacity onPress={() => removeMember(m.uid, m.name)} style={s.removeBtn}>
-                <Ionicons name="close-circle" size={22} color={C.red} />
-              </TouchableOpacity>
-            )}
-          </TouchableOpacity>
-
-          {roleMenuUid === m.uid && (
-            <View style={s.roleMenu}>
-              {ROLE_ORDER.filter(r => r !== 'owner').map(r => (
-                <TouchableOpacity
-                  key={r}
-                  style={[s.roleOption, m.role === r && s.roleOptionActive]}
-                  onPress={() => changeRole(m.uid, r)}
-                >
-                  <View style={[s.roleDot, { backgroundColor: ROLE_COLORS[r] }]} />
-                  <Text style={[s.roleOptionText, m.role === r && { color: C.accent }]}>
-                    {ROLE_LABELS[r]}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-        </View>
-      ))}
-    </View>
-  );
-
   if (loading) {
     return (
-      <View style={[s.container, { justifyContent: 'center', alignItems: 'center' }]}>
+      <View style={[s.container, s.center]}>
         <Stack.Screen options={{ headerShown: false }} />
-        <ActivityIndicator size="large" color={C.accent} />
+        <ActivityIndicator size="large" color={Aurora.primary} />
       </View>
     );
   }
 
+  const nameDirty = groupName.trim() !== savedName && groupName.trim().length > 0;
+
   return (
     <View style={s.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <LinearGradient colors={[C.bg, '#F9FAFB', C.bg]} style={StyleSheet.absoluteFill} />
 
-      <Animated.View style={{ flex: 1, opacity: fadeIn }}>
-        {renderHeader()}
+      <View style={s.header}>
+        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
+          <Ionicons name="arrow-back" size={24} color={Aurora.text} />
+        </TouchableOpacity>
+        <Text style={s.headerTitle}>Group Admin</Text>
+        <View style={{ width: 40 }} />
+      </View>
 
-        <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
-          {renderGroupInfo()}
-          {renderPermissions()}
-          {renderSlowMode()}
-          {renderModeration()}
-          {renderMembers()}
-        </ScrollView>
-
-        {/* Save Button */}
-        <View style={s.bottomBar}>
-          <TouchableOpacity style={s.saveBtn} onPress={saveSettings} disabled={saving}>
-            <LinearGradient
-              colors={[C.accent, '#2B7FE0']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={s.saveBtnGrad}
-            >
-              {saving ? (
-                <ActivityIndicator size="small" color="#FFF" />
-              ) : (
-                <>
-                  <Ionicons name="checkmark-circle" size={20} color="#FFF" style={{ marginRight: 8 }} />
-                  <Text style={s.saveBtnText}>Save Settings</Text>
-                </>
-              )}
-            </LinearGradient>
-          </TouchableOpacity>
+      {banner && (
+        <View style={[s.banner, banner.kind === 'err' ? s.bannerErr : s.bannerOk]}>
+          <Text style={s.bannerTxt}>{banner.text}</Text>
         </View>
-      </Animated.View>
+      )}
+
+      <ScrollView contentContainerStyle={{ paddingBottom: 60 }} showsVerticalScrollIndicator={false}>
+        {/* Group Info */}
+        <View style={s.section}>
+          <Text style={s.sectionTitle}>Group Info</Text>
+          <Text style={s.label}>Group Name</Text>
+          <TextInput
+            style={[s.input, !isAdmin && s.inputDisabled]}
+            value={groupName}
+            onChangeText={setGroupName}
+            editable={isAdmin}
+            placeholderTextColor={Aurora.textFaint}
+            placeholder="Group name"
+            maxLength={100}
+          />
+          {!isAdmin && <Text style={s.hint}>Only admins can edit group info.</Text>}
+          {isAdmin && nameDirty && (
+            <TouchableOpacity style={s.saveNameBtn} onPress={saveName} disabled={savingName}>
+              {savingName
+                ? <ActivityIndicator size="small" color="#04130D" />
+                : <Text style={s.saveNameTxt}>Save name</Text>}
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Members */}
+        <View style={s.section}>
+          <Text style={s.sectionTitle}>Members ({members.length})</Text>
+          {members.length === 0 && (
+            <Text style={[s.hint, { textAlign: 'center', marginVertical: 16 }]}>No members.</Text>
+          )}
+          {members.map(m => {
+            const role = (m.role as Role) ?? 'member';
+            const isMe = m.userId === myId;
+            const label = m.name || m.email || m.userId.slice(0, 8);
+            // Admins can manage non-owner members other than themselves.
+            const canManage = isAdmin && role !== 'owner' && !isMe;
+            return (
+              <View key={m.userId}>
+                <TouchableOpacity
+                  style={s.memberRow}
+                  activeOpacity={canManage ? 0.6 : 1}
+                  onPress={() => canManage && setRoleMenuUid(roleMenuUid === m.userId ? null : m.userId)}
+                >
+                  <View style={s.avatar}><Text style={s.avatarText}>{label.charAt(0).toUpperCase()}</Text></View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.memberName} numberOfLines={1}>{label}{isMe ? ' (You)' : ''}</Text>
+                    <Text style={[s.roleBadgeText, { color: ROLE_COLORS[role] }]}>{ROLE_LABELS[role]}</Text>
+                  </View>
+                  {canManage && (
+                    <TouchableOpacity onPress={() => removeMember(m)} style={s.removeBtn} hitSlop={8}>
+                      <Ionicons name="close-circle" size={22} color={Aurora.danger} />
+                    </TouchableOpacity>
+                  )}
+                </TouchableOpacity>
+
+                {roleMenuUid === m.userId && canManage && (
+                  <View style={s.roleMenu}>
+                    {(['admin', 'member'] as const).map(r => (
+                      <TouchableOpacity
+                        key={r}
+                        style={[s.roleOption, role === r && s.roleOptionActive]}
+                        onPress={() => changeRole(m, r)}
+                      >
+                        <View style={[s.roleDot, { backgroundColor: ROLE_COLORS[r] }]} />
+                        <Text style={[s.roleOptionText, role === r && { color: Aurora.accent }]}>
+                          {role === r ? `${ROLE_LABELS[r]} ✓` : `Make ${ROLE_LABELS[r]}`}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+              </View>
+            );
+          })}
+          {isAdmin && (
+            <Text style={s.hint}>Tap a member to change their role or remove them.</Text>
+          )}
+        </View>
+      </ScrollView>
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg },
-
+  container: { flex: 1, backgroundColor: Aurora.bg },
+  center: { justifyContent: 'center', alignItems: 'center' },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: TOP + 8,
-    paddingHorizontal: 16,
-    paddingBottom: 12,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingTop: TOP + 8, paddingHorizontal: 16, paddingBottom: 12,
   },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  headerTitle: { fontSize: 18, fontWeight: '700', color: C.text },
+  headerTitle: { fontSize: 18, fontWeight: '700', color: Aurora.text },
+
+  banner: { marginHorizontal: 16, marginBottom: 8, padding: 10, borderRadius: 10, borderWidth: 1 },
+  bannerOk: { backgroundColor: 'rgba(16,185,129,0.12)', borderColor: 'rgba(16,185,129,0.4)' },
+  bannerErr: { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.4)' },
+  bannerTxt: { color: Aurora.text, fontSize: 12 },
 
   section: {
-    marginHorizontal: 16,
-    marginTop: 20,
-    backgroundColor: C.card,
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: C.border,
+    marginHorizontal: 16, marginTop: 16, backgroundColor: Aurora.card,
+    borderRadius: 16, padding: 16, borderWidth: 1, borderColor: Aurora.border,
   },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: C.text, marginBottom: 12 },
-  label: { fontSize: 13, color: C.textDim, marginTop: 10, marginBottom: 4 },
-  hint: { fontSize: 12, color: C.textDim, marginBottom: 8 },
+  sectionTitle: { fontSize: 16, fontWeight: '700', color: Aurora.text, marginBottom: 12 },
+  label: { fontSize: 13, color: Aurora.textDim, marginTop: 4, marginBottom: 4 },
+  hint: { fontSize: 12, color: Aurora.textDim, marginTop: 8 },
   input: {
-    backgroundColor: C.cardAlt,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    color: C.text,
-    fontSize: 15,
-    borderWidth: 1,
-    borderColor: C.border,
+    backgroundColor: Aurora.surface, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10,
+    color: Aurora.text, fontSize: 15, borderWidth: 1, borderColor: Aurora.border,
   },
-
-  photoCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: C.cardAlt,
-    justifyContent: 'center',
-    alignItems: 'center',
-    alignSelf: 'center',
-    marginBottom: 8,
-    borderWidth: 2,
-    borderColor: C.border,
+  inputDisabled: { opacity: 0.6 },
+  saveNameBtn: {
+    marginTop: 12, backgroundColor: Aurora.primary, borderRadius: 10,
+    paddingVertical: 11, alignItems: 'center',
   },
-  photoLabel: { fontSize: 9, color: C.textDim, marginTop: 2 },
-
-  permRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.04)',
-  },
-  permLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  permLabel: { fontSize: 14, color: C.text, flex: 1 },
-  permBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-  },
-  permBadgeText: { fontSize: 12, color: C.textDim, fontWeight: '600' },
-
-  slowRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
-  slowChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: C.cardAlt,
-    borderWidth: 1,
-    borderColor: C.border,
-  },
-  slowChipActive: { backgroundColor: 'rgba(74,159,255,0.2)', borderColor: C.accent },
-  slowChipText: { fontSize: 13, color: C.textDim, fontWeight: '600' },
-  slowChipTextActive: { color: C.accent },
-
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.04)',
-  },
-  toggleLabel: { fontSize: 14, color: C.text, fontWeight: '600' },
+  saveNameTxt: { color: '#04130D', fontWeight: '800', fontSize: 14 },
 
   memberRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.04)',
+    flexDirection: 'row', alignItems: 'center', paddingVertical: 10,
+    borderBottomWidth: 0.5, borderBottomColor: Aurora.separator,
   },
   avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: C.cardAlt,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-    borderWidth: 1,
-    borderColor: C.border,
+    width: 40, height: 40, borderRadius: 20, backgroundColor: Aurora.surface,
+    justifyContent: 'center', alignItems: 'center', marginRight: 12,
+    borderWidth: 1, borderColor: Aurora.border,
   },
-  avatarText: { fontSize: 16, fontWeight: '700', color: C.accent },
-  memberName: { fontSize: 14, fontWeight: '600', color: C.text },
+  avatarText: { fontSize: 16, fontWeight: '700', color: Aurora.accent },
+  memberName: { fontSize: 14, fontWeight: '600', color: Aurora.text },
   roleBadgeText: { fontSize: 11, fontWeight: '700', marginTop: 2 },
   removeBtn: { padding: 6 },
 
-  roleMenu: {
-    flexDirection: 'row',
-    backgroundColor: C.cardAlt,
-    borderRadius: 10,
-    marginBottom: 8,
-    padding: 6,
-    gap: 4,
-  },
-  roleOption: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  roleOptionActive: { backgroundColor: 'rgba(74,159,255,0.12)' },
+  roleMenu: { flexDirection: 'row', backgroundColor: Aurora.surface, borderRadius: 10, marginBottom: 8, padding: 6, gap: 4 },
+  roleOption: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 8, borderRadius: 8 },
+  roleOptionActive: { backgroundColor: 'rgba(6,182,212,0.12)' },
   roleDot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
-  roleOptionText: { fontSize: 11, color: C.textDim, fontWeight: '600' },
-
-  bottomBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    paddingHorizontal: 16,
-    paddingBottom: Platform.OS === 'ios' ? 34 : 20,
-    paddingTop: 12,
-    backgroundColor: 'rgba(2,11,24,0.95)',
-    borderTopWidth: 1,
-    borderTopColor: C.border,
-  },
-  saveBtn: { borderRadius: 12, overflow: 'hidden' },
-  saveBtnGrad: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-  },
-  saveBtnText: { fontSize: 16, fontWeight: '700', color: '#FFF' },
+  roleOptionText: { fontSize: 12, color: Aurora.textDim, fontWeight: '600' },
 });

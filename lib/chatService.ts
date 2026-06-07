@@ -549,6 +549,19 @@ export async function removeChatMember(chatId: string, userId: string): Promise<
   });
 }
 
+// Promote/demote a group member between 'admin' and 'member' (owner-gated
+// for demotions). The 'owner' role can't be set through this endpoint.
+export async function setMemberRole(
+  chatId: string,
+  userId: string,
+  role: 'admin' | 'member',
+): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/members/${encodeURIComponent(userId)}/role`, {
+    method: 'PATCH',
+    json: { role },
+  });
+}
+
 // ─── Search (Day 13) ────────────────────────────────────────────────
 export interface SearchChatHit {
   id:            string;

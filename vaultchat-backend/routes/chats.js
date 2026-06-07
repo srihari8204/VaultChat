@@ -902,6 +902,52 @@ router.post('/:id/members', async (req, res) => {
   }
 });
 
+// PATCH /chats/:id/members/:userId/role  { role: 'admin' | 'member' }
+//
+// Promote/demote a group member between 'admin' and 'member'. The 'owner'
+// role is immutable here (ownership transfer is a separate, deliberate flow).
+// Rules:
+//   - caller must be admin or owner of a group chat
+//   - cannot change your own role
+//   - cannot touch the owner's row
+//   - only the owner may demote an existing admin → member (an admin can
+//     promote members but can't demote a peer admin)
+router.patch('/:id/members/:userId/role', async (req, res) => {
+  try {
+    const mem = await loadChatMembership(req, req.params.id);
+    if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
+    if (mem.chat_type !== 'group') return res.status(400).json({ error: 'Only group chats have roles' });
+    if (mem.role !== 'admin' && mem.role !== 'owner') return res.status(403).json({ error: 'Admin only' });
+
+    const role = (req.body?.role || '').toString();
+    if (role !== 'admin' && role !== 'member') {
+      return res.status(400).json({ error: "role must be 'admin' or 'member'" });
+    }
+    const target = req.params.userId;
+    if (target === req.user.id) return res.status(400).json({ error: 'Cannot change your own role' });
+
+    const tr = await req.dbQuery(
+      `SELECT role FROM chat_members WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL`,
+      [req.params.id, target]
+    );
+    if (!tr.rows[0]) return res.status(404).json({ error: 'Member not found' });
+    if (tr.rows[0].role === 'owner') return res.status(403).json({ error: 'Cannot change the owner role' });
+    if (tr.rows[0].role === 'admin' && role === 'member' && mem.role !== 'owner') {
+      return res.status(403).json({ error: 'Only the owner can demote an admin' });
+    }
+
+    await req.dbQuery(
+      `UPDATE chat_members SET role = $1 WHERE chat_id = $2 AND user_id = $3 AND left_at IS NULL`,
+      [role, req.params.id, target]
+    );
+    broadcastChatEvent(req.params.id, 'member_role_changed', { userId: target, role, by: req.user.id });
+    res.json({ ok: true, userId: target, role });
+  } catch (err) {
+    console.error('[member role PATCH]', err.message);
+    res.status(500).json({ error: 'Failed to change role' });
+  }
+});
+
 // PATCH /chats/:id  { name?, photoURL?, disappearingSeconds? }
 // name / photoURL: group-admin only. disappearingSeconds: any member.
 // Direct chats may only set disappearingSeconds.
