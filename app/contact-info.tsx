@@ -17,7 +17,7 @@ import { Aurora } from '../constants/theme';
 import { E2EE_ENABLED } from '../constants/flags';
 import { getAccessToken } from '../lib/api';
 import {
-  getChat, getMessages, muteChat, listBlocks, blockUser, unblockUser,
+  getChat, getMessages, muteChat, listBlocks, blockUser, unblockUser, reportUser,
   attachmentUrl, type Message, type ChatMember,
 } from '../lib/chatService';
 
@@ -126,12 +126,18 @@ export default function ContactInfoScreen() {
 
   const reportAndBlock = () => {
     if (!peerUid) return;
-    Alert.alert(`Report ${displayName}?`, 'This blocks the contact. A moderation review queue is coming soon.', [
+    Alert.alert(`Report ${displayName}?`, 'This files a report for review and blocks the contact.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Report & block', style: 'destructive', onPress: async () => {
         setBlocked(true);
-        try { await blockUser(peerUid); Alert.alert('Done', `${displayName} was blocked.`); }
-        catch (e: any) { setBlocked(false); Alert.alert('Error', e?.message ?? 'Failed'); }
+        try {
+          await reportUser(peerUid, 'reported_from_contact_info', chatId ? String(chatId) : undefined);
+          await blockUser(peerUid);
+          Alert.alert('Done', `${displayName} was reported and blocked.`);
+        } catch (e: any) {
+          setBlocked(false);
+          Alert.alert('Error', e?.message ?? 'Failed');
+        }
       } },
     ]);
   };

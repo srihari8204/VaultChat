@@ -856,6 +856,13 @@ export async function unblockUser(userId: string): Promise<void> {
   await api(`/user/blocks/${encodeURIComponent(userId)}`, { method: 'DELETE' });
 }
 
+// File an abuse report against a user (moderation queue).
+export async function reportUser(
+  reportedUserId: string, reason?: string, context?: string,
+): Promise<void> {
+  await api('/user/reports', { method: 'POST', json: { reportedUserId, reason: reason ?? null, context: context ?? null } });
+}
+
 // ─── Reactions (Day 8) ──────────────────────────────────────────────
 export interface ReactionSummary { emoji: string; count: number; mine: boolean }
 export interface Reactor          { emoji: string; userId: string; name: string | null; email: string | null }

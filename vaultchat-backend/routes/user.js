@@ -83,6 +83,29 @@ router.get('/profile', async (req, res) => {
   }
 });
 
+// POST /user/reports  { reportedUserId, reason?, context? } — file an abuse report
+router.post('/reports', async (req, res) => {
+  try {
+    const reportedId = (req.body?.reportedUserId || '').toString().trim();
+    if (!reportedId) return res.status(400).json({ error: 'reportedUserId required' });
+    if (reportedId === req.user.id) return res.status(400).json({ error: 'Cannot report yourself' });
+    const reason  = (req.body?.reason  || '').toString().slice(0, 500) || null;
+    const context = (req.body?.context || '').toString().slice(0, 200) || null;
+
+    const u = await db.query(`SELECT 1 FROM users WHERE id = $1 AND is_deleted = FALSE`, [reportedId]);
+    if (!u.rows[0]) return res.status(404).json({ error: 'User not found' });
+
+    await db.query(
+      `INSERT INTO user_reports (reporter_id, reported_id, reason, context) VALUES ($1, $2, $3, $4)`,
+      [req.user.id, reportedId, reason, context]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[user/reports POST]', err.message);
+    res.status(500).json({ error: 'Failed to file report' });
+  }
+});
+
 // POST /user/sos  { latitude?, longitude?, test?, contactIds? }
 // Dispatches an emergency (or test) SOS: pushes an alert to the sender's
 // trusted contacts (optionally a selected subset) and records the event.
