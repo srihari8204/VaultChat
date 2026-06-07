@@ -204,6 +204,48 @@ export async function createGroupChat(
   });
 }
 
+// ─── Broadcast channels ─────────────────────────────────────────────
+export interface Channel {
+  id:              string;
+  name:            string;
+  description:     string | null;
+  adminId:         string;
+  isAdmin:         boolean;
+  inviteCode:      string;
+  createdAt:       string;
+  lastPostAt:      string | null;
+  lastPost:        string | null;
+  subscriberCount?: number;
+}
+export interface ChannelPost {
+  id:         number;
+  text:       string;
+  authorId:   string;
+  authorName?: string | null;
+  createdAt:  string;
+}
+export async function listChannels(): Promise<Channel[]> {
+  return api<Channel[]>('/channels');
+}
+export async function createChannel(name: string, description?: string): Promise<Channel> {
+  return api<Channel>('/channels', { method: 'POST', json: { name, description: description ?? '' } });
+}
+export async function joinChannel(code: string): Promise<Channel> {
+  return api<Channel>('/channels/join', { method: 'POST', json: { code } });
+}
+export async function listChannelPosts(
+  channelId: string, opts: { before?: number; limit?: number } = {},
+): Promise<ChannelPost[]> {
+  const p: string[] = [];
+  if (opts.before) p.push(`before=${opts.before}`);
+  if (opts.limit) p.push(`limit=${opts.limit}`);
+  const qs = p.length ? `?${p.join('&')}` : '';
+  return api<ChannelPost[]>(`/channels/${encodeURIComponent(channelId)}/posts${qs}`);
+}
+export async function postToChannel(channelId: string, text: string): Promise<ChannelPost> {
+  return api<ChannelPost>(`/channels/${encodeURIComponent(channelId)}/posts`, { method: 'POST', json: { text } });
+}
+
 // ─── Profile / VaultID ──────────────────────────────────────────────
 export interface MyProfile {
   id:       string;

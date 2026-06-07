@@ -55,6 +55,7 @@ app.use('/contacts', require('./routes/contacts'));
 const chatsRouter = require('./routes/chats');
 app.use('/chats',    chatsRouter);
 app.use('/stories',  require('./routes/stories'));
+app.use('/channels', require('./routes/channels'));
 
 // Wire the chats router so its REST writes broadcast over sockets.
 chatsRouter.setBroadcasters({
