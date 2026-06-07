@@ -11,6 +11,7 @@
 // Privacy: only returns users with discoverable=TRUE.
 
 const express   = require('express');
+const crypto    = require('crypto');
 const jwtUtil   = require('../jwt');
 const db        = require('../db');
 const rateLimit = require('../rateLimit');
@@ -66,6 +67,86 @@ router.post('/match', async (req, res) => {
   } catch (err) {
     console.error('[contacts/match]', err.message);
     res.status(500).json({ error: 'Contact match failed' });
+  }
+});
+
+// ─── Mutual-consent contact sync ───────────────────────────────────
+// One user generates a 6-digit code (5-min, single-use); the other enters
+// it to consent. On verify both learn each other's public stub.
+function genSyncCode() {
+  return String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+}
+
+// POST /contacts/sync/create — generate a fresh code (replaces any prior one)
+router.post('/sync/create', async (req, res) => {
+  try {
+    await db.query(`DELETE FROM sync_codes WHERE initiator_id = $1`, [req.user.id]);
+    for (let i = 0; i < 6; i++) {
+      try {
+        const code = genSyncCode();
+        await db.query(
+          `INSERT INTO sync_codes (code, initiator_id, expires_at)
+           VALUES ($1, $2, NOW() + INTERVAL '5 minutes')`,
+          [code, req.user.id]
+        );
+        return res.json({ success: true, code });
+      } catch (e) {
+        if (i === 5) throw e; // collided with a live code; retry
+      }
+    }
+  } catch (err) {
+    console.error('[sync create]', err.message);
+    res.status(500).json({ error: 'Failed to create code' });
+  }
+});
+
+// GET /contacts/sync/:code — initiator polls for the other party's consent
+router.get('/sync/:code', async (req, res) => {
+  try {
+    const r = await db.query(
+      `SELECT expires_at, verified_at FROM sync_codes WHERE code = $1 AND initiator_id = $2 LIMIT 1`,
+      [req.params.code, req.user.id]
+    );
+    const row = r.rows[0];
+    if (!row) return res.status(404).json({ error: 'not found' });
+    if (new Date(row.expires_at) < new Date()) return res.status(410).json({ error: 'expired' });
+    res.json({ verified: !!row.verified_at });
+  } catch (err) {
+    console.error('[sync status]', err.message);
+    res.status(500).json({ error: 'Failed to check status' });
+  }
+});
+
+// POST /contacts/sync/verify { code } — the other party consents
+router.post('/sync/verify', async (req, res) => {
+  try {
+    const code = (req.body?.code || '').toString().trim();
+    if (!/^\d{6}$/.test(code)) return res.status(400).json({ error: '6-digit code required' });
+
+    const r = await db.query(`SELECT * FROM sync_codes WHERE code = $1 LIMIT 1`, [code]);
+    const row = r.rows[0];
+    if (!row) return res.status(404).json({ error: 'Invalid code' });
+    if (new Date(row.expires_at) < new Date()) return res.status(410).json({ error: 'Code expired' });
+    if (row.initiator_id === req.user.id) return res.status(400).json({ error: 'Cannot sync with yourself' });
+    if (row.verified_at) return res.status(409).json({ error: 'Code already used' });
+
+    await db.query(
+      `UPDATE sync_codes SET verified_by = $1, verified_at = NOW() WHERE code = $2`,
+      [req.user.id, code]
+    );
+    const u = await db.query(
+      `SELECT id, name, email, phone FROM users WHERE id = $1 AND is_deleted = FALSE LIMIT 1`,
+      [row.initiator_id]
+    );
+    const init = u.rows[0];
+    if (!init) return res.status(404).json({ error: 'Initiator no longer exists' });
+    res.json({
+      success: true,
+      initiator: { userId: init.id, displayName: init.name, email: init.email, phoneNumber: init.phone },
+    });
+  } catch (err) {
+    console.error('[sync verify]', err.message);
+    res.status(500).json({ error: 'Verification failed' });
   }
 });
 

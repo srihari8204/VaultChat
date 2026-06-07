@@ -204,6 +204,23 @@ export async function createGroupChat(
   });
 }
 
+// ─── Mutual-consent contact sync ────────────────────────────────────
+export interface SyncInitiator {
+  userId:      string;
+  displayName: string | null;
+  email:       string | null;
+  phoneNumber: string | null;
+}
+export async function createSyncCode(): Promise<{ success: boolean; code: string }> {
+  return api('/contacts/sync/create', { method: 'POST' });
+}
+export async function getSyncStatus(code: string): Promise<{ verified: boolean }> {
+  return api(`/contacts/sync/${encodeURIComponent(code)}`);
+}
+export async function verifySyncCode(code: string): Promise<{ success: boolean; initiator: SyncInitiator }> {
+  return api('/contacts/sync/verify', { method: 'POST', json: { code } });
+}
+
 // ─── Broadcast channels ─────────────────────────────────────────────
 export interface Channel {
   id:              string;
