@@ -30,6 +30,15 @@ import {
 const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
 
 type Role = 'owner' | 'admin' | 'member';
+
+const SLOW_OPTS = [
+  { label: 'Off', value: 0 },
+  { label: '10s', value: 10 },
+  { label: '30s', value: 30 },
+  { label: '1m', value: 60 },
+  { label: '5m', value: 300 },
+  { label: '15m', value: 900 },
+];
 const ROLE_COLORS: Record<Role, string> = {
   owner: '#F59E0B',
   admin: Aurora.accent,
@@ -50,6 +59,8 @@ export default function GroupAdminScreen() {
   const [savingName, setSavingName] = useState(false);
   const [banner, setBanner] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [roleMenuUid, setRoleMenuUid] = useState<string | null>(null);
+  const [slowMode, setSlowMode] = useState(0);
+  const [sendPolicy, setSendPolicy] = useState<'everyone' | 'admins'>('everyone');
 
   const flash = useCallback((kind: 'ok' | 'err', text: string) => {
     setBanner({ kind, text });
@@ -64,6 +75,8 @@ export default function GroupAdminScreen() {
       setMembers(active);
       setMyId(me?.id ?? '');
       setMyRole((chat.myRole as Role) ?? 'member');
+      setSlowMode(chat.slowModeSeconds ?? 0);
+      setSendPolicy((chat.sendPolicy as any) ?? 'everyone');
       if (chat.name) { setGroupName(chat.name); setSavedName(chat.name); }
     } catch (e: any) {
       flash('err', e?.message ?? 'Failed to load group');
@@ -90,6 +103,20 @@ export default function GroupAdminScreen() {
     } finally {
       setSavingName(false);
     }
+  };
+
+  const changeSlowMode = async (s: number) => {
+    const prev = slowMode;
+    setSlowMode(s);
+    try { await updateChat(chatId!, { slowModeSeconds: s }); flash('ok', s ? `Slow mode: ${s < 60 ? s + 's' : s / 60 + 'm'}` : 'Slow mode off'); }
+    catch (e: any) { setSlowMode(prev); flash('err', e?.message ?? 'Failed'); }
+  };
+
+  const changeSendPolicy = async (p: 'everyone' | 'admins') => {
+    const prev = sendPolicy;
+    setSendPolicy(p);
+    try { await updateChat(chatId!, { sendPolicy: p }); flash('ok', p === 'admins' ? 'Only admins can send' : 'Everyone can send'); }
+    catch (e: any) { setSendPolicy(prev); flash('err', e?.message ?? 'Failed'); }
   };
 
   const changeRole = async (m: ChatMember, role: 'admin' | 'member') => {
@@ -178,6 +205,42 @@ export default function GroupAdminScreen() {
             </TouchableOpacity>
           )}
         </View>
+
+        {/* Group Controls (admin only) */}
+        {isAdmin && (
+          <View style={s.section}>
+            <Text style={s.sectionTitle}>Group Controls</Text>
+
+            <Text style={s.ctrlLabel}>Who can send messages</Text>
+            <View style={s.policyRow}>
+              {(['everyone', 'admins'] as const).map(p => (
+                <TouchableOpacity
+                  key={p}
+                  style={[s.policyBtn, sendPolicy === p && s.policyBtnActive]}
+                  onPress={() => changeSendPolicy(p)}
+                >
+                  <Text style={[s.policyTxt, sendPolicy === p && s.policyTxtActive]}>
+                    {p === 'everyone' ? 'Everyone' : 'Admins only'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={[s.ctrlLabel, { marginTop: 14 }]}>Slow mode (between messages)</Text>
+            <View style={s.slowRow}>
+              {SLOW_OPTS.map(opt => (
+                <TouchableOpacity
+                  key={opt.value}
+                  style={[s.slowChip, slowMode === opt.value && s.slowChipActive]}
+                  onPress={() => changeSlowMode(opt.value)}
+                >
+                  <Text style={[s.slowTxt, slowMode === opt.value && s.slowTxtActive]}>{opt.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={s.hint}>Admins are exempt from these limits.</Text>
+          </View>
+        )}
 
         {/* Members */}
         <View style={s.section}>
@@ -285,6 +348,17 @@ const s = StyleSheet.create({
   roleBadgeText: { fontSize: 11, fontWeight: '700', marginTop: 2 },
   removeBtn: { padding: 6 },
 
+  ctrlLabel: { color: Aurora.textDim, fontSize: 13, marginBottom: 8 },
+  policyRow: { flexDirection: 'row', gap: 8 },
+  policyBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center', backgroundColor: Aurora.surface, borderWidth: 1, borderColor: Aurora.border },
+  policyBtnActive: { backgroundColor: Aurora.primary, borderColor: Aurora.primary },
+  policyTxt: { color: Aurora.textDim, fontSize: 13, fontWeight: '600' },
+  policyTxtActive: { color: '#04130D', fontWeight: '800' },
+  slowRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  slowChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, backgroundColor: Aurora.surface, borderWidth: 1, borderColor: Aurora.border },
+  slowChipActive: { backgroundColor: 'rgba(6,182,212,0.15)', borderColor: Aurora.accent },
+  slowTxt: { color: Aurora.textDim, fontSize: 13, fontWeight: '600' },
+  slowTxtActive: { color: Aurora.accent },
   roleMenu: { flexDirection: 'row', backgroundColor: Aurora.surface, borderRadius: 10, marginBottom: 8, padding: 6, gap: 4 },
   roleOption: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 8, borderRadius: 8 },
   roleOptionActive: { backgroundColor: 'rgba(6,182,212,0.12)' },

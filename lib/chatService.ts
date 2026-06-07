@@ -83,6 +83,9 @@ export interface ChatDetail extends ChatSummary {
   members:              ChatMember[];
   // Chat-level disappearing-messages timer. null = off.
   disappearingSeconds?: number | null;
+  // Group admin controls.
+  slowModeSeconds?:     number;
+  sendPolicy?:          'everyone' | 'admins';
 }
 
 export interface Message {
@@ -666,7 +669,7 @@ export async function exportMyData(): Promise<string> {
 // ─── Group admin (Day 14) ───────────────────────────────────────────
 export async function updateChat(
   chatId: string,
-  patch: { name?: string; photoURL?: string; disappearingSeconds?: number | null },
+  patch: { name?: string; photoURL?: string; disappearingSeconds?: number | null; slowModeSeconds?: number; sendPolicy?: 'everyone' | 'admins' },
 ): Promise<void> {
   await api(`/chats/${encodeURIComponent(chatId)}`, { method: 'PATCH', json: patch });
 }

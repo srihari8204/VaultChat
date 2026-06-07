@@ -93,7 +93,7 @@ function publicMessage(row) {
 
 async function loadChatMembership(req, chatId) {
   const r = await req.dbQuery(
-    `SELECT cm.*, c.type AS chat_type
+    `SELECT cm.*, c.type AS chat_type, c.send_policy, c.slow_mode_seconds
      FROM chat_members cm
      JOIN chats c ON c.id = cm.chat_id
      WHERE cm.chat_id = $1 AND cm.user_id = $2`,
@@ -565,6 +565,8 @@ router.get('/:id', async (req, res) => {
       lastMessageId:        chat.last_message_id,
       lastMessageAt:        chat.last_message_at,
       disappearingSeconds:  chat.disappearing_seconds ?? null,
+      slowModeSeconds:      chat.slow_mode_seconds ?? 0,
+      sendPolicy:           chat.send_policy ?? 'everyone',
       members:              membersR.rows.map(publicMember),
       myRole:               mem.role,
       myLastReadId:         mem.last_read_message_id,
@@ -583,6 +585,29 @@ router.post('/:id/messages', async (req, res) => {
   try {
     const mem = await loadChatMembership(req, req.params.id);
     if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member of this chat' });
+
+    // Group admin controls — send policy + slow mode (non-admins only).
+    const memberIsAdmin = mem.role === 'admin' || mem.role === 'owner';
+    if (!memberIsAdmin) {
+      if (mem.send_policy === 'admins') {
+        return res.status(403).json({ error: 'Only admins can send messages in this group' });
+      }
+      const slow = parseInt(mem.slow_mode_seconds, 10) || 0;
+      if (slow > 0) {
+        const last = await req.dbQuery(
+          `SELECT created_at FROM messages
+            WHERE chat_id = $1 AND sender_id = $2 AND deleted_at IS NULL
+            ORDER BY id DESC LIMIT 1`,
+          [req.params.id, req.user.id]
+        );
+        if (last.rows[0]) {
+          const elapsed = (Date.now() - new Date(last.rows[0].created_at).getTime()) / 1000;
+          if (elapsed < slow) {
+            return res.status(429).json({ error: 'Slow mode is on', retryAfter: Math.ceil(slow - elapsed) });
+          }
+        }
+      }
+    }
 
     const b = req.body || {};
     let   content   = b.content;
@@ -1102,6 +1127,23 @@ router.patch('/:id', async (req, res) => {
         params.push(Math.min(Math.round(s), 365 * 24 * 60 * 60));
       }
       sets.push(`disappearing_seconds = $${params.length}`);
+    }
+
+    // Slow mode (group admin only): seconds between non-admin messages.
+    if (b.slowModeSeconds !== undefined) {
+      if (mem.chat_type !== 'group') return res.status(400).json({ error: 'Slow mode is group-only' });
+      if (!isAdmin) return res.status(403).json({ error: 'Admin only' });
+      let sm = parseInt(b.slowModeSeconds, 10);
+      if (!Number.isFinite(sm) || sm < 0) sm = 0;
+      params.push(Math.min(sm, 24 * 60 * 60));
+      sets.push(`slow_mode_seconds = $${params.length}`);
+    }
+    // Send policy (group admin only): 'everyone' | 'admins'.
+    if (typeof b.sendPolicy === 'string') {
+      if (mem.chat_type !== 'group') return res.status(400).json({ error: 'Send policy is group-only' });
+      if (!isAdmin) return res.status(403).json({ error: 'Admin only' });
+      params.push(b.sendPolicy === 'admins' ? 'admins' : 'everyone');
+      sets.push(`send_policy = $${params.length}`);
     }
 
     if (sets.length === 0) return res.json({ ok: true, noop: true });
