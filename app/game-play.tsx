@@ -9,10 +9,11 @@ import {
 } from 'react-native';
 import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
 import { io, Socket } from 'socket.io-client';
-import auth from '@react-native-firebase/auth';
+import { getAccessToken } from '../lib/api';
 import { SERVER_URL } from '../constants/server';
 import { recordGameResult, ALL_GAMES, cryptoDiceRoll } from '../services/gameService';
-import { initGame, makeGameMove, checkGameWinner, getBotMove } from '../services/gameEngines';
+import { initGame, makeGameMove, checkGameWinner, getBotMove, type GameState } from '../services/gameEngines';
+import { GameBoard } from '../components/games/GameBoard';
 
 const DARK = '#0D0F14';
 const CARD = '#1A1D27';
@@ -26,11 +27,11 @@ const GOLD = '#F59E0B';
 
 export default function GamePlayScreen() {
   const router = useRouter();
-  const { roomId, gameType, bet, opponentUid, opponentName, yourTurn: initialTurn } = useLocalSearchParams<{
-    roomId: string; gameType: string; bet: string; opponentUid: string; opponentName: string; yourTurn: string;
+  const { roomId, gameType, bet, opponentUid, opponentName, yourTurn: initialTurn, myUid } = useLocalSearchParams<{
+    roomId: string; gameType: string; bet: string; opponentUid: string; opponentName: string; yourTurn: string; myUid: string;
   }>();
 
-  const uid = auth().currentUser?.uid ?? '';
+  const uid = myUid ?? '';
   const isBot = opponentUid === 'bot';
   const betAmount = parseInt(bet ?? '0', 10);
   const game = ALL_GAMES.find(g => g.id === gameType);
@@ -45,6 +46,14 @@ export default function GamePlayScreen() {
   const [connected, setConnected] = useState(isBot);
   const [chatMsgs, setChatMsgs] = useState<{ from: string; text: string }[]>([]);
 
+  // Some game engines (chess/ludo/rummy…) return a board-shaped state with no
+  // score/moves. Default them so the generic screen never crashes on render.
+  const score = gameState?.score ?? { me: 0, opp: 0 };
+  const moves: any[] = Array.isArray(gameState?.moves) ? gameState.moves : [];
+  // This generic screen only implements the dice game; other engines (chess,
+  // ludo…) have no board UI yet, so don't offer a dice action that they reject.
+  const isDiceGame = (gameType ?? 'vaultdice') === 'vaultdice';
+
   const socketRef = useRef<Socket | null>(null);
 
   // Socket connection for multiplayer
@@ -52,18 +61,20 @@ export default function GamePlayScreen() {
     if (isBot) return;
     let sock: Socket;
     (async () => {
-      const token = await auth().currentUser?.getIdToken();
+      const token = await getAccessToken();
       sock = io(SERVER_URL, { auth: { token }, transports: ['websocket'] });
       socketRef.current = sock;
-      sock.emit('join_chat', { chatId: roomId, uid }); // reuse chat room mechanism
+      // Re-join the game room (this is a fresh socket, not the lobby's).
+      sock.emit('game_rejoin', { roomId });
 
       sock.on('connect', () => setConnected(true));
+      sock.on('game_rejoined', () => setConnected(true));
 
       sock.on('game_move', ({ uid: moveUid, move }: any) => {
         if (moveUid !== uid) {
           setGameState((prev: any) => ({
             ...prev,
-            moves: [...prev.moves, { uid: moveUid, move, ts: Date.now() }],
+            moves: [...(prev.moves ?? []), { uid: moveUid, move, ts: Date.now() }],
           }));
           setMyTurn(true);
         }
@@ -85,43 +96,69 @@ export default function GamePlayScreen() {
     return () => { sock?.disconnect(); };
   }, [isBot, roomId, uid]);
 
+  // Which seat (if any) the bot should play next. Normally it's whoever's
+  // state.turn isn't me. Durak is role-based (defender acts in the defend
+  // phase), so it needs a special case. Returns null when it's MY move.
+  const botActorFor = (st: GameState): string | null => {
+    if (st.finished) return null;
+    if (gameType === 'durak') {
+      const defender = st.data?.defender;
+      if (st.phase === 'defend' && defender && defender !== uid) return defender;
+      if (st.phase === 'attack' && st.turn !== uid) return st.turn;
+      return null;
+    }
+    return st.turn !== uid ? st.turn : null;
+  };
+
   const makeMove = (move: any) => {
+    if (gameOver) return;
     if (!myTurn && !isBot) return;
 
-    // Apply move through game engine
     const result = makeGameMove(gameType ?? 'vaultdice', gameState, move, uid);
-    if (!result.valid) {
-      Alert.alert('Invalid Move', result.message ?? 'That move is not allowed');
-      return;
-    }
+    if (!result.valid) return; // invalid tap — ignore silently
     setGameState(result.state);
 
-    // Check for winner
     const winCheck = checkGameWinner(gameType ?? 'vaultdice', result.state);
     if (winCheck.winner || winCheck.draw) {
-      endGame(winCheck.draw ? uid : winCheck.winner!, winCheck.draw ? 'Draw' : 'Checkmate');
+      endGame(winCheck.draw ? uid : winCheck.winner!, winCheck.draw ? 'Draw' : 'Game over');
       return;
     }
 
-    if (isBot) {
-      setMyTurn(false);
-      setTimeout(() => {
-        const botMove = getBotMove(gameType ?? 'vaultdice', result.state, 'easy');
-        const botResult = makeGameMove(gameType ?? 'vaultdice', result.state, botMove, opponentUid ?? 'bot');
-        if (botResult.valid) {
-          setGameState(botResult.state);
-          const botWin = checkGameWinner(gameType ?? 'vaultdice', botResult.state);
-          if (botWin.winner || botWin.draw) {
-            endGame(botWin.draw ? uid : botWin.winner!, botWin.draw ? 'Draw' : 'Game over');
-            return;
-          }
-        }
-        setMyTurn(true);
-      }, 800 + Math.random() * 1200);
-    } else {
+    if (!isBot) {
+      setMyTurn(result.state.turn === uid);
       socketRef.current?.emit('game_move', { roomId, uid, move });
-      setMyTurn(false);
+      return;
     }
+    const actor = botActorFor(result.state);
+    setMyTurn(actor === null);
+    if (actor) runBotTurn(result.state);
+  };
+
+  // Drive the bot through its full turn (possibly several engine moves, across
+  // multiple seats / roles) until control returns to the player.
+  const runBotTurn = (start: GameState) => {
+    setTimeout(() => {
+      let s = start;
+      let guard = 0;
+      let actor: string | null;
+      while ((actor = botActorFor(s)) && guard++ < 80) {
+        const botMove = getBotMove(gameType ?? 'vaultdice', s, 'easy');
+        const r = makeGameMove(gameType ?? 'vaultdice', s, botMove, actor);
+        if (!r.valid) break;
+        s = r.state;
+      }
+      setGameState(s);
+      const w = checkGameWinner(gameType ?? 'vaultdice', s);
+      if (w.winner || w.draw) { endGame(w.draw ? uid : w.winner!, w.draw ? 'Draw' : 'Game over'); return; }
+      setMyTurn(botActorFor(s) === null);
+    }, 700 + Math.random() * 600);
+  };
+
+  // Dry-run a candidate move against the current state (engine clones state,
+  // so this never mutates). Boards use it to highlight legal destinations.
+  const dryRun = (move: any): boolean => {
+    try { return makeGameMove(gameType ?? 'vaultdice', gameState, move, uid).valid; }
+    catch { return false; }
   };
 
   const endGame = (winnerId: string, reason = 'Game over') => {
@@ -151,13 +188,13 @@ export default function GamePlayScreen() {
     if (isBot) {
       setTimeout(() => {
         const botRoll = cryptoDiceRoll();
-        const myTotal = gameState.score.me + roll;
-        const oppTotal = gameState.score.opp + botRoll.roll;
+        const myTotal = (gameState.score?.me ?? 0) + roll;
+        const oppTotal = (gameState.score?.opp ?? 0) + botRoll.roll;
 
         setGameState((prev: any) => ({
           ...prev,
-          score: { me: prev.score.me + roll, opp: prev.score.opp + botRoll.roll },
-          moves: [...prev.moves, { uid: 'bot', move: { type: 'dice', value: botRoll.roll }, ts: Date.now() }],
+          score: { me: (prev.score?.me ?? 0) + roll, opp: (prev.score?.opp ?? 0) + botRoll.roll },
+          moves: [...(prev.moves ?? []), { uid: 'bot', move: { type: 'dice', value: botRoll.roll }, ts: Date.now() }],
         }));
 
         // End game at 100 points
@@ -203,19 +240,19 @@ export default function GamePlayScreen() {
         <View style={s.scoreRow}>
           <View style={[s.scoreCard, myTurn && s.scoreCardActive]}>
             <Text style={s.scoreName}>You</Text>
-            <Text style={s.scoreVal}>{gameState.score.me}</Text>
+            <Text style={s.scoreVal}>{score.me}</Text>
           </View>
           <Text style={s.vsText}>VS</Text>
           <View style={[s.scoreCard, !myTurn && s.scoreCardActive]}>
             <Text style={s.scoreName}>{opponentName ?? 'Bot'}</Text>
-            <Text style={s.scoreVal}>{gameState.score.opp}</Text>
+            <Text style={s.scoreVal}>{score.opp}</Text>
           </View>
         </View>
 
         {/* Move history */}
         <View style={s.movesCard}>
-          <Text style={s.movesTitle}>Moves ({gameState.moves.length})</Text>
-          {gameState.moves.slice(-6).map((m: any, i: number) => (
+          <Text style={s.movesTitle}>Moves ({moves.length})</Text>
+          {moves.slice(-6).map((m: any, i: number) => (
             <View key={i} style={s.moveRow}>
               <Text style={s.moveFrom}>{m.uid === uid ? 'You' : opponentName ?? 'Bot'}</Text>
               <Text style={s.moveVal}>{m.move?.type === 'dice' ? `\uD83C\uDFB2 ${m.move.value}` : JSON.stringify(m.move)}</Text>
@@ -223,12 +260,19 @@ export default function GamePlayScreen() {
           ))}
         </View>
 
-        {/* Action button (dice roll for default game) */}
-        {!gameOver && (
+        {/* Action button (dice roll) \u2014 only the dice game is playable here. */}
+        {!gameOver && isDiceGame && (
           <TouchableOpacity style={[s.actionBtn, !myTurn && s.actionBtnDisabled]} onPress={rollDice} disabled={!myTurn} activeOpacity={0.8}>
             <Text style={s.actionBtnIcon}>{'\uD83C\uDFB2'}</Text>
             <Text style={s.actionBtnTxt}>{myTurn ? 'Roll Dice' : 'Waiting for opponent...'}</Text>
           </TouchableOpacity>
+        )}
+
+        {/* Board games render their engine-backed board. */}
+        {!gameOver && !isDiceGame && (
+          <View style={{ alignItems: 'center', marginVertical: 8 }}>
+            <GameBoard state={gameState} myId={uid} myTurn={myTurn} onMove={makeMove} validate={dryRun} />
+          </View>
         )}
 
         {/* Game over */}

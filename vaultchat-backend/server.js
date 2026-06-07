@@ -30,6 +30,7 @@ const { Server } = require('socket.io');
 const cors       = require('cors');
 
 const db      = require('./db');
+const gameStore = require('./gameStore');
 const redis   = require('./redis');
 const jwtUtil = require('./jwt');
 
@@ -56,6 +57,7 @@ const chatsRouter = require('./routes/chats');
 app.use('/chats',    chatsRouter);
 app.use('/stories',  require('./routes/stories'));
 app.use('/channels', require('./routes/channels'));
+app.use('/games',    require('./routes/games'));
 
 // Wire the chats router so its REST writes broadcast over sockets.
 chatsRouter.setBroadcasters({
@@ -552,115 +554,165 @@ io.on('connection', (socket) => {
   const gameRooms      = io.gameRooms      || (io.gameRooms      = new Map());
   const gameMatchQueue = io.gameMatchQueue || (io.gameMatchQueue = new Map());
 
-  socket.on('game_join_lobby', ({ uid, name }) => {
-    if (!uid) return;
-    const existing = gamePlayers.get(uid);
-    gamePlayers.set(uid, {
-      uid, name,
+  socket.on('game_join_lobby', async ({ name }) => {
+    const me = socket.data.uid;
+    if (!me) return;
+    let profile;
+    try { profile = await gameStore.loadProfile(me); }
+    catch (e) { console.error('[game_join_lobby]', e.message); profile = { coins: 1000, wins: 0 }; }
+    gamePlayers.set(me, {
+      uid: me,
+      name: name || socket.data.email || 'Player',
       socketId: socket.id,
-      coins: existing?.coins ?? 1000,
-      wins: existing?.wins ?? 0,
+      coins: profile.coins,
+      wins: profile.wins,
       inGame: false,
     });
     socket.join('game_lobby');
-    socket.emit('game_coins', { coins: gamePlayers.get(uid).coins });
+    socket.emit('game_coins', { coins: profile.coins });
   });
 
   socket.on('game_leave_lobby', () => socket.leave('game_lobby'));
 
-  socket.on('game_quick_match', ({ uid, gameType, bet }) => {
-    const player = gamePlayers.get(uid);
+  socket.on('game_quick_match', async ({ gameType, bet }) => {
+    const me = socket.data.uid;
+    const player = gamePlayers.get(me);
     if (!player) return;
-    if (player.coins < bet) {
+    const wager = Math.max(0, parseInt(bet, 10) || 0);
+    if (player.coins < wager) {
       socket.emit('game_error', { message: 'Not enough coins' });
       return;
     }
-    const waitKey = `${gameType}_${bet}`;
+    const waitKey = `${gameType}_${wager}`;
     const waiting = gameMatchQueue.get(waitKey);
-    if (waiting && waiting.uid !== uid) {
+    if (waiting && waiting.uid !== me) {
       gameMatchQueue.delete(waitKey);
       const roomId = `GAME-${Date.now().toString(36).toUpperCase()}`;
       const room = {
-        id: roomId, gameType, bet,
+        id: roomId, gameType, bet: wager,
         players: [
           { uid: waiting.uid, name: waiting.name, socketId: waiting.socketId },
-          { uid, name: player.name, socketId: socket.id },
+          { uid: me, name: player.name, socketId: socket.id },
         ],
         state: {}, turn: waiting.uid, startedAt: Date.now(),
       };
       gameRooms.set(roomId, room);
-      gamePlayers.get(waiting.uid).coins -= bet;
-      player.coins -= bet;
-      gamePlayers.get(waiting.uid).inGame = true;
-      player.inGame = true;
+
+      // Persist: log the match + deduct the wager from both balances.
+      try {
+        await gameStore.recordMatch(room);
+        const aCoins = await gameStore.adjustCoins(waiting.uid, -wager);
+        const bCoins = await gameStore.adjustCoins(me, -wager);
+        const wp = gamePlayers.get(waiting.uid); if (wp) { wp.coins = aCoins; wp.inGame = true; }
+        player.coins = bCoins; player.inGame = true;
+      } catch (e) { console.error('[game_quick_match persist]', e.message); }
+
       const waitingSocket = io.sockets.sockets.get(waiting.socketId);
       if (waitingSocket) {
+        waitingSocket.data.gameRoomId = roomId;
         waitingSocket.emit('game_matched', {
-          roomId, gameType, bet,
-          opponent: { uid, name: player.name }, yourTurn: true,
+          roomId, gameType, bet: wager,
+          opponent: { uid: me, name: player.name }, yourTurn: true,
         });
+        waitingSocket.emit('game_coins', { coins: gamePlayers.get(waiting.uid)?.coins ?? 0 });
         waitingSocket.join(`game:${roomId}`);
       }
+      socket.data.gameRoomId = roomId;
       socket.emit('game_matched', {
-        roomId, gameType, bet,
+        roomId, gameType, bet: wager,
         opponent: { uid: waiting.uid, name: waiting.name }, yourTurn: false,
       });
+      socket.emit('game_coins', { coins: player.coins });
       socket.join(`game:${roomId}`);
     } else {
       gameMatchQueue.set(waitKey, {
-        uid, name: player.name, socketId: socket.id, gameType, bet,
+        uid: me, name: player.name, socketId: socket.id, gameType, bet: wager,
       });
-      socket.emit('game_waiting', { gameType, bet });
+      socket.emit('game_waiting', { gameType, bet: wager });
     }
   });
 
-  socket.on('game_cancel_match', ({ uid, gameType, bet }) => {
-    const waitKey = `${gameType}_${bet}`;
+  socket.on('game_cancel_match', ({ gameType, bet }) => {
+    const me = socket.data.uid;
+    const waitKey = `${gameType}_${Math.max(0, parseInt(bet, 10) || 0)}`;
     const waiting = gameMatchQueue.get(waitKey);
-    if (waiting && waiting.uid === uid) gameMatchQueue.delete(waitKey);
+    if (waiting && waiting.uid === me) gameMatchQueue.delete(waitKey);
     socket.emit('game_match_cancelled');
   });
 
-  socket.on('game_move', ({ roomId, uid, move }) => {
+  // game-play opens its own socket; it must re-join the game room (the
+  // matchmaking socket from the lobby is a different connection). This fixes
+  // the prior bug where game-play joined `chat:<room>` and never received the
+  // events broadcast to `game:<room>`.
+  socket.on('game_rejoin', ({ roomId }) => {
+    const me = socket.data.uid;
     const room = gameRooms.get(roomId);
-    if (!room) return;
-    socket.to(`game:${roomId}`).emit('game_move', { uid, move });
-    room.turn = room.players.find(p => p.uid !== uid)?.uid ?? uid;
+    if (!room) { socket.emit('game_error', { message: 'Match no longer active' }); return; }
+    const p = room.players.find(pl => pl.uid === me);
+    if (!p) return;
+    p.socketId = socket.id;
+    socket.data.gameRoomId = roomId;
+    socket.join(`game:${roomId}`);
+    socket.emit('game_rejoined', { roomId, yourTurn: room.turn === me });
   });
 
-  socket.on('game_end', ({ roomId, winnerId, reason }) => {
+  socket.on('game_move', ({ roomId, move }) => {
+    const me = socket.data.uid;
     const room = gameRooms.get(roomId);
     if (!room) return;
-    const totalPot = room.bet * 2;
-    const winner = gamePlayers.get(winnerId);
-    if (winner) {
-      winner.coins += totalPot;
-      winner.wins++;
-      winner.inGame = false;
-    }
-    const loserId = room.players.find(p => p.uid !== winnerId)?.uid;
-    if (loserId) {
-      const loser = gamePlayers.get(loserId);
-      if (loser) loser.inGame = false;
-    }
-    io.to(`game:${roomId}`).emit('game_ended', { winnerId, totalPot, reason });
+    socket.to(`game:${roomId}`).emit('game_move', { uid: me, move });
+    room.turn = room.players.find(p => p.uid !== me)?.uid ?? me;
+  });
+
+  // Settle a finished room: pay the winner the pot, persist, notify, clean up.
+  async function settleGame(roomId, winnerId, reason) {
+    const room = gameRooms.get(roomId);
+    if (!room) return;
+    gameRooms.delete(roomId);
+    const pot = room.bet * 2;
+    const loserId = room.players.find(p => p.uid !== winnerId)?.uid ?? null;
+    let winnerCoins = null;
+    try {
+      const r = await gameStore.finishMatch(roomId, winnerId, loserId, pot);
+      winnerCoins = r.winnerCoins;
+    } catch (e) { console.error('[settleGame persist]', e.message); }
+    const wp = winnerId && gamePlayers.get(winnerId);
+    if (wp) { wp.coins = winnerCoins ?? (wp.coins + pot); wp.wins++; wp.inGame = false; }
+    const lp = loserId && gamePlayers.get(loserId);
+    if (lp) lp.inGame = false;
+    io.to(`game:${roomId}`).emit('game_ended', { winnerId, totalPot: pot, reason });
     room.players.forEach(p => {
       const s = io.sockets.sockets.get(p.socketId);
       if (s) {
         s.leave(`game:${roomId}`);
+        delete s.data.gameRoomId;
         s.emit('game_coins', { coins: gamePlayers.get(p.uid)?.coins ?? 0 });
       }
     });
-    gameRooms.delete(roomId);
+  }
+
+  socket.on('game_end', ({ roomId, winnerId, reason }) => {
+    settleGame(roomId, winnerId, reason).catch(e => console.error('[game_end]', e.message));
   });
 
-  socket.on('game_chat', ({ roomId, uid, text }) => {
-    if (roomId) socket.to(`game:${roomId}`).emit('game_chat', { uid, text });
+  socket.on('game_chat', ({ roomId, text }) => {
+    if (roomId) socket.to(`game:${roomId}`).emit('game_chat', { uid: socket.data.uid, text });
   });
 
   // ── Disconnect cleanup ────────────────────────────────────
   socket.on('disconnect', () => {
     untrackSocket(socket);
+    // Drop out of any pending matchmaking queue.
+    for (const [k, w] of gameMatchQueue) if (w.socketId === socket.id) gameMatchQueue.delete(k);
+    // Forfeit any active game this socket was in — the remaining player wins.
+    const roomId = socket.data.gameRoomId;
+    if (roomId) {
+      const room = gameRooms.get(roomId);
+      if (room) {
+        const winnerId = room.players.find(p => p.uid !== socket.data.uid)?.uid ?? null;
+        settleGame(roomId, winnerId, 'opponent_left').catch(e => console.error('[disconnect forfeit]', e.message));
+      }
+    }
   });
 });
 

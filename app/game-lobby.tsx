@@ -9,10 +9,12 @@ import {
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { io, Socket } from 'socket.io-client';
-import auth from '@react-native-firebase/auth';
 import { SERVER_URL } from '../constants/server';
+import { getAccessToken } from '../lib/api';
+import { getCurrentUserAsync } from './(constants)/authService';
+import { getGameProfile } from '../lib/chatService';
 import {
-  ALL_GAMES, GAME_REGIONS, getCoins, getGameStats, GameStats, GameType, ACHIEVEMENTS, setCoins,
+  ALL_GAMES, GAME_REGIONS, getGameStats, GameStats, GameType, ACHIEVEMENTS, setCoins,
 } from '../services/gameService';
 
 const DARK = '#0D0F14';
@@ -31,8 +33,8 @@ type PlayMode = 'friends' | 'online' | 'bot';
 
 export default function GameLobbyScreen() {
   const router = useRouter();
-  const uid = auth().currentUser?.uid ?? '';
-  const myName = auth().currentUser?.displayName ?? 'Player';
+  const [uid, setUid] = useState('');
+  const [myName, setMyName] = useState('Player');
 
   const [coins, setCoinsState] = useState(1000);
   const [stats, setStats] = useState<GameStats | null>(null);
@@ -45,21 +47,31 @@ export default function GameLobbyScreen() {
 
   const socketRef = useRef<Socket | null>(null);
 
-  // Load coins & stats
+  // Load coin balance (backend-authoritative) + local stats
   useEffect(() => {
-    getCoins().then(setCoinsState);
+    getGameProfile().then(p => setCoinsState(p.coins)).catch(() => {});
     getGameStats().then(setStats);
   }, []);
 
-  // Socket connection for matchmaking
+  // Identity + socket connection for matchmaking. Auth uses our JWT (not a
+  // Firebase token); the server identifies the player from it.
   useEffect(() => {
-    let sock: Socket;
+    let sock: Socket | null = null;
+    let cancelled = false;
     (async () => {
-      const token = await auth().currentUser?.getIdToken();
+      const me = await getCurrentUserAsync();
+      const myId = me?.id ?? '';
+      const myNm = me?.name ?? 'Player';
+      if (cancelled) return;
+      setUid(myId);
+      setMyName(myNm);
+
+      const token = await getAccessToken();
+      if (cancelled) return;
       sock = io(SERVER_URL, { auth: { token }, transports: ['websocket'] });
       socketRef.current = sock;
 
-      sock.emit('game_join_lobby', { uid, name: myName });
+      sock.emit('game_join_lobby', { name: myNm });
 
       sock.on('game_coins', ({ coins: c }: any) => {
         setCoinsState(c);
@@ -69,26 +81,20 @@ export default function GameLobbyScreen() {
       sock.on('game_matched', ({ roomId, gameType, bet: b, opponent, yourTurn }: any) => {
         setSearching(false);
         Alert.alert('Match Found!', `Playing ${gameType} vs ${opponent.name} for ${b} coins`, [
-          { text: 'Play', onPress: () => router.push({ pathname: `/game-play` as any, params: { roomId, gameType, bet: String(b), opponentUid: opponent.uid, opponentName: opponent.name, yourTurn: String(yourTurn) } }) },
+          { text: 'Play', onPress: () => router.push({ pathname: `/game-play` as any, params: { roomId, gameType, bet: String(b), opponentUid: opponent.uid, opponentName: opponent.name, yourTurn: String(yourTurn), myUid: myId } }) },
         ]);
       });
 
-      sock.on('game_waiting', () => {
-        // Still searching
-      });
-
-      sock.on('game_match_cancelled', () => {
-        setSearching(false);
-      });
-
+      sock.on('game_waiting', () => { /* still searching */ });
+      sock.on('game_match_cancelled', () => setSearching(false));
       sock.on('game_error', ({ message }: any) => {
         setSearching(false);
         Alert.alert('Error', message);
       });
     })();
 
-    return () => { sock?.disconnect(); };
-  }, [uid, myName]);
+    return () => { cancelled = true; sock?.disconnect(); };
+  }, []);
 
   const startQuickMatch = () => {
     if (!selectedGame) { Alert.alert('Select a game first'); return; }
@@ -104,7 +110,7 @@ export default function GameLobbyScreen() {
 
   const startBotGame = () => {
     if (!selectedGame) { Alert.alert('Select a game first'); return; }
-    router.push({ pathname: `/game-play` as any, params: { roomId: `BOT-${Date.now()}`, gameType: selectedGame.id, bet: '0', opponentUid: 'bot', opponentName: 'Bot (Easy)', yourTurn: 'true' } });
+    router.push({ pathname: `/game-play` as any, params: { roomId: `BOT-${Date.now()}`, gameType: selectedGame.id, bet: '0', opponentUid: 'bot', opponentName: 'Bot (Easy)', yourTurn: 'true', myUid: uid } });
   };
 
   const filteredGames = activeRegion ? ALL_GAMES.filter(g => g.region === activeRegion) : ALL_GAMES;

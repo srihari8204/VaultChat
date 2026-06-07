@@ -204,6 +204,30 @@ export async function createGroupChat(
   });
 }
 
+// ─── Gaming (durable layer; realtime is Socket.IO) ──────────────────
+export interface GameProfile {
+  coins:       number;
+  wins:        number;
+  losses:      number;
+  gamesPlayed: number;
+}
+export interface GameHistoryItem {
+  id:           string;
+  gameType:     string;
+  bet:          number;
+  opponentId:   string;
+  opponentName: string | null;
+  result:       'win' | 'loss' | 'draw' | 'active' | 'abandoned';
+  startedAt:    string;
+  endedAt:      string | null;
+}
+export async function getGameProfile(): Promise<GameProfile> {
+  return api<GameProfile>('/games/profile');
+}
+export async function getGameHistory(): Promise<GameHistoryItem[]> {
+  return api<GameHistoryItem[]>('/games/history');
+}
+
 // ─── Emergency SOS ──────────────────────────────────────────────────
 export interface SOSHistoryItem {
   id:               number;
