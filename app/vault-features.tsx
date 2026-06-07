@@ -19,8 +19,7 @@ import {
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
-import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
+import { createSyncCode } from '../lib/chatService';
 
 // ─────────────────────────────────────────────────────────────────
 // Types
@@ -91,7 +90,6 @@ function generateCode(): string {
 
 export default function VaultFeaturesScreen() {
   const router = useRouter();
-  const uid    = auth().currentUser?.uid || '';
 
   const [settings,      setSettings]      = useState<VaultSettings>(DEFAULT_SETTINGS);
 
@@ -141,42 +139,24 @@ export default function VaultFeaturesScreen() {
   const saveSetting = async (key: keyof VaultSettings, value: any) => {
     const updated = { ...settings, [key]: value };
     setSettings(updated);
+    // Device-local preferences (no server enforcement layer).
     await SecureStore.setItemAsync(
       'vault_features_settings',
       JSON.stringify(updated)
     );
-    // Sync to Firestore so backend can enforce
-    await firestore()
-      .collection('users').doc(uid)
-      .update({ [`vaultSettings.${key}`]: value })
-      .catch(() => {});
   };
 
   // ── Generate temp chat code ───────────────────────────────────
   const handleGenerateCode = async () => {
     setGeneratingCode(true);
     try {
-      const code   = generateCode();
-      const expiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h from now
-      const expiryStr = expiry.toISOString();
+      // Use the real mutual-consent sync-code backend (5-min, single-use).
+      // The recipient enters it under "Add Contact → Enter Their Code".
+      const { code } = await createSyncCode();
+      const expiryStr = new Date(Date.now() + 5 * 60 * 1000).toISOString();
 
-      // Save locally
       await SecureStore.setItemAsync('vault_chat_code', code);
       await SecureStore.setItemAsync('vault_chat_code_expiry', expiryStr);
-
-      // Save to Firestore so recipient can validate
-      await firestore()
-        .collection('chatCodes')
-        .doc(code.replace('-', ''))
-        .set({
-          code,
-          creatorUid: uid,
-          createdAt:  firestore.FieldValue.serverTimestamp(),
-          expiresAt:  firestore.Timestamp.fromDate(expiry),
-          used:       false,
-          uses:       0,
-          maxUses:    1, // single use
-        });
 
       setChatCode(code);
       setCodeExpiry(expiryStr);
@@ -199,7 +179,7 @@ export default function VaultFeaturesScreen() {
     if (!chatCode) return;
     try {
       await Share.share({
-        message: `Join me on VaultChat — use this secure invite code:\n\n${chatCode}\n\nExpires in 24 hours. Download VaultChat to use it.`,
+        message: `Join me on VaultChat — use this secure invite code:\n\n${chatCode}\n\nExpires in 5 minutes. Enter it under Add Contact → Enter Their Code.`,
         title:   'VaultChat Secure Invite',
       });
     } catch {}
@@ -211,13 +191,6 @@ export default function VaultFeaturesScreen() {
       {
         text: 'Revoke', style: 'destructive',
         onPress: async () => {
-          if (chatCode) {
-            await firestore()
-              .collection('chatCodes')
-              .doc(chatCode.replace('-', ''))
-              .update({ used: true, revokedAt: firestore.FieldValue.serverTimestamp() })
-              .catch(() => {});
-          }
           await SecureStore.deleteItemAsync('vault_chat_code');
           await SecureStore.deleteItemAsync('vault_chat_code_expiry');
           setChatCode(null);
