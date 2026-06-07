@@ -56,7 +56,8 @@ app.use('/contacts', require('./routes/contacts'));
 const chatsRouter = require('./routes/chats');
 app.use('/chats',    chatsRouter);
 app.use('/stories',  require('./routes/stories'));
-app.use('/channels', require('./routes/channels'));
+const channelsRouter = require('./routes/channels');
+app.use('/channels', channelsRouter);
 app.use('/games',    require('./routes/games'));
 
 // Wire the chats router so its REST writes broadcast over sockets.
@@ -66,6 +67,10 @@ chatsRouter.setBroadcasters({
   newMessage: (chatId, payload) => fanOutToChat(chatId, 'new_message', payload, payload?.senderId ?? null),
   chatEvent:  (chatId, event, payload) => fanOutToChat(chatId, event, payload),
 });
+
+// Broadcast-channel realtime: a new post fans out to everyone in the room.
+channelsRouter.setBroadcaster((channelId, event, payload) =>
+  io.to(`channel:${channelId}`).emit(event, payload));
 
 // ─── Disappearing messages — periodic cleanup ──────────────────────
 // Hard-deletes rows whose expires_at <= NOW(). The lazy filter on
@@ -434,6 +439,14 @@ io.on('connection', (socket) => {
   socket.on('leave_chat', ({ chatId }) => {
     if (!chatId) return;
     socket.leave(`chat:${chatId}`);
+  });
+
+  // Broadcast channels — join/leave the room while viewing a channel.
+  socket.on('channel_join', ({ channelId }) => {
+    if (channelId) socket.join(`channel:${channelId}`);
+  });
+  socket.on('channel_leave', ({ channelId }) => {
+    if (channelId) socket.leave(`channel:${channelId}`);
   });
 
   socket.on('typing_start', ({ chatId, uid }) => {

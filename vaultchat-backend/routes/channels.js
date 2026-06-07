@@ -20,6 +20,10 @@ const db      = require('../db');
 const router = express.Router();
 router.use(jwtUtil.requireAuth);
 
+// Realtime fan-out — injected by server.js at boot (emits to `channel:<id>`).
+let broadcastChannel = (_channelId, _event, _payload) => {};
+function setBroadcaster(fn) { if (fn) broadcastChannel = fn; }
+
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous chars
 function genChannelCode() {
   const b = crypto.randomBytes(8);
@@ -182,7 +186,17 @@ router.post('/:id/posts', async (req, res) => {
       );
       return r.rows[0];
     });
-    res.json({ id: post.id, text: post.text, authorId: post.author_id, createdAt: post.created_at });
+
+    // Realtime: push the new post to every subscriber currently viewing.
+    const nameR = await db.query(
+      `SELECT COALESCE(NULLIF(name, ''), email) AS n FROM users WHERE id = $1`, [req.user.id]
+    );
+    const out = {
+      id: post.id, text: post.text, authorId: post.author_id,
+      authorName: nameR.rows[0]?.n ?? null, createdAt: post.created_at,
+    };
+    broadcastChannel(ch.id, 'channel_post', out);
+    res.json(out);
   } catch (err) {
     console.error('[channel posts POST]', err.message);
     res.status(500).json({ error: 'Failed to post' });
@@ -190,3 +204,4 @@ router.post('/:id/posts', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.setBroadcaster = setBroadcaster;

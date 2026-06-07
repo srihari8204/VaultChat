@@ -11,6 +11,7 @@ import {
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Aurora } from '../constants/theme';
+import { getSocket } from '../lib/socket';
 import {
   listChannels, createChannel, joinChannel, listChannelPosts, postToChannel,
   type Channel, type ChannelPost,
@@ -39,6 +40,27 @@ export default function BroadcastScreen() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Realtime: while viewing a channel, join its room and prepend live posts.
+  useEffect(() => {
+    if (!selected) return;
+    const channelId = selected.id;
+    let active = true;
+    let cleanup = () => {};
+    (async () => {
+      try {
+        const s = await getSocket();
+        if (!active) return;
+        s.emit('channel_join', { channelId });
+        const onPost = (p: ChannelPost) => {
+          setPosts(prev => prev.some(x => x.id === p.id) ? prev : [p, ...prev]);
+        };
+        s.on('channel_post', onPost);
+        cleanup = () => { s.off('channel_post', onPost); s.emit('channel_leave', { channelId }); };
+      } catch { /* realtime optional */ }
+    })();
+    return () => { active = false; cleanup(); };
+  }, [selected?.id]);
 
   const create = async () => {
     if (!name.trim()) return;
