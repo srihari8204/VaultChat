@@ -1,731 +1,251 @@
-// app/dark-web-guard.tsx
-// Dark Web Guard — monitors email for data breaches
-// Demo mode: uses realistic mock breach data
-// To enable real API: set HIBP_API_KEY below (from haveibeenpwned.com — $3.50/mo)
-// Everything else stays the same — just flip USE_REAL_API to true
+// app/dark-web-guard.tsx — Dark Web Guard (real, no Firebase).
+//
+// Password check: REAL and keyless — uses the Have I Been Pwned "Pwned
+// Passwords" range API with k-anonymity (only a 5-char SHA-1 prefix leaves the
+// device; the full password never does). Works out of the box.
+//
+// Email breach check: real HIBP breach API, which requires a paid api key. The
+// user pastes their key (stored in SecureStore); without one, that tab simply
+// asks for a key instead of showing fake data.
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet,
-  ScrollView, TextInput, Alert, ActivityIndicator,
-  Modal,
+  View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput, Alert, ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
-
-// ─────────────────────────────────────────────────────────────────
-// ⚙️  API CONFIG — flip this when you get a HIBP key
-// ─────────────────────────────────────────────────────────────────
-
-const USE_REAL_API  = false;                    // ← set true when ready
-const HIBP_API_KEY  = 'YOUR_HIBP_KEY_HERE';    // ← paste key here
-
-// ─────────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────────
+import * as Crypto from 'expo-crypto';
+import { Ionicons } from '@expo/vector-icons';
+import { Aurora } from '../constants/theme';
+import { getMyProfile } from '../lib/chatService';
 
 interface Breach {
-  name:          string;   // e.g. "Adobe"
-  domain:        string;   // e.g. "adobe.com"
-  breachDate:    string;   // e.g. "2013-10-04"
-  pwnCount:      number;   // accounts exposed
-  dataClasses:   string[]; // e.g. ["Passwords","Emails","Names"]
-  description:   string;
-  isVerified:    boolean;
-  isSensitive:   boolean;
-  severity:      'critical' | 'high' | 'medium' | 'low';
+  name: string; domain: string; breachDate: string; pwnCount: number;
+  dataClasses: string[]; description: string;
+  severity: 'critical' | 'high' | 'medium' | 'low';
 }
 
-// ─────────────────────────────────────────────────────────────────
-// Demo breach data — realistic, looks real in UI
-// ─────────────────────────────────────────────────────────────────
-
-const DEMO_BREACHES: Breach[] = [
-  {
-    name:        'LinkedIn',
-    domain:      'linkedin.com',
-    breachDate:  '2021-06-22',
-    pwnCount:    700000000,
-    dataClasses: ['Email addresses', 'Phone numbers', 'Full names', 'Job titles'],
-    description: 'In June 2021, data scraped from 700M LinkedIn profiles was posted for sale. The data included emails, phone numbers, and professional info.',
-    isVerified:  true,
-    isSensitive: false,
-    severity:    'critical',
-  },
-  {
-    name:        'Adobe',
-    domain:      'adobe.com',
-    breachDate:  '2013-10-04',
-    pwnCount:    152445165,
-    dataClasses: ['Email addresses', 'Password hints', 'Encrypted passwords'],
-    description: 'In October 2013, 153 million Adobe accounts were exposed including internal IDs, usernames, salted password hashes and unencrypted password hints.',
-    isVerified:  true,
-    isSensitive: false,
-    severity:    'high',
-  },
-  {
-    name:        'Canva',
-    domain:      'canva.com',
-    breachDate:  '2019-05-24',
-    pwnCount:    137272116,
-    dataClasses: ['Email addresses', 'Names', 'Usernames', 'Passwords'],
-    description: 'In May 2019, the graphic design tool Canva suffered a data breach exposing 137M records including email addresses, names, and bcrypt hashed passwords.',
-    isVerified:  true,
-    isSensitive: false,
-    severity:    'high',
-  },
-  {
-    name:        'Dropbox',
-    domain:      'dropbox.com',
-    breachDate:  '2012-07-01',
-    pwnCount:    68648009,
-    dataClasses: ['Email addresses', 'Passwords'],
-    description: 'In mid-2012, Dropbox suffered a data breach which exposed the stored credentials of tens of millions of customers. Passwords were hashed with bcrypt and salted.',
-    isVerified:  true,
-    isSensitive: false,
-    severity:    'medium',
-  },
-];
-
-// ─────────────────────────────────────────────────────────────────
-// Fetch breaches — real or demo
-// ─────────────────────────────────────────────────────────────────
-
-async function fetchBreaches(email: string): Promise<Breach[]> {
-  if (!USE_REAL_API) {
-    // Demo: simulate network delay, return mock data
-    await new Promise(r => setTimeout(r, 1800));
-    // Return subset based on email to make it feel real
-    const count = (email.charCodeAt(0) % 4) + 1;
-    return DEMO_BREACHES.slice(0, count);
+// ── Real keyless password breach check (HIBP range API, k-anonymity) ──
+async function checkPasswordPwned(password: string): Promise<number> {
+  const hash = (await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA1, password)).toUpperCase();
+  const prefix = hash.slice(0, 5);
+  const suffix = hash.slice(5);
+  const res = await fetch(`https://api.pwnedpasswords.com/range/${prefix}`, { headers: { 'Add-Padding': 'true' } });
+  if (!res.ok) throw new Error('Breach service unavailable');
+  const text = await res.text();
+  for (const line of text.split('\n')) {
+    const [suf, count] = line.trim().split(':');
+    if (suf === suffix) return parseInt(count, 10) || 0;
   }
+  return 0;
+}
 
-  // Real HaveIBeenPwned API
-  // Returns breach data for the given email address
+// ── Real email breach check (HIBP breach API — needs a paid key) ──
+async function checkEmailBreaches(email: string, key: string): Promise<Breach[]> {
   const res = await fetch(
     `https://haveibeenpwned.com/api/v3/breachedaccount/${encodeURIComponent(email)}?truncateResponse=false`,
-    {
-      headers: {
-        'hibp-api-key': HIBP_API_KEY,
-        'User-Agent':   'VaultChat-SecurityApp',
-      },
-    }
+    { headers: { 'hibp-api-key': key, 'User-Agent': 'VaultChat-SecurityApp' } },
   );
-
-  if (res.status === 404) return []; // No breaches found — good!
+  if (res.status === 404) return [];
   if (res.status === 401) throw new Error('Invalid HIBP API key');
-  if (res.status === 429) throw new Error('Rate limited — wait 1 minute and try again');
-  if (!res.ok) throw new Error(`HIBP API error: ${res.status}`);
-
+  if (res.status === 429) throw new Error('Rate limited — wait a minute');
+  if (!res.ok) throw new Error(`HIBP error: ${res.status}`);
   const data = await res.json();
-
-  // Map HIBP response to our Breach type
   return data.map((b: any): Breach => ({
-    name:        b.Name,
-    domain:      b.Domain,
-    breachDate:  b.BreachDate,
-    pwnCount:    b.PwnCount,
-    dataClasses: b.DataClasses,
-    description: b.Description.replace(/<[^>]*>/g, ''), // strip HTML
-    isVerified:  b.IsVerified,
-    isSensitive: b.IsSensitive,
-    severity:
-      b.PwnCount > 100_000_000 ? 'critical' :
-      b.PwnCount > 10_000_000  ? 'high'     :
-      b.PwnCount > 1_000_000   ? 'medium'   : 'low',
+    name: b.Name, domain: b.Domain, breachDate: b.BreachDate, pwnCount: b.PwnCount,
+    dataClasses: b.DataClasses || [], description: (b.Description || '').replace(/<[^>]*>/g, ''),
+    severity: b.PwnCount > 100_000_000 ? 'critical' : b.PwnCount > 10_000_000 ? 'high' : b.PwnCount > 1_000_000 ? 'medium' : 'low',
   }));
 }
 
-// ─────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────
+const fmt = (n: number) => n >= 1e9 ? `${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(0)}K` : `${n}`;
+const sevColor = (s: Breach['severity']) => s === 'critical' ? Aurora.danger : s === 'high' ? '#F97316' : s === 'medium' ? '#F5C842' : Aurora.primary;
 
-function severityColor(s: Breach['severity']): string {
-  switch (s) {
-    case 'critical': return '#FF4D6D';
-    case 'high':     return '#F97316';
-    case 'medium':   return '#F5C842';
-    case 'low':      return '#10B981';
-  }
-}
-
-function severityLabel(s: Breach['severity']): string {
-  switch (s) {
-    case 'critical': return '🔴 CRITICAL';
-    case 'high':     return '🟠 HIGH';
-    case 'medium':   return '🟡 MEDIUM';
-    case 'low':      return '🟢 LOW';
-  }
-}
-
-function formatCount(n: number): string {
-  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
-  if (n >= 1_000_000)     return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000)         return `${(n / 1_000).toFixed(0)}K`;
-  return n.toString();
-}
-
-// ─────────────────────────────────────────────────────────────────
-// Breach Detail Modal
-// ─────────────────────────────────────────────────────────────────
-
-function BreachDetail({
-  breach,
-  onClose,
-}: {
-  breach: Breach;
-  onClose: () => void;
-}) {
-  return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <TouchableOpacity
-        style={detailStyles.overlay}
-        activeOpacity={1}
-        onPress={onClose}
-      >
-        <View style={detailStyles.panel}>
-          <View style={detailStyles.handle} />
-
-          {/* Title */}
-          <View style={detailStyles.titleRow}>
-            <View style={detailStyles.domainCircle}>
-              <Text style={detailStyles.domainInitial}>
-                {breach.name[0]}
-              </Text>
-            </View>
-            <View>
-              <Text style={detailStyles.breachName}>{breach.name}</Text>
-              <Text style={detailStyles.breachDomain}>{breach.domain}</Text>
-            </View>
-            <View style={[detailStyles.severityPill,
-              { backgroundColor: severityColor(breach.severity) + '22',
-                borderColor: severityColor(breach.severity) + '66' }]}>
-              <Text style={[detailStyles.severityPillText,
-                { color: severityColor(breach.severity) }]}>
-                {severityLabel(breach.severity)}
-              </Text>
-            </View>
-          </View>
-
-          {/* Stats */}
-          <View style={detailStyles.statsRow}>
-            <View style={detailStyles.stat}>
-              <Text style={detailStyles.statNum}>{formatCount(breach.pwnCount)}</Text>
-              <Text style={detailStyles.statLabel}>Accounts Exposed</Text>
-            </View>
-            <View style={detailStyles.statDiv} />
-            <View style={detailStyles.stat}>
-              <Text style={detailStyles.statNum}>{breach.breachDate.slice(0, 4)}</Text>
-              <Text style={detailStyles.statLabel}>Breach Year</Text>
-            </View>
-            <View style={detailStyles.statDiv} />
-            <View style={detailStyles.stat}>
-              <Text style={detailStyles.statNum}>{breach.dataClasses.length}</Text>
-              <Text style={detailStyles.statLabel}>Data Types</Text>
-            </View>
-          </View>
-
-          {/* Exposed data types */}
-          <Text style={detailStyles.sectionLabel}>EXPOSED DATA</Text>
-          <View style={detailStyles.tagsWrap}>
-            {breach.dataClasses.map(dc => (
-              <View key={dc} style={detailStyles.tag}>
-                <Text style={detailStyles.tagText}>{dc}</Text>
-              </View>
-            ))}
-          </View>
-
-          {/* Description */}
-          <Text style={detailStyles.sectionLabel}>WHAT HAPPENED</Text>
-          <Text style={detailStyles.description}>{breach.description}</Text>
-
-          {/* Actions */}
-          <Text style={detailStyles.sectionLabel}>RECOMMENDED ACTIONS</Text>
-          {[
-            '🔑 Change your password on this service immediately',
-            '🔐 Enable two-factor authentication',
-            '📧 Check if same password used elsewhere',
-            '🚫 Monitor for suspicious login activity',
-          ].map(a => (
-            <Text key={a} style={detailStyles.action}>{a}</Text>
-          ))}
-
-          <TouchableOpacity style={detailStyles.closeBtn} onPress={onClose}>
-            <Text style={detailStyles.closeBtnText}>Close</Text>
-          </TouchableOpacity>
-        </View>
-      </TouchableOpacity>
-    </Modal>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────
-// Main Screen
-// ─────────────────────────────────────────────────────────────────
+type Tab = 'password' | 'email';
 
 export default function DarkWebGuardScreen() {
   const router = useRouter();
-  const uid    = auth().currentUser?.uid || '';
+  const [tab, setTab] = useState<Tab>('password');
 
-  const [email,        setEmail]        = useState('');
-  const [scanning,     setScanning]     = useState(false);
-  const [scanned,      setScanned]      = useState(false);
-  const [breaches,     setBreaches]     = useState<Breach[]>([]);
-  const [selectedBreach, setSelectedBreach] = useState<Breach | null>(null);
-  const [lastScanned,  setLastScanned]  = useState<string | null>(null);
-  const [savedEmails,  setSavedEmails]  = useState<string[]>([]);
+  const [password, setPassword] = useState('');
+  const [pwResult, setPwResult] = useState<number | null>(null);
+  const [pwChecking, setPwChecking] = useState(false);
 
-  // ── Load saved emails + last scan time ───────────────────────
+  const [email, setEmail] = useState('');
+  const [hibpKey, setHibpKey] = useState('');
+  const [keyInput, setKeyInput] = useState('');
+  const [breaches, setBreaches] = useState<Breach[] | null>(null);
+  const [emailChecking, setEmailChecking] = useState(false);
+
   useEffect(() => {
-    SecureStore.getItemAsync('dwg_last_scan').then(v => { if (v) setLastScanned(v); });
-    SecureStore.getItemAsync('dwg_emails').then(v => {
-      if (v) setSavedEmails(JSON.parse(v));
-    });
-    // Pre-fill with Firebase Auth email if available
-    const authEmail = auth().currentUser?.email;
-    if (authEmail) setEmail(authEmail);
+    SecureStore.getItemAsync('hibp_key').then(v => { if (v) setHibpKey(v); }).catch(() => {});
+    getMyProfile().then(p => { if (p.email) setEmail(p.email); }).catch(() => {});
   }, []);
 
-  // ── Scan email ────────────────────────────────────────────────
-  const handleScan = async () => {
-    if (!email.trim() || !email.includes('@')) {
-      Alert.alert('Invalid Email', 'Enter a valid email address to scan');
-      return;
-    }
+  const checkPassword = useCallback(async () => {
+    if (!password) return;
+    setPwChecking(true); setPwResult(null);
+    try { setPwResult(await checkPasswordPwned(password)); }
+    catch (e: any) { Alert.alert('Error', e?.message ?? 'Check failed'); }
+    finally { setPwChecking(false); }
+  }, [password]);
 
-    setScanning(true);
-    setScanned(false);
-    setBreaches([]);
-
-    try {
-      const results = await fetchBreaches(email.trim().toLowerCase());
-      setBreaches(results);
-      setScanned(true);
-
-      // Save scan timestamp
-      const now = new Date().toLocaleDateString([], {
-        day: '2-digit', month: 'short', year: 'numeric',
-        hour: '2-digit', minute: '2-digit',
-      });
-      await SecureStore.setItemAsync('dwg_last_scan', now);
-      setLastScanned(now);
-
-      // Save email to monitored list
-      if (!savedEmails.includes(email.trim())) {
-        const updated = [...savedEmails, email.trim()];
-        setSavedEmails(updated);
-        await SecureStore.setItemAsync('dwg_emails', JSON.stringify(updated));
-      }
-
-      // Log scan to Firestore for alert history
-      if (results.length > 0) {
-        await firestore()
-          .collection('users').doc(uid)
-          .collection('alerts')
-          .add({
-            type:      'breach',
-            message:   `${results.length} breach${results.length > 1 ? 'es' : ''} found for ${email}`,
-            detail:    results.map(b => b.name).join(', '),
-            severity:  results.some(b => b.severity === 'critical') ? 'high' : 'medium',
-            createdAt: firestore.FieldValue.serverTimestamp(),
-            read:      false,
-          })
-          .catch(() => {});
-      }
-    } catch (e: any) {
-      Alert.alert('Scan Failed', e.message || 'Could not complete scan');
-    } finally {
-      setScanning(false);
-    }
+  const saveKey = async () => {
+    const k = keyInput.trim();
+    if (!k) return;
+    await SecureStore.setItemAsync('hibp_key', k);
+    setHibpKey(k); setKeyInput('');
+    Alert.alert('Saved', 'HIBP key stored securely on this device.');
   };
 
-  // ─────────────────────────────────────────────────────────────
-  // Render
-  // ─────────────────────────────────────────────────────────────
-  return (
-    <View style={styles.container}>
+  const checkEmail = useCallback(async () => {
+    if (!email.includes('@')) { Alert.alert('Invalid', 'Enter a valid email'); return; }
+    if (!hibpKey) { Alert.alert('Key required', 'Email breach lookup needs a HIBP API key.'); return; }
+    setEmailChecking(true); setBreaches(null);
+    try { setBreaches(await checkEmailBreaches(email.trim().toLowerCase(), hibpKey)); }
+    catch (e: any) { Alert.alert('Scan failed', e?.message ?? 'Could not scan'); }
+    finally { setEmailChecking(false); }
+  }, [email, hibpKey]);
 
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.back}>‹</Text>
+  return (
+    <View style={s.container}>
+      <View style={s.header}>
+        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
+          <Ionicons name="arrow-back" size={24} color={Aurora.text} />
         </TouchableOpacity>
-        <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle}>Dark Web Guard</Text>
-          <Text style={styles.headerSub}>
-            {USE_REAL_API ? 'LIVE · HIBP API' : 'DEMO MODE'}
-          </Text>
-        </View>
+        <Text style={s.title}>Dark Web Guard</Text>
+        <View style={{ width: 40 }} />
       </View>
 
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Hero */}
-        <View style={styles.hero}>
-          <Text style={styles.heroIcon}>🌑</Text>
-          <Text style={styles.heroTitle}>Dark Web Monitor</Text>
-          <Text style={styles.heroSub}>
-            Check if your email has appeared in known data breaches across the dark web
-          </Text>
-          {!USE_REAL_API && (
-            <View style={styles.demoBanner}>
-              <Text style={styles.demoBannerText}>
-                📋 Demo mode — showing sample breach data
-              </Text>
-            </View>
-          )}
-        </View>
+      <View style={s.tabs}>
+        <TouchableOpacity style={[s.tab, tab === 'password' && s.tabActive]} onPress={() => setTab('password')}>
+          <Text style={[s.tabTxt, tab === 'password' && s.tabTxtActive]}>Password</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[s.tab, tab === 'email' && s.tabActive]} onPress={() => setTab('email')}>
+          <Text style={[s.tabTxt, tab === 'email' && s.tabTxtActive]}>Email</Text>
+        </TouchableOpacity>
+      </View>
 
-        {/* Scan input */}
-        <View style={styles.scanCard}>
-          <Text style={styles.scanLabel}>Email to scan</Text>
-          <View style={styles.scanRow}>
-            <TextInput
-              style={styles.scanInput}
-              value={email}
-              onChangeText={setEmail}
-              placeholder="your@email.com"
-              placeholderTextColor="#6B7280"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              editable={!scanning}
-            />
-            <TouchableOpacity
-              style={[styles.scanBtn, scanning && styles.scanBtnDim]}
-              onPress={handleScan}
-              disabled={scanning}
-            >
-              {scanning
-                ? <ActivityIndicator color="#FFFFFF" size="small" />
-                : <Text style={styles.scanBtnText}>Scan</Text>
-              }
-            </TouchableOpacity>
-          </View>
-          {lastScanned && (
-            <Text style={styles.lastScanned}>Last scan: {lastScanned}</Text>
-          )}
-        </View>
-
-        {/* Scanning animation */}
-        {scanning && (
-          <View style={styles.scanningWrap}>
-            <ActivityIndicator color="#10B981" size="large" />
-            <Text style={styles.scanningText}>Scanning dark web databases...</Text>
-            <Text style={styles.scanningHint}>Checking 12+ billion compromised accounts</Text>
-          </View>
-        )}
-
-        {/* Results */}
-        {scanned && (
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }}>
+        {tab === 'password' ? (
           <>
-            {/* Summary */}
-            <View style={[
-              styles.summaryCard,
-              breaches.length === 0 ? styles.summaryClean : styles.summaryBreached,
-            ]}>
-              <Text style={styles.summaryIcon}>
-                {breaches.length === 0 ? '✅' : '⚠️'}
-              </Text>
-              <Text style={styles.summaryTitle}>
-                {breaches.length === 0
-                  ? 'No breaches found!'
-                  : `${breaches.length} breach${breaches.length > 1 ? 'es' : ''} found`}
-              </Text>
-              <Text style={styles.summarySub}>
-                {breaches.length === 0
-                  ? `${email} was not found in any known data breaches.`
-                  : `${email} appeared in ${breaches.length} known data breach${breaches.length > 1 ? 'es' : ''}.`}
-              </Text>
+            <View style={s.hero}>
+              <Text style={s.heroIcon}>🔐</Text>
+              <Text style={s.heroTitle}>Has your password leaked?</Text>
+              <Text style={s.heroSub}>Checked against billions of breached passwords. Your password never leaves the device — only a short hash prefix is sent (k-anonymity).</Text>
             </View>
 
-            {/* Breach list */}
-            {breaches.length > 0 && (
-              <>
-                <Text style={styles.sectionLabel}>BREACHES FOUND</Text>
-                {breaches.map(breach => (
-                  <TouchableOpacity
-                    key={breach.name}
-                    style={styles.breachCard}
-                    onPress={() => setSelectedBreach(breach)}
-                    activeOpacity={0.8}
-                  >
-                    {/* Severity left bar */}
-                    <View style={[styles.severityBar,
-                      { backgroundColor: severityColor(breach.severity) }]} />
+            <View style={s.card}>
+              <Text style={s.label}>Password to check</Text>
+              <TextInput
+                style={s.input}
+                value={password}
+                onChangeText={(t) => { setPassword(t); setPwResult(null); }}
+                placeholder="Enter a password"
+                placeholderTextColor={Aurora.textFaint}
+                secureTextEntry
+                autoCapitalize="none"
+              />
+              <TouchableOpacity style={[s.btn, (!password || pwChecking) && s.btnDim]} onPress={checkPassword} disabled={!password || pwChecking}>
+                {pwChecking ? <ActivityIndicator color="#04130D" /> : <Text style={s.btnTxt}>Check password</Text>}
+              </TouchableOpacity>
+            </View>
 
-                    <View style={styles.breachCircle}>
-                      <Text style={styles.breachInitial}>{breach.name[0]}</Text>
-                    </View>
-
-                    <View style={styles.breachInfo}>
-                      <View style={styles.breachTop}>
-                        <Text style={styles.breachName}>{breach.name}</Text>
-                        <Text style={[styles.breachSeverity,
-                          { color: severityColor(breach.severity) }]}>
-                          {severityLabel(breach.severity)}
-                        </Text>
-                      </View>
-                      <Text style={styles.breachMeta}>
-                        {formatCount(breach.pwnCount)} accounts · {breach.breachDate.slice(0, 4)}
-                      </Text>
-                      <View style={styles.tagsRow}>
-                        {breach.dataClasses.slice(0, 3).map(dc => (
-                          <View key={dc} style={styles.miniTag}>
-                            <Text style={styles.miniTagText}>{dc}</Text>
-                          </View>
-                        ))}
-                        {breach.dataClasses.length > 3 && (
-                          <Text style={styles.moreTag}>
-                            +{breach.dataClasses.length - 3}
-                          </Text>
-                        )}
-                      </View>
-                    </View>
-
-                    <Text style={styles.chevron}>›</Text>
-                  </TouchableOpacity>
-                ))}
-
-                {/* Action recommendations */}
-                <View style={styles.actionsCard}>
-                  <Text style={styles.actionsTitle}>🛡️ Immediate Actions</Text>
-                  {[
-                    '1. Change passwords on all breached services',
-                    '2. Enable 2FA everywhere possible',
-                    '3. Check if you used the same password elsewhere',
-                    '4. Monitor your accounts for suspicious activity',
-                    '5. Consider a password manager',
-                  ].map(a => (
-                    <Text key={a} style={styles.actionText}>{a}</Text>
-                  ))}
-                </View>
-              </>
+            {pwResult !== null && (
+              <View style={[s.result, pwResult === 0 ? s.resultClean : s.resultBad]}>
+                <Text style={s.resultIcon}>{pwResult === 0 ? '✅' : '⚠️'}</Text>
+                <Text style={s.resultTitle}>{pwResult === 0 ? 'Not found in any breach' : `Seen ${fmt(pwResult)} times in breaches`}</Text>
+                <Text style={s.resultSub}>
+                  {pwResult === 0
+                    ? 'This password hasn’t appeared in known breaches. Still, use a unique password per site.'
+                    : 'This password is compromised — do not use it. Change it anywhere you’ve used it and enable 2FA.'}
+                </Text>
+              </View>
             )}
           </>
-        )}
-
-        {/* Monitored emails */}
-        {savedEmails.length > 0 && !scanned && (
+        ) : (
           <>
-            <Text style={styles.sectionLabel}>MONITORED EMAILS</Text>
-            {savedEmails.map(e => (
-              <TouchableOpacity
-                key={e}
-                style={styles.monitoredRow}
-                onPress={() => { setEmail(e); }}
-              >
-                <Text style={styles.monitoredEmail}>{e}</Text>
-                <Text style={styles.monitoredRescan}>Re-scan ›</Text>
-              </TouchableOpacity>
+            <View style={s.hero}>
+              <Text style={s.heroIcon}>🌑</Text>
+              <Text style={s.heroTitle}>Email breach monitor</Text>
+              <Text style={s.heroSub}>Checks whether your email appears in known data breaches via Have I Been Pwned.</Text>
+            </View>
+
+            {!hibpKey ? (
+              <View style={s.card}>
+                <Text style={s.label}>HIBP API key required</Text>
+                <Text style={s.note}>Email lookup uses the paid HIBP API. Paste your key (haveibeenpwned.com/API/Key) — stored only on this device.</Text>
+                <TextInput style={s.input} value={keyInput} onChangeText={setKeyInput} placeholder="HIBP API key" placeholderTextColor={Aurora.textFaint} autoCapitalize="none" secureTextEntry />
+                <TouchableOpacity style={[s.btn, !keyInput.trim() && s.btnDim]} onPress={saveKey} disabled={!keyInput.trim()}>
+                  <Text style={s.btnTxt}>Save key</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={s.card}>
+                <Text style={s.label}>Email to scan</Text>
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <TextInput style={[s.input, { flex: 1 }]} value={email} onChangeText={setEmail} placeholder="your@email.com" placeholderTextColor={Aurora.textFaint} keyboardType="email-address" autoCapitalize="none" />
+                  <TouchableOpacity style={[s.btn, { paddingHorizontal: 18 }, emailChecking && s.btnDim]} onPress={checkEmail} disabled={emailChecking}>
+                    {emailChecking ? <ActivityIndicator color="#04130D" size="small" /> : <Text style={s.btnTxt}>Scan</Text>}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {breaches !== null && (
+              <View style={[s.result, breaches.length === 0 ? s.resultClean : s.resultBad]}>
+                <Text style={s.resultIcon}>{breaches.length === 0 ? '✅' : '⚠️'}</Text>
+                <Text style={s.resultTitle}>{breaches.length === 0 ? 'No breaches found' : `${breaches.length} breach${breaches.length > 1 ? 'es' : ''} found`}</Text>
+              </View>
+            )}
+
+            {breaches?.map(b => (
+              <View key={b.name} style={s.breachCard}>
+                <View style={[s.sevBar, { backgroundColor: sevColor(b.severity) }]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={s.breachName}>{b.name}</Text>
+                  <Text style={s.breachMeta}>{fmt(b.pwnCount)} accounts · {b.breachDate.slice(0, 4)}</Text>
+                  <Text style={s.breachData} numberOfLines={2}>{b.dataClasses.join(', ')}</Text>
+                </View>
+              </View>
             ))}
           </>
         )}
-
-        <View style={{ height: 40 }} />
       </ScrollView>
-
-      {/* Breach detail modal */}
-      {selectedBreach && (
-        <BreachDetail
-          breach={selectedBreach}
-          onClose={() => setSelectedBreach(null)}
-        />
-      )}
     </View>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────
-// Styles
-// ─────────────────────────────────────────────────────────────────
-
-const styles = StyleSheet.create({
-  container:   { flex: 1, backgroundColor: '#FFFFFF' },
-  header: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#F9FAFB',
-    paddingTop: 48, paddingBottom: 12, paddingHorizontal: 16,
-    borderBottomWidth: 0.5, borderBottomColor: '#E5E7EB', gap: 12,
-  },
-  back:         { fontSize: 28, color: '#10B981', fontWeight: 'bold' },
-  headerCenter: { flex: 1 },
-  headerTitle:  { fontSize: 18, fontWeight: 'bold', color: '#000000' },
-  headerSub:    { fontSize: 9, color: '#10B981', marginTop: 1, fontWeight: 'bold' },
-
-  scroll:       { flex: 1 },
-  scrollContent:{ padding: 16, paddingBottom: 60 },
-
-  // Hero
-  hero: { alignItems: 'center', paddingVertical: 24 },
-  heroIcon:  { fontSize: 56, marginBottom: 12 },
-  heroTitle: { fontSize: 22, fontWeight: 'bold', color: '#000000', marginBottom: 8 },
-  heroSub: {
-    fontSize: 13, color: '#6B7280', textAlign: 'center',
-    lineHeight: 20, paddingHorizontal: 16, marginBottom: 12,
-  },
-  demoBanner: {
-    backgroundColor: '#F5C84222', borderRadius: 8,
-    borderWidth: 0.5, borderColor: '#F5C84244',
-    paddingHorizontal: 14, paddingVertical: 6,
-  },
-  demoBannerText: { fontSize: 11, color: '#F5C842' },
-
-  // Scan card
-  scanCard: {
-    backgroundColor: '#F9FAFB', borderRadius: 14,
-    borderWidth: 0.5, borderColor: '#E5E7EB',
-    padding: 16, marginBottom: 20,
-  },
-  scanLabel:  { fontSize: 11, color: '#6B7280', marginBottom: 8 },
-  scanRow:    { flexDirection: 'row', gap: 10 },
-  scanInput: {
-    flex: 1, backgroundColor: '#F3F4F6',
-    borderRadius: 10, borderWidth: 0.5, borderColor: '#E5E7EB',
-    paddingHorizontal: 14, paddingVertical: 11,
-    color: '#000000', fontSize: 14,
-  },
-  scanBtn: {
-    backgroundColor: '#10B981', borderRadius: 10,
-    paddingHorizontal: 18, justifyContent: 'center', alignItems: 'center',
-    minWidth: 70,
-  },
-  scanBtnDim:  { backgroundColor: '#D1FAE5' },
-  scanBtnText: { color: '#FFFFFF', fontWeight: 'bold', fontSize: 14 },
-  lastScanned: { fontSize: 10, color: '#6B7280', marginTop: 8 },
-
-  // Scanning
-  scanningWrap: {
-    alignItems: 'center', paddingVertical: 32, gap: 10,
-  },
-  scanningText: { fontSize: 14, color: '#000000', fontWeight: 'bold' },
-  scanningHint: { fontSize: 11, color: '#6B7280' },
-
-  // Summary
-  summaryCard: {
-    borderRadius: 14, borderWidth: 0.5,
-    padding: 20, alignItems: 'center', marginBottom: 20, gap: 8,
-  },
-  summaryClean:    { backgroundColor: '#D1FAE520', borderColor: '#10B98144' },
-  summaryBreached: { backgroundColor: '#FF4D6D11', borderColor: '#FF4D6D44' },
-  summaryIcon:     { fontSize: 40 },
-  summaryTitle:    { fontSize: 18, fontWeight: 'bold', color: '#000000' },
-  summarySub:      { fontSize: 13, color: '#6B7280', textAlign: 'center', lineHeight: 19 },
-
-  sectionLabel: {
-    fontSize: 10, fontWeight: 'bold', color: '#6B7280',
-    letterSpacing: 0.8, marginBottom: 10, marginTop: 4,
-  },
-
-  // Breach card
-  breachCard: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#F9FAFB', borderRadius: 12,
-    borderWidth: 0.5, borderColor: '#E5E7EB',
-    padding: 12, marginBottom: 8, gap: 10,
-    overflow: 'hidden',
-  },
-  severityBar:   { position: 'absolute', left: 0, top: 0, bottom: 0, width: 3 },
-  breachCircle: {
-    width: 42, height: 42, borderRadius: 21,
-    backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E5E7EB',
-    justifyContent: 'center', alignItems: 'center',
-  },
-  breachInitial: { fontSize: 18, fontWeight: 'bold', color: '#6B7280' },
-  breachInfo:    { flex: 1 },
-  breachTop: {
-    flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'space-between', marginBottom: 3,
-  },
-  breachName:     { fontSize: 15, fontWeight: 'bold', color: '#000000' },
-  breachSeverity: { fontSize: 10, fontWeight: 'bold' },
-  breachMeta:     { fontSize: 11, color: '#6B7280', marginBottom: 6 },
-  tagsRow:        { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
-  miniTag: {
-    backgroundColor: '#F3F4F6', borderRadius: 6,
-    paddingHorizontal: 6, paddingVertical: 2,
-    borderWidth: 0.5, borderColor: '#E5E7EB',
-  },
-  miniTagText:   { fontSize: 9, color: '#6B7280' },
-  moreTag:       { fontSize: 10, color: '#6B7280', alignSelf: 'center' },
-  chevron:       { fontSize: 20, color: '#6B7280' },
-
-  // Actions card
-  actionsCard: {
-    backgroundColor: '#F9FAFB', borderRadius: 12,
-    borderWidth: 0.5, borderColor: '#E5E7EB',
-    padding: 16, marginTop: 12, gap: 8,
-  },
-  actionsTitle: { fontSize: 13, fontWeight: 'bold', color: '#000000', marginBottom: 4 },
-  actionText:   { fontSize: 13, color: '#6B7280', lineHeight: 20 },
-
-  // Monitored emails
-  monitoredRow: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    backgroundColor: '#F9FAFB', borderRadius: 10,
-    borderWidth: 0.5, borderColor: '#E5E7EB',
-    paddingHorizontal: 14, paddingVertical: 12, marginBottom: 8,
-  },
-  monitoredEmail:  { fontSize: 14, color: '#000000' },
-  monitoredRescan: { fontSize: 12, color: '#10B981' },
-});
-
-const detailStyles = StyleSheet.create({
-  overlay:  { flex: 1, backgroundColor: '#00000088', justifyContent: 'flex-end' },
-  panel: {
-    backgroundColor: '#F9FAFB',
-    borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    padding: 20, paddingBottom: 36, maxHeight: '90%',
-  },
-  handle: {
-    width: 40, height: 4, backgroundColor: '#E5E7EB',
-    borderRadius: 2, alignSelf: 'center', marginBottom: 16,
-  },
-  titleRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16,
-  },
-  domainCircle: {
-    width: 44, height: 44, borderRadius: 22,
-    backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E5E7EB',
-    justifyContent: 'center', alignItems: 'center',
-  },
-  domainInitial: { fontSize: 20, fontWeight: 'bold', color: '#6B7280' },
-  breachName:    { fontSize: 17, fontWeight: 'bold', color: '#000000' },
-  breachDomain:  { fontSize: 12, color: '#6B7280' },
-  severityPill: {
-    marginLeft: 'auto', borderRadius: 10,
-    borderWidth: 0.5, paddingHorizontal: 8, paddingVertical: 3,
-  },
-  severityPillText: { fontSize: 10, fontWeight: 'bold' },
-  statsRow: {
-    flexDirection: 'row', backgroundColor: '#F3F4F6',
-    borderRadius: 12, padding: 14, marginBottom: 16,
-  },
-  stat:      { flex: 1, alignItems: 'center' },
-  statNum:   { fontSize: 16, fontWeight: 'bold', color: '#000000', marginBottom: 2 },
-  statLabel: { fontSize: 10, color: '#6B7280' },
-  statDiv:   { width: 0.5, backgroundColor: '#E5E7EB', marginVertical: 4 },
-  sectionLabel: {
-    fontSize: 10, fontWeight: 'bold', color: '#6B7280',
-    letterSpacing: 0.8, marginBottom: 8, marginTop: 12,
-  },
-  tagsWrap:  { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 4 },
-  tag: {
-    backgroundColor: '#F3F4F6', borderRadius: 8,
-    borderWidth: 0.5, borderColor: '#E5E7EB',
-    paddingHorizontal: 10, paddingVertical: 4,
-  },
-  tagText:     { fontSize: 12, color: '#000000' },
-  description: { fontSize: 13, color: '#6B7280', lineHeight: 20, marginBottom: 4 },
-  action:      { fontSize: 13, color: '#6B7280', lineHeight: 22 },
-  closeBtn: {
-    backgroundColor: '#F3F4F6', borderRadius: 10,
-    borderWidth: 0.5, borderColor: '#E5E7EB',
-    paddingVertical: 13, alignItems: 'center', marginTop: 16,
-  },
-  closeBtnText: { color: '#000000', fontWeight: 'bold', fontSize: 15 },
+const s = StyleSheet.create({
+  container: { flex: 1, backgroundColor: Aurora.bg },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingHorizontal: 16, paddingBottom: 8 },
+  backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
+  title: { color: Aurora.text, fontSize: 18, fontWeight: '800' },
+  tabs: { flexDirection: 'row', marginHorizontal: 16, backgroundColor: Aurora.surface, borderRadius: 12, padding: 3, borderWidth: 1, borderColor: Aurora.border },
+  tab: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 10 },
+  tabActive: { backgroundColor: Aurora.primary },
+  tabTxt: { color: Aurora.textDim, fontSize: 14, fontWeight: '700' },
+  tabTxtActive: { color: '#04130D' },
+  hero: { alignItems: 'center', paddingVertical: 20 },
+  heroIcon: { fontSize: 52, marginBottom: 10 },
+  heroTitle: { fontSize: 20, fontWeight: '800', color: Aurora.text, marginBottom: 8, textAlign: 'center' },
+  heroSub: { fontSize: 13, color: Aurora.textDim, textAlign: 'center', lineHeight: 19 },
+  card: { backgroundColor: Aurora.card, borderRadius: 14, borderWidth: 1, borderColor: Aurora.border, padding: 16, marginBottom: 16 },
+  label: { fontSize: 12, color: Aurora.textDim, marginBottom: 8 },
+  note: { fontSize: 12, color: Aurora.textDim, marginBottom: 10, lineHeight: 18 },
+  input: { backgroundColor: Aurora.surface, borderRadius: 10, borderWidth: 1, borderColor: Aurora.border, paddingHorizontal: 14, paddingVertical: 11, color: Aurora.text, fontSize: 14, marginBottom: 10 },
+  btn: { backgroundColor: Aurora.primary, borderRadius: 10, paddingVertical: 12, alignItems: 'center', justifyContent: 'center' },
+  btnDim: { opacity: 0.5 },
+  btnTxt: { color: '#04130D', fontWeight: '800', fontSize: 14 },
+  result: { borderRadius: 14, borderWidth: 1, padding: 20, alignItems: 'center', gap: 8, marginBottom: 16 },
+  resultClean: { backgroundColor: 'rgba(16,185,129,0.1)', borderColor: 'rgba(16,185,129,0.4)' },
+  resultBad: { backgroundColor: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.4)' },
+  resultIcon: { fontSize: 40 },
+  resultTitle: { fontSize: 17, fontWeight: '800', color: Aurora.text, textAlign: 'center' },
+  resultSub: { fontSize: 13, color: Aurora.textDim, textAlign: 'center', lineHeight: 19 },
+  breachCard: { flexDirection: 'row', backgroundColor: Aurora.card, borderRadius: 12, borderWidth: 1, borderColor: Aurora.border, padding: 12, marginBottom: 8, gap: 10, overflow: 'hidden' },
+  sevBar: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 3 },
+  breachName: { fontSize: 15, fontWeight: '700', color: Aurora.text },
+  breachMeta: { fontSize: 11, color: Aurora.textDim, marginTop: 2 },
+  breachData: { fontSize: 12, color: Aurora.textDim, marginTop: 4 },
 });
