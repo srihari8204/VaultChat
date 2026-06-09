@@ -16,6 +16,7 @@ const express = require('express');
 const crypto  = require('crypto');
 const jwtUtil = require('../jwt');
 const db      = require('../db');
+const { sendPushToTokens } = require('../push');
 
 const router = express.Router();
 router.use(jwtUtil.requireAuth);
@@ -197,6 +198,29 @@ router.post('/:id/posts', async (req, res) => {
     };
     broadcastChannel(ch.id, 'channel_post', out);
     res.json(out);
+
+    // Fire-and-forget push to subscribers (excluding the author).
+    (async () => {
+      try {
+        const subR = await db.query(
+          `SELECT user_id FROM channel_subscribers WHERE channel_id = $1 AND user_id <> $2`,
+          [ch.id, req.user.id]
+        );
+        if (!subR.rows.length) return;
+        const tokR = await db.query(
+          `SELECT push_token FROM devices WHERE user_id = ANY($1::uuid[])`,
+          [subR.rows.map(r => r.user_id)]
+        );
+        const tokens = tokR.rows.map(r => r.push_token).filter(Boolean);
+        if (tokens.length) {
+          await sendPushToTokens(tokens, {
+            title: ch.name,
+            body:  text.slice(0, 140),
+            data:  { type: 'channel_post', channelId: ch.id },
+          });
+        }
+      } catch (e) { console.error('[channel push]', e.message); }
+    })();
   } catch (err) {
     console.error('[channel posts POST]', err.message);
     res.status(500).json({ error: 'Failed to post' });

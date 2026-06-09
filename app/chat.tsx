@@ -1122,7 +1122,8 @@ export default function ChatScreen() {
   const jumpToMessage = useCallback(async (targetId: number) => {
     let idx = messagesRef.current.findIndex(m => m.id === targetId);
     let guard = 0;
-    while (idx < 0 && guard < 12) {
+    // Page back far enough to reach old matches (40 * PAGE_SIZE messages).
+    while (idx < 0 && guard < 40) {
       guard++;
       const oldest = messagesRef.current[messagesRef.current.length - 1]?.id;
       if (!oldest) break;
