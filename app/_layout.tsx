@@ -306,7 +306,6 @@ function RootLayout() {
         {/* Mini Apps destinations */}
         <Stack.Screen name="encrypted-notes" />
         <Stack.Screen name="watch-together" />
-        <Stack.Screen name="walkie-talkie" />
         <Stack.Screen name="screen-share" />
         <Stack.Screen name="current-location" />
         <Stack.Screen name="game-lobby" />

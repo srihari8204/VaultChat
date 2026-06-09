@@ -21,7 +21,6 @@ import {
 // Row 3: Current Loc, Cloud, Pegasus
 const MINI_APPS_MAIN = [
   { id: 'watch',       icon: '\uD83C\uDFAC', name: 'Watch',       route: '/watch-together', gradient: ['#7C3AED', '#6C63FF'] as [string, string] },
-  { id: 'walkie',      icon: '\uD83D\uDCFB', name: 'Walkie',      route: '/walkie-talkie',  gradient: ['#059669', '#10B981'] as [string, string] },
   { id: 'screen',      icon: '\uD83D\uDCBB', name: 'Screen',      route: '/screen-share',   gradient: ['#0891B2', '#06B6D4'] as [string, string] },
   { id: 'notes',       icon: '\uD83D\uDCDD', name: 'Notes',       route: '/encrypted-notes', gradient: ['#F59E0B', '#D97706'] as [string, string] },
   { id: 'scanner',     icon: '\uD83D\uDCC4', name: 'Scanner',     route: '/scanner',        gradient: ['#4A9FFF', '#1D4ED8'] as [string, string] },

@@ -500,66 +500,6 @@ io.on('connection', (socket) => {
   socket.on('screen_share_start', relayToPeer('screen_share_start'));
   socket.on('screen_share_stop',  relayToPeer('screen_share_stop'));
 
-  // ── Walkie-Talkie rooms ───────────────────────────────────
-  // Ephemeral in-memory rooms — lost on restart (acceptable for the feature).
-  const walkieRooms = io.walkieRooms || (io.walkieRooms = new Map());
-
-  socket.on('walkie_join', ({ roomId, uid, name, pin }) => {
-    if (!roomId || !uid) return;
-    const existing = walkieRooms.get(roomId);
-    if (existing && existing.pin && existing.pin !== pin) {
-      socket.emit('walkie_error', { message: 'Invalid room PIN' });
-      return;
-    }
-    if (!existing) {
-      walkieRooms.set(roomId, { id: roomId, pin: pin || '', host: uid, participants: [] });
-    }
-    const room = walkieRooms.get(roomId);
-    room.participants = room.participants.filter(p => p.uid !== uid);
-    room.participants.push({ uid, name, isTalking: false, isMuted: false, socketId: socket.id });
-    socket.join(`walkie:${roomId}`);
-    io.to(`walkie:${roomId}`).emit('walkie_participants',
-      room.participants.map(p => ({ uid: p.uid, name: p.name, isTalking: p.isTalking, isMuted: p.isMuted }))
-    );
-    socket.to(`walkie:${roomId}`).emit('walkie_user_joined', { uid, name });
-  });
-
-  socket.on('walkie_leave', ({ roomId, uid }) => {
-    const room = walkieRooms.get(roomId);
-    if (!room) return;
-    room.participants = room.participants.filter(p => p.uid !== uid);
-    if (room.participants.length === 0) walkieRooms.delete(roomId);
-    else io.to(`walkie:${roomId}`).emit('walkie_user_left', { uid });
-    socket.leave(`walkie:${roomId}`);
-  });
-
-  socket.on('walkie_talk_start', ({ roomId, uid }) => {
-    const room = walkieRooms.get(roomId);
-    if (!room) return;
-    const p = room.participants.find(x => x.uid === uid);
-    if (p) p.isTalking = true;
-    socket.to(`walkie:${roomId}`).emit('walkie_talk_start', { uid });
-  });
-
-  socket.on('walkie_talk_stop', ({ roomId, uid }) => {
-    const room = walkieRooms.get(roomId);
-    if (!room) return;
-    const p = room.participants.find(x => x.uid === uid);
-    if (p) p.isTalking = false;
-    socket.to(`walkie:${roomId}`).emit('walkie_talk_stop', { uid });
-  });
-
-  socket.on('walkie_mute', ({ roomId, uid, muted }) => {
-    const room = walkieRooms.get(roomId);
-    if (!room) return;
-    const p = room.participants.find(x => x.uid === uid);
-    if (p) p.isMuted = muted;
-  });
-
-  socket.on('walkie_ping', ({ roomId, from }) => {
-    if (roomId) socket.to(`walkie:${roomId}`).emit('walkie_ping', { from });
-  });
-
   // ── Gaming Platform ───────────────────────────────────────
   // Ephemeral in-memory — coins, rooms, queue. Lost on restart (acceptable
   // until Phase 6+ moves wallet to Postgres).
