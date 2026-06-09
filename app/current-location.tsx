@@ -8,8 +8,7 @@ import {
 } from 'react-native';
 import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
 import * as Location from 'expo-location';
-import firestore from '@react-native-firebase/firestore';
-import auth from '@react-native-firebase/auth';
+import { sendMessage } from '../lib/chatService';
 
 const DARK = '#0D0F14';
 const CARD = '#1A1D27';
@@ -22,8 +21,7 @@ const GREEN = '#10B981';
 
 export default function CurrentLocationScreen() {
   const router = useRouter();
-  const { chatId, peerUid } = useLocalSearchParams<{ chatId?: string; peerUid?: string }>();
-  const uid = auth().currentUser?.uid ?? '';
+  const { chatId } = useLocalSearchParams<{ chatId?: string; peerUid?: string }>();
 
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const [loading, setLoading] = useState(false);
@@ -68,31 +66,15 @@ export default function CurrentLocationScreen() {
     }
 
     try {
-      // Send as a chat message with location data
-      await firestore().collection('chats').doc(chatId).collection('messages').add({
-        senderId: uid,
-        msgType: 'location',
-        plaintext: `\uD83D\uDCCC Current Location\n${address}`,
-        locationData: {
+      // Send as a location-type chat message (Postgres backend).
+      await sendMessage(chatId, `\uD83D\uDCCC Current Location${address ? `\n${address}` : ''}`, 'location', {
+        meta: {
           latitude: location.coords.latitude,
           longitude: location.coords.longitude,
-          altitude: location.coords.altitude,
           accuracy: location.coords.accuracy,
           address,
-          timestamp: location.timestamp,
-          type: 'snapshot', // one-time pin, not live
+          kind: 'snapshot',
         },
-        ciphertext: '', iv: '',
-        status: 'sent',
-        isDeleted: false,
-        reactions: {},
-        createdAt: firestore.FieldValue.serverTimestamp(),
-      });
-
-      await firestore().collection('chats').doc(chatId).update({
-        lastMsg: '\uD83D\uDCCC Current Location',
-        lastTime: firestore.FieldValue.serverTimestamp(),
-        [`unread.${peerUid}`]: firestore.FieldValue.increment(1),
       });
 
       setShared(true);
@@ -135,7 +117,7 @@ export default function CurrentLocationScreen() {
             </TouchableOpacity>
             <View style={s.infoCard}>
               <Text style={s.infoIcon}>{'\uD83D\uDD12'}</Text>
-              <Text style={s.infoTxt}>Location data is E2E encrypted — server never sees your coordinates</Text>
+              <Text style={s.infoTxt}>A one-time pin — not live tracking. Only shared with this chat.</Text>
             </View>
           </>
         ) : (
