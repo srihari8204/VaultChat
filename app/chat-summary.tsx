@@ -1,123 +1,119 @@
-// app/chat-summary.tsx — AI Chat Summary
-// One tap → summarizes 100+ unread messages into key points
-// Groups by topic, extracts action items, decisions, questions
+// app/chat-summary.tsx — Chat Summary (real on-device, no Firebase).
+//
+// A heuristic/extractive summary computed locally from the real message
+// history (GET /chats/:id/messages): message stats, keyword topics, extracted
+// action items, and key (longer, recent) messages. No LLM, no cloud — runs
+// entirely on-device.
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet,
-  StatusBar, ScrollView, ActivityIndicator, Alert,
+  View, Text, TouchableOpacity, StyleSheet, StatusBar, ScrollView, ActivityIndicator, Alert,
 } from 'react-native';
-import { useLocalSearchParams, Stack } from 'expo-router';
-import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
+import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import { Aurora } from '../constants/theme';
+import { getMessages, type Message } from '../lib/chatService';
+import { getCurrentUserAsync } from './(constants)/authService';
 
-const C = { bg: '#FFFFFF', accent: '#4A9FFF', card: '#F9FAFB', green: '#10B981', purple: '#A78BFA' };
+interface SumMsg { isMine: boolean; text: string; type: Message['type']; createdAt: string }
+interface Summary {
+  total: number; myMsgs: number; peerMsgs: number; mediaCount: number; questionCount: number;
+  topics: string[]; actions: string[]; keyMessages: string[]; sentiment: string; timespan: string;
+}
 
-// On-device summarization engine
-const generateSummary = (messages, peerName) => {
-  const total = messages.length;
-  const myMsgs = messages.filter(m => m.isMine).length;
-  const peerMsgs = total - myMsgs;
-  const mediaCount = messages.filter(m => m.mediaUrl || ['image','video','audio','file'].includes(m.msgType)).length;
-  const questionCount = messages.filter(m => (m.plaintext || '').includes('?')).length;
+function formatTimespan(firstIso?: string, lastIso?: string): string {
+  try {
+    const start = new Date(firstIso || Date.now()).getTime();
+    const end = new Date(lastIso || Date.now()).getTime();
+    const diff = Math.abs(end - start);
+    if (diff < 3600000) return `${Math.round(diff / 60000)} minutes`;
+    if (diff < 86400000) return `${Math.round(diff / 3600000)} hours`;
+    return `${Math.round(diff / 86400000)} days`;
+  } catch { return 'Unknown'; }
+}
 
-  // Extract key messages (longer ones are usually more important)
-  const keyMessages = messages
-    .filter(m => (m.plaintext || '').length > 30)
-    .slice(-5)
-    .map(m => m.plaintext || '[media]');
+function generateSummary(msgs: SumMsg[], peerName: string): Summary {
+  const total = msgs.length;
+  const myMsgs = msgs.filter(m => m.isMine).length;
+  const mediaCount = msgs.filter(m => ['image', 'video', 'audio', 'file'].includes(m.type)).length;
+  const questionCount = msgs.filter(m => m.text.includes('?')).length;
 
-  // Detect topics from keywords
-  const allText = messages.map(m => (m.plaintext || '').toLowerCase()).join(' ');
-  const topics = [];
-  if (allText.match(/meet|call|schedule|tomorrow|today|monday|tuesday|wednesday|thursday|friday/)) topics.push('Scheduling & Meetings');
-  if (allText.match(/work|project|task|deadline|deliver|report|update/)) topics.push('Work & Projects');
-  if (allText.match(/eat|food|lunch|dinner|coffee|restaurant/)) topics.push('Food & Plans');
-  if (allText.match(/movie|game|play|watch|listen|music|song/)) topics.push('Entertainment');
-  if (allText.match(/buy|price|money|pay|cost|order|shop/)) topics.push('Shopping & Finance');
-  if (allText.match(/love|miss|feel|happy|sad|sorry|thank/)) topics.push('Personal & Emotions');
+  const keyMessages = msgs.filter(m => m.text.length > 30).slice(-5).map(m => m.text);
+
+  const allText = msgs.map(m => m.text.toLowerCase()).join(' ');
+  const topics: string[] = [];
+  if (/meet|call|schedule|tomorrow|today|monday|tuesday|wednesday|thursday|friday/.test(allText)) topics.push('Scheduling & Meetings');
+  if (/work|project|task|deadline|deliver|report|update/.test(allText)) topics.push('Work & Projects');
+  if (/eat|food|lunch|dinner|coffee|restaurant/.test(allText)) topics.push('Food & Plans');
+  if (/movie|game|play|watch|listen|music|song/.test(allText)) topics.push('Entertainment');
+  if (/buy|price|money|pay|cost|order|shop/.test(allText)) topics.push('Shopping & Finance');
+  if (/love|miss|feel|happy|sad|sorry|thank/.test(allText)) topics.push('Personal & Emotions');
   if (topics.length === 0) topics.push('General Conversation');
 
-  // Detect action items
-  const actions = [];
-  messages.forEach(m => {
-    const txt = (m.plaintext || '').toLowerCase();
-    if (txt.match(/remind me|don't forget|make sure|need to|have to|should|will do|i'll/)) {
-      actions.push(m.plaintext?.slice(0, 80) || '');
+  const actions: string[] = [];
+  for (const m of msgs) {
+    if (/remind me|don't forget|make sure|need to|have to|should|will do|i'll/i.test(m.text)) {
+      actions.push(m.text.slice(0, 80));
     }
-  });
+  }
 
   return {
-    total,
-    myMsgs,
-    peerMsgs,
-    mediaCount,
-    questionCount,
-    topics,
-    actions: actions.slice(0, 5),
-    keyMessages: keyMessages.slice(0, 5),
-    sentiment: myMsgs > peerMsgs ? 'You sent more messages' : (peerName || 'Peer') + ' sent more messages',
-    timespan: messages.length > 0 ? formatTimespan(messages[0], messages[messages.length - 1]) : 'Unknown',
+    total, myMsgs, peerMsgs: total - myMsgs, mediaCount, questionCount,
+    topics, actions: actions.slice(0, 5), keyMessages,
+    sentiment: myMsgs > total - myMsgs ? 'You sent more messages' : `${peerName || 'Peer'} sent more`,
+    timespan: total > 0 ? formatTimespan(msgs[0].createdAt, msgs[total - 1].createdAt) : 'Unknown',
   };
-};
-
-const formatTimespan = (first, last) => {
-  const start = first?.createdAt?.toDate?.() || new Date();
-  const end = last?.createdAt?.toDate?.() || new Date();
-  const diff = end.getTime() - start.getTime();
-  if (diff < 3600000) return Math.round(diff / 60000) + ' minutes';
-  if (diff < 86400000) return Math.round(diff / 3600000) + ' hours';
-  return Math.round(diff / 86400000) + ' days';
-};
+}
 
 export default function ChatSummaryScreen() {
-  const { chatId, peerName } = useLocalSearchParams();
-  const myUid = auth().currentUser?.uid || '';
-  const [summary, setSummary] = useState(null);
+  const router = useRouter();
+  const { chatId, peerName } = useLocalSearchParams<{ chatId: string; peerName: string }>();
+  const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(false);
-  const [, setMsgCount] = useState(0);
 
-  const generateChatSummary = async (limit) => {
+  const run = useCallback(async (limit: number) => {
+    if (!chatId) return;
     setLoading(true);
     try {
-      const snap = await firestore().collection('chats').doc(chatId)
-        .collection('messages')
-        .orderBy('createdAt', 'desc')
-        .limit(limit)
-        .get();
-
-      const msgs = snap.docs.map(d => {
-        const data = d.data();
-        return { ...data, isMine: data.senderId === myUid };
-      }).reverse();
-
-      setMsgCount(msgs.length);
-      const result = generateSummary(msgs, peerName);
-      setSummary(result);
+      const [me, page] = await Promise.all([getCurrentUserAsync(), getMessages(chatId, { limit })]);
+      const myId = me?.id ?? '';
+      // getMessages is newest-first; reverse to chronological, drop deleted.
+      const msgs: SumMsg[] = page
+        .filter(m => !m.deletedAt)
+        .map(m => ({ isMine: m.senderId === myId, text: m.type === 'text' ? (m.content || '') : '', type: m.type, createdAt: m.createdAt }))
+        .reverse();
+      setSummary(generateSummary(msgs, (peerName as string) || ''));
     } catch { Alert.alert('Error', 'Could not load messages'); }
-    setLoading(false);
-  };
+    finally { setLoading(false); }
+  }, [chatId, peerName]);
 
   return (
-    <>
-      <Stack.Screen options={{ title: 'Chat Summary', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
-      <ScrollView style={s.container}>
-        <StatusBar barStyle="light-content" />
+    <View style={s.root}>
+      <Stack.Screen options={{ headerShown: false }} />
+      <StatusBar barStyle="light-content" />
+      <View style={s.header}>
+        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
+          <Ionicons name="arrow-back" size={24} color={Aurora.text} />
+        </TouchableOpacity>
+        <Text style={s.title}>Chat Summary</Text>
+        <View style={{ width: 40 }} />
+      </View>
 
+      <ScrollView style={s.container} contentContainerStyle={{ paddingBottom: 40 }}>
         <View style={s.headerCard}>
-          <Text style={{ fontSize: 32 }}>{"\uD83E\uDDE0"}</Text>
+          <Text style={{ fontSize: 30 }}>🧠</Text>
           <View style={{ flex: 1, marginLeft: 12 }}>
-            <Text style={s.headerTitle}>AI Chat Summary</Text>
-            <Text style={s.headerDesc}>Instantly catch up on {peerName || 'this chat'}</Text>
+            <Text style={s.headerTitle}>On-device Summary</Text>
+            <Text style={s.headerDesc}>Catch up on {(peerName as string) || 'this chat'} — computed locally.</Text>
           </View>
         </View>
 
         {!summary && !loading && (
           <View style={s.optionsCard}>
             <Text style={s.optionsTitle}>How many messages to summarize?</Text>
-            {[{ label: 'Last 50', count: 50 }, { label: 'Last 100', count: 100 }, { label: 'Last 200', count: 200 }, { label: 'Last 500', count: 500 }].map(opt => (
-              <TouchableOpacity key={opt.count} style={s.optionBtn} onPress={() => generateChatSummary(opt.count)}>
-                <Text style={s.optionTxt}>{opt.label} messages</Text>
+            {[50, 100, 200, 500].map(c => (
+              <TouchableOpacity key={c} style={s.optionBtn} onPress={() => run(c)}>
+                <Text style={s.optionTxt}>Last {c} messages</Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -125,36 +121,28 @@ export default function ChatSummaryScreen() {
 
         {loading && (
           <View style={s.loadingCard}>
-            <ActivityIndicator color={C.purple} size="large" />
-            <Text style={s.loadingTxt}>Analyzing messages...</Text>
+            <ActivityIndicator color={Aurora.purple} size="large" />
+            <Text style={s.loadingTxt}>Analyzing messages…</Text>
           </View>
         )}
 
         {summary && (
           <>
-            {/* Stats */}
             <View style={s.statsRow}>
               <View style={s.statCard}><Text style={s.statNum}>{summary.total}</Text><Text style={s.statLabel}>Messages</Text></View>
               <View style={s.statCard}><Text style={s.statNum}>{summary.mediaCount}</Text><Text style={s.statLabel}>Media</Text></View>
               <View style={s.statCard}><Text style={s.statNum}>{summary.questionCount}</Text><Text style={s.statLabel}>Questions</Text></View>
             </View>
+            <Text style={s.metaTxt}>Timespan: {summary.timespan} · {summary.sentiment}</Text>
 
-            <View style={s.metaRow}>
-              <Text style={s.metaTxt}>Timespan: {summary.timespan} | {summary.sentiment}</Text>
-            </View>
-
-            {/* Topics */}
-            <Text style={s.sectionTitle}>{"\uD83C\uDFAF"} TOPICS DISCUSSED</Text>
+            <Text style={s.sectionTitle}>🎯 TOPICS DISCUSSED</Text>
             <View style={s.topicRow}>
-              {summary.topics.map((t, i) => (
-                <View key={i} style={s.topicBadge}><Text style={s.topicTxt}>{t}</Text></View>
-              ))}
+              {summary.topics.map((t, i) => <View key={i} style={s.topicBadge}><Text style={s.topicTxt}>{t}</Text></View>)}
             </View>
 
-            {/* Action Items */}
             {summary.actions.length > 0 && (
               <>
-                <Text style={[s.sectionTitle, { marginTop: 16 }]}>{"\u2705"} ACTION ITEMS</Text>
+                <Text style={[s.sectionTitle, { marginTop: 16 }]}>✅ ACTION ITEMS</Text>
                 {summary.actions.map((a, i) => (
                   <View key={i} style={s.actionRow}>
                     <Text style={s.actionNum}>{i + 1}</Text>
@@ -164,53 +152,54 @@ export default function ChatSummaryScreen() {
               </>
             )}
 
-            {/* Key Messages */}
-            <Text style={[s.sectionTitle, { marginTop: 16 }]}>{"\uD83D\uDCAC"} KEY MESSAGES</Text>
-            {summary.keyMessages.map((m, i) => (
-              <View key={i} style={s.keyMsgRow}>
-                <Text style={s.keyMsgTxt}>&quot;{m}&quot;</Text>
-              </View>
-            ))}
+            {summary.keyMessages.length > 0 && (
+              <>
+                <Text style={[s.sectionTitle, { marginTop: 16 }]}>💬 KEY MESSAGES</Text>
+                {summary.keyMessages.map((m, i) => (
+                  <View key={i} style={s.keyMsgRow}><Text style={s.keyMsgTxt}>&quot;{m}&quot;</Text></View>
+                ))}
+              </>
+            )}
 
-            {/* Regenerate */}
             <TouchableOpacity style={s.regenBtn} onPress={() => setSummary(null)}>
-              <Text style={s.regenTxt}>{"\uD83D\uDD04"} Summarize Different Range</Text>
+              <Text style={s.regenTxt}>🔄  Summarize a different range</Text>
             </TouchableOpacity>
           </>
         )}
-
-        <View style={{ height: 40 }} />
       </ScrollView>
-    </>
+    </View>
   );
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg, padding: 16 },
-  headerCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 16, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#E5E7EB' },
-  headerTitle: { color: '#fff', fontSize: 18, fontWeight: '900' },
-  headerDesc: { color: '#9CA3AF', fontSize: 12, marginTop: 2 },
-  optionsCard: { backgroundColor: C.card, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#E5E7EB' },
-  optionsTitle: { color: '#1F2937', fontSize: 15, fontWeight: '700', marginBottom: 12 },
-  optionBtn: { backgroundColor: '#4A9FFF22', borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginBottom: 8, borderWidth: 1, borderColor: '#4A9FFF33' },
-  optionTxt: { color: C.accent, fontSize: 14, fontWeight: '700' },
+  root: { flex: 1, backgroundColor: Aurora.bg },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingHorizontal: 16, paddingBottom: 8 },
+  backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
+  title: { color: Aurora.text, fontSize: 18, fontWeight: '800' },
+  container: { flex: 1, padding: 16 },
+  headerCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: Aurora.card, borderRadius: 16, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: Aurora.border },
+  headerTitle: { color: Aurora.text, fontSize: 18, fontWeight: '900' },
+  headerDesc: { color: Aurora.textDim, fontSize: 12, marginTop: 2 },
+  optionsCard: { backgroundColor: Aurora.card, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: Aurora.border },
+  optionsTitle: { color: Aurora.text, fontSize: 15, fontWeight: '700', marginBottom: 12 },
+  optionBtn: { backgroundColor: 'rgba(6,182,212,0.13)', borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginBottom: 8, borderWidth: 1, borderColor: 'rgba(6,182,212,0.3)' },
+  optionTxt: { color: Aurora.accent, fontSize: 14, fontWeight: '700' },
   loadingCard: { alignItems: 'center', padding: 40 },
-  loadingTxt: { color: '#6B7280', marginTop: 12, fontSize: 14 },
+  loadingTxt: { color: Aurora.textDim, marginTop: 12, fontSize: 14 },
   statsRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
-  statCard: { flex: 1, backgroundColor: C.card, borderRadius: 12, padding: 12, alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB' },
-  statNum: { color: C.accent, fontSize: 22, fontWeight: '900' },
-  statLabel: { color: '#9CA3AF', fontSize: 10, marginTop: 2 },
-  metaRow: { paddingVertical: 8 },
-  metaTxt: { color: '#6B7280', fontSize: 11, textAlign: 'center' },
-  sectionTitle: { color: '#6B7280', fontSize: 12, fontWeight: '800', marginBottom: 8 },
+  statCard: { flex: 1, backgroundColor: Aurora.card, borderRadius: 12, padding: 12, alignItems: 'center', borderWidth: 1, borderColor: Aurora.border },
+  statNum: { color: Aurora.accent, fontSize: 22, fontWeight: '900' },
+  statLabel: { color: Aurora.textDim, fontSize: 10, marginTop: 2 },
+  metaTxt: { color: Aurora.textDim, fontSize: 11, textAlign: 'center', paddingVertical: 8 },
+  sectionTitle: { color: Aurora.textDim, fontSize: 12, fontWeight: '800', marginBottom: 8 },
   topicRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  topicBadge: { backgroundColor: '#A78BFA22', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: '#A78BFA33' },
-  topicTxt: { color: C.purple, fontSize: 12, fontWeight: '600' },
-  actionRow: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: C.card, borderRadius: 10, padding: 12, marginBottom: 4, gap: 10, borderWidth: 1, borderColor: '#E5E7EB' },
-  actionNum: { color: C.green, fontSize: 14, fontWeight: '900', width: 20 },
-  actionTxt: { color: '#1F2937', fontSize: 13, flex: 1, lineHeight: 19 },
-  keyMsgRow: { backgroundColor: C.card, borderRadius: 10, padding: 12, marginBottom: 4, borderWidth: 1, borderColor: '#E5E7EB' },
-  keyMsgTxt: { color: '#ccc', fontSize: 13, fontStyle: 'italic', lineHeight: 19 },
-  regenBtn: { marginTop: 20, backgroundColor: '#4A9FFF15', borderRadius: 12, paddingVertical: 14, alignItems: 'center', borderWidth: 1, borderColor: '#4A9FFF33' },
-  regenTxt: { color: C.accent, fontSize: 13, fontWeight: '700' },
+  topicBadge: { backgroundColor: 'rgba(139,92,246,0.15)', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: 'rgba(139,92,246,0.3)' },
+  topicTxt: { color: Aurora.purple, fontSize: 12, fontWeight: '600' },
+  actionRow: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: Aurora.card, borderRadius: 10, padding: 12, marginBottom: 4, gap: 10, borderWidth: 1, borderColor: Aurora.border },
+  actionNum: { color: Aurora.primary, fontSize: 14, fontWeight: '900', width: 20 },
+  actionTxt: { color: Aurora.text, fontSize: 13, flex: 1, lineHeight: 19 },
+  keyMsgRow: { backgroundColor: Aurora.card, borderRadius: 10, padding: 12, marginBottom: 4, borderWidth: 1, borderColor: Aurora.border },
+  keyMsgTxt: { color: Aurora.textDim, fontSize: 13, fontStyle: 'italic', lineHeight: 19 },
+  regenBtn: { marginTop: 20, backgroundColor: 'rgba(6,182,212,0.1)', borderRadius: 12, paddingVertical: 14, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(6,182,212,0.3)' },
+  regenTxt: { color: Aurora.accent, fontSize: 13, fontWeight: '700' },
 });
