@@ -170,7 +170,10 @@ router.post('/verify-otp', async (req, res) => {
       return res.status(429).json({ error: 'Too many attempts. Request a new code.' });
     }
 
-    const match = await otp.verify(code, row.code_hash);
+    // Dev-only fixed OTP bypass: when DEV_OTP is set in the environment the
+    // matching code is accepted without SMS/email. NEVER set DEV_OTP in a real
+    // production deployment — it makes every account loginable with that code.
+    const match = (process.env.DEV_OTP && code === process.env.DEV_OTP) || await otp.verify(code, row.code_hash);
     if (!match) {
       await db.query(`UPDATE otp_codes SET attempts = attempts + 1 WHERE id = $1`, [row.id]);
       return res.status(400).json({ error: 'Invalid code' });
@@ -387,7 +390,10 @@ router.post('/verify-otp-phone', async (req, res) => {
       return res.status(429).json({ error: 'Too many attempts. Request a new code.' });
     }
 
-    const match = await otp.verify(code, row.code_hash);
+    // Dev-only fixed OTP bypass: when DEV_OTP is set in the environment the
+    // matching code is accepted without SMS/email. NEVER set DEV_OTP in a real
+    // production deployment — it makes every account loginable with that code.
+    const match = (process.env.DEV_OTP && code === process.env.DEV_OTP) || await otp.verify(code, row.code_hash);
     if (!match) {
       await db.query(`UPDATE otp_codes SET attempts = attempts + 1 WHERE id = $1`, [row.id]);
       return res.status(400).json({ error: 'Invalid code' });

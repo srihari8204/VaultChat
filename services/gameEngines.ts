@@ -2912,27 +2912,33 @@ export function initGame(gameType: string, players?: string[]): GameState {
 }
 
 export function makeGameMove(gameType: string, state: GameState, move: any, playerId: string): MoveResult {
-  switch (gameType) {
-    case 'chess': return chessMove(state, move, playerId);
-    case 'ludo': return ludoMove(state, move, playerId);
-    case 'rummy': return rummyMove(state, move, playerId);
-    case 'carrom': return carromMove(state, move, playerId);
-    case 'vaultdice': return vaultdiceMove(state, move, playerId);
-    case 'mahjong': return mahjongMove(state, move, playerId);
-    case 'go': return goMove(state, move, playerId);
-    case 'xiangqi': return xiangqiMove(state, move, playerId);
-    case 'doudizhu': return doudizhuMove(state, move, playerId);
-    case 'shogi': return shogiMove(state, move, playerId);
-    case 'hanafuda': return hanafudaMove(state, move, playerId);
-    case 'poker': return pokerMove(state, move, playerId);
-    case 'backgammon': return backgammonMove(state, move, playerId);
-    case 'mancala': return mancalaMove(state, move, playerId);
-    case 'dominoes': return dominoesMove(state, move, playerId);
-    case 'durak': return durakMove(state, move, playerId);
-    case 'okey': return okeyMove(state, move, playerId);
-    case 'truco': return trucoMove(state, move, playerId);
-    case 'trivia': return triviaMove(state, move, playerId);
-    default: throw new Error(`Unknown game type: ${gameType}`);
+  // A malformed move (e.g. a dice move sent to the chess engine by the generic
+  // play screen) must never crash the UI — engines may destructure move fields.
+  try {
+    switch (gameType) {
+      case 'chess': return chessMove(state, move, playerId);
+      case 'ludo': return ludoMove(state, move, playerId);
+      case 'rummy': return rummyMove(state, move, playerId);
+      case 'carrom': return carromMove(state, move, playerId);
+      case 'vaultdice': return vaultdiceMove(state, move, playerId);
+      case 'mahjong': return mahjongMove(state, move, playerId);
+      case 'go': return goMove(state, move, playerId);
+      case 'xiangqi': return xiangqiMove(state, move, playerId);
+      case 'doudizhu': return doudizhuMove(state, move, playerId);
+      case 'shogi': return shogiMove(state, move, playerId);
+      case 'hanafuda': return hanafudaMove(state, move, playerId);
+      case 'poker': return pokerMove(state, move, playerId);
+      case 'backgammon': return backgammonMove(state, move, playerId);
+      case 'mancala': return mancalaMove(state, move, playerId);
+      case 'dominoes': return dominoesMove(state, move, playerId);
+      case 'durak': return durakMove(state, move, playerId);
+      case 'okey': return okeyMove(state, move, playerId);
+      case 'truco': return trucoMove(state, move, playerId);
+      case 'trivia': return triviaMove(state, move, playerId);
+      default: return { state, valid: false, message: `Unknown game type: ${gameType}` };
+    }
+  } catch (e: any) {
+    return { state, valid: false, message: e?.message ? `Move error: ${e.message}` : 'Invalid move' };
   }
 }
 

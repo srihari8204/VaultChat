@@ -56,3 +56,6 @@ add_*.js
 fix_*.js
 *.ghost-backup
 *.vo-backup
+
+# Expo export bundle (build artifact)
+dist-export/

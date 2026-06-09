@@ -1,227 +1,130 @@
 /**
- * app/otp.tsx
- * OTP Verification — CRED-style premium UI
- * Auto-captures OTP from SMS via textContentType="oneTimeCode" + autoComplete
- * Supports clipboard paste detection for quick OTP entry
+ * app/otp.tsx — 6-digit OTP verification (Obsidian Aurora).
+ *
+ * Works for phone (flow='phone' → verifyPhoneOTP) and email (flow='login' /
+ * 'signup' → verifyOTP). Auto-advance, auto-submit on the 6th digit, 30s
+ * resend timer, and SMS-clipboard auto-detect. Routes new users to profile
+ * setup, existing users to the app. No permission prompts.
  */
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
-  Animated,
-  AppState,
-  Keyboard,
-  KeyboardAvoidingView,
-  Platform,
-  StyleSheet,
-  Text, TextInput, TouchableOpacity,
-  View,
+  ActivityIndicator, Animated, AppState, Keyboard, KeyboardAvoidingView,
+  Platform, StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
+import { Aurora } from '../constants/theme';
 import {
-  clearPendingSignup,
-  getPendingSignup,
-  savePIN,
-  saveUserProfile,
-  sendOTP,
-  verifyOTP,
+  clearPendingSignup, getPendingSignup, savePIN, saveUserProfile,
+  sendOTP, verifyOTP, sendPhoneOTP, verifyPhoneOTP, hasPIN,
 } from './(constants)/authService';
 import { markSetupComplete } from '../services/securityService';
-
-/**
- * Verify the OTP and, for signup flow, finish the profile setup.
- * `phone` carries the email address (the URL param keeps its old name
- * for backwards compatibility with existing routes).
- */
-async function submitOtpForFlow(email: string, code: string, isSignup: boolean): Promise<boolean> {
-  let name: string | undefined;
-  let pending: Awaited<ReturnType<typeof getPendingSignup>> = null;
-  if (isSignup) {
-    pending = await getPendingSignup();
-    name = pending?.name;
-  }
-  const result = await verifyOTP(email, code, name);
-  if (!result?.user) return false;
-
-  if (isSignup) {
-    if (pending) {
-      try { await saveUserProfile(pending); } catch (e) { console.warn('[OTP] profile save failed', e); }
-    }
-    try {
-      const pendingPin = await AsyncStorage.getItem('vc_pending_pin');
-      if (pendingPin) {
-        await savePIN(pendingPin);
-        await AsyncStorage.removeItem('vc_pending_pin').catch(() => {});
-      }
-    } catch (e) { console.warn('[OTP] PIN save failed', e); }
-    await clearPendingSignup();
-  }
-  return true;
-}
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function OTPScreen() {
   const { phone, flow } = useLocalSearchParams<{ phone: string; flow?: string }>();
-  const router    = useRouter();
+  const router = useRouter();
+  const isPhone = flow === 'phone';
+  const target = (phone as string) ?? '';
 
-  // Phase 3a: chats is back online (Postgres-backed), land users there.
-  const getPostVerifyRoute = async () => {
-    return '/(tabs)/chats';
-  };
-
-  const [otp,       setOtp]       = useState(['','','','','','']);
-  const [loading,   setLoading]   = useState(false);
-  const [resending, setResending] = useState(false);
+  const [otp, setOtp] = useState(['', '', '', '', '', '']);
+  const [loading, setLoading] = useState(false);
   const [countdown, setCountdown] = useState(30);
-  const [canResend, setCanResend] = useState(false);
-  const [error,     setError]     = useState('');
+  const [error, setError] = useState('');
+  const [done, setDone] = useState(false);
   const [autoDetected, setAutoDetected] = useState(false);
 
   const inputs = useRef<any[]>([]);
-  const fadeIn = useRef(new Animated.Value(0)).current;
-  const slideUp = useRef(new Animated.Value(40)).current;
-  const dotAnims = useRef([0,1,2].map(() => new Animated.Value(0))).current;
   const shakeAnim = useRef(new Animated.Value(0)).current;
-  const successScale = useRef(new Animated.Value(0)).current;
   const appStateRef = useRef(AppState.currentState);
 
-  // ── Entrance animation ─────────────────────────────────────────
+  // ── Countdown for resend ───────────────────────────────────────
   useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeIn, { toValue: 1, duration: 600, useNativeDriver: true }),
-      Animated.spring(slideUp, { toValue: 0, tension: 60, friction: 12, useNativeDriver: true }),
-    ]).start();
-    const doInitialSend = async () => {
-      try {
-        setLoading(true);
-        setError('');
-        await sendOTP(phone as string);
-      } catch (e: any) {
-        setError(e?.message || 'Failed to send OTP');
-      } finally {
-        setLoading(false);
-      }
-    };
-    doInitialSend();
-  }, [fadeIn, slideUp, phone]);
-
-  // ── Loading dots animation ─────────────────────────────────────
-  useEffect(() => {
-    if (!loading) return;
-    const anims = dotAnims.map((dot, i) =>
-      Animated.loop(Animated.sequence([
-        Animated.delay(i * 200),
-        Animated.timing(dot, { toValue: 1, duration: 300, useNativeDriver: true }),
-        Animated.timing(dot, { toValue: 0, duration: 300, useNativeDriver: true }),
-      ]))
-    );
-    anims.forEach(a => a.start());
-    return () => anims.forEach(a => a.stop());
-  }, [loading, dotAnims]);
-
-  // ── Countdown ──────────────────────────────────────────────────
-  useEffect(() => {
-    if (countdown <= 0) { setCanResend(true); return; }
+    if (countdown <= 0) return;
     const t = setTimeout(() => setCountdown(c => c - 1), 1000);
     return () => clearTimeout(t);
   }, [countdown]);
 
-  // ── OTP Auto-capture: clipboard monitoring ─────────────────────
-  // When user switches back from SMS app, check clipboard for 6-digit code
+  // ── SMS clipboard auto-detect on return-to-foreground ──────────
   useEffect(() => {
-    const shakeInEffect = () => {
-      Animated.sequence([
-        Animated.timing(shakeAnim, { toValue: 15, duration: 50, useNativeDriver: true }),
-        Animated.timing(shakeAnim, { toValue: -15, duration: 50, useNativeDriver: true }),
-        Animated.timing(shakeAnim, { toValue: 10, duration: 50, useNativeDriver: true }),
-        Animated.timing(shakeAnim, { toValue: -10, duration: 50, useNativeDriver: true }),
-        Animated.timing(shakeAnim, { toValue: 0, duration: 50, useNativeDriver: true }),
-      ]).start();
-    };
-    const doVerify = async (code: string) => {
-      try {
-        setLoading(true);
-        setError('');
-        const ok = await submitOtpForFlow(phone as string, code, flow === 'signup');
-        if (ok) {
-          if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          Animated.spring(successScale, { toValue: 1, tension: 50, friction: 8, useNativeDriver: true }).start();
-          if (flow !== 'signup') {
-            try { await markSetupComplete(); } catch {}
-          }
-          let route: string;
-          try { route = await getPostVerifyRoute(); } catch { route = '/(tabs)/chats'; }
-          setTimeout(() => router.replace(route as any), 800);
-        } else {
-          shakeInEffect();
-          setError('Invalid code. Try again.');
-          setOtp(['','','','','','']);
-          inputs.current[0]?.focus();
-          if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        }
-      } catch (e: any) {
-        shakeInEffect();
-        setError(e?.message || 'Invalid code. Try again.');
-        setOtp(['','','','','','']);
-        inputs.current[0]?.focus();
-        if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    const sub = AppState.addEventListener('change', async (nextState) => {
-      if (appStateRef.current.match(/inactive|background/) && nextState === 'active') {
+    const sub = AppState.addEventListener('change', async (next) => {
+      if (appStateRef.current.match(/inactive|background/) && next === 'active' && !autoDetected) {
         try {
           const clip = await Clipboard.getStringAsync();
-          const match = clip?.match(/\b(\d{6})\b/);
-          if (match && !autoDetected) {
-            const digits = match[1].split('');
-            setOtp(digits);
+          const m = clip?.match(/\b(\d{6})\b/);
+          if (m) {
+            setOtp(m[1].split(''));
             setAutoDetected(true);
             if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            // Auto-verify after short delay
-            setTimeout(() => doVerify(match[1]), 500);
+            setTimeout(() => verify(m[1]), 350);
           }
         } catch {}
       }
-      appStateRef.current = nextState;
+      appStateRef.current = next;
     });
     return () => sub.remove();
-  }, [autoDetected, router, successScale, shakeAnim]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoDetected]);
 
-  // ── Send OTP ───────────────────────────────────────────────────
-  const doSendOTP = async () => {
+  const shake = () => {
+    Animated.sequence([
+      Animated.timing(shakeAnim, { toValue: 12, duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: -12, duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: 8, duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: 0, duration: 50, useNativeDriver: true }),
+    ]).start();
+  };
+
+  // ── Verify ─────────────────────────────────────────────────────
+  const verify = async (code: string) => {
+    if (loading || done) return;
+    setLoading(true);
+    setError('');
     try {
-      setLoading(true);
-      setError('');
-      await sendOTP(phone as string);
+      let isNewUser = false;
+      if (isPhone) {
+        const r = await verifyPhoneOTP(target, code);
+        if (!r?.user) throw new Error('Verification failed');
+        isNewUser = !!r.isNewUser;
+      } else {
+        const ok = await submitEmailFlow(target, code, flow === 'signup');
+        if (!ok) throw new Error('Invalid code');
+      }
+
+      if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setDone(true);
+
+      // Route: new users finish profile setup → MPIN; existing users go
+      // through the MPIN gate (set one if they never have, else enter it).
+      const pinSet = await hasPIN().catch(() => false);
+      setTimeout(() => {
+        if (isPhone && isNewUser) {
+          router.replace({ pathname: '/profile-setup', params: { phone: target } } as any);
+        } else if (pinSet) {
+          router.replace('/enter-mpin' as any);
+        } else {
+          markSetupComplete().catch(() => {});
+          router.replace('/set-mpin' as any);
+        }
+      }, 650);
     } catch (e: any) {
-      setError(e?.message || 'Failed to send OTP');
+      shake();
+      setError(e?.message || 'Invalid code. Try again.');
+      setOtp(['', '', '', '', '', '']);
+      inputs.current[0]?.focus();
+      if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {
       setLoading(false);
     }
   };
 
-  // ── Resend ─────────────────────────────────────────────────────
-  const handleResend = async () => {
-    if (!canResend) return;
-    setResending(true);
-    setCanResend(false);
-    setCountdown(30);
-    setOtp(['','','','','','']);
-    setAutoDetected(false);
-    await doSendOTP();
-    setResending(false);
-  };
-
-  // ── Handle digit input ─────────────────────────────────────────
-  const handleChange = (val: string, idx: number) => {
-    // Handle paste of full OTP
-    if (val.length === 6 && /^\d{6}$/.test(val)) {
-      const digits = val.split('');
-      setOtp(digits);
+  // ── Input handling ─────────────────────────────────────────────
+  const onChange = (val: string, idx: number) => {
+    if (val.length === 6 && /^\d{6}$/.test(val)) { // full paste
+      setOtp(val.split(''));
       Keyboard.dismiss();
-      doVerifyOTP(val);
+      verify(val);
       return;
     }
     if (!/^\d*$/.test(val)) return;
@@ -229,15 +132,13 @@ export default function OTPScreen() {
     next[idx] = val.slice(-1);
     setOtp(next);
     if (val && idx < 5) inputs.current[idx + 1]?.focus();
-    if (!val && idx > 0) inputs.current[idx - 1]?.focus();
-    if (next.every(d => d !== '') && val) {
+    if (next.every(d => d !== '')) {
       if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      doVerifyOTP(next.join(''));
+      verify(next.join(''));
     }
   };
 
-  // ── Handle key press for backspace ─────────────────────────────
-  const handleKeyPress = (e: any, idx: number) => {
+  const onKey = (e: any, idx: number) => {
     if (e.nativeEvent.key === 'Backspace' && !otp[idx] && idx > 0) {
       const next = [...otp];
       next[idx - 1] = '';
@@ -246,86 +147,47 @@ export default function OTPScreen() {
     }
   };
 
-  // ── Shake animation ────────────────────────────────────────────
-  const shake = () => {
-    Animated.sequence([
-      Animated.timing(shakeAnim, { toValue: 15, duration: 50, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: -15, duration: 50, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: 10, duration: 50, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: -10, duration: 50, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: 0, duration: 50, useNativeDriver: true }),
-    ]).start();
-  };
-
-  // ── Verify OTP ─────────────────────────────────────────────────
-  const doVerifyOTP = async (code: string) => {
+  const resend = async () => {
+    if (countdown > 0) return;
+    setOtp(['', '', '', '', '', '']);
+    setAutoDetected(false);
+    setError('');
+    setCountdown(30);
     try {
-      setLoading(true);
-      setError('');
-      console.log('[OTP] Verifying code:', code, 'flow:', flow);
-      const ok = await submitOtpForFlow(phone as string, code, flow === 'signup');
-      console.log('[OTP] Verify result:', ok);
-      if (ok) {
-        if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        Animated.spring(successScale, { toValue: 1, tension: 50, friction: 8, useNativeDriver: true }).start();
-        if (flow !== 'signup') await markSetupComplete();
-        const route = await getPostVerifyRoute();
-        console.log('[OTP] Navigating to:', route);
-        setTimeout(() => router.replace(route as any), 800);
-      } else {
-        shake();
-        setError('Invalid code. Try again.');
-        setOtp(['','','','','','']);
-        inputs.current[0]?.focus();
-        if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      }
-    } catch (e: any) {
-      shake();
-      setError(e?.message || 'Invalid code. Try again.');
-      setOtp(['','','','','','']);
+      if (isPhone) await sendPhoneOTP(target);
+      else await sendOTP(target);
       inputs.current[0]?.focus();
-      if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-    } finally {
-      setLoading(false);
+    } catch (e: any) {
+      setError(e?.message || 'Failed to resend code');
     }
   };
 
-  const handleVerify = () => {
-    const code = otp.join('');
-    if (code.length < 6) { setError('Enter all 6 digits'); return; }
-    doVerifyOTP(code);
-  };
+  const filled = otp.filter(d => d !== '').length;
 
-  const filledCount = otp.filter(d => d !== '').length;
+  if (done) {
+    return (
+      <View style={[s.screen, s.center]}>
+        <View style={s.successCircle}><Text style={s.successCheck}>✓</Text></View>
+        <Text style={s.successTxt}>Verified</Text>
+      </View>
+    );
+  }
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={{ flex: 1 }}
-    >
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
       <View style={s.screen}>
-        <Animated.View style={{ flex: 1, opacity: fadeIn, transform: [{ translateY: slideUp }] }}>
-
-        {/* Back button */}
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
           <Text style={s.backTxt}>←</Text>
         </TouchableOpacity>
 
         <View style={s.content}>
-          {/* Header */}
-          <Text style={s.title}>Verify your{'\n'}number</Text>
-          <Text style={s.subtitle}>
-            Code sent to <Text style={s.phone}>{phone}</Text>
-          </Text>
+          <Text style={s.title}>Verify your{'\n'}{isPhone ? 'number' : 'email'}</Text>
+          <Text style={s.subtitle}>Code sent to <Text style={s.target}>{target}</Text></Text>
 
-          {/* Auto-detect badge */}
           {autoDetected && (
-            <View style={s.autoBadge}>
-              <Text style={s.autoTxt}>Auto-detected from SMS</Text>
-            </View>
+            <View style={s.autoBadge}><Text style={s.autoTxt}>Auto-detected from SMS</Text></View>
           )}
 
-          {/* OTP Boxes */}
           <Animated.View style={[s.otpRow, { transform: [{ translateX: shakeAnim }] }]}>
             {otp.map((digit, i) => (
               <View key={i} style={s.otpWrap}>
@@ -333,118 +195,94 @@ export default function OTPScreen() {
                   ref={r => { inputs.current[i] = r; }}
                   style={[s.otpBox, digit ? s.otpBoxFilled : null]}
                   value={digit}
-                  onChangeText={v => handleChange(v, i)}
-                  onKeyPress={e => handleKeyPress(e, i)}
+                  onChangeText={v => onChange(v, i)}
+                  onKeyPress={e => onKey(e, i)}
                   keyboardType="number-pad"
                   maxLength={6}
+                  autoFocus={i === 0}
                   selectTextOnFocus
                   textContentType="oneTimeCode"
-                  autoComplete={i === 0 ? 'sms-otp' as any : 'off'}
+                  autoComplete={i === 0 ? ('sms-otp' as any) : 'off'}
+                  selectionColor={Aurora.primary}
                 />
                 <View style={[s.otpLine, digit ? s.otpLineFilled : null]} />
               </View>
             ))}
           </Animated.View>
 
-          {/* Error */}
           {error ? <Text style={s.error}>{error}</Text> : null}
 
-          {/* Progress indicator */}
-          <View style={s.progressRow}>
-            {[0,1,2,3,4,5].map(i => (
-              <View key={i} style={[s.progressDot, i < filledCount && s.progressDotFilled]} />
-            ))}
-          </View>
-
-          {/* Verify button */}
           <TouchableOpacity
-            style={[s.verifyBtn, filledCount < 6 && s.verifyBtnOff]}
-            onPress={handleVerify}
-            disabled={loading || filledCount < 6}
-            activeOpacity={0.8}
+            style={[s.verifyBtn, filled < 6 && s.verifyOff]}
+            onPress={() => verify(otp.join(''))}
+            disabled={loading || filled < 6}
+            activeOpacity={0.85}
           >
-            {loading ? (
-              <View style={s.dotsRow}>
-                {dotAnims.map((dot, i) => (
-                  <Animated.View key={i} style={[s.loadDot, { transform: [{ translateY: dot.interpolate({ inputRange: [0, 1], outputRange: [0, -8] }) }] }]} />
-                ))}
-              </View>
-            ) : (
-              <Text style={s.verifyTxt}>Verify</Text>
-            )}
+            {loading ? <ActivityIndicator color="#04130D" /> : <Text style={s.verifyTxt}>Verify</Text>}
           </TouchableOpacity>
 
-          {/* Resend */}
-          <TouchableOpacity onPress={handleResend} disabled={!canResend || resending} style={s.resendBtn}>
-            <Text style={[s.resendTxt, canResend && s.resendActive]}>
-              {canResend ? 'Resend code' : `Resend in ${countdown}s`}
+          <TouchableOpacity onPress={resend} disabled={countdown > 0} style={s.resendBtn}>
+            <Text style={[s.resendTxt, countdown === 0 && s.resendActive]}>
+              {countdown > 0 ? `Resend code in ${countdown}s` : 'Resend code'}
             </Text>
           </TouchableOpacity>
-
-          {/* Change number */}
-          <TouchableOpacity onPress={() => router.back()} style={s.changeBtn}>
-            <Text style={s.changeTxt}>Change number</Text>
-          </TouchableOpacity>
         </View>
-
-        {/* Success overlay */}
-        <Animated.View style={[s.successOverlay, {
-          opacity: successScale,
-          transform: [{ scale: successScale }],
-        }]} pointerEvents="none">
-          <View style={s.successCircle}>
-            <Text style={s.successCheck}>✓</Text>
-          </View>
-          <Text style={s.successTxt}>Verified</Text>
-        </Animated.View>
-
-      </Animated.View>
       </View>
     </KeyboardAvoidingView>
   );
 }
 
+// Email login/signup path (kept for existing flows): verify + finish any
+// pending signup profile/PIN saved by the multi-step email signup screen.
+async function submitEmailFlow(email: string, code: string, isSignup: boolean): Promise<boolean> {
+  let name: string | undefined;
+  let pending = null as Awaited<ReturnType<typeof getPendingSignup>>;
+  if (isSignup) { pending = await getPendingSignup(); name = pending?.name; }
+  const result = await verifyOTP(email, code, name);
+  if (!result?.user) return false;
+  if (isSignup) {
+    if (pending) { try { await saveUserProfile(pending); } catch {} }
+    try {
+      const pendingPin = await AsyncStorage.getItem('vc_pending_pin');
+      if (pendingPin) { await savePIN(pendingPin); await AsyncStorage.removeItem('vc_pending_pin').catch(() => {}); }
+    } catch {}
+    await clearPendingSignup();
+  }
+  return true;
+}
+
 const s = StyleSheet.create({
-  screen:      { flex: 1, backgroundColor: '#FFFFFF' },
-  backBtn:     { paddingTop: 56, paddingLeft: 24 },
-  backTxt:     { color: '#000000', fontSize: 28, fontWeight: '200' },
-  content:     { flex: 1, paddingHorizontal: 32, paddingTop: 40 },
-  title:       { color: '#000000', fontSize: 36, fontWeight: '800', lineHeight: 44, marginBottom: 12 },
-  subtitle:    { color: 'rgba(0,0,0,0.4)', fontSize: 15, marginBottom: 32, lineHeight: 22 },
-  phone:       { color: '#000000', fontWeight: '700' },
+  screen: { flex: 1, backgroundColor: Aurora.bg },
+  center: { alignItems: 'center', justifyContent: 'center' },
+  backBtn: { paddingTop: 56, paddingLeft: 24, width: 80 },
+  backTxt: { color: Aurora.text, fontSize: 28, fontWeight: '300' },
+  content: { flex: 1, paddingHorizontal: 28, paddingTop: 32 },
 
-  autoBadge:   { backgroundColor: 'rgba(16,185,129,0.12)', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, alignSelf: 'flex-start', marginBottom: 20, borderWidth: 1, borderColor: 'rgba(16,185,129,0.25)' },
-  autoTxt:     { color: '#10B981', fontSize: 12, fontWeight: '700' },
+  title: { color: Aurora.text, fontSize: 30, fontWeight: '800', lineHeight: 36, marginBottom: 10 },
+  subtitle: { color: Aurora.textDim, fontSize: 14, marginBottom: 28 },
+  target: { color: Aurora.text, fontWeight: '700' },
 
-  otpRow:      { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12, gap: 12 },
-  otpWrap:     { flex: 1, alignItems: 'center' },
-  otpBox:      { width: '100%', height: 56, color: '#000000', fontSize: 28, fontWeight: '700', textAlign: 'center', backgroundColor: 'transparent' },
-  otpBoxFilled:{},
-  otpLine:     { width: '100%', height: 2, backgroundColor: 'rgba(0,0,0,0.12)', borderRadius: 1 },
-  otpLineFilled:{ backgroundColor: '#000000' },
+  autoBadge: { alignSelf: 'flex-start', backgroundColor: 'rgba(16,185,129,0.12)', borderColor: 'rgba(16,185,129,0.3)', borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, marginBottom: 18 },
+  autoTxt: { color: Aurora.primary, fontSize: 12, fontWeight: '700' },
 
-  error:       { color: '#EF4444', fontSize: 13, marginBottom: 12 },
+  otpRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 10, marginBottom: 14 },
+  otpWrap: { flex: 1, alignItems: 'center' },
+  otpBox: { width: '100%', height: 58, textAlign: 'center', color: Aurora.text, fontSize: 26, fontWeight: '700' },
+  otpBoxFilled: {},
+  otpLine: { width: '100%', height: 2, borderRadius: 1, backgroundColor: Aurora.border },
+  otpLineFilled: { backgroundColor: Aurora.primary },
 
-  progressRow: { flexDirection: 'row', gap: 6, marginBottom: 40, marginTop: 8 },
-  progressDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(0,0,0,0.1)' },
-  progressDotFilled: { backgroundColor: '#000000' },
+  error: { color: Aurora.danger, fontSize: 13, marginBottom: 12 },
 
-  verifyBtn:   { backgroundColor: '#000000', borderRadius: 16, paddingVertical: 18, alignItems: 'center', marginBottom: 24 },
-  verifyBtnOff:{ opacity: 0.15 },
-  verifyTxt:   { color: '#FFFFFF', fontSize: 17, fontWeight: '800' },
+  verifyBtn: { height: 56, borderRadius: 16, backgroundColor: Aurora.primary, alignItems: 'center', justifyContent: 'center', marginTop: 18, marginBottom: 18 },
+  verifyOff: { opacity: 0.35 },
+  verifyTxt: { color: '#04130D', fontSize: 16, fontWeight: '800' },
 
-  dotsRow:     { flexDirection: 'row', gap: 6, height: 20, alignItems: 'center' },
-  loadDot:     { width: 6, height: 6, borderRadius: 3, backgroundColor: '#FFFFFF' },
+  resendBtn: { alignItems: 'center' },
+  resendTxt: { color: Aurora.textFaint, fontSize: 14 },
+  resendActive: { color: Aurora.text },
 
-  resendBtn:   { alignItems: 'center', marginBottom: 16 },
-  resendTxt:   { color: 'rgba(0,0,0,0.25)', fontSize: 14 },
-  resendActive:{ color: 'rgba(0,0,0,0.7)' },
-
-  changeBtn:   { alignItems: 'center' },
-  changeTxt:   { color: 'rgba(0,0,0,0.25)', fontSize: 13 },
-
-  successOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center' },
-  successCircle:  { width: 80, height: 80, borderRadius: 40, borderWidth: 2, borderColor: '#10B981', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
-  successCheck:   { color: '#10B981', fontSize: 36, fontWeight: '200' },
-  successTxt:     { color: '#000000', fontSize: 24, fontWeight: '700' },
+  successCircle: { width: 84, height: 84, borderRadius: 42, borderWidth: 2, borderColor: Aurora.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 18 },
+  successCheck: { color: Aurora.primary, fontSize: 40, fontWeight: '300' },
+  successTxt: { color: Aurora.text, fontSize: 22, fontWeight: '800' },
 });

@@ -19,6 +19,7 @@ import {
   setCachedUser,
   setTokens,
 } from '../../lib/api';
+import { lockSession } from '../../lib/sessionLock';
 
 // Web Client ID from Firebase Console → Auth → Sign-in method → Google.
 // (Google Sign-In SDK still talks to Google's OAuth — the resulting
@@ -299,6 +300,7 @@ export async function isSetupComplete(): Promise<boolean> {
 
 // ─── Logout ─────────────────────────────────────────────────
 export async function logoutUser() {
+  lockSession();
   try { await signOutGoogle(); } catch {}
   try {
     const refreshToken = await SecureStore.getItemAsync('vc_refresh_token');

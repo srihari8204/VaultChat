@@ -19,10 +19,14 @@ import * as ScreenCapture from 'expo-screen-capture';
 import * as Sentry from '@sentry/react-native';
 import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet, Platform } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { runSecurityCheck } from '../services/securityService';
 import { attachTapHandler } from '../lib/push';
 import { getSocket } from '../lib/socket';
+import { getAccessToken } from '../lib/api';
+import { hasPIN } from './(constants)/authService';
+import { isUnlocked } from '../lib/sessionLock';
 global.Buffer = Buffer;
 
 // ── Sentry frontend init (Day 16) ──────────────────────────────────
@@ -76,6 +80,16 @@ function RootLayout() {
           // Security check error — fail open
         }
       }
+
+      // ── MPIN gate ──────────────────────────────────────────────
+      // Signed-in users who have set an MPIN must unlock on every cold
+      // start (the unlocked flag resets on full reload). Fail open on error.
+      try {
+        const tok = await getAccessToken();
+        if (tok && !isUnlocked() && (await hasPIN())) {
+          router.replace('/enter-mpin' as any);
+        }
+      } catch { /* don't lock users out on an unexpected error */ }
 
       setSecurityChecked(true);
       // Push token registration happens on the chats-screen mount
@@ -133,17 +147,17 @@ function RootLayout() {
   // Prevents any screen flashing before check completes
   if (!securityChecked) {
     return (
-      <View style={styles.loading}>
-        <StatusBar style="dark" backgroundColor="#FFFFFF" />
-        <ActivityIndicator size="large" color="#4A9FFF" />
-      </View>
+      <GestureHandlerRootView style={styles.loading}>
+        <StatusBar style="light" />
+        <ActivityIndicator size="large" color="#10B981" />
+      </GestureHandlerRootView>
     );
   }
 
   return (
-    <>
-      <StatusBar style="dark" backgroundColor="#FFFFFF" />
-      <Stack screenOptions={{ headerShown: false }}>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <StatusBar style="light" />
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0A0A0F' } }}>
 
         {/* Security — gesture disabled so user can't swipe back */}
         <Stack.Screen name="blocked" options={{ gestureEnabled: false }} />
@@ -156,6 +170,8 @@ function RootLayout() {
         <Stack.Screen name="security-questions" />
         <Stack.Screen name="pinentry" />
         <Stack.Screen name="otp" />
+        <Stack.Screen name="set-mpin" options={{ gestureEnabled: false }} />
+        <Stack.Screen name="enter-mpin" options={{ gestureEnabled: false }} />
         <Stack.Screen name="facescan" />
         <Stack.Screen name="biometric-setup" />
         {/* Main app — 6-tab navigation */}
@@ -296,14 +312,14 @@ function RootLayout() {
         <Stack.Screen name="game-lobby" />
         <Stack.Screen name="game-play" />
       </Stack>
-    </>
+    </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
   loading: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#0A0A0F',
     justifyContent: 'center',
     alignItems: 'center',
   },

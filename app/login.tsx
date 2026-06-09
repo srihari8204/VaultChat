@@ -1,448 +1,250 @@
+/**
+ * app/login.tsx — Phone-first login (WhatsApp/Telegram style).
+ *
+ * Flow: pick country code → enter number → Continue → sends OTP via
+ * /auth/send-otp-phone → routes to /otp (flow='phone'). Google remains as a
+ * secondary option. No permission prompts anywhere in this screen.
+ */
 import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert, Animated, Easing, KeyboardAvoidingView,
-  Platform, ScrollView, StyleSheet, Text, TextInput,
-  TouchableOpacity, View,
+  ActivityIndicator, Animated, FlatList, KeyboardAvoidingView, Modal,
+  Platform, Pressable, StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
-import { sendOTP, signInWithGoogle, configureGoogleSignIn } from './(constants)/authService';
+import { Aurora } from '../constants/theme';
+import { COUNTRIES, DEFAULT_COUNTRY, type Country } from '../constants/countries';
+import { sendPhoneOTP, signInWithGoogle, configureGoogleSignIn } from './(constants)/authService';
 import { markSetupComplete } from '../services/securityService';
-import { hasPIN } from './(constants)/authService';
 
 export default function LoginScreen() {
   const router = useRouter();
-  const [email, setEmail] = useState('');
+
+  const [country, setCountry] = useState<Country>(DEFAULT_COUNTRY);
+  const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [banner, setBanner] = useState<string | null>(null);
 
-  // Configure Google Sign-In on mount
+  const fade = useRef(new Animated.Value(0)).current;
+  const slide = useRef(new Animated.Value(24)).current;
+
   useEffect(() => {
     try { configureGoogleSignIn(); } catch {}
-  }, []);
+    Animated.parallel([
+      Animated.timing(fade, { toValue: 1, duration: 500, useNativeDriver: true }),
+      Animated.spring(slide, { toValue: 0, tension: 50, friction: 9, useNativeDriver: true }),
+    ]).start();
+  }, [fade, slide]);
 
-  // Google Sign-In handler — no OTP required
-  const handleGoogleSignIn = async () => {
-    setGoogleLoading(true);
+  const digits = phone.replace(/\D/g, '');
+  const isValid = digits.length >= 6 && digits.length <= 15;
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return COUNTRIES;
+    return COUNTRIES.filter(c =>
+      c.name.toLowerCase().includes(q) || c.dial.includes(q) || c.iso.toLowerCase().includes(q));
+  }, [search]);
+
+  const handleSend = async () => {
+    if (!isValid || loading) return;
+    setBanner(null);
+    setLoading(true);
     try {
-      const result = await signInWithGoogle();
-      console.log('[LOGIN] Google sign-in success:', result.displayName, 'isNew:', result.isNewUser);
-      await markSetupComplete();
+      const full = `${country.dial}${digits}`; // e.g. +9198…  backend normalises
+      const r = await sendPhoneOTP(full);
+      if (r?.dev) setBanner('Dev mode: enter code 123456'); // backend DEV_OTP
+      router.push({ pathname: '/otp', params: { phone: full, flow: 'phone' } });
+    } catch (err: any) {
+      setBanner(err?.message ?? 'Failed to send code. Try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-      // Phase 3a: chats is back online (Postgres-backed).
+  const handleGoogle = async () => {
+    setGoogleLoading(true);
+    setBanner(null);
+    try {
+      await signInWithGoogle();
+      try { await markSetupComplete(); } catch {}
       router.replace('/(tabs)/chats' as any);
     } catch (e: any) {
-      console.error('[LOGIN] Google sign-in error:', e);
-      if (!e.message?.includes('cancelled')) {
-        Alert.alert('Google Sign-In Error', e.message ?? 'Failed to sign in with Google');
+      if (!String(e?.message ?? '').toLowerCase().includes('cancel')) {
+        setBanner(e?.message ?? 'Google sign-in failed');
       }
     } finally {
       setGoogleLoading(false);
     }
   };
 
-  const isValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
-
-  // Entrance animations
-  const headerFade = useRef(new Animated.Value(0)).current;
-  const headerSlide = useRef(new Animated.Value(24)).current;
-  const formFade = useRef(new Animated.Value(0)).current;
-  const formSlide = useRef(new Animated.Value(24)).current;
-  const btnFade = useRef(new Animated.Value(0)).current;
-  const btnSlide = useRef(new Animated.Value(24)).current;
-
-  // Loading dot animation
-  const dot1 = useRef(new Animated.Value(0.3)).current;
-  const dot2 = useRef(new Animated.Value(0.3)).current;
-  const dot3 = useRef(new Animated.Value(0.3)).current;
-
-  useEffect(() => {
-    const springConfig = { tension: 50, friction: 9, useNativeDriver: true };
-
-    Animated.parallel([
-      Animated.spring(headerSlide, { ...springConfig, toValue: 0 }),
-      Animated.timing(headerFade, { toValue: 1, duration: 500, useNativeDriver: true }),
-    ]).start();
-
-    setTimeout(() => {
-      Animated.parallel([
-        Animated.spring(formSlide, { ...springConfig, toValue: 0 }),
-        Animated.timing(formFade, { toValue: 1, duration: 500, useNativeDriver: true }),
-      ]).start();
-    }, 200);
-
-    setTimeout(() => {
-      Animated.parallel([
-        Animated.spring(btnSlide, { ...springConfig, toValue: 0 }),
-        Animated.timing(btnFade, { toValue: 1, duration: 500, useNativeDriver: true }),
-      ]).start();
-    }, 400);
-  }, [btnFade, btnSlide, formFade, formSlide, headerFade, headerSlide]);
-
-  // Pulsing dots for loading state
-  useEffect(() => {
-    if (!loading) return;
-    const pulseDot = (dot: Animated.Value, delay: number) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.delay(delay),
-          Animated.timing(dot, { toValue: 1, duration: 400, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-          Animated.timing(dot, { toValue: 0.3, duration: 400, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-        ])
-      );
-    const a1 = pulseDot(dot1, 0);
-    const a2 = pulseDot(dot2, 150);
-    const a3 = pulseDot(dot3, 300);
-    a1.start();
-    a2.start();
-    a3.start();
-    return () => { a1.stop(); a2.stop(); a3.stop(); dot1.setValue(0.3); dot2.setValue(0.3); dot3.setValue(0.3); };
-  }, [loading, dot1, dot2, dot3]);
-
-  const handleSend = async () => {
-    const e = email.trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) {
-      Alert.alert('Error', 'Enter a valid email address.');
-      return;
-    }
-    setLoading(true);
-    try {
-      console.log('[LOGIN] Sending OTP to:', e);
-      await sendOTP(e);
-      console.log('[LOGIN] OTP sent, navigating to OTP screen');
-      // OTP screen still uses `phone` as the URL param name for now —
-      // it carries the email for the email-OTP flow.
-      router.push({ pathname: '/otp', params: { phone: e, flow: 'login' } });
-    } catch (err: any) {
-      console.error('[LOGIN] OTP error:', err);
-      Alert.alert('Error', err.message ?? 'Failed to send code. Try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
-    <View style={S.container}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={{ flex: 1 }}
-      >
-        <ScrollView
-          contentContainerStyle={S.scroll}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Back button */}
-          <TouchableOpacity
-            onPress={() => router.back()}
-            style={S.backBtn}
-            activeOpacity={0.6}
-          >
-            <Text style={S.backArrow}>{'\u2190'}</Text>
-          </TouchableOpacity>
-
+    <View style={S.screen}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+        <Animated.View style={[S.body, { opacity: fade, transform: [{ translateY: slide }] }]}>
           {/* Header */}
-          <Animated.View style={[S.headerSection, { opacity: headerFade, transform: [{ translateY: headerSlide }] }]}>
-            <Text style={S.title}>Welcome{'\n'}back</Text>
-            <Text style={S.subtitle}>Enter your email to continue</Text>
-          </Animated.View>
+          <View style={S.logoBadge}><Text style={S.logoTxt}>V</Text></View>
+          <Text style={S.title}>Enter your{'\n'}phone number</Text>
+          <Text style={S.subtitle}>We'll send you a verification code</Text>
 
-          {/* Email input section */}
-          <Animated.View style={[S.formSection, { opacity: formFade, transform: [{ translateY: formSlide }] }]}>
-            <View style={S.inputWrap}>
+          {/* Phone row */}
+          <View style={S.phoneRow}>
+            <TouchableOpacity style={S.ccBtn} onPress={() => setPickerOpen(true)} activeOpacity={0.8}>
+              <Text style={S.ccFlag}>{country.flag}</Text>
+              <Text style={S.ccDial}>{country.dial}</Text>
+              <Text style={S.ccChevron}>▾</Text>
+            </TouchableOpacity>
+            <View style={S.phoneInputWrap}>
               <TextInput
                 style={S.phoneInput}
-                placeholder="you@example.com"
-                placeholderTextColor="rgba(3, 3, 3, 0.2)"
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-                autoComplete="email"
-                textContentType="emailAddress"
-                maxLength={120}
-                selectionColor="rgba(255,255,255,0.5)"
+                placeholder="98765 43210"
+                placeholderTextColor={Aurora.textFaint}
+                value={phone}
+                onChangeText={setPhone}
+                keyboardType="phone-pad"
+                maxLength={18}
+                autoFocus
+                selectionColor={Aurora.primary}
               />
-              <View style={S.inputLine} />
             </View>
-          </Animated.View>
+          </View>
 
-          {/* Continue button */}
-          <Animated.View style={[S.btnSection, { opacity: btnFade, transform: [{ translateY: btnSlide }] }]}>
-            <TouchableOpacity
-              style={[S.btnContinue, !isValid && !loading && S.btnDisabled]}
-              onPress={handleSend}
-              disabled={loading || !isValid}
-              activeOpacity={0.85}
-            >
-              {loading ? (
-                <View style={S.dotsRow}>
-                  <Animated.View style={[S.loadingDot, { opacity: dot1 }]} />
-                  <Animated.View style={[S.loadingDot, { opacity: dot2 }]} />
-                  <Animated.View style={[S.loadingDot, { opacity: dot3 }]} />
-                </View>
-              ) : (
-                <Text style={S.btnText}>Continue</Text>
-              )}
-            </TouchableOpacity>
-          </Animated.View>
+          {banner ? <Text style={S.banner}>{banner}</Text> : null}
+
+          {/* Continue */}
+          <TouchableOpacity
+            style={[S.continueBtn, !isValid && S.continueOff]}
+            onPress={handleSend}
+            disabled={!isValid || loading}
+            activeOpacity={0.85}
+          >
+            {loading
+              ? <ActivityIndicator color="#04130D" />
+              : <Text style={S.continueTxt}>Continue</Text>}
+          </TouchableOpacity>
 
           {/* Divider */}
           <View style={S.dividerRow}>
             <View style={S.dividerLine} />
-            <Text style={S.dividerText}>or</Text>
+            <Text style={S.dividerTxt}>or</Text>
             <View style={S.dividerLine} />
           </View>
 
-          {/* Google Sign-In Button */}
-          <TouchableOpacity
-            style={S.googleBtn}
-            onPress={handleGoogleSignIn}
-            disabled={googleLoading}
-            activeOpacity={0.85}
-          >
-            {googleLoading ? (
-              <Text style={S.googleBtnText}>Signing in...</Text>
-            ) : (
-              <>
-                <Text style={S.googleIcon}>G</Text>
-                <Text style={S.googleBtnText}>Sign in with Google</Text>
-              </>
-            )}
+          {/* Google */}
+          <TouchableOpacity style={S.googleBtn} onPress={handleGoogle} disabled={googleLoading} activeOpacity={0.85}>
+            {googleLoading
+              ? <ActivityIndicator color={Aurora.text} />
+              : <><Text style={S.googleIcon}>G</Text><Text style={S.googleTxt}>Continue with Google</Text></>}
           </TouchableOpacity>
 
-          {/* Bottom link */}
-          <View style={S.bottomLink}>
-            <TouchableOpacity onPress={() => router.replace('/signup')} activeOpacity={0.6}>
-              <Text style={S.bottomText}>
-                New to VaultChat?{'  '}
-                <Text style={S.bottomAccent}>Create Account</Text>
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-        </ScrollView>
+          <Text style={S.terms}>By continuing you agree to our Terms & Privacy Policy</Text>
+        </Animated.View>
       </KeyboardAvoidingView>
+
+      {/* Country picker */}
+      <Modal visible={pickerOpen} animationType="slide" transparent onRequestClose={() => setPickerOpen(false)}>
+        <Pressable style={S.modalBackdrop} onPress={() => setPickerOpen(false)} />
+        <View style={S.modalSheet}>
+          <View style={S.modalHandle} />
+          <Text style={S.modalTitle}>Select country</Text>
+          <TextInput
+            style={S.searchInput}
+            placeholder="Search country or code"
+            placeholderTextColor={Aurora.textFaint}
+            value={search}
+            onChangeText={setSearch}
+            autoCapitalize="none"
+            selectionColor={Aurora.primary}
+          />
+          <FlatList
+            data={filtered}
+            keyExtractor={(c, i) => `${c.iso}-${c.dial}-${i}`}
+            keyboardShouldPersistTaps="handled"
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={S.countryRow}
+                onPress={() => { setCountry(item); setPickerOpen(false); setSearch(''); }}
+                activeOpacity={0.7}
+              >
+                <Text style={S.countryFlag}>{item.flag}</Text>
+                <Text style={S.countryName}>{item.name}</Text>
+                <Text style={S.countryDial}>{item.dial}</Text>
+              </TouchableOpacity>
+            )}
+            style={{ maxHeight: 380 }}
+          />
+        </View>
+      </Modal>
     </View>
   );
 }
 
 const S = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundcolor: '#000000',
-  },
-  scroll: {
-    // flexGrow: 1,
-    padding:12
-    // paddingHorizontal: 28,
-    // paddingTop: 60,
-    // paddingBottom: 48,
-  },
+  screen: { flex: 1, backgroundColor: Aurora.bg },
+  body: { flex: 1, paddingHorizontal: 28, paddingTop: 88 },
 
-  // Back button
-  backBtn: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: -8,
-    marginBottom: 32,
+  logoBadge: {
+    width: 56, height: 56, borderRadius: 18, backgroundColor: Aurora.primary,
+    alignItems: 'center', justifyContent: 'center', marginBottom: 28,
   },
-  backArrow: {
-    color: '#000000',
-    fontSize: 28,
-    fontWeight: '300',
-  },
+  logoTxt: { color: '#04130D', fontSize: 28, fontWeight: '900' },
 
-  // Header
-  headerSection: {
-    marginBottom: 36,
-  },
-  title: {
-    color: '#000000',
-    fontSize: 36,
-    fontWeight: '800',
-    lineHeight: 42,
-    letterSpacing: -0.5,
-  },
-  subtitle: {
-    color: 'rgba(0, 0, 0, 0.6)',
-    fontSize: 14,
-    fontWeight: '400',
-    marginTop: 12,
-    letterSpacing: 0.3,
-  },
+  title: { color: Aurora.text, fontSize: 30, fontWeight: '800', lineHeight: 36, letterSpacing: -0.5 },
+  subtitle: { color: Aurora.textDim, fontSize: 14, marginTop: 10, marginBottom: 32 },
 
-  // Form
-  formSection: {
-    marginBottom: 48,
+  phoneRow: { flexDirection: 'row', gap: 10, marginBottom: 8 },
+  ccBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, height: 56, paddingHorizontal: 14,
+    borderRadius: 14, backgroundColor: Aurora.surface, borderWidth: 1, borderColor: Aurora.border,
   },
+  ccFlag: { fontSize: 20 },
+  ccDial: { color: Aurora.text, fontSize: 16, fontWeight: '700' },
+  ccChevron: { color: Aurora.textDim, fontSize: 12 },
+  phoneInputWrap: {
+    flex: 1, height: 56, justifyContent: 'center', paddingHorizontal: 16, borderRadius: 14,
+    backgroundColor: Aurora.surface, borderWidth: 1, borderColor: Aurora.border,
+  },
+  phoneInput: { color: Aurora.text, fontSize: 18, fontWeight: '600', letterSpacing: 1 },
 
-  // Country code selector
-  ccSelector: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    borderWidth: 1,
-    borderColor: 'rgba(0, 0, 0, 0.2)',
-    borderRadius: 100,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    gap: 8,
-    marginBottom: 32,
-  },
-  ccFlag: {
-    fontSize: 18,
-  },
-  ccCode: {
-    color: '#000000',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  ccChevron: {
-    color: 'rgba(0, 0, 0, 0.6)',
-    fontSize: 14,
-    marginTop: -2,
-  },
+  banner: { color: Aurora.accent, fontSize: 13, marginTop: 4, marginBottom: 4 },
 
-  // Dropdown
-  dropdown: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 0, 0, 0.1)',
-    marginBottom: 32,
-    overflow: 'hidden',
+  continueBtn: {
+    height: 56, borderRadius: 16, backgroundColor: Aurora.primary,
+    alignItems: 'center', justifyContent: 'center', marginTop: 20,
   },
-  ddItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0, 0, 0, 0.05)',
-    gap: 12,
-  },
-  ddFlag: {
-    fontSize: 20,
-  },
-  ddName: {
-    flex: 1,
-    color: 'rgba(0, 0, 0, 0.7)',
-    fontSize: 15,
-    fontWeight: '400',
-  },
-  ddCode: {
-    color: 'rgba(0, 0, 0, 0.4)',
-    fontSize: 14,
-    fontWeight: '600',
-  },
+  continueOff: { opacity: 0.35 },
+  continueTxt: { color: '#04130D', fontSize: 16, fontWeight: '800', letterSpacing: 0.3 },
 
-  // Phone input
-  inputWrap: {
-    marginBottom: 8,
-  },
-  phoneInput: {
-    color: '#000000',
-    fontSize: 24,
-    fontWeight: '500',
-    paddingVertical: 12,
-    letterSpacing: 1,
-  },
-  inputLine: {
-    height: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.15)',
-  },
+  dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginVertical: 22 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: Aurora.border },
+  dividerTxt: { color: Aurora.textFaint, fontSize: 13 },
 
-  // Continue button
-  btnSection: {
-    marginBottom: 'auto' as any,
-  },
-  btnContinue: {
-    backgroundcolor: '#000000',
-    height: 56,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  btnDisabled: {
-    backgroundColor: 'rgba(0, 0, 0, 0.1)',
-  },
-  btnText: {
-    color: '#000000',
-    fontSize: 16,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-
-  // Loading dots
-  dotsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  loadingDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    backgroundcolor: '#000000',
-  },
-
-  // Divider
-  dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 20,
-    gap: 12,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.1)',
-  },
-  dividerText: {
-    color: 'rgba(0, 0, 0, 0.3)',
-    fontSize: 13,
-    fontWeight: '500',
-  },
-
-  // Google button
   googleBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: 56,
-    borderRadius: 16,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1.5,
-    borderColor: 'rgba(0, 0, 0, 0.12)',
-    gap: 10,
-    marginBottom: 8,
+    height: 56, borderRadius: 16, backgroundColor: Aurora.surface, borderWidth: 1, borderColor: Aurora.border,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
   },
-  googleIcon: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#4285F4',
-  },
-  googleBtnText: {
-    color: '#000000',
-    fontSize: 16,
-    fontWeight: '600',
-  },
+  googleIcon: { color: '#4285F4', fontSize: 18, fontWeight: '900' },
+  googleTxt: { color: Aurora.text, fontSize: 15, fontWeight: '700' },
 
-  // Bottom link
-  bottomLink: {
-    alignItems: 'center',
-    marginTop: 20,
-    paddingBottom: 16,
+  terms: { color: Aurora.textFaint, fontSize: 12, textAlign: 'center', marginTop: 24, lineHeight: 18 },
+
+  // Country picker modal
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' },
+  modalSheet: {
+    backgroundColor: Aurora.surfaceSolid, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    paddingHorizontal: 20, paddingTop: 10, paddingBottom: 28,
+    borderTopWidth: 1, borderColor: Aurora.border,
   },
-  bottomText: {
-    color: 'rgba(0, 0, 0, 0.5)',
-    fontSize: 14,
+  modalHandle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: Aurora.border, marginBottom: 14 },
+  modalTitle: { color: Aurora.text, fontSize: 18, fontWeight: '800', marginBottom: 14 },
+  searchInput: {
+    height: 46, borderRadius: 12, backgroundColor: Aurora.surface, borderWidth: 1, borderColor: Aurora.border,
+    paddingHorizontal: 14, color: Aurora.text, fontSize: 15, marginBottom: 10,
   },
-  bottomAccent: {
-    color: 'rgba(0, 0, 0, 0.8)',
-    fontWeight: '700',
-  },
+  countryRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: Aurora.separator },
+  countryFlag: { fontSize: 22 },
+  countryName: { flex: 1, color: Aurora.text, fontSize: 15, fontWeight: '500' },
+  countryDial: { color: Aurora.textDim, fontSize: 15, fontWeight: '700' },
 });
