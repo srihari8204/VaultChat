@@ -230,6 +230,19 @@ export async function getGameProfile(): Promise<GameProfile> {
 export async function getGameHistory(): Promise<GameHistoryItem[]> {
   return api<GameHistoryItem[]>('/games/history');
 }
+export interface LeaderboardEntry {
+  rank:        number;
+  userId:      string;
+  name:        string | null;
+  coins:       number;
+  wins:        number;
+  losses:      number;
+  gamesPlayed: number;
+  isMe:        boolean;
+}
+export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
+  return api<LeaderboardEntry[]>('/games/leaderboard');
+}
 
 // ─── Emergency SOS ──────────────────────────────────────────────────
 export interface SOSHistoryItem {

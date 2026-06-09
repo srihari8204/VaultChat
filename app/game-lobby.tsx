@@ -12,7 +12,7 @@ import { io, Socket } from 'socket.io-client';
 import { SERVER_URL } from '../constants/server';
 import { getAccessToken } from '../lib/api';
 import { getCurrentUserAsync } from './(constants)/authService';
-import { getGameProfile } from '../lib/chatService';
+import { getGameProfile, getLeaderboard, type LeaderboardEntry } from '../lib/chatService';
 import {
   ALL_GAMES, GAME_REGIONS, getGameStats, GameStats, GameType, ACHIEVEMENTS, setCoins,
 } from '../services/gameService';
@@ -44,6 +44,8 @@ export default function GameLobbyScreen() {
   const [bet, setBet] = useState(0);
   const [searching, setSearching] = useState(false);
   const [showAchievements, setShowAchievements] = useState(false);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
 
   const socketRef = useRef<Socket | null>(null);
 
@@ -128,6 +130,12 @@ export default function GameLobbyScreen() {
           <Text style={s.headerTitle}>{'\uD83C\uDFAE'} Game Lobby</Text>
           <Text style={s.headerSub}>D2DE Encrypted {'\u2022'} P2P Fair Play</Text>
         </View>
+        <TouchableOpacity
+          onPress={() => { getLeaderboard().then(setLeaderboard).catch(() => {}); setShowLeaderboard(true); }}
+          style={{ marginRight: 14 }}
+        >
+          <Text style={{ fontSize: 22 }}>{'\uD83D\uDCCA'}</Text>
+        </TouchableOpacity>
         <TouchableOpacity onPress={() => setShowAchievements(true)}>
           <Text style={{ fontSize: 22 }}>{'\uD83C\uDFC6'}</Text>
         </TouchableOpacity>
@@ -274,6 +282,33 @@ export default function GameLobbyScreen() {
               );
             })}
             <TouchableOpacity onPress={() => setShowAchievements(false)} style={{ marginTop: 16 }}>
+              <Text style={{ color: SUB, textAlign: 'center', fontSize: 14 }}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Leaderboard Modal */}
+      <Modal visible={showLeaderboard} transparent animationType="slide">
+        <View style={s.achieveModal}>
+          <View style={s.achieveCard}>
+            <Text style={s.achieveTitle}>{'🏆'} Leaderboard</Text>
+            <ScrollView style={{ maxHeight: 400 }}>
+              {leaderboard.length === 0 ? (
+                <Text style={{ color: SUB, textAlign: 'center', padding: 20 }}>No ranked players yet</Text>
+              ) : leaderboard.map(e => (
+                <View key={e.userId} style={[s.achieveRow, e.isMe && { backgroundColor: '#6C63FF22', borderRadius: 8 }]}>
+                  <Text style={[s.achieveIcon, { width: 34, textAlign: 'center' }]}>
+                    {e.rank <= 3 ? ['🥇', '🥈', '🥉'][e.rank - 1] : `#${e.rank}`}
+                  </Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.achieveName}>{e.name || 'Player'}{e.isMe ? ' (You)' : ''}</Text>
+                    <Text style={s.achieveDesc}>{e.wins}W · {e.losses}L · {e.coins} coins</Text>
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+            <TouchableOpacity onPress={() => setShowLeaderboard(false)} style={{ marginTop: 16 }}>
               <Text style={{ color: SUB, textAlign: 'center', fontSize: 14 }}>Close</Text>
             </TouchableOpacity>
           </View>

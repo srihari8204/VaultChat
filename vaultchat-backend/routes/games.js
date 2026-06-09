@@ -52,4 +52,31 @@ router.get('/history', async (req, res) => {
   }
 });
 
+// GET /games/leaderboard — top players by wins then coins
+router.get('/leaderboard', async (req, res) => {
+  try {
+    const r = await db.query(
+      `SELECT gp.user_id, gp.coins, gp.wins, gp.losses, gp.games_played,
+              COALESCE(NULLIF(u.name, ''), u.email) AS name
+         FROM game_profiles gp JOIN users u ON u.id = gp.user_id
+        WHERE gp.games_played > 0
+        ORDER BY gp.wins DESC, gp.coins DESC
+        LIMIT 50`
+    );
+    res.json(r.rows.map((row, i) => ({
+      rank:        i + 1,
+      userId:      row.user_id,
+      name:        row.name,
+      coins:       row.coins,
+      wins:        row.wins,
+      losses:      row.losses,
+      gamesPlayed: row.games_played,
+      isMe:        row.user_id === req.user.id,
+    })));
+  } catch (err) {
+    console.error('[games leaderboard]', err.message);
+    res.status(500).json({ error: 'Failed to load leaderboard' });
+  }
+});
+
 module.exports = router;
