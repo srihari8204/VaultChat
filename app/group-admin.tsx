@@ -17,15 +17,18 @@ import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Platform, ScrollView, StatusBar,
+  ActivityIndicator, Alert, Platform, ScrollView, StatusBar, Switch,
   StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { Aurora } from '../constants/theme';
 import { getCurrentUserAsync } from './(constants)/authService';
 import {
   getChat, removeChatMember, setMemberRole, updateChat,
-  type ChatMember,
+  listJoinRequests, approveJoinRequest, rejectJoinRequest,
+  type ChatMember, type JoinRequest,
 } from '../lib/chatService';
+
+type Policy = 'everyone' | 'admins';
 
 const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
 
@@ -60,7 +63,12 @@ export default function GroupAdminScreen() {
   const [banner, setBanner] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [roleMenuUid, setRoleMenuUid] = useState<string | null>(null);
   const [slowMode, setSlowMode] = useState(0);
-  const [sendPolicy, setSendPolicy] = useState<'everyone' | 'admins'>('everyone');
+  const [sendPolicy, setSendPolicy] = useState<Policy>('everyone');
+  const [mediaPolicy, setMediaPolicy] = useState<Policy>('everyone');
+  const [addPolicy, setAddPolicy] = useState<Policy>('admins');
+  const [antiSpam, setAntiSpam] = useState(false);
+  const [approve, setApprove] = useState(false);
+  const [joinReqs, setJoinReqs] = useState<JoinRequest[]>([]);
 
   const flash = useCallback((kind: 'ok' | 'err', text: string) => {
     setBanner({ kind, text });
@@ -76,7 +84,12 @@ export default function GroupAdminScreen() {
       setMyId(me?.id ?? '');
       setMyRole((chat.myRole as Role) ?? 'member');
       setSlowMode(chat.slowModeSeconds ?? 0);
-      setSendPolicy((chat.sendPolicy as any) ?? 'everyone');
+      setSendPolicy((chat.sendPolicy as Policy) ?? 'everyone');
+      setMediaPolicy((chat.mediaPolicy as Policy) ?? 'everyone');
+      setAddPolicy((chat.addMembersPolicy as Policy) ?? 'admins');
+      setAntiSpam(!!chat.antiSpamLinks);
+      setApprove(!!chat.approveMembers);
+      if (chat.approveMembers) listJoinRequests(chatId).then(setJoinReqs).catch(() => {});
       if (chat.name) { setGroupName(chat.name); setSavedName(chat.name); }
     } catch (e: any) {
       flash('err', e?.message ?? 'Failed to load group');
@@ -112,12 +125,61 @@ export default function GroupAdminScreen() {
     catch (e: any) { setSlowMode(prev); flash('err', e?.message ?? 'Failed'); }
   };
 
-  const changeSendPolicy = async (p: 'everyone' | 'admins') => {
+  const changeSendPolicy = async (p: Policy) => {
     const prev = sendPolicy;
     setSendPolicy(p);
     try { await updateChat(chatId!, { sendPolicy: p }); flash('ok', p === 'admins' ? 'Only admins can send' : 'Everyone can send'); }
     catch (e: any) { setSendPolicy(prev); flash('err', e?.message ?? 'Failed'); }
   };
+
+  const changeMediaPolicy = async (p: Policy) => {
+    const prev = mediaPolicy; setMediaPolicy(p);
+    try { await updateChat(chatId!, { mediaPolicy: p }); flash('ok', p === 'admins' ? 'Only admins send media' : 'Everyone can send media'); }
+    catch (e: any) { setMediaPolicy(prev); flash('err', e?.message ?? 'Failed'); }
+  };
+
+  const changeAddPolicy = async (p: Policy) => {
+    const prev = addPolicy; setAddPolicy(p);
+    try { await updateChat(chatId!, { addMembersPolicy: p }); flash('ok', p === 'everyone' ? 'Anyone can add members' : 'Only admins add members'); }
+    catch (e: any) { setAddPolicy(prev); flash('err', e?.message ?? 'Failed'); }
+  };
+
+  const toggleAntiSpam = async (v: boolean) => {
+    const prev = antiSpam; setAntiSpam(v);
+    try { await updateChat(chatId!, { antiSpamLinks: v }); flash('ok', v ? 'Link anti-spam on' : 'Link anti-spam off'); }
+    catch (e: any) { setAntiSpam(prev); flash('err', e?.message ?? 'Failed'); }
+  };
+
+  const toggleApprove = async (v: boolean) => {
+    const prev = approve; setApprove(v);
+    try {
+      await updateChat(chatId!, { approveMembers: v });
+      flash('ok', v ? 'New members need approval' : 'Open joining');
+      if (v) listJoinRequests(chatId!).then(setJoinReqs).catch(() => {}); else setJoinReqs([]);
+    } catch (e: any) { setApprove(prev); flash('err', e?.message ?? 'Failed'); }
+  };
+
+  const approveReq = async (uid: string) => {
+    setJoinReqs(list => list.filter(r => r.userId !== uid));
+    try { await approveJoinRequest(chatId!, uid); flash('ok', 'Approved'); load(); }
+    catch (e: any) { flash('err', e?.message ?? 'Failed'); listJoinRequests(chatId!).then(setJoinReqs).catch(() => {}); }
+  };
+
+  const rejectReq = async (uid: string) => {
+    setJoinReqs(list => list.filter(r => r.userId !== uid));
+    try { await rejectJoinRequest(chatId!, uid); }
+    catch (e: any) { flash('err', e?.message ?? 'Failed'); listJoinRequests(chatId!).then(setJoinReqs).catch(() => {}); }
+  };
+
+  const PolicyToggle = ({ value, onChange }: { value: Policy; onChange: (p: Policy) => void }) => (
+    <View style={s.policyRow}>
+      {(['everyone', 'admins'] as const).map(p => (
+        <TouchableOpacity key={p} style={[s.policyBtn, value === p && s.policyBtnActive]} onPress={() => onChange(p)}>
+          <Text style={[s.policyTxt, value === p && s.policyTxtActive]}>{p === 'everyone' ? 'Everyone' : 'Admins only'}</Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
 
   const changeRole = async (m: ChatMember, role: 'admin' | 'member') => {
     setRoleMenuUid(null);
@@ -238,7 +300,48 @@ export default function GroupAdminScreen() {
                 </TouchableOpacity>
               ))}
             </View>
+            <Text style={[s.ctrlLabel, { marginTop: 14 }]}>Who can send media</Text>
+            <PolicyToggle value={mediaPolicy} onChange={changeMediaPolicy} />
+
+            <Text style={[s.ctrlLabel, { marginTop: 14 }]}>Who can add members</Text>
+            <PolicyToggle value={addPolicy} onChange={changeAddPolicy} />
+
+            <View style={s.switchRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.switchLabel}>Approve new members</Text>
+                <Text style={s.switchSub}>Invite-link joins wait for an admin.</Text>
+              </View>
+              <Switch value={approve} onValueChange={toggleApprove}
+                trackColor={{ false: Aurora.surface, true: 'rgba(16,185,129,0.5)' }} thumbColor={approve ? Aurora.primary : '#888'} />
+            </View>
+
+            <View style={s.switchRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.switchLabel}>Block links from new members</Text>
+                <Text style={s.switchSub}>Members &lt; 24h old can’t post links.</Text>
+              </View>
+              <Switch value={antiSpam} onValueChange={toggleAntiSpam}
+                trackColor={{ false: Aurora.surface, true: 'rgba(16,185,129,0.5)' }} thumbColor={antiSpam ? Aurora.primary : '#888'} />
+            </View>
+
             <Text style={s.hint}>Admins are exempt from these limits.</Text>
+          </View>
+        )}
+
+        {/* Pending join requests (admin, approve-members on) */}
+        {isAdmin && approve && (
+          <View style={s.section}>
+            <Text style={s.sectionTitle}>Join Requests ({joinReqs.length})</Text>
+            {joinReqs.length === 0 ? (
+              <Text style={s.hint}>No pending requests.</Text>
+            ) : joinReqs.map(r => (
+              <View key={r.userId} style={s.memberRow}>
+                <View style={s.avatar}><Text style={s.avatarText}>{(r.name || '?').charAt(0).toUpperCase()}</Text></View>
+                <Text style={[s.memberName, { flex: 1 }]} numberOfLines={1}>{r.name || r.userId.slice(0, 8)}</Text>
+                <TouchableOpacity style={s.reqApprove} onPress={() => approveReq(r.userId)}><Text style={s.reqApproveTxt}>Approve</Text></TouchableOpacity>
+                <TouchableOpacity style={s.reqReject} onPress={() => rejectReq(r.userId)} hitSlop={6}><Ionicons name="close" size={18} color={Aurora.danger} /></TouchableOpacity>
+              </View>
+            ))}
           </View>
         )}
 
@@ -349,6 +452,12 @@ const s = StyleSheet.create({
   removeBtn: { padding: 6 },
 
   ctrlLabel: { color: Aurora.textDim, fontSize: 13, marginBottom: 8 },
+  switchRow: { flexDirection: 'row', alignItems: 'center', marginTop: 16, gap: 12 },
+  switchLabel: { color: Aurora.text, fontSize: 14, fontWeight: '600' },
+  switchSub: { color: Aurora.textDim, fontSize: 12, marginTop: 2 },
+  reqApprove: { backgroundColor: Aurora.primary, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7, marginRight: 8 },
+  reqApproveTxt: { color: '#04130D', fontSize: 12, fontWeight: '800' },
+  reqReject: { padding: 6 },
   policyRow: { flexDirection: 'row', gap: 8 },
   policyBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center', backgroundColor: Aurora.surface, borderWidth: 1, borderColor: Aurora.border },
   policyBtnActive: { backgroundColor: Aurora.primary, borderColor: Aurora.primary },

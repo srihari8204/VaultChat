@@ -86,6 +86,10 @@ export interface ChatDetail extends ChatSummary {
   // Group admin controls.
   slowModeSeconds?:     number;
   sendPolicy?:          'everyone' | 'admins';
+  mediaPolicy?:         'everyone' | 'admins';
+  addMembersPolicy?:    'everyone' | 'admins';
+  antiSpamLinks?:       boolean;
+  approveMembers?:      boolean;
 }
 
 export interface Message {
@@ -682,7 +686,12 @@ export async function exportMyData(): Promise<string> {
 // ─── Group admin (Day 14) ───────────────────────────────────────────
 export async function updateChat(
   chatId: string,
-  patch: { name?: string; photoURL?: string; disappearingSeconds?: number | null; slowModeSeconds?: number; sendPolicy?: 'everyone' | 'admins' },
+  patch: {
+    name?: string; photoURL?: string; disappearingSeconds?: number | null;
+    slowModeSeconds?: number; sendPolicy?: 'everyone' | 'admins';
+    mediaPolicy?: 'everyone' | 'admins'; addMembersPolicy?: 'everyone' | 'admins';
+    antiSpamLinks?: boolean; approveMembers?: boolean;
+  },
 ): Promise<void> {
   await api(`/chats/${encodeURIComponent(chatId)}`, { method: 'PATCH', json: patch });
 }
@@ -776,9 +785,29 @@ export async function createInviteLink(
 export async function revokeInviteLink(chatId: string, linkId: number): Promise<void> {
   await api(`/chats/${encodeURIComponent(chatId)}/invite-links/${linkId}`, { method: 'DELETE' });
 }
-// Redeem a code and join the group. Returns the joined chat id.
-export async function joinViaInvite(code: string): Promise<{ chatId: string }> {
-  return api<{ chatId: string }>(`/chats/join/${encodeURIComponent(code)}`, { method: 'POST' });
+// Redeem a code and join the group. Returns the chat id; `pending` is true
+// when the group requires admin approval, `alreadyMember` if already joined.
+export async function joinViaInvite(
+  code: string,
+): Promise<{ chatId: string; pending?: boolean; alreadyMember?: boolean }> {
+  return api(`/chats/join/${encodeURIComponent(code)}`, { method: 'POST' });
+}
+
+// Join requests (approve-members groups; admin only).
+export interface JoinRequest {
+  userId:      string;
+  name:        string | null;
+  photoURL:    string | null;
+  requestedAt: string;
+}
+export async function listJoinRequests(chatId: string): Promise<JoinRequest[]> {
+  return api<JoinRequest[]>(`/chats/${encodeURIComponent(chatId)}/join-requests`);
+}
+export async function approveJoinRequest(chatId: string, userId: string): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/join-requests/${encodeURIComponent(userId)}/approve`, { method: 'POST' });
+}
+export async function rejectJoinRequest(chatId: string, userId: string): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/join-requests/${encodeURIComponent(userId)}`, { method: 'DELETE' });
 }
 
 // In-chat message search — matches text content within a single chat.

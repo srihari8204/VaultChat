@@ -93,7 +93,8 @@ function publicMessage(row) {
 
 async function loadChatMembership(req, chatId) {
   const r = await req.dbQuery(
-    `SELECT cm.*, c.type AS chat_type, c.send_policy, c.slow_mode_seconds
+    `SELECT cm.*, c.type AS chat_type, c.send_policy, c.slow_mode_seconds,
+            c.media_policy, c.add_members_policy, c.anti_spam_links, c.approve_members
      FROM chat_members cm
      JOIN chats c ON c.id = cm.chat_id
      WHERE cm.chat_id = $1 AND cm.user_id = $2`,
@@ -452,7 +453,36 @@ router.post('/join/:code', async (req, res) => {
   try {
     const code = String(req.params.code || '').trim();
     if (!code) return res.status(400).json({ error: 'code required' });
-    // SECURITY DEFINER helper bypasses chat_members RLS for the self-join.
+
+    // Peek the link + chat to decide auto-join vs. approval request.
+    const lr = await db.query(
+      `SELECT il.chat_id, il.revoked, il.expires_at, il.max_uses, il.uses, c.approve_members
+         FROM invite_links il JOIN chats c ON c.id = il.chat_id
+        WHERE il.code = $1 LIMIT 1`,
+      [code]
+    );
+    const link = lr.rows[0];
+    if (!link || link.revoked) return res.status(410).json({ error: 'Invalid or revoked link' });
+    if (link.expires_at && new Date(link.expires_at) < new Date()) return res.status(410).json({ error: 'Link has expired' });
+    if (link.max_uses > 0 && link.uses >= link.max_uses) return res.status(410).json({ error: 'Link has reached its use limit' });
+
+    const already = await db.query(
+      `SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL`,
+      [link.chat_id, req.user.id]
+    );
+    if (already.rows[0]) return res.json({ chatId: link.chat_id, alreadyMember: true });
+
+    // Approval required → queue a join request instead of joining.
+    if (link.approve_members) {
+      await db.query(
+        `INSERT INTO chat_join_requests (chat_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [link.chat_id, req.user.id]
+      );
+      broadcastChatEvent(link.chat_id, 'join_requested', { userId: req.user.id });
+      return res.json({ chatId: link.chat_id, pending: true });
+    }
+
+    // Auto-join via the SECURITY DEFINER helper (atomic uses++ + membership).
     const r = await db.query(`SELECT chat_id, status FROM vc_redeem_invite($1, $2)`, [code, req.user.id]);
     const row = r.rows[0];
     if (!row || row.status !== 'ok') {
@@ -464,6 +494,71 @@ router.post('/join/:code', async (req, res) => {
   } catch (err) {
     console.error('[chats join]', err.message);
     res.status(500).json({ error: 'Failed to join via link' });
+  }
+});
+
+// ─── Join requests (approve-members groups) ─────────────────────────
+// GET /chats/:id/join-requests — admin lists pending requests
+router.get('/:id/join-requests', async (req, res) => {
+  try {
+    const mem = await loadChatMembership(req, req.params.id);
+    if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
+    if (mem.role !== 'admin' && mem.role !== 'owner') return res.status(403).json({ error: 'Admin only' });
+    const r = await db.query(
+      `SELECT jr.user_id, jr.created_at, COALESCE(NULLIF(u.name, ''), u.email) AS name, u.photo_url
+         FROM chat_join_requests jr JOIN users u ON u.id = jr.user_id
+        WHERE jr.chat_id = $1 ORDER BY jr.created_at`,
+      [req.params.id]
+    );
+    res.json(r.rows.map(row => ({
+      userId: row.user_id, name: row.name, photoURL: row.photo_url, requestedAt: row.created_at,
+    })));
+  } catch (err) {
+    console.error('[join-requests GET]', err.message);
+    res.status(500).json({ error: 'Failed to load join requests' });
+  }
+});
+
+// POST /chats/:id/join-requests/:userId/approve — admin approves
+router.post('/:id/join-requests/:userId/approve', async (req, res) => {
+  try {
+    const mem = await loadChatMembership(req, req.params.id);
+    if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
+    if (mem.role !== 'admin' && mem.role !== 'owner') return res.status(403).json({ error: 'Admin only' });
+    const target = req.params.userId;
+    const jr = await db.query(
+      `SELECT 1 FROM chat_join_requests WHERE chat_id = $1 AND user_id = $2`, [req.params.id, target]
+    );
+    if (!jr.rows[0]) return res.status(404).json({ error: 'Request not found' });
+    // Admin context → RLS allows the membership insert.
+    await req.dbQuery(
+      `INSERT INTO chat_members (chat_id, user_id, role) VALUES ($1, $2, 'member')
+       ON CONFLICT (chat_id, user_id) DO UPDATE SET left_at = NULL`,
+      [req.params.id, target]
+    );
+    await db.query(`DELETE FROM chat_join_requests WHERE chat_id = $1 AND user_id = $2`, [req.params.id, target]);
+    broadcastChatEvent(req.params.id, 'members_added', { added: [target], by: req.user.id });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[join-requests approve]', err.message);
+    res.status(500).json({ error: 'Failed to approve request' });
+  }
+});
+
+// DELETE /chats/:id/join-requests/:userId — admin rejects
+router.delete('/:id/join-requests/:userId', async (req, res) => {
+  try {
+    const mem = await loadChatMembership(req, req.params.id);
+    if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
+    if (mem.role !== 'admin' && mem.role !== 'owner') return res.status(403).json({ error: 'Admin only' });
+    await db.query(
+      `DELETE FROM chat_join_requests WHERE chat_id = $1 AND user_id = $2`,
+      [req.params.id, req.params.userId]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[join-requests reject]', err.message);
+    res.status(500).json({ error: 'Failed to reject request' });
   }
 });
 
@@ -567,6 +662,10 @@ router.get('/:id', async (req, res) => {
       disappearingSeconds:  chat.disappearing_seconds ?? null,
       slowModeSeconds:      chat.slow_mode_seconds ?? 0,
       sendPolicy:           chat.send_policy ?? 'everyone',
+      mediaPolicy:          chat.media_policy ?? 'everyone',
+      addMembersPolicy:     chat.add_members_policy ?? 'admins',
+      antiSpamLinks:        !!chat.anti_spam_links,
+      approveMembers:       !!chat.approve_members,
       members:              membersR.rows.map(publicMember),
       myRole:               mem.role,
       myLastReadId:         mem.last_read_message_id,
@@ -586,11 +685,25 @@ router.post('/:id/messages', async (req, res) => {
     const mem = await loadChatMembership(req, req.params.id);
     if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member of this chat' });
 
-    // Group admin controls — send policy + slow mode (non-admins only).
+    // Group admin controls — enforced for non-admins only.
     const memberIsAdmin = mem.role === 'admin' || mem.role === 'owner';
     if (!memberIsAdmin) {
+      const bb = req.body || {};
+      const bType = (bb.type || 'text').toString();
+      const bContent = typeof bb.content === 'string' ? bb.content : '';
+
       if (mem.send_policy === 'admins') {
         return res.status(403).json({ error: 'Only admins can send messages in this group' });
+      }
+      if (mem.media_policy === 'admins' && ['image', 'video', 'file'].includes(bType)) {
+        return res.status(403).json({ error: 'Only admins can send media in this group' });
+      }
+      if (mem.anti_spam_links) {
+        const joinedMs = mem.joined_at ? new Date(mem.joined_at).getTime() : 0;
+        const newish = Date.now() - joinedMs < 24 * 60 * 60 * 1000;
+        if (newish && /https?:\/\//i.test(bContent)) {
+          return res.status(403).json({ error: 'New members can’t post links yet (anti-spam)' });
+        }
       }
       const slow = parseInt(mem.slow_mode_seconds, 10) || 0;
       if (slow > 0) {
@@ -941,7 +1054,8 @@ router.post('/:id/members', async (req, res) => {
     const mem = await loadChatMembership(req, req.params.id);
     if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
     if (mem.chat_type !== 'group') return res.status(400).json({ error: 'Only group chats support add' });
-    if (mem.role !== 'admin' && mem.role !== 'owner') return res.status(403).json({ error: 'Admin only' });
+    const canAdd = mem.role === 'admin' || mem.role === 'owner' || mem.add_members_policy === 'everyone';
+    if (!canAdd) return res.status(403).json({ error: 'Only admins can add members' });
 
     const ids = Array.isArray(req.body?.userIds) ? req.body.userIds.filter(x => typeof x === 'string') : [];
     if (!ids.length) return res.status(400).json({ error: 'userIds required' });
@@ -1144,6 +1258,30 @@ router.patch('/:id', async (req, res) => {
       if (!isAdmin) return res.status(403).json({ error: 'Admin only' });
       params.push(b.sendPolicy === 'admins' ? 'admins' : 'everyone');
       sets.push(`send_policy = $${params.length}`);
+    }
+    if (typeof b.mediaPolicy === 'string') {
+      if (mem.chat_type !== 'group') return res.status(400).json({ error: 'Media policy is group-only' });
+      if (!isAdmin) return res.status(403).json({ error: 'Admin only' });
+      params.push(b.mediaPolicy === 'admins' ? 'admins' : 'everyone');
+      sets.push(`media_policy = $${params.length}`);
+    }
+    if (typeof b.addMembersPolicy === 'string') {
+      if (mem.chat_type !== 'group') return res.status(400).json({ error: 'Add-members policy is group-only' });
+      if (!isAdmin) return res.status(403).json({ error: 'Admin only' });
+      params.push(b.addMembersPolicy === 'everyone' ? 'everyone' : 'admins');
+      sets.push(`add_members_policy = $${params.length}`);
+    }
+    if (b.antiSpamLinks !== undefined) {
+      if (mem.chat_type !== 'group') return res.status(400).json({ error: 'Anti-spam is group-only' });
+      if (!isAdmin) return res.status(403).json({ error: 'Admin only' });
+      params.push(!!b.antiSpamLinks);
+      sets.push(`anti_spam_links = $${params.length}`);
+    }
+    if (b.approveMembers !== undefined) {
+      if (mem.chat_type !== 'group') return res.status(400).json({ error: 'Approve-members is group-only' });
+      if (!isAdmin) return res.status(403).json({ error: 'Admin only' });
+      params.push(!!b.approveMembers);
+      sets.push(`approve_members = $${params.length}`);
     }
 
     if (sets.length === 0) return res.json({ ok: true, noop: true });
