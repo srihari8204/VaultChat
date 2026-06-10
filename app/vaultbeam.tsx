@@ -1,363 +1,251 @@
-// app/vaultbeam.tsx — VaultBeam P2P Direct File Transfer
-// Device-to-device encrypted file transfer via WebRTC data channels
-// No server storage — files go directly between devices
-// Supports any file type, any size, with progress tracking
+// app/vaultbeam.tsx — VaultBeam P2P file transfer (real WebRTC data channel).
+//
+// Device-to-device transfer over an RTCDataChannel — the file bytes go peer to
+// peer (relayed only if TURN is needed), never stored on the server. Signaling
+// rides the shared Socket.IO connection on a dedicated channel
+// (vaultbeam_offer/answer/ice/end) so it never collides with a call.
+//
+// Both parties open this screen from the chat. The sender picks a file and
+// makes the offer; the receiver auto-answers and saves the file on completion.
+// Needs a dev/native build (react-native-webrtc) + two devices to verify.
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, FlatList,
-  StatusBar, Alert, Animated,
+  View, Text, TouchableOpacity, StyleSheet, StatusBar, Alert, ActivityIndicator, ScrollView,
 } from 'react-native';
-import { useLocalSearchParams, Stack } from 'expo-router';
+import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
-import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
+import { Ionicons } from '@expo/vector-icons';
+import {
+  mediaDevices, RTCIceCandidate, RTCPeerConnection, RTCSessionDescription,
+} from 'react-native-webrtc';
+import { Aurora } from '../constants/theme';
+import { getSocket } from '../lib/socket';
+import { getCurrentUserAsync } from './(constants)/authService';
+import { getTurnConfig, type IceServer } from '../lib/chatService';
 
-const C = { bg: '#FFFFFF', accent: '#4A9FFF', green: '#10B981', card: '#F9FAFB', danger: '#FF3C6E', purple: '#A78BFA' };
-const CHUNK_SIZE = 16384; // 16KB chunks for WebRTC
-const TRANSFER_KEY = 'vc_active_transfers';
+const CHUNK = 16 * 1024;          // 16KB base64 slices
+const BACKPRESSURE = 4 * 1024 * 1024;
+const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+const fmtSize = (b: number) => b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(1)} KB` : b < 1073741824 ? `${(b / 1048576).toFixed(1)} MB` : `${(b / 1073741824).toFixed(2)} GB`;
 
 export default function VaultBeamScreen() {
-  const { chatId, peerUid, peerName } = useLocalSearchParams();
-  const myUid = auth().currentUser?.uid || '';
-  const [tab, setTab] = useState('send');
-  const [sending, setSending] = useState(false);
-  const [receiving, setReceiving] = useState(false);
+  const router = useRouter();
+  const { peerUid, peerName } = useLocalSearchParams<{ chatId?: string; peerUid?: string; peerName?: string }>();
+
+  const [status, setStatus] = useState<'idle' | 'connecting' | 'ready' | 'transferring' | 'done' | 'error'>('connecting');
+  const [role, setRole] = useState<'send' | 'receive' | null>(null);
+  const [fileName, setFileName] = useState('');
   const [progress, setProgress] = useState(0);
-  const [speed, setSpeed] = useState('');
-  const [currentFile, setCurrentFile] = useState(null);
-  const [history, setHistory] = useState([]);
-  const [pendingReceive, setPendingReceive] = useState([]);
-  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const [err, setErr] = useState('');
 
-  useEffect(() => {
-    const loadHistory = async () => {
-      try {
-        const raw = await AsyncStorage.getItem(TRANSFER_KEY);
-        if (raw) setHistory(JSON.parse(raw));
-      } catch {}
+  const pcRef = useRef<RTCPeerConnection | null>(null);
+  const dcRef = useRef<any>(null);
+  const meRef = useRef('');
+  const offs = useRef<Array<() => void>>([]);
+  const recv = useRef<{ meta: any; chunks: string[]; got: number } | null>(null);
+
+  const teardown = useCallback((notify = true) => {
+    offs.current.forEach(f => { try { f(); } catch {} });
+    offs.current = [];
+    try { dcRef.current?.close(); } catch {}
+    try { pcRef.current?.close(); } catch {}
+    dcRef.current = null; pcRef.current = null;
+    if (notify && peerUid) getSocket().then(s => s.emit('vaultbeam_end', { to: peerUid })).catch(() => {});
+  }, [peerUid]);
+
+  // ── Receiver: handle an open data channel ──
+  const wireReceive = useCallback((dc: any) => {
+    dcRef.current = dc;
+    dc.onmessage = (e: any) => {
+      const d = e.data;
+      if (typeof d === 'string' && d[0] === '{') {
+        try {
+          const j = JSON.parse(d);
+          if (j.t === 'meta') { recv.current = { meta: j, chunks: [], got: 0 }; setFileName(j.name); setRole('receive'); setStatus('transferring'); setProgress(0); return; }
+          if (j.t === 'eof') { void finishReceive(); return; }
+        } catch { /* fall through */ }
+      }
+      if (recv.current) {
+        recv.current.chunks.push(d);
+        recv.current.got += d.length;
+        setProgress(Math.min(1, recv.current.got / (recv.current.meta.size || 1)));
+      }
     };
-    loadHistory();
-    if (!chatId) return;
-    const unsub = firestore().collection('chats').doc(chatId)
-      .collection('vaultbeam')
-      .where('recipientUid', '==', myUid)
-      .where('status', '==', 'pending')
-      .onSnapshot(snap => {
-        setPendingReceive(snap?.docs.map(d => ({ id: d.id, ...d.data() })) || []);
-      }, () => {});
-    return () => unsub();
-  }, [chatId, myUid]);
+  }, []);
 
+  const finishReceive = useCallback(async () => {
+    const r = recv.current;
+    if (!r) return;
+    try {
+      const path = (FileSystem as any).cacheDirectory + (r.meta.name || `vaultbeam_${Date.now()}`);
+      await FileSystem.writeAsStringAsync(path, r.chunks.join(''), { encoding: 'base64' });
+      setProgress(1); setStatus('done');
+      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(path);
+      else Alert.alert('Received', `Saved to ${path}`);
+    } catch (e: any) {
+      setErr(e?.message ?? 'Save failed'); setStatus('error');
+    } finally {
+      recv.current = null;
+    }
+  }, []);
+
+  // ── Setup: identity, pc, signaling ──
   useEffect(() => {
-    if (sending || receiving) {
-      const pulse = Animated.loop(Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 1.15, duration: 600, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
-      ]));
-      pulse.start();
-      return () => pulse.stop();
-    }
-  }, [sending, receiving, pulseAnim]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const me = await getCurrentUserAsync();
+        if (!me?.id) throw new Error('Not signed in');
+        meRef.current = me.id;
+        const turn = await getTurnConfig().catch(() => ({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] as IceServer[] }));
+        if (cancelled) return;
+        const pc = new RTCPeerConnection({ iceServers: turn.iceServers as any });
+        pcRef.current = pc;
 
-  const saveHistory = async (entry) => {
-    const updated = [entry, ...history].slice(0, 50);
-    setHistory(updated);
-    await AsyncStorage.setItem(TRANSFER_KEY, JSON.stringify(updated));
-  };
+        (pc as any).onicecandidate = (ev: any) => {
+          if (ev.candidate && peerUid) getSocket().then(s => s.emit('vaultbeam_ice', { to: peerUid, from: meRef.current, candidate: ev.candidate }));
+        };
+        (pc as any).ondatachannel = (ev: any) => wireReceive(ev.channel);
+        (pc as any).onconnectionstatechange = () => {
+          const st = (pc as any).connectionState;
+          if (st === 'connected' && status === 'connecting') setStatus('ready');
+          if (st === 'failed' || st === 'disconnected') { setErr('Connection lost'); setStatus('error'); }
+        };
 
-  const pickAndSend = async () => {
+        const s = await getSocket();
+        const matches = (data: any) => data?.from === peerUid || data?.fromUid === peerUid;
+        const onOffer = async (data: any) => {
+          if (!matches(data) || !pcRef.current) return;
+          setRole('receive');
+          await pcRef.current.setRemoteDescription(new RTCSessionDescription(data.offer));
+          const answer = await pcRef.current.createAnswer();
+          await pcRef.current.setLocalDescription(answer);
+          s.emit('vaultbeam_answer', { to: peerUid, from: meRef.current, answer });
+        };
+        const onAnswer = async (data: any) => {
+          if (!matches(data) || !pcRef.current) return;
+          await pcRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
+        };
+        const onIce = async (data: any) => {
+          if (!matches(data) || !data?.candidate || !pcRef.current) return;
+          try { await pcRef.current.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch {}
+        };
+        const onEnd = () => { setStatus(st => st === 'done' ? st : 'error'); };
+        s.on('vaultbeam_offer', onOffer);
+        s.on('vaultbeam_answer', onAnswer);
+        s.on('vaultbeam_ice', onIce);
+        s.on('vaultbeam_end', onEnd);
+        offs.current.push(() => s.off('vaultbeam_offer', onOffer), () => s.off('vaultbeam_answer', onAnswer), () => s.off('vaultbeam_ice', onIce), () => s.off('vaultbeam_end', onEnd));
+        if (!cancelled) setStatus('ready');
+      } catch (e: any) {
+        if (!cancelled) { setErr(e?.message ?? 'Setup failed'); setStatus('error'); }
+      }
+    })();
+    return () => { cancelled = true; teardown(false); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [peerUid]);
+
+  // ── Sender: pick a file + stream it over the data channel ──
+  const pickAndSend = useCallback(async () => {
+    if (!pcRef.current || !peerUid) { Alert.alert('Not ready', 'Open this from a chat with a peer.'); return; }
     try {
-      const result = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
-      if (result.canceled) return;
-      const file = result.assets[0];
-      setCurrentFile({ name: file.name, size: file.size, uri: file.uri });
-      setSending(true);
-      setProgress(0);
+      const res = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
+      if (res.canceled) return;
+      const file = res.assets[0];
+      setRole('send'); setFileName(file.name); setStatus('connecting'); setProgress(0);
 
-      // Create transfer record in Firestore
-      const transferRef = await firestore().collection('chats').doc(chatId)
-        .collection('vaultbeam').add({
-          senderUid: myUid,
-          recipientUid: peerUid,
-          fileName: file.name,
-          fileSize: file.size || 0,
-          status: 'pending',
-          progress: 0,
-          chunks: 0,
-          totalChunks: 0,
-          createdAt: firestore.FieldValue.serverTimestamp(),
-        });
+      const dc = (pcRef.current as any).createDataChannel('vaultbeam', { ordered: true });
+      dcRef.current = dc;
+      const b64 = await FileSystem.readAsStringAsync(file.uri, { encoding: 'base64' });
 
-      // Read file and simulate chunked transfer
-      const fileInfo = await FileSystem.getInfoAsync(file.uri);
-      const totalSize = fileInfo.size || file.size || 0;
-      const totalChunks = Math.ceil(totalSize / CHUNK_SIZE);
-      let sentChunks = 0;
-      const startTime = Date.now();
-
-      await transferRef.update({ totalChunks, status: 'transferring' });
-
-      // Simulate chunked P2P transfer with progress
-      for (let i = 0; i < totalChunks; i++) {
-        // In production: read chunk, encrypt with AES-256, send via WebRTC data channel
-        await new Promise(r => setTimeout(r, 8 + Math.random() * 12));
-        sentChunks++;
-        const pct = sentChunks / totalChunks;
-        setProgress(pct);
-
-        // Calculate speed
-        const elapsed = (Date.now() - startTime) / 1000;
-        const bytesPerSec = (sentChunks * CHUNK_SIZE) / elapsed;
-        if (bytesPerSec > 1048576) setSpeed((bytesPerSec / 1048576).toFixed(1) + ' MB/s');
-        else setSpeed((bytesPerSec / 1024).toFixed(0) + ' KB/s');
-
-        // Update Firestore every 10%
-        if (sentChunks % Math.max(1, Math.floor(totalChunks / 10)) === 0) {
-          await transferRef.update({ progress: pct, chunks: sentChunks });
+      dc.onopen = async () => {
+        setStatus('transferring');
+        dc.send(JSON.stringify({ t: 'meta', name: file.name, size: b64.length }));
+        let off = 0;
+        while (off < b64.length) {
+          if (dc.bufferedAmount > BACKPRESSURE) { await sleep(20); continue; }
+          dc.send(b64.slice(off, off + CHUNK));
+          off += CHUNK;
+          setProgress(Math.min(1, off / b64.length));
         }
-      }
+        dc.send(JSON.stringify({ t: 'eof' }));
+        setProgress(1); setStatus('done');
+      };
 
-      // Mark complete
-      await transferRef.update({ status: 'completed', progress: 1, completedAt: firestore.FieldValue.serverTimestamp() });
-
-      await saveHistory({
-        id: transferRef.id,
-        type: 'sent',
-        fileName: file.name,
-        fileSize: totalSize,
-        peerName: peerName || 'Peer',
-        timestamp: Date.now(),
-        status: 'completed',
-      });
-
-      setProgress(1);
-      setTimeout(() => {
-        setSending(false);
-        setProgress(0);
-        setCurrentFile(null);
-        Alert.alert('VaultBeam Complete!', file.name + ' sent to ' + (peerName || 'peer') + ' via encrypted P2P');
-      }, 500);
-
-    } catch (e) {
-      setSending(false);
-      Alert.alert('Transfer Failed', e.message);
+      const offer = await pcRef.current.createOffer({});
+      await pcRef.current.setLocalDescription(offer);
+      const s = await getSocket();
+      s.emit('vaultbeam_offer', { to: peerUid, from: meRef.current, offer, fileName: file.name });
+    } catch (e: any) {
+      setErr(e?.message ?? 'Send failed'); setStatus('error');
     }
-  };
-
-  const acceptTransfer = async (transfer) => {
-    setReceiving(true);
-    setProgress(0);
-    setCurrentFile({ name: transfer.fileName, size: transfer.fileSize });
-
-    try {
-      const ref = firestore().collection('chats').doc(chatId)
-        .collection('vaultbeam').doc(transfer.id);
-      await ref.update({ status: 'transferring' });
-
-      // Simulate receiving chunks
-      const totalChunks = transfer.totalChunks || Math.ceil((transfer.fileSize || 1000) / CHUNK_SIZE);
-      const startTime = Date.now();
-
-      for (let i = 0; i < totalChunks; i++) {
-        await new Promise(r => setTimeout(r, 8 + Math.random() * 12));
-        const pct = (i + 1) / totalChunks;
-        setProgress(pct);
-
-        const elapsed = (Date.now() - startTime) / 1000;
-        const bytesPerSec = ((i + 1) * CHUNK_SIZE) / elapsed;
-        if (bytesPerSec > 1048576) setSpeed((bytesPerSec / 1048576).toFixed(1) + ' MB/s');
-        else setSpeed((bytesPerSec / 1024).toFixed(0) + ' KB/s');
-      }
-
-      await ref.update({ status: 'completed', progress: 1 });
-
-      await saveHistory({
-        id: transfer.id,
-        type: 'received',
-        fileName: transfer.fileName,
-        fileSize: transfer.fileSize,
-        peerName: peerName || 'Peer',
-        timestamp: Date.now(),
-        status: 'completed',
-      });
-
-      setReceiving(false);
-      setProgress(0);
-      Alert.alert('File Received!', transfer.fileName + ' saved securely');
-    } catch {
-      setReceiving(false);
-      Alert.alert('Error', 'Transfer failed');
-    }
-  };
-
-  const formatSize = (bytes) => {
-    if (!bytes) return '0 B';
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-    if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
-    return (bytes / 1073741824).toFixed(2) + ' GB';
-  };
-
-  const isActive = sending || receiving;
+  }, [peerUid]);
 
   return (
-    <>
-      <Stack.Screen options={{ title: 'VaultBeam P2P', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
-      <View style={s.container}>
-        <StatusBar barStyle="light-content" />
-
-        {/* Active Transfer */}
-        {isActive && (
-          <View style={s.activeCard}>
-            <Animated.View style={[s.beamIcon, { transform: [{ scale: pulseAnim }] }]}>
-              <Text style={{ fontSize: 36 }}>{sending ? '\u2B06\uFE0F' : '\u2B07\uFE0F'}</Text>
-            </Animated.View>
-            <Text style={s.activeTitle}>{sending ? 'Sending' : 'Receiving'}...</Text>
-            <Text style={s.activeFile}>{currentFile?.name || 'File'}</Text>
-            <Text style={s.activeSize}>{formatSize(currentFile?.size)} | {speed}</Text>
-
-            <View style={s.progressBarBg}>
-              <View style={[s.progressBarFill, { width: (progress * 100) + '%' }]} />
-            </View>
-            <Text style={s.progressPct}>{Math.round(progress * 100)}%</Text>
-
-            <View style={s.encBadge}>
-              <Text style={s.encTxt}>{"\uD83D\uDD12"} AES-256 Encrypted P2P</Text>
-            </View>
-          </View>
-        )}
-
-        {!isActive && (
-          <>
-            {/* Tabs */}
-            <View style={s.tabs}>
-              <TouchableOpacity style={[s.tab, tab === 'send' && s.tabActive]} onPress={() => setTab('send')}>
-                <Text style={[s.tabTxt, tab === 'send' && s.tabTxtActive]}>Send</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[s.tab, tab === 'receive' && s.tabActive]} onPress={() => setTab('receive')}>
-                <Text style={[s.tabTxt, tab === 'receive' && s.tabTxtActive]}>
-                  Receive{pendingReceive.length > 0 ? ' (' + pendingReceive.length + ')' : ''}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[s.tab, tab === 'history' && s.tabActive]} onPress={() => setTab('history')}>
-                <Text style={[s.tabTxt, tab === 'history' && s.tabTxtActive]}>History</Text>
-              </TouchableOpacity>
-            </View>
-
-            {tab === 'send' && (
-              <View style={s.sendArea}>
-                <View style={s.beamLogo}>
-                  <Text style={{ fontSize: 60 }}>{"\u26A1"}</Text>
-                </View>
-                <Text style={s.sendTitle}>VaultBeam</Text>
-                <Text style={s.sendDesc}>Send any file directly to {peerName || 'peer'} via encrypted peer-to-peer connection. No server storage — your file goes straight to their device.</Text>
-
-                <View style={s.featureList}>
-                  <Text style={s.featureItem}>{"\uD83D\uDD12"} End-to-end AES-256 encryption</Text>
-                  <Text style={s.featureItem}>{"\uD83D\uDCE1"} Direct device-to-device transfer</Text>
-                  <Text style={s.featureItem}>{"\u267B\uFE0F"} Resumable — pick up where you left off</Text>
-                  <Text style={s.featureItem}>{"\uD83D\uDCC2"} Any file type, any size</Text>
-                  <Text style={s.featureItem}>{"\uD83D\uDEAB"} Zero server storage</Text>
-                </View>
-
-                <TouchableOpacity style={s.sendBtn} onPress={pickAndSend}>
-                  <Text style={s.sendBtnTxt}>{"\u26A1 Select File & Beam"}</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {tab === 'receive' && (
-              <FlatList
-                data={pendingReceive}
-                keyExtractor={t => t.id}
-                renderItem={({ item }) => (
-                  <View style={s.receiveRow}>
-                    <View style={s.receiveIcon}><Text style={{ fontSize: 22 }}>{"\uD83D\uDCC4"}</Text></View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.receiveName}>{item.fileName}</Text>
-                      <Text style={s.receiveMeta}>{formatSize(item.fileSize)} from {peerName || 'Peer'}</Text>
-                    </View>
-                    <TouchableOpacity style={s.acceptBtn} onPress={() => acceptTransfer(item)}>
-                      <Text style={s.acceptTxt}>Accept</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-                contentContainerStyle={{ padding: 12 }}
-                ListEmptyComponent={
-                  <View style={{ alignItems: 'center', padding: 40 }}>
-                    <Text style={{ fontSize: 40 }}>{"\uD83D\uDCE1"}</Text>
-                    <Text style={{ color: '#6B7280', marginTop: 12 }}>Waiting for incoming files...</Text>
-                    <Text style={{ color: '#9CA3AF', fontSize: 11, marginTop: 4 }}>Ask {peerName || 'peer'} to send a file via VaultBeam</Text>
-                  </View>
-                }
-              />
-            )}
-
-            {tab === 'history' && (
-              <FlatList
-                data={history}
-                keyExtractor={(h, i) => h.id || String(i)}
-                renderItem={({ item }) => (
-                  <View style={s.historyRow}>
-                    <Text style={{ fontSize: 18 }}>{item.type === 'sent' ? '\u2B06\uFE0F' : '\u2B07\uFE0F'}</Text>
-                    <View style={{ flex: 1, marginLeft: 10 }}>
-                      <Text style={s.historyName}>{item.fileName}</Text>
-                      <Text style={s.historyMeta}>{formatSize(item.fileSize)} | {item.peerName} | {new Date(item.timestamp).toLocaleDateString()}</Text>
-                    </View>
-                    <View style={[s.statusBadge, { backgroundColor: item.status === 'completed' ? '#10B98122' : '#FF3C6E22' }]}>
-                      <Text style={{ color: item.status === 'completed' ? C.green : C.danger, fontSize: 10, fontWeight: '700' }}>
-                        {item.status === 'completed' ? 'Done' : item.status}
-                      </Text>
-                    </View>
-                  </View>
-                )}
-                contentContainerStyle={{ padding: 12 }}
-                ListEmptyComponent={<View style={{ alignItems: 'center', padding: 40 }}><Text style={{ color: '#6B7280' }}>No transfer history</Text></View>}
-              />
-            )}
-          </>
-        )}
+    <View style={s.container}>
+      <Stack.Screen options={{ headerShown: false }} />
+      <StatusBar barStyle="light-content" />
+      <View style={s.header}>
+        <TouchableOpacity onPress={() => { teardown(true); router.back(); }} style={s.backBtn} hitSlop={10}>
+          <Ionicons name="arrow-back" size={24} color={Aurora.text} />
+        </TouchableOpacity>
+        <Text style={s.title}>VaultBeam P2P</Text>
+        <View style={{ width: 40 }} />
       </View>
-    </>
+
+      <ScrollView contentContainerStyle={{ padding: 16 }}>
+        <View style={s.infoCard}>
+          <Text style={{ fontSize: 22 }}>📡</Text>
+          <Text style={s.infoTxt}>Direct device-to-device transfer to {(peerName as string) || 'peer'}. Files go peer-to-peer — never stored on the server.</Text>
+        </View>
+
+        <View style={s.statusCard}>
+          <Text style={s.statusLabel}>
+            {status === 'connecting' ? 'Connecting…' : status === 'ready' ? 'Ready' : status === 'transferring' ? `${role === 'send' ? 'Sending' : 'Receiving'} ${fileName}` : status === 'done' ? 'Complete' : 'Error'}
+          </Text>
+          {(status === 'transferring') && (
+            <>
+              <View style={s.barTrack}><View style={[s.barFill, { width: `${Math.round(progress * 100)}%` }]} /></View>
+              <Text style={s.pct}>{Math.round(progress * 100)}%</Text>
+            </>
+          )}
+          {status === 'connecting' && <ActivityIndicator color={Aurora.primary} style={{ marginTop: 10 }} />}
+          {status === 'done' && <Text style={[s.pct, { color: Aurora.primary }]}>✓ {fileName}</Text>}
+          {status === 'error' && <Text style={[s.pct, { color: Aurora.danger }]}>{err || 'Transfer error'}</Text>}
+        </View>
+
+        <TouchableOpacity
+          style={[s.sendBtn, (status === 'transferring') && s.dim]}
+          onPress={pickAndSend}
+          disabled={status === 'transferring'}
+        >
+          <Ionicons name="cloud-upload-outline" size={20} color="#04130D" />
+          <Text style={s.sendTxt}>Pick a file to send</Text>
+        </TouchableOpacity>
+
+        <Text style={s.note}>Both people must have this screen open. Needs a dev build (WebRTC) — verify on two devices.</Text>
+      </ScrollView>
+    </View>
   );
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg },
-  tabs: { flexDirection: 'row', paddingHorizontal: 12, paddingTop: 8, gap: 6 },
-  tab: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: '#F9FAFB' },
-  tabActive: { backgroundColor: C.accent },
-  tabTxt: { color: '#6B7280', fontSize: 13, fontWeight: '700' },
-  tabTxtActive: { color: '#000' },
-  activeCard: { alignItems: 'center', padding: 24, margin: 16, backgroundColor: C.card, borderRadius: 20, borderWidth: 1, borderColor: C.accent + '44' },
-  beamIcon: { marginBottom: 12 },
-  activeTitle: { color: C.accent, fontSize: 18, fontWeight: '900' },
-  activeFile: { color: '#1F2937', fontSize: 14, marginTop: 4 },
-  activeSize: { color: '#6B7280', fontSize: 12, marginTop: 4 },
-  progressBarBg: { width: '100%', height: 6, backgroundColor: '#E5E7EB', borderRadius: 3, marginTop: 16, overflow: 'hidden' },
-  progressBarFill: { height: '100%', backgroundColor: C.accent, borderRadius: 3 },
-  progressPct: { color: C.accent, fontSize: 20, fontWeight: '900', marginTop: 8 },
-  encBadge: { marginTop: 12, backgroundColor: '#4A9FFF11', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 6 },
-  encTxt: { color: C.accent, fontSize: 11, fontWeight: '600' },
-  sendArea: { flex: 1, alignItems: 'center', padding: 24 },
-  beamLogo: { marginTop: 20, marginBottom: 8 },
-  sendTitle: { color: C.accent, fontSize: 28, fontWeight: '900', letterSpacing: -1 },
-  sendDesc: { color: '#6B7280', fontSize: 13, textAlign: 'center', marginTop: 8, lineHeight: 20, paddingHorizontal: 12 },
-  featureList: { marginTop: 20, alignSelf: 'stretch' },
-  featureItem: { color: '#9CA3AF', fontSize: 12, lineHeight: 26 },
-  sendBtn: { marginTop: 24, backgroundColor: C.accent, borderRadius: 16, paddingVertical: 16, paddingHorizontal: 32, width: '100%', alignItems: 'center' },
-  sendBtnTxt: { color: '#000', fontSize: 16, fontWeight: '900' },
-  receiveRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: '#E5E7EB' },
-  receiveIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  receiveName: { color: '#1F2937', fontSize: 14, fontWeight: '700' },
-  receiveMeta: { color: '#6B7280', fontSize: 11, marginTop: 2 },
-  acceptBtn: { backgroundColor: C.green, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 8 },
-  acceptTxt: { color: '#000', fontSize: 12, fontWeight: '800' },
-  historyRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 12, marginBottom: 6, borderWidth: 1, borderColor: '#E5E7EB' },
-  historyName: { color: '#1F2937', fontSize: 13, fontWeight: '600' },
-  historyMeta: { color: '#6B7280', fontSize: 10, marginTop: 2 },
-  statusBadge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  container: { flex: 1, backgroundColor: Aurora.bg },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingHorizontal: 16, paddingBottom: 8 },
+  backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
+  title: { color: Aurora.text, fontSize: 18, fontWeight: '800' },
+  infoCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: Aurora.card, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: Aurora.border, marginBottom: 14 },
+  infoTxt: { flex: 1, color: Aurora.textDim, fontSize: 12, lineHeight: 18 },
+  statusCard: { backgroundColor: Aurora.card, borderRadius: 14, padding: 18, borderWidth: 1, borderColor: Aurora.border, alignItems: 'center', marginBottom: 14 },
+  statusLabel: { color: Aurora.text, fontSize: 15, fontWeight: '700', textAlign: 'center' },
+  barTrack: { width: '100%', height: 8, borderRadius: 4, backgroundColor: Aurora.surface, marginTop: 14, overflow: 'hidden' },
+  barFill: { height: 8, borderRadius: 4, backgroundColor: Aurora.primary },
+  pct: { color: Aurora.textDim, fontSize: 13, marginTop: 8, fontWeight: '700' },
+  sendBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: Aurora.primary, borderRadius: 12, paddingVertical: 14 },
+  sendTxt: { color: '#04130D', fontWeight: '800', fontSize: 15 },
+  dim: { opacity: 0.5 },
+  note: { color: Aurora.textFaint, fontSize: 11, textAlign: 'center', marginTop: 14, lineHeight: 16 },
 });

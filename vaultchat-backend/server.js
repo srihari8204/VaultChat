@@ -513,6 +513,12 @@ io.on('connection', (socket) => {
   socket.on('call_incoming',      relayToPeer('call_incoming'));
   socket.on('screen_share_start', relayToPeer('screen_share_start'));
   socket.on('screen_share_stop',  relayToPeer('screen_share_stop'));
+  // VaultBeam P2P file transfer — own signaling channel so it never collides
+  // with an in-progress call.
+  socket.on('vaultbeam_offer',    relayToPeer('vaultbeam_offer'));
+  socket.on('vaultbeam_answer',   relayToPeer('vaultbeam_answer'));
+  socket.on('vaultbeam_ice',      relayToPeer('vaultbeam_ice'));
+  socket.on('vaultbeam_end',      relayToPeer('vaultbeam_end'));
 
   // ── Gaming Platform ───────────────────────────────────────
   // Ephemeral in-memory — coins, rooms, queue. Lost on restart (acceptable
