@@ -1,182 +1,152 @@
-// app/voice-transcribe.tsx — Voice Message Transcription
-// Converts audio messages to text using on-device speech recognition
-// Also provides a record-and-transcribe feature
+// app/voice-transcribe.tsx — Voice → Text (real on-device dictation).
+//
+// Uses @react-native-voice/voice for real on-device speech recognition (the OS
+// recognizer — Android SpeechRecognizer / iOS Speech). Speak and get live text
+// you can edit and send to the chat. Requires a dev/native build (not Expo Go)
+// — the native module is autolinked on prebuild.
+//
+// (File-transcription of *received* audio messages needs a cloud STT service
+// like Whisper/Google Speech — that's a separate, key-gated integration. This
+// screen does real live dictation, which the on-device recognizer supports.)
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, FlatList,
-  StatusBar, ActivityIndicator, Alert,
+  View, Text, TouchableOpacity, StyleSheet, StatusBar, Alert, TextInput, ScrollView,
 } from 'react-native';
-import { useLocalSearchParams, Stack } from 'expo-router';
-import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
-
-const C = { bg: '#FFFFFF', accent: '#4A9FFF', green: '#10B981', card: '#F9FAFB', purple: '#A78BFA' };
-
-// Simulated transcription engine — in production, use Whisper.cpp or Google Speech API
-const transcribeAudio = async (audioUrl) => {
-  // Simulate processing delay
-  await new Promise(r => setTimeout(r, 1500 + Math.random() * 1000));
-  return { success: true, confidence: 0.85 + Math.random() * 0.14 };
-};
+import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import Voice, { type SpeechResultsEvent, type SpeechErrorEvent } from '@react-native-voice/voice';
+import { Aurora } from '../constants/theme';
+import { sendMessage } from '../lib/chatService';
 
 export default function VoiceTranscribeScreen() {
-  const { chatId, peerName } = useLocalSearchParams();
-  const myUid = auth().currentUser?.uid || '';
-  const [audioMsgs, setAudioMsgs] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [transcribing, setTranscribing] = useState(null);
-  const [transcriptions, setTranscriptions] = useState({});
+  const router = useRouter();
+  const { chatId } = useLocalSearchParams<{ chatId?: string }>();
+  const [listening, setListening] = useState(false);
+  const [partial, setPartial] = useState('');
+  const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
+  const baseRef = useRef('');
 
   useEffect(() => {
-    const loadAudioMessages = async () => {
-      setLoading(true);
-      try {
-        const snap = await firestore().collection('chats').doc(chatId)
-          .collection('messages')
-          .where('msgType', '==', 'audio')
-          .orderBy('createdAt', 'desc')
-          .limit(50)
-          .get();
-        const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        setAudioMsgs(msgs);
-
-        // Load existing transcriptions
-        const txns = {};
-        for (const msg of msgs) {
-          if (msg.transcription) txns[msg.id] = msg.transcription;
-        }
-        setTranscriptions(txns);
-      } catch {}
-      setLoading(false);
+    Voice.onSpeechStart = () => setListening(true);
+    Voice.onSpeechEnd = () => setListening(false);
+    Voice.onSpeechResults = (e: SpeechResultsEvent) => {
+      const best = e.value?.[0] ?? '';
+      setText((baseRef.current ? baseRef.current + ' ' : '') + best);
+      setPartial('');
     };
-    loadAudioMessages();
-  }, [chatId]);
+    Voice.onSpeechPartialResults = (e: SpeechResultsEvent) => setPartial(e.value?.[0] ?? '');
+    Voice.onSpeechError = (e: SpeechErrorEvent) => {
+      setListening(false);
+      const msg = e.error?.message || 'Speech recognition error';
+      if (!/No speech|1110|recognizer is busy/i.test(msg)) Alert.alert('Voice', msg);
+    };
+    return () => { Voice.destroy().then(() => Voice.removeAllListeners()).catch(() => {}); };
+  }, []);
 
-  const transcribeMessage = async (msg) => {
-    setTranscribing(msg.id);
+  const start = useCallback(async () => {
     try {
-      const result = await transcribeAudio(msg.mediaUrl);
-      if (result.success) {
-        // Store transcription in Firestore
-        const text = generateTranscriptionText(msg);
-        await firestore().collection('chats').doc(chatId)
-          .collection('messages').doc(msg.id)
-          .update({ transcription: text, transcriptionConfidence: result.confidence });
-        setTranscriptions(prev => ({ ...prev, [msg.id]: text }));
-      }
-    } catch { Alert.alert('Error', 'Transcription failed'); }
-    setTranscribing(null);
-  };
+      baseRef.current = text.trim();
+      setPartial('');
+      await Voice.start('en-US');
+    } catch (e: any) {
+      Alert.alert('Cannot start', e?.message ?? 'Speech recognition unavailable on this device/build.');
+    }
+  }, [text]);
 
-  // Generate realistic placeholder transcription
-  const generateTranscriptionText = (msg) => {
-    const templates = [
-      'Hey, just wanted to check in and see how you are doing.',
-      'Can you call me back when you get a chance? It is important.',
-      'I am on my way, should be there in about twenty minutes.',
-      'The meeting went well. I will send you the details later.',
-      'Happy birthday! Hope you have an amazing day.',
-      'Just finished the project. Let me know what you think.',
-      'I got your message. Let me think about it and get back to you.',
-      'The weather is great today. Want to go for a walk?',
-    ];
-    return templates[Math.floor(Math.random() * templates.length)];
-  };
+  const stop = useCallback(async () => {
+    try { await Voice.stop(); } catch { /* ignore */ }
+    setListening(false);
+  }, []);
 
-  const formatDuration = (secs) => {
-    if (!secs) return '0:00';
-    const m = Math.floor(secs / 60);
-    const s = Math.floor(secs % 60);
-    return m + ':' + (s < 10 ? '0' : '') + s;
-  };
-
-  const formatTime = (ts) => {
-    if (!ts?.toDate) return '';
-    const d = ts.toDate();
-    return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const send = async () => {
+    const body = text.trim();
+    if (!body || !chatId) { if (!chatId) Alert.alert('No chat', 'Open from a chat to send.'); return; }
+    setSending(true);
+    try {
+      await sendMessage(chatId, body, 'text');
+      router.back();
+    } catch (e: any) {
+      Alert.alert('Error', e?.message ?? 'Could not send');
+    } finally {
+      setSending(false);
+    }
   };
 
   return (
-    <>
-      <Stack.Screen options={{ title: 'Voice Transcription', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
-      <View style={s.container}>
-        <StatusBar barStyle="light-content" />
+    <View style={s.container}>
+      <Stack.Screen options={{ headerShown: false }} />
+      <StatusBar barStyle="light-content" />
+      <View style={s.header}>
+        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
+          <Ionicons name="arrow-back" size={24} color={Aurora.text} />
+        </TouchableOpacity>
+        <Text style={s.title}>Voice to Text</Text>
+        <View style={{ width: 40 }} />
+      </View>
 
+      <View style={s.body}>
         <View style={s.infoCard}>
-          <Text style={{ fontSize: 24 }}>{"\uD83C\uDF99\uFE0F"}</Text>
-          <View style={{ flex: 1, marginLeft: 12 }}>
-            <Text style={s.infoTitle}>Audio Transcription</Text>
-            <Text style={s.infoDesc}>Convert voice messages to text. Tap any audio message to transcribe it.</Text>
-          </View>
+          <Text style={{ fontSize: 22 }}>🎙️</Text>
+          <Text style={s.infoTxt}>Tap the mic and speak. Words are transcribed on-device; edit and send to the chat.</Text>
         </View>
 
-        <Text style={s.sectionTitle}>{audioMsgs.length} AUDIO MESSAGES</Text>
-
-        {loading ? <ActivityIndicator color={C.accent} style={{ marginTop: 30 }} /> : (
-          <FlatList
-            data={audioMsgs}
-            keyExtractor={m => m.id}
-            renderItem={({ item }) => {
-              const isMine = item.senderId === myUid;
-              const hasTranscription = !!transcriptions[item.id];
-              const isTranscribing = transcribing === item.id;
-
-              return (
-                <View style={s.audioRow}>
-                  <View style={s.audioHeader}>
-                    <View style={s.audioIcon}>
-                      <Text style={{ fontSize: 20 }}>{isMine ? '\uD83C\uDF99\uFE0F' : '\uD83D\uDD0A'}</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.audioSender}>{isMine ? 'You' : (peerName || 'Peer')}</Text>
-                      <Text style={s.audioMeta}>{formatDuration(item.audioDuration)} | {formatTime(item.createdAt)}</Text>
-                    </View>
-                    {!hasTranscription && !isTranscribing && (
-                      <TouchableOpacity style={s.transcribeBtn} onPress={() => transcribeMessage(item)}>
-                        <Text style={s.transcribeTxt}>Transcribe</Text>
-                      </TouchableOpacity>
-                    )}
-                    {isTranscribing && <ActivityIndicator color={C.purple} size="small" />}
-                    {hasTranscription && (
-                      <View style={s.doneBadge}><Text style={s.doneTxt}>Done</Text></View>
-                    )}
-                  </View>
-                  {hasTranscription && (
-                    <View style={s.transcriptionBox}>
-                      <Text style={s.transcriptionText}>{transcriptions[item.id]}</Text>
-                    </View>
-                  )}
-                </View>
-              );
-            }}
-            ListEmptyComponent={
-              <View style={{ alignItems: 'center', padding: 40 }}>
-                <Text style={{ color: '#6B7280' }}>No audio messages in this chat</Text>
-              </View>
-            }
+        <ScrollView style={s.textArea} contentContainerStyle={{ padding: 14 }}>
+          <TextInput
+            style={s.input}
+            value={text}
+            onChangeText={setText}
+            placeholder="Your transcribed text appears here…"
+            placeholderTextColor={Aurora.textFaint}
+            multiline
           />
-        )}
+          {!!partial && <Text style={s.partial}>{partial}…</Text>}
+        </ScrollView>
+
+        <View style={s.controls}>
+          <TouchableOpacity
+            style={[s.micBtn, listening && s.micActive]}
+            onPress={listening ? stop : start}
+            activeOpacity={0.85}
+          >
+            <Ionicons name={listening ? 'stop' : 'mic'} size={30} color="#04130D" />
+          </TouchableOpacity>
+          <Text style={s.micLabel}>{listening ? 'Listening… tap to stop' : 'Tap to speak'}</Text>
+        </View>
+
+        <View style={s.actions}>
+          <TouchableOpacity style={[s.actionBtn, s.clearBtn]} onPress={() => { setText(''); setPartial(''); }} disabled={!text}>
+            <Text style={[s.actionTxt, { color: Aurora.textDim }]}>Clear</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[s.actionBtn, s.sendBtn, (!text.trim() || sending) && s.dim]} onPress={send} disabled={!text.trim() || sending}>
+            <Text style={[s.actionTxt, { color: '#04130D' }]}>{sending ? 'Sending…' : 'Send to chat'}</Text>
+          </TouchableOpacity>
+        </View>
       </View>
-    </>
+    </View>
   );
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg, padding: 16 },
-  infoCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#E5E7EB' },
-  infoTitle: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  infoDesc: { color: '#9CA3AF', fontSize: 12, marginTop: 2 },
-  sectionTitle: { color: '#6B7280', fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 8 },
-  audioRow: { backgroundColor: C.card, borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: '#E5E7EB' },
-  audioHeader: { flexDirection: 'row', alignItems: 'center' },
-  audioIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  audioSender: { color: '#1F2937', fontSize: 14, fontWeight: '700' },
-  audioMeta: { color: '#6B7280', fontSize: 11, marginTop: 2 },
-  transcribeBtn: { backgroundColor: '#A78BFA22', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 6, borderWidth: 1, borderColor: '#A78BFA44' },
-  transcribeTxt: { color: C.purple, fontSize: 12, fontWeight: '700' },
-  doneBadge: { backgroundColor: '#10B98122', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 4 },
-  doneTxt: { color: C.green, fontSize: 11, fontWeight: '700' },
-  transcriptionBox: { marginTop: 10, backgroundColor: '#E5E7EB', borderRadius: 10, padding: 12 },
-  transcriptionText: { color: '#1F2937', fontSize: 13, lineHeight: 20, fontStyle: 'italic' },
+  container: { flex: 1, backgroundColor: Aurora.bg },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingHorizontal: 16, paddingBottom: 8 },
+  backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
+  title: { color: Aurora.text, fontSize: 18, fontWeight: '800' },
+  body: { flex: 1, padding: 16 },
+  infoCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: Aurora.card, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: Aurora.border, marginBottom: 14 },
+  infoTxt: { flex: 1, color: Aurora.textDim, fontSize: 12, lineHeight: 18 },
+  textArea: { flex: 1, backgroundColor: Aurora.card, borderRadius: 14, borderWidth: 1, borderColor: Aurora.border, marginBottom: 14 },
+  input: { color: Aurora.text, fontSize: 16, lineHeight: 24, minHeight: 120, textAlignVertical: 'top' },
+  partial: { color: Aurora.textDim, fontSize: 15, fontStyle: 'italic', marginTop: 6 },
+  controls: { alignItems: 'center', marginBottom: 16 },
+  micBtn: { width: 72, height: 72, borderRadius: 36, backgroundColor: Aurora.primary, alignItems: 'center', justifyContent: 'center' },
+  micActive: { backgroundColor: '#FF6B35' },
+  micLabel: { color: Aurora.textDim, fontSize: 12, marginTop: 8 },
+  actions: { flexDirection: 'row', gap: 10 },
+  actionBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
+  clearBtn: { backgroundColor: Aurora.surface, borderWidth: 1, borderColor: Aurora.border },
+  sendBtn: { backgroundColor: Aurora.primary },
+  dim: { opacity: 0.5 },
+  actionTxt: { fontSize: 14, fontWeight: '800' },
 });

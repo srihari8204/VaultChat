@@ -17,6 +17,7 @@
       "infoPlist": {
         "NSCameraUsageDescription": "VaultChat needs camera for video calls and face scan",
         "NSMicrophoneUsageDescription": "VaultChat needs microphone for voice and video calls",
+        "NSSpeechRecognitionUsageDescription": "VaultChat uses speech recognition to transcribe your voice into text",
         "NSFaceIDUsageDescription": "VaultChat uses Face ID to protect your messages",
         "NSContactsUsageDescription": "VaultChat needs contacts to find people you know",
         "NSLocationWhenInUseUsageDescription": "VaultChat needs location to share your position with contacts",
