@@ -449,6 +449,20 @@ io.on('connection', (socket) => {
     if (channelId) socket.leave(`channel:${channelId}`);
   });
 
+  // Live location — relay position updates to the chat room. The sender's
+  // location-sharing screen emits; the peers' open chat screens render a
+  // live banner. Server only relays (no storage).
+  socket.on('live_location_update', ({ chatId, latitude, longitude, address, until }) => {
+    if (!chatId) return;
+    socket.to(`chat:${chatId}`).emit('live_location_update', {
+      userId: socket.data.uid, latitude, longitude, address, until,
+    });
+  });
+  socket.on('live_location_stop', ({ chatId }) => {
+    if (!chatId) return;
+    socket.to(`chat:${chatId}`).emit('live_location_stop', { userId: socket.data.uid });
+  });
+
   socket.on('typing_start', ({ chatId, uid }) => {
     if (chatId) socket.to(`chat:${chatId}`).emit('typing_start', { uid });
   });

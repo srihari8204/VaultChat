@@ -171,6 +171,7 @@ export default function ChatScreen() {
   const listRef = useRef<FlatList>(null);
   const messagesRef = useRef<DisplayMessage[]>([]);
   const [flashId, setFlashId] = useState<number | null>(null);
+  const [liveLoc, setLiveLoc] = useState<{ userId: string; latitude: number; longitude: number; address?: string } | null>(null);
   const readDebounce = useRef<any>(null);
   const lastReadSent = useRef<number>(0);
   const typingIdleTimer = useRef<any>(null);
@@ -375,6 +376,15 @@ export default function ChatScreen() {
           setPollVotes(prev => bumpPollVote(prev, e.messageId, e.optionIndex, -1, e.userId === meId));
         };
 
+        const onLiveLocation = (e: any) => {
+          if (e?.userId && e.userId !== meId) setLiveLoc({ userId: e.userId, latitude: e.latitude, longitude: e.longitude, address: e.address });
+        };
+        const onLiveLocationStop = (e: any) => {
+          setLiveLoc(prev => (prev && e?.userId === prev.userId) ? null : prev);
+        };
+
+        s.on('live_location_update', onLiveLocation);
+        s.on('live_location_stop',   onLiveLocationStop);
         s.on('new_message',       onNew);
         s.on('message_edited',    onEdit);
         s.on('message_deleted',   onDelete);
@@ -389,6 +399,8 @@ export default function ChatScreen() {
         s.on('poll_voted',        onPollVoted);
         s.on('poll_unvoted',      onPollUnvoted);
 
+        off.push(() => s.off('live_location_update', onLiveLocation));
+        off.push(() => s.off('live_location_stop',   onLiveLocationStop));
         off.push(() => s.off('new_message',       onNew));
         off.push(() => s.off('message_edited',    onEdit));
         off.push(() => s.off('message_deleted',   onDelete));
@@ -1362,6 +1374,22 @@ export default function ChatScreen() {
             “{memoryBubble.msg.content}”
           </Text>
           <Text style={S.memoryBubbleDismiss}>Tap to dismiss</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* Live-location banner — a peer is sharing live location */}
+      {liveLoc && (
+        <TouchableOpacity
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 12, marginTop: 8, padding: 10, borderRadius: 12, backgroundColor: 'rgba(255,107,53,0.12)', borderWidth: 1, borderColor: 'rgba(255,107,53,0.4)' }}
+          activeOpacity={0.85}
+          onPress={() => Linking.openURL(`https://maps.google.com/?q=${liveLoc.latitude},${liveLoc.longitude}`).catch(() => {})}
+        >
+          <Text style={{ fontSize: 18 }}>📍</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: '#FF6B35', fontSize: 13, fontWeight: '700' }}>{membersById.get(liveLoc.userId)?.name || 'Someone'} is sharing live location</Text>
+            <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 11, marginTop: 1 }} numberOfLines={1}>{liveLoc.address || `${liveLoc.latitude.toFixed(5)}, ${liveLoc.longitude.toFixed(5)}`} · Open in Maps</Text>
+          </View>
+          <TouchableOpacity onPress={() => setLiveLoc(null)} hitSlop={8}><Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 16 }}>✕</Text></TouchableOpacity>
         </TouchableOpacity>
       )}
 
