@@ -24,7 +24,9 @@
     "pm2:save": "pm2 save",
     "lint:syntax": "node -e \"const{execSync}=require('child_process'),fs=require('fs');const files=['server.js','firebaseAdmin.js',...fs.readdirSync('routes').filter(f=>f.endsWith('.js')).map(f=>'routes/'+f)];for(const f of files){try{execSync(`node --check ${f}`,{stdio:'inherit'})}catch(e){process.exit(1)}}console.log('Backend syntax OK')\"",
     "health": "curl -fsS http://localhost:${PORT:-3002}/health || exit 1",
-    "postinstall": "echo 'Backend deps installed.'"
+    "postinstall": "echo 'Backend deps installed.'",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
   },
   "dependencies": {
     "@sentry/node": "^8.55.2",
@@ -41,7 +43,10 @@
     "pg": "^8.13.1",
     "resend": "^4.8.0",
     "socket.io": "^4.6.1",
-    "uuid": "^13.0.0"
+    "uuid": "^13.0.0",
+    "expo": "~54.0.33",
+    "react": "19.1.0",
+    "react-native": "0.81.5"
   },
   "devDependencies": {
     "esbuild": "^0.28.0",
