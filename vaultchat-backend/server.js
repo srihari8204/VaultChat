@@ -59,14 +59,26 @@ app.use('/stories',  require('./routes/stories'));
 const channelsRouter = require('./routes/channels');
 app.use('/channels', channelsRouter);
 app.use('/games',    require('./routes/games'));
+const adminRouter = require('./routes/admin');
+app.use('/api/admin', adminRouter);
 
 // Wire the chats router so its REST writes broadcast over sockets.
 chatsRouter.setBroadcasters({
   // payload.senderId drives block-list suppression in fanOutToChat. Other
   // chat events (typing, delivery, read, reactions) are sender-agnostic.
-  newMessage: (chatId, payload) => fanOutToChat(chatId, 'new_message', payload, payload?.senderId ?? null),
-  chatEvent:  (chatId, event, payload) => fanOutToChat(chatId, event, payload),
+  // We ALSO mirror a privacy-safe summary (no content) to the admin firehose.
+  newMessage: (chatId, payload) => {
+    fanOutToChat(chatId, 'new_message', payload, payload?.senderId ?? null);
+    io.to('admin').emit('admin:event', { event: 'new_message', chatId, senderId: payload?.senderId ?? null, type: payload?.type ?? null, messageId: payload?.id ?? null, ts: Date.now() });
+  },
+  chatEvent:  (chatId, event, payload) => {
+    fanOutToChat(chatId, event, payload);
+    io.to('admin').emit('admin:event', { event, chatId, ts: Date.now() });
+  },
 });
+
+// Expose the live runtime to the admin router (online count + socket emitter).
+adminRouter.setRuntime({ io, getOnlineCount: () => userSockets.size });
 
 // Broadcast-channel realtime: a new post fans out to everyone in the room.
 channelsRouter.setBroadcaster((channelId, event, payload) =>
@@ -411,6 +423,12 @@ async function fanOutToChat(chatId, event, data, senderId = null) {
 
 // JWT handshake middleware — runs on every new connection BEFORE 'connection'
 io.use((socket, next) => {
+  // Admin console authenticates the socket with the admin key (not a user JWT).
+  const adminKey = socket.handshake.auth?.adminKey;
+  if (adminKey && process.env.ADMIN_KEY && adminKey === process.env.ADMIN_KEY) {
+    socket.data = { admin: true, uid: 'admin' };
+    return next();
+  }
   try {
     const token =
       socket.handshake.auth?.token ||
@@ -425,6 +443,14 @@ io.use((socket, next) => {
 });
 
 io.on('connection', (socket) => {
+  // Admin console socket — joins the firehose room, is NOT counted as an
+  // online user, and skips all the per-user event handlers below.
+  if (socket.data.admin) {
+    socket.join('admin');
+    socket.emit('ready', { admin: true });
+    return;
+  }
+
   trackSocket(socket);
   // Personal room — useful for direct user-targeted events (e.g. invitations)
   socket.join(`user:${socket.data.uid}`);
