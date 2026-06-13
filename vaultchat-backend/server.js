@@ -487,8 +487,20 @@ io.on('connection', (socket) => {
   // Live location — relay position updates to the chat room. The sender's
   // location-sharing screen emits; the peers' open chat screens render a
   // live banner. Server only relays (no storage).
-  socket.on('live_location_update', ({ chatId, latitude, longitude, address, until }) => {
+  socket.on('live_location_update', async ({ chatId, latitude, longitude, address, until }) => {
     if (!chatId) return;
+    // Only relay into a chat the sender is actually a member of (cache the
+    // membership check per chat for this socket so it's one query per session).
+    socket.data.liveLocOk = socket.data.liveLocOk || {};
+    if (socket.data.liveLocOk[chatId] === undefined) {
+      try {
+        const r = await db.queryAs(socket.data.uid,
+          `SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL LIMIT 1`,
+          [chatId, socket.data.uid]);
+        socket.data.liveLocOk[chatId] = r.rowCount > 0;
+      } catch { socket.data.liveLocOk[chatId] = false; }
+    }
+    if (!socket.data.liveLocOk[chatId]) return;
     socket.to(`chat:${chatId}`).emit('live_location_update', {
       userId: socket.data.uid, latitude, longitude, address, until,
     });

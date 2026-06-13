@@ -38,7 +38,10 @@ async function adminAuth(req, res, next) {
   if (!expected) return res.status(503).json({ error: 'ADMIN_KEY not configured on server' });
   if (!safeKeyEqual(key, expected)) return res.status(401).json({ error: 'Invalid admin key' });
   try {
-    const ip = (req.headers['x-forwarded-for'] || req.ip || 'admin').toString().split(',')[0].trim();
+    // Real client IP behind Cloudflare→nginx. CF-Connecting-IP can't be spoofed
+    // through Cloudflare; fall back through nginx's X-Real-IP / XFF / req.ip.
+    const ip = (req.get('cf-connecting-ip') || req.get('x-real-ip')
+      || (req.headers['x-forwarded-for'] || '').toString().split(',')[0] || req.ip || 'admin').toString().trim();
     const rl = await rateLimit.consume(`admin:${ip}`, 120, 60); // 120 req / min
     if (!rl.allowed) return res.status(429).json({ error: 'Rate limited', retryAfter: rl.resetInSec });
   } catch { /* fail open on limiter error */ }
