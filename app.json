@@ -90,7 +90,8 @@
           "cameraPermissionText": "VaultChat needs camera for Face ID",
           "enableMicrophonePermission": false
         }
-      ]
+      ],
+      "./plugins/withAppComponentFactoryFix.js"
     ],
     "extra": {
       "router": {},
