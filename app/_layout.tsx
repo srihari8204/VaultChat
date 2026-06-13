@@ -25,6 +25,7 @@ import { runSecurityCheck } from '../services/securityService';
 import { attachTapHandler } from '../lib/push';
 import { getSocket } from '../lib/socket';
 import { getAccessToken } from '../lib/api';
+import { E2EE_ENABLED } from '../constants/flags';
 import { hasPIN } from './(constants)/authService';
 import { isUnlocked } from '../lib/sessionLock';
 global.Buffer = Buffer;
@@ -88,6 +89,13 @@ function RootLayout() {
         const tok = await getAccessToken();
         if (tok && !isUnlocked() && (await hasPIN())) {
           router.replace('/enter-mpin' as any);
+        }
+        // Publish this device's E2EE key bundle on startup so peers can open
+        // encrypted sessions with us immediately. Gated + lazy + fire-and-forget.
+        if (tok && E2EE_ENABLED) {
+          import('../services/crypto/e2eeSession.rn')
+            .then(m => m.provisionE2EEIdentity())
+            .catch(() => {});
         }
       } catch { /* don't lock users out on an unexpected error */ }
 

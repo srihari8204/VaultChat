@@ -393,10 +393,14 @@ export async function sendMessage(
 
 export async function editMessage(chatId: string, msgId: number, plaintext: string): Promise<Message> {
   const content = await encryptForChat(chatId, plaintext);
-  return api<Message>(`/chats/${encodeURIComponent(chatId)}/messages/${msgId}`, {
+  const msg = await api<Message>(`/chats/${encodeURIComponent(chatId)}/messages/${msgId}`, {
     method: 'PATCH',
     json: { content },
   });
+  // Cache the edited plaintext so the sender can read their own edited message
+  // (the server now holds ciphertext we can't self-decrypt).
+  if (content !== plaintext) await cacheOwnPlaintext(chatId, msgId, plaintext);
+  return msg;
 }
 
 export async function deleteMessage(chatId: string, msgId: number): Promise<{ id: number; deletedAt: string }> {
