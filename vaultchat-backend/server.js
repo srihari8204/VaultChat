@@ -28,6 +28,15 @@ const express    = require('express');
 const http       = require('http');
 const { Server } = require('socket.io');
 const cors       = require('cors');
+const crypto     = require('crypto');
+
+// Constant-time admin-key comparison (mirrors routes/admin.js).
+function safeKeyEqual(a, b) {
+  if (!a || !b) return false;
+  const ha = crypto.createHash('sha256').update(String(a)).digest();
+  const hb = crypto.createHash('sha256').update(String(b)).digest();
+  return crypto.timingSafeEqual(ha, hb);
+}
 
 const db      = require('./db');
 const gameStore = require('./gameStore');
@@ -425,7 +434,7 @@ async function fanOutToChat(chatId, event, data, senderId = null) {
 io.use((socket, next) => {
   // Admin console authenticates the socket with the admin key (not a user JWT).
   const adminKey = socket.handshake.auth?.adminKey;
-  if (adminKey && process.env.ADMIN_KEY && adminKey === process.env.ADMIN_KEY) {
+  if (process.env.ADMIN_KEY && safeKeyEqual(adminKey, process.env.ADMIN_KEY)) {
     socket.data = { admin: true, uid: 'admin' };
     return next();
   }

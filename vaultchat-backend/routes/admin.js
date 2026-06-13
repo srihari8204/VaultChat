@@ -7,11 +7,21 @@
 
 const express   = require('express');
 const os        = require('os');
+const crypto    = require('crypto');
 const db        = require('../db');
 const redis     = require('../redis');
 const rateLimit = require('../rateLimit');
 
 const router = express.Router();
+
+// Constant-time key comparison (hash both sides so length never leaks and the
+// compare time can't be used to recover the key byte-by-byte).
+function safeKeyEqual(a, b) {
+  if (!a || !b) return false;
+  const ha = crypto.createHash('sha256').update(String(a)).digest();
+  const hb = crypto.createHash('sha256').update(String(b)).digest();
+  return crypto.timingSafeEqual(ha, hb);
+}
 
 // ── Runtime injected from server.js ─────────────────────────────────
 let io = null;
@@ -26,7 +36,7 @@ async function adminAuth(req, res, next) {
   const key = req.get('x-admin-key') || '';
   const expected = process.env.ADMIN_KEY || '';
   if (!expected) return res.status(503).json({ error: 'ADMIN_KEY not configured on server' });
-  if (key !== expected) return res.status(401).json({ error: 'Invalid admin key' });
+  if (!safeKeyEqual(key, expected)) return res.status(401).json({ error: 'Invalid admin key' });
   try {
     const ip = (req.headers['x-forwarded-for'] || req.ip || 'admin').toString().split(',')[0].trim();
     const rl = await rateLimit.consume(`admin:${ip}`, 120, 60); // 120 req / min
