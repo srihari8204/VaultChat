@@ -15,6 +15,7 @@
 const {
   withAndroidManifest,
   withGradleProperties,
+  withAppBuildGradle,
 } = require('@expo/config-plugins');
 
 function fixManifest(config) {
@@ -51,8 +52,22 @@ function enableJetifier(config) {
   });
 }
 
+function excludeLegacySupport(config) {
+  return withAppBuildGradle(config, (cfg) => {
+    if (cfg.modResults.language !== 'groovy') return cfg;
+    const marker = '// vc: drop legacy com.android.support (androidx provides the v4 shims)';
+    if (cfg.modResults.contents.includes(marker)) return cfg;
+    cfg.modResults.contents +=
+      `\n${marker}\nconfigurations.all {\n` +
+      `    exclude group: 'com.android.support'\n` +
+      `}\n`;
+    return cfg;
+  });
+}
+
 module.exports = function withAndroidBuildFixes(config) {
   config = fixManifest(config);
   config = enableJetifier(config);
+  config = excludeLegacySupport(config);
   return config;
 };
