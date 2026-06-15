@@ -15,7 +15,8 @@ const pool = new Pool({
   database: process.env.DB_NAME || 'vaultchat',
   user:     process.env.DB_USER || 'vaultchat_user',
   password: process.env.DB_PASS || '',
-  max: 10,
+  // Pool sized for the box (62 GB / 12 cores). Override with DB_POOL_MAX.
+  max: parseInt(process.env.DB_POOL_MAX || '30', 10),
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
 });
@@ -76,10 +77,12 @@ async function shutdown() {
 // Throws and ROLLBACKs on any error. Idempotent if the callback is.
 async function withUser(userId, fn) {
   if (!userId) throw new Error('withUser requires a userId');
+  const uid = String(userId).replace(/'/g, "''");
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
-    await client.query(`SET LOCAL app.current_user_id = '${String(userId).replace(/'/g, "''")}'`);
+    // BEGIN + SET LOCAL in a single round-trip (uid is single-quote-escaped),
+    // trimming the per-query RLS overhead from 4 round-trips to 3.
+    await client.query(`BEGIN; SET LOCAL app.current_user_id = '${uid}'`);
     const result = await fn(client);
     await client.query('COMMIT');
     return result;

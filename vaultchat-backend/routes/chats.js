@@ -203,12 +203,7 @@ router.get('/', async (req, res) => {
          peer.peer_photo AS peer_photo,
          peer.peer_online AS peer_online,
          peer.peer_last_seen AS peer_last_seen,
-         (SELECT COUNT(*) FROM messages m
-            WHERE m.chat_id = c.id
-              AND m.id > COALESCE(cm.last_read_message_id, 0)
-              AND m.sender_id <> $1
-              AND m.deleted_at IS NULL
-         ) AS unread_count
+         cm.unread_count AS unread_count
        FROM chats c
        JOIN chat_members cm ON cm.chat_id = c.id AND cm.user_id = $1
        LEFT JOIN LATERAL (
@@ -814,6 +809,12 @@ router.post('/:id/messages', async (req, res) => {
     broadcastNewMessage(req.params.id, msg);
     res.json(msg);
 
+    // Bump the denormalized unread counter for every other member (system
+    // cross-user write via the SECURITY DEFINER helper). Best-effort: the
+    // read-marker recomputes the exact value, so a rare miss self-heals.
+    db.query('SELECT vc_bump_unread($1, $2)', [req.params.id, req.user.id])
+      .catch(e => console.error('[unread bump]', e.message));
+
     // Fire-and-forget push to other members' devices. Doesn't block
     // the response. Failures are logged but don't surface to the sender.
     sendChatMessagePush(req.params.id, req.user.id, msg, mem.chat_type).catch(err => {
@@ -1012,7 +1013,12 @@ router.post('/:id/read', async (req, res) => {
     // Only advance forward; don't accept a regression.
     const r = await req.dbQuery(
       `UPDATE chat_members
-       SET last_read_message_id = $1
+       SET last_read_message_id = $1,
+           unread_count = (
+             SELECT COUNT(*) FROM messages m
+              WHERE m.chat_id = $2 AND m.id > $1
+                AND m.sender_id <> $3 AND m.deleted_at IS NULL
+           )
        WHERE chat_id = $2 AND user_id = $3
          AND (last_read_message_id IS NULL OR last_read_message_id < $1)
        RETURNING last_read_message_id`,
