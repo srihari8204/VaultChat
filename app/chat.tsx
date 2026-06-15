@@ -27,7 +27,7 @@ import { DeviceMotion } from 'expo-sensors';
 import * as Sharing from 'expo-sharing';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { consumePendingJump } from '../lib/chatJump';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { E2EE_ENABLED } from '../constants/flags';
 import { getCachedMessages, cacheMessages, applyMessage } from '../lib/localDb';
 import { saveDraft, getDraft, clearDraft } from '../lib/drafts';
@@ -183,6 +183,21 @@ export default function ChatScreen() {
     chat?.members.forEach(x => m.set(x.userId, x));
     return m;
   }, [chat]);
+
+  // O(1) reply-target lookup — replaces a per-bubble messages.find() on every
+  // render (was O(n²) across the visible page).
+  const replyById = useMemo(() => {
+    const m = new Map<number, DisplayMessage>();
+    for (const msg of messages) {
+      if (typeof msg.id === 'number' && msg.id > 0) m.set(msg.id, msg);
+    }
+    return m;
+  }, [messages]);
+
+  // Stable key over the visible message ids, so the reaction/poll hydration
+  // effects only refire when the SET of ids changes — not on every edit,
+  // optimistic update, or cache write that re-creates the array.
+  const messageIdKey = useMemo(() => messages.map(m => m.id).join(','), [messages]);
 
   // Members of this chat that aren't me — used to compute outgoing-message
   // tick state (any → delivered / any → read, MVP semantics).
@@ -455,7 +470,8 @@ export default function ChatScreen() {
       setReactions(next);
     }).catch(() => {});
     return () => { cancel = true; };
-  }, [chatId, messages]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatId, messageIdKey]);
 
   // ── Hydrate poll votes for visible polls ─────────────────
   // Same pattern as reactions — bulk fetch once per message-id change.
@@ -475,7 +491,8 @@ export default function ChatScreen() {
       setPollVotes(prev => ({ ...prev, ...next }));
     }).catch(() => {});
     return () => { cancel = true; };
-  }, [chatId, messages]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatId, messageIdKey]);
 
   // ── Mark-as-read (debounced) ──────────────────────────────
   useEffect(() => {
@@ -1414,7 +1431,7 @@ export default function ChatScreen() {
         contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 8 }}
         renderItem={({ item }) => (
           <View style={item.id === flashId ? { backgroundColor: 'rgba(16,185,129,0.18)', borderRadius: 12 } : undefined}>
-          <MessageBubble
+          <MemoBubble
             msg={item}
             meId={meId}
             member={membersById.get(item.senderId)}
@@ -1423,10 +1440,10 @@ export default function ChatScreen() {
             onLongPress={onLongPressMessage}
             reactionsForMsg={reactions[item.id]}
             onToggleReaction={(emoji) => toggleReaction(item, emoji)}
-            replyTarget={item.replyToId ? messages.find(m => m.id === item.replyToId) ?? null : null}
+            replyTarget={item.replyToId ? replyById.get(item.replyToId) ?? null : null}
             replyTargetMember={item.replyToId
               ? (() => {
-                  const t = messages.find(m => m.id === item.replyToId);
+                  const t = replyById.get(item.replyToId);
                   return t ? membersById.get(t.senderId) : undefined;
                 })()
               : undefined}
@@ -2648,3 +2665,27 @@ const S = StyleSheet.create({
   forwardRowTxt:       { color: TEXT, fontSize: 15, flex: 1 },
   forwardRowSub:       { color: SUBTLE, fontSize: 11 },
 });
+
+// ── Memoized message bubble ──────────────────────────────────────────────
+// Re-render a bubble only when its DATA changes. The function props
+// (onLongPress / onToggleReaction / onPollVoteChange) are intentionally
+// excluded from the comparison: each closure is keyed to the bubble's own msg
+// (stable by id), so skipping a re-render when the data is unchanged is safe —
+// and it's what stops one incoming message from re-rendering every visible
+// bubble (the chat now scrolls/types smoothly on long threads).
+function bubblePropsEqual(a: any, b: any): boolean {
+  return (
+    a.msg === b.msg &&
+    a.meId === b.meId &&
+    a.member === b.member &&
+    a.chatId === b.chatId &&
+    a.otherMembers === b.otherMembers &&
+    a.reactionsForMsg === b.reactionsForMsg &&
+    a.pollVotesForMsg === b.pollVotesForMsg &&
+    a.replyTarget === b.replyTarget &&
+    a.replyTargetMember === b.replyTargetMember &&
+    a.highlight === b.highlight &&
+    a.tiltRevealed === b.tiltRevealed
+  );
+}
+const MemoBubble = memo(MessageBubble, bubblePropsEqual);
