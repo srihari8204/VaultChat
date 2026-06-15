@@ -20,6 +20,10 @@ import {
   View,
 } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
+import { getSettings, updateSettings, listTrustedContacts } from '../lib/chatService';
+import { getSecurityOverview } from '../lib/security';
+import { hasPIN } from './(constants)/authService';
+import { E2EE_ENABLED } from '../constants/flags';
 
 const C = {
   bg: '#FFFFFF',
@@ -114,9 +118,25 @@ export default function PrivacyDashboardScreen() {
   const loadSettings = async () => {
     try {
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(raw) });
-      }
+      let local = DEFAULT_SETTINGS;
+      if (raw) local = { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+      // Overlay REAL state so the score + checklist reflect reality, not local guesses.
+      const [bs, ov, pin, trusted] = await Promise.all([
+        getSettings().catch(() => null),
+        getSecurityOverview().catch(() => null),
+        hasPIN().catch(() => false),
+        listTrustedContacts().catch(() => [] as any[]),
+      ]);
+      setSettings({
+        ...local,
+        pinSet: !!pin,
+        trustedContacts: (trusted?.length ?? 0) > 0,
+        lastSeenHidden:  bs ? bs.lastSeenVisible === false : local.lastSeenHidden,
+        readReceiptsOff: bs ? bs.readReceipts === false : local.readReceiptsOff,
+        lastSeenPrivacy: bs ? (bs.lastSeenVisible ? 'everyone' : 'nobody') : local.lastSeenPrivacy,
+        profilePhotoPrivacy: bs ? (bs.profilePhotoVisible ? 'everyone' : 'nobody') : local.profilePhotoPrivacy,
+        blockedCount: ov ? ov.blockedContacts : local.blockedCount,
+      });
     } catch {} finally {
       setLoading(false);
     }
@@ -161,14 +181,20 @@ export default function PrivacyDashboardScreen() {
 
   const toggleFeature = (key: keyof PrivacySettings) => {
     const updated = { ...settings, [key]: !settings[key] };
+    // Sync the backend-backed toggles for real (enforced server-side).
+    if (key === 'readReceiptsOff') updateSettings({ readReceipts: !updated.readReceiptsOff }).catch(() => {});
+    if (key === 'lastSeenHidden')  updateSettings({ lastSeenVisible: !updated.lastSeenHidden }).catch(() => {});
     saveSettings(updated);
   };
 
   const setPrivacyLevel = (key: 'lastSeenPrivacy' | 'profilePhotoPrivacy' | 'aboutPrivacy', value: PrivacyLevel) => {
     const updated = { ...settings, [key]: value };
-    // Also update related boolean flags
     if (key === 'lastSeenPrivacy') {
       updated.lastSeenHidden = value === 'nobody';
+      updateSettings({ lastSeenVisible: value !== 'nobody' }).catch(() => {});
+    }
+    if (key === 'profilePhotoPrivacy') {
+      updateSettings({ profilePhotoVisible: value !== 'nobody' }).catch(() => {});
     }
     saveSettings(updated);
   };
@@ -320,7 +346,7 @@ export default function PrivacyDashboardScreen() {
       </View>
 
       {/* Blocked contacts */}
-      <TouchableOpacity style={s.blockedRow} onPress={() => Alert.alert('Blocked Contacts', 'Navigate to blocked contacts management.')}>
+      <TouchableOpacity style={s.blockedRow} onPress={() => router.push('/blocked' as any)}>
         <View style={s.privacyLeft}>
           <Ionicons name="ban" size={20} color={C.red} style={{ marginRight: 10 }} />
           <Text style={s.privacyLabel}>Blocked Contacts</Text>

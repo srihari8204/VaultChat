@@ -1,5 +1,6 @@
 import 'react-native-get-random-values';
 import { Buffer } from 'buffer';
+import { E2EE_ENABLED } from '../constants/flags';
 
 export interface EncryptedPayload {
   ciphertext: string;
@@ -74,12 +75,17 @@ export async function decryptMessage(
   return new TextDecoder().decode(dec);
 }
 
+// Reports the REAL encryption posture. TLS is always on (transport). The
+// end-to-end layers are active only when E2EE_ENABLED — i.e. they reflect the
+// actual services/crypto double-ratchet path used for direct chats, not a
+// hardcoded "everything green".
 export function getD2DEStatus(): D2DEStatusLayer[] {
+  const e2e = E2EE_ENABLED;
   return [
-    { layer: 'TLS 1.3',         active: true,  label: 'Transport â€” TLS 1.3 on all connections' },
-    { layer: 'AES-256-GCM',     active: true,  label: 'Messages â€” unique IV per message' },
-    { layer: 'Double Ratchet',  active: true,  label: 'Forward Secrecy — per-message keys' },
-    { layer: 'X3DH',            active: true,  label: 'Extended Triple Diffie-Hellman key exchange' },
-    { layer: 'Android Keystore',active: true,  label: 'Hardware-backed secure key storage' },
+    { layer: 'TLS 1.3',        active: true, label: 'Transport — encrypted on all connections' },
+    { layer: 'AES-256-GCM',    active: e2e,  label: e2e ? 'Direct messages encrypted on your device' : 'End-to-end encryption rolling out' },
+    { layer: 'Double Ratchet', active: e2e,  label: e2e ? 'Forward secrecy — a fresh key per message' : 'Not active yet' },
+    { layer: 'X3DH',           active: e2e,  label: e2e ? 'Key agreement via published prekeys' : 'Not active yet' },
+    { layer: 'Secure Keystore',active: e2e,  label: e2e ? 'Keys held in the device secure store' : 'No end-to-end keys yet' },
   ];
 }
