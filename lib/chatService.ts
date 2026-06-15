@@ -3,6 +3,7 @@
 // double-ratchet in Phase 3b without touching call sites.
 
 import * as Crypto from 'expo-crypto';
+import * as FileSystem from 'expo-file-system/legacy';
 import { api, getAccessToken } from './api';
 import { SERVER_URL } from '../constants/server';
 import { E2EE_ENABLED } from '../constants/flags';
@@ -1040,6 +1041,37 @@ export async function uploadAttachment(
 ): Promise<UploadResult> {
   const token = await getAccessToken();
   if (!token) throw new Error('Not signed in');
+
+  // Object-store path: get a presigned PUT URL and upload the bytes DIRECTLY to
+  // storage (they never pass through the app server). Falls back to the multipart
+  // route below when the server has no object storage configured (503) or the
+  // presign path errors — so media never silently fails to send.
+  try {
+    let size = 0;
+    try {
+      const fi: any = await FileSystem.getInfoAsync(uri);
+      if (fi?.exists && typeof fi.size === 'number') size = fi.size;
+    } catch {}
+    const presign = await api<{ id: string; uploadUrl: string }>('/uploads/presign', {
+      method: 'POST',
+      json: { filename, mime, size, viewOnce: !!opts.viewOnce },
+    });
+    if (presign?.uploadUrl) {
+      const put = await FileSystem.uploadAsync(presign.uploadUrl, uri, {
+        httpMethod: 'PUT',
+        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+        headers: { 'Content-Type': mime },
+      });
+      if (put.status >= 200 && put.status < 300) {
+        return { id: presign.id, mime, size, filename };
+      }
+      throw new Error(`object-store upload failed (HTTP ${put.status})`);
+    }
+  } catch (e: any) {
+    if (__DEV__ && e?.status !== 503) {
+      console.warn('[upload] presign path failed, using multipart:', e?.message);
+    }
+  }
 
   const form = new FormData();
   // React Native's FormData accepts {uri, name, type} objects for files
