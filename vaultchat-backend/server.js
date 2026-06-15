@@ -85,6 +85,9 @@ app.use(express.json({ limit: '2mb' }));
 
 redis.connect().catch(() => {});
 
+// Ensure the media bucket exists (no-op unless object storage is configured).
+require('./lib/storage').ensureBucket().catch(() => {});
+
 // ── Routes ───────────────────────────────────────────────────
 app.use('/auth',     require('./routes/auth'));
 app.use('/user',     require('./routes/user'));

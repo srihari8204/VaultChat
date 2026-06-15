@@ -24,6 +24,7 @@ const crypto  = require('crypto');
 const multer  = require('multer');
 
 const jwtUtil = require('../jwt');
+const objectStore = require('../lib/storage');
 
 const router = express.Router();
 
@@ -110,12 +111,49 @@ router.post('/', jwtUtil.requireAuth, upload.single('file'), async (req, res) =>
   }
 });
 
+// ── POST /uploads/presign ────────────────────────────────────
+// Object-store path: client asks for a presigned PUT URL, uploads the bytes
+// DIRECTLY to the store, then references the returned id in its message — the
+// bytes never pass through this process. Falls back to the multipart POST /
+// above when object storage isn't configured.
+//   Body: { filename, mime, size?, viewOnce? } → { id, uploadUrl, key }
+router.post('/presign', jwtUtil.requireAuth, async (req, res) => {
+  try {
+    if (!objectStore.enabled()) {
+      return res.status(503).json({ error: 'Object storage not configured' });
+    }
+    const filename = (req.body?.filename || 'file').toString().slice(0, 255);
+    const mime     = (req.body?.mime || 'application/octet-stream').toString().slice(0, 100);
+    const size     = parseInt(req.body?.size || '0', 10) || 0;
+    if (size > MAX_BYTES) {
+      return res.status(413).json({ error: `File too large (max ${MAX_BYTES} bytes)` });
+    }
+    const viewOnce = req.body?.viewOnce === true || req.body?.viewOnce === 1 || req.body?.viewOnce === '1';
+
+    const id  = crypto.randomUUID();
+    const key = `att/${id}${safeExt(filename)}`;
+
+    await req.dbQuery(
+      `INSERT INTO attachments
+         (id, owner_user_id, filename, mime_type, size_bytes, storage_path, view_once, storage_backend)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 's3')`,
+      [id, req.user.id, filename, mime, size, key, viewOnce]
+    );
+
+    const uploadUrl = await objectStore.presignPut(key, mime);
+    res.json({ id, uploadUrl, key });
+  } catch (err) {
+    console.error('[uploads presign]', err.message);
+    res.status(500).json({ error: 'Presign failed' });
+  }
+});
+
 // ── GET /uploads/:id ─────────────────────────────────────────
 router.get('/:id', jwtUtil.requireAuth, async (req, res) => {
   try {
     const r = await req.dbQuery(
       `SELECT id, owner_user_id, filename, mime_type, size_bytes, storage_path,
-              view_once, viewed_at
+              view_once, viewed_at, storage_backend
        FROM attachments WHERE id = $1 LIMIT 1`,
       [req.params.id]
     );
@@ -148,6 +186,15 @@ router.get('/:id', jwtUtil.requireAuth, async (req, res) => {
       if (att.view_once && att.viewed_at) {
         return res.status(410).json({ error: 'This media has already been viewed and is no longer available.' });
       }
+    }
+
+    // Object-store backed: hand out a short-lived presigned URL (issued only
+    // after the access checks above) and redirect — the bytes are served by the
+    // store/CDN, never streamed through this process.
+    if (att.storage_backend === 's3') {
+      const url = await objectStore.presignGet(att.storage_path);
+      if (!url) return res.status(500).json({ error: 'Storage unavailable' });
+      return res.redirect(302, url);
     }
 
     const absPath = path.join(UPLOAD_DIR, att.storage_path);
