@@ -59,3 +59,10 @@ fix_*.js
 
 # Expo export bundle (build artifact)
 dist-export/
+
+# Never commit ship tarballs / build archives
+*.tgz
+*.tar.gz
+*.zip
+*.aab
+*.apk
