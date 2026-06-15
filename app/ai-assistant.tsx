@@ -82,7 +82,7 @@ export default function AIAssistantScreen() {
   const [thinking, setThinking] = useState(false);
   const flatRef = useRef(null);
 
-  const send = async (text) => {
+  const send = async (text?: string) => {
     const msg = text || input.trim();
     if (!msg) return;
     setInput('');
