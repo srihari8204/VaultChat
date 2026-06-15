@@ -52,6 +52,28 @@ const io     = new Server(server, {
   maxHttpBufferSize: 2 * 1024 * 1024,  // 2 MB — accommodates encrypted media metadata
 });
 
+// Horizontal scaling: with REDIS_ADAPTER=1, Socket.IO shares room + emit state
+// across processes via Redis pub/sub, so `io.to(room).emit(...)` reaches sockets
+// connected to ANY node (and lets the Kafka fan-out worker deliver too). Off by
+// default → single-node in-memory behaviour, unchanged.
+if (process.env.REDIS_ADAPTER === '1') {
+  try {
+    const { createAdapter } = require('@socket.io/redis-adapter');
+    const Redis = require('ioredis');
+    const redisOpts = {
+      host: process.env.REDIS_HOST || '127.0.0.1',
+      port: parseInt(process.env.REDIS_PORT || '6379', 10),
+      password: process.env.REDIS_PASS || undefined,
+    };
+    const pubClient = new Redis(redisOpts);
+    const subClient = pubClient.duplicate();
+    io.adapter(createAdapter(pubClient, subClient));
+    console.log('[socket] Redis adapter enabled — multi-node fan-out active');
+  } catch (e) {
+    console.error('[socket] Redis adapter init failed:', e.message);
+  }
+}
+
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 
@@ -353,9 +375,10 @@ async function loadGhostTargets(senderId, column) {
 }
 
 function emitToUid(uid, event, data) {
-  const set = userSockets.get(uid);
-  if (!set || set.size === 0) return false;
-  for (const sid of set) io.to(sid).emit(event, data);
+  // Emit via the per-user room (joined on connect) rather than iterating this
+  // node's socket map — so it reaches every device of the user on THIS node and,
+  // with the Redis adapter, on ANY node in the cluster.
+  io.to(`user:${uid}`).emit(event, data);
   return true;
 }
 
