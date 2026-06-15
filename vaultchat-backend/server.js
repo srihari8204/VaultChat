@@ -92,6 +92,7 @@ require('./lib/storage').ensureBucket().catch(() => {});
 app.use('/auth',     require('./routes/auth'));
 app.use('/user',     require('./routes/user'));
 app.use('/uploads',  require('./routes/uploads'));
+app.use('/ai',       require('./routes/ai'));
 app.use('/contacts', require('./routes/contacts'));
 const chatsRouter = require('./routes/chats');
 app.use('/chats',    chatsRouter);

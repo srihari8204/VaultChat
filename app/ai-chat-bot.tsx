@@ -19,6 +19,7 @@ import {
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { aiChat } from '../lib/ai';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const STORAGE_KEY = 'vc_aria_messages';
@@ -465,31 +466,39 @@ export default function AriaChatBot() {
       setMessages(newMessages);
       setInput('');
       setIsTyping(true);
-
-      // Simulate typing delay
-      const delay = 800 + Math.random() * 1200;
-      setTimeout(() => {
-        const responseText = generateAriaResponse(msgText);
-        const ariaMsg: Message = {
-          id: 'aria_' + Date.now(),
-          text: responseText,
-          sender: 'aria',
-          timestamp: Date.now(),
-        };
-
-        const updated = [...newMessages, ariaMsg];
-        setMessages(updated);
-        saveMessages(updated);
-        setIsTyping(false);
-      }, delay);
-
-      // Save user message immediately
       saveMessages(newMessages);
+      setTimeout(() => { flatListRef.current?.scrollToEnd({ animated: true }); }, 100);
 
-      // Scroll
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
+      // Real assistant reply via the on-prem LLM (Ollama, through the backend).
+      const history = messages.slice(-10).map((m) => ({
+        role: (m.sender === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+        content: m.text,
+      }));
+      aiChat(msgText, history)
+        .then((reply) => {
+          const ariaMsg: Message = {
+            id: 'aria_' + Date.now(),
+            text: reply || "I'm not sure how to answer that.",
+            sender: 'aria',
+            timestamp: Date.now(),
+          };
+          const updated = [...newMessages, ariaMsg];
+          setMessages(updated);
+          saveMessages(updated);
+        })
+        .catch((e: any) => {
+          const text = e?.status === 503
+            ? 'The assistant is offline right now — please try again shortly.'
+            : 'Sorry, I couldn’t reach the assistant just now.';
+          const errMsg: Message = { id: 'aria_' + Date.now(), text, sender: 'aria', timestamp: Date.now() };
+          const updated = [...newMessages, errMsg];
+          setMessages(updated);
+          saveMessages(updated);
+        })
+        .finally(() => {
+          setIsTyping(false);
+          setTimeout(() => { flatListRef.current?.scrollToEnd({ animated: true }); }, 100);
+        });
     },
     [input, messages]
   );
