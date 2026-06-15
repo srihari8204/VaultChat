@@ -96,6 +96,7 @@ services:
       DB_PASS: ${DB_PASS:-vaultchat_dev}
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      REDIS_PASS: ""                # staging Redis has no auth (overrides .env)
       KAFKA_BROKERS: kafka:9092
       # Staging exercises the full Phase-2 delivery path (live app leaves these unset).
       REDIS_ADAPTER: "1"
@@ -133,6 +134,7 @@ services:
       DB_PASS: ${DB_PASS:-vaultchat_dev}
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      REDIS_PASS: ""                # staging Redis has no auth (overrides .env)
       KAFKA_BROKERS: kafka:9092
       KAFKA_GROUP_ID: fanout-workers
     depends_on:

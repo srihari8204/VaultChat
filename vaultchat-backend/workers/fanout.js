@@ -38,6 +38,18 @@ async function main() {
 
   const { fanOutToChat } = createDelivery(io);
 
+  // Ensure the topic exists before subscribing — avoids a cold-start race where
+  // the broker hasn't auto-created it yet (UNKNOWN_TOPIC_OR_PARTITION).
+  const admin = kafka.client().admin();
+  try {
+    await admin.connect();
+    await admin.createTopics({
+      topics: [{ topic: kafka.TOPICS.MESSAGE_CREATED, numPartitions: 3 }],
+      waitForLeaders: true,
+    });
+  } catch { /* already exists / raced — fine */ }
+  finally { await admin.disconnect().catch(() => {}); }
+
   const consumer = kafka.createConsumer(process.env.KAFKA_GROUP_ID || 'fanout-workers');
   await consumer.connect();
   await consumer.subscribe({ topic: kafka.TOPICS.MESSAGE_CREATED, fromBeginning: false });
