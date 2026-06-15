@@ -11,10 +11,9 @@ const ANON_NAMES=['Shadow','Ghost','Cipher','Phantom','Echo','Nova','Viper','Sto
 const genAnon=()=>({emoji:ANON_EMOJIS[Math.floor(Math.random()*ANON_EMOJIS.length)],name:ANON_NAMES[Math.floor(Math.random()*ANON_NAMES.length)]+Math.floor(Math.random()*999)});
 const genCode=()=>{ const c='ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let s=''; for(let i=0;i<8;i++){ if(i===4)s+='-'; s+=c[Math.floor(Math.random()*c.length)]; } return s; };
 const AUTO_DELETE_OPTIONS=[{label:'Never',value:0},{label:'1 hour',value:1},{label:'6 hours',value:6},{label:'24 hours',value:24},{label:'7 days',value:168}];
-const DEMO_COMMUNITIES=[
-  {id:'1',name:'CryptoVault',anonName:'Shadow#441',emoji:'🔐',memberCount:847,isAdmin:false,inviteCode:'VAULT-2024',autoDeleteHours:24,topic:'Privacy and crypto discussion',createdAt:Date.now()-86400000*30,messages:[{id:'1',text:'Anyone using hardware wallets?',anonId:'Ghost#112',anonEmoji:'🦊',timestamp:Date.now()-3600000},{id:'2',text:'Ledger all the way. Never leave keys online.',anonId:'Nova#887',anonEmoji:'🦁',timestamp:Date.now()-3000000}]},
-  {id:'2',name:'PrivacyFirst',anonName:'Phantom#772',emoji:'🛡️',memberCount:1203,isAdmin:true,inviteCode:'PRIV-8821',autoDeleteHours:6,topic:'Digital rights and surveillance',createdAt:Date.now()-86400000*14,messages:[{id:'1',text:'New surveillance law is dangerous',anonId:'Storm#445',anonEmoji:'🦅',timestamp:Date.now()-7200000}]},
-];
+// Anonymous communities don't have a backend yet — start empty (no fabricated
+// rooms/members) and gate create/join behind an honest "coming soon".
+const DEMO_COMMUNITIES: any[] = [];
 
 function CommunitiesContent() {
   const router=useRouter();
@@ -38,9 +37,9 @@ function CommunitiesContent() {
 
   const sendMessage=()=>{ if(!input.trim()||!activeComm)return; const msg={id:Date.now().toString(),text:input.trim(),anonId:myAnon.current.name,anonEmoji:myAnon.current.emoji,timestamp:Date.now()}; setCommunities(prev=>prev.map(c=>c.id===activeComm.id?{...c,messages:[...c.messages,msg]}:c)); setActiveComm((prev:any)=>prev?{...prev,messages:[...prev.messages,msg]}:null); setInput(''); };
 
-  const createCommunity=()=>{ if(!createName.trim())return; const code=genCode(); const anon=genAnon(); const newComm={id:Date.now().toString(),name:createName.trim(),anonName:anon.name+'#'+Math.floor(Math.random()*999),emoji:['🌐','🔐','🛡️','⚡','🌊','🔥'][Math.floor(Math.random()*6)],memberCount:1,isAdmin:true,inviteCode:code,autoDeleteHours:createAutoDelete,topic:createTopic.trim()||'Private community',createdAt:Date.now(),messages:[]}; setCommunities(prev=>[newComm,...prev]); setShowCreate(false); setCreateName(''); setCreateTopic(''); Alert.alert('Community Created','Your invite code is: '+code+'. Share with trusted members only.'); };
+  const createCommunity=()=>{ setShowCreate(false); setCreateName(''); setCreateTopic(''); Alert.alert('Coming soon','Anonymous communities are in development — creating a room isn’t live yet.'); };
 
-  const joinCommunity=()=>{ if(joinCode.trim().length<6){ Alert.alert('Invalid Code','Please enter a valid invite code.'); return; } const anon=genAnon(); const newComm={id:Date.now().toString(),name:'Community #'+joinCode.slice(-4),anonName:anon.name+'#'+Math.floor(Math.random()*999),emoji:'🌐',memberCount:Math.floor(Math.random()*500)+10,isAdmin:false,inviteCode:joinCode.trim().toUpperCase(),autoDeleteHours:24,topic:'Joined community',createdAt:Date.now(),messages:[]}; setCommunities(prev=>[newComm,...prev]); setShowJoin(false); setJoinCode(''); Alert.alert('Joined','You joined as '+anon.emoji+' '+newComm.anonName); };
+  const joinCommunity=()=>{ setShowJoin(false); setJoinCode(''); Alert.alert('Coming soon','Joining communities isn’t available yet — this feature is in development.'); };
 
   const handleNav=(item:typeof NAV[0])=>{ setActiveTab(item.id); if(item.id!=='community')router.push(item.route as any); };
 
@@ -124,6 +123,13 @@ function CommunitiesContent() {
               <Text style={{color:C.textFaint,fontSize:10}}>{comm.messages.length>0?fmtTime(comm.messages[comm.messages.length-1].timestamp):''}</Text>
             </TouchableOpacity>
           ))}
+          {communities.length===0 && (
+            <View style={{alignItems:'center',marginTop:50}}>
+              <Text style={{fontSize:42}}>🌐</Text>
+              <Text style={{color:C.textDim,fontSize:14,fontWeight:'800',marginTop:12}}>No communities yet</Text>
+              <Text style={{color:C.textFaint,fontSize:12,textAlign:'center',marginTop:6,paddingHorizontal:36,lineHeight:18}}>Anonymous communities are in development. Community sync is coming soon.</Text>
+            </View>
+          )}
         </ScrollView>
       </Animated.View>
 

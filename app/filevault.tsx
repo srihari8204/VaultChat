@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -11,20 +12,12 @@ const NAV = [{id:'chats',icon:'💬',label:'Chats',route:'/(tabs)/chats'},{id:'s
 
 const getFileIcon=(type:string)=>{ switch(type){ case 'image':return '🖼️'; case 'video':return '🎥'; case 'document':return '📄'; case 'audio':return '🎵'; default:return '📁'; } };
 
-const DEMO_FOLDERS = [
-  {id:'1',name:'Private Docs',emoji:'📋',isLocked:true,fileCount:3,color:C.primary},
-  {id:'2',name:'Photos',emoji:'🖼️',isLocked:false,fileCount:12,color:C.secondary},
-  {id:'3',name:'Videos',emoji:'🎥',isLocked:true,fileCount:5,color:C.accent},
-  {id:'4',name:'Voice Notes',emoji:'🎵',isLocked:false,fileCount:8,color:C.warning},
-];
-
-const DEMO_FILES = [
-  {id:'1',name:'passport_scan.pdf',size:'2.4 MB',type:'document',folderId:'1',addedAt:Date.now()-86400000*3,autoDestruct:false,viewCount:2,isEncrypted:true},
-  {id:'2',name:'contract_2024.pdf',size:'1.1 MB',type:'document',folderId:'1',addedAt:Date.now()-86400000*7,autoDestruct:true,viewCount:0,maxViews:3,isEncrypted:true},
-  {id:'3',name:'family_photo.jpg',size:'4.2 MB',type:'image',folderId:'2',addedAt:Date.now()-86400000,autoDestruct:false,viewCount:5,isEncrypted:true},
-  {id:'4',name:'meeting_recording.mp4',size:'45 MB',type:'video',folderId:'3',addedAt:Date.now()-86400000*2,autoDestruct:true,viewCount:1,maxViews:2,isEncrypted:true},
-  {id:'5',name:'voice_memo.m4a',size:'0.8 MB',type:'audio',folderId:'4',addedAt:Date.now()-3600000*5,autoDestruct:false,viewCount:3,isEncrypted:true},
-];
+// Real on-device vault — starts empty (no fabricated folders/files); folders +
+// files are persisted locally. Files are references to documents on this device
+// (not server-side encrypted), so the UI says so honestly.
+const STORAGE_KEY = 'vc_filevault';
+const DEMO_FOLDERS: any[] = [];
+const DEMO_FILES: any[] = [];
 
 function FileVaultContent() {
   const router=useRouter();
@@ -47,16 +40,20 @@ function FileVaultContent() {
 
   useEffect(()=>{ Animated.timing(fadeIn,{toValue:1,duration:500,useNativeDriver:true}).start(); },[fadeIn]);
 
+  // Real local persistence: load on mount, save whenever folders/files change.
+  useEffect(()=>{ (async()=>{ try{ const raw=await AsyncStorage.getItem(STORAGE_KEY); if(raw){ const d=JSON.parse(raw); if(Array.isArray(d.folders))setFolders(d.folders); if(Array.isArray(d.files))setFiles(d.files); } }catch{} })(); },[]);
+  useEffect(()=>{ AsyncStorage.setItem(STORAGE_KEY,JSON.stringify({folders,files})).catch(()=>{}); },[folders,files]);
+
   const fmtTime=(ts:number)=>{ const d=Date.now()-ts; if(d<3600000)return Math.floor(d/60000)+'m ago'; if(d<86400000)return Math.floor(d/3600000)+'h ago'; return Math.floor(d/86400000)+'d ago'; };
 
   const openFolder=(folder:any)=>{ if(folder.isLocked){ setFolderToUnlock(folder); setShowPasswordModal(true); return; } setActiveFolder(folder); setView('files'); };
-  const unlockFolder=()=>{ if(!folderToUnlock)return; setActiveFolder(folderToUnlock); setView('files'); setShowPasswordModal(false); setPasswordInput(''); setFolderToUnlock(null); };
+  const unlockFolder=()=>{ if(!folderToUnlock)return; if((folderToUnlock.password||'')!==passwordInput){ Alert.alert('Incorrect password','That password is wrong.'); return; } setActiveFolder(folderToUnlock); setView('files'); setShowPasswordModal(false); setPasswordInput(''); setFolderToUnlock(null); };
 
   const viewFile=(file:any)=>{ const updated={...file,viewCount:file.viewCount+1}; if(file.autoDestruct&&file.maxViews&&updated.viewCount>=file.maxViews){ Alert.alert('Last View Reached',file.name+' has reached its view limit and will be deleted.',[{text:'OK',onPress:()=>{ setFiles(prev=>prev.filter((f:any)=>f.id!==file.id)); setFolders(prev=>prev.map((fo:any)=>fo.id===file.folderId?{...fo,fileCount:Math.max(0,fo.fileCount-1)}:fo)); }}]); } else { setFiles(prev=>prev.map((f:any)=>f.id===file.id?updated:f)); Alert.alert('File Opened',file.name+' — Views: '+updated.viewCount+(file.maxViews?' of '+file.maxViews:'')); } };
   const deleteFile=(file:any)=>{ Alert.alert('Delete File','Permanently delete '+file.name+'?',[{text:'Cancel',style:'cancel'},{text:'Delete',style:'destructive',onPress:()=>{ setFiles(prev=>prev.filter((f:any)=>f.id!==file.id)); setFolders(prev=>prev.map((fo:any)=>fo.id===file.folderId?{...fo,fileCount:Math.max(0,fo.fileCount-1)}:fo)); }}]); };
-  const createFolder=()=>{ if(!newFolderName.trim())return; const colors=[C.primary,C.secondary,C.accent,C.warning,C.danger]; const newFolder={id:Date.now().toString(),name:newFolderName.trim(),emoji:'📁',isLocked:newFolderLocked,fileCount:0,color:colors[Math.floor(Math.random()*colors.length)]}; setFolders(prev=>[newFolder,...prev]); setShowCreateFolder(false); setNewFolderName(''); setNewFolderLocked(false); setNewFolderPassword(''); };
+  const createFolder=()=>{ if(!newFolderName.trim())return; if(newFolderLocked&&!newFolderPassword.trim()){ Alert.alert('Set a password','A locked folder needs a password.'); return; } const colors=[C.primary,C.secondary,C.accent,C.warning,C.danger]; const newFolder={id:Date.now().toString(),name:newFolderName.trim(),emoji:'📁',isLocked:newFolderLocked,password:newFolderLocked?newFolderPassword:'',fileCount:0,color:colors[Math.floor(Math.random()*colors.length)]}; setFolders(prev=>[newFolder,...prev]); setShowCreateFolder(false); setNewFolderName(''); setNewFolderLocked(false); setNewFolderPassword(''); };
 
-  const addFile=async(source:'camera'|'gallery'|'document')=>{ setShowAddFile(false); try { let name='',size='',type='other'; if(source==='camera'){ const r=Platform.OS==='web'?await ImagePicker.launchImageLibraryAsync({quality:0.8}):await ImagePicker.launchCameraAsync({quality:0.8}); if(r.canceled)return; name='photo_'+Date.now()+'.jpg'; size='~2 MB'; type='image'; } else if(source==='gallery'){ const r=await ImagePicker.launchImageLibraryAsync({quality:0.8}); if(r.canceled)return; name=r.assets[0].fileName||'media_'+Date.now(); size='~1 MB'; type=r.assets[0].type==='video'?'video':'image'; } else { const r=await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true }); if(r.canceled)return; name=r.assets[0].name; size='~1 MB'; type='document'; } const newFile={id:Date.now().toString(),name,size,type,folderId:activeFolder?.id||'2',addedAt:Date.now(),autoDestruct,viewCount:0,maxViews:autoDestruct?parseInt(maxViews)||1:undefined,isEncrypted:true}; setFiles((prev:any[])=>[newFile,...prev]); setFolders(prev=>prev.map((f:any)=>f.id===activeFolder?.id?{...f,fileCount:f.fileCount+1}:f)); Alert.alert('File Added',name+' has been encrypted and stored securely.'); } catch{ Alert.alert('Error','Could not add file.'); } };
+  const addFile=async(source:'camera'|'gallery'|'document')=>{ setShowAddFile(false); try { let name='',size='',type='other'; if(source==='camera'){ const r=Platform.OS==='web'?await ImagePicker.launchImageLibraryAsync({quality:0.8}):await ImagePicker.launchCameraAsync({quality:0.8}); if(r.canceled)return; name='photo_'+Date.now()+'.jpg'; size='~2 MB'; type='image'; } else if(source==='gallery'){ const r=await ImagePicker.launchImageLibraryAsync({quality:0.8}); if(r.canceled)return; name=r.assets[0].fileName||'media_'+Date.now(); size='~1 MB'; type=r.assets[0].type==='video'?'video':'image'; } else { const r=await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true }); if(r.canceled)return; name=r.assets[0].name; size='~1 MB'; type='document'; } const newFile={id:Date.now().toString(),name,size,type,uri:'',folderId:activeFolder?.id||'',addedAt:Date.now(),autoDestruct,viewCount:0,maxViews:autoDestruct?parseInt(maxViews)||1:undefined}; setFiles((prev:any[])=>[newFile,...prev]); setFolders(prev=>prev.map((f:any)=>f.id===activeFolder?.id?{...f,fileCount:f.fileCount+1}:f)); Alert.alert('File added',name+' was added to this folder.'); } catch{ Alert.alert('Error','Could not add file.'); } };
 
   const handleNav=(item:typeof NAV[0])=>{ setNavTab(item.id); if(item.id!=='vault')router.push(item.route as any); };
   const folderFiles=files.filter((f:any)=>f.folderId===activeFolder?.id);
@@ -69,7 +66,7 @@ function FileVaultContent() {
         <Text style={{fontSize:22}}>{activeFolder.emoji}</Text>
         <View style={{flex:1}}>
           <Text style={{color:C.text,fontSize:15,fontWeight:'900'}}>{activeFolder.name}</Text>
-          <Text style={{color:C.textFaint,fontSize:10}}>{folderFiles.length} files — AES-256 encrypted</Text>
+          <Text style={{color:C.textFaint,fontSize:10}}>{folderFiles.length} files — on this device</Text>
         </View>
         <TouchableOpacity onPress={()=>setShowAddFile(true)} style={{backgroundColor:'#1D4ED8',borderRadius:20,width:40,height:40,justifyContent:'center',alignItems:'center'}}><Text style={{color:'#fff',fontSize:22,fontWeight:'900'}}>+</Text></TouchableOpacity>
       </View>
@@ -78,7 +75,7 @@ function FileVaultContent() {
           <View style={{alignItems:'center',paddingTop:60}}>
             <Text style={{fontSize:56,marginBottom:16}}>📂</Text>
             <Text style={{color:C.textDim,fontSize:15,fontWeight:'700'}}>No files yet</Text>
-            <Text style={{color:C.textFaint,fontSize:12,marginTop:6}}>Tap + to add encrypted files</Text>
+            <Text style={{color:C.textFaint,fontSize:12,marginTop:6}}>Tap + to add files</Text>
           </View>
         ):folderFiles.map((file:any,i:number)=>(
           <TouchableOpacity key={i} onPress={()=>viewFile(file)} style={S.fileRow}>
@@ -87,7 +84,6 @@ function FileVaultContent() {
               <Text style={{color:C.text,fontSize:13,fontWeight:'700'}} numberOfLines={1}>{file.name}</Text>
               <View style={{flexDirection:'row',gap:8,marginTop:4}}>
                 <Text style={{color:C.textFaint,fontSize:10}}>{file.size}</Text>
-                <Text style={{color:C.accent,fontSize:10}}>🔐</Text>
                 {file.autoDestruct&&<Text style={{color:C.danger,fontSize:10}}>💣 {file.viewCount}/{file.maxViews}</Text>}
               </View>
             </View>
@@ -133,7 +129,7 @@ function FileVaultContent() {
       <Animated.View style={{flex:1,opacity:fadeIn}}>
         <View style={S.header}>
           <TouchableOpacity onPress={()=>router.back()} style={S.backBtn}><Text style={{color:C.primary,fontSize:18}}>←</Text></TouchableOpacity>
-          <View style={{flex:1}}><Text style={S.title}>📦 File Vault</Text><Text style={{color:C.textFaint,fontSize:9,letterSpacing:2}}>ENCRYPTED SECURE STORAGE</Text></View>
+          <View style={{flex:1}}><Text style={S.title}>📦 File Vault</Text><Text style={{color:C.textFaint,fontSize:9,letterSpacing:2}}>PRIVATE ON-DEVICE STORAGE</Text></View>
           <TouchableOpacity onPress={()=>setShowCreateFolder(true)} style={{backgroundColor:'#1D4ED8',borderRadius:20,width:40,height:40,justifyContent:'center',alignItems:'center'}}><Text style={{color:'#fff',fontSize:22,fontWeight:'900'}}>+</Text></TouchableOpacity>
         </View>
         <View style={{flexDirection:'row',paddingHorizontal:18,gap:8,marginBottom:16}}>
@@ -186,7 +182,7 @@ function FileVaultContent() {
                 <View style={{width:20,height:20,borderRadius:10,backgroundColor:newFolderLocked?C.accent:'rgba(255,255,255,0.15)'}}/>
               </TouchableOpacity>
               {newFolderLocked&&<TextInput value={newFolderPassword} onChangeText={setNewFolderPassword} placeholder="Set folder password..." placeholderTextColor={C.textFaint} secureTextEntry style={[S.input,{marginBottom:12}]}/>}
-              <TouchableOpacity onPress={createFolder}><LinearGradient colors={[C.primary,C.secondary]} style={{borderRadius:16,paddingVertical:14,alignItems:'center'}}><Text style={{color:'#fff',fontSize:15,fontWeight:'900'}}>Create Encrypted Folder</Text></LinearGradient></TouchableOpacity>
+              <TouchableOpacity onPress={createFolder}><LinearGradient colors={[C.primary,C.secondary]} style={{borderRadius:16,paddingVertical:14,alignItems:'center'}}><Text style={{color:'#fff',fontSize:15,fontWeight:'900'}}>Create Folder</Text></LinearGradient></TouchableOpacity>
             </LinearGradient>
           </View>
         </TouchableOpacity>
