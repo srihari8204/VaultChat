@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
@@ -9,15 +10,10 @@ const NAV = [{id:'chats',icon:'ðŸ’¬',label:'Chats',route:'/(tabs)/chats'},{
 
 const TRUST_LEVELS=[{level:'Untrusted',min:0,max:20,color:'#EF4444',icon:'â›”'},{level:'Low',min:21,max:40,color:'#F59E0B',icon:'âš ï¸'},{level:'Moderate',min:41,max:60,color:'#4A9FFF',icon:'ðŸ”µ'},{level:'High',min:61,max:80,color:'#10B981',icon:'âœ…'},{level:'Verified',min:81,max:100,color:'#A78BFA',icon:'ðŸ’Ž'}];
 const getLevel=(score:number)=>TRUST_LEVELS.find(l=>score>=l.min&&score<=l.max)||TRUST_LEVELS[0];
-const genHash=()=>'0x'+Array.from({length:16},()=>Math.floor(Math.random()*16).toString(16)).join('');
-
-const DEMO_ENTRIES=[
-  {id:'1',contactName:'Alice Chen',emoji:'ðŸ‘©',score:94,interactions:247,lastVerified:'2h ago',blockchainHash:genHash(),notes:'Trusted colleague. Known 3 years.',verified:true},
-  {id:'2',contactName:'Bob Martinez',emoji:'ðŸ‘¨',score:78,interactions:89,lastVerified:'1d ago',blockchainHash:genHash(),notes:'Friend from work. Reliable.',verified:true},
-  {id:'3',contactName:'Unknown#7821',emoji:'ðŸ‘¤',score:12,interactions:3,lastVerified:'Never',blockchainHash:'',notes:'New contact. No history.',verified:false},
-  {id:'4',contactName:'Sarah Kim',emoji:'ðŸ‘§',score:65,interactions:134,lastVerified:'3d ago',blockchainHash:genHash(),notes:'Regular contact. Good history.',verified:true},
-  {id:'5',contactName:'Ghost#4421',emoji:'ðŸ‘»',score:34,interactions:12,lastVerified:'1w ago',blockchainHash:genHash(),notes:'Anonymous community member.',verified:false},
-];
+// Personal trust notes — YOUR own assessment of contacts, stored on this device.
+// No "blockchain" (there isn't one). Starts empty; persisted locally.
+const STORAGE_KEY = 'vc_trustnotes';
+const DEMO_ENTRIES: any[] = [];
 
 function TrustScoreContent() {
   const router=useRouter();
@@ -34,16 +30,18 @@ function TrustScoreContent() {
   const scoreAnim=useRef(new Animated.Value(0)).current;
 
   useEffect(()=>{ Animated.timing(fadeIn,{toValue:1,duration:500,useNativeDriver:true}).start(); },[fadeIn]);
+  useEffect(()=>{ (async()=>{ try{ const raw=await AsyncStorage.getItem(STORAGE_KEY); if(raw){ const d=JSON.parse(raw); if(Array.isArray(d))setEntries(d); } }catch{} })(); },[]);
+  useEffect(()=>{ AsyncStorage.setItem(STORAGE_KEY,JSON.stringify(entries)).catch(()=>{}); },[entries]);
   useEffect(()=>{ if(selected){ scoreAnim.setValue(0); Animated.timing(scoreAnim,{toValue:selected.score,duration:900,useNativeDriver:false}).start(); } },[selected, scoreAnim]);
 
-  const verifyOnBlockchain=(entry:any)=>{ const hash=genHash(); const updated={...entry,verified:true,blockchainHash:hash,lastVerified:'Just now'}; setSelected(updated); setEntries(prev=>prev.map(e=>e.id===entry.id?updated:e)); Alert.alert('Verified on Blockchain','Trust score for '+entry.contactName+' has been cryptographically signed. Hash: '+hash); };
+  const markTrusted=(entry:any)=>{ const updated={...entry,verified:true,lastVerified:'Just now'}; setSelected(updated); setEntries(prev=>prev.map(e=>e.id===entry.id?updated:e)); };
   const adjustScore=(entry:any,delta:number)=>{ const ns=Math.max(0,Math.min(100,entry.score+delta)); const lvl=getLevel(ns); const updated={...entry,score:ns,level:lvl.level}; setSelected(updated); setEntries(prev=>prev.map(e=>e.id===entry.id?updated:e)); };
   const deleteEntry=(entry:any)=>{ Alert.alert('Remove Contact','Remove '+entry.contactName+' from TrustScore?',[{text:'Cancel',style:'cancel'},{text:'Remove',style:'destructive',onPress:()=>{ setEntries(prev=>prev.filter(e=>e.id!==entry.id)); setShowDetail(false); }}]); };
-  const addEntry=()=>{ if(!newName.trim())return; const score=Math.max(0,Math.min(100,parseInt(newScore)||50)); const lvl=getLevel(score); const entry={id:Date.now().toString(),contactName:newName.trim(),emoji:'ðŸ‘¤',score,level:lvl.level,interactions:0,lastVerified:'Never',blockchainHash:'',notes:newNotes.trim(),verified:false}; setEntries(prev=>[entry,...prev]); setShowAdd(false); setNewName(''); setNewScore('50'); setNewNotes(''); };
+  const addEntry=()=>{ if(!newName.trim())return; const score=Math.max(0,Math.min(100,parseInt(newScore)||50)); const lvl=getLevel(score); const entry={id:Date.now().toString(),contactName:newName.trim(),emoji:'ðŸ‘¤',score,level:lvl.level,interactions:0,lastVerified:'Never',notes:newNotes.trim(),verified:false}; setEntries(prev=>[entry,...prev]); setShowAdd(false); setNewName(''); setNewScore('50'); setNewNotes(''); };
   const handleNav=(item:typeof NAV[0])=>{ setNavTab(item.id); if(item.id!=='shield')router.push(item.route as any); };
 
   const filtered=entries.filter(e=>filter==='all'?true:filter==='verified'?e.verified:!e.verified);
-  const avg=Math.round(entries.reduce((a,e)=>a+e.score,0)/entries.length);
+  const avg=entries.length?Math.round(entries.reduce((a,e)=>a+e.score,0)/entries.length):0;
 
   return (
     <View style={S.container}>
@@ -53,7 +51,7 @@ function TrustScoreContent() {
           <TouchableOpacity onPress={()=>router.back()} style={S.backBtn}><Text style={{color:C.primary,fontSize:18}}>â†</Text></TouchableOpacity>
           <View style={{flex:1}}>
             <Text style={S.title}>â›“ï¸ TrustScore</Text>
-            <Text style={{color:C.textFaint,fontSize:9,letterSpacing:2}}>BLOCKCHAIN VERIFIED TRUST</Text>
+            <Text style={{color:C.textFaint,fontSize:9,letterSpacing:2}}>YOUR PRIVATE TRUST NOTES</Text>
           </View>
           <TouchableOpacity onPress={()=>setShowAdd(true)} style={{backgroundColor:'#1D4ED8',borderRadius:20,width:40,height:40,justifyContent:'center',alignItems:'center'}}><Text style={{color:'#fff',fontSize:22,fontWeight:'900'}}>+</Text></TouchableOpacity>
         </View>
@@ -86,7 +84,7 @@ function TrustScoreContent() {
                   {entry.verified&&<Text style={{fontSize:12}}>ðŸ’Ž</Text>}
                 </View>
                 <View style={{height:5,backgroundColor:'rgba(255,255,255,0.06)',borderRadius:3,overflow:'hidden',marginBottom:4}}>
-                  <View style={{width:entry.score+'%',height:5,backgroundColor:lvl.color,borderRadius:3}}/>
+                  <View style={{width:(entry.score+'%') as any,height:5,backgroundColor:lvl.color,borderRadius:3}}/>
                 </View>
                 <Text style={{color:C.textFaint,fontSize:10}}>{entry.interactions} interactions Â· {entry.lastVerified}</Text>
               </View>
@@ -96,6 +94,13 @@ function TrustScoreContent() {
               </View>
             </TouchableOpacity>
           ); })}
+          {entries.length===0 && (
+            <View style={{alignItems:'center',marginTop:50}}>
+              <Text style={{fontSize:42}}>🤝</Text>
+              <Text style={{color:C.textDim,fontSize:14,fontWeight:'800',marginTop:12}}>No trust notes yet</Text>
+              <Text style={{color:C.textFaint,fontSize:12,textAlign:'center',marginTop:6,paddingHorizontal:36,lineHeight:18}}>Tap + to record your own trust assessment of a contact. Saved privately on this device.</Text>
+            </View>
+          )}
         </ScrollView>
       </Animated.View>
 
@@ -121,9 +126,9 @@ function TrustScoreContent() {
                     ))}
                   </View>
                   {selected.notes?<Text style={{color:C.textDim,fontSize:12,marginBottom:14,fontStyle:'italic'}}>&quot;{selected.notes}&quot;</Text>:null}
-                  {selected.blockchainHash?<View style={{backgroundColor:'rgba(167,139,250,0.08)',borderRadius:12,padding:12,marginBottom:14,borderWidth:1,borderColor:'rgba(167,139,250,0.25)'}}><Text style={{color:'#A78BFA',fontSize:9,fontWeight:'700',letterSpacing:1,marginBottom:4}}>BLOCKCHAIN HASH</Text><Text style={{color:C.textFaint,fontSize:10}}>{selected.blockchainHash}</Text></View>:null}
+                  {null}
                   <View style={{flexDirection:'row',gap:8}}>
-                    {!selected.verified&&<TouchableOpacity onPress={()=>verifyOnBlockchain(selected)} style={{flex:1}}><LinearGradient colors={['#A78BFA','#7C3AED']} style={{borderRadius:14,paddingVertical:13,alignItems:'center'}}><Text style={{color:'#fff',fontSize:13,fontWeight:'800'}}>â›“ï¸ Verify on Chain</Text></LinearGradient></TouchableOpacity>}
+                    {!selected.verified&&<TouchableOpacity onPress={()=>markTrusted(selected)} style={{flex:1}}><LinearGradient colors={['#A78BFA','#7C3AED']} style={{borderRadius:14,paddingVertical:13,alignItems:'center'}}><Text style={{color:'#fff',fontSize:13,fontWeight:'800'}}>â›“ï¸ Mark as Trusted</Text></LinearGradient></TouchableOpacity>}
                     <TouchableOpacity onPress={()=>deleteEntry(selected)} style={{backgroundColor:'rgba(239,68,68,0.1)',borderRadius:14,paddingVertical:13,paddingHorizontal:16,borderWidth:1,borderColor:C.danger+'44'}}><Text style={{color:C.danger,fontSize:13,fontWeight:'800'}}>Remove</Text></TouchableOpacity>
                   </View>
                 </>
