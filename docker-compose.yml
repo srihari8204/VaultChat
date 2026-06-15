@@ -39,7 +39,7 @@ services:
     volumes:
       - redisdata:/data
     ports:
-      - "6379:6379"
+      - "16379:6379"          # host 16379 to avoid clashing with the live app's Redis
 
   kafka:
     image: bitnami/kafka:3.7
@@ -58,7 +58,7 @@ services:
     volumes:
       - kafkadata:/bitnami/kafka
     ports:
-      - "9092:9092"
+      - "19092:9092"
 
   minio:
     image: minio/minio:latest
@@ -70,15 +70,16 @@ services:
     volumes:
       - miniodata:/data
     ports:
-      - "9000:9000"           # S3 API
-      - "9001:9001"           # web console
+      - "19000:9000"          # S3 API
+      - "19001:9001"          # web console
 
   api:
     build:
       context: ./vaultchat-backend
     restart: unless-stopped
     env_file:
-      - ./vaultchat-backend/.env          # JWT_SECRET, ADMIN_KEY, etc.
+      - path: ./vaultchat-backend/.env     # JWT_SECRET, ADMIN_KEY, etc.
+        required: false                     # so `up <infra only>` works without the backend dir present
     environment:
       # Infra wiring overrides .env so the container talks to the compose services.
       NODE_ENV: production
@@ -103,7 +104,7 @@ services:
       kafka:
         condition: service_started
     ports:
-      - "3000:3000"
+      - "13000:3000"          # host 13000 — never clashes with the live pm2 app on :3000
 
 volumes:
   pgdata:

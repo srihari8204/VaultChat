@@ -91,7 +91,8 @@
           "enableMicrophonePermission": false
         }
       ],
-      "./plugins/withAppComponentFactoryFix.js"
+      "./plugins/withAppComponentFactoryFix.js",
+      "expo-sqlite"
     ],
     "extra": {
       "router": {},
