@@ -83,6 +83,38 @@ router.get('/profile', async (req, res) => {
   }
 });
 
+// GET /user/security-overview — real account-security snapshot (no fabricated
+// "threats blocked" theatre). All counts are the caller's own data, filtered
+// explicitly by user id (refresh_tokens has no RLS).
+router.get('/security-overview', async (req, res) => {
+  try {
+    const uid = req.user.id;
+    const [sessions, devices, blocks, keys, prof] = await Promise.all([
+      db.query(`SELECT COUNT(*)::int AS n FROM refresh_tokens WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > NOW()`, [uid]),
+      db.query(`SELECT COUNT(*)::int AS n FROM devices WHERE user_id = $1`, [uid]),
+      db.query(`SELECT COUNT(*)::int AS n FROM user_blocks WHERE blocker_id = $1`, [uid]),
+      db.query(`SELECT COUNT(*)::int AS n FROM identity_keys WHERE user_id = $1`, [uid]),
+      db.query(`SELECT created_at, discoverable, read_receipts, last_seen_visible FROM users WHERE id = $1`, [uid]),
+    ]);
+    const p = prof.rows[0] || {};
+    res.json({
+      activeSessions:   sessions.rows[0].n,
+      linkedDevices:    devices.rows[0].n,
+      blockedContacts:  blocks.rows[0].n,
+      e2eeKeyPublished: keys.rows[0].n > 0,
+      accountCreatedAt: p.created_at ?? null,
+      settings: {
+        discoverable:    p.discoverable ?? null,
+        readReceipts:    p.read_receipts ?? null,
+        lastSeenVisible: p.last_seen_visible ?? null,
+      },
+    });
+  } catch (err) {
+    console.error('[security-overview]', err.message);
+    res.status(500).json({ error: 'Failed to load security overview' });
+  }
+});
+
 // POST /user/reports  { reportedUserId, reason?, context? } — file an abuse report
 router.post('/reports', async (req, res) => {
   try {
