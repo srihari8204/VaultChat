@@ -22,7 +22,7 @@
     "pm2:logs": "pm2 logs vaultchat-backend",
     "pm2:status": "pm2 status",
     "pm2:save": "pm2 save",
-    "lint:syntax": "node -e \"const{execSync}=require('child_process'),fs=require('fs');const files=['server.js','firebaseAdmin.js',...fs.readdirSync('routes').filter(f=>f.endsWith('.js')).map(f=>'routes/'+f)];for(const f of files){try{execSync(`node --check ${f}`,{stdio:'inherit'})}catch(e){process.exit(1)}}console.log('Backend syntax OK')\"",
+    "lint:syntax": "node -e \"const{execSync}=require('child_process'),fs=require('fs');const files=['server.js',...fs.readdirSync('routes').filter(f=>f.endsWith('.js')).map(f=>'routes/'+f)];for(const f of files){try{execSync(`node --check ${f}`,{stdio:'inherit'})}catch(e){process.exit(1)}}console.log('Backend syntax OK')\"",
     "health": "curl -fsS http://localhost:${PORT:-3002}/health || exit 1",
     "postinstall": "echo 'Backend deps installed.'",
     "android": "expo run:android",

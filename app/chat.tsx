@@ -25,6 +25,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ScreenCapture from 'expo-screen-capture';
 import { DeviceMotion } from 'expo-sensors';
 import * as Sharing from 'expo-sharing';
+import { recordScreenshotAttempt } from '../services/security/auditChain';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { consumePendingJump } from '../lib/chatJump';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -687,6 +688,10 @@ export default function ChatScreen() {
       try {
         sub = ScreenCapture.addScreenshotListener(() => {
           reportScreenshotCaptured(chatId).catch(() => {});
+          // Record the capture in the on-device tamper-evident audit chain so it
+          // surfaces in the Alerts tab (#41). Real local event — the inbound
+          // "someone captured your content" alert is delivered separately (W7).
+          recordScreenshotAttempt({ chatId, chatName: title }).catch(() => {});
           if (mode === 'allow_notify') {
             Alert.alert('Screenshot captured', 'The other side has been notified.');
           }
@@ -1136,6 +1141,15 @@ export default function ChatScreen() {
           params: { chatId, peerName: peer?.name || chat?.name || '' },
         });
       }},
+      { text: '📍 Location', onPress: () => {
+        const peer = chat?.type === 'direct' && meId
+          ? chat.members.find(m => m.userId !== meId)
+          : null;
+        router.push({
+          pathname: '/location' as any,
+          params: { chatId, name: peer?.name || chat?.name || '' },
+        });
+      }},
       { text: '📎 File',            onPress: onPickFile  },
       { text: 'Cancel', style: 'cancel' },
     ]);
@@ -1300,7 +1314,20 @@ export default function ChatScreen() {
           </View>
           {peerPresence?.online && <View style={S.headerPresenceDot} />}
         </View>
-        <View style={{ flex: 1 }}>
+        <TouchableOpacity
+          style={{ flex: 1 }}
+          activeOpacity={chat?.type === 'direct' ? 0.6 : 1}
+          disabled={chat?.type !== 'direct' || !meId}
+          onPress={() => {
+            if (chat?.type !== 'direct' || !meId) return;
+            const peer = chat.members.find(m => m.userId !== meId);
+            if (!peer) return;
+            router.push({
+              pathname: '/verify-contact' as any,
+              params: { peerId: peer.userId, peerName: peer.name ?? peer.email ?? 'VaultChat user' },
+            });
+          }}
+        >
           <Text style={S.title} numberOfLines={1}>{title}</Text>
           {chat && (
             <Text style={S.sub}>
@@ -1308,7 +1335,7 @@ export default function ChatScreen() {
               <Text style={S.e2eBadge}>  ·  🔒 secured</Text>
             </Text>
           )}
-        </View>
+        </TouchableOpacity>
         {chat?.type === 'direct' && meId && (() => {
           const peer = chat.members.find(m => m.userId !== meId);
           if (!peer) return null;
@@ -2263,6 +2290,7 @@ function MessageBubble({
   const isFile  = msg.type === 'file'  && msg.meta?.attachmentId;
   const isSticker = msg.type === 'sticker' && !!msg.content;
   const isPoll  = msg.type === 'poll' && Array.isArray(msg.meta?.options);
+  const isLocation = msg.type === 'location';
 
   // ── View-once gate (P1) ──────────────────────────────────
   // Only photo/video honor view-once. Owner (sender) sees the media
@@ -2390,7 +2418,33 @@ function MessageBubble({
             votes={pollVotesForMsg}
             onChange={onPollVoteChange}
           />
-        ) : (
+        ) : isLocation ? (() => {
+          // A 'location' message's (decrypted) content is JSON {lat,lng,address}.
+          let L: any = null; try { L = JSON.parse(plain || '{}'); } catch {}
+          const ok = L && typeof L.lat === 'number' && typeof L.lng === 'number';
+          return (
+            <TouchableOpacity
+              disabled={!ok}
+              activeOpacity={0.85}
+              onPress={() => { if (ok) Linking.openURL(`https://www.google.com/maps?q=${L.lat},${L.lng}`).catch(() => {}); }}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 190 }}>
+                <Text style={{ fontSize: 24 }}>📍</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, { fontWeight: '700' }]}>
+                    {L?.live ? 'Live location' : 'Location'}
+                  </Text>
+                  {ok && !!L.address && (
+                    <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, { fontSize: 12, opacity: 0.85 }]} numberOfLines={2}>
+                      {L.address}
+                    </Text>
+                  )}
+                  {ok && <Text style={{ color: '#4A9FFF', fontSize: 12, fontWeight: '700', marginTop: 2 }}>Open in Maps ›</Text>}
+                </View>
+              </View>
+            </TouchableOpacity>
+          );
+        })() : (
           plain ? (
             // Invisible Ink: recipient sees ●●●● until they tilt the
             // phone past 45°. Sender (isMine) always sees plaintext —

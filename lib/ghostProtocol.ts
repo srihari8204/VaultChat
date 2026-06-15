@@ -1,97 +1,64 @@
-// lib/ghostProtocol.ts — Ghost Protocol Engine
-// Manages duress/decoy mode state and fake data generation
-// ZERO indicators that duress mode is active
+// lib/ghostProtocol.ts — decoy account store (the "second account" in the W3
+// duress/decoy split).
+//
+// The decoy is now a REAL, persistent local account — not the old hardcoded
+// generators that reset on every reload. Believable starter chats are seeded
+// ONCE into AsyncStorage; after that the decoy reads and writes its own store,
+// so messages you type in duress mode persist and it behaves like a genuine
+// (if mundane) messenger. Cryptographic separation from the real account is
+// handled by services/security/duressVault.ts — which vault opens is decided by
+// PIN-derived key, not by the flag below.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const GHOST_KEY = 'vc_ghost_active';
+const GHOST_KEY      = 'vc_ghost_active';
 const GHOST_WIPE_KEY = 'vc_ghost_wipe_done';
+const SEEDED_KEY     = 'vc_decoy_seeded';
+const CHATS_KEY      = 'vc_decoy_chats';
+const msgsKey = (chatId: string) => `vc_decoy_msgs_${chatId}`;
 
-// Check if Ghost Protocol (duress mode) is active
+export interface DecoyChat {
+  id: string; name: string; avatar: string | null;
+  lastMsg: string; time: string; unread: number; pinned: boolean; muted: boolean;
+}
+export interface DecoyMessage {
+  id: string; text: string; sent: boolean; time: string; delivered?: boolean;
+}
+
+// ── Duress-mode flag (selection is cryptographic; this only drives UI state) ──
 export async function isGhostMode(): Promise<boolean> {
   return (await AsyncStorage.getItem(GHOST_KEY)) === '1';
 }
-
-// Activate Ghost Protocol
 export async function activateGhost(): Promise<void> {
   await AsyncStorage.setItem(GHOST_KEY, '1');
 }
-
-// Deactivate (only possible with real PIN re-entry)
 export async function deactivateGhost(): Promise<void> {
   await AsyncStorage.removeItem(GHOST_KEY);
   await AsyncStorage.removeItem(GHOST_WIPE_KEY);
 }
-
-// Mark that background wipe was done
 export async function markWipeDone(): Promise<void> {
   await AsyncStorage.setItem(GHOST_WIPE_KEY, '1');
 }
-
 export async function wasWipeDone(): Promise<boolean> {
   return (await AsyncStorage.getItem(GHOST_WIPE_KEY)) === '1';
 }
 
-// Generate realistic fake chat data
-// These look like mundane everyday conversations — nothing suspicious
-export function generateDecoyChats() {
-  const now = Date.now();
+// ── Seed content (believable starter account, written once) ──────────────────
+function seedChats(): DecoyChat[] {
   return [
-    {
-      id: 'decoy_1', name: 'Mom', avatar: null,
-      lastMsg: 'Coming home for dinner tonight?',
-      time: new Date(now - 180000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      unread: 1, pinned: true, muted: false,
-    },
-    {
-      id: 'decoy_2', name: 'Rahul', avatar: null,
-      lastMsg: 'Bro the match was insane yesterday',
-      time: new Date(now - 3600000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      unread: 3, pinned: false, muted: false,
-    },
-    {
-      id: 'decoy_3', name: 'Work Group', avatar: null,
-      lastMsg: 'Priya: Meeting moved to 3pm',
-      time: new Date(now - 7200000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      unread: 0, pinned: false, muted: true,
-    },
-    {
-      id: 'decoy_4', name: 'Sneha', avatar: null,
-      lastMsg: 'Thanks for the notes!',
-      time: new Date(now - 14400000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      unread: 0, pinned: false, muted: false,
-    },
-    {
-      id: 'decoy_5', name: 'Amazon Delivery', avatar: null,
-      lastMsg: 'Your order has been shipped',
-      time: 'Yesterday',
-      unread: 0, pinned: false, muted: true,
-    },
-    {
-      id: 'decoy_6', name: 'Dad', avatar: null,
-      lastMsg: 'Call me when free',
-      time: 'Yesterday',
-      unread: 0, pinned: false, muted: false,
-    },
-    {
-      id: 'decoy_7', name: 'College Friends', avatar: null,
-      lastMsg: 'Amit: Reunion plan confirmed for March',
-      time: 'Monday',
-      unread: 0, pinned: false, muted: false,
-    },
-    {
-      id: 'decoy_8', name: 'Gym Trainer', avatar: null,
-      lastMsg: 'Rest day tomorrow, back to legs Thursday',
-      time: 'Monday',
-      unread: 0, pinned: false, muted: false,
-    },
+    { id: 'decoy_1', name: 'Mom',            avatar: null, lastMsg: 'Coming home for dinner tonight?',  time: '7:45 PM',   unread: 1, pinned: true,  muted: false },
+    { id: 'decoy_2', name: 'Rahul',          avatar: null, lastMsg: 'Bro the match was insane yesterday', time: '11:30 AM', unread: 3, pinned: false, muted: false },
+    { id: 'decoy_3', name: 'Work Group',     avatar: null, lastMsg: 'Priya: Meeting moved to 3pm',       time: '10:45 AM', unread: 0, pinned: false, muted: true  },
+    { id: 'decoy_4', name: 'Sneha',          avatar: null, lastMsg: 'Thanks for the notes!',             time: '3:30 PM',  unread: 0, pinned: false, muted: false },
+    { id: 'decoy_5', name: 'Amazon Delivery',avatar: null, lastMsg: 'Your order has been shipped',       time: 'Yesterday',unread: 0, pinned: false, muted: true  },
+    { id: 'decoy_6', name: 'Dad',            avatar: null, lastMsg: 'Call me when free',                 time: 'Yesterday',unread: 0, pinned: false, muted: false },
+    { id: 'decoy_7', name: 'College Friends',avatar: null, lastMsg: 'Amit: Reunion plan confirmed for March', time: 'Monday', unread: 0, pinned: false, muted: false },
+    { id: 'decoy_8', name: 'Gym Trainer',    avatar: null, lastMsg: 'Rest day tomorrow, back to legs Thursday', time: 'Monday', unread: 0, pinned: false, muted: false },
   ];
 }
 
-// Generate fake conversation messages for a decoy chat
-export function generateDecoyMessages(chatId: string) {
-  const now = Date.now();
-  const convos: Record<string, any[]> = {
+function seedMessages(chatId: string): DecoyMessage[] {
+  const convos: Record<string, DecoyMessage[]> = {
     decoy_1: [
       { id: '1', text: 'Hi beta, dinner at 8?', sent: false, time: '6:30 PM' },
       { id: '2', text: 'Yes mom, coming!', sent: true, time: '6:32 PM' },
@@ -102,15 +69,13 @@ export function generateDecoyMessages(chatId: string) {
     decoy_2: [
       { id: '1', text: 'Did you watch the match?', sent: false, time: '10:00 AM' },
       { id: '2', text: 'Yes! That last over was crazy', sent: true, time: '10:05 AM' },
-      { id: '3', text: 'Kohli played so well', sent: false, time: '10:06 AM' },
-      { id: '4', text: 'Best innings this season', sent: true, time: '10:08 AM' },
-      { id: '5', text: 'Bro the match was insane yesterday', sent: false, time: '11:30 AM' },
+      { id: '3', text: 'Best innings this season', sent: true, time: '10:08 AM' },
+      { id: '4', text: 'Bro the match was insane yesterday', sent: false, time: '11:30 AM' },
     ],
     decoy_3: [
       { id: '1', text: 'Team meeting at 2pm today', sent: false, time: '9:00 AM' },
       { id: '2', text: 'I will be there', sent: true, time: '9:15 AM' },
-      { id: '3', text: 'Can someone share the agenda?', sent: false, time: '9:20 AM' },
-      { id: '4', text: 'Priya: Meeting moved to 3pm', sent: false, time: '10:45 AM' },
+      { id: '3', text: 'Priya: Meeting moved to 3pm', sent: false, time: '10:45 AM' },
     ],
     decoy_4: [
       { id: '1', text: 'Hey can you share the physics notes?', sent: false, time: '3:00 PM' },
@@ -143,25 +108,56 @@ export function generateDecoyMessages(chatId: string) {
   ];
 }
 
-// Fake call history
-export function generateDecoyCallHistory() {
-  return [
-    { id: 'c1', name: 'Mom', type: 'incoming', callType: 'voice', time: 'Today, 6:30 PM', duration: '4:23' },
-    { id: 'c2', name: 'Rahul', type: 'outgoing', callType: 'voice', time: 'Today, 2:15 PM', duration: '12:07' },
-    { id: 'c3', name: 'Dad', type: 'missed', callType: 'voice', time: 'Yesterday, 9:00 PM', duration: '' },
-    { id: 'c4', name: 'Sneha', type: 'incoming', callType: 'video', time: 'Yesterday, 4:00 PM', duration: '8:45' },
-    { id: 'c5', name: 'Work - Priya', type: 'outgoing', callType: 'voice', time: 'Monday, 11:00 AM', duration: '3:12' },
-  ];
+async function ensureSeeded(): Promise<void> {
+  if ((await AsyncStorage.getItem(SEEDED_KEY)) === '1') return;
+  await AsyncStorage.setItem(CHATS_KEY, JSON.stringify(seedChats()));
+  await AsyncStorage.setItem(SEEDED_KEY, '1');
 }
 
-// Fake contacts
-export function generateDecoyContacts() {
-  return [
-    { id: 'dc1', name: 'Amit Sharma', status: 'Hey there!', online: false },
-    { id: 'dc2', name: 'Dad', status: '', online: false },
-    { id: 'dc3', name: 'Mom', status: 'Busy', online: true },
-    { id: 'dc4', name: 'Priya (Work)', status: 'In a meeting', online: true },
-    { id: 'dc5', name: 'Rahul', status: 'At the gym', online: false },
-    { id: 'dc6', name: 'Sneha', status: 'Studying', online: false },
-  ];
+function safeParse<T>(s: string | null, fallback: T): T {
+  if (!s) return fallback;
+  try { return JSON.parse(s) as T; } catch { return fallback; }
+}
+
+function nowLabel(): string {
+  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+/** Seed the decoy account if it has never been provisioned (call at duress setup). */
+export async function seedDecoyAccount(): Promise<void> {
+  await ensureSeeded();
+}
+
+/** The decoy chat list (persistent). */
+export async function getDecoyChats(): Promise<DecoyChat[]> {
+  await ensureSeeded();
+  return safeParse<DecoyChat[]>(await AsyncStorage.getItem(CHATS_KEY), seedChats());
+}
+
+/** Messages for a decoy chat (persistent; seeds the thread on first open). */
+export async function getDecoyMessages(chatId: string): Promise<DecoyMessage[]> {
+  const raw = await AsyncStorage.getItem(msgsKey(chatId));
+  if (raw) return safeParse<DecoyMessage[]>(raw, []);
+  const seed = seedMessages(chatId);
+  await AsyncStorage.setItem(msgsKey(chatId), JSON.stringify(seed));
+  return seed;
+}
+
+/** Persist a sent decoy message and update the chat preview. Returns the message. */
+export async function appendDecoyMessage(chatId: string, text: string): Promise<DecoyMessage> {
+  const msg: DecoyMessage = { id: Date.now().toString(), text, sent: true, time: nowLabel(), delivered: false };
+  const msgs = await getDecoyMessages(chatId);
+  await AsyncStorage.setItem(msgsKey(chatId), JSON.stringify([...msgs, msg]));
+
+  const chats = await getDecoyChats();
+  const updated = chats.map((c) => (c.id === chatId ? { ...c, lastMsg: text, time: msg.time, unread: 0 } : c));
+  await AsyncStorage.setItem(CHATS_KEY, JSON.stringify(updated));
+  return msg;
+}
+
+/** Mark a decoy message delivered (persisted). */
+export async function markDecoyDelivered(chatId: string, msgId: string): Promise<void> {
+  const msgs = await getDecoyMessages(chatId);
+  const next = msgs.map((m) => (m.id === msgId ? { ...m, delivered: true } : m));
+  await AsyncStorage.setItem(msgsKey(chatId), JSON.stringify(next));
 }

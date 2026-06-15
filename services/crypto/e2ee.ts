@@ -1,8 +1,9 @@
 /**
  * VaultChat E2EE core — REAL X3DH key agreement + Double Ratchet.
  * ───────────────────────────────────────────────────────────────────────
- * This is the genuine cryptographic replacement for the fake skeleton in
- * services/doubleRatchetService.ts (whose `dhExchange` was HMAC, not DH).
+ * This is the genuine cryptographic core. It replaced an earlier fake skeleton
+ * (services/doubleRatchetService.ts — `dhExchange` was HMAC, not DH) which has
+ * since been removed.
  *
  * Built entirely on audited pure-JS primitives (@noble/curves, @noble/hashes,
  * @noble/ciphers) so the EXACT same code runs in Node (where it is unit-tested

@@ -564,9 +564,10 @@ router.delete('/:id/join-requests/:userId', async (req, res) => {
 //
 // MUST stay above GET /:id so Express doesn't treat 'search' as a chat id.
 //
-// TEMPORARY: works because Phase 3a stores content as plaintext. When real
-// E2EE ships (Phase 3b) the message-content search will need to move
-// client-side; this endpoint will then only return chat / member matches.
+// ZERO-KNOWLEDGE: message *content* is NOT searched server-side (the server
+// only holds ciphertext under real E2EE). This returns chat + member-name
+// matches only; message-content search runs on-device (lib/chatService
+// .searchInChat over the local store).
 router.get('/search', async (req, res) => {
   try {
     const q = (req.query.q || '').toString().trim();
@@ -587,19 +588,6 @@ router.get('/search', async (req, res) => {
       [req.user.id, like, limit]
     );
 
-    const msgsR = await req.dbQuery(
-      `SELECT m.id, m.chat_id, m.sender_id, m.content, m.created_at, m.type,
-              c.type AS chat_type, c.name AS chat_name
-         FROM messages m
-         JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1 AND cm.left_at IS NULL
-         JOIN chats c ON c.id = m.chat_id
-        WHERE m.deleted_at IS NULL
-          AND m.content ILIKE $2
-        ORDER BY m.id DESC
-        LIMIT $3`,
-      [req.user.id, like, limit]
-    );
-
     res.json({
       chats: chatsR.rows.map(r => ({
         id:            r.id,
@@ -608,16 +596,9 @@ router.get('/search', async (req, res) => {
         photoURL:      r.photo_url,
         lastMessageAt: r.last_message_at,
       })),
-      messages: msgsR.rows.map(r => ({
-        id:        r.id,
-        chatId:    r.chat_id,
-        chatName:  r.chat_name,
-        chatType:  r.chat_type,
-        senderId:  r.sender_id,
-        type:      r.type,
-        snippet:   (r.content || '').slice(0, 240),
-        createdAt: r.created_at,
-      })),
+      // Message-content search is on-device (zero-knowledge) — the server never
+      // reads message bodies. searchInChat decrypts + matches the local store.
+      messages: [],
     });
   } catch (err) {
     console.error('[chats search]', err.message);
@@ -874,44 +855,15 @@ router.get('/:id/messages', async (req, res) => {
 // matches the longer, more specific path here because the extra '/search'
 // segment makes it distinct from '/:id/messages'.
 //
-// TEMPORARY (same caveat as the global /chats/search): relies on Phase 3a
-// plaintext content. Under real E2EE (Phase 3b) in-chat search moves
-// fully client-side over the local message store.
+// In-chat message search is now ON-DEVICE (zero-knowledge): the server only
+// holds ciphertext, so it cannot match message content. The client
+// (lib/chatService.searchInChat) searches the decrypted local store. This
+// endpoint stays membership-gated and intentionally returns no content matches.
 router.get('/:id/messages/search', async (req, res) => {
   try {
     const mem = await loadChatMembership(req, req.params.id);
     if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member of this chat' });
-
-    const q = (req.query.q || '').toString().trim();
-    if (!q) return res.json({ messages: [] });
-    if (q.length > 200) return res.status(400).json({ error: 'query too long' });
-    const limit = Math.min(parseInt(req.query.limit || '50', 10), 100);
-    const like = `%${q.replace(/[%_]/g, '\\$&')}%`;
-
-    const r = await req.dbQuery(
-      `SELECT m.id, m.sender_id, m.content, m.type, m.created_at,
-              COALESCE(NULLIF(u.name, ''), u.email) AS sender_name
-         FROM messages m
-         JOIN users u ON u.id = m.sender_id
-        WHERE m.chat_id = $1
-          AND m.deleted_at IS NULL
-          AND m.type = 'text'
-          AND m.content ILIKE $2
-        ORDER BY m.id DESC
-        LIMIT $3`,
-      [req.params.id, like, limit]
-    );
-
-    res.json({
-      messages: r.rows.map(row => ({
-        id:         row.id,
-        senderId:   row.sender_id,
-        senderName: row.sender_name,
-        content:    row.content || '',
-        type:       row.type,
-        createdAt:  row.created_at,
-      })),
-    });
+    res.json({ messages: [] });
   } catch (err) {
     console.error('[in-chat search]', err.message);
     res.status(500).json({ error: 'Search failed' });

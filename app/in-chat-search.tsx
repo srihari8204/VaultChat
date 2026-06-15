@@ -1,8 +1,8 @@
-// app/in-chat-search.tsx — In-Chat Message Search (Postgres-backed).
+// app/in-chat-search.tsx — In-Chat Message Search (on-device, zero-knowledge).
 //
-// Searches the text messages of a single chat via GET
-// /chats/:id/messages/search (server-side ILIKE, membership-scoped).
-// Debounced query, highlighted matches, Obsidian Aurora styling.
+// Searches the DECRYPTED local message store via searchInChat — the server only
+// holds ciphertext and never sees the query or the content. Covers the chat
+// history cached on this device. Debounced, highlighted, Obsidian Aurora.
 //
 // NOTE: tapping a result returns to the chat. Scroll-to-message requires
 // pagination-aware loading in app/chat.tsx (the history is keyset-paginated,
@@ -164,7 +164,7 @@ export default function InChatSearchScreen() {
         <View style={s.center}>
           <Ionicons name="search-outline" size={64} color={Aurora.surfaceSolid} />
           <Text style={s.emptyTitle}>Search Messages</Text>
-          <Text style={s.emptySubtitle}>Type to search the text messages in this chat.</Text>
+          <Text style={s.emptySubtitle}>Searches messages saved on this device — on-device and private.</Text>
         </View>
       ) : results.length === 0 ? (
         <View style={s.center}>

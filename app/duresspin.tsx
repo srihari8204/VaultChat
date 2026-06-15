@@ -1,18 +1,15 @@
 
 // ================================================================
-// app/duresspin.tsx
-// Real PIN  → VaultChat opens normally
-// Duress PIN → Stealth mode activates, Calculator shown
-//              Data is NOT wiped — hidden + encrypted only
+// app/duresspin.tsx — duress / decoy unlock (genuine crypto separation).
 //
-// Compliant with:
-//   Android: Google Play policy (no hidden functionality harm)
-//   iOS:     App Store guideline 2.5.4 (no background processes harm)
+// Real PIN   → opens VaultChat normally.
+// Duress PIN → opens the believable, persistent decoy account (/decoy-chats).
 //
-// SECRET REACTIVATION:
-//   Long press "=" button 3 times on Calculator
-//   → Returns to this PIN screen
-//   → Enter REAL PIN → VaultChat unlocks
+// Selection is cryptographic, not a flag: each PIN derives a key (scrypt) that
+// authenticates exactly ONE AES-256-GCM-sealed vault header. The duress PIN
+// cannot derive or open the real vault, so the real account is unreachable —
+// not merely hidden. Neither PIN is ever stored. See
+// services/security/duressVault.ts + vaultKeys.ts (Node-proven separation).
 // ================================================================
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -21,11 +18,9 @@ import {
   Animated, Platform, StyleSheet,
   Text, TouchableOpacity, Vibration, View,
 } from 'react-native';
-import * as SecureStore from 'expo-secure-store';
 import { stealthMode } from '../lib/stealthMode';
-
-const REAL_PIN_KEY   = 'vaultRealPin';
-const DURESS_PIN_KEY = 'vaultDuressPin';
+import { isVaultSetup, setupVaults, unlockWithPin } from '../services/security/duressVault';
+import { activateGhost, deactivateGhost, seedDecoyAccount } from '../lib/ghostProtocol';
 
 const C = {
   bg:'#FFFFFF', primary:'#4A9FFF',
@@ -48,8 +43,8 @@ export default function DuressPin() {
   }, []);
 
   const checkSetup = async () => {
-    const realPin = await SecureStore.getItemAsync(REAL_PIN_KEY);
-    if (!realPin) {
+    const ready = await isVaultSetup();
+    if (!ready) {
       setIsSetup(true);
       setLabel('Set your real PIN (6 digits)');
     }
@@ -78,17 +73,20 @@ export default function DuressPin() {
         setLabel('Set your real PIN (6 digits)');
         return;
       }
-      await SecureStore.setItemAsync(REAL_PIN_KEY, pin);
+      // tempPin still holds the confirmed real PIN; keep it for the duress step.
       setEntered('');
       setSetupStep('duress');
       setLabel('Set duress PIN (shown to attacker)');
     } else if (setupStep === 'duress') {
-      const realPin = await SecureStore.getItemAsync(REAL_PIN_KEY);
-      if (pin === realPin) {
+      if (pin === tempPin) {
         triggerShake('Duress PIN cannot match real PIN');
         return;
       }
-      await SecureStore.setItemAsync(DURESS_PIN_KEY, pin);
+      // Provision two cryptographically separate vaults. Neither PIN is stored —
+      // each derives a key that opens only its own AES-GCM-sealed vault header.
+      await setupVaults(tempPin, pin);
+      await seedDecoyAccount();
+      setTempPin('');
       setEntered('');
       setIsSetup(false);
       setSetupStep('done');
@@ -98,22 +96,25 @@ export default function DuressPin() {
 
   // ── Verify PIN on normal entry ───────────────────────────────
   const verify = async (pin: string) => {
-    const realPin   = await SecureStore.getItemAsync(REAL_PIN_KEY);
-    const duressPin = await SecureStore.getItemAsync(DURESS_PIN_KEY);
+    // Cryptographic selection: the entered PIN derives a key that authenticates
+    // exactly one sealed vault. The duress PIN can never open the real vault.
+    const res = await unlockWithPin(pin);
 
-    if (pin === realPin) {
-      // ✅ Real PIN — open VaultChat normally
+    if (res?.kind === 'real') {
+      // ✅ Real PIN — clear any decoy/stealth state and open VaultChat.
+      await deactivateGhost();
       await stealthMode.deactivate();
       router.replace('/(tabs)/chats');
 
-    } else if (pin === duressPin) {
-      // 🔮 Duress PIN — activate stealth, show calculator
-      // Data stays safe and encrypted — NOT wiped
-      await stealthMode.activate('Duress PIN entered');
-      router.replace('/stealth');
+    } else if (res?.kind === 'decoy') {
+      // 🎭 Duress PIN — open the believable, persistent decoy account. The real
+      // vault is not decryptable with this PIN, so real chats stay sealed.
+      await activateGhost();
+      await seedDecoyAccount();
+      router.replace('/decoy-chats' as any);
 
     } else {
-      // ❌ Wrong PIN
+      // ❌ Unrecognised PIN
       triggerShake('Wrong PIN');
       setEntered('');
     }

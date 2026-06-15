@@ -2,13 +2,13 @@
 // Looks IDENTICAL to real chats.tsx but shows fake data
 // No visual indicator of duress mode — pixel-perfect clone
 
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList,
   StatusBar, TextInput, SafeAreaView,
 } from 'react-native';
-import { useRouter } from 'expo-router';
-import { generateDecoyChats } from '../lib/ghostProtocol';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { getDecoyChats, type DecoyChat } from '../lib/ghostProtocol';
 
 const C = {
   bg: '#FFFFFF', primary: '#4A9FFF', accent: '#10B981',
@@ -23,7 +23,15 @@ export default function DecoyChatList() {
   const router = useRouter();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
-  const chats = generateDecoyChats();
+  const [chats, setChats] = useState<DecoyChat[]>([]);
+
+  // Reload from the persistent decoy store on focus so sent messages / preview
+  // updates survive navigation and reload (a real account, not a reset clone).
+  useFocusEffect(useCallback(() => {
+    let alive = true;
+    getDecoyChats().then((c) => { if (alive) setChats(c); }).catch(() => {});
+    return () => { alive = false; };
+  }, []));
 
   const filtered = chats.filter(c => {
     if (search && !c.name.toLowerCase().includes(search.toLowerCase())) return false;

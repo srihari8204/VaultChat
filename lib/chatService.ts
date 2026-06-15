@@ -824,12 +824,40 @@ export interface InChatMessageHit {
   type:       Message['type'];
   createdAt:  string;
 }
-export async function searchInChat(chatId: string, q: string, limit = 50): Promise<InChatMessageHit[]> {
-  const params = new URLSearchParams({ q, limit: String(limit) }).toString();
-  const r = await api<{ messages: InChatMessageHit[] }>(
-    `/chats/${encodeURIComponent(chatId)}/messages/search?${params}`,
-  );
-  return r.messages || [];
+// ZERO-KNOWLEDGE: searches the DECRYPTED local message store, never the server
+// (which only holds ciphertext). Covers the chat history cached on this device.
+export async function searchInChat(chatId: string, q: string, limit = 80): Promise<InChatMessageHit[]> {
+  const term = q.trim().toLowerCase();
+  if (!term || !chatId) return [];
+
+  const { getCachedMessages } = await import('./localDb');
+  const [msgs, chat] = await Promise.all([
+    getCachedMessages(chatId, 1000),
+    getChat(chatId).catch(() => null),
+  ]);
+
+  const nameById = new Map<string, string>();
+  for (const m of chat?.members ?? []) {
+    if (m.userId) nameById.set(m.userId, m.name || m.email || '');
+  }
+
+  const hits: InChatMessageHit[] = [];
+  for (const m of msgs) {
+    if (m.type !== 'text' || m.deletedAt) continue;
+    const text = await decryptFromChat(chatId, m.senderId, m.content, m.id);
+    if (text && text.toLowerCase().includes(term)) {
+      hits.push({
+        id:         m.id,
+        senderId:   m.senderId,
+        senderName: nameById.get(m.senderId) || null,
+        content:    text,
+        type:       m.type,
+        createdAt:  m.createdAt,
+      });
+      if (hits.length >= limit) break;
+    }
+  }
+  return hits;
 }
 
 // ─── Mute (Day 11) ──────────────────────────────────────────────────

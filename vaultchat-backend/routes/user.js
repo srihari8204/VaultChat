@@ -207,6 +207,211 @@ router.get('/sos', async (req, res) => {
   }
 });
 
+// ─── Security audit chain (Alerts tab #41) ─────────────────────────────────
+// Zero-knowledge backup of the device's tamper-evident audit chain. The server
+// stores ONLY the client-encrypted blob + opaque SHA-256 chain hashes; it can
+// never read an event's content. See migration 036_security_events.sql.
+
+// POST /user/security-events  { events: [{ blob, hash, prevHash, ts? }] }  (batch)
+// Idempotent — re-pushing an already-stored event (same hash) is a no-op.
+router.post('/security-events', async (req, res) => {
+  try {
+    const events = Array.isArray(req.body?.events) ? req.body.events : [];
+    if (!events.length) return res.json({ stored: 0 });
+    if (events.length > 500) return res.status(400).json({ error: 'Too many events (max 500)' });
+
+    let stored = 0;
+    for (const e of events) {
+      if (!e || typeof e.blob !== 'string' || typeof e.hash !== 'string' || typeof e.prevHash !== 'string') continue;
+      if (e.blob.length > 20000 || e.hash.length > 128 || e.prevHash.length > 128) continue; // sanity caps
+      const ts = Number.isFinite(e.ts) ? Math.trunc(e.ts) : null;
+      const r = await db.query(
+        `INSERT INTO security_events (user_id, blob, hash, prev_hash, client_ts)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (user_id, hash) DO NOTHING`,
+        [req.user.id, e.blob, e.hash, e.prevHash, ts]
+      );
+      stored += r.rowCount;
+    }
+    res.json({ stored });
+  } catch (err) {
+    console.error('[user/security-events POST]', err.message);
+    res.status(500).json({ error: 'Failed to store security events' });
+  }
+});
+
+// GET /user/security-events?since=<id> → { events: [{ id, blob, hash, prevHash, ts }] }
+router.get('/security-events', async (req, res) => {
+  try {
+    const since = parseInt(req.query.since, 10) || 0;
+    const r = await db.query(
+      `SELECT id, blob, hash, prev_hash, client_ts
+         FROM security_events
+        WHERE user_id = $1 AND id > $2
+        ORDER BY id ASC
+        LIMIT 1000`,
+      [req.user.id, since]
+    );
+    res.json({ events: r.rows.map(row => ({
+      id:       row.id,
+      blob:     row.blob,
+      hash:     row.hash,
+      prevHash: row.prev_hash,
+      ts:       row.client_ts,
+    })) });
+  } catch (err) {
+    console.error('[user/security-events GET]', err.message);
+    res.status(500).json({ error: 'Failed to load security events' });
+  }
+});
+
+// ─── Breach monitors (breachguard screen) ──────────────────────────────────
+// Persists which targets the user watches for breach exposure. The HIBP lookup
+// runs on-device (the API key never leaves the phone); the server only stores
+// the watch list + last result count. See migration 037_breach_monitors.sql.
+
+function publicMonitor(row) {
+  return {
+    id:            row.id,
+    targetType:    row.target_type,
+    target:        row.target,
+    breachCount:   row.breach_count,
+    lastCheckedAt: row.last_checked_at,
+    createdAt:     row.created_at,
+  };
+}
+
+// GET /user/breach-monitors → { monitors: [...] }
+router.get('/breach-monitors', async (req, res) => {
+  try {
+    const r = await db.query(
+      `SELECT id, target_type, target, breach_count, last_checked_at, created_at
+         FROM breach_monitors WHERE user_id = $1 ORDER BY created_at DESC LIMIT 200`,
+      [req.user.id]
+    );
+    res.json({ monitors: r.rows.map(publicMonitor) });
+  } catch (err) {
+    console.error('[user/breach-monitors GET]', err.message);
+    res.status(500).json({ error: 'Failed to load breach monitors' });
+  }
+});
+
+// POST /user/breach-monitors { target, targetType? } → upsert one monitor
+router.post('/breach-monitors', async (req, res) => {
+  try {
+    const target = String(req.body?.target || '').trim().toLowerCase();
+    const targetType = String(req.body?.targetType || 'email').trim();
+    if (!target) return res.status(400).json({ error: 'target required' });
+    if (target.length > 320) return res.status(400).json({ error: 'target too long' });
+    if (targetType !== 'email') return res.status(400).json({ error: 'unsupported targetType' });
+    const r = await db.query(
+      `INSERT INTO breach_monitors (user_id, target_type, target)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, target_type, target) DO UPDATE SET target = EXCLUDED.target
+       RETURNING id, target_type, target, breach_count, last_checked_at, created_at`,
+      [req.user.id, targetType, target]
+    );
+    res.json({ monitor: publicMonitor(r.rows[0]) });
+  } catch (err) {
+    console.error('[user/breach-monitors POST]', err.message);
+    res.status(500).json({ error: 'Failed to add breach monitor' });
+  }
+});
+
+// PATCH /user/breach-monitors/:id { breachCount } → record a scan result
+router.patch('/breach-monitors/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'bad id' });
+    const breachCount = Number.isFinite(req.body?.breachCount) ? Math.max(0, Math.trunc(req.body.breachCount)) : 0;
+    const r = await db.query(
+      `UPDATE breach_monitors SET breach_count = $1, last_checked_at = NOW()
+        WHERE id = $2 AND user_id = $3 RETURNING id`,
+      [breachCount, id, req.user.id]
+    );
+    if (!r.rowCount) return res.status(404).json({ error: 'not found' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[user/breach-monitors PATCH]', err.message);
+    res.status(500).json({ error: 'Failed to update breach monitor' });
+  }
+});
+
+// DELETE /user/breach-monitors/:id → stop watching a target
+router.delete('/breach-monitors/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'bad id' });
+    const r = await db.query(
+      `DELETE FROM breach_monitors WHERE id = $1 AND user_id = $2`,
+      [id, req.user.id]
+    );
+    res.json({ ok: true, deleted: r.rowCount });
+  } catch (err) {
+    console.error('[user/breach-monitors DELETE]', err.message);
+    res.status(500).json({ error: 'Failed to delete breach monitor' });
+  }
+});
+
+// ─── Identity key + contact verification (safety numbers, #101) ─────────────
+// The public identity key is what peers compare (as a safety number) to detect
+// a man-in-the-middle. This read does NOT consume a one-time prekey (unlike
+// /keybundle) — it's just the long-term public identity.
+
+// GET /user/contact-verifications → { verified: [contactId, ...] }
+router.get('/contact-verifications', async (req, res) => {
+  try {
+    const r = await db.query(
+      `SELECT contact_id FROM contact_verifications WHERE user_id = $1`,
+      [req.user.id]
+    );
+    res.json({ verified: r.rows.map(row => row.contact_id) });
+  } catch (err) {
+    console.error('[user/contact-verifications GET]', err.message);
+    res.status(500).json({ error: 'Failed to load verifications' });
+  }
+});
+
+// POST /user/contact-verifications { contactId, verified } → set/clear verified
+router.post('/contact-verifications', async (req, res) => {
+  try {
+    const contactId = String(req.body?.contactId || '').trim();
+    const verified = req.body?.verified !== false;
+    if (!contactId) return res.status(400).json({ error: 'contactId required' });
+    if (verified) {
+      await db.query(
+        `INSERT INTO contact_verifications (user_id, contact_id)
+         VALUES ($1, $2) ON CONFLICT (user_id, contact_id) DO NOTHING`,
+        [req.user.id, contactId]
+      );
+    } else {
+      await db.query(
+        `DELETE FROM contact_verifications WHERE user_id = $1 AND contact_id = $2`,
+        [req.user.id, contactId]
+      );
+    }
+    res.json({ ok: true, verified });
+  } catch (err) {
+    console.error('[user/contact-verifications POST]', err.message);
+    res.status(500).json({ error: 'Failed to update verification' });
+  }
+});
+
+// GET /user/:id/identity → { identityKey } (public packed identity, no OTPK consumed)
+router.get('/:id/identity', async (req, res) => {
+  try {
+    const r = await db.query(
+      `SELECT public_key_b64 FROM identity_keys WHERE user_id = $1`,
+      [req.params.id]
+    );
+    if (!r.rowCount) return res.status(404).json({ error: 'User has no identity key' });
+    res.json({ identityKey: r.rows[0].public_key_b64 });
+  } catch (err) {
+    console.error('[user/identity GET]', err.message);
+    res.status(500).json({ error: 'Failed to load identity key' });
+  }
+});
+
 // GET /user/by-vault/:vaultId — resolve a VaultID handle to a public user
 // stub (for QR / invite-link contact adds). Leading '@' is tolerated.
 router.get('/by-vault/:vaultId', async (req, res) => {

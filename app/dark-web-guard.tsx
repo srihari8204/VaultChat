@@ -14,51 +14,11 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-import * as Crypto from 'expo-crypto';
 import { Ionicons } from '@expo/vector-icons';
 import { Aurora } from '../constants/theme';
 import { getMyProfile } from '../lib/chatService';
+import { checkEmailBreaches, checkPasswordPwned, fmtCount as fmt, type Breach } from '../lib/breachCheck';
 
-interface Breach {
-  name: string; domain: string; breachDate: string; pwnCount: number;
-  dataClasses: string[]; description: string;
-  severity: 'critical' | 'high' | 'medium' | 'low';
-}
-
-// ── Real keyless password breach check (HIBP range API, k-anonymity) ──
-async function checkPasswordPwned(password: string): Promise<number> {
-  const hash = (await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA1, password)).toUpperCase();
-  const prefix = hash.slice(0, 5);
-  const suffix = hash.slice(5);
-  const res = await fetch(`https://api.pwnedpasswords.com/range/${prefix}`, { headers: { 'Add-Padding': 'true' } });
-  if (!res.ok) throw new Error('Breach service unavailable');
-  const text = await res.text();
-  for (const line of text.split('\n')) {
-    const [suf, count] = line.trim().split(':');
-    if (suf === suffix) return parseInt(count, 10) || 0;
-  }
-  return 0;
-}
-
-// ── Real email breach check (HIBP breach API — needs a paid key) ──
-async function checkEmailBreaches(email: string, key: string): Promise<Breach[]> {
-  const res = await fetch(
-    `https://haveibeenpwned.com/api/v3/breachedaccount/${encodeURIComponent(email)}?truncateResponse=false`,
-    { headers: { 'hibp-api-key': key, 'User-Agent': 'VaultChat-SecurityApp' } },
-  );
-  if (res.status === 404) return [];
-  if (res.status === 401) throw new Error('Invalid HIBP API key');
-  if (res.status === 429) throw new Error('Rate limited — wait a minute');
-  if (!res.ok) throw new Error(`HIBP error: ${res.status}`);
-  const data = await res.json();
-  return data.map((b: any): Breach => ({
-    name: b.Name, domain: b.Domain, breachDate: b.BreachDate, pwnCount: b.PwnCount,
-    dataClasses: b.DataClasses || [], description: (b.Description || '').replace(/<[^>]*>/g, ''),
-    severity: b.PwnCount > 100_000_000 ? 'critical' : b.PwnCount > 10_000_000 ? 'high' : b.PwnCount > 1_000_000 ? 'medium' : 'low',
-  }));
-}
-
-const fmt = (n: number) => n >= 1e9 ? `${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(0)}K` : `${n}`;
 const sevColor = (s: Breach['severity']) => s === 'critical' ? Aurora.danger : s === 'high' ? '#F97316' : s === 'medium' ? '#F5C842' : Aurora.primary;
 
 type Tab = 'password' | 'email';

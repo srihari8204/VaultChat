@@ -9,6 +9,7 @@ import { Platform } from 'react-native';
 import DeviceInfo from 'react-native-device-info';
 import { assessThreats, signal as toSignal, type ThreatSignal } from './security/threatEngine';
 import { createDuressPinTracker } from './security/duressPin';
+import { recordDeviceScan } from './security/auditChain';
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -303,8 +304,32 @@ export async function runSecurityCheck(): Promise<SecurityReport> {
   }
   if (!report.clean) {
     logThreatToFirestore(report).catch(() => {});
+    // Record threats in the on-device tamper-evident audit chain (#41) so they
+    // surface in the Alerts tab. Clean launch scans are intentionally NOT logged
+    // (no noise); user-initiated scans always log via scanDeviceAndRecord().
+    recordDeviceScan({
+      level: report.level, score: report.score, threats: report.threats,
+      deviceModel: report.deviceModel, platform: report.platform,
+    }).catch(() => {});
   }
 
+  return report;
+}
+
+/**
+ * Run a device-integrity scan and ALWAYS leave an audit-chain entry — used by
+ * the Alerts tab "Scan device" action so the user sees a result whether the
+ * device is clean or not. (runSecurityCheck already records non-clean scans, so
+ * here we only add the clean-result entry to avoid duplicates.) Returns the report.
+ */
+export async function scanDeviceAndRecord(): Promise<SecurityReport> {
+  const report = await runSecurityCheck();
+  if (report.clean) {
+    await recordDeviceScan({
+      level: report.level, score: report.score, threats: report.threats,
+      deviceModel: report.deviceModel, platform: report.platform,
+    }).catch(() => {});
+  }
   return report;
 }
 

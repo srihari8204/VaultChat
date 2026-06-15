@@ -2,32 +2,38 @@
 // Pixel-perfect clone of real chat.tsx but with fake messages
 // Even allows "typing" fake messages that disappear on reload
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList,
   TextInput, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { useLocalSearchParams, Stack } from 'expo-router';
-import { generateDecoyMessages } from '../lib/ghostProtocol';
+import {
+  appendDecoyMessage, getDecoyMessages, markDecoyDelivered, type DecoyMessage,
+} from '../lib/ghostProtocol';
 
 export default function DecoyChatScreen() {
   const { chatId, name } = useLocalSearchParams();
-  const [messages, setMessages] = useState(() => generateDecoyMessages(chatId as string));
+  const [messages, setMessages] = useState<DecoyMessage[]>([]);
   const [input, setInput] = useState('');
-  const flatRef = useRef(null);
+  const flatRef = useRef<FlatList>(null);
 
-  const send = () => {
-    if (!input.trim()) return;
-    const newMsg = {
-      id: Date.now().toString(),
-      text: input.trim(),
-      sent: true,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-    setMessages(prev => [...prev, newMsg]);
+  // Load the persistent decoy thread (seeds on first open).
+  useEffect(() => {
+    let alive = true;
+    getDecoyMessages(chatId as string).then((m) => { if (alive) setMessages(m); }).catch(() => {});
+    return () => { alive = false; };
+  }, [chatId]);
+
+  const send = async () => {
+    const text = input.trim();
+    if (!text) return;
     setInput('');
-    // Fake "delivered" tick after 1s
-    setTimeout(() => {
+    // Persist the sent message so it survives reload (real account behaviour).
+    const newMsg = await appendDecoyMessage(chatId as string, text);
+    setMessages(prev => [...prev, newMsg]);
+    setTimeout(async () => {
+      await markDecoyDelivered(chatId as string, newMsg.id);
       setMessages(prev => prev.map(m => m.id === newMsg.id ? { ...m, delivered: true } : m));
     }, 1000);
   };
