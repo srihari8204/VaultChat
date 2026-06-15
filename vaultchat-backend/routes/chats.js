@@ -832,19 +832,26 @@ router.get('/:id/messages', async (req, res) => {
     if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member of this chat' });
 
     const before = req.query.before ? parseInt(req.query.before, 10) : null;
+    // ?after=<id> → local-first delta sync: only messages newer than the
+    // client's cursor, oldest-first so the client can page forward.
+    const after  = req.query.after ? parseInt(req.query.after, 10) : null;
     const limit  = Math.min(parseInt(req.query.limit || DEFAULT_PAGE, 10), MAX_PAGE);
 
     const params = [req.params.id];
     // Filter expired ephemeral messages on the lazy path (cleanup loop
     // hard-deletes them every 5 min; this catches the gap).
     let where = `chat_id = $1 AND (expires_at IS NULL OR expires_at > NOW())`;
-    if (before && Number.isFinite(before)) {
+    if (after && Number.isFinite(after)) {
+      params.push(after);
+      where += ` AND id > $${params.length}`;
+    } else if (before && Number.isFinite(before)) {
       params.push(before);
       where += ` AND id < $${params.length}`;
     }
     params.push(limit);
+    const order = (after && Number.isFinite(after)) ? 'ASC' : 'DESC';
     const r = await req.dbQuery(
-      `SELECT * FROM messages WHERE ${where} ORDER BY id DESC LIMIT $${params.length}`,
+      `SELECT * FROM messages WHERE ${where} ORDER BY id ${order} LIMIT $${params.length}`,
       params
     );
     res.json(r.rows.map(publicMessage));

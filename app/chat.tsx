@@ -29,6 +29,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { consumePendingJump } from '../lib/chatJump';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { E2EE_ENABLED } from '../constants/flags';
+import { getCachedMessages, cacheMessages, applyMessage } from '../lib/localDb';
 import { saveDraft, getDraft, clearDraft } from '../lib/drafts';
 import {
   ActivityIndicator,
@@ -206,6 +207,13 @@ export default function ChatScreen() {
             .catch(() => {});
         }
 
+        // Local-first: paint cached messages instantly (no spinner), then
+        // refresh from the server below and reconcile.
+        try {
+          const cached = await getCachedMessages(chatId, PAGE_SIZE);
+          if (cached.length) { setMessages(cached); setLoading(false); }
+        } catch { /* cache miss → fall through to server load */ }
+
         const [me, c, msgs, pendingQ] = await Promise.all([
           getCurrentUserAsync(),
           getChat(chatId),
@@ -237,6 +245,8 @@ export default function ChatScreen() {
         setMessages([...pendingBubbles.reverse(), ...msgs]);
         setHasMore(msgs.length === PAGE_SIZE);
         setError(null);
+        // Persist the fresh page to the local cache for next instant open.
+        cacheMessages(chatId, msgs).catch(() => {});
       } catch (e: any) {
         setError(e?.message ?? 'Failed to load chat');
       } finally {
@@ -259,6 +269,7 @@ export default function ChatScreen() {
           ? ({ ...real, _tempId: undefined, _state: undefined, _error: undefined } as DisplayMessage)
           : x);
       });
+      cacheMessages(cid, [real]).catch(() => {}); // persist own sent message
     });
     const offFailed = onQueue('failed', ({ tempId, chatId: cid, error }) => {
       if (cid !== chatId) return;
@@ -287,6 +298,7 @@ export default function ChatScreen() {
             if (prev.some(x => x.id === m.id)) return prev;
             return [m, ...prev];
           });
+          applyMessage(chatId, m).catch(() => {}); // persist to local cache
           // Auto-acknowledge delivery as soon as the message lands on this
           // device — independent of whether the user has the chat open.
           // The sender's UI flips from "sent" to "delivered" via the
