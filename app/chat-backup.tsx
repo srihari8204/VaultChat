@@ -1,16 +1,23 @@
 // app/chat-backup.tsx — Chat Backup & Restore
-// Simulated backup system using AsyncStorage for chat metadata
+// Real encrypted backup: exports local data (AsyncStorage + the local message DB)
+// to an AES-256-GCM-encrypted file (passphrase-protected via lib/vaultCrypto)
+// that the user saves via the OS share sheet. Restore re-imports a picked file.
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   StatusBar, Platform, Alert, ActivityIndicator, Switch,
-  Animated,
+  Modal, TextInput,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
+import * as DocumentPicker from 'expo-document-picker';
+import { vaultEncrypt, vaultDecrypt } from '../lib/vaultCrypto';
+import { exportAll, importAll } from '../lib/localDb';
 
 const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
 
@@ -55,12 +62,11 @@ export default function ChatBackupScreen() {
   const [loading, setLoading] = useState(true);
   const [backingUp, setBackingUp] = useState(false);
   const [restoring, setRestoring] = useState(false);
-  const [progress, setProgress] = useState(0);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [backups, setBackups] = useState<BackupEntry[]>([]);
   const [lastBackup, setLastBackup] = useState<BackupEntry | null>(null);
-
-  const progressAnim = useRef(new Animated.Value(0)).current;
+  const [passModal, setPassModal] = useState<'backup' | 'restore' | null>(null);
+  const [passInput, setPassInput] = useState('');
 
   useEffect(() => {
     loadData();
@@ -90,68 +96,73 @@ export default function ChatBackupScreen() {
     await AsyncStorage.setItem(BACKUP_SETTINGS_KEY, JSON.stringify(updated));
   };
 
-  const runBackup = async () => {
+  const doBackup = async (passphrase: string) => {
     setBackingUp(true);
-    setProgress(0);
-    progressAnim.setValue(0);
+    try {
+      // Gather real local data: all AsyncStorage + the local message DB.
+      const keys = await AsyncStorage.getAllKeys();
+      const pairs = await AsyncStorage.multiGet(keys);
+      const store: Record<string, string | null> = {};
+      for (const [k, v] of pairs) store[k] = v;
+      const local = await exportAll();
 
-    // Simulate backup progress
-    const steps = 20;
-    for (let i = 1; i <= steps; i++) {
-      await new Promise(r => setTimeout(r, 150));
-      const p = i / steps;
-      setProgress(p);
-      Animated.timing(progressAnim, { toValue: p, duration: 100, useNativeDriver: false }).start();
+      const bundle = JSON.stringify({ v: 1, createdAt: new Date().toISOString(), asyncStorage: store, messages: local.messages, chats: local.chats });
+      const payload = vaultEncrypt(passphrase, bundle); // real AES-256-GCM
+
+      const fileName = `vaultchat-backup-${Date.now()}.vcbak`;
+      const uri = (FileSystem as any).cacheDirectory + fileName;
+      await FileSystem.writeAsStringAsync(uri, JSON.stringify(payload), { encoding: 'utf8' });
+
+      const entry: BackupEntry = {
+        id: Date.now().toString(),
+        date: new Date().toISOString(),
+        sizeBytes: bundle.length,
+        messageCount: local.messages.length,
+        encrypted: true,
+      };
+      const updated = [entry, ...backups].slice(0, 10);
+      setBackups(updated);
+      setLastBackup(entry);
+      await AsyncStorage.setItem(BACKUP_KEY, JSON.stringify(updated));
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, { mimeType: 'application/octet-stream', dialogTitle: 'Save your encrypted backup' });
+      }
+      Alert.alert('Backup ready', `${entry.messageCount} messages exported (${formatBytes(entry.sizeBytes)}). Keep your passphrase safe — it’s required to restore.`);
+    } catch (e: any) {
+      Alert.alert('Backup failed', e?.message ?? 'Please try again.');
+    } finally {
+      setBackingUp(false);
     }
-
-    // Collect all AsyncStorage data as "backup"
-    const keys = await AsyncStorage.getAllKeys();
-    let totalSize = 0;
-    const pairs = await AsyncStorage.multiGet(keys);
-    for (const [k, v] of pairs) {
-      totalSize += (k?.length ?? 0) + (v?.length ?? 0);
-    }
-
-    // Add simulated media size
-    const mediaExtra = settings.includeVideos ? 45_000_000 : 12_000_000;
-    totalSize += mediaExtra;
-
-    const msgCount = keys.filter(k => k.includes('message') || k.includes('chat')).length * 47 + 128;
-
-    const entry: BackupEntry = {
-      id: Date.now().toString(),
-      date: new Date().toISOString(),
-      sizeBytes: totalSize,
-      messageCount: msgCount,
-      encrypted: true,
-    };
-
-    const updated = [entry, ...backups].slice(0, 10); // Keep last 10
-    setBackups(updated);
-    setLastBackup(entry);
-    await AsyncStorage.setItem(BACKUP_KEY, JSON.stringify(updated));
-
-    setBackingUp(false);
-    Alert.alert('Backup Complete', `Backed up ${msgCount} messages (${formatBytes(totalSize)})`);
   };
 
-  const restoreBackup = (entry: BackupEntry) => {
-    Alert.alert(
-      'Restore Backup',
-      `Restore backup from ${formatDate(entry.date)}?\n\nThis will replace current messages with the backup data.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Restore', style: 'destructive', onPress: async () => {
-            setRestoring(true);
-            // Simulate restore
-            await new Promise(r => setTimeout(r, 2500));
-            setRestoring(false);
-            Alert.alert('Restored', `${entry.messageCount} messages restored from backup.`);
-          },
-        },
-      ]
-    );
+  const doRestore = async (passphrase: string) => {
+    setRestoring(true);
+    try {
+      const pick = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
+      if (pick.canceled) { setRestoring(false); return; }
+      const raw = await FileSystem.readAsStringAsync(pick.assets[0].uri, { encoding: 'utf8' });
+      const json = vaultDecrypt(passphrase, JSON.parse(raw));
+      const data = JSON.parse(json);
+      if (data.asyncStorage) {
+        const entries = Object.entries(data.asyncStorage).filter(([, v]) => v != null) as [string, string][];
+        if (entries.length) await AsyncStorage.multiSet(entries);
+      }
+      const n = await importAll({ messages: data.messages, chats: data.chats });
+      Alert.alert('Restore complete', `${n} messages restored. Restart the app to see them.`);
+    } catch {
+      Alert.alert('Restore failed', 'Wrong passphrase or invalid backup file.');
+    } finally {
+      setRestoring(false);
+    }
+  };
+
+  const submitPass = () => {
+    const p = passInput;
+    const mode = passModal;
+    setPassModal(null); setPassInput('');
+    if (!p || p.length < 4) { Alert.alert('Passphrase too short', 'Use at least 4 characters.'); return; }
+    if (mode === 'backup') doBackup(p); else if (mode === 'restore') doRestore(p);
   };
 
   const RadioRow = ({ label, value, current, onPress }: any) => (
@@ -171,11 +182,6 @@ export default function ChatBackupScreen() {
       </View>
     );
   }
-
-  const progressWidth = progressAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0%', '100%'],
-  });
 
   return (
     <View style={s.root}>
@@ -224,20 +230,11 @@ export default function ChatBackupScreen() {
         {/* ── Backup Now ─────────────────────────────── */}
         <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <Text style={s.cardTitle}>Backup Now</Text>
-          <Text style={s.cardDesc}>Includes: Messages, Media, Settings</Text>
-
-          {backingUp && (
-            <View style={s.progressWrap}>
-              <View style={s.progressBg}>
-                <Animated.View style={[s.progressFill, { width: progressWidth }]} />
-              </View>
-              <Text style={s.progressText}>{Math.round(progress * 100)}%</Text>
-            </View>
-          )}
+          <Text style={s.cardDesc}>Exports your messages, chats and settings to an encrypted file you save yourself.</Text>
 
           <TouchableOpacity
             style={[s.primaryBtn, backingUp && s.btnDisabled]}
-            onPress={runBackup}
+            onPress={() => setPassModal('backup')}
             disabled={backingUp}
             activeOpacity={0.7}
           >
@@ -296,13 +293,7 @@ export default function ChatBackupScreen() {
           ) : (
             <TouchableOpacity
               style={s.restoreBtn}
-              onPress={() => {
-                if (backups.length === 0) {
-                  Alert.alert('No Backups', 'Create a backup first before restoring.');
-                } else {
-                  restoreBackup(backups[0]);
-                }
-              }}
+              onPress={() => setPassModal('restore')}
               activeOpacity={0.7}
             >
               <Ionicons name="cloud-download-outline" size={20} color={C.cyan} />
@@ -316,7 +307,7 @@ export default function ChatBackupScreen() {
           <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
             <Text style={s.cardTitle}>Backup History</Text>
             {backups.map((b, i) => (
-              <TouchableOpacity key={b.id} style={s.historyRow} onPress={() => restoreBackup(b)} activeOpacity={0.7}>
+              <TouchableOpacity key={b.id} style={s.historyRow} onPress={() => setPassModal('restore')} activeOpacity={0.7}>
                 <View style={s.historyIcon}>
                   <Ionicons name="time-outline" size={18} color={C.accent} />
                 </View>
@@ -338,6 +329,20 @@ export default function ChatBackupScreen() {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      <Modal visible={!!passModal} transparent animationType="fade" onRequestClose={() => setPassModal(null)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 24 }}>
+          <View style={{ backgroundColor: '#0F2847', borderRadius: 18, padding: 22, borderWidth: 1, borderColor: C.cardBorder }}>
+            <Text style={{ color: C.white, fontSize: 17, fontWeight: '700', marginBottom: 6 }}>{passModal === 'backup' ? 'Encrypt backup' : 'Restore backup'}</Text>
+            <Text style={{ color: C.muted, fontSize: 12, marginBottom: 16, lineHeight: 17 }}>{passModal === 'backup' ? 'Choose a passphrase to encrypt your backup file. You’ll need it to restore.' : 'Enter the passphrase the backup was created with, then pick the .vcbak file.'}</Text>
+            <TextInput value={passInput} onChangeText={setPassInput} placeholder="Passphrase" placeholderTextColor={C.muted} secureTextEntry autoFocus style={{ backgroundColor: '#0A1A30', borderRadius: 12, padding: 14, color: C.white, fontSize: 15, borderWidth: 1, borderColor: C.cardBorder, marginBottom: 14 }} />
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <TouchableOpacity onPress={() => { setPassModal(null); setPassInput(''); }} style={{ flex: 1, paddingVertical: 13, alignItems: 'center', borderRadius: 12, borderWidth: 1, borderColor: C.cardBorder }}><Text style={{ color: C.muted, fontWeight: '700' }}>Cancel</Text></TouchableOpacity>
+              <TouchableOpacity onPress={submitPass} style={{ flex: 1, paddingVertical: 13, alignItems: 'center', borderRadius: 12, backgroundColor: C.accent }}><Text style={{ color: C.white, fontWeight: '800' }}>{passModal === 'backup' ? 'Export' : 'Pick file'}</Text></TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }

@@ -147,6 +147,34 @@ export async function getCachedChats(): Promise<any[]> {
   return rows.map((r: any) => safeParse(r.data)).filter(Boolean);
 }
 
+/** Dump all local rows for an encrypted backup. */
+export async function exportAll(): Promise<{ messages: any[]; chats: any[] }> {
+  const db = await getLocalDb();
+  const messages = await db.getAllAsync(`SELECT * FROM messages`);
+  const chats = await db.getAllAsync(`SELECT * FROM chats`);
+  return { messages, chats };
+}
+
+/** Re-insert rows from a decrypted backup (idempotent upserts). Returns count. */
+export async function importAll(data: { messages?: any[]; chats?: any[] }): Promise<number> {
+  const db = await getLocalDb();
+  let n = 0;
+  await db.withTransactionAsync(async () => {
+    for (const m of data.messages || []) {
+      await db.runAsync(
+        `INSERT OR REPLACE INTO messages (id, chat_id, sender_id, type, content, reply_to_id, meta, created_at, edited_at, deleted_at, expires_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+        [m.id, m.chat_id, m.sender_id, m.type, m.content, m.reply_to_id, m.meta, m.created_at, m.edited_at, m.deleted_at, m.expires_at],
+      );
+      n++;
+    }
+    for (const c of data.chats || []) {
+      await db.runAsync(`INSERT OR REPLACE INTO chats (id, data, last_message_at) VALUES (?,?,?)`, [c.id, c.data, c.last_message_at]);
+    }
+  });
+  return n;
+}
+
 /** Wipe everything (e.g. on logout / account switch). */
 export async function clearLocalDb(): Promise<void> {
   const db = await getLocalDb();
