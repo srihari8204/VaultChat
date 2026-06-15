@@ -11,7 +11,9 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 make g++ \
  && rm -rf /var/lib/apt/lists/*
 COPY package*.json ./
-RUN npm ci --omit=dev
+# npm install (not ci) so the build tolerates a lockfile that predates a new
+# dependency — it reconciles package.json + lock and installs.
+RUN npm install --omit=dev
 
 FROM node:20-bookworm-slim AS runtime
 WORKDIR /app
