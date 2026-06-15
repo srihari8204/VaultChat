@@ -42,6 +42,12 @@ const db      = require('./db');
 const gameStore = require('./gameStore');
 const redis   = require('./redis');
 const jwtUtil = require('./jwt');
+const kafka   = require('./lib/kafka');
+
+// With EVENT_BUS=kafka (and KAFKA_BROKERS set), new-message delivery is produced
+// to Kafka for the fan-out worker instead of fanning out in this process. Off by
+// default → in-process synchronous fan-out, unchanged.
+const EVENT_BUS_KAFKA = process.env.EVENT_BUS === 'kafka' && kafka.enabled();
 
 const app    = express();
 const server = http.createServer(app);
@@ -99,7 +105,15 @@ chatsRouter.setBroadcasters({
   // chat events (typing, delivery, read, reactions) are sender-agnostic.
   // We ALSO mirror a privacy-safe summary (no content) to the admin firehose.
   newMessage: (chatId, payload) => {
-    fanOutToChat(chatId, 'new_message', payload, payload?.senderId ?? null);
+    if (EVENT_BUS_KAFKA) {
+      // Decoupled delivery: the fan-out worker consumes this and emits via the
+      // Redis adapter. (Push still goes out from the route handler directly.)
+      kafka.publish(kafka.TOPICS.MESSAGE_CREATED, chatId, {
+        event: 'new_message', chatId, payload, senderId: payload?.senderId ?? null,
+      });
+    } else {
+      fanOutToChat(chatId, 'new_message', payload, payload?.senderId ?? null);
+    }
     io.to('admin').emit('admin:event', { event: 'new_message', chatId, senderId: payload?.senderId ?? null, type: payload?.type ?? null, messageId: payload?.id ?? null, ts: Date.now() });
   },
   chatEvent:  (chatId, event, payload) => {

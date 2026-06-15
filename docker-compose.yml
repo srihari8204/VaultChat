@@ -111,6 +111,35 @@ services:
     ports:
       - "13000:3000"          # host 13000 — never clashes with the live pm2 app on :3000
 
+  # Kafka fan-out worker — consumes message.created and delivers over the Redis
+  # adapter. Same image as api, different command. Scale with: --scale fanout-worker=N
+  fanout-worker:
+    build:
+      context: ./vaultchat-backend
+    restart: unless-stopped
+    command: ["node", "workers/fanout.js"]
+    env_file:
+      - path: ./vaultchat-backend/.env
+        required: false
+    environment:
+      NODE_ENV: production
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: vaultchat
+      DB_USER: vaultchat
+      DB_PASS: ${DB_PASS:-vaultchat_dev}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_GROUP_ID: fanout-workers
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      kafka:
+        condition: service_started
+
 volumes:
   pgdata:
   redisdata:
