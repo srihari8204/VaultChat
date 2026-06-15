@@ -1,0 +1,112 @@
+# docker-compose.yml — VaultChat platform substrate (dev / staging).
+#
+# Brings up the full backend stack so we can build the new architecture WITHOUT
+# touching the live pm2 deployment:
+#   - postgres   : primary database
+#   - redis      : cache + presence + Socket.IO adapter + queues
+#   - kafka      : durable message bus (KRaft mode, no Zookeeper)
+#   - minio      : S3-compatible object storage for media (swap for Cloudflare R2 in prod)
+#   - api        : the backend (built from vaultchat-backend/Dockerfile)
+#
+# Usage (on the Hetzner box or any Docker host):
+#   docker compose up -d
+#   docker compose logs -f api
+#
+# pgbouncer + the fan-out/push workers get added as we extract those services.
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: vaultchat
+      POSTGRES_PASSWORD: ${DB_PASS:-vaultchat_dev}
+      POSTGRES_DB: vaultchat
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vaultchat"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    ports:
+      - "15432:5432"          # host:container — matches your existing dev port
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    ports:
+      - "6379:6379"
+
+  kafka:
+    image: bitnami/kafka:3.7
+    restart: unless-stopped
+    environment:
+      KAFKA_CFG_NODE_ID: "1"
+      KAFKA_CFG_PROCESS_ROLES: "controller,broker"
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_CFG_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
+      KAFKA_CFG_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092"
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+    volumes:
+      - kafkadata:/bitnami/kafka
+    ports:
+      - "9092:9092"
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_USER:-vaultchat}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASS:-vaultchat_dev_secret}
+    volumes:
+      - miniodata:/data
+    ports:
+      - "9000:9000"           # S3 API
+      - "9001:9001"           # web console
+
+  api:
+    build:
+      context: ./vaultchat-backend
+    restart: unless-stopped
+    env_file:
+      - ./vaultchat-backend/.env          # JWT_SECRET, ADMIN_KEY, etc.
+    environment:
+      # Infra wiring overrides .env so the container talks to the compose services.
+      NODE_ENV: production
+      PORT: "3000"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: vaultchat
+      DB_USER: vaultchat
+      DB_PASS: ${DB_PASS:-vaultchat_dev}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      KAFKA_BROKERS: kafka:9092
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: vaultchat-media
+      S3_ACCESS_KEY: ${MINIO_USER:-vaultchat}
+      S3_SECRET_KEY: ${MINIO_PASS:-vaultchat_dev_secret}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      kafka:
+        condition: service_started
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata:
+  redisdata:
+  kafkadata:
+  miniodata:
