@@ -28,6 +28,8 @@ import {
   Text, TouchableOpacity,
   View,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import {
   createDirectChat,
   hashPhoneForLookup,
@@ -55,7 +57,14 @@ interface InviteRow {
 
 const INVITE_URL = 'https://vaultchat.app/invite';
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function ContactsScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   const router = useRouter();
   const [permission, setPermission]   = useState<'unknown' | 'granted' | 'denied'>('unknown');
   const [scanning,   setScanning]     = useState(false);
@@ -203,7 +212,7 @@ export default function ContactsScreen() {
             <Text style={S.rowSub} numberOfLines={1}>{m.rawPhone || 'On VaultChat'}</Text>
           </View>
           {openingId === m.id
-            ? <ActivityIndicator color={ACCENT} />
+            ? <ActivityIndicator color={colors.primary} />
             : <Text style={S.action}>Message →</Text>}
         </TouchableOpacity>
       );
@@ -248,7 +257,7 @@ export default function ContactsScreen() {
 
       {scanning && matched.length === 0 && invite.length === 0 && (
         <View style={S.center}>
-          <ActivityIndicator color={ACCENT} size="large" />
+          <ActivityIndicator color={colors.primary} size="large" />
           <Text style={S.scanHint}>Scanning your address book…</Text>
         </View>
       )}
@@ -283,45 +292,38 @@ export default function ContactsScreen() {
   );
 }
 
-const DARK_BG = '#0D0F14';
-const CARD_BG = '#161A22';
-const BORDER  = '#1F2937';
-const TEXT    = '#E5E7EB';
-const SUBTLE  = '#9CA3AF';
-const ACCENT  = '#6C63FF';
-const GREEN   = '#22C55E';
 
-const S = StyleSheet.create({
-  screen:        { flex: 1, backgroundColor: DARK_BG },
-  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER, gap: 8 },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen:        { flex: 1, backgroundColor: c.bg },
+  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border, gap: 8 },
   backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backTxt:       { color: TEXT, fontSize: 24 },
-  title:         { color: TEXT, fontSize: 18, fontWeight: '700', flex: 1 },
+  backTxt:       { color: c.text, fontSize: 24 },
+  title:         { color: c.text, fontSize: 18, fontWeight: '700', flex: 1 },
   refreshBtn:    { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  refreshTxt:    { color: ACCENT, fontSize: 22, fontWeight: '700' },
+  refreshTxt:    { color: c.primary, fontSize: 22, fontWeight: '700' },
 
   center:        { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32, gap: 12 },
   icon:          { fontSize: 56, marginBottom: 8 },
-  heading:       { color: TEXT, fontSize: 18, fontWeight: '700', textAlign: 'center' },
-  sub:           { color: SUBTLE, fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 8 },
-  scanHint:      { color: SUBTLE, fontSize: 13, marginTop: 8 },
+  heading:       { color: c.text, fontSize: 18, fontWeight: '700', textAlign: 'center' },
+  sub:           { color: c.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 8 },
+  scanHint:      { color: c.textDim, fontSize: 13, marginTop: 8 },
 
   errorBar:      { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.4)', borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 10 },
   errorTxt:      { color: '#EF4444', fontSize: 12 },
 
-  sectionHeader: { color: SUBTLE, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 8, backgroundColor: DARK_BG },
+  sectionHeader: { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 8, backgroundColor: c.bg },
 
-  row:           { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 12, gap: 12, backgroundColor: DARK_BG },
+  row:           { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 12, gap: 12, backgroundColor: c.bg },
   avatar:        { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
-  avatarOnApp:   { backgroundColor: GREEN },
-  avatarInvite:  { backgroundColor: CARD_BG, borderWidth: 1, borderColor: BORDER },
+  avatarOnApp:   { backgroundColor: c.primary },
+  avatarInvite:  { backgroundColor: c.card, borderWidth: 1, borderColor: c.border },
   avatarTxt:     { color: '#fff', fontSize: 16, fontWeight: '700' },
   rowBody:       { flex: 1 },
-  rowName:       { color: TEXT, fontSize: 15, fontWeight: '600' },
-  rowSub:        { color: SUBTLE, fontSize: 12, marginTop: 2 },
-  action:        { color: ACCENT, fontSize: 13, fontWeight: '600' },
-  actionInvite:  { color: SUBTLE },
+  rowName:       { color: c.text, fontSize: 15, fontWeight: '600' },
+  rowSub:        { color: c.textDim, fontSize: 12, marginTop: 2 },
+  action:        { color: c.primary, fontSize: 13, fontWeight: '600' },
+  actionInvite:  { color: c.textDim },
 
-  ctaBtn:        { marginTop: 16, backgroundColor: ACCENT, paddingHorizontal: 28, paddingVertical: 12, borderRadius: 24 },
+  ctaBtn:        { marginTop: 16, backgroundColor: c.primary, paddingHorizontal: 28, paddingVertical: 12, borderRadius: 24 },
   ctaTxt:        { color: '#fff', fontWeight: '700', fontSize: 14 },
 });

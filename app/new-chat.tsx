@@ -16,6 +16,8 @@ import {
   Text, TextInput, TouchableOpacity,
   View,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { createDirectChat, createGroupChat } from '../lib/chatService';
 
 type Mode = 'direct' | 'group';
@@ -25,7 +27,14 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // Accept 8-15 digits in the entered phone (will be normalized server-side)
 const PHONE_RE = /^[0-9+()\-\s]{8,20}$/;
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function NewChatScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   const router = useRouter();
   const [mode,    setMode]    = useState<Mode>('direct');
   const [loading, setLoading] = useState(false);
@@ -237,47 +246,41 @@ export default function NewChatScreen() {
   );
 }
 
-const DARK_BG = '#0D0F14';
-const CARD_BG = '#161A22';
-const BORDER  = '#1F2937';
-const TEXT    = '#E5E7EB';
-const SUBTLE  = '#9CA3AF';
-const ACCENT  = '#6C63FF';
 
-const S = StyleSheet.create({
-  screen:    { flex: 1, backgroundColor: DARK_BG },
-  header:    { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER, gap: 8 },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen:    { flex: 1, backgroundColor: c.bg },
+  header:    { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border, gap: 8 },
   backBtn:   { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backTxt:   { color: TEXT, fontSize: 24 },
-  title:     { color: TEXT, fontSize: 18, fontWeight: '700' },
+  backTxt:   { color: c.text, fontSize: 24 },
+  title:     { color: c.text, fontSize: 18, fontWeight: '700' },
 
-  toggle:    { flexDirection: 'row', margin: 20, backgroundColor: CARD_BG, borderRadius: 12, padding: 4, gap: 4 },
+  toggle:    { flexDirection: 'row', margin: 20, backgroundColor: c.card, borderRadius: 12, padding: 4, gap: 4 },
   toggleBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 8 },
-  toggleBtnActive: { backgroundColor: ACCENT },
-  toggleTxt: { color: SUBTLE, fontWeight: '600' },
+  toggleBtnActive: { backgroundColor: c.primary },
+  toggleTxt: { color: c.textDim, fontWeight: '600' },
   toggleTxtActive: { color: '#fff' },
 
-  subToggle:    { flexDirection: 'row', backgroundColor: CARD_BG, borderRadius: 10, padding: 3, gap: 3, marginBottom: 12 },
+  subToggle:    { flexDirection: 'row', backgroundColor: c.card, borderRadius: 10, padding: 3, gap: 3, marginBottom: 12 },
   subBtn:       { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 7 },
-  subBtnActive: { backgroundColor: 'rgba(108,99,255,0.25)', borderWidth: 1, borderColor: ACCENT },
-  subTxt:       { color: SUBTLE, fontSize: 13, fontWeight: '600' },
-  subTxtActive: { color: TEXT },
+  subBtnActive: { backgroundColor: 'rgba(108,99,255,0.25)', borderWidth: 1, borderColor: c.primary },
+  subTxt:       { color: c.textDim, fontSize: 13, fontWeight: '600' },
+  subTxtActive: { color: c.text },
 
   body:      { paddingHorizontal: 20, gap: 8 },
-  label:     { color: SUBTLE, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginTop: 12 },
-  input:     { color: TEXT, backgroundColor: CARD_BG, borderColor: BORDER, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, marginBottom: 8 },
-  hint:      { color: SUBTLE, fontSize: 13, lineHeight: 18, marginTop: 6 },
+  label:     { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginTop: 12 },
+  input:     { color: c.text, backgroundColor: c.card, borderColor: c.border, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, marginBottom: 8 },
+  hint:      { color: c.textDim, fontSize: 13, lineHeight: 18, marginTop: 6 },
 
   row:       { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  addBtn:    { width: 44, height: 44, borderRadius: 12, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center' },
+  addBtn:    { width: 44, height: 44, borderRadius: 12, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
   addBtnTxt: { color: '#fff', fontSize: 24, fontWeight: '600', marginTop: -2 },
 
   chips:     { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
-  chip:      { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(108,99,255,0.15)', borderColor: ACCENT, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14, gap: 6 },
-  chipTxt:   { color: TEXT, fontSize: 13 },
-  chipX:     { color: SUBTLE, fontSize: 16, marginTop: -2 },
+  chip:      { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(108,99,255,0.15)', borderColor: c.primary, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14, gap: 6 },
+  chipTxt:   { color: c.text, fontSize: 13 },
+  chipX:     { color: c.textDim, fontSize: 16, marginTop: -2 },
 
-  btn:       { backgroundColor: ACCENT, paddingVertical: 14, borderRadius: 24, alignItems: 'center', marginTop: 20 },
+  btn:       { backgroundColor: c.primary, paddingVertical: 14, borderRadius: 24, alignItems: 'center', marginTop: 20 },
   btnOff:    { backgroundColor: '#374151' },
   btnTxt:    { color: '#fff', fontWeight: '700', fontSize: 15 },
 });

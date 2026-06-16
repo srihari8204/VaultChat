@@ -10,7 +10,7 @@
 // dropped for MVP (re-add as a Phase-2 user-content feature).
 
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useState , useMemo} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -22,6 +22,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { sendMessage } from '../lib/chatService';
 
 const { width: SW } = Dimensions.get('window');
@@ -42,7 +44,14 @@ const PACKS: Pack[] = [
   { id: 'vault',     name: 'VaultChat', stickers: ['🔐','🛡️','👁️‍🗨️','🔒','🕵️','💂','🔑','🧬','📡','🛰️','⚔️','🗡️','🏴‍☠️','🎯','🔮','💠','🔓','🪪','⚙️','🚨'] },
 ];
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function StickerPickerScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   const router = useRouter();
   const { chatId, peerName } = useLocalSearchParams<{ chatId?: string; peerName?: string }>();
   const [sending, setSending] = useState(false);
@@ -77,7 +86,7 @@ export default function StickerPickerScreen() {
           <Text style={S.title}>Stickers</Text>
           {peerName ? <Text style={S.sub}>to {peerName}</Text> : null}
         </View>
-        {sending && <ActivityIndicator color={ACCENT} />}
+        {sending && <ActivityIndicator color={colors.primary} />}
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }}>
@@ -104,24 +113,18 @@ export default function StickerPickerScreen() {
   );
 }
 
-const DARK_BG = '#0D0F14';
-const CARD_BG = '#161A22';
-const BORDER  = '#1F2937';
-const TEXT    = '#E5E7EB';
-const SUBTLE  = '#9CA3AF';
-const ACCENT  = '#6C63FF';
 
-const S = StyleSheet.create({
-  screen:       { flex: 1, backgroundColor: DARK_BG },
-  header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen:       { flex: 1, backgroundColor: c.bg },
+  header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   backBtn:      { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backTxt:      { color: TEXT, fontSize: 26, fontWeight: '600' },
-  title:        { color: TEXT, fontSize: 22, fontWeight: '800' },
-  sub:          { color: SUBTLE, fontSize: 12 },
+  backTxt:      { color: c.text, fontSize: 26, fontWeight: '600' },
+  title:        { color: c.text, fontSize: 22, fontWeight: '800' },
+  sub:          { color: c.textDim, fontSize: 12 },
 
   packBlock:    { marginBottom: 24 },
-  packName:     { color: SUBTLE, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 10 },
+  packName:     { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 10 },
   grid:         { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  tile:         { backgroundColor: CARD_BG, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: BORDER },
+  tile:         { backgroundColor: c.card, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.border },
   tileEmoji:    { fontSize: 28 },
 });

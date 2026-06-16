@@ -2,11 +2,13 @@
 // D2DE Gaming Platform — Full lobby with matchmaking, coins, game selection
 // PDF page 22-23: 12 platform features + 19 world games across 6 continents
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef , useMemo} from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, FlatList, Alert,
   ScrollView, Modal, Platform, ActivityIndicator,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { Stack, useRouter } from 'expo-router';
 import { io, Socket } from 'socket.io-client';
 import { SERVER_URL } from '../constants/server';
@@ -17,21 +19,19 @@ import {
   ALL_GAMES, GAME_REGIONS, getGameStats, GameStats, GameType, ACHIEVEMENTS, setCoins,
 } from '../services/gameService';
 
-const DARK = '#0D0F14';
-const CARD = '#1A1D27';
-const PURPLE = '#6C63FF';
-const BORDER = '#2A2D3A';
-const TXT = '#E8E8E8';
-const SUB = '#6B7280';
-const GREEN = '#10B981';
-const GOLD = '#F59E0B';
-const RED = '#EF4444';
 
 const BET_OPTIONS = [0, 10, 25, 50, 100, 250, 500];
 
 type PlayMode = 'friends' | 'online' | 'bot';
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function GameLobbyScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const [uid, setUid] = useState('');
   const [myName, setMyName] = useState('Player');
@@ -222,7 +222,7 @@ export default function GameLobbyScreen() {
             {/* Play button */}
             {searching ? (
               <View style={s.searchingWrap}>
-                <ActivityIndicator color={PURPLE} size="small" />
+                <ActivityIndicator color={colors.purple} size="small" />
                 <Text style={s.searchingTxt}>Searching for opponent...</Text>
                 <TouchableOpacity style={s.cancelBtn} onPress={cancelMatch}>
                   <Text style={s.cancelBtnTxt}>Cancel</Text>
@@ -277,12 +277,12 @@ export default function GameLobbyScreen() {
                     <Text style={s.achieveName}>{a.name}</Text>
                     <Text style={s.achieveDesc}>{a.desc}</Text>
                   </View>
-                  {unlocked && <Text style={{ color: GREEN, fontSize: 12, fontWeight: '700' }}>{'\u2713'}</Text>}
+                  {unlocked && <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '700' }}>{'\u2713'}</Text>}
                 </View>
               );
             })}
             <TouchableOpacity onPress={() => setShowAchievements(false)} style={{ marginTop: 16 }}>
-              <Text style={{ color: SUB, textAlign: 'center', fontSize: 14 }}>Close</Text>
+              <Text style={{ color: colors.textDim, textAlign: 'center', fontSize: 14 }}>Close</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -295,7 +295,7 @@ export default function GameLobbyScreen() {
             <Text style={s.achieveTitle}>{'🏆'} Leaderboard</Text>
             <ScrollView style={{ maxHeight: 400 }}>
               {leaderboard.length === 0 ? (
-                <Text style={{ color: SUB, textAlign: 'center', padding: 20 }}>No ranked players yet</Text>
+                <Text style={{ color: colors.textDim, textAlign: 'center', padding: 20 }}>No ranked players yet</Text>
               ) : leaderboard.map(e => (
                 <View key={e.userId} style={[s.achieveRow, e.isMe && { backgroundColor: '#6C63FF22', borderRadius: 8 }]}>
                   <Text style={[s.achieveIcon, { width: 34, textAlign: 'center' }]}>
@@ -309,7 +309,7 @@ export default function GameLobbyScreen() {
               ))}
             </ScrollView>
             <TouchableOpacity onPress={() => setShowLeaderboard(false)} style={{ marginTop: 16 }}>
-              <Text style={{ color: SUB, textAlign: 'center', fontSize: 14 }}>Close</Text>
+              <Text style={{ color: colors.textDim, textAlign: 'center', fontSize: 14 }}>Close</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -318,73 +318,73 @@ export default function GameLobbyScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: DARK },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: Platform.OS === 'ios' ? 56 : 44, paddingBottom: 14, paddingHorizontal: 16, backgroundColor: CARD, borderBottomWidth: 1, borderBottomColor: BORDER },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen: { flex: 1, backgroundColor: c.bg },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: Platform.OS === 'ios' ? 56 : 44, paddingBottom: 14, paddingHorizontal: 16, backgroundColor: c.card, borderBottomWidth: 1, borderBottomColor: c.border },
   backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#2A2D3A', alignItems: 'center', justifyContent: 'center' },
-  backTxt: { fontSize: 18, color: TXT },
-  headerTitle: { fontSize: 16, fontWeight: '700', color: TXT },
-  headerSub: { fontSize: 11, color: GREEN, marginTop: 1, fontWeight: '600' },
+  backTxt: { fontSize: 18, color: c.text },
+  headerTitle: { fontSize: 16, fontWeight: '700', color: c.text },
+  headerSub: { fontSize: 11, color: c.primary, marginTop: 1, fontWeight: '600' },
 
-  statsBar: { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 12, backgroundColor: CARD, borderBottomWidth: 1, borderBottomColor: BORDER },
+  statsBar: { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 12, backgroundColor: c.card, borderBottomWidth: 1, borderBottomColor: c.border },
   statItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   statIcon: { fontSize: 18 },
-  statVal: { color: TXT, fontSize: 14, fontWeight: '700' },
+  statVal: { color: c.text, fontSize: 14, fontWeight: '700' },
 
   body: { padding: 16, paddingBottom: 40 },
 
   regionRow: { gap: 8, marginBottom: 16 },
-  regionChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, backgroundColor: CARD, borderWidth: 1, borderColor: BORDER },
-  regionChipActive: { backgroundColor: PURPLE + '20', borderColor: PURPLE },
-  regionTxt: { color: SUB, fontSize: 13, fontWeight: '500' },
-  regionTxtActive: { color: PURPLE },
+  regionChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, backgroundColor: c.card, borderWidth: 1, borderColor: c.border },
+  regionChipActive: { backgroundColor: c.purple + '20', borderColor: c.purple },
+  regionTxt: { color: c.textDim, fontSize: 13, fontWeight: '500' },
+  regionTxtActive: { color: c.purple },
 
   gamesGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  gameCard: { width: '30%', backgroundColor: CARD, borderRadius: 14, padding: 12, alignItems: 'center', borderWidth: 1, borderColor: BORDER },
-  gameCardSelected: { backgroundColor: PURPLE + '15', borderColor: PURPLE },
+  gameCard: { width: '30%', backgroundColor: c.card, borderRadius: 14, padding: 12, alignItems: 'center', borderWidth: 1, borderColor: c.border },
+  gameCardSelected: { backgroundColor: c.purple + '15', borderColor: c.purple },
   gameIcon: { fontSize: 28, marginBottom: 6 },
-  gameName: { color: TXT, fontSize: 11, fontWeight: '600', textAlign: 'center' },
-  gameRegion: { color: SUB, fontSize: 9, marginTop: 2 },
+  gameName: { color: c.text, fontSize: 11, fontWeight: '600', textAlign: 'center' },
+  gameRegion: { color: c.textDim, fontSize: 9, marginTop: 2 },
 
-  playCard: { backgroundColor: CARD, borderRadius: 16, padding: 18, marginTop: 16, borderWidth: 1, borderColor: PURPLE + '40' },
-  playTitle: { color: TXT, fontSize: 18, fontWeight: '700', marginBottom: 4 },
-  playDesc: { color: SUB, fontSize: 13, marginBottom: 4 },
-  playPlayers: { color: PURPLE, fontSize: 12, fontWeight: '600', marginBottom: 12 },
+  playCard: { backgroundColor: c.card, borderRadius: 16, padding: 18, marginTop: 16, borderWidth: 1, borderColor: c.purple + '40' },
+  playTitle: { color: c.text, fontSize: 18, fontWeight: '700', marginBottom: 4 },
+  playDesc: { color: c.textDim, fontSize: 13, marginBottom: 4 },
+  playPlayers: { color: c.purple, fontSize: 12, fontWeight: '600', marginBottom: 12 },
 
   modeRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
   modeBtn: { flex: 1, backgroundColor: '#2A2D3A', borderRadius: 10, paddingVertical: 10, alignItems: 'center', borderWidth: 1, borderColor: 'transparent' },
-  modeBtnActive: { backgroundColor: PURPLE + '15', borderColor: PURPLE },
+  modeBtnActive: { backgroundColor: c.purple + '15', borderColor: c.purple },
   modeIcon: { fontSize: 20, marginBottom: 2 },
-  modeTxt: { color: SUB, fontSize: 11, fontWeight: '500' },
-  modeTxtActive: { color: PURPLE },
+  modeTxt: { color: c.textDim, fontSize: 11, fontWeight: '500' },
+  modeTxtActive: { color: c.purple },
 
   betSection: { marginBottom: 14 },
-  betLabel: { color: SUB, fontSize: 12, fontWeight: '600', marginBottom: 8 },
+  betLabel: { color: c.textDim, fontSize: 12, fontWeight: '600', marginBottom: 8 },
   betRow: { gap: 8 },
   betChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, backgroundColor: '#2A2D3A' },
-  betChipActive: { backgroundColor: GOLD + '20', borderWidth: 1, borderColor: GOLD },
-  betTxt: { color: SUB, fontSize: 13, fontWeight: '600' },
-  betTxtActive: { color: GOLD },
+  betChipActive: { backgroundColor: c.accent + '20', borderWidth: 1, borderColor: c.accent },
+  betTxt: { color: c.textDim, fontSize: 13, fontWeight: '600' },
+  betTxtActive: { color: c.accent },
 
   searchingWrap: { alignItems: 'center', gap: 8, paddingVertical: 12 },
-  searchingTxt: { color: SUB, fontSize: 13 },
-  cancelBtn: { paddingHorizontal: 20, paddingVertical: 8, borderRadius: 8, backgroundColor: RED + '20' },
-  cancelBtnTxt: { color: RED, fontSize: 13, fontWeight: '600' },
+  searchingTxt: { color: c.textDim, fontSize: 13 },
+  cancelBtn: { paddingHorizontal: 20, paddingVertical: 8, borderRadius: 8, backgroundColor: c.danger + '20' },
+  cancelBtnTxt: { color: c.danger, fontSize: 13, fontWeight: '600' },
 
-  playBtn: { backgroundColor: PURPLE, borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
+  playBtn: { backgroundColor: c.purple, borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
   playBtnTxt: { color: '#FFF', fontSize: 16, fontWeight: '700' },
 
-  featCard: { backgroundColor: CARD, borderRadius: 16, padding: 16, marginTop: 20, borderWidth: 1, borderColor: BORDER },
-  featTitle: { color: PURPLE, fontSize: 13, fontWeight: '600', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.5 },
+  featCard: { backgroundColor: c.card, borderRadius: 16, padding: 16, marginTop: 20, borderWidth: 1, borderColor: c.border },
+  featTitle: { color: c.purple, fontSize: 13, fontWeight: '600', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.5 },
   featRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 5 },
   featIcon: { fontSize: 16, width: 24, textAlign: 'center' },
-  featTxt: { color: SUB, fontSize: 13 },
+  featTxt: { color: c.textDim, fontSize: 13 },
 
   achieveModal: { flex: 1, backgroundColor: '#000000AA', justifyContent: 'center', padding: 24 },
-  achieveCard: { backgroundColor: CARD, borderRadius: 20, padding: 24, borderWidth: 1, borderColor: BORDER },
-  achieveTitle: { color: TXT, fontSize: 20, fontWeight: '700', marginBottom: 16, textAlign: 'center' },
-  achieveRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: BORDER },
+  achieveCard: { backgroundColor: c.card, borderRadius: 20, padding: 24, borderWidth: 1, borderColor: c.border },
+  achieveTitle: { color: c.text, fontSize: 20, fontWeight: '700', marginBottom: 16, textAlign: 'center' },
+  achieveRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: c.border },
   achieveIcon: { fontSize: 24 },
-  achieveName: { color: TXT, fontSize: 14, fontWeight: '600' },
-  achieveDesc: { color: SUB, fontSize: 12, marginTop: 1 },
+  achieveName: { color: c.text, fontSize: 14, fontWeight: '600' },
+  achieveDesc: { color: c.textDim, fontSize: 12, marginTop: 1 },
 });

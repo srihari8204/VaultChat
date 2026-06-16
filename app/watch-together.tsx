@@ -2,23 +2,24 @@
 // Watch Together — Synchronized YouTube playback via D2DE
 // Features: Sync playback, D2DE connection, voice chat overlay
 
-import React, { useState } from 'react';
+import React, { useState , useMemo} from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
   Alert, Platform, KeyboardAvoidingView, ScrollView,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
 
-const DARK = '#0D0F14';
-const CARD = '#1A1D27';
-const PURPLE = '#6C63FF';
-const BORDER = '#2A2D3A';
-const TEXT = '#E8E8E8';
-const SUB = '#6B7280';
-const RED = '#EF4444';
-const GREEN = '#10B981';
+
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
 
 export default function WatchTogetherScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const { peerUid, peerName } = useLocalSearchParams<{ peerUid?: string; peerName?: string }>();
 
@@ -152,7 +153,7 @@ export default function WatchTogetherScreen() {
             </TouchableOpacity>
             <TouchableOpacity style={[s.bottomBtn, s.bottomBtnDanger]} onPress={stopWatching}>
               <Text style={s.bottomBtnIcon}>{'\u23F9\uFE0F'}</Text>
-              <Text style={[s.bottomBtnTxt, { color: RED }]}>End</Text>
+              <Text style={[s.bottomBtnTxt, { color: colors.danger }]}>End</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -161,64 +162,64 @@ export default function WatchTogetherScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: DARK },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen: { flex: 1, backgroundColor: c.bg },
   header: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     paddingTop: Platform.OS === 'ios' ? 56 : 44, paddingBottom: 14, paddingHorizontal: 16,
-    backgroundColor: CARD, borderBottomWidth: 1, borderBottomColor: BORDER,
+    backgroundColor: c.card, borderBottomWidth: 1, borderBottomColor: c.border,
   },
   backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#2A2D3A', alignItems: 'center', justifyContent: 'center' },
-  backTxt: { fontSize: 18, color: TEXT },
-  headerTitle: { fontSize: 16, fontWeight: '700', color: TEXT },
-  headerSub: { fontSize: 11, color: GREEN, marginTop: 1, fontWeight: '600' },
-  syncBadge: { backgroundColor: GREEN + '20', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10 },
-  syncTxt: { color: GREEN, fontSize: 11, fontWeight: '700' },
+  backTxt: { fontSize: 18, color: c.text },
+  headerTitle: { fontSize: 16, fontWeight: '700', color: c.text },
+  headerSub: { fontSize: 11, color: c.primary, marginTop: 1, fontWeight: '600' },
+  syncBadge: { backgroundColor: c.primary + '20', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10 },
+  syncTxt: { color: c.primary, fontSize: 11, fontWeight: '700' },
 
   body: { padding: 20, paddingBottom: 40 },
   bigIcon: { fontSize: 48, textAlign: 'center', marginBottom: 12, marginTop: 8 },
-  bodyTitle: { fontSize: 22, fontWeight: '700', color: TEXT, textAlign: 'center', marginBottom: 6 },
-  bodySub: { fontSize: 13, color: SUB, textAlign: 'center', lineHeight: 19, marginBottom: 24 },
+  bodyTitle: { fontSize: 22, fontWeight: '700', color: c.text, textAlign: 'center', marginBottom: 6 },
+  bodySub: { fontSize: 13, color: c.textDim, textAlign: 'center', lineHeight: 19, marginBottom: 24 },
 
-  urlCard: { backgroundColor: CARD, borderRadius: 16, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: BORDER },
-  urlLabel: { fontSize: 12, fontWeight: '600', color: PURPLE, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
-  urlInput: { backgroundColor: DARK, borderRadius: 12, padding: 14, color: TEXT, fontSize: 15, borderWidth: 1, borderColor: BORDER },
+  urlCard: { backgroundColor: c.card, borderRadius: 16, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: c.border },
+  urlLabel: { fontSize: 12, fontWeight: '600', color: c.purple, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
+  urlInput: { backgroundColor: c.bg, borderRadius: 12, padding: 14, color: c.text, fontSize: 15, borderWidth: 1, borderColor: c.border },
 
-  startBtn: { backgroundColor: PURPLE, borderRadius: 16, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 24 },
+  startBtn: { backgroundColor: c.purple, borderRadius: 16, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 24 },
   startBtnIcon: { fontSize: 20 },
   startBtnTxt: { color: '#FFF', fontSize: 17, fontWeight: '700' },
 
-  infoCard: { backgroundColor: CARD, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: BORDER },
-  infoTitle: { fontSize: 14, fontWeight: '600', color: TEXT, marginBottom: 12 },
+  infoCard: { backgroundColor: c.card, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: c.border },
+  infoTitle: { fontSize: 14, fontWeight: '600', color: c.text, marginBottom: 12 },
   infoRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6 },
   infoIcon: { fontSize: 16, width: 24, textAlign: 'center' },
-  infoTxt: { fontSize: 13, color: SUB },
+  infoTxt: { fontSize: 13, color: c.textDim },
 
   watchingBody: { flex: 1 },
   videoArea: { aspectRatio: 16 / 9, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
   videoPlaceholder: { alignItems: 'center' },
   videoIcon: { fontSize: 48, marginBottom: 8 },
-  videoTxt: { color: TEXT, fontSize: 16, fontWeight: '600' },
-  videoUrl: { color: SUB, fontSize: 11, marginTop: 4, maxWidth: 250 },
+  videoTxt: { color: c.text, fontSize: 16, fontWeight: '600' },
+  videoUrl: { color: c.textDim, fontSize: 11, marginTop: 4, maxWidth: 250 },
 
   playbackBar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 10 },
-  timeTxt: { color: SUB, fontSize: 11, fontWeight: '600', minWidth: 30 },
+  timeTxt: { color: c.textDim, fontSize: 11, fontWeight: '600', minWidth: 30 },
   progressTrack: { flex: 1, height: 3, backgroundColor: '#333', borderRadius: 2 },
-  progressFill: { height: 3, backgroundColor: PURPLE, borderRadius: 2 },
+  progressFill: { height: 3, backgroundColor: c.purple, borderRadius: 2 },
 
   playerControls: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 24, paddingVertical: 12 },
-  playerBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: CARD, alignItems: 'center', justifyContent: 'center' },
+  playerBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: c.card, alignItems: 'center', justifyContent: 'center' },
   playerBtnIcon: { fontSize: 20 },
-  playerBtnMain: { width: 60, height: 60, borderRadius: 30, backgroundColor: PURPLE, alignItems: 'center', justifyContent: 'center' },
+  playerBtnMain: { width: 60, height: 60, borderRadius: 30, backgroundColor: c.purple, alignItems: 'center', justifyContent: 'center' },
   playerBtnMainIcon: { fontSize: 28 },
 
   statusRow: { flexDirection: 'row', justifyContent: 'center', gap: 8, paddingVertical: 12, flexWrap: 'wrap' },
-  statusBadge: { backgroundColor: GREEN + '15', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
-  statusBadgeTxt: { color: GREEN, fontSize: 10, fontWeight: '700' },
+  statusBadge: { backgroundColor: c.primary + '15', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  statusBadgeTxt: { color: c.primary, fontSize: 10, fontWeight: '700' },
 
-  bottomControls: { flexDirection: 'row', justifyContent: 'center', gap: 16, paddingVertical: 16, paddingBottom: Platform.OS === 'ios' ? 34 : 16, marginTop: 'auto' as any, backgroundColor: CARD, borderTopWidth: 1, borderTopColor: BORDER },
+  bottomControls: { flexDirection: 'row', justifyContent: 'center', gap: 16, paddingVertical: 16, paddingBottom: Platform.OS === 'ios' ? 34 : 16, marginTop: 'auto' as any, backgroundColor: c.card, borderTopWidth: 1, borderTopColor: c.border },
   bottomBtn: { backgroundColor: '#2A2D3A', borderRadius: 14, paddingVertical: 12, paddingHorizontal: 24, alignItems: 'center', flexDirection: 'row', gap: 8 },
-  bottomBtnDanger: { borderWidth: 1, borderColor: RED + '40' },
+  bottomBtnDanger: { borderWidth: 1, borderColor: c.danger + '40' },
   bottomBtnIcon: { fontSize: 18 },
-  bottomBtnTxt: { fontSize: 14, fontWeight: '600', color: TEXT },
+  bottomBtnTxt: { fontSize: 14, fontWeight: '600', color: c.text },
 });

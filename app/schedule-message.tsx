@@ -8,7 +8,7 @@
 // A 30-second sweep loop in server.js delivers when sendAt <= NOW().
 
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useState , useMemo} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -20,6 +20,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { scheduleMessage } from '../lib/chatService';
 
 const QUICK_TIMES: { label: string; mins: number }[] = [
@@ -47,7 +49,14 @@ function scheduleTimeFor(mins: number): Date {
   return new Date(now.getTime() + mins * 60_000);
 }
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function ScheduleMessageScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   const router = useRouter();
   const { chatId, peerName } = useLocalSearchParams<{ chatId?: string; peerName?: string }>();
 
@@ -99,7 +108,7 @@ export default function ScheduleMessageScreen() {
           value={message}
           onChangeText={setMessage}
           placeholder="What should we send?"
-          placeholderTextColor={SUBTLE}
+          placeholderTextColor={colors.textDim}
           multiline
           maxLength={4000}
         />
@@ -128,46 +137,40 @@ export default function ScheduleMessageScreen() {
 
         {scheduling && (
           <View style={S.busy}>
-            <ActivityIndicator color={ACCENT} />
+            <ActivityIndicator color={colors.primary} />
             <Text style={S.busyTxt}>Scheduling…</Text>
           </View>
         )}
 
         <Text style={S.note}>
           Server stores the pending message and delivers it within 30 seconds of the chosen time.
-          You can cancel any pending one from <Text style={{ color: ACCENT }}>/scheduled</Text>.
+          You can cancel any pending one from <Text style={{ color: colors.primary }}>/scheduled</Text>.
         </Text>
       </ScrollView>
     </View>
   );
 }
 
-const DARK_BG = '#0D0F14';
-const CARD_BG = '#161A22';
-const BORDER  = '#1F2937';
-const TEXT    = '#E5E7EB';
-const SUBTLE  = '#9CA3AF';
-const ACCENT  = '#6C63FF';
 
-const S = StyleSheet.create({
-  screen:        { flex: 1, backgroundColor: DARK_BG },
-  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen:        { flex: 1, backgroundColor: c.bg },
+  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backTxt:       { color: TEXT, fontSize: 26, fontWeight: '600' },
-  title:         { color: TEXT, fontSize: 22, fontWeight: '800' },
+  backTxt:       { color: c.text, fontSize: 26, fontWeight: '600' },
+  title:         { color: c.text, fontSize: 22, fontWeight: '800' },
 
-  label:         { color: SUBTLE, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 8 },
-  who:           { color: TEXT, fontSize: 16, fontWeight: '600' },
-  input:         { color: TEXT, backgroundColor: CARD_BG, borderColor: BORDER, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, minHeight: 100, textAlignVertical: 'top' },
+  label:         { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 8 },
+  who:           { color: c.text, fontSize: 16, fontWeight: '600' },
+  input:         { color: c.text, backgroundColor: c.card, borderColor: c.border, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, minHeight: 100, textAlignVertical: 'top' },
 
   quickGrid:     { gap: 8 },
-  quickBtn:      { backgroundColor: CARD_BG, borderColor: BORDER, borderWidth: 1, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 16 },
+  quickBtn:      { backgroundColor: c.card, borderColor: c.border, borderWidth: 1, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 16 },
   quickBtnOff:   { opacity: 0.5 },
-  quickLabel:    { color: TEXT, fontSize: 15, fontWeight: '700' },
-  quickSub:      { color: SUBTLE, fontSize: 12, marginTop: 2 },
+  quickLabel:    { color: c.text, fontSize: 15, fontWeight: '700' },
+  quickSub:      { color: c.textDim, fontSize: 12, marginTop: 2 },
 
   busy:          { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 16, justifyContent: 'center' },
-  busyTxt:       { color: SUBTLE, fontSize: 12 },
+  busyTxt:       { color: c.textDim, fontSize: 12 },
 
-  note:          { color: SUBTLE, fontSize: 12, lineHeight: 16, marginTop: 24 },
+  note:          { color: c.textDim, fontSize: 12, lineHeight: 16, marginTop: 24 },
 });

@@ -3,10 +3,12 @@
 // turn management, coin awards, and renders game-specific components
 // Each game type will have its own logic module in services/games/
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef , useMemo} from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Alert, Platform, ActivityIndicator,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
 import { io, Socket } from 'socket.io-client';
 import { getAccessToken } from '../lib/api';
@@ -15,17 +17,15 @@ import { recordGameResult, ALL_GAMES, cryptoDiceRoll } from '../services/gameSer
 import { initGame, makeGameMove, checkGameWinner, getBotMove, type GameState } from '../services/gameEngines';
 import { GameBoard } from '../components/games/GameBoard';
 
-const DARK = '#0D0F14';
-const CARD = '#1A1D27';
-const PURPLE = '#6C63FF';
-const BORDER = '#2A2D3A';
-const TXT = '#E8E8E8';
-const SUB = '#6B7280';
-const GREEN = '#10B981';
-const RED = '#EF4444';
-const GOLD = '#F59E0B';
+
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
 
 export default function GamePlayScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const { roomId, gameType, bet, opponentUid, opponentName, yourTurn: initialTurn, myUid } = useLocalSearchParams<{
     roomId: string; gameType: string; bet: string; opponentUid: string; opponentName: string; yourTurn: string; myUid: string;
@@ -210,8 +210,8 @@ export default function GamePlayScreen() {
     return (
       <View style={[s.screen, s.center]}>
         <Stack.Screen options={{ headerShown: false }} />
-        <ActivityIndicator size="large" color={PURPLE} />
-        <Text style={{ color: SUB, marginTop: 12 }}>Connecting to game...</Text>
+        <ActivityIndicator size="large" color={colors.purple} />
+        <Text style={{ color: colors.textDim, marginTop: 12 }}>Connecting to game...</Text>
       </View>
     );
   }
@@ -293,43 +293,43 @@ export default function GamePlayScreen() {
 
 // Bot moves now handled by services/gameEngines.ts getBotMove()
 
-const s = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: DARK },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen: { flex: 1, backgroundColor: c.bg },
   center: { justifyContent: 'center', alignItems: 'center' },
 
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: Platform.OS === 'ios' ? 56 : 44, paddingBottom: 14, paddingHorizontal: 16, backgroundColor: CARD, borderBottomWidth: 1, borderBottomColor: BORDER },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: Platform.OS === 'ios' ? 56 : 44, paddingBottom: 14, paddingHorizontal: 16, backgroundColor: c.card, borderBottomWidth: 1, borderBottomColor: c.border },
   backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#2A2D3A', alignItems: 'center', justifyContent: 'center' },
-  backTxt: { fontSize: 18, color: TXT },
-  headerTitle: { fontSize: 16, fontWeight: '700', color: TXT },
-  headerSub: { fontSize: 12, color: SUB, marginTop: 1 },
+  backTxt: { fontSize: 18, color: c.text },
+  headerTitle: { fontSize: 16, fontWeight: '700', color: c.text },
+  headerSub: { fontSize: 12, color: c.textDim, marginTop: 1 },
   turnBadge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10, backgroundColor: '#2A2D3A' },
-  turnBadgeActive: { backgroundColor: GREEN + '20' },
-  turnTxt: { color: GREEN, fontSize: 11, fontWeight: '700' },
+  turnBadgeActive: { backgroundColor: c.primary + '20' },
+  turnTxt: { color: c.primary, fontSize: 11, fontWeight: '700' },
 
   gameArea: { flex: 1, padding: 16 },
 
   scoreRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16, marginBottom: 20 },
-  scoreCard: { backgroundColor: CARD, borderRadius: 14, padding: 16, alignItems: 'center', width: 120, borderWidth: 1, borderColor: BORDER },
-  scoreCardActive: { borderColor: GREEN },
-  scoreName: { color: SUB, fontSize: 12, fontWeight: '600', marginBottom: 4 },
-  scoreVal: { color: TXT, fontSize: 32, fontWeight: '800' },
-  vsText: { color: SUB, fontSize: 16, fontWeight: '700' },
+  scoreCard: { backgroundColor: c.card, borderRadius: 14, padding: 16, alignItems: 'center', width: 120, borderWidth: 1, borderColor: c.border },
+  scoreCardActive: { borderColor: c.primary },
+  scoreName: { color: c.textDim, fontSize: 12, fontWeight: '600', marginBottom: 4 },
+  scoreVal: { color: c.text, fontSize: 32, fontWeight: '800' },
+  vsText: { color: c.textDim, fontSize: 16, fontWeight: '700' },
 
-  movesCard: { backgroundColor: CARD, borderRadius: 14, padding: 14, marginBottom: 20, borderWidth: 1, borderColor: BORDER },
-  movesTitle: { color: PURPLE, fontSize: 12, fontWeight: '600', marginBottom: 8 },
-  moveRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: BORDER },
-  moveFrom: { color: SUB, fontSize: 12 },
-  moveVal: { color: TXT, fontSize: 13, fontWeight: '600' },
+  movesCard: { backgroundColor: c.card, borderRadius: 14, padding: 14, marginBottom: 20, borderWidth: 1, borderColor: c.border },
+  movesTitle: { color: c.purple, fontSize: 12, fontWeight: '600', marginBottom: 8 },
+  moveRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: c.border },
+  moveFrom: { color: c.textDim, fontSize: 12 },
+  moveVal: { color: c.text, fontSize: 13, fontWeight: '600' },
 
-  actionBtn: { backgroundColor: PURPLE, borderRadius: 16, paddingVertical: 18, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 10 },
+  actionBtn: { backgroundColor: c.purple, borderRadius: 16, paddingVertical: 18, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 10 },
   actionBtnDisabled: { backgroundColor: '#2A2D3A', opacity: 0.5 },
   actionBtnIcon: { fontSize: 24 },
   actionBtnTxt: { color: '#FFF', fontSize: 16, fontWeight: '700' },
 
-  gameOverCard: { alignItems: 'center', backgroundColor: CARD, borderRadius: 20, padding: 28, borderWidth: 1, borderColor: GOLD + '40' },
+  gameOverCard: { alignItems: 'center', backgroundColor: c.card, borderRadius: 20, padding: 28, borderWidth: 1, borderColor: c.accent + '40' },
   gameOverIcon: { fontSize: 56, marginBottom: 12 },
-  gameOverTitle: { color: TXT, fontSize: 24, fontWeight: '800', marginBottom: 4 },
-  gameOverCoins: { color: GOLD, fontSize: 18, fontWeight: '700', marginBottom: 20 },
-  gameOverBtn: { backgroundColor: PURPLE, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 36 },
+  gameOverTitle: { color: c.text, fontSize: 24, fontWeight: '800', marginBottom: 4 },
+  gameOverCoins: { color: c.accent, fontSize: 18, fontWeight: '700', marginBottom: 20 },
+  gameOverBtn: { backgroundColor: c.purple, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 36 },
   gameOverBtnTxt: { color: '#FFF', fontSize: 16, fontWeight: '700' },
 });

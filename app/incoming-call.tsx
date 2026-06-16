@@ -6,11 +6,20 @@
 // answers the carried offer instead of creating a new one.
 
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef , useMemo} from 'react';
 import { StatusBar, StyleSheet, Text, TouchableOpacity, Vibration, View } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { getSocket } from '../lib/socket';
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function IncomingCallScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   const router = useRouter();
   const { chatId, peerUid, peerName, type, offer } = useLocalSearchParams<{
     chatId: string;
@@ -92,24 +101,20 @@ export default function IncomingCallScreen() {
   );
 }
 
-const BG     = '#0A0F1A';
-const TEXT   = '#FFFFFF';
 const SUBTLE = 'rgba(255,255,255,0.7)';
-const ACCENT = '#22C55E';
-const DANGER = '#EF4444';
 
-const S = StyleSheet.create({
-  screen:    { flex: 1, backgroundColor: BG },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen:    { flex: 1, backgroundColor: c.bg },
   body:      { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 14 },
-  label:     { color: SUBTLE, fontSize: 14, letterSpacing: 1.5, textTransform: 'uppercase' },
+  label:     { color: c.textDim, fontSize: 14, letterSpacing: 1.5, textTransform: 'uppercase' },
   avatar:    { width: 160, height: 160, borderRadius: 80, backgroundColor: '#6C63FF', alignItems: 'center', justifyContent: 'center', marginTop: 12, shadowColor: '#6C63FF', shadowOpacity: 0.6, shadowRadius: 30 },
   avatarTxt: { color: '#fff', fontSize: 64, fontWeight: '800' },
-  name:      { color: TEXT, fontSize: 26, fontWeight: '700' },
+  name:      { color: c.text, fontSize: 26, fontWeight: '700' },
 
   controls:  { flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 32, paddingBottom: 56 },
   btn:       { width: 110, alignItems: 'center', justifyContent: 'center', paddingVertical: 18, borderRadius: 24, gap: 6 },
-  btnAccept: { backgroundColor: ACCENT },
-  btnDecline:{ backgroundColor: DANGER },
+  btnAccept: { backgroundColor: c.primary },
+  btnDecline:{ backgroundColor: c.danger },
   btnIcon:   { fontSize: 28 },
   btnLabel:  { color: '#fff', fontSize: 13, fontWeight: '700' },
 });

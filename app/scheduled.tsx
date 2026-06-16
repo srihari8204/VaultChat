@@ -5,7 +5,7 @@
 // read-only confirmation that delivery fired.
 
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState , useMemo} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -16,13 +16,22 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import {
   cancelScheduledMessage,
   listScheduledMessages,
   type ScheduledMessageRow,
 } from '../lib/chatService';
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function ScheduledScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   const router = useRouter();
   const [rows,       setRows]       = useState<ScheduledMessageRow[]>([]);
   const [loading,    setLoading]    = useState(true);
@@ -69,7 +78,7 @@ export default function ScheduledScreen() {
   }, []);
 
   if (loading) {
-    return <View style={[S.screen, S.center]}><ActivityIndicator color={ACCENT} size="large" /></View>;
+    return <View style={[S.screen, S.center]}><ActivityIndicator color={colors.primary} size="large" /></View>;
   }
 
   const pending = rows.filter(r => !r.sentAt);
@@ -97,7 +106,7 @@ export default function ScheduledScreen() {
         <FlatList
           data={rows}
           keyExtractor={(r) => r.id}
-          refreshControl={<RefreshControl tintColor={ACCENT} refreshing={refreshing} onRefresh={onRefresh} />}
+          refreshControl={<RefreshControl tintColor={colors.primary} refreshing={refreshing} onRefresh={onRefresh} />}
           contentContainerStyle={{ paddingBottom: 32 }}
           ListHeaderComponent={
             <View style={S.intro}>
@@ -160,35 +169,28 @@ function formatFuture(iso: string): string {
   } catch { return ''; }
 }
 
-const DARK_BG = '#0D0F14';
-const CARD_BG = '#161A22';
-const BORDER  = '#1F2937';
-const TEXT    = '#E5E7EB';
-const SUBTLE  = '#9CA3AF';
-const ACCENT  = '#6C63FF';
-const DANGER  = '#EF4444';
 
-const S = StyleSheet.create({
-  screen:        { flex: 1, backgroundColor: DARK_BG },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen:        { flex: 1, backgroundColor: c.bg },
   center:        { justifyContent: 'center', alignItems: 'center' },
 
-  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
+  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backTxt:       { color: TEXT, fontSize: 26, fontWeight: '600' },
-  title:         { color: TEXT, fontSize: 22, fontWeight: '800' },
+  backTxt:       { color: c.text, fontSize: 26, fontWeight: '600' },
+  title:         { color: c.text, fontSize: 22, fontWeight: '800' },
 
-  errorTxt:      { color: DANGER, paddingHorizontal: 16, paddingVertical: 8, fontSize: 12 },
-  emptyTitle:    { color: TEXT, fontSize: 16, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
-  emptySub:      { color: SUBTLE, fontSize: 13, lineHeight: 18, textAlign: 'center' },
+  errorTxt:      { color: c.danger, paddingHorizontal: 16, paddingVertical: 8, fontSize: 12 },
+  emptyTitle:    { color: c.text, fontSize: 16, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
+  emptySub:      { color: c.textDim, fontSize: 13, lineHeight: 18, textAlign: 'center' },
 
   intro:         { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 4 },
-  introTxt:      { color: SUBTLE, fontSize: 12 },
+  introTxt:      { color: c.textDim, fontSize: 12 },
 
-  row:           { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
+  row:           { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   rowSent:       { opacity: 0.6 },
-  rowChatName:   { color: TEXT, fontSize: 15, fontWeight: '600' },
-  rowContent:    { color: TEXT, fontSize: 13, marginTop: 4 },
-  rowWhen:       { color: SUBTLE, fontSize: 11, marginTop: 4 },
+  rowChatName:   { color: c.text, fontSize: 15, fontWeight: '600' },
+  rowContent:    { color: c.text, fontSize: 13, marginTop: 4 },
+  rowWhen:       { color: c.textDim, fontSize: 11, marginTop: 4 },
   deliveredTag:  { color: '#22C55E', fontSize: 11, fontWeight: '700' },
-  cancelTxt:     { color: DANGER, fontSize: 12, fontWeight: '700' },
+  cancelTxt:     { color: c.danger, fontSize: 12, fontWeight: '700' },
 });

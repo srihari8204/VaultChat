@@ -6,7 +6,7 @@
 // chat name + sender + the message preview + relative time.
 
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState , useMemo} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -17,13 +17,22 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import {
   listBookmarks,
   removeBookmark,
   type BookmarkRow,
 } from '../lib/chatService';
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function BookmarksScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   const router = useRouter();
   const [rows,       setRows]       = useState<BookmarkRow[]>([]);
   const [loading,    setLoading]    = useState(true);
@@ -77,7 +86,7 @@ export default function BookmarksScreen() {
   }, []);
 
   if (loading) {
-    return <View style={[S.screen, S.center]}><ActivityIndicator color={ACCENT} size="large" /></View>;
+    return <View style={[S.screen, S.center]}><ActivityIndicator color={colors.primary} size="large" /></View>;
   }
 
   return (
@@ -102,7 +111,7 @@ export default function BookmarksScreen() {
         <FlatList
           data={rows}
           keyExtractor={(b) => b.id}
-          refreshControl={<RefreshControl tintColor={ACCENT} refreshing={refreshing} onRefresh={onRefresh} />}
+          refreshControl={<RefreshControl tintColor={colors.primary} refreshing={refreshing} onRefresh={onRefresh} />}
           contentContainerStyle={{ paddingBottom: 32 }}
           renderItem={({ item: b }) => (
             <TouchableOpacity
@@ -158,31 +167,24 @@ function formatAgo(iso: string): string {
   } catch { return ''; }
 }
 
-const DARK_BG = '#0D0F14';
-const CARD_BG = '#161A22';
-const BORDER  = '#1F2937';
-const TEXT    = '#E5E7EB';
-const SUBTLE  = '#9CA3AF';
-const ACCENT  = '#6C63FF';
-const DANGER  = '#EF4444';
 
-const S = StyleSheet.create({
-  screen:       { flex: 1, backgroundColor: DARK_BG },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen:       { flex: 1, backgroundColor: c.bg },
   center:       { justifyContent: 'center', alignItems: 'center' },
 
-  header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
+  header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   backBtn:      { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backTxt:      { color: TEXT, fontSize: 26, fontWeight: '600' },
-  title:        { color: TEXT, fontSize: 22, fontWeight: '800' },
+  backTxt:      { color: c.text, fontSize: 26, fontWeight: '600' },
+  title:        { color: c.text, fontSize: 22, fontWeight: '800' },
 
-  errorTxt:     { color: DANGER, paddingHorizontal: 16, paddingVertical: 8, fontSize: 12 },
-  emptyTitle:   { color: TEXT, fontSize: 16, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
-  emptySub:     { color: SUBTLE, fontSize: 13, lineHeight: 18, textAlign: 'center' },
+  errorTxt:     { color: c.danger, paddingHorizontal: 16, paddingVertical: 8, fontSize: 12 },
+  emptyTitle:   { color: c.text, fontSize: 16, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
+  emptySub:     { color: c.textDim, fontSize: 13, lineHeight: 18, textAlign: 'center' },
 
-  row:          { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
-  iconBox:      { width: 36, height: 36, borderRadius: 18, backgroundColor: CARD_BG, alignItems: 'center', justifyContent: 'center' },
+  row:          { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  iconBox:      { width: 36, height: 36, borderRadius: 18, backgroundColor: c.card, alignItems: 'center', justifyContent: 'center' },
   iconTxt:      { fontSize: 18 },
-  rowChat:      { color: TEXT, fontSize: 14, fontWeight: '700' },
-  rowContent:   { color: TEXT, fontSize: 13, marginTop: 4 },
-  rowWhen:      { color: SUBTLE, fontSize: 11, marginTop: 4 },
+  rowChat:      { color: c.text, fontSize: 14, fontWeight: '700' },
+  rowContent:   { color: c.text, fontSize: 13, marginTop: 4 },
+  rowWhen:      { color: c.textDim, fontSize: 11, marginTop: 4 },
 });

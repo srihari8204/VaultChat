@@ -6,7 +6,7 @@
 // hydrates vote counts via the bulk endpoint on render.
 
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useState , useMemo} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -19,12 +19,21 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { createPoll } from '../lib/chatService';
 
 const MIN_OPTIONS = 2;
 const MAX_OPTIONS = 10;
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function CreatePollScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   const router = useRouter();
   const { chatId, peerName } = useLocalSearchParams<{ chatId?: string; peerName?: string }>();
 
@@ -96,7 +105,7 @@ export default function CreatePollScreen() {
           value={question}
           onChangeText={setQuestion}
           placeholder="What should we ask?"
-          placeholderTextColor={SUBTLE}
+          placeholderTextColor={colors.textDim}
           maxLength={200}
           multiline
         />
@@ -110,7 +119,7 @@ export default function CreatePollScreen() {
               value={o}
               onChangeText={(v) => updateOption(i, v)}
               placeholder={`Option ${i + 1}`}
-              placeholderTextColor={SUBTLE}
+              placeholderTextColor={colors.textDim}
               maxLength={100}
             />
             {options.length > MIN_OPTIONS && (
@@ -141,7 +150,7 @@ export default function CreatePollScreen() {
           <Switch
             value={allowMultiple}
             onValueChange={setAllowMultiple}
-            trackColor={{ true: ACCENT, false: '#374151' }}
+            trackColor={{ true: colors.primary, false: '#374151' }}
             thumbColor="#fff"
           />
         </View>
@@ -150,39 +159,32 @@ export default function CreatePollScreen() {
   );
 }
 
-const DARK_BG = '#0D0F14';
-const CARD_BG = '#161A22';
-const BORDER  = '#1F2937';
-const TEXT    = '#E5E7EB';
-const SUBTLE  = '#9CA3AF';
-const ACCENT  = '#6C63FF';
-const DANGER  = '#EF4444';
 
-const S = StyleSheet.create({
-  screen:        { flex: 1, backgroundColor: DARK_BG },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen:        { flex: 1, backgroundColor: c.bg },
 
-  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
+  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backTxt:       { color: TEXT, fontSize: 26, fontWeight: '600' },
-  title:         { color: TEXT, fontSize: 22, fontWeight: '800' },
-  sub:           { color: SUBTLE, fontSize: 12 },
-  sendBtn:       { backgroundColor: ACCENT, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20 },
+  backTxt:       { color: c.text, fontSize: 26, fontWeight: '600' },
+  title:         { color: c.text, fontSize: 22, fontWeight: '800' },
+  sub:           { color: c.textDim, fontSize: 12 },
+  sendBtn:       { backgroundColor: c.primary, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20 },
   sendBtnOff:    { backgroundColor: '#374151' },
   sendBtnTxt:    { color: '#fff', fontWeight: '700' },
 
-  label:         { color: SUBTLE, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 8 },
+  label:         { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 8 },
 
-  questionInput: { color: TEXT, backgroundColor: CARD_BG, borderColor: BORDER, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, minHeight: 80, textAlignVertical: 'top' },
-  counter:       { color: SUBTLE, fontSize: 11, marginTop: 4, textAlign: 'right' },
+  questionInput: { color: c.text, backgroundColor: c.card, borderColor: c.border, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, minHeight: 80, textAlignVertical: 'top' },
+  counter:       { color: c.textDim, fontSize: 11, marginTop: 4, textAlign: 'right' },
 
   optionRow:     { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
-  optionInput:   { flex: 1, color: TEXT, backgroundColor: CARD_BG, borderColor: BORDER, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15 },
-  removeBtn:     { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: 18, borderWidth: 1, borderColor: BORDER, backgroundColor: CARD_BG },
-  removeBtnTxt:  { color: DANGER, fontSize: 22, fontWeight: '700' },
-  addBtn:        { padding: 12, borderRadius: 12, backgroundColor: CARD_BG, borderWidth: 1, borderColor: BORDER, alignItems: 'center', marginTop: 4 },
-  addBtnTxt:     { color: ACCENT, fontWeight: '700' },
+  optionInput:   { flex: 1, color: c.text, backgroundColor: c.card, borderColor: c.border, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15 },
+  removeBtn:     { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: 18, borderWidth: 1, borderColor: c.border, backgroundColor: c.card },
+  removeBtnTxt:  { color: c.danger, fontSize: 22, fontWeight: '700' },
+  addBtn:        { padding: 12, borderRadius: 12, backgroundColor: c.card, borderWidth: 1, borderColor: c.border, alignItems: 'center', marginTop: 4 },
+  addBtnTxt:     { color: c.primary, fontWeight: '700' },
 
-  toggleRow:     { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 24, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: BORDER },
-  toggleTitle:   { color: TEXT, fontSize: 15, fontWeight: '600' },
-  toggleSub:     { color: SUBTLE, fontSize: 12, lineHeight: 16, marginTop: 2 },
+  toggleRow:     { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 24, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border },
+  toggleTitle:   { color: c.text, fontSize: 15, fontWeight: '600' },
+  toggleSub:     { color: c.textDim, fontSize: 12, lineHeight: 16, marginTop: 2 },
 });

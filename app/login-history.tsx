@@ -9,7 +9,7 @@
 // The row flagged isCurrent is the device this app is running on.
 
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState , useMemo} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -20,6 +20,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import {
   listSessions,
   revokeAllOtherSessions,
@@ -27,7 +29,14 @@ import {
   type SessionRow,
 } from '../lib/chatService';
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function LoginHistoryScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   const router = useRouter();
   const [rows,       setRows]       = useState<SessionRow[]>([]);
   const [loading,    setLoading]    = useState(true);
@@ -97,7 +106,7 @@ export default function LoginHistoryScreen() {
   if (loading) {
     return (
       <View style={[S.screen, S.center]}>
-        <ActivityIndicator color={ACCENT} size="large" />
+        <ActivityIndicator color={colors.primary} size="large" />
       </View>
     );
   }
@@ -118,7 +127,7 @@ export default function LoginHistoryScreen() {
       <FlatList
         data={rows}
         keyExtractor={(r) => r.id}
-        refreshControl={<RefreshControl tintColor={ACCENT} refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={<RefreshControl tintColor={colors.primary} refreshing={refreshing} onRefresh={onRefresh} />}
         contentContainerStyle={{ paddingBottom: 24 }}
         ListHeaderComponent={
           <View style={S.intro}>
@@ -190,37 +199,30 @@ function formatRelative(iso: string | null): string {
   } catch { return ''; }
 }
 
-const DARK_BG = '#0D0F14';
-const CARD_BG = '#161A22';
-const BORDER  = '#1F2937';
-const TEXT    = '#E5E7EB';
-const SUBTLE  = '#9CA3AF';
-const ACCENT  = '#6C63FF';
-const DANGER  = '#EF4444';
 
-const S = StyleSheet.create({
-  screen:        { flex: 1, backgroundColor: DARK_BG },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen:        { flex: 1, backgroundColor: c.bg },
   center:        { justifyContent: 'center', alignItems: 'center' },
 
-  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
+  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backTxt:       { color: TEXT, fontSize: 26, fontWeight: '600' },
-  title:         { color: TEXT, fontSize: 22, fontWeight: '800' },
+  backTxt:       { color: c.text, fontSize: 26, fontWeight: '600' },
+  title:         { color: c.text, fontSize: 22, fontWeight: '800' },
 
-  errorTxt:      { color: DANGER, paddingHorizontal: 16, paddingVertical: 8, fontSize: 12 },
+  errorTxt:      { color: c.danger, paddingHorizontal: 16, paddingVertical: 8, fontSize: 12 },
 
   intro:         { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4 },
-  introTxt:      { color: SUBTLE, fontSize: 12, lineHeight: 16 },
+  introTxt:      { color: c.textDim, fontSize: 12, lineHeight: 16 },
 
-  row:           { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
+  row:           { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   rowCurrent:    { backgroundColor: 'rgba(108,99,255,0.08)' },
   rowTop:        { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  rowDevice:     { color: TEXT, fontSize: 15, fontWeight: '600', flex: 1 },
-  currentTag:    { color: ACCENT, fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1, borderColor: ACCENT, borderWidth: 1, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, overflow: 'hidden' },
-  rowSub:        { color: SUBTLE, fontSize: 12, marginTop: 4 },
-  rowSubSmall:   { color: SUBTLE, fontSize: 11, marginTop: 2, opacity: 0.7 },
-  revokeTxt:     { color: DANGER, fontSize: 12, fontWeight: '700' },
+  rowDevice:     { color: c.text, fontSize: 15, fontWeight: '600', flex: 1 },
+  currentTag:    { color: c.primary, fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1, borderColor: c.primary, borderWidth: 1, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, overflow: 'hidden' },
+  rowSub:        { color: c.textDim, fontSize: 12, marginTop: 4 },
+  rowSubSmall:   { color: c.textDim, fontSize: 11, marginTop: 2, opacity: 0.7 },
+  revokeTxt:     { color: c.danger, fontSize: 12, fontWeight: '700' },
 
-  revokeAllBtn:  { marginHorizontal: 20, marginTop: 24, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: DANGER, backgroundColor: CARD_BG, alignItems: 'center' },
-  revokeAllTxt:  { color: DANGER, fontWeight: '700' },
+  revokeAllBtn:  { marginHorizontal: 20, marginTop: 24, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: c.danger, backgroundColor: c.card, alignItems: 'center' },
+  revokeAllTxt:  { color: c.danger, fontWeight: '700' },
 });
