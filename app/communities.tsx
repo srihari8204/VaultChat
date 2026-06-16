@@ -1,10 +1,11 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState , useMemo} from 'react';
 import { Alert, Animated, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 
-const C = { bg:'#FFFFFF',surface:'rgba(10,22,40,0.85)',primary:'#4A9FFF',secondary:'#7C3AED',accent:'#10B981',danger:'#EF4444',warning:'#F59E0B',border:'rgba(74,159,255,0.15)',borderDim:'rgba(255,255,255,0.06)',text:'#FFFFFF',textDim:'rgba(255,255,255,0.5)',textFaint:'rgba(255,255,255,0.22)' };
 const NAV = [{id:'chats',icon:'💬',label:'Chats',route:'/(tabs)/chats'},{id:'shield',icon:'🛡️',label:'Shield',route:'/dashboard'},{id:'community',icon:'🌐',label:'Community',route:'/communities'},{id:'vault',icon:'📦',label:'Vault',route:'/filevault'},{id:'alerts',icon:'🔔',label:'Alerts',route:'/notifications'}];
 const ANON_EMOJIS=['🦊','🐺','🦁','🐯','🦋','🦅','🦉','🐉','🦄','🐬','🦈','🦜'];
 const ANON_NAMES=['Shadow','Ghost','Cipher','Phantom','Echo','Nova','Viper','Storm','Raven','Falcon'];
@@ -16,6 +17,8 @@ const AUTO_DELETE_OPTIONS=[{label:'Never',value:0},{label:'1 hour',value:1},{lab
 const DEMO_COMMUNITIES: any[] = [];
 
 function CommunitiesContent() {
+  const S = useS();
+  const { colors } = useTheme();
   const router=useRouter();
   const [communities,setCommunities]=useState(DEMO_COMMUNITIES as any[]);
   const [activeComm,setActiveComm]=useState<any>(null);
@@ -47,26 +50,26 @@ function CommunitiesContent() {
     <View style={S.container}>
       <LinearGradient colors={['#FFFFFF','#040F20','#060F24']} style={StyleSheet.absoluteFillObject}/>
       <View style={S.chatHead}>
-        <TouchableOpacity onPress={()=>setView('list')} style={S.backBtn}><Text style={{color:C.primary,fontSize:18}}>←</Text></TouchableOpacity>
+        <TouchableOpacity onPress={()=>setView('list')} style={S.backBtn}><Text style={{color:colors.primary,fontSize:18}}>←</Text></TouchableOpacity>
         <Text style={{fontSize:24}}>{activeComm.emoji}</Text>
         <View style={{flex:1}}>
-          <Text style={{color:C.text,fontSize:15,fontWeight:'900'}}>{activeComm.name}</Text>
-          <Text style={{color:C.textFaint,fontSize:10}}>{activeComm.memberCount} anonymous members</Text>
+          <Text style={{color:colors.text,fontSize:15,fontWeight:'900'}}>{activeComm.name}</Text>
+          <Text style={{color:colors.textFaint,fontSize:10}}>{activeComm.memberCount} anonymous members</Text>
         </View>
       </View>
       <View style={{backgroundColor:'rgba(124,58,237,0.1)',paddingHorizontal:16,paddingVertical:8,flexDirection:'row',alignItems:'center',gap:8,borderBottomWidth:1,borderBottomColor:'rgba(255,255,255,0.06)'}}>
         <Text style={{fontSize:12}}>👻</Text>
-        <Text style={{color:C.secondary,fontSize:10,fontWeight:'700'}}>You are {myAnon.current.emoji} {myAnon.current.name} — identity hidden</Text>
-        {activeComm.autoDeleteHours>0&&<View style={{marginLeft:'auto'}}><Text style={{color:C.warning,fontSize:9}}>⏱️ {activeComm.autoDeleteHours}h auto-delete</Text></View>}
+        <Text style={{color:colors.textDim,fontSize:10,fontWeight:'700'}}>You are {myAnon.current.emoji} {myAnon.current.name} — identity hidden</Text>
+        {activeComm.autoDeleteHours>0&&<View style={{marginLeft:'auto'}}><Text style={{color:colors.accent,fontSize:9}}>⏱️ {activeComm.autoDeleteHours}h auto-delete</Text></View>}
       </View>
       <ScrollView style={{flex:1}} contentContainerStyle={{padding:16}}>
         {activeComm.messages.map((msg:any,i:number)=>{ const isMe=msg.anonId===myAnon.current.name; return (
           <View key={i} style={[{flexDirection:'row',marginBottom:12,gap:8},isMe&&{flexDirection:'row-reverse'}]}>
             <View style={{width:32,height:32,borderRadius:16,backgroundColor:'rgba(10,22,40,0.85)',justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:'rgba(255,255,255,0.06)'}}><Text style={{fontSize:18}}>{msg.anonEmoji}</Text></View>
             <View style={{maxWidth:'70%'}}>
-              {!isMe&&<Text style={{color:C.secondary,fontSize:9,fontWeight:'700',marginBottom:3}}>{msg.anonEmoji} {msg.anonId}</Text>}
+              {!isMe&&<Text style={{color:colors.textDim,fontSize:9,fontWeight:'700',marginBottom:3}}>{msg.anonEmoji} {msg.anonId}</Text>}
               <View style={[{borderRadius:16,padding:10,borderWidth:1},isMe?{backgroundColor:'#1D4ED8',borderColor:'#2563EB'}:{backgroundColor:'rgba(10,22,40,0.85)',borderColor:'rgba(255,255,255,0.06)'}]}>
-                <Text style={{color:C.text,fontSize:13}}>{msg.text}</Text>
+                <Text style={{color:colors.text,fontSize:13}}>{msg.text}</Text>
                 <Text style={{color:'rgba(255,255,255,0.3)',fontSize:8,textAlign:'right',marginTop:3}}>{fmtTime(msg.timestamp)}</Text>
               </View>
             </View>
@@ -74,9 +77,9 @@ function CommunitiesContent() {
         ); })}
       </ScrollView>
       <View style={{flexDirection:'row',padding:12,borderTopWidth:1,borderTopColor:'rgba(255,255,255,0.06)',gap:8,alignItems:'center'}}>
-        <TextInput value={input} onChangeText={setInput} placeholder={'Message as '+myAnon.current.emoji+' '+myAnon.current.name+'...'} placeholderTextColor={C.textFaint} style={{flex:1,backgroundColor:'rgba(10,22,40,0.85)',borderRadius:20,paddingHorizontal:16,paddingVertical:10,color:C.text,fontSize:13,borderWidth:1,borderColor:'rgba(255,255,255,0.06)'}} multiline/>
+        <TextInput value={input} onChangeText={setInput} placeholder={'Message as '+myAnon.current.emoji+' '+myAnon.current.name+'...'} placeholderTextColor={colors.textFaint} style={{flex:1,backgroundColor:'rgba(10,22,40,0.85)',borderRadius:20,paddingHorizontal:16,paddingVertical:10,color:colors.text,fontSize:13,borderWidth:1,borderColor:'rgba(255,255,255,0.06)'}} multiline/>
         <TouchableOpacity onPress={sendMessage}>
-          <LinearGradient colors={input.trim()?[C.primary,C.secondary]:['rgba(10,22,40,0.8)','rgba(10,22,40,0.8)']} style={{width:42,height:42,borderRadius:21,justifyContent:'center',alignItems:'center'}}><Text style={{fontSize:18,color:'#fff'}}>→</Text></LinearGradient>
+          <LinearGradient colors={input.trim()?[colors.primary,colors.textDim]:['rgba(10,22,40,0.8)','rgba(10,22,40,0.8)']} style={{width:42,height:42,borderRadius:21,justifyContent:'center',alignItems:'center'}}><Text style={{fontSize:18,color:'#fff'}}>→</Text></LinearGradient>
         </TouchableOpacity>
       </View>
     </View>
@@ -87,10 +90,10 @@ function CommunitiesContent() {
       <LinearGradient colors={['#FFFFFF','#040F20','#060F24']} style={StyleSheet.absoluteFillObject}/>
       <Animated.View style={{flex:1,opacity:fadeIn}}>
         <View style={S.header}>
-          <TouchableOpacity onPress={()=>router.back()} style={S.backBtn}><Text style={{color:C.primary,fontSize:18}}>←</Text></TouchableOpacity>
+          <TouchableOpacity onPress={()=>router.back()} style={S.backBtn}><Text style={{color:colors.primary,fontSize:18}}>←</Text></TouchableOpacity>
           <View style={{flex:1}}>
             <Text style={S.title}>🌐 Communities</Text>
-            <Text style={{color:C.textFaint,fontSize:9,letterSpacing:2}}>ANONYMOUS AND ENCRYPTED</Text>
+            <Text style={{color:colors.textFaint,fontSize:9,letterSpacing:2}}>ANONYMOUS AND ENCRYPTED</Text>
           </View>
           <TouchableOpacity onPress={()=>setShowJoin(true)} style={[S.iconBtn,{marginRight:6}]}><Text style={{fontSize:16}}>🔗</Text></TouchableOpacity>
           <TouchableOpacity onPress={()=>setShowCreate(true)} style={{backgroundColor:'#1D4ED8',borderRadius:20,width:40,height:40,justifyContent:'center',alignItems:'center'}}><Text style={{color:'#fff',fontSize:22,fontWeight:'900'}}>+</Text></TouchableOpacity>
@@ -99,35 +102,35 @@ function CommunitiesContent() {
         <View style={{marginHorizontal:18,backgroundColor:'rgba(124,58,237,0.12)',borderRadius:16,padding:14,marginBottom:14,borderWidth:1,borderColor:'rgba(124,58,237,0.3)',flexDirection:'row',alignItems:'center',gap:12}}>
           <Text style={{fontSize:26}}>👻</Text>
           <View style={{flex:1}}>
-            <Text style={{color:C.secondary,fontSize:13,fontWeight:'800'}}>You are completely anonymous</Text>
-            <Text style={{color:C.textFaint,fontSize:11,marginTop:2}}>Real identity never revealed. New anon ID per community.</Text>
+            <Text style={{color:colors.textDim,fontSize:13,fontWeight:'800'}}>You are completely anonymous</Text>
+            <Text style={{color:colors.textFaint,fontSize:11,marginTop:2}}>Real identity never revealed. New anon ID per community.</Text>
           </View>
         </View>
 
         <ScrollView contentContainerStyle={{paddingHorizontal:18,paddingBottom:110}}>
           {communities.map((comm:any,i:number)=>(
             <TouchableOpacity key={i} onPress={()=>{ setActiveComm(comm); setView('chat'); }} style={S.commRow}>
-              <View style={{width:52,height:52,borderRadius:26,backgroundColor:'rgba(10,22,40,0.85)',justifyContent:'center',alignItems:'center',borderWidth:1.5,borderColor:C.border}}><Text style={{fontSize:26}}>{comm.emoji}</Text></View>
+              <View style={{width:52,height:52,borderRadius:26,backgroundColor:'rgba(10,22,40,0.85)',justifyContent:'center',alignItems:'center',borderWidth:1.5,borderColor:colors.border}}><Text style={{fontSize:26}}>{comm.emoji}</Text></View>
               <View style={{flex:1}}>
                 <View style={{flexDirection:'row',alignItems:'center',gap:8}}>
-                  <Text style={{color:C.text,fontSize:14,fontWeight:'800'}}>{comm.name}</Text>
-                  {comm.isAdmin&&<View style={{backgroundColor:C.warning+'18',borderRadius:6,paddingHorizontal:5,paddingVertical:2,borderWidth:1,borderColor:C.warning}}><Text style={{color:C.warning,fontSize:8,fontWeight:'800'}}>ADMIN</Text></View>}
+                  <Text style={{color:colors.text,fontSize:14,fontWeight:'800'}}>{comm.name}</Text>
+                  {comm.isAdmin&&<View style={{backgroundColor:colors.accent+'18',borderRadius:6,paddingHorizontal:5,paddingVertical:2,borderWidth:1,borderColor:colors.accent}}><Text style={{color:colors.accent,fontSize:8,fontWeight:'800'}}>ADMIN</Text></View>}
                 </View>
-                <Text style={{color:C.textFaint,fontSize:11,marginTop:2}}>{comm.topic}</Text>
+                <Text style={{color:colors.textFaint,fontSize:11,marginTop:2}}>{comm.topic}</Text>
                 <View style={{flexDirection:'row',gap:10,marginTop:4}}>
-                  <Text style={{color:C.primary,fontSize:10}}>👥 {comm.memberCount}</Text>
-                  {comm.autoDeleteHours>0&&<Text style={{color:C.warning,fontSize:10}}>⏱️ {comm.autoDeleteHours}h</Text>}
-                  <Text style={{color:C.accent,fontSize:10}}>🔐 Encrypted</Text>
+                  <Text style={{color:colors.primary,fontSize:10}}>👥 {comm.memberCount}</Text>
+                  {comm.autoDeleteHours>0&&<Text style={{color:colors.accent,fontSize:10}}>⏱️ {comm.autoDeleteHours}h</Text>}
+                  <Text style={{color:colors.accent,fontSize:10}}>🔐 Encrypted</Text>
                 </View>
               </View>
-              <Text style={{color:C.textFaint,fontSize:10}}>{comm.messages.length>0?fmtTime(comm.messages[comm.messages.length-1].timestamp):''}</Text>
+              <Text style={{color:colors.textFaint,fontSize:10}}>{comm.messages.length>0?fmtTime(comm.messages[comm.messages.length-1].timestamp):''}</Text>
             </TouchableOpacity>
           ))}
           {communities.length===0 && (
             <View style={{alignItems:'center',marginTop:50}}>
               <Text style={{fontSize:42}}>🌐</Text>
-              <Text style={{color:C.textDim,fontSize:14,fontWeight:'800',marginTop:12}}>No communities yet</Text>
-              <Text style={{color:C.textFaint,fontSize:12,textAlign:'center',marginTop:6,paddingHorizontal:36,lineHeight:18}}>Anonymous communities are in development. Community sync is coming soon.</Text>
+              <Text style={{color:colors.textDim,fontSize:14,fontWeight:'800',marginTop:12}}>No communities yet</Text>
+              <Text style={{color:colors.textFaint,fontSize:12,textAlign:'center',marginTop:6,paddingHorizontal:36,lineHeight:18}}>Anonymous communities are in development. Community sync is coming soon.</Text>
             </View>
           )}
         </ScrollView>
@@ -137,14 +140,14 @@ function CommunitiesContent() {
         <TouchableOpacity style={{flex:1,backgroundColor:'rgba(0,0,0,0.6)'}} activeOpacity={1} onPress={()=>setShowCreate(false)}>
           <View style={{position:'absolute',bottom:0,left:0,right:0}}>
             <LinearGradient colors={['rgba(10,22,40,0.99)','rgba(6,14,34,0.99)']} style={{borderTopLeftRadius:28,borderTopRightRadius:28,padding:24,paddingBottom:44,borderWidth:1,borderColor:'rgba(74,159,255,0.12)'}}>
-              <Text style={{color:C.text,fontSize:18,fontWeight:'900',marginBottom:20}}>Create Community</Text>
-              <TextInput value={createName} onChangeText={setCreateName} placeholder="Community name..." placeholderTextColor={C.textFaint} style={S.modalInput}/>
-              <TextInput value={createTopic} onChangeText={setCreateTopic} placeholder="Topic or description..." placeholderTextColor={C.textFaint} style={[S.modalInput,{marginTop:10}]}/>
+              <Text style={{color:colors.text,fontSize:18,fontWeight:'900',marginBottom:20}}>Create Community</Text>
+              <TextInput value={createName} onChangeText={setCreateName} placeholder="Community name..." placeholderTextColor={colors.textFaint} style={S.modalInput}/>
+              <TextInput value={createTopic} onChangeText={setCreateTopic} placeholder="Topic or description..." placeholderTextColor={colors.textFaint} style={[S.modalInput,{marginTop:10}]}/>
               <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginTop:12,marginBottom:16}}>
-                {AUTO_DELETE_OPTIONS.map((o,i)=>(<TouchableOpacity key={i} onPress={()=>setCreateAutoDelete(o.value)} style={{backgroundColor:createAutoDelete===o.value?C.warning+'22':'rgba(6,14,34,0.9)',borderRadius:12,paddingHorizontal:14,paddingVertical:10,borderWidth:1.5,borderColor:createAutoDelete===o.value?C.warning:'rgba(255,255,255,0.06)'}}><Text style={{color:createAutoDelete===o.value?C.warning:C.text,fontSize:12,fontWeight:'700'}}>{o.label}</Text></TouchableOpacity>))}
+                {AUTO_DELETE_OPTIONS.map((o,i)=>(<TouchableOpacity key={i} onPress={()=>setCreateAutoDelete(o.value)} style={{backgroundColor:createAutoDelete===o.value?colors.accent+'22':'rgba(6,14,34,0.9)',borderRadius:12,paddingHorizontal:14,paddingVertical:10,borderWidth:1.5,borderColor:createAutoDelete===o.value?colors.accent:'rgba(255,255,255,0.06)'}}><Text style={{color:createAutoDelete===o.value?colors.accent:colors.text,fontSize:12,fontWeight:'700'}}>{o.label}</Text></TouchableOpacity>))}
               </View>
               <TouchableOpacity onPress={createCommunity}>
-                <LinearGradient colors={[C.primary,C.secondary]} style={{borderRadius:16,paddingVertical:16,alignItems:'center'}}><Text style={{color:'#fff',fontSize:15,fontWeight:'900'}}>Create Anonymous Community</Text></LinearGradient>
+                <LinearGradient colors={[colors.primary,colors.textDim]} style={{borderRadius:16,paddingVertical:16,alignItems:'center'}}><Text style={{color:'#fff',fontSize:15,fontWeight:'900'}}>Create Anonymous Community</Text></LinearGradient>
               </TouchableOpacity>
             </LinearGradient>
           </View>
@@ -155,11 +158,11 @@ function CommunitiesContent() {
         <TouchableOpacity style={{flex:1,backgroundColor:'rgba(0,0,0,0.6)'}} activeOpacity={1} onPress={()=>setShowJoin(false)}>
           <View style={{position:'absolute',bottom:0,left:0,right:0}}>
             <LinearGradient colors={['rgba(10,22,40,0.99)','rgba(6,14,34,0.99)']} style={{borderTopLeftRadius:28,borderTopRightRadius:28,padding:24,paddingBottom:44,borderWidth:1,borderColor:'rgba(74,159,255,0.12)'}}>
-              <Text style={{color:C.text,fontSize:18,fontWeight:'900',marginBottom:8}}>Join Community</Text>
-              <Text style={{color:C.textFaint,fontSize:13,marginBottom:20}}>Enter the encrypted invite code to join anonymously</Text>
-              <TextInput value={joinCode} onChangeText={setJoinCode} placeholder="XXXX-XXXX" placeholderTextColor={C.textFaint} style={[S.modalInput,{textAlign:'center',letterSpacing:4,fontSize:18,fontWeight:'800',color:C.primary}]} autoCapitalize="characters"/>
+              <Text style={{color:colors.text,fontSize:18,fontWeight:'900',marginBottom:8}}>Join Community</Text>
+              <Text style={{color:colors.textFaint,fontSize:13,marginBottom:20}}>Enter the encrypted invite code to join anonymously</Text>
+              <TextInput value={joinCode} onChangeText={setJoinCode} placeholder="XXXX-XXXX" placeholderTextColor={colors.textFaint} style={[S.modalInput,{textAlign:'center',letterSpacing:4,fontSize:18,fontWeight:'800',color:colors.primary}]} autoCapitalize="characters"/>
               <TouchableOpacity onPress={joinCommunity} style={{marginTop:16}}>
-                <LinearGradient colors={[C.secondary,C.primary]} style={{borderRadius:16,paddingVertical:16,alignItems:'center'}}><Text style={{color:'#fff',fontSize:15,fontWeight:'900'}}>Join Anonymously</Text></LinearGradient>
+                <LinearGradient colors={[colors.textDim,colors.primary]} style={{borderRadius:16,paddingVertical:16,alignItems:'center'}}><Text style={{color:'#fff',fontSize:15,fontWeight:'900'}}>Join Anonymously</Text></LinearGradient>
               </TouchableOpacity>
             </LinearGradient>
           </View>
@@ -170,7 +173,7 @@ function CommunitiesContent() {
         {NAV.map(item=>(
           <TouchableOpacity key={item.id} onPress={()=>handleNav(item)} style={[S.navItem,activeTab===item.id&&S.navItemActive]}>
             <Text style={{fontSize:20,lineHeight:22}}>{item.icon}</Text>
-            <Text style={[S.navLabel,{color:activeTab===item.id?C.primary:C.textFaint}]}>{item.label}</Text>
+            <Text style={[S.navLabel,{color:activeTab===item.id?colors.primary:colors.textFaint}]}>{item.label}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -178,11 +181,18 @@ function CommunitiesContent() {
   );
 }
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function CommunitiesScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   return (<ErrorBoundary fallbackTitle="Communities Error" fallbackMessage="Communities had a problem."><CommunitiesContent/></ErrorBoundary>);
 }
 
-const S = StyleSheet.create({
+const makeStyles = (c: Palette) => StyleSheet.create({
   container:{flex:1,backgroundColor:'#FFFFFF'},
   header:{flexDirection:'row',alignItems:'center',paddingHorizontal:18,paddingTop:50,paddingBottom:16,gap:10},
   title:{color:'#fff',fontSize:20,fontWeight:'900'},

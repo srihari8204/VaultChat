@@ -1,17 +1,13 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState , useMemo} from 'react';
 import { ActivityIndicator, Animated, Easing, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { getSecurityOverview, type SecurityOverview } from '../lib/security';
 import { E2EE_ENABLED } from '../constants/flags';
 
-const C = {
-  bg:'#FFFFFF', surface:'rgba(10,22,40,0.85)', surface2:'rgba(6,14,34,0.9)',
-  primary:'#4A9FFF', secondary:'#7C3AED', accent:'#10B981', danger:'#EF4444', warning:'#F59E0B',
-  border:'rgba(74,159,255,0.15)', borderDim:'rgba(255,255,255,0.06)',
-  text:'#FFFFFF', textDim:'rgba(255,255,255,0.5)', textFaint:'rgba(255,255,255,0.22)',
-};
 
 const NAV = [
   {id:'chats',icon:'💬',label:'Chats',route:'/(tabs)/chats'},
@@ -50,6 +46,8 @@ function accountAge(iso: string | null): string {
 }
 
 function DashboardContent() {
+  const S = useS();
+  const { colors } = useTheme();
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('shield');
   const [overview, setOverview] = useState<SecurityOverview | null>(null);
@@ -83,7 +81,7 @@ function DashboardContent() {
 
   const checks = overview ? buildChecks(overview) : [];
   const score = checks.length ? Math.round((checks.filter(c => c.ok).length / checks.length) * 100) : 0;
-  const scoreColor = score >= 80 ? C.accent : score >= 50 ? C.warning : C.danger;
+  const scoreColor = score >= 80 ? colors.accent : score >= 50 ? colors.accent : colors.danger;
   const radarDeg = radarAnim.interpolate({inputRange:[0,1],outputRange:['0deg','360deg']});
 
   return (
@@ -93,13 +91,13 @@ function DashboardContent() {
 
       <Animated.View style={[{flex:1},{ opacity:fadeAnim}]}>
         <View style={S.header}>
-          <TouchableOpacity onPress={()=>router.back()} style={S.backBtn}><Text style={{color:C.primary,fontSize:18}}>←</Text></TouchableOpacity>
+          <TouchableOpacity onPress={()=>router.back()} style={S.backBtn}><Text style={{color:colors.primary,fontSize:18}}>←</Text></TouchableOpacity>
           <View style={{flex:1}}>
             <Text style={S.title}>🛡️ Security Hub</Text>
-            <Text style={{color:C.textFaint,fontSize:9,letterSpacing:2}}>YOUR ACCOUNT SECURITY</Text>
+            <Text style={{color:colors.textFaint,fontSize:9,letterSpacing:2}}>YOUR ACCOUNT SECURITY</Text>
           </View>
           <TouchableOpacity onPress={load} style={[S.scanBtn,loading&&{opacity:0.65}]}>
-            <Text style={{color:C.primary,fontSize:10,fontWeight:'800',letterSpacing:1}}>{loading?'…':'REFRESH'}</Text>
+            <Text style={{color:colors.primary,fontSize:10,fontWeight:'800',letterSpacing:1}}>{loading?'…':'REFRESH'}</Text>
           </TouchableOpacity>
         </View>
 
@@ -122,24 +120,24 @@ function DashboardContent() {
 
         <View style={S.statsRow}>
           {[
-            {label:'Active Sessions',value:overview?String(overview.activeSessions):'—',icon:'📱',color:C.primary},
-            {label:'Devices',value:overview?String(overview.linkedDevices):'—',icon:'💻',color:C.secondary},
-            {label:'Blocked',value:overview?String(overview.blockedContacts):'—',icon:'🚫',color:C.warning},
-            {label:'Account Age',value:overview?accountAge(overview.accountCreatedAt):'—',icon:'🗓️',color:C.accent},
+            {label:'Active Sessions',value:overview?String(overview.activeSessions):'—',icon:'📱',color:colors.primary},
+            {label:'Devices',value:overview?String(overview.linkedDevices):'—',icon:'💻',color:colors.textDim},
+            {label:'Blocked',value:overview?String(overview.blockedContacts):'—',icon:'🚫',color:colors.accent},
+            {label:'Account Age',value:overview?accountAge(overview.accountCreatedAt):'—',icon:'🗓️',color:colors.accent},
           ].map((s,i)=>(
             <View key={i} style={S.statCard}>
               <Text style={{fontSize:16}}>{s.icon}</Text>
               <Text style={{color:s.color,fontSize:15,fontWeight:'900'}}>{s.value}</Text>
-              <Text style={{color:C.textFaint,fontSize:7,letterSpacing:0.5,textAlign:'center',marginTop:1}}>{s.label}</Text>
+              <Text style={{color:colors.textFaint,fontSize:7,letterSpacing:0.5,textAlign:'center',marginTop:1}}>{s.label}</Text>
             </View>
           ))}
         </View>
 
         <ScrollView contentContainerStyle={{paddingHorizontal:18,paddingBottom:110,paddingTop:6}} showsVerticalScrollIndicator={false}>
-          {loading && <ActivityIndicator color={C.primary} style={{marginTop:30}} />}
-          {error && !loading && <Text style={{color:C.danger,textAlign:'center',marginTop:24,fontSize:13}}>{error}</Text>}
+          {loading && <ActivityIndicator color={colors.primary} style={{marginTop:30}} />}
+          {error && !loading && <Text style={{color:colors.danger,textAlign:'center',marginTop:24,fontSize:13}}>{error}</Text>}
           {!loading && !error && checks.map((c,i)=>{
-            const col = c.ok ? C.accent : C.warning;
+            const col = c.ok ? colors.accent : colors.accent;
             return (
               <View key={i} style={S.moduleRow}>
                 <View style={[S.modIcon,{backgroundColor:col+'18',borderColor:col+'44'}]}>
@@ -147,12 +145,12 @@ function DashboardContent() {
                 </View>
                 <View style={{flex:1}}>
                   <View style={{flexDirection:'row',alignItems:'center',gap:8,marginBottom:4}}>
-                    <Text style={{color:C.text,fontSize:12,fontWeight:'700'}}>{c.name}</Text>
+                    <Text style={{color:colors.text,fontSize:12,fontWeight:'700'}}>{c.name}</Text>
                     <View style={{backgroundColor:col+'18',borderRadius:5,paddingHorizontal:5,paddingVertical:2,borderWidth:1,borderColor:col}}>
                       <Text style={{color:col,fontSize:7,fontWeight:'800',letterSpacing:1}}>{c.ok?'OK':'REVIEW'}</Text>
                     </View>
                   </View>
-                  <Text style={{color:C.textFaint,fontSize:10}}>{c.desc}</Text>
+                  <Text style={{color:colors.textFaint,fontSize:10}}>{c.desc}</Text>
                 </View>
               </View>
             );
@@ -164,7 +162,7 @@ function DashboardContent() {
         {NAV.map(item=>(
           <TouchableOpacity key={item.id} onPress={()=>handleNav(item)} style={[S.navItem,activeTab===item.id&&S.navItemActive]}>
             <Text style={{fontSize:20,lineHeight:22}}>{item.icon}</Text>
-            <Text style={[S.navLabel,{color:activeTab===item.id?C.primary:C.textFaint}]}>{item.label}</Text>
+            <Text style={[S.navLabel,{color:activeTab===item.id?colors.primary:colors.textFaint}]}>{item.label}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -172,7 +170,14 @@ function DashboardContent() {
   );
 }
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function DashboardScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   return (
     <ErrorBoundary fallbackTitle="Dashboard Error" fallbackMessage="Security dashboard had a problem.">
       <DashboardContent/>
@@ -180,7 +185,7 @@ export default function DashboardScreen() {
   );
 }
 
-const S = StyleSheet.create({
+const makeStyles = (c: Palette) => StyleSheet.create({
   container:{flex:1,backgroundColor:'#FFFFFF'},
   glowTop:{position:'absolute',top:-40,alignSelf:'center',width:300,height:300,borderRadius:150,backgroundColor:'rgba(74,159,255,0.06)'},
   header:{flexDirection:'row',alignItems:'center',paddingHorizontal:18,paddingTop:50,paddingBottom:14,gap:10},

@@ -2,7 +2,7 @@
 // CRED-inspired premium dark UI, on-device AI with pattern matching
 // Persistent messages via AsyncStorage
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback , useMemo} from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,8 @@ import {
   Dimensions,
   StatusBar,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { Stack, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { aiChat } from '../lib/ai';
@@ -25,28 +27,6 @@ const { width: SCREEN_W } = Dimensions.get('window');
 const STORAGE_KEY = 'vc_aria_messages';
 
 // ── CRED Palette ────────────────────────────────────────────────────
-const CLR = {
-  black: '#000000',
-  bg: '#000000',
-  white: '#FFFFFF',
-  silver: '#A0A0A0',
-  silverLight: '#C0C0C0',
-  silverDim: '#666666',
-  cardDark: '#111111',
-  cardLight: '#1A1A1A',
-  userBubble: '#1C1C1E',
-  ariaBubble: '#141414',
-  ariaBubbleBorder: 'rgba(255,255,255,0.06)',
-  inputBg: '#0E0E0E',
-  inputBorder: 'rgba(255,255,255,0.08)',
-  green: '#34C759',
-  accent: '#C0C0C0',
-  sendActive: '#FFFFFF',
-  sendInactive: 'rgba(255,255,255,0.15)',
-  divider: 'rgba(255,255,255,0.04)',
-  chipBg: 'rgba(255,255,255,0.04)',
-  chipBorder: 'rgba(255,255,255,0.08)',
-};
 
 // ── Types ───────────────────────────────────────────────────────────
 interface Message {
@@ -346,6 +326,8 @@ function generateAriaResponse(text: string): string {
 
 // ── Typing Indicator Component ──────────────────────────────────────
 function TypingIndicator() {
+  const S = useS();
+  const { colors } = useTheme();
   const dot1 = useRef(new Animated.Value(0)).current;
   const dot2 = useRef(new Animated.Value(0)).current;
   const dot3 = useRef(new Animated.Value(0)).current;
@@ -403,7 +385,14 @@ function TypingIndicator() {
 }
 
 // ── Main Component ──────────────────────────────────────────────────
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function AriaChatBot() {
+  const { colors } = useTheme();
+  const S = useS();
   const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -551,7 +540,7 @@ export default function AriaChatBot() {
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="light-content" backgroundColor={CLR.black} />
+      <StatusBar barStyle="light-content" backgroundColor={'#000000'} />
 
       <Animated.View style={[S.container, { opacity: fadeAnim }]}>
         {/* ── Header ─────────────────────────────────────────────── */}
@@ -632,7 +621,7 @@ export default function AriaChatBot() {
               <TextInput
                 style={S.input}
                 placeholder="Message Aria..."
-                placeholderTextColor={CLR.silverDim}
+                placeholderTextColor={'#666666'}
                 value={input}
                 onChangeText={setInput}
                 multiline
@@ -670,10 +659,10 @@ export default function AriaChatBot() {
 }
 
 // ── Styles ──────────────────────────────────────────────────────────
-const S = StyleSheet.create({
+const makeStyles = (c: Palette) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: CLR.bg,
+    backgroundColor: c.bg,
   },
 
   // Header
@@ -683,7 +672,7 @@ const S = StyleSheet.create({
     paddingTop: Platform.OS === 'ios' ? 56 : 44,
     paddingBottom: 14,
     paddingHorizontal: 16,
-    backgroundColor: CLR.black,
+    backgroundColor: '#000000',
   },
   backButton: {
     width: 36,
@@ -693,7 +682,7 @@ const S = StyleSheet.create({
     alignItems: 'center',
   },
   backArrow: {
-    color: CLR.white,
+    color: c.text,
     fontSize: 22,
     fontWeight: '300',
   },
@@ -714,7 +703,7 @@ const S = StyleSheet.create({
     alignItems: 'center',
   },
   headerAvatarTxt: {
-    color: CLR.silverLight,
+    color: '#C0C0C0',
     fontSize: 17,
     fontWeight: '600',
   },
@@ -727,7 +716,7 @@ const S = StyleSheet.create({
     gap: 6,
   },
   headerName: {
-    color: CLR.white,
+    color: c.text,
     fontSize: 17,
     fontWeight: '700',
     letterSpacing: 0.5,
@@ -736,10 +725,10 @@ const S = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: CLR.green,
+    backgroundColor: c.primary,
   },
   headerSubtitle: {
-    color: CLR.silverDim,
+    color: '#666666',
     fontSize: 12,
     fontWeight: '400',
     marginTop: 1,
@@ -749,16 +738,16 @@ const S = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: CLR.chipBorder,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   clearTxt: {
-    color: CLR.silver,
+    color: '#A0A0A0',
     fontSize: 12,
     fontWeight: '500',
   },
   headerDivider: {
     height: 1,
-    backgroundColor: CLR.divider,
+    backgroundColor: c.border,
   },
 
   // Messages
@@ -793,7 +782,7 @@ const S = StyleSheet.create({
     marginTop: 4,
   },
   ariaAvatarTxt: {
-    color: CLR.silverLight,
+    color: '#C0C0C0',
     fontSize: 13,
     fontWeight: '600',
   },
@@ -806,13 +795,13 @@ const S = StyleSheet.create({
     maxWidth: SCREEN_W * 0.72,
   },
   bubbleUser: {
-    backgroundColor: CLR.userBubble,
+    backgroundColor: '#1C1C1E',
     borderBottomRightRadius: 4,
   },
   bubbleAria: {
-    backgroundColor: CLR.ariaBubble,
+    backgroundColor: '#141414',
     borderWidth: 1,
-    borderColor: CLR.ariaBubbleBorder,
+    borderColor: 'rgba(255,255,255,0.06)',
     borderBottomLeftRadius: 4,
   },
   bubbleText: {
@@ -821,7 +810,7 @@ const S = StyleSheet.create({
     fontWeight: '400',
   },
   bubbleTextUser: {
-    color: CLR.white,
+    color: c.text,
   },
   bubbleTextAria: {
     color: 'rgba(255,255,255,0.88)',
@@ -844,9 +833,9 @@ const S = StyleSheet.create({
   typingBubble: {
     flexDirection: 'row',
     gap: 5,
-    backgroundColor: CLR.ariaBubble,
+    backgroundColor: '#141414',
     borderWidth: 1,
-    borderColor: CLR.ariaBubbleBorder,
+    borderColor: 'rgba(255,255,255,0.06)',
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderRadius: 18,
@@ -862,7 +851,7 @@ const S = StyleSheet.create({
   // Quick replies
   quickRepliesWrap: {
     borderTopWidth: 1,
-    borderTopColor: CLR.divider,
+    borderTopColor: c.border,
     paddingVertical: 10,
   },
   quickRepliesList: {
@@ -873,12 +862,12 @@ const S = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
-    backgroundColor: CLR.chipBg,
+    backgroundColor: 'rgba(255,255,255,0.04)',
     borderWidth: 1,
-    borderColor: CLR.chipBorder,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   quickChipText: {
-    color: CLR.silver,
+    color: '#A0A0A0',
     fontSize: 13,
     fontWeight: '400',
   },
@@ -891,20 +880,20 @@ const S = StyleSheet.create({
     paddingVertical: 12,
     gap: 10,
     borderTopWidth: 1,
-    borderTopColor: CLR.divider,
+    borderTopColor: c.border,
   },
   inputWrap: {
     flex: 1,
-    backgroundColor: CLR.inputBg,
+    backgroundColor: '#0E0E0E',
     borderRadius: 24,
     borderWidth: 1,
-    borderColor: CLR.inputBorder,
+    borderColor: 'rgba(255,255,255,0.08)',
     paddingHorizontal: 18,
     paddingVertical: Platform.OS === 'ios' ? 10 : 4,
     maxHeight: 120,
   },
   input: {
-    color: CLR.white,
+    color: c.text,
     fontSize: 15,
     fontWeight: '400',
     lineHeight: 20,
@@ -919,7 +908,7 @@ const S = StyleSheet.create({
     marginBottom: 2,
   },
   sendBtnActive: {
-    backgroundColor: CLR.white,
+    backgroundColor: c.text,
   },
   sendBtnInactive: {
     backgroundColor: 'rgba(255,255,255,0.06)',
@@ -931,7 +920,7 @@ const S = StyleSheet.create({
     fontWeight: '700',
   },
   sendIconActive: {
-    color: CLR.black,
+    color: '#000000',
   },
   sendIconInactive: {
     color: 'rgba(255,255,255,0.2)',

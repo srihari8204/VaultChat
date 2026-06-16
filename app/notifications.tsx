@@ -1,7 +1,9 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback , useMemo} from 'react';
 import { Alert, Animated, Easing, ActivityIndicator, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import * as Location from 'expo-location';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import {
@@ -9,7 +11,6 @@ import {
   type SOSHistoryItem, type TrustedContact, type UserSettings,
 } from '../lib/chatService';
 
-const C = { bg:'#FFFFFF',surface:'rgba(10,22,40,0.85)',primary:'#4A9FFF',secondary:'#7C3AED',accent:'#10B981',danger:'#EF4444',warning:'#F59E0B',border:'rgba(74,159,255,0.15)',borderDim:'rgba(255,255,255,0.06)',text:'#FFFFFF',textDim:'rgba(255,255,255,0.5)',textFaint:'rgba(255,255,255,0.22)' };
 const NAV = [{id:'chats',icon:'💬',label:'Chats',route:'/(tabs)/chats'},{id:'shield',icon:'🛡️',label:'Shield',route:'/dashboard'},{id:'community',icon:'🌐',label:'Community',route:'/communities'},{id:'vault',icon:'📦',label:'Vault',route:'/filevault'},{id:'alerts',icon:'🔔',label:'Alerts',route:'/notifications'}];
 
 const SETTING_DEFS: { key: keyof UserSettings; title: string; desc: string; icon: string }[] = [
@@ -30,6 +31,8 @@ function fmtTime(iso: string): string {
 }
 
 function NotificationsContent() {
+  const S = useS();
+  const { colors } = useTheme();
   const router=useRouter();
   const [activeTab,setActiveTab]=useState<'alerts'|'settings'|'panic'>('alerts');
   const [navTab,setNavTab]=useState('alerts');
@@ -116,37 +119,37 @@ function NotificationsContent() {
       <LinearGradient colors={['#FFFFFF','#040F20','#060F24']} style={StyleSheet.absoluteFillObject}/>
       <Animated.View style={{flex:1,opacity:fadeIn}}>
         <View style={S.header}>
-          <TouchableOpacity onPress={()=>router.back()} style={S.backBtn}><Text style={{color:C.primary,fontSize:18}}>←</Text></TouchableOpacity>
+          <TouchableOpacity onPress={()=>router.back()} style={S.backBtn}><Text style={{color:colors.primary,fontSize:18}}>←</Text></TouchableOpacity>
           <View style={{flex:1}}>
             <Text style={S.title}>🔔 Alerts & Safety</Text>
-            <Text style={{color:C.textFaint,fontSize:9,letterSpacing:2}}>EMERGENCY & PRIVACY CENTER</Text>
+            <Text style={{color:colors.textFaint,fontSize:9,letterSpacing:2}}>EMERGENCY & PRIVACY CENTER</Text>
           </View>
         </View>
 
         <View style={S.tabs}>
           {[{id:'alerts',label:'SOS HISTORY'},{id:'settings',label:'PRIVACY'},{id:'panic',label:'🆘 PANIC'}].map(tab=>(
             <TouchableOpacity key={tab.id} onPress={()=>setActiveTab(tab.id as any)} style={[S.tab,activeTab===tab.id&&S.tabActive]}>
-              <Text style={[S.tabText,{color:activeTab===tab.id?(tab.id==='panic'?C.danger:C.primary):C.textFaint}]}>{tab.label}</Text>
+              <Text style={[S.tabText,{color:activeTab===tab.id?(tab.id==='panic'?colors.danger:colors.primary):colors.textFaint}]}>{tab.label}</Text>
             </TouchableOpacity>
           ))}
         </View>
 
         <ScrollView contentContainerStyle={{paddingHorizontal:18,paddingBottom:110}} showsVerticalScrollIndicator={false}>
-          {loading && <ActivityIndicator color={C.primary} style={{marginTop:30}}/>}
+          {loading && <ActivityIndicator color={colors.primary} style={{marginTop:30}}/>}
 
           {!loading && activeTab==='alerts' && (sos.length===0
-            ? <Text style={{color:C.textFaint,textAlign:'center',marginTop:36,fontSize:13}}>No emergency alerts sent yet.{'\n'}Your SOS history will appear here.</Text>
+            ? <Text style={{color:colors.textFaint,textAlign:'center',marginTop:36,fontSize:13}}>No emergency alerts sent yet.{'\n'}Your SOS history will appear here.</Text>
             : sos.map((a)=>{
-                const col = a.type==='emergency' ? C.danger : C.accent;
+                const col = a.type==='emergency' ? colors.danger : colors.accent;
                 return (
                   <View key={a.id} style={[S.alertRow,{borderLeftColor:col}]}>
                     <View style={{flex:1}}>
                       <View style={{flexDirection:'row',alignItems:'center',gap:8,marginBottom:4}}>
                         <View style={{backgroundColor:col+'18',borderRadius:5,paddingHorizontal:5,paddingVertical:2,borderWidth:1,borderColor:col}}><Text style={{color:col,fontSize:7,fontWeight:'800',letterSpacing:1}}>{a.type==='emergency'?'EMERGENCY':'TEST'}</Text></View>
-                        <Text style={{color:C.text,fontSize:12,fontWeight:'800'}}>SOS alert sent</Text>
+                        <Text style={{color:colors.text,fontSize:12,fontWeight:'800'}}>SOS alert sent</Text>
                       </View>
-                      <Text style={{color:C.textDim,fontSize:12,lineHeight:17}}>Notified {a.contactsNotified} trusted contact{a.contactsNotified===1?'':'s'}{a.latitude!=null?' with your location':''}.</Text>
-                      <Text style={{color:C.textFaint,fontSize:9,marginTop:6}}>{fmtTime(a.createdAt)}</Text>
+                      <Text style={{color:colors.textDim,fontSize:12,lineHeight:17}}>Notified {a.contactsNotified} trusted contact{a.contactsNotified===1?'':'s'}{a.latitude!=null?' with your location':''}.</Text>
+                      <Text style={{color:colors.textFaint,fontSize:9,marginTop:6}}>{fmtTime(a.createdAt)}</Text>
                     </View>
                   </View>
                 );
@@ -154,15 +157,15 @@ function NotificationsContent() {
 
           {!loading && activeTab==='settings' && settings && (
             <View style={{marginTop:4}}>
-              <Text style={{color:C.textFaint,fontSize:9,fontWeight:'800',letterSpacing:2,marginBottom:10}}>PRIVACY</Text>
+              <Text style={{color:colors.textFaint,fontSize:9,fontWeight:'800',letterSpacing:2,marginBottom:10}}>PRIVACY</Text>
               {SETTING_DEFS.map((d)=>(
                 <View key={d.key} style={S.settingRow}>
                   <View style={{width:40,height:40,borderRadius:20,backgroundColor:'rgba(6,14,34,0.9)',justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:'rgba(255,255,255,0.06)'}}><Text style={{fontSize:20}}>{d.icon}</Text></View>
                   <View style={{flex:1}}>
-                    <Text style={{color:C.text,fontSize:13,fontWeight:'700'}}>{d.title}</Text>
-                    <Text style={{color:C.textFaint,fontSize:10,marginTop:2}}>{d.desc}</Text>
+                    <Text style={{color:colors.text,fontSize:13,fontWeight:'700'}}>{d.title}</Text>
+                    <Text style={{color:colors.textFaint,fontSize:10,marginTop:2}}>{d.desc}</Text>
                   </View>
-                  <Switch value={!!settings[d.key]} onValueChange={()=>toggleSetting(d.key)} trackColor={{false:'rgba(255,255,255,0.06)',true:C.primary+'66'}} thumbColor={settings[d.key]?C.primary:'rgba(255,255,255,0.3)'}/>
+                  <Switch value={!!settings[d.key]} onValueChange={()=>toggleSetting(d.key)} trackColor={{false:'rgba(255,255,255,0.06)',true:colors.primary+'66'}} thumbColor={settings[d.key]?colors.primary:'rgba(255,255,255,0.3)'}/>
                 </View>
               ))}
             </View>
@@ -171,29 +174,29 @@ function NotificationsContent() {
           {!loading && activeTab==='panic' && (
             <View style={{gap:16}}>
               <View style={{backgroundColor:'rgba(239,68,68,0.08)',borderRadius:16,padding:16,borderWidth:1,borderColor:'rgba(239,68,68,0.25)'}}>
-                <Text style={{color:C.danger,fontSize:12,fontWeight:'800',marginBottom:6}}>🆘 EMERGENCY PANIC BUTTON</Text>
-                <Text style={{color:C.textDim,fontSize:12,lineHeight:18}}>Sends an emergency alert with your current location to your trusted contacts.</Text>
+                <Text style={{color:colors.danger,fontSize:12,fontWeight:'800',marginBottom:6}}>🆘 EMERGENCY PANIC BUTTON</Text>
+                <Text style={{color:colors.textDim,fontSize:12,lineHeight:18}}>Sends an emergency alert with your current location to your trusted contacts.</Text>
               </View>
               <Animated.View style={{borderRadius:22,borderWidth:2,borderColor:panicBorderColor,overflow:'hidden'}}>
                 <TouchableOpacity onPress={armPanic} activeOpacity={0.85} disabled={sending}>
                   <LinearGradient colors={panicArmed?['rgba(127,29,29,0.9)','rgba(153,27,27,0.9)']:['rgba(26,10,10,0.9)','rgba(42,10,10,0.9)']} style={{padding:28,alignItems:'center',gap:8}}>
                     <Animated.Text style={{fontSize:52,transform:[{scale:panicAnim}]}}>🆘</Animated.Text>
-                    <Text style={{color:C.danger,fontSize:17,fontWeight:'900',letterSpacing:2}}>{sending?'SENDING…':panicArmed?'SENDING IN '+panicCountdown+'...':'PANIC ALERT'}</Text>
-                    <Text style={{color:C.textDim,fontSize:11}}>{panicArmed?'Tap again to cancel':'Tap to arm — auto-sends in 3 seconds'}</Text>
+                    <Text style={{color:colors.danger,fontSize:17,fontWeight:'900',letterSpacing:2}}>{sending?'SENDING…':panicArmed?'SENDING IN '+panicCountdown+'...':'PANIC ALERT'}</Text>
+                    <Text style={{color:colors.textDim,fontSize:11}}>{panicArmed?'Tap again to cancel':'Tap to arm — auto-sends in 3 seconds'}</Text>
                   </LinearGradient>
                 </TouchableOpacity>
               </Animated.View>
-              <Text style={{color:C.textFaint,fontSize:9,fontWeight:'800',letterSpacing:2}}>TRUSTED CONTACTS ({contacts.length})</Text>
+              <Text style={{color:colors.textFaint,fontSize:9,fontWeight:'800',letterSpacing:2}}>TRUSTED CONTACTS ({contacts.length})</Text>
               {contacts.length===0
-                ? <Text style={{color:C.textFaint,fontSize:12}}>No trusted contacts yet. Add them from a contact’s profile so they’re alerted in an emergency.</Text>
+                ? <Text style={{color:colors.textFaint,fontSize:12}}>No trusted contacts yet. Add them from a contact’s profile so they’re alerted in an emergency.</Text>
                 : contacts.map((c)=>(
                     <View key={c.userId} style={[S.settingRow,{borderColor:'rgba(239,68,68,0.15)'}]}>
                       <Text style={{fontSize:28}}>🛟</Text>
                       <View style={{flex:1}}>
-                        <Text style={{color:C.text,fontSize:13,fontWeight:'700'}}>{c.name || c.vaultId || 'Contact'}</Text>
-                        {c.vaultId && <Text style={{color:C.textFaint,fontSize:11,marginTop:2}}>@{c.vaultId}</Text>}
+                        <Text style={{color:colors.text,fontSize:13,fontWeight:'700'}}>{c.name || c.vaultId || 'Contact'}</Text>
+                        {c.vaultId && <Text style={{color:colors.textFaint,fontSize:11,marginTop:2}}>@{c.vaultId}</Text>}
                       </View>
-                      <View style={{backgroundColor:(c.online?C.accent:C.textFaint)+'18',borderRadius:8,paddingHorizontal:8,paddingVertical:4,borderWidth:1,borderColor:c.online?C.accent:C.textFaint}}><Text style={{color:c.online?C.accent:C.textFaint,fontSize:9,fontWeight:'700'}}>{c.online?'ONLINE':'OFFLINE'}</Text></View>
+                      <View style={{backgroundColor:(c.online?colors.accent:colors.textFaint)+'18',borderRadius:8,paddingHorizontal:8,paddingVertical:4,borderWidth:1,borderColor:c.online?colors.accent:colors.textFaint}}><Text style={{color:c.online?colors.accent:colors.textFaint,fontSize:9,fontWeight:'700'}}>{c.online?'ONLINE':'OFFLINE'}</Text></View>
                     </View>
                   ))}
             </View>
@@ -205,7 +208,7 @@ function NotificationsContent() {
         {NAV.map(item=>(
           <TouchableOpacity key={item.id} onPress={()=>handleNav(item)} style={[S.navItem,navTab===item.id&&S.navItemActive]}>
             <Text style={{fontSize:20,lineHeight:22}}>{item.icon}</Text>
-            <Text style={[S.navLabel,{color:navTab===item.id?C.primary:C.textFaint}]}>{item.label}</Text>
+            <Text style={[S.navLabel,{color:navTab===item.id?colors.primary:colors.textFaint}]}>{item.label}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -213,11 +216,18 @@ function NotificationsContent() {
   );
 }
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function NotificationsScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   return (<ErrorBoundary fallbackTitle="Notifications Error" fallbackMessage="Notifications had a problem."><NotificationsContent/></ErrorBoundary>);
 }
 
-const S = StyleSheet.create({
+const makeStyles = (c: Palette) => StyleSheet.create({
   container:{flex:1,backgroundColor:'#FFFFFF'},
   header:{flexDirection:'row',alignItems:'center',paddingHorizontal:18,paddingTop:50,paddingBottom:14,gap:10},
   title:{color:'#fff',fontSize:20,fontWeight:'900'},
