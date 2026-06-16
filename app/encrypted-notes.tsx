@@ -17,6 +17,7 @@ import { useTheme } from '../lib/theme';
 import { Stack, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
+import { decryptNotes, encryptNotes } from '../lib/notesCrypto';
 
 
 // 9 Categories from PDF
@@ -86,13 +87,21 @@ export default function EncryptedNotesScreen() {
   const loadNotes = async () => {
     try {
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
-      if (raw) setNotes(JSON.parse(raw));
+      if (!raw) return;
+      const dec = await decryptNotes(raw);
+      if (!dec) return; // sealed blob we can't open — don't clobber it
+      const parsed: Note[] = JSON.parse(dec.text);
+      setNotes(parsed);
+      // Migrate legacy plaintext storage to an encrypted blob in place.
+      if (!dec.wasEncrypted) {
+        await AsyncStorage.setItem(STORAGE_KEY, await encryptNotes(JSON.stringify(parsed)));
+      }
     } catch {}
   };
 
   const saveNotes = async (updated: Note[]) => {
     setNotes(updated);
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    await AsyncStorage.setItem(STORAGE_KEY, await encryptNotes(JSON.stringify(updated)));
   };
 
   const openEditor = (note?: Note) => {
