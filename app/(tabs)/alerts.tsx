@@ -8,12 +8,13 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState , useMemo} from 'react';
 import {
   ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text,
   TouchableOpacity, View,
 } from 'react-native';
-import { Aurora } from '../../constants/theme';
+import { type Palette } from '../../constants/theme';
+import { useTheme } from '../../lib/theme';
 import {
   listSecurityEvents, markAllSeen, syncAuditChain, verifyAuditChain,
   type AuditSeverity, type ChainStatus, type SecurityEvent,
@@ -52,7 +53,14 @@ function timeAgo(ts: number): string {
   return new Date(ts).toLocaleDateString();
 }
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function AlertsScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   const [events, setEvents] = useState<SecurityEvent[]>([]);
   const [status, setStatus] = useState<ChainStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -149,9 +157,9 @@ export default function AlertsScreen() {
           <Ionicons
             name={status.ok ? 'lock-closed' : 'alert-circle'}
             size={15}
-            color={status.ok ? Aurora.success : Aurora.danger}
+            color={status.ok ? colors.success : colors.danger}
           />
-          <Text style={[S.bannerText, { color: status.ok ? Aurora.success : Aurora.danger }]}>
+          <Text style={[S.bannerText, { color: status.ok ? colors.success : colors.danger }]}>
             {status.ok
               ? `Log verified · ${status.total} event${status.total === 1 ? '' : 's'} · chain intact`
               : `Integrity broken at entry #${status.brokenAtSeq} — the log was altered`}
@@ -160,7 +168,7 @@ export default function AlertsScreen() {
       )}
 
       {loading ? (
-        <View style={S.center}><ActivityIndicator color={Aurora.primary} /></View>
+        <View style={S.center}><ActivityIndicator color={colors.primary} /></View>
       ) : (
         <FlatList
           data={events}
@@ -168,11 +176,11 @@ export default function AlertsScreen() {
           renderItem={renderItem}
           contentContainerStyle={events.length === 0 ? S.emptyWrap : { paddingVertical: 8 }}
           refreshControl={
-            <RefreshControl refreshing={false} onRefresh={load} tintColor={Aurora.primary} />
+            <RefreshControl refreshing={false} onRefresh={load} tintColor={colors.primary} />
           }
           ListEmptyComponent={
             <View style={S.empty}>
-              <Ionicons name="shield-checkmark-outline" size={56} color={Aurora.textFaint} />
+              <Ionicons name="shield-checkmark-outline" size={56} color={colors.textFaint} />
               <Text style={S.emptyTitle}>No security events yet</Text>
               <Text style={S.emptySub}>
                 Screenshot captures, device scans, and other security events are recorded
@@ -186,12 +194,12 @@ export default function AlertsScreen() {
   );
 }
 
-const S = StyleSheet.create({
-  screen:   { flex: 1, backgroundColor: Aurora.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen:   { flex: 1, backgroundColor: c.bg },
   header:   { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 56, paddingBottom: 12, gap: 12 },
-  title:    { color: Aurora.text, fontSize: 28, fontWeight: '800' },
-  subtitle: { color: Aurora.textDim, fontSize: 13, marginTop: 2 },
-  scanBtn:  { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: Aurora.primary, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 12 },
+  title:    { color: c.text, fontSize: 28, fontWeight: '800' },
+  subtitle: { color: c.textDim, fontSize: 13, marginTop: 2 },
+  scanBtn:  { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.primary, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 12 },
   scanBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
 
   banner:   { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10, borderWidth: 1 },
@@ -205,15 +213,15 @@ const S = StyleSheet.create({
   iconWrap: { width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   rowBody:  { flex: 1 },
   rowTop:   { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  rowTitle: { color: Aurora.text, fontSize: 15, fontWeight: '700', flex: 1 },
-  rowTime:  { color: Aurora.textFaint, fontSize: 11.5 },
-  rowDetail:{ color: Aurora.textDim, fontSize: 13, lineHeight: 18, marginTop: 2 },
-  metaBox:  { marginTop: 8, padding: 10, borderRadius: 10, backgroundColor: Aurora.surface, gap: 3 },
-  metaLine: { color: Aurora.textDim, fontSize: 12 },
-  metaKey:  { color: Aurora.textFaint, fontWeight: '700' },
+  rowTitle: { color: c.text, fontSize: 15, fontWeight: '700', flex: 1 },
+  rowTime:  { color: c.textFaint, fontSize: 11.5 },
+  rowDetail:{ color: c.textDim, fontSize: 13, lineHeight: 18, marginTop: 2 },
+  metaBox:  { marginTop: 8, padding: 10, borderRadius: 10, backgroundColor: c.surface, gap: 3 },
+  metaLine: { color: c.textDim, fontSize: 12 },
+  metaKey:  { color: c.textFaint, fontWeight: '700' },
 
   emptyWrap:{ flexGrow: 1, justifyContent: 'center' },
   empty:    { alignItems: 'center', paddingHorizontal: 36, gap: 10 },
-  emptyTitle: { color: Aurora.text, fontSize: 17, fontWeight: '700', marginTop: 6 },
-  emptySub: { color: Aurora.textDim, fontSize: 13.5, textAlign: 'center', lineHeight: 20 },
+  emptyTitle: { color: c.text, fontSize: 17, fontWeight: '700', marginTop: 6 },
+  emptySub: { color: c.textDim, fontSize: 13.5, textAlign: 'center', lineHeight: 20 },
 });

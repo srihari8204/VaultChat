@@ -6,14 +6,15 @@
 // opens it in a self-contained full-screen viewer (no dependency on other
 // screens). Links open externally. No Firestore.
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList, Dimensions, StatusBar,
   ActivityIndicator, Linking, Image, Modal,
 } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Aurora } from '../constants/theme';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { getAccessToken } from '../lib/api';
 import { getMessages, getChat, decryptFromChat, attachmentUrl, type Message } from '../lib/chatService';
 import { getDecryptedAttachmentUri, parseMediaContent } from '../lib/mediaAttachments';
@@ -25,7 +26,14 @@ const PAGE = 200;
 type TabId = 'photos' | 'videos' | 'files' | 'links';
 interface LinkItem { id: number; url: string; createdAt: string }
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function MediaGalleryScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const { chatId, id: idParam, peerName } = useLocalSearchParams<{ chatId?: string; id?: string; peerName?: string }>();
   const cid = String(chatId ?? idParam ?? '');
@@ -110,7 +118,7 @@ export default function MediaGalleryScreen() {
       (async () => { const r = await resolveSrc(m); if (!cancel) setSrc(r); })();
       return () => { cancel = true; };
     }, [m]);
-    if (!src) return <View style={[style, { backgroundColor: Aurora.surfaceSolid }]} />;
+    if (!src) return <View style={[style, { backgroundColor: colors.surfaceSolid }]} />;
     return <Image source={src} style={style} resizeMode={resizeMode} />;
   }, [resolveSrc]);
 
@@ -136,20 +144,20 @@ export default function MediaGalleryScreen() {
 
   const renderFile = ({ item }: { item: Message }) => (
     <TouchableOpacity style={s.fileRow} onPress={() => openFile(item)}>
-      <View style={s.fileIcon}><Ionicons name="document-text-outline" size={22} color={Aurora.accent} /></View>
+      <View style={s.fileIcon}><Ionicons name="document-text-outline" size={22} color={colors.accent} /></View>
       <View style={{ flex: 1 }}>
         <Text style={s.fileName} numberOfLines={1}>{item.meta?.fileName || item.meta?.name || item.meta?.filename || 'File'}</Text>
         <Text style={s.fileDate}>{fmtDate(item.createdAt)}</Text>
       </View>
-      <Ionicons name="download-outline" size={18} color={Aurora.textDim} />
+      <Ionicons name="download-outline" size={18} color={colors.textDim} />
     </TouchableOpacity>
   );
 
   const renderLink = ({ item }: { item: LinkItem }) => (
     <TouchableOpacity style={s.fileRow} onPress={() => Linking.openURL(item.url).catch(() => {})}>
-      <View style={s.fileIcon}><Ionicons name="link-outline" size={20} color={Aurora.accent} /></View>
+      <View style={s.fileIcon}><Ionicons name="link-outline" size={20} color={colors.accent} /></View>
       <View style={{ flex: 1 }}>
-        <Text style={[s.fileName, { color: Aurora.accent }]} numberOfLines={2}>{item.url}</Text>
+        <Text style={[s.fileName, { color: colors.accent }]} numberOfLines={2}>{item.url}</Text>
         <Text style={s.fileDate}>{fmtDate(item.createdAt)}</Text>
       </View>
     </TouchableOpacity>
@@ -169,7 +177,7 @@ export default function MediaGalleryScreen() {
 
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
-          <Ionicons name="arrow-back" size={24} color={Aurora.text} />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.title} numberOfLines={1}>{(peerName as string) || 'Shared'} Media</Text>
         <View style={{ width: 40 }} />
@@ -185,7 +193,7 @@ export default function MediaGalleryScreen() {
       </View>
 
       {loading ? (
-        <ActivityIndicator color={Aurora.primary} style={{ marginTop: 40 }} />
+        <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
       ) : tab === 'photos' ? (
         <FlatList data={photos} numColumns={3} keyExtractor={m => String(m.id)} renderItem={renderPhoto}
           contentContainerStyle={{ padding: 8 }} ListEmptyComponent={<Empty label="No photos shared yet" />} />
@@ -213,30 +221,33 @@ export default function MediaGalleryScreen() {
   );
 }
 
-const Empty = ({ label }: { label: string }) => (
-  <View style={{ alignItems: 'center', paddingVertical: 60 }}>
-    <Text style={{ color: Aurora.textDim, fontSize: 14 }}>{label}</Text>
-  </View>
-);
+const Empty = ({ label }: { label: string }) => {
+  const { colors } = useTheme();
+  return (
+    <View style={{ alignItems: 'center', paddingVertical: 60 }}>
+      <Text style={{ color: colors.textDim, fontSize: 14 }}>{label}</Text>
+    </View>
+  );
+};
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Aurora.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingHorizontal: 16, paddingBottom: 8, gap: 12 },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  title: { color: Aurora.text, fontSize: 18, fontWeight: '800', flex: 1 },
+  title: { color: c.text, fontSize: 18, fontWeight: '800', flex: 1 },
   tabs: { flexDirection: 'row', paddingHorizontal: 12, paddingTop: 8, gap: 6 },
-  tab: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: Aurora.surface, borderWidth: 1, borderColor: Aurora.border },
-  tabActive: { backgroundColor: Aurora.primary, borderColor: Aurora.primary },
-  tabTxt: { color: Aurora.textDim, fontSize: 12, fontWeight: '700' },
+  tab: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: c.surface, borderWidth: 1, borderColor: c.border },
+  tabActive: { backgroundColor: c.primary, borderColor: c.primary },
+  tabTxt: { color: c.textDim, fontSize: 12, fontWeight: '700' },
   tabTxtActive: { color: '#04130D' },
-  tabCount: { color: Aurora.textDim, fontSize: 10, marginTop: 2 },
-  tile: { width: TILE, height: TILE, margin: 4, borderRadius: 8, overflow: 'hidden', backgroundColor: Aurora.surfaceSolid },
+  tabCount: { color: c.textDim, fontSize: 10, marginTop: 2 },
+  tile: { width: TILE, height: TILE, margin: 4, borderRadius: 8, overflow: 'hidden', backgroundColor: c.surfaceSolid },
   tileImg: { width: '100%', height: '100%' },
   playBadge: { position: 'absolute', top: '50%', left: '50%', marginLeft: -16, marginTop: -16, width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
-  fileRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: Aurora.card, borderRadius: 12, padding: 12, marginBottom: 6, borderWidth: 1, borderColor: Aurora.border, gap: 12 },
-  fileIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: Aurora.surface, justifyContent: 'center', alignItems: 'center' },
-  fileName: { color: Aurora.text, fontSize: 13, fontWeight: '600' },
-  fileDate: { color: Aurora.textDim, fontSize: 11, marginTop: 2 },
+  fileRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, borderRadius: 12, padding: 12, marginBottom: 6, borderWidth: 1, borderColor: c.border, gap: 12 },
+  fileIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: c.surface, justifyContent: 'center', alignItems: 'center' },
+  fileName: { color: c.text, fontSize: 13, fontWeight: '600' },
+  fileDate: { color: c.textDim, fontSize: 11, marginTop: 2 },
   viewerBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' },
   viewerClose: { position: 'absolute', top: 54, right: 20, zIndex: 10 },
   viewerImg: { width: '100%', height: '80%' },

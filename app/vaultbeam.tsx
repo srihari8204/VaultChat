@@ -9,7 +9,7 @@
 // makes the offer; the receiver auto-answers and saves the file on completion.
 // Needs a dev/native build (react-native-webrtc) + two devices to verify.
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, StatusBar, Alert, ActivityIndicator, ScrollView,
 } from 'react-native';
@@ -21,7 +21,8 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   mediaDevices, RTCIceCandidate, RTCPeerConnection, RTCSessionDescription,
 } from 'react-native-webrtc';
-import { Aurora } from '../constants/theme';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { getSocket } from '../lib/socket';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { getTurnConfig, type IceServer } from '../lib/chatService';
@@ -34,7 +35,14 @@ const BACKPRESSURE = 4 * 1024 * 1024;
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 const fmtSize = (b: number) => b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(1)} KB` : b < 1073741824 ? `${(b / 1048576).toFixed(1)} MB` : `${(b / 1073741824).toFixed(2)} GB`;
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function VaultBeamScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const { peerUid, peerName } = useLocalSearchParams<{ chatId?: string; peerUid?: string; peerName?: string }>();
 
@@ -245,11 +253,11 @@ export default function VaultBeamScreen() {
       <StatusBar barStyle="light-content" />
       <View style={s.header}>
         <TouchableOpacity onPress={() => { teardown(true); router.back(); }} style={s.backBtn} hitSlop={10}>
-          <Ionicons name="arrow-back" size={24} color={Aurora.text} />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.title}>VaultBeam P2P</Text>
         <TouchableOpacity onPress={() => router.push('/transfers' as any)} style={s.backBtn} hitSlop={10}>
-          <Ionicons name="list-outline" size={22} color={Aurora.text} />
+          <Ionicons name="list-outline" size={22} color={colors.text} />
         </TouchableOpacity>
       </View>
 
@@ -269,12 +277,12 @@ export default function VaultBeamScreen() {
               <Text style={s.pct}>{Math.round(progress * 100)}%</Text>
             </>
           )}
-          {status === 'connecting' && <ActivityIndicator color={Aurora.primary} style={{ marginTop: 10 }} />}
-          {status === 'done' && <Text style={[s.pct, { color: Aurora.primary }]}>✓ {fileName}</Text>}
+          {status === 'connecting' && <ActivityIndicator color={colors.primary} style={{ marginTop: 10 }} />}
+          {status === 'done' && <Text style={[s.pct, { color: colors.primary }]}>✓ {fileName}</Text>}
           {status === 'done' && verified === true && (
-            <Text style={[s.pct, { color: Aurora.primary }]}>🔒 SHA-256 integrity verified</Text>
+            <Text style={[s.pct, { color: colors.primary }]}>🔒 SHA-256 integrity verified</Text>
           )}
-          {status === 'error' && <Text style={[s.pct, { color: Aurora.danger }]}>{err || 'Transfer error'}</Text>}
+          {status === 'error' && <Text style={[s.pct, { color: colors.danger }]}>{err || 'Transfer error'}</Text>}
         </View>
 
         <TouchableOpacity
@@ -292,20 +300,20 @@ export default function VaultBeamScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Aurora.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingHorizontal: 16, paddingBottom: 8 },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  title: { color: Aurora.text, fontSize: 18, fontWeight: '800' },
-  infoCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: Aurora.card, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: Aurora.border, marginBottom: 14 },
-  infoTxt: { flex: 1, color: Aurora.textDim, fontSize: 12, lineHeight: 18 },
-  statusCard: { backgroundColor: Aurora.card, borderRadius: 14, padding: 18, borderWidth: 1, borderColor: Aurora.border, alignItems: 'center', marginBottom: 14 },
-  statusLabel: { color: Aurora.text, fontSize: 15, fontWeight: '700', textAlign: 'center' },
-  barTrack: { width: '100%', height: 8, borderRadius: 4, backgroundColor: Aurora.surface, marginTop: 14, overflow: 'hidden' },
-  barFill: { height: 8, borderRadius: 4, backgroundColor: Aurora.primary },
-  pct: { color: Aurora.textDim, fontSize: 13, marginTop: 8, fontWeight: '700' },
-  sendBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: Aurora.primary, borderRadius: 12, paddingVertical: 14 },
+  title: { color: c.text, fontSize: 18, fontWeight: '800' },
+  infoCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: c.card, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: c.border, marginBottom: 14 },
+  infoTxt: { flex: 1, color: c.textDim, fontSize: 12, lineHeight: 18 },
+  statusCard: { backgroundColor: c.card, borderRadius: 14, padding: 18, borderWidth: 1, borderColor: c.border, alignItems: 'center', marginBottom: 14 },
+  statusLabel: { color: c.text, fontSize: 15, fontWeight: '700', textAlign: 'center' },
+  barTrack: { width: '100%', height: 8, borderRadius: 4, backgroundColor: c.surface, marginTop: 14, overflow: 'hidden' },
+  barFill: { height: 8, borderRadius: 4, backgroundColor: c.primary },
+  pct: { color: c.textDim, fontSize: 13, marginTop: 8, fontWeight: '700' },
+  sendBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: c.primary, borderRadius: 12, paddingVertical: 14 },
   sendTxt: { color: '#04130D', fontWeight: '800', fontSize: 15 },
   dim: { opacity: 0.5 },
-  note: { color: Aurora.textFaint, fontSize: 11, textAlign: 'center', marginTop: 14, lineHeight: 16 },
+  note: { color: c.textFaint, fontSize: 11, textAlign: 'center', marginTop: 14, lineHeight: 16 },
 });
