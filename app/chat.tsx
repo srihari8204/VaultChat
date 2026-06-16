@@ -48,6 +48,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import { Sheet } from '../components/ui';
 import { getCurrentUserAsync } from './(constants)/authService';
 
 // Fire-and-forget haptic (no-op on web / if unavailable).
@@ -157,6 +158,7 @@ export default function ChatScreen() {
   // and the bubble renders obscured text until the receiver tilts the
   // device past ~45°. Sender always sees the plaintext.
   const [nextInvisibleInk, setNextInvisibleInk] = useState(false);
+  const [attachOpen, setAttachOpen] = useState(false);
   // Global "tilt revealed" state — flips true when the gyro reports any
   // axis past ~45° (~0.78 rad). Shared by every invisible-ink bubble on
   // screen, so a single tilt reveals all of them at once.
@@ -1127,50 +1129,28 @@ export default function ChatScreen() {
     }
   }, [chatId, sending]);
 
-  // ── Attach menu ───────────────────────────────────────────
-  // Photo / Video / View-once photo / View-once video / Sticker / File.
+  // ── Attach menu (bottom sheet — U4) ───────────────────────
+  // Photo / Video / View-once / Sticker / Invisible Ink / Poll / Location / File.
   const onPressAttach = useCallback(() => {
     if (sending) return;
-    Alert.alert('Attach', undefined, [
-      { text: '📷 Photo',           onPress: () => onPickMedia('images') },
-      { text: '🎥 Video',           onPress: () => onPickMedia('videos') },
-      { text: '👁️ View-once photo', onPress: () => onPickMedia('images', { viewOnce: true }) },
-      { text: '👁️ View-once video', onPress: () => onPickMedia('videos', { viewOnce: true }) },
-      { text: '🎨 Sticker', onPress: () => {
-        const peer = chat?.type === 'direct' && meId
-          ? chat.members.find(m => m.userId !== meId)
-          : null;
-        router.push({
-          pathname: '/stickers' as any,
-          params: { chatId, peerName: peer?.name || chat?.name || '' },
-        });
-      }},
-      {
-        text: nextInvisibleInk ? '✨ Invisible Ink: armed — disarm' : '✨ Invisible Ink (next message)',
-        onPress: () => setNextInvisibleInk(v => !v),
-      },
-      { text: '📊 Poll', onPress: () => {
-        const peer = chat?.type === 'direct' && meId
-          ? chat.members.find(m => m.userId !== meId)
-          : null;
-        router.push({
-          pathname: '/create-poll' as any,
-          params: { chatId, peerName: peer?.name || chat?.name || '' },
-        });
-      }},
-      { text: '📍 Location', onPress: () => {
-        const peer = chat?.type === 'direct' && meId
-          ? chat.members.find(m => m.userId !== meId)
-          : null;
-        router.push({
-          pathname: '/location' as any,
-          params: { chatId, name: peer?.name || chat?.name || '' },
-        });
-      }},
-      { text: '📎 File',            onPress: onPickFile  },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  }, [sending, onPickMedia, onPickFile, router, chatId, chat, meId, nextInvisibleInk]);
+    setAttachOpen(true);
+  }, [sending]);
+
+  const attachActions = useMemo(() => {
+    const peer = chat?.type === 'direct' && meId ? chat.members.find(m => m.userId !== meId) : null;
+    const peerName = peer?.name || chat?.name || '';
+    return [
+      { label: 'Photo',           icon: 'image' as const,      onPress: () => onPickMedia('images') },
+      { label: 'Video',           icon: 'videocam' as const,   onPress: () => onPickMedia('videos') },
+      { label: 'View-once photo', icon: 'eye' as const,        onPress: () => onPickMedia('images', { viewOnce: true }) },
+      { label: 'View-once video', icon: 'eye-outline' as const, onPress: () => onPickMedia('videos', { viewOnce: true }) },
+      { label: 'Sticker',         icon: 'happy' as const,      onPress: () => router.push({ pathname: '/stickers' as any, params: { chatId, peerName } }) },
+      { label: nextInvisibleInk ? 'Invisible Ink: armed — disarm' : 'Invisible Ink (next message)', icon: 'sparkles' as const, onPress: () => setNextInvisibleInk(v => !v) },
+      { label: 'Poll',            icon: 'stats-chart' as const, onPress: () => router.push({ pathname: '/create-poll' as any, params: { chatId, peerName } }) },
+      { label: 'Location',        icon: 'location' as const,   onPress: () => router.push({ pathname: '/location' as any, params: { chatId, name: peerName } }) },
+      { label: 'File',            icon: 'document' as const,   onPress: onPickFile },
+    ];
+  }, [onPickMedia, onPickFile, router, chatId, chat, meId, nextInvisibleInk]);
 
   // ── Load older on scroll-up ───────────────────────────────
   const onEndReached = useCallback(async () => {
@@ -1676,6 +1656,14 @@ export default function ChatScreen() {
         onClose={() => setActionSheet(null)}
         onReact={(e) => { if (actionSheet) toggleReaction(actionSheet.msg, e); }}
         actions={actionSheet ? buildSheetActions(actionSheet.msg, actionSheet.plain) : []}
+      />
+
+      {/* Attach menu (U4 bottom sheet) */}
+      <Sheet
+        visible={attachOpen}
+        title="Attach"
+        actions={attachActions}
+        onClose={() => setAttachOpen(false)}
       />
 
       {/* Forward chat picker */}
