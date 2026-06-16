@@ -3,17 +3,18 @@
 // translate, check tone, fix grammar, shorten. Conversation tasks decrypt the
 // recent messages locally (E2E) before sending the text to the on-prem model.
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, TextInput,
   FlatList, StatusBar, KeyboardAvoidingView, Platform,
   ActivityIndicator,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { useLocalSearchParams, Stack } from 'expo-router';
 import { aiChat, aiAssist, type AiTask } from '../lib/ai';
 import { getMessages, decryptFromChat } from '../lib/chatService';
 
-const C = { bg: '#FFFFFF', accent: '#A78BFA', card: '#F9FAFB', green: '#10B981' };
 
 const QUICK_PROMPTS: { id: string; label: string; icon: string }[] = [
   { id: 'summarize', label: 'Summarize Chat', icon: '📝' },
@@ -32,7 +33,14 @@ const TASK_FOR: Record<string, AiTask> = {
 
 interface Msg { id: string; text: string; isAI: boolean }
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function AIAssistantScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const { chatId, peerName } = useLocalSearchParams();
   const [messages, setMessages] = useState<Msg[]>([
     { id: '0', text: 'Hi! I can summarize this chat, draft replies, translate, check tone, fix grammar, and answer questions. Tap a shortcut or just ask.', isAI: true },
@@ -140,7 +148,7 @@ export default function AIAssistantScreen() {
           <View style={s.thinkingRow}>
             <View style={s.aiAvatar}><Text style={{ fontSize: 16 }}>{"🤖"}</Text></View>
             <View style={s.thinkingBubble}>
-              <ActivityIndicator color={C.accent} size="small" />
+              <ActivityIndicator color={colors.accent} size="small" />
               <Text style={s.thinkingTxt}>Thinking...</Text>
             </View>
           </View>
@@ -159,12 +167,12 @@ export default function AIAssistantScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
   contextBar: { backgroundColor: '#A78BFA15', paddingHorizontal: 14, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
-  contextTxt: { color: C.accent, fontSize: 11, fontWeight: '600' },
+  contextTxt: { color: c.accent, fontSize: 11, fontWeight: '600' },
   quickRow: { paddingHorizontal: 12, paddingVertical: 8, gap: 8 },
-  quickBtn: { backgroundColor: C.card, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: '#E5E7EB' },
+  quickBtn: { backgroundColor: c.card, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: '#E5E7EB' },
   quickIcon: { fontSize: 14 },
   quickLabel: { color: '#ccc', fontSize: 12, fontWeight: '600' },
   msgRow: { marginBottom: 8, flexDirection: 'row', alignItems: 'flex-end', gap: 6 },
@@ -172,14 +180,14 @@ const s = StyleSheet.create({
   userRow: { justifyContent: 'flex-end' },
   aiAvatar: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#A78BFA22', justifyContent: 'center', alignItems: 'center' },
   bubble: { maxWidth: '82%', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10 },
-  aiBubble: { backgroundColor: C.card, borderBottomLeftRadius: 2 },
+  aiBubble: { backgroundColor: c.card, borderBottomLeftRadius: 2 },
   userBubble: { backgroundColor: '#DCF8C6', borderBottomRightRadius: 2 },
   msgTxt: { color: '#1F2937', fontSize: 14, lineHeight: 21 },
   thinkingRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingBottom: 8 },
-  thinkingBubble: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.card, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10 },
+  thinkingBubble: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: c.card, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10 },
   thinkingTxt: { color: '#6B7280', fontSize: 13 },
   inputBar: { flexDirection: 'row', alignItems: 'flex-end', backgroundColor: '#FFFFFF', padding: 10, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
   input: { flex: 1, backgroundColor: '#F3F4F6', color: '#1F2937', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, fontSize: 14, maxHeight: 100, marginRight: 8 },
-  sendBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: C.accent, justifyContent: 'center', alignItems: 'center' },
+  sendBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: c.accent, justifyContent: 'center', alignItems: 'center' },
   sendTxt: { color: '#000', fontSize: 18, fontWeight: '900' },
 });

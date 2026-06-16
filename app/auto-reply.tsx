@@ -3,15 +3,16 @@
 // Schedule-based: work hours, sleep, custom
 // Per-contact exceptions
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, TextInput,
   StatusBar, Switch, ScrollView, Alert, FlatList,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { Stack } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const C = { bg: '#FFFFFF', accent: '#4A9FFF', card: '#F9FAFB', green: '#10B981', danger: '#FF3C6E' };
 const STORAGE_KEY = 'vc_auto_reply';
 
 const TEMPLATES = [
@@ -31,7 +32,14 @@ const SCHEDULES = [
   { id: 's5', label: 'Custom', desc: 'Set your own hours', icon: '\u2699\uFE0F' },
 ];
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function AutoReplyScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const [enabled, setEnabled] = useState(false);
   const [message, setMessage] = useState("I'm busy right now. I'll get back to you soon!");
   const [schedule, setSchedule] = useState('s1');
@@ -75,7 +83,7 @@ export default function AutoReplyScreen() {
             <Text style={s.masterDesc}>{enabled ? 'Active — sending auto-replies' : 'Disabled — manual replies only'}</Text>
           </View>
           <Switch value={enabled} onValueChange={v => { setEnabled(v); }}
-            thumbColor={enabled ? C.green : '#6B7280'} trackColor={{ false: '#E5E7EB', true: '#10B98144' }} />
+            thumbColor={enabled ? colors.primary : '#6B7280'} trackColor={{ false: '#E5E7EB', true: '#10B98144' }} />
         </View>
 
         {/* Message */}
@@ -106,10 +114,10 @@ export default function AutoReplyScreen() {
             onPress={() => setSchedule(sc.id)}>
             <Text style={s.scheduleIcon}>{sc.icon}</Text>
             <View style={{ flex: 1 }}>
-              <Text style={[s.scheduleName, schedule === sc.id && { color: C.accent }]}>{sc.label}</Text>
+              <Text style={[s.scheduleName, schedule === sc.id && { color: colors.accent }]}>{sc.label}</Text>
               <Text style={s.scheduleDesc}>{sc.desc}</Text>
             </View>
-            {schedule === sc.id && <Text style={{ color: C.accent }}>{"\u2713"}</Text>}
+            {schedule === sc.id && <Text style={{ color: colors.accent }}>{"\u2713"}</Text>}
           </TouchableOpacity>
         ))}
 
@@ -121,7 +129,7 @@ export default function AutoReplyScreen() {
             <Text style={s.settDesc}>Only auto-reply once per person until you manually reply</Text>
           </View>
           <Switch value={replyOnce} onValueChange={setReplyOnce}
-            thumbColor={replyOnce ? C.accent : '#6B7280'} trackColor={{ false: '#E5E7EB', true: '#4A9FFF44' }} />
+            thumbColor={replyOnce ? colors.accent : '#6B7280'} trackColor={{ false: '#E5E7EB', true: '#4A9FFF44' }} />
         </View>
         <View style={s.settRow}>
           <View style={{ flex: 1 }}>
@@ -129,7 +137,7 @@ export default function AutoReplyScreen() {
             <Text style={s.settDesc}>Skip auto-reply for your trusted contacts</Text>
           </View>
           <Switch value={excludeTrusted} onValueChange={setExcludeTrusted}
-            thumbColor={excludeTrusted ? C.accent : '#6B7280'} trackColor={{ false: '#E5E7EB', true: '#4A9FFF44' }} />
+            thumbColor={excludeTrusted ? colors.accent : '#6B7280'} trackColor={{ false: '#E5E7EB', true: '#4A9FFF44' }} />
         </View>
 
         <TouchableOpacity style={s.saveBtn} onPress={save}>
@@ -142,25 +150,25 @@ export default function AutoReplyScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg, padding: 16 },
-  masterCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 16, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#E5E7EB' },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg, padding: 16 },
+  masterCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, borderRadius: 16, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#E5E7EB' },
   masterTitle: { color: '#fff', fontSize: 18, fontWeight: '900' },
   masterDesc: { color: '#9CA3AF', fontSize: 12, marginTop: 4 },
   sectionTitle: { color: '#6B7280', fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 8 },
-  msgBox: { backgroundColor: C.card, borderRadius: 14, padding: 4, borderWidth: 1, borderColor: '#E5E7EB' },
+  msgBox: { backgroundColor: c.card, borderRadius: 14, padding: 4, borderWidth: 1, borderColor: '#E5E7EB' },
   msgInput: { color: '#fff', fontSize: 15, padding: 12, minHeight: 80, textAlignVertical: 'top' },
   charCount: { color: '#9CA3AF', fontSize: 10, textAlign: 'right', padding: 8 },
   templateBtn: { backgroundColor: '#4A9FFF22', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: '#4A9FFF33' },
-  templateLabel: { color: C.accent, fontSize: 12, fontWeight: '600' },
-  scheduleRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 14, marginBottom: 6, borderWidth: 1, borderColor: '#E5E7EB', gap: 12 },
+  templateLabel: { color: c.accent, fontSize: 12, fontWeight: '600' },
+  scheduleRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, borderRadius: 12, padding: 14, marginBottom: 6, borderWidth: 1, borderColor: '#E5E7EB', gap: 12 },
   scheduleActive: { borderColor: '#4A9FFF44', backgroundColor: '#4A9FFF08' },
   scheduleIcon: { fontSize: 20 },
   scheduleName: { color: '#1F2937', fontSize: 14, fontWeight: '700' },
   scheduleDesc: { color: '#6B7280', fontSize: 11, marginTop: 2 },
-  settRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 14, marginBottom: 6, borderWidth: 1, borderColor: '#E5E7EB' },
+  settRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, borderRadius: 12, padding: 14, marginBottom: 6, borderWidth: 1, borderColor: '#E5E7EB' },
   settName: { color: '#1F2937', fontSize: 13, fontWeight: '700' },
   settDesc: { color: '#6B7280', fontSize: 11, marginTop: 2 },
-  saveBtn: { backgroundColor: C.accent, borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 16 },
+  saveBtn: { backgroundColor: c.accent, borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 16 },
   saveTxt: { color: '#000', fontSize: 16, fontWeight: '900' },
 });
