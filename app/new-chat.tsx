@@ -102,6 +102,9 @@ export default function NewChatScreen() {
           <Text style={S.backTxt}>←</Text>
         </TouchableOpacity>
         <Text style={S.title}>New chat</Text>
+        <TouchableOpacity onPress={() => router.push('/qr-contact')} style={S.qrBtn} activeOpacity={0.7}>
+          <Text style={S.qrTxt}>⧉ QR</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Mode toggle */}
@@ -252,7 +255,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   header:    { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border, gap: 8 },
   backBtn:   { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   backTxt:   { color: c.text, fontSize: 24 },
-  title:     { color: c.text, fontSize: 18, fontWeight: '700' },
+  title:     { color: c.text, fontSize: 18, fontWeight: '700', flex: 1 },
+  qrBtn:     { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: c.border },
+  qrTxt:     { color: c.primary, fontSize: 14, fontWeight: '700' },
 
   toggle:    { flexDirection: 'row', margin: 20, backgroundColor: c.card, borderRadius: 12, padding: 4, gap: 4 },
   toggleBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 8 },

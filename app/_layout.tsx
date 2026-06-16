@@ -202,6 +202,7 @@ function RootLayout() {
         <Stack.Screen name="videocall" />
         <Stack.Screen name="voicecall" />
         <Stack.Screen name="qr-contact" />
+        <Stack.Screen name="add/[...segments]" options={{ headerShown: false }} />
         <Stack.Screen name="file-preview" />
         <Stack.Screen name="vaultbeam" />
         <Stack.Screen name="transfers" />
