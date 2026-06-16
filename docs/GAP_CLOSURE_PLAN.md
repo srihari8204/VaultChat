@@ -41,6 +41,8 @@
   - **U5 (partial) ✅ tab bar de-emoji** — `app/(tabs)/_layout.tsx` rewritten off emoji icons (💬🟢📞🧩🔔👤 — the "#1 beta tell") to **Ionicons** (filled active / outline inactive) + Aurora tokens (was off-system `#6C63FF`) + `AppText` labels. **Follow-on:** live unread `tabBarBadge` on Chats/Alerts (needs a count provider). Typechecks clean. Client-only.
   - **U7 (slice) ✅ avatar colors** — chat-list initials avatars use name-hash `avatarColor()` instead of one fixed emerald.
   - **U6 (slice) ✅ chat-surface polish** — `app/chat.tsx`: **date separators** ("Today"/"Yesterday"/date chips) above the first message of each day in the inverted list; **delivery ticks** are now vector Ionicons (`time-outline`/`checkmark`/`checkmark-done`, read = blue) instead of emoji ⏳/✓/✓✓; header **E2E lock** is a vector `lock-closed` glyph. Typechecks clean. **Follow-on:** consecutive-message grouping, bubble tail/colors, reaction chips overlaid on the bubble.
+  - **U8 (slice) ✅ haptics** — `app/chat.tsx` now fires haptic feedback on send (light), message long-press (medium), and reaction toggle (light) — chat had none before. **Follow-on:** blurhash placeholders, list batching props, skeleton loaders, systematic safe-area insets.
+  - **Note (not a gap):** the **Calls tab** is an honest "coming back soon" placeholder (no fake data); a real call log needs a full-stack `call_history` (`services/webrtcService.ts` is orphaned/in-memory) and overlaps the infra-blocked calls feature — deferred.
 
 ## Definition of Done (applies to every workstream)
 

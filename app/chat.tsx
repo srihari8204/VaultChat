@@ -47,7 +47,13 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { getCurrentUserAsync } from './(constants)/authService';
+
+// Fire-and-forget haptic (no-op on web / if unavailable).
+const haptic = (style: Haptics.ImpactFeedbackStyle = Haptics.ImpactFeedbackStyle.Light) => {
+  if (Platform.OS !== 'web') Haptics.impactAsync(style).catch(() => {});
+};
 import { MessageActionSheet, type SheetAction } from '../components/MessageActionSheet';
 import { getAccessToken } from '../lib/api';
 import { getLiveKey, putLiveKey, clearLiveKey, decryptPosition } from '../lib/liveLocationCrypto';
@@ -564,6 +570,7 @@ export default function ChatScreen() {
   const onSend = useCallback(async () => {
     const text = input.trim();
     if (!text || sending) return;
+    haptic();
     setSending(true);
     stopTypingIfActive();
     if (draftTimer.current) clearTimeout(draftTimer.current);
@@ -610,6 +617,7 @@ export default function ChatScreen() {
 
   // ── Long-press menu on a message bubble ───────────────────
   const onLongPressMessage = useCallback((msg: DisplayMessage, plain: string) => {
+    haptic(Haptics.ImpactFeedbackStyle.Medium);
     // Failed (queued) bubble: offer Retry / Cancel-and-remove.
     if (msg._state === 'failed' && msg._tempId) {
       Alert.alert(
@@ -903,6 +911,7 @@ export default function ChatScreen() {
 
   // ── React / Reply / Forward handlers ──────────────────────
   const toggleReaction = useCallback(async (msg: DisplayMessage, emoji: string) => {
+    haptic();
     setReactPicker(null);
     const mineAlready = (reactions[msg.id] || []).some(r => r.emoji === emoji && r.mine);
     // Optimistic — server will broadcast back and reconcile via socket handler.
