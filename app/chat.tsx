@@ -46,6 +46,7 @@ import {
   Text, TextInput, TouchableOpacity,
   View,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { MessageActionSheet, type SheetAction } from '../components/MessageActionSheet';
 import { getAccessToken } from '../lib/api';
@@ -1339,7 +1340,9 @@ export default function ChatScreen() {
           {chat && (
             <Text style={S.sub}>
               {headerSub}
-              <Text style={S.e2eBadge}>  ·  🔒 secured</Text>
+              <Text style={S.e2eBadge}>  ·  </Text>
+              <Ionicons name="lock-closed" size={11} color="#10B981" />
+              <Text style={S.e2eBadge}> secured</Text>
             </Text>
           )}
         </TouchableOpacity>
@@ -1463,31 +1466,40 @@ export default function ChatScreen() {
         keyExtractor={(m) => String(m.id)}
         inverted
         contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 8 }}
-        renderItem={({ item }) => (
-          <View style={item.id === flashId ? { backgroundColor: 'rgba(16,185,129,0.18)', borderRadius: 12 } : undefined}>
-          <MemoBubble
-            msg={item}
-            meId={meId}
-            member={membersById.get(item.senderId)}
-            chatId={chatId}
-            otherMembers={otherMembers}
-            onLongPress={onLongPressMessage}
-            reactionsForMsg={reactions[item.id]}
-            onToggleReaction={(emoji) => toggleReaction(item, emoji)}
-            replyTarget={item.replyToId ? replyById.get(item.replyToId) ?? null : null}
-            replyTargetMember={item.replyToId
-              ? (() => {
-                  const t = replyById.get(item.replyToId);
-                  return t ? membersById.get(t.senderId) : undefined;
-                })()
-              : undefined}
-            highlight={searchOpen && searchQ.trim().length > 0 ? searchQ.trim() : null}
-            tiltRevealed={tiltRevealed}
-            pollVotesForMsg={pollVotes[item.id]}
-            onPollVoteChange={(next) => setPollVotes(prev => ({ ...prev, [item.id]: next }))}
-          />
+        renderItem={({ item, index }) => {
+          // Inverted list: the older message is at index+1. Show a date chip
+          // above the first (oldest) message of each calendar day.
+          const older = messages[index + 1];
+          const showDate = !older || !isSameCalendarDay(item.createdAt, older.createdAt);
+          return (
+          <View>
+            {showDate && <DateChip iso={item.createdAt} />}
+            <View style={item.id === flashId ? { backgroundColor: 'rgba(16,185,129,0.18)', borderRadius: 12 } : undefined}>
+            <MemoBubble
+              msg={item}
+              meId={meId}
+              member={membersById.get(item.senderId)}
+              chatId={chatId}
+              otherMembers={otherMembers}
+              onLongPress={onLongPressMessage}
+              reactionsForMsg={reactions[item.id]}
+              onToggleReaction={(emoji) => toggleReaction(item, emoji)}
+              replyTarget={item.replyToId ? replyById.get(item.replyToId) ?? null : null}
+              replyTargetMember={item.replyToId
+                ? (() => {
+                    const t = replyById.get(item.replyToId);
+                    return t ? membersById.get(t.senderId) : undefined;
+                  })()
+                : undefined}
+              highlight={searchOpen && searchQ.trim().length > 0 ? searchQ.trim() : null}
+              tiltRevealed={tiltRevealed}
+              pollVotesForMsg={pollVotes[item.id]}
+              onPollVoteChange={(next) => setPollVotes(prev => ({ ...prev, [item.id]: next }))}
+            />
+            </View>
           </View>
-        )}
+          );
+        }}
         onScrollToIndexFailed={(info) => {
           // Inverted, variable-height rows have no getItemLayout — approximate
           // then retry the precise scroll once layout settles.
@@ -2222,6 +2234,27 @@ function VideoBubble({
   );
 }
 
+// ── Date separators (U6) ─────────────────────────────────────────────
+function isSameCalendarDay(a: string, b: string): boolean {
+  const x = new Date(a), y = new Date(b);
+  return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate();
+}
+function dayLabel(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  const yest = new Date(now); yest.setDate(now.getDate() - 1);
+  if (isSameCalendarDay(iso, now.toISOString())) return 'Today';
+  if (isSameCalendarDay(iso, yest.toISOString())) return 'Yesterday';
+  return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+}
+function DateChip({ iso }: { iso: string }) {
+  return (
+    <View style={S.dateChipRow}>
+      <View style={S.dateChip}><Text style={S.dateChipTxt}>{dayLabel(iso)}</Text></View>
+    </View>
+  );
+}
+
 function MessageBubble({
   msg, meId, member, chatId, otherMembers, onLongPress,
   reactionsForMsg, onToggleReaction,
@@ -2527,12 +2560,12 @@ function MessageBubble({
             <Text style={S.vanishBadge}> · 💨 vanish</Text>
           )}
           {tickState && (
-            <Text style={tickState === 'read' ? S.tickRead : S.tick}>
-              {' '}
-              {tickState === 'pending'   ? '⏳'
-                : tickState === 'sent'   ? '✓'
-                : '✓✓'}
-            </Text>
+            <Ionicons
+              name={tickState === 'pending' ? 'time-outline' : tickState === 'sent' ? 'checkmark' : 'checkmark-done'}
+              size={14}
+              color={tickState === 'read' ? '#4A9FFF' : SUBTLE}
+              style={{ marginLeft: 3 }}
+            />
           )}
         </Text>
       </TouchableOpacity>
@@ -2600,6 +2633,10 @@ const S = StyleSheet.create({
   memoryBubbleBody:    { color: TEXT, fontSize: 13, marginTop: 4, fontStyle: 'italic' },
   memoryBubbleDismiss: { color: SUBTLE, fontSize: 10, marginTop: 6 },
   screenshotBannerTxt: { color: '#FCD34D', fontSize: 12, fontWeight: '600' },
+
+  dateChipRow:   { alignItems: 'center', marginVertical: 10 },
+  dateChip:      { backgroundColor: 'rgba(255,255,255,0.07)', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 4 },
+  dateChipTxt:   { color: SUBTLE, fontSize: 11.5, fontWeight: '700' },
 
   bubbleRow:     { marginVertical: 4, flexDirection: 'row' },
   bubbleRowMine: { justifyContent: 'flex-end' },

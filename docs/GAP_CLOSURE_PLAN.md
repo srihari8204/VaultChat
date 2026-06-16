@@ -39,6 +39,8 @@
   - **U1 ✅ design-token foundation** — expanded `constants/theme.ts` with `SPACING` (4-pt), `RADIUS`, `ELEVATION` (RN shadow presets), `MOTION` (durations + spring configs), `FONT`, `TYPOGRAPHY` (type scale w/ family+weight+lineHeight), and `AVATAR_PALETTE` + `avatarColor()` (name-hash per-contact colors for U7). All additive — existing `Aurora.*` untouched.
   - **U2 ✅ brand fonts + Text wrapper** — installed `@expo-google-fonts/sora` + `/nunito-sans`; root layout loads Sora (700/800) + Nunito Sans (400/600/700) **non-blocking** via `useFonts` and provides `FontReadyContext`. New `components/ui/Text.tsx` `AppText` (variant→TYPOGRAPHY scale; brand family once loaded, system-font + weight fallback otherwise — never blank). Adoption is incremental per screen.
   - **U5 (partial) ✅ tab bar de-emoji** — `app/(tabs)/_layout.tsx` rewritten off emoji icons (💬🟢📞🧩🔔👤 — the "#1 beta tell") to **Ionicons** (filled active / outline inactive) + Aurora tokens (was off-system `#6C63FF`) + `AppText` labels. **Follow-on:** live unread `tabBarBadge` on Chats/Alerts (needs a count provider). Typechecks clean. Client-only.
+  - **U7 (slice) ✅ avatar colors** — chat-list initials avatars use name-hash `avatarColor()` instead of one fixed emerald.
+  - **U6 (slice) ✅ chat-surface polish** — `app/chat.tsx`: **date separators** ("Today"/"Yesterday"/date chips) above the first message of each day in the inverted list; **delivery ticks** are now vector Ionicons (`time-outline`/`checkmark`/`checkmark-done`, read = blue) instead of emoji ⏳/✓/✓✓; header **E2E lock** is a vector `lock-closed` glyph. Typechecks clean. **Follow-on:** consecutive-message grouping, bubble tail/colors, reaction chips overlaid on the bubble.
 
 ## Definition of Done (applies to every workstream)
 
