@@ -9,17 +9,25 @@
 // like Whisper/Google Speech — that's a separate, key-gated integration. This
 // screen does real live dictation, which the on-device recognizer supports.)
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, StatusBar, Alert, TextInput, ScrollView,
 } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Voice, { type SpeechResultsEvent, type SpeechErrorEvent } from '@react-native-voice/voice';
-import { Aurora } from '../constants/theme';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { sendMessage } from '../lib/chatService';
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function VoiceTranscribeScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const { chatId } = useLocalSearchParams<{ chatId?: string }>();
   const [listening, setListening] = useState(false);
@@ -80,7 +88,7 @@ export default function VoiceTranscribeScreen() {
       <StatusBar barStyle="light-content" />
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
-          <Ionicons name="arrow-back" size={24} color={Aurora.text} />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.title}>Voice to Text</Text>
         <View style={{ width: 40 }} />
@@ -98,7 +106,7 @@ export default function VoiceTranscribeScreen() {
             value={text}
             onChangeText={setText}
             placeholder="Your transcribed text appears here…"
-            placeholderTextColor={Aurora.textFaint}
+            placeholderTextColor={colors.textFaint}
             multiline
           />
           {!!partial && <Text style={s.partial}>{partial}…</Text>}
@@ -117,7 +125,7 @@ export default function VoiceTranscribeScreen() {
 
         <View style={s.actions}>
           <TouchableOpacity style={[s.actionBtn, s.clearBtn]} onPress={() => { setText(''); setPartial(''); }} disabled={!text}>
-            <Text style={[s.actionTxt, { color: Aurora.textDim }]}>Clear</Text>
+            <Text style={[s.actionTxt, { color: colors.textDim }]}>Clear</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[s.actionBtn, s.sendBtn, (!text.trim() || sending) && s.dim]} onPress={send} disabled={!text.trim() || sending}>
             <Text style={[s.actionTxt, { color: '#04130D' }]}>{sending ? 'Sending…' : 'Send to chat'}</Text>
@@ -128,25 +136,25 @@ export default function VoiceTranscribeScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Aurora.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingHorizontal: 16, paddingBottom: 8 },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  title: { color: Aurora.text, fontSize: 18, fontWeight: '800' },
+  title: { color: c.text, fontSize: 18, fontWeight: '800' },
   body: { flex: 1, padding: 16 },
-  infoCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: Aurora.card, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: Aurora.border, marginBottom: 14 },
-  infoTxt: { flex: 1, color: Aurora.textDim, fontSize: 12, lineHeight: 18 },
-  textArea: { flex: 1, backgroundColor: Aurora.card, borderRadius: 14, borderWidth: 1, borderColor: Aurora.border, marginBottom: 14 },
-  input: { color: Aurora.text, fontSize: 16, lineHeight: 24, minHeight: 120, textAlignVertical: 'top' },
-  partial: { color: Aurora.textDim, fontSize: 15, fontStyle: 'italic', marginTop: 6 },
+  infoCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: c.card, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: c.border, marginBottom: 14 },
+  infoTxt: { flex: 1, color: c.textDim, fontSize: 12, lineHeight: 18 },
+  textArea: { flex: 1, backgroundColor: c.card, borderRadius: 14, borderWidth: 1, borderColor: c.border, marginBottom: 14 },
+  input: { color: c.text, fontSize: 16, lineHeight: 24, minHeight: 120, textAlignVertical: 'top' },
+  partial: { color: c.textDim, fontSize: 15, fontStyle: 'italic', marginTop: 6 },
   controls: { alignItems: 'center', marginBottom: 16 },
-  micBtn: { width: 72, height: 72, borderRadius: 36, backgroundColor: Aurora.primary, alignItems: 'center', justifyContent: 'center' },
+  micBtn: { width: 72, height: 72, borderRadius: 36, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
   micActive: { backgroundColor: '#FF6B35' },
-  micLabel: { color: Aurora.textDim, fontSize: 12, marginTop: 8 },
+  micLabel: { color: c.textDim, fontSize: 12, marginTop: 8 },
   actions: { flexDirection: 'row', gap: 10 },
   actionBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
-  clearBtn: { backgroundColor: Aurora.surface, borderWidth: 1, borderColor: Aurora.border },
-  sendBtn: { backgroundColor: Aurora.primary },
+  clearBtn: { backgroundColor: c.surface, borderWidth: 1, borderColor: c.border },
+  sendBtn: { backgroundColor: c.primary },
   dim: { opacity: 0.5 },
   actionTxt: { fontSize: 14, fontWeight: '800' },
 });

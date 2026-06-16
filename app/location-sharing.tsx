@@ -10,16 +10,17 @@
 
 import * as Location from 'expo-location';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState , useMemo} from 'react';
 import {
   ActivityIndicator, Alert, Platform, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
-import { Aurora } from '../constants/theme';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { getSocket } from '../lib/socket';
 import { sendMessage } from '../lib/chatService';
 import { newLiveKey, encryptPosition } from '../lib/liveLocationCrypto';
 
-const C = { current: Aurora.primary, live: '#FF6B35', manual: Aurora.purple, link: Aurora.accent };
+const C = { current: '#10B981', live: '#FF6B35', manual: '#8B5CF6', link: '#06B6D4' };
 const DURATIONS = [
   { val: 15, label: '15 min' }, { val: 30, label: '30 min' }, { val: 60, label: '1 hr' },
   { val: 90, label: '90 min' }, { val: 120, label: '2 hrs' }, { val: 180, label: '3 hrs' },
@@ -28,7 +29,14 @@ const DURATIONS = [
 type Mode = 'current' | 'live' | 'manual';
 type Screen = 'picker' | 'dur-current' | 'dur-live' | 'active';
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function LocationSharingScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const { chatId } = useLocalSearchParams<{ chatId?: string }>();
 
@@ -172,21 +180,21 @@ export default function LocationSharingScreen() {
           <View style={s.durGrid}>
             {DURATIONS.map(d => (
               <TouchableOpacity key={d.val} style={[s.durCard, selDur === d.val && { backgroundColor: `${col}18`, borderColor: `${col}55` }]} onPress={() => setSelDur(d.val)}>
-                <Text style={[s.durLabel, { color: selDur === d.val ? col : Aurora.textDim }]}>{d.label}</Text>
+                <Text style={[s.durLabel, { color: selDur === d.val ? col : colors.textDim }]}>{d.label}</Text>
               </TouchableOpacity>
             ))}
           </View>
           {live && (
             <TouchableOpacity style={[s.durCard, { width: '100%', marginBottom: 16 }, selDur === -1 && { backgroundColor: `${col}18`, borderColor: `${col}55` }]} onPress={() => setSelDur(-1)}>
-              <Text style={[s.durLabel, { color: selDur === -1 ? col : Aurora.textDim }]}>♾️ Until I stop</Text>
+              <Text style={[s.durLabel, { color: selDur === -1 ? col : colors.textDim }]}>♾️ Until I stop</Text>
             </TouchableOpacity>
           )}
           <TouchableOpacity
-            style={[s.btn, { backgroundColor: selDur !== null ? col : Aurora.surface }]}
+            style={[s.btn, { backgroundColor: selDur !== null ? col : colors.surface }]}
             disabled={selDur === null}
             onPress={() => { if (selDur !== null) startSharing(live ? 'live' : 'current', selDur === -1 ? null : selDur); }}
           >
-            <Text style={[s.btnTxt, { color: selDur !== null ? '#fff' : Aurora.textDim }]}>{live ? '🔴 Start live' : '📌 Share location'}</Text>
+            <Text style={[s.btnTxt, { color: selDur !== null ? '#fff' : colors.textDim }]}>{live ? '🔴 Start live' : '📌 Share location'}</Text>
           </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
@@ -216,7 +224,7 @@ export default function LocationSharingScreen() {
               <Text style={s.optTitle}>{opt.title}</Text>
               <Text style={s.sub}>{opt.desc}</Text>
             </View>
-            <Text style={{ color: Aurora.textFaint, fontSize: 20 }}>›</Text>
+            <Text style={{ color: colors.textFaint, fontSize: 20 }}>›</Text>
           </TouchableOpacity>
         ))}
       </ScrollView>
@@ -224,20 +232,20 @@ export default function LocationSharingScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: Aurora.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: c.bg },
   center: { justifyContent: 'center', alignItems: 'center' },
-  heading: { fontSize: 22, fontWeight: '900', color: Aurora.text, marginBottom: 6 },
-  sub: { fontSize: 12, color: Aurora.textDim, lineHeight: 18 },
-  lbl: { fontSize: 9, fontWeight: '700', color: Aurora.textFaint, letterSpacing: 2, marginBottom: 8 },
-  modeCard: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16, borderRadius: 18, backgroundColor: Aurora.card, borderWidth: 1, marginBottom: 12 },
+  heading: { fontSize: 22, fontWeight: '900', color: c.text, marginBottom: 6 },
+  sub: { fontSize: 12, color: c.textDim, lineHeight: 18 },
+  lbl: { fontSize: 9, fontWeight: '700', color: c.textFaint, letterSpacing: 2, marginBottom: 8 },
+  modeCard: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16, borderRadius: 18, backgroundColor: c.card, borderWidth: 1, marginBottom: 12 },
   modeIcon: { width: 52, height: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  optTitle: { fontSize: 15, fontWeight: '800', color: Aurora.text },
+  optTitle: { fontSize: 15, fontWeight: '800', color: c.text },
   badge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderWidth: 1 },
   badgeText: { fontSize: 9, fontWeight: '700' },
   dot: { width: 6, height: 6, borderRadius: 3 },
   durGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
-  durCard: { width: '31%', padding: 12, borderRadius: 14, alignItems: 'center', backgroundColor: Aurora.surface, borderWidth: 1.5, borderColor: Aurora.border },
+  durCard: { width: '31%', padding: 12, borderRadius: 14, alignItems: 'center', backgroundColor: c.surface, borderWidth: 1.5, borderColor: c.border },
   durLabel: { fontSize: 12, fontWeight: '800' },
   btn: { borderRadius: 14, padding: 14, alignItems: 'center', marginBottom: 10 },
   btnTxt: { fontSize: 14, fontWeight: '800', color: '#fff' },

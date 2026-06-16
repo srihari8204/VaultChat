@@ -9,12 +9,13 @@
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState , useMemo} from 'react';
 import {
   ActivityIndicator, Animated, AppState, Keyboard, KeyboardAvoidingView,
   Platform, StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
-import { Aurora } from '../constants/theme';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import {
   clearPendingSignup, getPendingSignup, savePIN, saveUserProfile,
   sendOTP, verifyOTP, sendPhoneOTP, verifyPhoneOTP, hasPIN,
@@ -22,7 +23,14 @@ import {
 import { markSetupComplete } from '../services/securityService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function OTPScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const { phone, flow } = useLocalSearchParams<{ phone: string; flow?: string }>();
   const router = useRouter();
   const isPhone = flow === 'phone';
@@ -203,7 +211,7 @@ export default function OTPScreen() {
                   selectTextOnFocus
                   textContentType="oneTimeCode"
                   autoComplete={i === 0 ? ('sms-otp' as any) : 'off'}
-                  selectionColor={Aurora.primary}
+                  selectionColor={colors.primary}
                 />
                 <View style={[s.otpLine, digit ? s.otpLineFilled : null]} />
               </View>
@@ -251,38 +259,38 @@ async function submitEmailFlow(email: string, code: string, isSignup: boolean): 
   return true;
 }
 
-const s = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: Aurora.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen: { flex: 1, backgroundColor: c.bg },
   center: { alignItems: 'center', justifyContent: 'center' },
   backBtn: { paddingTop: 56, paddingLeft: 24, width: 80 },
-  backTxt: { color: Aurora.text, fontSize: 28, fontWeight: '300' },
+  backTxt: { color: c.text, fontSize: 28, fontWeight: '300' },
   content: { flex: 1, paddingHorizontal: 28, paddingTop: 32 },
 
-  title: { color: Aurora.text, fontSize: 30, fontWeight: '800', lineHeight: 36, marginBottom: 10 },
-  subtitle: { color: Aurora.textDim, fontSize: 14, marginBottom: 28 },
-  target: { color: Aurora.text, fontWeight: '700' },
+  title: { color: c.text, fontSize: 30, fontWeight: '800', lineHeight: 36, marginBottom: 10 },
+  subtitle: { color: c.textDim, fontSize: 14, marginBottom: 28 },
+  target: { color: c.text, fontWeight: '700' },
 
   autoBadge: { alignSelf: 'flex-start', backgroundColor: 'rgba(16,185,129,0.12)', borderColor: 'rgba(16,185,129,0.3)', borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, marginBottom: 18 },
-  autoTxt: { color: Aurora.primary, fontSize: 12, fontWeight: '700' },
+  autoTxt: { color: c.primary, fontSize: 12, fontWeight: '700' },
 
   otpRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 10, marginBottom: 14 },
   otpWrap: { flex: 1, alignItems: 'center' },
-  otpBox: { width: '100%', height: 58, textAlign: 'center', color: Aurora.text, fontSize: 26, fontWeight: '700' },
+  otpBox: { width: '100%', height: 58, textAlign: 'center', color: c.text, fontSize: 26, fontWeight: '700' },
   otpBoxFilled: {},
-  otpLine: { width: '100%', height: 2, borderRadius: 1, backgroundColor: Aurora.border },
-  otpLineFilled: { backgroundColor: Aurora.primary },
+  otpLine: { width: '100%', height: 2, borderRadius: 1, backgroundColor: c.border },
+  otpLineFilled: { backgroundColor: c.primary },
 
-  error: { color: Aurora.danger, fontSize: 13, marginBottom: 12 },
+  error: { color: c.danger, fontSize: 13, marginBottom: 12 },
 
-  verifyBtn: { height: 56, borderRadius: 16, backgroundColor: Aurora.primary, alignItems: 'center', justifyContent: 'center', marginTop: 18, marginBottom: 18 },
+  verifyBtn: { height: 56, borderRadius: 16, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', marginTop: 18, marginBottom: 18 },
   verifyOff: { opacity: 0.35 },
   verifyTxt: { color: '#04130D', fontSize: 16, fontWeight: '800' },
 
   resendBtn: { alignItems: 'center' },
-  resendTxt: { color: Aurora.textFaint, fontSize: 14 },
-  resendActive: { color: Aurora.text },
+  resendTxt: { color: c.textFaint, fontSize: 14 },
+  resendActive: { color: c.text },
 
-  successCircle: { width: 84, height: 84, borderRadius: 42, borderWidth: 2, borderColor: Aurora.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 18 },
-  successCheck: { color: Aurora.primary, fontSize: 40, fontWeight: '300' },
-  successTxt: { color: Aurora.text, fontSize: 22, fontWeight: '800' },
+  successCircle: { width: 84, height: 84, borderRadius: 42, borderWidth: 2, borderColor: c.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 18 },
+  successCheck: { color: c.primary, fontSize: 40, fontWeight: '300' },
+  successTxt: { color: c.text, fontSize: 22, fontWeight: '800' },
 });

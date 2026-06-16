@@ -9,17 +9,25 @@
  */
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useState , useMemo} from 'react';
 import {
   ActivityIndicator, Image, KeyboardAvoidingView, Platform, ScrollView,
   StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Aurora } from '../constants/theme';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { api, getCachedUser, setCachedUser } from '../lib/api';
 import { getPendingSignup } from './(constants)/authService';
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function ProfileSetupScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   const router = useRouter();
   const { phone } = useLocalSearchParams<{ phone?: string }>();
 
@@ -120,11 +128,11 @@ export default function ProfileSetupScreen() {
           <TextInput
             style={S.input}
             placeholder="Your name"
-            placeholderTextColor={Aurora.textFaint}
+            placeholderTextColor={colors.textFaint}
             value={name}
             onChangeText={setName}
             maxLength={40}
-            selectionColor={Aurora.primary}
+            selectionColor={colors.primary}
           />
 
           {/* Email (optional) */}
@@ -132,13 +140,13 @@ export default function ProfileSetupScreen() {
           <TextInput
             style={S.input}
             placeholder="you@example.com"
-            placeholderTextColor={Aurora.textFaint}
+            placeholderTextColor={colors.textFaint}
             value={email}
             onChangeText={setEmail}
             keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
-            selectionColor={Aurora.primary}
+            selectionColor={colors.primary}
           />
 
           {/* Mobile (read-only) */}
@@ -163,31 +171,31 @@ export default function ProfileSetupScreen() {
   );
 }
 
-const S = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: Aurora.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen: { flex: 1, backgroundColor: c.bg },
   scroll: { paddingHorizontal: 28, paddingTop: 72, paddingBottom: 20 },
 
-  title: { color: Aurora.text, fontSize: 30, fontWeight: '800', lineHeight: 36 },
-  subtitle: { color: Aurora.textDim, fontSize: 14, marginTop: 8, marginBottom: 28 },
+  title: { color: c.text, fontSize: 30, fontWeight: '800', lineHeight: 36 },
+  subtitle: { color: c.textDim, fontSize: 14, marginTop: 8, marginBottom: 28 },
 
   avatarWrap: { alignSelf: 'center', width: 112, height: 112, marginBottom: 28 },
   avatarImg: { width: 112, height: 112, borderRadius: 56 },
-  avatarPH: { width: 112, height: 112, borderRadius: 56, backgroundColor: Aurora.surface, borderWidth: 1, borderColor: Aurora.border, alignItems: 'center', justifyContent: 'center' },
-  avatarInitial: { color: Aurora.primary, fontSize: 44, fontWeight: '800' },
-  cameraBadge: { position: 'absolute', bottom: 0, right: 0, width: 34, height: 34, borderRadius: 17, backgroundColor: Aurora.primary, alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: Aurora.bg },
+  avatarPH: { width: 112, height: 112, borderRadius: 56, backgroundColor: c.surface, borderWidth: 1, borderColor: c.border, alignItems: 'center', justifyContent: 'center' },
+  avatarInitial: { color: c.primary, fontSize: 44, fontWeight: '800' },
+  cameraBadge: { position: 'absolute', bottom: 0, right: 0, width: 34, height: 34, borderRadius: 17, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: c.bg },
   cameraIcon: { fontSize: 14 },
 
-  label: { color: Aurora.textDim, fontSize: 13, fontWeight: '600', marginBottom: 8, marginTop: 4 },
-  optional: { color: Aurora.textFaint, fontWeight: '400' },
-  input: { height: 54, borderRadius: 14, backgroundColor: Aurora.surface, borderWidth: 1, borderColor: Aurora.border, paddingHorizontal: 16, color: Aurora.text, fontSize: 16, marginBottom: 16, justifyContent: 'center' },
+  label: { color: c.textDim, fontSize: 13, fontWeight: '600', marginBottom: 8, marginTop: 4 },
+  optional: { color: c.textFaint, fontWeight: '400' },
+  input: { height: 54, borderRadius: 14, backgroundColor: c.surface, borderWidth: 1, borderColor: c.border, paddingHorizontal: 16, color: c.text, fontSize: 16, marginBottom: 16, justifyContent: 'center' },
   inputReadonly: { backgroundColor: 'rgba(255,255,255,0.03)' },
-  readonlyTxt: { color: Aurora.textDim, fontSize: 16, fontWeight: '600' },
+  readonlyTxt: { color: c.textDim, fontSize: 16, fontWeight: '600' },
 
-  banner: { color: Aurora.accent, fontSize: 13, marginTop: 2 },
+  banner: { color: c.accent, fontSize: 13, marginTop: 2 },
 
   footer: { paddingHorizontal: 28, paddingBottom: 28, paddingTop: 8 },
-  continueBtn: { height: 56, borderRadius: 16, backgroundColor: Aurora.primary, alignItems: 'center', justifyContent: 'center' },
+  continueBtn: { height: 56, borderRadius: 16, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
   continueTxt: { color: '#04130D', fontSize: 16, fontWeight: '800' },
   skipBtn: { alignItems: 'center', paddingVertical: 14 },
-  skipTxt: { color: Aurora.textDim, fontSize: 14, fontWeight: '600' },
+  skipTxt: { color: c.textDim, fontSize: 14, fontWeight: '600' },
 });

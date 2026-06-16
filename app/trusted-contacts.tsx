@@ -3,18 +3,26 @@
 // Up to 3 contacts alerted on duress-PIN / new-device / panic events.
 // Backed by /contacts/trusted (list/add-by-VaultID/remove). No Firestore.
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList, Alert, StatusBar, ActivityIndicator, TextInput,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Aurora } from '../constants/theme';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { listTrustedContacts, addTrustedContact, removeTrustedContact, type TrustedContact } from '../lib/chatService';
 
 const MAX_TRUSTED = 3;
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function TrustedContactsScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const [trusted, setTrusted] = useState<TrustedContact[]>([]);
   const [loading, setLoading] = useState(true);
@@ -66,7 +74,7 @@ export default function TrustedContactsScreen() {
 
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
-          <Ionicons name="arrow-back" size={24} color={Aurora.text} />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.headerTitle}>Trusted Contacts</Text>
         <View style={{ width: 40 }} />
@@ -74,7 +82,7 @@ export default function TrustedContactsScreen() {
 
       <View style={s.body}>
         <View style={s.infoCard}>
-          <Ionicons name="shield-checkmark" size={26} color={Aurora.primary} />
+          <Ionicons name="shield-checkmark" size={26} color={colors.primary} />
           <Text style={s.infoTitle}>Emergency Contacts</Text>
           <Text style={s.infoDesc}>
             These contacts are silently notified with your location if you activate the duress PIN, and when your account is accessed from a new device.
@@ -83,7 +91,7 @@ export default function TrustedContactsScreen() {
         </View>
 
         {loading ? (
-          <ActivityIndicator color={Aurora.primary} style={{ marginTop: 30 }} />
+          <ActivityIndicator color={colors.primary} style={{ marginTop: 30 }} />
         ) : (
           <FlatList
             data={trusted}
@@ -97,7 +105,7 @@ export default function TrustedContactsScreen() {
                   <Text style={s.contactName}>{item.name || 'Contact'}</Text>
                   <Text style={s.contactId}>@{item.vaultId || '—'}</Text>
                 </View>
-                <View style={[s.statusDot, { backgroundColor: item.online ? Aurora.online : Aurora.textFaint }]} />
+                <View style={[s.statusDot, { backgroundColor: item.online ? colors.online : colors.textFaint }]} />
                 <TouchableOpacity onPress={() => removeTrusted(item)} style={s.removeBtn}>
                   <Text style={s.removeTxt}>Remove</Text>
                 </TouchableOpacity>
@@ -122,13 +130,13 @@ export default function TrustedContactsScreen() {
           <View style={s.addForm}>
             <Text style={s.addLabel}>Enter their VaultID</Text>
             <View style={s.addRow}>
-              <Text style={{ color: Aurora.textDim, fontSize: 18 }}>@</Text>
+              <Text style={{ color: colors.textDim, fontSize: 18 }}>@</Text>
               <TextInput
                 style={s.addInput}
                 value={searchId}
                 onChangeText={setSearchId}
                 placeholder="vaultid"
-                placeholderTextColor={Aurora.textFaint}
+                placeholderTextColor={colors.textFaint}
                 autoCapitalize="none"
                 autoFocus
               />
@@ -153,36 +161,36 @@ export default function TrustedContactsScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Aurora.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingHorizontal: 16, paddingBottom: 8 },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  headerTitle: { color: Aurora.text, fontSize: 18, fontWeight: '700' },
+  headerTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
   body: { flex: 1, padding: 16 },
-  infoCard: { backgroundColor: Aurora.card, borderRadius: 16, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: Aurora.border, alignItems: 'flex-start' },
-  infoTitle: { color: Aurora.text, fontSize: 18, fontWeight: '900', marginTop: 8, marginBottom: 6 },
-  infoDesc: { color: Aurora.textDim, fontSize: 13, lineHeight: 20 },
-  infoStat: { color: Aurora.primary, fontSize: 13, fontWeight: '700', marginTop: 12 },
-  contactRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: Aurora.card, borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: Aurora.border },
-  contactAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: Aurora.primary, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  infoCard: { backgroundColor: c.card, borderRadius: 16, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: c.border, alignItems: 'flex-start' },
+  infoTitle: { color: c.text, fontSize: 18, fontWeight: '900', marginTop: 8, marginBottom: 6 },
+  infoDesc: { color: c.textDim, fontSize: 13, lineHeight: 20 },
+  infoStat: { color: c.primary, fontSize: 13, fontWeight: '700', marginTop: 12 },
+  contactRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: c.border },
+  contactAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: c.primary, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   contactAvatarTxt: { color: '#04130D', fontWeight: '900', fontSize: 18 },
-  contactName: { color: Aurora.text, fontSize: 15, fontWeight: '700' },
-  contactId: { color: Aurora.textDim, fontSize: 12, marginTop: 2 },
+  contactName: { color: c.text, fontSize: 15, fontWeight: '700' },
+  contactId: { color: c.textDim, fontSize: 12, marginTop: 2 },
   statusDot: { width: 8, height: 8, borderRadius: 4, marginRight: 12 },
   removeBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: 'rgba(239,68,68,0.1)', borderWidth: 1, borderColor: 'rgba(239,68,68,0.3)' },
-  removeTxt: { color: Aurora.danger, fontSize: 12, fontWeight: '700' },
+  removeTxt: { color: c.danger, fontSize: 12, fontWeight: '700' },
   addBtn: { backgroundColor: 'rgba(16,185,129,0.13)', borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 12, borderWidth: 1, borderColor: 'rgba(16,185,129,0.3)' },
-  addBtnTxt: { color: Aurora.primary, fontSize: 14, fontWeight: '700' },
-  addForm: { backgroundColor: Aurora.card, borderRadius: 14, padding: 16, marginTop: 12, borderWidth: 1, borderColor: Aurora.border },
-  addLabel: { color: Aurora.textDim, fontSize: 13, marginBottom: 10 },
+  addBtnTxt: { color: c.primary, fontSize: 14, fontWeight: '700' },
+  addForm: { backgroundColor: c.card, borderRadius: 14, padding: 16, marginTop: 12, borderWidth: 1, borderColor: c.border },
+  addLabel: { color: c.textDim, fontSize: 13, marginBottom: 10 },
   addRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  addInput: { flex: 1, backgroundColor: Aurora.surface, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, color: Aurora.text, fontSize: 15, borderWidth: 1, borderColor: Aurora.border },
-  addConfirm: { backgroundColor: Aurora.primary, borderRadius: 10, paddingHorizontal: 20, paddingVertical: 11 },
+  addInput: { flex: 1, backgroundColor: c.surface, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, color: c.text, fontSize: 15, borderWidth: 1, borderColor: c.border },
+  addConfirm: { backgroundColor: c.primary, borderRadius: 10, paddingHorizontal: 20, paddingVertical: 11 },
   addConfirmTxt: { color: '#04130D', fontWeight: '800' },
-  cancelTxt: { color: Aurora.textDim, textAlign: 'center', marginTop: 12 },
-  emptyTxt: { color: Aurora.textDim, fontSize: 14 },
-  emptySub: { color: Aurora.textFaint, fontSize: 12, marginTop: 4 },
-  alertInfo: { marginTop: 20, backgroundColor: Aurora.card, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: Aurora.border },
-  alertTitle: { color: Aurora.textDim, fontSize: 12, fontWeight: '700', marginBottom: 10 },
-  alertItem: { color: Aurora.textDim, fontSize: 12, lineHeight: 22 },
+  cancelTxt: { color: c.textDim, textAlign: 'center', marginTop: 12 },
+  emptyTxt: { color: c.textDim, fontSize: 14 },
+  emptySub: { color: c.textFaint, fontSize: 12, marginTop: 4 },
+  alertInfo: { marginTop: 20, backgroundColor: c.card, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: c.border },
+  alertTitle: { color: c.textDim, fontSize: 12, fontWeight: '700', marginBottom: 10 },
+  alertItem: { color: c.textDim, fontSize: 12, lineHeight: 22 },
 });

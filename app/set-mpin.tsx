@@ -6,16 +6,24 @@
  */
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useState , useMemo} from 'react';
 import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
-import { Aurora } from '../constants/theme';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { PinPad } from '../components/PinPad';
 import { savePIN } from './(constants)/authService';
 import { markSetupComplete } from '../services/securityService';
 import { markUnlocked } from '../lib/sessionLock';
 import { sealCurrentSession } from '../lib/api';
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function SetMpinScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const [phase, setPhase] = useState<'set' | 'confirm'>('set');
   const [pin, setPin] = useState('');
@@ -64,7 +72,7 @@ export default function SetMpinScreen() {
 
       <View style={s.padArea}>
         {saving
-          ? <ActivityIndicator color={Aurora.primary} size="large" />
+          ? <ActivityIndicator color={colors.primary} size="large" />
           : (
             <PinPad
               value={setting ? pin : confirm}
@@ -75,17 +83,17 @@ export default function SetMpinScreen() {
           )}
       </View>
 
-      {msg ? <Text style={[s.msg, error && { color: Aurora.danger }]}>{msg}</Text> : null}
+      {msg ? <Text style={[s.msg, error && { color: colors.danger }]}>{msg}</Text> : null}
     </View>
   );
 }
 
-const s = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: Aurora.bg, alignItems: 'center', paddingTop: 96 },
-  lock: { width: 64, height: 64, borderRadius: 20, backgroundColor: Aurora.surface, borderWidth: 1, borderColor: Aurora.border, alignItems: 'center', justifyContent: 'center', marginBottom: 24 },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen: { flex: 1, backgroundColor: c.bg, alignItems: 'center', paddingTop: 96 },
+  lock: { width: 64, height: 64, borderRadius: 20, backgroundColor: c.surface, borderWidth: 1, borderColor: c.border, alignItems: 'center', justifyContent: 'center', marginBottom: 24 },
   lockIcon: { fontSize: 28 },
-  title: { color: Aurora.text, fontSize: 24, fontWeight: '800', marginBottom: 8 },
-  subtitle: { color: Aurora.textDim, fontSize: 14, textAlign: 'center', paddingHorizontal: 40, marginBottom: 40 },
+  title: { color: c.text, fontSize: 24, fontWeight: '800', marginBottom: 8 },
+  subtitle: { color: c.textDim, fontSize: 14, textAlign: 'center', paddingHorizontal: 40, marginBottom: 40 },
   padArea: { minHeight: 360, justifyContent: 'center' },
-  msg: { color: Aurora.textDim, fontSize: 13, marginTop: 8 },
+  msg: { color: c.textDim, fontSize: 13, marginTop: 8 },
 });

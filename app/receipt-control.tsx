@@ -14,13 +14,21 @@ import {
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Aurora } from '../constants/theme';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { listChats, listGhostMode, setGhostMode, type GhostMode } from '../lib/chatService';
 
 interface Contact { userId: string; name: string }
 type Field = 'read' | 'typing' | 'lastSeen';
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function ReceiptControlScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [rules, setRules] = useState<Record<string, GhostMode>>({});
@@ -95,7 +103,7 @@ export default function ReceiptControlScreen() {
       onPress={onPress}
       hitSlop={4}
     >
-      <Text style={[s.toggleIcon, { color: on ? color : Aurora.textFaint }]}>{icon}</Text>
+      <Text style={[s.toggleIcon, { color: on ? color : colors.textFaint }]}>{icon}</Text>
     </TouchableOpacity>
   );
 
@@ -105,7 +113,7 @@ export default function ReceiptControlScreen() {
 
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
-          <Ionicons name="arrow-back" size={24} color={Aurora.text} />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.headerTitle}>Privacy per Contact</Text>
         <View style={{ width: 40 }} />
@@ -113,7 +121,7 @@ export default function ReceiptControlScreen() {
 
       <View style={s.body}>
         <View style={s.infoCard}>
-          <Ionicons name="lock-closed" size={22} color={Aurora.primary} />
+          <Ionicons name="lock-closed" size={22} color={colors.primary} />
           <View style={{ flex: 1, marginLeft: 12 }}>
             <Text style={s.infoTitle}>Per-Contact Privacy</Text>
             <Text style={s.infoDesc}>Control who sees your read receipts, typing indicator, and last seen — individually per contact.</Text>
@@ -125,19 +133,19 @@ export default function ReceiptControlScreen() {
           value={search}
           onChangeText={setSearch}
           placeholder="Search contacts…"
-          placeholderTextColor={Aurora.textFaint}
+          placeholderTextColor={colors.textFaint}
         />
 
         <View style={s.legendRow}>
-          <View style={s.legendItem}><Text style={[s.toggleIcon, { color: Aurora.accent }]}>✓✓</Text><Text style={s.legendTxt}>Read</Text></View>
-          <View style={s.legendItem}><Text style={[s.toggleIcon, { color: Aurora.primary }]}>✍</Text><Text style={s.legendTxt}>Typing</Text></View>
-          <View style={s.legendItem}><Text style={[s.toggleIcon, { color: Aurora.purple }]}>🕒</Text><Text style={s.legendTxt}>Last Seen</Text></View>
+          <View style={s.legendItem}><Text style={[s.toggleIcon, { color: colors.accent }]}>✓✓</Text><Text style={s.legendTxt}>Read</Text></View>
+          <View style={s.legendItem}><Text style={[s.toggleIcon, { color: colors.primary }]}>✍</Text><Text style={s.legendTxt}>Typing</Text></View>
+          <View style={s.legendItem}><Text style={[s.toggleIcon, { color: colors.purple }]}>🕒</Text><Text style={s.legendTxt}>Last Seen</Text></View>
         </View>
 
         {error && <View style={s.errorBar}><Text style={s.errorTxt}>{error}</Text></View>}
 
         {loading ? (
-          <ActivityIndicator color={Aurora.primary} style={{ marginTop: 30 }} />
+          <ActivityIndicator color={colors.primary} style={{ marginTop: 30 }} />
         ) : (
           <FlatList
             data={filtered}
@@ -149,9 +157,9 @@ export default function ReceiptControlScreen() {
                   <View style={s.avatar}><Text style={s.avatarTxt}>{(item.name.trim()[0] ?? '#').toUpperCase()}</Text></View>
                   <Text style={s.contactName} numberOfLines={1}>{item.name}</Text>
                   <View style={s.toggleGroup}>
-                    <Toggle on={r.read} color={Aurora.accent} icon="✓✓" onPress={() => toggleRule(item.userId, 'read')} />
-                    <Toggle on={r.typing} color={Aurora.primary} icon="✍" onPress={() => toggleRule(item.userId, 'typing')} />
-                    <Toggle on={r.lastSeen} color={Aurora.purple} icon="🕒" onPress={() => toggleRule(item.userId, 'lastSeen')} />
+                    <Toggle on={r.read} color={colors.accent} icon="✓✓" onPress={() => toggleRule(item.userId, 'read')} />
+                    <Toggle on={r.typing} color={colors.primary} icon="✍" onPress={() => toggleRule(item.userId, 'typing')} />
+                    <Toggle on={r.lastSeen} color={colors.purple} icon="🕒" onPress={() => toggleRule(item.userId, 'lastSeen')} />
                   </View>
                 </View>
               );
@@ -168,27 +176,27 @@ export default function ReceiptControlScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Aurora.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingHorizontal: 16, paddingBottom: 8 },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  headerTitle: { color: Aurora.text, fontSize: 18, fontWeight: '700' },
+  headerTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
   body: { flex: 1, padding: 16 },
-  infoCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: Aurora.card, borderRadius: 14, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: Aurora.border },
-  infoTitle: { color: Aurora.text, fontSize: 16, fontWeight: '800' },
-  infoDesc: { color: Aurora.textDim, fontSize: 12, marginTop: 2, lineHeight: 18 },
-  searchInput: { backgroundColor: Aurora.surface, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, color: Aurora.text, fontSize: 14, marginBottom: 8, borderWidth: 1, borderColor: Aurora.border },
+  infoCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, borderRadius: 14, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: c.border },
+  infoTitle: { color: c.text, fontSize: 16, fontWeight: '800' },
+  infoDesc: { color: c.textDim, fontSize: 12, marginTop: 2, lineHeight: 18 },
+  searchInput: { backgroundColor: c.surface, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, color: c.text, fontSize: 14, marginBottom: 8, borderWidth: 1, borderColor: c.border },
   legendRow: { flexDirection: 'row', gap: 16, marginBottom: 10, paddingLeft: 4 },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  legendTxt: { color: Aurora.textDim, fontSize: 10 },
+  legendTxt: { color: c.textDim, fontSize: 10 },
   errorBar: { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.4)', borderWidth: 1, padding: 10, borderRadius: 10, marginBottom: 8 },
-  errorTxt: { color: Aurora.danger, fontSize: 12 },
-  contactRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: Aurora.card, borderRadius: 12, padding: 12, marginBottom: 6, borderWidth: 1, borderColor: Aurora.border, gap: 12 },
-  avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: Aurora.surfaceSolid, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: Aurora.border },
-  avatarTxt: { color: Aurora.accent, fontSize: 16, fontWeight: '800' },
-  contactName: { flex: 1, color: Aurora.text, fontSize: 14, fontWeight: '700' },
+  errorTxt: { color: c.danger, fontSize: 12 },
+  contactRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, borderRadius: 12, padding: 12, marginBottom: 6, borderWidth: 1, borderColor: c.border, gap: 12 },
+  avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: c.surfaceSolid, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: c.border },
+  avatarTxt: { color: c.accent, fontSize: 16, fontWeight: '800' },
+  contactName: { flex: 1, color: c.text, fontSize: 14, fontWeight: '700' },
   toggleGroup: { flexDirection: 'row', gap: 6 },
-  toggleBtn: { width: 34, height: 34, borderRadius: 8, backgroundColor: Aurora.surface, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: Aurora.border },
+  toggleBtn: { width: 34, height: 34, borderRadius: 8, backgroundColor: c.surface, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: c.border },
   toggleIcon: { fontSize: 13, fontWeight: '700' },
-  emptyTxt: { color: Aurora.textDim, fontSize: 13, textAlign: 'center' },
+  emptyTxt: { color: c.textDim, fontSize: 13, textAlign: 'center' },
 });

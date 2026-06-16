@@ -6,12 +6,20 @@
 // now just forwards any old navigation here to /chat so there is one chat
 // surface and no remaining Firebase dependency.
 
-import React, { useEffect } from 'react';
+import React, { useEffect , useMemo} from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { Aurora } from '../constants/theme';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
+
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
 
 export default function GroupChatRedirect() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const params = useLocalSearchParams<{ chatId?: string; id?: string; groupName?: string }>();
   const id = String(params.chatId ?? params.id ?? '');
@@ -24,11 +32,11 @@ export default function GroupChatRedirect() {
   return (
     <View style={s.center}>
       <Stack.Screen options={{ headerShown: false }} />
-      <ActivityIndicator color={Aurora.primary} size="large" />
+      <ActivityIndicator color={colors.primary} size="large" />
     </View>
   );
 }
 
-const s = StyleSheet.create({
-  center: { flex: 1, backgroundColor: Aurora.bg, justifyContent: 'center', alignItems: 'center' },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  center: { flex: 1, backgroundColor: c.bg, justifyContent: 'center', alignItems: 'center' },
 });

@@ -6,12 +6,13 @@
 // user's own and is persisted (synced across their devices).
 
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState , useMemo} from 'react';
 import {
   ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Aurora } from '../constants/theme';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { getCachedUser } from '../lib/api';
 import { computeSafetyNumber, formatSafetyNumber } from '../services/security/safetyNumber';
 import { fetchIdentityKey, getVerifiedContacts, setContactVerified } from '../lib/verification';
@@ -21,7 +22,14 @@ type State =
   | { kind: 'unavailable'; reason: string }
   | { kind: 'ready'; number: string };
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function VerifyContactScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   const router = useRouter();
   const params = useLocalSearchParams();
   const peerId = (params.peerId as string) || '';
@@ -75,7 +83,7 @@ export default function VerifyContactScreen() {
     <View style={S.container}>
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={10}>
-          <Ionicons name="chevron-back" size={26} color={Aurora.text} />
+          <Ionicons name="chevron-back" size={26} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title}>Verify {peerName}</Text>
         <View style={{ width: 26 }} />
@@ -83,12 +91,12 @@ export default function VerifyContactScreen() {
 
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
         {state.kind === 'loading' && (
-          <View style={S.center}><ActivityIndicator color={Aurora.primary} /></View>
+          <View style={S.center}><ActivityIndicator color={colors.primary} /></View>
         )}
 
         {state.kind === 'unavailable' && (
           <View style={S.card}>
-            <Ionicons name="information-circle" size={28} color={Aurora.textDim} />
+            <Ionicons name="information-circle" size={28} color={colors.textDim} />
             <Text style={S.unavailable}>{state.reason}</Text>
           </View>
         )}
@@ -114,15 +122,15 @@ export default function VerifyContactScreen() {
               activeOpacity={0.85}
             >
               {saving ? (
-                <ActivityIndicator size="small" color={verified ? '#fff' : Aurora.primary} />
+                <ActivityIndicator size="small" color={verified ? '#fff' : colors.primary} />
               ) : (
                 <>
                   <Ionicons
                     name={verified ? 'shield-checkmark' : 'shield-outline'}
                     size={18}
-                    color={verified ? '#fff' : Aurora.primary}
+                    color={verified ? '#fff' : colors.primary}
                   />
-                  <Text style={[S.verifyBtnText, { color: verified ? '#fff' : Aurora.primary }]}>
+                  <Text style={[S.verifyBtnText, { color: verified ? '#fff' : colors.primary }]}>
                     {verified ? 'Verified — tap to clear' : 'Mark as verified'}
                   </Text>
                 </>
@@ -135,22 +143,22 @@ export default function VerifyContactScreen() {
   );
 }
 
-const S = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Aurora.bg },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingBottom: 12, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: Aurora.border },
-  title: { color: Aurora.text, fontSize: 17, fontWeight: '800' },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingBottom: 12, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: c.border },
+  title: { color: c.text, fontSize: 17, fontWeight: '800' },
   center: { paddingVertical: 60, alignItems: 'center' },
 
-  card: { backgroundColor: Aurora.card, borderRadius: 16, borderWidth: 1, borderColor: Aurora.border, padding: 20, alignItems: 'center', gap: 10 },
-  numberLabel: { color: Aurora.textFaint, fontSize: 11, fontWeight: '800', letterSpacing: 1 },
-  number: { color: Aurora.text, fontSize: 22, fontWeight: '700', letterSpacing: 2, textAlign: 'center', lineHeight: 34, fontVariant: ['tabular-nums'] },
+  card: { backgroundColor: c.card, borderRadius: 16, borderWidth: 1, borderColor: c.border, padding: 20, alignItems: 'center', gap: 10 },
+  numberLabel: { color: c.textFaint, fontSize: 11, fontWeight: '800', letterSpacing: 1 },
+  number: { color: c.text, fontSize: 22, fontWeight: '700', letterSpacing: 2, textAlign: 'center', lineHeight: 34, fontVariant: ['tabular-nums'] },
 
-  explain: { color: Aurora.textDim, fontSize: 13.5, lineHeight: 20, marginTop: 18, marginBottom: 22 },
+  explain: { color: c.textDim, fontSize: 13.5, lineHeight: 20, marginTop: 18, marginBottom: 22 },
 
   verifyBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 15, borderRadius: 14, borderWidth: 1 },
-  verifyBtnOn: { backgroundColor: Aurora.primary, borderColor: Aurora.primary },
-  verifyBtnOff: { backgroundColor: 'transparent', borderColor: Aurora.primary },
+  verifyBtnOn: { backgroundColor: c.primary, borderColor: c.primary },
+  verifyBtnOff: { backgroundColor: 'transparent', borderColor: c.primary },
   verifyBtnText: { fontSize: 15, fontWeight: '800' },
 
-  unavailable: { color: Aurora.textDim, fontSize: 14, lineHeight: 20, textAlign: 'center' },
+  unavailable: { color: c.textDim, fontSize: 14, lineHeight: 20, textAlign: 'center' },
 });

@@ -5,22 +5,30 @@
 // services/security. Its Firestore reads no longer resolve, so this module
 // now forwards to /enter-mpin to avoid a dead, non-functional screen.
 
-import React, { useEffect } from 'react';
+import React, { useEffect , useMemo} from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
-import { Aurora } from '../constants/theme';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
+
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
 
 export default function PinEntryRedirect() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   useEffect(() => { router.replace('/enter-mpin' as any); }, []);
   return (
     <View style={s.center}>
       <Stack.Screen options={{ headerShown: false }} />
-      <ActivityIndicator color={Aurora.primary} size="large" />
+      <ActivityIndicator color={colors.primary} size="large" />
     </View>
   );
 }
 
-const s = StyleSheet.create({
-  center: { flex: 1, backgroundColor: Aurora.bg, justifyContent: 'center', alignItems: 'center' },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  center: { flex: 1, backgroundColor: c.bg, justifyContent: 'center', alignItems: 'center' },
 });

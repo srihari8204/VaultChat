@@ -9,9 +9,10 @@
 import * as Haptics from 'expo-haptics';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState , useMemo} from 'react';
 import { Animated, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Aurora } from '../constants/theme';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { PinPad } from '../components/PinPad';
 import { verifyPIN } from './(constants)/authService';
 import { logoutUser } from './(constants)/authService';
@@ -19,7 +20,14 @@ import { markUnlocked } from '../lib/sessionLock';
 import { loadSealedSession } from '../lib/api';
 import { VAULT_SESSION_SEALED } from '../constants/flags';
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function EnterMpinScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const [pin, setPin] = useState('');
   const [error, setError] = useState(false);
@@ -130,18 +138,18 @@ export default function EnterMpinScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: Aurora.bg, alignItems: 'center', paddingTop: 88 },
-  lock: { width: 64, height: 64, borderRadius: 20, backgroundColor: Aurora.surface, borderWidth: 1, borderColor: Aurora.border, alignItems: 'center', justifyContent: 'center', marginBottom: 22 },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen: { flex: 1, backgroundColor: c.bg, alignItems: 'center', paddingTop: 88 },
+  lock: { width: 64, height: 64, borderRadius: 20, backgroundColor: c.surface, borderWidth: 1, borderColor: c.border, alignItems: 'center', justifyContent: 'center', marginBottom: 22 },
   lockIcon: { fontSize: 28 },
-  title: { color: Aurora.text, fontSize: 24, fontWeight: '800', marginBottom: 8 },
-  subtitle: { color: Aurora.textDim, fontSize: 14, marginBottom: 36 },
+  title: { color: c.text, fontSize: 24, fontWeight: '800', marginBottom: 8 },
+  subtitle: { color: c.textDim, fontSize: 14, marginBottom: 36 },
   padArea: { minHeight: 320, justifyContent: 'center' },
-  msg: { color: Aurora.danger, fontSize: 13, marginTop: 4 },
+  msg: { color: c.danger, fontSize: 13, marginTop: 4 },
   bioRow: { flexDirection: 'row', gap: 12, marginTop: 12 },
-  bioBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 14, backgroundColor: Aurora.surface, borderWidth: 1, borderColor: Aurora.border },
+  bioBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 14, backgroundColor: c.surface, borderWidth: 1, borderColor: c.border },
   bioIcon: { fontSize: 18 },
-  bioTxt: { color: Aurora.text, fontSize: 14, fontWeight: '600' },
+  bioTxt: { color: c.text, fontSize: 14, fontWeight: '600' },
   signOut: { marginTop: 'auto', marginBottom: 36, padding: 12 },
-  signOutTxt: { color: Aurora.textFaint, fontSize: 14, fontWeight: '600' },
+  signOutTxt: { color: c.textFaint, fontSize: 14, fontWeight: '600' },
 });

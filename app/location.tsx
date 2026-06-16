@@ -12,12 +12,13 @@
 
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Location from 'expo-location';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState , useMemo} from 'react';
 import {
   ActivityIndicator, Alert, Linking, Platform, ScrollView,
   StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
-import { Aurora } from '../constants/theme';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { sendMessage } from '../lib/chatService';
 import { emit } from '../lib/socket';
 import { newLiveKey, encryptPosition } from '../lib/liveLocationCrypto';
@@ -34,7 +35,14 @@ function fmtClock(s: number): string {
   return `${m}:${String(sec).padStart(2, '0')}`;
 }
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function LocationScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   const router = useRouter();
   const params = useLocalSearchParams();
   const chatId = (params.chatId as string) || '';
@@ -191,7 +199,7 @@ export default function LocationScreen() {
         <View style={S.mapCard}>
           <Text style={{ fontSize: 40 }}>📍</Text>
           {loading ? (
-            <ActivityIndicator color={Aurora.primary} style={{ marginTop: 8 }} />
+            <ActivityIndicator color={colors.primary} style={{ marginTop: 8 }} />
           ) : (
             <>
               <Text style={S.address} numberOfLines={2}>{address}</Text>
@@ -211,7 +219,7 @@ export default function LocationScreen() {
           <View style={S.liveCard}>
             <Text style={S.liveTitle}>🔴 Sharing live with {chatName}</Text>
             <Text style={S.liveSub}>{fmtClock(timeLeft)} remaining · updates as you move</Text>
-            <TouchableOpacity style={[S.primaryBtn, { backgroundColor: Aurora.danger, marginTop: 12 }]} onPress={stopLive}>
+            <TouchableOpacity style={[S.primaryBtn, { backgroundColor: colors.danger, marginTop: 12 }]} onPress={stopLive}>
               <Text style={S.primaryBtnText}>Stop sharing</Text>
             </TouchableOpacity>
           </View>
@@ -238,8 +246,8 @@ export default function LocationScreen() {
                 </TouchableOpacity>
               ))}
             </View>
-            <TouchableOpacity style={[S.primaryBtn, { backgroundColor: Aurora.surfaceSolid, borderWidth: 1, borderColor: Aurora.border }]} onPress={startLive} disabled={loading}>
-              <Text style={[S.primaryBtnText, { color: Aurora.primary }]}>Start live location</Text>
+            <TouchableOpacity style={[S.primaryBtn, { backgroundColor: colors.surfaceSolid, borderWidth: 1, borderColor: colors.border }]} onPress={startLive} disabled={loading}>
+              <Text style={[S.primaryBtnText, { color: colors.primary }]}>Start live location</Text>
             </TouchableOpacity>
             <Text style={S.note}>
               Streams your position in real time. It’s relayed through the server and never stored,
@@ -252,35 +260,35 @@ export default function LocationScreen() {
   );
 }
 
-const S = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Aurora.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
   center: { justifyContent: 'center', alignItems: 'center', padding: 32 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingBottom: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: Aurora.border },
-  back: { color: Aurora.text, fontSize: 32, fontWeight: '300', marginTop: -4 },
-  title: { color: Aurora.text, fontSize: 17, fontWeight: '800' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingBottom: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: c.border },
+  back: { color: c.text, fontSize: 32, fontWeight: '300', marginTop: -4 },
+  title: { color: c.text, fontSize: 17, fontWeight: '800' },
 
-  mapCard: { backgroundColor: Aurora.card, borderRadius: 18, borderWidth: 1, borderColor: Aurora.border, alignItems: 'center', padding: 22, gap: 6 },
-  address: { color: Aurora.text, fontSize: 15, fontWeight: '700', textAlign: 'center', marginTop: 6 },
-  coords: { color: Aurora.textDim, fontSize: 12.5 },
+  mapCard: { backgroundColor: c.card, borderRadius: 18, borderWidth: 1, borderColor: c.border, alignItems: 'center', padding: 22, gap: 6 },
+  address: { color: c.text, fontSize: 15, fontWeight: '700', textAlign: 'center', marginTop: 6 },
+  coords: { color: c.textDim, fontSize: 12.5 },
   mapsBtn: { marginTop: 10, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 10, backgroundColor: 'rgba(74,159,255,0.12)' },
   mapsBtnText: { color: '#4A9FFF', fontSize: 13, fontWeight: '700' },
 
-  primaryBtn: { marginTop: 16, backgroundColor: Aurora.primary, paddingVertical: 15, borderRadius: 14, alignItems: 'center' },
+  primaryBtn: { marginTop: 16, backgroundColor: c.primary, paddingVertical: 15, borderRadius: 14, alignItems: 'center' },
   primaryBtnText: { color: '#fff', fontSize: 15, fontWeight: '800' },
-  note: { color: Aurora.textDim, fontSize: 12.5, lineHeight: 18, marginTop: 8, paddingHorizontal: 4 },
+  note: { color: c.textDim, fontSize: 12.5, lineHeight: 18, marginTop: 8, paddingHorizontal: 4 },
 
-  sectionTitle: { color: Aurora.textFaint, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginTop: 26, marginBottom: 10, marginLeft: 4 },
+  sectionTitle: { color: c.textFaint, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginTop: 26, marginBottom: 10, marginLeft: 4 },
   durRow: { flexDirection: 'row', gap: 8 },
-  durBtn: { flex: 1, paddingVertical: 11, borderRadius: 12, backgroundColor: Aurora.surface, borderWidth: 1, borderColor: Aurora.border, alignItems: 'center' },
-  durBtnActive: { backgroundColor: 'rgba(16,185,129,0.15)', borderColor: Aurora.primary },
-  durText: { color: Aurora.textDim, fontSize: 13, fontWeight: '600' },
-  durTextActive: { color: Aurora.primary, fontWeight: '800' },
+  durBtn: { flex: 1, paddingVertical: 11, borderRadius: 12, backgroundColor: c.surface, borderWidth: 1, borderColor: c.border, alignItems: 'center' },
+  durBtnActive: { backgroundColor: 'rgba(16,185,129,0.15)', borderColor: c.primary },
+  durText: { color: c.textDim, fontSize: 13, fontWeight: '600' },
+  durTextActive: { color: c.primary, fontWeight: '800' },
 
   liveCard: { marginTop: 16, backgroundColor: 'rgba(239,68,68,0.07)', borderRadius: 16, borderWidth: 1, borderColor: 'rgba(239,68,68,0.3)', padding: 16 },
-  liveTitle: { color: Aurora.text, fontSize: 15, fontWeight: '800' },
-  liveSub: { color: Aurora.textDim, fontSize: 12.5, marginTop: 4 },
+  liveTitle: { color: c.text, fontSize: 15, fontWeight: '800' },
+  liveSub: { color: c.textDim, fontSize: 12.5, marginTop: 4 },
 
-  permTitle: { color: Aurora.text, fontSize: 18, fontWeight: '800', textAlign: 'center' },
-  permSub: { color: Aurora.textDim, fontSize: 14, textAlign: 'center', marginTop: 8, marginBottom: 18 },
-  link: { color: Aurora.primary, fontSize: 14, fontWeight: '700' },
+  permTitle: { color: c.text, fontSize: 18, fontWeight: '800', textAlign: 'center' },
+  permSub: { color: c.textDim, fontSize: 14, textAlign: 'center', marginTop: 8, marginBottom: 18 },
+  link: { color: c.primary, fontSize: 14, fontWeight: '700' },
 });
