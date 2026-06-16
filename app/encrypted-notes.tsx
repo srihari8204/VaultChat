@@ -314,7 +314,7 @@ export default function EncryptedNotesScreen() {
               ))}
             </ScrollView>
 
-            {/* Rich text area */}
+            {/* Plain-text content (rich-text/markdown is W19 #142, not yet built) */}
             <TextInput style={s.editorContent} placeholder="Note content..." placeholderTextColor="#555" value={edContent} onChangeText={setEdContent} multiline textAlignVertical="top" />
 
             {/* Tags */}
