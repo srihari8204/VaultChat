@@ -22,10 +22,9 @@ function ForgotContent() {
   }, [fadeAnim, slideAnim]);
 
   const STEPS = [
-    { n: '1', icon: '&#128737;', label: 'Verify Identity', desc: 'Answer 2 of your recovery security questions', color: colors.accent },
-    { n: '2', icon: '&#9993;',   label: 'Get Reset Link',  desc: 'A secure link is sent to your registered email', color: colors.primary },
-    { n: '3', icon: '&#128274;', label: 'Create Password', desc: 'Set a new strong password for your account', color: colors.accent },
-    { n: '4', icon: '&#128065;', label: 'Face Scan',       desc: 'Re-verify your identity with biometrics', color: '#A78BFA' },
+    { n: '1', icon: '&#128737;', label: 'Verify Identity', desc: 'Answer all 3 of your recovery security questions', color: colors.accent },
+    { n: '2', icon: '&#128274;', label: 'Set a New PIN',    desc: 'Choose a fresh MPIN to unlock VaultChat', color: colors.primary },
+    { n: '3', icon: '&#128065;', label: 'Unlock',           desc: 'Your new PIN takes effect immediately', color: '#A78BFA' },
   ];
 
   return (
@@ -43,9 +42,9 @@ function ForgotContent() {
             <View style={S.iconWrap}>
               <Text style={{ fontSize: 40 }}>&#128274;</Text>
             </View>
-            <Text style={S.title}>Reset Password</Text>
+            <Text style={S.title}>Reset Your PIN</Text>
             <Text style={{ color: colors.textDim, fontSize: 13, textAlign: 'center', lineHeight: 20 }}>
-              For your security, identity verification is required before resetting your password.
+              For your security, identity verification is required before you can set a new unlock PIN.
             </Text>
           </View>
 

@@ -4,6 +4,7 @@
 
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
+import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import DeviceInfo from 'react-native-device-info';
@@ -409,6 +410,87 @@ export async function saveProfile(data: Record<string, string>): Promise<void> {
 // 11. Security Answers
 // ─────────────────────────────────────────────────────────────
 
-export async function saveSecurityAnswers(answers: Record<string, string>): Promise<void> {
-  await SecureStore.setItemAsync('security_answers', JSON.stringify(answers));
+// Recovery answers are NEVER stored in the clear. We normalise (trim, collapse
+// whitespace, lowercase — matching the "case-insensitive" promise the setup
+// screen makes) then SHA-256 hash each answer with a per-record random salt.
+// The questions themselves aren't secret, so they're kept plaintext for display
+// during recovery. Stored under SecureStore key 'security_answers', schema v2.
+const SEC_KEY = 'security_answers';
+
+function normalizeAnswer(a: string): string {
+  return (a ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+async function hashAnswer(salt: string, answer: string): Promise<string> {
+  return Crypto.digestStringAsync(
+    Crypto.CryptoDigestAlgorithm.SHA256,
+    `${salt}|${normalizeAnswer(answer)}`,
+  );
+}
+
+interface SecurityRecordV2 {
+  v: 2;
+  q1: string; q2: string; q3: string;
+  h1: string; h2: string; h3: string;
+  salt: string;
+}
+
+export async function saveSecurityAnswers(
+  data: { q1: string; a1: string; q2: string; a2: string; q3: string; a3: string },
+): Promise<void> {
+  const saltBytes = await Crypto.getRandomBytesAsync(16);
+  const salt = Array.from(saltBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+  const [h1, h2, h3] = await Promise.all([
+    hashAnswer(salt, data.a1),
+    hashAnswer(salt, data.a2),
+    hashAnswer(salt, data.a3),
+  ]);
+  const rec: SecurityRecordV2 = { v: 2, q1: data.q1, q2: data.q2, q3: data.q3, h1, h2, h3, salt };
+  await SecureStore.setItemAsync(SEC_KEY, JSON.stringify(rec));
+}
+
+// The three questions the user chose, in order, for the recovery screen to show.
+// null when the user never configured recovery questions.
+export async function getSecurityQuestions(): Promise<string[] | null> {
+  try {
+    const raw = await SecureStore.getItemAsync(SEC_KEY);
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    if (o?.q1 && o?.q2 && o?.q3) return [o.q1, o.q2, o.q3];
+    return null;
+  } catch { return null; }
+}
+
+// Verify all three answers against the stored hashes. Returns false (never
+// throws) when no record exists or any answer mismatches. Transparently handles
+// legacy v1 plaintext records and upgrades them to hashed v2 on first success.
+export async function verifySecurityAnswers(answers: [string, string, string]): Promise<boolean> {
+  let raw: string | null = null;
+  try { raw = await SecureStore.getItemAsync(SEC_KEY); } catch { return false; }
+  if (!raw) return false;
+
+  let o: any;
+  try { o = JSON.parse(raw); } catch { return false; }
+
+  // Legacy v1: { q1,a1,q2,a2,q3,a3 } stored in the clear (pre-hash builds).
+  if (o.v !== 2) {
+    const ok =
+      normalizeAnswer(answers[0]) === normalizeAnswer(o.a1) &&
+      normalizeAnswer(answers[1]) === normalizeAnswer(o.a2) &&
+      normalizeAnswer(answers[2]) === normalizeAnswer(o.a3);
+    if (ok && o.q1 && o.q2 && o.q3) {
+      // Upgrade in place so the plaintext answers stop living on disk.
+      await saveSecurityAnswers({
+        q1: o.q1, a1: answers[0], q2: o.q2, a2: answers[1], q3: o.q3, a3: answers[2],
+      });
+    }
+    return ok;
+  }
+
+  const [h1, h2, h3] = await Promise.all([
+    hashAnswer(o.salt, answers[0]),
+    hashAnswer(o.salt, answers[1]),
+    hashAnswer(o.salt, answers[2]),
+  ]);
+  return h1 === o.h1 && h2 === o.h2 && h3 === o.h3;
 }
