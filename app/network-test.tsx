@@ -2,18 +2,19 @@
 // Download/upload speed, ping/latency, jitter, animated gauge
 // Connection type from NetInfo, history in AsyncStorage
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   ActivityIndicator, Platform, Dimensions, Animated, Easing,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { useRouter, Stack } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import NetInfo from '@react-native-community/netinfo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width: SW } = Dimensions.get('window');
-const C = { bg: '#FFFFFF', accent: '#4A9FFF', cyan: '#4A9FFF', card: '#F9FAFB', danger: '#FF3C6E', green: '#10B981', text: '#FFFFFF', muted: '#8A9BBF', yellow: '#FBBF24' };
 
 const STORAGE_KEY = 'vaultchat_speedtest_history';
 const GAUGE_SIZE = 220;
@@ -32,7 +33,14 @@ type TestResult = {
 
 type TestPhase = 'idle' | 'ping' | 'download' | 'upload' | 'done';
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function NetworkTestScreen() {
+  const { colors } = useTheme();
+  const styles = useS();
   const router = useRouter();
   const needleAnim = useRef(new Animated.Value(0)).current;
 
@@ -238,7 +246,7 @@ export default function NetworkTestScreen() {
           <View style={styles.gaugeArcBg} />
           {/* Colored arc overlay */}
           <View style={[styles.gaugeArcFill, {
-            borderColor: speed > 100 ? C.green : speed > 50 ? C.cyan : speed > 20 ? C.accent : C.yellow,
+            borderColor: speed > 100 ? colors.primary : speed > 50 ? colors.accent : speed > 20 ? colors.accent : '#FBBF24',
           }]} />
           {/* Tick marks */}
           {ticks.map(t => {
@@ -307,7 +315,7 @@ export default function NetworkTestScreen() {
             <Text style={styles.connectionIcon}>{getConnectionIcon()}</Text>
             <Text style={styles.connectionLabel}>{connectionDetails}</Text>
           </View>
-          <View style={[styles.serverDot, { backgroundColor: serverOnline === null ? C.yellow : serverOnline ? C.green : C.danger }]} />
+          <View style={[styles.serverDot, { backgroundColor: serverOnline === null ? '#FBBF24' : serverOnline ? colors.primary : colors.danger }]} />
           <Text style={styles.serverLabel}>
             {serverOnline === null ? 'Checking...' : serverOnline ? 'Server Online' : 'Server Offline'}
           </Text>
@@ -330,7 +338,7 @@ export default function NetworkTestScreen() {
           style={[styles.testButton, (phase !== 'idle' && phase !== 'done') && styles.testButtonDisabled]}
         >
           <LinearGradient
-            colors={(phase !== 'idle' && phase !== 'done') ? ['#D1D5DB', '#E5E7EB'] : [C.accent, '#2D7AE0']}
+            colors={(phase !== 'idle' && phase !== 'done') ? ['#D1D5DB', '#E5E7EB'] : [colors.accent, '#2D7AE0']}
             style={styles.testButtonGradient}
           >
             {(phase !== 'idle' && phase !== 'done') ? (
@@ -344,22 +352,22 @@ export default function NetworkTestScreen() {
         {/* Results */}
         {phase === 'done' && (
           <View style={styles.resultsGrid}>
-            <View style={[styles.resultCard, { borderLeftColor: C.cyan }]}>
+            <View style={[styles.resultCard, { borderLeftColor: colors.accent }]}>
               <Text style={styles.resultLabel}>Download</Text>
               <Text style={styles.resultValue}>{download.toFixed(1)}</Text>
               <Text style={styles.resultUnit}>Mbps</Text>
             </View>
-            <View style={[styles.resultCard, { borderLeftColor: C.accent }]}>
+            <View style={[styles.resultCard, { borderLeftColor: colors.accent }]}>
               <Text style={styles.resultLabel}>Upload</Text>
               <Text style={styles.resultValue}>{upload.toFixed(1)}</Text>
               <Text style={styles.resultUnit}>Mbps</Text>
             </View>
-            <View style={[styles.resultCard, { borderLeftColor: C.green }]}>
+            <View style={[styles.resultCard, { borderLeftColor: colors.primary }]}>
               <Text style={styles.resultLabel}>Ping</Text>
               <Text style={styles.resultValue}>{ping}</Text>
               <Text style={styles.resultUnit}>ms</Text>
             </View>
-            <View style={[styles.resultCard, { borderLeftColor: C.yellow }]}>
+            <View style={[styles.resultCard, { borderLeftColor: '#FBBF24' }]}>
               <Text style={styles.resultLabel}>Jitter</Text>
               <Text style={styles.resultValue}>{jitter}</Text>
               <Text style={styles.resultUnit}>ms</Text>
@@ -389,7 +397,7 @@ export default function NetworkTestScreen() {
                     <Text style={styles.historyMetricValue}>{item.upload.toFixed(1)}</Text>
                   </View>
                   <View style={styles.historyMetric}>
-                    <Text style={[styles.historyMetricLabel, { color: C.green }]}>⏱</Text>
+                    <Text style={[styles.historyMetricLabel, { color: colors.primary }]}>⏱</Text>
                     <Text style={styles.historyMetricValue}>{item.ping}ms</Text>
                   </View>
                 </View>
@@ -404,22 +412,22 @@ export default function NetworkTestScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: Platform.OS === 'ios' ? 56 : 40, paddingHorizontal: 16, paddingBottom: 14 },
   backBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(74,159,255,0.08)', justifyContent: 'center', alignItems: 'center' },
-  backArrow: { color: C.accent, fontSize: 20 },
+  backArrow: { color: c.accent, fontSize: 20 },
   headerTitle: { color: '#FFF', fontSize: 18, fontWeight: '700' },
   scroll: { flex: 1 },
   scrollContent: { paddingHorizontal: 16 },
 
   // Connection
   connectionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 10, marginBottom: 16 },
-  connectionBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, marginRight: 16, borderWidth: 1, borderColor: 'rgba(74,159,255,0.1)' },
+  connectionBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, marginRight: 16, borderWidth: 1, borderColor: 'rgba(74,159,255,0.1)' },
   connectionIcon: { fontSize: 16, marginRight: 6 },
   connectionLabel: { color: '#FFF', fontSize: 14, fontWeight: '600' },
   serverDot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
-  serverLabel: { color: C.muted, fontSize: 13 },
+  serverLabel: { color: c.textDim, fontSize: 13 },
 
   // Gauge
   gaugeContainer: { alignItems: 'center', marginVertical: 16 },
@@ -427,41 +435,41 @@ const styles = StyleSheet.create({
   gaugeArcBg: { position: 'absolute', top: 0, width: GAUGE_SIZE, height: GAUGE_SIZE, borderRadius: GAUGE_SIZE / 2, borderWidth: GAUGE_STROKE, borderColor: 'rgba(74,159,255,0.08)' },
   gaugeArcFill: { position: 'absolute', top: 0, width: GAUGE_SIZE, height: GAUGE_SIZE, borderRadius: GAUGE_SIZE / 2, borderWidth: GAUGE_STROKE, borderTopColor: 'transparent' },
   gaugeTick: { position: 'absolute', bottom: 0, alignItems: 'center' },
-  gaugeTickLabel: { color: C.muted, fontSize: 9 },
-  gaugeNeedle: { position: 'absolute', bottom: 10, width: 3, height: GAUGE_SIZE / 2 - 20, backgroundColor: C.danger, borderRadius: 2, transformOrigin: 'bottom center' },
-  needleLine: { width: 3, height: '100%', backgroundColor: C.cyan, borderRadius: 2 },
+  gaugeTickLabel: { color: c.textDim, fontSize: 9 },
+  gaugeNeedle: { position: 'absolute', bottom: 10, width: 3, height: GAUGE_SIZE / 2 - 20, backgroundColor: c.danger, borderRadius: 2, transformOrigin: 'bottom center' },
+  needleLine: { width: 3, height: '100%', backgroundColor: c.accent, borderRadius: 2 },
   gaugeCenterDot: { position: 'absolute', bottom: 4, width: 16, height: 16, borderRadius: 8, backgroundColor: '#FFF' },
   gaugeSpeed: { color: '#FFF', fontSize: 42, fontWeight: '800', marginTop: 8 },
-  gaugeUnit: { color: C.muted, fontSize: 14, marginTop: -2 },
-  gaugePhase: { color: C.cyan, fontSize: 13, fontWeight: '600', marginTop: 8 },
+  gaugeUnit: { color: c.textDim, fontSize: 14, marginTop: -2 },
+  gaugePhase: { color: c.accent, fontSize: 13, fontWeight: '600', marginTop: 8 },
 
   // Progress
   progressBar: { height: 4, backgroundColor: 'rgba(74,159,255,0.1)', borderRadius: 2, marginVertical: 12, overflow: 'hidden' },
-  progressFill: { height: 4, backgroundColor: C.cyan, borderRadius: 2 },
+  progressFill: { height: 4, backgroundColor: c.accent, borderRadius: 2 },
 
   // Test Button
-  testButton: { borderRadius: 14, overflow: 'hidden', marginVertical: 16, elevation: 4, shadowColor: C.accent, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 10 },
+  testButton: { borderRadius: 14, overflow: 'hidden', marginVertical: 16, elevation: 4, shadowColor: c.accent, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 10 },
   testButtonDisabled: { opacity: 0.7 },
   testButtonGradient: { paddingVertical: 16, alignItems: 'center', borderRadius: 14 },
   testButtonText: { color: '#FFF', fontSize: 18, fontWeight: '800', letterSpacing: 1 },
 
   // Results
   resultsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 16 },
-  resultCard: { width: (SW - 42) / 2, backgroundColor: C.card, borderRadius: 14, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(74,159,255,0.08)', borderLeftWidth: 3 },
-  resultLabel: { color: C.muted, fontSize: 12, marginBottom: 4 },
+  resultCard: { width: (SW - 42) / 2, backgroundColor: c.card, borderRadius: 14, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(74,159,255,0.08)', borderLeftWidth: 3 },
+  resultLabel: { color: c.textDim, fontSize: 12, marginBottom: 4 },
   resultValue: { color: '#FFF', fontSize: 28, fontWeight: '800' },
-  resultUnit: { color: C.muted, fontSize: 12, marginTop: 2 },
+  resultUnit: { color: c.textDim, fontSize: 12, marginTop: 2 },
 
   // History
   section: { marginTop: 20 },
   sectionTitle: { color: '#FFF', fontSize: 16, fontWeight: '700', marginBottom: 12 },
-  noHistory: { color: C.muted, fontSize: 13, textAlign: 'center', marginTop: 8 },
-  historyRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(74,159,255,0.06)' },
+  noHistory: { color: c.textDim, fontSize: 13, textAlign: 'center', marginTop: 8 },
+  historyRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: c.card, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(74,159,255,0.06)' },
   historyLeft: { flex: 1 },
   historyDate: { color: '#FFF', fontSize: 13, fontWeight: '600' },
-  historyConn: { color: C.muted, fontSize: 11, marginTop: 2 },
+  historyConn: { color: c.textDim, fontSize: 11, marginTop: 2 },
   historyRight: { flexDirection: 'row', gap: 14 },
   historyMetric: { alignItems: 'center' },
-  historyMetricLabel: { color: C.accent, fontSize: 12 },
+  historyMetricLabel: { color: c.accent, fontSize: 12 },
   historyMetricValue: { color: '#FFF', fontSize: 13, fontWeight: '700', marginTop: 2 },
 });

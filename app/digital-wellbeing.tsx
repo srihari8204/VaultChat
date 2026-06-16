@@ -2,17 +2,18 @@
 // Daily usage chart, stats, heatmap, focus mode, daily limit
 // All data from AsyncStorage
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   Switch, Alert, TextInput, Animated, Easing, Platform, Dimensions,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { useRouter, Stack } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width: SW } = Dimensions.get('window');
-const C = { bg: '#FFFFFF', accent: '#4A9FFF', cyan: '#4A9FFF', card: '#F9FAFB', danger: '#FF3C6E', green: '#10B981', text: '#FFFFFF', muted: '#8A9BBF', yellow: '#FBBF24' };
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
@@ -22,7 +23,14 @@ const STORAGE_KEYS = {
   dailyLimit: 'vaultchat_daily_limit',
 };
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function DigitalWellbeingScreen() {
+  const { colors } = useTheme();
+  const styles = useS();
   const router = useRouter();
   const progressAnim = useRef(new Animated.Value(0)).current;
 
@@ -155,11 +163,11 @@ export default function DigitalWellbeingScreen() {
             {/* Progress indicator using animated view */}
             <Animated.View style={[styles.ringProgress, {
               width: ringSize, height: ringSize, borderRadius: ringSize / 2, borderWidth: ringStroke,
-              borderColor: usagePercent > 0.8 ? C.danger : C.cyan,
+              borderColor: usagePercent > 0.8 ? colors.danger : colors.accent,
               borderTopColor: 'transparent',
-              borderRightColor: usagePercent > 0.25 ? (usagePercent > 0.8 ? C.danger : C.cyan) : 'transparent',
-              borderBottomColor: usagePercent > 0.5 ? (usagePercent > 0.8 ? C.danger : C.cyan) : 'transparent',
-              borderLeftColor: usagePercent > 0.75 ? (usagePercent > 0.8 ? C.danger : C.cyan) : 'transparent',
+              borderRightColor: usagePercent > 0.25 ? (usagePercent > 0.8 ? colors.danger : colors.accent) : 'transparent',
+              borderBottomColor: usagePercent > 0.5 ? (usagePercent > 0.8 ? colors.danger : colors.accent) : 'transparent',
+              borderLeftColor: usagePercent > 0.75 ? (usagePercent > 0.8 ? colors.danger : colors.accent) : 'transparent',
               transform: [{ rotate: '-90deg' }],
             }]} />
             <View style={styles.ringCenter}>
@@ -204,7 +212,7 @@ export default function DigitalWellbeingScreen() {
           <Text style={styles.comparisonIcon}>{weeklyChange < 0 ? '📉' : '📈'}</Text>
           <Text style={styles.comparisonText}>
             You used VaultChat{' '}
-            <Text style={{ color: weeklyChange < 0 ? C.green : C.danger, fontWeight: '700' }}>
+            <Text style={{ color: weeklyChange < 0 ? colors.primary : colors.danger, fontWeight: '700' }}>
               {Math.abs(weeklyChange)}% {weeklyChange < 0 ? 'less' : 'more'}
             </Text>
             {' '}than last week
@@ -218,7 +226,7 @@ export default function DigitalWellbeingScreen() {
             {weeklyData.map((mins, i) => (
               <View key={i} style={styles.barCol}>
                 <Text style={styles.barValue}>{mins}m</Text>
-                <View style={[styles.bar, { height: Math.max((mins / maxWeekly) * 120, 4), backgroundColor: i === 6 ? C.cyan : C.accent }]} />
+                <View style={[styles.bar, { height: Math.max((mins / maxWeekly) * 120, 4), backgroundColor: i === 6 ? colors.accent : colors.accent }]} />
                 <Text style={styles.barLabel}>{DAYS[i]}</Text>
               </View>
             ))}
@@ -237,7 +245,7 @@ export default function DigitalWellbeingScreen() {
                     backgroundColor: intensity === 0 ? 'rgba(74,159,255,0.05)' :
                       intensity < 0.3 ? 'rgba(0,229,255,0.2)' :
                       intensity < 0.6 ? 'rgba(0,229,255,0.5)' :
-                      intensity < 0.8 ? 'rgba(0,229,255,0.7)' : C.cyan,
+                      intensity < 0.8 ? 'rgba(0,229,255,0.7)' : colors.accent,
                   }]} />
                   {h % 4 === 0 && <Text style={styles.heatLabel}>{h}:00</Text>}
                 </View>
@@ -276,7 +284,7 @@ export default function DigitalWellbeingScreen() {
                 value={focusMode}
                 onValueChange={toggleFocusMode}
                 trackColor={{ false: 'rgba(255,255,255,0.1)', true: 'rgba(0,229,255,0.3)' }}
-                thumbColor={focusMode ? C.cyan : '#6B7280'}
+                thumbColor={focusMode ? colors.accent : '#6B7280'}
               />
             </View>
             <View style={styles.focusDurationRow}>
@@ -334,11 +342,11 @@ export default function DigitalWellbeingScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: Platform.OS === 'ios' ? 56 : 40, paddingHorizontal: 16, paddingBottom: 14 },
   backBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(74,159,255,0.08)', justifyContent: 'center', alignItems: 'center' },
-  backArrow: { color: C.accent, fontSize: 20 },
+  backArrow: { color: c.accent, fontSize: 20 },
   headerTitle: { color: '#FFF', fontSize: 18, fontWeight: '700' },
   scroll: { flex: 1 },
   scrollContent: { paddingHorizontal: 16, paddingTop: 8 },
@@ -350,67 +358,67 @@ const styles = StyleSheet.create({
   ringProgress: { position: 'absolute' },
   ringCenter: { alignItems: 'center' },
   ringTime: { color: '#FFF', fontSize: 28, fontWeight: '800' },
-  ringSubtext: { color: C.muted, fontSize: 12, marginTop: 2 },
-  warningText: { color: C.danger, fontSize: 13, fontWeight: '600', marginTop: 10 },
+  ringSubtext: { color: c.textDim, fontSize: 12, marginTop: 2 },
+  warningText: { color: c.danger, fontSize: 13, fontWeight: '600', marginTop: 10 },
 
   // Stats
   section: { marginTop: 24 },
   sectionTitle: { color: '#FFF', fontSize: 16, fontWeight: '700', marginBottom: 12 },
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  statCard: { width: (SW - 52) / 2, backgroundColor: C.card, borderRadius: 14, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(74,159,255,0.08)' },
+  statCard: { width: (SW - 52) / 2, backgroundColor: c.card, borderRadius: 14, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(74,159,255,0.08)' },
   statIcon: { fontSize: 22, marginBottom: 6 },
   statValue: { color: '#FFF', fontSize: 24, fontWeight: '800' },
-  statLabel: { color: C.muted, fontSize: 12, marginTop: 3 },
+  statLabel: { color: c.textDim, fontSize: 12, marginTop: 3 },
 
   // Comparison
-  comparisonCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 16, marginTop: 16, borderWidth: 1, borderColor: 'rgba(74,159,255,0.08)' },
+  comparisonCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, borderRadius: 14, padding: 16, marginTop: 16, borderWidth: 1, borderColor: 'rgba(74,159,255,0.08)' },
   comparisonIcon: { fontSize: 24, marginRight: 12 },
   comparisonText: { color: '#FFF', fontSize: 14, flex: 1, lineHeight: 20 },
 
   // Bar chart
-  barChart: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', height: 160, backgroundColor: C.card, borderRadius: 14, padding: 16, paddingTop: 24, borderWidth: 1, borderColor: 'rgba(74,159,255,0.08)' },
+  barChart: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', height: 160, backgroundColor: c.card, borderRadius: 14, padding: 16, paddingTop: 24, borderWidth: 1, borderColor: 'rgba(74,159,255,0.08)' },
   barCol: { alignItems: 'center', flex: 1 },
-  barValue: { color: C.muted, fontSize: 9, marginBottom: 4 },
+  barValue: { color: c.textDim, fontSize: 9, marginBottom: 4 },
   bar: { width: 20, borderRadius: 4, minHeight: 4 },
-  barLabel: { color: C.muted, fontSize: 10, marginTop: 6 },
+  barLabel: { color: c.textDim, fontSize: 10, marginTop: 6 },
 
   // Heatmap
-  heatmap: { flexDirection: 'row', flexWrap: 'wrap', backgroundColor: C.card, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: 'rgba(74,159,255,0.08)' },
+  heatmap: { flexDirection: 'row', flexWrap: 'wrap', backgroundColor: c.card, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: 'rgba(74,159,255,0.08)' },
   heatCell: { alignItems: 'center', marginRight: 2, marginBottom: 4 },
   heatBox: { width: (SW - 80) / 24, height: 20, borderRadius: 3 },
-  heatLabel: { color: C.muted, fontSize: 7, marginTop: 2 },
+  heatLabel: { color: c.textDim, fontSize: 7, marginTop: 2 },
 
   // Top chats
   chatRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   chatRank: { width: 24, height: 24, borderRadius: 12, backgroundColor: 'rgba(74,159,255,0.15)', justifyContent: 'center', alignItems: 'center', marginRight: 10 },
-  chatRankText: { color: C.accent, fontSize: 12, fontWeight: '700' },
+  chatRankText: { color: c.accent, fontSize: 12, fontWeight: '700' },
   chatName: { color: '#FFF', fontSize: 14, width: 90 },
   chatBarWrap: { flex: 1, height: 8, borderRadius: 4, backgroundColor: 'rgba(74,159,255,0.1)', marginHorizontal: 10 },
-  chatBar: { height: 8, borderRadius: 4, backgroundColor: C.cyan },
-  chatCount: { color: C.muted, fontSize: 13, fontWeight: '600', width: 30, textAlign: 'right' },
+  chatBar: { height: 8, borderRadius: 4, backgroundColor: c.accent },
+  chatCount: { color: c.textDim, fontSize: 13, fontWeight: '600', width: 30, textAlign: 'right' },
 
   // Focus mode
-  focusCard: { backgroundColor: C.card, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: 'rgba(74,159,255,0.08)' },
+  focusCard: { backgroundColor: c.card, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: 'rgba(74,159,255,0.08)' },
   focusRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   focusTitle: { color: '#FFF', fontSize: 15, fontWeight: '600' },
-  focusSub: { color: C.muted, fontSize: 12, marginTop: 2 },
+  focusSub: { color: c.textDim, fontSize: 12, marginTop: 2 },
   focusDurationRow: { flexDirection: 'row', alignItems: 'center', marginTop: 14, justifyContent: 'space-between' },
-  focusDurLabel: { color: C.muted, fontSize: 13 },
+  focusDurLabel: { color: c.textDim, fontSize: 13 },
   durationBtns: { flexDirection: 'row', gap: 8 },
   durBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(74,159,255,0.2)' },
-  durBtnActive: { borderColor: C.cyan, backgroundColor: 'rgba(0,229,255,0.1)' },
-  durBtnText: { color: C.muted, fontSize: 13 },
-  durBtnTextActive: { color: C.cyan, fontWeight: '600' },
+  durBtnActive: { borderColor: c.accent, backgroundColor: 'rgba(0,229,255,0.1)' },
+  durBtnText: { color: c.textDim, fontSize: 13 },
+  durBtnTextActive: { color: c.accent, fontWeight: '600' },
 
   // Daily limit
-  limitCard: { backgroundColor: C.card, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: 'rgba(74,159,255,0.08)' },
-  limitDesc: { color: C.muted, fontSize: 13, marginBottom: 12 },
+  limitCard: { backgroundColor: c.card, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: 'rgba(74,159,255,0.08)' },
+  limitDesc: { color: c.textDim, fontSize: 13, marginBottom: 12 },
   limitRow: { flexDirection: 'row', alignItems: 'center' },
   limitValue: { color: '#FFF', fontSize: 22, fontWeight: '800', flex: 1 },
-  limitInput: { backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, color: '#FFF', fontSize: 18, fontWeight: '700', width: 80, borderWidth: 1, borderColor: C.cyan },
-  limitUnit: { color: C.muted, fontSize: 13, marginLeft: 8, flex: 1 },
-  limitSaveBtn: { backgroundColor: C.accent, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
+  limitInput: { backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, color: '#FFF', fontSize: 18, fontWeight: '700', width: 80, borderWidth: 1, borderColor: c.accent },
+  limitUnit: { color: c.textDim, fontSize: 13, marginLeft: 8, flex: 1 },
+  limitSaveBtn: { backgroundColor: c.accent, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
   limitSaveText: { color: '#FFF', fontSize: 13, fontWeight: '700' },
   limitEditBtn: { backgroundColor: 'rgba(74,159,255,0.15)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
-  limitEditText: { color: C.accent, fontSize: 13, fontWeight: '600' },
+  limitEditText: { color: c.accent, fontSize: 13, fontWeight: '600' },
 });

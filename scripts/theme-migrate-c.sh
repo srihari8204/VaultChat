@@ -7,13 +7,13 @@
 f="$1"
 grep -qE "useTheme|makeStyles\(" "$f" && { echo "SKIP $f"; exit 0; }
 [ "$(grep -cE '^export default function' "$f")" = "1" ] || { echo "MANUAL(comps) $f"; exit 3; }
-grep -qE "^const [Ss] = StyleSheet\.create\(\{" "$f" || { echo "MANUAL(nostyle) $f"; exit 3; }
+grep -qE "^const (S|s|styles) = StyleSheet\.create\(\{" "$f" || { echo "MANUAL(nostyle) $f"; exit 3; }
 ALLOW_SUBS=1
 # Palette object var (first const NAME = { with a hex inside).
 for cand in C CLR COLORS Colors COLOR THEME PALETTE; do grep -qE "^const ${cand} *= *{" "$f" && { cvar=$cand; break; }; done
 [ -z "$cvar" ] && { echo "MANUAL(noCobj) $f"; exit 3; }
-ss=$(grep -nE "^const [Ss] = StyleSheet\.create\(\{" "$f" | head -1 | cut -d: -f1)
-svar=$(sed -n "${ss}p" "$f" | grep -oE "^const [Ss]" | grep -oE "[Ss]$")
+ss=$(grep -nE "^const (S|s|styles) = StyleSheet\.create\(\{" "$f" | head -1 | cut -d: -f1)
+svar=$(sed -n "${ss}p" "$f" | grep -oE "^const [A-Za-z]+" | sed "s/^const //")
 
 # key -> palette role
 roles() { # $1 prefix, $2 file
@@ -52,7 +52,7 @@ done
 perl -0pi -e "s/^const ${cvar} *= *\{[^\n]*\};[ \t]*(\/\/[^\n]*)?\n//m" "$f"
 perl -0pi -e "s/^const ${cvar} *= *\{.*?\}(?: as const)?;[ \t]*\n//ms" "$f"
 
-sed -i "s/^const [Ss] = StyleSheet.create(/const makeStyles = (c: Palette) => StyleSheet.create(/" "$f"
+sed -i "s/^const ${svar} = StyleSheet.create(/const makeStyles = (c: Palette) => StyleSheet.create(/" "$f"
 depth="../"; grep -qE "from '\.\./\.\./" "$f" && depth="../../"
 perl -0pi -e "s#(from 'react-native';\n)#\${1}import { type Palette } from '${depth}constants/theme';\nimport { useTheme } from '${depth}lib/theme';\n#" "$f"
 grep -qE "\buseMemo\b" "$f" || perl -0pi -e "s/(import (?:React, )?\{[^}]*?)\} from 'react';/\$1, useMemo} from 'react';/s" "$f"

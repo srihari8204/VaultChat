@@ -2,19 +2,20 @@
 // Crop, Rotate, Draw, Text overlay, Filters, Brightness/Contrast
 // Uses expo-image-manipulator for transforms, react-native-view-shot to capture
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Image, ScrollView,
   Dimensions, PanResponder, TextInput, Alert, ActivityIndicator,
   Platform,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImageManipulator from 'expo-image-manipulator';
 import ViewShot from 'react-native-view-shot';
 
 const { width: SW, height: SH } = Dimensions.get('window');
-const C = { bg: '#FFFFFF', accent: '#4A9FFF', cyan: '#4A9FFF', card: '#F9FAFB', danger: '#FF3C6E', text: '#FFFFFF', muted: '#8A9BBF' };
 
 const DRAW_COLORS = ['#FFFFFF', '#FF3C3C', '#4A9FFF', '#10B981', '#FBBF24'];
 const FILTER_LIST = ['Original', 'B&W', 'Warm', 'Cool', 'Vivid'];
@@ -30,7 +31,14 @@ type TextOverlay = { id: string; text: string; x: number; y: number; color: stri
 
 type ToolMode = 'none' | 'crop' | 'rotate' | 'draw' | 'text' | 'filter' | 'adjust';
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function ImageEditorScreen() {
+  const { colors } = useTheme();
+  const styles = useS();
   const router = useRouter();
   const { uri } = useLocalSearchParams<{ uri: string }>();
   const viewShotRef = useRef<any>(null);
@@ -372,7 +380,7 @@ export default function ImageEditorScreen() {
                 <Text style={[styles.chipText, cropRatio === r.value && styles.chipTextActive]}>{r.label}</Text>
               </TouchableOpacity>
             ))}
-            <TouchableOpacity style={[styles.chipBtn, { backgroundColor: C.accent }]} onPress={handleCrop}>
+            <TouchableOpacity style={[styles.chipBtn, { backgroundColor: colors.accent }]} onPress={handleCrop}>
               <Text style={[styles.chipText, { color: '#FFF' }]}>Apply Crop</Text>
             </TouchableOpacity>
           </ScrollView>
@@ -414,7 +422,7 @@ export default function ImageEditorScreen() {
             <TextInput
               style={styles.textInput}
               placeholder="Enter text..."
-              placeholderTextColor={C.muted}
+              placeholderTextColor={colors.textDim}
               value={editingText}
               onChangeText={setEditingText}
               onSubmitEditing={addTextOverlay}
@@ -449,7 +457,7 @@ export default function ImageEditorScreen() {
               {textOverlays.map(t => (
                 <TouchableOpacity key={t.id} onPress={() => removeTextOverlay(t.id)} style={styles.textTag}>
                   <Text style={{ color: t.color, fontSize: 12 }}>{t.text}</Text>
-                  <Text style={{ color: C.danger, fontSize: 10, marginLeft: 4 }}>✕</Text>
+                  <Text style={{ color: colors.danger, fontSize: 10, marginLeft: 4 }}>✕</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -467,7 +475,7 @@ export default function ImageEditorScreen() {
                 onPress={() => applyFilter(f)}
               >
                 <View style={[styles.filterPreview, f === 'B&W' && { backgroundColor: '#6B7280' }, f === 'Warm' && { backgroundColor: '#FF8C32' }, f === 'Cool' && { backgroundColor: '#3264FF' }, f === 'Vivid' && { backgroundColor: '#FF32C8' }]} />
-                <Text style={[styles.filterLabel, activeFilter === f && { color: C.cyan }]}>{f}</Text>
+                <Text style={[styles.filterLabel, activeFilter === f && { color: colors.accent }]}>{f}</Text>
               </TouchableOpacity>
             ))}
           </ScrollView>
@@ -485,7 +493,7 @@ export default function ImageEditorScreen() {
                   style={[styles.adjustStep, brightness === v && styles.adjustStepActive]}
                   onPress={() => setBrightness(v)}
                 >
-                  <Text style={[styles.adjustStepText, brightness === v && { color: C.cyan }]}>{v > 0 ? '+' + v : v}</Text>
+                  <Text style={[styles.adjustStepText, brightness === v && { color: colors.accent }]}>{v > 0 ? '+' + v : v}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -499,7 +507,7 @@ export default function ImageEditorScreen() {
                   style={[styles.adjustStep, contrast === v && styles.adjustStepActive]}
                   onPress={() => setContrast(v)}
                 >
-                  <Text style={[styles.adjustStepText, contrast === v && { color: C.cyan }]}>{v > 0 ? '+' + v : v}</Text>
+                  <Text style={[styles.adjustStepText, contrast === v && { color: colors.accent }]}>{v > 0 ? '+' + v : v}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -509,7 +517,7 @@ export default function ImageEditorScreen() {
 
       {processing && (
         <View style={styles.processingOverlay}>
-          <ActivityIndicator size="large" color={C.cyan} />
+          <ActivityIndicator size="large" color={colors.accent} />
           <Text style={styles.processingText}>Processing...</Text>
         </View>
       )}
@@ -517,54 +525,54 @@ export default function ImageEditorScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
   topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: Platform.OS === 'ios' ? 56 : 40, paddingHorizontal: 16, paddingBottom: 12, backgroundColor: 'rgba(2,11,24,0.95)' },
   topBtn: { paddingVertical: 6, paddingHorizontal: 14 },
-  topBtnText: { color: C.muted, fontSize: 16, fontWeight: '600' },
+  topBtnText: { color: c.textDim, fontSize: 16, fontWeight: '600' },
   topTitle: { color: '#FFF', fontSize: 17, fontWeight: '700' },
-  doneBtn: { backgroundColor: C.accent, borderRadius: 8 },
+  doneBtn: { backgroundColor: c.accent, borderRadius: 8 },
   doneBtnText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
   canvasWrapper: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   canvas: { width: SW, height: SH * 0.55, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
   image: { width: '100%', height: '100%' },
-  toolbar: { backgroundColor: C.card, borderTopWidth: 1, borderTopColor: 'rgba(74,159,255,0.1)', paddingVertical: 10 },
+  toolbar: { backgroundColor: c.card, borderTopWidth: 1, borderTopColor: 'rgba(74,159,255,0.1)', paddingVertical: 10 },
   toolRow: { flexDirection: 'row', paddingHorizontal: 12, gap: 6 },
   toolBtn: { alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10 },
   toolBtnActive: { backgroundColor: 'rgba(0,229,255,0.15)' },
-  toolIcon: { fontSize: 20, color: C.muted },
-  toolIconActive: { color: C.cyan },
-  toolLabel: { fontSize: 11, color: C.muted, marginTop: 3 },
-  toolLabelActive: { color: C.cyan },
-  subPanel: { backgroundColor: C.card, paddingHorizontal: 14, paddingVertical: 10, borderTopWidth: 1, borderTopColor: 'rgba(74,159,255,0.08)' },
+  toolIcon: { fontSize: 20, color: c.textDim },
+  toolIconActive: { color: c.accent },
+  toolLabel: { fontSize: 11, color: c.textDim, marginTop: 3 },
+  toolLabelActive: { color: c.accent },
+  subPanel: { backgroundColor: c.card, paddingHorizontal: 14, paddingVertical: 10, borderTopWidth: 1, borderTopColor: 'rgba(74,159,255,0.08)' },
   subRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   chipBtn: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(74,159,255,0.2)' },
-  chipActive: { borderColor: C.cyan, backgroundColor: 'rgba(0,229,255,0.1)' },
-  chipText: { color: C.muted, fontSize: 13, fontWeight: '600' },
-  chipTextActive: { color: C.cyan },
+  chipActive: { borderColor: c.accent, backgroundColor: 'rgba(0,229,255,0.1)' },
+  chipText: { color: c.textDim, fontSize: 13, fontWeight: '600' },
+  chipTextActive: { color: c.accent },
   colorDot: { width: 28, height: 28, borderRadius: 14, borderWidth: 2, borderColor: 'transparent' },
-  colorDotActive: { borderColor: C.cyan, borderWidth: 3 },
+  colorDotActive: { borderColor: c.accent, borderWidth: 3 },
   sliderRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 10 },
-  sliderLabel: { color: C.muted, fontSize: 11, marginRight: 4 },
+  sliderLabel: { color: c.textDim, fontSize: 11, marginRight: 4 },
   sizeBtn: { width: 30, height: 30, borderRadius: 15, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
-  sizeBtnActive: { borderColor: C.cyan, backgroundColor: 'rgba(0,229,255,0.15)' },
+  sizeBtnActive: { borderColor: c.accent, backgroundColor: 'rgba(0,229,255,0.15)' },
   undoBtn: { marginLeft: 'auto', paddingHorizontal: 12, paddingVertical: 6, backgroundColor: 'rgba(255,60,110,0.15)', borderRadius: 6 },
-  undoBtnText: { color: C.danger, fontSize: 12, fontWeight: '600' },
+  undoBtnText: { color: c.danger, fontSize: 12, fontWeight: '600' },
   textInputRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   textInput: { flex: 1, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, color: '#FFF', fontSize: 14, borderWidth: 1, borderColor: 'rgba(74,159,255,0.15)' },
-  addTextBtn: { marginLeft: 8, backgroundColor: C.accent, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
+  addTextBtn: { marginLeft: 8, backgroundColor: c.accent, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
   addTextBtnText: { color: '#FFF', fontSize: 13, fontWeight: '700' },
   textTag: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.06)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, marginRight: 6 },
   filterBtn: { alignItems: 'center', marginRight: 14 },
   filterBtnActive: {},
   filterPreview: { width: 48, height: 48, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.1)', marginBottom: 4, borderWidth: 2, borderColor: 'transparent' },
-  filterLabel: { fontSize: 11, color: C.muted },
+  filterLabel: { fontSize: 11, color: c.textDim },
   adjustRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  adjustLabel: { color: C.muted, fontSize: 13, width: 80 },
+  adjustLabel: { color: c.textDim, fontSize: 13, width: 80 },
   adjustSlider: { flex: 1, flexDirection: 'row', justifyContent: 'space-around' },
   adjustStep: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
-  adjustStepActive: { borderColor: C.cyan, backgroundColor: 'rgba(0,229,255,0.1)' },
-  adjustStepText: { color: C.muted, fontSize: 12 },
+  adjustStepActive: { borderColor: c.accent, backgroundColor: 'rgba(0,229,255,0.1)' },
+  adjustStepText: { color: c.textDim, fontSize: 12 },
   processingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(2,11,24,0.85)', justifyContent: 'center', alignItems: 'center' },
-  processingText: { color: C.cyan, fontSize: 15, marginTop: 12, fontWeight: '600' },
+  processingText: { color: c.accent, fontSize: 15, marginTop: 12, fontWeight: '600' },
 });
