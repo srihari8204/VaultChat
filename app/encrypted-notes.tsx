@@ -15,6 +15,7 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Sharing from 'expo-sharing';
+import Markdown from 'react-native-markdown-display';
 import {
   addAttachment, deleteAttachment, isImage, openAttachment, prettySize,
   type NoteAttachment,
@@ -92,6 +93,8 @@ export default function EncryptedNotesScreen() {
   const [edAttachments, setEdAttachments] = useState<NoteAttachment[]>([]);
   const [attaching, setAttaching] = useState(false);
   const [viewerImg, setViewerImg] = useState<string | null>(null);
+  const [edPreview, setEdPreview] = useState(false);
+  const [edSel, setEdSel] = useState({ start: 0, end: 0 });
 
   useEffect(() => { loadNotes(); }, []);
 
@@ -188,6 +191,22 @@ export default function EncryptedNotesScreen() {
     if (isImage(att)) { setViewerImg(uri); return; }
     if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri, { mimeType: att.mime, dialogTitle: att.name });
     else Alert.alert('Saved', 'Opened a decrypted copy.');
+  };
+
+  // ── Markdown formatting (#142) ────────────────────────────────────────────
+  // Wrap the current selection (or insert at the cursor) with markdown markers.
+  const wrapSelection = (before: string, after: string) => {
+    const { start, end } = edSel;
+    const s0 = Math.max(0, Math.min(start, edContent.length));
+    const s1 = Math.max(s0, Math.min(end, edContent.length));
+    const selected = edContent.slice(s0, s1) || 'text';
+    setEdContent(edContent.slice(0, s0) + before + selected + after + edContent.slice(s1));
+  };
+  // Prefix the line containing the selection start (headings, lists, quotes).
+  const prefixLine = (prefix: string) => {
+    const { start } = edSel;
+    const lineStart = edContent.lastIndexOf('\n', Math.max(0, start - 1)) + 1;
+    setEdContent(edContent.slice(0, lineStart) + prefix + edContent.slice(lineStart));
   };
 
   const saveNote = async () => {
@@ -362,9 +381,14 @@ export default function EncryptedNotesScreen() {
               <Text style={s.editorCancel}>Cancel</Text>
             </TouchableOpacity>
             <Text style={s.editorTitle}>{editNote ? 'Edit Note' : 'New Note'}</Text>
-            <TouchableOpacity onPress={saveNote}>
-              <Text style={s.editorSave}>Save</Text>
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+              <TouchableOpacity onPress={() => setEdPreview(p => !p)}>
+                <Text style={[s.editorCancel, edPreview && { color: colors.primary }]}>{edPreview ? 'Edit' : 'Preview'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={saveNote}>
+                <Text style={s.editorSave}>Save</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           <ScrollView style={s.editorBody}>
@@ -380,8 +404,42 @@ export default function EncryptedNotesScreen() {
               ))}
             </ScrollView>
 
-            {/* Plain-text content (rich-text/markdown is W19 #142, not yet built) */}
-            <TextInput style={s.editorContent} placeholder="Note content..." placeholderTextColor="#555" value={edContent} onChangeText={setEdContent} multiline textAlignVertical="top" />
+            {/* Markdown content (#142): edit with a formatting toolbar, or preview rendered */}
+            {edPreview ? (
+              <View style={s.mdPreview}>
+                {edContent.trim()
+                  ? <Markdown style={mdStyles(colors)}>{edContent}</Markdown>
+                  : <Text style={{ color: colors.textFaint }}>Nothing to preview yet.</Text>}
+              </View>
+            ) : (
+              <>
+                <View style={s.mdBar}>
+                  {([
+                    ['B', () => wrapSelection('**', '**')],
+                    ['I', () => wrapSelection('_', '_')],
+                    ['H', () => prefixLine('# ')],
+                    ['• List', () => prefixLine('- ')],
+                    ['❝', () => prefixLine('> ')],
+                    ['‹›', () => wrapSelection('`', '`')],
+                    ['🔗', () => wrapSelection('[', '](https://)')],
+                  ] as [string, () => void][]).map(([label, fn]) => (
+                    <TouchableOpacity key={label} style={s.mdBtn} onPress={fn}>
+                      <Text style={s.mdBtnTxt}>{label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <TextInput
+                  style={s.editorContent}
+                  placeholder="Note content… (Markdown supported — tap Preview)"
+                  placeholderTextColor="#555"
+                  value={edContent}
+                  onChangeText={setEdContent}
+                  onSelectionChange={(e) => setEdSel(e.nativeEvent.selection)}
+                  multiline
+                  textAlignVertical="top"
+                />
+              </>
+            )}
 
             {/* Attachments (encrypted) */}
             <View style={s.edSection}>
@@ -520,6 +578,25 @@ export default function EncryptedNotesScreen() {
   );
 }
 
+// Markdown render theme — maps react-native-markdown-display element keys to the
+// active palette so previews look right in both light and dark.
+const mdStyles = (c: Palette) => ({
+  body: { color: c.text, fontSize: 15, lineHeight: 22 },
+  heading1: { color: c.text, fontSize: 22, fontWeight: '800' as const, marginTop: 8, marginBottom: 4 },
+  heading2: { color: c.text, fontSize: 19, fontWeight: '800' as const, marginTop: 8, marginBottom: 4 },
+  heading3: { color: c.text, fontSize: 16, fontWeight: '700' as const, marginTop: 6, marginBottom: 4 },
+  strong: { fontWeight: '800' as const, color: c.text },
+  em: { fontStyle: 'italic' as const },
+  link: { color: c.primary, textDecorationLine: 'underline' as const },
+  blockquote: { backgroundColor: c.card, borderLeftColor: c.primary, borderLeftWidth: 3, paddingHorizontal: 12, paddingVertical: 6, marginVertical: 4 },
+  code_inline: { backgroundColor: c.card, color: c.accent, paddingHorizontal: 5, borderRadius: 4, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  code_block: { backgroundColor: c.card, color: c.text, padding: 10, borderRadius: 8, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  fence: { backgroundColor: c.card, color: c.text, padding: 10, borderRadius: 8, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  bullet_list: { marginVertical: 4 },
+  ordered_list: { marginVertical: 4 },
+  hr: { backgroundColor: c.border, height: 1 },
+});
+
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: c.bg },
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: Platform.OS === 'ios' ? 56 : 44, paddingBottom: 14, paddingHorizontal: 16, backgroundColor: c.card, borderBottomWidth: 1, borderBottomColor: c.border },
@@ -586,6 +663,10 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   attachRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: c.card, borderRadius: 10, borderWidth: 1, borderColor: c.border, paddingHorizontal: 12, paddingVertical: 10, marginTop: 6 },
   attachName: { color: c.text, fontSize: 14, fontWeight: '600' },
   attachMeta: { color: c.textDim, fontSize: 11, marginTop: 2 },
+  mdBar: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8, marginBottom: 8 },
+  mdBtn: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, backgroundColor: c.card, borderWidth: 1, borderColor: c.border },
+  mdBtnTxt: { color: c.text, fontSize: 13, fontWeight: '700' },
+  mdPreview: { minHeight: 180, paddingVertical: 8 },
   imgViewer: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' },
   imgViewerImg: { width: '100%', height: '80%' },
   imgViewerClose: { position: 'absolute', bottom: 50, paddingHorizontal: 28, paddingVertical: 12, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 24 },
