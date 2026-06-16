@@ -76,3 +76,105 @@ export const Aurora = {
 } as const;
 
 export type AuroraTheme = typeof Aurora;
+
+// ─── U1: Design-token foundation ─────────────────────────────────────
+// One source of truth for space / radius / elevation / motion / type, so every
+// screen stops inventing its own 8/10/14/18/20/24 radii and ad-hoc paddings.
+// All additive — existing Aurora.* usage is untouched.
+
+/** 4-point spacing scale. Use SPACING.md not magic numbers. */
+export const SPACING = {
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 24,
+  xxl: 32,
+  xxxl: 48,
+} as const;
+
+/** Corner-radius scale. `pill` = fully rounded; `bubble`/`tail` for chat. */
+export const RADIUS = {
+  xs: 6,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 20,
+  xxl: 28,
+  bubble: 16,
+  tail: 4,
+  pill: 999,
+} as const;
+
+/** Elevation presets — ready-to-spread RN style objects (iOS shadow + Android elevation). */
+export const ELEVATION = {
+  none: {},
+  sm: {
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.18,
+    shadowRadius: 2, elevation: 2,
+  },
+  md: {
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.24,
+    shadowRadius: 8, elevation: 5,
+  },
+  lg: {
+    shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.32,
+    shadowRadius: 16, elevation: 10,
+  },
+} as const;
+
+/** Motion presets — durations (ms) + spring configs for Reanimated/Animated. */
+export const MOTION = {
+  fast: 150,
+  base: 220,
+  slow: 320,
+  spring:      { damping: 18, stiffness: 180, mass: 1 },
+  springSnappy:{ damping: 22, stiffness: 260, mass: 0.9 },
+  springSoft:  { damping: 26, stiffness: 120, mass: 1 },
+} as const;
+
+// ─── Brand font families (loaded in the root layout — see U2) ─────────
+// Until the fonts load, the Text wrapper falls back to the system font.
+// Family names match @expo-google-fonts exports (loaded in the root layout, U2).
+export const FONT = {
+  heading:     'Sora_700Bold',          // headings / titles
+  headingBold: 'Sora_800ExtraBold',
+  body:        'NunitoSans_400Regular', // body / UI
+  bodySemibold:'NunitoSans_600SemiBold',
+  bodyBold:    'NunitoSans_700Bold',
+} as const;
+
+/**
+ * Type scale. Each variant carries size / lineHeight / weight / family so a
+ * single <Text variant="title"> renders consistently everywhere. Weight is kept
+ * for the system-font fallback; family takes over once the brand fonts load.
+ */
+export const TYPOGRAPHY = {
+  display: { fontSize: 34, lineHeight: 40, fontWeight: '800' as const, family: FONT.headingBold },
+  title:   { fontSize: 24, lineHeight: 30, fontWeight: '800' as const, family: FONT.headingBold },
+  h2:      { fontSize: 20, lineHeight: 26, fontWeight: '700' as const, family: FONT.heading },
+  h3:      { fontSize: 17, lineHeight: 22, fontWeight: '700' as const, family: FONT.heading },
+  body:    { fontSize: 15, lineHeight: 21, fontWeight: '400' as const, family: FONT.body },
+  bodyStrong:{ fontSize: 15, lineHeight: 21, fontWeight: '600' as const, family: FONT.bodySemibold },
+  callout: { fontSize: 14, lineHeight: 19, fontWeight: '500' as const, family: FONT.body },
+  caption: { fontSize: 12.5, lineHeight: 16, fontWeight: '500' as const, family: FONT.body },
+  tiny:    { fontSize: 11, lineHeight: 14, fontWeight: '600' as const, family: FONT.bodySemibold },
+} as const;
+
+export type TypeVariant = keyof typeof TYPOGRAPHY;
+
+/**
+ * Deterministic per-contact avatar colors (name-hash → palette), so initials
+ * aren't all the same purple (U7). Pass a stable string (userId or name).
+ */
+export const AVATAR_PALETTE = [
+  '#10B981', '#06B6D4', '#8B5CF6', '#F59E0B', '#EF4444',
+  '#EC4899', '#3B82F6', '#14B8A6', '#F97316', '#6366F1',
+] as const;
+
+export function avatarColor(seed: string | null | undefined): string {
+  const s = seed || '?';
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
+}

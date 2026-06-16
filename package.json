@@ -27,6 +27,8 @@
     "prod:precheck": "node ./scripts/prod-precheck.js"
   },
   "dependencies": {
+    "@expo-google-fonts/nunito-sans": "^0.4.2",
+    "@expo-google-fonts/sora": "^0.4.2",
     "@expo/vector-icons": "^15.0.3",
     "@noble/ciphers": "^2.2.0",
     "@noble/curves": "^2.2.0",

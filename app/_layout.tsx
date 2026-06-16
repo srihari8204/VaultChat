@@ -20,6 +20,9 @@ import * as Sentry from '@sentry/react-native';
 import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet, Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { useFonts, Sora_700Bold, Sora_800ExtraBold } from '@expo-google-fonts/sora';
+import { NunitoSans_400Regular, NunitoSans_600SemiBold, NunitoSans_700Bold } from '@expo-google-fonts/nunito-sans';
+import { FontReadyContext } from '../components/ui/Text';
 
 import { runSecurityCheck } from '../services/securityService';
 import { attachTapHandler } from '../lib/push';
@@ -50,6 +53,12 @@ if (SENTRY_DSN) {
 function RootLayout() {
   const router = useRouter();
   const [securityChecked, setSecurityChecked] = useState(false);
+  // U2: load brand fonts (non-blocking — render proceeds on system font, then
+  // swaps to Sora/Nunito Sans when ready via FontReadyContext).
+  const [fontsReady] = useFonts({
+    Sora_700Bold, Sora_800ExtraBold,
+    NunitoSans_400Regular, NunitoSans_600SemiBold, NunitoSans_700Bold,
+  });
 
   useEffect(() => {
     // ── 1. Block screenshots app-wide (native only) ──────────
@@ -165,6 +174,7 @@ function RootLayout() {
   }
 
   return (
+    <FontReadyContext.Provider value={fontsReady}>
     <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style="light" />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0A0A0F' } }}>
@@ -323,6 +333,7 @@ function RootLayout() {
         <Stack.Screen name="game-play" />
       </Stack>
     </GestureHandlerRootView>
+    </FontReadyContext.Provider>
   );
 }
 
