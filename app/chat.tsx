@@ -81,7 +81,6 @@ import {
   muteChat,
   removeReaction,
   reportScreenshotCaptured,
-  sendMessage,
   setDisappearing,
   setHidden,
   setScreenshotMode,
@@ -1460,6 +1459,11 @@ export default function ChatScreen() {
           // above the first (oldest) message of each calendar day.
           const older = messages[index + 1];
           const showDate = !older || !isSameCalendarDay(item.createdAt, older.createdAt);
+          // Group with the older message when it's the same sender, same day, and
+          // within 5 minutes (suppresses the repeated sender tag + tightens spacing).
+          const grouped = !showDate && !!older && older.senderId === item.senderId &&
+            item.type !== 'system' && older.type !== 'system' &&
+            Math.abs(new Date(item.createdAt).getTime() - new Date(older.createdAt).getTime()) < 5 * 60 * 1000;
           return (
           <View>
             {showDate && <DateChip iso={item.createdAt} />}
@@ -1482,6 +1486,7 @@ export default function ChatScreen() {
                 : undefined}
               highlight={searchOpen && searchQ.trim().length > 0 ? searchQ.trim() : null}
               tiltRevealed={tiltRevealed}
+              grouped={grouped}
               pollVotesForMsg={pollVotes[item.id]}
               onPollVoteChange={(next) => setPollVotes(prev => ({ ...prev, [item.id]: next }))}
             />
@@ -2260,7 +2265,7 @@ function MessageBubble({
   msg, meId, member, chatId, otherMembers, onLongPress,
   reactionsForMsg, onToggleReaction,
   replyTarget, replyTargetMember,
-  highlight, tiltRevealed,
+  highlight, tiltRevealed, grouped,
   pollVotesForMsg, onPollVoteChange,
 }: {
   msg: DisplayMessage;
@@ -2269,6 +2274,7 @@ function MessageBubble({
   chatId: string;
   otherMembers: ChatMember[];
   onLongPress: (msg: DisplayMessage, plain: string) => void;
+  grouped?: boolean; // true when grouped with the previous (older) same-sender msg
   reactionsForMsg?: ReactionSummary[];
   onToggleReaction?: (emoji: string) => void;
   replyTarget?: DisplayMessage | null;
@@ -2396,11 +2402,13 @@ function MessageBubble({
   }, [revealed, msg.meta?.attachmentId]);
 
   return (
-    <View style={[S.bubbleRow, isMine ? S.bubbleRowMine : S.bubbleRowTheirs]}>
+    <View style={[S.bubbleRow, isMine ? S.bubbleRowMine : S.bubbleRowTheirs, grouped && S.bubbleRowGrouped]}>
       <TouchableOpacity
         style={[
           S.bubble,
           isMine ? S.bubbleMine : S.bubbleTheirs,
+          // Soften the tail corner on grouped (consecutive) messages.
+          grouped && (isMine ? { borderTopRightRadius: 16 } : { borderTopLeftRadius: 16 }),
           isImage   && S.imageBubble,
           isSticker && S.stickerBubble,
           msg._state === 'pending' && S.bubblePending,
@@ -2411,7 +2419,7 @@ function MessageBubble({
         delayLongPress={250}
         activeOpacity={0.85}
       >
-        {!isMine && member && !isSticker && (
+        {!isMine && member && !isSticker && !grouped && (
           <Text style={S.senderTag}>{member.name || member.email || msg.senderId.slice(0, 8)}</Text>
         )}
 
@@ -2640,11 +2648,12 @@ const S = StyleSheet.create({
   dateChipTxt:   { color: SUBTLE, fontSize: 11.5, fontWeight: '700' },
 
   bubbleRow:     { marginVertical: 4, flexDirection: 'row' },
+  bubbleRowGrouped: { marginTop: 1 }, // tighter spacing for consecutive same-sender msgs
   bubbleRowMine: { justifyContent: 'flex-end' },
   bubbleRowTheirs:{ justifyContent: 'flex-start' },
   bubble:        { maxWidth: '78%', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 16, gap: 2 },
-  bubbleMine:    { backgroundColor: ACCENT, borderTopRightRadius: 4 },
-  bubbleTheirs:  { backgroundColor: '#1F2937', borderTopLeftRadius: 4 },
+  bubbleMine:    { backgroundColor: '#0E7256', borderTopRightRadius: 4 }, // brand emerald "sent"
+  bubbleTheirs:  { backgroundColor: '#22272E', borderTopLeftRadius: 4 },  // neutral "received"
   bubblePending: { opacity: 0.6 },
   bubbleFailed:  { borderWidth: 1, borderColor: DANGER, opacity: 0.85 },
   bubbleSystem:  { alignSelf: 'center', backgroundColor: 'transparent', paddingVertical: 4 },
@@ -2831,7 +2840,8 @@ function bubblePropsEqual(a: any, b: any): boolean {
     a.replyTarget === b.replyTarget &&
     a.replyTargetMember === b.replyTargetMember &&
     a.highlight === b.highlight &&
-    a.tiltRevealed === b.tiltRevealed
+    a.tiltRevealed === b.tiltRevealed &&
+    a.grouped === b.grouped
   );
 }
 const MemoBubble = memo(MessageBubble, bubblePropsEqual);
