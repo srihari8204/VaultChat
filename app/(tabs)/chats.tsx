@@ -177,6 +177,7 @@ export default function ChatsScreen() {
       <View style={S.header}>
         <Text style={S.title}>Chats</Text>
         <View style={{ flexDirection: 'row', gap: 8 }}>
+          <TouchableOpacity onPress={() => router.push('/broadcast' as any)} style={S.headerBtn}><Text style={S.headerBtnTxt}>📢</Text></TouchableOpacity>
           <TouchableOpacity onPress={() => router.push('/search' as any)} style={S.headerBtn}><Text style={S.headerBtnTxt}>🔍</Text></TouchableOpacity>
           <TouchableOpacity onPress={() => router.push('/contacts' as any)} style={S.headerBtn}><Text style={S.headerBtnTxt}>📇</Text></TouchableOpacity>
         </View>
