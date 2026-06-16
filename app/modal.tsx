@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useState , useMemo} from 'react';
 import {
   ActivityIndicator,
   Alert, KeyboardAvoidingView,
@@ -8,8 +8,17 @@ import {
   Text, TextInput, TouchableOpacity,
   View
 } from 'react-native';
+import { useTheme } from '../lib/theme';
+import { type Palette } from '../constants/theme';
+
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
 
 export default function PhoneLoginScreen() {
+  const { colors } = useTheme();
+  const styles = useS();
   const router = useRouter();
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
@@ -99,10 +108,10 @@ export default function PhoneLoginScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (c: Palette) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#050D1F',
+    backgroundColor: c.bg,
     justifyContent: 'space-between',
     paddingHorizontal: 24,
     paddingVertical: 40,
@@ -123,12 +132,12 @@ const styles = StyleSheet.create({
   },
   tagline: {
     fontSize: 14,
-    color: '#6B7280',
+    color: c.textDim,
     marginTop: 8,
     textAlign: 'center',
   },
   formArea: {
-    backgroundColor: '#0F1729',
+    backgroundColor: c.bg,
     borderRadius: 24,
     padding: 24,
     borderWidth: 1,
@@ -142,7 +151,7 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: 14,
-    color: '#6B7280',
+    color: c.textDim,
     marginBottom: 24,
     lineHeight: 20,
   },
@@ -158,7 +167,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: c.border,
   },
   countryCodeText: {
     color: '#000000',
@@ -175,7 +184,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
     letterSpacing: 2,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: c.border,
   },
   charCount: {
     color: '#475569',
@@ -184,12 +193,12 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   button: {
-    backgroundColor: '#1D4ED8',
+    backgroundColor: c.accent,
     borderRadius: 14,
     paddingVertical: 18,
     alignItems: 'center',
     marginBottom: 16,
-    shadowColor: '#1D4ED8',
+    shadowColor: c.accent,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.4,
     shadowRadius: 8,
