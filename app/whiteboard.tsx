@@ -2,21 +2,29 @@
 // Draw sketches, annotate, share in chat
 // Touch-based drawing with color picker, brush sizes, undo, clear
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, PanResponder,
   StatusBar, Alert,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { Stack } from 'expo-router';
 import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
 
-const C = { bg: '#FFFFFF', accent: '#4A9FFF' };
 
 const COLORS = ['#FFFFFF', '#FF3C6E', '#4A9FFF', '#10B981', '#F59E0B', '#A78BFA', '#FF6B35', '#EC4899', '#8B5CF6'];
 const BRUSH_SIZES = [2, 4, 8, 14, 22];
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function WhiteboardScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const canvasRef = useRef(null);
   const [paths, setPaths] = useState([]);
   const [currentPath, setCurrentPath] = useState([]);
@@ -141,9 +149,9 @@ export default function WhiteboardScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg },
-  canvas: { flex: 1, backgroundColor: C.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
+  canvas: { flex: 1, backgroundColor: c.bg },
   toolbar: { backgroundColor: '#161B22', padding: 12, paddingBottom: 28, borderTopWidth: 1, borderTopColor: '#21262D' },
   toolRow: { flexDirection: 'row', justifyContent: 'center', gap: 16, marginBottom: 12 },
   toolBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#21262D', justifyContent: 'center', alignItems: 'center' },

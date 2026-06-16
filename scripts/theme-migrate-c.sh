@@ -9,7 +9,7 @@ grep -qE "useTheme|makeStyles\(" "$f" && { echo "SKIP $f"; exit 0; }
 [ "$(grep -cE '^export default function' "$f")" = "1" ] || { echo "MANUAL(comps) $f"; exit 3; }
 grep -qE "^const [Ss] = StyleSheet\.create\(\{" "$f" || { echo "MANUAL(nostyle) $f"; exit 3; }
 # Palette object var (first const NAME = { with a hex inside).
-cvar=$(grep -E "^const [A-Za-z_]+ *= *\{" "$f" | while read -r l; do n=$(echo "$l" | grep -oE "^const [A-Za-z_]+" | sed 's/^const //'); echo "$l" | grep -q "#" && { echo "$n"; break; }; done)
+for cand in C CLR COLORS Colors COLOR THEME PALETTE; do grep -qE "^const ${cand} *= *{" "$f" && { cvar=$cand; break; }; done
 [ -z "$cvar" ] && { echo "MANUAL(noCobj) $f"; exit 3; }
 ss=$(grep -nE "^const [Ss] = StyleSheet\.create\(\{" "$f" | head -1 | cut -d: -f1)
 svar=$(sed -n "${ss}p" "$f" | grep -oE "^const [Ss]" | grep -oE "[Ss]$")

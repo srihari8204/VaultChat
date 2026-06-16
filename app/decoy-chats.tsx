@@ -2,24 +2,29 @@
 // Looks IDENTICAL to real chats.tsx but shows fake data
 // No visual indicator of duress mode — pixel-perfect clone
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList,
   StatusBar, TextInput, SafeAreaView,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { getDecoyChats, type DecoyChat } from '../lib/ghostProtocol';
 
-const C = {
-  bg: '#FFFFFF', primary: '#4A9FFF', accent: '#10B981',
-  dim: 'rgba(255,255,255,0.45)', card: 'rgba(10,22,40,0.88)',
-};
 
 const GRADS = [
   '#1D4ED8', '#059669', '#DC2626', '#9333EA', '#0891B2', '#7C3AED', '#F59E0B', '#EC4899',
 ];
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function DecoyChatList() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
@@ -129,8 +134,8 @@ export default function DecoyChatList() {
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8 },
   title: { color: '#fff', fontSize: 24, fontWeight: '900', letterSpacing: -0.5 },
   headerRight: { flexDirection: 'row', alignItems: 'center' },

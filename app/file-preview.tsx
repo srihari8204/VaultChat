@@ -3,16 +3,17 @@
 // Supports: JS, TS, Python, Java, C, Go, Rust, SQL, HTML, CSS, JSON, YAML, MD, TXT
 // Dark theme with line numbers
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   StatusBar, ActivityIndicator, Share, Alert,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { useLocalSearchParams, Stack } from 'expo-router';
 import * as FileSystem from 'expo-file-system/legacy';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
 
-const C = { bg: '#FFFFFF', accent: '#4A9FFF', card: '#161B22', green: '#10B981' };
 
 // Syntax color themes per token type
 const TOKEN_COLORS = {
@@ -129,7 +130,14 @@ const tokenize = (line, lang) => {
   return tokens;
 };
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function FilePreviewScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const { uri, filename, mediaUrl } = useLocalSearchParams();
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(true);
@@ -182,13 +190,13 @@ export default function FilePreviewScreen() {
         headerRight: () => (
           <View style={{ flexDirection: 'row', gap: 12, marginRight: 8 }}>
             <TouchableOpacity onPress={() => setWordWrap(!wordWrap)}>
-              <Text style={{ color: wordWrap ? C.accent : '#6B7280', fontSize: 12, fontWeight: '700' }}>Wrap</Text>
+              <Text style={{ color: wordWrap ? colors.accent : '#6B7280', fontSize: 12, fontWeight: '700' }}>Wrap</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={copyAll}>
-              <Text style={{ color: C.accent, fontSize: 12, fontWeight: '700' }}>Copy</Text>
+              <Text style={{ color: colors.accent, fontSize: 12, fontWeight: '700' }}>Copy</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={shareFile}>
-              <Text style={{ color: C.accent, fontSize: 12, fontWeight: '700' }}>Share</Text>
+              <Text style={{ color: colors.accent, fontSize: 12, fontWeight: '700' }}>Share</Text>
             </TouchableOpacity>
           </View>
         ),
@@ -204,7 +212,7 @@ export default function FilePreviewScreen() {
         </View>
 
         {loading ? (
-          <ActivityIndicator color={C.accent} style={{ marginTop: 40 }} />
+          <ActivityIndicator color={colors.accent} style={{ marginTop: 40 }} />
         ) : (
           <ScrollView style={s.codeScroll} horizontal={!wordWrap}>
             <ScrollView nestedScrollEnabled>
@@ -230,10 +238,10 @@ export default function FilePreviewScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg },
-  infoBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, backgroundColor: C.card, borderBottomWidth: 1, borderBottomColor: '#21262D', gap: 12 },
-  langBadge: { backgroundColor: '#4A9FFF22', color: C.accent, fontSize: 10, fontWeight: '800', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
+  infoBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, backgroundColor: c.card, borderBottomWidth: 1, borderBottomColor: '#21262D', gap: 12 },
+  langBadge: { backgroundColor: '#4A9FFF22', color: c.accent, fontSize: 10, fontWeight: '800', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 },
   lineCount: { color: '#8B949E', fontSize: 11 },
   sizeInfo: { color: '#8B949E', fontSize: 11 },
   codeScroll: { flex: 1 },

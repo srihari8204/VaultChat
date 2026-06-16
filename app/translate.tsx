@@ -3,15 +3,16 @@
 // Uses on-device dictionary for common phrases, no API needed
 // Stores translations in AsyncStorage for offline access
 
-import React, { useState } from 'react';
+import React, { useState , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, TextInput,
   FlatList, StatusBar, ScrollView, Alert,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { useLocalSearchParams, Stack } from 'expo-router';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
 
-const C = { bg: '#FFFFFF', accent: '#4A9FFF', card: '#F9FAFB', green: '#10B981' };
 
 const LANGUAGES = [
   { code: 'en', name: 'English', flag: '\uD83C\uDDFA\uD83C\uDDF8' },
@@ -69,7 +70,14 @@ const translateText = (text, targetLang) => {
   return result;
 };
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function TranslateScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const { text: initialText } = useLocalSearchParams();
   const [inputText, setInputText] = useState((initialText || '') + '');
   const [targetLang, setTargetLang] = useState('hi');
@@ -139,7 +147,7 @@ export default function TranslateScreen() {
                   style={[s.langOption, targetLang === item.code && s.langOptionActive]}
                   onPress={() => { setTargetLang(item.code); setShowLangs(false); }}>
                   <Text style={s.langFlag}>{item.flag}</Text>
-                  <Text style={[s.langName, targetLang === item.code && { color: C.accent }]}>{item.name}</Text>
+                  <Text style={[s.langName, targetLang === item.code && { color: colors.accent }]}>{item.name}</Text>
                 </TouchableOpacity>
               )}
               contentContainerStyle={{ padding: 8 }}
@@ -179,14 +187,14 @@ export default function TranslateScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg, padding: 16 },
-  card: { backgroundColor: C.card, borderRadius: 16, borderWidth: 1, borderColor: '#E5E7EB', overflow: 'hidden', marginBottom: 4 },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg, padding: 16 },
+  card: { backgroundColor: c.card, borderRadius: 16, borderWidth: 1, borderColor: '#E5E7EB', overflow: 'hidden', marginBottom: 4 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
   langLabel: { color: '#1F2937', fontSize: 14, fontWeight: '700' },
   textInput: { padding: 14, color: '#fff', fontSize: 15, minHeight: 80, textAlignVertical: 'top' },
   swapRow: { alignItems: 'center', paddingVertical: 4 },
-  swapBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: C.card, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB' },
+  swapBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: c.card, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB' },
   langOption: { flex: 1, flexDirection: 'row', alignItems: 'center', padding: 10, borderRadius: 8, gap: 8, margin: 2 },
   langOptionActive: { backgroundColor: '#4A9FFF22' },
   langFlag: { fontSize: 18 },
@@ -194,10 +202,10 @@ const s = StyleSheet.create({
   resultBox: { padding: 14, minHeight: 80 },
   resultTxt: { color: '#1F2937', fontSize: 15, lineHeight: 22 },
   copyHint: { color: '#9CA3AF', fontSize: 10, marginTop: 8, textAlign: 'right' },
-  translateBtn: { backgroundColor: C.accent, borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 12 },
+  translateBtn: { backgroundColor: c.accent, borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 12 },
   translateBtnTxt: { color: '#000', fontSize: 16, fontWeight: '900' },
   sectionTitle: { color: '#6B7280', fontSize: 11, fontWeight: '800', letterSpacing: 1, marginTop: 20, marginBottom: 8 },
-  historyRow: { backgroundColor: C.card, borderRadius: 10, padding: 10, marginBottom: 4, borderWidth: 1, borderColor: '#E5E7EB' },
+  historyRow: { backgroundColor: c.card, borderRadius: 10, padding: 10, marginBottom: 4, borderWidth: 1, borderColor: '#E5E7EB' },
   historyFrom: { color: '#6B7280', fontSize: 12 },
   historyTo: { color: '#1F2937', fontSize: 12, marginTop: 2 },
 });

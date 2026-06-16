@@ -2,15 +2,16 @@
 // Categorizes notifications: Urgent, Important, Social, Low Priority
 // Learns from user behavior, supports Do Not Disturb with exceptions
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect , useMemo} from 'react';
 import {
   View, Text, StyleSheet,
   StatusBar, Switch, ScrollView,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { Stack } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const C = { bg: '#FFFFFF', accent: '#4A9FFF', green: '#10B981', card: '#F9FAFB', danger: '#FF3C6E', purple: '#A78BFA', orange: '#F59E0B' };
 
 const PRIORITY_LEVELS = [
   { id: 'urgent', name: 'Urgent', icon: '\uD83D\uDD34', color: '#FF3C6E', desc: 'Duress alerts, panic, trusted contacts', sound: 'Always ring', override: true },
@@ -32,7 +33,14 @@ const SMART_RULES = [
 
 const SETTINGS_KEY = 'vc_smart_notif_rules';
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function SmartNotificationsScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const [rules, setRules] = useState(SMART_RULES);
   const [dnd, setDnd] = useState(false);
   const [stats] = useState({ urgent: 2, important: 15, social: 47, low: 128 });
@@ -104,7 +112,7 @@ export default function SmartNotificationsScreen() {
               <Text style={s.ruleDesc}>{r.desc}</Text>
             </View>
             <Switch value={r.enabled} onValueChange={() => toggleRule(r.id)}
-              thumbColor={r.enabled ? C.accent : '#6B7280'} trackColor={{ false: '#E5E7EB', true: '#4A9FFF44' }} />
+              thumbColor={r.enabled ? colors.accent : '#6B7280'} trackColor={{ false: '#E5E7EB', true: '#4A9FFF44' }} />
           </View>
         ))}
 
@@ -116,7 +124,7 @@ export default function SmartNotificationsScreen() {
             <Text style={s.dndDesc}>Silence all except urgent. Trusted contacts always ring.</Text>
           </View>
           <Switch value={dnd} onValueChange={setDnd}
-            thumbColor={dnd ? C.danger : '#6B7280'} trackColor={{ false: '#E5E7EB', true: '#FF3C6E44' }} />
+            thumbColor={dnd ? colors.danger : '#6B7280'} trackColor={{ false: '#E5E7EB', true: '#FF3C6E44' }} />
         </View>
 
         <View style={{ height: 40 }} />
@@ -125,21 +133,21 @@ export default function SmartNotificationsScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg, padding: 16 },
-  summaryCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#E5E7EB' },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg, padding: 16 },
+  summaryCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, borderRadius: 14, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#E5E7EB' },
   summaryTitle: { color: '#fff', fontSize: 16, fontWeight: '800' },
   summaryDesc: { color: '#9CA3AF', fontSize: 12, marginTop: 4, lineHeight: 18 },
   sectionTitle: { color: '#6B7280', fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 8 },
   statsRow: { flexDirection: 'row', gap: 8 },
-  statCard: { flex: 1, backgroundColor: C.card, borderRadius: 12, padding: 12, alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB' },
+  statCard: { flex: 1, backgroundColor: c.card, borderRadius: 12, padding: 12, alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB' },
   statNum: { fontSize: 20, fontWeight: '900', marginTop: 4 },
   statLabel: { color: '#9CA3AF', fontSize: 9, marginTop: 2, fontWeight: '700' },
-  priorityRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 14, marginBottom: 6, borderWidth: 1, borderColor: '#E5E7EB' },
+  priorityRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, borderRadius: 12, padding: 14, marginBottom: 6, borderWidth: 1, borderColor: '#E5E7EB' },
   priorityName: { fontSize: 14, fontWeight: '700' },
   priorityDesc: { color: '#9CA3AF', fontSize: 11, marginTop: 2 },
   prioritySound: { color: '#9CA3AF', fontSize: 10, marginTop: 2, fontStyle: 'italic' },
-  ruleRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 14, marginBottom: 6, borderWidth: 1, borderColor: '#E5E7EB' },
+  ruleRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, borderRadius: 12, padding: 14, marginBottom: 6, borderWidth: 1, borderColor: '#E5E7EB' },
   ruleName: { color: '#1F2937', fontSize: 13, fontWeight: '700' },
   ruleDesc: { color: '#6B7280', fontSize: 11, marginTop: 2 },
   dndCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FF3C6E10', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#FF3C6E22' },
