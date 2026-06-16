@@ -47,6 +47,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Swipeable } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
 import { Sheet, Avatar } from '../components/ui';
 import { useTheme } from '../lib/theme';
@@ -1478,6 +1479,7 @@ export default function ChatScreen() {
           return (
           <View>
             {showDate && <DateChip iso={item.createdAt} />}
+            <SwipeToReply onReply={() => { if (!item.deletedAt && item.type !== 'system') setReplyTo(item); }}>
             <View style={item.id === flashId ? { backgroundColor: 'rgba(16,185,129,0.18)', borderRadius: 12 } : undefined}>
             <MemoBubble
               msg={item}
@@ -1502,6 +1504,7 @@ export default function ChatScreen() {
               onPollVoteChange={(next) => setPollVotes(prev => ({ ...prev, [item.id]: next }))}
             />
             </View>
+            </SwipeToReply>
           </View>
           );
         }}
@@ -2275,6 +2278,32 @@ function DateChip({ iso }: { iso: string }) {
     <View style={S.dateChipRow}>
       <View style={S.dateChip}><Text style={S.dateChipTxt}>{dayLabel(iso)}</Text></View>
     </View>
+  );
+}
+
+// Swipe-right on a message to reply (WhatsApp/Signal gesture). Reveals a reply
+// arrow; crossing the threshold fires onReply once and snaps back.
+function SwipeToReply({ onReply, children }: { onReply: () => void; children: React.ReactNode }) {
+  const ref = useRef<Swipeable>(null);
+  return (
+    <Swipeable
+      ref={ref}
+      friction={2}
+      leftThreshold={44}
+      overshootLeft={false}
+      renderLeftActions={() => (
+        <View style={{ justifyContent: 'center', paddingLeft: 18 }}>
+          <Ionicons name="arrow-undo" size={22} color="#9CA3AF" />
+        </View>
+      )}
+      onSwipeableWillOpen={() => {
+        if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+        onReply();
+        requestAnimationFrame(() => ref.current?.close());
+      }}
+    >
+      {children}
+    </Swipeable>
   );
 }
 
