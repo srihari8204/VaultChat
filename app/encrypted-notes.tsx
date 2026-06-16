@@ -10,8 +10,15 @@
 import React, { useState, useEffect, useCallback , useMemo} from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, FlatList, TextInput,
-  Alert, Modal, Platform, ScrollView,
+  Alert, Modal, Platform, ScrollView, Image, ActivityIndicator,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
+import * as Sharing from 'expo-sharing';
+import {
+  addAttachment, deleteAttachment, isImage, openAttachment, prettySize,
+  type NoteAttachment,
+} from '../lib/notesAttachments';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { Stack, useRouter } from 'expo-router';
@@ -49,6 +56,7 @@ interface Note {
   reminder?: number;     // timestamp
   isDeleted?: boolean;   // soft delete
   deletedAt?: number;
+  attachments?: NoteAttachment[]; // encrypted files (lib/notesAttachments)
 }
 
 const STORAGE_KEY = 'vc_encrypted_notes';
@@ -81,6 +89,9 @@ export default function EncryptedNotesScreen() {
   const [edSensitive, setEdSensitive] = useState(false);
   const [edLocked, setEdLocked] = useState(false);
   const [hideSensitive, setHideSensitive] = useState(true);
+  const [edAttachments, setEdAttachments] = useState<NoteAttachment[]>([]);
+  const [attaching, setAttaching] = useState(false);
+  const [viewerImg, setViewerImg] = useState<string | null>(null);
 
   useEffect(() => { loadNotes(); }, []);
 
@@ -114,6 +125,7 @@ export default function EncryptedNotesScreen() {
       setEdTagColor(note.tagColor ?? '#3B82F6');
       setEdSensitive(note.isSensitive);
       setEdLocked(note.isLocked);
+      setEdAttachments(note.attachments ?? []);
     } else {
       setEditNote(null);
       setEdTitle('');
@@ -123,21 +135,72 @@ export default function EncryptedNotesScreen() {
       setEdTagColor('#3B82F6');
       setEdSensitive(false);
       setEdLocked(false);
+      setEdAttachments([]);
     }
     setShowEditor(true);
+  };
+
+  // ── Attachments (encrypted via lib/notesAttachments) ──────────────────────
+  const attachImage = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) { Alert.alert('Permission needed', 'Allow photo access to attach an image.'); return; }
+    const res = await ImagePicker.launchImageLibraryAsync({ quality: 0.9 });
+    if (res.canceled || !res.assets?.[0]) return;
+    const a = res.assets[0];
+    setAttaching(true);
+    try {
+      const att = await addAttachment(a.uri, a.fileName ?? `image_${Date.now()}.jpg`, a.mimeType ?? 'image/jpeg');
+      setEdAttachments(prev => [...prev, att]);
+    } catch (e: any) {
+      Alert.alert('Could not attach', e?.message ?? 'Try again');
+    } finally { setAttaching(false); }
+  };
+
+  const attachFile = async () => {
+    const res = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
+    if (res.canceled || !res.assets?.[0]) return;
+    const a = res.assets[0];
+    setAttaching(true);
+    try {
+      const att = await addAttachment(a.uri, a.name, a.mimeType ?? 'application/octet-stream');
+      setEdAttachments(prev => [...prev, att]);
+    } catch (e: any) {
+      Alert.alert('Could not attach', e?.message ?? 'Try again');
+    } finally { setAttaching(false); }
+  };
+
+  const addAttachmentMenu = () => {
+    Alert.alert('Add attachment', 'Encrypted with your notes key before it touches disk.', [
+      { text: 'Photo / Image', onPress: attachImage },
+      { text: 'File', onPress: attachFile },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  const removeAttachment = async (att: NoteAttachment) => {
+    await deleteAttachment(att.id);
+    setEdAttachments(prev => prev.filter(x => x.id !== att.id));
+  };
+
+  const openAttachmentFile = async (att: NoteAttachment) => {
+    const uri = await openAttachment(att);
+    if (!uri) { Alert.alert('Could not open', 'This attachment is unavailable or corrupted.'); return; }
+    if (isImage(att)) { setViewerImg(uri); return; }
+    if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri, { mimeType: att.mime, dialogTitle: att.name });
+    else Alert.alert('Saved', 'Opened a decrypted copy.');
   };
 
   const saveNote = async () => {
     if (!edTitle.trim()) { Alert.alert('Error', 'Title required'); return; }
     const now = Date.now();
     if (editNote) {
-      const updated = notes.map(n => n.id === editNote.id ? { ...n, title: edTitle.trim(), content: edContent, category: edCategory, tags: edTags, tagColor: edTagColor, isSensitive: edSensitive, isLocked: edLocked, updatedAt: now } : n);
+      const updated = notes.map(n => n.id === editNote.id ? { ...n, title: edTitle.trim(), content: edContent, category: edCategory, tags: edTags, tagColor: edTagColor, isSensitive: edSensitive, isLocked: edLocked, attachments: edAttachments, updatedAt: now } : n);
       await saveNotes(updated);
     } else {
       const newNote: Note = {
         id: `note_${now}`, title: edTitle.trim(), content: edContent,
         category: edCategory, tags: edTags, tagColor: edTagColor,
-        isSensitive: edSensitive, isLocked: edLocked,
+        isSensitive: edSensitive, isLocked: edLocked, attachments: edAttachments,
         createdAt: now, updatedAt: now,
       };
       await saveNotes([newNote, ...notes]);
@@ -161,6 +224,8 @@ export default function EncryptedNotesScreen() {
   };
 
   const permanentDelete = async (id: string) => {
+    const gone = notes.find(n => n.id === id);
+    if (gone?.attachments?.length) await Promise.all(gone.attachments.map(a => deleteAttachment(a.id)));
     await saveNotes(notes.filter(n => n.id !== id));
   };
 
@@ -250,6 +315,7 @@ export default function EncryptedNotesScreen() {
                 <Text style={s.noteTitle} numberOfLines={1}>{n.title}</Text>
                 {n.isLocked && <Text style={{ fontSize: 14 }}>{'\uD83D\uDD12'}</Text>}
                 {n.isSensitive && <Text style={{ fontSize: 14 }}>{'\uD83D\uDC41'}</Text>}
+                {!!n.attachments?.length && <Text style={{ fontSize: 13 }}>{'\uD83D\uDCCE'}{n.attachments.length}</Text>}
               </View>
               <Text style={s.notePreview} numberOfLines={2}>
                 {n.isSensitive && hideSensitive ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022' : n.content}
@@ -317,6 +383,31 @@ export default function EncryptedNotesScreen() {
             {/* Plain-text content (rich-text/markdown is W19 #142, not yet built) */}
             <TextInput style={s.editorContent} placeholder="Note content..." placeholderTextColor="#555" value={edContent} onChangeText={setEdContent} multiline textAlignVertical="top" />
 
+            {/* Attachments (encrypted) */}
+            <View style={s.edSection}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Text style={s.edLabel}>Attachments {edAttachments.length > 0 ? `(${edAttachments.length})` : ''}</Text>
+                <TouchableOpacity onPress={addAttachmentMenu} disabled={attaching} style={s.attachBtn}>
+                  {attaching ? <ActivityIndicator size="small" color={colors.primary} /> : <Text style={s.attachBtnTxt}>＋ Attach</Text>}
+                </TouchableOpacity>
+              </View>
+              <Text style={s.attachHint}>🔒 Encrypted with your notes key before it’s written to disk.</Text>
+              {edAttachments.map(att => (
+                <View key={att.id} style={s.attachRow}>
+                  <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10 }} onPress={() => openAttachmentFile(att)}>
+                    <Text style={{ fontSize: 20 }}>{isImage(att) ? '🖼️' : '📎'}</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.attachName} numberOfLines={1}>{att.name}</Text>
+                      <Text style={s.attachMeta}>{prettySize(att.size)} · tap to open</Text>
+                    </View>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => removeAttachment(att)} hitSlop={8}>
+                    <Text style={{ color: '#EF4444', fontSize: 16 }}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+
             {/* Tags */}
             <View style={s.edSection}>
               <Text style={s.edLabel}>Tags & Color Labels</Text>
@@ -380,6 +471,16 @@ export default function EncryptedNotesScreen() {
               <Text style={{ color: colors.textDim, textAlign: 'center' }}>Close</Text>
             </TouchableOpacity>
           </View>
+        </View>
+      </Modal>
+
+      {/* Encrypted image viewer */}
+      <Modal visible={!!viewerImg} transparent animationType="fade" onRequestClose={() => setViewerImg(null)}>
+        <View style={s.imgViewer}>
+          {viewerImg && <Image source={{ uri: viewerImg }} style={s.imgViewerImg} resizeMode="contain" />}
+          <TouchableOpacity style={s.imgViewerClose} onPress={() => setViewerImg(null)}>
+            <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>Close</Text>
+          </TouchableOpacity>
         </View>
       </Modal>
 
@@ -479,6 +580,15 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   edSection: { marginTop: 16 },
   edLabel: { color: c.purple, fontSize: 12, fontWeight: '600', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
+  attachBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: c.border, minWidth: 72, alignItems: 'center' },
+  attachBtnTxt: { color: c.primary, fontSize: 13, fontWeight: '700' },
+  attachHint: { color: c.textDim, fontSize: 11, marginBottom: 8 },
+  attachRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: c.card, borderRadius: 10, borderWidth: 1, borderColor: c.border, paddingHorizontal: 12, paddingVertical: 10, marginTop: 6 },
+  attachName: { color: c.text, fontSize: 14, fontWeight: '600' },
+  attachMeta: { color: c.textDim, fontSize: 11, marginTop: 2 },
+  imgViewer: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' },
+  imgViewerImg: { width: '100%', height: '80%' },
+  imgViewerClose: { position: 'absolute', bottom: 50, paddingHorizontal: 28, paddingVertical: 12, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 24 },
   colorDot: { width: 28, height: 28, borderRadius: 14 },
   colorDotActive: { borderWidth: 3, borderColor: '#FFF' },
   tagInput: { backgroundColor: c.card, borderRadius: 10, padding: 10, color: c.text, fontSize: 13, marginTop: 8, borderWidth: 1, borderColor: c.border },

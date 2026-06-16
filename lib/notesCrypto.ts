@@ -68,4 +68,35 @@ export async function decryptNotes(raw: string): Promise<{ text: string; wasEncr
   }
 }
 
+// ── Binary attachments ──────────────────────────────────────────────────────
+// Note attachments (images/files) are sealed with the SAME notes DEK and written
+// to disk as a small JSON envelope {v,iv,ct(base64)}. Returns the envelope string
+// to persist via FileSystem.writeAsStringAsync (UTF-8).
+export async function encryptBytesToString(bytes: Uint8Array): Promise<string> {
+  const key = await getDEK();
+  const iv = randomBytes(12);
+  const ct = gcm(key, iv).encrypt(bytes);
+  const payload: NotesCipher = {
+    v: 1,
+    iv: Buffer.from(iv).toString('base64'),
+    ct: Buffer.from(ct).toString('base64'),
+  };
+  return JSON.stringify(payload);
+}
+
+// Reverse of encryptBytesToString. Returns null on a wrong key or tampered blob.
+export async function decryptStringToBytes(raw: string): Promise<Uint8Array | null> {
+  let parsed: any;
+  try { parsed = JSON.parse(raw); } catch { return null; }
+  if (!isCipher(parsed)) return null;
+  try {
+    const key = await getDEK();
+    const iv = Buffer.from(parsed.iv, 'base64');
+    const ct = Buffer.from(parsed.ct, 'base64');
+    return gcm(key, iv).decrypt(ct);
+  } catch {
+    return null;
+  }
+}
+
 export function clearNotesKeyCache(): void { dekCache = null; }

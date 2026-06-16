@@ -1,0 +1,74 @@
+// lib/notesAttachments.ts — encrypted file attachments for Encrypted Notes.
+//
+// Each attachment's bytes are sealed with the notes DEK (lib/notesCrypto) and
+// written to <documentDirectory>/note_attachments/<id>.enc as a JSON envelope.
+// Nothing is ever written to disk in the clear. Opening decrypts to a temp file
+// in the cache directory (which the OS may purge) so an image can be previewed
+// or the file handed to the OS share sheet.
+
+import * as FileSystem from 'expo-file-system/legacy';
+import { Buffer } from 'buffer';
+import { decryptStringToBytes, encryptBytesToString } from './notesCrypto';
+
+const DIR = FileSystem.documentDirectory + 'note_attachments/';
+
+export interface NoteAttachment {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;       // plaintext byte length
+  createdAt: number;
+}
+
+async function ensureDir(): Promise<void> {
+  const info = await FileSystem.getInfoAsync(DIR);
+  if (!info.exists) await FileSystem.makeDirectoryAsync(DIR, { intermediates: true });
+}
+
+function extFor(mime: string, name: string): string {
+  const fromName = name.includes('.') ? name.slice(name.lastIndexOf('.')) : '';
+  if (fromName) return fromName;
+  if (mime.startsWith('image/')) return '.' + mime.slice(6);
+  if (mime === 'application/pdf') return '.pdf';
+  return '';
+}
+
+// Encrypt the file at `srcUri` and store it. Returns its metadata for the note.
+export async function addAttachment(srcUri: string, name: string, mime: string): Promise<NoteAttachment> {
+  await ensureDir();
+  const b64 = await FileSystem.readAsStringAsync(srcUri, { encoding: FileSystem.EncodingType.Base64 });
+  const bytes = new Uint8Array(Buffer.from(b64, 'base64'));
+  const blob = await encryptBytesToString(bytes);
+  const id = `${Date.now()}_${Math.floor(Math.random() * 1e9).toString(36)}`;
+  await FileSystem.writeAsStringAsync(DIR + id + '.enc', blob, { encoding: FileSystem.EncodingType.UTF8 });
+  return { id, name, mime, size: bytes.length, createdAt: Date.now() };
+}
+
+// Decrypt to a temp cache file; returns its uri, or null if it can't be opened.
+export async function openAttachment(att: NoteAttachment): Promise<string | null> {
+  try {
+    const blob = await FileSystem.readAsStringAsync(DIR + att.id + '.enc', { encoding: FileSystem.EncodingType.UTF8 });
+    const bytes = await decryptStringToBytes(blob);
+    if (!bytes) return null;
+    const tmp = FileSystem.cacheDirectory + att.id + extFor(att.mime, att.name);
+    await FileSystem.writeAsStringAsync(tmp, Buffer.from(bytes).toString('base64'), { encoding: FileSystem.EncodingType.Base64 });
+    return tmp;
+  } catch {
+    return null;
+  }
+}
+
+// Best-effort delete of the encrypted file (call when removing an attachment/note).
+export async function deleteAttachment(id: string): Promise<void> {
+  try { await FileSystem.deleteAsync(DIR + id + '.enc', { idempotent: true }); } catch { /* ignore */ }
+}
+
+export function isImage(att: NoteAttachment): boolean {
+  return att.mime.startsWith('image/');
+}
+
+export function prettySize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
