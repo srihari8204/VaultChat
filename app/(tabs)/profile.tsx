@@ -5,7 +5,9 @@
 
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTheme } from '../../lib/theme';
+import { type Palette } from '../../constants/theme';
 import {
   ActivityIndicator,
   Alert,
@@ -35,7 +37,14 @@ interface UserProfile {
   emailVerifiedAt?: string | null;
 }
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function ProfileScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   const router = useRouter();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -201,7 +210,7 @@ export default function ProfileScreen() {
   if (loading) {
     return (
       <View style={[S.screen, S.center]}>
-        <ActivityIndicator color={ACCENT} size="large" />
+        <ActivityIndicator color={colors.primary} size="large" />
       </View>
     );
   }
@@ -262,7 +271,7 @@ export default function ProfileScreen() {
           value={name}
           onChangeText={setName}
           placeholder="Your name"
-          placeholderTextColor={SUBTLE}
+          placeholderTextColor={colors.textDim}
           maxLength={100}
         />
 
@@ -272,7 +281,7 @@ export default function ProfileScreen() {
           value={status}
           onChangeText={setStatus}
           placeholder="e.g. Hey, I'm on VaultChat"
-          placeholderTextColor={SUBTLE}
+          placeholderTextColor={colors.textDim}
           maxLength={200}
         />
 
@@ -282,7 +291,7 @@ export default function ProfileScreen() {
           value={phone}
           onChangeText={setPhone}
           placeholder="+91 9876543210 or 9876543210"
-          placeholderTextColor={SUBTLE}
+          placeholderTextColor={colors.textDim}
           keyboardType="phone-pad"
           autoComplete="tel"
           maxLength={20}
@@ -309,7 +318,7 @@ export default function ProfileScreen() {
           <View style={S.verifyBox}>
             <Text style={S.subHint}>Enter the 6-digit code we sent to {phone}.</Text>
             {verifyDevHint && (
-              <Text style={[S.subHint, { color: ACCENT }]}>
+              <Text style={[S.subHint, { color: colors.primary }]}>
                 (Dev: SMS provider not configured — check the server logs for the code.)
               </Text>
             )}
@@ -318,7 +327,7 @@ export default function ProfileScreen() {
               value={phoneCode}
               onChangeText={(v) => setPhoneCode(v.replace(/\D/g, '').slice(0, 6))}
               placeholder="123456"
-              placeholderTextColor={SUBTLE}
+              placeholderTextColor={colors.textDim}
               keyboardType="number-pad"
               maxLength={6}
             />
@@ -381,6 +390,7 @@ export default function ProfileScreen() {
 }
 
 function InfoRow({ k, v, small }: { k: string; v: string; small?: boolean }) {
+  const S = useS();
   return (
     <View style={S.infoRow}>
       <Text style={S.infoK}>{k}</Text>
@@ -389,51 +399,43 @@ function InfoRow({ k, v, small }: { k: string; v: string; small?: boolean }) {
   );
 }
 
-const DARK_BG = '#0D0F14';
-const CARD_BG = '#161A22';
-const BORDER  = '#1F2937';
-const TEXT    = '#E5E7EB';
-const SUBTLE  = '#9CA3AF';
-const ACCENT  = '#6C63FF';
-const DANGER  = '#EF4444';
-
-const S = StyleSheet.create({
-  screen:       { flex: 1, backgroundColor: DARK_BG },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen:       { flex: 1, backgroundColor: c.bg },
   center:       { justifyContent: 'center', alignItems: 'center' },
   header:       { paddingHorizontal: 20, paddingTop: 56, paddingBottom: 12 },
-  title:        { color: TEXT, fontSize: 28, fontWeight: '800' },
+  title:        { color: c.text, fontSize: 28, fontWeight: '800' },
 
   avatarWrap:   { alignItems: 'center', paddingVertical: 24, gap: 8 },
-  avatar:       { width: 96, height: 96, borderRadius: 48, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  avatar:       { width: 96, height: 96, borderRadius: 48, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   avatarImg:    { width: '100%', height: '100%' },
   avatarTxt:    { color: '#fff', fontSize: 38, fontWeight: '800' },
   avatarBusy:   { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.4)' },
-  avatarEditPill: { position: 'absolute', right: 0, bottom: 0, backgroundColor: '#1F2937', borderRadius: 14, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 2, borderColor: DARK_BG },
+  avatarEditPill: { position: 'absolute', right: 0, bottom: 0, backgroundColor: c.surfaceSolid, borderRadius: 14, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 2, borderColor: c.bg },
   avatarEditTxt:  { fontSize: 14 },
-  removePhotoTxt: { color: DANGER, fontSize: 12, fontWeight: '600', marginTop: 4 },
-  emailDisplay: { color: TEXT, fontSize: 15, fontWeight: '600', marginTop: 8 },
-  providerPill: { backgroundColor: CARD_BG, borderColor: BORDER, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, marginTop: 4 },
-  providerPillTxt: { color: SUBTLE, fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1 },
+  removePhotoTxt: { color: c.danger, fontSize: 12, fontWeight: '600', marginTop: 4 },
+  emailDisplay: { color: c.text, fontSize: 15, fontWeight: '600', marginTop: 8 },
+  providerPill: { backgroundColor: c.card, borderColor: c.border, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, marginTop: 4 },
+  providerPillTxt: { color: c.textDim, fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1 },
 
   section:      { paddingHorizontal: 20, marginTop: 16, gap: 8 },
-  label:        { color: SUBTLE, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginTop: 8 },
-  input:        { color: TEXT, backgroundColor: CARD_BG, borderColor: BORDER, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
-  subHint:      { color: SUBTLE, fontSize: 12, lineHeight: 16, marginTop: -2 },
-  btn:          { backgroundColor: ACCENT, paddingVertical: 14, borderRadius: 24, alignItems: 'center', marginTop: 12 },
+  label:        { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginTop: 8 },
+  input:        { color: c.text, backgroundColor: c.card, borderColor: c.border, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
+  subHint:      { color: c.textDim, fontSize: 12, lineHeight: 16, marginTop: -2 },
+  btn:          { backgroundColor: c.primary, paddingVertical: 14, borderRadius: 24, alignItems: 'center', marginTop: 12 },
   btnOff:       { backgroundColor: '#374151' },
   btnTxt:       { color: '#fff', fontWeight: '700', fontSize: 14 },
 
-  infoRow:      { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
-  infoK:        { color: SUBTLE, fontSize: 13 },
-  infoV:        { color: TEXT, fontSize: 13, fontWeight: '600', maxWidth: '60%' },
+  infoRow:      { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  infoK:        { color: c.textDim, fontSize: 13 },
+  infoV:        { color: c.text, fontSize: 13, fontWeight: '600', maxWidth: '60%' },
   infoVSmall:   { fontSize: 11, fontWeight: '500' },
 
   verifyLink:     { paddingVertical: 8 },
-  verifyLinkTxt:  { color: ACCENT, fontWeight: '600', fontSize: 13 },
+  verifyLinkTxt:  { color: c.primary, fontWeight: '600', fontSize: 13 },
   verifyBox:      { marginTop: 8, gap: 8 },
 
-  settingsBtn:    { marginHorizontal: 20, marginTop: 24, padding: 14, borderRadius: 24, borderWidth: 1, borderColor: BORDER, backgroundColor: CARD_BG, alignItems: 'center' },
-  settingsBtnTxt: { color: TEXT, fontWeight: '700', fontSize: 14 },
-  signOutBtn:   { marginHorizontal: 20, marginTop: 12, padding: 14, borderRadius: 24, borderWidth: 1, borderColor: DANGER, alignItems: 'center' },
-  signOutTxt:   { color: DANGER, fontWeight: '700', fontSize: 14 },
+  settingsBtn:    { marginHorizontal: 20, marginTop: 24, padding: 14, borderRadius: 24, borderWidth: 1, borderColor: c.border, backgroundColor: c.card, alignItems: 'center' },
+  settingsBtnTxt: { color: c.text, fontWeight: '700', fontSize: 14 },
+  signOutBtn:   { marginHorizontal: 20, marginTop: 12, padding: 14, borderRadius: 24, borderWidth: 1, borderColor: c.danger, alignItems: 'center' },
+  signOutTxt:   { color: c.danger, fontWeight: '700', fontSize: 14 },
 });

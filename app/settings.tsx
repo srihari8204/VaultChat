@@ -11,7 +11,7 @@
 import * as FileSystem from 'expo-file-system';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -26,7 +26,14 @@ import {
 import { logoutUser } from './(constants)/authService';
 import { getAccessToken } from '../lib/api';
 import { useTheme, type ThemePref } from '../lib/theme';
+import { type Palette } from '../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
+
+/** Memoized themed stylesheet for this screen. */
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
 import {
   attachmentUrl,
   deleteAccount,
@@ -43,6 +50,8 @@ import { disconnect as disconnectSocket } from '../lib/socket';
 
 export default function SettingsScreen() {
   const router = useRouter();
+  const { colors } = useTheme();
+  const S = useS();
 
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [blocks,   setBlocks]   = useState<BlockedUser[]>([]);
@@ -163,7 +172,7 @@ export default function SettingsScreen() {
   if (loading || !settings) {
     return (
       <View style={[S.screen, S.center]}>
-        <ActivityIndicator color={ACCENT} size="large" />
+        <ActivityIndicator color={colors.primary} size="large" />
       </View>
     );
   }
@@ -287,7 +296,7 @@ export default function SettingsScreen() {
           disabled={exporting}
           activeOpacity={0.85}
         >
-          {exporting ? <ActivityIndicator color={ACCENT} /> : (
+          {exporting ? <ActivityIndicator color={colors.primary} /> : (
             <Text style={S.dataBtnTxt}>📦 Export my data</Text>
           )}
         </TouchableOpacity>
@@ -302,7 +311,7 @@ export default function SettingsScreen() {
           disabled={deleting}
           activeOpacity={0.85}
         >
-          {deleting ? <ActivityIndicator color={DANGER} /> : (
+          {deleting ? <ActivityIndicator color={colors.danger} /> : (
             <Text style={S.deleteBtnTxt}>Delete my account</Text>
           )}
         </TouchableOpacity>
@@ -344,6 +353,7 @@ export default function SettingsScreen() {
 // The control itself is theme-aware so the chosen palette previews live.
 function AppearanceSection() {
   const { pref, setPref, colors, scheme } = useTheme();
+  const S = useS();
   const opts: { key: ThemePref; label: string; icon: React.ComponentProps<typeof Ionicons>['name'] }[] = [
     { key: 'system', label: 'System', icon: 'phone-portrait-outline' },
     { key: 'light',  label: 'Light',  icon: 'sunny-outline' },
@@ -368,7 +378,7 @@ function AppearanceSection() {
           );
         })}
       </View>
-      <Text style={[apS.hint, { color: SUBTLE }]}>
+      <Text style={[apS.hint, { color: colors.textDim }]}>
         {pref === 'system' ? `Following your device (currently ${scheme}).` : `Always ${pref}.`} Light mode is rolling out screen by screen.
       </Text>
     </View>
@@ -391,6 +401,8 @@ function ToggleRow({
   busy:          boolean;
   onValueChange: () => void;
 }) {
+  const { colors } = useTheme();
+  const S = useS();
   return (
     <View style={S.toggleRow}>
       <View style={{ flex: 1 }}>
@@ -398,12 +410,12 @@ function ToggleRow({
         <Text style={S.toggleSub}>{sub}</Text>
       </View>
       {busy ? (
-        <ActivityIndicator color={ACCENT} style={{ marginLeft: 8 }} />
+        <ActivityIndicator color={colors.primary} style={{ marginLeft: 8 }} />
       ) : (
         <Switch
           value={value}
           onValueChange={onValueChange}
-          trackColor={{ true: ACCENT, false: '#374151' }}
+          trackColor={{ true: colors.primary, false: '#374151' }}
           thumbColor="#fff"
         />
       )}
@@ -411,45 +423,37 @@ function ToggleRow({
   );
 }
 
-const DARK_BG = '#0D0F14';
-const CARD_BG = '#161A22';
-const BORDER  = '#1F2937';
-const TEXT    = '#E5E7EB';
-const SUBTLE  = '#9CA3AF';
-const ACCENT  = '#6C63FF';
-const DANGER  = '#EF4444';
-
-const S = StyleSheet.create({
-  screen:        { flex: 1, backgroundColor: DARK_BG },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen:        { flex: 1, backgroundColor: c.bg },
   center:        { justifyContent: 'center', alignItems: 'center' },
 
   header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8 },
   backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backTxt:       { color: TEXT, fontSize: 26, fontWeight: '600' },
-  title:         { color: TEXT, fontSize: 22, fontWeight: '800' },
+  backTxt:       { color: c.text, fontSize: 26, fontWeight: '600' },
+  title:         { color: c.text, fontSize: 22, fontWeight: '800' },
 
   section:       { paddingHorizontal: 16, marginTop: 16 },
-  label:         { color: SUBTLE, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 8 },
+  label:         { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 8 },
 
-  toggleRow:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
-  toggleTitle:   { color: TEXT, fontSize: 15, fontWeight: '600' },
-  toggleSub:     { color: SUBTLE, fontSize: 12, lineHeight: 16, marginTop: 2 },
+  toggleRow:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  toggleTitle:   { color: c.text, fontSize: 15, fontWeight: '600' },
+  toggleSub:     { color: c.textDim, fontSize: 12, lineHeight: 16, marginTop: 2 },
 
-  blockRow:      { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
-  blockAvatar:   { width: 40, height: 40, borderRadius: 20, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  blockRow:      { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  blockAvatar:   { width: 40, height: 40, borderRadius: 20, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   blockAvatarImg:{ width: '100%', height: '100%' },
   blockAvatarTxt:{ color: '#fff', fontWeight: '700' },
-  blockName:     { color: TEXT, fontSize: 15, fontWeight: '600' },
-  blockEmail:    { color: SUBTLE, fontSize: 12, marginTop: 2 },
-  unblockBtn:    { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, borderWidth: 1, borderColor: DANGER },
-  unblockTxt:    { color: DANGER, fontSize: 12, fontWeight: '700' },
+  blockName:     { color: c.text, fontSize: 15, fontWeight: '600' },
+  blockEmail:    { color: c.textDim, fontSize: 12, marginTop: 2 },
+  unblockBtn:    { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, borderWidth: 1, borderColor: c.danger },
+  unblockTxt:    { color: c.danger, fontSize: 12, fontWeight: '700' },
 
-  emptySub:      { color: SUBTLE, fontSize: 13, lineHeight: 18, paddingVertical: 16 },
+  emptySub:      { color: c.textDim, fontSize: 13, lineHeight: 18, paddingVertical: 16 },
 
   // Data & account section
-  dataBtn:       { marginTop: 8, padding: 12, borderRadius: 12, backgroundColor: CARD_BG, borderWidth: 1, borderColor: BORDER, alignItems: 'center' },
-  dataBtnTxt:    { color: ACCENT, fontWeight: '700' },
-  dataHint:      { color: SUBTLE, fontSize: 12, lineHeight: 16, marginTop: 6 },
-  deleteBtn:     { marginTop: 16, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: DANGER, alignItems: 'center' },
-  deleteBtnTxt:  { color: DANGER, fontWeight: '700' },
+  dataBtn:       { marginTop: 8, padding: 12, borderRadius: 12, backgroundColor: c.card, borderWidth: 1, borderColor: c.border, alignItems: 'center' },
+  dataBtnTxt:    { color: c.primary, fontWeight: '700' },
+  dataHint:      { color: c.textDim, fontSize: 12, lineHeight: 16, marginTop: 6 },
+  deleteBtn:     { marginTop: 16, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: c.danger, alignItems: 'center' },
+  deleteBtnTxt:  { color: c.danger, fontWeight: '700' },
 });
