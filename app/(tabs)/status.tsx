@@ -31,6 +31,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { type Palette } from '../../constants/theme';
+import { useTheme } from '../../lib/theme';
 import { getAccessToken } from '../../lib/api';
 import {
   addStory,
@@ -45,7 +47,14 @@ import { STORY_E2EE, E2EE_ENABLED } from '../../constants/flags';
 import { uploadEncryptedAttachment } from '../../lib/mediaAttachments';
 import { wrapStoryKeyForViewers } from '../../lib/storyKeys';
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function StatusScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   const router = useRouter();
   const [feed,       setFeed]       = useState<StoryFeedEntry[]>([]);
   const [loading,    setLoading]    = useState(true);
@@ -142,7 +151,7 @@ export default function StatusScreen() {
   }, [router]);
 
   if (loading) {
-    return <View style={[S.screen, S.center]}><ActivityIndicator color={ACCENT} size="large" /></View>;
+    return <View style={[S.screen, S.center]}><ActivityIndicator color={colors.primary} size="large" /></View>;
   }
 
   return (
@@ -155,7 +164,7 @@ export default function StatusScreen() {
           activeOpacity={0.7}
           style={S.headerBtn}
         >
-          {posting ? <ActivityIndicator color={ACCENT} /> : <Text style={S.headerBtnTxt}>＋</Text>}
+          {posting ? <ActivityIndicator color={colors.primary} /> : <Text style={S.headerBtnTxt}>＋</Text>}
         </TouchableOpacity>
       </View>
 
@@ -164,7 +173,7 @@ export default function StatusScreen() {
       <FlatList
         data={others}
         keyExtractor={(e) => e.userId}
-        refreshControl={<RefreshControl tintColor={ACCENT} refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={<RefreshControl tintColor={colors.primary} refreshing={refreshing} onRefresh={onRefresh} />}
         ListHeaderComponent={
           <View>
             {/* "My status" — always shown. Tap = add another to story, or
@@ -247,41 +256,34 @@ function formatRelative(iso: string): string {
   } catch { return ''; }
 }
 
-const DARK_BG = '#0D0F14';
-const CARD_BG = '#161A22';
-const BORDER  = '#1F2937';
-const TEXT    = '#E5E7EB';
-const SUBTLE  = '#9CA3AF';
-const ACCENT  = '#10B981'; // brand emerald (was off-system #6C63FF)
-const DANGER  = '#EF4444';
 
-const S = StyleSheet.create({
-  screen:       { flex: 1, backgroundColor: DARK_BG },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen:       { flex: 1, backgroundColor: c.bg },
   center:       { justifyContent: 'center', alignItems: 'center' },
 
   header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 56, paddingBottom: 16, justifyContent: 'space-between' },
-  title:        { color: TEXT, fontSize: 28, fontWeight: '800' },
-  headerBtn:    { width: 40, height: 40, borderRadius: 20, backgroundColor: CARD_BG, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: BORDER },
-  headerBtnTxt: { color: ACCENT, fontSize: 22, fontWeight: '600', marginTop: -2 },
+  title:        { color: c.text, fontSize: 28, fontWeight: '800' },
+  headerBtn:    { width: 40, height: 40, borderRadius: 20, backgroundColor: c.card, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.border },
+  headerBtnTxt: { color: c.primary, fontSize: 22, fontWeight: '600', marginTop: -2 },
 
-  errorTxt:     { color: DANGER, paddingHorizontal: 16, paddingVertical: 8, fontSize: 12 },
+  errorTxt:     { color: c.danger, paddingHorizontal: 16, paddingVertical: 8, fontSize: 12 },
 
-  sectionLabel: { color: SUBTLE, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 },
+  sectionLabel: { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 },
 
   row:          { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingVertical: 12 },
   // 3px-thick ring that wraps the avatar. Purple = unseen, grey = all
   // seen. The ring is a padded square with a coloured background.
   avatarRing:        { width: 60, height: 60, borderRadius: 30, padding: 3, alignItems: 'center', justifyContent: 'center' },
-  avatarRingMine:    { backgroundColor: ACCENT },
-  avatarRingUnseen:  { backgroundColor: ACCENT },
+  avatarRingMine:    { backgroundColor: c.primary },
+  avatarRingUnseen:  { backgroundColor: c.primary },
   avatarRingSeen:    { backgroundColor: '#374151' },
   avatarImg:         { width: 54, height: 54, borderRadius: 27 },
-  avatarFallback:    { width: 54, height: 54, borderRadius: 27, backgroundColor: CARD_BG, alignItems: 'center', justifyContent: 'center' },
-  avatarFallbackTxt: { color: TEXT, fontSize: 20, fontWeight: '700' },
+  avatarFallback:    { width: 54, height: 54, borderRadius: 27, backgroundColor: c.card, alignItems: 'center', justifyContent: 'center' },
+  avatarFallbackTxt: { color: c.text, fontSize: 20, fontWeight: '700' },
 
-  rowName:      { color: TEXT, fontSize: 15, fontWeight: '600' },
-  rowSub:       { color: SUBTLE, fontSize: 12, marginTop: 2 },
+  rowName:      { color: c.text, fontSize: 15, fontWeight: '600' },
+  rowSub:       { color: c.textDim, fontSize: 12, marginTop: 2 },
 
-  emptyTitle:   { color: TEXT, fontSize: 16, fontWeight: '700', textAlign: 'center', marginBottom: 8 },
-  emptySub:     { color: SUBTLE, fontSize: 13, lineHeight: 18, textAlign: 'center' },
+  emptyTitle:   { color: c.text, fontSize: 16, fontWeight: '700', textAlign: 'center', marginBottom: 8 },
+  emptySub:     { color: c.textDim, fontSize: 13, lineHeight: 18, textAlign: 'center' },
 });

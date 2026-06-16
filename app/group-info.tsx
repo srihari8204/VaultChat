@@ -12,7 +12,7 @@
 
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState , useMemo} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -25,6 +25,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { getAccessToken } from '../lib/api';
 import {
@@ -38,7 +40,14 @@ import {
   type ChatMember,
 } from '../lib/chatService';
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function GroupInfoScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const chatId = (id ?? '').toString();
@@ -188,7 +197,7 @@ export default function GroupInfoScreen() {
   }, [chat, isAdmin, load, router]);
 
   if (loading || !chat) {
-    return <View style={[S.screen, S.center]}><ActivityIndicator color={ACCENT} size="large" /></View>;
+    return <View style={[S.screen, S.center]}><ActivityIndicator color={colors.primary} size="large" /></View>;
   }
 
   const activeMembers = chat.members.filter(m => !m.leftAt);
@@ -227,7 +236,7 @@ export default function GroupInfoScreen() {
               value={nameDraft}
               onChangeText={setNameDraft}
               placeholder="Group name"
-              placeholderTextColor={SUBTLE}
+              placeholderTextColor={colors.textDim}
               autoFocus
               maxLength={100}
               onSubmitEditing={onRename}
@@ -284,6 +293,8 @@ function MemberRow({
   authHeader: string | null;
   onRemove:   () => void;
 }) {
+  const S = useS();
+  const { colors } = useTheme();
   const isMe = member.userId === meId;
   const showRemove = isAdmin && !isMe && member.role !== 'owner';
   const letter = (member.name?.trim()[0] || member.email?.trim()[0] || '?').toUpperCase();
@@ -321,55 +332,48 @@ function MemberRow({
   );
 }
 
-const DARK_BG = '#0D0F14';
-const CARD_BG = '#161A22';
-const BORDER  = '#1F2937';
-const TEXT    = '#E5E7EB';
-const SUBTLE  = '#9CA3AF';
-const ACCENT  = '#6C63FF';
-const DANGER  = '#EF4444';
 
-const S = StyleSheet.create({
-  screen:        { flex: 1, backgroundColor: DARK_BG },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen:        { flex: 1, backgroundColor: c.bg },
   center:        { justifyContent: 'center', alignItems: 'center' },
 
   header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 8, gap: 8 },
   backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backTxt:       { color: TEXT, fontSize: 26, fontWeight: '600' },
-  titleBar:      { color: TEXT, fontSize: 22, fontWeight: '800' },
+  backTxt:       { color: c.text, fontSize: 26, fontWeight: '600' },
+  titleBar:      { color: c.text, fontSize: 22, fontWeight: '800' },
 
   heroWrap:      { alignItems: 'center', paddingVertical: 20, gap: 8 },
-  hero:          { width: 112, height: 112, borderRadius: 56, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  hero:          { width: 112, height: 112, borderRadius: 56, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   heroImg:       { width: '100%', height: '100%' },
   heroTxt:       { color: '#fff', fontSize: 48, fontWeight: '800' },
   heroBusy:      { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.4)' },
-  heroEditPill:  { position: 'absolute', right: 0, bottom: 0, backgroundColor: '#1F2937', borderRadius: 14, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 2, borderColor: DARK_BG },
-  groupName:     { color: TEXT, fontSize: 22, fontWeight: '700' },
-  subInfo:       { color: SUBTLE, fontSize: 12 },
+  heroEditPill:  { position: 'absolute', right: 0, bottom: 0, backgroundColor: '#1F2937', borderRadius: 14, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 2, borderColor: c.bg },
+  groupName:     { color: c.text, fontSize: 22, fontWeight: '700' },
+  subInfo:       { color: c.textDim, fontSize: 12 },
 
   renameRow:     { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, width: '100%' },
-  renameInput:   { flex: 1, color: TEXT, backgroundColor: CARD_BG, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16 },
-  saveBtn:       { backgroundColor: ACCENT, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10 },
+  renameInput:   { flex: 1, color: c.text, backgroundColor: c.card, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16 },
+  saveBtn:       { backgroundColor: c.primary, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10 },
   saveBtnTxt:    { color: '#fff', fontWeight: '700' },
 
-  addBtn:        { marginHorizontal: 16, marginTop: 8, padding: 12, borderRadius: 12, backgroundColor: CARD_BG, borderWidth: 1, borderColor: BORDER, alignItems: 'center' },
-  addBtnTxt:     { color: ACCENT, fontWeight: '700' },
+  addBtn:        { marginHorizontal: 16, marginTop: 8, padding: 12, borderRadius: 12, backgroundColor: c.card, borderWidth: 1, borderColor: c.border, alignItems: 'center' },
+  addBtnTxt:     { color: c.primary, fontWeight: '700' },
 
   section:       { paddingHorizontal: 16, marginTop: 16 },
-  label:         { color: SUBTLE, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 8 },
+  label:         { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 8 },
 
-  memberRow:     { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
+  memberRow:     { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   memberAvatarWrap: { width: 44, height: 44 },
-  memberAvatar:  { width: 44, height: 44, borderRadius: 22, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  memberAvatar:  { width: 44, height: 44, borderRadius: 22, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   memberAvatarImg: { width: '100%', height: '100%' },
   memberAvatarTxt: { color: '#fff', fontWeight: '700', fontSize: 17 },
-  memberPresenceDot: { position: 'absolute', right: 0, bottom: 0, width: 12, height: 12, borderRadius: 6, backgroundColor: '#22C55E', borderWidth: 2, borderColor: DARK_BG },
-  memberName:    { color: TEXT, fontSize: 15, fontWeight: '600' },
-  memberMeTag:   { color: SUBTLE, fontSize: 12, fontWeight: '400' },
-  memberSub:     { color: SUBTLE, fontSize: 12, marginTop: 2 },
-  removeBtn:     { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, borderWidth: 1, borderColor: DANGER },
-  removeBtnTxt:  { color: DANGER, fontSize: 11, fontWeight: '700' },
+  memberPresenceDot: { position: 'absolute', right: 0, bottom: 0, width: 12, height: 12, borderRadius: 6, backgroundColor: '#22C55E', borderWidth: 2, borderColor: c.bg },
+  memberName:    { color: c.text, fontSize: 15, fontWeight: '600' },
+  memberMeTag:   { color: c.textDim, fontSize: 12, fontWeight: '400' },
+  memberSub:     { color: c.textDim, fontSize: 12, marginTop: 2 },
+  removeBtn:     { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, borderWidth: 1, borderColor: c.danger },
+  removeBtnTxt:  { color: c.danger, fontSize: 11, fontWeight: '700' },
 
-  leaveBtn:      { marginHorizontal: 16, marginTop: 32, padding: 14, borderRadius: 24, borderWidth: 1, borderColor: DANGER, alignItems: 'center' },
-  leaveTxt:      { color: DANGER, fontWeight: '700' },
+  leaveBtn:      { marginHorizontal: 16, marginTop: 32, padding: 14, borderRadius: 24, borderWidth: 1, borderColor: c.danger, alignItems: 'center' },
+  leaveTxt:      { color: c.danger, fontWeight: '700' },
 });
