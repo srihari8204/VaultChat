@@ -16,6 +16,7 @@ const email     = require('../email');
 const sms       = require('../sms');
 const jwtUtil   = require('../jwt');
 const rateLimit = require('../rateLimit');
+const vault     = require('../lib/vault');
 
 const router = express.Router();
 
@@ -460,6 +461,241 @@ router.post('/verify-otp-phone', async (req, res) => {
   } catch (err) {
     console.error('[auth/verify-otp-phone]', err.message);
     return res.status(500).json({ error: 'Verification failed' });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// Onboarding re-architecture (encrypted PII). lib/vault: AES-GCM PII, HMAC
+// lookup, argon2id secrets. Error envelope: { error: { code, message } }.
+// ════════════════════════════════════════════════════════════════════════════
+
+const SECURITY_QUESTION_CODES = new Set([
+  'first_pet', 'mother_maiden', 'birth_city', 'primary_school', 'childhood_friend',
+  'first_car', 'favourite_teacher', 'street_grew_up', 'first_job_city',
+  'favourite_book', 'oldest_cousin', 'maternal_grandfather',
+]);
+
+// 6-digit MPIN weakness check (defence in depth — client checks too).
+const WEAK_MPINS = new Set([
+  '123456', '654321', '000000', '111111', '222222', '333333', '444444',
+  '555555', '666666', '777777', '888888', '999999', '123123', '121212',
+  '112233', '098765', '012345',
+]);
+function isWeakMpin(m) {
+  if (!/^\d{6}$/.test(m)) return true;             // exactly 6 digits
+  if (/^(\d)\1{5}$/.test(m)) return true;          // all same
+  if ('0123456789'.includes(m) || '9876543210'.includes(m)) return true; // sequential
+  if (WEAK_MPINS.has(m)) return true;
+  return false;
+}
+
+function ageFromDob(iso) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return NaN;
+  const now = new Date();
+  let a = now.getFullYear() - d.getFullYear();
+  const mo = now.getMonth() - d.getMonth();
+  if (mo < 0 || (mo === 0 && now.getDate() < d.getDate())) a--;
+  return a;
+}
+
+function envErr(res, status, code, message) {
+  return res.status(status).json({ error: { code, message } });
+}
+function safeDecrypt(c) { try { return c ? vault.decrypt(c) : null; } catch { return null; } }
+async function auditAttempt(userId, ip, type, success) {
+  try {
+    await db.query(
+      `INSERT INTO auth_attempts (user_id, ip_address, attempt_type, success) VALUES ($1, $2, $3, $4)`,
+      [userId || null, ip || null, type, success],
+    );
+  } catch { /* audit is best-effort; never block auth */ }
+}
+
+// POST /auth/lookup — exists only if BOTH email and phone match the same row.
+router.post('/lookup', async (req, res) => {
+  try {
+    const ipLimit = await rateLimit.consume(`auth-ip:${req.ip}`, 20, 60);
+    if (!ipLimit.allowed) return envErr(res, 429, 'rate_limited', 'Too many requests');
+    const email = vault.normalizeEmail(req.body?.email);
+    const phone = vault.normalizePhone(req.body?.phone);
+    if (!email || !phone) return envErr(res, 400, 'bad_request', 'email and phone are required');
+
+    const r = await db.query(
+      `SELECT id FROM users WHERE email_lookup = $1 AND phone_lookup = $2 AND is_deleted = FALSE LIMIT 1`,
+      [vault.emailLookup(email), vault.phoneLookup(phone)],
+    );
+    const exists = !!r.rows[0];
+    await auditAttempt(r.rows[0]?.id, req.ip, 'lookup', exists);
+    return res.json(exists ? { exists: true, userId: r.rows[0].id } : { exists: false });
+  } catch (err) {
+    console.error('[auth/lookup]', err.message);
+    return envErr(res, 500, 'server_error', 'Lookup failed');
+  }
+});
+
+// POST /auth/profile/init — create the encrypted user row (onboarding_complete=false).
+router.post('/profile/init', async (req, res) => {
+  try {
+    const email = vault.normalizeEmail(req.body?.email);
+    const phone = vault.normalizePhone(req.body?.phone);
+    const firstName = (req.body?.firstName || '').toString().trim();
+    const lastName  = (req.body?.lastName  || '').toString().trim();
+    const dob       = (req.body?.dob       || '').toString().trim();
+    const status    = (req.body?.status    || '').toString();
+    const profilePicUrl = req.body?.profilePicUrl ? req.body.profilePicUrl.toString() : null;
+
+    if (!email || !phone || !firstName || !dob) {
+      return envErr(res, 400, 'bad_request', 'email, phone, firstName and dob are required');
+    }
+    const age = ageFromDob(dob);
+    if (isNaN(age) || age < 13) return envErr(res, 400, 'min_age', 'You must be at least 13');
+    if (status.length > 139) return envErr(res, 400, 'status_too_long', 'Status max 139 characters');
+
+    const el = vault.emailLookup(email);
+    const pl = vault.phoneLookup(phone);
+    const dup = await db.query(
+      `SELECT 1 FROM users WHERE (email_lookup = $1 OR phone_lookup = $2) AND is_deleted = FALSE LIMIT 1`,
+      [el, pl],
+    );
+    if (dup.rows[0]) return envErr(res, 409, 'already_exists', 'An account already exists for this email or mobile');
+
+    const ins = await db.query(
+      `INSERT INTO users
+         (email_lookup, phone_lookup, email_cipher, phone_cipher,
+          first_name_cipher, last_name_cipher, dob_cipher, status_cipher,
+          photo_url, auth_provider, email_verified_at, onboarding_complete)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'google',NOW(),FALSE)
+       RETURNING id`,
+      [
+        el, pl, vault.encrypt(email), vault.encrypt(phone),
+        vault.encrypt(firstName), lastName ? vault.encrypt(lastName) : null,
+        vault.encrypt(dob), status.trim() ? vault.encrypt(status) : null,
+        profilePicUrl,
+      ],
+    );
+    return res.json({ userId: ins.rows[0].id });
+  } catch (err) {
+    console.error('[auth/profile/init]', err.message);
+    return envErr(res, 500, 'server_error', 'Could not create profile');
+  }
+});
+
+// POST /auth/security-questions/save — exactly 5 unique answers from the pool.
+router.post('/security-questions/save', async (req, res) => {
+  try {
+    const userId  = (req.body?.userId || '').toString();
+    const answers = Array.isArray(req.body?.answers) ? req.body.answers : null;
+    if (!userId || !answers || answers.length !== 5) {
+      return envErr(res, 400, 'bad_request', 'Exactly 5 answers required');
+    }
+    const codes = answers.map(a => (a?.questionCode || '').toString());
+    if (new Set(codes).size !== 5) return envErr(res, 400, 'duplicate_question', 'Questions must be unique');
+    if (!codes.every(c => SECURITY_QUESTION_CODES.has(c))) return envErr(res, 400, 'invalid_question', 'Unknown question code');
+    if (!answers.every(a => vault.normalizeAnswer(a?.answer).length >= 2)) {
+      return envErr(res, 400, 'answer_too_short', 'Each answer needs at least 2 characters');
+    }
+    const u = await db.query(`SELECT id FROM users WHERE id = $1 AND is_deleted = FALSE`, [userId]);
+    if (!u.rows[0]) return envErr(res, 404, 'not_found', 'User not found');
+
+    for (const a of answers) {
+      const hash = await vault.hashSecret(vault.normalizeAnswer(a.answer));
+      await db.query(
+        `INSERT INTO user_security_questions (user_id, question_code, answer_hash)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (user_id, question_code) DO UPDATE SET answer_hash = EXCLUDED.answer_hash`,
+        [userId, a.questionCode, hash],
+      );
+    }
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[auth/security-questions/save]', err.message);
+    return envErr(res, 500, 'server_error', 'Could not save security questions');
+  }
+});
+
+// POST /auth/mpin/set — argon2id-hash; marks onboarding_complete.
+router.post('/mpin/set', async (req, res) => {
+  try {
+    const userId = (req.body?.userId || '').toString();
+    const mpin   = (req.body?.mpin   || '').toString();
+    if (!userId) return envErr(res, 400, 'bad_request', 'userId required');
+    if (isWeakMpin(mpin)) return envErr(res, 400, 'weak_mpin', 'Choose a less predictable MPIN');
+    const u = await db.query(`SELECT id FROM users WHERE id = $1 AND is_deleted = FALSE`, [userId]);
+    if (!u.rows[0]) return envErr(res, 404, 'not_found', 'User not found');
+
+    const hash = await vault.hashSecret(mpin);
+    await db.query(
+      `UPDATE users SET mpin_hash = $1, onboarding_complete = TRUE, updated_at = NOW() WHERE id = $2`,
+      [hash, userId],
+    );
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[auth/mpin/set]', err.message);
+    return envErr(res, 500, 'server_error', 'Could not set MPIN');
+  }
+});
+
+// POST /auth/mpin/verify — Redis-backed 5-attempt / 15-min lockout; issues JWTs.
+router.post('/mpin/verify', async (req, res) => {
+  try {
+    const userId = (req.body?.userId || '').toString();
+    const mpin   = (req.body?.mpin   || '').toString();
+    if (!userId || !mpin) return envErr(res, 400, 'bad_request', 'userId and mpin required');
+
+    const gate = await rateLimit.consume(`mpin:${userId}`, 5, 900);
+    if (!gate.allowed) {
+      return envErr(res, 423, 'locked', `Too many attempts. Try again in ${gate.resetInSec || 900}s`);
+    }
+
+    const u = await db.query(`SELECT * FROM users WHERE id = $1 AND is_deleted = FALSE`, [userId]);
+    const row = u.rows[0];
+    const ok  = !!(row && row.mpin_hash) && await vault.verifySecret(mpin, row.mpin_hash);
+    await auditAttempt(userId, req.ip, 'mpin', ok);
+    if (!ok) return envErr(res, 401, 'invalid_mpin', 'Incorrect MPIN');
+
+    await rateLimit.reset(`mpin:${userId}`);
+    const tokens = await issueTokens(row, req);
+    return res.json(tokens);
+  } catch (err) {
+    console.error('[auth/mpin/verify]', err.message);
+    return envErr(res, 500, 'server_error', 'Verification failed');
+  }
+});
+
+// POST /auth/mfa/configure — (JWT) toggle device-MFA flag.
+router.post('/mfa/configure', jwtUtil.requireAuth, async (req, res) => {
+  try {
+    const enabled = !!req.body?.mfaEnabled;
+    await db.query(`UPDATE users SET mfa_enabled = $1, updated_at = NOW() WHERE id = $2`, [enabled, req.user.id]);
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[auth/mfa/configure]', err.message);
+    return envErr(res, 500, 'server_error', 'Could not update MFA');
+  }
+});
+
+// GET /auth/profile — (JWT) decrypted profile. Plaintext leaves only over TLS.
+router.get('/profile', jwtUtil.requireAuth, async (req, res) => {
+  try {
+    const u = await db.query(`SELECT * FROM users WHERE id = $1 AND is_deleted = FALSE`, [req.user.id]);
+    const r = u.rows[0];
+    if (!r) return envErr(res, 404, 'not_found', 'User not found');
+    return res.json({
+      userId:             r.id,
+      email:              safeDecrypt(r.email_cipher),
+      phone:              safeDecrypt(r.phone_cipher),
+      firstName:          safeDecrypt(r.first_name_cipher),
+      lastName:           safeDecrypt(r.last_name_cipher),
+      dob:                safeDecrypt(r.dob_cipher),
+      status:             safeDecrypt(r.status_cipher),
+      profilePicUrl:      r.photo_url || null,
+      mfaEnabled:         r.mfa_enabled,
+      onboardingComplete: r.onboarding_complete,
+    });
+  } catch (err) {
+    console.error('[auth/profile GET]', err.message);
+    return envErr(res, 500, 'server_error', 'Could not load profile');
   }
 });
 
