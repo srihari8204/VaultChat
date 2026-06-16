@@ -144,6 +144,7 @@ function useS() {
 const HL = StyleSheet.create({
   highlight: { backgroundColor: 'rgba(252, 211, 77, 0.45)', color: '#111' },
   link:      { color: '#7DD3FC', textDecorationLine: 'underline' },
+  mention:   { color: '#34D399', fontWeight: '700' },
 });
 
 export default function ChatScreen() {
@@ -179,6 +180,9 @@ export default function ChatScreen() {
   const [nextInvisibleInk, setNextInvisibleInk] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const [gifOpen, setGifOpen] = useState(false);
+  // @mentions (groups): active typed query (null = none) + recorded picks.
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const mentionsRef = useRef<{ name: string; userId: string }[]>([]);
   const [pinnedId, setPinnedId] = useState<string | null>(null);
   // Global "tilt revealed" state — flips true when the gyro reports any
   // axis past ~45° (~0.78 rad). Shared by every invisible-ink bubble on
@@ -582,6 +586,9 @@ export default function ChatScreen() {
 
   const onInputChange = useCallback((text: string) => {
     setInput(text);
+    // @mentions: in a group, a trailing "@word" opens the member picker.
+    const mm = text.match(/(?:^|\s)@(\w{0,30})$/);
+    setMentionQuery(chat?.type === 'group' && mm ? mm[1] : null);
     if (draftTimer.current) clearTimeout(draftTimer.current);
     draftTimer.current = setTimeout(() => { saveDraft(chatId, text).catch(() => {}); }, 400);
     if (!meId) return;
@@ -592,6 +599,22 @@ export default function ChatScreen() {
     if (typingIdleTimer.current) clearTimeout(typingIdleTimer.current);
     typingIdleTimer.current = setTimeout(stopTypingIfActive, TYPING_IDLE_MS);
   }, [chatId, meId, stopTypingIfActive]);
+
+  // Insert a picked @mention: replace the trailing "@query" with "@Name ".
+  const pickMention = useCallback((mem: ChatMember) => {
+    const name = (mem.name || mem.email || 'member').split(' ')[0];
+    setInput(prev => prev.replace(/@(\w{0,30})$/, `@${name} `));
+    if (!mentionsRef.current.some(x => x.userId === mem.userId)) {
+      mentionsRef.current.push({ name, userId: mem.userId });
+    }
+    setMentionQuery(null);
+  }, []);
+
+  const mentionCandidates = useMemo(() => {
+    if (mentionQuery == null) return [];
+    const q = mentionQuery.toLowerCase();
+    return otherMembers.filter(m => (m.name || m.email || '').toLowerCase().includes(q)).slice(0, 6);
+  }, [mentionQuery, otherMembers]);
 
   // ── Send / Edit ───────────────────────────────────────────
   const onSend = useCallback(async () => {
@@ -613,8 +636,11 @@ export default function ChatScreen() {
         // Enqueue + add optimistic bubble immediately. If the one-shot
         // Invisible Ink toggle was on, stamp meta.invisibleInk and reset.
         const replyToId = replyTo?.id ?? null;
-        const meta = nextInvisibleInk ? { invisibleInk: true } : null;
-        const q = await enqueueText(chatId, text, { replyToId, meta });
+        // Keep only mentions whose "@Name" still appears in the final text.
+        const mentions = mentionsRef.current.filter(mn => text.includes('@' + mn.name));
+        const meta: any = { ...(nextInvisibleInk ? { invisibleInk: true } : {}), ...(mentions.length ? { mentions } : {}) };
+        const q = await enqueueText(chatId, text, { replyToId, meta: Object.keys(meta).length ? meta : null });
+        mentionsRef.current = [];
         const optimistic: DisplayMessage = {
           id:        0,
           chatId,
@@ -1573,6 +1599,23 @@ export default function ChatScreen() {
         initialNumToRender={15}
       />
 
+      {/* @mention picker (W15) — appears while typing "@name" in a group */}
+      {mentionCandidates.length > 0 && (
+        <View style={S.mentionBar}>
+          {mentionCandidates.map(m => (
+            <TouchableOpacity key={m.userId} style={S.mentionRow} onPress={() => pickMention(m)} activeOpacity={0.7}>
+              <Avatar
+                uri={m.photoURL && screenAuthHeader ? attachmentUrl(m.photoURL) : null}
+                headers={screenAuthHeader ? { Authorization: screenAuthHeader } : undefined}
+                name={m.name || m.email || 'member'}
+                size={28}
+              />
+              <Text style={S.mentionName} numberOfLines={1}>{m.name || m.email}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
       {/* Typing indicator */}
       {typingUids.size > 0 && (
         <View style={S.typingBar}>
@@ -1784,8 +1827,24 @@ const QUICK_REACTS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 // Case-insensitive substring highlighter — splits `body` around every
 // occurrence of `q` and wraps the matches in a styled <Text>. Empty
 // query returns the body unchanged.
+// Color @mention tokens (e.g. "@Alex") in a message body.
+function colorMentions(body: string): any {
+  if (!body || body.indexOf('@') === -1) return body;
+  const parts: any[] = [];
+  const re = /@\w[\w]*/g;
+  let last = 0; let m: RegExpExecArray | null;
+  while ((m = re.exec(body)) !== null) {
+    if (m.index > last) parts.push(body.slice(last, m.index));
+    parts.push(<Text key={`mn${m.index}`} style={HL.mention}>{m[0]}</Text>);
+    last = m.index + m[0].length;
+  }
+  if (last < body.length) parts.push(body.slice(last));
+  return parts.length ? parts : body;
+}
+
 function renderWithHighlight(body: string, q: string | null | undefined): any {
-  if (!q || !body) return body;
+  if (!body) return body;
+  if (!q) return colorMentions(body); // no active search → color @mentions
   const needle = q.toLowerCase();
   const hay    = body.toLowerCase();
   if (hay.indexOf(needle) === -1) return body;
@@ -2744,6 +2803,10 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   memoryBubbleBody:    { color: c.text, fontSize: 13, marginTop: 4, fontStyle: 'italic' },
   memoryBubbleDismiss: { color: c.textDim, fontSize: 10, marginTop: 6 },
   screenshotBannerTxt: { color: '#FCD34D', fontSize: 12, fontWeight: '600' },
+
+  mentionBar:    { backgroundColor: c.surfaceSolid, borderTopWidth: 1, borderTopColor: c.border, maxHeight: 220 },
+  mentionRow:    { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 8 },
+  mentionName:   { color: c.text, fontSize: 14, fontWeight: '600', flex: 1 },
 
   pinnedBar:     { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: c.surfaceSolid, borderBottomWidth: 1, borderBottomColor: c.border },
   pinnedBarTitle:{ color: '#10B981', fontSize: 11, fontWeight: '700' },
