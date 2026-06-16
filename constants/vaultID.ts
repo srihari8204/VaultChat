@@ -1,4 +1,4 @@
-// constants/vaultID.ts — Blockchain VaultID System
+// constants/vaultID.ts â€” Cryptographic VaultID (Ethereum-format keypair via ethers, stored locally in SecureStore; real ECDSA signing, NOT registered on any blockchain)
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -6,7 +6,7 @@ import { ethers } from 'ethers';
 
 export interface VaultID {
   vaultTag: string;        // @username like @vault_abc123
-  publicKey: string;       // blockchain public key
+  publicKey: string;       // public key (Ethereum-format)
   privateKeyHash: string;  // hashed private key (never stored plain)
   walletAddress: string;   // ethereum-style address
   createdAt: number;
@@ -22,7 +22,7 @@ const PRIVATE_KEY_SECURE = 'vaultchat_private_key';
 
 // Generate a new VaultID — no phone number needed!
 export const generateVaultID = async (displayName: string, avatar: string, bio: string): Promise<VaultID> => {
-  // Create real ethereum wallet (blockchain keypair)
+  // Create real ethereum wallet (Ethereum-format keypair (local, not on-chain))
   const wallet = ethers.Wallet.createRandom();
 
   // Generate unique VaultTag
@@ -75,7 +75,7 @@ export const destroyVaultID = async (): Promise<void> => {
   await SecureStore.deleteItemAsync(PRIVATE_KEY_SECURE);
 };
 
-// Sign a message with private key (proves identity on blockchain)
+// Sign a message with private key (proves key ownership (off-chain))
 export const signMessage = async (message: string): Promise<string> => {
   const privateKey = await SecureStore.getItemAsync(PRIVATE_KEY_SECURE);
   if (!privateKey) throw new Error('No private key found');
@@ -91,7 +91,7 @@ export const verifySignature = (message: string, signature: string, expectedAddr
   } catch { return false; }
 };
 
-// Generate blockchain certificate (proof of identity)
+// Generate signed identity certificate (proof of identity)
 export const generateIdentityCertificate = async (vaultID: VaultID): Promise<string> => {
   const payload = JSON.stringify({
     vaultTag: vaultID.vaultTag,

@@ -198,7 +198,7 @@ function MemoryShieldScreenContent() {
           <View style={S.destroyCard}>
             <Text style={S.settingsTitle}>What Gets Destroyed</Text>
             {[
-              { icon: '🔑', item: 'Private blockchain keys', critical: true },
+              { icon: '🔑', item: 'Private cryptographic keys', critical: true },
               { icon: '🧬', item: 'VaultID identity', critical: true },
               { icon: '👤', item: 'Enrolled face scans', critical: true },
               { icon: '💬', item: 'All messages and chats', critical: true },

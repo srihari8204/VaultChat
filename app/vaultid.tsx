@@ -58,7 +58,7 @@ function VaultIDScreenContent() {
       setVaultID(id);
       setShowCreate(false);
       setDisplayName(''); setBio('');
-      Alert.alert('ðŸ§¬ VaultID Created!', 'Your blockchain identity is ready.\n\nNo phone number needed â€” ever!\n\nYour VaultTag: ' + id.vaultTag);
+      Alert.alert('ðŸ§¬ VaultID Created!', 'Your cryptographic identity is ready.\n\nNo phone number needed â€” ever!\n\nYour VaultTag: ' + id.vaultTag);
     } catch {
       Alert.alert('Error','Failed to create VaultID. Try again.');
     }
@@ -79,7 +79,7 @@ function VaultIDScreenContent() {
       const msg = 'VaultChat Identity Proof â€” ' + Date.now();
       const sig = await signMessage(msg);
       setSignedMsg(sig.substring(0,40)+'...');
-      Alert.alert('âœ… Signed!','Message signed with your blockchain private key.\n\nThis proves you own this VaultID without revealing your private key.');
+      Alert.alert('âœ… Signed!','Message signed with your private key.\n\nThis proves you own this VaultID without revealing your private key.');
     } catch { Alert.alert('Error','Could not sign message'); }
   };
 
@@ -92,7 +92,7 @@ function VaultIDScreenContent() {
   };
 
   const handleDestroy = () => {
-    Alert.alert('ðŸ’€ Destroy VaultID','This will permanently delete your blockchain identity.\n\nThis cannot be undone!',[
+    Alert.alert('ðŸ’€ Destroy VaultID','This will permanently delete your cryptographic identity.\n\nThis cannot be undone!',[
       {text:'Cancel',style:'cancel'},
       {text:'DESTROY',style:'destructive',onPress:async()=>{
         await destroyVaultID();
@@ -124,7 +124,7 @@ function VaultIDScreenContent() {
           </TouchableOpacity>
           <View style={{flex:1}}>
             <Text style={S.headerTitle}>ðŸ§¬ VaultID</Text>
-            <Text style={{color:'#3D5A7A',fontSize:10,letterSpacing:1.5}}>BLOCKCHAIN IDENTITY</Text>
+            <Text style={{color:'#3D5A7A',fontSize:10,letterSpacing:1.5}}>CRYPTOGRAPHIC IDENTITY</Text>
           </View>
           {vaultID&&<TouchableOpacity onPress={handleShare} style={S.shareBtn}>
             <Text style={{color:'#4A9FFF',fontSize:12,fontWeight:'700'}}>Share</Text>
@@ -137,7 +137,7 @@ function VaultIDScreenContent() {
           <Animated.View style={[S.idCard,{transform:[{scale:pulse}]}]}>
             <LinearGradient colors={['#0D1E3A','#F9FAFB','#060F20']} style={S.idCardInner}>
 
-              {/* Blockchain spinning ring */}
+              {/* Identity spinning ring */}
               <Animated.View style={[S.chainRing,{transform:[{rotate:rotateStr}]}]}/>
 
               {/* Avatar */}
@@ -216,7 +216,7 @@ function VaultIDScreenContent() {
               <LinearGradient colors={['#7C3AED','#6D28D9']} style={S.actionGrad}>
                 <Text style={{fontSize:20}}>ðŸ“œ</Text>
                 <Text style={S.actionText}>Certificate</Text>
-                <Text style={S.actionSub}>Blockchain proof</Text>
+                <Text style={S.actionSub}>Cryptographic proof</Text>
               </LinearGradient>
             </TouchableOpacity>
 
@@ -242,11 +242,11 @@ function VaultIDScreenContent() {
             </View>
           </View>
 
-          {/* Blockchain features */}
+          {/* Identity features */}
           <View style={S.featuresGrid}>
             {[
               {icon:'ðŸ”',title:'Zero-Knowledge',sub:'Identity without personal data'},
-              {icon:'â›“ï¸',title:'Blockchain Proof',sub:'Cryptographic ownership'},
+              {icon:'â›“ï¸',title:'Cryptographic Proof',sub:'Cryptographic ownership'},
               {icon:'ðŸ“µ',title:'No Phone Number',sub:'VaultTag only'},
               {icon:'ðŸŒ',title:'Universal ID',sub:'Works everywhere'},
               {icon:'ðŸ’€',title:'MemoryShield',sub:'Instant key destruction'},
@@ -270,7 +270,7 @@ function VaultIDScreenContent() {
           <View style={{alignItems:'center',paddingTop:40}}>
             <Text style={{fontSize:80,marginBottom:20}}>ðŸ§¬</Text>
             <Text style={{color:'#fff',fontSize:22,fontWeight:'900',textAlign:'center'}}>No VaultID Yet</Text>
-            <Text style={{color:'#3D5A7A',fontSize:14,textAlign:'center',marginTop:8,lineHeight:22,paddingHorizontal:20}}>Create your blockchain identity.\nNo phone number, no email required.</Text>
+            <Text style={{color:'#3D5A7A',fontSize:14,textAlign:'center',marginTop:8,lineHeight:22,paddingHorizontal:20}}>Create your cryptographic identity.\nNo phone number, no email required.</Text>
             <TouchableOpacity onPress={()=>setShowCreate(true)} style={{marginTop:24}}>
               <LinearGradient colors={['#1D4ED8','#7C3AED']} style={{borderRadius:16,paddingVertical:16,paddingHorizontal:40}}>
                 <Text style={{color:'#fff',fontSize:16,fontWeight:'800'}}>ðŸ§¬ Create VaultID</Text>
@@ -286,7 +286,7 @@ function VaultIDScreenContent() {
         <View style={{flex:1,backgroundColor:'rgba(0,0,0,0.92)',justifyContent:'flex-end'}}>
           <LinearGradient colors={['#F9FAFB','#0D1E3A']} style={{borderTopLeftRadius:28,borderTopRightRadius:28,padding:24,paddingBottom:44}}>
             <Text style={{color:'#fff',fontSize:22,fontWeight:'900',marginBottom:4}}>ðŸ§¬ Create VaultID</Text>
-            <Text style={{color:'#3D5A7A',fontSize:13,marginBottom:20}}>Your blockchain identity â€” no phone number needed</Text>
+            <Text style={{color:'#3D5A7A',fontSize:13,marginBottom:20}}>Your cryptographic identity â€” no phone number needed</Text>
 
             <Text style={{color:'#4A9FFF',fontSize:11,fontWeight:'700',marginBottom:8,letterSpacing:1}}>CHOOSE AVATAR</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:16}}>
@@ -314,7 +314,7 @@ function VaultIDScreenContent() {
 
             <TouchableOpacity disabled={creating||!displayName.trim()} style={{opacity:creating||!displayName.trim()?0.5:1}} onPress={handleCreate}>
               <LinearGradient colors={['#1D4ED8','#7C3AED']} style={{borderRadius:16,paddingVertical:16,alignItems:'center',marginBottom:12}}>
-                <Text style={{color:'#fff',fontSize:15,fontWeight:'900'}}>{creating?'â›“ï¸ Generating on Blockchain...':'ðŸ§¬ Generate VaultID'}</Text>
+                <Text style={{color:'#fff',fontSize:15,fontWeight:'900'}}>{creating?'â›“ï¸ Generating keys...':'ðŸ§¬ Generate VaultID'}</Text>
               </LinearGradient>
             </TouchableOpacity>
 
@@ -362,12 +362,12 @@ function VaultIDScreenContent() {
       <Modal visible={showCert} transparent animationType="slide">
         <View style={{flex:1,backgroundColor:'rgba(0,0,0,0.92)',justifyContent:'flex-end'}}>
           <LinearGradient colors={['#F9FAFB','#0D1E3A']} style={{borderTopLeftRadius:28,borderTopRightRadius:28,padding:24,paddingBottom:44}}>
-            <Text style={{color:'#fff',fontSize:20,fontWeight:'900',marginBottom:4}}>ðŸ“œ Blockchain Certificate</Text>
+            <Text style={{color:'#fff',fontSize:20,fontWeight:'900',marginBottom:4}}>ðŸ“œ Identity Certificate</Text>
             <Text style={{color:'#3D5A7A',fontSize:12,marginBottom:16}}>Cryptographic proof of your VaultID ownership</Text>
             <ScrollView style={{backgroundColor:'#060E22',borderRadius:12,padding:14,maxHeight:200,marginBottom:16}}>
               <Text style={{color:'#10B981',fontSize:10,fontFamily:'monospace',lineHeight:16}}>{certificate}</Text>
             </ScrollView>
-            <TouchableOpacity onPress={async()=>{ await Share.share({message:'My VaultChat Blockchain Certificate:\n\n'+certificate}); }}>
+            <TouchableOpacity onPress={async()=>{ await Share.share({message:'My VaultChat Identity Certificate:\n\n'+certificate}); }}>
               <LinearGradient colors={['#1D4ED8','#7C3AED']} style={{borderRadius:14,paddingVertical:14,alignItems:'center',marginBottom:12}}>
                 <Text style={{color:'#fff',fontSize:14,fontWeight:'800'}}>ðŸ“¤ Share Certificate</Text>
               </LinearGradient>

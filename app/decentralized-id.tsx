@@ -1,5 +1,5 @@
 // app/decentralized-id.tsx
-// Decentralised VaultID — blockchain-backed identity
+// Decentralised VaultID — self-custodied cryptographic identity
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -102,7 +102,7 @@ export default function DecentralizedIDScreen() {
           <LinearGradient colors={['#7C3AED', '#4A9FFF']} style={st.hero}>
             <Text style={{ fontSize: 52 }}>🆔</Text>
             <Text style={st.heroTitle}>Decentralised VaultID</Text>
-            <Text style={st.heroSub}>Your identity, on the blockchain. No authority can revoke it.</Text>
+            <Text style={st.heroSub}>Your identity is a keypair only you hold — stored on your device, controlled by no one else.</Text>
           </LinearGradient>
 
           {did ? (
@@ -160,7 +160,7 @@ export default function DecentralizedIDScreen() {
                   onChangeText={setDisplayName}
                 />
 
-                <Text style={st.label}>BLOCKCHAIN</Text>
+                <Text style={st.label}>KEY-BASED</Text>
                 <View style={{ gap: 8, marginBottom: 16 }}>
                   {CHAINS.map(chain => (
                     <TouchableOpacity
@@ -210,7 +210,7 @@ export default function DecentralizedIDScreen() {
               { app: 'WhatsApp', method: 'Phone number', control: 'Meta', revocable: true },
               { app: 'Telegram', method: 'Phone number', control: 'Telegram', revocable: true },
               { app: 'Signal', method: 'Phone number', control: 'Signal Foundation', revocable: true },
-              { app: 'VaultChat', method: 'DID (Blockchain)', control: 'You', revocable: false },
+              { app: 'VaultChat', method: 'Self-custodied keypair', control: 'You', revocable: false },
             ].map((r, i) => (
               <View key={i} style={[st.compRow, i < 3 && { borderBottomWidth: 1, borderBottomColor: C.border }]}>
                 <Text style={{ color: C.text, fontSize: 13, fontWeight: '600', width: 80 }}>{r.app}</Text>
