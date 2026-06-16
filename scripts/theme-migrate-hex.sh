@@ -23,9 +23,11 @@ ss=$(grep -nE "^const [A-Za-z]+ = StyleSheet\.create\(\{" "$f" | head -1 | cut -
 [ -z "$ss" ] && { echo "MANUAL(nostyle) $f"; exit 3; }
 svar=$(sed -n "${ss}p" "$f" | grep -oE "^const [A-Za-z]+" | sed "s/^const //")
 
-NEARBLACK="#0[AaBb]0[AaBb]0[Ff]|#0[Bb]0[Ff]1[0-9A-Fa-f]|#0[Dd]111[0-9A-Fa-f]|#0[Ff]172[Aa]|#000000|#000|#0[Aa]0[Aa]0[Aa]|#0[Cc]0[Cc]1[0-9A-Fa-f]|#0[Ee]0[Ee]14"
-DARKCARD="#1[0-9A-Fa-f]1[0-9A-Fa-f]1[0-9A-Fa-f]|#1[Aa]1[Aa]2[Ee]|#16213[Ee]|#1[Ee]293[Bb]|#1[Ff]2937|#15161[Dd]|#14141[Bb]|#192233|#1[Cc]1[Cc]1[Ee]|#222|#202020|#23232[0-9A-Fa-f]"
-GRAYBORDER="#374151|#334155|#2[Dd]3748|#283548|#283039|#30363[Dd]|#3[Ff]3[Ff]46|#2[Aa]2[Aa]35|#333|#444|#2[Cc]2[Cc]2[Ee]"
+NEARBLACK="#0[AaBb]0[AaBb]0[Ff]|#0[Bb]0[Ff]1[0-9A-Fa-f]|#0[Dd]111[0-9A-Fa-f]|#0[Ff]172[Aa]|#000000|#000|#0[Aa]0[Aa]0[Aa]|#0[Cc]0[Cc]1[0-9A-Fa-f]|#0[Ee]0[Ee]14|#0[Ff]1729|#030[Aa]18|#050[Dd]1[Ff]|#050510|#1[Aa]0[Aa]0[Aa]|#0[Dd]0[Ff]14"
+DARKCARD="#1[0-9A-Fa-f]1[0-9A-Fa-f]1[0-9A-Fa-f]|#1[Aa]1[Aa]2[Ee]|#16213[Ee]|#1[Ee]293[Bb]|#1[Ff]2937|#15161[Dd]|#14141[Bb]|#192233|#1[Cc]1[Cc]1[Ee]|#222|#202020|#23232[0-9A-Fa-f]|#0[Dd]1[Ee]3[Aa]|#0[Dd]1[Bb]3[Ee]|#0[Dd]2847|#1[Aa]2[Aa]4[Aa]|#1[Aa]1[Dd]27|#1[Aa]2744"
+GRAYBORDER="#374151|#334155|#2[Dd]3748|#283548|#283039|#30363[Dd]|#3[Ff]3[Ff]46|#2[Aa]2[Aa]35|#333|#444|#2[Cc]2[Cc]2[Ee]|#2[Aa]2[Dd]3[Aa]|#1[Aa]2744"
+# navy / near-black values that appear as borders on deep-navy screens
+NAVYBORDER="#0[Ff]1729|#030[Aa]18|#0[Dd]1[Ee]3[Aa]|#1[Aa]2[Aa]4[Aa]"
 MIDGRAY="#9[Cc][Aa]3[Aa][Ff]|#6[Bb]7280|#94[Aa]3[Bb]8|#64748[Bb]|#8[Ee]8[Ee]93|#[Aa]1[Aa]1[Aa][Aa]|#[Aa][Aa][Aa]|#888|#999|#777|#[Cc]9[Cc][Aa][Dd]4|#[Dd]1[Dd]5[Dd][Bb]|#6[Bb]6[Bb]6[Bb]|#808080"
 WHITE="#[Ff]9[Ff][Aa][Ff][Bb]|#[Ff]3[Ff]4[Ff]6|#[Ee]5[Ee]7[Ee][Bb]|#[Ee][Dd][Ee][Ee][Ff]1|#[Ff]5[Ff]5[Ff]5|#[Ee][Ee][Ee]|#[Ff][Ff][Ff][Ff][Ff][Ff]|#[Ff][Ff][Ff]"
 
@@ -33,15 +35,15 @@ map() { # $1 file  $2 prefix(c. | colors.)
   local F="$1" P="$2"
   # --- brand hues: property-independent ---
   sed -i -E "s/'(#10[Bb]981|#22[Cc]55[Ee]|#34[Dd]399|#059669|#16[Aa]34[Aa]|#4[Aa][Dd][Ee]80)'/${P}primary/g" "$F"
-  sed -i -E "s/'(#06[Bb]6[Dd]4|#00[Dd]9[Ff][Ff]|#0[Ee][Aa]5[Ee]9|#3[Bb]82[Ff]6|#2563[Ee][Bb]|#38[Bb][Dd][Ff]8|#60[Aa]5[Ff][Aa])'/${P}accent/g" "$F"
+  sed -i -E "s/'(#06[Bb]6[Dd]4|#00[Dd]9[Ff][Ff]|#0[Ee][Aa]5[Ee]9|#3[Bb]82[Ff]6|#2563[Ee][Bb]|#38[Bb][Dd][Ff]8|#60[Aa]5[Ff][Aa]|#1[Dd]4[Ee][Dd]8|#4[Aa]9[Ff][Ff][Ff])'/${P}accent/g" "$F"
   sed -i -E "s/'(#8[Bb]5[Cc][Ff]6|#[Aa]855[Ff]7|#7[Cc]3[Aa][Ee][Dd]|#6366[Ff]1|#[Aa]78[Bb][Ff][Aa])'/${P}purple/g" "$F"
   sed -i -E "s/'(#[Ee][Ff]4444|#[Dd][Cc]2626|#[Ff]87171|#[Ff][Ff]3[Bb]30|#[Ee]11[Dd]48|#[Ff]56565)'/${P}danger/g" "$F"
   # --- neutrals: only inside their natural property ---
   sed -i -E "s/(backgroundColor: )'(${NEARBLACK})'/\1${P}bg/g" "$F"
   sed -i -E "s/(backgroundColor: )'(${DARKCARD})'/\1${P}card/g" "$F"
-  sed -i -E "s/(borderColor: )'(${GRAYBORDER}|${DARKCARD})'/\1${P}border/g" "$F"
-  sed -i -E "s/(borderBottomColor: )'(${GRAYBORDER}|${DARKCARD})'/\1${P}border/g" "$F"
-  sed -i -E "s/(borderTopColor: )'(${GRAYBORDER}|${DARKCARD})'/\1${P}border/g" "$F"
+  sed -i -E "s/(borderColor: )'(${GRAYBORDER}|${DARKCARD}|${NAVYBORDER})'/\1${P}border/g" "$F"
+  sed -i -E "s/(borderBottomColor: )'(${GRAYBORDER}|${DARKCARD}|${NAVYBORDER})'/\1${P}border/g" "$F"
+  sed -i -E "s/(borderTopColor: )'(${GRAYBORDER}|${DARKCARD}|${NAVYBORDER})'/\1${P}border/g" "$F"
   sed -i -E "s/(color: )'(${WHITE})'/\1${P}text/g" "$F"
   sed -i -E "s/(color: )'(${MIDGRAY})'/\1${P}textDim/g" "$F"
 }

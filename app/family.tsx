@@ -1,6 +1,6 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useState , useMemo} from 'react';
 import {
     Alert, Image,
     ScrollView,
@@ -10,6 +10,8 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+import { useTheme } from '../lib/theme';
+import { type Palette } from '../constants/theme';
 
 const FAMILY_MEMBERS = [
   { id: '1', name: 'Priya (Daughter)', age: 14, photo: 'https://i.pravatar.cc/150?img=5',
@@ -32,7 +34,14 @@ const CONTENT_FILTERS = [
   { id: 'gaming',   icon: '🎮', label: 'Gaming (18+)',      blocked: false },
 ];
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function FamilyScreen() {
+  const { colors } = useTheme();
+  const styles = useS();
   const router = useRouter();
   const [filters, setFilters] = useState(CONTENT_FILTERS);
   const [locationSharing, setLocationSharing] = useState(true);
@@ -68,7 +77,7 @@ export default function FamilyScreen() {
             { text: 'Cancel', style: 'cancel' },
           ])}
         >
-          <LinearGradient colors={['#1D4ED8', '#7C3AED']} style={styles.addBtnGrad}>
+          <LinearGradient colors={[colors.accent, colors.purple]} style={styles.addBtnGrad}>
             <Text style={styles.addBtnText}>+ Add</Text>
           </LinearGradient>
         </TouchableOpacity>
@@ -169,7 +178,7 @@ export default function FamilyScreen() {
                     <View>
                       <Text style={styles.filterLabel}>{filter.label}</Text>
                       <Text style={[styles.filterStatus,
-                        { color: filter.blocked ? '#EF4444' : '#22C55E' }]}>
+                        { color: filter.blocked ? colors.danger : colors.primary }]}>
                         {filter.blocked ? '🚫 Blocked' : '✅ Allowed'}
                       </Text>
                     </View>
@@ -177,7 +186,7 @@ export default function FamilyScreen() {
                   <Switch
                     value={filter.blocked}
                     onValueChange={() => toggleFilter(filter.id)}
-                    trackColor={{ false: '#E5E7EB', true: '#EF4444' }}
+                    trackColor={{ false: '#E5E7EB', true: colors.danger }}
                     thumbColor="#FFFFFF"
                   />
                 </View>
@@ -211,7 +220,7 @@ export default function FamilyScreen() {
                   <Switch
                     value={item.val}
                     onValueChange={() => item.set(!item.val)}
-                    trackColor={{ false: '#E5E7EB', true: '#1D4ED8' }}
+                    trackColor={{ false: '#E5E7EB', true: colors.accent }}
                     thumbColor={item.val ? '#FFFFFF' : '#475569'}
                   />
                 </View>
@@ -251,7 +260,7 @@ export default function FamilyScreen() {
 
         {/* ── WORLD FIRST BADGE ──────────────────────── */}
         <LinearGradient
-          colors={['#1D4ED8', '#7C3AED']}
+          colors={[colors.accent, colors.purple]}
           style={styles.worldFirstBadge}
           start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
         >
@@ -270,17 +279,17 @@ export default function FamilyScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#030A18' },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
 
   header: {
     flexDirection: 'row', alignItems: 'center',
     justifyContent: 'space-between',
     paddingTop: 54, paddingBottom: 14, paddingHorizontal: 16,
-    borderBottomWidth: 1, borderBottomColor: '#0D1E3A',
+    borderBottomWidth: 1, borderBottomColor: c.border,
   },
   backBtn: { padding: 6 },
-  backArrow: { color: '#4A9FFF', fontSize: 26, fontWeight: '300' },
+  backArrow: { color: c.accent, fontSize: 26, fontWeight: '300' },
   headerTitle: { color: '#000000', fontSize: 17, fontWeight: '800', textAlign: 'center' },
   headerSub: { color: '#2D4A6B', fontSize: 11, textAlign: 'center' },
   addBtn: { borderRadius: 10, overflow: 'hidden' },
@@ -291,7 +300,7 @@ const styles = StyleSheet.create({
   safeScoreCard: {
     margin: 16, borderRadius: 20, padding: 20,
     flexDirection: 'row', alignItems: 'center',
-    elevation: 10, shadowColor: '#22C55E',
+    elevation: 10, shadowColor: c.primary,
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.3, shadowRadius: 12,
   },
@@ -302,10 +311,10 @@ const styles = StyleSheet.create({
     height: 6, backgroundColor: 'rgba(255,255,255,0.2)',
     borderRadius: 3, marginTop: 4,
   },
-  safeScoreBarFill: { height: 6, backgroundColor: '#4ADE80', borderRadius: 3 },
+  safeScoreBarFill: { height: 6, backgroundColor: c.primary, borderRadius: 3 },
   safeScoreNote: { color: 'rgba(255,255,255,0.6)', fontSize: 11 },
   safeScoreRight: { alignItems: 'center', marginLeft: 16 },
-  safeScoreNum: { color: '#4ADE80', fontSize: 48, fontWeight: '900', lineHeight: 54 },
+  safeScoreNum: { color: c.primary, fontSize: 48, fontWeight: '900', lineHeight: 54 },
   safeScoreMax: { color: 'rgba(255,255,255,0.5)', fontSize: 14 },
 
   // SECTIONS
@@ -316,30 +325,30 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: '#F9FAFB', borderRadius: 16,
-    borderWidth: 1, borderColor: '#0D1E3A', overflow: 'hidden',
+    borderWidth: 1, borderColor: c.border, overflow: 'hidden',
   },
-  divider: { height: 1, backgroundColor: '#0D1E3A', marginLeft: 56 },
+  divider: { height: 1, backgroundColor: c.card, marginLeft: 56 },
 
   // MEMBER CARD
   memberCard: {
     backgroundColor: '#F9FAFB', borderRadius: 16,
-    borderWidth: 1, borderColor: '#0D1E3A',
+    borderWidth: 1, borderColor: c.border,
     padding: 14, marginBottom: 10,
     flexDirection: 'row', alignItems: 'center', gap: 12,
   },
-  memberCardSelected: { borderColor: '#1D4ED8', backgroundColor: '#0D1E3A' },
+  memberCardSelected: { borderColor: c.accent, backgroundColor: c.card },
   memberAvatarRing: {
     width: 52, height: 52, borderRadius: 26,
     justifyContent: 'center', alignItems: 'center', padding: 2.5,
   },
   memberPhoto: {
     width: 44, height: 44, borderRadius: 22,
-    borderWidth: 2, borderColor: '#030A18',
+    borderWidth: 2, borderColor: c.border,
   },
   memberOnlineDot: {
     position: 'absolute', left: 52, top: 10,
     width: 12, height: 12, borderRadius: 6,
-    backgroundColor: '#22C55E', borderWidth: 2, borderColor: '#030A18',
+    backgroundColor: c.primary, borderWidth: 2, borderColor: c.border,
   },
   memberInfo: { flex: 1, gap: 4 },
   memberRow1: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
@@ -351,10 +360,10 @@ const styles = StyleSheet.create({
   memberScoreRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 },
   memberScoreBarBg: {
     flex: 1, height: 4,
-    backgroundColor: '#0D1E3A', borderRadius: 2,
+    backgroundColor: c.card, borderRadius: 2,
   },
   memberScoreBarFill: { height: 4, borderRadius: 2 },
-  memberScoreText: { color: '#22C55E', fontSize: 10, fontWeight: '700' },
+  memberScoreText: { color: c.primary, fontSize: 10, fontWeight: '700' },
   memberChevron: { color: '#2D4A6B', fontSize: 12 },
 
   // FILTERS
@@ -382,7 +391,7 @@ const styles = StyleSheet.create({
   controlIconBox: {
     width: 36, height: 36, borderRadius: 10,
     justifyContent: 'center', alignItems: 'center',
-    backgroundColor: '#0D1E3A',
+    backgroundColor: c.card,
   },
   controlIcon:  { fontSize: 18 },
   controlLabel: { color: '#000000', fontSize: 14, fontWeight: '600' },

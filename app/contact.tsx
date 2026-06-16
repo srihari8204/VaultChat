@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useState , useMemo} from 'react';
 import {
   Alert,
   ScrollView,
@@ -8,15 +8,24 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+import { useTheme } from '../lib/theme';
+import { type Palette } from '../constants/theme';
+
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
 
 export default function ContactScreen() {
+  const { colors } = useTheme();
+  const styles = useS();
   const router = useRouter();
   const { name, avatar } = useLocalSearchParams();
   const [isMuted, setIsMuted] = useState(false);
   const [isBlocked, setIsBlocked] = useState(false);
 
   const trustScore = 87;
-  const trustColor = trustScore >= 80 ? '#22C55E' : trustScore >= 60 ? '#F59E0B' : '#EF4444';
+  const trustColor = trustScore >= 80 ? colors.primary : trustScore >= 60 ? '#F59E0B' : colors.danger;
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
@@ -89,9 +98,9 @@ export default function ContactScreen() {
 
         {/* Score breakdown */}
         {[
-          { label: 'VaultID Verified', score: 30, max: 30, color: '#22C55E' },
-          { label: 'Account Age', score: 18, max: 20, color: '#3B82F6' },
-          { label: 'Mutual Contacts', score: 20, max: 20, color: '#8B5CF6' },
+          { label: 'VaultID Verified', score: 30, max: 30, color: colors.primary },
+          { label: 'Account Age', score: 18, max: 20, color: colors.accent },
+          { label: 'Mutual Contacts', score: 20, max: 20, color: colors.purple },
           { label: 'No Incidents', score: 19, max: 30, color: '#F59E0B' },
         ].map((item, i) => (
           <View key={i} style={styles.scoreRow}>
@@ -143,17 +152,17 @@ export default function ContactScreen() {
         {[
           {
             icon: '⏱️', label: 'HideTimer',
-            value: '30 minutes', color: '#3B82F6',
+            value: '30 minutes', color: colors.accent,
             onPress: () => Alert.alert('HideTimer', 'Chat blurs after 30 min of inactivity')
           },
           {
             icon: '🔕', label: 'Mute Notifications',
-            value: isMuted ? 'Muted' : 'On', color: isMuted ? '#EF4444' : '#22C55E',
+            value: isMuted ? 'Muted' : 'On', color: isMuted ? colors.danger : colors.primary,
             onPress: () => setIsMuted(!isMuted)
           },
           {
             icon: '🚫', label: 'Block Contact',
-            value: isBlocked ? 'Blocked' : 'Not blocked', color: isBlocked ? '#EF4444' : '#475569',
+            value: isBlocked ? 'Blocked' : 'Not blocked', color: isBlocked ? colors.danger : '#475569',
             onPress: () => {
               Alert.alert(
                 isBlocked ? 'Unblock?' : 'Block Contact?',
@@ -192,7 +201,7 @@ export default function ContactScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (c: Palette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: '#ffffff' },
   header: {
     flexDirection: 'row',
@@ -202,19 +211,19 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#0F1729',
+    borderBottomColor: c.border,
   },
   backBtn: { padding: 4 },
-  backText: { color: '#1D4ED8', fontSize: 24, fontWeight: 'bold' },
+  backText: { color: c.accent, fontSize: 24, fontWeight: 'bold' },
   headerTitle: { color: '#000000', fontSize: 17, fontWeight: 'bold' },
   editBtn: { padding: 4 },
-  editText: { color: '#1D4ED8', fontSize: 15 },
+  editText: { color: c.accent, fontSize: 15 },
   profileCard: {
     alignItems: 'center',
     paddingVertical: 32,
     paddingHorizontal: 24,
     borderBottomWidth: 1,
-    borderBottomColor: '#0F1729',
+    borderBottomColor: c.border,
   },
   bigAvatar: {
     width: 100,
@@ -224,7 +233,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 3,
-    borderColor: '#1D4ED8',
+    borderColor: c.accent,
     marginBottom: 8,
   },
   bigAvatarEmoji: { fontSize: 56 },
@@ -236,13 +245,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 2,
   },
-  onlineBadgeText: { color: '#22C55E', fontSize: 10, fontWeight: 'bold' },
+  onlineBadgeText: { color: c.primary, fontSize: 10, fontWeight: 'bold' },
   contactName: {
     color: '#000000', fontSize: 24, fontWeight: 'bold', marginTop: 8
   },
-  contactPhone: { color: '#6B7280', fontSize: 14, marginTop: 4 },
+  contactPhone: { color: c.textDim, fontSize: 14, marginTop: 4 },
   contactStatus: {
-    color: '#6B7280', fontSize: 13, marginTop: 8,
+    color: c.textDim, fontSize: 13, marginTop: 8,
     textAlign: 'center', fontStyle: 'italic'
   },
   actionRow: {
@@ -252,7 +261,7 @@ const styles = StyleSheet.create({
   },
   actionBtn: {
     alignItems: 'center',
-    backgroundColor: '#0F1729',
+    backgroundColor: c.bg,
     borderRadius: 16,
     padding: 16,
     minWidth: 68,
@@ -260,19 +269,19 @@ const styles = StyleSheet.create({
     borderColor: '#E5E7EB',
   },
   actionIcon: { fontSize: 24, marginBottom: 6 },
-  actionLabel: { color: '#6B7280', fontSize: 12 },
+  actionLabel: { color: c.textDim, fontSize: 12 },
   section: {
     marginHorizontal: 16,
     marginTop: 20,
   },
   sectionTitle: {
-    color: '#6B7280', fontSize: 13,
+    color: c.textDim, fontSize: 13,
     fontWeight: '600', marginBottom: 12,
     textTransform: 'uppercase', letterSpacing: 0.5,
   },
   trustCard: {
     flexDirection: 'row',
-    backgroundColor: '#0F1729',
+    backgroundColor: c.bg,
     borderRadius: 16,
     padding: 16,
     borderWidth: 1,
@@ -285,13 +294,13 @@ const styles = StyleSheet.create({
   trustDesc: { color: '#475569', fontSize: 12, marginTop: 4, lineHeight: 16 },
   trustScoreCircle: {
     alignItems: 'center',
-    backgroundColor: '#050D1F',
+    backgroundColor: c.bg,
     borderRadius: 40,
     width: 70,
     height: 70,
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: '#22C55E',
+    borderColor: c.primary,
   },
   trustScoreNum: { fontSize: 24, fontWeight: 'bold' },
   trustScoreMax: { color: '#475569', fontSize: 10 },
@@ -301,7 +310,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     gap: 8,
   },
-  scoreLabel: { color: '#6B7280', fontSize: 12, width: 120 },
+  scoreLabel: { color: c.textDim, fontSize: 12, width: 120 },
   scoreBar: {
     flex: 1, height: 6,
     backgroundColor: '#E5E7EB',
@@ -311,15 +320,15 @@ const styles = StyleSheet.create({
   scoreBarFill: { height: '100%', borderRadius: 3 },
   scoreNum: { fontSize: 11, width: 32, textAlign: 'right' },
   vaultIdCard: {
-    backgroundColor: '#0F1729',
+    backgroundColor: c.bg,
     borderRadius: 16,
     padding: 16,
     borderWidth: 1,
     borderColor: '#E5E7EB',
   },
-  vaultIdLabel: { color: '#6B7280', fontSize: 12 },
+  vaultIdLabel: { color: c.textDim, fontSize: 12 },
   vaultIdValue: {
-    color: '#3B82F6', fontSize: 14,
+    color: c.accent, fontSize: 14,
     fontFamily: 'monospace', marginTop: 4,
   },
   verifiedBadge: {
@@ -332,7 +341,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#166534',
   },
-  verifiedText: { color: '#22C55E', fontSize: 10, fontWeight: 'bold' },
+  verifiedText: { color: c.primary, fontSize: 10, fontWeight: 'bold' },
   mediaGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -341,7 +350,7 @@ const styles = StyleSheet.create({
   },
   mediaItem: {
     width: 80, height: 80,
-    backgroundColor: '#0F1729',
+    backgroundColor: c.bg,
     borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
@@ -350,11 +359,11 @@ const styles = StyleSheet.create({
   },
   mediaIcon: { fontSize: 32 },
   viewAllBtn: { alignItems: 'center', paddingVertical: 8 },
-  viewAllText: { color: '#1D4ED8', fontSize: 14 },
+  viewAllText: { color: c.accent, fontSize: 14 },
   settingRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#0F1729',
+    backgroundColor: c.bg,
     borderRadius: 12,
     padding: 14,
     marginBottom: 8,
@@ -366,12 +375,12 @@ const styles = StyleSheet.create({
   settingValue: { fontSize: 13, marginRight: 8 },
   settingArrow: { color: '#475569', fontSize: 18 },
   dangerBtn: {
-    backgroundColor: '#1A0A0A',
+    backgroundColor: c.bg,
     borderRadius: 14,
     padding: 16,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#7F1D1D',
   },
-  dangerText: { color: '#EF4444', fontSize: 15, fontWeight: '600' },
+  dangerText: { color: c.danger, fontSize: 15, fontWeight: '600' },
 });

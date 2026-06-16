@@ -3,6 +3,9 @@
 
 import React from 'react';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
+import { useMemo } from 'react';
+import { useTheme } from '../lib/theme';
+import { type Palette } from '../constants/theme';
 import { Stack } from 'expo-router';
 import { getD2DEStatus } from '../services/d2deService';
 
@@ -14,7 +17,14 @@ const LAYER_INFO: Record<string, string> = {
   'Android Keystore':  'Private keys stored in hardware-backed secure enclave. Non-exportable even with root access.',
 };
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function D2DEStatusScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const layers = getD2DEStatus();
   const active = layers.filter(l => l.active).length;
 
@@ -72,23 +82,23 @@ export default function D2DEStatusScreen() {
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (c: Palette) => StyleSheet.create({
   screen:       { flex: 1, backgroundColor: '#FFFFFF' },
-  scoreCard:    { backgroundColor: '#050510', margin: 16, borderRadius: 16, padding: 24, alignItems: 'center', borderWidth: 1, borderColor: '#00FF8822' },
+  scoreCard:    { backgroundColor: c.bg, margin: 16, borderRadius: 16, padding: 24, alignItems: 'center', borderWidth: 1, borderColor: '#00FF8822' },
   scoreNum:     { fontSize: 56, fontWeight: 'bold', color: '#00FF88' },
-  scoreLabel:   { color: '#6B7280', fontSize: 14, marginBottom: 16 },
+  scoreLabel:   { color: c.textDim, fontSize: 14, marginBottom: 16 },
   scoreBar:     { flexDirection: 'row', gap: 6, marginBottom: 12 },
   scoreSeg:     { flex: 1, height: 6, borderRadius: 3 },
-  scoreNote:    { color: '#9CA3AF', fontSize: 12, textAlign: 'center' },
+  scoreNote:    { color: c.textDim, fontSize: 12, textAlign: 'center' },
   layerCard:    { backgroundColor: '#FFFFFF', marginHorizontal: 16, marginBottom: 10, borderRadius: 12, padding: 16, borderLeftWidth: 3 },
   layerHeader:  { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 },
   layerDot:     { width: 10, height: 10, borderRadius: 5 },
   layerName:    { fontSize: 16, fontWeight: '700', flex: 1 },
   layerBadge:   { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
   layerBadgeTxt:{ fontSize: 10, fontWeight: 'bold', letterSpacing: 0.5 },
-  layerLabel:   { color: '#4A9FFF', fontSize: 12, marginBottom: 6 },
-  layerInfo:    { color: '#6B7280', fontSize: 12, lineHeight: 18 },
-  uniqueBox:    { backgroundColor: '#050510', margin: 16, borderRadius: 12, padding: 18, borderWidth: 1, borderColor: '#FFD16633' },
+  layerLabel:   { color: c.accent, fontSize: 12, marginBottom: 6 },
+  layerInfo:    { color: c.textDim, fontSize: 12, lineHeight: 18 },
+  uniqueBox:    { backgroundColor: c.bg, margin: 16, borderRadius: 12, padding: 18, borderWidth: 1, borderColor: '#FFD16633' },
   uniqueTitle:  { color: '#FFD166', fontSize: 15, fontWeight: 'bold', marginBottom: 8 },
-  uniqueBody:   { color: '#6B7280', fontSize: 13, lineHeight: 20 },
+  uniqueBody:   { color: c.textDim, fontSize: 13, lineHeight: 20 },
 });

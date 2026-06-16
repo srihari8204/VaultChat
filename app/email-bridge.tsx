@@ -1,7 +1,7 @@
 // app/email-bridge.tsx
 // Encrypted Email Bridge — send and receive AES-256-GCM encrypted emails
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback , useMemo} from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,8 @@ import {
   StyleSheet,
   StatusBar,
 } from 'react-native';
+import { useTheme } from '../lib/theme';
+import { type Palette } from '../constants/theme';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
 
@@ -53,7 +55,14 @@ const MOCK_INBOX = [
   },
 ];
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function EmailBridgeScreen() {
+  const { colors } = useTheme();
+  const styles = useS();
   const router = useRouter();
 
   // Compose state
@@ -197,7 +206,7 @@ export default function EmailBridgeScreen() {
 
           <TouchableOpacity onPress={handleSend} disabled={sending} activeOpacity={0.8}>
             <LinearGradient
-              colors={['#4A9FFF', '#7C3AED']}
+              colors={[colors.accent, colors.purple]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
               style={[styles.sendBtn, sending && { opacity: 0.6 }]}
@@ -222,7 +231,7 @@ export default function EmailBridgeScreen() {
             <View style={styles.emailHeader}>
               <View style={styles.emailSenderRow}>
                 <LinearGradient
-                  colors={['#4A9FFF', '#7C3AED']}
+                  colors={[colors.accent, colors.purple]}
                   style={styles.emailAvatar}
                 >
                   <Text style={styles.emailAvatarText}>
@@ -256,7 +265,7 @@ export default function EmailBridgeScreen() {
               activeOpacity={0.8}
             >
               <LinearGradient
-                colors={['#7C3AED', '#4A9FFF']}
+                colors={[colors.purple, colors.accent]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.decryptBtn}
@@ -311,7 +320,7 @@ export default function EmailBridgeScreen() {
                     </Text>
                     <TouchableOpacity onPress={performDecrypt} activeOpacity={0.8}>
                       <LinearGradient
-                        colors={['#4A9FFF', '#7C3AED']}
+                        colors={[colors.accent, colors.purple]}
                         start={{ x: 0, y: 0 }}
                         end={{ x: 1, y: 0 }}
                         style={styles.modalDecryptBtn}
@@ -329,7 +338,7 @@ export default function EmailBridgeScreen() {
                     <Text style={styles.decryptingText}>{'\u23F3'} Decrypting with your private key...</Text>
                     <View style={styles.progressBar}>
                       <LinearGradient
-                        colors={['#4A9FFF', '#7C3AED']}
+                        colors={[colors.accent, colors.purple]}
                         start={{ x: 0, y: 0 }}
                         end={{ x: 1, y: 0 }}
                         style={styles.progressFill}
@@ -356,7 +365,7 @@ export default function EmailBridgeScreen() {
 }
 
 // ── Styles ─────────────────────────────────────────────────────
-const styles = StyleSheet.create({
+const makeStyles = (c: Palette) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#FFFFFF',
@@ -379,13 +388,13 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#0D1B3E',
+    backgroundColor: c.card,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
   },
   backArrow: {
-    color: '#4A9FFF',
+    color: c.accent,
     fontSize: 20,
     fontWeight: '700',
   },
@@ -396,7 +405,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   encBadge: {
-    backgroundColor: '#0D2847',
+    backgroundColor: c.card,
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 5,
@@ -404,7 +413,7 @@ const styles = StyleSheet.create({
     borderColor: '#4A9FFF33',
   },
   encBadgeText: {
-    color: '#4A9FFF',
+    color: c.accent,
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 0.5,
@@ -418,7 +427,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 20,
     borderWidth: 1,
-    borderColor: '#1A2A4A',
+    borderColor: c.border,
   },
   infoIcon: {
     fontSize: 24,
@@ -445,7 +454,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   countBadge: {
-    backgroundColor: '#4A9FFF',
+    backgroundColor: c.accent,
     borderRadius: 10,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -465,7 +474,7 @@ const styles = StyleSheet.create({
     padding: 18,
     marginBottom: 24,
     borderWidth: 1,
-    borderColor: '#1A2A4A',
+    borderColor: c.border,
   },
   inputGroup: {
     marginBottom: 14,
@@ -479,14 +488,14 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
   },
   input: {
-    backgroundColor: '#0D1B3E',
+    backgroundColor: c.card,
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
     color: '#000000',
     fontSize: 15,
     borderWidth: 1,
-    borderColor: '#1A2A4A',
+    borderColor: c.border,
   },
   bodyInput: {
     minHeight: 100,
@@ -511,7 +520,7 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#1A2A4A',
+    borderColor: c.border,
   },
   emailHeader: {
     flexDirection: 'row',
@@ -560,7 +569,7 @@ const styles = StyleSheet.create({
     borderColor: '#7C3AED44',
   },
   encryptedTagText: {
-    color: '#7C3AED',
+    color: c.purple,
     fontSize: 10,
     fontWeight: '700',
   },
@@ -600,7 +609,7 @@ const styles = StyleSheet.create({
     maxHeight: '85%',
     paddingBottom: 30,
     borderWidth: 1,
-    borderColor: '#1A2A4A',
+    borderColor: c.border,
     borderBottomWidth: 0,
   },
   modalHeader: {
@@ -611,7 +620,7 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     paddingBottom: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#1A2A4A',
+    borderBottomColor: c.border,
   },
   modalTitle: {
     color: '#000000',
@@ -645,18 +654,18 @@ const styles = StyleSheet.create({
   },
   modalDivider: {
     height: 1,
-    backgroundColor: '#1A2A4A',
+    backgroundColor: c.card,
     marginVertical: 16,
   },
 
   // Encrypted block
   encryptedBlock: {
-    backgroundColor: '#0D1B3E',
+    backgroundColor: c.card,
     borderRadius: 14,
     padding: 20,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#1A2A4A',
+    borderColor: c.border,
   },
   encryptedBlockIcon: {
     fontSize: 36,
@@ -681,7 +690,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   decryptingText: {
-    color: '#4A9FFF',
+    color: c.accent,
     fontSize: 15,
     fontWeight: '600',
     marginBottom: 14,
@@ -690,7 +699,7 @@ const styles = StyleSheet.create({
     width: '80%',
     height: 4,
     borderRadius: 2,
-    backgroundColor: '#1A2A4A',
+    backgroundColor: c.card,
     overflow: 'hidden',
   },
   progressFill: {
@@ -714,7 +723,7 @@ const styles = StyleSheet.create({
     borderColor: '#05966944',
   },
   decryptedBadgeText: {
-    color: '#10B981',
+    color: c.primary,
     fontSize: 13,
     fontWeight: '600',
   },
