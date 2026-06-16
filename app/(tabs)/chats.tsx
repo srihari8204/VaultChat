@@ -12,7 +12,8 @@ import {
   StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
-import { Aurora } from '../../constants/theme';
+import { type Palette } from '../../constants/theme';
+import { useTheme } from '../../lib/theme';
 import { Avatar } from '../../components/ui';
 import { getAccessToken } from '../../lib/api';
 import {
@@ -32,8 +33,15 @@ const FOLDERS: { id: FolderId; label: string }[] = [
   { id: 'archive', label: 'Archive' },
 ];
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function ChatsScreen() {
   const router = useRouter();
+  const { colors } = useTheme();
+  const S = useS();
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -161,7 +169,7 @@ export default function ChatsScreen() {
   }, [visibleChats, folder]);
 
   if (loading) {
-    return <View style={[S.screen, S.center]}><ActivityIndicator color={Aurora.primary} size="large" /></View>;
+    return <View style={[S.screen, S.center]}><ActivityIndicator color={colors.primary} size="large" /></View>;
   }
 
   return (
@@ -226,7 +234,7 @@ export default function ChatsScreen() {
           )}
           ItemSeparatorComponent={() => <View style={S.separator} />}
           contentContainerStyle={{ paddingBottom: 110 }}
-          refreshControl={<RefreshControl tintColor={Aurora.primary} refreshing={refreshing} onRefresh={onRefresh} />}
+          refreshControl={<RefreshControl tintColor={colors.primary} refreshing={refreshing} onRefresh={onRefresh} />}
           removeClippedSubviews
           maxToRenderPerBatch={12}
           windowSize={11}
@@ -247,6 +255,8 @@ function ChatRow({
   chat: ChatSummary; authHeader: string | null; draft?: string;
   onPress: () => void; onPin: () => void; onMute: () => void; onArchive: () => void; onDelete: () => void;
 }) {
+  const { colors } = useTheme();
+  const S = useS();
   const swipeRef = useRef<Swipeable>(null);
   const title = chat.type === 'direct' ? (chat.peerName || chat.name || 'Direct chat') : (chat.name || 'Group chat');
   const avatarLetter = (title.trim()[0] ?? '#').toUpperCase();
@@ -261,10 +271,10 @@ function ChatRow({
 
   const leftActions = () => (
     <View style={S.actionsRow}>
-      <TouchableOpacity style={[S.action, { backgroundColor: Aurora.primary }]} onPress={() => act(onPin)}>
+      <TouchableOpacity style={[S.action, { backgroundColor: colors.primary }]} onPress={() => act(onPin)}>
         <Text style={S.actionIcon}>📌</Text><Text style={S.actionLbl}>{chat.pinned ? 'Unpin' : 'Pin'}</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={[S.action, { backgroundColor: Aurora.purple }]} onPress={() => act(onMute)}>
+      <TouchableOpacity style={[S.action, { backgroundColor: colors.purple }]} onPress={() => act(onMute)}>
         <Text style={S.actionIcon}>{chat.muted ? '🔔' : '🔕'}</Text><Text style={S.actionLbl}>{chat.muted ? 'Unmute' : 'Mute'}</Text>
       </TouchableOpacity>
     </View>
@@ -274,7 +284,7 @@ function ChatRow({
       <TouchableOpacity style={[S.action, { backgroundColor: '#475569' }]} onPress={() => act(onArchive)}>
         <Text style={S.actionIcon}>🗄️</Text><Text style={S.actionLbl}>{chat.archived ? 'Unarchive' : 'Archive'}</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={[S.action, { backgroundColor: Aurora.danger }]} onPress={() => act(onDelete)}>
+      <TouchableOpacity style={[S.action, { backgroundColor: colors.danger }]} onPress={() => act(onDelete)}>
         <Text style={S.actionIcon}>🗑️</Text><Text style={S.actionLbl}>Delete</Text>
       </TouchableOpacity>
     </View>
@@ -324,51 +334,51 @@ function formatRelative(iso: string): string {
   } catch { return ''; }
 }
 
-const S = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: Aurora.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen: { flex: 1, backgroundColor: c.bg },
   center: { justifyContent: 'center', alignItems: 'center' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 56, paddingBottom: 12 },
-  title: { color: Aurora.text, fontSize: 28, fontWeight: '800' },
-  headerBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: Aurora.surface, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: Aurora.border },
+  title: { color: c.text, fontSize: 28, fontWeight: '800' },
+  headerBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.border },
   headerBtnTxt: { fontSize: 17 },
   errorBar: { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.4)', borderWidth: 1, marginHorizontal: 16, padding: 10, borderRadius: 10 },
-  errorTxt: { color: Aurora.danger, fontSize: 12 },
+  errorTxt: { color: c.danger, fontSize: 12 },
 
-  emptyTitle: { color: Aurora.text, fontSize: 18, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
-  emptySub: { color: Aurora.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 24 },
-  emptyBtn: { backgroundColor: Aurora.primary, paddingHorizontal: 28, paddingVertical: 12, borderRadius: 24 },
+  emptyTitle: { color: c.text, fontSize: 18, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
+  emptySub: { color: c.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 24 },
+  emptyBtn: { backgroundColor: c.primary, paddingHorizontal: 28, paddingVertical: 12, borderRadius: 24 },
   emptyBtnTxt: { color: '#04130D', fontWeight: '800', fontSize: 14 },
 
   folderRow: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 8, gap: 8 },
-  folderChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 18, backgroundColor: Aurora.surface, borderWidth: 1, borderColor: Aurora.border },
-  folderChipActive: { backgroundColor: Aurora.primary, borderColor: Aurora.primary },
-  folderTxt: { color: Aurora.textDim, fontSize: 13, fontWeight: '600' },
+  folderChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 18, backgroundColor: c.surface, borderWidth: 1, borderColor: c.border },
+  folderChipActive: { backgroundColor: c.primary, borderColor: c.primary },
+  folderTxt: { color: c.textDim, fontSize: 13, fontWeight: '600' },
   folderTxtActive: { color: '#04130D' },
-  folderCount: { color: Aurora.textDim, fontSize: 11, fontWeight: '700', backgroundColor: Aurora.surface, paddingHorizontal: 6, borderRadius: 8, overflow: 'hidden', minWidth: 18, textAlign: 'center' },
-  folderCountActive: { color: Aurora.primary, backgroundColor: '#04130D' },
+  folderCount: { color: c.textDim, fontSize: 11, fontWeight: '700', backgroundColor: c.surface, paddingHorizontal: 6, borderRadius: 8, overflow: 'hidden', minWidth: 18, textAlign: 'center' },
+  folderCountActive: { color: c.primary, backgroundColor: '#04130D' },
 
-  sectionHeader: { color: Aurora.textDim, fontSize: 12, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase', paddingHorizontal: 20, paddingTop: 14, paddingBottom: 6, backgroundColor: Aurora.bg },
-  separator: { height: 0.5, backgroundColor: Aurora.separator, marginLeft: 82 },
+  sectionHeader: { color: c.textDim, fontSize: 12, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase', paddingHorizontal: 20, paddingTop: 14, paddingBottom: 6, backgroundColor: c.bg },
+  separator: { height: 0.5, backgroundColor: c.separator, marginLeft: 82 },
 
-  row: { flexDirection: 'row', height: 72, paddingHorizontal: 12, alignItems: 'center', gap: 12, backgroundColor: Aurora.bg },
+  row: { flexDirection: 'row', height: 72, paddingHorizontal: 12, alignItems: 'center', gap: 12, backgroundColor: c.bg },
   avatarWrap: { width: 50, height: 50 },
-  avatar: { width: 50, height: 50, borderRadius: 25, backgroundColor: Aurora.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  avatarGroup: { backgroundColor: Aurora.accent },
+  avatar: { width: 50, height: 50, borderRadius: 25, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  avatarGroup: { backgroundColor: c.accent },
   avatarImg: { width: '100%', height: '100%' },
   avatarTxt: { color: '#04130D', fontSize: 20, fontWeight: '800' },
-  presenceDot: { position: 'absolute', right: 0, bottom: 0, width: 14, height: 14, borderRadius: 7, backgroundColor: Aurora.online, borderWidth: 2.5, borderColor: Aurora.bg },
+  presenceDot: { position: 'absolute', right: 0, bottom: 0, width: 14, height: 14, borderRadius: 7, backgroundColor: c.online, borderWidth: 2.5, borderColor: c.bg },
 
   rowBody: { flex: 1, gap: 4 },
   rowTop: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   rowPin: { fontSize: 11 },
-  rowName: { color: Aurora.text, fontSize: 16, fontWeight: '700', flexShrink: 1 },
+  rowName: { color: c.text, fontSize: 16, fontWeight: '700', flexShrink: 1 },
   rowMuted: { fontSize: 12 },
-  rowTime: { color: Aurora.textFaint, fontSize: 12, marginLeft: 'auto' },
+  rowTime: { color: c.textFaint, fontSize: 12, marginLeft: 'auto' },
   rowBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  rowPreview: { color: Aurora.textDim, fontSize: 14, flex: 1 },
-  rowPreviewUnread: { color: Aurora.text, fontWeight: '600' },
-  draftLabel: { color: Aurora.danger, fontWeight: '700' },
-  unreadBadge: { backgroundColor: Aurora.primary, borderRadius: 11, minWidth: 22, height: 22, paddingHorizontal: 7, alignItems: 'center', justifyContent: 'center' },
+  rowPreview: { color: c.textDim, fontSize: 14, flex: 1 },
+  rowPreviewUnread: { color: c.text, fontWeight: '600' },
+  draftLabel: { color: c.danger, fontWeight: '700' },
+  unreadBadge: { backgroundColor: c.primary, borderRadius: 11, minWidth: 22, height: 22, paddingHorizontal: 7, alignItems: 'center', justifyContent: 'center' },
   unreadTxt: { color: '#04130D', fontSize: 12, fontWeight: '800' },
 
   actionsRow: { flexDirection: 'row' },
@@ -376,6 +386,6 @@ const S = StyleSheet.create({
   actionIcon: { fontSize: 20 },
   actionLbl: { color: '#fff', fontSize: 11, fontWeight: '700' },
 
-  fab: { position: 'absolute', right: 20, bottom: 92, width: 58, height: 58, borderRadius: 29, backgroundColor: Aurora.primary, alignItems: 'center', justifyContent: 'center', elevation: 8, shadowColor: Aurora.primary, shadowOpacity: 0.4, shadowOffset: { width: 0, height: 4 }, shadowRadius: 10 },
+  fab: { position: 'absolute', right: 20, bottom: 92, width: 58, height: 58, borderRadius: 29, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', elevation: 8, shadowColor: c.primary, shadowOpacity: 0.4, shadowOffset: { width: 0, height: 4 }, shadowRadius: 10 },
   fabTxt: { fontSize: 22 },
 });
