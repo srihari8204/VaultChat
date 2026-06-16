@@ -12,7 +12,8 @@ import {
   StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
-import { Aurora, avatarColor } from '../../constants/theme';
+import { Aurora } from '../../constants/theme';
+import { Avatar } from '../../components/ui';
 import { getAccessToken } from '../../lib/api';
 import {
   archiveChat, attachmentUrl, listChats, muteChat, pinChat, setHidden,
@@ -283,12 +284,13 @@ function ChatRow({
     <Swipeable ref={swipeRef} renderLeftActions={leftActions} renderRightActions={rightActions} overshootLeft={false} overshootRight={false} friction={2}>
       <TouchableOpacity style={S.row} onPress={onPress} activeOpacity={0.7}>
         <View style={S.avatarWrap}>
-          <View style={[S.avatar, !showPhoto && { backgroundColor: avatarColor(chat.id || title) }]}>
-            {showPhoto
-              ? <Image source={{ uri: attachmentUrl(photoId!), headers: { Authorization: authHeader! } }} style={S.avatarImg} />
-              : <Text style={S.avatarTxt}>{avatarLetter}</Text>}
-          </View>
-          {chat.type === 'direct' && chat.peerOnline && <View style={S.presenceDot} />}
+          <Avatar
+            uri={showPhoto ? attachmentUrl(photoId!) : null}
+            headers={authHeader ? { Authorization: authHeader } : undefined}
+            name={title}
+            size={50}
+            presence={chat.type === 'direct' && chat.peerOnline ? 'online' : null}
+          />
         </View>
 
         <View style={S.rowBody}>
