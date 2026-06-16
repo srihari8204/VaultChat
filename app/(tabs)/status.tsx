@@ -252,7 +252,7 @@ const CARD_BG = '#161A22';
 const BORDER  = '#1F2937';
 const TEXT    = '#E5E7EB';
 const SUBTLE  = '#9CA3AF';
-const ACCENT  = '#6C63FF';
+const ACCENT  = '#10B981'; // brand emerald (was off-system #6C63FF)
 const DANGER  = '#EF4444';
 
 const S = StyleSheet.create({
