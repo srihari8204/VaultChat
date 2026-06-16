@@ -8,17 +8,25 @@
 // provisioned.
 
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState , useMemo} from 'react';
 import { FlatList, StyleSheet, Text, TouchableOpacity, View, ActivityIndicator, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Aurora } from '../constants/theme';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { getChat, attachmentUrl, type ChatMember } from '../lib/chatService';
 import { getAccessToken } from '../lib/api';
 import { getCurrentUserAsync } from './(constants)/authService';
 
 type CallMode = 'voice' | 'video';
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function GroupCallsScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const { chatId, groupName, mode: modeParam } = useLocalSearchParams<{ chatId: string; groupName: string; mode?: string }>();
   const [mode, setMode] = useState<CallMode>((modeParam as CallMode) || 'voice');
@@ -55,7 +63,7 @@ export default function GroupCallsScreen() {
       <Stack.Screen options={{ headerShown: false }} />
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
-          <Ionicons name="arrow-back" size={24} color={Aurora.text} />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.title} numberOfLines={1}>{(groupName as string) || 'Group'} · Call</Text>
         <View style={{ width: 40 }} />
@@ -64,19 +72,19 @@ export default function GroupCallsScreen() {
       <View style={s.modeRow}>
         {(['voice', 'video'] as const).map(mo => (
           <TouchableOpacity key={mo} style={[s.modeBtn, mode === mo && s.modeBtnActive]} onPress={() => setMode(mo)}>
-            <Ionicons name={mo === 'voice' ? 'call' : 'videocam'} size={18} color={mode === mo ? '#04130D' : Aurora.textDim} />
+            <Ionicons name={mo === 'voice' ? 'call' : 'videocam'} size={18} color={mode === mo ? '#04130D' : colors.textDim} />
             <Text style={[s.modeTxt, mode === mo && s.modeTxtActive]}>{mo === 'voice' ? 'Voice' : 'Video'}</Text>
           </TouchableOpacity>
         ))}
       </View>
 
       <View style={s.notice}>
-        <Ionicons name="information-circle-outline" size={18} color={Aurora.accent} />
+        <Ionicons name="information-circle-outline" size={18} color={colors.accent} />
         <Text style={s.noticeTxt}>Everyone-at-once group calls need the media server (rolling out). Tap a member to start a 1:1 call now.</Text>
       </View>
 
       {loading ? (
-        <ActivityIndicator color={Aurora.primary} style={{ marginTop: 30 }} />
+        <ActivityIndicator color={colors.primary} style={{ marginTop: 30 }} />
       ) : (
         <FlatList
           data={members}
@@ -96,7 +104,7 @@ export default function GroupCallsScreen() {
                   <Text style={s.name} numberOfLines={1}>{name}</Text>
                   <Text style={s.sub}>{item.online ? 'Online' : 'Tap to call'}</Text>
                 </View>
-                <View style={s.callBtn}><Ionicons name={mode === 'voice' ? 'call' : 'videocam'} size={18} color={Aurora.primary} /></View>
+                <View style={s.callBtn}><Ionicons name={mode === 'voice' ? 'call' : 'videocam'} size={18} color={colors.primary} /></View>
               </TouchableOpacity>
             );
           }}
@@ -107,24 +115,24 @@ export default function GroupCallsScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Aurora.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingHorizontal: 16, paddingBottom: 8, gap: 12 },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  title: { color: Aurora.text, fontSize: 18, fontWeight: '800', flex: 1 },
-  modeRow: { flexDirection: 'row', gap: 8, marginHorizontal: 16, backgroundColor: Aurora.surface, borderRadius: 12, padding: 3, borderWidth: 1, borderColor: Aurora.border },
+  title: { color: c.text, fontSize: 18, fontWeight: '800', flex: 1 },
+  modeRow: { flexDirection: 'row', gap: 8, marginHorizontal: 16, backgroundColor: c.surface, borderRadius: 12, padding: 3, borderWidth: 1, borderColor: c.border },
   modeBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 10 },
-  modeBtnActive: { backgroundColor: Aurora.primary },
-  modeTxt: { color: Aurora.textDim, fontSize: 14, fontWeight: '700' },
+  modeBtnActive: { backgroundColor: c.primary },
+  modeTxt: { color: c.textDim, fontSize: 14, fontWeight: '700' },
   modeTxtActive: { color: '#04130D' },
   notice: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 16, marginTop: 12, padding: 12, borderRadius: 12, backgroundColor: 'rgba(6,182,212,0.1)', borderWidth: 1, borderColor: 'rgba(6,182,212,0.3)' },
-  noticeTxt: { flex: 1, color: Aurora.textDim, fontSize: 12, lineHeight: 17 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: Aurora.card, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: Aurora.border },
-  avatar: { width: 46, height: 46, borderRadius: 23, backgroundColor: Aurora.surfaceSolid, alignItems: 'center', justifyContent: 'center', overflow: 'visible' },
+  noticeTxt: { flex: 1, color: c.textDim, fontSize: 12, lineHeight: 17 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: c.card, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: c.border },
+  avatar: { width: 46, height: 46, borderRadius: 23, backgroundColor: c.surfaceSolid, alignItems: 'center', justifyContent: 'center', overflow: 'visible' },
   avatarImg: { width: 46, height: 46, borderRadius: 23 },
-  avatarTxt: { color: Aurora.accent, fontSize: 18, fontWeight: '800' },
-  onlineDot: { position: 'absolute', right: 0, bottom: 0, width: 12, height: 12, borderRadius: 6, backgroundColor: Aurora.online, borderWidth: 2, borderColor: Aurora.card },
-  name: { color: Aurora.text, fontSize: 15, fontWeight: '700' },
-  sub: { color: Aurora.textDim, fontSize: 12, marginTop: 2 },
+  avatarTxt: { color: c.accent, fontSize: 18, fontWeight: '800' },
+  onlineDot: { position: 'absolute', right: 0, bottom: 0, width: 12, height: 12, borderRadius: 6, backgroundColor: c.online, borderWidth: 2, borderColor: c.card },
+  name: { color: c.text, fontSize: 15, fontWeight: '700' },
+  sub: { color: c.textDim, fontSize: 12, marginTop: 2 },
   callBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(16,185,129,0.13)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(16,185,129,0.3)' },
 });

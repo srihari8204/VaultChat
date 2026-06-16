@@ -9,12 +9,13 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState , useMemo} from 'react';
 import {
   ActivityIndicator, Alert, ScrollView, StyleSheet, Text,
   TouchableOpacity, View,
 } from 'react-native';
-import { Aurora } from '../constants/theme';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import {
   listSecurityEvents, type AuditSeverity, type SecurityEvent,
 } from '../services/security/auditChain';
@@ -26,11 +27,11 @@ const SEV_COLOR: Record<AuditSeverity, string> = {
 };
 
 const GRADE_META: Record<SecurityScore['grade'], { color: string; label: string }> = {
-  strong:  { color: Aurora.success, label: 'Strong'      },
+  strong:  { color: '#10B981', label: 'Strong'      },
   good:    { color: '#34D399',      label: 'Good'        },
   fair:    { color: '#F59E0B',      label: 'Fair'        },
   weak:    { color: '#EF4444',      label: 'Needs work'  },
-  unknown: { color: Aurora.textDim, label: 'Run a scan'  },
+  unknown: { color: '#9CA3AF', label: 'Run a scan'  },
 };
 
 function iconForType(type: string): keyof typeof Ionicons.glyphMap {
@@ -54,7 +55,14 @@ function timeAgo(ts: number): string {
   return new Date(ts).toLocaleDateString();
 }
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function SecurityGuardianScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   const router = useRouter();
   const [data, setData] = useState<SecurityScore | null>(null);
   const [events, setEvents] = useState<SecurityEvent[]>([]);
@@ -93,7 +101,7 @@ export default function SecurityGuardianScreen() {
     <View style={S.container}>
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} style={S.backBtn} hitSlop={10}>
-          <Ionicons name="chevron-back" size={26} color={Aurora.text} />
+          <Ionicons name="chevron-back" size={26} color={colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={S.headerTitle}>Security Guardian</Text>
@@ -130,7 +138,7 @@ export default function SecurityGuardianScreen() {
         <Text style={S.sectionTitle}>CHECKS</Text>
         <View style={S.card}>
           {(data?.factors ?? []).map((f, i) => {
-            const color = f.pending ? Aurora.textDim : f.ok ? Aurora.success : '#EF4444';
+            const color = f.pending ? colors.textDim : f.ok ? '#10B981' : '#EF4444';
             const icon = f.pending ? 'help-circle' : f.ok ? 'checkmark-circle' : 'close-circle';
             return (
               <View key={f.key}>
@@ -184,47 +192,47 @@ export default function SecurityGuardianScreen() {
 
         <TouchableOpacity style={S.alertsLink} onPress={() => router.push('/(tabs)/alerts')} activeOpacity={0.7}>
           <Text style={S.alertsLinkText}>View full security log</Text>
-          <Ionicons name="arrow-forward" size={15} color={Aurora.primary} />
+          <Ionicons name="arrow-forward" size={15} color={colors.primary} />
         </TouchableOpacity>
       </ScrollView>
     </View>
   );
 }
 
-const S = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Aurora.bg },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 54, paddingBottom: 14, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: Aurora.border },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 54, paddingBottom: 14, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: c.border },
   backBtn: { padding: 4 },
-  headerTitle: { color: Aurora.text, fontSize: 18, fontWeight: '800' },
-  headerSub: { color: Aurora.textDim, fontSize: 12, marginTop: 1 },
+  headerTitle: { color: c.text, fontSize: 18, fontWeight: '800' },
+  headerSub: { color: c.textDim, fontSize: 12, marginTop: 1 },
 
   hero: { alignItems: 'center', paddingVertical: 28, gap: 8 },
   ring: { width: 130, height: 130, borderRadius: 65, borderWidth: 5, justifyContent: 'center', alignItems: 'center', flexDirection: 'row' },
   scoreNum: { fontSize: 44, fontWeight: '900' },
-  scoreMax: { color: Aurora.textFaint, fontSize: 15, fontWeight: '700', marginLeft: 2, marginTop: 14 },
+  scoreMax: { color: c.textFaint, fontSize: 15, fontWeight: '700', marginLeft: 2, marginTop: 14 },
   gradeLabel: { fontSize: 18, fontWeight: '800', marginTop: 4 },
-  heroSub: { color: Aurora.textDim, fontSize: 13, textAlign: 'center', paddingHorizontal: 40, lineHeight: 19 },
+  heroSub: { color: c.textDim, fontSize: 13, textAlign: 'center', paddingHorizontal: 40, lineHeight: 19 },
 
-  scanBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginHorizontal: 16, backgroundColor: Aurora.primary, paddingVertical: 15, borderRadius: 14 },
+  scanBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginHorizontal: 16, backgroundColor: c.primary, paddingVertical: 15, borderRadius: 14 },
   scanBtnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
 
-  sectionTitle: { color: Aurora.textFaint, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginTop: 24, marginBottom: 8, marginLeft: 20 },
-  card: { marginHorizontal: 16, backgroundColor: Aurora.card, borderRadius: 16, borderWidth: 1, borderColor: Aurora.border, overflow: 'hidden' },
-  divider: { height: 1, backgroundColor: Aurora.separator, marginLeft: 16 },
+  sectionTitle: { color: c.textFaint, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginTop: 24, marginBottom: 8, marginLeft: 20 },
+  card: { marginHorizontal: 16, backgroundColor: c.card, borderRadius: 16, borderWidth: 1, borderColor: c.border, overflow: 'hidden' },
+  divider: { height: 1, backgroundColor: c.separator, marginLeft: 16 },
 
   checkRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 },
-  checkLabel: { color: Aurora.text, fontSize: 14.5, fontWeight: '700' },
-  checkDetail: { color: Aurora.textDim, fontSize: 12.5, marginTop: 2, lineHeight: 17 },
+  checkLabel: { color: c.text, fontSize: 14.5, fontWeight: '700' },
+  checkDetail: { color: c.textDim, fontSize: 12.5, marginTop: 2, lineHeight: 17 },
 
   emptyCard: { padding: 18 },
-  emptyText: { color: Aurora.textDim, fontSize: 13, lineHeight: 19, textAlign: 'center' },
+  emptyText: { color: c.textDim, fontSize: 13, lineHeight: 19, textAlign: 'center' },
 
   eventRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12 },
   eventIcon: { width: 36, height: 36, borderRadius: 11, justifyContent: 'center', alignItems: 'center' },
-  eventTitle: { color: Aurora.text, fontSize: 14, fontWeight: '700' },
-  eventDetail: { color: Aurora.textDim, fontSize: 12, marginTop: 1 },
-  eventTime: { color: Aurora.textFaint, fontSize: 11 },
+  eventTitle: { color: c.text, fontSize: 14, fontWeight: '700' },
+  eventDetail: { color: c.textDim, fontSize: 12, marginTop: 1 },
+  eventTime: { color: c.textFaint, fontSize: 11 },
 
   alertsLink: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 22 },
-  alertsLinkText: { color: Aurora.primary, fontSize: 14, fontWeight: '700' },
+  alertsLinkText: { color: c.primary, fontSize: 14, fontWeight: '700' },
 });

@@ -11,13 +11,14 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState , useMemo} from 'react';
 import {
   ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView,
   StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
-import { Aurora } from '../constants/theme';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import {
   addMonitor, checkEmailBreaches, checkPasswordPwned, fmtCount, listMonitors,
   recordMonitorScan, removeMonitor, type Breach, type BreachMonitor,
@@ -25,7 +26,14 @@ import {
 import { getMyProfile } from '../lib/chatService';
 import { appendSecurityEvent } from '../services/security/auditChain';
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function BreachGuardScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   const router = useRouter();
 
   const [monitors, setMonitors] = useState<BreachMonitor[]>([]);
@@ -161,7 +169,7 @@ export default function BreachGuardScreen() {
     <KeyboardAvoidingView style={S.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} style={S.backBtn} hitSlop={10}>
-          <Ionicons name="chevron-back" size={26} color={Aurora.text} />
+          <Ionicons name="chevron-back" size={26} color={colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={S.title}>Breach Guard</Text>
@@ -183,7 +191,7 @@ export default function BreachGuardScreen() {
               value={keyInput}
               onChangeText={setKeyInput}
               placeholder="Paste HIBP API key"
-              placeholderTextColor={Aurora.textFaint}
+              placeholderTextColor={colors.textFaint}
               autoCapitalize="none"
               secureTextEntry
             />
@@ -193,7 +201,7 @@ export default function BreachGuardScreen() {
           </View>
         ) : (
           <View style={[S.card, S.keyOkRow]}>
-            <Ionicons name="key" size={18} color={Aurora.success} />
+            <Ionicons name="key" size={18} color={colors.success} />
             <Text style={S.keyOkText}>HIBP key set</Text>
             <TouchableOpacity onPress={() => setHibpKey('')}>
               <Text style={S.changeKey}>Change</Text>
@@ -210,7 +218,7 @@ export default function BreachGuardScreen() {
               value={emailInput}
               onChangeText={setEmailInput}
               placeholder="email@example.com"
-              placeholderTextColor={Aurora.textFaint}
+              placeholderTextColor={colors.textFaint}
               autoCapitalize="none"
               keyboardType="email-address"
             />
@@ -220,14 +228,14 @@ export default function BreachGuardScreen() {
           </View>
 
           {loading ? (
-            <ActivityIndicator color={Aurora.primary} style={{ marginVertical: 16 }} />
+            <ActivityIndicator color={colors.primary} style={{ marginVertical: 16 }} />
           ) : monitors.length === 0 ? (
             <Text style={S.emptyText}>No emails monitored yet. Add one above to start watching for breaches.</Text>
           ) : (
             monitors.map((m, i) => (
               <View key={m.id}>
                 <TouchableOpacity style={S.monitorRow} onPress={() => showFindings(m)} activeOpacity={0.7}>
-                  <Ionicons name="mail" size={18} color={Aurora.textDim} />
+                  <Ionicons name="mail" size={18} color={colors.textDim} />
                   <View style={{ flex: 1 }}>
                     <Text style={S.monitorEmail} numberOfLines={1}>{m.target}</Text>
                     <Text style={S.monitorMeta}>
@@ -237,10 +245,10 @@ export default function BreachGuardScreen() {
                   {m.breachCount > 0 ? (
                     <View style={S.breachBadge}><Text style={S.breachBadgeText}>{m.breachCount}</Text></View>
                   ) : m.lastCheckedAt ? (
-                    <Ionicons name="shield-checkmark" size={18} color={Aurora.success} />
+                    <Ionicons name="shield-checkmark" size={18} color={colors.success} />
                   ) : null}
                   <TouchableOpacity onPress={() => onRemove(m)} hitSlop={8} style={{ paddingLeft: 6 }}>
-                    <Ionicons name="trash-outline" size={18} color={Aurora.textFaint} />
+                    <Ionicons name="trash-outline" size={18} color={colors.textFaint} />
                   </TouchableOpacity>
                 </TouchableOpacity>
                 {i < monitors.length - 1 && <View style={S.divider} />}
@@ -273,7 +281,7 @@ export default function BreachGuardScreen() {
               value={pw}
               onChangeText={(t) => { setPw(t); setPwResult(null); }}
               placeholder="Enter a password to check"
-              placeholderTextColor={Aurora.textFaint}
+              placeholderTextColor={colors.textFaint}
               autoCapitalize="none"
               secureTextEntry
             />
@@ -282,7 +290,7 @@ export default function BreachGuardScreen() {
             </TouchableOpacity>
           </View>
           {pwResult != null && (
-            <Text style={[S.pwResult, { color: pwResult > 0 ? Aurora.danger : Aurora.success }]}>
+            <Text style={[S.pwResult, { color: pwResult > 0 ? colors.danger : colors.success }]}>
               {pwResult > 0
                 ? `⚠ Found in ${fmtCount(pwResult)} breaches — do not use this password.`
                 : '✓ Not found in any known breach.'}
@@ -294,38 +302,38 @@ export default function BreachGuardScreen() {
   );
 }
 
-const S = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Aurora.bg },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 54, paddingBottom: 14, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: Aurora.border },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 54, paddingBottom: 14, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: c.border },
   backBtn: { padding: 4 },
-  title: { color: Aurora.text, fontSize: 18, fontWeight: '800' },
-  subtitle: { color: Aurora.textDim, fontSize: 12, marginTop: 1 },
+  title: { color: c.text, fontSize: 18, fontWeight: '800' },
+  subtitle: { color: c.textDim, fontSize: 12, marginTop: 1 },
 
-  sectionTitle: { color: Aurora.textFaint, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginTop: 22, marginBottom: 8, marginLeft: 20 },
-  card: { marginHorizontal: 16, marginTop: 12, backgroundColor: Aurora.card, borderRadius: 16, borderWidth: 1, borderColor: Aurora.border, padding: 14 },
-  cardTitle: { color: Aurora.text, fontSize: 15, fontWeight: '700', marginBottom: 6 },
-  cardSub: { color: Aurora.textDim, fontSize: 12.5, lineHeight: 18, marginBottom: 10 },
+  sectionTitle: { color: c.textFaint, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginTop: 22, marginBottom: 8, marginLeft: 20 },
+  card: { marginHorizontal: 16, marginTop: 12, backgroundColor: c.card, borderRadius: 16, borderWidth: 1, borderColor: c.border, padding: 14 },
+  cardTitle: { color: c.text, fontSize: 15, fontWeight: '700', marginBottom: 6 },
+  cardSub: { color: c.textDim, fontSize: 12.5, lineHeight: 18, marginBottom: 10 },
 
-  input: { backgroundColor: Aurora.surface, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11, color: Aurora.text, fontSize: 14, borderWidth: 1, borderColor: Aurora.border, marginBottom: 10 },
-  primaryBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: Aurora.primary, paddingVertical: 13, borderRadius: 12 },
+  input: { backgroundColor: c.surface, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11, color: c.text, fontSize: 14, borderWidth: 1, borderColor: c.border, marginBottom: 10 },
+  primaryBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: c.primary, paddingVertical: 13, borderRadius: 12 },
   primaryBtnText: { color: '#fff', fontWeight: '800', fontSize: 14.5 },
   btnDim: { opacity: 0.45 },
   scanBtn: { marginHorizontal: 16, marginTop: 16 },
 
   keyOkRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  keyOkText: { color: Aurora.text, fontSize: 14, fontWeight: '600', flex: 1 },
-  changeKey: { color: Aurora.primary, fontSize: 13, fontWeight: '700' },
+  keyOkText: { color: c.text, fontSize: 14, fontWeight: '600', flex: 1 },
+  changeKey: { color: c.primary, fontSize: 13, fontWeight: '700' },
 
   addRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  addBtn: { width: 44, height: 44, borderRadius: 12, backgroundColor: Aurora.primary, alignItems: 'center', justifyContent: 'center' },
+  addBtn: { width: 44, height: 44, borderRadius: 12, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
 
-  emptyText: { color: Aurora.textDim, fontSize: 13, lineHeight: 19, paddingVertical: 12, textAlign: 'center' },
-  divider: { height: 1, backgroundColor: Aurora.separator, marginVertical: 2 },
+  emptyText: { color: c.textDim, fontSize: 13, lineHeight: 19, paddingVertical: 12, textAlign: 'center' },
+  divider: { height: 1, backgroundColor: c.separator, marginVertical: 2 },
 
   monitorRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 },
-  monitorEmail: { color: Aurora.text, fontSize: 14, fontWeight: '600' },
-  monitorMeta: { color: Aurora.textFaint, fontSize: 11.5, marginTop: 2 },
-  breachBadge: { backgroundColor: Aurora.danger, borderRadius: 11, minWidth: 22, height: 22, paddingHorizontal: 7, alignItems: 'center', justifyContent: 'center' },
+  monitorEmail: { color: c.text, fontSize: 14, fontWeight: '600' },
+  monitorMeta: { color: c.textFaint, fontSize: 11.5, marginTop: 2 },
+  breachBadge: { backgroundColor: c.danger, borderRadius: 11, minWidth: 22, height: 22, paddingHorizontal: 7, alignItems: 'center', justifyContent: 'center' },
   breachBadgeText: { color: '#fff', fontSize: 12, fontWeight: '800' },
 
   pwResult: { fontSize: 13, fontWeight: '600', marginTop: 12, lineHeight: 18 },

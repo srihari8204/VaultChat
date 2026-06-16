@@ -4,7 +4,7 @@
 // pagination), formats it on-device, and shares via the system sheet.
 // Nothing leaves the device except through the user-initiated share.
 
-import React, { useState } from 'react';
+import React, { useState , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, StatusBar, Alert, ActivityIndicator, Share,
 } from 'react-native';
@@ -12,13 +12,21 @@ import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import { Aurora } from '../constants/theme';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { getMessages, type Message } from '../lib/chatService';
 import { getCurrentUserAsync } from './(constants)/authService';
 
 const PAGE = 200;
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function ChatExportScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const params = useLocalSearchParams<{ chatId?: string; id?: string; peerName?: string }>();
   const chatId = String(params.chatId ?? params.id ?? '');
@@ -143,7 +151,7 @@ export default function ChatExportScreen() {
 
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
-          <Ionicons name="arrow-back" size={24} color={Aurora.text} />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.headerTitle}>Export Chat</Text>
         <View style={{ width: 40 }} />
@@ -151,7 +159,7 @@ export default function ChatExportScreen() {
 
       <View style={s.body}>
         <View style={s.infoCard}>
-          <Ionicons name="share-outline" size={26} color={Aurora.primary} />
+          <Ionicons name="share-outline" size={26} color={colors.primary} />
           <View style={{ flex: 1, marginLeft: 12 }}>
             <Text style={s.infoTitle}>Export {peerName}</Text>
             <Text style={s.infoDesc}>Save your conversation as a file you can share or keep as backup.</Text>
@@ -159,7 +167,7 @@ export default function ChatExportScreen() {
         </View>
 
         <TouchableOpacity style={s.exportBtn} onPress={exportAsText} disabled={exporting} activeOpacity={0.8}>
-          <View style={s.exportIcon}><Ionicons name="document-text-outline" size={22} color={Aurora.accent} /></View>
+          <View style={s.exportIcon}><Ionicons name="document-text-outline" size={22} color={colors.accent} /></View>
           <View style={{ flex: 1 }}>
             <Text style={s.exportTitle}>Export as Text</Text>
             <Text style={s.exportDesc}>Plain text file (.txt) — lightweight, universal</Text>
@@ -167,7 +175,7 @@ export default function ChatExportScreen() {
         </TouchableOpacity>
 
         <TouchableOpacity style={s.exportBtn} onPress={exportAsHTML} disabled={exporting} activeOpacity={0.8}>
-          <View style={s.exportIcon}><Ionicons name="globe-outline" size={22} color={Aurora.accent} /></View>
+          <View style={s.exportIcon}><Ionicons name="globe-outline" size={22} color={colors.accent} /></View>
           <View style={{ flex: 1 }}>
             <Text style={s.exportTitle}>Export as HTML</Text>
             <Text style={s.exportDesc}>Styled web page (.html) — looks like a real chat</Text>
@@ -176,7 +184,7 @@ export default function ChatExportScreen() {
 
         {exporting && (
           <View style={s.progressBox}>
-            <ActivityIndicator color={Aurora.primary} />
+            <ActivityIndicator color={colors.primary} />
             <Text style={s.progressTxt}>{progress}</Text>
             {msgCount > 0 && <Text style={s.progressCount}>{msgCount} messages</Text>}
           </View>
@@ -191,23 +199,23 @@ export default function ChatExportScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Aurora.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingHorizontal: 16, paddingBottom: 8 },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  headerTitle: { color: Aurora.text, fontSize: 18, fontWeight: '700' },
+  headerTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
   body: { flex: 1, padding: 16 },
-  infoCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: Aurora.card, borderRadius: 14, padding: 16, marginBottom: 20, borderWidth: 1, borderColor: Aurora.border },
-  infoTitle: { color: Aurora.text, fontSize: 16, fontWeight: '800' },
-  infoDesc: { color: Aurora.textDim, fontSize: 12, marginTop: 2, lineHeight: 18 },
-  exportBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: Aurora.card, borderRadius: 14, padding: 16, marginBottom: 10, borderWidth: 1, borderColor: Aurora.border },
-  exportIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: Aurora.surface, justifyContent: 'center', alignItems: 'center', marginRight: 14 },
-  exportTitle: { color: Aurora.text, fontSize: 15, fontWeight: '700' },
-  exportDesc: { color: Aurora.textDim, fontSize: 12, marginTop: 2 },
+  infoCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, borderRadius: 14, padding: 16, marginBottom: 20, borderWidth: 1, borderColor: c.border },
+  infoTitle: { color: c.text, fontSize: 16, fontWeight: '800' },
+  infoDesc: { color: c.textDim, fontSize: 12, marginTop: 2, lineHeight: 18 },
+  exportBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, borderRadius: 14, padding: 16, marginBottom: 10, borderWidth: 1, borderColor: c.border },
+  exportIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: c.surface, justifyContent: 'center', alignItems: 'center', marginRight: 14 },
+  exportTitle: { color: c.text, fontSize: 15, fontWeight: '700' },
+  exportDesc: { color: c.textDim, fontSize: 12, marginTop: 2 },
   progressBox: { alignItems: 'center', padding: 20, marginTop: 10 },
-  progressTxt: { color: Aurora.textDim, fontSize: 13, marginTop: 8 },
-  progressCount: { color: Aurora.textFaint, fontSize: 11, marginTop: 4 },
+  progressTxt: { color: c.textDim, fontSize: 13, marginTop: 8 },
+  progressCount: { color: c.textFaint, fontSize: 11, marginTop: 4 },
   noteBox: { marginTop: 24, backgroundColor: 'rgba(239,68,68,0.06)', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: 'rgba(239,68,68,0.22)' },
-  noteTitle: { color: Aurora.danger, fontSize: 12, fontWeight: '800', marginBottom: 4 },
-  noteDesc: { color: Aurora.textDim, fontSize: 11, lineHeight: 18 },
+  noteTitle: { color: c.danger, fontSize: 12, fontWeight: '800', marginBottom: 4 },
+  noteDesc: { color: c.textDim, fontSize: 11, lineHeight: 18 },
 });

@@ -15,12 +15,13 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState , useMemo} from 'react';
 import {
   ActivityIndicator, Alert, Platform, ScrollView, StatusBar, Switch,
   StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
-import { Aurora } from '../constants/theme';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { getCurrentUserAsync } from './(constants)/authService';
 import {
   getChat, removeChatMember, setMemberRole, updateChat,
@@ -44,12 +45,19 @@ const SLOW_OPTS = [
 ];
 const ROLE_COLORS: Record<Role, string> = {
   owner: '#F59E0B',
-  admin: Aurora.accent,
-  member: Aurora.textDim,
+  admin: '#06B6D4',
+  member: '#9CA3AF',
 };
 const ROLE_LABELS: Record<Role, string> = { owner: 'Owner', admin: 'Admin', member: 'Member' };
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function GroupAdminScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const { chatId, groupName: initialName } = useLocalSearchParams<{ chatId: string; groupName: string }>();
 
@@ -219,7 +227,7 @@ export default function GroupAdminScreen() {
     return (
       <View style={[s.container, s.center]}>
         <Stack.Screen options={{ headerShown: false }} />
-        <ActivityIndicator size="large" color={Aurora.primary} />
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
@@ -232,7 +240,7 @@ export default function GroupAdminScreen() {
 
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
-          <Ionicons name="arrow-back" size={24} color={Aurora.text} />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.headerTitle}>Group Admin</Text>
         <View style={{ width: 40 }} />
@@ -254,7 +262,7 @@ export default function GroupAdminScreen() {
             value={groupName}
             onChangeText={setGroupName}
             editable={isAdmin}
-            placeholderTextColor={Aurora.textFaint}
+            placeholderTextColor={colors.textFaint}
             placeholder="Group name"
             maxLength={100}
           />
@@ -312,7 +320,7 @@ export default function GroupAdminScreen() {
                 <Text style={s.switchSub}>Invite-link joins wait for an admin.</Text>
               </View>
               <Switch value={approve} onValueChange={toggleApprove}
-                trackColor={{ false: Aurora.surface, true: 'rgba(16,185,129,0.5)' }} thumbColor={approve ? Aurora.primary : '#888'} />
+                trackColor={{ false: colors.surface, true: 'rgba(16,185,129,0.5)' }} thumbColor={approve ? colors.primary : '#888'} />
             </View>
 
             <View style={s.switchRow}>
@@ -321,7 +329,7 @@ export default function GroupAdminScreen() {
                 <Text style={s.switchSub}>Members &lt; 24h old can’t post links.</Text>
               </View>
               <Switch value={antiSpam} onValueChange={toggleAntiSpam}
-                trackColor={{ false: Aurora.surface, true: 'rgba(16,185,129,0.5)' }} thumbColor={antiSpam ? Aurora.primary : '#888'} />
+                trackColor={{ false: colors.surface, true: 'rgba(16,185,129,0.5)' }} thumbColor={antiSpam ? colors.primary : '#888'} />
             </View>
 
             <Text style={s.hint}>Admins are exempt from these limits.</Text>
@@ -339,7 +347,7 @@ export default function GroupAdminScreen() {
                 <View style={s.avatar}><Text style={s.avatarText}>{(r.name || '?').charAt(0).toUpperCase()}</Text></View>
                 <Text style={[s.memberName, { flex: 1 }]} numberOfLines={1}>{r.name || r.userId.slice(0, 8)}</Text>
                 <TouchableOpacity style={s.reqApprove} onPress={() => approveReq(r.userId)}><Text style={s.reqApproveTxt}>Approve</Text></TouchableOpacity>
-                <TouchableOpacity style={s.reqReject} onPress={() => rejectReq(r.userId)} hitSlop={6}><Ionicons name="close" size={18} color={Aurora.danger} /></TouchableOpacity>
+                <TouchableOpacity style={s.reqReject} onPress={() => rejectReq(r.userId)} hitSlop={6}><Ionicons name="close" size={18} color={colors.danger} /></TouchableOpacity>
               </View>
             ))}
           </View>
@@ -371,7 +379,7 @@ export default function GroupAdminScreen() {
                   </View>
                   {canManage && (
                     <TouchableOpacity onPress={() => removeMember(m)} style={s.removeBtn} hitSlop={8}>
-                      <Ionicons name="close-circle" size={22} color={Aurora.danger} />
+                      <Ionicons name="close-circle" size={22} color={colors.danger} />
                     </TouchableOpacity>
                   )}
                 </TouchableOpacity>
@@ -385,7 +393,7 @@ export default function GroupAdminScreen() {
                         onPress={() => changeRole(m, r)}
                       >
                         <View style={[s.roleDot, { backgroundColor: ROLE_COLORS[r] }]} />
-                        <Text style={[s.roleOptionText, role === r && { color: Aurora.accent }]}>
+                        <Text style={[s.roleOptionText, role === r && { color: colors.accent }]}>
                           {role === r ? `${ROLE_LABELS[r]} ✓` : `Make ${ROLE_LABELS[r]}`}
                         </Text>
                       </TouchableOpacity>
@@ -404,73 +412,73 @@ export default function GroupAdminScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Aurora.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
   center: { justifyContent: 'center', alignItems: 'center' },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingTop: TOP + 8, paddingHorizontal: 16, paddingBottom: 12,
   },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  headerTitle: { fontSize: 18, fontWeight: '700', color: Aurora.text },
+  headerTitle: { fontSize: 18, fontWeight: '700', color: c.text },
 
   banner: { marginHorizontal: 16, marginBottom: 8, padding: 10, borderRadius: 10, borderWidth: 1 },
   bannerOk: { backgroundColor: 'rgba(16,185,129,0.12)', borderColor: 'rgba(16,185,129,0.4)' },
   bannerErr: { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.4)' },
-  bannerTxt: { color: Aurora.text, fontSize: 12 },
+  bannerTxt: { color: c.text, fontSize: 12 },
 
   section: {
-    marginHorizontal: 16, marginTop: 16, backgroundColor: Aurora.card,
-    borderRadius: 16, padding: 16, borderWidth: 1, borderColor: Aurora.border,
+    marginHorizontal: 16, marginTop: 16, backgroundColor: c.card,
+    borderRadius: 16, padding: 16, borderWidth: 1, borderColor: c.border,
   },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: Aurora.text, marginBottom: 12 },
-  label: { fontSize: 13, color: Aurora.textDim, marginTop: 4, marginBottom: 4 },
-  hint: { fontSize: 12, color: Aurora.textDim, marginTop: 8 },
+  sectionTitle: { fontSize: 16, fontWeight: '700', color: c.text, marginBottom: 12 },
+  label: { fontSize: 13, color: c.textDim, marginTop: 4, marginBottom: 4 },
+  hint: { fontSize: 12, color: c.textDim, marginTop: 8 },
   input: {
-    backgroundColor: Aurora.surface, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10,
-    color: Aurora.text, fontSize: 15, borderWidth: 1, borderColor: Aurora.border,
+    backgroundColor: c.surface, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10,
+    color: c.text, fontSize: 15, borderWidth: 1, borderColor: c.border,
   },
   inputDisabled: { opacity: 0.6 },
   saveNameBtn: {
-    marginTop: 12, backgroundColor: Aurora.primary, borderRadius: 10,
+    marginTop: 12, backgroundColor: c.primary, borderRadius: 10,
     paddingVertical: 11, alignItems: 'center',
   },
   saveNameTxt: { color: '#04130D', fontWeight: '800', fontSize: 14 },
 
   memberRow: {
     flexDirection: 'row', alignItems: 'center', paddingVertical: 10,
-    borderBottomWidth: 0.5, borderBottomColor: Aurora.separator,
+    borderBottomWidth: 0.5, borderBottomColor: c.separator,
   },
   avatar: {
-    width: 40, height: 40, borderRadius: 20, backgroundColor: Aurora.surface,
+    width: 40, height: 40, borderRadius: 20, backgroundColor: c.surface,
     justifyContent: 'center', alignItems: 'center', marginRight: 12,
-    borderWidth: 1, borderColor: Aurora.border,
+    borderWidth: 1, borderColor: c.border,
   },
-  avatarText: { fontSize: 16, fontWeight: '700', color: Aurora.accent },
-  memberName: { fontSize: 14, fontWeight: '600', color: Aurora.text },
+  avatarText: { fontSize: 16, fontWeight: '700', color: c.accent },
+  memberName: { fontSize: 14, fontWeight: '600', color: c.text },
   roleBadgeText: { fontSize: 11, fontWeight: '700', marginTop: 2 },
   removeBtn: { padding: 6 },
 
-  ctrlLabel: { color: Aurora.textDim, fontSize: 13, marginBottom: 8 },
+  ctrlLabel: { color: c.textDim, fontSize: 13, marginBottom: 8 },
   switchRow: { flexDirection: 'row', alignItems: 'center', marginTop: 16, gap: 12 },
-  switchLabel: { color: Aurora.text, fontSize: 14, fontWeight: '600' },
-  switchSub: { color: Aurora.textDim, fontSize: 12, marginTop: 2 },
-  reqApprove: { backgroundColor: Aurora.primary, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7, marginRight: 8 },
+  switchLabel: { color: c.text, fontSize: 14, fontWeight: '600' },
+  switchSub: { color: c.textDim, fontSize: 12, marginTop: 2 },
+  reqApprove: { backgroundColor: c.primary, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7, marginRight: 8 },
   reqApproveTxt: { color: '#04130D', fontSize: 12, fontWeight: '800' },
   reqReject: { padding: 6 },
   policyRow: { flexDirection: 'row', gap: 8 },
-  policyBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center', backgroundColor: Aurora.surface, borderWidth: 1, borderColor: Aurora.border },
-  policyBtnActive: { backgroundColor: Aurora.primary, borderColor: Aurora.primary },
-  policyTxt: { color: Aurora.textDim, fontSize: 13, fontWeight: '600' },
+  policyBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center', backgroundColor: c.surface, borderWidth: 1, borderColor: c.border },
+  policyBtnActive: { backgroundColor: c.primary, borderColor: c.primary },
+  policyTxt: { color: c.textDim, fontSize: 13, fontWeight: '600' },
   policyTxtActive: { color: '#04130D', fontWeight: '800' },
   slowRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  slowChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, backgroundColor: Aurora.surface, borderWidth: 1, borderColor: Aurora.border },
-  slowChipActive: { backgroundColor: 'rgba(6,182,212,0.15)', borderColor: Aurora.accent },
-  slowTxt: { color: Aurora.textDim, fontSize: 13, fontWeight: '600' },
-  slowTxtActive: { color: Aurora.accent },
-  roleMenu: { flexDirection: 'row', backgroundColor: Aurora.surface, borderRadius: 10, marginBottom: 8, padding: 6, gap: 4 },
+  slowChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, backgroundColor: c.surface, borderWidth: 1, borderColor: c.border },
+  slowChipActive: { backgroundColor: 'rgba(6,182,212,0.15)', borderColor: c.accent },
+  slowTxt: { color: c.textDim, fontSize: 13, fontWeight: '600' },
+  slowTxtActive: { color: c.accent },
+  roleMenu: { flexDirection: 'row', backgroundColor: c.surface, borderRadius: 10, marginBottom: 8, padding: 6, gap: 4 },
   roleOption: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 8, borderRadius: 8 },
   roleOptionActive: { backgroundColor: 'rgba(6,182,212,0.12)' },
   roleDot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
-  roleOptionText: { fontSize: 12, color: Aurora.textDim, fontWeight: '600' },
+  roleOptionText: { fontSize: 12, color: c.textDim, fontWeight: '600' },
 });

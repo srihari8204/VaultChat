@@ -4,20 +4,28 @@
 // /channels/:id/posts (read/post). No Firestore. The iOS-only Alert.prompt
 // join flow is replaced with a cross-platform modal.
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList, Alert, StatusBar, TextInput, Modal, Share, ActivityIndicator,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Aurora } from '../constants/theme';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { getSocket } from '../lib/socket';
 import {
   listChannels, createChannel, joinChannel, listChannelPosts, postToChannel,
   type Channel, type ChannelPost,
 } from '../lib/chatService';
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function BroadcastScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -115,7 +123,7 @@ export default function BroadcastScreen() {
         <Stack.Screen options={{ headerShown: false }} />
         <View style={s.header}>
           <TouchableOpacity onPress={() => { setSelected(null); setPosts([]); }} style={s.backBtn} hitSlop={10}>
-            <Ionicons name="arrow-back" size={24} color={Aurora.text} />
+            <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={s.title} numberOfLines={1}>{selected.name}</Text>
           <TouchableOpacity onPress={() => shareInvite(selected)} hitSlop={10}>
@@ -152,7 +160,7 @@ export default function BroadcastScreen() {
               value={postText}
               onChangeText={setPostText}
               placeholder="Write a broadcast…"
-              placeholderTextColor={Aurora.textFaint}
+              placeholderTextColor={colors.textFaint}
               multiline
             />
             <TouchableOpacity style={[s.postBtn, !postText.trim() && { opacity: 0.4 }]} onPress={sendPost} disabled={!postText.trim() || posting}>
@@ -174,7 +182,7 @@ export default function BroadcastScreen() {
 
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
-          <Ionicons name="arrow-back" size={24} color={Aurora.text} />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.title}>Broadcast Channels</Text>
         <View style={{ width: 40 }} />
@@ -185,12 +193,12 @@ export default function BroadcastScreen() {
           <Text style={s.createTxt}>＋  Create Channel</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[s.createBtn, s.joinBtn]} onPress={() => setShowJoin(true)}>
-          <Text style={[s.createTxt, { color: Aurora.primary }]}>🔗  Join Channel</Text>
+          <Text style={[s.createTxt, { color: colors.primary }]}>🔗  Join Channel</Text>
         </TouchableOpacity>
       </View>
 
       {loading ? (
-        <ActivityIndicator color={Aurora.primary} style={{ marginTop: 30 }} />
+        <ActivityIndicator color={colors.primary} style={{ marginTop: 30 }} />
       ) : (
         <FlatList
           data={channels}
@@ -222,8 +230,8 @@ export default function BroadcastScreen() {
         <View style={s.modalBg}>
           <View style={s.modal}>
             <Text style={s.modalTitle}>Create Broadcast Channel</Text>
-            <TextInput style={s.modalInput} value={name} onChangeText={setName} placeholder="Channel name" placeholderTextColor={Aurora.textFaint} />
-            <TextInput style={[s.modalInput, { height: 80, textAlignVertical: 'top' }]} value={desc} onChangeText={setDesc} placeholder="Description (optional)" placeholderTextColor={Aurora.textFaint} multiline />
+            <TextInput style={s.modalInput} value={name} onChangeText={setName} placeholder="Channel name" placeholderTextColor={colors.textFaint} />
+            <TextInput style={[s.modalInput, { height: 80, textAlignVertical: 'top' }]} value={desc} onChangeText={setDesc} placeholder="Description (optional)" placeholderTextColor={colors.textFaint} multiline />
             <TouchableOpacity style={[s.modalBtn, (!name.trim() || busy) && { opacity: 0.5 }]} onPress={create} disabled={!name.trim() || busy}>
               {busy ? <ActivityIndicator color="#04130D" /> : <Text style={s.modalBtnTxt}>Create</Text>}
             </TouchableOpacity>
@@ -242,7 +250,7 @@ export default function BroadcastScreen() {
               value={joinCode}
               onChangeText={setJoinCode}
               placeholder="Invite code (e.g. ABCD-2F9K)"
-              placeholderTextColor={Aurora.textFaint}
+              placeholderTextColor={colors.textFaint}
               autoCapitalize="characters"
               autoCorrect={false}
             />
@@ -257,44 +265,44 @@ export default function BroadcastScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Aurora.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingHorizontal: 16, paddingBottom: 12, gap: 12 },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  title: { color: Aurora.text, fontSize: 18, fontWeight: '800', flex: 1 },
-  shareLink: { color: Aurora.accent, fontSize: 14, fontWeight: '700' },
+  title: { color: c.text, fontSize: 18, fontWeight: '800', flex: 1 },
+  shareLink: { color: c.accent, fontSize: 14, fontWeight: '700' },
   topBtns: { flexDirection: 'row', gap: 8, padding: 12 },
-  createBtn: { flex: 1, backgroundColor: Aurora.surface, borderRadius: 12, paddingVertical: 12, alignItems: 'center', borderWidth: 1, borderColor: Aurora.border },
+  createBtn: { flex: 1, backgroundColor: c.surface, borderRadius: 12, paddingVertical: 12, alignItems: 'center', borderWidth: 1, borderColor: c.border },
   joinBtn: { backgroundColor: 'rgba(16,185,129,0.13)', borderColor: 'rgba(16,185,129,0.3)' },
-  createTxt: { color: Aurora.accent, fontSize: 13, fontWeight: '700' },
-  chRow: { flexDirection: 'row', alignItems: 'center', padding: 14, marginHorizontal: 12, marginBottom: 6, backgroundColor: Aurora.card, borderRadius: 14, borderWidth: 1, borderColor: Aurora.border },
-  chAvatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: Aurora.surfaceSolid, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  chName: { color: Aurora.text, fontSize: 15, fontWeight: '700', flex: 1, marginRight: 8 },
-  chSubs: { color: Aurora.textDim, fontSize: 11 },
-  chLast: { color: Aurora.textDim, fontSize: 12, marginTop: 2 },
+  createTxt: { color: c.accent, fontSize: 13, fontWeight: '700' },
+  chRow: { flexDirection: 'row', alignItems: 'center', padding: 14, marginHorizontal: 12, marginBottom: 6, backgroundColor: c.card, borderRadius: 14, borderWidth: 1, borderColor: c.border },
+  chAvatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: c.surfaceSolid, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  chName: { color: c.text, fontSize: 15, fontWeight: '700', flex: 1, marginRight: 8 },
+  chSubs: { color: c.textDim, fontSize: 11 },
+  chLast: { color: c.textDim, fontSize: 12, marginTop: 2 },
   adminBadge: { backgroundColor: 'rgba(6,182,212,0.15)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2, marginLeft: 8 },
-  adminTxt: { color: Aurora.accent, fontSize: 10, fontWeight: '800' },
-  channelInfo: { padding: 12, backgroundColor: Aurora.card, borderBottomWidth: 1, borderBottomColor: Aurora.separator },
-  channelMeta: { color: Aurora.textDim, fontSize: 12 },
-  channelDesc: { color: Aurora.textDim, fontSize: 12, marginTop: 4 },
-  postCard: { backgroundColor: Aurora.card, borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: Aurora.border },
-  postAuthor: { color: Aurora.accent, fontSize: 12, fontWeight: '700', marginBottom: 4 },
-  postText: { color: Aurora.text, fontSize: 15, lineHeight: 22 },
-  postTime: { color: Aurora.textFaint, fontSize: 10, marginTop: 6, textAlign: 'right' },
-  postBar: { flexDirection: 'row', alignItems: 'flex-end', padding: 10, backgroundColor: Aurora.bg, borderTopWidth: 1, borderTopColor: Aurora.separator },
-  postInput: { flex: 1, backgroundColor: Aurora.surface, color: Aurora.text, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14, maxHeight: 100, marginRight: 8, borderWidth: 1, borderColor: Aurora.border },
-  postBtn: { backgroundColor: Aurora.primary, borderRadius: 12, paddingHorizontal: 18, paddingVertical: 11 },
+  adminTxt: { color: c.accent, fontSize: 10, fontWeight: '800' },
+  channelInfo: { padding: 12, backgroundColor: c.card, borderBottomWidth: 1, borderBottomColor: c.separator },
+  channelMeta: { color: c.textDim, fontSize: 12 },
+  channelDesc: { color: c.textDim, fontSize: 12, marginTop: 4 },
+  postCard: { backgroundColor: c.card, borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: c.border },
+  postAuthor: { color: c.accent, fontSize: 12, fontWeight: '700', marginBottom: 4 },
+  postText: { color: c.text, fontSize: 15, lineHeight: 22 },
+  postTime: { color: c.textFaint, fontSize: 10, marginTop: 6, textAlign: 'right' },
+  postBar: { flexDirection: 'row', alignItems: 'flex-end', padding: 10, backgroundColor: c.bg, borderTopWidth: 1, borderTopColor: c.separator },
+  postInput: { flex: 1, backgroundColor: c.surface, color: c.text, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14, maxHeight: 100, marginRight: 8, borderWidth: 1, borderColor: c.border },
+  postBtn: { backgroundColor: c.primary, borderRadius: 12, paddingHorizontal: 18, paddingVertical: 11 },
   postBtnTxt: { color: '#04130D', fontWeight: '900' },
-  readOnly: { padding: 14, alignItems: 'center', backgroundColor: Aurora.surface, borderTopWidth: 1, borderTopColor: Aurora.separator },
-  readOnlyTxt: { color: Aurora.textDim, fontSize: 13 },
+  readOnly: { padding: 14, alignItems: 'center', backgroundColor: c.surface, borderTopWidth: 1, borderTopColor: c.separator },
+  readOnlyTxt: { color: c.textDim, fontSize: 13 },
   emptyBox: { alignItems: 'center', padding: 40 },
-  emptyTxt: { color: Aurora.textDim, fontSize: 14 },
-  emptySub: { color: Aurora.textFaint, fontSize: 12, marginTop: 8 },
+  emptyTxt: { color: c.textDim, fontSize: 14 },
+  emptySub: { color: c.textFaint, fontSize: 12, marginTop: 8 },
   modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
-  modal: { backgroundColor: Aurora.surfaceSolid, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40, borderTopWidth: 1, borderColor: Aurora.border },
-  modalTitle: { color: Aurora.text, fontSize: 18, fontWeight: '900', marginBottom: 16 },
-  modalInput: { backgroundColor: Aurora.surface, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, color: Aurora.text, fontSize: 14, marginBottom: 12, borderWidth: 1, borderColor: Aurora.border },
-  modalBtn: { backgroundColor: Aurora.primary, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  modal: { backgroundColor: c.surfaceSolid, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40, borderTopWidth: 1, borderColor: c.border },
+  modalTitle: { color: c.text, fontSize: 18, fontWeight: '900', marginBottom: 16 },
+  modalInput: { backgroundColor: c.surface, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, color: c.text, fontSize: 14, marginBottom: 12, borderWidth: 1, borderColor: c.border },
+  modalBtn: { backgroundColor: c.primary, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
   modalBtnTxt: { color: '#04130D', fontWeight: '800' },
-  modalCancel: { color: Aurora.textDim, textAlign: 'center', marginTop: 12 },
+  modalCancel: { color: c.textDim, textAlign: 'center', marginTop: 12 },
 });

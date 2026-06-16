@@ -9,7 +9,8 @@ import {
   View, Text, TouchableOpacity, StyleSheet, FlatList, Alert, Share, StatusBar, ActivityIndicator,
 } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
-import { Aurora } from '../constants/theme';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
 import { listInviteLinks, createInviteLink, revokeInviteLink, type InviteLink } from '../lib/chatService';
 
@@ -21,7 +22,14 @@ const EXPIRY_OPTS = [
   { label: '7 days', hours: 168 },
 ];
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function InviteLinkScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const { chatId, groupName } = useLocalSearchParams<{ chatId: string; groupName: string }>();
   const [links, setLinks] = useState<InviteLink[]>([]);
@@ -89,7 +97,7 @@ export default function InviteLinkScreen() {
 
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
-          <Text style={{ color: Aurora.text, fontSize: 24 }}>←</Text>
+          <Text style={{ color: colors.text, fontSize: 24 }}>←</Text>
         </TouchableOpacity>
         <Text style={s.title}>Invite Links</Text>
         <View style={{ width: 40 }} />
@@ -114,11 +122,11 @@ export default function InviteLinkScreen() {
             </TouchableOpacity>
           ))}
         </View>
-        {creating && <ActivityIndicator color={Aurora.primary} style={{ marginTop: 12 }} />}
+        {creating && <ActivityIndicator color={colors.primary} style={{ marginTop: 12 }} />}
 
         <Text style={[s.sectionTitle, { marginTop: 16 }]}>ACTIVE LINKS ({activeCount})</Text>
         {loading ? (
-          <ActivityIndicator color={Aurora.primary} style={{ marginTop: 20 }} />
+          <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
         ) : (
           <FlatList
             data={links}
@@ -129,14 +137,14 @@ export default function InviteLinkScreen() {
                 <View style={{ flexDirection: 'row', gap: 12, marginTop: 4 }}>
                   <Text style={s.linkMeta}>{item.uses} joins</Text>
                   <Text style={s.linkMeta}>{formatExpiry(item.expiresAt)}</Text>
-                  {item.revoked && <Text style={[s.linkMeta, { color: Aurora.danger }]}>Revoked</Text>}
+                  {item.revoked && <Text style={[s.linkMeta, { color: colors.danger }]}>Revoked</Text>}
                 </View>
                 {!item.revoked && (
                   <View style={s.linkBtns}>
                     <TouchableOpacity style={s.linkBtn} onPress={() => copyLink(item.code)}><Text style={s.linkBtnTxt}>Copy</Text></TouchableOpacity>
                     <TouchableOpacity style={s.linkBtn} onPress={() => shareLink(item.code)}><Text style={s.linkBtnTxt}>Share</Text></TouchableOpacity>
                     <TouchableOpacity style={[s.linkBtn, { borderColor: 'rgba(239,68,68,0.4)' }]} onPress={() => revoke(item)}>
-                      <Text style={[s.linkBtnTxt, { color: Aurora.danger }]}>Revoke</Text>
+                      <Text style={[s.linkBtnTxt, { color: colors.danger }]}>Revoke</Text>
                     </TouchableOpacity>
                   </View>
                 )}
@@ -150,26 +158,26 @@ export default function InviteLinkScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Aurora.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingHorizontal: 16, paddingBottom: 12 },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  title: { color: Aurora.text, fontSize: 18, fontWeight: '800' },
+  title: { color: c.text, fontSize: 18, fontWeight: '800' },
   body: { flex: 1, padding: 16 },
-  infoCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: Aurora.card, borderRadius: 14, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: Aurora.border },
-  infoTitle: { color: Aurora.text, fontSize: 16, fontWeight: '800' },
-  infoDesc: { color: Aurora.textDim, fontSize: 12, marginTop: 2 },
+  infoCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, borderRadius: 14, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: c.border },
+  infoTitle: { color: c.text, fontSize: 16, fontWeight: '800' },
+  infoDesc: { color: c.textDim, fontSize: 12, marginTop: 2 },
   errorBar: { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.4)', borderWidth: 1, padding: 10, borderRadius: 10, marginBottom: 12 },
-  errorTxt: { color: Aurora.danger, fontSize: 12 },
-  sectionTitle: { color: Aurora.textDim, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 8 },
+  errorTxt: { color: c.danger, fontSize: 12 },
+  sectionTitle: { color: c.textDim, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 8 },
   createRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
   createOpt: { backgroundColor: 'rgba(16,185,129,0.13)', borderRadius: 10, paddingVertical: 10, paddingHorizontal: 16, borderWidth: 1, borderColor: 'rgba(16,185,129,0.3)' },
-  createOptTxt: { color: Aurora.primary, fontSize: 12, fontWeight: '700' },
-  linkRow: { backgroundColor: Aurora.card, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: Aurora.border },
-  linkCode: { color: Aurora.text, fontSize: 13, fontWeight: '600', fontFamily: 'monospace' },
-  linkMeta: { color: Aurora.textDim, fontSize: 11 },
+  createOptTxt: { color: c.primary, fontSize: 12, fontWeight: '700' },
+  linkRow: { backgroundColor: c.card, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: c.border },
+  linkCode: { color: c.text, fontSize: 13, fontWeight: '600', fontFamily: 'monospace' },
+  linkMeta: { color: c.textDim, fontSize: 11 },
   linkBtns: { flexDirection: 'row', gap: 8, marginTop: 10 },
   linkBtn: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(6,182,212,0.4)' },
-  linkBtnTxt: { color: Aurora.accent, fontSize: 11, fontWeight: '700' },
-  empty: { color: Aurora.textDim, fontSize: 13 },
+  linkBtnTxt: { color: c.accent, fontSize: 11, fontWeight: '700' },
+  empty: { color: c.textDim, fontSize: 13 },
 });

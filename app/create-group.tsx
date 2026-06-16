@@ -13,12 +13,20 @@ import {
 } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Aurora } from '../constants/theme';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { listChats, createGroupChat } from '../lib/chatService';
 
 interface Pick { userId: string; name: string }
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function CreateGroupScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
 
   const [people, setPeople] = useState<Pick[]>([]);
@@ -102,7 +110,7 @@ export default function CreateGroupScreen() {
 
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
-          <Ionicons name="arrow-back" size={24} color={Aurora.text} />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.headerTitle}>New Group</Text>
         <View style={{ width: 40 }} />
@@ -111,7 +119,7 @@ export default function CreateGroupScreen() {
       <TextInput
         style={s.nameInput}
         placeholder="Group name…"
-        placeholderTextColor={Aurora.textFaint}
+        placeholderTextColor={colors.textFaint}
         value={groupName}
         onChangeText={setGroupName}
         maxLength={100}
@@ -122,10 +130,10 @@ export default function CreateGroupScreen() {
       <Text style={s.label}>SELECT MEMBERS ({selected.size} selected)</Text>
 
       {loading ? (
-        <ActivityIndicator color={Aurora.primary} style={{ marginTop: 40 }} />
+        <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
       ) : people.length === 0 ? (
         <View style={s.empty}>
-          <Ionicons name="people-outline" size={56} color={Aurora.surfaceSolid} />
+          <Ionicons name="people-outline" size={56} color={colors.surfaceSolid} />
           <Text style={s.emptyTxt}>No contacts yet. Start a direct chat with someone first, then create a group.</Text>
         </View>
       ) : (
@@ -156,31 +164,31 @@ export default function CreateGroupScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: Aurora.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen: { flex: 1, backgroundColor: c.bg },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingHorizontal: 16, paddingBottom: 8 },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  headerTitle: { color: Aurora.text, fontSize: 18, fontWeight: '700' },
+  headerTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
   nameInput: {
-    backgroundColor: Aurora.surface, color: Aurora.text, fontSize: 16,
+    backgroundColor: c.surface, color: c.text, fontSize: 16,
     marginHorizontal: 16, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 13,
-    borderWidth: 1, borderColor: Aurora.border,
+    borderWidth: 1, borderColor: c.border,
   },
   errorBar: { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.4)', borderWidth: 1, marginHorizontal: 16, marginTop: 10, padding: 10, borderRadius: 10 },
-  errorTxt: { color: Aurora.danger, fontSize: 12 },
-  label: { color: Aurora.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1, paddingHorizontal: 16, paddingTop: 18, paddingBottom: 8 },
+  errorTxt: { color: c.danger, fontSize: 12 },
+  label: { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1, paddingHorizontal: 16, paddingTop: 18, paddingBottom: 8 },
   row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, gap: 12 },
-  avatar: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center', backgroundColor: Aurora.surfaceSolid, borderWidth: 1, borderColor: Aurora.border },
-  avatarSel: { borderColor: Aurora.primary },
-  avatarTxt: { color: Aurora.accent, fontSize: 18, fontWeight: '800' },
-  name: { flex: 1, color: Aurora.text, fontSize: 15, fontWeight: '600' },
-  check: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: Aurora.border, alignItems: 'center', justifyContent: 'center' },
-  checkSel: { backgroundColor: Aurora.primary, borderColor: Aurora.primary },
+  avatar: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surfaceSolid, borderWidth: 1, borderColor: c.border },
+  avatarSel: { borderColor: c.primary },
+  avatarTxt: { color: c.accent, fontSize: 18, fontWeight: '800' },
+  name: { flex: 1, color: c.text, fontSize: 15, fontWeight: '600' },
+  check: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: c.border, alignItems: 'center', justifyContent: 'center' },
+  checkSel: { backgroundColor: c.primary, borderColor: c.primary },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40, gap: 12 },
-  emptyTxt: { color: Aurora.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20 },
-  bottomBar: { position: 'absolute', left: 0, right: 0, bottom: 0, padding: 16, backgroundColor: Aurora.bg, borderTopWidth: 1, borderTopColor: Aurora.separator },
-  createBtn: { backgroundColor: Aurora.primary, borderRadius: 12, paddingVertical: 15, alignItems: 'center' },
-  createBtnOff: { backgroundColor: Aurora.surface },
+  emptyTxt: { color: c.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20 },
+  bottomBar: { position: 'absolute', left: 0, right: 0, bottom: 0, padding: 16, backgroundColor: c.bg, borderTopWidth: 1, borderTopColor: c.separator },
+  createBtn: { backgroundColor: c.primary, borderRadius: 12, paddingVertical: 15, alignItems: 'center' },
+  createBtnOff: { backgroundColor: c.surface },
   createTxt: { color: '#04130D', fontSize: 16, fontWeight: '800' },
-  createTxtOff: { color: Aurora.textFaint },
+  createTxtOff: { color: c.textFaint },
 });

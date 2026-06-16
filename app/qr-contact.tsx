@@ -4,17 +4,25 @@
 // "Scan" reads a VaultChat QR, resolves the handle (GET /user/by-vault/:id),
 // and opens/creates a direct chat (POST /chats). No Firestore.
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Alert, StatusBar, ActivityIndicator, Share,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import QRCode from 'react-native-qrcode-svg';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { Aurora } from '../constants/theme';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { getMyProfile, resolveVaultId, createDirectChat } from '../lib/chatService';
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function QRContactScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const [tab, setTab] = useState<'my' | 'scan'>('my');
   const [myVaultId, setMyVaultId] = useState('');
@@ -94,7 +102,7 @@ export default function QRContactScreen() {
 
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
-          <Text style={{ color: Aurora.text, fontSize: 24 }}>←</Text>
+          <Text style={{ color: colors.text, fontSize: 24 }}>←</Text>
         </TouchableOpacity>
         <Text style={s.title}>QR Contact</Text>
         <View style={{ width: 40 }} />
@@ -112,7 +120,7 @@ export default function QRContactScreen() {
       {tab === 'my' ? (
         <View style={s.myQR}>
           {loading ? (
-            <ActivityIndicator color={Aurora.primary} size="large" />
+            <ActivityIndicator color={colors.primary} size="large" />
           ) : (
             <>
               <View style={s.qrCard}>
@@ -134,7 +142,7 @@ export default function QRContactScreen() {
       ) : (
         <View style={s.scanArea}>
           {!permission ? (
-            <ActivityIndicator color={Aurora.primary} size="large" style={{ flex: 1 }} />
+            <ActivityIndicator color={colors.primary} size="large" style={{ flex: 1 }} />
           ) : !permission.granted ? (
             <View style={s.noPerm}>
               <Text style={s.noPermTxt}>Camera permission is required to scan QR codes.</Text>
@@ -167,29 +175,29 @@ export default function QRContactScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Aurora.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingHorizontal: 16, paddingBottom: 12 },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  title: { color: Aurora.text, fontSize: 18, fontWeight: '800' },
-  tabs: { flexDirection: 'row', marginHorizontal: 16, backgroundColor: Aurora.surface, borderRadius: 12, padding: 3, borderWidth: 1, borderColor: Aurora.border },
+  title: { color: c.text, fontSize: 18, fontWeight: '800' },
+  tabs: { flexDirection: 'row', marginHorizontal: 16, backgroundColor: c.surface, borderRadius: 12, padding: 3, borderWidth: 1, borderColor: c.border },
   tab: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 10 },
-  tabActive: { backgroundColor: Aurora.primary },
-  tabTxt: { color: Aurora.textDim, fontSize: 14, fontWeight: '700' },
+  tabActive: { backgroundColor: c.primary },
+  tabTxt: { color: c.textDim, fontSize: 14, fontWeight: '700' },
   tabTxtActive: { color: '#04130D' },
   myQR: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  qrCard: { backgroundColor: Aurora.card, borderRadius: 24, padding: 32, alignItems: 'center', width: '100%', maxWidth: 320, borderWidth: 1, borderColor: Aurora.border },
-  qrName: { color: Aurora.text, fontSize: 20, fontWeight: '900', marginBottom: 4 },
-  qrId: { color: Aurora.accent, fontSize: 14, marginBottom: 20, fontWeight: '700' },
+  qrCard: { backgroundColor: c.card, borderRadius: 24, padding: 32, alignItems: 'center', width: '100%', maxWidth: 320, borderWidth: 1, borderColor: c.border },
+  qrName: { color: c.text, fontSize: 20, fontWeight: '900', marginBottom: 4 },
+  qrId: { color: c.accent, fontSize: 14, marginBottom: 20, fontWeight: '700' },
   qrBox: { padding: 12, backgroundColor: '#FFFFFF', borderRadius: 12, minWidth: 224, minHeight: 224, alignItems: 'center', justifyContent: 'center' },
-  qrHint: { color: Aurora.textDim, fontSize: 12, marginTop: 16, textAlign: 'center' },
+  qrHint: { color: c.textDim, fontSize: 12, marginTop: 16, textAlign: 'center' },
   shareBtn: { marginTop: 24, backgroundColor: 'rgba(16,185,129,0.13)', borderRadius: 14, paddingVertical: 14, paddingHorizontal: 28, borderWidth: 1, borderColor: 'rgba(16,185,129,0.3)' },
-  shareTxt: { color: Aurora.primary, fontSize: 14, fontWeight: '700' },
+  shareTxt: { color: c.primary, fontSize: 14, fontWeight: '700' },
   scanArea: { flex: 1, position: 'relative', marginTop: 12 },
   scanner: { flex: 1 },
   scanOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center' },
-  scanFrame: { width: 250, height: 250, borderWidth: 2, borderColor: Aurora.primary, borderRadius: 20, backgroundColor: 'transparent' },
+  scanFrame: { width: 250, height: 250, borderWidth: 2, borderColor: c.primary, borderRadius: 20, backgroundColor: 'transparent' },
   scanHint: { color: '#fff', fontSize: 14, marginTop: 20, textAlign: 'center', fontWeight: '600', textShadowColor: '#000', textShadowRadius: 4 },
   noPerm: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
-  noPermTxt: { color: Aurora.textDim, fontSize: 15, textAlign: 'center', marginBottom: 20 },
+  noPermTxt: { color: c.textDim, fontSize: 15, textAlign: 'center', marginBottom: 20 },
 });

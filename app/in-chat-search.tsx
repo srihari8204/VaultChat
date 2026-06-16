@@ -2,25 +2,33 @@
 //
 // Searches the DECRYPTED local message store via searchInChat — the server only
 // holds ciphertext and never sees the query or the content. Covers the chat
-// history cached on this device. Debounced, highlighted, Obsidian Aurora.
+// history cached on this device. Debounced, highlighted, Obsidian colors.
 //
 // NOTE: tapping a result returns to the chat. Scroll-to-message requires
 // pagination-aware loading in app/chat.tsx (the history is keyset-paginated,
 // so an old match may not be in memory) — tracked as a follow-up rather than
 // faked here.
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback , useMemo} from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   FlatList, StatusBar, ActivityIndicator,
 } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Aurora } from '../constants/theme';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { searchInChat, type InChatMessageHit } from '../lib/chatService';
 import { setPendingJump } from '../lib/chatJump';
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function InChatSearchScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const { chatId } = useLocalSearchParams<{ chatId: string }>();
   const inputRef = useRef<TextInput>(null);
@@ -110,21 +118,21 @@ export default function InChatSearchScreen() {
 
   return (
     <View style={s.root}>
-      <StatusBar barStyle="light-content" backgroundColor={Aurora.bg} />
+      <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
-          <Ionicons name="arrow-back" size={24} color={Aurora.text} />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
 
         <View style={s.searchBox}>
-          <Ionicons name="search" size={18} color={Aurora.textDim} style={{ marginRight: 8 }} />
+          <Ionicons name="search" size={18} color={colors.textDim} style={{ marginRight: 8 }} />
           <TextInput
             ref={inputRef}
             style={s.searchInput}
             placeholder="Search messages…"
-            placeholderTextColor={Aurora.textFaint}
+            placeholderTextColor={colors.textFaint}
             value={query}
             onChangeText={setQuery}
             autoCapitalize="none"
@@ -133,7 +141,7 @@ export default function InChatSearchScreen() {
           />
           {query.length > 0 && (
             <TouchableOpacity onPress={() => setQuery('')} hitSlop={8}>
-              <Ionicons name="close-circle" size={18} color={Aurora.textDim} />
+              <Ionicons name="close-circle" size={18} color={colors.textDim} />
             </TouchableOpacity>
           )}
         </View>
@@ -151,24 +159,24 @@ export default function InChatSearchScreen() {
 
       {error ? (
         <View style={s.center}>
-          <Ionicons name="alert-circle-outline" size={56} color={Aurora.danger} />
+          <Ionicons name="alert-circle-outline" size={56} color={colors.danger} />
           <Text style={s.emptyTitle}>Couldn’t search</Text>
           <Text style={s.emptySubtitle}>{error}</Text>
         </View>
       ) : loading ? (
         <View style={s.center}>
-          <ActivityIndicator size="large" color={Aurora.primary} />
+          <ActivityIndicator size="large" color={colors.primary} />
           <Text style={s.loadingText}>Searching…</Text>
         </View>
       ) : !hasQuery ? (
         <View style={s.center}>
-          <Ionicons name="search-outline" size={64} color={Aurora.surfaceSolid} />
+          <Ionicons name="search-outline" size={64} color={colors.surfaceSolid} />
           <Text style={s.emptyTitle}>Search Messages</Text>
           <Text style={s.emptySubtitle}>Searches messages saved on this device — on-device and private.</Text>
         </View>
       ) : results.length === 0 ? (
         <View style={s.center}>
-          <Ionicons name="document-text-outline" size={64} color={Aurora.surfaceSolid} />
+          <Ionicons name="document-text-outline" size={64} color={colors.surfaceSolid} />
           <Text style={s.emptyTitle}>No Results</Text>
           <Text style={s.emptySubtitle}>No messages match “{query.trim()}”.</Text>
         </View>
@@ -186,8 +194,8 @@ export default function InChatSearchScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: Aurora.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: c.bg },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -200,14 +208,14 @@ const s = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Aurora.surface,
+    backgroundColor: c.surface,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: Aurora.border,
+    borderColor: c.border,
     paddingHorizontal: 12,
     height: 42,
   },
-  searchInput: { flex: 1, color: Aurora.text, fontSize: 15, padding: 0 },
+  searchInput: { flex: 1, color: c.text, fontSize: 15, padding: 0 },
   badgeRow: { flexDirection: 'row', paddingHorizontal: 16, paddingTop: 8 },
   badge: {
     backgroundColor: 'rgba(16,185,129,0.13)',
@@ -215,22 +223,22 @@ const s = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 4,
   },
-  badgeText: { color: Aurora.primary, fontSize: 13, fontWeight: '600' },
+  badgeText: { color: c.primary, fontSize: 13, fontWeight: '600' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
-  loadingText: { color: Aurora.textDim, marginTop: 12, fontSize: 14 },
-  emptyTitle: { color: Aurora.text, fontSize: 18, fontWeight: '600', marginTop: 16 },
+  loadingText: { color: c.textDim, marginTop: 12, fontSize: 14 },
+  emptyTitle: { color: c.text, fontSize: 18, fontWeight: '600', marginTop: 16 },
   emptySubtitle: {
-    color: Aurora.textDim,
+    color: c.textDim,
     fontSize: 14,
     textAlign: 'center',
     marginTop: 8,
     lineHeight: 20,
   },
   resultCard: {
-    backgroundColor: Aurora.card,
+    backgroundColor: c.card,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: Aurora.border,
+    borderColor: c.border,
     padding: 14,
   },
   resultHeader: {
@@ -240,8 +248,8 @@ const s = StyleSheet.create({
     marginBottom: 6,
     gap: 8,
   },
-  senderName: { color: Aurora.accent, fontSize: 13, fontWeight: '600', flexShrink: 1 },
-  timestamp: { color: Aurora.textFaint, fontSize: 11 },
-  msgText: { color: Aurora.textDim, fontSize: 14, lineHeight: 20 },
-  highlight: { color: Aurora.text, backgroundColor: 'rgba(16,185,129,0.28)', fontWeight: '700' },
+  senderName: { color: c.accent, fontSize: 13, fontWeight: '600', flexShrink: 1 },
+  timestamp: { color: c.textFaint, fontSize: 11 },
+  msgText: { color: c.textDim, fontSize: 14, lineHeight: 20 },
+  highlight: { color: c.text, backgroundColor: 'rgba(16,185,129,0.28)', fontWeight: '700' },
 });

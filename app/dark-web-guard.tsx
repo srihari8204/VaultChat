@@ -8,22 +8,30 @@
 // user pastes their key (stored in SecureStore); without one, that tab simply
 // asks for a key instead of showing fake data.
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput, Alert, ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { Ionicons } from '@expo/vector-icons';
-import { Aurora } from '../constants/theme';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { getMyProfile } from '../lib/chatService';
 import { checkEmailBreaches, checkPasswordPwned, fmtCount as fmt, type Breach } from '../lib/breachCheck';
 
-const sevColor = (s: Breach['severity']) => s === 'critical' ? Aurora.danger : s === 'high' ? '#F97316' : s === 'medium' ? '#F5C842' : Aurora.primary;
+const sevColor = (s: Breach['severity']) => s === 'critical' ? '#EF4444' : s === 'high' ? '#F97316' : s === 'medium' ? '#F5C842' : '#10B981';
 
 type Tab = 'password' | 'email';
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function DarkWebGuardScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const [tab, setTab] = useState<Tab>('password');
 
@@ -71,7 +79,7 @@ export default function DarkWebGuardScreen() {
     <View style={s.container}>
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
-          <Ionicons name="arrow-back" size={24} color={Aurora.text} />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.title}>Dark Web Guard</Text>
         <View style={{ width: 40 }} />
@@ -102,7 +110,7 @@ export default function DarkWebGuardScreen() {
                 value={password}
                 onChangeText={(t) => { setPassword(t); setPwResult(null); }}
                 placeholder="Enter a password"
-                placeholderTextColor={Aurora.textFaint}
+                placeholderTextColor={colors.textFaint}
                 secureTextEntry
                 autoCapitalize="none"
               />
@@ -135,7 +143,7 @@ export default function DarkWebGuardScreen() {
               <View style={s.card}>
                 <Text style={s.label}>HIBP API key required</Text>
                 <Text style={s.note}>Email lookup uses the paid HIBP API. Paste your key (haveibeenpwned.com/API/Key) — stored only on this device.</Text>
-                <TextInput style={s.input} value={keyInput} onChangeText={setKeyInput} placeholder="HIBP API key" placeholderTextColor={Aurora.textFaint} autoCapitalize="none" secureTextEntry />
+                <TextInput style={s.input} value={keyInput} onChangeText={setKeyInput} placeholder="HIBP API key" placeholderTextColor={colors.textFaint} autoCapitalize="none" secureTextEntry />
                 <TouchableOpacity style={[s.btn, !keyInput.trim() && s.btnDim]} onPress={saveKey} disabled={!keyInput.trim()}>
                   <Text style={s.btnTxt}>Save key</Text>
                 </TouchableOpacity>
@@ -144,7 +152,7 @@ export default function DarkWebGuardScreen() {
               <View style={s.card}>
                 <Text style={s.label}>Email to scan</Text>
                 <View style={{ flexDirection: 'row', gap: 10 }}>
-                  <TextInput style={[s.input, { flex: 1 }]} value={email} onChangeText={setEmail} placeholder="your@email.com" placeholderTextColor={Aurora.textFaint} keyboardType="email-address" autoCapitalize="none" />
+                  <TextInput style={[s.input, { flex: 1 }]} value={email} onChangeText={setEmail} placeholder="your@email.com" placeholderTextColor={colors.textFaint} keyboardType="email-address" autoCapitalize="none" />
                   <TouchableOpacity style={[s.btn, { paddingHorizontal: 18 }, emailChecking && s.btnDim]} onPress={checkEmail} disabled={emailChecking}>
                     {emailChecking ? <ActivityIndicator color="#04130D" size="small" /> : <Text style={s.btnTxt}>Scan</Text>}
                   </TouchableOpacity>
@@ -176,36 +184,36 @@ export default function DarkWebGuardScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Aurora.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingHorizontal: 16, paddingBottom: 8 },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  title: { color: Aurora.text, fontSize: 18, fontWeight: '800' },
-  tabs: { flexDirection: 'row', marginHorizontal: 16, backgroundColor: Aurora.surface, borderRadius: 12, padding: 3, borderWidth: 1, borderColor: Aurora.border },
+  title: { color: c.text, fontSize: 18, fontWeight: '800' },
+  tabs: { flexDirection: 'row', marginHorizontal: 16, backgroundColor: c.surface, borderRadius: 12, padding: 3, borderWidth: 1, borderColor: c.border },
   tab: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 10 },
-  tabActive: { backgroundColor: Aurora.primary },
-  tabTxt: { color: Aurora.textDim, fontSize: 14, fontWeight: '700' },
+  tabActive: { backgroundColor: c.primary },
+  tabTxt: { color: c.textDim, fontSize: 14, fontWeight: '700' },
   tabTxtActive: { color: '#04130D' },
   hero: { alignItems: 'center', paddingVertical: 20 },
   heroIcon: { fontSize: 52, marginBottom: 10 },
-  heroTitle: { fontSize: 20, fontWeight: '800', color: Aurora.text, marginBottom: 8, textAlign: 'center' },
-  heroSub: { fontSize: 13, color: Aurora.textDim, textAlign: 'center', lineHeight: 19 },
-  card: { backgroundColor: Aurora.card, borderRadius: 14, borderWidth: 1, borderColor: Aurora.border, padding: 16, marginBottom: 16 },
-  label: { fontSize: 12, color: Aurora.textDim, marginBottom: 8 },
-  note: { fontSize: 12, color: Aurora.textDim, marginBottom: 10, lineHeight: 18 },
-  input: { backgroundColor: Aurora.surface, borderRadius: 10, borderWidth: 1, borderColor: Aurora.border, paddingHorizontal: 14, paddingVertical: 11, color: Aurora.text, fontSize: 14, marginBottom: 10 },
-  btn: { backgroundColor: Aurora.primary, borderRadius: 10, paddingVertical: 12, alignItems: 'center', justifyContent: 'center' },
+  heroTitle: { fontSize: 20, fontWeight: '800', color: c.text, marginBottom: 8, textAlign: 'center' },
+  heroSub: { fontSize: 13, color: c.textDim, textAlign: 'center', lineHeight: 19 },
+  card: { backgroundColor: c.card, borderRadius: 14, borderWidth: 1, borderColor: c.border, padding: 16, marginBottom: 16 },
+  label: { fontSize: 12, color: c.textDim, marginBottom: 8 },
+  note: { fontSize: 12, color: c.textDim, marginBottom: 10, lineHeight: 18 },
+  input: { backgroundColor: c.surface, borderRadius: 10, borderWidth: 1, borderColor: c.border, paddingHorizontal: 14, paddingVertical: 11, color: c.text, fontSize: 14, marginBottom: 10 },
+  btn: { backgroundColor: c.primary, borderRadius: 10, paddingVertical: 12, alignItems: 'center', justifyContent: 'center' },
   btnDim: { opacity: 0.5 },
   btnTxt: { color: '#04130D', fontWeight: '800', fontSize: 14 },
   result: { borderRadius: 14, borderWidth: 1, padding: 20, alignItems: 'center', gap: 8, marginBottom: 16 },
   resultClean: { backgroundColor: 'rgba(16,185,129,0.1)', borderColor: 'rgba(16,185,129,0.4)' },
   resultBad: { backgroundColor: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.4)' },
   resultIcon: { fontSize: 40 },
-  resultTitle: { fontSize: 17, fontWeight: '800', color: Aurora.text, textAlign: 'center' },
-  resultSub: { fontSize: 13, color: Aurora.textDim, textAlign: 'center', lineHeight: 19 },
-  breachCard: { flexDirection: 'row', backgroundColor: Aurora.card, borderRadius: 12, borderWidth: 1, borderColor: Aurora.border, padding: 12, marginBottom: 8, gap: 10, overflow: 'hidden' },
+  resultTitle: { fontSize: 17, fontWeight: '800', color: c.text, textAlign: 'center' },
+  resultSub: { fontSize: 13, color: c.textDim, textAlign: 'center', lineHeight: 19 },
+  breachCard: { flexDirection: 'row', backgroundColor: c.card, borderRadius: 12, borderWidth: 1, borderColor: c.border, padding: 12, marginBottom: 8, gap: 10, overflow: 'hidden' },
   sevBar: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 3 },
-  breachName: { fontSize: 15, fontWeight: '700', color: Aurora.text },
-  breachMeta: { fontSize: 11, color: Aurora.textDim, marginTop: 2 },
-  breachData: { fontSize: 12, color: Aurora.textDim, marginTop: 4 },
+  breachName: { fontSize: 15, fontWeight: '700', color: c.text },
+  breachMeta: { fontSize: 11, color: c.textDim, marginTop: 2 },
+  breachData: { fontSize: 12, color: c.textDim, marginTop: 4 },
 });

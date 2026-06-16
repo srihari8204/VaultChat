@@ -5,13 +5,14 @@
 // action items, and key (longer, recent) messages. No LLM, no cloud — runs
 // entirely on-device.
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, StatusBar, ScrollView, ActivityIndicator, Alert,
 } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Aurora } from '../constants/theme';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { getMessages, type Message } from '../lib/chatService';
 import { getCurrentUserAsync } from './(constants)/authService';
 
@@ -65,7 +66,14 @@ function generateSummary(msgs: SumMsg[], peerName: string): Summary {
   };
 }
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function ChatSummaryScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const { chatId, peerName } = useLocalSearchParams<{ chatId: string; peerName: string }>();
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -93,7 +101,7 @@ export default function ChatSummaryScreen() {
       <StatusBar barStyle="light-content" />
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
-          <Ionicons name="arrow-back" size={24} color={Aurora.text} />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.title}>Chat Summary</Text>
         <View style={{ width: 40 }} />
@@ -121,7 +129,7 @@ export default function ChatSummaryScreen() {
 
         {loading && (
           <View style={s.loadingCard}>
-            <ActivityIndicator color={Aurora.purple} size="large" />
+            <ActivityIndicator color={colors.purple} size="large" />
             <Text style={s.loadingTxt}>Analyzing messages…</Text>
           </View>
         )}
@@ -171,35 +179,35 @@ export default function ChatSummaryScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: Aurora.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: c.bg },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingHorizontal: 16, paddingBottom: 8 },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  title: { color: Aurora.text, fontSize: 18, fontWeight: '800' },
+  title: { color: c.text, fontSize: 18, fontWeight: '800' },
   container: { flex: 1, padding: 16 },
-  headerCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: Aurora.card, borderRadius: 16, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: Aurora.border },
-  headerTitle: { color: Aurora.text, fontSize: 18, fontWeight: '900' },
-  headerDesc: { color: Aurora.textDim, fontSize: 12, marginTop: 2 },
-  optionsCard: { backgroundColor: Aurora.card, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: Aurora.border },
-  optionsTitle: { color: Aurora.text, fontSize: 15, fontWeight: '700', marginBottom: 12 },
+  headerCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, borderRadius: 16, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: c.border },
+  headerTitle: { color: c.text, fontSize: 18, fontWeight: '900' },
+  headerDesc: { color: c.textDim, fontSize: 12, marginTop: 2 },
+  optionsCard: { backgroundColor: c.card, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: c.border },
+  optionsTitle: { color: c.text, fontSize: 15, fontWeight: '700', marginBottom: 12 },
   optionBtn: { backgroundColor: 'rgba(6,182,212,0.13)', borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginBottom: 8, borderWidth: 1, borderColor: 'rgba(6,182,212,0.3)' },
-  optionTxt: { color: Aurora.accent, fontSize: 14, fontWeight: '700' },
+  optionTxt: { color: c.accent, fontSize: 14, fontWeight: '700' },
   loadingCard: { alignItems: 'center', padding: 40 },
-  loadingTxt: { color: Aurora.textDim, marginTop: 12, fontSize: 14 },
+  loadingTxt: { color: c.textDim, marginTop: 12, fontSize: 14 },
   statsRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
-  statCard: { flex: 1, backgroundColor: Aurora.card, borderRadius: 12, padding: 12, alignItems: 'center', borderWidth: 1, borderColor: Aurora.border },
-  statNum: { color: Aurora.accent, fontSize: 22, fontWeight: '900' },
-  statLabel: { color: Aurora.textDim, fontSize: 10, marginTop: 2 },
-  metaTxt: { color: Aurora.textDim, fontSize: 11, textAlign: 'center', paddingVertical: 8 },
-  sectionTitle: { color: Aurora.textDim, fontSize: 12, fontWeight: '800', marginBottom: 8 },
+  statCard: { flex: 1, backgroundColor: c.card, borderRadius: 12, padding: 12, alignItems: 'center', borderWidth: 1, borderColor: c.border },
+  statNum: { color: c.accent, fontSize: 22, fontWeight: '900' },
+  statLabel: { color: c.textDim, fontSize: 10, marginTop: 2 },
+  metaTxt: { color: c.textDim, fontSize: 11, textAlign: 'center', paddingVertical: 8 },
+  sectionTitle: { color: c.textDim, fontSize: 12, fontWeight: '800', marginBottom: 8 },
   topicRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   topicBadge: { backgroundColor: 'rgba(139,92,246,0.15)', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: 'rgba(139,92,246,0.3)' },
-  topicTxt: { color: Aurora.purple, fontSize: 12, fontWeight: '600' },
-  actionRow: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: Aurora.card, borderRadius: 10, padding: 12, marginBottom: 4, gap: 10, borderWidth: 1, borderColor: Aurora.border },
-  actionNum: { color: Aurora.primary, fontSize: 14, fontWeight: '900', width: 20 },
-  actionTxt: { color: Aurora.text, fontSize: 13, flex: 1, lineHeight: 19 },
-  keyMsgRow: { backgroundColor: Aurora.card, borderRadius: 10, padding: 12, marginBottom: 4, borderWidth: 1, borderColor: Aurora.border },
-  keyMsgTxt: { color: Aurora.textDim, fontSize: 13, fontStyle: 'italic', lineHeight: 19 },
+  topicTxt: { color: c.purple, fontSize: 12, fontWeight: '600' },
+  actionRow: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: c.card, borderRadius: 10, padding: 12, marginBottom: 4, gap: 10, borderWidth: 1, borderColor: c.border },
+  actionNum: { color: c.primary, fontSize: 14, fontWeight: '900', width: 20 },
+  actionTxt: { color: c.text, fontSize: 13, flex: 1, lineHeight: 19 },
+  keyMsgRow: { backgroundColor: c.card, borderRadius: 10, padding: 12, marginBottom: 4, borderWidth: 1, borderColor: c.border },
+  keyMsgTxt: { color: c.textDim, fontSize: 13, fontStyle: 'italic', lineHeight: 19 },
   regenBtn: { marginTop: 20, backgroundColor: 'rgba(6,182,212,0.1)', borderRadius: 12, paddingVertical: 14, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(6,182,212,0.3)' },
-  regenTxt: { color: Aurora.accent, fontSize: 13, fontWeight: '700' },
+  regenTxt: { color: c.accent, fontSize: 13, fontWeight: '700' },
 });
