@@ -83,6 +83,7 @@ import {
   markDelivered,
   markRead,
   muteChat,
+  pinMessage,
   removeReaction,
   reportScreenshotCaptured,
   setDisappearing,
@@ -175,6 +176,7 @@ export default function ChatScreen() {
   // device past ~45°. Sender always sees the plaintext.
   const [nextInvisibleInk, setNextInvisibleInk] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
+  const [pinnedId, setPinnedId] = useState<string | null>(null);
   // Global "tilt revealed" state — flips true when the gyro reports any
   // axis past ~45° (~0.78 rad). Shared by every invisible-ink bubble on
   // screen, so a single tilt reveals all of them at once.
@@ -265,6 +267,7 @@ export default function ChatScreen() {
         ]);
         setMeId(me?.id ?? null);
         setChat(c);
+        setPinnedId(c.pinnedMessageId ?? null);
 
         // Prepend any locally-queued messages as optimistic bubbles so
         // they show up immediately after a cold start where the network
@@ -466,7 +469,10 @@ export default function ChatScreen() {
         s.on('screenshot_captured', onScreenshotCaptured);
         s.on('poll_voted',        onPollVoted);
         s.on('poll_unvoted',      onPollUnvoted);
+        const onPinned = (e: any) => setPinnedId(e?.messageId ?? null);
+        s.on('message_pinned',    onPinned);
 
+        off.push(() => s.off('message_pinned', onPinned));
         off.push(() => s.off('live_location_update', onLiveLocation));
         off.push(() => s.off('live_location_stop',   onLiveLocationStop));
         off.push(() => s.off('new_message',       onNew));
@@ -676,8 +682,14 @@ export default function ChatScreen() {
   // Build the action-sheet tiles for a message — reuses the existing handlers.
   const buildSheetActions = useCallback((msg: DisplayMessage, plain: string): SheetAction[] => {
     const isMine = msg.senderId === meId;
+    const isPinned = pinnedId === String(msg.id);
     const acts: SheetAction[] = [
       { key: 'reply',   label: 'Reply',   icon: '↩️', onPress: () => setReplyTo(msg) },
+      { key: 'pin',     label: isPinned ? 'Unpin' : 'Pin', icon: '📌', onPress: async () => {
+          const next = isPinned ? null : msg.id;
+          setPinnedId(next == null ? null : String(msg.id)); // optimistic
+          try { await pinMessage(chatId, next); } catch (e: any) { Alert.alert('Could not pin', e?.message ?? 'Try again'); }
+        } },
       { key: 'forward', label: 'Forward', icon: '↪️', onPress: () => openForward(msg) },
       { key: 'copy',    label: 'Copy',    icon: '📋', onPress: () => copyAndAutoClear(plain) },
       { key: 'star',    label: 'Star',    icon: '🔖', onPress: async () => {
@@ -699,7 +711,7 @@ export default function ChatScreen() {
         } });
     }
     return acts;
-  }, [meId, chatId, router]);
+  }, [meId, chatId, router, pinnedId]);
 
   // ── Screenshot mode (P1 polish) ──────────────────────────
   // Apply the chat's per-user screenshot policy on mount, restore the
@@ -1459,6 +1471,27 @@ export default function ChatScreen() {
           <TouchableOpacity onPress={() => setLiveLoc(null)} hitSlop={8}><Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 16 }}>✕</Text></TouchableOpacity>
         </TouchableOpacity>
       )}
+
+      {/* Pinned-message bar (W15) — tap to jump, × to unpin. */}
+      {pinnedId && (() => {
+        const pm = messages.find(m => String(m.id) === pinnedId);
+        const label = !pm ? 'Message'
+          : pm.type === 'image' ? '📷 Photo' : pm.type === 'video' ? '🎥 Video'
+          : pm.type === 'audio' ? '🎙️ Voice message' : pm.type === 'file' ? '📎 File'
+          : pm.type === 'location' ? '📍 Location' : pm.type === 'poll' ? '📊 Poll' : 'Message';
+        return (
+          <TouchableOpacity style={S.pinnedBar} activeOpacity={0.8} onPress={() => jumpToMessage(Number(pinnedId))}>
+            <Ionicons name="pin" size={15} color="#10B981" />
+            <View style={{ flex: 1 }}>
+              <Text style={S.pinnedBarTitle}>Pinned message</Text>
+              <Text style={S.pinnedBarSub} numberOfLines={1}>{label}</Text>
+            </View>
+            <TouchableOpacity hitSlop={10} onPress={async () => { setPinnedId(null); try { await pinMessage(chatId, null); } catch {} }}>
+              <Ionicons name="close" size={16} color={colors.textDim} />
+            </TouchableOpacity>
+          </TouchableOpacity>
+        );
+      })()}
 
       {/* Messages (inverted — newest at top of the array, visually at bottom) */}
       <FlatList
@@ -2685,6 +2718,10 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   memoryBubbleBody:    { color: c.text, fontSize: 13, marginTop: 4, fontStyle: 'italic' },
   memoryBubbleDismiss: { color: c.textDim, fontSize: 10, marginTop: 6 },
   screenshotBannerTxt: { color: '#FCD34D', fontSize: 12, fontWeight: '600' },
+
+  pinnedBar:     { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: c.surfaceSolid, borderBottomWidth: 1, borderBottomColor: c.border },
+  pinnedBarTitle:{ color: '#10B981', fontSize: 11, fontWeight: '700' },
+  pinnedBarSub:  { color: c.textDim, fontSize: 12.5, marginTop: 1 },
 
   dateChipRow:   { alignItems: 'center', marginVertical: 10 },
   dateChip:      { backgroundColor: c.surface, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 4 },

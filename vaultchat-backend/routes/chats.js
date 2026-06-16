@@ -635,6 +635,7 @@ router.get('/:id', async (req, res) => {
       updatedAt:            chat.updated_at,
       lastMessageId:        chat.last_message_id,
       lastMessageAt:        chat.last_message_at,
+      pinnedMessageId:      chat.pinned_message_id != null ? String(chat.pinned_message_id) : null,
       disappearingSeconds:  chat.disappearing_seconds ?? null,
       slowModeSeconds:      chat.slow_mode_seconds ?? 0,
       sendPolicy:           chat.send_policy ?? 'everyone',
@@ -1733,6 +1734,31 @@ router.get('/:id/poll-votes', async (req, res) => {
   } catch (err) {
     console.error('[poll votes bulk]', err.message);
     res.status(500).json({ error: 'Failed to load votes' });
+  }
+});
+
+// POST /chats/:id/pin — pin a message chat-wide, or clear it (messageId: null).
+// Any member can pin (matches WhatsApp). Broadcasts so open chats update live.
+router.post('/:id/pin', async (req, res) => {
+  try {
+    const chatId = req.params.id;
+    const me = await loadChatMembership(req, chatId);
+    if (!me || me.left_at) return res.status(403).json({ error: 'not a member' });
+
+    const messageId = req.body?.messageId == null ? null : parseInt(req.body.messageId, 10);
+    if (messageId !== null) {
+      // Verify the message belongs to this chat (and isn't deleted).
+      const m = await req.dbQuery(
+        `SELECT 1 FROM messages WHERE id = $1 AND chat_id = $2 AND deleted_at IS NULL LIMIT 1`,
+        [messageId, chatId]);
+      if (!m.rowCount) return res.status(404).json({ error: 'message not found' });
+    }
+    await req.dbQuery(`UPDATE chats SET pinned_message_id = $1 WHERE id = $2`, [messageId, chatId]);
+    broadcastChatEvent(chatId, 'message_pinned', { messageId: messageId != null ? String(messageId) : null });
+    res.json({ ok: true, pinnedMessageId: messageId != null ? String(messageId) : null });
+  } catch (err) {
+    console.error('[chats pin]', err.message);
+    res.status(500).json({ error: 'Failed to pin' });
   }
 });
 

@@ -91,6 +91,16 @@ export interface ChatDetail extends ChatSummary {
   addMembersPolicy?:    'everyone' | 'admins';
   antiSpamLinks?:       boolean;
   approveMembers?:      boolean;
+  // W15: a chat-wide pinned message (null = none).
+  pinnedMessageId?:     string | null;
+}
+
+/** Pin a message chat-wide (messageId = null clears the pin). */
+export async function pinMessage(chatId: string, messageId: string | number | null): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/pin`, {
+    method: 'POST',
+    json: { messageId: messageId == null ? null : Number(messageId) },
+  });
 }
 
 export interface Message {
