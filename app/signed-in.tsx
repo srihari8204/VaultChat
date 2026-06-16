@@ -5,17 +5,26 @@
 // chats / contacts / channels back online on top of Postgres.
 
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useState , useMemo} from 'react';
 import {
   ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
+import { useTheme } from '../lib/theme';
+import { type Palette } from '../constants/theme';
 import {
   getCurrentUserAsync,
   logoutUser,
 } from './(constants)/authService';
 import { api } from '../lib/api';
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function SignedInScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   const router = useRouter();
   const [user,    setUser]    = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
@@ -95,7 +104,7 @@ export default function SignedInScreen() {
   );
 }
 
-const S = StyleSheet.create({
+const makeStyles = (c: Palette) => StyleSheet.create({
   center:        { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFFFFF' },
   screen:        { flex: 1, backgroundColor: '#FFFFFF', padding: 24, paddingTop: 64, gap: 16 },
   card:          { backgroundColor: '#F4F6FA', borderRadius: 16, padding: 20, gap: 8 },
@@ -107,6 +116,6 @@ const S = StyleSheet.create({
   vSmall:        { fontSize: 11, color: '#000', fontWeight: '500', maxWidth: 220, textAlign: 'right' },
   btnSecondary:  { borderWidth: 1, borderColor: 'rgba(0,0,0,0.15)', borderRadius: 12, padding: 14, alignItems: 'center' },
   btnSecondaryTxt: { color: '#000', fontWeight: '600' },
-  btnDanger:     { backgroundColor: '#000', borderRadius: 12, padding: 14, alignItems: 'center' },
-  btnDangerTxt:  { color: '#fff', fontWeight: '700' },
+  btnDanger:     { backgroundColor: c.bg, borderRadius: 12, padding: 14, alignItems: 'center' },
+  btnDangerTxt:  { color: c.text, fontWeight: '700' },
 });

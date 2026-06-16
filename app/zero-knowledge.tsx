@@ -5,6 +5,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
 import React from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useMemo } from 'react';
+import { useTheme } from '../lib/theme';
+import { type Palette } from '../constants/theme';
 
 const ZK_LAYERS = [
   {
@@ -57,7 +60,14 @@ const COMPARISON = [
   { app: 'VaultChat', zk: true, desc: 'ZK on client today, server ZK in Phase 7-8' },
 ];
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function ZeroKnowledgeScreen() {
+  const { colors } = useTheme();
+  const st = useS();
   const router = useRouter();
 
   return (
@@ -70,7 +80,7 @@ export default function ZeroKnowledgeScreen() {
       <View style={st.screen}>
         <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
           {/* Header */}
-          <LinearGradient colors={['#1D4ED8', '#7C3AED']} style={st.heroBanner}>
+          <LinearGradient colors={['#1D4ED8', colors.purple]} style={st.heroBanner}>
             <Text style={{ fontSize: 48 }}>🔒</Text>
             <Text style={st.heroTitle}>Zero-Knowledge Architecture</Text>
             <Text style={st.heroSub}>The server mathematically cannot read your data — even if compelled by law.</Text>
@@ -96,7 +106,7 @@ export default function ZeroKnowledgeScreen() {
                   <Text style={st.layerTitle}>{layer.title}</Text>
                 </View>
                 <View style={[st.statusPill, layer.status === 'active' ? st.pillActive : st.pillPlanned]}>
-                  <Text style={[st.pillTxt, layer.status === 'active' ? { color: '#10B981' } : { color: '#F59E0B' }]}>{layer.phase}</Text>
+                  <Text style={[st.pillTxt, layer.status === 'active' ? { color: colors.primary } : { color: '#F59E0B' }]}>{layer.phase}</Text>
                 </View>
               </View>
               <Text style={st.layerDesc}>{layer.desc}</Text>
@@ -109,7 +119,7 @@ export default function ZeroKnowledgeScreen() {
             {COMPARISON.map((c, i) => (
               <View key={i} style={[st.compRow, i < COMPARISON.length - 1 && { borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }]}>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>{c.app}</Text>
+                  <Text style={{ color: colors.text, fontSize: 14, fontWeight: '700' }}>{c.app}</Text>
                   <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11, marginTop: 2 }}>{c.desc}</Text>
                 </View>
                 <Text style={{ fontSize: 18 }}>{c.zk ? '✅' : '❌'}</Text>
@@ -126,17 +136,17 @@ export default function ZeroKnowledgeScreen() {
   );
 }
 
-const st = StyleSheet.create({
+const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#FFFFFF' },
   heroBanner: { borderRadius: 20, padding: 24, alignItems: 'center', marginBottom: 20, gap: 10 },
-  heroTitle: { color: '#fff', fontSize: 22, fontWeight: '900', textAlign: 'center' },
+  heroTitle: { color: c.text, fontSize: 22, fontWeight: '900', textAlign: 'center' },
   heroSub: { color: 'rgba(255,255,255,0.7)', fontSize: 13, textAlign: 'center', lineHeight: 20 },
   card: { backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)', marginBottom: 16 },
-  cardTitle: { color: '#fff', fontSize: 16, fontWeight: '800', marginBottom: 8 },
+  cardTitle: { color: c.text, fontSize: 16, fontWeight: '800', marginBottom: 8 },
   cardDesc: { color: 'rgba(255,255,255,0.5)', fontSize: 13, lineHeight: 20 },
   sectionLabel: { color: 'rgba(255,255,255,0.3)', fontSize: 10, fontWeight: '800', letterSpacing: 2, marginBottom: 10, marginTop: 8 },
   layerCard: { backgroundColor: 'rgba(10,22,40,0.8)', borderRadius: 14, padding: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)', marginBottom: 10 },
-  layerTitle: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  layerTitle: { color: c.text, fontSize: 14, fontWeight: '700' },
   layerDesc: { color: 'rgba(255,255,255,0.45)', fontSize: 12, lineHeight: 18 },
   statusPill: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1 },
   pillActive: { backgroundColor: 'rgba(16,185,129,0.1)', borderColor: 'rgba(16,185,129,0.3)' },

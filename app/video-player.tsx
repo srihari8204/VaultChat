@@ -1,12 +1,14 @@
 // app/video-player.tsx — World-class Video Player for VaultChat
 // Full-featured playback: controls overlay, PiP, double-tap seek, pinch-zoom, swipe dismiss
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, TouchableWithoutFeedback, StyleSheet,
   StatusBar, ActivityIndicator, Dimensions, Animated, PanResponder,
   Platform, Share,
 } from 'react-native';
+import { useTheme } from '../lib/theme';
+import { type Palette } from '../constants/theme';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import * as ScreenOrientation from 'expo-screen-orientation';
@@ -27,7 +29,14 @@ const formatTime = (ms: number) => {
   return `${min}:${sec < 10 ? '0' : ''}${sec}`;
 };
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function VideoPlayerScreen() {
+  const { colors } = useTheme();
+  const styles = useS();
   const router = useRouter();
   const { uri, filename } = useLocalSearchParams();
   const videoUri = (uri || '') + '';
@@ -519,7 +528,7 @@ export default function VideoPlayerScreen() {
 }
 
 // ============================== STYLES ==============================
-const styles = StyleSheet.create({
+const makeStyles = (c: Palette) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: BG,
@@ -562,7 +571,7 @@ const styles = StyleSheet.create({
     top: '40%',
   },
   rippleText: {
-    color: '#fff',
+    color: c.text,
     fontSize: 14,
     fontWeight: '700',
   },
@@ -602,13 +611,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   topBtnIcon: {
-    color: '#fff',
+    color: c.text,
     fontSize: 24,
     fontWeight: '700',
   },
   titleText: {
     flex: 1,
-    color: '#fff',
+    color: c.text,
     fontSize: 16,
     fontWeight: '600',
     marginHorizontal: 8,
@@ -637,7 +646,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   playBtnIcon: {
-    color: '#fff',
+    color: c.text,
     fontSize: 28,
     fontWeight: '800',
   },
@@ -650,12 +659,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   sideBtnIcon: {
-    color: '#fff',
+    color: c.text,
     fontSize: 14,
     fontWeight: '700',
   },
   sideBtnLabel: {
-    color: '#fff',
+    color: c.text,
     fontSize: 11,
     fontWeight: '600',
     marginTop: -2,
@@ -725,11 +734,11 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   bottomActionIcon: {
-    color: '#fff',
+    color: c.text,
     fontSize: 20,
   },
   bottomActionText: {
-    color: '#fff',
+    color: c.text,
     fontSize: 14,
     fontWeight: '700',
     letterSpacing: 0.5,
@@ -748,7 +757,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.3)',
   },
   speedText: {
-    color: '#fff',
+    color: c.text,
     fontSize: 14,
     fontWeight: '700',
   },
@@ -805,7 +814,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   pipPlayIcon: {
-    color: '#fff',
+    color: c.text,
     fontSize: 12,
     fontWeight: '800',
   },
@@ -818,7 +827,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   pipExpandIcon: {
-    color: '#fff',
+    color: c.text,
     fontSize: 16,
   },
   pipCloseBtn: {
@@ -833,7 +842,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   pipCloseIcon: {
-    color: '#fff',
+    color: c.text,
     fontSize: 12,
     fontWeight: '800',
   },

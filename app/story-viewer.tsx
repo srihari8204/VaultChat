@@ -27,6 +27,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useTheme } from '../lib/theme';
+import { type Palette } from '../constants/theme';
 import { getAccessToken } from '../lib/api';
 import {
   attachmentUrl,
@@ -44,7 +46,14 @@ import { unwrapStoryKey } from '../lib/storyKeys';
 
 const IMAGE_DURATION_MS = 5_000;
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function StoryViewerScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   const router = useRouter();
   const { userId, userName } = useLocalSearchParams<{ userId?: string; userName?: string }>();
 
@@ -337,8 +346,8 @@ function formatAgo(iso: string): string {
   } catch { return ''; }
 }
 
-const S = StyleSheet.create({
-  screen:        { flex: 1, backgroundColor: '#000' },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen:        { flex: 1, backgroundColor: c.bg },
   center:        { justifyContent: 'center', alignItems: 'center' },
 
   media:         { ...StyleSheet.absoluteFillObject },
@@ -352,26 +361,26 @@ const S = StyleSheet.create({
   progressTrack: { flex: 1, height: 2, backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: 1, overflow: 'hidden' },
   progressFill:  { height: 2, backgroundColor: '#fff', borderRadius: 1 },
   authorRow:     { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 6 },
-  authorName:    { color: '#fff', fontSize: 15, fontWeight: '700' },
+  authorName:    { color: c.text, fontSize: 15, fontWeight: '700' },
   authorTime:    { color: 'rgba(255,255,255,0.7)', fontSize: 12 },
   iconBtn:       { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
-  iconBtnTxt:    { color: '#fff', fontSize: 18 },
+  iconBtnTxt:    { color: c.text, fontSize: 18 },
 
   captionBar:    { position: 'absolute', left: 16, right: 16, bottom: 40, backgroundColor: 'rgba(0,0,0,0.55)', padding: 12, borderRadius: 12 },
-  captionTxt:    { color: '#fff', fontSize: 14, lineHeight: 20 },
+  captionTxt:    { color: c.text, fontSize: 14, lineHeight: 20 },
 
-  errorTxt:      { color: '#fff', fontSize: 14, marginBottom: 16 },
+  errorTxt:      { color: c.text, fontSize: 14, marginBottom: 16 },
   closeBtn:      { backgroundColor: '#fff', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20 },
   closeBtnTxt:   { color: '#000', fontWeight: '700' },
 
   viewersBackdrop:  { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
   viewersSheet:     { backgroundColor: '#161A22', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, paddingBottom: 32, maxHeight: '70%' },
-  viewersTitle:     { color: '#fff', fontSize: 16, fontWeight: '700', marginBottom: 12 },
-  viewersEmpty:     { color: '#9CA3AF', fontSize: 13, textAlign: 'center', paddingVertical: 24 },
-  viewerRow:        { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#1F2937' },
+  viewersTitle:     { color: c.text, fontSize: 16, fontWeight: '700', marginBottom: 12 },
+  viewersEmpty:     { color: c.textDim, fontSize: 13, textAlign: 'center', paddingVertical: 24 },
+  viewerRow:        { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   viewerAvatar:     { width: 36, height: 36, borderRadius: 18, backgroundColor: '#6C63FF', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   viewerAvatarImg:  { width: '100%', height: '100%' },
-  viewerAvatarTxt:  { color: '#fff', fontWeight: '700' },
-  viewerName:       { color: '#fff', fontSize: 14, flex: 1 },
-  viewerWhen:       { color: '#9CA3AF', fontSize: 11 },
+  viewerAvatarTxt:  { color: c.text, fontWeight: '700' },
+  viewerName:       { color: c.text, fontSize: 14, flex: 1 },
+  viewerWhen:       { color: c.textDim, fontSize: 11 },
 });

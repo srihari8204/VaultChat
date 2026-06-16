@@ -2,14 +2,23 @@
 // Full-screen camera with photo/video, flip, flash, viewOnce toggle
 // Returns captured media URI back to chat via router params
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Alert, StatusBar,
 } from 'react-native';
+import { useTheme } from '../lib/theme';
+import { type Palette } from '../constants/theme';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function CameraScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const { chatId, peerUid, peerName, returnTo } = useLocalSearchParams();
   const [permission, requestPermission] = useCameraPermissions();
@@ -24,12 +33,12 @@ export default function CameraScreen() {
   if (!permission.granted) {
     return (
       <View style={[s.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <Text style={{ color: '#fff', fontSize: 16, marginBottom: 20 }}>Camera permission needed</Text>
+        <Text style={{ color: colors.text, fontSize: 16, marginBottom: 20 }}>Camera permission needed</Text>
         <TouchableOpacity onPress={requestPermission} style={s.permBtn}>
-          <Text style={{ color: '#10B981', fontWeight: '800', fontSize: 16 }}>Grant Access</Text>
+          <Text style={{ color: colors.primary, fontWeight: '800', fontSize: 16 }}>Grant Access</Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 16 }}>
-          <Text style={{ color: '#6B7280' }}>Go Back</Text>
+          <Text style={{ color: colors.textDim }}>Go Back</Text>
         </TouchableOpacity>
       </View>
     );
@@ -79,7 +88,7 @@ export default function CameraScreen() {
             onPress={() => setViewOnce(v => !v)}
             style={[s.topBtn, viewOnce && { backgroundColor: '#10B98144' }]}
           >
-            <Text style={[s.topIcon, viewOnce && { color: '#10B981' }]}>{"\uD83D\uDC41"}</Text>
+            <Text style={[s.topIcon, viewOnce && { color: colors.primary }]}>{"\uD83D\uDC41"}</Text>
           </TouchableOpacity>
         </View>
 
@@ -111,17 +120,17 @@ export default function CameraScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
   camera: { flex: 1 },
   topBar: { flexDirection: 'row', justifyContent: 'space-between', paddingTop: 50, paddingHorizontal: 20 },
   topBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#00000066', justifyContent: 'center', alignItems: 'center' },
-  topIcon: { color: '#fff', fontSize: 18, fontWeight: '700' },
+  topIcon: { color: c.text, fontSize: 18, fontWeight: '700' },
   bottomBar: { position: 'absolute', bottom: 40, left: 0, right: 0, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 40 },
   captureBtn: { width: 76, height: 76, borderRadius: 38, borderWidth: 4, borderColor: '#fff', justifyContent: 'center', alignItems: 'center' },
   captureInner: { width: 62, height: 62, borderRadius: 31, backgroundColor: '#fff' },
   flipBtn: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#00000066', justifyContent: 'center', alignItems: 'center' },
   permBtn: { paddingHorizontal: 28, paddingVertical: 14, borderRadius: 14, borderWidth: 1, borderColor: '#10B98144', backgroundColor: '#10B98115' },
   voBadge: { position: 'absolute', top: 100, alignSelf: 'center', backgroundColor: '#10B98133', paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20 },
-  voTxt: { color: '#10B981', fontSize: 13, fontWeight: '700' },
+  voTxt: { color: c.primary, fontSize: 13, fontWeight: '700' },
 });

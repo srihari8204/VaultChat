@@ -5,14 +5,23 @@
 import { Audio } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState , useMemo} from 'react';
 import {
   Animated, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
+import { useTheme } from '../lib/theme';
+import { type Palette } from '../constants/theme';
 
 const SPEEDS = [0.5, 1, 1.25, 1.5, 2];
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function VoiceSpeedPlayer() {
+  const { colors } = useTheme();
+  const st = useS();
   const { uri, duration: durParam, senderName } = useLocalSearchParams<{
     uri: string; duration?: string; senderName?: string;
   }>();
@@ -166,10 +175,10 @@ export default function VoiceSpeedPlayer() {
   );
 }
 
-const st = StyleSheet.create({
+const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#FFFFFF', justifyContent: 'center', padding: 20 },
   card: { backgroundColor: 'rgba(10,22,40,0.9)', borderRadius: 24, padding: 24, borderWidth: 1, borderColor: 'rgba(0,229,255,0.15)' },
-  sender: { color: '#fff', fontSize: 18, fontWeight: '800', textAlign: 'center', marginBottom: 20 },
+  sender: { color: c.text, fontSize: 18, fontWeight: '800', textAlign: 'center', marginBottom: 20 },
   waveform: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 60, gap: 2, marginBottom: 16 },
   bar: { width: 4, borderRadius: 2 },
   progressBg: { height: 4, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 2, overflow: 'hidden', marginBottom: 8 },

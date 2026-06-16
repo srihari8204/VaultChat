@@ -4,14 +4,23 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect , useMemo} from 'react';
 import {
   Animated, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
+import { useTheme } from '../lib/theme';
+import { type Palette } from '../constants/theme';
 
 const MAX_DURATION = 60; // 60 seconds max
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function VideoNotesScreen() {
+  const { colors } = useTheme();
+  const st = useS();
   const router = useRouter();
   const { chatId, peerUid, peerName } = useLocalSearchParams();
   const [permission, requestPermission] = useCameraPermissions();
@@ -84,13 +93,13 @@ export default function VideoNotesScreen() {
 
   const fmt = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
 
-  const ringColor = ringAnim.interpolate({ inputRange: [0, 0.7, 1], outputRange: ['#4A9FFF', '#F59E0B', '#EF4444'] });
+  const ringColor = ringAnim.interpolate({ inputRange: [0, 0.7, 1], outputRange: ['#4A9FFF', '#F59E0B', colors.danger] });
 
   if (!permission?.granted) {
     return (
       <View style={[st.screen, { justifyContent: 'center', alignItems: 'center' }]}>
         <Stack.Screen options={{ title: 'Video Note', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
-        <Text style={{ color: '#fff', fontSize: 16, marginBottom: 20 }}>Camera permission needed</Text>
+        <Text style={{ color: colors.text, fontSize: 16, marginBottom: 20 }}>Camera permission needed</Text>
         <TouchableOpacity onPress={requestPermission} style={st.permBtn}>
           <Text style={{ color: '#4A9FFF', fontWeight: '800' }}>Grant Access</Text>
         </TouchableOpacity>
@@ -131,7 +140,7 @@ export default function VideoNotesScreen() {
           {/* Timer */}
           {(recording || recorded) && (
             <View style={st.timerBadge}>
-              <View style={[st.recDot, recording && { backgroundColor: '#EF4444' }]} />
+              <View style={[st.recDot, recording && { backgroundColor: colors.danger }]} />
               <Text style={st.timerTxt}>{fmt(seconds)}</Text>
             </View>
           )}
@@ -142,7 +151,7 @@ export default function VideoNotesScreen() {
           {!recorded ? (
             <>
               <TouchableOpacity onPress={() => router.back()} style={st.cancelBtn}>
-                <Text style={{ color: '#6B7280', fontSize: 14 }}>Cancel</Text>
+                <Text style={{ color: colors.textDim, fontSize: 14 }}>Cancel</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -150,7 +159,7 @@ export default function VideoNotesScreen() {
                 style={st.recordOuter}
               >
                 <LinearGradient
-                  colors={recording ? ['#EF4444', '#DC2626'] : ['#4A9FFF', '#4A9FFF']}
+                  colors={recording ? [colors.danger, colors.danger] : ['#4A9FFF', '#4A9FFF']}
                   style={st.recordInner}
                 >
                   {recording ? (
@@ -176,7 +185,7 @@ export default function VideoNotesScreen() {
               </TouchableOpacity>
 
               <TouchableOpacity onPress={() => router.back()} style={st.actionBtn}>
-                <Text style={{ color: '#6B7280', fontSize: 14 }}>Cancel</Text>
+                <Text style={{ color: colors.textDim, fontSize: 14 }}>Cancel</Text>
               </TouchableOpacity>
             </>
           )}
@@ -190,9 +199,9 @@ export default function VideoNotesScreen() {
   );
 }
 
-const st = StyleSheet.create({
+const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#FFFFFF', alignItems: 'center', paddingTop: 20 },
-  title: { color: '#fff', fontSize: 22, fontWeight: '900', marginBottom: 4 },
+  title: { color: c.text, fontSize: 22, fontWeight: '900', marginBottom: 4 },
   subtitle: { color: 'rgba(255,255,255,0.4)', fontSize: 13, marginBottom: 30 },
   cameraWrap: { alignItems: 'center', marginBottom: 40 },
   ringOuter: { width: 260, height: 260, borderRadius: 130, borderWidth: 4, justifyContent: 'center', alignItems: 'center' },
@@ -200,7 +209,7 @@ const st = StyleSheet.create({
   camera: { width: 240, height: 240 },
   timerBadge: { position: 'absolute', bottom: -10, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FFFFFF', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
   recDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#D1D5DB' },
-  timerTxt: { color: '#fff', fontSize: 14, fontWeight: '700', fontFamily: 'monospace' },
+  timerTxt: { color: c.text, fontSize: 14, fontWeight: '700', fontFamily: 'monospace' },
   controls: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 24 },
   cancelBtn: { width: 60, alignItems: 'center' },
   recordOuter: { width: 80, height: 80, borderRadius: 40, borderWidth: 3, borderColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' },
