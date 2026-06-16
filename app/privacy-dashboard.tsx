@@ -7,7 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState , useMemo} from 'react';
 import {
   Alert,
   Animated,
@@ -19,26 +19,14 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import Svg, { Circle } from 'react-native-svg';
 import { getSettings, updateSettings, listTrustedContacts } from '../lib/chatService';
 import { getSecurityOverview } from '../lib/security';
 import { hasPIN } from './(constants)/authService';
 import { E2EE_ENABLED } from '../constants/flags';
 
-const C = {
-  bg: '#FFFFFF',
-  card: '#F9FAFB',
-  cardAlt: '#111D32',
-  accent: '#4A9FFF',
-  cyan: '#4A9FFF',
-  green: '#10B981',
-  red: '#EF4444',
-  orange: '#F59E0B',
-  text: '#FFFFFF',
-  textDim: 'rgba(255,255,255,0.5)',
-  textFaint: 'rgba(255,255,255,0.22)',
-  border: 'rgba(74,159,255,0.15)',
-};
 
 const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
 const STORAGE_KEY = 'vc_privacy_settings';
@@ -101,7 +89,14 @@ const FEATURES: FeatureItem[] = [
 ];
 
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function PrivacyDashboardScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
 
   const [settings, setSettings] = useState<PrivacySettings>(DEFAULT_SETTINGS);
@@ -169,9 +164,9 @@ export default function PrivacyDashboardScreen() {
   }, [score, scoreAnim]);
 
   const getScoreColor = () => {
-    if (score >= 80) return C.green;
-    if (score >= 50) return C.orange;
-    return C.red;
+    if (score >= 80) return colors.primary;
+    if (score >= 50) return '#F59E0B';
+    return colors.danger;
   };
 
   const isFeatureEnabled = (f: FeatureItem): boolean => {
@@ -267,10 +262,10 @@ export default function PrivacyDashboardScreen() {
               <Ionicons
                 name={enabled ? 'checkmark' : 'close'}
                 size={14}
-                color={enabled ? '#FFF' : C.textDim}
+                color={enabled ? '#FFF' : colors.textDim}
               />
             </View>
-            <Text style={[s.checkLabel, !enabled && { color: C.textDim }]}>{f.label}</Text>
+            <Text style={[s.checkLabel, !enabled && { color: colors.textDim }]}>{f.label}</Text>
             {f.alwaysOn && (
               <View style={s.alwaysBadge}>
                 <Text style={s.alwaysBadgeText}>Always On</Text>
@@ -298,7 +293,7 @@ export default function PrivacyDashboardScreen() {
     return (
       <View style={s.privacyRow}>
         <View style={s.privacyLeft}>
-          <Ionicons name={icon as any} size={20} color={C.accent} style={{ marginRight: 10 }} />
+          <Ionicons name={icon as any} size={20} color={colors.accent} style={{ marginRight: 10 }} />
           <Text style={s.privacyLabel}>{label}</Text>
         </View>
         <View style={s.privacyChips}>
@@ -326,7 +321,7 @@ export default function PrivacyDashboardScreen() {
       {/* Online status */}
       <View style={s.privacyRow}>
         <View style={s.privacyLeft}>
-          <Ionicons name="ellipse" size={20} color={settings.onlineStatus ? C.green : C.textDim} style={{ marginRight: 10 }} />
+          <Ionicons name="ellipse" size={20} color={settings.onlineStatus ? colors.primary : colors.textDim} style={{ marginRight: 10 }} />
           <Text style={s.privacyLabel}>Online Status</Text>
         </View>
         <View style={s.privacyChips}>
@@ -348,13 +343,13 @@ export default function PrivacyDashboardScreen() {
       {/* Blocked contacts */}
       <TouchableOpacity style={s.blockedRow} onPress={() => router.push('/blocked' as any)}>
         <View style={s.privacyLeft}>
-          <Ionicons name="ban" size={20} color={C.red} style={{ marginRight: 10 }} />
+          <Ionicons name="ban" size={20} color={colors.danger} style={{ marginRight: 10 }} />
           <Text style={s.privacyLabel}>Blocked Contacts</Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <Text style={s.blockedCount}>{settings.blockedCount}</Text>
           <Text style={s.manageLink}>Manage</Text>
-          <Ionicons name="chevron-forward" size={16} color={C.accent} />
+          <Ionicons name="chevron-forward" size={16} color={colors.accent} />
         </View>
       </TouchableOpacity>
     </View>
@@ -369,7 +364,7 @@ export default function PrivacyDashboardScreen() {
         <Text style={s.sectionTitle}>Improve Your Score</Text>
         {suggestions.map((f, i) => (
           <View key={i} style={s.suggestionRow}>
-            <Ionicons name="arrow-up-circle" size={18} color={C.cyan} style={{ marginRight: 10, marginTop: 1 }} />
+            <Ionicons name="arrow-up-circle" size={18} color={colors.accent} style={{ marginRight: 10, marginTop: 1 }} />
             <View style={{ flex: 1 }}>
               <Text style={s.suggestionLabel}>{f.label}</Text>
               <Text style={s.suggestionText}>{f.suggestion}</Text>
@@ -384,13 +379,13 @@ export default function PrivacyDashboardScreen() {
   return (
     <View style={s.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <LinearGradient colors={[C.bg, '#F9FAFB', C.bg]} style={StyleSheet.absoluteFill} />
+      <LinearGradient colors={[colors.bg, '#F9FAFB', colors.bg]} style={StyleSheet.absoluteFill} />
 
       <Animated.View style={{ flex: 1, opacity: fadeIn }}>
         {/* Header */}
         <View style={s.header}>
           <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-            <Ionicons name="arrow-back" size={24} color={C.text} />
+            <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={s.headerTitle}>Privacy Dashboard</Text>
           <View style={{ width: 40 }} />
@@ -407,8 +402,8 @@ export default function PrivacyDashboardScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
 
   header: {
     flexDirection: 'row',
@@ -419,27 +414,27 @@ const s = StyleSheet.create({
     paddingBottom: 12,
   },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  headerTitle: { fontSize: 18, fontWeight: '700', color: C.text },
+  headerTitle: { fontSize: 18, fontWeight: '700', color: c.text },
 
   // Score ring
   scoreContainer: { alignItems: 'center', marginTop: 12, marginBottom: 8, paddingHorizontal: 24 },
   ringWrapper: { position: 'relative', width: 160, height: 160, justifyContent: 'center', alignItems: 'center' },
   scoreTextContainer: { position: 'absolute', alignItems: 'center' },
   scoreNumber: { fontSize: 42, fontWeight: '800' },
-  scoreLabel: { fontSize: 12, color: C.textDim, marginTop: -2 },
-  scoreHint: { fontSize: 13, color: C.textDim, textAlign: 'center', marginTop: 12, lineHeight: 20 },
+  scoreLabel: { fontSize: 12, color: c.textDim, marginTop: -2 },
+  scoreHint: { fontSize: 13, color: c.textDim, textAlign: 'center', marginTop: 12, lineHeight: 20 },
 
   // Sections
   section: {
     marginHorizontal: 16,
     marginTop: 20,
-    backgroundColor: C.card,
+    backgroundColor: c.card,
     borderRadius: 16,
     padding: 16,
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: c.border,
   },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: C.text, marginBottom: 12 },
+  sectionTitle: { fontSize: 16, fontWeight: '700', color: c.text, marginBottom: 12 },
 
   // Checklist
   checkRow: {
@@ -457,16 +452,16 @@ const s = StyleSheet.create({
     alignItems: 'center',
     marginRight: 12,
   },
-  checkIconOn: { backgroundColor: C.green },
+  checkIconOn: { backgroundColor: c.primary },
   checkIconOff: { backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
-  checkLabel: { fontSize: 14, color: C.text, fontWeight: '500', flex: 1 },
+  checkLabel: { fontSize: 14, color: c.text, fontWeight: '500', flex: 1 },
   alwaysBadge: {
     backgroundColor: 'rgba(16,185,129,0.15)',
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 6,
   },
-  alwaysBadgeText: { fontSize: 10, color: C.green, fontWeight: '700' },
+  alwaysBadgeText: { fontSize: 10, color: c.primary, fontWeight: '700' },
 
   // Privacy controls
   privacyRow: {
@@ -475,19 +470,19 @@ const s = StyleSheet.create({
     borderBottomColor: 'rgba(255,255,255,0.04)',
   },
   privacyLeft: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  privacyLabel: { fontSize: 14, color: C.text, fontWeight: '600' },
+  privacyLabel: { fontSize: 14, color: c.text, fontWeight: '600' },
   privacyChips: { flexDirection: 'row', gap: 6 },
   pChip: {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
-    backgroundColor: C.cardAlt,
+    backgroundColor: '#111D32',
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: c.border,
   },
-  pChipActive: { backgroundColor: 'rgba(74,159,255,0.15)', borderColor: C.accent },
-  pChipText: { fontSize: 12, color: C.textDim, fontWeight: '600' },
-  pChipTextActive: { color: C.accent },
+  pChipActive: { backgroundColor: 'rgba(74,159,255,0.15)', borderColor: c.accent },
+  pChipText: { fontSize: 12, color: c.textDim, fontWeight: '600' },
+  pChipTextActive: { color: c.accent },
 
   blockedRow: {
     flexDirection: 'row',
@@ -495,8 +490,8 @@ const s = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 12,
   },
-  blockedCount: { fontSize: 14, fontWeight: '700', color: C.text, marginRight: 8 },
-  manageLink: { fontSize: 13, color: C.accent, fontWeight: '600', marginRight: 4 },
+  blockedCount: { fontSize: 14, fontWeight: '700', color: c.text, marginRight: 8 },
+  manageLink: { fontSize: 13, color: c.accent, fontWeight: '600', marginRight: 4 },
 
   // Suggestions
   suggestionRow: {
@@ -506,7 +501,7 @@ const s = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.04)',
   },
-  suggestionLabel: { fontSize: 13, fontWeight: '600', color: C.text },
-  suggestionText: { fontSize: 12, color: C.textDim, marginTop: 2, lineHeight: 18 },
-  suggestionPoints: { fontSize: 13, fontWeight: '700', color: C.cyan, marginLeft: 8 },
+  suggestionLabel: { fontSize: 13, fontWeight: '600', color: c.text },
+  suggestionText: { fontSize: 12, color: c.textDim, marginTop: 2, lineHeight: 18 },
+  suggestionPoints: { fontSize: 13, fontWeight: '700', color: c.accent, marginLeft: 8 },
 });

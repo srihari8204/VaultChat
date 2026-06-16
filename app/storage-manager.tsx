@@ -1,11 +1,13 @@
 // app/storage-manager.tsx — Storage Manager
 // View storage breakdown, manage cache, auto-download & quality settings
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   StatusBar, Platform, Alert, ActivityIndicator, Switch,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { Stack, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -13,13 +15,6 @@ import { Ionicons } from '@expo/vector-icons';
 
 const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
 
-const C = {
-  bg: '#FFFFFF', accent: '#4A9FFF', cyan: '#4A9FFF',
-  card: '#F9FAFB', cardBorder: '#112240', white: '#FFFFFF',
-  muted: '#7B8CA8', green: '#10B981', red: '#FF4D6D',
-  orange: '#FF9F43', purple: '#A855F7', pink: '#EC4899',
-  yellow: '#FBBF24',
-};
 
 const STORAGE_KEY = 'vc_storage_settings';
 
@@ -43,7 +38,14 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function StorageManagerScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [clearing, setClearing] = useState(false);
@@ -98,11 +100,11 @@ export default function StorageManagerScreen() {
       const total = imgSize + vidSize + audSize + fileSize + otherSize;
 
       setCategories([
-        { label: 'Images', size: imgSize, color: C.green, icon: 'image-outline' },
-        { label: 'Videos', size: vidSize, color: C.accent, icon: 'videocam-outline' },
-        { label: 'Audio', size: audSize, color: C.purple, icon: 'musical-notes-outline' },
-        { label: 'Files', size: fileSize, color: C.orange, icon: 'document-outline' },
-        { label: 'Other', size: otherSize, color: C.muted, icon: 'ellipsis-horizontal-outline' },
+        { label: 'Images', size: imgSize, color: colors.primary, icon: 'image-outline' },
+        { label: 'Videos', size: vidSize, color: colors.accent, icon: 'videocam-outline' },
+        { label: 'Audio', size: audSize, color: colors.purple, icon: 'musical-notes-outline' },
+        { label: 'Files', size: fileSize, color: '#FF9F43', icon: 'document-outline' },
+        { label: 'Other', size: otherSize, color: colors.textDim, icon: 'ellipsis-horizontal-outline' },
       ]);
       setTotalUsed(total);
       setFreeSpace(4_200_000_000); // Simulated free space
@@ -194,7 +196,7 @@ export default function StorageManagerScreen() {
     return (
       <View style={s.loadingWrap}>
         <Stack.Screen options={{ headerShown: false }} />
-        <ActivityIndicator size="large" color={C.accent} />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -202,12 +204,12 @@ export default function StorageManagerScreen() {
   return (
     <View style={s.root}>
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+      <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
 
-      <LinearGradient colors={['#F9FAFB', C.bg]} style={s.header}>
+      <LinearGradient colors={['#F9FAFB', colors.bg]} style={s.header}>
         <View style={[s.headerRow, { marginTop: TOP }]}>
           <TouchableOpacity onPress={() => router.back()} hitSlop={16}>
-            <Ionicons name="arrow-back" size={24} color={C.white} />
+            <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={s.headerTitle}>Storage Manager</Text>
           <View style={{ width: 24 }} />
@@ -219,14 +221,14 @@ export default function StorageManagerScreen() {
         {/* ── Total Storage Card ─────────────────────── */}
         <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.storageHeader}>
-            <Ionicons name="pie-chart-outline" size={28} color={C.cyan} />
+            <Ionicons name="pie-chart-outline" size={28} color={colors.accent} />
             <View style={{ marginLeft: 12, flex: 1 }}>
               <Text style={s.cardTitle}>Total Storage Used</Text>
               <Text style={s.storageBig}>{formatBytes(totalUsed)}</Text>
             </View>
           </View>
           <View style={s.freeRow}>
-            <Ionicons name="cloud-done-outline" size={16} color={C.green} />
+            <Ionicons name="cloud-done-outline" size={16} color={colors.primary} />
             <Text style={s.freeText}>{formatBytes(freeSpace)} free on device</Text>
           </View>
         </LinearGradient>
@@ -267,8 +269,8 @@ export default function StorageManagerScreen() {
           <Text style={s.cardTitle}>Cache Management</Text>
 
           <TouchableOpacity style={s.actionBtn} onPress={clearCache} disabled={clearing} activeOpacity={0.7}>
-            <Ionicons name="trash-outline" size={20} color={C.red} />
-            <Text style={[s.actionText, { color: C.red }]}>
+            <Ionicons name="trash-outline" size={20} color={colors.danger} />
+            <Text style={[s.actionText, { color: colors.danger }]}>
               {clearing ? 'Clearing...' : 'Clear Cache'}
             </Text>
           </TouchableOpacity>
@@ -313,13 +315,13 @@ export default function StorageManagerScreen() {
             ['autoDownloadFiles', 'Files', 'document-outline'],
           ] as const).map(([key, label, icon]) => (
             <View key={key} style={s.toggleRow}>
-              <Ionicons name={icon as any} size={18} color={C.muted} />
+              <Ionicons name={icon as any} size={18} color={colors.textDim} />
               <Text style={s.toggleLabel}>{label}</Text>
               <Switch
                 value={settings[key]}
                 onValueChange={(v) => saveSettings({ ...settings, [key]: v })}
-                trackColor={{ false: '#1A2A44', true: C.accent }}
-                thumbColor={settings[key] ? C.white : '#6B7280'}
+                trackColor={{ false: '#1A2A44', true: colors.accent }}
+                thumbColor={settings[key] ? colors.text : '#6B7280'}
               />
             </View>
           ))}
@@ -354,58 +356,58 @@ export default function StorageManagerScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: C.bg },
-  loadingWrap: { flex: 1, backgroundColor: C.bg, justifyContent: 'center', alignItems: 'center' },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: c.bg },
+  loadingWrap: { flex: 1, backgroundColor: c.bg, justifyContent: 'center', alignItems: 'center' },
   header: { paddingBottom: 16, paddingHorizontal: 20 },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  headerTitle: { color: C.white, fontSize: 20, fontWeight: '700' },
+  headerTitle: { color: c.text, fontSize: 20, fontWeight: '700' },
   scroll: { flex: 1 },
   scrollContent: { padding: 16, paddingBottom: 40 },
 
   card: {
     borderRadius: 16, padding: 20, marginBottom: 16,
-    borderWidth: 1, borderColor: C.cardBorder,
+    borderWidth: 1, borderColor: '#112240',
   },
-  cardTitle: { color: C.white, fontSize: 17, fontWeight: '700', marginBottom: 16 },
+  cardTitle: { color: c.text, fontSize: 17, fontWeight: '700', marginBottom: 16 },
 
   storageHeader: { flexDirection: 'row', alignItems: 'center' },
-  storageBig: { color: C.cyan, fontSize: 28, fontWeight: '800', marginTop: 2 },
-  freeRow: { flexDirection: 'row', alignItems: 'center', marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: C.cardBorder },
-  freeText: { color: C.green, fontSize: 13, marginLeft: 8 },
+  storageBig: { color: c.accent, fontSize: 28, fontWeight: '800', marginTop: 2 },
+  freeRow: { flexDirection: 'row', alignItems: 'center', marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#112240' },
+  freeText: { color: c.primary, fontSize: 13, marginLeft: 8 },
 
   catRow: { marginBottom: 14 },
   catInfo: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
-  catLabel: { color: C.white, fontSize: 14, marginLeft: 8, flex: 1 },
-  catSize: { color: C.muted, fontSize: 13 },
+  catLabel: { color: c.text, fontSize: 14, marginLeft: 8, flex: 1 },
+  catSize: { color: c.textDim, fontSize: 13 },
   barBg: { height: 8, borderRadius: 4, backgroundColor: '#1A2A44', overflow: 'hidden' },
   barFill: { height: 8, borderRadius: 4 },
 
-  chatRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.cardBorder },
-  chatAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: C.accent + '30', justifyContent: 'center', alignItems: 'center' },
-  chatAvatarText: { color: C.accent, fontSize: 15, fontWeight: '700' },
-  chatName: { color: C.white, fontSize: 14, flex: 1, marginLeft: 12 },
-  chatSize: { color: C.muted, fontSize: 13 },
+  chatRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#112240' },
+  chatAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: c.accent + '30', justifyContent: 'center', alignItems: 'center' },
+  chatAvatarText: { color: c.accent, fontSize: 15, fontWeight: '700' },
+  chatName: { color: c.text, fontSize: 14, flex: 1, marginLeft: 12 },
+  chatSize: { color: c.textDim, fontSize: 13 },
 
-  actionBtn: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: C.cardBorder },
+  actionBtn: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#112240' },
   actionText: { fontSize: 15, fontWeight: '600', marginLeft: 10 },
 
-  sectionLabel: { color: C.muted, fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1, marginTop: 14, marginBottom: 10 },
+  sectionLabel: { color: c.textDim, fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1, marginTop: 14, marginBottom: 10 },
 
   daysRow: { flexDirection: 'row', gap: 10 },
   dayBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: '#1A2A44', alignItems: 'center' },
-  dayBtnActive: { backgroundColor: C.red + '30', borderWidth: 1, borderColor: C.red },
-  dayBtnText: { color: C.muted, fontSize: 13, fontWeight: '600' },
-  dayBtnTextActive: { color: C.red },
+  dayBtnActive: { backgroundColor: c.danger + '30', borderWidth: 1, borderColor: c.danger },
+  dayBtnText: { color: c.textDim, fontSize: 13, fontWeight: '600' },
+  dayBtnTextActive: { color: c.danger },
 
   radioRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10 },
-  radioOuter: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: C.muted, justifyContent: 'center', alignItems: 'center' },
-  radioOuterActive: { borderColor: C.accent },
-  radioInner: { width: 10, height: 10, borderRadius: 5, backgroundColor: C.accent },
-  radioLabel: { color: C.white, fontSize: 14, marginLeft: 10 },
+  radioOuter: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: c.textDim, justifyContent: 'center', alignItems: 'center' },
+  radioOuterActive: { borderColor: c.accent },
+  radioInner: { width: 10, height: 10, borderRadius: 5, backgroundColor: c.accent },
+  radioLabel: { color: c.text, fontSize: 14, marginLeft: 10 },
 
-  toggleRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.cardBorder },
-  toggleLabel: { color: C.white, fontSize: 14, flex: 1, marginLeft: 10 },
+  toggleRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#112240' },
+  toggleLabel: { color: c.text, fontSize: 14, flex: 1, marginLeft: 10 },
 
-  divider: { height: 1, backgroundColor: C.cardBorder, marginVertical: 10 },
+  divider: { height: 1, backgroundColor: '#112240', marginVertical: 10 },
 });

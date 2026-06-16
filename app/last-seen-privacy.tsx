@@ -1,11 +1,13 @@
 // app/last-seen-privacy.tsx — Last Seen & Online Privacy Settings
 // All settings saved to AsyncStorage 'vc_privacy_settings'
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   StatusBar, Platform, Alert, Switch,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { Stack, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -13,12 +15,6 @@ import { Ionicons } from '@expo/vector-icons';
 
 const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
 
-const C = {
-  bg: '#FFFFFF', accent: '#4A9FFF', cyan: '#4A9FFF',
-  card: '#F9FAFB', cardBorder: '#112240', white: '#FFFFFF',
-  muted: '#7B8CA8', green: '#10B981', red: '#FF4D6D',
-  orange: '#FF9F43', yellow: '#FBBF24',
-};
 
 const STORAGE_KEY = 'vc_privacy_settings';
 
@@ -41,7 +37,14 @@ const VISIBILITY_OPTIONS = [
   { label: 'Nobody', value: 'nobody' },
 ];
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function LastSeenPrivacyScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const [settings, setSettings] = useState<PrivacySettings>(DEFAULT_PRIVACY);
   const [saved, setSaved] = useState(false);
@@ -97,7 +100,7 @@ export default function LastSeenPrivacyScreen() {
 
   const InfoCard = ({ text }: { text: string }) => (
     <View style={s.infoCard}>
-      <Ionicons name="information-circle-outline" size={16} color={C.accent} />
+      <Ionicons name="information-circle-outline" size={16} color={colors.accent} />
       <Text style={s.infoText}>{text}</Text>
     </View>
   );
@@ -115,16 +118,16 @@ export default function LastSeenPrivacyScreen() {
   return (
     <View style={s.root}>
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+      <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
 
-      <LinearGradient colors={['#F9FAFB', C.bg]} style={s.header}>
+      <LinearGradient colors={['#F9FAFB', colors.bg]} style={s.header}>
         <View style={[s.headerRow, { marginTop: TOP }]}>
           <TouchableOpacity onPress={() => router.back()} hitSlop={16}>
-            <Ionicons name="arrow-back" size={24} color={C.white} />
+            <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={s.headerTitle}>Privacy Settings</Text>
           <TouchableOpacity onPress={saveAll} hitSlop={16}>
-            <Text style={[s.saveBtn, saved && { color: C.green }]}>
+            <Text style={[s.saveBtn, saved && { color: colors.primary }]}>
               {saved ? 'Saved!' : 'Save'}
             </Text>
           </TouchableOpacity>
@@ -136,7 +139,7 @@ export default function LastSeenPrivacyScreen() {
         {/* ── Last Seen ──────────────────────────────── */}
         <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.sectionHeader}>
-            <Ionicons name="time-outline" size={20} color={C.cyan} />
+            <Ionicons name="time-outline" size={20} color={colors.accent} />
             <Text style={s.cardTitle}>Last Seen</Text>
           </View>
           <InfoCard text="Controls who can see when you were last active in VaultChat." />
@@ -146,7 +149,7 @@ export default function LastSeenPrivacyScreen() {
         {/* ── Online Status ──────────────────────────── */}
         <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.sectionHeader}>
-            <Ionicons name="radio-button-on-outline" size={20} color={C.green} />
+            <Ionicons name="radio-button-on-outline" size={20} color={colors.primary} />
             <Text style={s.cardTitle}>Online Status</Text>
           </View>
           <InfoCard text="When hidden, others won't see when you're currently online." />
@@ -155,8 +158,8 @@ export default function LastSeenPrivacyScreen() {
             <Switch
               value={settings.onlineStatus}
               onValueChange={(v) => update({ onlineStatus: v })}
-              trackColor={{ false: '#1A2A44', true: C.green }}
-              thumbColor={settings.onlineStatus ? C.white : '#6B7280'}
+              trackColor={{ false: '#1A2A44', true: colors.primary }}
+              thumbColor={settings.onlineStatus ? colors.text : '#6B7280'}
             />
           </View>
         </LinearGradient>
@@ -164,7 +167,7 @@ export default function LastSeenPrivacyScreen() {
         {/* ── Profile Photo ──────────────────────────── */}
         <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.sectionHeader}>
-            <Ionicons name="person-circle-outline" size={20} color={C.accent} />
+            <Ionicons name="person-circle-outline" size={20} color={colors.accent} />
             <Text style={s.cardTitle}>Profile Photo</Text>
           </View>
           <InfoCard text="Choose who can see your profile photo." />
@@ -174,7 +177,7 @@ export default function LastSeenPrivacyScreen() {
         {/* ── About / Bio ────────────────────────────── */}
         <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.sectionHeader}>
-            <Ionicons name="text-outline" size={20} color={C.orange} />
+            <Ionicons name="text-outline" size={20} color={'#FF9F43'} />
             <Text style={s.cardTitle}>About / Bio</Text>
           </View>
           <InfoCard text="Controls who can see your bio or status text." />
@@ -184,7 +187,7 @@ export default function LastSeenPrivacyScreen() {
         {/* ── Read Receipts ──────────────────────────── */}
         <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.sectionHeader}>
-            <Ionicons name="checkmark-done-outline" size={20} color={C.accent} />
+            <Ionicons name="checkmark-done-outline" size={20} color={colors.accent} />
             <Text style={s.cardTitle}>Read Receipts</Text>
           </View>
           <View style={s.toggleRow}>
@@ -205,13 +208,13 @@ export default function LastSeenPrivacyScreen() {
                   update({ readReceipts: true });
                 }
               }}
-              trackColor={{ false: '#1A2A44', true: C.accent }}
-              thumbColor={settings.readReceipts ? C.white : '#6B7280'}
+              trackColor={{ false: '#1A2A44', true: colors.accent }}
+              thumbColor={settings.readReceipts ? colors.text : '#6B7280'}
             />
           </View>
           {!settings.readReceipts && (
             <View style={s.warningCard}>
-              <Ionicons name="warning-outline" size={16} color={C.yellow} />
+              <Ionicons name="warning-outline" size={16} color={'#FBBF24'} />
               <Text style={s.warningText}>
                 You won&apos;t see others&apos; read receipts either when this is turned off.
               </Text>
@@ -222,7 +225,7 @@ export default function LastSeenPrivacyScreen() {
         {/* ── Typing Indicator ───────────────────────── */}
         <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.sectionHeader}>
-            <Ionicons name="chatbubble-ellipses-outline" size={20} color={C.cyan} />
+            <Ionicons name="chatbubble-ellipses-outline" size={20} color={colors.accent} />
             <Text style={s.cardTitle}>Typing Indicator</Text>
           </View>
           <InfoCard text="When off, others won't see when you're typing a message." />
@@ -231,8 +234,8 @@ export default function LastSeenPrivacyScreen() {
             <Switch
               value={settings.typingIndicator}
               onValueChange={(v) => update({ typingIndicator: v })}
-              trackColor={{ false: '#1A2A44', true: C.cyan }}
-              thumbColor={settings.typingIndicator ? C.white : '#6B7280'}
+              trackColor={{ false: '#1A2A44', true: colors.accent }}
+              thumbColor={settings.typingIndicator ? colors.text : '#6B7280'}
             />
           </View>
         </LinearGradient>
@@ -240,7 +243,7 @@ export default function LastSeenPrivacyScreen() {
         {/* ── Groups ─────────────────────────────────── */}
         <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.sectionHeader}>
-            <Ionicons name="people-outline" size={20} color={C.accent} />
+            <Ionicons name="people-outline" size={20} color={colors.accent} />
             <Text style={s.cardTitle}>Groups</Text>
           </View>
           <InfoCard text="Controls who can add you to group chats." />
@@ -250,7 +253,7 @@ export default function LastSeenPrivacyScreen() {
         {/* ── Live Location Duration ─────────────────── */}
         <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.sectionHeader}>
-            <Ionicons name="location-outline" size={20} color={C.red} />
+            <Ionicons name="location-outline" size={20} color={colors.danger} />
             <Text style={s.cardTitle}>Live Location</Text>
           </View>
           <InfoCard text="Default sharing duration when you share your live location." />
@@ -273,7 +276,7 @@ export default function LastSeenPrivacyScreen() {
         {/* ── Profile Preview ────────────────────────── */}
         <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.sectionHeader}>
-            <Ionicons name="eye-outline" size={20} color={C.cyan} />
+            <Ionicons name="eye-outline" size={20} color={colors.accent} />
             <Text style={s.cardTitle}>Profile Preview</Text>
           </View>
           <Text style={s.previewDesc}>How your profile appears to others:</Text>
@@ -285,10 +288,10 @@ export default function LastSeenPrivacyScreen() {
                 {
                   backgroundColor:
                     item.value === 'everyone' || item.value === 'Visible' || item.value === 'On'
-                      ? C.green + '20'
+                      ? colors.primary + '20'
                       : item.value === 'contacts'
-                      ? C.accent + '20'
-                      : C.red + '20'
+                      ? colors.accent + '20'
+                      : colors.danger + '20'
                 },
               ]}>
                 <Text style={[
@@ -296,10 +299,10 @@ export default function LastSeenPrivacyScreen() {
                   {
                     color:
                       item.value === 'everyone' || item.value === 'Visible' || item.value === 'On'
-                        ? C.green
+                        ? colors.primary
                         : item.value === 'contacts'
-                        ? C.accent
-                        : C.red
+                        ? colors.accent
+                        : colors.danger
                   },
                 ]}>
                   {typeof item.value === 'string'
@@ -338,50 +341,50 @@ export default function LastSeenPrivacyScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: C.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: c.bg },
   header: { paddingBottom: 16, paddingHorizontal: 20 },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  headerTitle: { color: C.white, fontSize: 20, fontWeight: '700' },
-  saveBtn: { color: C.accent, fontSize: 15, fontWeight: '700' },
+  headerTitle: { color: c.text, fontSize: 20, fontWeight: '700' },
+  saveBtn: { color: c.accent, fontSize: 15, fontWeight: '700' },
   scroll: { flex: 1 },
   scrollContent: { padding: 16, paddingBottom: 40 },
 
-  card: { borderRadius: 16, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: C.cardBorder },
-  cardTitle: { color: C.white, fontSize: 17, fontWeight: '700', marginLeft: 10 },
-  cardDesc: { color: C.muted, fontSize: 13, marginBottom: 14 },
+  card: { borderRadius: 16, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: '#112240' },
+  cardTitle: { color: c.text, fontSize: 17, fontWeight: '700', marginLeft: 10 },
+  cardDesc: { color: c.textDim, fontSize: 13, marginBottom: 14 },
 
   sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
 
-  infoCard: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: C.accent + '10', borderRadius: 10, padding: 12, marginBottom: 14, gap: 8 },
-  infoText: { color: C.muted, fontSize: 13, flex: 1, lineHeight: 18 },
+  infoCard: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: c.accent + '10', borderRadius: 10, padding: 12, marginBottom: 14, gap: 8 },
+  infoText: { color: c.textDim, fontSize: 13, flex: 1, lineHeight: 18 },
 
-  warningCard: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: C.yellow + '15', borderRadius: 10, padding: 12, marginTop: 10, gap: 8 },
-  warningText: { color: C.yellow, fontSize: 13, flex: 1, lineHeight: 18 },
+  warningCard: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#FBBF24' + '15', borderRadius: 10, padding: 12, marginTop: 10, gap: 8 },
+  warningText: { color: '#FBBF24', fontSize: 13, flex: 1, lineHeight: 18 },
 
   radioGroup: { gap: 2 },
   radioRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10 },
-  radioOuter: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: C.muted, justifyContent: 'center', alignItems: 'center' },
-  radioOuterActive: { borderColor: C.accent },
-  radioInner: { width: 10, height: 10, borderRadius: 5, backgroundColor: C.accent },
-  radioLabel: { color: C.white, fontSize: 14, marginLeft: 10 },
+  radioOuter: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: c.textDim, justifyContent: 'center', alignItems: 'center' },
+  radioOuterActive: { borderColor: c.accent },
+  radioInner: { width: 10, height: 10, borderRadius: 5, backgroundColor: c.accent },
+  radioLabel: { color: c.text, fontSize: 14, marginLeft: 10 },
 
   toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8 },
-  toggleLabel: { color: C.white, fontSize: 14 },
+  toggleLabel: { color: c.text, fontSize: 14 },
 
   durationRow: { flexDirection: 'row', gap: 10 },
   durationBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: '#1A2A44', alignItems: 'center' },
-  durationBtnActive: { backgroundColor: C.accent + '30', borderWidth: 1, borderColor: C.accent },
-  durationText: { color: C.muted, fontSize: 14, fontWeight: '600' },
-  durationTextActive: { color: C.accent },
+  durationBtnActive: { backgroundColor: c.accent + '30', borderWidth: 1, borderColor: c.accent },
+  durationText: { color: c.textDim, fontSize: 14, fontWeight: '600' },
+  durationTextActive: { color: c.accent },
 
-  previewDesc: { color: C.muted, fontSize: 13, marginBottom: 12 },
-  previewRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: C.cardBorder },
-  previewLabel: { color: C.white, fontSize: 14 },
+  previewDesc: { color: c.textDim, fontSize: 13, marginBottom: 12 },
+  previewRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#112240' },
+  previewLabel: { color: c.text, fontSize: 14 },
   previewBadge: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 8 },
   previewValue: { fontSize: 12, fontWeight: '700' },
 
   applyRow: { flexDirection: 'row', gap: 10 },
-  applyBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: C.accent + '20', alignItems: 'center' },
-  applyBtnText: { color: C.accent, fontSize: 13, fontWeight: '700' },
+  applyBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: c.accent + '20', alignItems: 'center' },
+  applyBtnText: { color: c.accent, fontSize: 13, fontWeight: '700' },
 });

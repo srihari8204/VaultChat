@@ -36,6 +36,16 @@ roles "colors." /tmp/_hd
 roles "c." /tmp/_tl
 cat /tmp/_hd /tmp/_tl > "$f"
 
+# Any leftover (unmapped) cvar.key → substitute its LITERAL value from the C
+# object, so non-palette brand colors keep their exact value (dark mode identical;
+# they just won't theme in light mode). Only standard roles got tokenised above.
+cblock=$(perl -0ne "print \$1 if /const ${cvar} *= *\{(.*?)\n?\}/s" "$f")
+echo "$cblock" | grep -oE "[a-zA-Z0-9_]+ *: *('[^']*'|\"[^\"]*\"|rgba?\([^)]*\))" | while IFS= read -r pair; do
+  key=$(echo "$pair" | sed -E "s/ *:.*//; s/[^a-zA-Z0-9_]//g")
+  val=$(echo "$pair" | sed -E "s/^[^:]*: *//")
+  [ -n "$key" ] && sed -i "s|\\b${cvar}\\.${key}\\b|${val}|g" "$f"
+done
+
 # Delete the C object definition: single-line, or multi-line up to a line that
 # ends the object ("};" or "} as const;").
 perl -0pi -e "s/^const ${cvar} *= *\{[^\n]*\};[ \t]*(\/\/[^\n]*)?\n//m" "$f"
