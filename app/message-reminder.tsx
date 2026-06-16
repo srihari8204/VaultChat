@@ -12,7 +12,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Notifications from 'expo-notifications';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState , useMemo} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -24,6 +24,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 
 const STORAGE_KEY = 'vc_message_reminders_v1';
 
@@ -74,7 +76,14 @@ async function saveReminders(list: ReminderRow[]): Promise<void> {
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(list));
 }
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function MessageReminderScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   const router = useRouter();
   const { chatId, messageId, preview } = useLocalSearchParams<{
     chatId?: string; messageId?: string; preview?: string;
@@ -91,6 +100,8 @@ function Composer({
 }: {
   chatId: string; messageId: string; preview: string; router: any;
 }) {
+  const S = useS();
+  const { colors } = useTheme();
   const [busy, setBusy] = useState(false);
 
   const schedule = useCallback(async (mins: number) => {
@@ -176,14 +187,14 @@ function Composer({
 
         {busy && (
           <View style={S.busy}>
-            <ActivityIndicator color={ACCENT} />
+            <ActivityIndicator color={colors.primary} />
             <Text style={S.busyTxt}>Scheduling…</Text>
           </View>
         )}
 
         <Text style={S.note}>
           Reminders are device-only — they fire as a local notification at the
-          chosen time and tap-open the chat. See all pending at <Text style={{ color: ACCENT }}>/message-reminder</Text>.
+          chosen time and tap-open the chat. See all pending at <Text style={{ color: colors.primary }}>/message-reminder</Text>.
         </Text>
       </ScrollView>
     </View>
@@ -191,6 +202,8 @@ function Composer({
 }
 
 function RemindersList({ router }: { router: any }) {
+  const S = useS();
+  const { colors } = useTheme();
   const [rows,    setRows]    = useState<ReminderRow[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -217,7 +230,7 @@ function RemindersList({ router }: { router: any }) {
   }, []);
 
   if (loading) {
-    return <View style={[S.screen, S.center]}><ActivityIndicator color={ACCENT} size="large" /></View>;
+    return <View style={[S.screen, S.center]}><ActivityIndicator color={colors.primary} size="large" /></View>;
   }
 
   return (
@@ -262,43 +275,37 @@ function RemindersList({ router }: { router: any }) {
   );
 }
 
-const DARK_BG = '#0D0F14';
-const CARD_BG = '#161A22';
-const BORDER  = '#1F2937';
-const TEXT    = '#E5E7EB';
-const SUBTLE  = '#9CA3AF';
-const ACCENT  = '#6C63FF';
 
-const S = StyleSheet.create({
-  screen:       { flex: 1, backgroundColor: DARK_BG },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen:       { flex: 1, backgroundColor: c.bg },
   center:       { justifyContent: 'center', alignItems: 'center' },
 
-  header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
+  header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   backBtn:      { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backTxt:      { color: TEXT, fontSize: 26, fontWeight: '600' },
-  title:        { color: TEXT, fontSize: 22, fontWeight: '800' },
+  backTxt:      { color: c.text, fontSize: 26, fontWeight: '600' },
+  title:        { color: c.text, fontSize: 22, fontWeight: '800' },
 
-  previewCard:  { backgroundColor: CARD_BG, borderColor: BORDER, borderWidth: 1, borderRadius: 12, padding: 12 },
-  previewLabel: { color: SUBTLE, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 6 },
-  previewBody:  { color: TEXT, fontSize: 14, lineHeight: 20 },
+  previewCard:  { backgroundColor: c.card, borderColor: c.border, borderWidth: 1, borderRadius: 12, padding: 12 },
+  previewLabel: { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 6 },
+  previewBody:  { color: c.text, fontSize: 14, lineHeight: 20 },
 
   gridCol:      { gap: 8 },
-  preset:       { backgroundColor: CARD_BG, borderColor: BORDER, borderWidth: 1, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 16 },
+  preset:       { backgroundColor: c.card, borderColor: c.border, borderWidth: 1, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 16 },
   presetOff:    { opacity: 0.5 },
-  presetLabel:  { color: TEXT, fontSize: 15, fontWeight: '700' },
-  presetSub:    { color: SUBTLE, fontSize: 12, marginTop: 2 },
+  presetLabel:  { color: c.text, fontSize: 15, fontWeight: '700' },
+  presetSub:    { color: c.textDim, fontSize: 12, marginTop: 2 },
 
   busy:         { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 16, justifyContent: 'center' },
-  busyTxt:      { color: SUBTLE, fontSize: 12 },
-  note:         { color: SUBTLE, fontSize: 12, lineHeight: 16, marginTop: 24 },
+  busyTxt:      { color: c.textDim, fontSize: 12 },
+  note:         { color: c.textDim, fontSize: 12, lineHeight: 16, marginTop: 24 },
 
-  emptyTitle:   { color: TEXT, fontSize: 16, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
-  emptySub:     { color: SUBTLE, fontSize: 13, lineHeight: 18, textAlign: 'center' },
+  emptyTitle:   { color: c.text, fontSize: 16, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
+  emptySub:     { color: c.textDim, fontSize: 13, lineHeight: 18, textAlign: 'center' },
 
-  row:          { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
-  iconBox:      { width: 36, height: 36, borderRadius: 18, backgroundColor: CARD_BG, alignItems: 'center', justifyContent: 'center' },
+  row:          { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  iconBox:      { width: 36, height: 36, borderRadius: 18, backgroundColor: c.card, alignItems: 'center', justifyContent: 'center' },
   iconTxt:      { fontSize: 18 },
-  rowWhen:      { color: TEXT, fontSize: 14, fontWeight: '700' },
-  rowPreview:   { color: TEXT, fontSize: 13, marginTop: 4 },
-  rowSub:       { color: SUBTLE, fontSize: 11, marginTop: 6 },
+  rowWhen:      { color: c.text, fontSize: 14, fontWeight: '700' },
+  rowPreview:   { color: c.text, fontSize: 13, marginTop: 4 },
+  rowSub:       { color: c.textDim, fontSize: 11, marginTop: 6 },
 });

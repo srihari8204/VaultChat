@@ -10,7 +10,7 @@
 // PIN session is screen-scoped: leaving the screen requires re-entering.
 
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState , useMemo} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -24,6 +24,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { getAccessToken } from '../lib/api';
 import {
   attachmentUrl,
@@ -35,7 +37,14 @@ import {
 
 const MAX_ATTEMPTS = 5;
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function HiddenChatsScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   const router = useRouter();
   const [stage, setStage] = useState<'pin' | 'list'>('pin');
 
@@ -48,6 +57,8 @@ export default function HiddenChatsScreen() {
 function PinGate({
   router, onPass,
 }: { router: any; onPass: () => void }) {
+  const S = useS();
+  const { colors } = useTheme();
   const [pin,       setPin]       = useState('');
   const [busy,      setBusy]      = useState(false);
   const [attempts,  setAttempts]  = useState(0);
@@ -105,7 +116,7 @@ function PinGate({
         value={pin}
         onChangeText={(v) => setPin(v.replace(/\D/g, '').slice(0, 8))}
         placeholder="••••••"
-        placeholderTextColor={SUBTLE}
+        placeholderTextColor={colors.textDim}
         keyboardType="number-pad"
         secureTextEntry
         maxLength={8}
@@ -133,6 +144,8 @@ function PinGate({
 }
 
 function HiddenList({ router }: { router: any }) {
+  const S = useS();
+  const { colors } = useTheme();
   const [rows,       setRows]       = useState<ChatSummary[]>([]);
   const [loading,    setLoading]    = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -187,7 +200,7 @@ function HiddenList({ router }: { router: any }) {
   }, []);
 
   if (loading) {
-    return <View style={[S.screen, S.center]}><ActivityIndicator color={ACCENT} size="large" /></View>;
+    return <View style={[S.screen, S.center]}><ActivityIndicator color={colors.primary} size="large" /></View>;
   }
 
   return (
@@ -213,7 +226,7 @@ function HiddenList({ router }: { router: any }) {
         <FlatList
           data={rows}
           keyExtractor={(c) => c.id}
-          refreshControl={<RefreshControl tintColor={ACCENT} refreshing={refreshing} onRefresh={onRefresh} />}
+          refreshControl={<RefreshControl tintColor={colors.primary} refreshing={refreshing} onRefresh={onRefresh} />}
           contentContainerStyle={{ paddingBottom: 32 }}
           renderItem={({ item: c }) => {
             const title = c.type === 'direct'
@@ -254,44 +267,37 @@ function HiddenList({ router }: { router: any }) {
   );
 }
 
-const DARK_BG = '#0D0F14';
-const CARD_BG = '#161A22';
-const BORDER  = '#1F2937';
-const TEXT    = '#E5E7EB';
-const SUBTLE  = '#9CA3AF';
-const ACCENT  = '#6C63FF';
-const DANGER  = '#EF4444';
 
-const S = StyleSheet.create({
-  screen:       { flex: 1, backgroundColor: DARK_BG },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen:       { flex: 1, backgroundColor: c.bg },
   center:       { justifyContent: 'center', alignItems: 'center' },
 
   // PIN gate
   gateIcon:     { fontSize: 48, marginBottom: 16 },
-  gateTitle:    { color: TEXT, fontSize: 22, fontWeight: '800', marginBottom: 6 },
-  gateSub:      { color: SUBTLE, fontSize: 13, textAlign: 'center', marginBottom: 24 },
-  pinInput:     { color: TEXT, fontSize: 28, letterSpacing: 10, textAlign: 'center', backgroundColor: CARD_BG, borderColor: BORDER, borderWidth: 1, borderRadius: 12, paddingHorizontal: 20, paddingVertical: 14, width: '100%', maxWidth: 280 },
-  errorTxt:     { color: DANGER, paddingHorizontal: 16, paddingTop: 12, fontSize: 12, textAlign: 'center' },
+  gateTitle:    { color: c.text, fontSize: 22, fontWeight: '800', marginBottom: 6 },
+  gateSub:      { color: c.textDim, fontSize: 13, textAlign: 'center', marginBottom: 24 },
+  pinInput:     { color: c.text, fontSize: 28, letterSpacing: 10, textAlign: 'center', backgroundColor: c.card, borderColor: c.border, borderWidth: 1, borderRadius: 12, paddingHorizontal: 20, paddingVertical: 14, width: '100%', maxWidth: 280 },
+  errorTxt:     { color: c.danger, paddingHorizontal: 16, paddingTop: 12, fontSize: 12, textAlign: 'center' },
   gateBtnRow:   { flexDirection: 'row', gap: 12, marginTop: 24, width: '100%', maxWidth: 280 },
-  gateCancel:   { flex: 1, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: BORDER, alignItems: 'center' },
-  gateCancelTxt: { color: TEXT, fontWeight: '700' },
-  gateUnlock:    { flex: 1, padding: 14, borderRadius: 12, backgroundColor: ACCENT, alignItems: 'center' },
+  gateCancel:   { flex: 1, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: c.border, alignItems: 'center' },
+  gateCancelTxt: { color: c.text, fontWeight: '700' },
+  gateUnlock:    { flex: 1, padding: 14, borderRadius: 12, backgroundColor: c.primary, alignItems: 'center' },
   gateUnlockOff: { backgroundColor: '#374151' },
   gateUnlockTxt: { color: '#fff', fontWeight: '700' },
 
   // List
-  header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
+  header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   backBtn:      { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backTxt:      { color: TEXT, fontSize: 26, fontWeight: '600' },
-  title:        { color: TEXT, fontSize: 22, fontWeight: '800' },
-  emptyTitle:   { color: TEXT, fontSize: 16, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
-  emptySub:     { color: SUBTLE, fontSize: 13, lineHeight: 18, textAlign: 'center' },
+  backTxt:      { color: c.text, fontSize: 26, fontWeight: '600' },
+  title:        { color: c.text, fontSize: 22, fontWeight: '800' },
+  emptyTitle:   { color: c.text, fontSize: 16, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
+  emptySub:     { color: c.textDim, fontSize: 13, lineHeight: 18, textAlign: 'center' },
 
-  row:          { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
-  avatar:       { width: 52, height: 52, borderRadius: 26, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  row:          { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  avatar:       { width: 52, height: 52, borderRadius: 26, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   avatarGroup:  { backgroundColor: '#22C55E' },
   avatarImg:    { width: '100%', height: '100%' },
   avatarTxt:    { color: '#fff', fontSize: 20, fontWeight: '700' },
-  rowName:      { color: TEXT, fontSize: 16, fontWeight: '600' },
-  rowSub:       { color: SUBTLE, fontSize: 12, marginTop: 4 },
+  rowName:      { color: c.text, fontSize: 16, fontWeight: '600' },
+  rowSub:       { color: c.textDim, fontSize: 12, marginTop: 4 },
 });

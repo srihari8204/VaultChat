@@ -14,7 +14,7 @@
 // Last-seen blanking happens in the GET /chats query.
 
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState , useMemo} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -27,6 +27,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { getAccessToken } from '../lib/api';
 import {
   attachmentUrl,
@@ -37,7 +39,14 @@ import {
   type GhostMode,
 } from '../lib/chatService';
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function GhostModeScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   const router = useRouter();
   const { targetId, targetName } = useLocalSearchParams<{ targetId?: string; targetName?: string }>();
 
@@ -47,6 +56,8 @@ export default function GhostModeScreen() {
 
 // ─── List view ────────────────────────────────────────────────
 function ListView() {
+  const S = useS();
+  const { colors } = useTheme();
   const router = useRouter();
   const [rows,    setRows]    = useState<GhostMode[]>([]);
   const [loading, setLoading] = useState(true);
@@ -71,7 +82,7 @@ function ListView() {
   }, []);
 
   if (loading) {
-    return <View style={[S.screen, S.center]}><ActivityIndicator color={ACCENT} size="large" /></View>;
+    return <View style={[S.screen, S.center]}><ActivityIndicator color={colors.primary} size="large" /></View>;
   }
 
   return (
@@ -145,6 +156,8 @@ function summarise(g: GhostMode): string {
 
 // ─── Per-target editor ────────────────────────────────────────
 function PerTargetEditor({ targetId, targetName }: { targetId: string; targetName: string | null }) {
+  const S = useS();
+  const { colors } = useTheme();
   const router = useRouter();
   const [state,   setState]   = useState<GhostMode | null>(null);
   const [loading, setLoading] = useState(true);
@@ -200,7 +213,7 @@ function PerTargetEditor({ targetId, targetName }: { targetId: string; targetNam
   }, [targetId, router]);
 
   if (loading || !state) {
-    return <View style={[S.screen, S.center]}><ActivityIndicator color={ACCENT} size="large" /></View>;
+    return <View style={[S.screen, S.center]}><ActivityIndicator color={colors.primary} size="large" /></View>;
   }
 
   const anySet = state.hideOnline || state.hideTyping || state.hideRead || state.hideLastSeen;
@@ -216,7 +229,7 @@ function PerTargetEditor({ targetId, targetName }: { targetId: string; targetNam
 
       <View style={S.intro}>
         <Text style={S.introTxt}>
-          Hide live signals from <Text style={{ color: ACCENT, fontWeight: '700' }}>{targetName || targetId.slice(0, 8)}</Text>.
+          Hide live signals from <Text style={{ color: colors.primary, fontWeight: '700' }}>{targetName || targetId.slice(0, 8)}</Text>.
           They stay your contact — they just won't see the chosen indicators in real time.
         </Text>
       </View>
@@ -266,6 +279,8 @@ function ToggleRow({
 }: {
   title: string; sub: string; value: boolean; busy: boolean; onChange: () => void;
 }) {
+  const S = useS();
+  const { colors } = useTheme();
   return (
     <View style={S.toggleRow}>
       <View style={{ flex: 1 }}>
@@ -273,12 +288,12 @@ function ToggleRow({
         <Text style={S.toggleSub}>{sub}</Text>
       </View>
       {busy ? (
-        <ActivityIndicator color={ACCENT} style={{ marginLeft: 8 }} />
+        <ActivityIndicator color={colors.primary} style={{ marginLeft: 8 }} />
       ) : (
         <Switch
           value={value}
           onValueChange={onChange}
-          trackColor={{ true: ACCENT, false: '#374151' }}
+          trackColor={{ true: colors.primary, false: '#374151' }}
           thumbColor="#fff"
         />
       )}
@@ -286,42 +301,35 @@ function ToggleRow({
   );
 }
 
-const DARK_BG = '#0D0F14';
-const CARD_BG = '#161A22';
-const BORDER  = '#1F2937';
-const TEXT    = '#E5E7EB';
-const SUBTLE  = '#9CA3AF';
-const ACCENT  = '#6C63FF';
-const DANGER  = '#EF4444';
 
-const S = StyleSheet.create({
-  screen:        { flex: 1, backgroundColor: DARK_BG },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen:        { flex: 1, backgroundColor: c.bg },
   center:        { justifyContent: 'center', alignItems: 'center' },
 
-  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
+  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backTxt:       { color: TEXT, fontSize: 26, fontWeight: '600' },
-  title:         { color: TEXT, fontSize: 22, fontWeight: '800' },
+  backTxt:       { color: c.text, fontSize: 26, fontWeight: '600' },
+  title:         { color: c.text, fontSize: 22, fontWeight: '800' },
 
   intro:         { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 },
-  introTxt:      { color: SUBTLE, fontSize: 13, lineHeight: 18 },
+  introTxt:      { color: c.textDim, fontSize: 13, lineHeight: 18 },
 
-  emptyTitle:    { color: TEXT, fontSize: 16, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
-  emptySub:      { color: SUBTLE, fontSize: 13, lineHeight: 18, textAlign: 'center' },
+  emptyTitle:    { color: c.text, fontSize: 16, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
+  emptySub:      { color: c.textDim, fontSize: 13, lineHeight: 18, textAlign: 'center' },
 
-  row:           { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
-  avatar:        { width: 44, height: 44, borderRadius: 22, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  row:           { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  avatar:        { width: 44, height: 44, borderRadius: 22, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   avatarImg:     { width: '100%', height: '100%' },
   avatarTxt:     { color: '#fff', fontWeight: '700' },
-  rowName:       { color: TEXT, fontSize: 15, fontWeight: '600' },
-  rowSub:        { color: SUBTLE, fontSize: 12, marginTop: 2 },
-  rowChev:       { color: SUBTLE, fontSize: 22, fontWeight: '600' },
+  rowName:       { color: c.text, fontSize: 15, fontWeight: '600' },
+  rowSub:        { color: c.textDim, fontSize: 12, marginTop: 2 },
+  rowChev:       { color: c.textDim, fontSize: 22, fontWeight: '600' },
 
   section:       { paddingHorizontal: 16, marginTop: 8 },
-  toggleRow:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
-  toggleTitle:   { color: TEXT, fontSize: 15, fontWeight: '600' },
-  toggleSub:     { color: SUBTLE, fontSize: 12, lineHeight: 16, marginTop: 2 },
+  toggleRow:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  toggleTitle:   { color: c.text, fontSize: 15, fontWeight: '600' },
+  toggleSub:     { color: c.textDim, fontSize: 12, lineHeight: 16, marginTop: 2 },
 
-  clearBtn:      { marginHorizontal: 20, marginTop: 32, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: DANGER, backgroundColor: CARD_BG, alignItems: 'center' },
-  clearBtnTxt:   { color: DANGER, fontWeight: '700' },
+  clearBtn:      { marginHorizontal: 20, marginTop: 32, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: c.danger, backgroundColor: c.card, alignItems: 'center' },
+  clearBtnTxt:   { color: c.danger, fontWeight: '700' },
 });
