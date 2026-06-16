@@ -1,20 +1,16 @@
 // components/GifPicker.tsx
-// Search and pick GIFs using Tenor API (free public key)
-// Get your own key free at: https://tenor.com/developer/dashboard
+// Search and pick GIFs via our backend Tenor proxy (key stays server-side).
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View, Text, TextInput, FlatList, TouchableOpacity,
   Image, StyleSheet, ActivityIndicator, Pressable,
 } from 'react-native';
-
-// Replace with your own free Tenor API key from tenor.com/developer
-const TENOR_KEY = 'AIzaSyAyimkuYQYF_FXVALexPuGQctUWRURdCPY';
-const TENOR_URL = 'https://tenor.googleapis.com/v2/search';
+import { api } from '../lib/api';
 
 interface GifResult {
   id: string;
-  url: string;
+  url: string;      // animated GIF url (sendable + renders in <Image>)
   preview: string;
   width: number;
   height: number;
@@ -32,23 +28,23 @@ export default function GifPicker({ visible, onClose, onSelect }: Props) {
   const [loading, setLoading] = useState(false);
 
   const search = useCallback(async (q: string) => {
-    if (!q.trim()) { setResults([]); return; }
     setLoading(true);
     try {
-      const url = `${TENOR_URL}?q=${encodeURIComponent(q)}&key=${TENOR_KEY}&limit=24&media_filter=gif,tinygif`;
-      const res  = await fetch(url);
-      const data = await res.json();
-      const gifs: GifResult[] = (data.results ?? []).map((r: any) => ({
+      const data = await api<{ results: any[] }>(`/gif/search?q=${encodeURIComponent(q.trim())}`);
+      const gifs: GifResult[] = (data.results ?? []).map((r) => ({
         id:      r.id,
-        url:     r.media_formats?.gif?.url     ?? r.media_formats?.tinygif?.url ?? '',
-        preview: r.media_formats?.tinygif?.url ?? r.media_formats?.gif?.url     ?? '',
-        width:   r.media_formats?.tinygif?.dims?.[0] ?? 100,
-        height:  r.media_formats?.tinygif?.dims?.[1] ?? 100,
-      }));
+        url:     r.gif || r.url || '',         // animated gif (broad compatibility)
+        preview: r.preview || r.gif || '',
+        width:   r.width  ?? 100,
+        height:  r.height ?? 100,
+      })).filter((g: GifResult) => g.url);
       setResults(gifs);
     } catch { setResults([]); }
     finally { setLoading(false); }
   }, []);
+
+  // Show trending GIFs (empty query) when opened.
+  useEffect(() => { if (visible) search(''); }, [visible, search]);
 
   if (!visible) return null;
 
@@ -59,14 +55,14 @@ export default function GifPicker({ visible, onClose, onSelect }: Props) {
         <View style={s.searchRow}>
           <TextInput
             style={s.input}
-            placeholder="Search GIFsâ€¦"
+            placeholder="Search GIFs…"
             placeholderTextColor="#444"
             value={query}
             onChangeText={q => { setQuery(q); search(q); }}
             autoFocus
           />
           <TouchableOpacity onPress={onClose}>
-            <Text style={s.closeX}>âœ•</Text>
+            <Text style={s.closeX}>✕</Text>
           </TouchableOpacity>
         </View>
         {loading && <ActivityIndicator color="#00E5FF" style={{ margin: 16 }} />}

@@ -51,6 +51,7 @@ import { Swipeable } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
 import { Sheet, Avatar } from '../components/ui';
 import LinkPreview, { extractUrl } from '../components/LinkPreview';
+import GifPicker from '../components/GifPicker';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
 import { getCurrentUserAsync } from './(constants)/authService';
@@ -86,6 +87,7 @@ import {
   pinMessage,
   removeReaction,
   reportScreenshotCaptured,
+  sendMessage,
   setDisappearing,
   setHidden,
   setScreenshotMode,
@@ -176,6 +178,7 @@ export default function ChatScreen() {
   // device past ~45°. Sender always sees the plaintext.
   const [nextInvisibleInk, setNextInvisibleInk] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
+  const [gifOpen, setGifOpen] = useState(false);
   const [pinnedId, setPinnedId] = useState<string | null>(null);
   // Global "tilt revealed" state — flips true when the gyro reports any
   // axis past ~45° (~0.78 rad). Shared by every invisible-ink bubble on
@@ -1157,6 +1160,18 @@ export default function ChatScreen() {
     }
   }, [chatId, sending]);
 
+  // ── Send a GIF (external Tenor URL — no upload; rendered from the URL) ──
+  const sendGif = useCallback(async (url: string, preview: string) => {
+    setGifOpen(false);
+    if (!url) return;
+    try {
+      const msg = await sendMessage(chatId, '', 'image', { meta: { gifUrl: url, preview } });
+      setMessages(prev => prev.some(x => x.id === msg.id) ? prev : [msg, ...prev]);
+    } catch (e: any) {
+      Alert.alert('Could not send GIF', e?.message ?? 'Try again');
+    }
+  }, [chatId]);
+
   // ── Attach menu (bottom sheet — U4) ───────────────────────
   // Photo / Video / View-once / Sticker / Invisible Ink / Poll / Location / File.
   const onPressAttach = useCallback(() => {
@@ -1172,6 +1187,7 @@ export default function ChatScreen() {
       { label: 'Video',           icon: 'videocam' as const,   onPress: () => onPickMedia('videos') },
       { label: 'View-once photo', icon: 'eye' as const,        onPress: () => onPickMedia('images', { viewOnce: true }) },
       { label: 'View-once video', icon: 'eye-outline' as const, onPress: () => onPickMedia('videos', { viewOnce: true }) },
+      { label: 'GIF',             icon: 'film' as const,       onPress: () => setGifOpen(true) },
       { label: 'Sticker',         icon: 'happy' as const,      onPress: () => router.push({ pathname: '/stickers' as any, params: { chatId, peerName } }) },
       { label: nextInvisibleInk ? 'Invisible Ink: armed — disarm' : 'Invisible Ink (next message)', icon: 'sparkles' as const, onPress: () => setNextInvisibleInk(v => !v) },
       { label: 'Poll',            icon: 'stats-chart' as const, onPress: () => router.push({ pathname: '/create-poll' as any, params: { chatId, peerName } }) },
@@ -1718,6 +1734,9 @@ export default function ChatScreen() {
         actions={attachActions}
         onClose={() => setAttachOpen(false)}
       />
+
+      {/* GIF picker (W15) */}
+      <GifPicker visible={gifOpen} onClose={() => setGifOpen(false)} onSelect={sendGif} />
 
       {/* Forward chat picker */}
       <Modal
@@ -2460,7 +2479,8 @@ function MessageBubble({
     );
   }
 
-  const isImage = msg.type === 'image' && msg.meta?.attachmentId;
+  const isGif   = msg.type === 'image' && !!msg.meta?.gifUrl;
+  const isImage = msg.type === 'image' && msg.meta?.attachmentId && !isGif;
   const isVideo = msg.type === 'video' && msg.meta?.attachmentId;
   const isAudio = msg.type === 'audio' && msg.meta?.attachmentId;
   const isFile  = msg.type === 'file'  && msg.meta?.attachmentId;
@@ -2546,6 +2566,12 @@ function MessageBubble({
               From {member?.name || member?.email || 'sender'} · disappears after one view
             </Text>
           </TouchableOpacity>
+        ) : isGif ? (
+          <Image
+            source={{ uri: msg.meta.gifUrl }}
+            style={S.attachedImage}
+            resizeMode="cover"
+          />
         ) : isImage ? (
           (isEncMedia ? mediaSrc : (authHeader ? { uri: attachmentUrl(msg.meta.attachmentId), headers: { Authorization: authHeader } } : null)) ? (
             <Image
