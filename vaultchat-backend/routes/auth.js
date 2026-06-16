@@ -512,6 +512,57 @@ async function auditAttempt(userId, ip, type, success) {
   } catch { /* audit is best-effort; never block auth */ }
 }
 
+// POST /auth/onboard/send-otp — email OTP to PROVE email ownership (email, not SMS).
+router.post('/onboard/send-otp', async (req, res) => {
+  try {
+    const e = vault.normalizeEmail(req.body?.email);
+    if (!e) return envErr(res, 400, 'bad_request', 'Invalid email');
+    const perEmail = await rateLimit.consume(`otp:email:${e}`, 3, 3600);
+    if (!perEmail.allowed) return envErr(res, 429, 'rate_limited', 'Too many requests. Try again later.');
+    const perIP = await rateLimit.consume(`otp:ip:${req.ip}`, 10, 3600);
+    if (!perIP.allowed) return envErr(res, 429, 'rate_limited', 'Too many requests. Try again later.');
+
+    const code = otp.generate();
+    const codeHash = await otp.hash(code);
+    await db.transaction(async (client) => {
+      await client.query(`UPDATE otp_codes SET consumed_at = NOW() WHERE email = $1 AND consumed_at IS NULL`, [e]);
+      await client.query(
+        `INSERT INTO otp_codes (email, code_hash, expires_at) VALUES ($1, $2, NOW() + ($3 || ' seconds')::INTERVAL)`,
+        [e, codeHash, otp.OTP_TTL_SECONDS.toString()],
+      );
+    });
+    await email.sendOTP(e, code);
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[auth/onboard/send-otp]', err.message);
+    return envErr(res, 500, 'server_error', 'Failed to send code');
+  }
+});
+
+// POST /auth/onboard/verify-otp — verify email OTP → short-lived ownership ticket.
+router.post('/onboard/verify-otp', async (req, res) => {
+  try {
+    const e = vault.normalizeEmail(req.body?.email);
+    const code = (req.body?.code || '').toString().trim();
+    if (!e || !code) return envErr(res, 400, 'bad_request', 'email and code required');
+    const r = await db.query(
+      `SELECT id, code_hash FROM otp_codes
+       WHERE email = $1 AND consumed_at IS NULL AND expires_at > NOW()
+       ORDER BY expires_at DESC LIMIT 1`,
+      [e],
+    );
+    const row = r.rows[0];
+    const ok = !!row && await otp.verify(code, row.code_hash);
+    if (!ok) return envErr(res, 401, 'invalid_code', 'Incorrect or expired code');
+    await db.query(`UPDATE otp_codes SET consumed_at = NOW() WHERE id = $1`, [row.id]);
+    // Ticket binds to the email lookup hash; profile/init requires it.
+    return res.json({ ok: true, emailTicket: vault.signTicket(vault.emailLookup(e)) });
+  } catch (err) {
+    console.error('[auth/onboard/verify-otp]', err.message);
+    return envErr(res, 500, 'server_error', 'Verification failed');
+  }
+});
+
 // POST /auth/lookup — exists only if BOTH email and phone match the same row.
 router.post('/lookup', async (req, res) => {
   try {
@@ -554,6 +605,14 @@ router.post('/profile/init', async (req, res) => {
 
     const el = vault.emailLookup(email);
     const pl = vault.phoneLookup(phone);
+
+    // Email ownership: require a valid ticket from /auth/onboard/verify-otp for
+    // THIS email. Closes the impersonation gap (no account creation for an email
+    // the caller hasn't proven they control).
+    if (!vault.verifyTicket((req.body?.emailTicket || '').toString(), el)) {
+      return envErr(res, 401, 'email_unverified', 'Verify your email with the code first');
+    }
+
     const dup = await db.query(
       `SELECT 1 FROM users WHERE (email_lookup = $1 OR phone_lookup = $2) AND is_deleted = FALSE LIMIT 1`,
       [el, pl],

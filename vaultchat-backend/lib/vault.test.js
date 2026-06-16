@@ -57,5 +57,13 @@ function throws(fn, m) { let t = false; try { fn(); } catch { t = true; } assert
   const ans = await v.hashSecret(v.normalizeAnswer('  Fluffy  THE Cat '));
   assert(await v.verifySecret(v.normalizeAnswer('fluffy the cat'), ans) === true, 'normalized answer verifies case/space-insensitively');
 
+  // Stateless tickets (email-OTP proof)
+  const el = v.emailLookup('proof@example.com');
+  const ticket = v.signTicket(el);
+  assert(v.verifyTicket(ticket, el) === true, 'valid ticket verifies for its data');
+  assert(v.verifyTicket(ticket, v.emailLookup('other@example.com')) === false, 'ticket bound to its data');
+  assert(v.verifyTicket(ticket + 'x', el) === false, 'tampered ticket rejected');
+  assert(v.verifyTicket(v.signTicket(el, -1), el) === false, 'expired ticket rejected');
+
   console.log(`\n${passed} checks passed`);
 })();

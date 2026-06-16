@@ -112,9 +112,34 @@ async function verifySecret(plaintext, encoded) {
   catch { return false; }
 }
 
+// ── Stateless signed tickets ────────────────────────────────────────────────
+// Short-lived proof that some step happened (e.g. "this email was OTP-verified"),
+// carried by the client between requests without server-side session/Redis.
+// HMAC-SHA256(pepper) over "<data>.<exp>"; base64url. verifyTicket is constant-time
+// and binds the ticket to the expected data (e.g. the email lookup hash).
+function signTicket(data, ttlSec = 900) {
+  const exp = Math.floor(Date.now() / 1000) + ttlSec;
+  const body = `${data}.${exp}`;
+  const sig = crypto.createHmac('sha256', pepper()).update(`ticket|${body}`).digest('hex');
+  return Buffer.from(`${body}.${sig}`).toString('base64url');
+}
+function verifyTicket(token, expectedData) {
+  try {
+    const parts = Buffer.from(String(token), 'base64url').toString('utf8').split('.');
+    if (parts.length !== 3) return false;
+    const [data, exp, sig] = parts;
+    if (data !== expectedData) return false;
+    if (parseInt(exp, 10) < Math.floor(Date.now() / 1000)) return false;
+    const expect = crypto.createHmac('sha256', pepper()).update(`ticket|${data}.${exp}`).digest('hex');
+    const a = Buffer.from(sig), b = Buffer.from(expect);
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  } catch { return false; }
+}
+
 module.exports = {
   encrypt, decrypt,
   lookupHash, emailLookup, phoneLookup,
   hashSecret, verifySecret,
+  signTicket, verifyTicket,
   normalizeEmail, normalizePhone, normalizeAnswer,
 };
