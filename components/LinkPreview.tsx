@@ -3,27 +3,22 @@
 
 import React, { useEffect, useState } from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet, Linking, ActivityIndicator } from 'react-native';
+import { api } from '../lib/api';
 
 interface OGData { title: string; description: string; image: string; url: string; }
 
-// Extract URLs from text
+// Extract the first URL from text.
 export function extractUrl(text: string): string | null {
   const m = text.match(/https?:\/\/[^\s]+/);
   return m ? m[0] : null;
 }
 
+// Real Open Graph fetch via our own backend (SSRF-guarded; no third party sees
+// the user's links, and no demo "sample" key).
 async function fetchOG(url: string): Promise<OGData | null> {
   try {
-    // Use a free OG parser proxy (no key needed)
-    const res  = await fetch(`https://opengraph.io/api/1.1/site/${encodeURIComponent(url)}?app_id=sample_id`, { signal: AbortSignal.timeout(5000) });
-    const data = await res.json();
-    const og   = data.openGraph ?? data.htmlInferred ?? {};
-    return {
-      title:       og.title ?? '',
-      description: og.description ?? '',
-      image:       og.image?.url ?? og.image ?? '',
-      url,
-    };
+    const data = await api<OGData>(`/link/preview?url=${encodeURIComponent(url)}`);
+    return data && data.title ? data : null;
   } catch { return null; }
 }
 

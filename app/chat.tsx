@@ -50,6 +50,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Swipeable } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
 import { Sheet, Avatar } from '../components/ui';
+import LinkPreview, { extractUrl } from '../components/LinkPreview';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
 import { getCurrentUserAsync } from './(constants)/authService';
@@ -2598,9 +2599,12 @@ function MessageBubble({
                 {obscureForInk(plain)}
               </Text>
             ) : (
-              <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine]}>
-                {renderRichText(plain, highlight)}
-              </Text>
+              <>
+                <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine]}>
+                  {renderRichText(plain, highlight)}
+                </Text>
+                {(() => { const u = extractUrl(plain); return u ? <LinkPreview url={u} /> : null; })()}
+              </>
             )
           ) : null
         )}

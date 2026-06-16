@@ -97,6 +97,7 @@ app.use('/contacts', require('./routes/contacts'));
 const chatsRouter = require('./routes/chats');
 app.use('/chats',    chatsRouter);
 app.use('/stories',  require('./routes/stories'));
+app.use('/link',     require('./routes/link'));
 const channelsRouter = require('./routes/channels');
 app.use('/channels', channelsRouter);
 app.use('/games',    require('./routes/games'));
