@@ -110,19 +110,23 @@ async function loadChatMembership(req, chatId) {
 // when needed) — here we just fetch devices for known member uids.
 async function sendChatMessagePush(chatId, senderId, msg, chatType) {
   try {
-    // Recipients = chat members minus the sender; AND who haven't muted
-    // this chat; AND who haven't blocked the sender.
+    // Recipients = chat members minus the sender; not blocking the sender; and
+    // not muting the chat — EXCEPT @mentioned members, who are notified even when
+    // muted (W15).
+    const mentionedIds = Array.isArray(msg.meta?.mentions)
+      ? msg.meta.mentions.map(m => m && m.userId).filter(Boolean)
+      : [];
     const memR = await db.query(
       `SELECT cm.user_id FROM chat_members cm
         WHERE cm.chat_id = $1
           AND cm.user_id <> $2
           AND cm.left_at IS NULL
-          AND cm.muted = FALSE
+          AND (cm.muted = FALSE OR cm.user_id = ANY($3::uuid[]))
           AND NOT EXISTS (
             SELECT 1 FROM user_blocks ub
              WHERE ub.blocker_id = cm.user_id AND ub.blocked_id = $2
           )`,
-      [chatId, senderId]
+      [chatId, senderId, mentionedIds]
     );
     if (memR.rows.length === 0) return;
     const recipientIds = memR.rows.map(r => r.user_id);
