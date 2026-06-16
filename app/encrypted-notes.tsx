@@ -7,23 +7,17 @@
 // 5. Show/Hide Sensitive Fields       11. Secure Trash (30-Day Recovery)
 // 6. Copy with Auto-Clear (30s)       12. Reminders on Notes
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback , useMemo} from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, FlatList, TextInput,
   Alert, Modal, Platform, ScrollView,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { Stack, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
 
-const DARK = '#0D0F14';
-const CARD = '#1A1D27';
-const PURPLE = '#6C63FF';
-const BORDER = '#2A2D3A';
-const TEXT_C = '#E8E8E8';
-const SUB = '#6B7280';
-const GREEN = '#10B981';
-const RED = '#EF4444';
 
 // 9 Categories from PDF
 const CATEGORIES = [
@@ -59,7 +53,14 @@ interface Note {
 const STORAGE_KEY = 'vc_encrypted_notes';
 const TRASH_DAYS = 30;
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function EncryptedNotesScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const [notes, setNotes] = useState<Note[]>([]);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
@@ -362,12 +363,12 @@ export default function EncryptedNotesScreen() {
               <TouchableOpacity style={s.passBtn} onPress={() => generatePassword()}>
                 <Text style={s.passBtnTxt}>{'\uD83D\uDD04'} Regenerate</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[s.passBtn, { backgroundColor: GREEN }]} onPress={() => { copyWithAutoClear(generatedPass); setShowPassGen(false); }}>
+              <TouchableOpacity style={[s.passBtn, { backgroundColor: colors.primary }]} onPress={() => { copyWithAutoClear(generatedPass); setShowPassGen(false); }}>
                 <Text style={s.passBtnTxt}>{'\uD83D\uDCCB'} Copy</Text>
               </TouchableOpacity>
             </View>
             <TouchableOpacity onPress={() => setShowPassGen(false)} style={{ marginTop: 12 }}>
-              <Text style={{ color: SUB, textAlign: 'center' }}>Close</Text>
+              <Text style={{ color: colors.textDim, textAlign: 'center' }}>Close</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -393,15 +394,15 @@ export default function EncryptedNotesScreen() {
                 <Text style={s.trashDate}>Deleted {n.deletedAt ? new Date(n.deletedAt).toLocaleDateString() : ''}</Text>
                 <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
                   <TouchableOpacity style={s.trashRestore} onPress={() => restoreNote(n.id)}>
-                    <Text style={{ color: GREEN, fontWeight: '600', fontSize: 13 }}>Restore</Text>
+                    <Text style={{ color: colors.primary, fontWeight: '600', fontSize: 13 }}>Restore</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={s.trashDelete} onPress={() => permanentDelete(n.id)}>
-                    <Text style={{ color: RED, fontWeight: '600', fontSize: 13 }}>Delete Forever</Text>
+                    <Text style={{ color: colors.danger, fontWeight: '600', fontSize: 13 }}>Delete Forever</Text>
                   </TouchableOpacity>
                 </View>
               </View>
             )}
-            ListEmptyComponent={<Text style={{ color: SUB, textAlign: 'center', marginTop: 40 }}>Trash is empty</Text>}
+            ListEmptyComponent={<Text style={{ color: colors.textDim, textAlign: 'center', marginTop: 40 }}>Trash is empty</Text>}
           />
         </View>
       </Modal>
@@ -409,91 +410,91 @@ export default function EncryptedNotesScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: DARK },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: Platform.OS === 'ios' ? 56 : 44, paddingBottom: 14, paddingHorizontal: 16, backgroundColor: CARD, borderBottomWidth: 1, borderBottomColor: BORDER },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen: { flex: 1, backgroundColor: c.bg },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: Platform.OS === 'ios' ? 56 : 44, paddingBottom: 14, paddingHorizontal: 16, backgroundColor: c.card, borderBottomWidth: 1, borderBottomColor: c.border },
   backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#2A2D3A', alignItems: 'center', justifyContent: 'center' },
-  backTxt: { fontSize: 18, color: TEXT_C },
-  headerTitle: { fontSize: 16, fontWeight: '700', color: TEXT_C },
-  headerSub: { fontSize: 10, color: SUB, marginTop: 1 },
+  backTxt: { fontSize: 18, color: c.text },
+  headerTitle: { fontSize: 16, fontWeight: '700', color: c.text },
+  headerSub: { fontSize: 10, color: c.textDim, marginTop: 1 },
   trashBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#2A2D3A', alignItems: 'center', justifyContent: 'center' },
 
-  searchBar: { flexDirection: 'row', alignItems: 'center', gap: 8, margin: 12, backgroundColor: CARD, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: BORDER },
+  searchBar: { flexDirection: 'row', alignItems: 'center', gap: 8, margin: 12, backgroundColor: c.card, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: c.border },
   searchIcon: { fontSize: 16 },
-  searchInput: { flex: 1, color: TEXT_C, fontSize: 14 },
+  searchInput: { flex: 1, color: c.text, fontSize: 14 },
   passGenBtn: { fontSize: 20 },
 
   catRow: { paddingHorizontal: 12, gap: 8, paddingBottom: 8 },
-  catChip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: CARD, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: BORDER },
-  catChipActive: { backgroundColor: PURPLE + '20', borderColor: PURPLE },
+  catChip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.card, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: c.border },
+  catChipActive: { backgroundColor: c.purple + '20', borderColor: c.purple },
   catIcon: { fontSize: 14 },
-  catTxt: { fontSize: 12, color: SUB, fontWeight: '500' },
-  catTxtActive: { color: PURPLE },
+  catTxt: { fontSize: 12, color: c.textDim, fontWeight: '500' },
+  catTxtActive: { color: c.purple },
   catCount: { fontSize: 10, fontWeight: '700' },
 
   notesList: { padding: 12, paddingBottom: 100 },
-  noteCard: { backgroundColor: CARD, borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: BORDER },
+  noteCard: { backgroundColor: c.card, borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: c.border },
   noteHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
   noteIcon: { fontSize: 18 },
-  noteTitle: { flex: 1, fontSize: 15, fontWeight: '700', color: TEXT_C },
-  notePreview: { fontSize: 13, color: SUB, lineHeight: 18, marginBottom: 8 },
+  noteTitle: { flex: 1, fontSize: 15, fontWeight: '700', color: c.text },
+  notePreview: { fontSize: 13, color: c.textDim, lineHeight: 18, marginBottom: 8 },
   noteFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   noteDate: { fontSize: 11, color: '#4B5563' },
   tagRow: { flexDirection: 'row', gap: 4 },
   tag: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
   tagTxt: { fontSize: 10, fontWeight: '600' },
 
-  sensToggle: { position: 'absolute', bottom: 90, left: 16, backgroundColor: CARD, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: BORDER },
-  sensToggleTxt: { color: SUB, fontSize: 12, fontWeight: '600' },
+  sensToggle: { position: 'absolute', bottom: 90, left: 16, backgroundColor: c.card, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: c.border },
+  sensToggleTxt: { color: c.textDim, fontSize: 12, fontWeight: '600' },
 
-  fab: { position: 'absolute', bottom: 24, right: 20, width: 56, height: 56, borderRadius: 28, backgroundColor: PURPLE, alignItems: 'center', justifyContent: 'center', elevation: 6 },
+  fab: { position: 'absolute', bottom: 24, right: 20, width: 56, height: 56, borderRadius: 28, backgroundColor: c.purple, alignItems: 'center', justifyContent: 'center', elevation: 6 },
   fabTxt: { fontSize: 28, color: '#FFF', fontWeight: '300', marginTop: -2 },
 
   empty: { alignItems: 'center', paddingTop: 60 },
   emptyIcon: { fontSize: 48, marginBottom: 12 },
-  emptyTxt: { fontSize: 16, fontWeight: '600', color: TEXT_C },
-  emptySub: { fontSize: 13, color: SUB, marginTop: 4 },
+  emptyTxt: { fontSize: 16, fontWeight: '600', color: c.text },
+  emptySub: { fontSize: 13, color: c.textDim, marginTop: 4 },
 
   // Editor
-  editorScreen: { flex: 1, backgroundColor: DARK },
-  editorHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: Platform.OS === 'ios' ? 56 : 44, paddingBottom: 12, paddingHorizontal: 16, backgroundColor: CARD, borderBottomWidth: 1, borderBottomColor: BORDER },
-  editorCancel: { color: SUB, fontSize: 14 },
-  editorTitle: { color: TEXT_C, fontSize: 16, fontWeight: '700' },
-  editorSave: { color: PURPLE, fontSize: 14, fontWeight: '700' },
+  editorScreen: { flex: 1, backgroundColor: c.bg },
+  editorHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: Platform.OS === 'ios' ? 56 : 44, paddingBottom: 12, paddingHorizontal: 16, backgroundColor: c.card, borderBottomWidth: 1, borderBottomColor: c.border },
+  editorCancel: { color: c.textDim, fontSize: 14 },
+  editorTitle: { color: c.text, fontSize: 16, fontWeight: '700' },
+  editorSave: { color: c.purple, fontSize: 14, fontWeight: '700' },
   editorBody: { flex: 1, padding: 16 },
-  editorTitleInput: { color: TEXT_C, fontSize: 22, fontWeight: '700', marginBottom: 12, borderBottomWidth: 1, borderBottomColor: BORDER, paddingBottom: 8 },
-  editorContent: { color: TEXT_C, fontSize: 15, lineHeight: 22, minHeight: 150, backgroundColor: CARD, borderRadius: 12, padding: 14, marginTop: 8, borderWidth: 1, borderColor: BORDER },
+  editorTitleInput: { color: c.text, fontSize: 22, fontWeight: '700', marginBottom: 12, borderBottomWidth: 1, borderBottomColor: c.border, paddingBottom: 8 },
+  editorContent: { color: c.text, fontSize: 15, lineHeight: 22, minHeight: 150, backgroundColor: c.card, borderRadius: 12, padding: 14, marginTop: 8, borderWidth: 1, borderColor: c.border },
 
-  edCatChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: CARD, borderWidth: 1, borderColor: BORDER },
-  edCatTxt: { fontSize: 11, color: SUB },
+  edCatChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: c.card, borderWidth: 1, borderColor: c.border },
+  edCatTxt: { fontSize: 11, color: c.textDim },
 
   edSection: { marginTop: 16 },
-  edLabel: { color: PURPLE, fontSize: 12, fontWeight: '600', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
+  edLabel: { color: c.purple, fontSize: 12, fontWeight: '600', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
   colorDot: { width: 28, height: 28, borderRadius: 14 },
   colorDotActive: { borderWidth: 3, borderColor: '#FFF' },
-  tagInput: { backgroundColor: CARD, borderRadius: 10, padding: 10, color: TEXT_C, fontSize: 13, marginTop: 8, borderWidth: 1, borderColor: BORDER },
+  tagInput: { backgroundColor: c.card, borderRadius: 10, padding: 10, color: c.text, fontSize: 13, marginTop: 8, borderWidth: 1, borderColor: c.border },
 
-  edToggle: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: BORDER },
+  edToggle: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: c.border },
   edToggleIcon: { fontSize: 20 },
-  edToggleTxt: { color: TEXT_C, fontSize: 14, fontWeight: '500' },
+  edToggleTxt: { color: c.text, fontSize: 14, fontWeight: '500' },
 
-  copyBtn: { backgroundColor: GREEN + '20', borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 16, borderWidth: 1, borderColor: GREEN + '40' },
-  copyBtnTxt: { color: GREEN, fontSize: 14, fontWeight: '600' },
+  copyBtn: { backgroundColor: c.primary + '20', borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 16, borderWidth: 1, borderColor: c.primary + '40' },
+  copyBtnTxt: { color: c.primary, fontSize: 14, fontWeight: '600' },
 
   // Password generator
   passModal: { flex: 1, backgroundColor: '#000000AA', justifyContent: 'center', padding: 24 },
-  passCard: { backgroundColor: CARD, borderRadius: 20, padding: 24, borderWidth: 1, borderColor: BORDER },
-  passTitle: { color: TEXT_C, fontSize: 18, fontWeight: '700', marginBottom: 16, textAlign: 'center' },
-  passDisplay: { backgroundColor: DARK, borderRadius: 12, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: BORDER },
-  passText: { color: GREEN, fontSize: 16, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', textAlign: 'center' },
+  passCard: { backgroundColor: c.card, borderRadius: 20, padding: 24, borderWidth: 1, borderColor: c.border },
+  passTitle: { color: c.text, fontSize: 18, fontWeight: '700', marginBottom: 16, textAlign: 'center' },
+  passDisplay: { backgroundColor: c.bg, borderRadius: 12, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: c.border },
+  passText: { color: c.primary, fontSize: 16, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', textAlign: 'center' },
   passActions: { flexDirection: 'row', gap: 10 },
-  passBtn: { flex: 1, backgroundColor: PURPLE, borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
+  passBtn: { flex: 1, backgroundColor: c.purple, borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
   passBtnTxt: { color: '#FFF', fontSize: 14, fontWeight: '600' },
 
   // Trash
-  trashCard: { backgroundColor: CARD, borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: RED + '30' },
-  trashTitle: { color: TEXT_C, fontSize: 15, fontWeight: '600' },
-  trashDate: { color: SUB, fontSize: 12, marginTop: 2 },
-  trashRestore: { backgroundColor: GREEN + '15', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 6 },
-  trashDelete: { backgroundColor: RED + '15', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 6 },
+  trashCard: { backgroundColor: c.card, borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: c.danger + '30' },
+  trashTitle: { color: c.text, fontSize: 15, fontWeight: '600' },
+  trashDate: { color: c.textDim, fontSize: 12, marginTop: 2 },
+  trashRestore: { backgroundColor: c.primary + '15', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 6 },
+  trashDelete: { backgroundColor: c.danger + '15', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 6 },
 });
