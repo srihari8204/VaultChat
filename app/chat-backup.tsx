@@ -305,6 +305,24 @@ export default function ChatBackupScreen() {
           )}
         </LinearGradient>
 
+        {/* ── Split-key recovery ─────────────────────── */}
+        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
+          <Text style={s.cardTitle}>Split-key recovery</Text>
+          <Text style={s.cardDesc}>
+            Worried you’ll forget your backup passphrase? Split it into recovery shares
+            (e.g. 3-of-5) and give them to people you trust. Any 3 can rebuild it; fewer
+            reveal nothing.
+          </Text>
+          <TouchableOpacity
+            style={s.restoreBtn}
+            onPress={() => router.push('/split-key-backup' as any)}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="key-outline" size={20} color={colors.accent} />
+            <Text style={s.restoreBtnText}>Set up split-key recovery</Text>
+          </TouchableOpacity>
+        </LinearGradient>
+
         {/* ── Backup History ─────────────────────────── */}
         {backups.length > 0 && (
           <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
