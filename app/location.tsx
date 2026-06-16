@@ -20,6 +20,7 @@ import {
 import { Aurora } from '../constants/theme';
 import { sendMessage } from '../lib/chatService';
 import { emit } from '../lib/socket';
+import { newLiveKey, encryptPosition } from '../lib/liveLocationCrypto';
 
 const DURATIONS = [
   { label: '15 minutes', seconds: 900 },
@@ -111,12 +112,27 @@ export default function LocationScreen() {
     if (!chatId) { Alert.alert('No chat', 'Open this from a chat to share live location.'); return; }
     const dur = DURATIONS[selDuration];
     const until = Date.now() + dur.seconds * 1000;
+
+    // Per-session key. Delivered to the peer ONCE inside the initial E2E
+    // 'location' message (content.lk), then used to encrypt every relayed update
+    // so the server only ever sees opaque blobs.
+    const liveKey = newLiveKey();
+    try {
+      await sendMessage(chatId, JSON.stringify({
+        lat: loc.coords.latitude, lng: loc.coords.longitude, address, live: true, lk: liveKey, until,
+      }), 'location');
+    } catch (e: any) {
+      Alert.alert('Could not start', e?.message ?? 'Try again');
+      return;
+    }
+
     setLive(true);
     setTimeLeft(dur.seconds);
 
-    // Emit the first position immediately, then on every movement update.
+    // Encrypt each position with the session key and relay the opaque blob.
     const pushUpdate = (latitude: number, longitude: number) => {
-      emit('live_location_update', { chatId, latitude, longitude, address, until }).catch(() => {});
+      const blob = encryptPosition(liveKey, { lat: latitude, lng: longitude, address });
+      if (blob) emit('live_location_update', { chatId, blob, until }).catch(() => {});
     };
     pushUpdate(loc.coords.latitude, loc.coords.longitude);
 

@@ -13,6 +13,7 @@ import { PinPad } from '../components/PinPad';
 import { savePIN } from './(constants)/authService';
 import { markSetupComplete } from '../services/securityService';
 import { markUnlocked } from '../lib/sessionLock';
+import { sealCurrentSession } from '../lib/api';
 
 export default function SetMpinScreen() {
   const router = useRouter();
@@ -39,6 +40,8 @@ export default function SetMpinScreen() {
     setSaving(true);
     try {
       await savePIN(pin); // hashes to SecureStore (vc_pin_hash)
+      // #32: seal the real session under this PIN (no-op unless VAULT_SESSION_SEALED).
+      await sealCurrentSession(pin);
       await markSetupComplete();
       markUnlocked();
       if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});

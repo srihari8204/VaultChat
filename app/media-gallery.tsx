@@ -15,7 +15,8 @@ import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Aurora } from '../constants/theme';
 import { getAccessToken } from '../lib/api';
-import { getMessages, attachmentUrl, type Message } from '../lib/chatService';
+import { getMessages, getChat, decryptFromChat, attachmentUrl, type Message } from '../lib/chatService';
+import { getDecryptedAttachmentUri, parseMediaContent } from '../lib/mediaAttachments';
 
 const { width: SW } = Dimensions.get('window');
 const TILE = (SW - 40) / 3;
@@ -36,7 +37,7 @@ export default function MediaGalleryScreen() {
   const [files, setFiles] = useState<Message[]>([]);
   const [links, setLinks] = useState<LinkItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [viewer, setViewer] = useState<string | null>(null); // attachmentId being viewed
+  const [viewer, setViewer] = useState<Message | null>(null); // message being viewed full-screen
 
   useEffect(() => {
     let active = true;
@@ -45,6 +46,10 @@ export default function MediaGalleryScreen() {
         const tok = await getAccessToken();
         if (active) setAuthHeader(tok ? `Bearer ${tok}` : null);
         if (!cid) { setLoading(false); return; }
+
+        // Remember the chat's direct peer so encrypted media content can be
+        // decrypted (to recover per-file keys) — same as the chat screen does.
+        await getChat(cid).catch(() => {});
 
         // Walk the history (cap a few pages) and bucket by type.
         const all: Message[] = [];
@@ -76,26 +81,64 @@ export default function MediaGalleryScreen() {
   }, [cid]);
 
   const fmtDate = useCallback((iso: string) => { try { return new Date(iso).toLocaleDateString(); } catch { return ''; } }, []);
-  const thumb = (aid: string) => ({ uri: attachmentUrl(aid), headers: authHeader ? { Authorization: authHeader } : undefined });
+
+  // Resolve a renderable source for a media message: for encrypted attachments,
+  // decrypt the content to recover the per-file key, then return a decrypted
+  // local file:// URI; for plaintext, return the auth-gated /uploads URL.
+  const resolveSrc = useCallback(async (
+    m: Message,
+  ): Promise<{ uri: string; headers?: Record<string, string> } | null> => {
+    const aid = m.meta?.attachmentId;
+    if (!aid) return null;
+    if (m.meta?.encrypted) {
+      try {
+        const plain = await decryptFromChat(cid, m.senderId, m.content, m.id);
+        await parseMediaContent(aid, plain);
+        return await getDecryptedAttachmentUri(aid);
+      } catch { return null; }
+    }
+    return { uri: attachmentUrl(aid), headers: authHeader ? { Authorization: authHeader } : undefined };
+  }, [cid, authHeader]);
+
+  // Lazy thumbnail: resolves (and decrypts if needed) only when the tile mounts.
+  const MediaThumb = useCallback(({ m, style, resizeMode = 'cover' as const }: {
+    m: Message; style: any; resizeMode?: 'cover' | 'contain';
+  }) => {
+    const [src, setSrc] = useState<{ uri: string; headers?: Record<string, string> } | null>(null);
+    useEffect(() => {
+      let cancel = false;
+      (async () => { const r = await resolveSrc(m); if (!cancel) setSrc(r); })();
+      return () => { cancel = true; };
+    }, [m]);
+    if (!src) return <View style={[style, { backgroundColor: Aurora.surfaceSolid }]} />;
+    return <Image source={src} style={style} resizeMode={resizeMode} />;
+  }, [resolveSrc]);
+
+  const openFile = useCallback(async (m: Message) => {
+    const r = await resolveSrc(m);
+    if (!r) return;
+    // Decrypted local file → open directly; plaintext → open the auth'd URL.
+    Linking.openURL(r.uri).catch(() => {});
+  }, [resolveSrc]);
 
   const renderPhoto = ({ item }: { item: Message }) => (
-    <TouchableOpacity style={s.tile} onPress={() => setViewer(item.meta.attachmentId)} activeOpacity={0.8}>
-      <Image source={thumb(item.meta.attachmentId)} style={s.tileImg} resizeMode="cover" />
+    <TouchableOpacity style={s.tile} onPress={() => setViewer(item)} activeOpacity={0.8}>
+      <MediaThumb m={item} style={s.tileImg} />
     </TouchableOpacity>
   );
 
   const renderVideo = ({ item }: { item: Message }) => (
-    <TouchableOpacity style={s.tile} onPress={() => setViewer(item.meta.attachmentId)} activeOpacity={0.8}>
-      <Image source={thumb(item.meta.attachmentId)} style={s.tileImg} resizeMode="cover" />
+    <TouchableOpacity style={s.tile} onPress={() => setViewer(item)} activeOpacity={0.8}>
+      <MediaThumb m={item} style={s.tileImg} />
       <View style={s.playBadge}><Ionicons name="play" size={16} color="#fff" /></View>
     </TouchableOpacity>
   );
 
   const renderFile = ({ item }: { item: Message }) => (
-    <TouchableOpacity style={s.fileRow} onPress={() => Linking.openURL(attachmentUrl(item.meta.attachmentId)).catch(() => {})}>
+    <TouchableOpacity style={s.fileRow} onPress={() => openFile(item)}>
       <View style={s.fileIcon}><Ionicons name="document-text-outline" size={22} color={Aurora.accent} /></View>
       <View style={{ flex: 1 }}>
-        <Text style={s.fileName} numberOfLines={1}>{item.meta?.fileName || item.meta?.name || 'File'}</Text>
+        <Text style={s.fileName} numberOfLines={1}>{item.meta?.fileName || item.meta?.name || item.meta?.filename || 'File'}</Text>
         <Text style={s.fileDate}>{fmtDate(item.createdAt)}</Text>
       </View>
       <Ionicons name="download-outline" size={18} color={Aurora.textDim} />
@@ -163,7 +206,7 @@ export default function MediaGalleryScreen() {
           <TouchableOpacity style={s.viewerClose} onPress={() => setViewer(null)} hitSlop={12}>
             <Ionicons name="close" size={28} color="#fff" />
           </TouchableOpacity>
-          {viewer && <Image source={thumb(viewer)} style={s.viewerImg} resizeMode="contain" />}
+          {viewer && <MediaThumb m={viewer} style={s.viewerImg} resizeMode="contain" />}
         </View>
       </Modal>
     </View>

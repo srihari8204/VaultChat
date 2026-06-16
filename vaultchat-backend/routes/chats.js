@@ -1736,5 +1736,67 @@ router.get('/:id/poll-votes', async (req, res) => {
   }
 });
 
+// ─── Group E2EE sender-key distribution (W5) ────────────────────────────────
+// Members publish their Sender Key Distribution Messages (SKDMs) — each already
+// encrypted with the pairwise Double Ratchet, so OPAQUE to the server — and fetch
+// the ones addressed to them. The server only relays blobs; it can never read
+// group messages.
+
+// POST /chats/:id/sender-keys  { distributions: [{ recipientId, skdm }] }
+// The caller (sender) publishes their SKDM to one or more recipients. Upserts so
+// a rotation overwrites the previous key. Recipients are validated to be active
+// members of the chat.
+router.post('/:id/sender-keys', async (req, res) => {
+  try {
+    const chatId = req.params.id;
+    const me = await loadChatMembership(req, chatId);
+    if (!me || me.left_at) return res.status(403).json({ error: 'not a member' });
+
+    const dists = Array.isArray(req.body?.distributions) ? req.body.distributions : [];
+    if (!dists.length) return res.json({ ok: true, stored: 0 });
+
+    // Set of active members to validate recipients against.
+    const mem = await req.dbQuery(
+      `SELECT user_id FROM chat_members WHERE chat_id = $1 AND left_at IS NULL`, [chatId]);
+    const active = new Set(mem.rows.map(r => r.user_id));
+
+    let stored = 0;
+    for (const d of dists) {
+      const recipientId = d && d.recipientId ? String(d.recipientId) : '';
+      const skdm        = d && d.skdm        ? String(d.skdm)        : '';
+      if (!recipientId || !skdm || recipientId === req.user.id || !active.has(recipientId)) continue;
+      await req.dbQuery(
+        `INSERT INTO group_sender_keys (chat_id, sender_id, recipient_id, skdm)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (chat_id, sender_id, recipient_id)
+           DO UPDATE SET skdm = EXCLUDED.skdm, updated_at = NOW()`,
+        [chatId, req.user.id, recipientId, skdm]);
+      stored++;
+    }
+    res.json({ ok: true, stored });
+  } catch (err) {
+    console.error('[sender-keys POST]', err.message);
+    res.status(500).json({ error: 'Failed to publish sender keys' });
+  }
+});
+
+// GET /chats/:id/sender-keys → SKDMs addressed to the caller: [{ senderId, skdm }].
+router.get('/:id/sender-keys', async (req, res) => {
+  try {
+    const chatId = req.params.id;
+    const me = await loadChatMembership(req, chatId);
+    if (!me || me.left_at) return res.status(403).json({ error: 'not a member' });
+
+    const r = await req.dbQuery(
+      `SELECT sender_id, skdm FROM group_sender_keys
+        WHERE chat_id = $1 AND recipient_id = $2`,
+      [chatId, req.user.id]);
+    res.json(r.rows.map(row => ({ senderId: row.sender_id, skdm: row.skdm })));
+  } catch (err) {
+    console.error('[sender-keys GET]', err.message);
+    res.status(500).json({ error: 'Failed to load sender keys' });
+  }
+});
+
 module.exports = router;
 module.exports.setBroadcasters = setBroadcasters;

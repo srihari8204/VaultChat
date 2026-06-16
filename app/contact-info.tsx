@@ -18,8 +18,9 @@ import { E2EE_ENABLED } from '../constants/flags';
 import { getAccessToken } from '../lib/api';
 import {
   getChat, getMessages, muteChat, listBlocks, blockUser, unblockUser, reportUser,
-  attachmentUrl, type Message, type ChatMember,
+  decryptFromChat, attachmentUrl, type Message, type ChatMember,
 } from '../lib/chatService';
+import { getDecryptedAttachmentUri, parseMediaContent } from '../lib/mediaAttachments';
 
 const { width: SW } = Dimensions.get('window');
 const MEDIA_SIZE = (SW - 32 - 8) / 3;
@@ -195,17 +196,12 @@ export default function ContactInfoScreen() {
               </TouchableOpacity>
             </View>
             <View style={s.mediaGrid}>
-              {media.map(m => {
-                const aid = m.meta?.attachmentId;
-                return (
-                  <View key={m.id} style={s.mediaTile}>
-                    {aid && authHeader
-                      ? <Image source={{ uri: attachmentUrl(aid), headers: { Authorization: authHeader } }} style={s.mediaImg} />
-                      : <Ionicons name={m.type === 'video' ? 'videocam' : 'image'} size={24} color={Aurora.textFaint} />}
-                    {m.type === 'video' && <View style={s.videoBadge}><Ionicons name="play" size={12} color="#fff" /></View>}
-                  </View>
-                );
-              })}
+              {media.map(m => (
+                <View key={m.id} style={s.mediaTile}>
+                  <SharedMediaThumb m={m} chatId={chatId} authHeader={authHeader} />
+                  {m.type === 'video' && <View style={s.videoBadge}><Ionicons name="play" size={12} color="#fff" /></View>}
+                </View>
+              ))}
             </View>
           </View>
         )}
@@ -282,6 +278,35 @@ export default function ContactInfoScreen() {
       </ScrollView>
     </View>
   );
+}
+
+// Shared-media thumbnail. Decrypts encrypted attachments (recovering the per-file
+// key from the message content) to a local file; renders plaintext via the auth'd
+// /uploads URL. Falls back to a placeholder icon while resolving / on failure.
+function SharedMediaThumb({ m, chatId, authHeader }: {
+  m: Message; chatId?: string; authHeader: string | null;
+}) {
+  const [src, setSrc] = useState<{ uri: string; headers?: Record<string, string> } | null>(null);
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      const aid = m.meta?.attachmentId;
+      if (!aid) return;
+      if (m.meta?.encrypted) {
+        try {
+          const plain = await decryptFromChat(String(chatId || ''), m.senderId, m.content, m.id);
+          await parseMediaContent(aid, plain);
+          const r = await getDecryptedAttachmentUri(aid);
+          if (!cancel) setSrc(r);
+        } catch { /* leave placeholder */ }
+      } else if (authHeader) {
+        if (!cancel) setSrc({ uri: attachmentUrl(aid), headers: { Authorization: authHeader } });
+      }
+    })();
+    return () => { cancel = true; };
+  }, [m, chatId, authHeader]);
+  if (!src) return <Ionicons name={m.type === 'video' ? 'videocam' : 'image'} size={24} color={Aurora.textFaint} />;
+  return <Image source={src} style={s.mediaImg} />;
 }
 
 const s = StyleSheet.create({

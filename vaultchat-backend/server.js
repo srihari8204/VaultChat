@@ -526,9 +526,13 @@ io.on('connection', (socket) => {
   });
 
   // Live location — relay position updates to the chat room. The sender's
-  // location-sharing screen emits; the peers' open chat screens render a
-  // live banner. Server only relays (no storage).
-  socket.on('live_location_update', async ({ chatId, latitude, longitude, address, until }) => {
+  // location screen emits; the peers' open chat screens render a live banner.
+  // Server only RELAYS (no storage) and is ZERO-KNOWLEDGE: the position is an
+  // opaque `blob` (client-side AES-256-GCM under a per-session key delivered E2E
+  // in the initial 'location' message). We never see coordinates. `until` is a
+  // non-sensitive expiry timestamp. Legacy plaintext fields are tolerated for
+  // cross-version rollout but new clients send only `blob`.
+  socket.on('live_location_update', async ({ chatId, blob, latitude, longitude, address, until }) => {
     if (!chatId) return;
     // Only relay into a chat the sender is actually a member of (cache the
     // membership check per chat for this socket so it's one query per session).
@@ -542,9 +546,10 @@ io.on('connection', (socket) => {
       } catch { socket.data.liveLocOk[chatId] = false; }
     }
     if (!socket.data.liveLocOk[chatId]) return;
-    socket.to(`chat:${chatId}`).emit('live_location_update', {
-      userId: socket.data.uid, latitude, longitude, address, until,
-    });
+    const out = { userId: socket.data.uid, until };
+    if (blob) out.blob = blob;                                  // E2E path (preferred)
+    else if (latitude != null) { out.latitude = latitude; out.longitude = longitude; out.address = address; } // legacy
+    socket.to(`chat:${chatId}`).emit('live_location_update', out);
   });
   socket.on('live_location_stop', ({ chatId }) => {
     if (!chatId) return;

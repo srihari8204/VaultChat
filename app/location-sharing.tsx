@@ -17,6 +17,7 @@ import {
 import { Aurora } from '../constants/theme';
 import { getSocket } from '../lib/socket';
 import { sendMessage } from '../lib/chatService';
+import { newLiveKey, encryptPosition } from '../lib/liveLocationCrypto';
 
 const C = { current: Aurora.primary, live: '#FF6B35', manual: Aurora.purple, link: Aurora.accent };
 const DURATIONS = [
@@ -85,22 +86,29 @@ export default function LocationSharingScreen() {
     if (!coords) { Alert.alert('Waiting', 'Getting your location, please wait…'); return; }
     setLoading(true);
     try {
-      // A location message so it appears in the chat history.
-      await sendMessage(chatId, `${m === 'current' ? '📌 Current location' : '📍 Live location'}${address ? `\n${address}` : ''}`, 'location', {
-        meta: { latitude: coords.lat, longitude: coords.lng, address, kind: m === 'current' ? 'snapshot' : 'live' },
-      });
+      const isLive = m !== 'current';
+      // Per-session key for live mode, delivered to the peer E2E inside this
+      // message's content (so the server never sees it or the coordinates).
+      const liveKey = isLive ? newLiveKey() : null;
+      untilRef.current = isLive && durMin ? Date.now() + durMin * 60000 : undefined;
 
-      if (m !== 'current') {
-        untilRef.current = durMin ? Date.now() + durMin * 60000 : undefined;
+      // Coordinates ride in the message CONTENT (end-to-end encrypted in direct
+      // chats), NOT in plaintext meta. The render bubble parses content JSON.
+      await sendMessage(chatId, JSON.stringify({
+        lat: coords.lat, lng: coords.lng, address, live: isLive,
+        ...(liveKey ? { lk: liveKey, until: untilRef.current } : {}),
+      }), 'location');
+
+      if (isLive) {
         socketRef.current = await getSocket();
         await Location.requestBackgroundPermissionsAsync().catch(() => {});
         watchRef.current = await Location.watchPositionAsync(
           { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 8000, distanceInterval: 8 },
           (loc) => {
             setCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude });
-            socketRef.current?.emit('live_location_update', {
-              chatId, latitude: loc.coords.latitude, longitude: loc.coords.longitude, address, until: untilRef.current,
-            });
+            // Encrypt each position with the session key → relay opaque blob.
+            const blob = liveKey && encryptPosition(liveKey, { lat: loc.coords.latitude, lng: loc.coords.longitude, address });
+            if (blob) socketRef.current?.emit('live_location_update', { chatId, blob, until: untilRef.current });
           },
         );
       }

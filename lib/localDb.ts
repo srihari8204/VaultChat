@@ -12,6 +12,7 @@
 
 import * as SQLite from 'expo-sqlite';
 import type { Message } from './chatService';
+import { encField, decField, clearCacheKeyStore } from './cacheCrypto';
 
 let _dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
@@ -56,9 +57,9 @@ function rowToMessage(r: any): Message {
     id: r.id,
     senderId: r.sender_id,
     type: r.type,
-    content: r.content,
+    content: decField(r.content),
     replyToId: r.reply_to_id,
-    meta: r.meta ? safeParse(r.meta) : null,
+    meta: r.meta ? safeParse(decField(r.meta)!) : null,
     createdAt: r.created_at,
     editedAt: r.edited_at,
     deletedAt: r.deleted_at,
@@ -79,8 +80,8 @@ export async function cacheMessages(chatId: string, msgs: Message[]): Promise<vo
            (id, chat_id, sender_id, type, content, reply_to_id, meta, created_at, edited_at, deleted_at, expires_at)
          VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
         [
-          m.id, chatId, (m as any).senderId ?? null, m.type ?? null, m.content ?? null,
-          m.replyToId ?? null, m.meta != null ? JSON.stringify(m.meta) : null,
+          m.id, chatId, (m as any).senderId ?? null, m.type ?? null, encField(m.content ?? null),
+          m.replyToId ?? null, encField(m.meta != null ? JSON.stringify(m.meta) : null),
           m.createdAt ?? null, m.editedAt ?? null, m.deletedAt ?? null, (m as any).expiresAt ?? null,
         ],
       );
@@ -133,7 +134,7 @@ export async function cacheChats(chats: Array<{ id: string; lastMessageAt?: stri
     for (const c of chats) {
       await db.runAsync(
         `INSERT OR REPLACE INTO chats (id, data, last_message_at) VALUES (?, ?, ?)`,
-        [c.id, JSON.stringify(c), (c as any).lastMessageAt ?? null],
+        [c.id, encField(JSON.stringify(c)), (c as any).lastMessageAt ?? null],
       );
     }
   });
@@ -144,14 +145,21 @@ export async function getCachedChats(): Promise<any[]> {
   const rows = await db.getAllAsync(
     `SELECT data FROM chats ORDER BY (last_message_at IS NULL), last_message_at DESC`,
   );
-  return rows.map((r: any) => safeParse(r.data)).filter(Boolean);
+  return rows.map((r: any) => safeParse(decField(r.data) || '')).filter(Boolean);
 }
 
-/** Dump all local rows for an encrypted backup. */
+/** Dump all local rows for an encrypted backup. Sealed fields are decrypted here
+ *  so the backup is portable across installs (it gets re-sealed under the backup
+ *  layer's own key by backupService, and re-encrypted under the local DEK on
+ *  importAll). Requires the cache to be unlocked, or sealed rows export as-is. */
 export async function exportAll(): Promise<{ messages: any[]; chats: any[] }> {
   const db = await getLocalDb();
-  const messages = await db.getAllAsync(`SELECT * FROM messages`);
-  const chats = await db.getAllAsync(`SELECT * FROM chats`);
+  const messages = (await db.getAllAsync(`SELECT * FROM messages`)).map((m: any) => ({
+    ...m, content: decField(m.content), meta: decField(m.meta),
+  }));
+  const chats = (await db.getAllAsync(`SELECT * FROM chats`)).map((c: any) => ({
+    ...c, data: decField(c.data),
+  }));
   return { messages, chats };
 }
 
@@ -164,12 +172,12 @@ export async function importAll(data: { messages?: any[]; chats?: any[] }): Prom
       await db.runAsync(
         `INSERT OR REPLACE INTO messages (id, chat_id, sender_id, type, content, reply_to_id, meta, created_at, edited_at, deleted_at, expires_at)
          VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-        [m.id, m.chat_id, m.sender_id, m.type, m.content, m.reply_to_id, m.meta, m.created_at, m.edited_at, m.deleted_at, m.expires_at],
+        [m.id, m.chat_id, m.sender_id, m.type, encField(m.content), m.reply_to_id, encField(m.meta), m.created_at, m.edited_at, m.deleted_at, m.expires_at],
       );
       n++;
     }
     for (const c of data.chats || []) {
-      await db.runAsync(`INSERT OR REPLACE INTO chats (id, data, last_message_at) VALUES (?,?,?)`, [c.id, c.data, c.last_message_at]);
+      await db.runAsync(`INSERT OR REPLACE INTO chats (id, data, last_message_at) VALUES (?,?,?)`, [c.id, encField(c.data), c.last_message_at]);
     }
   });
   return n;
@@ -179,4 +187,7 @@ export async function importAll(data: { messages?: any[]; chats?: any[] }): Prom
 export async function clearLocalDb(): Promise<void> {
   const db = await getLocalDb();
   await db.execAsync(`DELETE FROM messages; DELETE FROM chats; DELETE FROM sync_cursor;`);
+  // #32 Phase B: wipe the sealed DEK envelope too, so no orphaned key survives an
+  // account switch (rows are gone, so the key has nothing left to protect).
+  try { await clearCacheKeyStore(); } catch {}
 }

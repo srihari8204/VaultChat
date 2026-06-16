@@ -16,6 +16,8 @@ import { PinPad } from '../components/PinPad';
 import { verifyPIN } from './(constants)/authService';
 import { logoutUser } from './(constants)/authService';
 import { markUnlocked } from '../lib/sessionLock';
+import { loadSealedSession } from '../lib/api';
+import { VAULT_SESSION_SEALED } from '../constants/flags';
 
 export default function EnterMpinScreen() {
   const router = useRouter();
@@ -30,6 +32,9 @@ export default function EnterMpinScreen() {
 
   // Detect + auto-trigger biometrics (silent — never throws a blocking alert).
   useEffect(() => {
+    // A PIN-sealed session (#32) can only be unsealed by the PIN — biometrics
+    // can't, and are a coercion weakness anyway. So skip biometrics when sealed.
+    if (VAULT_SESSION_SEALED) return;
     (async () => {
       try {
         const hasHw = await LocalAuthentication.hasHardwareAsync();
@@ -70,7 +75,12 @@ export default function EnterMpinScreen() {
 
   const onComplete = async (v: string) => {
     const ok = await verifyPIN(v);
-    if (ok) { enter(); return; }
+    if (ok) {
+      // #32: unseal the real session with this PIN (no-op unless VAULT_SESSION_SEALED).
+      await loadSealedSession(v);
+      enter();
+      return;
+    }
     setError(true);
     setMsg('Incorrect PIN');
     doShake();
@@ -95,8 +105,8 @@ export default function EnterMpinScreen() {
 
       {msg ? <Text style={s.msg}>{msg}</Text> : null}
 
-      {/* Biometric buttons */}
-      {(hasFingerprint || hasFace) && (
+      {/* Biometric buttons (hidden when the session is PIN-sealed) */}
+      {!VAULT_SESSION_SEALED && (hasFingerprint || hasFace) && (
         <View style={s.bioRow}>
           {hasFingerprint && (
             <TouchableOpacity style={s.bioBtn} onPress={runBiometric} activeOpacity={0.8}>

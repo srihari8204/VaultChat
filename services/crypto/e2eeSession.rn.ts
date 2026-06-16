@@ -82,6 +82,13 @@ export async function e2eeCachePlaintext(chatId: string, messageId: number, plai
   if (messageId > 0) await msgStore.put(chatId, messageId, plaintext);
 }
 
+/** Read a cached message plaintext by (chatId, messageId), or null. Shared by the
+ *  group session so a sender can render their own (un-self-decryptable) messages. */
+export async function e2eeGetCached(chatId: string, messageId: number): Promise<string | null> {
+  if (messageId <= 0) return null;
+  return msgStore.get(chatId, messageId);
+}
+
 /**
  * Provision + publish this device's key bundle so peers can start E2EE
  * sessions. Idempotent and cheap after the first successful call this session.

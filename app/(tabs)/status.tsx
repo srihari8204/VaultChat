@@ -34,11 +34,16 @@ import {
 import { getAccessToken } from '../../lib/api';
 import {
   addStory,
+  addEncryptedStory,
+  getStoryAudience,
   attachmentUrl,
   listStoriesFeed,
   uploadAttachment,
   type StoryFeedEntry,
 } from '../../lib/chatService';
+import { STORY_E2EE, E2EE_ENABLED } from '../../constants/flags';
+import { uploadEncryptedAttachment } from '../../lib/mediaAttachments';
+import { wrapStoryKeyForViewers } from '../../lib/storyKeys';
 
 export default function StatusScreen() {
   const router = useRouter();
@@ -100,8 +105,17 @@ export default function StatusScreen() {
     try {
       const filename = asset.fileName || `story-${Date.now()}.jpg`;
       const mime     = asset.mimeType || 'image/jpeg';
-      const up = await uploadAttachment(asset.uri, filename, mime);
-      await addStory(up.id, 'image');
+
+      if (STORY_E2EE && E2EE_ENABLED) {
+        // Encrypt the media once, then wrap its key per authorized viewer.
+        const { attachmentId, mediaKey } = await uploadEncryptedAttachment(asset.uri, filename, mime);
+        const viewerIds = await getStoryAudience();
+        const keys = await wrapStoryKeyForViewers(viewerIds, mediaKey);
+        await addEncryptedStory(attachmentId, 'image', keys);
+      } else {
+        const up = await uploadAttachment(asset.uri, filename, mime);
+        await addStory(up.id, 'image');
+      }
       await load();
     } catch (e: any) {
       Alert.alert('Could not post story', e?.message ?? 'Try again');

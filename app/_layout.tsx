@@ -24,7 +24,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { runSecurityCheck } from '../services/securityService';
 import { attachTapHandler } from '../lib/push';
 import { getSocket } from '../lib/socket';
-import { getAccessToken } from '../lib/api';
+import { getAccessToken, sealedSessionLocked } from '../lib/api';
 import { E2EE_ENABLED } from '../constants/flags';
 import { hasPIN } from './(constants)/authService';
 import { isUnlocked } from '../lib/sessionLock';
@@ -87,7 +87,9 @@ function RootLayout() {
       // start (the unlocked flag resets on full reload). Fail open on error.
       try {
         const tok = await getAccessToken();
-        if (tok && !isUnlocked() && (await hasPIN())) {
+        // #32: a sealed session has no readable token until unlocked — gate on it too.
+        const sealedLocked = await sealedSessionLocked();
+        if ((tok || sealedLocked) && !isUnlocked() && ((await hasPIN()) || sealedLocked)) {
           router.replace('/enter-mpin' as any);
         }
         // Publish this device's E2EE key bundle on startup so peers can open

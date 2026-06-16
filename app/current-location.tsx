@@ -66,16 +66,15 @@ export default function CurrentLocationScreen() {
     }
 
     try {
-      // Send as a location-type chat message (Postgres backend).
-      await sendMessage(chatId, `\uD83D\uDCCC Current Location${address ? `\n${address}` : ''}`, 'location', {
-        meta: {
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-          accuracy: location.coords.accuracy,
-          address,
-          kind: 'snapshot',
-        },
-      });
+      // Send as a location-type chat message. Coordinates ride in the CONTENT
+      // (end-to-end encrypted in direct chats), NOT in plaintext meta.
+      await sendMessage(chatId, JSON.stringify({
+        lat: location.coords.latitude,
+        lng: location.coords.longitude,
+        accuracy: location.coords.accuracy,
+        address,
+        live: false,
+      }), 'location');
 
       setShared(true);
       Alert.alert('Shared!', 'Your current location has been sent', [

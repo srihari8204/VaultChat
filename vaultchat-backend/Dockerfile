@@ -25,6 +25,11 @@ RUN apt-get update \
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 EXPOSE 3000
+# Writable disk-upload dir for the local-storage fallback, owned by the non-root
+# user (named volumes mounted here inherit this ownership on first use).
+RUN mkdir -p /app/uploads && chown -R node:node /app/uploads
 HEALTHCHECK --interval=15s --timeout=4s --start-period=20s --retries=3 \
   CMD curl -fsS http://localhost:3000/health || exit 1
+# Drop root — the app runs as the built-in unprivileged `node` user.
+USER node
 CMD ["node", "server.js"]

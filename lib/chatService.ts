@@ -6,7 +6,7 @@ import * as Crypto from 'expo-crypto';
 import * as FileSystem from 'expo-file-system/legacy';
 import { api, getAccessToken } from './api';
 import { SERVER_URL } from '../constants/server';
-import { E2EE_ENABLED } from '../constants/flags';
+import { E2EE_ENABLED, GROUP_E2EE } from '../constants/flags';
 
 export interface ChatSummary {
   id:            string;
@@ -125,10 +125,27 @@ function directPeerOf(chatId: string): string | null {
   return e && e.type === 'direct' ? e.peerId : null;
 }
 
+/** True when this chat is a known direct (1:1) chat — i.e. media/text can be E2E
+ *  encrypted to a single peer. Group chats return false (no group E2EE yet). */
+export function isDirectChat(chatId: string): boolean {
+  return directPeerOf(chatId) != null;
+}
+
 export async function encryptForChat(chatId: string, plaintext: string): Promise<string> {
   if (!E2EE_ENABLED) return plaintext;
+  // Group chats (W5): encrypt with the sender-key group session when enabled.
+  if (_chatPeer.get(chatId)?.type === 'group') {
+    if (!GROUP_E2EE) return plaintext; // groups stay plaintext until enabled
+    try {
+      const g = await import('../services/crypto/groupSession.rn');
+      return await g.groupEncryptMessage(chatId, plaintext);
+    } catch (err) {
+      if (__DEV__) console.warn('[e2ee] group encrypt fell back to plaintext:', (err as any)?.message);
+      return plaintext;
+    }
+  }
   const peerId = directPeerOf(chatId);
-  if (!peerId) return plaintext; // group / unknown chat → not yet E2EE
+  if (!peerId) return plaintext; // unknown chat → not yet E2EE
   try {
     const e2ee = await import('../services/crypto/e2eeSession.rn');
     return await e2ee.e2eeEncrypt(chatId, peerId, plaintext);
@@ -146,6 +163,19 @@ export async function decryptFromChat(
 ): Promise<string> {
   if (ciphertext == null) return '';
   if (!E2EE_ENABLED) return ciphertext;
+  // Group chats (W5): a group envelope (GSK1:) is decrypted via the sender-key
+  // session; anything else is pre-E2EE / plaintext history and passes through.
+  if (_chatPeer.get(chatId)?.type === 'group') {
+    if (!GROUP_E2EE) return ciphertext;
+    try {
+      const g = await import('../services/crypto/groupSession.rn');
+      if (!g.isGroupEnvelope(ciphertext)) return ciphertext;
+      return await g.groupDecryptMessage(chatId, senderId, messageId ?? 0, ciphertext);
+    } catch (err) {
+      if (__DEV__) console.warn('[e2ee] group decrypt failed:', (err as any)?.message);
+      return '🔒 unable to decrypt';
+    }
+  }
   try {
     const e2ee = await import('../services/crypto/e2eeSession.rn');
     if (!e2ee.isEnvelope(ciphertext)) return ciphertext; // pre-E2EE plaintext history
@@ -511,6 +541,7 @@ export interface StoryItem {
   attachmentId: string;
   mediaType:    'image' | 'video';
   caption:      string | null;
+  encrypted?:   boolean;
   createdAt:    string;
   expiresAt:    string;
   seen:         boolean;
@@ -539,6 +570,34 @@ export async function addStory(
   caption?: string,
 ): Promise<StoryItem> {
   return api('/stories', { method: 'POST', json: { attachmentId, mediaType, caption } });
+}
+
+// W7: viewer ids to wrap an encrypted story's content key for (the author's
+// current audience). Fetched before posting an encrypted story.
+export async function getStoryAudience(): Promise<string[]> {
+  const r = await api<{ viewerIds: string[] }>('/stories/audience');
+  return r?.viewerIds ?? [];
+}
+
+// W7: post an encrypted story (opaque ciphertext attachment + per-viewer wrapped keys).
+export async function addEncryptedStory(
+  attachmentId: string,
+  mediaType: 'image' | 'video',
+  keys: { viewerId: string; wrappedKey: string }[],
+  caption?: string,
+): Promise<StoryItem> {
+  return api('/stories', { method: 'POST', json: { attachmentId, mediaType, caption, encrypted: true, keys } });
+}
+
+// W7: the caller's own wrapped content key for an encrypted story (404 if not in audience).
+export async function getStoryKey(storyId: string): Promise<string | null> {
+  try {
+    const r = await api<{ wrappedKey: string }>(`/stories/${encodeURIComponent(storyId)}/key`);
+    return r?.wrappedKey ?? null;
+  } catch (e: any) {
+    if (e?.status === 404 || e?.status === 410) return null;
+    throw e;
+  }
 }
 
 export async function listStoriesFeed(): Promise<StoryFeedEntry[]> {

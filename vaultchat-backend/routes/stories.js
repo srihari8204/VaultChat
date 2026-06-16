@@ -29,10 +29,43 @@ function publicStory(row) {
     attachmentId: row.attachment_id,
     mediaType:    row.media_type,
     caption:      row.caption,
+    encrypted:    !!row.encrypted,
     createdAt:    row.created_at,
     expiresAt:    row.expires_at,
   };
 }
+
+// The set of users who may view the caller's stories: anyone sharing an active
+// chat, minus blocks, minus self. Used by the client to wrap an encrypted
+// story's content key once per authorized viewer at post time.
+async function audienceIds(userId) {
+  const r = await db.query(
+    `SELECT DISTINCT cm_them.user_id AS id
+       FROM chat_members cm_me
+       JOIN chat_members cm_them ON cm_them.chat_id = cm_me.chat_id
+      WHERE cm_me.user_id   = $1 AND cm_me.left_at   IS NULL
+        AND cm_them.user_id <> $1 AND cm_them.left_at IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM user_blocks ub
+           WHERE (ub.blocker_id = $1 AND ub.blocked_id = cm_them.user_id)
+              OR (ub.blocker_id = cm_them.user_id AND ub.blocked_id = $1)
+        )`,
+    [userId]
+  );
+  return r.rows.map(x => x.id);
+}
+
+// GET /stories/audience — viewer ids the caller should wrap an encrypted story
+// for. Returned BEFORE posting so the client can fetch each one's key bundle and
+// wrap the content key per viewer.
+router.get('/audience', async (req, res) => {
+  try {
+    res.json({ viewerIds: await audienceIds(req.user.id) });
+  } catch (err) {
+    console.error('[stories audience GET]', err.message);
+    res.status(500).json({ error: 'Failed to load audience' });
+  }
+});
 
 // POST /stories — create a new story.
 router.post('/', async (req, res) => {
@@ -41,6 +74,10 @@ router.post('/', async (req, res) => {
     const attachmentId = (b.attachmentId || '').toString();
     const mediaType    = (b.mediaType    || '').toString();
     const caption      = b.caption != null ? String(b.caption).slice(0, MAX_CAPTION) : null;
+    const encrypted    = b.encrypted === true;
+    // For encrypted stories: per-viewer wrapped content keys
+    // [{ viewerId, wrappedKey }]. The server stores them opaquely.
+    const keys = Array.isArray(b.keys) ? b.keys : [];
 
     if (!attachmentId) return res.status(400).json({ error: 'attachmentId required' });
     if (!['image','video'].includes(mediaType)) {
@@ -60,12 +97,30 @@ router.post('/', async (req, res) => {
     }
 
     const r = await db.query(
-      `INSERT INTO stories (user_id, attachment_id, media_type, caption)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO stories (user_id, attachment_id, media_type, caption, encrypted)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
-      [req.user.id, attachmentId, mediaType, caption]
+      [req.user.id, attachmentId, mediaType, caption, encrypted]
     );
-    res.json(publicStory(r.rows[0]));
+    const story = r.rows[0];
+
+    // Persist the per-viewer wrapped keys for an encrypted story. Restricted to
+    // the caller's real audience so keys can't be planted for arbitrary users.
+    if (encrypted && keys.length) {
+      const allowed = new Set(await audienceIds(req.user.id));
+      for (const k of keys) {
+        const viewerId   = k && k.viewerId   ? String(k.viewerId)   : '';
+        const wrappedKey = k && k.wrappedKey ? String(k.wrappedKey) : '';
+        if (!viewerId || !wrappedKey || !allowed.has(viewerId)) continue;
+        await db.query(
+          `INSERT INTO story_keys (story_id, viewer_id, wrapped_key)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (story_id, viewer_id) DO UPDATE SET wrapped_key = EXCLUDED.wrapped_key`,
+          [story.id, viewerId, wrappedKey]
+        );
+      }
+    }
+    res.json(publicStory(story));
   } catch (err) {
     console.error('[stories POST]', err.message);
     res.status(500).json({ error: 'Failed to post story' });
@@ -79,7 +134,7 @@ router.post('/', async (req, res) => {
 router.get('/feed', async (req, res) => {
   try {
     const r = await db.query(
-      `SELECT s.id, s.user_id, s.attachment_id, s.media_type, s.caption,
+      `SELECT s.id, s.user_id, s.attachment_id, s.media_type, s.caption, s.encrypted,
               s.created_at, s.expires_at,
               u.name, u.email, u.photo_url,
               EXISTS (SELECT 1 FROM story_views sv
@@ -132,6 +187,7 @@ router.get('/feed', async (req, res) => {
         attachmentId: row.attachment_id,
         mediaType:    row.media_type,
         caption:      row.caption,
+        encrypted:    !!row.encrypted,
         createdAt:    row.created_at,
         expiresAt:    row.expires_at,
         seen:         !!row.seen,
@@ -212,6 +268,32 @@ router.post('/:id/viewed', async (req, res) => {
   } catch (err) {
     console.error('[stories viewed POST]', err.message);
     res.status(500).json({ error: 'Failed to mark viewed' });
+  }
+});
+
+// GET /stories/:id/key — the caller's own wrapped content key for an encrypted
+// story. Returns 404 if the caller wasn't in the audience (no key was wrapped
+// for them) or the story expired. The key is opaque to the server.
+router.get('/:id/key', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid id' });
+    const s = await db.query(
+      `SELECT expires_at FROM stories WHERE id = $1`, [id]
+    );
+    if (!s.rows[0]) return res.status(404).json({ error: 'story not found' });
+    if (new Date(s.rows[0].expires_at).getTime() <= Date.now()) {
+      return res.status(410).json({ error: 'story expired' });
+    }
+    const k = await db.query(
+      `SELECT wrapped_key FROM story_keys WHERE story_id = $1 AND viewer_id = $2`,
+      [id, req.user.id]
+    );
+    if (!k.rows[0]) return res.status(404).json({ error: 'no key for viewer' });
+    res.json({ wrappedKey: k.rows[0].wrapped_key });
+  } catch (err) {
+    console.error('[stories key GET]', err.message);
+    res.status(500).json({ error: 'Failed to load key' });
   }
 });
 

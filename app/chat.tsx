@@ -49,6 +49,7 @@ import {
 import { getCurrentUserAsync } from './(constants)/authService';
 import { MessageActionSheet, type SheetAction } from '../components/MessageActionSheet';
 import { getAccessToken } from '../lib/api';
+import { getLiveKey, putLiveKey, clearLiveKey, decryptPosition } from '../lib/liveLocationCrypto';
 import {
   addBookmark,
   addReaction,
@@ -77,7 +78,6 @@ import {
   setHidden,
   setScreenshotMode,
   setVanishMode,
-  uploadAttachment,
   type ScreenshotMode,
   type ChatDetail,
   type ChatMember,
@@ -85,6 +85,8 @@ import {
   type Message,
   type ReactionSummary,
 } from '../lib/chatService';
+import { sendMediaMessage } from '../lib/sendMedia';
+import { getDecryptedAttachmentUri, parseMediaContent } from '../lib/mediaAttachments';
 import {
   cancel as queueCancel,
   enqueueText,
@@ -405,10 +407,23 @@ export default function ChatScreen() {
         };
 
         const onLiveLocation = (e: any) => {
-          if (e?.userId && e.userId !== meId) setLiveLoc({ userId: e.userId, latitude: e.latitude, longitude: e.longitude, address: e.address });
+          if (!e?.userId || e.userId === meId) return;
+          if (e.blob) {
+            // E2E path: decrypt the relayed blob with the per-session key the peer
+            // delivered in the initial 'location' message. No key yet → ignore
+            // (the key arrives via the E2E message; updates resume once we have it).
+            const key = getLiveKey(chatId, e.userId);
+            if (!key) return;
+            const pos = decryptPosition(key, e.blob);
+            if (pos) setLiveLoc({ userId: e.userId, latitude: pos.lat, longitude: pos.lng, address: pos.address });
+          } else if (e.latitude != null) {
+            // Legacy plaintext path (older sender).
+            setLiveLoc({ userId: e.userId, latitude: e.latitude, longitude: e.longitude, address: e.address });
+          }
         };
         const onLiveLocationStop = (e: any) => {
           setLiveLoc(prev => (prev && e?.userId === prev.userId) ? null : prev);
+          if (e?.userId) clearLiveKey(chatId, e.userId);
         };
 
         s.on('live_location_update', onLiveLocation);
@@ -968,16 +983,15 @@ export default function ChatScreen() {
         setRecElapsedMs(0);
         return;
       }
-      const up = await uploadAttachment(r.uri, r.filename, r.mime);
-      const msg = await sendMessage(chatId, '', 'audio', {
-        meta: {
-          attachmentId: up.id, mime: up.mime, size: up.size, filename: up.filename,
+      const msg = await sendMediaMessage(chatId, 'audio',
+        { uri: r.uri, filename: r.filename, mime: r.mime },
+        { metaExtra: {
           durationMs: r.durationMs,
           // Pre-computed 0..1 amplitude bars (length up to 32). Bubble
           // renders these without re-parsing the audio file.
           waveform: r.waveform,
-        },
-      });
+        } },
+      );
       setMessages(prev => prev.some(x => x.id === msg.id) ? prev : [msg, ...prev]);
       setRecElapsedMs(0);
     } catch (e: any) {
@@ -1061,18 +1075,12 @@ export default function ChatScreen() {
         (isVideo ? `video-${Date.now()}.mp4` : `photo-${Date.now()}.jpg`);
       const mime = asset.mimeType ||
         (isVideo ? 'video/mp4' : 'image/jpeg');
-      const up = await uploadAttachment(asset.uri, filename, mime, { viewOnce: !!opts.viewOnce });
-      const meta: any = {
-        attachmentId: up.id,
-        mime: up.mime,
-        size: up.size,
-        filename: up.filename,
-        width:  asset.width,
-        height: asset.height,
-      };
-      if (isVideo && asset.duration) meta.durationMs = asset.duration;
-      if (opts.viewOnce) meta.viewOnce = true;
-      const msg = await sendMessage(chatId, '', isVideo ? 'video' : 'image', { meta });
+      const metaExtra: any = { width: asset.width, height: asset.height };
+      if (isVideo && asset.duration) metaExtra.durationMs = asset.duration;
+      const msg = await sendMediaMessage(chatId, isVideo ? 'video' : 'image',
+        { uri: asset.uri, filename, mime },
+        { viewOnce: !!opts.viewOnce, metaExtra },
+      );
       setMessages(prev => prev.some(x => x.id === msg.id) ? prev : [msg, ...prev]);
     } catch (e: any) {
       Alert.alert('Upload failed', e?.message ?? 'Try again');
@@ -1098,10 +1106,9 @@ export default function ChatScreen() {
     try {
       const filename = asset.name || `file-${Date.now()}`;
       const mime     = asset.mimeType || 'application/octet-stream';
-      const up = await uploadAttachment(asset.uri, filename, mime);
-      const msg = await sendMessage(chatId, '', 'file', {
-        meta: { attachmentId: up.id, mime: up.mime, size: up.size, filename: up.filename },
-      });
+      const msg = await sendMediaMessage(chatId, 'file',
+        { uri: asset.uri, filename, mime },
+      );
       setMessages(prev => prev.some(x => x.id === msg.id) ? prev : [msg, ...prev]);
     } catch (e: any) {
       Alert.alert('Upload failed', e?.message ?? 'Try again');
@@ -1988,42 +1995,52 @@ function PollBubble({
 // (Sharing.shareAsync). The /uploads route is auth-gated so we pass
 // the Bearer header on the download request.
 function FileBubble({
-  attachmentId, filename, mime, size, authHeader, isMine,
+  attachmentId, filename, mime, size, authHeader, resolvedUri, isMine,
 }: {
   attachmentId: string;
   filename:     string;
   mime:         string;
   size:         number;
   authHeader:   string | null;
+  resolvedUri?: { uri: string; headers?: Record<string, string> } | null;
   isMine:       boolean;
 }) {
   const [busy, setBusy] = useState(false);
 
   const onOpen = useCallback(async () => {
-    if (!authHeader || busy) return;
+    if (busy) return;
+    // Encrypted files resolve to a local decrypted file (no auth header); plaintext
+    // files still need the Bearer header to download from /uploads.
+    if (!resolvedUri && !authHeader) return;
     setBusy(true);
     try {
       const safe = (filename || `file-${attachmentId}`).replace(/[/\\:*?"<>|]/g, '_');
-      // expo-file-system v19 (SDK 54) uses the legacy API
       const dest = `${(FileSystem as any).cacheDirectory}${safe}`;
-      const dl = await (FileSystem as any).downloadAsync(
-        attachmentUrl(attachmentId),
-        dest,
-        { headers: { Authorization: authHeader } },
-      );
-      if (dl.status !== 200) throw new Error(`Download failed (HTTP ${dl.status})`);
+      let outUri: string;
+      if (resolvedUri && !resolvedUri.headers) {
+        // Already a decrypted local file — copy to a nicely-named path, then share.
+        await (FileSystem as any).copyAsync({ from: resolvedUri.uri, to: dest }).catch(() => {});
+        const info = await (FileSystem as any).getInfoAsync(dest);
+        outUri = info?.exists ? dest : resolvedUri.uri;
+      } else {
+        const url = resolvedUri?.uri ?? attachmentUrl(attachmentId);
+        const headers = resolvedUri?.headers ?? { Authorization: authHeader as string };
+        const dl = await (FileSystem as any).downloadAsync(url, dest, { headers });
+        if (dl.status !== 200) throw new Error(`Download failed (HTTP ${dl.status})`);
+        outUri = dl.uri;
+      }
 
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(dl.uri, { mimeType: mime, dialogTitle: filename });
+        await Sharing.shareAsync(outUri, { mimeType: mime, dialogTitle: filename });
       } else {
-        Alert.alert('File saved', `Saved to ${dl.uri}`);
+        Alert.alert('File saved', `Saved to ${outUri}`);
       }
     } catch (e: any) {
       Alert.alert('Could not open file', e?.message ?? 'Try again');
     } finally {
       setBusy(false);
     }
-  }, [attachmentId, filename, mime, authHeader, busy]);
+  }, [attachmentId, filename, mime, authHeader, resolvedUri, busy]);
 
   return (
     <TouchableOpacity style={S.fileRow} onPress={onOpen} activeOpacity={0.7} disabled={busy}>
@@ -2051,12 +2068,13 @@ function formatBytes(n: number): string {
 // auth-gated /uploads endpoint with a Bearer header. Mono speaker icon
 // stays bold while playing, otherwise dim.
 function AudioBubble({
-  attachmentId, durationMs, waveform, authHeader, isMine,
+  attachmentId, durationMs, waveform, authHeader, resolvedUri, isMine,
 }: {
   attachmentId: string;
   durationMs:   number;
   waveform?:    number[];
   authHeader:   string | null;
+  resolvedUri?: { uri: string; headers?: Record<string, string> } | null;
   isMine:       boolean;
 }) {
   const [playing,  setPlaying]  = useState(false);
@@ -2073,7 +2091,11 @@ function AudioBubble({
   }, []);
 
   const togglePlay = useCallback(async () => {
-    if (!authHeader) return;
+    // Encrypted voice notes play from a local decrypted file (no header); plaintext
+    // ones stream from /uploads with the Bearer header.
+    const src = resolvedUri
+      ?? (authHeader ? { uri: attachmentUrl(attachmentId), headers: { Authorization: authHeader } } : null);
+    if (!src) return;
     try {
       if (playing) {
         await soundRef.current?.pauseAsync();
@@ -2082,7 +2104,7 @@ function AudioBubble({
       }
       if (!soundRef.current) {
         const { sound } = await Audio.Sound.createAsync(
-          { uri: attachmentUrl(attachmentId), headers: { Authorization: authHeader } },
+          src,
           { shouldPlay: true, progressUpdateIntervalMillis: 150 },
           (status: any) => {
             if (!status?.isLoaded) return;
@@ -2103,7 +2125,7 @@ function AudioBubble({
     } catch (e: any) {
       Alert.alert('Playback failed', e?.message ?? 'Try again');
     }
-  }, [attachmentId, authHeader, playing]);
+  }, [attachmentId, authHeader, resolvedUri, playing]);
 
   const totalSec = Math.max(1, Math.round(durationMs / 1000));
   const playedSec = Math.min(totalSec, Math.round(position / 1000));
@@ -2163,14 +2185,19 @@ function AudioBubble({
 // MessageBubble can flip to a "Viewed" tombstone without an extra
 // HEAD round-trip.
 function VideoBubble({
-  attachmentId, durationMs, authHeader, onErrorOnce,
+  attachmentId, durationMs, authHeader, resolvedUri, onErrorOnce,
 }: {
   attachmentId:  string;
   durationMs:    number;
   authHeader:    string | null;
+  resolvedUri?:  { uri: string; headers?: Record<string, string> } | null;
   onErrorOnce?:  () => void;
 }) {
-  if (!authHeader) {
+  // Encrypted videos play from a local decrypted file; plaintext stream from
+  // /uploads with the Bearer header.
+  const src = resolvedUri
+    ?? (authHeader ? { uri: attachmentUrl(attachmentId), headers: { Authorization: authHeader } } : null);
+  if (!src) {
     return (
       <View style={S.videoLoading}>
         <ActivityIndicator color={ACCENT} />
@@ -2180,10 +2207,7 @@ function VideoBubble({
   return (
     <View style={S.videoWrap}>
       <Video
-        source={{
-          uri: attachmentUrl(attachmentId),
-          headers: { Authorization: authHeader },
-        }}
+        source={src}
         style={S.videoView}
         useNativeControls
         resizeMode={ResizeMode.COVER}
@@ -2254,6 +2278,16 @@ function MessageBubble({
     return () => { cancel = true; };
   }, [msg.content, msg.senderId, chatId]);
 
+  // A live-location message carries the per-session key (content.lk) E2E. Stash
+  // it so the socket relay's opaque blobs from this sender can be decrypted.
+  useEffect(() => {
+    if (msg.type !== 'location' || !plain) return;
+    try {
+      const L = JSON.parse(plain);
+      if (L?.live && typeof L.lk === 'string') putLiveKey(chatId, msg.senderId, L.lk);
+    } catch { /* not a JSON location payload */ }
+  }, [plain, msg.type, msg.senderId, chatId]);
+
   useEffect(() => {
     if (!replyTarget) { setReplyPlain(''); return; }
     let cancel = false;
@@ -2275,6 +2309,26 @@ function MessageBubble({
     })();
     return () => { cancel = true; };
   }, [msg.type]);
+
+  // W6 media-at-rest: for ENCRYPTED attachments (meta.encrypted), stash the
+  // per-file key from the decrypted content, then resolve a decrypted local
+  // file:// URI to render. Plaintext media is untouched — the bubbles render the
+  // auth-gated /uploads URL directly, exactly as before.
+  const [mediaSrc, setMediaSrc] = useState<{ uri: string; headers?: Record<string, string> } | null>(null);
+  const isEncMedia = !!msg.meta?.encrypted && !!msg.meta?.attachmentId &&
+    (msg.type === 'image' || msg.type === 'video' || msg.type === 'audio' || msg.type === 'file');
+  useEffect(() => {
+    if (!isEncMedia) { setMediaSrc(null); return; }
+    let cancel = false;
+    (async () => {
+      try {
+        if (plain) await parseMediaContent(msg.meta.attachmentId, plain); // stash key
+        const r = await getDecryptedAttachmentUri(msg.meta.attachmentId);  // download + decrypt
+        if (!cancel) setMediaSrc(r);
+      } catch { if (!cancel) setMediaSrc(null); }
+    })();
+    return () => { cancel = true; };
+  }, [isEncMedia, plain, msg.meta?.attachmentId]);
 
   if (msg.deletedAt) {
     return (
@@ -2369,12 +2423,9 @@ function MessageBubble({
             </Text>
           </TouchableOpacity>
         ) : isImage ? (
-          authHeader ? (
+          (isEncMedia ? mediaSrc : (authHeader ? { uri: attachmentUrl(msg.meta.attachmentId), headers: { Authorization: authHeader } } : null)) ? (
             <Image
-              source={{
-                uri: attachmentUrl(msg.meta.attachmentId),
-                headers: { Authorization: authHeader },
-              }}
+              source={isEncMedia ? mediaSrc! : { uri: attachmentUrl(msg.meta.attachmentId), headers: { Authorization: authHeader! } }}
               style={S.attachedImage}
               resizeMode="cover"
               onError={() => { if (isViewOnceMedia && !isMine) setTombstoned(true); }}
@@ -2389,6 +2440,7 @@ function MessageBubble({
             attachmentId={msg.meta.attachmentId}
             durationMs={Number(msg.meta?.durationMs) || 0}
             authHeader={authHeader}
+            resolvedUri={isEncMedia ? mediaSrc : undefined}
             onErrorOnce={() => { if (isViewOnceMedia && !isMine) setTombstoned(true); }}
           />
         ) : isAudio ? (
@@ -2397,6 +2449,7 @@ function MessageBubble({
             durationMs={Number(msg.meta?.durationMs) || 0}
             waveform={Array.isArray(msg.meta?.waveform) ? msg.meta.waveform : undefined}
             authHeader={authHeader}
+            resolvedUri={isEncMedia ? mediaSrc : undefined}
             isMine={isMine}
           />
         ) : isFile ? (
@@ -2406,6 +2459,7 @@ function MessageBubble({
             mime={String(msg.meta?.mime || 'application/octet-stream')}
             size={Number(msg.meta?.size) || 0}
             authHeader={authHeader}
+            resolvedUri={isEncMedia ? mediaSrc : undefined}
             isMine={isMine}
           />
         ) : isSticker ? (

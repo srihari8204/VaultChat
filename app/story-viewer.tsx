@@ -31,12 +31,16 @@ import { getAccessToken } from '../lib/api';
 import {
   attachmentUrl,
   deleteStory,
+  getStoryKey,
   listStoriesFeed,
   listStoryViews,
   markStoryViewed,
   type StoryFeedEntry,
   type StoryViewer,
 } from '../lib/chatService';
+import { getDecryptedAttachmentUri } from '../lib/mediaAttachments';
+import { putMediaKey } from '../lib/mediaKeyStore';
+import { unwrapStoryKey } from '../lib/storyKeys';
 
 const IMAGE_DURATION_MS = 5_000;
 
@@ -79,6 +83,32 @@ export default function StoryViewerScreen() {
   }, [userId]);
 
   const current = entry?.stories[index] ?? null;
+
+  // W7: resolve the renderable media source for the active story. Encrypted
+  // stories fetch this viewer's wrapped key, unwrap it to the content key, and
+  // decrypt the media to a local file. Plaintext stories use the auth'd URL.
+  const [mediaSrc, setMediaSrc] = useState<{ uri: string; headers?: Record<string, string> } | null>(null);
+  useEffect(() => {
+    let cancel = false;
+    setMediaSrc(null);
+    if (!current) return;
+    (async () => {
+      if (current.encrypted) {
+        try {
+          const wrapped = await getStoryKey(current.id);
+          if (!wrapped || !entry) return;                       // not in audience → leave blank
+          const mk = await unwrapStoryKey(entry.userId, wrapped);
+          if (!mk) return;
+          await putMediaKey(current.attachmentId, mk);          // feed the standard media-decrypt path
+          const r = await getDecryptedAttachmentUri(current.attachmentId);
+          if (!cancel) setMediaSrc(r);
+        } catch { /* leave blank on failure */ }
+      } else if (authHeader) {
+        if (!cancel) setMediaSrc({ uri: attachmentUrl(current.attachmentId), headers: { Authorization: authHeader } });
+      }
+    })();
+    return () => { cancel = true; };
+  }, [current?.id, current?.encrypted, current?.attachmentId, entry?.userId, authHeader]);
 
   // ── Per-story side effects: mark viewed, run progress, auto-advance.
   useEffect(() => {
@@ -191,13 +221,10 @@ export default function StoryViewerScreen() {
     <View style={S.screen}>
       <StatusBar barStyle="light-content" />
 
-      {/* Media — full-bleed image. Authed URL via attachmentUrl + Bearer. */}
-      {authHeader && (
+      {/* Media — full-bleed. Plaintext: authed URL; encrypted: decrypted local file. */}
+      {mediaSrc && (
         <Image
-          source={{
-            uri: attachmentUrl(current.attachmentId),
-            headers: { Authorization: authHeader },
-          }}
+          source={mediaSrc}
           style={S.media}
           resizeMode="contain"
         />

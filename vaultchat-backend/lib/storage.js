@@ -21,28 +21,46 @@ const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
 const BUCKET = process.env.S3_BUCKET || 'vaultchat-media';
 const REGION = process.env.S3_REGION || 'auto';
-const SIGN_ENDPOINT = process.env.S3_PUBLIC_ENDPOINT || process.env.S3_ENDPOINT || '';
+// SIGN_ENDPOINT is baked into presigned URLs (what CLIENTS hit) → must be the
+// public, device-reachable endpoint. SERVER_ENDPOINT is what the SERVER uses for
+// its own network ops (bucket head/create, direct I/O) → must be the INTERNAL
+// endpoint (e.g. minio:9000 inside Docker). Using the public endpoint for server
+// ops makes the container dial the host's public IP and time out.
+const SIGN_ENDPOINT   = process.env.S3_PUBLIC_ENDPOINT || process.env.S3_ENDPOINT || '';
+const SERVER_ENDPOINT = process.env.S3_ENDPOINT || SIGN_ENDPOINT;
 
-let s3 = null;
+let s3Server = null;
+let s3Sign   = null;
 
 function enabled() {
   return !!(process.env.S3_ENDPOINT && process.env.S3_ACCESS_KEY);
 }
 
+function mkClient(endpoint) {
+  return new S3Client({
+    endpoint,
+    region: REGION,
+    forcePathStyle: true, // MinIO + most S3-compatible stores need path-style
+    credentials: {
+      accessKeyId: process.env.S3_ACCESS_KEY,
+      secretAccessKey: process.env.S3_SECRET_KEY,
+    },
+  });
+}
+
+// Server-side client (bucket ops + direct I/O) over the INTERNAL endpoint.
 function client() {
   if (!enabled()) return null;
-  if (!s3) {
-    s3 = new S3Client({
-      endpoint: SIGN_ENDPOINT,
-      region: REGION,
-      forcePathStyle: true, // MinIO + most S3-compatible stores need path-style
-      credentials: {
-        accessKeyId: process.env.S3_ACCESS_KEY,
-        secretAccessKey: process.env.S3_SECRET_KEY,
-      },
-    });
-  }
-  return s3;
+  if (!s3Server) s3Server = mkClient(SERVER_ENDPOINT);
+  return s3Server;
+}
+
+// Signing client — its endpoint is encoded into the presigned URL, so it uses
+// the PUBLIC endpoint. Signing does no network I/O, so reachability is moot here.
+function signClient() {
+  if (!enabled()) return null;
+  if (!s3Sign) s3Sign = mkClient(SIGN_ENDPOINT);
+  return s3Sign;
 }
 
 // Idempotently ensure the bucket exists (dev/MinIO convenience; R2 buckets are
@@ -60,7 +78,7 @@ async function ensureBucket() {
 
 // Presigned PUT — the client uploads the bytes directly to the object store.
 async function presignPut(key, contentType, expiresIn = 900) {
-  const c = client();
+  const c = signClient();
   if (!c) return null;
   return getSignedUrl(
     c,
@@ -71,7 +89,7 @@ async function presignPut(key, contentType, expiresIn = 900) {
 
 // Presigned GET — short-lived download URL handed out AFTER the access check.
 async function presignGet(key, expiresIn = 3600) {
-  const c = client();
+  const c = signClient();
   if (!c) return null;
   return getSignedUrl(c, new GetObjectCommand({ Bucket: BUCKET, Key: key }), { expiresIn });
 }
