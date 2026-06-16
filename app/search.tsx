@@ -10,7 +10,7 @@
 // scope).
 
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState , useMemo} from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -21,6 +21,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { getAccessToken } from '../lib/api';
 import {
   attachmentUrl,
@@ -30,7 +32,14 @@ import {
   type SearchResults,
 } from '../lib/chatService';
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function SearchScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   const router = useRouter();
   const [query,   setQuery]   = useState('');
   const [loading, setLoading] = useState(false);
@@ -88,7 +97,7 @@ export default function SearchScreen() {
         <TextInput
           style={S.input}
           placeholder="Search chats and messages…"
-          placeholderTextColor={SUBTLE}
+          placeholderTextColor={colors.textDim}
           value={query}
           onChangeText={onChange}
           autoFocus
@@ -97,7 +106,7 @@ export default function SearchScreen() {
         />
       </View>
 
-      {loading && <ActivityIndicator color={ACCENT} style={{ marginVertical: 12 }} />}
+      {loading && <ActivityIndicator color={colors.primary} style={{ marginVertical: 12 }} />}
       {error && <Text style={S.errorTxt}>{error}</Text>}
 
       {!loading && query.length >= 2 && !hasAny && (
@@ -134,6 +143,7 @@ function ChatHitRow({
   authHeader:  string | null;
   onPress:     () => void;
 }) {
+  const S = useS();
   const letter = (chat.name?.trim()[0] ?? '#').toUpperCase();
   return (
     <TouchableOpacity style={S.row} onPress={onPress} activeOpacity={0.7}>
@@ -156,6 +166,7 @@ function ChatHitRow({
 }
 
 function MessageHitRow({ msg, onPress }: { msg: SearchMessageHit; onPress: () => void }) {
+  const S = useS();
   return (
     <TouchableOpacity style={S.row} onPress={onPress} activeOpacity={0.7}>
       <View style={S.msgIcon}><Text style={S.msgIconTxt}>💬</Text></View>
@@ -167,35 +178,28 @@ function MessageHitRow({ msg, onPress }: { msg: SearchMessageHit; onPress: () =>
   );
 }
 
-const DARK_BG = '#0D0F14';
-const CARD_BG = '#161A22';
-const BORDER  = '#1F2937';
-const TEXT    = '#E5E7EB';
-const SUBTLE  = '#9CA3AF';
-const ACCENT  = '#6C63FF';
-const DANGER  = '#EF4444';
 
-const S = StyleSheet.create({
-  screen:        { flex: 1, backgroundColor: DARK_BG },
-  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen:        { flex: 1, backgroundColor: c.bg },
+  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backTxt:       { color: TEXT, fontSize: 26, fontWeight: '600' },
-  input:         { flex: 1, color: TEXT, backgroundColor: CARD_BG, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10, fontSize: 15 },
-  errorTxt:      { color: DANGER, paddingHorizontal: 16, paddingVertical: 8, fontSize: 12 },
+  backTxt:       { color: c.text, fontSize: 26, fontWeight: '600' },
+  input:         { flex: 1, color: c.text, backgroundColor: c.card, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10, fontSize: 15 },
+  errorTxt:      { color: c.danger, paddingHorizontal: 16, paddingVertical: 8, fontSize: 12 },
   empty:         { alignItems: 'center', paddingTop: 64, paddingHorizontal: 32 },
-  emptyTitle:    { color: TEXT, fontSize: 16, fontWeight: '700' },
-  emptySub:      { color: SUBTLE, fontSize: 13, marginTop: 6, textAlign: 'center' },
+  emptyTitle:    { color: c.text, fontSize: 16, fontWeight: '700' },
+  emptySub:      { color: c.textDim, fontSize: 13, marginTop: 6, textAlign: 'center' },
 
   sectionLabelWrap: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 4 },
-  sectionLabel:     { color: SUBTLE, fontSize: 11, fontWeight: '700', letterSpacing: 1.2 },
+  sectionLabel:     { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2 },
 
-  row:           { flexDirection: 'row', gap: 12, alignItems: 'center', paddingVertical: 12, paddingHorizontal: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
-  avatar:        { width: 44, height: 44, borderRadius: 22, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  row:           { flexDirection: 'row', gap: 12, alignItems: 'center', paddingVertical: 12, paddingHorizontal: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  avatar:        { width: 44, height: 44, borderRadius: 22, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   avatarGroup:   { backgroundColor: '#22C55E' },
   avatarImg:     { width: '100%', height: '100%' },
   avatarTxt:     { color: '#fff', fontWeight: '700', fontSize: 17 },
   msgIcon:       { width: 44, height: 44, borderRadius: 22, backgroundColor: '#1F2937', alignItems: 'center', justifyContent: 'center' },
   msgIconTxt:    { fontSize: 18 },
-  rowTitle:      { color: TEXT, fontSize: 15, fontWeight: '600' },
-  rowSub:        { color: SUBTLE, fontSize: 12, marginTop: 2, lineHeight: 16 },
+  rowTitle:      { color: c.text, fontSize: 15, fontWeight: '600' },
+  rowSub:        { color: c.textDim, fontSize: 12, marginTop: 2, lineHeight: 16 },
 });
