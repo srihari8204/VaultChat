@@ -226,6 +226,10 @@ export default function ChatsScreen() {
           ItemSeparatorComponent={() => <View style={S.separator} />}
           contentContainerStyle={{ paddingBottom: 110 }}
           refreshControl={<RefreshControl tintColor={Aurora.primary} refreshing={refreshing} onRefresh={onRefresh} />}
+          removeClippedSubviews
+          maxToRenderPerBatch={12}
+          windowSize={11}
+          initialNumToRender={14}
         />
       )}
 

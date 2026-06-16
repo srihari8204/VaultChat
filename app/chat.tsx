@@ -1518,6 +1518,10 @@ export default function ChatScreen() {
         onEndReached={onEndReached}
         onEndReachedThreshold={0.4}
         ListFooterComponent={loadingOlder ? <ActivityIndicator color={ACCENT} style={{ paddingVertical: 12 }} /> : null}
+        removeClippedSubviews
+        maxToRenderPerBatch={10}
+        windowSize={11}
+        initialNumToRender={15}
       />
 
       {/* Typing indicator */}
