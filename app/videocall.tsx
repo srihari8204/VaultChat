@@ -8,8 +8,10 @@
 
 import { Audio } from 'expo-av';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState , useMemo} from 'react';
 import { Alert, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import {
   mediaDevices,
   RTCIceCandidate,
@@ -131,7 +133,14 @@ function matrixToOverlay(m: number[] | null): { tint?: string; opacity?: number 
   return { tint, opacity };
 }
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function VideoCallScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   const router = useRouter();
   const { chatId, peerUid, peerName, isIncoming, initialOffer } =
     useLocalSearchParams<{
@@ -415,6 +424,7 @@ export default function VideoCallScreen() {
 
 function ControlBtn({ icon, label, onPress, active, danger }:
   { icon: string; label: string; onPress: () => void; active?: boolean; danger?: boolean }) {
+  const S = useS();
   return (
     <TouchableOpacity
       style={[S.btn, active && S.btnActive, danger && S.btnDanger]}
@@ -433,15 +443,11 @@ function formatDuration(s: number): string {
   return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
 }
 
-const BG     = '#000';
-const TEXT   = '#FFFFFF';
 const SUBTLE = 'rgba(255,255,255,0.7)';
-const ACCENT = '#6C63FF';
-const DANGER = '#EF4444';
 
-const S = StyleSheet.create({
-  screen:     { flex: 1, backgroundColor: BG },
-  remote:     { flex: 1, backgroundColor: BG },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen:     { flex: 1, backgroundColor: c.bg },
+  remote:     { flex: 1, backgroundColor: c.bg },
   remoteVid:  { width: '100%', height: '100%' },
   remotePlaceholder: { alignItems: 'center', justifyContent: 'center' },
   placeholderInitial: { fontSize: 96, color: 'rgba(255,255,255,0.3)', fontWeight: '900' },
@@ -451,9 +457,9 @@ const S = StyleSheet.create({
   glow:       { opacity: 0.10 },
 
   topBar:     { position: 'absolute', top: 56, left: 24, right: 24, alignItems: 'center', gap: 4 },
-  name:       { color: TEXT, fontSize: 22, fontWeight: '700' },
-  status:     { color: SUBTLE, fontSize: 14 },
-  errorTxt:   { color: DANGER, fontSize: 13, marginTop: 4 },
+  name:       { color: c.text, fontSize: 22, fontWeight: '700' },
+  status:     { color: c.textDim, fontSize: 14 },
+  errorTxt:   { color: c.danger, fontSize: 13, marginTop: 4 },
 
   localWrap:  { position: 'absolute', top: 60, right: 16, width: 110, height: 150, borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
   local:      { width: '100%', height: '100%' },
@@ -468,8 +474,8 @@ const S = StyleSheet.create({
 
   controls:   { position: 'absolute', left: 12, right: 12, bottom: 36, flexDirection: 'row', justifyContent: 'space-around', backgroundColor: 'rgba(20,20,30,0.6)', paddingVertical: 14, borderRadius: 24 },
   btn:        { width: 64, alignItems: 'center', justifyContent: 'center', paddingVertical: 8, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.06)' },
-  btnActive:  { backgroundColor: ACCENT },
-  btnDanger:  { backgroundColor: DANGER },
+  btnActive:  { backgroundColor: c.primary },
+  btnDanger:  { backgroundColor: c.danger },
   btnIcon:    { fontSize: 22 },
-  btnLabel:   { color: TEXT, fontSize: 10, marginTop: 2 },
+  btnLabel:   { color: c.text, fontSize: 10, marginTop: 2 },
 });

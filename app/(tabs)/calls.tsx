@@ -3,9 +3,19 @@
 // the call signalling layer is wired through the new Socket.IO server
 // and history is stored in Postgres.
 
+import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { type Palette } from '../../constants/theme';
+import { useTheme } from '../../lib/theme';
+
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
 
 export default function CallsScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   return (
     <View style={S.screen}>
       <View style={S.header}>
@@ -24,16 +34,13 @@ export default function CallsScreen() {
   );
 }
 
-const DARK_BG = '#0D0F14';
-const TEXT    = '#E5E7EB';
-const SUBTLE  = '#9CA3AF';
 
-const S = StyleSheet.create({
-  screen:  { flex: 1, backgroundColor: DARK_BG },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen:  { flex: 1, backgroundColor: c.bg },
   header:  { paddingHorizontal: 20, paddingTop: 56, paddingBottom: 12 },
-  title:   { color: TEXT, fontSize: 28, fontWeight: '800' },
+  title:   { color: c.text, fontSize: 28, fontWeight: '800' },
   body:    { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32, gap: 12 },
   icon:    { fontSize: 56, marginBottom: 8 },
-  heading: { color: TEXT, fontSize: 18, fontWeight: '700', textAlign: 'center' },
-  sub:     { color: SUBTLE, fontSize: 14, textAlign: 'center', lineHeight: 20 },
+  heading: { color: c.text, fontSize: 18, fontWeight: '700', textAlign: 'center' },
+  sub:     { color: c.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20 },
 });

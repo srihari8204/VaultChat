@@ -4,22 +4,23 @@
 // 2. Screen Annotation          5. Watch Together YouTube
 // 3. View-Only Mode             6. Voice Chat Overlay
 
-import React, { useState } from 'react';
+import React, { useState , useMemo} from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Alert, Platform, Switch,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
 
-const DARK = '#0D0F14';
-const CARD = '#1A1D27';
-const PURPLE = '#6C63FF';
-const BORDER = '#2A2D3A';
-const TEXT = '#E8E8E8';
-const SUB = '#6B7280';
-const GREEN = '#10B981';
-const RED = '#EF4444';
+
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
 
 export default function ScreenShareScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const { peerUid, peerName } = useLocalSearchParams<{ peerUid?: string; peerName?: string }>();
 
@@ -131,7 +132,7 @@ export default function ScreenShareScreen() {
 
             <TouchableOpacity style={[s.shareCtrlBtn, s.shareCtrlDanger]} onPress={stopSharing}>
               <Text style={s.shareCtrlIcon}>{'\u23F9\uFE0F'}</Text>
-              <Text style={[s.shareCtrlTxt, { color: RED }]}>Stop</Text>
+              <Text style={[s.shareCtrlTxt, { color: colors.danger }]}>Stop</Text>
             </TouchableOpacity>
           </View>
 
@@ -145,6 +146,8 @@ export default function ScreenShareScreen() {
 function SettingRow({ icon, title, sub, value, onChange }: {
   icon: string; title: string; sub: string; value: boolean; onChange: (v: boolean) => void;
 }) {
+  const s = useS();
+  const { colors } = useTheme();
   return (
     <View style={s.settingRow}>
       <Text style={s.settingIcon}>{icon}</Text>
@@ -153,66 +156,66 @@ function SettingRow({ icon, title, sub, value, onChange }: {
         <Text style={s.settingSub}>{sub}</Text>
       </View>
       <Switch value={value} onValueChange={onChange}
-        trackColor={{ false: '#374151', true: PURPLE + '80' }}
-        thumbColor={value ? PURPLE : '#6B7280'}
+        trackColor={{ false: '#374151', true: colors.purple + '80' }}
+        thumbColor={value ? colors.purple : '#6B7280'}
       />
     </View>
   );
 }
 
-const s = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: DARK },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen: { flex: 1, backgroundColor: c.bg },
   header: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     paddingTop: Platform.OS === 'ios' ? 56 : 44, paddingBottom: 14, paddingHorizontal: 16,
-    backgroundColor: CARD, borderBottomWidth: 1, borderBottomColor: BORDER,
+    backgroundColor: c.card, borderBottomWidth: 1, borderBottomColor: c.border,
   },
   backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#2A2D3A', alignItems: 'center', justifyContent: 'center' },
-  backTxt: { fontSize: 18, color: TEXT },
-  headerTitle: { fontSize: 16, fontWeight: '700', color: TEXT },
-  headerSub: { fontSize: 11, color: GREEN, marginTop: 1, fontWeight: '600' },
-  liveBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: RED + '20', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10 },
-  liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: RED },
-  liveTxt: { color: RED, fontSize: 11, fontWeight: '700' },
+  backTxt: { fontSize: 18, color: c.text },
+  headerTitle: { fontSize: 16, fontWeight: '700', color: c.text },
+  headerSub: { fontSize: 11, color: c.primary, marginTop: 1, fontWeight: '600' },
+  liveBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.danger + '20', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10 },
+  liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: c.danger },
+  liveTxt: { color: c.danger, fontSize: 11, fontWeight: '700' },
 
   body: { flex: 1, padding: 20 },
   bigIcon: { fontSize: 48, textAlign: 'center', marginBottom: 12, marginTop: 12 },
-  bodyTitle: { fontSize: 22, fontWeight: '700', color: TEXT, textAlign: 'center', marginBottom: 6 },
-  bodySub: { fontSize: 13, color: SUB, textAlign: 'center', lineHeight: 19, marginBottom: 24 },
+  bodyTitle: { fontSize: 22, fontWeight: '700', color: c.text, textAlign: 'center', marginBottom: 6 },
+  bodySub: { fontSize: 13, color: c.textDim, textAlign: 'center', lineHeight: 19, marginBottom: 24 },
 
-  settingsCard: { backgroundColor: CARD, borderRadius: 16, padding: 4, marginBottom: 20, borderWidth: 1, borderColor: BORDER },
-  settingRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderBottomWidth: 1, borderBottomColor: BORDER },
+  settingsCard: { backgroundColor: c.card, borderRadius: 16, padding: 4, marginBottom: 20, borderWidth: 1, borderColor: c.border },
+  settingRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderBottomWidth: 1, borderBottomColor: c.border },
   settingIcon: { fontSize: 20, width: 28, textAlign: 'center' },
-  settingTitle: { fontSize: 14, fontWeight: '600', color: TEXT },
-  settingSub: { fontSize: 11, color: SUB, marginTop: 1 },
+  settingTitle: { fontSize: 14, fontWeight: '600', color: c.text },
+  settingSub: { fontSize: 11, color: c.textDim, marginTop: 1 },
 
-  startBtn: { backgroundColor: PURPLE, borderRadius: 16, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 24 },
+  startBtn: { backgroundColor: c.purple, borderRadius: 16, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 24 },
   startBtnIcon: { fontSize: 22 },
   startBtnTxt: { color: '#FFF', fontSize: 17, fontWeight: '700' },
 
-  featCard: { backgroundColor: CARD, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: BORDER },
-  featTitle: { fontSize: 14, fontWeight: '600', color: PURPLE, marginBottom: 12, textTransform: 'uppercase', letterSpacing: 0.5 },
+  featCard: { backgroundColor: c.card, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: c.border },
+  featTitle: { fontSize: 14, fontWeight: '600', color: c.purple, marginBottom: 12, textTransform: 'uppercase', letterSpacing: 0.5 },
   featRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 8 },
   featIcon: { fontSize: 18, width: 26, textAlign: 'center', marginTop: 1 },
-  featName: { fontSize: 13, fontWeight: '600', color: TEXT },
-  featDesc: { fontSize: 11, color: SUB, marginTop: 1 },
+  featName: { fontSize: 13, fontWeight: '600', color: c.text },
+  featDesc: { fontSize: 11, color: c.textDim, marginTop: 1 },
 
   // Active sharing
   sharingBody: { flex: 1, padding: 20, justifyContent: 'center' },
   previewArea: { alignItems: 'center', marginBottom: 40 },
   previewIcon: { fontSize: 64, marginBottom: 16 },
-  previewTxt: { fontSize: 20, fontWeight: '700', color: TEXT, marginBottom: 4 },
-  previewSub: { fontSize: 14, color: SUB, marginBottom: 20 },
+  previewTxt: { fontSize: 20, fontWeight: '700', color: c.text, marginBottom: 4 },
+  previewSub: { fontSize: 14, color: c.textDim, marginBottom: 20 },
   badges: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', justifyContent: 'center' },
-  encBadge: { backgroundColor: GREEN + '20', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
-  encBadgeTxt: { color: GREEN, fontSize: 10, fontWeight: '700' },
+  encBadge: { backgroundColor: c.primary + '20', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  encBadgeTxt: { color: c.primary, fontSize: 10, fontWeight: '700' },
 
   shareControls: { flexDirection: 'row', justifyContent: 'center', gap: 16, marginBottom: 24 },
-  shareCtrlBtn: { backgroundColor: CARD, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 28, alignItems: 'center', borderWidth: 1, borderColor: BORDER },
-  shareCtrlActive: { backgroundColor: PURPLE + '15', borderColor: PURPLE + '40' },
-  shareCtrlDanger: { borderColor: RED + '40' },
+  shareCtrlBtn: { backgroundColor: c.card, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 28, alignItems: 'center', borderWidth: 1, borderColor: c.border },
+  shareCtrlActive: { backgroundColor: c.purple + '15', borderColor: c.purple + '40' },
+  shareCtrlDanger: { borderColor: c.danger + '40' },
   shareCtrlIcon: { fontSize: 24, marginBottom: 4 },
-  shareCtrlTxt: { fontSize: 12, color: TEXT, fontWeight: '600' },
+  shareCtrlTxt: { fontSize: 12, color: c.text, fontWeight: '600' },
 
-  footerNote: { color: GREEN, fontSize: 11, textAlign: 'center', fontWeight: '600' },
+  footerNote: { color: c.primary, fontSize: 11, textAlign: 'center', fontWeight: '600' },
 });
