@@ -192,6 +192,7 @@ function RootLayout() {
         <Stack.Screen name="qr-contact" />
         <Stack.Screen name="file-preview" />
         <Stack.Screen name="vaultbeam" />
+        <Stack.Screen name="transfers" />
         <Stack.Screen name="voice-transcribe" />
         <Stack.Screen name="smart-notifications" />
         <Stack.Screen name="tone-detector" />

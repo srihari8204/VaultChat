@@ -25,6 +25,9 @@ import { Aurora } from '../constants/theme';
 import { getSocket } from '../lib/socket';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { getTurnConfig, type IceServer } from '../lib/chatService';
+import {
+  sha256OfBase64, saveTransfer, completeTransfer, failTransfer, type TransferState,
+} from '../lib/transferManager';
 
 const CHUNK = 16 * 1024;          // 16KB base64 slices
 const BACKPRESSURE = 4 * 1024 * 1024;
@@ -40,12 +43,14 @@ export default function VaultBeamScreen() {
   const [fileName, setFileName] = useState('');
   const [progress, setProgress] = useState(0);
   const [err, setErr] = useState('');
+  const [verified, setVerified] = useState<boolean | null>(null); // SHA-256 integrity result
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<any>(null);
   const meRef = useRef('');
   const offs = useRef<Array<() => void>>([]);
   const recv = useRef<{ meta: any; chunks: string[]; got: number } | null>(null);
+  const xferIdRef = useRef<string>(''); // current transfer record id (for the dashboard)
 
   const teardown = useCallback((notify = true) => {
     offs.current.forEach(f => { try { f(); } catch {} });
@@ -64,7 +69,19 @@ export default function VaultBeamScreen() {
       if (typeof d === 'string' && d[0] === '{') {
         try {
           const j = JSON.parse(d);
-          if (j.t === 'meta') { recv.current = { meta: j, chunks: [], got: 0 }; setFileName(j.name); setRole('receive'); setStatus('transferring'); setProgress(0); return; }
+          if (j.t === 'meta') {
+            recv.current = { meta: j, chunks: [], got: 0 };
+            setFileName(j.name); setRole('receive'); setStatus('transferring'); setProgress(0); setVerified(null);
+            // Persist a transfer record so the dashboard shows it.
+            xferIdRef.current = `rx_${meRef.current}_${Date.now()}`;
+            saveTransfer({
+              id: xferIdRef.current, chatId: '', fileName: j.name, fileSize: j.size || 0,
+              direction: 'receive', status: 'active', totalChunks: 0, completedChunks: 0,
+              progress: 0, peerUid: String(peerUid || ''), peerName: String(peerName || 'peer'),
+              startedAt: Date.now(), lastActiveAt: Date.now(), sha256: j.sha256,
+            } as TransferState).catch(() => {});
+            return;
+          }
           if (j.t === 'eof') { void finishReceive(); return; }
         } catch { /* fall through */ }
       }
@@ -80,17 +97,42 @@ export default function VaultBeamScreen() {
     const r = recv.current;
     if (!r) return;
     try {
+      const assembled = r.chunks.join('');
+      // Integrity check: hash the received bytes and compare to the sender's hash.
+      // A corrupted or incomplete transfer fails verification (#113).
+      let ok: boolean | null = null;
+      if (r.meta.sha256) {
+        try { ok = sha256OfBase64(assembled) === r.meta.sha256; } catch { ok = false; }
+        setVerified(ok);
+      }
+      if (ok === false) {
+        // Don't hand the user a corrupted file.
+        setErr('Integrity check failed — the file was corrupted in transit.');
+        setStatus('error');
+        if (xferIdRef.current) failTransfer(xferIdRef.current, 'sha256 mismatch').catch(() => {});
+        return;
+      }
       const path = (FileSystem as any).cacheDirectory + (r.meta.name || `vaultbeam_${Date.now()}`);
-      await FileSystem.writeAsStringAsync(path, r.chunks.join(''), { encoding: 'base64' });
+      await FileSystem.writeAsStringAsync(path, assembled, { encoding: 'base64' });
       setProgress(1); setStatus('done');
+      if (xferIdRef.current) {
+        await saveTransfer({
+          id: xferIdRef.current, chatId: '', fileName: r.meta.name || 'file', fileSize: r.meta.size || 0,
+          fileUri: path, direction: 'receive', status: 'active', totalChunks: 0, completedChunks: 0,
+          progress: 1, peerUid: String(peerUid || ''), peerName: String(peerName || 'peer'),
+          startedAt: Date.now(), lastActiveAt: Date.now(), sha256: r.meta.sha256,
+        } as TransferState).catch(() => {});
+        await completeTransfer(xferIdRef.current, ok === true).catch(() => {});
+      }
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(path);
-      else Alert.alert('Received', `Saved to ${path}`);
+      else Alert.alert('Received', `Saved to ${path}${ok ? ' · integrity verified' : ''}`);
     } catch (e: any) {
       setErr(e?.message ?? 'Save failed'); setStatus('error');
+      if (xferIdRef.current) failTransfer(xferIdRef.current, e?.message ?? 'save failed').catch(() => {});
     } finally {
       recv.current = null;
     }
-  }, []);
+  }, [peerUid, peerName]);
 
   // ── Setup: identity, pc, signaling ──
   useEffect(() => {
@@ -160,10 +202,22 @@ export default function VaultBeamScreen() {
       const dc = (pcRef.current as any).createDataChannel('vaultbeam', { ordered: true });
       dcRef.current = dc;
       const b64 = await FileSystem.readAsStringAsync(file.uri, { encoding: 'base64' });
+      // Per-file SHA-256 so the receiver can verify integrity (#113).
+      const hash = sha256OfBase64(b64);
+      setVerified(null);
+
+      // Persist a transfer record for the dashboard.
+      xferIdRef.current = `tx_${meRef.current}_${Date.now()}`;
+      saveTransfer({
+        id: xferIdRef.current, chatId: '', fileName: file.name, fileSize: file.size || 0,
+        fileUri: file.uri, direction: 'send', status: 'active', totalChunks: 0, completedChunks: 0,
+        progress: 0, peerUid: String(peerUid || ''), peerName: String(peerName || 'peer'),
+        startedAt: Date.now(), lastActiveAt: Date.now(), sha256: hash,
+      } as TransferState).catch(() => {});
 
       dc.onopen = async () => {
         setStatus('transferring');
-        dc.send(JSON.stringify({ t: 'meta', name: file.name, size: b64.length }));
+        dc.send(JSON.stringify({ t: 'meta', name: file.name, size: b64.length, sha256: hash }));
         let off = 0;
         while (off < b64.length) {
           if (dc.bufferedAmount > BACKPRESSURE) { await sleep(20); continue; }
@@ -172,7 +226,8 @@ export default function VaultBeamScreen() {
           setProgress(Math.min(1, off / b64.length));
         }
         dc.send(JSON.stringify({ t: 'eof' }));
-        setProgress(1); setStatus('done');
+        setProgress(1); setStatus('done'); setVerified(true); // sender holds the source file
+        if (xferIdRef.current) completeTransfer(xferIdRef.current, true).catch(() => {});
       };
 
       const offer = await pcRef.current.createOffer({});
@@ -193,7 +248,9 @@ export default function VaultBeamScreen() {
           <Ionicons name="arrow-back" size={24} color={Aurora.text} />
         </TouchableOpacity>
         <Text style={s.title}>VaultBeam P2P</Text>
-        <View style={{ width: 40 }} />
+        <TouchableOpacity onPress={() => router.push('/transfers' as any)} style={s.backBtn} hitSlop={10}>
+          <Ionicons name="list-outline" size={22} color={Aurora.text} />
+        </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 16 }}>
@@ -214,6 +271,9 @@ export default function VaultBeamScreen() {
           )}
           {status === 'connecting' && <ActivityIndicator color={Aurora.primary} style={{ marginTop: 10 }} />}
           {status === 'done' && <Text style={[s.pct, { color: Aurora.primary }]}>✓ {fileName}</Text>}
+          {status === 'done' && verified === true && (
+            <Text style={[s.pct, { color: Aurora.primary }]}>🔒 SHA-256 integrity verified</Text>
+          )}
           {status === 'error' && <Text style={[s.pct, { color: Aurora.danger }]}>{err || 'Transfer error'}</Text>}
         </View>
 
