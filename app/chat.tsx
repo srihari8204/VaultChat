@@ -49,6 +49,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Sheet, Avatar } from '../components/ui';
+import { useTheme } from '../lib/theme';
+import { type Palette } from '../constants/theme';
 import { getCurrentUserAsync } from './(constants)/authService';
 
 // Fire-and-forget haptic (no-op on web / if unavailable).
@@ -128,9 +130,22 @@ const TYPING_IDLE_MS = 2500;
 
 const PAGE_SIZE = 50;
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
+// Fixed accent styles (theme-agnostic) used by the plain renderWithHighlight helper.
+const HL = StyleSheet.create({
+  highlight: { backgroundColor: 'rgba(252, 211, 77, 0.45)', color: '#111' },
+  link:      { color: '#7DD3FC', textDecorationLine: 'underline' },
+});
+
 export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const { colors } = useTheme();
+  const S = useS();
   const chatId = (id ?? '') as string;
 
   const [meId,      setMeId]      = useState<string | null>(null);
@@ -1281,7 +1296,7 @@ export default function ChatScreen() {
   if (loading) {
     return (
       <View style={[S.screen, S.center]}>
-        <ActivityIndicator color={ACCENT} size="large" />
+        <ActivityIndicator color={colors.primary} size="large" />
       </View>
     );
   }
@@ -1371,7 +1386,7 @@ export default function ChatScreen() {
           <TextInput
             style={S.inChatSearchInput}
             placeholder="Find in chat…"
-            placeholderTextColor={SUBTLE}
+            placeholderTextColor={colors.textDim}
             value={searchQ}
             onChangeText={setSearchQ}
             autoFocus
@@ -1498,7 +1513,7 @@ export default function ChatScreen() {
         }}
         onEndReached={onEndReached}
         onEndReachedThreshold={0.4}
-        ListFooterComponent={loadingOlder ? <ActivityIndicator color={ACCENT} style={{ paddingVertical: 12 }} /> : null}
+        ListFooterComponent={loadingOlder ? <ActivityIndicator color={colors.primary} style={{ paddingVertical: 12 }} /> : null}
         removeClippedSubviews
         maxToRenderPerBatch={10}
         windowSize={11}
@@ -1599,7 +1614,7 @@ export default function ChatScreen() {
           <TextInput
             style={S.input}
             placeholder={editingId != null ? 'Edit message…' : 'Message'}
-            placeholderTextColor={SUBTLE}
+            placeholderTextColor={colors.textDim}
             value={input}
             onChangeText={onInputChange}
             multiline
@@ -1678,7 +1693,7 @@ export default function ChatScreen() {
           <Pressable style={S.forwardSheet} onPress={(e) => e.stopPropagation()}>
             <Text style={S.forwardTitle}>Forward to…</Text>
             {forwardLoading ? (
-              <ActivityIndicator color={ACCENT} style={{ marginTop: 24 }} />
+              <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
             ) : forwardChats.length === 0 ? (
               <Text style={S.forwardEmpty}>No other chats yet</Text>
             ) : (
@@ -1725,7 +1740,7 @@ function renderWithHighlight(body: string, q: string | null | undefined): any {
     if (idx === -1) { parts.push(body.slice(i)); break; }
     if (idx > i) parts.push(body.slice(i, idx));
     parts.push(
-      <Text key={`h${idx}`} style={S.highlight}>{body.slice(idx, idx + q.length)}</Text>,
+      <Text key={`h${idx}`} style={HL.highlight}>{body.slice(idx, idx + q.length)}</Text>,
     );
     i = idx + q.length;
   }
@@ -1758,7 +1773,7 @@ function renderRichText(body: string, q: string | null | undefined): any {
     parts.push(
       <Text
         key={`u${m.index}`}
-        style={S.link}
+        style={HL.link}
         onPress={() => Linking.openURL(url).catch(() => {})}
       >
         {renderWithHighlight(url, q)}
@@ -1911,6 +1926,7 @@ function PollBubble({
   votes?:   PollVoteSummary;
   onChange?: (next: PollVoteSummary) => void;
 }) {
+  const S = useS();
   const options: string[]    = Array.isArray(msg.meta?.options) ? msg.meta.options : [];
   const allowMultiple = !!msg.meta?.allowMultiple;
   const counts = votes?.counts ?? {};
@@ -2019,6 +2035,7 @@ function FileBubble({
   resolvedUri?: { uri: string; headers?: Record<string, string> } | null;
   isMine:       boolean;
 }) {
+  const S = useS();
   const [busy, setBusy] = useState(false);
 
   const onOpen = useCallback(async () => {
@@ -2091,6 +2108,7 @@ function AudioBubble({
   resolvedUri?: { uri: string; headers?: Record<string, string> } | null;
   isMine:       boolean;
 }) {
+  const S = useS();
   const [playing,  setPlaying]  = useState(false);
   const [position, setPosition] = useState(0);
   const soundRef = useRef<Audio.Sound | null>(null);
@@ -2207,6 +2225,8 @@ function VideoBubble({
   resolvedUri?:  { uri: string; headers?: Record<string, string> } | null;
   onErrorOnce?:  () => void;
 }) {
+  const { colors } = useTheme();
+  const S = useS();
   // Encrypted videos play from a local decrypted file; plaintext stream from
   // /uploads with the Bearer header.
   const src = resolvedUri
@@ -2214,7 +2234,7 @@ function VideoBubble({
   if (!src) {
     return (
       <View style={S.videoLoading}>
-        <ActivityIndicator color={ACCENT} />
+        <ActivityIndicator color={colors.primary} />
       </View>
     );
   }
@@ -2250,6 +2270,7 @@ function dayLabel(iso: string): string {
   return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
 }
 function DateChip({ iso }: { iso: string }) {
+  const S = useS();
   return (
     <View style={S.dateChipRow}>
       <View style={S.dateChip}><Text style={S.dateChipTxt}>{dayLabel(iso)}</Text></View>
@@ -2284,6 +2305,8 @@ function MessageBubble({
   pollVotesForMsg?: PollVoteSummary;
   onPollVoteChange?: (next: PollVoteSummary) => void;
 }) {
+  const { colors } = useTheme();
+  const S = useS();
   const isMine = msg.senderId === meId;
   const [plain, setPlain] = useState<string>('');
   const [replyPlain, setReplyPlain] = useState<string>('');
@@ -2553,7 +2576,7 @@ function MessageBubble({
           ) : null
         )}
 
-        <Text style={S.bubbleMeta}>
+        <Text style={[S.bubbleMeta, !isMine && { color: colors.textDim }]}>
           {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           {msg.editedAt ? ' · edited' : ''}
           {msg._state === 'pending' ? ' · sending…' : ''}
@@ -2568,7 +2591,7 @@ function MessageBubble({
             <Ionicons
               name={tickState === 'pending' ? 'time-outline' : tickState === 'sent' ? 'checkmark' : 'checkmark-done'}
               size={14}
-              color={tickState === 'read' ? '#4A9FFF' : SUBTLE}
+              color={tickState === 'read' ? '#4A9FFF' : colors.textDim}
               style={{ marginLeft: 3 }}
             />
           )}
@@ -2595,53 +2618,44 @@ function MessageBubble({
   );
 }
 
-const DARK_BG = '#0D0F14';
-const BORDER  = '#1F2937';
-const TEXT    = '#E5E7EB';
-const SUBTLE  = '#9CA3AF';
-const ACCENT  = '#6C63FF';
-const DANGER  = '#EF4444';
-
-const S = StyleSheet.create({
-  screen:        { flex: 1, backgroundColor: DARK_BG },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen:        { flex: 1, backgroundColor: c.bg },
   center:        { justifyContent: 'center', alignItems: 'center' },
 
-  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER, gap: 8 },
+  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border, gap: 8 },
   headerIconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   headerIcon:    { fontSize: 20 },
   headerAvatarWrap:  { width: 36, height: 36 },
-  headerAvatar:      { width: 36, height: 36, borderRadius: 18, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  headerAvatar:      { width: 36, height: 36, borderRadius: 18, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   headerAvatarImg:   { width: '100%', height: '100%' },
   headerAvatarTxt:   { color: '#fff', fontWeight: '700', fontSize: 15 },
-  headerPresenceDot: { position: 'absolute', right: -1, bottom: -1, width: 10, height: 10, borderRadius: 5, backgroundColor: '#22C55E', borderWidth: 2, borderColor: DARK_BG },
+  headerPresenceDot: { position: 'absolute', right: -1, bottom: -1, width: 10, height: 10, borderRadius: 5, backgroundColor: '#22C55E', borderWidth: 2, borderColor: c.bg },
 
   // Day 13 — in-chat search
-  inChatSearchBar:    { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: '#0F1217', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
-  inChatSearchInput:  { flex: 1, color: TEXT, backgroundColor: '#1F2937', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 8, fontSize: 14 },
-  inChatSearchCount:  { color: SUBTLE, fontSize: 11, fontWeight: '600' },
-  highlight:          { backgroundColor: 'rgba(252, 211, 77, 0.45)', color: '#111' },
-  link:               { color: '#7DD3FC', textDecorationLine: 'underline' },
+  inChatSearchBar:    { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: '#0F1217', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  inChatSearchInput:  { flex: 1, color: c.text, backgroundColor: '#1F2937', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 8, fontSize: 14 },
+  inChatSearchCount:  { color: c.textDim, fontSize: 11, fontWeight: '600' },
   backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backTxt:       { color: TEXT, fontSize: 24 },
-  title:         { color: TEXT, fontSize: 18, fontWeight: '700' },
-  sub:           { color: SUBTLE, fontSize: 12 },
+  backTxt:       { color: c.text, fontSize: 24 },
+  title:         { color: c.text, fontSize: 18, fontWeight: '700' },
+  sub:           { color: c.textDim, fontSize: 12 },
   e2eBadge:      { color: '#22C55E', fontSize: 11, fontWeight: '600' },
 
   errorBar:      { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.4)', borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 10 },
-  errorTxt:      { color: DANGER, fontSize: 12 },
+  errorTxt:      { color: c.danger, fontSize: 12 },
   screenshotBanner:    { backgroundColor: 'rgba(252,211,77,0.14)', borderColor: 'rgba(252,211,77,0.5)', borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 10 },
   // Memory Bubble — anniversary banner under the chat header. Distinct
   // from screenshot/error banners (purple) so the user reads it as a
   // "nostalgia" moment rather than an alert.
   memoryBubble:        { backgroundColor: 'rgba(180,160,255,0.10)', borderColor: 'rgba(180,160,255,0.35)', borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 12, borderRadius: 10 },
   memoryBubbleTitle:   { color: '#C4B5FD', fontSize: 12, fontWeight: '700' },
-  memoryBubbleBody:    { color: TEXT, fontSize: 13, marginTop: 4, fontStyle: 'italic' },
-  memoryBubbleDismiss: { color: SUBTLE, fontSize: 10, marginTop: 6 },
+  memoryBubbleBody:    { color: c.text, fontSize: 13, marginTop: 4, fontStyle: 'italic' },
+  memoryBubbleDismiss: { color: c.textDim, fontSize: 10, marginTop: 6 },
   screenshotBannerTxt: { color: '#FCD34D', fontSize: 12, fontWeight: '600' },
 
   dateChipRow:   { alignItems: 'center', marginVertical: 10 },
-  dateChip:      { backgroundColor: 'rgba(255,255,255,0.07)', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 4 },
-  dateChipTxt:   { color: SUBTLE, fontSize: 11.5, fontWeight: '700' },
+  dateChip:      { backgroundColor: c.surface, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 4 },
+  dateChipTxt:   { color: c.textDim, fontSize: 11.5, fontWeight: '700' },
 
   bubbleRow:     { marginVertical: 4, flexDirection: 'row' },
   bubbleRowGrouped: { marginTop: 1 }, // tighter spacing for consecutive same-sender msgs
@@ -2649,13 +2663,13 @@ const S = StyleSheet.create({
   bubbleRowTheirs:{ justifyContent: 'flex-start' },
   bubble:        { maxWidth: '78%', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 16, gap: 2 },
   bubbleMine:    { backgroundColor: '#0E7256', borderTopRightRadius: 4 }, // brand emerald "sent"
-  bubbleTheirs:  { backgroundColor: '#22272E', borderTopLeftRadius: 4 },  // neutral "received"
+  bubbleTheirs:  { backgroundColor: c.surfaceSolid, borderTopLeftRadius: 4 }, // neutral "received" (themed)
   bubblePending: { opacity: 0.6 },
-  bubbleFailed:  { borderWidth: 1, borderColor: DANGER, opacity: 0.85 },
+  bubbleFailed:  { borderWidth: 1, borderColor: c.danger, opacity: 0.85 },
   bubbleSystem:  { alignSelf: 'center', backgroundColor: 'transparent', paddingVertical: 4 },
-  bubbleSystemTxt:{ color: SUBTLE, fontSize: 11, fontStyle: 'italic' },
-  senderTag:     { color: SUBTLE, fontSize: 11, fontWeight: '600', marginBottom: 2 },
-  bubbleTxt:     { color: TEXT, fontSize: 15, lineHeight: 20 },
+  bubbleSystemTxt:{ color: c.textDim, fontSize: 11, fontStyle: 'italic' },
+  senderTag:     { color: c.textDim, fontSize: 11, fontWeight: '600', marginBottom: 2 },
+  bubbleTxt:     { color: c.text, fontSize: 15, lineHeight: 20 },
   bubbleTxtMine: { color: '#fff' },
   bubbleMeta:    { color: 'rgba(255,255,255,0.5)', fontSize: 10, alignSelf: 'flex-end', marginTop: 2 },
   ttlBadge:      { color: '#FCD34D', fontSize: 10, fontWeight: '700' },
@@ -2663,9 +2677,9 @@ const S = StyleSheet.create({
   tickRead:      { color: '#3B82F6',               fontSize: 11, fontWeight: '700' },
 
   typingBar:     { paddingHorizontal: 16, paddingBottom: 4 },
-  typingTxt:     { color: SUBTLE, fontSize: 12, fontStyle: 'italic' },
+  typingTxt:     { color: c.textDim, fontSize: 12, fontStyle: 'italic' },
 
-  editBar:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8, backgroundColor: 'rgba(108,99,255,0.12)', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: BORDER },
+  editBar:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8, backgroundColor: 'rgba(108,99,255,0.12)', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border },
   // Vanish-Mode banner above the composer when chat.vanishMode is ON.
   vanishBar:     { paddingHorizontal: 16, paddingVertical: 8, backgroundColor: 'rgba(252,211,77,0.10)', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(252,211,77,0.40)' },
   vanishBarTxt:  { color: '#FCD34D', fontSize: 12, fontWeight: '600' },
@@ -2677,32 +2691,32 @@ const S = StyleSheet.create({
   // Composer banner when Invisible Ink is armed (matches vanishBar shape).
   inkBar:        { paddingHorizontal: 16, paddingVertical: 8, backgroundColor: 'rgba(180,160,255,0.12)', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(180,160,255,0.45)' },
   inkBarTxt:     { color: '#C4B5FD', fontSize: 12, fontWeight: '600' },
-  editTxt:       { color: ACCENT, fontSize: 12, fontWeight: '600' },
-  editCancelTxt: { color: SUBTLE, fontSize: 12 },
+  editTxt:       { color: c.primary, fontSize: 12, fontWeight: '600' },
+  editCancelTxt: { color: c.textDim, fontSize: 12 },
 
-  composer:      { flexDirection: 'row', alignItems: 'flex-end', padding: 12, gap: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: BORDER, backgroundColor: '#0F1217' },
+  composer:      { flexDirection: 'row', alignItems: 'flex-end', padding: 12, gap: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border, backgroundColor: '#0F1217' },
   attachBtn:     { width: 40, height: 40, borderRadius: 20, backgroundColor: '#1F2937', alignItems: 'center', justifyContent: 'center' },
   attachTxt:     { fontSize: 18 },
 
   // Recording-mode composer: pulse dot + timer + hint + cancel/send buttons
   recordingComposer: { alignItems: 'center', gap: 8 },
-  recordingDot:    { width: 10, height: 10, borderRadius: 5, backgroundColor: DANGER },
-  recordingTimer:  { color: TEXT, fontSize: 16, fontWeight: '700', minWidth: 52, textAlign: 'center' },
-  recordingHint:   { flex: 1, color: SUBTLE, fontSize: 12 },
+  recordingDot:    { width: 10, height: 10, borderRadius: 5, backgroundColor: c.danger },
+  recordingTimer:  { color: c.text, fontSize: 16, fontWeight: '700', minWidth: 52, textAlign: 'center' },
+  recordingHint:   { flex: 1, color: c.textDim, fontSize: 12 },
   recCancelBtn:    { width: 40, height: 40, borderRadius: 20, backgroundColor: '#1F2937', alignItems: 'center', justifyContent: 'center' },
-  recCancelTxt:    { color: DANGER, fontSize: 18, fontWeight: '700' },
-  recSendBtn:      { width: 40, height: 40, borderRadius: 20, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center' },
+  recCancelTxt:    { color: c.danger, fontSize: 18, fontWeight: '700' },
+  recSendBtn:      { width: 40, height: 40, borderRadius: 20, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
   recSendTxt:      { color: '#fff', fontSize: 18, fontWeight: '700' },
 
   // Voice-message bubble (playback): play/pause button + track + duration
   audioRow:           { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 200, maxWidth: 260 },
   audioPlayBtn:       { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   audioPlayBtnMine:   { backgroundColor: 'rgba(255,255,255,0.22)' },
-  audioPlayBtnTheirs: { backgroundColor: ACCENT },
+  audioPlayBtnTheirs: { backgroundColor: c.primary },
   audioPlayIcon:      { color: '#fff', fontSize: 14, fontWeight: '700' },
   audioMeter:         { flex: 1, gap: 4 },
   audioTrack:         { height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.18)', overflow: 'hidden' },
-  audioFill:          { height: 4, backgroundColor: ACCENT, borderRadius: 2 },
+  audioFill:          { height: 4, backgroundColor: c.primary, borderRadius: 2 },
 
   // Waveform bars (Day 7 polish): 32 vertical bars sized by amplitude.
   // Played bars use the accent color; unplayed are dim so the playhead
@@ -2711,14 +2725,14 @@ const S = StyleSheet.create({
   waveBar:                { width: 3, borderRadius: 1.5 },
   waveBarPlayedMine:      { backgroundColor: '#fff' },
   waveBarUnplayedMine:    { backgroundColor: 'rgba(255,255,255,0.35)' },
-  waveBarPlayedTheirs:    { backgroundColor: ACCENT },
+  waveBarPlayedTheirs:    { backgroundColor: c.primary },
   waveBarUnplayedTheirs:  { backgroundColor: 'rgba(108,99,255,0.35)' },
   audioFillMine:      { backgroundColor: '#fff' },
-  audioTime:          { color: SUBTLE, fontSize: 11 },
+  audioTime:          { color: c.textDim, fontSize: 11 },
   audioTimeMine:      { color: 'rgba(255,255,255,0.85)' },
 
-  input:         { flex: 1, color: TEXT, backgroundColor: '#1F2937', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, maxHeight: 120, fontSize: 15 },
-  sendBtn:       { backgroundColor: ACCENT, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, justifyContent: 'center' },
+  input:         { flex: 1, color: c.text, backgroundColor: '#1F2937', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, maxHeight: 120, fontSize: 15 },
+  sendBtn:       { backgroundColor: c.primary, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, justifyContent: 'center' },
   sendBtnOff:    { backgroundColor: '#374151' },
   sendTxt:       { color: '#fff', fontWeight: '700' },
 
@@ -2732,24 +2746,24 @@ const S = StyleSheet.create({
   // Poll bubble: question on top, options as rows with a horizontal fill
   // bar proportional to vote count, footer with totals + mode hint.
   pollWrap:               { minWidth: 240, maxWidth: 300, gap: 8 },
-  pollQuestion:           { color: TEXT, fontSize: 14, fontWeight: '700', marginBottom: 6 },
+  pollQuestion:           { color: c.text, fontSize: 14, fontWeight: '700', marginBottom: 6 },
   pollQuestionMine:       { color: '#fff' },
   pollOptionRow:          { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 },
-  pollOptionMark:         { color: SUBTLE, fontSize: 16, width: 18, textAlign: 'center' },
-  pollOptionMarkOn:       { color: ACCENT },
+  pollOptionMark:         { color: c.textDim, fontSize: 16, width: 18, textAlign: 'center' },
+  pollOptionMarkOn:       { color: c.primary },
   pollOptionLine:         { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
-  pollOptionLabel:        { color: TEXT, fontSize: 13, flex: 1 },
+  pollOptionLabel:        { color: c.text, fontSize: 13, flex: 1 },
   pollOptionLabelMine:    { color: '#fff' },
-  pollOptionCount:        { color: SUBTLE, fontSize: 11, fontWeight: '700' },
+  pollOptionCount:        { color: c.textDim, fontSize: 11, fontWeight: '700' },
   pollOptionCountMine:    { color: 'rgba(255,255,255,0.85)' },
   pollBarTrack:           { height: 4, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 2, marginTop: 4, overflow: 'hidden' },
-  pollBarFill:            { height: 4, backgroundColor: ACCENT, borderRadius: 2 },
+  pollBarFill:            { height: 4, backgroundColor: c.primary, borderRadius: 2 },
   pollBarFillMine:        { backgroundColor: '#fff' },
-  pollFooter:             { color: SUBTLE, fontSize: 11, marginTop: 6 },
+  pollFooter:             { color: c.textDim, fontSize: 11, marginTop: 6 },
   pollFooterMine:         { color: 'rgba(255,255,255,0.7)' },
   attachedImage: { width: 220, height: 220, borderRadius: 8, backgroundColor: '#0F1217' },
   imageError:    { width: 180, padding: 16, alignItems: 'center', gap: 4 },
-  imageErrorTxt: { color: SUBTLE, fontSize: 12 },
+  imageErrorTxt: { color: c.textDim, fontSize: 12 },
 
   // Video bubble — inline player with native controls + duration pill
   videoWrap:     { width: 240, height: 240, borderRadius: 8, overflow: 'hidden', backgroundColor: '#000', position: 'relative' },
@@ -2758,49 +2772,49 @@ const S = StyleSheet.create({
   videoLoading:  { width: 240, height: 240, borderRadius: 8, backgroundColor: '#0F1217', alignItems: 'center', justifyContent: 'center' },
 
   // View-once shield (before tap) + tombstone (after view)
-  viewOnceShield:        { width: 220, padding: 20, borderRadius: 12, alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: 'rgba(108,99,255,0.15)', borderWidth: 1, borderColor: ACCENT, borderStyle: 'dashed' },
+  viewOnceShield:        { width: 220, padding: 20, borderRadius: 12, alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: 'rgba(108,99,255,0.15)', borderWidth: 1, borderColor: c.primary, borderStyle: 'dashed' },
   viewOnceShieldIcon:    { fontSize: 28 },
-  viewOnceShieldTxt:     { color: TEXT, fontSize: 14, fontWeight: '700' },
-  viewOnceShieldHint:    { color: SUBTLE, fontSize: 11, textAlign: 'center' },
-  viewOnceTombstone:     { width: 220, padding: 16, borderRadius: 12, alignItems: 'center', backgroundColor: '#0F1217', borderWidth: StyleSheet.hairlineWidth, borderColor: BORDER },
-  viewOnceTombstoneTxt:  { color: SUBTLE, fontSize: 12, fontStyle: 'italic' },
+  viewOnceShieldTxt:     { color: c.text, fontSize: 14, fontWeight: '700' },
+  viewOnceShieldHint:    { color: c.textDim, fontSize: 11, textAlign: 'center' },
+  viewOnceTombstone:     { width: 220, padding: 16, borderRadius: 12, alignItems: 'center', backgroundColor: '#0F1217', borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
+  viewOnceTombstoneTxt:  { color: c.textDim, fontSize: 12, fontStyle: 'italic' },
 
   // Day 9 — file bubble (documents)
   fileRow:        { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 220, maxWidth: 280 },
   fileIcon:       { width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   fileIconMine:   { backgroundColor: 'rgba(255,255,255,0.22)' },
-  fileIconTheirs: { backgroundColor: ACCENT },
+  fileIconTheirs: { backgroundColor: c.primary },
   fileIconTxt:    { fontSize: 18 },
   fileMeta:       { flex: 1, gap: 2 },
-  fileName:       { color: TEXT, fontSize: 14, fontWeight: '600' },
+  fileName:       { color: c.text, fontSize: 14, fontWeight: '600' },
   fileNameMine:   { color: '#fff' },
-  fileSize:       { color: SUBTLE, fontSize: 11 },
+  fileSize:       { color: c.textDim, fontSize: 11 },
   fileSizeMine:   { color: 'rgba(255,255,255,0.85)' },
 
   // Day 8 — reply bar above composer
-  replyBar:        { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: '#0F1217', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: BORDER },
-  replyBarLine:    { width: 3, alignSelf: 'stretch', backgroundColor: ACCENT, borderRadius: 1.5 },
-  replyBarTitle:   { color: ACCENT, fontSize: 12, fontWeight: '700' },
-  replyBarBody:    { color: TEXT, fontSize: 13 },
+  replyBar:        { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: '#0F1217', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border },
+  replyBarLine:    { width: 3, alignSelf: 'stretch', backgroundColor: c.primary, borderRadius: 1.5 },
+  replyBarTitle:   { color: c.primary, fontSize: 12, fontWeight: '700' },
+  replyBarBody:    { color: c.text, fontSize: 13 },
 
   // Day 8 — inline reply preview inside a bubble
   replyPreview:        { flexDirection: 'row', alignItems: 'stretch', gap: 8, marginBottom: 6, paddingVertical: 4, paddingHorizontal: 6, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 6 },
-  replyPreviewLine:    { width: 2, backgroundColor: ACCENT, borderRadius: 1 },
-  replyPreviewWho:     { color: ACCENT, fontSize: 11, fontWeight: '700' },
-  replyPreviewBody:    { color: TEXT, fontSize: 12 },
+  replyPreviewLine:    { width: 2, backgroundColor: c.primary, borderRadius: 1 },
+  replyPreviewWho:     { color: c.primary, fontSize: 11, fontWeight: '700' },
+  replyPreviewBody:    { color: c.text, fontSize: 12 },
 
   // Day 8 — "↪ Forwarded" tag at top of bubble
-  forwardedTag:        { color: SUBTLE, fontSize: 11, fontStyle: 'italic', marginBottom: 2 },
+  forwardedTag:        { color: c.textDim, fontSize: 11, fontStyle: 'italic', marginBottom: 2 },
 
   // Day 8 — reaction chips under a bubble
   reactionRow:         { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: -6, marginBottom: 6, paddingHorizontal: 4 },
   reactionRowMine:     { justifyContent: 'flex-end' },
   reactionRowTheirs:   { justifyContent: 'flex-start' },
-  reactionChip:        { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, backgroundColor: '#1F2937', borderWidth: StyleSheet.hairlineWidth, borderColor: BORDER },
-  reactionChipMine:    { backgroundColor: 'rgba(108,99,255,0.25)', borderColor: ACCENT },
+  reactionChip:        { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, backgroundColor: '#1F2937', borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
+  reactionChipMine:    { backgroundColor: 'rgba(108,99,255,0.25)', borderColor: c.primary },
   reactionChipEmoji:   { fontSize: 14 },
-  reactionChipCount:   { color: SUBTLE, fontSize: 11, fontWeight: '600' },
-  reactionChipCountMine: { color: ACCENT },
+  reactionChipCount:   { color: c.textDim, fontSize: 11, fontWeight: '600' },
+  reactionChipCountMine: { color: c.primary },
 
   // Day 8 — quick-react picker
   modalBackdrop:       { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center', padding: 20 },
@@ -2810,11 +2824,11 @@ const S = StyleSheet.create({
 
   // Day 8 — forward chat picker
   forwardSheet:        { width: '100%', maxHeight: '70%', backgroundColor: '#0F1217', borderRadius: 16, padding: 16, gap: 8 },
-  forwardTitle:        { color: TEXT, fontSize: 16, fontWeight: '700', marginBottom: 8 },
-  forwardEmpty:        { color: SUBTLE, textAlign: 'center', marginTop: 24 },
-  forwardRow:          { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
-  forwardRowTxt:       { color: TEXT, fontSize: 15, flex: 1 },
-  forwardRowSub:       { color: SUBTLE, fontSize: 11 },
+  forwardTitle:        { color: c.text, fontSize: 16, fontWeight: '700', marginBottom: 8 },
+  forwardEmpty:        { color: c.textDim, textAlign: 'center', marginTop: 24 },
+  forwardRow:          { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  forwardRowTxt:       { color: c.text, fontSize: 15, flex: 1 },
+  forwardRowSub:       { color: c.textDim, fontSize: 11 },
 });
 
 // ── Memoized message bubble ──────────────────────────────────────────────
