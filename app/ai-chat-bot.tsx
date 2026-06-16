@@ -67,7 +67,7 @@ const VAULTCHAT_INFO = {
   general:
     "VaultChat is a privacy-first encrypted messaging app. It features end-to-end encryption, biometric authentication, disappearing messages, secure file sharing, and much more. Your data stays yours.",
   encryption:
-    "VaultChat uses military-grade end-to-end encryption for all messages, calls, and file transfers. Not even our servers can read your messages. We use the Signal Protocol combined with additional security layers.",
+    "Direct (1:1) messages are end-to-end encrypted with a Signal-style protocol (X3DH + Double Ratchet), so their contents aren't readable on our servers. Group chats, calls and file transfers use transport (TLS) encryption today, with end-to-end coverage expanding.",
   features:
     "Here's what VaultChat offers:\n\n" +
     "  Encrypted messaging & calls\n" +
@@ -82,7 +82,7 @@ const VAULTCHAT_INFO = {
     "  Broadcast messages\n" +
     "  And many more security features",
   privacy:
-    "Your privacy is our top priority. VaultChat doesn't store messages on servers after delivery, uses zero-knowledge encryption, and never sells your data. The app also prevents screenshots and screen recording.",
+    "Your privacy matters: direct messages are end-to-end encrypted and we never sell your data. We're continually strengthening encryption across the rest of the app.",
   security:
     "VaultChat includes multi-layer security: biometric authentication, 8-digit secret codes, security questions, jailbreak detection, anti-tampering checks, and encrypted local storage. Your vault is truly secure.",
 };

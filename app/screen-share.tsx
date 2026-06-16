@@ -34,7 +34,7 @@ export default function ScreenShareScreen() {
   const startSharing = () => {
     setIsSharing(true);
     setViewerCount(1);
-    Alert.alert('Screen Share Started', 'Your screen is now being shared via D2DE encrypted P2P connection.\n\nNo data passes through any server.');
+    Alert.alert('Screen Share', 'Screen sharing is in preview — real device-to-device streaming (WebRTC) is not wired up yet, so nothing is transmitted.');
   };
 
   const stopSharing = () => {
@@ -73,7 +73,7 @@ export default function ScreenShareScreen() {
         <View style={s.body}>
           <Text style={s.bigIcon}>{'\uD83D\uDCBB'}</Text>
           <Text style={s.bodyTitle}>Share Your Screen</Text>
-          <Text style={s.bodySub}>Share your entire screen encrypted via D2DE. Viewer count shown. No remote control.</Text>
+          <Text style={s.bodySub}>Share your entire screen. Viewer count shown. No remote control. (Preview — streaming not wired yet.)</Text>
 
           {/* Settings before sharing */}
           <View style={s.settingsCard}>
@@ -91,11 +91,11 @@ export default function ScreenShareScreen() {
           <View style={s.featCard}>
             <Text style={s.featTitle}>6 Features</Text>
             {[
-              ['\uD83D\uDCBB', 'Screen Share (P2P)', 'Entire screen encrypted via D2DE'],
+              ['\uD83D\uDCBB', 'Screen Share (P2P)', 'Entire screen (preview \u2014 not wired yet)'],
               ['\u270F\uFE0F', 'Screen Annotation', 'Viewers draw and point on shared screen'],
               ['\uD83D\uDD12', 'View-Only Mode', 'FLAG_SECURE on receiver — can\'t screenshot'],
               ['\u23F8\uFE0F', 'Pause Sharing', 'Freeze screen without ending session'],
-              ['\uD83C\uDFAC', 'Watch Together', 'Synchronized YouTube playback via D2DE'],
+              ['\uD83C\uDFAC', 'Watch Together', 'Synchronized YouTube playback'],
               ['\uD83C\uDFA4', 'Voice Chat Overlay', 'Talk while sharing or watching together'],
             ].map(([icon, title, desc], i) => (
               <View key={i} style={s.featRow}>
@@ -117,7 +117,7 @@ export default function ScreenShareScreen() {
             <Text style={s.previewSub}>{viewerCount} viewer{viewerCount !== 1 ? 's' : ''} connected</Text>
 
             <View style={s.badges}>
-              <View style={s.encBadge}><Text style={s.encBadgeTxt}>D2DE ACTIVE</Text></View>
+              <View style={s.encBadge}><Text style={s.encBadgeTxt}>PREVIEW</Text></View>
               {viewOnlyMode && <View style={s.encBadge}><Text style={s.encBadgeTxt}>VIEW ONLY</Text></View>}
               {annotationEnabled && <View style={s.encBadge}><Text style={s.encBadgeTxt}>ANNOTATION ON</Text></View>}
             </View>
@@ -136,7 +136,7 @@ export default function ScreenShareScreen() {
             </TouchableOpacity>
           </View>
 
-          <Text style={s.footerNote}>No remote control {'\u2022'} Server sees nothing {'\u2022'} All P2P encrypted</Text>
+          <Text style={s.footerNote}>No remote control {'\u2022'} Preview \u2014 real P2P streaming not wired yet</Text>
         </View>
       )}
     </View>

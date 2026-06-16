@@ -167,7 +167,7 @@ export default function VoiceSpeedPlayer() {
         {/* Info */}
         <View style={st.infoCard}>
           <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>
-            🔐 Voice message is end-to-end encrypted
+            🔐 Voice messages are encrypted in transit — end-to-end coverage is rolling out
           </Text>
         </View>
       </View>

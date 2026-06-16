@@ -57,7 +57,7 @@ export default function WatchTogetherScreen() {
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={s.headerTitle}>{'\uD83C\uDFAC'} Watch Together</Text>
-          <Text style={s.headerSub}>D2DE Sync {'\u2022'} YouTube</Text>
+          <Text style={s.headerSub}>Synced {'\u2022'} YouTube</Text>
         </View>
         {isWatching && (
           <View style={s.syncBadge}>
@@ -72,7 +72,7 @@ export default function WatchTogetherScreen() {
             <Text style={s.bigIcon}>{'\uD83C\uDFAC'}</Text>
             <Text style={s.bodyTitle}>Watch Together</Text>
             <Text style={s.bodySub}>
-              Synchronized YouTube playback via official API. Both users see the same frame at the same time, synced through D2DE.
+              Synchronized YouTube playback via official API. Both users see the same frame at the same time, kept in sync via the YouTube API (no end-to-end encryption).
             </Text>
 
             <View style={s.urlCard}>
@@ -97,7 +97,7 @@ export default function WatchTogetherScreen() {
               <Text style={s.infoTitle}>How it works</Text>
               {[
                 ['\uD83D\uDD17', 'Paste any YouTube URL'],
-                ['\uD83D\uDCE1', 'D2DE syncs playback state P2P'],
+                ['\uD83D\uDCE1', 'Playback state synced via the YouTube API'],
                 ['\u23EF\uFE0F', 'Play/pause/seek synced in real-time'],
                 ['\uD83C\uDFA4', 'Voice chat overlay while watching'],
                 ['\uD83D\uDD12', 'Server sees nothing \u2014 all P2P'],
@@ -141,7 +141,7 @@ export default function WatchTogetherScreen() {
           </View>
 
           <View style={s.statusRow}>
-            <View style={s.statusBadge}><Text style={s.statusBadgeTxt}>D2DE SYNCED</Text></View>
+            <View style={s.statusBadge}><Text style={s.statusBadgeTxt}>SYNCED</Text></View>
             <View style={s.statusBadge}><Text style={s.statusBadgeTxt}>{viewerCount} viewers</Text></View>
             {voiceChat && <View style={s.statusBadge}><Text style={s.statusBadgeTxt}>{'\uD83C\uDFA4'} Voice ON</Text></View>}
           </View>

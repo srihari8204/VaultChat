@@ -128,7 +128,7 @@ export default function GameLobbyScreen() {
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={s.headerTitle}>{'\uD83C\uDFAE'} Game Lobby</Text>
-          <Text style={s.headerSub}>D2DE Encrypted {'\u2022'} P2P Fair Play</Text>
+          <Text style={s.headerSub}>P2P Fair Play</Text>
         </View>
         <TouchableOpacity
           onPress={() => { getLeaderboard().then(setLeaderboard).catch(() => {}); setShowLeaderboard(true); }}
@@ -242,14 +242,14 @@ export default function GameLobbyScreen() {
         <View style={s.featCard}>
           <Text style={s.featTitle}>12 Platform Features</Text>
           {[
-            ['\uD83C\uDFAE', 'D2DE Game Engine'],
+            ['\uD83C\uDFAE', 'Game Engine'],
             ['\uD83C\uDCCF', 'Mental Poker Protocol (Fair Deal)'],
             ['\uD83C\uDFB2', 'Cryptographic Dice (Commitment)'],
             ['\uD83D\uDC65', 'Play with Friends Mode'],
             ['\uD83C\uDF10', 'Online Ranked Matchmaking'],
             ['\uD83E\uDD16', 'Bot Mode (Easy to Expert)'],
             ['\uD83E\uDE99', '1,000 Demo Coins (Every User)'],
-            ['\uD83C\uDFA4', 'In-Game Voice Chat (D2DE)'],
+            ['\uD83C\uDFA4', 'In-Game Voice Chat'],
             ['\uD83D\uDD07', 'Host Mute / Player Mute'],
             ['\uD83D\uDC41', 'Spectator Mode'],
             ['\uD83C\uDFC6', 'Tournaments (Bracket Style)'],
