@@ -617,10 +617,10 @@ export default function ChatScreen() {
   }, [mentionQuery, otherMembers]);
 
   // ── Send / Edit ───────────────────────────────────────────
-  const onSend = useCallback(async () => {
+  const onSend = useCallback(async (silent = false) => {
     const text = input.trim();
     if (!text || sending) return;
-    haptic();
+    haptic(silent ? Haptics.ImpactFeedbackStyle.Medium : Haptics.ImpactFeedbackStyle.Light);
     setSending(true);
     stopTypingIfActive();
     if (draftTimer.current) clearTimeout(draftTimer.current);
@@ -638,7 +638,7 @@ export default function ChatScreen() {
         const replyToId = replyTo?.id ?? null;
         // Keep only mentions whose "@Name" still appears in the final text.
         const mentions = mentionsRef.current.filter(mn => text.includes('@' + mn.name));
-        const meta: any = { ...(nextInvisibleInk ? { invisibleInk: true } : {}), ...(mentions.length ? { mentions } : {}) };
+        const meta: any = { ...(nextInvisibleInk ? { invisibleInk: true } : {}), ...(mentions.length ? { mentions } : {}), ...(silent ? { silent: true } : {}) };
         const q = await enqueueText(chatId, text, { replyToId, meta: Object.keys(meta).length ? meta : null });
         mentionsRef.current = [];
         const optimistic: DisplayMessage = {
@@ -1729,7 +1729,9 @@ export default function ChatScreen() {
           ) : (
             <TouchableOpacity
               style={[S.sendBtn, (!input.trim() || sending) && S.sendBtnOff]}
-              onPress={onSend}
+              onPress={() => onSend(false)}
+              onLongPress={() => { if (input.trim() && !sending && editingId == null) onSend(true); }}
+              delayLongPress={300}
               disabled={!input.trim() || sending}
               activeOpacity={0.85}
             >

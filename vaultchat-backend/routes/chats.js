@@ -110,6 +110,8 @@ async function loadChatMembership(req, chatId) {
 // when needed) — here we just fetch devices for known member uids.
 async function sendChatMessagePush(chatId, senderId, msg, chatType) {
   try {
+    // Silent send (W15): the sender chose not to ring anyone for this message.
+    if (msg.meta && msg.meta.silent) return;
     // Recipients = chat members minus the sender; not blocking the sender; and
     // not muting the chat — EXCEPT @mentioned members, who are notified even when
     // muted (W15).
