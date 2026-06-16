@@ -23,6 +23,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useFonts, Sora_700Bold, Sora_800ExtraBold } from '@expo-google-fonts/sora';
 import { NunitoSans_400Regular, NunitoSans_600SemiBold, NunitoSans_700Bold } from '@expo-google-fonts/nunito-sans';
 import { FontReadyContext } from '../components/ui/Text';
+import { ThemeProvider } from '../lib/theme';
 
 import { runSecurityCheck } from '../services/securityService';
 import { attachTapHandler } from '../lib/push';
@@ -174,6 +175,7 @@ function RootLayout() {
   }
 
   return (
+    <ThemeProvider>
     <FontReadyContext.Provider value={fontsReady}>
     <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style="light" />
@@ -334,6 +336,7 @@ function RootLayout() {
       </Stack>
     </GestureHandlerRootView>
     </FontReadyContext.Provider>
+    </ThemeProvider>
   );
 }
 

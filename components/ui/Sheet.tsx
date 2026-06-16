@@ -11,7 +11,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
-import { Aurora, RADIUS, SPACING } from '../../constants/theme';
+import { RADIUS, SPACING } from '../../constants/theme';
+import { useColors } from '../../lib/theme';
 import { AppText } from './Text';
 
 export interface SheetAction {
@@ -30,6 +31,7 @@ export interface SheetProps {
 }
 
 export function Sheet({ visible, title, message, actions, onClose }: SheetProps) {
+  const Aurora = useColors();
   const insets = useSafeAreaInsets();
   const slide = React.useRef(new Animated.Value(0)).current;
 
@@ -54,9 +56,9 @@ export function Sheet({ visible, title, message, actions, onClose }: SheetProps)
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.scrim} onPress={onClose} />
-      <Animated.View style={[styles.sheet, { paddingBottom: insets.bottom + SPACING.sm, transform: [{ translateY }] }]}>
+      <Animated.View style={[styles.sheet, { backgroundColor: Aurora.surfaceSolid, borderColor: Aurora.border, paddingBottom: insets.bottom + SPACING.sm, transform: [{ translateY }] }]}>
         {(title || message) && (
-          <View style={styles.headerBlock}>
+          <View style={[styles.headerBlock, { borderBottomColor: Aurora.separator }]}>
             {title ? <AppText variant="bodyStrong" style={styles.center}>{title}</AppText> : null}
             {message ? <AppText variant="caption" color={Aurora.textDim} style={styles.center}>{message}</AppText> : null}
           </View>
@@ -79,12 +81,11 @@ const styles = StyleSheet.create({
   scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)' },
   sheet: {
     position: 'absolute', left: 0, right: 0, bottom: 0,
-    backgroundColor: Aurora.surfaceSolid,
     borderTopLeftRadius: RADIUS.xxl, borderTopRightRadius: RADIUS.xxl,
     paddingTop: SPACING.sm, paddingHorizontal: SPACING.sm,
-    borderTopWidth: 1, borderColor: Aurora.border,
+    borderTopWidth: 1,
   },
-  headerBlock: { paddingVertical: SPACING.md, paddingHorizontal: SPACING.md, gap: 4, borderBottomWidth: 1, borderBottomColor: Aurora.separator, marginBottom: SPACING.xs },
+  headerBlock: { paddingVertical: SPACING.md, paddingHorizontal: SPACING.md, gap: 4, borderBottomWidth: 1, marginBottom: SPACING.xs },
   center: { textAlign: 'center' },
   row: { flexDirection: 'row', alignItems: 'center', gap: SPACING.md, paddingVertical: 15, paddingHorizontal: SPACING.md, borderRadius: RADIUS.md },
   cancel: { justifyContent: 'center', marginTop: SPACING.xs },

@@ -8,7 +8,8 @@ import { View, TouchableOpacity, StyleSheet, type ViewStyle, type StyleProp } fr
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Aurora, SPACING } from '../../constants/theme';
+import { SPACING } from '../../constants/theme';
+import { useColors } from '../../lib/theme';
 import { AppText } from './Text';
 
 export interface HeaderProps {
@@ -26,19 +27,20 @@ export interface HeaderProps {
 export function Header({ title, back = true, onBack, right, border, style }: HeaderProps) {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const c = useColors();
   return (
     <View
       style={[
         styles.header,
-        { paddingTop: insets.top + SPACING.xs },
-        border && styles.border,
+        { paddingTop: insets.top + SPACING.xs, backgroundColor: c.bg },
+        border && { borderBottomWidth: 1, borderBottomColor: c.border },
         style,
       ]}
     >
       <View style={styles.side}>
         {back && (
           <TouchableOpacity onPress={onBack ?? (() => router.back())} hitSlop={10} style={styles.iconBtn}>
-            <Ionicons name="arrow-back" size={24} color={Aurora.text} />
+            <Ionicons name="arrow-back" size={24} color={c.text} />
           </TouchableOpacity>
         )}
       </View>
@@ -52,9 +54,7 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: SPACING.sm, paddingBottom: SPACING.sm,
-    backgroundColor: Aurora.bg,
   },
-  border: { borderBottomWidth: 1, borderBottomColor: Aurora.border },
   side: { minWidth: 44, justifyContent: 'center' },
   right: { alignItems: 'flex-end' },
   iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },

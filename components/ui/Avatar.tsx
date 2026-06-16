@@ -7,7 +7,8 @@
 import React from 'react';
 import { View, StyleSheet, type ViewStyle, type StyleProp } from 'react-native';
 import { Image } from 'expo-image';
-import { Aurora, avatarColor } from '../../constants/theme';
+import { avatarColor } from '../../constants/theme';
+import { useColors } from '../../lib/theme';
 import { AppText } from './Text';
 
 export interface AvatarProps {
@@ -23,6 +24,7 @@ export interface AvatarProps {
 }
 
 export function Avatar({ uri, headers, name, size = 48, presence, style }: AvatarProps) {
+  const c = useColors();
   const initial = (name || '?').trim()[0]?.toUpperCase() || '?';
   const dim = { width: size, height: size, borderRadius: size / 2 };
   const dotSize = Math.max(10, Math.round(size * 0.28));
@@ -31,7 +33,7 @@ export function Avatar({ uri, headers, name, size = 48, presence, style }: Avata
       {uri ? (
         <Image
           source={headers ? { uri, headers } : { uri }}
-          style={[dim, styles.img]}
+          style={[dim, { backgroundColor: c.surfaceSolid }]}
           contentFit="cover"
           transition={150}
         />
@@ -41,16 +43,15 @@ export function Avatar({ uri, headers, name, size = 48, presence, style }: Avata
         </View>
       )}
       {presence === 'online' && (
-        <View style={[styles.dot, { width: dotSize, height: dotSize, borderRadius: dotSize / 2, right: 0, bottom: 0 }]} />
+        <View style={[styles.dot, { width: dotSize, height: dotSize, borderRadius: dotSize / 2, right: 0, bottom: 0, backgroundColor: c.online, borderColor: c.bg }]} />
       )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  img: { backgroundColor: Aurora.surfaceSolid },
   center: { alignItems: 'center', justifyContent: 'center' },
-  dot: { position: 'absolute', backgroundColor: Aurora.online, borderWidth: 2, borderColor: Aurora.bg },
+  dot: { position: 'absolute', borderWidth: 2 },
 });
 
 export default Avatar;

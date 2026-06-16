@@ -25,6 +25,8 @@ import {
 } from 'react-native';
 import { logoutUser } from './(constants)/authService';
 import { getAccessToken } from '../lib/api';
+import { useTheme, type ThemePref } from '../lib/theme';
+import { Ionicons } from '@expo/vector-icons';
 import {
   attachmentUrl,
   deleteAccount,
@@ -174,6 +176,8 @@ export default function SettingsScreen() {
         </TouchableOpacity>
         <Text style={S.title}>Settings</Text>
       </View>
+
+      <AppearanceSection />
 
       <View style={S.section}>
         <Text style={S.label}>PRIVACY</Text>
@@ -335,6 +339,48 @@ export default function SettingsScreen() {
     </ScrollView>
   );
 }
+
+// Appearance (U3) — Light / Dark / System, persisted via the ThemeProvider.
+// The control itself is theme-aware so the chosen palette previews live.
+function AppearanceSection() {
+  const { pref, setPref, colors, scheme } = useTheme();
+  const opts: { key: ThemePref; label: string; icon: React.ComponentProps<typeof Ionicons>['name'] }[] = [
+    { key: 'system', label: 'System', icon: 'phone-portrait-outline' },
+    { key: 'light',  label: 'Light',  icon: 'sunny-outline' },
+    { key: 'dark',   label: 'Dark',   icon: 'moon-outline' },
+  ];
+  return (
+    <View style={S.section}>
+      <Text style={S.label}>APPEARANCE</Text>
+      <View style={[apS.row, { backgroundColor: colors.surfaceSolid, borderColor: colors.border }]}>
+        {opts.map(o => {
+          const active = pref === o.key;
+          return (
+            <TouchableOpacity
+              key={o.key}
+              style={[apS.pill, active && { backgroundColor: colors.primary }]}
+              onPress={() => setPref(o.key)}
+              activeOpacity={0.8}
+            >
+              <Ionicons name={o.icon} size={16} color={active ? '#04130D' : colors.textDim} />
+              <Text style={[apS.pillTxt, { color: active ? '#04130D' : colors.textDim }]}>{o.label}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+      <Text style={[apS.hint, { color: SUBTLE }]}>
+        {pref === 'system' ? `Following your device (currently ${scheme}).` : `Always ${pref}.`} Light mode is rolling out screen by screen.
+      </Text>
+    </View>
+  );
+}
+
+const apS = StyleSheet.create({
+  row: { flexDirection: 'row', borderRadius: 14, borderWidth: 1, padding: 4, gap: 4, marginTop: 4 },
+  pill: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 11 },
+  pillTxt: { fontSize: 13, fontWeight: '700' },
+  hint: { fontSize: 11.5, marginTop: 8, lineHeight: 16 },
+});
 
 function ToggleRow({
   title, sub, value, busy, onValueChange,

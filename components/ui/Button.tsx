@@ -10,7 +10,8 @@ import {
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
-import { Aurora, RADIUS, SPACING } from '../../constants/theme';
+import { RADIUS, SPACING } from '../../constants/theme';
+import { useColors } from '../../lib/theme';
 import { AppText } from './Text';
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
@@ -34,6 +35,7 @@ export function Button({
   title, onPress, variant = 'primary', size = 'md', icon,
   loading, disabled, fullWidth, style,
 }: ButtonProps) {
+  const Aurora = useColors();
   const isDisabled = disabled || loading;
   const handlePress = useCallback(() => {
     if (isDisabled) return;

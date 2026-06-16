@@ -53,29 +53,61 @@ export const Fonts = Platform.select({
 });
 
 // ─── Obsidian Aurora design system ───────────────────────────────────
-// Shared tokens for the redesigned auth + chat screens.
-export const Aurora = {
-  primary:   '#10B981', // emerald
-  accent:    '#06B6D4', // cyan
-  purple:    '#8B5CF6',
+// Two palettes (dark / light) sharing the brand accents (U3). `Aurora` is the
+// DARK palette and stays the static default so every existing `import { Aurora }`
+// keeps working unchanged; theme-aware code reads the active palette via
+// useTheme() (lib/theme). Brand colors are identical across both so accents stay
+// on-brand in either mode; only surfaces + text invert.
 
+export interface Palette {
+  primary: string; accent: string; purple: string;
+  danger: string; success: string; online: string;
+  bg: string; surface: string; surfaceSolid: string;
+  card: string; border: string; separator: string;
+  text: string; textDim: string; textFaint: string;
+}
+
+const BRAND = {
+  primary: '#10B981', // emerald
+  accent:  '#06B6D4', // cyan
+  purple:  '#8B5CF6',
+  danger:  '#EF4444',
+  success: '#10B981',
+  online:  '#10B981',
+};
+
+export const AuroraDark: Palette = {
+  ...BRAND,
   bg:        '#0A0A0F', // near-black app background
   surface:   'rgba(255,255,255,0.05)',
   surfaceSolid: '#14141B',
   card:      '#15161D',
   border:    'rgba(255,255,255,0.08)',
   separator: 'rgba(255,255,255,0.06)',
-
   text:      '#FFFFFF',
   textDim:   'rgba(255,255,255,0.5)',
   textFaint: 'rgba(255,255,255,0.3)',
+};
 
-  danger:    '#EF4444',
-  success:   '#10B981',
-  online:    '#10B981',
-} as const;
+export const AuroraLight: Palette = {
+  ...BRAND,
+  bg:        '#F6F7F9',
+  surface:   'rgba(0,0,0,0.04)',
+  surfaceSolid: '#EDEFF3',
+  card:      '#FFFFFF',
+  border:    'rgba(0,0,0,0.10)',
+  separator: 'rgba(0,0,0,0.07)',
+  text:      '#0A0A0F',
+  textDim:   'rgba(0,0,0,0.55)',
+  textFaint: 'rgba(0,0,0,0.35)',
+};
 
-export type AuroraTheme = typeof Aurora;
+/** The static default palette (dark). Existing screens import this directly. */
+export const Aurora: Palette = AuroraDark;
+
+export type AuroraTheme = Palette;
+export const PALETTES = { dark: AuroraDark, light: AuroraLight };
+export type ColorScheme = keyof typeof PALETTES;
 
 // ─── U1: Design-token foundation ─────────────────────────────────────
 // One source of truth for space / radius / elevation / motion / type, so every

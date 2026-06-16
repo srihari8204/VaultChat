@@ -10,7 +10,8 @@
 
 import React, { createContext, useContext } from 'react';
 import { Text as RNText, type TextProps, type TextStyle } from 'react-native';
-import { Aurora, TYPOGRAPHY, type TypeVariant } from '../../constants/theme';
+import { TYPOGRAPHY, type TypeVariant } from '../../constants/theme';
+import { useColors } from '../../lib/theme';
 
 /** True once the brand fonts are registered (provided by the root layout). */
 export const FontReadyContext = createContext<boolean>(false);
@@ -24,11 +25,12 @@ export interface AppTextProps extends TextProps {
 
 export function AppText({ variant = 'body', color, style, ...rest }: AppTextProps) {
   const ready = useFontsReady();
+  const colors = useColors();
   const t = TYPOGRAPHY[variant];
   const base: TextStyle = {
     fontSize: t.fontSize,
     lineHeight: t.lineHeight,
-    color: color ?? Aurora.text,
+    color: color ?? colors.text,
     // Brand font encodes its own weight, so only set fontWeight on the fallback.
     ...(ready ? { fontFamily: t.family } : { fontWeight: t.fontWeight }),
   };
