@@ -21,6 +21,7 @@ import {
   decryptFromChat, attachmentUrl, type Message, type ChatMember,
 } from '../lib/chatService';
 import { getDecryptedAttachmentUri, parseMediaContent } from '../lib/mediaAttachments';
+import { Avatar } from '../components/ui';
 
 const { width: SW } = Dimensions.get('window');
 const MEDIA_SIZE = (SW - 32 - 8) / 3;
@@ -165,11 +166,14 @@ export default function ContactInfoScreen() {
             <Ionicons name="arrow-back" size={24} color={Aurora.text} />
           </TouchableOpacity>
 
-          <View style={s.avatar}>
-            {peer?.photoURL && authHeader
-              ? <Image source={{ uri: attachmentUrl(peer.photoURL), headers: { Authorization: authHeader } }} style={s.avatarImg} />
-              : <Text style={s.avatarText}>{initials}</Text>}
-            {peer?.online && <View style={s.onlineDot} />}
+          <View style={{ marginTop: 12 }}>
+            <Avatar
+              uri={peer?.photoURL && authHeader ? attachmentUrl(peer.photoURL) : null}
+              headers={authHeader ? { Authorization: authHeader } : undefined}
+              name={displayName}
+              size={100}
+              presence={peer?.online ? 'online' : null}
+            />
           </View>
 
           <Text style={s.heroName}>{displayName}</Text>

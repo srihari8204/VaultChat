@@ -48,7 +48,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { Sheet } from '../components/ui';
+import { Sheet, Avatar } from '../components/ui';
 import { getCurrentUserAsync } from './(constants)/authService';
 
 // Fire-and-forget haptic (no-op on web / if unavailable).
@@ -1298,17 +1298,13 @@ export default function ChatScreen() {
           <Text style={S.backTxt}>←</Text>
         </TouchableOpacity>
         <View style={S.headerAvatarWrap}>
-          <View style={S.headerAvatar}>
-            {headerPhotoId && screenAuthHeader ? (
-              <Image
-                source={{ uri: attachmentUrl(headerPhotoId), headers: { Authorization: screenAuthHeader } }}
-                style={S.headerAvatarImg}
-              />
-            ) : (
-              <Text style={S.headerAvatarTxt}>{(title.trim()[0] ?? '#').toUpperCase()}</Text>
-            )}
-          </View>
-          {peerPresence?.online && <View style={S.headerPresenceDot} />}
+          <Avatar
+            uri={headerPhotoId && screenAuthHeader ? attachmentUrl(headerPhotoId) : null}
+            headers={screenAuthHeader ? { Authorization: screenAuthHeader } : undefined}
+            name={title}
+            size={40}
+            presence={chat?.type === 'direct' && peerPresence?.online ? 'online' : null}
+          />
         </View>
         <TouchableOpacity
           style={{ flex: 1 }}
