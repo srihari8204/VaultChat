@@ -14,6 +14,7 @@ const express   = require('express');
 const crypto    = require('crypto');
 const jwtUtil   = require('../jwt');
 const db        = require('../db');
+const vault     = require('../lib/vault');
 const rateLimit = require('../rateLimit');
 
 const router = express.Router();
@@ -49,7 +50,7 @@ router.post('/match', async (req, res) => {
     // discoverable here. Self is excluded so the user doesn't get a row
     // for their own number.
     const r = await db.query(
-      `SELECT id, name, photo_url, phone_hash
+      `SELECT id, name, first_name_cipher, last_name_cipher, email_cipher, photo_url, phone_hash
        FROM users
        WHERE phone_hash = ANY($1::text[])
          AND discoverable = TRUE
@@ -60,7 +61,7 @@ router.post('/match', async (req, res) => {
 
     res.json(r.rows.map(row => ({
       id:        row.id,
-      name:      row.name,
+      name:      vault.identityFromRow(row).name,
       photoURL:  row.photo_url,
       phoneHash: row.phone_hash,
     })));

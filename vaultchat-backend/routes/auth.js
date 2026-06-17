@@ -504,6 +504,15 @@ function envErr(res, status, code, message) {
   return res.status(status).json({ error: { code, message } });
 }
 function safeDecrypt(c) { try { return c ? vault.decrypt(c) : null; } catch { return null; } }
+
+// Contact-discovery hash — MUST match the client + user.js/chats.js scheme so new
+// users are findable: sha256 of digits, 10-digit input prefixed with India's '91'.
+// (This is the client-computable index; the peppered phone_lookup is for auth only.)
+function discoveryPhoneHash(phone) {
+  let digits = String(phone || '').replace(/\D/g, '');
+  if (digits.length === 10) digits = '91' + digits;
+  return crypto.createHash('sha256').update(digits, 'utf8').digest('hex');
+}
 async function auditAttempt(userId, ip, type, success) {
   try {
     await db.query(
@@ -636,14 +645,14 @@ router.post('/profile/init', async (req, res) => {
       `INSERT INTO users
          (email_lookup, phone_lookup, email_cipher, phone_cipher,
           first_name_cipher, last_name_cipher, dob_cipher, status_cipher,
-          photo_url, auth_provider, email_verified_at, onboarding_complete)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'google',NOW(),FALSE)
+          photo_url, phone_hash, auth_provider, email_verified_at, onboarding_complete)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'google',NOW(),FALSE)
        RETURNING id`,
       [
         el, pl, vault.encrypt(email), vault.encrypt(phone),
         vault.encrypt(firstName), lastName ? vault.encrypt(lastName) : null,
         vault.encrypt(dob), status.trim() ? vault.encrypt(status) : null,
-        profilePicUrl,
+        profilePicUrl, discoveryPhoneHash(phone),
       ],
     );
     return res.json({ userId: ins.rows[0].id });
