@@ -11,6 +11,7 @@
 import * as FileSystem from 'expo-file-system';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
+import { isMfaEnabled, enableMfa, disableMfa } from '../lib/mfa';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -96,6 +97,24 @@ export default function SettingsScreen() {
 
   const [exporting, setExporting] = useState(false);
   const [deleting,  setDeleting]  = useState(false);
+
+  // Device MFA (biometric / device PIN) — local + server mirror.
+  const [mfaOn,   setMfaOn]   = useState(false);
+  const [mfaBusy, setMfaBusy] = useState(false);
+  useEffect(() => { isMfaEnabled().then(setMfaOn); }, []);
+  const toggleMfa = useCallback(async () => {
+    if (mfaBusy) return;
+    setMfaBusy(true);
+    try {
+      if (mfaOn) { await disableMfa(); setMfaOn(false); }
+      else {
+        const ok = await enableMfa();
+        if (ok) setMfaOn(true);
+        else Alert.alert('Could not enable', 'No device biometrics/PIN found, or the prompt was dismissed.');
+      }
+    } catch { Alert.alert('Error', 'Could not update MFA.'); }
+    finally { setMfaBusy(false); }
+  }, [mfaOn, mfaBusy]);
 
   // GDPR export → write to cache → share sheet (user picks where to save).
   const onExport = useCallback(async () => {
@@ -218,6 +237,17 @@ export default function SettingsScreen() {
           value={settings.profilePhotoVisible}
           busy={saving === 'profilePhotoVisible'}
           onValueChange={() => toggle('profilePhotoVisible')}
+        />
+      </View>
+
+      <View style={S.section}>
+        <Text style={S.label}>SECURITY</Text>
+        <ToggleRow
+          title="Device MFA (PIN / fingerprint / face)"
+          sub="Require your device biometrics or MPIN each time VaultChat launches."
+          value={mfaOn}
+          busy={mfaBusy}
+          onValueChange={toggleMfa}
         />
       </View>
 

@@ -11,13 +11,16 @@ import { router } from "expo-router";
 import { useEffect } from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
 import { getAccessToken } from "../lib/api";
+import { isMfaEnabled } from "../lib/mfa";
 
 export default function IndexScreen() {
   useEffect(() => {
     (async () => {
       try {
         const token = await getAccessToken();
-        router.replace((token ? "/(tabs)/chats" : "/onboard") as any);
+        if (!token) { router.replace("/onboard" as any); return; }
+        // Logged in → if device MFA is on, gate the launch (biometric or MPIN).
+        router.replace(((await isMfaEnabled()) ? "/app-lock" : "/(tabs)/chats") as any);
       } catch {
         router.replace("/onboard" as any);
       }

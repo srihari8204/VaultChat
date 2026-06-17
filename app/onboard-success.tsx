@@ -2,17 +2,13 @@
 // fingerprint / face) via expo-local-authentication. "Continue to Chats" logs in
 // (mpin/verify → JWT), optionally enrolls MFA, clears the onboarding store.
 
-import * as Crypto from 'expo-crypto';
-import * as LocalAuthentication from 'expo-local-authentication';
-import * as SecureStore from 'expo-secure-store';
 import { Stack, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
-import { configureMfa, onboarding, verifyMpinRemote, onboardingError } from '../lib/onboarding';
-
-export const MFA_TOKEN_KEY = 'vc.mfa.token';
+import { onboarding, verifyMpinRemote, onboardingError } from '../lib/onboarding';
+import { deviceSecurityAvailable, enableMfa } from '../lib/mfa';
 
 export default function OnboardSuccess() {
   const { colors } = useTheme();
@@ -23,15 +19,7 @@ export default function OnboardSuccess() {
   const [hasDeviceSecurity, setHasDeviceSecurity] = useState(true);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const hw = await LocalAuthentication.hasHardwareAsync();
-        const enrolled = await LocalAuthentication.isEnrolledAsync();
-        setHasDeviceSecurity(hw && enrolled);
-      } catch { setHasDeviceSecurity(false); }
-    })();
-  }, []);
+  useEffect(() => { deviceSecurityAvailable().then(setHasDeviceSecurity).catch(() => setHasDeviceSecurity(false)); }, []);
 
   const finish = async () => {
     if (busy) return;
@@ -42,16 +30,9 @@ export default function OnboardSuccess() {
       await verifyMpinRemote(userId, mpin);              // logs in → JWT stored
 
       if (mfaOn) {
-        if (!hasDeviceSecurity) {
+        const enabled = await enableMfa();
+        if (!enabled && !hasDeviceSecurity) {
           Alert.alert('No device security found', 'You can enable this later in Settings.');
-        } else {
-          const r = await LocalAuthentication.authenticateAsync({ promptMessage: 'Confirm to enable VaultChat MFA' });
-          if (r.success) {
-            const bytes = await Crypto.getRandomBytesAsync(32);
-            const token = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
-            await SecureStore.setItemAsync(MFA_TOKEN_KEY, token);
-            await configureMfa(true);
-          }
         }
       }
       onboarding.reset();                                // wipe plaintext MPIN/answers
