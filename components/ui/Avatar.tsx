@@ -4,7 +4,7 @@
 // Replaces the per-screen avatar markup duplicated across chats / contact-info /
 // chat header / group-info. Uses expo-image (caching + transition + blurhash-ready).
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, type ViewStyle, type StyleProp } from 'react-native';
 import { Image } from 'expo-image';
 import { avatarColor } from '../../constants/theme';
@@ -25,17 +25,20 @@ export interface AvatarProps {
 
 export function Avatar({ uri, headers, name, size = 48, presence, style }: AvatarProps) {
   const c = useColors();
+  const [failed, setFailed] = useState(false);
+  useEffect(() => { setFailed(false); }, [uri]);   // retry when the uri changes
   const initial = (name || '?').trim()[0]?.toUpperCase() || '?';
   const dim = { width: size, height: size, borderRadius: size / 2 };
   const dotSize = Math.max(10, Math.round(size * 0.28));
   return (
     <View style={[dim, style]}>
-      {uri ? (
+      {uri && !failed ? (
         <Image
           source={headers ? { uri, headers } : { uri }}
           style={[dim, { backgroundColor: c.surfaceSolid }]}
           contentFit="cover"
           transition={150}
+          onError={() => setFailed(true)}   // fall back to initials on a failed load
         />
       ) : (
         <View style={[dim, styles.center, { backgroundColor: avatarColor(name || initial) }]}>
