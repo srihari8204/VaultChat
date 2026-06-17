@@ -22,7 +22,20 @@ const express   = require('express');
 const crypto    = require('crypto');
 const jwtUtil   = require('../jwt');
 const db        = require('../db');
+const vault     = require('../lib/vault');
 const { sendPushToTokens } = require('../push');
+
+// Decrypt a peer's display name from the cipher columns (Stage 4) with a plaintext
+// fallback. SQL can't decrypt, so joins select the cipher columns and we resolve
+// the name here.
+function peerName(row, prefix = 'peer_') {
+  return vault.identityFromRow({
+    name:              row[`${prefix}name`],
+    first_name_cipher: row[`${prefix}fnc`],
+    last_name_cipher:  row[`${prefix}lnc`],
+    email_cipher:      row[`${prefix}ec`],
+  }).name;
+}
 
 // Normalize a phone number for hashing.
 // Strips non-digits; if exactly 10 digits remain, assumes India and
@@ -65,9 +78,10 @@ function publicMember(row) {
     lastDeliveredMessageId:  row.last_delivered_message_id,
     muted:                   row.muted,
     leftAt:                  row.left_at,
-    // Joined-from-users fields (only present when we LEFT JOIN users)
-    email:                   row.email,
-    name:                    row.name,
+    // Joined-from-users fields (only present when we LEFT JOIN users) — Stage 4:
+    // decrypt cipher columns when present, else fall back to legacy plaintext.
+    email:                   vault.identityFromRow(row).email,
+    name:                    vault.identityFromRow(row).name,
     photoURL:                row.photo_url,
     online:                  row.online ?? false,
     lastSeenAt,
@@ -206,6 +220,9 @@ router.get('/', async (req, res) => {
          cm.screenshot_mode, cm.vanish_mode,
          peer.user_id   AS peer_user_id,
          peer.peer_name AS peer_name,
+         peer.peer_fnc  AS peer_fnc,
+         peer.peer_lnc  AS peer_lnc,
+         peer.peer_ec   AS peer_ec,
          peer.peer_photo AS peer_photo,
          peer.peer_online AS peer_online,
          peer.peer_last_seen AS peer_last_seen,
@@ -215,6 +232,9 @@ router.get('/', async (req, res) => {
        LEFT JOIN LATERAL (
          SELECT u.id AS user_id,
                 u.name AS peer_name,
+                u.first_name_cipher AS peer_fnc,
+                u.last_name_cipher  AS peer_lnc,
+                u.email_cipher      AS peer_ec,
                 u.photo_url AS peer_photo,
                 u.online   AS peer_online,
                 -- Last-seen visibility: global toggle AND no ghost-mode
@@ -265,7 +285,7 @@ router.get('/', async (req, res) => {
       unreadCount:     parseInt(row.unread_count, 10) || 0,
       // direct-chat peer info (null for groups)
       peerUserId:      row.peer_user_id ?? null,
-      peerName:        row.peer_name    ?? null,
+      peerName:        row.peer_user_id ? peerName(row) : null,
       peerPhotoURL:    row.peer_photo   ?? null,
       peerOnline:      row.peer_online  ?? false,
       peerLastSeenAt:  row.peer_last_seen ?? null,
@@ -623,7 +643,8 @@ router.get('/:id', async (req, res) => {
     if (!chat) return res.status(404).json({ error: 'Chat not found' });
 
     const membersR = await req.dbQuery(
-      `SELECT cm.*, u.email, u.name, u.photo_url, u.online, u.last_seen_at, u.last_seen_visible
+      `SELECT cm.*, u.email, u.name, u.first_name_cipher, u.last_name_cipher, u.email_cipher,
+              u.photo_url, u.online, u.last_seen_at, u.last_seen_visible
        FROM chat_members cm
        JOIN users u ON u.id = cm.user_id
        WHERE cm.chat_id = $1
