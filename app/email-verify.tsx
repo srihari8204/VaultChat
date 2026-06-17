@@ -2,7 +2,7 @@
 // (required by /auth/profile/init). 6 visible digits.
 
 import { Stack, useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
@@ -16,6 +16,13 @@ export default function EmailVerify() {
   const email = onboarding.get().email;
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
+  const [cooldown, setCooldown] = useState(30);   // a code was just sent from the landing
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
 
   const submit = async (value: string) => {
     if (busy) return;
@@ -31,7 +38,8 @@ export default function EmailVerify() {
   };
 
   const resend = async () => {
-    try { await sendEmailOtp(email); Alert.alert('Sent', 'A new code is on its way.'); }
+    if (cooldown > 0) return;
+    try { await sendEmailOtp(email); setCooldown(30); Alert.alert('Sent', 'A new code is on its way.'); }
     catch (e: any) { Alert.alert('Could not resend', onboardingError(e, 'Try again')); }
   };
 
@@ -49,8 +57,10 @@ export default function EmailVerify() {
 
         {busy && <ActivityIndicator color={colors.primary} />}
 
-        <TouchableOpacity onPress={resend} style={{ marginTop: 16 }}>
-          <Text style={s.resend}>Didn’t get it? Resend code</Text>
+        <TouchableOpacity onPress={resend} disabled={cooldown > 0} style={{ marginTop: 16 }}>
+          <Text style={[s.resend, cooldown > 0 && { color: colors.textFaint }]}>
+            {cooldown > 0 ? `Resend code in ${cooldown}s` : 'Didn’t get it? Resend code'}
+          </Text>
         </TouchableOpacity>
       </View>
     </View>

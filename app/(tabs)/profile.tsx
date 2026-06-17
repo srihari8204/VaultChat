@@ -201,7 +201,7 @@ export default function ProfileScreen() {
           try { await unregisterPushToken(); } catch {}
           try { disconnectSocket(); } catch {}
           await logoutUser();
-          router.replace('/welcome' as any);
+          router.replace('/onboard' as any);
         }
       },
     ]);

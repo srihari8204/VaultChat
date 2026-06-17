@@ -196,7 +196,7 @@ async function endSessionAndBounce(): Promise<void> {
     await setCachedUser(null);
     try {
       // expo-router's imperative router is safe outside React components.
-      router.replace('/welcome');
+      router.replace('/onboard' as any);
     } catch (err) {
       console.warn('[api] could not redirect after session end:', (err as any)?.message);
     }
