@@ -1,92 +1,56 @@
-// app/search.tsx — Day 13 global search.
-//
-// Talks to GET /chats/search?q=…  → { chats, messages }
-// Two sections: matching chats (by name / peer name / peer email),
-// then matching messages (newest first, 240-char snippet).
-//
-// Phase-3a server-side search works on plaintext content. When real E2EE
-// ships, server-side message search will be dropped; only chat / member
-// hits will remain (and an offline client-side index becomes Phase 3b
-// scope).
+// app/search.tsx — local chat search. Loads all chats once, shows them all, and
+// filters client-side by title (peer/group name). No server round-trip — server
+// can't search E2EE content, and chat/peer names are encrypted at rest.
 
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState , useMemo} from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
-  FlatList,
-  Image,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+  ActivityIndicator, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { getAccessToken } from '../lib/api';
-import {
-  attachmentUrl,
-  searchAll,
-  type SearchChatHit,
-  type SearchMessageHit,
-  type SearchResults,
-} from '../lib/chatService';
+import { Avatar } from '../components/ui';
+import { attachmentUrl, listChats, type ChatSummary } from '../lib/chatService';
 
 function useS() {
   const { colors } = useTheme();
   return useMemo(() => makeStyles(colors), [colors]);
 }
 
+const titleOf = (c: ChatSummary) =>
+  c.type === 'direct' ? (c.peerName || c.name || 'Direct chat') : (c.name || 'Group chat');
+
 export default function SearchScreen() {
   const { colors } = useTheme();
   const S = useS();
   const router = useRouter();
-  const [query,   setQuery]   = useState('');
-  const [loading, setLoading] = useState(false);
-  const [results, setResults] = useState<SearchResults>({ chats: [], messages: [] });
-  const [error,   setError]   = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [chats, setChats] = useState<ChatSummary[]>([]);
+  const [loading, setLoading] = useState(true);
   const [authHeader, setAuthHeader] = useState<string | null>(null);
-  const debounceRef = useRef<any>(null);
 
   useEffect(() => {
     let cancel = false;
     (async () => {
-      const tok = await getAccessToken();
-      if (!cancel) setAuthHeader(tok ? `Bearer ${tok}` : null);
+      try {
+        const [list, tok] = await Promise.all([listChats(), getAccessToken()]);
+        if (cancel) return;
+        setChats(list);
+        setAuthHeader(tok ? `Bearer ${tok}` : null);
+      } catch { /* show empty */ }
+      finally { if (!cancel) setLoading(false); }
     })();
     return () => { cancel = true; };
   }, []);
 
-  const onChange = useCallback((text: string) => {
-    setQuery(text);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (text.trim().length < 2) {
-      setResults({ chats: [], messages: [] });
-      setLoading(false);
-      setError(null);
-      return;
-    }
-    debounceRef.current = setTimeout(async () => {
-      setLoading(true);
-      try {
-        const r = await searchAll(text.trim());
-        setResults(r);
-        setError(null);
-      } catch (e: any) {
-        setError(e?.message ?? 'Search failed');
-      } finally {
-        setLoading(false);
-      }
-    }, 250);
-  }, []);
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return chats;
+    return chats.filter(c => titleOf(c).toLowerCase().includes(q));
+  }, [query, chats]);
 
-  useEffect(() => () => { if (debounceRef.current) clearTimeout(debounceRef.current); }, []);
-
-  const openChat = useCallback((chatId: string) => {
-    router.push({ pathname: '/chat', params: { id: chatId } } as any);
-  }, [router]);
-
-  const hasAny = results.chats.length + results.messages.length > 0;
+  const openChat = (id: string) => router.push({ pathname: '/chat', params: { id } } as any);
 
   return (
     <View style={S.screen}>
@@ -96,110 +60,65 @@ export default function SearchScreen() {
         </TouchableOpacity>
         <TextInput
           style={S.input}
-          placeholder="Search chats and messages…"
+          placeholder="Search chats…"
           placeholderTextColor={colors.textDim}
           value={query}
-          onChangeText={onChange}
+          onChangeText={setQuery}
           autoFocus
           returnKeyType="search"
-          maxLength={200}
+          maxLength={120}
         />
       </View>
 
-      {loading && <ActivityIndicator color={colors.primary} style={{ marginVertical: 12 }} />}
-      {error && <Text style={S.errorTxt}>{error}</Text>}
-
-      {!loading && query.length >= 2 && !hasAny && (
+      {loading ? (
+        <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
+      ) : filtered.length === 0 ? (
         <View style={S.empty}>
-          <Text style={S.emptyTitle}>No results</Text>
-          <Text style={S.emptySub}>Try a different word or check spelling.</Text>
+          <Text style={S.emptyTitle}>{query.trim() ? 'No chats found' : 'No chats yet'}</Text>
+          {!!query.trim() && <Text style={S.emptySub}>Try a different name.</Text>}
         </View>
+      ) : (
+        <FlatList
+          data={filtered}
+          keyExtractor={(c) => c.id}
+          contentContainerStyle={{ paddingBottom: 40 }}
+          renderItem={({ item }) => {
+            const photoId = item.type === 'direct' ? item.peerPhotoURL : item.photoURL;
+            return (
+              <TouchableOpacity style={S.row} onPress={() => openChat(item.id)} activeOpacity={0.7}>
+                <Avatar
+                  uri={photoId && authHeader ? attachmentUrl(photoId) : null}
+                  headers={authHeader ? { Authorization: authHeader } : undefined}
+                  name={titleOf(item)}
+                  size={44}
+                  presence={item.type === 'direct' && item.peerOnline ? 'online' : null}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={S.rowTitle} numberOfLines={1}>{titleOf(item)}</Text>
+                  <Text style={S.rowSub}>
+                    {item.type === 'group' ? 'Group' : 'Direct'}
+                    {item.unreadCount > 0 ? ` · ${item.unreadCount} unread` : ''}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            );
+          }}
+        />
       )}
-
-      <FlatList
-        data={[
-          ...results.chats.map(c => ({ kind: 'chat' as const, item: c })),
-          ...results.messages.map(m => ({ kind: 'msg'  as const, item: m })),
-        ]}
-        keyExtractor={(row, idx) => row.kind === 'chat' ? `c:${row.item.id}` : `m:${row.item.id}:${idx}`}
-        contentContainerStyle={{ paddingBottom: 40 }}
-        renderItem={({ item }) => item.kind === 'chat'
-          ? <ChatHitRow chat={item.item} authHeader={authHeader} onPress={() => openChat(item.item.id)} />
-          : <MessageHitRow msg={item.item}  onPress={() => openChat(item.item.chatId)} />}
-        ListHeaderComponent={hasAny ? () => (
-          <View style={S.sectionLabelWrap}>
-            <Text style={S.sectionLabel}>RESULTS</Text>
-          </View>
-        ) : null}
-      />
     </View>
   );
 }
 
-function ChatHitRow({
-  chat, authHeader, onPress,
-}: {
-  chat:        SearchChatHit;
-  authHeader:  string | null;
-  onPress:     () => void;
-}) {
-  const S = useS();
-  const letter = (chat.name?.trim()[0] ?? '#').toUpperCase();
-  return (
-    <TouchableOpacity style={S.row} onPress={onPress} activeOpacity={0.7}>
-      <View style={[S.avatar, chat.type === 'group' && S.avatarGroup]}>
-        {chat.photoURL && authHeader ? (
-          <Image
-            source={{ uri: attachmentUrl(chat.photoURL), headers: { Authorization: authHeader } }}
-            style={S.avatarImg}
-          />
-        ) : (
-          <Text style={S.avatarTxt}>{letter}</Text>
-        )}
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={S.rowTitle} numberOfLines={1}>{chat.name || (chat.type === 'group' ? 'Group' : 'Direct chat')}</Text>
-        <Text style={S.rowSub}>{chat.type === 'group' ? 'Group' : 'Direct'}</Text>
-      </View>
-    </TouchableOpacity>
-  );
-}
-
-function MessageHitRow({ msg, onPress }: { msg: SearchMessageHit; onPress: () => void }) {
-  const S = useS();
-  return (
-    <TouchableOpacity style={S.row} onPress={onPress} activeOpacity={0.7}>
-      <View style={S.msgIcon}><Text style={S.msgIconTxt}>💬</Text></View>
-      <View style={{ flex: 1 }}>
-        <Text style={S.rowTitle} numberOfLines={1}>{msg.chatName || (msg.chatType === 'group' ? 'Group' : 'Direct chat')}</Text>
-        <Text style={S.rowSub} numberOfLines={2}>{msg.snippet}</Text>
-      </View>
-    </TouchableOpacity>
-  );
-}
-
-
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen:        { flex: 1, backgroundColor: c.bg },
-  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
-  backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backTxt:       { color: c.text, fontSize: 26, fontWeight: '600' },
-  input:         { flex: 1, color: c.text, backgroundColor: c.card, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10, fontSize: 15 },
-  errorTxt:      { color: c.danger, paddingHorizontal: 16, paddingVertical: 8, fontSize: 12 },
-  empty:         { alignItems: 'center', paddingTop: 64, paddingHorizontal: 32 },
-  emptyTitle:    { color: c.text, fontSize: 16, fontWeight: '700' },
-  emptySub:      { color: c.textDim, fontSize: 13, marginTop: 6, textAlign: 'center' },
-
-  sectionLabelWrap: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 4 },
-  sectionLabel:     { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2 },
-
-  row:           { flexDirection: 'row', gap: 12, alignItems: 'center', paddingVertical: 12, paddingHorizontal: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
-  avatar:        { width: 44, height: 44, borderRadius: 22, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  avatarGroup:   { backgroundColor: '#22C55E' },
-  avatarImg:     { width: '100%', height: '100%' },
-  avatarTxt:     { color: '#fff', fontWeight: '700', fontSize: 17 },
-  msgIcon:       { width: 44, height: 44, borderRadius: 22, backgroundColor: '#1F2937', alignItems: 'center', justifyContent: 'center' },
-  msgIconTxt:    { fontSize: 18 },
-  rowTitle:      { color: c.text, fontSize: 15, fontWeight: '600' },
-  rowSub:        { color: c.textDim, fontSize: 12, marginTop: 2, lineHeight: 16 },
+  screen:     { flex: 1, backgroundColor: c.bg },
+  header:     { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  backBtn:    { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  backTxt:    { color: c.text, fontSize: 26, fontWeight: '600' },
+  input:      { flex: 1, color: c.text, backgroundColor: c.card, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10, fontSize: 15 },
+  empty:      { alignItems: 'center', paddingTop: 64, paddingHorizontal: 32 },
+  emptyTitle: { color: c.text, fontSize: 16, fontWeight: '700' },
+  emptySub:   { color: c.textDim, fontSize: 13, marginTop: 6, textAlign: 'center' },
+  row:        { flexDirection: 'row', gap: 12, alignItems: 'center', paddingVertical: 12, paddingHorizontal: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  rowTitle:   { color: c.text, fontSize: 15, fontWeight: '600' },
+  rowSub:     { color: c.textDim, fontSize: 12, marginTop: 2 },
 });

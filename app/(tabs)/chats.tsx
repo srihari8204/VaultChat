@@ -50,9 +50,6 @@ export default function ChatsScreen() {
   const [folder, setFolder] = useState<FolderId>('all');
   const [drafts, setDrafts] = useState<Record<string, string>>({});
 
-  // Refresh draft previews whenever the list regains focus (e.g. back from a chat).
-  useFocusEffect(useCallback(() => { getDraftMap().then(setDrafts).catch(() => {}); }, []));
-
   useEffect(() => {
     let cancel = false;
     (async () => {
@@ -73,6 +70,13 @@ export default function ChatsScreen() {
   }, []);
 
   useEffect(() => { (async () => { setLoading(true); await fetchList(); setLoading(false); })(); }, [fetchList]);
+
+  // Refresh the list (so unread counts clear after reading) + draft previews
+  // whenever the screen regains focus — e.g. coming back from a chat.
+  useFocusEffect(useCallback(() => {
+    fetchList();
+    getDraftMap().then(setDrafts).catch(() => {});
+  }, [fetchList]));
   useEffect(() => { registerPushToken().catch(() => {}); }, []);
 
   // Realtime: new messages refresh the list; presence patches in place.
@@ -185,7 +189,7 @@ export default function ChatsScreen() {
 
       {error && <View style={S.errorBar}><Text style={S.errorTxt}>{error}</Text></View>}
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={S.folderRow}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={S.folderScroll} contentContainerStyle={S.folderRow}>
         {FOLDERS.map(f => {
           const count = f.id === 'unread' ? chats.filter(c => !c.archived && c.unreadCount > 0).length
             : f.id === 'pinned' ? chats.filter(c => !c.archived && c.pinned).length
@@ -350,7 +354,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   emptyBtn: { backgroundColor: c.primary, paddingHorizontal: 28, paddingVertical: 12, borderRadius: 24 },
   emptyBtnTxt: { color: '#04130D', fontWeight: '800', fontSize: 14 },
 
-  folderRow: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 8, gap: 8 },
+  folderScroll: { flexGrow: 0, maxHeight: 50 },   // keep the chip row compact, never stretch vertically
+  folderRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8, gap: 8 },
   folderChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 18, backgroundColor: c.surface, borderWidth: 1, borderColor: c.border },
   folderChipActive: { backgroundColor: c.primary, borderColor: c.primary },
   folderTxt: { color: c.textDim, fontSize: 13, fontWeight: '600' },
