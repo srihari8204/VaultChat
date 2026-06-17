@@ -54,6 +54,10 @@ export default function MpinEntry() {
 
         {busy && <ActivityIndicator color={colors.primary} />}
         {!!error && <Text style={s.error}>{error}</Text>}
+
+        <TouchableOpacity onPress={() => router.push({ pathname: '/mpin-recover', params: { userId } } as any)} style={{ marginTop: 24 }}>
+          <Text style={s.forgot}>Forgot MPIN?</Text>
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -68,4 +72,5 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   title: { color: c.text, fontSize: 24, fontWeight: '900' },
   sub: { color: c.textDim, fontSize: 14, marginTop: 8 },
   error: { color: c.danger, fontSize: 13, marginTop: 14, textAlign: 'center', fontWeight: '600' },
+  forgot: { color: c.primary, fontSize: 14, fontWeight: '700' },
 });

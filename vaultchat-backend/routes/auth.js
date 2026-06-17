@@ -734,6 +734,74 @@ router.post('/mpin/verify', async (req, res) => {
   }
 });
 
+// GET /auth/security-questions/:userId — the user's chosen question codes (no
+// answers) so the recovery screen can show them. (userId is known from /lookup.)
+router.get('/security-questions/:userId', async (req, res) => {
+  try {
+    const r = await db.query(
+      `SELECT question_code FROM user_security_questions WHERE user_id = $1 ORDER BY created_at`,
+      [req.params.userId],
+    );
+    return res.json({ questions: r.rows.map(x => x.question_code) });
+  } catch (err) {
+    console.error('[auth/security-questions GET]', err.message);
+    return envErr(res, 500, 'server_error', 'Could not load questions');
+  }
+});
+
+// POST /auth/security-questions/verify — recovery: ≥3 correct answers → ticket.
+router.post('/security-questions/verify', async (req, res) => {
+  try {
+    const userId  = (req.body?.userId || '').toString();
+    const answers = Array.isArray(req.body?.answers) ? req.body.answers : null;
+    if (!userId || !answers || !answers.length) return envErr(res, 400, 'bad_request', 'answers required');
+
+    const gate = await rateLimit.consume(`recover:${userId}`, 5, 900);
+    if (!gate.allowed) return envErr(res, 423, 'locked', `Too many attempts. Try again in ${gate.resetInSec || 900}s`);
+
+    const rows = (await db.query(
+      `SELECT question_code, answer_hash FROM user_security_questions WHERE user_id = $1`, [userId],
+    )).rows;
+    const byCode = new Map(rows.map(x => [x.question_code, x.answer_hash]));
+    let correct = 0;
+    for (const a of answers) {
+      const h = byCode.get((a?.questionCode || '').toString());
+      if (h && await vault.verifySecret(vault.normalizeAnswer(a?.answer), h)) correct++;
+    }
+    const ok = correct >= 3;
+    await auditAttempt(userId, req.ip, 'recover', ok);
+    if (!ok) return envErr(res, 401, 'insufficient_answers', `Need at least 3 correct answers (got ${correct})`);
+    await rateLimit.reset(`recover:${userId}`);
+    return res.json({ ok: true, recoveryTicket: vault.signTicket(`recover:${userId}`) });
+  } catch (err) {
+    console.error('[auth/security-questions/verify]', err.message);
+    return envErr(res, 500, 'server_error', 'Verification failed');
+  }
+});
+
+// POST /auth/mpin/recover — set a new MPIN using a valid recovery ticket → JWTs.
+router.post('/mpin/recover', async (req, res) => {
+  try {
+    const userId = (req.body?.userId || '').toString();
+    const ticket = (req.body?.recoveryTicket || '').toString();
+    const mpin   = (req.body?.mpin || '').toString();
+    if (!userId) return envErr(res, 400, 'bad_request', 'userId required');
+    if (!vault.verifyTicket(ticket, `recover:${userId}`)) return envErr(res, 401, 'not_verified', 'Answer your security questions first');
+    if (isWeakMpin(mpin)) return envErr(res, 400, 'weak_mpin', 'Choose a less predictable MPIN');
+
+    const u = await db.query(`SELECT * FROM users WHERE id = $1 AND is_deleted = FALSE`, [userId]);
+    if (!u.rows[0]) return envErr(res, 404, 'not_found', 'User not found');
+
+    await db.query(`UPDATE users SET mpin_hash = $1, updated_at = NOW() WHERE id = $2`, [await vault.hashSecret(mpin), userId]);
+    await rateLimit.reset(`mpin:${userId}`);          // clear any verify-lockout
+    const tokens = await issueTokens(u.rows[0], req);
+    return res.json(tokens);
+  } catch (err) {
+    console.error('[auth/mpin/recover]', err.message);
+    return envErr(res, 500, 'server_error', 'Could not reset MPIN');
+  }
+});
+
 // POST /auth/mfa/configure — (JWT) toggle device-MFA flag.
 router.post('/mfa/configure', jwtUtil.requireAuth, async (req, res) => {
   try {

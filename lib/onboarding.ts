@@ -116,4 +116,25 @@ export async function configureMfa(enabled: boolean): Promise<void> {
   await api('/auth/mfa/configure', { method: 'POST', json: { mfaEnabled: enabled } });
 }
 
+// ── MPIN recovery (forgot MPIN → security questions) ────────────────────────
+export async function getRecoveryQuestions(userId: string): Promise<string[]> {
+  const r = await api<{ questions: string[] }>(`/auth/security-questions/${encodeURIComponent(userId)}`, { auth: false });
+  return r.questions;
+}
+
+export async function verifyRecoveryAnswers(userId: string, answers: { questionCode: string; answer: string }[]): Promise<string> {
+  const r = await api<{ ok: true; recoveryTicket: string }>('/auth/security-questions/verify', {
+    method: 'POST', json: { userId, answers }, auth: false,
+  });
+  return r.recoveryTicket;
+}
+
+export async function recoverMpin(userId: string, recoveryTicket: string, mpin: string): Promise<void> {
+  const r = await api<{ accessToken: string; refreshToken: string }>('/auth/mpin/recover', {
+    method: 'POST', json: { userId, recoveryTicket, mpin }, auth: false,
+  });
+  await setTokens(r.accessToken, r.refreshToken);
+  await setCachedUser({ id: userId });
+}
+
 export { msg as onboardingError };
