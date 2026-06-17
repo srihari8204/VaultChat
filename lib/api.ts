@@ -168,7 +168,20 @@ async function rawFetch(path: string, opts: ApiOptions): Promise<Response> {
   return fetch(url, { ...init, headers, body });
 }
 
-async function tryRefresh(): Promise<boolean> {
+// Refresh tokens ROTATE (single-use): the server revokes the presented token and
+// issues a new pair. So when a dozen requests 401 at once on app resume (access
+// token expired), they must NOT each fire their own /auth/refresh — the first
+// rotates the token and the rest would present the now-revoked one and get logged
+// out. All concurrent callers therefore share ONE in-flight refresh.
+let refreshInFlight: Promise<boolean> | null = null;
+function tryRefresh(): Promise<boolean> {
+  if (!refreshInFlight) {
+    refreshInFlight = doRefresh().finally(() => { refreshInFlight = null; });
+  }
+  return refreshInFlight;
+}
+
+async function doRefresh(): Promise<boolean> {
   const refresh = await getRefreshToken();
   if (!refresh) return false;
   try {
