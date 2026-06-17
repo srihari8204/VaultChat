@@ -24,22 +24,14 @@ import {
 } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
+import { listChats } from '../lib/chatService';
+import {
+  getAllLocks, setChatLock, removeChatLock, verifyBiometric, hasBiometric,
+  type LockedChat, type LockMethod, type AutoLockTimer,
+} from '../lib/chatLock';
 
 
 const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
-const STORAGE_KEY = 'vc_locked_chats';
-
-type LockMethod = 'biometric' | 'pin' | 'both';
-type AutoLockTimer = 0 | 60 | 300; // 0=immediately, 60=1min, 300=5min
-
-interface LockedChat {
-  chatId: string;
-  chatName: string;
-  locked: boolean;
-  lockMethod: LockMethod;
-  autoLockTimer: AutoLockTimer;
-  pin?: string;
-}
 
 interface ChatItem {
   id: string;
@@ -47,16 +39,6 @@ interface ChatItem {
   avatar?: string;
   lastMessage?: string;
 }
-
-// Demo chats for display
-const DEMO_CHATS: ChatItem[] = [
-  { id: 'c1', name: 'Alice', lastMessage: 'See you tomorrow!' },
-  { id: 'c2', name: 'Bob', lastMessage: 'Got the files, thanks' },
-  { id: 'c3', name: 'Team Vault', lastMessage: 'Meeting at 3pm' },
-  { id: 'c4', name: 'Mom', lastMessage: 'Call me when you can' },
-  { id: 'c5', name: 'Dave', lastMessage: 'Check this out' },
-  { id: 'c6', name: 'Work Group', lastMessage: 'Deadline extended' },
-];
 
 const AUTO_LOCK_OPTIONS: { label: string; value: AutoLockTimer }[] = [
   { label: 'Immediately', value: 0 },
@@ -80,10 +62,11 @@ export default function AppLockChatsScreen() {
   const s = useS();
   const router = useRouter();
 
+  const [chats, setChats] = useState<ChatItem[]>([]);
   const [lockedChats, setLockedChats] = useState<Record<string, LockedChat>>({});
   const [configChat, setConfigChat] = useState<string | null>(null);
   const [pinInput, setPinInput] = useState('');
-  const [, setHasBiometric] = useState(false);
+  const [bioAvailable, setBioAvailable] = useState(false);
   const [configMethod, setConfigMethod] = useState<LockMethod>('biometric');
   const [configTimer, setConfigTimer] = useState<AutoLockTimer>(0);
 
@@ -91,61 +74,33 @@ export default function AppLockChatsScreen() {
 
   useEffect(() => {
     Animated.timing(fadeIn, { toValue: 1, duration: 400, useNativeDriver: true }).start();
-    loadSettings();
-    checkBiometric();
+    (async () => {
+      setBioAvailable(await hasBiometric());
+      setLockedChats(await getAllLocks());
+      try {
+        const list = await listChats();
+        setChats(list.map(c => ({ id: c.id, name: c.name || c.peerName || 'Chat' })));
+      } catch {}
+    })();
   }, [fadeIn]);
 
-  const checkBiometric = async () => {
-    if (Platform.OS === 'web') { setHasBiometric(false); return; }
-    try {
-      const compatible = await LocalAuthentication.hasHardwareAsync();
-      const enrolled = await LocalAuthentication.isEnrolledAsync();
-      setHasBiometric(compatible && enrolled);
-    } catch {
-      setHasBiometric(false);
-    }
-  };
-
-  const loadSettings = async () => {
-    try {
-      const raw = await AsyncStorage.getItem(STORAGE_KEY);
-      if (raw) setLockedChats(JSON.parse(raw));
-    } catch {}
-  };
-
-  const saveSettings = async (data: Record<string, LockedChat>) => {
-    setLockedChats(data);
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  };
+  const reloadLocks = async () => setLockedChats(await getAllLocks());
 
   const toggleLock = async (chat: ChatItem) => {
     const existing = lockedChats[chat.id];
     if (existing?.locked) {
-      // Verify before unlocking
-      const success = await verifyAuth(existing);
-      if (!success) return;
-      const updated = { ...lockedChats };
-      delete updated[chat.id];
-      await saveSettings(updated);
+      // Verify before unlocking. Biometric is required when the device has it
+      // enrolled; PIN-only locks are still enforced at the chat gate on open.
+      const ok = bioAvailable ? await verifyBiometric('Verify to unlock this chat') : true;
+      if (!ok) return;
+      await removeChatLock(chat.id);
+      await reloadLocks();
     } else {
-      // Enable lock — show config
       const ex = lockedChats[chat.id];
-      setConfigMethod(ex?.lockMethod || 'biometric');
+      setConfigMethod(ex?.lockMethod || (bioAvailable ? 'biometric' : 'pin'));
       setConfigTimer(ex?.autoLockTimer || 0);
       setConfigChat(chat.id);
     }
-  };
-
-  const verifyAuth = async (config: LockedChat): Promise<boolean> => {
-    if (Platform.OS === 'web') return true;
-    if (config.lockMethod === 'biometric' || config.lockMethod === 'both') {
-      const result = await LocalAuthentication.authenticateAsync({
-        promptMessage: 'Verify to unlock chat',
-        fallbackLabel: 'Use PIN',
-      });
-      if (!result.success) return false;
-    }
-    return true;
   };
 
   const confirmLockSetup = async (chatId: string, method: LockMethod, timer: AutoLockTimer, pin?: string) => {
@@ -153,19 +108,9 @@ export default function AppLockChatsScreen() {
       Alert.alert('Invalid PIN', 'PIN must be at least 4 digits.');
       return;
     }
-
-    const chat = DEMO_CHATS.find(c => c.id === chatId);
-    const entry: LockedChat = {
-      chatId,
-      chatName: chat?.name || 'Chat',
-      locked: true,
-      lockMethod: method,
-      autoLockTimer: timer,
-      pin: pin || undefined,
-    };
-
-    const updated = { ...lockedChats, [chatId]: entry };
-    await saveSettings(updated);
+    const chat = chats.find(c => c.id === chatId);
+    await setChatLock(chatId, chat?.name || 'Chat', method, timer, pin);
+    await reloadLocks();
     setConfigChat(null);
     setPinInput('');
   };
@@ -173,7 +118,7 @@ export default function AppLockChatsScreen() {
   // ── Config modal for a chat ──
   const renderConfigPanel = () => {
     if (!configChat) return null;
-    const chat = DEMO_CHATS.find(c => c.id === configChat);
+    const chat = chats.find(c => c.id === configChat);
     const method = configMethod;
     const setMethod = setConfigMethod;
     const timer = configTimer;
@@ -330,11 +275,12 @@ export default function AppLockChatsScreen() {
 
         {/* Chat list */}
         <FlatList
-          data={DEMO_CHATS}
+          data={chats}
           keyExtractor={c => c.id}
           renderItem={renderChatItem}
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 40 }}
           ItemSeparatorComponent={() => <View style={{ height: 2 }} />}
+          ListEmptyComponent={<Text style={{ color: colors.textDim, textAlign: 'center', marginTop: 40 }}>No chats yet</Text>}
         />
       </Animated.View>
 

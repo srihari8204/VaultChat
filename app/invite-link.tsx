@@ -6,9 +6,10 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, FlatList, Alert, Share, StatusBar, ActivityIndicator,
+  View, Text, TouchableOpacity, StyleSheet, FlatList, Alert, Share, StatusBar, ActivityIndicator, Modal,
 } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
+import QRCode from 'react-native-qrcode-svg';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
@@ -36,6 +37,7 @@ export default function InviteLinkScreen() {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [qrCode, setQrCode] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!chatId) { setLoading(false); return; }
@@ -143,6 +145,7 @@ export default function InviteLinkScreen() {
                   <View style={s.linkBtns}>
                     <TouchableOpacity style={s.linkBtn} onPress={() => copyLink(item.code)}><Text style={s.linkBtnTxt}>Copy</Text></TouchableOpacity>
                     <TouchableOpacity style={s.linkBtn} onPress={() => shareLink(item.code)}><Text style={s.linkBtnTxt}>Share</Text></TouchableOpacity>
+                    <TouchableOpacity style={s.linkBtn} onPress={() => setQrCode(item.code)}><Text style={s.linkBtnTxt}>QR</Text></TouchableOpacity>
                     <TouchableOpacity style={[s.linkBtn, { borderColor: 'rgba(239,68,68,0.4)' }]} onPress={() => revoke(item)}>
                       <Text style={[s.linkBtnTxt, { color: colors.danger }]}>Revoke</Text>
                     </TouchableOpacity>
@@ -154,6 +157,22 @@ export default function InviteLinkScreen() {
           />
         )}
       </View>
+
+      {/* QR for an invite link — scannable from the other device's camera */}
+      <Modal visible={qrCode != null} transparent animationType="fade" onRequestClose={() => setQrCode(null)}>
+        <View style={s.qrBackdrop}>
+          <View style={s.qrCard}>
+            <Text style={s.qrTitle}>Scan to join {groupName || 'group'}</Text>
+            <View style={s.qrBox}>
+              {qrCode && <QRCode value={JOIN_BASE + qrCode} size={220} backgroundColor="#FFFFFF" color="#0A0A0F" />}
+            </View>
+            <Text style={s.qrCode} numberOfLines={1}>vaultchat.app/join/{qrCode}</Text>
+            <TouchableOpacity style={s.qrClose} onPress={() => setQrCode(null)}>
+              <Text style={s.qrCloseTxt}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -180,4 +199,11 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   linkBtn: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(6,182,212,0.4)' },
   linkBtnTxt: { color: c.accent, fontSize: 11, fontWeight: '700' },
   empty: { color: c.textDim, fontSize: 13 },
+  qrBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  qrCard: { backgroundColor: c.card, borderRadius: 24, padding: 24, alignItems: 'center', width: '100%', maxWidth: 320, borderWidth: 1, borderColor: c.border },
+  qrTitle: { color: c.text, fontSize: 16, fontWeight: '800', marginBottom: 16, textAlign: 'center' },
+  qrBox: { backgroundColor: '#FFFFFF', padding: 16, borderRadius: 16 },
+  qrCode: { color: c.textDim, fontSize: 12, fontFamily: 'monospace', marginTop: 16 },
+  qrClose: { marginTop: 20, paddingVertical: 12, paddingHorizontal: 40, borderRadius: 14, backgroundColor: c.primary },
+  qrCloseTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
 });

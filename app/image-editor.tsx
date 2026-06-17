@@ -40,7 +40,7 @@ export default function ImageEditorScreen() {
   const { colors } = useTheme();
   const styles = useS();
   const router = useRouter();
-  const { uri } = useLocalSearchParams<{ uri: string }>();
+  const { uri, chatId, returnTo } = useLocalSearchParams<{ uri: string; chatId?: string; returnTo?: string }>();
   const viewShotRef = useRef<any>(null);
 
   // Image state
@@ -217,11 +217,12 @@ export default function ImageEditorScreen() {
         finalUri = result.uri;
       }
 
-      router.back();
-      // Pass the edited URI back via global event or params
-      if (router.canGoBack()) {
-        router.setParams({ editedUri: finalUri });
-      }
+      // Hand the edited image back to the chat via the shared capturedUri
+      // contract so it's actually sent (a prior router.back()+setParams lost it).
+      router.replace({
+        pathname: (returnTo || '/chat') as any,
+        params: { chatId, capturedUri: finalUri, capturedType: 'image' },
+      });
     } catch {
       Alert.alert('Error', 'Failed to save edited image');
     }

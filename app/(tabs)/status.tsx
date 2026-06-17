@@ -92,9 +92,8 @@ export default function StatusScreen() {
     setRefreshing(false);
   }, [load]);
 
-  // ── Create a new story ────────────────────────────────────
-  // Photo only for the MVP — videos add a Video<>RTCView size dance we
-  // can address in round 2. Server already accepts mediaType:'video'.
+  // ── Create a new story (photo or video) ───────────────────
+  // The viewer plays video stories; the server already accepts mediaType:'video'.
   const onAddStory = useCallback(async () => {
     if (posting) return;
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -103,27 +102,30 @@ export default function StatusScreen() {
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
+      mediaTypes: ['images', 'videos'],
       quality: 0.7,
       allowsEditing: false,
+      videoMaxDuration: 30,
     });
     if (result.canceled || !result.assets?.[0]) return;
     const asset = result.assets[0];
+    const isVideo = asset.type === 'video';
+    const mediaType: 'image' | 'video' = isVideo ? 'video' : 'image';
 
     setPosting(true);
     try {
-      const filename = asset.fileName || `story-${Date.now()}.jpg`;
-      const mime     = asset.mimeType || 'image/jpeg';
+      const filename = asset.fileName || (isVideo ? `story-${Date.now()}.mp4` : `story-${Date.now()}.jpg`);
+      const mime     = asset.mimeType || (isVideo ? 'video/mp4' : 'image/jpeg');
 
       if (STORY_E2EE && E2EE_ENABLED) {
         // Encrypt the media once, then wrap its key per authorized viewer.
         const { attachmentId, mediaKey } = await uploadEncryptedAttachment(asset.uri, filename, mime);
         const viewerIds = await getStoryAudience();
         const keys = await wrapStoryKeyForViewers(viewerIds, mediaKey);
-        await addEncryptedStory(attachmentId, 'image', keys);
+        await addEncryptedStory(attachmentId, mediaType, keys);
       } else {
         const up = await uploadAttachment(asset.uri, filename, mime);
-        await addStory(up.id, 'image');
+        await addStory(up.id, mediaType);
       }
       await load();
     } catch (e: any) {

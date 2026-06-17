@@ -259,6 +259,36 @@ export default function GroupInfoScreen() {
         </TouchableOpacity>
       )}
 
+      {isAdmin && (
+        <View style={S.section}>
+          <Text style={S.label}>ADMIN</Text>
+          <TouchableOpacity
+            style={S.navRow}
+            activeOpacity={0.7}
+            onPress={() => router.push({ pathname: '/group-admin', params: { chatId: chat.id, groupName: chat.name ?? '' } } as any)}
+          >
+            <Text style={S.navIcon}>🛡️</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={S.navTitle}>Group settings & permissions</Text>
+              <Text style={S.navSub}>Roles, slow mode, who can send, join requests</Text>
+            </View>
+            <Text style={S.navChevron}>›</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={S.navRow}
+            activeOpacity={0.7}
+            onPress={() => router.push({ pathname: '/invite-link', params: { chatId: chat.id, groupName: chat.name ?? '' } } as any)}
+          >
+            <Text style={S.navIcon}>🔗</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={S.navTitle}>Invite links</Text>
+              <Text style={S.navSub}>Create & share links to invite people</Text>
+            </View>
+            <Text style={S.navChevron}>›</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       <View style={S.section}>
         <Text style={S.label}>MEMBERS</Text>
         <FlatList
@@ -361,6 +391,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   section:       { paddingHorizontal: 16, marginTop: 16 },
   label:         { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 8 },
+
+  navRow:        { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  navIcon:       { fontSize: 20, width: 28, textAlign: 'center' },
+  navTitle:      { color: c.text, fontSize: 15, fontWeight: '600' },
+  navSub:        { color: c.textDim, fontSize: 12, marginTop: 2 },
+  navChevron:    { color: c.textDim, fontSize: 22, fontWeight: '300' },
 
   memberRow:     { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   memberAvatarWrap: { width: 44, height: 44 },

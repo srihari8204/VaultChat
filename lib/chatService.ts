@@ -97,7 +97,7 @@ export interface ChatDetail extends ChatSummary {
 
 /** Pin a message chat-wide (messageId = null clears the pin). */
 export async function pinMessage(chatId: string, messageId: string | number | null): Promise<void> {
-  await api(`/chats/${encodeURIComponent(chatId)}/pin`, {
+  await api(`/chats/${encodeURIComponent(chatId)}/pin-message`, {
     method: 'POST',
     json: { messageId: messageId == null ? null : Number(messageId) },
   });

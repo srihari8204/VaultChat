@@ -85,9 +85,15 @@ router.post('/assist', async (req, res) => {
   try {
     const task = (req.body?.task || '').toString();
     const text = (req.body?.text || '').toString().slice(0, 4000).trim();
-    const instruction = TASKS[task];
+    let instruction = TASKS[task];
     if (!instruction) return res.status(400).json({ error: 'unknown task' });
     if (!text) return res.status(400).json({ error: 'text required' });
+
+    // Translate accepts an optional target language (e.g. "Spanish", "Hindi").
+    if (task === 'translate') {
+      const lang = (req.body?.lang || '').toString().replace(/[^a-zA-Z \-]/g, '').slice(0, 40).trim();
+      if (lang) instruction = `Translate the following text to ${lang}. Return only the translation, nothing else:`;
+    }
 
     const j = await ollama('/api/generate', { prompt: `${instruction}\n\n${text}` });
     res.json({ result: (j.response || '').trim() });

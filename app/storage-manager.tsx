@@ -1,41 +1,72 @@
-// app/storage-manager.tsx — Storage Manager
-// View storage breakdown, manage cache, auto-download & quality settings
+// app/storage-manager.tsx — Storage Manager (real on-disk usage).
+//
+// Walks the app's document + cache directories and sums real file sizes,
+// bucketed by type. Free space comes from the OS. "Clear cache" really deletes
+// cached files; "Delete old media" deletes cache files older than N days by
+// their real modification time. No fabricated sizes, no hardcoded chat list,
+// and no auto-download/quality toggles that nothing enforced.
 
-import React, { useState, useEffect , useMemo} from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  StatusBar, Platform, Alert, ActivityIndicator, Switch,
+  StatusBar, Platform, Alert, ActivityIndicator,
 } from 'react-native';
+import * as FileSystem from 'expo-file-system/legacy';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { Stack, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 
 const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
 
-
-const STORAGE_KEY = 'vc_storage_settings';
-
 type Category = { label: string; size: number; color: string; icon: string };
 
-const DEFAULT_SETTINGS = {
-  autoDownload: 'wifi', // wifi | wifi_mobile | never
-  photoQuality: 'standard', // original | standard | low
-  videoQuality: 'standard',
-  autoDownloadImages: true,
-  autoDownloadVideos: false,
-  autoDownloadAudio: true,
-  autoDownloadFiles: false,
-};
-
 function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
+  if (!bytes || bytes < 1) return '0 B';
   const k = 1024;
   const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1);
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+const EXT = {
+  img: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'bmp'],
+  vid: ['mp4', 'mov', 'mkv', 'webm', 'avi', 'm4v'],
+  aud: ['m4a', 'mp3', 'wav', 'aac', 'ogg', 'opus'],
+  file: ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'zip', 'enc'],
+};
+
+// Recursively walk a directory, accumulating bytes per bucket. Optionally delete
+// files older than `olderThan` (epoch seconds) instead of measuring.
+async function walk(
+  dir: string,
+  acc: Record<string, number>,
+  olderThan?: number,
+): Promise<void> {
+  let names: string[] = [];
+  try { names = await FileSystem.readDirectoryAsync(dir); } catch { return; }
+  for (const name of names) {
+    const uri = dir + (dir.endsWith('/') ? '' : '/') + name;
+    let info: any;
+    try { info = await FileSystem.getInfoAsync(uri); } catch { continue; }
+    if (!info?.exists) continue;
+    if (info.isDirectory) { await walk(uri, acc, olderThan); continue; }
+    if (olderThan != null) {
+      if (info.modificationTime && info.modificationTime < olderThan) {
+        await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+      }
+      continue;
+    }
+    const size = info.size ?? 0;
+    const ext = name.toLowerCase().split('.').pop() || '';
+    if (EXT.img.includes(ext)) acc.img += size;
+    else if (EXT.vid.includes(ext)) acc.vid += size;
+    else if (EXT.aud.includes(ext)) acc.aud += size;
+    else if (EXT.file.includes(ext)) acc.file += size;
+    else acc.other += size;
+  }
 }
 
 function useS() {
@@ -52,74 +83,36 @@ export default function StorageManagerScreen() {
   const [totalUsed, setTotalUsed] = useState(0);
   const [freeSpace, setFreeSpace] = useState(0);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [chatStorages, setChatStorages] = useState<{ name: string; size: number }[]>([]);
-  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
-  const [deleteMediaDays, setDeleteMediaDays] = useState<number | null>(null);
 
-  useEffect(() => {
-    loadStorageData();
-    loadSettings();
-  }, []);
-
-  const loadSettings = async () => {
-    try {
-      const raw = await AsyncStorage.getItem(STORAGE_KEY);
-      if (raw) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(raw) });
-    } catch {}
-  };
-
-  const saveSettings = async (updated: typeof settings) => {
-    setSettings(updated);
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-  };
+  useEffect(() => { loadStorageData(); }, []);
 
   const loadStorageData = async () => {
+    setLoading(true);
     try {
-      // Calculate AsyncStorage usage
-      const keys = await AsyncStorage.getAllKeys();
-      const pairs = await AsyncStorage.multiGet(keys);
+      const acc: Record<string, number> = { img: 0, vid: 0, aud: 0, file: 0, other: 0 };
+      if (FileSystem.documentDirectory) await walk(FileSystem.documentDirectory, acc);
+      if (FileSystem.cacheDirectory) await walk(FileSystem.cacheDirectory, acc);
 
-      // Simulate category breakdown based on key prefixes
-      let imgSize = 0, vidSize = 0, audSize = 0, fileSize = 0, otherSize = 0;
-      for (const [k, v] of pairs) {
-        const size = (k?.length ?? 0) + (v?.length ?? 0);
-        if (k?.includes('image') || k?.includes('photo') || k?.includes('img')) imgSize += size;
-        else if (k?.includes('video') || k?.includes('vid')) vidSize += size;
-        else if (k?.includes('audio') || k?.includes('voice') || k?.includes('recording')) audSize += size;
-        else if (k?.includes('file') || k?.includes('doc') || k?.includes('pdf')) fileSize += size;
-        else otherSize += size;
-      }
+      // App key/value data (AsyncStorage) counts toward "Other".
+      try {
+        const keys = await AsyncStorage.getAllKeys();
+        const pairs = await AsyncStorage.multiGet(keys);
+        for (const [k, v] of pairs) acc.other += (k?.length ?? 0) + (v?.length ?? 0);
+      } catch {}
 
-      // Add simulated cache sizes for realistic display
-      imgSize += 12_400_000;
-      vidSize += 45_800_000;
-      audSize += 3_200_000;
-      fileSize += 8_600_000;
-      otherSize += 2_100_000;
-
-      const total = imgSize + vidSize + audSize + fileSize + otherSize;
-
+      const total = acc.img + acc.vid + acc.aud + acc.file + acc.other;
       setCategories([
-        { label: 'Images', size: imgSize, color: colors.primary, icon: 'image-outline' },
-        { label: 'Videos', size: vidSize, color: colors.accent, icon: 'videocam-outline' },
-        { label: 'Audio', size: audSize, color: colors.purple, icon: 'musical-notes-outline' },
-        { label: 'Files', size: fileSize, color: '#FF9F43', icon: 'document-outline' },
-        { label: 'Other', size: otherSize, color: colors.textDim, icon: 'ellipsis-horizontal-outline' },
+        { label: 'Images', size: acc.img, color: colors.primary, icon: 'image-outline' },
+        { label: 'Videos', size: acc.vid, color: colors.accent, icon: 'videocam-outline' },
+        { label: 'Audio', size: acc.aud, color: colors.purple, icon: 'musical-notes-outline' },
+        { label: 'Files', size: acc.file, color: '#FF9F43', icon: 'document-outline' },
+        { label: 'Other', size: acc.other, color: colors.textDim, icon: 'ellipsis-horizontal-outline' },
       ]);
       setTotalUsed(total);
-      setFreeSpace(4_200_000_000); // Simulated free space
 
-      // Simulate per-chat storage
-      const chats = [
-        { name: 'Alice Chen', size: 18_500_000 },
-        { name: 'Dev Team Group', size: 32_100_000 },
-        { name: 'Bob Martinez', size: 5_400_000 },
-        { name: 'Family Group', size: 12_800_000 },
-        { name: 'Sarah K.', size: 3_200_000 },
-      ].sort((a, b) => b.size - a.size);
-      setChatStorages(chats);
-
-    } catch (e) {
+      try { setFreeSpace(await FileSystem.getFreeDiskStorageAsync()); } catch { setFreeSpace(0); }
+    } catch {
+      /* leave zeros */
     } finally {
       setLoading(false);
     }
@@ -128,18 +121,22 @@ export default function StorageManagerScreen() {
   const clearCache = () => {
     Alert.alert(
       'Clear Cache',
-      'This will clear cached thumbnails and temporary files. Your messages and media will not be deleted.',
+      'This deletes cached files (thumbnails, downloaded previews, temporary files). Your messages and saved media are not affected.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Clear', style: 'destructive', onPress: async () => {
             setClearing(true);
             try {
-              const keys = await AsyncStorage.getAllKeys();
-              const cacheKeys = keys.filter(k => k.includes('cache') || k.includes('thumb') || k.includes('temp'));
-              if (cacheKeys.length > 0) await AsyncStorage.multiRemove(cacheKeys);
-              Alert.alert('Done', 'Cache cleared successfully.');
-              loadStorageData();
+              const dir = FileSystem.cacheDirectory;
+              if (dir) {
+                const names = await FileSystem.readDirectoryAsync(dir).catch(() => [] as string[]);
+                for (const n of names) {
+                  await FileSystem.deleteAsync(dir + n, { idempotent: true }).catch(() => {});
+                }
+              }
+              Alert.alert('Done', 'Cache cleared.');
+              await loadStorageData();
             } catch {
               Alert.alert('Error', 'Failed to clear cache.');
             } finally {
@@ -147,56 +144,43 @@ export default function StorageManagerScreen() {
             }
           },
         },
-      ]
+      ],
     );
   };
 
   const deleteOldMedia = (days: number) => {
     Alert.alert(
-      'Delete Old Media',
-      `Delete all cached media older than ${days} days? This cannot be undone.`,
+      'Delete Old Cached Media',
+      `Delete cached files older than ${days} days? Saved media in chats is not affected.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete', style: 'destructive', onPress: async () => {
             setClearing(true);
             try {
-              // In a real app, filter by timestamp
-              const keys = await AsyncStorage.getAllKeys();
-              const mediaKeys = keys.filter(k =>
-                k.includes('image') || k.includes('video') || k.includes('audio')
-              );
-              if (mediaKeys.length > 0) await AsyncStorage.multiRemove(mediaKeys);
-              Alert.alert('Done', `Media older than ${days} days has been deleted.`);
-              loadStorageData();
+              const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
+              if (FileSystem.cacheDirectory) await walk(FileSystem.cacheDirectory, {}, cutoff);
+              Alert.alert('Done', `Removed cached files older than ${days} days.`);
+              await loadStorageData();
             } catch {
               Alert.alert('Error', 'Failed to delete old media.');
             } finally {
               setClearing(false);
-              setDeleteMediaDays(null);
             }
           },
         },
-      ]
+      ],
     );
   };
 
   const maxCatSize = Math.max(...categories.map(c => c.size), 1);
-
-  const RadioRow = ({ label, value, current, onPress }: any) => (
-    <TouchableOpacity style={s.radioRow} onPress={() => onPress(value)} activeOpacity={0.7}>
-      <View style={[s.radioOuter, current === value && s.radioOuterActive]}>
-        {current === value && <View style={s.radioInner} />}
-      </View>
-      <Text style={s.radioLabel}>{label}</Text>
-    </TouchableOpacity>
-  );
 
   if (loading) {
     return (
       <View style={s.loadingWrap}>
         <Stack.Screen options={{ headerShown: false }} />
         <ActivityIndicator size="large" color={colors.accent} />
+        <Text style={{ color: colors.textDim, marginTop: 12 }}>Measuring storage…</Text>
       </View>
     );
   }
@@ -218,25 +202,29 @@ export default function StorageManagerScreen() {
 
       <ScrollView style={s.scroll} contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
 
-        {/* ── Total Storage Card ─────────────────────── */}
+        {/* Total */}
         <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.storageHeader}>
             <Ionicons name="pie-chart-outline" size={28} color={colors.accent} />
             <View style={{ marginLeft: 12, flex: 1 }}>
-              <Text style={s.cardTitle}>Total Storage Used</Text>
+              <Text style={s.cardTitle}>VaultChat Storage Used</Text>
               <Text style={s.storageBig}>{formatBytes(totalUsed)}</Text>
             </View>
           </View>
-          <View style={s.freeRow}>
-            <Ionicons name="cloud-done-outline" size={16} color={colors.primary} />
-            <Text style={s.freeText}>{formatBytes(freeSpace)} free on device</Text>
-          </View>
+          {freeSpace > 0 && (
+            <View style={s.freeRow}>
+              <Ionicons name="cloud-done-outline" size={16} color={colors.primary} />
+              <Text style={s.freeText}>{formatBytes(freeSpace)} free on device</Text>
+            </View>
+          )}
         </LinearGradient>
 
-        {/* ── Category Breakdown ─────────────────────── */}
+        {/* Breakdown */}
         <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <Text style={s.cardTitle}>Storage Breakdown</Text>
-          {categories.map((cat, i) => (
+          {totalUsed === 0 ? (
+            <Text style={{ color: colors.textDim, fontSize: 13 }}>No app files on disk yet.</Text>
+          ) : categories.map((cat, i) => (
             <View key={i} style={s.catRow}>
               <View style={s.catInfo}>
                 <Ionicons name={cat.icon as any} size={18} color={cat.color} />
@@ -250,104 +238,31 @@ export default function StorageManagerScreen() {
           ))}
         </LinearGradient>
 
-        {/* ── Per-Chat Storage ────────────────────────── */}
-        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
-          <Text style={s.cardTitle}>Per-Chat Storage</Text>
-          {chatStorages.map((ch, i) => (
-            <View key={i} style={s.chatRow}>
-              <View style={s.chatAvatar}>
-                <Text style={s.chatAvatarText}>{ch.name[0]}</Text>
-              </View>
-              <Text style={s.chatName} numberOfLines={1}>{ch.name}</Text>
-              <Text style={s.chatSize}>{formatBytes(ch.size)}</Text>
-            </View>
-          ))}
-        </LinearGradient>
-
-        {/* ── Cache Actions ───────────────────────────── */}
+        {/* Cache */}
         <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <Text style={s.cardTitle}>Cache Management</Text>
 
           <TouchableOpacity style={s.actionBtn} onPress={clearCache} disabled={clearing} activeOpacity={0.7}>
             <Ionicons name="trash-outline" size={20} color={colors.danger} />
             <Text style={[s.actionText, { color: colors.danger }]}>
-              {clearing ? 'Clearing...' : 'Clear Cache'}
+              {clearing ? 'Working…' : 'Clear Cache'}
             </Text>
           </TouchableOpacity>
 
-          <Text style={s.sectionLabel}>Delete Old Media</Text>
+          <Text style={s.sectionLabel}>Delete Old Cached Media</Text>
           <View style={s.daysRow}>
             {[30, 60, 90].map(d => (
               <TouchableOpacity
                 key={d}
-                style={[s.dayBtn, deleteMediaDays === d && s.dayBtnActive]}
-                onPress={() => {
-                  setDeleteMediaDays(d);
-                  deleteOldMedia(d);
-                }}
+                style={s.dayBtn}
+                onPress={() => deleteOldMedia(d)}
+                disabled={clearing}
                 activeOpacity={0.7}
               >
-                <Text style={[s.dayBtnText, deleteMediaDays === d && s.dayBtnTextActive]}>{d} days</Text>
+                <Text style={s.dayBtnText}>{d} days</Text>
               </TouchableOpacity>
             ))}
           </View>
-        </LinearGradient>
-
-        {/* ── Auto-Download Settings ─────────────────── */}
-        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
-          <Text style={s.cardTitle}>Auto-Download</Text>
-
-          <Text style={s.sectionLabel}>Download Mode</Text>
-          <RadioRow label="WiFi Only" value="wifi" current={settings.autoDownload}
-            onPress={(v: string) => saveSettings({ ...settings, autoDownload: v })} />
-          <RadioRow label="WiFi + Mobile Data" value="wifi_mobile" current={settings.autoDownload}
-            onPress={(v: string) => saveSettings({ ...settings, autoDownload: v })} />
-          <RadioRow label="Never (Manual Only)" value="never" current={settings.autoDownload}
-            onPress={(v: string) => saveSettings({ ...settings, autoDownload: v })} />
-
-          <View style={s.divider} />
-          <Text style={s.sectionLabel}>Auto-Download Toggles</Text>
-
-          {([
-            ['autoDownloadImages', 'Images', 'image-outline'],
-            ['autoDownloadVideos', 'Videos', 'videocam-outline'],
-            ['autoDownloadAudio', 'Audio', 'musical-notes-outline'],
-            ['autoDownloadFiles', 'Files', 'document-outline'],
-          ] as const).map(([key, label, icon]) => (
-            <View key={key} style={s.toggleRow}>
-              <Ionicons name={icon as any} size={18} color={colors.textDim} />
-              <Text style={s.toggleLabel}>{label}</Text>
-              <Switch
-                value={settings[key]}
-                onValueChange={(v) => saveSettings({ ...settings, [key]: v })}
-                trackColor={{ false: '#1A2A44', true: colors.accent }}
-                thumbColor={settings[key] ? colors.text : '#6B7280'}
-              />
-            </View>
-          ))}
-        </LinearGradient>
-
-        {/* ── Quality Settings ────────────────────────── */}
-        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
-          <Text style={s.cardTitle}>Media Quality</Text>
-
-          <Text style={s.sectionLabel}>Photo Quality</Text>
-          <RadioRow label="Original" value="original" current={settings.photoQuality}
-            onPress={(v: string) => saveSettings({ ...settings, photoQuality: v })} />
-          <RadioRow label="Standard (Recommended)" value="standard" current={settings.photoQuality}
-            onPress={(v: string) => saveSettings({ ...settings, photoQuality: v })} />
-          <RadioRow label="Low (Save Space)" value="low" current={settings.photoQuality}
-            onPress={(v: string) => saveSettings({ ...settings, photoQuality: v })} />
-
-          <View style={s.divider} />
-
-          <Text style={s.sectionLabel}>Video Quality</Text>
-          <RadioRow label="Original" value="original" current={settings.videoQuality}
-            onPress={(v: string) => saveSettings({ ...settings, videoQuality: v })} />
-          <RadioRow label="Standard (Recommended)" value="standard" current={settings.videoQuality}
-            onPress={(v: string) => saveSettings({ ...settings, videoQuality: v })} />
-          <RadioRow label="Low (Save Space)" value="low" current={settings.videoQuality}
-            onPress={(v: string) => saveSettings({ ...settings, videoQuality: v })} />
         </LinearGradient>
 
         <View style={{ height: 40 }} />
@@ -365,10 +280,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   scroll: { flex: 1 },
   scrollContent: { padding: 16, paddingBottom: 40 },
 
-  card: {
-    borderRadius: 16, padding: 20, marginBottom: 16,
-    borderWidth: 1, borderColor: '#112240',
-  },
+  card: { borderRadius: 16, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: '#112240' },
   cardTitle: { color: c.text, fontSize: 17, fontWeight: '700', marginBottom: 16 },
 
   storageHeader: { flexDirection: 'row', alignItems: 'center' },
@@ -383,31 +295,11 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   barBg: { height: 8, borderRadius: 4, backgroundColor: '#1A2A44', overflow: 'hidden' },
   barFill: { height: 8, borderRadius: 4 },
 
-  chatRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#112240' },
-  chatAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: c.accent + '30', justifyContent: 'center', alignItems: 'center' },
-  chatAvatarText: { color: c.accent, fontSize: 15, fontWeight: '700' },
-  chatName: { color: c.text, fontSize: 14, flex: 1, marginLeft: 12 },
-  chatSize: { color: c.textDim, fontSize: 13 },
-
   actionBtn: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#112240' },
   actionText: { fontSize: 15, fontWeight: '600', marginLeft: 10 },
 
   sectionLabel: { color: c.textDim, fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1, marginTop: 14, marginBottom: 10 },
-
   daysRow: { flexDirection: 'row', gap: 10 },
   dayBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: '#1A2A44', alignItems: 'center' },
-  dayBtnActive: { backgroundColor: c.danger + '30', borderWidth: 1, borderColor: c.danger },
   dayBtnText: { color: c.textDim, fontSize: 13, fontWeight: '600' },
-  dayBtnTextActive: { color: c.danger },
-
-  radioRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10 },
-  radioOuter: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: c.textDim, justifyContent: 'center', alignItems: 'center' },
-  radioOuterActive: { borderColor: c.accent },
-  radioInner: { width: 10, height: 10, borderRadius: 5, backgroundColor: c.accent },
-  radioLabel: { color: c.text, fontSize: 14, marginLeft: 10 },
-
-  toggleRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#112240' },
-  toggleLabel: { color: c.text, fontSize: 14, flex: 1, marginLeft: 10 },
-
-  divider: { height: 1, backgroundColor: '#112240', marginVertical: 10 },
 });

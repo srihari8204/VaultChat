@@ -1,9 +1,10 @@
-// app/chat-summary.tsx — Chat Summary (real on-device, no Firebase).
+// app/chat-summary.tsx — Chat Summary.
 //
-// A heuristic/extractive summary computed locally from the real message
-// history (GET /chats/:id/messages): message stats, keyword topics, extracted
-// action items, and key (longer, recent) messages. No LLM, no cloud — runs
-// entirely on-device.
+// Reads the real message history (GET /chats/:id/messages), computes real stats
+// (counts, media, questions, timespan), and produces a genuine natural-language
+// summary by sending the transcript to VaultChat's own on-prem LLM
+// (/ai/assist → Ollama). The transcript leaves the device only to the VaultChat
+// backend, and only when the user taps a range.
 
 import React, { useState, useCallback , useMemo} from 'react';
 import {
@@ -15,11 +16,12 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { getMessages, type Message } from '../lib/chatService';
 import { getCurrentUserAsync } from './(constants)/authService';
+import { aiAssist } from '../lib/ai';
 
 interface SumMsg { isMine: boolean; text: string; type: Message['type']; createdAt: string }
 interface Summary {
   total: number; myMsgs: number; peerMsgs: number; mediaCount: number; questionCount: number;
-  topics: string[]; actions: string[]; keyMessages: string[]; sentiment: string; timespan: string;
+  sentiment: string; timespan: string; aiSummary: string;
 }
 
 function formatTimespan(firstIso?: string, lastIso?: string): string {
@@ -33,34 +35,13 @@ function formatTimespan(firstIso?: string, lastIso?: string): string {
   } catch { return 'Unknown'; }
 }
 
-function generateSummary(msgs: SumMsg[], peerName: string): Summary {
+function computeStats(msgs: SumMsg[], peerName: string): Omit<Summary, 'aiSummary'> {
   const total = msgs.length;
   const myMsgs = msgs.filter(m => m.isMine).length;
   const mediaCount = msgs.filter(m => ['image', 'video', 'audio', 'file'].includes(m.type)).length;
   const questionCount = msgs.filter(m => m.text.includes('?')).length;
-
-  const keyMessages = msgs.filter(m => m.text.length > 30).slice(-5).map(m => m.text);
-
-  const allText = msgs.map(m => m.text.toLowerCase()).join(' ');
-  const topics: string[] = [];
-  if (/meet|call|schedule|tomorrow|today|monday|tuesday|wednesday|thursday|friday/.test(allText)) topics.push('Scheduling & Meetings');
-  if (/work|project|task|deadline|deliver|report|update/.test(allText)) topics.push('Work & Projects');
-  if (/eat|food|lunch|dinner|coffee|restaurant/.test(allText)) topics.push('Food & Plans');
-  if (/movie|game|play|watch|listen|music|song/.test(allText)) topics.push('Entertainment');
-  if (/buy|price|money|pay|cost|order|shop/.test(allText)) topics.push('Shopping & Finance');
-  if (/love|miss|feel|happy|sad|sorry|thank/.test(allText)) topics.push('Personal & Emotions');
-  if (topics.length === 0) topics.push('General Conversation');
-
-  const actions: string[] = [];
-  for (const m of msgs) {
-    if (/remind me|don't forget|make sure|need to|have to|should|will do|i'll/i.test(m.text)) {
-      actions.push(m.text.slice(0, 80));
-    }
-  }
-
   return {
     total, myMsgs, peerMsgs: total - myMsgs, mediaCount, questionCount,
-    topics, actions: actions.slice(0, 5), keyMessages,
     sentiment: myMsgs > total - myMsgs ? 'You sent more messages' : `${peerName || 'Peer'} sent more`,
     timespan: total > 0 ? formatTimespan(msgs[0].createdAt, msgs[total - 1].createdAt) : 'Unknown',
   };
@@ -78,10 +59,12 @@ export default function ChatSummaryScreen() {
   const { chatId, peerName } = useLocalSearchParams<{ chatId: string; peerName: string }>();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(false);
+  const [aiError, setAiError] = useState(false);
 
   const run = useCallback(async (limit: number) => {
     if (!chatId) return;
     setLoading(true);
+    setAiError(false);
     try {
       const [me, page] = await Promise.all([getCurrentUserAsync(), getMessages(chatId, { limit })]);
       const myId = me?.id ?? '';
@@ -90,7 +73,20 @@ export default function ChatSummaryScreen() {
         .filter(m => !m.deletedAt)
         .map(m => ({ isMine: m.senderId === myId, text: m.type === 'text' ? (m.content || '') : '', type: m.type, createdAt: m.createdAt }))
         .reverse();
-      setSummary(generateSummary(msgs, (peerName as string) || ''));
+      const stats = computeStats(msgs, (peerName as string) || '');
+
+      // Real LLM summary over the transcript (text messages only).
+      const transcript = msgs
+        .filter(m => m.text)
+        .map(m => `${m.isMine ? 'Me' : ((peerName as string) || 'Them')}: ${m.text}`)
+        .join('\n')
+        .slice(0, 4000);
+      let aiSummary = '';
+      if (transcript.trim()) {
+        try { aiSummary = await aiAssist('summarize', transcript); }
+        catch { setAiError(true); }
+      }
+      setSummary({ ...stats, aiSummary });
     } catch { Alert.alert('Error', 'Could not load messages'); }
     finally { setLoading(false); }
   }, [chatId, peerName]);
@@ -111,8 +107,8 @@ export default function ChatSummaryScreen() {
         <View style={s.headerCard}>
           <Text style={{ fontSize: 30 }}>🧠</Text>
           <View style={{ flex: 1, marginLeft: 12 }}>
-            <Text style={s.headerTitle}>On-device Summary</Text>
-            <Text style={s.headerDesc}>Catch up on {(peerName as string) || 'this chat'} — computed locally.</Text>
+            <Text style={s.headerTitle}>AI Summary</Text>
+            <Text style={s.headerDesc}>Catch up on {(peerName as string) || 'this chat'} — summarized by VaultChat's on-prem model.</Text>
           </View>
         </View>
 
@@ -143,30 +139,19 @@ export default function ChatSummaryScreen() {
             </View>
             <Text style={s.metaTxt}>Timespan: {summary.timespan} · {summary.sentiment}</Text>
 
-            <Text style={s.sectionTitle}>🎯 TOPICS DISCUSSED</Text>
-            <View style={s.topicRow}>
-              {summary.topics.map((t, i) => <View key={i} style={s.topicBadge}><Text style={s.topicTxt}>{t}</Text></View>)}
-            </View>
-
-            {summary.actions.length > 0 && (
-              <>
-                <Text style={[s.sectionTitle, { marginTop: 16 }]}>✅ ACTION ITEMS</Text>
-                {summary.actions.map((a, i) => (
-                  <View key={i} style={s.actionRow}>
-                    <Text style={s.actionNum}>{i + 1}</Text>
-                    <Text style={s.actionTxt}>{a}</Text>
-                  </View>
-                ))}
-              </>
-            )}
-
-            {summary.keyMessages.length > 0 && (
-              <>
-                <Text style={[s.sectionTitle, { marginTop: 16 }]}>💬 KEY MESSAGES</Text>
-                {summary.keyMessages.map((m, i) => (
-                  <View key={i} style={s.keyMsgRow}><Text style={s.keyMsgTxt}>&quot;{m}&quot;</Text></View>
-                ))}
-              </>
+            <Text style={s.sectionTitle}>🧠 SUMMARY</Text>
+            {summary.aiSummary ? (
+              <View style={s.keyMsgRow}>
+                <Text style={s.summaryTxt}>{summary.aiSummary}</Text>
+              </View>
+            ) : (
+              <View style={s.keyMsgRow}>
+                <Text style={s.keyMsgTxt}>
+                  {aiError
+                    ? 'The AI summary service is offline right now — the stats above are still accurate. Try again later.'
+                    : 'No text messages in this range to summarize.'}
+                </Text>
+              </View>
             )}
 
             <TouchableOpacity style={s.regenBtn} onPress={() => setSummary(null)}>
@@ -208,6 +193,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   actionTxt: { color: c.text, fontSize: 13, flex: 1, lineHeight: 19 },
   keyMsgRow: { backgroundColor: c.card, borderRadius: 10, padding: 12, marginBottom: 4, borderWidth: 1, borderColor: c.border },
   keyMsgTxt: { color: c.textDim, fontSize: 13, fontStyle: 'italic', lineHeight: 19 },
+  summaryTxt: { color: c.text, fontSize: 14, lineHeight: 21 },
   regenBtn: { marginTop: 20, backgroundColor: 'rgba(6,182,212,0.1)', borderRadius: 12, paddingVertical: 14, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(6,182,212,0.3)' },
   regenTxt: { color: c.accent, fontSize: 13, fontWeight: '700' },
 });

@@ -185,6 +185,7 @@ function RootLayout() {
         {/* Main app — 6-tab navigation */}
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="chat" />
+        <Stack.Screen name="join/[code]" options={{ headerShown: false }} />
         <Stack.Screen name="videocall" />
         <Stack.Screen name="voicecall" />
         <Stack.Screen name="qr-contact" />
@@ -194,7 +195,6 @@ function RootLayout() {
         <Stack.Screen name="vaultbeam" />
         <Stack.Screen name="transfers" />
         <Stack.Screen name="voice-transcribe" />
-        <Stack.Screen name="smart-notifications" />
         <Stack.Screen name="tone-detector" />
         <Stack.Screen name="group-chat" />
         <Stack.Screen name="lock" />
@@ -241,11 +241,9 @@ function RootLayout() {
         <Stack.Screen name="settings" />
         <Stack.Screen name="story-viewer" />
         <Stack.Screen name="breachguard" />
-        <Stack.Screen name="deepfake" />
         <Stack.Screen name="trustscore" />
         <Stack.Screen name="meeting-scheduler" />
         <Stack.Screen name="three-factor-verify" options={{ gestureEnabled: false }} />
-        <Stack.Screen name="zero-knowledge" />
         <Stack.Screen name="decentralized-id" />
         <Stack.Screen name="bot-api" />
         <Stack.Screen name="mini-apps" />
@@ -260,7 +258,6 @@ function RootLayout() {
         <Stack.Screen name="last-seen-privacy" />
         <Stack.Screen name="offline-mode" />
         <Stack.Screen name="image-editor" />
-        <Stack.Screen name="digital-wellbeing" />
         <Stack.Screen name="emergency-sos" />
         <Stack.Screen name="network-test" />
         <Stack.Screen name="file-viewer" />
@@ -291,7 +288,6 @@ function RootLayout() {
         <Stack.Screen name="communities" />
         <Stack.Screen name="sync-contact" />
         <Stack.Screen name="msgrequests" />
-        <Stack.Screen name="family" />
         <Stack.Screen name="create-group" />
 
         {/* Utility */}
@@ -308,7 +304,6 @@ function RootLayout() {
 
         {/* Mini Apps destinations */}
         <Stack.Screen name="encrypted-notes" />
-        <Stack.Screen name="watch-together" />
         <Stack.Screen name="screen-share" />
         <Stack.Screen name="current-location" />
         <Stack.Screen name="game-lobby" />

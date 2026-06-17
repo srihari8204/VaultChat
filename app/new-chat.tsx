@@ -5,7 +5,7 @@ import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import {
   ActivityIndicator, Alert, KeyboardAvoidingView, Platform,
-  ScrollView, StyleSheet, Text, TouchableOpacity, View,
+  ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
@@ -20,8 +20,25 @@ export default function NewChatScreen() {
   const [dialCode, setDialCode] = useState('+91');
   const [national, setNational] = useState('');
   const [loading, setLoading] = useState(false);
+  const [joinLink, setJoinLink] = useState('');
 
   const e164 = toE164(dialCode, national);
+
+  // Pull the invite code out of a pasted link (https://vaultchat.app/join/CODE,
+  // vaultchat://join/CODE) or a bare code.
+  const extractCode = (raw: string): string => {
+    let v = raw.trim().split('?')[0].split('#')[0];
+    const m = v.match(/\/join\/([^/\s]+)\/?$/i);
+    if (m) return m[1];
+    if (v.includes('/')) { const parts = v.split('/').filter(Boolean); return parts[parts.length - 1] || ''; }
+    return v;
+  };
+
+  const joinByLink = () => {
+    const code = extractCode(joinLink);
+    if (!code) { Alert.alert('Invalid link', 'Paste a valid VaultChat invite link or code.'); return; }
+    router.push({ pathname: '/join/[code]', params: { code } } as any);
+  };
 
   const startByPhone = async () => {
     if (!e164 || loading) return;
@@ -68,6 +85,23 @@ export default function NewChatScreen() {
           {loading ? <ActivityIndicator color="#fff" /> : <Text style={S.ctaTxt}>Start chat</Text>}
         </TouchableOpacity>
         <Text style={S.hint}>The number must belong to someone who has set their phone on VaultChat.</Text>
+
+        <Text style={S.orLabel}>OR JOIN A GROUP BY INVITE LINK</Text>
+        <TextInput
+          style={S.linkInput}
+          value={joinLink}
+          onChangeText={setJoinLink}
+          placeholder="Paste invite link or code"
+          placeholderTextColor={colors.textFaint}
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="go"
+          onSubmitEditing={joinByLink}
+        />
+        <TouchableOpacity style={[S.cta, S.ctaAlt, !joinLink.trim() && S.ctaOff]} onPress={joinByLink} disabled={!joinLink.trim()} activeOpacity={0.85}>
+          <Text style={S.ctaTxt}>Join group</Text>
+        </TouchableOpacity>
+        <Text style={S.hint}>Someone in the group can share an invite link with you.</Text>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -89,7 +123,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   actionSub: { color: c.textDim, fontSize: 13, marginTop: 2 },
   orLabel: { color: c.textDim, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginTop: 24, marginBottom: 12 },
   cta: { marginTop: 16, height: 54, borderRadius: 14, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
+  ctaAlt: { backgroundColor: c.accent },
   ctaOff: { opacity: 0.4 },
   ctaTxt: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  linkInput: { height: 50, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.card, color: c.text, paddingHorizontal: 14, fontSize: 15 },
   hint: { color: c.textFaint, fontSize: 12, marginTop: 12, lineHeight: 17 },
 });

@@ -40,10 +40,20 @@ const GRADIENT_PRESETS = [
   { id: 'steel',     name: 'Steel',     colors: ['#0e1117', '#1a1e25'] },
 ];
 
-interface WallpaperConfig {
+export interface WallpaperConfig {
   type: 'solid' | 'gradient' | 'image';
   value: string;         // hex for solid, preset id for gradient, uri for image
   colors?: string[];     // gradient colors
+}
+
+// Read the saved wallpaper for a chat (falls back to the global default).
+// Consumed by app/chat.tsx to actually render the background.
+export async function getWallpaper(chatId: string): Promise<WallpaperConfig | null> {
+  try {
+    const raw = (await AsyncStorage.getItem(`vc_wallpaper_${chatId}`))
+      || (await AsyncStorage.getItem('vc_wallpaper_default'));
+    return raw ? JSON.parse(raw) as WallpaperConfig : null;
+  } catch { return null; }
 }
 
 export default function ChatWallpaperScreen() {

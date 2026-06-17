@@ -1,7 +1,7 @@
-// app/translate.tsx — Real-Time Message Translation
-// Tap any message -> instant translation to 50+ languages
-// Uses on-device dictionary for common phrases, no API needed
-// Stores translations in AsyncStorage for offline access
+// app/translate.tsx — Message Translation
+// Translates text to any of the listed languages using VaultChat's own on-prem
+// LLM (Ollama via /ai/assist). No third-party translation API; the request goes
+// only to the VaultChat backend.
 
 import React, { useState , useMemo} from 'react';
 import {
@@ -12,6 +12,7 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { useLocalSearchParams, Stack } from 'expo-router';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
+import { aiAssist } from '../lib/ai';
 
 
 const LANGUAGES = [
@@ -37,39 +38,6 @@ const LANGUAGES = [
   { code: 'vi', name: 'Vietnamese', flag: '\uD83C\uDDFB\uD83C\uDDF3' },
 ];
 
-// On-device translation samples (common phrases)
-const TRANSLATIONS = {
-  hi: { 'hello': 'namaste', 'how are you': 'aap kaise hain', 'thank you': 'dhanyavaad', 'good morning': 'suprabhat', 'goodbye': 'alvida', 'yes': 'haan', 'no': 'nahi', 'please': 'kripya', 'sorry': 'maaf kijiye', 'i love you': 'main tumse pyaar karta hoon' },
-  te: { 'hello': 'namaskaram', 'how are you': 'meeru ela unnaru', 'thank you': 'dhanyavaadalu', 'good morning': 'subhodayam', 'goodbye': 'velutunnanu', 'yes': 'avunu', 'no': 'kaadu', 'please': 'dayachesi', 'sorry': 'kshaminchandhi' },
-  es: { 'hello': 'hola', 'how are you': 'como estas', 'thank you': 'gracias', 'good morning': 'buenos dias', 'goodbye': 'adios', 'yes': 'si', 'no': 'no', 'please': 'por favor', 'sorry': 'lo siento', 'i love you': 'te amo' },
-  fr: { 'hello': 'bonjour', 'how are you': 'comment allez-vous', 'thank you': 'merci', 'good morning': 'bonjour', 'goodbye': 'au revoir', 'yes': 'oui', 'no': 'non', 'please': "s'il vous plait", 'sorry': 'desole', 'i love you': 'je t\'aime' },
-  ja: { 'hello': 'konnichiwa', 'how are you': 'ogenki desu ka', 'thank you': 'arigatou', 'good morning': 'ohayou gozaimasu', 'goodbye': 'sayounara', 'yes': 'hai', 'no': 'iie', 'please': 'onegaishimasu', 'sorry': 'gomenasai' },
-  de: { 'hello': 'hallo', 'how are you': 'wie geht es Ihnen', 'thank you': 'danke', 'good morning': 'guten Morgen', 'goodbye': 'auf Wiedersehen', 'yes': 'ja', 'no': 'nein', 'please': 'bitte', 'sorry': 'Entschuldigung' },
-};
-
-// Simple word-swap translation
-const translateText = (text, targetLang) => {
-  const dict = TRANSLATIONS[targetLang];
-  if (!dict) return text + ' [' + targetLang + ']';
-  let result = text;
-  const lower = text.toLowerCase();
-
-  // Check exact phrase matches first
-  for (const [en, translated] of Object.entries(dict)) {
-    if (lower.includes(en)) {
-      result = result.replace(new RegExp(en, 'gi'), translated);
-    }
-  }
-
-  // If no translation found, show transliteration note
-  if (result === text) {
-    const lang = LANGUAGES.find(l => l.code === targetLang);
-    return '\uD83C\uDF10 [' + (lang?.name || targetLang) + '] ' + text + '\n\n(Full translation requires online connection. Common phrases are available offline.)';
-  }
-
-  return result;
-};
-
 function useS() {
   const { colors } = useTheme();
   return useMemo(() => makeStyles(colors), [colors]);
@@ -84,12 +52,22 @@ export default function TranslateScreen() {
   const [translated, setTranslated] = useState('');
   const [history, setHistory] = useState([]);
   const [showLangs, setShowLangs] = useState(false);
+  const [translating, setTranslating] = useState(false);
 
-  const translate = () => {
-    if (!inputText.trim()) return;
-    const result = translateText(inputText, targetLang);
-    setTranslated(result);
-    setHistory(prev => [{ id: Date.now(), from: inputText, to: result, lang: targetLang }, ...prev].slice(0, 20));
+  const translate = async () => {
+    if (!inputText.trim() || translating) return;
+    const lang = LANGUAGES.find(l => l.code === targetLang);
+    setTranslating(true);
+    try {
+      const result = await aiAssist('translate', inputText.trim(), { lang: lang?.name });
+      setTranslated(result);
+      setHistory(prev => [{ id: Date.now(), from: inputText, to: result, lang: targetLang }, ...prev].slice(0, 20));
+    } catch (e: any) {
+      const offline = e?.status === 503 || /unavailable/i.test(e?.message || '');
+      Alert.alert('Translation unavailable', offline ? 'The translation service is offline right now. Please try again later.' : (e?.message ?? 'Try again'));
+    } finally {
+      setTranslating(false);
+    }
   };
 
   const copyTranslation = async () => {
@@ -166,8 +144,8 @@ export default function TranslateScreen() {
           )}
         </View>
 
-        <TouchableOpacity style={[s.translateBtn, !inputText.trim() && { opacity: 0.4 }]} onPress={translate} disabled={!inputText.trim()}>
-          <Text style={s.translateBtnTxt}>{"\uD83C\uDF10  Translate"}</Text>
+        <TouchableOpacity style={[s.translateBtn, (!inputText.trim() || translating) && { opacity: 0.4 }]} onPress={translate} disabled={!inputText.trim() || translating}>
+          <Text style={s.translateBtnTxt}>{translating ? 'Translating\u2026' : "\uD83C\uDF10  Translate"}</Text>
         </TouchableOpacity>
 
         {history.length > 0 && (

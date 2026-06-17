@@ -26,6 +26,8 @@ import { Stack, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
 import { decryptNotes, encryptNotes } from '../lib/notesCrypto';
+import 'react-native-get-random-values';
+import { randomBytes } from '@noble/hashes/utils.js';
 
 
 // 9 Categories from PDF
@@ -248,12 +250,20 @@ export default function EncryptedNotesScreen() {
     await saveNotes(notes.filter(n => n.id !== id));
   };
 
-  // Password generator
+  // Password generator — CSPRNG (@noble randomBytes) with rejection sampling so
+  // every character is uniformly distributed (no modulo bias). Never Math.random
+  // for a security tool.
   const generatePassword = (length = 20) => {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+-=';
-    let pass = '';
-    for (let i = 0; i < length; i++) pass += chars.charAt(Math.floor(Math.random() * chars.length));
-    setGeneratedPass(pass);
+    const max = 256 - (256 % chars.length); // discard bytes ≥ this to stay unbiased
+    const out: string[] = [];
+    while (out.length < length) {
+      const batch = randomBytes(length);
+      for (let i = 0; i < batch.length && out.length < length; i++) {
+        if (batch[i] < max) out.push(chars[batch[i] % chars.length]);
+      }
+    }
+    setGeneratedPass(out.join(''));
     setShowPassGen(true);
   };
 

@@ -16,11 +16,12 @@ export async function aiChat(message: string, history: AiChatTurn[] = []): Promi
 
 export type AiTask = 'summarize' | 'suggest' | 'translate' | 'tone' | 'grammar' | 'shorten';
 
-/** Run an in-chat helper task over some text. Throws on AI-unavailable (503). */
-export async function aiAssist(task: AiTask, text: string): Promise<string> {
+/** Run an in-chat helper task over some text. Throws on AI-unavailable (503).
+ *  `opts.lang` sets a target language for the 'translate' task. */
+export async function aiAssist(task: AiTask, text: string, opts: { lang?: string } = {}): Promise<string> {
   const r = await api<{ result: string }>('/ai/assist', {
     method: 'POST',
-    json: { task, text },
+    json: { task, text, ...(opts.lang ? { lang: opts.lang } : {}) },
   });
   return (r?.result || '').trim();
 }

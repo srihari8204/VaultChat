@@ -14,6 +14,7 @@
 // (server is idempotent + treats author-as-viewer as no-op).
 
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { ResizeMode, Video } from 'expo-av';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -45,6 +46,7 @@ import { putMediaKey } from '../lib/mediaKeyStore';
 import { unwrapStoryKey } from '../lib/storyKeys';
 
 const IMAGE_DURATION_MS = 5_000;
+const VIDEO_DURATION_MS = 15_000;
 
 function useS() {
   const { colors } = useTheme();
@@ -131,7 +133,7 @@ export default function StoryViewerScreen() {
     progress.setValue(0);
     const anim = Animated.timing(progress, {
       toValue:  1,
-      duration: IMAGE_DURATION_MS,
+      duration: current.mediaType === 'video' ? VIDEO_DURATION_MS : IMAGE_DURATION_MS,
       useNativeDriver: false,
     });
     anim.start(({ finished }) => {
@@ -232,11 +234,22 @@ export default function StoryViewerScreen() {
 
       {/* Media — full-bleed. Plaintext: authed URL; encrypted: decrypted local file. */}
       {mediaSrc && (
-        <Image
-          source={mediaSrc}
-          style={S.media}
-          resizeMode="contain"
-        />
+        current?.mediaType === 'video' ? (
+          <Video
+            source={mediaSrc as any}
+            style={S.media}
+            resizeMode={ResizeMode.CONTAIN}
+            shouldPlay={!paused}
+            isLooping={false}
+            useNativeControls={false}
+          />
+        ) : (
+          <Image
+            source={mediaSrc}
+            style={S.media}
+            resizeMode="contain"
+          />
+        )
       )}
 
       {/* Tap zones (under everything visible) */}

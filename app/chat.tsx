@@ -52,6 +52,19 @@ import * as Haptics from 'expo-haptics';
 import { Sheet, Avatar } from '../components/ui';
 import LinkPreview, { extractUrl } from '../components/LinkPreview';
 import GifPicker from '../components/GifPicker';
+import { LinearGradient } from 'expo-linear-gradient';
+import { getWallpaper, type WallpaperConfig } from './chat-wallpaper';
+import { getBubbleColors } from './chat-themes';
+import { getLock, verifyBiometric, verifyPin, type LockedChat } from '../lib/chatLock';
+
+// Pick black or white text for legibility on an arbitrary bubble color.
+function idealText(hex: string): string {
+  const h = hex.replace('#', '');
+  if (h.length < 6) return '#fff';
+  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.6 ? '#0e0e14' : '#ffffff';
+}
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
 import { getCurrentUserAsync } from './(constants)/authService';
@@ -148,11 +161,17 @@ const HL = StyleSheet.create({
 });
 
 export default function ChatScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  // `id` is the normal entry param; `chatId` is what the capture screens
+  // (/camera, /video-notes, /image-editor) echo back when they router.replace
+  // here with a freshly captured/edited file — accept either.
+  const params = useLocalSearchParams<{
+    id?: string; chatId?: string;
+    capturedUri?: string; capturedType?: string; capturedViewOnce?: string;
+  }>();
   const router = useRouter();
   const { colors } = useTheme();
   const S = useS();
-  const chatId = (id ?? '') as string;
+  const chatId = ((params.id ?? params.chatId) ?? '') as string;
 
   const [meId,      setMeId]      = useState<string | null>(null);
   const [chat,      setChat]      = useState<ChatDetail | null>(null);
@@ -180,6 +199,15 @@ export default function ChatScreen() {
   const [nextInvisibleInk, setNextInvisibleInk] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const [gifOpen, setGifOpen] = useState(false);
+
+  // Media staged for sending, shown in a caption-preview before it goes out.
+  // Every send path (gallery pick, camera, video note, edited photo) routes
+  // through here so the user can add a caption (WhatsApp-style).
+  const [pendingMedia, setPendingMedia] = useState<{
+    uri: string; mediaType: 'image' | 'video'; filename: string; mime: string;
+    viewOnce: boolean; metaExtra: Record<string, any>;
+  } | null>(null);
+  const [mediaCaption, setMediaCaption] = useState('');
   // @mentions (groups): active typed query (null = none) + recorded picks.
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const mentionsRef = useRef<{ name: string; userId: string }[]>([]);
@@ -924,6 +952,14 @@ export default function ChatScreen() {
           params: { chatId, peerName: peer?.name ?? chat.name ?? '' },
         }),
       },
+      {
+        text: '🖼️ Wallpaper',
+        onPress: () => router.push({ pathname: '/chat-wallpaper' as any, params: { chatId } }),
+      },
+      {
+        text: '🎨 Bubble theme',
+        onPress: () => router.push({ pathname: '/chat-themes' as any, params: { chatId } }),
+      },
     ];
 
     if (chat.type === 'group') {
@@ -1137,18 +1173,30 @@ export default function ChatScreen() {
     if (result.canceled || !result.assets?.[0]) return;
     const asset = result.assets[0];
     const isVideo = kind === 'videos';
+    const filename = asset.fileName ||
+      (isVideo ? `video-${Date.now()}.mp4` : `photo-${Date.now()}.jpg`);
+    const mime = asset.mimeType ||
+      (isVideo ? 'video/mp4' : 'image/jpeg');
+    const metaExtra: any = { width: asset.width, height: asset.height };
+    if (isVideo && asset.duration) metaExtra.durationMs = asset.duration;
+    // Stage for the caption preview instead of sending immediately.
+    setMediaCaption('');
+    setPendingMedia({ uri: asset.uri, mediaType: isVideo ? 'video' : 'image', filename, mime, viewOnce: !!opts.viewOnce, metaExtra });
+  }, [sending]);
 
+  // Actually upload + send the staged media, with the typed caption.
+  const confirmSendPendingMedia = useCallback(async () => {
+    if (!pendingMedia || sending) return;
+    const pm = pendingMedia;
+    const cap = mediaCaption.trim();
+    setPendingMedia(null);
+    setMediaCaption('');
     setSending(true);
     try {
-      const filename = asset.fileName ||
-        (isVideo ? `video-${Date.now()}.mp4` : `photo-${Date.now()}.jpg`);
-      const mime = asset.mimeType ||
-        (isVideo ? 'video/mp4' : 'image/jpeg');
-      const metaExtra: any = { width: asset.width, height: asset.height };
-      if (isVideo && asset.duration) metaExtra.durationMs = asset.duration;
-      const msg = await sendMediaMessage(chatId, isVideo ? 'video' : 'image',
-        { uri: asset.uri, filename, mime },
-        { viewOnce: !!opts.viewOnce, metaExtra },
+      const msg = await sendMediaMessage(
+        chatId, pm.mediaType,
+        { uri: pm.uri, filename: pm.filename, mime: pm.mime },
+        { viewOnce: pm.viewOnce, caption: cap || undefined, metaExtra: pm.metaExtra },
       );
       setMessages(prev => prev.some(x => x.id === msg.id) ? prev : [msg, ...prev]);
     } catch (e: any) {
@@ -1156,7 +1204,31 @@ export default function ChatScreen() {
     } finally {
       setSending(false);
     }
-  }, [chatId, sending]);
+  }, [pendingMedia, mediaCaption, chatId, sending]);
+
+  // ── Consume media captured by /camera, /video-notes, /image-editor ──
+  // Those screens router.replace back here with capturedUri + capturedType.
+  // Send it exactly once, then clear the params so a re-render or Back never
+  // re-sends the same file.
+  const consumedCaptureRef = useRef<string | null>(null);
+  useEffect(() => {
+    const uri = params.capturedUri || '';
+    if (!uri || consumedCaptureRef.current === uri) return;
+    consumedCaptureRef.current = uri;
+    const rawType = params.capturedType || 'image';
+    const isVideo = rawType === 'video' || rawType === 'video-note';
+    const viewOnce = params.capturedViewOnce === '1';
+    // Clear immediately so navigating back into the chat doesn't re-stage.
+    router.setParams({ capturedUri: '', capturedType: '', capturedViewOnce: '' } as any);
+    const filename = isVideo
+      ? `${rawType === 'video-note' ? 'note' : 'video'}-${Date.now()}.mp4`
+      : `photo-${Date.now()}.jpg`;
+    const mime = isVideo ? 'video/mp4' : 'image/jpeg';
+    const metaExtra: Record<string, any> = rawType === 'video-note' ? { videoNote: true } : {};
+    // Stage in the caption preview (same as a gallery pick).
+    setMediaCaption('');
+    setPendingMedia({ uri, mediaType: isVideo ? 'video' : 'image', filename, mime, viewOnce, metaExtra });
+  }, [params.capturedUri, params.capturedType, params.capturedViewOnce, router]);
 
   // ── Attach file (Day 9) ───────────────────────────────────
   // Generic doc picker. The server accepts any mime via /uploads; the bubble
@@ -1186,6 +1258,18 @@ export default function ChatScreen() {
     }
   }, [chatId, sending]);
 
+  // ── Pick a photo, edit it (crop/rotate/draw), then send ──
+  // /image-editor returns via the same capturedUri contract the effect above
+  // consumes, so the edited file is actually delivered (not lost).
+  const onEditPhoto = useCallback(async () => {
+    if (sending) return;
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) { Alert.alert('Permission needed', 'Allow photo library access to attach.'); return; }
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1, allowsEditing: false });
+    if (result.canceled || !result.assets?.[0]) return;
+    router.push({ pathname: '/image-editor' as any, params: { uri: result.assets[0].uri, chatId, returnTo: '/chat' } });
+  }, [chatId, sending, router]);
+
   // ── Send a GIF (external Tenor URL — no upload; rendered from the URL) ──
   const sendGif = useCallback(async (url: string, preview: string) => {
     setGifOpen(false);
@@ -1209,7 +1293,10 @@ export default function ChatScreen() {
     const peer = chat?.type === 'direct' && meId ? chat.members.find(m => m.userId !== meId) : null;
     const peerName = peer?.name || chat?.name || '';
     return [
+      { label: 'Camera',          icon: 'camera' as const,     onPress: () => router.push({ pathname: '/camera' as any, params: { chatId, peerName, returnTo: '/chat' } }) },
+      { label: 'Video note',      icon: 'ellipse' as const,    onPress: () => router.push({ pathname: '/video-notes' as any, params: { chatId, peerName } }) },
       { label: 'Photo',           icon: 'image' as const,      onPress: () => onPickMedia('images') },
+      { label: 'Edit & send photo', icon: 'create' as const,   onPress: onEditPhoto },
       { label: 'Video',           icon: 'videocam' as const,   onPress: () => onPickMedia('videos') },
       { label: 'View-once photo', icon: 'eye' as const,        onPress: () => onPickMedia('images', { viewOnce: true }) },
       { label: 'View-once video', icon: 'eye-outline' as const, onPress: () => onPickMedia('videos', { viewOnce: true }) },
@@ -1219,8 +1306,9 @@ export default function ChatScreen() {
       { label: 'Poll',            icon: 'stats-chart' as const, onPress: () => router.push({ pathname: '/create-poll' as any, params: { chatId, peerName } }) },
       { label: 'Location',        icon: 'location' as const,   onPress: () => router.push({ pathname: '/location' as any, params: { chatId, name: peerName } }) },
       { label: 'File',            icon: 'document' as const,   onPress: onPickFile },
+      { label: 'Scan document',   icon: 'scan' as const,       onPress: () => router.push({ pathname: '/docscanner' as any, params: { chatId } }) },
     ];
-  }, [onPickMedia, onPickFile, router, chatId, chat, meId, nextInvisibleInk]);
+  }, [onPickMedia, onPickFile, onEditPhoto, router, chatId, chat, meId, nextInvisibleInk]);
 
   // ── Load older on scroll-up ───────────────────────────────
   const onEndReached = useCallback(async () => {
@@ -1273,6 +1361,49 @@ export default function ChatScreen() {
     const target = consumePendingJump(chatId);
     if (target) jumpToMessage(target);
   }, [chatId, jumpToMessage]));
+
+  // Per-chat appearance (wallpaper + bubble colors). Reloaded on focus so a
+  // change made in the selector applies the moment we navigate back.
+  const [wallpaper, setWallpaper] = useState<WallpaperConfig | null>(null);
+  const [bubbleColors, setBubbleColors] = useState<{ mine: string; peer: string } | null>(null);
+  useFocusEffect(useCallback(() => {
+    let cancel = false;
+    (async () => {
+      const [wp, bc] = await Promise.all([getWallpaper(chatId), getBubbleColors(chatId)]);
+      if (!cancel) { setWallpaper(wp); setBubbleColors(bc); }
+    })();
+    return () => { cancel = true; };
+  }, [chatId]));
+
+  // ── Per-chat lock gate ──────────────────────────────────────
+  // If this chat is locked, cover it until the user authenticates. Biometric is
+  // attempted automatically; PIN-locked chats show a keypad. Enforced on every
+  // focus so backgrounding + returning re-locks.
+  const [lockInfo, setLockInfo] = useState<LockedChat | null>(null);
+  const [lockOpen, setLockOpen] = useState(true);
+  const [lockPin, setLockPin] = useState('');
+  const [lockErr, setLockErr] = useState(false);
+  useFocusEffect(useCallback(() => {
+    let cancel = false;
+    (async () => {
+      const lock = await getLock(chatId);
+      if (cancel) return;
+      setLockInfo(lock);
+      setLockPin(''); setLockErr(false);
+      if (!lock) { setLockOpen(true); return; }
+      setLockOpen(false);
+      if (lock.lockMethod === 'biometric' || lock.lockMethod === 'both') {
+        const ok = await verifyBiometric('Unlock chat');
+        if (!cancel && ok) setLockOpen(true);
+      }
+    })();
+    return () => { cancel = true; };
+  }, [chatId]));
+
+  const submitLockPin = useCallback(() => {
+    if (lockInfo && verifyPin(lockInfo, lockPin)) { setLockOpen(true); setLockErr(false); setLockPin(''); }
+    else setLockErr(true);
+  }, [lockInfo, lockPin]);
 
   const title = useMemo(() => {
     if (!chat) return '…';
@@ -1363,6 +1494,19 @@ export default function ChatScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
     >
+      {/* Per-chat wallpaper — painted behind the (transparent) message list */}
+      {wallpaper && (
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+          {wallpaper.type === 'image' ? (
+            <Image source={{ uri: wallpaper.value }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+          ) : wallpaper.type === 'gradient' && wallpaper.colors ? (
+            <LinearGradient colors={wallpaper.colors as [string, string, ...string[]]} style={StyleSheet.absoluteFill} />
+          ) : (
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: wallpaper.value }]} />
+          )}
+        </View>
+      )}
+
       {/* Header */}
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7}>
@@ -1576,6 +1720,7 @@ export default function ChatScreen() {
               highlight={searchOpen && searchQ.trim().length > 0 ? searchQ.trim() : null}
               tiltRevealed={tiltRevealed}
               grouped={grouped}
+              bubbleColors={bubbleColors}
               pollVotesForMsg={pollVotes[item.id]}
               onPollVoteChange={(next) => setPollVotes(prev => ({ ...prev, [item.id]: next }))}
             />
@@ -1783,6 +1928,65 @@ export default function ChatScreen() {
       {/* GIF picker (W15) */}
       <GifPicker visible={gifOpen} onClose={() => setGifOpen(false)} onSelect={sendGif} />
 
+      {/* Media caption preview — every send path stages here first */}
+      <Modal
+        visible={pendingMedia != null}
+        transparent={false}
+        animationType="slide"
+        onRequestClose={() => { setPendingMedia(null); setMediaCaption(''); }}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={{ flex: 1, backgroundColor: '#000' }}
+        >
+          <TouchableOpacity
+            onPress={() => { setPendingMedia(null); setMediaCaption(''); }}
+            hitSlop={12}
+            style={{ position: 'absolute', top: 48, left: 16, zIndex: 2, width: 40, height: 40, borderRadius: 20, backgroundColor: '#00000088', alignItems: 'center', justifyContent: 'center' }}
+          >
+            <Ionicons name="close" size={26} color="#fff" />
+          </TouchableOpacity>
+
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+            {pendingMedia?.mediaType === 'image' ? (
+              <Image source={{ uri: pendingMedia.uri }} style={{ width: '100%', height: '100%' }} resizeMode="contain" />
+            ) : pendingMedia ? (
+              <Video
+                source={{ uri: pendingMedia.uri }}
+                style={{ width: '100%', height: '100%' }}
+                resizeMode={ResizeMode.CONTAIN}
+                useNativeControls
+                shouldPlay
+                isLooping
+              />
+            ) : null}
+            {pendingMedia?.viewOnce && (
+              <View style={{ position: 'absolute', top: 100, alignSelf: 'center', backgroundColor: '#10B98133', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20 }}>
+                <Text style={{ color: colors.primary, fontWeight: '700' }}>👁 View once</Text>
+              </View>
+            )}
+          </View>
+
+          <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, padding: 10, paddingBottom: Platform.OS === 'ios' ? 28 : 14, backgroundColor: '#000' }}>
+            <TextInput
+              value={mediaCaption}
+              onChangeText={setMediaCaption}
+              placeholder="Add a caption…"
+              placeholderTextColor="#9CA3AF"
+              multiline
+              style={{ flex: 1, color: '#fff', backgroundColor: '#1F2937', borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10, maxHeight: 120, fontSize: 16 }}
+            />
+            <TouchableOpacity
+              onPress={confirmSendPendingMedia}
+              disabled={sending}
+              style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', opacity: sending ? 0.6 : 1 }}
+            >
+              {sending ? <ActivityIndicator color="#fff" /> : <Ionicons name="send" size={22} color="#fff" />}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
       {/* Forward chat picker */}
       <Modal
         visible={forwardMsg != null}
@@ -1818,6 +2022,49 @@ export default function ChatScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Per-chat lock gate — covers the chat until the user authenticates */}
+      {!lockOpen && lockInfo && (
+        <View style={S.lockGate}>
+          <Ionicons name="lock-closed" size={56} color={colors.primary} />
+          <Text style={S.lockGateTitle}>Chat locked</Text>
+          <Text style={S.lockGateSub}>{lockInfo.chatName}</Text>
+
+          {(lockInfo.lockMethod === 'biometric' || lockInfo.lockMethod === 'both') && (
+            <TouchableOpacity
+              style={S.lockGateBtn}
+              onPress={async () => { if (await verifyBiometric('Unlock chat')) setLockOpen(true); }}
+            >
+              <Ionicons name="finger-print" size={18} color="#fff" />
+              <Text style={S.lockGateBtnTxt}>Use biometrics</Text>
+            </TouchableOpacity>
+          )}
+
+          {(lockInfo.lockMethod === 'pin' || lockInfo.lockMethod === 'both') && (
+            <View style={{ width: '100%', maxWidth: 280, marginTop: 18 }}>
+              <TextInput
+                style={S.lockGateInput}
+                value={lockPin}
+                onChangeText={(t) => { setLockPin(t); setLockErr(false); }}
+                keyboardType="number-pad"
+                secureTextEntry
+                maxLength={8}
+                placeholder="Enter PIN"
+                placeholderTextColor={colors.textFaint}
+                onSubmitEditing={submitLockPin}
+              />
+              {lockErr && <Text style={S.lockGateErr}>Incorrect PIN</Text>}
+              <TouchableOpacity style={[S.lockGateBtn, { marginTop: 12 }]} onPress={submitLockPin}>
+                <Text style={S.lockGateBtnTxt}>Unlock</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          <TouchableOpacity style={{ marginTop: 20 }} onPress={() => router.replace('/(tabs)/chats' as any)}>
+            <Text style={S.lockGateBack}>Back to chats</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -2425,7 +2672,7 @@ function MessageBubble({
   msg, meId, member, chatId, otherMembers, onLongPress,
   reactionsForMsg, onToggleReaction,
   replyTarget, replyTargetMember,
-  highlight, tiltRevealed, grouped,
+  highlight, tiltRevealed, grouped, bubbleColors,
   pollVotesForMsg, onPollVoteChange,
 }: {
   msg: DisplayMessage;
@@ -2435,6 +2682,7 @@ function MessageBubble({
   otherMembers: ChatMember[];
   onLongPress: (msg: DisplayMessage, plain: string) => void;
   grouped?: boolean; // true when grouped with the previous (older) same-sender msg
+  bubbleColors?: { mine: string; peer: string } | null;
   reactionsForMsg?: ReactionSummary[];
   onToggleReaction?: (emoji: string) => void;
   replyTarget?: DisplayMessage | null;
@@ -2451,6 +2699,10 @@ function MessageBubble({
   const { colors } = useTheme();
   const S = useS();
   const isMine = msg.senderId === meId;
+  // Per-chat bubble color override (null = built-in styling). Text color is
+  // chosen for legibility on the chosen background.
+  const bubbleBg = bubbleColors ? (isMine ? bubbleColors.mine : bubbleColors.peer) : null;
+  const bubbleTxtColor = bubbleBg ? idealText(bubbleBg) : null;
   const [plain, setPlain] = useState<string>('');
   const [replyPlain, setReplyPlain] = useState<string>('');
   const [authHeader, setAuthHeader] = useState<string | null>(null);
@@ -2570,6 +2822,7 @@ function MessageBubble({
         style={[
           S.bubble,
           isMine ? S.bubbleMine : S.bubbleTheirs,
+          bubbleBg ? { backgroundColor: bubbleBg } : null,
           // Soften the tail corner on grouped (consecutive) messages.
           grouped && (isMine ? { borderTopRightRadius: 16 } : { borderTopLeftRadius: 16 }),
           isImage   && S.imageBubble,
@@ -2720,7 +2973,7 @@ function MessageBubble({
               </Text>
             ) : (
               <>
-                <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine]}>
+                <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, bubbleTxtColor ? { color: bubbleTxtColor } : null]}>
                   {renderRichText(plain, highlight)}
                 </Text>
                 {(() => { const u = extractUrl(plain); return u ? <LinkPreview url={u} /> : null; })()}
@@ -2728,6 +2981,21 @@ function MessageBubble({
             )
           ) : null
         )}
+
+        {/* Caption under a photo/video. For plaintext media the decrypted
+            content IS the caption; for encrypted media it's {t,mk} JSON. */}
+        {(isImage || isVideo) && (() => {
+          let cap = '';
+          if (plain) {
+            if (msg.meta?.encrypted) { try { cap = JSON.parse(plain)?.t || ''; } catch { cap = ''; } }
+            else cap = plain;
+          }
+          return cap ? (
+            <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, { marginTop: 6 }, bubbleTxtColor ? { color: bubbleTxtColor } : null]}>
+              {renderRichText(cap, highlight)}
+            </Text>
+          ) : null;
+        })()}
 
         <Text style={[S.bubbleMeta, !isMine && { color: colors.textDim }]}>
           {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -2773,6 +3041,14 @@ function MessageBubble({
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen:        { flex: 1, backgroundColor: c.bg },
+  lockGate:      { ...StyleSheet.absoluteFillObject, backgroundColor: c.bg, alignItems: 'center', justifyContent: 'center', padding: 32, zIndex: 50 },
+  lockGateTitle: { color: c.text, fontSize: 20, fontWeight: '800', marginTop: 16 },
+  lockGateSub:   { color: c.textDim, fontSize: 14, marginTop: 6, textAlign: 'center' },
+  lockGateBtn:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: c.primary, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 24, marginTop: 20, minWidth: 200 },
+  lockGateBtnTxt:{ color: '#fff', fontSize: 15, fontWeight: '800' },
+  lockGateInput: { backgroundColor: c.card, borderRadius: 12, borderWidth: 1, borderColor: c.border, color: c.text, fontSize: 18, textAlign: 'center', letterSpacing: 6, paddingVertical: 12 },
+  lockGateErr:   { color: c.danger, fontSize: 13, textAlign: 'center', marginTop: 8 },
+  lockGateBack:  { color: c.textDim, fontSize: 14, fontWeight: '600' },
   center:        { justifyContent: 'center', alignItems: 'center' },
 
   header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border, gap: 8 },
@@ -3012,7 +3288,8 @@ function bubblePropsEqual(a: any, b: any): boolean {
     a.replyTargetMember === b.replyTargetMember &&
     a.highlight === b.highlight &&
     a.tiltRevealed === b.tiltRevealed &&
-    a.grouped === b.grouped
+    a.grouped === b.grouped &&
+    a.bubbleColors === b.bubbleColors
   );
 }
 const MemoBubble = memo(MessageBubble, bubblePropsEqual);

@@ -176,3 +176,14 @@ export async function getChatTheme(chatId) {
   const global = await AsyncStorage.getItem(GLOBAL_KEY);
   return THEMES.find(t => t.id === global) || THEMES[0];
 }
+
+// Bubble colors chosen for this chat. Returns null for the built-in default so
+// chat.tsx keeps its native styling. Consumed by app/chat.tsx.
+export async function getBubbleColors(chatId) {
+  try {
+    const id = await AsyncStorage.getItem(BUBBLE_KEY + chatId);
+    const found = BUBBLE_COLORS.find(b => b.id === id);
+    if (!found || found.id === 'default') return null;
+    return { mine: found.mine, peer: found.peer };
+  } catch { return null; }
+}

@@ -375,36 +375,22 @@ export default function VaultFeaturesScreen() {
           )}
         </View>
 
-        {/* ── 3. Decoy Mode (Fake PIN) ── */}
-        <View style={styles.section}>
+        {/* ── 3. Decoy / Duress PIN → the REAL cryptographically-separate vault ──
+            (The old in-screen "fake PIN" wrote a key nothing read. The genuine
+            decoy vault lives on /duresspin: a scrypt-derived, AES-GCM-sealed
+            alternate vault that the real PIN never unlocks.) */}
+        <TouchableOpacity style={styles.section} activeOpacity={0.7} onPress={() => router.push('/duresspin')}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionIcon}>🎭</Text>
-            <View>
-              <Text style={styles.sectionTitle}>Decoy Mode</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.sectionTitle}>Decoy / Duress PIN</Text>
               <Text style={styles.sectionDesc}>
-                Fake PIN opens an empty decoy account
+                Set a separate PIN that opens a believable decoy vault — real and cryptographically isolated from your data.
               </Text>
             </View>
-            <Switch
-              style={{ marginLeft: 'auto' }}
-              value={settings.fakePinEnabled}
-              onValueChange={v => {
-                if (v) setShowFakePin(true);
-                else   handleDisableFakePin();
-              }}
-              trackColor={{ false: '#E5E7EB', true: '#D1FAE5' }}
-              thumbColor={settings.fakePinEnabled ? '#10B981' : '#6B7280'}
-            />
+            <Text style={{ fontSize: 22, color: '#9CA3AF', marginLeft: 'auto' }}>›</Text>
           </View>
-
-          {settings.fakePinEnabled && (
-            <View style={styles.infoBanner}>
-              <Text style={styles.infoBannerText}>
-                🎭  Decoy mode active — entering fake PIN shows empty account
-              </Text>
-            </View>
-          )}
-        </View>
+        </TouchableOpacity>
 
         {/* ── 4. Auto Screen Lock ── */}
         <View style={styles.section}>

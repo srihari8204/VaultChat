@@ -1771,9 +1771,11 @@ router.get('/:id/poll-votes', async (req, res) => {
   }
 });
 
-// POST /chats/:id/pin — pin a message chat-wide, or clear it (messageId: null).
+// POST /chats/:id/pin-message — pin a message chat-wide, or clear it (messageId: null).
 // Any member can pin (matches WhatsApp). Broadcasts so open chats update live.
-router.post('/:id/pin', async (req, res) => {
+// NOTE: distinct path from POST /:id/pin (per-user pin-chat-to-top); a shared path
+// let the chat-pin handler shadow this one, silently breaking message pinning.
+router.post('/:id/pin-message', async (req, res) => {
   try {
     const chatId = req.params.id;
     const me = await loadChatMembership(req, chatId);
