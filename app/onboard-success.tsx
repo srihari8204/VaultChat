@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
-import { onboarding, verifyMpinRemote, onboardingError } from '../lib/onboarding';
+import { onboarding, verifyMpinRemote, uploadAndSetProfilePhoto, onboardingError } from '../lib/onboarding';
 import { deviceSecurityAvailable, enableMfa } from '../lib/mfa';
 
 export default function OnboardSuccess() {
@@ -28,6 +28,10 @@ export default function OnboardSuccess() {
     setBusy(true);
     try {
       await verifyMpinRemote(userId, mpin);              // logs in → JWT stored
+
+      // Upload the picked avatar now that we have a token (best-effort).
+      const localPic = onboarding.get().profilePicLocalUri;
+      if (localPic) { try { await uploadAndSetProfilePhoto(localPic); } catch { /* non-blocking */ } }
 
       if (mfaOn) {
         const enabled = await enableMfa();

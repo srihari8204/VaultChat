@@ -75,7 +75,7 @@ export default function OnboardLanding() {
           <EmailAccountPicker
             email={email}
             onEmailChange={setEmail}
-            onAccountPicked={(a) => onboarding.set({ firstName: a.firstName, lastName: a.lastName, profilePicUrl: a.photoURL })}
+            onAccountPicked={(a) => onboarding.set({ firstName: a.firstName, lastName: a.lastName })}
           />
 
           <TouchableOpacity

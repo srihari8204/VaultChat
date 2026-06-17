@@ -8,6 +8,7 @@
 
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import { api, setTokens, setCachedUser } from './api';
+import { uploadAttachment } from './chatService';
 
 // ── In-memory onboarding store ──────────────────────────────────────────────
 export interface OnboardingState {
@@ -114,6 +115,13 @@ export async function verifyMpinRemote(userId: string, mpin: string): Promise<vo
 
 export async function configureMfa(enabled: boolean): Promise<void> {
   await api('/auth/mfa/configure', { method: 'POST', json: { mfaEnabled: enabled } });
+}
+
+// Upload a picked/cropped avatar (post-login — needs the JWT) and set it on the
+// profile. Best-effort: a failed photo upload must not block reaching Chats.
+export async function uploadAndSetProfilePhoto(localUri: string): Promise<void> {
+  const up = await uploadAttachment(localUri, `avatar_${Date.now()}.jpg`, 'image/jpeg');
+  if (up?.id) await api('/auth/profile/photo', { method: 'POST', json: { photoId: up.id } });
 }
 
 // ── MPIN recovery (forgot MPIN → security questions) ────────────────────────

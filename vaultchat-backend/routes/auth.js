@@ -802,6 +802,18 @@ router.post('/mpin/recover', async (req, res) => {
   }
 });
 
+// POST /auth/profile/photo — (JWT) set the profile photo (attachment id / url).
+router.post('/profile/photo', jwtUtil.requireAuth, async (req, res) => {
+  try {
+    const photoId = req.body?.photoId ? req.body.photoId.toString() : null;
+    await db.query(`UPDATE users SET photo_url = $1, updated_at = NOW() WHERE id = $2`, [photoId, req.user.id]);
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[auth/profile/photo]', err.message);
+    return envErr(res, 500, 'server_error', 'Could not save photo');
+  }
+});
+
 // POST /auth/mfa/configure — (JWT) toggle device-MFA flag.
 router.post('/mfa/configure', jwtUtil.requireAuth, async (req, res) => {
   try {

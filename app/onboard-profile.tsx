@@ -4,10 +4,11 @@
 // the in-memory onboarding store until /auth/profile/init at the end of the chain.
 
 import DateTimePicker from '@react-native-community/datetimepicker';
+import * as ImagePicker from 'expo-image-picker';
 import { Stack, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import {
-  KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View,
+  Alert, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
@@ -33,6 +34,26 @@ export default function OnboardProfile() {
   const [status, setStatus] = useState(st.status);
   const [dob, setDob] = useState<Date | null>(st.dob ? new Date(st.dob) : null);
   const [showPicker, setShowPicker] = useState(false);
+  const [pic, setPic] = useState<string | null>(st.profilePicLocalUri);
+
+  const pickFrom = async (source: 'camera' | 'gallery') => {
+    const perm = source === 'camera'
+      ? await ImagePicker.requestCameraPermissionsAsync()
+      : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) { Alert.alert('Permission needed', `Allow ${source} access to set a photo.`); return; }
+    const fn = source === 'camera' ? ImagePicker.launchCameraAsync : ImagePicker.launchImageLibraryAsync;
+    const res = await fn({ allowsEditing: true, aspect: [1, 1], quality: 0.85 });   // square crop
+    if (res.canceled || !res.assets?.[0]) return;
+    const uri = res.assets[0].uri;
+    setPic(uri);
+    onboarding.set({ profilePicLocalUri: uri });
+  };
+  const choosePhoto = () => Alert.alert('Profile photo', undefined, [
+    { text: 'Take photo', onPress: () => pickFrom('camera') },
+    { text: 'Choose from gallery', onPress: () => pickFrom('gallery') },
+    ...(pic ? [{ text: 'Remove', style: 'destructive' as const, onPress: () => { setPic(null); onboarding.set({ profilePicLocalUri: null }); } }] : []),
+    { text: 'Cancel', style: 'cancel' as const },
+  ]);
 
   const ageOk = !!dob && ageOf(dob) >= 13;
   const valid = firstName.trim().length > 0 && ageOk;
@@ -54,6 +75,13 @@ export default function OnboardProfile() {
           <TouchableOpacity onPress={() => router.back()} style={s.back}><Text style={s.backTxt}>←</Text></TouchableOpacity>
           <Text style={s.title}>Set up your profile</Text>
           <Text style={s.step}>Step 1 of 3</Text>
+
+          <TouchableOpacity style={s.avatarWrap} onPress={choosePhoto} activeOpacity={0.8}>
+            {pic
+              ? <Image source={{ uri: pic }} style={s.avatar} />
+              : <View style={[s.avatar, s.avatarEmpty]}><Text style={s.avatarPlus}>＋</Text></View>}
+            <Text style={s.avatarHint}>{pic ? 'Change photo' : 'Add photo'}</Text>
+          </TouchableOpacity>
 
           <Text style={s.label}>EMAIL</Text>
           <TextInput style={[s.input, s.disabled]} value={st.email} editable={false} />
@@ -116,6 +144,11 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   backTxt: { color: c.text, fontSize: 26 },
   title: { color: c.text, fontSize: 24, fontWeight: '900' },
   step: { color: c.primary, fontSize: 12, fontWeight: '700', marginTop: 4, marginBottom: 16 },
+  avatarWrap: { alignItems: 'center', marginBottom: 8 },
+  avatar: { width: 96, height: 96, borderRadius: 48 },
+  avatarEmpty: { backgroundColor: c.card, borderWidth: 1, borderColor: c.border, alignItems: 'center', justifyContent: 'center' },
+  avatarPlus: { color: c.textDim, fontSize: 34, fontWeight: '300' },
+  avatarHint: { color: c.primary, fontSize: 13, fontWeight: '700', marginTop: 8 },
   label: { color: c.textDim, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginTop: 16, marginBottom: 6 },
   input: { minHeight: 52, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.card, paddingHorizontal: 14, paddingVertical: 14, color: c.text, fontSize: 16 },
   disabled: { opacity: 0.6 },
