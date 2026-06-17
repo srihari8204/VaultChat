@@ -252,11 +252,18 @@ router.post('/refresh', async (req, res) => {
     // For typical traffic this set is tiny per user, but here we don't know
     // the user. Mitigation: keep refresh tokens short (90 days max) and add
     // a candidate prefix lookup later if scale demands.
+    // Grace window: also accept a token revoked in the last 30s. Refresh tokens
+    // rotate (single-use), so a burst of concurrent requests on app-resume can
+    // race — the client dedupes, but this is belt-and-suspenders so a slightly-
+    // late retry still succeeds instead of logging the user out.
+    const GRACE_SEC = 30;
     const rows = await db.query(
-      `SELECT id, user_id, token_hash FROM refresh_tokens
-       WHERE revoked_at IS NULL AND expires_at > NOW()
+      `SELECT id, user_id, token_hash, revoked_at FROM refresh_tokens
+       WHERE expires_at > NOW()
+         AND (revoked_at IS NULL OR revoked_at > NOW() - ($1 || ' seconds')::INTERVAL)
        ORDER BY id DESC
-       LIMIT 500`
+       LIMIT 500`,
+      [GRACE_SEC.toString()],
     );
     let match = null;
     for (const row of rows.rows) {
@@ -278,8 +285,13 @@ router.post('/refresh', async (req, res) => {
     }
     const user = userRow.rows[0];
 
-    // Rotate: revoke old, issue new
-    await db.query(`UPDATE refresh_tokens SET revoked_at = NOW(), last_used_at = NOW() WHERE id = $1`, [match.id]);
+    // Rotate: revoke old (unless it's a grace re-use of an already-revoked token,
+    // in which case don't double-revoke), issue new.
+    if (!match.revoked_at) {
+      await db.query(`UPDATE refresh_tokens SET revoked_at = NOW(), last_used_at = NOW() WHERE id = $1`, [match.id]);
+    } else {
+      await db.query(`UPDATE refresh_tokens SET last_used_at = NOW() WHERE id = $1`, [match.id]);
+    }
     const tokens = await issueTokens(user, req);
 
     return res.json(tokens);
