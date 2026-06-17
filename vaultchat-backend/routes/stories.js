@@ -15,6 +15,7 @@
 
 const express = require('express');
 const db      = require('../db');
+const vault   = require('../lib/vault');
 const jwtUtil = require('../jwt');
 
 const router = express.Router();
@@ -136,7 +137,7 @@ router.get('/feed', async (req, res) => {
     const r = await db.query(
       `SELECT s.id, s.user_id, s.attachment_id, s.media_type, s.caption, s.encrypted,
               s.created_at, s.expires_at,
-              u.name, u.email, u.photo_url,
+              u.name, u.email, u.first_name_cipher, u.last_name_cipher, u.email_cipher, u.photo_url,
               EXISTS (SELECT 1 FROM story_views sv
                        WHERE sv.story_id = s.id AND sv.viewer_id = $1) AS seen
          FROM stories s
@@ -172,8 +173,8 @@ router.get('/feed', async (req, res) => {
       if (!bucket) {
         bucket = {
           userId:    row.user_id,
-          name:      row.name,
-          email:     row.email,
+          name:      vault.identityFromRow(row).name,
+          email:     vault.identityFromRow(row).email,
           photoURL:  row.photo_url,
           isMine:    row.user_id === req.user.id,
           stories:   [],
@@ -221,7 +222,7 @@ router.get('/:id/views', async (req, res) => {
     if (owner.rows[0].user_id !== req.user.id) return res.status(403).json({ error: 'author only' });
 
     const r = await db.query(
-      `SELECT sv.viewer_id, sv.viewed_at, u.name, u.email, u.photo_url
+      `SELECT sv.viewer_id, sv.viewed_at, u.name, u.email, u.first_name_cipher, u.last_name_cipher, u.email_cipher, u.photo_url
          FROM story_views sv
          JOIN users u ON u.id = sv.viewer_id
         WHERE sv.story_id = $1
@@ -230,8 +231,8 @@ router.get('/:id/views', async (req, res) => {
     );
     res.json(r.rows.map(row => ({
       userId:   row.viewer_id,
-      name:     row.name,
-      email:    row.email,
+      name:     vault.identityFromRow(row).name,
+      email:    vault.identityFromRow(row).email,
       photoURL: row.photo_url,
       viewedAt: row.viewed_at,
     })));

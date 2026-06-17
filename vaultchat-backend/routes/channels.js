@@ -16,6 +16,7 @@ const express = require('express');
 const crypto  = require('crypto');
 const jwtUtil = require('../jwt');
 const db      = require('../db');
+const vault   = require('../lib/vault');
 const { sendPushToTokens } = require('../push');
 
 const router = express.Router();
@@ -49,7 +50,10 @@ function publicChannel(row, myId) {
 }
 
 function publicPost(p) {
-  return { id: p.id, text: p.text, authorId: p.author_id, authorName: p.author_name, createdAt: p.created_at };
+  const authorName = vault.identityFromRow({
+    name: p.author_name, first_name_cipher: p.author_fnc, last_name_cipher: p.author_lnc, email_cipher: p.author_ec,
+  }).name;
+  return { id: p.id, text: p.text, authorId: p.author_id, authorName, createdAt: p.created_at };
 }
 
 async function loadChannel(id) {
@@ -154,7 +158,8 @@ router.get('/:id/posts', async (req, res) => {
     if (before && Number.isFinite(before)) { params.push(before); where += ` AND p.id < $${params.length}`; }
     params.push(limit);
     const r = await db.query(
-      `SELECT p.*, COALESCE(NULLIF(u.name, ''), u.email) AS author_name
+      `SELECT p.*, u.name AS author_name, u.first_name_cipher AS author_fnc,
+              u.last_name_cipher AS author_lnc, u.email_cipher AS author_ec
          FROM channel_posts p JOIN users u ON u.id = p.author_id
         WHERE ${where} ORDER BY p.id DESC LIMIT $${params.length}`,
       params
@@ -190,11 +195,11 @@ router.post('/:id/posts', async (req, res) => {
 
     // Realtime: push the new post to every subscriber currently viewing.
     const nameR = await db.query(
-      `SELECT COALESCE(NULLIF(name, ''), email) AS n FROM users WHERE id = $1`, [req.user.id]
+      `SELECT name, first_name_cipher, last_name_cipher, email_cipher FROM users WHERE id = $1`, [req.user.id]
     );
     const out = {
       id: post.id, text: post.text, authorId: post.author_id,
-      authorName: nameR.rows[0]?.n ?? null, createdAt: post.created_at,
+      authorName: vault.identityFromRow(nameR.rows[0] || {}).name, createdAt: post.created_at,
     };
     broadcastChannel(ch.id, 'channel_post', out);
     res.json(out);

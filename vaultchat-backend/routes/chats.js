@@ -156,11 +156,14 @@ async function sendChatMessagePush(chatId, senderId, msg, chatType) {
     // Sender display name + chat name (for group context)
     const meta = await db.query(
       `SELECT
-         (SELECT COALESCE(NULLIF(name, ''), email) FROM users WHERE id = $1) AS sender_name,
+         (SELECT name              FROM users WHERE id = $1) AS sender_name,
+         (SELECT first_name_cipher FROM users WHERE id = $1) AS sender_fnc,
+         (SELECT last_name_cipher  FROM users WHERE id = $1) AS sender_lnc,
+         (SELECT email_cipher      FROM users WHERE id = $1) AS sender_ec,
          (SELECT name FROM chats WHERE id = $2) AS chat_name`,
       [senderId, chatId]
     );
-    const senderName = meta.rows[0]?.sender_name || 'New message';
+    const senderName = peerName(meta.rows[0] || {}, 'sender_') || 'New message';
     const chatName   = meta.rows[0]?.chat_name;
 
     // Phase 3a stores content as opaque (currently plaintext). For privacy
@@ -526,13 +529,13 @@ router.get('/:id/join-requests', async (req, res) => {
     if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
     if (mem.role !== 'admin' && mem.role !== 'owner') return res.status(403).json({ error: 'Admin only' });
     const r = await db.query(
-      `SELECT jr.user_id, jr.created_at, COALESCE(NULLIF(u.name, ''), u.email) AS name, u.photo_url
+      `SELECT jr.user_id, jr.created_at, u.name, u.first_name_cipher, u.last_name_cipher, u.email_cipher, u.photo_url
          FROM chat_join_requests jr JOIN users u ON u.id = jr.user_id
         WHERE jr.chat_id = $1 ORDER BY jr.created_at`,
       [req.params.id]
     );
     res.json(r.rows.map(row => ({
-      userId: row.user_id, name: row.name, photoURL: row.photo_url, requestedAt: row.created_at,
+      userId: row.user_id, name: vault.identityFromRow(row).name, photoURL: row.photo_url, requestedAt: row.created_at,
     })));
   } catch (err) {
     console.error('[join-requests GET]', err.message);
@@ -1552,19 +1555,17 @@ router.get('/:id/messages/:msgId/reactions', async (req, res) => {
     if (!Number.isFinite(msgId)) return res.status(400).json({ error: 'invalid msgId' });
 
     const r = await req.dbQuery(
-      `SELECT mr.emoji, mr.user_id, u.name, u.email
+      `SELECT mr.emoji, mr.user_id, u.name, u.email, u.first_name_cipher, u.last_name_cipher, u.email_cipher
          FROM message_reactions mr
          JOIN users u ON u.id = mr.user_id
         WHERE mr.message_id = $1
         ORDER BY mr.created_at ASC`,
       [msgId]
     );
-    res.json(r.rows.map(row => ({
-      emoji:  row.emoji,
-      userId: row.user_id,
-      name:   row.name,
-      email:  row.email,
-    })));
+    res.json(r.rows.map(row => {
+      const idn = vault.identityFromRow(row);
+      return { emoji: row.emoji, userId: row.user_id, name: idn.name, email: idn.email };
+    }));
   } catch (err) {
     console.error('[reactions GET]', err.message);
     res.status(500).json({ error: 'Failed to load reactions' });
