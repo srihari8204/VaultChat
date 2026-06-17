@@ -83,7 +83,7 @@ export async function verifyEmailOtp(email: string, code: string): Promise<strin
   return r.emailTicket;
 }
 
-export async function lookupUser(email: string, phone: string): Promise<{ exists: boolean; userId?: string }> {
+export async function lookupUser(email: string, phone: string): Promise<{ exists: boolean; userId?: string; conflict?: 'phone' | 'email' }> {
   return api('/auth/lookup', { method: 'POST', json: { email, phone }, auth: false });
 }
 

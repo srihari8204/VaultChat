@@ -17,9 +17,9 @@ export default function IndexScreen() {
     (async () => {
       try {
         const token = await getAccessToken();
-        router.replace(token ? "/(tabs)/chats" : "/onboard");
+        router.replace((token ? "/(tabs)/chats" : "/onboard") as any);
       } catch {
-        router.replace("/onboard");
+        router.replace("/onboard" as any);
       }
     })();
   }, []);

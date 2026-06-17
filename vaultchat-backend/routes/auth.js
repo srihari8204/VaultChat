@@ -572,13 +572,25 @@ router.post('/lookup', async (req, res) => {
     const phone = vault.normalizePhone(req.body?.phone);
     if (!email || !phone) return envErr(res, 400, 'bad_request', 'email and phone are required');
 
+    const el = vault.emailLookup(email);
+    const pl = vault.phoneLookup(phone);
     const r = await db.query(
-      `SELECT id FROM users WHERE email_lookup = $1 AND phone_lookup = $2 AND is_deleted = FALSE LIMIT 1`,
-      [vault.emailLookup(email), vault.phoneLookup(phone)],
+      `SELECT id, email_lookup, phone_lookup FROM users
+       WHERE (email_lookup = $1 OR phone_lookup = $2) AND is_deleted = FALSE LIMIT 2`,
+      [el, pl],
     );
-    const exists = !!r.rows[0];
-    await auditAttempt(r.rows[0]?.id, req.ip, 'lookup', exists);
-    return res.json(exists ? { exists: true, userId: r.rows[0].id } : { exists: false });
+    const both = r.rows.find(row => row.email_lookup === el && row.phone_lookup === pl);
+    if (both) {
+      await auditAttempt(both.id, req.ip, 'lookup', true);
+      return res.json({ exists: true, userId: both.id });
+    }
+    // One identifier is taken by a DIFFERENT account → block (1 mobile ↔ 1 email).
+    const phoneTaken = r.rows.some(row => row.phone_lookup === pl);
+    const emailTaken = r.rows.some(row => row.email_lookup === el);
+    await auditAttempt(null, req.ip, 'lookup', false);
+    if (phoneTaken) return res.json({ exists: false, conflict: 'phone' });
+    if (emailTaken) return res.json({ exists: false, conflict: 'email' });
+    return res.json({ exists: false });
   } catch (err) {
     console.error('[auth/lookup]', err.message);
     return envErr(res, 500, 'server_error', 'Lookup failed');

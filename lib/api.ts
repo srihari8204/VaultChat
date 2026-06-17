@@ -226,7 +226,8 @@ export async function api<T = any>(path: string, opts: ApiOptions = {}): Promise
     let msg = res.statusText || `HTTP ${res.status}`;
     try {
       const j: any = await res.json();
-      if (j?.error) msg = String(j.error);
+      // Old routes: { error: "msg" }. New onboarding routes: { error: { code, message } }.
+      if (j?.error) msg = typeof j.error === 'string' ? j.error : (j.error.message || msg);
     } catch {}
     const err: any = new Error(msg);
     err.status = res.status;

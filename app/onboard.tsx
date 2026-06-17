@@ -42,6 +42,10 @@ export default function OnboardLanding() {
       const r = await lookupUser(cleanEmail, e164);
       if (r.exists && r.userId) {
         router.push({ pathname: '/mpin-entry', params: { userId: r.userId } } as any);
+      } else if (r.conflict === 'phone') {
+        Alert.alert('Mobile already registered', 'This mobile number is already registered with another email account. Use that email, or a different mobile number.');
+      } else if (r.conflict === 'email') {
+        Alert.alert('Email already registered', 'This email is already registered with another mobile number. Use that mobile number, or a different email.');
       } else {
         await sendEmailOtp(cleanEmail);
         router.push('/email-verify' as any);
