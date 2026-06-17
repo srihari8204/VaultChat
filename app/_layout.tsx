@@ -28,10 +28,8 @@ import { ThemeProvider } from '../lib/theme';
 import { runSecurityCheck } from '../services/securityService';
 import { attachTapHandler } from '../lib/push';
 import { getSocket } from '../lib/socket';
-import { getAccessToken, sealedSessionLocked } from '../lib/api';
+import { getAccessToken } from '../lib/api';
 import { E2EE_ENABLED } from '../constants/flags';
-import { hasPIN } from './(constants)/authService';
-import { isUnlocked } from '../lib/sessionLock';
 global.Buffer = Buffer;
 
 // ── Sentry frontend init (Day 16) ──────────────────────────────────
@@ -92,16 +90,11 @@ function RootLayout() {
         }
       }
 
-      // ── MPIN gate ──────────────────────────────────────────────
-      // Signed-in users who have set an MPIN must unlock on every cold
-      // start (the unlocked flag resets on full reload). Fail open on error.
+      // The cold-start launch gate now lives in app/index.tsx: a signed-in user
+      // with device MFA enabled is routed to /app-lock (biometric or MPIN); the
+      // old per-launch PIN gate (/enter-mpin) is retired with the legacy auth flow.
       try {
         const tok = await getAccessToken();
-        // #32: a sealed session has no readable token until unlocked — gate on it too.
-        const sealedLocked = await sealedSessionLocked();
-        if ((tok || sealedLocked) && !isUnlocked() && ((await hasPIN()) || sealedLocked)) {
-          router.replace('/enter-mpin' as any);
-        }
         // Publish this device's E2EE key bundle on startup so peers can open
         // encrypted sessions with us immediately. Gated + lazy + fire-and-forget.
         if (tok && E2EE_ENABLED) {
@@ -109,7 +102,7 @@ function RootLayout() {
             .then(m => m.provisionE2EEIdentity())
             .catch(() => {});
         }
-      } catch { /* don't lock users out on an unexpected error */ }
+      } catch { /* don't block startup on an unexpected error */ }
 
       setSecurityChecked(true);
       // Push token registration happens on the chats-screen mount
@@ -186,14 +179,7 @@ function RootLayout() {
 
         {/* Auth flow */}
         <Stack.Screen name="index" />
-        <Stack.Screen name="login" />
-        <Stack.Screen name="signup" />
-        <Stack.Screen name="profile-setup" />
         <Stack.Screen name="security-questions" />
-        <Stack.Screen name="pinentry" />
-        <Stack.Screen name="otp" />
-        <Stack.Screen name="set-mpin" options={{ gestureEnabled: false }} />
-        <Stack.Screen name="enter-mpin" options={{ gestureEnabled: false }} />
         <Stack.Screen name="facescan" />
         <Stack.Screen name="biometric-setup" />
         {/* Main app — 6-tab navigation */}
@@ -257,7 +243,6 @@ function RootLayout() {
         <Stack.Screen name="breachguard" />
         <Stack.Screen name="deepfake" />
         <Stack.Screen name="trustscore" />
-        <Stack.Screen name="vault-id" />
         <Stack.Screen name="meeting-scheduler" />
         <Stack.Screen name="three-factor-verify" options={{ gestureEnabled: false }} />
         <Stack.Screen name="zero-knowledge" />
@@ -287,13 +272,7 @@ function RootLayout() {
         <Stack.Screen name="group-info" />
 
         {/* Auth extras */}
-        <Stack.Screen name="welcome" />
-        <Stack.Screen name="phone" />
-        <Stack.Screen name="register" />
-        <Stack.Screen name="forgot" />
-        <Stack.Screen name="recovery" />
         <Stack.Screen name="setup-complete" />
-        <Stack.Screen name="face-verify" />
         <Stack.Screen name="face-verify-new-device" />
         <Stack.Screen name="secret-code" />
 
@@ -323,7 +302,6 @@ function RootLayout() {
         <Stack.Screen name="docscanner" />
         <Stack.Screen name="notifications" />
         <Stack.Screen name="location" />
-        <Stack.Screen name="modal" />
         <Stack.Screen name="filevault" />
         <Stack.Screen name="vaultid" />
         <Stack.Screen name="testconsole" />
