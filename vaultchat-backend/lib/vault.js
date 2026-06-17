@@ -156,11 +156,26 @@ function identityFromRow(row) {
   };
 }
 
+// AES-256-GCM decrypt a blob with an EXPLICIT hex key (not the master key). Used
+// for encrypted avatars whose per-photo data key was wrapped under the master key.
+// Blob layout matches the @noble client: iv(12) ‖ ciphertext ‖ tag(16).
+function decryptWithKey(blob, keyHex) {
+  const key = Buffer.from(keyHex, 'hex');
+  const buf = Buffer.isBuffer(blob) ? blob : Buffer.from(blob);
+  if (buf.length < 12 + 16) throw new Error('decryptWithKey: blob too short');
+  const iv  = buf.subarray(0, 12);
+  const tag = buf.subarray(buf.length - 16);
+  const ct  = buf.subarray(12, buf.length - 16);
+  const d = crypto.createDecipheriv('aes-256-gcm', key, iv);
+  d.setAuthTag(tag);
+  return Buffer.concat([d.update(ct), d.final()]);
+}
+
 module.exports = {
   encrypt, decrypt,
   lookupHash, emailLookup, phoneLookup,
   hashSecret, verifySecret,
   signTicket, verifyTicket,
   normalizeEmail, normalizePhone, normalizeAnswer,
-  identityFromRow,
+  identityFromRow, decryptWithKey,
 };

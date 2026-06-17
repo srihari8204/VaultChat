@@ -25,6 +25,7 @@ const multer  = require('multer');
 
 const jwtUtil = require('../jwt');
 const objectStore = require('../lib/storage');
+const vault   = require('../lib/vault');
 
 const router = express.Router();
 
@@ -185,6 +186,30 @@ router.get('/:id', jwtUtil.requireAuth, async (req, res) => {
       // Owners can always re-fetch (so the sender can review their send).
       if (att.view_once && att.viewed_at) {
         return res.status(410).json({ error: 'This media has already been viewed and is no longer available.' });
+      }
+    }
+
+    // Encrypted avatar: if this attachment is in use as a profile photo that was
+    // uploaded encrypted, stream-decrypt it here (the bytes are ciphertext in the
+    // store; the per-photo key is wrapped under the master key). Falls through to
+    // the normal path if anything is missing — never serves a broken image.
+    const keyRow = await req.dbQuery(
+      `SELECT photo_key_cipher FROM users WHERE photo_url = $1 AND photo_key_cipher IS NOT NULL LIMIT 1`,
+      [String(att.id)],
+    );
+    if (keyRow.rows[0]?.photo_key_cipher) {
+      try {
+        const cipherBytes = att.storage_backend === 's3'
+          ? await objectStore.getObject(att.storage_path)
+          : require('fs').readFileSync(path.join(UPLOAD_DIR, att.storage_path));
+        const dekHex = vault.decrypt(keyRow.rows[0].photo_key_cipher);
+        const plain  = vault.decryptWithKey(cipherBytes, dekHex);
+        res.setHeader('Content-Type', 'image/jpeg');
+        res.setHeader('Cache-Control', 'private, max-age=86400');
+        return res.end(plain);
+      } catch (e) {
+        console.error('[uploads avatar-decrypt]', e.message);
+        // fall through to normal serving below
       }
     }
 

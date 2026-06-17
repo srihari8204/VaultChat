@@ -7,6 +7,10 @@
 // fills the same role the spec's useOnboardingStore would.)
 
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
+import * as FileSystem from 'expo-file-system/legacy';
+import { gcm } from '@noble/ciphers/aes.js';
+import { randomBytes, bytesToHex } from '@noble/hashes/utils.js';
+import { Buffer } from 'buffer';
 import { api, setTokens, setCachedUser } from './api';
 import { uploadAttachment } from './chatService';
 
@@ -118,10 +122,24 @@ export async function configureMfa(enabled: boolean): Promise<void> {
 }
 
 // Upload a picked/cropped avatar (post-login — needs the JWT) and set it on the
-// profile. Best-effort: a failed photo upload must not block reaching Chats.
+// profile. The bytes are AES-256-GCM encrypted with a random per-photo key BEFORE
+// upload, so the object store only ever holds ciphertext; the key is sent to the
+// server (over TLS) which wraps it under the master key. Best-effort: a failed
+// photo upload must not block reaching Chats.
 export async function uploadAndSetProfilePhoto(localUri: string): Promise<void> {
-  const up = await uploadAttachment(localUri, `avatar_${Date.now()}.jpg`, 'image/jpeg');
-  if (up?.id) await api('/auth/profile/photo', { method: 'POST', json: { photoId: up.id } });
+  const b64 = await FileSystem.readAsStringAsync(localUri, { encoding: FileSystem.EncodingType.Base64 });
+  const bytes = new Uint8Array(Buffer.from(b64, 'base64'));
+
+  const dek = randomBytes(32);
+  const iv  = randomBytes(12);
+  const ct  = gcm(dek, iv).encrypt(bytes);                 // ciphertext includes the 16-byte tag
+  const blob = new Uint8Array(iv.length + ct.length);
+  blob.set(iv, 0); blob.set(ct, iv.length);                // iv ‖ ct‖tag
+
+  const tmp = `${FileSystem.cacheDirectory}avatar_${Date.now()}.enc`;
+  await FileSystem.writeAsStringAsync(tmp, Buffer.from(blob).toString('base64'), { encoding: FileSystem.EncodingType.Base64 });
+  const up = await uploadAttachment(tmp, 'avatar.enc', 'application/octet-stream');
+  if (up?.id) await api('/auth/profile/photo', { method: 'POST', json: { photoId: up.id, photoKey: bytesToHex(dek) } });
 }
 
 // ── MPIN recovery (forgot MPIN → security questions) ────────────────────────

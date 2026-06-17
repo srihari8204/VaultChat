@@ -812,11 +812,19 @@ router.post('/mpin/recover', async (req, res) => {
   }
 });
 
-// POST /auth/profile/photo — (JWT) set the profile photo (attachment id / url).
+// POST /auth/profile/photo — (JWT) set the profile photo. photoKey (hex) is the
+// per-photo AES key the client encrypted the avatar with; we wrap it under the
+// master key so the serve path can stream-decrypt it. Omit photoKey for a legacy
+// plaintext photo.
 router.post('/profile/photo', jwtUtil.requireAuth, async (req, res) => {
   try {
-    const photoId = req.body?.photoId ? req.body.photoId.toString() : null;
-    await db.query(`UPDATE users SET photo_url = $1, updated_at = NOW() WHERE id = $2`, [photoId, req.user.id]);
+    const photoId  = req.body?.photoId ? req.body.photoId.toString() : null;
+    const photoKey = req.body?.photoKey ? req.body.photoKey.toString() : null;
+    const keyCipher = (photoId && photoKey) ? vault.encrypt(photoKey) : null;
+    await db.query(
+      `UPDATE users SET photo_url = $1, photo_key_cipher = $2, updated_at = NOW() WHERE id = $3`,
+      [photoId, keyCipher, req.user.id],
+    );
     return res.json({ ok: true });
   } catch (err) {
     console.error('[auth/profile/photo]', err.message);

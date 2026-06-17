@@ -94,4 +94,15 @@ async function presignGet(key, expiresIn = 3600) {
   return getSignedUrl(c, new GetObjectCommand({ Bucket: BUCKET, Key: key }), { expiresIn });
 }
 
-module.exports = { enabled, client, ensureBucket, presignPut, presignGet, BUCKET };
+// Server-side download → Buffer. Used to stream-decrypt encrypted avatars
+// (the server must touch those bytes; everything else is served presigned-direct).
+async function getObject(key) {
+  const c = client();
+  if (!c) return null;
+  const out = await c.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }));
+  const chunks = [];
+  for await (const chunk of out.Body) chunks.push(chunk);
+  return Buffer.concat(chunks);
+}
+
+module.exports = { enabled, client, ensureBucket, presignPut, presignGet, getObject, BUCKET };
