@@ -9,6 +9,7 @@ import { Platform, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Aurora, SPACING } from '../../constants/theme';
 import { AppText } from '../../components/ui/Text';
+import { useUnreadTotal } from '../../lib/unreadStore';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -25,9 +26,18 @@ const ICONS: Record<string, { on: IoniconName; off: IoniconName }> = {
 function TabIcon({ tab, label, focused }: { tab: keyof typeof ICONS; label: string; focused: boolean }) {
   const g = ICONS[tab];
   const color = focused ? Aurora.primary : Aurora.textDim;
+  const unread = useUnreadTotal();
+  const badge = tab === 'chats' && unread > 0;
   return (
     <View style={styles.tabIconWrap}>
-      <Ionicons name={focused ? g.on : g.off} size={22} color={color} />
+      <View>
+        <Ionicons name={focused ? g.on : g.off} size={22} color={color} />
+        {badge && (
+          <View style={styles.badge}>
+            <AppText variant="tiny" color="#fff" style={styles.badgeTxt}>{unread > 99 ? '99+' : unread}</AppText>
+          </View>
+        )}
+      </View>
       <AppText variant="tiny" color={color} style={styles.tabLabel}>{label}</AppText>
     </View>
   );
@@ -70,4 +80,9 @@ const styles = StyleSheet.create({
   },
   tabIconWrap: { alignItems: 'center', justifyContent: 'center', gap: 3, width: 64 },
   tabLabel: { marginTop: 1 },
+  badge: {
+    position: 'absolute', top: -5, right: -10, minWidth: 18, height: 18, borderRadius: 9,
+    backgroundColor: Aurora.danger, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4,
+  },
+  badgeTxt: { fontSize: 10, fontWeight: '800', lineHeight: 14 },
 });

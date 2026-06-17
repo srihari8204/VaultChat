@@ -814,6 +814,12 @@ router.post('/:id/messages', async (req, res) => {
         `UPDATE chats SET last_message_id = $1, last_message_at = $2 WHERE id = $3`,
         [m.rows[0].id, m.rows[0].created_at, req.params.id]
       );
+      // Resurface the chat for any recipient who had hidden/deleted it — a new
+      // message must bring it back into their list, otherwise they never see it.
+      await client.query(
+        `UPDATE chat_members SET hidden = FALSE WHERE chat_id = $1 AND user_id <> $2 AND hidden = TRUE`,
+        [req.params.id, req.user.id]
+      );
       return m.rows[0];
     });
 

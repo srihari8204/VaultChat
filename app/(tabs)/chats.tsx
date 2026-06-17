@@ -23,6 +23,7 @@ import {
 } from '../../lib/chatService';
 import { registerPushToken } from '../../lib/push';
 import { getSocket } from '../../lib/socket';
+import { setUnreadTotal } from '../../lib/unreadStore';
 import { getDraftMap } from '../../lib/drafts';
 
 type FolderId = 'all' | 'unread' | 'groups' | 'pinned' | 'archive';
@@ -66,6 +67,8 @@ export default function ChatsScreen() {
       const list = await listChats();
       setChats(list);
       setError(null);
+      // Publish total unread (non-archived) so the Chats tab can badge it.
+      setUnreadTotal(list.reduce((n, c) => n + (c.archived ? 0 : (c.unreadCount > 0 ? 1 : 0)), 0));
     } catch (e: any) {
       setError(e?.message ?? 'Failed to load chats');
     }
