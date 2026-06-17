@@ -136,10 +136,31 @@ function verifyTicket(token, expectedData) {
   } catch { return false; }
 }
 
+// Decrypt the identity PII from a users row, falling back to the legacy plaintext
+// columns for any pre-encryption rows. Used by the publicUser serializers so the
+// rest of the app sees real values regardless of which storage a row uses.
+function safeDec(c) { try { return c ? decrypt(c) : null; } catch { return null; } }
+function identityFromRow(row) {
+  if (!row) return {};
+  const first = safeDec(row.first_name_cipher);
+  const last  = safeDec(row.last_name_cipher);
+  const name  = (first || last) ? [first, last].filter(Boolean).join(' ') : (row.name ?? null);
+  return {
+    email:     safeDec(row.email_cipher)  ?? row.email ?? null,
+    phone:     safeDec(row.phone_cipher)  ?? row.phone ?? null,
+    name,
+    firstName: first ?? null,
+    lastName:  last ?? null,
+    dob:       safeDec(row.dob_cipher)    ?? (row.dob ? String(row.dob) : null),
+    status:    safeDec(row.status_cipher) ?? row.status ?? null,
+  };
+}
+
 module.exports = {
   encrypt, decrypt,
   lookupHash, emailLookup, phoneLookup,
   hashSecret, verifySecret,
   signTicket, verifyTicket,
   normalizeEmail, normalizePhone, normalizeAnswer,
+  identityFromRow,
 };

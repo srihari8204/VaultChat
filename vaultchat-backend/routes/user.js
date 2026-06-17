@@ -18,17 +18,19 @@ router.use(jwtUtil.requireAuth);
 
 const PIN_BCRYPT_ROUNDS = 10;
 
+const vault = require('../lib/vault');
 function publicUser(row) {
   if (!row) return null;
+  const idn = vault.identityFromRow(row);
   return {
     id:        row.id,
-    email:     row.email,
-    name:      row.name,
-    phone:     row.phone,
+    email:     idn.email,
+    name:      idn.name,
+    phone:     idn.phone,
     photoURL:  row.photo_url,
     vaultId:   row.vault_id,
-    dob:       row.dob,
-    status:    row.status,
+    dob:       idn.dob,
+    status:    idn.status,
     online:    row.online,
     lastSeen:  row.last_seen_at,
     authProvider: row.auth_provider,

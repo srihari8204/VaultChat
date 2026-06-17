@@ -32,14 +32,15 @@ function normalizeEmail(raw) {
 // Shape sent to the client. Excludes hashes, internal flags, etc.
 function publicUser(row) {
   if (!row) return null;
+  const id = vault.identityFromRow(row);
   return {
     id:        row.id,
-    email:     row.email,
-    name:      row.name,
-    phone:     row.phone,
+    email:     id.email,
+    name:      id.name,
+    phone:     id.phone,
     photoURL:  row.photo_url,
-    dob:       row.dob,
-    status:    row.status,
+    dob:       id.dob,
+    status:    id.status,
     online:    row.online,
     lastSeen:  row.last_seen_at,
     authProvider: row.auth_provider,
