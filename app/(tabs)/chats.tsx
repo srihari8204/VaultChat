@@ -8,10 +8,11 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Image, RefreshControl, ScrollView, SectionList,
+  ActivityIndicator, Alert, Modal, Pressable, RefreshControl, ScrollView, SectionList,
   StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
+import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
 import { Avatar } from '../../components/ui';
@@ -49,6 +50,7 @@ export default function ChatsScreen() {
   const [authHeader, setAuthHeader] = useState<string | null>(null);
   const [folder, setFolder] = useState<FolderId>('all');
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [menuChat, setMenuChat] = useState<ChatSummary | null>(null);   // long-press action sheet
 
   useEffect(() => {
     let cancel = false;
@@ -180,10 +182,10 @@ export default function ChatsScreen() {
     <View style={S.screen}>
       <View style={S.header}>
         <Text style={S.title}>Chats</Text>
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          <TouchableOpacity onPress={() => router.push('/broadcast' as any)} style={S.headerBtn}><Text style={S.headerBtnTxt}>📢</Text></TouchableOpacity>
-          <TouchableOpacity onPress={() => router.push('/search' as any)} style={S.headerBtn}><Text style={S.headerBtnTxt}>🔍</Text></TouchableOpacity>
-          <TouchableOpacity onPress={() => router.push('/contacts' as any)} style={S.headerBtn}><Text style={S.headerBtnTxt}>📇</Text></TouchableOpacity>
+        <View style={{ flexDirection: 'row', gap: 4 }}>
+          <TouchableOpacity onPress={() => router.push('/search' as any)} style={S.headerBtn}><Ionicons name="search" size={22} color={colors.text} /></TouchableOpacity>
+          <TouchableOpacity onPress={() => router.push('/contacts' as any)} style={S.headerBtn}><Ionicons name="people-outline" size={22} color={colors.text} /></TouchableOpacity>
+          <TouchableOpacity onPress={() => router.push('/broadcast' as any)} style={S.headerBtn}><Ionicons name="megaphone-outline" size={22} color={colors.text} /></TouchableOpacity>
         </View>
       </View>
 
@@ -231,6 +233,7 @@ export default function ChatsScreen() {
               authHeader={authHeader}
               draft={drafts[item.id]}
               onPress={() => onOpenChat(item.id)}
+              onLongPress={() => setMenuChat(item)}
               onPin={() => doPin(item)}
               onMute={() => doMute(item)}
               onArchive={() => doArchive(item)}
@@ -248,17 +251,44 @@ export default function ChatsScreen() {
       )}
 
       <TouchableOpacity style={S.fab} onPress={onNewChat} activeOpacity={0.85}>
-        <Text style={S.fabTxt}>✏️</Text>
+        <Ionicons name="create-outline" size={26} color="#fff" />
       </TouchableOpacity>
+
+      {/* Long-press action sheet (WhatsApp-style) */}
+      <Modal visible={!!menuChat} transparent animationType="fade" onRequestClose={() => setMenuChat(null)}>
+        <Pressable style={S.sheetBackdrop} onPress={() => setMenuChat(null)}>
+          <Pressable style={S.sheet} onPress={() => {}}>
+            <View style={S.sheetHandle} />
+            <Text style={S.sheetTitle} numberOfLines={1}>
+              {menuChat ? (menuChat.type === 'direct' ? (menuChat.peerName || menuChat.name || 'Direct chat') : (menuChat.name || 'Group chat')) : ''}
+            </Text>
+            <SheetItem icon={menuChat?.pinned ? 'pin' : 'pin-outline'} label={menuChat?.pinned ? 'Unpin' : 'Pin'} onPress={() => { const c = menuChat!; setMenuChat(null); doPin(c); }} />
+            <SheetItem icon={menuChat?.muted ? 'notifications-outline' : 'notifications-off-outline'} label={menuChat?.muted ? 'Unmute' : 'Mute'} onPress={() => { const c = menuChat!; setMenuChat(null); doMute(c); }} />
+            <SheetItem icon={menuChat?.archived ? 'archive' : 'archive-outline'} label={menuChat?.archived ? 'Unarchive' : 'Archive'} onPress={() => { const c = menuChat!; setMenuChat(null); doArchive(c); }} />
+            <SheetItem icon="trash-outline" label="Delete chat" danger onPress={() => { const c = menuChat!; setMenuChat(null); doDelete(c); }} />
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
 
+function SheetItem({ icon, label, onPress, danger }: { icon: any; label: string; onPress: () => void; danger?: boolean }) {
+  const { colors } = useTheme();
+  const S = useS();
+  return (
+    <TouchableOpacity style={S.sheetItem} onPress={onPress} activeOpacity={0.7}>
+      <Ionicons name={icon} size={22} color={danger ? colors.danger : colors.text} />
+      <Text style={[S.sheetItemTxt, danger && { color: colors.danger }]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
 function ChatRow({
-  chat, authHeader, draft, onPress, onPin, onMute, onArchive, onDelete,
+  chat, authHeader, draft, onPress, onLongPress, onPin, onMute, onArchive, onDelete,
 }: {
   chat: ChatSummary; authHeader: string | null; draft?: string;
-  onPress: () => void; onPin: () => void; onMute: () => void; onArchive: () => void; onDelete: () => void;
+  onPress: () => void; onLongPress: () => void; onPin: () => void; onMute: () => void; onArchive: () => void; onDelete: () => void;
 }) {
   const { colors } = useTheme();
   const S = useS();
@@ -277,27 +307,27 @@ function ChatRow({
   const leftActions = () => (
     <View style={S.actionsRow}>
       <TouchableOpacity style={[S.action, { backgroundColor: colors.primary }]} onPress={() => act(onPin)}>
-        <Text style={S.actionIcon}>📌</Text><Text style={S.actionLbl}>{chat.pinned ? 'Unpin' : 'Pin'}</Text>
+        <Ionicons name={chat.pinned ? 'pin' : 'pin-outline'} size={20} color="#fff" /><Text style={S.actionLbl}>{chat.pinned ? 'Unpin' : 'Pin'}</Text>
       </TouchableOpacity>
       <TouchableOpacity style={[S.action, { backgroundColor: colors.purple }]} onPress={() => act(onMute)}>
-        <Text style={S.actionIcon}>{chat.muted ? '🔔' : '🔕'}</Text><Text style={S.actionLbl}>{chat.muted ? 'Unmute' : 'Mute'}</Text>
+        <Ionicons name={chat.muted ? 'notifications-outline' : 'notifications-off-outline'} size={20} color="#fff" /><Text style={S.actionLbl}>{chat.muted ? 'Unmute' : 'Mute'}</Text>
       </TouchableOpacity>
     </View>
   );
   const rightActions = () => (
     <View style={S.actionsRow}>
       <TouchableOpacity style={[S.action, { backgroundColor: '#475569' }]} onPress={() => act(onArchive)}>
-        <Text style={S.actionIcon}>🗄️</Text><Text style={S.actionLbl}>{chat.archived ? 'Unarchive' : 'Archive'}</Text>
+        <Ionicons name={chat.archived ? 'archive' : 'archive-outline'} size={20} color="#fff" /><Text style={S.actionLbl}>{chat.archived ? 'Unarchive' : 'Archive'}</Text>
       </TouchableOpacity>
       <TouchableOpacity style={[S.action, { backgroundColor: colors.danger }]} onPress={() => act(onDelete)}>
-        <Text style={S.actionIcon}>🗑️</Text><Text style={S.actionLbl}>Delete</Text>
+        <Ionicons name="trash-outline" size={20} color="#fff" /><Text style={S.actionLbl}>Delete</Text>
       </TouchableOpacity>
     </View>
   );
 
   return (
     <Swipeable ref={swipeRef} renderLeftActions={leftActions} renderRightActions={rightActions} overshootLeft={false} overshootRight={false} friction={2}>
-      <TouchableOpacity style={S.row} onPress={onPress} activeOpacity={0.7}>
+      <TouchableOpacity style={S.row} onPress={onPress} onLongPress={onLongPress} delayLongPress={250} activeOpacity={0.7}>
         <View style={S.avatarWrap}>
           <Avatar
             uri={showPhoto ? attachmentUrl(photoId!) : null}
@@ -383,6 +413,13 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   rowBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   rowPreview: { color: c.textDim, fontSize: 14, flex: 1 },
   rowPreviewUnread: { color: c.text, fontWeight: '600' },
+  // Long-press action sheet
+  sheetBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  sheet: { backgroundColor: c.surfaceSolid, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 32, paddingTop: 10 },
+  sheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: c.border, alignSelf: 'center', marginBottom: 8 },
+  sheetTitle: { color: c.textDim, fontSize: 13, fontWeight: '700', paddingHorizontal: 20, paddingVertical: 10 },
+  sheetItem: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingHorizontal: 20, paddingVertical: 15 },
+  sheetItemTxt: { color: c.text, fontSize: 16, fontWeight: '500' },
   draftLabel: { color: c.danger, fontWeight: '700' },
   unreadBadge: { backgroundColor: c.primary, borderRadius: 11, minWidth: 22, height: 22, paddingHorizontal: 7, alignItems: 'center', justifyContent: 'center' },
   unreadTxt: { color: '#04130D', fontSize: 12, fontWeight: '800' },
