@@ -106,6 +106,37 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
   async function saveIdentity(id: StoredIdentity): Promise<void> {
     await store.set(IDENTITY_KEY, JSON.stringify(id));
   }
+
+  // Single-flight identity: the local identity is loaded (or created) exactly
+  // ONCE and shared by every caller — publish, encrypt, and decrypt. Without
+  // this, provisioning fired from two places at once (app/_layout + app/chat)
+  // each ran createIdentity(), and their chunked SecureStore writes interleaved
+  // and corrupted the stored blob — so loadIdentity() later returned null
+  // ("local identity not provisioned") even though the key bundle had just been
+  // published. Memoizing the create makes that race impossible.
+  let _identity: StoredIdentity | null = null;
+  let _identityPromise: Promise<StoredIdentity> | null = null;
+  function getIdentity(): Promise<StoredIdentity> {
+    if (_identity) return Promise.resolve(_identity);
+    if (!_identityPromise) {
+      _identityPromise = (async () => {
+        const id = (await loadIdentity()) ?? (await createIdentity());
+        _identity = id;
+        return id;
+      })();
+      _identityPromise.catch(() => { _identityPromise = null; }); // allow retry on failure
+    }
+    return _identityPromise;
+  }
+
+  // Serialize identity writes so concurrent mutations (OTPK top-up on publish,
+  // OTPK consumption on decrypt) never interleave their chunked writes.
+  let _saveChain: Promise<void> = Promise.resolve();
+  function saveIdentitySerial(id: StoredIdentity): Promise<void> {
+    const next = _saveChain.then(() => saveIdentity(id), () => saveIdentity(id));
+    _saveChain = next.catch(() => {});
+    return next;
+  }
   function newOpks(start: number, n: number): StoredOpk[] {
     const out: StoredOpk[] = [];
     for (let i = 0; i < n; i++) {
@@ -144,14 +175,13 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
   }
 
   async function ensurePublished(): Promise<void> {
-    let id = await loadIdentity();
-    if (!id) id = await createIdentity();
+    const id = await getIdentity();
     // Top up the OTPK pool if it has run low.
     if (id.opks.length < OPK_POOL_MIN) {
       const fresh = newOpks(id.nextKeyId, OPK_BATCH);
       id.opks.push(...fresh);
       id.nextKeyId += OPK_BATCH;
-      await saveIdentity(id);
+      await saveIdentitySerial(id);
     }
     await transport.publish(publishPayload(id));
   }
@@ -192,8 +222,7 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
   }
 
   async function encryptForPeer(peerId: string, plaintext: string): Promise<string> {
-    const id = await loadIdentity();
-    if (!id) throw new Error('e2ee: local identity not provisioned — call ensurePublished() first');
+    const id = await getIdentity();
 
     let session = await loadSession(peerId);
     let state: RatchetState;
@@ -231,8 +260,7 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
     const parsed = JSON.parse(wire);
     if (parsed?.v !== 'dr1' || !parsed.env) throw new Error('e2ee: not a dr1 envelope');
 
-    const id = await loadIdentity();
-    if (!id) throw new Error('e2ee: local identity not provisioned');
+    const id = await getIdentity();
 
     let session = await loadSession(peerId);
     let state: RatchetState;
@@ -252,7 +280,7 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
         if (idx >= 0) {
           myOpk = { priv: hexToBytes(id.opks[idx].priv), pub: hexToBytes(id.opks[idx].pub) };
           id.opks.splice(idx, 1);     // consumed exactly once
-          await saveIdentity(id);
+          await saveIdentitySerial(id);
         }
       }
       const sk = x3dhResponder(me.ik, me.spk, myOpk, header);

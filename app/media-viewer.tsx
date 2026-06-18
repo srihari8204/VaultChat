@@ -12,6 +12,9 @@ import { Video, Audio, ResizeMode } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as MediaLibrary from 'expo-media-library';
+import { getAttachmentLocalUri } from '../lib/mediaAttachments';
+import { getAccessToken } from '../lib/api';
+import { saveToGallery } from '../lib/gallerySave';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 const C = { bg: '#000', accent: '#4A9FFF', green: '#10B981' };
@@ -31,13 +34,37 @@ const formatDur = (ms) => { if (!ms) return '0:00'; const s=Math.floor(ms/1000);
 
 export default function MediaViewerScreen() {
   const router = useRouter();
-  const { uri, mediaUrl, filename, msgType } = useLocalSearchParams();
-  const fileUri = (mediaUrl || uri || '') + '';
+  const { uri, mediaUrl, attachmentId, needsAuth, save, filename, msgType } = useLocalSearchParams();
   const fileName = (filename || 'file') + '';
+  // For our own /uploads images we attach the Bearer header so Fresco serves the
+  // already-cached image instantly (no re-download).
+  const [authHeaders, setAuthHeaders] = useState<{ Authorization: string } | undefined>(undefined);
+  useEffect(() => {
+    if (needsAuth) getAccessToken().then(t => { if (t) setAuthHeaders({ Authorization: `Bearer ${t}` }); });
+  }, [needsAuth]);
   const fileType = msgType === 'image' ? 'image' : msgType === 'video' ? 'video' : msgType === 'audio' ? 'audio' : getFileType(fileName);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [fileSize, setFileSize] = useState(0);
+  // When opened by attachmentId (the common path from a chat bubble) we resolve
+  // a local file here — so the bubble navigates INSTANTLY and we show a spinner,
+  // instead of the bubble awaiting a download (which made taps feel unreliable
+  // and stacked multiple viewers).
+  const [fileUri, setFileUri] = useState<string>((mediaUrl || uri || '') + '');
+  useEffect(() => {
+    if (fileUri || !attachmentId) return;
+    let cancel = false;
+    getAttachmentLocalUri(String(attachmentId))
+      .then(u => {
+        if (cancel) return;
+        setFileUri(u);
+        if (save === '1' && (fileType === 'image' || fileType === 'video')) {
+          saveToGallery(u, fileType, String(attachmentId));   // VaultChat gallery album
+        }
+      })
+      .catch(() => { if (!cancel) { setError('Failed to load media'); setLoading(false); } });
+    return () => { cancel = true; };
+  }, [attachmentId]);
 
   useEffect(() => {
     if (fileUri.startsWith('http')) fetch(fileUri, { method: 'HEAD' }).then(r => setFileSize(parseInt(r.headers.get('content-length') || '0'))).catch(() => {});
@@ -72,7 +99,7 @@ export default function MediaViewerScreen() {
     return (
       <View style={s.full} {...panResponder.panHandlers}>
         {!imgLoaded && <ActivityIndicator color={C.accent} style={s.center} />}
-        <Animated.Image source={{ uri: fileUri }} style={[s.fullImg, { transform: [{ scale }] }]} resizeMode="contain"
+        <Animated.Image source={needsAuth && fileUri.startsWith('http') ? { uri: fileUri, headers: authHeaders } : { uri: fileUri }} style={[s.fullImg, { transform: [{ scale }] }]} resizeMode="contain"
           onLoad={() => { setImgLoaded(true); setLoading(false); }} onError={() => { setError('Failed to load image'); setLoading(false); }} />
       </View>
     );
@@ -83,16 +110,26 @@ export default function MediaViewerScreen() {
     const videoRef = useRef(null);
     const [st, setSt] = useState({});
     const [ctrl, setCtrl] = useState(true);
+    const [shouldPlay, setShouldPlay] = useState(true);
     useEffect(() => { setLoading(false); }, []);
     return (
       <TouchableOpacity style={s.full} activeOpacity={1} onPress={() => setCtrl(!ctrl)}>
         <Video ref={videoRef} source={{ uri: fileUri }} style={s.fullVid} resizeMode={ResizeMode.CONTAIN}
-          shouldPlay={true} useNativeControls={false} progressUpdateIntervalMillis={250}
-          onPlaybackStatusUpdate={setSt} onLoad={() => setLoading(false)} onError={() => { setError('Failed to load video'); setLoading(false); }} />
+          shouldPlay={shouldPlay} isLooping={false} useNativeControls={false} progressUpdateIntervalMillis={250}
+          onPlaybackStatusUpdate={(status) => { setSt(status); if (status?.didJustFinish) setShouldPlay(false); }}
+          onLoad={() => setLoading(false)} onError={() => { setError('Failed to load video'); setLoading(false); }} />
         {st.isBuffering && !st.isPlaying && <View style={s.bufOverlay}><ActivityIndicator color={C.accent} size="large" /><Text style={s.bufTxt}>Streaming...</Text></View>}
         {ctrl && (
           <View style={s.vidCtrl}>
-            <TouchableOpacity style={s.playBtn} onPress={async () => { if (!videoRef.current) return; if (st.isPlaying) { await videoRef.current.pauseAsync(); } else { await videoRef.current.playAsync(); } }}>
+            <TouchableOpacity style={s.playBtn} onPress={async () => {
+              const v = videoRef.current; if (!v) return;
+              if (st.isPlaying) { await v.pauseAsync(); setShouldPlay(false); }
+              else {
+                // Replay from the start if it had reached the end.
+                if (st.didJustFinish || (st.durationMillis && st.positionMillis >= st.durationMillis)) { await v.setPositionAsync(0); }
+                await v.playAsync(); setShouldPlay(true);
+              }
+            }}>
               <Text style={{ fontSize: 32 }}>{st.isPlaying ? '\u23F8' : '\u25B6\uFE0F'}</Text>
             </TouchableOpacity>
             <View style={s.progRow}>
@@ -191,11 +228,17 @@ export default function MediaViewerScreen() {
         <StatusBar barStyle="light-content" backgroundColor="#000" />
         {loading && <ActivityIndicator color={C.accent} style={s.center} />}
         {error ? <Text style={{color:'#FF3C6E',textAlign:'center',padding:20}}>{error}</Text> : null}
-        {fileType === 'image' && <ImageViewer />}
-        {fileType === 'video' && <VideoPlayer />}
-        {fileType === 'audio' && <AudioPlayer />}
-        {fileType === 'code' && <CodeViewer />}
-        {(fileType === 'pdf' || fileType === 'unknown') && <GenericViewer />}
+        {!fileUri && !error ? (
+          <ActivityIndicator color={C.accent} style={s.center} size="large" />
+        ) : fileUri ? (
+          <>
+            {fileType === 'image' && <ImageViewer />}
+            {fileType === 'video' && <VideoPlayer />}
+            {fileType === 'audio' && <AudioPlayer />}
+            {fileType === 'code' && <CodeViewer />}
+            {(fileType === 'pdf' || fileType === 'unknown') && <GenericViewer />}
+          </>
+        ) : null}
       </View>
     </>
   );

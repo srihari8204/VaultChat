@@ -37,6 +37,7 @@ import {
   Alert,
   FlatList,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -56,6 +57,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { getWallpaper, type WallpaperConfig } from './chat-wallpaper';
 import { getBubbleColors } from './chat-themes';
 import { getLock, verifyBiometric, verifyPin, type LockedChat } from '../lib/chatLock';
+import { preloadViewedOnce, isViewedOnce, isViewedOnceSync, markViewedOnce } from '../lib/viewOnceStore';
+import { saveToGallery } from '../lib/gallerySave';
 
 // Pick black or white text for legibility on an arbitrary bubble color.
 function idealText(hex: string): string {
@@ -113,7 +116,7 @@ import {
   type ReactionSummary,
 } from '../lib/chatService';
 import { sendMediaMessage } from '../lib/sendMedia';
-import { getDecryptedAttachmentUri, parseMediaContent } from '../lib/mediaAttachments';
+import { getDecryptedAttachmentUri, getAttachmentLocalUri, parseMediaContent } from '../lib/mediaAttachments';
 import {
   cancel as queueCancel,
   enqueueText,
@@ -172,6 +175,22 @@ export default function ChatScreen() {
   const { colors } = useTheme();
   const S = useS();
   const chatId = ((params.id ?? params.chatId) ?? '') as string;
+
+  // Keyboard avoidance, driven manually. edge-to-edge breaks adjustResize, and
+  // KeyboardAvoidingView's "padding" left residual space after the keyboard
+  // closed. Tracking the height ourselves resets cleanly to 0 on hide.
+  const [kbHeight, setKbHeight] = useState(0);
+  useEffect(() => {
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const s = Keyboard.addListener(showEvt, (e) => setKbHeight(e.endCoordinates?.height ?? 0));
+    const h = Keyboard.addListener(hideEvt, () => setKbHeight(0));
+    return () => { s.remove(); h.remove(); };
+  }, []);
+
+  // Warm the "already viewed" set so view-once bubbles render as consumed
+  // immediately (no flash of the shield) on first paint.
+  useEffect(() => { preloadViewedOnce(); }, []);
 
   const [meId,      setMeId]      = useState<string | null>(null);
   const [chat,      setChat]      = useState<ChatDetail | null>(null);
@@ -1489,11 +1508,7 @@ export default function ChatScreen() {
   }
 
   return (
-    <KeyboardAvoidingView
-      style={S.screen}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
-    >
+    <View style={[S.screen, { paddingBottom: kbHeight }]}>
       {/* Per-chat wallpaper — painted behind the (transparent) message list */}
       {wallpaper && (
         <View style={StyleSheet.absoluteFill} pointerEvents="none">
@@ -2065,7 +2080,7 @@ export default function ChatScreen() {
           </TouchableOpacity>
         </View>
       )}
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -2574,6 +2589,35 @@ function AudioBubble({
   );
 }
 
+// ─── Image bubble ────────────────────────────────────────────
+// Renders an image from the PERSISTENT on-device media folder (downloaded once
+// via getAttachmentLocalUri). Survives "Clear cache" AND the server's
+// post-delivery purge — only an uninstall removes it, like WhatsApp's media
+// folder. Encrypted media arrives as an already-decrypted local file.
+function ImageAttachment({ attachmentId, resolvedUri, autoSave, onError }: {
+  attachmentId: string;
+  resolvedUri?: { uri: string; headers?: Record<string, string> } | null;
+  autoSave?: boolean;   // copy received media into the VaultChat gallery album
+  onError?: () => void;
+}) {
+  const { colors } = useTheme();
+  const S = useS();
+  const [uri, setUri] = useState<string | null>(resolvedUri?.uri ?? null);
+  useEffect(() => {
+    const onReady = (u: string) => { setUri(u); if (autoSave) saveToGallery(u, 'image', attachmentId); };
+    if (resolvedUri?.uri) { onReady(resolvedUri.uri); return; }
+    let cancel = false;
+    getAttachmentLocalUri(attachmentId)
+      .then(u => { if (!cancel) onReady(u); })
+      .catch(() => { if (!cancel) onError?.(); });
+    return () => { cancel = true; };
+  }, [attachmentId, resolvedUri?.uri, autoSave]);
+  if (!uri) {
+    return <View style={[S.attachedImage, S.imageError]}><ActivityIndicator color={colors.primary} /></View>;
+  }
+  return <Image source={{ uri }} style={S.attachedImage} resizeMode="cover" onError={onError} />;
+}
+
 // ─── Video bubble ────────────────────────────────────────────
 // Inline player using expo-av's <Video>. Tap = native controls, no
 // autoplay. Streams the auth-gated /uploads endpoint via the Bearer
@@ -2581,42 +2625,73 @@ function AudioBubble({
 // MessageBubble can flip to a "Viewed" tombstone without an extra
 // HEAD round-trip.
 function VideoBubble({
-  attachmentId, durationMs, authHeader, resolvedUri, onErrorOnce,
+  attachmentId, durationMs, authHeader, resolvedUri, onErrorOnce, isNote, onOpen,
 }: {
   attachmentId:  string;
   durationMs:    number;
   authHeader:    string | null;
   resolvedUri?:  { uri: string; headers?: Record<string, string> } | null;
   onErrorOnce?:  () => void;
+  isNote?:       boolean;   // round "video note" vs rectangular video
+  onOpen?:       () => void; // open full-screen player
 }) {
-  const { colors } = useTheme();
   const S = useS();
-  // Encrypted videos play from a local decrypted file; plaintext stream from
-  // /uploads with the Bearer header.
-  const src = resolvedUri
-    ?? (authHeader ? { uri: attachmentUrl(attachmentId), headers: { Authorization: authHeader } } : null);
-  if (!src) {
-    return (
-      <View style={S.videoLoading}>
-        <ActivityIndicator color={colors.primary} />
-      </View>
-    );
-  }
+  // WhatsApp-style: do NOT mount a <Video> (ExoPlayer) at rest — each instance
+  // buffers the file in memory, and many bubbles at once OOM'd the app. We show
+  // a lightweight placeholder + play button. Regular videos open the full-screen
+  // player on tap (one player at a time). Video notes lazily download then play
+  // inline in the round bubble — so at most ONE <Video> is ever alive.
+  const [playing, setPlaying] = useState(false);
+  const [noteUri, setNoteUri] = useState<string | null>(resolvedUri?.uri ?? null);
+  const [busy, setBusy] = useState(false);
+
+  const onTap = useCallback(async () => {
+    if (!isNote) { onOpen?.(); return; }
+    if (playing) { setPlaying(false); return; }
+    let uri = noteUri;
+    if (!uri) {
+      setBusy(true);
+      try { uri = resolvedUri?.uri ?? await getAttachmentLocalUri(attachmentId); setNoteUri(uri); }
+      catch { onErrorOnce?.(); setBusy(false); return; }
+      setBusy(false);
+    }
+    setPlaying(true);
+  }, [isNote, playing, noteUri, resolvedUri?.uri, attachmentId, onOpen, onErrorOnce]);
+
+  const showingVideo = isNote && playing && !!noteUri;
   return (
-    <View style={S.videoWrap}>
-      <Video
-        source={src}
-        style={S.videoView}
-        useNativeControls
-        resizeMode={ResizeMode.COVER}
-        isLooping={false}
-        shouldPlay={false}
-        onError={() => onErrorOnce?.()}
-      />
-      {durationMs > 0 && (
-        <Text style={S.videoDuration}>{formatRecDuration(durationMs)}</Text>
+    <TouchableOpacity
+      style={isNote ? S.videoNoteWrap : S.videoWrap}
+      activeOpacity={0.9}
+      onPress={onTap}
+    >
+      {showingVideo ? (
+        <Video
+          source={{ uri: noteUri! }}
+          style={S.videoNoteView}
+          useNativeControls={false}
+          resizeMode={ResizeMode.COVER}
+          isLooping={false}
+          shouldPlay
+          onPlaybackStatusUpdate={(st: any) => { if (st?.didJustFinish) setPlaying(false); }}
+          onError={() => { setPlaying(false); onErrorOnce?.(); }}
+        />
+      ) : (
+        <View style={[isNote ? S.videoNoteView : S.videoView, S.videoPlaceholder]}>
+          <Text style={{ fontSize: 34 }}>🎬</Text>
+        </View>
       )}
-    </View>
+      {!showingVideo && (
+        <View style={S.videoPlayOverlay} pointerEvents="none">
+          <View style={S.videoPlayBtn}>
+            {busy ? <ActivityIndicator color="#fff" /> : <Text style={S.videoPlayIcon}>▶</Text>}
+          </View>
+        </View>
+      )}
+      {durationMs > 0 && !showingVideo && (
+        <Text style={[S.videoDuration, isNote && S.videoNoteDuration]}>{formatRecDuration(durationMs)}</Text>
+      )}
+    </TouchableOpacity>
   );
 }
 
@@ -2797,24 +2872,58 @@ function MessageBubble({
   const isVideo = msg.type === 'video' && msg.meta?.attachmentId;
   const isAudio = msg.type === 'audio' && msg.meta?.attachmentId;
   const isFile  = msg.type === 'file'  && msg.meta?.attachmentId;
+
+  // Open image/video full-screen (WhatsApp-style). Navigate INSTANTLY and let
+  // the viewer resolve a local file — so taps are reliable and never stack.
+  const bubbleRouter = useRouter();
+  const openingRef = useRef(false);
+  const openFullScreen = useCallback((kind: 'image' | 'video') => {
+    if (openingRef.current) return;                      // guard against rapid double-taps
+    openingRef.current = true;
+    setTimeout(() => { openingRef.current = false; }, 700);
+    const params: any = { filename: String(msg.meta?.filename || ''), msgType: kind };
+    if (msg.meta?.gifUrl) {
+      params.mediaUrl = String(msg.meta.gifUrl);                 // external GIF — no auth
+    } else if (isEncMedia && mediaSrc?.uri) {
+      params.mediaUrl = mediaSrc.uri;                            // encrypted → already-decrypted local file
+    } else if (msg.meta?.attachmentId) {
+      // The bubble already saved this to the PERSISTENT media folder, so the
+      // viewer resolves it instantly (no re-download) and it works even after
+      // the server purges its copy.
+      params.attachmentId = String(msg.meta.attachmentId);
+      // Received (non-view-once) media → also drop it in the VaultChat gallery
+      // album. Images already auto-save in the bubble; this covers videos, which
+      // only download when opened.
+      if (!isMine && !isViewOnceMedia) params.save = '1';
+    } else { openingRef.current = false; return; }
+    bubbleRouter.push({ pathname: '/media-viewer' as any, params });
+  }, [msg.meta?.attachmentId, msg.meta?.gifUrl, msg.meta?.filename, isEncMedia, mediaSrc?.uri, bubbleRouter]);
   const isSticker = msg.type === 'sticker' && !!msg.content;
   const isPoll  = msg.type === 'poll' && Array.isArray(msg.meta?.options);
   const isLocation = msg.type === 'location';
 
-  // ── View-once gate (P1) ──────────────────────────────────
-  // Only photo/video honor view-once. Owner (sender) sees the media
-  // normally — they can re-watch their own send. Non-owners get a
-  // tap-to-reveal shield; on tap we POST /viewed and reveal once.
-  // If the GET returns 410 (already consumed by another viewer) the
-  // Image/Video onError fires and we flip to the tombstone.
+  // ── View-once gate (WhatsApp-style) ──────────────────────
+  // Photo/video only. The OWNER sees their own media inline. A recipient gets a
+  // tap-to-view shield; tapping opens it full-screen ONCE, then it's permanently
+  // a "viewed" tombstone — persisted locally (lib/viewOnceStore) so it survives
+  // re-renders, scrolls, and restarts. The server also 410s after the first GET.
   const isViewOnceMedia = !!msg.meta?.viewOnce && (isImage || isVideo);
-  const [revealed,  setRevealed]  = useState<boolean>(!isViewOnceMedia || isMine);
-  const [tombstoned, setTombstoned] = useState<boolean>(false);
+  const revealed = !isViewOnceMedia || isMine;   // owner sees inline; recipients use the shield
+  const [tombstoned, setTombstoned] = useState<boolean>(
+    isViewOnceMedia && !isMine && isViewedOnceSync(String(msg.id)),
+  );
+  useEffect(() => {
+    if (isViewOnceMedia && !isMine) {
+      isViewedOnce(String(msg.id)).then(v => { if (v) setTombstoned(true); });
+    }
+  }, [isViewOnceMedia, isMine, msg.id]);
   const handleRevealViewOnce = useCallback(async () => {
-    if (revealed) return;
-    setRevealed(true);
+    if (tombstoned) return;
+    markViewedOnce(String(msg.id));   // persist so it never re-appears
+    setTombstoned(true);              // bubble becomes "viewed" immediately
+    openFullScreen(isVideo ? 'video' : 'image');  // show it once, full-screen
     try { await markAttachmentViewed(msg.meta.attachmentId); } catch { /* best-effort */ }
-  }, [revealed, msg.meta?.attachmentId]);
+  }, [tombstoned, msg.id, msg.meta?.attachmentId, isVideo, openFullScreen]);
 
   return (
     <View style={[S.bubbleRow, isMine ? S.bubbleRowMine : S.bubbleRowTheirs, grouped && S.bubbleRowGrouped]}>
@@ -2830,7 +2939,13 @@ function MessageBubble({
           msg._state === 'pending' && S.bubblePending,
           msg._state === 'failed'  && S.bubbleFailed,
         ]}
-        onPress={() => { if (msg._state === 'failed') onLongPress(msg, plain); }}
+        onPress={() => {
+          if (msg._state === 'failed') { onLongPress(msg, plain); return; }
+          // Tap an image bubble → open full screen (WhatsApp-style). Video bubbles
+          // have their own play/tap handling inside VideoBubble.
+          if (isImage && !isViewOnceMedia) openFullScreen('image');
+          else if (isGif) openFullScreen('image');
+        }}
         onLongPress={() => onLongPress(msg, plain)}
         delayLongPress={250}
         activeOpacity={0.85}
@@ -2887,24 +3002,20 @@ function MessageBubble({
             resizeMode="cover"
           />
         ) : isImage ? (
-          (isEncMedia ? mediaSrc : (authHeader ? { uri: attachmentUrl(msg.meta.attachmentId), headers: { Authorization: authHeader } } : null)) ? (
-            <Image
-              source={isEncMedia ? mediaSrc! : { uri: attachmentUrl(msg.meta.attachmentId), headers: { Authorization: authHeader! } }}
-              style={S.attachedImage}
-              resizeMode="cover"
-              onError={() => { if (isViewOnceMedia && !isMine) setTombstoned(true); }}
-            />
-          ) : (
-            <View style={S.imageError}>
-              <Text style={S.imageErrorTxt}>Loading image…</Text>
-            </View>
-          )
+          <ImageAttachment
+            attachmentId={msg.meta.attachmentId}
+            resolvedUri={isEncMedia ? mediaSrc : undefined}
+            autoSave={!isMine && !isViewOnceMedia}
+            onError={() => { if (isViewOnceMedia && !isMine) setTombstoned(true); }}
+          />
         ) : isVideo ? (
           <VideoBubble
             attachmentId={msg.meta.attachmentId}
             durationMs={Number(msg.meta?.durationMs) || 0}
             authHeader={authHeader}
             resolvedUri={isEncMedia ? mediaSrc : undefined}
+            isNote={!!msg.meta?.videoNote}
+            onOpen={() => openFullScreen('video')}
             onErrorOnce={() => { if (isViewOnceMedia && !isMine) setTombstoned(true); }}
           />
         ) : isAudio ? (
@@ -3207,6 +3318,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   videoView:     { width: '100%', height: '100%' },
   videoDuration: { position: 'absolute', right: 8, bottom: 8, color: '#fff', fontSize: 11, fontWeight: '700', backgroundColor: 'rgba(0,0,0,0.55)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, overflow: 'hidden' },
   videoLoading:  { width: 240, height: 240, borderRadius: 8, backgroundColor: '#0F1217', alignItems: 'center', justifyContent: 'center' },
+  videoPlaceholder: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#10141B' },
+  // Round "video note" (Telegram/WhatsApp style) — distinct from a rectangular video.
+  videoNoteWrap: { width: 200, height: 200, borderRadius: 100, overflow: 'hidden', backgroundColor: '#000', position: 'relative', alignSelf: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.18)' },
+  videoNoteView: { width: '100%', height: '100%' },
+  videoNoteDuration: { right: undefined, bottom: 10, alignSelf: 'center', left: 0, textAlign: 'center', width: '100%', backgroundColor: 'transparent' },
+  videoPlayOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+  videoPlayBtn:  { width: 54, height: 54, borderRadius: 27, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.85)' },
+  videoPlayIcon: { color: '#fff', fontSize: 22, marginLeft: 4 },
 
   // View-once shield (before tap) + tombstone (after view)
   viewOnceShield:        { width: 220, padding: 20, borderRadius: 12, alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: 'rgba(108,99,255,0.15)', borderWidth: 1, borderColor: c.primary, borderStyle: 'dashed' },

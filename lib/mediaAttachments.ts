@@ -59,6 +59,56 @@ export async function getDecryptedAttachmentUri(
   return { uri: cached }; // local decrypted file; no auth header needed
 }
 
+// Resolve ANY attachment (plaintext or encrypted) to a local file:// URI.
+// expo-av's Android <Video> won't send auth headers, so video playback must
+// come from a local file — this downloads (with the Bearer header) and decrypts
+// if we hold a key, caching the result. Uses the same fetch+write path proven by
+// getDecryptedAttachmentUri (never depends on FileSystem.downloadAsync, which is
+// absent from the SDK 54 main module).
+// Persistent on-device media store (NOT the cache dir — "Clear cache" wipes that
+// and the server purges its copy after delivery). Lives under documentDirectory,
+// so downloaded media survives cache clears and server-side purge, like
+// WhatsApp's media folder. Removed only on uninstall.
+const MEDIA_DIR = (FileSystem as any).documentDirectory + 'media/';
+let _mediaDirReady = false;
+async function ensureMediaDir(): Promise<void> {
+  if (_mediaDirReady) return;
+  try { await FileSystem.makeDirectoryAsync(MEDIA_DIR, { intermediates: true }); } catch {}
+  _mediaDirReady = true;
+}
+
+export async function getAttachmentLocalUri(attachmentId: string): Promise<string> {
+  const token = await getAccessToken();
+  const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+  const mk = await getMediaKey(attachmentId);
+
+  await ensureMediaDir();
+  const cached = MEDIA_DIR + `media_${attachmentId}`;
+  // Migrate any file previously saved in the cache dir so existing media isn't re-downloaded.
+  const info = await FileSystem.getInfoAsync(cached);
+  if (info.exists && (info as any).size) return cached;
+
+  if (!mk) {
+    // Plaintext: STREAM the bytes straight to disk. Never load the whole file
+    // into memory — doing that (fetch→arrayBuffer→base64) OOM'd when several
+    // video bubbles resolved at once. downloadAsync (legacy) writes to disk.
+    const r = await FileSystem.downloadAsync(attachmentUrl(attachmentId), cached, { headers });
+    if ((r.status ?? 0) >= 400) {
+      await FileSystem.deleteAsync(cached, { idempotent: true }).catch(() => {});
+      throw new Error(`attachment ${attachmentId} download failed (${r.status})`);
+    }
+    return cached;
+  }
+
+  // Encrypted: we must read the bytes to decrypt. (Flag-gated; usually off.)
+  const res = await fetch(attachmentUrl(attachmentId), { headers });
+  if (!res.ok) throw new Error(`attachment ${attachmentId} download failed (${res.status})`);
+  const b64 = Buffer.from(await res.arrayBuffer()).toString('base64');
+  const out = decryptMediaB64(b64, mk);
+  await FileSystem.writeAsStringAsync(cached, out, { encoding: 'base64' });
+  return cached;
+}
+
 // ── Media envelope (the E2E-encrypted message content for a media message) ──
 // We pack the caption + key into the content that the per-peer Double Ratchet
 // encrypts, so the key is delivered E2E (never in plaintext meta).

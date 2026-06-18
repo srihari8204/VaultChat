@@ -160,6 +160,57 @@ const sweepTimer = setInterval(sweepExpiredMessages, SWEEP_INTERVAL_MS);
 // stale ephemeral content visible.
 sweepExpiredMessages().catch(() => {});
 
+// ─── Media retention — purge delivered/expired attachment bytes ────
+// WhatsApp-style: once every recipient has downloaded an attachment (or after a
+// hard TTL backstop for the never-online case), delete the BYTES from storage.
+// The metadata row stays, so anyone who already cached the media locally still
+// renders it; offline recipients keep the bytes on the server until they fetch.
+const attStore = require('./lib/storage');
+const attFs    = require('fs').promises;
+const attPath  = require('path');
+const ATT_DIR  = attPath.resolve(process.env.UPLOAD_DIR || attPath.join(process.cwd(), 'uploads'));
+const MEDIA_TTL_DAYS = parseInt(process.env.MEDIA_TTL_DAYS || '14', 10);
+
+async function sweepDeliveredAttachments() {
+  try {
+    const r = await db.query(
+      `SELECT a.id, a.storage_path, a.storage_backend
+         FROM attachments a
+        WHERE a.purged_at IS NULL
+          AND a.storage_path IS NOT NULL
+          AND (
+            a.created_at < NOW() - ($1 || ' days')::INTERVAL          -- TTL backstop
+            OR (
+              (SELECT COUNT(*) FROM attachment_deliveries d WHERE d.attachment_id = a.id) > 0
+              AND (SELECT COUNT(*) FROM attachment_deliveries d WHERE d.attachment_id = a.id)
+                  >= (SELECT COUNT(DISTINCT cm.user_id)
+                        FROM messages m
+                        JOIN chat_members cm ON cm.chat_id = m.chat_id
+                                            AND cm.left_at IS NULL
+                                            AND cm.user_id <> a.owner_user_id
+                       WHERE m.meta->>'attachmentId' = a.id::text)
+            )
+          )
+        LIMIT 500`,
+      [String(MEDIA_TTL_DAYS)]
+    );
+    let purged = 0;
+    for (const att of r.rows) {
+      try {
+        if (att.storage_backend === 's3') await attStore.deleteObject(att.storage_path);
+        else await attFs.unlink(attPath.join(ATT_DIR, att.storage_path)).catch(() => {});
+        await db.query(`UPDATE attachments SET purged_at = NOW() WHERE id = $1`, [att.id]);
+        purged++;
+      } catch { /* skip this one, retry next sweep */ }
+    }
+    if (purged > 0) console.log(`[media-retention] purged ${purged} delivered/expired attachment(s)`);
+  } catch (err) {
+    console.error('[media-retention] failed:', err.message);
+  }
+}
+const mediaRetentionTimer = setInterval(sweepDeliveredAttachments, SWEEP_INTERVAL_MS);
+sweepDeliveredAttachments().catch(() => {});
+
 // ─── Scheduled-messages worker ─────────────────────────────────────
 // Every 30 s, claim any rows in `scheduled_messages` whose send_at <= NOW()
 // that haven't fired yet, insert them as real `messages`, broadcast

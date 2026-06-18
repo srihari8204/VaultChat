@@ -182,6 +182,16 @@ router.get('/:id', jwtUtil.requireAuth, async (req, res) => {
         if (!asPhoto.rows[0]) return res.status(403).json({ error: 'Forbidden' });
       }
 
+      // Record delivery (a recipient is fetching the bytes) so the retention
+      // sweeper can purge the media once everyone in the chat has downloaded it.
+      if (inChat.rows[0]) {
+        req.dbQuery(
+          `INSERT INTO attachment_deliveries (attachment_id, user_id) VALUES ($1, $2)
+           ON CONFLICT DO NOTHING`,
+          [String(att.id), req.user.id],
+        ).catch(() => {});
+      }
+
       // View-once gate: non-owner after consumption gets 410 Gone.
       // Owners can always re-fetch (so the sender can review their send).
       if (att.view_once && att.viewed_at) {

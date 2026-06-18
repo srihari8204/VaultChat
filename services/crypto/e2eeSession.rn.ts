@@ -94,15 +94,17 @@ export async function e2eeGetCached(chatId: string, messageId: number): Promise<
  * sessions. Idempotent and cheap after the first successful call this session.
  */
 let _provisioned = false;
+let _provisioning: Promise<void> | null = null;
 export async function provisionE2EEIdentity(): Promise<void> {
   if (_provisioned) return;
-  try {
-    await e2ee.ensurePublished();
-    _provisioned = true;
-  } catch (e) {
-    _provisioned = false; // allow a later retry
-    throw e;
+  // Dedupe concurrent callers (app/_layout startup + app/chat mount) onto a
+  // single in-flight publish so they can't double-provision.
+  if (!_provisioning) {
+    _provisioning = e2ee.ensurePublished()
+      .then(() => { _provisioned = true; })
+      .finally(() => { _provisioning = null; });
   }
+  return _provisioning;
 }
 
 export default e2ee;

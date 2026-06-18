@@ -38,10 +38,13 @@ export default function VideoNotesScreen() {
 
   useEffect(() => {
     if (recording) {
-      // Pulse animation
+      // Pulse animation. MUST use the JS driver (useNativeDriver: false): this
+      // value drives `scale` on the SAME <Animated.View> whose `borderColor` is
+      // driven by ringColor (a color interpolation, which only works on the JS
+      // driver). Mixing drivers on one node throws "moved to native earlier".
       Animated.loop(Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 1.08, duration: 600, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1.08, duration: 600, useNativeDriver: false }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 600, useNativeDriver: false }),
       ])).start();
 
       // Progress ring

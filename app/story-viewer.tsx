@@ -41,7 +41,7 @@ import {
   type StoryFeedEntry,
   type StoryViewer,
 } from '../lib/chatService';
-import { getDecryptedAttachmentUri } from '../lib/mediaAttachments';
+import { getDecryptedAttachmentUri, getAttachmentLocalUri } from '../lib/mediaAttachments';
 import { putMediaKey } from '../lib/mediaKeyStore';
 import { unwrapStoryKey } from '../lib/storyKeys';
 
@@ -115,7 +115,16 @@ export default function StoryViewerScreen() {
           if (!cancel) setMediaSrc(r);
         } catch { /* leave blank on failure */ }
       } else if (authHeader) {
-        if (!cancel) setMediaSrc({ uri: attachmentUrl(current.attachmentId), headers: { Authorization: authHeader } });
+        // expo-av's Android <Video> won't send the Bearer header, so video
+        // stories play from a downloaded local file; images render with headers.
+        if (current.mediaType === 'video') {
+          try {
+            const uri = await getAttachmentLocalUri(current.attachmentId);
+            if (!cancel) setMediaSrc({ uri });
+          } catch { /* leave blank on failure */ }
+        } else if (!cancel) {
+          setMediaSrc({ uri: attachmentUrl(current.attachmentId), headers: { Authorization: authHeader } });
+        }
       }
     })();
     return () => { cancel = true; };

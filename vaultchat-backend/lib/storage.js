@@ -14,7 +14,7 @@
 //   S3_ACCESS_KEY, S3_SECRET_KEY
 
 const {
-  S3Client, PutObjectCommand, GetObjectCommand,
+  S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand,
   HeadBucketCommand, CreateBucketCommand,
 } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
@@ -105,4 +105,12 @@ async function getObject(key) {
   return Buffer.concat(chunks);
 }
 
-module.exports = { enabled, client, ensureBucket, presignPut, presignGet, getObject, BUCKET };
+// Delete an object (used to purge media after it's been delivered to everyone).
+async function deleteObject(key) {
+  const c = client();
+  if (!c) return;
+  try { await c.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key })); }
+  catch (e) { console.warn('[storage] deleteObject:', e.message); }
+}
+
+module.exports = { enabled, client, ensureBucket, presignPut, presignGet, getObject, deleteObject, BUCKET };
