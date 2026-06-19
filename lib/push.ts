@@ -19,6 +19,15 @@ import { api } from './api';
 
 const EAS_PROJECT_ID = '144570a3-de88-48f0-b7e1-ecda63618199';
 
+// Selectable notification sounds → one Android channel each. The sound files
+// (note_*.wav) are bundled into res/raw by the expo-notifications plugin
+// (app.json "sounds"). `channelId` is what the server sends in the push.
+export const NOTIF_CHANNELS = [
+  { id: 'default', name: 'Default', channelId: 'default', channelName: 'Messages',         sound: 'default' as const },
+  { id: 'chime',   name: 'Chime',   channelId: 'chime',   channelName: 'Messages (Chime)', sound: 'note_chime.wav' },
+  { id: 'bell',    name: 'Bell',    channelId: 'bell',    channelName: 'Messages (Bell)',  sound: 'note_bell.wav' },
+];
+
 // Show notifications even when the app is foregrounded (otherwise the
 // system silently swallows them and the user sees nothing).
 Notifications.setNotificationHandler({
@@ -36,18 +45,22 @@ let cachedToken: string | null = null;
 export async function ensurePermissionAndChannel(): Promise<boolean> {
   if (Platform.OS === 'web') return false;
 
-  // Android 8+ requires explicit notification channels for sound/vibration
+  // Android 8+ requires explicit notification channels for sound/vibration.
+  // One channel per selectable sound — the server addresses the right channel
+  // via the push payload's channelId (per-chat notification sound).
   if (Platform.OS === 'android') {
-    try {
-      await Notifications.setNotificationChannelAsync('default', {
-        name: 'Messages',
-        importance: Notifications.AndroidImportance.HIGH,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#6C63FF',
-        sound: 'default',
-      });
-    } catch (err) {
-      console.warn('[push] setNotificationChannel failed:', (err as any)?.message);
+    for (const ch of NOTIF_CHANNELS) {
+      try {
+        await Notifications.setNotificationChannelAsync(ch.channelId, {
+          name: ch.channelName,
+          importance: Notifications.AndroidImportance.HIGH,
+          vibrationPattern: [0, 250, 250, 250],
+          lightColor: '#6C63FF',
+          sound: ch.sound,
+        });
+      } catch (err) {
+        console.warn('[push] setNotificationChannel failed:', (err as any)?.message);
+      }
     }
   }
 

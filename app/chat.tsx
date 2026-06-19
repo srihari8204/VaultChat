@@ -32,6 +32,8 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { E2EE_ENABLED } from '../constants/flags';
 import { getCachedMessages, cacheMessages, applyMessage } from '../lib/localDb';
 import { saveDraft, getDraft, clearDraft } from '../lib/drafts';
+import { playSent, playReceived } from '../lib/sounds';
+import { NOTIF_CHANNELS } from '../lib/push';
 import {
   ActivityIndicator,
   Alert,
@@ -43,6 +45,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text, TextInput, TouchableOpacity,
   View,
@@ -50,7 +53,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Swipeable } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
-import { Sheet, Avatar } from '../components/ui';
+import { Sheet, Avatar, type SheetAction as MenuAction } from '../components/ui';
 import LinkPreview, { extractUrl } from '../components/LinkPreview';
 import GifPicker from '../components/GifPicker';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -58,7 +61,6 @@ import { getWallpaper, type WallpaperConfig } from './chat-wallpaper';
 import { getBubbleColors } from './chat-themes';
 import { getLock, verifyBiometric, verifyPin, type LockedChat } from '../lib/chatLock';
 import { preloadViewedOnce, isViewedOnce, isViewedOnceSync, markViewedOnce } from '../lib/viewOnceStore';
-import { saveToGallery } from '../lib/gallerySave';
 
 // Pick black or white text for legibility on an arbitrary bubble color.
 function idealText(hex: string): string {
@@ -96,13 +98,14 @@ import {
   getMessages,
   getReactionCounts,
   listChats,
-  markAttachmentViewed,
   markDelivered,
   markRead,
   muteChat,
   pinMessage,
   removeReaction,
   reportScreenshotCaptured,
+  resetChatSession,
+  setChatNotifSound,
   sendMessage,
   setDisappearing,
   setHidden,
@@ -117,6 +120,8 @@ import {
 } from '../lib/chatService';
 import { sendMediaMessage } from '../lib/sendMedia';
 import { getDecryptedAttachmentUri, getAttachmentLocalUri, parseMediaContent } from '../lib/mediaAttachments';
+import { getMedia } from '../lib/mediaStore';
+import { thumbDataUri } from '../lib/thumbnails';
 import {
   cancel as queueCancel,
   enqueueText,
@@ -218,6 +223,7 @@ export default function ChatScreen() {
   const [nextInvisibleInk, setNextInvisibleInk] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const [gifOpen, setGifOpen] = useState(false);
+  const [emojiOpen, setEmojiOpen] = useState(false);
 
   // Media staged for sending, shown in a caption-preview before it goes out.
   // Every send path (gallery pick, camera, video note, edited photo) routes
@@ -248,6 +254,7 @@ export default function ChatScreen() {
   const [reactions, setReactions] = useState<Record<number, ReactionSummary[]>>({});
   const [reactPicker, setReactPicker] = useState<DisplayMessage | null>(null);
   const [actionSheet, setActionSheet] = useState<{ msg: DisplayMessage; plain: string } | null>(null);
+  const [overflowMenu, setOverflowMenu] = useState<{ title: string; actions: MenuAction[] } | null>(null);
   const [replyTo, setReplyTo]         = useState<DisplayMessage | null>(null);
   const [forwardMsg, setForwardMsg]   = useState<DisplayMessage | null>(null);
   const [forwardChats, setForwardChats] = useState<ChatSummary[]>([]);
@@ -405,6 +412,7 @@ export default function ChatScreen() {
           // message_delivered broadcast that follows.
           if (m.senderId !== meId) {
             markDelivered(chatId, m.id).catch(() => {});
+            playReceived();   // in-app "received" tone (respects sound prefs)
           }
         };
         const onMemberDelivered = (e: { userId: string; lastDeliveredMessageId: number }) => {
@@ -608,6 +616,22 @@ export default function ChatScreen() {
     return () => { if (readDebounce.current) clearTimeout(readDebounce.current); };
   }, [chatId, messages]);
 
+  // ── Unread divider (WhatsApp "N unread messages") ─────────
+  // Capture the read boundary ONCE when the chat opens — before mark-as-read
+  // advances it — so the divider stays put above the first message we hadn't read.
+  const [unreadInfo, setUnreadInfo] = useState<{ boundaryId: number; count: number } | null>(null);
+  const unreadCapturedRef = useRef(false);
+  useEffect(() => { unreadCapturedRef.current = false; setUnreadInfo(null); }, [chatId]);
+  useEffect(() => {
+    if (unreadCapturedRef.current) return;
+    if (!chat || !meId || messages.length === 0) return;
+    unreadCapturedRef.current = true;
+    const myMember = chat.members.find(m => m.userId === meId);
+    const boundaryId = myMember?.lastReadMessageId ?? 0;
+    const count = messages.filter(m => m.id > 0 && m.id > boundaryId && m.senderId !== meId).length;
+    if (count > 0) setUnreadInfo({ boundaryId, count });
+  }, [chat, messages, meId]);
+
   // ── Typing indicator (emit start, then debounced stop) ────
   // ── Draft auto-save (feature 66) ──────────────────────────
   const inputRef = useRef(input);
@@ -668,6 +692,7 @@ export default function ChatScreen() {
     const text = input.trim();
     if (!text || sending) return;
     haptic(silent ? Haptics.ImpactFeedbackStyle.Medium : Haptics.ImpactFeedbackStyle.Light);
+    if (editingId == null) playSent();   // in-app "sent" tone (respects sound prefs)
     setSending(true);
     stopTypingIfActive();
     if (draftTimer.current) clearTimeout(draftTimer.current);
@@ -760,25 +785,25 @@ export default function ChatScreen() {
     const isMine = msg.senderId === meId;
     const isPinned = pinnedId === String(msg.id);
     const acts: SheetAction[] = [
-      { key: 'reply',   label: 'Reply',   icon: '↩️', onPress: () => setReplyTo(msg) },
-      { key: 'pin',     label: isPinned ? 'Unpin' : 'Pin', icon: '📌', onPress: async () => {
+      { key: 'reply',   label: 'Reply',   icon: 'arrow-undo', onPress: () => setReplyTo(msg) },
+      { key: 'pin',     label: isPinned ? 'Unpin' : 'Pin', icon: 'pin', onPress: async () => {
           const next = isPinned ? null : msg.id;
           setPinnedId(next == null ? null : String(msg.id)); // optimistic
           try { await pinMessage(chatId, next); } catch (e: any) { Alert.alert('Could not pin', e?.message ?? 'Try again'); }
         } },
-      { key: 'forward', label: 'Forward', icon: '↪️', onPress: () => openForward(msg) },
-      { key: 'copy',    label: 'Copy',    icon: '📋', onPress: () => copyAndAutoClear(plain) },
-      { key: 'star',    label: 'Star',    icon: '🔖', onPress: async () => {
+      { key: 'forward', label: 'Forward', icon: 'arrow-redo', onPress: () => openForward(msg) },
+      { key: 'copy',    label: 'Copy',    icon: 'copy-outline', onPress: () => copyAndAutoClear(plain) },
+      { key: 'star',    label: 'Star',    icon: 'star-outline', onPress: async () => {
           try { await addBookmark(msg.id, null); } catch (e: any) { Alert.alert('Could not save', e?.message ?? 'Try again'); }
         } },
-      { key: 'remind',  label: 'Remind',  icon: '⏰', onPress: () => router.push({
+      { key: 'remind',  label: 'Remind',  icon: 'alarm-outline', onPress: () => router.push({
           pathname: '/message-reminder' as any,
           params: { chatId, messageId: String(msg.id), preview: (plain || msg.type).slice(0, 200) },
         }) },
     ];
     if (isMine && !msg.deletedAt) {
-      acts.push({ key: 'edit', label: 'Edit', icon: '✏️', onPress: () => { setEditingId(msg.id); setInput(plain); } });
-      acts.push({ key: 'delete', label: 'Delete', icon: '🗑️', danger: true, onPress: async () => {
+      acts.push({ key: 'edit', label: 'Edit', icon: 'create-outline', onPress: () => { setEditingId(msg.id); setInput(plain); } });
+      acts.push({ key: 'delete', label: 'Delete', icon: 'trash-outline', danger: true, onPress: async () => {
           try {
             await deleteMessage(chatId, msg.id);
             setMessages(prev => prev.map(x => x.id === msg.id
@@ -853,26 +878,40 @@ export default function ChatScreen() {
       { label: 'Block screenshots',          mode: 'block' },
       { label: 'Block silently (no alert)',  mode: 'block_silent' },
     ];
-    Alert.alert(
-      'Screenshots in this chat',
-      'Choose how screenshots are handled while you have this chat open.',
-      [
-        ...opts.map(o => ({
-          text: `${current === o.mode ? '✓ ' : '   '}${o.label}`,
-          onPress: async () => {
-            if (current === o.mode) return;
-            setChat(prev => prev ? { ...prev, screenshotMode: o.mode } : prev);
-            try {
-              await setScreenshotMode(chatId, o.mode);
-            } catch (e: any) {
-              setChat(prev => prev ? { ...prev, screenshotMode: current } : prev);
-              Alert.alert('Save failed', e?.message ?? 'Try again');
-            }
-          },
-        })),
-        { text: 'Cancel', style: 'cancel' },
-      ],
-    );
+    setOverflowMenu({
+      title: 'Screenshots in this chat',
+      actions: opts.map(o => ({
+        label: o.label,
+        icon: current === o.mode ? 'radio-button-on' : 'radio-button-off',
+        onPress: async () => {
+          if (current === o.mode) return;
+          setChat(prev => prev ? { ...prev, screenshotMode: o.mode } : prev);
+          try {
+            await setScreenshotMode(chatId, o.mode);
+          } catch (e: any) {
+            setChat(prev => prev ? { ...prev, screenshotMode: current } : prev);
+            Alert.alert('Save failed', e?.message ?? 'Try again');
+          }
+        },
+      })),
+    });
+  }, [chat, chatId]);
+
+  // Per-chat notification sound picker (themed sheet). Sets the Android channel
+  // the server will address for this chat's pushes.
+  const openNotifSoundPicker = useCallback(() => {
+    if (!chat) return;
+    setOverflowMenu({
+      title: 'Notification sound',
+      actions: NOTIF_CHANNELS.map(ch => ({
+        label: ch.name,
+        icon: 'musical-note-outline' as const,
+        onPress: async () => {
+          try { await setChatNotifSound(chatId, ch.id); }
+          catch (e: any) { Alert.alert('Could not update', e?.message ?? 'Try again'); }
+        },
+      })),
+    });
   }, [chat, chatId]);
 
   // Disappearing-messages picker — Alert sheet, Off / 24h / 7d / 90d.
@@ -882,29 +921,28 @@ export default function ChatScreen() {
   const openDisappearingPicker = useCallback(() => {
     if (!chat) return;
     const current = chat.disappearingSeconds ?? null;
-    const buttons: any[] = DISAPPEARING_PRESETS.map(opt => ({
-      text: `${current === opt.seconds ? '✓ ' : '   '}${opt.label}`,
-      onPress: async () => {
-        if (current === opt.seconds) return;
-        // Optimistic update; rollback on failure.
-        setChat(prev => prev ? { ...prev, disappearingSeconds: opt.seconds } : prev);
-        try {
-          await setDisappearing(chatId, opt.seconds);
-        } catch (e: any) {
-          setChat(prev => prev ? { ...prev, disappearingSeconds: current } : prev);
-          Alert.alert('Could not update', e?.message ?? 'Try again');
-        }
-      },
-    }));
-    buttons.push({ text: 'Cancel', style: 'cancel' });
-    Alert.alert(
-      'Disappearing messages',
-      'New messages in this chat will auto-delete after the chosen time. Existing messages are unaffected.',
-      buttons,
-    );
+    setOverflowMenu({
+      title: 'Disappearing messages',
+      actions: DISAPPEARING_PRESETS.map(opt => ({
+        label: opt.label,
+        icon: current === opt.seconds ? 'radio-button-on' : 'radio-button-off',
+        onPress: async () => {
+          if (current === opt.seconds) return;
+          // Optimistic update; rollback on failure.
+          setChat(prev => prev ? { ...prev, disappearingSeconds: opt.seconds } : prev);
+          try {
+            await setDisappearing(chatId, opt.seconds);
+          } catch (e: any) {
+            setChat(prev => prev ? { ...prev, disappearingSeconds: current } : prev);
+            Alert.alert('Could not update', e?.message ?? 'Try again');
+          }
+        },
+      })),
+    });
   }, [chat, chatId]);
 
-  // ── Chat-level overflow menu: Mute / Block / Leave (Day 11) ──
+  // ── Chat-level overflow menu — a themed bottom sheet (not Alert.alert, which
+  // caps at 3 buttons on Android and looks like a system dialog). ──
   const onPressMenu = useCallback(() => {
     if (!chat) return;
     const peer = chat.type === 'direct' && meId
@@ -912,28 +950,32 @@ export default function ChatScreen() {
       : null;
     const isMuted = chat.muted;
 
-    const buttons: any[] = [
+    const actions: MenuAction[] = [
       {
-        text: isMuted ? '🔔 Unmute' : '🔕 Mute notifications',
+        label: isMuted ? 'Unmute notifications' : 'Mute notifications',
+        icon: isMuted ? 'notifications-outline' : 'notifications-off-outline',
         onPress: async () => {
           try {
             await muteChat(chatId, !isMuted);
             setChat(prev => prev ? { ...prev, muted: !isMuted } : prev);
-          } catch (e: any) {
-            Alert.alert('Mute failed', e?.message ?? 'Try again');
-          }
+          } catch (e: any) { Alert.alert('Mute failed', e?.message ?? 'Try again'); }
         },
       },
       {
-        text: chat.disappearingSeconds
-          ? `⏱️ Disappearing: ${formatDisappearing(chat.disappearingSeconds)}`
-          : '⏱️ Disappearing messages',
+        label: 'Notification sound',
+        icon: 'musical-notes-outline',
+        onPress: () => openNotifSoundPicker(),
+      },
+      {
+        label: chat.disappearingSeconds
+          ? `Disappearing: ${formatDisappearing(chat.disappearingSeconds)}`
+          : 'Disappearing messages',
+        icon: 'timer-outline',
         onPress: () => openDisappearingPicker(),
       },
       {
-        text: chat.vanishMode
-          ? '💨 Vanish Mode: ON'
-          : '💨 Vanish Mode: Off',
+        label: chat.vanishMode ? 'Vanish Mode: On' : 'Vanish Mode: Off',
+        icon: 'flame-outline',
         onPress: async () => {
           const next = !chat.vanishMode;
           setChat(prev => prev ? { ...prev, vanishMode: next } : prev);
@@ -946,59 +988,80 @@ export default function ChatScreen() {
         },
       },
       {
-        text: `📸 Screenshots: ${formatScreenshotMode((chat.screenshotMode as ScreenshotMode) || 'block')}`,
+        label: `Screenshots: ${formatScreenshotMode((chat.screenshotMode as ScreenshotMode) || 'block')}`,
+        icon: 'camera-outline',
         onPress: () => openScreenshotPicker(),
       },
       {
-        text: chat.hidden ? '👁️ Unhide chat' : '🕶️ Hide chat',
+        label: chat.hidden ? 'Unhide chat' : 'Hide chat',
+        icon: chat.hidden ? 'eye-outline' : 'eye-off-outline',
         onPress: async () => {
           const next = !chat.hidden;
           try {
             await setHidden(chatId, next);
-            // If we just hid, drop back to the chat list — the chat won't
-            // appear there any more (only via PIN-gated /hidden-chats).
             if (next) router.replace('/(tabs)/chats' as any);
             else setChat(prev => prev ? { ...prev, hidden: next } : prev);
-          } catch (e: any) {
-            Alert.alert('Could not update', e?.message ?? 'Try again');
-          }
+          } catch (e: any) { Alert.alert('Could not update', e?.message ?? 'Try again'); }
         },
       },
       {
-        text: '📅 Schedule a message',
+        label: 'Schedule a message',
+        icon: 'calendar-outline',
         onPress: () => router.push({
           pathname: '/schedule-message' as any,
           params: { chatId, peerName: peer?.name ?? chat.name ?? '' },
         }),
       },
       {
-        text: '🖼️ Wallpaper',
+        label: 'Wallpaper',
+        icon: 'image-outline',
         onPress: () => router.push({ pathname: '/chat-wallpaper' as any, params: { chatId } }),
       },
       {
-        text: '🎨 Bubble theme',
+        label: 'Bubble theme',
+        icon: 'color-palette-outline',
         onPress: () => router.push({ pathname: '/chat-themes' as any, params: { chatId } }),
       },
     ];
 
     if (chat.type === 'group') {
-      buttons.push({
-        text: '👥 Group info',
+      actions.push({
+        label: 'Group info',
+        icon: 'people-outline',
         onPress: () => router.push({ pathname: '/group-info' as any, params: { id: chatId } }),
       });
     }
 
     if (peer) {
-      buttons.push({
-        text: '👻 Ghost Mode',
+      actions.push({
+        label: 'Ghost Mode',
+        icon: 'eye-off-outline',
         onPress: () => router.push({
           pathname: '/ghost-mode' as any,
           params: { targetId: peer.userId, targetName: peer.name ?? peer.email ?? '' },
         }),
       });
-      buttons.push({
-        text: '🚫 Block user',
-        style: 'destructive',
+      actions.push({
+        label: 'Reset secure session',
+        icon: 'refresh-outline',
+        onPress: () => Alert.alert(
+          'Reset secure session?',
+          'Use this if messages show "unable to decrypt". It re-establishes encryption keys with this contact on your next message. Past undecryptable messages stay unreadable.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Reset', onPress: async () => {
+                try {
+                  await resetChatSession(chatId);
+                  Alert.alert('Session reset', 'Send a message to re-establish encryption.');
+                } catch (e: any) { Alert.alert('Reset failed', e?.message ?? 'Try again'); }
+              } },
+          ],
+        ),
+      });
+      actions.push({
+        label: 'Block user',
+        icon: 'ban-outline',
+        destructive: true,
         onPress: () => Alert.alert(
           'Block this user?',
           'They will no longer be able to message you. Existing chat history is preserved.',
@@ -1009,18 +1072,14 @@ export default function ChatScreen() {
                   await blockUser(peer.userId);
                   Alert.alert('Blocked', `${peer.name || peer.email || 'User'} can no longer message you.`);
                   router.back();
-                } catch (e: any) {
-                  Alert.alert('Block failed', e?.message ?? 'Try again');
-                }
-              }
-            },
+                } catch (e: any) { Alert.alert('Block failed', e?.message ?? 'Try again'); }
+              } },
           ],
         ),
       });
     }
 
-    buttons.push({ text: 'Cancel', style: 'cancel' });
-    Alert.alert(chat.name || (peer?.name ?? 'Chat'), undefined, buttons);
+    setOverflowMenu({ title: chat.name || (peer?.name ?? 'Chat'), actions });
   }, [chat, meId, chatId, router]);
 
   // ── React / Reply / Forward handlers ──────────────────────
@@ -1568,17 +1627,17 @@ export default function ChatScreen() {
             <>
               <TouchableOpacity
                 style={S.headerIconBtn}
-                onPress={() => router.push({ pathname: '/voicecall' as any, params })}
-                activeOpacity={0.7}
-              >
-                <Text style={S.headerIcon}>📞</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={S.headerIconBtn}
                 onPress={() => router.push({ pathname: '/videocall' as any, params })}
                 activeOpacity={0.7}
               >
-                <Text style={S.headerIcon}>📹</Text>
+                <Ionicons name="videocam" size={23} color={colors.text} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={S.headerIconBtn}
+                onPress={() => router.push({ pathname: '/voicecall' as any, params })}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="call" size={20} color={colors.text} />
               </TouchableOpacity>
             </>
           );
@@ -1588,10 +1647,10 @@ export default function ChatScreen() {
           onPress={() => { setSearchOpen(o => !o); if (searchOpen) setSearchQ(''); }}
           activeOpacity={0.7}
         >
-          <Text style={S.headerIcon}>{searchOpen ? '✕' : '🔍'}</Text>
+          <Ionicons name={searchOpen ? 'close' : 'search'} size={22} color={colors.text} />
         </TouchableOpacity>
         <TouchableOpacity style={S.headerIconBtn} onPress={onPressMenu} activeOpacity={0.7}>
-          <Text style={S.headerIcon}>⋮</Text>
+          <Ionicons name="ellipsis-vertical" size={20} color={colors.text} />
         </TouchableOpacity>
       </View>
 
@@ -1664,7 +1723,7 @@ export default function ChatScreen() {
           activeOpacity={0.85}
           onPress={() => Linking.openURL(`https://maps.google.com/?q=${liveLoc.latitude},${liveLoc.longitude}`).catch(() => {})}
         >
-          <Text style={{ fontSize: 18 }}>📍</Text>
+          <Ionicons name="location" size={20} color="#FF6B35" />
           <View style={{ flex: 1 }}>
             <Text style={{ color: '#FF6B35', fontSize: 13, fontWeight: '700' }}>{membersById.get(liveLoc.userId)?.name || 'Someone'} is sharing live location</Text>
             <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 11, marginTop: 1 }} numberOfLines={1}>{liveLoc.address || `${liveLoc.latitude.toFixed(5)}, ${liveLoc.longitude.toFixed(5)}`} · Open in Maps</Text>
@@ -1711,9 +1770,13 @@ export default function ChatScreen() {
           const grouped = !showDate && !!older && older.senderId === item.senderId &&
             item.type !== 'system' && older.type !== 'system' &&
             Math.abs(new Date(item.createdAt).getTime() - new Date(older.createdAt).getTime()) < 5 * 60 * 1000;
+          // Unread separator above the first message newer than the read boundary.
+          const showUnread = !!unreadInfo && item.id > unreadInfo.boundaryId &&
+            (!older || older.id <= unreadInfo.boundaryId);
           return (
           <View>
             {showDate && <DateChip iso={item.createdAt} />}
+            {showUnread && <UnreadDivider count={unreadInfo!.count} />}
             <SwipeToReply onReply={() => { if (!item.deletedAt && item.type !== 'system') setReplyTo(item); }}>
             <View style={item.id === flashId ? { backgroundColor: 'rgba(16,185,129,0.18)', borderRadius: 12 } : undefined}>
             <MemoBubble
@@ -1828,18 +1891,29 @@ export default function ChatScreen() {
             <Text style={S.replyBarTitle} numberOfLines={1}>
               Replying to {(membersById.get(replyTo.senderId)?.name) || 'message'}
             </Text>
-            <Text style={S.replyBarBody} numberOfLines={1}>
-              {replyTo.type === 'image' ? '📷 Photo'
-                : replyTo.type === 'audio' ? '🎙️ Voice message'
-                : replyTo.type === 'video' ? '🎥 Video'
-                : replyTo.type === 'file'  ? '📎 File'
-                : replyTo.content ?? ''}
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+              {replyTo.type === 'image' ? <Ionicons name="image" size={13} color={colors.textDim} />
+                : replyTo.type === 'audio' ? <Ionicons name="mic" size={13} color={colors.textDim} />
+                : replyTo.type === 'video' ? <Ionicons name="videocam" size={13} color={colors.textDim} />
+                : replyTo.type === 'file'  ? <Ionicons name="document" size={13} color={colors.textDim} /> : null}
+              <Text style={S.replyBarBody} numberOfLines={1}>
+                {replyTo.type === 'image' ? 'Photo'
+                  : replyTo.type === 'audio' ? 'Voice message'
+                  : replyTo.type === 'video' ? 'Video'
+                  : replyTo.type === 'file'  ? 'File'
+                  : replyTo.content ?? ''}
+              </Text>
+            </View>
           </View>
           <TouchableOpacity onPress={() => setReplyTo(null)} hitSlop={8}>
-            <Text style={S.editCancelTxt}>✕</Text>
+            <Ionicons name="close" size={20} color={colors.textDim} />
           </TouchableOpacity>
         </View>
+      )}
+
+      {/* Emoji panel (tap the 😊 icon) — inserts into the message input */}
+      {emojiOpen && editingId == null && !recording && (
+        <EmojiPanel onPick={(e) => setInput(prev => (prev + e).slice(0, 4000))} />
       )}
 
       {/* Composer — either normal or recording mode */}
@@ -1847,55 +1921,82 @@ export default function ChatScreen() {
         <View style={[S.composer, S.recordingComposer]}>
           <View style={S.recordingDot} />
           <Text style={S.recordingTimer}>{formatRecDuration(recElapsedMs)}</Text>
-          <Text style={S.recordingHint}>Recording… tap ✕ to cancel, ▶ to send</Text>
+          <Text style={S.recordingHint}>Slide to cancel · tap send</Text>
           <TouchableOpacity style={S.recCancelBtn} onPress={cancelRecording} activeOpacity={0.8}>
-            <Text style={S.recCancelTxt}>✕</Text>
+            <Ionicons name="trash-outline" size={22} color={colors.danger} />
           </TouchableOpacity>
-          <TouchableOpacity style={S.recSendBtn} onPress={stopAndSendRecording} activeOpacity={0.85}>
-            <Text style={S.recSendTxt}>▶</Text>
+          <TouchableOpacity style={S.sendFab} onPress={stopAndSendRecording} activeOpacity={0.85}>
+            <Ionicons name="send" size={20} color="#fff" style={{ marginLeft: 2 }} />
           </TouchableOpacity>
         </View>
       ) : (
         <View style={S.composer}>
-          {editingId == null && (
-            <TouchableOpacity
-              style={S.attachBtn}
-              onPress={onPressAttach}
-              disabled={sending}
-              activeOpacity={0.7}
-            >
-              <Text style={S.attachTxt}>📎</Text>
-            </TouchableOpacity>
-          )}
-          <TextInput
-            style={S.input}
-            placeholder={editingId != null ? 'Edit message…' : 'Message'}
-            placeholderTextColor={colors.textDim}
-            value={input}
-            onChangeText={onInputChange}
-            multiline
-            maxLength={4000}
-          />
-          {/* Mic when input is empty + not editing; otherwise the Send button takes its place */}
+          <View style={S.inputPill}>
+            {editingId == null && (
+              <TouchableOpacity
+                style={S.pillIconBtn}
+                onPress={() => { if (!emojiOpen) Keyboard.dismiss(); setEmojiOpen(o => !o); }}
+                activeOpacity={0.7}
+                hitSlop={6}
+              >
+                <Ionicons name={emojiOpen ? 'happy' : 'happy-outline'} size={24} color={emojiOpen ? colors.primary : colors.textDim} />
+              </TouchableOpacity>
+            )}
+            <TextInput
+              style={S.input}
+              placeholder={editingId != null ? 'Edit message…' : 'Message'}
+              placeholderTextColor={colors.textDim}
+              value={input}
+              onChangeText={onInputChange}
+              onFocus={() => setEmojiOpen(false)}
+              multiline
+              maxLength={4000}
+            />
+            {editingId == null && (
+              <>
+                <TouchableOpacity
+                  style={S.pillIconBtn}
+                  onPress={() => { setEmojiOpen(false); Keyboard.dismiss(); setGifOpen(true); }}
+                  disabled={sending}
+                  activeOpacity={0.7}
+                  hitSlop={6}
+                >
+                  <Ionicons name="film-outline" size={23} color={colors.textDim} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={S.pillIconBtn}
+                  onPress={onPressAttach}
+                  disabled={sending}
+                  activeOpacity={0.7}
+                  hitSlop={6}
+                >
+                  <Ionicons name="attach" size={24} color={colors.textDim} style={{ transform: [{ rotate: '45deg' }] }} />
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+          {/* Mic when input is empty + not editing; otherwise Send takes its place */}
           {editingId == null && input.trim().length === 0 ? (
             <TouchableOpacity
-              style={S.attachBtn}
+              style={S.sendFab}
               onPress={startRecording}
               disabled={sending}
-              activeOpacity={0.7}
+              activeOpacity={0.85}
             >
-              <Text style={S.attachTxt}>🎙️</Text>
+              <Ionicons name="mic" size={23} color="#fff" />
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
-              style={[S.sendBtn, (!input.trim() || sending) && S.sendBtnOff]}
+              style={[S.sendFab, (!input.trim() || sending) && S.sendBtnOff]}
               onPress={() => onSend(false)}
               onLongPress={() => { if (input.trim() && !sending && editingId == null) onSend(true); }}
               delayLongPress={300}
               disabled={!input.trim() || sending}
               activeOpacity={0.85}
             >
-              <Text style={S.sendTxt}>{sending ? '…' : editingId != null ? 'Save' : 'Send'}</Text>
+              {sending
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <Ionicons name={editingId != null ? 'checkmark' : 'send'} size={editingId != null ? 24 : 20} color="#fff" style={editingId != null ? undefined : { marginLeft: 2 }} />}
             </TouchableOpacity>
           )}
         </View>
@@ -1942,6 +2043,14 @@ export default function ChatScreen() {
 
       {/* GIF picker (W15) */}
       <GifPicker visible={gifOpen} onClose={() => setGifOpen(false)} onSelect={sendGif} />
+
+      {/* Chat overflow menu — themed bottom sheet (replaces the 3-button Alert) */}
+      <Sheet
+        visible={!!overflowMenu}
+        title={overflowMenu?.title}
+        actions={overflowMenu?.actions ?? []}
+        onClose={() => setOverflowMenu(null)}
+      />
 
       {/* Media caption preview — every send path stages here first */}
       <Modal
@@ -2419,26 +2528,18 @@ function FileBubble({
 
   const onOpen = useCallback(async () => {
     if (busy) return;
-    // Encrypted files resolve to a local decrypted file (no auth header); plaintext
-    // files still need the Bearer header to download from /uploads.
-    if (!resolvedUri && !authHeader) return;
     setBusy(true);
     try {
+      // Persistent local copy (downloaded once). Survives "Clear cache" AND the
+      // server's post-delivery purge. Encrypted files arrive decrypted via
+      // resolvedUri; everything else resolves through the persistent media store.
+      const localUri = resolvedUri?.uri ?? await getMedia(attachmentId, { kind: 'file', isMine, mime, filename });
+      // Copy to a nicely-named temp so the share sheet shows the real filename.
       const safe = (filename || `file-${attachmentId}`).replace(/[/\\:*?"<>|]/g, '_');
       const dest = `${(FileSystem as any).cacheDirectory}${safe}`;
-      let outUri: string;
-      if (resolvedUri && !resolvedUri.headers) {
-        // Already a decrypted local file — copy to a nicely-named path, then share.
-        await (FileSystem as any).copyAsync({ from: resolvedUri.uri, to: dest }).catch(() => {});
-        const info = await (FileSystem as any).getInfoAsync(dest);
-        outUri = info?.exists ? dest : resolvedUri.uri;
-      } else {
-        const url = resolvedUri?.uri ?? attachmentUrl(attachmentId);
-        const headers = resolvedUri?.headers ?? { Authorization: authHeader as string };
-        const dl = await (FileSystem as any).downloadAsync(url, dest, { headers });
-        if (dl.status !== 200) throw new Error(`Download failed (HTTP ${dl.status})`);
-        outUri = dl.uri;
-      }
+      await (FileSystem as any).copyAsync({ from: localUri, to: dest }).catch(() => {});
+      const info = await (FileSystem as any).getInfoAsync(dest);
+      const outUri = info?.exists ? dest : localUri;
 
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(outUri, { mimeType: mime, dialogTitle: filename });
@@ -2450,12 +2551,12 @@ function FileBubble({
     } finally {
       setBusy(false);
     }
-  }, [attachmentId, filename, mime, authHeader, resolvedUri, busy]);
+  }, [attachmentId, filename, mime, resolvedUri, busy]);
 
   return (
     <TouchableOpacity style={S.fileRow} onPress={onOpen} activeOpacity={0.7} disabled={busy}>
       <View style={[S.fileIcon, isMine ? S.fileIconMine : S.fileIconTheirs]}>
-        <Text style={S.fileIconTxt}>{busy ? '⏳' : '📄'}</Text>
+        {busy ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="document-text" size={22} color="#fff" />}
       </View>
       <View style={S.fileMeta}>
         <Text style={[S.fileName, isMine && S.fileNameMine]} numberOfLines={1}>{filename}</Text>
@@ -2478,7 +2579,7 @@ function formatBytes(n: number): string {
 // auth-gated /uploads endpoint with a Bearer header. Mono speaker icon
 // stays bold while playing, otherwise dim.
 function AudioBubble({
-  attachmentId, durationMs, waveform, authHeader, resolvedUri, isMine,
+  attachmentId, durationMs, waveform, authHeader, resolvedUri, isMine, mime,
 }: {
   attachmentId: string;
   durationMs:   number;
@@ -2486,6 +2587,7 @@ function AudioBubble({
   authHeader:   string | null;
   resolvedUri?: { uri: string; headers?: Record<string, string> } | null;
   isMine:       boolean;
+  mime?:        string;
 }) {
   const S = useS();
   const [playing,  setPlaying]  = useState(false);
@@ -2502,11 +2604,6 @@ function AudioBubble({
   }, []);
 
   const togglePlay = useCallback(async () => {
-    // Encrypted voice notes play from a local decrypted file (no header); plaintext
-    // ones stream from /uploads with the Bearer header.
-    const src = resolvedUri
-      ?? (authHeader ? { uri: attachmentUrl(attachmentId), headers: { Authorization: authHeader } } : null);
-    if (!src) return;
     try {
       if (playing) {
         await soundRef.current?.pauseAsync();
@@ -2514,6 +2611,11 @@ function AudioBubble({
         return;
       }
       if (!soundRef.current) {
+        // Play from the PERSISTENT local copy (download once). Survives "Clear
+        // cache" and the server's post-delivery purge. Encrypted notes already
+        // arrive as a local decrypted file via resolvedUri.
+        let src: { uri: string } | null = resolvedUri ? { uri: resolvedUri.uri } : null;
+        if (!src) { try { src = { uri: await getMedia(attachmentId, { kind: 'voice', isMine, mime }) }; } catch { return; } }
         const { sound } = await Audio.Sound.createAsync(
           src,
           { shouldPlay: true, progressUpdateIntervalMillis: 150 },
@@ -2550,7 +2652,7 @@ function AudioBubble({
         onPress={togglePlay}
         activeOpacity={0.7}
       >
-        <Text style={S.audioPlayIcon}>{playing ? '▌▌' : '▶'}</Text>
+        <Ionicons name={playing ? 'pause' : 'play'} size={19} color="#fff" style={playing ? undefined : { marginLeft: 2 }} />
       </TouchableOpacity>
       <View style={S.audioMeter}>
         {waveform && waveform.length > 0 ? (
@@ -2594,25 +2696,29 @@ function AudioBubble({
 // via getAttachmentLocalUri). Survives "Clear cache" AND the server's
 // post-delivery purge — only an uninstall removes it, like WhatsApp's media
 // folder. Encrypted media arrives as an already-decrypted local file.
-function ImageAttachment({ attachmentId, resolvedUri, autoSave, onError }: {
+function ImageAttachment({ attachmentId, resolvedUri, isMine, mime, thumb, onError }: {
   attachmentId: string;
   resolvedUri?: { uri: string; headers?: Record<string, string> } | null;
-  autoSave?: boolean;   // copy received media into the VaultChat gallery album
+  isMine?: boolean;
+  mime?: string;
+  thumb?: string;   // base64 JPEG shown instantly while the full image loads
   onError?: () => void;
 }) {
   const { colors } = useTheme();
   const S = useS();
   const [uri, setUri] = useState<string | null>(resolvedUri?.uri ?? null);
   useEffect(() => {
-    const onReady = (u: string) => { setUri(u); if (autoSave) saveToGallery(u, 'image', attachmentId); };
-    if (resolvedUri?.uri) { onReady(resolvedUri.uri); return; }
+    if (resolvedUri?.uri) { setUri(resolvedUri.uri); return; }
     let cancel = false;
-    getAttachmentLocalUri(attachmentId)
-      .then(u => { if (!cancel) onReady(u); })
+    getMedia(attachmentId, { kind: 'image', isMine, mime })
+      .then(u => { if (!cancel) setUri(u); })
       .catch(() => { if (!cancel) onError?.(); });
     return () => { cancel = true; };
-  }, [attachmentId, resolvedUri?.uri, autoSave]);
+  }, [attachmentId, resolvedUri?.uri, isMine, mime]);
   if (!uri) {
+    // Instant low-res preview from the embedded thumbnail while the full image
+    // downloads (WhatsApp-style progressive load).
+    if (thumb) return <Image source={{ uri: thumbDataUri(thumb) }} style={S.attachedImage} resizeMode="cover" />;
     return <View style={[S.attachedImage, S.imageError]}><ActivityIndicator color={colors.primary} /></View>;
   }
   return <Image source={{ uri }} style={S.attachedImage} resizeMode="cover" onError={onError} />;
@@ -2625,7 +2731,7 @@ function ImageAttachment({ attachmentId, resolvedUri, autoSave, onError }: {
 // MessageBubble can flip to a "Viewed" tombstone without an extra
 // HEAD round-trip.
 function VideoBubble({
-  attachmentId, durationMs, authHeader, resolvedUri, onErrorOnce, isNote, onOpen,
+  attachmentId, durationMs, authHeader, resolvedUri, onErrorOnce, isNote, onOpen, isMine, mime, thumb,
 }: {
   attachmentId:  string;
   durationMs:    number;
@@ -2634,6 +2740,9 @@ function VideoBubble({
   onErrorOnce?:  () => void;
   isNote?:       boolean;   // round "video note" vs rectangular video
   onOpen?:       () => void; // open full-screen player
+  isMine?:       boolean;
+  mime?:         string;
+  thumb?:        string;    // base64 JPEG poster (instant, no download)
 }) {
   const S = useS();
   // WhatsApp-style: do NOT mount a <Video> (ExoPlayer) at rest — each instance
@@ -2651,7 +2760,7 @@ function VideoBubble({
     let uri = noteUri;
     if (!uri) {
       setBusy(true);
-      try { uri = resolvedUri?.uri ?? await getAttachmentLocalUri(attachmentId); setNoteUri(uri); }
+      try { uri = resolvedUri?.uri ?? await getMedia(attachmentId, { kind: 'video', isMine, mime }); setNoteUri(uri); }
       catch { onErrorOnce?.(); setBusy(false); return; }
       setBusy(false);
     }
@@ -2676,15 +2785,17 @@ function VideoBubble({
           onPlaybackStatusUpdate={(st: any) => { if (st?.didJustFinish) setPlaying(false); }}
           onError={() => { setPlaying(false); onErrorOnce?.(); }}
         />
+      ) : thumb ? (
+        <Image source={{ uri: thumbDataUri(thumb) }} style={isNote ? S.videoNoteView : S.videoView} resizeMode="cover" />
       ) : (
         <View style={[isNote ? S.videoNoteView : S.videoView, S.videoPlaceholder]}>
-          <Text style={{ fontSize: 34 }}>🎬</Text>
+          <Ionicons name="videocam" size={34} color="#5B6470" />
         </View>
       )}
       {!showingVideo && (
         <View style={S.videoPlayOverlay} pointerEvents="none">
           <View style={S.videoPlayBtn}>
-            {busy ? <ActivityIndicator color="#fff" /> : <Text style={S.videoPlayIcon}>▶</Text>}
+            {busy ? <ActivityIndicator color="#fff" /> : <Ionicons name="play" size={26} color="#fff" style={{ marginLeft: 3 }} />}
           </View>
         </View>
       )}
@@ -2713,6 +2824,41 @@ function DateChip({ iso }: { iso: string }) {
   return (
     <View style={S.dateChipRow}>
       <View style={S.dateChip}><Text style={S.dateChipTxt}>{dayLabel(iso)}</Text></View>
+    </View>
+  );
+}
+
+// WhatsApp-style "N unread messages" separator, shown above the first message
+// the user hasn't read yet.
+function UnreadDivider({ count }: { count: number }) {
+  const S = useS();
+  return (
+    <View style={S.unreadDivRow}>
+      <Text style={S.unreadDivTxt}>{count} unread message{count === 1 ? '' : 's'}</Text>
+    </View>
+  );
+}
+
+// Compact emoji picker for inserting into the composer (no native dep).
+const EMOJIS = (
+  '😀 😃 😄 😁 😆 😅 😂 🤣 🙂 😊 😇 🙃 😉 😌 😍 🥰 😘 😗 😙 😚 😋 😛 😝 😜 🤪 🤨 🧐 🤓 😎 🥳 🤩 ' +
+  '😏 😒 😞 😔 😟 😕 🙁 ☹️ 😣 😖 😫 😩 🥺 😢 😭 😤 😠 😡 🤬 🤯 😳 🥵 🥶 😱 😨 😰 😥 😓 🫠 🥲 ' +
+  '😶 😐 😑 😬 🙄 😯 😦 😧 😮 😲 🥱 😴 🤤 😪 😵 🤐 🥴 🤢 🤮 🤧 😷 🤒 🤕 🤑 🤠 😈 👿 👻 💀 👀 ' +
+  '👍 👎 👊 ✊ 🤛 🤜 👏 🙌 👐 🤝 🙏 ✌️ 🤞 🫶 🤟 🤘 👌 🤌 🤏 👈 👉 👆 👇 ☝️ 🖐️ ✋ 🖖 👋 🤙 💪 ' +
+  '❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎 💔 ❣️ 💕 💞 💓 💗 💖 💘 💝 💯 🔥 ✨ ⭐ 🌟 💫 ⚡ 💥 🎉 🎊 🎈 🎁'
+).split(' ').filter(Boolean);
+
+function EmojiPanel({ onPick }: { onPick: (e: string) => void }) {
+  const S = useS();
+  return (
+    <View style={S.emojiPanel}>
+      <ScrollView contentContainerStyle={S.emojiWrap} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        {EMOJIS.map((e, i) => (
+          <TouchableOpacity key={`${e}-${i}`} style={S.emojiCell} onPress={() => onPick(e)} activeOpacity={0.6}>
+            <Text style={S.emojiGlyph}>{e}</Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
     </View>
   );
 }
@@ -2774,9 +2920,10 @@ function MessageBubble({
   const { colors } = useTheme();
   const S = useS();
   const isMine = msg.senderId === meId;
-  // Per-chat bubble color override (null = built-in styling). Text color is
-  // chosen for legibility on the chosen background.
-  const bubbleBg = bubbleColors ? (isMine ? bubbleColors.mine : bubbleColors.peer) : null;
+  // Per-chat bubble theme: recolors only YOUR (outgoing) bubble — received
+  // bubbles always follow the theme (WhatsApp-style). Text color auto-picked
+  // for legibility on the chosen background.
+  const bubbleBg = bubbleColors && isMine ? bubbleColors.mine : null;
   const bubbleTxtColor = bubbleBg ? idealText(bubbleBg) : null;
   const [plain, setPlain] = useState<string>('');
   const [replyPlain, setReplyPlain] = useState<string>('');
@@ -2801,6 +2948,9 @@ function MessageBubble({
   useEffect(() => {
     let cancel = false;
     (async () => {
+      // decryptFromChat handles the transient out-of-order retry internally and
+      // tombstones permanent failures, so we decrypt once here (no per-bubble
+      // retry loop — that was hammering the backlog of undecryptable history).
       const text = await decryptFromChat(chatId, msg.senderId, msg.content, msg.id);
       if (!cancel) setPlain(text);
     })();
@@ -2877,11 +3027,12 @@ function MessageBubble({
   // the viewer resolve a local file — so taps are reliable and never stack.
   const bubbleRouter = useRouter();
   const openingRef = useRef(false);
-  const openFullScreen = useCallback((kind: 'image' | 'video') => {
+  const openFullScreen = useCallback((kind: 'image' | 'video', viewOnce = false) => {
     if (openingRef.current) return;                      // guard against rapid double-taps
     openingRef.current = true;
     setTimeout(() => { openingRef.current = false; }, 700);
     const params: any = { filename: String(msg.meta?.filename || ''), msgType: kind };
+    if (viewOnce) params.viewOnce = '1';                         // viewer loads to cache + marks viewed after load
     if (msg.meta?.gifUrl) {
       params.mediaUrl = String(msg.meta.gifUrl);                 // external GIF — no auth
     } else if (isEncMedia && mediaSrc?.uri) {
@@ -2891,13 +3042,11 @@ function MessageBubble({
       // viewer resolves it instantly (no re-download) and it works even after
       // the server purges its copy.
       params.attachmentId = String(msg.meta.attachmentId);
-      // Received (non-view-once) media → also drop it in the VaultChat gallery
-      // album. Images already auto-save in the bubble; this covers videos, which
-      // only download when opened.
-      if (!isMine && !isViewOnceMedia) params.save = '1';
+      params.isMine = isMine ? '1' : '';
+      params.mime = String(msg.meta?.mime || '');
     } else { openingRef.current = false; return; }
     bubbleRouter.push({ pathname: '/media-viewer' as any, params });
-  }, [msg.meta?.attachmentId, msg.meta?.gifUrl, msg.meta?.filename, isEncMedia, mediaSrc?.uri, bubbleRouter]);
+  }, [msg.meta?.attachmentId, msg.meta?.gifUrl, msg.meta?.filename, isEncMedia, mediaSrc?.uri, isMine, bubbleRouter]);
   const isSticker = msg.type === 'sticker' && !!msg.content;
   const isPoll  = msg.type === 'poll' && Array.isArray(msg.meta?.options);
   const isLocation = msg.type === 'location';
@@ -2917,13 +3066,16 @@ function MessageBubble({
       isViewedOnce(String(msg.id)).then(v => { if (v) setTombstoned(true); });
     }
   }, [isViewOnceMedia, isMine, msg.id]);
-  const handleRevealViewOnce = useCallback(async () => {
+  const handleRevealViewOnce = useCallback(() => {
     if (tombstoned) return;
-    markViewedOnce(String(msg.id));   // persist so it never re-appears
+    markViewedOnce(String(msg.id));   // persist locally so it never re-appears
     setTombstoned(true);              // bubble becomes "viewed" immediately
-    openFullScreen(isVideo ? 'video' : 'image');  // show it once, full-screen
-    try { await markAttachmentViewed(msg.meta.attachmentId); } catch { /* best-effort */ }
-  }, [tombstoned, msg.id, msg.meta?.attachmentId, isVideo, openFullScreen]);
+    // Open full-screen as view-once: the viewer downloads to CACHE (never the
+    // browsable folder) and marks the server "viewed" only AFTER the media has
+    // loaded — otherwise the POST /viewed races the GET and the GET 410s
+    // ("Failed to load media").
+    openFullScreen(isVideo ? 'video' : 'image', true);
+  }, [tombstoned, msg.id, isVideo, openFullScreen]);
 
   return (
     <View style={[S.bubbleRow, isMine ? S.bubbleRowMine : S.bubbleRowTheirs, grouped && S.bubbleRowGrouped]}>
@@ -2989,7 +3141,7 @@ function MessageBubble({
             onPress={handleRevealViewOnce}
             activeOpacity={0.7}
           >
-            <Text style={S.viewOnceShieldIcon}>👁️</Text>
+            <Ionicons name="eye-outline" size={26} color={colors.textDim} style={{ marginBottom: 4 }} />
             <Text style={S.viewOnceShieldTxt}>Tap to view {isImage ? 'photo' : 'video'} once</Text>
             <Text style={S.viewOnceShieldHint}>
               From {member?.name || member?.email || 'sender'} · disappears after one view
@@ -3005,7 +3157,9 @@ function MessageBubble({
           <ImageAttachment
             attachmentId={msg.meta.attachmentId}
             resolvedUri={isEncMedia ? mediaSrc : undefined}
-            autoSave={!isMine && !isViewOnceMedia}
+            isMine={isMine}
+            mime={String(msg.meta?.mime || '')}
+            thumb={typeof msg.meta?.thumb === 'string' ? msg.meta.thumb : undefined}
             onError={() => { if (isViewOnceMedia && !isMine) setTombstoned(true); }}
           />
         ) : isVideo ? (
@@ -3017,6 +3171,9 @@ function MessageBubble({
             isNote={!!msg.meta?.videoNote}
             onOpen={() => openFullScreen('video')}
             onErrorOnce={() => { if (isViewOnceMedia && !isMine) setTombstoned(true); }}
+            isMine={isMine}
+            mime={String(msg.meta?.mime || '')}
+            thumb={typeof msg.meta?.thumb === 'string' ? msg.meta.thumb : undefined}
           />
         ) : isAudio ? (
           <AudioBubble
@@ -3026,6 +3183,7 @@ function MessageBubble({
             authHeader={authHeader}
             resolvedUri={isEncMedia ? mediaSrc : undefined}
             isMine={isMine}
+            mime={String(msg.meta?.mime || '')}
           />
         ) : isFile ? (
           <FileBubble
@@ -3058,7 +3216,9 @@ function MessageBubble({
               onPress={() => { if (ok) Linking.openURL(`https://www.google.com/maps?q=${L.lat},${L.lng}`).catch(() => {}); }}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 190 }}>
-                <Text style={{ fontSize: 24 }}>📍</Text>
+                <View style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: 'rgba(74,159,255,0.18)', alignItems: 'center', justifyContent: 'center' }}>
+                  <Ionicons name="location" size={22} color="#4A9FFF" />
+                </View>
                 <View style={{ flex: 1 }}>
                   <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, { fontWeight: '700' }]}>
                     {L?.live ? 'Live location' : 'Location'}
@@ -3108,7 +3268,7 @@ function MessageBubble({
           ) : null;
         })()}
 
-        <Text style={[S.bubbleMeta, !isMine && { color: colors.textDim }]}>
+        <Text style={[S.bubbleMeta, !isMine && { color: colors.bubbleMetaIn }]}>
           {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           {msg.editedAt ? ' · edited' : ''}
           {msg._state === 'pending' ? ' · sending…' : ''}
@@ -3151,7 +3311,7 @@ function MessageBubble({
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen:        { flex: 1, backgroundColor: c.bg },
+  screen:        { flex: 1, backgroundColor: c.chatBg },
   lockGate:      { ...StyleSheet.absoluteFillObject, backgroundColor: c.bg, alignItems: 'center', justifyContent: 'center', padding: 32, zIndex: 50 },
   lockGateTitle: { color: c.text, fontSize: 20, fontWeight: '800', marginTop: 16 },
   lockGateSub:   { color: c.textDim, fontSize: 14, marginTop: 6, textAlign: 'center' },
@@ -3162,7 +3322,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   lockGateBack:  { color: c.textDim, fontSize: 14, fontWeight: '600' },
   center:        { justifyContent: 'center', alignItems: 'center' },
 
-  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border, gap: 8 },
+  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border, gap: 8, backgroundColor: c.bg },
   headerIconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   headerIcon:    { fontSize: 20 },
   headerAvatarWrap:  { width: 36, height: 36 },
@@ -3172,8 +3332,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   headerPresenceDot: { position: 'absolute', right: -1, bottom: -1, width: 10, height: 10, borderRadius: 5, backgroundColor: '#22C55E', borderWidth: 2, borderColor: c.bg },
 
   // Day 13 — in-chat search
-  inChatSearchBar:    { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: '#0F1217', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
-  inChatSearchInput:  { flex: 1, color: c.text, backgroundColor: '#1F2937', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 8, fontSize: 14 },
+  inChatSearchBar:    { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: c.surfaceSolid, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  inChatSearchInput:  { flex: 1, color: c.text, backgroundColor: c.surface, borderRadius: 18, paddingHorizontal: 14, paddingVertical: 8, fontSize: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
   inChatSearchCount:  { color: c.textDim, fontSize: 11, fontWeight: '600' },
   backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   backTxt:       { color: c.text, fontSize: 24 },
@@ -3204,25 +3364,33 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   dateChipRow:   { alignItems: 'center', marginVertical: 10 },
   dateChip:      { backgroundColor: c.surface, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 4 },
   dateChipTxt:   { color: c.textDim, fontSize: 11.5, fontWeight: '700' },
+  unreadDivRow:  { alignItems: 'center', marginVertical: 8 },
+  unreadDivTxt:  { color: c.primary, fontSize: 11.5, fontWeight: '800', letterSpacing: 0.3, backgroundColor: 'rgba(16,185,129,0.14)', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 4, overflow: 'hidden' },
+
+  // Emoji insertion panel above the composer
+  emojiPanel:    { height: 240, backgroundColor: c.surfaceSolid, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border },
+  emojiWrap:     { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 6, paddingVertical: 8 },
+  emojiCell:     { width: `${100 / 8}%`, aspectRatio: 1, alignItems: 'center', justifyContent: 'center' },
+  emojiGlyph:    { fontSize: 26 },
 
   bubbleRow:     { marginVertical: 4, flexDirection: 'row' },
   bubbleRowGrouped: { marginTop: 1 }, // tighter spacing for consecutive same-sender msgs
   bubbleRowMine: { justifyContent: 'flex-end' },
   bubbleRowTheirs:{ justifyContent: 'flex-start' },
   bubble:        { maxWidth: '78%', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 16, gap: 2 },
-  bubbleMine:    { backgroundColor: '#0E7256', borderTopRightRadius: 4 }, // brand emerald "sent"
-  bubbleTheirs:  { backgroundColor: c.surfaceSolid, borderTopLeftRadius: 4 }, // neutral "received" (themed)
+  bubbleMine:    { backgroundColor: c.bubbleOut, borderTopRightRadius: 4 },   // WhatsApp "sent"
+  bubbleTheirs:  { backgroundColor: c.bubbleIn, borderTopLeftRadius: 4 },     // WhatsApp "received"
   bubblePending: { opacity: 0.6 },
   bubbleFailed:  { borderWidth: 1, borderColor: c.danger, opacity: 0.85 },
   bubbleSystem:  { alignSelf: 'center', backgroundColor: 'transparent', paddingVertical: 4 },
   bubbleSystemTxt:{ color: c.textDim, fontSize: 11, fontStyle: 'italic' },
   senderTag:     { color: c.textDim, fontSize: 11, fontWeight: '600', marginBottom: 2 },
-  bubbleTxt:     { color: c.text, fontSize: 15, lineHeight: 20 },
-  bubbleTxtMine: { color: '#fff' },
-  bubbleMeta:    { color: 'rgba(255,255,255,0.5)', fontSize: 10, alignSelf: 'flex-end', marginTop: 2 },
+  bubbleTxt:     { color: c.bubbleInText, fontSize: 15, lineHeight: 20 },
+  bubbleTxtMine: { color: c.bubbleOutText },
+  bubbleMeta:    { color: c.bubbleMetaOut, fontSize: 10, alignSelf: 'flex-end', marginTop: 2 },
   ttlBadge:      { color: '#FCD34D', fontSize: 10, fontWeight: '700' },
-  tick:          { color: 'rgba(255,255,255,0.7)', fontSize: 11, fontWeight: '700' },
-  tickRead:      { color: '#3B82F6',               fontSize: 11, fontWeight: '700' },
+  tick:          { color: c.bubbleMetaOut, fontSize: 11, fontWeight: '700' },
+  tickRead:      { color: c.tickRead,      fontSize: 11, fontWeight: '700' },
 
   typingBar:     { paddingHorizontal: 16, paddingBottom: 4 },
   typingTxt:     { color: c.textDim, fontSize: 12, fontStyle: 'italic' },
@@ -3242,8 +3410,11 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   editTxt:       { color: c.primary, fontSize: 12, fontWeight: '600' },
   editCancelTxt: { color: c.textDim, fontSize: 12 },
 
-  composer:      { flexDirection: 'row', alignItems: 'flex-end', padding: 12, gap: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border, backgroundColor: '#0F1217' },
-  attachBtn:     { width: 40, height: 40, borderRadius: 20, backgroundColor: '#1F2937', alignItems: 'center', justifyContent: 'center' },
+  composer:      { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 8, paddingVertical: 7, gap: 7, backgroundColor: c.bg },
+  inputPill:     { flex: 1, flexDirection: 'row', alignItems: 'flex-end', backgroundColor: c.surface, borderRadius: 24, minHeight: 48, paddingLeft: 16, paddingRight: 6, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
+  pillIconBtn:   { width: 38, height: 46, alignItems: 'center', justifyContent: 'center' },
+  sendFab:       { width: 48, height: 48, borderRadius: 24, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', elevation: 3, shadowColor: '#000', shadowOpacity: 0.25, shadowOffset: { width: 0, height: 2 }, shadowRadius: 4 },
+  attachBtn:     { width: 40, height: 40, borderRadius: 20, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' },
   attachTxt:     { fontSize: 18 },
 
   // Recording-mode composer: pulse dot + timer + hint + cancel/send buttons
@@ -3251,7 +3422,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   recordingDot:    { width: 10, height: 10, borderRadius: 5, backgroundColor: c.danger },
   recordingTimer:  { color: c.text, fontSize: 16, fontWeight: '700', minWidth: 52, textAlign: 'center' },
   recordingHint:   { flex: 1, color: c.textDim, fontSize: 12 },
-  recCancelBtn:    { width: 40, height: 40, borderRadius: 20, backgroundColor: '#1F2937', alignItems: 'center', justifyContent: 'center' },
+  recCancelBtn:    { width: 40, height: 40, borderRadius: 20, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' },
   recCancelTxt:    { color: c.danger, fontSize: 18, fontWeight: '700' },
   recSendBtn:      { width: 40, height: 40, borderRadius: 20, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
   recSendTxt:      { color: '#fff', fontSize: 18, fontWeight: '700' },
@@ -3259,11 +3430,11 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   // Voice-message bubble (playback): play/pause button + track + duration
   audioRow:           { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 200, maxWidth: 260 },
   audioPlayBtn:       { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  audioPlayBtnMine:   { backgroundColor: 'rgba(255,255,255,0.22)' },
+  audioPlayBtnMine:   { backgroundColor: c.primary },
   audioPlayBtnTheirs: { backgroundColor: c.primary },
   audioPlayIcon:      { color: '#fff', fontSize: 14, fontWeight: '700' },
   audioMeter:         { flex: 1, gap: 4 },
-  audioTrack:         { height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.18)', overflow: 'hidden' },
+  audioTrack:         { height: 4, borderRadius: 2, backgroundColor: 'rgba(128,128,128,0.30)', overflow: 'hidden' },
   audioFill:          { height: 4, backgroundColor: c.primary, borderRadius: 2 },
 
   // Waveform bars (Day 7 polish): 32 vertical bars sized by amplitude.
@@ -3271,17 +3442,17 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   // is implicit. flex-end alignItems so all bars sit on the baseline.
   waveBars:               { flexDirection: 'row', alignItems: 'flex-end', height: 24, gap: 2 },
   waveBar:                { width: 3, borderRadius: 1.5 },
-  waveBarPlayedMine:      { backgroundColor: '#fff' },
-  waveBarUnplayedMine:    { backgroundColor: 'rgba(255,255,255,0.35)' },
+  waveBarPlayedMine:      { backgroundColor: c.bubbleOutText },
+  waveBarUnplayedMine:    { backgroundColor: c.bubbleMetaOut },
   waveBarPlayedTheirs:    { backgroundColor: c.primary },
-  waveBarUnplayedTheirs:  { backgroundColor: 'rgba(108,99,255,0.35)' },
-  audioFillMine:      { backgroundColor: '#fff' },
-  audioTime:          { color: c.textDim, fontSize: 11 },
-  audioTimeMine:      { color: 'rgba(255,255,255,0.85)' },
+  waveBarUnplayedTheirs:  { backgroundColor: 'rgba(128,128,128,0.35)' },
+  audioFillMine:      { backgroundColor: c.bubbleOutText },
+  audioTime:          { color: c.bubbleMetaIn, fontSize: 11 },
+  audioTimeMine:      { color: c.bubbleMetaOut },
 
-  input:         { flex: 1, color: c.text, backgroundColor: '#1F2937', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, maxHeight: 120, fontSize: 15 },
+  input:         { flex: 1, color: c.text, paddingVertical: 11, paddingRight: 4, maxHeight: 120, fontSize: 16, lineHeight: 21 },
   sendBtn:       { backgroundColor: c.primary, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, justifyContent: 'center' },
-  sendBtnOff:    { backgroundColor: '#374151' },
+  sendBtnOff:    { backgroundColor: c.textFaint, elevation: 0, shadowOpacity: 0 },
   sendTxt:       { color: '#fff', fontWeight: '700' },
 
   imageBubble:   { padding: 4, borderRadius: 12 },
@@ -3295,20 +3466,20 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   // bar proportional to vote count, footer with totals + mode hint.
   pollWrap:               { minWidth: 240, maxWidth: 300, gap: 8 },
   pollQuestion:           { color: c.text, fontSize: 14, fontWeight: '700', marginBottom: 6 },
-  pollQuestionMine:       { color: '#fff' },
+  pollQuestionMine:       { color: c.bubbleOutText },
   pollOptionRow:          { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 },
   pollOptionMark:         { color: c.textDim, fontSize: 16, width: 18, textAlign: 'center' },
   pollOptionMarkOn:       { color: c.primary },
   pollOptionLine:         { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
   pollOptionLabel:        { color: c.text, fontSize: 13, flex: 1 },
-  pollOptionLabelMine:    { color: '#fff' },
+  pollOptionLabelMine:    { color: c.bubbleOutText },
   pollOptionCount:        { color: c.textDim, fontSize: 11, fontWeight: '700' },
-  pollOptionCountMine:    { color: 'rgba(255,255,255,0.85)' },
-  pollBarTrack:           { height: 4, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 2, marginTop: 4, overflow: 'hidden' },
+  pollOptionCountMine:    { color: c.bubbleMetaOut },
+  pollBarTrack:           { height: 4, backgroundColor: 'rgba(128,128,128,0.25)', borderRadius: 2, marginTop: 4, overflow: 'hidden' },
   pollBarFill:            { height: 4, backgroundColor: c.primary, borderRadius: 2 },
-  pollBarFillMine:        { backgroundColor: '#fff' },
+  pollBarFillMine:        { backgroundColor: c.bubbleOutText },
   pollFooter:             { color: c.textDim, fontSize: 11, marginTop: 6 },
-  pollFooterMine:         { color: 'rgba(255,255,255,0.7)' },
+  pollFooterMine:         { color: c.bubbleMetaOut },
   attachedImage: { width: 220, height: 220, borderRadius: 8, backgroundColor: '#0F1217' },
   imageError:    { width: 180, padding: 16, alignItems: 'center', gap: 4 },
   imageErrorTxt: { color: c.textDim, fontSize: 12 },
@@ -3338,26 +3509,26 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   // Day 9 — file bubble (documents)
   fileRow:        { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 220, maxWidth: 280 },
   fileIcon:       { width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
-  fileIconMine:   { backgroundColor: 'rgba(255,255,255,0.22)' },
+  fileIconMine:   { backgroundColor: c.primary },
   fileIconTheirs: { backgroundColor: c.primary },
   fileIconTxt:    { fontSize: 18 },
   fileMeta:       { flex: 1, gap: 2 },
-  fileName:       { color: c.text, fontSize: 14, fontWeight: '600' },
-  fileNameMine:   { color: '#fff' },
-  fileSize:       { color: c.textDim, fontSize: 11 },
-  fileSizeMine:   { color: 'rgba(255,255,255,0.85)' },
+  fileName:       { color: c.bubbleInText, fontSize: 14, fontWeight: '600' },
+  fileNameMine:   { color: c.bubbleOutText },
+  fileSize:       { color: c.bubbleMetaIn, fontSize: 11 },
+  fileSizeMine:   { color: c.bubbleMetaOut },
 
   // Day 8 — reply bar above composer
-  replyBar:        { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: '#0F1217', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border },
+  replyBar:        { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: c.surfaceSolid, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border },
   replyBarLine:    { width: 3, alignSelf: 'stretch', backgroundColor: c.primary, borderRadius: 1.5 },
   replyBarTitle:   { color: c.primary, fontSize: 12, fontWeight: '700' },
   replyBarBody:    { color: c.text, fontSize: 13 },
 
   // Day 8 — inline reply preview inside a bubble
-  replyPreview:        { flexDirection: 'row', alignItems: 'stretch', gap: 8, marginBottom: 6, paddingVertical: 4, paddingHorizontal: 6, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 6 },
+  replyPreview:        { flexDirection: 'row', alignItems: 'stretch', gap: 8, marginBottom: 6, paddingVertical: 4, paddingHorizontal: 6, backgroundColor: 'rgba(0,0,0,0.16)', borderRadius: 6 },
   replyPreviewLine:    { width: 2, backgroundColor: c.primary, borderRadius: 1 },
   replyPreviewWho:     { color: c.primary, fontSize: 11, fontWeight: '700' },
-  replyPreviewBody:    { color: c.text, fontSize: 12 },
+  replyPreviewBody:    { color: c.bubbleInText, fontSize: 12 },
 
   // Day 8 — "↪ Forwarded" tag at top of bubble
   forwardedTag:        { color: c.textDim, fontSize: 11, fontStyle: 'italic', marginBottom: 2 },

@@ -75,7 +75,7 @@ export default function VoiceCallScreen() {
     pcRef.current = null;
     if (notify && peerUid) {
       getSocket()
-        .then(s => s.emit('webrtc_end', { to: peerUid, chatId }))
+        .then(s => s.emit('webrtc_end', { to: peerUid, from: meIdRef.current, chatId }))
         .catch(() => {});
     }
   }, [peerUid, chatId]);

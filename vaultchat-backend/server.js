@@ -650,7 +650,11 @@ io.on('connection', (socket) => {
   // Targets a specific peer by uid. Sender must include `to: <peer uid>`.
   const relayToPeer = (event) => (data) => {
     if (!data?.to) return;
-    emitToUid(data.to, event, data);
+    // Stamp the authenticated sender so the peer can always identify the source.
+    // Critical for webrtc_end (hangup): the client used to omit `from`, so the
+    // peer's "did my call partner hang up?" check never matched and the call
+    // screen stayed open on the other device.
+    emitToUid(data.to, event, { ...data, from: socket.data.uid, fromUid: socket.data.uid });
   };
   socket.on('webrtc_offer',       relayToPeer('webrtc_offer'));
   socket.on('webrtc_answer',      relayToPeer('webrtc_answer'));

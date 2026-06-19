@@ -94,6 +94,8 @@ export interface E2EESession {
   isEnvelope(wire: string | null | undefined): boolean;
   /** Whether a usable session already exists for a peer. */
   hasSession(peerId: string): Promise<boolean>;
+  /** Drop the local session so the next message re-initiates X3DH ("reset secure session"). */
+  resetSession(peerId: string): Promise<void>;
 }
 
 export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTransport }): E2EESession {
@@ -256,48 +258,74 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
     return JSON.stringify(wire);
   }
 
+  // Bootstrap a fresh responder ratchet from a message's X3DH header. Consumes the
+  // one-time prekey the initiator used (if any). Shared by the no-session path and
+  // the re-key recovery path below.
+  async function bootstrapResponder(parsed: any, id: StoredIdentity): Promise<RatchetState> {
+    const header: InitialHeader = {
+      identityKey: unb64(parsed.x3dh.ik),
+      ephemeralKey: unb64(parsed.x3dh.ek),
+      oneTimePreKeyId: parsed.x3dh.opkId ?? null,
+    };
+    const me = identityKeyPairs(id);
+    let myOpk: KeyPair | null = null;
+    if (header.oneTimePreKeyId != null) {
+      const idx = id.opks.findIndex((o) => o.id === header.oneTimePreKeyId);
+      if (idx >= 0) {
+        myOpk = { priv: hexToBytes(id.opks[idx].priv), pub: hexToBytes(id.opks[idx].pub) };
+        id.opks.splice(idx, 1);     // consumed exactly once
+        await saveIdentitySerial(id);
+      }
+    }
+    const sk = x3dhResponder(me.ik, me.spk, myOpk, header);
+    return ratchetInitBob(sk, me.spk);
+  }
+
   async function decryptFromPeer(peerId: string, wire: string): Promise<string> {
     const parsed = JSON.parse(wire);
     if (parsed?.v !== 'dr1' || !parsed.env) throw new Error('e2ee: not a dr1 envelope');
 
     const id = await getIdentity();
+    const envelope = decodeEnvelope(parsed.env) as Envelope;
 
-    let session = await loadSession(peerId);
-    let state: RatchetState;
+    const session = await loadSession(peerId);
 
     if (!session) {
       if (!parsed.x3dh) throw new Error('e2ee: no session and no X3DH header to bootstrap responder');
-      const header: InitialHeader = {
-        identityKey: unb64(parsed.x3dh.ik),
-        ephemeralKey: unb64(parsed.x3dh.ek),
-        oneTimePreKeyId: parsed.x3dh.opkId ?? null,
-      };
-      const me = identityKeyPairs(id);
-      // Find + consume the one-time prekey the initiator used (if any).
-      let myOpk: KeyPair | null = null;
-      if (header.oneTimePreKeyId != null) {
-        const idx = id.opks.findIndex((o) => o.id === header.oneTimePreKeyId);
-        if (idx >= 0) {
-          myOpk = { priv: hexToBytes(id.opks[idx].priv), pub: hexToBytes(id.opks[idx].pub) };
-          id.opks.splice(idx, 1);     // consumed exactly once
-          await saveIdentitySerial(id);
-        }
-      }
-      const sk = x3dhResponder(me.ik, me.spk, myOpk, header);
-      state = ratchetInitBob(sk, me.spk);
-      session = { state: serializeState(state), role: 'responder', includeX3DH: false };
-    } else {
-      state = deserializeState(session.state);
+      const state = await bootstrapResponder(parsed, id);
+      const plaintextBytes = ratchetDecrypt(state, envelope);
+      await saveSession(peerId, { state: serializeState(state), role: 'responder', includeX3DH: false });
+      return new TextDecoder().decode(plaintextBytes);
     }
 
-    const plaintextBytes = ratchetDecrypt(state, decodeEnvelope(parsed.env) as Envelope);
-    // Initiator: receiving a reply proves the peer established the session →
-    // stop attaching the X3DH header to future messages.
-    if (session.role === 'initiator' && session.includeX3DH) session.includeX3DH = false;
-    session.state = serializeState(state);
-    await saveSession(peerId, session);
-    return new TextDecoder().decode(plaintextBytes);
+    const state = deserializeState(session.state);
+    try {
+      const plaintextBytes = ratchetDecrypt(state, envelope);
+      // Initiator: receiving a reply proves the peer established the session →
+      // stop attaching the X3DH header to future messages.
+      if (session.role === 'initiator' && session.includeX3DH) session.includeX3DH = false;
+      session.state = serializeState(state);
+      await saveSession(peerId, session);
+      return new TextDecoder().decode(plaintextBytes);
+    } catch (err) {
+      // The cached session can't decrypt this. If the message carries an X3DH
+      // header, the peer RE-KEYED (e.g. reinstalled / fresh identity) and is
+      // bootstrapping a new session — our old one is dead. Adopt the new session
+      // and retry, so the conversation self-heals instead of being stuck on
+      // "unable to decrypt" forever.
+      if (!parsed.x3dh) throw err;
+      const fresh = await bootstrapResponder(parsed, id);
+      const plaintextBytes = ratchetDecrypt(fresh, envelope); // throws if genuinely undecryptable
+      await saveSession(peerId, { state: serializeState(fresh), role: 'responder', includeX3DH: false });
+      return new TextDecoder().decode(plaintextBytes);
+    }
   }
 
-  return { ensurePublished, encryptForPeer, decryptFromPeer, isEnvelope, hasSession };
+  // Drop the local session for a peer. The next outbound message then re-initiates
+  // X3DH (Signal's "reset secure session"); the peer adopts it on receipt.
+  async function resetSession(peerId: string): Promise<void> {
+    await store.del(sessionKey(peerId));
+  }
+
+  return { ensurePublished, encryptForPeer, decryptFromPeer, isEnvelope, hasSession, resetSession };
 }

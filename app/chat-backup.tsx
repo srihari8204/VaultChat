@@ -20,6 +20,11 @@ import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 import { vaultEncrypt, vaultDecrypt } from '../lib/vaultCrypto';
 import { exportAll, importAll } from '../lib/localDb';
+import {
+  uploadCloudBackup, restoreCloudBackup, cloudBackupMeta, type BackupMeta,
+  writeLocalBackup, restoreLocalBackup, listLocalBackups, type LocalBackup,
+} from '../lib/cloudBackup';
+import { markBackupDone } from '../lib/backupScheduler';
 
 const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
 
@@ -28,8 +33,10 @@ const BACKUP_KEY = 'vc_backup_data';
 const BACKUP_SETTINGS_KEY = 'vc_backup_settings';
 
 const DEFAULT_SETTINGS = {
-  frequency: 'weekly', // daily | weekly | monthly | manual
+  frequency: 'daily',   // daily | weekly | monthly | manual
+  network: 'wifi',      // wifi (Wi-Fi only) | any (Wi-Fi or mobile data)
   includeVideos: false,
+  lastBackupAt: 0,
 };
 
 type BackupEntry = {
@@ -70,6 +77,10 @@ export default function ChatBackupScreen() {
   const [lastBackup, setLastBackup] = useState<BackupEntry | null>(null);
   const [passModal, setPassModal] = useState<'backup' | 'restore' | null>(null);
   const [passInput, setPassInput] = useState('');
+  const [cloud, setCloud] = useState<BackupMeta>({ exists: false });
+  const [cloudBusy, setCloudBusy] = useState(false);
+  const [localList, setLocalList] = useState<LocalBackup[]>([]);
+  const [localBusy, setLocalBusy] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -89,9 +100,55 @@ export default function ChatBackupScreen() {
         setBackups(list);
         if (list.length > 0) setLastBackup(list[0]);
       }
+      cloudBackupMeta().then(setCloud).catch(() => {});
+      listLocalBackups().then(setLocalList).catch(() => {});
     } catch {} finally {
       setLoading(false);
     }
+  };
+
+  const doLocalBackup = async () => {
+    setLocalBusy(true);
+    try {
+      const r = await writeLocalBackup(new Date());
+      await markBackupDone();
+      setLocalList(await listLocalBackups());
+      Alert.alert('Local backup saved', `${r.messageCount} messages saved to VaultChat/Databases. You can copy this file anywhere.`);
+    } catch (e: any) {
+      Alert.alert('Local backup failed', e?.message ?? 'Please try again.');
+    } finally { setLocalBusy(false); }
+  };
+
+  const doLocalRestore = async () => {
+    setLocalBusy(true);
+    try {
+      const n = await restoreLocalBackup();
+      Alert.alert('Restore complete', `${n} messages restored from the latest local backup. Restart the app to see them.`);
+    } catch (e: any) {
+      Alert.alert('Restore failed', e?.message === 'No local backup found' ? 'No local backup file found in VaultChat/Databases.' : (e?.message ?? 'Please try again.'));
+    } finally { setLocalBusy(false); }
+  };
+
+  const doCloudBackup = async () => {
+    setCloudBusy(true);
+    try {
+      const r = await uploadCloudBackup();
+      await markBackupDone();
+      setCloud({ exists: true, sizeBytes: r.sizeBytes, messageCount: r.messageCount, updatedAt: new Date().toISOString() });
+      Alert.alert('Backed up to cloud', `${r.messageCount} messages encrypted & uploaded. Restore on a new phone just by signing in.`);
+    } catch (e: any) {
+      Alert.alert('Cloud backup failed', e?.message ?? 'Please try again.');
+    } finally { setCloudBusy(false); }
+  };
+
+  const doCloudRestore = async () => {
+    setCloudBusy(true);
+    try {
+      const n = await restoreCloudBackup();
+      Alert.alert('Restore complete', `${n} messages restored from cloud. Restart the app to see them.`);
+    } catch (e: any) {
+      Alert.alert('Restore failed', e?.message === 'No backup found' ? 'No cloud backup exists for this account.' : (e?.message ?? 'Please try again.'));
+    } finally { setCloudBusy(false); }
   };
 
   const saveSetting = async (updated: typeof settings) => {
@@ -165,7 +222,8 @@ export default function ChatBackupScreen() {
     const mode = passModal;
     setPassModal(null); setPassInput('');
     if (!p || p.length < 4) { Alert.alert('Passphrase too short', 'Use at least 4 characters.'); return; }
-    if (mode === 'backup') doBackup(p); else if (mode === 'restore') doRestore(p);
+    if (mode === 'backup') doBackup(p);
+    else if (mode === 'restore') doRestore(p);
   };
 
   const RadioRow = ({ label, value, current, onPress }: any) => (
@@ -252,6 +310,78 @@ export default function ChatBackupScreen() {
           </TouchableOpacity>
         </LinearGradient>
 
+        {/* ── Cloud backup (WhatsApp-style, zero-knowledge) ── */}
+        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
+          <Text style={s.cardTitle}>Cloud backup</Text>
+          <Text style={s.cardDesc}>
+            Encrypts everything (messages, keys & settings) with your passphrase and stores it on
+            the server — opaque to us. Restore it on a new phone or after a reinstall.
+          </Text>
+          {cloud.exists && (
+            <View style={s.encryptBadge}>
+              <Ionicons name="cloud-done" size={16} color={colors.primary} />
+              <Text style={s.encryptText}>
+                Cloud backup{cloud.messageCount != null ? ` · ${cloud.messageCount} msgs` : ''}{cloud.updatedAt ? ` · ${formatDate(cloud.updatedAt)}` : ''}
+              </Text>
+            </View>
+          )}
+          <TouchableOpacity
+            style={[s.primaryBtn, cloudBusy && s.btnDisabled]}
+            onPress={doCloudBackup}
+            disabled={cloudBusy}
+            activeOpacity={0.7}
+          >
+            {cloudBusy
+              ? <ActivityIndicator size="small" color={colors.text} />
+              : (<><Ionicons name="cloud-upload-outline" size={20} color={colors.text} /><Text style={s.primaryBtnText}>Back up to cloud</Text></>)}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={s.restoreBtn}
+            onPress={doCloudRestore}
+            disabled={cloudBusy}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="cloud-download-outline" size={20} color={colors.accent} />
+            <Text style={s.restoreBtnText}>Restore from cloud</Text>
+          </TouchableOpacity>
+        </LinearGradient>
+
+        {/* ── Local backup (WhatsApp "Databases" folder) ── */}
+        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
+          <Text style={s.cardTitle}>Local backup</Text>
+          <Text style={s.cardDesc}>
+            Saves an encrypted backup file to VaultChat/Databases (visible in your file manager).
+            Restores offline; keeps the latest {7} backups.
+          </Text>
+          {localList.length > 0 && (
+            <View style={s.encryptBadge}>
+              <Ionicons name="folder" size={16} color={colors.primary} />
+              <Text style={s.encryptText}>
+                {localList.length} local backup{localList.length === 1 ? '' : 's'} · latest {formatBytes(localList[0].size)}
+              </Text>
+            </View>
+          )}
+          <TouchableOpacity
+            style={[s.primaryBtn, localBusy && s.btnDisabled]}
+            onPress={doLocalBackup}
+            disabled={localBusy}
+            activeOpacity={0.7}
+          >
+            {localBusy
+              ? <ActivityIndicator size="small" color={colors.text} />
+              : (<><Ionicons name="save-outline" size={20} color={colors.text} /><Text style={s.primaryBtnText}>Back up to device</Text></>)}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={s.restoreBtn}
+            onPress={doLocalRestore}
+            disabled={localBusy || localList.length === 0}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="refresh-outline" size={20} color={colors.accent} />
+            <Text style={s.restoreBtnText}>Restore latest local backup</Text>
+          </TouchableOpacity>
+        </LinearGradient>
+
         {/* ── Backup Settings ────────────────────────── */}
         <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <Text style={s.cardTitle}>Backup Settings</Text>
@@ -265,6 +395,14 @@ export default function ChatBackupScreen() {
             onPress={(v: string) => saveSetting({ ...settings, frequency: v })} />
           <RadioRow label="Manual Only" value="manual" current={settings.frequency}
             onPress={(v: string) => saveSetting({ ...settings, frequency: v })} />
+
+          <View style={s.divider} />
+
+          <Text style={s.sectionLabel}>Back up using</Text>
+          <RadioRow label="Wi-Fi only" value="wifi" current={settings.network}
+            onPress={(v: string) => saveSetting({ ...settings, network: v })} />
+          <RadioRow label="Wi-Fi or mobile data" value="any" current={settings.network}
+            onPress={(v: string) => saveSetting({ ...settings, network: v })} />
 
           <View style={s.divider} />
 

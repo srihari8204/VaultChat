@@ -22,6 +22,9 @@ import {
   type ChatSummary,
 } from '../../lib/chatService';
 import { registerPushToken } from '../../lib/push';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { cloudBackupMeta } from '../../lib/cloudBackup';
+import { runScheduledBackupIfDue } from '../../lib/backupScheduler';
 import { getSocket } from '../../lib/socket';
 import { setUnreadTotal } from '../../lib/unreadStore';
 import { getDraftMap } from '../../lib/drafts';
@@ -83,6 +86,36 @@ export default function ChatsScreen() {
     getDraftMap().then(setDrafts).catch(() => {});
   }, [fetchList]));
   useEffect(() => { registerPushToken().catch(() => {}); }, []);
+
+  // Auto-backup: a few seconds after the list is up, run a scheduled backup if
+  // it's due and the network policy (Wi-Fi only / any) allows. Silent + safe.
+  useEffect(() => {
+    const t = setTimeout(() => { runScheduledBackupIfDue().catch(() => {}); }, 4000);
+    return () => clearTimeout(t);
+  }, []);
+
+  // Restore-on-reinstall (WhatsApp-style): once per install, if a cloud backup
+  // exists, offer to restore it. AsyncStorage is wiped on reinstall, so the
+  // "prompted" flag resets and a returning user is offered their backup again.
+  useEffect(() => {
+    (async () => {
+      try {
+        if (await AsyncStorage.getItem('vc_restore_prompted')) return;
+        const meta = await cloudBackupMeta();
+        await AsyncStorage.setItem('vc_restore_prompted', '1');
+        if (meta.exists) {
+          Alert.alert(
+            'Restore your chats?',
+            `A cloud backup${meta.messageCount != null ? ` with ${meta.messageCount} messages` : ''} was found for this account. Restore it on this device?`,
+            [
+              { text: 'Not now', style: 'cancel' },
+              { text: 'Restore', onPress: () => router.push('/chat-backup' as any) },
+            ],
+          );
+        }
+      } catch {}
+    })();
+  }, []);
 
   // Realtime: new messages refresh the list; presence patches in place.
   useEffect(() => {
@@ -343,10 +376,10 @@ function ChatRow({
 
         <View style={S.rowBody}>
           <View style={S.rowTop}>
-            {chat.pinned && <Text style={S.rowPin}>📌</Text>}
             <Text style={S.rowName} numberOfLines={1}>{title}</Text>
-            {chat.muted && <Text style={S.rowMuted}>🔇</Text>}
-            <Text style={S.rowTime}>{time}</Text>
+            {chat.muted && <Ionicons name="volume-mute" size={15} color={colors.textFaint} style={{ marginLeft: 2 }} />}
+            {chat.pinned && <Ionicons name="pin" size={14} color={colors.textFaint} style={{ marginLeft: 2 }} />}
+            <Text style={[S.rowTime, chat.unreadCount > 0 && { color: colors.primary, fontWeight: '700' }]}>{time}</Text>
           </View>
           <View style={S.rowBottom}>
             <Text style={[S.rowPreview, chat.unreadCount > 0 && S.rowPreviewUnread]} numberOfLines={1}>

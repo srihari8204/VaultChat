@@ -527,15 +527,24 @@ router.post('/pin', async (req, res) => {
   }
 });
 
-// POST /user/pin/verify — verify the app PIN
+// POST /user/pin/verify — verify the user's PIN. Accepts EITHER the dedicated
+// app PIN (pin_hash, bcrypt) OR the onboarding MPIN (mpin_hash, argon2id), so
+// users provisioned through the MPIN onboarding flow — who may never have set a
+// separate app PIN — can still unlock PIN-gated surfaces (e.g. hidden chats)
+// with the PIN they actually have.
 router.post('/pin/verify', async (req, res) => {
   try {
     const pin = (req.body?.pin || '').toString();
     if (!/^\d{4,8}$/.test(pin)) return res.json({ ok: false });
-    const r = await db.query(`SELECT pin_hash FROM users WHERE id = $1 AND is_deleted = FALSE LIMIT 1`, [req.user.id]);
-    const h = r.rows[0]?.pin_hash;
-    if (!h) return res.json({ ok: false });
-    const ok = await bcrypt.compare(pin, h);
+    const r = await db.query(
+      `SELECT pin_hash, mpin_hash FROM users WHERE id = $1 AND is_deleted = FALSE LIMIT 1`,
+      [req.user.id]
+    );
+    const row = r.rows[0];
+    if (!row) return res.json({ ok: false });
+    let ok = false;
+    if (row.pin_hash)  ok = await bcrypt.compare(pin, row.pin_hash);
+    if (!ok && row.mpin_hash) ok = await vault.verifySecret(pin, row.mpin_hash);
     return res.json({ ok });
   } catch (err) {
     console.error('[user/pin/verify]', err.message);
@@ -1164,13 +1173,19 @@ router.post('/scheduled-messages', async (req, res) => {
     );
     if (!memR.rows[0]) return res.status(403).json({ error: 'Not a member of this chat' });
 
-    // Type-specific validation matches POST /chats/:id/messages
-    const isMedia = type !== 'text' && type !== 'system';
+    // Type-specific validation matches POST /chats/:id/messages. Only the
+    // attachment-backed types need meta.attachmentId; sticker/poll/location
+    // carry their data in content/meta directly.
+    const isMedia = type === 'image' || type === 'video' || type === 'audio' || type === 'file';
     if (type === 'text' && (!content || typeof content !== 'string')) {
       return res.status(400).json({ error: 'content required for text messages' });
     }
-    if (isMedia && (!meta || !meta.attachmentId)) {
-      return res.status(400).json({ error: 'meta.attachmentId required for media messages' });
+    if (isMedia) {
+      const isExternalGif = type === 'image' && meta && typeof meta.gifUrl === 'string'
+        && /^https:\/\/\S+$/.test(meta.gifUrl) && meta.gifUrl.length <= 2048;
+      if (!isExternalGif && (!meta || !meta.attachmentId)) {
+        return res.status(400).json({ error: 'meta.attachmentId required for media messages' });
+      }
     }
 
     const r = await db.query(
@@ -1314,12 +1329,31 @@ router.post('/keybundle', async (req, res) => {
 
     await db.transaction(async (client) => {
       if (typeof b.identityKey === 'string' && b.identityKey.length > 0) {
+        const ik = b.identityKey.slice(0, 8192);
+        // Detect a fresh identity (reinstall / re-provision). The previous
+        // identity's one-time + signed prekeys are now UNUSABLE — the client
+        // lost their private halves — so a sender who fetched one would derive a
+        // different X3DH secret and the recipient would fail with "invalid ghash
+        // tag". Purge them so only the new identity's prekeys remain.
+        const prev = await client.query(
+          `SELECT public_key_b64 FROM identity_keys WHERE user_id = $1`, [userId]
+        );
+        const identityChanged = prev.rows.length > 0 && prev.rows[0].public_key_b64 !== ik;
+
         await client.query(
           `INSERT INTO identity_keys (user_id, public_key_b64)
            VALUES ($1, $2)
            ON CONFLICT (user_id) DO UPDATE SET public_key_b64 = EXCLUDED.public_key_b64, updated_at = NOW()`,
-          [userId, b.identityKey.slice(0, 8192)]
+          [userId, ik]
         );
+
+        if (identityChanged) {
+          await client.query(`DELETE FROM one_time_prekeys WHERE user_id = $1`, [userId]);
+          await client.query(
+            `UPDATE signed_prekeys SET retired_at = NOW() WHERE user_id = $1 AND retired_at IS NULL`,
+            [userId]
+          );
+        }
       }
 
       if (b.signedPreKey
@@ -1474,6 +1508,127 @@ router.delete('/blocks/:userId', async (req, res) => {
     console.error('[user/blocks DELETE]', err.message);
     res.status(500).json({ error: 'Failed to unblock' });
   }
+});
+
+// ─── Encrypted chat backup (zero-knowledge, WhatsApp-style) ──────────
+// The blob is opaque AES-256-GCM ciphertext produced on-device with the user's
+// passphrase — the server can never read it. The blob lives in OBJECT STORAGE
+// (presigned PUT/GET straight to MinIO/S3, so it never passes through Express or
+// Postgres — no size cap, no memory spikes as histories grow). The DB keeps only
+// metadata + the object key. `blob` inline is a fallback when storage is off.
+const objectStore = require('../lib/storage');
+const BACKUP_INLINE_LIMIT = '16mb';
+const backupKey = (uid) => `backups/${uid}.vcbak`;
+
+// GET /user/backup/key — the account-managed backup key (WhatsApp default model).
+// Generated + stored server-side on first request, returned to the authenticated
+// user thereafter, so backup/restore need no passphrase. Restore on a new device
+// just signs in and fetches the same key.
+router.get('/backup/key', async (req, res) => {
+  try {
+    let r = await db.query(`SELECT dek FROM user_backup_keys WHERE user_id = $1`, [req.user.id]);
+    if (!r.rows[0]) {
+      const dek = crypto.randomBytes(32).toString('base64');
+      await db.query(
+        `INSERT INTO user_backup_keys (user_id, dek) VALUES ($1, $2)
+         ON CONFLICT (user_id) DO NOTHING`,
+        [req.user.id, dek]
+      );
+      r = await db.query(`SELECT dek FROM user_backup_keys WHERE user_id = $1`, [req.user.id]);
+    }
+    res.json({ key: r.rows[0].dek });
+  } catch (err) { console.error('[backup key]', err.message); res.status(500).json({ error: 'Failed' }); }
+});
+
+// GET /user/backup/meta — lightweight "does a backup exist?" check (no blob)
+router.get('/backup/meta', async (req, res) => {
+  try {
+    const r = await db.query(
+      `SELECT size_bytes, message_count, updated_at FROM user_backups WHERE user_id = $1`,
+      [req.user.id]
+    );
+    if (!r.rows[0]) return res.json({ exists: false });
+    const row = r.rows[0];
+    res.json({ exists: true, sizeBytes: Number(row.size_bytes), messageCount: row.message_count, updatedAt: row.updated_at });
+  } catch (err) { console.error('[backup meta]', err.message); res.status(500).json({ error: 'Failed' }); }
+});
+
+// POST /user/backup/presign — get a presigned PUT URL to upload the blob direct
+// to object storage. Falls back to inline mode when object storage is disabled.
+router.post('/backup/presign', async (req, res) => {
+  try {
+    if (!objectStore.enabled) return res.json({ mode: 'inline' });
+    const key = backupKey(req.user.id);
+    const uploadUrl = await objectStore.presignPut(key, 'application/octet-stream');
+    res.json({ mode: 'object', uploadUrl, key });
+  } catch (err) { console.error('[backup presign]', err.message); res.status(500).json({ error: 'Failed' }); }
+});
+
+// POST /user/backup/commit — record metadata after a successful object upload.
+router.post('/backup/commit', async (req, res) => {
+  try {
+    const key = (req.body?.key || '').toString();
+    if (key !== backupKey(req.user.id)) return res.status(400).json({ error: 'bad key' });
+    const sizeBytes = parseInt(req.body?.sizeBytes, 10) || 0;
+    const messageCount = parseInt(req.body?.messageCount, 10) || 0;
+    await db.query(
+      `INSERT INTO user_backups (user_id, storage_key, blob, size_bytes, message_count, updated_at)
+       VALUES ($1, $2, NULL, $3, $4, NOW())
+       ON CONFLICT (user_id) DO UPDATE
+         SET storage_key = EXCLUDED.storage_key, blob = NULL,
+             size_bytes = EXCLUDED.size_bytes, message_count = EXCLUDED.message_count, updated_at = NOW()`,
+      [req.user.id, key, sizeBytes, messageCount]
+    );
+    res.json({ ok: true, updatedAt: new Date().toISOString() });
+  } catch (err) { console.error('[backup commit]', err.message); res.status(500).json({ error: 'Failed' }); }
+});
+
+// PUT /user/backup — inline upload (fallback only; small body limit).
+router.put('/backup', express.json({ limit: BACKUP_INLINE_LIMIT }), async (req, res) => {
+  try {
+    const blob = req.body?.blob;
+    if (typeof blob !== 'string' || blob.length === 0) return res.status(400).json({ error: 'blob required' });
+    const sizeBytes = parseInt(req.body?.sizeBytes, 10) || 0;
+    const messageCount = parseInt(req.body?.messageCount, 10) || 0;
+    await db.query(
+      `INSERT INTO user_backups (user_id, storage_key, blob, size_bytes, message_count, updated_at)
+       VALUES ($1, NULL, $2, $3, $4, NOW())
+       ON CONFLICT (user_id) DO UPDATE
+         SET storage_key = NULL, blob = EXCLUDED.blob,
+             size_bytes = EXCLUDED.size_bytes, message_count = EXCLUDED.message_count, updated_at = NOW()`,
+      [req.user.id, blob, sizeBytes, messageCount]
+    );
+    res.json({ ok: true, updatedAt: new Date().toISOString() });
+  } catch (err) { console.error('[backup put]', err.message); res.status(500).json({ error: 'Failed to save backup' }); }
+});
+
+// GET /user/backup — returns a presigned download URL (object mode) or the inline blob.
+router.get('/backup', async (req, res) => {
+  try {
+    const r = await db.query(
+      `SELECT storage_key, blob, size_bytes, message_count, updated_at FROM user_backups WHERE user_id = $1`,
+      [req.user.id]
+    );
+    if (!r.rows[0]) return res.status(404).json({ error: 'No backup' });
+    const row = r.rows[0];
+    const meta = { sizeBytes: Number(row.size_bytes), messageCount: row.message_count, updatedAt: row.updated_at };
+    if (row.storage_key && objectStore.enabled) {
+      const downloadUrl = await objectStore.presignGet(row.storage_key);
+      return res.json({ mode: 'object', downloadUrl, ...meta });
+    }
+    res.json({ mode: 'inline', blob: row.blob, ...meta });
+  } catch (err) { console.error('[backup get]', err.message); res.status(500).json({ error: 'Failed' }); }
+});
+
+// DELETE /user/backup — remove the cloud backup (object + row)
+router.delete('/backup', async (req, res) => {
+  try {
+    const r = await db.query(`SELECT storage_key FROM user_backups WHERE user_id = $1`, [req.user.id]);
+    const key = r.rows[0]?.storage_key;
+    if (key && objectStore.enabled) { try { await objectStore.deleteObject(key); } catch {} }
+    await db.query(`DELETE FROM user_backups WHERE user_id = $1`, [req.user.id]);
+    res.json({ ok: true });
+  } catch (err) { console.error('[backup del]', err.message); res.status(500).json({ error: 'Failed' }); }
 });
 
 module.exports = router;

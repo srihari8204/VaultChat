@@ -1,9 +1,11 @@
 // components/LinkPreview.tsx
 // Renders an OG link preview card when a URL is in the message
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet, Linking, ActivityIndicator } from 'react-native';
 import { api } from '../lib/api';
+import { useTheme } from '../lib/theme';
+import { type Palette } from '../constants/theme';
 
 interface OGData { title: string; description: string; image: string; url: string; }
 
@@ -25,6 +27,8 @@ async function fetchOG(url: string): Promise<OGData | null> {
 interface Props { url: string; }
 
 export default function LinkPreview({ url }: Props) {
+  const { colors } = useTheme();
+  const s = useMemo(() => makeStyles(colors), [colors]);
   const [og, setOg] = useState<OGData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -32,7 +36,7 @@ export default function LinkPreview({ url }: Props) {
     fetchOG(url).then(data => { setOg(data); setLoading(false); });
   }, [url]);
 
-  if (loading) return <ActivityIndicator color="#00E5FF" size="small" style={{ marginVertical: 6 }} />;
+  if (loading) return <ActivityIndicator color={colors.accent} size="small" style={{ marginVertical: 6 }} />;
   if (!og || !og.title) return null;
 
   return (
@@ -47,11 +51,11 @@ export default function LinkPreview({ url }: Props) {
   );
 }
 
-const s = StyleSheet.create({
-  card:  { backgroundColor: '#0A0A1E', borderRadius: 10, overflow: 'hidden', marginTop: 6, maxWidth: 240, borderWidth: 1, borderColor: '#222' },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  card:  { backgroundColor: c.surfaceSolid, borderRadius: 10, overflow: 'hidden', marginTop: 6, maxWidth: 240, borderWidth: 1, borderColor: c.border },
   img:   { width: '100%', height: 120 },
   body:  { padding: 10 },
-  title: { color: '#E0E0F0', fontSize: 13, fontWeight: '700', marginBottom: 4 },
-  desc:  { color: '#888', fontSize: 11, lineHeight: 16, marginBottom: 4 },
-  url:   { color: '#00E5FF', fontSize: 10 },
+  title: { color: c.text, fontSize: 13, fontWeight: '700', marginBottom: 4 },
+  desc:  { color: c.textDim, fontSize: 11, lineHeight: 16, marginBottom: 4 },
+  url:   { color: c.accent, fontSize: 10 },
 });

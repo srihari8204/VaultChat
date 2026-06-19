@@ -7,10 +7,12 @@
 
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef , useMemo} from 'react';
-import { StatusBar, StyleSheet, Text, TouchableOpacity, Vibration, View } from 'react-native';
+import { StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { getSocket } from '../lib/socket';
+import { startRingtone, stopRingtone } from '../lib/sounds';
 
 function useS() {
   const { colors } = useTheme();
@@ -29,10 +31,10 @@ export default function IncomingCallScreen() {
     offer:   string;          // JSON-stringified RTCSessionDescription
   }>();
 
-  // Buzz pattern while ringing
+  // Ring (looping ringtone + vibration, per the user's sound prefs)
   useEffect(() => {
-    Vibration.vibrate([0, 800, 600, 800, 600, 800], true);
-    return () => Vibration.cancel();
+    startRingtone();
+    return () => { stopRingtone(); };
   }, []);
 
   // Listen for caller-side hangup before answer
@@ -45,7 +47,7 @@ export default function IncomingCallScreen() {
         if (decidedRef.current) return;
         if (data?.from === peerUid || data?.fromUid === peerUid) {
           decidedRef.current = true;
-          Vibration.cancel();
+          stopRingtone();
           router.back();
         }
       };
@@ -57,7 +59,7 @@ export default function IncomingCallScreen() {
 
   const accept = () => {
     decidedRef.current = true;
-    Vibration.cancel();
+    stopRingtone();
     const route = type === 'video' ? '/videocall' : '/voicecall';
     router.replace({
       pathname: route as any,
@@ -67,7 +69,7 @@ export default function IncomingCallScreen() {
 
   const decline = async () => {
     decidedRef.current = true;
-    Vibration.cancel();
+    stopRingtone();
     try {
       const s = await getSocket();
       s.emit('webrtc_end', { to: peerUid, chatId });
@@ -89,11 +91,11 @@ export default function IncomingCallScreen() {
 
       <View style={S.controls}>
         <TouchableOpacity style={[S.btn, S.btnDecline]} onPress={decline} activeOpacity={0.85}>
-          <Text style={S.btnIcon}>📵</Text>
+          <Ionicons name="call" size={28} color="#fff" style={{ transform: [{ rotate: '135deg' }] }} />
           <Text style={S.btnLabel}>Decline</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[S.btn, S.btnAccept]} onPress={accept} activeOpacity={0.85}>
-          <Text style={S.btnIcon}>{type === 'video' ? '📹' : '📞'}</Text>
+          <Ionicons name={type === 'video' ? 'videocam' : 'call'} size={28} color="#fff" />
           <Text style={S.btnLabel}>Accept</Text>
         </TouchableOpacity>
       </View>

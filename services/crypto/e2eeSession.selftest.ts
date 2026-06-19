@@ -37,6 +37,8 @@ function makeBackend() {
       return {
         async publish(b: PublishBundle) {
           const cur = store.get(userId) || { identityKey: '', signedPreKey: null, otpks: [] };
+          // Mirror the backend: a changed identity purges the now-dead prekeys.
+          if (cur.identityKey && cur.identityKey !== b.identityKey) cur.otpks = [];
           cur.identityKey = b.identityKey;
           cur.signedPreKey = b.signedPreKey;
           const have = new Set(cur.otpks.map((o) => o.keyId));
@@ -109,6 +111,27 @@ function makeBackend() {
   await oa.ensurePublished();
   const idAfter = await aliceKV.get('vc_e2ee_identity');
   check('ensurePublished() does not regenerate identity', idBefore === idAfter);
+
+  // Re-key recovery: a peer reinstalls (fresh identity) and re-initiates. The
+  // other side has a now-DEAD session and must adopt the fresh one instead of
+  // being stuck on "unable to decrypt".
+  console.log('Re-key recovery (reinstall self-heal):');
+  const bobKV2 = makeKV();
+  const bob2 = createE2EESession({ store: bobKV2, transport: backend.transportFor('bob') });
+  await bob2.ensurePublished();                               // fresh identity replaces bob's bundle
+  const rk1 = await bob2.encryptForPeer('alice', 'new bob here');
+  check('reinstalled Bob re-initiates with an X3DH header', JSON.parse(rk1).x3dh !== undefined);
+  const adopted = await alice.decryptFromPeer('bob', rk1);    // alice still holds the STALE session
+  check('Alice adopts the new session over the dead one', adopted === 'new bob here');
+  const rk2 = await alice.encryptForPeer('bob', 'welcome back');
+  check('Alice replies on the adopted session', (await bob2.decryptFromPeer('alice', rk2)) === 'welcome back');
+
+  // Manual "reset secure session": drop the local session → next message re-keys.
+  console.log('Reset secure session:');
+  await alice.resetSession('bob');
+  const rs1 = await alice.encryptForPeer('bob', 'after reset');
+  check('after reset Alice re-attaches an X3DH header', JSON.parse(rs1).x3dh !== undefined);
+  check('peer adopts the reset session', (await bob2.decryptFromPeer('alice', rs1)) === 'after reset');
 
   // Helpers + error paths
   console.log('Helpers & guards:');

@@ -6,7 +6,7 @@
 
 import React, { useEffect } from 'react';
 import {
-  Modal, View, TouchableOpacity, Pressable, StyleSheet, Animated, Platform,
+  Modal, View, TouchableOpacity, Pressable, StyleSheet, Animated, Platform, ScrollView, Dimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
@@ -63,12 +63,14 @@ export function Sheet({ visible, title, message, actions, onClose }: SheetProps)
             {message ? <AppText variant="caption" color={Aurora.textDim} style={styles.center}>{message}</AppText> : null}
           </View>
         )}
-        {actions.map((a, i) => (
-          <TouchableOpacity key={i} style={styles.row} onPress={() => pick(a)} activeOpacity={0.7}>
-            {a.icon && <Ionicons name={a.icon} size={20} color={a.destructive ? Aurora.danger : Aurora.text} />}
-            <AppText variant="body" color={a.destructive ? Aurora.danger : Aurora.text}>{a.label}</AppText>
-          </TouchableOpacity>
-        ))}
+        <ScrollView style={{ maxHeight: Dimensions.get('window').height * 0.6 }} bounces={false} showsVerticalScrollIndicator={false}>
+          {actions.map((a, i) => (
+            <TouchableOpacity key={i} style={styles.row} onPress={() => pick(a)} activeOpacity={0.7}>
+              {a.icon && <Ionicons name={a.icon} size={20} color={a.destructive ? Aurora.danger : Aurora.text} />}
+              <AppText variant="body" color={a.destructive ? Aurora.danger : Aurora.text}>{a.label}</AppText>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
         <TouchableOpacity style={[styles.row, styles.cancel]} onPress={onClose} activeOpacity={0.7}>
           <AppText variant="bodyStrong" color={Aurora.textDim}>Cancel</AppText>
         </TouchableOpacity>

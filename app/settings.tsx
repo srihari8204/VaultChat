@@ -13,7 +13,6 @@ import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { isMfaEnabled, enableMfa, disableMfa } from '../lib/mfa';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { isGallerySaveEnabled, setGallerySaveEnabled } from '../lib/gallerySave';
 import {
   ActivityIndicator,
   Alert,
@@ -103,15 +102,6 @@ export default function SettingsScreen() {
   const [mfaOn,   setMfaOn]   = useState(false);
   const [mfaBusy, setMfaBusy] = useState(false);
   useEffect(() => { isMfaEnabled().then(setMfaOn); }, []);
-
-  // Media visibility — auto-save received photos/videos to the gallery (default on).
-  const [gallerySave, setGallerySave] = useState(true);
-  useEffect(() => { isGallerySaveEnabled().then(setGallerySave); }, []);
-  const toggleGallerySave = useCallback(async () => {
-    const next = !gallerySave;
-    setGallerySave(next);
-    await setGallerySaveEnabled(next);
-  }, [gallerySave]);
   const toggleMfa = useCallback(async () => {
     if (mfaBusy) return;
     setMfaBusy(true);
@@ -251,17 +241,6 @@ export default function SettingsScreen() {
       </View>
 
       <View style={S.section}>
-        <Text style={S.label}>MEDIA</Text>
-        <ToggleRow
-          title="Save to gallery"
-          sub="Auto-save received photos & videos to a VaultChat album in your gallery."
-          value={gallerySave}
-          busy={false}
-          onValueChange={toggleGallerySave}
-        />
-      </View>
-
-      <View style={S.section}>
         <Text style={S.label}>SECURITY</Text>
         <ToggleRow
           title="Device MFA (PIN / fingerprint / face)"
@@ -277,6 +256,28 @@ export default function SettingsScreen() {
 
         <TouchableOpacity
           style={S.dataBtn}
+          onPress={() => router.push('/notification-sounds' as any)}
+          activeOpacity={0.85}
+        >
+          <Text style={S.dataBtnTxt}>🔔 Notifications & Sounds</Text>
+        </TouchableOpacity>
+        <Text style={S.dataHint}>
+          Message tones, call ringtone and vibration.
+        </Text>
+
+        <TouchableOpacity
+          style={[S.dataBtn, { marginTop: 12 }]}
+          onPress={() => router.push('/chat-backup' as any)}
+          activeOpacity={0.85}
+        >
+          <Text style={S.dataBtnTxt}>☁️ Chat backup</Text>
+        </TouchableOpacity>
+        <Text style={S.dataHint}>
+          Encrypted backup to the cloud or a file. Restore on a new phone with your passphrase.
+        </Text>
+
+        <TouchableOpacity
+          style={[S.dataBtn, { marginTop: 12 }]}
           onPress={() => router.push('/scheduled' as any)}
           activeOpacity={0.85}
         >

@@ -12,9 +12,9 @@ import { Video, Audio, ResizeMode } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as MediaLibrary from 'expo-media-library';
-import { getAttachmentLocalUri } from '../lib/mediaAttachments';
+import { getMedia } from '../lib/mediaStore';
 import { getAccessToken } from '../lib/api';
-import { saveToGallery } from '../lib/gallerySave';
+import { attachmentUrl, markAttachmentViewed } from '../lib/chatService';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 const C = { bg: '#000', accent: '#4A9FFF', green: '#10B981' };
@@ -34,7 +34,18 @@ const formatDur = (ms) => { if (!ms) return '0:00'; const s=Math.floor(ms/1000);
 
 export default function MediaViewerScreen() {
   const router = useRouter();
-  const { uri, mediaUrl, attachmentId, needsAuth, save, filename, msgType } = useLocalSearchParams();
+  const { uri, mediaUrl, attachmentId, needsAuth, save, isMine, mime, filename, msgType, viewOnce } = useLocalSearchParams();
+  const isViewOnce = viewOnce === '1';
+  const viewedRef = useRef(false);
+  // Mark the server "viewed" only AFTER the media has loaded — never before, or
+  // the POST /viewed flips viewed_at while the GET is still in flight and the GET
+  // 410s. View-once is also downloaded to cache (below), never persisted.
+  const markViewedAfterLoad = () => {
+    if (isViewOnce && attachmentId && !viewedRef.current) {
+      viewedRef.current = true;
+      markAttachmentViewed(String(attachmentId)).catch(() => {});
+    }
+  };
   const fileName = (filename || 'file') + '';
   // For our own /uploads images we attach the Bearer header so Fresco serves the
   // already-cached image instantly (no re-download).
@@ -54,15 +65,33 @@ export default function MediaViewerScreen() {
   useEffect(() => {
     if (fileUri || !attachmentId) return;
     let cancel = false;
-    getAttachmentLocalUri(String(attachmentId))
-      .then(u => {
-        if (cancel) return;
-        setFileUri(u);
-        if (save === '1' && (fileType === 'image' || fileType === 'video')) {
-          saveToGallery(u, fileType, String(attachmentId));   // VaultChat gallery album
-        }
-      })
-      .catch(() => { if (!cancel) { setError('Failed to load media'); setLoading(false); } });
+    const onErr = () => { if (!cancel) { setError('Failed to load media'); setLoading(false); } };
+    if (isViewOnce) {
+      // View-once: download to an EPHEMERAL cache file (not the browsable media
+      // folder) so it's never saved. The GET runs while viewed_at is still NULL,
+      // so it serves; we flip viewed_at only after onLoad (markViewedAfterLoad).
+      (async () => {
+        try {
+          const token = await getAccessToken();
+          const ext = msgType === 'video' ? 'mp4' : 'jpg';
+          const dest = FileSystem.cacheDirectory + 'vo_' + String(attachmentId) + '.' + ext;
+          const res = await FileSystem.downloadAsync(attachmentUrl(String(attachmentId)), dest, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
+          if (res.status >= 400) throw new Error('view-once GET ' + res.status);
+          if (!cancel) setFileUri(res.uri);
+        } catch { onErr(); }
+      })();
+      return () => { cancel = true; };
+    }
+    getMedia(String(attachmentId), {
+      kind: msgType === 'video' ? 'video' : 'image',
+      isMine: isMine === '1',
+      mime: mime ? String(mime) : undefined,
+      filename: filename ? String(filename) : undefined,
+    })
+      .then(u => { if (!cancel) setFileUri(u); })
+      .catch(onErr);
     return () => { cancel = true; };
   }, [attachmentId]);
 
@@ -100,7 +129,7 @@ export default function MediaViewerScreen() {
       <View style={s.full} {...panResponder.panHandlers}>
         {!imgLoaded && <ActivityIndicator color={C.accent} style={s.center} />}
         <Animated.Image source={needsAuth && fileUri.startsWith('http') ? { uri: fileUri, headers: authHeaders } : { uri: fileUri }} style={[s.fullImg, { transform: [{ scale }] }]} resizeMode="contain"
-          onLoad={() => { setImgLoaded(true); setLoading(false); }} onError={() => { setError('Failed to load image'); setLoading(false); }} />
+          onLoad={() => { setImgLoaded(true); setLoading(false); markViewedAfterLoad(); }} onError={() => { setError('Failed to load image'); setLoading(false); }} />
       </View>
     );
   };
@@ -117,7 +146,7 @@ export default function MediaViewerScreen() {
         <Video ref={videoRef} source={{ uri: fileUri }} style={s.fullVid} resizeMode={ResizeMode.CONTAIN}
           shouldPlay={shouldPlay} isLooping={false} useNativeControls={false} progressUpdateIntervalMillis={250}
           onPlaybackStatusUpdate={(status) => { setSt(status); if (status?.didJustFinish) setShouldPlay(false); }}
-          onLoad={() => setLoading(false)} onError={() => { setError('Failed to load video'); setLoading(false); }} />
+          onLoad={() => { setLoading(false); markViewedAfterLoad(); }} onError={() => { setError('Failed to load video'); setLoading(false); }} />
         {st.isBuffering && !st.isPlaying && <View style={s.bufOverlay}><ActivityIndicator color={C.accent} size="large" /><Text style={s.bufTxt}>Streaming...</Text></View>}
         {ctrl && (
           <View style={s.vidCtrl}>
@@ -248,8 +277,8 @@ const s = StyleSheet.create({
   container:{flex:1,backgroundColor:'#000'},
   full:{flex:1,justifyContent:'center',alignItems:'center'},
   center:{position:'absolute',top:'45%',alignSelf:'center',zIndex:10},
-  fullImg:{width:SW,height:SH-100},
-  fullVid:{width:SW,height:SH-100},
+  fullImg:{width:'100%',height:'100%'},
+  fullVid:{width:'100%',height:'100%'},
   bufOverlay:{position:'absolute',justifyContent:'center',alignItems:'center'},
   bufTxt:{color:'#6B7280',fontSize:12,marginTop:8},
   vidCtrl:{position:'absolute',bottom:0,left:0,right:0,backgroundColor:'#000000AA',padding:16,paddingBottom:30},

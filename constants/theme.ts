@@ -65,6 +65,14 @@ export interface Palette {
   bg: string; surface: string; surfaceSolid: string;
   card: string; border: string; separator: string;
   text: string; textDim: string; textFaint: string;
+  // WhatsApp-faithful chat surface (see memory: WhatsApp = reference standard).
+  chatBg: string;          // conversation background
+  bubbleIn: string;        // received bubble
+  bubbleOut: string;       // sent bubble
+  bubbleInText: string; bubbleOutText: string;
+  bubbleMetaIn: string; bubbleMetaOut: string;  // time/tick color inside the bubble
+  tickRead: string;        // blue double-tick
+  headerBar: string;       // chat top bar
 }
 
 const BRAND = {
@@ -87,6 +95,16 @@ export const AuroraDark: Palette = {
   text:      '#FFFFFF',
   textDim:   'rgba(255,255,255,0.5)',
   textFaint: 'rgba(255,255,255,0.3)',
+  // WhatsApp dark conversation palette
+  chatBg:        '#0B141A',
+  bubbleIn:      '#1F2C34',
+  bubbleOut:     '#005C4B',
+  bubbleInText:  '#E9EDEF',
+  bubbleOutText: '#E9EDEF',
+  bubbleMetaIn:  '#8696A0',
+  bubbleMetaOut: 'rgba(233,237,239,0.6)',
+  tickRead:      '#53BDEB',
+  headerBar:     '#1F2C34',
 };
 
 export const AuroraLight: Palette = {
@@ -100,6 +118,16 @@ export const AuroraLight: Palette = {
   text:      '#0A0A0F',
   textDim:   'rgba(0,0,0,0.55)',
   textFaint: 'rgba(0,0,0,0.35)',
+  // WhatsApp light conversation palette
+  chatBg:        '#ECE5DD',
+  bubbleIn:      '#FFFFFF',
+  bubbleOut:     '#D9FDD3',
+  bubbleInText:  '#111B21',
+  bubbleOutText: '#111B21',
+  bubbleMetaIn:  '#667781',
+  bubbleMetaOut: '#5B7765',
+  tickRead:      '#34B7F1',
+  headerBar:     '#008069',
 };
 
 /** The static default palette (dark). Existing screens import this directly. */

@@ -147,9 +147,14 @@ async function sendChatMessagePush(chatId, senderId, msg, chatType) {
     if (memR.rows.length === 0) return;
     const recipientIds = memR.rows.map(r => r.user_id);
 
+    // Pull each recipient's tokens alongside their per-chat notification sound
+    // (the Android channelId) so everyone hears the sound they picked.
     const tokR = await db.query(
-      `SELECT push_token FROM devices WHERE user_id = ANY($1::uuid[])`,
-      [recipientIds]
+      `SELECT d.push_token, cm.notif_sound
+         FROM devices d
+         JOIN chat_members cm ON cm.user_id = d.user_id AND cm.chat_id = $2
+        WHERE d.user_id = ANY($1::uuid[]) AND cm.left_at IS NULL`,
+      [recipientIds, chatId]
     );
     if (tokR.rows.length === 0) return;
 
@@ -177,14 +182,18 @@ async function sendChatMessagePush(chatId, senderId, msg, chatType) {
                 : msg.type === 'file'  ? '📎 File'
                 : 'New message';
 
-    await sendPushToTokens(
-      tokR.rows.map(r => r.push_token),
-      {
-        title,
-        body,
-        data: { chatId, messageId: msg.id, type: 'message' },
-      }
-    );
+    // Group tokens by their channel (notification sound) and send one batch per
+    // group so each recipient's chosen sound is used.
+    const byChannel = new Map();
+    for (const row of tokR.rows) {
+      const ch = row.notif_sound || 'default';
+      if (!byChannel.has(ch)) byChannel.set(ch, []);
+      byChannel.get(ch).push(row.push_token);
+    }
+    const data = { chatId, messageId: msg.id, type: 'message' };
+    for (const [channelId, tokens] of byChannel) {
+      await sendPushToTokens(tokens, { title, body, data, channelId });
+    }
   } catch (err) {
     console.error('[sendChatMessagePush]', err.message);
   }
@@ -776,7 +785,11 @@ router.post('/:id/messages', async (req, res) => {
         }
       }
     } else if (isMedia) {
-      if (!meta || !meta.attachmentId) {
+      // External GIFs (type 'image' from the GIF picker) carry a remote URL in
+      // meta.gifUrl instead of an uploaded attachment — exempt them.
+      const isExternalGif = type === 'image' && meta && typeof meta.gifUrl === 'string'
+        && /^https:\/\/\S+$/.test(meta.gifUrl) && meta.gifUrl.length <= 2048;
+      if (!isExternalGif && (!meta || !meta.attachmentId)) {
         return res.status(400).json({ error: 'meta.attachmentId required for media messages' });
       }
       // Allow empty content for media — treat as null in DB so the bubble
@@ -1438,6 +1451,27 @@ router.post('/:id/mute', async (req, res) => {
   } catch (err) {
     console.error('[chats mute]', err.message);
     res.status(500).json({ error: 'Failed to update mute' });
+  }
+});
+
+// PATCH /chats/:id/notif-sound  { sound }  — per-chat notification sound (the
+// Android channelId the client registered, e.g. 'default' | 'chime' | 'bell').
+router.patch('/:id/notif-sound', async (req, res) => {
+  try {
+    const mem = await loadChatMembership(req, req.params.id);
+    if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
+    const raw = (req.body?.sound ?? '').toString();
+    // Whitelist + cap length; 'default' (or empty) clears the override.
+    const allowed = ['default', 'chime', 'bell'];
+    const sound = allowed.includes(raw) && raw !== 'default' ? raw : null;
+    await req.dbQuery(
+      `UPDATE chat_members SET notif_sound = $1 WHERE chat_id = $2 AND user_id = $3`,
+      [sound, req.params.id, req.user.id]
+    );
+    res.json({ ok: true, sound: sound || 'default' });
+  } catch (err) {
+    console.error('[chats notif-sound]', err.message);
+    res.status(500).json({ error: 'Failed to update notification sound' });
   }
 });
 

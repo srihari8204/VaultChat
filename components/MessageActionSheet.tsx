@@ -6,11 +6,13 @@
  * and the reaction handler, so it stays decoupled from chat.tsx's logic.
  * Built on RN Modal + Animated (no @gorhom/bottom-sheet dependency).
  */
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import {
   Animated, Dimensions, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
-import { Aurora } from '../constants/theme';
+import { Ionicons } from '@expo/vector-icons';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 
 export interface SheetAction {
   key: string;
@@ -32,6 +34,8 @@ export function MessageActionSheet({
   onReact?: (emoji: string) => void;
   reactions?: string[];
 }) {
+  const { colors } = useTheme();
+  const s = useMemo(() => makeStyles(colors), [colors]);
   const slide = useRef(new Animated.Value(SCREEN_H)).current;
   const backdrop = useRef(new Animated.Value(0)).current;
 
@@ -83,8 +87,8 @@ export function MessageActionSheet({
             <View key={ri} style={s.gridRow}>
               {row.map(a => (
                 <TouchableOpacity key={a.key} style={s.tile} onPress={() => fire(a.onPress)} activeOpacity={0.7}>
-                  <Text style={s.tileIcon}>{a.icon}</Text>
-                  <Text style={[s.tileLabel, a.danger && { color: Aurora.danger }]} numberOfLines={1}>{a.label}</Text>
+                  <Ionicons name={a.icon as any} size={23} color={a.danger ? colors.danger : colors.text} />
+                  <Text style={[s.tileLabel, a.danger && { color: colors.danger }]} numberOfLines={1}>{a.label}</Text>
                 </TouchableOpacity>
               ))}
               {/* pad the last row so tiles stay left-aligned in a 3-col grid */}
@@ -97,25 +101,25 @@ export function MessageActionSheet({
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (c: Palette) => StyleSheet.create({
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)' },
   sheet: {
     position: 'absolute', left: 0, right: 0, bottom: 0,
-    backgroundColor: Aurora.surfaceSolid, borderTopLeftRadius: 26, borderTopRightRadius: 26,
+    backgroundColor: c.surfaceSolid, borderTopLeftRadius: 26, borderTopRightRadius: 26,
     paddingHorizontal: 16, paddingTop: 10, paddingBottom: 34,
-    borderTopWidth: 1, borderColor: Aurora.border,
+    borderTopWidth: 1, borderColor: c.border,
   },
-  handle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: Aurora.border, marginBottom: 16 },
+  handle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: c.border, marginBottom: 16 },
 
-  reactionRow: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: Aurora.surface, borderRadius: 18, paddingVertical: 10, paddingHorizontal: 10, marginBottom: 16 },
+  reactionRow: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: c.surface, borderRadius: 18, paddingVertical: 10, paddingHorizontal: 10, marginBottom: 16 },
   reaction: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   reactionEmoji: { fontSize: 26 },
 
   grid: { gap: 12 },
   gridRow: { flexDirection: 'row', gap: 12 },
-  tile: { flex: 1, height: 68, borderRadius: 16, backgroundColor: Aurora.surface, alignItems: 'center', justifyContent: 'center', gap: 6 },
+  tile: { flex: 1, height: 68, borderRadius: 16, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center', gap: 6 },
   tileIcon: { fontSize: 22 },
-  tileLabel: { color: Aurora.text, fontSize: 11, fontWeight: '600' },
+  tileLabel: { color: c.text, fontSize: 11, fontWeight: '600' },
 });
 
 export default MessageActionSheet;

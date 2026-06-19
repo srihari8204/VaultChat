@@ -27,6 +27,7 @@
     "prod:precheck": "node ./scripts/prod-precheck.js"
   },
   "dependencies": {
+    "@dr.pogodin/react-native-fs": "^2.39.0",
     "@expo-google-fonts/nunito-sans": "^0.4.2",
     "@expo-google-fonts/sora": "^0.4.2",
     "@expo/vector-icons": "^15.0.3",
@@ -92,6 +93,7 @@
     "expo-symbols": "~1.0.8",
     "expo-system-ui": "~6.0.9",
     "expo-updates": "~29.0.16",
+    "expo-video-thumbnails": "~10.0.8",
     "expo-web-browser": "~15.0.10",
     "firebase": "^12.10.0",
     "react": "19.1.0",

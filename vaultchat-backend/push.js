@@ -65,7 +65,7 @@ async function sendPushToTokens(tokens, payload) {
     body: payload.body,
     data: payload.data ?? {},
     priority: 'high',
-    channelId: 'default', // Android notification channel
+    channelId: payload.channelId || 'default', // Android channel = per-chat sound
     _displayInForeground: true,
   };
 

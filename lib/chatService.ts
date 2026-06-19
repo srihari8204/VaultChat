@@ -165,6 +165,20 @@ export async function encryptForChat(chatId: string, plaintext: string): Promise
   }
 }
 
+/**
+ * Reset the E2EE session for a direct chat ("reset secure session"). Drops the
+ * local ratchet so the next message we send re-initiates X3DH with the peer's
+ * current keys — recovers a conversation stuck on "unable to decrypt" after a
+ * peer reinstalled. No-op for group chats.
+ */
+export async function resetChatSession(chatId: string): Promise<void> {
+  if (!E2EE_ENABLED) return;
+  const peerId = directPeerOf(chatId);
+  if (!peerId) return;
+  const e2ee = await import('../services/crypto/e2eeSession.rn');
+  await e2ee.e2eeResetSession(peerId);
+}
+
 export async function decryptFromChat(
   chatId: string,
   senderId: string,
@@ -186,13 +200,24 @@ export async function decryptFromChat(
       return '🔒 unable to decrypt';
     }
   }
+  const e2ee = await import('../services/crypto/e2eeSession.rn');
+  if (!e2ee.isEnvelope(ciphertext)) return ciphertext; // pre-E2EE plaintext history
+  const peerId = directPeerOf(chatId) ?? senderId;     // peer = the other party
   try {
-    const e2ee = await import('../services/crypto/e2eeSession.rn');
-    if (!e2ee.isEnvelope(ciphertext)) return ciphertext; // pre-E2EE plaintext history
-    const peerId = directPeerOf(chatId) ?? senderId;     // peer = the other party
     return await e2ee.e2eeDecrypt(chatId, peerId, messageId ?? 0, ciphertext);
   } catch (err) {
-    if (__DEV__) console.warn('[e2ee] decrypt failed:', (err as any)?.message);
+    const m = String((err as any)?.message || '');
+    // ONLY retry the transient out-of-order case (a follow-up message can arrive
+    // before the X3DH-bearing first message bootstraps the session). Permanent
+    // failures are tombstoned in e2eeDecrypt — no retry, no re-attempt, no spam.
+    if (m.includes('no session and no X3DH')) {
+      for (let i = 0; i < 2; i++) {
+        await new Promise(r => setTimeout(r, 250));
+        try { return await e2ee.e2eeDecrypt(chatId, peerId, messageId ?? 0, ciphertext); } catch {}
+      }
+    } else if (__DEV__ && !m.includes('undecryptable (cached)')) {
+      console.warn('[e2ee] decrypt failed:', m);
+    }
     return '🔒 unable to decrypt';
   }
 }
@@ -957,6 +982,15 @@ export async function setHidden(chatId: string, hidden: boolean): Promise<void> 
   await api(`/chats/${encodeURIComponent(chatId)}/hidden`, {
     method: 'PATCH',
     json: { hidden },
+  });
+}
+
+// Per-chat notification sound — value is the Android channelId the client
+// registered ('default' | 'chime' | 'bell'). 'default' clears the override.
+export async function setChatNotifSound(chatId: string, sound: string): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/notif-sound`, {
+    method: 'PATCH',
+    json: { sound },
   });
 }
 

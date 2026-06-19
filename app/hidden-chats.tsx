@@ -108,7 +108,7 @@ function PinGate({
       <StatusBar barStyle="light-content" />
       <Text style={S.gateIcon}>🔒</Text>
       <Text style={S.gateTitle}>Enter your PIN</Text>
-      <Text style={S.gateSub}>Hidden chats are protected by your profile PIN.</Text>
+      <Text style={S.gateSub}>Hidden chats are protected by your app PIN (the same MPIN you use to sign in).</Text>
 
       <TextInput
         ref={inputRef}

@@ -176,7 +176,7 @@ export default function VideoCallScreen() {
     try { pcRef.current?.close(); } catch {}
     pcRef.current = null;
     if (notify && peerUid) {
-      getSocket().then(s => s.emit('webrtc_end', { to: peerUid, chatId })).catch(() => {});
+      getSocket().then(s => s.emit('webrtc_end', { to: peerUid, from: meIdRef.current, chatId })).catch(() => {});
     }
   }, [peerUid, chatId]);
 
