@@ -6,6 +6,7 @@
 // leaves the device; "verified" means we actually signed a fresh challenge and
 // verified it against the public key. No blockchain, no gas, no fabrication.
 
+import { BRAND_ACCENT } from '../constants/theme';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -20,7 +21,7 @@ import {
 
 const C = {
   bg: '#FFFFFF', primary: '#4A9FFF', secondary: '#7C3AED',
-  accent: '#10B981', gold: '#F59E0B', text: '#fff',
+  accent: BRAND_ACCENT, gold: '#F59E0B', text: '#fff',
   dim: 'rgba(255,255,255,0.5)', faint: 'rgba(255,255,255,0.2)',
   card: 'rgba(10,22,40,0.8)', border: 'rgba(255,255,255,0.06)',
 };

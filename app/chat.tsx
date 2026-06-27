@@ -17,10 +17,12 @@
 // Read receipts:
 //   POST /chats/:id/read with the latest visible message id, debounced.
 
+import { BRAND_ACCENT, brandAlpha } from '../constants/theme';
 import { Audio, ResizeMode, Video } from 'expo-av';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as IntentLauncher from 'expo-intent-launcher';
 import * as ImagePicker from 'expo-image-picker';
 import * as ScreenCapture from 'expo-screen-capture';
 import { DeviceMotion } from 'expo-sensors';
@@ -30,19 +32,21 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { consumePendingJump } from '../lib/chatJump';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { E2EE_ENABLED } from '../constants/flags';
-import { getCachedMessages, cacheMessages, applyMessage } from '../lib/localDb';
+import { getCachedMessages, cacheMessages, applyMessage, markCachedDeleted, getCachedMessagesByIds } from '../lib/localDb';
 import { saveDraft, getDraft, clearDraft } from '../lib/drafts';
 import { playSent, playReceived } from '../lib/sounds';
 import { NOTIF_CHANNELS } from '../lib/push';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   FlatList,
   Image,
   Keyboard,
   KeyboardAvoidingView,
   Linking,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -71,7 +75,7 @@ function idealText(hex: string): string {
   return lum > 0.6 ? '#0e0e14' : '#ffffff';
 }
 import { useTheme } from '../lib/theme';
-import { type Palette } from '../constants/theme';
+import { type Palette, ELEVATION } from '../constants/theme';
 import { getCurrentUserAsync } from './(constants)/authService';
 
 // Fire-and-forget haptic (no-op on web / if unavailable).
@@ -97,7 +101,10 @@ import {
   getChat,
   getMessages,
   getReactionCounts,
+  hydrateMessages,
+  looksEncrypted,
   listChats,
+  listStoriesFeed,
   markDelivered,
   markRead,
   muteChat,
@@ -120,7 +127,9 @@ import {
 } from '../lib/chatService';
 import { sendMediaMessage } from '../lib/sendMedia';
 import { getDecryptedAttachmentUri, getAttachmentLocalUri, parseMediaContent } from '../lib/mediaAttachments';
-import { getMedia } from '../lib/mediaStore';
+import { shouldAutoDownloadNow } from '../lib/mediaPrefs';
+import { ProgressRing } from '../components/ProgressRing';
+import { getMedia, copyToCache } from '../lib/mediaStore';
 import { thumbDataUri } from '../lib/thumbnails';
 import {
   cancel as queueCancel,
@@ -228,11 +237,13 @@ export default function ChatScreen() {
   // Media staged for sending, shown in a caption-preview before it goes out.
   // Every send path (gallery pick, camera, video note, edited photo) routes
   // through here so the user can add a caption (WhatsApp-style).
-  const [pendingMedia, setPendingMedia] = useState<{
+  // Staged media awaiting send — supports WhatsApp-style multi-select. Each
+  // item carries its own caption + view-once; currentIdx is the one on screen.
+  const [pendingItems, setPendingItems] = useState<Array<{
     uri: string; mediaType: 'image' | 'video'; filename: string; mime: string;
-    viewOnce: boolean; metaExtra: Record<string, any>;
-  } | null>(null);
-  const [mediaCaption, setMediaCaption] = useState('');
+    viewOnce: boolean; metaExtra: Record<string, any>; caption: string;
+  }>>([]);
+  const [currentIdx, setCurrentIdx] = useState(0);
   // @mentions (groups): active typed query (null = none) + recorded picks.
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const mentionsRef = useRef<{ name: string; userId: string }[]>([]);
@@ -263,6 +274,11 @@ export default function ChatScreen() {
   const listRef = useRef<FlatList>(null);
   const messagesRef = useRef<DisplayMessage[]>([]);
   const [flashId, setFlashId] = useState<number | null>(null);
+  // Scroll-to-bottom FAB (WhatsApp "↓ N new"): shown when scrolled up.
+  const [showScrollDown, setShowScrollDown] = useState(false);
+  const [newSinceUp, setNewSinceUp] = useState(0);
+  const atBottomRef = useRef(true);
+  const [infoMsg, setInfoMsg] = useState<DisplayMessage | null>(null); // Message Info sheet
   const [liveLoc, setLiveLoc] = useState<{ userId: string; latitude: number; longitude: number; address?: string } | null>(null);
   const readDebounce = useRef<any>(null);
   const lastReadSent = useRef<number>(0);
@@ -284,6 +300,36 @@ export default function ChatScreen() {
     }
     return m;
   }, [messages]);
+
+  // Reply targets that aren't in the current page (older messages) — resolve
+  // them from the local plaintext cache so the quoted preview still shows, like
+  // WhatsApp. Stays on-device: no content goes to the server.
+  const [extraReplies, setExtraReplies] = useState<Map<number, DisplayMessage>>(new Map());
+  useEffect(() => {
+    const need = new Set<number>();
+    for (const m of messages) {
+      const rid = m.replyToId;
+      if (rid && rid > 0 && !replyById.has(rid) && !extraReplies.has(rid)) need.add(rid);
+    }
+    if (!need.size) return;
+    let cancel = false;
+    getCachedMessagesByIds(chatId, [...need]).then(rows => {
+      if (cancel || !rows.length) return;
+      setExtraReplies(prev => {
+        const n = new Map(prev);
+        for (const r of rows) if (typeof r.id === 'number') n.set(r.id, r as DisplayMessage);
+        return n;
+      });
+    }).catch(() => {});
+    return () => { cancel = true; };
+    // extraReplies intentionally omitted (the has-guard prevents refetch loops)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, replyById, chatId]);
+
+  const resolveReply = useCallback(
+    (id?: number | null) => (id ? (replyById.get(id) ?? extraReplies.get(id) ?? null) : null),
+    [replyById, extraReplies],
+  );
 
   // Stable key over the visible message ids, so the reaction/poll hydration
   // effects only refire when the SET of ids changes — not on every edit,
@@ -313,19 +359,26 @@ export default function ChatScreen() {
             .catch(() => {});
         }
 
-        // Local-first: paint cached messages instantly (no spinner), then
-        // refresh from the server below and reconcile.
+        // Local-first (WhatsApp-style): paint cached PLAINTEXT instantly (no
+        // spinner, no decryption), then refresh from the server and reconcile.
+        // knownPlain lets us reuse already-decrypted text so we never re-decrypt
+        // a message we've seen before.
+        const knownPlain = new Map<number, string>();
         try {
           const cached = await getCachedMessages(chatId, PAGE_SIZE);
           if (cached.length) { setMessages(cached); setLoading(false); }
+          for (const m of cached) if (!looksEncrypted(m.content)) knownPlain.set(m.id, m.content as string);
         } catch { /* cache miss → fall through to server load */ }
 
-        const [me, c, msgs, pendingQ] = await Promise.all([
+        const [me, c, msgsRaw, pendingQ] = await Promise.all([
           getCurrentUserAsync(),
           getChat(chatId),
           getMessages(chatId, { limit: PAGE_SIZE }),
           pendingForChat(chatId),
         ]);
+        // Decrypt each envelope ONCE here at ingest (reusing cached plaintext),
+        // so bubbles render plaintext directly — no per-bubble decryption.
+        const msgs = await hydrateMessages(chatId, msgsRaw, knownPlain);
         setMeId(me?.id ?? null);
         setChat(c);
         setPinnedId(c.pinnedMessageId ?? null);
@@ -400,20 +453,20 @@ export default function ChatScreen() {
 
         const onNew = (m: Message) => {
           if (m.chatId !== chatId) return;
-          setMessages(prev => {
-            // Dedupe in case we already appended optimistically
-            if (prev.some(x => x.id === m.id)) return prev;
-            return [m, ...prev];
-          });
-          applyMessage(chatId, m).catch(() => {}); // persist to local cache
-          // Auto-acknowledge delivery as soon as the message lands on this
-          // device — independent of whether the user has the chat open.
-          // The sender's UI flips from "sent" to "delivered" via the
-          // message_delivered broadcast that follows.
+          // Auto-acknowledge delivery + tone immediately (don't wait on decrypt).
           if (m.senderId !== meId) {
             markDelivered(chatId, m.id).catch(() => {});
             playReceived();   // in-app "received" tone (respects sound prefs)
           }
+          // Decrypt-on-arrival (WhatsApp-style): decrypt ONCE, then show + cache
+          // the PLAINTEXT so re-opens never decrypt it again.
+          (async () => {
+            const fin = looksEncrypted(m.content) ? (await hydrateMessages(chatId, [m]))[0] ?? m : m;
+            setMessages(prev => prev.some(x => x.id === fin.id) ? prev : [fin, ...prev]);
+            applyMessage(chatId, fin).catch(() => {}); // persist plaintext to local cache
+            // Bump the "↓ N new" counter when a message lands while scrolled up.
+            if (!atBottomRef.current && fin.senderId !== meId) setNewSinceUp(n => n + 1);
+          })();
         };
         const onMemberDelivered = (e: { userId: string; lastDeliveredMessageId: number }) => {
           if (!e?.userId) return;
@@ -443,15 +496,15 @@ export default function ChatScreen() {
             x.id === e.id ? { ...x, content: null, deletedAt: e.deletedAt, type: 'system' } : x
           ));
         };
-        const onTypingStart = (e: { uid: string }) => {
-          if (!e?.uid || e.uid === meId) return;
+        const onTypingStart = (e: { uid: string; chatId?: string }) => {
+          if (!e?.uid || e.uid === meId || (e.chatId && e.chatId !== chatId)) return;
           setTypingUids(prev => {
             if (prev.has(e.uid)) return prev;
             const next = new Set(prev); next.add(e.uid); return next;
           });
         };
-        const onTypingStop = (e: { uid: string }) => {
-          if (!e?.uid) return;
+        const onTypingStop = (e: { uid: string; chatId?: string }) => {
+          if (!e?.uid || (e.chatId && e.chatId !== chatId)) return;
           setTypingUids(prev => {
             if (!prev.has(e.uid)) return prev;
             const next = new Set(prev); next.delete(e.uid); return next;
@@ -801,14 +854,36 @@ export default function ChatScreen() {
           params: { chatId, messageId: String(msg.id), preview: (plain || msg.type).slice(0, 200) },
         }) },
     ];
+    if (isMine && msg.id > 0 && !msg.deletedAt) {
+      acts.push({ key: 'info', label: 'Info', icon: 'information-circle-outline', onPress: () => setInfoMsg(msg) });
+    }
     if (isMine && !msg.deletedAt) {
       acts.push({ key: 'edit', label: 'Edit', icon: 'create-outline', onPress: () => { setEditingId(msg.id); setInput(plain); } });
-      acts.push({ key: 'delete', label: 'Delete', icon: 'trash-outline', danger: true, onPress: async () => {
-          try {
-            await deleteMessage(chatId, msg.id);
-            setMessages(prev => prev.map(x => x.id === msg.id
-              ? { ...x, content: null, deletedAt: new Date().toISOString(), type: 'system' } : x));
-          } catch (e: any) { Alert.alert('Delete failed', e?.message ?? 'Try again'); }
+    }
+    // Delete is available on EVERY message: "Delete for me" always (local-only
+    // hide), plus "Delete for everyone" on your own messages (server revoke) —
+    // matching WhatsApp.
+    if (!msg.deletedAt) {
+      acts.push({ key: 'delete', label: 'Delete', icon: 'trash-outline', danger: true, onPress: () => {
+          const opts: any[] = [{
+            text: 'Delete for me', style: 'destructive', onPress: async () => {
+              try { await markCachedDeleted(chatId, msg.id); } catch {}
+              setMessages(prev => prev.filter(x => x.id !== msg.id));
+            },
+          }];
+          if (isMine && msg.id > 0) {
+            opts.push({
+              text: 'Delete for everyone', style: 'destructive', onPress: async () => {
+                try {
+                  await deleteMessage(chatId, msg.id);
+                  setMessages(prev => prev.map(x => x.id === msg.id
+                    ? { ...x, content: null, deletedAt: new Date().toISOString(), type: 'system' } : x));
+                } catch (e: any) { Alert.alert('Delete failed', e?.message ?? 'Try again'); }
+              },
+            });
+          }
+          opts.push({ text: 'Cancel', style: 'cancel' });
+          Alert.alert('Delete message?', undefined, opts);
         } });
     }
     return acts;
@@ -1246,43 +1321,78 @@ export default function ChatScreen() {
       mediaTypes: [kind],
       quality:    kind === 'videos' ? 1 : 0.7,
       allowsEditing: false,
+      allowsMultipleSelection: true,   // WhatsApp-style multi-select
+      selectionLimit: 10,
+      orderedSelection: true,
       videoMaxDuration: 60, // hard cap to keep upload size sane on free plan
     });
-    if (result.canceled || !result.assets?.[0]) return;
-    const asset = result.assets[0];
+    if (result.canceled || !result.assets?.length) return;
     const isVideo = kind === 'videos';
-    const filename = asset.fileName ||
-      (isVideo ? `video-${Date.now()}.mp4` : `photo-${Date.now()}.jpg`);
-    const mime = asset.mimeType ||
-      (isVideo ? 'video/mp4' : 'image/jpeg');
-    const metaExtra: any = { width: asset.width, height: asset.height };
-    if (isVideo && asset.duration) metaExtra.durationMs = asset.duration;
-    // Stage for the caption preview instead of sending immediately.
-    setMediaCaption('');
-    setPendingMedia({ uri: asset.uri, mediaType: isVideo ? 'video' : 'image', filename, mime, viewOnce: !!opts.viewOnce, metaExtra });
+    const stamp = Date.now();
+    // Stage all picks for the multi-image caption preview.
+    const items = result.assets.map((asset, i) => {
+      const filename = asset.fileName ||
+        (isVideo ? `video-${stamp}-${i}.mp4` : `photo-${stamp}-${i}.jpg`);
+      const mime = asset.mimeType || (isVideo ? 'video/mp4' : 'image/jpeg');
+      const metaExtra: any = { width: asset.width, height: asset.height };
+      if (isVideo && asset.duration) metaExtra.durationMs = asset.duration;
+      return {
+        uri: asset.uri, mediaType: (isVideo ? 'video' : 'image') as 'image' | 'video',
+        filename, mime, viewOnce: !!opts.viewOnce, metaExtra, caption: '',
+      };
+    });
+    setPendingItems(items);
+    setCurrentIdx(0);
   }, [sending]);
 
-  // Actually upload + send the staged media, with the typed caption.
+  // Upload + send every staged item (each with its own caption + view-once).
   const confirmSendPendingMedia = useCallback(async () => {
-    if (!pendingMedia || sending) return;
-    const pm = pendingMedia;
-    const cap = mediaCaption.trim();
-    setPendingMedia(null);
-    setMediaCaption('');
+    if (pendingItems.length === 0 || sending) return;
+    const items = pendingItems;
+    setPendingItems([]);
+    setCurrentIdx(0);
     setSending(true);
     try {
-      const msg = await sendMediaMessage(
-        chatId, pm.mediaType,
-        { uri: pm.uri, filename: pm.filename, mime: pm.mime },
-        { viewOnce: pm.viewOnce, caption: cap || undefined, metaExtra: pm.metaExtra },
-      );
-      setMessages(prev => prev.some(x => x.id === msg.id) ? prev : [msg, ...prev]);
+      for (const pm of items) {
+        const msg = await sendMediaMessage(
+          chatId, pm.mediaType,
+          { uri: pm.uri, filename: pm.filename, mime: pm.mime },
+          { viewOnce: pm.viewOnce, caption: pm.caption.trim() || undefined, metaExtra: pm.metaExtra },
+        );
+        setMessages(prev => prev.some(x => x.id === msg.id) ? prev : [msg, ...prev]);
+      }
     } catch (e: any) {
       Alert.alert('Upload failed', e?.message ?? 'Try again');
     } finally {
       setSending(false);
     }
-  }, [pendingMedia, mediaCaption, chatId, sending]);
+  }, [pendingItems, chatId, sending]);
+
+  // Helpers for the multi-item preview.
+  const updateCurrentItem = useCallback((patch: Partial<{ caption: string; viewOnce: boolean }>) => {
+    setPendingItems(prev => prev.map((it, i) => i === currentIdx ? { ...it, ...patch } : it));
+  }, [currentIdx]);
+  const removePendingAt = useCallback((idx: number) => {
+    setPendingItems(prev => {
+      const next = prev.filter((_, i) => i !== idx);
+      setCurrentIdx(ci => Math.max(0, Math.min(ci - (idx <= ci ? 1 : 0), next.length - 1)));
+      return next;
+    });
+  }, []);
+  const addMorePhotos = useCallback(async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'], quality: 0.7, allowsMultipleSelection: true, selectionLimit: 10, orderedSelection: true,
+    });
+    if (result.canceled || !result.assets?.length) return;
+    const stamp = Date.now();
+    const more = result.assets.map((asset, i) => ({
+      uri: asset.uri, mediaType: 'image' as const,
+      filename: asset.fileName || `photo-${stamp}-${i}.jpg`,
+      mime: asset.mimeType || 'image/jpeg', viewOnce: false,
+      metaExtra: { width: asset.width, height: asset.height } as Record<string, any>, caption: '',
+    }));
+    setPendingItems(prev => [...prev, ...more]);
+  }, []);
 
   // ── Consume media captured by /camera, /video-notes, /image-editor ──
   // Those screens router.replace back here with capturedUri + capturedType.
@@ -1304,9 +1414,67 @@ export default function ChatScreen() {
     const mime = isVideo ? 'video/mp4' : 'image/jpeg';
     const metaExtra: Record<string, any> = rawType === 'video-note' ? { videoNote: true } : {};
     // Stage in the caption preview (same as a gallery pick).
-    setMediaCaption('');
-    setPendingMedia({ uri, mediaType: isVideo ? 'video' : 'image', filename, mime, viewOnce, metaExtra });
+    setPendingItems([{ uri, mediaType: isVideo ? 'video' : 'image', filename, mime, viewOnce, metaExtra, caption: '' }]);
+    setCurrentIdx(0);
   }, [params.capturedUri, params.capturedType, params.capturedViewOnce, router]);
+
+  // ── Composer camera button: tap = camera, slide up = video note ──────
+  // (WhatsApp-style. startMode='note' makes /camera open in round-video mode.)
+  const openCamera = useCallback((startMode?: 'note') => {
+    if (sending) return;
+    Keyboard.dismiss();
+    const peerName = (chat?.type === 'direct' && meId ? chat.members.find(m => m.userId !== meId)?.name : chat?.name) || '';
+    router.push({ pathname: '/camera' as any, params: { chatId, peerName, returnTo: '/chat', ...(startMode ? { startMode } : {}) } });
+  }, [sending, chat, meId, chatId, router]);
+  // Keep the latest handler in a ref so the once-created PanResponder never goes stale.
+  const openCameraRef = useRef(openCamera);
+  openCameraRef.current = openCamera;
+
+  // Animation values: camDragY (icon follows finger), hintProg (drag hint 0→1
+  // as you slide up, "armed" near 1), chevPulse (idle discovery cue loop).
+  const camDragY = useRef(new Animated.Value(0)).current;
+  const hintProg = useRef(new Animated.Value(0)).current;
+  const chevPulse = useRef(new Animated.Value(0)).current;
+  const [camDragging, setCamDragging] = useState(false);
+  const camDraggingRef = useRef(false);
+  const ARM_DIST = 56; // px to slide up to "arm" the video note
+
+  // Gentle, looping up-chevron above the camera icon so users discover slide-up.
+  useEffect(() => {
+    const loop = Animated.loop(Animated.sequence([
+      Animated.timing(chevPulse, { toValue: 1, duration: 950, useNativeDriver: true }),
+      Animated.timing(chevPulse, { toValue: 0, duration: 950, useNativeDriver: true }),
+    ]));
+    loop.start();
+    return () => loop.stop();
+  }, [chevPulse]);
+
+  const resetCamDrag = useCallback(() => {
+    camDraggingRef.current = false; setCamDragging(false);
+    Animated.spring(camDragY, { toValue: 0, useNativeDriver: true, friction: 6, tension: 90 }).start();
+    Animated.timing(hintProg, { toValue: 0, duration: 140, useNativeDriver: true }).start();
+  }, [camDragY, hintProg]);
+
+  const cameraPan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dy) > 6,
+      onPanResponderMove: (_e, g) => {
+        if (!camDraggingRef.current && Math.abs(g.dy) > 6) { camDraggingRef.current = true; setCamDragging(true); }
+        const dy = Math.max(-72, Math.min(0, g.dy));
+        camDragY.setValue(dy);
+        hintProg.setValue(Math.min(1, -dy / ARM_DIST));
+      },
+      onPanResponderRelease: (_e, g) => {
+        const armed = g.dy < -24;
+        const tap = Math.abs(g.dy) < 12 && Math.abs(g.dx) < 12;
+        resetCamDrag();
+        if (armed) openCameraRef.current('note');   // slid up → video note
+        else if (tap) openCameraRef.current();       // tap → camera
+      },
+      onPanResponderTerminate: () => resetCamDrag(),
+    }),
+  ).current;
 
   // ── Attach file (Day 9) ───────────────────────────────────
   // Generic doc picker. The server accepts any mime via /uploads; the bubble
@@ -1371,20 +1539,15 @@ export default function ChatScreen() {
     const peer = chat?.type === 'direct' && meId ? chat.members.find(m => m.userId !== meId) : null;
     const peerName = peer?.name || chat?.name || '';
     return [
-      { label: 'Camera',          icon: 'camera' as const,     onPress: () => router.push({ pathname: '/camera' as any, params: { chatId, peerName, returnTo: '/chat' } }) },
-      { label: 'Video note',      icon: 'ellipse' as const,    onPress: () => router.push({ pathname: '/video-notes' as any, params: { chatId, peerName } }) },
-      { label: 'Photo',           icon: 'image' as const,      onPress: () => onPickMedia('images') },
-      { label: 'Edit & send photo', icon: 'create' as const,   onPress: onEditPhoto },
-      { label: 'Video',           icon: 'videocam' as const,   onPress: () => onPickMedia('videos') },
-      { label: 'View-once photo', icon: 'eye' as const,        onPress: () => onPickMedia('images', { viewOnce: true }) },
-      { label: 'View-once video', icon: 'eye-outline' as const, onPress: () => onPickMedia('videos', { viewOnce: true }) },
-      { label: 'GIF',             icon: 'film' as const,       onPress: () => setGifOpen(true) },
-      { label: 'Sticker',         icon: 'happy' as const,      onPress: () => router.push({ pathname: '/stickers' as any, params: { chatId, peerName } }) },
-      { label: nextInvisibleInk ? 'Invisible Ink: armed — disarm' : 'Invisible Ink (next message)', icon: 'sparkles' as const, onPress: () => setNextInvisibleInk(v => !v) },
-      { label: 'Poll',            icon: 'stats-chart' as const, onPress: () => router.push({ pathname: '/create-poll' as any, params: { chatId, peerName } }) },
-      { label: 'Location',        icon: 'location' as const,   onPress: () => router.push({ pathname: '/location' as any, params: { chatId, name: peerName } }) },
-      { label: 'File',            icon: 'document' as const,   onPress: onPickFile },
-      { label: 'Scan document',   icon: 'scan' as const,       onPress: () => router.push({ pathname: '/docscanner' as any, params: { chatId } }) },
+      { label: 'Camera',        icon: 'camera' as const,      color: '#E1306C', onPress: () => router.push({ pathname: '/camera' as any, params: { chatId, peerName, returnTo: '/chat' } }) },
+      { label: 'Gallery',       icon: 'image' as const,       color: '#7E57C2', onPress: () => onPickMedia('images') },
+      { label: 'Video',         icon: 'videocam' as const,    color: '#EC407A', onPress: () => onPickMedia('videos') },
+      { label: 'Edit photo',    icon: 'create' as const,      color: '#5C6BC0', onPress: onEditPhoto },
+      { label: 'File',          icon: 'document' as const,    color: '#42A5F5', onPress: onPickFile },
+      { label: 'Scan',          icon: 'scan' as const,        color: '#8D6E63', onPress: () => router.push({ pathname: '/docscanner' as any, params: { chatId } }) },
+      { label: 'Location',      icon: 'location' as const,    color: '#66BB6A', onPress: () => router.push({ pathname: '/location' as any, params: { chatId, name: peerName } }) },
+      { label: 'Poll',          icon: 'stats-chart' as const, color: '#FFA726', onPress: () => router.push({ pathname: '/create-poll' as any, params: { chatId, peerName } }) },
+      { label: nextInvisibleInk ? 'Ink: armed' : 'Invisible Ink', icon: 'sparkles' as const, color: '#AB47BC', onPress: () => setNextInvisibleInk(v => !v) },
     ];
   }, [onPickMedia, onPickFile, onEditPhoto, router, chatId, chat, meId, nextInvisibleInk]);
 
@@ -1395,9 +1558,11 @@ export default function ChatScreen() {
     if (!oldest) return;
     setLoadingOlder(true);
     try {
-      const older = await getMessages(chatId, { before: oldest, limit: PAGE_SIZE });
+      const olderRaw = await getMessages(chatId, { before: oldest, limit: PAGE_SIZE });
+      const older = await hydrateMessages(chatId, olderRaw);   // decrypt once at ingest
       setMessages(prev => [...prev, ...older]);
       if (older.length < PAGE_SIZE) setHasMore(false);
+      cacheMessages(chatId, older).catch(() => {});            // persist plaintext for instant scroll-back
     } catch {}
     finally { setLoadingOlder(false); }
   }, [chatId, hasMore, loadingOlder, messages]);
@@ -1416,7 +1581,7 @@ export default function ChatScreen() {
       const oldest = messagesRef.current[messagesRef.current.length - 1]?.id;
       if (!oldest) break;
       let older;
-      try { older = await getMessages(chatId, { before: oldest, limit: PAGE_SIZE }); }
+      try { older = await hydrateMessages(chatId, await getMessages(chatId, { before: oldest, limit: PAGE_SIZE })); }
       catch { break; }
       if (!older.length) { setHasMore(false); break; }
       const next = [...messagesRef.current, ...older];
@@ -1504,6 +1669,39 @@ export default function ChatScreen() {
     return null;
   }, [chat, meId]);
 
+  // ── Avatar tap (WhatsApp): if the peer has an active story → open it;
+  // otherwise show the profile photo in a popup with quick actions. ──────
+  const [photoViewer, setPhotoViewer] = useState(false);
+  const directPeer = useCallback(() => {
+    if (chat?.type !== 'direct' || !meId) return null;
+    return chat.members.find(m => m.userId !== meId) ?? null;
+  }, [chat, meId]);
+
+  const onAvatarTap = useCallback(async () => {
+    const peer = directPeer();
+    if (peer) {
+      try {
+        const feed = await listStoriesFeed();
+        if (feed.some(e => e.userId === peer.userId)) {
+          router.push({ pathname: '/story-viewer' as any, params: { userId: peer.userId, userName: peer.name ?? peer.email ?? title } });
+          return;
+        }
+      } catch {}
+    }
+    setPhotoViewer(true);   // no story (or group) → show the profile photo
+  }, [directPeer, router, title]);
+
+  // Tap the name/header → the contact's profile page (or group info).
+  const openProfile = useCallback(() => {
+    if (chat?.type === 'group') {
+      router.push({ pathname: '/group-info' as any, params: { chatId } });
+      return;
+    }
+    const peer = directPeer();
+    if (!peer) return;
+    router.push({ pathname: '/contact-info' as any, params: { chatId, peerUid: peer.userId, peerName: peer.name ?? peer.email ?? 'VaultChat user' } });
+  }, [chat, chatId, directPeer, router]);
+
   // Direct-chat peer presence — drives the "online" / "last seen X" sub-text
   // and the green dot on the header avatar.
   const peerPresence = useMemo(() => {
@@ -1584,9 +1782,9 @@ export default function ChatScreen() {
       {/* Header */}
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7}>
-          <Text style={S.backTxt}>←</Text>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <View style={S.headerAvatarWrap}>
+        <TouchableOpacity style={S.headerAvatarWrap} activeOpacity={0.7} onPress={onAvatarTap}>
           <Avatar
             uri={headerPhotoId && screenAuthHeader ? attachmentUrl(headerPhotoId) : null}
             headers={screenAuthHeader ? { Authorization: screenAuthHeader } : undefined}
@@ -1594,27 +1792,18 @@ export default function ChatScreen() {
             size={40}
             presence={chat?.type === 'direct' && peerPresence?.online ? 'online' : null}
           />
-        </View>
+        </TouchableOpacity>
         <TouchableOpacity
           style={{ flex: 1 }}
-          activeOpacity={chat?.type === 'direct' ? 0.6 : 1}
-          disabled={chat?.type !== 'direct' || !meId}
-          onPress={() => {
-            if (chat?.type !== 'direct' || !meId) return;
-            const peer = chat.members.find(m => m.userId !== meId);
-            if (!peer) return;
-            router.push({
-              pathname: '/verify-contact' as any,
-              params: { peerId: peer.userId, peerName: peer.name ?? peer.email ?? 'VaultChat user' },
-            });
-          }}
+          activeOpacity={0.6}
+          onPress={openProfile}
         >
           <Text style={S.title} numberOfLines={1}>{title}</Text>
           {chat && (
             <Text style={S.sub}>
               {headerSub}
               <Text style={S.e2eBadge}>  ·  </Text>
-              <Ionicons name="lock-closed" size={11} color="#10B981" />
+              <Ionicons name="lock-closed" size={11} color="#22C55E" />
               <Text style={S.e2eBadge}> secured</Text>
             </Text>
           )}
@@ -1723,9 +1912,9 @@ export default function ChatScreen() {
           activeOpacity={0.85}
           onPress={() => Linking.openURL(`https://maps.google.com/?q=${liveLoc.latitude},${liveLoc.longitude}`).catch(() => {})}
         >
-          <Ionicons name="location" size={20} color="#FF6B35" />
+          <Ionicons name="location" size={20} color={colors.primary} />
           <View style={{ flex: 1 }}>
-            <Text style={{ color: '#FF6B35', fontSize: 13, fontWeight: '700' }}>{membersById.get(liveLoc.userId)?.name || 'Someone'} is sharing live location</Text>
+            <Text style={{ color: colors.primary, fontSize: 13, fontWeight: '700' }}>{membersById.get(liveLoc.userId)?.name || 'Someone'} is sharing live location</Text>
             <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 11, marginTop: 1 }} numberOfLines={1}>{liveLoc.address || `${liveLoc.latitude.toFixed(5)}, ${liveLoc.longitude.toFixed(5)}`} · Open in Maps</Text>
           </View>
           <TouchableOpacity onPress={() => setLiveLoc(null)} hitSlop={8}><Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 16 }}>✕</Text></TouchableOpacity>
@@ -1741,7 +1930,7 @@ export default function ChatScreen() {
           : pm.type === 'location' ? '📍 Location' : pm.type === 'poll' ? '📊 Poll' : 'Message';
         return (
           <TouchableOpacity style={S.pinnedBar} activeOpacity={0.8} onPress={() => jumpToMessage(Number(pinnedId))}>
-            <Ionicons name="pin" size={15} color="#10B981" />
+            <Ionicons name="pin" size={15} color={colors.primary} />
             <View style={{ flex: 1 }}>
               <Text style={S.pinnedBarTitle}>Pinned message</Text>
               <Text style={S.pinnedBarSub} numberOfLines={1}>{label}</Text>
@@ -1778,7 +1967,7 @@ export default function ChatScreen() {
             {showDate && <DateChip iso={item.createdAt} />}
             {showUnread && <UnreadDivider count={unreadInfo!.count} />}
             <SwipeToReply onReply={() => { if (!item.deletedAt && item.type !== 'system') setReplyTo(item); }}>
-            <View style={item.id === flashId ? { backgroundColor: 'rgba(16,185,129,0.18)', borderRadius: 12 } : undefined}>
+            <View style={item.id === flashId ? { backgroundColor: brandAlpha(0.18), borderRadius: 12 } : undefined}>
             <MemoBubble
               msg={item}
               meId={meId}
@@ -1786,15 +1975,14 @@ export default function ChatScreen() {
               chatId={chatId}
               otherMembers={otherMembers}
               onLongPress={onLongPressMessage}
+              onJumpTo={jumpToMessage}
               reactionsForMsg={reactions[item.id]}
               onToggleReaction={(emoji) => toggleReaction(item, emoji)}
-              replyTarget={item.replyToId ? replyById.get(item.replyToId) ?? null : null}
-              replyTargetMember={item.replyToId
-                ? (() => {
-                    const t = replyById.get(item.replyToId);
-                    return t ? membersById.get(t.senderId) : undefined;
-                  })()
-                : undefined}
+              replyTarget={resolveReply(item.replyToId)}
+              replyTargetMember={(() => {
+                const t = resolveReply(item.replyToId);
+                return t ? membersById.get(t.senderId) : undefined;
+              })()}
               highlight={searchOpen && searchQ.trim().length > 0 ? searchQ.trim() : null}
               tiltRevealed={tiltRevealed}
               grouped={grouped}
@@ -1815,12 +2003,33 @@ export default function ChatScreen() {
         }}
         onEndReached={onEndReached}
         onEndReachedThreshold={0.4}
+        onScroll={(e) => {
+          const up = e.nativeEvent.contentOffset.y > 280; // inverted: y>0 = scrolled off newest
+          atBottomRef.current = !up;
+          setShowScrollDown(up);
+          if (!up && newSinceUp) setNewSinceUp(0);
+        }}
+        scrollEventThrottle={32}
         ListFooterComponent={loadingOlder ? <ActivityIndicator color={colors.primary} style={{ paddingVertical: 12 }} /> : null}
         removeClippedSubviews
         maxToRenderPerBatch={10}
         windowSize={11}
         initialNumToRender={15}
       />
+
+      {/* Scroll-to-bottom FAB with new-message count (WhatsApp-style) */}
+      {showScrollDown && (
+        <TouchableOpacity
+          style={S.scrollDownBtn}
+          activeOpacity={0.85}
+          onPress={() => { try { listRef.current?.scrollToOffset({ offset: 0, animated: true }); } catch {}; setNewSinceUp(0); setShowScrollDown(false); atBottomRef.current = true; }}
+        >
+          <Ionicons name="chevron-down" size={24} color={colors.text} />
+          {newSinceUp > 0 && (
+            <View style={S.scrollDownBadge}><Text style={S.scrollDownBadgeTxt}>{newSinceUp > 99 ? '99+' : newSinceUp}</Text></View>
+          )}
+        </TouchableOpacity>
+      )}
 
       {/* @mention picker (W15) — appears while typing "@name" in a group */}
       {mentionCandidates.length > 0 && (
@@ -1972,6 +2181,47 @@ export default function ChatScreen() {
                 >
                   <Ionicons name="attach" size={24} color={colors.textDim} style={{ transform: [{ rotate: '45deg' }] }} />
                 </TouchableOpacity>
+                <View style={S.camWrap}>
+                  {/* Drag hint pill — rises + arms as you slide up */}
+                  {camDragging && (
+                    <Animated.View
+                      pointerEvents="none"
+                      style={[S.camDragHint, {
+                        opacity: hintProg,
+                        transform: [
+                          { translateY: hintProg.interpolate({ inputRange: [0, 1], outputRange: [4, -8] }) },
+                          { scale: hintProg.interpolate({ inputRange: [0, 0.85, 1], outputRange: [0.8, 1, 1.12] }) },
+                        ],
+                      }]}
+                    >
+                      <Ionicons name="videocam" size={13} color="#fff" />
+                      <Text style={S.camDragHintTxt}>Video note</Text>
+                    </Animated.View>
+                  )}
+                  {/* Idle discovery cue — subtle pulsing chevron */}
+                  {!camDragging && !sending && (
+                    <Animated.View
+                      pointerEvents="none"
+                      style={[S.camHintChevron, {
+                        opacity: chevPulse.interpolate({ inputRange: [0, 1], outputRange: [0.2, 0.65] }),
+                        transform: [{ translateY: chevPulse.interpolate({ inputRange: [0, 1], outputRange: [2, -3] }) }],
+                      }]}
+                    >
+                      <Ionicons name="chevron-up" size={12} color={colors.textDim} />
+                    </Animated.View>
+                  )}
+                  <Animated.View style={[S.pillIconBtn, { transform: [{ translateY: camDragY }] }]} {...cameraPan.panHandlers}>
+                    {/* Arming ring fades/scales in while dragging up */}
+                    <Animated.View
+                      pointerEvents="none"
+                      style={[S.camRing, {
+                        opacity: hintProg,
+                        transform: [{ scale: hintProg.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1.15] }) }],
+                      }]}
+                    />
+                    <Ionicons name="camera-outline" size={24} color={colors.textDim} />
+                  </Animated.View>
+                </View>
               </>
             )}
           </View>
@@ -2033,13 +2283,106 @@ export default function ChatScreen() {
         actions={actionSheet ? buildSheetActions(actionSheet.msg, actionSheet.plain) : []}
       />
 
-      {/* Attach menu (U4 bottom sheet) */}
-      <Sheet
-        visible={attachOpen}
-        title="Attach"
-        actions={attachActions}
-        onClose={() => setAttachOpen(false)}
-      />
+      {/* Message Info — who delivered/read this message (WhatsApp-style) */}
+      <Modal visible={infoMsg != null} transparent animationType="slide" onRequestClose={() => setInfoMsg(null)}>
+        <Pressable style={S.infoBackdrop} onPress={() => setInfoMsg(null)}>
+          <Pressable style={S.infoSheet} onPress={() => {}}>
+            <View style={S.sheetGrip} />
+            <Text style={S.infoTitle}>Message info</Text>
+            {infoMsg && (() => {
+              const mid = infoMsg.id;
+              const read = otherMembers.filter(m => (m.lastReadMessageId ?? 0) >= mid);
+              const delivered = otherMembers.filter(m => (m.lastDeliveredMessageId ?? 0) >= mid && (m.lastReadMessageId ?? 0) < mid);
+              const sent = otherMembers.filter(m => (m.lastDeliveredMessageId ?? 0) < mid);
+              const Row = (m: ChatMember) => (
+                <View key={m.userId} style={S.infoRow}>
+                  <Avatar uri={m.photoURL && screenAuthHeader ? attachmentUrl(m.photoURL) : null} headers={screenAuthHeader ? { Authorization: screenAuthHeader } : undefined} name={m.name || m.email || '?'} size={36} />
+                  <Text style={S.infoName} numberOfLines={1}>{m.name || m.email || m.userId.slice(0, 8)}</Text>
+                </View>
+              );
+              const Section = (title: string, icon: any, color: string, list: ChatMember[]) => list.length ? (
+                <View key={title} style={{ marginTop: 14 }}>
+                  <View style={S.infoSecHdr}>
+                    <Ionicons name={icon} size={16} color={color} />
+                    <Text style={S.infoSecTitle}>{title} · {list.length}</Text>
+                  </View>
+                  {list.map(Row)}
+                </View>
+              ) : null;
+              return (
+                <ScrollView style={{ maxHeight: 420 }}>
+                  {Section('Read', 'checkmark-done', '#4A9FFF', read)}
+                  {Section('Delivered', 'checkmark-done', colors.textDim, delivered)}
+                  {Section('Sent', 'checkmark', colors.textDim, sent)}
+                  {otherMembers.length === 0 && <Text style={S.infoEmpty}>No other members.</Text>}
+                </ScrollView>
+              );
+            })()}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Profile photo viewer (avatar tap with no active story) — WhatsApp popup */}
+      <Modal visible={photoViewer} transparent animationType="fade" onRequestClose={() => setPhotoViewer(false)}>
+        <Pressable style={S.photoBackdrop} onPress={() => setPhotoViewer(false)}>
+          <Pressable style={S.photoCard} onPress={() => {}}>
+            <View style={S.photoImgWrap}>
+              {headerPhotoId && screenAuthHeader ? (
+                <Image source={{ uri: attachmentUrl(headerPhotoId), headers: { Authorization: screenAuthHeader } }} style={S.photoImg} resizeMode="cover" />
+              ) : (
+                <View style={[S.photoImg, S.photoInitialsWrap]}><Text style={S.photoInitials}>{(title?.trim()[0] ?? '?').toUpperCase()}</Text></View>
+              )}
+              <View style={S.photoNameBar}><Text style={S.photoNameTxt} numberOfLines={1}>{title}</Text></View>
+            </View>
+            <View style={S.photoActions}>
+              <TouchableOpacity style={S.photoActionBtn} onPress={() => setPhotoViewer(false)}>
+                <Ionicons name="chatbubble-ellipses" size={22} color={colors.primary} />
+                <Text style={S.photoActionTxt}>Message</Text>
+              </TouchableOpacity>
+              {chat?.type === 'direct' && (
+                <>
+                  <TouchableOpacity style={S.photoActionBtn} onPress={() => { setPhotoViewer(false); const p = directPeer(); if (p) router.push({ pathname: '/voicecall' as any, params: { chatId, peerUid: p.userId, peerName: p.name ?? p.email ?? title } }); }}>
+                    <Ionicons name="call" size={22} color={colors.primary} />
+                    <Text style={S.photoActionTxt}>Audio</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={S.photoActionBtn} onPress={() => { setPhotoViewer(false); const p = directPeer(); if (p) router.push({ pathname: '/videocall' as any, params: { chatId, peerUid: p.userId, peerName: p.name ?? p.email ?? title } }); }}>
+                    <Ionicons name="videocam" size={22} color={colors.primary} />
+                    <Text style={S.photoActionTxt}>Video</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+              <TouchableOpacity style={S.photoActionBtn} onPress={() => { setPhotoViewer(false); openProfile(); }}>
+                <Ionicons name="information-circle" size={22} color={colors.primary} />
+                <Text style={S.photoActionTxt}>Info</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Attach menu — WhatsApp-style grid of colored round icons */}
+      <Modal visible={attachOpen} transparent animationType="slide" onRequestClose={() => setAttachOpen(false)}>
+        <Pressable style={S.attachBackdrop} onPress={() => setAttachOpen(false)}>
+          <Pressable style={S.attachSheet} onPress={() => {}}>
+            <View style={S.attachHandle} />
+            <View style={S.attachGrid}>
+              {attachActions.map((a) => (
+                <TouchableOpacity
+                  key={a.label}
+                  style={S.attachCell}
+                  activeOpacity={0.7}
+                  onPress={() => { setAttachOpen(false); setTimeout(a.onPress, 120); }}
+                >
+                  <View style={S.attachIcon}>
+                    <Ionicons name={a.icon} size={26} color={colors.text} />
+                  </View>
+                  <Text style={S.attachLabel} numberOfLines={1}>{a.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* GIF picker (W15) */}
       <GifPicker visible={gifOpen} onClose={() => setGifOpen(false)} onSelect={sendGif} />
@@ -2052,62 +2395,111 @@ export default function ChatScreen() {
         onClose={() => setOverflowMenu(null)}
       />
 
-      {/* Media caption preview — every send path stages here first */}
+      {/* Media caption preview — WhatsApp-style, supports multiple images */}
       <Modal
-        visible={pendingMedia != null}
+        visible={pendingItems.length > 0}
         transparent={false}
         animationType="slide"
-        onRequestClose={() => { setPendingMedia(null); setMediaCaption(''); }}
+        onRequestClose={() => setPendingItems([])}
       >
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={{ flex: 1, backgroundColor: '#000' }}
         >
-          <TouchableOpacity
-            onPress={() => { setPendingMedia(null); setMediaCaption(''); }}
-            hitSlop={12}
-            style={{ position: 'absolute', top: 48, left: 16, zIndex: 2, width: 40, height: 40, borderRadius: 20, backgroundColor: '#00000088', alignItems: 'center', justifyContent: 'center' }}
-          >
-            <Ionicons name="close" size={26} color="#fff" />
-          </TouchableOpacity>
+          {(() => {
+            const cur = pendingItems[currentIdx];
+            if (!cur) return null;
+            const multi = pendingItems.length > 1;
+            return (
+              <>
+                <TouchableOpacity
+                  onPress={() => setPendingItems([])}
+                  hitSlop={12}
+                  style={{ position: 'absolute', top: 48, left: 16, zIndex: 2, width: 40, height: 40, borderRadius: 20, backgroundColor: '#00000088', alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <Ionicons name="close" size={26} color="#fff" />
+                </TouchableOpacity>
+                {multi && (
+                  <View style={{ position: 'absolute', top: 54, right: 16, zIndex: 2, backgroundColor: '#00000088', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 14 }}>
+                    <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>{currentIdx + 1} / {pendingItems.length}</Text>
+                  </View>
+                )}
 
-          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-            {pendingMedia?.mediaType === 'image' ? (
-              <Image source={{ uri: pendingMedia.uri }} style={{ width: '100%', height: '100%' }} resizeMode="contain" />
-            ) : pendingMedia ? (
-              <Video
-                source={{ uri: pendingMedia.uri }}
-                style={{ width: '100%', height: '100%' }}
-                resizeMode={ResizeMode.CONTAIN}
-                useNativeControls
-                shouldPlay
-                isLooping
-              />
-            ) : null}
-            {pendingMedia?.viewOnce && (
-              <View style={{ position: 'absolute', top: 100, alignSelf: 'center', backgroundColor: '#10B98133', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20 }}>
-                <Text style={{ color: colors.primary, fontWeight: '700' }}>👁 View once</Text>
-              </View>
-            )}
-          </View>
+                <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+                  {cur.mediaType === 'image' ? (
+                    <Image source={{ uri: cur.uri }} style={{ width: '100%', height: '100%' }} resizeMode="contain" />
+                  ) : (
+                    <Video
+                      source={{ uri: cur.uri }}
+                      style={{ width: '100%', height: '100%' }}
+                      resizeMode={ResizeMode.CONTAIN}
+                      useNativeControls
+                      shouldPlay
+                      isLooping
+                    />
+                  )}
+                  {cur.viewOnce && (
+                    <View style={{ position: 'absolute', top: 100, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: BRAND_ACCENT + '33', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20 }}>
+                      <Ionicons name="eye" size={14} color={colors.primary} />
+                      <Text style={{ color: colors.primary, fontWeight: '700' }}>View once</Text>
+                    </View>
+                  )}
+                </View>
 
-          <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, padding: 10, paddingBottom: Platform.OS === 'ios' ? 28 : 14, backgroundColor: '#000' }}>
-            <TextInput
-              value={mediaCaption}
-              onChangeText={setMediaCaption}
-              placeholder="Add a caption…"
-              placeholderTextColor="#9CA3AF"
-              multiline
-              style={{ flex: 1, color: '#fff', backgroundColor: '#1F2937', borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10, maxHeight: 120, fontSize: 16 }}
-            />
-            <TouchableOpacity
-              onPress={confirmSendPendingMedia}
-              disabled={sending}
-              style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', opacity: sending ? 0.6 : 1 }}
-            >
-              {sending ? <ActivityIndicator color="#fff" /> : <Ionicons name="send" size={22} color="#fff" />}
-            </TouchableOpacity>
-          </View>
+                {/* Thumbnail strip (multi-select) */}
+                {multi && (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ maxHeight: 76, backgroundColor: '#000' }} contentContainerStyle={{ alignItems: 'center', paddingHorizontal: 10, gap: 8, paddingVertical: 8 }}>
+                    {pendingItems.map((it, i) => (
+                      <TouchableOpacity key={`${it.uri}-${i}`} activeOpacity={0.8} onPress={() => setCurrentIdx(i)}
+                        style={{ width: 56, height: 56, borderRadius: 8, overflow: 'hidden', borderWidth: 2, borderColor: i === currentIdx ? colors.primary : 'transparent' }}>
+                        <Image source={{ uri: it.uri }} style={{ width: '100%', height: '100%' }} />
+                        <TouchableOpacity onPress={() => removePendingAt(i)} hitSlop={6}
+                          style={{ position: 'absolute', top: 1, right: 1, width: 18, height: 18, borderRadius: 9, backgroundColor: '#000000aa', alignItems: 'center', justifyContent: 'center' }}>
+                          <Ionicons name="close" size={12} color="#fff" />
+                        </TouchableOpacity>
+                      </TouchableOpacity>
+                    ))}
+                    <TouchableOpacity onPress={addMorePhotos} style={{ width: 56, height: 56, borderRadius: 8, borderWidth: 1, borderColor: '#3A3A44', alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name="add" size={26} color="#fff" />
+                    </TouchableOpacity>
+                  </ScrollView>
+                )}
+
+                <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, padding: 10, paddingBottom: Platform.OS === 'ios' ? 28 : 14, backgroundColor: '#000' }}>
+                  {/* Per-item view-once toggle (WhatsApp "1-in-a-circle") */}
+                  <TouchableOpacity
+                    onPress={() => updateCurrentItem({ viewOnce: !cur.viewOnce })}
+                    style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: cur.viewOnce ? colors.primary : '#1F2937', alignItems: 'center', justifyContent: 'center' }}
+                    hitSlop={6}
+                  >
+                    <View style={{ width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: '#fff', alignItems: 'center', justifyContent: 'center' }}>
+                      <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>1</Text>
+                    </View>
+                  </TouchableOpacity>
+                  <TextInput
+                    value={cur.caption}
+                    onChangeText={(t) => updateCurrentItem({ caption: t })}
+                    placeholder={multi ? 'Add a caption…' : 'Add a caption…'}
+                    placeholderTextColor="#9CA3AF"
+                    multiline
+                    style={{ flex: 1, color: '#fff', backgroundColor: '#1F2937', borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10, maxHeight: 120, fontSize: 16 }}
+                  />
+                  <TouchableOpacity
+                    onPress={confirmSendPendingMedia}
+                    disabled={sending}
+                    style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', opacity: sending ? 0.6 : 1 }}
+                  >
+                    {sending ? <ActivityIndicator color="#fff" /> : <Ionicons name="send" size={22} color="#fff" />}
+                    {multi && !sending && (
+                      <View style={{ position: 'absolute', top: -4, right: -4, minWidth: 20, height: 20, borderRadius: 10, backgroundColor: colors.danger, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, borderWidth: 2, borderColor: '#000' }}>
+                        <Text style={{ color: '#fff', fontSize: 11, fontWeight: '800' }}>{pendingItems.length}</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </>
+            );
+          })()}
         </KeyboardAvoidingView>
       </Modal>
 
@@ -2121,6 +2513,24 @@ export default function ChatScreen() {
         <Pressable style={S.modalBackdrop} onPress={() => setForwardMsg(null)}>
           <Pressable style={S.forwardSheet} onPress={(e) => e.stopPropagation()}>
             <Text style={S.forwardTitle}>Forward to…</Text>
+            {/* Preview of the message being forwarded (which msg) */}
+            {forwardMsg && (
+              <View style={S.forwardPreview}>
+                <View style={S.replyPreviewLine} />
+                <View style={{ flex: 1 }}>
+                  <Text style={S.forwardPreviewWho} numberOfLines={1}>
+                    {forwardMsg.senderId === meId ? 'You' : (membersById.get(forwardMsg.senderId)?.name || membersById.get(forwardMsg.senderId)?.email || 'Message')}
+                  </Text>
+                  <Text style={S.forwardPreviewBody} numberOfLines={2}>
+                    {forwardMsg.type === 'image' ? '📷 Photo'
+                      : forwardMsg.type === 'video' ? '🎥 Video'
+                      : forwardMsg.type === 'audio' ? '🎙️ Voice message'
+                      : forwardMsg.type === 'file'  ? '📎 File'
+                      : (forwardMsg.content && !looksEncrypted(forwardMsg.content) ? forwardMsg.content : `[${forwardMsg.type}]`)}
+                  </Text>
+                </View>
+              </View>
+            )}
             {forwardLoading ? (
               <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
             ) : forwardChats.length === 0 ? (
@@ -2513,7 +2923,7 @@ function PollBubble({
 // (Sharing.shareAsync). The /uploads route is auth-gated so we pass
 // the Bearer header on the download request.
 function FileBubble({
-  attachmentId, filename, mime, size, authHeader, resolvedUri, isMine,
+  attachmentId, filename, mime, size, authHeader, resolvedUri, isMine, thumb,
 }: {
   attachmentId: string;
   filename:     string;
@@ -2522,6 +2932,7 @@ function FileBubble({
   authHeader:   string | null;
   resolvedUri?: { uri: string; headers?: Record<string, string> } | null;
   isMine:       boolean;
+  thumb?:       string;   // PDF first-page preview (base64 jpeg)
 }) {
   const S = useS();
   const [busy, setBusy] = useState(false);
@@ -2534,17 +2945,30 @@ function FileBubble({
       // server's post-delivery purge. Encrypted files arrive decrypted via
       // resolvedUri; everything else resolves through the persistent media store.
       const localUri = resolvedUri?.uri ?? await getMedia(attachmentId, { kind: 'file', isMine, mime, filename });
-      // Copy to a nicely-named temp so the share sheet shows the real filename.
-      const safe = (filename || `file-${attachmentId}`).replace(/[/\\:*?"<>|]/g, '_');
-      const dest = `${(FileSystem as any).cacheDirectory}${safe}`;
-      await (FileSystem as any).copyAsync({ from: localUri, to: dest }).catch(() => {});
-      const info = await (FileSystem as any).getInfoAsync(dest);
-      const outUri = info?.exists ? dest : localUri;
+      // Copy into the app cache via RNFS (it can read /Android/media; expo-file-
+      // system can't) so the OS FileProvider can hand the file to another app.
+      const openUri = await copyToCache(localUri, filename || `file-${attachmentId}`);
 
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(outUri, { mimeType: mime, dialogTitle: filename });
-      } else {
-        Alert.alert('File saved', `Saved to ${outUri}`);
+      if (Platform.OS === 'android') {
+        // WhatsApp-style: hand the file to the system "Open with" chooser so apps
+        // that can VIEW this type open it (ACTION_VIEW), instead of a share sheet.
+        try {
+          const contentUri = await FileSystem.getContentUriAsync(openUri);
+          await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+            data: contentUri,
+            flags: 1, // FLAG_GRANT_READ_URI_PERMISSION
+            type: mime || undefined,
+          });
+        } catch {
+          // No app can open this type → offer to share/save instead.
+          try {
+            if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(openUri, { mimeType: mime, dialogTitle: filename });
+            else Alert.alert('Can’t open file', 'No app on this device can open this file type.');
+          } catch { Alert.alert('Can’t open file', 'No app on this device can open this file type.'); }
+        }
+      } else if (await Sharing.isAvailableAsync()) {
+        // iOS has no ACTION_VIEW; its share/open-in sheet is the equivalent.
+        await Sharing.shareAsync(openUri, { mimeType: mime, dialogTitle: filename });
       }
     } catch (e: any) {
       Alert.alert('Could not open file', e?.message ?? 'Try again');
@@ -2552,6 +2976,25 @@ function FileBubble({
       setBusy(false);
     }
   }, [attachmentId, filename, mime, resolvedUri, busy]);
+
+  // PDF with a page-1 preview → WhatsApp-style document card (preview on top,
+  // filename row below). Other files → the plain icon + name row.
+  if (thumb) {
+    return (
+      <TouchableOpacity style={S.fileCard} onPress={onOpen} activeOpacity={0.85} disabled={busy}>
+        <Image source={{ uri: thumbDataUri(thumb) }} style={S.filePreview} resizeMode="cover" />
+        <View style={S.fileCardRow}>
+          <View style={[S.fileIcon, isMine ? S.fileIconMine : S.fileIconTheirs]}>
+            {busy ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="document-text" size={20} color="#fff" />}
+          </View>
+          <View style={S.fileMeta}>
+            <Text style={[S.fileName, isMine && S.fileNameMine]} numberOfLines={1}>{filename}</Text>
+            <Text style={[S.fileSize, isMine && S.fileSizeMine]}>{formatBytes(size)}</Text>
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  }
 
   return (
     <TouchableOpacity style={S.fileRow} onPress={onOpen} activeOpacity={0.7} disabled={busy}>
@@ -2707,15 +3150,53 @@ function ImageAttachment({ attachmentId, resolvedUri, isMine, mime, thumb, onErr
   const { colors } = useTheme();
   const S = useS();
   const [uri, setUri] = useState<string | null>(resolvedUri?.uri ?? null);
+  const [needTap, setNeedTap] = useState(false);    // gated by auto-download policy
+  const [progress, setProgress] = useState<number | null>(null); // null=idle, 0-1=downloading
+  const download = useCallback(() => {
+    setNeedTap(false);
+    setProgress(0);
+    getMedia(attachmentId, { kind: 'image', isMine, mime, onProgress: setProgress })
+      .then(u => { setUri(u || null); setProgress(null); })
+      .catch(() => { setProgress(null); onError?.(); });
+  }, [attachmentId, isMine, mime, onError]);
   useEffect(() => {
     if (resolvedUri?.uri) { setUri(resolvedUri.uri); return; }
     let cancel = false;
-    getMedia(attachmentId, { kind: 'image', isMine, mime })
-      .then(u => { if (!cancel) setUri(u); })
-      .catch(() => { if (!cancel) onError?.(); });
+    (async () => {
+      // Already cached? render instantly (no gating). Own media is always local.
+      const local = await getMedia(attachmentId, { kind: 'image', isMine, mime, cacheOnly: true }).catch(() => '');
+      if (cancel) return;
+      if (local) { setUri(local); return; }
+      // Not cached → honor the media auto-download policy.
+      const ok = !!isMine || await shouldAutoDownloadNow();
+      if (cancel) return;
+      if (ok) download();
+      else setNeedTap(true);
+    })();
     return () => { cancel = true; };
   }, [attachmentId, resolvedUri?.uri, isMine, mime]);
   if (!uri) {
+    // Downloading → blurred thumb + determinate progress ring.
+    if (progress != null) {
+      return (
+        <View style={S.attachedImage}>
+          {thumb ? <Image source={{ uri: thumbDataUri(thumb) }} style={S.attachedImage} resizeMode="cover" blurRadius={2} /> : <View style={[S.attachedImage, S.imageError]} />}
+          <View style={S.dlOverlay}><ProgressRing progress={progress} /></View>
+        </View>
+      );
+    }
+    // Auto-download skipped by policy → tap-to-download over the blurred thumb.
+    if (needTap) {
+      return (
+        <TouchableOpacity activeOpacity={0.85} onPress={download} style={S.attachedImage}>
+          {thumb ? <Image source={{ uri: thumbDataUri(thumb) }} style={S.attachedImage} resizeMode="cover" blurRadius={3} /> : <View style={[S.attachedImage, S.imageError]} />}
+          <View style={S.dlOverlay}>
+            <Ionicons name="arrow-down-circle" size={40} color="#fff" />
+            <Text style={S.dlOverlayTxt}>Download</Text>
+          </View>
+        </TouchableOpacity>
+      );
+    }
     // Instant low-res preview from the embedded thumbnail while the full image
     // downloads (WhatsApp-style progressive load).
     if (thumb) return <Image source={{ uri: thumbDataUri(thumb) }} style={S.attachedImage} resizeMode="cover" />;
@@ -2890,7 +3371,7 @@ function SwipeToReply({ onReply, children }: { onReply: () => void; children: Re
 }
 
 function MessageBubble({
-  msg, meId, member, chatId, otherMembers, onLongPress,
+  msg, meId, member, chatId, otherMembers, onLongPress, onJumpTo,
   reactionsForMsg, onToggleReaction,
   replyTarget, replyTargetMember,
   highlight, tiltRevealed, grouped, bubbleColors,
@@ -2902,6 +3383,7 @@ function MessageBubble({
   chatId: string;
   otherMembers: ChatMember[];
   onLongPress: (msg: DisplayMessage, plain: string) => void;
+  onJumpTo?: (targetId: number) => void;
   grouped?: boolean; // true when grouped with the previous (older) same-sender msg
   bubbleColors?: { mine: string; peer: string } | null;
   reactionsForMsg?: ReactionSummary[];
@@ -2925,7 +3407,9 @@ function MessageBubble({
   // for legibility on the chosen background.
   const bubbleBg = bubbleColors && isMine ? bubbleColors.mine : null;
   const bubbleTxtColor = bubbleBg ? idealText(bubbleBg) : null;
-  const [plain, setPlain] = useState<string>('');
+  // Init from content directly when it's already plaintext (the common case
+  // after decrypt-at-ingest) → no decryption flash on first render.
+  const [plain, setPlain] = useState<string>(() => looksEncrypted(msg.content) ? '' : (msg.content ?? ''));
   const [replyPlain, setReplyPlain] = useState<string>('');
   const [authHeader, setAuthHeader] = useState<string | null>(null);
 
@@ -2946,11 +3430,12 @@ function MessageBubble({
   }
 
   useEffect(() => {
+    // Messages are decrypted once at ingest, so content is usually already
+    // plaintext → render directly, no async work. Only a still-encrypted
+    // envelope (rare: failed/out-of-order ingest) decrypts here as a fallback.
+    if (!looksEncrypted(msg.content)) { setPlain(msg.content ?? ''); return; }
     let cancel = false;
     (async () => {
-      // decryptFromChat handles the transient out-of-order retry internally and
-      // tombstones permanent failures, so we decrypt once here (no per-bubble
-      // retry loop — that was hammering the backlog of undecryptable history).
       const text = await decryptFromChat(chatId, msg.senderId, msg.content, msg.id);
       if (!cancel) setPlain(text);
     })();
@@ -3086,7 +3571,7 @@ function MessageBubble({
           bubbleBg ? { backgroundColor: bubbleBg } : null,
           // Soften the tail corner on grouped (consecutive) messages.
           grouped && (isMine ? { borderTopRightRadius: 16 } : { borderTopLeftRadius: 16 }),
-          isImage   && S.imageBubble,
+          (isImage || isVideo || isGif) && S.mediaBubble,
           isSticker && S.stickerBubble,
           msg._state === 'pending' && S.bubblePending,
           msg._state === 'failed'  && S.bubbleFailed,
@@ -3111,9 +3596,15 @@ function MessageBubble({
           <Text style={S.forwardedTag}>↪ Forwarded</Text>
         )}
 
-        {/* Inline reply preview (above the body) */}
-        {replyTarget && (
-          <View style={S.replyPreview}>
+        {/* Inline reply preview (above the body) — tap to jump to the original.
+            Suppressed on forwarded messages: a forward carries no reply context
+            (it shows "↪ Forwarded"), so we must never render a reply quote. */}
+        {replyTarget && !msg.meta?.forwardedFrom && (
+          <TouchableOpacity
+            style={S.replyPreview}
+            activeOpacity={0.6}
+            onPress={() => { if (replyTarget.id > 0) onJumpTo?.(replyTarget.id); }}
+          >
             <View style={S.replyPreviewLine} />
             <View style={{ flex: 1 }}>
               <Text style={S.replyPreviewWho} numberOfLines={1}>
@@ -3127,7 +3618,7 @@ function MessageBubble({
                   : replyPlain || ''}
               </Text>
             </View>
-          </View>
+          </TouchableOpacity>
         )}
 
         {/* View-once tombstone — replaces media after it's been viewed */}
@@ -3194,6 +3685,7 @@ function MessageBubble({
             authHeader={authHeader}
             resolvedUri={isEncMedia ? mediaSrc : undefined}
             isMine={isMine}
+            thumb={typeof msg.meta?.thumb === 'string' ? msg.meta.thumb : undefined}
           />
         ) : isSticker ? (
           <Text style={S.stickerEmoji}>{msg.content}</Text>
@@ -3261,14 +3753,16 @@ function MessageBubble({
             if (msg.meta?.encrypted) { try { cap = JSON.parse(plain)?.t || ''; } catch { cap = ''; } }
             else cap = plain;
           }
+          // Media bubble is transparent (no fill) — caption sits over the chat
+          // background, so use the normal readable text color, not the on-orange white.
           return cap ? (
-            <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, { marginTop: 6 }, bubbleTxtColor ? { color: bubbleTxtColor } : null]}>
+            <Text style={[S.bubbleTxt, { marginTop: 6, color: colors.text, paddingHorizontal: 4 }]}>
               {renderRichText(cap, highlight)}
             </Text>
           ) : null;
         })()}
 
-        <Text style={[S.bubbleMeta, !isMine && { color: colors.bubbleMetaIn }]}>
+        <Text style={[S.bubbleMeta, (!isMine || isImage || isVideo || isGif) && { color: colors.bubbleMetaIn }, (isImage || isVideo || isGif) && { paddingHorizontal: 4 }]}>
           {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           {msg.editedAt ? ' · edited' : ''}
           {msg._state === 'pending' ? ' · sending…' : ''}
@@ -3326,6 +3820,32 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   headerIconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   headerIcon:    { fontSize: 20 },
   headerAvatarWrap:  { width: 36, height: 36 },
+  // Scroll-to-bottom FAB
+  scrollDownBtn:     { position: 'absolute', right: 14, bottom: 92, width: 44, height: 44, borderRadius: 22, backgroundColor: c.surfaceSolid, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, alignItems: 'center', justifyContent: 'center', ...ELEVATION.md, shadowColor: '#000' },
+  scrollDownBadge:   { position: 'absolute', top: -5, right: -5, minWidth: 20, height: 20, borderRadius: 10, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5, borderWidth: 2, borderColor: c.bg },
+  scrollDownBadgeTxt:{ color: '#fff', fontSize: 11, fontWeight: '800' },
+  // Message Info sheet
+  infoBackdrop:      { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  infoSheet:         { backgroundColor: c.surfaceSolid, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 18, paddingTop: 8, paddingBottom: 28 },
+  sheetGrip:         { alignSelf: 'center', width: 38, height: 4, borderRadius: 2, backgroundColor: c.border, marginBottom: 10 },
+  infoTitle:         { color: c.text, fontSize: 17, fontWeight: '800', marginBottom: 4 },
+  infoSecHdr:        { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
+  infoSecTitle:      { color: c.textDim, fontSize: 12, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase' },
+  infoRow:           { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 7 },
+  infoName:          { color: c.text, fontSize: 15, fontWeight: '600', flex: 1 },
+  infoEmpty:         { color: c.textDim, fontSize: 13, paddingVertical: 16, textAlign: 'center' },
+  // Profile-photo popup (avatar tap)
+  photoBackdrop:     { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', alignItems: 'center', justifyContent: 'center', padding: 28 },
+  photoCard:         { width: '100%', maxWidth: 360, borderRadius: 16, overflow: 'hidden', backgroundColor: c.surfaceSolid },
+  photoImgWrap:      { width: '100%', aspectRatio: 1, backgroundColor: c.primary },
+  photoImg:          { width: '100%', height: '100%' },
+  photoInitialsWrap: { alignItems: 'center', justifyContent: 'center', backgroundColor: c.primary },
+  photoInitials:     { color: '#fff', fontSize: 84, fontWeight: '800' },
+  photoNameBar:      { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: 'rgba(0,0,0,0.45)' },
+  photoNameTxt:      { color: '#fff', fontSize: 19, fontWeight: '700' },
+  photoActions:      { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 12, backgroundColor: c.surfaceSolid },
+  photoActionBtn:    { alignItems: 'center', gap: 4, paddingHorizontal: 6 },
+  photoActionTxt:    { color: c.primary, fontSize: 12, fontWeight: '600' },
   headerAvatar:      { width: 36, height: 36, borderRadius: 18, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   headerAvatarImg:   { width: '100%', height: '100%' },
   headerAvatarTxt:   { color: '#fff', fontWeight: '700', fontSize: 15 },
@@ -3358,14 +3878,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   mentionName:   { color: c.text, fontSize: 14, fontWeight: '600', flex: 1 },
 
   pinnedBar:     { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: c.surfaceSolid, borderBottomWidth: 1, borderBottomColor: c.border },
-  pinnedBarTitle:{ color: '#10B981', fontSize: 11, fontWeight: '700' },
+  pinnedBarTitle:{ color: c.primary, fontSize: 11, fontWeight: '700' },
   pinnedBarSub:  { color: c.textDim, fontSize: 12.5, marginTop: 1 },
 
   dateChipRow:   { alignItems: 'center', marginVertical: 10 },
   dateChip:      { backgroundColor: c.surface, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 4 },
   dateChipTxt:   { color: c.textDim, fontSize: 11.5, fontWeight: '700' },
   unreadDivRow:  { alignItems: 'center', marginVertical: 8 },
-  unreadDivTxt:  { color: c.primary, fontSize: 11.5, fontWeight: '800', letterSpacing: 0.3, backgroundColor: 'rgba(16,185,129,0.14)', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 4, overflow: 'hidden' },
+  unreadDivTxt:  { color: c.primary, fontSize: 11.5, fontWeight: '800', letterSpacing: 0.3, backgroundColor: brandAlpha(0.14), borderRadius: 999, paddingHorizontal: 14, paddingVertical: 4, overflow: 'hidden' },
 
   // Emoji insertion panel above the composer
   emojiPanel:    { height: 240, backgroundColor: c.surfaceSolid, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border },
@@ -3413,9 +3933,23 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   composer:      { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 8, paddingVertical: 7, gap: 7, backgroundColor: c.bg },
   inputPill:     { flex: 1, flexDirection: 'row', alignItems: 'flex-end', backgroundColor: c.surface, borderRadius: 24, minHeight: 48, paddingLeft: 16, paddingRight: 6, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
   pillIconBtn:   { width: 38, height: 46, alignItems: 'center', justifyContent: 'center' },
+  camWrap:       { width: 38, height: 46, alignItems: 'center', justifyContent: 'center', position: 'relative' },
+  camRing:       { position: 'absolute', width: 40, height: 40, borderRadius: 20, borderWidth: 2, borderColor: c.primary, backgroundColor: 'rgba(0,0,0,0)' },
+  camDragHint:   { position: 'absolute', bottom: 50, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: c.primary, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14, ...ELEVATION.sm, shadowColor: c.primary },
+  camDragHintTxt:{ color: '#fff', fontSize: 12, fontWeight: '800' },
+  camHintChevron:{ position: 'absolute', bottom: 42, alignSelf: 'center' },
   sendFab:       { width: 48, height: 48, borderRadius: 24, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', elevation: 3, shadowColor: '#000', shadowOpacity: 0.25, shadowOffset: { width: 0, height: 2 }, shadowRadius: 4 },
   attachBtn:     { width: 40, height: 40, borderRadius: 20, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' },
   attachTxt:     { fontSize: 18 },
+
+  // Attach menu — WhatsApp-style grid
+  attachBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  attachSheet:    { backgroundColor: c.surfaceSolid, borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingTop: 10, paddingBottom: 32, paddingHorizontal: 8 },
+  attachHandle:   { width: 40, height: 4, borderRadius: 2, backgroundColor: c.border, alignSelf: 'center', marginBottom: 14 },
+  attachGrid:     { flexDirection: 'row', flexWrap: 'wrap' },
+  attachCell:     { width: '25%', alignItems: 'center', paddingVertical: 12, gap: 8 },
+  attachIcon:     { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
+  attachLabel:    { color: c.text, fontSize: 12, textAlign: 'center' },
 
   // Recording-mode composer: pulse dot + timer + hint + cancel/send buttons
   recordingComposer: { alignItems: 'center', gap: 8 },
@@ -3456,6 +3990,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   sendTxt:       { color: '#fff', fontWeight: '700' },
 
   imageBubble:   { padding: 4, borderRadius: 12 },
+  // Media (image/video/gif) bubbles: no fill, just a thin frame so the media
+  // sits nearly edge-to-edge (the orange fill looked awkward around photos).
+  mediaBubble:   { backgroundColor: 'transparent', padding: 3, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
   // Sticker: WhatsApp-style — transparent backdrop, no padding, just a
   // big emoji glyph. The bubble component still wraps it so long-press
   // (forward/reply/delete) works the same as any other message.
@@ -3481,6 +4018,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   pollFooter:             { color: c.textDim, fontSize: 11, marginTop: 6 },
   pollFooterMine:         { color: c.bubbleMetaOut },
   attachedImage: { width: 220, height: 220, borderRadius: 8, backgroundColor: '#0F1217' },
+  dlOverlay:     { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.25)' },
+  dlOverlayTxt:  { color: '#fff', fontSize: 12, fontWeight: '700' },
   imageError:    { width: 180, padding: 16, alignItems: 'center', gap: 4 },
   imageErrorTxt: { color: c.textDim, fontSize: 12 },
 
@@ -3508,6 +4047,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   // Day 9 — file bubble (documents)
   fileRow:        { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 220, maxWidth: 280 },
+  fileCard:       { width: 240, borderRadius: 8, overflow: 'hidden' },
+  filePreview:    { width: 240, height: 170, backgroundColor: 'rgba(0,0,0,0.06)' },
+  fileCardRow:    { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 8 },
   fileIcon:       { width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   fileIconMine:   { backgroundColor: c.primary },
   fileIconTheirs: { backgroundColor: c.primary },
@@ -3552,6 +4094,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   // Day 8 — forward chat picker
   forwardSheet:        { width: '100%', maxHeight: '70%', backgroundColor: '#0F1217', borderRadius: 16, padding: 16, gap: 8 },
   forwardTitle:        { color: c.text, fontSize: 16, fontWeight: '700', marginBottom: 8 },
+  forwardPreview:      { flexDirection: 'row', gap: 8, backgroundColor: c.card, borderRadius: 10, padding: 10, marginBottom: 8 },
+  forwardPreviewWho:   { color: c.primary, fontSize: 13, fontWeight: '700' },
+  forwardPreviewBody:  { color: c.textDim, fontSize: 13, marginTop: 2 },
   forwardEmpty:        { color: c.textDim, textAlign: 'center', marginTop: 24 },
   forwardRow:          { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   forwardRowTxt:       { color: c.text, fontSize: 15, flex: 1 },

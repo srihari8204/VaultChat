@@ -1,9 +1,11 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useState , useMemo} from 'react';
+import { useState, useMemo } from 'react';
 import {
   Alert,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TouchableOpacity,
   View
@@ -24,176 +26,142 @@ export default function ContactScreen() {
   const [isMuted, setIsMuted] = useState(false);
   const [isBlocked, setIsBlocked] = useState(false);
 
-  const trustScore = 87;
-  const trustColor = trustScore >= 80 ? colors.primary : trustScore >= 60 ? '#F59E0B' : colors.danger;
+  const contactName = (name as string) || 'Contact';
+
+  const actions: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void }[] = [
+    { icon: 'chatbubble', label: 'Message', onPress: () => router.push({ pathname: '/chat' as any, params: { name, avatar } }) },
+    { icon: 'call', label: 'Audio', onPress: () => router.push({ pathname: '/voicecall' as any, params: { name, avatar } }) },
+    { icon: 'videocam', label: 'Video', onPress: () => router.push({ pathname: '/videocall' as any, params: { name, avatar } }) },
+  ];
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
 
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Text style={styles.backText}>←</Text>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={8}>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Contact Info</Text>
-        <TouchableOpacity style={styles.editBtn}>
-          <Text style={styles.editText}>Edit</Text>
+        <Text style={styles.headerTitle}>Contact info</Text>
+        <TouchableOpacity style={styles.editBtn} hitSlop={8}>
+          <Ionicons name="create-outline" size={22} color={colors.text} />
         </TouchableOpacity>
       </View>
 
-      {/* Profile Card */}
+      {/* Profile */}
       <View style={styles.profileCard}>
-        {/* Big Avatar */}
         <View style={styles.bigAvatar}>
-          <Text style={styles.bigAvatarEmoji}>{avatar || '👤'}</Text>
-          <View style={styles.onlineBadge}>
-            <Text style={styles.onlineBadgeText}>● Online</Text>
-          </View>
+          <Text style={styles.bigAvatarEmoji}>{(avatar as string) || '👤'}</Text>
         </View>
-
-        <Text style={styles.contactName}>{name || 'Contact'}</Text>
+        <Text style={styles.contactName}>{contactName}</Text>
         <Text style={styles.contactPhone}>+91 98765 43210</Text>
-        <Text style={styles.contactStatus}>
-          &quot;Privacy is not a luxury — it&apos;s a right 🛡️&quot;
-        </Text>
 
         {/* Action Buttons Row */}
         <View style={styles.actionRow}>
-          {[
-            { icon: '💬', label: 'Message' },
-            { icon: '📞', label: 'Voice' },
-            { icon: '🎥', label: 'Video' },
-            { icon: '🔍', label: 'Search' },
-          ].map((btn, i) => (
-            <TouchableOpacity
-              key={i}
-              style={styles.actionBtn}
-              onPress={() => {
-                if (btn.label === 'Voice') router.push({ pathname: '/voicecall' as any, params: { name, avatar } });
-                if (btn.label === 'Video') router.push({ pathname: '/videocall' as any, params: { name, avatar } });
-                if (btn.label === 'Message') router.push({ pathname: '/chat' as any, params: { name, avatar } });
-              }}
-            >
-              <Text style={styles.actionIcon}>{btn.icon}</Text>
+          {actions.map((btn) => (
+            <TouchableOpacity key={btn.label} style={styles.actionBtn} onPress={btn.onPress} activeOpacity={0.8}>
+              <Ionicons name={btn.icon} size={22} color={colors.primary} />
               <Text style={styles.actionLabel}>{btn.label}</Text>
             </TouchableOpacity>
           ))}
         </View>
       </View>
 
-      {/* TrustScore */}
-      <View style={styles.section}>
-        <View style={styles.trustCard}>
-          <View style={styles.trustLeft}>
-            <Text style={styles.trustTitle}>🌡️ TrustScore</Text>
-            <Text style={styles.trustDesc}>
-              Based on account age, verification, and mutual contacts
-            </Text>
-          </View>
-          <View style={styles.trustScoreCircle}>
-            <Text style={[styles.trustScoreNum, { color: trustColor }]}>{trustScore}</Text>
-            <Text style={styles.trustScoreMax}>/100</Text>
-          </View>
-        </View>
-
-        {/* Score breakdown */}
-        {[
-          { label: 'VaultID Verified', score: 30, max: 30, color: colors.primary },
-          { label: 'Account Age', score: 18, max: 20, color: colors.accent },
-          { label: 'Mutual Contacts', score: 20, max: 20, color: colors.purple },
-          { label: 'No Incidents', score: 19, max: 30, color: '#F59E0B' },
-        ].map((item, i) => (
-          <View key={i} style={styles.scoreRow}>
-            <Text style={styles.scoreLabel}>{item.label}</Text>
-            <View style={styles.scoreBar}>
-              <View style={[styles.scoreBarFill, {
-                width: `${(item.score / item.max) * 100}%`,
-                backgroundColor: item.color
-              }]} />
-            </View>
-            <Text style={[styles.scoreNum, { color: item.color }]}>
-              {item.score}/{item.max}
-            </Text>
-          </View>
-        ))}
+      {/* About / status */}
+      <View style={styles.block}>
+        <Text style={styles.aboutText}>Privacy is not a luxury — it&apos;s a right</Text>
       </View>
 
-      {/* VaultID Info */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>⛓️ VaultID</Text>
-        <View style={styles.vaultIdCard}>
-          <Text style={styles.vaultIdLabel}>Blockchain Identity</Text>
-          <Text style={styles.vaultIdValue}>vault:0x8f3a...2d9c</Text>
-          <View style={styles.verifiedBadge}>
-            <Text style={styles.verifiedText}>✅ VERIFIED ON BLOCKCHAIN</Text>
+      {/* Media */}
+      <View style={styles.block}>
+        <TouchableOpacity style={styles.rowBetween}>
+          <Text style={styles.rowLabel}>Media, links and docs</Text>
+          <View style={styles.rowRight}>
+            <Text style={styles.rowCount}>6</Text>
+            <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
           </View>
-        </View>
-      </View>
-
-      {/* Media Section */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>📸 Shared Media</Text>
+        </TouchableOpacity>
         <View style={styles.mediaGrid}>
-          {['🖼️','📄','🎵','🎥','🖼️','📄'].map((icon, i) => (
+          {['🖼️', '📄', '🎵', '🎥', '🖼️', '📄'].map((icon, i) => (
             <View key={i} style={styles.mediaItem}>
               <Text style={styles.mediaIcon}>{icon}</Text>
             </View>
           ))}
         </View>
-        <TouchableOpacity style={styles.viewAllBtn}>
-          <Text style={styles.viewAllText}>View All Media →</Text>
+      </View>
+
+      {/* Privacy & settings */}
+      <View style={styles.block}>
+        <View style={styles.settingRow}>
+          <Ionicons name="notifications-off-outline" size={22} color={colors.text} />
+          <Text style={styles.settingLabel}>Mute notifications</Text>
+          <Switch
+            value={isMuted}
+            onValueChange={setIsMuted}
+            trackColor={{ true: colors.primary, false: colors.border }}
+            thumbColor="#fff"
+          />
+        </View>
+
+        <TouchableOpacity
+          style={styles.settingRow}
+          onPress={() => Alert.alert('Disappearing messages', 'New messages will disappear from this chat after the selected duration.')}
+        >
+          <Ionicons name="timer-outline" size={22} color={colors.text} />
+          <Text style={styles.settingLabel}>Disappearing messages</Text>
+          <Text style={styles.settingValue}>Off</Text>
+          <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.settingRow}
+          onPress={() => router.push({ pathname: '/chat-export' as any, params: { peerName: contactName } })}
+        >
+          <Ionicons name="share-outline" size={22} color={colors.text} />
+          <Text style={styles.settingLabel}>Export chat</Text>
+          <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
         </TouchableOpacity>
       </View>
 
-      {/* Security Settings */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>🔒 Privacy & Security</Text>
-
-        {[
-          {
-            icon: '⏱️', label: 'HideTimer',
-            value: '30 minutes', color: colors.accent,
-            onPress: () => Alert.alert('HideTimer', 'Chat blurs after 30 min of inactivity')
-          },
-          {
-            icon: '🔕', label: 'Mute Notifications',
-            value: isMuted ? 'Muted' : 'On', color: isMuted ? colors.danger : colors.primary,
-            onPress: () => setIsMuted(!isMuted)
-          },
-          {
-            icon: '🚫', label: 'Block Contact',
-            value: isBlocked ? 'Blocked' : 'Not blocked', color: isBlocked ? colors.danger : '#475569',
-            onPress: () => {
-              Alert.alert(
-                isBlocked ? 'Unblock?' : 'Block Contact?',
-                isBlocked ? `Unblock ${name}?` : `Block ${name}? They won't be able to message you.`,
-                [
-                  { text: 'Cancel', style: 'cancel' },
-                  { text: isBlocked ? 'Unblock' : 'Block', onPress: () => setIsBlocked(!isBlocked) }
-                ]
-              );
-            }
-          },
-        ].map((item, i) => (
-          <TouchableOpacity key={i} style={styles.settingRow} onPress={item.onPress}>
-            <Text style={styles.settingIcon}>{item.icon}</Text>
-            <Text style={styles.settingLabel}>{item.label}</Text>
-            <Text style={[styles.settingValue, { color: item.color }]}>{item.value}</Text>
-            <Text style={styles.settingArrow}>›</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      {/* Danger Zone */}
-      <View style={[styles.section, { marginBottom: 40 }]}>
+      {/* Block / report / delete */}
+      <View style={[styles.block, { marginBottom: 40 }]}>
         <TouchableOpacity
-          style={styles.dangerBtn}
-          onPress={() => Alert.alert('Delete Chat?', 'This will delete all messages. Cannot be undone.', [
+          style={styles.dangerRow}
+          onPress={() => {
+            Alert.alert(
+              isBlocked ? 'Unblock?' : 'Block Contact?',
+              isBlocked ? `Unblock ${contactName}?` : `Block ${contactName}? They won't be able to message or call you.`,
+              [
+                { text: 'Cancel', style: 'cancel' },
+                { text: isBlocked ? 'Unblock' : 'Block', style: isBlocked ? 'default' : 'destructive', onPress: () => setIsBlocked(!isBlocked) }
+              ]
+            );
+          }}
+        >
+          <Ionicons name="ban-outline" size={22} color={colors.danger} />
+          <Text style={styles.dangerLabel}>{isBlocked ? `Unblock ${contactName}` : `Block ${contactName}`}</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.dangerRow}
+          onPress={() => Alert.alert('Report contact?', `The last 5 messages from ${contactName} will be forwarded to VaultChat.`, [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Report', style: 'destructive' }
+          ])}
+        >
+          <Ionicons name="thumbs-down-outline" size={22} color={colors.danger} />
+          <Text style={styles.dangerLabel}>Report {contactName}</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.dangerRow}
+          onPress={() => Alert.alert('Delete chat?', 'This will delete all messages. This cannot be undone.', [
             { text: 'Cancel', style: 'cancel' },
             { text: 'Delete', style: 'destructive', onPress: () => router.back() }
           ])}
         >
-          <Text style={styles.dangerText}>🗑️ Delete Chat</Text>
+          <Ionicons name="trash-outline" size={22} color={colors.danger} />
+          <Text style={styles.dangerLabel}>Delete chat</Text>
         </TouchableOpacity>
       </View>
 
@@ -202,7 +170,7 @@ export default function ContactScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#ffffff' },
+  container: { flex: 1, backgroundColor: c.bg },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -210,50 +178,30 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     paddingTop: 55,
     paddingBottom: 12,
     paddingHorizontal: 16,
-    borderBottomWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: c.border,
   },
   backBtn: { padding: 4 },
-  backText: { color: c.accent, fontSize: 24, fontWeight: 'bold' },
-  headerTitle: { color: '#000000', fontSize: 17, fontWeight: 'bold' },
+  headerTitle: { color: c.text, fontSize: 17, fontWeight: '700' },
   editBtn: { padding: 4 },
-  editText: { color: c.accent, fontSize: 15 },
   profileCard: {
     alignItems: 'center',
-    paddingVertical: 32,
+    paddingVertical: 28,
     paddingHorizontal: 24,
-    borderBottomWidth: 1,
-    borderBottomColor: c.border,
+    backgroundColor: c.card,
   },
   bigAvatar: {
     width: 100,
     height: 100,
     borderRadius: 50,
-    backgroundColor: '#ffffff',
+    backgroundColor: c.surface,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 3,
-    borderColor: c.accent,
     marginBottom: 8,
   },
   bigAvatarEmoji: { fontSize: 56 },
-  onlineBadge: {
-    position: 'absolute',
-    bottom: 4,
-    backgroundColor: '#052e16',
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  onlineBadgeText: { color: c.primary, fontSize: 10, fontWeight: 'bold' },
-  contactName: {
-    color: '#000000', fontSize: 24, fontWeight: 'bold', marginTop: 8
-  },
+  contactName: { color: c.text, fontSize: 24, fontWeight: '700', marginTop: 8 },
   contactPhone: { color: c.textDim, fontSize: 14, marginTop: 4 },
-  contactStatus: {
-    color: c.textDim, fontSize: 13, marginTop: 8,
-    textAlign: 'center', fontStyle: 'italic'
-  },
   actionRow: {
     flexDirection: 'row',
     marginTop: 24,
@@ -261,126 +209,59 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   },
   actionBtn: {
     alignItems: 'center',
-    backgroundColor: c.bg,
+    backgroundColor: c.surface,
     borderRadius: 16,
-    padding: 16,
-    minWidth: 68,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    paddingVertical: 14,
+    minWidth: 84,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: c.border,
+    gap: 6,
   },
-  actionIcon: { fontSize: 24, marginBottom: 6 },
-  actionLabel: { color: c.textDim, fontSize: 12 },
-  section: {
-    marginHorizontal: 16,
-    marginTop: 20,
+  actionLabel: { color: c.primary, fontSize: 13, fontWeight: '600' },
+  block: {
+    marginTop: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: c.card,
   },
-  sectionTitle: {
-    color: c.textDim, fontSize: 13,
-    fontWeight: '600', marginBottom: 12,
-    textTransform: 'uppercase', letterSpacing: 0.5,
-  },
-  trustCard: {
+  aboutText: { color: c.text, fontSize: 15, lineHeight: 21 },
+  rowBetween: {
     flexDirection: 'row',
-    backgroundColor: c.bg,
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    marginBottom: 12,
+    justifyContent: 'space-between',
     alignItems: 'center',
   },
-  trustLeft: { flex: 1 },
-  trustTitle: { color: '#000000', fontSize: 16, fontWeight: 'bold' },
-  trustDesc: { color: '#475569', fontSize: 12, marginTop: 4, lineHeight: 16 },
-  trustScoreCircle: {
-    alignItems: 'center',
-    backgroundColor: c.bg,
-    borderRadius: 40,
-    width: 70,
-    height: 70,
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: c.primary,
-  },
-  trustScoreNum: { fontSize: 24, fontWeight: 'bold' },
-  trustScoreMax: { color: '#475569', fontSize: 10 },
-  scoreRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-    gap: 8,
-  },
-  scoreLabel: { color: c.textDim, fontSize: 12, width: 120 },
-  scoreBar: {
-    flex: 1, height: 6,
-    backgroundColor: '#E5E7EB',
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  scoreBarFill: { height: '100%', borderRadius: 3 },
-  scoreNum: { fontSize: 11, width: 32, textAlign: 'right' },
-  vaultIdCard: {
-    backgroundColor: c.bg,
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  vaultIdLabel: { color: c.textDim, fontSize: 12 },
-  vaultIdValue: {
-    color: c.accent, fontSize: 14,
-    fontFamily: 'monospace', marginTop: 4,
-  },
-  verifiedBadge: {
-    backgroundColor: '#052e16',
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    alignSelf: 'flex-start',
-    marginTop: 8,
-    borderWidth: 1,
-    borderColor: '#166534',
-  },
-  verifiedText: { color: c.primary, fontSize: 10, fontWeight: 'bold' },
+  rowLabel: { color: c.text, fontSize: 15 },
+  rowRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  rowCount: { color: c.textDim, fontSize: 14 },
   mediaGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    marginBottom: 8,
+    marginTop: 12,
   },
   mediaItem: {
     width: 80, height: 80,
-    backgroundColor: c.bg,
+    backgroundColor: c.surface,
     borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: c.border,
   },
   mediaIcon: { fontSize: 32 },
-  viewAllBtn: { alignItems: 'center', paddingVertical: 8 },
-  viewAllText: { color: c.accent, fontSize: 14 },
   settingRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: c.bg,
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    paddingVertical: 14,
+    gap: 16,
   },
-  settingIcon: { fontSize: 20, marginRight: 12 },
-  settingLabel: { color: '#000000', fontSize: 15, flex: 1 },
-  settingValue: { fontSize: 13, marginRight: 8 },
-  settingArrow: { color: '#475569', fontSize: 18 },
-  dangerBtn: {
-    backgroundColor: c.bg,
-    borderRadius: 14,
-    padding: 16,
+  settingLabel: { color: c.text, fontSize: 15, flex: 1 },
+  settingValue: { color: c.textDim, fontSize: 14, marginRight: 4 },
+  dangerRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#7F1D1D',
+    paddingVertical: 14,
+    gap: 16,
   },
-  dangerText: { color: c.danger, fontSize: 15, fontWeight: '600' },
+  dangerLabel: { color: c.danger, fontSize: 15, fontWeight: '500' },
 });

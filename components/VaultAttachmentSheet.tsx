@@ -1,3 +1,4 @@
+import { BRAND_ACCENT } from '../constants/theme';
 import React, { useRef, useEffect } from 'react';
 import {
   View,
@@ -35,9 +36,9 @@ const GRID = [
   { id: 'gallery',          icon: '🖼️', label: 'Gallery',    color: '#4A9FFF', bg: '#080F1A' },
   { id: 'scanner',          icon: '🔍', label: 'Scan Doc',  color: '#00D4AA', bg: '#001A15' },
   { id: 'location-current', icon: '📍', label: 'Location',  color: '#F59E0B', bg: '#1A1000' },
-  { id: 'location-live',    icon: '📡', label: 'Live Track',color: '#FF6B35', bg: '#1A0800' },
+  { id: 'location-live',    icon: '📡', label: 'Live Track',color: BRAND_ACCENT, bg: '#1A0800' },
   { id: 'sync-contact',     icon: '🔒', label: 'Contact',   color: '#A78BFA', bg: '#0E0A1A' },
-  { id: 'audio',            icon: '🎵', label: 'Audio',     color: '#10B981', bg: '#001A0E' },
+  { id: 'audio',            icon: '🎵', label: 'Audio',     color: BRAND_ACCENT, bg: '#001A0E' },
   { id: 'vaultdrop',        icon: '📦', label: 'VaultDrop', color: '#EC4899', bg: '#1A0010' },
   { id: 'view-once',        icon: '👁', label: 'View Once', color: '#00D4AA', bg: '#001A15' },
 ] as const;

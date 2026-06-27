@@ -1,6 +1,7 @@
 // app/mpin-entry.tsx — existing user enters their 6-digit MPIN.
 // /auth/mpin/verify issues JWTs (server enforces 5-try / 15-min lockout) → Chats.
 
+import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -42,7 +43,7 @@ export default function MpinEntry() {
   return (
     <View style={s.screen}>
       <Stack.Screen options={{ headerShown: false }} />
-      <TouchableOpacity onPress={() => router.back()} style={s.back}><Text style={s.backTxt}>←</Text></TouchableOpacity>
+      <TouchableOpacity onPress={() => router.back()} style={s.back}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
       <View style={s.body}>
         <Text style={s.lock}>🔒</Text>
         <Text style={s.title}>Enter your MPIN</Text>

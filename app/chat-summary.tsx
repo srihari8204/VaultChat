@@ -155,7 +155,8 @@ export default function ChatSummaryScreen() {
             )}
 
             <TouchableOpacity style={s.regenBtn} onPress={() => setSummary(null)}>
-              <Text style={s.regenTxt}>🔄  Summarize a different range</Text>
+              <Ionicons name="refresh" size={16} color={colors.accent} />
+              <Text style={s.regenTxt}>  Summarize a different range</Text>
             </TouchableOpacity>
           </>
         )}
@@ -194,6 +195,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   keyMsgRow: { backgroundColor: c.card, borderRadius: 10, padding: 12, marginBottom: 4, borderWidth: 1, borderColor: c.border },
   keyMsgTxt: { color: c.textDim, fontSize: 13, fontStyle: 'italic', lineHeight: 19 },
   summaryTxt: { color: c.text, fontSize: 14, lineHeight: 21 },
-  regenBtn: { marginTop: 20, backgroundColor: 'rgba(6,182,212,0.1)', borderRadius: 12, paddingVertical: 14, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(6,182,212,0.3)' },
+  regenBtn: { marginTop: 20, flexDirection: 'row', justifyContent: 'center', backgroundColor: 'rgba(6,182,212,0.1)', borderRadius: 12, paddingVertical: 14, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(6,182,212,0.3)' },
   regenTxt: { color: c.accent, fontSize: 13, fontWeight: '700' },
 });

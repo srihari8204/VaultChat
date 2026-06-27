@@ -9,6 +9,7 @@
 // like Whisper/Google Speech — that's a separate, key-gated integration. This
 // screen does real live dictation, which the on-device recognizer supports.)
 
+import { BRAND_ACCENT } from '../constants/theme';
 import React, { useState, useEffect, useRef, useCallback , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, StatusBar, Alert, TextInput, ScrollView,
@@ -118,7 +119,7 @@ export default function VoiceTranscribeScreen() {
             onPress={listening ? stop : start}
             activeOpacity={0.85}
           >
-            <Ionicons name={listening ? 'stop' : 'mic'} size={30} color="#04130D" />
+            <Ionicons name={listening ? 'stop' : 'mic'} size={30} color="#FFFFFF" />
           </TouchableOpacity>
           <Text style={s.micLabel}>{listening ? 'Listening… tap to stop' : 'Tap to speak'}</Text>
         </View>
@@ -128,7 +129,7 @@ export default function VoiceTranscribeScreen() {
             <Text style={[s.actionTxt, { color: colors.textDim }]}>Clear</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[s.actionBtn, s.sendBtn, (!text.trim() || sending) && s.dim]} onPress={send} disabled={!text.trim() || sending}>
-            <Text style={[s.actionTxt, { color: '#04130D' }]}>{sending ? 'Sending…' : 'Send to chat'}</Text>
+            <Text style={[s.actionTxt, { color: '#FFFFFF' }]}>{sending ? 'Sending…' : 'Send to chat'}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -149,7 +150,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   partial: { color: c.textDim, fontSize: 15, fontStyle: 'italic', marginTop: 6 },
   controls: { alignItems: 'center', marginBottom: 16 },
   micBtn: { width: 72, height: 72, borderRadius: 36, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
-  micActive: { backgroundColor: '#FF6B35' },
+  micActive: { backgroundColor: BRAND_ACCENT },
   micLabel: { color: c.textDim, fontSize: 12, marginTop: 8 },
   actions: { flexDirection: 'row', gap: 10 },
   actionBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center' },

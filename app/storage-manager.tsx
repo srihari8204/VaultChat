@@ -18,6 +18,10 @@ import { useTheme } from '../lib/theme';
 import { Stack, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { getAttachmentChatMap } from '../lib/localDb';
+import { listChats } from '../lib/chatService';
+
+type ChatStore = { id: string; name: string; size: number };
 
 const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
 
@@ -40,10 +44,13 @@ const EXT = {
 
 // Recursively walk a directory, accumulating bytes per bucket. Optionally delete
 // files older than `olderThan` (epoch seconds) instead of measuring.
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
 async function walk(
   dir: string,
   acc: Record<string, number>,
   olderThan?: number,
+  perChat?: { map: Record<string, string>; sizes: Record<string, number> },
 ): Promise<void> {
   let names: string[] = [];
   try { names = await FileSystem.readDirectoryAsync(dir); } catch { return; }
@@ -52,7 +59,7 @@ async function walk(
     let info: any;
     try { info = await FileSystem.getInfoAsync(uri); } catch { continue; }
     if (!info?.exists) continue;
-    if (info.isDirectory) { await walk(uri, acc, olderThan); continue; }
+    if (info.isDirectory) { await walk(uri, acc, olderThan, perChat); continue; }
     if (olderThan != null) {
       if (info.modificationTime && info.modificationTime < olderThan) {
         await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
@@ -66,6 +73,11 @@ async function walk(
     else if (EXT.aud.includes(ext)) acc.aud += size;
     else if (EXT.file.includes(ext)) acc.file += size;
     else acc.other += size;
+    // Attribute media files (named by attachment id) to their chat.
+    if (perChat) {
+      const m = name.match(UUID_RE);
+      if (m) { const cid = perChat.map[m[0]]; if (cid) perChat.sizes[cid] = (perChat.sizes[cid] || 0) + size; }
+    }
   }
 }
 
@@ -83,6 +95,7 @@ export default function StorageManagerScreen() {
   const [totalUsed, setTotalUsed] = useState(0);
   const [freeSpace, setFreeSpace] = useState(0);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [chatStores, setChatStores] = useState<ChatStore[]>([]);
 
   useEffect(() => { loadStorageData(); }, []);
 
@@ -90,8 +103,22 @@ export default function StorageManagerScreen() {
     setLoading(true);
     try {
       const acc: Record<string, number> = { img: 0, vid: 0, aud: 0, file: 0, other: 0 };
-      if (FileSystem.documentDirectory) await walk(FileSystem.documentDirectory, acc);
-      if (FileSystem.cacheDirectory) await walk(FileSystem.cacheDirectory, acc);
+      const attMap = await getAttachmentChatMap().catch(() => ({} as Record<string, string>));
+      const perChat = { map: attMap, sizes: {} as Record<string, number> };
+      if (FileSystem.documentDirectory) await walk(FileSystem.documentDirectory, acc, undefined, perChat);
+      if (FileSystem.cacheDirectory) await walk(FileSystem.cacheDirectory, acc, undefined, perChat);
+
+      // Rank chats by how much media they hold (WhatsApp "Manage storage").
+      try {
+        const chats = await listChats();
+        const nameById = new Map(chats.map(c => [c.id, c.type === 'direct' ? (c.peerName || 'Direct chat') : (c.name || 'Group')]));
+        const ranked = Object.entries(perChat.sizes)
+          .map(([id, size]) => ({ id, size, name: nameById.get(id) || 'Chat' }))
+          .filter(c => c.size > 0)
+          .sort((a, b) => b.size - a.size)
+          .slice(0, 12);
+        setChatStores(ranked);
+      } catch { setChatStores([]); }
 
       // App key/value data (AsyncStorage) counts toward "Other".
       try {
@@ -237,6 +264,26 @@ export default function StorageManagerScreen() {
             </View>
           ))}
         </LinearGradient>
+
+        {/* Per-chat (WhatsApp "Manage storage") */}
+        {chatStores.length > 0 && (
+          <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
+            <Text style={s.cardTitle}>Storage by Chat</Text>
+            {chatStores.map(c => (
+              <TouchableOpacity key={c.id} style={s.catRow} activeOpacity={0.7}
+                onPress={() => router.push({ pathname: '/chat', params: { id: c.id } } as any)}>
+                <View style={s.catInfo}>
+                  <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.primary} />
+                  <Text style={s.catLabel} numberOfLines={1}>{c.name}</Text>
+                  <Text style={s.catSize}>{formatBytes(c.size)}</Text>
+                </View>
+                <View style={s.barBg}>
+                  <View style={[s.barFill, { width: `${(c.size / chatStores[0].size) * 100}%`, backgroundColor: colors.primary }]} />
+                </View>
+              </TouchableOpacity>
+            ))}
+          </LinearGradient>
+        )}
 
         {/* Cache */}
         <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>

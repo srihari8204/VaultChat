@@ -1,14 +1,14 @@
 
 // lib/screenSharePrivacy.ts
-// Screen Share Privacy Ã¢â‚¬â€ hides VaultChat content during screen share
+// Screen Share Privacy — hides VaultChat content during screen share
 //
 // HOW IT WORKS:
-// Android uses FLAG_SECURE on the window Ã¢â‚¬â€ this makes the entire
+// Android uses FLAG_SECURE on the window — this makes the entire
 // window appear BLACK in screenshots and screen recordings.
 //
 // We SELECTIVELY apply this:
-//   Screen sharing ON  Ã¢â€ â€™ FLAG_SECURE active on chat screens
-//   Screen sharing OFF Ã¢â€ â€™ FLAG_SECURE removed, normal view
+//   Screen sharing ON  → FLAG_SECURE active on chat screens
+//   Screen sharing OFF → FLAG_SECURE removed, normal view
 //
 // The person sharing their screen with you:
 //   - Can show you their home screen
@@ -17,7 +17,7 @@
 //
 // Implementation:
 //   - Expo native module (full build)
-//   - JS fallback (Expo Go) Ã¢â‚¬â€ shows privacy overlay instead
+//   - JS fallback (Expo Go) — shows privacy overlay instead
 
 import { NativeModules, Platform } from 'react-native';
 const getSocket = () => null; // stub
@@ -26,19 +26,19 @@ class ScreenSharePrivacy {
   private isProtected = false;
   private listeners: ((protected_: boolean) => void)[] = [];
 
-  // Enable FLAG_SECURE Ã¢â‚¬â€ makes screen appear black in recordings
+  // Enable FLAG_SECURE — makes screen appear black in recordings
   async enableProtection() {
     if (this.isProtected) return;
     this.isProtected = true;
 
     if (Platform.OS === 'android') {
       try {
-        // Native module Ã¢â‚¬â€ works in full build (npx expo run:android)
+        // Native module — works in full build (npx expo run:android)
         const { ScreenSecure } = NativeModules;
         if (ScreenSecure?.enable) {
           await ScreenSecure.enable();
         } else {
-          // Fallback Ã¢â‚¬â€ notify UI to show overlay
+          // Fallback — notify UI to show overlay
         }
       } catch (e) {
       }
@@ -47,7 +47,7 @@ class ScreenSharePrivacy {
     this.listeners.forEach(l => l(true));
   }
 
-  // Disable FLAG_SECURE Ã¢â‚¬â€ restore normal view
+  // Disable FLAG_SECURE — restore normal view
   async disableProtection() {
     if (!this.isProtected) return;
     this.isProtected = false;

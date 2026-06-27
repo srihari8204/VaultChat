@@ -1,7 +1,8 @@
 // app/(tabs)/_layout.tsx
-// 6-tab navigation: Chats | Status | Calls | Mini | Alerts | Profile.
-// U5: vector icons (Ionicons) instead of emoji + Aurora design tokens instead of
-// the old ad-hoc purple — one consistent, accessible icon language.
+// WhatsApp-style 4-tab navigation: Chats | Status | Calls | Profile.
+// Mini + Alerts stay as routes (href: null hides them from the bar) and are
+// reached from icons in the Chats header.
+// U5: vector icons (Ionicons) instead of emoji + Aurora design tokens.
 
 import { Tabs } from 'expo-router';
 import React from 'react';
@@ -57,9 +58,10 @@ export default function TabLayout() {
       <Tabs.Screen name="chats"   options={{ title: 'Chats',   tabBarIcon: ({ focused }) => <TabIcon tab="chats"   label="Chats"   focused={focused} /> }} />
       <Tabs.Screen name="status"  options={{ title: 'Status',  tabBarIcon: ({ focused }) => <TabIcon tab="status"  label="Status"  focused={focused} /> }} />
       <Tabs.Screen name="calls"   options={{ title: 'Calls',   tabBarIcon: ({ focused }) => <TabIcon tab="calls"   label="Calls"   focused={focused} /> }} />
-      <Tabs.Screen name="mini"    options={{ title: 'Mini',    tabBarIcon: ({ focused }) => <TabIcon tab="mini"    label="Mini"    focused={focused} /> }} />
-      <Tabs.Screen name="alerts"  options={{ title: 'Alerts',  tabBarIcon: ({ focused }) => <TabIcon tab="alerts"  label="Alerts"  focused={focused} /> }} />
       <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarIcon: ({ focused }) => <TabIcon tab="profile" label="Profile" focused={focused} /> }} />
+      {/* Routable but hidden from the bar — opened from the Chats header */}
+      <Tabs.Screen name="mini"    options={{ href: null }} />
+      <Tabs.Screen name="alerts"  options={{ href: null }} />
     </Tabs>
   );
 }

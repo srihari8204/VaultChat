@@ -25,6 +25,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { getCurrentUserAsync } from './(constants)/authService';
@@ -60,6 +61,9 @@ export default function GroupInfoScreen() {
   const [renaming,  setRenaming]  = useState(false);
   const [nameDraft, setNameDraft] = useState('');
   const [photoBusy, setPhotoBusy] = useState(false);
+  const [memberQuery, setMemberQuery] = useState('');
+  const [editingDesc, setEditingDesc] = useState(false);
+  const [descDraft, setDescDraft] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -96,6 +100,16 @@ export default function GroupInfoScreen() {
       setRenaming(false);
     }
   }, [chat, isAdmin, nameDraft]);
+
+  const onSaveDesc = useCallback(async () => {
+    if (!chat || !isAdmin) { setEditingDesc(false); return; }
+    const d = descDraft.trim();
+    try {
+      await updateChat(chat.id, { description: d });
+      setChat(prev => prev ? { ...prev, description: d || null } : prev);
+    } catch (e: any) { Alert.alert('Could not save', e?.message ?? 'Try again'); }
+    finally { setEditingDesc(false); }
+  }, [chat, isAdmin, descDraft]);
 
   const onChangePhoto = useCallback(async () => {
     if (!chat || !isAdmin || photoBusy) return;
@@ -201,12 +215,16 @@ export default function GroupInfoScreen() {
   }
 
   const activeMembers = chat.members.filter(m => !m.leftAt);
+  const mq = memberQuery.trim().toLowerCase();
+  const shownMembers = mq
+    ? activeMembers.filter(m => (m.name || m.email || m.userId).toLowerCase().includes(mq))
+    : activeMembers;
 
   return (
     <ScrollView style={S.screen} contentContainerStyle={{ paddingBottom: 64 }}>
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
-          <Text style={S.backTxt}>←</Text>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.titleBar}>Group info</Text>
       </View>
@@ -225,7 +243,7 @@ export default function GroupInfoScreen() {
             {photoBusy && (
               <View style={S.heroBusy}><ActivityIndicator color="#fff" /></View>
             )}
-            {isAdmin && <View style={S.heroEditPill}><Text>📷</Text></View>}
+            {isAdmin && <View style={S.heroEditPill}><Ionicons name="camera" size={15} color="#fff" /></View>}
           </View>
         </TouchableOpacity>
 
@@ -253,11 +271,58 @@ export default function GroupInfoScreen() {
         <Text style={S.subInfo}>{activeMembers.length} members</Text>
       </View>
 
+      {/* Group description (WhatsApp) */}
+      <View style={S.section}>
+        {editingDesc ? (
+          <View style={S.descEditRow}>
+            <TextInput
+              style={S.descInput}
+              value={descDraft}
+              onChangeText={setDescDraft}
+              placeholder="Add a group description"
+              placeholderTextColor={colors.textDim}
+              multiline
+              maxLength={512}
+              autoFocus
+            />
+            <TouchableOpacity onPress={onSaveDesc} style={S.saveBtn}><Text style={S.saveBtnTxt}>Save</Text></TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity
+            disabled={!isAdmin}
+            activeOpacity={isAdmin ? 0.7 : 1}
+            onPress={() => { setDescDraft(chat.description ?? ''); setEditingDesc(true); }}
+          >
+            <Text style={S.label}>DESCRIPTION</Text>
+            <Text style={chat.description ? S.descText : S.descPlaceholder}>
+              {chat.description || (isAdmin ? 'Add a group description' : 'No description')}
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
       {isAdmin && (
         <TouchableOpacity style={S.addBtn} onPress={onAddMember} activeOpacity={0.85}>
-          <Text style={S.addBtnTxt}>＋ Add member</Text>
+          <Ionicons name="person-add-outline" size={18} color={colors.primary} />
+          <Text style={S.addBtnTxt}>Add member</Text>
         </TouchableOpacity>
       )}
+
+      {/* Media, links and docs — WhatsApp-style row → shared media gallery */}
+      <View style={S.section}>
+        <TouchableOpacity
+          style={S.navRow}
+          activeOpacity={0.7}
+          onPress={() => router.push({ pathname: '/media-gallery', params: { chatId: chat.id } } as any)}
+        >
+          <Ionicons name="images-outline" size={22} color={colors.text} style={S.navIcon} />
+          <View style={{ flex: 1 }}>
+            <Text style={S.navTitle}>Media, links and docs</Text>
+            <Text style={S.navSub}>Everything shared in this group</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
+        </TouchableOpacity>
+      </View>
 
       {isAdmin && (
         <View style={S.section}>
@@ -267,32 +332,49 @@ export default function GroupInfoScreen() {
             activeOpacity={0.7}
             onPress={() => router.push({ pathname: '/group-admin', params: { chatId: chat.id, groupName: chat.name ?? '' } } as any)}
           >
-            <Text style={S.navIcon}>🛡️</Text>
+            <Ionicons name="shield-checkmark-outline" size={22} color={colors.text} style={S.navIcon} />
             <View style={{ flex: 1 }}>
               <Text style={S.navTitle}>Group settings & permissions</Text>
               <Text style={S.navSub}>Roles, slow mode, who can send, join requests</Text>
             </View>
-            <Text style={S.navChevron}>›</Text>
+            <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
           </TouchableOpacity>
           <TouchableOpacity
             style={S.navRow}
             activeOpacity={0.7}
             onPress={() => router.push({ pathname: '/invite-link', params: { chatId: chat.id, groupName: chat.name ?? '' } } as any)}
           >
-            <Text style={S.navIcon}>🔗</Text>
+            <Ionicons name="link-outline" size={22} color={colors.text} style={S.navIcon} />
             <View style={{ flex: 1 }}>
               <Text style={S.navTitle}>Invite links</Text>
               <Text style={S.navSub}>Create & share links to invite people</Text>
             </View>
-            <Text style={S.navChevron}>›</Text>
+            <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
           </TouchableOpacity>
         </View>
       )}
 
       <View style={S.section}>
-        <Text style={S.label}>MEMBERS</Text>
+        <Text style={S.label}>{activeMembers.length} MEMBERS</Text>
+        {activeMembers.length > 8 && (
+          <View style={S.memberSearch}>
+            <Ionicons name="search" size={16} color={colors.textDim} />
+            <TextInput
+              style={S.memberSearchInput}
+              value={memberQuery}
+              onChangeText={setMemberQuery}
+              placeholder="Search members"
+              placeholderTextColor={colors.textDim}
+            />
+            {memberQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setMemberQuery('')} hitSlop={8}>
+                <Ionicons name="close-circle" size={16} color={colors.textDim} />
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
         <FlatList
-          data={activeMembers}
+          data={shownMembers}
           scrollEnabled={false}
           keyExtractor={m => m.userId}
           renderItem={({ item: m }) => (
@@ -377,7 +459,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   heroImg:       { width: '100%', height: '100%' },
   heroTxt:       { color: '#fff', fontSize: 48, fontWeight: '800' },
   heroBusy:      { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.4)' },
-  heroEditPill:  { position: 'absolute', right: 0, bottom: 0, backgroundColor: '#1F2937', borderRadius: 14, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 2, borderColor: c.bg },
+  heroEditPill:  { position: 'absolute', right: 0, bottom: 0, backgroundColor: c.primary, borderRadius: 16, padding: 6, borderWidth: 2, borderColor: c.bg },
   groupName:     { color: c.text, fontSize: 22, fontWeight: '700' },
   subInfo:       { color: c.textDim, fontSize: 12 },
 
@@ -386,18 +468,24 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   saveBtn:       { backgroundColor: c.primary, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10 },
   saveBtnTxt:    { color: '#fff', fontWeight: '700' },
 
-  addBtn:        { marginHorizontal: 16, marginTop: 8, padding: 12, borderRadius: 12, backgroundColor: c.card, borderWidth: 1, borderColor: c.border, alignItems: 'center' },
+  addBtn:        { flexDirection: 'row', gap: 8, marginHorizontal: 16, marginTop: 8, padding: 12, borderRadius: 12, backgroundColor: c.card, borderWidth: 1, borderColor: c.border, alignItems: 'center', justifyContent: 'center' },
   addBtnTxt:     { color: c.primary, fontWeight: '700' },
 
   section:       { paddingHorizontal: 16, marginTop: 16 },
   label:         { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 8 },
 
   navRow:        { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
-  navIcon:       { fontSize: 20, width: 28, textAlign: 'center' },
+  navIcon:       { width: 28, textAlign: 'center' },
   navTitle:      { color: c.text, fontSize: 15, fontWeight: '600' },
   navSub:        { color: c.textDim, fontSize: 12, marginTop: 2 },
   navChevron:    { color: c.textDim, fontSize: 22, fontWeight: '300' },
 
+  descText:      { color: c.text, fontSize: 15, lineHeight: 21, marginTop: 4 },
+  descPlaceholder: { color: c.textDim, fontSize: 15, marginTop: 4 },
+  descEditRow:   { gap: 8 },
+  descInput:     { color: c.text, backgroundColor: c.surface, borderRadius: 12, padding: 12, fontSize: 15, minHeight: 70, textAlignVertical: 'top' },
+  memberSearch:  { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: c.surface, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 6 },
+  memberSearchInput: { flex: 1, color: c.text, fontSize: 14, padding: 0 },
   memberRow:     { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   memberAvatarWrap: { width: 44, height: 44 },
   memberAvatar:  { width: 44, height: 44, borderRadius: 22, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },

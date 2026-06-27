@@ -7,10 +7,12 @@
 // encryption card now reflects the real E2EE_ENABLED flag so we don't claim a
 // guarantee the build doesn't yet provide.
 
+import { brandAlpha } from '../constants/theme';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, StatusBar, ScrollView, Dimensions, Alert, Image, ActivityIndicator,
+  View, Text, TouchableOpacity, StyleSheet, StatusBar, ScrollView, Dimensions, Alert, Image, ActivityIndicator, Linking,
 } from 'react-native';
+import LinkPreview from '../components/LinkPreview';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
@@ -19,7 +21,7 @@ import { E2EE_ENABLED } from '../constants/flags';
 import { getAccessToken } from '../lib/api';
 import {
   getChat, getMessages, muteChat, listBlocks, blockUser, unblockUser, reportUser,
-  decryptFromChat, attachmentUrl, type Message, type ChatMember,
+  decryptFromChat, attachmentUrl, getCommonGroups, type Message, type ChatMember,
 } from '../lib/chatService';
 import { getDecryptedAttachmentUri, parseMediaContent } from '../lib/mediaAttachments';
 import { Avatar } from '../components/ui';
@@ -49,9 +51,12 @@ export default function ContactInfoScreen() {
   const [media, setMedia] = useState<Message[]>([]);
   const [files, setFiles] = useState<FileHit[]>([]);
   const [links, setLinks] = useState<LinkHit[]>([]);
+  const [commonGroups, setCommonGroups] = useState<{ id: string; name: string | null; photoURL: string | null }[]>([]);
   const [loading, setLoading] = useState(true);
 
   const displayName = peer?.name || peerName || 'Contact';
+
+  useEffect(() => { if (peerUid) getCommonGroups(peerUid).then(setCommonGroups).catch(() => {}); }, [peerUid]);
 
   useEffect(() => {
     let active = true;
@@ -156,8 +161,8 @@ export default function ContactInfoScreen() {
 
   const ActionButton = ({ icon, label, onPress, active }: { icon: any; label: string; onPress: () => void; active?: boolean }) => (
     <TouchableOpacity style={s.actionBtn} activeOpacity={0.7} onPress={onPress}>
-      <View style={[s.actionIcon, active && { borderColor: colors.primary, backgroundColor: 'rgba(16,185,129,0.12)' }]}>
-        <Ionicons name={icon} size={22} color={active ? colors.primary : colors.accent} />
+      <View style={[s.actionIcon, active && { borderColor: colors.primary, backgroundColor: brandAlpha(0.12) }]}>
+        <Ionicons name={icon} size={22} color={active ? colors.primary : colors.text} />
       </View>
       <Text style={[s.actionLabel, { color: active ? colors.primary : colors.textDim }]}>{label}</Text>
     </TouchableOpacity>
@@ -190,11 +195,20 @@ export default function ContactInfoScreen() {
         </View>
 
         <View style={s.actionsRow}>
+          <ActionButton icon="call-outline" label="Call" onPress={() => router.push({ pathname: '/voicecall', params: { chatId, peerUid, peerName: displayName } } as any)} />
+          <ActionButton icon="videocam-outline" label="Video" onPress={() => router.push({ pathname: '/videocall', params: { chatId, peerUid, peerName: displayName } } as any)} />
           <ActionButton icon="search-outline" label="Search" onPress={() => router.push({ pathname: '/in-chat-search', params: { chatId } } as any)} />
-          <ActionButton icon="images-outline" label="Media" onPress={() => router.push({ pathname: '/media-gallery', params: { chatId } } as any)} />
           <ActionButton icon={muted ? 'notifications-off-outline' : 'notifications-outline'} label={muted ? 'Unmute' : 'Mute'} active={muted} onPress={toggleMute} />
           <ActionButton icon={blocked ? 'lock-closed-outline' : 'ban-outline'} label={blocked ? 'Unblock' : 'Block'} active={blocked} onPress={toggleBlock} />
         </View>
+
+        {/* About (peer's status text) */}
+        {!!peer?.status && (
+          <View style={s.section}>
+            <Text style={s.sectionTitle}>About</Text>
+            <Text style={s.aboutText}>{peer.status}</Text>
+          </View>
+        )}
 
         {loading && <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />}
 
@@ -224,39 +238,63 @@ export default function ContactInfoScreen() {
             <Text style={s.sectionTitle}>Shared Files</Text>
             {files.map(f => (
               <View key={f.id} style={s.fileRow}>
-                <View style={s.fileIcon}><Ionicons name="document-text-outline" size={20} color={colors.accent} /></View>
+                <View style={s.fileIcon}><Ionicons name="document-text-outline" size={20} color={colors.textDim} /></View>
                 <Text style={s.fileName} numberOfLines={1}>{f.name}</Text>
               </View>
             ))}
           </View>
         )}
 
-        {/* Shared Links */}
+        {/* Shared Links — preview card (OG) + tappable URL */}
         {links.length > 0 && (
           <View style={s.section}>
             <Text style={s.sectionTitle}>Shared Links</Text>
-            {links.map(l => (
-              <View key={`${l.id}-${l.url}`} style={s.linkRow}>
-                <View style={s.linkIcon}><Ionicons name="link-outline" size={18} color={colors.accent} /></View>
-                <Text style={s.linkUrl} numberOfLines={1}>{l.url}</Text>
-              </View>
+            {links.slice(0, 20).map(l => (
+              <TouchableOpacity key={`${l.id}-${l.url}`} activeOpacity={0.7} onPress={() => Linking.openURL(l.url).catch(() => {})}>
+                <View style={s.linkRow}>
+                  <View style={s.linkIcon}><Ionicons name="link-outline" size={18} color={colors.textDim} /></View>
+                  <Text style={s.linkUrl} numberOfLines={1}>{l.url}</Text>
+                </View>
+                <LinkPreview url={l.url} />
+              </TouchableOpacity>
             ))}
           </View>
         )}
 
-        {/* Encryption status — honest about the current flag state. */}
+        {/* Groups in common (WhatsApp) */}
+        {commonGroups.length > 0 && (
+          <View style={s.section}>
+            <Text style={s.sectionTitle}>{commonGroups.length} group{commonGroups.length > 1 ? 's' : ''} in common</Text>
+            {commonGroups.map(g => (
+              <TouchableOpacity key={g.id} style={s.fileRow} activeOpacity={0.7}
+                onPress={() => router.push({ pathname: '/group-info', params: { id: g.id } } as any)}>
+                <Avatar uri={g.photoURL && authHeader ? attachmentUrl(g.photoURL) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={g.name || 'Group'} size={40} />
+                <Text style={s.fileName} numberOfLines={1}>{g.name || 'Group'}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
+        {/* Encryption status — honest about the current flag state. Tapping
+            opens the safety-number verification (WhatsApp's "Verify"). */}
         <View style={s.section}>
-          <View style={s.encryptionCard}>
+          <TouchableOpacity
+            style={s.encryptionCard}
+            activeOpacity={E2EE_ENABLED && peerUid ? 0.7 : 1}
+            disabled={!E2EE_ENABLED || !peerUid}
+            onPress={() => router.push({ pathname: '/verify-contact' as any, params: { peerId: peerUid, peerName: displayName } })}
+          >
             <MaterialCommunityIcons name={E2EE_ENABLED ? 'shield-lock' : 'lock-outline'} size={22} color={colors.primary} />
             <View style={{ flex: 1, marginLeft: 12 }}>
               <Text style={s.encTitle}>{E2EE_ENABLED ? 'End-to-End Encrypted' : 'Encrypted in Transit'}</Text>
               <Text style={s.encSubtitle}>
                 {E2EE_ENABLED
-                  ? 'Messages in this chat are end-to-end encrypted. No one outside this chat can read them.'
+                  ? 'Messages are end-to-end encrypted. Tap to verify the security code.'
                   : 'Messages are encrypted in transit (TLS). End-to-end encryption is rolling out.'}
               </Text>
             </View>
-          </View>
+            {E2EE_ENABLED && !!peerUid && <Ionicons name="chevron-forward" size={18} color={colors.textDim} />}
+          </TouchableOpacity>
         </View>
 
         {/* Ghost Mode */}
@@ -334,13 +372,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   heroName: { color: c.text, fontSize: 24, fontWeight: '700', marginTop: 14 },
   heroStatus: { color: c.textDim, fontSize: 14, marginTop: 4 },
   heroPhone: { color: c.textFaint, fontSize: 14, marginTop: 4 },
-  actionsRow: { flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 24, paddingVertical: 16, borderBottomWidth: 1, borderColor: c.separator },
+  actionsRow: { flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 10, paddingVertical: 16, borderBottomWidth: 1, borderColor: c.separator },
   actionBtn: { alignItems: 'center', gap: 6 },
   actionIcon: { width: 44, height: 44, borderRadius: 14, backgroundColor: c.surface, borderWidth: 1, borderColor: c.border, justifyContent: 'center', alignItems: 'center' },
   actionLabel: { fontSize: 12, fontWeight: '500' },
   section: { paddingHorizontal: 16, marginTop: 20 },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   sectionTitle: { color: c.textDim, fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 12 },
+  aboutText: { color: c.text, fontSize: 15, lineHeight: 21 },
   seeAll: { color: c.accent, fontSize: 13, fontWeight: '600', marginBottom: 12 },
   mediaGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
   mediaTile: { width: MEDIA_SIZE, height: MEDIA_SIZE, borderRadius: 8, backgroundColor: c.surfaceSolid, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
@@ -352,7 +391,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   linkRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, borderRadius: 12, borderWidth: 1, borderColor: c.border, padding: 12, marginBottom: 6, gap: 12 },
   linkIcon: { width: 34, height: 34, borderRadius: 10, backgroundColor: 'rgba(6,182,212,0.12)', justifyContent: 'center', alignItems: 'center' },
   linkUrl: { flex: 1, color: c.accent, fontSize: 13 },
-  encryptionCard: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: 'rgba(16,185,129,0.06)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(16,185,129,0.2)', padding: 14 },
+  encryptionCard: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: brandAlpha(0.06), borderRadius: 12, borderWidth: 1, borderColor: brandAlpha(0.2), padding: 14 },
   encTitle: { color: c.primary, fontSize: 14, fontWeight: '600' },
   encSubtitle: { color: c.textDim, fontSize: 12, lineHeight: 18, marginTop: 4 },
   dangerBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(239,68,68,0.06)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(239,68,68,0.22)', padding: 14, gap: 10 },

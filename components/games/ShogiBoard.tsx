@@ -3,6 +3,7 @@
  * | { drop, to }). Pieces 's'+type (Sente, player[0], bottom) / 'g'+type;
  * promoted pieces prefixed '+'. Captured pieces ("in hand") can be dropped.
  */
+import { brandAlpha } from '../../constants/theme';
 import { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import type { GameState } from '../../services/gameEngines';
@@ -102,7 +103,7 @@ export function ShogiBoard({
 const s = StyleSheet.create({
   board: { flexDirection: 'row', flexWrap: 'wrap', backgroundColor: '#E8C98A', borderRadius: 4, overflow: 'hidden', borderWidth: 2, borderColor: '#8A6D3B' },
   cell: { alignItems: 'center', justifyContent: 'center', borderWidth: 0.5, borderColor: 'rgba(0,0,0,0.35)' },
-  sel: { backgroundColor: 'rgba(16,185,129,0.45)' },
+  sel: { backgroundColor: brandAlpha(0.45) },
   piece: { fontWeight: '800' },
   mine: { color: '#1A1A1A' },
   theirs: { color: '#7A1F12' },
@@ -113,8 +114,8 @@ const s = StyleSheet.create({
   handPiece: { width: 32, height: 34, borderRadius: 6, backgroundColor: '#E8C98A', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#8A6D3B' },
   handSel: { borderColor: Aurora.primary, borderWidth: 2 },
   handGlyph: { color: '#1A1A1A', fontSize: 18, fontWeight: '800' },
-  dotMark: { position: 'absolute', backgroundColor: 'rgba(16,185,129,0.8)' },
-  capMark: { position: 'absolute', borderColor: 'rgba(16,185,129,0.9)' },
+  dotMark: { position: 'absolute', backgroundColor: brandAlpha(0.8) },
+  capMark: { position: 'absolute', borderColor: brandAlpha(0.9) },
 });
 
 export default ShogiBoard;

@@ -14,6 +14,7 @@
 // over the wire, and the server only sees hashes for users who opted in to
 // `discoverable=TRUE`.
 
+import { Ionicons } from '@expo/vector-icons';
 import * as Contacts from 'expo-contacts';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -247,11 +248,11 @@ export default function ContactsScreen() {
     <View style={S.screen}>
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7}>
-          <Text style={S.backTxt}>←</Text>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title}>Contacts</Text>
         <TouchableOpacity onPress={scan} disabled={scanning} style={S.refreshBtn} activeOpacity={0.7}>
-          <Text style={S.refreshTxt}>{scanning ? '…' : '↻'}</Text>
+          {scanning ? <Text style={S.refreshTxt}>…</Text> : <Ionicons name="refresh" size={22} color={colors.primary} />}
         </TouchableOpacity>
       </View>
 

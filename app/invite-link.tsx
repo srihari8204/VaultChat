@@ -4,11 +4,13 @@
 // Links look like https://vaultchat.app/join/CODE. Admins set an optional
 // expiry and revoke anytime. No Firestore.
 
+import { brandAlpha } from '../constants/theme';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList, Alert, Share, StatusBar, ActivityIndicator, Modal,
 } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import QRCode from 'react-native-qrcode-svg';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
@@ -99,7 +101,7 @@ export default function InviteLinkScreen() {
 
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
-          <Text style={{ color: colors.text, fontSize: 24 }}>←</Text>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.title}>Invite Links</Text>
         <View style={{ width: 40 }} />
@@ -107,7 +109,7 @@ export default function InviteLinkScreen() {
 
       <View style={s.body}>
         <View style={s.infoCard}>
-          <Text style={{ fontSize: 22 }}>🔗</Text>
+          <Ionicons name="link-outline" size={22} color={colors.text} />
           <View style={{ flex: 1, marginLeft: 12 }}>
             <Text style={s.infoTitle}>{groupName || 'Group'} Invite Links</Text>
             <Text style={s.infoDesc}>Anyone with this link can join. Set an expiry or revoke anytime.</Text>
@@ -143,10 +145,20 @@ export default function InviteLinkScreen() {
                 </View>
                 {!item.revoked && (
                   <View style={s.linkBtns}>
-                    <TouchableOpacity style={s.linkBtn} onPress={() => copyLink(item.code)}><Text style={s.linkBtnTxt}>Copy</Text></TouchableOpacity>
-                    <TouchableOpacity style={s.linkBtn} onPress={() => shareLink(item.code)}><Text style={s.linkBtnTxt}>Share</Text></TouchableOpacity>
-                    <TouchableOpacity style={s.linkBtn} onPress={() => setQrCode(item.code)}><Text style={s.linkBtnTxt}>QR</Text></TouchableOpacity>
-                    <TouchableOpacity style={[s.linkBtn, { borderColor: 'rgba(239,68,68,0.4)' }]} onPress={() => revoke(item)}>
+                    <TouchableOpacity style={s.linkBtn} onPress={() => copyLink(item.code)}>
+                      <Ionicons name="copy-outline" size={15} color={colors.text} />
+                      <Text style={s.linkBtnTxt}>Copy</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={s.linkBtn} onPress={() => shareLink(item.code)}>
+                      <Ionicons name="share-social-outline" size={15} color={colors.text} />
+                      <Text style={s.linkBtnTxt}>Share</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={s.linkBtn} onPress={() => setQrCode(item.code)}>
+                      <Ionicons name="qr-code-outline" size={15} color={colors.text} />
+                      <Text style={s.linkBtnTxt}>QR</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={s.linkBtn} onPress={() => revoke(item)}>
+                      <Ionicons name="trash-outline" size={15} color={colors.danger} />
                       <Text style={[s.linkBtnTxt, { color: colors.danger }]}>Revoke</Text>
                     </TouchableOpacity>
                   </View>
@@ -190,14 +202,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   errorTxt: { color: c.danger, fontSize: 12 },
   sectionTitle: { color: c.textDim, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 8 },
   createRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
-  createOpt: { backgroundColor: 'rgba(16,185,129,0.13)', borderRadius: 10, paddingVertical: 10, paddingHorizontal: 16, borderWidth: 1, borderColor: 'rgba(16,185,129,0.3)' },
+  createOpt: { backgroundColor: brandAlpha(0.13), borderRadius: 10, paddingVertical: 10, paddingHorizontal: 16, borderWidth: 1, borderColor: brandAlpha(0.3) },
   createOptTxt: { color: c.primary, fontSize: 12, fontWeight: '700' },
   linkRow: { backgroundColor: c.card, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: c.border },
   linkCode: { color: c.text, fontSize: 13, fontWeight: '600', fontFamily: 'monospace' },
   linkMeta: { color: c.textDim, fontSize: 11 },
   linkBtns: { flexDirection: 'row', gap: 8, marginTop: 10 },
-  linkBtn: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(6,182,212,0.4)' },
-  linkBtnTxt: { color: c.accent, fontSize: 11, fontWeight: '700' },
+  linkBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface },
+  linkBtnTxt: { color: c.text, fontSize: 11, fontWeight: '700' },
   empty: { color: c.textDim, fontSize: 13 },
   qrBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', alignItems: 'center', justifyContent: 'center', padding: 24 },
   qrCard: { backgroundColor: c.card, borderRadius: 24, padding: 24, alignItems: 'center', width: '100%', maxWidth: 320, borderWidth: 1, borderColor: c.border },

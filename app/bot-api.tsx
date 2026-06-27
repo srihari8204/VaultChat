@@ -1,6 +1,8 @@
 // app/bot-api.tsx
 // Bot & Automation API platform — built-in bots + custom bot creation
 
+import { BRAND_ACCENT } from '../constants/theme';
+import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
@@ -36,7 +38,7 @@ const BUILT_IN_BOTS = [
     icon: '📰',
     name: 'News Bot',
     description: 'Curated headlines delivered to your chat. Filter by topic or region.',
-    gradient: ['#F97316', '#DC2626'] as [string, string],
+    gradient: [BRAND_ACCENT, '#DC2626'] as [string, string],
   },
   {
     id: 'poll',
@@ -50,7 +52,7 @@ const BUILT_IN_BOTS = [
     icon: '🌐',
     name: 'Translate Bot',
     description: 'Auto-translate messages in 50+ languages. Set per-chat language preferences.',
-    gradient: ['#10B981', '#059669'] as [string, string],
+    gradient: [BRAND_ACCENT, '#059669'] as [string, string],
   },
 ];
 
@@ -143,7 +145,7 @@ export default function BotApiScreen() {
         {/* ── Header ────────────────────────────────── */}
         <View style={styles.headerRow}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Text style={styles.backArrow}>←</Text>
+            <Ionicons name="arrow-back" size={20} color="#fff" />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
             <Text style={styles.headerTitle}>🤖 Bot Platform</Text>
@@ -245,7 +247,7 @@ export default function BotApiScreen() {
                   style={styles.deleteBtn}
                   onPress={() => handleDeleteBot(bot.id)}
                 >
-                  <Text style={styles.deleteBtnText}>🗑</Text>
+                  <Ionicons name="trash-outline" size={18} color="#DC2626" />
                 </TouchableOpacity>
               </View>
             ))}
@@ -258,8 +260,9 @@ export default function BotApiScreen() {
           style={styles.docsToggle}
           onPress={() => setShowDocs(!showDocs)}
         >
+          <Ionicons name={showDocs ? 'chevron-down' : 'chevron-forward'} size={14} color="#4A9FFF" style={{ marginRight: 6 }} />
           <Text style={styles.docsToggleText}>
-            {showDocs ? '▼' : '▶'} Webhook Format & Integration Guide
+            Webhook Format & Integration Guide
           </Text>
         </TouchableOpacity>
         {showDocs && (
@@ -491,6 +494,8 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   docsToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#F9FAFB',
     borderRadius: 10,
     padding: 14,

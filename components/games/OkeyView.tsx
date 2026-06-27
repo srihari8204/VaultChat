@@ -4,6 +4,7 @@
  * { action:'draw' | 'drawDiscard' }. Discard: { action:'discard', tile }.
  * Win: { action:'declare', groups } (greedy auto-grouping).
  */
+import { BRAND_ACCENT } from '../../constants/theme';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import type { GameState } from '../../services/gameEngines';
 import { Aurora } from '../../constants/theme';
@@ -36,7 +37,7 @@ function Tile({ t, wild, onPress }: { t: number; wild?: boolean; onPress?: () =>
   const joker = t >= 104;
   return (
     <TouchableOpacity disabled={!onPress} activeOpacity={0.8} onPress={onPress} style={[ts.tile, wild && ts.wild]}>
-      <Text style={[ts.num, { color: joker ? '#10B981' : COLORS[tColor(t)] }]}>{joker ? '★' : tNum(t)}</Text>
+      <Text style={[ts.num, { color: joker ? BRAND_ACCENT : COLORS[tColor(t)] }]}>{joker ? '★' : tNum(t)}</Text>
     </TouchableOpacity>
   );
 }
@@ -103,7 +104,7 @@ const s = StyleSheet.create({
   label: { color: Aurora.textDim, fontSize: 12, fontWeight: '700' },
   hand: { gap: 4, paddingVertical: 10 },
   declare: { backgroundColor: Aurora.primary, borderRadius: 14, paddingVertical: 13, alignItems: 'center' },
-  declareTxt: { color: '#04130D', fontSize: 15, fontWeight: '800' },
+  declareTxt: { color: '#FFFFFF', fontSize: 15, fontWeight: '800' },
 });
 
 export default OkeyView;

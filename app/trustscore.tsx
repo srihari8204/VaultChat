@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState , useMemo} from 'react';
@@ -7,9 +8,9 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 
-const NAV = [{id:'chats',icon:'ðŸ’¬',label:'Chats',route:'/(tabs)/chats'},{id:'shield',icon:'ðŸ›¡ï¸',label:'Shield',route:'/dashboard'},{id:'community',icon:'ðŸŒ',label:'Community',route:'/communities'},{id:'vault',icon:'ðŸ“¦',label:'Vault',route:'/filevault'},{id:'alerts',icon:'ðŸ””',label:'Alerts',route:'/notifications'}];
+const NAV = [{id:'chats',icon:'💬',label:'Chats',route:'/(tabs)/chats'},{id:'shield',icon:'🛡️',label:'Shield',route:'/dashboard'},{id:'community',icon:'🌐',label:'Community',route:'/communities'},{id:'vault',icon:'📦',label:'Vault',route:'/filevault'},{id:'alerts',icon:'🔔',label:'Alerts',route:'/notifications'}];
 
-const TRUST_LEVELS=[{level:'Untrusted',min:0,max:20,color:'#EF4444',icon:'â›”'},{level:'Low',min:21,max:40,color:'#F59E0B',icon:'âš ï¸'},{level:'Moderate',min:41,max:60,color:'#4A9FFF',icon:'ðŸ”µ'},{level:'High',min:61,max:80,color:'#10B981',icon:'âœ…'},{level:'Verified',min:81,max:100,color:'#A78BFA',icon:'ðŸ’Ž'}];
+const TRUST_LEVELS=[{level:'Untrusted',min:0,max:20,color:'#EF4444',icon:'⛔'},{level:'Low',min:21,max:40,color:'#F59E0B',icon:'⚠️'},{level:'Moderate',min:41,max:60,color:'#4A9FFF',icon:'🔵'},{level:'High',min:61,max:80,color:'#22C55E',icon:'✅'},{level:'Verified',min:81,max:100,color:'#A78BFA',icon:'💎'}];
 const getLevel=(score:number)=>TRUST_LEVELS.find(l=>score>=l.min&&score<=l.max)||TRUST_LEVELS[0];
 // Personal trust notes — YOUR own assessment of contacts, stored on this device.
 // No "blockchain" (there isn't one). Starts empty; persisted locally.
@@ -40,7 +41,7 @@ function TrustScoreContent() {
   const markTrusted=(entry:any)=>{ const updated={...entry,verified:true,lastVerified:'Just now'}; setSelected(updated); setEntries(prev=>prev.map(e=>e.id===entry.id?updated:e)); };
   const adjustScore=(entry:any,delta:number)=>{ const ns=Math.max(0,Math.min(100,entry.score+delta)); const lvl=getLevel(ns); const updated={...entry,score:ns,level:lvl.level}; setSelected(updated); setEntries(prev=>prev.map(e=>e.id===entry.id?updated:e)); };
   const deleteEntry=(entry:any)=>{ Alert.alert('Remove Contact','Remove '+entry.contactName+' from TrustScore?',[{text:'Cancel',style:'cancel'},{text:'Remove',style:'destructive',onPress:()=>{ setEntries(prev=>prev.filter(e=>e.id!==entry.id)); setShowDetail(false); }}]); };
-  const addEntry=()=>{ if(!newName.trim())return; const score=Math.max(0,Math.min(100,parseInt(newScore)||50)); const lvl=getLevel(score); const entry={id:Date.now().toString(),contactName:newName.trim(),emoji:'ðŸ‘¤',score,level:lvl.level,interactions:0,lastVerified:'Never',notes:newNotes.trim(),verified:false}; setEntries(prev=>[entry,...prev]); setShowAdd(false); setNewName(''); setNewScore('50'); setNewNotes(''); };
+  const addEntry=()=>{ if(!newName.trim())return; const score=Math.max(0,Math.min(100,parseInt(newScore)||50)); const lvl=getLevel(score); const entry={id:Date.now().toString(),contactName:newName.trim(),emoji:'👤',score,level:lvl.level,interactions:0,lastVerified:'Never',notes:newNotes.trim(),verified:false}; setEntries(prev=>[entry,...prev]); setShowAdd(false); setNewName(''); setNewScore('50'); setNewNotes(''); };
   const handleNav=(item:typeof NAV[0])=>{ setNavTab(item.id); if(item.id!=='shield')router.push(item.route as any); };
 
   const filtered=entries.filter(e=>filter==='all'?true:filter==='verified'?e.verified:!e.verified);
@@ -51,16 +52,16 @@ function TrustScoreContent() {
       <LinearGradient colors={['#FFFFFF','#040F20','#060F24']} style={StyleSheet.absoluteFillObject}/>
       <Animated.View style={{flex:1,opacity:fadeIn}}>
         <View style={S.header}>
-          <TouchableOpacity onPress={()=>router.back()} style={S.backBtn}><Text style={{color:colors.primary,fontSize:18}}>â†</Text></TouchableOpacity>
+          <TouchableOpacity onPress={()=>router.back()} style={S.backBtn}><Ionicons name="arrow-back" size={24} color={colors.primary} /></TouchableOpacity>
           <View style={{flex:1}}>
-            <Text style={S.title}>â›“ï¸ TrustScore</Text>
+            <Text style={S.title}>⛓️ TrustScore</Text>
             <Text style={{color:colors.textFaint,fontSize:9,letterSpacing:2}}>YOUR PRIVATE TRUST NOTES</Text>
           </View>
-          <TouchableOpacity onPress={()=>setShowAdd(true)} style={{backgroundColor:'#1D4ED8',borderRadius:20,width:40,height:40,justifyContent:'center',alignItems:'center'}}><Text style={{color:'#fff',fontSize:22,fontWeight:'900'}}>+</Text></TouchableOpacity>
+          <TouchableOpacity onPress={()=>setShowAdd(true)} style={{backgroundColor:'#1D4ED8',borderRadius:20,width:40,height:40,justifyContent:'center',alignItems:'center'}}><Ionicons name="add" size={24} color="#fff" /></TouchableOpacity>
         </View>
 
         <View style={{flexDirection:'row',paddingHorizontal:18,gap:8,marginBottom:14}}>
-          {[{label:'Avg Score',value:avg.toString(),icon:'â­',color:colors.primary},{label:'Verified',value:entries.filter(e=>e.verified).length.toString(),icon:'ðŸ’Ž',color:'#A78BFA'},{label:'Total',value:entries.length.toString(),icon:'ðŸ‘¥',color:colors.accent}].map((s,i)=>(
+          {[{label:'Avg Score',value:avg.toString(),icon:'⭐',color:colors.primary},{label:'Verified',value:entries.filter(e=>e.verified).length.toString(),icon:'💎',color:'#A78BFA'},{label:'Total',value:entries.length.toString(),icon:'👥',color:colors.accent}].map((s,i)=>(
             <View key={i} style={{flex:1,backgroundColor:'rgba(10,22,40,0.8)',borderRadius:14,padding:12,alignItems:'center',borderWidth:1,borderColor:'rgba(255,255,255,0.06)',gap:3}}>
               <Text style={{fontSize:18}}>{s.icon}</Text>
               <Text style={{color:s.color,fontSize:18,fontWeight:'900'}}>{s.value}</Text>
@@ -84,12 +85,12 @@ function TrustScoreContent() {
               <View style={{flex:1}}>
                 <View style={{flexDirection:'row',alignItems:'center',gap:8,marginBottom:4}}>
                   <Text style={{color:colors.text,fontSize:14,fontWeight:'800'}}>{entry.contactName}</Text>
-                  {entry.verified&&<Text style={{fontSize:12}}>ðŸ’Ž</Text>}
+                  {entry.verified&&<Text style={{fontSize:12}}>💎</Text>}
                 </View>
                 <View style={{height:5,backgroundColor:'rgba(255,255,255,0.06)',borderRadius:3,overflow:'hidden',marginBottom:4}}>
                   <View style={{width:(entry.score+'%') as any,height:5,backgroundColor:lvl.color,borderRadius:3}}/>
                 </View>
-                <Text style={{color:colors.textFaint,fontSize:10}}>{entry.interactions} interactions Â· {entry.lastVerified}</Text>
+                <Text style={{color:colors.textFaint,fontSize:10}}>{entry.interactions} interactions · {entry.lastVerified}</Text>
               </View>
               <View style={{alignItems:'flex-end',gap:4}}>
                 <Text style={{color:lvl.color,fontSize:22,fontWeight:'900'}}>{entry.score}</Text>
@@ -131,7 +132,7 @@ function TrustScoreContent() {
                   {selected.notes?<Text style={{color:colors.textDim,fontSize:12,marginBottom:14,fontStyle:'italic'}}>&quot;{selected.notes}&quot;</Text>:null}
                   {null}
                   <View style={{flexDirection:'row',gap:8}}>
-                    {!selected.verified&&<TouchableOpacity onPress={()=>markTrusted(selected)} style={{flex:1}}><LinearGradient colors={['#A78BFA','#7C3AED']} style={{borderRadius:14,paddingVertical:13,alignItems:'center'}}><Text style={{color:'#fff',fontSize:13,fontWeight:'800'}}>â›“ï¸ Mark as Trusted</Text></LinearGradient></TouchableOpacity>}
+                    {!selected.verified&&<TouchableOpacity onPress={()=>markTrusted(selected)} style={{flex:1}}><LinearGradient colors={['#A78BFA','#7C3AED']} style={{borderRadius:14,paddingVertical:13,alignItems:'center'}}><Text style={{color:'#fff',fontSize:13,fontWeight:'800'}}>⛓️ Mark as Trusted</Text></LinearGradient></TouchableOpacity>}
                     <TouchableOpacity onPress={()=>deleteEntry(selected)} style={{backgroundColor:'rgba(239,68,68,0.1)',borderRadius:14,paddingVertical:13,paddingHorizontal:16,borderWidth:1,borderColor:colors.danger+'44'}}><Text style={{color:colors.danger,fontSize:13,fontWeight:'800'}}>Remove</Text></TouchableOpacity>
                   </View>
                 </>

@@ -4,11 +4,13 @@
 // "Scan" reads a VaultChat QR, resolves the handle (GET /user/by-vault/:id),
 // and opens/creates a direct chat (POST /chats). No Firestore.
 
+import { brandAlpha } from '../constants/theme';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Alert, StatusBar, ActivityIndicator, Share,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import QRCode from 'react-native-qrcode-svg';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { type Palette } from '../constants/theme';
@@ -102,7 +104,7 @@ export default function QRContactScreen() {
 
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
-          <Text style={{ color: colors.text, fontSize: 24 }}>←</Text>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.title}>QR Contact</Text>
         <View style={{ width: 40 }} />
@@ -133,8 +135,9 @@ export default function QRContactScreen() {
                 </View>
                 <Text style={s.qrHint}>Show this to add you on VaultChat</Text>
               </View>
-              <TouchableOpacity style={s.shareBtn} onPress={handleShare} disabled={!myVaultId}>
-                <Text style={s.shareTxt}>🔗  Share my VaultID</Text>
+              <TouchableOpacity style={[s.shareBtn, { flexDirection: 'row', alignItems: 'center', gap: 8 }]} onPress={handleShare} disabled={!myVaultId}>
+                <Ionicons name="share-outline" size={16} color={colors.primary} />
+                <Text style={s.shareTxt}>Share my VaultID</Text>
               </TouchableOpacity>
             </>
           )}
@@ -184,14 +187,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   tab: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 10 },
   tabActive: { backgroundColor: c.primary },
   tabTxt: { color: c.textDim, fontSize: 14, fontWeight: '700' },
-  tabTxtActive: { color: '#04130D' },
+  tabTxtActive: { color: '#FFFFFF' },
   myQR: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   qrCard: { backgroundColor: c.card, borderRadius: 24, padding: 32, alignItems: 'center', width: '100%', maxWidth: 320, borderWidth: 1, borderColor: c.border },
   qrName: { color: c.text, fontSize: 20, fontWeight: '900', marginBottom: 4 },
   qrId: { color: c.accent, fontSize: 14, marginBottom: 20, fontWeight: '700' },
   qrBox: { padding: 12, backgroundColor: '#FFFFFF', borderRadius: 12, minWidth: 224, minHeight: 224, alignItems: 'center', justifyContent: 'center' },
   qrHint: { color: c.textDim, fontSize: 12, marginTop: 16, textAlign: 'center' },
-  shareBtn: { marginTop: 24, backgroundColor: 'rgba(16,185,129,0.13)', borderRadius: 14, paddingVertical: 14, paddingHorizontal: 28, borderWidth: 1, borderColor: 'rgba(16,185,129,0.3)' },
+  shareBtn: { marginTop: 24, backgroundColor: brandAlpha(0.13), borderRadius: 14, paddingVertical: 14, paddingHorizontal: 28, borderWidth: 1, borderColor: brandAlpha(0.3) },
   shareTxt: { color: c.primary, fontSize: 14, fontWeight: '700' },
   scanArea: { flex: 1, position: 'relative', marginTop: 12 },
   scanner: { flex: 1 },

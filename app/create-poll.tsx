@@ -5,6 +5,7 @@
 // to the chat with meta.options + meta.allowMultiple. The chat's PollBubble
 // hydrates vote counts via the bulk endpoint on render.
 
+import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useState , useMemo} from 'react';
 import {
@@ -24,7 +25,7 @@ import { useTheme } from '../lib/theme';
 import { createPoll } from '../lib/chatService';
 
 const MIN_OPTIONS = 2;
-const MAX_OPTIONS = 10;
+const MAX_OPTIONS = 12;
 
 function useS() {
   const { colors } = useTheme();
@@ -82,7 +83,7 @@ export default function CreatePollScreen() {
       <StatusBar barStyle="light-content" />
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
-          <Text style={S.backTxt}>←</Text>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={S.title}>New poll</Text>
@@ -94,7 +95,7 @@ export default function CreatePollScreen() {
           style={[S.sendBtn, posting && S.sendBtnOff]}
           activeOpacity={0.85}
         >
-          {posting ? <ActivityIndicator color="#fff" /> : <Text style={S.sendBtnTxt}>Send</Text>}
+          {posting ? <ActivityIndicator color={colors.bubbleOutText} /> : <Text style={S.sendBtnTxt}>Send</Text>}
         </TouchableOpacity>
       </View>
 
@@ -128,14 +129,15 @@ export default function CreatePollScreen() {
                 hitSlop={8}
                 style={S.removeBtn}
               >
-                <Text style={S.removeBtnTxt}>×</Text>
+                <Ionicons name="close" size={20} color={colors.danger} />
               </TouchableOpacity>
             )}
           </View>
         ))}
         {options.length < MAX_OPTIONS && (
           <TouchableOpacity onPress={addOption} style={S.addBtn} activeOpacity={0.7}>
-            <Text style={S.addBtnTxt}>＋ Add option</Text>
+            <Ionicons name="add" size={16} color={colors.primary} />
+            <Text style={[S.addBtnTxt, { marginLeft: 6 }]}>Add option</Text>
           </TouchableOpacity>
         )}
 
@@ -150,8 +152,8 @@ export default function CreatePollScreen() {
           <Switch
             value={allowMultiple}
             onValueChange={setAllowMultiple}
-            trackColor={{ true: colors.primary, false: '#374151' }}
-            thumbColor="#fff"
+            trackColor={{ true: colors.primary, false: colors.border }}
+            thumbColor={colors.card}
           />
         </View>
       </ScrollView>
@@ -169,8 +171,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   title:         { color: c.text, fontSize: 22, fontWeight: '800' },
   sub:           { color: c.textDim, fontSize: 12 },
   sendBtn:       { backgroundColor: c.primary, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20 },
-  sendBtnOff:    { backgroundColor: '#374151' },
-  sendBtnTxt:    { color: '#fff', fontWeight: '700' },
+  sendBtnOff:    { opacity: 0.5 },
+  sendBtnTxt:    { color: c.bubbleOutText, fontWeight: '700' },
 
   label:         { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 8 },
 
@@ -181,7 +183,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   optionInput:   { flex: 1, color: c.text, backgroundColor: c.card, borderColor: c.border, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15 },
   removeBtn:     { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: 18, borderWidth: 1, borderColor: c.border, backgroundColor: c.card },
   removeBtnTxt:  { color: c.danger, fontSize: 22, fontWeight: '700' },
-  addBtn:        { padding: 12, borderRadius: 12, backgroundColor: c.card, borderWidth: 1, borderColor: c.border, alignItems: 'center', marginTop: 4 },
+  addBtn:        { flexDirection: 'row', justifyContent: 'center', padding: 12, borderRadius: 12, backgroundColor: c.card, borderWidth: 1, borderColor: c.border, alignItems: 'center', marginTop: 4 },
   addBtnTxt:     { color: c.primary, fontWeight: '700' },
 
   toggleRow:     { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 24, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border },

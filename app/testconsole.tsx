@@ -1,3 +1,4 @@
+import { brandAlpha } from '../constants/theme';
 import React, { useState, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Animated } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -42,9 +43,9 @@ export default function TestConsole() {
       };
       const res = await runParallelTest(config, handleProgress);
       setResult(res);
-      addLog(`âœ“ Done â€” ${res.totalSent} sent, ${res.deliveryRate}% delivered, avg ${res.avgLatencyMs}ms`);
+      addLog(`✓ Done — ${res.totalSent} sent, ${res.deliveryRate}% delivered, avg ${res.avgLatencyMs}ms`);
     } catch (e: any) {
-      addLog(`âœ— Test failed: ${e.message}`);
+      addLog(`✗ Test failed: ${e.message}`);
     } finally {
       setRunning(false);
     }
@@ -61,15 +62,15 @@ export default function TestConsole() {
       {/* Header */}
       <View style={Ss.header}>
         <TouchableOpacity onPress={()=>router.back()} style={Ss.backBtn}>
-          <Text style={{color:C.primary,fontSize:18}}>â†</Text>
+          <Text style={{color:C.primary,fontSize:18}}>←</Text>
         </TouchableOpacity>
         <View style={{flex:1}}>
           <Text style={Ss.title}>Test Console</Text>
           <Text style={Ss.sub}>MULTI-USER PARALLEL TESTING</Text>
         </View>
-        <View style={[Ss.badge, running && {borderColor:'rgba(16,185,129,0.5)',backgroundColor:'rgba(16,185,129,0.1)'}]}>
+        <View style={[Ss.badge, running && {borderColor:brandAlpha(0.5),backgroundColor:brandAlpha(0.1)}]}>
           <Text style={{color: running ? C.accent : C.dim, fontSize:9, fontWeight:'900'}}>
-            {running ? 'ðŸŸ¢ RUNNING' : 'âš« IDLE'}
+            {running ? '🟢 RUNNING' : '⚫ IDLE'}
           </Text>
         </View>
       </View>
@@ -78,7 +79,7 @@ export default function TestConsole() {
 
         {/* Config */}
         <View style={Ss.card}>
-          <Text style={Ss.cardTitle}>âš™ï¸ Test Configuration</Text>
+          <Text style={Ss.cardTitle}>⚙️ Test Configuration</Text>
           <View style={{gap:12}}>
             <View style={{flexDirection:'row',gap:10}}>
               <View style={{flex:1}}>
@@ -126,7 +127,7 @@ export default function TestConsole() {
             colors={running ? ['#1a2a4a','#2a1a4a'] : ['#1D4ED8','#7C3AED']}
             style={Ss.runBtn}>
             <Text style={{color:'#fff',fontSize:15,fontWeight:'900'}}>
-              {running ? 'â³ Test Running...' : 'â–¶ Start Parallel Test'}
+              {running ? '⏳ Test Running...' : '▶ Start Parallel Test'}
             </Text>
           </LinearGradient>
         </TouchableOpacity>
@@ -148,7 +149,7 @@ export default function TestConsole() {
         {/* Results */}
         {result && (
           <View style={Ss.card}>
-            <Text style={Ss.cardTitle}>ðŸ“Š Test Results</Text>
+            <Text style={Ss.cardTitle}>📊 Test Results</Text>
             <View style={{gap:8}}>
               {[
                 { label:'Total Sent',      val:result.totalSent+'',      color:C.primary },
@@ -168,20 +169,20 @@ export default function TestConsole() {
             </View>
 
             {/* Per-user breakdown */}
-            <Text style={[Ss.cardTitle,{marginTop:14,marginBottom:8}]}>ðŸ‘¥ Per-User Breakdown</Text>
+            <Text style={[Ss.cardTitle,{marginTop:14,marginBottom:8}]}>👥 Per-User Breakdown</Text>
             {result.users.map((u,i) => (
               <View key={i} style={{backgroundColor:'rgba(8,20,42,0.8)',borderRadius:10,
                 padding:10,marginBottom:6,borderWidth:1,borderColor:'rgba(255,255,255,0.05)'}}>
                 <View style={{flexDirection:'row',justifyContent:'space-between'}}>
                   <Text style={{color:'#fff',fontSize:12,fontWeight:'800'}}>{u.name}</Text>
                   <Text style={{color:u.errors.length?C.red:C.accent,fontSize:10,fontWeight:'800'}}>
-                    {u.errors.length ? u.errors.length+' errors' : 'âœ“ Clean'}
+                    {u.errors.length ? u.errors.length+' errors' : '✓ Clean'}
                   </Text>
                 </View>
                 <View style={{flexDirection:'row',gap:16,marginTop:4}}>
-                  <Text style={{color:C.dim,fontSize:10}}>ðŸ“¤ Sent: <Text style={{color:C.primary,fontWeight:'800'}}>{u.msgSent}</Text></Text>
-                  <Text style={{color:C.dim,fontSize:10}}>ðŸ“¥ Received: <Text style={{color:C.accent,fontWeight:'800'}}>{u.msgReceived}</Text></Text>
-                  <Text style={{color:C.dim,fontSize:10}}>âš¡ Avg: <Text style={{color:C.yellow,fontWeight:'800'}}>{u.latencies.length?Math.round(u.latencies.reduce((a,b)=>a+b,0)/u.latencies.length):0}ms</Text></Text>
+                  <Text style={{color:C.dim,fontSize:10}}>📤 Sent: <Text style={{color:C.primary,fontWeight:'800'}}>{u.msgSent}</Text></Text>
+                  <Text style={{color:C.dim,fontSize:10}}>📥 Received: <Text style={{color:C.accent,fontWeight:'800'}}>{u.msgReceived}</Text></Text>
+                  <Text style={{color:C.dim,fontSize:10}}>⚡ Avg: <Text style={{color:C.yellow,fontWeight:'800'}}>{u.latencies.length?Math.round(u.latencies.reduce((a,b)=>a+b,0)/u.latencies.length):0}ms</Text></Text>
                 </View>
               </View>
             ))}
@@ -190,7 +191,7 @@ export default function TestConsole() {
 
         {/* Live log */}
         <View style={Ss.card}>
-          <Text style={Ss.cardTitle}>ðŸ“Ÿ Live Log</Text>
+          <Text style={Ss.cardTitle}>📟 Live Log</Text>
           <View style={{backgroundColor:'rgba(2,8,18,0.9)',borderRadius:10,padding:10,minHeight:120,maxHeight:220}}>
             <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false}>
               {logLines.length === 0

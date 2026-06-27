@@ -13,6 +13,7 @@
 // View tracking: as each story flips active, we POST /stories/:id/viewed
 // (server is idempotent + treats author-as-viewer as no-op).
 
+import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ResizeMode, Video } from 'expo-av';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -63,6 +64,7 @@ export default function StoryViewerScreen() {
   const [index,      setIndex]      = useState(0);
   const [authHeader, setAuthHeader] = useState<string | null>(null);
   const [paused,     setPaused]     = useState(false);
+  const [loaded,     setLoaded]     = useState(false);   // media actually rendered?
   const [error,      setError]      = useState<string | null>(null);
 
   // Progress bar animation per active story. Re-runs on `index` change.
@@ -103,6 +105,7 @@ export default function StoryViewerScreen() {
     let cancel = false;
     setMediaSrc(null);
     if (!current) return;
+    if (current.mediaType === 'text') return;   // text status has no attachment
     (async () => {
       if (current.encrypted) {
         try {
@@ -130,9 +133,26 @@ export default function StoryViewerScreen() {
     return () => { cancel = true; };
   }, [current?.id, current?.encrypted, current?.attachmentId, entry?.userId, authHeader]);
 
-  // ── Per-story side effects: mark viewed, run progress, auto-advance.
+  // Reset the "loaded" gate whenever the current story changes. Text stories
+  // have no media to wait for, so they're ready immediately.
   useEffect(() => {
-    if (!current || paused) return;
+    setLoaded(current?.mediaType === 'text');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current?.id]);
+
+  // Safety: if the media stalls (slow network), don't sit on a blank screen
+  // forever — treat it as loaded after a max wait so the timer can run/advance.
+  useEffect(() => {
+    if (!current || loaded) return;
+    const t = setTimeout(() => setLoaded(true), 12000);
+    return () => clearTimeout(t);
+  }, [current?.id, loaded]);
+
+  // ── Per-story side effects: mark viewed, run progress, auto-advance.
+  // The progress timer only starts once the media has actually loaded, so the
+  // bar no longer empties out over a blank screen while the image/video loads.
+  useEffect(() => {
+    if (!current || paused || !loaded) return;
 
     // Best-effort mark-viewed; server is idempotent.
     if (!current.seen) {
@@ -149,9 +169,9 @@ export default function StoryViewerScreen() {
       if (finished) advance(+1);
     });
     return () => anim.stop();
-  // intentional: re-runs when *index* changes or when user pauses/resumes
+  // intentional: re-runs when *index* changes, on pause/resume, or once loaded
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current?.id, paused]);
+  }, [current?.id, paused, loaded]);
 
   const close = useCallback(() => router.back(), [router]);
 
@@ -241,24 +261,42 @@ export default function StoryViewerScreen() {
     <View style={S.screen}>
       <StatusBar barStyle="light-content" />
 
+      {/* Text status — full-bleed colored card with centered text (WhatsApp). */}
+      {current?.mediaType === 'text' && (
+        <View style={[S.media, { backgroundColor: (current as any).bgColor || '#0B0B10', alignItems: 'center', justifyContent: 'center', padding: 32 }]}>
+          <Text style={{ color: '#fff', fontSize: 28, fontWeight: '700', textAlign: 'center' }}>{(current as any).text || ''}</Text>
+        </View>
+      )}
+
       {/* Media — full-bleed. Plaintext: authed URL; encrypted: decrypted local file. */}
-      {mediaSrc && (
+      {mediaSrc && current?.mediaType !== 'text' && (
         current?.mediaType === 'video' ? (
           <Video
             source={mediaSrc as any}
             style={S.media}
             resizeMode={ResizeMode.CONTAIN}
-            shouldPlay={!paused}
+            shouldPlay={!paused && loaded}
             isLooping={false}
             useNativeControls={false}
+            onLoad={() => setLoaded(true)}
+            onError={() => setLoaded(true)}
           />
         ) : (
           <Image
             source={mediaSrc}
             style={S.media}
             resizeMode="contain"
+            onLoad={() => setLoaded(true)}
+            onError={() => setLoaded(true)}
           />
         )
+      )}
+
+      {/* Spinner while the media (or its decrypt/download) is still loading. */}
+      {current?.mediaType !== 'text' && !loaded && (
+        <View style={[S.media, { alignItems: 'center', justifyContent: 'center' }]} pointerEvents="none">
+          <ActivityIndicator color="#fff" size="large" />
+        </View>
       )}
 
       {/* Tap zones (under everything visible) */}
@@ -299,16 +337,16 @@ export default function StoryViewerScreen() {
           <View style={{ flex: 1 }} />
           {isMyStory && (
             <TouchableOpacity onPress={openViewers} hitSlop={8} style={S.iconBtn}>
-              <Text style={S.iconBtnTxt}>👁️</Text>
+              <Ionicons name="eye-outline" size={20} color={colors.text} />
             </TouchableOpacity>
           )}
           {isMyStory && (
             <TouchableOpacity onPress={onDelete} hitSlop={8} style={S.iconBtn}>
-              <Text style={[S.iconBtnTxt, { color: '#FCA5A5' }]}>🗑</Text>
+              <Ionicons name="trash-outline" size={20} color="#FCA5A5" />
             </TouchableOpacity>
           )}
           <TouchableOpacity onPress={close} hitSlop={8} style={S.iconBtn}>
-            <Text style={S.iconBtnTxt}>✕</Text>
+            <Ionicons name="close" size={22} color={colors.text} />
           </TouchableOpacity>
         </View>
       </View>

@@ -9,6 +9,8 @@
 //
 // Pure on-device crypto; nothing here touches the network.
 
+import { Ionicons } from '@expo/vector-icons';
+import { brandAlpha } from '../constants/theme';
 import { Stack, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import {
@@ -38,7 +40,7 @@ export default function SplitKeyBackupScreen() {
       <Stack.Screen options={{ headerShown: false }} />
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
-          <Text style={S.backTxt}>←</Text>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title}>Split-key recovery</Text>
       </View>
@@ -271,7 +273,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   addBtn: { alignItems: 'center', paddingVertical: 12, marginTop: 8 },
   addTxt: { color: c.primary, fontSize: 14, fontWeight: '700' },
 
-  resultBox: { marginTop: 24, backgroundColor: 'rgba(16,185,129,0.08)', borderColor: 'rgba(16,185,129,0.3)', borderWidth: 1, borderRadius: 12, padding: 16, gap: 10 },
+  resultBox: { marginTop: 24, backgroundColor: brandAlpha(0.08), borderColor: brandAlpha(0.3), borderWidth: 1, borderRadius: 12, padding: 16, gap: 10 },
   resultLabel: { color: c.primary, fontSize: 11, fontWeight: '800', letterSpacing: 1 },
   resultPass: { color: c.text, fontSize: 18, fontWeight: '700' },
   resultNote: { color: c.textDim, fontSize: 11, lineHeight: 16 },

@@ -2,6 +2,8 @@
 // Crop, Rotate, Draw, Text overlay, Filters, Brightness/Contrast
 // Uses expo-image-manipulator for transforms, react-native-view-shot to capture
 
+import { BRAND_ACCENT } from '../constants/theme';
+import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useRef , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Image, ScrollView,
@@ -17,7 +19,7 @@ import ViewShot from 'react-native-view-shot';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
-const DRAW_COLORS = ['#FFFFFF', '#FF3C3C', '#4A9FFF', '#10B981', '#FBBF24'];
+const DRAW_COLORS = ['#FFFFFF', '#FF3C3C', '#4A9FFF', BRAND_ACCENT, '#FBBF24'];
 const FILTER_LIST = ['Original', 'B&W', 'Warm', 'Cool', 'Vivid'];
 const CROP_RATIOS = [
   { label: 'Free', value: null },
@@ -458,7 +460,7 @@ export default function ImageEditorScreen() {
               {textOverlays.map(t => (
                 <TouchableOpacity key={t.id} onPress={() => removeTextOverlay(t.id)} style={styles.textTag}>
                   <Text style={{ color: t.color, fontSize: 12 }}>{t.text}</Text>
-                  <Text style={{ color: colors.danger, fontSize: 10, marginLeft: 4 }}>✕</Text>
+                  <Ionicons name="close" size={12} color={colors.danger} style={{ marginLeft: 4 }} />
                 </TouchableOpacity>
               ))}
             </ScrollView>

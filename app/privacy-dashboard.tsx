@@ -3,6 +3,7 @@
  * Privacy Dashboard — security score, feature checklist, privacy controls.
  */
 
+import { brandAlpha } from '../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -456,7 +457,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   checkIconOff: { backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
   checkLabel: { fontSize: 14, color: c.text, fontWeight: '500', flex: 1 },
   alwaysBadge: {
-    backgroundColor: 'rgba(16,185,129,0.15)',
+    backgroundColor: brandAlpha(0.15),
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 6,

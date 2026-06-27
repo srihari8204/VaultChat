@@ -7,6 +7,7 @@
 //   { chatId, sendAt, type: 'text', content }
 // A 30-second sweep loop in server.js delivers when sendAt <= NOW().
 
+import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useState , useMemo} from 'react';
 import {
@@ -93,7 +94,7 @@ export default function ScheduleMessageScreen() {
       <StatusBar barStyle="light-content" />
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
-          <Text style={S.backTxt}>←</Text>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title}>Schedule message</Text>
       </View>

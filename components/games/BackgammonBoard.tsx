@@ -3,6 +3,7 @@
  * - = p2 (abs = checker count). Phase 'roll' → { action:'roll' }; 'move' →
  * { action:'move', from, dieValue }. Pick a die, then tap one of your points.
  */
+import { BRAND_ACCENT, brandAlpha } from '../../constants/theme';
 import { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import type { GameState } from '../../services/gameEngines';
@@ -89,15 +90,15 @@ const s = StyleSheet.create({
   grid: { backgroundColor: '#3A2616', borderRadius: 12, padding: 6, gap: 24, borderWidth: 1, borderColor: '#5A4028' },
   row: { flexDirection: 'row', justifyContent: 'space-between' },
   point: { flex: 1, alignItems: 'center', minHeight: 44, gap: 3, paddingVertical: 2 },
-  pointMine: { backgroundColor: 'rgba(16,185,129,0.15)', borderRadius: 4 },
+  pointMine: { backgroundColor: brandAlpha(0.15), borderRadius: 4 },
   idx: { color: 'rgba(255,255,255,0.3)', fontSize: 8 },
   checker: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  p1: { backgroundColor: '#10B981' },
+  p1: { backgroundColor: BRAND_ACCENT },
   p2: { backgroundColor: '#C0392B' },
-  cc: { color: '#04130D', fontSize: 11, fontWeight: '800' },
+  cc: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
   rollBtn: { backgroundColor: Aurora.primary, paddingVertical: 14, borderRadius: 16, alignItems: 'center' },
   off: { opacity: 0.4 },
-  rollTxt: { color: '#04130D', fontSize: 16, fontWeight: '800' },
+  rollTxt: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
   diceArea: { gap: 8, alignItems: 'center' },
   diceLabel: { color: Aurora.textDim, fontSize: 12, fontWeight: '600' },
   diceRow: { flexDirection: 'row', gap: 10 },

@@ -1,3 +1,5 @@
+import { BRAND_ACCENT } from '../constants/theme';
+import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
@@ -65,7 +67,7 @@ function BehavioralScreenContent() {
         <ScrollView contentContainerStyle={S.container}>
           <View style={S.header}>
             <TouchableOpacity onPress={() => router.back()} style={S.backBtn}>
-              <Text style={{ color: '#4A9FFF', fontSize: 18 }}>←</Text>
+              <Ionicons name="arrow-back" size={20} color="#4A9FFF" />
             </TouchableOpacity>
             <View style={{ flex: 1 }}>
               <Text style={S.title}>AI Behavioral Security</Text>
@@ -82,8 +84,8 @@ function BehavioralScreenContent() {
                 {pattern ? ('Trained on ' + pattern.sessionCount + ' sessions') : 'Not yet trained'}
               </Text>
               <View style={[S.statusPill, { backgroundColor: pattern ? '#052E16' : '#1a0000', borderColor: pattern ? '#166534' : '#7F1D1D' }]}>
-                <View style={[S.statusDot, { backgroundColor: pattern ? '#10B981' : '#EF4444' }]} />
-                <Text style={{ color: pattern ? '#10B981' : '#EF4444', fontSize: 11, fontWeight: '700' }}>
+                <View style={[S.statusDot, { backgroundColor: pattern ? BRAND_ACCENT : '#EF4444' }]} />
+                <Text style={{ color: pattern ? BRAND_ACCENT : '#EF4444', fontSize: 11, fontWeight: '700' }}>
                   {pattern ? 'AI TRAINED' : 'NEEDS TRAINING'}
                 </Text>
               </View>

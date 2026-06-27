@@ -2,6 +2,7 @@
 // D2DE Gaming Platform — Full lobby with matchmaking, coins, game selection
 // PDF page 22-23: 12 platform features + 19 world games across 6 continents
 
+import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useEffect, useRef , useMemo} from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, FlatList, Alert,
@@ -124,7 +125,7 @@ export default function GameLobbyScreen() {
       {/* Header */}
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-          <Text style={s.backTxt}>{'\u2190'}</Text>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={s.headerTitle}>{'\uD83C\uDFAE'} Game Lobby</Text>
@@ -297,7 +298,7 @@ export default function GameLobbyScreen() {
               {leaderboard.length === 0 ? (
                 <Text style={{ color: colors.textDim, textAlign: 'center', padding: 20 }}>No ranked players yet</Text>
               ) : leaderboard.map(e => (
-                <View key={e.userId} style={[s.achieveRow, e.isMe && { backgroundColor: '#6C63FF22', borderRadius: 8 }]}>
+                <View key={e.userId} style={[s.achieveRow, e.isMe && { backgroundColor: colors.primary + '22', borderRadius: 8 }]}>
                   <Text style={[s.achieveIcon, { width: 34, textAlign: 'center' }]}>
                     {e.rank <= 3 ? ['🥇', '🥈', '🥉'][e.rank - 1] : `#${e.rank}`}
                   </Text>

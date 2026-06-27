@@ -39,6 +39,7 @@ function safeKeyEqual(a, b) {
 }
 
 const db      = require('./db');
+const { sendPushToTokens } = require('./push');
 const gameStore = require('./gameStore');
 const redis   = require('./redis');
 const jwtUtil = require('./jwt');
@@ -96,7 +97,10 @@ app.use('/ai',       require('./routes/ai'));
 app.use('/contacts', require('./routes/contacts'));
 const chatsRouter = require('./routes/chats');
 app.use('/chats',    chatsRouter);
-app.use('/stories',  require('./routes/stories'));
+const storiesRouter = require('./routes/stories');
+app.use('/stories',  storiesRouter);
+storiesRouter.setBroadcasters({ emitToUid });   // push 'story_posted' to viewers live
+app.use('/communities', require('./routes/communities'));
 app.use('/link',     require('./routes/link'));
 app.use('/gif',      require('./routes/gif'));
 const channelsRouter = require('./routes/channels');
@@ -609,12 +613,15 @@ io.on('connection', (socket) => {
     socket.to(`chat:${chatId}`).emit('live_location_stop', { userId: socket.data.uid });
   });
 
+  // Route via fanOutToChat so it reaches every member's user-room (the chat
+  // list shows "typing…" too, not just the open chat) and honours hide_typing
+  // ghost-mode. chatId is included so each screen filters to the right chat.
   socket.on('typing_start', ({ chatId, uid }) => {
-    if (chatId) socket.to(`chat:${chatId}`).emit('typing_start', { uid });
+    if (chatId) fanOutToChat(chatId, 'typing_start', { uid, chatId });
   });
 
   socket.on('typing_stop', ({ chatId, uid }) => {
-    if (chatId) socket.to(`chat:${chatId}`).emit('typing_stop', { uid });
+    if (chatId) fanOutToChat(chatId, 'typing_stop', { uid, chatId });
   });
 
   socket.on('new_message', ({ chatId, messageId }) => {
@@ -660,7 +667,46 @@ io.on('connection', (socket) => {
   socket.on('webrtc_answer',      relayToPeer('webrtc_answer'));
   socket.on('webrtc_ice',         relayToPeer('webrtc_ice'));
   socket.on('webrtc_end',         relayToPeer('webrtc_end'));
-  socket.on('call_incoming',      relayToPeer('call_incoming'));
+  // Calls: relay over the socket AND fire a high-priority push, so the callee
+  // is alerted even when the app is killed / in doze (the socket is dead then).
+  // The client suppresses the notification when it's in the foreground (the
+  // socket already shows the in-app incoming-call screen) to avoid a double.
+  socket.on('call_incoming', async (data) => {
+    if (!data?.to) return;
+    emitToUid(data.to, 'call_incoming', { ...data, from: socket.data.uid, fromUid: socket.data.uid });
+    try {
+      // If the callee has a live socket, the app is running and shows the call
+      // in-app / via Notifee already — only wake the device when there's NO
+      // socket (killed / doze), to avoid double-ringing.
+      const live = await io.in(`user:${data.to}`).fetchSockets();
+      if (live.length > 0) return;
+
+      const r = await db.query(
+        `SELECT push_token FROM devices WHERE user_id = $1 AND push_token IS NOT NULL`,
+        [data.to],
+      );
+      const tokens = r.rows.map(x => x.push_token).filter(Boolean);
+      if (tokens.length) {
+        // Expo push → FCM (the app's google-services project). High-priority +
+        // the 'calls' channel wakes the device; the client renders the Notifee
+        // full-screen call.
+        await sendPushToTokens(tokens, {
+          title: data.callerName || 'Incoming call',
+          body: data.type === 'video' ? '📹 Video call' : '📞 Voice call',
+          channelId: 'calls',
+          categoryId: 'incoming_call',
+          sound: 'default',
+          data: {
+            type: 'call',
+            chatId: data.chatId || '',
+            fromUid: socket.data.uid,
+            callerName: data.callerName || '',
+            callType: data.type === 'video' ? 'video' : 'audio',
+          },
+        });
+      }
+    } catch (e) { /* best-effort wake-up push */ }
+  });
   socket.on('screen_share_start', relayToPeer('screen_share_start'));
   socket.on('screen_share_stop',  relayToPeer('screen_share_stop'));
   // VaultBeam P2P file transfer — own signaling channel so it never collides
@@ -669,6 +715,29 @@ io.on('connection', (socket) => {
   socket.on('vaultbeam_answer',   relayToPeer('vaultbeam_answer'));
   socket.on('vaultbeam_ice',      relayToPeer('vaultbeam_ice'));
   socket.on('vaultbeam_end',      relayToPeer('vaultbeam_end'));
+
+  // ── Group calls (mesh) ────────────────────────────────────────────
+  // A call room per chat. Joiners learn the existing roster; the per-pair
+  // WebRTC offer/answer/ice still flow through relayToPeer (tagged to/from).
+  // Glare is avoided client-side (smaller uid offers).
+  socket.on('join_call', async ({ chatId }) => {
+    if (!chatId) return;
+    const room = `call:${chatId}`;
+    let existing = [];
+    try {
+      const socks = await io.in(room).fetchSockets();
+      existing = [...new Set(socks.map(s => s.data?.uid).filter(u => u && u !== socket.data.uid))];
+    } catch {}
+    socket.join(room);
+    socket.emit('call_roster', { chatId, peers: existing });
+    socket.to(room).emit('call_peer_joined', { chatId, uid: socket.data.uid });
+  });
+  socket.on('leave_call', ({ chatId }) => {
+    if (!chatId) return;
+    const room = `call:${chatId}`;
+    socket.to(room).emit('call_peer_left', { chatId, uid: socket.data.uid });
+    socket.leave(room);
+  });
 
   // ── Gaming Platform ───────────────────────────────────────
   // Ephemeral in-memory — coins, rooms, queue. Lost on restart (acceptable
@@ -825,6 +894,12 @@ io.on('connection', (socket) => {
   // ── Disconnect cleanup ────────────────────────────────────
   socket.on('disconnect', () => {
     untrackSocket(socket);
+    // Tell any active call rooms this participant dropped.
+    for (const room of socket.rooms) {
+      if (typeof room === 'string' && room.startsWith('call:')) {
+        socket.to(room).emit('call_peer_left', { chatId: room.slice(5), uid: socket.data.uid });
+      }
+    }
     // Drop out of any pending matchmaking queue.
     for (const [k, w] of gameMatchQueue) if (w.socketId === socket.id) gameMatchQueue.delete(k);
     // Forfeit any active game this socket was in — the remaining player wins.

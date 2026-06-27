@@ -10,11 +10,11 @@ import {
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
-import { RADIUS, SPACING } from '../../constants/theme';
+import { RADIUS, SPACING, ELEVATION } from '../../constants/theme';
 import { useColors } from '../../lib/theme';
 import { AppText } from './Text';
 
-type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
+type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'outline';
 type Size = 'sm' | 'md' | 'lg';
 
 export interface ButtonProps {
@@ -48,10 +48,13 @@ export function Button({
     : variant === 'danger' ? Aurora.danger
     : variant === 'secondary' ? Aurora.surfaceSolid : 'transparent';
   const fg =
-    variant === 'primary' ? '#04130D'
+    variant === 'primary' ? '#FFFFFF'
     : variant === 'danger' ? '#FFFFFF'
-    : variant === 'ghost' ? Aurora.primary : Aurora.text;
-  const border = variant === 'secondary' ? Aurora.border : 'transparent';
+    : (variant === 'ghost' || variant === 'outline') ? Aurora.primary : Aurora.text;
+  const border =
+    variant === 'secondary' ? Aurora.border
+    : variant === 'outline' ? Aurora.primary : 'transparent';
+  const filled = variant === 'primary' || variant === 'danger';
 
   return (
     <TouchableOpacity
@@ -60,7 +63,8 @@ export function Button({
       activeOpacity={0.85}
       style={[
         styles.base,
-        { height: HEIGHT[size], backgroundColor: bg, borderColor: border, borderWidth: border === 'transparent' ? 0 : 1 },
+        { height: HEIGHT[size], backgroundColor: bg, borderColor: border, borderWidth: border === 'transparent' ? 0 : 1.5 },
+        filled && !isDisabled && { ...ELEVATION.sm, shadowColor: bg },
         fullWidth && { alignSelf: 'stretch' },
         isDisabled && { opacity: 0.5 },
         style,
@@ -79,7 +83,7 @@ export function Button({
 }
 
 const styles = StyleSheet.create({
-  base: { borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center', paddingHorizontal: SPACING.lg },
+  base: { borderRadius: RADIUS.lg, alignItems: 'center', justifyContent: 'center', paddingHorizontal: SPACING.xl },
   row: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm },
 });
 

@@ -5,11 +5,13 @@
 // it into a chat as a file attachment. Recent docs are the real PDFs produced on
 // this device. No fake OCR, no fabricated "AES-256" claim, no simulated progress.
 
+import { Ionicons } from '@expo/vector-icons';
+import { brandAlpha } from '../constants/theme';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -181,7 +183,7 @@ function DocScannerContent() {
       <Animated.View style={{ flex: 1, opacity: fadeIn }}>
         <View style={S.header}>
           <TouchableOpacity onPress={() => step === 'pick' ? router.back() : resetScanner()} style={S.backBtn}>
-            <Text style={{ color: colors.primary, fontSize: 18 }}>←</Text>
+            <Ionicons name="arrow-back" size={24} color={colors.primary} />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
             <Text style={S.title}>📄 Doc Scanner</Text>
@@ -352,6 +354,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   docRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(10,22,40,0.8)', borderRadius: 14, padding: 14, gap: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
   typeCard: { width: '30%', flex: 1, minWidth: 100, backgroundColor: 'rgba(10,22,40,0.8)', borderRadius: 16, padding: 14, alignItems: 'center', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.06)' },
   input: { backgroundColor: 'rgba(6,14,34,0.9)', borderRadius: 14, padding: 15, color: '#fff', fontSize: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
-  successBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(16,185,129,0.1)', borderRadius: 16, padding: 16, gap: 14, borderWidth: 1, borderColor: 'rgba(16,185,129,0.25)' },
+  successBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: brandAlpha(0.1), borderRadius: 16, padding: 16, gap: 14, borderWidth: 1, borderColor: brandAlpha(0.25) },
   docPreviewLarge: { height: 320, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(74,159,255,0.2)', overflow: 'hidden', backgroundColor: 'rgba(2,11,24,0.9)' },
 });

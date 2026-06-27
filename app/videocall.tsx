@@ -6,8 +6,9 @@
 //   * Remote video via large <RTCView>
 //   * Extra control: switch camera (front <-> back)
 
-import { Audio } from 'expo-av';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import InCallManager from 'react-native-incall-manager';
+import { setActiveCall, clearActiveCall, type ActiveCall } from '../lib/callState';
 import { useCallback, useEffect, useRef, useState , useMemo} from 'react';
 import { Alert, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { type Palette } from '../constants/theme';
@@ -22,6 +23,8 @@ import {
 import { getCurrentUserAsync } from './(constants)/authService';
 import { getTurnConfig, type IceServer } from '../lib/chatService';
 import { getSocket } from '../lib/socket';
+import { addCallLog } from '../lib/callLog';
+import { Ionicons } from '@expo/vector-icons';
 
 type CallState = 'connecting' | 'ringing' | 'connected' | 'ended';
 
@@ -166,12 +169,21 @@ export default function VideoCallScreen() {
   const localStreamRef  = useRef<any>(null);
   const meIdRef         = useRef<string>('');
   const timerRef        = useRef<any>(null);
+  const ringTimerRef    = useRef<any>(null);
   const offsRef         = useRef<Array<() => void>>([]);
+  const secondsRef      = useRef(0);
+  const connectedRef    = useRef(false);
+  const loggedRef       = useRef(false);
+
+  useEffect(() => { secondsRef.current = seconds; }, [seconds]);
+  useEffect(() => { if (state === 'connected') connectedRef.current = true; }, [state]);
 
   const teardown = useCallback((notify = true) => {
     offsRef.current.forEach(fn => { try { fn(); } catch {} });
     offsRef.current = [];
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    if (ringTimerRef.current) { clearInterval(ringTimerRef.current); ringTimerRef.current = null; }
+    try { InCallManager.stop(); } catch {}
     try { localStreamRef.current?.getTracks().forEach((t: any) => t.stop()); } catch {}
     try { pcRef.current?.close(); } catch {}
     pcRef.current = null;
@@ -181,10 +193,49 @@ export default function VideoCallScreen() {
   }, [peerUid, chatId]);
 
   const endCall = useCallback((notify = true) => {
+    if (!loggedRef.current && peerUid) {
+      loggedRef.current = true;
+      const incoming = isIncoming === 'true' || isIncoming === '1';
+      const dir: 'incoming' | 'outgoing' | 'missed' = incoming ? (connectedRef.current ? 'incoming' : 'missed') : 'outgoing';
+      addCallLog({ chatId, peerUid, peerName: peerName || 'VaultChat user', kind: 'video', direction: dir, at: Date.now() - secondsRef.current * 1000, durationSec: secondsRef.current }).catch(() => {});
+    }
     setState('ended');
     teardown(notify);
     setTimeout(() => router.back(), 200);
-  }, [teardown, router]);
+  }, [teardown, router, peerUid, peerName, isIncoming]);
+
+  // ── call-waiting / hold registration (pause mic + camera on hold) ──
+  const mutedRef = useRef(false);
+  useEffect(() => { mutedRef.current = muted; }, [muted]);
+  const speakerRef = useRef(true);   // video defaults to speaker
+  const heldRef = useRef(false);
+  const meRef   = useRef<ActiveCall | null>(null);
+
+  useEffect(() => {
+    const me: ActiveCall = {
+      chatId, peerUid, peerName: peerName || 'VaultChat user', kind: 'video',
+      hold: () => { heldRef.current = true; try {
+        localStreamRef.current?.getAudioTracks?.().forEach((t: any) => { t.enabled = false; });
+        localStreamRef.current?.getVideoTracks?.().forEach((t: any) => { t.enabled = false; });
+        pcRef.current?.getReceivers?.().forEach((r: any) => { if (r.track) r.track.enabled = false; });
+      } catch {} },
+      resume: () => { heldRef.current = false; try {
+        InCallManager.start({ media: 'video', auto: true });
+        InCallManager.setForceSpeakerphoneOn(speakerRef.current ? true : null);
+        localStreamRef.current?.getAudioTracks?.().forEach((t: any) => { t.enabled = !mutedRef.current; });
+        localStreamRef.current?.getVideoTracks?.().forEach((t: any) => { t.enabled = !cameraOff; });
+        pcRef.current?.getReceivers?.().forEach((r: any) => { if (r.track) r.track.enabled = true; });
+      } catch {} },
+      hangUp: () => endCall(true),
+    };
+    meRef.current = me;
+    setActiveCall(me);
+    return () => clearActiveCall(me);
+  }, [chatId, peerUid, peerName, endCall, cameraOff]);
+
+  useFocusEffect(useCallback(() => {
+    if (heldRef.current && meRef.current) { meRef.current.resume(); setActiveCall(meRef.current); }
+  }, []));
 
   const startTimer = useCallback(() => {
     if (timerRef.current) return;
@@ -196,11 +247,12 @@ export default function VideoCallScreen() {
     let cancelled = false;
     const run = async () => {
       try {
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS:         true,
-          playsInSilentModeIOS:       true,
-          playThroughEarpieceAndroid: false,
-        });
+        // InCallManager owns the call audio route; `auto` follows Bluetooth/
+        // wired headsets. Speaker is the default for a video call.
+        try {
+          InCallManager.start({ media: 'video', auto: true });
+          InCallManager.setForceSpeakerphoneOn(true);
+        } catch {}
 
         const me = await getCurrentUserAsync();
         if (!me?.id) throw new Error('Not signed in');
@@ -270,16 +322,24 @@ export default function VideoCallScreen() {
         } else {
           const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
           await pc.setLocalDescription(offer);
-          s.emit('call_incoming', {
+          const ringPayload = {
             to: peerUid,
             from: meIdRef.current,
             chatId,
             type: 'video',
             callerName: me.name ?? me.email ?? 'VaultChat user',
             offer,
-          });
+          };
+          s.emit('call_incoming', ringPayload);
           s.emit('webrtc_offer', { to: peerUid, from: meIdRef.current, offer });
           setState('ringing');
+          // Re-send ring + offer every 3s so a killed-then-woken callee can answer.
+          let rings = 0;
+          ringTimerRef.current = setInterval(() => {
+            if (connectedRef.current || rings >= 9) { clearInterval(ringTimerRef.current); ringTimerRef.current = null; return; }
+            rings++;
+            try { s.emit('call_incoming', ringPayload); s.emit('webrtc_offer', { to: peerUid, from: meIdRef.current, offer }); } catch {}
+          }, 3000);
         }
       } catch (e: any) {
         if (cancelled) return;
@@ -312,16 +372,11 @@ export default function VideoCallScreen() {
     tracks.forEach((t: any) => { try { t._switchCamera?.(); } catch {} });
   }, []);
 
-  const toggleSpeaker = useCallback(async () => {
+  const toggleSpeaker = useCallback(() => {
     const next = !speaker;
     setSpeaker(next);
-    try {
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS:         true,
-        playsInSilentModeIOS:       true,
-        playThroughEarpieceAndroid: !next,
-      });
-    } catch {}
+    speakerRef.current = next;
+    try { InCallManager.setForceSpeakerphoneOn(next ? true : null); } catch {}
   }, [speaker]);
 
   const statusText = state === 'connecting' ? 'Connecting…'
@@ -406,17 +461,17 @@ export default function VideoCallScreen() {
 
       {/* Controls */}
       <View style={S.controls}>
-        <ControlBtn icon={muted ? '🎙️̸' : '🎙️'} label={muted ? 'Unmute' : 'Mute'} active={muted} onPress={toggleMute} />
-        <ControlBtn icon={cameraOff ? '📷̸' : '📷'} label={cameraOff ? 'Camera' : 'Off'} active={cameraOff} onPress={toggleCamera} />
-        <ControlBtn icon="🔄" label="Flip" onPress={flipCamera} />
+        <ControlBtn icon={muted ? 'mic-off' : 'mic'} label={muted ? 'Unmute' : 'Mute'} active={muted} onPress={toggleMute} />
+        <ControlBtn icon={cameraOff ? 'videocam-off' : 'videocam'} label={cameraOff ? 'Camera' : 'Off'} active={cameraOff} onPress={toggleCamera} />
+        <ControlBtn icon="camera-reverse" label="Flip" onPress={flipCamera} />
         <ControlBtn
           icon="✨"
           label={filter === 'none' ? 'Beauty' : f.label}
           active={showFilters || filter !== 'none'}
           onPress={() => setShowFilters(v => !v)}
         />
-        <ControlBtn icon={speaker ? '🔊' : '🔈'} label={speaker ? 'Speaker' : 'Earpiece'} active={speaker} onPress={toggleSpeaker} />
-        <ControlBtn icon="📴" label="End" danger onPress={() => endCall(true)} />
+        <ControlBtn icon={speaker ? 'volume-high' : 'volume-low'} label={speaker ? 'Speaker' : 'Earpiece'} active={speaker} onPress={toggleSpeaker} />
+        <ControlBtn icon="call" label="End" danger onPress={() => endCall(true)} />
       </View>
     </View>
   );
@@ -431,7 +486,7 @@ function ControlBtn({ icon, label, onPress, active, danger }:
       onPress={onPress}
       activeOpacity={0.85}
     >
-      <Text style={S.btnIcon}>{icon}</Text>
+      <Ionicons name={icon as any} size={22} color="#fff" style={S.btnIcon} />
       <Text style={S.btnLabel}>{label}</Text>
     </TouchableOpacity>
   );

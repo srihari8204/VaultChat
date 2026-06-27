@@ -4,6 +4,7 @@
 // /channels/:id/posts (read/post). No Firestore. The iOS-only Alert.prompt
 // join flow is replaced with a cross-platform modal.
 
+import { brandAlpha } from '../constants/theme';
 import React, { useState, useEffect, useCallback , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList, Alert, StatusBar, TextInput, Modal, Share, ActivityIndicator,
@@ -164,7 +165,7 @@ export default function BroadcastScreen() {
               multiline
             />
             <TouchableOpacity style={[s.postBtn, !postText.trim() && { opacity: 0.4 }]} onPress={sendPost} disabled={!postText.trim() || posting}>
-              {posting ? <ActivityIndicator color="#04130D" size="small" /> : <Text style={s.postBtnTxt}>POST</Text>}
+              {posting ? <ActivityIndicator color={colors.bubbleOutText} size="small" /> : <Text style={s.postBtnTxt}>POST</Text>}
             </TouchableOpacity>
           </View>
         ) : (
@@ -190,10 +191,12 @@ export default function BroadcastScreen() {
 
       <View style={s.topBtns}>
         <TouchableOpacity style={s.createBtn} onPress={() => setShowCreate(true)}>
-          <Text style={s.createTxt}>＋  Create Channel</Text>
+          <Ionicons name="add" size={16} color={colors.accent} />
+          <Text style={s.createTxt}>  Create Channel</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[s.createBtn, s.joinBtn]} onPress={() => setShowJoin(true)}>
-          <Text style={[s.createTxt, { color: colors.primary }]}>🔗  Join Channel</Text>
+          <Ionicons name="link" size={16} color={colors.primary} />
+          <Text style={[s.createTxt, { color: colors.primary }]}>  Join Channel</Text>
         </TouchableOpacity>
       </View>
 
@@ -205,7 +208,7 @@ export default function BroadcastScreen() {
           keyExtractor={c => c.id}
           renderItem={({ item }) => (
             <TouchableOpacity style={s.chRow} onPress={() => openChannel(item)} activeOpacity={0.7}>
-              <View style={s.chAvatar}><Text style={{ fontSize: 22 }}>📢</Text></View>
+              <View style={s.chAvatar}><Ionicons name="megaphone-outline" size={22} color={colors.textDim} /></View>
               <View style={{ flex: 1 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                   <Text style={s.chName} numberOfLines={1}>{item.name}</Text>
@@ -233,7 +236,7 @@ export default function BroadcastScreen() {
             <TextInput style={s.modalInput} value={name} onChangeText={setName} placeholder="Channel name" placeholderTextColor={colors.textFaint} />
             <TextInput style={[s.modalInput, { height: 80, textAlignVertical: 'top' }]} value={desc} onChangeText={setDesc} placeholder="Description (optional)" placeholderTextColor={colors.textFaint} multiline />
             <TouchableOpacity style={[s.modalBtn, (!name.trim() || busy) && { opacity: 0.5 }]} onPress={create} disabled={!name.trim() || busy}>
-              {busy ? <ActivityIndicator color="#04130D" /> : <Text style={s.modalBtnTxt}>Create</Text>}
+              {busy ? <ActivityIndicator color={colors.bubbleOutText} /> : <Text style={s.modalBtnTxt}>Create</Text>}
             </TouchableOpacity>
             <TouchableOpacity onPress={() => setShowCreate(false)}><Text style={s.modalCancel}>Cancel</Text></TouchableOpacity>
           </View>
@@ -255,7 +258,7 @@ export default function BroadcastScreen() {
               autoCorrect={false}
             />
             <TouchableOpacity style={[s.modalBtn, (!joinCode.trim() || busy) && { opacity: 0.5 }]} onPress={join} disabled={!joinCode.trim() || busy}>
-              {busy ? <ActivityIndicator color="#04130D" /> : <Text style={s.modalBtnTxt}>Join</Text>}
+              {busy ? <ActivityIndicator color={colors.bubbleOutText} /> : <Text style={s.modalBtnTxt}>Join</Text>}
             </TouchableOpacity>
             <TouchableOpacity onPress={() => setShowJoin(false)}><Text style={s.modalCancel}>Cancel</Text></TouchableOpacity>
           </View>
@@ -272,15 +275,15 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   title: { color: c.text, fontSize: 18, fontWeight: '800', flex: 1 },
   shareLink: { color: c.accent, fontSize: 14, fontWeight: '700' },
   topBtns: { flexDirection: 'row', gap: 8, padding: 12 },
-  createBtn: { flex: 1, backgroundColor: c.surface, borderRadius: 12, paddingVertical: 12, alignItems: 'center', borderWidth: 1, borderColor: c.border },
-  joinBtn: { backgroundColor: 'rgba(16,185,129,0.13)', borderColor: 'rgba(16,185,129,0.3)' },
+  createBtn: { flex: 1, flexDirection: 'row', backgroundColor: c.surface, borderRadius: 12, paddingVertical: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.border },
+  joinBtn: { backgroundColor: brandAlpha(0.13), borderColor: brandAlpha(0.3) },
   createTxt: { color: c.accent, fontSize: 13, fontWeight: '700' },
   chRow: { flexDirection: 'row', alignItems: 'center', padding: 14, marginHorizontal: 12, marginBottom: 6, backgroundColor: c.card, borderRadius: 14, borderWidth: 1, borderColor: c.border },
   chAvatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: c.surfaceSolid, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   chName: { color: c.text, fontSize: 15, fontWeight: '700', flex: 1, marginRight: 8 },
   chSubs: { color: c.textDim, fontSize: 11 },
   chLast: { color: c.textDim, fontSize: 12, marginTop: 2 },
-  adminBadge: { backgroundColor: 'rgba(6,182,212,0.15)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2, marginLeft: 8 },
+  adminBadge: { backgroundColor: brandAlpha(0.15), borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2, marginLeft: 8 },
   adminTxt: { color: c.accent, fontSize: 10, fontWeight: '800' },
   channelInfo: { padding: 12, backgroundColor: c.card, borderBottomWidth: 1, borderBottomColor: c.separator },
   channelMeta: { color: c.textDim, fontSize: 12 },
@@ -292,7 +295,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   postBar: { flexDirection: 'row', alignItems: 'flex-end', padding: 10, backgroundColor: c.bg, borderTopWidth: 1, borderTopColor: c.separator },
   postInput: { flex: 1, backgroundColor: c.surface, color: c.text, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14, maxHeight: 100, marginRight: 8, borderWidth: 1, borderColor: c.border },
   postBtn: { backgroundColor: c.primary, borderRadius: 12, paddingHorizontal: 18, paddingVertical: 11 },
-  postBtnTxt: { color: '#04130D', fontWeight: '900' },
+  postBtnTxt: { color: c.bubbleOutText, fontWeight: '900' },
   readOnly: { padding: 14, alignItems: 'center', backgroundColor: c.surface, borderTopWidth: 1, borderTopColor: c.separator },
   readOnlyTxt: { color: c.textDim, fontSize: 13 },
   emptyBox: { alignItems: 'center', padding: 40 },
@@ -303,6 +306,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   modalTitle: { color: c.text, fontSize: 18, fontWeight: '900', marginBottom: 16 },
   modalInput: { backgroundColor: c.surface, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, color: c.text, fontSize: 14, marginBottom: 12, borderWidth: 1, borderColor: c.border },
   modalBtn: { backgroundColor: c.primary, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
-  modalBtnTxt: { color: '#04130D', fontWeight: '800' },
+  modalBtnTxt: { color: c.bubbleOutText, fontWeight: '800' },
   modalCancel: { color: c.textDim, textAlign: 'center', marginTop: 12 },
 });

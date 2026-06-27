@@ -68,6 +68,8 @@ async function sendPushToTokens(tokens, payload) {
     channelId: payload.channelId || 'default', // Android channel = per-chat sound
     _displayInForeground: true,
   };
+  // Action buttons (Accept/Decline for calls) via an iOS/Android category.
+  if (payload.categoryId) base.categoryId = payload.categoryId;
 
   for (let i = 0; i < valid.length; i += BATCH) {
     const slice = valid.slice(i, i + BATCH);

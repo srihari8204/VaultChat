@@ -4,6 +4,7 @@
 // (paused) / history, with per-file SHA-256 integrity badges and totals. No
 // fabricated rows — everything here is a real persisted transfer record.
 
+import { brandAlpha } from '../constants/theme';
 import React, { useState, useEffect, useCallback , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, StatusBar, FlatList, ActivityIndicator, Alert,
@@ -160,6 +161,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   status: { fontSize: 12, fontWeight: '700' },
   barTrack: { height: 5, borderRadius: 3, backgroundColor: c.surface, marginTop: 6, overflow: 'hidden' },
   barFill: { height: 5, borderRadius: 3, backgroundColor: c.accent },
-  verifiedPill: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(16,185,129,0.12)', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  verifiedPill: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: brandAlpha(0.12), borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   verifiedTxt: { color: c.primary, fontSize: 10, fontWeight: '700' },
 });

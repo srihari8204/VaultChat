@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState , useMemo} from 'react';
@@ -91,7 +92,7 @@ function DashboardContent() {
 
       <Animated.View style={[{flex:1},{ opacity:fadeAnim}]}>
         <View style={S.header}>
-          <TouchableOpacity onPress={()=>router.back()} style={S.backBtn}><Text style={{color:colors.primary,fontSize:18}}>←</Text></TouchableOpacity>
+          <TouchableOpacity onPress={()=>router.back()} style={S.backBtn}><Ionicons name="arrow-back" size={24} color={colors.primary} /></TouchableOpacity>
           <View style={{flex:1}}>
             <Text style={S.title}>🛡️ Security Hub</Text>
             <Text style={{color:colors.textFaint,fontSize:9,letterSpacing:2}}>YOUR ACCOUNT SECURITY</Text>

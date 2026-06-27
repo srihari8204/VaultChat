@@ -2,6 +2,7 @@
 // Current Location — share exact coordinates as a snapshot
 // Uses expo-location for real GPS, sends via Firestore chat message
 
+import { Ionicons } from '@expo/vector-icons';
 import React, { useState , useMemo} from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Alert, Platform, ActivityIndicator,
@@ -93,7 +94,7 @@ export default function CurrentLocationScreen() {
 
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-          <Text style={s.backTxt}>{'\u2190'}</Text>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={s.headerTitle}>{'\uD83D\uDCCC'} Current Location</Text>
@@ -113,7 +114,10 @@ export default function CurrentLocationScreen() {
               {loading ? (
                 <ActivityIndicator color="#FFF" />
               ) : (
-                <Text style={s.getBtnTxt}>{'\uD83D\uDCCD'} Get My Location</Text>
+                <>
+                  <Ionicons name="location" size={18} color="#FFF" />
+                  <Text style={[s.getBtnTxt, { marginLeft: 8 }]}>Get My Location</Text>
+                </>
               )}
             </TouchableOpacity>
             <View style={s.infoCard}>
@@ -148,14 +152,16 @@ export default function CurrentLocationScreen() {
 
             {chatId ? (
               <TouchableOpacity style={s.shareBtn} onPress={shareLocation} activeOpacity={0.8}>
-                <Text style={s.shareBtnTxt}>{'\uD83D\uDCE4'} Share to Chat</Text>
+                <Ionicons name="share-outline" size={18} color="#FFF" />
+                <Text style={[s.shareBtnTxt, { marginLeft: 8 }]}>Share to Chat</Text>
               </TouchableOpacity>
             ) : (
               <Text style={s.noChat}>Open from a chat to share location</Text>
             )}
 
             <TouchableOpacity style={s.refreshBtn} onPress={getLocation}>
-              <Text style={s.refreshBtnTxt}>{'\uD83D\uDD04'} Refresh Location</Text>
+              <Ionicons name="refresh" size={16} color={colors.textDim} />
+              <Text style={[s.refreshBtnTxt, { marginLeft: 6 }]}>Refresh Location</Text>
             </TouchableOpacity>
           </>
         )}
@@ -177,7 +183,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   title: { fontSize: 22, fontWeight: '700', color: c.text, marginBottom: 8 },
   sub: { fontSize: 14, color: c.textDim, textAlign: 'center', lineHeight: 20, marginBottom: 28 },
 
-  getBtn: { backgroundColor: c.purple, borderRadius: 16, paddingVertical: 16, paddingHorizontal: 40, marginBottom: 24, width: '100%', alignItems: 'center' },
+  getBtn: { backgroundColor: c.purple, borderRadius: 16, paddingVertical: 16, paddingHorizontal: 40, marginBottom: 24, width: '100%', flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
   getBtnTxt: { color: '#FFF', fontSize: 17, fontWeight: '700' },
 
   infoCard: { flexDirection: 'row', gap: 10, backgroundColor: c.primary + '10', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: c.primary + '30', width: '100%' },
@@ -193,9 +199,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   coordVal: { color: c.text, fontSize: 16, fontWeight: '700', fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
   addressTxt: { color: c.text, fontSize: 13, marginTop: 12, textAlign: 'center' },
 
-  shareBtn: { backgroundColor: c.primary, borderRadius: 16, paddingVertical: 16, width: '100%', alignItems: 'center', marginBottom: 12 },
+  shareBtn: { backgroundColor: c.primary, borderRadius: 16, paddingVertical: 16, width: '100%', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
   shareBtnTxt: { color: '#FFF', fontSize: 17, fontWeight: '700' },
   noChat: { color: c.textDim, fontSize: 13, marginBottom: 12 },
-  refreshBtn: { backgroundColor: c.card, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 24, borderWidth: 1, borderColor: c.border },
+  refreshBtn: { backgroundColor: c.card, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 24, borderWidth: 1, borderColor: c.border, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
   refreshBtnTxt: { color: c.textDim, fontSize: 14, fontWeight: '600' },
 });

@@ -3,6 +3,7 @@
  * ({ action:'fold'|'check'|'call'|'raise', amount? }). hands[me]=2 hole cards,
  * board=community, data.pot/currentBet/bets, scores=chips.
  */
+import { brandAlpha } from '../../constants/theme';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import type { GameState } from '../../services/gameEngines';
 import { Aurora } from '../../constants/theme';
@@ -72,7 +73,7 @@ const s = StyleSheet.create({
   topRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%' },
   chip: { color: Aurora.text, fontSize: 13, fontWeight: '700' },
   phase: { color: Aurora.accent, fontSize: 12, fontWeight: '800' },
-  potBox: { backgroundColor: 'rgba(16,185,129,0.12)', borderColor: 'rgba(16,185,129,0.3)', borderWidth: 1, borderRadius: 12, paddingHorizontal: 18, paddingVertical: 6 },
+  potBox: { backgroundColor: brandAlpha(0.12), borderColor: brandAlpha(0.3), borderWidth: 1, borderRadius: 12, paddingHorizontal: 18, paddingVertical: 6 },
   potTxt: { color: Aurora.primary, fontSize: 14, fontWeight: '800' },
   label: { color: Aurora.textDim, fontSize: 12, fontWeight: '700', alignSelf: 'flex-start' },
   cardRow: { flexDirection: 'row', gap: 6, justifyContent: 'center', minHeight: 62 },

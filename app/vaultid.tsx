@@ -1,4 +1,6 @@
+import { BRAND_ACCENT } from '../constants/theme';
 import { ErrorBoundary } from '../components/ErrorBoundary';
+import { Ionicons } from '@expo/vector-icons';
 
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -8,7 +10,7 @@ import { VaultID, destroyVaultID, generateIdentityCertificate, generateVaultID, 
 
 const { width } = Dimensions.get('window');
 
-const AVATARS = ['ðŸ§‘','ðŸ‘©','ðŸ‘¨','ðŸ§”','ðŸ‘§','ðŸ‘¦','ðŸ§“','ðŸ‘´','ðŸ‘µ','ðŸ¦¸','ðŸ¦¹','ðŸ§™','ðŸ§','ðŸ§›','ðŸ¤–','ðŸ‘¾'];
+const AVATARS = ['🧑','👩','👨','🧔','👧','👦','🧓','👴','👵','🦸','🦹','🧙','🧝','🧛','🤖','👾'];
 
 function VaultIDScreenContent() {
   const router = useRouter();
@@ -21,7 +23,7 @@ function VaultIDScreenContent() {
   const [creating, setCreating] = useState(false);
   const [displayName, setDisplayName] = useState('');
   const [bio, setBio] = useState('');
-  const [selectedAvatar, setSelectedAvatar] = useState('ðŸ§‘');
+  const [selectedAvatar, setSelectedAvatar] = useState('🧑');
   const [signedMsg, setSignedMsg] = useState('');
 
   const fadeIn    = useRef(new Animated.Value(0)).current;
@@ -58,7 +60,7 @@ function VaultIDScreenContent() {
       setVaultID(id);
       setShowCreate(false);
       setDisplayName(''); setBio('');
-      Alert.alert('ðŸ§¬ VaultID Created!', 'Your cryptographic identity is ready.\n\nNo phone number needed â€” ever!\n\nYour VaultTag: ' + id.vaultTag);
+      Alert.alert('🧬 VaultID Created!', 'Your cryptographic identity is ready.\n\nNo phone number needed — ever!\n\nYour VaultTag: ' + id.vaultTag);
     } catch {
       Alert.alert('Error','Failed to create VaultID. Try again.');
     }
@@ -76,23 +78,23 @@ function VaultIDScreenContent() {
 
   const handleSign = async () => {
     try {
-      const msg = 'VaultChat Identity Proof â€” ' + Date.now();
+      const msg = 'VaultChat Identity Proof — ' + Date.now();
       const sig = await signMessage(msg);
       setSignedMsg(sig.substring(0,40)+'...');
-      Alert.alert('âœ… Signed!','Message signed with your private key.\n\nThis proves you own this VaultID without revealing your private key.');
+      Alert.alert('✅ Signed!','Message signed with your private key.\n\nThis proves you own this VaultID without revealing your private key.');
     } catch { Alert.alert('Error','Could not sign message'); }
   };
 
   const handleShare = async () => {
     if(!vaultID) return;
     await Share.share({
-      message: 'Add me on VaultChat!\n\nVaultTag: '+vaultID.vaultTag+'\nWallet: '+shortAddress(vaultID.walletAddress)+'\n\nNo phone number needed â€” find me by VaultTag only.',
+      message: 'Add me on VaultChat!\n\nVaultTag: '+vaultID.vaultTag+'\nWallet: '+shortAddress(vaultID.walletAddress)+'\n\nNo phone number needed — find me by VaultTag only.',
       title: 'My VaultID',
     });
   };
 
   const handleDestroy = () => {
-    Alert.alert('ðŸ’€ Destroy VaultID','This will permanently delete your cryptographic identity.\n\nThis cannot be undone!',[
+    Alert.alert('💀 Destroy VaultID','This will permanently delete your cryptographic identity.\n\nThis cannot be undone!',[
       {text:'Cancel',style:'cancel'},
       {text:'DESTROY',style:'destructive',onPress:async()=>{
         await destroyVaultID();
@@ -102,13 +104,13 @@ function VaultIDScreenContent() {
     ]);
   };
 
-  const trustColor = (score: number) => score>=80?'#10B981':score>=50?'#F59E0B':'#EF4444';
+  const trustColor = (score: number) => score>=80?BRAND_ACCENT:score>=50?'#F59E0B':'#EF4444';
   const rotateStr = rotate.interpolate({inputRange:[0,1],outputRange:['0deg','360deg']});
   const chainOpacity = chainAnim.interpolate({inputRange:[0,1],outputRange:[0.3,1]});
 
   if(loading) return (
     <LinearGradient colors={['#FFFFFF','#060F24']} style={{flex:1,justifyContent:'center',alignItems:'center'}}>
-      <Text style={{color:'#7C3AED',fontSize:40}}>ðŸ§¬</Text>
+      <Text style={{color:'#7C3AED',fontSize:40}}>🧬</Text>
       <Text style={{color:'#4A9FFF',fontSize:14,marginTop:12,letterSpacing:2}}>LOADING VAULT ID...</Text>
     </LinearGradient>
   );
@@ -120,10 +122,10 @@ function VaultIDScreenContent() {
         {/* Header */}
         <View style={S.header}>
           <TouchableOpacity onPress={()=>router.back()} style={S.backBtn}>
-            <Text style={{color:'#4A9FFF',fontSize:18}}>â†</Text>
+            <Ionicons name="arrow-back" size={24} color="#4A9FFF" />
           </TouchableOpacity>
           <View style={{flex:1}}>
-            <Text style={S.headerTitle}>ðŸ§¬ VaultID</Text>
+            <Text style={S.headerTitle}>🧬 VaultID</Text>
             <Text style={{color:'#3D5A7A',fontSize:10,letterSpacing:1.5}}>CRYPTOGRAPHIC IDENTITY</Text>
           </View>
           {vaultID&&<TouchableOpacity onPress={handleShare} style={S.shareBtn}>
@@ -145,7 +147,7 @@ function VaultIDScreenContent() {
                 <LinearGradient colors={['#1D4ED8','#7C3AED']} style={S.avatarGrad}>
                   <Text style={{fontSize:44}}>{vaultID.avatar}</Text>
                 </LinearGradient>
-                {vaultID.isVerified&&<View style={S.verifiedBadge}><Text style={{fontSize:14}}>âœ…</Text></View>}
+                {vaultID.isVerified&&<View style={S.verifiedBadge}><Text style={{fontSize:14}}>✅</Text></View>}
               </View>
 
               {/* Name & VaultTag */}
@@ -176,14 +178,14 @@ function VaultIDScreenContent() {
 
               {/* Chain blocks decoration */}
               <Animated.View style={[S.chainBlocks,{opacity:chainOpacity}]}>
-                {['ðŸ”—','â›“ï¸','ðŸ”—','â›“ï¸','ðŸ”—'].map((c,i)=>(
+                {['🔗','⛓️','🔗','⛓️','🔗'].map((c,i)=>(
                   <Text key={i} style={{fontSize:10,opacity:0.6}}>{c}</Text>
                 ))}
               </Animated.View>
 
               {/* No phone badge */}
               <View style={S.nophone}>
-                <Text style={{color:'#10B981',fontSize:10,fontWeight:'800',letterSpacing:1}}>ðŸ“µ NO PHONE NUMBER Â· EVER</Text>
+                <Text style={{color:BRAND_ACCENT,fontSize:10,fontWeight:'800',letterSpacing:1}}>📵 NO PHONE NUMBER · EVER</Text>
               </View>
             </LinearGradient>
           </Animated.View>
@@ -206,7 +208,7 @@ function VaultIDScreenContent() {
           <View style={S.actions}>
             <TouchableOpacity onPress={handleSign} style={S.actionBtn}>
               <LinearGradient colors={['#1D4ED8','#1E40AF']} style={S.actionGrad}>
-                <Text style={{fontSize:20}}>âœï¸</Text>
+                <Text style={{fontSize:20}}>✍️</Text>
                 <Text style={S.actionText}>Sign Message</Text>
                 <Text style={S.actionSub}>Prove ownership</Text>
               </LinearGradient>
@@ -214,7 +216,7 @@ function VaultIDScreenContent() {
 
             <TouchableOpacity onPress={handleGenerateCert} style={S.actionBtn}>
               <LinearGradient colors={['#7C3AED','#6D28D9']} style={S.actionGrad}>
-                <Text style={{fontSize:20}}>ðŸ“œ</Text>
+                <Text style={{fontSize:20}}>📜</Text>
                 <Text style={S.actionText}>Certificate</Text>
                 <Text style={S.actionSub}>Cryptographic proof</Text>
               </LinearGradient>
@@ -222,7 +224,7 @@ function VaultIDScreenContent() {
 
             <TouchableOpacity onPress={()=>setShowDetails(true)} style={S.actionBtn}>
               <LinearGradient colors={['#0369A1','#0284C7']} style={S.actionGrad}>
-                <Text style={{fontSize:20}}>ðŸ”</Text>
+                <Text style={{fontSize:20}}>🔍</Text>
                 <Text style={S.actionText}>Full Details</Text>
                 <Text style={S.actionSub}>Keys & data</Text>
               </LinearGradient>
@@ -245,12 +247,12 @@ function VaultIDScreenContent() {
           {/* Identity features */}
           <View style={S.featuresGrid}>
             {[
-              {icon:'ðŸ”',title:'Zero-Knowledge',sub:'Identity without personal data'},
-              {icon:'â›“ï¸',title:'Cryptographic Proof',sub:'Cryptographic ownership'},
-              {icon:'ðŸ“µ',title:'No Phone Number',sub:'VaultTag only'},
-              {icon:'ðŸŒ',title:'Universal ID',sub:'Works everywhere'},
-              {icon:'ðŸ’€',title:'MemoryShield',sub:'Instant key destruction'},
-              {icon:'ðŸ›¡ï¸',title:'Sovereign Identity',sub:'You own your keys'},
+              {icon:'🔐',title:'Zero-Knowledge',sub:'Identity without personal data'},
+              {icon:'⛓️',title:'Cryptographic Proof',sub:'Cryptographic ownership'},
+              {icon:'📵',title:'No Phone Number',sub:'VaultTag only'},
+              {icon:'🌍',title:'Universal ID',sub:'Works everywhere'},
+              {icon:'💀',title:'MemoryShield',sub:'Instant key destruction'},
+              {icon:'🛡️',title:'Sovereign Identity',sub:'You own your keys'},
             ].map((f,i)=>(
               <View key={i} style={S.featureCard}>
                 <Text style={{fontSize:22,marginBottom:4}}>{f.icon}</Text>
@@ -262,18 +264,18 @@ function VaultIDScreenContent() {
 
           {/* Danger zone */}
           <TouchableOpacity onPress={handleDestroy} style={S.destroyBtn}>
-            <Text style={{color:'#EF4444',fontSize:13,fontWeight:'700'}}>ðŸ’€ Destroy VaultID (MemoryShield)</Text>
+            <Text style={{color:'#EF4444',fontSize:13,fontWeight:'700'}}>💀 Destroy VaultID (MemoryShield)</Text>
           </TouchableOpacity>
 
         </>) : (
           /* No VaultID yet */
           <View style={{alignItems:'center',paddingTop:40}}>
-            <Text style={{fontSize:80,marginBottom:20}}>ðŸ§¬</Text>
+            <Text style={{fontSize:80,marginBottom:20}}>🧬</Text>
             <Text style={{color:'#fff',fontSize:22,fontWeight:'900',textAlign:'center'}}>No VaultID Yet</Text>
             <Text style={{color:'#3D5A7A',fontSize:14,textAlign:'center',marginTop:8,lineHeight:22,paddingHorizontal:20}}>Create your cryptographic identity.\nNo phone number, no email required.</Text>
             <TouchableOpacity onPress={()=>setShowCreate(true)} style={{marginTop:24}}>
               <LinearGradient colors={['#1D4ED8','#7C3AED']} style={{borderRadius:16,paddingVertical:16,paddingHorizontal:40}}>
-                <Text style={{color:'#fff',fontSize:16,fontWeight:'800'}}>ðŸ§¬ Create VaultID</Text>
+                <Text style={{color:'#fff',fontSize:16,fontWeight:'800'}}>🧬 Create VaultID</Text>
               </LinearGradient>
             </TouchableOpacity>
           </View>
@@ -285,8 +287,8 @@ function VaultIDScreenContent() {
       <Modal visible={showCreate} transparent animationType="slide">
         <View style={{flex:1,backgroundColor:'rgba(0,0,0,0.92)',justifyContent:'flex-end'}}>
           <LinearGradient colors={['#F9FAFB','#0D1E3A']} style={{borderTopLeftRadius:28,borderTopRightRadius:28,padding:24,paddingBottom:44}}>
-            <Text style={{color:'#fff',fontSize:22,fontWeight:'900',marginBottom:4}}>ðŸ§¬ Create VaultID</Text>
-            <Text style={{color:'#3D5A7A',fontSize:13,marginBottom:20}}>Your cryptographic identity â€” no phone number needed</Text>
+            <Text style={{color:'#fff',fontSize:22,fontWeight:'900',marginBottom:4}}>🧬 Create VaultID</Text>
+            <Text style={{color:'#3D5A7A',fontSize:13,marginBottom:20}}>Your cryptographic identity — no phone number needed</Text>
 
             <Text style={{color:'#4A9FFF',fontSize:11,fontWeight:'700',marginBottom:8,letterSpacing:1}}>CHOOSE AVATAR</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:16}}>
@@ -314,7 +316,7 @@ function VaultIDScreenContent() {
 
             <TouchableOpacity disabled={creating||!displayName.trim()} style={{opacity:creating||!displayName.trim()?0.5:1}} onPress={handleCreate}>
               <LinearGradient colors={['#1D4ED8','#7C3AED']} style={{borderRadius:16,paddingVertical:16,alignItems:'center',marginBottom:12}}>
-                <Text style={{color:'#fff',fontSize:15,fontWeight:'900'}}>{creating?'â›“ï¸ Generating keys...':'ðŸ§¬ Generate VaultID'}</Text>
+                <Text style={{color:'#fff',fontSize:15,fontWeight:'900'}}>{creating?'⛓️ Generating keys...':'🧬 Generate VaultID'}</Text>
               </LinearGradient>
             </TouchableOpacity>
 
@@ -330,7 +332,7 @@ function VaultIDScreenContent() {
         <View style={{flex:1,backgroundColor:'rgba(0,0,0,0.92)',justifyContent:'flex-end'}}>
           <LinearGradient colors={['#F9FAFB','#0D1E3A']} style={{borderTopLeftRadius:28,borderTopRightRadius:28,padding:24,paddingBottom:44,maxHeight:'85%'}}>
             <ScrollView>
-              <Text style={{color:'#fff',fontSize:20,fontWeight:'900',marginBottom:16}}>ðŸ” VaultID Details</Text>
+              <Text style={{color:'#fff',fontSize:20,fontWeight:'900',marginBottom:16}}>🔍 VaultID Details</Text>
               {vaultID&&[
                 {label:'VaultTag',value:vaultID.vaultTag},
                 {label:'Display Name',value:vaultID.displayName},
@@ -348,7 +350,7 @@ function VaultIDScreenContent() {
               ))}
               {signedMsg?<View style={{marginBottom:14}}>
                 <Text style={{color:'#3D5A7A',fontSize:10,letterSpacing:1,marginBottom:4}}>LAST SIGNATURE</Text>
-                <Text style={{color:'#10B981',fontSize:12,fontFamily:'monospace',backgroundColor:'#060E22',padding:10,borderRadius:8}}>{signedMsg}</Text>
+                <Text style={{color:BRAND_ACCENT,fontSize:12,fontFamily:'monospace',backgroundColor:'#060E22',padding:10,borderRadius:8}}>{signedMsg}</Text>
               </View>:null}
               <TouchableOpacity onPress={()=>setShowDetails(false)} style={{alignItems:'center',paddingVertical:14,marginTop:8}}>
                 <Text style={{color:'#4A9FFF',fontSize:14,fontWeight:'700'}}>Close</Text>
@@ -362,14 +364,14 @@ function VaultIDScreenContent() {
       <Modal visible={showCert} transparent animationType="slide">
         <View style={{flex:1,backgroundColor:'rgba(0,0,0,0.92)',justifyContent:'flex-end'}}>
           <LinearGradient colors={['#F9FAFB','#0D1E3A']} style={{borderTopLeftRadius:28,borderTopRightRadius:28,padding:24,paddingBottom:44}}>
-            <Text style={{color:'#fff',fontSize:20,fontWeight:'900',marginBottom:4}}>ðŸ“œ Identity Certificate</Text>
+            <Text style={{color:'#fff',fontSize:20,fontWeight:'900',marginBottom:4}}>📜 Identity Certificate</Text>
             <Text style={{color:'#3D5A7A',fontSize:12,marginBottom:16}}>Cryptographic proof of your VaultID ownership</Text>
             <ScrollView style={{backgroundColor:'#060E22',borderRadius:12,padding:14,maxHeight:200,marginBottom:16}}>
-              <Text style={{color:'#10B981',fontSize:10,fontFamily:'monospace',lineHeight:16}}>{certificate}</Text>
+              <Text style={{color:BRAND_ACCENT,fontSize:10,fontFamily:'monospace',lineHeight:16}}>{certificate}</Text>
             </ScrollView>
             <TouchableOpacity onPress={async()=>{ await Share.share({message:'My VaultChat Identity Certificate:\n\n'+certificate}); }}>
               <LinearGradient colors={['#1D4ED8','#7C3AED']} style={{borderRadius:14,paddingVertical:14,alignItems:'center',marginBottom:12}}>
-                <Text style={{color:'#fff',fontSize:14,fontWeight:'800'}}>ðŸ“¤ Share Certificate</Text>
+                <Text style={{color:'#fff',fontSize:14,fontWeight:'800'}}>📤 Share Certificate</Text>
               </LinearGradient>
             </TouchableOpacity>
             <TouchableOpacity onPress={()=>setShowCert(false)} style={{alignItems:'center',paddingVertical:10}}>
@@ -402,7 +404,7 @@ const S = StyleSheet.create({
   bioText:{color:'#3D5A7A',fontSize:13,textAlign:'center',marginBottom:10,paddingHorizontal:20},
   walletRow:{flexDirection:'row',alignItems:'center',gap:8,marginBottom:14,backgroundColor:'#060E22',borderRadius:10,paddingHorizontal:14,paddingVertical:8},
   walletAddr:{color:'#4A9FFF',fontSize:12,fontFamily:'monospace',fontWeight:'700',flex:1},
-  blockchainDot:{width:8,height:8,borderRadius:4,backgroundColor:'#10B981'},
+  blockchainDot:{width:8,height:8,borderRadius:4,backgroundColor:BRAND_ACCENT},
   trustRow:{width:'100%',gap:6,marginBottom:12},
   trustBar:{height:6,backgroundColor:'#F9FAFB',borderRadius:3,flex:1,overflow:'hidden'},
   trustFill:{height:6,borderRadius:3},

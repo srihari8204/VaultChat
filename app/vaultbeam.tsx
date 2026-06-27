@@ -290,7 +290,7 @@ export default function VaultBeamScreen() {
           onPress={pickAndSend}
           disabled={status === 'transferring'}
         >
-          <Ionicons name="cloud-upload-outline" size={20} color="#04130D" />
+          <Ionicons name="cloud-upload-outline" size={20} color="#FFFFFF" />
           <Text style={s.sendTxt}>Pick a file to send</Text>
         </TouchableOpacity>
 
@@ -313,7 +313,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   barFill: { height: 8, borderRadius: 4, backgroundColor: c.primary },
   pct: { color: c.textDim, fontSize: 13, marginTop: 8, fontWeight: '700' },
   sendBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: c.primary, borderRadius: 12, paddingVertical: 14 },
-  sendTxt: { color: '#04130D', fontWeight: '800', fontSize: 15 },
+  sendTxt: { color: '#FFFFFF', fontWeight: '800', fontSize: 15 },
   dim: { opacity: 0.5 },
   note: { color: c.textFaint, fontSize: 11, textAlign: 'center', marginTop: 14, lineHeight: 16 },
 });

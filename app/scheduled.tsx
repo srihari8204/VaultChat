@@ -4,6 +4,7 @@
 // (last 7 days). Tap a pending row to cancel it. Recently-sent rows are
 // read-only confirmation that delivery fired.
 
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState , useMemo} from 'react';
 import {
@@ -88,7 +89,7 @@ export default function ScheduledScreen() {
     <View style={S.screen}>
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
-          <Text style={S.backTxt}>←</Text>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title}>Scheduled</Text>
       </View>

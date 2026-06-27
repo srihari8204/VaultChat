@@ -9,6 +9,7 @@ import {
   FlatList, StatusBar, KeyboardAvoidingView, Platform,
   ActivityIndicator,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { useLocalSearchParams, Stack } from 'expo-router';
@@ -159,7 +160,7 @@ export default function AIAssistantScreen() {
           <TextInput style={s.input} value={input} onChangeText={setInput}
             placeholder="Ask AI anything..." placeholderTextColor="#6B7280" multiline />
           <TouchableOpacity style={[s.sendBtn, !input.trim() && { opacity: 0.3 }]} onPress={() => send()} disabled={!input.trim() || thinking}>
-            <Text style={s.sendTxt}>{"↑"}</Text>
+            <Ionicons name="arrow-up" size={18} color="#000" />
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>

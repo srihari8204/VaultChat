@@ -17,7 +17,7 @@ import {
 } from './chatService';
 import { uploadEncryptedAttachment, buildMediaContent } from './mediaAttachments';
 import { storeSentCopy, saveThumb } from './mediaStore';
-import { makeThumb } from './thumbnails';
+import { makeThumb, makePdfThumb } from './thumbnails';
 
 export type MediaType = 'image' | 'video' | 'audio' | 'file';
 
@@ -70,13 +70,17 @@ export async function sendMediaMessage(
   // re-viewable). Best-effort — never blocks the send on failure.
   if (!opts.viewOnce) {
     const kind = type === 'audio' ? 'voice' : type;   // 'image' | 'video' | 'voice' | 'file'
-    await storeSentCopy(up.id, file.uri, { kind, isMine: true, mime: file.mime, filename: file.filename });
-    // Thumbnail (image/video only): embed in meta so the RECEIVER previews it
-    // instantly without downloading the full file, and cache it in .Thumbs.
-    if (type === 'image' || type === 'video') {
-      const thumb = await makeThumb(file.uri, type);
-      if (thumb) { meta.thumb = thumb; saveThumb(up.id, thumb).catch(() => {}); }
-    }
+    // Store the sender's copy under the SAME name the bubble will look for on
+    // open (meta uses up.filename/up.mime) — otherwise files name-mismatch and
+    // the sender re-downloads their own file.
+    await storeSentCopy(up.id, file.uri, { kind, isMine: true, mime: up.mime, filename: up.filename });
+    // Thumbnail: embed in meta so the RECEIVER previews it instantly without
+    // downloading the full file, and cache it in .Thumbs. Image/video → frame;
+    // PDF → first-page preview (WhatsApp-style document preview).
+    let thumb: string | null = null;
+    if (type === 'image' || type === 'video') thumb = await makeThumb(file.uri, type);
+    else if (type === 'file' && /pdf/i.test(file.mime)) thumb = await makePdfThumb(file.uri);
+    if (thumb) { meta.thumb = thumb; saveThumb(up.id, thumb).catch(() => {}); }
   }
   return sendMessage(chatId, opts.caption || '', type, { meta });
 }

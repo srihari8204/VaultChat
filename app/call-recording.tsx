@@ -3,6 +3,7 @@
  * Call Recording — record, playback, save, share, manage recordings.
  */
 
+import { brandAlpha } from '../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Audio } from 'expo-av';
@@ -344,7 +345,7 @@ export default function CallRecordingScreen() {
         </TouchableOpacity>
       ) : state === 'paused' ? (
         <TouchableOpacity style={s.controlBtn} onPress={resumeRecording}>
-          <View style={[s.controlCircle, { backgroundColor: 'rgba(16,185,129,0.2)' }]}>
+          <View style={[s.controlCircle, { backgroundColor: brandAlpha(0.2) }]}>
             <Ionicons name="play" size={28} color={colors.primary} />
           </View>
           <Text style={s.controlLabel}>Resume</Text>
@@ -514,7 +515,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   consentBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(16,185,129,0.1)',
+    backgroundColor: brandAlpha(0.1),
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 10,

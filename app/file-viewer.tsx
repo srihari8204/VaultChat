@@ -2,6 +2,8 @@
 // View ANY file without leaving the app: images, videos, PDFs, Office docs,
 // code/text files, audio — all rendered inline with premium UI.
 
+import { Ionicons } from '@expo/vector-icons';
+import { BRAND_ACCENT } from '../constants/theme';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated,
@@ -32,7 +34,7 @@ const C = {
   bgPure: '#000000',
   primary: '#4A9FFF',
   secondary: '#7C3AED',
-  accent: '#10B981',
+  accent: BRAND_ACCENT,
   danger: '#EF4444',
   warning: '#F59E0B',
   text: '#FFFFFF',
@@ -530,7 +532,10 @@ export default function FileViewerScreen() {
             onPress={() => seekAudio(Math.max(0, (audioPosition - 15000) / (audioDuration || 1)))}
             style={s.audioBtn}
           >
-            <Text style={s.audioBtnText}>⏪ 15s</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Ionicons name="play-back" size={14} color={C.textDim} />
+              <Text style={s.audioBtnText}>15s</Text>
+            </View>
           </TouchableOpacity>
 
           <TouchableOpacity onPress={toggleAudio} style={s.audioPlayBtn}>
@@ -538,7 +543,7 @@ export default function FileViewerScreen() {
               colors={[C.primary, '#3B82F6']}
               style={s.audioPlayGradient}
             >
-              <Text style={s.audioPlayIcon}>{audioPlaying ? '⏸' : '▶'}</Text>
+              <Ionicons name={audioPlaying ? 'pause' : 'play'} size={24} color="#fff" />
             </LinearGradient>
           </TouchableOpacity>
 
@@ -546,7 +551,10 @@ export default function FileViewerScreen() {
             onPress={() => seekAudio(Math.min(1, (audioPosition + 15000) / (audioDuration || 1)))}
             style={s.audioBtn}
           >
-            <Text style={s.audioBtnText}>15s ⏩</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Text style={s.audioBtnText}>15s</Text>
+              <Ionicons name="play-forward" size={14} color={C.textDim} />
+            </View>
           </TouchableOpacity>
         </View>
       </View>
@@ -632,7 +640,7 @@ export default function FileViewerScreen() {
         <View style={s.headerInner}>
           {/* Back button */}
           <TouchableOpacity onPress={() => router.back()} style={s.headerBtn}>
-            <Text style={s.headerBtnIcon}>←</Text>
+            <Ionicons name="arrow-back" size={20} color={C.text} />
           </TouchableOpacity>
 
           {/* File info */}
@@ -648,7 +656,7 @@ export default function FileViewerScreen() {
 
           {/* Action buttons */}
           <TouchableOpacity onPress={handleShare} style={s.headerBtn}>
-            <Text style={s.headerBtnIcon}>↗</Text>
+            <Ionicons name="share-outline" size={20} color={C.text} />
           </TouchableOpacity>
         </View>
       </Animated.View>

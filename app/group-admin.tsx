@@ -13,6 +13,7 @@
  * backend grows the tables to support them.
  */
 
+import { brandAlpha } from '../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState , useMemo} from 'react';
@@ -43,11 +44,6 @@ const SLOW_OPTS = [
   { label: '5m', value: 300 },
   { label: '15m', value: 900 },
 ];
-const ROLE_COLORS: Record<Role, string> = {
-  owner: '#F59E0B',
-  admin: '#06B6D4',
-  member: '#9CA3AF',
-};
 const ROLE_LABELS: Record<Role, string> = { owner: 'Owner', admin: 'Admin', member: 'Member' };
 
 function useS() {
@@ -270,7 +266,7 @@ export default function GroupAdminScreen() {
           {isAdmin && nameDirty && (
             <TouchableOpacity style={s.saveNameBtn} onPress={saveName} disabled={savingName}>
               {savingName
-                ? <ActivityIndicator size="small" color="#04130D" />
+                ? <ActivityIndicator size="small" color="#FFFFFF" />
                 : <Text style={s.saveNameTxt}>Save name</Text>}
             </TouchableOpacity>
           )}
@@ -320,7 +316,7 @@ export default function GroupAdminScreen() {
                 <Text style={s.switchSub}>Invite-link joins wait for an admin.</Text>
               </View>
               <Switch value={approve} onValueChange={toggleApprove}
-                trackColor={{ false: colors.surface, true: 'rgba(16,185,129,0.5)' }} thumbColor={approve ? colors.primary : '#888'} />
+                trackColor={{ false: colors.surface, true: brandAlpha(0.5) }} thumbColor={approve ? colors.primary : '#888'} />
             </View>
 
             <View style={s.switchRow}>
@@ -329,7 +325,7 @@ export default function GroupAdminScreen() {
                 <Text style={s.switchSub}>Members &lt; 24h old can’t post links.</Text>
               </View>
               <Switch value={antiSpam} onValueChange={toggleAntiSpam}
-                trackColor={{ false: colors.surface, true: 'rgba(16,185,129,0.5)' }} thumbColor={antiSpam ? colors.primary : '#888'} />
+                trackColor={{ false: colors.surface, true: brandAlpha(0.5) }} thumbColor={antiSpam ? colors.primary : '#888'} />
             </View>
 
             <Text style={s.hint}>Admins are exempt from these limits.</Text>
@@ -375,7 +371,7 @@ export default function GroupAdminScreen() {
                   <View style={s.avatar}><Text style={s.avatarText}>{label.charAt(0).toUpperCase()}</Text></View>
                   <View style={{ flex: 1 }}>
                     <Text style={s.memberName} numberOfLines={1}>{label}{isMe ? ' (You)' : ''}</Text>
-                    <Text style={[s.roleBadgeText, { color: ROLE_COLORS[role] }]}>{ROLE_LABELS[role]}</Text>
+                    <Text style={s.roleBadgeText}>{ROLE_LABELS[role]}</Text>
                   </View>
                   {canManage && (
                     <TouchableOpacity onPress={() => removeMember(m)} style={s.removeBtn} hitSlop={8}>
@@ -392,9 +388,11 @@ export default function GroupAdminScreen() {
                         style={[s.roleOption, role === r && s.roleOptionActive]}
                         onPress={() => changeRole(m, r)}
                       >
-                        <View style={[s.roleDot, { backgroundColor: ROLE_COLORS[r] }]} />
-                        <Text style={[s.roleOptionText, role === r && { color: colors.accent }]}>
-                          {role === r ? `${ROLE_LABELS[r]} ✓` : `Make ${ROLE_LABELS[r]}`}
+                        {role === r && (
+                          <Ionicons name="checkmark" size={14} color={colors.primary} style={{ marginRight: 6 }} />
+                        )}
+                        <Text style={[s.roleOptionText, role === r && { color: colors.primary }]}>
+                          {role === r ? ROLE_LABELS[r] : `Make ${ROLE_LABELS[r]}`}
                         </Text>
                       </TouchableOpacity>
                     ))}
@@ -423,7 +421,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   headerTitle: { fontSize: 18, fontWeight: '700', color: c.text },
 
   banner: { marginHorizontal: 16, marginBottom: 8, padding: 10, borderRadius: 10, borderWidth: 1 },
-  bannerOk: { backgroundColor: 'rgba(16,185,129,0.12)', borderColor: 'rgba(16,185,129,0.4)' },
+  bannerOk: { backgroundColor: brandAlpha(0.12), borderColor: brandAlpha(0.4) },
   bannerErr: { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.4)' },
   bannerTxt: { color: c.text, fontSize: 12 },
 
@@ -443,7 +441,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     marginTop: 12, backgroundColor: c.primary, borderRadius: 10,
     paddingVertical: 11, alignItems: 'center',
   },
-  saveNameTxt: { color: '#04130D', fontWeight: '800', fontSize: 14 },
+  saveNameTxt: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 },
 
   memberRow: {
     flexDirection: 'row', alignItems: 'center', paddingVertical: 10,
@@ -456,7 +454,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   },
   avatarText: { fontSize: 16, fontWeight: '700', color: c.accent },
   memberName: { fontSize: 14, fontWeight: '600', color: c.text },
-  roleBadgeText: { fontSize: 11, fontWeight: '700', marginTop: 2 },
+  roleBadgeText: { fontSize: 11, fontWeight: '700', marginTop: 2, color: c.textDim },
   removeBtn: { padding: 6 },
 
   ctrlLabel: { color: c.textDim, fontSize: 13, marginBottom: 8 },
@@ -464,21 +462,20 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   switchLabel: { color: c.text, fontSize: 14, fontWeight: '600' },
   switchSub: { color: c.textDim, fontSize: 12, marginTop: 2 },
   reqApprove: { backgroundColor: c.primary, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7, marginRight: 8 },
-  reqApproveTxt: { color: '#04130D', fontSize: 12, fontWeight: '800' },
+  reqApproveTxt: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
   reqReject: { padding: 6 },
   policyRow: { flexDirection: 'row', gap: 8 },
   policyBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center', backgroundColor: c.surface, borderWidth: 1, borderColor: c.border },
   policyBtnActive: { backgroundColor: c.primary, borderColor: c.primary },
   policyTxt: { color: c.textDim, fontSize: 13, fontWeight: '600' },
-  policyTxtActive: { color: '#04130D', fontWeight: '800' },
+  policyTxtActive: { color: '#FFFFFF', fontWeight: '800' },
   slowRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   slowChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, backgroundColor: c.surface, borderWidth: 1, borderColor: c.border },
-  slowChipActive: { backgroundColor: 'rgba(6,182,212,0.15)', borderColor: c.accent },
+  slowChipActive: { backgroundColor: brandAlpha(0.15), borderColor: c.primary },
   slowTxt: { color: c.textDim, fontSize: 13, fontWeight: '600' },
-  slowTxtActive: { color: c.accent },
+  slowTxtActive: { color: c.primary },
   roleMenu: { flexDirection: 'row', backgroundColor: c.surface, borderRadius: 10, marginBottom: 8, padding: 6, gap: 4 },
   roleOption: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 8, borderRadius: 8 },
-  roleOptionActive: { backgroundColor: 'rgba(6,182,212,0.12)' },
-  roleDot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
+  roleOptionActive: { backgroundColor: brandAlpha(0.12) },
   roleOptionText: { fontSize: 12, color: c.textDim, fontWeight: '600' },
 });

@@ -20,7 +20,7 @@ const C = {
   cardBorder: '#1A2744',
   accent: '#4A9FFF',
   purple: '#7C3AED',
-  green: '#10B981',
+  green: '#22C55E',
   danger: '#FF3C6E',
   text: '#FFFFFF',
   textDim: '#8A9BBF',

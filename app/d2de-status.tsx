@@ -1,5 +1,5 @@
 // app/d2de-status.tsx
-// Live D2DE encryption status screen â€” unique to VaultChat
+// Live D2DE encryption status screen — unique to VaultChat
 
 import React from 'react';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
@@ -30,7 +30,7 @@ export default function D2DEStatusScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'ðŸ” D2DE Status', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
+      <Stack.Screen options={{ title: '🔐 D2DE Status', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
       <ScrollView style={s.screen}>
 
         {/* Score card */}
@@ -44,8 +44,8 @@ export default function D2DEStatusScreen() {
           </View>
           <Text style={s.scoreNote}>
             {active === layers.length
-              ? 'ðŸ† Maximum security â€” all layers active'
-              : `${layers.length - active} layer${layers.length - active > 1 ? 's' : ''} pending â€” see roadmap below`
+              ? '🏆 Maximum security — all layers active'
+              : `${layers.length - active} layer${layers.length - active > 1 ? 's' : ''} pending — see roadmap below`
             }
           </Text>
         </View>
@@ -69,9 +69,9 @@ export default function D2DEStatusScreen() {
 
         {/* Unique callout */}
         <View style={s.uniqueBox}>
-          <Text style={s.uniqueTitle}>ðŸ† Unique to VaultChat</Text>
+          <Text style={s.uniqueTitle}>🏆 Unique to VaultChat</Text>
           <Text style={s.uniqueBody}>
-            No other messaging app â€” not Signal, not WhatsApp, not Telegram â€” shows you a live encryption status screen.
+            No other messaging app — not Signal, not WhatsApp, not Telegram — shows you a live encryption status screen.
             VaultChat is the only app where you can see exactly what protection is active on your conversation right now.
           </Text>
         </View>

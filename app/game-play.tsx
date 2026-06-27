@@ -3,6 +3,7 @@
 // turn management, coin awards, and renders game-specific components
 // Each game type will have its own logic module in services/games/
 
+import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useEffect, useRef , useMemo} from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Alert, Platform, ActivityIndicator,
@@ -223,7 +224,7 @@ export default function GamePlayScreen() {
       {/* Header */}
       <View style={s.header}>
         <TouchableOpacity onPress={resign} style={s.backBtn}>
-          <Text style={s.backTxt}>{'\u2190'}</Text>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={s.headerTitle}>{game?.icon ?? '\uD83C\uDFAE'} {game?.name ?? gameType}</Text>

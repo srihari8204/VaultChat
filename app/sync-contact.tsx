@@ -10,6 +10,7 @@ import {
   ScrollView, Share, Platform, ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
@@ -129,7 +130,7 @@ export default function SyncContactScreen() {
 
           {!!synced.userId && (
             <TouchableOpacity style={[s.btn, { backgroundColor: colors.primary, width: '100%', marginBottom: 10 }]} onPress={messageContact}>
-              <Text style={[s.btnTxt, { color: '#04130D' }]}>Message</Text>
+              <Text style={[s.btnTxt, { color: '#FFFFFF' }]}>Message</Text>
             </TouchableOpacity>
           )}
           <TouchableOpacity style={[s.btn, { backgroundColor: colors.purple, width: '100%', marginBottom: 10 }]} onPress={() => router.back()}>
@@ -146,8 +147,9 @@ export default function SyncContactScreen() {
   return (
     <SafeAreaView style={s.root}>
       <ScrollView contentContainerStyle={{ padding: 20 }}>
-        <TouchableOpacity onPress={() => router.back()} style={{ marginBottom: 16 }}>
-          <Text style={{ color: colors.purple, fontSize: 15 }}>← Back</Text>
+        <TouchableOpacity onPress={() => router.back()} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 16 }}>
+          <Ionicons name="arrow-back" size={18} color={colors.purple} />
+          <Text style={{ color: colors.purple, fontSize: 15 }}>Back</Text>
         </TouchableOpacity>
 
         <Text style={s.label}>SYNC CONTACT</Text>

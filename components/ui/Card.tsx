@@ -4,7 +4,7 @@
 
 import React from 'react';
 import { View, TouchableOpacity, StyleSheet, type ViewStyle, type StyleProp } from 'react-native';
-import { RADIUS, SPACING } from '../../constants/theme';
+import { RADIUS, SPACING, ELEVATION } from '../../constants/theme';
 import { useColors } from '../../lib/theme';
 
 export interface CardProps {
@@ -21,6 +21,7 @@ export function Card({ children, onPress, padded = true, style }: CardProps) {
       {children}
     </View>
   );
+  // (shadow lives on the card style below)
   if (onPress) {
     return <TouchableOpacity onPress={onPress} activeOpacity={0.85}>{content}</TouchableOpacity>;
   }
@@ -28,7 +29,7 @@ export function Card({ children, onPress, padded = true, style }: CardProps) {
 }
 
 const styles = StyleSheet.create({
-  card: { borderRadius: RADIUS.lg, borderWidth: 1 },
+  card: { borderRadius: RADIUS.xl, borderWidth: StyleSheet.hairlineWidth, ...ELEVATION.sm, shadowColor: '#000' },
   padded: { padding: SPACING.lg },
 });
 

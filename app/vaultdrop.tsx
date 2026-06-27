@@ -2,6 +2,8 @@
  * app/vaultdrop.tsx
  * VaultDrop — D2DE file sharing (emoji fix applied)
  */
+import { BRAND_ACCENT } from '../constants/theme';
+import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
@@ -37,8 +39,8 @@ const getFileIcon = (name: string): string => {
 const getIconColor = (icon: string): string => {
   const map: Record<string, string> = {
     IMG: '#F5C842', VID: '#9B5DE5', AUD: '#3B82F6',
-    PDF: '#FF4D6D', DOC: '#3B82F6', XLS: '#10B981',
-    ZIP: '#F97316', FILE: '#6B7280',
+    PDF: '#FF4D6D', DOC: '#3B82F6', XLS: BRAND_ACCENT,
+    ZIP: BRAND_ACCENT, FILE: '#6B7280',
   };
   return map[icon] || '#6B7280';
 };
@@ -107,7 +109,7 @@ export default function VaultDropScreen() {
 
   const statusColor = (status: string) => {
     if (status === 'sending')  return '#F5C842';
-    if (status === 'sent')     return '#10B981';
+    if (status === 'sent')     return BRAND_ACCENT;
     if (status === 'received') return '#3B82F6';
     return '#6B7280';
   };
@@ -149,7 +151,7 @@ export default function VaultDropScreen() {
             <Text style={styles.sentCheck}>Done</Text>
           )}
           <TouchableOpacity onPress={() => removeFile(item.id)} style={styles.removeBtn}>
-            <Text style={styles.removeBtnText}>X</Text>
+            <Ionicons name="close" size={14} color="#FF4D6D" />
           </TouchableOpacity>
         </View>
       </View>
@@ -209,14 +211,14 @@ const styles = StyleSheet.create({
   container:      { flex: 1, backgroundColor: '#FFFFFF' },
   header:         { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
   backBtn:        { paddingRight: 12 },
-  backText:       { color: '#10B981', fontSize: 15 },
+  backText:       { color: BRAND_ACCENT, fontSize: 15 },
   headerTitle:    { flex: 1, color: '#000000', fontWeight: 'bold', fontSize: 18, textAlign: 'center' },
   headerRight:    { minWidth: 60, alignItems: 'flex-end' },
-  d2deBadge:      { color: '#10B981', fontSize: 11, fontWeight: 'bold', borderWidth: 1, borderColor: '#10B981', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
-  infoBanner:     { flexDirection: 'row', alignItems: 'center', margin: 12, backgroundColor: '#001810', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#10B98133', gap: 10 },
-  infoBannerIcon: { color: '#10B981', fontSize: 11, fontWeight: 'bold' },
+  d2deBadge:      { color: BRAND_ACCENT, fontSize: 11, fontWeight: 'bold', borderWidth: 1, borderColor: BRAND_ACCENT, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  infoBanner:     { flexDirection: 'row', alignItems: 'center', margin: 12, backgroundColor: '#001810', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: BRAND_ACCENT + '33', gap: 10 },
+  infoBannerIcon: { color: BRAND_ACCENT, fontSize: 11, fontWeight: 'bold' },
   infoBannerText: { flex: 1, color: '#6B7280', fontSize: 12, lineHeight: 18 },
-  pickBtn:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', margin: 12, backgroundColor: '#10B981', borderRadius: 14, paddingVertical: 14, gap: 8 },
+  pickBtn:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', margin: 12, backgroundColor: BRAND_ACCENT, borderRadius: 14, paddingVertical: 14, gap: 8 },
   pickBtnIcon:    { color: '#FFFFFF', fontSize: 22, fontWeight: 'bold' },
   pickBtnText:    { color: '#FFFFFF', fontWeight: 'bold', fontSize: 15 },
   fileList:       { padding: 12, gap: 10 },
@@ -227,12 +229,12 @@ const styles = StyleSheet.create({
   fileName:       { color: '#000000', fontWeight: 'bold', fontSize: 14, marginBottom: 4 },
   fileMeta:       { flexDirection: 'row', alignItems: 'center', gap: 8 },
   fileSize:       { color: '#4A5568', fontSize: 11 },
-  d2deTag:        { color: '#10B981', fontSize: 10, fontWeight: 'bold', borderWidth: 1, borderColor: '#10B98144', borderRadius: 4, paddingHorizontal: 4 },
+  d2deTag:        { color: BRAND_ACCENT, fontSize: 10, fontWeight: 'bold', borderWidth: 1, borderColor: BRAND_ACCENT + '44', borderRadius: 4, paddingHorizontal: 4 },
   fileStatus:     { fontSize: 11, fontWeight: 'bold' },
   fileActions:    { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  sendBtn:        { backgroundColor: '#10B981', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 },
+  sendBtn:        { backgroundColor: BRAND_ACCENT, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 },
   sendBtnText:    { color: '#FFFFFF', fontWeight: 'bold', fontSize: 12 },
-  sentCheck:      { color: '#10B981', fontSize: 12, fontWeight: 'bold' },
+  sentCheck:      { color: BRAND_ACCENT, fontSize: 12, fontWeight: 'bold' },
   removeBtn:      { width: 24, height: 24, borderRadius: 12, backgroundColor: '#FF4D6D22', alignItems: 'center', justifyContent: 'center' },
   removeBtnText:  { color: '#FF4D6D', fontSize: 11, fontWeight: 'bold' },
   emptyWrap:      { alignItems: 'center', paddingTop: 60, gap: 8 },

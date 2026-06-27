@@ -1,36 +1,37 @@
+import { BRAND_ACCENT } from '../constants/theme';
 // services/aiService.ts
-// On-device AI features â€” smart replies, summariser, writing assistant,
+// On-device AI features — smart replies, summariser, writing assistant,
 // voice transcription, translation
 // Uses react-native-whisper for transcription (on-device, private)
 // All AI features run 100% on-device — zero server calls
 
-// â”€â”€ Smart Replies â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Smart Replies ─────────────────────────────────────────────────────────
 export async function getSmartReplies(lastMessage: string): Promise<string[]> {
-  // Heuristic quick replies (no API needed â€” fully on-device)
+  // Heuristic quick replies (no API needed — fully on-device)
   const msg = lastMessage.toLowerCase();
 
-  if (msg.match(/\b(ok|okay|fine|sure|alright)\b/)) return ['Got it ðŸ‘', 'Perfect!', 'Sounds good'];
-  if (msg.match(/\b(thanks|thank you|thx)\b/)) return ['You\'re welcome! ðŸ˜Š', 'Anytime!', 'No problem'];
-  if (msg.match(/\b(hi|hello|hey|sup)\b/)) return ['Hey! ðŸ‘‹', 'Hi there!', 'Hello!'];
-  if (msg.match(/\b(how are you|how\'s it going|hows it)\b/)) return ['I\'m good, you?', 'Doing great! ðŸ˜Š', 'All good here'];
-  if (msg.match(/\b(yes|yeah|yep|yup)\b/)) return ['Great! ðŸŽ‰', 'Awesome!', 'Perfect'];
+  if (msg.match(/\b(ok|okay|fine|sure|alright)\b/)) return ['Got it 👍', 'Perfect!', 'Sounds good'];
+  if (msg.match(/\b(thanks|thank you|thx)\b/)) return ['You\'re welcome! 😊', 'Anytime!', 'No problem'];
+  if (msg.match(/\b(hi|hello|hey|sup)\b/)) return ['Hey! 👋', 'Hi there!', 'Hello!'];
+  if (msg.match(/\b(how are you|how\'s it going|hows it)\b/)) return ['I\'m good, you?', 'Doing great! 😊', 'All good here'];
+  if (msg.match(/\b(yes|yeah|yep|yup)\b/)) return ['Great! 🎉', 'Awesome!', 'Perfect'];
   if (msg.match(/\b(no|nope|nah)\b/)) return ['Okay, no worries', 'Understood', 'Got it'];
   if (msg.match(/\b(where|location|address)\b/)) return ['Let me check', 'I\'ll send you the location', 'One moment'];
   if (msg.match(/\b(when|time|schedule)\b/)) return ['Let me check my schedule', 'What time works?', 'I\'ll confirm shortly'];
   if (msg.match(/\b(why|reason)\b/)) return ['Good question!', 'Let me explain', 'I\'ll get back to you'];
-  if (msg.match(/\b(love|miss|â¤ï¸|ðŸ’•)\b/)) return ['â¤ï¸', 'Miss you too!', 'ðŸ˜Š'];
-  if (msg.match(/\b(lol|haha|ðŸ˜‚|funny)\b/)) return ['ðŸ˜‚', 'Hahaha!', 'So funny!'];
+  if (msg.match(/\b(love|miss|❤️|💕)\b/)) return ['❤️', 'Miss you too!', '😊'];
+  if (msg.match(/\b(lol|haha|😂|funny)\b/)) return ['😂', 'Hahaha!', 'So funny!'];
 
   // Default
-  return ['ðŸ‘', 'Sure!', 'On my way'];
+  return ['👍', 'Sure!', 'On my way'];
 }
 
-// â”€â”€ Message Summariser â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Message Summariser ────────────────────────────────────────────────────
 // Summarises an array of messages into bullet points
 export async function summariseMessages(messages: { sender: string; text: string }[]): Promise<string> {
   if (messages.length === 0) return 'No messages to summarise.';
 
-  // Simple local summariser â€” count topics and extract key info
+  // Simple local summariser — count topics and extract key info
   const senders = [...new Set(messages.map(m => m.sender))];
   const totalMsgs = messages.length;
   const lastFew = messages.slice(-5).map(m => `${m.sender}: ${m.text}`).join('\n');
@@ -49,13 +50,13 @@ export async function summariseMessages(messages: { sender: string; text: string
     .map(([w]) => w);
 
   return [
-    `ðŸ“Š ${totalMsgs} messages from ${senders.join(', ')}`,
-    topWords.length > 0 ? `ðŸ”‘ Key topics: ${topWords.join(', ')}` : '',
-    `ðŸ“Œ Recent:\n${lastFew}`,
+    `📊 ${totalMsgs} messages from ${senders.join(', ')}`,
+    topWords.length > 0 ? `🔑 Key topics: ${topWords.join(', ')}` : '',
+    `📌 Recent:\n${lastFew}`,
   ].filter(Boolean).join('\n\n');
 }
 
-// â”€â”€ Writing Assistant â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Writing Assistant ─────────────────────────────────────────────────────
 export type WriteMode = 'formal' | 'casual' | 'shorter' | 'longer' | 'emoji';
 
 export function rewriteMessage(text: string, mode: WriteMode): string {
@@ -91,23 +92,23 @@ export function rewriteMessage(text: string, mode: WriteMode): string {
 
     case 'emoji':
       return text
-        .replace(/\bgood\b/gi, 'good âœ¨')
-        .replace(/\blove\b/gi, 'love â¤ï¸')
-        .replace(/\bhappy\b/gi, 'happy ðŸ˜Š')
-        .replace(/\bsad\b/gi, 'sad ðŸ˜¢')
-        .replace(/\bthanks\b/gi, 'thanks ðŸ™')
-        .replace(/\bcool\b/gi, 'cool ðŸ˜Ž')
-        .replace(/\bfire\b/gi, 'fire ðŸ”¥')
-        .replace(/\bgreat\b/gi, 'great ðŸŽ‰')
-        + ' ðŸ‘';
+        .replace(/\bgood\b/gi, 'good ✨')
+        .replace(/\blove\b/gi, 'love ❤️')
+        .replace(/\bhappy\b/gi, 'happy 😊')
+        .replace(/\bsad\b/gi, 'sad 😢')
+        .replace(/\bthanks\b/gi, 'thanks 🙏')
+        .replace(/\bcool\b/gi, 'cool 😎')
+        .replace(/\bfire\b/gi, 'fire 🔥')
+        .replace(/\bgreat\b/gi, 'great 🎉')
+        + ' 👍';
 
     default:
       return text;
   }
 }
 
-// â”€â”€ Message Translation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Uses free MyMemory API â€” no key needed, 1000 req/day
+// ── Message Translation ───────────────────────────────────────────────────
+// Uses free MyMemory API — no key needed, 1000 req/day
 export async function translateMessage(text: string, targetLang: string = 'en'): Promise<string> {
   try {
     const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=auto|${targetLang}`;
@@ -119,11 +120,11 @@ export async function translateMessage(text: string, targetLang: string = 'en'):
   }
 }
 
-// â”€â”€ Voice Transcription â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Voice Transcription ───────────────────────────────────────────────────
 // Uses Web Speech API (available on Android WebView / Expo)
 // For fully on-device: integrate react-native-whisper
 export async function transcribeVoice(audioUri: string): Promise<string> {
-  // This is a placeholder â€” in production, integrate:
+  // This is a placeholder — in production, integrate:
   // npm install react-native-whisper
   // The whisper model runs fully on-device (no internet needed)
   return '[Transcription: react-native-whisper integration \u2014 install and configure separately]';
@@ -145,7 +146,7 @@ interface MoodAnalysis {
 const MOOD_MAP: Record<MoodType, { color: string; gradient: [string, string]; emoji: string }> = {
   happy:     { color: '#F59E0B', gradient: ['#F59E0B', '#FBBF24'], emoji: '\uD83D\uDE0A' },
   calm:      { color: '#3B82F6', gradient: ['#3B82F6', '#60A5FA'], emoji: '\uD83D\uDE0C' },
-  energetic: { color: '#10B981', gradient: ['#10B981', '#34D399'], emoji: '\uD83D\uDE04' },
+  energetic: { color: BRAND_ACCENT, gradient: [BRAND_ACCENT, '#34D399'], emoji: '\uD83D\uDE04' },
   stressed:  { color: '#EF4444', gradient: ['#EF4444', '#F87171'], emoji: '\uD83D\uDE1F' },
   sad:       { color: '#8B5CF6', gradient: ['#8B5CF6', '#A78BFA'], emoji: '\uD83D\uDE14' },
   neutral:   { color: '#6B7280', gradient: ['#6B7280', '#9CA3AF'], emoji: '\uD83D\uDE10' },
@@ -158,9 +159,9 @@ export function analyzeMood(messages: { text: string; timestamp: number }[]): Mo
   const allText = recentTexts.join(' ');
 
   // Emoji scoring
-  const happyEmojis = (allText.match(/[\uD83D\uDE00-\uD83D\uDE0F\uD83D\uDE42\uD83E\uDD70\uD83D\uDE0D\u2764\uFE0F\uD83D\uDC95\uD83C\uDF89\uD83C\uDF8A\uD83D\uDC4D\uD83D\uDE02\uD83D\uDE01\uD83D\uDE04]/g) || []).length;
-  const sadEmojis = (allText.match(/[\uD83D\uDE22\uD83D\uDE2D\uD83D\uDE1E\uD83D\uDE14\uD83D\uDE29\uD83D\uDE2B\uD83D\uDC94]/g) || []).length;
-  const angryEmojis = (allText.match(/[\uD83D\uDE20\uD83D\uDE21\uD83D\uDE24\uD83E\uDD2C]/g) || []).length;
+  const happyEmojis = (allText.match(/[\uD83D\uDE00-\uD83D\uDE0F\uD83D\uDE42\uD83E\uDD70\uD83D\uDE0D\u2764\uFE0F\uD83D\uDC95\uD83C\uDF89\uD83C\uDF8A\uD83D\uDC4D\uD83D\uDE02\uD83D\uDE01\uD83D\uDE04]/gu) || []).length;
+  const sadEmojis = (allText.match(/[\uD83D\uDE22\uD83D\uDE2D\uD83D\uDE1E\uD83D\uDE14\uD83D\uDE29\uD83D\uDE2B\uD83D\uDC94]/gu) || []).length;
+  const angryEmojis = (allText.match(/[\uD83D\uDE20\uD83D\uDE21\uD83D\uDE24\uD83E\uDD2C]/gu) || []).length;
   const exclamations = (allText.match(/!+/g) || []).length;
   const questions = (allText.match(/\?+/g) || []).length;
 
@@ -253,11 +254,11 @@ export function analyzeConversationHealth(
   const mid = Math.floor(messages.length / 2);
   const firstHalf = messages.slice(0, mid);
   const secondHalf = messages.slice(mid);
-  const firstPositive = firstHalf.filter(m => m.text.match(/[\uD83D\uDE00-\uD83D\uDE0F]|love|great|thanks/i)).length;
-  const secondPositive = secondHalf.filter(m => m.text.match(/[\uD83D\uDE00-\uD83D\uDE0F]|love|great|thanks/i)).length;
+  const firstPositive = firstHalf.filter(m => m.text.match(/[\uD83D\uDE00-\uD83D\uDE0F]|love|great|thanks/iu)).length;
+  const secondPositive = secondHalf.filter(m => m.text.match(/[\uD83D\uDE00-\uD83D\uDE0F]|love|great|thanks/iu)).length;
   const trend = secondPositive > firstPositive + 2 ? 'improving' : secondPositive < firstPositive - 2 ? 'declining' : 'stable';
 
-  const color = overall >= 70 ? '#10B981' : overall >= 40 ? '#F59E0B' : '#EF4444';
+  const color = overall >= 70 ? BRAND_ACCENT : overall >= 40 ? '#F59E0B' : '#EF4444';
   const label = overall >= 80 ? 'Excellent' : overall >= 60 ? 'Good' : overall >= 40 ? 'Fair' : 'Needs attention';
 
   return {

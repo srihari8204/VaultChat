@@ -14,7 +14,7 @@
 
 import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { api } from './api';
 
 const EAS_PROJECT_ID = '144570a3-de88-48f0-b7e1-ecda63618199';
@@ -31,13 +31,23 @@ export const NOTIF_CHANNELS = [
 // Show notifications even when the app is foregrounded (otherwise the
 // system silently swallows them and the user sees nothing).
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert:  true,
-    shouldPlaySound:  true,
-    shouldSetBadge:   false,
-    shouldShowBanner: true,
-    shouldShowList:   true,
-  }),
+  handleNotification: async (notification) => {
+    // For a CALL push while the app is in the foreground, the live socket
+    // already shows the in-app incoming-call screen — suppress the duplicate
+    // notification + ringtone. When backgrounded/killed there's no socket, so
+    // the OS shows it normally (that's what wakes the user).
+    const data: any = notification.request.content.data;
+    if (data?.type === 'call' && AppState.currentState === 'active') {
+      return { shouldShowAlert: false, shouldPlaySound: false, shouldSetBadge: false, shouldShowBanner: false, shouldShowList: false };
+    }
+    return {
+      shouldShowAlert:  true,
+      shouldPlaySound:  true,
+      shouldSetBadge:   false,
+      shouldShowBanner: true,
+      shouldShowList:   true,
+    };
+  },
 });
 
 let cachedToken: string | null = null;
@@ -62,7 +72,31 @@ export async function ensurePermissionAndChannel(): Promise<boolean> {
         console.warn('[push] setNotificationChannel failed:', (err as any)?.message);
       }
     }
+    // Dedicated high-urgency channel for incoming calls: MAX importance, ringer
+    // loop, bypasses Do-Not-Disturb, shows fully on the lock screen.
+    try {
+      await Notifications.setNotificationChannelAsync('calls', {
+        name: 'Calls',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 1000, 800, 1000, 800, 1000],
+        lightColor: '#6C63FF',
+        sound: 'default',
+        bypassDnd: true,
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+        enableVibrate: true,
+      });
+    } catch (err) {
+      console.warn('[push] calls channel failed:', (err as any)?.message);
+    }
   }
+
+  // Accept / Decline action buttons on the incoming-call notification.
+  try {
+    await Notifications.setNotificationCategoryAsync('incoming_call', [
+      { identifier: 'accept',  buttonTitle: 'Accept',  options: { opensAppToForeground: true } },
+      { identifier: 'decline', buttonTitle: 'Decline', options: { opensAppToForeground: false, isDestructive: true } },
+    ]);
+  } catch {}
 
   const { status: existing } = await Notifications.getPermissionsAsync();
   if (existing === 'granted') return true;
@@ -130,9 +164,13 @@ export async function unregisterPushToken(): Promise<void> {
  * Returns an unsubscribe function. Call from app/_layout.tsx so it
  * survives screen changes.
  */
-export function attachTapHandler(onOpenChat: (chatId: string) => void): () => void {
+export function attachTapHandler(
+  onOpenChat: (chatId: string) => void,
+  onCall?: (data: any, action: string) => void,
+): () => void {
   const sub = Notifications.addNotificationResponseReceivedListener((response) => {
     const data: any = response.notification.request.content.data;
+    if (data?.type === 'call') { onCall?.(data, response.actionIdentifier); return; }
     if (data?.chatId) onOpenChat(String(data.chatId));
   });
   return () => sub.remove();

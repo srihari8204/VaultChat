@@ -2,6 +2,7 @@
  * ChessBoard — tap-to-move board wired to services/gameEngines chessMove.
  * board is an 8×8 array of '' | 'wP'..'bK'. Player[0] is white (bottom).
  */
+import { brandAlpha } from '../../constants/theme';
 import { useMemo, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { Aurora } from '../../constants/theme';
@@ -92,8 +93,8 @@ const s = StyleSheet.create({
   piece: { fontWeight: '700' },
   white: { color: '#FFFFFF', textShadowColor: '#000', textShadowRadius: 2 },
   black: { color: '#0B0B0F', textShadowColor: 'rgba(255,255,255,0.4)', textShadowRadius: 2 },
-  dot: { position: 'absolute', backgroundColor: 'rgba(16,185,129,0.75)' },
-  capture: { position: 'absolute', borderColor: 'rgba(16,185,129,0.85)' },
+  dot: { position: 'absolute', backgroundColor: brandAlpha(0.75) },
+  capture: { position: 'absolute', borderColor: brandAlpha(0.85) },
 });
 
 export default ChessBoard;

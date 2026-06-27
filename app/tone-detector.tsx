@@ -6,6 +6,7 @@
 // that's gone — this reflects a real model's judgement, or says so plainly when
 // the AI service is offline.
 
+import { BRAND_ACCENT } from '../constants/theme';
 import React, { useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, TextInput,
@@ -14,7 +15,7 @@ import {
 import { Stack } from 'expo-router';
 import { aiAssist } from '../lib/ai';
 
-const C = { bg: '#FFFFFF', accent: '#4A9FFF', green: '#10B981', card: '#F9FAFB', purple: '#A78BFA', border: '#E5E7EB' };
+const C = { bg: '#FFFFFF', accent: '#4A9FFF', green: BRAND_ACCENT, card: '#F9FAFB', purple: '#A78BFA', border: '#E5E7EB' };
 
 interface Analysis { id: number; text: string; analysis: string }
 

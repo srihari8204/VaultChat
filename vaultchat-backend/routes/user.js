@@ -920,10 +920,12 @@ router.get('/bookmarks', async (req, res) => {
               m.id   AS message_id,
               m.chat_id, m.sender_id, m.type, m.content, m.meta,
               m.created_at AS message_created_at, m.deleted_at,
-              c.type AS chat_type, c.name AS chat_name
+              c.type AS chat_type, c.name AS chat_name,
+              su.name AS sender_name
          FROM bookmarks b
          LEFT JOIN messages m ON m.id = b.message_id
          LEFT JOIN chats    c ON c.id = m.chat_id
+         LEFT JOIN users    su ON su.id = m.sender_id
         WHERE b.user_id = $1
         ORDER BY b.created_at DESC
         LIMIT 500`,
@@ -942,6 +944,7 @@ router.get('/bookmarks', async (req, res) => {
         chatType:  row.chat_type,
         chatName:  row.chat_name,
         senderId:  row.sender_id,
+        senderName: row.sender_name,
         type:      row.type,
         content:   row.content,
         meta:      row.meta,
@@ -1408,7 +1411,8 @@ router.post('/keybundle', async (req, res) => {
 router.get('/settings', async (req, res) => {
   try {
     const r = await db.query(
-      `SELECT discoverable, last_seen_visible, read_receipts, profile_photo_visible
+      `SELECT discoverable, last_seen_visible, read_receipts, profile_photo_visible,
+              group_add_policy, default_disappearing_seconds
          FROM users WHERE id = $1`,
       [req.user.id]
     );
@@ -1418,6 +1422,8 @@ router.get('/settings', async (req, res) => {
       lastSeenVisible:     !!row.last_seen_visible,
       readReceipts:        !!row.read_receipts,
       profilePhotoVisible: !!row.profile_photo_visible,
+      groupAddPolicy:      row.group_add_policy || 'everyone',
+      defaultDisappearingSeconds: row.default_disappearing_seconds ?? 0,
     });
   } catch (err) {
     console.error('[user/settings GET]', err.message);
@@ -1439,6 +1445,16 @@ router.put('/settings', async (req, res) => {
     flag('last_seen_visible',     b.lastSeenVisible);
     flag('read_receipts',         b.readReceipts);
     flag('profile_photo_visible', b.profilePhotoVisible);
+
+    if (typeof b.groupAddPolicy === 'string' && ['everyone', 'contacts', 'nobody'].includes(b.groupAddPolicy)) {
+      params.push(b.groupAddPolicy);
+      sets.push(`group_add_policy = $${params.length}`);
+    }
+    if (b.defaultDisappearingSeconds !== undefined) {
+      const s = Math.max(0, Math.min(parseInt(b.defaultDisappearingSeconds, 10) || 0, 365 * 24 * 60 * 60));
+      params.push(s);
+      sets.push(`default_disappearing_seconds = $${params.length}`);
+    }
 
     if (sets.length === 0) return res.json({ ok: true, noop: true });
 

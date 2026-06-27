@@ -2,6 +2,7 @@
 // (≥3 must match) → recovery ticket. Phase 2: set + confirm a new 6-digit MPIN
 // (weak rejected) → logged in → Chats.
 
+import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -86,7 +87,7 @@ export default function MpinRecover() {
       <Stack.Screen options={{ headerShown: false }} />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
-          <TouchableOpacity onPress={() => router.back()} style={s.back}><Text style={s.backTxt}>←</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => router.back()} style={s.back}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
 
           {phase === 'loading' && <ActivityIndicator color={colors.primary} style={{ marginTop: 80 }} />}
 

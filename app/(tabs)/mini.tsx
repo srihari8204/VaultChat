@@ -1,6 +1,8 @@
 // app/mini-apps.tsx
 // Mini Apps Platform — built-in mini apps with working Calculator and Todo List
 
+import { BRAND_ACCENT } from '../../constants/theme';
+import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
@@ -23,7 +25,7 @@ const MINI_APPS_MAIN = [
   { id: 'screen',      icon: '\uD83D\uDCBB', name: 'Screen',      route: '/screen-share',   gradient: ['#0891B2', '#06B6D4'] as [string, string] },
   { id: 'notes',       icon: '\uD83D\uDCDD', name: 'Notes',       route: '/encrypted-notes', gradient: ['#F59E0B', '#D97706'] as [string, string] },
   { id: 'scanner',     icon: '\uD83D\uDCC4', name: 'Scanner',     route: '/scanner',        gradient: ['#4A9FFF', '#1D4ED8'] as [string, string] },
-  { id: 'location',    icon: '\uD83D\uDCCD', name: 'Location',    route: '/location-sharing', gradient: ['#DC2626', '#F97316'] as [string, string] },
+  { id: 'location',    icon: '\uD83D\uDCCD', name: 'Location',    route: '/location-sharing', gradient: ['#DC2626', BRAND_ACCENT] as [string, string] },
   { id: 'currentloc',  icon: '\uD83D\uDCCC', name: 'Current Loc', route: '/current-location', gradient: ['#EC4899', '#F472B6'] as [string, string] },
   { id: 'cloud',       icon: '\u2601\uFE0F', name: 'Cloud',       route: null,              gradient: ['#6B7280', '#4B5563'] as [string, string] },
   { id: 'pegasus',     icon: '\uD83E\uDD85', name: 'Pegasus',     route: '/aiguardian',     gradient: ['#B91C1C', '#DC2626'] as [string, string] },
@@ -33,8 +35,8 @@ const MINI_APPS_MAIN = [
 // ── Built-in utility mini apps ──────────────────────────────────
 const MINI_APPS_UTILS = [
   { id: 'calculator', icon: '\uD83E\uDDEE', name: 'Calculator',      gradient: ['#4A9FFF', '#1D4ED8'] as [string, string] },
-  { id: 'todo',       icon: '\u2705',        name: 'Todo List',        gradient: ['#10B981', '#059669'] as [string, string] },
-  { id: 'pomodoro',   icon: '\uD83C\uDF45',  name: 'Pomodoro Timer',   gradient: ['#F97316', '#DC2626'] as [string, string] },
+  { id: 'todo',       icon: '\u2705',        name: 'Todo List',        gradient: [BRAND_ACCENT, '#059669'] as [string, string] },
+  { id: 'pomodoro',   icon: '\uD83C\uDF45',  name: 'Pomodoro Timer',   gradient: [BRAND_ACCENT, '#DC2626'] as [string, string] },
   { id: 'expense',    icon: '\uD83D\uDCB0',  name: 'Expense Tracker',  gradient: ['#7C3AED', '#EC4899'] as [string, string] },
   { id: 'qr',         icon: '\uD83D\uDCF1',  name: 'QR Generator',     gradient: ['#06B6D4', '#0891B2'] as [string, string] },
 ];
@@ -158,7 +160,8 @@ export default function MiniAppsScreen() {
     return (
       <View style={styles.appContainer}>
         <TouchableOpacity onPress={() => setActiveApp(null)} style={styles.closeAppBtn}>
-          <Text style={styles.closeAppText}>← Back to Apps</Text>
+          <Ionicons name="arrow-back" size={16} color="#4A9FFF" />
+          <Text style={styles.closeAppText}>Back to Apps</Text>
         </TouchableOpacity>
         <View style={styles.calcDisplay}>
           <Text style={styles.calcDisplayText} numberOfLines={1} adjustsFontSizeToFit>
@@ -209,7 +212,8 @@ export default function MiniAppsScreen() {
     return (
       <View style={styles.appContainer}>
         <TouchableOpacity onPress={() => setActiveApp(null)} style={styles.closeAppBtn}>
-          <Text style={styles.closeAppText}>← Back to Apps</Text>
+          <Ionicons name="arrow-back" size={16} color="#4A9FFF" />
+          <Text style={styles.closeAppText}>Back to Apps</Text>
         </TouchableOpacity>
         <Text style={styles.todoTitle}>✅ Todo List</Text>
         <Text style={styles.todoSubtitle}>
@@ -228,7 +232,7 @@ export default function MiniAppsScreen() {
             returnKeyType="done"
           />
           <TouchableOpacity style={styles.todoAddBtn} onPress={addTodo}>
-            <Text style={styles.todoAddBtnText}>+</Text>
+            <Ionicons name="add" size={24} color="#000000" />
           </TouchableOpacity>
         </View>
         <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
@@ -238,13 +242,13 @@ export default function MiniAppsScreen() {
                 style={[styles.todoCheck, item.done && styles.todoCheckDone]}
                 onPress={() => toggleTodo(item.id)}
               >
-                {item.done && <Text style={styles.todoCheckMark}>✓</Text>}
+                {item.done && <Ionicons name="checkmark" size={14} color="#000000" />}
               </TouchableOpacity>
               <Text style={[styles.todoText, item.done && styles.todoTextDone]}>
                 {item.text}
               </Text>
               <TouchableOpacity onPress={() => deleteTodo(item.id)} style={styles.todoDelBtn}>
-                <Text style={styles.todoDelText}>✕</Text>
+                <Ionicons name="close" size={14} color="#DC2626" />
               </TouchableOpacity>
             </View>
           ))}
@@ -299,7 +303,7 @@ export default function MiniAppsScreen() {
         {/* ── Header ────────────────────────────────── */}
         <View style={styles.headerRow}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Text style={styles.backArrow}>←</Text>
+            <Ionicons name="arrow-back" size={20} color="#E8E8E8" />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
             <Text style={styles.headerTitle}>🔲 Mini Apps</Text>
@@ -328,7 +332,7 @@ export default function MiniAppsScreen() {
           onPress={() => router.push('/game-lobby' as any)}
         >
           <LinearGradient
-            colors={['#F97316', '#D97706']}
+            colors={[BRAND_ACCENT, '#D97706']}
             start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
             style={styles.gamesBannerGrad}
           >
@@ -537,6 +541,9 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
   },
   closeAppBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     marginBottom: 20,
   },
   closeAppText: {

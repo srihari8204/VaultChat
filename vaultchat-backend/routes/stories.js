@@ -21,6 +21,17 @@ const jwtUtil = require('../jwt');
 const router = express.Router();
 router.use(jwtUtil.requireAuth);
 
+// Socket broadcaster injected by server.js (so a new story pushes live).
+let emitToUid = () => {};
+function setBroadcasters(fns) { if (fns.emitToUid) emitToUid = fns.emitToUid; }
+
+// Notify everyone who can see this user's story that a new one was posted.
+function broadcastStoryPosted(userId) {
+  audienceIds(userId)
+    .then(aud => { for (const uid of aud) emitToUid(uid, 'story_posted', { userId }); })
+    .catch(() => {});
+}
+
 const MAX_CAPTION = 200;
 
 function publicStory(row) {
@@ -30,6 +41,8 @@ function publicStory(row) {
     attachmentId: row.attachment_id,
     mediaType:    row.media_type,
     caption:      row.caption,
+    text:         row.text_content ?? null,
+    bgColor:      row.bg_color ?? null,
     encrypted:    !!row.encrypted,
     createdAt:    row.created_at,
     expiresAt:    row.expires_at,
@@ -53,8 +66,42 @@ async function audienceIds(userId) {
         )`,
     [userId]
   );
-  return r.rows.map(x => x.id);
+  const base = r.rows.map(x => x.id);
+  // Apply the user's Status privacy (who can see my status).
+  const pr = await db.query(`SELECT status_privacy FROM users WHERE id = $1`, [userId]);
+  const mode = pr.rows[0]?.status_privacy || 'contacts';
+  if (mode === 'contacts') return base;
+  const lr = await db.query(`SELECT user_id FROM status_audience WHERE owner_id = $1`, [userId]);
+  const listed = new Set(lr.rows.map(x => x.user_id));
+  if (mode === 'except') return base.filter(id => !listed.has(id));
+  if (mode === 'only')   return base.filter(id => listed.has(id));
+  return base;
 }
+
+// GET /stories/privacy — my Status privacy { mode, userIds }
+router.get('/privacy', async (req, res) => {
+  try {
+    const pr = await db.query(`SELECT status_privacy FROM users WHERE id = $1`, [req.user.id]);
+    const lr = await db.query(`SELECT user_id FROM status_audience WHERE owner_id = $1`, [req.user.id]);
+    res.json({ mode: pr.rows[0]?.status_privacy || 'contacts', userIds: lr.rows.map(x => x.user_id) });
+  } catch (err) { console.error('[stories privacy GET]', err.message); res.status(500).json({ error: 'Failed' }); }
+});
+
+// PUT /stories/privacy { mode, userIds }
+router.put('/privacy', async (req, res) => {
+  try {
+    const mode = ['contacts', 'except', 'only'].includes(req.body?.mode) ? req.body.mode : 'contacts';
+    const ids = Array.isArray(req.body?.userIds) ? req.body.userIds.filter(x => typeof x === 'string').slice(0, 1000) : [];
+    await db.query(`UPDATE users SET status_privacy = $1 WHERE id = $2`, [mode, req.user.id]);
+    await db.query(`DELETE FROM status_audience WHERE owner_id = $1`, [req.user.id]);
+    if (mode !== 'contacts' && ids.length) {
+      for (const uid of ids) {
+        await db.query(`INSERT INTO status_audience (owner_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [req.user.id, uid]);
+      }
+    }
+    res.json({ ok: true });
+  } catch (err) { console.error('[stories privacy PUT]', err.message); res.status(500).json({ error: 'Failed' }); }
+});
 
 // GET /stories/audience — viewer ids the caller should wrap an encrypted story
 // for. Returned BEFORE posting so the client can fetch each one's key bundle and
@@ -79,6 +126,21 @@ router.post('/', async (req, res) => {
     // For encrypted stories: per-viewer wrapped content keys
     // [{ viewerId, wrappedKey }]. The server stores them opaquely.
     const keys = Array.isArray(b.keys) ? b.keys : [];
+
+    // Text status (WhatsApp): no attachment, just text + a background color.
+    if (mediaType === 'text') {
+      const text = (b.text || '').toString().trim().slice(0, 700);
+      const bgColor = (b.bgColor || '#0B0B10').toString().slice(0, 16);
+      if (!text) return res.status(400).json({ error: 'text required' });
+      const r = await db.query(
+        `INSERT INTO stories (user_id, media_type, text_content, bg_color, encrypted)
+         VALUES ($1, 'text', $2, $3, FALSE) RETURNING *`,
+        [req.user.id, text, bgColor]
+      );
+      const s = r.rows[0];
+      broadcastStoryPosted(req.user.id);
+      return res.json({ id: s.id, mediaType: 'text', text: s.text_content, bgColor: s.bg_color, caption: null, createdAt: s.created_at });
+    }
 
     if (!attachmentId) return res.status(400).json({ error: 'attachmentId required' });
     if (!['image','video'].includes(mediaType)) {
@@ -121,6 +183,7 @@ router.post('/', async (req, res) => {
         );
       }
     }
+    broadcastStoryPosted(req.user.id);
     res.json(publicStory(story));
   } catch (err) {
     console.error('[stories POST]', err.message);
@@ -135,7 +198,7 @@ router.post('/', async (req, res) => {
 router.get('/feed', async (req, res) => {
   try {
     const r = await db.query(
-      `SELECT s.id, s.user_id, s.attachment_id, s.media_type, s.caption, s.encrypted,
+      `SELECT s.id, s.user_id, s.attachment_id, s.media_type, s.caption, s.text_content, s.bg_color, s.encrypted,
               s.created_at, s.expires_at,
               u.name, u.email, u.first_name_cipher, u.last_name_cipher, u.email_cipher, u.photo_url,
               EXISTS (SELECT 1 FROM story_views sv
@@ -188,6 +251,8 @@ router.get('/feed', async (req, res) => {
         attachmentId: row.attachment_id,
         mediaType:    row.media_type,
         caption:      row.caption,
+        text:         row.text_content ?? null,
+        bgColor:      row.bg_color ?? null,
         encrypted:    !!row.encrypted,
         createdAt:    row.created_at,
         expiresAt:    row.expires_at,
@@ -316,3 +381,4 @@ router.delete('/:id', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.setBroadcasters = setBroadcasters;

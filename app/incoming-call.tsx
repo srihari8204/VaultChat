@@ -13,6 +13,10 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { getSocket } from '../lib/socket';
 import { startRingtone, stopRingtone } from '../lib/sounds';
+import { addCallLog } from '../lib/callLog';
+import { holdActiveCall } from '../lib/callState';
+import { setRingingPeer } from '../lib/ringTracker';
+import { cancelIncomingCall } from '../lib/callNotification';
 
 function useS() {
   const { colors } = useTheme();
@@ -23,19 +27,45 @@ export default function IncomingCallScreen() {
   const { colors } = useTheme();
   const S = useS();
   const router = useRouter();
-  const { chatId, peerUid, peerName, type, offer } = useLocalSearchParams<{
+  const { chatId, peerUid, peerName, type, offer, group, groupName, waiting } = useLocalSearchParams<{
     chatId: string;
     peerUid: string;
     peerName: string;
     type:    'audio' | 'video';
     offer:   string;          // JSON-stringified RTCSessionDescription
+    group?:  string;          // '1' for a mesh group call
+    groupName?: string;
+    waiting?: string;         // '1' when a call arrives while already on a call
   }>();
+  const isGroup = group === '1';
+  const isWaiting = waiting === '1';
 
   // Ring (looping ringtone + vibration, per the user's sound prefs)
   useEffect(() => {
     startRingtone();
-    return () => { stopRingtone(); };
+    cancelIncomingCall();   // dismiss the OS full-screen call notification — in-app UI now owns the ring
+    // Clear the ring-tracker when this screen goes away (so a fresh call from
+    // the same person isn't de-duped away).
+    return () => { stopRingtone(); setRingingPeer(null); cancelIncomingCall(); };
   }, []);
+
+  // If opened from a push (offer empty), capture the WebRTC offer the caller
+  // re-sends every few seconds, so Accept can still answer the original call.
+  const liveOfferRef = useRef(offer || '');
+  useEffect(() => {
+    if (offer) return;
+    let off: (() => void) | null = null;
+    (async () => {
+      const s = await getSocket();
+      const onOffer = (d: any) => {
+        const from = d?.from ?? d?.fromUid;
+        if (from === peerUid && d?.offer) liveOfferRef.current = JSON.stringify(d.offer);
+      };
+      s.on('webrtc_offer', onOffer);
+      off = () => s.off('webrtc_offer', onOffer);
+    })();
+    return () => { if (off) off(); };
+  }, [offer, peerUid]);
 
   // Listen for caller-side hangup before answer
   const decidedRef = useRef(false);
@@ -48,6 +78,7 @@ export default function IncomingCallScreen() {
         if (data?.from === peerUid || data?.fromUid === peerUid) {
           decidedRef.current = true;
           stopRingtone();
+          addCallLog({ chatId, peerUid, peerName: peerName || 'VaultChat user', kind: type === 'video' ? 'video' : 'audio', direction: 'missed', at: Date.now(), durationSec: 0 }).catch(() => {});
           router.back();
         }
       };
@@ -60,16 +91,22 @@ export default function IncomingCallScreen() {
   const accept = () => {
     decidedRef.current = true;
     stopRingtone();
+    if (isWaiting) holdActiveCall();   // put the call we're on now on hold
+    if (isGroup) {
+      router.replace({ pathname: '/group-call-active' as any, params: { chatId, video: type === 'video' ? '1' : '0', name: groupName || peerName } });
+      return;
+    }
     const route = type === 'video' ? '/videocall' : '/voicecall';
     router.replace({
       pathname: route as any,
-      params: { chatId, peerUid, peerName, isIncoming: 'true', initialOffer: offer },
+      params: { chatId, peerUid, peerName, isIncoming: 'true', initialOffer: offer || liveOfferRef.current },
     });
   };
 
   const decline = async () => {
     decidedRef.current = true;
     stopRingtone();
+    addCallLog({ chatId, peerUid, peerName: peerName || 'VaultChat user', kind: type === 'video' ? 'video' : 'audio', direction: 'missed', at: Date.now(), durationSec: 0 }).catch(() => {});
     try {
       const s = await getSocket();
       s.emit('webrtc_end', { to: peerUid, chatId });
@@ -84,9 +121,10 @@ export default function IncomingCallScreen() {
       <StatusBar barStyle="light-content" />
 
       <View style={S.body}>
-        <Text style={S.label}>{type === 'video' ? 'Incoming video call' : 'Incoming voice call'}</Text>
+        <Text style={S.label}>{isWaiting ? 'On another call' : type === 'video' ? 'Incoming video call' : 'Incoming voice call'}</Text>
         <View style={S.avatar}><Text style={S.avatarTxt}>{initial}</Text></View>
         <Text style={S.name}>{peerName || 'VaultChat user'}</Text>
+        {isWaiting && <Text style={S.label}>{type === 'video' ? 'Video call' : 'Voice call'} waiting…</Text>}
       </View>
 
       <View style={S.controls}>
@@ -96,7 +134,7 @@ export default function IncomingCallScreen() {
         </TouchableOpacity>
         <TouchableOpacity style={[S.btn, S.btnAccept]} onPress={accept} activeOpacity={0.85}>
           <Ionicons name={type === 'video' ? 'videocam' : 'call'} size={28} color="#fff" />
-          <Text style={S.btnLabel}>Accept</Text>
+          <Text style={S.btnLabel}>{isWaiting ? 'Hold & accept' : 'Accept'}</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -109,7 +147,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   screen:    { flex: 1, backgroundColor: c.bg },
   body:      { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 14 },
   label:     { color: c.textDim, fontSize: 14, letterSpacing: 1.5, textTransform: 'uppercase' },
-  avatar:    { width: 160, height: 160, borderRadius: 80, backgroundColor: '#6C63FF', alignItems: 'center', justifyContent: 'center', marginTop: 12, shadowColor: '#6C63FF', shadowOpacity: 0.6, shadowRadius: 30 },
+  avatar:    { width: 160, height: 160, borderRadius: 80, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', marginTop: 12, shadowColor: c.primary, shadowOpacity: 0.6, shadowRadius: 30 },
   avatarTxt: { color: '#fff', fontSize: 64, fontWeight: '800' },
   name:      { color: c.text, fontSize: 26, fontWeight: '700' },
 

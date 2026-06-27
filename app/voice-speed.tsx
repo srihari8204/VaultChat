@@ -3,6 +3,7 @@
 // Provides 1x, 1.5x, 2x playback for voice messages
 
 import { Audio } from 'expo-av';
+import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useRef, useState , useMemo} from 'react';
@@ -138,7 +139,7 @@ export default function VoiceSpeedPlayer() {
 
             <TouchableOpacity onPress={togglePlay} style={st.playBtn}>
               <LinearGradient colors={['#4A9FFF', '#4A9FFF']} style={st.playGrad}>
-                <Text style={st.playIcon}>{isPlaying ? '⏸' : '▶'}</Text>
+                <Ionicons name={isPlaying ? 'pause' : 'play'} size={26} color="#fff" />
               </LinearGradient>
             </TouchableOpacity>
 

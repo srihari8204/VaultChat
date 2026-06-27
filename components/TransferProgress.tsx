@@ -2,6 +2,7 @@
 // Shows upload/download % with animated bar, file name, speed, ETA
 // Use: <TransferProgress visible={uploading} progress={0.65} filename="photo.jpg" type="upload" />
 
+import { BRAND_ACCENT } from '../constants/theme';
 import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Animated, TouchableOpacity } from 'react-native';
 
@@ -44,7 +45,7 @@ export default function TransferProgress({ visible, progress, filename, type = '
   const pct = Math.round(progress * 100);
   const icon = type === 'upload' ? '\u2191' : '\u2193';
   const label = type === 'upload' ? 'Uploading' : 'Downloading';
-  const barColor = type === 'upload' ? '#00E5FF' : '#10B981';
+  const barColor = type === 'upload' ? '#00E5FF' : BRAND_ACCENT;
 
   return (
     <Animated.View style={[s.container, { opacity: pulseAnim }]}>

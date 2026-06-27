@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 // app/location-sharing.tsx — Location Sharing (Postgres + socket, no Firebase).
 //
 // Opened from a chat. Three modes:
@@ -8,6 +9,7 @@
 // Real GPS via expo-location. Removed the fake "D2DE" stubs + false crypto
 // claims (the flag is off; coordinates are sent like any other message).
 
+import { brandAlpha } from '../constants/theme';
 import * as Location from 'expo-location';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState , useMemo} from 'react';
@@ -20,7 +22,6 @@ import { getSocket } from '../lib/socket';
 import { sendMessage } from '../lib/chatService';
 import { newLiveKey, encryptPosition } from '../lib/liveLocationCrypto';
 
-const C = { current: '#10B981', live: '#FF6B35', manual: '#8B5CF6', link: '#06B6D4' };
 const DURATIONS = [
   { val: 15, label: '15 min' }, { val: 30, label: '30 min' }, { val: 60, label: '1 hr' },
   { val: 90, label: '90 min' }, { val: 120, label: '2 hrs' }, { val: 180, label: '3 hrs' },
@@ -39,6 +40,10 @@ export default function LocationSharingScreen() {
   const s = useS();
   const router = useRouter();
   const { chatId } = useLocalSearchParams<{ chatId?: string }>();
+
+  // Brand-only accents. Live status uses the WhatsApp live-location red purely
+  // as a status indicator; all chrome/CTAs use the lavender brand color.
+  const C = { current: colors.primary, live: colors.danger, manual: colors.primary, link: colors.primary };
 
   const [screen, setScreen] = useState<Screen>('picker');
   const [mode, setMode] = useState<Mode>('current');
@@ -147,7 +152,7 @@ export default function LocationSharingScreen() {
         <View style={[s.center, { flex: 1, padding: 20 }]}>
           <View style={[s.pulseOuter, { borderColor: `${col}40` }]}>
             <View style={[s.pulseInner, { backgroundColor: `${col}15`, borderColor: `${col}55` }]}>
-              <View style={[s.pin, { backgroundColor: col }]}><Text style={{ fontSize: 26 }}>📍</Text></View>
+              <View style={[s.pin, { backgroundColor: col }]}><Ionicons name="location" size={26} color="#fff" /></View>
             </View>
           </View>
           <View style={[s.badge, { backgroundColor: `${col}15`, borderColor: `${col}33`, marginBottom: 10 }]}>
@@ -159,7 +164,10 @@ export default function LocationSharingScreen() {
             {mode === 'current' ? 'Snapshot sent to the chat.' : mode === 'manual' ? 'Sharing until you stop.' : `Live · ${fmt(timeLeft)} remaining`}
           </Text>
           <TouchableOpacity style={[s.btn, { backgroundColor: `${col}15`, borderColor: `${col}33`, borderWidth: 1, width: '100%' }]} onPress={stop}>
-            <Text style={[s.btnTxt, { color: col }]}>⏹ Stop sharing</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+              <Ionicons name="stop" size={16} color={col} />
+              <Text style={[s.btnTxt, { color: col }]}>Stop sharing</Text>
+            </View>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -172,10 +180,14 @@ export default function LocationSharingScreen() {
     return (
       <SafeAreaView style={s.root}>
         <ScrollView contentContainerStyle={{ padding: 20 }}>
-          <TouchableOpacity onPress={() => { setScreen('picker'); setSelDur(null); }} style={{ marginBottom: 16 }}>
-            <Text style={{ color: C.link, fontSize: 15 }}>‹ Back</Text>
+          <TouchableOpacity onPress={() => { setScreen('picker'); setSelDur(null); }} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+            <Ionicons name="chevron-back" size={18} color={C.link} />
+            <Text style={{ color: C.link, fontSize: 15 }}>Back</Text>
           </TouchableOpacity>
-          <Text style={[s.heading, { color: col }]}>{live ? '🔴 Live Location' : '📌 Current Location'}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <Ionicons name={live ? 'navigate' : 'location'} size={20} color={col} />
+            <Text style={[s.heading, { color: col, marginBottom: 0 }]}>{live ? 'Live Location' : 'Current Location'}</Text>
+          </View>
           <Text style={[s.sub, { marginBottom: 20 }]}>How long to share for?</Text>
           <View style={s.durGrid}>
             {DURATIONS.map(d => (
@@ -186,7 +198,7 @@ export default function LocationSharingScreen() {
           </View>
           {live && (
             <TouchableOpacity style={[s.durCard, { width: '100%', marginBottom: 16 }, selDur === -1 && { backgroundColor: `${col}18`, borderColor: `${col}55` }]} onPress={() => setSelDur(-1)}>
-              <Text style={[s.durLabel, { color: selDur === -1 ? col : colors.textDim }]}>♾️ Until I stop</Text>
+              <Text style={[s.durLabel, { color: selDur === -1 ? col : colors.textDim }]}>Until I stop</Text>
             </TouchableOpacity>
           )}
           <TouchableOpacity
@@ -194,7 +206,7 @@ export default function LocationSharingScreen() {
             disabled={selDur === null}
             onPress={() => { if (selDur !== null) startSharing(live ? 'live' : 'current', selDur === -1 ? null : selDur); }}
           >
-            <Text style={[s.btnTxt, { color: selDur !== null ? '#fff' : colors.textDim }]}>{live ? '🔴 Start live' : '📌 Share location'}</Text>
+            <Text style={[s.btnTxt, { color: selDur !== null ? '#fff' : colors.textDim }]}>{live ? 'Start live location' : 'Share location'}</Text>
           </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
@@ -205,26 +217,30 @@ export default function LocationSharingScreen() {
   return (
     <SafeAreaView style={s.root}>
       <ScrollView contentContainerStyle={{ padding: 20 }}>
-        <TouchableOpacity onPress={() => router.back()} style={{ marginBottom: 16 }}>
-          <Text style={{ color: C.link, fontSize: 15 }}>‹ Back</Text>
+        <TouchableOpacity onPress={() => router.back()} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+          <Ionicons name="chevron-back" size={18} color={C.link} />
+          <Text style={{ color: C.link, fontSize: 15 }}>Back</Text>
         </TouchableOpacity>
         <Text style={s.lbl}>LOCATION SHARING</Text>
         <Text style={s.heading}>Share Location</Text>
-        <Text style={[s.sub, { marginBottom: 16 }]}>📍 {address}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 16 }}>
+          <Ionicons name="location-outline" size={13} color={colors.textDim} />
+          <Text style={s.sub}>{address}</Text>
+        </View>
         {!chatId && <Text style={[s.sub, { color: C.live, marginBottom: 12 }]}>Open this from a chat to share.</Text>}
 
         {([
-          { mode: 'current' as Mode, icon: '📌', title: 'Current Location', desc: 'One-time snapshot, not tracking', color: C.current, onPress: () => setScreen('dur-current') },
-          { mode: 'live' as Mode, icon: '🔴', title: 'Live Location', desc: 'Updates as you move · time-limited', color: C.live, onPress: () => setScreen('dur-live') },
-          { mode: 'manual' as Mode, icon: '♾️', title: 'Until I Stop', desc: 'Live with no time limit', color: C.manual, onPress: () => startSharing('manual', null) },
+          { mode: 'current' as Mode, icon: 'location' as const, title: 'Current Location', desc: 'One-time snapshot, not tracking', onPress: () => setScreen('dur-current') },
+          { mode: 'live' as Mode, icon: 'navigate' as const, title: 'Live Location', desc: 'Updates as you move · time-limited', onPress: () => setScreen('dur-live') },
+          { mode: 'manual' as Mode, icon: 'infinite' as const, title: 'Until I Stop', desc: 'Live with no time limit', onPress: () => startSharing('manual', null) },
         ]).map(opt => (
-          <TouchableOpacity key={opt.mode} style={[s.modeCard, { borderColor: `${opt.color}33` }]} onPress={opt.onPress} disabled={!chatId}>
-            <View style={[s.modeIcon, { backgroundColor: `${opt.color}18` }]}><Text style={{ fontSize: 26 }}>{opt.icon}</Text></View>
+          <TouchableOpacity key={opt.mode} style={s.modeCard} onPress={opt.onPress} disabled={!chatId}>
+            <View style={s.modeIcon}><Ionicons name={opt.icon} size={24} color={colors.text} /></View>
             <View style={{ flex: 1 }}>
               <Text style={s.optTitle}>{opt.title}</Text>
               <Text style={s.sub}>{opt.desc}</Text>
             </View>
-            <Text style={{ color: colors.textFaint, fontSize: 20 }}>›</Text>
+            <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
           </TouchableOpacity>
         ))}
       </ScrollView>
@@ -238,8 +254,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   heading: { fontSize: 22, fontWeight: '900', color: c.text, marginBottom: 6 },
   sub: { fontSize: 12, color: c.textDim, lineHeight: 18 },
   lbl: { fontSize: 9, fontWeight: '700', color: c.textFaint, letterSpacing: 2, marginBottom: 8 },
-  modeCard: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16, borderRadius: 18, backgroundColor: c.card, borderWidth: 1, marginBottom: 12 },
-  modeIcon: { width: 52, height: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  modeCard: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16, borderRadius: 18, backgroundColor: c.card, borderWidth: 1, borderColor: c.border, marginBottom: 12 },
+  modeIcon: { width: 52, height: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surface },
   optTitle: { fontSize: 15, fontWeight: '800', color: c.text },
   badge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderWidth: 1 },
   badgeText: { fontSize: 9, fontWeight: '700' },

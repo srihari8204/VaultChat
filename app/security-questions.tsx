@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { useState } from "react";
@@ -38,7 +39,7 @@ export default function SecurityQuestionsScreen() {
             <Text style={S.qNum}>Question {slot+1}</Text>
             <TouchableOpacity style={S.qSel} onPress={()=>setPick(pick===slot?null:slot)} activeOpacity={0.8}>
               <Text style={S.qSelTxt} numberOfLines={2}>{SECURITY_QUESTIONS[sel[slot]]}</Text>
-              <Text style={{color:"#4A9FFF",fontSize:12,marginLeft:8}}>{pick===slot?"▲":"▼"}</Text>
+              <Ionicons name={pick===slot?"chevron-up":"chevron-down"} size={14} color="#4A9FFF" style={{marginLeft:8}} />
             </TouchableOpacity>
             {pick===slot&&(
               <View style={S.drop}>

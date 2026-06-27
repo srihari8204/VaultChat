@@ -12,7 +12,7 @@ import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import { type Palette } from '../constants/theme';
+import { type Palette, BRAND_ACCENT } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { getMessages, type Message } from '../lib/chatService';
 import { getCurrentUserAsync } from './(constants)/authService';
@@ -119,9 +119,9 @@ export default function ChatExportScreen() {
     html += '<title>VaultChat Export</title><style>';
     html += 'body{font-family:-apple-system,Segoe UI,sans-serif;background:#0A0A0F;color:#fff;max-width:600px;margin:0 auto;padding:16px}';
     html += '.header{text-align:center;padding:20px;border-bottom:1px solid #222;margin-bottom:20px}';
-    html += '.header h1{color:#10B981;margin:0}.header p{color:#888;font-size:12px}';
+    html += `.header h1{color:${BRAND_ACCENT};margin:0}.header p{color:#888;font-size:12px}`;
     html += '.msg{margin:4px 0;padding:8px 12px;border-radius:14px;max-width:80%;word-wrap:break-word}';
-    html += '.mine{background:#10B98122;margin-left:auto;border-bottom-right-radius:2px}';
+    html += `.mine{background:${BRAND_ACCENT}22;margin-left:auto;border-bottom-right-radius:2px}`;
     html += '.peer{background:#1a1a22;margin-right:auto;border-bottom-left-radius:2px}';
     html += '.time{color:#666;font-size:10px;margin-top:4px;text-align:right}';
     html += '.sender{color:#06B6D4;font-size:11px;font-weight:700;margin-bottom:2px}';
@@ -215,7 +215,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   progressBox: { alignItems: 'center', padding: 20, marginTop: 10 },
   progressTxt: { color: c.textDim, fontSize: 13, marginTop: 8 },
   progressCount: { color: c.textFaint, fontSize: 11, marginTop: 4 },
-  noteBox: { marginTop: 24, backgroundColor: 'rgba(239,68,68,0.06)', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: 'rgba(239,68,68,0.22)' },
+  noteBox: { marginTop: 24, backgroundColor: c.surface, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: c.border },
   noteTitle: { color: c.danger, fontSize: 12, fontWeight: '800', marginBottom: 4 },
   noteDesc: { color: c.textDim, fontSize: 11, lineHeight: 18 },
 });

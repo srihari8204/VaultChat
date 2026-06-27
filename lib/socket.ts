@@ -21,6 +21,18 @@ import { getAccessToken } from './api';
 let socket: Socket | null = null;
 let connecting: Promise<Socket> | null = null;
 
+// Listeners that MUST survive socket re-creation (reconnect after a network
+// drop, or a new instance after disconnect()/re-login). Re-applied every time
+// a fresh Socket is constructed. This is what keeps incoming calls reliable —
+// a one-shot `s.on('call_incoming', …)` is lost the moment the socket is
+// replaced, which is exactly why calls were silently not ringing.
+const persistentListeners = new Map<string, Set<(data: any) => void>>();
+function applyPersistent(s: Socket) {
+  for (const [event, hs] of persistentListeners) {
+    for (const h of hs) { try { s.off(event, h); s.on(event, h); } catch {} }
+  }
+}
+
 async function connect(): Promise<Socket> {
   const token = await getAccessToken();
   if (!token) throw new Error('Not signed in');
@@ -33,6 +45,7 @@ async function connect(): Promise<Socket> {
     reconnectionDelayMax: 10000,
     timeout: 20000,
   });
+  applyPersistent(s);   // re-attach call/global listeners onto the new socket
 
   return new Promise<Socket>((resolve, reject) => {
     const onReady = () => {
@@ -64,6 +77,28 @@ export function disconnect(): void {
     socket = null;
   }
   connecting = null;
+  // Keep persistentListeners — they must re-arm on the next (re-login) socket.
+}
+
+/**
+ * Register a listener that auto-re-attaches whenever the socket is (re)created
+ * — survives reconnects AND disconnect()/re-login. Also keeps retrying the
+ * initial connection so it arms even if called before sign-in completes.
+ * Use this for app-global events like incoming calls. Returns an unsubscribe.
+ */
+export function addPersistentListener<T = any>(event: string, handler: (data: T) => void): () => void {
+  let set = persistentListeners.get(event);
+  if (!set) { set = new Set(); persistentListeners.set(event, set); }
+  set.add(handler as any);
+  if (socket) { try { socket.off(event, handler as any); socket.on(event, handler as any); } catch {} }
+  // Kick off / keep retrying a connection until signed in, so it actually attaches.
+  let stop = false;
+  (async () => {
+    for (let i = 0; i < 30 && !stop; i++) {
+      try { await getSocket(); break; } catch { await new Promise(r => setTimeout(r, 1500)); }
+    }
+  })();
+  return () => { stop = true; persistentListeners.get(event)?.delete(handler as any); try { socket?.off(event, handler as any); } catch {} };
 }
 
 /**

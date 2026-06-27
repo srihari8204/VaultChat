@@ -1,6 +1,8 @@
 // app/media-viewer.tsx — Universal In-App Media Viewer
 // Images: zoom, pan | Videos: stream while loading | Audio: built-in player | Code: inline preview
 
+import { BRAND_ACCENT } from '../constants/theme';
+import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, StatusBar,
@@ -17,7 +19,7 @@ import { getAccessToken } from '../lib/api';
 import { attachmentUrl, markAttachmentViewed } from '../lib/chatService';
 
 const { width: SW, height: SH } = Dimensions.get('window');
-const C = { bg: '#000', accent: '#4A9FFF', green: '#10B981' };
+const C = { bg: '#000', accent: '#4A9FFF', green: BRAND_ACCENT };
 
 const getFileType = (name) => {
   const ext = (name || '').split('.').pop()?.toLowerCase() || '';
@@ -159,7 +161,7 @@ export default function MediaViewerScreen() {
                 await v.playAsync(); setShouldPlay(true);
               }
             }}>
-              <Text style={{ fontSize: 32 }}>{st.isPlaying ? '\u23F8' : '\u25B6\uFE0F'}</Text>
+              <Ionicons name={st.isPlaying ? 'pause' : 'play'} size={40} color="#fff" />
             </TouchableOpacity>
             <View style={s.progRow}>
               <Text style={s.timeTxt}>{formatDur(st.positionMillis)}</Text>
@@ -191,17 +193,17 @@ export default function MediaViewerScreen() {
     return (
       <View style={s.audioWrap}>
         <View style={s.audioCard}>
-          <Text style={{ fontSize: 48 }}>{"\uD83C\uDFB5"}</Text>
+          <Ionicons name="musical-notes" size={48} color="#1F2937" />
           <Text style={s.audioName}>{fileName}</Text>
           <Text style={s.audioMeta}>{formatSize(fileSize)}{ast.durationMillis ? ' | ' + formatDur(ast.durationMillis) : ''}</Text>
           <View style={s.waveform}>{Array.from({length:40}).map((_,i) => <View key={i} style={[s.waveBar,{height:8+Math.random()*28,backgroundColor:i/40<prog?C.accent:'#D1D5DB'}]}/>)}</View>
           <View style={s.audioTimeRow}><Text style={s.audioTime}>{formatDur(ast.positionMillis)}</Text><Text style={s.audioTime}>{formatDur(ast.durationMillis)}</Text></View>
           <View style={s.audioCtrlRow}>
-            <TouchableOpacity onPress={async()=>{if(!soundRef.current)return;const p=Math.max(0,prog-0.1);await soundRef.current.setPositionAsync(p*(ast.durationMillis||0));}}><Text style={{fontSize:24}}>{"\u23EA"}</Text></TouchableOpacity>
+            <TouchableOpacity onPress={async()=>{if(!soundRef.current)return;const p=Math.max(0,prog-0.1);await soundRef.current.setPositionAsync(p*(ast.durationMillis||0));}}><Ionicons name="play-back" size={26} color="#1F2937" /></TouchableOpacity>
             <TouchableOpacity style={s.audioPlayBtn} onPress={async()=>{if(!soundRef.current)return;if(ast.isPlaying){await soundRef.current.pauseAsync();}else{await soundRef.current.playAsync();}}}>
-              <Text style={{fontSize:28}}>{ast.isPlaying?'\u23F8':'\u25B6\uFE0F'}</Text>
+              <Ionicons name={ast.isPlaying?'pause':'play'} size={30} color="#000" />
             </TouchableOpacity>
-            <TouchableOpacity onPress={async()=>{if(!soundRef.current)return;const p=Math.min(1,prog+0.1);await soundRef.current.setPositionAsync(p*(ast.durationMillis||0));}}><Text style={{fontSize:24}}>{"\u23E9"}</Text></TouchableOpacity>
+            <TouchableOpacity onPress={async()=>{if(!soundRef.current)return;const p=Math.min(1,prog+0.1);await soundRef.current.setPositionAsync(p*(ast.durationMillis||0));}}><Ionicons name="play-forward" size={26} color="#1F2937" /></TouchableOpacity>
           </View>
         </View>
       </View>
@@ -226,9 +228,10 @@ export default function MediaViewerScreen() {
         <View style={{padding:12,background:'#161B22',borderBottomWidth:1,borderBottomColor:'#21262D'}}>
           <Text style={{color:'#1F2937',fontSize:14,fontWeight:800}}>{fileName}</Text>
           <Text style={{color:'#8B949E',fontSize:11,marginTop:4}}>{lines.length} lines | {formatSize(content.length)}</Text>
-          <TouchableOpacity style={{marginTop:10,background:'#4A9FFF22',borderRadius:10,paddingVertical:10,alignItems:'center',borderWidth:1,borderColor:'#4A9FFF44'}}
+          <TouchableOpacity style={{marginTop:10,backgroundColor:'#4A9FFF22',borderRadius:10,paddingVertical:10,flexDirection:'row',gap:6,justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:'#4A9FFF44'}}
             onPress={()=>router.push({pathname:'/file-preview',params:{uri:fileUri,filename:fileName,mediaUrl:fileUri}})}>
-            <Text style={{color:'#4A9FFF',fontSize:12,fontWeight:700}}>{"\uD83C\uDF08 Open with Syntax Highlighting"}</Text>
+            <Ionicons name="code-slash-outline" size={14} color="#4A9FFF" />
+            <Text style={{color:'#4A9FFF',fontSize:12,fontWeight:'700'}}>Open with Syntax Highlighting</Text>
           </TouchableOpacity>
         </View>
         {lines.slice(0,500).map((l,i)=><View key={i} style={{flexDirection:'row',minHeight:22}}><Text style={{color:'#484F58',fontSize:12,fontFamily:'monospace',width:40,textAlign:'right',paddingRight:12,paddingTop:2}}>{i+1}</Text><Text style={{color:'#C9D1D9',fontSize:12,fontFamily:'monospace',flex:1,paddingTop:2}}>{l}</Text></View>)}
@@ -240,17 +243,17 @@ export default function MediaViewerScreen() {
 
   // PDF / UNKNOWN
   const GenericViewer = () => { useEffect(()=>{setLoading(false);},[]);
-    return (<View style={s.audioWrap}><View style={s.audioCard}><Text style={{fontSize:48}}>{"\uD83D\uDCC4"}</Text><Text style={s.audioName}>{fileName}</Text><Text style={s.audioMeta}>{formatSize(fileSize)}</Text>
-      <TouchableOpacity style={{marginTop:20,background:C.accent,borderRadius:14,paddingVertical:14,paddingHorizontal:32}} onPress={saveToDevice}><Text style={{color:'#000',fontSize:14,fontWeight:800}}>{"\uD83D\uDCE5 Download & Open"}</Text></TouchableOpacity>
+    return (<View style={s.audioWrap}><View style={s.audioCard}><Ionicons name="document-outline" size={48} color="#1F2937" /><Text style={s.audioName}>{fileName}</Text><Text style={s.audioMeta}>{formatSize(fileSize)}</Text>
+      <TouchableOpacity style={{marginTop:20,backgroundColor:C.accent,borderRadius:14,flexDirection:'row',gap:8,alignItems:'center',paddingVertical:14,paddingHorizontal:32}} onPress={saveToDevice}><Ionicons name="download-outline" size={16} color="#000" /><Text style={{color:'#000',fontSize:14,fontWeight:'800'}}>Download & Open</Text></TouchableOpacity>
     </View></View>);
   };
 
   return (
     <>
-      <Stack.Screen options={{ title: fileName, headerStyle: { backgroundColor: '#000' }, headerTintColor: '#1F2937',
-        headerRight: () => <View style={{flexDirection:'row',gap:14,marginRight:8}}>
-          <TouchableOpacity onPress={()=>Share.share({url:fileUri,message:fileName})}><Text style={{color:C.accent,fontSize:13,fontWeight:700}}>Share</Text></TouchableOpacity>
-          <TouchableOpacity onPress={saveToDevice}><Text style={{color:C.accent,fontSize:13,fontWeight:700}}>Save</Text></TouchableOpacity>
+      <Stack.Screen options={{ title: fileName, headerStyle: { backgroundColor: '#000' }, headerTintColor: '#fff',
+        headerRight: () => <View style={{flexDirection:'row',gap:20,marginRight:8}}>
+          <TouchableOpacity onPress={()=>Share.share({url:fileUri,message:fileName})} hitSlop={8}><Ionicons name="share-social-outline" size={22} color="#fff" /></TouchableOpacity>
+          <TouchableOpacity onPress={saveToDevice} hitSlop={8}><Ionicons name="download-outline" size={22} color="#fff" /></TouchableOpacity>
         </View>,
       }} />
       <View style={s.container}>

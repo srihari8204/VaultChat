@@ -7,14 +7,16 @@
 // screens). The full mesh/SFU group call lights up once the media server is
 // provisioned.
 
+import { brandAlpha } from '../constants/theme';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
-import React, { useEffect, useState , useMemo} from 'react';
+import React, { useCallback, useEffect, useState , useMemo} from 'react';
 import { FlatList, StyleSheet, Text, TouchableOpacity, View, ActivityIndicator, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { getChat, attachmentUrl, type ChatMember } from '../lib/chatService';
 import { getAccessToken } from '../lib/api';
+import { getSocket } from '../lib/socket';
 import { getCurrentUserAsync } from './(constants)/authService';
 
 type CallMode = 'voice' | 'video';
@@ -58,6 +60,18 @@ export default function GroupCallsScreen() {
     } as any);
   };
 
+  // Real mesh group call: ring every member, then join the call room.
+  const startGroupCall = useCallback(async () => {
+    try {
+      const me = await getCurrentUserAsync();
+      const s = await getSocket();
+      for (const m of members) {
+        s.emit('call_incoming', { to: m.userId, chatId, group: true, groupName, video: mode === 'video' ? '1' : '0', fromName: me?.name || 'Someone' });
+      }
+    } catch {}
+    router.push({ pathname: '/group-call-active', params: { chatId, video: mode === 'video' ? '1' : '0', name: groupName } } as any);
+  }, [members, chatId, groupName, mode, router]);
+
   return (
     <View style={s.container}>
       <Stack.Screen options={{ headerShown: false }} />
@@ -72,16 +86,17 @@ export default function GroupCallsScreen() {
       <View style={s.modeRow}>
         {(['voice', 'video'] as const).map(mo => (
           <TouchableOpacity key={mo} style={[s.modeBtn, mode === mo && s.modeBtnActive]} onPress={() => setMode(mo)}>
-            <Ionicons name={mo === 'voice' ? 'call' : 'videocam'} size={18} color={mode === mo ? '#04130D' : colors.textDim} />
+            <Ionicons name={mo === 'voice' ? 'call' : 'videocam'} size={18} color={mode === mo ? '#FFFFFF' : colors.textDim} />
             <Text style={[s.modeTxt, mode === mo && s.modeTxtActive]}>{mo === 'voice' ? 'Voice' : 'Video'}</Text>
           </TouchableOpacity>
         ))}
       </View>
 
-      <View style={s.notice}>
-        <Ionicons name="information-circle-outline" size={18} color={colors.accent} />
-        <Text style={s.noticeTxt}>Everyone-at-once group calls need the media server (rolling out). Tap a member to start a 1:1 call now.</Text>
-      </View>
+      <TouchableOpacity style={s.startBtn} activeOpacity={0.85} onPress={startGroupCall}>
+        <Ionicons name={mode === 'video' ? 'videocam' : 'call'} size={20} color="#fff" />
+        <Text style={s.startTxt}>Start {mode} group call</Text>
+      </TouchableOpacity>
+      <Text style={s.noticeTxt}>Everyone-at-once call (best for small groups). Or tap a member below for a 1:1 call.</Text>
 
       {loading ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: 30 }} />
@@ -124,9 +139,11 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   modeBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 10 },
   modeBtnActive: { backgroundColor: c.primary },
   modeTxt: { color: c.textDim, fontSize: 14, fontWeight: '700' },
-  modeTxtActive: { color: '#04130D' },
+  modeTxtActive: { color: '#FFFFFF' },
   notice: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 16, marginTop: 12, padding: 12, borderRadius: 12, backgroundColor: 'rgba(6,182,212,0.1)', borderWidth: 1, borderColor: 'rgba(6,182,212,0.3)' },
-  noticeTxt: { flex: 1, color: c.textDim, fontSize: 12, lineHeight: 17 },
+  noticeTxt: { color: c.textDim, fontSize: 12, lineHeight: 17, marginHorizontal: 18, marginTop: 8, textAlign: 'center' },
+  startBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginHorizontal: 16, marginTop: 12, paddingVertical: 14, borderRadius: 14, backgroundColor: c.primary },
+  startTxt: { color: '#fff', fontSize: 15, fontWeight: '800', textTransform: 'capitalize' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: c.card, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: c.border },
   avatar: { width: 46, height: 46, borderRadius: 23, backgroundColor: c.surfaceSolid, alignItems: 'center', justifyContent: 'center', overflow: 'visible' },
   avatarImg: { width: 46, height: 46, borderRadius: 23 },
@@ -134,5 +151,5 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   onlineDot: { position: 'absolute', right: 0, bottom: 0, width: 12, height: 12, borderRadius: 6, backgroundColor: c.online, borderWidth: 2, borderColor: c.card },
   name: { color: c.text, fontSize: 15, fontWeight: '700' },
   sub: { color: c.textDim, fontSize: 12, marginTop: 2 },
-  callBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(16,185,129,0.13)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(16,185,129,0.3)' },
+  callBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: brandAlpha(0.13), alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: brandAlpha(0.3) },
 });

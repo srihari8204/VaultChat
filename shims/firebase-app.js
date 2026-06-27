@@ -2,12 +2,12 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 
 const firebaseConfig = {
-  apiKey: "AIzaSyDKic9s-_fyg4OeAttQgZVBj4mT-4UkGSc",
-  authDomain: "vaultchat-ce9e3.firebaseapp.com",
-  projectId: "vaultchat-ce9e3",
-  storageBucket: "vaultchat-ce9e3.firebasestorage.app",
-  messagingSenderId: "207307621485",
-  appId: "1:207307621485:android:56aa1a7927a5a77bdeab64",
+  apiKey: "AIzaSyBKL2HIzv5NGeRPJBLj1AZGKZ5JCzxzjPc",
+  authDomain: "vaultchatprod01.firebaseapp.com",
+  projectId: "vaultchatprod01",
+  storageBucket: "vaultchatprod01.firebasestorage.app",
+  messagingSenderId: "553821750020",
+  appId: "1:553821750020:android:537c9dc1496e9c40350651",
 };
 
 // Initialize once — same config as constants/firebase.ts

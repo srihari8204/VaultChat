@@ -17,8 +17,9 @@
 // Audio routing: earpiece by default (private). Speaker toggle button.
 // Cleanup: stops local tracks, closes pc, emits webrtc_end, leaves screen.
 
-import { Audio } from 'expo-av';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import InCallManager from 'react-native-incall-manager';
+import { setActiveCall, clearActiveCall, type ActiveCall } from '../lib/callState';
 import { useCallback, useEffect, useRef, useState , useMemo} from 'react';
 import { Alert, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { type Palette } from '../constants/theme';
@@ -32,6 +33,8 @@ import {
 import { getCurrentUserAsync } from './(constants)/authService';
 import { getTurnConfig, type IceServer } from '../lib/chatService';
 import { getSocket } from '../lib/socket';
+import { addCallLog } from '../lib/callLog';
+import { Ionicons } from '@expo/vector-icons';
 
 type CallState = 'connecting' | 'ringing' | 'connected' | 'ended';
 
@@ -63,13 +66,23 @@ export default function VoiceCallScreen() {
   const localStreamRef  = useRef<any>(null);
   const meIdRef         = useRef<string>('');
   const timerRef        = useRef<any>(null);
+  const ringTimerRef    = useRef<any>(null);
   const offsRef         = useRef<Array<() => void>>([]);
+  const secondsRef      = useRef(0);
+  const connectedRef    = useRef(false);
+  const loggedRef       = useRef(false);
+
+  // Keep refs in sync so endCall (a stable callback) can log accurate history.
+  useEffect(() => { secondsRef.current = seconds; }, [seconds]);
+  useEffect(() => { if (state === 'connected') connectedRef.current = true; }, [state]);
 
   // ── teardown ──────────────────────────────────────────────
   const teardown = useCallback((notify = true) => {
     offsRef.current.forEach(fn => { try { fn(); } catch {} });
     offsRef.current = [];
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    if (ringTimerRef.current) { clearInterval(ringTimerRef.current); ringTimerRef.current = null; }
+    try { InCallManager.stop(); } catch {}
     try { localStreamRef.current?.getTracks().forEach((t: any) => t.stop()); } catch {}
     try { pcRef.current?.close(); } catch {}
     pcRef.current = null;
@@ -81,10 +94,52 @@ export default function VoiceCallScreen() {
   }, [peerUid, chatId]);
 
   const endCall = useCallback((notify = true) => {
+    // Log this call to the local history exactly once.
+    if (!loggedRef.current && peerUid) {
+      loggedRef.current = true;
+      const incoming = isIncoming === 'true' || isIncoming === '1';
+      const dir: 'incoming' | 'outgoing' | 'missed' = incoming ? (connectedRef.current ? 'incoming' : 'missed') : 'outgoing';
+      addCallLog({ chatId, peerUid, peerName: peerName || 'VaultChat user', kind: 'audio', direction: dir, at: Date.now() - secondsRef.current * 1000, durationSec: secondsRef.current }).catch(() => {});
+    }
     setState('ended');
     teardown(notify);
     setTimeout(() => router.back(), 200);
-  }, [teardown, router]);
+  }, [teardown, router, peerUid, peerName, isIncoming]);
+
+  // ── call-waiting / hold registration ───────────────────────
+  // Lets a call arriving while we're busy become "call waiting": the incoming
+  // screen can hold THIS call (pause our mic) and accept the new one, then we
+  // resume when it ends and we regain focus.
+  const mutedRef = useRef(false);
+  useEffect(() => { mutedRef.current = muted; }, [muted]);
+  const speakerRef = useRef(false);
+  const heldRef = useRef(false);
+  const meRef   = useRef<ActiveCall | null>(null);
+
+  useEffect(() => {
+    const me: ActiveCall = {
+      chatId, peerUid, peerName: peerName || 'VaultChat user', kind: 'audio',
+      hold:   () => { heldRef.current = true;  try {
+        localStreamRef.current?.getAudioTracks?.().forEach((t: any) => { t.enabled = false; });   // mute my mic
+        pcRef.current?.getReceivers?.().forEach((r: any) => { if (r.track) r.track.enabled = false; }); // silence the held peer
+      } catch {} },
+      resume: () => { heldRef.current = false; try {
+        InCallManager.start({ media: 'audio', auto: true });               // re-acquire the audio route
+        InCallManager.setForceSpeakerphoneOn(speakerRef.current ? true : null);
+        localStreamRef.current?.getAudioTracks?.().forEach((t: any) => { t.enabled = !mutedRef.current; });
+        pcRef.current?.getReceivers?.().forEach((r: any) => { if (r.track) r.track.enabled = true; });
+      } catch {} },
+      hangUp: () => endCall(true),
+    };
+    meRef.current = me;
+    setActiveCall(me);
+    return () => clearActiveCall(me);
+  }, [chatId, peerUid, peerName, endCall]);
+
+  // Regained focus after a call-waiting call ended → resume + re-assert active.
+  useFocusEffect(useCallback(() => {
+    if (heldRef.current && meRef.current) { meRef.current.resume(); setActiveCall(meRef.current); }
+  }, []));
 
   // ── timer ──────────────────────────────────────────────────
   const startTimer = useCallback(() => {
@@ -99,12 +154,13 @@ export default function VoiceCallScreen() {
 
     const run = async () => {
       try {
-        // 1. Audio session — earpiece by default for voice calls
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS:         true,
-          playsInSilentModeIOS:       true,
-          playThroughEarpieceAndroid: true,
-        });
+        // 1. Audio session — InCallManager owns the call audio route. `auto`
+        //    makes it follow wired/Bluetooth headsets automatically; earpiece
+        //    is the default for a voice call (speaker off).
+        try {
+          InCallManager.start({ media: 'audio', auto: true });
+          InCallManager.setForceSpeakerphoneOn(false);
+        } catch {}
 
         // 2. Identity
         const me = await getCurrentUserAsync();
@@ -185,16 +241,26 @@ export default function VoiceCallScreen() {
           // Notify peer it's an incoming call (separate event so the
           // recipient can show a UI before answering, and so that the
           // OFFER itself can ride alongside)
-          s.emit('call_incoming', {
+          const ringPayload = {
             to: peerUid,
             from: meIdRef.current,
             chatId,
             type: 'audio',
             callerName: me.name ?? me.email ?? 'VaultChat user',
             offer,
-          });
+          };
+          s.emit('call_incoming', ringPayload);
           s.emit('webrtc_offer', { to: peerUid, from: meIdRef.current, offer });
           setState('ringing');
+          // Re-send the ring + offer every 3s while ringing, so a callee whose
+          // app was killed (and got the push) still receives the offer once it
+          // wakes + reconnects. Stops on connect/teardown or after ~30s.
+          let rings = 0;
+          ringTimerRef.current = setInterval(() => {
+            if (connectedRef.current || rings >= 9) { clearInterval(ringTimerRef.current); ringTimerRef.current = null; return; }
+            rings++;
+            try { s.emit('call_incoming', ringPayload); s.emit('webrtc_offer', { to: peerUid, from: meIdRef.current, offer }); } catch {}
+          }, 3000);
         }
       } catch (e: any) {
         if (cancelled) return;
@@ -216,16 +282,13 @@ export default function VoiceCallScreen() {
     setMuted(next);
   }, [muted]);
 
-  const toggleSpeaker = useCallback(async () => {
+  const toggleSpeaker = useCallback(() => {
     const next = !speaker;
     setSpeaker(next);
-    try {
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS:         true,
-        playsInSilentModeIOS:       true,
-        playThroughEarpieceAndroid: !next,   // false → speaker; true → earpiece
-      });
-    } catch {}
+    speakerRef.current = next;
+    // null route when speaker is OFF lets InCallManager keep using a connected
+    // Bluetooth/wired headset instead of forcing the earpiece.
+    try { InCallManager.setForceSpeakerphoneOn(next ? true : null); } catch {}
   }, [speaker]);
 
   // ── render ────────────────────────────────────────────────
@@ -249,9 +312,9 @@ export default function VoiceCallScreen() {
       </View>
 
       <View style={S.controls}>
-        <ControlBtn icon={muted ? '🎙️̸' : '🎙️'} label={muted ? 'Unmute' : 'Mute'} active={muted} onPress={toggleMute} />
-        <ControlBtn icon={speaker ? '🔊' : '🔈'} label={speaker ? 'Speaker' : 'Earpiece'} active={speaker} onPress={toggleSpeaker} />
-        <ControlBtn icon="📴" label="End" danger onPress={() => endCall(true)} />
+        <ControlBtn icon={muted ? 'mic-off' : 'mic'} label={muted ? 'Unmute' : 'Mute'} active={muted} onPress={toggleMute} />
+        <ControlBtn icon={speaker ? 'volume-high' : 'volume-low'} label={speaker ? 'Speaker' : 'Earpiece'} active={speaker} onPress={toggleSpeaker} />
+        <ControlBtn icon="call" label="End" danger onPress={() => endCall(true)} />
       </View>
     </View>
   );
@@ -266,7 +329,7 @@ function ControlBtn({ icon, label, onPress, active, danger }:
       onPress={onPress}
       activeOpacity={0.85}
     >
-      <Text style={S.btnIcon}>{icon}</Text>
+      <Ionicons name={icon as any} size={24} color="#fff" style={S.btnIcon} />
       <Text style={S.btnLabel}>{label}</Text>
     </TouchableOpacity>
   );

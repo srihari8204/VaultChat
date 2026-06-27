@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 // app/location.tsx — Location sharing (real, full-stack).
 //
 // Replaces the old screen that claimed "🔐 D2DE · AES-256-GCM · zero plaintext
@@ -10,6 +11,7 @@
 //     open chat shows a live banner. Stops automatically after the chosen time.
 // Honest copy only — no fabricated guarantees.
 
+import { brandAlpha } from '../constants/theme';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import React, { useCallback, useEffect, useRef, useState , useMemo} from 'react';
@@ -188,7 +190,7 @@ export default function LocationScreen() {
     <View style={S.container}>
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={10}>
-          <Text style={S.back}>‹</Text>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title}>Share location</Text>
         <View style={{ width: 24 }} />
@@ -197,7 +199,7 @@ export default function LocationScreen() {
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
         {/* Map / coordinates */}
         <View style={S.mapCard}>
-          <Text style={{ fontSize: 40 }}>📍</Text>
+          <Ionicons name="location" size={40} color={colors.primary} />
           {loading ? (
             <ActivityIndicator color={colors.primary} style={{ marginTop: 8 }} />
           ) : (
@@ -208,6 +210,7 @@ export default function LocationScreen() {
               )}
               {lat != null && lng != null && (
                 <TouchableOpacity style={S.mapsBtn} onPress={() => Linking.openURL(`https://www.google.com/maps?q=${lat},${lng}`)}>
+                  <Ionicons name="map-outline" size={15} color={colors.primary} />
                   <Text style={S.mapsBtnText}>Open in Google Maps</Text>
                 </TouchableOpacity>
               )}
@@ -217,7 +220,10 @@ export default function LocationScreen() {
 
         {live ? (
           <View style={S.liveCard}>
-            <Text style={S.liveTitle}>🔴 Sharing live with {chatName}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+              <View style={S.liveDot} />
+              <Text style={S.liveTitle}>Sharing live with {chatName}</Text>
+            </View>
             <Text style={S.liveSub}>{fmtClock(timeLeft)} remaining · updates as you move</Text>
             <TouchableOpacity style={[S.primaryBtn, { backgroundColor: colors.danger, marginTop: 12 }]} onPress={stopLive}>
               <Text style={S.primaryBtnText}>Stop sharing</Text>
@@ -270,8 +276,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   mapCard: { backgroundColor: c.card, borderRadius: 18, borderWidth: 1, borderColor: c.border, alignItems: 'center', padding: 22, gap: 6 },
   address: { color: c.text, fontSize: 15, fontWeight: '700', textAlign: 'center', marginTop: 6 },
   coords: { color: c.textDim, fontSize: 12.5 },
-  mapsBtn: { marginTop: 10, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 10, backgroundColor: 'rgba(74,159,255,0.12)' },
-  mapsBtnText: { color: '#4A9FFF', fontSize: 13, fontWeight: '700' },
+  mapsBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 10, backgroundColor: brandAlpha(0.12) },
+  mapsBtnText: { color: c.primary, fontSize: 13, fontWeight: '700' },
 
   primaryBtn: { marginTop: 16, backgroundColor: c.primary, paddingVertical: 15, borderRadius: 14, alignItems: 'center' },
   primaryBtnText: { color: '#fff', fontSize: 15, fontWeight: '800' },
@@ -280,11 +286,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   sectionTitle: { color: c.textFaint, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginTop: 26, marginBottom: 10, marginLeft: 4 },
   durRow: { flexDirection: 'row', gap: 8 },
   durBtn: { flex: 1, paddingVertical: 11, borderRadius: 12, backgroundColor: c.surface, borderWidth: 1, borderColor: c.border, alignItems: 'center' },
-  durBtnActive: { backgroundColor: 'rgba(16,185,129,0.15)', borderColor: c.primary },
+  durBtnActive: { backgroundColor: brandAlpha(0.15), borderColor: c.primary },
   durText: { color: c.textDim, fontSize: 13, fontWeight: '600' },
   durTextActive: { color: c.primary, fontWeight: '800' },
 
   liveCard: { marginTop: 16, backgroundColor: 'rgba(239,68,68,0.07)', borderRadius: 16, borderWidth: 1, borderColor: 'rgba(239,68,68,0.3)', padding: 16 },
+  liveDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: c.danger },
   liveTitle: { color: c.text, fontSize: 15, fontWeight: '800' },
   liveSub: { color: c.textDim, fontSize: 12.5, marginTop: 4 },
 

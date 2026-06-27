@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { type Palette } from '../constants/theme';
+import { type Palette, brandAlpha } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { listChats, listGhostMode, setGhostMode, type GhostMode } from '../lib/chatService';
 
@@ -97,13 +97,13 @@ export default function ReceiptControlScreen() {
     [contacts, search],
   );
 
-  const Toggle = ({ on, color, icon, onPress }: { on: boolean; color: string; icon: string; onPress: () => void }) => (
+  const Toggle = ({ on, icon, onPress }: { on: boolean; icon: any; onPress: () => void }) => (
     <TouchableOpacity
-      style={[s.toggleBtn, on && { backgroundColor: color + '33', borderColor: color }]}
+      style={[s.toggleBtn, on && s.toggleBtnOn]}
       onPress={onPress}
       hitSlop={4}
     >
-      <Text style={[s.toggleIcon, { color: on ? color : colors.textFaint }]}>{icon}</Text>
+      <Ionicons name={icon} size={16} color={on ? colors.primary : colors.textFaint} />
     </TouchableOpacity>
   );
 
@@ -137,9 +137,9 @@ export default function ReceiptControlScreen() {
         />
 
         <View style={s.legendRow}>
-          <View style={s.legendItem}><Text style={[s.toggleIcon, { color: colors.accent }]}>✓✓</Text><Text style={s.legendTxt}>Read</Text></View>
-          <View style={s.legendItem}><Text style={[s.toggleIcon, { color: colors.primary }]}>✍</Text><Text style={s.legendTxt}>Typing</Text></View>
-          <View style={s.legendItem}><Text style={[s.toggleIcon, { color: colors.purple }]}>🕒</Text><Text style={s.legendTxt}>Last Seen</Text></View>
+          <View style={s.legendItem}><Ionicons name="checkmark-done" size={14} color={colors.textDim} /><Text style={s.legendTxt}>Read</Text></View>
+          <View style={s.legendItem}><Ionicons name="create-outline" size={14} color={colors.textDim} /><Text style={s.legendTxt}>Typing</Text></View>
+          <View style={s.legendItem}><Ionicons name="time-outline" size={14} color={colors.textDim} /><Text style={s.legendTxt}>Last Seen</Text></View>
         </View>
 
         {error && <View style={s.errorBar}><Text style={s.errorTxt}>{error}</Text></View>}
@@ -157,9 +157,9 @@ export default function ReceiptControlScreen() {
                   <View style={s.avatar}><Text style={s.avatarTxt}>{(item.name.trim()[0] ?? '#').toUpperCase()}</Text></View>
                   <Text style={s.contactName} numberOfLines={1}>{item.name}</Text>
                   <View style={s.toggleGroup}>
-                    <Toggle on={r.read} color={colors.accent} icon="✓✓" onPress={() => toggleRule(item.userId, 'read')} />
-                    <Toggle on={r.typing} color={colors.primary} icon="✍" onPress={() => toggleRule(item.userId, 'typing')} />
-                    <Toggle on={r.lastSeen} color={colors.purple} icon="🕒" onPress={() => toggleRule(item.userId, 'lastSeen')} />
+                    <Toggle on={r.read} icon="checkmark-done" onPress={() => toggleRule(item.userId, 'read')} />
+                    <Toggle on={r.typing} icon="create-outline" onPress={() => toggleRule(item.userId, 'typing')} />
+                    <Toggle on={r.lastSeen} icon="time-outline" onPress={() => toggleRule(item.userId, 'lastSeen')} />
                   </View>
                 </View>
               );
@@ -189,14 +189,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   legendRow: { flexDirection: 'row', gap: 16, marginBottom: 10, paddingLeft: 4 },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   legendTxt: { color: c.textDim, fontSize: 10 },
-  errorBar: { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.4)', borderWidth: 1, padding: 10, borderRadius: 10, marginBottom: 8 },
+  errorBar: { backgroundColor: c.danger + '1F', borderColor: c.danger + '66', borderWidth: 1, padding: 10, borderRadius: 10, marginBottom: 8 },
   errorTxt: { color: c.danger, fontSize: 12 },
   contactRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, borderRadius: 12, padding: 12, marginBottom: 6, borderWidth: 1, borderColor: c.border, gap: 12 },
   avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: c.surfaceSolid, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: c.border },
-  avatarTxt: { color: c.accent, fontSize: 16, fontWeight: '800' },
+  avatarTxt: { color: c.textDim, fontSize: 16, fontWeight: '800' },
   contactName: { flex: 1, color: c.text, fontSize: 14, fontWeight: '700' },
   toggleGroup: { flexDirection: 'row', gap: 6 },
   toggleBtn: { width: 34, height: 34, borderRadius: 8, backgroundColor: c.surface, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: c.border },
-  toggleIcon: { fontSize: 13, fontWeight: '700' },
+  toggleBtnOn: { backgroundColor: brandAlpha(0.2), borderColor: c.primary },
   emptyTxt: { color: c.textDim, fontSize: 13, textAlign: 'center' },
 });

@@ -8,6 +8,7 @@ import {
   View, Text, TouchableOpacity, StyleSheet, TextInput,
   FlatList, StatusBar, ScrollView, Alert,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { useLocalSearchParams, Stack } from 'expo-router';
@@ -104,14 +105,14 @@ export default function TranslateScreen() {
         {/* Swap + Target */}
         <View style={s.swapRow}>
           <TouchableOpacity onPress={swapLangs} style={s.swapBtn}>
-            <Text style={{ fontSize: 20 }}>{"\u21C5"}</Text>
+            <Ionicons name="swap-vertical" size={20} color={colors.text} />
           </TouchableOpacity>
         </View>
 
         <View style={s.card}>
           <TouchableOpacity style={s.cardHeader} onPress={() => setShowLangs(!showLangs)}>
             <Text style={s.langLabel}>{selectedLang?.flag} {selectedLang?.name}</Text>
-            <Text style={{ color: '#6B7280' }}>{"\u25BC"}</Text>
+            <Ionicons name="chevron-down" size={16} color="#6B7280" />
           </TouchableOpacity>
 
           {showLangs && (

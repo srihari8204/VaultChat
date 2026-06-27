@@ -7,6 +7,8 @@
 // 5. Show/Hide Sensitive Fields       11. Secure Trash (30-Day Recovery)
 // 6. Copy with Auto-Clear (30s)       12. Reminders on Notes
 
+import { Ionicons } from '@expo/vector-icons';
+import { BRAND_ACCENT } from '../constants/theme';
 import React, { useState, useEffect, useCallback , useMemo} from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, FlatList, TextInput,
@@ -35,15 +37,15 @@ const CATEGORIES = [
   { key: 'passwords',    icon: '\uD83D\uDD11', name: 'Passwords',     color: '#EF4444' },
   { key: 'ideas',        icon: '\uD83D\uDCA1', name: 'Ideas',         color: '#F59E0B' },
   { key: 'personal',     icon: '\uD83D\uDCDD', name: 'Personal',      color: '#3B82F6' },
-  { key: 'bank',         icon: '\uD83D\uDCB3', name: 'Bank/Cards',    color: '#10B981' },
+  { key: 'bank',         icon: '\uD83D\uDCB3', name: 'Bank/Cards',    color: BRAND_ACCENT },
   { key: 'medical',      icon: '\uD83C\uDFE5', name: 'Medical',       color: '#EC4899' },
   { key: 'documents',    icon: '\uD83D\uDCC1', name: 'Documents',     color: '#8B5CF6' },
-  { key: 'recovery',     icon: '\uD83D\uDD10', name: 'Recovery Keys', color: '#F97316' },
+  { key: 'recovery',     icon: '\uD83D\uDD10', name: 'Recovery Keys', color: BRAND_ACCENT },
   { key: 'bookmarks',    icon: '\uD83D\uDD16', name: 'Bookmarks',     color: '#06B6D4' },
   { key: 'custom',       icon: '\uD83D\uDCC2', name: 'Custom',        color: '#6B7280' },
 ];
 
-const TAG_COLORS = ['#EF4444', '#F59E0B', '#10B981', '#3B82F6', '#8B5CF6', '#EC4899', '#06B6D4', '#6B7280'];
+const TAG_COLORS = ['#EF4444', '#F59E0B', BRAND_ACCENT, '#3B82F6', '#8B5CF6', '#EC4899', '#06B6D4', '#6B7280'];
 
 interface Note {
   id: string;
@@ -296,20 +298,20 @@ export default function EncryptedNotesScreen() {
       {/* Header */}
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-          <Text style={s.backTxt}>{'\u2190'}</Text>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={s.headerTitle}>{'\uD83D\uDCDD'} Encrypted Notes</Text>
           <Text style={s.headerSub}>AES-256-GCM {'\u2022'} Biometric locked {'\u2022'} On-device only</Text>
         </View>
         <TouchableOpacity onPress={() => setShowTrash(true)} style={s.trashBtn}>
-          <Text style={{ fontSize: 18 }}>{'\uD83D\uDDD1\uFE0F'}</Text>
+          <Ionicons name="trash-outline" size={18} color={colors.text} />
         </TouchableOpacity>
       </View>
 
       {/* Search */}
       <View style={s.searchBar}>
-        <Text style={s.searchIcon}>{'\uD83D\uDD0D'}</Text>
+        <Ionicons name="search" size={16} color={colors.textDim} style={s.searchIcon} />
         <TextInput style={s.searchInput} placeholder="Encrypted search..." placeholderTextColor="#555" value={search} onChangeText={setSearch} />
         <TouchableOpacity onPress={() => generatePassword()}>
           <Text style={s.passGenBtn}>{'\uD83D\uDD11'}</Text>
@@ -380,7 +382,7 @@ export default function EncryptedNotesScreen() {
 
       {/* FAB */}
       <TouchableOpacity style={s.fab} onPress={() => openEditor()} activeOpacity={0.8}>
-        <Text style={s.fabTxt}>+</Text>
+        <Ionicons name="add" size={28} color="#FFF" />
       </TouchableOpacity>
 
       {/* Note Editor Modal */}
@@ -470,7 +472,7 @@ export default function EncryptedNotesScreen() {
                     </View>
                   </TouchableOpacity>
                   <TouchableOpacity onPress={() => removeAttachment(att)} hitSlop={8}>
-                    <Text style={{ color: '#EF4444', fontSize: 16 }}>✕</Text>
+                    <Ionicons name="close" size={16} color="#EF4444" />
                   </TouchableOpacity>
                 </View>
               ))}
@@ -556,8 +558,9 @@ export default function EncryptedNotesScreen() {
       <Modal visible={showTrash} animationType="slide">
         <View style={s.editorScreen}>
           <View style={s.editorHeader}>
-            <TouchableOpacity onPress={() => setShowTrash(false)}>
-              <Text style={s.editorCancel}>{'\u2190'} Back</Text>
+            <TouchableOpacity onPress={() => setShowTrash(false)} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Ionicons name="arrow-back" size={16} color={colors.textDim} />
+              <Text style={s.editorCancel}>Back</Text>
             </TouchableOpacity>
             <Text style={s.editorTitle}>{'\uD83D\uDDD1\uFE0F'} Secure Trash</Text>
             <View style={{ width: 50 }} />

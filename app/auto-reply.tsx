@@ -3,6 +3,8 @@
 // Schedule-based: work hours, sleep, custom
 // Per-contact exceptions
 
+import { BRAND_ACCENT } from '../constants/theme';
+import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useEffect , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, TextInput,
@@ -83,7 +85,7 @@ export default function AutoReplyScreen() {
             <Text style={s.masterDesc}>{enabled ? 'Active — sending auto-replies' : 'Disabled — manual replies only'}</Text>
           </View>
           <Switch value={enabled} onValueChange={v => { setEnabled(v); }}
-            thumbColor={enabled ? colors.primary : '#6B7280'} trackColor={{ false: '#E5E7EB', true: '#10B98144' }} />
+            thumbColor={enabled ? colors.primary : '#6B7280'} trackColor={{ false: '#E5E7EB', true: BRAND_ACCENT + '44' }} />
         </View>
 
         {/* Message */}
@@ -117,7 +119,7 @@ export default function AutoReplyScreen() {
               <Text style={[s.scheduleName, schedule === sc.id && { color: colors.accent }]}>{sc.label}</Text>
               <Text style={s.scheduleDesc}>{sc.desc}</Text>
             </View>
-            {schedule === sc.id && <Text style={{ color: colors.accent }}>{"\u2713"}</Text>}
+            {schedule === sc.id && <Ionicons name="checkmark" size={18} color={colors.accent} />}
           </TouchableOpacity>
         ))}
 
@@ -141,7 +143,8 @@ export default function AutoReplyScreen() {
         </View>
 
         <TouchableOpacity style={s.saveBtn} onPress={save}>
-          <Text style={s.saveTxt}>{"\u2714\uFE0F  Save Auto-Reply"}</Text>
+          <Ionicons name="checkmark" size={18} color="#000" style={{ marginRight: 8 }} />
+          <Text style={s.saveTxt}>Save Auto-Reply</Text>
         </TouchableOpacity>
 
         <View style={{ height: 40 }} />
@@ -169,6 +172,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   settRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, borderRadius: 12, padding: 14, marginBottom: 6, borderWidth: 1, borderColor: '#E5E7EB' },
   settName: { color: '#1F2937', fontSize: 13, fontWeight: '700' },
   settDesc: { color: '#6B7280', fontSize: 11, marginTop: 2 },
-  saveBtn: { backgroundColor: c.accent, borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 16 },
+  saveBtn: { flexDirection: 'row', backgroundColor: c.accent, borderRadius: 14, paddingVertical: 16, alignItems: 'center', justifyContent: 'center', marginTop: 16 },
   saveTxt: { color: '#000', fontSize: 16, fontWeight: '900' },
 });

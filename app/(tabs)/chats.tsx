@@ -8,17 +8,17 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Modal, Pressable, RefreshControl, ScrollView, SectionList,
+  ActivityIndicator, Alert, Image, Modal, Pressable, RefreshControl, ScrollView, SectionList,
   StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
-import { type Palette } from '../../constants/theme';
+import { type Palette, brandAlpha } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
 import { Avatar } from '../../components/ui';
 import { getAccessToken } from '../../lib/api';
 import {
-  archiveChat, attachmentUrl, listChats, muteChat, pinChat, setHidden,
+  archiveChat, attachmentUrl, listChats, listStoriesFeed, muteChat, pinChat, setHidden,
   type ChatSummary,
 } from '../../lib/chatService';
 import { registerPushToken } from '../../lib/push';
@@ -28,6 +28,11 @@ import { runScheduledBackupIfDue } from '../../lib/backupScheduler';
 import { getSocket } from '../../lib/socket';
 import { setUnreadTotal } from '../../lib/unreadStore';
 import { getDraftMap } from '../../lib/drafts';
+import { getLastMessagePerChat, getCachedChats, cacheChats } from '../../lib/localDb';
+import { syncAllHistory } from '../../lib/historySync';
+import { getCurrentUserAsync } from '../(constants)/authService';
+
+type LastMsg = { content: string | null; type: string | null; senderId: string | null; id: number };
 
 type FolderId = 'all' | 'unread' | 'groups' | 'pinned' | 'archive';
 const FOLDERS: { id: FolderId; label: string }[] = [
@@ -54,6 +59,14 @@ export default function ChatsScreen() {
   const [authHeader, setAuthHeader] = useState<string | null>(null);
   const [folder, setFolder] = useState<FolderId>('all');
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  // Real last-message previews from the local plaintext cache (WhatsApp-style).
+  const [lastMsgs, setLastMsgs] = useState<Map<string, LastMsg>>(new Map());
+  const [meId, setMeId] = useState<string | null>(null);
+  const meIdRef = useRef<string | null>(null);
+  useEffect(() => { meIdRef.current = meId; }, [meId]);
+  // Chats with someone typing right now (chatId set) — shows "typing…" in the row.
+  const [typingChats, setTypingChats] = useState<Set<string>>(new Set());
+  const typingTimers = useRef<Record<string, any>>({});
   const [menuChat, setMenuChat] = useState<ChatSummary | null>(null);   // long-press action sheet
 
   useEffect(() => {
@@ -69,6 +82,10 @@ export default function ChatsScreen() {
     try {
       const list = await listChats();
       setChats(list);
+      cacheChats(list).catch(() => {});                         // persist for instant next-launch paint
+      getLastMessagePerChat().then(setLastMsgs).catch(() => {}); // refresh row previews
+      // Background: pre-fetch history so offline scroll-back works (once/session, Wi-Fi only).
+      syncAllHistory(list.filter(c => !c.archived).map(c => c.id)).then(() => getLastMessagePerChat().then(setLastMsgs).catch(() => {})).catch(() => {});
       setError(null);
       // Publish total unread (non-archived) so the Chats tab can badge it.
       setUnreadTotal(list.reduce((n, c) => n + (c.archived ? 0 : (c.unreadCount > 0 ? 1 : 0)), 0));
@@ -77,7 +94,20 @@ export default function ChatsScreen() {
     }
   }, []);
 
-  useEffect(() => { (async () => { setLoading(true); await fetchList(); setLoading(false); })(); }, [fetchList]);
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      // Paint cached chats instantly (WhatsApp-style) so there's no spinner on
+      // cold start; the network fetch then reconciles in the background.
+      try {
+        const cached = await getCachedChats();
+        if (!cancel && cached.length) { setChats(cached as any); setLoading(false); }
+      } catch {}
+      await fetchList();
+      if (!cancel) setLoading(false);
+    })();
+    return () => { cancel = true; };
+  }, [fetchList]);
 
   // Refresh the list (so unread counts clear after reading) + draft previews
   // whenever the screen regains focus — e.g. coming back from a chat.
@@ -130,22 +160,54 @@ export default function ChatsScreen() {
           setChats(prev => prev.map(c => c.peerUserId === e.userId
             ? { ...c, peerOnline: e.online, peerLastSeenAt: e.lastSeenAt ?? c.peerLastSeenAt } : c));
         };
+        const onTyping = (e: { uid?: string; chatId?: string }) => {
+          if (!e?.chatId || !e.uid || e.uid === meIdRef.current) return;
+          setTypingChats(prev => { const n = new Set(prev); n.add(e.chatId!); return n; });
+          clearTimeout(typingTimers.current[e.chatId]);
+          typingTimers.current[e.chatId] = setTimeout(() =>
+            setTypingChats(prev => { const n = new Set(prev); n.delete(e.chatId!); return n; }), 6000);
+        };
+        const onTypingStop = (e: { chatId?: string }) => {
+          if (!e?.chatId) return;
+          clearTimeout(typingTimers.current[e.chatId]);
+          setTypingChats(prev => { const n = new Set(prev); n.delete(e.chatId!); return n; });
+        };
         s.on('new_message', refresh);
         s.on('message_deleted', refresh);
         s.on('message_edited', refresh);
         s.on('presence_changed', onPresence);
+        s.on('typing_start', onTyping);
+        s.on('typing_stop', onTypingStop);
         if (!cancelled) off = () => {
           s.off('new_message', refresh); s.off('message_deleted', refresh);
           s.off('message_edited', refresh); s.off('presence_changed', onPresence);
+          s.off('typing_start', onTyping); s.off('typing_stop', onTypingStop);
         };
       } catch (e: any) { if (!cancelled) setError(e?.message ?? 'Realtime unavailable'); }
     })();
     return () => { cancelled = true; if (off) off(); };
   }, [fetchList]);
 
+  useEffect(() => { getCurrentUserAsync().then(u => setMeId(u?.id ?? null)).catch(() => {}); }, []);
+
   const onRefresh = useCallback(async () => { setRefreshing(true); await fetchList(); setRefreshing(false); }, [fetchList]);
   const onOpenChat = (id: string) => router.push({ pathname: '/chat', params: { id } } as any);
   const onNewChat = () => router.push('/new-chat' as any);
+
+  // Avatar tap (WhatsApp): peer has a story → open it; else show photo popup.
+  const [avatarView, setAvatarView] = useState<ChatSummary | null>(null);
+  const onAvatarPress = useCallback(async (chat: ChatSummary) => {
+    if (chat.type === 'direct' && chat.peerUserId) {
+      try {
+        const feed = await listStoriesFeed();
+        if (feed.some(e => e.userId === chat.peerUserId)) {
+          router.push({ pathname: '/story-viewer' as any, params: { userId: chat.peerUserId, userName: chat.peerName ?? chat.name ?? '' } });
+          return;
+        }
+      } catch {}
+    }
+    setAvatarView(chat);
+  }, [router]);
 
   // Optimistic chat-row actions with rollback.
   const patch = (id: string, fields: Partial<ChatSummary>) =>
@@ -186,6 +248,39 @@ export default function ChatsScreen() {
     );
   };
 
+  // ── Multi-select (WhatsApp-style bulk actions) ───────────────────────
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const exitSelect = () => { setSelectMode(false); setSelected(new Set()); };
+  const enterSelect = (id: string) => { setSelectMode(true); setSelected(new Set([id])); };
+  const toggleSelect = (id: string) => setSelected(prev => {
+    const n = new Set(prev);
+    n.has(id) ? n.delete(id) : n.add(id);
+    if (n.size === 0) setSelectMode(false);
+    return n;
+  });
+  const bulkRun = async (fn: (id: string) => Promise<any>) => {
+    const ids = [...selected];
+    exitSelect();
+    for (const id of ids) { try { await fn(id); } catch {} }
+    fetchList();
+  };
+  const bulkPin     = () => bulkRun(id => { patch(id, { pinned: true });   return pinChat(id, true); });
+  const bulkMute    = () => bulkRun(id => { patch(id, { muted: true });    return muteChat(id, true); });
+  const bulkArchive = () => bulkRun(id => { patch(id, { archived: true }); return archiveChat(id, true); });
+  const bulkDelete  = () => {
+    const ids = [...selected];
+    Alert.alert(`Delete ${ids.length} chat${ids.length > 1 ? 's' : ''}?`, 'They stay reachable from Hidden chats.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+        exitSelect();
+        setChats(prev => prev.filter(c => !ids.includes(c.id)));
+        for (const id of ids) { try { await setHidden(id, true); } catch {} }
+        fetchList();
+      } },
+    ]);
+  };
+
   const visibleChats = useMemo(() => {
     if (folder === 'archive') return chats.filter(c => c.archived);
     const base = chats.filter(c => !c.archived);
@@ -216,14 +311,31 @@ export default function ChatsScreen() {
 
   return (
     <View style={S.screen}>
-      <View style={S.header}>
-        <Text style={S.title}>Chats</Text>
-        <View style={{ flexDirection: 'row', gap: 4 }}>
-          <TouchableOpacity onPress={() => router.push('/search' as any)} style={S.headerBtn}><Ionicons name="search" size={22} color={colors.text} /></TouchableOpacity>
-          <TouchableOpacity onPress={() => router.push('/contacts' as any)} style={S.headerBtn}><Ionicons name="people-outline" size={22} color={colors.text} /></TouchableOpacity>
-          <TouchableOpacity onPress={() => router.push('/broadcast' as any)} style={S.headerBtn}><Ionicons name="megaphone-outline" size={22} color={colors.text} /></TouchableOpacity>
+      {selectMode ? (
+        <View style={S.header}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+            <TouchableOpacity onPress={exitSelect} hitSlop={8}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
+            <Text style={S.title}>{selected.size}</Text>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 4 }}>
+            <TouchableOpacity onPress={bulkPin} style={S.headerBtn}><Ionicons name="pin" size={20} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity onPress={bulkMute} style={S.headerBtn}><Ionicons name="notifications-off-outline" size={20} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity onPress={bulkArchive} style={S.headerBtn}><Ionicons name="archive-outline" size={20} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity onPress={bulkDelete} style={S.headerBtn}><Ionicons name="trash-outline" size={20} color={colors.danger} /></TouchableOpacity>
+          </View>
         </View>
-      </View>
+      ) : (
+        <View style={S.header}>
+          <Text style={S.title}>Chats</Text>
+          <View style={{ flexDirection: 'row', gap: 4 }}>
+            <TouchableOpacity onPress={() => router.push('/search' as any)} style={S.headerBtn}><Ionicons name="search" size={22} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/alerts' as any)} style={S.headerBtn}><Ionicons name="notifications-outline" size={22} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/mini' as any)} style={S.headerBtn}><Ionicons name="grid-outline" size={22} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/contacts' as any)} style={S.headerBtn}><Ionicons name="people-outline" size={22} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/broadcast' as any)} style={S.headerBtn}><Ionicons name="megaphone-outline" size={22} color={colors.text} /></TouchableOpacity>
+          </View>
+        </View>
+      )}
 
       {error && <View style={S.errorBar}><Text style={S.errorTxt}>{error}</Text></View>}
 
@@ -268,8 +380,14 @@ export default function ChatsScreen() {
               chat={item}
               authHeader={authHeader}
               draft={drafts[item.id]}
-              onPress={() => onOpenChat(item.id)}
-              onLongPress={() => setMenuChat(item)}
+              lastMsg={lastMsgs.get(item.id)}
+              meId={meId}
+              isTyping={typingChats.has(item.id)}
+              selectMode={selectMode}
+              isSelected={selected.has(item.id)}
+              onPress={() => selectMode ? toggleSelect(item.id) : onOpenChat(item.id)}
+              onAvatarPress={() => selectMode ? toggleSelect(item.id) : onAvatarPress(item)}
+              onLongPress={() => selectMode ? toggleSelect(item.id) : enterSelect(item.id)}
               onPin={() => doPin(item)}
               onMute={() => doMute(item)}
               onArchive={() => doArchive(item)}
@@ -305,6 +423,52 @@ export default function ChatsScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Avatar photo popup (WhatsApp-style) — photo + quick actions */}
+      <Modal visible={!!avatarView} transparent animationType="fade" onRequestClose={() => setAvatarView(null)}>
+        <Pressable style={S.avBackdrop} onPress={() => setAvatarView(null)}>
+          {avatarView && (() => {
+            const av = avatarView;
+            const isDirect = av.type === 'direct';
+            const avTitle = isDirect ? (av.peerName || av.name || 'Direct chat') : (av.name || 'Group chat');
+            const avPhoto = isDirect ? av.peerPhotoURL : av.photoURL;
+            const peerUid = av.peerUserId ?? '';
+            const go = (fn: () => void) => { setAvatarView(null); fn(); };
+            return (
+              <Pressable style={S.avCard} onPress={() => {}}>
+                <View style={S.avImgWrap}>
+                  {avPhoto && authHeader ? (
+                    <Image source={{ uri: attachmentUrl(avPhoto), headers: { Authorization: authHeader } }} style={S.avImg} resizeMode="cover" />
+                  ) : (
+                    <View style={[S.avImg, S.avInitials]}><Text style={S.avInitialsTxt}>{(avTitle.trim()[0] ?? '?').toUpperCase()}</Text></View>
+                  )}
+                  <View style={S.avNameBar}><Text style={S.avNameTxt} numberOfLines={1}>{avTitle}</Text></View>
+                </View>
+                <View style={S.avActions}>
+                  <TouchableOpacity style={S.avActionBtn} onPress={() => go(() => onOpenChat(av.id))}>
+                    <Ionicons name="chatbubble-ellipses" size={22} color={colors.primary} /><Text style={S.avActionTxt}>Message</Text>
+                  </TouchableOpacity>
+                  {isDirect && (
+                    <>
+                      <TouchableOpacity style={S.avActionBtn} onPress={() => go(() => router.push({ pathname: '/voicecall' as any, params: { chatId: av.id, peerUid, peerName: avTitle } }))}>
+                        <Ionicons name="call" size={22} color={colors.primary} /><Text style={S.avActionTxt}>Audio</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={S.avActionBtn} onPress={() => go(() => router.push({ pathname: '/videocall' as any, params: { chatId: av.id, peerUid, peerName: avTitle } }))}>
+                        <Ionicons name="videocam" size={22} color={colors.primary} /><Text style={S.avActionTxt}>Video</Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
+                  <TouchableOpacity style={S.avActionBtn} onPress={() => go(() => isDirect
+                    ? router.push({ pathname: '/contact-info' as any, params: { chatId: av.id, peerUid, peerName: avTitle } })
+                    : router.push({ pathname: '/group-info' as any, params: { chatId: av.id } }))}>
+                    <Ionicons name="information-circle" size={22} color={colors.primary} /><Text style={S.avActionTxt}>Info</Text>
+                  </TouchableOpacity>
+                </View>
+              </Pressable>
+            );
+          })()}
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -321,10 +485,11 @@ function SheetItem({ icon, label, onPress, danger }: { icon: any; label: string;
 }
 
 function ChatRow({
-  chat, authHeader, draft, onPress, onLongPress, onPin, onMute, onArchive, onDelete,
+  chat, authHeader, draft, lastMsg, meId, isTyping, selectMode, isSelected, onPress, onAvatarPress, onLongPress, onPin, onMute, onArchive, onDelete,
 }: {
-  chat: ChatSummary; authHeader: string | null; draft?: string;
-  onPress: () => void; onLongPress: () => void; onPin: () => void; onMute: () => void; onArchive: () => void; onDelete: () => void;
+  chat: ChatSummary; authHeader: string | null; draft?: string; lastMsg?: LastMsg; meId?: string | null; isTyping?: boolean;
+  selectMode?: boolean; isSelected?: boolean;
+  onPress: () => void; onAvatarPress: () => void; onLongPress: () => void; onPin: () => void; onMute: () => void; onArchive: () => void; onDelete: () => void;
 }) {
   const { colors } = useTheme();
   const S = useS();
@@ -335,7 +500,22 @@ function ChatRow({
   const showPhoto = !!photoId && !!authHeader;
   const time = chat.lastMessageAt ? formatRelative(chat.lastMessageAt) : '';
   const draftText = draft && draft.trim() ? draft.trim() : '';
-  const preview = draftText || (chat.unreadCount > 0 ? 'New messages' : (chat.lastMessageId ? 'Tap to open chat' : 'No messages yet'));
+  // Real last-message preview from the local plaintext cache (WhatsApp-style).
+  const previewBody = (() => {
+    if (!lastMsg) return chat.lastMessageId ? 'Tap to open chat' : 'No messages yet';
+    const t = lastMsg.type;
+    const label = t === 'image' ? '📷 Photo'
+      : t === 'video' ? '🎥 Video'
+      : t === 'audio' ? '🎙️ Voice message'
+      : t === 'file' ? '📎 File'
+      : t === 'location' ? '📍 Location'
+      : t === 'poll' ? '📊 Poll'
+      : t === 'sticker' ? 'Sticker'
+      : (lastMsg.content || '');
+    const mine = !!meId && lastMsg.senderId === meId;
+    return (mine ? 'You: ' : '') + label;
+  })();
+  const preview = draftText || previewBody;
 
   const close = () => swipeRef.current?.close();
   const act = (fn: () => void) => { close(); fn(); };
@@ -362,9 +542,9 @@ function ChatRow({
   );
 
   return (
-    <Swipeable ref={swipeRef} renderLeftActions={leftActions} renderRightActions={rightActions} overshootLeft={false} overshootRight={false} friction={2}>
-      <TouchableOpacity style={S.row} onPress={onPress} onLongPress={onLongPress} delayLongPress={250} activeOpacity={0.7}>
-        <View style={S.avatarWrap}>
+    <Swipeable ref={swipeRef} enabled={!selectMode} renderLeftActions={leftActions} renderRightActions={rightActions} overshootLeft={false} overshootRight={false} friction={2}>
+      <TouchableOpacity style={[S.row, isSelected && S.rowSelected]} onPress={onPress} onLongPress={onLongPress} delayLongPress={250} activeOpacity={0.7}>
+        <TouchableOpacity style={S.avatarWrap} activeOpacity={0.7} onPress={onAvatarPress}>
           <Avatar
             uri={showPhoto ? attachmentUrl(photoId!) : null}
             headers={authHeader ? { Authorization: authHeader } : undefined}
@@ -372,7 +552,12 @@ function ChatRow({
             size={50}
             presence={chat.type === 'direct' && chat.peerOnline ? 'online' : null}
           />
-        </View>
+          {selectMode && (
+            <View style={[S.selBadge, isSelected ? S.selBadgeOn : S.selBadgeOff]}>
+              {isSelected && <Ionicons name="checkmark" size={13} color="#fff" />}
+            </View>
+          )}
+        </TouchableOpacity>
 
         <View style={S.rowBody}>
           <View style={S.rowTop}>
@@ -382,9 +567,23 @@ function ChatRow({
             <Text style={[S.rowTime, chat.unreadCount > 0 && { color: colors.primary, fontWeight: '700' }]}>{time}</Text>
           </View>
           <View style={S.rowBottom}>
-            <Text style={[S.rowPreview, chat.unreadCount > 0 && S.rowPreviewUnread]} numberOfLines={1}>
-              {draftText ? <Text style={S.draftLabel}>Draft: </Text> : null}{preview}
-            </Text>
+            {isTyping ? (
+              <Text style={[S.rowPreview, { color: colors.primary }]} numberOfLines={1}>typing…</Text>
+            ) : (
+              <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                {!draftText && !!lastMsg && !!meId && lastMsg.senderId === meId && chat.type === 'direct' && (
+                  <Ionicons
+                    name={((chat.peerLastReadMessageId ?? 0) >= lastMsg.id || (chat.peerLastDeliveredMessageId ?? 0) >= lastMsg.id) ? 'checkmark-done' : 'checkmark'}
+                    size={15}
+                    color={(chat.peerLastReadMessageId ?? 0) >= lastMsg.id ? '#4A9FFF' : colors.textDim}
+                    style={{ marginRight: 3 }}
+                  />
+                )}
+                <Text style={[S.rowPreview, chat.unreadCount > 0 && S.rowPreviewUnread]} numberOfLines={1}>
+                  {draftText ? <Text style={S.draftLabel}>Draft: </Text> : null}{preview}
+                </Text>
+              </View>
+            )}
             {chat.unreadCount > 0 && (
               <View style={S.unreadBadge}><Text style={S.unreadTxt}>{chat.unreadCount > 99 ? '99+' : chat.unreadCount}</Text></View>
             )}
@@ -410,7 +609,19 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   center: { justifyContent: 'center', alignItems: 'center' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 56, paddingBottom: 12 },
   title: { color: c.text, fontSize: 28, fontWeight: '800' },
-  headerBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.border },
+  headerBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.border },
+  // Avatar photo popup
+  avBackdrop:   { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', alignItems: 'center', justifyContent: 'center', padding: 28 },
+  avCard:       { width: '100%', maxWidth: 360, borderRadius: 16, overflow: 'hidden', backgroundColor: c.surfaceSolid },
+  avImgWrap:    { width: '100%', aspectRatio: 1, backgroundColor: c.primary },
+  avImg:        { width: '100%', height: '100%' },
+  avInitials:   { alignItems: 'center', justifyContent: 'center', backgroundColor: c.primary },
+  avInitialsTxt:{ color: '#fff', fontSize: 84, fontWeight: '800' },
+  avNameBar:    { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: 'rgba(0,0,0,0.45)' },
+  avNameTxt:    { color: '#fff', fontSize: 19, fontWeight: '700' },
+  avActions:    { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 12, backgroundColor: c.surfaceSolid },
+  avActionBtn:  { alignItems: 'center', gap: 4, paddingHorizontal: 6 },
+  avActionTxt:  { color: c.primary, fontSize: 12, fontWeight: '600' },
   headerBtnTxt: { fontSize: 17 },
   errorBar: { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.4)', borderWidth: 1, marginHorizontal: 16, padding: 10, borderRadius: 10 },
   errorTxt: { color: c.danger, fontSize: 12 },
@@ -418,26 +629,30 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   emptyTitle: { color: c.text, fontSize: 18, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
   emptySub: { color: c.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 24 },
   emptyBtn: { backgroundColor: c.primary, paddingHorizontal: 28, paddingVertical: 12, borderRadius: 24 },
-  emptyBtnTxt: { color: '#04130D', fontWeight: '800', fontSize: 14 },
+  emptyBtnTxt: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 },
 
   folderScroll: { flexGrow: 0, maxHeight: 50 },   // keep the chip row compact, never stretch vertically
   folderRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8, gap: 8 },
   folderChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 18, backgroundColor: c.surface, borderWidth: 1, borderColor: c.border },
   folderChipActive: { backgroundColor: c.primary, borderColor: c.primary },
   folderTxt: { color: c.textDim, fontSize: 13, fontWeight: '600' },
-  folderTxtActive: { color: '#04130D' },
+  folderTxtActive: { color: '#FFFFFF' },
   folderCount: { color: c.textDim, fontSize: 11, fontWeight: '700', backgroundColor: c.surface, paddingHorizontal: 6, borderRadius: 8, overflow: 'hidden', minWidth: 18, textAlign: 'center' },
-  folderCountActive: { color: c.primary, backgroundColor: '#04130D' },
+  folderCountActive: { color: c.primary, backgroundColor: '#FFFFFF' },
 
   sectionHeader: { color: c.textDim, fontSize: 12, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase', paddingHorizontal: 20, paddingTop: 14, paddingBottom: 6, backgroundColor: c.bg },
   separator: { height: 0.5, backgroundColor: c.separator, marginLeft: 82 },
 
   row: { flexDirection: 'row', height: 72, paddingHorizontal: 12, alignItems: 'center', gap: 12, backgroundColor: c.bg },
+  rowSelected: { backgroundColor: brandAlpha(0.14) },
   avatarWrap: { width: 50, height: 50 },
+  selBadge: { position: 'absolute', right: -2, bottom: -2, width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: c.bg },
+  selBadgeOn: { backgroundColor: c.primary },
+  selBadgeOff: { backgroundColor: c.surfaceSolid, borderColor: c.textDim },
   avatar: { width: 50, height: 50, borderRadius: 25, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   avatarGroup: { backgroundColor: c.accent },
   avatarImg: { width: '100%', height: '100%' },
-  avatarTxt: { color: '#04130D', fontSize: 20, fontWeight: '800' },
+  avatarTxt: { color: '#FFFFFF', fontSize: 20, fontWeight: '800' },
   presenceDot: { position: 'absolute', right: 0, bottom: 0, width: 14, height: 14, borderRadius: 7, backgroundColor: c.online, borderWidth: 2.5, borderColor: c.bg },
 
   rowBody: { flex: 1, gap: 4 },
@@ -458,7 +673,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   sheetItemTxt: { color: c.text, fontSize: 16, fontWeight: '500' },
   draftLabel: { color: c.danger, fontWeight: '700' },
   unreadBadge: { backgroundColor: c.primary, borderRadius: 11, minWidth: 22, height: 22, paddingHorizontal: 7, alignItems: 'center', justifyContent: 'center' },
-  unreadTxt: { color: '#04130D', fontSize: 12, fontWeight: '800' },
+  unreadTxt: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
 
   actionsRow: { flexDirection: 'row' },
   action: { width: 76, alignItems: 'center', justifyContent: 'center', gap: 4 },

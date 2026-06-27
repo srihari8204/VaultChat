@@ -2,6 +2,7 @@
 // fingerprint / face) via expo-local-authentication. "Continue to Chats" logs in
 // (mpin/verify → JWT), optionally enrolls MFA, clears the onboarding store.
 
+import { brandAlpha } from '../constants/theme';
 import { Stack, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -77,7 +78,7 @@ export default function OnboardSuccess() {
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: c.bg },
   body: { flex: 1, paddingHorizontal: 24, paddingTop: 96, alignItems: 'center' },
-  tick: { width: 96, height: 96, borderRadius: 48, backgroundColor: 'rgba(16,185,129,0.15)', borderWidth: 2, borderColor: c.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
+  tick: { width: 96, height: 96, borderRadius: 48, backgroundColor: brandAlpha(0.15), borderWidth: 2, borderColor: c.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
   title: { color: c.text, fontSize: 26, fontWeight: '900' },
   sub: { color: c.textDim, fontSize: 14, marginTop: 8, textAlign: 'center', lineHeight: 20 },
   mfaCard: { width: '100%', backgroundColor: c.card, borderRadius: 16, borderWidth: 1, borderColor: c.border, padding: 16, marginTop: 36 },

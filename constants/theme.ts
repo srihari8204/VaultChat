@@ -75,13 +75,21 @@ export interface Palette {
   headerBar: string;       // chat top bar
 }
 
+// ─── Single source of truth for the brand ACCENT (lavender) ─────────
+// Change BRAND_ACCENT and the whole app re-colors. Everything that needs the
+// accent imports this (solid) or brandAlpha(a) (translucent tints) — no screen
+// hardcodes the hex. Keep BRAND_ACCENT_RGB in sync with the hex.
+export const BRAND_ACCENT = '#9D6FD0';           // lavender (button-safe shade)
+export const BRAND_ACCENT_RGB = '157, 111, 208'; // keep in sync with BRAND_ACCENT
+export const brandAlpha = (a: number) => `rgba(${BRAND_ACCENT_RGB}, ${a})`;
+
 const BRAND = {
-  primary: '#10B981', // emerald
-  accent:  '#06B6D4', // cyan
+  primary: BRAND_ACCENT,
+  accent:  BRAND_ACCENT, // secondary accent follows the brand color
   purple:  '#8B5CF6',
   danger:  '#EF4444',
-  success: '#10B981',
-  online:  '#10B981',
+  success: '#22C55E', // green stays for "success / good" semantics (reference uses it)
+  online:  '#22C55E', // presence stays green
 };
 
 export const AuroraDark: Palette = {
@@ -95,16 +103,16 @@ export const AuroraDark: Palette = {
   text:      '#FFFFFF',
   textDim:   'rgba(255,255,255,0.5)',
   textFaint: 'rgba(255,255,255,0.3)',
-  // WhatsApp dark conversation palette
-  chatBg:        '#0B141A',
-  bubbleIn:      '#1F2C34',
-  bubbleOut:     '#005C4B',
-  bubbleInText:  '#E9EDEF',
-  bubbleOutText: '#E9EDEF',
-  bubbleMetaIn:  '#8696A0',
-  bubbleMetaOut: 'rgba(233,237,239,0.6)',
-  tickRead:      '#53BDEB',
-  headerBar:     '#1F2C34',
+  // Lavender-theme dark conversation palette (sent = accent, received = neutral)
+  chatBg:        '#0B0B10',
+  bubbleIn:      '#1E1F26',
+  bubbleOut:     BRAND_ACCENT,
+  bubbleInText:  '#ECEDEE',
+  bubbleOutText: '#FFFFFF',
+  bubbleMetaIn:  '#8A8A93',
+  bubbleMetaOut: 'rgba(255,255,255,0.75)',
+  tickRead:      '#FFFFFF',
+  headerBar:     '#15161D',
 };
 
 export const AuroraLight: Palette = {
@@ -118,16 +126,16 @@ export const AuroraLight: Palette = {
   text:      '#0A0A0F',
   textDim:   'rgba(0,0,0,0.55)',
   textFaint: 'rgba(0,0,0,0.35)',
-  // WhatsApp light conversation palette
-  chatBg:        '#ECE5DD',
+  // Lavender-theme light conversation palette (sent = accent, received = neutral)
+  chatBg:        '#F4F4F7',
   bubbleIn:      '#FFFFFF',
-  bubbleOut:     '#D9FDD3',
-  bubbleInText:  '#111B21',
-  bubbleOutText: '#111B21',
+  bubbleOut:     BRAND_ACCENT,
+  bubbleInText:  '#11181C',
+  bubbleOutText: '#FFFFFF',
   bubbleMetaIn:  '#667781',
-  bubbleMetaOut: '#5B7765',
-  tickRead:      '#34B7F1',
-  headerBar:     '#008069',
+  bubbleMetaOut: 'rgba(255,255,255,0.85)',
+  tickRead:      '#FFFFFF',
+  headerBar:     '#FFFFFF',
 };
 
 /** The static default palette (dark). Existing screens import this directly. */
@@ -228,7 +236,7 @@ export type TypeVariant = keyof typeof TYPOGRAPHY;
  * aren't all the same purple (U7). Pass a stable string (userId or name).
  */
 export const AVATAR_PALETTE = [
-  '#10B981', '#06B6D4', '#8B5CF6', '#F59E0B', '#EF4444',
+  BRAND_ACCENT, '#06B6D4', '#8B5CF6', '#F59E0B', '#EF4444',
   '#EC4899', '#3B82F6', '#14B8A6', '#F97316', '#6366F1',
 ] as const;
 

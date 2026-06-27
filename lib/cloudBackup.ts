@@ -150,6 +150,21 @@ export async function deleteCloudBackup(): Promise<void> {
   await api('/user/backup', { method: 'DELETE' });
 }
 
+// ── Google Drive (the user's own Drive — WhatsApp model) ─────────────────
+import { driveUpload, driveDownload } from './googleDrive';
+
+export async function backupToGoogleDrive(interactive = true): Promise<{ messageCount: number; sizeBytes: number }> {
+  const { blob, messageCount, sizeBytes } = await buildEncryptedBackup(await getBackupKey());
+  await driveUpload(blob, interactive);
+  return { messageCount, sizeBytes };
+}
+
+export async function restoreFromGoogleDrive(): Promise<number> {
+  const blob = await driveDownload();
+  if (!blob) throw new Error('No backup found');
+  return applyEncryptedBackup(await getBackupKey(), blob);
+}
+
 // ── Local file backups (WhatsApp-style "Databases" folder) ───────────────
 // Encrypted backup files written to the app's browsable external folder, next
 // to Media/, so a user can see/copy them and restore offline. Rolling retention

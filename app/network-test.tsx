@@ -7,6 +7,7 @@ import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   ActivityIndicator, Platform, Dimensions, Animated, Easing,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { useRouter, Stack } from 'expo-router';
@@ -301,7 +302,7 @@ export default function NetworkTestScreen() {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Text style={styles.backArrow}>←</Text>
+          <Ionicons name="arrow-back" size={20} color={colors.accent} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Speed Test</Text>
         <View style={{ width: 40 }} />

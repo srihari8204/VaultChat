@@ -11,6 +11,7 @@
 //   6. Wire notification tap listeners → navigate to correct chat
 //   7. Handle notification that launched app from killed state
 
+import { BRAND_ACCENT } from '../constants/theme';
 import { Buffer } from 'buffer';
 
 import { Stack, useRouter } from 'expo-router';
@@ -18,7 +19,8 @@ import { useEffect, useState } from 'react';
 import * as ScreenCapture from 'expo-screen-capture';
 import * as Sentry from '@sentry/react-native';
 import { StatusBar } from 'expo-status-bar';
-import { View, ActivityIndicator, StyleSheet, Platform } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, Platform, AppState } from 'react-native';
+import notifee, { EventType } from '@notifee/react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useFonts, Sora_700Bold, Sora_800ExtraBold } from '@expo-google-fonts/sora';
 import { NunitoSans_400Regular, NunitoSans_600SemiBold, NunitoSans_700Bold } from '@expo-google-fonts/nunito-sans';
@@ -27,7 +29,11 @@ import { ThemeProvider } from '../lib/theme';
 
 import { runSecurityCheck } from '../services/securityService';
 import { attachTapHandler } from '../lib/push';
-import { getSocket } from '../lib/socket';
+import { addPersistentListener, getSocket } from '../lib/socket';
+import { getActiveCall } from '../lib/callState';
+import { getRingingPeer, setRingingPeer, consumePendingCall } from '../lib/ringTracker';
+import { displayIncomingCall, cancelIncomingCall } from '../lib/callNotification';
+import '../lib/callBackground';   // registers notifee bg event + bg notification task
 import { getAccessToken } from '../lib/api';
 import { E2EE_ENABLED } from '../constants/flags';
 global.Buffer = Buffer;
@@ -71,81 +77,111 @@ function RootLayout() {
       configureGoogleSignIn();
     } catch {}
 
-    // ── 3. Run security scan BEFORE showing any screen ─────────
-    const runStartup = async () => {
-      // Skip security checks on web — they require native APIs
-      if (Platform.OS !== 'web') {
-        try {
-          const report = await runSecurityCheck();
-
-          if (!report.clean) {
-            router.replace({
-              pathname: '/blocked',
-              params: { threats: JSON.stringify(report.threats) },
-            });
-            return;
-          }
-        } catch {
-          // Security check error — fail open
-        }
-      }
-
-      // The cold-start launch gate now lives in app/index.tsx: a signed-in user
-      // with device MFA enabled is routed to /app-lock (biometric or MPIN); the
-      // old per-launch PIN gate (/enter-mpin) is retired with the legacy auth flow.
-      try {
-        const tok = await getAccessToken();
-        // Publish this device's E2EE key bundle on startup so peers can open
-        // encrypted sessions with us immediately. Gated + lazy + fire-and-forget.
-        if (tok && E2EE_ENABLED) {
-          import('../services/crypto/e2eeSession.rn')
-            .then(m => m.provisionE2EEIdentity())
-            .catch(() => {});
-        }
-      } catch { /* don't block startup on an unexpected error */ }
-
-      setSecurityChecked(true);
-      // Push token registration happens on the chats-screen mount
-      // (lib/push.ts:registerPushToken) — needs a valid JWT, which we
-      // only have after sign-in.
-    };
-
-    runStartup();
-
-    // ── Notification tap → open the chat. Survives across screens. ──
-    let cleanupListeners = () => {};
+    // ── 3. Security scan runs in the BACKGROUND ─────────────────
+    // It used to be awaited before the first paint — and its two localhost
+    // Frida probes alone can stall ~1.4s — so cold start felt slow. The scan
+    // wipes keys + redirects to /blocked ITSELF if the device is compromised,
+    // so running it async (without gating the UI) is safe and WhatsApp-fast.
     if (Platform.OS !== 'web') {
-      cleanupListeners = attachTapHandler((chatId) => {
-        router.push({ pathname: '/chat', params: { id: chatId } } as any);
-      });
+      runSecurityCheck()
+        .then(report => {
+          if (!report.clean) {
+            router.replace({ pathname: '/blocked', params: { threats: JSON.stringify(report.threats) } });
+          }
+        })
+        .catch(() => { /* fail open */ });
     }
 
-    // ── Incoming-call listener (Socket.IO). Pushes to the full-screen
-    //    accept/decline overlay while the app is open. (When the app is
-    //    closed, the existing push-notification arrives and tapping it
-    //    opens the chat — full lock-screen call UI is a Phase-7 polish
-    //    that needs a Notifee high-importance fullscreen intent.)
-    let cleanupCallListener: () => void = () => {};
+    // Publish this device's E2EE key bundle on startup (lazy, fire-and-forget).
+    getAccessToken()
+      .then(tok => {
+        if (tok && E2EE_ENABLED) {
+          import('../services/crypto/e2eeSession.rn').then(m => m.provisionE2EEIdentity()).catch(() => {});
+        }
+      })
+      .catch(() => {});
+
+    // Unblock the UI immediately — nothing awaited gates the first render now.
+    setSecurityChecked(true);
+
+    // (attachTapHandler is wired below, after the call handlers are defined)
+    let cleanupListeners = () => {};
+
+    // Open the in-app ringing screen for a call. `offer` may be empty (push /
+    // backgrounded) — incoming-call captures the caller's re-sent offer live.
+    const routeToIncoming = (p: { chatId?: string; peerUid: string; peerName: string; type: string; offer?: string; group?: boolean; groupName?: string; waiting?: boolean }) => {
+      cancelIncomingCall();             // clear any OS full-screen call once the in-app UI takes over
+      setRingingPeer(p.peerUid);
+      router.push({
+        pathname: '/incoming-call' as any,
+        params: {
+          chatId: p.chatId || '', peerUid: p.peerUid, peerName: p.peerName,
+          type: p.type === 'video' ? 'video' : 'audio',
+          offer: p.offer || '',
+          group: p.group ? '1' : '', groupName: p.groupName ?? '',
+          waiting: p.waiting ? '1' : '',
+        },
+      });
+    };
+
+    // ── Incoming-call listener (Socket.IO) ──────────────────────────────
+    const onIncoming = (data: any) => {
+      if (!data?.from || !data?.chatId) return;
+      const active = getActiveCall();
+      if (active && active.peerUid === data.from && !data.group) return;   // call-waiting same peer
+      if (getRingingPeer() === data.from) return;                          // de-dupe repeated rings
+      setRingingPeer(data.from);
+      const name = data.group ? (data.groupName || 'Group call') : (data.callerName ?? data.fromName ?? 'VaultChat user');
+      const type = (data.type === 'video' || data.video === '1') ? 'video' : 'audio';
+      // App in the FOREGROUND (or a group call) → show the in-app screen.
+      // App BACKGROUNDED with a live socket → raise the OS full-screen call UI
+      // (lock screen). Answering it routes into the app via the notifee events.
+      if (AppState.currentState === 'active' || data.group) {
+        routeToIncoming({ chatId: data.chatId, peerUid: data.from, peerName: name, type, offer: data.offer ? JSON.stringify(data.offer) : '', group: !!data.group, groupName: data.groupName, waiting: !!active });
+      } else {
+        displayIncomingCall({ fromUid: data.from, callerName: name, callType: type, chatId: data.chatId });
+      }
+    };
+    const cleanupCallListener = addPersistentListener('call_incoming', onIncoming);
+
+    // ── Notifee full-screen call events (foreground) ────────────────────
+    const onNotifeeAnswerOrDecline = (action: string, data: any) => {
+      if (data?.type !== 'call' || !data?.fromUid) return;
+      cancelIncomingCall();
+      if (action === 'decline') {
+        setRingingPeer(null);
+        getSocket().then(s => s.emit('webrtc_end', { to: data.fromUid, chatId: data.chatId })).catch(() => {});
+        return;
+      }
+      routeToIncoming({ chatId: data.chatId, peerUid: data.fromUid, peerName: data.callerName || 'VaultChat user', type: data.callType, offer: '' });
+    };
+    const notifeeFg = notifee.onForegroundEvent(({ type, detail }) => {
+      if (type !== EventType.ACTION_PRESS && type !== EventType.PRESS) return;
+      onNotifeeAnswerOrDecline(detail?.pressAction?.id === 'decline' ? 'decline' : 'answer', detail?.notification?.data);
+    });
+
+    // App launched/woken BY a call notification → act on it once up.
     (async () => {
       try {
-        const s = await getSocket();
-        const onIncoming = (data: any) => {
-          if (!data?.from || !data?.chatId) return;
-          router.push({
-            pathname: '/incoming-call' as any,
-            params: {
-              chatId:   data.chatId,
-              peerUid:  data.from,
-              peerName: data.callerName ?? 'VaultChat user',
-              type:     data.type === 'video' ? 'video' : 'audio',
-              offer:    data.offer ? JSON.stringify(data.offer) : '',
-            },
-          });
-        };
-        s.on('call_incoming', onIncoming);
-        cleanupCallListener = () => { try { s.off('call_incoming', onIncoming); } catch {} };
-      } catch { /* not signed-in yet — listener will arm when chats mounts */ }
+        const initial = await notifee.getInitialNotification();
+        if (initial?.notification?.data?.type === 'call') {
+          onNotifeeAnswerOrDecline(initial.pressAction?.id === 'decline' ? 'decline' : 'answer', initial.notification.data);
+        }
+      } catch {}
+      const pending = consumePendingCall();   // chosen from a bg notification action
+      if (pending) onNotifeeAnswerOrDecline(pending.action, pending.data);
     })();
+
+    // Expo notification tap / actions (heads-up call push fallback).
+    const onCallNotification = (data: any, action: string) =>
+      onNotifeeAnswerOrDecline(action === 'decline' ? 'decline' : 'answer', { ...data, type: 'call' });
+
+    if (Platform.OS !== 'web') {
+      cleanupListeners = attachTapHandler(
+        (chatId) => { router.push({ pathname: '/chat', params: { id: chatId } } as any); },
+        onCallNotification,
+      );
+    }
 
     return () => {
       if (Platform.OS !== 'web') {
@@ -153,6 +189,7 @@ function RootLayout() {
       }
       cleanupListeners();
       cleanupCallListener();
+      notifeeFg();
     };
   }, [router]);
 
@@ -162,7 +199,7 @@ function RootLayout() {
     return (
       <GestureHandlerRootView style={styles.loading}>
         <StatusBar style="light" />
-        <ActivityIndicator size="large" color="#10B981" />
+        <ActivityIndicator size="large" color={BRAND_ACCENT} />
       </GestureHandlerRootView>
     );
   }

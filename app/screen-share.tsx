@@ -4,6 +4,7 @@
 // 2. Screen Annotation          5. Watch Together YouTube
 // 3. View-Only Mode             6. Voice Chat Overlay
 
+import { Ionicons } from '@expo/vector-icons';
 import React, { useState , useMemo} from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Alert, Platform, Switch,
@@ -54,7 +55,7 @@ export default function ScreenShareScreen() {
       {/* Header */}
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-          <Text style={s.backTxt}>{'\u2190'}</Text>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={s.headerTitle}>{'\uD83D\uDCBB'} Screen Share</Text>

@@ -8,6 +8,7 @@
 // "Session" = one non-revoked refresh token = one signed-in device.
 // The row flagged isCurrent is the device this app is running on.
 
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState , useMemo} from 'react';
 import {
@@ -117,7 +118,7 @@ export default function LoginHistoryScreen() {
     <View style={S.screen}>
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
-          <Text style={S.backTxt}>←</Text>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title}>Active devices</Text>
       </View>

@@ -9,6 +9,7 @@
 // so an old match may not be in memory) — tracked as a follow-up rather than
 // faked here.
 
+import { brandAlpha } from '../constants/theme';
 import React, { useState, useEffect, useRef, useCallback , useMemo} from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
@@ -218,7 +219,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   searchInput: { flex: 1, color: c.text, fontSize: 15, padding: 0 },
   badgeRow: { flexDirection: 'row', paddingHorizontal: 16, paddingTop: 8 },
   badge: {
-    backgroundColor: 'rgba(16,185,129,0.13)',
+    backgroundColor: brandAlpha(0.13),
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 4,
@@ -251,5 +252,5 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   senderName: { color: c.accent, fontSize: 13, fontWeight: '600', flexShrink: 1 },
   timestamp: { color: c.textFaint, fontSize: 11 },
   msgText: { color: c.textDim, fontSize: 14, lineHeight: 20 },
-  highlight: { color: c.text, backgroundColor: 'rgba(16,185,129,0.28)', fontWeight: '700' },
+  highlight: { color: c.text, backgroundColor: brandAlpha(0.28), fontWeight: '700' },
 });

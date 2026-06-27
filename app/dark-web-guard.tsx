@@ -8,6 +8,7 @@
 // user pastes their key (stored in SecureStore); without one, that tab simply
 // asks for a key instead of showing fake data.
 
+import { BRAND_ACCENT, brandAlpha } from '../constants/theme';
 import React, { useState, useEffect, useCallback , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput, Alert, ActivityIndicator,
@@ -20,7 +21,7 @@ import { useTheme } from '../lib/theme';
 import { getMyProfile } from '../lib/chatService';
 import { checkEmailBreaches, checkPasswordPwned, fmtCount as fmt, type Breach } from '../lib/breachCheck';
 
-const sevColor = (s: Breach['severity']) => s === 'critical' ? '#EF4444' : s === 'high' ? '#F97316' : s === 'medium' ? '#F5C842' : '#10B981';
+const sevColor = (s: Breach['severity']) => s === 'critical' ? '#EF4444' : s === 'high' ? BRAND_ACCENT : s === 'medium' ? '#F5C842' : BRAND_ACCENT;
 
 type Tab = 'password' | 'email';
 
@@ -115,7 +116,7 @@ export default function DarkWebGuardScreen() {
                 autoCapitalize="none"
               />
               <TouchableOpacity style={[s.btn, (!password || pwChecking) && s.btnDim]} onPress={checkPassword} disabled={!password || pwChecking}>
-                {pwChecking ? <ActivityIndicator color="#04130D" /> : <Text style={s.btnTxt}>Check password</Text>}
+                {pwChecking ? <ActivityIndicator color="#FFFFFF" /> : <Text style={s.btnTxt}>Check password</Text>}
               </TouchableOpacity>
             </View>
 
@@ -154,7 +155,7 @@ export default function DarkWebGuardScreen() {
                 <View style={{ flexDirection: 'row', gap: 10 }}>
                   <TextInput style={[s.input, { flex: 1 }]} value={email} onChangeText={setEmail} placeholder="your@email.com" placeholderTextColor={colors.textFaint} keyboardType="email-address" autoCapitalize="none" />
                   <TouchableOpacity style={[s.btn, { paddingHorizontal: 18 }, emailChecking && s.btnDim]} onPress={checkEmail} disabled={emailChecking}>
-                    {emailChecking ? <ActivityIndicator color="#04130D" size="small" /> : <Text style={s.btnTxt}>Scan</Text>}
+                    {emailChecking ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={s.btnTxt}>Scan</Text>}
                   </TouchableOpacity>
                 </View>
               </View>
@@ -193,7 +194,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   tab: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 10 },
   tabActive: { backgroundColor: c.primary },
   tabTxt: { color: c.textDim, fontSize: 14, fontWeight: '700' },
-  tabTxtActive: { color: '#04130D' },
+  tabTxtActive: { color: '#FFFFFF' },
   hero: { alignItems: 'center', paddingVertical: 20 },
   heroIcon: { fontSize: 52, marginBottom: 10 },
   heroTitle: { fontSize: 20, fontWeight: '800', color: c.text, marginBottom: 8, textAlign: 'center' },
@@ -204,9 +205,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   input: { backgroundColor: c.surface, borderRadius: 10, borderWidth: 1, borderColor: c.border, paddingHorizontal: 14, paddingVertical: 11, color: c.text, fontSize: 14, marginBottom: 10 },
   btn: { backgroundColor: c.primary, borderRadius: 10, paddingVertical: 12, alignItems: 'center', justifyContent: 'center' },
   btnDim: { opacity: 0.5 },
-  btnTxt: { color: '#04130D', fontWeight: '800', fontSize: 14 },
+  btnTxt: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 },
   result: { borderRadius: 14, borderWidth: 1, padding: 20, alignItems: 'center', gap: 8, marginBottom: 16 },
-  resultClean: { backgroundColor: 'rgba(16,185,129,0.1)', borderColor: 'rgba(16,185,129,0.4)' },
+  resultClean: { backgroundColor: brandAlpha(0.1), borderColor: brandAlpha(0.4) },
   resultBad: { backgroundColor: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.4)' },
   resultIcon: { fontSize: 40 },
   resultTitle: { fontSize: 17, fontWeight: '800', color: c.text, textAlign: 'center' },

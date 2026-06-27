@@ -94,6 +94,23 @@ export async function getThumbUri(attachmentId: string): Promise<string | null> 
   } catch { return null; }
 }
 
+/**
+ * Copy a media-folder file into the app cache (via RNFS, which CAN read
+ * /Android/media) so the OS FileProvider can serve it — needed to open a file
+ * with another app (expo-file-system can't touch the media folder). Returns the
+ * cache file:// uri.
+ */
+export async function copyToCache(sourceUri: string, filename: string): Promise<string> {
+  const safe = (filename || 'file').replace(/[/\\:*?"<>|]/g, '_');
+  const dest = `${RNFS.CachesDirectoryPath}/${safe}`;
+  const src = sourceUri.replace('file://', '');
+  if (src !== dest) {
+    try { if (await RNFS.exists(dest)) await RNFS.unlink(dest); } catch {}
+    await RNFS.copyFile(src, dest);
+  }
+  return `file://${dest}`;
+}
+
 function pathFor(attachmentId: string, opts: MediaOpts): { folder: string; path: string } {
   const folder = `${BASE}/${FOLDER[opts.kind]}${opts.isMine && HAS_SENT[opts.kind] ? '/Sent' : ''}`;
   const ext  = extFor(opts.kind, opts.mime, opts.filename);
@@ -127,7 +144,7 @@ export async function storeSentCopy(attachmentId: string, sourceUri: string, opt
  * Resolve a local file:// URI for an attachment, downloading once into the
  * WhatsApp-style folder if needed. Returns a path that renders/plays directly.
  */
-export async function getMedia(attachmentId: string, opts: MediaOpts): Promise<string> {
+export async function getMedia(attachmentId: string, opts: MediaOpts & { cacheOnly?: boolean; onProgress?: (pct: number) => void }): Promise<string> {
   // Encrypted media → reuse the internal decrypt-to-file path.
   const mk = await getMediaKey(attachmentId);
   if (mk) return (await getDecryptedAttachmentUri(attachmentId)).uri;
@@ -135,6 +152,8 @@ export async function getMedia(attachmentId: string, opts: MediaOpts): Promise<s
   const { folder, path } = pathFor(attachmentId, opts);
 
   if (await RNFS.exists(path)) return `file://${path}`;
+  // Cache-only probe (for the auto-download gate): don't hit the network.
+  if (opts.cacheOnly) return '';
 
   // Ensure the folder tree exists, then download into it.
   await ensureTree(opts, folder);
@@ -144,6 +163,10 @@ export async function getMedia(attachmentId: string, opts: MediaOpts): Promise<s
     fromUrl: attachmentUrl(attachmentId),
     toFile: path,
     headers: token ? { Authorization: `Bearer ${token}` } : {},
+    progressInterval: 150,
+    progress: opts.onProgress
+      ? (p: any) => { if (p.contentLength > 0) opts.onProgress!(Math.min(1, p.bytesWritten / p.contentLength)); }
+      : undefined,
   }).promise;
 
   if (res.statusCode && res.statusCode >= 400) {

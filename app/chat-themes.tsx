@@ -22,7 +22,7 @@ interface BubbleTheme { id: string; name: string; color: string | null }
 
 const BUBBLE_THEMES: BubbleTheme[] = [
   { id: 'default', name: 'Default', color: null },
-  { id: 'emerald', name: 'Emerald', color: '#0E7256' },
+  { id: 'emerald', name: 'Emerald', color: '#10B981' },
   { id: 'teal',    name: 'Teal',    color: '#0B6E63' },
   { id: 'sky',     name: 'Sky',     color: '#0369A1' },
   { id: 'blue',    name: 'Blue',    color: '#1E40AF' },

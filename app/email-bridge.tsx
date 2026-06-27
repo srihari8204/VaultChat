@@ -1,6 +1,7 @@
 // app/email-bridge.tsx
 // Encrypted Email Bridge — send and receive AES-256-GCM encrypted emails
 
+import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useCallback , useMemo} from 'react';
 import {
   View,
@@ -138,7 +139,7 @@ export default function EmailBridgeScreen() {
         {/* ── Header ──────────────────────────────────── */}
         <View style={styles.headerRow}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Text style={styles.backArrow}>{'\u2190'}</Text>
+            <Ionicons name="arrow-back" size={20} color={colors.accent} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>{'\u2709\uFE0F'} Encrypted Email</Text>
           <View style={styles.encBadge}>
@@ -291,7 +292,7 @@ export default function EmailBridgeScreen() {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{'\uD83D\uDD10'} Decrypt Email</Text>
               <TouchableOpacity onPress={() => setDecryptModal(false)}>
-                <Text style={styles.modalClose}>{'\u2715'}</Text>
+                <Ionicons name="close" size={20} color="#5A6E8F" />
               </TouchableOpacity>
             </View>
 

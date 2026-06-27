@@ -9,7 +9,7 @@
 
 import NetInfo from '@react-native-community/netinfo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { writeLocalBackup, uploadCloudBackup } from './cloudBackup';
+import { writeLocalBackup, backupToGoogleDrive } from './cloudBackup';
 
 const SETTINGS_KEY = 'vc_backup_settings';
 
@@ -57,10 +57,11 @@ export async function runScheduledBackupIfDue(): Promise<void> {
     const onWifi = net.type === 'wifi';
     if (s.network === 'wifi' && !onWifi) return; // Wi-Fi-only and not on Wi-Fi → wait
 
-    // No passphrase: the backup key is account-managed (fetched in cloudBackup).
-    // Local file backup always; cloud upload best-effort.
+    // No passphrase: the backup key is account-managed. Local file always;
+    // Google Drive SILENTLY (interactive=false) — only if already signed in, so
+    // auto-backup never pops a sign-in dialog.
     await writeLocalBackup(new Date()).catch(() => {});
-    await uploadCloudBackup().catch(() => {});
+    await backupToGoogleDrive(false).catch(() => {});
     await saveBackupSettings({ ...s, lastBackupAt: Date.now() });
   } catch { /* never let a backup attempt crash startup */ }
 }

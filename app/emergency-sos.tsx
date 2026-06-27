@@ -3,6 +3,8 @@
 // Countdown before sending, test mode, history
 // Uses expo-location, expo-sensors (Accelerometer)
 
+import { Ionicons } from '@expo/vector-icons';
+import { brandAlpha } from '../constants/theme';
 import React, { useState, useEffect, useRef , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
@@ -226,7 +228,7 @@ export default function EmergencySOSScreen() {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Text style={styles.backArrow}>←</Text>
+          <Ionicons name="arrow-back" size={20} color={colors.accent} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Emergency SOS</Text>
         <View style={{ width: 40 }} />
@@ -320,7 +322,7 @@ export default function EmergencySOSScreen() {
                 onPress={() => toggleContact(contact.uid)}
               >
                 <View style={[styles.contactCheck, selectedContacts.includes(contact.uid) && styles.contactCheckActive]}>
-                  {selectedContacts.includes(contact.uid) && <Text style={styles.checkMark}>✓</Text>}
+                  {selectedContacts.includes(contact.uid) && <Ionicons name="checkmark" size={14} color={colors.accent} />}
                 </View>
                 <View style={styles.contactInfo}>
                   <Text style={styles.contactName}>{contact.name}</Text>
@@ -399,7 +401,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   shakeTitle: { color: '#FFF', fontSize: 15, fontWeight: '600' },
   shakeSub: { color: c.textDim, fontSize: 12, marginTop: 2 },
   toggleBtn: { paddingHorizontal: 18, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
-  toggleBtnActive: { borderColor: c.primary, backgroundColor: 'rgba(16,185,129,0.15)' },
+  toggleBtnActive: { borderColor: c.primary, backgroundColor: brandAlpha(0.15) },
   toggleText: { color: c.textDim, fontSize: 13, fontWeight: '700' },
   toggleTextActive: { color: c.primary },
 

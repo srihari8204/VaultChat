@@ -3,6 +3,7 @@
  * then 'move' (tap a movable token). board[player] = 4 token positions
  * (-1 yard, 0-51 track, 52-57 home stretch, 57 = home). Rolling a 6 repeats.
  */
+import { brandAlpha } from '../../constants/theme';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import type { GameState } from '../../services/gameEngines';
 import { Aurora } from '../../constants/theme';
@@ -71,14 +72,14 @@ const s = StyleSheet.create({
   diceArea: { alignItems: 'center', minHeight: 64, justifyContent: 'center' },
   rollBtn: { backgroundColor: Aurora.primary, paddingHorizontal: 32, paddingVertical: 14, borderRadius: 16 },
   off: { opacity: 0.4 },
-  rollTxt: { color: '#04130D', fontSize: 16, fontWeight: '800' },
+  rollTxt: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
   diceShow: { alignItems: 'center', gap: 4 },
   diceVal: { color: Aurora.text, fontSize: 30, fontWeight: '800' },
   diceHint: { color: Aurora.textDim, fontSize: 12 },
   label: { color: Aurora.textDim, fontSize: 12, fontWeight: '700' },
   tokens: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   token: { width: '47%', flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 14, backgroundColor: Aurora.surface, borderWidth: 1, borderColor: Aurora.border },
-  tokenActive: { borderColor: Aurora.primary, backgroundColor: 'rgba(16,185,129,0.1)' },
+  tokenActive: { borderColor: Aurora.primary, backgroundColor: brandAlpha(0.1) },
   tokenDone: { opacity: 0.6 },
   tokenDot: { width: 28, height: 28, borderRadius: 14, backgroundColor: Aurora.purple, alignItems: 'center', justifyContent: 'center' },
   tokenNum: { color: '#fff', fontSize: 13, fontWeight: '800' },

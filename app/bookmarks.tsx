@@ -5,6 +5,7 @@
 // chat thread loads from newest). Long-press to remove. Each row shows
 // chat name + sender + the message preview + relative time.
 
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState , useMemo} from 'react';
 import {
@@ -93,7 +94,7 @@ export default function BookmarksScreen() {
     <View style={S.screen}>
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
-          <Text style={S.backTxt}>←</Text>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title}>Bookmarks</Text>
       </View>

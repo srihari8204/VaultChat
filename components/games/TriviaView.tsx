@@ -2,6 +2,7 @@
  * TriviaView — wired to gameEngines triviaMove ({ answer }). Both players
  * answer each round; the engine advances when all have answered.
  */
+import { brandAlpha } from '../../constants/theme';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import type { GameState } from '../../services/gameEngines';
 import { Aurora } from '../../constants/theme';
@@ -55,7 +56,7 @@ const s = StyleSheet.create({
   q: { color: Aurora.text, fontSize: 18, fontWeight: '800', lineHeight: 24 },
   options: { gap: 10 },
   option: { backgroundColor: Aurora.surface, borderWidth: 1, borderColor: Aurora.border, borderRadius: 14, padding: 16 },
-  optionMine: { borderColor: Aurora.primary, backgroundColor: 'rgba(16,185,129,0.12)' },
+  optionMine: { borderColor: Aurora.primary, backgroundColor: brandAlpha(0.12) },
   optionDim: { opacity: 0.5 },
   optionTxt: { color: Aurora.text, fontSize: 15, fontWeight: '600' },
   waiting: { color: Aurora.textDim, fontSize: 13, textAlign: 'center' },

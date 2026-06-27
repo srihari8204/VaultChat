@@ -8,16 +8,18 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  View, Text, TextInput, FlatList, TouchableOpacity,
+  View, Text, TextInput, FlatList, ScrollView, TouchableOpacity,
   StyleSheet, ActivityIndicator,
 } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
-import { listChats, createGroupChat } from '../lib/chatService';
+import { Avatar } from '../components/ui';
+import { listChats, createGroupChat, attachmentUrl } from '../lib/chatService';
+import { getAccessToken } from '../lib/api';
 
-interface Pick { userId: string; name: string }
+interface Pick { userId: string; name: string; photoURL: string | null }
 
 function useS() {
   const { colors } = useTheme();
@@ -32,6 +34,8 @@ export default function CreateGroupScreen() {
   const [people, setPeople] = useState<Pick[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [groupName, setGroupName] = useState('');
+  const [query, setQuery] = useState('');
+  const [authHeader, setAuthHeader] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +44,8 @@ export default function CreateGroupScreen() {
     let active = true;
     (async () => {
       try {
-        const chats = await listChats();
+        const [chats, tok] = await Promise.all([listChats(), getAccessToken()]);
+        if (active) setAuthHeader(tok ? `Bearer ${tok}` : null);
         // Direct-chat peers → dedup by userId.
         const seen = new Map<string, Pick>();
         for (const c of chats) {
@@ -49,6 +54,7 @@ export default function CreateGroupScreen() {
               seen.set(c.peerUserId, {
                 userId: c.peerUserId,
                 name: c.peerName || c.name || 'Direct chat',
+                photoURL: c.peerPhotoURL ?? null,
               });
             }
           }
@@ -62,6 +68,12 @@ export default function CreateGroupScreen() {
     })();
     return () => { active = false; };
   }, []);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? people.filter(p => p.name.toLowerCase().includes(q)) : people;
+  }, [query, people]);
+  const selectedPeople = useMemo(() => people.filter(p => selected.has(p.userId)), [people, selected]);
 
   const toggle = useCallback((userId: string) => {
     setSelected(prev => {
@@ -93,12 +105,10 @@ export default function CreateGroupScreen() {
     const sel = selected.has(item.userId);
     return (
       <TouchableOpacity style={s.row} onPress={() => toggle(item.userId)} activeOpacity={0.7}>
-        <View style={[s.avatar, sel && s.avatarSel]}>
-          <Text style={s.avatarTxt}>{(item.name.trim()[0] ?? '#').toUpperCase()}</Text>
-        </View>
+        <Avatar uri={item.photoURL && authHeader ? attachmentUrl(item.photoURL) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={item.name} size={46} />
         <Text style={s.name} numberOfLines={1}>{item.name}</Text>
         <View style={[s.check, sel && s.checkSel]}>
-          {sel && <Ionicons name="checkmark" size={15} color="#04130D" />}
+          {sel && <Ionicons name="checkmark" size={15} color="#FFFFFF" />}
         </View>
       </TouchableOpacity>
     );
@@ -127,7 +137,26 @@ export default function CreateGroupScreen() {
 
       {error && <View style={s.errorBar}><Text style={s.errorTxt}>{error}</Text></View>}
 
-      <Text style={s.label}>SELECT MEMBERS ({selected.size} selected)</Text>
+      {/* Selected members as removable chips (WhatsApp) */}
+      {selectedPeople.length > 0 && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.chipRow} contentContainerStyle={{ gap: 8, paddingHorizontal: 16 }}>
+          {selectedPeople.map(p => (
+            <TouchableOpacity key={p.userId} style={s.chip} onPress={() => toggle(p.userId)} activeOpacity={0.7}>
+              <Avatar uri={p.photoURL && authHeader ? attachmentUrl(p.photoURL) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={p.name} size={26} />
+              <Text style={s.chipTxt} numberOfLines={1}>{p.name.split(' ')[0]}</Text>
+              <Ionicons name="close-circle" size={16} color={colors.textDim} />
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
+
+      {/* Search */}
+      <View style={s.searchWrap}>
+        <Ionicons name="search" size={18} color={colors.textDim} />
+        <TextInput style={s.searchInput} value={query} onChangeText={setQuery} placeholder="Search contacts" placeholderTextColor={colors.textDim} autoCorrect={false} />
+      </View>
+
+      <Text style={s.label}>{selected.size} SELECTED</Text>
 
       {loading ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
@@ -138,11 +167,12 @@ export default function CreateGroupScreen() {
         </View>
       ) : (
         <FlatList
-          data={people}
+          data={filtered}
           keyExtractor={p => p.userId}
           renderItem={renderItem}
           contentContainerStyle={{ paddingBottom: 96 }}
           keyboardShouldPersistTaps="handled"
+          ListEmptyComponent={<Text style={s.emptyTxt}>No contacts found</Text>}
         />
       )}
 
@@ -154,7 +184,7 @@ export default function CreateGroupScreen() {
           activeOpacity={0.85}
         >
           {creating
-            ? <ActivityIndicator color="#04130D" />
+            ? <ActivityIndicator color="#FFFFFF" />
             : <Text style={[s.createTxt, !canCreate && s.createTxtOff]}>
                 Create Group{selected.size > 0 ? ` (${selected.size + 1})` : ''}
               </Text>}
@@ -176,7 +206,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   },
   errorBar: { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.4)', borderWidth: 1, marginHorizontal: 16, marginTop: 10, padding: 10, borderRadius: 10 },
   errorTxt: { color: c.danger, fontSize: 12 },
-  label: { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1, paddingHorizontal: 16, paddingTop: 18, paddingBottom: 8 },
+  label: { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 8 },
+  chipRow: { maxHeight: 46, marginTop: 12 },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.card, borderRadius: 18, paddingLeft: 4, paddingRight: 10, paddingVertical: 4 },
+  chipTxt: { color: c.text, fontSize: 13, fontWeight: '600', maxWidth: 90 },
+  searchWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginTop: 12, paddingHorizontal: 14, height: 40, borderRadius: 20, backgroundColor: c.card },
+  searchInput: { flex: 1, color: c.text, fontSize: 15 },
   row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, gap: 12 },
   avatar: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surfaceSolid, borderWidth: 1, borderColor: c.border },
   avatarSel: { borderColor: c.primary },
@@ -189,6 +224,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   bottomBar: { position: 'absolute', left: 0, right: 0, bottom: 0, padding: 16, backgroundColor: c.bg, borderTopWidth: 1, borderTopColor: c.separator },
   createBtn: { backgroundColor: c.primary, borderRadius: 12, paddingVertical: 15, alignItems: 'center' },
   createBtnOff: { backgroundColor: c.surface },
-  createTxt: { color: '#04130D', fontSize: 16, fontWeight: '800' },
+  createTxt: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
   createTxtOff: { color: c.textFaint },
 });

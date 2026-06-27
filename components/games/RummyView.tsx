@@ -96,7 +96,7 @@ const s = StyleSheet.create({
   label: { color: Aurora.textDim, fontSize: 12, fontWeight: '700' },
   hand: { gap: 4, paddingVertical: 12 },
   declareBtn: { backgroundColor: Aurora.primary, borderRadius: 14, paddingVertical: 13, alignItems: 'center' },
-  declareTxt: { color: '#04130D', fontSize: 15, fontWeight: '800' },
+  declareTxt: { color: '#FFFFFF', fontSize: 15, fontWeight: '800' },
 });
 
 export default RummyView;

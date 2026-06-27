@@ -42,7 +42,7 @@ export function Avatar({ uri, headers, name, size = 48, presence, style }: Avata
         />
       ) : (
         <View style={[dim, styles.center, { backgroundColor: avatarColor(name || initial) }]}>
-          <AppText style={{ fontSize: size * 0.4, color: '#04130D', fontWeight: '800' }}>{initial}</AppText>
+          <AppText style={{ fontSize: size * 0.4, color: '#FFFFFF', fontWeight: '800' }}>{initial}</AppText>
         </View>
       )}
       {presence === 'online' && (

@@ -17,6 +17,7 @@ import {
   Dimensions,
   StatusBar,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { Stack, useRouter } from 'expo-router';
@@ -270,7 +271,7 @@ export default function AriaChatBot() {
             style={S.backButton}
             activeOpacity={0.7}
           >
-            <Text style={S.backArrow}>{'<'}</Text>
+            <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
 
           <View style={S.headerCenter}>
@@ -360,14 +361,11 @@ export default function AriaChatBot() {
               disabled={!input.trim()}
               activeOpacity={0.7}
             >
-              <Text
-                style={[
-                  S.sendIcon,
-                  input.trim() ? S.sendIconActive : S.sendIconInactive,
-                ]}
-              >
-                {'->'}
-              </Text>
+              <Ionicons
+                name="arrow-forward"
+                size={18}
+                color={input.trim() ? '#000000' : 'rgba(255,255,255,0.2)'}
+              />
             </TouchableOpacity>
           </View>
 

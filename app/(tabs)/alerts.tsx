@@ -6,6 +6,7 @@
 // detected and shown in the integrity banner. "Scan device" runs a real
 // root/Frida/emulator scan and appends its result. Nothing here is mock data.
 
+import { brandAlpha } from '../../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useState , useMemo} from 'react';
@@ -203,7 +204,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   scanBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
 
   banner:   { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10, borderWidth: 1 },
-  bannerOk: { backgroundColor: 'rgba(16,185,129,0.08)', borderColor: 'rgba(16,185,129,0.3)' },
+  bannerOk: { backgroundColor: brandAlpha(0.08), borderColor: brandAlpha(0.3) },
   bannerBad:{ backgroundColor: 'rgba(239,68,68,0.08)', borderColor: 'rgba(239,68,68,0.35)' },
   bannerText: { fontSize: 12.5, fontWeight: '600', flex: 1 },
 

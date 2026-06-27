@@ -2,6 +2,7 @@
 // Draw sketches, annotate, share in chat
 // Touch-based drawing with color picker, brush sizes, undo, clear
 
+import { BRAND_ACCENT } from '../constants/theme';
 import React, { useState, useRef , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, PanResponder,
@@ -14,7 +15,7 @@ import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
 
 
-const COLORS = ['#FFFFFF', '#FF3C6E', '#4A9FFF', '#10B981', '#F59E0B', '#A78BFA', '#FF6B35', '#EC4899', '#8B5CF6'];
+const COLORS = ['#FFFFFF', '#FF3C6E', '#4A9FFF', BRAND_ACCENT, '#F59E0B', '#A78BFA', BRAND_ACCENT, '#EC4899', '#8B5CF6'];
 const BRUSH_SIZES = [2, 4, 8, 14, 22];
 
 function useS() {
@@ -99,7 +100,7 @@ export default function WhiteboardScreen() {
         headerRight: () => (
           <View style={{ flexDirection: 'row', gap: 14, marginRight: 8 }}>
             <TouchableOpacity onPress={undo}><Text style={{ color: '#4A9FFF', fontSize: 13, fontWeight: '700' }}>Undo</Text></TouchableOpacity>
-            <TouchableOpacity onPress={saveAndShare}><Text style={{ color: '#10B981', fontSize: 13, fontWeight: '700' }}>Share</Text></TouchableOpacity>
+            <TouchableOpacity onPress={saveAndShare}><Text style={{ color: BRAND_ACCENT, fontSize: 13, fontWeight: '700' }}>Share</Text></TouchableOpacity>
           </View>
         ),
       }} />

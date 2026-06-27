@@ -9,6 +9,7 @@
 //
 // PIN session is screen-scoped: leaving the screen requires re-entering.
 
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState , useMemo} from 'react';
 import {
@@ -208,7 +209,7 @@ function HiddenList({ router }: { router: any }) {
       <StatusBar barStyle="light-content" />
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
-          <Text style={S.backTxt}>←</Text>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title}>Hidden chats</Text>
       </View>

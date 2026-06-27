@@ -3,6 +3,7 @@
 // Up to 3 contacts alerted on duress-PIN / new-device / panic events.
 // Backed by /contacts/trusted (list/add-by-VaultID/remove). No Firestore.
 
+import { brandAlpha } from '../constants/theme';
 import React, { useState, useEffect, useCallback , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList, Alert, StatusBar, ActivityIndicator, TextInput,
@@ -121,8 +122,9 @@ export default function TrustedContactsScreen() {
         )}
 
         {!adding && trusted.length < MAX_TRUSTED && (
-          <TouchableOpacity style={s.addBtn} onPress={() => setAdding(true)}>
-            <Text style={s.addBtnTxt}>＋  Add Trusted Contact</Text>
+          <TouchableOpacity style={[s.addBtn, { flexDirection: 'row', justifyContent: 'center', gap: 8 }]} onPress={() => setAdding(true)}>
+            <Ionicons name="add" size={18} color={colors.primary} />
+            <Text style={s.addBtnTxt}>Add Trusted Contact</Text>
           </TouchableOpacity>
         )}
 
@@ -141,7 +143,7 @@ export default function TrustedContactsScreen() {
                 autoFocus
               />
               <TouchableOpacity style={s.addConfirm} onPress={addByVaultId} disabled={searching}>
-                {searching ? <ActivityIndicator color="#04130D" size="small" /> : <Text style={s.addConfirmTxt}>Add</Text>}
+                {searching ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={s.addConfirmTxt}>Add</Text>}
               </TouchableOpacity>
             </View>
             <TouchableOpacity onPress={() => { setAdding(false); setSearchId(''); }}>
@@ -173,20 +175,20 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   infoStat: { color: c.primary, fontSize: 13, fontWeight: '700', marginTop: 12 },
   contactRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: c.border },
   contactAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: c.primary, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  contactAvatarTxt: { color: '#04130D', fontWeight: '900', fontSize: 18 },
+  contactAvatarTxt: { color: '#FFFFFF', fontWeight: '900', fontSize: 18 },
   contactName: { color: c.text, fontSize: 15, fontWeight: '700' },
   contactId: { color: c.textDim, fontSize: 12, marginTop: 2 },
   statusDot: { width: 8, height: 8, borderRadius: 4, marginRight: 12 },
   removeBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: 'rgba(239,68,68,0.1)', borderWidth: 1, borderColor: 'rgba(239,68,68,0.3)' },
   removeTxt: { color: c.danger, fontSize: 12, fontWeight: '700' },
-  addBtn: { backgroundColor: 'rgba(16,185,129,0.13)', borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 12, borderWidth: 1, borderColor: 'rgba(16,185,129,0.3)' },
+  addBtn: { backgroundColor: brandAlpha(0.13), borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 12, borderWidth: 1, borderColor: brandAlpha(0.3) },
   addBtnTxt: { color: c.primary, fontSize: 14, fontWeight: '700' },
   addForm: { backgroundColor: c.card, borderRadius: 14, padding: 16, marginTop: 12, borderWidth: 1, borderColor: c.border },
   addLabel: { color: c.textDim, fontSize: 13, marginBottom: 10 },
   addRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   addInput: { flex: 1, backgroundColor: c.surface, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, color: c.text, fontSize: 15, borderWidth: 1, borderColor: c.border },
   addConfirm: { backgroundColor: c.primary, borderRadius: 10, paddingHorizontal: 20, paddingVertical: 11 },
-  addConfirmTxt: { color: '#04130D', fontWeight: '800' },
+  addConfirmTxt: { color: '#FFFFFF', fontWeight: '800' },
   cancelTxt: { color: c.textDim, textAlign: 'center', marginTop: 12 },
   emptyTxt: { color: c.textDim, fontSize: 14 },
   emptySub: { color: c.textFaint, fontSize: 12, marginTop: 4 },

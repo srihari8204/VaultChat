@@ -31,6 +31,8 @@ export interface ChatSummary {
   peerPhotoURL?:   string | null;
   peerOnline?:     boolean;
   peerLastSeenAt?: string | null;
+  peerLastReadMessageId?:      number | null;
+  peerLastDeliveredMessageId?: number | null;
   // Per-user screenshot policy for this chat. Backend defaults to 'block'.
   screenshotMode?: 'allow' | 'allow_notify' | 'block' | 'block_silent';
   // Per-user Vanish Mode: while ON, new messages I send are flagged for
@@ -78,10 +80,12 @@ export interface ChatMember {
   photoURL?:              string | null;
   online?:                boolean;
   lastSeenAt?:            string | null;
+  status?:                string | null;   // "About" text (WhatsApp)
 }
 
 export interface ChatDetail extends ChatSummary {
   members:              ChatMember[];
+  description?:         string | null;   // group description (WhatsApp)
   // Chat-level disappearing-messages timer. null = off.
   disappearingSeconds?: number | null;
   // Group admin controls.
@@ -220,6 +224,40 @@ export async function decryptFromChat(
     }
     return '🔒 unable to decrypt';
   }
+}
+
+/** Sync check: does this wire string look like an E2EE envelope (vs plaintext)? */
+export function looksEncrypted(s: string | null | undefined): boolean {
+  if (!s || typeof s !== 'string') return false;
+  if (s.startsWith('GSK1:')) return true;                                   // group sender-key
+  if (s[0] === '{') { try { return JSON.parse(s)?.v === 'dr1'; } catch { return false; } } // 1:1 double-ratchet
+  return false;
+}
+
+/**
+ * WhatsApp-style ingest: decrypt each envelope EXACTLY ONCE, reusing plaintext
+ * we already have (knownPlain: id→text), and return messages whose `content`
+ * is plaintext. Failed decrypts keep their envelope so a later open retries.
+ * Decrypts oldest→newest to keep the double-ratchet in order.
+ */
+export async function hydrateMessages(
+  chatId: string,
+  msgs: Message[],
+  knownPlain?: Map<number, string>,
+): Promise<Message[]> {
+  const out = msgs.slice();
+  for (let i = out.length - 1; i >= 0; i--) {   // msgs arrive newest-first → iterate oldest-first
+    const m = out[i];
+    const c = m.content;
+    if (!looksEncrypted(c)) continue;            // already plaintext (cache / pre-E2EE history)
+    const cached = knownPlain?.get(m.id);
+    if (cached != null && !looksEncrypted(cached)) { out[i] = { ...m, content: cached }; continue; }
+    const plain = await decryptFromChat(chatId, (m as any).senderId ?? '', c, m.id);
+    if (plain && !looksEncrypted(plain) && plain !== '🔒 unable to decrypt') {
+      out[i] = { ...m, content: plain };
+    }
+  }
+  return out;
 }
 
 // Cache an own-sent message's plaintext once the server assigns its id, so the
@@ -550,6 +588,7 @@ export interface BookmarkRow {
     chatType:  'direct' | 'group';
     chatName:  string | null;
     senderId:  string;
+    senderName?: string | null;
     type:      Message['type'];
     content:   string | null;
     meta?:     any;
@@ -574,8 +613,10 @@ export async function removeBookmark(id: string): Promise<void> {
 export interface StoryItem {
   id:           string;
   attachmentId: string;
-  mediaType:    'image' | 'video';
+  mediaType:    'image' | 'video' | 'text';
   caption:      string | null;
+  text?:        string | null;     // text status
+  bgColor?:     string | null;     // text status background
   encrypted?:   boolean;
   createdAt:    string;
   expiresAt:    string;
@@ -605,6 +646,20 @@ export async function addStory(
   caption?: string,
 ): Promise<StoryItem> {
   return api('/stories', { method: 'POST', json: { attachmentId, mediaType, caption } });
+}
+
+/** Post a WhatsApp-style text status (no attachment — just text + a bg color). */
+export async function postTextStory(text: string, bgColor: string): Promise<any> {
+  return api('/stories', { method: 'POST', json: { mediaType: 'text', text, bgColor } });
+}
+
+export type StatusPrivacyMode = 'contacts' | 'except' | 'only';
+export async function getStatusPrivacy(): Promise<{ mode: StatusPrivacyMode; userIds: string[] }> {
+  try { return await api<{ mode: StatusPrivacyMode; userIds: string[] }>('/stories/privacy'); }
+  catch { return { mode: 'contacts', userIds: [] }; }
+}
+export async function setStatusPrivacy(mode: StatusPrivacyMode, userIds: string[]): Promise<void> {
+  await api('/stories/privacy', { method: 'PUT', json: { mode, userIds } });
 }
 
 // W7: viewer ids to wrap an encrypted story's content key for (the author's
@@ -786,7 +841,7 @@ export async function exportMyData(): Promise<string> {
 export async function updateChat(
   chatId: string,
   patch: {
-    name?: string; photoURL?: string; disappearingSeconds?: number | null;
+    name?: string; photoURL?: string; description?: string; disappearingSeconds?: number | null;
     slowModeSeconds?: number; sendPolicy?: 'everyone' | 'admins';
     mediaPolicy?: 'everyone' | 'admins'; addMembersPolicy?: 'everyone' | 'admins';
     antiSpamLinks?: boolean; approveMembers?: boolean;
@@ -1011,12 +1066,40 @@ export interface UserSettings {
   lastSeenVisible:     boolean;
   readReceipts:        boolean;
   profilePhotoVisible: boolean;
+  groupAddPolicy?:     'everyone' | 'contacts' | 'nobody';
+  defaultDisappearingSeconds?: number;
 }
 export async function getSettings(): Promise<UserSettings> {
   return api<UserSettings>('/user/settings');
 }
 export async function updateSettings(patch: Partial<UserSettings>): Promise<void> {
   await api('/user/settings', { method: 'PUT', json: patch });
+}
+
+/** Groups both me and `userId` are in (WhatsApp "groups in common"). */
+export async function getCommonGroups(userId: string): Promise<{ id: string; name: string | null; photoURL: string | null }[]> {
+  try {
+    const r = await api<{ groups: { id: string; name: string | null; photoURL: string | null }[] }>(`/chats/common/${encodeURIComponent(userId)}`);
+    return r.groups || [];
+  } catch { return []; }
+}
+
+// ─── Communities (WhatsApp) ─────────────────────────────────────────
+export interface Community { id: string; name: string; description: string | null; photoURL: string | null; groupCount: number; }
+export interface CommunityGroup { id: string; name: string; photoURL: string | null; isAnnouncement: boolean; members: number; }
+export interface CommunityDetail { id: string; name: string; description: string | null; photoURL: string | null; isOwner: boolean; groups: CommunityGroup[]; }
+
+export async function listCommunities(): Promise<Community[]> {
+  try { const r = await api<{ communities: Community[] }>('/communities'); return r.communities || []; } catch { return []; }
+}
+export async function createCommunity(name: string, description?: string): Promise<{ id: string; announcementChatId: string }> {
+  return api('/communities', { method: 'POST', json: { name, description } });
+}
+export async function getCommunity(id: string): Promise<CommunityDetail> {
+  return api(`/communities/${encodeURIComponent(id)}`);
+}
+export async function createCommunityGroup(communityId: string, name: string): Promise<{ id: string }> {
+  return api(`/communities/${encodeURIComponent(communityId)}/groups`, { method: 'POST', json: { name } });
 }
 
 // ─── Blocks (Day 11) ────────────────────────────────────────────────

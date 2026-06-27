@@ -57,7 +57,7 @@ export default function VoiceRecorder({ onSend, onCancel }: Props) {
   return (
     <View style={s.wrap}>
       <TouchableOpacity onPress={cancel} style={s.cancelBtn}>
-        <Text style={s.cancelTxt}>âœ•</Text>
+        <Text style={s.cancelTxt}>✕</Text>
       </TouchableOpacity>
 
       <View style={s.center}>
@@ -74,10 +74,10 @@ export default function VoiceRecorder({ onSend, onCancel }: Props) {
         ? <ActivityIndicator color="#00E5FF" />
         : recording
           ? <TouchableOpacity onPress={stopAndSend} style={[s.micBtn, s.micStop]}>
-              <Text style={s.micIco}>â¬›</Text>
+              <Text style={s.micIco}>⬛</Text>
             </TouchableOpacity>
           : <TouchableOpacity onPress={startRecording} style={s.micBtn}>
-              <Text style={s.micIco}>ðŸŽ¤</Text>
+              <Text style={s.micIco}>🎤</Text>
             </TouchableOpacity>
       }
     </View>

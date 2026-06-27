@@ -5,7 +5,7 @@
 
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ComponentProps } from 'react';
 import { useTheme } from '../../lib/theme';
 import { type Palette } from '../../constants/theme';
 import {
@@ -17,6 +17,7 @@ import {
   Text, TextInput, TouchableOpacity,
   View,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { logoutUser, sendPhoneOTP, verifyPhoneOTP } from '../(constants)/authService';
 import { api, getAccessToken } from '../../lib/api';
 import { attachmentUrl, uploadAttachment } from '../../lib/chatService';
@@ -55,6 +56,7 @@ export default function ProfileScreen() {
   const [name,   setName]   = useState('');
   const [status, setStatus] = useState('');
   const [phone,  setPhone]  = useState('');
+  const [editing, setEditing] = useState<null | 'name' | 'status' | 'phone'>(null);
 
   // Fetch the Bearer header once so RN's <Image> can pull the photo via
   // the auth-gated /uploads endpoint.
@@ -96,13 +98,15 @@ export default function ProfileScreen() {
         },
       });
       setProfile(updated);
-      Alert.alert('Saved', 'Profile updated');
     } catch (e: any) {
       Alert.alert('Save failed', e?.message ?? 'Try again');
     } finally {
       setSaving(false);
     }
   }, [name, status, phone, saving]);
+
+  // Inline per-row save (WhatsApp-style): commit then collapse the editor.
+  const saveField = useCallback(async () => { await onSave(); setEditing(null); }, [onSave]);
 
   // ── Profile photo: pick → upload → PUT /user/profile { photoURL } ──
   const onChangePhoto = useCallback(async () => {
@@ -218,174 +222,144 @@ export default function ProfileScreen() {
   const avatarLetter = (profile?.name?.trim()[0] ?? profile?.email?.[0] ?? '?').toUpperCase();
 
   return (
-    <ScrollView style={S.screen} contentContainerStyle={{ paddingBottom: 80 }}>
+    <ScrollView style={S.screen} contentContainerStyle={{ paddingBottom: 90 }}>
       <View style={S.header}>
         <Text style={S.title}>Profile</Text>
+        <TouchableOpacity onPress={() => router.push('/settings' as any)} hitSlop={8}>
+          <Ionicons name="settings-outline" size={22} color={colors.text} />
+        </TouchableOpacity>
       </View>
 
+      {/* Avatar with camera badge */}
       <View style={S.avatarWrap}>
-        <TouchableOpacity
-          onPress={onChangePhoto}
-          activeOpacity={0.85}
-          disabled={photoBusy}
-        >
+        <TouchableOpacity onPress={onChangePhoto} activeOpacity={0.85} disabled={photoBusy}>
           <View style={S.avatar}>
             {profile?.photoURL && authHeader ? (
-              <Image
-                source={{
-                  uri: attachmentUrl(profile.photoURL),
-                  headers: { Authorization: authHeader },
-                }}
-                style={S.avatarImg}
-              />
+              <Image source={{ uri: attachmentUrl(profile.photoURL), headers: { Authorization: authHeader } }} style={S.avatarImg} />
             ) : (
               <Text style={S.avatarTxt}>{avatarLetter}</Text>
             )}
-            {photoBusy && (
-              <View style={S.avatarBusy}>
-                <ActivityIndicator color="#fff" />
-              </View>
-            )}
-            <View style={S.avatarEditPill}>
-              <Text style={S.avatarEditTxt}>📷</Text>
-            </View>
+            {photoBusy && <View style={S.avatarBusy}><ActivityIndicator color="#fff" /></View>}
           </View>
+          <View style={S.cameraBadge}><Ionicons name="camera" size={18} color="#fff" /></View>
         </TouchableOpacity>
-        {profile?.photoURL ? (
+        <Text style={S.nameBig} numberOfLines={1}>{name || 'Your name'}</Text>
+        <Text style={S.emailDisplay} numberOfLines={1}>{profile?.email}</Text>
+        {!!profile?.photoURL && (
           <TouchableOpacity onPress={onRemovePhoto} disabled={photoBusy} hitSlop={8}>
             <Text style={S.removePhotoTxt}>Remove photo</Text>
           </TouchableOpacity>
-        ) : (
-          <Text style={S.subHint}>Tap the avatar to set a photo</Text>
         )}
-        <Text style={S.emailDisplay}>{profile?.email}</Text>
-        <View style={S.providerPill}>
-          <Text style={S.providerPillTxt}>{profile?.authProvider ?? 'unknown'}</Text>
-        </View>
       </View>
 
-      <View style={S.section}>
-        <Text style={S.label}>DISPLAY NAME</Text>
-        <TextInput
-          style={S.input}
-          value={name}
-          onChangeText={setName}
-          placeholder="Your name"
-          placeholderTextColor={colors.textDim}
-          maxLength={100}
+      {/* WhatsApp-style editable info rows */}
+      <View style={S.card}>
+        <EditRow
+          icon="person-outline" label="Name" value={name} placeholder="Your name"
+          editing={editing === 'name'} onEdit={() => setEditing('name')}
+          onChangeText={setName} onSave={saveField} saving={saving} maxLength={100}
         />
-
-        <Text style={S.label}>STATUS</Text>
-        <TextInput
-          style={S.input}
-          value={status}
-          onChangeText={setStatus}
-          placeholder="e.g. Hey, I'm on VaultChat"
-          placeholderTextColor={colors.textDim}
-          maxLength={200}
+        <View style={S.rowSep} />
+        <EditRow
+          icon="information-circle-outline" label="About" value={status} placeholder="Hey, I'm on VaultChat"
+          editing={editing === 'status'} onEdit={() => setEditing('status')}
+          onChangeText={setStatus} onSave={saveField} saving={saving} maxLength={200} multiline
         />
-
-        <Text style={S.label}>PHONE (for chat discovery)</Text>
-        <TextInput
-          style={S.input}
-          value={phone}
-          onChangeText={setPhone}
-          placeholder="+91 9876543210 or 9876543210"
-          placeholderTextColor={colors.textDim}
-          keyboardType="phone-pad"
-          autoComplete="tel"
-          maxLength={20}
+        <View style={S.rowSep} />
+        <EditRow
+          icon="call-outline" label="Phone" value={phone} placeholder="Add phone number"
+          editing={editing === 'phone'} onEdit={() => setEditing('phone')}
+          onChangeText={setPhone} onSave={saveField} saving={saving} maxLength={20} keyboardType="phone-pad"
+          verified={verifyStep === 'done' || !!profile?.phone}
         />
-        <Text style={S.subHint}>
-          Others can start a direct chat with you using this number.
-          Leave blank to stay email-only.
-        </Text>
+      </View>
+      <Text style={S.cardHint}>Your phone lets others start a direct chat with you. Leave blank to stay email-only.</Text>
 
-        {/* Phone verification (Day 17) */}
-        {verifyStep === 'idle' && (
-          <TouchableOpacity
-            onPress={onSendPhoneOtp}
-            disabled={verifying || !phone.trim()}
-            style={[S.verifyLink, (verifying || !phone.trim()) && { opacity: 0.5 }]}
-            activeOpacity={0.7}
-          >
-            <Text style={S.verifyLinkTxt}>
-              {verifying ? 'Sending…' : '📱 Verify this number via SMS'}
-            </Text>
-          </TouchableOpacity>
-        )}
-        {verifyStep === 'code' && (
-          <View style={S.verifyBox}>
-            <Text style={S.subHint}>Enter the 6-digit code we sent to {phone}.</Text>
-            {verifyDevHint && (
-              <Text style={[S.subHint, { color: colors.primary }]}>
-                (Dev: SMS provider not configured — check the server logs for the code.)
-              </Text>
-            )}
-            <TextInput
-              style={[S.input, { letterSpacing: 6, textAlign: 'center', fontSize: 20 }]}
-              value={phoneCode}
-              onChangeText={(v) => setPhoneCode(v.replace(/\D/g, '').slice(0, 6))}
-              placeholder="123456"
-              placeholderTextColor={colors.textDim}
-              keyboardType="number-pad"
-              maxLength={6}
-            />
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              <TouchableOpacity
-                style={[S.btn, { flex: 1 }, verifying && S.btnOff]}
-                onPress={onVerifyPhoneOtp}
-                disabled={verifying}
-                activeOpacity={0.85}
-              >
-                {verifying ? <ActivityIndicator color="#fff" /> : <Text style={S.btnTxt}>Verify</Text>}
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => { setVerifyStep('idle'); setPhoneCode(''); }}
-                style={[S.btn, { flex: 0.5, backgroundColor: '#1F2937' }]}
-                disabled={verifying}
-                activeOpacity={0.85}
-              >
-                <Text style={S.btnTxt}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
-        {verifyStep === 'done' && (
-          <Text style={[S.subHint, { color: '#22C55E' }]}>✓ Phone verified</Text>
-        )}
-
-        <TouchableOpacity
-          style={[S.btn, saving && S.btnOff]}
-          onPress={onSave}
-          disabled={saving}
-          activeOpacity={0.85}
-        >
-          {saving ? <ActivityIndicator color="#fff" /> : <Text style={S.btnTxt}>Save changes</Text>}
+      {/* Phone verification (kept) */}
+      {!!phone.trim() && verifyStep !== 'done' && (verifyStep === 'idle' ? (
+        <TouchableOpacity onPress={onSendPhoneOtp} disabled={verifying || !phone.trim()} style={[S.verifyRow, (verifying || !phone.trim()) && { opacity: 0.5 }]} activeOpacity={0.7}>
+          <Ionicons name="shield-checkmark-outline" size={18} color={colors.primary} />
+          <Text style={S.verifyLinkTxt}>{verifying ? 'Sending…' : 'Verify this number via SMS'}</Text>
         </TouchableOpacity>
-      </View>
+      ) : (
+        <View style={S.verifyBox}>
+          <Text style={S.subHint}>Enter the 6-digit code we sent to {phone}.</Text>
+          {verifyDevHint && <Text style={[S.subHint, { color: colors.primary }]}>(Dev: SMS provider not configured — check the server logs for the code.)</Text>}
+          <TextInput
+            style={[S.input, { letterSpacing: 6, textAlign: 'center', fontSize: 20 }]}
+            value={phoneCode} onChangeText={(v) => setPhoneCode(v.replace(/\D/g, '').slice(0, 6))}
+            placeholder="123456" placeholderTextColor={colors.textDim} keyboardType="number-pad" maxLength={6}
+          />
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <TouchableOpacity style={[S.btn, { flex: 1 }, verifying && S.btnOff]} onPress={onVerifyPhoneOtp} disabled={verifying} activeOpacity={0.85}>
+              {verifying ? <ActivityIndicator color="#fff" /> : <Text style={S.btnTxt}>Verify</Text>}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => { setVerifyStep('idle'); setPhoneCode(''); }} style={[S.btn, S.btnGhost, { flex: 0.5 }]} disabled={verifying} activeOpacity={0.85}>
+              <Text style={[S.btnTxt, { color: colors.text }]}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ))}
 
-      <View style={S.section}>
-        <Text style={S.label}>ACCOUNT</Text>
-        <InfoRow k="User ID" v={profile?.id ?? '—'} small />
-        <InfoRow k="Created"  v={profile?.createdAt ? new Date(profile.createdAt).toLocaleString() : '—'} small />
+      {/* Account (secondary) */}
+      <Text style={S.groupLabel}>ACCOUNT</Text>
+      <View style={S.card}>
         <InfoRow k="Email verified" v={profile?.emailVerifiedAt ? '✓ Yes' : '—'} />
         <InfoRow k="PIN set" v={profile?.hasPin ? '✓ Yes' : 'No'} />
         <InfoRow k="Faces enrolled" v={String(profile?.faceCount ?? 0)} />
+        <InfoRow k="User ID" v={profile?.id ?? '—'} small />
+        <InfoRow k="Created" v={profile?.createdAt ? new Date(profile.createdAt).toLocaleString() : '—'} small />
       </View>
 
-      <TouchableOpacity
-        style={S.settingsBtn}
-        onPress={() => router.push('/settings' as any)}
-        activeOpacity={0.85}
-      >
-        <Text style={S.settingsBtnTxt}>Privacy & settings →</Text>
+      {/* Actions */}
+      <TouchableOpacity style={S.actionRow} onPress={() => router.push('/settings' as any)} activeOpacity={0.85}>
+        <Ionicons name="settings-outline" size={20} color={colors.text} />
+        <Text style={S.actionTxt}>Privacy & settings</Text>
+        <Ionicons name="chevron-forward" size={18} color={colors.textDim} style={{ marginLeft: 'auto' }} />
       </TouchableOpacity>
-
-      <TouchableOpacity style={S.signOutBtn} onPress={onSignOut} activeOpacity={0.85}>
-        <Text style={S.signOutTxt}>Sign out</Text>
+      <TouchableOpacity style={[S.actionRow, { borderColor: colors.danger }]} onPress={onSignOut} activeOpacity={0.85}>
+        <Ionicons name="log-out-outline" size={20} color={colors.danger} />
+        <Text style={[S.actionTxt, { color: colors.danger }]}>Sign out</Text>
       </TouchableOpacity>
     </ScrollView>
+  );
+}
+
+// A WhatsApp-style info row: leading icon, label + value (or inline editor),
+// trailing pencil → checkmark to save.
+function EditRow({ icon, label, value, placeholder, editing, onEdit, onChangeText, onSave, saving, multiline, keyboardType, maxLength, verified }: {
+  icon: ComponentProps<typeof Ionicons>['name']; label: string; value: string; placeholder: string;
+  editing: boolean; onEdit: () => void; onChangeText: (t: string) => void; onSave: () => void; saving?: boolean;
+  multiline?: boolean; keyboardType?: any; maxLength?: number; verified?: boolean;
+}) {
+  const { colors } = useTheme();
+  const S = useS();
+  return (
+    <View style={S.editRow}>
+      <Ionicons name={icon} size={22} color={colors.primary} style={S.editIcon} />
+      <View style={{ flex: 1 }}>
+        <Text style={S.editLabel}>{label}</Text>
+        {editing ? (
+          <TextInput
+            style={S.editInput} value={value} onChangeText={onChangeText} placeholder={placeholder}
+            placeholderTextColor={colors.textDim} multiline={multiline} keyboardType={keyboardType}
+            maxLength={maxLength} autoFocus
+          />
+        ) : (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={[S.editValue, !value && { color: colors.textDim, fontWeight: '400' }]} numberOfLines={multiline ? 2 : 1}>
+              {value || placeholder}
+            </Text>
+            {verified && <Ionicons name="checkmark-circle" size={15} color={colors.success} />}
+          </View>
+        )}
+      </View>
+      <TouchableOpacity onPress={editing ? onSave : onEdit} hitSlop={10} style={S.editPencil} disabled={saving}>
+        {editing && saving ? <ActivityIndicator size="small" color={colors.primary} /> : (
+          <Ionicons name={editing ? 'checkmark' : 'pencil'} size={20} color={editing ? colors.primary : colors.textDim} />
+        )}
+      </TouchableOpacity>
+    </View>
   );
 }
 
@@ -402,40 +376,46 @@ function InfoRow({ k, v, small }: { k: string; v: string; small?: boolean }) {
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen:       { flex: 1, backgroundColor: c.bg },
   center:       { justifyContent: 'center', alignItems: 'center' },
-  header:       { paddingHorizontal: 20, paddingTop: 56, paddingBottom: 12 },
-  title:        { color: c.text, fontSize: 28, fontWeight: '800' },
+  header:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 56, paddingBottom: 8 },
+  title:        { color: c.text, fontSize: 26, fontWeight: '800' },
 
-  avatarWrap:   { alignItems: 'center', paddingVertical: 24, gap: 8 },
-  avatar:       { width: 96, height: 96, borderRadius: 48, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  avatarWrap:   { alignItems: 'center', paddingTop: 16, paddingBottom: 20 },
+  avatar:       { width: 120, height: 120, borderRadius: 60, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   avatarImg:    { width: '100%', height: '100%' },
-  avatarTxt:    { color: '#fff', fontSize: 38, fontWeight: '800' },
+  avatarTxt:    { color: '#fff', fontSize: 46, fontWeight: '800' },
   avatarBusy:   { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.4)' },
-  avatarEditPill: { position: 'absolute', right: 0, bottom: 0, backgroundColor: c.surfaceSolid, borderRadius: 14, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 2, borderColor: c.bg },
-  avatarEditTxt:  { fontSize: 14 },
-  removePhotoTxt: { color: c.danger, fontSize: 12, fontWeight: '600', marginTop: 4 },
-  emailDisplay: { color: c.text, fontSize: 15, fontWeight: '600', marginTop: 8 },
-  providerPill: { backgroundColor: c.card, borderColor: c.border, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, marginTop: 4 },
-  providerPillTxt: { color: c.textDim, fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1 },
+  cameraBadge:  { position: 'absolute', right: 2, bottom: 2, width: 36, height: 36, borderRadius: 18, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: c.bg },
+  nameBig:      { color: c.text, fontSize: 22, fontWeight: '800', marginTop: 14 },
+  emailDisplay: { color: c.textDim, fontSize: 13, marginTop: 2 },
+  removePhotoTxt: { color: c.danger, fontSize: 12, fontWeight: '600', marginTop: 8 },
 
-  section:      { paddingHorizontal: 20, marginTop: 16, gap: 8 },
-  label:        { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginTop: 8 },
-  input:        { color: c.text, backgroundColor: c.card, borderColor: c.border, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
-  subHint:      { color: c.textDim, fontSize: 12, lineHeight: 16, marginTop: -2 },
-  btn:          { backgroundColor: c.primary, paddingVertical: 14, borderRadius: 24, alignItems: 'center', marginTop: 12 },
-  btnOff:       { backgroundColor: '#374151' },
-  btnTxt:       { color: '#fff', fontWeight: '700', fontSize: 14 },
+  card:         { backgroundColor: c.card, borderRadius: 16, marginHorizontal: 16, marginTop: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, overflow: 'hidden' },
+  cardHint:     { color: c.textDim, fontSize: 12, lineHeight: 16, marginHorizontal: 22, marginTop: 8 },
 
-  infoRow:      { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  editRow:      { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, gap: 14 },
+  editIcon:     { width: 24, textAlign: 'center' },
+  editLabel:    { color: c.textDim, fontSize: 12, marginBottom: 2 },
+  editValue:    { color: c.text, fontSize: 15.5, fontWeight: '600' },
+  editInput:    { color: c.text, fontSize: 15.5, fontWeight: '600', padding: 0, borderBottomWidth: 1.5, borderBottomColor: c.primary, paddingBottom: 2 },
+  editPencil:   { padding: 4, minWidth: 26, alignItems: 'center' },
+  rowSep:       { height: StyleSheet.hairlineWidth, backgroundColor: c.border, marginLeft: 54 },
+
+  groupLabel:   { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginHorizontal: 22, marginTop: 24, marginBottom: 2 },
+  infoRow:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   infoK:        { color: c.textDim, fontSize: 13 },
   infoV:        { color: c.text, fontSize: 13, fontWeight: '600', maxWidth: '60%' },
   infoVSmall:   { fontSize: 11, fontWeight: '500' },
 
-  verifyLink:     { paddingVertical: 8 },
-  verifyLinkTxt:  { color: c.primary, fontWeight: '600', fontSize: 13 },
-  verifyBox:      { marginTop: 8, gap: 8 },
+  input:        { color: c.text, backgroundColor: c.surface, borderColor: c.border, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
+  subHint:      { color: c.textDim, fontSize: 12, lineHeight: 16 },
+  verifyRow:    { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 22, marginTop: 12, paddingVertical: 6 },
+  verifyLinkTxt:{ color: c.primary, fontWeight: '700', fontSize: 13 },
+  verifyBox:    { marginHorizontal: 16, marginTop: 10, gap: 8, backgroundColor: c.card, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, padding: 14 },
+  btn:          { backgroundColor: c.primary, paddingVertical: 14, borderRadius: 16, alignItems: 'center' },
+  btnGhost:     { backgroundColor: c.surface },
+  btnOff:       { opacity: 0.5 },
+  btnTxt:       { color: '#fff', fontWeight: '800', fontSize: 14 },
 
-  settingsBtn:    { marginHorizontal: 20, marginTop: 24, padding: 14, borderRadius: 24, borderWidth: 1, borderColor: c.border, backgroundColor: c.card, alignItems: 'center' },
-  settingsBtnTxt: { color: c.text, fontWeight: '700', fontSize: 14 },
-  signOutBtn:   { marginHorizontal: 20, marginTop: 12, padding: 14, borderRadius: 24, borderWidth: 1, borderColor: c.danger, alignItems: 'center' },
-  signOutTxt:   { color: c.danger, fontWeight: '700', fontSize: 14 },
+  actionRow:    { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 16, marginTop: 12, paddingHorizontal: 16, paddingVertical: 15, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, backgroundColor: c.card },
+  actionTxt:    { color: c.text, fontWeight: '700', fontSize: 15 },
 });

@@ -1,6 +1,7 @@
 // app/slideshow.tsx
 // Slideshow viewer for multiple images — swipe through with transitions
 
+import { Ionicons } from '@expo/vector-icons';
 import * as MediaLibrary from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
@@ -124,15 +125,15 @@ export default function SlideshowScreen() {
       {showControls && (
         <View style={st.topBar}>
           <TouchableOpacity onPress={() => { clearInterval(autoplayTimer.current); router.back(); }} style={st.topBtn}>
-            <Text style={{ color: colors.text, fontSize: 20 }}>✕</Text>
+            <Ionicons name="close" size={22} color={colors.text} />
           </TouchableOpacity>
           <Text style={st.counter}>{currentIndex + 1} / {imageList.length}</Text>
           <View style={{ flexDirection: 'row', gap: 12 }}>
             <TouchableOpacity onPress={shareImage} style={st.topBtn}>
-              <Text style={{ fontSize: 18 }}>📤</Text>
+              <Ionicons name="share-outline" size={20} color={colors.text} />
             </TouchableOpacity>
             <TouchableOpacity onPress={saveToGallery} style={st.topBtn}>
-              <Text style={{ fontSize: 18 }}>💾</Text>
+              <Ionicons name="download-outline" size={20} color={colors.text} />
             </TouchableOpacity>
           </View>
         </View>
@@ -165,13 +166,17 @@ export default function SlideshowScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity onPress={toggleAutoplay} style={[st.autoBtn, autoplay && st.autoBtnActive]}>
-              <Text style={{ color: autoplay ? '#000' : '#4A9FFF', fontWeight: '800', fontSize: 13 }}>
-                {autoplay ? '⏸ Stop' : '▶ Slideshow'}
-              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                <Ionicons name={autoplay ? 'pause' : 'play'} size={13} color={autoplay ? '#000' : '#4A9FFF'} />
+                <Text style={{ color: autoplay ? '#000' : '#4A9FFF', fontWeight: '800', fontSize: 13 }}>{autoplay ? 'Stop' : 'Slideshow'}</Text>
+              </View>
             </TouchableOpacity>
 
             <TouchableOpacity onPress={() => goTo(currentIndex + 1)} disabled={currentIndex === imageList.length - 1} style={st.navBtn}>
-              <Text style={[st.navTxt, currentIndex === imageList.length - 1 && { opacity: 0.3 }]}>Next ▶</Text>
+              <View style={[{ flexDirection: 'row', alignItems: 'center', gap: 3 }, currentIndex === imageList.length - 1 && { opacity: 0.3 }]}>
+                <Text style={st.navTxt}>Next</Text>
+                <Ionicons name="chevron-forward" size={15} color={colors.text} />
+              </View>
             </TouchableOpacity>
           </View>
         </View>

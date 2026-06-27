@@ -9,6 +9,7 @@
 //   data: { chatId, messageId } so the existing root tap handler routes
 //   back into the chat when the user taps the notification.
 
+import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Notifications from 'expo-notifications';
@@ -155,7 +156,7 @@ function Composer({
       <StatusBar barStyle="light-content" />
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
-          <Text style={S.backTxt}>←</Text>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title}>Remind me about</Text>
       </View>
@@ -238,7 +239,7 @@ function RemindersList({ router }: { router: any }) {
       <StatusBar barStyle="light-content" />
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
-          <Text style={S.backTxt}>←</Text>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title}>Reminders</Text>
       </View>

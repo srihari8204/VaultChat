@@ -107,6 +107,87 @@ export async function getCachedMessages(chatId: string, limit = 50): Promise<Mes
   return rows.map(rowToMessage);
 }
 
+/**
+ * The newest cached message for each chat — used by the chat list to render a
+ * real last-message preview (WhatsApp-style) from local plaintext, since the
+ * server only holds ciphertext. One query, decrypted at-rest on the way out.
+ */
+export async function getLastMessagePerChat(): Promise<Map<string, { content: string | null; type: string | null; senderId: string | null; id: number }>> {
+  const db = await getLocalDb();
+  const rows = await db.getAllAsync(
+    `SELECT m.chat_id, m.id, m.content, m.type, m.sender_id
+       FROM messages m
+       JOIN (SELECT chat_id, MAX(id) AS mx FROM messages WHERE deleted_at IS NULL GROUP BY chat_id) t
+         ON t.chat_id = m.chat_id AND t.mx = m.id`,
+    [],
+  );
+  const out = new Map<string, { content: string | null; type: string | null; senderId: string | null; id: number }>();
+  for (const r of rows as any[]) {
+    out.set(r.chat_id, { content: decField(r.content), type: r.type ?? null, senderId: r.sender_id ?? null, id: r.id });
+  }
+  return out;
+}
+
+/**
+ * Global message search across ALL chats, on-device (WhatsApp-style, zero-
+ * knowledge). Decrypts the at-rest cache in JS and substring-matches plaintext.
+ */
+export async function searchAllMessages(
+  query: string, limit = 40,
+): Promise<{ chatId: string; id: number; content: string; senderId: string | null; createdAt: string }[]> {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const db = await getLocalDb();
+  const rows = await db.getAllAsync(
+    `SELECT chat_id, id, content, sender_id, created_at FROM messages
+      WHERE content IS NOT NULL AND deleted_at IS NULL ORDER BY id DESC LIMIT 5000`,
+    [],
+  );
+  const out: { chatId: string; id: number; content: string; senderId: string | null; createdAt: string }[] = [];
+  for (const r of rows as any[]) {
+    const text = decField(r.content);
+    // Skip un-decrypted envelopes ({..."v":"dr1"...} / GSK1:) and match plaintext.
+    if (!text || text[0] === '{' || text.startsWith('GSK1:')) continue;
+    if (text.toLowerCase().includes(q)) {
+      out.push({ chatId: r.chat_id, id: r.id, content: text, senderId: r.sender_id, createdAt: r.created_at });
+      if (out.length >= limit) break;
+    }
+  }
+  return out;
+}
+
+/**
+ * Map every cached attachment id → the chat it belongs to. Used by the storage
+ * manager to attribute on-disk media files (named by attachment id) to chats.
+ */
+export async function getAttachmentChatMap(): Promise<Record<string, string>> {
+  const db = await getLocalDb();
+  const rows = await db.getAllAsync(`SELECT chat_id, meta FROM messages WHERE meta IS NOT NULL`, []);
+  const out: Record<string, string> = {};
+  for (const r of rows as any[]) {
+    try {
+      const meta = JSON.parse(decField(r.meta) || '');
+      const aid = meta?.attachmentId;
+      if (aid) out[String(aid)] = r.chat_id;
+    } catch {}
+  }
+  return out;
+}
+
+/** Fetch specific cached messages by id (used to resolve reply quotes for
+ *  messages that aren't in the currently-rendered page). */
+export async function getCachedMessagesByIds(chatId: string, ids: number[]): Promise<Message[]> {
+  const want = ids.filter(n => typeof n === 'number' && n > 0);
+  if (!want.length) return [];
+  const db = await getLocalDb();
+  const ph = want.map(() => '?').join(',');
+  const rows = await db.getAllAsync(
+    `SELECT * FROM messages WHERE chat_id = ? AND id IN (${ph})`,
+    [chatId, ...want],
+  );
+  return rows.map(rowToMessage);
+}
+
 /** Highest message id we've already synced for this chat (the delta cursor). */
 export async function getSyncCursor(chatId: string): Promise<number> {
   const db = await getLocalDb();

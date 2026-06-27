@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 // app/vault-features.tsx
 // VaultChat premium security features
 //
@@ -10,6 +11,7 @@
 // 5. Email Share — share encrypted chat transcript via email
 // 6. Chat Backup — export encrypted backup to email
 
+import { BRAND_ACCENT } from '../constants/theme';
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
@@ -268,7 +270,7 @@ export default function VaultFeaturesScreen() {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.back}>‹</Text>
+          <Ionicons name="arrow-back" size={26} color={BRAND_ACCENT} />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>Vault Features</Text>
@@ -361,7 +363,7 @@ export default function VaultFeaturesScreen() {
               <Text style={styles.pickerValueText}>
                 {DISAPPEAR_OPTIONS.find(o => o.value === settings.disappearTimer)?.label}
               </Text>
-              <Text style={styles.pickerChevron}>›</Text>
+              <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
             </View>
           </TouchableOpacity>
 
@@ -388,7 +390,7 @@ export default function VaultFeaturesScreen() {
                 Set a separate PIN that opens a believable decoy vault — real and cryptographically isolated from your data.
               </Text>
             </View>
-            <Text style={{ fontSize: 22, color: '#9CA3AF', marginLeft: 'auto' }}>›</Text>
+            <Ionicons name="chevron-forward" size={18} color="#9CA3AF" style={{ marginLeft: 'auto' }} />
           </View>
         </TouchableOpacity>
 
@@ -413,7 +415,7 @@ export default function VaultFeaturesScreen() {
               <Text style={styles.pickerValueText}>
                 {LOCK_OPTIONS.find(o => o.value === settings.lockTimer)?.label}
               </Text>
-              <Text style={styles.pickerChevron}>›</Text>
+              <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
             </View>
           </TouchableOpacity>
         </View>
@@ -459,7 +461,7 @@ export default function VaultFeaturesScreen() {
                 onValueChange={v => saveSetting(key as keyof VaultSettings, v)}
                 trackColor={{ false: '#E5E7EB', true: '#D1FAE5' }}
                 thumbColor={
-                  settings[key as keyof VaultSettings] ? '#10B981' : '#6B7280'
+                  settings[key as keyof VaultSettings] ? BRAND_ACCENT : '#6B7280'
                 }
               />
             </View>
@@ -483,7 +485,7 @@ export default function VaultFeaturesScreen() {
               <Text style={styles.exportTitle}>Email Encrypted Transcript</Text>
               <Text style={styles.exportDesc}>Share a chat history via email</Text>
             </View>
-            <Text style={styles.exportChevron}>›</Text>
+            <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -495,7 +497,7 @@ export default function VaultFeaturesScreen() {
               <Text style={styles.exportTitle}>Vault Backup</Text>
               <Text style={styles.exportDesc}>Backup vault files to email</Text>
             </View>
-            <Text style={styles.exportChevron}>›</Text>
+            <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
           </TouchableOpacity>
         </View>
 
@@ -536,7 +538,7 @@ export default function VaultFeaturesScreen() {
                   {opt.label}
                 </Text>
                 {settings.disappearTimer === opt.value && (
-                  <Text style={modalStyles.checkmark}>✓</Text>
+                  <Ionicons name="checkmark" size={16} color={BRAND_ACCENT} />
                 )}
               </TouchableOpacity>
             ))}
@@ -578,7 +580,7 @@ export default function VaultFeaturesScreen() {
                   {opt.label}
                 </Text>
                 {settings.lockTimer === opt.value && (
-                  <Text style={modalStyles.checkmark}>✓</Text>
+                  <Ionicons name="checkmark" size={16} color={BRAND_ACCENT} />
                 )}
               </TouchableOpacity>
             ))}
@@ -667,10 +669,10 @@ const styles = StyleSheet.create({
     paddingTop: 48, paddingBottom: 12, paddingHorizontal: 16,
     borderBottomWidth: 0.5, borderBottomColor: '#E5E7EB', gap: 12,
   },
-  back:          { fontSize: 28, color: '#10B981', fontWeight: 'bold' },
+  back:          { fontSize: 28, color: BRAND_ACCENT, fontWeight: 'bold' },
   headerCenter:  { flex: 1 },
   headerTitle:   { fontSize: 18, fontWeight: 'bold', color: '#000000' },
-  headerSub:     { fontSize: 9, color: '#10B981', marginTop: 1, fontWeight: 'bold' },
+  headerSub:     { fontSize: 9, color: BRAND_ACCENT, marginTop: 1, fontWeight: 'bold' },
   headerBadge:   { fontSize: 22 },
 
   scroll:        { flex: 1 },
@@ -696,7 +698,7 @@ const styles = StyleSheet.create({
     padding: 14, alignItems: 'center', gap: 6,
   },
   codeValue: {
-    fontSize: 28, fontWeight: 'bold', color: '#10B981',
+    fontSize: 28, fontWeight: 'bold', color: BRAND_ACCENT,
     letterSpacing: 3, fontFamily: 'monospace',
   },
   codeExpiry:   { fontSize: 11, color: '#6B7280', marginBottom: 4 },
@@ -706,13 +708,13 @@ const styles = StyleSheet.create({
     borderWidth: 0.5, borderColor: '#E5E7EB',
     paddingHorizontal: 12, paddingVertical: 7,
   },
-  codeBtnCopied:    { backgroundColor: '#D1FAE5', borderColor: '#10B981' },
+  codeBtnCopied:    { backgroundColor: '#D1FAE5', borderColor: BRAND_ACCENT },
   codeBtnRevoke:    { borderColor: '#FF4D6D44' },
   codeBtnText:      { fontSize: 12, color: '#000000' },
   codeBtnTextRevoke:{ color: '#FF4D6D' },
 
   actionBtn: {
-    backgroundColor: '#10B981', borderRadius: 10,
+    backgroundColor: BRAND_ACCENT, borderRadius: 10,
     paddingVertical: 12, alignItems: 'center',
   },
   actionBtnDim:   { backgroundColor: '#D1FAE5' },
@@ -727,16 +729,16 @@ const styles = StyleSheet.create({
   },
   pickerLabel:      { fontSize: 14, color: '#000000' },
   pickerValue:      { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  pickerValueText:  { fontSize: 14, color: '#10B981', fontWeight: 'bold' },
+  pickerValueText:  { fontSize: 14, color: BRAND_ACCENT, fontWeight: 'bold' },
   pickerChevron:    { fontSize: 18, color: '#6B7280' },
 
   // Info banner
   infoBanner: {
     backgroundColor: '#D1FAE520', borderRadius: 8,
-    borderWidth: 0.5, borderColor: '#10B98133',
+    borderWidth: 0.5, borderColor: BRAND_ACCENT + '33',
     paddingHorizontal: 12, paddingVertical: 7, marginTop: 10,
   },
-  infoBannerText: { fontSize: 12, color: '#10B981', lineHeight: 17 },
+  infoBannerText: { fontSize: 12, color: BRAND_ACCENT, lineHeight: 17 },
 
   // Toggle section
   toggleSectionLabel: {
@@ -791,10 +793,10 @@ const modalStyles = StyleSheet.create({
     marginBottom: 6, backgroundColor: '#F3F4F6',
     borderWidth: 0.5, borderColor: '#E5E7EB',
   },
-  optionActive:     { backgroundColor: '#D1FAE5', borderColor: '#10B981' },
+  optionActive:     { backgroundColor: '#D1FAE5', borderColor: BRAND_ACCENT },
   optionText:       { fontSize: 15, color: '#000000' },
-  optionTextActive: { color: '#10B981', fontWeight: 'bold' },
-  checkmark:        { fontSize: 16, color: '#10B981', fontWeight: 'bold' },
+  optionTextActive: { color: BRAND_ACCENT, fontWeight: 'bold' },
+  checkmark:        { fontSize: 16, color: BRAND_ACCENT, fontWeight: 'bold' },
   inputLabel:       { fontSize: 11, color: '#6B7280', marginBottom: 6, marginTop: 4 },
   pinInput: {
     backgroundColor: '#F3F4F6', borderRadius: 10,
@@ -811,7 +813,7 @@ const modalStyles = StyleSheet.create({
   },
   cancelText:   { color: '#6B7280', fontWeight: 'bold' },
   confirmBtn: {
-    flex: 1, backgroundColor: '#10B981',
+    flex: 1, backgroundColor: BRAND_ACCENT,
     borderRadius: 10, paddingVertical: 13, alignItems: 'center',
   },
   confirmBtnDim:  { backgroundColor: '#D1FAE5' },

@@ -2,6 +2,7 @@
 // Pixel-perfect clone of real chat.tsx but with fake messages
 // Even allows "typing" fake messages that disappear on reload
 
+import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useRef, useEffect , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList,
@@ -67,8 +68,8 @@ export default function DecoyChatScreen() {
         headerTintColor: '#1F2937',
         headerRight: () => (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, marginRight: 12 }}>
-            <TouchableOpacity><Text style={{ color: '#4A9FFF', fontSize: 20 }}>{"\u260E\uFE0F"}</Text></TouchableOpacity>
-            <TouchableOpacity><Text style={{ color: '#4A9FFF', fontSize: 20 }}>{"\uD83D\uDCF9"}</Text></TouchableOpacity>
+            <TouchableOpacity><Ionicons name="call" size={20} color="#4A9FFF" /></TouchableOpacity>
+            <TouchableOpacity><Ionicons name="videocam" size={20} color="#4A9FFF" /></TouchableOpacity>
           </View>
         ),
       }} />
@@ -82,7 +83,7 @@ export default function DecoyChatScreen() {
           onContentSizeChange={() => flatRef.current?.scrollToEnd({ animated: false })}
         />
         <View style={s.bar}>
-          <TouchableOpacity style={s.attachBtn}><Text style={{ fontSize: 22 }}>{"\u2795"}</Text></TouchableOpacity>
+          <TouchableOpacity style={s.attachBtn}><Ionicons name="add" size={22} color={colors.text} /></TouchableOpacity>
           <TextInput
             style={s.input}
             value={input}
@@ -92,7 +93,7 @@ export default function DecoyChatScreen() {
             multiline
           />
           <TouchableOpacity style={[s.sendBtn, !input.trim() && s.sendOff]} onPress={send} disabled={!input.trim()}>
-            <Text style={s.sendIco}>{"\u2191"}</Text>
+            <Ionicons name="arrow-up" size={18} color="#000" />
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>

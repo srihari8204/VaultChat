@@ -1,6 +1,8 @@
 // app/mini-apps.tsx
 // Mini Apps Platform — built-in mini apps with working Calculator and Todo List
 
+import { BRAND_ACCENT } from '../constants/theme';
+import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
@@ -18,8 +20,8 @@ import {
 // ── Featured mini apps ───────────────────────────────────────────
 const MINI_APPS = [
   { id: 'calculator', icon: '🧮', name: 'Calculator',      gradient: ['#4A9FFF', '#1D4ED8'] as [string, string] },
-  { id: 'todo',       icon: '✅', name: 'Todo List',        gradient: ['#10B981', '#059669'] as [string, string] },
-  { id: 'pomodoro',   icon: '🍅', name: 'Pomodoro Timer',   gradient: ['#F97316', '#DC2626'] as [string, string] },
+  { id: 'todo',       icon: '✅', name: 'Todo List',        gradient: [BRAND_ACCENT, '#059669'] as [string, string] },
+  { id: 'pomodoro',   icon: '🍅', name: 'Pomodoro Timer',   gradient: [BRAND_ACCENT, '#DC2626'] as [string, string] },
   { id: 'expense',    icon: '💰', name: 'Expense Tracker',  gradient: ['#7C3AED', '#EC4899'] as [string, string] },
   { id: 'notes',      icon: '📝', name: 'Notes',            gradient: ['#F59E0B', '#D97706'] as [string, string] },
   { id: 'qr',         icon: '📱', name: 'QR Generator',     gradient: ['#06B6D4', '#0891B2'] as [string, string] },
@@ -214,7 +216,7 @@ export default function MiniAppsScreen() {
             returnKeyType="done"
           />
           <TouchableOpacity style={styles.todoAddBtn} onPress={addTodo}>
-            <Text style={styles.todoAddBtnText}>+</Text>
+            <Ionicons name="add" size={24} color="#000000" />
           </TouchableOpacity>
         </View>
         <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
@@ -224,13 +226,13 @@ export default function MiniAppsScreen() {
                 style={[styles.todoCheck, item.done && styles.todoCheckDone]}
                 onPress={() => toggleTodo(item.id)}
               >
-                {item.done && <Text style={styles.todoCheckMark}>✓</Text>}
+                {item.done && <Ionicons name="checkmark" size={14} color="#000000" />}
               </TouchableOpacity>
               <Text style={[styles.todoText, item.done && styles.todoTextDone]}>
                 {item.text}
               </Text>
               <TouchableOpacity onPress={() => deleteTodo(item.id)} style={styles.todoDelBtn}>
-                <Text style={styles.todoDelText}>✕</Text>
+                <Ionicons name="close" size={14} color="#DC2626" />
               </TouchableOpacity>
             </View>
           ))}
@@ -275,7 +277,7 @@ export default function MiniAppsScreen() {
         {/* ── Header ────────────────────────────────── */}
         <View style={styles.headerRow}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Text style={styles.backArrow}>←</Text>
+            <Ionicons name="arrow-back" size={20} color="#fff" />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
             <Text style={styles.headerTitle}>🔲 Mini Apps</Text>

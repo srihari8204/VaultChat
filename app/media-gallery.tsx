@@ -187,7 +187,7 @@ export default function MediaGalleryScreen() {
         {TABS.map(t => (
           <TouchableOpacity key={t.id} style={[s.tab, tab === t.id && s.tabActive]} onPress={() => setTab(t.id)}>
             <Text style={[s.tabTxt, tab === t.id && s.tabTxtActive]}>{t.label}</Text>
-            <Text style={[s.tabCount, tab === t.id && { color: '#04130D' }]}>{t.count}</Text>
+            <Text style={[s.tabCount, tab === t.id && { color: '#FFFFFF' }]}>{t.count}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -239,7 +239,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   tab: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: c.surface, borderWidth: 1, borderColor: c.border },
   tabActive: { backgroundColor: c.primary, borderColor: c.primary },
   tabTxt: { color: c.textDim, fontSize: 12, fontWeight: '700' },
-  tabTxtActive: { color: '#04130D' },
+  tabTxtActive: { color: '#FFFFFF' },
   tabCount: { color: c.textDim, fontSize: 10, marginTop: 2 },
   tile: { width: TILE, height: TILE, margin: 4, borderRadius: 8, overflow: 'hidden', backgroundColor: c.surfaceSolid },
   tileImg: { width: '100%', height: '100%' },

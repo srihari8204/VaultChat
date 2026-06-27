@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { listBookmarks, removeBookmark, type BookmarkRow } from '../lib/chatService';
+import { getCurrentUserAsync } from './(constants)/authService';
 
 function useS() {
   const { colors } = useTheme();
@@ -28,6 +29,9 @@ export default function StarredScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [meId, setMeId] = useState<string>('');
+
+  React.useEffect(() => { getCurrentUserAsync().then(u => setMeId(u?.id ?? '')); }, []);
 
   const load = useCallback(async () => {
     try {
@@ -76,6 +80,12 @@ export default function StarredScreen() {
     const m = item.message;
     const chatName = m?.chatName || (m?.chatType === 'group' ? 'Group chat' : 'Direct chat');
     const deleted = !m || !!m.deletedAt;
+    // Sender (WhatsApp shows this): "You" for your own, else the sender's name
+    // (from backend), falling back to the peer name for a direct chat.
+    const sender = !m ? '' : (m.senderId === meId ? 'You'
+      : (m.senderName || (m.chatType === 'direct' ? m.chatName : null) || 'Unknown'));
+    // For groups the chat differs from the sender, so show "in <group>".
+    const meta = m && m.chatType === 'group' ? `in ${chatName} · ${fmt(item.createdAt)}` : fmt(item.createdAt);
     const body = deleted
       ? 'Original message was deleted'
       : (m?.content && m.content.trim().length
@@ -89,8 +99,8 @@ export default function StarredScreen() {
         onPress={() => m && openChat(m.chatId)}
       >
         <View style={{ flex: 1 }}>
-          <Text style={s.chatName} numberOfLines={1}>{chatName}</Text>
-          <Text style={s.meta}>{fmt(item.createdAt)}</Text>
+          <Text style={s.chatName} numberOfLines={1}>{sender}</Text>
+          <Text style={s.meta}>{meta}</Text>
           <Text style={[s.msg, deleted && s.msgDeleted]} numberOfLines={3}>{body}</Text>
           {!!item.note && <Text style={s.note} numberOfLines={2}>📝 {item.note}</Text>}
         </View>

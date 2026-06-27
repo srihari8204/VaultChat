@@ -7,6 +7,7 @@
 // chain, and "Run device scan" performs a real root/Frida/emulator scan.
 // No invented numbers, no behavioral-AI claims we don't implement.
 
+import { BRAND_ACCENT } from '../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useState , useMemo} from 'react';
@@ -27,7 +28,7 @@ const SEV_COLOR: Record<AuditSeverity, string> = {
 };
 
 const GRADE_META: Record<SecurityScore['grade'], { color: string; label: string }> = {
-  strong:  { color: '#10B981', label: 'Strong'      },
+  strong:  { color: BRAND_ACCENT, label: 'Strong'      },
   good:    { color: '#34D399',      label: 'Good'        },
   fair:    { color: '#F59E0B',      label: 'Fair'        },
   weak:    { color: '#EF4444',      label: 'Needs work'  },
@@ -138,7 +139,7 @@ export default function SecurityGuardianScreen() {
         <Text style={S.sectionTitle}>CHECKS</Text>
         <View style={S.card}>
           {(data?.factors ?? []).map((f, i) => {
-            const color = f.pending ? colors.textDim : f.ok ? '#10B981' : '#EF4444';
+            const color = f.pending ? colors.textDim : f.ok ? BRAND_ACCENT : '#EF4444';
             const icon = f.pending ? 'help-circle' : f.ok ? 'checkmark-circle' : 'close-circle';
             return (
               <View key={f.key}>

@@ -14,7 +14,6 @@ import {
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { Stack, useRouter } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { getSettings, updateSettings, type UserSettings } from '../lib/chatService';
 
@@ -66,7 +65,7 @@ export default function LastSeenPrivacyScreen() {
       <Stack.Screen options={{ headerShown: false }} />
       <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
 
-      <LinearGradient colors={['#F9FAFB', colors.bg]} style={s.header}>
+      <View style={s.header}>
         <View style={[s.headerRow, { marginTop: TOP }]}>
           <TouchableOpacity onPress={() => router.back()} hitSlop={16}>
             <Ionicons name="arrow-back" size={24} color={colors.text} />
@@ -74,7 +73,7 @@ export default function LastSeenPrivacyScreen() {
           <Text style={s.headerTitle}>Last Seen & Privacy</Text>
           <View style={{ width: 24 }} />
         </View>
-      </LinearGradient>
+      </View>
 
       {!settings ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
@@ -83,14 +82,14 @@ export default function LastSeenPrivacyScreen() {
       ) : (
         <ScrollView style={s.scroll} contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={s.infoCard}>
-            <Ionicons name="shield-checkmark-outline" size={16} color={colors.accent} />
+            <Ionicons name="shield-checkmark-outline" size={16} color={colors.textDim} />
             <Text style={s.infoText}>These settings are enforced on the server and apply across all your devices.</Text>
           </View>
 
           {ROWS.map(row => (
-            <LinearGradient key={row.key} colors={['#0F2847', '#F9FAFB']} style={s.card}>
+            <View key={row.key} style={s.card}>
               <View style={s.sectionHeader}>
-                <Ionicons name={row.icon} size={20} color={colors.accent} />
+                <Ionicons name={row.icon} size={20} color={colors.textDim} />
                 <Text style={s.cardTitle}>{row.title}</Text>
                 {busy === row.key && <ActivityIndicator color={colors.primary} style={{ marginLeft: 'auto' }} />}
               </View>
@@ -101,11 +100,11 @@ export default function LastSeenPrivacyScreen() {
                   value={!!settings[row.key]}
                   onValueChange={(v) => toggle(row.key, v)}
                   disabled={busy === row.key}
-                  trackColor={{ false: '#1A2A44', true: colors.accent }}
-                  thumbColor={settings[row.key] ? colors.text : '#6B7280'}
+                  trackColor={{ false: colors.border, true: colors.primary }}
+                  thumbColor={colors.card}
                 />
               </View>
-            </LinearGradient>
+            </View>
           ))}
 
           <View style={{ height: 40 }} />
@@ -123,10 +122,10 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   scroll: { flex: 1 },
   scrollContent: { padding: 16, paddingBottom: 40 },
 
-  infoCard: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: c.accent + '10', borderRadius: 10, padding: 12, marginBottom: 16, gap: 8 },
+  infoCard: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: c.surface, borderRadius: 10, padding: 12, marginBottom: 16, gap: 8 },
   infoText: { color: c.textDim, fontSize: 13, flex: 1, lineHeight: 18 },
 
-  card: { borderRadius: 16, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: '#112240' },
+  card: { backgroundColor: c.card, borderRadius: 16, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: c.border },
   cardTitle: { color: c.text, fontSize: 17, fontWeight: '700', marginLeft: 10 },
   cardInfo: { color: c.textDim, fontSize: 13, lineHeight: 18, marginBottom: 12 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },

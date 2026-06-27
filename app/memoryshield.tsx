@@ -1,5 +1,6 @@
 import { ErrorBoundary } from '../components/ErrorBoundary';
-﻿import { LinearGradient } from 'expo-linear-gradient';
+﻿import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Animated, Easing, Modal, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -116,7 +117,7 @@ function MemoryShieldScreenContent() {
         <ScrollView contentContainerStyle={S.container}>
           <View style={S.header}>
             <TouchableOpacity onPress={() => router.back()} style={S.backBtn}>
-              <Text style={{ color: '#4A9FFF', fontSize: 18 }}>←</Text>
+              <Ionicons name="arrow-back" size={20} color="#4A9FFF" />
             </TouchableOpacity>
             <View style={{ flex: 1 }}>
               <Text style={S.title}>💀 MemoryShield</Text>
@@ -131,8 +132,8 @@ function MemoryShieldScreenContent() {
               <Text style={{ color: '#EF4444', fontSize: 20, fontWeight: '900', letterSpacing: 2 }}>MEMORYSHIELD</Text>
               <Text style={{ color: '#FCA5A5', fontSize: 11, marginTop: 4 }}>Armed and ready</Text>
               <View style={S.statusRow}>
-                <View style={[S.statusDot, { backgroundColor: '#10B981' }]} />
-                <Text style={{ color: '#10B981', fontSize: 12, fontWeight: '700' }}>SHIELD ACTIVE</Text>
+                <View style={[S.statusDot, { backgroundColor: '#22C55E' }]} />
+                <Text style={{ color: '#22C55E', fontSize: 12, fontWeight: '700' }}>SHIELD ACTIVE</Text>
               </View>
             </LinearGradient>
           </Animated.View>
@@ -144,7 +145,7 @@ function MemoryShieldScreenContent() {
                 <Text style={{ color: '#fff', fontSize: 16, fontWeight: '900' }}>TRIGGER MEMORYSHIELD</Text>
                 <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 11, marginTop: 2 }}>Instantly destroy ALL data</Text>
               </View>
-              <Text style={{ color: '#fff', fontSize: 22 }}>→</Text>
+              <Ionicons name="chevron-forward" size={18} color="#fff" />
             </LinearGradient>
           </TouchableOpacity>
 

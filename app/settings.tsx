@@ -8,7 +8,7 @@
 //
 // No Firebase, no Firestore — pure Postgres + JWT.
 
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { isMfaEnabled, enableMfa, disableMfa } from '../lib/mfa';
@@ -25,9 +25,10 @@ import {
   View,
 } from 'react-native';
 import { logoutUser } from './(constants)/authService';
-import { getAccessToken } from '../lib/api';
+import { api, getAccessToken } from '../lib/api';
+import { getAutoDownload, setAutoDownload, type AutoDownloadPolicy } from '../lib/mediaPrefs';
 import { useTheme, type ThemePref } from '../lib/theme';
-import { type Palette } from '../constants/theme';
+import { type Palette, brandAlpha } from '../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 
 /** Memoized themed stylesheet for this screen. */
@@ -59,17 +60,25 @@ export default function SettingsScreen() {
   const [loading,  setLoading]  = useState(true);
   const [saving,   setSaving]   = useState<null | keyof UserSettings>(null);
   const [authHeader, setAuthHeader] = useState<string | null>(null);
+  const [profile, setProfile] = useState<{ name?: string; email?: string; status?: string; photoURL?: string } | null>(null);
+  const [autoDl, setAutoDl] = useState<AutoDownloadPolicy>('always');
+  useEffect(() => { getAutoDownload().then(setAutoDl); }, []);
+  const autoDlLabel = (p: AutoDownloadPolicy) => p === 'never' ? 'Never' : p === 'wifi' ? 'Wi-Fi only' : 'Wi-Fi & mobile data';
 
-  // Initial fetch — settings + blocks in parallel + auth header
+  // Initial fetch — settings + blocks in parallel + auth header + profile
   useEffect(() => {
     let cancel = false;
     (async () => {
       try {
-        const [s, b, tok] = await Promise.all([getSettings(), listBlocks(), getAccessToken()]);
+        const [s, b, tok, p] = await Promise.all([
+          getSettings(), listBlocks(), getAccessToken(),
+          api<{ name?: string; email?: string; status?: string; photoURL?: string }>('/user/profile').catch(() => null),
+        ]);
         if (cancel) return;
         setSettings(s);
         setBlocks(b);
         setAuthHeader(tok ? `Bearer ${tok}` : null);
+        setProfile(p);
       } catch (e: any) {
         Alert.alert('Could not load settings', e?.message ?? 'Try again');
       } finally {
@@ -94,6 +103,18 @@ export default function SettingsScreen() {
       setSaving(null);
     }
   }, [settings, saving]);
+
+  // Non-boolean settings (group-add policy, default timer) — optimistic save.
+  const savePref = useCallback(async (patch: Partial<UserSettings>) => {
+    if (!settings) return;
+    const prev = settings;
+    setSettings({ ...settings, ...patch });
+    try { await updateSettings(patch); }
+    catch (e: any) { setSettings(prev); Alert.alert('Save failed', e?.message ?? 'Try again'); }
+  }, [settings]);
+
+  const groupAddLabel = (p?: string) => p === 'nobody' ? 'Nobody' : p === 'contacts' ? 'My contacts' : 'Everyone';
+  const timerLabel = (s?: number) => !s ? 'Off' : s >= 7776000 ? '90 days' : s >= 604800 ? '7 days' : s >= 86400 ? '24 hours' : `${Math.round(s / 60)} min`;
 
   const [exporting, setExporting] = useState(false);
   const [deleting,  setDeleting]  = useState(false);
@@ -200,12 +221,49 @@ export default function SettingsScreen() {
     <ScrollView style={S.screen} contentContainerStyle={{ paddingBottom: 64 }}>
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn} activeOpacity={0.7}>
-          <Text style={S.backTxt}>←</Text>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title}>Settings</Text>
       </View>
 
+      {/* Profile card (WhatsApp-style) — avatar + name + about + QR */}
+      <TouchableOpacity style={S.profileCard} activeOpacity={0.8} onPress={() => router.push('/(tabs)/profile' as any)}>
+        <View style={S.profileAvatar}>
+          {profile?.photoURL && authHeader ? (
+            <Image source={{ uri: attachmentUrl(profile.photoURL), headers: { Authorization: authHeader } }} style={S.profileAvatarImg} />
+          ) : (
+            <Text style={S.profileAvatarTxt}>{(profile?.name || profile?.email || '?').trim()[0].toUpperCase()}</Text>
+          )}
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={S.profileName} numberOfLines={1}>{profile?.name || 'Your name'}</Text>
+          <Text style={S.profileSub} numberOfLines={1}>{profile?.status || profile?.email || ''}</Text>
+        </View>
+        <Ionicons name="qr-code-outline" size={22} color={colors.textDim} />
+      </TouchableOpacity>
+
       <AppearanceSection />
+
+      <View style={S.section}>
+        <Text style={S.label}>CHATS</Text>
+        <View style={S.linkCard}>
+          <LinkRow icon="color-palette-outline" title="Bubble theme" sub="Color of your sent messages" onPress={() => router.push('/chat-themes' as any)} />
+          <LinkRow icon="image-outline" title="Wallpaper" sub="Default chat background" onPress={() => router.push('/chat-wallpaper' as any)} />
+          <TouchableOpacity style={[S.linkRow, { borderBottomWidth: 0 }]} activeOpacity={0.7} onPress={() => Alert.alert('Media auto-download', 'When to download photos automatically.', [
+            { text: 'Wi-Fi & mobile data', onPress: () => { setAutoDl('always'); setAutoDownload('always'); } },
+            { text: 'Wi-Fi only', onPress: () => { setAutoDl('wifi'); setAutoDownload('wifi'); } },
+            { text: 'Never', onPress: () => { setAutoDl('never'); setAutoDownload('never'); } },
+            { text: 'Cancel', style: 'cancel' },
+          ])}>
+            <View style={S.linkIconWrap}><Ionicons name="cloud-download-outline" size={22} color={colors.text} /></View>
+            <View style={{ flex: 1 }}>
+              <Text style={S.linkTitle}>Media auto-download</Text>
+              <Text style={S.linkSub}>{autoDlLabel(autoDl)}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
+          </TouchableOpacity>
+        </View>
+      </View>
 
       <View style={S.section}>
         <Text style={S.label}>PRIVACY</Text>
@@ -238,6 +296,31 @@ export default function SettingsScreen() {
           busy={saving === 'profilePhotoVisible'}
           onValueChange={() => toggle('profilePhotoVisible')}
         />
+        <TouchableOpacity style={S.prefRow} activeOpacity={0.7} onPress={() => Alert.alert('Who can add me to groups', undefined, [
+          { text: 'Everyone', onPress: () => savePref({ groupAddPolicy: 'everyone' }) },
+          { text: 'My contacts', onPress: () => savePref({ groupAddPolicy: 'contacts' }) },
+          { text: 'Nobody', onPress: () => savePref({ groupAddPolicy: 'nobody' }) },
+          { text: 'Cancel', style: 'cancel' },
+        ])}>
+          <View style={{ flex: 1 }}>
+            <Text style={S.toggleTitle}>Add me to groups</Text>
+            <Text style={S.toggleSub}>{groupAddLabel(settings.groupAddPolicy)}</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
+        </TouchableOpacity>
+        <TouchableOpacity style={S.prefRow} activeOpacity={0.7} onPress={() => Alert.alert('Default disappearing timer', 'Applied to new chats you start.', [
+          { text: 'Off', onPress: () => savePref({ defaultDisappearingSeconds: 0 }) },
+          { text: '24 hours', onPress: () => savePref({ defaultDisappearingSeconds: 86400 }) },
+          { text: '7 days', onPress: () => savePref({ defaultDisappearingSeconds: 604800 }) },
+          { text: '90 days', onPress: () => savePref({ defaultDisappearingSeconds: 7776000 }) },
+          { text: 'Cancel', style: 'cancel' },
+        ])}>
+          <View style={{ flex: 1 }}>
+            <Text style={S.toggleTitle}>Default message timer</Text>
+            <Text style={S.toggleSub}>{timerLabel(settings.defaultDisappearingSeconds)}</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
+        </TouchableOpacity>
       </View>
 
       <View style={S.section}>
@@ -253,109 +336,17 @@ export default function SettingsScreen() {
 
       <View style={S.section}>
         <Text style={S.label}>DATA & ACCOUNT</Text>
-
-        <TouchableOpacity
-          style={S.dataBtn}
-          onPress={() => router.push('/notification-sounds' as any)}
-          activeOpacity={0.85}
-        >
-          <Text style={S.dataBtnTxt}>🔔 Notifications & Sounds</Text>
-        </TouchableOpacity>
-        <Text style={S.dataHint}>
-          Message tones, call ringtone and vibration.
-        </Text>
-
-        <TouchableOpacity
-          style={[S.dataBtn, { marginTop: 12 }]}
-          onPress={() => router.push('/chat-backup' as any)}
-          activeOpacity={0.85}
-        >
-          <Text style={S.dataBtnTxt}>☁️ Chat backup</Text>
-        </TouchableOpacity>
-        <Text style={S.dataHint}>
-          Encrypted backup to the cloud or a file. Restore on a new phone with your passphrase.
-        </Text>
-
-        <TouchableOpacity
-          style={[S.dataBtn, { marginTop: 12 }]}
-          onPress={() => router.push('/scheduled' as any)}
-          activeOpacity={0.85}
-        >
-          <Text style={S.dataBtnTxt}>📅 Scheduled messages</Text>
-        </TouchableOpacity>
-        <Text style={S.dataHint}>
-          Review and cancel any messages waiting to send at a future time.
-        </Text>
-
-        <TouchableOpacity
-          style={[S.dataBtn, { marginTop: 12 }]}
-          onPress={() => router.push('/bookmarks' as any)}
-          activeOpacity={0.85}
-        >
-          <Text style={S.dataBtnTxt}>🔖 Bookmarks</Text>
-        </TouchableOpacity>
-        <Text style={S.dataHint}>
-          Messages you've saved across all chats.
-        </Text>
-
-        <TouchableOpacity
-          style={[S.dataBtn, { marginTop: 12 }]}
-          onPress={() => router.push('/message-reminder' as any)}
-          activeOpacity={0.85}
-        >
-          <Text style={S.dataBtnTxt}>⏰ Message reminders</Text>
-        </TouchableOpacity>
-        <Text style={S.dataHint}>
-          Notifications you've scheduled for specific messages.
-        </Text>
-
-        <TouchableOpacity
-          style={[S.dataBtn, { marginTop: 12 }]}
-          onPress={() => router.push('/hidden-chats' as any)}
-          activeOpacity={0.85}
-        >
-          <Text style={S.dataBtnTxt}>🕶️ Hidden chats</Text>
-        </TouchableOpacity>
-        <Text style={S.dataHint}>
-          PIN-gated. Hidden chats stay invisible in the main list until you unlock them here.
-        </Text>
-
-        <TouchableOpacity
-          style={[S.dataBtn, { marginTop: 12 }]}
-          onPress={() => router.push('/login-history' as any)}
-          activeOpacity={0.85}
-        >
-          <Text style={S.dataBtnTxt}>🖥️ Active devices</Text>
-        </TouchableOpacity>
-        <Text style={S.dataHint}>
-          See where you're signed in and remotely sign out other devices.
-        </Text>
-
-        <TouchableOpacity
-          style={[S.dataBtn, { marginTop: 12 }]}
-          onPress={() => router.push('/ghost-mode' as any)}
-          activeOpacity={0.85}
-        >
-          <Text style={S.dataBtnTxt}>👻 Ghost Mode contacts</Text>
-        </TouchableOpacity>
-        <Text style={S.dataHint}>
-          People for whom you've hidden online, typing, read, or last-seen.
-        </Text>
-
-        <TouchableOpacity
-          style={[S.dataBtn, { marginTop: 12 }]}
-          onPress={onExport}
-          disabled={exporting}
-          activeOpacity={0.85}
-        >
-          {exporting ? <ActivityIndicator color={colors.primary} /> : (
-            <Text style={S.dataBtnTxt}>📦 Export my data</Text>
-          )}
-        </TouchableOpacity>
-        <Text style={S.dataHint}>
-          Download a JSON file containing your profile, chats, messages, and settings.
-          Attachments are listed by id — fetch them separately.
-        </Text>
+        <View style={S.linkCard}>
+          <LinkRow icon="notifications-outline" title="Notifications & Sounds" sub="Message tones, ringtone, vibration" onPress={() => router.push('/notification-sounds' as any)} />
+          <LinkRow icon="cloud-upload-outline" title="Chat backup" sub="Encrypted backup to cloud or file" onPress={() => router.push('/chat-backup' as any)} />
+          <LinkRow icon="time-outline" title="Scheduled messages" sub="Messages waiting to send later" onPress={() => router.push('/scheduled' as any)} />
+          <LinkRow icon="bookmark-outline" title="Bookmarks" sub="Messages you've saved across chats" onPress={() => router.push('/bookmarks' as any)} />
+          <LinkRow icon="alarm-outline" title="Message reminders" sub="Notifications you've scheduled" onPress={() => router.push('/message-reminder' as any)} />
+          <LinkRow icon="eye-off-outline" title="Hidden chats" sub="PIN-gated chats, hidden from the list" onPress={() => router.push('/hidden-chats' as any)} />
+          <LinkRow icon="desktop-outline" title="Active devices" sub="Where you're signed in" onPress={() => router.push('/login-history' as any)} />
+          <LinkRow icon="glasses-outline" title="Ghost Mode contacts" sub="Hidden online, typing, read, last-seen" onPress={() => router.push('/ghost-mode' as any)} />
+          <LinkRow icon="download-outline" title="Export my data" sub="Download a JSON of your account" onPress={onExport} busy={exporting} last />
+        </View>
 
         <TouchableOpacity
           style={S.deleteBtn}
@@ -401,6 +392,25 @@ export default function SettingsScreen() {
   );
 }
 
+// WhatsApp-style settings row: tinted leading icon, title + sub, chevron.
+function LinkRow({ icon, title, sub, onPress, busy, last }: {
+  icon: React.ComponentProps<typeof Ionicons>['name']; title: string; sub?: string;
+  onPress?: () => void; busy?: boolean; last?: boolean;
+}) {
+  const { colors } = useTheme();
+  const S = useS();
+  return (
+    <TouchableOpacity style={[S.linkRow, last && { borderBottomWidth: 0 }]} onPress={onPress} activeOpacity={0.7} disabled={busy}>
+      <View style={S.linkIconWrap}><Ionicons name={icon} size={22} color={colors.text} /></View>
+      <View style={{ flex: 1 }}>
+        <Text style={S.linkTitle} numberOfLines={1}>{title}</Text>
+        {sub ? <Text style={S.linkSub} numberOfLines={1}>{sub}</Text> : null}
+      </View>
+      {busy ? <ActivityIndicator color={colors.primary} /> : <Ionicons name="chevron-forward" size={18} color={colors.textDim} />}
+    </TouchableOpacity>
+  );
+}
+
 // Appearance (U3) — Light / Dark / System, persisted via the ThemeProvider.
 // The control itself is theme-aware so the chosen palette previews live.
 function AppearanceSection() {
@@ -424,8 +434,8 @@ function AppearanceSection() {
               onPress={() => setPref(o.key)}
               activeOpacity={0.8}
             >
-              <Ionicons name={o.icon} size={16} color={active ? '#04130D' : colors.textDim} />
-              <Text style={[apS.pillTxt, { color: active ? '#04130D' : colors.textDim }]}>{o.label}</Text>
+              <Ionicons name={o.icon} size={16} color={active ? '#FFFFFF' : colors.textDim} />
+              <Text style={[apS.pillTxt, { color: active ? '#FFFFFF' : colors.textDim }]}>{o.label}</Text>
             </TouchableOpacity>
           );
         })}
@@ -484,10 +494,26 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   backTxt:       { color: c.text, fontSize: 26, fontWeight: '600' },
   title:         { color: c.text, fontSize: 22, fontWeight: '800' },
 
+  // Profile card
+  profileCard:   { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 16, marginTop: 4, padding: 14, borderRadius: 16, backgroundColor: c.card, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
+  profileAvatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  profileAvatarImg: { width: '100%', height: '100%' },
+  profileAvatarTxt: { color: '#fff', fontSize: 22, fontWeight: '800' },
+  profileName:   { color: c.text, fontSize: 17, fontWeight: '700' },
+  profileSub:    { color: c.textDim, fontSize: 13, marginTop: 2 },
+
+  // Icon-led link rows (grouped card)
+  linkCard:      { backgroundColor: c.card, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, overflow: 'hidden' },
+  linkRow:       { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 14, paddingVertical: 13, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  linkIconWrap:  { width: 30, alignItems: 'center', justifyContent: 'center' },
+  linkTitle:     { color: c.text, fontSize: 15, fontWeight: '600' },
+  linkSub:       { color: c.textDim, fontSize: 12, marginTop: 1 },
+
   section:       { paddingHorizontal: 16, marginTop: 16 },
   label:         { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 8 },
 
   toggleRow:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  prefRow:       { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   toggleTitle:   { color: c.text, fontSize: 15, fontWeight: '600' },
   toggleSub:     { color: c.textDim, fontSize: 12, lineHeight: 16, marginTop: 2 },
 

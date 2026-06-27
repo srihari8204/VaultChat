@@ -85,6 +85,7 @@ function publicMember(row) {
     photoURL:                row.photo_url,
     online:                  row.online ?? false,
     lastSeenAt,
+    status:                  row.status ?? null,   // "About" text (WhatsApp)
   };
 }
 
@@ -238,6 +239,8 @@ router.get('/', async (req, res) => {
          peer.peer_photo AS peer_photo,
          peer.peer_online AS peer_online,
          peer.peer_last_seen AS peer_last_seen,
+         peer.peer_last_read AS peer_last_read,
+         peer.peer_last_delivered AS peer_last_delivered,
          cm.unread_count AS unread_count
        FROM chats c
        JOIN chat_members cm ON cm.chat_id = c.id AND cm.user_id = $1
@@ -249,6 +252,8 @@ router.get('/', async (req, res) => {
                 u.email_cipher      AS peer_ec,
                 u.photo_url AS peer_photo,
                 u.online   AS peer_online,
+                cm2.last_read_message_id      AS peer_last_read,
+                cm2.last_delivered_message_id AS peer_last_delivered,
                 -- Last-seen visibility: global toggle AND no ghost-mode
                 -- override from the peer toward me.
                 CASE
@@ -301,6 +306,8 @@ router.get('/', async (req, res) => {
       peerPhotoURL:    row.peer_photo   ?? null,
       peerOnline:      row.peer_online  ?? false,
       peerLastSeenAt:  row.peer_last_seen ?? null,
+      peerLastReadMessageId:      row.peer_last_read != null ? Number(row.peer_last_read) : null,
+      peerLastDeliveredMessageId: row.peer_last_delivered != null ? Number(row.peer_last_delivered) : null,
     })));
   } catch (err) {
     console.error('[chats GET]', err.message);
@@ -371,10 +378,15 @@ router.post('/', async (req, res) => {
         return res.json({ id: existing.rows[0].id, type: 'direct', existing: true });
       }
 
+      // Apply the creator's default disappearing-messages timer (WhatsApp) to
+      // chats they start.
+      const ddR = await req.dbQuery(`SELECT default_disappearing_seconds FROM users WHERE id = $1`, [req.user.id]);
+      const defDis = ddR.rows[0]?.default_disappearing_seconds || 0;
+
       const chat = await req.dbTx(async (client) => {
         const ins = await client.query(
-          `INSERT INTO chats (type, created_by) VALUES ('direct', $1) RETURNING *`,
-          [req.user.id]
+          `INSERT INTO chats (type, created_by, disappearing_seconds) VALUES ('direct', $1, $2) RETURNING *`,
+          [req.user.id, defDis > 0 ? defDis : null]
         );
         const chatId = ins.rows[0].id;
         // Insert creator FIRST as 'owner' so the bootstrap RLS clause allows it;
@@ -644,6 +656,28 @@ router.get('/search', async (req, res) => {
   }
 });
 
+// GET /chats/common/:userId — groups that both the caller and :userId are in
+// (WhatsApp "groups in common"). Declared above GET /:id so 'common' isn't a chat id.
+router.get('/common/:userId', async (req, res) => {
+  try {
+    const peer = req.params.userId;
+    const r = await req.dbQuery(
+      `SELECT c.id, c.name, c.photo_url
+         FROM chats c
+         JOIN chat_members a ON a.chat_id = c.id AND a.user_id = $1 AND a.left_at IS NULL
+         JOIN chat_members b ON b.chat_id = c.id AND b.user_id = $2 AND b.left_at IS NULL
+        WHERE c.type = 'group'
+        ORDER BY c.last_message_at DESC NULLS LAST
+        LIMIT 50`,
+      [req.user.id, peer]
+    );
+    res.json({ groups: r.rows.map(g => ({ id: g.id, name: g.name, photoURL: g.photo_url })) });
+  } catch (err) {
+    console.error('[chats common]', err.message);
+    res.status(500).json({ error: 'Failed' });
+  }
+});
+
 // GET /chats/:id — chat + members (no messages, that's a separate call)
 router.get('/:id', async (req, res) => {
   try {
@@ -656,7 +690,7 @@ router.get('/:id', async (req, res) => {
 
     const membersR = await req.dbQuery(
       `SELECT cm.*, u.email, u.name, u.first_name_cipher, u.last_name_cipher, u.email_cipher,
-              u.photo_url, u.online, u.last_seen_at, u.last_seen_visible
+              u.photo_url, u.online, u.last_seen_at, u.last_seen_visible, u.status
        FROM chat_members cm
        JOIN users u ON u.id = cm.user_id
        WHERE cm.chat_id = $1
@@ -668,6 +702,7 @@ router.get('/:id', async (req, res) => {
       id:                   chat.id,
       type:                 chat.type,
       name:                 chat.name,
+      description:          chat.description ?? null,
       photoURL:             chat.photo_url,
       createdBy:            chat.created_by,
       createdAt:            chat.created_at,
@@ -1083,7 +1118,33 @@ router.post('/:id/members', async (req, res) => {
       return res.status(400).json({ error: `Group would exceed cap of ${MAX_GROUP_SIZE}` });
     }
 
-    for (const uid of ids) {
+    // Honor each invitee's "who can add me to groups" privacy (WhatsApp).
+    const polR = await req.dbQuery(
+      `SELECT id, group_add_policy FROM users WHERE id = ANY($1::uuid[])`, [ids]
+    );
+    const policy = new Map(polR.rows.map(r => [r.id, r.group_add_policy || 'everyone']));
+    const contactReq = ids.filter(uid => policy.get(uid) === 'contacts');
+    let known = new Set();
+    if (contactReq.length) {
+      const dc = await req.dbQuery(
+        `SELECT DISTINCT m2.user_id FROM chat_members m1
+           JOIN chats c ON c.id = m1.chat_id AND c.type = 'direct'
+           JOIN chat_members m2 ON m2.chat_id = c.id AND m2.user_id <> $1
+          WHERE m1.user_id = $1 AND m2.user_id = ANY($2::uuid[])`,
+        [req.user.id, contactReq]
+      );
+      known = new Set(dc.rows.map(r => r.user_id));
+    }
+    const allowed = ids.filter(uid => {
+      const p = policy.get(uid) || 'everyone';
+      if (p === 'nobody') return false;
+      if (p === 'contacts') return known.has(uid);
+      return true;
+    });
+    const blocked = ids.filter(uid => !allowed.includes(uid));
+    if (!allowed.length) return res.status(403).json({ error: "Those users don't allow being added to groups by you" });
+
+    for (const uid of allowed) {
       await req.dbQuery(
         `INSERT INTO chat_members (chat_id, user_id, role)
          VALUES ($1, $2, 'member')
@@ -1091,8 +1152,8 @@ router.post('/:id/members', async (req, res) => {
         [req.params.id, uid]
       );
     }
-    broadcastChatEvent(req.params.id, 'members_added', { added: ids, by: req.user.id });
-    res.json({ added: ids });
+    broadcastChatEvent(req.params.id, 'members_added', { added: allowed, by: req.user.id });
+    res.json({ added: allowed, blocked });
   } catch (err) {
     console.error('[members POST]', err.message);
     res.status(500).json({ error: 'Failed to add members' });
@@ -1241,6 +1302,13 @@ router.patch('/:id', async (req, res) => {
       const p = b.photoURL.trim().slice(0, 1024);
       params.push(p || null);
       sets.push(`photo_url = $${params.length}`);
+    }
+    if (typeof b.description === 'string') {
+      if (mem.chat_type !== 'group') return res.status(400).json({ error: 'Direct chats have no description' });
+      if (!isAdmin) return res.status(403).json({ error: 'Admin only' });
+      const d = b.description.trim().slice(0, 512);
+      params.push(d || null);
+      sets.push(`description = $${params.length}`);
     }
 
     // Disappearing-messages timer: any member can set/clear it. Null/0

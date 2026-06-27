@@ -9,6 +9,7 @@
 // previous version managed Firestore-backed custom packs; that's been
 // dropped for MVP (re-add as a Phase-2 user-content feature).
 
+import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useState , useMemo} from 'react';
 import {
@@ -80,7 +81,7 @@ export default function StickerPickerScreen() {
       <StatusBar barStyle="light-content" />
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
-          <Text style={S.backTxt}>←</Text>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={S.title}>Stickers</Text>

@@ -2,6 +2,7 @@
  * XiangqiBoard — Chinese chess (10×9) wired to gameEngines xiangqiMove
  * ({ from:[r,c], to:[r,c] }). Pieces 'rX' (red, player[0], bottom) / 'bX'.
  */
+import { brandAlpha } from '../../constants/theme';
 import { useMemo, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import type { GameState } from '../../services/gameEngines';
@@ -74,13 +75,13 @@ export function XiangqiBoard({
 const s = StyleSheet.create({
   board: { flexDirection: 'row', flexWrap: 'wrap', backgroundColor: '#D8B783', borderRadius: 6, overflow: 'hidden', borderWidth: 2, borderColor: '#8A6D3B' },
   cell: { alignItems: 'center', justifyContent: 'center', borderWidth: 0.5, borderColor: 'rgba(0,0,0,0.3)' },
-  sel: { backgroundColor: 'rgba(16,185,129,0.4)' },
+  sel: { backgroundColor: brandAlpha(0.4) },
   disc: { borderRadius: 999, backgroundColor: '#F3E2C0', alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: '#8A6D3B' },
   piece: { fontWeight: '800' },
   red: { color: '#C0392B' },
   black: { color: '#1A1A1A' },
-  dotMark: { position: 'absolute', backgroundColor: 'rgba(16,185,129,0.8)' },
-  capMark: { position: 'absolute', borderColor: 'rgba(16,185,129,0.9)' },
+  dotMark: { position: 'absolute', backgroundColor: brandAlpha(0.8) },
+  capMark: { position: 'absolute', borderColor: brandAlpha(0.9) },
 });
 
 export default XiangqiBoard;

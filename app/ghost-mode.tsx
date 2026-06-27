@@ -13,6 +13,7 @@
 // Enforced server-side at the fan-out layer (presence, typing, read).
 // Last-seen blanking happens in the GET /chats query.
 
+import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState , useMemo} from 'react';
 import {
@@ -89,7 +90,7 @@ function ListView() {
     <View style={S.screen}>
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
-          <Text style={S.backTxt}>←</Text>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title}>Ghost Mode</Text>
       </View>
@@ -136,7 +137,7 @@ function ListView() {
                 <Text style={S.rowName} numberOfLines={1}>{item.name || item.email || item.targetId.slice(0, 8)}</Text>
                 <Text style={S.rowSub} numberOfLines={1}>{summarise(item)}</Text>
               </View>
-              <Text style={S.rowChev}>›</Text>
+              <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
             </TouchableOpacity>
           )}
         />
@@ -222,7 +223,7 @@ function PerTargetEditor({ targetId, targetName }: { targetId: string; targetNam
     <ScrollView style={S.screen} contentContainerStyle={{ paddingBottom: 64 }}>
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
-          <Text style={S.backTxt}>←</Text>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title}>Ghost Mode</Text>
       </View>

@@ -3,6 +3,7 @@
 // emoji allowed). "Next" → security questions. Nothing is sent yet — all held in
 // the in-memory onboarding store until /auth/profile/init at the end of the chain.
 
+import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import { Stack, useRouter } from 'expo-router';
@@ -72,14 +73,14 @@ export default function OnboardProfile() {
       <Stack.Screen options={{ headerShown: false }} />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
-          <TouchableOpacity onPress={() => router.back()} style={s.back}><Text style={s.backTxt}>←</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => router.back()} style={s.back}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
           <Text style={s.title}>Set up your profile</Text>
           <Text style={s.step}>Step 1 of 3</Text>
 
           <TouchableOpacity style={s.avatarWrap} onPress={choosePhoto} activeOpacity={0.8}>
             {pic
               ? <Image source={{ uri: pic }} style={s.avatar} />
-              : <View style={[s.avatar, s.avatarEmpty]}><Text style={s.avatarPlus}>＋</Text></View>}
+              : <View style={[s.avatar, s.avatarEmpty]}><Ionicons name="add" size={34} color={colors.textDim} /></View>}
             <Text style={s.avatarHint}>{pic ? 'Change photo' : 'Add photo'}</Text>
           </TouchableOpacity>
 

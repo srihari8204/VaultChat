@@ -1,6 +1,7 @@
 // app/email-verify.tsx — new-user email OTP. Proves email ownership → emailTicket
 // (required by /auth/profile/init). 6 visible digits.
 
+import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -46,7 +47,7 @@ export default function EmailVerify() {
   return (
     <View style={s.screen}>
       <Stack.Screen options={{ headerShown: false }} />
-      <TouchableOpacity onPress={() => router.back()} style={s.back}><Text style={s.backTxt}>←</Text></TouchableOpacity>
+      <TouchableOpacity onPress={() => router.back()} style={s.back}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
       <View style={s.body}>
         <Text style={s.title}>Verify your email</Text>
         <Text style={s.sub}>Enter the 6-digit code we sent to{'\n'}<Text style={{ color: colors.text, fontWeight: '700' }}>{email}</Text></Text>

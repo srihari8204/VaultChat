@@ -10,11 +10,13 @@
 // This uses 'request' context in getVisibleProfile()
 // which correctly shows photo + name for unsaved senders
 
-import { LinearGradient } from 'expo-linear-gradient';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert, Animated, FlatList, StyleSheet,
+  Alert, Animated, FlatList, StatusBar, StyleSheet,
   Text, TouchableOpacity, View,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -23,16 +25,10 @@ import {
   getVisibleProfile, isSavedContact, formatLastSeen,
 } from '../lib/contactPrivacy';
 
-const C = {
-  bg:'#FFFFFF', primary:'#4A9FFF', green:'#10B981',
-  red:'#EF4444', yellow:'#F59E0B',
-  dim:'rgba(255,255,255,0.45)', faint:'rgba(255,255,255,0.12)',
-};
-
-const GRADS = [
-  ['#1D4ED8','#7C3AED'],['#059669','#0EA5E9'],['#DC2626','#F97316'],
-  ['#9333EA','#3B82F6'],['#0891B2','#10B981'],['#7C3AED','#EC4899'],
-];
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
 
 // A message request = one unknown sender + their latest message
 export type MessageRequest = {
@@ -48,11 +44,12 @@ function RequestCard({ req, allContacts, onAccept, onDecline }: {
   onAccept:    (r:MessageRequest) => void;
   onDecline:   (r:MessageRequest) => void;
 }) {
+  const { colors } = useTheme();
+  const s = useS();
   const c       = req.contact;
   const saved   = isSavedContact(c.vaultId, allContacts);
 
-  // ✅ REQUEST CONTEXT — shows photo + name even if not saved
-  // This is the correct behaviour the user asked for
+  // REQUEST CONTEXT — shows photo + name even if not saved
   const profile = getVisibleProfile(c, saved, 'request');
 
   const slide = useRef(new Animated.Value(0)).current;
@@ -62,60 +59,38 @@ function RequestCard({ req, allContacts, onAccept, onDecline }: {
 
   const initials = profile.displayName.split(' ')
     .map(w=>w[0]||'').join('').slice(0,2).toUpperCase()||'??';
-  const grad = GRADS[profile.displayName.charCodeAt(0) % GRADS.length];
 
   return (
     <Animated.View style={{
       opacity:slide,
       transform:[{translateY:Animated.multiply(Animated.subtract(new Animated.Value(1),slide),new Animated.Value(20))}],
     }}>
-      <View style={Ss.card}>
+      <View style={s.card}>
         {/* Sender info — photo + name always shown in request context */}
-        <View style={{flexDirection:'row',alignItems:'center',gap:14,marginBottom:14}}>
-          {/* Avatar — shown because context = 'request' */}
-          {profile.showPhoto && profile.photoUri
-            ? <View style={{width:56,height:56,borderRadius:28,
-                backgroundColor:'#D1D5DB',overflow:'hidden',
-                justifyContent:'center',alignItems:'center'}}>
-                <Text style={{fontSize:20,color:'#fff',fontWeight:'900'}}>{initials}</Text>
-              </View>
-            : <LinearGradient colors={grad as any}
-                style={{width:56,height:56,borderRadius:28,
-                  justifyContent:'center',alignItems:'center'}}>
-                <Text style={{color:'#fff',fontSize:22,fontWeight:'900'}}>{initials}</Text>
-              </LinearGradient>
-          }
+        <View style={s.row}>
+          <View style={s.avatar}>
+            <Text style={s.avatarTxt}>{initials}</Text>
+          </View>
           <View style={{flex:1}}>
-            {/* Name — shown because context = 'request' */}
-            <Text style={{color:'#fff',fontSize:16,fontWeight:'900'}}>
-              {profile.displayName}
-            </Text>
-            <Text style={{color:C.dim,fontSize:11,marginTop:3}}>
+            <Text style={s.name} numberOfLines={1}>{profile.displayName}</Text>
+            <Text style={s.meta}>
               {req.msgCount} message{req.msgCount!==1?'s':''} · {formatLastSeen(req.receivedAt)}
             </Text>
           </View>
-          <View style={{backgroundColor:'rgba(245,158,11,0.15)',borderRadius:10,
-            paddingHorizontal:8,paddingVertical:4,borderWidth:1,
-            borderColor:'rgba(245,158,11,0.3)'}}>
-            <Text style={{color:C.yellow,fontSize:9,fontWeight:'900'}}>
-              NOT IN CONTACTS
-            </Text>
+          <View style={s.tag}>
+            <Text style={s.tagTxt}>NOT IN CONTACTS</Text>
           </View>
         </View>
 
         {/* Message preview */}
-        <View style={{backgroundColor:'rgba(255,255,255,0.05)',borderRadius:12,
-          padding:12,marginBottom:14,borderWidth:1,
-          borderColor:'rgba(255,255,255,0.08)'}}>
-          <Text style={{color:'rgba(255,255,255,0.6)',fontSize:12,fontStyle:'italic',
-            lineHeight:18}} numberOfLines={3}>
+        <View style={s.preview}>
+          <Text style={s.previewTxt} numberOfLines={3}>
             &quot;{req.preview}&quot;
           </Text>
         </View>
 
         {/* Privacy note */}
-        <Text style={{color:'rgba(255,255,255,0.3)',fontSize:10,
-          textAlign:'center',marginBottom:12,lineHeight:15}}>
+        <Text style={s.note}>
           This person is not in your contacts.{'\n'}
           Their status and last seen are hidden until you accept.
         </Text>
@@ -124,19 +99,15 @@ function RequestCard({ req, allContacts, onAccept, onDecline }: {
         <View style={{flexDirection:'row',gap:10}}>
           <TouchableOpacity
             onPress={()=>onDecline(req)}
-            style={[Ss.btn,{backgroundColor:'rgba(239,68,68,0.1)',
-              borderColor:'rgba(239,68,68,0.3)'}]}>
-            <Text style={{color:C.red,fontSize:13,fontWeight:'800'}}>
-              🚫  Decline
-            </Text>
+            style={[s.btn, s.btnDecline]}>
+            <Ionicons name="close" size={16} color={colors.danger} />
+            <Text style={[s.btnTxt,{color:colors.danger}]}>Decline</Text>
           </TouchableOpacity>
           <TouchableOpacity
             onPress={()=>onAccept(req)}
-            style={[Ss.btn,{flex:1,backgroundColor:'rgba(16,185,129,0.15)',
-              borderColor:'rgba(16,185,129,0.4)'}]}>
-            <Text style={{color:C.green,fontSize:13,fontWeight:'800',textAlign:'center'}}>
-              ✅  Accept & Chat
-            </Text>
+            style={[s.btn, s.btnAccept, {flex:1}]}>
+            <Ionicons name="chatbubble-ellipses-outline" size={16} color={colors.bubbleOutText} />
+            <Text style={[s.btnTxt,{color:colors.bubbleOutText}]}>Accept &amp; Chat</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -145,6 +116,8 @@ function RequestCard({ req, allContacts, onAccept, onDecline }: {
 }
 
 export default function MsgRequests() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const [requests, setRequests] = useState<MessageRequest[]>([]);
   const [allContacts, setAllContacts] = useState<VaultContact[]>([]);
@@ -167,7 +140,6 @@ export default function MsgRequests() {
 
   const onAccept = async (req: MessageRequest) => {
     // Move to normal chat — contact now accepted
-    // In real flow: server is notified, contact added to chat list
     const updated = requests.filter(r=>r.contact.vaultId !== req.contact.vaultId);
     setRequests(updated);
     await AsyncStorage.setItem('msgRequests', JSON.stringify(updated));
@@ -203,36 +175,35 @@ export default function MsgRequests() {
   };
 
   return (
-    <View style={{flex:1,backgroundColor:C.bg}}>
-      <LinearGradient colors={['#FFFFFF','#FFFFFF']} style={StyleSheet.absoluteFillObject}/>
+    <View style={s.screen}>
+      <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
 
       {/* Header */}
-      <View style={Ss.header}>
-        <TouchableOpacity onPress={()=>router.back()} style={Ss.backBtn}>
-          <Text style={{color:C.primary,fontSize:18}}>←</Text>
+      <View style={s.header}>
+        <TouchableOpacity onPress={()=>router.back()} style={s.backBtn} hitSlop={10}>
+          <Ionicons name="arrow-back" size={22} color={colors.text} />
         </TouchableOpacity>
         <View style={{flex:1}}>
-          <Text style={Ss.title}>Message Requests</Text>
-          <Text style={Ss.sub}>{requests.length} PENDING REQUEST{requests.length!==1?'S':''}</Text>
+          <Text style={s.title}>Message Requests</Text>
+          <Text style={s.sub}>{requests.length} PENDING REQUEST{requests.length!==1?'S':''}</Text>
         </View>
       </View>
 
       {/* Info banner */}
-      <View style={{margin:16,padding:14,borderRadius:14,
-        backgroundColor:'rgba(74,159,255,0.06)',
-        borderWidth:1,borderColor:'rgba(74,159,255,0.15)'}}>
-        <Text style={{color:'rgba(255,255,255,0.7)',fontSize:12,lineHeight:18}}>
-          💡  These people messaged you but are not in your contacts.
-          Their <Text style={{color:C.primary,fontWeight:'800'}}>name and photo are shown</Text> so
+      <View style={s.banner}>
+        <Ionicons name="information-circle-outline" size={18} color={colors.textDim} style={{marginTop:1}} />
+        <Text style={s.bannerTxt}>
+          These people messaged you but are not in your contacts.
+          Their <Text style={s.bannerEm}>name and photo are shown</Text> so
           you can recognise them before deciding to accept or decline.
         </Text>
       </View>
 
       {requests.length === 0
-        ? <View style={{flex:1,justifyContent:'center',alignItems:'center',gap:12}}>
-            <Text style={{fontSize:48}}>📭</Text>
-            <Text style={{color:'#fff',fontSize:16,fontWeight:'900'}}>No pending requests</Text>
-            <Text style={{color:C.dim,fontSize:12}}>New requests will appear here</Text>
+        ? <View style={s.emptyWrap}>
+            <Ionicons name="mail-open-outline" size={48} color={colors.textFaint} />
+            <Text style={s.emptyTitle}>No pending requests</Text>
+            <Text style={s.emptySub}>New requests will appear here</Text>
           </View>
         : <FlatList
             data={requests}
@@ -246,18 +217,51 @@ export default function MsgRequests() {
   );
 }
 
-const Ss = StyleSheet.create({
-  header:  {paddingTop:52,paddingBottom:12,paddingHorizontal:18,
-             flexDirection:'row',alignItems:'center',gap:12,
-             borderBottomWidth:1,borderBottomColor:'rgba(74,159,255,0.1)'},
-  backBtn: {width:36,height:36,borderRadius:18,
-             backgroundColor:'rgba(10,22,40,0.8)',
-             justifyContent:'center',alignItems:'center'},
-  title:   {color:'#fff',fontSize:19,fontWeight:'900'},
-  sub:     {color:'rgba(255,255,255,0.35)',fontSize:8,fontWeight:'800',
-             letterSpacing:1.5,marginTop:2},
-  card:    {backgroundColor:'rgba(10,22,40,0.92)',borderRadius:20,
-             padding:16,borderWidth:1,borderColor:'rgba(74,159,255,0.14)'},
-  btn:     {paddingVertical:14,paddingHorizontal:18,borderRadius:14,borderWidth:1.5,
-             justifyContent:'center',alignItems:'center'},
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen:  { flex:1, backgroundColor:c.bg },
+  header:  { paddingTop:52, paddingBottom:12, paddingHorizontal:18,
+             flexDirection:'row', alignItems:'center', gap:12,
+             borderBottomWidth:StyleSheet.hairlineWidth, borderBottomColor:c.separator },
+  backBtn: { width:40, height:40, borderRadius:20,
+             justifyContent:'center', alignItems:'center' },
+  title:   { color:c.text, fontSize:19, fontWeight:'900' },
+  sub:     { color:c.textFaint, fontSize:9, fontWeight:'800',
+             letterSpacing:1.5, marginTop:2 },
+
+  banner:  { flexDirection:'row', alignItems:'flex-start', gap:10,
+             margin:16, padding:14, borderRadius:14,
+             backgroundColor:c.surface, borderWidth:1, borderColor:c.border },
+  bannerTxt:{ flex:1, color:c.textDim, fontSize:12, lineHeight:18 },
+  bannerEm: { color:c.text, fontWeight:'800' },
+
+  card:    { backgroundColor:c.card, borderRadius:20,
+             padding:16, borderWidth:1, borderColor:c.border },
+  row:     { flexDirection:'row', alignItems:'center', gap:14, marginBottom:14 },
+  avatar:  { width:56, height:56, borderRadius:28,
+             backgroundColor:c.surfaceSolid, borderWidth:1, borderColor:c.border,
+             justifyContent:'center', alignItems:'center' },
+  avatarTxt:{ color:c.textDim, fontSize:20, fontWeight:'900' },
+  name:    { color:c.text, fontSize:16, fontWeight:'900' },
+  meta:    { color:c.textDim, fontSize:11, marginTop:3 },
+  tag:     { backgroundColor:c.surface, borderRadius:10,
+             paddingHorizontal:8, paddingVertical:4,
+             borderWidth:1, borderColor:c.border },
+  tagTxt:  { color:c.textDim, fontSize:9, fontWeight:'900' },
+
+  preview: { backgroundColor:c.surface, borderRadius:12, padding:12,
+             marginBottom:14, borderWidth:1, borderColor:c.border },
+  previewTxt:{ color:c.textDim, fontSize:12, fontStyle:'italic', lineHeight:18 },
+
+  note:    { color:c.textFaint, fontSize:10, textAlign:'center',
+             marginBottom:12, lineHeight:15 },
+
+  btn:     { flexDirection:'row', alignItems:'center', justifyContent:'center', gap:6,
+             paddingVertical:13, paddingHorizontal:18, borderRadius:14, borderWidth:1.5 },
+  btnTxt:  { fontSize:13, fontWeight:'800' },
+  btnDecline:{ backgroundColor:c.danger + '14', borderColor:c.danger + '4D' },
+  btnAccept: { backgroundColor:c.primary, borderColor:c.primary },
+
+  emptyWrap:{ flex:1, justifyContent:'center', alignItems:'center', gap:12 },
+  emptyTitle:{ color:c.text, fontSize:16, fontWeight:'900' },
+  emptySub: { color:c.textDim, fontSize:12 },
 });
