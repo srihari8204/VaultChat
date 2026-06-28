@@ -12,6 +12,14 @@
 // work) and media payloads. Verify with a two-device round-trip after deploy.
 export const E2EE_ENABLED = true;
 
+// E2EE_STRICT hardens the 1:1 seam so it NEVER silently sends plaintext. When a
+// direct-chat message can't be encrypted (peer key bundle missing / transient
+// session error), the send THROWS instead of falling back to plaintext — so the
+// message shows as failed + retries (the retry re-fetches the bundle and almost
+// always succeeds), rather than leaking a plaintext body to the server. This is
+// the WhatsApp guarantee. Groups stay graceful during the E2EE rollout.
+export const E2EE_STRICT = true;
+
 // VAULT_SESSION_SEALED gates #32 Phase A: the real account's session tokens are
 // sealed under the unlock PIN (services/security/sessionSeal) instead of sitting
 // in plaintext SecureStore, so a duress/decoy PIN cannot reach the real session.
@@ -51,7 +59,7 @@ export const VAULT_CACHE_ENCRYPTED = false;
 // no local key falls back to the direct URL, so legacy/plaintext and group media
 // keep rendering. Group chats stay plaintext until group E2EE (W5) lands. Verify
 // with a two-device direct-chat photo/voice/file round-trip before enabling.
-export const MEDIA_E2EE = false;
+export const MEDIA_E2EE = true;   // enabled 2026-06-28 — VERIFY two-device direct-chat photo/voice/file round-trip after deploy
 
 // STORY_E2EE gates W7 per-viewer story encryption: a story's media is uploaded as
 // opaque AES-256-GCM ciphertext and its single content key is wrapped SEPARATELY
@@ -64,7 +72,7 @@ export const MEDIA_E2EE = false;
 // encrypted stories coexist. Viewers who weren't in the audience at post time have
 // no wrapped key and cannot decrypt (correct for an ephemeral, audience-scoped
 // post). Verify with a two-device round-trip before enabling.
-export const STORY_E2EE = false;
+export const STORY_E2EE = true;   // enabled 2026-06-28 — VERIFY two-device story round-trip after deploy
 
 // GROUP_E2EE gates W5 group chat encryption via Sender Keys (Signal-style). Each
 // member encrypts with their own hash-ratchet sender key (services/crypto/senderKey,
@@ -77,6 +85,6 @@ export const STORY_E2EE = false;
 // pre-E2EE / plaintext history stays readable; a member without a sender key yet
 // falls back so messaging never breaks. Requires E2EE_ENABLED. Verify with a
 // 3-device group round-trip (incl. add/remove member) before enabling.
-export const GROUP_E2EE = false;
+export const GROUP_E2EE = true;   // enabled 2026-06-28 — needs migration 040; VERIFY 3-device group round-trip (incl add/remove) after deploy
 
 export default { E2EE_ENABLED, VAULT_SESSION_SEALED, VAULT_CACHE_ENCRYPTED, MEDIA_E2EE, STORY_E2EE, GROUP_E2EE };

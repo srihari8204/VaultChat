@@ -38,6 +38,8 @@ export function Avatar({ uri, headers, name, size = 48, presence, style }: Avata
           style={[dim, { backgroundColor: c.surfaceSolid }]}
           contentFit="cover"
           transition={150}
+          cachePolicy="memory-disk"          // keep decoded avatars hot → instant re-render on scroll (WhatsApp-like)
+          recyclingKey={uri}                 // correct image reuse in recycled list rows
           onError={() => setFailed(true)}   // fall back to initials on a failed load
         />
       ) : (

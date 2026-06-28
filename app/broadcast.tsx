@@ -14,10 +14,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { getSocket } from '../lib/socket';
+import { readCache, writeCache } from '../lib/localCache';
 import {
   listChannels, createChannel, joinChannel, listChannelPosts, postToChannel,
   type Channel, type ChannelPost,
 } from '../lib/chatService';
+
+const CACHE_KEY = 'broadcasts';
 
 function useS() {
   const { colors } = useTheme();
@@ -42,13 +45,24 @@ export default function BroadcastScreen() {
   const [postText, setPostText] = useState('');
   const [posting, setPosting] = useState(false);
 
-  const load = useCallback(async () => {
-    try { setChannels(await listChannels()); }
-    catch (e: any) { Alert.alert('Error', e?.message ?? 'Failed to load channels'); }
+  const load = useCallback(async (hasCache: boolean) => {
+    try {
+      const list = await listChannels();
+      setChannels(list);
+      writeCache(CACHE_KEY, list);
+    }
+    // Keep cached channels if we have them; only alert on a cold load.
+    catch (e: any) { if (!hasCache) Alert.alert('Error', e?.message ?? 'Failed to load channels'); }
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    (async () => {
+      const cached = await readCache<Channel[]>(CACHE_KEY);
+      if (cached) { setChannels(cached); setLoading(false); }
+      await load(!!cached);
+    })();
+  }, [load]);
 
   // Realtime: while viewing a channel, join its room and prepend live posts.
   useEffect(() => {

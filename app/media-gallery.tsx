@@ -18,6 +18,7 @@ import { useTheme } from '../lib/theme';
 import { getAccessToken } from '../lib/api';
 import { getMessages, getChat, decryptFromChat, attachmentUrl, type Message } from '../lib/chatService';
 import { getDecryptedAttachmentUri, parseMediaContent } from '../lib/mediaAttachments';
+import { readCache, writeCache } from '../lib/localCache';
 
 const { width: SW } = Dimensions.get('window');
 const TILE = (SW - 40) / 3;
@@ -25,6 +26,14 @@ const PAGE = 200;
 
 type TabId = 'photos' | 'videos' | 'files' | 'links';
 interface LinkItem { id: number; url: string; createdAt: string }
+
+// Per-chat media buckets persisted so the gallery opens instantly on re-entry.
+interface GalleryCache {
+  photos: Message[];
+  videos: Message[];
+  files: Message[];
+  links: LinkItem[];
+}
 
 function useS() {
   const { colors } = useTheme();
@@ -49,7 +58,22 @@ export default function MediaGalleryScreen() {
 
   useEffect(() => {
     let active = true;
+    // Cache key includes the chat id so different chats' galleries don't collide.
+    const cacheKey = 'media-gallery:' + cid;
+    let painted = false;
     (async () => {
+      // Local-first: paint the cached buckets instantly so the gallery opens
+      // without a spinner; individual thumbnails still decrypt on demand.
+      if (cid) {
+        const cached = await readCache<GalleryCache>(cacheKey);
+        if (active && cached) {
+          setPhotos(cached.photos); setVideos(cached.videos);
+          setFiles(cached.files); setLinks(cached.links);
+          setLoading(false);
+          painted = true;
+        }
+      }
+
       try {
         const tok = await getAccessToken();
         if (active) setAuthHeader(tok ? `Bearer ${tok}` : null);
@@ -81,8 +105,11 @@ export default function MediaGalleryScreen() {
           }
         }
         setPhotos(ph); setVideos(vd); setFiles(fl); setLinks(lk);
-      } catch { /* leaves empties */ } finally {
-        if (active) setLoading(false);
+        writeCache<GalleryCache>(cacheKey, { photos: ph, videos: vd, files: fl, links: lk });
+      } catch {
+        // Keep painted cache on error; only "empty" when there was nothing cached.
+      } finally {
+        if (active && !painted) setLoading(false);
       }
     })();
     return () => { active = false; };

@@ -8,6 +8,7 @@
     "scheme": "vaultchat",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "jsEngine": "hermes",
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": false

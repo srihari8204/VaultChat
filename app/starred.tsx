@@ -15,6 +15,7 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { listBookmarks, removeBookmark, type BookmarkRow } from '../lib/chatService';
 import { getCurrentUserAsync } from './(constants)/authService';
+import { readCache, writeCache } from '../lib/localCache';
 
 function useS() {
   const { colors } = useTheme();
@@ -34,12 +35,17 @@ export default function StarredScreen() {
   React.useEffect(() => { getCurrentUserAsync().then(u => setMeId(u?.id ?? '')); }, []);
 
   const load = useCallback(async () => {
+    // Local-first: paint cached starred messages instantly, then fetch fresh.
+    const cached = await readCache<BookmarkRow[]>('starred');
+    if (cached) { setItems(cached); setLoading(false); }
     try {
       const rows = await listBookmarks();
       setItems(rows);
+      writeCache('starred', rows);
       setError(null);
     } catch (e: any) {
-      setError(e?.message ?? 'Failed to load starred messages');
+      // Keep cached items for offline read; only surface if nothing painted.
+      if (!cached) setError(e?.message ?? 'Failed to load starred messages');
     }
   }, []);
 
@@ -60,11 +66,14 @@ export default function StarredScreen() {
   // Optimistic un-star with rollback on failure.
   const unstar = useCallback(async (item: BookmarkRow) => {
     const prev = items;
-    setItems(list => list.filter(b => b.id !== item.id));
+    const next = items.filter(b => b.id !== item.id);
+    setItems(next);
+    writeCache('starred', next); // keep instant-paint cache consistent
     try {
       await removeBookmark(item.id);
     } catch (e: any) {
       setItems(prev);
+      writeCache('starred', prev);
       setError(e?.message ?? 'Failed to remove');
     }
   }, [items]);

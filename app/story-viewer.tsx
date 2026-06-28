@@ -117,17 +117,15 @@ export default function StoryViewerScreen() {
           const r = await getDecryptedAttachmentUri(current.attachmentId);
           if (!cancel) setMediaSrc(r);
         } catch { /* leave blank on failure */ }
-      } else if (authHeader) {
-        // expo-av's Android <Video> won't send the Bearer header, so video
-        // stories play from a downloaded local file; images render with headers.
-        if (current.mediaType === 'video') {
-          try {
-            const uri = await getAttachmentLocalUri(current.attachmentId);
-            if (!cancel) setMediaSrc({ uri });
-          } catch { /* leave blank on failure */ }
-        } else if (!cancel) {
-          setMediaSrc({ uri: attachmentUrl(current.attachmentId), headers: { Authorization: authHeader } });
-        }
+      } else {
+        // Both images AND video: download to a local file (self-authenticated)
+        // and render file:// — reliable. The old image path used a raw remote
+        // URL gated on authHeader, which left a black screen when the token was
+        // slow or the Image's onLoad never fired.
+        try {
+          const uri = await getAttachmentLocalUri(current.attachmentId);
+          if (!cancel) setMediaSrc({ uri });
+        } catch { if (!cancel) setLoaded(true); /* let the timer advance past a failed story */ }
       }
     })();
     return () => { cancel = true; };

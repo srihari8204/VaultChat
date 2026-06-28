@@ -23,6 +23,7 @@ import { api, getAccessToken } from '../../lib/api';
 import { attachmentUrl, uploadAttachment } from '../../lib/chatService';
 import { unregisterPushToken } from '../../lib/push';
 import { disconnect as disconnectSocket } from '../../lib/socket';
+import { readCache, writeCache } from '../../lib/localCache';
 
 interface UserProfile {
   id: string;
@@ -70,14 +71,25 @@ export default function ProfileScreen() {
   }, []);
 
   const load = useCallback(async () => {
+    // Local-first: paint last-known profile instantly, then fetch fresh.
+    const cached = await readCache<UserProfile>('my-profile');
+    if (cached) {
+      setProfile(cached);
+      setName(cached.name ?? '');
+      setStatus(cached.status ?? '');
+      setPhone(cached.phone ?? '');
+      setLoading(false);
+    }
     try {
       const p = await api<UserProfile>('/user/profile');
       setProfile(p);
       setName(p.name ?? '');
       setStatus(p.status ?? '');
       setPhone(p.phone ?? '');
+      writeCache('my-profile', p);
     } catch (e: any) {
-      Alert.alert('Profile load failed', e?.message ?? 'Try again');
+      // Keep cached data for offline read; only surface if nothing painted.
+      if (!cached) Alert.alert('Profile load failed', e?.message ?? 'Try again');
     } finally {
       setLoading(false);
     }

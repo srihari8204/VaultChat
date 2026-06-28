@@ -19,6 +19,7 @@ import {
 import * as SecureStore from 'expo-secure-store';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
+import { readCache, writeCache } from '../lib/localCache';
 import {
   addMonitor, checkEmailBreaches, checkPasswordPwned, fmtCount, listMonitors,
   recordMonitorScan, removeMonitor, type Breach, type BreachMonitor,
@@ -52,8 +53,15 @@ export default function BreachGuardScreen() {
   const [pwResult, setPwResult] = useState<number | null>(null);
 
   const loadMonitors = useCallback(async () => {
-    try { setMonitors(await listMonitors()); }
-    catch { /* offline / unauth — leave list as-is */ }
+    // Local-first: paint last-known monitors instantly so re-opens never blank-spin.
+    const cached = await readCache<BreachMonitor[]>('breachguard');
+    if (cached) { setMonitors(cached); setLoading(false); }
+    try {
+      const fresh = await listMonitors();
+      setMonitors(fresh);
+      writeCache('breachguard', fresh);
+    }
+    catch { /* offline / unauth — keep painted cache */ }
     finally { setLoading(false); }
   }, []);
 

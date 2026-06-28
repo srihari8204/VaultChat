@@ -6,7 +6,7 @@
 // pin/archive/mute/hidden, unread) is preserved from the previous version.
 
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator, Alert, Image, Modal, Pressable, RefreshControl, ScrollView, SectionList,
   StyleSheet, Text, TouchableOpacity, View,
@@ -484,7 +484,7 @@ function SheetItem({ icon, label, onPress, danger }: { icon: any; label: string;
   );
 }
 
-function ChatRow({
+const ChatRow = memo(function ChatRow({
   chat, authHeader, draft, lastMsg, meId, isTyping, selectMode, isSelected, onPress, onAvatarPress, onLongPress, onPin, onMute, onArchive, onDelete,
 }: {
   chat: ChatSummary; authHeader: string | null; draft?: string; lastMsg?: LastMsg; meId?: string | null; isTyping?: boolean;
@@ -592,7 +592,19 @@ function ChatRow({
       </TouchableOpacity>
     </Swipeable>
   );
-}
+}, (a, b) =>
+  // Re-render a row ONLY when its own data changes — not when an unrelated chat
+  // updates (typing, draft, unread on another row). Handler props are inline
+  // closures keyed by the stable chat id, so we deliberately ignore them.
+  a.chat === b.chat &&
+  a.authHeader === b.authHeader &&
+  a.draft === b.draft &&
+  a.lastMsg === b.lastMsg &&
+  a.meId === b.meId &&
+  a.isTyping === b.isTyping &&
+  a.selectMode === b.selectMode &&
+  a.isSelected === b.isSelected,
+);
 
 function formatRelative(iso: string): string {
   try {

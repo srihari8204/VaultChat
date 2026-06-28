@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState , useMemo} from 'react';
 import { ActivityIndicator, Animated, Easing, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
+import { readCache, writeCache } from '../lib/localCache';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { getSecurityOverview, type SecurityOverview } from '../lib/security';
 import { E2EE_ENABLED } from '../constants/flags';
@@ -59,9 +60,17 @@ function DashboardContent() {
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
   const load = useCallback(async () => {
-    setLoading(true); setError(null);
-    try { setOverview(await getSecurityOverview()); }
-    catch (e: any) { setError(e?.message ?? 'Failed to load'); }
+    setError(null);
+    // Local-first: paint last-known security overview instantly, then refresh.
+    const cached = await readCache<SecurityOverview>('dashboard');
+    if (cached) { setOverview(cached); setLoading(false); }
+    else setLoading(true);
+    try {
+      const fresh = await getSecurityOverview();
+      setOverview(fresh);
+      writeCache('dashboard', fresh);
+    }
+    catch (e: any) { if (!cached) setError(e?.message ?? 'Failed to load'); }
     finally { setLoading(false); }
   }, []);
 

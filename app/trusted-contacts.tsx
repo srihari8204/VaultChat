@@ -12,9 +12,11 @@ import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
+import { readCache, writeCache } from '../lib/localCache';
 import { listTrustedContacts, addTrustedContact, removeTrustedContact, type TrustedContact } from '../lib/chatService';
 
 const MAX_TRUSTED = 3;
+const CACHE_KEY = 'trusted-contacts';
 
 function useS() {
   const { colors } = useTheme();
@@ -31,13 +33,24 @@ export default function TrustedContactsScreen() {
   const [searchId, setSearchId] = useState('');
   const [searching, setSearching] = useState(false);
 
-  const load = useCallback(async () => {
-    try { setTrusted(await listTrustedContacts()); }
-    catch (e: any) { Alert.alert('Error', e?.message ?? 'Failed to load'); }
+  const load = useCallback(async (hasCache: boolean) => {
+    try {
+      const list = await listTrustedContacts();
+      setTrusted(list);
+      writeCache(CACHE_KEY, list);
+    }
+    // Keep cached contacts if we have them; only alert on a cold load.
+    catch (e: any) { if (!hasCache) Alert.alert('Error', e?.message ?? 'Failed to load'); }
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    (async () => {
+      const cached = await readCache<TrustedContact[]>(CACHE_KEY);
+      if (cached) { setTrusted(cached); setLoading(false); }
+      await load(!!cached);
+    })();
+  }, [load]);
 
   const addByVaultId = async () => {
     const id = searchId.trim().toLowerCase().replace('@', '');

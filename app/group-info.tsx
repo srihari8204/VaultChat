@@ -30,6 +30,7 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { getAccessToken } from '../lib/api';
+import { readCache, writeCache } from '../lib/localCache';
 import {
   addChatMembers,
   attachmentUrl,
@@ -66,8 +67,21 @@ export default function GroupInfoScreen() {
   const [descDraft, setDescDraft] = useState('');
 
   const load = useCallback(async () => {
+    // Cache key includes the chat id so different groups don't collide.
+    const cacheKey = 'group-info:' + chatId;
+    let painted = false;
     try {
-      setLoading(true);
+      // Local-first: paint the last-known group detail instantly, then refresh.
+      const cached = chatId ? await readCache<ChatDetail>(cacheKey) : null;
+      if (cached) {
+        setChat(cached);
+        setNameDraft(cached.name ?? '');
+        setLoading(false);
+        painted = true;
+      } else {
+        setLoading(true);
+      }
+
       const [c, me, tok] = await Promise.all([
         getChat(chatId), getCurrentUserAsync(), getAccessToken(),
       ]);
@@ -75,14 +89,26 @@ export default function GroupInfoScreen() {
       setMeId(me?.id ?? null);
       setAuthHeader(tok ? `Bearer ${tok}` : null);
       setNameDraft(c.name ?? '');
+      if (chatId) writeCache<ChatDetail>(cacheKey, c);
     } catch (e: any) {
-      Alert.alert('Could not load group', e?.message ?? 'Try again');
+      // Keep painted cache on error; only surface failure when nothing is shown.
+      if (!painted) Alert.alert('Could not load group', e?.message ?? 'Try again');
     } finally {
-      setLoading(false);
+      if (!painted) setLoading(false);
     }
   }, [chatId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Apply an optimistic update to `chat` AND persist it so re-opens stay accurate.
+  const patchChat = useCallback((fn: (prev: ChatDetail) => ChatDetail) => {
+    setChat(prev => {
+      if (!prev) return prev;
+      const next = fn(prev);
+      if (chatId) writeCache<ChatDetail>('group-info:' + chatId, next);
+      return next;
+    });
+  }, [chatId]);
 
   const myRole = chat?.members.find(m => m.userId === meId)?.role;
   const isAdmin = myRole === 'admin' || myRole === 'owner';
@@ -93,7 +119,7 @@ export default function GroupInfoScreen() {
     if (!n || n === chat.name) { setRenaming(false); return; }
     try {
       await updateChat(chat.id, { name: n });
-      setChat(prev => prev ? { ...prev, name: n } : prev);
+      patchChat(prev => ({ ...prev, name: n }));
     } catch (e: any) {
       Alert.alert('Rename failed', e?.message ?? 'Try again');
     } finally {
@@ -106,7 +132,7 @@ export default function GroupInfoScreen() {
     const d = descDraft.trim();
     try {
       await updateChat(chat.id, { description: d });
-      setChat(prev => prev ? { ...prev, description: d || null } : prev);
+      patchChat(prev => ({ ...prev, description: d || null }));
     } catch (e: any) { Alert.alert('Could not save', e?.message ?? 'Try again'); }
     finally { setEditingDesc(false); }
   }, [chat, isAdmin, descDraft]);
@@ -131,7 +157,7 @@ export default function GroupInfoScreen() {
         asset.mimeType || 'image/jpeg',
       );
       await updateChat(chat.id, { photoURL: up.id });
-      setChat(prev => prev ? { ...prev, photoURL: up.id } : prev);
+      patchChat(prev => ({ ...prev, photoURL: up.id }));
     } catch (e: any) {
       Alert.alert('Photo upload failed', e?.message ?? 'Try again');
     } finally {
@@ -149,10 +175,10 @@ export default function GroupInfoScreen() {
         { text: 'Remove', style: 'destructive', onPress: async () => {
             try {
               await removeChatMember(chat.id, m.userId);
-              setChat(prev => prev ? {
+              patchChat(prev => ({
                 ...prev,
                 members: prev.members.map(x => x.userId === m.userId ? { ...x, leftAt: new Date().toISOString() } : x),
-              } : prev);
+              }));
             } catch (e: any) {
               Alert.alert('Remove failed', e?.message ?? 'Try again');
             }

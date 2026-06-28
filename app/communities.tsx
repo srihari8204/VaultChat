@@ -15,6 +15,7 @@ import {
   listCommunities, createCommunity, getCommunity, createCommunityGroup,
   type Community, type CommunityDetail,
 } from '../lib/chatService';
+import { readCache, writeCache } from '../lib/localCache';
 
 export default function CommunitiesScreen() {
   const { colors } = useTheme();
@@ -30,13 +31,31 @@ export default function CommunitiesScreen() {
   const [desc, setDesc] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const loadList = useCallback(() => { listCommunities().then(l => { setList(l); setLoading(false); }).catch(() => setLoading(false)); }, []);
+  const loadList = useCallback(async () => {
+    // Local-first: paint cached list instantly, then refresh in background.
+    const cached = await readCache<Community[]>('communities');
+    if (cached) { setList(cached); setLoading(false); }
+    try {
+      const l = await listCommunities();
+      setList(l);
+      writeCache('communities', l);
+    } catch { /* keep cached list for offline read */ }
+    finally { setLoading(false); }
+  }, []);
   useFocusEffect(useCallback(() => { if (!detail) loadList(); }, [detail, loadList]));
 
   const openCommunity = useCallback(async (id: string) => {
-    setLoading(true);
-    try { setDetail(await getCommunity(id)); }
-    catch { Alert.alert('Error', 'Could not open this community.'); }
+    // Local-first: paint cached detail instantly, else show spinner.
+    const cached = await readCache<CommunityDetail>('community:' + id);
+    if (cached) { setDetail(cached); setLoading(false); }
+    else setLoading(true);
+    try {
+      const d = await getCommunity(id);
+      setDetail(d);
+      writeCache('community:' + id, d);
+    } catch {
+      if (!cached) Alert.alert('Error', 'Could not open this community.');
+    }
     finally { setLoading(false); }
   }, []);
 

@@ -23,12 +23,15 @@ import {
 } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
+import { readCache, writeCache } from '../lib/localCache';
 import {
   listSessions,
   revokeAllOtherSessions,
   revokeSession,
   type SessionRow,
 } from '../lib/chatService';
+
+const CACHE_KEY = 'sessions';
 
 function useS() {
   const { colors } = useTheme();
@@ -49,13 +52,23 @@ export default function LoginHistoryScreen() {
       const list = await listSessions();
       setRows(list);
       setError(null);
+      writeCache(CACHE_KEY, list);
     } catch (e: any) {
-      setError(e?.message ?? 'Failed to load sessions');
+      // Keep cached rows if we have them; only surface the error on a cold load.
+      setRows(prev => {
+        if (prev.length === 0) setError(e?.message ?? 'Failed to load sessions');
+        return prev;
+      });
     }
   }, []);
 
   useEffect(() => {
-    (async () => { setLoading(true); await fetchAll(); setLoading(false); })();
+    (async () => {
+      const cached = await readCache<SessionRow[]>(CACHE_KEY);
+      if (cached) { setRows(cached); setLoading(false); }
+      await fetchAll();
+      setLoading(false);
+    })();
   }, [fetchAll]);
 
   const onRefresh = useCallback(async () => {

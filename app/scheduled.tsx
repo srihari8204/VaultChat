@@ -19,11 +19,14 @@ import {
 } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
+import { readCache, writeCache } from '../lib/localCache';
 import {
   cancelScheduledMessage,
   listScheduledMessages,
   type ScheduledMessageRow,
 } from '../lib/chatService';
+
+const CACHE_KEY = 'scheduled';
 
 function useS() {
   const { colors } = useTheme();
@@ -44,13 +47,23 @@ export default function ScheduledScreen() {
       const list = await listScheduledMessages();
       setRows(list);
       setError(null);
+      writeCache(CACHE_KEY, list);
     } catch (e: any) {
-      setError(e?.message ?? 'Failed to load');
+      // Keep cached rows if we have them; only surface the error on a cold load.
+      setRows(prev => {
+        if (prev.length === 0) setError(e?.message ?? 'Failed to load');
+        return prev;
+      });
     }
   }, []);
 
   useEffect(() => {
-    (async () => { setLoading(true); await load(); setLoading(false); })();
+    (async () => {
+      const cached = await readCache<ScheduledMessageRow[]>(CACHE_KEY);
+      if (cached) { setRows(cached); setLoading(false); }
+      await load();
+      setLoading(false);
+    })();
   }, [load]);
 
   const onRefresh = useCallback(async () => {

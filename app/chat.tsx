@@ -3599,23 +3599,26 @@ function MessageBubble({
         {/* Inline reply preview (above the body) — tap to jump to the original.
             Suppressed on forwarded messages: a forward carries no reply context
             (it shows "↪ Forwarded"), so we must never render a reply quote. */}
-        {replyTarget && !msg.meta?.forwardedFrom && (
+        {(msg.replyToId ?? 0) > 0 && !msg.meta?.forwardedFrom && (
           <TouchableOpacity
             style={S.replyPreview}
             activeOpacity={0.6}
-            onPress={() => { if (replyTarget.id > 0) onJumpTo?.(replyTarget.id); }}
+            onPress={() => { const t = replyTarget?.id ?? msg.replyToId; if (t && t > 0) onJumpTo?.(t); }}
           >
             <View style={S.replyPreviewLine} />
             <View style={{ flex: 1 }}>
               <Text style={S.replyPreviewWho} numberOfLines={1}>
-                {replyTargetMember?.name || replyTargetMember?.email || 'Reply'}
+                {replyTarget
+                  ? (replyTarget.senderId === meId ? 'You' : (replyTargetMember?.name || replyTargetMember?.email || 'Unknown'))
+                  : 'Replied message'}
               </Text>
               <Text style={S.replyPreviewBody} numberOfLines={1}>
-                {replyTarget.type === 'image' ? '📷 Photo'
+                {!replyTarget ? 'Tap to view'
+                  : replyTarget.type === 'image' ? '📷 Photo'
                   : replyTarget.type === 'audio' ? '🎙️ Voice message'
                   : replyTarget.type === 'video' ? '🎥 Video'
                   : replyTarget.type === 'file'  ? '📎 File'
-                  : replyPlain || ''}
+                  : (replyPlain || '…')}
               </Text>
             </View>
           </TouchableOpacity>

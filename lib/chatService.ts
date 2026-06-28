@@ -6,7 +6,7 @@ import * as Crypto from 'expo-crypto';
 import * as FileSystem from 'expo-file-system/legacy';
 import { api, getAccessToken } from './api';
 import { SERVER_URL } from '../constants/server';
-import { E2EE_ENABLED, GROUP_E2EE } from '../constants/flags';
+import { E2EE_ENABLED, GROUP_E2EE, E2EE_STRICT } from '../constants/flags';
 
 export interface ChatSummary {
   id:            string;
@@ -159,13 +159,22 @@ export async function encryptForChat(chatId: string, plaintext: string): Promise
     }
   }
   const peerId = directPeerOf(chatId);
-  if (!peerId) return plaintext; // unknown chat → not yet E2EE
+  if (!peerId) {
+    // Can't resolve the recipient → can't encrypt. STRICT: refuse to leak
+    // plaintext (the send fails + retries once the chat/peer is resolved).
+    if (E2EE_STRICT) throw new Error('Encryption not ready — recipient not resolved yet. Retrying…');
+    return plaintext;
+  }
   try {
     const e2ee = await import('../services/crypto/e2eeSession.rn');
     return await e2ee.e2eeEncrypt(chatId, peerId, plaintext);
   } catch (err) {
-    if (__DEV__) console.warn('[e2ee] encrypt fell back to plaintext:', (err as any)?.message);
-    return plaintext; // never block sending
+    if (__DEV__) console.warn('[e2ee] encrypt failed:', (err as any)?.message);
+    // STRICT: never silently send plaintext. Throwing surfaces a failed/retry
+    // bubble; the retry re-fetches the peer's key bundle and almost always
+    // succeeds. (Legacy graceful mode falls back to plaintext.)
+    if (E2EE_STRICT) throw new Error("Couldn't encrypt this message — the recipient's encryption keys aren't available yet. It will retry.");
+    return plaintext;
   }
 }
 

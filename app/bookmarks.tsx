@@ -25,6 +25,7 @@ import {
   removeBookmark,
   type BookmarkRow,
 } from '../lib/chatService';
+import { readCache, writeCache } from '../lib/localCache';
 
 function useS() {
   const { colors } = useTheme();
@@ -41,11 +42,17 @@ export default function BookmarksScreen() {
   const [error,      setError]      = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    // Local-first: paint cached bookmarks instantly, then fetch fresh.
+    const cached = await readCache<BookmarkRow[]>('bookmarks');
+    if (cached) { setRows(cached); setLoading(false); }
     try {
-      setRows(await listBookmarks());
+      const fresh = await listBookmarks();
+      setRows(fresh);
+      writeCache('bookmarks', fresh);
       setError(null);
     } catch (e: any) {
-      setError(e?.message ?? 'Failed to load bookmarks');
+      // Keep cached rows for offline read; only surface if nothing painted.
+      if (!cached) setError(e?.message ?? 'Failed to load bookmarks');
     }
   }, []);
 
@@ -76,7 +83,11 @@ export default function BookmarksScreen() {
         { text: 'Remove', style: 'destructive', onPress: async () => {
             try {
               await removeBookmark(b.id);
-              setRows(prev => prev.filter(r => r.id !== b.id));
+              setRows(prev => {
+                const next = prev.filter(r => r.id !== b.id);
+                writeCache('bookmarks', next); // keep instant-paint cache consistent
+                return next;
+              });
             } catch (e: any) {
               Alert.alert('Failed', e?.message ?? 'Try again');
             }

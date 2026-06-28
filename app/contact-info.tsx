@@ -24,6 +24,7 @@ import {
   decryptFromChat, attachmentUrl, getCommonGroups, type Message, type ChatMember,
 } from '../lib/chatService';
 import { getDecryptedAttachmentUri, parseMediaContent } from '../lib/mediaAttachments';
+import { readCache, writeCache } from '../lib/localCache';
 import { Avatar } from '../components/ui';
 
 const { width: SW } = Dimensions.get('window');
@@ -32,6 +33,16 @@ const URL_RE = /(https?:\/\/[^\s]+)/gi;
 
 interface LinkHit { id: number; url: string }
 interface FileHit { id: number; name: string }
+
+// Shape persisted to the local-first cache so a re-open paints instantly.
+interface ContactInfoCache {
+  peer: ChatMember | null;
+  muted: boolean;
+  blocked: boolean;
+  media: Message[];
+  files: FileHit[];
+  links: LinkHit[];
+}
 
 function useS() {
   const { colors } = useTheme();
@@ -60,7 +71,23 @@ export default function ContactInfoScreen() {
 
   useEffect(() => {
     let active = true;
+    // Cache key includes the chat id so different conversations don't collide.
+    const cacheKey = 'contact-info:' + (chatId || peerUid || '');
+    let painted = false;
     (async () => {
+      // Local-first: paint the last-known snapshot instantly, before the network.
+      const cached = chatId || peerUid ? await readCache<ContactInfoCache>(cacheKey) : null;
+      if (active && cached) {
+        if (cached.peer) setPeer(cached.peer);
+        setMuted(cached.muted);
+        setBlocked(cached.blocked);
+        setMedia(cached.media);
+        setFiles(cached.files);
+        setLinks(cached.links);
+        setLoading(false);
+        painted = true;
+      }
+
       try {
         const tok = await getAccessToken();
         if (active) setAuthHeader(tok ? `Bearer ${tok}` : null);
@@ -70,18 +97,30 @@ export default function ContactInfoScreen() {
         const [blocks, chat, msgs] = await Promise.all(tasks);
 
         if (!active) return;
-        if (peerUid) setBlocked((blocks as any[]).some(b => b.userId === peerUid));
+
+        let nextBlocked = blocked;
+        let nextMuted = muted;
+        let nextPeer = peer;
+        if (peerUid) { nextBlocked = (blocks as any[]).some(b => b.userId === peerUid); setBlocked(nextBlocked); }
         if (chat) {
-          setMuted(!!chat.muted);
+          nextMuted = !!chat.muted;
+          setMuted(nextMuted);
           const p = chat.members.find((m: ChatMember) => m.userId === peerUid && !m.leftAt)
             ?? chat.members.find((m: ChatMember) => m.userId === peerUid);
-          if (p) setPeer(p);
+          if (p) { nextPeer = p; setPeer(p); }
         }
-        if (msgs) classify(msgs as Message[]);
+        const buckets = msgs ? classify(msgs as Message[]) : { media, files, links };
+
+        if (chatId || peerUid) {
+          writeCache<ContactInfoCache>(cacheKey, {
+            peer: nextPeer, muted: nextMuted, blocked: nextBlocked,
+            media: buckets.media, files: buckets.files, links: buckets.links,
+          });
+        }
       } catch {
-        // Non-fatal: header still renders from params.
+        // Non-fatal: header still renders from params (and cache, if painted).
       } finally {
-        if (active) setLoading(false);
+        if (active && !painted) setLoading(false);
       }
     })();
     return () => { active = false; };
@@ -98,9 +137,11 @@ export default function ContactInfoScreen() {
         if (found) for (const u of found) lnk.push({ id: m.id, url: u });
       }
     }
-    setMedia(med.slice(0, 9));
-    setFiles(fil.slice(0, 5));
-    setLinks(lnk.slice(0, 5));
+    const out = { media: med.slice(0, 9), files: fil.slice(0, 5), links: lnk.slice(0, 5) };
+    setMedia(out.media);
+    setFiles(out.files);
+    setLinks(out.links);
+    return out;
   };
 
   const lastSeenText = useCallback(() => {

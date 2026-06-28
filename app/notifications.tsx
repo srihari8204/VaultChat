@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, useCallback , useMemo} from 'react';
 import { Alert, Animated, Easing, ActivityIndicator, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
+import { readCache, writeCache } from '../lib/localCache';
 import * as Location from 'expo-location';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import {
@@ -51,21 +52,37 @@ function NotificationsContent() {
   const loadSos = useCallback(async () => { try { setSos(await listSOSHistory()); } catch {} }, []);
 
   useEffect(()=>{
+    let cancel = false;
+    type AlertsCache = { sos: SOSHistoryItem[]; contacts: TrustedContact[]; settings: UserSettings | null };
     (async () => {
+      // Local-first: paint last-known SOS history / contacts / privacy settings, then refresh.
+      const cached = await readCache<AlertsCache>('alerts');
+      if (!cancel && cached) {
+        setSos(cached.sos); setContacts(cached.contacts); setSettings(cached.settings);
+        setLoading(false);
+      }
       try {
         const [h, c, s] = await Promise.all([
-          listSOSHistory().catch(() => []),
-          listTrustedContacts().catch(() => []),
+          listSOSHistory().catch(() => null),
+          listTrustedContacts().catch(() => null),
           getSettings().catch(() => null),
         ]);
-        setSos(h); setContacts(c); setSettings(s);
-      } finally { setLoading(false); }
+        if (cancel) return;
+        // Fall back to cached values for any piece that failed, so a partial
+        // network failure never blanks a section we already showed.
+        const sosV = h ?? cached?.sos ?? [];
+        const contactsV = c ?? cached?.contacts ?? [];
+        const settingsV = s ?? cached?.settings ?? null;
+        setSos(sosV); setContacts(contactsV); setSettings(settingsV);
+        writeCache('alerts', { sos: sosV, contacts: contactsV, settings: settingsV });
+      } finally { if (!cancel) setLoading(false); }
     })();
     Animated.timing(fadeIn,{toValue:1,duration:500,useNativeDriver:true}).start();
     Animated.loop(Animated.sequence([
       Animated.timing(glowAnim,{toValue:1,duration:1800,easing:Easing.inOut(Easing.ease),useNativeDriver:false}),
       Animated.timing(glowAnim,{toValue:0,duration:1800,easing:Easing.inOut(Easing.ease),useNativeDriver:false}),
     ])).start();
+    return () => { cancel = true; };
   },[fadeIn, glowAnim]);
 
   const fireSOS = useCallback(async () => {

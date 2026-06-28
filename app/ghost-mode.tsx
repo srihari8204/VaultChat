@@ -30,6 +30,7 @@ import {
 } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
+import { readCache, writeCache } from '../lib/localCache';
 import { getAccessToken } from '../lib/api';
 import {
   attachmentUrl,
@@ -67,14 +68,19 @@ function ListView() {
   useEffect(() => {
     let cancel = false;
     (async () => {
+      // Local-first: paint last-known overrides instantly, then refresh.
+      const cached = await readCache<GhostMode[]>('ghost-mode');
+      if (!cancel && cached) { setRows(cached); setLoading(false); }
       try {
         const [list, tok] = await Promise.all([listGhostMode(), getAccessToken()]);
         if (!cancel) {
           setRows(list);
           setAuthHeader(tok ? `Bearer ${tok}` : null);
         }
+        writeCache('ghost-mode', list);
       } catch (e: any) {
-        if (!cancel) Alert.alert('Could not load', e?.message ?? 'Try again');
+        // Keep painted cache for offline read; only surface error when nothing shown.
+        if (!cancel && !cached) Alert.alert('Could not load', e?.message ?? 'Try again');
       } finally {
         if (!cancel) setLoading(false);
       }
@@ -167,11 +173,15 @@ function PerTargetEditor({ targetId, targetName }: { targetId: string; targetNam
   useEffect(() => {
     let cancel = false;
     (async () => {
+      // Local-first: paint this contact's last-known overrides, then refresh.
+      const cached = await readCache<GhostMode>('ghost-mode:' + targetId);
+      if (!cancel && cached) { setState(cached); setLoading(false); }
       try {
         const g = await getGhostMode(targetId);
         if (!cancel) setState(g);
+        writeCache('ghost-mode:' + targetId, g);
       } catch (e: any) {
-        if (!cancel) Alert.alert('Could not load', e?.message ?? 'Try again');
+        if (!cancel && !cached) Alert.alert('Could not load', e?.message ?? 'Try again');
       } finally {
         if (!cancel) setLoading(false);
       }

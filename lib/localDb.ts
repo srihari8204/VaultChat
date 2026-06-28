@@ -75,10 +75,25 @@ export async function cacheMessages(chatId: string, msgs: Message[]): Promise<vo
   await db.withTransactionAsync(async () => {
     for (const m of msgs) {
       if (typeof m.id !== 'number' || m.id <= 0) continue; // skip optimistic temp rows
+      // Upsert. CRITICAL for delete-on-delivery: if the server has purged the
+      // body (content null) but we already hold the plaintext locally, KEEP the
+      // local copy — never let a re-sync/back-page wipe cached content. Same for
+      // meta. A real edit (non-null content) still overwrites.
       await db.runAsync(
-        `INSERT OR REPLACE INTO messages
+        `INSERT INTO messages
            (id, chat_id, sender_id, type, content, reply_to_id, meta, created_at, edited_at, deleted_at, expires_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)
+         ON CONFLICT(id) DO UPDATE SET
+           chat_id     = excluded.chat_id,
+           sender_id   = excluded.sender_id,
+           type        = excluded.type,
+           content     = COALESCE(excluded.content, messages.content),
+           reply_to_id = excluded.reply_to_id,
+           meta        = COALESCE(excluded.meta, messages.meta),
+           created_at  = excluded.created_at,
+           edited_at   = excluded.edited_at,
+           deleted_at  = excluded.deleted_at,
+           expires_at  = excluded.expires_at`,
         [
           m.id, chatId, (m as any).senderId ?? null, m.type ?? null, encField(m.content ?? null),
           m.replyToId ?? null, encField(m.meta != null ? JSON.stringify(m.meta) : null),

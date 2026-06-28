@@ -164,6 +164,67 @@ const sweepTimer = setInterval(sweepExpiredMessages, SWEEP_INTERVAL_MS);
 // stale ephemeral content visible.
 sweepExpiredMessages().catch(() => {});
 
+// ─── Delete-on-delivery (WhatsApp model) ──────────────────────────────
+// Once a message has been DELIVERED to every active recipient, the server no
+// longer needs the body — the recipients hold it in their local-first SQLite.
+// We NULL the content (keep the row for ordering/receipts; no socket event so
+// clients that already cached it are unaffected). New devices restore old
+// history from encrypted backup, exactly like WhatsApp.
+//
+// Gated by env so it's safe to deploy OFF and enable once you're comfortable
+// that clients reliably cache on receipt (they do — see local-first sweep).
+//   DELETE_ON_DELIVERY=true        — enable purging
+//   DELETE_ON_DELIVERY_GRACE_SEC   — min age before purge (default 120s)
+//   DELETE_ON_DELIVERY_MAX_AGE_DAYS— also purge undelivered bodies older than
+//                                    this (default 0 = never; set e.g. 30)
+const DOD_ON        = process.env.DELETE_ON_DELIVERY === 'true';
+const DOD_GRACE_SEC = parseInt(process.env.DELETE_ON_DELIVERY_GRACE_SEC || '120', 10);
+const DOD_MAX_DAYS  = parseInt(process.env.DELETE_ON_DELIVERY_MAX_AGE_DAYS || '0', 10);
+async function sweepDeliveredMessages() {
+  if (!DOD_ON) return;
+  try {
+    // Purge content of messages delivered to ALL other active members.
+    const r = await db.query(
+      `UPDATE messages m
+          SET content = NULL
+        WHERE m.content IS NOT NULL
+          AND m.deleted_at IS NULL
+          AND m.created_at < NOW() - ($1 || ' seconds')::interval
+          AND EXISTS (
+            SELECT 1 FROM chat_members o
+             WHERE o.chat_id = m.chat_id AND o.left_at IS NULL AND o.user_id <> m.sender_id
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM chat_members cm
+             WHERE cm.chat_id = m.chat_id
+               AND cm.left_at IS NULL
+               AND cm.user_id <> m.sender_id
+               AND (cm.last_delivered_message_id IS NULL OR cm.last_delivered_message_id < m.id)
+          )
+        RETURNING m.id`,
+      [String(DOD_GRACE_SEC)],
+    );
+    let purged = r.rowCount || 0;
+    // Optional hard cap: drop bodies older than N days even if not delivered to
+    // everyone (e.g. a member who never came back online).
+    if (DOD_MAX_DAYS > 0) {
+      const c = await db.query(
+        `UPDATE messages SET content = NULL
+          WHERE content IS NOT NULL AND deleted_at IS NULL
+            AND created_at < NOW() - ($1 || ' days')::interval
+          RETURNING id`,
+        [String(DOD_MAX_DAYS)],
+      );
+      purged += c.rowCount || 0;
+    }
+    if (purged > 0) console.log(`[delete-on-delivery] purged ${purged} delivered message bodies`);
+  } catch (err) {
+    console.error('[delete-on-delivery] failed:', err.message);
+  }
+}
+const deliveredSweepTimer = DOD_ON ? setInterval(sweepDeliveredMessages, SWEEP_INTERVAL_MS) : null;
+if (DOD_ON) { sweepDeliveredMessages().catch(() => {}); console.log('[delete-on-delivery] ENABLED'); }
+
 // ─── Media retention — purge delivered/expired attachment bytes ────
 // WhatsApp-style: once every recipient has downloaded an attachment (or after a
 // hard TTL backstop for the never-online case), delete the BYTES from storage.
