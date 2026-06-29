@@ -84,19 +84,22 @@ class CallModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMo
      */
     @ReactMethod
     fun getInitialCallIntent(promise: Promise) {
-        val act = currentActivity ?: return promise.resolve(null)
-        val intent = act.intent
+        val intent = getCurrentActivity()?.intent
         val action = intent?.getStringExtra("vc_action")
-        if (action == null || intent.getStringExtra("callId") == null) return promise.resolve(null)
-        val map = Arguments.createMap().apply {
-            putString("action", action)                               // "incoming_call" | "answer"
-            putString("callId", intent.getStringExtra("callId"))
-            putString("callerId", intent.getStringExtra("callerId"))
-            putString("callerName", intent.getStringExtra("callerName"))
-            putBoolean("isVideo", intent.getBooleanExtra("isVideo", false))
+        val callId = intent?.getStringExtra("callId")
+        if (intent == null || action == null || callId == null) {
+            promise.resolve(null)
+            return
         }
+        val map = Arguments.createMap()
+        map.putString("action", action)                               // "incoming_call" | "answer"
+        map.putString("callId", callId)
+        map.putString("callerId", intent.getStringExtra("callerId"))
+        map.putString("callerName", intent.getStringExtra("callerName"))
+        map.putBoolean("isVideo", intent.getBooleanExtra("isVideo", false))
         // Consume so it fires only once.
-        intent.removeExtra("vc_action"); intent.removeExtra("callId")
+        intent.removeExtra("vc_action")
+        intent.removeExtra("callId")
         promise.resolve(map)
     }
 }

@@ -21,6 +21,7 @@ const {
   withAndroidManifest,
   withDangerousMod,
   withMainApplication,
+  withAppBuildGradle,
   withInfoPlist,
   AndroidConfig,
 } = require('@expo/config-plugins');
@@ -133,6 +134,26 @@ function withPackageRegistration(config) {
   });
 }
 
+// Native FCM SDK so VaultCallMessagingService (a FirebaseMessagingService) has
+// com.google.firebase.messaging on the classpath. The project shims the JS
+// @react-native-firebase to the web SDK, but this is the native Gradle lib and
+// is independent of that shim. The google-services plugin + json are already set
+// up by the base config, so only the dependency is needed.
+const FIREBASE_MESSAGING = 'com.google.firebase:firebase-messaging:24.1.1';
+function withFirebaseMessaging(config) {
+  return withAppBuildGradle(config, (cfg) => {
+    let src = cfg.modResults.contents;
+    if (!src.includes('firebase-messaging')) {
+      src = src.replace(
+        /dependencies\s*\{/,
+        `dependencies {\n    implementation("${FIREBASE_MESSAGING}")  // native FCM for call wake-up`,
+      );
+      cfg.modResults.contents = src;
+    }
+    return cfg;
+  });
+}
+
 function withIosVoip(config) {
   return withInfoPlist(config, (cfg) => {
     const modes = new Set(cfg.modResults.UIBackgroundModes || []);
@@ -149,6 +170,7 @@ module.exports = function withVaultChatCalls(config) {
   config = withServices(config);
   config = withKotlinSources(config);
   config = withPackageRegistration(config);
+  config = withFirebaseMessaging(config);
   config = withIosVoip(config);
   return config;
 };
