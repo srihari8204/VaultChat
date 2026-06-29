@@ -110,23 +110,25 @@ function withKotlinSources(config) {
 function withPackageRegistration(config) {
   return withMainApplication(config, (cfg) => {
     let src = cfg.modResults.contents;
-    if (!src.includes('CallPackage()')) {
-      // Kotlin MainApplication: add to the PackageList getPackages() result.
-      // Most Expo templates expose: override fun getPackages(): List<ReactPackage> {
-      //   val packages = PackageList(this).packages
-      //   // add(MyReactNativePackage())
-      //   return packages
-      // }
-      if (src.includes('PackageList(this).packages')) {
-        src = src.replace(
-          /(val packages\s*=\s*PackageList\(this\)\.packages)/,
-          `$1\n      packages.add(${CALLS_PKG}.CallPackage())`,
-        );
-      } else if (src.includes('return packages')) {
-        src = src.replace(/return packages/, `packages.add(${CALLS_PKG}.CallPackage())\n      return packages`);
-      }
-      cfg.modResults.contents = src;
+    if (src.includes(`${CALLS_PKG}.CallPackage()`)) return cfg;   // already registered
+    const add = `add(${CALLS_PKG}.CallPackage())`;
+
+    // Current Expo (SDK 50+) Kotlin template:
+    //   override fun getPackages(): List<ReactPackage> =
+    //     PackageList(this).packages.apply {
+    //       // add(MyReactNativePackage())
+    //     }
+    if (src.includes('// add(MyReactNativePackage())')) {
+      src = src.replace('// add(MyReactNativePackage())', `// add(MyReactNativePackage())\n              ${add}`);
+    } else if (src.includes('.packages.apply {')) {
+      src = src.replace('.packages.apply {', `.packages.apply {\n              ${add}`);
+    } else if (/val\s+packages\s*=\s*PackageList\(this\)\.packages/.test(src)) {
+      // Older block form: val packages = PackageList(this).packages … return packages
+      src = src.replace(/(val\s+packages\s*=\s*PackageList\(this\)\.packages)/, `$1\n      packages.${add}`);
+    } else {
+      console.warn(`[withVaultChatCalls] could not auto-register CallPackage — add \`packages.${add}\` to MainApplication.getPackages() manually`);
     }
+    cfg.modResults.contents = src;
     return cfg;
   });
 }
