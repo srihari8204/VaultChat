@@ -7,23 +7,16 @@
 
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as VideoThumbnails from 'expo-video-thumbnails';
-import PdfThumbnail from 'react-native-pdf-thumbnail';
 
 const THUMB_WIDTH = 240;
 
-/** First-page preview of a PDF as a base64 JPEG (WhatsApp-style doc preview). */
-export async function makePdfThumb(localUri: string): Promise<string | null> {
-  try {
-    const { uri } = await PdfThumbnail.generate(localUri, 0);   // page 1 (0-indexed)
-    const r = await ImageManipulator.manipulateAsync(
-      uri,
-      [{ resize: { width: 320 } }],
-      { compress: 0.6, format: ImageManipulator.SaveFormat.JPEG, base64: true },
-    );
-    return r.base64 ?? null;
-  } catch {
-    return null;
-  }
+/** First-page preview of a PDF as a base64 JPEG.
+ *  Disabled: `react-native-pdf-thumbnail` fails to compile on Expo SDK 54
+ *  (Kotlin 2.0), breaking the Android build. PDFs fall back to a generic doc
+ *  icon (callers already treat a null thumb as "no preview"). Re-enable with a
+ *  build-compatible thumbnailer when one is available. */
+export async function makePdfThumb(_localUri: string): Promise<string | null> {
+  return null;
 }
 
 /** Returns a base64 JPEG thumbnail for an image/video local file, or null. */

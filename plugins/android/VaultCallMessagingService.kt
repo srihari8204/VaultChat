@@ -20,7 +20,6 @@ import android.media.RingtoneManager
 import android.os.Build
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
-import androidx.core.graphics.drawable.IconCompat
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import java.net.HttpURLConnection
@@ -186,8 +185,8 @@ class VaultCallMessagingService : FirebaseMessagingService() {
             .setAutoCancel(false)
             .setFullScreenIntent(fsPi, true)            // shows over the lock screen
             .setContentIntent(fsPi)
-            .addAction(IconCompat.createWithResource(this, applicationInfo.icon).toIcon(this).resId, "Decline", declinePi)
-            .addAction(IconCompat.createWithResource(this, applicationInfo.icon).toIcon(this).resId, "Answer", answerPi)
+            .addAction(applicationInfo.icon, "Decline", declinePi)
+            .addAction(applicationInfo.icon, "Answer", answerPi)
             .setVibrate(longArrayOf(0, 800, 600, 800, 600))
             .setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE), AudioManager.STREAM_RING)
             .setTimeoutAfter(35_000)
