@@ -1912,7 +1912,7 @@ export default function ChatScreen() {
           activeOpacity={0.85}
           onPress={() => Linking.openURL(`https://maps.google.com/?q=${liveLoc.latitude},${liveLoc.longitude}`).catch(() => {})}
         >
-          <Ionicons name="location" size={20} color={colors.primary} />
+          <Ionicons name="navigate" size={20} color={colors.primary} />
           <View style={{ flex: 1 }}>
             <Text style={{ color: colors.primary, fontSize: 13, fontWeight: '700' }}>{membersById.get(liveLoc.userId)?.name || 'Someone'} is sharing live location</Text>
             <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 11, marginTop: 1 }} numberOfLines={1}>{liveLoc.address || `${liveLoc.latitude.toFixed(5)}, ${liveLoc.longitude.toFixed(5)}`} · Open in Maps</Text>
@@ -3711,8 +3711,8 @@ function MessageBubble({
               onPress={() => { if (ok) Linking.openURL(`https://www.google.com/maps?q=${L.lat},${L.lng}`).catch(() => {}); }}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 190 }}>
-                <View style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: 'rgba(74,159,255,0.18)', alignItems: 'center', justifyContent: 'center' }}>
-                  <Ionicons name="location" size={22} color="#4A9FFF" />
+                <View style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: 'rgba(157,111,208,0.18)', alignItems: 'center', justifyContent: 'center' }}>
+                  <Ionicons name={L?.live ? 'navigate' : 'location'} size={22} color="#9D6FD0" />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, { fontWeight: '700' }]}>
@@ -3723,7 +3723,7 @@ function MessageBubble({
                       {L.address}
                     </Text>
                   )}
-                  {ok && <Text style={{ color: '#4A9FFF', fontSize: 12, fontWeight: '700', marginTop: 2 }}>Open in Maps ›</Text>}
+                  {ok && <Text style={{ color: '#9D6FD0', fontSize: 12, fontWeight: '700', marginTop: 2 }}>Open in Maps ›</Text>}
                 </View>
               </View>
             </TouchableOpacity>

@@ -34,6 +34,7 @@ import { getCurrentUserAsync } from './(constants)/authService';
 import { getTurnConfig, type IceServer } from '../lib/chatService';
 import { getSocket } from '../lib/socket';
 import { addCallLog } from '../lib/callLog';
+import { startCallForeground, stopCallForeground, dismissIncomingNotification, initiateCall, cancelCall } from '../lib/CallService';
 import { Ionicons } from '@expo/vector-icons';
 
 type CallState = 'connecting' | 'ringing' | 'connected' | 'ended';
@@ -83,6 +84,7 @@ export default function VoiceCallScreen() {
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     if (ringTimerRef.current) { clearInterval(ringTimerRef.current); ringTimerRef.current = null; }
     try { InCallManager.stop(); } catch {}
+    stopCallForeground();   // release the mic foreground service + wake lock
     try { localStreamRef.current?.getTracks().forEach((t: any) => t.stop()); } catch {}
     try { pcRef.current?.close(); } catch {}
     pcRef.current = null;
@@ -100,6 +102,11 @@ export default function VoiceCallScreen() {
       const incoming = isIncoming === 'true' || isIncoming === '1';
       const dir: 'incoming' | 'outgoing' | 'missed' = incoming ? (connectedRef.current ? 'incoming' : 'missed') : 'outgoing';
       addCallLog({ chatId, peerUid, peerName: peerName || 'VaultChat user', kind: 'audio', direction: dir, at: Date.now() - secondsRef.current * 1000, durationSec: secondsRef.current }).catch(() => {});
+      // Outgoing call we hung up before it was answered → tell the callee's device
+      // to stop ringing and show a "missed call".
+      if (!incoming && !connectedRef.current && peerUid) {
+        cancelCall(peerUid, String(chatId || peerUid)).catch(() => {});
+      }
     }
     setState('ended');
     teardown(notify);
@@ -140,6 +147,17 @@ export default function VoiceCallScreen() {
   useFocusEffect(useCallback(() => {
     if (heldRef.current && meRef.current) { meRef.current.resume(); setActiveCall(meRef.current); }
   }, []));
+
+  // Once connected: keep audio alive via the mic foreground service, and clear
+  // the native incoming-call ring (so it isn't later turned into a missed call).
+  const fgStartedRef = useRef(false);
+  useEffect(() => {
+    if (state === 'connected' && !fgStartedRef.current) {
+      fgStartedRef.current = true;
+      startCallForeground(String(chatId || peerUid || 'call'), peerName || 'VaultChat user', '', false);
+      dismissIncomingNotification();
+    }
+  }, [state, chatId, peerUid, peerName]);
 
   // ── timer ──────────────────────────────────────────────────
   const startTimer = useCallback(() => {
@@ -251,6 +269,8 @@ export default function VoiceCallScreen() {
           };
           s.emit('call_incoming', ringPayload);
           s.emit('webrtc_offer', { to: peerUid, from: meIdRef.current, offer });
+          // High-priority FCM wake-up so a killed/doze callee still rings.
+          initiateCall({ calleeId: peerUid, callId: String(chatId || peerUid), isVideo: false, sdpOffer: JSON.stringify(offer) }).catch(() => {});
           setState('ringing');
           // Re-send the ring + offer every 3s while ringing, so a callee whose
           // app was killed (and got the push) still receives the offer once it

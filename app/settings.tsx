@@ -338,6 +338,7 @@ export default function SettingsScreen() {
         <Text style={S.label}>DATA & ACCOUNT</Text>
         <View style={S.linkCard}>
           <LinkRow icon="notifications-outline" title="Notifications & Sounds" sub="Message tones, ringtone, vibration" onPress={() => router.push('/notification-sounds' as any)} />
+          <LinkRow icon="call-outline" title="Call reliability" sub="Make calls ring when the app is closed" onPress={() => router.push('/call-reliability' as any)} />
           <LinkRow icon="cloud-upload-outline" title="Chat backup" sub="Encrypted backup to cloud or file" onPress={() => router.push('/chat-backup' as any)} />
           <LinkRow icon="time-outline" title="Scheduled messages" sub="Messages waiting to send later" onPress={() => router.push('/scheduled' as any)} />
           <LinkRow icon="bookmark-outline" title="Bookmarks" sub="Messages you've saved across chats" onPress={() => router.push('/bookmarks' as any)} />

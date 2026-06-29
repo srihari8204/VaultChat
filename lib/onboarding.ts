@@ -62,7 +62,10 @@ export async function pickGoogleAccount(): Promise<GoogleAccount> {
     if (e?.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) throw new Error('Google Play Services not available');
     throw new Error(e?.message ?? 'Google sign-in failed');
   }
-  const u = res?.data?.user ?? {};
+  // v13+ returns { type: 'success' | 'cancelled' | 'noSavedCredential', data }.
+  // Treat a dismissed chooser as a clean cancel (not a hard error).
+  if (res?.type === 'cancelled' || res?.type === 'noSavedCredential') throw new Error('Cancelled');
+  const u = res?.data?.user ?? res?.user ?? {};   // v13+: data.user; legacy: user
   if (!u.email) throw new Error('Could not read the account email');
   return {
     email: u.email,

@@ -1,0 +1,293 @@
+package com.vaultchat.app.calls
+
+import android.app.KeyguardManager
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.Rect
+import android.media.AudioManager
+import android.media.RingtoneManager
+import android.os.Build
+import android.os.PowerManager
+import androidx.core.app.NotificationCompat
+import androidx.core.graphics.drawable.IconCompat
+import com.google.firebase.messaging.FirebaseMessagingService
+import com.google.firebase.messaging.RemoteMessage
+import java.net.HttpURLConnection
+import java.net.URL
+import kotlin.concurrent.thread
+import kotlin.math.abs
+
+/**
+ * Native FCM handler. Runs from a COLD START (app killed) because Android starts
+ * the FirebaseMessagingService process for a data-only high-priority message and
+ * calls onMessageReceived — without needing the React Native JS runtime alive.
+ *
+ * On type="incoming_call" it immediately:
+ *   1. wakes the screen,
+ *   2. starts the call foreground service,
+ *   3. posts a full-screen-intent CATEGORY_CALL notification with the caller's
+ *      NAME (content title) and DP (large icon, loaded async with an initials
+ *      fallback), plus Answer/Decline actions.
+ * On type="call_cancelled" it cancels the ring.
+ */
+class VaultCallMessagingService : FirebaseMessagingService() {
+
+    companion object {
+        const val INCOMING_CHANNEL = "vaultchat_incoming_calls"
+        const val MISSED_CHANNEL = "vaultchat_missed_calls"
+        const val INCOMING_NOTIF_ID = 0xC411
+        const val MISSED_NOTIF_ID = 0xC412
+        const val PREFS = "vaultchat_call_prefs"
+        const val KEY_FCM = "fcm_token"
+
+        const val ACTION_ANSWER = "com.vaultchat.app.CALL_ANSWER"
+        const val ACTION_DECLINE = "com.vaultchat.app.CALL_DECLINE"
+    }
+
+    override fun onNewToken(token: String) {
+        // The backend register call needs the user's JWT, which lives in JS. Save
+        // the token; CallModule.getFcmToken() lets JS read + POST /call/token.
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_FCM, token).apply()
+    }
+
+    override fun onMessageReceived(msg: RemoteMessage) {
+        val data = msg.data
+        when (data["type"]) {
+            "incoming_call" -> showIncoming(data)
+            "call_cancelled" -> handleCancel(data["callId"])
+        }
+    }
+
+    /**
+     * Caller hung up / timed out. Clear the ring; if it was NEVER answered (the
+     * app didn't call dismissIncoming → answered marker), turn it into a
+     * "Missed call" notification with the caller's saved name + DP.
+     */
+    private fun handleCancel(callId: String?) {
+        (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(INCOMING_NOTIF_ID)
+        CallForegroundService.stop(this)
+
+        val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val pending = prefs.getString("ring_callId", null)
+        if (pending != null && (callId == null || pending == callId)) {
+            val name = prefs.getString("ring_name", "VaultChat user") ?: "VaultChat user"
+            val dpUrl = prefs.getString("ring_dp", "") ?: ""
+            val video = prefs.getBoolean("ring_video", false)
+            postMissed(name, dpUrl, video)
+            prefs.edit().remove("ring_callId").remove("ring_name").remove("ring_dp").remove("ring_video").apply()
+        }
+    }
+
+    private fun showIncoming(data: Map<String, String>) {
+        val callId = data["callId"] ?: return
+        val callerId = data["callerId"] ?: ""
+        val name = data["callerName"]?.ifBlank { "VaultChat user" } ?: "VaultChat user"
+        val dpUrl = data["callerDpUrl"] ?: ""
+        val isVideo = data["isVideo"] == "true"
+
+        // Remember who is ringing so an unanswered cancel becomes a missed call.
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString("ring_callId", callId).putString("ring_name", name)
+            .putString("ring_dp", dpUrl).putBoolean("ring_video", isVideo).apply()
+
+        wakeScreen()
+        ensureChannel()
+
+        // Post the ring immediately with an initials fallback so it never waits
+        // on the network; swap in the real DP when it loads.
+        val fallback = initialsBitmap(name)
+        notifyIncoming(callId, callerId, name, isVideo, fallback)
+
+        if (dpUrl.isNotBlank()) {
+            thread(name = "vc-dp-load") {
+                val bmp = loadBitmap(absoluteUrl(dpUrl))
+                if (bmp != null) notifyIncoming(callId, callerId, name, isVideo, circleCrop(bmp))
+            }
+        }
+    }
+
+    /** Lock-screen "Missed call from X" with a tap-to-open + the caller DP. */
+    private fun postMissed(name: String, dpUrl: String, isVideo: Boolean) {
+        ensureMissedChannel()
+        val large = if (dpUrl.isNotBlank()) (loadBitmap(absoluteUrl(dpUrl))?.let { circleCrop(it) } ?: initialsBitmap(name)) else initialsBitmap(name)
+        val launch = packageManager.getLaunchIntentForPackage(packageName)?.apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra("vc_action", "open_calls")
+        } ?: Intent()
+        val pi = PendingIntent.getActivity(this, 9, launch, piFlags())
+        val n = NotificationCompat.Builder(this, MISSED_CHANNEL)
+            .setSmallIcon(applicationInfo.icon)
+            .setContentTitle("Missed ${if (isVideo) "video " else ""}call")
+            .setContentText(name)
+            .setLargeIcon(large)
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setAutoCancel(true)
+            .setContentIntent(pi)
+            .build()
+        (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(MISSED_NOTIF_ID, n)
+    }
+
+    private fun ensureMissedChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (nm.getNotificationChannel(MISSED_CHANNEL) == null) {
+            nm.createNotificationChannel(NotificationChannel(MISSED_CHANNEL, "Missed calls", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = "Notifications for missed VaultChat calls"
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            })
+        }
+    }
+
+    private fun notifyIncoming(callId: String, callerId: String, name: String, isVideo: Boolean, large: Bitmap) {
+        val pkg = packageName
+
+        // Full-screen intent → MainActivity, routed by JS to the incoming-call UI.
+        val fullScreen = packageManager.getLaunchIntentForPackage(pkg)?.apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra("vc_action", "incoming_call")
+            putExtra("callId", callId)
+            putExtra("callerId", callerId)
+            putExtra("callerName", name)
+            putExtra("isVideo", isVideo)
+        } ?: Intent()
+        val fsPi = PendingIntent.getActivity(this, 1, fullScreen, piFlags())
+
+        val answerIntent = Intent(fullScreen).apply { putExtra("vc_action", "answer") }
+        val answerPi = PendingIntent.getActivity(this, 2, answerIntent, piFlags())
+
+        val declinePi = PendingIntent.getBroadcast(
+            this, 3,
+            Intent(this, CallActionReceiver::class.java).apply {
+                action = ACTION_DECLINE; putExtra("callId", callId)
+            },
+            piFlags(),
+        )
+
+        val n: Notification = NotificationCompat.Builder(this, INCOMING_CHANNEL)
+            .setSmallIcon(applicationInfo.icon)
+            .setContentTitle(name)
+            .setContentText(if (isVideo) "VaultChat video call" else "VaultChat audio call")
+            .setLargeIcon(large)
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setOngoing(true)
+            .setAutoCancel(false)
+            .setFullScreenIntent(fsPi, true)            // shows over the lock screen
+            .setContentIntent(fsPi)
+            .addAction(IconCompat.createWithResource(this, applicationInfo.icon).toIcon(this).resId, "Decline", declinePi)
+            .addAction(IconCompat.createWithResource(this, applicationInfo.icon).toIcon(this).resId, "Answer", answerPi)
+            .setVibrate(longArrayOf(0, 800, 600, 800, 600))
+            .setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE), AudioManager.STREAM_RING)
+            .setTimeoutAfter(35_000)
+            .build()
+
+        (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(INCOMING_NOTIF_ID, n)
+    }
+
+    private fun ensureChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (nm.getNotificationChannel(INCOMING_CHANNEL) == null) {
+            val ch = NotificationChannel(INCOMING_CHANNEL, "Incoming calls", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "Rings for incoming VaultChat calls"
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 800, 600, 800, 600)
+                setBypassDnd(true)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                setSound(
+                    RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE),
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION).build(),
+                )
+            }
+            nm.createNotificationChannel(ch)
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun wakeScreen() {
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            pm.newWakeLock(
+                PowerManager.FULL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE,
+                "VaultChat:ring",
+            ).apply { acquire(10_000) }
+            val km = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) km.newKeyguardLock("VaultChat").disableKeyguard()
+        } catch (_: Throwable) {}
+    }
+
+    private fun absoluteUrl(url: String): String {
+        if (url.startsWith("http")) return url
+        val base = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("api_base", "") ?: ""
+        return if (base.isNotBlank()) base.trimEnd('/') + "/" + url.trimStart('/') else url
+    }
+
+    private fun loadBitmap(url: String): Bitmap? = try {
+        val token = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("access_token", null)
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 4000; readTimeout = 4000
+            if (!token.isNullOrBlank()) setRequestProperty("Authorization", "Bearer $token")
+        }
+        conn.inputStream.use { BitmapFactory.decodeStream(it) }
+    } catch (_: Throwable) { null }
+
+    private fun circleCrop(src: Bitmap): Bitmap {
+        val size = minOf(src.width, src.height)
+        val out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        val paint = Paint().apply { isAntiAlias = true }
+        canvas.drawCircle(size / 2f, size / 2f, size / 2f, paint)
+        paint.xfermode = android.graphics.PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
+        val left = (src.width - size) / 2; val top = (src.height - size) / 2
+        canvas.drawBitmap(src, Rect(left, top, left + size, top + size), Rect(0, 0, size, size), paint)
+        return out
+    }
+
+    private fun initialsBitmap(name: String): Bitmap {
+        val size = 256
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        val palette = intArrayOf(0xFF9D6FD0.toInt(), 0xFF7E57C2.toInt(), 0xFF5C6BC0.toInt(), 0xFF26A69A.toInt(), 0xFFEF5350.toInt())
+        val bg = palette[abs(name.hashCode()) % palette.size]
+        val circle = Paint().apply { isAntiAlias = true; color = bg }
+        canvas.drawCircle(size / 2f, size / 2f, size / 2f, circle)
+        val initial = name.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+        val text = Paint().apply {
+            isAntiAlias = true; color = Color.WHITE; textSize = size * 0.45f
+            textAlign = Paint.Align.CENTER; isFakeBoldText = true
+        }
+        val y = size / 2f - (text.descent() + text.ascent()) / 2f
+        canvas.drawText(initial, size / 2f, y, text)
+        return bmp
+    }
+
+    private fun piFlags(): Int =
+        PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0)
+}
+
+/** Handles the Decline action without opening the app. */
+class CallActionReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+            .cancel(VaultCallMessagingService.INCOMING_NOTIF_ID)
+        CallForegroundService.stop(context)
+        // Best-effort: persist a "declined" marker the JS reads on next launch to
+        // notify the caller over the socket. (A killed app can't open a socket here.)
+        context.getSharedPreferences(VaultCallMessagingService.PREFS, Context.MODE_PRIVATE)
+            .edit().putString("declined_call", intent.getStringExtra("callId")).apply()
+    }
+}

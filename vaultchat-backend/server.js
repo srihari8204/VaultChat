@@ -101,6 +101,7 @@ const storiesRouter = require('./routes/stories');
 app.use('/stories',  storiesRouter);
 storiesRouter.setBroadcasters({ emitToUid });   // push 'story_posted' to viewers live
 app.use('/communities', require('./routes/communities'));
+app.use('/call', require('./routes/calls'));   // call wake-up (FCM) + signaling bootstrap
 app.use('/link',     require('./routes/link'));
 app.use('/gif',      require('./routes/gif'));
 const channelsRouter = require('./routes/channels');

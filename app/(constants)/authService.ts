@@ -24,7 +24,11 @@ import { lockSession } from '../../lib/sessionLock';
 // Web Client ID from Firebase Console → Auth → Sign-in method → Google.
 // (Google Sign-In SDK still talks to Google's OAuth — the resulting
 //  idToken gets exchanged for OUR JWT via the backend /auth/google route.)
-const WEB_CLIENT_ID = '207307621485-53m82dlcolfctpfagjnddnsq1euvvmpe.apps.googleusercontent.com';
+// Web OAuth client (type 3) from google-services.json of the FINAL project
+// vaultchatprod01. It MUST match the project in google-services.json — a client
+// id from a different project makes GoogleSignin.signIn() throw DEVELOPER_ERROR
+// (the account picker "throws an error"). Was the old vaultchat-ce9e3 client.
+const WEB_CLIENT_ID = '553821750020-2v6ul3cu0tr4o76uvtabjubgnbk2m40u.apps.googleusercontent.com';
 
 // ─── Google Sign-In configuration ─────────────────────────────
 export function configureGoogleSignIn() {

@@ -23,6 +23,7 @@ import {
 import { getCurrentUserAsync } from './(constants)/authService';
 import { getTurnConfig, type IceServer } from '../lib/chatService';
 import { getSocket } from '../lib/socket';
+import { startCallForeground, stopCallForeground, dismissIncomingNotification, initiateCall, cancelCall } from '../lib/CallService';
 import { addCallLog } from '../lib/callLog';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -184,6 +185,7 @@ export default function VideoCallScreen() {
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     if (ringTimerRef.current) { clearInterval(ringTimerRef.current); ringTimerRef.current = null; }
     try { InCallManager.stop(); } catch {}
+    stopCallForeground();   // release the mic/camera foreground service + wake lock
     try { localStreamRef.current?.getTracks().forEach((t: any) => t.stop()); } catch {}
     try { pcRef.current?.close(); } catch {}
     pcRef.current = null;
@@ -198,6 +200,9 @@ export default function VideoCallScreen() {
       const incoming = isIncoming === 'true' || isIncoming === '1';
       const dir: 'incoming' | 'outgoing' | 'missed' = incoming ? (connectedRef.current ? 'incoming' : 'missed') : 'outgoing';
       addCallLog({ chatId, peerUid, peerName: peerName || 'VaultChat user', kind: 'video', direction: dir, at: Date.now() - secondsRef.current * 1000, durationSec: secondsRef.current }).catch(() => {});
+      if (!incoming && !connectedRef.current && peerUid) {
+        cancelCall(peerUid, String(chatId || peerUid)).catch(() => {});   // stop the callee's ring → missed call
+      }
     }
     setState('ended');
     teardown(notify);
@@ -236,6 +241,16 @@ export default function VideoCallScreen() {
   useFocusEffect(useCallback(() => {
     if (heldRef.current && meRef.current) { meRef.current.resume(); setActiveCall(meRef.current); }
   }, []));
+
+  // Keep audio+camera alive in the background + clear the native ring on connect.
+  const fgStartedRef = useRef(false);
+  useEffect(() => {
+    if (state === 'connected' && !fgStartedRef.current) {
+      fgStartedRef.current = true;
+      startCallForeground(String(chatId || peerUid || 'call'), peerName || 'VaultChat user', '', true);
+      dismissIncomingNotification();
+    }
+  }, [state, chatId, peerUid, peerName]);
 
   const startTimer = useCallback(() => {
     if (timerRef.current) return;
@@ -332,6 +347,7 @@ export default function VideoCallScreen() {
           };
           s.emit('call_incoming', ringPayload);
           s.emit('webrtc_offer', { to: peerUid, from: meIdRef.current, offer });
+          initiateCall({ calleeId: peerUid, callId: String(chatId || peerUid), isVideo: true, sdpOffer: JSON.stringify(offer) }).catch(() => {});
           setState('ringing');
           // Re-send ring + offer every 3s so a killed-then-woken callee can answer.
           let rings = 0;

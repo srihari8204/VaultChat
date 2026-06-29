@@ -30,6 +30,7 @@ import { ThemeProvider } from '../lib/theme';
 import { runSecurityCheck } from '../services/securityService';
 import { attachTapHandler } from '../lib/push';
 import { addPersistentListener, getSocket } from '../lib/socket';
+import { registerForCalls, getInitialCallIntent, drainDeclinedCall } from '../lib/CallService';
 import { getActiveCall } from '../lib/callState';
 import { getRingingPeer, setRingingPeer, consumePendingCall } from '../lib/ringTracker';
 import { displayIncomingCall, cancelIncomingCall } from '../lib/callNotification';
@@ -98,6 +99,8 @@ function RootLayout() {
         if (tok && E2EE_ENABLED) {
           import('../services/crypto/e2eeSession.rn').then(m => m.provisionE2EEIdentity()).catch(() => {});
         }
+        // Register the native FCM token so calls ring when the app is killed.
+        if (tok) registerForCalls();
       })
       .catch(() => {});
 
@@ -170,6 +173,24 @@ function RootLayout() {
       } catch {}
       const pending = consumePendingCall();   // chosen from a bg notification action
       if (pending) onNotifeeAnswerOrDecline(pending.action, pending.data);
+
+      // Native full-screen-intent (FCM) launch → open the in-app ringing screen.
+      // The caller re-emits the offer over the socket; incoming-call captures it live.
+      try {
+        const ci = await getInitialCallIntent();
+        if (ci?.callId && ci.action !== 'open_calls') {
+          routeToIncoming({
+            chatId: ci.callId, peerUid: ci.callerId || '', peerName: ci.callerName || 'VaultChat user',
+            type: ci.isVideo ? 'video' : 'audio', offer: '',
+          });
+        }
+      } catch {}
+
+      // A decline tapped on the killed lock-screen notification → stop the caller's ring.
+      try {
+        const declined = await drainDeclinedCall();
+        if (declined) getSocket().then(s => s.emit('webrtc_end', { chatId: declined })).catch(() => {});
+      } catch {}
     })();
 
     // Expo notification tap / actions (heads-up call push fallback).
