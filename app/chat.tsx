@@ -213,6 +213,21 @@ export default function ChatScreen() {
   const [meId,      setMeId]      = useState<string | null>(null);
   const [chat,      setChat]      = useState<ChatDetail | null>(null);
   const [messages,  setMessages]  = useState<DisplayMessage[]>([]);
+  // Guaranteed-unique render list: dedupe by the SAME key the FlatList uses
+  // (_tempId for optimistic rows, else id). No merge path — initial load, socket,
+  // pagination, or an optimistic→real swap — can ever crash the list with a
+  // duplicate key. Keeps the first occurrence (newest, since the list is inverted).
+  const renderMessages = useMemo(() => {
+    const seen = new Set<string>();
+    const out: DisplayMessage[] = [];
+    for (const m of messages) {
+      const k = m._tempId ?? String(m.id);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(m);
+    }
+    return out;
+  }, [messages]);
   const [loading,   setLoading]   = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMore,   setHasMore]   = useState(true);
@@ -470,6 +485,11 @@ export default function ChatScreen() {
 
         const onNew = (m: Message) => {
           if (m.chatId !== chatId) return;
+          // Socket payloads deliver `id` as a STRING, but the HTTP ack / cache use
+          // a NUMBER. Normalize so `x.id === m.id` dedup works — otherwise the
+          // socket echo of our own just-sent message survives alongside the ack'd
+          // row and both collide on the same React key.
+          if (m.id != null) (m as any).id = Number(m.id);
           // Auto-acknowledge delivery + tone immediately (don't wait on decrypt).
           if (m.senderId !== meId) {
             markDelivered(chatId, m.id).catch(() => {});
@@ -504,13 +524,15 @@ export default function ChatScreen() {
           } : prev);
         };
         const onEdit = (e: { id: number; content: string; editedAt: string }) => {
+          const eid = Number(e.id); // socket delivers id as string; rows hold numbers
           setMessages(prev => prev.map(x =>
-            x.id === e.id ? { ...x, content: e.content, editedAt: e.editedAt } : x
+            x.id === eid ? { ...x, content: e.content, editedAt: e.editedAt } : x
           ));
         };
         const onDelete = (e: { id: number; deletedAt: string }) => {
+          const eid = Number(e.id); // socket delivers id as string; rows hold numbers
           setMessages(prev => prev.map(x =>
-            x.id === e.id ? { ...x, content: null, deletedAt: e.deletedAt, type: 'system' } : x
+            x.id === eid ? { ...x, content: null, deletedAt: e.deletedAt, type: 'system' } : x
           ));
         };
         const onTypingStart = (e: { uid: string; chatId?: string }) => {
@@ -1362,28 +1384,57 @@ export default function ChatScreen() {
     setCurrentIdx(0);
   }, [sending]);
 
-  // Upload + send every staged item (each with its own caption + view-once).
+  // Send every staged item OPTIMISTICALLY: paint the user's own LOCAL file as a
+  // pending bubble instantly (they already have the bytes), then encrypt+upload
+  // in the BACKGROUND and swap in the real message. The composer never blocks on
+  // the upload — media "sends" feel instant even though the bytes upload after.
   const confirmSendPendingMedia = useCallback(async () => {
-    if (pendingItems.length === 0 || sending) return;
+    if (pendingItems.length === 0) return;
     const items = pendingItems;
     setPendingItems([]);
     setCurrentIdx(0);
-    setSending(true);
-    try {
-      for (const pm of items) {
-        const msg = await sendMediaMessage(
-          chatId, pm.mediaType,
-          { uri: pm.uri, filename: pm.filename, mime: pm.mime },
-          { viewOnce: pm.viewOnce, caption: pm.caption.trim() || undefined, metaExtra: pm.metaExtra },
-        );
-        setMessages(prev => prev.some(x => x.id === msg.id) ? prev : [msg, ...prev]);
-      }
-    } catch (e: any) {
-      Alert.alert('Upload failed', e?.message ?? 'Try again');
-    } finally {
-      setSending(false);
+    for (const pm of items) {
+      const tempId = `m_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const optimistic: DisplayMessage = {
+        id:        0,
+        chatId,
+        senderId:  meId ?? '',
+        type:      pm.mediaType as any,
+        content:   pm.caption.trim() || '',
+        // localUri lets the bubble render instantly via resolvedUri (no download).
+        meta:      { localUri: pm.uri, mime: pm.mime, filename: pm.filename, ...(pm.metaExtra || {}), ...(pm.viewOnce ? { viewOnce: true } : {}) },
+        replyToId: null,
+        editedAt:  null,
+        deletedAt: null,
+        createdAt: new Date().toISOString(),
+        _tempId:   tempId,
+        _state:    'pending',
+      };
+      setMessages(prev => [optimistic, ...prev]);
+      // Background upload — swap the optimistic bubble for the real message on
+      // success, or mark it failed (tap-to-retry) on error.
+      sendMediaMessage(
+        chatId, pm.mediaType,
+        { uri: pm.uri, filename: pm.filename, mime: pm.mime },
+        { viewOnce: pm.viewOnce, caption: pm.caption.trim() || undefined, metaExtra: pm.metaExtra },
+      )
+        .then(real => {
+          setMessages(prev => {
+            // If the real message already arrived via socket, drop the optimistic
+            // (prevents a duplicate React key / duplicated bubble). Otherwise swap
+            // it in, keeping localUri so the sender's own bubble keeps rendering
+            // their local file (no re-download/decrypt) after the swap.
+            if (prev.some(x => x.id === real.id)) return prev.filter(x => x._tempId !== tempId);
+            return prev.map(x => x._tempId === tempId
+              ? ({ ...real, meta: { ...(real as any).meta, localUri: pm.uri }, _tempId: undefined, _state: undefined } as DisplayMessage)
+              : x);
+          });
+          cacheMessages(chatId, [real]).catch(() => {});   // persist so it survives a reload
+        })
+        .catch(() => setMessages(prev => prev.map(x =>
+          x._tempId === tempId ? ({ ...x, _state: 'failed' } as DisplayMessage) : x)));
     }
-  }, [pendingItems, chatId, sending]);
+  }, [pendingItems, chatId, meId]);
 
   // Helpers for the multi-item preview.
   const updateCurrentItem = useCallback((patch: Partial<{ caption: string; viewOnce: boolean }>) => {
@@ -1577,7 +1628,12 @@ export default function ChatScreen() {
     try {
       const olderRaw = await getMessages(chatId, { before: oldest, limit: PAGE_SIZE });
       const older = await hydrateMessages(chatId, olderRaw);   // decrypt once at ingest
-      setMessages(prev => [...prev, ...older]);
+      // Dedupe against what's already loaded — a page boundary can overlap and
+      // would otherwise inject duplicate ids (duplicate React keys).
+      setMessages(prev => {
+        const have = new Set(prev.map(x => String(x.id)));
+        return [...prev, ...older.filter(m => !have.has(String(m.id)))];
+      });
       if (older.length < PAGE_SIZE) setHasMore(false);
       cacheMessages(chatId, older).catch(() => {});            // persist plaintext for instant scroll-back
     } catch {}
@@ -1976,8 +2032,8 @@ export default function ChatScreen() {
       {/* Messages (inverted — newest at top of the array, visually at bottom) */}
       <FlatList
         ref={listRef}
-        data={messages}
-        keyExtractor={(m) => String(m.id)}
+        data={renderMessages}
+        keyExtractor={(m) => m._tempId ?? String(m.id)}
         inverted
         contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 8 }}
         renderItem={({ item, index }) => {
@@ -3534,8 +3590,10 @@ function MessageBubble({
   }
 
   const isGif   = msg.type === 'image' && !!msg.meta?.gifUrl;
-  const isImage = msg.type === 'image' && msg.meta?.attachmentId && !isGif;
-  const isVideo = msg.type === 'video' && msg.meta?.attachmentId;
+  // `localUri` = an optimistic (still-uploading) bubble rendering the sender's
+  // own local file; treat it as image/video so it paints before it has an id.
+  const isImage = msg.type === 'image' && (msg.meta?.attachmentId || msg.meta?.localUri) && !isGif;
+  const isVideo = msg.type === 'video' && (msg.meta?.attachmentId || msg.meta?.localUri);
   const isAudio = msg.type === 'audio' && msg.meta?.attachmentId;
   const isFile  = msg.type === 'file'  && msg.meta?.attachmentId;
 
@@ -3680,8 +3738,8 @@ function MessageBubble({
           />
         ) : isImage ? (
           <ImageAttachment
-            attachmentId={msg.meta.attachmentId}
-            resolvedUri={isEncMedia ? mediaSrc : undefined}
+            attachmentId={msg.meta.attachmentId || ''}
+            resolvedUri={msg.meta?.localUri ? { uri: String(msg.meta.localUri) } : (isEncMedia ? mediaSrc : undefined)}
             isMine={isMine}
             mime={String(msg.meta?.mime || '')}
             thumb={typeof msg.meta?.thumb === 'string' ? msg.meta.thumb : undefined}
@@ -3689,10 +3747,10 @@ function MessageBubble({
           />
         ) : isVideo ? (
           <VideoBubble
-            attachmentId={msg.meta.attachmentId}
+            attachmentId={msg.meta.attachmentId || ''}
             durationMs={Number(msg.meta?.durationMs) || 0}
             authHeader={authHeader}
-            resolvedUri={isEncMedia ? mediaSrc : undefined}
+            resolvedUri={msg.meta?.localUri ? { uri: String(msg.meta.localUri) } : (isEncMedia ? mediaSrc : undefined)}
             isNote={!!msg.meta?.videoNote}
             onOpen={() => openFullScreen('video')}
             onErrorOnce={() => { if (isViewOnceMedia && !isMine) setTombstoned(true); }}

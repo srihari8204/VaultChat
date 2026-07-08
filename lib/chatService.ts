@@ -140,10 +140,47 @@ function directPeerOf(chatId: string): string | null {
   return e && e.type === 'direct' ? e.peerId : null;
 }
 
+/**
+ * Robustly resolve a direct chat's peer id, tolerating the cold-start race where
+ * `_chatPeer` (in-memory) isn't populated yet — e.g. a chat opened from a push
+ * or a just-created chat, before listChats/getChat ran. Retries getChat, then
+ * falls back to a full listChats (which caches every chat's peer), with backoff.
+ * Returns null only if the chat is genuinely a group or truly unresolvable.
+ */
+async function resolvePeerId(chatId: string, attempts = 3): Promise<string | null> {
+  let peerId = directPeerOf(chatId);
+  if (peerId) return peerId;
+  if (_chatPeer.get(chatId)?.type === 'group') return null;
+  for (let i = 0; i < attempts; i++) {
+    try { await getChat(chatId); } catch {}
+    peerId = directPeerOf(chatId);
+    if (peerId) return peerId;
+    if (_chatPeer.get(chatId)?.type === 'group') return null;
+    // getChat alone may not surface peerUserId for a freshly-created chat — a
+    // full list reliably caches every direct chat's peer.
+    try { await listChats(); } catch {}
+    peerId = directPeerOf(chatId);
+    if (peerId) return peerId;
+    if (i < attempts - 1) await new Promise(r => setTimeout(r, 300));
+  }
+  return peerId;
+}
+
 /** True when this chat is a known direct (1:1) chat — i.e. media/text can be E2E
  *  encrypted to a single peer. Group chats return false (no group E2EE yet). */
 export function isDirectChat(chatId: string): boolean {
   return directPeerOf(chatId) != null;
+}
+
+/**
+ * Async, race-tolerant version of isDirectChat: resolves the peer (retrying
+ * getChat/listChats) before answering, so the media send path can decide
+ * encrypt-vs-plaintext reliably instead of silently falling to plaintext when
+ * the peer just isn't cached yet. Returns false for genuine group chats.
+ */
+export async function ensureDirectChat(chatId: string): Promise<boolean> {
+  if (_chatPeer.get(chatId)?.type === 'group') return false;
+  return (await resolvePeerId(chatId)) != null;
 }
 
 export async function encryptForChat(chatId: string, plaintext: string): Promise<string> {
@@ -159,12 +196,9 @@ export async function encryptForChat(chatId: string, plaintext: string): Promise
       return plaintext;
     }
   }
-  let peerId = directPeerOf(chatId);
-  if (!peerId) {
-    // Not cached yet (e.g. sending right after opening a fresh chat) — resolve
-    // the peer on demand, which populates _chatPeer, then re-check.
-    try { await getChat(chatId); peerId = directPeerOf(chatId); } catch {}
-  }
+  // Resolve the peer robustly (retries getChat + listChats to beat the
+  // cold-start / fresh-chat race that made media/GIF sends fail).
+  const peerId = await resolvePeerId(chatId);
   if (!peerId) {
     // Still can't resolve → can't encrypt. STRICT: refuse to leak plaintext.
     console.warn('[e2ee] PEER-NOT-RESOLVED chat=', chatId, 'entry=', JSON.stringify(_chatPeer.get(chatId)));
@@ -223,22 +257,50 @@ export async function decryptFromChat(
   if (!e2ee.isEnvelope(ciphertext)) return ciphertext; // pre-E2EE plaintext history
   const peerId = directPeerOf(chatId) ?? senderId;     // peer = the other party
   try {
-    return await e2ee.e2eeDecrypt(chatId, peerId, messageId ?? 0, ciphertext);
+    const pt = await e2ee.e2eeDecrypt(chatId, peerId, messageId ?? 0, ciphertext);
+    _decryptFailStreak.delete(peerId);                 // healthy session — clear recovery counter
+    return pt;
   } catch (err) {
     const m = String((err as any)?.message || '');
     // ONLY retry the transient out-of-order case (a follow-up message can arrive
-    // before the X3DH-bearing first message bootstraps the session). Permanent
-    // failures are tombstoned in e2eeDecrypt — no retry, no re-attempt, no spam.
+    // before the X3DH-bearing first message bootstraps the session).
     if (m.includes('no session and no X3DH')) {
       for (let i = 0; i < 2; i++) {
         await new Promise(r => setTimeout(r, 250));
-        try { return await e2ee.e2eeDecrypt(chatId, peerId, messageId ?? 0, ciphertext); } catch {}
+        try {
+          const pt = await e2ee.e2eeDecrypt(chatId, peerId, messageId ?? 0, ciphertext);
+          _decryptFailStreak.delete(peerId);
+          return pt;
+        } catch {}
       }
-    } else if (__DEV__ && !m.includes('undecryptable (cached)')) {
-      console.warn('[e2ee] decrypt failed:', m);
+    } else if (!m.includes('undecryptable (cached)')) {
+      // PERMANENT failure (ghash / cannot-skip / wrong key) = the ratchet is
+      // desynced (peer reinstalled, DB truncate, lost state) AND the message
+      // carried no X3DH header to self-heal from. Silently AUTO-RECOVER: after a
+      // couple of consecutive failures the session is dead → drop it so our NEXT
+      // outbound message re-initiates X3DH and the peer adopts it. No user action,
+      // no "reset secure session" prompt.
+      await maybeAutoRecoverSession(peerId, m);
     }
     return '🔒 unable to decrypt';
   }
+}
+
+// Per-peer consecutive permanent-decrypt-failure counter → silent session
+// auto-recovery, so users never have to reset a session by hand.
+const _decryptFailStreak = new Map<string, number>();
+const AUTO_RECOVER_AFTER = 2;
+async function maybeAutoRecoverSession(peerId: string, errMsg: string): Promise<void> {
+  const n = (_decryptFailStreak.get(peerId) ?? 0) + 1;
+  _decryptFailStreak.set(peerId, n);
+  if (__DEV__) console.warn(`[e2ee] decrypt failed (${n}/${AUTO_RECOVER_AFTER}):`, errMsg);
+  if (n < AUTO_RECOVER_AFTER) return;
+  _decryptFailStreak.delete(peerId);
+  try {
+    const e2ee = await import('../services/crypto/e2eeSession.rn');
+    await e2ee.e2eeResetSession(peerId);   // drop dead ratchet; next outbound re-keys → peer self-heals
+    if (__DEV__) console.warn('[e2ee] AUTO-RESET dead session for peer', peerId, '— re-handshakes on next message');
+  } catch {}
 }
 
 /** Sync check: does this wire string look like an E2EE envelope (vs plaintext)? */
@@ -514,6 +576,9 @@ export async function sendMessage(
       method: 'POST',
       json: { content, type, replyToId: opts.replyToId ?? null, meta: opts.meta ?? null },
     });
+    // The POST ack returns `id` as a STRING; GET / socket deliver a NUMBER.
+    // Normalize so UI dedup and the local-cache upsert (number-id only) work.
+    if (msg && msg.id != null) (msg as any).id = Number(msg.id);
     const _tAck = Date.now();
     perf.mark('send_http_ack', { chatId, id: msg?.id, ms: _tAck - _tEnc });
     perf.recordSend({

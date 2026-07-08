@@ -13,7 +13,7 @@
 
 import { MEDIA_E2EE, E2EE_ENABLED } from '../constants/flags';
 import {
-  sendMessage, uploadAttachment, isDirectChat, type Message,
+  sendMessage, uploadAttachment, ensureDirectChat, type Message,
 } from './chatService';
 import { uploadEncryptedAttachment, buildMediaContent } from './mediaAttachments';
 import { storeSentCopy, saveThumb } from './mediaStore';
@@ -36,7 +36,9 @@ export async function sendMediaMessage(
   file: MediaFile,
   opts: SendMediaOpts = {},
 ): Promise<Message> {
-  const encrypt = MEDIA_E2EE && E2EE_ENABLED && isDirectChat(chatId);
+  // Resolve the peer robustly first (beats the cold-start race) so a direct
+  // chat reliably takes the encrypted path instead of silently going plaintext.
+  const encrypt = MEDIA_E2EE && E2EE_ENABLED && await ensureDirectChat(chatId);
 
   if (encrypt) {
     const { attachmentId, mediaKey } = await uploadEncryptedAttachment(
@@ -52,6 +54,17 @@ export async function sendMediaMessage(
       ...(opts.viewOnce ? { viewOnce: true } : {}),
       ...(opts.metaExtra || {}),
     };
+    // Keep the sender's OWN plaintext copy locally (keyed by attachmentId) so they
+    // never re-download + re-decrypt their own media on a later chat open — mirror
+    // of the plaintext path's storeSentCopy. Skip view-once (not re-viewable).
+    if (!opts.viewOnce) {
+      const kind = type === 'audio' ? 'voice' : type;
+      await storeSentCopy(attachmentId, file.uri, { kind, isMine: true, mime: file.mime, filename: file.filename }).catch(() => {});
+      if (type === 'image' || type === 'video') {
+        const thumb = await makeThumb(file.uri, type).catch(() => null);
+        if (thumb) { meta.thumb = thumb; saveThumb(attachmentId, thumb).catch(() => {}); }
+      }
+    }
     return sendMessage(chatId, content, type, { meta });
   }
 

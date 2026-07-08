@@ -38,7 +38,7 @@ import '../lib/callBackground';   // registers notifee bg event + bg notificatio
 import { getAccessToken } from '../lib/api';
 import { E2EE_ENABLED, SCHEDULED_LOCAL } from '../constants/flags';
 import { runDueScheduled, rearmAllTriggers } from '../lib/scheduledRunner';
-import { getDb, schemaVersion } from '../db/database';
+import { getLocalDb } from '../lib/localDb';
 import perf from '../lib/perf';
 global.Buffer = Buffer;
 
@@ -70,16 +70,13 @@ function RootLayout() {
   });
 
   useEffect(() => {
-    // ── 0. Open the op-sqlite local store + run migrations (Task 3) ──
-    // Source of truth for chats/messages. Guarded so a stale binary without
-    // the native module can't crash launch.
+    // ── 0. Warm up the op-sqlite local store (localDb, JSI engine) ──
+    // The local-first source of truth for chats/messages. Guarded so a stale
+    // binary without the native module can't crash launch.
     if (Platform.OS !== 'web') {
-      try {
-        getDb();
-        perf.mark('db_ready', { schema: schemaVersion() });
-      } catch (e: any) {
-        console.warn('[db] op-sqlite init failed:', e?.message);
-      }
+      getLocalDb()
+        .then(() => perf.mark('db_ready'))
+        .catch((e: any) => console.warn('[db] localDb init failed:', e?.message));
     }
 
     // ── 1. Block screenshots app-wide (native only) ──────────

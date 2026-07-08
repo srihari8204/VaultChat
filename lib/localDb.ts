@@ -10,16 +10,54 @@
 // Wiring (next step): chat.tsx renders getCachedMessages() first, then calls
 // syncChat() to fetch GET /chats/:id/messages?after=<cursor> and cacheMessages().
 
-import * as SQLite from 'expo-sqlite';
+import { open, type DB } from '@op-engineering/op-sqlite';
 import type { Message } from './chatService';
 import { encField, decField, clearCacheKeyStore } from './cacheCrypto';
 
-let _dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
+// Engine: op-sqlite (JSI) — faster than expo-sqlite, same SQL. A thin shim keeps
+// the expo-sqlite-style async API (getAllAsync/runAsync/withTransactionAsync/…)
+// so every call site + all logic below stays byte-identical.
+export interface LocalDb {
+  getAllAsync:          (sql: string, params?: any[]) => Promise<any[]>;
+  getFirstAsync:        (sql: string, params?: any[]) => Promise<any>;
+  runAsync:             (sql: string, params?: any[]) => Promise<void>;
+  execAsync:            (sql: string) => Promise<void>;
+  withTransactionAsync: (fn: () => Promise<void>) => Promise<void>;
+}
 
-export function getLocalDb(): Promise<SQLite.SQLiteDatabase> {
+function wrap(db: DB): LocalDb {
+  return {
+    getAllAsync:   async (sql, params = []) => ((await db.execute(sql, params as any)).rows ?? []) as any[],
+    getFirstAsync: async (sql, params = []) => (((await db.execute(sql, params as any)).rows ?? []) as any[])[0] ?? null,
+    runAsync:      async (sql, params = []) => { await db.execute(sql, params as any); },
+    // op-sqlite executes ONE statement per call — split the multi-statement schema.
+    execAsync:     async (sql) => { for (const s of sql.split(';')) { const t = s.trim(); if (t) db.executeSync(t); } },
+    // Manual BEGIN/COMMIT so the inner runAsync (db.execute) calls stay in-txn on
+    // this single connection; ROLLBACK on any throw (matches withTransactionAsync).
+    withTransactionAsync: async (fn) => {
+      await db.execute('BEGIN');
+      try { await fn(); await db.execute('COMMIT'); }
+      catch (e) { try { await db.execute('ROLLBACK'); } catch {} throw e; }
+    },
+  };
+}
+
+let _dbPromise: Promise<LocalDb> | null = null;
+
+export function getLocalDb(): Promise<LocalDb> {
   if (!_dbPromise) {
     _dbPromise = (async () => {
-      const db = await SQLite.openDatabaseAsync('vaultchat.db');
+      const db = wrap(open({ name: 'vaultchat.db' }));
+      // One-time reconciliation: an earlier build's op-sqlite repo layer may have
+      // created `messages`/`chats` in this same file with a DIFFERENT schema.
+      // If the messages table isn't ours (no `content` column), drop the pair so
+      // this schema is authoritative — it's a rebuildable cache, so it's safe.
+      try {
+        const cols = (await db.getAllAsync(`PRAGMA table_info(messages)`)).map((c: any) => c.name);
+        if (cols.length && !cols.includes('content')) {
+          await db.execAsync(`DROP TABLE IF EXISTS messages; DROP TABLE IF EXISTS chats;`);
+        }
+      } catch {}
       await db.execAsync(`
         PRAGMA journal_mode = WAL;
         CREATE TABLE IF NOT EXISTS messages (

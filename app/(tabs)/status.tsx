@@ -54,6 +54,7 @@ import {
 import { STORY_E2EE, E2EE_ENABLED } from '../../constants/flags';
 import { uploadEncryptedAttachment } from '../../lib/mediaAttachments';
 import { wrapStoryKeyForViewers } from '../../lib/storyKeys';
+import { putMediaKey } from '../../lib/mediaKeyStore';
 
 const TEXT_BGS = ['#0B0B10', '#7E57C2', '#26A69A', '#EF5350', '#42A5F5', '#FFA726', '#5C6BC0'];
 const QUICK_EMOJIS = ['😀','😂','🥰','😍','😎','🤔','😅','😭','😡','👍','🙏','👏','🔥','✨','🎉','❤️','💔','💯','🙌','😴','🥳','😇','🤩','😱','😬','🤗','😉','😏','🤨','😌','💪','👀','🌟','⚡','🌈','☀️','🌙','⭐','💜','💙'];
@@ -209,6 +210,10 @@ export default function StatusScreen() {
         const cap = a.caption.trim() || undefined;
         if (STORY_E2EE && E2EE_ENABLED) {
           const { attachmentId, mediaKey } = await uploadEncryptedAttachment(a.uri, a.filename, a.mime);
+          // Store MY OWN copy of the content key locally so I can always view my
+          // own story, independent of whether the server audience includes me
+          // (otherwise the poster sees a blank story — no wrapped key for self).
+          await putMediaKey(attachmentId, mediaKey).catch(() => {});
           const viewerIds = await getStoryAudience();
           const keys = await wrapStoryKeyForViewers(viewerIds, mediaKey);
           await addEncryptedStory(attachmentId, a.type, keys, cap);

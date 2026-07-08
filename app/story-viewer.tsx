@@ -43,7 +43,7 @@ import {
   type StoryViewer,
 } from '../lib/chatService';
 import { getDecryptedAttachmentUri, getAttachmentLocalUri } from '../lib/mediaAttachments';
-import { putMediaKey } from '../lib/mediaKeyStore';
+import { putMediaKey, getMediaKey } from '../lib/mediaKeyStore';
 import { unwrapStoryKey } from '../lib/storyKeys';
 
 const IMAGE_DURATION_MS = 5_000;
@@ -109,11 +109,16 @@ export default function StoryViewerScreen() {
     (async () => {
       if (current.encrypted) {
         try {
-          const wrapped = await getStoryKey(current.id);
-          if (!wrapped || !entry) return;                       // not in audience → leave blank
-          const mk = await unwrapStoryKey(entry.userId, wrapped);
-          if (!mk) return;
-          await putMediaKey(current.attachmentId, mk);          // feed the standard media-decrypt path
+          // Fast path: we already hold the content key locally (our OWN story, or
+          // a previously-unwrapped one) → decrypt directly, no wrapped-key fetch.
+          const haveKey = await getMediaKey(current.attachmentId).catch(() => null);
+          if (!haveKey) {
+            const wrapped = await getStoryKey(current.id);
+            if (!wrapped || !entry) return;                     // not in audience → leave blank
+            const mk = await unwrapStoryKey(entry.userId, wrapped);
+            if (!mk) return;
+            await putMediaKey(current.attachmentId, mk);        // feed the standard media-decrypt path
+          }
           const r = await getDecryptedAttachmentUri(current.attachmentId);
           if (!cancel) setMediaSrc(r);
         } catch { /* leave blank on failure */ }
@@ -152,8 +157,10 @@ export default function StoryViewerScreen() {
   useEffect(() => {
     if (!current || paused || !loaded) return;
 
-    // Best-effort mark-viewed; server is idempotent.
-    if (!current.seen) {
+    // Best-effort mark-viewed; server is idempotent. Do NOT mark a media story
+    // viewed if its media never actually resolved (decrypt/download failed) —
+    // otherwise a blank story gets silently marked seen and can't be retried.
+    if (!current.seen && (current.mediaType === 'text' || mediaSrc)) {
       markStoryViewed(current.id).catch(() => {});
     }
 
@@ -167,9 +174,10 @@ export default function StoryViewerScreen() {
       if (finished) advance(+1);
     });
     return () => anim.stop();
-  // intentional: re-runs when *index* changes, on pause/resume, or once loaded
+  // intentional: re-runs when *index* changes, on pause/resume, once loaded, or
+  // when the media source resolves (so mark-viewed sees a non-null mediaSrc).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current?.id, paused, loaded]);
+  }, [current?.id, paused, loaded, mediaSrc]);
 
   const close = useCallback(() => router.back(), [router]);
 

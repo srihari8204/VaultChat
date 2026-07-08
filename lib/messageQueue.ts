@@ -145,6 +145,11 @@ async function postOnce(item: QueuedMessage): Promise<Message> {
     method: 'POST',
     json: { content, type: item.type, replyToId: item.replyToId, meta: item.meta ?? null },
   });
+  // The POST ack returns `id` as a STRING, but GET /chats and socket payloads
+  // deliver it as a NUMBER. Left as a string, the UI's `x.id === real.id`
+  // dedup fails (optimistic + synced rows collide on the same React key) and
+  // the local cache drops it (cacheMessages skips non-number ids). Normalize.
+  if (real && real.id != null) (real as any).id = Number(real.id);
   const _tAck = Date.now();
   perf.recordSend({
     id: String(real?.id ?? item.tempId),
