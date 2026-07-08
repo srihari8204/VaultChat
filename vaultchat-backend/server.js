@@ -519,6 +519,84 @@ function emitToUid(uid, event, data) {
   return true;
 }
 
+// Reverse of loadGhostTargets: owners who have hidden `column` FROM `targetId`.
+// Used so a joiner isn't shown viewers who've ghosted them.
+async function loadGhostOwners(targetId, column) {
+  if (!targetId || !GHOST_COLS.includes(column)) return new Set();
+  try {
+    const r = await db.query(
+      `SELECT owner_id FROM ghost_mode WHERE target_id = $1 AND ${column} = TRUE`,
+      [targetId]
+    );
+    return new Set(r.rows.map(row => row.owner_id));
+  } catch (err) {
+    console.error('[loadGhostOwners]', err.message);
+    return new Set();
+  }
+}
+
+// ── Live Chat Viewers (feature #58) — "who is viewing this chat right now" ──
+// EPHEMERAL by design: Redis only, NEVER a Postgres table, no history.
+//   cv:h:{chatId}  hash  field=userId → JSON {activity, ts}   (current viewers)
+//   cv:exp         zset  member=`{chatId}|{userId}` score=ts  (30s expiry sweep)
+// Fan-out reuses the existing chat rooms + per-user rooms. Ghost Mode
+// (hide_online) hides you from a contact's viewer list; the per-chat toggle is
+// enforced client-side (opted-out clients simply never emit).
+const CV_TTL_MS = 30000;
+const cvRedis = () => (redis.isConnected() ? redis.client : null);
+
+async function cvTouch(chatId, uid, activity) {
+  const c = cvRedis();
+  if (!c) return { isNew: false, changed: false, activity: activity || 'reading' };
+  const now = Date.now();
+  const prev = await c.hget(`cv:h:${chatId}`, uid);
+  let prevAct = null;
+  if (prev) { try { prevAct = JSON.parse(prev).activity; } catch {} }
+  const act = activity || prevAct || 'reading';
+  await c.hset(`cv:h:${chatId}`, uid, JSON.stringify({ activity: act, ts: now }));
+  await c.zadd('cv:exp', now, `${chatId}|${uid}`);
+  c.pexpire(`cv:h:${chatId}`, CV_TTL_MS * 3).catch(() => {});   // drop idle chat hashes
+  return { isNew: !prev, changed: !!prev && !!activity && activity !== prevAct, activity: act };
+}
+
+async function cvRemove(chatId, uid) {
+  const c = cvRedis();
+  if (!c) return;
+  await c.hdel(`cv:h:${chatId}`, uid);
+  await c.zrem('cv:exp', `${chatId}|${uid}`);
+}
+
+async function cvList(chatId) {
+  const c = cvRedis();
+  if (!c) return [];
+  const h = await c.hgetall(`cv:h:${chatId}`);
+  const out = [];
+  for (const [uid, val] of Object.entries(h || {})) {
+    let activity = 'reading';
+    try { activity = JSON.parse(val).activity || 'reading'; } catch {}
+    out.push({ userId: uid, activity });
+  }
+  return out;
+}
+
+// Periodic sweep: any viewer whose heartbeat is >30s stale is dropped and a
+// viewer_left is broadcast (covers crashes / network drops with no LEFT).
+setInterval(async () => {
+  const c = cvRedis();
+  if (!c) return;
+  try {
+    const expired = await c.zrangebyscore('cv:exp', 0, Date.now() - CV_TTL_MS);
+    for (const member of expired) {
+      const i = member.indexOf('|');
+      if (i < 0) { await c.zrem('cv:exp', member); continue; }
+      const chatId = member.slice(0, i), uid = member.slice(i + 1);
+      await c.hdel(`cv:h:${chatId}`, uid);
+      await c.zrem('cv:exp', member);
+      io.to(`chat:${chatId}`).emit('viewer_left', { chatId, userId: uid });
+    }
+  } catch (err) { /* ephemeral — fail soft */ }
+}, 10000).unref?.();
+
 // Fan a chat-scoped event to every connected socket of every chat member.
 // `chat:${chatId}` room only contains sockets that explicitly joined it
 // (i.e. have the chat open). For background notifications we want every
@@ -684,6 +762,48 @@ io.on('connection', (socket) => {
 
   socket.on('typing_stop', ({ chatId, uid }) => {
     if (chatId) fanOutToChat(chatId, 'typing_stop', { uid, chatId });
+  });
+
+  // ── Live Chat Viewers (feature #58) — ephemeral presence, never persisted ──
+  // status: 'VIEWING' (also the 10s heartbeat) | 'LEFT'.  activity: reading|typing|uploading.
+  socket.on('chat_view', async ({ chatId, status, activity, resync }) => {
+    if (!chatId) return;
+    const uid = socket.data.uid;
+    try {
+      if (status === 'LEFT') {
+        await cvRemove(chatId, uid);
+        io.to(`chat:${chatId}`).emit('viewer_left', { chatId, userId: uid });
+        return;
+      }
+      // VIEWING = first open, 10s heartbeat, activity change, or reconnect resync.
+      const { isNew, changed, activity: act } = await cvTouch(chatId, uid, activity);
+      if (!isNew && !changed && !resync) return;         // plain heartbeat — no broadcast, no queries
+
+      const hideFrom = await loadGhostTargets(uid, 'hide_online');   // contacts I hide from
+      const viewers = await cvList(chatId);
+
+      if (isNew) {
+        // Tell everyone already viewing (except contacts I've ghosted) that I joined.
+        for (const v of viewers) {
+          if (v.userId === uid || hideFrom.has(v.userId)) continue;
+          emitToUid(v.userId, 'viewer_joined', { chatId, userId: uid, activity: act });
+        }
+      } else if (changed) {
+        for (const v of viewers) {
+          if (v.userId === uid || hideFrom.has(v.userId)) continue;
+          emitToUid(v.userId, 'viewer_activity', { chatId, userId: uid, activity: act });
+        }
+      }
+      // First open OR reconnect → send ME the authoritative list (minus anyone
+      // who has ghosted me, minus myself). Plain activity changes skip this.
+      if (isNew || resync) {
+        const hiddenFromMe = await loadGhostOwners(uid, 'hide_online');
+        socket.emit('viewer_list', {
+          chatId,
+          viewers: viewers.filter(v => v.userId !== uid && !hiddenFromMe.has(v.userId)),
+        });
+      }
+    } catch (err) { /* ephemeral — fail soft, no user-visible error */ }
   });
 
   socket.on('new_message', ({ chatId, messageId }) => {

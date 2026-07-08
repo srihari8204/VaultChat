@@ -87,4 +87,12 @@ export const STORY_E2EE = true;   // enabled 2026-06-28 — VERIFY two-device st
 // 3-device group round-trip (incl. add/remove member) before enabling.
 export const GROUP_E2EE = true;   // enabled 2026-06-28 — needs migration 040; VERIFY 3-device group round-trip (incl add/remove) after deploy
 
-export default { E2EE_ENABLED, VAULT_SESSION_SEALED, VAULT_CACHE_ENCRYPTED, MEDIA_E2EE, STORY_E2EE, GROUP_E2EE };
+// Scheduled messages (#73): local encrypted on-device queue (send at time) vs
+// the legacy server-side queue (scheduled_messages table + 30s sweep). Local is
+// the differentiator — nothing waits on a server; encrypted at send time.
+// FALSE = reliable server-side delivery (E2E-encrypted on-device before upload;
+// the server forwards ciphertext at send time — fires even if the app is killed).
+// TRUE = on-device queue, but best-effort timing on Android (Doze/OEM kills).
+export const SCHEDULED_LOCAL = false;
+
+export default { E2EE_ENABLED, VAULT_SESSION_SEALED, VAULT_CACHE_ENCRYPTED, MEDIA_E2EE, STORY_E2EE, GROUP_E2EE, SCHEDULED_LOCAL };

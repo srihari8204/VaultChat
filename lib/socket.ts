@@ -17,9 +17,37 @@
 import { io as ioClient, Socket } from 'socket.io-client';
 import { SERVER_URL } from '../constants/server';
 import { getAccessToken } from './api';
+import perf from './perf';
 
 let socket: Socket | null = null;
 let connecting: Promise<Socket> | null = null;
+
+// ── Task 2: "Can't connect" state ───────────────────────────────────
+// After 5 consecutive websocket failures we surface a persistent banner
+// (rendered by the UI in Task 6). Reset to healthy on the next successful
+// connect. Subscribe via onCantConnect(); read once via getCantConnect().
+let connectFailures = 0;
+let cantConnect = false;
+const cantConnectListeners = new Set<(v: boolean) => void>();
+function setCantConnect(v: boolean) {
+  if (cantConnect === v) return;
+  cantConnect = v;
+  for (const l of cantConnectListeners) { try { l(v); } catch {} }
+}
+function noteConnectFailure() {
+  connectFailures++;
+  if (connectFailures >= 5) setCantConnect(true);
+}
+function noteConnectSuccess() {
+  connectFailures = 0;
+  setCantConnect(false);
+}
+export function onCantConnect(cb: (v: boolean) => void): () => void {
+  cantConnectListeners.add(cb);
+  cb(cantConnect);
+  return () => { cantConnectListeners.delete(cb); };
+}
+export function getCantConnect(): boolean { return cantConnect; }
 
 // Listeners that MUST survive socket re-creation (reconnect after a network
 // drop, or a new instance after disconnect()/re-login). Re-applied every time
@@ -38,14 +66,39 @@ async function connect(): Promise<Socket> {
   if (!token) throw new Error('Not signed in');
 
   const s = ioClient(SERVER_URL, {
+    // Task 2: websocket-only (no polling fallback — intentional launch
+    // decision), aggressive-but-jittered reconnect for fast network recovery.
     transports: ['websocket'],
     auth: { token },
     reconnection: true,
-    reconnectionDelay: 1000,
-    reconnectionDelayMax: 10000,
-    timeout: 20000,
+    reconnectionDelay: 500,
+    reconnectionDelayMax: 5000,
+    randomizationFactor: 0.5,
+    timeout: 10000,
   });
   applyPersistent(s);   // re-attach call/global listeners onto the new socket
+
+  // ── Task 1 perf: log the negotiated transport + any upgrade ──────
+  perf.setConnState('connecting');
+  s.on('connect', () => {
+    const tname = (s as any).io?.engine?.transport?.name ?? 'unknown';
+    perf.setTransport(tname);
+    perf.setConnState('connected');
+    perf.mark('socket_connect', { transport: tname });
+    noteConnectSuccess();   // clears any "can't connect" state
+    try {
+      (s as any).io?.engine?.on('upgrade', (t: any) => {
+        perf.setTransport(t?.name ?? 'unknown');
+        perf.mark('socket_upgrade', { transport: t?.name });
+      });
+    } catch {}
+  });
+  s.on('disconnect', (reason: string) => { perf.setConnState('disconnected'); perf.mark('socket_disconnect', { reason }); });
+  s.io.on('reconnect_attempt', () => { perf.setConnState('connecting'); perf.bumpReconnect(); });
+  // Count consecutive failures → drives the "Can't connect" banner after 5.
+  s.io.on('reconnect_error', () => noteConnectFailure());
+  s.io.on('error', () => noteConnectFailure());
+  s.on('connect_error', () => noteConnectFailure());
 
   return new Promise<Socket>((resolve, reject) => {
     const onReady = () => {
@@ -134,6 +187,17 @@ export async function emitTypingStart(chatId: string, uid: string): Promise<void
 }
 export async function emitTypingStop(chatId: string, uid: string): Promise<void> {
   await emit('typing_stop', { chatId, uid });
+}
+
+// Live Chat Viewers (feature #58) — ephemeral "who's viewing this chat".
+export type ViewerActivity = 'reading' | 'typing' | 'uploading';
+export async function emitChatView(
+  chatId: string,
+  status: 'VIEWING' | 'LEFT',
+  activity?: ViewerActivity,
+  resync?: boolean,
+): Promise<void> {
+  await emit('chat_view', { chatId, status, activity, resync });
 }
 
 // Required by expo-router to silence "no default export" route warnings

@@ -25,6 +25,10 @@ import {
   listScheduledMessages,
   type ScheduledMessageRow,
 } from '../lib/chatService';
+import { SCHEDULED_LOCAL } from '../constants/flags';
+import { listScheduled, cancelScheduled } from '../lib/scheduledQueue';
+import { cancelTrigger } from '../lib/scheduledRunner';
+import { getScheduledCopy, deleteScheduledCopy } from '../lib/scheduledLocalCopy';
 
 const CACHE_KEY = 'scheduled';
 
@@ -44,7 +48,26 @@ export default function ScheduledScreen() {
 
   const load = useCallback(async () => {
     try {
-      const list = await listScheduledMessages();
+      let list: ScheduledMessageRow[];
+      if (SCHEDULED_LOCAL) {
+        // On-device queue (#73): map to the shared row shape the UI renders.
+        list = (await listScheduled()).map(it => ({
+          id: it.id, chatId: it.chatId, chatName: it.peerName || 'Chat', chatType: 'direct',
+          content: it.content, type: it.type as any,
+          sendAt: new Date(it.sendAt).toISOString(), sentAt: null,
+        } as any));
+      } else {
+        list = await listScheduledMessages();
+        // Server holds E2E-ciphertext; show the sender's own local plaintext copy.
+        list = await Promise.all(list.map(async r => {
+          if (r.type === 'text') {
+            const plain = await getScheduledCopy(String(r.id));
+            if (plain != null) return { ...r, content: plain };
+            if (!r.sentAt) return { ...r, content: '🔒 Encrypted scheduled message' };
+          }
+          return r;
+        }));
+      }
       setRows(list);
       setError(null);
       writeCache(CACHE_KEY, list);
@@ -72,24 +95,33 @@ export default function ScheduledScreen() {
     setRefreshing(false);
   }, [load]);
 
-  const onCancel = useCallback((row: ScheduledMessageRow) => {
-    Alert.alert(
-      'Cancel scheduled message?',
-      `"${(row.content || '').slice(0, 80) || row.type}" — scheduled for ${new Date(row.sendAt).toLocaleString()}.`,
-      [
-        { text: 'Keep', style: 'cancel' },
-        { text: 'Cancel message', style: 'destructive', onPress: async () => {
-            try {
-              await cancelScheduledMessage(row.id);
-              setRows(prev => prev.filter(r => r.id !== row.id));
-            } catch (e: any) {
-              Alert.alert('Could not cancel', e?.message ?? 'Try again');
-            }
-          }
-        },
-      ],
-    );
+  const removeRow = useCallback(async (row: ScheduledMessageRow) => {
+    if (SCHEDULED_LOCAL) { await cancelScheduled(row.id); await cancelTrigger(row.id); }
+    else { await cancelScheduledMessage(row.id); await deleteScheduledCopy(String(row.id)); }
+    setRows(prev => prev.filter(r => r.id !== row.id));
   }, []);
+
+  const onCancel = useCallback((row: ScheduledMessageRow) => {
+    const buttons: any[] = [];
+    if (SCHEDULED_LOCAL) {
+      // Edit = drop the queued item and reopen the composer prefilled to reschedule.
+      buttons.push({ text: 'Edit', onPress: async () => {
+        try {
+          await removeRow(row);
+          router.push({ pathname: '/schedule-message', params: { chatId: (row as any).chatId, peerName: row.chatName, initial: row.content || '' } } as any);
+        } catch (e: any) { Alert.alert('Could not edit', e?.message ?? 'Try again'); }
+      }});
+    }
+    buttons.push({ text: 'Cancel message', style: 'destructive', onPress: async () => {
+      try { await removeRow(row); } catch (e: any) { Alert.alert('Could not cancel', e?.message ?? 'Try again'); }
+    }});
+    buttons.push({ text: 'Keep', style: 'cancel' });
+    Alert.alert(
+      SCHEDULED_LOCAL ? 'Scheduled message' : 'Cancel scheduled message?',
+      `"${(row.content || '').slice(0, 80) || row.type}" — scheduled for ${new Date(row.sendAt).toLocaleString()}.`,
+      buttons,
+    );
+  }, [removeRow, router]);
 
   if (loading) {
     return <View style={[S.screen, S.center]}><ActivityIndicator color={colors.primary} size="large" /></View>;

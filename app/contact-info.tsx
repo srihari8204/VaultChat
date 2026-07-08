@@ -10,8 +10,9 @@
 import { brandAlpha } from '../constants/theme';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, StatusBar, ScrollView, Dimensions, Alert, Image, ActivityIndicator, Linking,
+  View, Text, TouchableOpacity, StyleSheet, StatusBar, ScrollView, Dimensions, Alert, Image, ActivityIndicator, Linking, Switch,
 } from 'react-native';
+import { getShareViewing, setShareViewing } from '../lib/viewerPrefs';
 import LinkPreview from '../components/LinkPreview';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -58,6 +59,12 @@ export default function ContactInfoScreen() {
   const [peer, setPeer] = useState<ChatMember | null>(null);
   const [muted, setMuted] = useState(false);
   const [blocked, setBlocked] = useState(false);
+  const [shareViewing, setShareViewingState] = useState(true);   // Live Chat Viewers (#58)
+  useEffect(() => { if (chatId) getShareViewing(chatId, false).then(setShareViewingState).catch(() => {}); }, [chatId]);
+  const toggleShareViewing = useCallback((on: boolean) => {
+    setShareViewingState(on);
+    setShareViewing(chatId, on).catch(() => {});
+  }, [chatId]);
   const [authHeader, setAuthHeader] = useState<string | null>(null);
   const [media, setMedia] = useState<Message[]>([]);
   const [files, setFiles] = useState<FileHit[]>([]);
@@ -241,6 +248,18 @@ export default function ContactInfoScreen() {
           <ActionButton icon="search-outline" label="Search" onPress={() => router.push({ pathname: '/in-chat-search', params: { chatId } } as any)} />
           <ActionButton icon={muted ? 'notifications-off-outline' : 'notifications-outline'} label={muted ? 'Unmute' : 'Mute'} active={muted} onPress={toggleMute} />
           <ActionButton icon={blocked ? 'lock-closed-outline' : 'ban-outline'} label={blocked ? 'Unblock' : 'Block'} active={blocked} onPress={toggleBlock} />
+        </View>
+
+        {/* Live Chat Viewers (#58) — share whether you're currently viewing this chat */}
+        <View style={s.section}>
+          <Text style={s.sectionTitle}>Privacy</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8 }}>
+            <View style={{ flex: 1, paddingRight: 12 }}>
+              <Text style={{ color: colors.text, fontSize: 15, fontWeight: '600' }}>Share my viewing status</Text>
+              <Text style={{ color: colors.textDim, fontSize: 12, marginTop: 2 }}>Let {displayName} see when you're viewing this chat right now</Text>
+            </View>
+            <Switch value={shareViewing} onValueChange={toggleShareViewing} trackColor={{ true: colors.primary, false: colors.border }} thumbColor="#fff" />
+          </View>
         </View>
 
         {/* About (peer's status text) */}

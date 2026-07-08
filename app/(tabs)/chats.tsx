@@ -29,6 +29,8 @@ import { getSocket } from '../../lib/socket';
 import { setUnreadTotal } from '../../lib/unreadStore';
 import { getDraftMap } from '../../lib/drafts';
 import { getLastMessagePerChat, getCachedChats, cacheChats } from '../../lib/localDb';
+import chatRepo from '../../db/chatRepo';
+import { syncChatList } from '../../db/chatSync';
 import { syncAllHistory } from '../../lib/historySync';
 import { getCurrentUserAsync } from '../(constants)/authService';
 
@@ -83,6 +85,7 @@ export default function ChatsScreen() {
       const list = await listChats();
       setChats(list);
       cacheChats(list).catch(() => {});                         // persist for instant next-launch paint
+      try { syncChatList(list); } catch {}                      // op-sqlite source of truth (Task 3)
       getLastMessagePerChat().then(setLastMsgs).catch(() => {}); // refresh row previews
       // Background: pre-fetch history so offline scroll-back works (once/session, Wi-Fi only).
       syncAllHistory(list.filter(c => !c.archived).map(c => c.id)).then(() => getLastMessagePerChat().then(setLastMsgs).catch(() => {})).catch(() => {});
@@ -98,10 +101,15 @@ export default function ChatsScreen() {
     let cancel = false;
     (async () => {
       // Paint cached chats instantly (WhatsApp-style) so there's no spinner on
-      // cold start; the network fetch then reconciles in the background.
+      // cold start; the network fetch then reconciles in the background. Prefer
+      // the op-sqlite store (Task 3 source of truth); fall back to legacy cache.
       try {
-        const cached = await getCachedChats();
-        if (!cancel && cached.length) { setChats(cached as any); setLoading(false); }
+        const local = chatRepo.listSummaries<ChatSummary>();
+        if (!cancel && local.length) { setChats(local); setLoading(false); }
+        else {
+          const cached = await getCachedChats();
+          if (!cancel && cached.length) { setChats(cached as any); setLoading(false); }
+        }
       } catch {}
       await fetchList();
       if (!cancel) setLoading(false);

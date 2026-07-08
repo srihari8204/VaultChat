@@ -36,7 +36,10 @@ import { getRingingPeer, setRingingPeer, consumePendingCall } from '../lib/ringT
 import { displayIncomingCall, cancelIncomingCall } from '../lib/callNotification';
 import '../lib/callBackground';   // registers notifee bg event + bg notification task
 import { getAccessToken } from '../lib/api';
-import { E2EE_ENABLED } from '../constants/flags';
+import { E2EE_ENABLED, SCHEDULED_LOCAL } from '../constants/flags';
+import { runDueScheduled, rearmAllTriggers } from '../lib/scheduledRunner';
+import { getDb, schemaVersion } from '../db/database';
+import perf from '../lib/perf';
 global.Buffer = Buffer;
 
 // ── Sentry frontend init (Day 16) ──────────────────────────────────
@@ -67,6 +70,18 @@ function RootLayout() {
   });
 
   useEffect(() => {
+    // ── 0. Open the op-sqlite local store + run migrations (Task 3) ──
+    // Source of truth for chats/messages. Guarded so a stale binary without
+    // the native module can't crash launch.
+    if (Platform.OS !== 'web') {
+      try {
+        getDb();
+        perf.mark('db_ready', { schema: schemaVersion() });
+      } catch (e: any) {
+        console.warn('[db] op-sqlite init failed:', e?.message);
+      }
+    }
+
     // ── 1. Block screenshots app-wide (native only) ──────────
     if (Platform.OS !== 'web') {
       ScreenCapture.preventScreenCaptureAsync().catch(() => {});
@@ -159,6 +174,8 @@ function RootLayout() {
       routeToIncoming({ chatId: data.chatId, peerUid: data.fromUid, peerName: data.callerName || 'VaultChat user', type: data.callType, offer: '' });
     };
     const notifeeFg = notifee.onForegroundEvent(({ type, detail }) => {
+      // Scheduled-message trigger fired (#73) → send any due items.
+      if (detail?.notification?.data?.type === 'scheduled_fire') { runDueScheduled(); return; }
       if (type !== EventType.ACTION_PRESS && type !== EventType.PRESS) return;
       onNotifeeAnswerOrDecline(detail?.pressAction?.id === 'decline' ? 'decline' : 'answer', detail?.notification?.data);
     });
@@ -214,6 +231,17 @@ function RootLayout() {
     };
   }, [router]);
 
+  // Scheduled messages (#73): fire due items on start + every foreground, and
+  // re-arm OS triggers (some OEMs clear alarms on force-stop). Sends fail-soft
+  // if not signed in yet and retry on the next sweep.
+  useEffect(() => {
+    if (!SCHEDULED_LOCAL) return;
+    runDueScheduled();
+    rearmAllTriggers();
+    const sub = AppState.addEventListener('change', (s) => { if (s === 'active') runDueScheduled(); });
+    return () => sub.remove();
+  }, []);
+
   // Show spinner while security check runs
   // Prevents any screen flashing before check completes
   if (!securityChecked) {
@@ -248,24 +276,17 @@ function RootLayout() {
         <Stack.Screen name="voicecall" />
         <Stack.Screen name="qr-contact" />
         <Stack.Screen name="add/[...segments]" options={{ headerShown: false }} />
-        <Stack.Screen name="split-key-backup" options={{ headerShown: false }} />
         <Stack.Screen name="file-preview" />
         <Stack.Screen name="vaultbeam" />
         <Stack.Screen name="transfers" />
         <Stack.Screen name="voice-transcribe" />
-        <Stack.Screen name="tone-detector" />
         <Stack.Screen name="group-chat" />
         <Stack.Screen name="lock" />
-        <Stack.Screen name="ai-assistant" />
-        <Stack.Screen name="ai-chat-bot" />
-        <Stack.Screen name="chat-summary" />
-        <Stack.Screen name="translate" />
         <Stack.Screen name="media-viewer" />
         <Stack.Screen name="whiteboard" />
         <Stack.Screen name="bookmarks" />
         <Stack.Screen name="receipt-control" />
         <Stack.Screen name="voice-effects" />
-        <Stack.Screen name="auto-reply" />
         <Stack.Screen name="chat-themes" />
         <Stack.Screen name="chat-wallpaper" />
         <Stack.Screen name="chat-export" />
@@ -293,17 +314,12 @@ function RootLayout() {
         <Stack.Screen name="d2de-status" />
         <Stack.Screen name="contacts" />
         <Stack.Screen name="location-sharing" />
-        <Stack.Screen name="dark-web-guard" />
         <Stack.Screen name="vault-features" />
         <Stack.Screen name="dashboard" />
         <Stack.Screen name="settings" />
         <Stack.Screen name="story-viewer" />
-        <Stack.Screen name="breachguard" />
-        <Stack.Screen name="trustscore" />
         <Stack.Screen name="meeting-scheduler" />
-        <Stack.Screen name="three-factor-verify" options={{ gestureEnabled: false }} />
         <Stack.Screen name="decentralized-id" />
-        <Stack.Screen name="bot-api" />
         <Stack.Screen name="mini-apps" />
         <Stack.Screen name="email-bridge" />
         <Stack.Screen name="creator-channels" />
@@ -321,7 +337,6 @@ function RootLayout() {
         <Stack.Screen name="file-viewer" />
         <Stack.Screen name="video-player" />
         <Stack.Screen name="voice-speed" />
-        <Stack.Screen name="video-notes" />
         <Stack.Screen name="slideshow" />
         <Stack.Screen name="group-calls" />
         <Stack.Screen name="group-info" />
@@ -329,15 +344,12 @@ function RootLayout() {
         {/* Auth extras */}
         <Stack.Screen name="setup-complete" />
         <Stack.Screen name="face-verify-new-device" />
-        <Stack.Screen name="secret-code" />
 
         {/* Security & Privacy */}
         <Stack.Screen name="ghost-mode" />
         <Stack.Screen name="aiguardian" />
         <Stack.Screen name="backup-pin" />
-        <Stack.Screen name="behavioral" />
         <Stack.Screen name="duresspin" />
-        <Stack.Screen name="stealth" />
         <Stack.Screen name="permissions" />
         <Stack.Screen name="memoryshield" />
 
@@ -352,13 +364,13 @@ function RootLayout() {
         <Stack.Screen name="search" />
         <Stack.Screen name="starred" />
         <Stack.Screen name="scheduled" />
+        <Stack.Screen name="perf-debug" />
         <Stack.Screen name="scanner" />
         <Stack.Screen name="docscanner" />
         <Stack.Screen name="notifications" />
         <Stack.Screen name="location" />
         <Stack.Screen name="filevault" />
         <Stack.Screen name="vaultid" />
-        <Stack.Screen name="testconsole" />
 
         {/* Mini Apps destinations */}
         <Stack.Screen name="encrypted-notes" />

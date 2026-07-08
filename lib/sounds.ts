@@ -11,7 +11,11 @@
 
 import { Audio } from 'expo-av';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Vibration, Platform } from 'react-native';
+import { Vibration, Platform, NativeModules } from 'react-native';
+
+// Native device-default ringtone (Android) — matches the killed-app ring.
+const VaultCalls: any = NativeModules.VaultCalls ?? null;
+const nativeRingAvailable = () => Platform.OS === 'android' && !!VaultCalls?.playSystemRingtone;
 
 export interface SoundPrefs {
   messageSounds: boolean;   // play sent/received tones while app is open
@@ -87,18 +91,25 @@ let ringSnd: Audio.Sound | null = null;
 export async function startRingtone(): Promise<void> {
   await stopRingtone();
   const p = await getSoundPrefs();
-  await ensureAudioMode();
-  const rt = RINGTONES.find(r => r.id === p.ringtone) || RINGTONES[0];
-  try {
-    const { sound } = await Audio.Sound.createAsync(rt.asset, { isLooping: true, volume: 1.0, shouldPlay: true });
-    ringSnd = sound;
-  } catch {}
+  // Prefer the phone's OWN default ringtone on Android (what users expect);
+  // fall back to a bundled tone if the native module isn't available (Expo Go).
+  if (nativeRingAvailable()) {
+    try { VaultCalls.playSystemRingtone(); } catch {}
+  } else {
+    await ensureAudioMode();
+    const rt = RINGTONES.find(r => r.id === p.ringtone) || RINGTONES[0];
+    try {
+      const { sound } = await Audio.Sound.createAsync(rt.asset, { isLooping: true, volume: 1.0, shouldPlay: true });
+      ringSnd = sound;
+    } catch {}
+  }
   if (p.vibrate && Platform.OS === 'android') {
     try { Vibration.vibrate([0, 700, 800], true); } catch {}
   }
 }
 export async function stopRingtone(): Promise<void> {
   try { Vibration.cancel(); } catch {}
+  if (nativeRingAvailable()) { try { VaultCalls.stopSystemRingtone(); } catch {} }
   if (ringSnd) {
     const s = ringSnd; ringSnd = null;
     try { await s.stopAsync(); await s.unloadAsync(); } catch {}

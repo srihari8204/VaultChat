@@ -19,6 +19,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import { api } from './api';
 import { encryptForChat, cacheOwnPlaintext, type Message } from './chatService';
+import perf from './perf';
 
 const STORAGE_KEY      = 'vc_msg_queue_v1';
 const MAX_ATTEMPTS     = 5;
@@ -52,7 +53,7 @@ function emit<K extends keyof QueueEvents>(event: K, data: QueueEvents[K]) {
   listeners[event]?.forEach(fn => { try { (fn as any)(data); } catch {} });
 }
 export function on<K extends keyof QueueEvents>(event: K, fn: Listener<QueueEvents[K]>): () => void {
-  if (!listeners[event]) listeners[event] = new Set();
+  if (!listeners[event]) listeners[event] = new Set() as any;
   listeners[event]!.add(fn as any);
   return () => listeners[event]?.delete(fn as any);
 }
@@ -134,10 +135,24 @@ let flushing = false;
 let flushScheduled: any = null;
 
 async function postOnce(item: QueuedMessage): Promise<Message> {
+  // Perf: split encrypt (X3DH/ratchet) vs POST round-trip — this is the REAL
+  // text send path (the queue), so this is what drives the pending→sent tick.
+  const _t0 = Date.now();
   const content = await encryptForChat(item.chatId, item.plaintext);
+  const _tEnc = Date.now();
+  perf.mark('queue_encrypt_done', { chatId: item.chatId, ms: _tEnc - _t0, encrypted: content !== item.plaintext });
   const real = await api<Message>(`/chats/${encodeURIComponent(item.chatId)}/messages`, {
     method: 'POST',
     json: { content, type: item.type, replyToId: item.replyToId, meta: item.meta ?? null },
+  });
+  const _tAck = Date.now();
+  perf.recordSend({
+    id: String(real?.id ?? item.tempId),
+    tapToEncrypt: _tEnc - _t0,
+    encryptToAck: _tAck - _tEnc,
+    totalMs: _tAck - _t0,
+    transport: perf.snapshot().transport,
+    at: _tAck,
   });
   if (content !== item.plaintext) await cacheOwnPlaintext(item.chatId, real?.id, item.plaintext);
   return real;

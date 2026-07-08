@@ -2,6 +2,9 @@ package com.vaultchat.app.calls
 
 import android.app.NotificationManager
 import android.content.Context
+import android.media.Ringtone
+import android.media.RingtoneManager
+import android.os.Build
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -26,6 +29,30 @@ import com.google.firebase.messaging.FirebaseMessaging
 class CallModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
 
     override fun getName() = "VaultCalls"
+
+    // ── Device-default ringtone for the in-app incoming-call screen ──
+    private var ringtone: Ringtone? = null
+
+    @ReactMethod
+    fun playSystemRingtone() {
+        try {
+            stopRingtoneInternal()
+            val uri = RingtoneManager.getActualDefaultRingtoneUri(reactApplicationContext, RingtoneManager.TYPE_RINGTONE)
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+            ringtone = RingtoneManager.getRingtone(reactApplicationContext, uri)?.apply {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) isLooping = true
+                play()
+            }
+        } catch (_: Throwable) {}
+    }
+
+    @ReactMethod
+    fun stopSystemRingtone() { stopRingtoneInternal() }
+
+    private fun stopRingtoneInternal() {
+        try { ringtone?.stop() } catch (_: Throwable) {}
+        ringtone = null
+    }
 
     @ReactMethod
     fun startCallService(callId: String, callerName: String, callerDpUrl: String, isVideo: Boolean) {

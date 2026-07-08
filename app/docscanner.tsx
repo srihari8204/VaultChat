@@ -21,6 +21,7 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { sendMediaMessage } from '../lib/sendMedia';
+import DocumentScanner from 'react-native-document-scanner-plugin';
 
 const RECENT_KEY = 'vc_docscanner_recent';
 
@@ -71,6 +72,21 @@ function DocScannerContent() {
   const persistRecent = async (docs: ScannedDoc[]) => {
     setRecentDocs(docs);
     try { await AsyncStorage.setItem(RECENT_KEY, JSON.stringify(docs.slice(0, 20))); } catch {}
+  };
+
+  // ML Kit / VisionKit document scanner — live edge detection, auto-capture,
+  // perspective-correct crop, filters (auto/grayscale/color) and multi-page.
+  // Returns already-cropped page images; we then assemble the PDF as before.
+  const scanDoc = async () => {
+    try {
+      const { scannedImages } = await DocumentScanner.scanDocument({ maxNumDocuments: 15, croppedImageQuality: 90 });
+      if (scannedImages?.length) {
+        setImageUris(scannedImages.map(p => (p.startsWith('file://') || p.startsWith('http') ? p : `file://${p}`)));
+        setStep('type');
+      }
+    } catch (e: any) {
+      Alert.alert('Scanner unavailable', e?.message ?? 'The document scanner needs Google Play Services.');
+    }
   };
 
   const pickPhoto = async (source: 'camera' | 'gallery') => {
@@ -197,11 +213,11 @@ function DocScannerContent() {
           {step === 'pick' && (
             <View style={{ gap: 16 }}>
               <View style={{ flexDirection: 'row', gap: 12 }}>
-                <TouchableOpacity onPress={() => pickPhoto('camera')} style={{ flex: 1 }}>
+                <TouchableOpacity onPress={scanDoc} style={{ flex: 1 }}>
                   <LinearGradient colors={[colors.primary, colors.textDim]} style={S.sourceBtn}>
-                    <Text style={{ fontSize: 40 }}>📷</Text>
-                    <Text style={{ color: '#fff', fontSize: 14, fontWeight: '900', marginTop: 8 }}>Take Photo</Text>
-                    <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 11, marginTop: 4, textAlign: 'center' }}>Use camera to scan a page</Text>
+                    <Text style={{ fontSize: 40 }}>📄</Text>
+                    <Text style={{ color: '#fff', fontSize: 14, fontWeight: '900', marginTop: 8 }}>Scan Document</Text>
+                    <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 11, marginTop: 4, textAlign: 'center' }}>Auto edge-detect, crop & multi-page</Text>
                   </LinearGradient>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => pickPhoto('gallery')} style={{ flex: 1 }}>

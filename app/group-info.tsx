@@ -20,11 +20,13 @@ import {
   Image,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { getShareViewing, setShareViewing } from '../lib/viewerPrefs';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
@@ -65,6 +67,12 @@ export default function GroupInfoScreen() {
   const [memberQuery, setMemberQuery] = useState('');
   const [editingDesc, setEditingDesc] = useState(false);
   const [descDraft, setDescDraft] = useState('');
+  const [shareViewing, setShareViewingState] = useState(true);   // Live Chat Viewers (#58) — group default ON
+  useEffect(() => { if (chatId) getShareViewing(chatId, true).then(setShareViewingState).catch(() => {}); }, [chatId]);
+  const toggleShareViewing = useCallback((on: boolean) => {
+    setShareViewingState(on);
+    setShareViewing(chatId, on).catch(() => {});
+  }, [chatId]);
 
   const load = useCallback(async () => {
     // Cache key includes the chat id so different groups don't collide.
@@ -348,6 +356,24 @@ export default function GroupInfoScreen() {
           </View>
           <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
         </TouchableOpacity>
+      </View>
+
+      {/* Live Chat Viewers (#58) — share whether you're currently viewing this chat */}
+      <View style={S.section}>
+        <Text style={S.label}>PRIVACY</Text>
+        <View style={S.navRow}>
+          <Ionicons name="eye-outline" size={22} color={colors.text} style={S.navIcon} />
+          <View style={{ flex: 1 }}>
+            <Text style={S.navTitle}>Share my viewing status</Text>
+            <Text style={S.navSub}>Let members see when you're viewing this chat now</Text>
+          </View>
+          <Switch
+            value={shareViewing}
+            onValueChange={toggleShareViewing}
+            trackColor={{ true: colors.primary, false: colors.border }}
+            thumbColor="#fff"
+          />
+        </View>
       </View>
 
       {isAdmin && (

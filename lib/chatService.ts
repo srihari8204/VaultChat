@@ -5,6 +5,7 @@
 import * as Crypto from 'expo-crypto';
 import * as FileSystem from 'expo-file-system/legacy';
 import { api, getAccessToken } from './api';
+import perf from './perf';
 import { SERVER_URL } from '../constants/server';
 import { E2EE_ENABLED, GROUP_E2EE, E2EE_STRICT } from '../constants/flags';
 
@@ -158,10 +159,15 @@ export async function encryptForChat(chatId: string, plaintext: string): Promise
       return plaintext;
     }
   }
-  const peerId = directPeerOf(chatId);
+  let peerId = directPeerOf(chatId);
   if (!peerId) {
-    // Can't resolve the recipient → can't encrypt. STRICT: refuse to leak
-    // plaintext (the send fails + retries once the chat/peer is resolved).
+    // Not cached yet (e.g. sending right after opening a fresh chat) — resolve
+    // the peer on demand, which populates _chatPeer, then re-check.
+    try { await getChat(chatId); peerId = directPeerOf(chatId); } catch {}
+  }
+  if (!peerId) {
+    // Still can't resolve → can't encrypt. STRICT: refuse to leak plaintext.
+    console.warn('[e2ee] PEER-NOT-RESOLVED chat=', chatId, 'entry=', JSON.stringify(_chatPeer.get(chatId)));
     if (E2EE_STRICT) throw new Error('Encryption not ready — recipient not resolved yet. Retrying…');
     return plaintext;
   }
@@ -169,7 +175,7 @@ export async function encryptForChat(chatId: string, plaintext: string): Promise
     const e2ee = await import('../services/crypto/e2eeSession.rn');
     return await e2ee.e2eeEncrypt(chatId, peerId, plaintext);
   } catch (err) {
-    if (__DEV__) console.warn('[e2ee] encrypt failed:', (err as any)?.message);
+    console.warn('[e2ee] ENCRYPT-FAILED chat=', chatId, 'peer=', peerId, 'err=', (err as any)?.message, (err as any)?.stack?.slice?.(0, 200));
     // STRICT: never silently send plaintext. Throwing surfaces a failed/retry
     // bubble; the retry re-fetches the peer's key bundle and almost always
     // succeeds. (Legacy graceful mode falls back to plaintext.)
@@ -495,13 +501,57 @@ export async function sendMessage(
   type: Message['type'] = 'text',
   opts: { replyToId?: number | null; meta?: any } = {},
 ): Promise<Message> {
+  // ── Task 1 perf instrumentation ──────────────────────────────────
+  // The real send path is HTTP POST (not a socket emit). Split the timing
+  // into E2EE-encrypt vs. POST round-trip so we can see which one dominates
+  // the "pending clock" the user experiences.
+  const _t0 = Date.now();
   const content = await encryptForChat(chatId, plaintext);
-  const msg = await api<Message>(`/chats/${encodeURIComponent(chatId)}/messages`, {
+  const _tEnc = Date.now();
+  perf.mark('send_encrypt_done', { chatId, ms: _tEnc - _t0, encrypted: content !== plaintext });
+  try {
+    const msg = await api<Message>(`/chats/${encodeURIComponent(chatId)}/messages`, {
+      method: 'POST',
+      json: { content, type, replyToId: opts.replyToId ?? null, meta: opts.meta ?? null },
+    });
+    const _tAck = Date.now();
+    perf.mark('send_http_ack', { chatId, id: msg?.id, ms: _tAck - _tEnc });
+    perf.recordSend({
+      id: String(msg?.id ?? chatId),
+      tapToEncrypt: _tEnc - _t0,
+      encryptToAck: _tAck - _tEnc,
+      totalMs: _tAck - _t0,
+      transport: perf.snapshot().transport,
+      at: _tAck,
+    });
+    if (content !== plaintext) await cacheOwnPlaintext(chatId, msg?.id, plaintext);
+    return msg;
+  } catch (err) {
+    perf.recordSend({
+      id: String(chatId), tapToEncrypt: _tEnc - _t0,
+      totalMs: Date.now() - _t0, transport: perf.snapshot().transport,
+      failed: true, at: Date.now(),
+    });
+    throw err;
+  }
+}
+
+// Schedule a message via the SERVER (reliable — fires even if the app is killed/
+// swiped away), but E2E-ENCRYPTED: the content is sealed for the chat BEFORE it
+// leaves the device, so the server only ever holds ciphertext it can't read, and
+// simply delivers that ciphertext at send time (the recipient decrypts as usual).
+// Returns the created row; its id keys a local plaintext copy for the sender's tray.
+export async function scheduleEncryptedMessage(
+  chatId: string,
+  plaintext: string,
+  sendAtIso: string,
+  opts: { replyToId?: number | null; meta?: any } = {},
+): Promise<ScheduledMessageRow> {
+  const content = await encryptForChat(chatId, plaintext);
+  return api<ScheduledMessageRow>('/user/scheduled-messages', {
     method: 'POST',
-    json: { content, type, replyToId: opts.replyToId ?? null, meta: opts.meta ?? null },
+    json: { chatId, sendAt: sendAtIso, type: 'text', content, replyToId: opts.replyToId ?? null, meta: opts.meta ?? null },
   });
-  if (content !== plaintext) await cacheOwnPlaintext(chatId, msg?.id, plaintext);
-  return msg;
 }
 
 export async function editMessage(chatId: string, msgId: number, plaintext: string): Promise<Message> {

@@ -10,7 +10,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import InCallManager from 'react-native-incall-manager';
 import { setActiveCall, clearActiveCall, type ActiveCall } from '../lib/callState';
 import { useCallback, useEffect, useRef, useState , useMemo} from 'react';
-import { Alert, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Platform, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import {
@@ -165,9 +165,12 @@ export default function VideoCallScreen() {
   const [remoteUrl, setRemoteUrl] = useState<string | null>(null);
   const [filter,    setFilter]    = useState<FilterId>('none');
   const [showFilters, setShowFilters] = useState(false);
+  const [sharing,   setSharing]   = useState(false);   // screen share (#124)
 
   const pcRef           = useRef<RTCPeerConnection | null>(null);
   const localStreamRef  = useRef<any>(null);
+  const screenStreamRef = useRef<any>(null);           // active getDisplayMedia stream
+  const cameraTrackRef  = useRef<any>(null);           // camera track held for swap-back
   const meIdRef         = useRef<string>('');
   const timerRef        = useRef<any>(null);
   const ringTimerRef    = useRef<any>(null);
@@ -186,6 +189,7 @@ export default function VideoCallScreen() {
     if (ringTimerRef.current) { clearInterval(ringTimerRef.current); ringTimerRef.current = null; }
     try { InCallManager.stop(); } catch {}
     stopCallForeground();   // release the mic/camera foreground service + wake lock
+    try { screenStreamRef.current?.getTracks?.().forEach((t: any) => t.stop()); } catch {}   // stop screen capture (#124)
     try { localStreamRef.current?.getTracks().forEach((t: any) => t.stop()); } catch {}
     try { pcRef.current?.close(); } catch {}
     pcRef.current = null;
@@ -388,6 +392,58 @@ export default function VideoCallScreen() {
     tracks.forEach((t: any) => { try { t._switchCamera?.(); } catch {} });
   }, []);
 
+  // ── Screen share (#124) — swap the outgoing camera track for a screen track ──
+  // via RTCRtpSender.replaceTrack(): the peer instantly sees the screen with NO
+  // renegotiation and NO call drop. Stays P2P + E2EE (same DTLS-SRTP stream).
+  const videoSender = () =>
+    pcRef.current?.getSenders?.().find((s: any) => s.track && s.track.kind === 'video') ?? null;
+
+  const stopScreenShare = useCallback(async () => {
+    const sender = videoSender();
+    try { if (sender && cameraTrackRef.current) await sender.replaceTrack(cameraTrackRef.current); } catch {}
+    try { screenStreamRef.current?.getTracks?.().forEach((t: any) => t.stop()); } catch {}
+    screenStreamRef.current = null;
+    cameraTrackRef.current = null;
+    try { if (localStreamRef.current) setLocalUrl(localStreamRef.current.toURL()); } catch {}
+    setSharing(false);
+  }, []);
+
+  const startScreenShare = useCallback(async () => {
+    const sender = videoSender();
+    if (!sender) {
+      Alert.alert('Screen share', `Not connected yet — no video track to swap (call state: ${state}).`);
+      return;
+    }
+    if (typeof (mediaDevices as any).getDisplayMedia !== 'function') {
+      Alert.alert('Screen share', 'getDisplayMedia is unavailable in this build (react-native-webrtc).');
+      return;
+    }
+    try {
+      console.log('[screenshare] calling getDisplayMedia…');
+      const screen: any = await (mediaDevices as any).getDisplayMedia();   // → system "Start recording?" prompt
+      console.log('[screenshare] stream:', !!screen, 'tracks:', screen?.getVideoTracks?.().length);
+      const screenTrack = screen?.getVideoTracks?.()[0];
+      if (!screenTrack) { screen?.getTracks?.().forEach((t: any) => t.stop()); Alert.alert('Screen share', 'No screen track was returned by capture.'); return; }
+      cameraTrackRef.current = sender.track;                      // keep the camera alive for swap-back
+      screenStreamRef.current = screen;
+      await sender.replaceTrack(screenTrack);                     // peer now sees the screen
+      try { setLocalUrl(screen.toURL()); } catch {}              // show the screen in my preview
+      setSharing(true);
+      try { screenTrack.addEventListener?.('ended', () => { stopScreenShare(); }); } catch {}
+    } catch (e: any) {
+      const msg = e?.message ? String(e.message) : String(e);
+      console.warn('[screenshare] FAILED:', msg, e);
+      // Silently ignore a genuine user cancel; surface everything else so we can see it.
+      if (!/cancel|denied by user|user.?cancel|NotAllowed/i.test(msg)) {
+        Alert.alert('Screen share failed', msg || 'Unknown error');
+      }
+    }
+  }, [stopScreenShare, state]);
+
+  const toggleScreenShare = useCallback(() => {
+    if (sharing) stopScreenShare(); else startScreenShare();
+  }, [sharing, startScreenShare, stopScreenShare]);
+
   const toggleSpeaker = useCallback(() => {
     const next = !speaker;
     setSpeaker(next);
@@ -435,10 +491,18 @@ export default function VideoCallScreen() {
         {error && <Text style={S.errorTxt}>{error}</Text>}
       </View>
 
-      {/* Local preview */}
-      {localUrl && !cameraOff && (
+      {/* Screen-share banner (#124) */}
+      {sharing && (
+        <View style={S.shareBanner} pointerEvents="none">
+          <Ionicons name="phone-portrait" size={14} color="#fff" />
+          <Text style={S.shareBannerTxt}>You're sharing your screen</Text>
+        </View>
+      )}
+
+      {/* Local preview (shows the screen while sharing, un-mirrored) */}
+      {localUrl && (!cameraOff || sharing) && (
         <View style={S.localWrap}>
-          <RTCView style={S.local} streamURL={localUrl} objectFit="cover" mirror zOrder={1} />
+          <RTCView style={S.local} streamURL={localUrl} objectFit="cover" mirror={!sharing} zOrder={1} />
           {overlay.tint && (
             <View
               pointerEvents="none"
@@ -479,7 +543,12 @@ export default function VideoCallScreen() {
       <View style={S.controls}>
         <ControlBtn icon={muted ? 'mic-off' : 'mic'} label={muted ? 'Unmute' : 'Mute'} active={muted} onPress={toggleMute} />
         <ControlBtn icon={cameraOff ? 'videocam-off' : 'videocam'} label={cameraOff ? 'Camera' : 'Off'} active={cameraOff} onPress={toggleCamera} />
-        <ControlBtn icon="camera-reverse" label="Flip" onPress={flipCamera} />
+        {sharing
+          ? <ControlBtn icon="stop-circle" label="Stop" active onPress={toggleScreenShare} />
+          : <ControlBtn icon="camera-reverse" label="Flip" onPress={flipCamera} />}
+        {Platform.OS === 'android' && !sharing && (
+          <ControlBtn icon="phone-portrait" label="Share" onPress={toggleScreenShare} />
+        )}
         <ControlBtn
           icon="✨"
           label={filter === 'none' ? 'Beauty' : f.label}
@@ -528,6 +597,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   glow:       { opacity: 0.10 },
 
   topBar:     { position: 'absolute', top: 56, left: 24, right: 24, alignItems: 'center', gap: 4 },
+  shareBanner:{ position: 'absolute', top: 110, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(157,111,208,0.92)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
+  shareBannerTxt: { color: '#fff', fontSize: 12, fontWeight: '700' },
   name:       { color: c.text, fontSize: 22, fontWeight: '700' },
   status:     { color: c.textDim, fontSize: 14 },
   errorTxt:   { color: c.danger, fontSize: 13, marginTop: 4 },

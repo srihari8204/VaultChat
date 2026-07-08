@@ -58,6 +58,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { Swipeable } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
 import { Sheet, Avatar, type SheetAction as MenuAction } from '../components/ui';
+import { useChatViewers } from '../hooks/useChatViewers';
+import { ViewerStack } from '../components/chat/ViewerStack';
+import { getShareViewing } from '../lib/viewerPrefs';
+import type { ViewerActivity } from '../lib/socket';
 import LinkPreview, { extractUrl } from '../components/LinkPreview';
 import GifPicker from '../components/GifPicker';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -290,6 +294,19 @@ export default function ChatScreen() {
     chat?.members.forEach(x => m.set(x.userId, x));
     return m;
   }, [chat]);
+
+  // ── Live Chat Viewers (feature #58) — who's viewing this chat right now ──
+  const [cvFocused, setCvFocused] = useState(true);
+  const [cvShareOn, setCvShareOn] = useState(false);
+  // Focus toggles emission on/off and re-reads the per-chat toggle (so a change
+  // made in chat-info takes effect the moment you return).
+  useFocusEffect(useCallback(() => {
+    setCvFocused(true);
+    if (chatId && chat) getShareViewing(chatId, chat.type !== 'direct').then(setCvShareOn).catch(() => {});
+    return () => setCvFocused(false);
+  }, [chatId, chat?.type]));
+  const myViewerActivity: ViewerActivity = sending ? 'uploading' : (input.trim().length > 0 ? 'typing' : 'reading');
+  const chatViewers = useChatViewers({ chatId, meId, enabled: cvShareOn, focused: cvFocused, activity: myViewerActivity });
 
   // O(1) reply-target lookup — replaces a per-bubble messages.find() on every
   // render (was O(n²) across the visible page).
@@ -1756,6 +1773,16 @@ export default function ChatScreen() {
     return () => { cancel = true; };
   }, []);
 
+  // Resolve a viewer's name/avatar from chat members (Live Chat Viewers, #58).
+  const resolveViewer = useCallback((userId: string) => {
+    const m = membersById.get(userId);
+    return {
+      name: m?.name || m?.email || 'VaultChat user',
+      uri: m?.photoURL && screenAuthHeader ? attachmentUrl(m.photoURL) : null,
+      headers: screenAuthHeader ? { Authorization: screenAuthHeader } : undefined,
+    };
+  }, [membersById, screenAuthHeader]);
+
   if (loading) {
     return (
       <View style={[S.screen, S.center]}>
@@ -1793,21 +1820,25 @@ export default function ChatScreen() {
             presence={chat?.type === 'direct' && peerPresence?.online ? 'online' : null}
           />
         </TouchableOpacity>
-        <TouchableOpacity
-          style={{ flex: 1 }}
-          activeOpacity={0.6}
-          onPress={openProfile}
-        >
-          <Text style={S.title} numberOfLines={1}>{title}</Text>
-          {chat && (
-            <Text style={S.sub}>
-              {headerSub}
-              <Text style={S.e2eBadge}>  ·  </Text>
-              <Ionicons name="lock-closed" size={11} color="#22C55E" />
-              <Text style={S.e2eBadge}> secured</Text>
-            </Text>
+        <View style={{ flex: 1 }}>
+          <TouchableOpacity activeOpacity={0.6} onPress={openProfile}>
+            <Text style={S.title} numberOfLines={1}>{title}</Text>
+            {chat && (
+              <Text style={S.sub}>
+                {headerSub}
+                <Text style={S.e2eBadge}>  ·  </Text>
+                <Ionicons name="lock-closed" size={11} color="#22C55E" />
+                <Text style={S.e2eBadge}> secured</Text>
+              </Text>
+            )}
+          </TouchableOpacity>
+          {/* Live Chat Viewers (#58): who's viewing right now — tap for details */}
+          {chatViewers.length > 0 && (
+            <View style={{ marginTop: 3 }}>
+              <ViewerStack viewers={chatViewers} resolve={resolveViewer} />
+            </View>
           )}
-        </TouchableOpacity>
+        </View>
         {chat?.type === 'direct' && meId && (() => {
           const peer = chat.members.find(m => m.userId !== meId);
           if (!peer) return null;

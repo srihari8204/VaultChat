@@ -15,6 +15,12 @@ import { setPendingCall } from './ringTracker';
 //    intent and (for decline) clear the call.
 notifee.onBackgroundEvent(async ({ type, detail }) => {
   const data: any = detail?.notification?.data;
+  // Scheduled-message trigger fired while backgrounded/killed (#73) → send due
+  // items best-effort (lazy require keeps the headless load path light).
+  if (data?.type === 'scheduled_fire') {
+    try { await require('./scheduledRunner').runDueScheduled(); } catch {}
+    return;
+  }
   if (data?.type !== 'call') return;
   const id = detail?.pressAction?.id;
   if (type === EventType.ACTION_PRESS && id === 'decline') {

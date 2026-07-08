@@ -22,6 +22,7 @@ const MINI_APPS = [
   { id: 'calculator', icon: '🧮', name: 'Calculator',      gradient: ['#4A9FFF', '#1D4ED8'] as [string, string] },
   { id: 'todo',       icon: '✅', name: 'Todo List',        gradient: [BRAND_ACCENT, '#059669'] as [string, string] },
   { id: 'pomodoro',   icon: '🍅', name: 'Pomodoro Timer',   gradient: [BRAND_ACCENT, '#DC2626'] as [string, string] },
+  { id: 'interest',   icon: '📈', name: 'Interest Calc',    gradient: ['#075E54', '#25D366'] as [string, string] },
   { id: 'expense',    icon: '💰', name: 'Expense Tracker',  gradient: ['#7C3AED', '#EC4899'] as [string, string] },
   { id: 'notes',      icon: '📝', name: 'Notes',            gradient: ['#F59E0B', '#D97706'] as [string, string] },
   { id: 'qr',         icon: '📱', name: 'QR Generator',     gradient: ['#06B6D4', '#0891B2'] as [string, string] },
@@ -243,7 +244,9 @@ export default function MiniAppsScreen() {
 
   // ── Handle app open ───────────────────────────────────────────
   const handleOpenApp = (appId: string) => {
-    if (appId === 'calculator' || appId === 'todo') {
+    if (appId === 'interest') {
+      router.push('/interest-calculator' as any);   // full-screen mini app
+    } else if (appId === 'calculator' || appId === 'todo') {
       setActiveApp(appId);
     } else {
       Alert.alert('Coming Soon', 'This mini app is under development.');

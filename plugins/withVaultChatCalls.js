@@ -36,6 +36,7 @@ const PERMISSIONS = [
   'android.permission.FOREGROUND_SERVICE',
   'android.permission.FOREGROUND_SERVICE_MICROPHONE',
   'android.permission.FOREGROUND_SERVICE_CAMERA',
+  'android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION',   // in-call screen share (#124)
   'android.permission.POST_NOTIFICATIONS',
   'android.permission.USE_FULL_SCREEN_INTENT',
   'android.permission.WAKE_LOCK',

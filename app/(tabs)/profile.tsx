@@ -333,6 +333,16 @@ export default function ProfileScreen() {
         <Ionicons name="log-out-outline" size={20} color={colors.danger} />
         <Text style={[S.actionTxt, { color: colors.danger }]}>Sign out</Text>
       </TouchableOpacity>
+
+      {/* Version footer — long-press opens the hidden perf/debug screen. */}
+      <TouchableOpacity
+        onLongPress={() => router.push('/perf-debug' as any)}
+        delayLongPress={800}
+        activeOpacity={1}
+        style={{ alignItems: 'center', paddingVertical: 24 }}
+      >
+        <Text style={{ color: colors.textDim, fontSize: 12 }}>VaultChat 1.1.1</Text>
+      </TouchableOpacity>
     </ScrollView>
   );
 }
