@@ -9,10 +9,10 @@
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import InCallManager from 'react-native-incall-manager';
 import { setActiveCall, clearActiveCall, type ActiveCall } from '../lib/callState';
-import { useCallback, useEffect, useRef, useState , useMemo} from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Platform, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { type Palette } from '../constants/theme';
-import { useTheme } from '../lib/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { CALL, CALL_TEXT_SHADOW } from '../constants/callTheme';
 import {
   mediaDevices,
   RTCIceCandidate,
@@ -24,6 +24,7 @@ import { getCurrentUserAsync } from './(constants)/authService';
 import { getTurnConfig, type IceServer } from '../lib/chatService';
 import { getSocket } from '../lib/socket';
 import { startCallForeground, stopCallForeground, dismissIncomingNotification, initiateCall, cancelCall } from '../lib/CallService';
+import { newCallCipher, openCallOffer, plainCipher, type CallCipher } from '../lib/callCrypto';
 import { addCallLog } from '../lib/callLog';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -137,14 +138,11 @@ function matrixToOverlay(m: number[] | null): { tint?: string; opacity?: number 
   return { tint, opacity };
 }
 
-function useS() {
-  const { colors } = useTheme();
-  return useMemo(() => makeStyles(colors), [colors]);
-}
+// Call chrome is always dark (independent of app theme), so styles are static.
+const S = makeStyles();
 
 export default function VideoCallScreen() {
-  const { colors } = useTheme();
-  const S = useS();
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const { chatId, peerUid, peerName, isIncoming, initialOffer } =
     useLocalSearchParams<{
@@ -168,6 +166,8 @@ export default function VideoCallScreen() {
   const [sharing,   setSharing]   = useState(false);   // screen share (#124)
 
   const pcRef           = useRef<RTCPeerConnection | null>(null);
+  // E2EE signaling cipher (F6) — per-call key; plaintext passthrough for legacy peers.
+  const cipherRef       = useRef<CallCipher>(plainCipher);
   const localStreamRef  = useRef<any>(null);
   const screenStreamRef = useRef<any>(null);           // active getDisplayMedia stream
   const cameraTrackRef  = useRef<any>(null);           // camera track held for swap-back
@@ -301,16 +301,23 @@ export default function VideoCallScreen() {
 
         const s = await getSocket();
         const onAnswer = async (data: any) => {
-          if (data?.from !== peerUid && data?.fromUid !== peerUid) return;
-          const sdp = data.answer || data.sdp;
-          if (!sdp || !pcRef.current) return;
-          await pcRef.current.setRemoteDescription(new RTCSessionDescription(sdp));
+          if (data?.from !== peerUid && data?.fromUid !== peerUid) { console.warn('[call] answer from wrong peer', data?.from, 'want', peerUid); return; }
+          const sdp = cipherRef.current.open(data.answer || data.sdp);   // F6: sealed for E2EE calls
+          if (!sdp?.type) { console.warn('[call] answer failed to open (E2EE cipher mismatch or bad sdp)'); return; }
+          if (!pcRef.current) { console.warn('[call] answer arrived after pc closed'); return; }
+          // Idempotent: the callee resends the answer a few times; only the first
+          // (have-local-offer → stable) transition applies. Later copies are no-ops.
+          if (pcRef.current.signalingState !== 'have-local-offer') return;
+          console.warn('[call] ANSWER applied → setRemoteDescription');
+          try { await pcRef.current.setRemoteDescription(new RTCSessionDescription(sdp)); }
+          catch (e: any) { console.warn('[call] setRemoteDescription failed:', e?.message); return; }
           if (state !== 'connected') { setState('connected'); startTimer(); }
         };
         const onIce = async (data: any) => {
           if (data?.from !== peerUid && data?.fromUid !== peerUid) return;
-          if (!data?.candidate || !pcRef.current) return;
-          try { await pcRef.current.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch {}
+          const cand = cipherRef.current.open(data?.candidate);          // F6: sealed for E2EE calls
+          if (!cand || !pcRef.current) return;
+          try { await pcRef.current.addIceCandidate(new RTCIceCandidate(cand)); } catch {}
         };
         const onEnd = (data: any) => {
           if (data?.from === peerUid || data?.fromUid === peerUid) endCall(false);
@@ -324,7 +331,7 @@ export default function VideoCallScreen() {
 
         (pc as any).onicecandidate = (event: any) => {
           if (!event.candidate || !peerUid) return;
-          s.emit('webrtc_ice', { to: peerUid, from: meIdRef.current, candidate: event.candidate });
+          s.emit('webrtc_ice', { to: peerUid, from: meIdRef.current, candidate: cipherRef.current.seal(event.candidate) });
         };
         (pc as any).onconnectionstatechange = () => {
           const st = (pc as any).connectionState;
@@ -332,33 +339,59 @@ export default function VideoCallScreen() {
         };
 
         if (isIncoming === 'true' && initialOffer) {
-          const offerObj = JSON.parse(String(initialOffer));
+          // F6: the offer may be an encrypted sig1 wire (new caller) or a raw
+          // plaintext SDP (legacy caller) — openCallOffer handles both.
+          const parsedWire = JSON.parse(String(initialOffer));
+          const { cipher, offer: offerObj } = await openCallOffer(peerUid, parsedWire);
+          cipherRef.current = cipher;
+          if (!offerObj?.type) {
+            // Stale caller session — we dropped it so the next attempt re-keys.
+            throw new Error('Secure call setup failed — ask the caller to try again');
+          }
           await pc.setRemoteDescription(new RTCSessionDescription(offerObj));
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
-          s.emit('webrtc_answer', { to: peerUid, from: meIdRef.current, answer });
+          // Resend the answer a few times: it's one-shot, so a single socket
+          // 'transport error' blip during setup used to drop it permanently and
+          // strand the call. The caller's setRemoteDescription is idempotent.
+          const answerWire = { to: peerUid, from: meIdRef.current, answer: cipher.seal(answer) };
+          console.warn('[call] sending ANSWER to', peerUid);
+          s.emit('webrtc_answer', answerWire);
+          let ansTries = 0;
+          const ansTimer = setInterval(() => {
+            if (connectedRef.current || ansTries >= 4) { clearInterval(ansTimer); return; }
+            ansTries++; try { s.emit('webrtc_answer', answerWire); } catch {}
+          }, 1500);
+          offsRef.current.push(() => clearInterval(ansTimer));
           setState('connecting');
         } else {
           const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
           await pc.setLocalDescription(offer);
+          // F6: seal the signaling under a per-call key (ratchet-wrapped once).
+          // Falls back to plaintext only when the peer has no key bundle yet.
+          const sealed = await newCallCipher(peerUid, offer);
+          if (sealed) cipherRef.current = sealed.cipher;
+          const offerWire = sealed ? sealed.offerWire : offer;
           const ringPayload = {
             to: peerUid,
             from: meIdRef.current,
             chatId,
             type: 'video',
             callerName: me.name ?? me.email ?? 'VaultChat user',
-            offer,
+            offer: offerWire,
           };
           s.emit('call_incoming', ringPayload);
-          s.emit('webrtc_offer', { to: peerUid, from: meIdRef.current, offer });
-          initiateCall({ calleeId: peerUid, callId: String(chatId || peerUid), isVideo: true, sdpOffer: JSON.stringify(offer) }).catch(() => {});
+          s.emit('webrtc_offer', { to: peerUid, from: meIdRef.current, offer: offerWire });
+          // FCM wake-up push: doorbell only — no SDP rides in the push (F6).
+          initiateCall({ calleeId: peerUid, callId: String(chatId || peerUid), isVideo: true }).catch(() => {});
           setState('ringing');
           // Re-send ring + offer every 3s so a killed-then-woken callee can answer.
+          // Re-sends the SAME sealed wire — never re-encrypt per tick.
           let rings = 0;
           ringTimerRef.current = setInterval(() => {
             if (connectedRef.current || rings >= 9) { clearInterval(ringTimerRef.current); ringTimerRef.current = null; return; }
             rings++;
-            try { s.emit('call_incoming', ringPayload); s.emit('webrtc_offer', { to: peerUid, from: meIdRef.current, offer }); } catch {}
+            try { s.emit('call_incoming', ringPayload); s.emit('webrtc_offer', { to: peerUid, from: meIdRef.current, offer: offerWire }); } catch {}
           }, 3000);
         }
       } catch (e: any) {
@@ -484,9 +517,9 @@ export default function VideoCallScreen() {
         )}
       </View>
 
-      {/* Top bar: name + status */}
-      <View style={S.topBar} pointerEvents="none">
-        <Text style={S.name}>{peerName || 'VaultChat user'}</Text>
+      {/* Top bar: name + status (offset below the notch / status bar) */}
+      <View style={[S.topBar, { top: insets.top + 8 }]} pointerEvents="none">
+        <Text style={S.name} numberOfLines={1}>{peerName || 'VaultChat user'}</Text>
         <Text style={S.status}>{statusText}</Text>
         {error && <Text style={S.errorTxt}>{error}</Text>}
       </View>
@@ -501,7 +534,7 @@ export default function VideoCallScreen() {
 
       {/* Local preview (shows the screen while sharing, un-mirrored) */}
       {localUrl && (!cameraOff || sharing) && (
-        <View style={S.localWrap}>
+        <View style={[S.localWrap, { top: insets.top + 8 }]}>
           <RTCView style={S.local} streamURL={localUrl} objectFit="cover" mirror={!sharing} zOrder={1} />
           {overlay.tint && (
             <View
@@ -512,9 +545,9 @@ export default function VideoCallScreen() {
         </View>
       )}
 
-      {/* Beautify filter strip (toggled by Beautify button) */}
+      {/* Beautify filter strip (toggled by Beautify button) — sits above the controls */}
       {showFilters && (
-        <View style={S.filterStrip}>
+        <View style={[S.filterStrip, { bottom: insets.bottom + 150 }]}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={S.filterRow}>
             {FILTERS.map(opt => (
               <TouchableOpacity
@@ -539,8 +572,9 @@ export default function VideoCallScreen() {
         </View>
       )}
 
-      {/* Controls */}
-      <View style={S.controls}>
+      {/* Controls — wraps to a second row on narrow screens instead of
+          overflowing, and clears the gesture bar via the bottom inset. */}
+      <View style={[S.controls, { bottom: insets.bottom + 12 }]}>
         <ControlBtn icon={muted ? 'mic-off' : 'mic'} label={muted ? 'Unmute' : 'Mute'} active={muted} onPress={toggleMute} />
         <ControlBtn icon={cameraOff ? 'videocam-off' : 'videocam'} label={cameraOff ? 'Camera' : 'Off'} active={cameraOff} onPress={toggleCamera} />
         {sharing
@@ -550,7 +584,7 @@ export default function VideoCallScreen() {
           <ControlBtn icon="phone-portrait" label="Share" onPress={toggleScreenShare} />
         )}
         <ControlBtn
-          icon="✨"
+          icon="sparkles"
           label={filter === 'none' ? 'Beauty' : f.label}
           active={showFilters || filter !== 'none'}
           onPress={() => setShowFilters(v => !v)}
@@ -564,7 +598,6 @@ export default function VideoCallScreen() {
 
 function ControlBtn({ icon, label, onPress, active, danger }:
   { icon: string; label: string; onPress: () => void; active?: boolean; danger?: boolean }) {
-  const S = useS();
   return (
     <TouchableOpacity
       style={[S.btn, active && S.btnActive, danger && S.btnDanger]}
@@ -572,7 +605,7 @@ function ControlBtn({ icon, label, onPress, active, danger }:
       activeOpacity={0.85}
     >
       <Ionicons name={icon as any} size={22} color="#fff" style={S.btnIcon} />
-      <Text style={S.btnLabel}>{label}</Text>
+      <Text style={S.btnLabel} numberOfLines={1}>{label}</Text>
     </TouchableOpacity>
   );
 }
@@ -583,30 +616,24 @@ function formatDuration(s: number): string {
   return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
 }
 
-const SUBTLE = 'rgba(255,255,255,0.7)';
-
-const makeStyles = (c: Palette) => StyleSheet.create({
-  screen:     { flex: 1, backgroundColor: c.bg },
-  remote:     { flex: 1, backgroundColor: c.bg },
+function makeStyles() { return StyleSheet.create({
+  screen:     { flex: 1, backgroundColor: CALL.video },
+  remote:     { flex: 1, backgroundColor: CALL.video },
   remoteVid:  { width: '100%', height: '100%' },
   remotePlaceholder: { alignItems: 'center', justifyContent: 'center' },
   placeholderInitial: { fontSize: 96, color: 'rgba(255,255,255,0.3)', fontWeight: '900' },
-  // Subtle radial-ish glow — RN can't do true radial gradients without a lib,
-  // but a soft full-screen white wash at low opacity reads as a halo on top
-  // of darker midtones in the video.
-  glow:       { opacity: 0.10 },
 
-  topBar:     { position: 'absolute', top: 56, left: 24, right: 24, alignItems: 'center', gap: 4 },
+  topBar:     { position: 'absolute', left: 24, right: 24, alignItems: 'center', gap: 4 },
   shareBanner:{ position: 'absolute', top: 110, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(157,111,208,0.92)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
   shareBannerTxt: { color: '#fff', fontSize: 12, fontWeight: '700' },
-  name:       { color: c.text, fontSize: 22, fontWeight: '700' },
-  status:     { color: c.textDim, fontSize: 14 },
-  errorTxt:   { color: c.danger, fontSize: 13, marginTop: 4 },
+  name:       { color: CALL.text, fontSize: 22, fontWeight: '700', ...CALL_TEXT_SHADOW },
+  status:     { color: CALL.textDim, fontSize: 14, ...CALL_TEXT_SHADOW },
+  errorTxt:   { color: CALL.danger, fontSize: 13, marginTop: 4, ...CALL_TEXT_SHADOW },
 
-  localWrap:  { position: 'absolute', top: 60, right: 16, width: 110, height: 150, borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
+  localWrap:  { position: 'absolute', right: 16, width: 110, height: 150, borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: CALL.ctrlBorder },
   local:      { width: '100%', height: '100%' },
 
-  filterStrip:     { position: 'absolute', left: 0, right: 0, bottom: 116, backgroundColor: 'rgba(10,10,15,0.7)', paddingVertical: 12 },
+  filterStrip:     { position: 'absolute', left: 0, right: 0, backgroundColor: 'rgba(10,10,15,0.7)', paddingVertical: 12 },
   filterRow:       { paddingHorizontal: 16, gap: 12, alignItems: 'center' },
   filterChip:      { alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4 },
   filterChipActive:{ },
@@ -614,10 +641,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   filterLabel:     { color: 'rgba(255,255,255,0.65)', fontSize: 11, fontWeight: '600' },
   filterLabelActive:{ color: '#FFFFFF' },
 
-  controls:   { position: 'absolute', left: 12, right: 12, bottom: 36, flexDirection: 'row', justifyContent: 'space-around', backgroundColor: 'rgba(20,20,30,0.6)', paddingVertical: 14, borderRadius: 24 },
-  btn:        { width: 64, alignItems: 'center', justifyContent: 'center', paddingVertical: 8, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.06)' },
-  btnActive:  { backgroundColor: c.primary },
-  btnDanger:  { backgroundColor: c.danger },
+  // flexWrap → the 7 controls fold onto a second centered row on narrow phones
+  // instead of overflowing off-screen.
+  controls:   { position: 'absolute', left: 12, right: 12, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', columnGap: 6, rowGap: 8, backgroundColor: CALL.barBg, paddingVertical: 12, paddingHorizontal: 6, borderRadius: 24, borderWidth: 1, borderColor: CALL.ctrlBorder },
+  btn:        { width: 62, alignItems: 'center', justifyContent: 'center', paddingVertical: 8, borderRadius: 14, backgroundColor: CALL.ctrl },
+  btnActive:  { backgroundColor: CALL.active },
+  btnDanger:  { backgroundColor: CALL.danger },
   btnIcon:    { fontSize: 22 },
-  btnLabel:   { color: c.text, fontSize: 10, marginTop: 2 },
-});
+  btnLabel:   { color: CALL.text, fontSize: 10, marginTop: 2 },
+}); }

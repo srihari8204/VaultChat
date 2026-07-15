@@ -2,9 +2,11 @@
 // and handles the encrypt/decrypt seam — currently pass-through, swap to
 // double-ratchet in Phase 3b without touching call sites.
 
+import { Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import * as FileSystem from 'expo-file-system/legacy';
 import { api, getAccessToken } from './api';
+import { unwrapPreview } from './linkPreview';
 import perf from './perf';
 import { SERVER_URL } from '../constants/server';
 import { E2EE_ENABLED, GROUP_E2EE, E2EE_STRICT } from '../constants/flags';
@@ -112,7 +114,7 @@ export interface Message {
   id:        number;
   chatId:    string;
   senderId:  string;
-  type:      'text' | 'image' | 'video' | 'audio' | 'file' | 'location' | 'system' | 'sticker' | 'poll';
+  type:      'text' | 'image' | 'video' | 'audio' | 'file' | 'location' | 'system' | 'sticker' | 'poll' | 'reaction' | 'vaultbeam';
   content:   string | null;        // opaque ciphertext (currently plaintext during Phase 3a)
   meta?:     any;
   replyToId: number | null;
@@ -298,8 +300,38 @@ async function maybeAutoRecoverSession(peerId: string, errMsg: string): Promise<
   _decryptFailStreak.delete(peerId);
   try {
     const e2ee = await import('../services/crypto/e2eeSession.rn');
-    await e2ee.e2eeResetSession(peerId);   // drop dead ratchet; next outbound re-keys → peer self-heals
+    await e2ee.e2eeResetSession(peerId);   // drop dead ratchet; MY next outbound re-keys → peer self-heals
     if (__DEV__) console.warn('[e2ee] AUTO-RESET dead session for peer', peerId, '— re-handshakes on next message');
+    // Stage 2: I'm a PASSIVE reader that can't decrypt this peer — resetting my
+    // own session only fixes my OUTbound. Ask the peer to reset too, so its next
+    // message re-runs X3DH and I can finally decrypt (bidirectional heal without
+    // requiring me to send anything). Rate-limited by the fail-streak threshold.
+    requestPeerRekey(peerId);
+  } catch {}
+}
+
+// ── Stage-2 auto-recovery: peer re-key request over the socket ──────
+let _lastRekeyReq = new Map<string, number>();
+async function requestPeerRekey(peerId: string): Promise<void> {
+  const now = Date.now();
+  if ((now - (_lastRekeyReq.get(peerId) ?? 0)) < 30_000) return;   // at most once / 30s / peer
+  _lastRekeyReq.set(peerId, now);
+  try {
+    const { getSocket } = await import('./socket');
+    const s = await getSocket();
+    s.emit('e2ee_rekey', { to: peerId });
+  } catch {}
+}
+
+/** Handle an inbound peer re-key request: drop my session with that peer so my
+ *  next message to them re-initiates X3DH (they were stuck decrypting me).
+ *  Wired once as a persistent socket listener in app/_layout.tsx. */
+export async function handleRekeyRequest(fromPeerId: string): Promise<void> {
+  if (!E2EE_ENABLED || !fromPeerId) return;
+  try {
+    const e2ee = await import('../services/crypto/e2eeSession.rn');
+    await e2ee.e2eeResetSession(fromPeerId);
+    if (__DEV__) console.warn('[e2ee] peer requested re-key; reset session for', fromPeerId);
   } catch {}
 }
 
@@ -323,15 +355,26 @@ export async function hydrateMessages(
   knownPlain?: Map<number, string>,
 ): Promise<Message[]> {
   const out = msgs.slice();
+  // F5: a decrypted payload may be a wrapped {text + link preview} envelope
+  // (sender-generated previews ride INSIDE the E2EE content). Unwrap so the
+  // UI sees plain text + meta.linkPreview — local-only, never sent anywhere.
+  const finish = (m: Message, plain: string): Message => {
+    const { text, lp } = unwrapPreview(plain);
+    return lp ? { ...m, content: text, meta: { ...(m.meta ?? {}), linkPreview: lp } }
+              : { ...m, content: plain };
+  };
   for (let i = out.length - 1; i >= 0; i--) {   // msgs arrive newest-first → iterate oldest-first
     const m = out[i];
     const c = m.content;
-    if (!looksEncrypted(c)) continue;            // already plaintext (cache / pre-E2EE history)
+    if (!looksEncrypted(c)) {                    // already plaintext (cache / pre-E2EE history)
+      if (c && c.startsWith('\u0000')) out[i] = finish(m, c);   // wrapped plaintext straggler
+      continue;
+    }
     const cached = knownPlain?.get(m.id);
-    if (cached != null && !looksEncrypted(cached)) { out[i] = { ...m, content: cached }; continue; }
+    if (cached != null && !looksEncrypted(cached)) { out[i] = finish(m, cached); continue; }
     const plain = await decryptFromChat(chatId, (m as any).senderId ?? '', c, m.id);
     if (plain && !looksEncrypted(plain) && plain !== '🔒 unable to decrypt') {
-      out[i] = { ...m, content: plain };
+      out[i] = finish(m, plain);
     }
   }
   return out;
@@ -353,12 +396,38 @@ export async function listChats(opts: { includeHidden?: boolean } = {}): Promise
   const qs = opts.includeHidden ? '?includeHidden=1' : '';
   const rows = await api<ChatSummary[]>(`/chats${qs}`);
   for (const r of rows) rememberChatPeer(r);
+  publishChatDirectory(rows);
   return rows;
+}
+
+// F2 content-free push: keep an on-device chatId → display-name directory in
+// native SharedPreferences so the native FCM service can title the "new
+// message" notification LOCALLY — the name never rides inside a push payload.
+function publishChatDirectory(rows: ChatSummary[]): void {
+  try {
+    if (Platform.OS !== 'android') return;
+    const dir: Record<string, string> = {};
+    for (const c of rows) {
+      const name = c.type === 'direct' ? (c.peerName ?? c.name) : c.name;
+      if (name) dir[c.id] = name;
+    }
+    const json = JSON.stringify(dir);
+    // Native FCM path (GMS devices) titles its notification from here…
+    const { NativeModules } = require('react-native');
+    NativeModules?.VaultCalls?.setChatDirectory?.(json);
+    // …and the JS client-notification path (no-GMS) reads the same map from
+    // AsyncStorage, so both title notifications with the local name.
+    require('@react-native-async-storage/async-storage').default.setItem('vc_chat_dir_v1', json).catch(() => {});
+    require('./messageNotifications').invalidateDirectory();
+  } catch { /* directory is best-effort — notification falls back to "VaultChat" */ }
 }
 
 export async function getChat(chatId: string): Promise<ChatDetail> {
   const c = await api<ChatDetail>(`/chats/${encodeURIComponent(chatId)}`);
   rememberChatPeer(c);
+  // Local-first: persist the detail so the chat header (name/peer/members)
+  // renders instantly + offline. Lazy require avoids an import cycle.
+  try { require('./localDb').cacheChatDetail(chatId, c); } catch {}
   return c;
 }
 
@@ -561,12 +630,16 @@ export async function sendMessage(
   chatId: string,
   plaintext: string,
   type: Message['type'] = 'text',
-  opts: { replyToId?: number | null; meta?: any } = {},
+  opts: { replyToId?: number | null; meta?: any; clientId?: string } = {},
 ): Promise<Message> {
   // ── Task 1 perf instrumentation ──────────────────────────────────
   // The real send path is HTTP POST (not a socket emit). Split the timing
   // into E2EE-encrypt vs. POST round-trip so we can see which one dominates
   // the "pending clock" the user experiences.
+  // F7: a stable idempotency key generated ONCE per call so an internal api()
+  // retry (e.g. token refresh) reuses the same key and the server dedups. Media/
+  // poll/sticker/GIF/location all route through here, so they're covered too.
+  const clientId = opts.clientId ?? Crypto.randomUUID();
   const _t0 = Date.now();
   const content = await encryptForChat(chatId, plaintext);
   const _tEnc = Date.now();
@@ -574,7 +647,7 @@ export async function sendMessage(
   try {
     const msg = await api<Message>(`/chats/${encodeURIComponent(chatId)}/messages`, {
       method: 'POST',
-      json: { content, type, replyToId: opts.replyToId ?? null, meta: opts.meta ?? null },
+      json: { content, type, replyToId: opts.replyToId ?? null, meta: opts.meta ?? null, clientId },
     });
     // The POST ack returns `id` as a STRING; GET / socket deliver a NUMBER.
     // Normalize so UI dedup and the local-cache upsert (number-id only) work.
@@ -625,6 +698,9 @@ export async function editMessage(chatId: string, msgId: number, plaintext: stri
     method: 'PATCH',
     json: { content },
   });
+  // PATCH returns `id` as a STRING; GET/socket deliver a NUMBER. Normalize so
+  // the queue's temp→real dedup and the number-id-only cache upsert both work.
+  if (msg && msg.id != null) (msg as any).id = Number(msg.id);
   // Cache the edited plaintext so the sender can read their own edited message
   // (the server now holds ciphertext we can't self-decrypt).
   if (content !== plaintext) await cacheOwnPlaintext(chatId, msgId, plaintext);
@@ -1255,19 +1331,12 @@ export async function reportUser(
 export interface ReactionSummary { emoji: string; count: number; mine: boolean }
 export interface Reactor          { emoji: string; userId: string; name: string | null; email: string | null }
 
-export async function addReaction(chatId: string, msgId: number, emoji: string): Promise<void> {
-  await api(`/chats/${encodeURIComponent(chatId)}/messages/${msgId}/reactions`, {
-    method: 'PUT',
-    json: { emoji },
-  });
-}
-
-export async function removeReaction(chatId: string, msgId: number, emoji: string): Promise<void> {
-  await api(`/chats/${encodeURIComponent(chatId)}/messages/${msgId}/reactions`, {
-    method: 'DELETE',
-    json: { emoji },
-  });
-}
+// E2EE reactions (F4, VC-031 / WhatsApp model): a reaction is a tiny REFERENCE
+// MESSAGE whose entire payload {reactsTo, op, emoji} rides INSIDE the E2E
+// content — the server stores only ciphertext and can no longer read which
+// emoji anyone placed. Add/remove are enqueued via messageQueue.enqueueReaction
+// (durable offline), flowing through the normal 'send' path; clients aggregate
+// counts themselves — one reaction per user per message.
 
 export async function listReactors(chatId: string, msgId: number): Promise<Reactor[]> {
   return api(`/chats/${encodeURIComponent(chatId)}/messages/${msgId}/reactions`);
@@ -1375,21 +1444,36 @@ export async function uploadAttachment(
   uri: string,
   filename: string,
   mime: string,
-  opts: { viewOnce?: boolean } = {},
+  opts: { viewOnce?: boolean; signal?: AbortSignal } = {},
 ): Promise<UploadResult> {
   const token = await getAccessToken();
   if (!token) throw new Error('Not signed in');
+
+  let size = 0;
+  try {
+    const fi: any = await FileSystem.getInfoAsync(uri);
+    if (fi?.exists && typeof fi.size === 'number') size = fi.size;
+  } catch {}
+
+  // Large files → resumable chunked (multipart) upload so a mid-upload network
+  // drop resumes from the parts already stored instead of restarting (WhatsApp).
+  // Both the plaintext and the E2EE (ciphertext-temp) send paths route through
+  // here, so both get resume. Falls through to single-PUT if it can't start.
+  if (size >= 5 * 1024 * 1024) {   // MULTIPART_THRESHOLD (lib/resumableUpload)
+    try {
+      const { resumableUpload } = require('./resumableUpload');
+      return await resumableUpload(uri, filename, mime, size, { viewOnce: opts.viewOnce, signal: opts.signal });
+    } catch (e: any) {
+      if (opts.signal?.aborted) throw e;   // user cancelled — don't silently re-upload
+      if (__DEV__) console.warn('[upload] resumable failed, falling back to single-PUT:', e?.message);
+    }
+  }
 
   // Object-store path: get a presigned PUT URL and upload the bytes DIRECTLY to
   // storage (they never pass through the app server). Falls back to the multipart
   // route below when the server has no object storage configured (503) or the
   // presign path errors — so media never silently fails to send.
   try {
-    let size = 0;
-    try {
-      const fi: any = await FileSystem.getInfoAsync(uri);
-      if (fi?.exists && typeof fi.size === 'number') size = fi.size;
-    } catch {}
     const presign = await api<{ id: string; uploadUrl: string }>('/uploads/presign', {
       method: 'POST',
       json: { filename, mime, size, viewOnce: !!opts.viewOnce },

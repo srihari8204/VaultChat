@@ -52,12 +52,14 @@ export function dismissIncomingNotification(): void {
   try { VaultCalls.dismissIncoming(); } catch {}
 }
 
-/** Ring the callee (sends the high-priority data push from the backend). */
-export async function initiateCall(p: { calleeId: string; callId: string; isVideo: boolean; sdpOffer?: string }): Promise<boolean> {
+/** Ring the callee (sends the high-priority data push from the backend).
+ *  Doorbell only (F6): the SDP never rides in the push — it carries the
+ *  DTLS-SRTP fingerprint and the callee gets it over the socket anyway. */
+export async function initiateCall(p: { calleeId: string; callId: string; isVideo: boolean }): Promise<boolean> {
   try {
     const r = await api<{ ok: boolean; delivered?: boolean }>('/call/initiate', {
       method: 'POST',
-      json: { calleeId: p.calleeId, callId: p.callId, isVideo: p.isVideo, sdpOffer: p.sdpOffer ?? '' },
+      json: { calleeId: p.calleeId, callId: p.callId, isVideo: p.isVideo },
     });
     return !!r?.delivered;
   } catch { return false; }
@@ -74,7 +76,11 @@ export async function drainDeclinedCall(): Promise<string | null> {
   try { return (await VaultCalls.consumeDeclinedCall()) || null; } catch { return null; }
 }
 
-export type InitialCallIntent = { action: 'incoming_call' | 'answer' | string; callId: string; callerId?: string; callerName?: string; isVideo: boolean };
+export type InitialCallIntent = {
+  action: 'incoming_call' | 'answer' | 'open_chat' | string;
+  callId?: string; callerId?: string; callerName?: string; isVideo?: boolean;
+  chatId?: string;   // set for action 'open_chat' (message-notification tap, F2)
+};
 
 /** If the app was opened by tapping the full-screen call notification, returns
  *  the call to route to (once). Null otherwise. */

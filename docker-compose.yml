@@ -118,6 +118,60 @@ services:
     ports:
       - "13000:3000"          # host 13000 — never clashes with the live pm2 app on :3000
 
+  # coturn — TURN/STUN relay for WebRTC (calls + VaultBeam Tier-2 P2P). Host
+  # networking because the relay allocates a UDP port range (min/max-port in
+  # turnserver.conf) that's impractical to map individually. The secret is passed
+  # as a flag so it stays in env, never in the mounted conf; it MUST equal the
+  # backend's TURN_SECRET, and the backend's TURN_HOST must point at this host's
+  # public IP. Open UDP 3478 + 49160-49200 (and TCP 3478) on the host firewall.
+  coturn:
+    image: coturn/coturn:4.6.2
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+      # cert.pem + pkey.pem for TURN-over-TLS (turns:5349). Generate before `up`
+      # (deploy steps below) — coturn won't start its TLS listener without them.
+      - ./coturn/certs:/etc/coturn/certs:ro
+    command: >
+      -c /etc/coturn/turnserver.conf
+      --static-auth-secret=${TURN_SECRET:-changeme-must-match-backend}
+      --external-ip=${TURN_EXTERNAL_IP:-65.21.229.167}
+
+  # VaultLens BullMQ worker — renders AI avatars (ModelsLab → R2) off the request
+  # path. Same image as api, different command. PROD override must also give it the
+  # R2 S3_* + MODELSLAB_API_KEY env (same as api) — it needs storage + the model key.
+  vaultlens-worker:
+    build:
+      context: ./vaultchat-backend
+    restart: unless-stopped
+    command: ["node", "workers/vaultlens.js"]
+    env_file:
+      - path: ./vaultchat-backend/.env
+        required: false
+    environment:
+      NODE_ENV: production
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: vaultchat
+      DB_USER: vaultchat
+      DB_PASS: ${DB_PASS:-vaultchat_dev}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASS: ""
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: http://65.21.229.167:19000
+      S3_BUCKET: vaultchat-media
+      S3_ACCESS_KEY: ${MINIO_USER:-vaultchat}
+      S3_SECRET_KEY: ${MINIO_PASS:-vaultchat_dev_secret}
+      MODELSLAB_API_KEY: ${MODELSLAB_API_KEY:-}
+      VAULTLENS_CONCURRENCY: "2"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
   # Kafka fan-out worker — consumes message.created and delivers over the Redis
   # adapter. Same image as api, different command. Scale with: --scale fanout-worker=N
   fanout-worker:

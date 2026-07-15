@@ -33,6 +33,11 @@ const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR || path.join(process.cwd(
 // 50 MB default so a ~30 second 1080p clip fits without bumping env.
 // Override via env in production once we know real distribution.
 const MAX_BYTES  = parseInt(process.env.UPLOAD_MAX_BYTES || (50 * 1024 * 1024).toString(), 10);
+// Resumable multipart path: larger ceiling (WhatsApp-scale video) + fixed part
+// size. S3/R2 requires ≥5 MiB parts (except the last) and ≤10000 parts, so 8 MiB
+// parts cover files up to 80 GiB with good resume granularity.
+const MULTIPART_MAX_BYTES = parseInt(process.env.MULTIPART_MAX_BYTES || (2 * 1024 * 1024 * 1024).toString(), 10);
+const PART_SIZE  = 8 * 1024 * 1024;
 
 // Ensure base dir exists at module load
 try { fs.mkdirSync(UPLOAD_DIR, { recursive: true }); } catch {}
@@ -149,6 +154,130 @@ router.post('/presign', jwtUtil.requireAuth, async (req, res) => {
   }
 });
 
+// ── Resumable multipart upload ───────────────────────────────
+// Large media uploads a part at a time so an interrupted upload RESUMES (the
+// parts already on R2 are skipped) instead of restarting from byte 0. The
+// object is finalised into a normal `attachments` row served by GET /uploads/:id.
+//
+//   POST /uploads/multipart/init      { filename, mime, size, viewOnce? }
+//                                      → { id, uploadId, key, partSize, partCount }
+//   POST /uploads/multipart/part-urls { id, uploadId, partNumbers:[…] } → { urls:{n:url} }
+//   GET  /uploads/multipart/:id/parts?uploadId=…  → { uploaded:[n…], partSize }
+//   POST /uploads/multipart/complete  { id, uploadId } → { id, mime, size, filename }
+//   POST /uploads/multipart/abort     { id, uploadId } → { ok:true }
+
+// Load an attachment row and assert the caller owns it (only the uploader may
+// drive their own multipart session). Returns the row or sends the error.
+async function ownedAttachment(req, res, id) {
+  const r = await req.dbQuery(
+    `SELECT id, owner_user_id, filename, mime_type, size_bytes, storage_path
+       FROM attachments WHERE id = $1 LIMIT 1`, [id]);
+  const att = r.rows[0];
+  if (!att) { res.status(404).json({ error: 'Not found' }); return null; }
+  if (att.owner_user_id !== req.user.id) { res.status(403).json({ error: 'Forbidden' }); return null; }
+  return att;
+}
+
+router.post('/multipart/init', jwtUtil.requireAuth, async (req, res) => {
+  try {
+    if (!objectStore.enabled()) return res.status(503).json({ error: 'Object storage not configured' });
+    const filename = (req.body?.filename || 'file').toString().slice(0, 255);
+    const mime     = (req.body?.mime || 'application/octet-stream').toString().slice(0, 100);
+    const size     = parseInt(req.body?.size || '0', 10) || 0;
+    if (size <= 0)                 return res.status(400).json({ error: 'size required' });
+    if (size > MULTIPART_MAX_BYTES) return res.status(413).json({ error: `File too large (max ${MULTIPART_MAX_BYTES} bytes)` });
+    const viewOnce = req.body?.viewOnce === true || req.body?.viewOnce === 1 || req.body?.viewOnce === '1';
+
+    const id  = crypto.randomUUID();
+    const key = `att/${id}${safeExt(filename)}`;
+    const uploadId = await objectStore.createMultipart(key, mime);
+    if (!uploadId) return res.status(500).json({ error: 'Could not start upload' });
+
+    await req.dbQuery(
+      `INSERT INTO attachments
+         (id, owner_user_id, filename, mime_type, size_bytes, storage_path, view_once, storage_backend)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 's3')`,
+      [id, req.user.id, filename, mime, size, key, viewOnce]);
+
+    res.json({ id, uploadId, key, partSize: PART_SIZE, partCount: Math.ceil(size / PART_SIZE) });
+  } catch (err) {
+    console.error('[uploads multipart/init]', err.message);
+    res.status(500).json({ error: 'Init failed' });
+  }
+});
+
+router.post('/multipart/part-urls', jwtUtil.requireAuth, async (req, res) => {
+  try {
+    const att = await ownedAttachment(req, res, req.body?.id);
+    if (!att) return;
+    const uploadId = (req.body?.uploadId || '').toString();
+    if (!uploadId) return res.status(400).json({ error: 'uploadId required' });
+    const nums = Array.isArray(req.body?.partNumbers) ? req.body.partNumbers : [];
+    if (!nums.length || nums.length > 1000) return res.status(400).json({ error: 'partNumbers: 1..1000' });
+
+    const urls = {};
+    for (const raw of nums) {
+      const n = parseInt(raw, 10);
+      if (!Number.isInteger(n) || n < 1 || n > 10000) continue;   // S3 part-number range
+      urls[n] = await objectStore.presignUploadPart(att.storage_path, uploadId, n);
+    }
+    res.json({ urls });
+  } catch (err) {
+    console.error('[uploads multipart/part-urls]', err.message);
+    res.status(500).json({ error: 'Presign failed' });
+  }
+});
+
+router.get('/multipart/:id/parts', jwtUtil.requireAuth, async (req, res) => {
+  try {
+    const att = await ownedAttachment(req, res, req.params.id);
+    if (!att) return;
+    const uploadId = (req.query?.uploadId || '').toString();
+    if (!uploadId) return res.status(400).json({ error: 'uploadId required' });
+    const parts = await objectStore.listParts(att.storage_path, uploadId);
+    res.json({ uploaded: parts.map(p => p.PartNumber), partSize: PART_SIZE });
+  } catch (err) {
+    console.error('[uploads multipart/parts]', err.message);
+    res.status(500).json({ error: 'List failed' });
+  }
+});
+
+router.post('/multipart/complete', jwtUtil.requireAuth, async (req, res) => {
+  try {
+    const att = await ownedAttachment(req, res, req.body?.id);
+    if (!att) return;
+    const uploadId = (req.body?.uploadId || '').toString();
+    if (!uploadId) return res.status(400).json({ error: 'uploadId required' });
+
+    // Server-authoritative: assemble from what actually landed (resume-safe —
+    // the client never has to track ETags).
+    const parts = (await objectStore.listParts(att.storage_path, uploadId))
+      .sort((a, b) => a.PartNumber - b.PartNumber)
+      .map(p => ({ PartNumber: p.PartNumber, ETag: p.ETag }));
+    if (!parts.length) return res.status(400).json({ error: 'No parts uploaded' });
+
+    await objectStore.completeMultipart(att.storage_path, uploadId, parts);
+    res.json({ id: att.id, mime: att.mime_type, size: att.size_bytes, filename: att.filename });
+  } catch (err) {
+    console.error('[uploads multipart/complete]', err.message);
+    res.status(500).json({ error: 'Complete failed' });
+  }
+});
+
+router.post('/multipart/abort', jwtUtil.requireAuth, async (req, res) => {
+  try {
+    const att = await ownedAttachment(req, res, req.body?.id);
+    if (!att) return;
+    const uploadId = (req.body?.uploadId || '').toString();
+    if (uploadId) await objectStore.abortMultipart(att.storage_path, uploadId);
+    await req.dbQuery(`DELETE FROM attachments WHERE id = $1`, [att.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[uploads multipart/abort]', err.message);
+    res.status(500).json({ error: 'Abort failed' });
+  }
+});
+
 // ── GET /uploads/:id ─────────────────────────────────────────
 router.get('/:id', jwtUtil.requireAuth, async (req, res) => {
   try {
@@ -223,13 +352,22 @@ router.get('/:id', jwtUtil.requireAuth, async (req, res) => {
       }
     }
 
-    // Object-store backed: hand out a short-lived presigned URL (issued only
-    // after the access checks above) and redirect — the bytes are served by the
-    // store/CDN, never streamed through this process.
+    // Object-store backed: STREAM the bytes through this process (after the
+    // access checks above). We used to 302-redirect to a presigned URL, but
+    // R2/S3 rejects requests carrying BOTH the presigned query signature AND an
+    // Authorization header — and RN's fetch/downloadAsync/Image forward our
+    // Bearer header across redirects → 400 → black media. MinIO tolerated the
+    // double auth, which is why this only surfaced at the R2 cutover.
     if (att.storage_backend === 's3') {
-      const url = await objectStore.presignGet(att.storage_path);
-      if (!url) return res.status(500).json({ error: 'Storage unavailable' });
-      return res.redirect(302, url);
+      const obj = await objectStore.getObjectStream(att.storage_path);
+      if (!obj) return res.status(404).json({ error: 'File missing in storage' });
+      res.setHeader('Content-Type', att.mime_type || obj.contentType || 'application/octet-stream');
+      if (obj.contentLength != null) res.setHeader('Content-Length', String(obj.contentLength));
+      res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(att.filename)}"`);
+      res.setHeader('Cache-Control', 'private, max-age=86400');
+      obj.body.on('error', (e) => { console.error('[uploads GET s3-stream]', e.message); try { res.destroy(); } catch {} });
+      obj.body.pipe(res);
+      return;
     }
 
     const absPath = path.join(UPLOAD_DIR, att.storage_path);

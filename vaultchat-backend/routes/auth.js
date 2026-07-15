@@ -339,7 +339,11 @@ function normalizePhone(raw) {
   return d;
 }
 function hashPhone(norm) {
-  return crypto.createHash('sha256').update(norm, 'utf8').digest('hex');
+  // Peppered (F1): HMAC(pepper, sha256(digits)) — same construction as
+  // /contacts/match applies to the client-supplied sha256, so writes and
+  // lookups agree while a DB dump alone stays brute-force-proof.
+  const sha = crypto.createHash('sha256').update(norm, 'utf8').digest('hex');
+  return vault.discoveryHash(sha);
 }
 
 router.post('/send-otp-phone', async (req, res) => {
@@ -517,13 +521,16 @@ function envErr(res, status, code, message) {
 }
 function safeDecrypt(c) { try { return c ? vault.decrypt(c) : null; } catch { return null; } }
 
-// Contact-discovery hash — MUST match the client + user.js/chats.js scheme so new
-// users are findable: sha256 of digits, 10-digit input prefixed with India's '91'.
-// (This is the client-computable index; the peppered phone_lookup is for auth only.)
+// Contact-discovery hash — MUST match the user.js/chats.js scheme so new users
+// are findable: HMAC(pepper, sha256(digits)), 10-digit input prefixed with
+// India's '91'. The client still sends bare sha256(digits); the pepper is
+// applied server-side everywhere (write here, match in /contacts/match) so a
+// DB dump alone can't be brute-forced. (phone_lookup remains the auth index.)
 function discoveryPhoneHash(phone) {
   let digits = String(phone || '').replace(/\D/g, '');
   if (digits.length === 10) digits = '91' + digits;
-  return crypto.createHash('sha256').update(digits, 'utf8').digest('hex');
+  const sha = crypto.createHash('sha256').update(digits, 'utf8').digest('hex');
+  return vault.discoveryHash(sha);
 }
 async function auditAttempt(userId, ip, type, success) {
   try {

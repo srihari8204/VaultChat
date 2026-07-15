@@ -46,8 +46,16 @@ router.post('/match', async (req, res) => {
     ));
     if (hashes.length === 0) return res.json([]);
 
-    // Query users by phone_hash. RLS is not enabled on users — we filter
-    // discoverable here. Self is excluded so the user doesn't get a row
+    // Pepper each client hash server-side (F1): the stored phone_hash is
+    // HMAC(pepper, sha256(digits)), so a stolen users-table dump alone can't be
+    // brute-forced over the ~10^10 phone space. Keep a peppered→original map —
+    // the client keys its contact list by the hash IT computed, so we must echo
+    // that original hash back, never the peppered one.
+    const map = new Map();
+    for (const h of hashes) map.set(vault.discoveryHash(h), h);
+
+    // Query users by (peppered) phone_hash. RLS is not enabled on users — we
+    // filter discoverable here. Self is excluded so the user doesn't get a row
     // for their own number.
     const r = await db.query(
       `SELECT id, name, first_name_cipher, last_name_cipher, email_cipher, photo_url, phone_hash
@@ -56,14 +64,14 @@ router.post('/match', async (req, res) => {
          AND discoverable = TRUE
          AND is_deleted = FALSE
          AND id <> $2`,
-      [hashes, req.user.id]
+      [Array.from(map.keys()), req.user.id]
     );
 
     res.json(r.rows.map(row => ({
       id:        row.id,
       name:      vault.identityFromRow(row).name,
       photoURL:  row.photo_url,
-      phoneHash: row.phone_hash,
+      phoneHash: map.get(row.phone_hash) || null,   // the client's ORIGINAL hash
     })));
   } catch (err) {
     console.error('[contacts/match]', err.message);

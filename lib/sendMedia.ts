@@ -27,6 +27,10 @@ export interface SendMediaOpts {
   caption?: string;
   /** Extra display meta merged in (width/height, durationMs, waveform, …). */
   metaExtra?: Record<string, any>;
+  /** Cancel an in-flight upload — aborts the multipart + frees R2 (see resumableUpload). */
+  signal?: AbortSignal;
+  /** Stable idempotency key so a durable-outbox re-drive can't duplicate the message. */
+  clientId?: string;
 }
 
 /** Upload an attachment (encrypted in eligible direct chats) and send its message. */
@@ -42,7 +46,7 @@ export async function sendMediaMessage(
 
   if (encrypt) {
     const { attachmentId, mediaKey } = await uploadEncryptedAttachment(
-      file.uri, file.filename, file.mime, { viewOnce: opts.viewOnce },
+      file.uri, file.filename, file.mime, { viewOnce: opts.viewOnce, signal: opts.signal },
     );
     // The key + caption ride inside the content the Double Ratchet encrypts.
     const content = buildMediaContent(opts.caption || '', mediaKey);
@@ -65,11 +69,11 @@ export async function sendMediaMessage(
         if (thumb) { meta.thumb = thumb; saveThumb(attachmentId, thumb).catch(() => {}); }
       }
     }
-    return sendMessage(chatId, content, type, { meta });
+    return sendMessage(chatId, content, type, { meta, clientId: opts.clientId });
   }
 
   // Plaintext path — unchanged from the original send sites.
-  const up = await uploadAttachment(file.uri, file.filename, file.mime, { viewOnce: opts.viewOnce });
+  const up = await uploadAttachment(file.uri, file.filename, file.mime, { viewOnce: opts.viewOnce, signal: opts.signal });
   const meta: Record<string, any> = {
     attachmentId: up.id,
     mime: up.mime,
@@ -95,7 +99,7 @@ export async function sendMediaMessage(
     else if (type === 'file' && /pdf/i.test(file.mime)) thumb = await makePdfThumb(file.uri);
     if (thumb) { meta.thumb = thumb; saveThumb(up.id, thumb).catch(() => {}); }
   }
-  return sendMessage(chatId, opts.caption || '', type, { meta });
+  return sendMessage(chatId, opts.caption || '', type, { meta, clientId: opts.clientId });
 }
 
 // Required by expo-router to silence "no default export" route warnings.

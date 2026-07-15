@@ -19,7 +19,7 @@ export interface EncryptedUpload { attachmentId: string; mediaKey: MediaKey }
 
 // Encrypt `uri`'s bytes, upload the ciphertext, stash the key by attachment id.
 export async function uploadEncryptedAttachment(
-  uri: string, filename: string, _mime: string, opts: { viewOnce?: boolean } = {},
+  uri: string, filename: string, _mime: string, opts: { viewOnce?: boolean; signal?: AbortSignal } = {},
 ): Promise<EncryptedUpload> {
   const fileB64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
   const mk = newMediaKey();

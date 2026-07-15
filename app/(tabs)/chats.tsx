@@ -22,6 +22,7 @@ import {
   type ChatSummary,
 } from '../../lib/chatService';
 import { registerPushToken } from '../../lib/push';
+import ConnectionBanner from '../../components/ConnectionBanner';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { cloudBackupMeta } from '../../lib/cloudBackup';
 import { runScheduledBackupIfDue } from '../../lib/backupScheduler';
@@ -337,6 +338,8 @@ export default function ChatsScreen() {
         </View>
       )}
 
+      <ConnectionBanner />
+
       {error && <View style={S.errorBar}><Text style={S.errorTxt}>{error}</Text></View>}
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={S.folderScroll} contentContainerStyle={S.folderRow}>
@@ -508,6 +511,7 @@ const ChatRow = memo(function ChatRow({
       : t === 'video' ? '🎥 Video'
       : t === 'audio' ? '🎙️ Voice message'
       : t === 'file' ? '📎 File'
+      : t === 'vaultbeam' ? '📦 File'
       : t === 'location' ? '📍 Location'
       : t === 'poll' ? '📊 Poll'
       : t === 'sticker' ? 'Sticker'

@@ -24,6 +24,7 @@ const jwtUtil   = require('../jwt');
 const db        = require('../db');
 const vault     = require('../lib/vault');
 const { sendPushToTokens } = require('../push');
+const callFcm   = require('../lib/callFcm');
 
 // Decrypt a peer's display name from the cipher columns (Stage 4) with a plaintext
 // fallback. SQL can't decrypt, so joins select the cipher columns and we resolve
@@ -53,13 +54,61 @@ function normalizePhone(raw) {
 function hashPhone(raw) {
   const norm = normalizePhone(raw);
   if (!norm) return null;
-  return crypto.createHash('sha256').update(norm, 'utf8').digest('hex');
+  // Peppered (F1): HMAC(pepper, sha256(digits)) — matches the stored index.
+  const sha = crypto.createHash('sha256').update(norm, 'utf8').digest('hex');
+  return vault.discoveryHash(sha);
 }
 
 const router = express.Router();
 router.use(jwtUtil.requireAuth);
 
+// GET /chats/delta?since=<globalMsgId>&limit= — forward catch-up across ALL of
+// the caller's chats. messages.id is a global BIGSERIAL, so one ordered scan past
+// the client's cursor delivers everything missed while offline — including chats
+// the client never knew existed (closes the offline first-contact gap). Defined
+// before /:id so "delta" isn't parsed as a chat id.
+// ponytail: id-cursor + a small client-side lookback absorbs the bigserial
+// commit-order window; a truly gapless watermark would need a commit-ordered
+// per-chat seq — unnecessary at this scale.
+router.get('/delta', async (req, res) => {
+  try {
+    const since = Math.max(0, parseInt(req.query.since || '0', 10) || 0);
+    const limit = Math.min(parseInt(req.query.limit || '200', 10) || 200, 500);
+    const r = await db.query(
+      `SELECT m.* FROM messages m
+         JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1 AND cm.left_at IS NULL
+        WHERE m.id > $2 AND (m.expires_at IS NULL OR m.expires_at > NOW())
+        ORDER BY m.id ASC LIMIT $3`,
+      [req.user.id, since, limit]);
+    const nextSince = r.rows.length ? Number(r.rows[r.rows.length - 1].id) : since;
+
+    // Mutations: edits/deletes touch an EXISTING row in place (same id, no new
+    // id), so the id-cursor above misses any that happened while the client was
+    // offline. When the client passes its last-seen mutation timestamp, also
+    // return old messages (id ≤ since) whose edited_at/deleted_at moved past it.
+    // serverTime becomes the client's next mutatedSince cursor.
+    const serverTime = (await db.query('SELECT NOW() AS now')).rows[0].now;
+    let mutations = [];
+    const mutatedSince = req.query.mutatedSince ? new Date(req.query.mutatedSince) : null;
+    if (mutatedSince && !isNaN(mutatedSince.getTime())) {
+      const mut = await db.query(
+        `SELECT m.* FROM messages m
+           JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1 AND cm.left_at IS NULL
+          WHERE (m.edited_at > $2 OR m.deleted_at > $2) AND m.id <= $3
+          ORDER BY GREATEST(COALESCE(m.edited_at, 'epoch'), COALESCE(m.deleted_at, 'epoch')) ASC
+          LIMIT 500`,
+        [req.user.id, mutatedSince, since]);
+      mutations = mut.rows.map(publicMessage);
+    }
+
+    res.json({ messages: r.rows.map(publicMessage), nextSince, more: r.rows.length === limit, mutations, serverTime });
+  } catch (e) { console.error('[chats/delta]', e.message); res.status(500).json({ error: 'delta failed' }); }
+});
+
 const EDIT_WINDOW_MS  = 15 * 60 * 1000;
+// Delete-for-everyone window (WhatsApp parity: 2 days 12 hours). Server is the
+// authority; the client hides the option past this as a UX hint only.
+const REVOKE_WINDOW_MS = 60 * 60 * 60 * 1000;
 const MAX_GROUP_SIZE  = 256;
 const DEFAULT_PAGE    = 50;
 const MAX_PAGE        = 200;
@@ -151,7 +200,7 @@ async function sendChatMessagePush(chatId, senderId, msg, chatType) {
     // Pull each recipient's tokens alongside their per-chat notification sound
     // (the Android channelId) so everyone hears the sound they picked.
     const tokR = await db.query(
-      `SELECT d.push_token, cm.notif_sound
+      `SELECT d.push_token, d.fcm_token, cm.notif_sound
          FROM devices d
          JOIN chat_members cm ON cm.user_id = d.user_id AND cm.chat_id = $2
         WHERE d.user_id = ANY($1::uuid[]) AND cm.left_at IS NULL`,
@@ -159,41 +208,42 @@ async function sendChatMessagePush(chatId, senderId, msg, chatType) {
     );
     if (tokR.rows.length === 0) return;
 
-    // Sender display name + chat name (for group context)
-    const meta = await db.query(
-      `SELECT
-         (SELECT name              FROM users WHERE id = $1) AS sender_name,
-         (SELECT first_name_cipher FROM users WHERE id = $1) AS sender_fnc,
-         (SELECT last_name_cipher  FROM users WHERE id = $1) AS sender_lnc,
-         (SELECT email_cipher      FROM users WHERE id = $1) AS sender_ec,
-         (SELECT name FROM chats WHERE id = $2) AS chat_name`,
-      [senderId, chatId]
-    );
-    const senderName = peerName(meta.rows[0] || {}, 'sender_') || 'New message';
-    const chatName   = meta.rows[0]?.chat_name;
-
-    // Phase 3a stores content as opaque (currently plaintext). For privacy
-    // we don't put the content in the notification body — show "<sender>
-    // sent a message" instead. After Phase 3b real E2EE this becomes a
-    // hard requirement (we couldn't decrypt anyway).
-    const title = chatType === 'group' && chatName ? `${senderName} in ${chatName}` : senderName;
-    const body  = msg.type === 'image' ? '📷 Photo'
-                : msg.type === 'video' ? '🎥 Video'
-                : msg.type === 'audio' ? '🎙️ Voice message'
-                : msg.type === 'file'  ? '📎 File'
-                : 'New message';
-
-    // Group tokens by their channel (notification sound) and send one batch per
-    // group so each recipient's chosen sound is used.
-    const byChannel = new Map();
+    // ── Content-free doorbell (F2, WhatsApp model) ────────────────────
+    // NOTHING readable rides in any push: no sender name, no group name, no
+    // message type, no body, no message id. Two transports:
+    //   • Devices WITH a native fcm_token (new builds): DATA-ONLY high-priority
+    //     FCM { type:'message', chatId, channelId }. The native service renders
+    //     the notification LOCALLY — the sender/chat name comes from the
+    //     on-device chat directory, so it never transits Google/Expo.
+    //   • Devices WITHOUT one (old builds / iOS): the legacy Expo push, but
+    //     with a generic title/body — they lose the rich name until upgrade,
+    //     the leak is closed for them regardless.
+    const fcmByChannel  = new Map();   // channelId -> Set<fcm_token>
+    const expoByChannel = new Map();   // channelId -> tokens[]
     for (const row of tokR.rows) {
       const ch = row.notif_sound || 'default';
-      if (!byChannel.has(ch)) byChannel.set(ch, []);
-      byChannel.get(ch).push(row.push_token);
+      if (row.fcm_token) {
+        if (!fcmByChannel.has(ch)) fcmByChannel.set(ch, new Set());
+        fcmByChannel.get(ch).add(row.fcm_token);
+      } else if (row.push_token) {
+        if (!expoByChannel.has(ch)) expoByChannel.set(ch, []);
+        expoByChannel.get(ch).push(row.push_token);
+      }
     }
-    const data = { chatId, messageId: msg.id, type: 'message' };
-    for (const [channelId, tokens] of byChannel) {
-      await sendPushToTokens(tokens, { title, body, data, channelId });
+    for (const [channelId, tokens] of fcmByChannel) {
+      const r = await callFcm.sendCallMessage(
+        Array.from(tokens),
+        { type: 'message', chatId, channelId },
+        60_000,
+      );
+      if (r.dead && r.dead.length) {
+        db.query(`UPDATE devices SET fcm_token = NULL WHERE fcm_token = ANY($1::text[])`, [r.dead])
+          .catch(() => {});
+      }
+    }
+    const data = { chatId, type: 'message' };
+    for (const [channelId, tokens] of expoByChannel) {
+      await sendPushToTokens(tokens, { title: 'VaultChat', body: 'New message', data, channelId });
     }
   } catch (err) {
     console.error('[sendChatMessagePush]', err.message);
@@ -252,7 +302,12 @@ router.get('/', async (req, res) => {
                 u.email_cipher      AS peer_ec,
                 u.photo_url AS peer_photo,
                 u.online   AS peer_online,
-                cm2.last_read_message_id      AS peer_last_read,
+                -- Read-receipt reciprocity: expose the peer's read pointer only
+                -- when BOTH sides keep read receipts ON (u = peer, $1 = me).
+                -- Delivered pointer is never gated (grey tick always shows).
+                CASE WHEN u.read_receipts
+                      AND (SELECT read_receipts FROM users WHERE id = $1)
+                     THEN cm2.last_read_message_id ELSE NULL END AS peer_last_read,
                 cm2.last_delivered_message_id AS peer_last_delivered,
                 -- Last-seen visibility: global toggle AND no ghost-mode
                 -- override from the peer toward me.
@@ -690,12 +745,25 @@ router.get('/:id', async (req, res) => {
 
     const membersR = await req.dbQuery(
       `SELECT cm.*, u.email, u.name, u.first_name_cipher, u.last_name_cipher, u.email_cipher,
-              u.photo_url, u.online, u.last_seen_at, u.last_seen_visible, u.status
+              u.photo_url, u.online, u.last_seen_at, u.last_seen_visible, u.status, u.read_receipts
        FROM chat_members cm
        JOIN users u ON u.id = cm.user_id
        WHERE cm.chat_id = $1
        ORDER BY cm.joined_at`,
       [req.params.id]
+    );
+
+    // Read-receipt reciprocity: in a DIRECT chat, only expose a peer's read
+    // pointer when EVERY active participant keeps read receipts ON. Groups are
+    // exempt. My own pointer and everyone's delivered pointer are untouched —
+    // only the peer's blue-tick (read) pointer is hidden (matches WhatsApp).
+    const receiptsMutual =
+      chat.type !== 'direct' ||
+      membersR.rows.every(m => m.left_at != null || m.read_receipts !== false);
+    const members = membersR.rows.map(publicMember).map(m =>
+      (!receiptsMutual && m.userId !== req.user.id)
+        ? { ...m, lastReadMessageId: null }
+        : m
     );
 
     res.json({
@@ -717,7 +785,7 @@ router.get('/:id', async (req, res) => {
       addMembersPolicy:     chat.add_members_policy ?? 'admins',
       antiSpamLinks:        !!chat.anti_spam_links,
       approveMembers:       !!chat.approve_members,
-      members:              membersR.rows.map(publicMember),
+      members:              members,
       myRole:               mem.role,
       myLastReadId:         mem.last_read_message_id,
       hidden:               !!mem.hidden,
@@ -778,8 +846,13 @@ router.post('/:id/messages', async (req, res) => {
     const type      = (b.type || 'text').toString();
     const replyTo   = b.replyToId ? parseInt(b.replyToId, 10) : null;
     const meta      = b.meta && typeof b.meta === 'object' ? b.meta : null;
+    // Idempotency key (F7): a stable client-generated UUID, identical across every
+    // retry of the SAME logical send. Scoped to (chat_id, sender_id) — sender_id
+    // comes from the JWT, so it can't collide with or forge another user's rows.
+    // Null for legacy clients that don't send it (they fall back to plain insert).
+    const clientId  = (typeof b.clientId === 'string' && b.clientId.length > 0 && b.clientId.length <= 128) ? b.clientId : null;
 
-    if (!['text','image','video','audio','file','location','system','sticker','poll'].includes(type)) {
+    if (!['text','image','video','audio','file','location','system','sticker','poll','reaction','vaultbeam'].includes(type)) {
       return res.status(400).json({ error: 'invalid type' });
     }
 
@@ -799,6 +872,16 @@ router.post('/:id/messages', async (req, res) => {
       }
       if (content.length > 64) {
         return res.status(400).json({ error: 'sticker id too long' });
+      }
+    } else if (type === 'reaction') {
+      // E2EE reaction reference-message (F4): content = the E2E-encrypted
+      // {reactsTo, op, emoji} payload. The server can't read it — it only
+      // relays + stores ciphertext. Cap sized for the encrypted envelope.
+      if (!content || typeof content !== 'string') {
+        return res.status(400).json({ error: 'content (encrypted reaction) required' });
+      }
+      if (content.length > 4096) {
+        return res.status(400).json({ error: 'reaction payload too long' });
       }
     } else if (type === 'poll') {
       // content = the poll question; meta.options = string[] of 2..10
@@ -844,10 +927,12 @@ router.post('/:id/messages', async (req, res) => {
     const inserted = await req.dbTx(async (client) => {
       // Look up the chat's disappearing-messages timer + sender's vanish
       // mode and stamp both on the new row. Single statement to keep
-      // the round-trip count flat.
+      // the round-trip count flat. ON CONFLICT dedups a retried send (F7):
+      // the partial unique index ux_messages_client_dedup(chat_id,sender_id,
+      // client_id) makes a repeat POST of the same clientId a no-op insert.
       const m = await client.query(
-        `INSERT INTO messages (chat_id, sender_id, type, content, meta, reply_to_id, expires_at, vanish_after_read)
-         SELECT $1, $2, $3, $4, $5, $6,
+        `INSERT INTO messages (chat_id, sender_id, type, content, meta, reply_to_id, client_id, expires_at, vanish_after_read)
+         SELECT $1, $2, $3, $4, $5, $6, $7,
                 CASE WHEN c.disappearing_seconds IS NOT NULL
                      THEN NOW() + (c.disappearing_seconds || ' seconds')::INTERVAL
                      ELSE NULL END,
@@ -855,37 +940,59 @@ router.post('/:id/messages', async (req, res) => {
            FROM chats c
            LEFT JOIN chat_members cm ON cm.chat_id = c.id AND cm.user_id = $2
           WHERE c.id = $1
+         ON CONFLICT (chat_id, sender_id, client_id) WHERE client_id IS NOT NULL DO NOTHING
          RETURNING *`,
-        [req.params.id, req.user.id, type, content, meta, replyTo]
+        [req.params.id, req.user.id, type, content, meta, replyTo, clientId]
       );
-      await client.query(
-        `UPDATE chats SET last_message_id = $1, last_message_at = $2 WHERE id = $3`,
-        [m.rows[0].id, m.rows[0].created_at, req.params.id]
-      );
-      // Resurface the chat for any recipient who had hidden/deleted it — a new
-      // message must bring it back into their list, otherwise they never see it.
-      await client.query(
-        `UPDATE chat_members SET hidden = FALSE WHERE chat_id = $1 AND user_id <> $2 AND hidden = TRUE`,
-        [req.params.id, req.user.id]
-      );
-      return m.rows[0];
+      if (m.rows.length === 0 && clientId) {
+        // DO NOTHING returned no row → this clientId already exists (a retry).
+        // Return the ORIGINAL row so the client reconciles onto the same id.
+        const ex = await client.query(
+          `SELECT * FROM messages WHERE chat_id = $1 AND sender_id = $2 AND client_id = $3`,
+          [req.params.id, req.user.id, clientId]
+        );
+        if (!ex.rows[0]) throw new Error('dedup lookup miss'); // READ COMMITTED: fresh snapshot per statement
+        return { row: ex.rows[0], duplicate: true };
+      }
+      // Reactions (F4) are metadata riders, not conversation activity: they must
+      // NOT become the chat's "last message", reorder the chat list, or
+      // resurrect a chat a member hid/deleted.
+      if (type !== 'reaction') {
+        await client.query(
+          `UPDATE chats SET last_message_id = $1, last_message_at = $2 WHERE id = $3`,
+          [m.rows[0].id, m.rows[0].created_at, req.params.id]
+        );
+        // Resurface the chat for any recipient who had hidden/deleted it — a new
+        // message must bring it back into their list, otherwise they never see it.
+        await client.query(
+          `UPDATE chat_members SET hidden = FALSE WHERE chat_id = $1 AND user_id <> $2 AND hidden = TRUE`,
+          [req.params.id, req.user.id]
+        );
+      }
+      return { row: m.rows[0], duplicate: false };
     });
 
-    const msg = publicMessage(inserted);
+    const msg = publicMessage(inserted.row);
+    // Re-broadcast even on a duplicate: broadcastNewMessage is id-idempotent
+    // (recipients dedup by id), so this recovers the "server committed then the
+    // ack was lost" case where the first attempt never reached the recipient.
     broadcastNewMessage(req.params.id, msg);
     res.json(msg);
 
-    // Bump the denormalized unread counter for every other member (system
-    // cross-user write via the SECURITY DEFINER helper). Best-effort: the
-    // read-marker recomputes the exact value, so a rare miss self-heals.
-    db.query('SELECT vc_bump_unread($1, $2)', [req.params.id, req.user.id])
-      .catch(e => console.error('[unread bump]', e.message));
-
-    // Fire-and-forget push to other members' devices. Doesn't block
-    // the response. Failures are logged but don't surface to the sender.
-    sendChatMessagePush(req.params.id, req.user.id, msg, mem.chat_type).catch(err => {
-      console.error('[push hook]', err.message);
-    });
+    if (!inserted.duplicate && type !== 'reaction') {
+      // Non-idempotent side effects run ONCE — only for a genuinely new row.
+      // Reactions (F4) never bump unread counts or ring the recipient's phone
+      // (WhatsApp behaviour) — they still fan out live via broadcastNewMessage.
+      // Bump the denormalized unread counter for every other member.
+      db.query('SELECT vc_bump_unread($1, $2)', [req.params.id, req.user.id])
+        .catch(e => console.error('[unread bump]', e.message));
+      // Fire-and-forget push. Skipped on a duplicate to avoid a double OS banner
+      // (the first attempt already pushed); the rare crash-before-push case
+      // trades a missed push for never double-notifying.
+      sendChatMessagePush(req.params.id, req.user.id, msg, mem.chat_type).catch(err => {
+        console.error('[push hook]', err.message);
+      });
+    }
   } catch (err) {
     console.error('[messages POST]', err.message);
     res.status(500).json({ error: 'Failed to send message' });
@@ -993,10 +1100,11 @@ router.delete('/:id/messages/:msgId', async (req, res) => {
       `UPDATE messages
        SET deleted_at = NOW(), content = NULL, meta = NULL, type = 'system'
        WHERE id = $1 AND chat_id = $2 AND sender_id = $3 AND deleted_at IS NULL
+         AND created_at > NOW() - INTERVAL '${REVOKE_WINDOW_MS} milliseconds'
        RETURNING id, chat_id, deleted_at`,
       [req.params.msgId, req.params.id, req.user.id]
     );
-    if (!r.rows[0]) return res.status(404).json({ error: 'Message not found or not yours' });
+    if (!r.rows[0]) return res.status(404).json({ error: 'Message not found, not yours, or the delete window has expired' });
 
     broadcastChatEvent(req.params.id, 'message_deleted', { id: r.rows[0].id, deletedAt: r.rows[0].deleted_at });
     res.json({ id: r.rows[0].id, deletedAt: r.rows[0].deleted_at });
@@ -1055,17 +1163,31 @@ router.post('/:id/read', async (req, res) => {
              SELECT COUNT(*) FROM messages m
               WHERE m.chat_id = $2 AND m.id > $1
                 AND m.sender_id <> $3 AND m.deleted_at IS NULL
+                AND m.type <> 'reaction'
            )
        WHERE chat_id = $2 AND user_id = $3
          AND (last_read_message_id IS NULL OR last_read_message_id < $1)
-       RETURNING last_read_message_id`,
+       RETURNING last_read_message_id,
+         (SELECT c.type FROM chats c WHERE c.id = $2) AS chat_type,
+         (SELECT bool_and(u.read_receipts)
+            FROM chat_members cm2 JOIN users u ON u.id = cm2.user_id
+           WHERE cm2.chat_id = $2 AND cm2.left_at IS NULL) AS receipts_mutual`,
       [lastReadMessageId, req.params.id, req.user.id]
     );
     if (r.rows[0]) {
-      broadcastChatEvent(req.params.id, 'message_read', {
-        userId: req.user.id,
-        lastReadMessageId: r.rows[0].last_read_message_id,
-      });
+      // Read-receipt reciprocity (WhatsApp): in a DIRECT chat only surface the
+      // read pointer to the peer when BOTH participants keep read receipts ON.
+      // Groups are exempt. This is enforced SERVER-SIDE (a client toggle can't
+      // stop the peer's device from receiving the pointer). The vanish sweep
+      // below stays UNCONDITIONAL — it's independent of receipt visibility.
+      const suppressReceipt =
+        r.rows[0].chat_type === 'direct' && r.rows[0].receipts_mutual === false;
+      if (!suppressReceipt) {
+        broadcastChatEvent(req.params.id, 'message_read', {
+          userId: req.user.id,
+          lastReadMessageId: r.rows[0].last_read_message_id,
+        });
+      }
 
       // Vanish-Mode trigger: any vanish_after_read messages in this chat
       // that have NO non-sender members lagging behind get expires_at =
@@ -1580,148 +1702,12 @@ router.delete('/:id/members/:userId', async (req, res) => {
 // TEMPORARY: works because Phase 3a stores content as plaintext. When
 // Phase 3b ships real E2EE this endpoint will return only chat-name and
 // member-name hits; message content search will need to move client-side.
-// ─── Reactions (Day 8) ─────────────────────────────────────────────
-// One row per (message, user, emoji). Toggling the same emoji removes it;
-// stacking different emojis is allowed.
-//
-// PUT    /chats/:id/messages/:msgId/reactions   { emoji }  → upsert (toggle on)
-// DELETE /chats/:id/messages/:msgId/reactions   { emoji }  → remove
-// GET    /chats/:id/messages/:msgId/reactions             → list reactors
-// GET    /chats/:id/reactions?messageIds=1,2,3            → bulk counts
-
-const MAX_EMOJI_BYTES = 16;
-
-router.put('/:id/messages/:msgId/reactions', async (req, res) => {
-  try {
-    const mem = await loadChatMembership(req, req.params.id);
-    if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
-
-    const emoji = (req.body?.emoji || '').toString();
-    if (!emoji || emoji.length === 0 || Buffer.byteLength(emoji, 'utf8') > MAX_EMOJI_BYTES) {
-      return res.status(400).json({ error: 'emoji required (1–16 bytes)' });
-    }
-    const msgId = parseInt(req.params.msgId, 10);
-    if (!Number.isFinite(msgId)) return res.status(400).json({ error: 'invalid msgId' });
-
-    // Verify the message belongs to this chat (RLS will also enforce, but
-    // a 404 is friendlier than a 500 from a write that filters nothing).
-    const mr = await req.dbQuery(
-      `SELECT 1 FROM messages WHERE id = $1 AND chat_id = $2`,
-      [msgId, req.params.id]
-    );
-    if (mr.rowCount === 0) return res.status(404).json({ error: 'Message not found' });
-
-    await req.dbQuery(
-      `INSERT INTO message_reactions (message_id, user_id, emoji)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (message_id, user_id, emoji) DO NOTHING`,
-      [msgId, req.user.id, emoji]
-    );
-    broadcastChatEvent(req.params.id, 'reaction_added', {
-      chatId: req.params.id, messageId: msgId, userId: req.user.id, emoji,
-    });
-    res.json({ ok: true });
-  } catch (err) {
-    console.error('[reactions PUT]', err.message);
-    res.status(500).json({ error: 'Failed to react' });
-  }
-});
-
-router.delete('/:id/messages/:msgId/reactions', async (req, res) => {
-  try {
-    const mem = await loadChatMembership(req, req.params.id);
-    if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
-
-    const emoji = (req.body?.emoji || req.query?.emoji || '').toString();
-    if (!emoji) return res.status(400).json({ error: 'emoji required' });
-
-    const msgId = parseInt(req.params.msgId, 10);
-    if (!Number.isFinite(msgId)) return res.status(400).json({ error: 'invalid msgId' });
-
-    await req.dbQuery(
-      `DELETE FROM message_reactions
-        WHERE message_id = $1 AND user_id = $2 AND emoji = $3`,
-      [msgId, req.user.id, emoji]
-    );
-    broadcastChatEvent(req.params.id, 'reaction_removed', {
-      chatId: req.params.id, messageId: msgId, userId: req.user.id, emoji,
-    });
-    res.json({ ok: true });
-  } catch (err) {
-    console.error('[reactions DELETE]', err.message);
-    res.status(500).json({ error: 'Failed to un-react' });
-  }
-});
-
-// GET reactors for a single message (used by the long-press details sheet)
-router.get('/:id/messages/:msgId/reactions', async (req, res) => {
-  try {
-    const mem = await loadChatMembership(req, req.params.id);
-    if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
-
-    const msgId = parseInt(req.params.msgId, 10);
-    if (!Number.isFinite(msgId)) return res.status(400).json({ error: 'invalid msgId' });
-
-    const r = await req.dbQuery(
-      `SELECT mr.emoji, mr.user_id, u.name, u.email, u.first_name_cipher, u.last_name_cipher, u.email_cipher
-         FROM message_reactions mr
-         JOIN users u ON u.id = mr.user_id
-        WHERE mr.message_id = $1
-        ORDER BY mr.created_at ASC`,
-      [msgId]
-    );
-    res.json(r.rows.map(row => {
-      const idn = vault.identityFromRow(row);
-      return { emoji: row.emoji, userId: row.user_id, name: idn.name, email: idn.email };
-    }));
-  } catch (err) {
-    console.error('[reactions GET]', err.message);
-    res.status(500).json({ error: 'Failed to load reactions' });
-  }
-});
-
-// GET bulk reaction counts for a list of message ids — used after loading
-// a message page to hydrate the bubbles with their reaction state in a
-// single round-trip.
-router.get('/:id/reactions', async (req, res) => {
-  try {
-    const mem = await loadChatMembership(req, req.params.id);
-    if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member' });
-
-    const ids = String(req.query.messageIds || '')
-      .split(',')
-      .map(s => parseInt(s.trim(), 10))
-      .filter(n => Number.isFinite(n))
-      .slice(0, 500);
-    if (ids.length === 0) return res.json({});
-
-    const r = await req.dbQuery(
-      `SELECT mr.message_id, mr.emoji, mr.user_id
-         FROM message_reactions mr
-         JOIN messages m ON m.id = mr.message_id
-        WHERE m.chat_id = $1 AND mr.message_id = ANY($2::bigint[])`,
-      [req.params.id, ids]
-    );
-    // Shape: { messageId: [{emoji, count, mine}] }
-    const byMsg = Object.create(null);
-    for (const row of r.rows) {
-      const k = String(row.message_id);
-      if (!byMsg[k]) byMsg[k] = {};
-      if (!byMsg[k][row.emoji]) byMsg[k][row.emoji] = { count: 0, mine: false };
-      byMsg[k][row.emoji].count += 1;
-      if (row.user_id === req.user.id) byMsg[k][row.emoji].mine = true;
-    }
-    // Flatten emoji map → array per message
-    const out = {};
-    for (const [k, m] of Object.entries(byMsg)) {
-      out[k] = Object.entries(m).map(([emoji, v]) => ({ emoji, count: v.count, mine: v.mine }));
-    }
-    res.json(out);
-  } catch (err) {
-    console.error('[reactions GET bulk]', err.message);
-    res.status(500).json({ error: 'Failed to load reactions' });
-  }
-});
+// ─── Reactions ─────────────────────────────────────────────────────
+// The legacy plaintext reaction endpoints (PUT/DELETE/GET .../reactions) were
+// REMOVED (F4): reactions are now E2EE reference-messages (type='reaction',
+// {reactsTo,op,emoji} sealed inside the message content), so the server never
+// sees the emoji and clients aggregate counts themselves. The plaintext
+// `message_reactions` table is dropped in migration 056.
 
 // ─── Polls (in-chat voting) ────────────────────────────────────────
 // Voting is a separate endpoint from message edit because the message

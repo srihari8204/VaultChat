@@ -6,11 +6,11 @@
 // answers the carried offer instead of creating a new one.
 
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useRef , useMemo} from 'react';
+import { useEffect, useRef } from 'react';
 import { StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { type Palette } from '../constants/theme';
-import { useTheme } from '../lib/theme';
+import { CALL } from '../constants/callTheme';
 import { getSocket } from '../lib/socket';
 import { startRingtone, stopRingtone } from '../lib/sounds';
 import { addCallLog } from '../lib/callLog';
@@ -18,14 +18,11 @@ import { holdActiveCall } from '../lib/callState';
 import { setRingingPeer } from '../lib/ringTracker';
 import { cancelIncomingCall } from '../lib/callNotification';
 
-function useS() {
-  const { colors } = useTheme();
-  return useMemo(() => makeStyles(colors), [colors]);
-}
+// Call chrome is always dark (independent of app theme).
+const S = makeStyles();
 
 export default function IncomingCallScreen() {
-  const { colors } = useTheme();
-  const S = useS();
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const { chatId, peerUid, peerName, type, offer, group, groupName, waiting } = useLocalSearchParams<{
     chatId: string;
@@ -127,7 +124,7 @@ export default function IncomingCallScreen() {
         {isWaiting && <Text style={S.label}>{type === 'video' ? 'Video call' : 'Voice call'} waiting…</Text>}
       </View>
 
-      <View style={S.controls}>
+      <View style={[S.controls, { paddingBottom: insets.bottom + 32 }]}>
         <TouchableOpacity style={[S.btn, S.btnDecline]} onPress={decline} activeOpacity={0.85}>
           <Ionicons name="call" size={28} color="#fff" style={{ transform: [{ rotate: '135deg' }] }} />
           <Text style={S.btnLabel}>Decline</Text>
@@ -141,20 +138,18 @@ export default function IncomingCallScreen() {
   );
 }
 
-const SUBTLE = 'rgba(255,255,255,0.7)';
-
-const makeStyles = (c: Palette) => StyleSheet.create({
-  screen:    { flex: 1, backgroundColor: c.bg },
+function makeStyles() { return StyleSheet.create({
+  screen:    { flex: 1, backgroundColor: CALL.bg },
   body:      { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 14 },
-  label:     { color: c.textDim, fontSize: 14, letterSpacing: 1.5, textTransform: 'uppercase' },
-  avatar:    { width: 160, height: 160, borderRadius: 80, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', marginTop: 12, shadowColor: c.primary, shadowOpacity: 0.6, shadowRadius: 30 },
+  label:     { color: CALL.textDim, fontSize: 14, letterSpacing: 1.5, textTransform: 'uppercase' },
+  avatar:    { width: 160, height: 160, borderRadius: 80, backgroundColor: CALL.active, alignItems: 'center', justifyContent: 'center', marginTop: 12, shadowColor: CALL.active, shadowOpacity: 0.6, shadowRadius: 30 },
   avatarTxt: { color: '#fff', fontSize: 64, fontWeight: '800' },
-  name:      { color: c.text, fontSize: 26, fontWeight: '700' },
+  name:      { color: CALL.text, fontSize: 26, fontWeight: '700' },
 
-  controls:  { flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 32, paddingBottom: 56 },
+  controls:  { flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 32 },
   btn:       { width: 110, alignItems: 'center', justifyContent: 'center', paddingVertical: 18, borderRadius: 24, gap: 6 },
-  btnAccept: { backgroundColor: c.primary },
-  btnDecline:{ backgroundColor: c.danger },
+  btnAccept: { backgroundColor: CALL.active },
+  btnDecline:{ backgroundColor: CALL.danger },
   btnIcon:   { fontSize: 28 },
   btnLabel:  { color: '#fff', fontSize: 13, fontWeight: '700' },
-});
+}); }

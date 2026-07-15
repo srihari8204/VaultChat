@@ -22,6 +22,7 @@ import {
 // Row 2: Notes, Scanner, Location
 // Row 3: Current Loc, Cloud, Pegasus
 const MINI_APPS_MAIN = [
+  { id: 'vaultlens',   icon: '\u2728', name: 'VaultLens', route: '/vaultlens', gradient: ['#9D6FD0', '#EC4899'] as [string, string] },
   { id: 'interest',    icon: '\uD83D\uDCC8', name: 'Interest Calculator', route: '/interest-calculator', gradient: ['#075E54', '#25D366'] as [string, string] },
   { id: 'notes',       icon: '\uD83D\uDCDD', name: 'Notes',       route: '/encrypted-notes', gradient: ['#F59E0B', '#D97706'] as [string, string] },
   { id: 'scanner',     icon: '\uD83D\uDCC4', name: 'Scanner',     route: '/docscanner',     gradient: ['#4A9FFF', '#1D4ED8'] as [string, string] },

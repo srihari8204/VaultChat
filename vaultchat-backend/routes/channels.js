@@ -218,9 +218,11 @@ router.post('/:id/posts', async (req, res) => {
         );
         const tokens = tokR.rows.map(r => r.push_token).filter(Boolean);
         if (tokens.length) {
+          // Content-free (F2): never put the post text or channel name in the
+          // push — it transits Expo + FCM/APNs in the clear. Routing data only.
           await sendPushToTokens(tokens, {
-            title: ch.name,
-            body:  text.slice(0, 140),
+            title: 'VaultChat',
+            body:  'New channel post',
             data:  { type: 'channel_post', channelId: ch.id },
           });
         }

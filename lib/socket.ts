@@ -15,6 +15,7 @@
 //   refresh the token (via the api wrapper) and reconnect.
 
 import { io as ioClient, Socket } from 'socket.io-client';
+import { useSyncExternalStore } from 'react';
 import { SERVER_URL } from '../constants/server';
 import { getAccessToken } from './api';
 import perf from './perf';
@@ -36,11 +37,12 @@ function setCantConnect(v: boolean) {
 }
 function noteConnectFailure() {
   connectFailures++;
-  if (connectFailures >= 5) setCantConnect(true);
+  if (connectFailures >= 5) { setCantConnect(true); setConn('OFFLINE'); }
 }
 function noteConnectSuccess() {
   connectFailures = 0;
   setCantConnect(false);
+  setConn('ONLINE');
 }
 export function onCantConnect(cb: (v: boolean) => void): () => void {
   cantConnectListeners.add(cb);
@@ -48,6 +50,32 @@ export function onCantConnect(cb: (v: boolean) => void): () => void {
   return () => { cantConnectListeners.delete(cb); };
 }
 export function getCantConnect(): boolean { return cantConnect; }
+
+// ── 3-state connection status (ONLINE | CONNECTING | OFFLINE) ────────
+// The single source for the connection banner + the sync engine's ONLINE
+// trigger. Derived from the same socket lifecycle events below.
+export type ConnState = 'ONLINE' | 'CONNECTING' | 'OFFLINE';
+let connState: ConnState = 'OFFLINE';
+const connListeners = new Set<(s: ConnState) => void>();
+function setConn(s: ConnState) {
+  if (connState === s) return;
+  connState = s;
+  for (const l of connListeners) { try { l(s); } catch {} }
+}
+export function getConnectionState(): ConnState { return connState; }
+export function onConnectionState(cb: (s: ConnState) => void): () => void {
+  connListeners.add(cb);
+  cb(connState);
+  return () => { connListeners.delete(cb); };
+}
+/** React hook for the "Connecting…" / "Waiting for network" banner. */
+export function useConnectionState(): ConnState {
+  return useSyncExternalStore(
+    (cb) => onConnectionState(() => cb()),
+    () => connState,
+    () => connState,
+  );
+}
 
 // Listeners that MUST survive socket re-creation (reconnect after a network
 // drop, or a new instance after disconnect()/re-login). Re-applied every time
@@ -79,7 +107,7 @@ async function connect(): Promise<Socket> {
   applyPersistent(s);   // re-attach call/global listeners onto the new socket
 
   // ── Task 1 perf: log the negotiated transport + any upgrade ──────
-  perf.setConnState('connecting');
+  perf.setConnState('connecting'); setConn('CONNECTING');
   s.on('connect', () => {
     const tname = (s as any).io?.engine?.transport?.name ?? 'unknown';
     perf.setTransport(tname);
@@ -93,8 +121,8 @@ async function connect(): Promise<Socket> {
       });
     } catch {}
   });
-  s.on('disconnect', (reason: string) => { perf.setConnState('disconnected'); perf.mark('socket_disconnect', { reason }); });
-  s.io.on('reconnect_attempt', () => { perf.setConnState('connecting'); perf.bumpReconnect(); });
+  s.on('disconnect', (reason: string) => { perf.setConnState('disconnected'); setConn('CONNECTING'); perf.mark('socket_disconnect', { reason }); });
+  s.io.on('reconnect_attempt', () => { perf.setConnState('connecting'); setConn('CONNECTING'); perf.bumpReconnect(); });
   // Count consecutive failures → drives the "Can't connect" banner after 5.
   s.io.on('reconnect_error', () => noteConnectFailure());
   s.io.on('error', () => noteConnectFailure());

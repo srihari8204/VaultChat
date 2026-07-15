@@ -470,14 +470,15 @@ router.put('/profile', async (req, res) => {
     }
 
     // Phone — normalize (digits-only, India default for 10-digit input),
-    // store hash for contact lookup. Same normalization used by
-    // routes/chats.js so writes and lookups produce matching hashes.
+    // store the PEPPERED hash for contact lookup (F1): HMAC(pepper, sha256).
+    // Same construction as routes/auth.js + routes/chats.js + /contacts/match,
+    // so writes and lookups produce matching values.
     if (b.phone) {
       const raw = b.phone.toString();
       let digits = raw.replace(/\D/g, '');
       if (digits.length === 10) digits = '91' + digits;
-      const h = crypto.createHash('sha256').update(digits, 'utf8').digest('hex');
-      params.push(h);
+      const sha = crypto.createHash('sha256').update(digits, 'utf8').digest('hex');
+      params.push(vault.discoveryHash(sha));
       sets.push(`phone_hash = $${params.length}`);
     }
 

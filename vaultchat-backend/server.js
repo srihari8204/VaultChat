@@ -107,6 +107,41 @@ app.use('/gif',      require('./routes/gif'));
 const channelsRouter = require('./routes/channels');
 app.use('/channels', channelsRouter);
 app.use('/games',    require('./routes/games'));
+const vaultbeamRouter = require('./routes/vaultbeam');
+app.use('/vaultbeam', vaultbeamRouter);
+vaultbeamRouter.setBroadcasters({ emitToUid });   // ring recipient: vb_invite / vb_ready / vb_complete / vb_abort
+setInterval(() => vaultbeamRouter.sweepExpired().catch(() => {}), 60 * 60 * 1000); // reap stale relay rows hourly
+
+// VaultLens (AI avatars). The BullMQ worker renders in its own process; here we
+// listen for job completion and emit the result to the user's socket. The API
+// process owns Socket.IO, so all emits happen here (not in the worker).
+const vaultlensRouter = require('./routes/vaultlens');
+app.use('/vaultlens', vaultlensRouter);
+try {
+  const { events: vlEvents } = require('./lib/vaultlensQueue');
+  const vlStore = require('./lib/storage');
+  const qe = vlEvents();
+  qe.on('completed', async ({ jobId, returnvalue }) => {
+    try {
+      const rv = typeof returnvalue === 'string' ? JSON.parse(returnvalue) : returnvalue;
+      if (!rv?.userId || !rv?.storageKey) return;
+      const url = await vlStore.presignGet(rv.storageKey, 3600);
+      emitToUid(rv.userId, 'vaultlens:ready', { id: rv.generationId, url, styleId: rv.styleId });
+    } catch (e) { console.error('[vaultlens completed]', e.message); }
+  });
+  qe.on('failed', async ({ jobId }) => {
+    try {
+      // Terminal failure → mark 'failed' (auto-refunds quota — excluded from the
+      // daily count) and tell the client to flip the card to a retry state.
+      const r = await db.query(
+        `UPDATE vaultlens_generation SET status = 'failed', completed_at = NOW()
+           WHERE id = $1 AND status <> 'done' RETURNING user_id`, [jobId]);
+      const uid = r.rows[0]?.user_id;
+      if (uid) emitToUid(uid, 'vaultlens:failed', { id: jobId });
+    } catch (e) { console.error('[vaultlens failed]', e.message); }
+  });
+  console.log('[vaultlens] QueueEvents listener active');
+} catch (e) { console.warn('[vaultlens] QueueEvents not started:', e.message); }
 const adminRouter = require('./routes/admin');
 app.use('/api/admin', adminRouter);
 
@@ -810,17 +845,19 @@ io.on('connection', (socket) => {
     if (chatId) socket.to(`chat:${chatId}`).emit('message_delivered', { messageId });
   });
 
-  socket.on('message_read', ({ chatId, messageId }) => {
-    if (chatId) socket.to(`chat:${chatId}`).emit('message_read', { messageId });
-  });
+  // NOTE: the legacy `message_read` socket relay was removed here. It re-broadcast
+  // a read pointer directly, bypassing the read-receipt reciprocity gate in
+  // POST /chats/:id/read (routes/chats.js) — so an opted-out user's read still
+  // leaked to the peer. Read receipts now flow ONLY through the gated REST path.
+  // (The `new_message`→`message_delivered` relay above stays: the grey delivered
+  // tick is intentionally never gated by the read-receipt setting.)
 
-  socket.on('message_edited', ({ chatId, messageId, newPlaintext }) => {
-    if (chatId) socket.to(`chat:${chatId}`).emit('message_edited', { messageId, newPlaintext });
-  });
-
-  socket.on('message_deleted', ({ chatId, messageId }) => {
-    if (chatId) socket.to(`chat:${chatId}`).emit('message_deleted', { messageId });
-  });
+  // NOTE: legacy `message_edited` / `message_deleted` socket relays removed —
+  // they re-broadcast CLIENT-supplied payloads with no ownership/age check, so
+  // any room member could spoof an edit/delete of anyone's message (transient
+  // UI-only, but still a spoof). The authoritative REST paths (PATCH/DELETE
+  // /chats/:id/messages/:msgId) already broadcast the real gated events; the
+  // live client is REST-only for both.
 
   socket.on('reaction_updated', ({ chatId, messageId, reactions }) => {
     if (chatId) socket.to(`chat:${chatId}`).emit('reaction_updated', { messageId, reactions });
@@ -849,6 +886,11 @@ io.on('connection', (socket) => {
   socket.on('webrtc_answer',      relayToPeer('webrtc_answer'));
   socket.on('webrtc_ice',         relayToPeer('webrtc_ice'));
   socket.on('webrtc_end',         relayToPeer('webrtc_end'));
+  // E2EE session re-key request (Stage-2 auto-recovery): a device that can't
+  // decrypt a peer's messages asks that peer to drop its stale session so its
+  // next message re-runs X3DH. Carries no content — just {to} — so relaying
+  // this cleartext control signal leaks nothing (the ratchet state is local).
+  socket.on('e2ee_rekey',         relayToPeer('e2ee_rekey'));
   // Calls: relay over the socket AND fire a high-priority push, so the callee
   // is alerted even when the app is killed / in doze (the socket is dead then).
   // The client suppresses the notification when it's in the foreground (the
@@ -897,6 +939,14 @@ io.on('connection', (socket) => {
   socket.on('vaultbeam_answer',   relayToPeer('vaultbeam_answer'));
   socket.on('vaultbeam_ice',      relayToPeer('vaultbeam_ice'));
   socket.on('vaultbeam_end',      relayToPeer('vaultbeam_end'));
+  // Direct-tier (LAN / P2P) negotiation for VaultBeam large-file transfer:
+  //   pull  — recipient: "I'm ready, let's try direct"
+  //   ready — sender: "here's my LAN endpoint" (+ a WebRTC offer via vaultbeam_offer)
+  //   tier  — recipient: "direct failed, fall back to relay"
+  // All are opaque routing (to/from); the file bytes never touch this server.
+  socket.on('vaultbeam_pull',     relayToPeer('vaultbeam_pull'));
+  socket.on('vaultbeam_ready',    relayToPeer('vaultbeam_ready'));
+  socket.on('vaultbeam_tier',     relayToPeer('vaultbeam_tier'));
 
   // ── Group calls (mesh) ────────────────────────────────────────────
   // A call room per chat. Joiners learn the existing roster; the per-pair

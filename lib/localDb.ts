@@ -170,7 +170,9 @@ export async function getLastMessagePerChat(): Promise<Map<string, { content: st
   const rows = await db.getAllAsync(
     `SELECT m.chat_id, m.id, m.content, m.type, m.sender_id
        FROM messages m
-       JOIN (SELECT chat_id, MAX(id) AS mx FROM messages WHERE deleted_at IS NULL GROUP BY chat_id) t
+       JOIN (SELECT chat_id, MAX(id) AS mx FROM messages
+              WHERE deleted_at IS NULL AND type <> 'reaction'   -- F4: reference messages never preview
+              GROUP BY chat_id) t
          ON t.chat_id = m.chat_id AND t.mx = m.id`,
     [],
   );
@@ -248,6 +250,14 @@ export async function getSyncCursor(chatId: string): Promise<number> {
   return r ? (r.last_id as number) : 0;
 }
 
+/** Highest message id cached across ALL chats — the global forward-catch-up
+ *  cursor (messages.id is a server-global BIGSERIAL). */
+export async function getGlobalSyncCursor(): Promise<number> {
+  const db = await getLocalDb();
+  const r: any = await db.getFirstAsync(`SELECT MAX(id) AS m FROM messages`);
+  return r?.m ? Number(r.m) : 0;
+}
+
 /** Apply a single incoming/edited message (from socket) to the cache. */
 export async function applyMessage(chatId: string, m: Message): Promise<void> {
   await cacheMessages(chatId, [m]);
@@ -280,6 +290,26 @@ export async function getCachedChats(): Promise<any[]> {
     `SELECT data FROM chats ORDER BY (last_message_at IS NULL), last_message_at DESC`,
   );
   return rows.map((r: any) => safeParse(decField(r.data) || '')).filter(Boolean);
+}
+
+// Persist ONE chat's full detail (members, timers, pinned…) so the chat header
+// renders offline. Reuses the chats table (ChatDetail is a superset of the
+// summary listChats caches), keyed by id → last writer wins.
+export async function cacheChatDetail(chatId: string, detail: any): Promise<void> {
+  if (!chatId || !detail) return;
+  const db = await getLocalDb();
+  await db.runAsync(
+    `INSERT OR REPLACE INTO chats (id, data, last_message_at) VALUES (?, ?, ?)`,
+    [chatId, encField(JSON.stringify(detail)), (detail as any).lastMessageAt ?? null],
+  );
+}
+
+/** Cached chat (detail if we have it, else the list summary) for offline header render. */
+export async function getCachedChat(chatId: string): Promise<any | null> {
+  const db = await getLocalDb();
+  const rows = await db.getAllAsync(`SELECT data FROM chats WHERE id = ? LIMIT 1`, [chatId]);
+  const row: any = rows[0];
+  return row ? safeParse(decField(row.data) || '') : null;
 }
 
 /** Dump all local rows for an encrypted backup. Sealed fields are decrypted here

@@ -29,6 +29,7 @@ import { ThemeProvider } from '../lib/theme';
 
 import { runSecurityCheck } from '../services/securityService';
 import { attachTapHandler } from '../lib/push';
+import { notify as notifyMessage, setSelfId } from '../lib/messageNotifications';
 import { addPersistentListener, getSocket } from '../lib/socket';
 import { registerForCalls, getInitialCallIntent, drainDeclinedCall } from '../lib/CallService';
 import { getActiveCall } from '../lib/callState';
@@ -159,6 +160,37 @@ function RootLayout() {
     };
     const cleanupCallListener = addPersistentListener('call_incoming', onIncoming);
 
+    // E2EE Stage-2 auto-recovery: a peer that couldn't decrypt us asks us to
+    // reset our session so our next message re-runs X3DH (persistent so it
+    // survives socket reconnects, like the call listener).
+    const cleanupRekey = addPersistentListener('e2ee_rekey', (data: any) => {
+      const from = data?.from ?? data?.fromUid;
+      if (from) import('../lib/chatService').then(m => m.handleRekeyRequest(String(from))).catch(() => {});
+    });
+
+    // VaultBeam: resume any relay upload that was interrupted by an app kill
+    // (the recipient resumes symmetrically via the server bitmask).
+    import('../lib/vaultBeamController').then(m => m.resumePendingSends()).catch(() => {});
+
+    // Offline forward catch-up: pull everything missed while offline on every
+    // reconnect, across all chats (Phase 2).
+    import('../lib/syncEngine').then(m => m.initSync()).catch(() => {});
+
+    // Durable read/delivered receipts: re-flush any that were dropped offline (Phase 3).
+    import('../lib/receipts').then(m => m.initReceipts()).catch(() => {});
+
+    // Durable media outbox: resume interrupted/offline media sends on reconnect.
+    import('../lib/mediaOutbox').then(m => m.initMediaOutbox()).catch(() => {});
+    // Bound the re-derivable media cache (safe: never touches the user's library).
+    import('../lib/mediaCacheGC').then(m => m.sweepMediaCache()).catch(() => {});
+
+    // No-GMS background delivery (Phase 4): raise a local notification for each
+    // inbound message. Global + persistent so it fires while the app is
+    // backgrounded-but-alive (foreground-service connection). notify() self-gates
+    // (skips push-capable devices, foregrounded app, own echo, duplicates).
+    import('./(constants)/authService').then(m => m.getCurrentUserAsync().then((u: any) => setSelfId(u?.id ?? null))).catch(() => {});
+    const cleanupMsgNotif = addPersistentListener('new_message', (m: any) => { notifyMessage(m).catch(() => {}); });
+
     // ── Notifee full-screen call events (foreground) ────────────────────
     const onNotifeeAnswerOrDecline = (action: string, data: any) => {
       if (data?.type !== 'call' || !data?.fromUid) return;
@@ -192,7 +224,10 @@ function RootLayout() {
       // The caller re-emits the offer over the socket; incoming-call captures it live.
       try {
         const ci = await getInitialCallIntent();
-        if (ci?.callId && ci.action !== 'open_calls') {
+        if (ci?.action === 'open_chat' && ci.chatId) {
+          // Native message-notification tap (F2 content-free doorbell).
+          router.push({ pathname: '/chat', params: { id: ci.chatId } } as any);
+        } else if (ci?.callId && ci.action !== 'open_calls') {
           routeToIncoming({
             chatId: ci.callId, peerUid: ci.callerId || '', peerName: ci.callerName || 'VaultChat user',
             type: ci.isVideo ? 'video' : 'audio', offer: '',
@@ -224,6 +259,8 @@ function RootLayout() {
       }
       cleanupListeners();
       cleanupCallListener();
+      cleanupRekey();
+      cleanupMsgNotif();
       notifeeFg();
     };
   }, [router]);
@@ -274,8 +311,6 @@ function RootLayout() {
         <Stack.Screen name="qr-contact" />
         <Stack.Screen name="add/[...segments]" options={{ headerShown: false }} />
         <Stack.Screen name="file-preview" />
-        <Stack.Screen name="vaultbeam" />
-        <Stack.Screen name="transfers" />
         <Stack.Screen name="voice-transcribe" />
         <Stack.Screen name="group-chat" />
         <Stack.Screen name="lock" />

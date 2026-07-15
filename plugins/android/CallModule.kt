@@ -113,8 +113,22 @@ class CallModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMo
     fun getInitialCallIntent(promise: Promise) {
         val intent = getCurrentActivity()?.intent
         val action = intent?.getStringExtra("vc_action")
-        val callId = intent?.getStringExtra("callId")
-        if (intent == null || action == null || callId == null) {
+        if (intent == null || action == null) {
+            promise.resolve(null)
+            return
+        }
+        // Message-notification tap (F2): route straight to the chat.
+        if (action == "open_chat") {
+            val map = Arguments.createMap()
+            map.putString("action", action)
+            map.putString("chatId", intent.getStringExtra("vc_chat_id"))
+            intent.removeExtra("vc_action")
+            intent.removeExtra("vc_chat_id")
+            promise.resolve(map)
+            return
+        }
+        val callId = intent.getStringExtra("callId")
+        if (callId == null) {
             promise.resolve(null)
             return
         }
@@ -128,5 +142,29 @@ class CallModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMo
         intent.removeExtra("vc_action")
         intent.removeExtra("callId")
         promise.resolve(map)
+    }
+
+    /**
+     * F2 content-free push support: JS keeps a local chatId → display-name
+     * directory so the native message notification can show the sender/chat
+     * name WITHOUT any name ever riding inside the push payload.
+     */
+    @ReactMethod
+    fun setChatDirectory(json: String) {
+        reactApplicationContext
+            .getSharedPreferences(VaultCallMessagingService.PREFS, Context.MODE_PRIVATE)
+            .edit().putString(VaultCallMessagingService.KEY_CHAT_DIR, json).apply()
+    }
+
+    /** Clear a chat's message notification + unread counter (chat opened). */
+    @ReactMethod
+    fun clearMessageNotifs(chatId: String) {
+        try {
+            val ctx = reactApplicationContext
+            (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager)
+                .cancel(chatId, VaultCallMessagingService.MSG_NOTIF_ID)
+            ctx.getSharedPreferences(VaultCallMessagingService.PREFS, Context.MODE_PRIVATE)
+                .edit().remove("msg_count_$chatId").apply()
+        } catch (_: Throwable) {}
     }
 }

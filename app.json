@@ -47,6 +47,7 @@
         "android.permission.BLUETOOTH_CONNECT",
         "android.permission.USE_FULL_SCREEN_INTENT",
         "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
         "android.permission.WAKE_LOCK",
         "android.permission.SYSTEM_ALERT_WINDOW",
         "android.permission.VIBRATE",
@@ -104,6 +105,9 @@
       ],
       "./plugins/withAppComponentFactoryFix.js",
       "./plugins/withVaultChatCalls.js",
+      "./plugins/withVaultBeamStream.js",
+      "./plugins/withVaultChatSync.js",
+      "./plugins/withGradleMemory.js",
       "expo-sqlite"
     ],
     "extra": {

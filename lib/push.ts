@@ -16,6 +16,8 @@ import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
 import { AppState, Platform } from 'react-native';
 import { api } from './api';
+import { setPushAvailable } from './messageNotifications';
+import { startBackgroundConnection, stopBackgroundConnection } from './backgroundConnection';
 
 const EAS_PROJECT_ID = '144570a3-de88-48f0-b7e1-ecda63618199';
 
@@ -126,7 +128,18 @@ export async function registerPushToken(): Promise<void> {
     return;
   }
   const token = await getExpoPushToken();
-  if (!token) return;
+  if (!token) {
+    // No push token → this device can't receive server push (typically a no-GMS
+    // handset, e.g. Huawei). Fall back to the app's own background delivery:
+    // client-raised notifications + a persistent foreground-service connection.
+    setPushAvailable(false);
+    startBackgroundConnection().catch(() => {});
+    return;
+  }
+  // Push works → let the server deliver notifications; suppress our own path and
+  // drop the battery-costing background connection.
+  setPushAvailable(true);
+  stopBackgroundConnection().catch(() => {});
 
   try {
     const platform = Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : 'web';

@@ -101,6 +101,18 @@ function lookupHash(normalizedValue) {
 function emailLookup(email) { return lookupHash(normalizeEmail(email)); }
 function phoneLookup(phone) { return lookupHash(normalizePhone(phone)); }
 
+// Contact-discovery pepper (F1). The client can only compute SHA256(digits) —
+// it can never hold the pepper — so the STORED index is HMAC(pepper, sha256hex):
+// the server peppers whatever the client sends before matching/writing. This
+// makes a stolen users-table dump useless for phone brute-force (attacker needs
+// the pepper too, which lives only in env — keep it OUT of DB backups). The
+// online membership oracle (an authed client probing candidate hashes) remains,
+// mitigated by the /contacts/match rate limit — same trade-off WhatsApp accepts.
+function discoveryHash(clientSha256Hex) {
+  return crypto.createHmac('sha256', pepper())
+               .update(String(clientSha256Hex).toLowerCase()).digest('hex');
+}
+
 // ── One-way secret hashing (MPIN, answers) ──────────────────────────────────
 async function hashSecret(plaintext) {
   if (plaintext == null || String(plaintext).length === 0) throw new Error('hashSecret: empty');
@@ -173,7 +185,7 @@ function decryptWithKey(blob, keyHex) {
 
 module.exports = {
   encrypt, decrypt,
-  lookupHash, emailLookup, phoneLookup,
+  lookupHash, emailLookup, phoneLookup, discoveryHash,
   hashSecret, verifySecret,
   signTicket, verifyTicket,
   normalizeEmail, normalizePhone, normalizeAnswer,

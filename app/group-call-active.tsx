@@ -19,6 +19,7 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { getTurnConfig } from '../lib/chatService';
 import { getSocket } from '../lib/socket';
+import { newCallCipher, openCallOffer, plainCipher, type CallCipher } from '../lib/callCrypto';
 import { getCurrentUserAsync } from './(constants)/authService';
 
 type Peer = { pc: RTCPeerConnection; url: string | null; name: string };
@@ -42,6 +43,10 @@ export default function GroupCallActive() {
   const pcsRef = useRef<Record<string, RTCPeerConnection>>({});
   const offsRef = useRef<Array<() => void>>([]);
   const pendingIce = useRef<Record<string, any[]>>({});
+  // F6: per-peer E2EE signaling cipher (mesh = one ratchet-wrapped call key per
+  // link). Defaults to plaintext passthrough for legacy peers.
+  const ciphersRef = useRef<Record<string, CallCipher>>({});
+  const cipherFor = (uid: string) => ciphersRef.current[uid] ?? plainCipher;
 
   const setPeerUrl = (uid: string, url: string | null, nm?: string) =>
     setPeers(prev => ({ ...prev, [uid]: { pc: pcsRef.current[uid], url, name: nm ?? prev[uid]?.name ?? '' } }));
@@ -50,6 +55,7 @@ export default function GroupCallActive() {
     try { pcsRef.current[uid]?.close(); } catch {}
     delete pcsRef.current[uid];
     delete pendingIce.current[uid];
+    delete ciphersRef.current[uid];
     setPeers(prev => { const n = { ...prev }; delete n[uid]; return n; });
   }, []);
 
@@ -60,7 +66,7 @@ export default function GroupCallActive() {
     setPeers(prev => ({ ...prev, [uid]: { pc, url: null, name: '' } }));
     try { localStreamRef.current?.getTracks().forEach((t: any) => pc.addTrack(t, localStreamRef.current)); } catch {}
     (pc as any).onicecandidate = (e: any) => {
-      if (e.candidate) getSocket().then(s => s.emit('webrtc_ice', { to: uid, chatId, candidate: e.candidate })).catch(() => {});
+      if (e.candidate) getSocket().then(s => s.emit('webrtc_ice', { to: uid, chatId, candidate: cipherFor(uid).seal(e.candidate) })).catch(() => {});
     };
     (pc as any).ontrack = (e: any) => { const rs = e.streams?.[0]; if (rs) setPeerUrl(uid, rs.toURL()); };
     (pc as any).oniceconnectionstatechange = () => {
@@ -72,7 +78,10 @@ export default function GroupCallActive() {
         const offer = await pc.createOffer({});
         await pc.setLocalDescription(offer);
         const s = await getSocket();
-        s.emit('webrtc_offer', { to: uid, chatId, sdp: pc.localDescription });
+        // F6: seal the offer under a per-peer call key (ratchet-wrapped once).
+        const sealed = await newCallCipher(uid, pc.localDescription);
+        if (sealed) ciphersRef.current[uid] = sealed.cipher;
+        s.emit('webrtc_offer', { to: uid, chatId, sdp: sealed ? sealed.offerWire : pc.localDescription });
       } catch (err: any) { setError(err?.message ?? 'offer failed'); }
     }
     return pc;
@@ -106,23 +115,29 @@ export default function GroupCallActive() {
           if (!from || !sdp) return;
           const pc = await ensurePeer(from, false);
           try {
-            await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+            // F6: sdp is either an encrypted sig1 wire (new peer) or raw SDP (legacy).
+            const { cipher, offer } = await openCallOffer(from, sdp);
+            ciphersRef.current[from] = cipher;
+            if (!offer?.type) { setError('Secure group-call setup failed'); return; }
+            await pc.setRemoteDescription(new RTCSessionDescription(offer));
             (pendingIce.current[from] || []).forEach(c => pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {}));
             pendingIce.current[from] = [];
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
-            s.emit('webrtc_answer', { to: from, chatId, sdp: pc.localDescription });
+            s.emit('webrtc_answer', { to: from, chatId, sdp: cipher.seal(pc.localDescription) });
           } catch (err: any) { setError(err?.message ?? 'answer failed'); }
         };
         const onAnswer = async ({ from, sdp }: any) => {
           const pc = pcsRef.current[from];
-          if (pc && sdp) { try { await pc.setRemoteDescription(new RTCSessionDescription(sdp)); (pendingIce.current[from] || []).forEach(c => pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {})); pendingIce.current[from] = []; } catch {} }
+          const ans = cipherFor(from).open(sdp);   // F6: decrypt for E2EE peers
+          if (pc && ans?.type) { try { await pc.setRemoteDescription(new RTCSessionDescription(ans)); (pendingIce.current[from] || []).forEach(c => pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {})); pendingIce.current[from] = []; } catch {} }
         };
         const onIce = async ({ from, candidate }: any) => {
           const pc = pcsRef.current[from];
-          if (!candidate) return;
-          if (pc && (pc as any).remoteDescription) { pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {}); }
-          else { (pendingIce.current[from] = pendingIce.current[from] || []).push(candidate); }
+          const cand = cipherFor(from).open(candidate);   // F6: decrypt; buffer plaintext
+          if (!cand) return;
+          if (pc && (pc as any).remoteDescription) { pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {}); }
+          else { (pendingIce.current[from] = pendingIce.current[from] || []).push(cand); }
         };
 
         s.on('call_roster', onRoster);

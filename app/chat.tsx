@@ -32,7 +32,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { consumePendingJump } from '../lib/chatJump';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { E2EE_ENABLED } from '../constants/flags';
-import { getCachedMessages, cacheMessages, applyMessage, markCachedDeleted, getCachedMessagesByIds } from '../lib/localDb';
+import { getCachedMessages, cacheMessages, applyMessage, markCachedDeleted, getCachedMessagesByIds, getCachedChat } from '../lib/localDb';
 import { saveDraft, getDraft, clearDraft } from '../lib/drafts';
 import { playSent, playReceived } from '../lib/sounds';
 import { NOTIF_CHANNELS } from '../lib/push';
@@ -63,6 +63,7 @@ import { ViewerStack } from '../components/chat/ViewerStack';
 import { getShareViewing } from '../lib/viewerPrefs';
 import type { ViewerActivity } from '../lib/socket';
 import LinkPreview, { extractUrl } from '../components/LinkPreview';
+import { extractFirstUrl, fetchPreviewFromDevice, type LinkPreviewData } from '../lib/linkPreview';
 import GifPicker from '../components/GifPicker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { getWallpaper, type WallpaperConfig } from './chat-wallpaper';
@@ -91,7 +92,6 @@ import { getAccessToken } from '../lib/api';
 import { getLiveKey, putLiveKey, clearLiveKey, decryptPosition } from '../lib/liveLocationCrypto';
 import {
   addBookmark,
-  addReaction,
   attachmentUrl,
   getPollVotesBulk,
   type PollVoteSummary,
@@ -99,21 +99,15 @@ import {
   voteOnPoll,
   blockUser,
   decryptFromChat,
-  deleteMessage,
-  editMessage,
   forwardMessage,
   getChat,
   getMessages,
-  getReactionCounts,
   hydrateMessages,
   looksEncrypted,
   listChats,
   listStoriesFeed,
-  markDelivered,
-  markRead,
   muteChat,
   pinMessage,
-  removeReaction,
   reportScreenshotCaptured,
   resetChatSession,
   setChatNotifSound,
@@ -129,7 +123,13 @@ import {
   type Message,
   type ReactionSummary,
 } from '../lib/chatService';
-import { sendMediaMessage } from '../lib/sendMedia';
+import { markReadDurable, markDeliveredDurable } from '../lib/receipts';
+import { type MediaType } from '../lib/sendMedia';
+import { enqueueMedia, cancelMedia, retryMedia, pendingForChat as mediaPendingForChat, on as onMediaOutbox } from '../lib/mediaOutbox';
+import VaultBeamBubble from '../components/VaultBeamBubble';
+import ConnectionBanner from '../components/ConnectionBanner';
+import { startSend as vbStartSend } from '../lib/vaultBeamController';
+import { isNativeStreamAvailable as vbNativeAvailable } from '../lib/vaultBeamStreamNative';
 import { getDecryptedAttachmentUri, getAttachmentLocalUri, parseMediaContent } from '../lib/mediaAttachments';
 import { shouldAutoDownloadNow } from '../lib/mediaPrefs';
 import { ProgressRing } from '../components/ProgressRing';
@@ -138,6 +138,9 @@ import { thumbDataUri } from '../lib/thumbnails';
 import {
   cancel as queueCancel,
   enqueueText,
+  enqueueReaction,
+  enqueueEdit,
+  enqueueDelete,
   initQueue,
   on as onQueue,
   pendingForChat,
@@ -149,6 +152,7 @@ import {
   getSocket,
   joinChatRoom,
   leaveChatRoom,
+  useConnectionState,
 } from '../lib/socket';
 import {
   cancel as recCancel,
@@ -166,6 +170,9 @@ type DisplayMessage = Message & {
 };
 
 const TYPING_IDLE_MS = 2500;
+// Delete-for-everyone window — keep numerically identical to the server's
+// REVOKE_WINDOW_MS (routes/chats.js). WhatsApp parity: 2 days 12 hours.
+const REVOKE_WINDOW_MS = 60 * 60 * 60 * 1000;
 
 const PAGE_SIZE = 50;
 
@@ -221,6 +228,7 @@ export default function ChatScreen() {
     const seen = new Set<string>();
     const out: DisplayMessage[] = [];
     for (const m of messages) {
+      if (m.type === 'reaction') continue;   // F4: reference messages, never timeline bubbles
       const k = m._tempId ?? String(m.id);
       if (seen.has(k)) continue;
       seen.add(k);
@@ -249,6 +257,27 @@ export default function ChatScreen() {
   // and the bubble renders obscured text until the receiver tilts the
   // device past ~45°. Sender always sees the plaintext.
   const [nextInvisibleInk, setNextInvisibleInk] = useState(false);
+
+  // ── Compose-time link preview (F5, WhatsApp model) ────────────────
+  // While typing, if the draft contains a URL, the SENDER's device resolves the
+  // preview (title/desc/thumb) and shows a card above the composer; on send it
+  // rides INSIDE the E2EE payload. Receiver + server never touch the URL.
+  const [composerLp, setComposerLp] = useState<{ url: string; data: LinkPreviewData } | null>(null);
+  const lpDismissedRef = useRef<string | null>(null);   // user closed the card for this URL
+  const lpInputRef = useRef('');
+  useEffect(() => { lpInputRef.current = input; }, [input]);
+  useEffect(() => {
+    const url = extractFirstUrl(input);
+    if (!url) { setComposerLp(null); lpDismissedRef.current = null; return; }
+    if (composerLp?.url === url || lpDismissedRef.current === url) return;
+    let cancel = false;
+    const t = setTimeout(async () => {
+      const data = await fetchPreviewFromDevice(url);
+      if (!cancel && data && extractFirstUrl(lpInputRef.current ?? '') === url) setComposerLp({ url, data });
+    }, 600);   // debounce — fetch once typing pauses
+    return () => { cancel = true; clearTimeout(t); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [input]);
   const [attachOpen, setAttachOpen] = useState(false);
   const [gifOpen, setGifOpen] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -280,8 +309,35 @@ export default function ChatScreen() {
   // via the bulk endpoint, then patched in place by socket events.
   const [pollVotes, setPollVotes] = useState<Record<number, PollVoteSummary>>({});
 
-  // Day 8 — reactions, reply, forward
-  const [reactions, setReactions] = useState<Record<number, ReactionSummary[]>>({});
+  // ── E2EE reactions (F4, WhatsApp model) ─────────────────────────
+  // Reactions are tiny E2E-encrypted reference messages in the ordered stream
+  // ({reactsTo, op, emoji} sealed inside content — the server never reads them).
+  // Derive the per-message map here: the LATEST reaction per (target, sender)
+  // wins (one reaction per user per message), 'remove' clears it. The dedup by
+  // (target, sender) also makes optimistic + server rows collapse to one.
+  const mergedReactions = useMemo(() => {
+    const latest = new Map<string, { at: string; emoji: string | null; mine: boolean; target: number }>();
+    for (const m of messages) {
+      if (m.type !== 'reaction' || !m.content || m.deletedAt) continue;
+      let p: any; try { p = JSON.parse(m.content); } catch { continue; }
+      const target = Number(p?.reactsTo);
+      if (!Number.isFinite(target) || target <= 0) continue;
+      const key = `${target}:${m.senderId}`;
+      const at = `${m.createdAt ?? ''}#${String(m.id ?? 0).padStart(12, '0')}`;
+      const prev = latest.get(key);
+      if (prev && prev.at >= at) continue;
+      latest.set(key, { at, emoji: p.op === 'remove' ? null : String(p.emoji || ''), mine: m.senderId === meId, target });
+    }
+    const out: Record<number, ReactionSummary[]> = {};
+    for (const v of latest.values()) {
+      if (!v.emoji) continue;
+      const list = out[v.target] ?? (out[v.target] = []);
+      const hit = list.find(r => r.emoji === v.emoji);
+      if (hit) { hit.count++; hit.mine = hit.mine || v.mine; }
+      else list.push({ emoji: v.emoji, count: 1, mine: v.mine });
+    }
+    return out;
+  }, [messages, meId]);
   const [reactPicker, setReactPicker] = useState<DisplayMessage | null>(null);
   const [actionSheet, setActionSheet] = useState<{ msg: DisplayMessage; plain: string } | null>(null);
   const [overflowMenu, setOverflowMenu] = useState<{ title: string; actions: MenuAction[] } | null>(null);
@@ -375,6 +431,13 @@ export default function ChatScreen() {
     [chat, meId],
   );
 
+  // Clear this chat's native message notification + unread counter (F2 —
+  // the content-free doorbell posts per-chat notifications tagged by chatId).
+  useEffect(() => {
+    if (!chatId || Platform.OS !== 'android') return;
+    try { require('react-native').NativeModules?.VaultCalls?.clearMessageNotifs?.(chatId); } catch {}
+  }, [chatId]);
+
   // ── Initial load ──────────────────────────────────────────
   useEffect(() => {
     if (!chatId) return;
@@ -391,54 +454,70 @@ export default function ChatScreen() {
             .catch(() => {});
         }
 
-        // Local-first (WhatsApp-style): paint cached PLAINTEXT instantly (no
-        // spinner, no decryption), then refresh from the server and reconcile.
-        // knownPlain lets us reuse already-decrypted text so we never re-decrypt
-        // a message we've seen before.
-        const knownPlain = new Map<number, string>();
+        // ── Local-first load (WhatsApp model) ────────────────────────────
+        // Everything the user sees is rendered from LOCAL storage first, with
+        // zero network calls; the server is then reconciled in the background.
+        // No network failure may ever blank what's already on screen.
+
+        // 1. Who am I — from the local session (never gated on the network), so
+        //    bubble alignment (isMine) is right even fully offline.
+        const me = await getCurrentUserAsync().catch(() => null);
+        const myId = me?.id ?? null;
+        setMeId(myId);
+
+        // 2. Chat header (name / peer / members) from the local cache → the
+        //    header renders offline instead of blank.
         try {
-          const cached = await getCachedMessages(chatId, PAGE_SIZE);
-          if (cached.length) { setMessages(cached); setLoading(false); }
-          for (const m of cached) if (!looksEncrypted(m.content)) knownPlain.set(m.id, m.content as string);
-        } catch { /* cache miss → fall through to server load */ }
+          const cc = await getCachedChat(chatId);
+          if (cc) { setChat({ ...cc, members: cc.members ?? [] }); setPinnedId(cc.pinnedMessageId ?? null); }
+        } catch {}
 
-        const [me, c, msgsRaw, pendingQ] = await Promise.all([
-          getCurrentUserAsync(),
-          getChat(chatId),
-          getMessages(chatId, { limit: PAGE_SIZE }),
-          pendingForChat(chatId),
+        // 3. Cached messages + still-in-flight outbox bubbles, painted instantly.
+        //    knownPlain reuses already-decrypted text so we never re-decrypt.
+        const knownPlain = new Map<number, string>();
+        const [cachedMsgs, pendingQ, mediaQ] = await Promise.all([
+          getCachedMessages(chatId, PAGE_SIZE).catch(() => []),
+          pendingForChat(chatId).catch(() => []),
+          mediaPendingForChat(chatId).catch(() => []),
         ]);
-        // Decrypt each envelope ONCE here at ingest (reusing cached plaintext),
-        // so bubbles render plaintext directly — no per-bubble decryption.
-        const msgs = await hydrateMessages(chatId, msgsRaw, knownPlain);
-        setMeId(me?.id ?? null);
-        setChat(c);
-        setPinnedId(c.pinnedMessageId ?? null);
+        for (const m of cachedMsgs) if (!looksEncrypted(m.content)) knownPlain.set(m.id, m.content as string);
 
-        // Prepend any locally-queued messages as optimistic bubbles so
-        // they show up immediately after a cold start where the network
-        // is still flaky.
-        const pendingBubbles: DisplayMessage[] = pendingQ.map(q => ({
-          id:        0,
-          chatId:    q.chatId,
-          senderId:  me?.id ?? '',
-          type:      q.type,
-          content:   q.plaintext,
-          meta:      null,
-          replyToId: q.replyToId,
-          editedAt:  null,
-          deletedAt: null,
-          createdAt: new Date(q.createdAt).toISOString(),
-          _tempId:   q.tempId,
-          _state:    q.attempts >= 1 ? 'pending' : 'pending',
-        }));
+        const pendingBubbles = (pendingQ as any[]).map(q => ({
+          id: 0, chatId: q.chatId, senderId: myId ?? '', type: q.type, content: q.plaintext,
+          meta: null, replyToId: q.replyToId, editedAt: null, deletedAt: null,
+          createdAt: new Date(q.createdAt).toISOString(), _tempId: q.tempId, _state: 'pending',
+        })) as DisplayMessage[];
+        const mediaBubbles = (mediaQ as any[]).map(m => ({
+          id: 0, chatId: m.chatId, senderId: myId ?? '', type: m.type as any, content: m.caption || '',
+          meta: { localUri: m.srcPath, mime: m.mime, filename: m.filename, ...(m.metaExtra || {}), ...(m.viewOnce ? { viewOnce: true } : {}) },
+          replyToId: null, editedAt: null, deletedAt: null,
+          createdAt: new Date(m.createdAt).toISOString(), _tempId: m.tempId, _state: m.state === 'failed' ? 'failed' : 'pending',
+        })) as DisplayMessage[];
+        // Inverted list = newest first. Reversed ONCE, reused for the reconcile.
+        const pendingNewestFirst = [...pendingBubbles, ...mediaBubbles]
+          .sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt)).reverse();
+        if (cachedMsgs.length || pendingNewestFirst.length) {
+          setMessages([...pendingNewestFirst, ...cachedMsgs]);
+          setLoading(false);
+        }
 
-        // Inverted list: newest first. Pendings are newest (just sent).
-        setMessages([...pendingBubbles.reverse(), ...msgs]);
-        setHasMore(msgs.length === PAGE_SIZE);
-        setError(null);
-        // Persist the fresh page to the local cache for next instant open.
-        cacheMessages(chatId, msgs).catch(() => {});
+        // 4. Reconcile from the server — RESILIENT. Each call is isolated; a
+        //    failure (offline) leaves the painted cache untouched. getChat also
+        //    re-caches the detail (see getChat) for the next offline open.
+        getChat(chatId)
+          .then(c => { setChat(c); setPinnedId(c.pinnedMessageId ?? null); })
+          .catch(() => {});
+        try {
+          const msgsRaw = await getMessages(chatId, { limit: PAGE_SIZE });
+          const msgs = await hydrateMessages(chatId, msgsRaw, knownPlain);
+          setMessages([...pendingNewestFirst, ...msgs]);
+          setHasMore(msgs.length === PAGE_SIZE);
+          setError(null);
+          cacheMessages(chatId, msgs).catch(() => {});   // persist for next instant open
+        } catch {
+          // Offline / transient — keep the painted cache silently; the connection
+          // banner already tells the user. A failed background refresh is not an error.
+        }
       } catch (e: any) {
         setError(e?.message ?? 'Failed to load chat');
       } finally {
@@ -452,6 +531,9 @@ export default function ChatScreen() {
     if (!chatId) return;
     const offSent = onQueue('sent', ({ tempId, chatId: cid, real }) => {
       if (cid !== chatId) return;
+      // delete/edit ops apply optimistically by id and carry no pending bubble —
+      // a delete resolves with real=null; nothing to swap or cache here.
+      if (!real) return;
       setMessages(prev => {
         // If real already arrived via Socket.IO, just drop the temp.
         if (prev.some(x => x.id === real.id)) {
@@ -468,7 +550,25 @@ export default function ChatScreen() {
       setMessages(prev => prev.map(x => x._tempId === tempId
         ? { ...x, _state: 'failed', _error: error } : x));
     });
-    return () => { offSent(); offFailed(); };
+    // Media outbox: same swap/fail, but keep localUri so the sender's own bubble
+    // keeps rendering their local file (no re-download) after the swap.
+    const offMSent = onMediaOutbox('sent', ({ tempId, chatId: cid, real }) => {
+      if (cid !== chatId) return;
+      setMessages(prev => {
+        if (prev.some(x => x.id === real.id)) return prev.filter(x => x._tempId !== tempId);
+        const localUri = prev.find(x => x._tempId === tempId)?.meta?.localUri;
+        return prev.map(x => x._tempId === tempId
+          ? ({ ...real, meta: { ...(real as any).meta, ...(localUri ? { localUri } : {}) }, _tempId: undefined, _state: undefined } as DisplayMessage)
+          : x);
+      });
+      cacheMessages(cid, [real]).catch(() => {});
+    });
+    const offMFailed = onMediaOutbox('failed', ({ tempId, chatId: cid }) => {
+      if (cid !== chatId) return;
+      setMessages(prev => prev.map(x => x._tempId === tempId
+        ? { ...x, _state: 'failed' } as DisplayMessage : x));
+    });
+    return () => { offSent(); offFailed(); offMSent(); offMFailed(); };
   }, [chatId]);
 
   // ── Socket: join chat room + listen for live events ───────
@@ -492,7 +592,7 @@ export default function ChatScreen() {
           if (m.id != null) (m as any).id = Number(m.id);
           // Auto-acknowledge delivery + tone immediately (don't wait on decrypt).
           if (m.senderId !== meId) {
-            markDelivered(chatId, m.id).catch(() => {});
+            markDeliveredDurable(chatId, m.id).catch(() => {});
             playReceived();   // in-app "received" tone (respects sound prefs)
           }
           // Decrypt-on-arrival (WhatsApp-style): decrypt ONCE, then show + cache
@@ -560,14 +660,8 @@ export default function ChatScreen() {
           } : prev);
         };
 
-        const onReactionAdded = (e: { messageId: number; userId: string; emoji: string }) => {
-          if (!e?.messageId || !e?.emoji) return;
-          setReactions(prev => bumpReaction(prev, e.messageId, e.emoji, +1, e.userId === meId));
-        };
-        const onReactionRemoved = (e: { messageId: number; userId: string; emoji: string }) => {
-          if (!e?.messageId || !e?.emoji) return;
-          setReactions(prev => bumpReaction(prev, e.messageId, e.emoji, -1, e.userId === meId));
-        };
+        // Reactions are now E2EE reference-messages in the ordered stream (F4) —
+        // no separate reaction_added/removed socket events, no legacy fetch.
         const onScreenshotCaptured = (e: { chatId: string; capturedBy: string; capturedAt: string }) => {
           // Server already filters to chat members — but ignore the
           // echo of our own capture and any cross-chat noise.
@@ -617,8 +711,6 @@ export default function ChatScreen() {
         s.on('message_read',      onMemberRead);
         s.on('typing_start',      onTypingStart);
         s.on('typing_stop',       onTypingStop);
-        s.on('reaction_added',    onReactionAdded);
-        s.on('reaction_removed',  onReactionRemoved);
         s.on('presence_changed',  onPresence);
         s.on('screenshot_captured', onScreenshotCaptured);
         s.on('poll_voted',        onPollVoted);
@@ -636,8 +728,6 @@ export default function ChatScreen() {
         off.push(() => s.off('message_read',      onMemberRead));
         off.push(() => s.off('typing_start',      onTypingStart));
         off.push(() => s.off('typing_stop',       onTypingStop));
-        off.push(() => s.off('reaction_added',    onReactionAdded));
-        off.push(() => s.off('reaction_removed',  onReactionRemoved));
         off.push(() => s.off('presence_changed',  onPresence));
         off.push(() => s.off('screenshot_captured', onScreenshotCaptured));
         off.push(() => s.off('poll_voted',        onPollVoted));
@@ -654,25 +744,9 @@ export default function ChatScreen() {
     };
   }, [chatId]);
 
-  // ── Hydrate reactions for visible messages ───────────────
-  // Refresh whenever the set of message ids changes. Cheap (one round-trip
-  // per page) and keeps the reaction state in sync after edits/deletes.
-  useEffect(() => {
-    if (!chatId) return;
-    const ids = messages.map(m => m.id).filter((n): n is number => typeof n === 'number' && n > 0);
-    if (ids.length === 0) return;
-    // Only re-fetch for ids we haven't seen — keep this simple and
-    // refetch the full visible page. The map is small.
-    let cancel = false;
-    getReactionCounts(chatId, ids).then(map => {
-      if (cancel) return;
-      const next: Record<number, ReactionSummary[]> = {};
-      for (const [k, v] of Object.entries(map)) next[Number(k)] = v;
-      setReactions(next);
-    }).catch(() => {});
-    return () => { cancel = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chatId, messageIdKey]);
+  // Reactions no longer need a separate hydration round-trip — they arrive as
+  // E2EE reference messages in the ordered stream and are derived in the
+  // e2eeReactions memo (F4). Legacy /reactions endpoints retired.
 
   // ── Hydrate poll votes for visible polls ─────────────────
   // Same pattern as reactions — bulk fetch once per message-id change.
@@ -703,7 +777,10 @@ export default function ChatScreen() {
     if (readDebounce.current) clearTimeout(readDebounce.current);
     readDebounce.current = setTimeout(() => {
       lastReadSent.current = latestId;
-      markRead(chatId, latestId).catch(() => {});
+      markReadDurable(chatId, latestId).catch(() => {});
+      // Reading here means we've seen up to latestId — don't let a later
+      // background sweep re-notify for these (Phase 4 no-GMS notifications).
+      import('../lib/messageNotifications').then(m => m.markSeen(chatId, latestId)).catch(() => {});
     }, 800);
     return () => { if (readDebounce.current) clearTimeout(readDebounce.current); };
   }, [chatId, messages]);
@@ -791,18 +868,24 @@ export default function ChatScreen() {
     clearDraft(chatId).catch(() => {});
     try {
       if (editingId != null) {
-        // Edits go straight to the backend (no offline-queue support yet).
-        const updated = await editMessage(chatId, editingId, text);
-        setMessages(prev => prev.map(x => x.id === editingId ? { ...x, ...updated } : x));
+        // WhatsApp: the edit shows instantly and syncs when back online. Apply
+        // optimistically by id, then durably enqueue (encrypt+PATCH on flush).
+        const editId = editingId;
+        setMessages(prev => prev.map(x => x.id === editId
+          ? { ...x, content: text, editedAt: new Date().toISOString() } : x));
         setEditingId(null);
         setInput('');
+        await enqueueEdit(chatId, editId, text);
       } else {
         // Enqueue + add optimistic bubble immediately. If the one-shot
         // Invisible Ink toggle was on, stamp meta.invisibleInk and reset.
         const replyToId = replyTo?.id ?? null;
         // Keep only mentions whose "@Name" still appears in the final text.
         const mentions = mentionsRef.current.filter(mn => text.includes('@' + mn.name));
-        const meta: any = { ...(nextInvisibleInk ? { invisibleInk: true } : {}), ...(mentions.length ? { mentions } : {}), ...(silent ? { silent: true } : {}) };
+        // F5: attach the sender-resolved link preview (LOCAL meta only — the
+        // queue folds it inside the E2EE content and strips it before POST).
+        const lp = composerLp && text.includes(composerLp.url) ? composerLp.data : null;
+        const meta: any = { ...(nextInvisibleInk ? { invisibleInk: true } : {}), ...(mentions.length ? { mentions } : {}), ...(silent ? { silent: true } : {}), ...(lp ? { linkPreview: lp } : {}) };
         const q = await enqueueText(chatId, text, { replyToId, meta: Object.keys(meta).length ? meta : null });
         mentionsRef.current = [];
         const optimistic: DisplayMessage = {
@@ -821,6 +904,7 @@ export default function ChatScreen() {
         };
         setReplyTo(null);
         setNextInvisibleInk(false);
+        setComposerLp(null);
         setMessages(prev => [optimistic, ...prev]);
         setInput('');
         // The 'sent' / 'failed' queue events update this bubble's state.
@@ -841,8 +925,9 @@ export default function ChatScreen() {
         'Message failed',
         msg._error || 'Could not send',
         [
-          { text: 'Retry', onPress: () => queueRetry(msg._tempId!) },
+          { text: 'Retry', onPress: () => { retryMedia(msg._tempId!).catch(() => {}); queueRetry(msg._tempId!); } },
           { text: 'Delete', style: 'destructive', onPress: async () => {
+              await cancelMedia(msg._tempId!).catch(() => {});
               await queueCancel(msg._tempId!);
               setMessages(prev => prev.filter(x => x._tempId !== msg._tempId));
           }},
@@ -852,13 +937,16 @@ export default function ChatScreen() {
       return;
     }
 
-    // Pending (still in queue): only allow Cancel.
+    // Pending (still in queue / uploading): only allow Cancel.
     if (msg._state === 'pending' && msg._tempId) {
       Alert.alert(
         'Message sending…',
         'This message hasn\'t been confirmed by the server yet.',
         [
           { text: 'Cancel send', style: 'destructive', onPress: async () => {
+              // Media: abort the (resumable) upload + delete the copy → frees R2.
+              // Text: drop from the queue. Each no-ops for the other kind.
+              await cancelMedia(msg._tempId!).catch(() => {});
               await queueCancel(msg._tempId!);
               setMessages(prev => prev.filter(x => x._tempId !== msg._tempId));
           }},
@@ -910,14 +998,18 @@ export default function ChatScreen() {
               setMessages(prev => prev.filter(x => x.id !== msg.id));
             },
           }];
-          if (isMine && msg.id > 0) {
+          // Delete-for-everyone window (WhatsApp: 2d12h). Server enforces the
+          // same window; this is only the UX hint. NaN-hardened: a missing
+          // createdAt must not silently hide the option via NaN comparisons.
+          const _t = new Date(msg.createdAt).getTime();
+          const withinRevoke = Number.isFinite(_t) && (Date.now() - _t < REVOKE_WINDOW_MS);
+          if (isMine && msg.id > 0 && withinRevoke) {
             opts.push({
               text: 'Delete for everyone', style: 'destructive', onPress: async () => {
-                try {
-                  await deleteMessage(chatId, msg.id);
-                  setMessages(prev => prev.map(x => x.id === msg.id
-                    ? { ...x, content: null, deletedAt: new Date().toISOString(), type: 'system' } : x));
-                } catch (e: any) { Alert.alert('Delete failed', e?.message ?? 'Try again'); }
+                // WhatsApp: tombstone instantly, sync the revoke when back online.
+                setMessages(prev => prev.map(x => x.id === msg.id
+                  ? { ...x, content: null, deletedAt: new Date().toISOString(), type: 'system' } : x));
+                await enqueueDelete(chatId, msg.id);
               },
             });
           }
@@ -1200,18 +1292,25 @@ export default function ChatScreen() {
   const toggleReaction = useCallback(async (msg: DisplayMessage, emoji: string) => {
     haptic();
     setReactPicker(null);
-    const mineAlready = (reactions[msg.id] || []).some(r => r.emoji === emoji && r.mine);
-    // Optimistic — server will broadcast back and reconcile via socket handler.
-    setReactions(prev => bumpReaction(prev, msg.id, emoji, mineAlready ? -1 : +1, true));
-    try {
-      if (mineAlready) await removeReaction(chatId, msg.id, emoji);
-      else             await addReaction(chatId, msg.id, emoji);
-    } catch (e: any) {
-      // Roll back
-      setReactions(prev => bumpReaction(prev, msg.id, emoji, mineAlready ? +1 : -1, true));
-      Alert.alert('Could not react', e?.message ?? 'Try again');
-    }
-  }, [chatId, reactions]);
+    if (!msg.id || msg.id <= 0) return;
+    // WhatsApp semantics: ONE reaction per user per message. Tapping my current
+    // emoji removes it; tapping a different one replaces it (latest-wins in the
+    // E2EE reducer handles the replace — no explicit remove needed).
+    const removing = (mergedReactions[msg.id] || []).some(r => r.emoji === emoji && r.mine);
+    // WhatsApp: a reaction works offline — durably enqueue it (it's an E2EE
+    // message under the hood) and reconcile on the queue's 'sent' event.
+    const q = await enqueueReaction(chatId, msg.id, emoji, removing ? 'remove' : 'add');
+    // Optimistic: inject a local reaction MESSAGE keyed by the QUEUE tempId, so
+    // 'sent' swaps it for the real row (no double count). The derived map updates
+    // instantly; if it never sends, the row resolves to the server truth on reload.
+    const optimistic: DisplayMessage = {
+      id: 0, chatId, senderId: meId ?? '', type: 'reaction',
+      content: JSON.stringify({ reactsTo: msg.id, op: removing ? 'remove' : 'add', emoji }),
+      meta: null, replyToId: null, editedAt: null, deletedAt: null,
+      createdAt: new Date().toISOString(), _tempId: q.tempId, _state: 'pending',
+    };
+    setMessages(prev => [optimistic, ...prev]);
+  }, [chatId, mergedReactions, meId]);
 
   const openForward = useCallback(async (msg: DisplayMessage) => {
     setForwardMsg(msg);
@@ -1266,6 +1365,28 @@ export default function ChatScreen() {
     try { await recCancel(); } catch {}
   }, []);
 
+  // Paint the user's own LOCAL file as a pending bubble instantly (they already
+  // have the bytes) and hand the send to the DURABLE media outbox: it copies the
+  // file, uploads (resumable), then posts the message — retrying across
+  // reconnects and app restarts. The 'sent'/'failed' outbox events (subscribed
+  // above) swap the bubble. Media now "sends" offline exactly like text.
+  const enqueueMediaOptimistic = useCallback(async (
+    type: MediaType,
+    file: { uri: string; filename: string; mime: string },
+    opts: { caption?: string; viewOnce?: boolean; metaExtra?: Record<string, any> } = {},
+  ) => {
+    const item = await enqueueMedia(chatId, type, file, opts);
+    const optimistic: DisplayMessage = {
+      id: 0, chatId, senderId: meId ?? '', type: type as any,
+      content: opts.caption?.trim() || '',
+      // localUri lets the bubble render instantly (no download).
+      meta: { localUri: file.uri, mime: file.mime, filename: file.filename, ...(opts.metaExtra || {}), ...(opts.viewOnce ? { viewOnce: true } : {}) },
+      replyToId: null, editedAt: null, deletedAt: null,
+      createdAt: new Date().toISOString(), _tempId: item.tempId, _state: 'pending',
+    };
+    setMessages(prev => [optimistic, ...prev]);
+  }, [chatId, meId]);
+
   const stopAndSendRecording = useCallback(async () => {
     if (!recording) return;
     if (recTimerRef.current) { clearInterval(recTimerRef.current); recTimerRef.current = null; }
@@ -1280,23 +1401,19 @@ export default function ChatScreen() {
         setRecElapsedMs(0);
         return;
       }
-      const msg = await sendMediaMessage(chatId, 'audio',
+      await enqueueMediaOptimistic('audio',
         { uri: r.uri, filename: r.filename, mime: r.mime },
-        { metaExtra: {
-          durationMs: r.durationMs,
-          // Pre-computed 0..1 amplitude bars (length up to 32). Bubble
-          // renders these without re-parsing the audio file.
-          waveform: r.waveform,
-        } },
+        // Pre-computed 0..1 amplitude bars (length up to 32) so the bubble
+        // renders without re-parsing the audio file.
+        { metaExtra: { durationMs: r.durationMs, waveform: r.waveform } },
       );
-      setMessages(prev => prev.some(x => x.id === msg.id) ? prev : [msg, ...prev]);
       setRecElapsedMs(0);
     } catch (e: any) {
       Alert.alert('Voice send failed', e?.message ?? 'Try again');
     } finally {
       setSending(false);
     }
-  }, [chatId, recording]);
+  }, [chatId, recording, enqueueMediaOptimistic]);
 
   // Clean up the timer + any active recording on unmount
   useEffect(() => {
@@ -1384,57 +1501,16 @@ export default function ChatScreen() {
     setCurrentIdx(0);
   }, [sending]);
 
-  // Send every staged item OPTIMISTICALLY: paint the user's own LOCAL file as a
-  // pending bubble instantly (they already have the bytes), then encrypt+upload
-  // in the BACKGROUND and swap in the real message. The composer never blocks on
-  // the upload — media "sends" feel instant even though the bytes upload after.
   const confirmSendPendingMedia = useCallback(async () => {
     if (pendingItems.length === 0) return;
     const items = pendingItems;
     setPendingItems([]);
     setCurrentIdx(0);
     for (const pm of items) {
-      const tempId = `m_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      const optimistic: DisplayMessage = {
-        id:        0,
-        chatId,
-        senderId:  meId ?? '',
-        type:      pm.mediaType as any,
-        content:   pm.caption.trim() || '',
-        // localUri lets the bubble render instantly via resolvedUri (no download).
-        meta:      { localUri: pm.uri, mime: pm.mime, filename: pm.filename, ...(pm.metaExtra || {}), ...(pm.viewOnce ? { viewOnce: true } : {}) },
-        replyToId: null,
-        editedAt:  null,
-        deletedAt: null,
-        createdAt: new Date().toISOString(),
-        _tempId:   tempId,
-        _state:    'pending',
-      };
-      setMessages(prev => [optimistic, ...prev]);
-      // Background upload — swap the optimistic bubble for the real message on
-      // success, or mark it failed (tap-to-retry) on error.
-      sendMediaMessage(
-        chatId, pm.mediaType,
-        { uri: pm.uri, filename: pm.filename, mime: pm.mime },
-        { viewOnce: pm.viewOnce, caption: pm.caption.trim() || undefined, metaExtra: pm.metaExtra },
-      )
-        .then(real => {
-          setMessages(prev => {
-            // If the real message already arrived via socket, drop the optimistic
-            // (prevents a duplicate React key / duplicated bubble). Otherwise swap
-            // it in, keeping localUri so the sender's own bubble keeps rendering
-            // their local file (no re-download/decrypt) after the swap.
-            if (prev.some(x => x.id === real.id)) return prev.filter(x => x._tempId !== tempId);
-            return prev.map(x => x._tempId === tempId
-              ? ({ ...real, meta: { ...(real as any).meta, localUri: pm.uri }, _tempId: undefined, _state: undefined } as DisplayMessage)
-              : x);
-          });
-          cacheMessages(chatId, [real]).catch(() => {});   // persist so it survives a reload
-        })
-        .catch(() => setMessages(prev => prev.map(x =>
-          x._tempId === tempId ? ({ ...x, _state: 'failed' } as DisplayMessage) : x)));
+      await enqueueMediaOptimistic(pm.mediaType, { uri: pm.uri, filename: pm.filename, mime: pm.mime },
+        { caption: pm.caption.trim() || undefined, viewOnce: pm.viewOnce, metaExtra: pm.metaExtra });
     }
-  }, [pendingItems, chatId, meId]);
+  }, [pendingItems, enqueueMediaOptimistic]);
 
   // Helpers for the multi-item preview.
   const updateCurrentItem = useCallback((patch: Partial<{ caption: string; viewOnce: boolean }>) => {
@@ -1561,16 +1637,42 @@ export default function ChatScreen() {
     try {
       const filename = asset.name || `file-${Date.now()}`;
       const mime     = asset.mimeType || 'application/octet-stream';
-      const msg = await sendMediaMessage(chatId, 'file',
-        { uri: asset.uri, filename, mime },
-      );
-      setMessages(prev => prev.some(x => x.id === msg.id) ? prev : [msg, ...prev]);
+      await enqueueMediaOptimistic('file', { uri: asset.uri, filename, mime });
     } catch (e: any) {
       Alert.alert('Upload failed', e?.message ?? 'Try again');
     } finally {
       setSending(false);
     }
-  }, [chatId, sending]);
+  }, [chatId, sending, enqueueMediaOptimistic]);
+
+  // ── VaultBeam: send a large file (up to 12 GB) over the R2 relay ──────
+  // Direct chats only. Picks a file (copied to cache → real path for the native
+  // streaming module), opens a relay transfer, posts the E2EE manifest message,
+  // and streams encrypted blocks in the background. The bubble shows live
+  // progress; the recipient taps Accept to pull it.
+  const onSendVaultBeam = useCallback(async () => {
+    if (sending) return;
+    const peer = chat?.type === 'direct' && meId ? chat.members.find(m => m.userId !== meId) : null;
+    if (!peer?.userId) { Alert.alert('VaultBeam', 'Large-file transfer is available in 1:1 chats only.'); return; }
+    if (!vbNativeAvailable()) { Alert.alert('VaultBeam', 'Large-file transfer needs the latest app build (Android). Update to send big files.'); return; }
+    const result = await DocumentPicker.getDocumentAsync({ type: '*/*', multiple: false, copyToCacheDirectory: true });
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+    const size = Number(asset.size) || 0;
+    if (!size) { Alert.alert('VaultBeam', 'Could not read that file. Try another.'); return; }
+    setSending(true);
+    try {
+      const msg = await vbStartSend({
+        chatId, recipientId: peer.userId, srcPath: asset.uri,
+        name: asset.name || `file-${Date.now()}`, mime: asset.mimeType || 'application/octet-stream', size,
+      });
+      setMessages(prev => prev.some(x => x.id === msg.id) ? prev : [msg, ...prev]);
+    } catch (e: any) {
+      Alert.alert('VaultBeam', e?.message ?? 'Could not start the transfer.');
+    } finally {
+      setSending(false);
+    }
+  }, [chatId, sending, chat, meId]);
 
   // ── Pick a photo, edit it (crop/rotate/draw), then send ──
   // /image-editor returns via the same capturedUri contract the effect above
@@ -1606,18 +1708,21 @@ export default function ChatScreen() {
   const attachActions = useMemo(() => {
     const peer = chat?.type === 'direct' && meId ? chat.members.find(m => m.userId !== meId) : null;
     const peerName = peer?.name || chat?.name || '';
+    const isDirect = chat?.type === 'direct';
     return [
       { label: 'Camera',        icon: 'camera' as const,      color: '#E1306C', onPress: () => router.push({ pathname: '/camera' as any, params: { chatId, peerName, returnTo: '/chat' } }) },
       { label: 'Gallery',       icon: 'image' as const,       color: '#7E57C2', onPress: () => onPickMedia('images') },
       { label: 'Video',         icon: 'videocam' as const,    color: '#EC407A', onPress: () => onPickMedia('videos') },
       { label: 'Edit photo',    icon: 'create' as const,      color: '#5C6BC0', onPress: onEditPhoto },
       { label: 'File',          icon: 'document' as const,    color: '#42A5F5', onPress: onPickFile },
+      // VaultBeam large-file transfer (up to 12 GB, R2 relay) — 1:1 only.
+      ...(isDirect ? [{ label: 'Big File', icon: 'cube' as const, color: BRAND_ACCENT, onPress: onSendVaultBeam }] : []),
       { label: 'Scan',          icon: 'scan' as const,        color: '#8D6E63', onPress: () => router.push({ pathname: '/docscanner' as any, params: { chatId } }) },
       { label: 'Location',      icon: 'location' as const,    color: '#66BB6A', onPress: () => router.push({ pathname: '/location' as any, params: { chatId, name: peerName } }) },
       { label: 'Poll',          icon: 'stats-chart' as const, color: '#FFA726', onPress: () => router.push({ pathname: '/create-poll' as any, params: { chatId, peerName } }) },
       { label: nextInvisibleInk ? 'Ink: armed' : 'Invisible Ink', icon: 'sparkles' as const, color: '#AB47BC', onPress: () => setNextInvisibleInk(v => !v) },
     ];
-  }, [onPickMedia, onPickFile, onEditPhoto, router, chatId, chat, meId, nextInvisibleInk]);
+  }, [onPickMedia, onPickFile, onEditPhoto, onSendVaultBeam, router, chatId, chat, meId, nextInvisibleInk]);
 
   // ── Load older on scroll-up ───────────────────────────────
   const onEndReached = useCallback(async () => {
@@ -1930,6 +2035,10 @@ export default function ChatScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* Connectivity strip (Connecting… / Waiting for network) — local-first:
+          the message list below never changes when this appears. */}
+      <ConnectionBanner />
+
       {/* In-chat search bar (Day 13) */}
       {searchOpen && (
         <View style={S.inChatSearchBar}>
@@ -2014,6 +2123,7 @@ export default function ChatScreen() {
         const label = !pm ? 'Message'
           : pm.type === 'image' ? '📷 Photo' : pm.type === 'video' ? '🎥 Video'
           : pm.type === 'audio' ? '🎙️ Voice message' : pm.type === 'file' ? '📎 File'
+          : pm.type === 'vaultbeam' ? '📦 File'
           : pm.type === 'location' ? '📍 Location' : pm.type === 'poll' ? '📊 Poll' : 'Message';
         return (
           <TouchableOpacity style={S.pinnedBar} activeOpacity={0.8} onPress={() => jumpToMessage(Number(pinnedId))}>
@@ -2063,7 +2173,7 @@ export default function ChatScreen() {
               otherMembers={otherMembers}
               onLongPress={onLongPressMessage}
               onJumpTo={jumpToMessage}
-              reactionsForMsg={reactions[item.id]}
+              reactionsForMsg={mergedReactions[item.id]}
               onToggleReaction={(emoji) => toggleReaction(item, emoji)}
               replyTarget={resolveReply(item.replyToId)}
               replyTargetMember={(() => {
@@ -2179,6 +2289,21 @@ export default function ChatScreen() {
         </TouchableOpacity>
       )}
 
+      {/* Compose-time link preview (F5) — resolved on the sender's device,
+          travels inside the E2EE payload. Tap ✕ to send without a preview. */}
+      {composerLp && (
+        <View style={S.lpBar}>
+          {composerLp.data.i ? <Image source={{ uri: composerLp.data.i }} style={S.lpBarImg} /> : null}
+          <View style={{ flex: 1, marginHorizontal: 8 }}>
+            <Text style={S.lpBarTitle} numberOfLines={1}>{composerLp.data.t}</Text>
+            {composerLp.data.d ? <Text style={S.lpBarDesc} numberOfLines={1}>{composerLp.data.d}</Text> : null}
+          </View>
+          <TouchableOpacity hitSlop={10} onPress={() => { lpDismissedRef.current = composerLp.url; setComposerLp(null); }}>
+            <Ionicons name="close" size={18} color={colors.textDim} />
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* Reply-to banner */}
       {replyTo && (
         <View style={S.replyBar}>
@@ -2191,12 +2316,14 @@ export default function ChatScreen() {
               {replyTo.type === 'image' ? <Ionicons name="image" size={13} color={colors.textDim} />
                 : replyTo.type === 'audio' ? <Ionicons name="mic" size={13} color={colors.textDim} />
                 : replyTo.type === 'video' ? <Ionicons name="videocam" size={13} color={colors.textDim} />
-                : replyTo.type === 'file'  ? <Ionicons name="document" size={13} color={colors.textDim} /> : null}
+                : replyTo.type === 'file'  ? <Ionicons name="document" size={13} color={colors.textDim} />
+                : replyTo.type === 'vaultbeam' ? <Ionicons name="cube" size={13} color={colors.textDim} /> : null}
               <Text style={S.replyBarBody} numberOfLines={1}>
                 {replyTo.type === 'image' ? 'Photo'
                   : replyTo.type === 'audio' ? 'Voice message'
                   : replyTo.type === 'video' ? 'Video'
                   : replyTo.type === 'file'  ? 'File'
+                  : replyTo.type === 'vaultbeam' ? 'File'
                   : replyTo.content ?? ''}
               </Text>
             </View>
@@ -2378,9 +2505,12 @@ export default function ChatScreen() {
             <Text style={S.infoTitle}>Message info</Text>
             {infoMsg && (() => {
               const mid = infoMsg.id;
-              const read = otherMembers.filter(m => (m.lastReadMessageId ?? 0) >= mid);
-              const delivered = otherMembers.filter(m => (m.lastDeliveredMessageId ?? 0) >= mid && (m.lastReadMessageId ?? 0) < mid);
-              const sent = otherMembers.filter(m => (m.lastDeliveredMessageId ?? 0) < mid);
+              // Exclude departed members so this breakdown agrees with the summary
+              // tick (a left member must not show as "never delivered" under a blue tick).
+              const recips = otherMembers.filter(m => !m.leftAt);
+              const read = recips.filter(m => (m.lastReadMessageId ?? 0) >= mid);
+              const delivered = recips.filter(m => (m.lastDeliveredMessageId ?? 0) >= mid && (m.lastReadMessageId ?? 0) < mid);
+              const sent = recips.filter(m => (m.lastDeliveredMessageId ?? 0) < mid);
               const Row = (m: ChatMember) => (
                 <View key={m.userId} style={S.infoRow}>
                   <Avatar uri={m.photoURL && screenAuthHeader ? attachmentUrl(m.photoURL) : null} headers={screenAuthHeader ? { Authorization: screenAuthHeader } : undefined} name={m.name || m.email || '?'} size={36} />
@@ -2613,6 +2743,7 @@ export default function ChatScreen() {
                       : forwardMsg.type === 'video' ? '🎥 Video'
                       : forwardMsg.type === 'audio' ? '🎙️ Voice message'
                       : forwardMsg.type === 'file'  ? '📎 File'
+                      : forwardMsg.type === 'vaultbeam' ? '📦 File'
                       : (forwardMsg.content && !looksEncrypted(forwardMsg.content) ? forwardMsg.content : `[${forwardMsg.type}]`)}
                   </Text>
                 </View>
@@ -2838,33 +2969,6 @@ function formatRecDuration(ms: number): string {
 }
 
 // Apply an optimistic ±1 to the reaction-count map. Pure — returns a new
-// object so React picks up the change. Removes empty buckets so the chip
-// disappears when count hits zero.
-function bumpReaction(
-  prev: Record<number, ReactionSummary[]>,
-  messageId: number,
-  emoji: string,
-  delta: 1 | -1,
-  fromMe: boolean,
-): Record<number, ReactionSummary[]> {
-  const list = prev[messageId] ? [...prev[messageId]] : [];
-  const idx  = list.findIndex(r => r.emoji === emoji);
-  if (idx >= 0) {
-    const current = list[idx];
-    const nextCount = current.count + delta;
-    if (nextCount <= 0) {
-      list.splice(idx, 1);
-    } else {
-      list[idx] = { emoji, count: nextCount, mine: fromMe ? delta > 0 : current.mine };
-    }
-  } else if (delta > 0) {
-    list.push({ emoji, count: 1, mine: fromMe });
-  }
-  const next = { ...prev };
-  if (list.length === 0) delete next[messageId]; else next[messageId] = list;
-  return next;
-}
-
 // Apply a ±1 patch to the per-message poll vote summary, optimistic-style.
 // Used both by the user's own tap (via PollBubble.onChange) and by inbound
 // socket events. Removes the bucket entirely when the count hits zero so
@@ -3226,6 +3330,17 @@ function AudioBubble({
 // via getAttachmentLocalUri). Survives "Clear cache" AND the server's
 // post-delivery purge — only an uninstall removes it, like WhatsApp's media
 // folder. Encrypted media arrives as an already-decrypted local file.
+// Retry a failed media download the moment the network comes back (WhatsApp
+// auto-download-on-reconnect). Fires only on an OFFLINE/CONNECTING → ONLINE edge.
+function useRetryOnReconnect(eligible: boolean, retry: () => void) {
+  const conn = useConnectionState();
+  const prev = useRef(conn);
+  useEffect(() => {
+    if (prev.current !== 'ONLINE' && conn === 'ONLINE' && eligible) retry();
+    prev.current = conn;
+  }, [conn, eligible, retry]);
+}
+
 function ImageAttachment({ attachmentId, resolvedUri, isMine, mime, thumb, onError }: {
   attachmentId: string;
   resolvedUri?: { uri: string; headers?: Record<string, string> } | null;
@@ -3262,6 +3377,8 @@ function ImageAttachment({ attachmentId, resolvedUri, isMine, mime, thumb, onErr
     })();
     return () => { cancel = true; };
   }, [attachmentId, resolvedUri?.uri, isMine, mime]);
+  // Auto-download failed offline → retry as soon as we're back online.
+  useRetryOnReconnect(!uri && progress == null && !needTap && !resolvedUri?.uri, download);
   if (!uri) {
     // Downloading → blurred thumb + determinate progress ring.
     if (progress != null) {
@@ -3501,15 +3618,25 @@ function MessageBubble({
   const [authHeader, setAuthHeader] = useState<string | null>(null);
 
   // Tick state — only meaningful for own server-confirmed messages.
-  // Group MVP semantic: "any other member" rather than "all members".
-  // Tightening to "all" is a UX polish once we observe usage.
+  // WhatsApp group semantics: blue (read) only when EVERY current recipient has
+  // read; double-grey (delivered) only when every current recipient received.
+  // Exclude members who LEFT (leftAt) so a departed member never blocks a tick,
+  // and members who JOINED AFTER this message (they were never a recipient of it).
+  // Guard the empty set because [].every() is vacuously true (would false-blue).
+  // read implies delivered, so fold read into the delivered test — a dropped
+  // `message_delivered` event must not strand a since-read message at 'sent'.
   let tickState: 'pending' | 'sent' | 'delivered' | 'read' | null = null;
   if (isMine && msg.id > 0 && !msg.deletedAt) {
+    const recipients = otherMembers.filter(
+      m => !m.leftAt && (!m.joinedAt || m.joinedAt <= msg.createdAt),
+    );
     if (msg._state === 'pending' || msg._state === 'failed') {
       tickState = msg._state === 'pending' ? 'pending' : null;
-    } else if (otherMembers.some(m => (m.lastReadMessageId ?? 0) >= msg.id)) {
+    } else if (recipients.length === 0) {
+      tickState = 'sent';
+    } else if (recipients.every(m => (m.lastReadMessageId ?? 0) >= msg.id)) {
       tickState = 'read';
-    } else if (otherMembers.some(m => (m.lastDeliveredMessageId ?? 0) >= msg.id)) {
+    } else if (recipients.every(m => Math.max(m.lastDeliveredMessageId ?? 0, m.lastReadMessageId ?? 0) >= msg.id)) {
       tickState = 'delivered';
     } else {
       tickState = 'sent';
@@ -3581,13 +3708,10 @@ function MessageBubble({
     return () => { cancel = true; };
   }, [isEncMedia, plain, msg.meta?.attachmentId]);
 
-  if (msg.deletedAt) {
-    return (
-      <View style={[S.bubble, S.bubbleSystem]}>
-        <Text style={S.bubbleSystemTxt}>Message deleted</Text>
-      </View>
-    );
-  }
+  // NOTE: the deleted-message early return lives BELOW all hooks (after
+  // handleRevealViewOnce) — an early return up here renders fewer hooks when a
+  // visible message transitions to deleted (delete-for-everyone / vanish /
+  // disappearing) and crashes the list with "Rendered fewer hooks than expected".
 
   const isGif   = msg.type === 'image' && !!msg.meta?.gifUrl;
   // `localUri` = an optimistic (still-uploading) bubble rendering the sender's
@@ -3596,6 +3720,7 @@ function MessageBubble({
   const isVideo = msg.type === 'video' && (msg.meta?.attachmentId || msg.meta?.localUri);
   const isAudio = msg.type === 'audio' && msg.meta?.attachmentId;
   const isFile  = msg.type === 'file'  && msg.meta?.attachmentId;
+  const isVaultbeam = msg.type === 'vaultbeam';
 
   // Open image/video full-screen (WhatsApp-style). Navigate INSTANTLY and let
   // the viewer resolve a local file — so taps are reliable and never stack.
@@ -3650,6 +3775,15 @@ function MessageBubble({
     // ("Failed to load media").
     openFullScreen(isVideo ? 'video' : 'image', true);
   }, [tombstoned, msg.id, isVideo, openFullScreen]);
+
+  // Deleted tombstone — safe here: every hook above has already run this render.
+  if (msg.deletedAt) {
+    return (
+      <View style={[S.bubble, S.bubbleSystem]}>
+        <Text style={S.bubbleSystemTxt}>Message deleted</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={[S.bubbleRow, isMine ? S.bubbleRowMine : S.bubbleRowTheirs, grouped && S.bubbleRowGrouped]}>
@@ -3707,6 +3841,7 @@ function MessageBubble({
                   : replyTarget.type === 'audio' ? '🎙️ Voice message'
                   : replyTarget.type === 'video' ? '🎥 Video'
                   : replyTarget.type === 'file'  ? '📎 File'
+                  : replyTarget.type === 'vaultbeam' ? '📦 File'
                   : (replyPlain || '…')}
               </Text>
             </View>
@@ -3779,6 +3914,8 @@ function MessageBubble({
             isMine={isMine}
             thumb={typeof msg.meta?.thumb === 'string' ? msg.meta.thumb : undefined}
           />
+        ) : isVaultbeam ? (
+          <VaultBeamBubble msg={msg} isMine={isMine} plain={plain} />
         ) : isSticker ? (
           <Text style={S.stickerEmoji}>{msg.content}</Text>
         ) : isPoll ? (
@@ -3831,7 +3968,15 @@ function MessageBubble({
                 <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, bubbleTxtColor ? { color: bubbleTxtColor } : null]}>
                   {renderRichText(plain, highlight)}
                 </Text>
-                {(() => { const u = extractUrl(plain); return u ? <LinkPreview url={u} /> : null; })()}
+                {(() => {
+                  // F5: prefer the sender-embedded E2EE preview (no fetch at
+                  // all); legacy messages without one fall back to the old
+                  // server-proxied lookup so old chats keep their cards.
+                  const lp = msg.meta?.linkPreview;
+                  if (lp?.t) return <LinkPreview url={lp.u} data={lp} />;
+                  const u = extractUrl(plain);
+                  return u ? <LinkPreview url={u} /> : null;
+                })()}
               </>
             )
           ) : null
@@ -4154,6 +4299,10 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   // Day 8 — reply bar above composer
   replyBar:        { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: c.surfaceSolid, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border },
+  lpBar:           { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, backgroundColor: c.surfaceSolid, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border },
+  lpBarImg:        { width: 36, height: 36, borderRadius: 6, backgroundColor: c.border },
+  lpBarTitle:      { color: c.text, fontSize: 12, fontWeight: '700' },
+  lpBarDesc:       { color: c.textDim, fontSize: 11, marginTop: 1 },
   replyBarLine:    { width: 3, alignSelf: 'stretch', backgroundColor: c.primary, borderRadius: 1.5 },
   replyBarTitle:   { color: c.primary, fontSize: 12, fontWeight: '700' },
   replyBarBody:    { color: c.text, fontSize: 13 },

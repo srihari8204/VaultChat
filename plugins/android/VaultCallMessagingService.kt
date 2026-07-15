@@ -45,10 +45,13 @@ class VaultCallMessagingService : FirebaseMessagingService() {
     companion object {
         const val INCOMING_CHANNEL = "vaultchat_incoming_calls"
         const val MISSED_CHANNEL = "vaultchat_missed_calls"
+        const val MESSAGES_CHANNEL = "vaultchat_messages"
         const val INCOMING_NOTIF_ID = 0xC411
         const val MISSED_NOTIF_ID = 0xC412
+        const val MSG_NOTIF_ID = 0xC413
         const val PREFS = "vaultchat_call_prefs"
         const val KEY_FCM = "fcm_token"
+        const val KEY_CHAT_DIR = "chat_dir"          // JSON map chatId → display name (set by JS)
 
         const val ACTION_ANSWER = "com.vaultchat.app.CALL_ANSWER"
         const val ACTION_DECLINE = "com.vaultchat.app.CALL_DECLINE"
@@ -65,6 +68,84 @@ class VaultCallMessagingService : FirebaseMessagingService() {
         when (data["type"]) {
             "incoming_call" -> showIncoming(data)
             "call_cancelled" -> handleCancel(data["callId"])
+            "message" -> showMessage(data)
+        }
+    }
+
+    /**
+     * WhatsApp-style content-free doorbell (F2). The push carries ONLY
+     * { type:"message", chatId } — no sender name, no body, no message type —
+     * so nothing readable ever transits Google FCM. The notification's title
+     * (chat/sender name) is resolved LOCALLY from the chat directory JS keeps
+     * in SharedPreferences. When the app is in the FOREGROUND the in-app socket
+     * path already presents the message, so we skip the status-bar notification.
+     */
+    private fun showMessage(data: Map<String, String>) {
+        val chatId = data["chatId"] ?: return
+        if (isAppForeground()) return
+
+        val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val title = try {
+            org.json.JSONObject(prefs.getString(KEY_CHAT_DIR, "{}") ?: "{}").optString(chatId, "")
+        } catch (_: Throwable) { "" }.ifBlank { "VaultChat" }
+
+        // Per-chat unread counter → "New message" / "N new messages". Cleared by
+        // CallModule.clearMessageNotifs(chatId) when JS opens the chat.
+        val countKey = "msg_count_$chatId"
+        val count = prefs.getInt(countKey, 0) + 1
+        prefs.edit().putInt(countKey, count).apply()
+
+        // Use the recipient's per-chat sound channel when it exists (created by
+        // the JS notifee setup); otherwise the default messages channel. Posting
+        // to a non-existent channel silently drops the notification on O+.
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        var channel = data["channelId"] ?: ""
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            (channel.isBlank() || nm.getNotificationChannel(channel) == null)) {
+            ensureMessagesChannel()
+            channel = MESSAGES_CHANNEL
+        } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            channel = MESSAGES_CHANNEL
+        }
+
+        val launch = packageManager.getLaunchIntentForPackage(packageName)?.apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra("vc_action", "open_chat")
+            putExtra("vc_chat_id", chatId)
+        } ?: Intent()
+        // Unique request code per chat so PendingIntents don't overwrite each other.
+        val pi = PendingIntent.getActivity(this, chatId.hashCode(), launch, piFlags())
+
+        val n = NotificationCompat.Builder(this, channel)
+            .setSmallIcon(applicationInfo.icon)
+            .setContentTitle(title)
+            .setContentText(if (count > 1) "$count new messages" else "New message")
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(pi)
+            .setNumber(count)
+            .build()
+        // Tag by chatId: one collapsed notification per chat (newest replaces).
+        nm.notify(chatId, MSG_NOTIF_ID, n)
+    }
+
+    private fun isAppForeground(): Boolean = try {
+        val am = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        am.runningAppProcesses?.any {
+            it.pid == android.os.Process.myPid() &&
+            it.importance <= android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
+        } == true
+    } catch (_: Throwable) { false }
+
+    private fun ensureMessagesChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (nm.getNotificationChannel(MESSAGES_CHANNEL) == null) {
+            nm.createNotificationChannel(NotificationChannel(MESSAGES_CHANNEL, "Messages", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "New message notifications"
+                lockscreenVisibility = Notification.VISIBILITY_PRIVATE
+            })
         }
     }
 

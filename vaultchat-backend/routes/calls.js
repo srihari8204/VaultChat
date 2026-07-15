@@ -60,13 +60,16 @@ router.post('/initiate', async (req, res) => {
     const calleeId = (req.body?.calleeId || '').toString();
     const callId   = (req.body?.callId   || '').toString();
     const isVideo  = req.body?.isVideo === true || req.body?.isVideo === 'true';
-    const sdpOffer = req.body?.sdpOffer ? String(req.body.sdpOffer) : '';
     if (!calleeId || !callId) return res.status(400).json({ error: 'calleeId and callId required' });
 
     const tokens = await fcmTokensFor(calleeId);
     if (!tokens.length) return res.json({ ok: true, delivered: false, reason: 'no_device_token' });
 
     const caller = await callerIdentity(req.user.id);
+    // NOTE (F6): the SDP offer is deliberately NOT included. It carries the
+    // DTLS-SRTP fingerprint (the anchor of call media E2EE) and was leaking to
+    // Google FCM for zero benefit — no native or JS consumer ever read it; the
+    // callee gets the offer over the socket re-send loop (incoming-call.tsx).
     const { ok, dead } = await sendCallMessage(tokens, {
       type: 'incoming_call',
       callId,
@@ -74,7 +77,6 @@ router.post('/initiate', async (req, res) => {
       callerName: caller.name,
       callerDpUrl: caller.dpUrl,
       isVideo: isVideo ? 'true' : 'false',
-      sdpOffer,                       // call-setup metadata only (DTLS/ICE bootstrap)
       ts: String(Date.now()),
     }, 30000);
 

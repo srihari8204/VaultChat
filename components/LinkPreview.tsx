@@ -24,28 +24,42 @@ async function fetchOG(url: string): Promise<OGData | null> {
   } catch { return null; }
 }
 
-interface Props { url: string; }
+interface Props {
+  url: string;
+  /** Sender-embedded E2EE preview (F5): resolved on the SENDER's device and
+   *  carried inside the encrypted payload. When present we render from it
+   *  directly — no fetch, so neither this device nor the server ever touches
+   *  the URL. Without it (legacy messages), fall back to the old
+   *  server-proxied OG fetch. */
+  data?: { u: string; t: string; d?: string; i?: string } | null;
+}
 
-export default function LinkPreview({ url }: Props) {
+export default function LinkPreview({ url, data }: Props) {
   const { colors } = useTheme();
   const s = useMemo(() => makeStyles(colors), [colors]);
   const [og, setOg] = useState<OGData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!data);
 
   useEffect(() => {
-    fetchOG(url).then(data => { setOg(data); setLoading(false); });
-  }, [url]);
+    if (data) return;                       // embedded preview — never fetch
+    fetchOG(url).then(d => { setOg(d); setLoading(false); });
+  }, [url, data]);
 
-  if (loading) return <ActivityIndicator color={colors.accent} size="small" style={{ marginVertical: 6 }} />;
-  if (!og || !og.title) return null;
+  const title = data?.t ?? og?.title;
+  const desc  = data?.d ?? og?.description;
+  const image = data?.i ?? og?.image;
+  const href  = data?.u ?? url;
+
+  if (!data && loading) return <ActivityIndicator color={colors.accent} size="small" style={{ marginVertical: 6 }} />;
+  if (!title) return null;
 
   return (
-    <TouchableOpacity style={s.card} onPress={() => Linking.openURL(url)}>
-      {og.image ? <Image source={{ uri: og.image }} style={s.img} resizeMode="cover" /> : null}
+    <TouchableOpacity style={s.card} onPress={() => Linking.openURL(href)}>
+      {image ? <Image source={{ uri: image }} style={s.img} resizeMode="cover" /> : null}
       <View style={s.body}>
-        <Text style={s.title} numberOfLines={2}>{og.title}</Text>
-        {og.description ? <Text style={s.desc} numberOfLines={2}>{og.description}</Text> : null}
-        <Text style={s.url} numberOfLines={1}>{url}</Text>
+        <Text style={s.title} numberOfLines={2}>{title}</Text>
+        {desc ? <Text style={s.desc} numberOfLines={2}>{desc}</Text> : null}
+        <Text style={s.url} numberOfLines={1}>{href}</Text>
       </View>
     </TouchableOpacity>
   );

@@ -1,0 +1,7 @@
+# TURN-over-TLS certs are provisioned at deploy time and MUST NOT be committed.
+# This .gitignore keeps the directory present (so the compose bind mount has a
+# source) while excluding the key material.
+*.pem
+*.key
+*.crt
+!.gitignore
