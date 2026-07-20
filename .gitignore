@@ -69,3 +69,6 @@ dist-export/
 
 # build logs (session artifacts)
 build_release*.log
+
+# Claude Code session scratchpad
+scratchpad/
