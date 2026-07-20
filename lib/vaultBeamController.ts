@@ -25,6 +25,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import { sendMessage, type Message } from './chatService';
 import { sendTransfer, receiveTransfer } from './vaultBeamTransfer';
+import { persistVbTransfer, loadVbTransfers, pruneVbTransfers } from './localDb';
 import NetInfo from '@react-native-community/netinfo';
 import { serveDirect, receiveDirect } from './vaultBeamDirect';
 import { isNativeStreamAvailable } from './vaultBeamStreamNative';
@@ -68,13 +69,47 @@ function emit(id: string) {
   const s = subs.get(id);
   if (s) for (const cb of s) { try { cb(); } catch {} }
 }
+// P0-2: mirror runtime state to op-sqlite so it survives remount/restart. Flush
+// immediately on a status change; throttle the frequent progress ticks.
+const persistT = new Map<string, any>();
+function persistSoon(id: string, immediate: boolean) {
+  const flush = () => { persistT.delete(id); const s = states.get(id); if (s) persistVbTransfer(s).catch(() => {}); };
+  const pend = persistT.get(id);
+  if (immediate) { if (pend) clearTimeout(pend); flush(); return; }
+  if (pend) return;
+  persistT.set(id, setTimeout(flush, 750));
+}
 function setState(id: string, patch: Partial<VBTransfer>) {
   const prev = states.get(id);
   const next = { ...(prev ?? ({ transferId: id } as VBTransfer)), ...patch } as VBTransfer;
   states.set(id, next);
   emit(id);
+  persistSoon(id, patch.status !== undefined);
 }
 export function getTransfer(id: string): VBTransfer | undefined { return states.get(id); }
+
+// P0-2: rebuild the in-memory store from op-sqlite at launch so bubbles show
+// their last-known progress/status. An in-flight transfer that never finished is
+// surfaced as 'failed' (senders are then re-driven live by resumePendingSends);
+// terminal states (complete/cancelled/failed) show exactly as they ended.
+let _hydrated = false;
+export async function hydrateTransfers(): Promise<void> {
+  if (_hydrated) return; _hydrated = true;
+  try {
+    for (const r of await loadVbTransfers()) {
+      const id = r.transfer_id;
+      if (states.has(id)) continue;   // a live transfer wins over the persisted snapshot
+      const status: VBStatus = (r.status === 'uploading' || r.status === 'receiving') ? 'failed' : r.status;
+      states.set(id, {
+        transferId: id, role: r.role, status,
+        done: r.done | 0, total: r.total | 0, bytes: r.bytes | 0, totalBytes: r.total_bytes | 0,
+        name: r.name ?? '', error: r.error ?? undefined, savedPath: r.saved_path ?? undefined,
+      } as VBTransfer);
+      emit(id);
+    }
+    pruneVbTransfers().catch(() => {});
+  } catch {}
+}
 export function subscribeTransfer(id: string, cb: () => void): () => void {
   let set = subs.get(id);
   if (!set) { set = new Set(); subs.set(id, set); }
@@ -148,6 +183,7 @@ async function unpersistSend(transferId: string): Promise<void> {
 // Call once on app launch (app/_layout). Resumes each interrupted send over the
 // relay; a send whose source file was evicted from cache is marked failed + dropped.
 export async function resumePendingSends(): Promise<void> {
+  await hydrateTransfers();               // P0-2: restore last-known transfer states first
   if (!isNativeStreamAvailable()) return;
   for (const r of await readSends()) {
     if (controllers.has(r.transferId)) continue; // already running (double-mount guard)

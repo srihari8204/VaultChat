@@ -26,6 +26,13 @@ export interface LocalDb {
 }
 
 function wrap(db: DB): LocalDb {
+  // Serialize TRANSACTIONS on the single op-sqlite connection. Two concurrent
+  // withTransactionAsync() would both issue BEGIN → "cannot start a transaction
+  // within a transaction" and lose one write. Chaining every transaction on one
+  // promise makes them run one-at-a-time. Only transactions are locked (not the
+  // inner runAsync calls) — locking those too would deadlock, since a transaction
+  // body awaits its own runAsync while holding the lock.
+  let txLock: Promise<any> = Promise.resolve();
   return {
     getAllAsync:   async (sql, params = []) => ((await db.execute(sql, params as any)).rows ?? []) as any[],
     getFirstAsync: async (sql, params = []) => (((await db.execute(sql, params as any)).rows ?? []) as any[])[0] ?? null,
@@ -33,11 +40,15 @@ function wrap(db: DB): LocalDb {
     // op-sqlite executes ONE statement per call — split the multi-statement schema.
     execAsync:     async (sql) => { for (const s of sql.split(';')) { const t = s.trim(); if (t) db.executeSync(t); } },
     // Manual BEGIN/COMMIT so the inner runAsync (db.execute) calls stay in-txn on
-    // this single connection; ROLLBACK on any throw (matches withTransactionAsync).
-    withTransactionAsync: async (fn) => {
-      await db.execute('BEGIN');
-      try { await fn(); await db.execute('COMMIT'); }
-      catch (e) { try { await db.execute('ROLLBACK'); } catch {} throw e; }
+    // this single connection; ROLLBACK on any throw. Serialized via txLock.
+    withTransactionAsync: (fn) => {
+      const run = txLock.then(async () => {
+        await db.execute('BEGIN');
+        try { await fn(); await db.execute('COMMIT'); }
+        catch (e) { try { await db.execute('ROLLBACK'); } catch {} throw e; }
+      });
+      txLock = run.catch(() => {});   // a failed txn must not wedge the queue
+      return run;
     },
   };
 }
@@ -82,6 +93,19 @@ export function getLocalDb(): Promise<LocalDb> {
         CREATE TABLE IF NOT EXISTS sync_cursor (
           chat_id  TEXT PRIMARY KEY,
           last_id  INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS vb_transfers (
+          transfer_id  TEXT PRIMARY KEY,
+          role         TEXT,
+          status       TEXT,
+          done         INTEGER,
+          total        INTEGER,
+          bytes        INTEGER,
+          total_bytes  INTEGER,
+          name         TEXT,
+          error        TEXT,
+          saved_path   TEXT,
+          updated_at   INTEGER
         );
       `);
       return db;
@@ -310,6 +334,41 @@ export async function getCachedChat(chatId: string): Promise<any | null> {
   const rows = await db.getAllAsync(`SELECT data FROM chats WHERE id = ? LIMIT 1`, [chatId]);
   const row: any = rows[0];
   return row ? safeParse(decField(row.data) || '') : null;
+}
+
+// ── VaultBeam transfer runtime state (P0-2) ─────────────────────────
+// Durable mirror of the in-memory transfer store so a bubble's progress/status
+// survives a remount, navigation, or app restart. Not sealed — it's non-content
+// runtime state (block counts, status), never the file bytes/key/name-of-content.
+export async function persistVbTransfer(t: {
+  transferId: string; role?: string; status?: string; done?: number; total?: number;
+  bytes?: number; totalBytes?: number; name?: string; error?: string; savedPath?: string;
+}): Promise<void> {
+  const db = await getLocalDb();
+  await db.runAsync(
+    `INSERT INTO vb_transfers (transfer_id, role, status, done, total, bytes, total_bytes, name, error, saved_path, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)
+     ON CONFLICT(transfer_id) DO UPDATE SET
+       role=excluded.role, status=excluded.status, done=excluded.done, total=excluded.total,
+       bytes=excluded.bytes, total_bytes=excluded.total_bytes, name=excluded.name,
+       error=excluded.error, saved_path=excluded.saved_path, updated_at=excluded.updated_at`,
+    [t.transferId, t.role ?? null, t.status ?? null, t.done | 0, t.total | 0, t.bytes | 0,
+     t.totalBytes | 0, t.name ?? null, t.error ?? null, t.savedPath ?? null, Date.now()]);
+}
+export async function loadVbTransfers(limit = 200): Promise<any[]> {
+  const db = await getLocalDb();
+  return db.getAllAsync(`SELECT * FROM vb_transfers ORDER BY updated_at DESC LIMIT ?`, [limit]);
+}
+export async function deleteVbTransfer(transferId: string): Promise<void> {
+  const db = await getLocalDb();
+  await db.runAsync(`DELETE FROM vb_transfers WHERE transfer_id = ?`, [transferId]);
+}
+/** Keep the table bounded — drop all but the most recent `keep` transfers. */
+export async function pruneVbTransfers(keep = 200): Promise<void> {
+  const db = await getLocalDb();
+  await db.runAsync(
+    `DELETE FROM vb_transfers WHERE transfer_id NOT IN
+       (SELECT transfer_id FROM vb_transfers ORDER BY updated_at DESC LIMIT ?)`, [keep]);
 }
 
 /** Dump all local rows for an encrypted backup. Sealed fields are decrypted here
