@@ -13,9 +13,15 @@ import {
   isNativeStreamAvailable, prealloc, uploadBlock, downloadBlock, sha256File,
 } from './vaultBeamStreamNative';
 import {
-  relayBlockUrls, relayMarkUploaded, relayState, relayComplete,
+  relayBlockUrls, relayMarkUploaded, relayState, relayComplete, relayGrow,
   uploadedBlocks, MAX_BYTES,
 } from './vaultbeamRelay';
+import {
+  type SegmentPlan, newPlan, appendSegment, isComplete, totalBlocks, segBlockCount,
+  locateBlock, serialize as serializePlan, deserialize as deserializePlan,
+} from './vaultBeamSegments';
+import { recordSample, loadState, saveState } from './networkStateStore';
+import { geometry as geoOf, sample as sampleNs } from './networkState';
 
 const URL_BATCH = 64;   // matches routes/vaultbeam.js MAX_URLS
 const PARALLEL  = 4;    // concurrent block ops (matches the native I/O pool width)
@@ -44,90 +50,113 @@ async function mapPool<T, R>(items: T[], n: number, fn: (item: T) => Promise<R>,
 const range = (n: number) => Array.from({ length: n }, (_, i) => i);
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-// ── SENDER ──────────────────────────────────────────────────────────
-// Push every not-yet-uploaded block for a transfer that the caller has ALREADY
-// opened via relay/init (lib/vaultBeamController does this before it delivers the
-// E2EE manifest message, so the relay row exists before the recipient can tap
-// Accept). Geometry + resume state come from relay/state — no second init here.
-// Returns when all blocks are on R2.
+// ── SENDER (v2 adaptive) ────────────────────────────────────────────
+// Builds the segment plan REACTIVELY: pick the next segment's chunk/block size
+// from live throughput (networkState), GROW the server (block count + content-free
+// plan), upload that segment, measure, repeat. So a WiFi→4G drop mid-transfer
+// shrinks the chunk size at the next segment boundary. Resume reloads the plan +
+// uploaded bitmap the server already holds and continues. The caller opened the
+// transfer via relay/init (empty plan) before delivering the E2EE manifest.
 export async function sendTransfer(opts: {
   srcPath: string; totalBytes: number; fileId: string; transferId: string; keyB64: string;
-  onProgress?: ProgressCb; signal?: AbortSignal;
+  linkType?: string | null; onProgress?: ProgressCb; signal?: AbortSignal;
 }): Promise<{ blockCount: number }> {
   if (!isNativeStreamAvailable()) throw new Error('native stream unavailable');
   if (opts.totalBytes <= 0 || opts.totalBytes > MAX_BYTES) throw new Error('size out of range (0–12 GB)');
 
-  // Server-authoritative geometry + resume: which blocks does R2 already have?
-  const st = await relayState(opts.transferId);
-  const { blockCount, chunkCount, chunkBytes, blockBytes } = st;
-  const have = new Set(uploadedBlocks(st.uploadedMask, blockCount));
-  let todo = range(blockCount).filter((b) => !have.has(b));
+  let ns = await loadState(opts.linkType);                    // live throughput brain, seeded from history
+  const st = await relayState(opts.transferId);               // resume: what does the server already hold?
+  let plan: SegmentPlan = (st.plan && deserializePlan(st.plan)) || newPlan(opts.totalBytes);
+  const have = new Set(uploadedBlocks(st.uploadedMask, st.blockCount));
   let uploadedBytes = 0;
 
-  for (let i = 0; i < todo.length; i += URL_BATCH) {
+  const push = async (indices: number[]) => {
+    for (let i = 0; i < indices.length; i += URL_BATCH) {
+      if (opts.signal?.aborted) throw new Error('aborted');
+      const batch = indices.slice(i, i + URL_BATCH);
+      const { urls } = await relayBlockUrls(opts.transferId, batch, 'put');
+      const okBlocks: number[] = [];
+      await mapPool(urls, PARALLEL, async ({ blockIndex, url }) => {
+        const loc = locateBlock(plan, blockIndex);
+        if (!loc) return;                                      // geometry not planned — skip (shouldn't happen)
+        const t0 = Date.now();
+        const bytes = await uploadBlock({
+          url, srcPath: opts.srcPath, keyB64: opts.keyB64, transferId: opts.transferId,
+          fileId: opts.fileId, blockIndex, chunkBytes: loc.chunkBytes, blockBytes: loc.blockBytes,
+          chunkCount: 0, totalBytes: opts.totalBytes, blockPlainOffset: loc.blockPlainOffset,
+        });
+        ns = sampleNs(ns, { bytes, elapsedMs: Math.max(1, Date.now() - t0), nowMs: Date.now() });
+        okBlocks.push(blockIndex); uploadedBytes += bytes; have.add(blockIndex);
+        opts.onProgress?.({ done: have.size, total: totalBlocks(plan) || have.size, bytes: uploadedBytes, totalBytes: opts.totalBytes });
+      }, opts.signal);
+      if (okBlocks.length) await relayMarkUploaded(opts.transferId, okBlocks);   // server HEAD-verifies each
+    }
+  };
+
+  // Grow + upload one segment at a time, each size chosen from LIVE throughput.
+  let guard = 0;
+  while (!isComplete(plan) && guard++ < 200_000) {
     if (opts.signal?.aborted) throw new Error('aborted');
-    const batch = todo.slice(i, i + URL_BATCH);
-    const { urls } = await relayBlockUrls(opts.transferId, batch, 'put');
-    const okBlocks: number[] = [];
-    await mapPool(urls, PARALLEL, async ({ blockIndex, url }) => {
-      const bytes = await uploadBlock({
-        url, srcPath: opts.srcPath, keyB64: opts.keyB64, transferId: opts.transferId,
-        fileId: opts.fileId, blockIndex, chunkBytes, blockBytes, chunkCount, totalBytes: opts.totalBytes,
-      });
-      okBlocks.push(blockIndex);
-      uploadedBytes += bytes;
-      have.add(blockIndex);
-      opts.onProgress?.({ done: have.size, total: blockCount, bytes: uploadedBytes, totalBytes: opts.totalBytes });
-    }, opts.signal);
-    // Server HEAD-verifies each before flipping its bit → truth is authoritative.
-    if (okBlocks.length) await relayMarkUploaded(opts.transferId, okBlocks);
+    const geo = geoOf(ns);
+    plan = appendSegment(plan, geo.chunkBytes, geo.blockBytes);
+    await relayGrow(opts.transferId, totalBlocks(plan), serializePlan(plan));
+    const seg = plan.segments[plan.segments.length - 1];
+    await push(range(segBlockCount(seg)).map((k) => seg.firstBlock + k).filter((b) => !have.has(b)));
   }
-  return { blockCount };
+  // Resume tail: earlier-segment blocks that never finished uploading.
+  const missing = range(totalBlocks(plan)).filter((b) => !have.has(b));
+  if (missing.length) await push(missing);
+
+  await saveState(opts.linkType, ns);                         // carry the measured throughput forward
+  return { blockCount: totalBlocks(plan) };
 }
 
-// ── RECIPIENT ───────────────────────────────────────────────────────
-// Preallocate the shell and pull every block as it becomes available on R2,
-// verifying + decrypting natively into place. Polls while the sender is still
-// uploading; verifies the whole-file sha256 (if the manifest carried one) before
-// telling the server to purge the relay copy.
+// ── RECIPIENT (v2 adaptive) ─────────────────────────────────────────
+// Polls the GROWING server plan + bitmap: pulls each block whose geometry it holds
+// AND that's on R2, verifying+decrypting natively into place. Done when the plan is
+// fully built (isComplete) and every block it defines is held. Whole-file sha256
+// gates the relay purge. Works for an offline recipient — the plan lives server-side.
 export async function receiveTransfer(opts: {
   transferId: string; dstPath: string; totalBytes: number; fileId: string; keyB64: string;
-  expectedSha256?: string; onProgress?: ProgressCb; signal?: AbortSignal;
+  linkType?: string | null; expectedSha256?: string; onProgress?: ProgressCb; signal?: AbortSignal;
 }): Promise<{ path: string; verified: boolean }> {
   if (!isNativeStreamAvailable()) throw new Error('native stream unavailable');
 
   await prealloc(opts.dstPath, opts.totalBytes);
   const got = new Set<number>();
   let downloadedBytes = 0;
-  let blockCount = 0; let chunkCount = 0; let chunkBytes = 0; let blockBytes = 0;
+  let plan: SegmentPlan | null = null;
 
-  // Loop until we hold every block or the transfer ends.
   for (;;) {
     if (opts.signal?.aborted) throw new Error('aborted');
     const st = await relayState(opts.transferId);
-    blockCount = st.blockCount; chunkCount = st.chunkCount;
-    chunkBytes = st.chunkBytes; blockBytes = st.blockBytes;
     if (st.state === 'aborted') throw new Error('transfer aborted by sender');
+    if (st.plan) { const p = deserializePlan(st.plan); if (p) plan = p; }
+    if (!plan) { await wait(POLL_MS); continue; }              // sender hasn't posted geometry yet
 
-    const avail = uploadedBlocks(st.uploadedMask, blockCount).filter((b) => !got.has(b));
+    const p = plan;
+    const avail = uploadedBlocks(st.uploadedMask, st.blockCount).filter((b) => !got.has(b) && locateBlock(p, b));
     for (let i = 0; i < avail.length; i += URL_BATCH) {
       if (opts.signal?.aborted) throw new Error('aborted');
       const batch = avail.slice(i, i + URL_BATCH);
       const { urls } = await relayBlockUrls(opts.transferId, batch, 'get');
       await mapPool(urls, PARALLEL, async ({ blockIndex, url }) => {
+        const loc = locateBlock(p, blockIndex)!;
+        const t0 = Date.now();
         await downloadBlock({
           url, dstPath: opts.dstPath, keyB64: opts.keyB64, transferId: opts.transferId,
-          fileId: opts.fileId, blockIndex, chunkBytes, blockBytes, chunkCount, totalBytes: opts.totalBytes,
+          fileId: opts.fileId, blockIndex, chunkBytes: loc.chunkBytes, blockBytes: loc.blockBytes,
+          chunkCount: 0, totalBytes: opts.totalBytes, blockPlainOffset: loc.blockPlainOffset,
         });
-        got.add(blockIndex);
-        downloadedBytes = got.size * blockBytes; // approx; last block is short
-        opts.onProgress?.({ done: got.size, total: blockCount, bytes: Math.min(downloadedBytes, opts.totalBytes), totalBytes: opts.totalBytes });
+        recordSample(opts.linkType, loc.blockBytes, Math.max(1, Date.now() - t0), Date.now()).catch(() => {});
+        got.add(blockIndex); downloadedBytes += loc.blockBytes;
+        opts.onProgress?.({ done: got.size, total: totalBlocks(p) || got.size, bytes: Math.min(downloadedBytes, opts.totalBytes), totalBytes: opts.totalBytes });
       }, opts.signal);
     }
 
-    if (blockCount > 0 && got.size >= blockCount) break;
-    if (st.state === 'complete') break; // relay already purged; nothing more to pull
-    await wait(POLL_MS); // sender still uploading — poll for more blocks
+    if (isComplete(plan) && got.size >= totalBlocks(plan)) break;  // plan done + every block held
+    if (st.state === 'complete') break;                        // relay already purged
+    await wait(POLL_MS);
   }
 
   // Whole-file integrity gate before we let the server purge the only other copy.

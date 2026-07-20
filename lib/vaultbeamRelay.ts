@@ -15,11 +15,16 @@ export const MAX_BYTES   = 12 * 1024 * 1024 * 1024;
 
 // ── Relay control-plane API (against routes/vaultbeam.js) ───────────
 export interface RelayInit { transferId: string; blockCount: number; chunkCount: number; chunkBytes: number; blockBytes: number; expiresAt: string }
-export interface RelayState { transferId: string; state: string; totalBytes: number; blockCount: number; chunkCount: number; chunkBytes: number; blockBytes: number; uploadedMask: string; uploaded: number; isSender: boolean; expiresAt: string }
+export interface RelayState { transferId: string; state: string; totalBytes: number; blockCount: number; chunkCount: number; chunkBytes: number; blockBytes: number; plan?: string | null; uploadedMask: string; uploaded: number; isSender: boolean; expiresAt: string }
 export interface BlockUrl { blockIndex: number; url: string }
 
-export const relayInit = (transferId: string, recipientId: string, totalBytes: number, chatId?: string) =>
-  api<RelayInit>('/vaultbeam/relay/init', { method: 'POST', json: { transferId, recipientId, totalBytes, chatId } });
+export const relayInit = (transferId: string, recipientId: string, totalBytes: number, chatId?: string, blockCount?: number, plan?: string) =>
+  api<RelayInit>('/vaultbeam/relay/init', { method: 'POST', json: { transferId, recipientId, totalBytes, chatId, blockCount, plan } });
+
+// v2: grow the block count + post the updated content-free plan as the sender
+// adapts geometry mid-transfer. blockCount may only increase.
+export const relayGrow = (transferId: string, blockCount: number, plan: string) =>
+  api<{ blockCount: number }>('/vaultbeam/relay/grow', { method: 'POST', json: { transferId, blockCount, plan } });
 
 export const relayBlockUrls = (transferId: string, blocks: number[], op: 'put' | 'get') =>
   api<{ op: string; ttl: number; urls: BlockUrl[] }>('/vaultbeam/relay/block-url', { method: 'POST', json: { transferId, blocks, op } });

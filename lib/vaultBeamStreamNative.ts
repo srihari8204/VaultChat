@@ -43,6 +43,10 @@ export interface BlockOp {
   blockBytes: number;
   chunkCount: number;
   totalBytes: number;
+  // Segmented geometry (R4): this block's plaintext byte offset. Supplied ⇒ the
+  // native op uses offset-based chunk identity (AAD+nonce) so per-segment size
+  // changes stay clean. Omitted ⇒ legacy uniform path (offset = blockIndex·blockBytes).
+  blockPlainOffset?: number;
 }
 
 export interface UploadBlockOp extends BlockOp { srcPath: string }

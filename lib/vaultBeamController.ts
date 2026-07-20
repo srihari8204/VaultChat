@@ -25,11 +25,17 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import { sendMessage, type Message } from './chatService';
 import { sendTransfer, receiveTransfer } from './vaultBeamTransfer';
+import NetInfo from '@react-native-community/netinfo';
 import { serveDirect, receiveDirect } from './vaultBeamDirect';
 import { isNativeStreamAvailable } from './vaultBeamStreamNative';
 import { relayAbort, MAX_BYTES, CHUNK_BYTES } from './vaultbeamRelay';
 
-export const VB_MANIFEST_VERSION = 'vbm1';
+// vbm2 (2026-07): manifest gained the segmented-geometry `plan`. A version bump
+// (not an additive field) on purpose — an old client that ignored `plan` would
+// read the server's CONSTANT geometry from relay/state and fail every GCM open
+// on an adaptively-sized transfer. Bumping makes old↔new a clean reject, never a
+// corrupt decrypt. VaultBeam is 1:1 same-app + 24h-ephemeral, so this is safe.
+export const VB_MANIFEST_VERSION = 'vbm2';
 
 export type VBStatus =
   | 'uploading'   // sender: pushing blocks to R2
@@ -92,7 +98,10 @@ const VB_DIR = `${FileSystem.documentDirectory}VaultBeam`;
 
 // The manifest that rides inside the E2EE message content. `token` authenticates
 // the LAN direct connection (an outsider on the same Wi-Fi can't guess it).
-export interface VBManifest { v: string; keyB64: string; fileId: string; name: string; mime: string; size: number; token: string }
+// `plan` is the serialized segmented-geometry manifest (vaultBeamSegments) — the
+// relay tier reads it for per-block chunk/block sizes + offsets. Absent on a
+// direct-only (LAN/P2P) transfer, which stays uniform 512 KiB.
+export interface VBManifest { v: string; keyB64: string; fileId: string; name: string; mime: string; size: number; token: string; plan?: string }
 
 export function parseManifest(plainContent: string | null | undefined): VBManifest | null {
   if (!plainContent) return null;
@@ -100,7 +109,8 @@ export function parseManifest(plainContent: string | null | undefined): VBManife
     const m = JSON.parse(plainContent);
     if (m?.v === VB_MANIFEST_VERSION && m.keyB64 && m.fileId) {
       return { v: m.v, keyB64: m.keyB64, fileId: m.fileId, name: m.name || 'file',
-        mime: m.mime || 'application/octet-stream', size: Number(m.size) || 0, token: m.token || '' };
+        mime: m.mime || 'application/octet-stream', size: Number(m.size) || 0, token: m.token || '',
+        plan: typeof m.plan === 'string' ? m.plan : undefined };
     }
   } catch {}
   return null;
@@ -109,6 +119,10 @@ export function parseManifest(plainContent: string | null | undefined): VBManife
 // Geometry is derivable from size alone (canonical 512 KiB chunk) — no relay call.
 const chunkCountFor = (size: number) => Math.ceil(size / CHUNK_BYTES);
 
+async function getLinkType(): Promise<string | null> {
+  try { return (await NetInfo.fetch()).type ?? null; } catch { return null; }
+}
+
 // ── Sender crash/restart resume ─────────────────────────────────────
 // A relay upload that dies mid-flight (app killed) is resumed on next launch:
 // the manifest was already delivered + the relay row exists, so we just re-run
@@ -116,7 +130,7 @@ const chunkCountFor = (size: number) => Math.ceil(size / CHUNK_BYTES);
 // already resumes symmetrically. Persisted only for the sender (it alone holds
 // the source file); dropped the moment the send reaches a terminal state.
 const SENDS_KEY = 'vc_vaultbeam_sends';
-interface PersistedSend { transferId: string; srcPath: string; name: string; size: number; fileId: string; keyB64: string }
+interface PersistedSend { transferId: string; srcPath: string; name: string; size: number; fileId: string; keyB64: string; plan?: string; linkType?: string | null }
 async function readSends(): Promise<PersistedSend[]> {
   try { const raw = await AsyncStorage.getItem(SENDS_KEY); return raw ? JSON.parse(raw) : []; } catch { return []; }
 }
@@ -146,7 +160,8 @@ export async function resumePendingSends(): Promise<void> {
     (async () => {
       try {
         await sendTransfer({
-          srcPath: r.srcPath, totalBytes: r.size, fileId: r.fileId, transferId: r.transferId, keyB64: r.keyB64, signal: ac.signal,
+          srcPath: r.srcPath, totalBytes: r.size, fileId: r.fileId, transferId: r.transferId, keyB64: r.keyB64,
+          linkType: r.linkType, signal: ac.signal,
           onProgress: (p) => setState(r.transferId, { status: 'uploading', done: p.done, total: p.total, bytes: p.bytes, totalBytes: p.totalBytes }),
         });
         setState(r.transferId, { status: 'sent' });
@@ -198,8 +213,12 @@ export async function startSend(opts: {
   const keyB64 = Buffer.from(randomBytes(32)).toString('base64');
   const token = Buffer.from(randomBytes(16)).toString('base64'); // LAN direct-connect auth
 
+  // v2: open the relay with an EMPTY plan (0 blocks). sendTransfer grows it
+  // reactively from live throughput; the recipient reads the growing plan from
+  // relay/state. linkType seeds/tags the throughput history.
+  const linkType = await getLinkType();
   const { relayInit } = await import('./vaultbeamRelay');
-  await relayInit(transferId, opts.recipientId, opts.size, opts.chatId);
+  await relayInit(transferId, opts.recipientId, opts.size, opts.chatId, 0, '');
 
   setState(transferId, {
     transferId, role: 'sender', status: 'uploading',
@@ -210,7 +229,7 @@ export async function startSend(opts: {
   const meta = { vaultbeam: true, transferId, size: opts.size };
   const msg = await sendMessage(opts.chatId, JSON.stringify(manifest), 'vaultbeam', { meta });
   // Persist so a killed relay upload resumes on next launch (manifest already sent).
-  await persistSend({ transferId, srcPath: opts.srcPath, name: opts.name, size: opts.size, fileId, keyB64 });
+  await persistSend({ transferId, srcPath: opts.srcPath, name: opts.name, size: opts.size, fileId, keyB64, linkType });
 
   ensureListeners();
   const ac = new AbortController();
@@ -232,7 +251,7 @@ export async function startSend(opts: {
       // Tier 3: R2 relay (guaranteed baseline — works even if the peer is offline).
       setState(transferId, { status: 'uploading', done: 0, total: 0, bytes: 0, totalBytes: opts.size });
       await sendTransfer({
-        srcPath: opts.srcPath, totalBytes: opts.size, fileId, transferId, keyB64, signal: ac.signal,
+        srcPath: opts.srcPath, totalBytes: opts.size, fileId, transferId, keyB64, linkType, signal: ac.signal,
         onProgress: (p) => setState(transferId, { status: 'uploading', done: p.done, total: p.total, bytes: p.bytes, totalBytes: p.totalBytes }),
       });
       setState(transferId, { status: 'sent' }); // on R2; peer pulls next
@@ -277,6 +296,7 @@ export async function startReceive(opts: {
       // Tier 3: pull from the R2 relay (the sender uploads there as the baseline).
       await receiveTransfer({
         transferId, dstPath, totalBytes: manifest.size, fileId: manifest.fileId, keyB64: manifest.keyB64,
+        linkType: await getLinkType(),
         signal: ac.signal,
         onProgress: (p) => setState(transferId, { status: 'receiving', done: p.done, total: p.total, bytes: p.bytes, totalBytes: p.totalBytes }),
       });
