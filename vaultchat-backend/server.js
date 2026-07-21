@@ -109,6 +109,7 @@ app.use('/channels', channelsRouter);
 app.use('/games',    require('./routes/games'));
 const vaultbeamRouter = require('./routes/vaultbeam');
 app.use('/vaultbeam', vaultbeamRouter);
+app.use('/nav', require('./routes/nav'));   // routing proxy → self-hosted Valhalla
 vaultbeamRouter.setBroadcasters({ emitToUid });   // ring recipient: vb_invite / vb_ready / vb_complete / vb_abort
 setInterval(() => vaultbeamRouter.sweepExpired().catch(() => {}), 60 * 60 * 1000); // reap stale relay rows hourly
 

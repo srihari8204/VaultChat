@@ -108,6 +108,7 @@ services:
       S3_BUCKET: vaultchat-media
       S3_ACCESS_KEY: ${MINIO_USER:-vaultchat}
       S3_SECRET_KEY: ${MINIO_PASS:-vaultchat_dev_secret}
+      VALHALLA_URL: http://valhalla:8002   # internal routing engine (POST /nav/route proxies here)
     depends_on:
       postgres:
         condition: service_healthy
@@ -117,6 +118,22 @@ services:
         condition: service_started
     ports:
       - "13000:3000"          # host 13000 — never clashes with the live pm2 app on :3000
+
+  # valhalla — self-hosted OSM routing engine (POST /route). The API proxies to it
+  # via routes/nav.js; it is NEVER exposed publicly (bound to localhost only).
+  # First boot: drop an OSM extract at ./valhalla/custom_files/<name>.osm.pbf and
+  # the image builds routing tiles into the volume (minutes–tens of minutes for a
+  # country extract), then serves on :8002. Rebuilds only when the pbf changes.
+  valhalla:
+    image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8002:8002"   # localhost only — reached in-network as valhalla:8002
+    volumes:
+      - ./valhalla/custom_files:/custom_files   # drop <region>.osm.pbf here; tiles build in-place
+    environment:
+      - server_threads=4
+      - use_tiles_ignore_pbf=True   # after the first build, serve tiles without re-parsing the pbf
 
   # coturn — TURN/STUN relay for WebRTC (calls + VaultBeam Tier-2 P2P). Host
   # networking because the relay allocates a UDP port range (min/max-port in
