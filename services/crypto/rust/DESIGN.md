@@ -1,8 +1,10 @@
 # Rust crypto core — Phase 1 design note
 
-Status: **Step 0 (design, no code)**. TS crypto in `services/crypto/*` stays the
-default and the permanent fallback. The Rust core ships DISABLED
-(`EXPO_PUBLIC_CRYPTO_BACKEND` defaults to `'ts'`) until parity is proven.
+Status: **implemented (Steps 0–5)** — crate + bindings + facade + parity all
+landed on this branch. TS crypto in `services/crypto/*` stays the default and
+the permanent fallback. The Rust core ships DISABLED
+(`EXPO_PUBLIC_CRYPTO_BACKEND` defaults to `'ts'`); parity is green (17/17
+cross-backend checks + 13 Rust tests incl. byte-exact golden vectors).
 
 ## 1. Binding strategy — Decision: Option A (Nitro HybridObject over a C-ABI Rust staticlib)
 
@@ -36,7 +38,7 @@ Why A over B (UniFFI → Kotlin):
 | `subtle` | constant-time comparisons | mirrors `ctEqual`. |
 | `serde` + `serde_json` | state/envelope JSON | struct field order = TS `JSON.stringify` key order (see §5). |
 | `base64`, `hex` | wire encodings | hex lowercase; b64 standard w/ padding (Node `Buffer` compatible). |
-| `getrandom` / `rand_core` | OS RNG | test builds inject a seeded RNG behind a feature flag so Rust unit tests can replay deterministic vectors. |
+| `getrandom` | OS RNG | vectors avoid RNG entirely (fixed inputs, deterministic transforms), so no seeded-RNG test seam is needed. |
 
 No `ring`: RustCrypto crates cover everything, pure-Rust, easier cross-compile.
 
@@ -152,8 +154,13 @@ From `shamir.ts`:
   against format drift; the Rust crate's unit tests consume the same JSON.
 - `services/crypto/parity.selftest.ts`: cross-backend encrypt↔decrypt,
   serializeState continue-in-other-backend, group send/receive across
-  backends, Shamir split-in-one/recover-in-other. Wired into `npm run
-  test:e2ee`. PR is not done until parity is green.
+  backends, Shamir split-in-one/recover-in-other. It drives the REAL Rust
+  dispatcher through `vc-crypto-cli` (line-JSON REPL), builds it via `cargo
+  build` when missing, and SKIPS (warning, exit 0) only when cargo is absent.
+  Wired into `npm run test:e2ee`. PR is not done until parity is green.
+- **CI gate** (requires rustup):
+  `cargo test --manifest-path services/crypto/rust/Cargo.toml && npm run test:e2ee`
+  — Rust unit/vector tests + TS selftests + vector guard + live parity.
 
 ## 8. Rollout & kill switch
 
