@@ -1,0 +1,63 @@
+{
+  "base": "http://127.0.0.1:13000",
+  "members": 50,
+  "senders": 5,
+  "stageSecs": 30,
+  "results": [
+    {
+      "rate": 60,
+      "sent": 1801,
+      "sendErrors": 0,
+      "achievedRate": 60,
+      "postP50": 19,
+      "postP95": 115,
+      "postP99": 596,
+      "deliveries": 90050,
+      "expected": 90050,
+      "deliveryRatio": 1,
+      "deliveriesPerSec": 3001,
+      "p50": 25,
+      "p95": 129,
+      "p99": 615,
+      "max": 1500,
+      "apiStats": "vaultchatbackup-api-1|112.3MiB / 11.61GiB|0.00%"
+    },
+    {
+      "rate": 75,
+      "sent": 2157,
+      "sendErrors": 0,
+      "achievedRate": 71.9,
+      "postP50": 2452,
+      "postP95": 6008,
+      "postP99": 6840,
+      "deliveries": 88642,
+      "expected": 107850,
+      "deliveryRatio": 0.8219,
+      "deliveriesPerSec": 2954,
+      "p50": 3376,
+      "p95": 10471,
+      "p99": 11232,
+      "max": 12293,
+      "apiStats": "vaultchatbackup-api-1|128.2MiB / 11.61GiB|16.68%"
+    },
+    {
+      "rate": 85,
+      "sent": 878,
+      "sendErrors": 1535,
+      "achievedRate": 29.2,
+      "postP50": 5684,
+      "postP95": 9346,
+      "postP99": 9806,
+      "deliveries": 7608,
+      "expected": 43900,
+      "deliveryRatio": 0.1733,
+      "deliveriesPerSec": 253,
+      "p50": 15195,
+      "p95": 16259,
+      "p99": 17265,
+      "max": 18431,
+      "apiStats": "vaultchatbackup-api-1|128.3MiB / 11.61GiB|16.14%"
+    }
+  ],
+  "at": "2026-07-25T19:26:07.558Z"
+}

@@ -8,6 +8,9 @@ serviceAccountKey.json
 temp_uploads/
 logs/
 dist/
+# bench artifacts carrying real-signed JWTs — never commit
+loadtest/bench-state.json
+loadtest/jwt-list.txt
 *.backup
 *.legacy
 .DS_Store
