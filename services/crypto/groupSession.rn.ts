@@ -19,7 +19,7 @@ import { e2eeEncrypt, e2eeDecrypt, e2eeCachePlaintext, e2eeGetCached } from './e
 import {
   createSenderKey, distributionMessage, processDistribution, groupEncrypt, groupDecrypt,
   type OwnSenderKey, type PeerSenderKey, type SenderKeyDistribution,
-} from './senderKey';
+} from './index'; // the facade — picks TS or Rust per EXPO_PUBLIC_CRYPTO_BACKEND
 
 const kv = chunkedKV({
   get: (k) => SecureStore.getItemAsync(k),
