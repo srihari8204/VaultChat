@@ -11,6 +11,7 @@
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
     "test:e2ee": "tsx services/crypto/e2ee.selftest.ts && tsx services/crypto/senderKey.selftest.ts && tsx services/crypto/shamir.selftest.ts && tsx services/security/safetyNumber.selftest.ts",
+    "test:crypto:vectors": "tsx services/crypto/vectors.selftest.ts",
     "prebuild": "expo prebuild --clean",
     "prebuild:android": "expo prebuild --platform android --clean",
     "prebuild:ios": "expo prebuild --platform ios --clean",
@@ -131,6 +132,7 @@
     "eslint": "^9.39.4",
     "eslint-config-expo": "~10.0.0",
     "patch-package": "^8.0.1",
+    "tsx": "^4.23.1",
     "typescript": "~5.9.2"
   },
   "private": true,

@@ -1,0 +1,87 @@
+{
+  "inputs": {
+    "kdfRk": {
+      "rk": "1d65861fe1e29a22a0af71c8351c44cbe42bd29ade031d0f1a7e727a8cb90599",
+      "dhOut": "a329f6e6d559ff67d8f48c1b38c1cddb6d62bcb963cdb4636009a511c9f722f1"
+    },
+    "kdfCk": {
+      "ck": "488a3adf5d30d142f370a4bc2c27a556a7e192e2e9214633ea73cfbfcf84109d"
+    },
+    "msgKey": {
+      "mk": "475021da9c5491e76131c486b9248612b2807830895049f6e38e2a49e498b013"
+    },
+    "sign": {
+      "priv": "0507d9e5cf0df5bc6125d957152e4a7247bcd94f69dfffba0b15eb108acf0fb8",
+      "msgUtf8": "VaultChat golden vector — sign me"
+    },
+    "x3dh": {
+      "bobIdentityPriv": "8bbf444ea883aa650769ae37c8f1c15e2ad4c502e6f4491c31c6a9056b0162df",
+      "bobSpkPriv": "ea51d4bf219c9b67b372f263ea3f4ff6e1471e4cd386bfbd7498af18d43244ab",
+      "bobOtkPriv": "848c44412b39f6f4b42fb588f415358eac12d532dffa55779bb0bc702a6f24e8",
+      "aliceIdentityPriv": "b8dc2ea52a715549737ff922ae849a9963a9433bb6b28ced6c169ac3310e3ae3",
+      "aliceEphPriv": "5def79ad9d7822de663c46b0bcc7483a73dd28bd7e60b35917cdf62f21bbaabe"
+    },
+    "ratchet": {
+      "aPriv": "55e94ee602dc9c0587f5cc6f8833dcd76a88da4f2e7c6d1a9955b3f7eed79630",
+      "bPriv": "681b845e387046eee7ec1414bd933bc3e311485e91ec9de9e501f4fdb3375606",
+      "rk": "52ee10fe97e3bc4b2cce147834a063164c7f0317861df71087cf524cbec5c6a6",
+      "cks": "3d99fc47261150b0b9911915c9ca570e0d44045e816b8073a938e8ed9c45c1f6",
+      "plaintexts": [
+        "first vector message",
+        "second — with unicode ✓ émoji 🙂",
+        "third message, decrypted out of order"
+      ]
+    }
+  },
+  "expected": {
+    "kdfRk": {
+      "rk": "98d498412179ff8146eff2b65f129362d8a458dbc5e73fda29cda99d9dc92151",
+      "ck": "c6df6670104682bb80071246497719b11bbb34a18df2bc9f47f06969eeb0943b"
+    },
+    "kdfCk": {
+      "mk": "0aaac864e008d2dd9bfc8b6f24e1cec6919aa441f7a28b443de47bd5d010f7b3",
+      "ck": "c8eb946358bd627f659ea074034bb1825ebaadf4e669eb50904332fad0fb8dc7"
+    },
+    "msgKey": {
+      "key": "053112ce8cc6cd4ef34150e858a6d0d5ac6b334000858f77296d6d8bba4e74cc",
+      "nonce": "fd12367728b6ae39f351dac4"
+    },
+    "sign": {
+      "pub": "4cf5d8472b703cf127158cac44d9a9a019fc47dc81d7e660c422de3a6ae27a7f",
+      "signature": "91dedfd7d251a0308757a98ecbf8d278c2ac28c1993f7d83529c5ebacf86b6e265b1ac5504996da0d0a008f198c1fec9043a89016291c70dd90b4525476fc600"
+    },
+    "x3dh": {
+      "header": {
+        "identityKey": "a758f0338dcc1532b36426c064ca0705ef6143de37f82b24ecd8c4ce141b566a",
+        "ephemeralKey": "a5215170481cb5bd4dd37fe974448620efb606dfb4c065d8c048170d3bdba509"
+      },
+      "bundlePubs": {
+        "identityKey": "68c8f4cc627249be393d1ab861713af02d45b5618394d950cc046968cdb2770e",
+        "signedPreKey": "3a94119df5e2798379bf85a57aaf9f896a84be848cdc08ffa50a89b490e10500",
+        "oneTimePreKey": "3991ed8591746ed55be9d044c38e4e39278cb11b3103d75356e86943203c3176"
+      },
+      "skWithOtk": "966788f48b758597d8a1946ca65c020aa531feae48d13a5d78d770600ce07459",
+      "skNoOtk": "66515c78071d507b101d1c7c2329d63689f9608a1d044079371b083115622aff"
+    },
+    "ratchet": {
+      "senderStateJson": "{\"DHs\":{\"priv\":\"55e94ee602dc9c0587f5cc6f8833dcd76a88da4f2e7c6d1a9955b3f7eed79630\",\"pub\":\"d1c68955c18d862d2d2fadbe4aa26e07822bb0f1ea293a230cc3ece0302a781e\"},\"DHr\":\"e82aa4cb3253c7ddf92b194593a6301f103e468a5997b04431ea41df41f25f10\",\"RK\":\"52ee10fe97e3bc4b2cce147834a063164c7f0317861df71087cf524cbec5c6a6\",\"CKs\":\"3d99fc47261150b0b9911915c9ca570e0d44045e816b8073a938e8ed9c45c1f6\",\"CKr\":null,\"Ns\":0,\"Nr\":0,\"PN\":0,\"skipped\":{}}",
+      "envelopes": [
+        "{\"dh\":\"0caJVcGNhi0tL62+SqJuB4IrsPHqKTojDMPs4DAqeB4=\",\"pn\":0,\"n\":0,\"ct\":\"qDXzccmUpAYCNknm1SzWtLiZfAG811Z1n7OCaNsDx56ozB15\"}",
+        "{\"dh\":\"0caJVcGNhi0tL62+SqJuB4IrsPHqKTojDMPs4DAqeB4=\",\"pn\":0,\"n\":1,\"ct\":\"BErJtXXBu+PDLAEb0B7yFSum1PenGb8/vsl6fuaCeZu88qYOsZUDniyA6RJNQDMkJMZcDsOAPg==\"}",
+        "{\"dh\":\"0caJVcGNhi0tL62+SqJuB4IrsPHqKTojDMPs4DAqeB4=\",\"pn\":0,\"n\":2,\"ct\":\"ruoYYujnbxPHSA7LAjxMC+D8iTh2c9vbY/isry2DxTJnCUdXBnQi/MI8FtmwF2ZBw54Ilgk=\"}"
+      ],
+      "senderStateAfterJson": "{\"DHs\":{\"priv\":\"55e94ee602dc9c0587f5cc6f8833dcd76a88da4f2e7c6d1a9955b3f7eed79630\",\"pub\":\"d1c68955c18d862d2d2fadbe4aa26e07822bb0f1ea293a230cc3ece0302a781e\"},\"DHr\":\"e82aa4cb3253c7ddf92b194593a6301f103e468a5997b04431ea41df41f25f10\",\"RK\":\"52ee10fe97e3bc4b2cce147834a063164c7f0317861df71087cf524cbec5c6a6\",\"CKs\":\"a691e1d0f27f5c80f92691855c64296d69b39014c2f1c4d6b241ee6330b653c6\",\"CKr\":null,\"Ns\":3,\"Nr\":0,\"PN\":0,\"skipped\":{}}",
+      "recvStateJson": "{\"DHs\":{\"priv\":\"681b845e387046eee7ec1414bd933bc3e311485e91ec9de9e501f4fdb3375606\",\"pub\":\"e82aa4cb3253c7ddf92b194593a6301f103e468a5997b04431ea41df41f25f10\"},\"DHr\":\"d1c68955c18d862d2d2fadbe4aa26e07822bb0f1ea293a230cc3ece0302a781e\",\"RK\":\"52ee10fe97e3bc4b2cce147834a063164c7f0317861df71087cf524cbec5c6a6\",\"CKs\":null,\"CKr\":\"3d99fc47261150b0b9911915c9ca570e0d44045e816b8073a938e8ed9c45c1f6\",\"Ns\":0,\"Nr\":0,\"PN\":0,\"skipped\":{}}",
+      "recvInOrder": {
+        "plaintext": "first vector message",
+        "stateJson": "{\"DHs\":{\"priv\":\"681b845e387046eee7ec1414bd933bc3e311485e91ec9de9e501f4fdb3375606\",\"pub\":\"e82aa4cb3253c7ddf92b194593a6301f103e468a5997b04431ea41df41f25f10\"},\"DHr\":\"d1c68955c18d862d2d2fadbe4aa26e07822bb0f1ea293a230cc3ece0302a781e\",\"RK\":\"52ee10fe97e3bc4b2cce147834a063164c7f0317861df71087cf524cbec5c6a6\",\"CKs\":null,\"CKr\":\"ed1e71d3be7a649ca8219bac339786f502c3e0632f4b1b774c006475bee4bc3c\",\"Ns\":0,\"Nr\":1,\"PN\":0,\"skipped\":{}}"
+      },
+      "recvOutOfOrder": {
+        "plaintext2": "third message, decrypted out of order",
+        "stateJsonAfterSkip": "{\"DHs\":{\"priv\":\"681b845e387046eee7ec1414bd933bc3e311485e91ec9de9e501f4fdb3375606\",\"pub\":\"e82aa4cb3253c7ddf92b194593a6301f103e468a5997b04431ea41df41f25f10\"},\"DHr\":\"d1c68955c18d862d2d2fadbe4aa26e07822bb0f1ea293a230cc3ece0302a781e\",\"RK\":\"52ee10fe97e3bc4b2cce147834a063164c7f0317861df71087cf524cbec5c6a6\",\"CKs\":null,\"CKr\":\"a691e1d0f27f5c80f92691855c64296d69b39014c2f1c4d6b241ee6330b653c6\",\"Ns\":0,\"Nr\":3,\"PN\":0,\"skipped\":{\"d1c68955c18d862d2d2fadbe4aa26e07822bb0f1ea293a230cc3ece0302a781e:0\":\"ff6342f68fd36592682da2fdc7201076e384382a2fbaff97493d015c644c3423\",\"d1c68955c18d862d2d2fadbe4aa26e07822bb0f1ea293a230cc3ece0302a781e:1\":\"b12a22c0bc34630a7f6e4d76f1728a4b33fc30908094d73c324ec094d614953d\"}}",
+        "thenPlaintext0": "first vector message",
+        "stateJsonAfterCacheHit": "{\"DHs\":{\"priv\":\"681b845e387046eee7ec1414bd933bc3e311485e91ec9de9e501f4fdb3375606\",\"pub\":\"e82aa4cb3253c7ddf92b194593a6301f103e468a5997b04431ea41df41f25f10\"},\"DHr\":\"d1c68955c18d862d2d2fadbe4aa26e07822bb0f1ea293a230cc3ece0302a781e\",\"RK\":\"52ee10fe97e3bc4b2cce147834a063164c7f0317861df71087cf524cbec5c6a6\",\"CKs\":null,\"CKr\":\"a691e1d0f27f5c80f92691855c64296d69b39014c2f1c4d6b241ee6330b653c6\",\"Ns\":0,\"Nr\":3,\"PN\":0,\"skipped\":{\"d1c68955c18d862d2d2fadbe4aa26e07822bb0f1ea293a230cc3ece0302a781e:1\":\"b12a22c0bc34630a7f6e4d76f1728a4b33fc30908094d73c324ec094d614953d\"}}"
+      }
+    }
+  }
+}
