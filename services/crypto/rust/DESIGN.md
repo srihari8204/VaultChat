@@ -42,10 +42,12 @@ No `ring`: RustCrypto crates cover everything, pure-Rust, easier cross-compile.
 
 ## 3. Targets & build hook
 
-Android ABIs (matching the app's current set):
+Android ABIs (matching Expo's default `reactNativeArchitectures`, which
+includes x86):
 
 - `aarch64-linux-android` → arm64-v8a
 - `armv7-linux-androideabi` → armeabi-v7a
+- `i686-linux-android` → x86
 - `x86_64-linux-android` → x86_64
 
 Build chain: `cargo ndk` (cargo-ndk) builds `libcrypto_core.a` per ABI; the
@@ -75,16 +77,25 @@ records, envelope JSON, VCSS1 strings). The boundary format IS the interop
 format, so "TS serializes → Rust continues" is exercised on every single call,
 not just in tests.
 
-- Bytes in/out: `(const uint8_t*, size_t)` pairs; Rust allocates results,
-  JS side copies into `Uint8Array`, then calls `vc_free(ptr, len)`.
-- Stateful ops take/return state as JSON strings:
-  `ratchet_encrypt(state_json, plaintext) -> { state_json', envelope_json }`,
-  same for decrypt / group ops. Keygen/sign/verify/x3dh/shamir are plain
-  byte/string functions.
-- Errors: Rust returns a status code + message string; the C++ wrapper throws a
-  JS error with the same message text as the TS implementation where consumers
-  match on it (e.g. `'no session and no X3DH'` transient detection in
-  `e2eeSession.rn.ts`).
+- **Single C entrypoint** (as built): `vc_crypto_call(op, args_json) -> json`
+  + `vc_crypto_free`. Every op is JSON-in/JSON-out; bytes travel as hex,
+  ratchet state as the canonical `serializeState` JSON, sender-key records as
+  their TS-shaped JSON. One extern fn, one C++ method
+  (`HybridCryptoCore::call`), one JS dispatcher — the typed surface lives in
+  `services/crypto/native/CryptoCore.ts`.
+- Response envelope `{"ok":true,"result":…} | {"ok":false,"error":…}`; the JS
+  wrapper throws `Error(error)`. Rust core error strings mirror the TS ones
+  (consumer string-matching like `'no session and no X3DH'` happens a layer
+  above, in `e2eeSession.ts`, which is shared by both backends).
+- `std::panic::catch_unwind` at the boundary — a Rust panic becomes a JS
+  error, never an abort.
+- Host-side testability: `src/bin/vc-crypto-cli.rs` is a line-delimited JSON
+  REPL over the same dispatcher, so the Node parity suite drives the real
+  Rust core without native bindings.
+- Known, intentional divergence: on a FAILED decrypt TS leaves partial
+  in-memory state mutations; the native wrapper applies state only on success
+  (atomic). Invisible to consumers — they never persist state after a failed
+  decrypt.
 
 <!-- ponytail: JSON-parse per ratchet op (~1KB states). If profiling ever shows
      it, upgrade path is opaque state handles kept Rust-side. -->

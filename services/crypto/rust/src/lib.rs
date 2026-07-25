@@ -7,6 +7,7 @@
 //! those formats is a bug, not a refactor — the TS core stays the reference.
 
 pub mod e2ee;
+pub mod ffi;
 pub mod sender_key;
 pub mod shamir;
 
