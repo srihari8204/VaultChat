@@ -151,16 +151,102 @@ async function main() {
     check(false, `realtime harness: ${e.message}`);
   }
 
+  // ── migrated routes: deep fixtures (promoted at Phase 2 cutover) ─────
+  console.log('contacts (deep):');
+  // GET /user/profile lazily assigns vaultIds (needed for trusted adds below).
+  const profA = (await req('GET', '/user/profile', { token: A.jwt })).json;
+  const profB = (await req('GET', '/user/profile', { token: B.jwt })).json;
+  check(!!profA?.vaultId && !!profB?.vaultId, 'profiles carry vaultId', { a: profA?.vaultId, b: profB?.vaultId });
+
+  // match — random bench users so the 5/min limiter never bleeds across runs.
+  const pick = () => 3 + Math.floor(Math.random() * 900);
+  const M = STATE.users[pick()];
+  r = await req('POST', '/contacts/match', { token: M.jwt, body: {} });
+  check(r.status === 400 && r.json?.error === 'phoneHashes array required', 'match w/o array → exact 400', r);
+  r = await req('POST', '/contacts/match', { token: M.jwt, body: { phoneHashes: [] } });
+  check(r.status === 200 && Array.isArray(r.json) && r.json.length === 0, 'match [] → 200 []', r);
+  r = await req('POST', '/contacts/match', { token: M.jwt, body: { phoneHashes: ['nothex', 'ZZ', 123] } });
+  check(r.status === 200 && Array.isArray(r.json) && r.json.length === 0, 'match junk hashes filtered → 200 []', r);
+  const L = STATE.users[pick()];
+  let last = null;
+  for (let i = 0; i < 6; i++) last = await req('POST', '/contacts/match', { token: L.jwt, body: { phoneHashes: [] } });
+  check(last.status === 429 && last.json?.error === 'Too many requests' && typeof last.json?.retryAfter === 'number',
+    '6th match in a minute → 429 {retryAfter}', last);
+
+  // mutual-consent sync flow, end to end
+  r = await req('POST', '/contacts/sync/create', { token: A.jwt });
+  check(r.status === 200 && r.json?.success === true && /^\d{6}$/.test(r.json?.code || ''), 'sync/create → {success, 6-digit code}', r);
+  const code = r.json?.code;
+  const wrong = code === '000000' ? '111111' : '000000';
+  r = await req('GET', `/contacts/sync/${code}`, { token: A.jwt });
+  check(r.status === 200 && r.json?.verified === false, 'sync status before verify → {verified:false}', r);
+  r = await req('GET', `/contacts/sync/${wrong}`, { token: A.jwt });
+  check(r.status === 404 && r.json?.error === 'not found', 'sync status unknown code → exact 404', r);
+  r = await req('POST', '/contacts/sync/verify', { token: B.jwt, body: { code: '12345' } });
+  check(r.status === 400 && r.json?.error === '6-digit code required', 'verify malformed code → exact 400', r);
+  r = await req('POST', '/contacts/sync/verify', { token: B.jwt, body: { code: wrong } });
+  check(r.status === 404 && r.json?.error === 'Invalid code', 'verify unknown code → exact 404', r);
+  r = await req('POST', '/contacts/sync/verify', { token: A.jwt, body: { code } });
+  check(r.status === 400 && r.json?.error === 'Cannot sync with yourself', 'self-verify → exact 400', r);
+  r = await req('POST', '/contacts/sync/verify', { token: B.jwt, body: { code } });
+  check(r.status === 200 && r.json?.success === true && r.json?.initiator?.userId === A.id
+    && hasKeys(r.json?.initiator, ['userId', 'displayName', 'email', 'phoneNumber']), 'verify → {success, initiator stub}', r);
+  r = await req('POST', '/contacts/sync/verify', { token: B.jwt, body: { code } });
+  check(r.status === 409 && r.json?.error === 'Code already used', 'second verify → exact 409', r);
+  r = await req('GET', `/contacts/sync/${code}`, { token: A.jwt });
+  check(r.status === 200 && r.json?.verified === true, 'sync status after verify → {verified:true}', r);
+
+  // trusted contacts — self-cleaning add/dup/list/remove
+  await req('DELETE', `/contacts/trusted/${B.id}`, { token: A.jwt }); // cleanup from any dead run
+  r = await req('POST', '/contacts/trusted', { token: A.jwt, body: {} });
+  check(r.status === 400 && r.json?.error === 'vaultId required', 'trusted add w/o vaultId → exact 400', r);
+  r = await req('POST', '/contacts/trusted', { token: A.jwt, body: { vaultId: 'no-such-vault-id-000' } });
+  check(r.status === 404 && r.json?.error === 'No user with that VaultID', 'trusted add unknown → exact 404', r);
+  r = await req('POST', '/contacts/trusted', { token: A.jwt, body: { vaultId: profA.vaultId } });
+  check(r.status === 400 && r.json?.error === "You can't add yourself", 'trusted add self → exact 400', r);
+  r = await req('POST', '/contacts/trusted', { token: A.jwt, body: { vaultId: `@${profB.vaultId}` } });
+  check(r.status === 200 && r.json?.userId === B.id && hasKeys(r.json, ['userId', 'name', 'vaultId', 'online']),
+    'trusted add (@-prefixed) → member stub', r);
+  r = await req('POST', '/contacts/trusted', { token: A.jwt, body: { vaultId: profB.vaultId } });
+  check(r.status === 409 && r.json?.error === 'Already a trusted contact', 'duplicate trusted add → exact 409', r);
+  r = await req('GET', '/contacts/trusted', { token: A.jwt });
+  check(r.status === 200 && Array.isArray(r.json) && r.json.some(c => c.userId === B.id), 'trusted list contains B', r);
+  r = await req('DELETE', `/contacts/trusted/${B.id}`, { token: A.jwt });
+  check(r.status === 200 && r.json?.ok === true, 'trusted remove → {ok:true}', r);
+
+  console.log('link (deep):');
+  r = await req('GET', '/link/preview?url=notaurl', { token: A.jwt });
+  check(r.status === 400 && r.json?.error === 'invalid url', 'invalid url → exact 400', r);
+  r = await req('GET', `/link/preview?url=${encodeURIComponent('ftp://example.com/x')}`, { token: A.jwt });
+  check(r.status === 400 && r.json?.error === 'unsupported scheme', 'ftp scheme → exact 400', r);
+  r = await req('GET', `/link/preview?url=${encodeURIComponent('https://example.com:8080/')}`, { token: A.jwt });
+  check(r.status === 400 && r.json?.error === 'blocked port', 'non-std port → exact 400', r);
+  r = await req('GET', `/link/preview?url=${encodeURIComponent('http://localhost/admin')}`, { token: A.jwt });
+  check(r.status === 502 && r.json?.error === 'preview unavailable', 'localhost blocked → 502', r);
+  r = await req('GET', `/link/preview?url=${encodeURIComponent('http://169.254.169.254/latest/meta-data/')}`, { token: A.jwt });
+  check(r.status === 502 && r.json?.error === 'preview unavailable', 'metadata IP blocked → 502', r);
+  r = await req('GET', `/link/preview?url=${encodeURIComponent('https://example.com')}`, { token: A.jwt });
+  check(r.status === 200 && hasKeys(r.json, ['url', 'title', 'description', 'image'])
+    && r.json?.url === 'https://example.com/', 'real fetch → OG shape, WHATWG-normalized url echo', r);
+
+  console.log('gif (deep):');
+  r = await req('GET', '/gif/search?q=hello', { token: A.jwt });
+  if (r.json?.error === 'not_configured') {
+    check(r.status === 200 && Array.isArray(r.json?.results) && r.json.results.length === 0 && r.json?.next === '',
+      'no GIPHY_KEY → exact not_configured shape', r);
+  } else {
+    check(r.status === 200 && Array.isArray(r.json?.results) && r.json.results.length > 0
+      && hasKeys(r.json.results[0], ['id', 'url', 'gif', 'preview', 'width', 'height'])
+      && typeof r.json?.next === 'string', 'gif search → normalized results', r);
+  }
+
   // ── module smokes (promoted to deep fixtures at each route's cutover) ─
   console.log('module smokes:');
   const smokes = [
-    ['contacts', 'GET', '/contacts/trusted', { token: A.jwt }, (x) => x.status === 200],
     ['stories', 'GET', '/stories/feed', { token: A.jwt }, (x) => x.status === 200],
     ['stories', 'GET', '/stories/privacy', { token: A.jwt }, (x) => x.status === 200 && !!x.json],
     ['communities', 'GET', '/communities', { token: A.jwt }, (x) => x.status === 200],
     ['calls', 'POST', '/call/initiate', { token: A.jwt, body: {} }, (x) => x.status >= 400 && x.status < 500 && !!x.json?.error],
-    ['link', 'GET', '/link/preview?url=https%3A%2F%2Fexample.com', { token: A.jwt }, (x) => !!x.json],
-    ['gif', 'GET', '/gif/search?q=hello', { token: A.jwt }, (x) => !!x.json],
     ['channels', 'GET', '/channels', { token: A.jwt }, (x) => x.status === 200],
     ['games', 'GET', '/games/profile', { token: A.jwt }, (x) => x.status === 200 && !!x.json],
     ['games', 'GET', '/games/leaderboard', { token: A.jwt }, (x) => x.status === 200],
