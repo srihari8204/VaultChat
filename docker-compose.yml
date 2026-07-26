@@ -160,6 +160,8 @@ services:
       S3_ACCESS_KEY: ${MINIO_USER:-vaultchat}
       S3_SECRET_KEY: ${MINIO_PASS:-vaultchat_dev_secret}
       VALHALLA_URL: http://valhalla:8002   # internal routing engine (POST /nav/route proxies here)
+      # Accept bridged socket emits from go-api (must match go-api's key).
+      INTERNAL_EMIT_KEY: ${INTERNAL_EMIT_KEY:-bench-internal-emit}
     depends_on:
       postgres:
         condition: service_healthy

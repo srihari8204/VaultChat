@@ -9,3 +9,8 @@
 {"method":"GET","path":"/link/preview?url=https%3A%2F%2Fexample.com"}
 {"method":"GET","path":"/gif/search?q=hello"}
 {"method":"GET","path":"/gif/search"}
+{"method":"GET","path":"/stories/feed"}
+{"method":"GET","path":"/stories/privacy"}
+{"method":"GET","path":"/stories/audience"}
+{"method":"GET","path":"/stories/999999999/views"}
+{"method":"GET","path":"/stories/abc/views"}

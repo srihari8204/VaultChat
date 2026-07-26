@@ -18,8 +18,8 @@
 	@gif path /gif /gif/*
 	reverse_proxy @gif go-api:4000
 
-	#@stories path /stories /stories/*
-	#reverse_proxy @stories go-api:4000
+	@stories path /stories /stories/*
+	reverse_proxy @stories go-api:4000
 
 	#@user path /user /user/*
 	#reverse_proxy @user go-api:4000

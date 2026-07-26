@@ -12,10 +12,46 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
+
+// JSTime marshals like JS Date.toISOString(): UTC, fixed 3-digit ms — the
+// format node-pg dates take in every Node response.
+type JSTime time.Time
+
+func (t JSTime) MarshalJSON() ([]byte, error) {
+	return []byte(time.Time(t).UTC().Format(`"2006-01-02T15:04:05.000Z"`)), nil
+}
+
+// JST wraps a nullable pg timestamp for response structs.
+func JST(t *time.Time) *JSTime {
+	if t == nil {
+		return nil
+	}
+	j := JSTime(*t)
+	return &j
+}
+
+var intPrefixRe = regexp.MustCompile(`^\s*[+-]?\d+`)
+
+// ParseIntPrefix mirrors JS parseInt(s, 10): trims, reads an optional sign +
+// leading digits, ignores the rest. false = NaN. (Hex '0x' inputs diverge —
+// no Node route receives them.)
+func ParseIntPrefix(s string) (int64, bool) {
+	m := intPrefixRe.FindString(s)
+	if m == "" {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(strings.TrimSpace(m), 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
 
 type ctxKey int
 

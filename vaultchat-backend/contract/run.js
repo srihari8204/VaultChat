@@ -240,11 +240,91 @@ async function main() {
       && typeof r.json?.next === 'string', 'gif search → normalized results', r);
   }
 
+  console.log('stories (deep):');
+  r = await req('GET', '/stories/privacy', { token: A.jwt });
+  check(r.status === 200 && typeof r.json?.mode === 'string' && Array.isArray(r.json?.userIds), 'privacy → {mode, userIds}', r);
+  r = await req('PUT', '/stories/privacy', { token: A.jwt, body: { mode: 'only', userIds: [B.id] } });
+  check(r.status === 200 && r.json?.ok === true, 'privacy PUT only:[B] → {ok}', r);
+  r = await req('GET', '/stories/privacy', { token: A.jwt });
+  check(r.json?.mode === 'only' && r.json?.userIds?.length === 1 && r.json?.userIds?.[0] === B.id, 'privacy round-trips', r);
+  r = await req('GET', '/stories/audience', { token: A.jwt });
+  check(r.status === 200 && Array.isArray(r.json?.viewerIds) && r.json.viewerIds.length === 1
+    && r.json.viewerIds[0] === B.id, "audience honors 'only' filter", r);
+  r = await req('PUT', '/stories/privacy', { token: A.jwt, body: { mode: 'contacts' } });
+  check(r.status === 200 && r.json?.ok === true, 'privacy reset to contacts', r);
+
+  r = await req('POST', '/stories', { token: A.jwt, body: {} });
+  check(r.status === 400 && r.json?.error === 'attachmentId required', 'post w/o attachment → exact 400', r);
+  r = await req('POST', '/stories', { token: A.jwt, body: { attachmentId: 'x', mediaType: 'gif' } });
+  check(r.status === 400 && r.json?.error === 'mediaType must be image or video', 'bad mediaType → exact 400', r);
+  r = await req('POST', '/stories', { token: A.jwt, body: { mediaType: 'text', text: '   ' } });
+  check(r.status === 400 && r.json?.error === 'text required', 'text story w/o text → exact 400', r);
+
+  // text story lifecycle, with the live story_posted push to B's socket
+  // (through the internal emit bridge when Go serves /stories).
+  let storyPush = null;
+  try {
+    const { s: sb } = await (async () => {
+      const s = io(BASE, { transports: ['websocket'], auth: { token: B.jwt }, reconnection: false });
+      await new Promise((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error('connect timeout')), 10000);
+        s.on('ready', () => { clearTimeout(t); resolve(); });
+        s.on('connect_error', (e) => { clearTimeout(t); reject(e); });
+      });
+      return { s };
+    })();
+    storyPush = new Promise((resolve) => {
+      const t = setTimeout(() => resolve(null), 8000);
+      sb.on('story_posted', (d) => { if (d?.userId === A.id) { clearTimeout(t); resolve(d); } });
+    });
+    r = await req('POST', '/stories', { token: A.jwt, body: { mediaType: 'text', text: 'contract story', bgColor: '#112233' } });
+    check(r.status === 200 && /^\d+$/.test(r.json?.id || '') && r.json?.mediaType === 'text'
+      && r.json?.text === 'contract story' && r.json?.bgColor === '#112233' && r.json?.caption === null,
+      'text story post → exact shape (bigint id as string)', r);
+    const storyId = r.json?.id;
+    check(!!(await storyPush), "story post → 'story_posted' pushed to B's socket");
+    sb.disconnect();
+
+    r = await req('GET', '/stories/feed', { token: B.jwt });
+    const aBucket = Array.isArray(r.json) ? r.json.find(x => x.userId === A.id) : null;
+    const inFeed = aBucket?.stories?.find?.(s => s.id === storyId);
+    check(!!inFeed && inFeed.text === 'contract story' && inFeed.seen === false
+      && hasKeys(aBucket, ['userId', 'name', 'email', 'photoURL', 'isMine', 'stories', 'seenAll', 'latestAt']),
+      'B feed shows A bucket with the story, unseen', { bucket: !!aBucket, inFeed: !!inFeed });
+
+    r = await req('POST', `/stories/${storyId}/viewed`, { token: B.jwt });
+    check(r.status === 200 && r.json?.ok === true && !('noop' in (r.json || {})), 'B marks viewed → {ok}', r);
+    r = await req('POST', `/stories/${storyId}/viewed`, { token: B.jwt });
+    check(r.status === 200 && r.json?.ok === true, 'viewed is idempotent', r);
+    r = await req('POST', `/stories/${storyId}/viewed`, { token: A.jwt });
+    check(r.status === 200 && r.json?.ok === true && r.json?.noop === true, 'author view → {ok, noop}', r);
+
+    r = await req('GET', `/stories/${storyId}/views`, { token: B.jwt });
+    check(r.status === 403 && r.json?.error === 'author only', 'views by non-author → exact 403', r);
+    r = await req('GET', `/stories/${storyId}/views`, { token: A.jwt });
+    const viewRow = Array.isArray(r.json) ? r.json.find(v => v.userId === B.id) : null;
+    check(!!viewRow && hasKeys(viewRow, ['userId', 'name', 'email', 'photoURL', 'viewedAt']), 'author sees B in viewers', r);
+    r = await req('GET', `/stories/${storyId}/key`, { token: B.jwt });
+    check(r.status === 404 && r.json?.error === 'no key for viewer', 'key for unencrypted story → exact 404', r);
+
+    r = await req('GET', '/stories/abc/views', { token: A.jwt });
+    check(r.status === 400 && r.json?.error === 'invalid id', 'non-numeric id → exact 400', r);
+    r = await req('GET', '/stories/999999999/views', { token: A.jwt });
+    check(r.status === 404 && r.json?.error === 'story not found', 'unknown story id → exact 404', r);
+
+    r = await req('DELETE', `/stories/${storyId}`, { token: B.jwt });
+    check(r.status === 404 && r.json?.error === 'not found or not author', 'delete by non-author → exact 404', r);
+    r = await req('DELETE', `/stories/${storyId}`, { token: A.jwt });
+    check(r.status === 200 && r.json?.ok === true, 'author delete → {ok}', r);
+    r = await req('DELETE', `/stories/${storyId}`, { token: A.jwt });
+    check(r.status === 404 && r.json?.error === 'not found or not author', 'double delete → exact 404', r);
+  } catch (e) {
+    check(false, `stories harness: ${e.message}`);
+  }
+
   // ── module smokes (promoted to deep fixtures at each route's cutover) ─
   console.log('module smokes:');
   const smokes = [
-    ['stories', 'GET', '/stories/feed', { token: A.jwt }, (x) => x.status === 200],
-    ['stories', 'GET', '/stories/privacy', { token: A.jwt }, (x) => x.status === 200 && !!x.json],
     ['communities', 'GET', '/communities', { token: A.jwt }, (x) => x.status === 200],
     ['calls', 'POST', '/call/initiate', { token: A.jwt, body: {} }, (x) => x.status >= 400 && x.status < 500 && !!x.json?.error],
     ['channels', 'GET', '/channels', { token: A.jwt }, (x) => x.status === 200],

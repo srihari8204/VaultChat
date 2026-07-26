@@ -4,14 +4,21 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var Pool *pgxpool.Pool
+
+// NoRows reports whether err is pgx's no-result sentinel. Routes must map it
+// (and ONLY it) to Node's 404s — any other DB error stays a 500, so an outage
+// never masquerades as "not found" and makes clients purge local state.
+func NoRows(err error) bool { return errors.Is(err, pgx.ErrNoRows) }
 
 func env(k, def string) string {
 	if v := os.Getenv(k); v != "" {

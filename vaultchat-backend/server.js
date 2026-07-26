@@ -146,6 +146,26 @@ try {
 const adminRouter = require('./routes/admin');
 app.use('/api/admin', adminRouter);
 
+// ── Internal emit bridge (Phase 2) ──────────────────────────────────────
+// Go-served routes bridge their socket emits here while Node still owns all
+// sockets (until Step 5). Reachable ONLY in-network: Caddy refuses /internal/*
+// from outside, and the key must match INTERNAL_EMIT_KEY. Body:
+//   { rooms?: ['user:<uid>', 'chat:<id>', ...], userIds?: [uid...], event, payload }
+app.post('/internal/emit', (req, res) => {
+  const key = process.env.INTERNAL_EMIT_KEY || '';
+  if (!key || req.get('x-internal-key') !== key) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  const { rooms, userIds, event, payload } = req.body || {};
+  if (!event || typeof event !== 'string') return res.status(400).json({ error: 'event required' });
+  const targets = [
+    ...(Array.isArray(rooms) ? rooms.filter(r => typeof r === 'string') : []),
+    ...(Array.isArray(userIds) ? userIds.filter(u => typeof u === 'string').map(u => `user:${u}`) : []),
+  ];
+  for (const room of targets) io.to(room).emit(event, payload);
+  res.json({ ok: true, rooms: targets.length });
+});
+
 // Wire the chats router so its REST writes broadcast over sockets.
 chatsRouter.setBroadcasters({
   // payload.senderId drives block-list suppression in fanOutToChat. Other

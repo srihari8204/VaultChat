@@ -41,6 +41,7 @@ func main() {
 	routes.RegisterContacts(mux)
 	routes.RegisterLink(mux)
 	routes.RegisterGif(mux)
+	routes.RegisterStories(mux)
 
 	// Anything else reaching us is a proxy misconfiguration — say so loudly.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
