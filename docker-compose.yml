@@ -58,6 +58,8 @@ services:
       # owns all sockets until Step 5). Internal-only; never proxied by Caddy.
       NODE_INTERNAL_URL: http://api:3000
       INTERNAL_EMIT_KEY: ${INTERNAL_EMIT_KEY:-bench-internal-emit}
+    ports:
+      - "14000:4000"          # direct access for tools/shadow-diff (bench only)
     depends_on:
       postgres:
         condition: service_healthy
