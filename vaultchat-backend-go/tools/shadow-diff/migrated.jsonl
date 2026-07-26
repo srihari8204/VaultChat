@@ -14,3 +14,8 @@
 {"method":"GET","path":"/stories/audience"}
 {"method":"GET","path":"/stories/999999999/views"}
 {"method":"GET","path":"/stories/abc/views"}
+{"method":"GET","path":"/games/profile"}
+{"method":"GET","path":"/games/history"}
+{"method":"GET","path":"/games/leaderboard"}
+{"method":"GET","path":"/communities"}
+{"method":"POST","path":"/nav/route","body":{}}

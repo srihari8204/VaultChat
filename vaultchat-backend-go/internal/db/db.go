@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -19,6 +20,28 @@ var Pool *pgxpool.Pool
 // (and ONLY it) to Node's 404s — any other DB error stays a 500, so an outage
 // never masquerades as "not found" and makes clients purge local state.
 func NoRows(err error) bool { return errors.Is(err, pgx.ErrNoRows) }
+
+// WithUser mirrors Node db.withUser: a transaction with app.current_user_id
+// set so the RLS policies (004_rls.sql) see the caller. uid is single-quote-
+// escaped exactly like Node (SET LOCAL takes no bind parameters).
+func WithUser(ctx context.Context, userID string, fn func(pgx.Tx) error) error {
+	if userID == "" {
+		return errors.New("withUser requires a userId")
+	}
+	uid := strings.ReplaceAll(userID, "'", "''")
+	tx, err := Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck — no-op after Commit
+	if _, err := tx.Exec(ctx, "SET LOCAL app.current_user_id = '"+uid+"'"); err != nil {
+		return err
+	}
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
 
 func env(k, def string) string {
 	if v := os.Getenv(k); v != "" {

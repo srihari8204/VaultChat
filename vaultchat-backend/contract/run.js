@@ -322,16 +322,56 @@ async function main() {
     check(false, `stories harness: ${e.message}`);
   }
 
+  console.log('games (deep):');
+  r = await req('GET', '/games/profile', { token: A.jwt });
+  check(r.status === 200 && hasKeys(r.json, ['coins', 'wins', 'losses', 'gamesPlayed'])
+    && typeof r.json?.coins === 'number', 'profile → {coins, wins, losses, gamesPlayed} numbers', r);
+  r = await req('GET', '/games/history', { token: A.jwt });
+  check(r.status === 200 && Array.isArray(r.json), 'history → array', r);
+  r = await req('GET', '/games/leaderboard', { token: A.jwt });
+  check(r.status === 200 && Array.isArray(r.json), 'leaderboard → array', r);
+
+  console.log('communities (deep):');
+  r = await req('POST', '/communities', { token: A.jwt, body: {} });
+  check(r.status === 400 && r.json?.error === 'name required', 'create w/o name → exact 400', r);
+  r = await req('POST', '/communities', { token: A.jwt, body: { name: 'Contract Community' } });
+  check(r.status === 200 && hasKeys(r.json, ['id', 'name', 'description', 'photoURL', 'announcementChatId'])
+    && r.json?.name === 'Contract Community' && r.json?.description === null, 'create → full stub', r);
+  const commId = r.json?.id;
+  r = await req('GET', '/communities', { token: A.jwt });
+  check(r.status === 200 && Array.isArray(r.json?.communities)
+    && r.json.communities.some(c => c.id === commId && typeof c.groupCount === 'number'),
+    'list contains new community with numeric groupCount', r);
+  r = await req('GET', `/communities/${commId}`, { token: A.jwt });
+  check(r.status === 200 && r.json?.isOwner === true && Array.isArray(r.json?.groups)
+    && r.json.groups.length === 1 && r.json.groups[0].isAnnouncement === true && r.json.groups[0].members === 1,
+    'detail → owner + announcement group', r);
+  r = await req('GET', `/communities/${commId}`, { token: B.jwt });
+  check(r.status === 403 && r.json?.error === 'Not a community member', 'non-member detail → exact 403', r);
+  r = await req('GET', '/communities/00000000-0000-0000-0000-000000000000', { token: A.jwt });
+  check(r.status === 404 && r.json?.error === 'Community not found', 'unknown id → exact 404', r);
+  r = await req('POST', `/communities/${commId}/groups`, { token: A.jwt, body: {} });
+  check(r.status === 400 && r.json?.error === 'name required', 'sub-group w/o name → exact 400', r);
+  r = await req('POST', `/communities/${commId}/groups`, { token: B.jwt, body: { name: 'Nope' } });
+  check(r.status === 403 && r.json?.error === 'Not a community member', 'sub-group by non-member → exact 403', r);
+  r = await req('POST', `/communities/${commId}/groups`, { token: A.jwt, body: { name: 'Contract Sub' } });
+  check(r.status === 200 && !!r.json?.id && r.json?.name === 'Contract Sub', 'sub-group create → {id, name}', r);
+
+  console.log('nav (deep):');
+  r = await req('POST', '/nav/route', { token: A.jwt, body: {} });
+  check(r.status === 400 && r.json?.error === 'from{lat,lng} + to{lat,lng} required', 'no coords → exact 400', r);
+  r = await req('POST', '/nav/route', { token: A.jwt, body: { from: { lat: '17.4', lng: 78.4 }, to: { lat: 17.5, lng: 78.5 } } });
+  check(r.status === 400 && r.json?.error === 'from{lat,lng} + to{lat,lng} required', 'string lat → exact 400', r);
+  r = await req('POST', '/nav/route', { token: A.jwt, body: { from: { lat: 17.4, lng: 78.4 }, to: { lat: 17.5, lng: 78.5 } } });
+  check((r.status === 503 && r.json?.error === 'routing engine unavailable') || (r.status === 200 && !!r.json?.trip),
+    'valid coords → trip (engine up) or exact 503 (engine down)', r);
+
   // ── module smokes (promoted to deep fixtures at each route's cutover) ─
   console.log('module smokes:');
   const smokes = [
-    ['communities', 'GET', '/communities', { token: A.jwt }, (x) => x.status === 200],
     ['calls', 'POST', '/call/initiate', { token: A.jwt, body: {} }, (x) => x.status >= 400 && x.status < 500 && !!x.json?.error],
     ['channels', 'GET', '/channels', { token: A.jwt }, (x) => x.status === 200],
-    ['games', 'GET', '/games/profile', { token: A.jwt }, (x) => x.status === 200 && !!x.json],
-    ['games', 'GET', '/games/leaderboard', { token: A.jwt }, (x) => x.status === 200],
     ['vaultbeam', 'GET', '/vaultbeam/relay/00000000-0000-0000-0000-000000000000', { token: A.jwt }, (x) => x.status === 404 && !!x.json],
-    ['nav', 'POST', '/nav/route', { token: A.jwt, body: {} }, (x) => x.status >= 400 && !!x.json],
     ['vaultlens', 'GET', '/vaultlens/catalog', { token: A.jwt }, (x) => x.status === 200 && !!x.json],
     ['vaultlens', 'GET', '/vaultlens/quota', { token: A.jwt }, (x) => x.status === 200 && !!x.json],
     ['uploads', 'GET', '/uploads/00000000-0000-0000-0000-000000000000', { token: A.jwt }, (x) => [400, 404].includes(x.status)],

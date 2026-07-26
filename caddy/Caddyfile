@@ -36,8 +36,8 @@
 	#@ai path /ai /ai/*
 	#reverse_proxy @ai go-api:4000
 
-	#@communities path /communities /communities/*
-	#reverse_proxy @communities go-api:4000
+	@communities path /communities /communities/*
+	reverse_proxy @communities go-api:4000
 
 	#@call path /call /call/*
 	#reverse_proxy @call go-api:4000
@@ -45,14 +45,14 @@
 	#@channels path /channels /channels/*
 	#reverse_proxy @channels go-api:4000
 
-	#@games path /games /games/*
-	#reverse_proxy @games go-api:4000
+	@games path /games /games/*
+	reverse_proxy @games go-api:4000
 
 	#@vaultbeam path /vaultbeam /vaultbeam/*
 	#reverse_proxy @vaultbeam go-api:4000
 
-	#@nav path /nav /nav/*
-	#reverse_proxy @nav go-api:4000
+	@nav path /nav /nav/*
+	reverse_proxy @nav go-api:4000
 
 	#@vaultlens path /vaultlens /vaultlens/*
 	#reverse_proxy @vaultlens go-api:4000
