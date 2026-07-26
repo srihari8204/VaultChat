@@ -19,3 +19,7 @@
 {"method":"GET","path":"/games/leaderboard"}
 {"method":"GET","path":"/communities"}
 {"method":"POST","path":"/nav/route","body":{}}
+{"method":"GET","path":"/auth/profile"}
+{"method":"POST","path":"/auth/refresh","body":{}}
+{"method":"POST","path":"/auth/lookup","body":{}}
+{"method":"GET","path":"/auth/security-questions/00000000-0000-0000-0000-000000000000"}

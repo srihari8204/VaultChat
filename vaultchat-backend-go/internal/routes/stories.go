@@ -229,13 +229,13 @@ func storiesPost(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := httpx.UserFrom(r)
 	var b struct {
-		AttachmentID any    `json:"attachmentId"`
-		MediaType    any    `json:"mediaType"`
-		Caption      any    `json:"caption"`
-		Encrypted    any    `json:"encrypted"`
-		Keys         []any  `json:"keys"`
-		Text         any    `json:"text"`
-		BgColor      any    `json:"bgColor"`
+		AttachmentID any   `json:"attachmentId"`
+		MediaType    any   `json:"mediaType"`
+		Caption      any   `json:"caption"`
+		Encrypted    any   `json:"encrypted"`
+		Keys         []any `json:"keys"`
+		Text         any   `json:"text"`
+		BgColor      any   `json:"bgColor"`
 	}
 	_ = httpx.Body(r, &b)
 	attachmentID := fmt.Sprintf("%v", orEmpty(b.AttachmentID))

@@ -24,8 +24,8 @@
 	#@user path /user /user/*
 	#reverse_proxy @user go-api:4000
 
-	#@auth path /auth /auth/*
-	#reverse_proxy @auth go-api:4000
+	@auth path /auth /auth/*
+	reverse_proxy @auth go-api:4000
 
 	#@chats path /chats /chats/*
 	#reverse_proxy @chats go-api:4000

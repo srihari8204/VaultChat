@@ -45,6 +45,7 @@ func main() {
 	routes.RegisterNav(mux)
 	routes.RegisterGames(mux)
 	routes.RegisterCommunities(mux)
+	routes.RegisterAuth(mux)
 
 	// Anything else reaching us is a proxy misconfiguration — say so loudly.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
