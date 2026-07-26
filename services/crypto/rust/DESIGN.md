@@ -1,10 +1,33 @@
 # Rust crypto core — Phase 1 design note
 
-Status: **implemented (Steps 0–5)** — crate + bindings + facade + parity all
-landed on this branch. TS crypto in `services/crypto/*` stays the default and
-the permanent fallback. The Rust core ships DISABLED
-(`EXPO_PUBLIC_CRYPTO_BACKEND` defaults to `'ts'`); parity is green (17/17
-cross-backend checks + 13 Rust tests incl. byte-exact golden vectors).
+Status: **implemented (Steps 0–5) + device-validated (Step 6, 2026-07-26)** —
+crate + bindings + facade + parity all landed on this branch. TS crypto in
+`services/crypto/*` stays the default and the permanent fallback. The Rust
+core ships DISABLED (`EXPO_PUBLIC_CRYPTO_BACKEND` defaults to `'ts'`); parity
+is green (17/17 cross-backend checks + 13 Rust tests incl. byte-exact golden
+vectors).
+
+## 0. Device validation record (Step 6)
+
+Release APK built with `EXPO_PUBLIC_CRYPTO_BACKEND=rust` through the full
+untested-until-now chain: `expo prebuild` (withCryptoCore) → cargo-ndk
+(4 Android targets) → CMake link → gradle `assembleRelease`. Verified:
+
+- APK contains `lib/<abi>/libvaultcrypto.so` for all 4 ABIs
+  (arm64-v8a 2.0 MB, armeabi-v7a 1.5 MB, x86 2.2 MB, x86_64 2.2 MB).
+- Flag inlining confirmed: the string `EXPO_PUBLIC_CRYPTO_BACKEND` is absent
+  from the Hermes bundle (babel-preset-expo replaced it with the literal).
+- On a Pixel 6 Pro AVD (android-36 google_apis x86_64): app installs, JS
+  bundle runs, NitroModules + libvaultcrypto.so load OK, **no**
+  `[crypto] rust backend unavailable` breadcrumb → `initNativeCrypto()`
+  (bind + native self-check) passed on-device. No crash over the session.
+- Host-side `npm run test:e2ee` (incl. 17/17 TS↔Rust live parity) green the
+  same day.
+
+Remaining before flipping the flag for users: soak on a physical arm64 device
+(the emulator exercised the x86_64 .so; the arm64 slice is cross-compiled from
+the same code but has not executed on hardware) — install this APK on the dev
+phone, chat both directions, watch Sentry for the fallback breadcrumb.
 
 ## 1. Binding strategy — Decision: Option A (Nitro HybridObject over a C-ABI Rust staticlib)
 
