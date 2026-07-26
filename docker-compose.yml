@@ -15,6 +15,55 @@
 # pgbouncer + the fan-out/push workers get added as we extract those services.
 
 services:
+  # ── caddy — THE migration switch (Phase 2 Step 2) ────────────────────
+  # The app keeps ONE SERVER_URL pointed here. Every path routes to Node by
+  # default; caddy/Caddyfile flips individual routes to the Go backend with
+  # one line each (and back — that's the per-route instant rollback).
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+    ports:
+      - "18080:80"            # bench/staging entry; prod binds 80/443 here
+    depends_on:
+      - api
+
+  # ── go-api — the strangler backend (Phase 2 Step 3+) ─────────────────
+  # Serves only the routes Caddy sends it; shares the SAME postgres/redis/
+  # kafka/minio as Node. Never receives traffic unless the Caddyfile says so.
+  go-api:
+    build:
+      context: ./vaultchat-backend-go
+    restart: unless-stopped
+    env_file:
+      - path: ./vaultchat-backend/.env     # same JWT_SECRET etc. as Node
+        required: false
+    environment:
+      PORT: "4000"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: vaultchat
+      DB_USER: vaultchat
+      DB_PASS: ${DB_PASS:-vaultchat_dev}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASS: ""
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: http://65.21.229.167:19000
+      S3_BUCKET: vaultchat-media
+      S3_ACCESS_KEY: ${MINIO_USER:-vaultchat}
+      S3_SECRET_KEY: ${MINIO_PASS:-vaultchat_dev_secret}
+      # Socket emits from Go-served routes bridge to the Node process (which
+      # owns all sockets until Step 5). Internal-only; never proxied by Caddy.
+      NODE_INTERNAL_URL: http://api:3000
+      INTERNAL_EMIT_KEY: ${INTERNAL_EMIT_KEY:-bench-internal-emit}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
   postgres:
     image: postgres:16
     restart: unless-stopped

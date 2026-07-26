@@ -1,0 +1,70 @@
+# VaultChat migration proxy — THE per-route switch (Phase 2 Step 2).
+#
+# Default: EVERYTHING → Node (api:3000), including Socket.IO websockets.
+# Each route below is a self-contained two-line block. To cut a route over
+# to Go: uncomment its block. To roll back: comment it and
+# `docker compose restart caddy` (sub-second). That is the whole rollback.
+
+:80 {
+	encode gzip
+
+	# ── migrated routes (uncomment a block to cut it over to Go) ─────
+	@contacts path /contacts /contacts/*
+	reverse_proxy @contacts go-api:4000
+
+	@link path /link /link/*
+	reverse_proxy @link go-api:4000
+
+	@gif path /gif /gif/*
+	reverse_proxy @gif go-api:4000
+
+	#@stories path /stories /stories/*
+	#reverse_proxy @stories go-api:4000
+
+	#@user path /user /user/*
+	#reverse_proxy @user go-api:4000
+
+	#@auth path /auth /auth/*
+	#reverse_proxy @auth go-api:4000
+
+	#@chats path /chats /chats/*
+	#reverse_proxy @chats go-api:4000
+
+	#@uploads path /uploads /uploads/*
+	#reverse_proxy @uploads go-api:4000
+
+	#@ai path /ai /ai/*
+	#reverse_proxy @ai go-api:4000
+
+	#@communities path /communities /communities/*
+	#reverse_proxy @communities go-api:4000
+
+	#@call path /call /call/*
+	#reverse_proxy @call go-api:4000
+
+	#@channels path /channels /channels/*
+	#reverse_proxy @channels go-api:4000
+
+	#@games path /games /games/*
+	#reverse_proxy @games go-api:4000
+
+	#@vaultbeam path /vaultbeam /vaultbeam/*
+	#reverse_proxy @vaultbeam go-api:4000
+
+	#@nav path /nav /nav/*
+	#reverse_proxy @nav go-api:4000
+
+	#@vaultlens path /vaultlens /vaultlens/*
+	#reverse_proxy @vaultlens go-api:4000
+
+	#@admin path /api/admin /api/admin/*
+	#reverse_proxy @admin go-api:4000
+
+	# The internal emit bridge is Node-only and must NEVER be reachable
+	# from outside — refuse it at the proxy regardless of backend flags.
+	@internal path /internal/*
+	respond @internal 404
+
+	# ── everything else → Node (incl. /socket.io websocket upgrade) ──
+	reverse_proxy api:3000
+}
