@@ -514,13 +514,42 @@ async function main() {
   r = await req('GET', `/vaultbeam/relay/${vbId}`, { token: A.jwt });
   check(r.status === 200 && r.json?.state === 'aborted', 'transfer state → aborted', r);
 
+  console.log('admin (deep):');
+  // Bench sets ADMIN_KEY=bench-admin-key (docker-compose.bench.yml) so the
+  // whole admin surface is exercisable; without it only the 503 smoke runs.
+  const AKEY = process.env.ADMIN_KEY || 'bench-admin-key';
+  const admin = (method, p, body) => fetch(`${BASE}${p}`, {
+    method,
+    headers: { 'x-admin-key': AKEY, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  }).then(async (x) => ({ status: x.status, json: await x.json().catch(() => null) }));
+  r = await req('GET', '/api/admin/stats');
+  if (r.status === 503) {
+    check(!!r.json?.error, 'admin: 503 when ADMIN_KEY unset', r);
+  } else {
+    check(r.status === 401 && !!r.json?.error, 'stats w/o key → 401', r);
+    r = await admin('GET', '/api/admin/stats');
+    check(r.status === 200 && !!r.json, 'stats with key → 200 JSON', r);
+    r = await admin('GET', '/api/admin/users?limit=5');
+    check(r.status === 200 && !!r.json, 'users list → 200 JSON', r);
+    r = await admin('GET', '/api/admin/messages');
+    check(r.status === 200 && !!r.json, 'messages firehose → 200 JSON', r);
+    r = await admin('GET', '/api/admin/sessions');
+    check(r.status === 200 && !!r.json, 'sessions → 200 JSON', r);
+    r = await admin('POST', '/api/admin/broadcast', {});
+    check(r.status === 400 && r.json?.error === 'text required', 'broadcast w/o text → exact 400', r);
+    r = await admin('POST', '/api/admin/broadcast', { text: 'contract announcement' });
+    check(r.status === 200 && r.json?.ok === true && r.json?.payload?.text === 'contract announcement'
+      && typeof r.json?.delivered === 'number', 'broadcast → {ok, delivered, payload}', r);
+    r = await admin('GET', '/api/admin/health-detail');
+    check(r.status === 200 && !!r.json, 'health-detail → 200 JSON', r);
+  }
+
   // ── module smokes (promoted to deep fixtures at each route's cutover) ─
   console.log('module smokes:');
   const smokes = [
     ['vaultlens', 'GET', '/vaultlens/catalog', { token: A.jwt }, (x) => x.status === 200 && !!x.json],
     ['vaultlens', 'GET', '/vaultlens/quota', { token: A.jwt }, (x) => x.status === 200 && !!x.json],
-    // 503 when ADMIN_KEY unset (bench), 401/403 when set and wrong.
-    ['admin', 'GET', '/api/admin/stats', {}, (x) => [401, 403, 503].includes(x.status) && !!x.json?.error],
   ];
   for (const [mod, method, p, opts, ok] of smokes) {
     try {

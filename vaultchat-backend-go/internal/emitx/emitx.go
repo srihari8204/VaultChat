@@ -16,14 +16,16 @@ import (
 
 var client = &http.Client{Timeout: 3 * time.Second}
 
-func post(body map[string]any) {
+func post(body map[string]any) { postTo("/internal/emit", body) }
+
+func postTo(path string, body map[string]any) {
 	base := os.Getenv("NODE_INTERNAL_URL")
 	key := os.Getenv("INTERNAL_EMIT_KEY")
 	if base == "" || key == "" {
 		return
 	}
 	data, _ := json.Marshal(body)
-	req, err := http.NewRequest("POST", base+"/internal/emit", bytes.NewReader(data))
+	req, err := http.NewRequest("POST", base+path, bytes.NewReader(data))
 	if err != nil {
 		return
 	}
@@ -51,4 +53,21 @@ func ToRooms(rooms []string, event string, payload any) {
 		return
 	}
 	go post(map[string]any{"rooms": rooms, "event": event, "payload": payload})
+}
+
+// Broadcast emits to EVERY connected socket (admin announcements).
+func Broadcast(event string, payload any) {
+	go post(map[string]any{"broadcast": true, "event": event, "payload": payload})
+}
+
+// ChatNewMessage / ChatEvent hand a chat-route write to Node's exact
+// broadcaster path (kafka-or-fanout + block-list filtering + admin mirror)
+// via POST /internal/chat-event. Synchronous variants are unnecessary — a
+// dropped bridge call degrades like a dropped socket.
+func ChatNewMessage(chatID string, payload any) {
+	go postTo("/internal/chat-event", map[string]any{"kind": "new_message", "chatId": chatID, "payload": payload})
+}
+
+func ChatEvent(chatID, event string, payload any) {
+	go postTo("/internal/chat-event", map[string]any{"kind": "chat_event", "chatId": chatID, "event": event, "payload": payload})
 }

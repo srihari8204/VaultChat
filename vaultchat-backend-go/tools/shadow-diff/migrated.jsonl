@@ -35,3 +35,5 @@
 {"method":"GET","path":"/channels"}
 {"method":"GET","path":"/channels/00000000-0000-0000-0000-000000000000/posts"}
 {"method":"GET","path":"/vaultbeam/relay/00000000-0000-0000-0000-000000000000"}
+{"method":"GET","path":"/vaultlens/catalog"}
+{"method":"GET","path":"/vaultlens/quota"}

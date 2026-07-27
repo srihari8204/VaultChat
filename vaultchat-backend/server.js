@@ -156,8 +156,12 @@ app.post('/internal/emit', (req, res) => {
   if (!key || req.get('x-internal-key') !== key) {
     return res.status(403).json({ error: 'forbidden' });
   }
-  const { rooms, userIds, event, payload } = req.body || {};
+  const { rooms, userIds, event, payload, broadcast } = req.body || {};
   if (!event || typeof event !== 'string') return res.status(400).json({ error: 'event required' });
+  if (broadcast === true) {
+    io.emit(event, payload); // every connected socket (admin /broadcast)
+    return res.json({ ok: true, broadcast: true });
+  }
   const targets = [
     ...(Array.isArray(rooms) ? rooms.filter(r => typeof r === 'string') : []),
     ...(Array.isArray(userIds) ? userIds.filter(u => typeof u === 'string').map(u => `user:${u}`) : []),
@@ -166,27 +170,44 @@ app.post('/internal/emit', (req, res) => {
   res.json({ ok: true, rooms: targets.length });
 });
 
+// Broadcast a chat-route write over sockets. Named (not inline in
+// setBroadcasters) so the internal bridge below can reuse the EXACT paths —
+// Go-served /chats calls land here and take the same kafka-or-fanout route.
+// payload.senderId drives block-list suppression in fanOutToChat. We ALSO
+// mirror a privacy-safe summary (no content) to the admin firehose.
+function broadcastNewMessage(chatId, payload) {
+  if (EVENT_BUS_KAFKA) {
+    // Decoupled delivery: the fan-out worker consumes this and emits via the
+    // Redis adapter. (Push still goes out from the route handler directly.)
+    kafka.publish(kafka.TOPICS.MESSAGE_CREATED, chatId, {
+      event: 'new_message', chatId, payload, senderId: payload?.senderId ?? null,
+    });
+  } else {
+    fanOutToChat(chatId, 'new_message', payload, payload?.senderId ?? null);
+  }
+  io.to('admin').emit('admin:event', { event: 'new_message', chatId, senderId: payload?.senderId ?? null, type: payload?.type ?? null, messageId: payload?.id ?? null, ts: Date.now() });
+}
+function broadcastChatEvent(chatId, event, payload) {
+  fanOutToChat(chatId, event, payload);
+  io.to('admin').emit('admin:event', { event, chatId, ts: Date.now() });
+}
+
 // Wire the chats router so its REST writes broadcast over sockets.
-chatsRouter.setBroadcasters({
-  // payload.senderId drives block-list suppression in fanOutToChat. Other
-  // chat events (typing, delivery, read, reactions) are sender-agnostic.
-  // We ALSO mirror a privacy-safe summary (no content) to the admin firehose.
-  newMessage: (chatId, payload) => {
-    if (EVENT_BUS_KAFKA) {
-      // Decoupled delivery: the fan-out worker consumes this and emits via the
-      // Redis adapter. (Push still goes out from the route handler directly.)
-      kafka.publish(kafka.TOPICS.MESSAGE_CREATED, chatId, {
-        event: 'new_message', chatId, payload, senderId: payload?.senderId ?? null,
-      });
-    } else {
-      fanOutToChat(chatId, 'new_message', payload, payload?.senderId ?? null);
-    }
-    io.to('admin').emit('admin:event', { event: 'new_message', chatId, senderId: payload?.senderId ?? null, type: payload?.type ?? null, messageId: payload?.id ?? null, ts: Date.now() });
-  },
-  chatEvent:  (chatId, event, payload) => {
-    fanOutToChat(chatId, event, payload);
-    io.to('admin').emit('admin:event', { event, chatId, ts: Date.now() });
-  },
+chatsRouter.setBroadcasters({ newMessage: broadcastNewMessage, chatEvent: broadcastChatEvent });
+
+// Bridge form of the same broadcasters, for chat routes served by Go.
+// { kind:'new_message', chatId, payload } | { kind:'chat_event', chatId, event, payload }
+app.post('/internal/chat-event', (req, res) => {
+  const key = process.env.INTERNAL_EMIT_KEY || '';
+  if (!key || req.get('x-internal-key') !== key) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  const { kind, chatId, event, payload } = req.body || {};
+  if (!chatId || typeof chatId !== 'string') return res.status(400).json({ error: 'chatId required' });
+  if (kind === 'new_message') broadcastNewMessage(chatId, payload);
+  else if (kind === 'chat_event' && typeof event === 'string') broadcastChatEvent(chatId, event, payload);
+  else return res.status(400).json({ error: 'bad kind' });
+  res.json({ ok: true });
 });
 
 // Expose the live runtime to the admin router (online count + socket emitter).

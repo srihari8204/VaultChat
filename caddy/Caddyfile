@@ -54,11 +54,11 @@
 	@nav path /nav /nav/*
 	reverse_proxy @nav go-api:4000
 
-	#@vaultlens path /vaultlens /vaultlens/*
-	#reverse_proxy @vaultlens go-api:4000
+	@vaultlens path /vaultlens /vaultlens/*
+	reverse_proxy @vaultlens go-api:4000
 
-	#@admin path /api/admin /api/admin/*
-	#reverse_proxy @admin go-api:4000
+	@admin path /api/admin /api/admin/*
+	reverse_proxy @admin go-api:4000
 
 	# The internal emit bridge is Node-only and must NEVER be reachable
 	# from outside — refuse it at the proxy regardless of backend flags.

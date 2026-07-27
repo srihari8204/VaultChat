@@ -52,6 +52,8 @@ func main() {
 	routes.RegisterChannels(mux)
 	routes.RegisterVaultbeam(mux)
 	routes.RegisterUser(mux)
+	routes.RegisterVaultlens(mux)
+	routes.RegisterAdmin(mux)
 
 	// Reap stale VaultBeam relay rows hourly (mirrors server.js).
 	go func() {

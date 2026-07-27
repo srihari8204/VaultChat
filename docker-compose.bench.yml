@@ -12,3 +12,7 @@ services:
       REDIS_ADAPTER: "0"
       EVENT_BUS: ""
       SENTRY_DSN: ""
+      ADMIN_KEY: bench-admin-key      # lets the contract suite exercise the admin surface
+  go-api:
+    environment:
+      ADMIN_KEY: bench-admin-key
