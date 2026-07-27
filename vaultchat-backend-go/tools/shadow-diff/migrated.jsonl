@@ -28,3 +28,10 @@
 {"method":"POST","path":"/call/initiate","body":{}}
 {"method":"POST","path":"/call/cancel","body":{}}
 {"method":"GET","path":"/uploads/00000000-0000-0000-0000-000000000000"}
+{"method":"GET","path":"/user/profile"}
+{"method":"GET","path":"/user/settings"}
+{"method":"GET","path":"/user/ghost-mode"}
+{"method":"GET","path":"/user/by-vault/no-such-vault-id-000"}
+{"method":"GET","path":"/channels"}
+{"method":"GET","path":"/channels/00000000-0000-0000-0000-000000000000/posts"}
+{"method":"GET","path":"/vaultbeam/relay/00000000-0000-0000-0000-000000000000"}

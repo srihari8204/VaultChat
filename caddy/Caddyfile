@@ -21,8 +21,8 @@
 	@stories path /stories /stories/*
 	reverse_proxy @stories go-api:4000
 
-	#@user path /user /user/*
-	#reverse_proxy @user go-api:4000
+	@user path /user /user/*
+	reverse_proxy @user go-api:4000
 
 	@auth path /auth /auth/*
 	reverse_proxy @auth go-api:4000
@@ -42,14 +42,14 @@
 	@call path /call /call/*
 	reverse_proxy @call go-api:4000
 
-	#@channels path /channels /channels/*
-	#reverse_proxy @channels go-api:4000
+	@channels path /channels /channels/*
+	reverse_proxy @channels go-api:4000
 
 	@games path /games /games/*
 	reverse_proxy @games go-api:4000
 
-	#@vaultbeam path /vaultbeam /vaultbeam/*
-	#reverse_proxy @vaultbeam go-api:4000
+	@vaultbeam path /vaultbeam /vaultbeam/*
+	reverse_proxy @vaultbeam go-api:4000
 
 	@nav path /nav /nav/*
 	reverse_proxy @nav go-api:4000

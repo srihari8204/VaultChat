@@ -448,11 +448,75 @@ async function main() {
     check(false, `uploads disk harness: ${e.message}`);
   }
 
+  console.log('user (deep):');
+  r = await req('GET', `/user/by-vault/@${profB.vaultId}`, { token: A.jwt });
+  check(r.status === 200 && r.json?.userId === B.id && hasKeys(r.json, ['userId', 'name', 'photoURL', 'vaultId']),
+    'by-vault (@-prefixed) → public stub', r);
+  r = await req('GET', '/user/by-vault/no-such-vault-id-000', { token: A.jwt });
+  check(r.status === 404 && r.json?.error === 'No user with that VaultID', 'by-vault unknown → exact 404', r);
+  r = await req('GET', `/user/${B.id}/identity`, { token: A.jwt });
+  check([200, 404].includes(r.status) && !!r.json, 'GET /user/:id/identity 200|404 JSON (bench users have no ik)', r);
+  r = await req('GET', '/user/ghost-mode', { token: A.jwt });
+  check(r.status === 200 && !!r.json, 'ghost-mode 200 JSON', r);
+  r = await req('GET', '/user/sessions', { token: A.jwt });
+  check(r.status === 200 && !!r.json, 'sessions 200 JSON', r);
+
+  console.log('channels (deep):');
+  r = await req('POST', '/channels', { token: A.jwt, body: {} });
+  check(r.status === 400 && r.json?.error === 'name required', 'create w/o name → exact 400', r);
+  r = await req('POST', '/channels', { token: A.jwt, body: { name: 'Contract Channel' } });
+  check(r.status === 200 && hasKeys(r.json, ['id', 'name', 'adminId', 'isAdmin', 'inviteCode'])
+    && r.json?.isAdmin === true && r.json?.subscriberCount === 1, 'create → publicChannel {subscriberCount:1}', r);
+  const chan = r.json;
+  r = await req('POST', '/channels/join', { token: B.jwt, body: {} });
+  check(r.status === 400 && r.json?.error === 'code required', 'join w/o code → exact 400', r);
+  r = await req('POST', '/channels/join', { token: B.jwt, body: { code: '0000-0000' } });
+  check(r.status === 404 && r.json?.error === 'No channel with that code', 'join unknown code → exact 404', r);
+  r = await req('POST', '/channels/join', { token: B.jwt, body: { code: (chan?.inviteCode || '').toLowerCase() } });
+  check(r.status === 200 && r.json?.id === chan?.id && r.json?.isAdmin === false && r.json?.subscriberCount === 2,
+    'join (lowercased code) → subscriberCount 2', r);
+  r = await req('POST', `/channels/${chan?.id}/posts`, { token: B.jwt, body: { text: 'nope' } });
+  check(r.status === 403 && r.json?.error === 'Only the admin can post', 'post by non-admin → exact 403', r);
+  r = await req('POST', `/channels/${chan?.id}/posts`, { token: A.jwt, body: {} });
+  check(r.status === 400 && r.json?.error === 'text required', 'post w/o text → exact 400', r);
+  r = await req('POST', `/channels/${chan?.id}/posts`, { token: A.jwt, body: { text: 'contract post' } });
+  check(r.status === 200 && !!r.json?.id && r.json?.text === 'contract post', 'admin post → post row', r);
+  r = await req('GET', `/channels/${chan?.id}/posts`, { token: B.jwt });
+  check(r.status === 200 && Array.isArray(r.json) && r.json.some(p => p.text === 'contract post' && p.authorId === A.id),
+    'subscriber reads posts', r);
+  r = await req('GET', `/channels/${chan?.id}/posts`, { token: STATE.users[10].jwt });
+  check(r.status === 403 && r.json?.error === 'Not subscribed', 'non-subscriber posts → exact 403', r);
+  r = await req('GET', '/channels/00000000-0000-0000-0000-000000000000/posts', { token: A.jwt });
+  check(r.status === 404 && r.json?.error === 'Channel not found', 'unknown channel → exact 404', r);
+  r = await req('GET', '/channels', { token: B.jwt });
+  check(r.status === 200 && Array.isArray(r.json) && r.json.some(c => c.id === chan?.id), 'B list contains channel', r);
+
+  console.log('vaultbeam (deep):');
+  const vbId = `contract${Date.now()}${Math.floor(Math.random() * 1e6)}`;
+  r = await req('POST', '/vaultbeam/relay/init', { token: A.jwt, body: {} });
+  check(r.status === 400 && r.json?.error === 'invalid transferId', 'init w/o transferId → exact 400', r);
+  r = await req('POST', '/vaultbeam/relay/init', { token: A.jwt, body: { transferId: vbId } });
+  check(r.status === 400 && r.json?.error === 'recipientId required', 'init w/o recipient → exact 400', r);
+  r = await req('POST', '/vaultbeam/relay/init', { token: A.jwt, body: { transferId: vbId, recipientId: A.id, totalBytes: 100 } });
+  check(r.status === 400 && r.json?.error === 'cannot send to self', 'init to self → exact 400', r);
+  r = await req('POST', '/vaultbeam/relay/init', { token: A.jwt, body: { transferId: vbId, recipientId: B.id, totalBytes: 0 } });
+  check(r.status === 400 && r.json?.error === 'invalid totalBytes', 'init zero bytes → exact 400', r);
+  r = await req('POST', '/vaultbeam/relay/init', { token: A.jwt, body: { transferId: vbId, recipientId: B.id, totalBytes: 13 * 1024 * 1024 * 1024 } });
+  check(r.status === 413 && r.json?.error === 'exceeds 12GB cap', 'init >12GB → exact 413', r);
+  r = await req('POST', '/vaultbeam/relay/init', { token: A.jwt, body: { transferId: vbId, recipientId: B.id, totalBytes: 1048576 } });
+  check(r.status === 200 && r.json?.transferId === vbId
+    && hasKeys(r.json, ['transferId', 'blockCount', 'chunkCount', 'chunkBytes', 'blockBytes', 'expiresAt']),
+    'init → transfer geometry', r);
+  r = await req('GET', `/vaultbeam/relay/${vbId}`, { token: A.jwt });
+  check(r.status === 200 && r.json?.isSender === true, 'sender polls transfer state', r);
+  r = await req('POST', '/vaultbeam/relay/abort', { token: A.jwt, body: { transferId: vbId } });
+  check(r.status === 200, 'abort → 200 (cleanup)', r);
+  r = await req('GET', `/vaultbeam/relay/${vbId}`, { token: A.jwt });
+  check(r.status === 200 && r.json?.state === 'aborted', 'transfer state → aborted', r);
+
   // ── module smokes (promoted to deep fixtures at each route's cutover) ─
   console.log('module smokes:');
   const smokes = [
-    ['channels', 'GET', '/channels', { token: A.jwt }, (x) => x.status === 200],
-    ['vaultbeam', 'GET', '/vaultbeam/relay/00000000-0000-0000-0000-000000000000', { token: A.jwt }, (x) => x.status === 404 && !!x.json],
     ['vaultlens', 'GET', '/vaultlens/catalog', { token: A.jwt }, (x) => x.status === 200 && !!x.json],
     ['vaultlens', 'GET', '/vaultlens/quota', { token: A.jwt }, (x) => x.status === 200 && !!x.json],
     // 503 when ADMIN_KEY unset (bench), 401/403 when set and wrong.
