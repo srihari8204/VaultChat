@@ -85,19 +85,56 @@ Per-feature: S3_* (+`S3_PUBLIC_ENDPOINT` for presign), `UPLOAD_DIR`,
 
 ## Remaining steps
 
-- **Step 3 tail**: /chats flip once the port lands + contract/realtime gates
-  pass (fixtures already exist and are deep — messaging core + socket
-  delivery through the bridge).
-- **Step 4 — workers**: `workers/vaultlens.js` (BullMQ consumer → ModelsLab
-  → R2) is independently portable. `workers/fanout.js` consumes Kafka
-  `message.created` and emits via the Socket.IO Redis adapter — port it
-  TOGETHER WITH Step 5 (same adapter wire dependency); until then the Node
-  workers keep running unchanged.
-- **Step 5 — realtime, LAST**: Go Socket.IO-v4-compatible server
-  (`zishang520/socket.io` + `socket.io-go-redis`) per REALTIME_DECISION.md.
-  Cutover = move the `/socket.io` route in Caddy; both servers share the
-  Redis adapter channels so emits cross during the transition. Client
-  untouched (websocket-only, `lib/socket.ts` unchanged).
+- **Step 3 — DONE**: all 17 REST modules on Go, flipped + proven (contract
+  both ways + shadow-diff), including `/chats` (the messaging core).
+- **Step 5 — realtime**: Go Socket.IO-v4-compatible server
+  (`zishang520/socket.io/v2`) in `internal/realtime`, mounted at `/socket.io`
+  on go-api. Single-node atomic cutover — NO redis adapter (this supersedes
+  the adapter-interop idea in REALTIME_DECISION.md; a cross-server adapter is
+  only needed for gradual multi-node cutover, which we don't do). Client
+  untouched (websocket-only, `lib/socket.ts` unchanged). Cutover = flip the
+  `/socket.io` route in Caddy.
+- **Step 4 — workers (deliberate split, NOT a full port):**
+  - `workers/fanout.js` consumes Kafka `message.created` and re-emits via the
+    Socket.IO redis adapter. It only runs when `EVENT_BUS=kafka`, which the
+    **prod shape leaves OFF** (single-process, in-process fan-out — see the
+    Step-0 gate). With Go realtime doing in-process `FanOutToChat`, this
+    matches prod exactly. Porting it now means porting a currently-unused
+    horizontal-scale path that also needs the redis adapter the realtime
+    layer deliberately omits — **premature; revisit only if Kafka scale-out
+    is re-enabled.**
+  - `workers/vaultlens.js` is a BullMQ **Worker** (ModelsLab render → R2 → DB).
+    Faithfully porting the BullMQ worker protocol to Go (distributed locks,
+    stalled-job detection, moveToActive/moveToFinished Lua, backoff) is a
+    bug-farm with **real cost** — duplicate paid ModelsLab calls / quota
+    corruption on any timing bug — for a 40-line, socket-independent process.
+    **Decision: the vaultlens worker stays in Node.** It is process-isolated
+    (`vaultlens-worker` compose service) and holds no sockets, so it is a
+    legitimate permanent split: Go owns the client-facing surface (REST +
+    WebSocket); Node runs background render jobs.
+  - The ONE realtime-coupled piece: the vaultlens **QueueEvents listener**
+    (job done → `vaultlens:ready` socket emit) currently lives in
+    `server.js` and uses Node's `io`. Once Go owns sockets, Node's `io` has
+    no clients, so this listener must push into Go instead: it POSTs to
+    go-api `/internal/emit` (the reverse of the outbound bridge — go-api
+    exposes the same key-guarded endpoint, backed by the realtime Hub). Env
+    `GO_INTERNAL_URL=http://go-api:4000` on the Node side enables it.
+
+## Realtime cutover — exact steps
+
+1. `internal/realtime` builds; `go build ./... && go vet ./internal/realtime`.
+2. main.go: mount `realtime.New().Handler()` at `/socket.io`; set the
+   `emitx.Local*` hooks to the Hub methods; add key-guarded `/internal/emit`
+   + `/internal/chat-event` handlers on go-api backed by the Hub (so leftover
+   Node emitters — the vaultlens listener — can push in).
+3. Node `server.js`: the vaultlens QueueEvents listener emits via the Go
+   bridge when `GO_INTERNAL_URL` is set (else local `io`, unchanged).
+4. Flip `/socket.io` (and the websocket upgrade) to go-api in Caddy.
+5. Gate: `node contract/run.js` realtime section against the proxy (handshake
+   auth reject, `ready.uid`, REST-send → `new_message` to member socket,
+   `typing_start` relay). Then soak calls/games/VaultBeam/live-location
+   ON-DEVICE before prod (the contract suite only covers the messaging core;
+   call ringing especially needs a real two-device check).
 
 ## Decommission checklist (Node retires only when ALL true)
 
