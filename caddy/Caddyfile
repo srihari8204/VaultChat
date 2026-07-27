@@ -33,14 +33,14 @@
 	#@uploads path /uploads /uploads/*
 	#reverse_proxy @uploads go-api:4000
 
-	#@ai path /ai /ai/*
-	#reverse_proxy @ai go-api:4000
+	@ai path /ai /ai/*
+	reverse_proxy @ai go-api:4000
 
 	@communities path /communities /communities/*
 	reverse_proxy @communities go-api:4000
 
-	#@call path /call /call/*
-	#reverse_proxy @call go-api:4000
+	@call path /call /call/*
+	reverse_proxy @call go-api:4000
 
 	#@channels path /channels /channels/*
 	#reverse_proxy @channels go-api:4000

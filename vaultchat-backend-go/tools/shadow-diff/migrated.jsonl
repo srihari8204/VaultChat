@@ -23,3 +23,7 @@
 {"method":"POST","path":"/auth/refresh","body":{}}
 {"method":"POST","path":"/auth/lookup","body":{}}
 {"method":"GET","path":"/auth/security-questions/00000000-0000-0000-0000-000000000000"}
+{"method":"POST","path":"/ai/chat","body":{}}
+{"method":"POST","path":"/ai/assist","body":{"task":"nope","text":"x"}}
+{"method":"POST","path":"/call/initiate","body":{}}
+{"method":"POST","path":"/call/cancel","body":{}}

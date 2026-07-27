@@ -366,10 +366,36 @@ async function main() {
   check((r.status === 503 && r.json?.error === 'routing engine unavailable') || (r.status === 200 && !!r.json?.trip),
     'valid coords → trip (engine up) or exact 503 (engine down)', r);
 
+  console.log('ai (deep):');
+  r = await req('POST', '/ai/chat', { token: A.jwt, body: {} });
+  check(r.status === 400 && r.json?.error === 'message required', 'chat w/o message → exact 400', r);
+  r = await req('POST', '/ai/assist', { token: A.jwt, body: { task: 'nope', text: 'x' } });
+  check(r.status === 400 && r.json?.error === 'unknown task', 'assist unknown task → exact 400', r);
+  r = await req('POST', '/ai/assist', { token: A.jwt, body: { task: 'summarize' } });
+  check(r.status === 400 && r.json?.error === 'text required', 'assist w/o text → exact 400', r);
+  r = await req('POST', '/ai/chat', { token: A.jwt, body: { message: 'hi' } });
+  check((r.status === 503 && r.json?.error === 'AI is unavailable right now') || (r.status === 200 && typeof r.json?.reply === 'string'),
+    'chat → reply (ollama up) or exact 503 (down)', r);
+
+  console.log('calls (deep):');
+  r = await req('POST', '/call/initiate', { token: A.jwt, body: {} });
+  check(r.status === 400 && r.json?.error === 'calleeId and callId required', 'initiate w/o ids → exact 400', r);
+  r = await req('POST', '/call/cancel', { token: A.jwt, body: {} });
+  check(r.status === 400 && r.json?.error === 'calleeId and callId required', 'cancel w/o ids → exact 400', r);
+  r = await req('POST', '/call/token', { token: A.jwt, body: {} });
+  check(r.status === 400 && r.json?.error === 'fcmToken required', 'token w/o fcmToken → exact 400', r);
+  const CT = STATE.users[pick()];
+  r = await req('POST', '/call/token', { token: CT.jwt, body: { fcmToken: `contract-fake-${Date.now()}` } });
+  check(r.status === 200 && r.json?.ok === true, 'token register → {ok}', r);
+  r = await req('POST', '/call/initiate', { token: A.jwt, body: { calleeId: CT.id, callId: 'contract-call' } });
+  check(r.status === 200 && r.json?.ok === true && r.json?.delivered === false,
+    'initiate → {ok, delivered:false} (no usable push path in bench)', r);
+  r = await req('POST', '/call/cancel', { token: A.jwt, body: { calleeId: CT.id, callId: 'contract-call' } });
+  check(r.status === 200 && r.json?.ok === true, 'cancel → {ok}', r);
+
   // ── module smokes (promoted to deep fixtures at each route's cutover) ─
   console.log('module smokes:');
   const smokes = [
-    ['calls', 'POST', '/call/initiate', { token: A.jwt, body: {} }, (x) => x.status >= 400 && x.status < 500 && !!x.json?.error],
     ['channels', 'GET', '/channels', { token: A.jwt }, (x) => x.status === 200],
     ['vaultbeam', 'GET', '/vaultbeam/relay/00000000-0000-0000-0000-000000000000', { token: A.jwt }, (x) => x.status === 404 && !!x.json],
     ['vaultlens', 'GET', '/vaultlens/catalog', { token: A.jwt }, (x) => x.status === 200 && !!x.json],
