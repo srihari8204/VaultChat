@@ -30,8 +30,8 @@
 	#@chats path /chats /chats/*
 	#reverse_proxy @chats go-api:4000
 
-	#@uploads path /uploads /uploads/*
-	#reverse_proxy @uploads go-api:4000
+	@uploads path /uploads /uploads/*
+	reverse_proxy @uploads go-api:4000
 
 	@ai path /ai /ai/*
 	reverse_proxy @ai go-api:4000

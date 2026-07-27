@@ -27,3 +27,4 @@
 {"method":"POST","path":"/ai/assist","body":{"task":"nope","text":"x"}}
 {"method":"POST","path":"/call/initiate","body":{}}
 {"method":"POST","path":"/call/cancel","body":{}}
+{"method":"GET","path":"/uploads/00000000-0000-0000-0000-000000000000"}

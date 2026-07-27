@@ -58,6 +58,11 @@ services:
       # owns all sockets until Step 5). Internal-only; never proxied by Caddy.
       NODE_INTERNAL_URL: http://api:3000
       INTERNAL_EMIT_KEY: ${INTERNAL_EMIT_KEY:-bench-internal-emit}
+      # Disk-stored attachments MUST be shared with Node while both backends
+      # can serve /uploads (strangler period) — same dir, both processes.
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - ./uploads-shared:/data/uploads
     ports:
       - "14000:4000"          # direct access for tools/shadow-diff (bench only)
     depends_on:
@@ -162,6 +167,10 @@ services:
       VALHALLA_URL: http://valhalla:8002   # internal routing engine (POST /nav/route proxies here)
       # Accept bridged socket emits from go-api (must match go-api's key).
       INTERNAL_EMIT_KEY: ${INTERNAL_EMIT_KEY:-bench-internal-emit}
+      # Shared with go-api so either backend can serve disk attachments.
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - ./uploads-shared:/data/uploads
     depends_on:
       postgres:
         condition: service_healthy

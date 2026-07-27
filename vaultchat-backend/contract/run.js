@@ -393,6 +393,61 @@ async function main() {
   r = await req('POST', '/call/cancel', { token: A.jwt, body: { calleeId: CT.id, callId: 'contract-call' } });
   check(r.status === 200 && r.json?.ok === true, 'cancel → {ok}', r);
 
+  console.log('uploads (deep):');
+  r = await req('GET', '/uploads/00000000-0000-0000-0000-000000000000', { token: A.jwt });
+  check(r.status === 404 && r.json?.error === 'Not found', 'unknown attachment → exact 404', r);
+  // presign accepts an empty body today (no validation) — that IS the contract.
+  r = await req('POST', '/uploads/presign', { token: A.jwt, body: {} });
+  check(r.status === 200 && hasKeys(r.json, ['id', 'uploadUrl', 'key']) && r.json.key.startsWith('att/'),
+    'presign empty body → {id, uploadUrl, key}', r);
+  r = await req('POST', '/uploads/presign', { token: A.jwt, body: { filename: 'x.bin', size: 99999999999 } });
+  check(r.status === 413 && /^File too large \(max \d+ bytes\)$/.test(r.json?.error || ''), 'presign oversize → exact 413', r);
+
+  // resumable multipart lifecycle (against the shared MinIO)
+  r = await req('POST', '/uploads/multipart/init', { token: A.jwt, body: { filename: 'v.mp4', mime: 'video/mp4' } });
+  check(r.status === 400 && r.json?.error === 'size required', 'mp init w/o size → exact 400', r);
+  r = await req('POST', '/uploads/multipart/init', { token: A.jwt, body: { filename: 'v.mp4', mime: 'video/mp4', size: 20000000 } });
+  check(r.status === 200 && hasKeys(r.json, ['id', 'uploadId', 'key', 'partSize', 'partCount'])
+    && r.json.partSize === 8388608 && r.json.partCount === 3, 'mp init → session {partSize 8MiB, 3 parts}', r);
+  const mp = r.json;
+  r = await req('POST', '/uploads/multipart/part-urls', { token: A.jwt, body: { id: mp?.id, uploadId: mp?.uploadId, partNumbers: [1, 2, 3] } });
+  check(r.status === 200 && r.json?.urls && ['1', '2', '3'].every(k => typeof r.json.urls[k] === 'string'),
+    'part-urls → 3 presigned urls', r);
+  r = await req('POST', '/uploads/multipart/part-urls', { token: B.jwt, body: { id: mp?.id, uploadId: mp?.uploadId, partNumbers: [1] } });
+  check(r.status === 403 && r.json?.error === 'Forbidden', 'part-urls by non-owner → exact 403', r);
+  r = await req('GET', `/uploads/multipart/${mp?.id}/parts`, { token: A.jwt });
+  check(r.status === 400 && r.json?.error === 'uploadId required', 'parts w/o uploadId → exact 400', r);
+  r = await req('GET', `/uploads/multipart/${mp?.id}/parts?uploadId=${encodeURIComponent(mp?.uploadId || '')}`, { token: A.jwt });
+  check(r.status === 200 && Array.isArray(r.json?.uploaded) && r.json.uploaded.length === 0, 'parts → {uploaded:[]}', r);
+  r = await req('POST', '/uploads/multipart/complete', { token: A.jwt, body: { id: mp?.id, uploadId: mp?.uploadId } });
+  check(r.status === 400 && r.json?.error === 'No parts uploaded', 'complete w/o parts → exact 400', r);
+  r = await req('POST', '/uploads/multipart/abort', { token: A.jwt, body: { id: mp?.id, uploadId: mp?.uploadId } });
+  check(r.status === 200 && r.json?.ok === true, 'abort → {ok} (row deleted)', r);
+  r = await req('GET', `/uploads/${mp?.id}`, { token: A.jwt });
+  check(r.status === 404, 'aborted attachment gone', r);
+
+  // disk upload path: real bytes through the API, owner round-trip
+  try {
+    const bytes = Buffer.from(`contract-upload-${Date.now()}`);
+    const fd = new FormData();
+    fd.append('file', new Blob([bytes], { type: 'text/plain' }), 'contract.txt');
+    const up = await fetch(`${BASE}/uploads?viewOnce=0`, {
+      method: 'POST', headers: { Authorization: `Bearer ${A.jwt}` }, body: fd,
+    });
+    const upj = await up.json();
+    check(up.status === 200 && hasKeys(upj, ['id', 'mime', 'size', 'filename', 'viewOnce'])
+      && upj.size === bytes.length && upj.viewOnce === false, 'disk upload → row shape', upj);
+    const dl = await fetch(`${BASE}/uploads/${upj.id}`, { headers: { Authorization: `Bearer ${A.jwt}` } });
+    const body = Buffer.from(await dl.arrayBuffer());
+    check(dl.status === 200 && body.equals(bytes), 'owner download → identical bytes', { status: dl.status, len: body.length });
+    r = await req('GET', `/uploads/${upj.id}`, { token: STATE.users[10].jwt });
+    check(r.status === 403 && r.json?.error === 'Forbidden', 'unrelated user download → exact 403', r);
+    r = await req('POST', `/uploads/${upj.id}/viewed`, { token: A.jwt });
+    check(r.status === 200 && r.json?.ok === true && r.json?.noop === true, 'viewed on non-view-once → {ok, noop}', r);
+  } catch (e) {
+    check(false, `uploads disk harness: ${e.message}`);
+  }
+
   // ── module smokes (promoted to deep fixtures at each route's cutover) ─
   console.log('module smokes:');
   const smokes = [
@@ -400,10 +455,6 @@ async function main() {
     ['vaultbeam', 'GET', '/vaultbeam/relay/00000000-0000-0000-0000-000000000000', { token: A.jwt }, (x) => x.status === 404 && !!x.json],
     ['vaultlens', 'GET', '/vaultlens/catalog', { token: A.jwt }, (x) => x.status === 200 && !!x.json],
     ['vaultlens', 'GET', '/vaultlens/quota', { token: A.jwt }, (x) => x.status === 200 && !!x.json],
-    ['uploads', 'GET', '/uploads/00000000-0000-0000-0000-000000000000', { token: A.jwt }, (x) => [400, 404].includes(x.status)],
-    // presign accepts an empty body today (no validation) — that IS the contract.
-    ['uploads', 'POST', '/uploads/presign', { token: A.jwt, body: {} }, (x) => x.status === 200 && hasKeys(x.json, ['id', 'uploadUrl'])],
-    ['ai', 'POST', '/ai/chat', { token: A.jwt, body: {} }, (x) => x.status >= 400 && !!x.json],
     // 503 when ADMIN_KEY unset (bench), 401/403 when set and wrong.
     ['admin', 'GET', '/api/admin/stats', {}, (x) => [401, 403, 503].includes(x.status) && !!x.json?.error],
   ];

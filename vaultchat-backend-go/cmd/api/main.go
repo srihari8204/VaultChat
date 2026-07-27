@@ -48,6 +48,19 @@ func main() {
 	routes.RegisterAuth(mux)
 	routes.RegisterAI(mux)
 	routes.RegisterCalls(mux)
+	routes.RegisterUploads(mux)
+	routes.RegisterChannels(mux)
+	routes.RegisterVaultbeam(mux)
+	routes.RegisterUser(mux)
+
+	// Reap stale VaultBeam relay rows hourly (mirrors server.js).
+	go func() {
+		for range time.Tick(time.Hour) {
+			if err := routes.VaultbeamSweepExpired(ctx); err != nil {
+				log.Printf("[vaultbeam] sweep: %v", err)
+			}
+		}
+	}()
 
 	// Anything else reaching us is a proxy misconfiguration — say so loudly.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
