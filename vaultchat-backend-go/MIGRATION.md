@@ -1,16 +1,25 @@
 # Node→Go strangler migration — runbook (Phase 2, Steps 2–6)
 
-Status 2026-07-27: **all 17 REST modules ported; 16 flipped to Go in the
-bench Caddyfile and proven** (chats port in progress — the last route).
-Realtime (Socket.IO) + the fanout/vaultlens workers still run in Node by
-design (Step 5 is last). Node remains fully deployable at every point.
+Status 2026-07-28: **COMPLETE for the client-facing surface. Go owns all 17
+REST modules AND the Socket.IO/WebSocket layer**, flipped in the bench
+Caddyfile and proven (full contract suite green through the Go backend for
+both REST and realtime, AND byte-matched against Node via shadow-diff).
+Node is retained only for background jobs (the vaultlens BullMQ worker + its
+QueueEvents listener, which now push results into Go's sockets via the
+reverse bridge) — a deliberate split, see Step 4 below. Every route/socket
+still has instant per-route rollback.
 
-## Architecture
+## Architecture (post-cutover)
 
 ```
-app (ONE SERVER_URL) ──► Caddy :80 ──► per-route match ──► go-api :4000
+app (ONE SERVER_URL) ──► Caddy :80 ──► REST + /socket.io ──► go-api :4000
                                    └──► default          ──► Node api :3000
-                                        (incl. /socket.io websockets)
+                                        (background jobs only; nothing
+                                         client-facing routes here now)
+
+go-api  : 17 REST modules + Socket.IO hub + reverse-bridge /internal/*
+Node api: vaultlens QueueEvents listener → POST go-api /internal/emit
+Node vaultlens-worker: BullMQ render worker (unchanged)
 ```
 
 - `caddy/Caddyfile` is THE switch. Each route is a two-line block; commented
