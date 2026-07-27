@@ -27,8 +27,8 @@
 	@auth path /auth /auth/*
 	reverse_proxy @auth go-api:4000
 
-	#@chats path /chats /chats/*
-	#reverse_proxy @chats go-api:4000
+	@chats path /chats /chats/*
+	reverse_proxy @chats go-api:4000
 
 	@uploads path /uploads /uploads/*
 	reverse_proxy @uploads go-api:4000
