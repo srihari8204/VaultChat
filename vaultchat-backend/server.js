@@ -114,10 +114,26 @@ vaultbeamRouter.setBroadcasters({ emitToUid });   // ring recipient: vb_invite /
 setInterval(() => vaultbeamRouter.sweepExpired().catch(() => {}), 60 * 60 * 1000); // reap stale relay rows hourly
 
 // VaultLens (AI avatars). The BullMQ worker renders in its own process; here we
-// listen for job completion and emit the result to the user's socket. The API
-// process owns Socket.IO, so all emits happen here (not in the worker).
+// listen for job completion and emit the result to the user's socket.
+//
+// Socket ownership: while Node owns Socket.IO, emitToUid delivers directly.
+// After the Phase-2 realtime cutover Go owns sockets, so set GO_INTERNAL_URL
+// (=http://go-api:4000) and this listener POSTs the emit to Go's reverse
+// bridge instead — the BullMQ worker + this listener are the only Node pieces
+// left, and they push their results into Go's socket layer.
 const vaultlensRouter = require('./routes/vaultlens');
 app.use('/vaultlens', vaultlensRouter);
+const GO_INTERNAL_URL = (process.env.GO_INTERNAL_URL || '').replace(/\/$/, '');
+async function emitToUserSockets(uid, event, payload) {
+  if (!GO_INTERNAL_URL) return emitToUid(uid, event, payload); // Node owns sockets
+  try {
+    await fetch(`${GO_INTERNAL_URL}/internal/emit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Internal-Key': process.env.INTERNAL_EMIT_KEY || '' },
+      body: JSON.stringify({ userIds: [uid], event, payload }),
+    });
+  } catch (e) { console.error('[emit→go]', e.message); }
+}
 try {
   const { events: vlEvents } = require('./lib/vaultlensQueue');
   const vlStore = require('./lib/storage');
@@ -127,7 +143,7 @@ try {
       const rv = typeof returnvalue === 'string' ? JSON.parse(returnvalue) : returnvalue;
       if (!rv?.userId || !rv?.storageKey) return;
       const url = await vlStore.presignGet(rv.storageKey, 3600);
-      emitToUid(rv.userId, 'vaultlens:ready', { id: rv.generationId, url, styleId: rv.styleId });
+      await emitToUserSockets(rv.userId, 'vaultlens:ready', { id: rv.generationId, url, styleId: rv.styleId });
     } catch (e) { console.error('[vaultlens completed]', e.message); }
   });
   qe.on('failed', async ({ jobId }) => {
@@ -138,7 +154,7 @@ try {
         `UPDATE vaultlens_generation SET status = 'failed', completed_at = NOW()
            WHERE id = $1 AND status <> 'done' RETURNING user_id`, [jobId]);
       const uid = r.rows[0]?.user_id;
-      if (uid) emitToUid(uid, 'vaultlens:failed', { id: jobId });
+      if (uid) await emitToUserSockets(uid, 'vaultlens:failed', { id: jobId });
     } catch (e) { console.error('[vaultlens failed]', e.message); }
   });
   console.log('[vaultlens] QueueEvents listener active');
