@@ -62,7 +62,9 @@ function deriveSocketEvents() {
   // Direct emits: io.to(...).emit / socket.emit / socket.to(...).emit
   for (const m of sources.matchAll(/\.emit\(\s*'([^']+)'/g)) serverToClient.add(m[1]);
   // Indirect emits routed through helpers with (…, 'event', …) signatures.
-  for (const m of sources.matchAll(/(?:emitToUid|fanOutToChat)\(\s*[^,]+,\s*'([^']+)'/g)) serverToClient.add(m[1]);
+  // emitToUserSockets = the post-cutover wrapper that routes to Go's sockets
+  // when GO_INTERNAL_URL is set, else emitToUid (same event surface).
+  for (const m of sources.matchAll(/(?:emitToUid|emitToUserSockets|fanOutToChat)\(\s*[^,]+,\s*'([^']+)'/g)) serverToClient.add(m[1]);
   // Broadcaster callbacks wired in server.js: newMessage → 'new_message';
   // chatEvent / channel broadcaster call sites in routes pass the event name
   // as the 2nd arg: broadcast.chatEvent(chatId, 'event', …).
