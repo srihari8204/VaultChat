@@ -1,8 +1,25 @@
 # VaultBeam shared-Rust transport core — Phase 3 design note
 
-Status: **DESIGN ONLY — implementation gated on review of this note (Step 1).**
-No Rust written yet. Step 0 (golden vectors) is committed
-(`services/crypto/__vectors__/vaultbeam.json` + `vaultbeam-vectors.selftest.ts`).
+Status: **IMPLEMENTED through Step 5 (host-verified); Step 3b native glue is
+prebuild-verified.** Steps 0–2, 3a, the block ops, Step 4 (backend switch), and
+Step 5 (host parity) are committed and green. The native binding (Kotlin/JNI +
+iOS Swift + Expo plugin) is written to be verified at `expo prebuild` (no
+NDK/Xcode in CI), exactly like Phase 1's binding.
+
+Two decisions were REFINED at implementation (rationale in §4–§6 below,
+reflected here):
+- **Binding: a CLASSIC RN bridge module, not Nitro** (deviates from §6's
+  original recommendation). The existing JS surface is classic
+  (`NativeModules` + `NativeEventEmitter` + Promises), so a classic Rust-backed
+  shim makes `vaultBeamStreamNative.ts` a TRUE drop-in and handles async + LAN
+  events naturally. The Rust staticlib is still shared cross-platform; only the
+  thin marshaling shim is per-platform.
+- **Block HTTP: Design A′ (hybrid)**, not pure A. The interop-critical
+  seal/open + block layout + file IO live in shared Rust (fully unit-tested, no
+  TLS dep); the trivial presigned-URL HTTPS PUT/GET stays platform-native
+  (Android `HttpURLConnection`, iOS `URLSession`) — avoids a Rust TLS stack in
+  the mobile lib and gains native proxy/background handling. One 4 MiB block
+  buffer crosses the FFI (base64), matching Kotlin `uploadBlock`'s memory profile.
 
 ## 0. The invariants this must NOT break (the whole point)
 
@@ -202,9 +219,42 @@ Default `kotlin` → internal build with `rust` → staged % via remote config o
 same flag → full. Relay tier always on. Kill-switch = set
 `VAULTBEAM_NATIVE_BACKEND=kotlin`. Kotlin module kept indefinitely as fallback.
 
-## Decisions requested before Step 2
+## Decisions (resolved)
 
-1. **No tokio** — blocking IO on a bounded thread pool (mirror Kotlin). OK?
-2. **Design A** — the crate owns `upload_block`/`download_block` HTTP (`ureq`) so
-   iOS gets the full byte pipeline. OK to expand Step 2's crate scope by these two?
-3. **Android x86/i686** included (match crypto-core) or dropped for size?
+1. **No tokio** — blocking IO on a bounded thread pool (mirror Kotlin). ✅ approved.
+2. **Block HTTP** — refined to **Design A′** (seal/open+layout+fileIO in Rust;
+   HTTPS transport platform-native). See status header + §5.
+3. **Android x86/i686** — included (match crypto-core; keeps emulator coverage).
+
+## Implementation status (per step)
+
+| step | what | state |
+|---|---|---|
+| 0 | golden vectors + JS drift-guard | ✅ committed, green in `test:e2ee` |
+| 1 | this design note | ✅ reviewed |
+| 2 | `vaultbeam-core` crate (chunk/fileio/lan) + crypto-core `gcm_seal/open` | ✅ 16 crate tests green, byte-identical vectors |
+| 3a | C-ABI FFI (`vb_call`/`vb_lan_*`/`vb_free`) + `vb-cli` | ✅ green |
+| 3b (core) | R2 block seal/write ops (A′) | ✅ green |
+| 3b (glue) | Kotlin/JNI module + CMake/gradle + `withVaultBeamRust` + iOS Swift/xcframework | ⚙️ prebuild-verified (no NDK/Xcode in CI) |
+| 4 | `EXPO_PUBLIC_VAULTBEAM_NATIVE_BACKEND` switch + fallback + Sentry | ✅ typecheck 0 new errors |
+| 5 (host) | Rust ≡ JS ≡ frozen-vectors parity (`vaultbeam-parity.selftest.ts`) | ✅ green |
+| 5 (device) | cross-version LAN/P2P/relay e2e + resume-across-switch + throughput | 🔲 on-device gate (see below) |
+| 6 | rollout + kill-switch + PR | ✅ `ROLLOUT.md` + `PR.md` |
+
+## The on-device gate (Step 5 device half) — cannot run in Node CI
+
+Host parity proves Rust ≡ JS ≡ the frozen wire (and the vectors ARE the Kotlin
+contract). What remains needs two REAL builds and a device/emulator, exactly
+like Phase 1's on-device crypto soak:
+
+1. Build an **old** build (Kotlin backend) and a **new** build
+   (`EXPO_PUBLIC_VAULTBEAM_NATIVE_BACKEND=rust`).
+2. Transfer a representative file **old ⇄ new** on each tier — LAN, P2P
+   datachannel, R2 relay — in BOTH directions (Rust-serve/Kotlin-receive and
+   the reverse). Each must complete + sha256-match.
+3. **Resume across a backend switch**: start a transfer on one backend, kill,
+   flip the flag, resume — op-sqlite state intact (the wire + geometry +
+   chunkId are identical, so the remaining chunks seal/open the same).
+4. **Throughput + memory** vs Kotlin on a large file (extend `loadtest`).
+
+Sign-off on all four is the true done-gate before staged rollout.
