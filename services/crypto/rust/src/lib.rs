@@ -6,6 +6,7 @@
 //! `services/crypto/__vectors__/*.json` byte-for-byte. Any change that alters
 //! those formats is a bug, not a refactor — the TS core stays the reference.
 
+pub mod aead;
 pub mod e2ee;
 pub mod ffi;
 pub mod sender_key;
