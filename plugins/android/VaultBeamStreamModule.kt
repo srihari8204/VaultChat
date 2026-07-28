@@ -121,20 +121,29 @@ class VaultBeamStreamModule(reactContext: ReactApplicationContext) : ReactContex
                 val totalBytes = opts.getDouble("totalBytes").toLong()
                 val chunksPerBlock = blockBytes / chunkBytes
                 val firstChunk = blockIndex.toLong() * chunksPerBlock
+                // Segmented geometry (R4): when blockPlainOffset is supplied the chunk
+                // IDENTITY (AAD + nonce) is its PLAINTEXT BYTE OFFSET — stable even when
+                // per-segment chunk sizes differ. Absent → legacy uniform path, which is
+                // byte-identical to before (offset = blockIndex*blockBytes, id = g).
+                val offsetScheme = opts.hasKey("blockPlainOffset")
+                val blockPlainOffset = if (offsetScheme) opts.getDouble("blockPlainOffset").toLong()
+                                       else blockIndex.toLong() * blockBytes
 
                 // Seal each chunk into memory (≤ block + 8·16B overhead). Bounded —
                 // never the whole file — which is the entire point of the native path.
                 val parts = ArrayList<ByteArray>(chunksPerBlock)
                 RandomAccessFile(srcPath, "r").use { raf ->
-                    var g = firstChunk; var i = 0
-                    while (i < chunksPerBlock && g < chunkCount) {
-                        val plainOffset = g * chunkBytes.toLong()
+                    var i = 0
+                    while (i < chunksPerBlock) {
+                        val plainOffset = blockPlainOffset + i.toLong() * chunkBytes
+                        if (plainOffset >= totalBytes) break
+                        val id = if (offsetScheme) plainOffset else firstChunk + i
                         val plainLen = minOf(chunkBytes.toLong(), totalBytes - plainOffset).toInt()
                         val plain = ByteArray(plainLen)
                         raf.seek(plainOffset); raf.readFully(plain, 0, plainLen)
-                        val aad = "$transferId|$fileId|$g".toByteArray(Charsets.UTF_8)
-                        parts.add(gcm(Cipher.ENCRYPT_MODE, keyBytes, chunkNonce(transferId, g), aad).doFinal(plain))
-                        g++; i++
+                        val aad = "$transferId|$fileId|$id".toByteArray(Charsets.UTF_8)
+                        parts.add(gcm(Cipher.ENCRYPT_MODE, keyBytes, chunkNonce(transferId, id), aad).doFinal(plain))
+                        i++
                     }
                 }
 
@@ -178,6 +187,11 @@ class VaultBeamStreamModule(reactContext: ReactApplicationContext) : ReactContex
                 val totalBytes = opts.getDouble("totalBytes").toLong()
                 val chunksPerBlock = blockBytes / chunkBytes
                 val firstChunk = blockIndex.toLong() * chunksPerBlock
+                // Segmented geometry (R4) — mirror uploadBlock exactly, or the AAD/nonce
+                // won't match and every chunk fails to open.
+                val offsetScheme = opts.hasKey("blockPlainOffset")
+                val blockPlainOffset = if (offsetScheme) opts.getDouble("blockPlainOffset").toLong()
+                                       else blockIndex.toLong() * blockBytes
 
                 val conn = URL(url).openConnection() as HttpURLConnection
                 val body: ByteArray
@@ -190,17 +204,19 @@ class VaultBeamStreamModule(reactContext: ReactApplicationContext) : ReactContex
                 } finally { conn.disconnect() }
 
                 RandomAccessFile(dstPath, "rw").use { raf ->
-                    var off = 0; var g = firstChunk; var i = 0; var written = 0
-                    while (i < chunksPerBlock && g < chunkCount) {
-                        val plainOffset = g * chunkBytes.toLong()
+                    var off = 0; var i = 0; var written = 0
+                    while (i < chunksPerBlock) {
+                        val plainOffset = blockPlainOffset + i.toLong() * chunkBytes
+                        if (plainOffset >= totalBytes) break
+                        val id = if (offsetScheme) plainOffset else firstChunk + i
                         val plainLen = minOf(chunkBytes.toLong(), totalBytes - plainOffset).toInt()
                         val ctLen = plainLen + 16 // + GCM tag
                         if (off + ctLen > body.size) throw IllegalStateException("short block body for block $blockIndex")
                         val ct = body.copyOfRange(off, off + ctLen)
-                        val aad = "$transferId|$fileId|$g".toByteArray(Charsets.UTF_8)
-                        val plain = gcm(Cipher.DECRYPT_MODE, keyBytes, chunkNonce(transferId, g), aad).doFinal(ct)
+                        val aad = "$transferId|$fileId|$id".toByteArray(Charsets.UTF_8)
+                        val plain = gcm(Cipher.DECRYPT_MODE, keyBytes, chunkNonce(transferId, id), aad).doFinal(ct)
                         raf.seek(plainOffset); raf.write(plain)
-                        off += ctLen; written++; g++; i++
+                        off += ctLen; written++; i++
                     }
                     promise.resolve(written.toDouble())
                 }

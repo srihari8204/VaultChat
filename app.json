@@ -108,6 +108,8 @@
       "./plugins/withVaultBeamStream.js",
       "./plugins/withVaultChatSync.js",
       "./plugins/withGradleMemory.js",
+      "./plugins/withCryptoCore.js",
+      "./plugins/withVaultBeamRust.js",
       "expo-sqlite"
     ],
     "extra": {

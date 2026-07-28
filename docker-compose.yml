@@ -15,6 +15,62 @@
 # pgbouncer + the fan-out/push workers get added as we extract those services.
 
 services:
+  # ── caddy — THE migration switch (Phase 2 Step 2) ────────────────────
+  # The app keeps ONE SERVER_URL pointed here. Every path routes to Node by
+  # default; caddy/Caddyfile flips individual routes to the Go backend with
+  # one line each (and back — that's the per-route instant rollback).
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+    ports:
+      - "18080:80"            # bench/staging entry; docker-compose.prod.yml maps 80/443
+    depends_on:
+      - go-api
+
+  # ── go-api — the strangler backend (Phase 2 Step 3+) ─────────────────
+  # Serves only the routes Caddy sends it; shares the SAME postgres/redis/
+  # kafka/minio as Node. Never receives traffic unless the Caddyfile says so.
+  go-api:
+    build:
+      context: ./vaultchat-backend-go
+    restart: unless-stopped
+    env_file:
+      - path: ./vaultchat-backend/.env     # same JWT_SECRET etc. as Node
+        required: false
+    environment:
+      PORT: "4000"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: vaultchat
+      DB_USER: vaultchat
+      DB_PASS: ${DB_PASS:-vaultchat_dev}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASS: ""
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: http://65.21.229.167:19000
+      S3_BUCKET: vaultchat-media
+      S3_ACCESS_KEY: ${MINIO_USER:-vaultchat}
+      S3_SECRET_KEY: ${MINIO_PASS:-vaultchat_dev_secret}
+      # Socket emits from Go-served routes bridge to the Node process (which
+      # owns all sockets until Step 5). Internal-only; never proxied by Caddy.
+      NODE_INTERNAL_URL: http://api:3000
+      INTERNAL_EMIT_KEY: ${INTERNAL_EMIT_KEY:-bench-internal-emit}
+      # Disk-stored attachments MUST be shared with Node while both backends
+      # can serve /uploads (strangler period) — same dir, both processes.
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - ./uploads-shared:/data/uploads
+    ports:
+      - "14000:4000"          # direct access for tools/shadow-diff (bench only)
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
   postgres:
     image: postgres:16
     restart: unless-stopped
@@ -44,6 +100,9 @@ services:
   kafka:
     image: apache/kafka:3.8.1          # official Apache image, KRaft built-in
     restart: unless-stopped
+    # LEGACY: only the Node EVENT_BUS=kafka path consumes this — off in the
+    # Go-first prod shape (in-process fan-out). Revisit at kafka scale-out.
+    profiles: ["legacy"]
     environment:
       KAFKA_NODE_ID: "1"
       KAFKA_PROCESS_ROLES: "broker,controller"
@@ -82,6 +141,11 @@ services:
     build:
       context: ./vaultchat-backend
     restart: unless-stopped
+    # LEGACY: the Node API is no longer routed (Go owns the client surface).
+    # Kept behind a profile for bench parity runs (contract vs Node direct,
+    # shadow-diff) and as the emergency per-route rollback target:
+    #   docker compose --profile legacy up -d api
+    profiles: ["legacy"]
     env_file:
       - path: ./vaultchat-backend/.env     # JWT_SECRET, ADMIN_KEY, etc.
         required: false                     # so `up <infra only>` works without the backend dir present
@@ -108,6 +172,16 @@ services:
       S3_BUCKET: vaultchat-media
       S3_ACCESS_KEY: ${MINIO_USER:-vaultchat}
       S3_SECRET_KEY: ${MINIO_PASS:-vaultchat_dev_secret}
+      VALHALLA_URL: http://valhalla:8002   # internal routing engine (POST /nav/route proxies here)
+      INTERNAL_EMIT_KEY: ${INTERNAL_EMIT_KEY:-bench-internal-emit}
+      # Post-realtime-cutover: Go owns Socket.IO, so the leftover Node
+      # emitters (the vaultlens QueueEvents listener) push results into Go's
+      # sockets via its reverse bridge instead of Node's now-clientless io.
+      GO_INTERNAL_URL: http://go-api:4000
+      # Shared with go-api so either backend can serve disk attachments.
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - ./uploads-shared:/data/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -117,6 +191,22 @@ services:
         condition: service_started
     ports:
       - "13000:3000"          # host 13000 — never clashes with the live pm2 app on :3000
+
+  # valhalla — self-hosted OSM routing engine (POST /route). The API proxies to it
+  # via routes/nav.js; it is NEVER exposed publicly (bound to localhost only).
+  # First boot: drop an OSM extract at ./valhalla/custom_files/<name>.osm.pbf and
+  # the image builds routing tiles into the volume (minutes–tens of minutes for a
+  # country extract), then serves on :8002. Rebuilds only when the pbf changes.
+  valhalla:
+    image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8002:8002"   # localhost only — reached in-network as valhalla:8002
+    volumes:
+      - ./valhalla/custom_files:/custom_files   # drop <region>.osm.pbf here; tiles build in-place
+    environment:
+      - server_threads=4
+      - use_tiles_ignore_pbf=True   # after the first build, serve tiles without re-parsing the pbf
 
   # coturn — TURN/STUN relay for WebRTC (calls + VaultBeam Tier-2 P2P). Host
   # networking because the relay allocates a UDP port range (min/max-port in
@@ -166,6 +256,10 @@ services:
       S3_SECRET_KEY: ${MINIO_PASS:-vaultchat_dev_secret}
       MODELSLAB_API_KEY: ${MODELSLAB_API_KEY:-}
       VAULTLENS_CONCURRENCY: "2"
+      # Go-first prod: the worker hosts the QueueEvents listener and pushes
+      # vaultlens:ready/failed into go-api's internal bridge (Go owns sockets).
+      GO_INTERNAL_URL: http://go-api:4000
+      INTERNAL_EMIT_KEY: ${INTERNAL_EMIT_KEY:-bench-internal-emit}
     depends_on:
       postgres:
         condition: service_healthy
@@ -178,6 +272,8 @@ services:
     build:
       context: ./vaultchat-backend
     restart: unless-stopped
+    # LEGACY: pairs with EVENT_BUS=kafka (off in the Go-first prod shape).
+    profiles: ["legacy"]
     command: ["node", "workers/fanout.js"]
     env_file:
       - path: ./vaultchat-backend/.env

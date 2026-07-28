@@ -9,7 +9,7 @@
 //
 // Run:  node workers/vaultlens.js   (docker-compose service: vaultlens-worker)
 
-const { Worker } = require('bullmq');
+const { Worker, QueueEvents } = require('bullmq');
 const { QUEUE_NAME, makeConnection } = require('../lib/vaultlensQueue');
 const db        = require('../db');
 const store     = require('../lib/storage');
@@ -17,6 +17,46 @@ const modelslab = require('../lib/modelslab');
 const vl        = require('../routes/vaultlens'); // promptFor / presignFace / outputKey
 
 const concurrency = Number(process.env.VAULTLENS_CONCURRENCY || 2);
+
+// ── Socket notification (Go-first prod) ─────────────────────────────────
+// Historically the Node API process owned Socket.IO and its QueueEvents
+// listener (server.js) emitted vaultlens:ready/failed. In the Go-first prod
+// there is NO Node API process — Go owns sockets — so THIS worker hosts the
+// listener and pushes the emits into Go's key-guarded internal bridge.
+// Enabled by GO_INTERNAL_URL (+ INTERNAL_EMIT_KEY); without it the old
+// server.js listener keeps doing the job and this block stays dormant.
+const GO_INTERNAL_URL = (process.env.GO_INTERNAL_URL || '').replace(/\/$/, '');
+async function emitToUserViaGo(uid, event, payload) {
+  try {
+    await fetch(`${GO_INTERNAL_URL}/internal/emit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Internal-Key': process.env.INTERNAL_EMIT_KEY || '' },
+      body: JSON.stringify({ userIds: [uid], event, payload }),
+    });
+  } catch (e) { console.error('[vaultlens emit→go]', e.message); }
+}
+if (GO_INTERNAL_URL) {
+  const qe = new QueueEvents(QUEUE_NAME, { connection: makeConnection() });
+  qe.on('completed', async ({ returnvalue }) => {
+    try {
+      const rv = typeof returnvalue === 'string' ? JSON.parse(returnvalue) : returnvalue;
+      if (!rv?.userId || !rv?.storageKey) return;
+      const url = await store.presignGet(rv.storageKey, 3600);
+      await emitToUserViaGo(rv.userId, 'vaultlens:ready', { id: rv.generationId, url, styleId: rv.styleId });
+    } catch (e) { console.error('[vaultlens completed]', e.message); }
+  });
+  qe.on('failed', async ({ jobId }) => {
+    try {
+      // Terminal failure → mark 'failed' (auto-refunds quota) + flip the card.
+      const r = await db.query(
+        `UPDATE vaultlens_generation SET status = 'failed', completed_at = NOW()
+           WHERE id = $1 AND status <> 'done' RETURNING user_id`, [jobId]);
+      const uid = r.rows[0]?.user_id;
+      if (uid) await emitToUserViaGo(uid, 'vaultlens:failed', { id: jobId });
+    } catch (e) { console.error('[vaultlens failed]', e.message); }
+  });
+  console.log('[vaultlens] QueueEvents listener active (→ Go bridge)');
+}
 
 const worker = new Worker(QUEUE_NAME, async (job) => {
   const { generationId, userId, styleId, width = 512 } = job.data || {};

@@ -18,6 +18,8 @@
 
 import { getSocket } from './socket';
 import { getTurnConfig, type IceServer } from './chatService';
+import { reprioritizeIceObject, readWinningPair } from './icePriority';
+import perf from './perf';
 import { newCallCipher, openCallOffer, type CallCipher } from './callCrypto';
 import {
   isNativeStreamAvailable, prealloc, lanIp, lanServe, lanConnect,
@@ -66,10 +68,29 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function emit(event: string, data: any) {
   try { (await getSocket()).emit(event, data); } catch {}
 }
-function makePc(ice: IceServer[]): any { return new RTC.RTCPeerConnection({ iceServers: ice as any }); }
+function makePc(ice: IceServer[]): any {
+  return new RTC.RTCPeerConnection({
+    iceServers: ice as any,
+    iceCandidatePoolSize: 4,      // pre-gather host candidates → IPv6 pair under test sooner
+    bundlePolicy: 'max-bundle',
+  });
+}
 async function iceServers(): Promise<IceServer[]> {
-  try { return (await getTurnConfig()).iceServers; }
-  catch { return [{ urls: 'stun:stun.l.google.com:19302' }]; }
+  // Cloudflare STUN is dual-stack — helps discover the IPv6 server-reflexive
+  // candidate on networks where our coturn STUN is IPv4-only (feeds IPv6-first).
+  const CF: IceServer = { urls: 'stun:stun.cloudflare.com:3478' };
+  try { return [CF, ...(await getTurnConfig()).iceServers]; }
+  catch { return [CF, { urls: 'stun:stun.l.google.com:19302' }]; }
+}
+// Log which candidate pair actually won (measures the real Jio/Airtel IPv6
+// hit-rate — direct vs paid relay). Best-effort; never blocks the transfer.
+function logIceWin(pc: any, tag: string): void {
+  try {
+    pc.getStats().then((s: any) => {
+      const o = readWinningPair(s);
+      if (o) perf.mark('vaultbeam_ice_win', { tag, wonVia: o.wonVia, direct: o.isDirect, ipv6: o.isIPv6, rttMs: o.roundTripTimeMs });
+    }).catch(() => {});
+  } catch {}
 }
 
 // Buffers all vaultbeam_* signaling for one transfer from the moment it's opened,
@@ -149,14 +170,16 @@ export async function serveDirect(g: DirectGeom & { srcPath: string; onProgress?
         // intermittently. Buffer remote candidates; flush once the answer lands.
         let remoteReady = false;
         const pendingIce: any[] = [];
-        const addIce = async (cand: any) => { try { await pc.addIceCandidate(new RTC.RTCIceCandidate(cand)); } catch {} };
+        // IPv6-first: rewrite each candidate's priority so the IPv6 pair is checked
+        // before IPv4/relay (both sides do it; ICE still falls through if IPv6 fails).
+        const addIce = async (cand: any) => { try { await pc.addIceCandidate(new RTC.RTCIceCandidate(reprioritizeIceObject(cand))); } catch {} };
         inbox.setOnIce((c) => { const cand = cipher ? cipher.open(c) : c; if (!cand) return; if (remoteReady) addIce(cand); else pendingIce.push(cand); });
 
         // Outgoing ICE must NOT egress before the cipher exists, or the server
         // sees device IPs unsealed. Buffer until the cipher is derived, then flush.
         let sealReady = false;
         const outIce: any[] = [];
-        const emitIce = (c: any) => emit('vaultbeam_ice', { to: g.peerId, transferId: g.transferId, candidate: cipher ? cipher.seal(c) : c });
+        const emitIce = (c: any) => { const b = reprioritizeIceObject(c); emit('vaultbeam_ice', { to: g.peerId, transferId: g.transferId, candidate: cipher ? cipher.seal(b) : b }); };
         pc.onicecandidate = (e: any) => { if (!e.candidate) return; if (sealReady) emitIce(e.candidate); else outIce.push(e.candidate); };
 
         const dc = pc.createDataChannel('vaultbeam', { ordered: true });
@@ -167,7 +190,7 @@ export async function serveDirect(g: DirectGeom & { srcPath: string; onProgress?
         dc.onmessage = (m: any) => { try { if (typeof m.data === 'string' && JSON.parse(m.data)?.t === 'ack') ackResolve?.(); } catch {} };
         // Connected but stalled / no ack in time → resolve null so the caller
         // falls back to the relay instead of the send hanging on a dead channel.
-        dc.onopen = () => { markConnected(); p2pSend(dc, g, ackP).then(() => done('p2p')).catch(() => done(null)); };
+        dc.onopen = () => { markConnected(); logIceWin(pc, 'send'); p2pSend(dc, g, ackP).then(() => done('p2p')).catch(() => done(null)); };
 
         // Apply the (buffered) answer, THEN release the queued remote candidates.
         (async () => {
@@ -299,16 +322,18 @@ async function p2pReceive(g: DirectGeom & { dstPath: string; onProgress?: Progre
       (async () => {
         try {
           pc = makePc(await iceServers());
-          pc.onicecandidate = (e: any) => { if (e.candidate) emit('vaultbeam_ice', { to: g.peerId, transferId: g.transferId, candidate: cipher.seal(e.candidate) }); };
+          pc.onicecandidate = (e: any) => { if (e.candidate) emit('vaultbeam_ice', { to: g.peerId, transferId: g.transferId, candidate: cipher.seal(reprioritizeIceObject(e.candidate)) }); };
           // Same rule as the sender: buffer remote ICE until our setRemoteDescription
           // is applied, else react-native-webrtc drops the early (host) candidate.
           let remoteReady = false;
           const pendingIce: any[] = [];
-          const addIce = async (cand: any) => { try { await pc.addIceCandidate(new RTC.RTCIceCandidate(cand)); } catch {} };
+          // IPv6-first bias (see the sender path).
+          const addIce = async (cand: any) => { try { await pc.addIceCandidate(new RTC.RTCIceCandidate(reprioritizeIceObject(cand))); } catch {} };
           inbox.setOnIce((c) => { const cand = cipher.open(c); if (!cand) return; if (remoteReady) addIce(cand); else pendingIce.push(cand); });
 
           pc.ondatachannel = (ev: any) => {
             const dc = ev.channel;
+            dc.onopen = () => logIceWin(pc, 'recv');   // measure the winning pair (IPv6 vs relay)
             let cur: { i: number; len: number; buf: Uint8Array; off: number } | null = null;
             let received = 0;
             // Ack only after every chunk is decrypted + written, so the sender's

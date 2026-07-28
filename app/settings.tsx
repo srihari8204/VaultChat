@@ -239,7 +239,9 @@ export default function SettingsScreen() {
           <Text style={S.profileName} numberOfLines={1}>{profile?.name || 'Your name'}</Text>
           <Text style={S.profileSub} numberOfLines={1}>{profile?.status || profile?.email || ''}</Text>
         </View>
-        <Ionicons name="qr-code-outline" size={22} color={colors.textDim} />
+        <TouchableOpacity onPress={() => router.push('/qr-contact' as any)} hitSlop={12}>
+          <Ionicons name="qr-code-outline" size={22} color={colors.primary} />
+        </TouchableOpacity>
       </TouchableOpacity>
 
       <AppearanceSection />

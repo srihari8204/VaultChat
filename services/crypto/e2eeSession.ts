@@ -23,8 +23,8 @@ import {
   ratchetInitAlice, ratchetInitBob, ratchetEncrypt, ratchetDecrypt,
   serializeState, deserializeState, encodeEnvelope, decodeEnvelope,
   bytesToHex, hexToBytes,
-} from './e2ee';
-import type { KeyPair, PreKeyBundle, InitialHeader, RatchetState, Envelope } from './e2ee';
+} from './index'; // the facade — picks TS or Rust per EXPO_PUBLIC_CRYPTO_BACKEND
+import type { KeyPair, PreKeyBundle, InitialHeader, RatchetState, Envelope } from './index';
 
 const b64 = (b: Uint8Array): string => Buffer.from(b).toString('base64');
 const unb64 = (s: string): Uint8Array => new Uint8Array(Buffer.from(s, 'base64'));

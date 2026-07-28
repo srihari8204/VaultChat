@@ -109,15 +109,36 @@ app.use('/channels', channelsRouter);
 app.use('/games',    require('./routes/games'));
 const vaultbeamRouter = require('./routes/vaultbeam');
 app.use('/vaultbeam', vaultbeamRouter);
+app.use('/nav', require('./routes/nav'));   // routing proxy → self-hosted Valhalla
 vaultbeamRouter.setBroadcasters({ emitToUid });   // ring recipient: vb_invite / vb_ready / vb_complete / vb_abort
 setInterval(() => vaultbeamRouter.sweepExpired().catch(() => {}), 60 * 60 * 1000); // reap stale relay rows hourly
 
 // VaultLens (AI avatars). The BullMQ worker renders in its own process; here we
-// listen for job completion and emit the result to the user's socket. The API
-// process owns Socket.IO, so all emits happen here (not in the worker).
+// listen for job completion and emit the result to the user's socket.
+//
+// Socket ownership: while Node owns Socket.IO, emitToUid delivers directly.
+// After the Phase-2 realtime cutover Go owns sockets, so set GO_INTERNAL_URL
+// (=http://go-api:4000) and this listener POSTs the emit to Go's reverse
+// bridge instead — the BullMQ worker + this listener are the only Node pieces
+// left, and they push their results into Go's socket layer.
 const vaultlensRouter = require('./routes/vaultlens');
 app.use('/vaultlens', vaultlensRouter);
-try {
+const GO_INTERNAL_URL = (process.env.GO_INTERNAL_URL || '').replace(/\/$/, '');
+async function emitToUserSockets(uid, event, payload) {
+  if (!GO_INTERNAL_URL) return emitToUid(uid, event, payload); // Node owns sockets
+  try {
+    await fetch(`${GO_INTERNAL_URL}/internal/emit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Internal-Key': process.env.INTERNAL_EMIT_KEY || '' },
+      body: JSON.stringify({ userIds: [uid], event, payload }),
+    });
+  } catch (e) { console.error('[emit→go]', e.message); }
+}
+// Exactly ONE listener per deployment: when GO_INTERNAL_URL is set (Go owns
+// sockets), workers/vaultlens.js hosts the QueueEvents listener and pushes
+// into Go's bridge — this API-process listener stays OFF to avoid double
+// emits. Unset (Node owns sockets) → this listener runs as always.
+if (!GO_INTERNAL_URL) try {
   const { events: vlEvents } = require('./lib/vaultlensQueue');
   const vlStore = require('./lib/storage');
   const qe = vlEvents();
@@ -126,7 +147,7 @@ try {
       const rv = typeof returnvalue === 'string' ? JSON.parse(returnvalue) : returnvalue;
       if (!rv?.userId || !rv?.storageKey) return;
       const url = await vlStore.presignGet(rv.storageKey, 3600);
-      emitToUid(rv.userId, 'vaultlens:ready', { id: rv.generationId, url, styleId: rv.styleId });
+      await emitToUserSockets(rv.userId, 'vaultlens:ready', { id: rv.generationId, url, styleId: rv.styleId });
     } catch (e) { console.error('[vaultlens completed]', e.message); }
   });
   qe.on('failed', async ({ jobId }) => {
@@ -137,7 +158,7 @@ try {
         `UPDATE vaultlens_generation SET status = 'failed', completed_at = NOW()
            WHERE id = $1 AND status <> 'done' RETURNING user_id`, [jobId]);
       const uid = r.rows[0]?.user_id;
-      if (uid) emitToUid(uid, 'vaultlens:failed', { id: jobId });
+      if (uid) await emitToUserSockets(uid, 'vaultlens:failed', { id: jobId });
     } catch (e) { console.error('[vaultlens failed]', e.message); }
   });
   console.log('[vaultlens] QueueEvents listener active');
@@ -145,27 +166,68 @@ try {
 const adminRouter = require('./routes/admin');
 app.use('/api/admin', adminRouter);
 
+// ── Internal emit bridge (Phase 2) ──────────────────────────────────────
+// Go-served routes bridge their socket emits here while Node still owns all
+// sockets (until Step 5). Reachable ONLY in-network: Caddy refuses /internal/*
+// from outside, and the key must match INTERNAL_EMIT_KEY. Body:
+//   { rooms?: ['user:<uid>', 'chat:<id>', ...], userIds?: [uid...], event, payload }
+app.post('/internal/emit', (req, res) => {
+  const key = process.env.INTERNAL_EMIT_KEY || '';
+  if (!key || req.get('x-internal-key') !== key) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  const { rooms, userIds, event, payload, broadcast } = req.body || {};
+  if (!event || typeof event !== 'string') return res.status(400).json({ error: 'event required' });
+  if (broadcast === true) {
+    io.emit(event, payload); // every connected socket (admin /broadcast)
+    return res.json({ ok: true, broadcast: true });
+  }
+  const targets = [
+    ...(Array.isArray(rooms) ? rooms.filter(r => typeof r === 'string') : []),
+    ...(Array.isArray(userIds) ? userIds.filter(u => typeof u === 'string').map(u => `user:${u}`) : []),
+  ];
+  for (const room of targets) io.to(room).emit(event, payload);
+  res.json({ ok: true, rooms: targets.length });
+});
+
+// Broadcast a chat-route write over sockets. Named (not inline in
+// setBroadcasters) so the internal bridge below can reuse the EXACT paths —
+// Go-served /chats calls land here and take the same kafka-or-fanout route.
+// payload.senderId drives block-list suppression in fanOutToChat. We ALSO
+// mirror a privacy-safe summary (no content) to the admin firehose.
+function broadcastNewMessage(chatId, payload) {
+  if (EVENT_BUS_KAFKA) {
+    // Decoupled delivery: the fan-out worker consumes this and emits via the
+    // Redis adapter. (Push still goes out from the route handler directly.)
+    kafka.publish(kafka.TOPICS.MESSAGE_CREATED, chatId, {
+      event: 'new_message', chatId, payload, senderId: payload?.senderId ?? null,
+    });
+  } else {
+    fanOutToChat(chatId, 'new_message', payload, payload?.senderId ?? null);
+  }
+  io.to('admin').emit('admin:event', { event: 'new_message', chatId, senderId: payload?.senderId ?? null, type: payload?.type ?? null, messageId: payload?.id ?? null, ts: Date.now() });
+}
+function broadcastChatEvent(chatId, event, payload) {
+  fanOutToChat(chatId, event, payload);
+  io.to('admin').emit('admin:event', { event, chatId, ts: Date.now() });
+}
+
 // Wire the chats router so its REST writes broadcast over sockets.
-chatsRouter.setBroadcasters({
-  // payload.senderId drives block-list suppression in fanOutToChat. Other
-  // chat events (typing, delivery, read, reactions) are sender-agnostic.
-  // We ALSO mirror a privacy-safe summary (no content) to the admin firehose.
-  newMessage: (chatId, payload) => {
-    if (EVENT_BUS_KAFKA) {
-      // Decoupled delivery: the fan-out worker consumes this and emits via the
-      // Redis adapter. (Push still goes out from the route handler directly.)
-      kafka.publish(kafka.TOPICS.MESSAGE_CREATED, chatId, {
-        event: 'new_message', chatId, payload, senderId: payload?.senderId ?? null,
-      });
-    } else {
-      fanOutToChat(chatId, 'new_message', payload, payload?.senderId ?? null);
-    }
-    io.to('admin').emit('admin:event', { event: 'new_message', chatId, senderId: payload?.senderId ?? null, type: payload?.type ?? null, messageId: payload?.id ?? null, ts: Date.now() });
-  },
-  chatEvent:  (chatId, event, payload) => {
-    fanOutToChat(chatId, event, payload);
-    io.to('admin').emit('admin:event', { event, chatId, ts: Date.now() });
-  },
+chatsRouter.setBroadcasters({ newMessage: broadcastNewMessage, chatEvent: broadcastChatEvent });
+
+// Bridge form of the same broadcasters, for chat routes served by Go.
+// { kind:'new_message', chatId, payload } | { kind:'chat_event', chatId, event, payload }
+app.post('/internal/chat-event', (req, res) => {
+  const key = process.env.INTERNAL_EMIT_KEY || '';
+  if (!key || req.get('x-internal-key') !== key) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  const { kind, chatId, event, payload } = req.body || {};
+  if (!chatId || typeof chatId !== 'string') return res.status(400).json({ error: 'chatId required' });
+  if (kind === 'new_message') broadcastNewMessage(chatId, payload);
+  else if (kind === 'chat_event' && typeof event === 'string') broadcastChatEvent(chatId, event, payload);
+  else return res.status(400).json({ error: 'bad kind' });
+  res.json({ ok: true });
 });
 
 // Expose the live runtime to the admin router (online count + socket emitter).

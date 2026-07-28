@@ -1,0 +1,18 @@
+# docker-compose.bench.yml — overrides for LOAD-BENCH runs (Phase 2 Step 0).
+#
+# The base compose file configures the api in Phase-2 staging shape
+# (REDIS_ADAPTER=1 + EVENT_BUS=kafka). The Step 0 gate must measure the
+# backend in PROD shape — the live pm2 deployment runs single-process,
+# in-process fan-out, no Kafka — so this override switches those off.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.bench.yml up -d --build api
+services:
+  api:
+    environment:
+      REDIS_ADAPTER: "0"
+      EVENT_BUS: ""
+      SENTRY_DSN: ""
+      ADMIN_KEY: bench-admin-key      # lets the contract suite exercise the admin surface
+  go-api:
+    environment:
+      ADMIN_KEY: bench-admin-key

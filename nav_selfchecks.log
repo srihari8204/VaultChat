@@ -1,0 +1,11 @@
+--- geo ---
+geo self-check: OK
+--- hapticLanguage ---
+hapticLanguage self-check: OK
+--- adaptiveDistance ---
+adaptiveDistance self-check: OK
+--- notificationTimeline ---
+notificationTimeline self-check: OK
+--- missedTurn ---
+missedTurn self-check: OK
+### CHECKS DONE

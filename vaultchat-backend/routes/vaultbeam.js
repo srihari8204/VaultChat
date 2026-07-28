@@ -80,21 +80,34 @@ router.post('/relay/init', async (req, res) => {
     if (!rec.rows[0]) return res.status(403).json({ error: 'recipient unavailable' });
 
     const chunkCount = ceilDiv(totalBytes, CHUNK_BYTES);
-    const blockCount = ceilDiv(totalBytes, BLOCK_BYTES);
+    // Segmented geometry (R3): with adaptive per-segment sizes the block count is
+    // client-chosen and no longer derivable from totalBytes. Accept it — it's
+    // content-free (the server only sizes the per-block bitmask + validates block
+    // indices) — with a sanity cap so a bad value can't allocate a huge mask.
+    // Omitted ⇒ legacy uniform count (byte-identical to before).
+    const MIN_BLK = 256 * 1024;                        // smallest block size we'd ever use
+    const capBlocks = ceilDiv(totalBytes, MIN_BLK);
+    const clientBlocks = Number(req.body?.blockCount);
+    // v2 (adaptive): the sender may init with 0 blocks and GROW the plan as it
+    // measures throughput (see /relay/grow). v1: an exact count. Neither ⇒ legacy.
+    const blockCount = (Number.isInteger(clientBlocks) && clientBlocks >= 0 && clientBlocks <= capBlocks)
+      ? clientBlocks
+      : ceilDiv(totalBytes, BLOCK_BYTES);
+    const plan = typeof req.body?.plan === 'string' ? req.body.plan.slice(0, 200000) : null;
     const mask = Buffer.alloc(ceilDiv(blockCount, 8)); // all-zero: nothing uploaded yet
 
     // Idempotent: re-init by the same sender resets an in-flight transfer of the
     // same id (client retry). ON CONFLICT keeps ownership stable.
     const ins = await db.query(
       `INSERT INTO vb_transfer
-         (transfer_id, sender_id, recipient_id, chat_id, total_bytes, block_count, chunk_count, uploaded_mask, state)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending')
+         (transfer_id, sender_id, recipient_id, chat_id, total_bytes, block_count, chunk_count, uploaded_mask, state, plan)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending',$9)
        ON CONFLICT (transfer_id) DO UPDATE
          SET total_bytes = EXCLUDED.total_bytes, block_count = EXCLUDED.block_count,
-             chunk_count = EXCLUDED.chunk_count
+             chunk_count = EXCLUDED.chunk_count, plan = EXCLUDED.plan
          WHERE vb_transfer.sender_id = $2 AND vb_transfer.state IN ('pending','ready')
        RETURNING transfer_id, expires_at`,
-      [transferId, req.user.id, recipientId, chatId, totalBytes, blockCount, chunkCount, mask]);
+      [transferId, req.user.id, recipientId, chatId, totalBytes, blockCount, chunkCount, mask, plan]);
     if (!ins.rows[0]) return res.status(409).json({ error: 'transferId already used' });
 
     // Opaque doorbell — name/type arrive over E2EE, not here.
@@ -171,9 +184,43 @@ router.post('/relay/uploaded', async (req, res) => {
   } catch (e) { console.error('[vb/uploaded]', e.message); res.status(500).json({ error: 'mark failed' }); }
 });
 
+// ── POST /vaultbeam/relay/grow ──────────────────────────────────────
+// v2 adaptive geometry: the sender GROWS the transfer mid-flight — it appends a
+// segment (chosen from live throughput), extends the block count + bitmask, and
+// posts the updated content-free plan the recipient reads to decrypt. block_count
+// may only increase; growing resets a transiently-'ready' state back to pending.
+router.post('/relay/grow', async (req, res) => {
+  try {
+    const transferId = String(req.body?.transferId || '');
+    const newCount = Number(req.body?.blockCount);
+    const plan = typeof req.body?.plan === 'string' ? req.body.plan.slice(0, 200000) : null;
+    if (!transferId) return res.status(400).json({ error: 'transferId required' });
+
+    const { t, err } = await loadTransfer(transferId, req.user.id);
+    if (err) return res.status(err).json({ error: err === 404 ? 'not found' : 'forbidden' });
+    if (t.sender_id !== req.user.id) return res.status(403).json({ error: 'sender only' });
+    if (t.state === 'complete' || t.state === 'aborted') return res.status(410).json({ error: `transfer ${t.state}` });
+
+    const capBlocks = ceilDiv(Number(t.total_bytes), 256 * 1024);
+    if (!Number.isInteger(newCount) || newCount < t.block_count || newCount > capBlocks) {
+      return res.status(400).json({ error: 'blockCount must grow within cap' });
+    }
+    // Extend the bitmask to the new width (append zero bytes — new blocks unset).
+    const need = ceilDiv(newCount, 8);
+    const mask = Buffer.concat([Buffer.from(t.uploaded_mask), Buffer.alloc(Math.max(0, need - t.uploaded_mask.length))]);
+    await db.query(
+      `UPDATE vb_transfer SET block_count = $1, uploaded_mask = $2, plan = COALESCE($3, plan),
+              state = CASE WHEN state = 'ready' THEN 'pending' ELSE state END
+         WHERE transfer_id = $4`,
+      [newCount, mask, plan, transferId]);
+    res.json({ blockCount: newCount });
+  } catch (e) { console.error('[vb/grow]', e.message); res.status(500).json({ error: 'grow failed' }); }
+});
+
 // ── GET /vaultbeam/relay/:transferId ────────────────────────────────
 // Either party polls state + the uploaded-block bitmap (recipient uses it to
-// know which GETs are fetchable — drives resume; only the 0-bits remain).
+// know which GETs are fetchable — drives resume; only the 0-bits remain) + the
+// growing content-free plan (v2 geometry).
 router.get('/relay/:transferId', async (req, res) => {
   try {
     const { t, err } = await loadTransfer(String(req.params.transferId), req.user.id);
@@ -181,7 +228,7 @@ router.get('/relay/:transferId', async (req, res) => {
     res.json({
       transferId: t.transfer_id, state: t.state, totalBytes: Number(t.total_bytes),
       blockCount: t.block_count, chunkCount: t.chunk_count,
-      chunkBytes: CHUNK_BYTES, blockBytes: BLOCK_BYTES,
+      chunkBytes: CHUNK_BYTES, blockBytes: BLOCK_BYTES, plan: t.plan ?? null,
       uploadedMask: Buffer.from(t.uploaded_mask).toString('base64'),
       uploaded: countSet(t.uploaded_mask, t.block_count),
       isSender: t.sender_id === req.user.id, expiresAt: t.expires_at,
