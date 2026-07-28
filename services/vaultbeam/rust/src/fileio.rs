@@ -8,7 +8,7 @@ use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
-use crate::chunk::{open_chunk, seal_chunk};
+use crate::chunk::{open_block, open_chunk, plan_block, seal_chunk};
 use crate::VbError;
 
 fn io<E: std::fmt::Display>(ctx: &str) -> impl FnOnce(E) -> VbError + '_ {
@@ -77,6 +77,62 @@ pub fn write_cipher_chunk(
     f.seek(SeekFrom::Start(plain_offset)).map_err(io("writeCipherChunk seek"))?;
     f.write_all(&plain).map_err(io("writeCipherChunk write"))?;
     Ok(plain.len())
+}
+
+/// SENDER (R2 relay): read a block's chunks from `src_path` @ their offsets,
+/// seal each, and return the concatenated block ciphertext (the platform layer
+/// HTTP-PUTs it to the presigned URL — "Design A′": crypto+layout+IO in Rust,
+/// the trivial HTTPS transport stays platform-native to avoid a Rust TLS stack).
+/// Byte-identical to Kotlin `uploadBlock`'s body.
+#[allow(clippy::too_many_arguments)]
+pub fn seal_block_from_file(
+    src_path: &str,
+    key: &[u8; 32],
+    transfer_id: &str,
+    file_id: &str,
+    block_index: u64,
+    chunk_bytes: u64,
+    block_bytes: u64,
+    total_bytes: u64,
+    block_plain_offset: Option<u64>,
+) -> Result<Vec<u8>, VbError> {
+    let specs = plan_block(block_index, chunk_bytes, block_bytes, total_bytes, block_plain_offset);
+    let mut f = File::open(fs_path(src_path)).map_err(io("uploadBlock open"))?;
+    let mut out = Vec::new();
+    for s in &specs {
+        f.seek(SeekFrom::Start(s.plain_offset)).map_err(io("uploadBlock seek"))?;
+        let mut plain = vec![0u8; s.plain_len];
+        f.read_exact(&mut plain).map_err(io("uploadBlock read"))?;
+        out.extend_from_slice(&seal_chunk(key, transfer_id, file_id, s.id, &plain));
+    }
+    Ok(out)
+}
+
+/// RECIPIENT (R2 relay): given a block's raw body (platform HTTP-GET'd), verify+
+/// open each chunk and write plaintext @ its offset. Errors on a short/tampered
+/// body (the block is not marked). Returns chunks written. Mirrors Kotlin
+/// `downloadBlock` after the GET.
+#[allow(clippy::too_many_arguments)]
+pub fn write_block_from_body(
+    dst_path: &str,
+    key: &[u8; 32],
+    transfer_id: &str,
+    file_id: &str,
+    block_index: u64,
+    chunk_bytes: u64,
+    block_bytes: u64,
+    total_bytes: u64,
+    block_plain_offset: Option<u64>,
+    body: &[u8],
+) -> Result<usize, VbError> {
+    let specs = plan_block(block_index, chunk_bytes, block_bytes, total_bytes, block_plain_offset);
+    let opened = open_block(key, transfer_id, file_id, &specs, body)?;
+    let mut f = OpenOptions::new().write(true).read(true).open(fs_path(dst_path)).map_err(io("downloadBlock open"))?;
+    for (off, plain) in &opened {
+        f.seek(SeekFrom::Start(*off)).map_err(io("downloadBlock seek"))?;
+        f.write_all(plain).map_err(io("downloadBlock write"))?;
+    }
+    Ok(opened.len())
 }
 
 /// Whole-file SHA-256 (lowercase hex), streamed — never a full read into memory.

@@ -65,6 +65,24 @@ pub fn dispatch(op: &str, a: &Value) -> Res<Value> {
             )?;
             Ok(json!(n))
         }
+        // R2 block ops — Rust seals/opens+writes; the platform layer does the
+        // presigned-URL HTTP PUT/GET with the base64 body returned/passed here.
+        "sealBlockFromFile" => {
+            let ct = fileio::seal_block_from_file(
+                s(a, "srcPath")?, &key32(a, "keyB64")?, s(a, "transferId")?, s(a, "fileId")?,
+                u64_(a, "blockIndex")?, u64_(a, "chunkBytes")?, u64_(a, "blockBytes")?, u64_(a, "totalBytes")?,
+                a.get("blockPlainOffset").and_then(Value::as_u64),
+            )?;
+            Ok(json!(B64.encode(ct)))
+        }
+        "writeBlockFromBody" => {
+            let n = fileio::write_block_from_body(
+                s(a, "dstPath")?, &key32(a, "keyB64")?, s(a, "transferId")?, s(a, "fileId")?,
+                u64_(a, "blockIndex")?, u64_(a, "chunkBytes")?, u64_(a, "blockBytes")?, u64_(a, "totalBytes")?,
+                a.get("blockPlainOffset").and_then(Value::as_u64), &b64(a, "bodyB64")?,
+            )?;
+            Ok(json!(n))
+        }
         "sha256" => Ok(json!(fileio::sha256_file(s(a, "path")?)?)),
         "deleteFile" => Ok(json!(fileio::delete_file(s(a, "path")?))),
         "lanIp" => Ok(match lan::lan_ip() {

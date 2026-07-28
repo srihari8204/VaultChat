@@ -98,6 +98,47 @@ fn lan_frames_byte_identical() {
 }
 
 #[test]
+fn block_from_file_matches_vectors_and_round_trips() {
+    let g = golden();
+    let key = key32(&g);
+    let file_data = hex::decode(g["inputs"]["fileDataHex"].as_str().unwrap()).unwrap();
+
+    let mut src = std::env::temp_dir();
+    src.push(format!("vbcore-blk-src-{}.bin", std::process::id()));
+    std::fs::write(&src, &file_data).unwrap();
+    let src = src.to_string_lossy().into_owned();
+
+    for b in g["blocks"].as_array().unwrap() {
+        let tid = b["transferId"].as_str().unwrap();
+        let fid = b["fileId"].as_str().unwrap();
+        let bi = u64_of(b, "blockIndex");
+        let cb = u64_of(b, "chunkBytes");
+        let bb = u64_of(b, "blockBytes");
+        let total = u64_of(b, "totalBytes");
+        let bpo = if b["offsetScheme"].as_bool().unwrap() { b["blockPlainOffset"].as_u64() } else { None };
+
+        // seal from the file == the golden block wire
+        let ct = vaultbeam_core::fileio::seal_block_from_file(&src, &key, tid, fid, bi, cb, bb, total, bpo).unwrap();
+        assert_eq!(hex::encode(&ct), b["wireHex"].as_str().unwrap(), "seal_block_from_file: {}", b["name"]);
+
+        // write that body into a fresh prealloc'd dst → the plaintext regions match
+        let mut dst = std::env::temp_dir();
+        dst.push(format!("vbcore-blk-dst-{}-{bi}.bin", std::process::id()));
+        let dst = dst.to_string_lossy().into_owned();
+        vaultbeam_core::fileio::prealloc(&dst, total).unwrap();
+        let n = vaultbeam_core::fileio::write_block_from_body(&dst, &key, tid, fid, bi, cb, bb, total, bpo, &ct).unwrap();
+        assert!(n > 0);
+        let written = std::fs::read(&dst).unwrap();
+        for spec in vaultbeam_core::chunk::plan_block(bi, cb, bb, total, bpo) {
+            let o = spec.plain_offset as usize;
+            assert_eq!(written[o..o + spec.plain_len], file_data[o..o + spec.plain_len], "block open write: {}", b["name"]);
+        }
+        vaultbeam_core::fileio::delete_file(&dst);
+    }
+    vaultbeam_core::fileio::delete_file(&src);
+}
+
+#[test]
 fn sha256_vector() {
     let g = golden();
     let data = hex::decode(g["sha256"]["dataHex"].as_str().unwrap()).unwrap();
