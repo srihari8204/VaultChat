@@ -90,6 +90,7 @@ const haptic = (style: Haptics.ImpactFeedbackStyle = Haptics.ImpactFeedbackStyle
 import { MessageActionSheet, type SheetAction } from '../components/MessageActionSheet';
 import { getAccessToken } from '../lib/api';
 import { getLiveKey, putLiveKey, clearLiveKey, decryptPosition } from '../lib/liveLocationCrypto';
+import { navigateTo, openNavigator, navigateFromUrl } from '../lib/nav/openNavigation';
 import {
   addBookmark,
   attachmentUrl,
@@ -1719,6 +1720,7 @@ export default function ChatScreen() {
       ...(isDirect ? [{ label: 'Big File', icon: 'cube' as const, color: BRAND_ACCENT, onPress: onSendVaultBeam }] : []),
       { label: 'Scan',          icon: 'scan' as const,        color: '#8D6E63', onPress: () => router.push({ pathname: '/docscanner' as any, params: { chatId } }) },
       { label: 'Location',      icon: 'location' as const,    color: '#66BB6A', onPress: () => router.push({ pathname: '/location' as any, params: { chatId, name: peerName } }) },
+      { label: 'Navigate',      icon: 'navigate' as const,    color: '#4A9FFF', onPress: () => openNavigator() },
       { label: 'Poll',          icon: 'stats-chart' as const, color: '#FFA726', onPress: () => router.push({ pathname: '/create-poll' as any, params: { chatId, peerName } }) },
       { label: nextInvisibleInk ? 'Ink: armed' : 'Invisible Ink', icon: 'sparkles' as const, color: '#AB47BC', onPress: () => setNextInvisibleInk(v => !v) },
     ];
@@ -2106,12 +2108,12 @@ export default function ChatScreen() {
         <TouchableOpacity
           style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 12, marginTop: 8, padding: 10, borderRadius: 12, backgroundColor: 'rgba(255,107,53,0.12)', borderWidth: 1, borderColor: 'rgba(255,107,53,0.4)' }}
           activeOpacity={0.85}
-          onPress={() => Linking.openURL(`https://maps.google.com/?q=${liveLoc.latitude},${liveLoc.longitude}`).catch(() => {})}
+          onPress={() => navigateTo(liveLoc.latitude, liveLoc.longitude, membersById.get(liveLoc.userId)?.name || 'Live location')}
         >
           <Ionicons name="navigate" size={20} color={colors.primary} />
           <View style={{ flex: 1 }}>
             <Text style={{ color: colors.primary, fontSize: 13, fontWeight: '700' }}>{membersById.get(liveLoc.userId)?.name || 'Someone'} is sharing live location</Text>
-            <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 11, marginTop: 1 }} numberOfLines={1}>{liveLoc.address || `${liveLoc.latitude.toFixed(5)}, ${liveLoc.longitude.toFixed(5)}`} · Open in Maps</Text>
+            <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 11, marginTop: 1 }} numberOfLines={1}>{liveLoc.address || `${liveLoc.latitude.toFixed(5)}, ${liveLoc.longitude.toFixed(5)}`} · Navigate</Text>
           </View>
           <TouchableOpacity onPress={() => setLiveLoc(null)} hitSlop={8}><Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 16 }}>✕</Text></TouchableOpacity>
         </TouchableOpacity>
@@ -2890,7 +2892,7 @@ function renderRichText(body: string, q: string | null | undefined): any {
       <Text
         key={`u${m.index}`}
         style={HL.link}
-        onPress={() => Linking.openURL(url).catch(() => {})}
+        onPress={() => { if (!navigateFromUrl(url)) Linking.openURL(url).catch(() => {}); }}
       >
         {renderWithHighlight(url, q)}
       </Text>,
@@ -3934,7 +3936,7 @@ function MessageBubble({
             <TouchableOpacity
               disabled={!ok}
               activeOpacity={0.85}
-              onPress={() => { if (ok) Linking.openURL(`https://www.google.com/maps?q=${L.lat},${L.lng}`).catch(() => {}); }}
+              onPress={() => { if (ok) navigateTo(L.lat, L.lng, L.address || 'Shared location'); }}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 190 }}>
                 <View style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: 'rgba(157,111,208,0.18)', alignItems: 'center', justifyContent: 'center' }}>

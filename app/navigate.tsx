@@ -1,7 +1,7 @@
-// app/navigate.tsx — the navigation screen. Screen-free by design: pick a
-// destination + a Direction-Lock profile, hit Start, and the haptic engine
-// guides you via vibration + the mini banner. No full map (that's a later,
-// optional layer) — this is the complete real flow against self-hosted Valhalla.
+// app/navigate.tsx — the navigation screen. Pick a destination + a Direction-Lock
+// profile, hit Start; the haptic engine guides you via vibration + the mini
+// banner, and once active the live map (NavMap) becomes the hero with the route,
+// destination, and a moving "you" dot. Real flow against self-hosted Valhalla.
 
 import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert, ActivityIndicator, Platform } from 'react-native';
@@ -10,8 +10,10 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useTheme } from '../lib/theme';
 import { useNavSettings, setNavSettings, loadNavSettings } from '../lib/nav/navSettings';
-import { startNavigation, stopNavigation, useNavBanner } from '../lib/nav/navigationService';
+import { startNavigation, stopNavigation, useNavBanner, type NavGeo } from '../lib/nav/navigationService';
+import { fetchRoute } from '../lib/nav/routing';
 import NavBanner from '../components/nav/NavBanner';
+import NavMap from '../components/nav/NavMap';
 import { type NavProfile } from '../lib/nav/hapticLanguage';
 import { type DisplayMode } from '../lib/nav/hapticPlayer';
 import { type LatLng } from '../lib/nav/geo';
@@ -37,8 +39,28 @@ export default function NavigateScreen() {
   const [dest, setDest] = useState<{ name: string; coords: LatLng } | null>(null);
   const [searching, setSearching] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [preview, setPreview] = useState<NavGeo | null>(null);
 
   useEffect(() => { loadNavSettings(); }, []);
+
+  // Setup preview: as soon as a destination is chosen, show it on the map with
+  // your current position and a preview of the route (best-effort; the pin shows
+  // instantly even before location/route resolve).
+  useEffect(() => {
+    if (!dest) { setPreview(null); return; }
+    let cancel = false;
+    (async () => {
+      let pos: LatLng | null = null;
+      try {
+        const cur = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        pos = { lat: cur.coords.latitude, lng: cur.coords.longitude };
+      } catch { /* no permission/fix yet — still show the destination pin */ }
+      let shape: LatLng[] = [];
+      if (pos) { try { shape = (await fetchRoute(pos, dest.coords, s.costing)).shape; } catch { /* route preview optional */ } }
+      if (!cancel) setPreview({ shape, pos, dest: dest.coords, heading: 0 });
+    })();
+    return () => { cancel = true; };
+  }, [dest, s.costing]);
   useEffect(() => {
     if (params.lat && params.lng) {
       const c = { lat: Number(params.lat), lng: Number(params.lng) };
@@ -87,19 +109,22 @@ export default function NavigateScreen() {
       <NavBanner />
 
       {banner.active ? (
-        <View style={st.activeWrap}>
-          <View style={[st.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Text style={[st.bigInstr, { color: colors.text }]}>{banner.rerouting ? 'Rerouting…' : (banner.instruction || 'Continue')}</Text>
-            {!!banner.roadName && <Text style={{ color: colors.text + '99', marginTop: 4 }}>{banner.roadName}</Text>}
-            <Text style={[st.bigDist, { color: colors.primary }]}>{banner.distanceToManeuver} m</Text>
+        <View style={{ flex: 1 }}>
+          <NavMap style={{ flex: 1 }} />
+          <View style={[st.sheet, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
+            <View style={{ flex: 1 }}>
+              <Text numberOfLines={1} style={[st.sheetInstr, { color: colors.text }]}>
+                {banner.rerouting ? 'Rerouting…' : (banner.instruction || 'Continue')}
+              </Text>
+              <Text numberOfLines={1} style={{ color: colors.text + '88', fontSize: 12.5, marginTop: 2 }}>
+                {banner.roadName ? banner.roadName + ' · ' : ''}{Math.round(banner.remainingM)} m to go · {s.profile}
+              </Text>
+            </View>
+            <TouchableOpacity onPress={() => stopNavigation()} style={[st.endBtn, { backgroundColor: colors.danger }]}>
+              <Ionicons name="stop" size={16} color="#fff" />
+              <Text style={st.endTxt}>End</Text>
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity onPress={() => stopNavigation()} style={[st.stopBtn, { backgroundColor: colors.danger }]}>
-            <Ionicons name="stop" size={18} color="#fff" />
-            <Text style={st.stopTxt}>End navigation</Text>
-          </TouchableOpacity>
-          <Text style={{ color: colors.text + '77', textAlign: 'center', marginTop: 14, fontSize: 12.5 }}>
-            Profile: {s.profile} · {MODES.find((m) => m.key === s.mode)?.label}. Keep your eyes on the road — the vibration guides you.
-          </Text>
         </View>
       ) : (
         <ScrollView contentContainerStyle={st.setup} keyboardShouldPersistTaps="handled">
@@ -121,6 +146,13 @@ export default function NavigateScreen() {
               <Text numberOfLines={1} style={{ color: colors.text, flex: 1 }}>{dest.name}</Text>
               <Text style={{ color: colors.text + '77', fontSize: 12 }}>{dest.coords.lat.toFixed(4)}, {dest.coords.lng.toFixed(4)}</Text>
             </View>
+          )}
+          {dest && (
+            <NavMap
+              data={preview ?? { shape: [], pos: null, dest: dest.coords, heading: 0 }}
+              follow={false}
+              style={[st.previewMap, { borderColor: colors.border }]}
+            />
           )}
 
           {/* Direction Lock — locked for the trip once you start */}
@@ -164,14 +196,13 @@ const st = StyleSheet.create({
   searchRow: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, height: 48 },
   input: { flex: 1, fontSize: 15 },
   destPill: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, padding: 12, borderRadius: 10 },
+  previewMap: { height: 210, borderRadius: 14, borderWidth: 1, marginTop: 14 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
   startBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 52, borderRadius: 14, marginTop: 30 },
   startTxt: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  activeWrap: { flex: 1, padding: 16, justifyContent: 'center' },
-  card: { borderWidth: 1, borderRadius: 16, padding: 22, alignItems: 'center' },
-  bigInstr: { fontSize: 22, fontWeight: '800', textAlign: 'center' },
-  bigDist: { fontSize: 44, fontWeight: '900', marginTop: 12 },
-  stopBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 50, borderRadius: 14, marginTop: 24 },
-  stopTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  sheet: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14, paddingBottom: 22, borderTopWidth: StyleSheet.hairlineWidth },
+  sheetInstr: { fontSize: 17, fontWeight: '800' },
+  endBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 44, paddingHorizontal: 18, borderRadius: 12 },
+  endTxt: { color: '#fff', fontSize: 14, fontWeight: '800' },
 });

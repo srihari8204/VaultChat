@@ -12,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 // Honest copy only — no fabricated guarantees.
 
 import { brandAlpha } from '../constants/theme';
+import { navigateTo } from '../lib/nav/openNavigation';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import React, { useCallback, useEffect, useRef, useState , useMemo} from 'react';
@@ -207,6 +208,12 @@ export default function LocationScreen() {
               <Text style={S.address} numberOfLines={2}>{address}</Text>
               {lat != null && lng != null && (
                 <Text style={S.coords}>{lat.toFixed(5)}, {lng.toFixed(5)}</Text>
+              )}
+              {lat != null && lng != null && (
+                <TouchableOpacity style={S.mapsBtn} onPress={() => navigateTo(lat, lng, address || 'Location')}>
+                  <Ionicons name="navigate" size={15} color={colors.primary} />
+                  <Text style={S.mapsBtnText}>Navigate here</Text>
+                </TouchableOpacity>
               )}
               {lat != null && lng != null && (
                 <TouchableOpacity style={S.mapsBtn} onPress={() => Linking.openURL(`https://www.google.com/maps?q=${lat},${lng}`)}>

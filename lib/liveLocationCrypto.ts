@@ -61,6 +61,36 @@ export function decryptPosition(keyB64: string, blobB64: string): LivePosition |
   } catch { return null; }
 }
 
+// ─── Generic seal/open (same AES-256-GCM) for richer payloads ─────────────────
+// Family Circle pings carry more than a position (battery, speed, ts), so they use
+// these instead of encryptPosition/decryptPosition, which are position-shaped.
+
+/** Seal any JSON-serializable value with a 32-byte base64 key → base64( nonce(12) || ct+tag ). */
+export function sealJSON(keyB64: string, value: unknown): string | null {
+  try {
+    const key = Buffer.from(keyB64, 'base64');
+    if (key.length !== 32) return null;
+    const nonce = randomBytes(12);
+    const ct = gcm(key, nonce).encrypt(Buffer.from(JSON.stringify(value), 'utf8'));
+    const out = new Uint8Array(nonce.length + ct.length);
+    out.set(nonce, 0);
+    out.set(ct, nonce.length);
+    return Buffer.from(out).toString('base64');
+  } catch { return null; }
+}
+
+/** Open a sealJSON blob with the key. Returns null on wrong/missing key or malformed data. */
+export function openJSON<T = any>(keyB64: string, blobB64: string): T | null {
+  try {
+    const key = Buffer.from(keyB64, 'base64');
+    if (key.length !== 32) return null;
+    const buf = Buffer.from(blobB64, 'base64');
+    if (buf.length <= 12) return null;
+    const pt = gcm(key, buf.subarray(0, 12)).decrypt(new Uint8Array(buf.subarray(12)));
+    return JSON.parse(Buffer.from(pt).toString('utf8')) as T;
+  } catch { return null; }
+}
+
 // ─── Ephemeral per-session key store (chat+peer → key) ────────────────────────
 // In-memory only: a live session lives as long as the app is open, and the key is
 // re-delivered E2E whenever a new session starts. Nothing sensitive persists.

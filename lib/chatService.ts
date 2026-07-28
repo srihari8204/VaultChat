@@ -449,7 +449,7 @@ export async function createDirectChat(
 
 export async function createGroupChat(
   name: string,
-  members: { ids?: string[]; emails?: string[] } = {},
+  members: { ids?: string[]; emails?: string[]; allowEmpty?: boolean } = {},
 ): Promise<{ id: string; type: 'group'; name: string }> {
   return api(`/chats`, {
     method: 'POST',
@@ -457,6 +457,7 @@ export async function createGroupChat(
       type: 'group', name,
       memberIds:    members.ids    ?? [],
       memberEmails: members.emails ?? [],
+      allowEmpty:   members.allowEmpty === true,
     },
   });
 }

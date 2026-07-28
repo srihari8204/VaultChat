@@ -18,6 +18,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
 import { logoutUser, sendPhoneOTP, verifyPhoneOTP } from '../(constants)/authService';
 import { api, getAccessToken } from '../../lib/api';
 import { attachmentUrl, uploadAttachment } from '../../lib/chatService';
@@ -37,6 +38,7 @@ interface UserProfile {
   faceCount?: number;
   createdAt?: string;
   emailVerifiedAt?: string | null;
+  vaultId?: string | null;
 }
 
 function useS() {
@@ -263,6 +265,24 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         )}
       </View>
+
+      {/* VaultID — your @handle others use to add you (Trusted Contacts, QR) */}
+      {!!profile?.vaultId && (
+        <View style={[S.card, { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 14, gap: 12 }]}>
+          <Ionicons name="at-circle-outline" size={22} color={colors.primary} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.textDim, fontSize: 12 }}>Your VaultID</Text>
+            <Text style={{ color: colors.text, fontSize: 15, fontWeight: '700' }}>@{profile.vaultId}</Text>
+          </View>
+          <TouchableOpacity hitSlop={10} style={{ padding: 6 }}
+            onPress={async () => { await Clipboard.setStringAsync('@' + (profile?.vaultId ?? '')); Alert.alert('Copied', `@${profile?.vaultId} copied to clipboard.`); }}>
+            <Ionicons name="copy-outline" size={20} color={colors.primary} />
+          </TouchableOpacity>
+          <TouchableOpacity hitSlop={10} style={{ padding: 6 }} onPress={() => router.push('/qr-contact' as any)}>
+            <Ionicons name="qr-code-outline" size={20} color={colors.primary} />
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* WhatsApp-style editable info rows */}
       <View style={S.card}>

@@ -38,6 +38,17 @@ export function useNavBanner(): NavBanner {
   return useSyncExternalStore((cb) => { subs.add(cb); return () => subs.delete(cb); }, () => banner, () => banner);
 }
 
+// ── geographic state for the map (route line, live position, destination) ──
+export interface NavGeo { shape: LatLng[]; pos: LatLng | null; heading: number; dest: LatLng | null; }
+const GEO_IDLE: NavGeo = { shape: [], pos: null, heading: 0, dest: null };
+let geo: NavGeo = GEO_IDLE;
+const geoSubs = new Set<() => void>();
+function setGeo(patch: Partial<NavGeo>) { geo = { ...geo, ...patch }; geoSubs.forEach((c) => { try { c(); } catch {} }); }
+export function getNavGeo(): NavGeo { return geo; }
+export function useNavGeo(): NavGeo {
+  return useSyncExternalStore((cb) => { geoSubs.add(cb); return () => geoSubs.delete(cb); }, () => geo, () => geo);
+}
+
 export interface StartNavOpts {
   to: LatLng; from?: LatLng; costing?: Costing;
   profile: NavProfile; mode?: DisplayMode; custom?: Partial<Record<HapticEvent, HapticPattern>>;
@@ -80,6 +91,7 @@ async function reroute() {
   try {
     route = await fetchRoute(last.pos, dest, opts.costing ?? 'auto');
     maneuverIdx = 0; timeline = null;
+    setGeo({ shape: route.shape });
   } catch { /* keep the old route; next fix retries via missed-turn */ }
   finally { rerouting = false; setBanner({ rerouting: false }); }
 }
@@ -101,6 +113,7 @@ function onFix(loc: Location.LocationObject) {
   }
   if (Number.isNaN(heading)) heading = 0;
   last = { pos, t: now };
+  setGeo({ pos, heading });
 
   const shape = route.shape;
   const near = nearestIndex(shape, pos);
@@ -154,6 +167,7 @@ export async function startNavigation(o: StartNavOpts): Promise<void> {
   route = await fetchRoute(fromLL, o.to, o.costing ?? 'auto');
   maneuverIdx = 0; timeline = null; last = null;
   setBanner({ ...IDLE, active: true });
+  setGeo({ shape: route.shape, dest: o.to, pos: fromLL, heading: 0 });
 
   watcher = await Location.watchPositionAsync(
     { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 1000, distanceInterval: 4 },
@@ -167,6 +181,7 @@ export async function stopNavigation(): Promise<void> {
   watcher = null; route = null; timeline = null; dest = null; opts = null; last = null; rerouting = false;
   stopHaptics();
   setBanner(IDLE);
+  setGeo(GEO_IDLE);
 }
 
 export default {};
