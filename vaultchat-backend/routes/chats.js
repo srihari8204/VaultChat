@@ -485,7 +485,9 @@ router.post('/', async (req, res) => {
         resolvedIds.push(...r.rows.map(x => x.id));
       }
 
-      if (resolvedIds.length === 0) {
+      // A Family Circle is created solo and filled via invite links, so it may
+      // start with no other members. Normal group creation still requires one.
+      if (resolvedIds.length === 0 && b.allowEmpty !== true) {
         return res.status(400).json({ error: 'Group needs at least one other member' });
       }
       if (resolvedIds.length >= MAX_GROUP_SIZE) {
