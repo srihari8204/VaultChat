@@ -1,20 +1,95 @@
-// lib/vaultBeamStreamNative.ts — typed bridge to the VaultBeamStream native module
-// (the P1 byte pipeline). This is the concrete implementation of the P1_SEAM
-// documented in lib/vaultbeamRelay.ts: JS holds only {blockIndex, url}; the native
-// side owns every file byte + the per-chunk AES-256-GCM + the block HTTP PUT/GET.
+// lib/vaultBeamStreamNative.ts — typed bridge to the VaultBeam native byte
+// pipeline. This is the concrete implementation of the P1_SEAM documented in
+// lib/vaultbeamRelay.ts: JS holds only {blockIndex, url}; the native side owns
+// every file byte + the per-chunk AES-256-GCM + the block HTTP PUT/GET.
 //
-// Absent under Expo Go / iOS (Android-only for now) → isNativeStreamAvailable()
-// is false and the orchestrator refuses >2 GB rather than OOMing the JS heap.
+// TWO interchangeable backends, selected at runtime by EXPO_PUBLIC_VAULTBEAM_
+// NATIVE_BACKEND ('kotlin' default | 'rust'):
+//   • 'kotlin' — the original VaultBeamStream module (Android only).
+//   • 'rust'   — the shared vaultbeam-core Rust module VaultBeamStreamRust
+//                (Android AND iOS — first iOS VaultBeam). Byte-identical wire
+//                (proven by the golden vectors), so a Kotlin peer and a Rust
+//                peer interop on every tier.
+// The wire format + method surface are identical, so this file is backend-
+// agnostic below the resolver. On any capability failure we fall back to Kotlin;
+// the orchestrator's tier fallback (LAN/P2P → R2 relay) is the ultimate net, so
+// a transfer never crashes. Kill-switch: set the flag to 'kotlin'.
+//
+// Absent entirely (Expo Go, or a build without either module) →
+// isNativeStreamAvailable() is false and the orchestrator refuses >2 GB rather
+// than OOMing the JS heap.
 
-import { NativeModules, NativeEventEmitter, Platform } from 'react-native';
+import { NativeModules, NativeEventEmitter } from 'react-native';
 
-const Native: any = NativeModules?.VaultBeamStream ?? null;
+export type VaultBeamBackend = 'kotlin' | 'rust';
+
+// Methods a usable native module must expose (structural capability check).
+const REQUIRED = [
+  'prealloc', 'uploadBlock', 'downloadBlock', 'sha256', 'deleteFile',
+  'readCipherChunk', 'writeCipherChunk', 'lanIp', 'lanServe', 'lanConnect',
+] as const;
+
+function hasSurface(mod: any): boolean {
+  return !!mod && REQUIRED.every((m) => typeof mod[m] === 'function');
+}
+
+function breadcrumb(message: string, level: 'info' | 'warning' = 'info'): void {
+  if (level === 'warning') console.warn(`[vaultbeam] ${message}`);
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const Sentry = require('@sentry/react-native');
+    Sentry.addBreadcrumb({ category: 'vaultbeam', level, message });
+  } catch {
+    /* Sentry unavailable (Node tests) — the console line above suffices. */
+  }
+}
+
+// Resolve the backend ONCE at module load. Prefer Rust when the flag asks for it
+// AND the module is present with the full surface; otherwise Kotlin; otherwise
+// none. Every branch leaves a breadcrumb so field selection/fallback is visible.
+function resolveBackend(): { native: any; backend: VaultBeamBackend | null } {
+  const want = String(process.env.EXPO_PUBLIC_VAULTBEAM_NATIVE_BACKEND || 'kotlin').toLowerCase();
+  const rust = NativeModules?.VaultBeamStreamRust ?? null;
+  const kotlin = NativeModules?.VaultBeamStream ?? null;
+
+  if (want === 'rust') {
+    if (hasSurface(rust)) {
+      breadcrumb('backend=rust (vaultbeam-core)');
+      return { native: rust, backend: 'rust' };
+    }
+    if (hasSurface(kotlin)) {
+      breadcrumb(`flag=rust but VaultBeamStreamRust ${rust ? 'incomplete' : 'absent'} — falling back to kotlin`, 'warning');
+      return { native: kotlin, backend: 'kotlin' };
+    }
+    breadcrumb('flag=rust but NO native module present — relay-only', 'warning');
+    return { native: null, backend: null };
+  }
+
+  if (hasSurface(kotlin)) {
+    breadcrumb('backend=kotlin');
+    return { native: kotlin, backend: 'kotlin' };
+  }
+  // Kotlin absent (e.g. iOS with only the Rust module built): use Rust if usable.
+  if (hasSurface(rust)) {
+    breadcrumb('backend=rust (kotlin absent on this platform)');
+    return { native: rust, backend: 'rust' };
+  }
+  return { native: null, backend: null };
+}
+
+const { native: Native, backend: BACKEND } = resolveBackend();
+
+/** Which native backend is live ('kotlin' | 'rust' | null) — for diagnostics. */
+export function vaultBeamBackend(): VaultBeamBackend | null {
+  return BACKEND;
+}
 
 export function isNativeStreamAvailable(): boolean {
-  return !!Native && Platform.OS === 'android';
+  return !!Native;
 }
 
 // Event bus for native-driven LAN transfer progress (vbLanProgress / vbLanBound).
+// Both backends emit the same event names/payloads via NativeEventEmitter.
 const emitter = Native ? new NativeEventEmitter(Native) : null;
 export function onLanEvent(event: 'vbLanProgress' | 'vbLanBound', cb: (d: any) => void): () => void {
   if (!emitter) return () => {};
@@ -24,7 +99,7 @@ export function onLanEvent(event: 'vbLanProgress' | 'vbLanBound', cb: (d: any) =
 
 function requireNative(): any {
   if (!Native) {
-    throw new Error('VaultBeamStream native module unavailable — needs a dev/EAS build (not Expo Go); Android only for now.');
+    throw new Error('VaultBeam native module unavailable — needs a dev/EAS build (not Expo Go). Set EXPO_PUBLIC_VAULTBEAM_NATIVE_BACKEND=rust for iOS + Android, or use the relay tier.');
   }
   return Native;
 }
