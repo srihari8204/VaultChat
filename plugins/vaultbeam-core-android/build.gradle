@@ -1,0 +1,89 @@
+// vaultbeam-core — Android library module linking the Rust vaultbeam-core
+// staticlib into a plain JNI shared lib (libvaultbeamnative.so) behind the
+// classic bridge module "VaultBeamStreamRust". Copied into android/vaultbeam-core
+// by plugins/withVaultBeamRust.js during expo prebuild (only when cargo-ndk
+// exists — otherwise the Kotlin VaultBeamStream fallback stays).
+//
+// Unlike crypto-core (pure C++/Nitro) this module ships Kotlin sources (the
+// classic ReactContextBaseJavaModule), so it also applies the Kotlin plugin.
+apply plugin: "com.android.library"
+apply plugin: "org.jetbrains.kotlin.android"
+
+def safeExtGet(prop, fallback) {
+    rootProject.ext.has(prop) ? rootProject.ext.get(prop) : fallback
+}
+
+def reactNativeArchitectures() {
+    def value = rootProject.getProperties().get("reactNativeArchitectures")
+    return value ? value.split(",") : ["armeabi-v7a", "arm64-v8a", "x86", "x86_64"]
+}
+
+android {
+    namespace "com.vaultchat.vaultbeamcore"
+    compileSdkVersion safeExtGet("compileSdkVersion", 36)
+
+    defaultConfig {
+        minSdkVersion safeExtGet("minSdkVersion", 24)
+        targetSdkVersion safeExtGet("targetSdkVersion", 36)
+        externalNativeBuild {
+            cmake {
+                arguments "-DANDROID_STL=c++_shared"
+            }
+        }
+        ndk {
+            abiFilters(*reactNativeArchitectures())
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "CMakeLists.txt"
+        }
+    }
+
+    packagingOptions {
+        excludes = ["META-INF", "META-INF/**"]
+        // libc++_shared ships with the app — don't double-package.
+        pickFirst "**/libc++_shared.so"
+    }
+}
+
+dependencies {
+    // Substituted to the local react-android by the React gradle plugin.
+    //noinspection GradleDynamicVersion
+    implementation "com.facebook.react:react-android"
+}
+
+// ── Rust: build libvaultbeam_core.a per ABI via cargo-ndk before CMake links it ──
+def rustDir = new File(projectDir, "../../services/vaultbeam/rust").canonicalFile
+def abiTargets = [
+    "arm64-v8a"  : "aarch64-linux-android",
+    "armeabi-v7a": "armv7-linux-androideabi",
+    "x86"        : "i686-linux-android",
+    "x86_64"     : "x86_64-linux-android",
+]
+
+tasks.register("cargoBuildVaultBeamCore") {
+    description = "Builds the vaultbeam-core Rust staticlib for all requested ABIs (cargo-ndk)"
+    doLast {
+        reactNativeArchitectures().each { abi ->
+            if (abiTargets[abi] == null) {
+                throw new GradleException("vaultbeam-core: unsupported ABI ${abi}")
+            }
+            exec {
+                workingDir rustDir
+                environment "ANDROID_NDK_HOME", android.ndkDirectory.absolutePath
+                commandLine "cargo", "ndk", "-t", abi, "build", "--release", "--lib"
+            }
+        }
+    }
+}
+preBuild.dependsOn("cargoBuildVaultBeamCore")
