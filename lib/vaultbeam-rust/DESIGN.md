@@ -235,7 +235,8 @@ same flag → full. Relay tier always on. Kill-switch = set
 | 2 | `vaultbeam-core` crate (chunk/fileio/lan) + crypto-core `gcm_seal/open` | ✅ 16 crate tests green, byte-identical vectors |
 | 3a | C-ABI FFI (`vb_call`/`vb_lan_*`/`vb_free`) + `vb-cli` | ✅ green |
 | 3b (core) | R2 block seal/write ops (A′) | ✅ green |
-| 3b (glue) | Kotlin/JNI module + CMake/gradle + `withVaultBeamRust` + iOS Swift/xcframework | ⚙️ prebuild-verified (no NDK/Xcode in CI) |
+| 3b (glue) Android | Kotlin/JNI module + CMake/gradle + `withVaultBeamRust` | ✅ **COMPILE-VERIFIED**: crate cross-compiles to all 4 ABIs + exports vb_* symbols; prebuild integrates (settings/app gradle + MainApplication); `:vaultbeam-core:assembleRelease` links `libvaultbeamnative.so` per ABI + Kotlin compiles + AAR builds |
+| 3b (glue) iOS | Swift module + `VaultBeamCore.xcframework` + podspec | ⚙️ prebuild-verified (no macOS/Xcode here) |
 | 4 | `EXPO_PUBLIC_VAULTBEAM_NATIVE_BACKEND` switch + fallback + Sentry | ✅ typecheck 0 new errors |
 | 5 (host) | Rust ≡ JS ≡ frozen-vectors parity (`vaultbeam-parity.selftest.ts`) | ✅ green |
 | 5 (device) | cross-version LAN/P2P/relay e2e + resume-across-switch + throughput | 🔲 on-device gate (see below) |
