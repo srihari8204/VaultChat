@@ -25,17 +25,24 @@ flag=kotlin (default) → Kotlin present? → KOTLIN → else (iOS) RUST → els
 Below all of it, the orchestrator's tier fallback (LAN/P2P → R2 relay) is the
 safety net. Every selection + fallback emits a `vaultbeam` Sentry breadcrumb.
 
-## Stages
+## Stages — GREENFIELD launch (no users in production yet)
 
-1. **Default (`kotlin`)** — this PR. Rust built into the app but dormant.
-2. **Internal build (`rust`)** — QA runs the on-device gate (DESIGN.md
-   "on-device gate": old⇄new on LAN/P2P/relay both directions, resume across a
-   backend switch, throughput/memory vs Kotlin). Watch the breadcrumbs for
-   unexpected fallbacks.
-3. **Staged %** — flip the flag for a small cohort via the same remote-config
-   mechanism that feeds `EXPO_PUBLIC_*`. Monitor transfer success rate + the
-   fallback breadcrumb rate vs the Kotlin cohort.
-4. **Full** — default to `rust`. Keep Kotlin as fallback indefinitely.
+There are no active users and no old builds in the field, so the staged
+old⇄new migration this plan originally assumed does not apply. The flag is
+also build-time inlined (`EXPO_PUBLIC_*`), so with one launch build every
+peer runs the same backend — mixed-backend pairs cannot occur in the field.
+
+1. **Default (`kotlin`)** — this PR as committed. Rust built in but dormant.
+2. **Internal build (`rust`)** — run the SIMPLIFIED device gate (DESIGN.md):
+   two devices on the same rust build; transfer on LAN, P2P, and relay;
+   sha256 match; kill-and-resume. Optional: one kotlin⇄rust smoke as
+   kill-switch insurance (already proven at the byte level by the vectors).
+3. **Launch with `rust` as the default** — the point of the phase (one shared
+   core + iOS). Kotlin stays in the tree purely as the kill-switch.
+
+The byte-identical wire still matters after launch: it is what makes the
+kill-switch instant (in-flight transfers resume on the other backend) and
+what keeps future build N ⇄ N+1 pairs interoperating forever.
 
 ## Kill-switch
 

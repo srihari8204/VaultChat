@@ -242,20 +242,25 @@ same flag → full. Relay tier always on. Kill-switch = set
 | 5 (device) | cross-version LAN/P2P/relay e2e + resume-across-switch + throughput | 🔲 on-device gate (see below) |
 | 6 | rollout + kill-switch + PR | ✅ `ROLLOUT.md` + `PR.md` |
 
-## The on-device gate (Step 5 device half) — cannot run in Node CI
+## The on-device gate (Step 5 device half) — SIMPLIFIED for greenfield
 
 Host parity proves Rust ≡ JS ≡ the frozen wire (and the vectors ARE the Kotlin
-contract). What remains needs two REAL builds and a device/emulator, exactly
-like Phase 1's on-device crypto soak:
+contract). The original cross-version bar (old-build ⇄ new-build on every tier,
+both directions) assumed live users with old APKs in the field. **There are
+none — the app is not in production** — so that matrix is downgraded from
+acceptance bar to optional kill-switch insurance. What remains before flipping
+the launch default to `rust`:
 
-1. Build an **old** build (Kotlin backend) and a **new** build
-   (`EXPO_PUBLIC_VAULTBEAM_NATIVE_BACKEND=rust`).
-2. Transfer a representative file **old ⇄ new** on each tier — LAN, P2P
-   datachannel, R2 relay — in BOTH directions (Rust-serve/Kotlin-receive and
-   the reverse). Each must complete + sha256-match.
-3. **Resume across a backend switch**: start a transfer on one backend, kill,
-   flip the flag, resume — op-sqlite state intact (the wire + geometry +
-   chunkId are identical, so the remaining chunks seal/open the same).
-4. **Throughput + memory** vs Kotlin on a large file (extend `loadtest`).
+1. Two devices on the SAME rust build: transfer a representative file on each
+   tier — LAN, P2P datachannel, R2 relay — and sha256-match.
+2. **Kill-and-resume** on the same backend (op-sqlite state intact).
+3. **Throughput + memory** vs Kotlin on a large file (extend `loadtest`) —
+   confirms the Rust path is not a regression before making it the default.
+4. *Optional insurance:* one kotlin-build ⇄ rust-build transfer (any tier) to
+   exercise the kill-switch story end-to-end. Byte-level interop is already
+   proven by the vectors; this only validates the packaging.
 
-Sign-off on all four is the true done-gate before staged rollout.
+Why the byte-identical wire still matters with no users to migrate: it is the
+correctness oracle (Kotlin was the only proven reference), it makes the
+kill-switch instant (flip to 'kotlin' and an in-flight transfer resumes), and
+it keeps future build N ⇄ N+1 pairs interoperating forever.

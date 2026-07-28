@@ -28,12 +28,14 @@ this establishes Rust ≡ Kotlin's wire.
 
 ## Cross-version interop proof
 
-Same wire ⇒ an old (Kotlin) peer and a new (Rust) peer interoperate on every
-tier. The host half is proven above. The **on-device gate** (two real builds:
-old⇄new on LAN, P2P, relay, both directions; resume across a backend switch;
-throughput/memory vs Kotlin) is documented in `DESIGN.md` and is the sign-off
-before staged rollout — it needs a device/prebuild, exactly like Phase 1's
-on-device crypto soak.
+Same wire ⇒ a Kotlin-backend peer and a Rust-backend peer interoperate on every
+tier — proven at the byte level by the host parity gate above. NOTE: the app is
+**not in production and has no users**, so there are no old builds in the field
+to migrate; the cross-version matrix is therefore kill-switch insurance rather
+than an acceptance bar. The **simplified on-device gate** (same-build rust⇄rust
+on LAN/P2P/relay + sha256, kill-and-resume, throughput vs Kotlin, optional one
+kotlin⇄rust smoke) is documented in `DESIGN.md` and is the sign-off before
+launching with `rust` as the default.
 
 ## iOS enablement
 
