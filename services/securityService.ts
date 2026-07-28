@@ -4,9 +4,13 @@
 
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
+import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import DeviceInfo from 'react-native-device-info';
+import { assessThreats, signal as toSignal, type ThreatSignal } from './security/threatEngine';
+import { createDuressPinTracker } from './security/duressPin';
+import { recordDeviceScan } from './security/auditChain';
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -20,7 +24,13 @@ export type ThreatType =
   | 'FRIDA_PORT_27042'
   | 'FRIDA_SERVER_RESPONSE'
   | 'EMULATOR_DETECTED'
-  | 'ADB_ENABLED';
+  | 'ADB_ENABLED'
+  | 'DEBUGGER_ATTACHED'
+  | 'HOOK_FRAMEWORK'
+  | 'OVERLAY_DETECTED'
+  | 'SUSPICIOUS_IME'
+  | 'PIN_BRUTEFORCE'
+  | 'DURESS_PIN_REPEATED';
 
 export interface ThreatDetail {
   type: ThreatType;
@@ -30,10 +40,26 @@ export interface ThreatDetail {
 export interface SecurityReport {
   clean: boolean;
   threats: ThreatDetail[];
+  // Graded response from the multi-indicator threat engine:
+  //   clean    — no signals
+  //   monitor  — weak signal(s); allow but flag
+  //   restrict — block access (navigate to /blocked) without wiping
+  //   wipe     — self-destruct: all keys wiped, then blocked
+  level: 'clean' | 'monitor' | 'restrict' | 'wipe';
+  score: number;
   checkedAt: number;
   platform: string;
   deviceModel: string;
 }
+
+// SecureStore-backed duress-PIN tracker (repeated failed/duress PIN entries
+// escalate toward self-destruct). Exposed so the PIN screens can also query it.
+const _duressKV = {
+  get: (k: string) => SecureStore.getItemAsync(k),
+  set: (k: string, v: string) => SecureStore.setItemAsync(k, v),
+  del: (k: string) => SecureStore.deleteItemAsync(k).then(() => undefined),
+};
+export const duressPin = createDuressPinTracker(_duressKV);
 
 // ─────────────────────────────────────────────────────────────
 // 1. Root / Jailbreak Detection
@@ -243,29 +269,68 @@ async function logThreatToFirestore(report: SecurityReport): Promise<void> {
 export async function runSecurityCheck(): Promise<SecurityReport> {
   const deviceModel = DeviceInfo.getModel();
 
-  const report: SecurityReport = {
-    clean: true,
-    threats: [],
-    checkedAt: Date.now(),
-    platform: Platform.OS,
-    deviceModel,
-  };
-
   const [rootThreats, fridaThreats, emulatorThreats] = await Promise.all([
     checkRootJailbreak(),
     checkFrida(),
     checkEmulator(),
   ]);
+  const detected: ThreatDetail[] = [...rootThreats, ...fridaThreats, ...emulatorThreats];
 
-  report.threats = [...rootThreats, ...fridaThreats, ...emulatorThreats];
-  report.clean = report.threats.length === 0;
+  // Grade the device-integrity signals + the accumulated PIN-failure signal,
+  // then let the engine pick a proportional response.
+  const signals: ThreatSignal[] = detected.map(d => toSignal(d.type, d.detail));
+  const pinSignal = await duressPin.getSignal();
+  if (pinSignal) {
+    detected.push({ type: pinSignal.type as ThreatType, detail: pinSignal.detail ?? '' });
+    signals.push(pinSignal);
+  }
+  const assessment = assessThreats(signals);
 
-  if (!report.clean) {
+  const report: SecurityReport = {
+    clean: assessment.level === 'clean',
+    threats: detected,
+    level: assessment.level,
+    score: assessment.score,
+    checkedAt: Date.now(),
+    platform: Platform.OS,
+    deviceModel,
+  };
+
+  // Self-destruct only on a wipe-level assessment (root / Frida / duress PIN /
+  // strong combinations). Weaker lone signals (emulator, ADB) restrict access
+  // — caller still routes to /blocked — without destroying data on a possible
+  // false positive.
+  if (assessment.level === 'wipe') {
     await wipeAllKeys();
+  }
+  if (!report.clean) {
     logThreatToFirestore(report).catch(() => {});
-  } else {
+    // Record threats in the on-device tamper-evident audit chain (#41) so they
+    // surface in the Alerts tab. Clean launch scans are intentionally NOT logged
+    // (no noise); user-initiated scans always log via scanDeviceAndRecord().
+    recordDeviceScan({
+      level: report.level, score: report.score, threats: report.threats,
+      deviceModel: report.deviceModel, platform: report.platform,
+    }).catch(() => {});
   }
 
+  return report;
+}
+
+/**
+ * Run a device-integrity scan and ALWAYS leave an audit-chain entry — used by
+ * the Alerts tab "Scan device" action so the user sees a result whether the
+ * device is clean or not. (runSecurityCheck already records non-clean scans, so
+ * here we only add the clean-result entry to avoid duplicates.) Returns the report.
+ */
+export async function scanDeviceAndRecord(): Promise<SecurityReport> {
+  const report = await runSecurityCheck();
+  if (report.clean) {
+    await recordDeviceScan({
+      level: report.level, score: report.score, threats: report.threats,
+      deviceModel: report.deviceModel, platform: report.platform,
+    }).catch(() => {});
+  }
   return report;
 }
 
@@ -312,7 +377,12 @@ export async function savePIN(pin: string): Promise<void> {
 
 export async function verifyPIN(pin: string): Promise<boolean> {
   const stored = await SecureStore.getItemAsync('vault_pin');
-  return stored === pin;
+  const ok = stored === pin;
+  // Feed the duress-PIN tracker: consecutive failures escalate toward a
+  // self-destruct on the next runSecurityCheck().
+  if (ok) await duressPin.recordSuccess();
+  else await duressPin.recordFailure();
+  return ok;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -340,6 +410,87 @@ export async function saveProfile(data: Record<string, string>): Promise<void> {
 // 11. Security Answers
 // ─────────────────────────────────────────────────────────────
 
-export async function saveSecurityAnswers(answers: Record<string, string>): Promise<void> {
-  await SecureStore.setItemAsync('security_answers', JSON.stringify(answers));
+// Recovery answers are NEVER stored in the clear. We normalise (trim, collapse
+// whitespace, lowercase — matching the "case-insensitive" promise the setup
+// screen makes) then SHA-256 hash each answer with a per-record random salt.
+// The questions themselves aren't secret, so they're kept plaintext for display
+// during recovery. Stored under SecureStore key 'security_answers', schema v2.
+const SEC_KEY = 'security_answers';
+
+function normalizeAnswer(a: string): string {
+  return (a ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+async function hashAnswer(salt: string, answer: string): Promise<string> {
+  return Crypto.digestStringAsync(
+    Crypto.CryptoDigestAlgorithm.SHA256,
+    `${salt}|${normalizeAnswer(answer)}`,
+  );
+}
+
+interface SecurityRecordV2 {
+  v: 2;
+  q1: string; q2: string; q3: string;
+  h1: string; h2: string; h3: string;
+  salt: string;
+}
+
+export async function saveSecurityAnswers(
+  data: { q1: string; a1: string; q2: string; a2: string; q3: string; a3: string },
+): Promise<void> {
+  const saltBytes = await Crypto.getRandomBytesAsync(16);
+  const salt = Array.from(saltBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+  const [h1, h2, h3] = await Promise.all([
+    hashAnswer(salt, data.a1),
+    hashAnswer(salt, data.a2),
+    hashAnswer(salt, data.a3),
+  ]);
+  const rec: SecurityRecordV2 = { v: 2, q1: data.q1, q2: data.q2, q3: data.q3, h1, h2, h3, salt };
+  await SecureStore.setItemAsync(SEC_KEY, JSON.stringify(rec));
+}
+
+// The three questions the user chose, in order, for the recovery screen to show.
+// null when the user never configured recovery questions.
+export async function getSecurityQuestions(): Promise<string[] | null> {
+  try {
+    const raw = await SecureStore.getItemAsync(SEC_KEY);
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    if (o?.q1 && o?.q2 && o?.q3) return [o.q1, o.q2, o.q3];
+    return null;
+  } catch { return null; }
+}
+
+// Verify all three answers against the stored hashes. Returns false (never
+// throws) when no record exists or any answer mismatches. Transparently handles
+// legacy v1 plaintext records and upgrades them to hashed v2 on first success.
+export async function verifySecurityAnswers(answers: [string, string, string]): Promise<boolean> {
+  let raw: string | null = null;
+  try { raw = await SecureStore.getItemAsync(SEC_KEY); } catch { return false; }
+  if (!raw) return false;
+
+  let o: any;
+  try { o = JSON.parse(raw); } catch { return false; }
+
+  // Legacy v1: { q1,a1,q2,a2,q3,a3 } stored in the clear (pre-hash builds).
+  if (o.v !== 2) {
+    const ok =
+      normalizeAnswer(answers[0]) === normalizeAnswer(o.a1) &&
+      normalizeAnswer(answers[1]) === normalizeAnswer(o.a2) &&
+      normalizeAnswer(answers[2]) === normalizeAnswer(o.a3);
+    if (ok && o.q1 && o.q2 && o.q3) {
+      // Upgrade in place so the plaintext answers stop living on disk.
+      await saveSecurityAnswers({
+        q1: o.q1, a1: answers[0], q2: o.q2, a2: answers[1], q3: o.q3, a3: answers[2],
+      });
+    }
+    return ok;
+  }
+
+  const [h1, h2, h3] = await Promise.all([
+    hashAnswer(o.salt, answers[0]),
+    hashAnswer(o.salt, answers[1]),
+    hashAnswer(o.salt, answers[2]),
+  ]);
+  return h1 === o.h1 && h2 === o.h2 && h3 === o.h3;
 }

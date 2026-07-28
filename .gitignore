@@ -56,3 +56,18 @@ add_*.js
 fix_*.js
 *.ghost-backup
 *.vo-backup
+
+# Expo export bundle (build artifact)
+dist-export/
+
+# Never commit ship tarballs / build archives
+*.tgz
+*.tar.gz
+*.zip
+*.aab
+*.apk
+
+# build logs (session artifacts)
+build_release*.log
+
+uploads-shared/

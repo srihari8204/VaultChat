@@ -3,20 +3,22 @@
 // Countdown before sending, test mode, history
 // Uses expo-location, expo-sensors (Accelerometer)
 
-import React, { useState, useEffect, useRef } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import { brandAlpha } from '../constants/theme';
+import React, { useState, useEffect, useRef , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   Alert, ActivityIndicator, Vibration, Platform,
   Animated, Easing,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { useRouter, Stack } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import { Accelerometer } from 'expo-sensors';
-import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
+import { listTrustedContacts, sendSOS, listSOSHistory } from '../lib/chatService';
 
-const C = { bg: '#FFFFFF', accent: '#4A9FFF', cyan: '#4A9FFF', card: '#F9FAFB', danger: '#FF3C6E', green: '#10B981', text: '#FFFFFF', muted: '#8A9BBF', red: '#FF2D2D' };
 
 const SOS_MESSAGE = (name: string, lat: number, lng: number) =>
   `\u{1F6A8} EMERGENCY: ${name} needs help. Location: https://maps.google.com/?q=${lat},${lng}`;
@@ -24,9 +26,15 @@ const SOS_MESSAGE = (name: string, lat: number, lng: number) =>
 const TEST_MESSAGE = (name: string, lat: number, lng: number) =>
   `[TEST] \u{1F6A8} SOS Test from ${name}. Location: https://maps.google.com/?q=${lat},${lng} — This is a test, no emergency.`;
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function EmergencySOSScreen() {
+  const { colors } = useTheme();
+  const styles = useS();
   const router = useRouter();
-  const myUid = auth().currentUser?.uid || '';
 
   // State
   const [trustedContacts, setTrustedContacts] = useState<any[]>([]);
@@ -61,34 +69,19 @@ export default function EmergencySOSScreen() {
     const loadTrustedContacts = async () => {
       setLoading(true);
       try {
-        const snap = await firestore().collection('users').doc(myUid).get();
-        const ids: string[] = snap.data()?.trustedContacts || [];
-        const contacts: any[] = [];
-        for (const uid of ids) {
-          try {
-            const uSnap = await firestore().collection('users').doc(uid).get();
-            const d = uSnap.data();
-            contacts.push({ uid, name: d?.name || 'Unknown', vaultId: d?.vaultId || uid.slice(0, 8) });
-          } catch {}
-        }
+        const tc = await listTrustedContacts();
+        const contacts = tc.map(c => ({ uid: c.userId, name: c.name || 'Unknown', vaultId: c.vaultId || c.userId.slice(0, 8) }));
         setTrustedContacts(contacts);
         setSelectedContacts(contacts.map(c => c.uid));
       } catch {}
       setLoading(false);
     };
     const loadHistory = async () => {
-      try {
-        const snap = await firestore().collection('users').doc(myUid)
-          .collection('sosHistory')
-          .orderBy('createdAt', 'desc')
-          .limit(20)
-          .get();
-        setHistory(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      } catch {}
+      try { setHistory(await listSOSHistory()); } catch {}
     };
     loadTrustedContacts();
     loadHistory();
-  }, [myUid]);
+  }, []);
 
   // Shake detection
   useEffect(() => {
@@ -98,44 +91,16 @@ export default function EmergencySOSScreen() {
       setSending(true);
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
-        let lat = 0, lng = 0;
+        let lat: number | null = null, lng: number | null = null;
         if (status === 'granted') {
           const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
           lat = loc.coords.latitude;
           lng = loc.coords.longitude;
         }
-        const mySnap = await firestore().collection('users').doc(myUid).get();
-        const myName = mySnap.data()?.name || 'VaultChat User';
-        const message = isTest ? TEST_MESSAGE(myName, lat, lng) : SOS_MESSAGE(myName, lat, lng);
-        for (const uid of selectedContacts) {
-          try {
-            await firestore().collection('users').doc(uid).collection('alerts').add({
-              type: isTest ? 'sos_test' : 'sos_emergency',
-              fromUid: myUid, fromName: myName, message,
-              latitude: lat, longitude: lng,
-              createdAt: firestore.FieldValue.serverTimestamp(), read: false,
-            });
-          } catch {}
-        }
-        await firestore().collection('securityEvents').add({
-          type: isTest ? 'sos_test' : 'sos_emergency',
-          uid: myUid, name: myName, latitude: lat, longitude: lng,
-          contactsNotified: selectedContacts.length,
-          createdAt: firestore.FieldValue.serverTimestamp(),
-        });
-        await firestore().collection('users').doc(myUid).collection('sosHistory').add({
-          type: isTest ? 'test' : 'emergency',
-          latitude: lat, longitude: lng,
-          contactsNotified: selectedContacts.length,
-          createdAt: firestore.FieldValue.serverTimestamp(),
-        });
+        await sendSOS(lat, lng, isTest, selectedContacts);
         setSent(true);
         Vibration.vibrate([0, 500, 200, 500]);
-        try {
-          const hSnap = await firestore().collection('users').doc(myUid)
-            .collection('sosHistory').orderBy('createdAt', 'desc').limit(20).get();
-          setHistory(hSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-        } catch {}
+        try { setHistory(await listSOSHistory()); } catch {}
       } catch {
         Alert.alert('Error', 'Failed to send SOS. Please try again.');
       }
@@ -184,7 +149,7 @@ export default function EmergencySOSScreen() {
     });
     Accelerometer.setUpdateInterval(100);
     return () => subscription.remove();
-  }, [shakeEnabled, countdown, sending, sent, selectedContacts, myUid]);
+  }, [shakeEnabled, countdown, sending, sent, selectedContacts]);
 
   const toggleContact = (uid: string) => {
     setSelectedContacts(prev =>
@@ -226,68 +191,21 @@ export default function EmergencySOSScreen() {
   const triggerSOS = async (isTest: boolean) => {
     setSending(true);
     try {
-      // Get location
+      // Get location (best-effort; SOS still sends without it)
       const { status } = await Location.requestForegroundPermissionsAsync();
-      let lat = 0, lng = 0;
+      let lat: number | null = null, lng: number | null = null;
       if (status === 'granted') {
         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
         lat = loc.coords.latitude;
         lng = loc.coords.longitude;
       }
 
-      // Get user name
-      const mySnap = await firestore().collection('users').doc(myUid).get();
-      const myName = mySnap.data()?.name || 'VaultChat User';
-
-      const message = isTest ? TEST_MESSAGE(myName, lat, lng) : SOS_MESSAGE(myName, lat, lng);
-
-      // Send to each selected trusted contact
-      for (const uid of selectedContacts) {
-        try {
-          await firestore().collection('users').doc(uid).collection('alerts').add({
-            type: isTest ? 'sos_test' : 'sos_emergency',
-            fromUid: myUid,
-            fromName: myName,
-            message,
-            latitude: lat,
-            longitude: lng,
-            createdAt: firestore.FieldValue.serverTimestamp(),
-            read: false,
-          });
-        } catch {}
-      }
-
-      // Log to securityEvents
-      await firestore().collection('securityEvents').add({
-        type: isTest ? 'sos_test' : 'sos_emergency',
-        uid: myUid,
-        name: myName,
-        latitude: lat,
-        longitude: lng,
-        contactsNotified: selectedContacts.length,
-        createdAt: firestore.FieldValue.serverTimestamp(),
-      });
-
-      // Save to SOS history
-      await firestore().collection('users').doc(myUid).collection('sosHistory').add({
-        type: isTest ? 'test' : 'emergency',
-        latitude: lat,
-        longitude: lng,
-        contactsNotified: selectedContacts.length,
-        createdAt: firestore.FieldValue.serverTimestamp(),
-      });
+      // Dispatch via backend — pushes to the selected trusted contacts.
+      await sendSOS(lat, lng, isTest, selectedContacts);
 
       setSent(true);
       Vibration.vibrate([0, 500, 200, 500]);
-      // Reload history inline
-      try {
-        const hSnap = await firestore().collection('users').doc(myUid)
-          .collection('sosHistory')
-          .orderBy('createdAt', 'desc')
-          .limit(20)
-          .get();
-        setHistory(hSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-      } catch {}
+      try { setHistory(await listSOSHistory()); } catch {}
     } catch {
       Alert.alert('Error', 'Failed to send SOS. Please try again.');
     }
@@ -295,9 +213,11 @@ export default function EmergencySOSScreen() {
   };
 
   const formatTime = (ts: any) => {
-    if (!ts?.toDate) return 'Unknown';
-    const d = ts.toDate();
-    return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (!ts) return 'Unknown';
+    try {
+      const d = new Date(ts.toDate ? ts.toDate() : ts);
+      return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch { return 'Unknown'; }
   };
 
   return (
@@ -308,7 +228,7 @@ export default function EmergencySOSScreen() {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Text style={styles.backArrow}>←</Text>
+          <Ionicons name="arrow-back" size={20} color={colors.accent} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Emergency SOS</Text>
         <View style={{ width: 40 }} />
@@ -330,7 +250,7 @@ export default function EmergencySOSScreen() {
           ) : sending ? (
             // Sending state
             <View style={styles.sendingContainer}>
-              <ActivityIndicator size="large" color={C.danger} />
+              <ActivityIndicator size="large" color={colors.danger} />
               <Text style={styles.sendingText}>Sending SOS...</Text>
             </View>
           ) : sent ? (
@@ -386,7 +306,7 @@ export default function EmergencySOSScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>SOS Contacts</Text>
           {loading ? (
-            <ActivityIndicator color={C.accent} style={{ marginTop: 16 }} />
+            <ActivityIndicator color={colors.accent} style={{ marginTop: 16 }} />
           ) : trustedContacts.length === 0 ? (
             <View style={styles.emptyCard}>
               <Text style={styles.emptyText}>No trusted contacts set up</Text>
@@ -402,7 +322,7 @@ export default function EmergencySOSScreen() {
                 onPress={() => toggleContact(contact.uid)}
               >
                 <View style={[styles.contactCheck, selectedContacts.includes(contact.uid) && styles.contactCheckActive]}>
-                  {selectedContacts.includes(contact.uid) && <Text style={styles.checkMark}>✓</Text>}
+                  {selectedContacts.includes(contact.uid) && <Ionicons name="checkmark" size={14} color={colors.accent} />}
                 </View>
                 <View style={styles.contactInfo}>
                   <Text style={styles.contactName}>{contact.name}</Text>
@@ -421,7 +341,7 @@ export default function EmergencySOSScreen() {
           ) : (
             history.map(item => (
               <View key={item.id} style={styles.historyRow}>
-                <View style={[styles.historyDot, { backgroundColor: item.type === 'test' ? C.yellow : C.danger }]} />
+                <View style={[styles.historyDot, { backgroundColor: item.type === 'test' ? colors.primary : colors.danger }]} />
                 <View style={styles.historyInfo}>
                   <Text style={styles.historyType}>
                     {item.type === 'test' ? 'Test SOS' : 'Emergency SOS'}
@@ -441,19 +361,19 @@ export default function EmergencySOSScreen() {
 }
 
 const SOS_SIZE = 160;
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: Platform.OS === 'ios' ? 56 : 40, paddingHorizontal: 16, paddingBottom: 14 },
   backBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(74,159,255,0.08)', justifyContent: 'center', alignItems: 'center' },
-  backArrow: { color: C.accent, fontSize: 20 },
+  backArrow: { color: c.accent, fontSize: 20 },
   headerTitle: { color: '#FFF', fontSize: 18, fontWeight: '700' },
   scroll: { flex: 1 },
   scrollContent: { paddingHorizontal: 16 },
 
   // SOS Button
   sosSection: { alignItems: 'center', marginVertical: 30 },
-  sosHint: { color: C.muted, fontSize: 14, marginBottom: 20, textAlign: 'center' },
-  sosButton: { width: SOS_SIZE, height: SOS_SIZE, borderRadius: SOS_SIZE / 2, overflow: 'hidden', elevation: 10, shadowColor: C.red, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.5, shadowRadius: 20 },
+  sosHint: { color: c.textDim, fontSize: 14, marginBottom: 20, textAlign: 'center' },
+  sosButton: { width: SOS_SIZE, height: SOS_SIZE, borderRadius: SOS_SIZE / 2, overflow: 'hidden', elevation: 10, shadowColor: c.danger, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.5, shadowRadius: 20 },
   sosGradient: { flex: 1, justifyContent: 'center', alignItems: 'center', borderRadius: SOS_SIZE / 2, borderWidth: 4, borderColor: 'rgba(255,45,45,0.5)' },
   sosText: { color: '#FFF', fontSize: 48, fontWeight: '900', letterSpacing: 6 },
   testBtn: { marginTop: 20, paddingHorizontal: 24, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(251,191,36,0.3)', backgroundColor: 'rgba(251,191,36,0.08)' },
@@ -461,52 +381,52 @@ const styles = StyleSheet.create({
 
   // Countdown
   countdownContainer: { alignItems: 'center' },
-  countdownLabel: { color: C.danger, fontSize: 18, fontWeight: '600', marginBottom: 10 },
+  countdownLabel: { color: c.danger, fontSize: 18, fontWeight: '600', marginBottom: 10 },
   countdownNumber: { color: '#FFF', fontSize: 72, fontWeight: '900' },
-  cancelBtn: { marginTop: 20, backgroundColor: 'rgba(255,60,110,0.15)', paddingHorizontal: 40, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: C.danger },
-  cancelBtnText: { color: C.danger, fontSize: 18, fontWeight: '800', letterSpacing: 2 },
+  cancelBtn: { marginTop: 20, backgroundColor: 'rgba(255,60,110,0.15)', paddingHorizontal: 40, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: c.danger },
+  cancelBtnText: { color: c.danger, fontSize: 18, fontWeight: '800', letterSpacing: 2 },
 
   // Sending/Sent
   sendingContainer: { alignItems: 'center', marginVertical: 30 },
-  sendingText: { color: C.danger, fontSize: 16, fontWeight: '600', marginTop: 12 },
+  sendingText: { color: c.danger, fontSize: 16, fontWeight: '600', marginTop: 12 },
   sentContainer: { alignItems: 'center', marginVertical: 20 },
-  sentCheck: { fontSize: 48, color: C.green },
+  sentCheck: { fontSize: 48, color: c.primary },
   sentText: { color: '#FFF', fontSize: 22, fontWeight: '700', marginTop: 8 },
-  sentSub: { color: C.muted, fontSize: 14, marginTop: 4 },
-  resetBtn: { marginTop: 20, backgroundColor: C.accent, paddingHorizontal: 40, paddingVertical: 10, borderRadius: 8 },
+  sentSub: { color: c.textDim, fontSize: 14, marginTop: 4 },
+  resetBtn: { marginTop: 20, backgroundColor: c.accent, paddingHorizontal: 40, paddingVertical: 10, borderRadius: 8 },
   resetBtnText: { color: '#FFF', fontSize: 15, fontWeight: '700' },
 
   // Shake
-  shakeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: 'rgba(74,159,255,0.08)' },
+  shakeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: c.card, borderRadius: 14, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: 'rgba(74,159,255,0.08)' },
   shakeTitle: { color: '#FFF', fontSize: 15, fontWeight: '600' },
-  shakeSub: { color: C.muted, fontSize: 12, marginTop: 2 },
+  shakeSub: { color: c.textDim, fontSize: 12, marginTop: 2 },
   toggleBtn: { paddingHorizontal: 18, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
-  toggleBtnActive: { borderColor: C.green, backgroundColor: 'rgba(16,185,129,0.15)' },
-  toggleText: { color: C.muted, fontSize: 13, fontWeight: '700' },
-  toggleTextActive: { color: C.green },
+  toggleBtnActive: { borderColor: c.primary, backgroundColor: brandAlpha(0.15) },
+  toggleText: { color: c.textDim, fontSize: 13, fontWeight: '700' },
+  toggleTextActive: { color: c.primary },
 
   // Contacts
   section: { marginTop: 20 },
   sectionTitle: { color: '#FFF', fontSize: 16, fontWeight: '700', marginBottom: 12 },
-  contactRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(74,159,255,0.06)' },
+  contactRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(74,159,255,0.06)' },
   contactSelected: { borderColor: 'rgba(0,229,255,0.3)', backgroundColor: 'rgba(0,229,255,0.04)' },
   contactCheck: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: 'rgba(255,255,255,0.15)', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  contactCheckActive: { borderColor: C.cyan, backgroundColor: 'rgba(0,229,255,0.2)' },
-  checkMark: { color: C.cyan, fontSize: 14, fontWeight: '700' },
+  contactCheckActive: { borderColor: c.accent, backgroundColor: 'rgba(0,229,255,0.2)' },
+  checkMark: { color: c.accent, fontSize: 14, fontWeight: '700' },
   contactInfo: { flex: 1 },
   contactName: { color: '#FFF', fontSize: 15, fontWeight: '600' },
-  contactId: { color: C.muted, fontSize: 12, marginTop: 2 },
-  emptyCard: { alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 24, borderWidth: 1, borderColor: 'rgba(74,159,255,0.08)' },
-  emptyText: { color: C.muted, fontSize: 14, marginBottom: 14 },
-  setupBtn: { backgroundColor: C.accent, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 },
+  contactId: { color: c.textDim, fontSize: 12, marginTop: 2 },
+  emptyCard: { alignItems: 'center', backgroundColor: c.card, borderRadius: 14, padding: 24, borderWidth: 1, borderColor: 'rgba(74,159,255,0.08)' },
+  emptyText: { color: c.textDim, fontSize: 14, marginBottom: 14 },
+  setupBtn: { backgroundColor: c.accent, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 },
   setupBtnText: { color: '#FFF', fontSize: 14, fontWeight: '700' },
 
   // History
-  noHistory: { color: C.muted, fontSize: 13, textAlign: 'center', marginTop: 8 },
-  historyRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(74,159,255,0.06)' },
+  noHistory: { color: c.textDim, fontSize: 13, textAlign: 'center', marginTop: 8 },
+  historyRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(74,159,255,0.06)' },
   historyDot: { width: 10, height: 10, borderRadius: 5, marginRight: 12 },
   historyInfo: { flex: 1 },
   historyType: { color: '#FFF', fontSize: 14, fontWeight: '600' },
-  historyTime: { color: C.muted, fontSize: 12, marginTop: 2 },
-  historyContacts: { color: C.muted, fontSize: 12 },
+  historyTime: { color: c.textDim, fontSize: 12, marginTop: 2 },
+  historyContacts: { color: c.textDim, fontSize: 12 },
 });

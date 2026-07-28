@@ -1,9 +1,10 @@
 // ================================================================
-// lib/testHarness.ts Ã¢â‚¬â€ Multi-user parallel test runner
-// Runs on device Ã¢â‚¬â€ simulates parallel users via Socket.io
+// lib/testHarness.ts — Multi-user parallel test runner
+// Runs on device — simulates parallel users via Socket.io
 // ================================================================
 const getSocket = () => null; // stub
 const encrypt = (d: any) => d; const generateKey = () => ''; // stubs
+import { BRAND_ACCENT } from '../constants/theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type TestUser = {
@@ -26,7 +27,7 @@ export type TestConfig = {
   serverUrl: string;
 };
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Run a full parallel multi-user test Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ── Run a full parallel multi-user test ──────────────────────────
 export async function runParallelTest(
   config: TestConfig,
   onProgress: (pct: number, log: string) => void
@@ -171,7 +172,7 @@ export async function runParallelTest(
 }
 
 // ================================================================
-// app/testconsole.tsx Ã¢â‚¬â€ In-app test console screen
+// app/testconsole.tsx — In-app test console screen
 // ================================================================
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -183,7 +184,7 @@ import {
 // removed circular import
 
 const C = {
-  bg:'#020B18', primary:'#4A9FFF', accent:'#10B981',
+  bg:'#020B18', primary:'#4A9FFF', accent:BRAND_ACCENT,
   yellow:'#F59E0B', red:'#EF4444', violet:'#7C3AED',
   card:'rgba(10,22,40,0.88)', border:'rgba(74,159,255,0.14)',
   dim:'rgba(255,255,255,0.5)', faint:'rgba(255,255,255,0.18)',

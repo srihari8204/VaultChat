@@ -1,0 +1,77 @@
+{
+  "inputs": {
+    "chainKey": "bb977d9df72198660173570470b56cbbb56c653ce13f09446c0cb148f9681300",
+    "signPriv": "db8f37d011228a1286242e56a511352e57eb26d27e873e44d9d189543ce78c6d",
+    "plaintexts": [
+      "group msg 0",
+      "group msg 1 — unicode ✓ 🙂",
+      "group msg 2 (out of order)"
+    ]
+  },
+  "expected": {
+    "own0": {
+      "chainKeyHex": "bb977d9df72198660173570470b56cbbb56c653ce13f09446c0cb148f9681300",
+      "iteration": 0,
+      "signPrivHex": "db8f37d011228a1286242e56a511352e57eb26d27e873e44d9d189543ce78c6d",
+      "signPubHex": "f330afd45d95ec0c63e9317214be1a57415bc18e02cdd98a7a62a3568ee98c81"
+    },
+    "distribution": {
+      "chainKeyHex": "bb977d9df72198660173570470b56cbbb56c653ce13f09446c0cb148f9681300",
+      "iteration": 0,
+      "signPubHex": "f330afd45d95ec0c63e9317214be1a57415bc18e02cdd98a7a62a3568ee98c81"
+    },
+    "ciphers": [
+      {
+        "iteration": 0,
+        "ciphertext": "o962oUueAm1ousxkUGal+BRq+eIsxmM5MFC8",
+        "signature": "yxyPlJUnxv9p2kRFYchWlU6e1dZvHIzAoNjtN/2US0yWI6l+Rt54RqUpXSblBtENtuFmRoqcWHZK82r9xu6+DQ=="
+      },
+      {
+        "iteration": 1,
+        "ciphertext": "O15HS4DbNCK7Nw71ViAcmAVCOLun+BovIntkDdyn4ZyXQmCJcMrSKeFU0lBXp16q",
+        "signature": "zOu75qjvkd8kdigshc9qYGg+jZlpklCK9YvoKCc/luxRKpxS1EGRANzz9VE7ApIQa7vptcgZvu1lekeNzGn3Bw=="
+      },
+      {
+        "iteration": 2,
+        "ciphertext": "A55M3Z9qsgf+2j5bOUznMNcLfP7AVXH9mPN3qihYjsanApazD6KBa1rG",
+        "signature": "LB9m2pfTOTYhjpes+rTPg2ijc4F8r/USvW6fg8rOjntdSDwElrBmBKWoI39aoxS0FqTf/Q1CMLBZTLQniBlaDg=="
+      }
+    ],
+    "ownAfter": {
+      "chainKeyHex": "3b251178c8114822f94ed4c19f92273007a4e128d064f6ab04199757aa36e255",
+      "iteration": 3,
+      "signPrivHex": "db8f37d011228a1286242e56a511352e57eb26d27e873e44d9d189543ce78c6d",
+      "signPubHex": "f330afd45d95ec0c63e9317214be1a57415bc18e02cdd98a7a62a3568ee98c81"
+    },
+    "decInOrder": {
+      "plaintext": "group msg 0",
+      "next": {
+        "chainKeyHex": "933d62d6f7cd39c50cd47c603554935d2f6ac05afd57840117e593168700e32e",
+        "iteration": 1,
+        "signPubHex": "f330afd45d95ec0c63e9317214be1a57415bc18e02cdd98a7a62a3568ee98c81",
+        "skipped": {}
+      }
+    },
+    "decOutOfOrder": {
+      "plaintext2": "group msg 2 (out of order)",
+      "next": {
+        "chainKeyHex": "3b251178c8114822f94ed4c19f92273007a4e128d064f6ab04199757aa36e255",
+        "iteration": 3,
+        "signPubHex": "f330afd45d95ec0c63e9317214be1a57415bc18e02cdd98a7a62a3568ee98c81",
+        "skipped": {
+          "0": "0df9d2f4705fe295df4c371daefcac9f7dd32d650458463fe927030b896295ea",
+          "1": "149f4c86444c36a5ed05209305d41daddefda599a879fbf12481cb791ef05170"
+        }
+      },
+      "thenPlaintext0": "group msg 0",
+      "nextAfterCacheHit": {
+        "chainKeyHex": "3b251178c8114822f94ed4c19f92273007a4e128d064f6ab04199757aa36e255",
+        "iteration": 3,
+        "signPubHex": "f330afd45d95ec0c63e9317214be1a57415bc18e02cdd98a7a62a3568ee98c81",
+        "skipped": {
+          "1": "149f4c86444c36a5ed05209305d41daddefda599a879fbf12481cb791ef05170"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,24 @@
+# VaultChat proxy — Go-first (Phase 2 migration COMPLETE).
+#
+# go-api owns the ENTIRE client-facing surface: all 17 REST modules, /health,
+# and Socket.IO (incl. the websocket upgrade — reverse_proxy handles the
+# Upgrade handshake transparently). The Node API process is NOT required and
+# is not routed; only the Node vaultlens-worker container remains (background
+# renders, pushes results into go-api's internal bridge in-network).
+#
+# Rollback to Node for any path (requires the Node api container running):
+#   @name path /route /route/*
+#   reverse_proxy @name api:3000
+# placed ABOVE the default block, then `docker compose restart caddy`.
+
+:80 {
+	encode gzip
+
+	# The internal emit bridge must NEVER be reachable from outside — refuse
+	# it at the proxy regardless of which backend owns it.
+	@internal path /internal/*
+	respond @internal 404
+
+	# ── everything → Go ──────────────────────────────────────────────
+	reverse_proxy go-api:4000
+}

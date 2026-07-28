@@ -1,162 +1,192 @@
-// app/create-poll.tsx — Create & Vote on Polls
-// Works in group chats. Stored in Firestore: chats/{id}/polls/{pollId}
-// Real-time vote updates via Firestore listener
+// app/create-poll.tsx — Compose a poll for a chat (Postgres).
+//
+// Reachable from the chat attach menu. Takes ?chatId (and optional peerName)
+// in route params. On submit: createPoll() → message of type='poll' posted
+// to the chat with meta.options + meta.allowMultiple. The chat's PollBubble
+// hydrates vote counts via the bulk endpoint on render.
 
-import React, { useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useState , useMemo} from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, TextInput,
-  Alert, StatusBar, ScrollView, Switch,
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
-import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
+import { createPoll } from '../lib/chatService';
 
-const C = { bg: '#FFFFFF', accent: '#4A9FFF', green: '#10B981', card: '#F9FAFB', danger: '#FF3C6E' };
+const MIN_OPTIONS = 2;
+const MAX_OPTIONS = 12;
+
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
 
 export default function CreatePollScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   const router = useRouter();
-  const { chatId } = useLocalSearchParams();
-  const myUid = auth().currentUser?.uid || '';
-  const [question, setQuestion] = useState('');
-  const [options, setOptions] = useState(['', '']);
-  const [multiVote, setMultiVote] = useState(false);
-  const [anonymous, setAnonymous] = useState(false);
-  const [creating, setCreating] = useState(false);
+  const { chatId, peerName } = useLocalSearchParams<{ chatId?: string; peerName?: string }>();
 
-  const addOption = () => {
-    if (options.length >= 10) { Alert.alert('Maximum 10 options'); return; }
-    setOptions([...options, '']);
-  };
+  const [question,      setQuestion]      = useState('');
+  const [options,       setOptions]       = useState<string[]>(['', '']);
+  const [allowMultiple, setAllowMultiple] = useState(false);
+  const [posting,       setPosting]       = useState(false);
 
-  const removeOption = (idx) => {
-    if (options.length <= 2) return;
-    setOptions(options.filter((_, i) => i !== idx));
-  };
+  const updateOption = useCallback((i: number, value: string) => {
+    setOptions(prev => prev.map((o, idx) => idx === i ? value : o));
+  }, []);
 
-  const updateOption = (idx, text) => {
-    const newOpts = [...options];
-    newOpts[idx] = text;
-    setOptions(newOpts);
-  };
+  const addOption = useCallback(() => {
+    setOptions(prev => prev.length >= MAX_OPTIONS ? prev : [...prev, '']);
+  }, []);
 
-  const createPoll = async () => {
-    if (!question.trim()) { Alert.alert('Enter a question'); return; }
-    const validOpts = options.filter(o => o.trim());
-    if (validOpts.length < 2) { Alert.alert('Need at least 2 options'); return; }
+  const removeOption = useCallback((i: number) => {
+    setOptions(prev => prev.length <= MIN_OPTIONS ? prev : prev.filter((_, idx) => idx !== i));
+  }, []);
 
-    setCreating(true);
+  const submit = useCallback(async () => {
+    if (!chatId) { Alert.alert('Missing chat', 'Open this from a chat.'); return; }
+    const q = question.trim();
+    if (!q) { Alert.alert('Question required', 'Type the poll question first.'); return; }
+    if (q.length > 200) { Alert.alert('Too long', 'Question is over 200 characters.'); return; }
+
+    const cleaned = options.map(o => o.trim()).filter(o => o.length > 0);
+    if (cleaned.length < MIN_OPTIONS) {
+      Alert.alert('Need more options', `Add at least ${MIN_OPTIONS} non-empty options.`);
+      return;
+    }
+
+    setPosting(true);
     try {
-      const myDoc = await firestore().collection('users').doc(myUid).get();
-      const myName = myDoc.data()?.name || 'Someone';
-
-      const pollData = {
-        question: question.trim(),
-        options: validOpts.map(o => ({ text: o.trim(), votes: [] })),
-        creatorUid: myUid,
-        creatorName: myName,
-        multiVote,
-        anonymous,
-        totalVotes: 0,
-        closed: false,
-        createdAt: firestore.FieldValue.serverTimestamp(),
-      };
-
-      // Save poll as a special message in the chat
-      await firestore().collection('chats').doc(chatId).collection('messages').add({
-        senderId: myUid,
-        msgType: 'poll',
-        pollData,
-        createdAt: firestore.FieldValue.serverTimestamp(),
-        status: 'sent',
-      });
-
-      // Update last message
-      await firestore().collection('chats').doc(chatId).update({
-        lastMsg: '\uD83D\uDCCA Poll: ' + question.trim().slice(0, 40),
-        lastTime: firestore.FieldValue.serverTimestamp(),
-      });
-
+      await createPoll(chatId, q, cleaned, allowMultiple);
       router.back();
-    } catch { Alert.alert('Error', 'Could not create poll'); }
-    setCreating(false);
-  };
+    } catch (e: any) {
+      Alert.alert('Could not send poll', e?.message ?? 'Try again');
+    } finally {
+      setPosting(false);
+    }
+  }, [chatId, question, options, allowMultiple, router]);
 
   return (
-    <>
-      <Stack.Screen options={{ title: 'Create Poll', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
-      <ScrollView style={s.container}>
-        <StatusBar barStyle="light-content" />
-
-        <View style={s.section}>
-          <Text style={s.label}>Question</Text>
-          <TextInput style={s.questionInput} value={question} onChangeText={setQuestion}
-            placeholder="Ask a question..." placeholderTextColor="#6B7280" multiline maxLength={300} />
-        </View>
-
-        <View style={s.section}>
-          <Text style={s.label}>Options</Text>
-          {options.map((opt, i) => (
-            <View key={i} style={s.optRow}>
-              <View style={s.optNum}><Text style={s.optNumTxt}>{i + 1}</Text></View>
-              <TextInput style={s.optInput} value={opt} onChangeText={t => updateOption(i, t)}
-                placeholder={'Option ' + (i + 1)} placeholderTextColor="#6B7280" maxLength={100} />
-              {options.length > 2 && (
-                <TouchableOpacity onPress={() => removeOption(i)} style={s.removeOpt}>
-                  <Text style={{ color: C.danger, fontSize: 18 }}>{"\u2715"}</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          ))}
-          {options.length < 10 && (
-            <TouchableOpacity style={s.addOptBtn} onPress={addOption}>
-              <Text style={s.addOptTxt}>{"\u2795  Add Option"}</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        <View style={s.section}>
-          <Text style={s.label}>Settings</Text>
-          <View style={s.settRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={s.settLabel}>Allow Multiple Votes</Text>
-              <Text style={s.settDesc}>Members can vote for more than one option</Text>
-            </View>
-            <Switch value={multiVote} onValueChange={setMultiVote} thumbColor={multiVote ? C.accent : '#6B7280'} trackColor={{ false: '#E5E7EB', true: '#4A9FFF44' }} />
-          </View>
-          <View style={s.settRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={s.settLabel}>Anonymous Voting</Text>
-              <Text style={s.settDesc}>Hide who voted for what</Text>
-            </View>
-            <Switch value={anonymous} onValueChange={setAnonymous} thumbColor={anonymous ? C.accent : '#6B7280'} trackColor={{ false: '#E5E7EB', true: '#4A9FFF44' }} />
-          </View>
-        </View>
-
-        <TouchableOpacity style={[s.createBtn, creating && { opacity: 0.5 }]} onPress={createPoll} disabled={creating}>
-          <Text style={s.createTxt}>{creating ? 'Creating...' : '\uD83D\uDCCA  Create Poll'}</Text>
+    <View style={S.screen}>
+      <StatusBar barStyle="light-content" />
+      <View style={S.header}>
+        <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
+        <View style={{ flex: 1 }}>
+          <Text style={S.title}>New poll</Text>
+          {peerName ? <Text style={S.sub}>to {peerName}</Text> : null}
+        </View>
+        <TouchableOpacity
+          onPress={submit}
+          disabled={posting}
+          style={[S.sendBtn, posting && S.sendBtnOff]}
+          activeOpacity={0.85}
+        >
+          {posting ? <ActivityIndicator color={colors.bubbleOutText} /> : <Text style={S.sendBtnTxt}>Send</Text>}
+        </TouchableOpacity>
+      </View>
 
-        <View style={{ height: 40 }} />
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }}>
+        <Text style={S.label}>QUESTION</Text>
+        <TextInput
+          style={S.questionInput}
+          value={question}
+          onChangeText={setQuestion}
+          placeholder="What should we ask?"
+          placeholderTextColor={colors.textDim}
+          maxLength={200}
+          multiline
+        />
+        <Text style={S.counter}>{question.length} / 200</Text>
+
+        <Text style={[S.label, { marginTop: 20 }]}>OPTIONS</Text>
+        {options.map((o, i) => (
+          <View key={i} style={S.optionRow}>
+            <TextInput
+              style={S.optionInput}
+              value={o}
+              onChangeText={(v) => updateOption(i, v)}
+              placeholder={`Option ${i + 1}`}
+              placeholderTextColor={colors.textDim}
+              maxLength={100}
+            />
+            {options.length > MIN_OPTIONS && (
+              <TouchableOpacity
+                onPress={() => removeOption(i)}
+                hitSlop={8}
+                style={S.removeBtn}
+              >
+                <Ionicons name="close" size={20} color={colors.danger} />
+              </TouchableOpacity>
+            )}
+          </View>
+        ))}
+        {options.length < MAX_OPTIONS && (
+          <TouchableOpacity onPress={addOption} style={S.addBtn} activeOpacity={0.7}>
+            <Ionicons name="add" size={16} color={colors.primary} />
+            <Text style={[S.addBtnTxt, { marginLeft: 6 }]}>Add option</Text>
+          </TouchableOpacity>
+        )}
+
+        <View style={S.toggleRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={S.toggleTitle}>Allow multiple answers</Text>
+            <Text style={S.toggleSub}>
+              When off, voters can pick exactly one option (radio-button style).
+              Switching options swaps the vote.
+            </Text>
+          </View>
+          <Switch
+            value={allowMultiple}
+            onValueChange={setAllowMultiple}
+            trackColor={{ true: colors.primary, false: colors.border }}
+            thumbColor={colors.card}
+          />
+        </View>
       </ScrollView>
-    </>
+    </View>
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg, padding: 16 },
-  section: { marginBottom: 20 },
-  label: { color: '#6B7280', fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 8 },
-  questionInput: { backgroundColor: C.card, borderRadius: 14, padding: 16, color: '#fff', fontSize: 16, minHeight: 80, borderWidth: 1, borderColor: '#E5E7EB', textAlignVertical: 'top' },
-  optRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 8 },
-  optNum: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center' },
-  optNumTxt: { color: '#6B7280', fontSize: 12, fontWeight: '800' },
-  optInput: { flex: 1, backgroundColor: C.card, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, color: '#fff', fontSize: 14, borderWidth: 1, borderColor: '#E5E7EB' },
-  removeOpt: { width: 32, height: 32, justifyContent: 'center', alignItems: 'center' },
-  addOptBtn: { backgroundColor: '#4A9FFF15', borderRadius: 10, paddingVertical: 12, alignItems: 'center', borderWidth: 1, borderColor: '#4A9FFF33', borderStyle: 'dashed' },
-  addOptTxt: { color: C.accent, fontSize: 13, fontWeight: '600' },
-  settRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: '#E5E7EB' },
-  settLabel: { color: '#1F2937', fontSize: 14, fontWeight: '600' },
-  settDesc: { color: '#6B7280', fontSize: 11, marginTop: 2 },
-  createBtn: { backgroundColor: C.accent, borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
-  createTxt: { color: '#000', fontSize: 16, fontWeight: '900' },
+
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen:        { flex: 1, backgroundColor: c.bg },
+
+  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  backTxt:       { color: c.text, fontSize: 26, fontWeight: '600' },
+  title:         { color: c.text, fontSize: 22, fontWeight: '800' },
+  sub:           { color: c.textDim, fontSize: 12 },
+  sendBtn:       { backgroundColor: c.primary, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20 },
+  sendBtnOff:    { opacity: 0.5 },
+  sendBtnTxt:    { color: c.bubbleOutText, fontWeight: '700' },
+
+  label:         { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 8 },
+
+  questionInput: { color: c.text, backgroundColor: c.card, borderColor: c.border, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, minHeight: 80, textAlignVertical: 'top' },
+  counter:       { color: c.textDim, fontSize: 11, marginTop: 4, textAlign: 'right' },
+
+  optionRow:     { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  optionInput:   { flex: 1, color: c.text, backgroundColor: c.card, borderColor: c.border, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15 },
+  removeBtn:     { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: 18, borderWidth: 1, borderColor: c.border, backgroundColor: c.card },
+  removeBtnTxt:  { color: c.danger, fontSize: 22, fontWeight: '700' },
+  addBtn:        { flexDirection: 'row', justifyContent: 'center', padding: 12, borderRadius: 12, backgroundColor: c.card, borderWidth: 1, borderColor: c.border, alignItems: 'center', marginTop: 4 },
+  addBtnTxt:     { color: c.primary, fontWeight: '700' },
+
+  toggleRow:     { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 24, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border },
+  toggleTitle:   { color: c.text, fontSize: 15, fontWeight: '600' },
+  toggleSub:     { color: c.textDim, fontSize: 12, lineHeight: 16, marginTop: 2 },
 });

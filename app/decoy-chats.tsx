@@ -2,28 +2,43 @@
 // Looks IDENTICAL to real chats.tsx but shows fake data
 // No visual indicator of duress mode — pixel-perfect clone
 
-import React, { useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import { BRAND_ACCENT } from '../constants/theme';
+import React, { useCallback, useState , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList,
   StatusBar, TextInput, SafeAreaView,
 } from 'react-native';
-import { useRouter } from 'expo-router';
-import { generateDecoyChats } from '../lib/ghostProtocol';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { getDecoyChats, type DecoyChat } from '../lib/ghostProtocol';
 
-const C = {
-  bg: '#FFFFFF', primary: '#4A9FFF', accent: '#10B981',
-  dim: 'rgba(255,255,255,0.45)', card: 'rgba(10,22,40,0.88)',
-};
 
 const GRADS = [
   '#1D4ED8', '#059669', '#DC2626', '#9333EA', '#0891B2', '#7C3AED', '#F59E0B', '#EC4899',
 ];
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function DecoyChatList() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
-  const chats = generateDecoyChats();
+  const [chats, setChats] = useState<DecoyChat[]>([]);
+
+  // Reload from the persistent decoy store on focus so sent messages / preview
+  // updates survive navigation and reload (a real account, not a reset clone).
+  useFocusEffect(useCallback(() => {
+    let alive = true;
+    getDecoyChats().then((c) => { if (alive) setChats(c); }).catch(() => {});
+    return () => { alive = false; };
+  }, []));
 
   const filtered = chats.filter(c => {
     if (search && !c.name.toLowerCase().includes(search.toLowerCase())) return false;
@@ -47,7 +62,7 @@ export default function DecoyChatList() {
         <View style={s.chatInfo}>
           <View style={s.chatTop}>
             <Text style={s.chatName} numberOfLines={1}>{item.name}</Text>
-            <Text style={[s.chatTime, item.unread > 0 && { color: '#10B981' }]}>{item.time}</Text>
+            <Text style={[s.chatTime, item.unread > 0 && { color: BRAND_ACCENT }]}>{item.time}</Text>
           </View>
           <View style={s.chatBottom}>
             <Text style={s.chatMsg} numberOfLines={1}>{item.lastMsg}</Text>
@@ -70,10 +85,10 @@ export default function DecoyChatList() {
         <Text style={s.title}>VaultChat</Text>
         <View style={s.headerRight}>
           <TouchableOpacity onPress={() => router.push('/search' as any)}>
-            <Text style={{ color: '#4A9FFF', fontSize: 20 }}>{"\uD83D\uDD0D"}</Text>
+            <Ionicons name="search" size={20} color="#4A9FFF" />
           </TouchableOpacity>
           <TouchableOpacity style={{ marginLeft: 16 }}>
-            <Text style={{ color: '#4A9FFF', fontSize: 20 }}>{"\u22EF"}</Text>
+            <Ionicons name="ellipsis-vertical" size={20} color="#4A9FFF" />
           </TouchableOpacity>
         </View>
       </View>
@@ -111,18 +126,18 @@ export default function DecoyChatList() {
 
       {/* Bottom tabs — identical to real app */}
       <View style={s.tabBar}>
-        <TouchableOpacity style={s.tab}><Text style={[s.tabIcon, { color: '#4A9FFF' }]}>{"\uD83D\uDCAC"}</Text><Text style={[s.tabLabel, { color: '#4A9FFF' }]}>Chats</Text></TouchableOpacity>
-        <TouchableOpacity style={s.tab} onPress={() => {}}><Text style={s.tabIcon}>{"\uD83D\uDCDE"}</Text><Text style={s.tabLabel}>Calls</Text></TouchableOpacity>
-        <TouchableOpacity style={s.tab} onPress={() => {}}><Text style={s.tabIcon}>{"\uD83D\uDC65"}</Text><Text style={s.tabLabel}>Contacts</Text></TouchableOpacity>
-        <TouchableOpacity style={s.tab} onPress={() => {}}><Text style={s.tabIcon}>{"\uD83D\uDD12"}</Text><Text style={s.tabLabel}>Vault</Text></TouchableOpacity>
-        <TouchableOpacity style={s.tab} onPress={() => {}}><Text style={s.tabIcon}>{"\u2699\uFE0F"}</Text><Text style={s.tabLabel}>Settings</Text></TouchableOpacity>
+        <TouchableOpacity style={s.tab}><Ionicons name="chatbubble" size={20} color="#4A9FFF" /><Text style={[s.tabLabel, { color: '#4A9FFF' }]}>Chats</Text></TouchableOpacity>
+        <TouchableOpacity style={s.tab} onPress={() => {}}><Ionicons name="call" size={20} color="#6B7280" /><Text style={s.tabLabel}>Calls</Text></TouchableOpacity>
+        <TouchableOpacity style={s.tab} onPress={() => {}}><Ionicons name="people" size={20} color="#6B7280" /><Text style={s.tabLabel}>Contacts</Text></TouchableOpacity>
+        <TouchableOpacity style={s.tab} onPress={() => {}}><Ionicons name="lock-closed" size={20} color="#6B7280" /><Text style={s.tabLabel}>Vault</Text></TouchableOpacity>
+        <TouchableOpacity style={s.tab} onPress={() => {}}><Ionicons name="settings-outline" size={20} color="#6B7280" /><Text style={s.tabLabel}>Settings</Text></TouchableOpacity>
       </View>
     </SafeAreaView>
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8 },
   title: { color: '#fff', fontSize: 24, fontWeight: '900', letterSpacing: -0.5 },
   headerRight: { flexDirection: 'row', alignItems: 'center' },
@@ -142,7 +157,7 @@ const s = StyleSheet.create({
   chatTime: { color: '#6B7280', fontSize: 11 },
   chatBottom: { flexDirection: 'row', alignItems: 'center', marginTop: 3 },
   chatMsg: { color: '#9CA3AF', fontSize: 13, flex: 1 },
-  badge: { backgroundColor: '#10B981', borderRadius: 10, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 6, marginLeft: 8 },
+  badge: { backgroundColor: BRAND_ACCENT, borderRadius: 10, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 6, marginLeft: 8 },
   badgeTxt: { color: '#fff', fontSize: 11, fontWeight: '800' },
   tabBar: { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row', backgroundColor: '#070D18', borderTopWidth: 1, borderTopColor: '#E5E7EB', paddingVertical: 8, paddingBottom: 24 },
   tab: { flex: 1, alignItems: 'center', gap: 2 },

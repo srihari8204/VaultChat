@@ -51,3 +51,198 @@ export const Fonts = Platform.select({
     mono: "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
   },
 });
+
+// ─── Obsidian Aurora design system ───────────────────────────────────
+// Two palettes (dark / light) sharing the brand accents (U3). `Aurora` is the
+// DARK palette and stays the static default so every existing `import { Aurora }`
+// keeps working unchanged; theme-aware code reads the active palette via
+// useTheme() (lib/theme). Brand colors are identical across both so accents stay
+// on-brand in either mode; only surfaces + text invert.
+
+export interface Palette {
+  primary: string; accent: string; purple: string;
+  danger: string; success: string; online: string;
+  bg: string; surface: string; surfaceSolid: string;
+  card: string; border: string; separator: string;
+  text: string; textDim: string; textFaint: string;
+  // WhatsApp-faithful chat surface (see memory: WhatsApp = reference standard).
+  chatBg: string;          // conversation background
+  bubbleIn: string;        // received bubble
+  bubbleOut: string;       // sent bubble
+  bubbleInText: string; bubbleOutText: string;
+  bubbleMetaIn: string; bubbleMetaOut: string;  // time/tick color inside the bubble
+  tickRead: string;        // blue double-tick
+  headerBar: string;       // chat top bar
+}
+
+// ─── Single source of truth for the brand ACCENT (lavender) ─────────
+// Change BRAND_ACCENT and the whole app re-colors. Everything that needs the
+// accent imports this (solid) or brandAlpha(a) (translucent tints) — no screen
+// hardcodes the hex. Keep BRAND_ACCENT_RGB in sync with the hex.
+export const BRAND_ACCENT = '#9D6FD0';           // lavender (button-safe shade)
+export const BRAND_ACCENT_RGB = '157, 111, 208'; // keep in sync with BRAND_ACCENT
+export const brandAlpha = (a: number) => `rgba(${BRAND_ACCENT_RGB}, ${a})`;
+
+const BRAND = {
+  primary: BRAND_ACCENT,
+  accent:  BRAND_ACCENT, // secondary accent follows the brand color
+  purple:  '#8B5CF6',
+  danger:  '#EF4444',
+  success: '#22C55E', // green stays for "success / good" semantics (reference uses it)
+  online:  '#22C55E', // presence stays green
+};
+
+export const AuroraDark: Palette = {
+  ...BRAND,
+  bg:        '#0A0A0F', // near-black app background
+  surface:   'rgba(255,255,255,0.05)',
+  surfaceSolid: '#14141B',
+  card:      '#15161D',
+  border:    'rgba(255,255,255,0.08)',
+  separator: 'rgba(255,255,255,0.06)',
+  text:      '#FFFFFF',
+  textDim:   'rgba(255,255,255,0.5)',
+  textFaint: 'rgba(255,255,255,0.3)',
+  // Lavender-theme dark conversation palette (sent = accent, received = neutral)
+  chatBg:        '#0B0B10',
+  bubbleIn:      '#1E1F26',
+  bubbleOut:     BRAND_ACCENT,
+  bubbleInText:  '#ECEDEE',
+  bubbleOutText: '#FFFFFF',
+  bubbleMetaIn:  '#8A8A93',
+  bubbleMetaOut: 'rgba(255,255,255,0.75)',
+  tickRead:      '#FFFFFF',
+  headerBar:     '#15161D',
+};
+
+export const AuroraLight: Palette = {
+  ...BRAND,
+  bg:        '#F6F7F9',
+  surface:   'rgba(0,0,0,0.04)',
+  surfaceSolid: '#EDEFF3',
+  card:      '#FFFFFF',
+  border:    'rgba(0,0,0,0.10)',
+  separator: 'rgba(0,0,0,0.07)',
+  text:      '#0A0A0F',
+  textDim:   'rgba(0,0,0,0.55)',
+  textFaint: 'rgba(0,0,0,0.35)',
+  // Lavender-theme light conversation palette (sent = accent, received = neutral)
+  chatBg:        '#F4F4F7',
+  bubbleIn:      '#FFFFFF',
+  bubbleOut:     BRAND_ACCENT,
+  bubbleInText:  '#11181C',
+  bubbleOutText: '#FFFFFF',
+  bubbleMetaIn:  '#667781',
+  bubbleMetaOut: 'rgba(255,255,255,0.85)',
+  tickRead:      '#FFFFFF',
+  headerBar:     '#FFFFFF',
+};
+
+/** The static default palette (dark). Existing screens import this directly. */
+export const Aurora: Palette = AuroraDark;
+
+export type AuroraTheme = Palette;
+export const PALETTES = { dark: AuroraDark, light: AuroraLight };
+export type ColorScheme = keyof typeof PALETTES;
+
+// ─── U1: Design-token foundation ─────────────────────────────────────
+// One source of truth for space / radius / elevation / motion / type, so every
+// screen stops inventing its own 8/10/14/18/20/24 radii and ad-hoc paddings.
+// All additive — existing Aurora.* usage is untouched.
+
+/** 4-point spacing scale. Use SPACING.md not magic numbers. */
+export const SPACING = {
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 24,
+  xxl: 32,
+  xxxl: 48,
+} as const;
+
+/** Corner-radius scale. `pill` = fully rounded; `bubble`/`tail` for chat. */
+export const RADIUS = {
+  xs: 6,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 20,
+  xxl: 28,
+  bubble: 16,
+  tail: 4,
+  pill: 999,
+} as const;
+
+/** Elevation presets — ready-to-spread RN style objects (iOS shadow + Android elevation). */
+export const ELEVATION = {
+  none: {},
+  sm: {
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.18,
+    shadowRadius: 2, elevation: 2,
+  },
+  md: {
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.24,
+    shadowRadius: 8, elevation: 5,
+  },
+  lg: {
+    shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.32,
+    shadowRadius: 16, elevation: 10,
+  },
+} as const;
+
+/** Motion presets — durations (ms) + spring configs for Reanimated/Animated. */
+export const MOTION = {
+  fast: 150,
+  base: 220,
+  slow: 320,
+  spring:      { damping: 18, stiffness: 180, mass: 1 },
+  springSnappy:{ damping: 22, stiffness: 260, mass: 0.9 },
+  springSoft:  { damping: 26, stiffness: 120, mass: 1 },
+} as const;
+
+// ─── Brand font families (loaded in the root layout — see U2) ─────────
+// Until the fonts load, the Text wrapper falls back to the system font.
+// Family names match @expo-google-fonts exports (loaded in the root layout, U2).
+export const FONT = {
+  heading:     'Sora_700Bold',          // headings / titles
+  headingBold: 'Sora_800ExtraBold',
+  body:        'NunitoSans_400Regular', // body / UI
+  bodySemibold:'NunitoSans_600SemiBold',
+  bodyBold:    'NunitoSans_700Bold',
+} as const;
+
+/**
+ * Type scale. Each variant carries size / lineHeight / weight / family so a
+ * single <Text variant="title"> renders consistently everywhere. Weight is kept
+ * for the system-font fallback; family takes over once the brand fonts load.
+ */
+export const TYPOGRAPHY = {
+  display: { fontSize: 34, lineHeight: 40, fontWeight: '800' as const, family: FONT.headingBold },
+  title:   { fontSize: 24, lineHeight: 30, fontWeight: '800' as const, family: FONT.headingBold },
+  h2:      { fontSize: 20, lineHeight: 26, fontWeight: '700' as const, family: FONT.heading },
+  h3:      { fontSize: 17, lineHeight: 22, fontWeight: '700' as const, family: FONT.heading },
+  body:    { fontSize: 15, lineHeight: 21, fontWeight: '400' as const, family: FONT.body },
+  bodyStrong:{ fontSize: 15, lineHeight: 21, fontWeight: '600' as const, family: FONT.bodySemibold },
+  callout: { fontSize: 14, lineHeight: 19, fontWeight: '500' as const, family: FONT.body },
+  caption: { fontSize: 12.5, lineHeight: 16, fontWeight: '500' as const, family: FONT.body },
+  tiny:    { fontSize: 11, lineHeight: 14, fontWeight: '600' as const, family: FONT.bodySemibold },
+} as const;
+
+export type TypeVariant = keyof typeof TYPOGRAPHY;
+
+/**
+ * Deterministic per-contact avatar colors (name-hash → palette), so initials
+ * aren't all the same purple (U7). Pass a stable string (userId or name).
+ */
+export const AVATAR_PALETTE = [
+  BRAND_ACCENT, '#06B6D4', '#8B5CF6', '#F59E0B', '#EF4444',
+  '#EC4899', '#3B82F6', '#14B8A6', '#F97316', '#6366F1',
+] as const;
+
+export function avatarColor(seed: string | null | undefined): string {
+  const s = seed || '?';
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
+}

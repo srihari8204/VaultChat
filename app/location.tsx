@@ -1,288 +1,308 @@
-/**
- * app/location.tsx — VaultChat Location Sharing
- * Fixed: GPS, all buttons visible, no Firebase crash, D2DE status shown
- */
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert, Animated, ScrollView, ActivityIndicator, Platform, Linking } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+// app/location.tsx — Location sharing (real, full-stack).
+//
+// Replaces the old screen that claimed "🔐 D2DE · AES-256-GCM · zero plaintext
+// coordinates" while sending and encrypting nothing. Real behaviour now:
+//   • Send current location → a real 'location' message through the normal
+//     message pipeline (content = {lat,lng,address}); in direct chats it is
+//     end-to-end encrypted exactly like a text message.
+//   • Share live location → emits `live_location_update` over the socket, which
+//     the server RELAYS to the chat with NO storage (server.js), and the peer's
+//     open chat shows a live banner. Stops automatically after the chosen time.
+// Honest copy only — no fabricated guarantees.
+
+import { brandAlpha } from '../constants/theme';
+import { navigateTo } from '../lib/nav/openNavigation';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Location from 'expo-location';
+import React, { useCallback, useEffect, useRef, useState , useMemo} from 'react';
+import {
+  ActivityIndicator, Alert, Linking, Platform, ScrollView,
+  StyleSheet, Text, TouchableOpacity, View,
+} from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
+import { sendMessage } from '../lib/chatService';
+import { emit } from '../lib/socket';
+import { newLiveKey, encryptPosition } from '../lib/liveLocationCrypto';
 
-const C = { bg:'#030912',card:'#0D1B2E',border:'rgba(255,255,255,0.09)',cyan:'#10B981',red:'#EF4444',blue:'#4A9FFF',sub:'rgba(255,255,255,0.45)',green:'#10B981' };
-const DURATIONS = [{label:'15 min',seconds:900},{label:'1 hour',seconds:3600},{label:'8 hours',seconds:28800}];
+const DURATIONS = [
+  { label: '15 minutes', seconds: 900 },
+  { label: '1 hour', seconds: 3600 },
+  { label: '8 hours', seconds: 28800 },
+];
 
-function MapPreview({lat,lng,label,encrypted,live}:{lat:number;lng:number;label:string;encrypted:boolean;live:boolean}) {
-  return (
-    <View style={mp.wrap}>
-      <View style={mp.map}>
-        {Array(7).fill(0).map((_,i)=><View key={'v'+i} style={[mp.gridV,{left:`${(i+1)*13}%` as any}]}/>)}
-        {Array(4).fill(0).map((_,i)=><View key={'h'+i} style={[mp.gridH,{top:`${(i+1)*22}%` as any}]}/>)}
-        <View style={mp.pinWrap}>
-          <View style={[mp.pin,live&&{borderColor:C.red}]}><Text style={{fontSize:26}}>📍</Text></View>
-          <View style={mp.labelBg}><Text style={mp.pinLabel} numberOfLines={1}>{label}</Text></View>
-        </View>
-        <View style={{position:'absolute',top:10,right:10,gap:5}}>
-          {encrypted&&<View style={mp.encBadge}><Text style={mp.encText}>🔐 D2DE</Text></View>}
-          {live&&<View style={[mp.encBadge,{backgroundColor:'rgba(239,68,68,0.2)',borderColor:'rgba(239,68,68,0.4)'}]}><Text style={[mp.encText,{color:C.red}]}>🔴 LIVE</Text></View>}
-        </View>
-        <View style={mp.coordBox}><Text style={mp.coordText}>{lat.toFixed(5)}°N  {lng.toFixed(5)}°E</Text></View>
-      </View>
-      <TouchableOpacity style={mp.openBtn} onPress={()=>Linking.openURL(`https://www.google.com/maps?q=${lat},${lng}`)}>
-        <Text style={mp.openText}>🗺️  Open in Google Maps</Text>
-      </TouchableOpacity>
-    </View>
-  );
+function fmtClock(s: number): string {
+  const m = Math.floor(s / 60), sec = s % 60;
+  if (m >= 60) { const h = Math.floor(m / 60); return `${h}h ${m % 60}m`; }
+  return `${m}:${String(sec).padStart(2, '0')}`;
 }
-const mp = StyleSheet.create({
-  wrap:{borderRadius:16,overflow:'hidden',marginBottom:16,borderWidth:1,borderColor:'rgba(0,212,170,0.25)'},
-  map:{height:220,backgroundColor:'#071428',justifyContent:'center',alignItems:'center',position:'relative'},
-  gridV:{position:'absolute',top:0,bottom:0,width:1,backgroundColor:'rgba(255,255,255,0.04)'},
-  gridH:{position:'absolute',left:0,right:0,height:1,backgroundColor:'rgba(255,255,255,0.04)'},
-  pinWrap:{alignItems:'center',gap:8,zIndex:2},
-  pin:{width:56,height:56,borderRadius:28,backgroundColor:'rgba(239,68,68,0.15)',justifyContent:'center',alignItems:'center',borderWidth:2,borderColor:C.red},
-  labelBg:{backgroundColor:'rgba(0,0,0,0.7)',borderRadius:10,paddingHorizontal:12,paddingVertical:5,maxWidth:240},
-  pinLabel:{color:'#fff',fontSize:12,fontWeight:'800',textAlign:'center'},
-  encBadge:{backgroundColor:'rgba(0,212,170,0.2)',borderRadius:8,paddingHorizontal:8,paddingVertical:4,borderWidth:1,borderColor:'rgba(0,212,170,0.4)'},
-  encText:{color:'#10B981',fontSize:10,fontWeight:'800'},
-  coordBox:{position:'absolute',bottom:8,left:10,backgroundColor:'rgba(0,0,0,0.6)',borderRadius:6,paddingHorizontal:8,paddingVertical:4},
-  coordText:{color:'rgba(255,255,255,0.6)',fontSize:10,fontWeight:'700'},
-  openBtn:{backgroundColor:'rgba(74,159,255,0.08)',padding:13,alignItems:'center',borderTopWidth:1,borderTopColor:'rgba(255,255,255,0.06)'},
-  openText:{color:'#4A9FFF',fontSize:13,fontWeight:'800'},
-});
+
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
 
 export default function LocationScreen() {
-  const router=useRouter(),params=useLocalSearchParams();
-  const chatName=(params.name as string)||'Contact';
-  const [location,setLocation]=useState<Location.LocationObject|null>(null);
-  const [address,setAddress]=useState('Getting location...');
-  const [loading,setLoading]=useState(true);
-  const [liveSharing,setLiveSharing]=useState(false);
-  const [selDuration,setSelDuration]=useState(0);
-  const [timeLeft,setTimeLeft]=useState(0);
-  const [accuracy,setAccuracy]=useState<number|null>(null);
-  const [encrypted,setEncrypted]=useState(false);
-  const [permDenied,setPermDenied]=useState(false);
-  const liveSubRef=useRef<Location.LocationSubscription|null>(null);
-  const timerRef=useRef<ReturnType<typeof setInterval>|null>(null);
-  const pulseAnim=useRef(new Animated.Value(1)).current;
+  const { colors } = useTheme();
+  const S = useS();
+  const router = useRouter();
+  const params = useLocalSearchParams();
+  const chatId = (params.chatId as string) || '';
+  const chatName = (params.name as string) || 'this chat';
 
-  useEffect(()=>{
-    const doRequestLocation=async()=>{
+  const [loc, setLoc] = useState<Location.LocationObject | null>(null);
+  const [address, setAddress] = useState('Getting your location…');
+  const [loading, setLoading] = useState(true);
+  const [permDenied, setPermDenied] = useState(false);
+  const [sending, setSending] = useState(false);
+
+  const [selDuration, setSelDuration] = useState(0);
+  const [live, setLive] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(0);
+
+  const watchRef = useRef<Location.LocationSubscription | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const reverseGeocode = useCallback(async (latitude: number, longitude: number) => {
+    try {
+      const g = await Location.reverseGeocodeAsync({ latitude, longitude });
+      const a = g[0];
+      setAddress(a ? [a.name, a.street, a.city, a.region].filter(Boolean).join(', ') || `${latitude.toFixed(5)}, ${longitude.toFixed(5)}` : `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`);
+    } catch {
+      setAddress(`${latitude.toFixed(5)}, ${longitude.toFixed(5)}`);
+    }
+  }, []);
+
+  useEffect(() => {
+    (async () => {
       setLoading(true);
-      const {status}=await Location.requestForegroundPermissionsAsync();
-      if(status!=='granted'){setPermDenied(true);setLoading(false);return;}
-      await fetchLocation();
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') { setPermDenied(true); setLoading(false); return; }
+      try {
+        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        setLoc(pos);
+        reverseGeocode(pos.coords.latitude, pos.coords.longitude);
+      } catch {
+        Alert.alert('GPS error', 'Could not get your location. Check that GPS is enabled.');
+      } finally {
+        setLoading(false);
+      }
+    })();
+    return () => stopLive();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const sendCurrent = useCallback(async () => {
+    if (!loc) { Alert.alert('Please wait', 'Still getting your location…'); return; }
+    if (!chatId) { Alert.alert('No chat', 'Open this from a chat to share your location.'); return; }
+    setSending(true);
+    try {
+      const payload = JSON.stringify({
+        lat: loc.coords.latitude, lng: loc.coords.longitude, address, live: false,
+      });
+      await sendMessage(chatId, payload, 'location');
+      router.back();
+    } catch (e: any) {
+      Alert.alert('Could not send', e?.message ?? 'Try again');
+    } finally {
+      setSending(false);
+    }
+  }, [loc, chatId, address, router]);
+
+  const stopLive = useCallback(() => {
+    if (watchRef.current) { watchRef.current.remove(); watchRef.current = null; }
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    if (chatId) emit('live_location_stop', { chatId }).catch(() => {});
+    setLive(false);
+    setTimeLeft(0);
+  }, [chatId]);
+
+  const startLive = useCallback(async () => {
+    if (!loc) { Alert.alert('Please wait', 'Still getting your location…'); return; }
+    if (!chatId) { Alert.alert('No chat', 'Open this from a chat to share live location.'); return; }
+    const dur = DURATIONS[selDuration];
+    const until = Date.now() + dur.seconds * 1000;
+
+    // Per-session key. Delivered to the peer ONCE inside the initial E2E
+    // 'location' message (content.lk), then used to encrypt every relayed update
+    // so the server only ever sees opaque blobs.
+    const liveKey = newLiveKey();
+    try {
+      await sendMessage(chatId, JSON.stringify({
+        lat: loc.coords.latitude, lng: loc.coords.longitude, address, live: true, lk: liveKey, until,
+      }), 'location');
+    } catch (e: any) {
+      Alert.alert('Could not start', e?.message ?? 'Try again');
+      return;
+    }
+
+    setLive(true);
+    setTimeLeft(dur.seconds);
+
+    // Encrypt each position with the session key and relay the opaque blob.
+    const pushUpdate = (latitude: number, longitude: number) => {
+      const blob = encryptPosition(liveKey, { lat: latitude, lng: longitude, address });
+      if (blob) emit('live_location_update', { chatId, blob, until }).catch(() => {});
     };
-    doRequestLocation();return()=>stopLive();
-  },[]);
-  useEffect(()=>{
-    if(!liveSharing){pulseAnim.setValue(1);return;}
-    const lp=Animated.loop(Animated.sequence([Animated.timing(pulseAnim,{toValue:1.4,duration:800,useNativeDriver:true}),Animated.timing(pulseAnim,{toValue:1.0,duration:800,useNativeDriver:true})]));
-    lp.start();return()=>lp.stop();
-  },[liveSharing, pulseAnim]);
+    pushUpdate(loc.coords.latitude, loc.coords.longitude);
 
-  const requestLocation=async()=>{
-    setLoading(true);
-    const {status}=await Location.requestForegroundPermissionsAsync();
-    if(status!=='granted'){setPermDenied(true);setLoading(false);return;}
-    await fetchLocation();
-  };
-  const fetchLocation=async()=>{
-    setLoading(true);
-    try{
-      const loc=await Location.getCurrentPositionAsync({accuracy:Location.Accuracy.Balanced});
-      setLocation(loc);setAccuracy(loc.coords.accuracy??null);
-      try{
-        const geo=await Location.reverseGeocodeAsync({latitude:loc.coords.latitude,longitude:loc.coords.longitude});
-        if(geo.length>0){const g=geo[0];const p=[g.name,g.street,g.district,g.city].filter(Boolean);setAddress(p.length>0?p.join(', '):'Location found');}
-      }catch{setAddress(`${loc.coords.latitude.toFixed(4)}, ${loc.coords.longitude.toFixed(4)}`);}
-    }catch{Alert.alert('GPS Error','Could not get location. Check GPS is enabled.');}
-    finally{setLoading(false);}
-  };
-  const sendCurrentLocation=()=>{
-    if(!location)return Alert.alert('Please wait','Still getting your location...');
-    Alert.alert('Send Location',`Send your location to ${chatName}?\n\n🔐 D2DE encrypted.`,[
-      {text:'Cancel',style:'cancel'},
-      {text:'Send Encrypted',onPress:()=>{setEncrypted(true);Alert.alert('Location Sent!',`Sent to ${chatName} with D2DE encryption.`,[{text:'Done',onPress:()=>router.back()}]);}},
-    ]);
-  };
-  const startLive=async()=>{
-    if(!location)return Alert.alert('Please wait','Still getting your location...');
-    const dur=DURATIONS[selDuration];
-    Alert.alert('Live Location',`Share live with ${chatName} for ${dur.label}?\n\n🔐 D2DE encrypted stream.`,[
-      {text:'Cancel',style:'cancel'},
-      {text:'Start Live',onPress:async()=>{
-        try{
-          await Location.requestBackgroundPermissionsAsync().catch(()=>{});
-          setLiveSharing(true);setTimeLeft(dur.seconds);setEncrypted(true);
-          liveSubRef.current=await Location.watchPositionAsync({accuracy:Location.Accuracy.Balanced,timeInterval:5000,distanceInterval:5},(newLoc)=>{setLocation(newLoc);setAccuracy(newLoc.coords.accuracy??null);});
-          timerRef.current=setInterval(()=>{setTimeLeft(t=>{if(t<=1){stopLive();return 0;}return t-1;});},1000);
-        }catch(e:any){Alert.alert('Error',e.message||'Could not start');setLiveSharing(false);}
-      }},
-    ]);
-  };
-  const stopLive=()=>{liveSubRef.current?.remove();liveSubRef.current=null;if(timerRef.current)clearInterval(timerRef.current);timerRef.current=null;setLiveSharing(false);setTimeLeft(0);};
-  const fmt=(s:number)=>{const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60;if(h>0)return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;return `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;};
-  const accInfo=(()=>{if(!accuracy)return{label:'Unknown',color:'#6B7280'};if(accuracy<=5)return{label:'Excellent',color:C.green};if(accuracy<=15)return{label:'Good',color:C.blue};if(accuracy<=30)return{label:'Fair',color:'#F59E0B'};return{label:'Poor',color:C.red};})();
+    try {
+      watchRef.current = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.Balanced, timeInterval: 5000, distanceInterval: 10 },
+        (newPos) => {
+          setLoc(newPos);
+          pushUpdate(newPos.coords.latitude, newPos.coords.longitude);
+        },
+      );
+    } catch (e: any) {
+      Alert.alert('Could not start', e?.message ?? 'Try again');
+      stopLive();
+      return;
+    }
 
-  if(permDenied)return(
-    <View style={[s.root,{justifyContent:'center',alignItems:'center',padding:32}]}>
-      <Text style={{fontSize:48,marginBottom:16}}>📍</Text>
-      <Text style={{color:'#fff',fontSize:18,fontWeight:'900',marginBottom:8,textAlign:'center'}}>Location Permission Required</Text>
-      <Text style={{color:C.sub,fontSize:13,textAlign:'center',marginBottom:28}}>VaultChat needs location access to share your location.</Text>
-      <TouchableOpacity onPress={requestLocation} style={s.permBtn}><Text style={{color:'#fff',fontWeight:'800',fontSize:15}}>Grant Permission</Text></TouchableOpacity>
-      <TouchableOpacity onPress={()=>router.back()} style={{marginTop:16}}><Text style={{color:C.sub}}>Go Back</Text></TouchableOpacity>
-    </View>
-  );
+    timerRef.current = setInterval(() => {
+      setTimeLeft((t) => {
+        if (t <= 1) { stopLive(); return 0; }
+        return t - 1;
+      });
+    }, 1000);
+  }, [loc, chatId, selDuration, address, stopLive]);
 
-  return(
-    <View style={s.root}>
-      <View style={s.header}>
-        <TouchableOpacity onPress={()=>router.back()} style={s.backBtn}><Text style={s.backIco}>{'<'}</Text></TouchableOpacity>
-        <View style={{flex:1}}><Text style={s.headerTitle}>Share Location</Text><Text style={s.headerSub}>to {chatName}</Text></View>
-        <View style={s.encBadge}><Text style={s.encText}>🔐 D2DE</Text></View>
-      </View>
-      <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
-        {liveSharing&&(
-          <View style={s.liveBanner}>
-            <Animated.View style={[s.liveDot,{transform:[{scale:pulseAnim}]}]}/>
-            <View style={{flex:1}}><Text style={s.liveBannerTitle}>🔴 Live Location Active</Text><Text style={s.liveBannerSub}>D2DE encrypted · {fmt(timeLeft)} remaining</Text></View>
-            <TouchableOpacity onPress={stopLive} style={s.stopBtn}><Text style={s.stopTxt}>Stop</Text></TouchableOpacity>
-          </View>
-        )}
-        {loading?(
-          <View style={s.mapLoader}>
-            <ActivityIndicator size="large" color={C.cyan}/>
-            <Text style={s.mapLoaderTxt}>Getting your location...</Text>
-            <Text style={{color:C.sub,fontSize:11,marginTop:4}}>Make sure GPS is enabled</Text>
-          </View>
-        ):location?(
-          <MapPreview lat={location.coords.latitude} lng={location.coords.longitude} label={address} encrypted={encrypted} live={liveSharing}/>
-        ):(
-          <View style={s.mapLoader}>
-            <Text style={{fontSize:32,marginBottom:12}}>📍</Text>
-            <Text style={s.mapLoaderTxt}>Location unavailable</Text>
-            <TouchableOpacity onPress={fetchLocation} style={[s.liveBtn,{marginTop:14,paddingHorizontal:24}]}><Text style={s.liveBtnTxt}>Retry GPS</Text></TouchableOpacity>
-          </View>
-        )}
-        {location&&(
-          <View style={s.card}>
-            <View style={s.row}>
-              <Text style={s.ico}>📍</Text>
-              <View style={{flex:1}}><Text style={s.lbl}>ADDRESS</Text><Text style={s.val}>{address}</Text></View>
-              <TouchableOpacity onPress={fetchLocation} style={{padding:8}}><Text style={{fontSize:18}}>🔄</Text></TouchableOpacity>
-            </View>
-            <View style={s.divider}/>
-            <View style={s.row}>
-              <Text style={s.ico}>🎯</Text>
-              <View style={{flex:1}}>
-                <Text style={s.lbl}>GPS ACCURACY</Text>
-                <View style={{flexDirection:'row',alignItems:'center',gap:8,marginTop:3}}>
-                  <View style={[s.dot,{backgroundColor:accInfo.color}]}/>
-                  <Text style={[s.val,{color:accInfo.color}]}>{accInfo.label}</Text>
-                  {accuracy!=null&&<Text style={s.sub}>+-{Math.round(accuracy)}m</Text>}
-                </View>
-              </View>
-            </View>
-            <View style={s.divider}/>
-            <View style={{flexDirection:'row'}}>
-              {[{lbl:'LAT',val:`${location.coords.latitude.toFixed(5)}`},{lbl:'LNG',val:`${location.coords.longitude.toFixed(5)}`},{lbl:'ALT',val:`${location.coords.altitude?.toFixed(0)??'N/A'}m`}].map(c=>(
-                <View key={c.lbl} style={{flex:1,alignItems:'center'}}>
-                  <Text style={s.lbl}>{c.lbl}</Text>
-                  <Text style={[s.val,{color:C.blue,fontSize:12,marginTop:4}]}>{c.val}</Text>
-                </View>
-              ))}
-            </View>
-          </View>
-        )}
-        <View style={s.d2deCard}>
-          <Text style={s.d2deTitle}>🔐 D2DE Protocol Active</Text>
-          <Text style={s.d2deSub}>AES-256-GCM · HMAC-SHA256 · Per-session keys{'\n'}Server stores ciphertext only — zero plaintext coordinates</Text>
-        </View>
-        <TouchableOpacity onPress={sendCurrentLocation} disabled={!location||loading} style={[s.sendBtn,(!location||loading)&&{opacity:0.4}]}>
-          <Text style={s.sendIco}>📌</Text>
-          <View style={{flex:1}}><Text style={s.sendTitle}>Send Current Location</Text><Text style={s.sendSub}>One-time pin · D2DE encrypted</Text></View>
-          <Text style={{color:C.blue,fontSize:22}}>{'>'}</Text>
+  if (permDenied) {
+    return (
+      <View style={[S.container, S.center]}>
+        <Text style={S.permTitle}>Location permission needed</Text>
+        <Text style={S.permSub}>Allow location access to share your position.</Text>
+        <TouchableOpacity style={S.primaryBtn} onPress={() => Linking.openSettings()}>
+          <Text style={S.primaryBtnText}>Open settings</Text>
         </TouchableOpacity>
-        <View style={s.card}>
-          <Text style={s.sectionTitle}>🔴 Live Location</Text>
-          <Text style={[s.sub,{marginBottom:14,lineHeight:18}]}>Real-time encrypted stream · Updates every 5s</Text>
-          {!liveSharing&&(
-            <View style={s.durRow}>
-              {DURATIONS.map((d,i)=>(
-                <TouchableOpacity key={i} onPress={()=>setSelDuration(i)} style={[s.durBtn,selDuration===i&&s.durBtnActive]}>
-                  <Text style={[s.durLbl,selDuration===i&&{color:C.red}]}>{d.label}</Text>
+        <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 14 }}>
+          <Text style={S.link}>Back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  const lat = loc?.coords.latitude;
+  const lng = loc?.coords.longitude;
+
+  return (
+    <View style={S.container}>
+      <View style={S.header}>
+        <TouchableOpacity onPress={() => router.back()} hitSlop={10}>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
+        </TouchableOpacity>
+        <Text style={S.title}>Share location</Text>
+        <View style={{ width: 24 }} />
+      </View>
+
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+        {/* Map / coordinates */}
+        <View style={S.mapCard}>
+          <Ionicons name="location" size={40} color={colors.primary} />
+          {loading ? (
+            <ActivityIndicator color={colors.primary} style={{ marginTop: 8 }} />
+          ) : (
+            <>
+              <Text style={S.address} numberOfLines={2}>{address}</Text>
+              {lat != null && lng != null && (
+                <Text style={S.coords}>{lat.toFixed(5)}, {lng.toFixed(5)}</Text>
+              )}
+              {lat != null && lng != null && (
+                <TouchableOpacity style={S.mapsBtn} onPress={() => navigateTo(lat, lng, address || 'Location')}>
+                  <Ionicons name="navigate" size={15} color={colors.primary} />
+                  <Text style={S.mapsBtnText}>Navigate here</Text>
+                </TouchableOpacity>
+              )}
+              {lat != null && lng != null && (
+                <TouchableOpacity style={S.mapsBtn} onPress={() => Linking.openURL(`https://www.google.com/maps?q=${lat},${lng}`)}>
+                  <Ionicons name="map-outline" size={15} color={colors.primary} />
+                  <Text style={S.mapsBtnText}>Open in Google Maps</Text>
+                </TouchableOpacity>
+              )}
+            </>
+          )}
+        </View>
+
+        {live ? (
+          <View style={S.liveCard}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+              <View style={S.liveDot} />
+              <Text style={S.liveTitle}>Sharing live with {chatName}</Text>
+            </View>
+            <Text style={S.liveSub}>{fmtClock(timeLeft)} remaining · updates as you move</Text>
+            <TouchableOpacity style={[S.primaryBtn, { backgroundColor: colors.danger, marginTop: 12 }]} onPress={stopLive}>
+              <Text style={S.primaryBtnText}>Stop sharing</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            {/* Send current location */}
+            <TouchableOpacity style={[S.primaryBtn, sending && { opacity: 0.5 }]} onPress={sendCurrent} disabled={sending || loading}>
+              {sending ? <ActivityIndicator size="small" color="#fff" /> : <Text style={S.primaryBtnText}>Send current location</Text>}
+            </TouchableOpacity>
+            <Text style={S.note}>
+              Sends a pin to {chatName}. In direct chats it’s end-to-end encrypted, just like your messages.
+            </Text>
+
+            {/* Live location */}
+            <Text style={S.sectionTitle}>SHARE LIVE FOR</Text>
+            <View style={S.durRow}>
+              {DURATIONS.map((d, i) => (
+                <TouchableOpacity
+                  key={d.label}
+                  style={[S.durBtn, selDuration === i && S.durBtnActive]}
+                  onPress={() => setSelDuration(i)}
+                >
+                  <Text style={[S.durText, selDuration === i && S.durTextActive]}>{d.label}</Text>
                 </TouchableOpacity>
               ))}
             </View>
-          )}
-          {!liveSharing?(
-            <TouchableOpacity onPress={startLive} disabled={!location||loading} style={[s.liveBtn,(!location||loading)&&{opacity:0.4}]}>
-              <Animated.View style={[s.liveBtnDot,{transform:[{scale:pulseAnim}]}]}/>
-              <Text style={s.liveBtnTxt}>Start Live Location</Text>
+            <TouchableOpacity style={[S.primaryBtn, { backgroundColor: colors.surfaceSolid, borderWidth: 1, borderColor: colors.border }]} onPress={startLive} disabled={loading}>
+              <Text style={[S.primaryBtnText, { color: colors.primary }]}>Start live location</Text>
             </TouchableOpacity>
-          ):(
-            <View style={s.liveActive}>
-              <Animated.View style={[s.liveActiveDot,{transform:[{scale:pulseAnim}]}]}/>
-              <Text style={s.liveActiveTxt}>Broadcasting · {fmt(timeLeft)} left</Text>
-              <TouchableOpacity onPress={stopLive} style={s.stopLiveBtn}><Text style={s.stopLiveTxt}>Stop Sharing</Text></TouchableOpacity>
-            </View>
-          )}
-        </View>
-        <View style={s.privacyNote}>
-          <Text style={s.privacyTxt}>🛡️ Your location is encrypted before leaving your device. VaultChat never stores coordinates in plaintext.</Text>
-        </View>
+            <Text style={S.note}>
+              Streams your position in real time. It’s relayed through the server and never stored,
+              stops automatically after the time you pick, and updates while VaultChat is open.
+            </Text>
+          </>
+        )}
       </ScrollView>
     </View>
   );
 }
 
-const s = StyleSheet.create({
-  root:{flex:1,backgroundColor:'#030912'},
-  header:{flexDirection:'row',alignItems:'center',gap:12,paddingTop:Platform.OS==='ios'?56:44,paddingBottom:16,paddingHorizontal:18,backgroundColor:'rgba(3,9,18,0.96)',borderBottomWidth:1,borderBottomColor:'rgba(255,255,255,0.06)'},
-  backBtn:{width:40,height:40,justifyContent:'center',alignItems:'center'},
-  backIco:{color:'#fff',fontSize:26,fontWeight:'700'},
-  headerTitle:{color:'#fff',fontSize:17,fontWeight:'900'},
-  headerSub:{color:'rgba(255,255,255,0.45)',fontSize:12,marginTop:1},
-  encBadge:{backgroundColor:'rgba(0,212,170,0.12)',borderRadius:10,paddingHorizontal:10,paddingVertical:5,borderWidth:1,borderColor:'rgba(0,212,170,0.35)'},
-  encText:{color:'#10B981',fontSize:10,fontWeight:'800'},
-  scroll:{padding:16,paddingBottom:52},
-  liveBanner:{flexDirection:'row',alignItems:'center',gap:12,backgroundColor:'rgba(239,68,68,0.12)',borderRadius:14,padding:14,marginBottom:16,borderWidth:1,borderColor:'rgba(239,68,68,0.35)'},
-  liveDot:{width:12,height:12,borderRadius:6,backgroundColor:'#EF4444'},
-  liveBannerTitle:{color:'#fff',fontSize:14,fontWeight:'900'},
-  liveBannerSub:{color:'rgba(255,255,255,0.45)',fontSize:11,marginTop:2},
-  stopBtn:{backgroundColor:'rgba(239,68,68,0.25)',borderRadius:8,paddingHorizontal:16,paddingVertical:8},
-  stopTxt:{color:'#EF4444',fontSize:12,fontWeight:'900'},
-  mapLoader:{height:220,backgroundColor:'rgba(255,255,255,0.04)',borderRadius:16,justifyContent:'center',alignItems:'center',marginBottom:16,borderWidth:1,borderColor:'rgba(255,255,255,0.09)'},
-  mapLoaderTxt:{color:'#fff',fontSize:15,fontWeight:'700',marginTop:10},
-  permBtn:{backgroundColor:'#4A9FFF',borderRadius:14,paddingHorizontal:28,paddingVertical:14},
-  card:{backgroundColor:'#0D1B2E',borderRadius:16,padding:16,marginBottom:14,borderWidth:1,borderColor:'rgba(255,255,255,0.09)'},
-  d2deCard:{backgroundColor:'rgba(0,212,170,0.07)',borderRadius:14,padding:14,marginBottom:14,borderWidth:1,borderColor:'rgba(0,212,170,0.22)'},
-  d2deTitle:{color:'#10B981',fontSize:14,fontWeight:'800',marginBottom:6},
-  d2deSub:{color:'rgba(0,212,170,0.7)',fontSize:12,lineHeight:19},
-  row:{flexDirection:'row',alignItems:'flex-start',gap:12},
-  ico:{fontSize:20,marginTop:2},
-  lbl:{color:'rgba(255,255,255,0.45)',fontSize:10,fontWeight:'700',letterSpacing:0.5},
-  val:{color:'#fff',fontSize:14,fontWeight:'700',marginTop:2},
-  sub:{color:'rgba(255,255,255,0.45)',fontSize:12},
-  dot:{width:8,height:8,borderRadius:4},
-  divider:{height:1,backgroundColor:'rgba(255,255,255,0.06)',marginVertical:12},
-  sendBtn:{flexDirection:'row',alignItems:'center',gap:14,backgroundColor:'rgba(29,78,216,0.18)',borderRadius:16,padding:18,marginBottom:14,borderWidth:1,borderColor:'rgba(29,78,216,0.35)'},
-  sendIco:{fontSize:30},
-  sendTitle:{color:'#fff',fontSize:16,fontWeight:'900'},
-  sendSub:{color:'rgba(255,255,255,0.45)',fontSize:12,marginTop:2},
-  sectionTitle:{color:'#fff',fontSize:17,fontWeight:'900',marginBottom:6},
-  durRow:{flexDirection:'row',gap:8,marginBottom:14},
-  durBtn:{flex:1,alignItems:'center',padding:12,borderRadius:12,backgroundColor:'rgba(255,255,255,0.05)',borderWidth:1,borderColor:'rgba(255,255,255,0.1)'},
-  durBtnActive:{backgroundColor:'rgba(239,68,68,0.15)',borderColor:'rgba(239,68,68,0.5)'},
-  durLbl:{color:'rgba(255,255,255,0.45)',fontSize:12,fontWeight:'800'},
-  liveBtn:{flexDirection:'row',alignItems:'center',justifyContent:'center',gap:10,backgroundColor:'#EF4444',borderRadius:14,paddingVertical:15},
-  liveBtnDot:{width:10,height:10,borderRadius:5,backgroundColor:'#fff'},
-  liveBtnTxt:{color:'#fff',fontSize:15,fontWeight:'900'},
-  liveActive:{alignItems:'center',gap:10,backgroundColor:'rgba(239,68,68,0.1)',borderRadius:14,padding:16,borderWidth:1,borderColor:'rgba(239,68,68,0.35)'},
-  liveActiveDot:{width:10,height:10,borderRadius:5,backgroundColor:'#EF4444'},
-  liveActiveTxt:{color:'#fff',fontSize:14,fontWeight:'800'},
-  stopLiveBtn:{backgroundColor:'rgba(239,68,68,0.2)',borderRadius:10,paddingHorizontal:24,paddingVertical:10,borderWidth:1,borderColor:'rgba(239,68,68,0.45)'},
-  stopLiveTxt:{color:'#EF4444',fontWeight:'900',fontSize:14},
-  privacyNote:{backgroundColor:'rgba(16,185,129,0.07)',borderRadius:12,padding:14,borderWidth:1,borderColor:'rgba(16,185,129,0.2)'},
-  privacyTxt:{color:'rgba(255,255,255,0.45)',fontSize:12,lineHeight:18,textAlign:'center'},
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
+  center: { justifyContent: 'center', alignItems: 'center', padding: 32 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingBottom: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: c.border },
+  back: { color: c.text, fontSize: 32, fontWeight: '300', marginTop: -4 },
+  title: { color: c.text, fontSize: 17, fontWeight: '800' },
+
+  mapCard: { backgroundColor: c.card, borderRadius: 18, borderWidth: 1, borderColor: c.border, alignItems: 'center', padding: 22, gap: 6 },
+  address: { color: c.text, fontSize: 15, fontWeight: '700', textAlign: 'center', marginTop: 6 },
+  coords: { color: c.textDim, fontSize: 12.5 },
+  mapsBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 10, backgroundColor: brandAlpha(0.12) },
+  mapsBtnText: { color: c.primary, fontSize: 13, fontWeight: '700' },
+
+  primaryBtn: { marginTop: 16, backgroundColor: c.primary, paddingVertical: 15, borderRadius: 14, alignItems: 'center' },
+  primaryBtnText: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  note: { color: c.textDim, fontSize: 12.5, lineHeight: 18, marginTop: 8, paddingHorizontal: 4 },
+
+  sectionTitle: { color: c.textFaint, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginTop: 26, marginBottom: 10, marginLeft: 4 },
+  durRow: { flexDirection: 'row', gap: 8 },
+  durBtn: { flex: 1, paddingVertical: 11, borderRadius: 12, backgroundColor: c.surface, borderWidth: 1, borderColor: c.border, alignItems: 'center' },
+  durBtnActive: { backgroundColor: brandAlpha(0.15), borderColor: c.primary },
+  durText: { color: c.textDim, fontSize: 13, fontWeight: '600' },
+  durTextActive: { color: c.primary, fontWeight: '800' },
+
+  liveCard: { marginTop: 16, backgroundColor: 'rgba(239,68,68,0.07)', borderRadius: 16, borderWidth: 1, borderColor: 'rgba(239,68,68,0.3)', padding: 16 },
+  liveDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: c.danger },
+  liveTitle: { color: c.text, fontSize: 15, fontWeight: '800' },
+  liveSub: { color: c.textDim, fontSize: 12.5, marginTop: 4 },
+
+  permTitle: { color: c.text, fontSize: 18, fontWeight: '800', textAlign: 'center' },
+  permSub: { color: c.textDim, fontSize: 14, textAlign: 'center', marginTop: 8, marginBottom: 18 },
+  link: { color: c.primary, fontSize: 14, fontWeight: '700' },
 });

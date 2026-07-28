@@ -1,150 +1,120 @@
-// app/qr-contact.tsx — QR Code Add Contact
-// Tab 1: "My QR" shows your VaultID as a QR code
-// Tab 2: "Scan" uses expo-camera CameraView with barcode scanning
+// app/qr-contact.tsx — QR Code Add Contact (Postgres-backed).
+//
+// "My QR" renders your VaultID (GET /user/profile → vaultId) as a QR.
+// "Scan" reads a VaultChat QR, resolves the handle (GET /user/by-vault/:id),
+// and opens/creates a direct chat (POST /chats). No Firestore.
 
-import React, { useState, useEffect } from 'react';
+import { brandAlpha } from '../constants/theme';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, Alert,
-  StatusBar, ActivityIndicator, Share,
+  View, Text, TouchableOpacity, StyleSheet, Alert, StatusBar, ActivityIndicator, Share,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
+import { Ionicons } from '@expo/vector-icons';
 import QRCode from 'react-native-qrcode-svg';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
+import { getMyProfile, resolveVaultId, createDirectChat } from '../lib/chatService';
 
-const C = {
-  bg: '#FFFFFF', primary: '#4A9FFF', accent: '#10B981',
-  card: 'rgba(10,22,40,0.88)', dim: 'rgba(255,255,255,0.45)',
-};
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
 
 export default function QRContactScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
-  const myUid = auth().currentUser?.uid || '';
-  const [tab, setTab] = useState('my');
+  const [tab, setTab] = useState<'my' | 'scan'>('my');
   const [myVaultId, setMyVaultId] = useState('');
-  const [myName, setMyName] = useState('');
+  const [myName, setMyName] = useState('VaultChat User');
   const [loading, setLoading] = useState(true);
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [processing, setProcessing] = useState(false);
 
   useEffect(() => {
+    let active = true;
     (async () => {
       try {
-        const snap = await firestore().collection('users').doc(myUid).get();
-        const d = snap.data();
-        setMyVaultId(d?.vaultId || myUid.slice(0, 12));
-        setMyName(d?.name || 'VaultChat User');
-      } catch {}
-      setLoading(false);
+        const p = await getMyProfile();
+        if (active) { setMyVaultId(p.vaultId || ''); setMyName(p.name || 'VaultChat User'); }
+      } catch { /* header still renders */ } finally {
+        if (active) setLoading(false);
+      }
     })();
-  }, [myUid]);
+    return () => { active = false; };
+  }, []);
 
-  const qrData = 'vaultchat://add/' + myVaultId + '/' + encodeURIComponent(myName);
+  const qrData = `vaultchat://add/${myVaultId}/${encodeURIComponent(myName)}`;
 
   const handleShare = async () => {
+    if (!myVaultId) return;
     try {
       await Share.share({
-        message: 'Add me on VaultChat! My VaultID: @' + myVaultId + '\nhttps://vaultchat.app/add/' + myVaultId,
+        message: `Add me on VaultChat! My VaultID: @${myVaultId}\nhttps://vaultchat.app/add/${myVaultId}`,
       });
-    } catch {}
+    } catch { /* user cancelled */ }
   };
 
-  const handleScan = async ({ data }) => {
+  const parseVaultId = (data: string): string => {
+    if (data.startsWith('vaultchat://add/')) return data.replace('vaultchat://add/', '').split('/')[0];
+    if (data.includes('/add/')) return data.split('/add/')[1].split('/')[0];
+    if (data.startsWith('@')) return data.slice(1);
+    return data.trim();
+  };
+
+  const handleScan = useCallback(async ({ data }: { data: string }) => {
     if (scanned || processing) return;
     setScanned(true);
     setProcessing(true);
-
     try {
-      let vaultId = '';
-      let scanName = '';
+      const vaultId = parseVaultId(data);
+      if (!vaultId) { Alert.alert('Invalid', 'Not a VaultChat QR code.'); setScanned(false); return; }
+      if (vaultId === myVaultId) { Alert.alert('That’s you', "That's your own QR code!"); setScanned(false); return; }
 
-      if (data.startsWith('vaultchat://add/')) {
-        const parts = data.replace('vaultchat://add/', '').split('/');
-        vaultId = parts[0];
-        scanName = decodeURIComponent(parts[1] || '');
-      } else if (data.startsWith('@')) {
-        vaultId = data.slice(1);
-      } else {
-        vaultId = data.trim();
-      }
-
-      if (!vaultId || vaultId === myVaultId) {
-        Alert.alert('Invalid', vaultId === myVaultId ? "That's your own QR code!" : 'Invalid QR code');
-        setScanned(false);
-        setProcessing(false);
-        return;
-      }
-
-      const snap = await firestore().collection('users').where('vaultId', '==', vaultId).get();
-
-      if (snap.empty) {
-        Alert.alert('Not Found', 'No VaultChat user with ID @' + vaultId);
-        setScanned(false);
-        setProcessing(false);
-        return;
-      }
-
-      const peerDoc = snap.docs[0];
-      const peer = peerDoc.data();
-      const peerUid = peerDoc.id;
-      const peerName = peer.name || scanName || vaultId;
-
-      const chatId = [myUid, peerUid].sort().join('_');
-      await firestore().collection('chats').doc(chatId).set({
-        participants: [myUid, peerUid],
-        createdAt: firestore.FieldValue.serverTimestamp(),
-        lastTime: firestore.FieldValue.serverTimestamp(),
-        lastMsg: '',
-      }, { merge: true });
-
-      Alert.alert(
-        'Contact Found!',
-        peerName + ' (@' + vaultId + ')',
-        [
-          { text: 'Cancel', onPress: () => { setScanned(false); setProcessing(false); } },
-          {
-            text: 'Open Chat',
-            onPress: () => {
-              router.replace({
-                pathname: '/chat',
-                params: { chatId, peerUid, peerName },
-              });
-            },
+      const peer = await resolveVaultId(vaultId);
+      Alert.alert('Contact found', `${peer.name || vaultId} (@${peer.vaultId})`, [
+        { text: 'Cancel', onPress: () => setScanned(false) },
+        {
+          text: 'Open chat',
+          onPress: async () => {
+            try {
+              const { id } = await createDirectChat({ userId: peer.userId });
+              router.replace({ pathname: '/chat', params: { id, peerUid: peer.userId, peerName: peer.name || vaultId } } as any);
+            } catch (e: any) {
+              Alert.alert('Error', e?.message ?? 'Could not start chat');
+              setScanned(false);
+            }
           },
-        ]
-      );
-    } catch {
-      Alert.alert('Error', 'Could not process QR code');
+        },
+      ]);
+    } catch (e: any) {
+      Alert.alert('Not found', e?.message ?? 'No VaultChat user with that ID.');
       setScanned(false);
+    } finally {
+      setProcessing(false);
     }
-    setProcessing(false);
-  };
+  }, [scanned, processing, myVaultId, router]);
 
   return (
     <View style={s.container}>
       <StatusBar barStyle="light-content" />
 
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-          <Text style={{ color: '#fff', fontSize: 24 }}>{"\u2190"}</Text>
+        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.title}>QR Contact</Text>
         <View style={{ width: 40 }} />
       </View>
 
       <View style={s.tabs}>
-        <TouchableOpacity
-          style={[s.tab, tab === 'my' && s.tabActive]}
-          onPress={() => setTab('my')}
-        >
+        <TouchableOpacity style={[s.tab, tab === 'my' && s.tabActive]} onPress={() => setTab('my')}>
           <Text style={[s.tabTxt, tab === 'my' && s.tabTxtActive]}>My QR</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={[s.tab, tab === 'scan' && s.tabActive]}
-          onPress={() => { setTab('scan'); setScanned(false); }}
-        >
+        <TouchableOpacity style={[s.tab, tab === 'scan' && s.tabActive]} onPress={() => { setTab('scan'); setScanned(false); }}>
           <Text style={[s.tabTxt, tab === 'scan' && s.tabTxtActive]}>Scan</Text>
         </TouchableOpacity>
       </View>
@@ -152,24 +122,22 @@ export default function QRContactScreen() {
       {tab === 'my' ? (
         <View style={s.myQR}>
           {loading ? (
-            <ActivityIndicator color={C.accent} size="large" />
+            <ActivityIndicator color={colors.primary} size="large" />
           ) : (
             <>
               <View style={s.qrCard}>
                 <Text style={s.qrName}>{myName}</Text>
-                <Text style={s.qrId}>@{myVaultId}</Text>
+                <Text style={s.qrId}>@{myVaultId || '…'}</Text>
                 <View style={s.qrBox}>
-                  <QRCode
-                    value={qrData}
-                    size={200}
-                    backgroundColor="#FFFFFF"
-                    color="#FFFFFF"
-                  />
+                  {myVaultId
+                    ? <QRCode value={qrData} size={200} backgroundColor="#FFFFFF" color="#0A0A0F" />
+                    : <Text style={{ color: '#888' }}>No VaultID yet</Text>}
                 </View>
                 <Text style={s.qrHint}>Show this to add you on VaultChat</Text>
               </View>
-              <TouchableOpacity style={s.shareBtn} onPress={handleShare}>
-                <Text style={s.shareTxt}>{"\uD83D\uDD17  Share my VaultID"}</Text>
+              <TouchableOpacity style={[s.shareBtn, { flexDirection: 'row', alignItems: 'center', gap: 8 }]} onPress={handleShare} disabled={!myVaultId}>
+                <Ionicons name="share-outline" size={16} color={colors.primary} />
+                <Text style={s.shareTxt}>Share my VaultID</Text>
               </TouchableOpacity>
             </>
           )}
@@ -177,10 +145,10 @@ export default function QRContactScreen() {
       ) : (
         <View style={s.scanArea}>
           {!permission ? (
-            <ActivityIndicator color={C.accent} size="large" style={{ flex: 1 }} />
+            <ActivityIndicator color={colors.primary} size="large" style={{ flex: 1 }} />
           ) : !permission.granted ? (
             <View style={s.noPerm}>
-              <Text style={s.noPermTxt}>Camera permission is required to scan QR codes</Text>
+              <Text style={s.noPermTxt}>Camera permission is required to scan QR codes.</Text>
               <TouchableOpacity style={s.shareBtn} onPress={requestPermission}>
                 <Text style={s.shareTxt}>Grant Permission</Text>
               </TouchableOpacity>
@@ -193,17 +161,12 @@ export default function QRContactScreen() {
                 barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
                 onBarcodeScanned={scanned ? undefined : handleScan}
               />
-              <View style={s.scanOverlay}>
+              <View style={s.scanOverlay} pointerEvents="none">
                 <View style={s.scanFrame} />
-                <Text style={s.scanHint}>
-                  {processing ? 'Processing...' : 'Point camera at a VaultChat QR code'}
-                </Text>
+                <Text style={s.scanHint}>{processing ? 'Processing…' : 'Point camera at a VaultChat QR code'}</Text>
               </View>
               {scanned && !processing && (
-                <TouchableOpacity
-                  style={[s.shareBtn, { position: 'absolute', bottom: 40, alignSelf: 'center' }]}
-                  onPress={() => setScanned(false)}
-                >
+                <TouchableOpacity style={[s.shareBtn, { position: 'absolute', bottom: 40, alignSelf: 'center' }]} onPress={() => setScanned(false)}>
                   <Text style={s.shareTxt}>Scan Again</Text>
                 </TouchableOpacity>
               )}
@@ -215,29 +178,29 @@ export default function QRContactScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 50, paddingHorizontal: 16, paddingBottom: 12 },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingHorizontal: 16, paddingBottom: 12 },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  title: { color: '#fff', fontSize: 18, fontWeight: '800' },
-  tabs: { flexDirection: 'row', marginHorizontal: 16, backgroundColor: '#F9FAFB', borderRadius: 12, padding: 3 },
+  title: { color: c.text, fontSize: 18, fontWeight: '800' },
+  tabs: { flexDirection: 'row', marginHorizontal: 16, backgroundColor: c.surface, borderRadius: 12, padding: 3, borderWidth: 1, borderColor: c.border },
   tab: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 10 },
-  tabActive: { backgroundColor: C.accent },
-  tabTxt: { color: '#6B7280', fontSize: 14, fontWeight: '700' },
-  tabTxtActive: { color: '#000' },
+  tabActive: { backgroundColor: c.primary },
+  tabTxt: { color: c.textDim, fontSize: 14, fontWeight: '700' },
+  tabTxtActive: { color: '#FFFFFF' },
   myQR: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  qrCard: { backgroundColor: '#fff', borderRadius: 24, padding: 32, alignItems: 'center', width: '100%', maxWidth: 320 },
-  qrName: { color: '#FFFFFF', fontSize: 20, fontWeight: '900', marginBottom: 4 },
-  qrId: { color: '#9CA3AF', fontSize: 14, marginBottom: 20 },
-  qrBox: { padding: 12, backgroundColor: '#fff', borderRadius: 12 },
-  qrHint: { color: '#999', fontSize: 12, marginTop: 16, textAlign: 'center' },
-  shareBtn: { marginTop: 24, backgroundColor: C.accent + '22', borderRadius: 14, paddingVertical: 14, paddingHorizontal: 28, borderWidth: 1, borderColor: C.accent + '44' },
-  shareTxt: { color: C.accent, fontSize: 14, fontWeight: '700' },
-  scanArea: { flex: 1, position: 'relative' },
+  qrCard: { backgroundColor: c.card, borderRadius: 24, padding: 32, alignItems: 'center', width: '100%', maxWidth: 320, borderWidth: 1, borderColor: c.border },
+  qrName: { color: c.text, fontSize: 20, fontWeight: '900', marginBottom: 4 },
+  qrId: { color: c.accent, fontSize: 14, marginBottom: 20, fontWeight: '700' },
+  qrBox: { padding: 12, backgroundColor: '#FFFFFF', borderRadius: 12, minWidth: 224, minHeight: 224, alignItems: 'center', justifyContent: 'center' },
+  qrHint: { color: c.textDim, fontSize: 12, marginTop: 16, textAlign: 'center' },
+  shareBtn: { marginTop: 24, backgroundColor: brandAlpha(0.13), borderRadius: 14, paddingVertical: 14, paddingHorizontal: 28, borderWidth: 1, borderColor: brandAlpha(0.3) },
+  shareTxt: { color: c.primary, fontSize: 14, fontWeight: '700' },
+  scanArea: { flex: 1, position: 'relative', marginTop: 12 },
   scanner: { flex: 1 },
   scanOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center' },
-  scanFrame: { width: 250, height: 250, borderWidth: 2, borderColor: C.accent, borderRadius: 20, backgroundColor: 'transparent' },
+  scanFrame: { width: 250, height: 250, borderWidth: 2, borderColor: c.primary, borderRadius: 20, backgroundColor: 'transparent' },
   scanHint: { color: '#fff', fontSize: 14, marginTop: 20, textAlign: 'center', fontWeight: '600', textShadowColor: '#000', textShadowRadius: 4 },
   noPerm: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
-  noPermTxt: { color: '#6B7280', fontSize: 15, textAlign: 'center', marginBottom: 20 },
+  noPermTxt: { color: c.textDim, fontSize: 15, textAlign: 'center', marginBottom: 20 },
 });

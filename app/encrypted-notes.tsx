@@ -7,37 +7,45 @@
 // 5. Show/Hide Sensitive Fields       11. Secure Trash (30-Day Recovery)
 // 6. Copy with Auto-Clear (30s)       12. Reminders on Notes
 
-import React, { useState, useEffect, useCallback } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import { BRAND_ACCENT } from '../constants/theme';
+import React, { useState, useEffect, useCallback , useMemo} from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, FlatList, TextInput,
-  Alert, Modal, Platform, ScrollView, Clipboard,
+  Alert, Modal, Platform, ScrollView, Image, ActivityIndicator,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
+import * as Sharing from 'expo-sharing';
+import Markdown from 'react-native-markdown-display';
+import {
+  addAttachment, deleteAttachment, isImage, openAttachment, prettySize,
+  type NoteAttachment,
+} from '../lib/notesAttachments';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { Stack, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { copyAndAutoClear } from '../lib/clipboardSafe';
+import { decryptNotes, encryptNotes } from '../lib/notesCrypto';
+import 'react-native-get-random-values';
+import { randomBytes } from '@noble/hashes/utils.js';
 
-const DARK = '#0D0F14';
-const CARD = '#1A1D27';
-const PURPLE = '#6C63FF';
-const BORDER = '#2A2D3A';
-const TEXT_C = '#E8E8E8';
-const SUB = '#6B7280';
-const GREEN = '#10B981';
-const RED = '#EF4444';
 
 // 9 Categories from PDF
 const CATEGORIES = [
   { key: 'passwords',    icon: '\uD83D\uDD11', name: 'Passwords',     color: '#EF4444' },
   { key: 'ideas',        icon: '\uD83D\uDCA1', name: 'Ideas',         color: '#F59E0B' },
   { key: 'personal',     icon: '\uD83D\uDCDD', name: 'Personal',      color: '#3B82F6' },
-  { key: 'bank',         icon: '\uD83D\uDCB3', name: 'Bank/Cards',    color: '#10B981' },
+  { key: 'bank',         icon: '\uD83D\uDCB3', name: 'Bank/Cards',    color: BRAND_ACCENT },
   { key: 'medical',      icon: '\uD83C\uDFE5', name: 'Medical',       color: '#EC4899' },
   { key: 'documents',    icon: '\uD83D\uDCC1', name: 'Documents',     color: '#8B5CF6' },
-  { key: 'recovery',     icon: '\uD83D\uDD10', name: 'Recovery Keys', color: '#F97316' },
+  { key: 'recovery',     icon: '\uD83D\uDD10', name: 'Recovery Keys', color: BRAND_ACCENT },
   { key: 'bookmarks',    icon: '\uD83D\uDD16', name: 'Bookmarks',     color: '#06B6D4' },
   { key: 'custom',       icon: '\uD83D\uDCC2', name: 'Custom',        color: '#6B7280' },
 ];
 
-const TAG_COLORS = ['#EF4444', '#F59E0B', '#10B981', '#3B82F6', '#8B5CF6', '#EC4899', '#06B6D4', '#6B7280'];
+const TAG_COLORS = ['#EF4444', '#F59E0B', BRAND_ACCENT, '#3B82F6', '#8B5CF6', '#EC4899', '#06B6D4', '#6B7280'];
 
 interface Note {
   id: string;
@@ -53,12 +61,20 @@ interface Note {
   reminder?: number;     // timestamp
   isDeleted?: boolean;   // soft delete
   deletedAt?: number;
+  attachments?: NoteAttachment[]; // encrypted files (lib/notesAttachments)
 }
 
 const STORAGE_KEY = 'vc_encrypted_notes';
 const TRASH_DAYS = 30;
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function EncryptedNotesScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const [notes, setNotes] = useState<Note[]>([]);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
@@ -78,19 +94,32 @@ export default function EncryptedNotesScreen() {
   const [edSensitive, setEdSensitive] = useState(false);
   const [edLocked, setEdLocked] = useState(false);
   const [hideSensitive, setHideSensitive] = useState(true);
+  const [edAttachments, setEdAttachments] = useState<NoteAttachment[]>([]);
+  const [attaching, setAttaching] = useState(false);
+  const [viewerImg, setViewerImg] = useState<string | null>(null);
+  const [edPreview, setEdPreview] = useState(false);
+  const [edSel, setEdSel] = useState({ start: 0, end: 0 });
 
   useEffect(() => { loadNotes(); }, []);
 
   const loadNotes = async () => {
     try {
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
-      if (raw) setNotes(JSON.parse(raw));
+      if (!raw) return;
+      const dec = await decryptNotes(raw);
+      if (!dec) return; // sealed blob we can't open — don't clobber it
+      const parsed: Note[] = JSON.parse(dec.text);
+      setNotes(parsed);
+      // Migrate legacy plaintext storage to an encrypted blob in place.
+      if (!dec.wasEncrypted) {
+        await AsyncStorage.setItem(STORAGE_KEY, await encryptNotes(JSON.stringify(parsed)));
+      }
     } catch {}
   };
 
   const saveNotes = async (updated: Note[]) => {
     setNotes(updated);
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    await AsyncStorage.setItem(STORAGE_KEY, await encryptNotes(JSON.stringify(updated)));
   };
 
   const openEditor = (note?: Note) => {
@@ -103,6 +132,7 @@ export default function EncryptedNotesScreen() {
       setEdTagColor(note.tagColor ?? '#3B82F6');
       setEdSensitive(note.isSensitive);
       setEdLocked(note.isLocked);
+      setEdAttachments(note.attachments ?? []);
     } else {
       setEditNote(null);
       setEdTitle('');
@@ -112,21 +142,88 @@ export default function EncryptedNotesScreen() {
       setEdTagColor('#3B82F6');
       setEdSensitive(false);
       setEdLocked(false);
+      setEdAttachments([]);
     }
     setShowEditor(true);
+  };
+
+  // ── Attachments (encrypted via lib/notesAttachments) ──────────────────────
+  const attachImage = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) { Alert.alert('Permission needed', 'Allow photo access to attach an image.'); return; }
+    const res = await ImagePicker.launchImageLibraryAsync({ quality: 0.9 });
+    if (res.canceled || !res.assets?.[0]) return;
+    const a = res.assets[0];
+    setAttaching(true);
+    try {
+      const att = await addAttachment(a.uri, a.fileName ?? `image_${Date.now()}.jpg`, a.mimeType ?? 'image/jpeg');
+      setEdAttachments(prev => [...prev, att]);
+    } catch (e: any) {
+      Alert.alert('Could not attach', e?.message ?? 'Try again');
+    } finally { setAttaching(false); }
+  };
+
+  const attachFile = async () => {
+    const res = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
+    if (res.canceled || !res.assets?.[0]) return;
+    const a = res.assets[0];
+    setAttaching(true);
+    try {
+      const att = await addAttachment(a.uri, a.name, a.mimeType ?? 'application/octet-stream');
+      setEdAttachments(prev => [...prev, att]);
+    } catch (e: any) {
+      Alert.alert('Could not attach', e?.message ?? 'Try again');
+    } finally { setAttaching(false); }
+  };
+
+  const addAttachmentMenu = () => {
+    Alert.alert('Add attachment', 'Encrypted with your notes key before it touches disk.', [
+      { text: 'Photo / Image', onPress: attachImage },
+      { text: 'File', onPress: attachFile },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  const removeAttachment = async (att: NoteAttachment) => {
+    await deleteAttachment(att.id);
+    setEdAttachments(prev => prev.filter(x => x.id !== att.id));
+  };
+
+  const openAttachmentFile = async (att: NoteAttachment) => {
+    const uri = await openAttachment(att);
+    if (!uri) { Alert.alert('Could not open', 'This attachment is unavailable or corrupted.'); return; }
+    if (isImage(att)) { setViewerImg(uri); return; }
+    if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri, { mimeType: att.mime, dialogTitle: att.name });
+    else Alert.alert('Saved', 'Opened a decrypted copy.');
+  };
+
+  // ── Markdown formatting (#142) ────────────────────────────────────────────
+  // Wrap the current selection (or insert at the cursor) with markdown markers.
+  const wrapSelection = (before: string, after: string) => {
+    const { start, end } = edSel;
+    const s0 = Math.max(0, Math.min(start, edContent.length));
+    const s1 = Math.max(s0, Math.min(end, edContent.length));
+    const selected = edContent.slice(s0, s1) || 'text';
+    setEdContent(edContent.slice(0, s0) + before + selected + after + edContent.slice(s1));
+  };
+  // Prefix the line containing the selection start (headings, lists, quotes).
+  const prefixLine = (prefix: string) => {
+    const { start } = edSel;
+    const lineStart = edContent.lastIndexOf('\n', Math.max(0, start - 1)) + 1;
+    setEdContent(edContent.slice(0, lineStart) + prefix + edContent.slice(lineStart));
   };
 
   const saveNote = async () => {
     if (!edTitle.trim()) { Alert.alert('Error', 'Title required'); return; }
     const now = Date.now();
     if (editNote) {
-      const updated = notes.map(n => n.id === editNote.id ? { ...n, title: edTitle.trim(), content: edContent, category: edCategory, tags: edTags, tagColor: edTagColor, isSensitive: edSensitive, isLocked: edLocked, updatedAt: now } : n);
+      const updated = notes.map(n => n.id === editNote.id ? { ...n, title: edTitle.trim(), content: edContent, category: edCategory, tags: edTags, tagColor: edTagColor, isSensitive: edSensitive, isLocked: edLocked, attachments: edAttachments, updatedAt: now } : n);
       await saveNotes(updated);
     } else {
       const newNote: Note = {
         id: `note_${now}`, title: edTitle.trim(), content: edContent,
         category: edCategory, tags: edTags, tagColor: edTagColor,
-        isSensitive: edSensitive, isLocked: edLocked,
+        isSensitive: edSensitive, isLocked: edLocked, attachments: edAttachments,
         createdAt: now, updatedAt: now,
       };
       await saveNotes([newNote, ...notes]);
@@ -150,23 +247,32 @@ export default function EncryptedNotesScreen() {
   };
 
   const permanentDelete = async (id: string) => {
+    const gone = notes.find(n => n.id === id);
+    if (gone?.attachments?.length) await Promise.all(gone.attachments.map(a => deleteAttachment(a.id)));
     await saveNotes(notes.filter(n => n.id !== id));
   };
 
-  // Password generator
+  // Password generator — CSPRNG (@noble randomBytes) with rejection sampling so
+  // every character is uniformly distributed (no modulo bias). Never Math.random
+  // for a security tool.
   const generatePassword = (length = 20) => {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+-=';
-    let pass = '';
-    for (let i = 0; i < length; i++) pass += chars.charAt(Math.floor(Math.random() * chars.length));
-    setGeneratedPass(pass);
+    const max = 256 - (256 % chars.length); // discard bytes ≥ this to stay unbiased
+    const out: string[] = [];
+    while (out.length < length) {
+      const batch = randomBytes(length);
+      for (let i = 0; i < batch.length && out.length < length; i++) {
+        if (batch[i] < max) out.push(chars[batch[i] % chars.length]);
+      }
+    }
+    setGeneratedPass(out.join(''));
     setShowPassGen(true);
   };
 
-  // Copy with auto-clear (30s)
+  // Copy with auto-clear (30s) — delegates to the shared clipboardSafe util
   const copyWithAutoClear = (text: string) => {
-    Clipboard.setString(text);
+    copyAndAutoClear(text);
     Alert.alert('Copied', 'Clipboard will auto-clear in 30 seconds');
-    setTimeout(() => { Clipboard.setString(''); }, 30000);
   };
 
   // Filter notes
@@ -192,20 +298,20 @@ export default function EncryptedNotesScreen() {
       {/* Header */}
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-          <Text style={s.backTxt}>{'\u2190'}</Text>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={s.headerTitle}>{'\uD83D\uDCDD'} Encrypted Notes</Text>
           <Text style={s.headerSub}>AES-256-GCM {'\u2022'} Biometric locked {'\u2022'} On-device only</Text>
         </View>
         <TouchableOpacity onPress={() => setShowTrash(true)} style={s.trashBtn}>
-          <Text style={{ fontSize: 18 }}>{'\uD83D\uDDD1\uFE0F'}</Text>
+          <Ionicons name="trash-outline" size={18} color={colors.text} />
         </TouchableOpacity>
       </View>
 
       {/* Search */}
       <View style={s.searchBar}>
-        <Text style={s.searchIcon}>{'\uD83D\uDD0D'}</Text>
+        <Ionicons name="search" size={16} color={colors.textDim} style={s.searchIcon} />
         <TextInput style={s.searchInput} placeholder="Encrypted search..." placeholderTextColor="#555" value={search} onChangeText={setSearch} />
         <TouchableOpacity onPress={() => generatePassword()}>
           <Text style={s.passGenBtn}>{'\uD83D\uDD11'}</Text>
@@ -240,6 +346,7 @@ export default function EncryptedNotesScreen() {
                 <Text style={s.noteTitle} numberOfLines={1}>{n.title}</Text>
                 {n.isLocked && <Text style={{ fontSize: 14 }}>{'\uD83D\uDD12'}</Text>}
                 {n.isSensitive && <Text style={{ fontSize: 14 }}>{'\uD83D\uDC41'}</Text>}
+                {!!n.attachments?.length && <Text style={{ fontSize: 13 }}>{'\uD83D\uDCCE'}{n.attachments.length}</Text>}
               </View>
               <Text style={s.notePreview} numberOfLines={2}>
                 {n.isSensitive && hideSensitive ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022' : n.content}
@@ -275,7 +382,7 @@ export default function EncryptedNotesScreen() {
 
       {/* FAB */}
       <TouchableOpacity style={s.fab} onPress={() => openEditor()} activeOpacity={0.8}>
-        <Text style={s.fabTxt}>+</Text>
+        <Ionicons name="add" size={28} color="#FFF" />
       </TouchableOpacity>
 
       {/* Note Editor Modal */}
@@ -286,9 +393,14 @@ export default function EncryptedNotesScreen() {
               <Text style={s.editorCancel}>Cancel</Text>
             </TouchableOpacity>
             <Text style={s.editorTitle}>{editNote ? 'Edit Note' : 'New Note'}</Text>
-            <TouchableOpacity onPress={saveNote}>
-              <Text style={s.editorSave}>Save</Text>
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+              <TouchableOpacity onPress={() => setEdPreview(p => !p)}>
+                <Text style={[s.editorCancel, edPreview && { color: colors.primary }]}>{edPreview ? 'Edit' : 'Preview'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={saveNote}>
+                <Text style={s.editorSave}>Save</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           <ScrollView style={s.editorBody}>
@@ -304,8 +416,67 @@ export default function EncryptedNotesScreen() {
               ))}
             </ScrollView>
 
-            {/* Rich text area */}
-            <TextInput style={s.editorContent} placeholder="Note content..." placeholderTextColor="#555" value={edContent} onChangeText={setEdContent} multiline textAlignVertical="top" />
+            {/* Markdown content (#142): edit with a formatting toolbar, or preview rendered */}
+            {edPreview ? (
+              <View style={s.mdPreview}>
+                {edContent.trim()
+                  ? <Markdown style={mdStyles(colors)}>{edContent}</Markdown>
+                  : <Text style={{ color: colors.textFaint }}>Nothing to preview yet.</Text>}
+              </View>
+            ) : (
+              <>
+                <View style={s.mdBar}>
+                  {([
+                    ['B', () => wrapSelection('**', '**')],
+                    ['I', () => wrapSelection('_', '_')],
+                    ['H', () => prefixLine('# ')],
+                    ['• List', () => prefixLine('- ')],
+                    ['❝', () => prefixLine('> ')],
+                    ['‹›', () => wrapSelection('`', '`')],
+                    ['🔗', () => wrapSelection('[', '](https://)')],
+                  ] as [string, () => void][]).map(([label, fn]) => (
+                    <TouchableOpacity key={label} style={s.mdBtn} onPress={fn}>
+                      <Text style={s.mdBtnTxt}>{label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <TextInput
+                  style={s.editorContent}
+                  placeholder="Note content… (Markdown supported — tap Preview)"
+                  placeholderTextColor="#555"
+                  value={edContent}
+                  onChangeText={setEdContent}
+                  onSelectionChange={(e) => setEdSel(e.nativeEvent.selection)}
+                  multiline
+                  textAlignVertical="top"
+                />
+              </>
+            )}
+
+            {/* Attachments (encrypted) */}
+            <View style={s.edSection}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Text style={s.edLabel}>Attachments {edAttachments.length > 0 ? `(${edAttachments.length})` : ''}</Text>
+                <TouchableOpacity onPress={addAttachmentMenu} disabled={attaching} style={s.attachBtn}>
+                  {attaching ? <ActivityIndicator size="small" color={colors.primary} /> : <Text style={s.attachBtnTxt}>＋ Attach</Text>}
+                </TouchableOpacity>
+              </View>
+              <Text style={s.attachHint}>🔒 Encrypted with your notes key before it’s written to disk.</Text>
+              {edAttachments.map(att => (
+                <View key={att.id} style={s.attachRow}>
+                  <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10 }} onPress={() => openAttachmentFile(att)}>
+                    <Text style={{ fontSize: 20 }}>{isImage(att) ? '🖼️' : '📎'}</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.attachName} numberOfLines={1}>{att.name}</Text>
+                      <Text style={s.attachMeta}>{prettySize(att.size)} · tap to open</Text>
+                    </View>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => removeAttachment(att)} hitSlop={8}>
+                    <Ionicons name="close" size={16} color="#EF4444" />
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
 
             {/* Tags */}
             <View style={s.edSection}>
@@ -362,14 +533,24 @@ export default function EncryptedNotesScreen() {
               <TouchableOpacity style={s.passBtn} onPress={() => generatePassword()}>
                 <Text style={s.passBtnTxt}>{'\uD83D\uDD04'} Regenerate</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[s.passBtn, { backgroundColor: GREEN }]} onPress={() => { copyWithAutoClear(generatedPass); setShowPassGen(false); }}>
+              <TouchableOpacity style={[s.passBtn, { backgroundColor: colors.primary }]} onPress={() => { copyWithAutoClear(generatedPass); setShowPassGen(false); }}>
                 <Text style={s.passBtnTxt}>{'\uD83D\uDCCB'} Copy</Text>
               </TouchableOpacity>
             </View>
             <TouchableOpacity onPress={() => setShowPassGen(false)} style={{ marginTop: 12 }}>
-              <Text style={{ color: SUB, textAlign: 'center' }}>Close</Text>
+              <Text style={{ color: colors.textDim, textAlign: 'center' }}>Close</Text>
             </TouchableOpacity>
           </View>
+        </View>
+      </Modal>
+
+      {/* Encrypted image viewer */}
+      <Modal visible={!!viewerImg} transparent animationType="fade" onRequestClose={() => setViewerImg(null)}>
+        <View style={s.imgViewer}>
+          {viewerImg && <Image source={{ uri: viewerImg }} style={s.imgViewerImg} resizeMode="contain" />}
+          <TouchableOpacity style={s.imgViewerClose} onPress={() => setViewerImg(null)}>
+            <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>Close</Text>
+          </TouchableOpacity>
         </View>
       </Modal>
 
@@ -377,8 +558,9 @@ export default function EncryptedNotesScreen() {
       <Modal visible={showTrash} animationType="slide">
         <View style={s.editorScreen}>
           <View style={s.editorHeader}>
-            <TouchableOpacity onPress={() => setShowTrash(false)}>
-              <Text style={s.editorCancel}>{'\u2190'} Back</Text>
+            <TouchableOpacity onPress={() => setShowTrash(false)} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Ionicons name="arrow-back" size={16} color={colors.textDim} />
+              <Text style={s.editorCancel}>Back</Text>
             </TouchableOpacity>
             <Text style={s.editorTitle}>{'\uD83D\uDDD1\uFE0F'} Secure Trash</Text>
             <View style={{ width: 50 }} />
@@ -393,15 +575,15 @@ export default function EncryptedNotesScreen() {
                 <Text style={s.trashDate}>Deleted {n.deletedAt ? new Date(n.deletedAt).toLocaleDateString() : ''}</Text>
                 <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
                   <TouchableOpacity style={s.trashRestore} onPress={() => restoreNote(n.id)}>
-                    <Text style={{ color: GREEN, fontWeight: '600', fontSize: 13 }}>Restore</Text>
+                    <Text style={{ color: colors.primary, fontWeight: '600', fontSize: 13 }}>Restore</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={s.trashDelete} onPress={() => permanentDelete(n.id)}>
-                    <Text style={{ color: RED, fontWeight: '600', fontSize: 13 }}>Delete Forever</Text>
+                    <Text style={{ color: colors.danger, fontWeight: '600', fontSize: 13 }}>Delete Forever</Text>
                   </TouchableOpacity>
                 </View>
               </View>
             )}
-            ListEmptyComponent={<Text style={{ color: SUB, textAlign: 'center', marginTop: 40 }}>Trash is empty</Text>}
+            ListEmptyComponent={<Text style={{ color: colors.textDim, textAlign: 'center', marginTop: 40 }}>Trash is empty</Text>}
           />
         </View>
       </Modal>
@@ -409,91 +591,123 @@ export default function EncryptedNotesScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: DARK },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: Platform.OS === 'ios' ? 56 : 44, paddingBottom: 14, paddingHorizontal: 16, backgroundColor: CARD, borderBottomWidth: 1, borderBottomColor: BORDER },
+// Markdown render theme — maps react-native-markdown-display element keys to the
+// active palette so previews look right in both light and dark.
+const mdStyles = (c: Palette) => ({
+  body: { color: c.text, fontSize: 15, lineHeight: 22 },
+  heading1: { color: c.text, fontSize: 22, fontWeight: '800' as const, marginTop: 8, marginBottom: 4 },
+  heading2: { color: c.text, fontSize: 19, fontWeight: '800' as const, marginTop: 8, marginBottom: 4 },
+  heading3: { color: c.text, fontSize: 16, fontWeight: '700' as const, marginTop: 6, marginBottom: 4 },
+  strong: { fontWeight: '800' as const, color: c.text },
+  em: { fontStyle: 'italic' as const },
+  link: { color: c.primary, textDecorationLine: 'underline' as const },
+  blockquote: { backgroundColor: c.card, borderLeftColor: c.primary, borderLeftWidth: 3, paddingHorizontal: 12, paddingVertical: 6, marginVertical: 4 },
+  code_inline: { backgroundColor: c.card, color: c.accent, paddingHorizontal: 5, borderRadius: 4, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  code_block: { backgroundColor: c.card, color: c.text, padding: 10, borderRadius: 8, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  fence: { backgroundColor: c.card, color: c.text, padding: 10, borderRadius: 8, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  bullet_list: { marginVertical: 4 },
+  ordered_list: { marginVertical: 4 },
+  hr: { backgroundColor: c.border, height: 1 },
+});
+
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen: { flex: 1, backgroundColor: c.bg },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: Platform.OS === 'ios' ? 56 : 44, paddingBottom: 14, paddingHorizontal: 16, backgroundColor: c.card, borderBottomWidth: 1, borderBottomColor: c.border },
   backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#2A2D3A', alignItems: 'center', justifyContent: 'center' },
-  backTxt: { fontSize: 18, color: TEXT_C },
-  headerTitle: { fontSize: 16, fontWeight: '700', color: TEXT_C },
-  headerSub: { fontSize: 10, color: SUB, marginTop: 1 },
+  backTxt: { fontSize: 18, color: c.text },
+  headerTitle: { fontSize: 16, fontWeight: '700', color: c.text },
+  headerSub: { fontSize: 10, color: c.textDim, marginTop: 1 },
   trashBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#2A2D3A', alignItems: 'center', justifyContent: 'center' },
 
-  searchBar: { flexDirection: 'row', alignItems: 'center', gap: 8, margin: 12, backgroundColor: CARD, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: BORDER },
+  searchBar: { flexDirection: 'row', alignItems: 'center', gap: 8, margin: 12, backgroundColor: c.card, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: c.border },
   searchIcon: { fontSize: 16 },
-  searchInput: { flex: 1, color: TEXT_C, fontSize: 14 },
+  searchInput: { flex: 1, color: c.text, fontSize: 14 },
   passGenBtn: { fontSize: 20 },
 
   catRow: { paddingHorizontal: 12, gap: 8, paddingBottom: 8 },
-  catChip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: CARD, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: BORDER },
-  catChipActive: { backgroundColor: PURPLE + '20', borderColor: PURPLE },
+  catChip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.card, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: c.border },
+  catChipActive: { backgroundColor: c.purple + '20', borderColor: c.purple },
   catIcon: { fontSize: 14 },
-  catTxt: { fontSize: 12, color: SUB, fontWeight: '500' },
-  catTxtActive: { color: PURPLE },
+  catTxt: { fontSize: 12, color: c.textDim, fontWeight: '500' },
+  catTxtActive: { color: c.purple },
   catCount: { fontSize: 10, fontWeight: '700' },
 
   notesList: { padding: 12, paddingBottom: 100 },
-  noteCard: { backgroundColor: CARD, borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: BORDER },
+  noteCard: { backgroundColor: c.card, borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: c.border },
   noteHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
   noteIcon: { fontSize: 18 },
-  noteTitle: { flex: 1, fontSize: 15, fontWeight: '700', color: TEXT_C },
-  notePreview: { fontSize: 13, color: SUB, lineHeight: 18, marginBottom: 8 },
+  noteTitle: { flex: 1, fontSize: 15, fontWeight: '700', color: c.text },
+  notePreview: { fontSize: 13, color: c.textDim, lineHeight: 18, marginBottom: 8 },
   noteFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   noteDate: { fontSize: 11, color: '#4B5563' },
   tagRow: { flexDirection: 'row', gap: 4 },
   tag: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
   tagTxt: { fontSize: 10, fontWeight: '600' },
 
-  sensToggle: { position: 'absolute', bottom: 90, left: 16, backgroundColor: CARD, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: BORDER },
-  sensToggleTxt: { color: SUB, fontSize: 12, fontWeight: '600' },
+  sensToggle: { position: 'absolute', bottom: 90, left: 16, backgroundColor: c.card, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: c.border },
+  sensToggleTxt: { color: c.textDim, fontSize: 12, fontWeight: '600' },
 
-  fab: { position: 'absolute', bottom: 24, right: 20, width: 56, height: 56, borderRadius: 28, backgroundColor: PURPLE, alignItems: 'center', justifyContent: 'center', elevation: 6 },
+  fab: { position: 'absolute', bottom: 24, right: 20, width: 56, height: 56, borderRadius: 28, backgroundColor: c.purple, alignItems: 'center', justifyContent: 'center', elevation: 6 },
   fabTxt: { fontSize: 28, color: '#FFF', fontWeight: '300', marginTop: -2 },
 
   empty: { alignItems: 'center', paddingTop: 60 },
   emptyIcon: { fontSize: 48, marginBottom: 12 },
-  emptyTxt: { fontSize: 16, fontWeight: '600', color: TEXT_C },
-  emptySub: { fontSize: 13, color: SUB, marginTop: 4 },
+  emptyTxt: { fontSize: 16, fontWeight: '600', color: c.text },
+  emptySub: { fontSize: 13, color: c.textDim, marginTop: 4 },
 
   // Editor
-  editorScreen: { flex: 1, backgroundColor: DARK },
-  editorHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: Platform.OS === 'ios' ? 56 : 44, paddingBottom: 12, paddingHorizontal: 16, backgroundColor: CARD, borderBottomWidth: 1, borderBottomColor: BORDER },
-  editorCancel: { color: SUB, fontSize: 14 },
-  editorTitle: { color: TEXT_C, fontSize: 16, fontWeight: '700' },
-  editorSave: { color: PURPLE, fontSize: 14, fontWeight: '700' },
+  editorScreen: { flex: 1, backgroundColor: c.bg },
+  editorHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: Platform.OS === 'ios' ? 56 : 44, paddingBottom: 12, paddingHorizontal: 16, backgroundColor: c.card, borderBottomWidth: 1, borderBottomColor: c.border },
+  editorCancel: { color: c.textDim, fontSize: 14 },
+  editorTitle: { color: c.text, fontSize: 16, fontWeight: '700' },
+  editorSave: { color: c.purple, fontSize: 14, fontWeight: '700' },
   editorBody: { flex: 1, padding: 16 },
-  editorTitleInput: { color: TEXT_C, fontSize: 22, fontWeight: '700', marginBottom: 12, borderBottomWidth: 1, borderBottomColor: BORDER, paddingBottom: 8 },
-  editorContent: { color: TEXT_C, fontSize: 15, lineHeight: 22, minHeight: 150, backgroundColor: CARD, borderRadius: 12, padding: 14, marginTop: 8, borderWidth: 1, borderColor: BORDER },
+  editorTitleInput: { color: c.text, fontSize: 22, fontWeight: '700', marginBottom: 12, borderBottomWidth: 1, borderBottomColor: c.border, paddingBottom: 8 },
+  editorContent: { color: c.text, fontSize: 15, lineHeight: 22, minHeight: 150, backgroundColor: c.card, borderRadius: 12, padding: 14, marginTop: 8, borderWidth: 1, borderColor: c.border },
 
-  edCatChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: CARD, borderWidth: 1, borderColor: BORDER },
-  edCatTxt: { fontSize: 11, color: SUB },
+  edCatChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: c.card, borderWidth: 1, borderColor: c.border },
+  edCatTxt: { fontSize: 11, color: c.textDim },
 
   edSection: { marginTop: 16 },
-  edLabel: { color: PURPLE, fontSize: 12, fontWeight: '600', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
+  edLabel: { color: c.purple, fontSize: 12, fontWeight: '600', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
+  attachBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: c.border, minWidth: 72, alignItems: 'center' },
+  attachBtnTxt: { color: c.primary, fontSize: 13, fontWeight: '700' },
+  attachHint: { color: c.textDim, fontSize: 11, marginBottom: 8 },
+  attachRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: c.card, borderRadius: 10, borderWidth: 1, borderColor: c.border, paddingHorizontal: 12, paddingVertical: 10, marginTop: 6 },
+  attachName: { color: c.text, fontSize: 14, fontWeight: '600' },
+  attachMeta: { color: c.textDim, fontSize: 11, marginTop: 2 },
+  mdBar: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8, marginBottom: 8 },
+  mdBtn: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, backgroundColor: c.card, borderWidth: 1, borderColor: c.border },
+  mdBtnTxt: { color: c.text, fontSize: 13, fontWeight: '700' },
+  mdPreview: { minHeight: 180, paddingVertical: 8 },
+  imgViewer: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' },
+  imgViewerImg: { width: '100%', height: '80%' },
+  imgViewerClose: { position: 'absolute', bottom: 50, paddingHorizontal: 28, paddingVertical: 12, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 24 },
   colorDot: { width: 28, height: 28, borderRadius: 14 },
   colorDotActive: { borderWidth: 3, borderColor: '#FFF' },
-  tagInput: { backgroundColor: CARD, borderRadius: 10, padding: 10, color: TEXT_C, fontSize: 13, marginTop: 8, borderWidth: 1, borderColor: BORDER },
+  tagInput: { backgroundColor: c.card, borderRadius: 10, padding: 10, color: c.text, fontSize: 13, marginTop: 8, borderWidth: 1, borderColor: c.border },
 
-  edToggle: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: BORDER },
+  edToggle: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: c.border },
   edToggleIcon: { fontSize: 20 },
-  edToggleTxt: { color: TEXT_C, fontSize: 14, fontWeight: '500' },
+  edToggleTxt: { color: c.text, fontSize: 14, fontWeight: '500' },
 
-  copyBtn: { backgroundColor: GREEN + '20', borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 16, borderWidth: 1, borderColor: GREEN + '40' },
-  copyBtnTxt: { color: GREEN, fontSize: 14, fontWeight: '600' },
+  copyBtn: { backgroundColor: c.primary + '20', borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 16, borderWidth: 1, borderColor: c.primary + '40' },
+  copyBtnTxt: { color: c.primary, fontSize: 14, fontWeight: '600' },
 
   // Password generator
   passModal: { flex: 1, backgroundColor: '#000000AA', justifyContent: 'center', padding: 24 },
-  passCard: { backgroundColor: CARD, borderRadius: 20, padding: 24, borderWidth: 1, borderColor: BORDER },
-  passTitle: { color: TEXT_C, fontSize: 18, fontWeight: '700', marginBottom: 16, textAlign: 'center' },
-  passDisplay: { backgroundColor: DARK, borderRadius: 12, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: BORDER },
-  passText: { color: GREEN, fontSize: 16, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', textAlign: 'center' },
+  passCard: { backgroundColor: c.card, borderRadius: 20, padding: 24, borderWidth: 1, borderColor: c.border },
+  passTitle: { color: c.text, fontSize: 18, fontWeight: '700', marginBottom: 16, textAlign: 'center' },
+  passDisplay: { backgroundColor: c.bg, borderRadius: 12, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: c.border },
+  passText: { color: c.primary, fontSize: 16, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', textAlign: 'center' },
   passActions: { flexDirection: 'row', gap: 10 },
-  passBtn: { flex: 1, backgroundColor: PURPLE, borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
+  passBtn: { flex: 1, backgroundColor: c.purple, borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
   passBtnTxt: { color: '#FFF', fontSize: 14, fontWeight: '600' },
 
   // Trash
-  trashCard: { backgroundColor: CARD, borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: RED + '30' },
-  trashTitle: { color: TEXT_C, fontSize: 15, fontWeight: '600' },
-  trashDate: { color: SUB, fontSize: 12, marginTop: 2 },
-  trashRestore: { backgroundColor: GREEN + '15', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 6 },
-  trashDelete: { backgroundColor: RED + '15', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 6 },
+  trashCard: { backgroundColor: c.card, borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: c.danger + '30' },
+  trashTitle: { color: c.text, fontSize: 15, fontWeight: '600' },
+  trashDate: { color: c.textDim, fontSize: 12, marginTop: 2 },
+  trashRestore: { backgroundColor: c.primary + '15', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 6 },
+  trashDelete: { backgroundColor: c.danger + '15', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 6 },
 });

@@ -101,7 +101,7 @@ export const getAlertColor = (type: string): string => {
   switch (type) {
     case 'imposter': return '#EF4444';
     case 'unusual': return '#F59E0B';
-    case 'safe': return '#10B981';
+    case 'safe': return '#F26B21';
     default: return '#6B7280';
   }
 };

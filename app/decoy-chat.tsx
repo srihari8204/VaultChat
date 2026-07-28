@@ -2,32 +2,48 @@
 // Pixel-perfect clone of real chat.tsx but with fake messages
 // Even allows "typing" fake messages that disappear on reload
 
-import React, { useState, useRef } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import React, { useState, useRef, useEffect , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList,
   TextInput, KeyboardAvoidingView, Platform,
 } from 'react-native';
+import { useTheme } from '../lib/theme';
+import { type Palette } from '../constants/theme';
 import { useLocalSearchParams, Stack } from 'expo-router';
-import { generateDecoyMessages } from '../lib/ghostProtocol';
+import {
+  appendDecoyMessage, getDecoyMessages, markDecoyDelivered, type DecoyMessage,
+} from '../lib/ghostProtocol';
+
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
 
 export default function DecoyChatScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const { chatId, name } = useLocalSearchParams();
-  const [messages, setMessages] = useState(() => generateDecoyMessages(chatId as string));
+  const [messages, setMessages] = useState<DecoyMessage[]>([]);
   const [input, setInput] = useState('');
-  const flatRef = useRef(null);
+  const flatRef = useRef<FlatList>(null);
 
-  const send = () => {
-    if (!input.trim()) return;
-    const newMsg = {
-      id: Date.now().toString(),
-      text: input.trim(),
-      sent: true,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-    setMessages(prev => [...prev, newMsg]);
+  // Load the persistent decoy thread (seeds on first open).
+  useEffect(() => {
+    let alive = true;
+    getDecoyMessages(chatId as string).then((m) => { if (alive) setMessages(m); }).catch(() => {});
+    return () => { alive = false; };
+  }, [chatId]);
+
+  const send = async () => {
+    const text = input.trim();
+    if (!text) return;
     setInput('');
-    // Fake "delivered" tick after 1s
-    setTimeout(() => {
+    // Persist the sent message so it survives reload (real account behaviour).
+    const newMsg = await appendDecoyMessage(chatId as string, text);
+    setMessages(prev => [...prev, newMsg]);
+    setTimeout(async () => {
+      await markDecoyDelivered(chatId as string, newMsg.id);
       setMessages(prev => prev.map(m => m.id === newMsg.id ? { ...m, delivered: true } : m));
     }, 1000);
   };
@@ -52,8 +68,8 @@ export default function DecoyChatScreen() {
         headerTintColor: '#1F2937',
         headerRight: () => (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, marginRight: 12 }}>
-            <TouchableOpacity><Text style={{ color: '#4A9FFF', fontSize: 20 }}>{"\u260E\uFE0F"}</Text></TouchableOpacity>
-            <TouchableOpacity><Text style={{ color: '#4A9FFF', fontSize: 20 }}>{"\uD83D\uDCF9"}</Text></TouchableOpacity>
+            <TouchableOpacity><Ionicons name="call" size={20} color="#4A9FFF" /></TouchableOpacity>
+            <TouchableOpacity><Ionicons name="videocam" size={20} color="#4A9FFF" /></TouchableOpacity>
           </View>
         ),
       }} />
@@ -67,7 +83,7 @@ export default function DecoyChatScreen() {
           onContentSizeChange={() => flatRef.current?.scrollToEnd({ animated: false })}
         />
         <View style={s.bar}>
-          <TouchableOpacity style={s.attachBtn}><Text style={{ fontSize: 22 }}>{"\u2795"}</Text></TouchableOpacity>
+          <TouchableOpacity style={s.attachBtn}><Ionicons name="add" size={22} color={colors.text} /></TouchableOpacity>
           <TextInput
             style={s.input}
             value={input}
@@ -77,7 +93,7 @@ export default function DecoyChatScreen() {
             multiline
           />
           <TouchableOpacity style={[s.sendBtn, !input.trim() && s.sendOff]} onPress={send} disabled={!input.trim()}>
-            <Text style={s.sendIco}>{"\u2191"}</Text>
+            <Ionicons name="arrow-up" size={18} color="#000" />
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -85,7 +101,7 @@ export default function DecoyChatScreen() {
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#FFFFFF' },
   list: { padding: 12, paddingBottom: 8 },
   row: { marginBottom: 6 },
@@ -96,8 +112,8 @@ const s = StyleSheet.create({
   bPeer: { backgroundColor: '#F3F4F6', borderBottomLeftRadius: 2 },
   msgTxt: { color: '#1F2937', fontSize: 15, lineHeight: 21 },
   meta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: 3 },
-  time: { color: '#9CA3AF', fontSize: 11, marginRight: 3 },
-  tick: { color: '#6B7280', fontSize: 12 },
+  time: { color: c.textDim, fontSize: 11, marginRight: 3 },
+  tick: { color: c.textDim, fontSize: 12 },
   bar: { flexDirection: 'row', alignItems: 'flex-end', backgroundColor: '#FFFFFF', paddingHorizontal: 10, paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
   attachBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   input: { flex: 1, backgroundColor: '#F3F4F6', color: '#1F2937', borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10, fontSize: 15, maxHeight: 120, marginHorizontal: 6 },

@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>VaultChat — Feature Deck &amp; Screen Wiring</title>
+<style>
+  :root{
+    --bg:#0a0e17; --bg2:#0f1626; --card:#131c2e; --card2:#172238;
+    --ink:#e8eefc; --muted:#90a0c0; --dim:#5f6f90;
+    --acc:#5b8cff; --acc2:#22d3a8; --warn:#ffb454; --bad:#ff6b81;
+    --line:#22304d; --good:#22d3a8;
+    --mono:'SFMono-Regular',ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:var(--sans)}
+  body{overflow:hidden}
+  #deck{height:100vh;width:100vw;position:relative}
+  .slide{
+    position:absolute;inset:0;display:none;flex-direction:column;
+    padding:54px 72px 72px;overflow:auto;
+    background:radial-gradient(1200px 600px at 80% -10%,rgba(91,140,255,.10),transparent 60%),
+               radial-gradient(900px 500px at -10% 110%,rgba(34,211,168,.08),transparent 55%),
+               var(--bg);
+    animation:fade .35s ease;
+  }
+  .slide.active{display:flex}
+  @keyframes fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  h1{font-size:46px;line-height:1.08;margin:0 0 6px;letter-spacing:-.5px}
+  h2{font-size:30px;margin:0 0 4px;letter-spacing:-.3px}
+  .kicker{font-family:var(--mono);font-size:13px;letter-spacing:2px;text-transform:uppercase;color:var(--acc);margin-bottom:14px}
+  .sub{color:var(--muted);font-size:17px;margin:2px 0 22px;max-width:90ch}
+  .grid{display:grid;gap:14px}
+  .g2{grid-template-columns:1fr 1fr}
+  .g3{grid-template-columns:1fr 1fr 1fr}
+  .g4{grid-template-columns:repeat(4,1fr)}
+  .card{background:linear-gradient(180deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+  .card h3{margin:0 0 8px;font-size:16px;display:flex;align-items:center;gap:8px}
+  .card .ico{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;font-size:15px;background:rgba(91,140,255,.16)}
+  ul.feat{list-style:none;margin:0;padding:0}
+  ul.feat li{padding:6px 0;border-bottom:1px dashed var(--line);font-size:14px;display:flex;gap:8px;align-items:flex-start}
+  ul.feat li:last-child{border-bottom:0}
+  ul.feat li b{color:var(--ink);font-weight:600}
+  .route{font-family:var(--mono);font-size:12px;color:var(--acc2);background:rgba(34,211,168,.10);padding:1px 7px;border-radius:6px;white-space:nowrap}
+  .where{color:var(--dim);font-size:12.5px}
+  .pill{display:inline-block;font-family:var(--mono);font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid var(--line)}
+  .live{color:var(--good);border-color:rgba(34,211,168,.4);background:rgba(34,211,168,.08)}
+  .dev{color:var(--warn);border-color:rgba(255,180,84,.4);background:rgba(255,180,84,.08)}
+  .flow{display:flex;flex-wrap:wrap;align-items:center;gap:10px;font-size:14px}
+  .node{background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:9px 13px;font-family:var(--mono);font-size:12.5px}
+  .node.tab{border-color:rgba(91,140,255,.5);color:#cdd9ff}
+  .node.scr{border-color:rgba(34,211,168,.4);color:#bff0e2}
+  .arrow{color:var(--dim);font-size:18px}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;margin-top:auto;padding-top:18px;color:var(--muted);font-size:13px}
+  .foot{position:absolute;bottom:18px;left:72px;right:72px;display:flex;justify-content:space-between;align-items:center;color:var(--dim);font-size:12.5px;font-family:var(--mono)}
+  .foot .bar{flex:1;height:3px;background:var(--line);border-radius:2px;margin:0 18px;overflow:hidden}
+  .foot .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--acc),var(--acc2))}
+  .big{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:8px 0 26px}
+  .stat{background:linear-gradient(180deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:14px;padding:18px}
+  .stat .n{font-size:38px;font-weight:700;background:linear-gradient(90deg,var(--acc),var(--acc2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .stat .l{color:var(--muted);font-size:13px;margin-top:2px}
+  .hint{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);color:var(--dim);font-size:12px;font-family:var(--mono);opacity:.7}
+  .cols2{columns:2;column-gap:28px}
+  .cols2 .card{break-inside:avoid;margin-bottom:14px;display:inline-block;width:100%}
+  .tag{font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .title-wrap{margin:auto 0}
+  .brand{display:flex;align-items:center;gap:14px;margin-bottom:24px}
+  .logo{width:54px;height:54px;border-radius:16px;background:linear-gradient(135deg,var(--acc),var(--acc2));display:grid;place-items:center;font-size:28px;box-shadow:0 8px 30px rgba(91,140,255,.35)}
+  .chips{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}
+  .chips .pill{font-size:12.5px;padding:5px 12px}
+  @media print{
+    body{overflow:visible}
+    .slide{display:flex!important;position:relative;inset:auto;height:100vh;page-break-after:always;animation:none}
+    .hint,.foot .bar{display:none}
+  }
+</style>
+</head>
+<body>
+<div id="deck">
+
+  <!-- 1. TITLE -->
+  <section class="slide active">
+    <div class="title-wrap">
+      <div class="brand">
+        <div class="logo">🛡️</div>
+        <div>
+          <div class="kicker" style="margin:0">Product &amp; Engineering Review</div>
+          <div class="tag">Built as of 2026-06-10 · branch hetzner-deploy</div>
+        </div>
+      </div>
+      <h1>VaultChat — Feature Inventory<br/>&amp; Screen Wiring</h1>
+      <p class="sub">Every feature that's been built, the exact screen it lives on, and how a user navigates to it. A privacy-first, end-to-end-encrypted messenger built to WhatsApp / Signal scale.</p>
+      <div class="chips">
+        <span class="pill live">● End-to-end encrypted</span>
+        <span class="pill live">● Postgres + Socket.IO realtime</span>
+        <span class="pill live">● On-device AI (Ollama)</span>
+        <span class="pill live">● Local-first SQLite</span>
+        <span class="pill live">● Kafka / R2 ready</span>
+      </div>
+    </div>
+    <div class="foot"><span>VaultChat</span><div class="bar"><i style="width:5%"></i></div><span class="pageno">01</span></div>
+  </section>
+
+  <!-- 2. AT A GLANCE -->
+  <section class="slide">
+    <div class="kicker">At a glance</div>
+    <h2>What's in the app today</h2>
+    <p class="sub">A full-stack messenger spanning ~95 live screens across 12 feature domains, on a production backend already serving live prod.</p>
+    <div class="big">
+      <div class="stat"><div class="n">95+</div><div class="l">Live, functional screens</div></div>
+      <div class="stat"><div class="n">6</div><div class="l">Bottom-tab sections</div></div>
+      <div class="stat"><div class="n">12</div><div class="l">Feature domains</div></div>
+      <div class="stat"><div class="n">14</div><div class="l">Mini-apps in launcher</div></div>
+    </div>
+    <div class="grid g3">
+      <div class="card"><h3><span class="ico">🔐</span>Security first</h3><p class="where">Real X3DH + Double-Ratchet E2EE, MPIN/biometric gate, duress PIN, decoy chats, jailbreak/root blocking.</p></div>
+      <div class="card"><h3><span class="ico">⚡</span>Built to scale</h3><p class="where">Local-first SQLite render, Redis Socket.IO adapter, Kafka durable bus + fan-out worker, R2/MinIO object storage — all wired.</p></div>
+      <div class="card"><h3><span class="ico">🤖</span>Real AI</h3><p class="where">On-prem Ollama LLM powers the assistant, chat-bot, summaries &amp; security scoring — no third-party data sharing.</p></div>
+    </div>
+    <div class="foot"><span>VaultChat</span><div class="bar"><i style="width:11%"></i></div><span class="pageno">02</span></div>
+  </section>
+
+  <!-- 3. PRIMARY NAV -->
+  <section class="slide">
+    <div class="kicker">Screen wiring · the spine</div>
+    <h2>Primary navigation — 6 bottom tabs</h2>
+    <p class="sub">Everything hangs off six tabs. Deep features are reached from a tab header, the Mini-Apps grid, or Profile → Settings.</p>
+    <div class="grid g3" style="margin-bottom:18px">
+      <div class="card"><h3><span class="ico">💬</span>Chats <span class="route">/(tabs)/chats</span></h3><p class="where">Chat list w/ folders (All · Unread · Groups · Pinned · Archive), swipe pin/mute/archive. Header → Search, Contacts. FAB → New Chat.</p></div>
+      <div class="card"><h3><span class="ico">📸</span>Status <span class="route">/(tabs)/status</span></h3><p class="where">Stories feed. Tap a ring → Story Viewer. Create story from image picker.</p></div>
+      <div class="card"><h3><span class="ico">📞</span>Calls <span class="route">/(tabs)/calls</span></h3><p class="where">Call history surface (WebRTC voice/video launch from chat today).</p></div>
+      <div class="card"><h3><span class="ico">🧩</span>Mini Apps <span class="route">/(tabs)/mini</span></h3><p class="where">Launcher grid: Notes, Scanner, Location, Screen-share, AI Guardian + utilities.</p></div>
+      <div class="card"><h3><span class="ico">🔔</span>Alerts <span class="route">/(tabs)/alerts</span></h3><p class="where">Security &amp; activity alerts surface.</p></div>
+      <div class="card"><h3><span class="ico">👤</span>Profile <span class="route">/(tabs)/profile</span></h3><p class="where">Edit name/status/photo, phone verify → gateway to <span class="route">/settings</span> (all privacy &amp; account features).</p></div>
+    </div>
+    <div class="flow">
+      <span class="node tab">App launch</span><span class="arrow">→</span>
+      <span class="node scr">JWT?</span><span class="arrow">→</span>
+      <span class="node scr">MPIN gate</span><span class="arrow">→</span>
+      <span class="node tab">Chats tab</span><span class="arrow">→</span>
+      <span class="node scr">/chat</span><span class="arrow">→</span>
+      <span class="node scr">media · calls · group</span>
+    </div>
+    <div class="foot"><span>VaultChat</span><div class="bar"><i style="width:17%"></i></div><span class="pageno">03</span></div>
+  </section>
+
+  <!-- 4. ONBOARDING -->
+  <section class="slide">
+    <div class="kicker">Domain 01 · Auth &amp; Onboarding</div>
+    <h2>Getting in — secure by the first tap</h2>
+    <p class="sub">A 14-step hardened onboarding from welcome to authenticated, with multi-factor recovery and an MPIN/biometric lock on every cold start.</p>
+    <div class="flow" style="margin-bottom:20px">
+      <span class="node scr">/welcome</span><span class="arrow">→</span>
+      <span class="node scr">/login · /signup</span><span class="arrow">→</span>
+      <span class="node scr">/otp</span><span class="arrow">→</span>
+      <span class="node scr">/security-questions</span><span class="arrow">→</span>
+      <span class="node scr">/backup-pin</span><span class="arrow">→</span>
+      <span class="node scr">/biometric-setup</span><span class="arrow">→</span>
+      <span class="node scr">/permissions</span><span class="arrow">→</span>
+      <span class="node scr">/set-mpin</span><span class="arrow">→</span>
+      <span class="node tab">Chats</span>
+    </div>
+    <div class="grid g2">
+      <ul class="feat card">
+        <li><b>Phone-first &amp; Google sign-in</b><span class="where">Welcome → Login / Signup</span></li>
+        <li><b>6-digit OTP verification</b> <span class="route">/otp</span></li>
+        <li><b>3 security questions + backup PIN</b> <span class="route">/security-questions → /backup-pin</span></li>
+        <li><b>Biometric (Face ID / fingerprint)</b> <span class="route">/biometric-setup</span></li>
+      </ul>
+      <ul class="feat card">
+        <li><b>MPIN unlock gate on every launch</b> <span class="route">/enter-mpin</span></li>
+        <li><b>Face verify for new devices</b> <span class="route">/face-verify-new-device</span></li>
+        <li><b>Secret recovery codes</b> <span class="route">/secret-code</span></li>
+        <li><b>Forgot / recovery via security Qs</b> <span class="route">/forgot → /recovery</span></li>
+      </ul>
+    </div>
+    <div class="legend"><span><span class="pill live">● Live</span></span><span class="where">Reached: cold start → index redirect → welcome</span></div>
+    <div class="foot"><span>VaultChat</span><div class="bar"><i style="width:23%"></i></div><span class="pageno">04</span></div>
+  </section>
+
+  <!-- 5. MESSAGING -->
+  <section class="slide">
+    <div class="kicker">Domain 02 · Messaging</div>
+    <h2>The chat — encrypted &amp; full-featured</h2>
+    <p class="sub">All roads lead to <span class="route">/chat</span>: 1:1 and group, end-to-end encrypted, rendered local-first from SQLite for instant open. Reached by tapping any row on the Chats tab.</p>
+    <div class="grid g3">
+      <ul class="feat card">
+        <li><b>Reactions &amp; replies</b><span class="where">long-press a bubble in /chat</span></li>
+        <li><b>Forwarding</b><span class="where">message actions</span></li>
+        <li><b>Disappearing / vanish mode</b><span class="where">chat header timer</span></li>
+        <li><b>Edit &amp; delete-for-everyone</b><span class="where">message actions</span></li>
+      </ul>
+      <ul class="feat card">
+        <li><b>Polls</b> <span class="route">/create-poll</span><span class="where">chat → attach → poll</span></li>
+        <li><b>Scheduled messages</b> <span class="route">/schedule-message · /scheduled</span></li>
+        <li><b>Message reminders</b> <span class="route">/message-reminder</span></li>
+        <li><b>In-chat search</b> <span class="route">/in-chat-search</span></li>
+      </ul>
+      <ul class="feat card">
+        <li><b>Broadcast channels</b> <span class="route">/broadcast</span></li>
+        <li><b>Chat themes &amp; wallpaper</b> <span class="route">/chat-themes · /chat-wallpaper</span></li>
+        <li><b>AI chat summary</b> <span class="route">/chat-summary</span></li>
+        <li><b>Bookmarks &amp; starred</b> <span class="route">/bookmarks · /starred</span></li>
+      </ul>
+    </div>
+    <div style="margin-top:16px" class="grid g2">
+      <div class="card"><h3><span class="ico">👥</span>Groups</h3><p class="where">Group info, admin controls (add/remove, mute, approve members, media policy, anti-spam) → <span class="route">/group-info · /group-admin · /create-group</span>, reached from the group header.</p></div>
+      <div class="card"><h3><span class="ico">🗂️</span>Folders &amp; organization</h3><p class="where">Pin, mute, archive, unread filter — swipe actions on the Chats tab. Hidden &amp; app-locked chats gated by PIN.</p></div>
+    </div>
+    <div class="foot"><span>VaultChat</span><div class="bar"><i style="width:29%"></i></div><span class="pageno">05</span></div>
+  </section>
+
+  <!-- 6. CALLS + MEDIA -->
+  <section class="slide">
+    <div class="kicker">Domain 03 &amp; 04 · Calls + Media</div>
+    <h2>Voice, video &amp; rich media</h2>
+    <p class="sub">WebRTC peer-to-peer calling launched from any chat, plus a full media pipeline — camera, editor, scanner, encrypted vault.</p>
+    <div class="grid g2">
+      <div>
+        <div class="card" style="margin-bottom:14px"><h3><span class="ico">📞</span>Calls</h3>
+          <ul class="feat">
+            <li><b>Voice call (WebRTC + TURN)</b> <span class="route">/voicecall</span></li>
+            <li><b>Video call — camera switch, filters</b> <span class="route">/videocall</span></li>
+            <li><b>Incoming call overlay</b> <span class="route">/incoming-call</span><span class="where">Socket.IO call_incoming</span></li>
+            <li><b>Call recording &amp; group calls</b> <span class="route">/call-recording · /group-calls</span></li>
+          </ul>
+        </div>
+      </div>
+      <div>
+        <div class="card"><h3><span class="ico">🖼️</span>Media &amp; Files</h3>
+          <ul class="feat">
+            <li><b>Camera, image editor</b> <span class="route">/camera · /image-editor</span></li>
+            <li><b>Doc scanner (OCR → PDF)</b> <span class="route">/docscanner</span></li>
+            <li><b>Media viewer / gallery / video player</b> <span class="route">/media-viewer · /media-gallery</span></li>
+            <li><b>Encrypted file vault (password folders)</b> <span class="route">/filevault</span></li>
+            <li><b>VaultDrop &amp; VaultBeam secure transfer</b> <span class="route">/vaultdrop · /vaultbeam</span></li>
+            <li><b>Voice messages — effects, speed, transcribe</b> <span class="route">/voice-effects · /voice-transcribe</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <div class="legend"><span class="where">Reached: chat → attachment menu / call buttons · Mini Apps grid · media tap-through</span></div>
+    <div class="foot"><span>VaultChat</span><div class="bar"><i style="width:35%"></i></div><span class="pageno">06</span></div>
+  </section>
+
+  <!-- 7. PRIVACY & SECURITY -->
+  <section class="slide">
+    <div class="kicker">Domain 05 · Privacy &amp; Security</div>
+    <h2>The differentiator — privacy controls</h2>
+    <p class="sub">A whole security suite, most reached from <b>Profile → Settings</b>, the <b>Privacy Dashboard</b>, or the <b>Security Hub</b>.</p>
+    <div class="cols2">
+      <div class="card"><h3><span class="ico">🛡️</span>Security Hub <span class="route">/dashboard</span></h3><p class="where">Real <span class="route">GET /user/security-overview</span> — E2EE key status, sessions, devices, blocks, read-receipts, discoverability + computed score.</p></div>
+      <div class="card"><h3><span class="ico">📊</span>Privacy Dashboard <span class="route">/privacy-dashboard</span></h3><p class="where">Security score + privacy checklist + trusted contacts; controls persist to backend.</p></div>
+      <div class="card"><h3><span class="ico">👻</span>Ghost Mode <span class="route">/ghost-mode</span></h3><p class="where">Per-contact hide last-seen / typing / read receipts.</p></div>
+      <div class="card"><h3><span class="ico">🎭</span>Decoy &amp; Duress <span class="route">/decoy-chats · /duresspin</span></h3><p class="where">Fake-PIN opens a decoy account; duress PIN wipes / shows decoy.</p></div>
+      <div class="card"><h3><span class="ico">🙈</span>Hidden &amp; locked chats <span class="route">/hidden-chats · /app-lock-chats</span></h3><p class="where">PIN-gated chats not shown in the normal list.</p></div>
+      <div class="card"><h3><span class="ico">🔑</span>Sessions &amp; devices <span class="route">/login-history · /sessions</span></h3><p class="where">Active sessions, login history, remote sign-out.</p></div>
+      <div class="card"><h3><span class="ico">🕵️</span>Stealth &amp; behavioral <span class="route">/stealth · /behavioral</span></h3><p class="where">Hide app icon, typing-pattern auth, RAM wipe on background.</p></div>
+      <div class="card"><h3><span class="ico">🔒</span>E2EE status <span class="route">/d2de-status · /zero-knowledge</span></h3><p class="where">Which chats are encrypted; reflects real E2EE_ENABLED flag.</p></div>
+    </div>
+    <div class="foot"><span>VaultChat</span><div class="bar"><i style="width:41%"></i></div><span class="pageno">07</span></div>
+  </section>
+
+  <!-- 8. SAFETY -->
+  <section class="slide">
+    <div class="kicker">Domain 06 · Safety &amp; Emergency</div>
+    <h2>Personal-safety toolkit</h2>
+    <p class="sub">Real emergency features wired to GPS, trusted contacts and breach databases — reached from Settings, the Alerts surface, and quick-access.</p>
+    <div class="grid g2">
+      <div class="card"><h3><span class="ico">🆘</span>Emergency SOS <span class="route">/emergency-sos</span></h3><p class="where">Shake-to-trigger + countdown → GPS alert (real <span class="route">sendSOS</span> + expo-location) to trusted contacts. History in Notifications.</p></div>
+      <div class="card"><h3><span class="ico">👨‍👩‍👧</span>Trusted Contacts <span class="route">/trusted-contacts</span></h3><p class="where">Up to 3 emergency contacts by VaultID for duress / panic alerts.</p></div>
+      <div class="card"><h3><span class="ico">🕳️</span>Dark-Web Guard <span class="route">/dark-web-guard</span></h3><p class="where">Real, keyless breach check (HIBP k-anonymity) for password / email exposure.</p></div>
+      <div class="card"><h3><span class="ico">📡</span>BreachGuard &amp; Deepfake <span class="route">/breachguard · /deepfake</span></h3><p class="where">Ongoing breach monitoring + deepfake media detection.</p></div>
+    </div>
+    <div class="legend"><span><span class="pill live">● Live</span></span><span class="where">Panic button &amp; SOS history also surface in <span class="route">/notifications</span></span></div>
+    <div class="foot"><span>VaultChat</span><div class="bar"><i style="width:47%"></i></div><span class="pageno">08</span></div>
+  </section>
+
+  <!-- 9. AI -->
+  <section class="slide">
+    <div class="kicker">Domain 07 · AI &amp; Automation</div>
+    <h2>Real on-device / on-prem AI</h2>
+    <p class="sub">No third-party data sharing — AI runs against an on-prem Ollama LLM (<span class="route">POST /ai/chat · /ai/assist</span>) with an honest 503 fallback when offline.</p>
+    <div class="grid g3">
+      <div class="card"><h3><span class="ico">🤖</span>AI Assistant <span class="route">/ai-assistant</span></h3><p class="where">General Q&amp;A over your context, real LLM.</p></div>
+      <div class="card"><h3><span class="ico">💬</span>Aria Chat Bot <span class="route">/ai-chat-bot</span></h3><p class="where">Conversational bot with persistent history.</p></div>
+      <div class="card"><h3><span class="ico">🦅</span>AI Guardian (Pegasus) <span class="route">/aiguardian</span></h3><p class="where">Content moderation / safety analysis. Mini Apps grid.</p></div>
+      <div class="card"><h3><span class="ico">📝</span>Chat Summary <span class="route">/chat-summary</span></h3><p class="where">Real on-device summary of a conversation.</p></div>
+      <div class="card"><h3><span class="ico">🎙️</span>Voice transcribe &amp; tone <span class="route">/voice-transcribe · /tone-detector</span></h3><p class="where">Speech-to-text, tone/sarcasm detection.</p></div>
+      <div class="card"><h3><span class="ico">🌐</span>Translate &amp; auto-reply <span class="route">/translate · /auto-reply</span></h3><p class="where">Message translation, away auto-responder.</p></div>
+    </div>
+    <div class="legend"><span><span class="pill live">● Live (needs Ollama model)</span></span><span class="where">Reached: Mini Apps grid, chat actions, menu</span></div>
+    <div class="foot"><span>VaultChat</span><div class="bar"><i style="width:53%"></i></div><span class="pageno">09</span></div>
+  </section>
+
+  <!-- 10. SOCIAL / CONTENT -->
+  <section class="slide">
+    <div class="kicker">Domain 08 &amp; 09 · Social &amp; Content</div>
+    <h2>Status, contacts &amp; entertainment</h2>
+    <div class="grid g3">
+      <div class="card"><h3><span class="ico">📸</span>Stories / Status</h3><ul class="feat">
+        <li><b>Status feed</b> <span class="route">/(tabs)/status</span></li>
+        <li><b>Story viewer</b> <span class="route">/story-viewer</span></li>
+      </ul></div>
+      <div class="card"><h3><span class="ico">👤</span>Contacts &amp; discovery</h3><ul class="feat">
+        <li><b>Address-book sync</b> <span class="route">/contacts · /sync-contact</span></li>
+        <li><b>QR contact share/scan</b> <span class="route">/qr-contact</span></li>
+        <li><b>VaultID (no phone needed)</b> <span class="route">/vault-id · /vaultid</span></li>
+        <li><b>Message requests</b> <span class="route">/msgrequests</span></li>
+      </ul></div>
+      <div class="card"><h3><span class="ico">🎮</span>Entertainment</h3><ul class="feat">
+        <li><b>Mini-games + leaderboard</b> <span class="route">/game-lobby · /game-play</span></li>
+        <li><b>Screen share</b> <span class="route">/screen-share</span></li>
+        <li><b>Encrypted notes</b> <span class="route">/encrypted-notes</span></li>
+        <li><b>Live location sharing</b> <span class="route">/location-sharing · /current-location</span></li>
+      </ul></div>
+    </div>
+    <div class="card" style="margin-top:14px"><h3><span class="ico">🧩</span>Mini-Apps launcher <span class="route">/(tabs)/mini</span></h3><p class="where">Grid of 14: Watch-together · Screen-share · Notes · Scanner · Location · Current-loc · Cloud · AI Guardian · Calculator · Todo · Pomodoro · Expense · QR generator.</p></div>
+    <div class="foot"><span>VaultChat</span><div class="bar"><i style="width:59%"></i></div><span class="pageno">10</span></div>
+  </section>
+
+  <!-- 11. DATA / BACKUP / SETTINGS -->
+  <section class="slide">
+    <div class="kicker">Domain 10 &amp; 11 · Data, Backup &amp; Settings</div>
+    <h2>Your data, your control</h2>
+    <p class="sub">All reached from <b>Profile → Settings</b>, the account gateway.</p>
+    <div class="grid g3">
+      <div class="card"><h3><span class="ico">💾</span>Encrypted backup</h3><ul class="feat">
+        <li><b>Passphrase-encrypted .vcbak export/import</b> <span class="route">/chat-backup</span></li>
+        <li><b>GDPR chat export</b> <span class="route">/chat-export</span></li>
+      </ul><p class="where">Real exportAll/importAll via vaultCrypto + local SQLite → OS share sheet.</p></div>
+      <div class="card"><h3><span class="ico">⚙️</span>Settings</h3><ul class="feat">
+        <li><b>Discoverability, last-seen, receipts</b> <span class="route">/settings</span></li>
+        <li><b>Blocked users</b> <span class="route">/blocked</span></li>
+        <li><b>Storage manager</b> <span class="route">/storage-manager</span></li>
+      </ul></div>
+      <div class="card"><h3><span class="ico">🔔</span>Notifications</h3><ul class="feat">
+        <li><b>Push settings + SOS history</b> <span class="route">/notifications</span></li>
+        <li><b>Smart prioritized notifications</b> <span class="route">/smart-notifications</span></li>
+        <li><b>Network diagnostics</b> <span class="route">/network-test</span></li>
+      </ul></div>
+    </div>
+    <div class="card" style="margin-top:14px"><h3><span class="ico">🖥️</span>Admin Console <span class="tag">(web, not in app)</span></h3><p class="where"><span class="route">admin/index.html</span> + <span class="route">/api/admin/*</span> — stats, users, sessions, broadcast, health. Messages are <b>metadata-only</b> (never content/ciphertext). Key-gated, timing-safe.</p></div>
+    <div class="foot"><span>VaultChat</span><div class="bar"><i style="width:65%"></i></div><span class="pageno">11</span></div>
+  </section>
+
+  <!-- 12. ARCHITECTURE -->
+  <section class="slide">
+    <div class="kicker">Under the hood</div>
+    <h2>Built to WhatsApp / Signal scale</h2>
+    <p class="sub">The features above sit on a production-grade backend that's already live in prod (migration 035), with the high-scale stack wired and validated on staging.</p>
+    <div class="grid g2">
+      <ul class="feat card">
+        <li><b>End-to-end encryption</b><span class="where">X3DH + Double Ratchet, 47/47 self-tests, gated by E2EE_ENABLED</span></li>
+        <li><b>Local-first rendering</b><span class="where">expo-sqlite cache → instant open + delta sync (?after=cursor)</span></li>
+        <li><b>Realtime fan-out</b><span class="where">Socket.IO + Redis adapter, user rooms, emitToUid</span></li>
+        <li><b>Durable message bus</b><span class="where">Kafka (KRaft) producer + fan-out worker</span></li>
+      </ul>
+      <ul class="feat card">
+        <li><b>Object storage</b><span class="where">R2 / MinIO presigned upload/download (S3 SDK)</span></li>
+        <li><b>Postgres + RLS</b><span class="where">row-level security, ledgered migrations, pool tuning</span></li>
+        <li><b>Push w/ self-healing</b><span class="where">retry + dead-token pruning</span></li>
+        <li><b>Docker substrate</b><span class="where">compose: pg · redis · kafka · minio · api · fanout-worker</span></li>
+      </ul>
+    </div>
+    <div class="flow" style="margin-top:18px">
+      <span class="node">client SQLite</span><span class="arrow">⇄</span>
+      <span class="node tab">Express API</span><span class="arrow">⇄</span>
+      <span class="node">Postgres + RLS</span><span class="arrow">·</span>
+      <span class="node">Redis</span><span class="arrow">·</span>
+      <span class="node">Kafka</span><span class="arrow">·</span>
+      <span class="node">R2/MinIO</span><span class="arrow">·</span>
+      <span class="node scr">Ollama LLM</span>
+    </div>
+    <div class="foot"><span>VaultChat</span><div class="bar"><i style="width:72%"></i></div><span class="pageno">12</span></div>
+  </section>
+
+  <!-- 13. STATUS -->
+  <section class="slide">
+    <div class="kicker">Honest status</div>
+    <h2>Live now vs in development</h2>
+    <p class="sub">Per the no-demo rule, every screen is either real or honestly labelled "coming soon" — nothing fakes data.</p>
+    <div class="grid g2">
+      <div class="card">
+        <h3><span class="pill live">● Live &amp; real</span></h3>
+        <p class="where" style="line-height:1.9">
+          E2EE messaging · groups + admin · reactions/replies/forward · disappearing · polls · scheduled · stories · broadcast · WebRTC voice/video · camera/scanner/editor · file vault · VaultDrop/Beam · voice messages · AI assistant/bot/summary (Ollama) · Security Hub · privacy dashboard · ghost mode · decoy/duress/hidden chats · sessions · stealth/behavioral · SOS · trusted contacts · dark-web guard · games + leaderboard · location sharing · encrypted notes · encrypted backup · settings · admin console
+        </p>
+      </div>
+      <div class="card">
+        <h3><span class="pill dev">● In development</span></h3>
+        <p class="where" style="line-height:1.9">
+          Calls-tab history feed · Alerts activity feed · communities · family hub · creator channels · watch-together · decentralized ID · trust score · bot API · email-bridge (backlogged by choice) · digital wellbeing · meeting scheduler
+        </p>
+        <p class="where" style="margin-top:12px;color:var(--dim)">Backend extras gated OFF in prod (safe): realtime adapter, Kafka bus, R2 media — built &amp; staging-validated, awaiting promotion.</p>
+      </div>
+    </div>
+    <div class="foot"><span>VaultChat</span><div class="bar"><i style="width:88%"></i></div><span class="pageno">13</span></div>
+  </section>
+
+  <!-- 14. CLOSE -->
+  <section class="slide">
+    <div class="title-wrap">
+      <div class="kicker">Where to next</div>
+      <h1>From "built" to "ships like<br/>WhatsApp"</h1>
+      <p class="sub">The feature surface is broad and real. The remaining path to parity is mostly turning on what's already wired:</p>
+      <div class="grid g4" style="margin-top:8px">
+        <div class="card"><h3>1</h3><p class="where">Promote realtime adapter + Kafka to prod</p></div>
+        <div class="card"><h3>2</h3><p class="where">Enable R2 media in prod</p></div>
+        <div class="card"><h3>3</h3><p class="where">Group sender-key E2EE + media E2EE wiring</p></div>
+        <div class="card"><h3>4</h3><p class="where">Direct FCM/APNs, multi-device, observability</p></div>
+      </div>
+      <p class="sub" style="margin-top:26px;color:var(--dim)">VaultChat · feature inventory &amp; screen wiring · 2026-06-10</p>
+    </div>
+    <div class="foot"><span>VaultChat</span><div class="bar"><i style="width:100%"></i></div><span class="pageno">14</span></div>
+  </section>
+
+</div>
+<div class="hint">← →  navigate · F fullscreen · P print / save-as-PDF</div>
+
+<script>
+  const slides=[...document.querySelectorAll('.slide')];
+  let i=0;
+  function show(n){
+    i=Math.max(0,Math.min(slides.length-1,n));
+    slides.forEach((s,k)=>s.classList.toggle('active',k===i));
+  }
+  document.addEventListener('keydown',e=>{
+    if(e.key==='ArrowRight'||e.key==='PageDown'||e.key===' ')show(i+1);
+    else if(e.key==='ArrowLeft'||e.key==='PageUp')show(i-1);
+    else if(e.key==='Home')show(0);
+    else if(e.key==='End')show(slides.length-1);
+    else if(e.key.toLowerCase()==='f'){if(!document.fullscreenElement)document.documentElement.requestFullscreen();else document.exitFullscreen();}
+    else if(e.key.toLowerCase()==='p')window.print();
+  });
+  document.addEventListener('click',e=>{ if(e.clientX > window.innerWidth*0.5) show(i+1); else show(i-1); });
+  show(0);
+</script>
+</body>
+</html>

@@ -1,0 +1,30 @@
+# docker-compose.prod.yml — Go-first PROD overrides for the Hetzner box.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Default service set (no profile) is already the Go-first shape:
+#   caddy + go-api + postgres + redis + minio + valhalla + coturn +
+#   vaultlens-worker. The Node api / kafka / fanout-worker are behind the
+#   `legacy` profile and are NOT started.
+#
+# This override only:
+#   - binds Caddy to the public ports (80; add 443 + a site address in the
+#     Caddyfile when a domain/TLS is configured)
+#   - drops the bench-only published ports (go-api 14000, postgres 15432 …)
+#     so nothing but Caddy is reachable from outside
+services:
+  caddy:
+    ports: !override
+      - "80:80"
+      - "3000:80"            # compatibility: existing APKs point SERVER_URL at :3000
+      # - "443:443"          # enable together with a TLS site in the Caddyfile
+  go-api:
+    ports: !override []      # in-network only (caddy + vaultlens-worker reach it)
+  postgres:
+    ports: !override []      # in-network only
+  redis:
+    ports: !override []      # in-network only
+  minio:
+    ports: !override
+      - "19000:9000"         # presigned URLs are signed for S3_PUBLIC_ENDPOINT
+                             # (console 19001 intentionally NOT published)

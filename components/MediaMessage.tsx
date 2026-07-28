@@ -12,7 +12,7 @@ interface Props {
   duration?: number;
 }
 
-// â”€â”€ Image / GIF â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Image / GIF ────────────────────────────────────────────
 function ImageMsg({ url }: { url: string }) {
   const [loading, setLoading] = useState(true);
   return (
@@ -29,7 +29,7 @@ function ImageMsg({ url }: { url: string }) {
   );
 }
 
-// â”€â”€ Audio player â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Audio player ───────────────────────────────────────────
 function AudioMsg({ url, duration }: { url: string; duration?: number }) {
   const [sound,   setSound]   = useState<Audio.Sound | null>(null);
   const [playing, setPlaying] = useState(false);
@@ -75,7 +75,7 @@ function AudioMsg({ url, duration }: { url: string; duration?: number }) {
   return (
     <View style={s.audioRow}>
       <TouchableOpacity onPress={toggle} style={s.playBtn}>
-        <Text style={{ fontSize: 20 }}>{playing ? 'â¸' : 'â–¶ï¸'}</Text>
+        <Text style={{ fontSize: 20 }}>{playing ? '⏸' : '▶️'}</Text>
       </TouchableOpacity>
       <View style={s.audioRight}>
         <View style={s.progressBg}>
@@ -87,11 +87,11 @@ function AudioMsg({ url, duration }: { url: string; duration?: number }) {
   );
 }
 
-// â”€â”€ File â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── File ───────────────────────────────────────────────────
 function FileMsg({ filename, url }: { filename?: string; url: string }) {
   return (
     <View style={s.fileRow}>
-      <Text style={{ fontSize: 28 }}>ðŸ“„</Text>
+      <Text style={{ fontSize: 28 }}>📄</Text>
       <View style={{ flex: 1 }}>
         <Text style={s.fileName} numberOfLines={1}>{filename ?? 'File'}</Text>
         <Text style={s.fileOpen}>Tap to open</Text>
@@ -100,7 +100,7 @@ function FileMsg({ filename, url }: { filename?: string; url: string }) {
   );
 }
 
-// â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Main ───────────────────────────────────────────────────
 export default function MediaMessage({ url, msgType, filename, duration }: Props) {
   if (msgType === 'image' || msgType === 'gif') return <ImageMsg url={url} />;
   if (msgType === 'audio')  return <AudioMsg url={url} duration={duration} />;
@@ -108,7 +108,7 @@ export default function MediaMessage({ url, msgType, filename, duration }: Props
   if (msgType === 'video')  return (
     <View style={s.imgWrap}>
       <Image source={{ uri: url }} style={s.img} resizeMode="cover" />
-      <View style={s.videoPlay}><Text style={{ fontSize: 36 }}>â–¶</Text></View>
+      <View style={s.videoPlay}><Text style={{ fontSize: 36 }}>▶</Text></View>
     </View>
   );
   return null;

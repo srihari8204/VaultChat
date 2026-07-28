@@ -1,9 +1,11 @@
 // app/mini-apps.tsx
 // Mini Apps Platform — built-in mini apps with working Calculator and Todo List
 
+import { BRAND_ACCENT } from '../../constants/theme';
+import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   Alert,
@@ -20,22 +22,21 @@ import {
 // Row 2: Notes, Scanner, Location
 // Row 3: Current Loc, Cloud, Pegasus
 const MINI_APPS_MAIN = [
-  { id: 'watch',       icon: '\uD83C\uDFAC', name: 'Watch',       route: '/watch-together', gradient: ['#7C3AED', '#6C63FF'] as [string, string] },
-  { id: 'walkie',      icon: '\uD83D\uDCFB', name: 'Walkie',      route: '/walkie-talkie',  gradient: ['#059669', '#10B981'] as [string, string] },
-  { id: 'screen',      icon: '\uD83D\uDCBB', name: 'Screen',      route: '/screen-share',   gradient: ['#0891B2', '#06B6D4'] as [string, string] },
+  { id: 'vaultlens',   icon: '\u2728', name: 'VaultLens', route: '/vaultlens', gradient: ['#9D6FD0', '#EC4899'] as [string, string] },
+  { id: 'navigate',    icon: '\uD83E\uDDED', name: 'Navigate', route: '/navigate', gradient: ['#4A9FFF', '#1D4ED8'] as [string, string] },
+  { id: 'family',      icon: '\uD83D\uDC6A', name: 'Family Circle', route: '/family', gradient: ['#22C55E', '#059669'] as [string, string] },
+  { id: 'sos',         icon: '\uD83C\uDD98', name: 'SOS',      route: '/emergency-sos', gradient: ['#DC2626', '#B91C1C'] as [string, string] },
+  { id: 'interest',    icon: '\uD83D\uDCC8', name: 'Interest Calculator', route: '/interest-calculator', gradient: ['#075E54', '#25D366'] as [string, string] },
   { id: 'notes',       icon: '\uD83D\uDCDD', name: 'Notes',       route: '/encrypted-notes', gradient: ['#F59E0B', '#D97706'] as [string, string] },
-  { id: 'scanner',     icon: '\uD83D\uDCC4', name: 'Scanner',     route: '/scanner',        gradient: ['#4A9FFF', '#1D4ED8'] as [string, string] },
-  { id: 'location',    icon: '\uD83D\uDCCD', name: 'Location',    route: '/location-sharing', gradient: ['#DC2626', '#F97316'] as [string, string] },
-  { id: 'currentloc',  icon: '\uD83D\uDCCC', name: 'Current Loc', route: '/current-location', gradient: ['#EC4899', '#F472B6'] as [string, string] },
+  { id: 'scanner',     icon: '\uD83D\uDCC4', name: 'Scanner',     route: '/docscanner',     gradient: ['#4A9FFF', '#1D4ED8'] as [string, string] },
   { id: 'cloud',       icon: '\u2601\uFE0F', name: 'Cloud',       route: null,              gradient: ['#6B7280', '#4B5563'] as [string, string] },
   { id: 'pegasus',     icon: '\uD83E\uDD85', name: 'Pegasus',     route: '/aiguardian',     gradient: ['#B91C1C', '#DC2626'] as [string, string] },
+  { id: 'vaultid',     icon: '\uD83C\uDD94', name: 'VaultID',     route: '/decentralized-id', gradient: ['#7C3AED', '#4A9FFF'] as [string, string] },
 ];
 
 // ── Built-in utility mini apps ──────────────────────────────────
 const MINI_APPS_UTILS = [
-  { id: 'calculator', icon: '\uD83E\uDDEE', name: 'Calculator',      gradient: ['#4A9FFF', '#1D4ED8'] as [string, string] },
-  { id: 'todo',       icon: '\u2705',        name: 'Todo List',        gradient: ['#10B981', '#059669'] as [string, string] },
-  { id: 'pomodoro',   icon: '\uD83C\uDF45',  name: 'Pomodoro Timer',   gradient: ['#F97316', '#DC2626'] as [string, string] },
+  { id: 'todo',       icon: '\u2705',        name: 'Todo List',        gradient: [BRAND_ACCENT, '#059669'] as [string, string] },
   { id: 'expense',    icon: '\uD83D\uDCB0',  name: 'Expense Tracker',  gradient: ['#7C3AED', '#EC4899'] as [string, string] },
   { id: 'qr',         icon: '\uD83D\uDCF1',  name: 'QR Generator',     gradient: ['#06B6D4', '#0891B2'] as [string, string] },
 ];
@@ -159,7 +160,8 @@ export default function MiniAppsScreen() {
     return (
       <View style={styles.appContainer}>
         <TouchableOpacity onPress={() => setActiveApp(null)} style={styles.closeAppBtn}>
-          <Text style={styles.closeAppText}>← Back to Apps</Text>
+          <Ionicons name="arrow-back" size={16} color="#4A9FFF" />
+          <Text style={styles.closeAppText}>Back to Apps</Text>
         </TouchableOpacity>
         <View style={styles.calcDisplay}>
           <Text style={styles.calcDisplayText} numberOfLines={1} adjustsFontSizeToFit>
@@ -210,7 +212,8 @@ export default function MiniAppsScreen() {
     return (
       <View style={styles.appContainer}>
         <TouchableOpacity onPress={() => setActiveApp(null)} style={styles.closeAppBtn}>
-          <Text style={styles.closeAppText}>← Back to Apps</Text>
+          <Ionicons name="arrow-back" size={16} color="#4A9FFF" />
+          <Text style={styles.closeAppText}>Back to Apps</Text>
         </TouchableOpacity>
         <Text style={styles.todoTitle}>✅ Todo List</Text>
         <Text style={styles.todoSubtitle}>
@@ -229,7 +232,7 @@ export default function MiniAppsScreen() {
             returnKeyType="done"
           />
           <TouchableOpacity style={styles.todoAddBtn} onPress={addTodo}>
-            <Text style={styles.todoAddBtnText}>+</Text>
+            <Ionicons name="add" size={24} color="#000000" />
           </TouchableOpacity>
         </View>
         <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
@@ -239,13 +242,13 @@ export default function MiniAppsScreen() {
                 style={[styles.todoCheck, item.done && styles.todoCheckDone]}
                 onPress={() => toggleTodo(item.id)}
               >
-                {item.done && <Text style={styles.todoCheckMark}>✓</Text>}
+                {item.done && <Ionicons name="checkmark" size={14} color="#000000" />}
               </TouchableOpacity>
               <Text style={[styles.todoText, item.done && styles.todoTextDone]}>
                 {item.text}
               </Text>
               <TouchableOpacity onPress={() => deleteTodo(item.id)} style={styles.todoDelBtn}>
-                <Text style={styles.todoDelText}>✕</Text>
+                <Ionicons name="close" size={14} color="#DC2626" />
               </TouchableOpacity>
             </View>
           ))}
@@ -300,7 +303,7 @@ export default function MiniAppsScreen() {
         {/* ── Header ────────────────────────────────── */}
         <View style={styles.headerRow}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Text style={styles.backArrow}>←</Text>
+            <Ionicons name="arrow-back" size={20} color="#E8E8E8" />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
             <Text style={styles.headerTitle}>🔲 Mini Apps</Text>
@@ -322,21 +325,7 @@ export default function MiniAppsScreen() {
           ))}
         </View>
 
-        {/* ── Top Games Banner (matching PDF) ────────── */}
-        <TouchableOpacity
-          style={styles.gamesBanner}
-          activeOpacity={0.8}
-          onPress={() => router.push('/game-lobby' as any)}
-        >
-          <LinearGradient
-            colors={['#F97316', '#D97706']}
-            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-            style={styles.gamesBannerGrad}
-          >
-            <Text style={styles.gamesBannerIcon}>{'\uD83C\uDFC6'}</Text>
-            <Text style={styles.gamesBannerTxt}>Top Games {'\u2192'} 19 games {'\u2022'} 6 continents</Text>
-          </LinearGradient>
-        </TouchableOpacity>
+        {/* Games ship as a separate WebView deployment — no in-app games. */}
 
         {/* ── Utility Apps ───────────────────────────── */}
         <Text style={[styles.sectionTitle, { marginTop: 24 }]}>Tools</Text>
@@ -470,22 +459,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontStyle: 'italic',
   },
-  // ── Games Banner ─────────────────────────────────────
-  gamesBanner: {
-    marginTop: 20,
-    marginBottom: 8,
-    borderRadius: 14,
-    overflow: 'hidden',
-  },
-  gamesBannerGrad: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    gap: 10,
-  },
-  gamesBannerIcon: { fontSize: 22 },
-  gamesBannerTxt: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
 
   // ── Developer card ────────────────────────────────
   devCard: {
@@ -538,6 +511,9 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
   },
   closeAppBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     marginBottom: 20,
   },
   closeAppText: {

@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { useEffect, useRef } from "react";
@@ -36,12 +37,12 @@ export default function SetupCompleteScreen() {
               <View key={f.text} style={S.row}>
                 <Text style={{fontSize:18}}>{f.icon}</Text>
                 <Text style={S.feat}>{f.text}</Text>
-                <Text style={{color:"#22C55E",fontSize:16}}>✓</Text>
+                <Ionicons name="checkmark" size={16} color="#22C55E" />
               </View>
             ))}
           </View>
           <View style={S.badge}>
-            <Text style={S.badgeTxt}>Protected by D2DE + E2EE + Biometric Lock</Text>
+            <Text style={S.badgeTxt}>Protected by E2EE + Biometric Lock</Text>
           </View>
           <TouchableOpacity style={S.btn} onPress={()=>router.replace("/(tabs)/chats")} activeOpacity={0.85}>
             <Text style={S.btnTxt}>Enter VaultChat</Text>

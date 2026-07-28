@@ -1,0 +1,155 @@
+{
+  "_comment": "VaultBeam wire-contract golden vectors — see vaultbeam-vectors.selftest.ts. Regenerate ONLY on an intentional wire-format change.",
+  "inputs": {
+    "keyHex": "905889933a2d781100639fc38bf9e0c22442034f15c4f51b904e608693b32bba",
+    "chunkBytes": 16,
+    "blockBytes": 64,
+    "fileLen": 100,
+    "fileDataHex": "0726456483a2c1e0ff1e3d5c7b9ab9d8f71635547392b1d0ef0e2d4c6b8aa9c8e70625446382a1c0dffe1d3c5b7a99b8d7f61534537291b0cfee0d2c4b6a89a8c7e60524436281a0bfdefd1c3b5a7998b7d6f51433527190afceed0c2b4a6988a7c6e504"
+  },
+  "chunks": [
+    {
+      "name": "uniform id=0",
+      "transferId": "TQF9k2mZ7pXaLdRb",
+      "fileId": "file-9d3c1f",
+      "chunkId": 0,
+      "plaintextHex": "0726456483a2c1e0ff1e3d5c7b9ab9d8",
+      "nonceHex": "545146390000000000000000",
+      "aad": "TQF9k2mZ7pXaLdRb|file-9d3c1f|0",
+      "wireHex": "8db4dd706c28a1b6bdfa2cfc9ea9cf33ad1c24791f81de7ef3f37335751f440a"
+    },
+    {
+      "name": "uniform id=1",
+      "transferId": "TQF9k2mZ7pXaLdRb",
+      "fileId": "file-9d3c1f",
+      "chunkId": 1,
+      "plaintextHex": "f71635547392b1d0ef0e2d4c6b8aa9c8",
+      "nonceHex": "545146390000000000000001",
+      "aad": "TQF9k2mZ7pXaLdRb|file-9d3c1f|1",
+      "wireHex": "e1aaf4f676975eab156fb5b189c292aa763b0832b83fa605dd8e319b3adf5359"
+    },
+    {
+      "name": "offset id=64 (segmented)",
+      "transferId": "TQF9k2mZ7pXaLdRb",
+      "fileId": "file-9d3c1f",
+      "chunkId": 64,
+      "plaintextHex": "c7e60524436281a0bfdefd1c3b5a7998",
+      "nonceHex": "545146390000000000000040",
+      "aad": "TQF9k2mZ7pXaLdRb|file-9d3c1f|64",
+      "wireHex": "5127a90b5b0b64ddff539a3f6efdb4902318dc393fc9898dc441aeeac26ab299"
+    },
+    {
+      "name": "partial tail (2 bytes)",
+      "transferId": "TQF9k2mZ7pXaLdRb",
+      "fileId": "file-9d3c1f",
+      "chunkId": 6,
+      "plaintextHex": "a7c6e504",
+      "nonceHex": "545146390000000000000006",
+      "aad": "TQF9k2mZ7pXaLdRb|file-9d3c1f|6",
+      "wireHex": "6c6e0fd4bf61ead4e818dc4492d84d4b756b76f5"
+    },
+    {
+      "name": "short transferId zero-pads nonce prefix",
+      "transferId": "ab",
+      "fileId": "file-9d3c1f",
+      "chunkId": 3,
+      "plaintextHex": "d7f61534537291b0cfee0d2c4b6a89a8",
+      "nonceHex": "616200000000000000000003",
+      "aad": "ab|file-9d3c1f|3",
+      "wireHex": "5769f6a439900e7a294c1bfb4f61f21712b2c6dc719f2f69f180b73347dffff4"
+    },
+    {
+      "name": "long transferId truncated to 4B prefix",
+      "transferId": "ZZZZ-tail-ignored",
+      "fileId": "file-9d3c1f",
+      "chunkId": 3,
+      "plaintextHex": "d7f61534537291b0cfee0d2c4b6a89a8",
+      "nonceHex": "5a5a5a5a0000000000000003",
+      "aad": "ZZZZ-tail-ignored|file-9d3c1f|3",
+      "wireHex": "737d144e3570a72417692be4ac0bfd9b2857142676d11e65dbc0aa4a00864ee5"
+    },
+    {
+      "name": "id > 2^32 exercises u64 nonce",
+      "transferId": "TQF9k2mZ7pXaLdRb",
+      "fileId": "file-9d3c1f",
+      "chunkId": 4294967298,
+      "plaintextHex": "0726456483a2c1e0ff1e3d5c7b9ab9d8",
+      "nonceHex": "545146390000000100000002",
+      "aad": "TQF9k2mZ7pXaLdRb|file-9d3c1f|4294967298",
+      "wireHex": "eae315aedbaed19da38da6d38372d56c01294329424c1a90c18e510b4d113714"
+    },
+    {
+      "name": "empty plaintext (tag-only wire)",
+      "transferId": "TQF9k2mZ7pXaLdRb",
+      "fileId": "file-9d3c1f",
+      "chunkId": 9,
+      "plaintextHex": "",
+      "nonceHex": "545146390000000000000009",
+      "aad": "TQF9k2mZ7pXaLdRb|file-9d3c1f|9",
+      "wireHex": "f1c7ba42fa7c4f264c8beb7a74e96363"
+    }
+  ],
+  "blocks": [
+    {
+      "name": "block0 uniform, 4 full chunks (total 100)",
+      "transferId": "TQF9k2mZ7pXaLdRb",
+      "fileId": "file-9d3c1f",
+      "blockIndex": 0,
+      "chunkBytes": 16,
+      "blockBytes": 64,
+      "totalBytes": 100,
+      "offsetScheme": false,
+      "chunkIds": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "wireHex": "8db4dd706c28a1b6bdfa2cfc9ea9cf33ad1c24791f81de7ef3f37335751f440ae1aaf4f676975eab156fb5b189c292aa763b0832b83fa605dd8e319b3adf5359f1ccc66986888853591c1b6c0f624ca2a07ed26d74c4e6c49b09699722184ade49126e4617c67a704ac987b65d2dc116486b5ca4dc87c945531a82b5aa9f6a97"
+    },
+    {
+      "name": "block1 uniform, non-zero firstChunk + partial tail",
+      "transferId": "TQF9k2mZ7pXaLdRb",
+      "fileId": "file-9d3c1f",
+      "blockIndex": 1,
+      "chunkBytes": 16,
+      "blockBytes": 64,
+      "totalBytes": 100,
+      "offsetScheme": false,
+      "chunkIds": [
+        4,
+        5,
+        6
+      ],
+      "wireHex": "81b2b14f9ff5efa8000d6236a9ac04a343f7e75056bb32bd82d17a41c23bdcddb28a58bb80a7189f24d48d0f25e9a1456971cc02a0abad00b02a446aeb3580a46c6e0fd4bf61ead4e818dc4492d84d4b756b76f5"
+    },
+    {
+      "name": "block1 offset-scheme (id = plaintext offset)",
+      "transferId": "TQF9k2mZ7pXaLdRb",
+      "fileId": "file-9d3c1f",
+      "blockIndex": 1,
+      "chunkBytes": 16,
+      "blockBytes": 64,
+      "totalBytes": 100,
+      "offsetScheme": true,
+      "chunkIds": [
+        64,
+        80,
+        96
+      ],
+      "wireHex": "5127a90b5b0b64ddff539a3f6efdb4902318dc393fc9898dc441aeeac26ab29941f0d40a647fdba8863297e389ebc0fe9e6b5ceb0700c3e3d7fbd915e4bbd7961f86864aa304ca5144509f44f46e1b417e289683",
+      "blockPlainOffset": 64
+    }
+  ],
+  "lan": {
+    "transferId": "TQF9k2mZ7pXaLdRb",
+    "fileId": "file-9d3c1f",
+    "totalBytes": 100,
+    "chunkCount": 7,
+    "framesHex": "00000000000000208db4dd706c28a1b6bdfa2cfc9ea9cf33ad1c24791f81de7ef3f37335751f440a0000000100000020e1aaf4f676975eab156fb5b189c292aa763b0832b83fa605dd8e319b3adf53590000000200000020f1ccc66986888853591c1b6c0f624ca2a07ed26d74c4e6c49b09699722184ade000000030000002049126e4617c67a704ac987b65d2dc116486b5ca4dc87c945531a82b5aa9f6a97000000040000002081b2b14f9ff5efa8000d6236a9ac04a343f7e75056bb32bd82d17a41c23bdcdd0000000500000020b28a58bb80a7189f24d48d0f25e9a1456971cc02a0abad00b02a446aeb3580a400000006000000146c6e0fd4bf61ead4e818dc4492d84d4b756b76f5"
+  },
+  "sha256": {
+    "dataHex": "0726456483a2c1e0ff1e3d5c7b9ab9d8f71635547392b1d0ef0e2d4c6b8aa9c8e70625446382a1c0dffe1d3c5b7a99b8d7f61534537291b0cfee0d2c4b6a89a8c7e60524436281a0bfdefd1c3b5a7998b7d6f51433527190afceed0c2b4a6988a7c6e504",
+    "hex": "c22e490daa445fb2fba44278c022df135310fd278cabca4ad7919eddcccd1dce"
+  }
+}

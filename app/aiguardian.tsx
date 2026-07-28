@@ -1,431 +1,239 @@
-import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+// app/aiguardian.tsx — Security Guardian.
+//
+// Honest device & account security overview. Replaces the old screen that
+// hardcoded a "97/100" score and a fake 3-second "AI analysis". Everything here
+// is real: the score is computed from actual signals (services/security/
+// securityScore), recent events come from the on-device tamper-evident audit
+// chain, and "Run device scan" performs a real root/Frida/emulator scan.
+// No invented numbers, no behavioral-AI claims we don't implement.
+
+import { BRAND_ACCENT } from '../constants/theme';
+import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useState , useMemo} from 'react';
 import {
-    Alert, Animated,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  ActivityIndicator, Alert, ScrollView, StyleSheet, Text,
+  TouchableOpacity, View,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
+import {
+  listSecurityEvents, type AuditSeverity, type SecurityEvent,
+} from '../services/security/auditChain';
+import { computeSecurityScore, type SecurityScore } from '../services/security/securityScore';
+import { scanDeviceAndRecord } from '../services/securityService';
 
-const THREAT_EVENTS = [
-  { id: '1', time: '2 min ago',  icon: '✅', type: 'Normal Login',        detail: 'Yanamalakuduru · Recognised device',  color: '#22C55E', bg: '#052e16' },
-  { id: '2', time: '1 hr ago',   icon: '⚠️', type: 'New Device Detected', detail: 'Samsung Galaxy · First time login',    color: '#F59E0B', bg: '#451a03' },
-  { id: '3', time: '3 hrs ago',  icon: '✅', type: 'Message Sent',        detail: '12 messages · All encrypted',          color: '#22C55E', bg: '#052e16' },
-  { id: '4', time: 'Yesterday',  icon: '✅', type: 'Face Scan Passed',    detail: '468-point match · 99.8% confidence',   color: '#22C55E', bg: '#052e16' },
-  { id: '5', time: '2 days ago', icon: '🚨', type: 'Login Attempt Failed','detail': 'Wrong Face · 3 attempts blocked',   color: '#EF4444', bg: '#450a0a' },
-];
+const SEV_COLOR: Record<AuditSeverity, string> = {
+  critical: '#EF4444', high: '#F59E0B', medium: '#FBBF24', low: '#34D399', info: '#06B6D4',
+};
 
-const AI_FEATURES = [
-  { icon: '🧠', title: 'Behavior Analysis',     desc: 'Learns your typing & usage patterns', active: true  },
-  { icon: '👁️', title: 'Anomaly Detection',     desc: 'Flags unusual login times or locations', active: true  },
-  { icon: '📍', title: 'Location Intelligence', desc: 'Recognises your trusted locations',    active: true  },
-  { icon: '📱', title: 'Device Fingerprinting', desc: 'Identifies trusted devices',           active: true  },
-  { icon: '⏰', title: 'Time Pattern Guard',    desc: 'Detects logins at unusual hours',      active: false },
-  { icon: '🤖', title: 'AI Impersonation Guard','desc': 'Detects if someone cloned your style',active: false },
-];
+const GRADE_META: Record<SecurityScore['grade'], { color: string; label: string }> = {
+  strong:  { color: BRAND_ACCENT, label: 'Strong'      },
+  good:    { color: '#34D399',      label: 'Good'        },
+  fair:    { color: '#F59E0B',      label: 'Fair'        },
+  weak:    { color: '#EF4444',      label: 'Needs work'  },
+  unknown: { color: '#9CA3AF', label: 'Run a scan'  },
+};
 
-export default function AIGuardianScreen() {
+function iconForType(type: string): keyof typeof Ionicons.glyphMap {
+  switch (type) {
+    case 'SCREENSHOT_ATTEMPT': return 'camera';
+    case 'DEVICE_SCAN':
+    case 'DEVICE_INTEGRITY':   return 'shield-checkmark';
+    case 'ROOT_DETECTED':      return 'bug';
+    case 'KEY_CHANGE':         return 'key';
+    case 'LOGIN':              return 'log-in';
+    default:                   return 'notifications';
+  }
+}
+
+function timeAgo(ts: number): string {
+  const s = (Date.now() - ts) / 1000;
+  if (s < 60) return 'just now';
+  const m = s / 60; if (m < 60) return `${Math.floor(m)}m ago`;
+  const h = m / 60; if (h < 24) return `${Math.floor(h)}h ago`;
+  const d = h / 24; if (d < 7) return `${Math.floor(d)}d ago`;
+  return new Date(ts).toLocaleDateString();
+}
+
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
+export default function SecurityGuardianScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   const router = useRouter();
-  const [aiScore]      = useState(97);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [analyzed,    setAnalyzed]    = useState(false);
+  const [data, setData] = useState<SecurityScore | null>(null);
+  const [events, setEvents] = useState<SecurityEvent[]>([]);
+  const [scanning, setScanning] = useState(false);
 
-  const pulseAnim  = useRef(new Animated.Value(1)).current;
-  const brainAnim  = useRef(new Animated.Value(0)).current;
-  const scoreAnim  = useRef(new Animated.Value(0)).current;
-  const glowAnim   = useRef(new Animated.Value(0.3)).current;
+  const load = useCallback(async () => {
+    const [score, evs] = await Promise.all([computeSecurityScore(), listSecurityEvents(8)]);
+    setData(score);
+    setEvents(evs);
+  }, []);
 
-  useEffect(() => {
-    // Pulse
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 1.06, duration: 1400, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1,    duration: 1400, useNativeDriver: true }),
-      ])
-    ).start();
-    // Glow
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(glowAnim, { toValue: 0.8, duration: 2000, useNativeDriver: true }),
-        Animated.timing(glowAnim, { toValue: 0.3, duration: 2000, useNativeDriver: true }),
-      ])
-    ).start();
-    // Score count up
-    Animated.timing(scoreAnim, { toValue: aiScore, duration: 1500, useNativeDriver: false }).start();
-  }, [aiScore, glowAnim, pulseAnim, scoreAnim]);
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const runAnalysis = () => {
-    setIsAnalyzing(true);
-    setAnalyzed(false);
-    Animated.loop(
-      Animated.timing(brainAnim, { toValue: 1, duration: 800, useNativeDriver: true })
-    ).start();
-    setTimeout(() => {
-      setIsAnalyzing(false);
-      setAnalyzed(true);
-      brainAnim.stopAnimation();
+  const onScan = useCallback(async () => {
+    if (scanning) return;
+    setScanning(true);
+    try {
+      const report = await scanDeviceAndRecord();
       Alert.alert(
-        '🧠 AI Analysis Complete!',
-        '✅ No threats detected\n✅ Behaviour matches your profile\n✅ All devices trusted\n✅ Location recognised\n\nAI Security Score: 97/100 — Excellent!',
-        [{ text: 'Great! 🛡️' }]
+        report.clean ? 'Scan complete — clean' : 'Scan complete — issues found',
+        report.clean
+          ? 'No root, instrumentation, or tampering indicators were detected.\n\nNote: a sandboxed app cannot detect kernel-level implants, so clean does not guarantee safety.'
+          : report.threats.map((t) => `• ${t.detail}`).join('\n'),
       );
-    }, 3000);
-  };
+    } catch {
+      Alert.alert('Scan failed', 'The device scan could not complete. Please try again.');
+    } finally {
+      setScanning(false);
+      load();
+    }
+  }, [scanning, load]);
 
-  const brainRotate = brainAnim.interpolate({
-    inputRange: [0, 1], outputRange: ['0deg', '360deg'],
-  });
+  const grade = GRADE_META[data?.grade ?? 'unknown'];
 
   return (
-    <View style={styles.container}>
-
-      {/* ── HEADER ─────────────────────────────────── */}
-      <LinearGradient colors={['#030A18', '#050D1F']} style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Text style={styles.backArrow}>←</Text>
+    <View style={S.container}>
+      <View style={S.header}>
+        <TouchableOpacity onPress={() => router.back()} style={S.backBtn} hitSlop={10}>
+          <Ionicons name="chevron-back" size={26} color={colors.text} />
         </TouchableOpacity>
-        <View>
-          <Text style={styles.headerTitle}>🤖 AI Guardian</Text>
-          <Text style={styles.headerSub}>Behavioral Security · World-First 🏆</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={S.headerTitle}>Security Guardian</Text>
+          <Text style={S.headerSub}>Live checks on this device & account</Text>
         </View>
-        <View style={{ width: 50 }} />
-      </LinearGradient>
+      </View>
 
-      <ScrollView showsVerticalScrollIndicator={false}>
-
-        {/* ── AI SCORE HERO ──────────────────────────── */}
-        <LinearGradient
-          colors={['#0D1E3A', '#050D1F']}
-          style={styles.heroCard}
-        >
-          {/* Glow behind brain */}
-          <Animated.View style={[styles.heroGlow, { opacity: glowAnim }]} />
-
-          {/* Brain pulse */}
-          <Animated.View style={[styles.brainWrap, { transform: [{ scale: pulseAnim }] }]}>
-            <LinearGradient
-              colors={['#1D4ED8', '#7C3AED']}
-              style={styles.brainCircle}
-            >
-              <Text style={styles.brainEmoji}>🧠</Text>
-            </LinearGradient>
-          </Animated.View>
-
-          <Text style={styles.heroTitle}>AI Security Score</Text>
-
-          {/* Score ring */}
-          <View style={styles.scoreRingWrap}>
-            <LinearGradient
-              colors={['#1D4ED8', '#7C3AED']}
-              style={styles.scoreRingOuter}
-              start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-            >
-              <View style={styles.scoreRingInner}>
-                <Text style={styles.scoreNumber}>{aiScore}</Text>
-                <Text style={styles.scoreMax}>/100</Text>
-              </View>
-            </LinearGradient>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
+        {/* Score hero */}
+        <View style={S.hero}>
+          <View style={[S.ring, { borderColor: grade.color }]}>
+            <Text style={[S.scoreNum, { color: grade.color }]}>
+              {data?.score ?? '—'}
+            </Text>
+            {data?.score != null && <Text style={S.scoreMax}>/100</Text>}
           </View>
-
-          <View style={styles.heroStatusRow}>
-            <View style={styles.heroDot} />
-            <Text style={styles.heroStatus}>AI Guardian Active · Monitoring in real-time</Text>
-          </View>
-
-          {/* Stats row */}
-          <View style={styles.heroStats}>
-            {[
-              { val: '0',   label: 'Threats',  color: '#22C55E' },
-              { val: '127', label: 'Events',   color: '#4A9FFF' },
-              { val: '99%', label: 'Accuracy', color: '#A78BFA' },
-            ].map((s, i) => (
-              <View key={i} style={styles.heroStat}>
-                <Text style={[styles.heroStatVal, { color: s.color }]}>{s.val}</Text>
-                <Text style={styles.heroStatLabel}>{s.label}</Text>
-              </View>
-            ))}
-          </View>
-        </LinearGradient>
-
-        {/* ── ANALYZE NOW BUTTON ─────────────────────── */}
-        <View style={styles.analyzeSection}>
-          <TouchableOpacity onPress={runAnalysis} disabled={isAnalyzing} activeOpacity={0.85}>
-            <LinearGradient
-              colors={isAnalyzing ? ['#0F1729', '#0F1729'] : ['#1D4ED8', '#7C3AED']}
-              style={styles.analyzeBtn}
-              start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-            >
-              {isAnalyzing ? (
-                <>
-                  <Animated.Text style={[styles.analyzeBtnIcon,
-                    { transform: [{ rotate: brainRotate }] }]}>
-                    🧠
-                  </Animated.Text>
-                  <Text style={styles.analyzeBtnText}>AI Analyzing...</Text>
-                </>
-              ) : (
-                <>
-                  <Text style={styles.analyzeBtnIcon}>🤖</Text>
-                  <Text style={styles.analyzeBtnText}>
-                    {analyzed ? 'Run Again' : 'Run AI Security Scan'}
-                  </Text>
-                </>
-              )}
-            </LinearGradient>
-          </TouchableOpacity>
+          <Text style={[S.gradeLabel, { color: grade.color }]}>{grade.label}</Text>
+          <Text style={S.heroSub}>
+            {data?.score == null
+              ? 'Run a device scan to evaluate device integrity.'
+              : 'Score reflects encryption, app lock, and your latest device scan.'}
+          </Text>
         </View>
 
-        {/* ── RECENT EVENTS ──────────────────────────── */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>📋 SECURITY EVENTS</Text>
-          {THREAT_EVENTS.map(event => (
-            <TouchableOpacity
-              key={event.id}
-              style={styles.eventCard}
-              onPress={() => Alert.alert(event.type, `${event.detail}\n\nTime: ${event.time}`)}
-              activeOpacity={0.7}
-            >
-              <LinearGradient
-                colors={[event.bg, '#030A18']}
-                style={styles.eventCardInner}
-                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-              >
-                <View style={[styles.eventIconBox, { backgroundColor: event.color + '20' }]}>
-                  <Text style={styles.eventIcon}>{event.icon}</Text>
-                </View>
-                <View style={styles.eventInfo}>
-                  <Text style={styles.eventType}>{event.type}</Text>
-                  <Text style={styles.eventDetail}>{event.detail}</Text>
-                </View>
-                <Text style={styles.eventTime}>{event.time}</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          ))}
-        </View>
+        {/* Run scan */}
+        <TouchableOpacity style={S.scanBtn} onPress={onScan} disabled={scanning} activeOpacity={0.85}>
+          {scanning
+            ? <ActivityIndicator size="small" color="#fff" />
+            : <Ionicons name="shield-checkmark" size={18} color="#fff" />}
+          <Text style={S.scanBtnText}>{scanning ? 'Scanning device…' : 'Run device scan'}</Text>
+        </TouchableOpacity>
 
-        {/* ── AI FEATURES ────────────────────────────── */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🤖 AI CAPABILITIES</Text>
-          <View style={styles.card}>
-            {AI_FEATURES.map((feature, i) => (
-              <View key={i}>
-                <View style={styles.featureRow}>
-                  <View style={[styles.featureIconBox,
-                    { backgroundColor: feature.active ? '#0D2A5A' : '#0D1E3A' }]}>
-                    <Text style={styles.featureIcon}>{feature.icon}</Text>
-                  </View>
-                  <View style={styles.featureInfo}>
-                    <Text style={styles.featureTitle}>{feature.title}</Text>
-                    <Text style={styles.featureDesc}>{feature.desc}</Text>
-                  </View>
-                  <View style={[styles.featureStatusBadge,
-                    { backgroundColor: feature.active ? '#052e16' : '#0D1E3A' }]}>
-                    <Text style={[styles.featureStatus,
-                      { color: feature.active ? '#22C55E' : '#2D4A6B' }]}>
-                      {feature.active ? '✅ ON' : '○ OFF'}
-                    </Text>
+        {/* Checks */}
+        <Text style={S.sectionTitle}>CHECKS</Text>
+        <View style={S.card}>
+          {(data?.factors ?? []).map((f, i) => {
+            const color = f.pending ? colors.textDim : f.ok ? BRAND_ACCENT : '#EF4444';
+            const icon = f.pending ? 'help-circle' : f.ok ? 'checkmark-circle' : 'close-circle';
+            return (
+              <View key={f.key}>
+                <View style={S.checkRow}>
+                  <Ionicons name={icon} size={22} color={color} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={S.checkLabel}>{f.label}</Text>
+                    <Text style={S.checkDetail}>{f.detail}</Text>
                   </View>
                 </View>
-                {i < AI_FEATURES.length - 1 && <View style={styles.divider} />}
+                {i < (data!.factors.length - 1) && <View style={S.divider} />}
               </View>
-            ))}
-          </View>
+            );
+          })}
         </View>
 
-        {/* ── HOW IT WORKS ───────────────────────────── */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>💡 HOW AI GUARDIAN WORKS</Text>
-          <LinearGradient
-            colors={['#F9FAFB', '#0D1E3A']}
-            style={styles.howCard}
-          >
-            {[
-              { step: '1', text: 'AI learns your normal usage patterns over 7 days' },
-              { step: '2', text: 'Every login is compared against your behaviour profile' },
-              { step: '3', text: 'Anomalies trigger instant alerts and can block access' },
-              { step: '4', text: 'Score updates in real-time based on threat events' },
-            ].map((item, i) => (
-              <View key={i} style={[styles.howRow, i > 0 && { marginTop: 12 }]}>
-                <LinearGradient
-                  colors={['#1D4ED8', '#7C3AED']}
-                  style={styles.howStepCircle}
-                >
-                  <Text style={styles.howStepNum}>{item.step}</Text>
-                </LinearGradient>
-                <Text style={styles.howText}>{item.text}</Text>
-              </View>
-            ))}
-          </LinearGradient>
-        </View>
-
-        {/* ── WORLD FIRST BADGE ──────────────────────── */}
-        <LinearGradient
-          colors={['#1D4ED8', '#7C3AED']}
-          style={styles.worldFirstBadge}
-          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-        >
-          <Text style={styles.worldFirstEmoji}>🏆</Text>
-          <View>
-            <Text style={styles.worldFirstTitle}>World-First Feature</Text>
-            <Text style={styles.worldFirstSub}>
-              No other messenger has AI behavioral security built in
+        {/* Recent events */}
+        <Text style={S.sectionTitle}>RECENT SECURITY EVENTS</Text>
+        {events.length === 0 ? (
+          <View style={[S.card, S.emptyCard]}>
+            <Text style={S.emptyText}>
+              No events recorded yet. Captures and scans appear here and in the Alerts tab.
             </Text>
           </View>
-        </LinearGradient>
+        ) : (
+          <View style={S.card}>
+            {events.map((e, i) => {
+              const color = SEV_COLOR[e.severity] ?? SEV_COLOR.info;
+              return (
+                <View key={e.seq}>
+                  <TouchableOpacity
+                    style={S.eventRow}
+                    activeOpacity={0.7}
+                    onPress={() => Alert.alert(e.title, `${e.detail || '—'}\n\n${new Date(e.ts).toLocaleString()}`)}
+                  >
+                    <View style={[S.eventIcon, { backgroundColor: color + '22' }]}>
+                      <Ionicons name={iconForType(e.type)} size={18} color={color} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={S.eventTitle} numberOfLines={1}>{e.title}</Text>
+                      <Text style={S.eventDetail} numberOfLines={1}>{e.detail || '—'}</Text>
+                    </View>
+                    <Text style={S.eventTime}>{timeAgo(e.ts)}</Text>
+                  </TouchableOpacity>
+                  {i < events.length - 1 && <View style={S.divider} />}
+                </View>
+              );
+            })}
+          </View>
+        )}
 
-        <View style={{ height: 50 }} />
+        <TouchableOpacity style={S.alertsLink} onPress={() => router.push('/(tabs)/alerts')} activeOpacity={0.7}>
+          <Text style={S.alertsLinkText}>View full security log</Text>
+          <Ionicons name="arrow-forward" size={15} color={colors.primary} />
+        </TouchableOpacity>
       </ScrollView>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#030A18' },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 54, paddingBottom: 14, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: c.border },
+  backBtn: { padding: 4 },
+  headerTitle: { color: c.text, fontSize: 18, fontWeight: '800' },
+  headerSub: { color: c.textDim, fontSize: 12, marginTop: 1 },
 
-  header: {
-    flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 54, paddingBottom: 14, paddingHorizontal: 16,
-    borderBottomWidth: 1, borderBottomColor: '#0D1E3A',
-  },
-  backBtn: { padding: 6 },
-  backArrow: { color: '#4A9FFF', fontSize: 26, fontWeight: '300' },
-  headerTitle: { color: '#000000', fontSize: 17, fontWeight: '800', textAlign: 'center' },
-  headerSub:   { color: '#2D4A6B', fontSize: 11, textAlign: 'center' },
+  hero: { alignItems: 'center', paddingVertical: 28, gap: 8 },
+  ring: { width: 130, height: 130, borderRadius: 65, borderWidth: 5, justifyContent: 'center', alignItems: 'center', flexDirection: 'row' },
+  scoreNum: { fontSize: 44, fontWeight: '900' },
+  scoreMax: { color: c.textFaint, fontSize: 15, fontWeight: '700', marginLeft: 2, marginTop: 14 },
+  gradeLabel: { fontSize: 18, fontWeight: '800', marginTop: 4 },
+  heroSub: { color: c.textDim, fontSize: 13, textAlign: 'center', paddingHorizontal: 40, lineHeight: 19 },
 
-  // HERO CARD
-  heroCard: {
-    margin: 16, borderRadius: 24, padding: 24,
-    alignItems: 'center', gap: 12,
-    borderWidth: 1, borderColor: '#0D1E3A',
-    overflow: 'hidden',
-  },
-  heroGlow: {
-    position: 'absolute', width: 200, height: 200,
-    borderRadius: 100, backgroundColor: '#1D4ED8',
-    top: -40,
-  },
-  brainWrap: {},
-  brainCircle: {
-    width: 80, height: 80, borderRadius: 40,
-    justifyContent: 'center', alignItems: 'center',
-    elevation: 12, shadowColor: '#1D4ED8',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.6, shadowRadius: 12,
-  },
-  brainEmoji: { fontSize: 36 },
-  heroTitle:  { color: '#000000', fontSize: 16, fontWeight: '700' },
+  scanBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginHorizontal: 16, backgroundColor: c.primary, paddingVertical: 15, borderRadius: 14 },
+  scanBtnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
 
-  scoreRingWrap: {},
-  scoreRingOuter: {
-    width: 110, height: 110, borderRadius: 55,
-    justifyContent: 'center', alignItems: 'center',
-    elevation: 10, shadowColor: '#1D4ED8',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5, shadowRadius: 10,
-  },
-  scoreRingInner: {
-    width: 94, height: 94, borderRadius: 47,
-    backgroundColor: '#030A18',
-    justifyContent: 'center', alignItems: 'center',
-  },
-  scoreNumber: { color: '#000000', fontSize: 32, fontWeight: '900', lineHeight: 36 },
-  scoreMax:    { color: '#2D4A6B', fontSize: 13, textAlign: 'center' },
+  sectionTitle: { color: c.textFaint, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginTop: 24, marginBottom: 8, marginLeft: 20 },
+  card: { marginHorizontal: 16, backgroundColor: c.card, borderRadius: 16, borderWidth: 1, borderColor: c.border, overflow: 'hidden' },
+  divider: { height: 1, backgroundColor: c.separator, marginLeft: 16 },
 
-  heroStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  heroDot: {
-    width: 8, height: 8, borderRadius: 4, backgroundColor: '#22C55E',
-  },
-  heroStatus: { color: '#22C55E', fontSize: 11, fontWeight: '600' },
+  checkRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 },
+  checkLabel: { color: c.text, fontSize: 14.5, fontWeight: '700' },
+  checkDetail: { color: c.textDim, fontSize: 12.5, marginTop: 2, lineHeight: 17 },
 
-  heroStats: { flexDirection: 'row', gap: 32, marginTop: 4 },
-  heroStat:  { alignItems: 'center', gap: 4 },
-  heroStatVal:   { fontSize: 22, fontWeight: '900' },
-  heroStatLabel: { color: '#2D4A6B', fontSize: 11, fontWeight: '600' },
+  emptyCard: { padding: 18 },
+  emptyText: { color: c.textDim, fontSize: 13, lineHeight: 19, textAlign: 'center' },
 
-  // ANALYZE BUTTON
-  analyzeSection: { paddingHorizontal: 16, marginBottom: 20, alignItems: 'center' },
-  analyzeBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingHorizontal: 32, paddingVertical: 16, borderRadius: 20,
-    elevation: 8, shadowColor: '#1D4ED8',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5, shadowRadius: 10,
-  },
-  analyzeBtnIcon: { fontSize: 22 },
-  analyzeBtnText: { color: '#000000', fontSize: 16, fontWeight: '800' },
+  eventRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12 },
+  eventIcon: { width: 36, height: 36, borderRadius: 11, justifyContent: 'center', alignItems: 'center' },
+  eventTitle: { color: c.text, fontSize: 14, fontWeight: '700' },
+  eventDetail: { color: c.textDim, fontSize: 12, marginTop: 1 },
+  eventTime: { color: c.textFaint, fontSize: 11 },
 
-  // SECTIONS
-  section: { marginHorizontal: 16, marginBottom: 20 },
-  sectionTitle: {
-    color: '#2D4A6B', fontSize: 11, fontWeight: '800',
-    letterSpacing: 1, marginBottom: 10, marginLeft: 4,
-  },
-  card: {
-    backgroundColor: '#F9FAFB', borderRadius: 16,
-    borderWidth: 1, borderColor: '#0D1E3A', overflow: 'hidden',
-  },
-  divider: { height: 1, backgroundColor: '#0D1E3A', marginLeft: 56 },
-
-  // EVENT CARDS
-  eventCard: { marginBottom: 8 },
-  eventCardInner: {
-    flexDirection: 'row', alignItems: 'center',
-    padding: 14, borderRadius: 14, gap: 12,
-    borderWidth: 1, borderColor: '#0D1E3A',
-  },
-  eventIconBox: {
-    width: 40, height: 40, borderRadius: 12,
-    justifyContent: 'center', alignItems: 'center',
-  },
-  eventIcon:   { fontSize: 20 },
-  eventInfo:   { flex: 1 },
-  eventType:   { color: '#000000', fontSize: 13, fontWeight: '700' },
-  eventDetail: { color: '#3D5A7A', fontSize: 11, marginTop: 2 },
-  eventTime:   { color: '#2D4A6B', fontSize: 10 },
-
-  // FEATURES
-  featureRow: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 14, paddingVertical: 12, gap: 12,
-  },
-  featureIconBox: {
-    width: 36, height: 36, borderRadius: 10,
-    justifyContent: 'center', alignItems: 'center',
-  },
-  featureIcon:  { fontSize: 18 },
-  featureInfo:  { flex: 1 },
-  featureTitle: { color: '#000000', fontSize: 13, fontWeight: '600' },
-  featureDesc:  { color: '#3D5A7A', fontSize: 11, marginTop: 2 },
-  featureStatusBadge: {
-    borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4,
-  },
-  featureStatus: { fontSize: 11, fontWeight: '700' },
-
-  // HOW IT WORKS
-  howCard: {
-    borderRadius: 16, padding: 16,
-    borderWidth: 1, borderColor: '#0D1E3A',
-  },
-  howRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
-  howStepCircle: {
-    width: 28, height: 28, borderRadius: 14,
-    justifyContent: 'center', alignItems: 'center',
-    flexShrink: 0,
-  },
-  howStepNum: { color: '#000000', fontSize: 13, fontWeight: '800' },
-  howText:    { color: '#4A6B8A', fontSize: 13, lineHeight: 20, flex: 1 },
-
-  // WORLD FIRST
-  worldFirstBadge: {
-    marginHorizontal: 16, marginBottom: 16,
-    borderRadius: 16, padding: 16,
-    flexDirection: 'row', alignItems: 'center', gap: 14,
-  },
-  worldFirstEmoji: { fontSize: 36 },
-  worldFirstTitle: { color: '#000000', fontSize: 15, fontWeight: '800' },
-  worldFirstSub:   { color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 2 },
+  alertsLink: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 22 },
+  alertsLinkText: { color: c.primary, fontSize: 14, fontWeight: '700' },
 });

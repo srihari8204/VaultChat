@@ -1,410 +1,212 @@
-import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
-import { useState } from 'react';
-import {
-    Alert, Image,
-    ScrollView,
-    StyleSheet,
-    Switch,
-    Text,
-    TouchableOpacity,
-    View
-} from 'react-native';
+// app/family.tsx — the Family Circle hero screen (Life360-style). A live map of
+// everyone who's sharing + a roster with last-seen/distance, a sharing toggle, an
+// SOS, Places (geofences) and invite. All positions are E2EE: the server relays
+// sealed blobs and stores nothing readable. See lib/family/presence.ts.
 
-const FAMILY_MEMBERS = [
-  { id: '1', name: 'Priya (Daughter)', age: 14, photo: 'https://i.pravatar.cc/150?img=5',
-    status: 'online', location: 'School', safeScore: 98, screenTime: '2h 15m',
-    gradient: ['#43E97B', '#38F9D7'] as [string,string] },
-  { id: '2', name: 'Rahul (Son)', age: 11, photo: 'https://i.pravatar.cc/150?img=8',
-    status: 'online', location: 'Home', safeScore: 95, screenTime: '1h 40m',
-    gradient: ['#4FACFE', '#00C9FF'] as [string,string] },
-  { id: '3', name: 'Mom', age: 58, photo: 'https://i.pravatar.cc/150?img=9',
-    status: 'offline', location: 'Last seen: Market', safeScore: 100, screenTime: '45m',
-    gradient: ['#FA709A', '#FEE140'] as [string,string] },
-];
+import React, { useEffect, useMemo, useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Share, Switch } from 'react-native';
+import * as Location from 'expo-location';
+import { Stack, useRouter, useFocusEffect } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '../lib/theme';
+import FamilyMap, { type FamilyMarker } from '../components/family/FamilyMap';
+import { listCircles, getSettings, setSettings, type CircleRef } from '../lib/family/store';
+import { circleMembers, circleInviteCode } from '../lib/family/circle';
+import { startPresence, stopPresence, setSharing, subscribeCircle, type PresenceEvent } from '../lib/family/presence';
+import { type CircleMember, type MemberPresence, STALE_MS } from '../lib/family/types';
+import { sendMessage } from '../lib/chatService';
+import { getCurrentUserAsync } from './(constants)/authService';
+import { navigateTo } from '../lib/nav/openNavigation';
+import { haversine } from '../lib/nav/geo';
 
-const CONTENT_FILTERS = [
-  { id: 'adult',    icon: '🔞', label: 'Adult Content',    blocked: true  },
-  { id: 'violence', icon: '⚔️', label: 'Violence',         blocked: true  },
-  { id: 'gambling', icon: '🎰', label: 'Gambling',          blocked: true  },
-  { id: 'drugs',    icon: '💊', label: 'Drugs & Alcohol',   blocked: true  },
-  { id: 'social',   icon: '📱', label: 'Social Media',      blocked: false },
-  { id: 'gaming',   icon: '🎮', label: 'Gaming (18+)',      blocked: false },
-];
+function ago(ts: number): string {
+  const s = Math.max(0, (Date.now() - ts) / 1000);
+  if (s < 45) return 'now';
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86400)}d ago`;
+}
+function dist(m: number): string { return m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1)} km`; }
 
 export default function FamilyScreen() {
+  const { colors } = useTheme();
   const router = useRouter();
-  const [filters, setFilters] = useState(CONTENT_FILTERS);
-  const [locationSharing, setLocationSharing] = useState(true);
-  const [screenTimeLimit, setScreenTimeLimit] = useState(true);
-  const [safeSearch, setSafeSearch]           = useState(true);
-  const [bedtimeMode, setBedtimeMode]         = useState(true);
-  const [selectedMember, setSelectedMember]   = useState<string | null>(null);
+  const [me, setMe] = useState<{ id: string; name: string } | null>(null);
+  const [circles, setCircles] = useState<CircleRef[]>([]);
+  const [active, setActive] = useState<CircleRef | null>(null);
+  const [members, setMembers] = useState<CircleMember[]>([]);
+  const [presences, setPresences] = useState<Record<string, MemberPresence>>({});
+  const [share, setShare] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [focusId, setFocusId] = useState<string | null>(null);
 
-  const toggleFilter = (id: string) => {
-    setFilters(prev => prev.map(f => f.id === id ? { ...f, blocked: !f.blocked } : f));
+  // identity + circle list
+  useEffect(() => { (async () => {
+    const u = await getCurrentUserAsync().catch(() => null);
+    setMe(u ? { id: String(u.id), name: u.name || u.email || 'Me' } : null);
+    const cs = await listCircles();
+    setCircles(cs);
+    if (!cs.length) { router.replace('/family-setup' as any); return; }
+    setActive((prev) => prev ?? cs[0]);
+    setShare((await getSettings()).sharing);
+    setLoading(false);
+  })(); }, []);
+
+  // members for the active circle
+  useEffect(() => { if (active) circleMembers(active.id).then(setMembers).catch(() => {}); }, [active?.id]);
+
+  // presence (broadcast self + receive others) for the active circle
+  useEffect(() => {
+    if (!active || !me) return;
+    let unsub: (() => void) | null = null, cancelled = false;
+    setPresences({});
+    (async () => {
+      try {
+        await startPresence({ circleIds: [active.id], myId: me.id, myName: me.name, share, onSelf: (p) => setPresences((prev) => ({ ...prev, [p.userId]: p })) });
+        const u = await subscribeCircle(active.id, me.id, (e: PresenceEvent) => {
+          if (cancelled) return;
+          setPresences((prev) => { const n = { ...prev }; if (e.presence) n[e.userId] = e.presence; else delete n[e.userId]; return n; });
+        });
+        if (cancelled) u(); else unsub = u;
+      } catch (err: any) { if (!cancelled) Alert.alert('Family Circle', err?.message ?? 'Could not start location.'); }
+    })();
+    return () => { cancelled = true; unsub?.(); stopPresence(); };
+  }, [active?.id, me?.id]);
+
+  // stop broadcasting when the screen loses focus (map still resumes on return)
+  useFocusEffect(React.useCallback(() => () => { stopPresence(); }, []));
+
+  const toggleShare = async (v: boolean) => {
+    setShare(v);
+    await setSettings({ sharing: v });
+    try { await setSharing(v); } catch {}
   };
 
-  const familySafeScore = Math.round(
-    FAMILY_MEMBERS.reduce((s, m) => s + m.safeScore, 0) / FAMILY_MEMBERS.length
-  );
+  const markers: FamilyMarker[] = useMemo(() => {
+    const now = Date.now();
+    const nameById = new Map(members.map((m) => [m.id, m.name]));
+    return Object.entries(presences).map(([uid, p]) => ({
+      id: uid, name: uid === me?.id ? 'You' : (nameById.get(uid) || 'Member'),
+      lat: p.pos.lat, lng: p.pos.lng, self: uid === me?.id, stale: now - p.ts > STALE_MS,
+    }));
+  }, [presences, members, me?.id]);
+
+  const invite = async () => {
+    if (!active) return;
+    try {
+      const code = await circleInviteCode(active.id);
+      await Share.share({ message: `Join my Family Circle "${active.name}" on VaultChat.\nCode: ${code}` });
+    } catch (e: any) { Alert.alert('Invite', e?.message ?? 'Could not create an invite.'); }
+  };
+
+  const sos = () => {
+    if (!active || !me) return;
+    Alert.alert('Send SOS?', `Alert everyone in "${active.name}" and share your live location.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Send SOS', style: 'destructive', onPress: async () => {
+        try {
+          await toggleShare(true);
+          let where = '';
+          try { const c = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }); where = ` (${c.coords.latitude.toFixed(5)}, ${c.coords.longitude.toFixed(5)})`; } catch {}
+          await sendMessage(active.id, `🆘 ${me.name} triggered an SOS — please respond${where}`, 'system');
+          Alert.alert('SOS sent', 'Your circle has been alerted and your live location is on.');
+        } catch (e: any) { Alert.alert('SOS', e?.message ?? 'Could not send SOS.'); }
+      } },
+    ]);
+  };
+
+  if (loading) return <View style={[st.center, { backgroundColor: colors.bg }]}><ActivityIndicator color={colors.primary} /></View>;
+
+  const mine = me ? presences[me.id] : undefined;
+  const roster = members.length ? members : (me ? [{ id: me.id, name: 'You', role: 'guardian' as const, avatar: null }] : []);
 
   return (
-    <View style={styles.container}>
+    <View style={[st.screen, { backgroundColor: colors.bg }]}>
+      <Stack.Screen options={{ title: active?.name || 'Family Circle', headerTitleAlign: 'center',
+        headerRight: () => <TouchableOpacity onPress={invite} style={{ paddingHorizontal: 6 }}><Ionicons name="person-add" size={20} color={colors.primary} /></TouchableOpacity> }} />
 
-      {/* ── HEADER ─────────────────────────────────── */}
-      <LinearGradient colors={['#030A18', '#050D1F']} style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Text style={styles.backArrow}>←</Text>
-        </TouchableOpacity>
-        <View>
-          <Text style={styles.headerTitle}>👨‍👩‍👧 SafeFamily Hub</Text>
-          <Text style={styles.headerSub}>World-First Family Protection 🏆</Text>
-        </View>
-        <TouchableOpacity
-          style={styles.addBtn}
-          onPress={() => Alert.alert('Add Member', 'Send invite link to family member?\n\nThey will receive a secure VaultChat invite!', [
-            { text: 'Send Invite 📨', onPress: () => Alert.alert('✅ Invite Sent!', 'Your family member will receive a VaultChat invite.') },
-            { text: 'Cancel', style: 'cancel' },
-          ])}
-        >
-          <LinearGradient colors={['#1D4ED8', '#7C3AED']} style={styles.addBtnGrad}>
-            <Text style={styles.addBtnText}>+ Add</Text>
-          </LinearGradient>
-        </TouchableOpacity>
-      </LinearGradient>
-
-      <ScrollView showsVerticalScrollIndicator={false}>
-
-        {/* ── FAMILY SAFE SCORE ──────────────────────── */}
-        <LinearGradient
-          colors={['#064E3B', '#065F46']}
-          style={styles.safeScoreCard}
-          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-        >
-          <View style={styles.safeScoreLeft}>
-            <Text style={styles.safeScoreTitle}>👨‍👩‍👧 Family Safety Score</Text>
-            <Text style={styles.safeScoreSubtitle}>All members protected by VaultChat</Text>
-            <View style={styles.safeScoreBarBg}>
-              <View style={[styles.safeScoreBarFill, { width: `${familySafeScore}%` }]} />
-            </View>
-            <Text style={styles.safeScoreNote}>
-              🛡️ {FAMILY_MEMBERS.filter(m => m.status === 'online').length} members online now
-            </Text>
-          </View>
-          <View style={styles.safeScoreRight}>
-            <Text style={styles.safeScoreNum}>{familySafeScore}</Text>
-            <Text style={styles.safeScoreMax}>/100</Text>
-          </View>
-        </LinearGradient>
-
-        {/* ── FAMILY MEMBERS ─────────────────────────── */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>👥 FAMILY MEMBERS</Text>
-          {FAMILY_MEMBERS.map(member => (
-            <TouchableOpacity
-              key={member.id}
-              style={[styles.memberCard,
-                selectedMember === member.id && styles.memberCardSelected]}
-              onPress={() => setSelectedMember(
-                selectedMember === member.id ? null : member.id
-              )}
-              activeOpacity={0.8}
-            >
-              {/* Avatar + gradient ring */}
-              <LinearGradient
-                colors={member.gradient}
-                style={styles.memberAvatarRing}
-              >
-                <Image source={{ uri: member.photo }} style={styles.memberPhoto} />
-              </LinearGradient>
-
-              {/* Online dot */}
-              {member.status === 'online' && (
-                <View style={styles.memberOnlineDot} />
-              )}
-
-              {/* Info */}
-              <View style={styles.memberInfo}>
-                <View style={styles.memberRow1}>
-                  <Text style={styles.memberName}>{member.name}</Text>
-                  <Text style={styles.memberAge}>Age {member.age}</Text>
-                </View>
-                <View style={styles.memberRow2}>
-                  <Text style={styles.memberLocation}>📍 {member.location}</Text>
-                  <Text style={styles.memberScreen}>⏱ {member.screenTime}</Text>
-                </View>
-                {/* Safe score bar */}
-                <View style={styles.memberScoreRow}>
-                  <View style={styles.memberScoreBarBg}>
-                    <LinearGradient
-                      colors={member.gradient}
-                      style={[styles.memberScoreBarFill, { width: `${member.safeScore}%` }]}
-                      start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-                    />
-                  </View>
-                  <Text style={styles.memberScoreText}>{member.safeScore}/100</Text>
-                </View>
-              </View>
-
-              <Text style={styles.memberChevron}>
-                {selectedMember === member.id ? '▲' : '▼'}
-              </Text>
+      {/* circle switcher */}
+      {circles.length > 1 && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={st.switcher}>
+          {circles.map((c) => (
+            <TouchableOpacity key={c.id} onPress={() => setActive(c)}
+              style={[st.chip, { borderColor: active?.id === c.id ? colors.primary : colors.border, backgroundColor: active?.id === c.id ? colors.primary + '1a' : 'transparent' }]}>
+              <Text style={{ color: active?.id === c.id ? colors.primary : colors.text, fontWeight: active?.id === c.id ? '700' : '500', fontSize: 13 }}>{c.name}</Text>
             </TouchableOpacity>
           ))}
+        </ScrollView>
+      )}
+
+      <View style={{ flex: 1 }}>
+        <FamilyMap members={markers} focusId={focusId} onSelect={(id) => setFocusId(id)} style={{ flex: 1 }} />
+      </View>
+
+      {/* roster */}
+      <View style={[st.sheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <View style={st.shareRow}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Ionicons name={share ? 'navigate' : 'navigate-outline'} size={18} color={share ? colors.primary : colors.textDim} />
+            <Text style={{ color: colors.text, fontWeight: '600' }}>Share my location</Text>
+          </View>
+          <Switch value={share} onValueChange={toggleShare} trackColor={{ true: colors.primary }} />
         </View>
 
-        {/* ── CONTENT FILTERS ────────────────────────── */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🚫 CONTENT FILTERS</Text>
-          <View style={styles.card}>
-            {filters.map((filter, i) => (
-              <View key={filter.id}>
-                <View style={styles.filterRow}>
-                  <View style={styles.filterLeft}>
-                    <View style={[styles.filterIconBox,
-                      { backgroundColor: filter.blocked ? '#1A0A0A' : '#0D1E3A' }]}>
-                      <Text style={styles.filterIcon}>{filter.icon}</Text>
-                    </View>
-                    <View>
-                      <Text style={styles.filterLabel}>{filter.label}</Text>
-                      <Text style={[styles.filterStatus,
-                        { color: filter.blocked ? '#EF4444' : '#22C55E' }]}>
-                        {filter.blocked ? '🚫 Blocked' : '✅ Allowed'}
-                      </Text>
-                    </View>
-                  </View>
-                  <Switch
-                    value={filter.blocked}
-                    onValueChange={() => toggleFilter(filter.id)}
-                    trackColor={{ false: '#E5E7EB', true: '#EF4444' }}
-                    thumbColor="#FFFFFF"
-                  />
+        <ScrollView style={{ maxHeight: 190 }} contentContainerStyle={{ paddingBottom: 6 }}>
+          {roster.map((m) => {
+            const p = presences[m.id];
+            const isMe = m.id === me?.id;
+            const d = p && mine && !isMe ? dist(haversine(mine.pos, p.pos)) : null;
+            return (
+              <View key={m.id} style={[st.row, { borderColor: colors.border }]}>
+                <View style={[st.dot, { backgroundColor: p ? colors.primary : colors.border }]}>
+                  <Text style={st.dotTxt}>{(m.name || '?').trim()[0]?.toUpperCase()}</Text>
                 </View>
-                {i < filters.length - 1 && <View style={styles.divider} />}
-              </View>
-            ))}
-          </View>
-        </View>
-
-        {/* ── SAFETY CONTROLS ────────────────────────── */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>⚙️ SAFETY CONTROLS</Text>
-          <View style={styles.card}>
-            {[
-              { icon: '📍', label: 'Location Sharing',  sub: 'See where family is in real-time',    val: locationSharing, set: setLocationSharing },
-              { icon: '⏰', label: 'Screen Time Limit', sub: 'Max 3 hours/day for children',         val: screenTimeLimit, set: setScreenTimeLimit },
-              { icon: '🔍', label: 'Safe Search',       sub: 'Filter harmful search results',        val: safeSearch,      set: setSafeSearch      },
-              { icon: '🌙', label: 'Bedtime Mode',      sub: 'No messages after 10 PM for kids',     val: bedtimeMode,     set: setBedtimeMode     },
-            ].map((item, i, arr) => (
-              <View key={i}>
-                <View style={styles.controlRow}>
-                  <View style={styles.controlLeft}>
-                    <View style={styles.controlIconBox}>
-                      <Text style={styles.controlIcon}>{item.icon}</Text>
-                    </View>
-                    <View>
-                      <Text style={styles.controlLabel}>{item.label}</Text>
-                      <Text style={styles.controlSub}>{item.sub}</Text>
-                    </View>
-                  </View>
-                  <Switch
-                    value={item.val}
-                    onValueChange={() => item.set(!item.val)}
-                    trackColor={{ false: '#E5E7EB', true: '#1D4ED8' }}
-                    thumbColor={item.val ? '#FFFFFF' : '#475569'}
-                  />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: colors.text, fontWeight: '600' }} numberOfLines={1}>{isMe ? 'You' : m.name}</Text>
+                  <Text style={{ color: colors.textDim, fontSize: 12 }} numberOfLines={1}>
+                    {p ? `${ago(p.ts)}${d ? ` · ${d} away` : ''}${p.speed && p.speed > 3 ? ' · moving' : ''}` : 'Location off'}
+                  </Text>
                 </View>
-                {i < arr.length - 1 && <View style={styles.divider} />}
+                {p && (
+                  <TouchableOpacity onPress={() => setFocusId(m.id)} style={st.rowBtn}><Ionicons name="locate" size={18} color={colors.primary} /></TouchableOpacity>
+                )}
+                {p && !isMe && (
+                  <TouchableOpacity onPress={() => navigateTo(p.pos.lat, p.pos.lng, m.name)} style={st.rowBtn}><Ionicons name="navigate-circle" size={20} color={colors.primary} /></TouchableOpacity>
+                )}
               </View>
-            ))}
-          </View>
+            );
+          })}
+        </ScrollView>
+
+        {/* action bar */}
+        <View style={st.actions}>
+          <TouchableOpacity onPress={() => active && router.push({ pathname: '/family-places' as any, params: { circleId: active.id, name: active.name } })} style={[st.action, { borderColor: colors.border }]}>
+            <Ionicons name="location" size={18} color={colors.primary} /><Text style={[st.actionTxt, { color: colors.text }]}>Places</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={invite} style={[st.action, { borderColor: colors.border }]}>
+            <Ionicons name="person-add" size={18} color={colors.primary} /><Text style={[st.actionTxt, { color: colors.text }]}>Invite</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={sos} style={[st.action, { borderColor: colors.danger, backgroundColor: colors.danger + '14' }]}>
+            <Ionicons name="alert-circle" size={18} color={colors.danger} /><Text style={[st.actionTxt, { color: colors.danger, fontWeight: '800' }]}>SOS</Text>
+          </TouchableOpacity>
         </View>
-
-        {/* ── QUICK ACTIONS ──────────────────────────── */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>⚡ QUICK ACTIONS</Text>
-          <View style={styles.actionsGrid}>
-            {[
-              { icon: '🆘', label: 'SOS Alert',      color: ['#7F1D1D','#991B1B'] as [string,string],
-                onPress: () => Alert.alert('🆘 SOS Alert Sent!', 'All family members have been notified of your emergency!') },
-              { icon: '📍', label: 'Find Family',    color: ['#0D2A5A','#1A0A3A'] as [string,string],
-                onPress: () => Alert.alert('📍 Live Location', `Priya: School\nRahul: Home\nMom: Last seen Market\n\nAll locations from 5 min ago`) },
-              { icon: '⏰', label: 'Screen Report',  color: ['#064E3B','#065F46'] as [string,string],
-                onPress: () => Alert.alert('📊 Today\'s Screen Time', 'Priya: 2h 15m ✅\nRahul: 1h 40m ✅\nMom: 45m ✅\n\nAll within limits!') },
-              { icon: '🔒', label: 'Lock All',       color: ['#1A0A2A','#2D1B69'] as [string,string],
-                onPress: () => Alert.alert('🔒 All Devices Locked', 'All family member devices have been locked remotely!', [
-                  { text: 'Unlock All', onPress: () => Alert.alert('✅ Unlocked', 'All devices unlocked!') },
-                  { text: 'Keep Locked' },
-                ]) },
-            ].map((a, i) => (
-              <TouchableOpacity key={i} style={styles.actionCard} onPress={a.onPress}>
-                <LinearGradient colors={a.color} style={styles.actionCardInner}
-                  start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-                  <Text style={styles.actionCardIcon}>{a.icon}</Text>
-                  <Text style={styles.actionCardLabel}>{a.label}</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-
-        {/* ── WORLD FIRST BADGE ──────────────────────── */}
-        <LinearGradient
-          colors={['#1D4ED8', '#7C3AED']}
-          style={styles.worldFirstBadge}
-          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-        >
-          <Text style={styles.worldFirstEmoji}>🏆</Text>
-          <View>
-            <Text style={styles.worldFirstTitle}>World-First Feature</Text>
-            <Text style={styles.worldFirstSub}>
-              No other messenger has family safety controls built in
-            </Text>
-          </View>
-        </LinearGradient>
-
-        <View style={{ height: 50 }} />
-      </ScrollView>
+      </View>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#030A18' },
-
-  header: {
-    flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 54, paddingBottom: 14, paddingHorizontal: 16,
-    borderBottomWidth: 1, borderBottomColor: '#0D1E3A',
-  },
-  backBtn: { padding: 6 },
-  backArrow: { color: '#4A9FFF', fontSize: 26, fontWeight: '300' },
-  headerTitle: { color: '#000000', fontSize: 17, fontWeight: '800', textAlign: 'center' },
-  headerSub: { color: '#2D4A6B', fontSize: 11, textAlign: 'center' },
-  addBtn: { borderRadius: 10, overflow: 'hidden' },
-  addBtnGrad: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
-  addBtnText: { color: '#000000', fontSize: 13, fontWeight: '700' },
-
-  // SAFE SCORE CARD
-  safeScoreCard: {
-    margin: 16, borderRadius: 20, padding: 20,
-    flexDirection: 'row', alignItems: 'center',
-    elevation: 10, shadowColor: '#22C55E',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.3, shadowRadius: 12,
-  },
-  safeScoreLeft: { flex: 1, gap: 6 },
-  safeScoreTitle:    { color: '#000000', fontSize: 16, fontWeight: '800' },
-  safeScoreSubtitle: { color: 'rgba(255,255,255,0.7)', fontSize: 12 },
-  safeScoreBarBg: {
-    height: 6, backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 3, marginTop: 4,
-  },
-  safeScoreBarFill: { height: 6, backgroundColor: '#4ADE80', borderRadius: 3 },
-  safeScoreNote: { color: 'rgba(255,255,255,0.6)', fontSize: 11 },
-  safeScoreRight: { alignItems: 'center', marginLeft: 16 },
-  safeScoreNum: { color: '#4ADE80', fontSize: 48, fontWeight: '900', lineHeight: 54 },
-  safeScoreMax: { color: 'rgba(255,255,255,0.5)', fontSize: 14 },
-
-  // SECTIONS
-  section: { marginHorizontal: 16, marginBottom: 20 },
-  sectionTitle: {
-    color: '#2D4A6B', fontSize: 11, fontWeight: '800',
-    letterSpacing: 1, marginBottom: 10, marginLeft: 4,
-  },
-  card: {
-    backgroundColor: '#F9FAFB', borderRadius: 16,
-    borderWidth: 1, borderColor: '#0D1E3A', overflow: 'hidden',
-  },
-  divider: { height: 1, backgroundColor: '#0D1E3A', marginLeft: 56 },
-
-  // MEMBER CARD
-  memberCard: {
-    backgroundColor: '#F9FAFB', borderRadius: 16,
-    borderWidth: 1, borderColor: '#0D1E3A',
-    padding: 14, marginBottom: 10,
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-  },
-  memberCardSelected: { borderColor: '#1D4ED8', backgroundColor: '#0D1E3A' },
-  memberAvatarRing: {
-    width: 52, height: 52, borderRadius: 26,
-    justifyContent: 'center', alignItems: 'center', padding: 2.5,
-  },
-  memberPhoto: {
-    width: 44, height: 44, borderRadius: 22,
-    borderWidth: 2, borderColor: '#030A18',
-  },
-  memberOnlineDot: {
-    position: 'absolute', left: 52, top: 10,
-    width: 12, height: 12, borderRadius: 6,
-    backgroundColor: '#22C55E', borderWidth: 2, borderColor: '#030A18',
-  },
-  memberInfo: { flex: 1, gap: 4 },
-  memberRow1: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  memberName: { color: '#000000', fontSize: 14, fontWeight: '700' },
-  memberAge:  { color: '#2D4A6B', fontSize: 11 },
-  memberRow2: { flexDirection: 'row', gap: 12 },
-  memberLocation: { color: '#3D5A7A', fontSize: 11 },
-  memberScreen:   { color: '#3D5A7A', fontSize: 11 },
-  memberScoreRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 },
-  memberScoreBarBg: {
-    flex: 1, height: 4,
-    backgroundColor: '#0D1E3A', borderRadius: 2,
-  },
-  memberScoreBarFill: { height: 4, borderRadius: 2 },
-  memberScoreText: { color: '#22C55E', fontSize: 10, fontWeight: '700' },
-  memberChevron: { color: '#2D4A6B', fontSize: 12 },
-
-  // FILTERS
-  filterRow: {
-    flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14, paddingVertical: 12,
-  },
-  filterLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  filterIconBox: {
-    width: 36, height: 36, borderRadius: 10,
-    justifyContent: 'center', alignItems: 'center',
-  },
-  filterIcon:   { fontSize: 18 },
-  filterLabel:  { color: '#000000', fontSize: 14, fontWeight: '600' },
-  filterStatus: { fontSize: 11, marginTop: 2 },
-
-  // CONTROLS
-  controlRow: {
-    flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14, paddingVertical: 13,
-  },
-  controlLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
-  controlIconBox: {
-    width: 36, height: 36, borderRadius: 10,
-    justifyContent: 'center', alignItems: 'center',
-    backgroundColor: '#0D1E3A',
-  },
-  controlIcon:  { fontSize: 18 },
-  controlLabel: { color: '#000000', fontSize: 14, fontWeight: '600' },
-  controlSub:   { color: '#3D5A7A', fontSize: 11, marginTop: 2 },
-
-  // ACTIONS GRID
-  actionsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  actionCard: { width: '47%', borderRadius: 14, overflow: 'hidden' },
-  actionCardInner: {
-    padding: 16, borderRadius: 14, alignItems: 'center', gap: 8,
-    borderWidth: 1, borderColor: '#1D4ED820',
-  },
-  actionCardIcon:  { fontSize: 28 },
-  actionCardLabel: { color: '#000000', fontSize: 13, fontWeight: '700' },
-
-  // WORLD FIRST BADGE
-  worldFirstBadge: {
-    marginHorizontal: 16, marginBottom: 16,
-    borderRadius: 16, padding: 16,
-    flexDirection: 'row', alignItems: 'center', gap: 14,
-  },
-  worldFirstEmoji: { fontSize: 36 },
-  worldFirstTitle: { color: '#000000', fontSize: 15, fontWeight: '800' },
-  worldFirstSub:   { color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 2 },
+const st = StyleSheet.create({
+  screen: { flex: 1 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  switcher: { gap: 8, paddingHorizontal: 12, paddingVertical: 10 },
+  chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7 },
+  sheet: { borderTopWidth: 1, borderTopLeftRadius: 18, borderTopRightRadius: 18, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 14, gap: 6 },
+  shareRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 6 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 9, borderTopWidth: StyleSheet.hairlineWidth },
+  dot: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
+  dotTxt: { color: '#fff', fontWeight: '800' },
+  rowBtn: { padding: 6 },
+  actions: { flexDirection: 'row', gap: 10, marginTop: 8 },
+  action: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 44, borderWidth: 1, borderRadius: 12 },
+  actionTxt: { fontSize: 14, fontWeight: '600' },
 });

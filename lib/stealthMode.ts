@@ -1,9 +1,10 @@
 
 // ================================================================
 // lib/stealthMode.ts
-// Hides VaultChat behind a Calculator decoy.
-// Data stays safe — encrypted on device.
-// No wipe. Just hidden until secret gesture.
+// UI-state flag for the calculator-decoy disguise. This module ONLY
+// tracks whether stealth is active — it does not encrypt anything.
+// Cryptographic separation of real vs decoy data is handled by the
+// duress vault (services/security/duressVault.ts). No wipe.
 // Works on Android + iOS.
 // ================================================================
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -14,8 +15,8 @@ class StealthMode {
   private onActivateCbs:   (() => void)[] = [];
   private onDeactivateCbs: (() => void)[] = [];
 
-  // Activate stealth — app hides, calculator shown
-  // Data is NOT wiped — stays AES-256 encrypted on device
+  // Activate stealth — app shows the calculator decoy. This only flips a flag;
+  // the real account's protection comes from the duress vault, not from here.
   async activate(reason: string) {
     if (this.active) return;
     this.active = true;

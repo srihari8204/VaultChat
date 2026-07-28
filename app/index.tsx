@@ -1,28 +1,28 @@
+// Cold-start router.
+//
+// Phase 2 rule: if a JWT exists in SecureStore, the user is signed in →
+// land them on /signed-in. Otherwise → /welcome (sign-in / sign-up).
+//
+// The old Firebase-based path (isSetupComplete → known device → /lock)
+// is gone for now and will be re-introduced in Phases 4-7 alongside the
+// chats UI it gates.
+
 import { router } from "expo-router";
 import { useEffect } from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
-import { SERVER_URL } from "../constants/server";
+import { getAccessToken } from "../lib/api";
+import { isMfaEnabled } from "../lib/mfa";
 
 export default function IndexScreen() {
   useEffect(() => {
     (async () => {
       try {
-        // ── Normal flow ───────────────────────────────────────
-        const { isSetupComplete } = await import("../services/securityService");
-        const setup = await isSetupComplete();
-        if (!setup) { router.replace("/welcome"); return; }
-
-        const { getCurrentUser } = await import("./(constants)/authService");
-        const user = getCurrentUser();
-        if (!user) { router.replace("/welcome"); return; }
-
-        const { isKnownDevice } = await import("../services/deviceService");
-        const known = await isKnownDevice(user.uid, SERVER_URL);
-        if (!known) { router.replace("/phone"); return; }
-
-        router.replace("/lock");
+        const token = await getAccessToken();
+        if (!token) { router.replace("/onboard" as any); return; }
+        // Logged in → if device MFA is on, gate the launch (biometric or MPIN).
+        router.replace(((await isMfaEnabled()) ? "/app-lock" : "/(tabs)/chats") as any);
       } catch {
-        router.replace("/welcome");
+        router.replace("/onboard" as any);
       }
     })();
   }, []);
@@ -35,5 +35,5 @@ export default function IndexScreen() {
 }
 
 const S = StyleSheet.create({
-  bg: { flex:1, backgroundColor:"#FFFFFF", justifyContent:"center", alignItems:"center" },
+  bg: { flex: 1, backgroundColor: "#FFFFFF", justifyContent: "center", alignItems: "center" },
 });

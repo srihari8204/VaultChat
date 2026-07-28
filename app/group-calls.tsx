@@ -1,243 +1,155 @@
-// app/group-calls.tsx
-// Group Voice & Video Call — multi-participant calling
+// app/group-calls.tsx — Group call hub (honest, no fake/Firebase).
+//
+// Real N-way (everyone-at-once) group calling requires a media server (SFU) +
+// TURN — that's a deployment/infra step. Rather than fake it (the old screen
+// simulated participants joining), this lists the group's members and starts a
+// REAL 1:1 WebRTC call with any member (reusing the working voicecall/videocall
+// screens). The full mesh/SFU group call lights up once the media server is
+// provisioned.
 
-import auth from '@react-native-firebase/auth';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
-import {
-  FlatList, StyleSheet, Text, TouchableOpacity, View,
-} from 'react-native';
+import { brandAlpha } from '../constants/theme';
+import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
+import React, { useCallback, useEffect, useState , useMemo} from 'react';
+import { FlatList, StyleSheet, Text, TouchableOpacity, View, ActivityIndicator, Image } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
+import { getChat, attachmentUrl, type ChatMember } from '../lib/chatService';
+import { getAccessToken } from '../lib/api';
+import { getSocket } from '../lib/socket';
+import { getCurrentUserAsync } from './(constants)/authService';
 
 type CallMode = 'voice' | 'video';
-type CallState = 'lobby' | 'ringing' | 'connected' | 'ended';
 
-interface Participant {
-  uid: string;
-  name: string;
-  isMuted: boolean;
-  isSpeaking: boolean;
-  isVideoOn: boolean;
-  joinedAt: number;
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
 }
 
 export default function GroupCallsScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
-  const { groupName, mode: modeParam } = useLocalSearchParams<{
-    chatId: string; groupName: string; mode?: string;
-  }>();
-  const myUid = auth().currentUser?.uid || '';
-  const myName = auth().currentUser?.displayName || 'You';
-
+  const { chatId, groupName, mode: modeParam } = useLocalSearchParams<{ chatId: string; groupName: string; mode?: string }>();
   const [mode, setMode] = useState<CallMode>((modeParam as CallMode) || 'voice');
-  const [state, setState] = useState<CallState>('lobby');
-  const [muted, setMuted] = useState(false);
-  const [videoOn, setVideoOn] = useState(mode === 'video');
-  const [speaker, setSpeaker] = useState(false);
-  const [seconds, setSeconds] = useState(0);
-  const timerRef = useRef<any>(null);
+  const [members, setMembers] = useState<ChatMember[]>([]);
+  const [authHeader, setAuthHeader] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const [participants, setParticipants] = useState<Participant[]>([
-    { uid: myUid, name: myName + ' (You)', isMuted: false, isSpeaking: false, isVideoOn: mode === 'video', joinedAt: Date.now() },
-  ]);
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const tok = await getAccessToken();
+        if (active) setAuthHeader(tok ? `Bearer ${tok}` : null);
+        const [chat, me] = await Promise.all([chatId ? getChat(chatId) : Promise.resolve(null as any), getCurrentUserAsync()]);
+        if (active && chat) {
+          setMembers(chat.members.filter((m: ChatMember) => !m.leftAt && m.userId !== me?.id));
+        }
+      } catch { /* leaves empty */ } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [chatId]);
 
-  const startCall = () => {
-    setState('ringing');
-    // Simulate participants joining
-    setTimeout(() => {
-      setState('connected');
-      timerRef.current = setInterval(() => setSeconds(s => s + 1), 1000);
-      // Simulate others joining
-      const others = ['Arjun M', 'Priya S', 'Vikram T'];
-      others.forEach((name, i) => {
-        setTimeout(() => {
-          setParticipants(prev => [...prev, {
-            uid: `sim_${i}`,
-            name,
-            isMuted: Math.random() > 0.7,
-            isSpeaking: false,
-            isVideoOn: mode === 'video' && Math.random() > 0.3,
-            joinedAt: Date.now(),
-          }]);
-        }, (i + 1) * 2000);
-      });
-    }, 3000);
+  const callMember = (m: ChatMember) => {
+    router.push({
+      pathname: mode === 'video' ? '/videocall' : '/voicecall',
+      params: { chatId, peerUid: m.userId, peerName: m.name || m.email || 'Member' },
+    } as any);
   };
 
-  const endCall = () => {
-    clearInterval(timerRef.current);
-    setState('ended');
-    setTimeout(() => router.back(), 1000);
-  };
+  // Real mesh group call: ring every member, then join the call room.
+  const startGroupCall = useCallback(async () => {
+    try {
+      const me = await getCurrentUserAsync();
+      const s = await getSocket();
+      for (const m of members) {
+        s.emit('call_incoming', { to: m.userId, chatId, group: true, groupName, video: mode === 'video' ? '1' : '0', fromName: me?.name || 'Someone' });
+      }
+    } catch {}
+    router.push({ pathname: '/group-call-active', params: { chatId, video: mode === 'video' ? '1' : '0', name: groupName } } as any);
+  }, [members, chatId, groupName, mode, router]);
 
-  useEffect(() => () => clearInterval(timerRef.current), []);
-
-  const fmt = (s: number) => {
-    const m = Math.floor(s / 60).toString().padStart(2, '0');
-    return `${m}:${(s % 60).toString().padStart(2, '0')}`;
-  };
-
-  const toggleMute = () => {
-    setMuted(m => !m);
-    setParticipants(prev => prev.map(p => p.uid === myUid ? { ...p, isMuted: !muted } : p));
-  };
-
-  // ── Lobby ──
-  if (state === 'lobby') {
-    return (
-      <>
-        <Stack.Screen options={{ headerShown: false }} />
-        <View style={st.screen}>
-          <LinearGradient colors={['#FFFFFF', '#F9FAFB']} style={StyleSheet.absoluteFill} />
-          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
-            <Text style={{ fontSize: 60 }}>{mode === 'video' ? '📹' : '📞'}</Text>
-            <Text style={st.title}>{groupName}</Text>
-            <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 14, marginBottom: 40 }}>
-              {mode === 'video' ? 'Group Video Call' : 'Group Voice Call'}
-            </Text>
-
-            {/* Mode toggle */}
-            <View style={st.modeRow}>
-              <TouchableOpacity
-                style={[st.modeBtn, mode === 'voice' && st.modeBtnActive]}
-                onPress={() => { setMode('voice'); setVideoOn(false); }}
-              >
-                <Text style={{ fontSize: 18 }}>🎤</Text>
-                <Text style={[st.modeTxt, mode === 'voice' && { color: '#4A9FFF' }]}>Voice</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[st.modeBtn, mode === 'video' && st.modeBtnActive]}
-                onPress={() => { setMode('video'); setVideoOn(true); }}
-              >
-                <Text style={{ fontSize: 18 }}>📹</Text>
-                <Text style={[st.modeTxt, mode === 'video' && { color: '#4A9FFF' }]}>Video</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Pre-call toggles */}
-            <View style={st.preControls}>
-              <TouchableOpacity style={[st.preBtn, muted && st.preBtnOff]} onPress={() => setMuted(!muted)}>
-                <Text style={{ fontSize: 22 }}>{muted ? '🔇' : '🎤'}</Text>
-                <Text style={st.preLbl}>{muted ? 'Unmute' : 'Mute'}</Text>
-              </TouchableOpacity>
-              {mode === 'video' && (
-                <TouchableOpacity style={[st.preBtn, !videoOn && st.preBtnOff]} onPress={() => setVideoOn(!videoOn)}>
-                  <Text style={{ fontSize: 22 }}>{videoOn ? '📹' : '📹'}</Text>
-                  <Text style={st.preLbl}>{videoOn ? 'Cam On' : 'Cam Off'}</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-
-            <TouchableOpacity onPress={startCall} style={{ marginTop: 20 }}>
-              <LinearGradient colors={['#10B981', '#059669']} style={st.startBtn}>
-                <Text style={{ color: '#fff', fontSize: 18, fontWeight: '900' }}>Start Call</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-
-            <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 16 }}>
-              <Text style={{ color: '#6B7280', fontSize: 14 }}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* D2DE badge */}
-          <View style={st.d2de}>
-            <Text style={{ color: '#10B981', fontSize: 10, fontWeight: '700' }}>🛡️ D2DE · E2E Encrypted Call</Text>
-          </View>
-        </View>
-      </>
-    );
-  }
-
-  // ── Connected / Ringing ──
   return (
-    <>
+    <View style={s.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <View style={st.screen}>
-        <LinearGradient colors={['#FFFFFF', '#F9FAFB']} style={StyleSheet.absoluteFill} />
-
-        {/* Header */}
-        <View style={st.header}>
-          <View>
-            <Text style={st.title}>{groupName}</Text>
-            <Text style={{ color: state === 'connected' ? '#4A9FFF' : '#F59E0B', fontSize: 13, fontWeight: '600' }}>
-              {state === 'ringing' ? 'Calling...' : `${fmt(seconds)} · ${participants.length} participants`}
-            </Text>
-          </View>
-        </View>
-
-        {/* Participants grid */}
-        <FlatList
-          data={participants}
-          keyExtractor={p => p.uid}
-          numColumns={mode === 'video' ? 2 : 1}
-          contentContainerStyle={{ padding: 12, paddingBottom: 160 }}
-          renderItem={({ item }) => (
-            <View style={[st.participantCard, mode === 'video' && { flex: 1, margin: 4, height: 200 }]}>
-              <LinearGradient
-                colors={item.uid === myUid ? ['#1D4ED8', '#7C3AED'] : ['#0F3460', '#16213E']}
-                style={st.participantGrad}
-              >
-                <Text style={{ fontSize: mode === 'video' ? 40 : 28 }}>
-                  {item.isVideoOn ? '📹' : item.name[0]?.toUpperCase()}
-                </Text>
-                <Text style={st.pName}>{item.name}</Text>
-                <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
-                  {item.isMuted && <Text style={{ fontSize: 12 }}>🔇</Text>}
-                  {item.isSpeaking && <Text style={{ fontSize: 12 }}>🔊</Text>}
-                </View>
-              </LinearGradient>
-            </View>
-          )}
-        />
-
-        {/* Controls */}
-        <View style={st.controls}>
-          <TouchableOpacity style={[st.ctrlBtn, muted && st.ctrlBtnActive]} onPress={toggleMute}>
-            <Text style={{ fontSize: 22 }}>{muted ? '🔇' : '🎤'}</Text>
-          </TouchableOpacity>
-
-          {mode === 'video' && (
-            <TouchableOpacity style={[st.ctrlBtn, !videoOn && st.ctrlBtnActive]} onPress={() => setVideoOn(!videoOn)}>
-              <Text style={{ fontSize: 22 }}>📹</Text>
-            </TouchableOpacity>
-          )}
-
-          <TouchableOpacity style={[st.ctrlBtn, speaker && st.ctrlBtnActive]} onPress={() => setSpeaker(!speaker)}>
-            <Text style={{ fontSize: 22 }}>{speaker ? '🔊' : '🔈'}</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={st.endBtn} onPress={endCall}>
-            <Text style={{ fontSize: 24 }}>📵</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={st.d2de}>
-          <Text style={{ color: '#10B981', fontSize: 10, fontWeight: '700' }}>🛡️ D2DE · E2E Encrypted</Text>
-        </View>
+      <View style={s.header}>
+        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
+        </TouchableOpacity>
+        <Text style={s.title} numberOfLines={1}>{(groupName as string) || 'Group'} · Call</Text>
+        <View style={{ width: 40 }} />
       </View>
-    </>
+
+      <View style={s.modeRow}>
+        {(['voice', 'video'] as const).map(mo => (
+          <TouchableOpacity key={mo} style={[s.modeBtn, mode === mo && s.modeBtnActive]} onPress={() => setMode(mo)}>
+            <Ionicons name={mo === 'voice' ? 'call' : 'videocam'} size={18} color={mode === mo ? '#FFFFFF' : colors.textDim} />
+            <Text style={[s.modeTxt, mode === mo && s.modeTxtActive]}>{mo === 'voice' ? 'Voice' : 'Video'}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <TouchableOpacity style={s.startBtn} activeOpacity={0.85} onPress={startGroupCall}>
+        <Ionicons name={mode === 'video' ? 'videocam' : 'call'} size={20} color="#fff" />
+        <Text style={s.startTxt}>Start {mode} group call</Text>
+      </TouchableOpacity>
+      <Text style={s.noticeTxt}>Everyone-at-once call (best for small groups). Or tap a member below for a 1:1 call.</Text>
+
+      {loading ? (
+        <ActivityIndicator color={colors.primary} style={{ marginTop: 30 }} />
+      ) : (
+        <FlatList
+          data={members}
+          keyExtractor={m => m.userId}
+          contentContainerStyle={{ padding: 16, gap: 8 }}
+          renderItem={({ item }) => {
+            const name = item.name || item.email || 'Member';
+            return (
+              <TouchableOpacity style={s.row} onPress={() => callMember(item)} activeOpacity={0.7}>
+                <View style={s.avatar}>
+                  {item.photoURL && authHeader
+                    ? <Image source={{ uri: attachmentUrl(item.photoURL), headers: { Authorization: authHeader } }} style={s.avatarImg} />
+                    : <Text style={s.avatarTxt}>{name.charAt(0).toUpperCase()}</Text>}
+                  {item.online && <View style={s.onlineDot} />}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.name} numberOfLines={1}>{name}</Text>
+                  <Text style={s.sub}>{item.online ? 'Online' : 'Tap to call'}</Text>
+                </View>
+                <View style={s.callBtn}><Ionicons name={mode === 'voice' ? 'call' : 'videocam'} size={18} color={colors.primary} /></View>
+              </TouchableOpacity>
+            );
+          }}
+          ListEmptyComponent={<View style={{ alignItems: 'center', padding: 40 }}><Text style={s.sub}>No other members to call.</Text></View>}
+        />
+      )}
+    </View>
   );
 }
 
-const st = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#FFFFFF' },
-  header: { paddingTop: 56, paddingHorizontal: 20, paddingBottom: 12 },
-  title: { color: '#fff', fontSize: 22, fontWeight: '900' },
-  modeRow: { flexDirection: 'row', gap: 12, marginBottom: 24 },
-  modeBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
-  modeBtnActive: { borderColor: '#4A9FFF', backgroundColor: '#4A9FFF12' },
-  modeTxt: { color: '#6B7280', fontSize: 14, fontWeight: '700' },
-  preControls: { flexDirection: 'row', gap: 16 },
-  preBtn: { alignItems: 'center', gap: 6, padding: 16, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', width: 80 },
-  preBtnOff: { backgroundColor: 'rgba(239,68,68,0.15)', borderColor: 'rgba(239,68,68,0.3)' },
-  preLbl: { color: '#6B7280', fontSize: 10, fontWeight: '600' },
-  startBtn: { borderRadius: 20, paddingHorizontal: 48, paddingVertical: 18 },
-  participantCard: { marginBottom: 8 },
-  participantGrad: { borderRadius: 16, padding: 16, alignItems: 'center', justifyContent: 'center', flex: 1 },
-  pName: { color: '#fff', fontSize: 14, fontWeight: '700', marginTop: 8 },
-  controls: { position: 'absolute', bottom: 40, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', gap: 16, paddingBottom: 20 },
-  ctrlBtn: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB' },
-  ctrlBtnActive: { backgroundColor: '#D1FAE5', borderColor: '#10B981' },
-  endBtn: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#EF4444', justifyContent: 'center', alignItems: 'center' },
-  d2de: { position: 'absolute', top: 52, right: 16, backgroundColor: '#D1FAE5', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 0.5, borderColor: '#10B981' },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingHorizontal: 16, paddingBottom: 8, gap: 12 },
+  backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
+  title: { color: c.text, fontSize: 18, fontWeight: '800', flex: 1 },
+  modeRow: { flexDirection: 'row', gap: 8, marginHorizontal: 16, backgroundColor: c.surface, borderRadius: 12, padding: 3, borderWidth: 1, borderColor: c.border },
+  modeBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 10 },
+  modeBtnActive: { backgroundColor: c.primary },
+  modeTxt: { color: c.textDim, fontSize: 14, fontWeight: '700' },
+  modeTxtActive: { color: '#FFFFFF' },
+  notice: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 16, marginTop: 12, padding: 12, borderRadius: 12, backgroundColor: 'rgba(6,182,212,0.1)', borderWidth: 1, borderColor: 'rgba(6,182,212,0.3)' },
+  noticeTxt: { color: c.textDim, fontSize: 12, lineHeight: 17, marginHorizontal: 18, marginTop: 8, textAlign: 'center' },
+  startBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginHorizontal: 16, marginTop: 12, paddingVertical: 14, borderRadius: 14, backgroundColor: c.primary },
+  startTxt: { color: '#fff', fontSize: 15, fontWeight: '800', textTransform: 'capitalize' },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: c.card, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: c.border },
+  avatar: { width: 46, height: 46, borderRadius: 23, backgroundColor: c.surfaceSolid, alignItems: 'center', justifyContent: 'center', overflow: 'visible' },
+  avatarImg: { width: 46, height: 46, borderRadius: 23 },
+  avatarTxt: { color: c.accent, fontSize: 18, fontWeight: '800' },
+  onlineDot: { position: 'absolute', right: 0, bottom: 0, width: 12, height: 12, borderRadius: 6, backgroundColor: c.online, borderWidth: 2, borderColor: c.card },
+  name: { color: c.text, fontSize: 15, fontWeight: '700' },
+  sub: { color: c.textDim, fontSize: 12, marginTop: 2 },
+  callBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: brandAlpha(0.13), alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: brandAlpha(0.3) },
 });

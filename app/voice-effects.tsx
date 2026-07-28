@@ -2,6 +2,7 @@
 // Change voice pitch, speed, reverb for privacy or fun
 // Record preview with effect applied before sending
 
+import { BRAND_ACCENT } from '../constants/theme';
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
@@ -12,15 +13,15 @@ import { Audio } from 'expo-av';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width: SW } = Dimensions.get('window');
-const C = { bg: '#FFFFFF', accent: '#A78BFA', card: '#F9FAFB', green: '#10B981' };
+const C = { bg: '#FFFFFF', accent: '#A78BFA', card: '#F9FAFB', green: BRAND_ACCENT };
 
 const EFFECTS = [
   { id: 'none', name: 'Normal', icon: '\uD83C\uDFA4', desc: 'Your natural voice', pitch: 1.0, rate: 1.0, color: '#6B7280' },
-  { id: 'deep', name: 'Deep Voice', icon: '\uD83D\uDC3B', desc: 'Lower pitch for a deeper tone', pitch: 0.7, rate: 0.95, color: '#FF6B35' },
+  { id: 'deep', name: 'Deep Voice', icon: '\uD83D\uDC3B', desc: 'Lower pitch for a deeper tone', pitch: 0.7, rate: 0.95, color: BRAND_ACCENT },
   { id: 'high', name: 'High Voice', icon: '\uD83D\uDC3F\uFE0F', desc: 'Higher pitch, chipmunk style', pitch: 1.5, rate: 1.05, color: '#F59E0B' },
   { id: 'robot', name: 'Robot', icon: '\uD83E\uDD16', desc: 'Robotic metallic voice', pitch: 0.85, rate: 0.8, color: '#4A9FFF' },
   { id: 'whisper', name: 'Whisper', icon: '\uD83E\uDD2B', desc: 'Quiet breathy whisper', pitch: 1.1, rate: 0.7, color: '#8B949E' },
-  { id: 'fast', name: 'Speed Up', icon: '\u26A1', desc: 'Faster playback', pitch: 1.0, rate: 1.5, color: '#10B981' },
+  { id: 'fast', name: 'Speed Up', icon: '\u26A1', desc: 'Faster playback', pitch: 1.0, rate: 1.5, color: BRAND_ACCENT },
   { id: 'slow', name: 'Slow Mo', icon: '\uD83D\uDC22', desc: 'Dramatic slow motion', pitch: 1.0, rate: 0.5, color: '#EC4899' },
   { id: 'echo', name: 'Echo', icon: '\uD83C\uDF0A', desc: 'Echoing cave effect', pitch: 0.95, rate: 0.9, color: '#A78BFA' },
   { id: 'alien', name: 'Alien', icon: '\uD83D\uDC7D', desc: 'Extraterrestrial voice', pitch: 1.8, rate: 0.85, color: '#22D3EE' },
@@ -179,12 +180,12 @@ const s = StyleSheet.create({
   recordBtn: { backgroundColor: '#A78BFA', borderRadius: 30, paddingVertical: 14, paddingHorizontal: 32 },
   recordTxt: { color: '#000', fontSize: 14, fontWeight: '800' },
   playRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
-  playBtn: { backgroundColor: '#10B981', borderRadius: 12, paddingVertical: 10, paddingHorizontal: 16 },
+  playBtn: { backgroundColor: BRAND_ACCENT, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 16 },
   playTxt: { color: '#000', fontSize: 12, fontWeight: '700' },
   useCallBtn: { backgroundColor: '#4A9FFF22', borderRadius: 12, paddingVertical: 10, paddingHorizontal: 16, borderWidth: 1, borderColor: '#4A9FFF44' },
   useCallTxt: { color: '#4A9FFF', fontSize: 12, fontWeight: '700' },
-  activeEffect: { marginTop: 12, backgroundColor: '#10B98115', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 },
-  activeTxt: { color: '#10B981', fontSize: 11, fontWeight: '600' },
+  activeEffect: { marginTop: 12, backgroundColor: BRAND_ACCENT + '15', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 },
+  activeTxt: { color: BRAND_ACCENT, fontSize: 11, fontWeight: '600' },
   sectionTitle: { color: '#6B7280', fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 8 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   effectCard: { width: (SW - 48) / 2, backgroundColor: C.card, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: '#E5E7EB', alignItems: 'center' },

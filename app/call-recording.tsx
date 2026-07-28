@@ -3,12 +3,13 @@
  * Call Recording — record, playback, save, share, manage recordings.
  */
 
+import { brandAlpha } from '../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Audio } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState , useMemo} from 'react';
 import {
   Alert,
   Animated,
@@ -22,21 +23,9 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 
-const C = {
-  bg: '#FFFFFF',
-  card: '#F9FAFB',
-  cardAlt: '#111D32',
-  accent: '#4A9FFF',
-  cyan: '#4A9FFF',
-  red: '#EF4444',
-  green: '#10B981',
-  orange: '#F59E0B',
-  text: '#FFFFFF',
-  textDim: 'rgba(255,255,255,0.5)',
-  textFaint: 'rgba(255,255,255,0.22)',
-  border: 'rgba(74,159,255,0.15)',
-};
 
 const SW = Dimensions.get('window').width;
 const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
@@ -53,7 +42,14 @@ interface RecordingMeta {
 
 type ScreenState = 'idle' | 'recording' | 'paused' | 'finished' | 'list';
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function CallRecordingScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
 
   const [state, setState] = useState<ScreenState>('idle');
@@ -295,11 +291,11 @@ export default function CallRecordingScreen() {
   const renderHeader = () => (
     <View style={s.header}>
       <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-        <Ionicons name="arrow-back" size={24} color={C.text} />
+        <Ionicons name="arrow-back" size={24} color={colors.text} />
       </TouchableOpacity>
       <Text style={s.headerTitle}>Call Recording</Text>
       <TouchableOpacity onPress={() => setState('list')} style={s.backBtn}>
-        <Ionicons name="list" size={22} color={C.accent} />
+        <Ionicons name="list" size={22} color={colors.accent} />
       </TouchableOpacity>
     </View>
   );
@@ -323,7 +319,7 @@ export default function CallRecordingScreen() {
               s.waveBar,
               {
                 transform: [{ scaleY: a }],
-                backgroundColor: state === 'paused' ? C.orange : C.cyan,
+                backgroundColor: state === 'paused' ? '#F59E0B' : colors.accent,
               },
             ]}
           />
@@ -332,7 +328,7 @@ export default function CallRecordingScreen() {
 
       {/* Consent banner */}
       <View style={s.consentBanner}>
-        <Ionicons name="shield-checkmark" size={16} color={C.green} style={{ marginRight: 8 }} />
+        <Ionicons name="shield-checkmark" size={16} color={colors.primary} style={{ marginRight: 8 }} />
         <Text style={s.consentText}>All participants have been notified</Text>
       </View>
     </View>
@@ -343,14 +339,14 @@ export default function CallRecordingScreen() {
       {state === 'recording' ? (
         <TouchableOpacity style={s.controlBtn} onPress={pauseRecording}>
           <View style={[s.controlCircle, { backgroundColor: 'rgba(245,158,11,0.2)' }]}>
-            <Ionicons name="pause" size={28} color={C.orange} />
+            <Ionicons name="pause" size={28} color={'#F59E0B'} />
           </View>
           <Text style={s.controlLabel}>Pause</Text>
         </TouchableOpacity>
       ) : state === 'paused' ? (
         <TouchableOpacity style={s.controlBtn} onPress={resumeRecording}>
-          <View style={[s.controlCircle, { backgroundColor: 'rgba(16,185,129,0.2)' }]}>
-            <Ionicons name="play" size={28} color={C.green} />
+          <View style={[s.controlCircle, { backgroundColor: brandAlpha(0.2) }]}>
+            <Ionicons name="play" size={28} color={colors.primary} />
           </View>
           <Text style={s.controlLabel}>Resume</Text>
         </TouchableOpacity>
@@ -358,7 +354,7 @@ export default function CallRecordingScreen() {
 
       <TouchableOpacity style={s.controlBtn} onPress={stopRecording}>
         <View style={[s.controlCircle, { backgroundColor: 'rgba(239,68,68,0.2)', width: 72, height: 72 }]}>
-          <Ionicons name="stop" size={32} color={C.red} />
+          <Ionicons name="stop" size={32} color={colors.danger} />
         </View>
         <Text style={s.controlLabel}>Stop</Text>
       </TouchableOpacity>
@@ -371,7 +367,7 @@ export default function CallRecordingScreen() {
 
     return (
       <View style={s.finishedContainer}>
-        <Ionicons name="checkmark-circle" size={48} color={C.green} />
+        <Ionicons name="checkmark-circle" size={48} color={colors.primary} />
         <Text style={s.finishedTitle}>Recording Saved</Text>
         <Text style={s.finishedDuration}>Duration: {formatTime(latest.duration)}</Text>
 
@@ -385,22 +381,22 @@ export default function CallRecordingScreen() {
             style={s.actionBtn}
             onPress={() => (isPlaying ? stopPlayback() : playRecording(latest.uri))}
           >
-            <Ionicons name={isPlaying ? 'stop-circle' : 'play-circle'} size={24} color={C.cyan} />
+            <Ionicons name={isPlaying ? 'stop-circle' : 'play-circle'} size={24} color={colors.accent} />
             <Text style={s.actionText}>{isPlaying ? 'Stop' : 'Play'}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={s.actionBtn} onPress={() => saveToVault(latest.id)}>
-            <Ionicons name="lock-closed" size={24} color={C.accent} />
+            <Ionicons name="lock-closed" size={24} color={colors.accent} />
             <Text style={s.actionText}>Save to Vault</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={s.actionBtn} onPress={() => Alert.alert('Share', 'Recording shared in chat.')}>
-            <Ionicons name="share" size={24} color={C.green} />
+            <Ionicons name="share" size={24} color={colors.primary} />
             <Text style={s.actionText}>Share</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={s.actionBtn} onPress={() => deleteRecording(latest.id)}>
-            <Ionicons name="trash" size={24} color={C.red} />
+            <Ionicons name="trash" size={24} color={colors.danger} />
             <Text style={s.actionText}>Delete</Text>
           </TouchableOpacity>
         </View>
@@ -432,7 +428,7 @@ export default function CallRecordingScreen() {
         renderItem={({ item }) => (
           <View style={s.listItem}>
             <View style={s.listItemLeft}>
-              <Ionicons name="mic-circle" size={36} color={C.accent} style={{ marginRight: 12 }} />
+              <Ionicons name="mic-circle" size={36} color={colors.accent} style={{ marginRight: 12 }} />
               <View>
                 <Text style={s.listItemName}>{item.callerName}</Text>
                 <Text style={s.listItemMeta}>
@@ -442,13 +438,13 @@ export default function CallRecordingScreen() {
             </View>
             <View style={s.listItemRight}>
               {item.savedToVault && (
-                <Ionicons name="lock-closed" size={14} color={C.green} style={{ marginRight: 8 }} />
+                <Ionicons name="lock-closed" size={14} color={colors.primary} style={{ marginRight: 8 }} />
               )}
               <TouchableOpacity onPress={() => playRecording(item.uri)}>
-                <Ionicons name="play-circle" size={28} color={C.cyan} />
+                <Ionicons name="play-circle" size={28} color={colors.accent} />
               </TouchableOpacity>
               <TouchableOpacity onPress={() => deleteRecording(item.id)} style={{ marginLeft: 10 }}>
-                <Ionicons name="trash-outline" size={20} color={C.red} />
+                <Ionicons name="trash-outline" size={20} color={colors.danger} />
               </TouchableOpacity>
             </View>
           </View>
@@ -461,7 +457,7 @@ export default function CallRecordingScreen() {
   return (
     <View style={s.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <LinearGradient colors={[C.bg, '#F9FAFB', C.bg]} style={StyleSheet.absoluteFill} />
+      <LinearGradient colors={[colors.bg, '#F9FAFB', colors.bg]} style={StyleSheet.absoluteFill} />
 
       <Animated.View style={{ flex: 1, opacity: fadeIn }}>
         {renderHeader()}
@@ -485,8 +481,8 @@ export default function CallRecordingScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
 
   header: {
     flexDirection: 'row',
@@ -497,14 +493,14 @@ const s = StyleSheet.create({
     paddingBottom: 12,
   },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  headerTitle: { fontSize: 18, fontWeight: '700', color: C.text },
+  headerTitle: { fontSize: 18, fontWeight: '700', color: c.text },
 
   // Recording indicator
   indicatorContainer: { alignItems: 'center', paddingHorizontal: 24, marginTop: 20 },
   indicatorRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  redDot: { width: 14, height: 14, borderRadius: 7, backgroundColor: C.red, marginRight: 10 },
-  recordingText: { fontSize: 18, fontWeight: '700', color: C.red },
-  timer: { fontSize: 48, fontWeight: '300', color: C.text, fontVariant: ['tabular-nums'] },
+  redDot: { width: 14, height: 14, borderRadius: 7, backgroundColor: c.danger, marginRight: 10 },
+  recordingText: { fontSize: 18, fontWeight: '700', color: c.danger },
+  timer: { fontSize: 48, fontWeight: '300', color: c.text, fontVariant: ['tabular-nums'] },
 
   waveContainer: {
     flexDirection: 'row',
@@ -519,13 +515,13 @@ const s = StyleSheet.create({
   consentBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(16,185,129,0.1)',
+    backgroundColor: brandAlpha(0.1),
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 10,
     marginTop: 8,
   },
-  consentText: { fontSize: 13, color: C.green, fontWeight: '600' },
+  consentText: { fontSize: 13, color: c.primary, fontWeight: '600' },
 
   // Controls
   controlsRow: {
@@ -543,12 +539,12 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  controlLabel: { fontSize: 12, color: C.textDim, marginTop: 8, fontWeight: '600' },
+  controlLabel: { fontSize: 12, color: c.textDim, marginTop: 8, fontWeight: '600' },
 
   // Finished
   finishedContainer: { alignItems: 'center', paddingHorizontal: 24 },
-  finishedTitle: { fontSize: 22, fontWeight: '700', color: C.text, marginTop: 12 },
-  finishedDuration: { fontSize: 14, color: C.textDim, marginTop: 4 },
+  finishedTitle: { fontSize: 22, fontWeight: '700', color: c.text, marginTop: 12 },
+  finishedDuration: { fontSize: 14, color: c.textDim, marginTop: 4 },
   progressBarBg: {
     width: SW - 80,
     height: 4,
@@ -557,20 +553,20 @@ const s = StyleSheet.create({
     marginTop: 20,
     overflow: 'hidden',
   },
-  progressBarFill: { height: '100%', backgroundColor: C.cyan, borderRadius: 2 },
+  progressBarFill: { height: '100%', backgroundColor: c.accent, borderRadius: 2 },
 
   actionRow: { flexDirection: 'row', marginTop: 32, gap: 12 },
   actionBtn: {
     alignItems: 'center',
-    backgroundColor: C.card,
+    backgroundColor: c.card,
     paddingHorizontal: 14,
     paddingVertical: 12,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: c.border,
     minWidth: 72,
   },
-  actionText: { fontSize: 11, color: C.textDim, marginTop: 4, fontWeight: '600' },
+  actionText: { fontSize: 11, color: c.textDim, marginTop: 4, fontWeight: '600' },
 
   // Idle
   idleContainer: { alignItems: 'center', paddingHorizontal: 24 },
@@ -586,29 +582,29 @@ const s = StyleSheet.create({
     width: 88,
     height: 88,
     borderRadius: 44,
-    backgroundColor: C.red,
+    backgroundColor: c.danger,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  idleText: { fontSize: 18, fontWeight: '700', color: C.text, marginTop: 20 },
-  idleHint: { fontSize: 13, color: C.textDim, textAlign: 'center', marginTop: 8, lineHeight: 20 },
+  idleText: { fontSize: 18, fontWeight: '700', color: c.text, marginTop: 20 },
+  idleHint: { fontSize: 13, color: c.textDim, textAlign: 'center', marginTop: 8, lineHeight: 20 },
 
   // List
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: C.text, marginBottom: 12 },
-  emptyText: { fontSize: 14, color: C.textDim, textAlign: 'center', marginTop: 40 },
+  sectionTitle: { fontSize: 16, fontWeight: '700', color: c.text, marginBottom: 12 },
+  emptyText: { fontSize: 14, color: c.textDim, textAlign: 'center', marginTop: 40 },
   listItem: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: C.card,
+    backgroundColor: c.card,
     padding: 14,
     borderRadius: 12,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: c.border,
   },
   listItemLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  listItemName: { fontSize: 14, fontWeight: '600', color: C.text },
-  listItemMeta: { fontSize: 12, color: C.textDim, marginTop: 2 },
+  listItemName: { fontSize: 14, fontWeight: '600', color: c.text },
+  listItemMeta: { fontSize: 12, color: c.textDim, marginTop: 2 },
   listItemRight: { flexDirection: 'row', alignItems: 'center' },
 });

@@ -1,121 +1,163 @@
-// app/search.tsx
-// Global search across all chats
+// app/search.tsx — global search (WhatsApp-style). Filters chats by name AND
+// searches message CONTENT across all chats, entirely on-device against the
+// local plaintext cache (zero-knowledge — the server never sees the query).
 
-import React, { useState } from 'react';
-import { View, Text, TextInput, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
-import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator, SectionList, StyleSheet, Text, TextInput, TouchableOpacity, View,
+} from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
+import { getAccessToken } from '../lib/api';
+import { Avatar } from '../components/ui';
+import { attachmentUrl, listChats, type ChatSummary } from '../lib/chatService';
+import { searchAllMessages } from '../lib/localDb';
+import { setPendingJump } from '../lib/chatJump';
 
-interface Result {
-  chatId: string;
-  chatName: string;
-  messageId: string;
-  plaintext: string;
-  senderId: string;
-  createdAt: any;
-  peerUid: string;
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
 }
 
+const titleOf = (c: ChatSummary) =>
+  c.type === 'direct' ? (c.peerName || c.name || 'Direct chat') : (c.name || 'Group chat');
+
+type MsgHit = { chatId: string; id: number; content: string; senderId: string | null; createdAt: string };
+
 export default function SearchScreen() {
-  const router   = useRouter();
-  const myUid    = auth().currentUser?.uid ?? '';
-  const [query,   setQuery]   = useState('');
-  const [results, setResults] = useState<Result[]>([]);
-  const [loading, setLoading] = useState(false);
+  const { colors } = useTheme();
+  const S = useS();
+  const router = useRouter();
+  const [query, setQuery] = useState('');
+  const [chats, setChats] = useState<ChatSummary[]>([]);
+  const [msgs, setMsgs] = useState<MsgHit[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [authHeader, setAuthHeader] = useState<string | null>(null);
+  const debounce = useRef<any>(null);
 
-  const search = async (q: string) => {
-    setQuery(q);
-    if (q.trim().length < 2) { setResults([]); return; }
-    setLoading(true);
-    try {
-      // Get all chats I'm in
-      const chatsSnap = await firestore().collection('chats')
-        .where('participants', 'array-contains', myUid).get();
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      try {
+        const [list, tok] = await Promise.all([listChats(), getAccessToken()]);
+        if (cancel) return;
+        setChats(list);
+        setAuthHeader(tok ? `Bearer ${tok}` : null);
+      } catch {}
+      finally { if (!cancel) setLoading(false); }
+    })();
+    return () => { cancel = true; };
+  }, []);
 
-      const matches: Result[] = [];
-      await Promise.all(chatsSnap.docs.map(async chatDoc => {
-        const d = chatDoc.data();
-        const chatName = d.name ?? (d.participantNames ? Object.values(d.participantNames).filter((n: any) => n !== myUid).join(', ') : 'Chat');
-        const peerUid  = (d.participants as string[]).find(u => u !== myUid) ?? '';
+  // Debounced on-device message-content search.
+  useEffect(() => {
+    clearTimeout(debounce.current);
+    const q = query.trim();
+    if (q.length < 2) { setMsgs([]); return; }
+    debounce.current = setTimeout(() => { searchAllMessages(q, 50).then(setMsgs).catch(() => setMsgs([])); }, 220);
+    return () => clearTimeout(debounce.current);
+  }, [query]);
 
-        // Note: this searches on plaintext field (unencrypted legacy messages)
-        // Encrypted messages need client-side search (decrypt first in memory)
-        const msgsSnap = await firestore().collection('chats').doc(chatDoc.id)
-          .collection('messages')
-          .where('plaintext', '>=', q)
-          .where('plaintext', '<=', q + '\uf8ff')
-          .limit(5).get();
+  const chatTitle = useMemo(() => {
+    const m = new Map<string, ChatSummary>();
+    for (const c of chats) m.set(c.id, c);
+    return m;
+  }, [chats]);
 
-        msgsSnap.docs.forEach(mDoc => {
-          const md = mDoc.data();
-          matches.push({
-            chatId: chatDoc.id, chatName, messageId: mDoc.id,
-            plaintext: md.plaintext ?? '', senderId: md.senderId,
-            createdAt: md.createdAt, peerUid,
-          });
-        });
-      }));
-      setResults(matches);
-    } catch { setResults([]); }
-    finally { setLoading(false); }
+  const filteredChats = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return chats;
+    return chats.filter(c => titleOf(c).toLowerCase().includes(q));
+  }, [query, chats]);
+
+  const sections = useMemo(() => {
+    const out: { title: string; kind: 'chat' | 'msg'; data: any[] }[] = [];
+    if (filteredChats.length) out.push({ title: 'Chats', kind: 'chat', data: filteredChats });
+    if (msgs.length) out.push({ title: 'Messages', kind: 'msg', data: msgs });
+    return out;
+  }, [filteredChats, msgs]);
+
+  const openChat = (id: string, jumpTo?: number) => {
+    if (jumpTo) setPendingJump(id, jumpTo);   // chat.tsx consumes this on focus → scrolls to the message
+    router.push({ pathname: '/chat', params: { id } } as any);
   };
 
-  const fmt = (ts: any) => ts?.toDate?.().toLocaleDateString() ?? '';
-
   return (
-    <>
-      <Stack.Screen options={{ title: 'Search', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
-      <View style={s.screen}>
-        <View style={s.searchBar}>
-          <Text style={{ fontSize: 16, marginRight: 8 }}>ðŸ”</Text>
-          <TextInput
-            style={s.input}
-            placeholder="Search messagesâ€¦"
-            placeholderTextColor="#9CA3AF"
-            value={query}
-            onChangeText={search}
-            autoFocus
-          />
-          {loading && <ActivityIndicator color="#4A9FFF" size="small" />}
-        </View>
-        <FlatList
-          data={results}
-          keyExtractor={r => r.chatId + r.messageId}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={s.result}
-              onPress={() => router.push({ pathname: '/chat', params: { chatId: item.chatId, peerUid: item.peerUid, peerName: item.chatName } })}
-            >
-              <Text style={s.chatName}>{item.chatName}</Text>
-              <Text style={s.date}>{fmt(item.createdAt)}</Text>
-              <Text style={s.preview} numberOfLines={2}>
-                {item.plaintext.replace(query, '').length < item.plaintext.length
-                  ? item.plaintext
-                  : item.plaintext}
-              </Text>
-            </TouchableOpacity>
-          )}
-          ListEmptyComponent={query.length >= 2 && !loading
-            ? <View style={s.empty}><Text style={s.emptyTxt}>No results for &quot;{query}&quot;</Text></View>
-            : query.length < 2
-              ? <View style={s.empty}><Text style={s.emptyTxt}>Type at least 2 characters</Text></View>
-              : null
-          }
+    <View style={S.screen}>
+      <View style={S.header}>
+        <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn} activeOpacity={0.7}>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
+        </TouchableOpacity>
+        <TextInput
+          style={S.input}
+          placeholder="Search chats and messages…"
+          placeholderTextColor={colors.textDim}
+          value={query}
+          onChangeText={setQuery}
+          autoFocus
+          returnKeyType="search"
+          maxLength={120}
         />
       </View>
-    </>
+
+      {loading ? (
+        <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
+      ) : sections.length === 0 ? (
+        <View style={S.empty}>
+          <Text style={S.emptyTitle}>{query.trim() ? 'Nothing found' : 'Search your chats'}</Text>
+          {!!query.trim() && <Text style={S.emptySub}>Try a different name or word.</Text>}
+        </View>
+      ) : (
+        <SectionList
+          sections={sections}
+          keyExtractor={(item, i) => (item.id ?? '') + ':' + i}
+          contentContainerStyle={{ paddingBottom: 40 }}
+          renderSectionHeader={({ section }) => <Text style={S.sectionLabel}>{section.title.toUpperCase()}</Text>}
+          renderItem={({ item, section }) => {
+            if (section.kind === 'chat') {
+              const c = item as ChatSummary;
+              const photoId = c.type === 'direct' ? c.peerPhotoURL : c.photoURL;
+              return (
+                <TouchableOpacity style={S.row} onPress={() => openChat(c.id)} activeOpacity={0.7}>
+                  <Avatar uri={photoId && authHeader ? attachmentUrl(photoId) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={titleOf(c)} size={44} presence={c.type === 'direct' && c.peerOnline ? 'online' : null} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={S.rowTitle} numberOfLines={1}>{titleOf(c)}</Text>
+                    <Text style={S.rowSub}>{c.type === 'group' ? 'Group' : 'Direct'}{c.unreadCount > 0 ? ` · ${c.unreadCount} unread` : ''}</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            }
+            const h = item as MsgHit;
+            const c = chatTitle.get(h.chatId);
+            const photoId = c?.type === 'direct' ? c?.peerPhotoURL : c?.photoURL;
+            return (
+              <TouchableOpacity style={S.row} onPress={() => openChat(h.chatId, h.id)} activeOpacity={0.7}>
+                <Avatar uri={photoId && authHeader ? attachmentUrl(photoId) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={c ? titleOf(c) : 'Chat'} size={44} />
+                <View style={{ flex: 1 }}>
+                  <Text style={S.rowTitle} numberOfLines={1}>{c ? titleOf(c) : 'Chat'}</Text>
+                  <Text style={S.rowSub} numberOfLines={1}>{h.content}</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          }}
+        />
+      )}
+    </View>
   );
 }
 
-const s = StyleSheet.create({
-  screen:   { flex: 1, backgroundColor: '#FFFFFF' },
-  searchBar:{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', padding: 12, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
-  input:    { flex: 1, color: '#1F2937', fontSize: 16 },
-  result:   { padding: 14, borderBottomWidth: 1, borderBottomColor: '#0A0A18' },
-  chatName: { color: '#4A9FFF', fontSize: 13, fontWeight: 'bold', marginBottom: 2 },
-  date:     { color: '#6B7280', fontSize: 11, marginBottom: 4 },
-  preview:  { color: '#C0C0E0', fontSize: 14 },
-  empty:    { padding: 40, alignItems: 'center' },
-  emptyTxt: { color: '#6B7280', fontSize: 14 },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen:     { flex: 1, backgroundColor: c.bg },
+  header:     { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  backBtn:    { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  input:      { flex: 1, color: c.text, backgroundColor: c.card, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10, fontSize: 15 },
+  empty:      { alignItems: 'center', paddingTop: 64, paddingHorizontal: 32 },
+  emptyTitle: { color: c.text, fontSize: 16, fontWeight: '700' },
+  emptySub:   { color: c.textDim, fontSize: 13, marginTop: 6, textAlign: 'center' },
+  sectionLabel: { color: c.textDim, fontSize: 12, fontWeight: '700', letterSpacing: 1, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 4, backgroundColor: c.bg },
+  row:        { flexDirection: 'row', gap: 12, alignItems: 'center', paddingVertical: 11, paddingHorizontal: 16 },
+  rowTitle:   { color: c.text, fontSize: 15, fontWeight: '600' },
+  rowSub:     { color: c.textDim, fontSize: 12, marginTop: 2 },
 });

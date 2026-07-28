@@ -1,20 +1,20 @@
 {
   "project_info": {
-    "project_number": "207307621485",
-    "project_id": "vaultchat-ce9e3",
-    "storage_bucket": "vaultchat-ce9e3.firebasestorage.app"
+    "project_number": "553821750020",
+    "project_id": "vaultchatprod01",
+    "storage_bucket": "vaultchatprod01.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:207307621485:android:56aa1a7927a5a77bdeab64",
+        "mobilesdk_app_id": "1:553821750020:android:537c9dc1496e9c40350651",
         "android_client_info": {
           "package_name": "com.vaultchat.app"
         }
       },
       "oauth_client": [
         {
-          "client_id": "207307621485-cgcu41rebb1495ik0fqfb6d78crd9v4e.apps.googleusercontent.com",
+          "client_id": "553821750020-k20ga1ce2v19rc18mt3hhd6t107eghhr.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
             "package_name": "com.vaultchat.app",
@@ -22,20 +22,20 @@
           }
         },
         {
-          "client_id": "207307621485-53m82dlcolfctpfagjnddnsq1euvvmpe.apps.googleusercontent.com",
+          "client_id": "553821750020-2v6ul3cu0tr4o76uvtabjubgnbk2m40u.apps.googleusercontent.com",
           "client_type": 3
         }
       ],
       "api_key": [
         {
-          "current_key": "AIzaSyDKic9s-_fyg4OeAttQgZVBj4mT-4UkGSc"
+          "current_key": "AIzaSyBKL2HIzv5NGeRPJBLj1AZGKZ5JCzxzjPc"
         }
       ],
       "services": {
         "appinvite_service": {
           "other_platform_oauth_client": [
             {
-              "client_id": "207307621485-53m82dlcolfctpfagjnddnsq1euvvmpe.apps.googleusercontent.com",
+              "client_id": "553821750020-2v6ul3cu0tr4o76uvtabjubgnbk2m40u.apps.googleusercontent.com",
               "client_type": 3
             }
           ]

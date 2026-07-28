@@ -1,524 +1,701 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-// app/chats.tsx
-// Chat list: 1:1 + groups, search, starred, mute, archive, online status,
-// note-to-self, swipe actions, smart filters, chat folders, gradient avatars
+// app/(tabs)/chats.tsx — WhatsApp-style chat list (Obsidian Aurora).
+//
+// Postgres backend (/chats REST + Socket.IO new_message/presence). Swipe
+// right → Pin / Mute; swipe left → Archive / Delete(hide). Sticky "Pinned"
+// and "All Chats" sections. FAB → /new-chat. Data wiring (presence, folders,
+// pin/archive/mute/hidden, unread) is preserved from the previous version.
 
-import { getApp } from '@react-native-firebase/app';
-import { getAuth } from '@react-native-firebase/auth';
-import { collection, doc, getDoc, getFirestore, onSnapshot, orderBy, query, updateDoc, where } from '@react-native-firebase/firestore';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  FlatList,
-  Image,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+  ActivityIndicator, Alert, Image, Modal, Pressable, RefreshControl, ScrollView, SectionList,
+  StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
-import { archiveChat, muteChat, pinChat } from '../../services/groupService';
+import { Swipeable } from 'react-native-gesture-handler';
+import { Ionicons } from '@expo/vector-icons';
+import { type Palette, brandAlpha } from '../../constants/theme';
+import { useTheme } from '../../lib/theme';
+import { Avatar } from '../../components/ui';
+import { getAccessToken } from '../../lib/api';
+import {
+  archiveChat, attachmentUrl, listChats, listStoriesFeed, muteChat, pinChat, setHidden,
+  type ChatSummary,
+} from '../../lib/chatService';
+import { registerPushToken } from '../../lib/push';
+import ConnectionBanner from '../../components/ConnectionBanner';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { cloudBackupMeta } from '../../lib/cloudBackup';
+import { runScheduledBackupIfDue } from '../../lib/backupScheduler';
+import { getSocket } from '../../lib/socket';
+import { setUnreadTotal } from '../../lib/unreadStore';
+import { getDraftMap } from '../../lib/drafts';
+import { getLastMessagePerChat, getCachedChats, cacheChats } from '../../lib/localDb';
+import { syncAllHistory } from '../../lib/historySync';
+import { getCurrentUserAsync } from '../(constants)/authService';
 
-let app: any, auth: any, db: any;
-try {
-  app = getApp();
-  auth = getAuth(app);
-  db = getFirestore(app);
-} catch {
-  // @react-native-firebase is not available on web — fall through
-  app = null; auth = null; db = null;
-}
+type LastMsg = { content: string | null; type: string | null; senderId: string | null; id: number };
 
-// ── Gradient palette for avatars ─────────────────────────────────
-const AVATAR_GRADIENTS: [string, string][] = [
-  ['#1D4ED8', '#7C3AED'],
-  ['#059669', '#10B981'],
-  ['#DC2626', '#F97316'],
-  ['#7C3AED', '#EC4899'],
-  ['#0891B2', '#06B6D4'],
-  ['#D97706', '#F59E0B'],
-  ['#4F46E5', '#818CF8'],
-  ['#BE185D', '#F472B6'],
+type FolderId = 'all' | 'unread' | 'groups' | 'pinned' | 'archive';
+const FOLDERS: { id: FolderId; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'unread', label: 'Unread' },
+  { id: 'groups', label: 'Groups' },
+  { id: 'pinned', label: 'Pinned' },
+  { id: 'archive', label: 'Archive' },
 ];
 
-function getGradient(name: string): [string, string] {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  return AVATAR_GRADIENTS[Math.abs(hash) % AVATAR_GRADIENTS.length];
-}
-
-// ── Smart filter types ───────────────────────────────────────────
-type ChatFilter = 'All' | 'Unread' | 'Groups' | 'Pinned' | 'Archive';
-
-const FILTERS: { key: ChatFilter; label: string; icon: string }[] = [
-  { key: 'All', label: 'All', icon: '💬' },
-  { key: 'Unread', label: 'Unread', icon: '🔵' },
-  { key: 'Groups', label: 'Groups', icon: '👥' },
-  { key: 'Pinned', label: 'Pinned', icon: '📌' },
-  { key: 'Archive', label: 'Archive', icon: '🗄' },
-];
-
-// ── Chat folder types ────────────────────────────────────────────
-type FolderKey = 'all' | 'work' | 'family' | 'friends' | 'unread';
-
-const FOLDERS: { key: FolderKey; label: string; icon: string }[] = [
-  { key: 'all', label: 'All', icon: '📂' },
-  { key: 'work', label: 'Work', icon: '💼' },
-  { key: 'family', label: 'Family', icon: '🏠' },
-  { key: 'friends', label: 'Friends', icon: '🤝' },
-];
-
-interface ChatItem {
-  id: string;
-  isGroup: boolean;
-  name: string;
-  photoURL?: string;
-  lastMsg: string;
-  lastTime: any;
-  unreadCount: number;
-  pinned: boolean;
-  archived: boolean;
-  muted: boolean;
-  online?: boolean;
-  peerUid?: string;
-  folder?: FolderKey;
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
 }
 
 export default function ChatsScreen() {
   const router = useRouter();
-  const myUid = auth.currentUser?.uid ?? '';
-
-  const [chats, setChats] = useState<ChatItem[]>([]);
-  const [filtered, setFiltered] = useState<ChatItem[]>([]);
-  const [search, setSearch] = useState('');
-  const [activeFilter, setActiveFilter] = useState<ChatFilter>('All');
-  const [activeFolder, setActiveFolder] = useState<FolderKey>('all');
+  const { colors } = useTheme();
+  const S = useS();
+  const [chats, setChats] = useState<ChatSummary[]>([]);
   const [loading, setLoading] = useState(true);
-  const [longPress, setLongPress] = useState<ChatItem | null>(null);
-  const [folderMap, setFolderMap] = useState<Record<string, FolderKey>>({});
-  const [showFolderPicker, setShowFolderPicker] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [authHeader, setAuthHeader] = useState<string | null>(null);
+  const [folder, setFolder] = useState<FolderId>('all');
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  // Real last-message previews from the local plaintext cache (WhatsApp-style).
+  const [lastMsgs, setLastMsgs] = useState<Map<string, LastMsg>>(new Map());
+  const [meId, setMeId] = useState<string | null>(null);
+  const meIdRef = useRef<string | null>(null);
+  useEffect(() => { meIdRef.current = meId; }, [meId]);
+  // Chats with someone typing right now (chatId set) — shows "typing…" in the row.
+  const [typingChats, setTypingChats] = useState<Set<string>>(new Set());
+  const typingTimers = useRef<Record<string, any>>({});
+  const [menuChat, setMenuChat] = useState<ChatSummary | null>(null);   // long-press action sheet
 
-  // Load folder assignments from AsyncStorage
   useEffect(() => {
+    let cancel = false;
     (async () => {
-      const raw = await AsyncStorage.getItem('vc_chat_folders');
-      if (raw) setFolderMap(JSON.parse(raw));
+      const tok = await getAccessToken();
+      if (!cancel) setAuthHeader(tok ? `Bearer ${tok}` : null);
     })();
+    return () => { cancel = true; };
   }, []);
 
-  const assignFolder = async (chatId: string, folder: FolderKey) => {
-    const updated = { ...folderMap, [chatId]: folder };
-    setFolderMap(updated);
-    await AsyncStorage.setItem('vc_chat_folders', JSON.stringify(updated));
-    setShowFolderPicker(false);
-    setLongPress(null);
-  };
+  const fetchList = useCallback(async () => {
+    try {
+      const list = await listChats();
+      setChats(list);
+      cacheChats(list).catch(() => {});                         // persist for instant next-launch paint (op-sqlite engine)
+      getLastMessagePerChat().then(setLastMsgs).catch(() => {}); // refresh row previews
+      // Background: pre-fetch history so offline scroll-back works (once/session, Wi-Fi only).
+      syncAllHistory(list.filter(c => !c.archived).map(c => c.id)).then(() => getLastMessagePerChat().then(setLastMsgs).catch(() => {})).catch(() => {});
+      setError(null);
+      // Publish total unread (non-archived) so the Chats tab can badge it.
+      setUnreadTotal(list.reduce((n, c) => n + (c.archived ? 0 : (c.unreadCount > 0 ? 1 : 0)), 0));
+    } catch (e: any) {
+      setError(e?.message ?? 'Failed to load chats');
+    }
+  }, []);
 
   useEffect(() => {
-    if (!myUid) { setLoading(false); router.replace('/welcome'); return; }
+    let cancel = false;
+    (async () => {
+      // Paint cached chats instantly (WhatsApp-style) so there's no spinner on
+      // cold start; the network fetch then reconciles in the background.
+      try {
+        const cached = await getCachedChats();
+        if (!cancel && cached.length) { setChats(cached as any); setLoading(false); }
+      } catch {}
+      await fetchList();
+      if (!cancel) setLoading(false);
+    })();
+    return () => { cancel = true; };
+  }, [fetchList]);
 
-    const q = query(
-      collection(db, 'chats'),
-      where('participants', 'array-contains', myUid),
-      orderBy('lastTime', 'desc')
-    );
+  // Refresh the list (so unread counts clear after reading) + draft previews
+  // whenever the screen regains focus — e.g. coming back from a chat.
+  useFocusEffect(useCallback(() => {
+    fetchList();
+    getDraftMap().then(setDrafts).catch(() => {});
+  }, [fetchList]));
+  useEffect(() => { registerPushToken().catch(() => {}); }, []);
 
-    const unsub = onSnapshot(q, async snap => {
-      const items = await Promise.all(snap.docs.map(async d => {
-        const data = d.data() as any;
-        const isGroup = data.isGroup === true;
-        const unread = data.unread?.[myUid] ?? 0;
+  // Auto-backup: a few seconds after the list is up, run a scheduled backup if
+  // it's due and the network policy (Wi-Fi only / any) allows. Silent + safe.
+  useEffect(() => {
+    const t = setTimeout(() => { runScheduledBackupIfDue().catch(() => {}); }, 4000);
+    return () => clearTimeout(t);
+  }, []);
 
-        if (isGroup) {
-          return {
-            id: d.id, isGroup: true,
-            name: data.name ?? 'Group',
-            photoURL: data.photoURL,
-            lastMsg: data.lastMsg ?? '',
-            lastTime: data.lastTime,
-            unreadCount: unread,
-            pinned: data.pinned_by?.[myUid] ?? data.pinned ?? false,
-            archived: data.archived_by?.[myUid] ?? data.archived ?? false,
-            muted: data.muted_by?.[myUid] ?? data.muted ?? false,
-          } as ChatItem;
+  // Restore-on-reinstall (WhatsApp-style): once per install, if a cloud backup
+  // exists, offer to restore it. AsyncStorage is wiped on reinstall, so the
+  // "prompted" flag resets and a returning user is offered their backup again.
+  useEffect(() => {
+    (async () => {
+      try {
+        if (await AsyncStorage.getItem('vc_restore_prompted')) return;
+        const meta = await cloudBackupMeta();
+        await AsyncStorage.setItem('vc_restore_prompted', '1');
+        if (meta.exists) {
+          Alert.alert(
+            'Restore your chats?',
+            `A cloud backup${meta.messageCount != null ? ` with ${meta.messageCount} messages` : ''} was found for this account. Restore it on this device?`,
+            [
+              { text: 'Not now', style: 'cancel' },
+              { text: 'Restore', onPress: () => router.push('/chat-backup' as any) },
+            ],
+          );
         }
-
-        const peerUid = (data.participants as string[]).find((u: string) => u !== myUid) ?? '';
-        let name = data.participantNames?.[peerUid] ?? 'Unknown';
-        let photo = '';
-        let online = false;
-        try {
-          const peerSnap = await getDoc(doc(db, 'users', peerUid));
-          const pd = peerSnap.data();
-          name = pd?.name ?? name;
-          photo = pd?.photoURL ?? '';
-          online = pd?.online ?? false;
-        } catch { }
-
-        return {
-          id: d.id, isGroup: false, peerUid,
-          name, photoURL: photo,
-          lastMsg: data.lastMsg ?? '',
-          lastTime: data.lastTime,
-          unreadCount: unread,
-          pinned: data.pinned_by?.[myUid] ?? data.pinned ?? false,
-          archived: data.archived_by?.[myUid] ?? data.archived ?? false,
-          muted: data.muted_by?.[myUid] ?? data.muted ?? false,
-          online,
-        } as ChatItem;
-      }));
-
-      const sorted = items.sort((a, b) => {
-        if (a.pinned && !b.pinned) return -1;
-        if (!a.pinned && b.pinned) return 1;
-        return 0;
-      });
-      setChats(sorted);
-      setLoading(false);
-    });
-
-    return unsub;
-  }, [myUid]);
-
-  // Filter out hidden chats (runs once on mount)
-  const [hiddenIds, setHiddenIds] = useState<string[]>([]);
-  useEffect(() => {
-    (async () => {
-      const raw = await AsyncStorage.getItem('vc_hidden_chats');
-      const hidden: string[] = raw ? JSON.parse(raw) : [];
-      setHiddenIds(hidden);
+      } catch {}
     })();
   }, []);
 
-  // Apply smart filters + folder + search
+  // Realtime: new messages refresh the list; presence patches in place.
   useEffect(() => {
-    let list = chats.filter(c => !hiddenIds.includes(c.id));
+    let off: (() => void) | null = null;
+    let cancelled = false;
+    (async () => {
+      try {
+        const s = await getSocket();
+        const refresh = () => fetchList();
+        const onPresence = (e: { userId: string; online: boolean; lastSeenAt: string | null }) => {
+          if (!e?.userId) return;
+          setChats(prev => prev.map(c => c.peerUserId === e.userId
+            ? { ...c, peerOnline: e.online, peerLastSeenAt: e.lastSeenAt ?? c.peerLastSeenAt } : c));
+        };
+        const onTyping = (e: { uid?: string; chatId?: string }) => {
+          if (!e?.chatId || !e.uid || e.uid === meIdRef.current) return;
+          setTypingChats(prev => { const n = new Set(prev); n.add(e.chatId!); return n; });
+          clearTimeout(typingTimers.current[e.chatId]);
+          typingTimers.current[e.chatId] = setTimeout(() =>
+            setTypingChats(prev => { const n = new Set(prev); n.delete(e.chatId!); return n; }), 6000);
+        };
+        const onTypingStop = (e: { chatId?: string }) => {
+          if (!e?.chatId) return;
+          clearTimeout(typingTimers.current[e.chatId]);
+          setTypingChats(prev => { const n = new Set(prev); n.delete(e.chatId!); return n; });
+        };
+        s.on('new_message', refresh);
+        s.on('message_deleted', refresh);
+        s.on('message_edited', refresh);
+        s.on('presence_changed', onPresence);
+        s.on('typing_start', onTyping);
+        s.on('typing_stop', onTypingStop);
+        if (!cancelled) off = () => {
+          s.off('new_message', refresh); s.off('message_deleted', refresh);
+          s.off('message_edited', refresh); s.off('presence_changed', onPresence);
+          s.off('typing_start', onTyping); s.off('typing_stop', onTypingStop);
+        };
+      } catch (e: any) { if (!cancelled) setError(e?.message ?? 'Realtime unavailable'); }
+    })();
+    return () => { cancelled = true; if (off) off(); };
+  }, [fetchList]);
 
-    // Smart filter
-    switch (activeFilter) {
-      case 'Unread': list = list.filter(c => c.unreadCount > 0 && !c.archived); break;
-      case 'Groups': list = list.filter(c => c.isGroup && !c.archived); break;
-      case 'Pinned': list = list.filter(c => c.pinned && !c.archived); break;
-      case 'Archive': list = list.filter(c => c.archived); break;
-      default: list = list.filter(c => !c.archived); break;
+  useEffect(() => { getCurrentUserAsync().then(u => setMeId(u?.id ?? null)).catch(() => {}); }, []);
+
+  const onRefresh = useCallback(async () => { setRefreshing(true); await fetchList(); setRefreshing(false); }, [fetchList]);
+  const onOpenChat = (id: string) => router.push({ pathname: '/chat', params: { id } } as any);
+  const onNewChat = () => router.push('/new-chat' as any);
+
+  // Avatar tap (WhatsApp): peer has a story → open it; else show photo popup.
+  const [avatarView, setAvatarView] = useState<ChatSummary | null>(null);
+  const onAvatarPress = useCallback(async (chat: ChatSummary) => {
+    if (chat.type === 'direct' && chat.peerUserId) {
+      try {
+        const feed = await listStoriesFeed();
+        if (feed.some(e => e.userId === chat.peerUserId)) {
+          router.push({ pathname: '/story-viewer' as any, params: { userId: chat.peerUserId, userName: chat.peerName ?? chat.name ?? '' } });
+          return;
+        }
+      } catch {}
     }
+    setAvatarView(chat);
+  }, [router]);
 
-    // Folder filter
-    if (activeFolder !== 'all') {
-      list = list.filter(c => folderMap[c.id] === activeFolder);
-    }
+  // Optimistic chat-row actions with rollback.
+  const patch = (id: string, fields: Partial<ChatSummary>) =>
+    setChats(prev => prev.map(c => c.id === id ? { ...c, ...fields } : c));
 
-    // Search
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter(c => c.name.toLowerCase().includes(q) || c.lastMsg.toLowerCase().includes(q));
-    }
-
-    setFiltered(list);
-  }, [chats, search, activeFilter, activeFolder, hiddenIds, folderMap]);
-
-  const openChat = (item: ChatItem) => {
-    if (item.isGroup) {
-      router.push({ pathname: '/group-chat', params: { chatId: item.id, groupName: item.name } });
-    } else {
-      router.push({ pathname: '/chat', params: { chatId: item.id, peerUid: item.peerUid ?? '', peerName: item.name } });
-    }
-    updateDoc(doc(db, 'chats', item.id), { [`unread.${myUid}`]: 0 }).catch(() => { });
+  const doPin = async (chat: ChatSummary) => {
+    const next = !chat.pinned;
+    patch(chat.id, { pinned: next });
+    try { await pinChat(chat.id, next); await fetchList(); }
+    catch (e: any) { patch(chat.id, { pinned: !next }); setError(e?.message ?? 'Pin failed'); }
   };
-
-  const ensureNoteToSelf = async () => {
-    if (!myUid) return;
-    router.push({ pathname: '/chat', params: { chatId: 'note-to-self', peerUid: myUid, peerName: '📝 Note to Self' } });
+  const doMute = async (chat: ChatSummary) => {
+    const next = !chat.muted;
+    patch(chat.id, { muted: next });
+    try { await muteChat(chat.id, next); await fetchList(); }
+    catch (e: any) { patch(chat.id, { muted: !next }); setError(e?.message ?? 'Mute failed'); }
   };
-
-  const fmt = (ts: any) => {
-    if (!ts?.toDate) return '';
-    const d = ts.toDate();
-    const now = new Date();
-    if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    return d.toLocaleDateString([], { weekday: 'short' });
+  const doArchive = async (chat: ChatSummary) => {
+    const next = !chat.archived;
+    patch(chat.id, { archived: next });
+    try { await archiveChat(chat.id, next); await fetchList(); }
+    catch (e: any) { patch(chat.id, { archived: !next }); setError(e?.message ?? 'Archive failed'); }
   };
-
-  // ── Gradient Avatar ─────────────────────────────────────────────
-  const GradientAvatar = ({ name, isGroup }: { name: string; isGroup: boolean }) => {
-    const colors = getGradient(name);
-    return (
-      <LinearGradient colors={colors} style={[s.avatar, { alignItems: 'center', justifyContent: 'center' }]}>
-        <Text style={s.avatarTxt}>{isGroup ? '👥' : name[0]?.toUpperCase()}</Text>
-      </LinearGradient>
+  const doDelete = (chat: ChatSummary) => {
+    Alert.alert(
+      'Delete chat?',
+      'This removes it from your list. It stays reachable from Hidden chats.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete', style: 'destructive', onPress: async () => {
+            setChats(prev => prev.filter(c => c.id !== chat.id));
+            try { await setHidden(chat.id, true); await fetchList(); }
+            catch (e: any) { setError(e?.message ?? 'Delete failed'); fetchList(); }
+          },
+        },
+      ],
     );
   };
 
-  const renderChat = ({ item }: { item: ChatItem }) => (
-    <Pressable onPress={() => openChat(item)} onLongPress={() => setLongPress(item)} delayLongPress={400}>
-      <View style={s.chatRow}>
-        <View style={s.avatarWrap}>
-          {item.photoURL
-            ? <Image source={{ uri: item.photoURL }} style={s.avatar} />
-            : <GradientAvatar name={item.name} isGroup={item.isGroup} />
-          }
-          {item.online && !item.isGroup && <View style={s.onlineDot} />}
-        </View>
-        <View style={s.chatBody}>
-          <View style={s.chatTop}>
-            <View style={s.nameRow}>
-              {item.pinned && <Text style={s.pinIcon}>📌 </Text>}
-              {item.muted && <Text style={s.muteIcon}>🔕 </Text>}
-              <Text style={s.chatName} numberOfLines={1}>{item.name}</Text>
-            </View>
-            <Text style={s.chatTime}>{fmt(item.lastTime)}</Text>
-          </View>
-          <View style={s.chatBottom}>
-            <Text style={s.chatPreview} numberOfLines={1}>{item.lastMsg}</Text>
-            {item.unreadCount > 0 && !item.muted && (
-              <View style={s.badge}><Text style={s.badgeTxt}>{item.unreadCount}</Text></View>
-            )}
-          </View>
-        </View>
-      </View>
-    </Pressable>
-  );
-
-  const hideChat = async (chatId: string) => {
-    const raw = await AsyncStorage.getItem('vc_hidden_chats');
-    const ids: string[] = raw ? JSON.parse(raw) : [];
-    if (!ids.includes(chatId)) ids.push(chatId);
-    await AsyncStorage.setItem('vc_hidden_chats', JSON.stringify(ids));
-    setHiddenIds(ids);
-    setLongPress(null);
+  // ── Multi-select (WhatsApp-style bulk actions) ───────────────────────
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const exitSelect = () => { setSelectMode(false); setSelected(new Set()); };
+  const enterSelect = (id: string) => { setSelectMode(true); setSelected(new Set([id])); };
+  const toggleSelect = (id: string) => setSelected(prev => {
+    const n = new Set(prev);
+    n.has(id) ? n.delete(id) : n.add(id);
+    if (n.size === 0) setSelectMode(false);
+    return n;
+  });
+  const bulkRun = async (fn: (id: string) => Promise<any>) => {
+    const ids = [...selected];
+    exitSelect();
+    for (const id of ids) { try { await fn(id); } catch {} }
+    fetchList();
+  };
+  const bulkPin     = () => bulkRun(id => { patch(id, { pinned: true });   return pinChat(id, true); });
+  const bulkMute    = () => bulkRun(id => { patch(id, { muted: true });    return muteChat(id, true); });
+  const bulkArchive = () => bulkRun(id => { patch(id, { archived: true }); return archiveChat(id, true); });
+  const bulkDelete  = () => {
+    const ids = [...selected];
+    Alert.alert(`Delete ${ids.length} chat${ids.length > 1 ? 's' : ''}?`, 'They stay reachable from Hidden chats.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+        exitSelect();
+        setChats(prev => prev.filter(c => !ids.includes(c.id)));
+        for (const id of ids) { try { await setHidden(id, true); } catch {} }
+        fetchList();
+      } },
+    ]);
   };
 
-  // ── Folder Picker Sheet ─────────────────────────────────────────
-  const FolderPickerSheet = () => {
-    if (!showFolderPicker || !longPress) return null;
-    return (
-      <Pressable style={s.overlay} onPress={() => setShowFolderPicker(false)}>
-        <View style={s.sheet}>
-          <Text style={{ color: '#212529', fontSize: 18, fontWeight: '700', padding: 16, paddingBottom: 8 }}>Move to Folder</Text>
-          {FOLDERS.map(f => (
-            <TouchableOpacity key={f.key} style={s.sheetRow} onPress={() => assignFolder(longPress.id, f.key)}>
-              <Text style={s.sheetTxt}>{f.icon}  {f.label}</Text>
-            </TouchableOpacity>
-          ))}
-          <TouchableOpacity style={s.sheetRow} onPress={() => setShowFolderPicker(false)}>
-            <Text style={[s.sheetTxt, { color: '#6C757D' }]}>Cancel</Text>
-          </TouchableOpacity>
-        </View>
-      </Pressable>
-    );
-  };
-
-  const LongPressSheet = () => {
-    if (!longPress) return null;
-    return (
-      <Pressable style={s.overlay} onPress={() => setLongPress(null)}>
-        <View style={s.sheet}>
-          <TouchableOpacity style={s.sheetRow} onPress={() => { pinChat(longPress.id, !longPress.pinned); setLongPress(null); }}>
-            <Text style={s.sheetTxt}>{longPress.pinned ? '📌 Unpin' : '📌 Pin to top'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={s.sheetRow} onPress={() => { muteChat(longPress.id, !longPress.muted); setLongPress(null); }}>
-            <Text style={s.sheetTxt}>{longPress.muted ? '🔔 Unmute' : '🔕 Mute'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={s.sheetRow} onPress={() => { archiveChat(longPress.id, !longPress.archived); setLongPress(null); }}>
-            <Text style={s.sheetTxt}>{longPress.archived ? '📚 Unarchive' : '🗄 Archive'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={s.sheetRow} onPress={() => setShowFolderPicker(true)}>
-            <Text style={s.sheetTxt}>📂 Move to Folder</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={s.sheetRow} onPress={() => { hideChat(longPress.id); }}>
-            <Text style={s.sheetTxt}>{"\uD83D\uDD12 Hide Chat"}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={s.sheetRow} onPress={() => setLongPress(null)}>
-            <Text style={[s.sheetTxt, { color: '#6C757D' }]}>Cancel</Text>
-          </TouchableOpacity>
-        </View>
-      </Pressable>
-    );
-  };
-
-  // ── Filter badge counts ─────────────────────────────────────────
-  const unreadCount = chats.filter(c => c.unreadCount > 0 && !c.archived).length;
-  const groupCount = chats.filter(c => c.isGroup && !c.archived).length;
-  const pinnedCount = chats.filter(c => c.pinned && !c.archived).length;
-  const archiveCount = chats.filter(c => c.archived).length;
-
-  const getBadge = (key: ChatFilter): number | null => {
-    switch (key) {
-      case 'Unread': return unreadCount || null;
-      case 'Groups': return groupCount || null;
-      case 'Pinned': return pinnedCount || null;
-      case 'Archive': return archiveCount || null;
-      default: return null;
+  const visibleChats = useMemo(() => {
+    if (folder === 'archive') return chats.filter(c => c.archived);
+    const base = chats.filter(c => !c.archived);
+    switch (folder) {
+      case 'unread': return base.filter(c => c.unreadCount > 0);
+      case 'groups': return base.filter(c => c.type === 'group');
+      case 'pinned': return base.filter(c => c.pinned);
+      default: return base;
     }
-  };
+  }, [chats, folder]);
+
+  // Sections: in "All", split pinned vs the rest with sticky headers.
+  const sections = useMemo(() => {
+    if (folder === 'all') {
+      const pinned = visibleChats.filter(c => c.pinned);
+      const rest = visibleChats.filter(c => !c.pinned);
+      const out: { title: string; data: ChatSummary[] }[] = [];
+      if (pinned.length) out.push({ title: 'Pinned', data: pinned });
+      out.push({ title: 'All Chats', data: rest });
+      return out;
+    }
+    return [{ title: FOLDERS.find(f => f.id === folder)?.label ?? '', data: visibleChats }];
+  }, [visibleChats, folder]);
+
+  if (loading) {
+    return <View style={[S.screen, S.center]}><ActivityIndicator color={colors.primary} size="large" /></View>;
+  }
 
   return (
-    <>
-      <View style={s.screen}>
-        {/* Header bar */}
-        <View style={s.headerBar}>
-          <View style={s.headerLeft}>
-            <Text style={s.headerTitle}>VaultChat</Text>
-            <View style={s.e2eBadge}><Text style={s.e2eTxt}>🔒 E2E ENCRYPTED</Text></View>
+    <View style={S.screen}>
+      {selectMode ? (
+        <View style={S.header}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+            <TouchableOpacity onPress={exitSelect} hitSlop={8}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
+            <Text style={S.title}>{selected.size}</Text>
           </View>
-          <View style={{ flexDirection: 'row', gap: 12 }}>
-            <TouchableOpacity onPress={() => router.push('/d2de-status' as any)}><Text style={{ fontSize: 20 }}>🛡️</Text></TouchableOpacity>
-            <TouchableOpacity onPress={ensureNoteToSelf}><Text style={{ fontSize: 20 }}>📝</Text></TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push('/create-group')}><Text style={{ fontSize: 22 }}>👥</Text></TouchableOpacity>
+          <View style={{ flexDirection: 'row', gap: 4 }}>
+            <TouchableOpacity onPress={bulkPin} style={S.headerBtn}><Ionicons name="pin" size={20} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity onPress={bulkMute} style={S.headerBtn}><Ionicons name="notifications-off-outline" size={20} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity onPress={bulkArchive} style={S.headerBtn}><Ionicons name="archive-outline" size={20} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity onPress={bulkDelete} style={S.headerBtn}><Ionicons name="trash-outline" size={20} color={colors.danger} /></TouchableOpacity>
           </View>
         </View>
-        {/* Search Bar */}
-        <View style={s.searchBar}>
-          <Text style={s.searchIcon}>🔍</Text>
-          <TextInput
-            style={s.searchInput}
-            placeholder="Search chats…"
-            placeholderTextColor="#444"
-            value={search}
-            onChangeText={setSearch}
-          />
-          {search.length > 0 && (
-            <TouchableOpacity onPress={() => setSearch('')}><Text style={{ color: '#555', fontSize: 18 }}>✕</Text></TouchableOpacity>
+      ) : (
+        <View style={S.header}>
+          <Text style={S.title}>Chats</Text>
+          <View style={{ flexDirection: 'row', gap: 4 }}>
+            <TouchableOpacity onPress={() => router.push('/search' as any)} style={S.headerBtn}><Ionicons name="search" size={22} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/alerts' as any)} style={S.headerBtn}><Ionicons name="notifications-outline" size={22} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/mini' as any)} style={S.headerBtn}><Ionicons name="grid-outline" size={22} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/contacts' as any)} style={S.headerBtn}><Ionicons name="people-outline" size={22} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/broadcast' as any)} style={S.headerBtn}><Ionicons name="megaphone-outline" size={22} color={colors.text} /></TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      <ConnectionBanner />
+
+      {error && <View style={S.errorBar}><Text style={S.errorTxt}>{error}</Text></View>}
+
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={S.folderScroll} contentContainerStyle={S.folderRow}>
+        {FOLDERS.map(f => {
+          const count = f.id === 'unread' ? chats.filter(c => !c.archived && c.unreadCount > 0).length
+            : f.id === 'pinned' ? chats.filter(c => !c.archived && c.pinned).length
+            : f.id === 'archive' ? chats.filter(c => c.archived).length : 0;
+          const active = folder === f.id;
+          return (
+            <TouchableOpacity key={f.id} onPress={() => setFolder(f.id)} activeOpacity={0.7} style={[S.folderChip, active && S.folderChipActive]}>
+              <Text style={[S.folderTxt, active && S.folderTxtActive]}>{f.label}</Text>
+              {count > 0 && f.id !== 'all' && f.id !== 'groups' && (
+                <Text style={[S.folderCount, active && S.folderCountActive]}>{count}</Text>
+              )}
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+
+      {chats.length === 0 ? (
+        <View style={[S.center, { flex: 1, paddingHorizontal: 32 }]}>
+          <Text style={S.emptyTitle}>No chats yet</Text>
+          <Text style={S.emptySub}>Tap the button below to start one.</Text>
+          <TouchableOpacity style={S.emptyBtn} onPress={onNewChat} activeOpacity={0.85}><Text style={S.emptyBtnTxt}>Start a chat</Text></TouchableOpacity>
+        </View>
+      ) : visibleChats.length === 0 ? (
+        <View style={[S.center, { flex: 1, paddingHorizontal: 32 }]}>
+          <Text style={S.emptyTitle}>Nothing here</Text>
+          <Text style={S.emptySub}>No chats match “{FOLDERS.find(f => f.id === folder)?.label}”.</Text>
+        </View>
+      ) : (
+        <SectionList
+          sections={sections}
+          keyExtractor={(c) => c.id}
+          stickySectionHeadersEnabled
+          renderSectionHeader={({ section }) =>
+            sections.length > 1 || section.title !== 'All Chats'
+              ? <Text style={S.sectionHeader}>{section.title}</Text> : <View style={{ height: 4 }} />}
+          renderItem={({ item }) => (
+            <ChatRow
+              chat={item}
+              authHeader={authHeader}
+              draft={drafts[item.id]}
+              lastMsg={lastMsgs.get(item.id)}
+              meId={meId}
+              isTyping={typingChats.has(item.id)}
+              selectMode={selectMode}
+              isSelected={selected.has(item.id)}
+              onPress={() => selectMode ? toggleSelect(item.id) : onOpenChat(item.id)}
+              onAvatarPress={() => selectMode ? toggleSelect(item.id) : onAvatarPress(item)}
+              onLongPress={() => selectMode ? toggleSelect(item.id) : enterSelect(item.id)}
+              onPin={() => doPin(item)}
+              onMute={() => doMute(item)}
+              onArchive={() => doArchive(item)}
+              onDelete={() => doDelete(item)}
+            />
           )}
-        </View>
+          ItemSeparatorComponent={() => <View style={S.separator} />}
+          contentContainerStyle={{ paddingBottom: 110 }}
+          refreshControl={<RefreshControl tintColor={colors.primary} refreshing={refreshing} onRefresh={onRefresh} />}
+          removeClippedSubviews
+          maxToRenderPerBatch={12}
+          windowSize={11}
+          initialNumToRender={14}
+        />
+      )}
 
-        {/* Smart Filters */}
-        <ScrollView horizontal style={{flexGrow:0}} showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterRow}>
-          {FILTERS.map(f => {
-            const isActive = activeFilter === f.key;
-            const badge = getBadge(f.key);
+      <TouchableOpacity style={S.fab} onPress={onNewChat} activeOpacity={0.85}>
+        <Ionicons name="create-outline" size={26} color="#fff" />
+      </TouchableOpacity>
+
+      {/* Long-press action sheet (WhatsApp-style) */}
+      <Modal visible={!!menuChat} transparent animationType="fade" onRequestClose={() => setMenuChat(null)}>
+        <Pressable style={S.sheetBackdrop} onPress={() => setMenuChat(null)}>
+          <Pressable style={S.sheet} onPress={() => {}}>
+            <View style={S.sheetHandle} />
+            <Text style={S.sheetTitle} numberOfLines={1}>
+              {menuChat ? (menuChat.type === 'direct' ? (menuChat.peerName || menuChat.name || 'Direct chat') : (menuChat.name || 'Group chat')) : ''}
+            </Text>
+            <SheetItem icon={menuChat?.pinned ? 'pin' : 'pin-outline'} label={menuChat?.pinned ? 'Unpin' : 'Pin'} onPress={() => { const c = menuChat!; setMenuChat(null); doPin(c); }} />
+            <SheetItem icon={menuChat?.muted ? 'notifications-outline' : 'notifications-off-outline'} label={menuChat?.muted ? 'Unmute' : 'Mute'} onPress={() => { const c = menuChat!; setMenuChat(null); doMute(c); }} />
+            <SheetItem icon={menuChat?.archived ? 'archive' : 'archive-outline'} label={menuChat?.archived ? 'Unarchive' : 'Archive'} onPress={() => { const c = menuChat!; setMenuChat(null); doArchive(c); }} />
+            <SheetItem icon="trash-outline" label="Delete chat" danger onPress={() => { const c = menuChat!; setMenuChat(null); doDelete(c); }} />
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Avatar photo popup (WhatsApp-style) — photo + quick actions */}
+      <Modal visible={!!avatarView} transparent animationType="fade" onRequestClose={() => setAvatarView(null)}>
+        <Pressable style={S.avBackdrop} onPress={() => setAvatarView(null)}>
+          {avatarView && (() => {
+            const av = avatarView;
+            const isDirect = av.type === 'direct';
+            const avTitle = isDirect ? (av.peerName || av.name || 'Direct chat') : (av.name || 'Group chat');
+            const avPhoto = isDirect ? av.peerPhotoURL : av.photoURL;
+            const peerUid = av.peerUserId ?? '';
+            const go = (fn: () => void) => { setAvatarView(null); fn(); };
             return (
-              <TouchableOpacity
-                key={f.key}
-                style={[s.filterChip, isActive && s.filterChipActive]}
-                onPress={() => setActiveFilter(f.key)}
-              >
-                <Text style={{ fontSize: 10 }}>{f.icon}</Text>
-                <Text style={[s.filterTxt, isActive && s.filterTxtActive]}>{f.label}</Text>
-                {badge != null && (
-                  <View style={[s.filterBadge, isActive && s.filterBadgeActive]}>
-                    <Text style={s.filterBadgeTxt}>{badge}</Text>
-                  </View>
-                )}
-              </TouchableOpacity>
+              <Pressable style={S.avCard} onPress={() => {}}>
+                <View style={S.avImgWrap}>
+                  {avPhoto && authHeader ? (
+                    <Image source={{ uri: attachmentUrl(avPhoto), headers: { Authorization: authHeader } }} style={S.avImg} resizeMode="cover" />
+                  ) : (
+                    <View style={[S.avImg, S.avInitials]}><Text style={S.avInitialsTxt}>{(avTitle.trim()[0] ?? '?').toUpperCase()}</Text></View>
+                  )}
+                  <View style={S.avNameBar}><Text style={S.avNameTxt} numberOfLines={1}>{avTitle}</Text></View>
+                </View>
+                <View style={S.avActions}>
+                  <TouchableOpacity style={S.avActionBtn} onPress={() => go(() => onOpenChat(av.id))}>
+                    <Ionicons name="chatbubble-ellipses" size={22} color={colors.primary} /><Text style={S.avActionTxt}>Message</Text>
+                  </TouchableOpacity>
+                  {isDirect && (
+                    <>
+                      <TouchableOpacity style={S.avActionBtn} onPress={() => go(() => router.push({ pathname: '/voicecall' as any, params: { chatId: av.id, peerUid, peerName: avTitle } }))}>
+                        <Ionicons name="call" size={22} color={colors.primary} /><Text style={S.avActionTxt}>Audio</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={S.avActionBtn} onPress={() => go(() => router.push({ pathname: '/videocall' as any, params: { chatId: av.id, peerUid, peerName: avTitle } }))}>
+                        <Ionicons name="videocam" size={22} color={colors.primary} /><Text style={S.avActionTxt}>Video</Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
+                  <TouchableOpacity style={S.avActionBtn} onPress={() => go(() => isDirect
+                    ? router.push({ pathname: '/contact-info' as any, params: { chatId: av.id, peerUid, peerName: avTitle } })
+                    : router.push({ pathname: '/group-info' as any, params: { chatId: av.id } }))}>
+                    <Ionicons name="information-circle" size={22} color={colors.primary} /><Text style={S.avActionTxt}>Info</Text>
+                  </TouchableOpacity>
+                </View>
+              </Pressable>
             );
-          })}
-        </ScrollView>
-
-        {/* Chat Folders */}
-        <ScrollView horizontal style={{flexGrow:0}} showsHorizontalScrollIndicator={false} contentContainerStyle={s.folderRow}>
-          {FOLDERS.map(f => {
-            const isActive = activeFolder === f.key;
-            return (
-              <TouchableOpacity
-                key={f.key}
-                style={[s.folderChip, isActive && s.folderChipActive]}
-                onPress={() => setActiveFolder(f.key)}
-              >
-                <Text style={{ fontSize: 9 }}>{f.icon}</Text>
-                <Text style={[s.folderTxt, isActive && s.folderTxtActive]}>{f.label}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-
-        <View style={s.chatContainer}>
-          <FlatList
-            contentContainerStyle={{ flexGrow: 1 }}
-            data={filtered}
-            keyExtractor={c => c.id}
-            renderItem={renderChat}
-            refreshControl={<RefreshControl refreshing={loading} colors={['#00E5FF']} tintColor="#00E5FF" />}
-            ListEmptyComponent={
-              <View style={s.empty}>
-                <Text style={s.emptyIcon}>💬</Text>
-                <Text style={s.emptyTxt}>{search ? 'No chats found' : activeFilter !== 'All' ? `No ${activeFilter.toLowerCase()} chats` : 'No chats yet'}</Text>
-                <Text style={s.emptySub}>Tap the groups icon to create a group or start a new chat</Text>
-              </View>
-            }
-          />
-        </View>
-        <LongPressSheet />
-        <FolderPickerSheet />
-
-        {/* Tab bar handled by (tabs)/_layout.tsx */}
-
-        {/* FAB - New Chat */}
-        <TouchableOpacity style={s.fab} onPress={() => router.push('/contacts' as any)} activeOpacity={0.8}>
-          <Text style={s.fabTxt}>{'✏️'}</Text>
-        </TouchableOpacity>
-
-      </View>
-    </>
+          })()}
+        </Pressable>
+      </Modal>
+    </View>
   );
 }
 
-// BottomNav removed — tab bar handled by (tabs)/_layout.tsx
+function SheetItem({ icon, label, onPress, danger }: { icon: any; label: string; onPress: () => void; danger?: boolean }) {
+  const { colors } = useTheme();
+  const S = useS();
+  return (
+    <TouchableOpacity style={S.sheetItem} onPress={onPress} activeOpacity={0.7}>
+      <Ionicons name={icon} size={22} color={danger ? colors.danger : colors.text} />
+      <Text style={[S.sheetItemTxt, danger && { color: colors.danger }]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
 
-const s = StyleSheet.create({
-  fab: { position: 'absolute', bottom: 24, right: 16, width: 52, height: 52, borderRadius: 26, backgroundColor: '#6C63FF', justifyContent: 'center', alignItems: 'center', elevation: 6, shadowColor: '#6C63FF', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.25, shadowRadius: 6 },
-  fabTxt: { fontSize: 22, color: '#FFFFFF' },
+const ChatRow = memo(function ChatRow({
+  chat, authHeader, draft, lastMsg, meId, isTyping, selectMode, isSelected, onPress, onAvatarPress, onLongPress, onPin, onMute, onArchive, onDelete,
+}: {
+  chat: ChatSummary; authHeader: string | null; draft?: string; lastMsg?: LastMsg; meId?: string | null; isTyping?: boolean;
+  selectMode?: boolean; isSelected?: boolean;
+  onPress: () => void; onAvatarPress: () => void; onLongPress: () => void; onPin: () => void; onMute: () => void; onArchive: () => void; onDelete: () => void;
+}) {
+  const { colors } = useTheme();
+  const S = useS();
+  const swipeRef = useRef<Swipeable>(null);
+  const title = chat.type === 'direct' ? (chat.peerName || chat.name || 'Direct chat') : (chat.name || 'Group chat');
+  const avatarLetter = (title.trim()[0] ?? '#').toUpperCase();
+  const photoId = chat.type === 'direct' ? chat.peerPhotoURL : chat.photoURL;
+  const showPhoto = !!photoId && !!authHeader;
+  const time = chat.lastMessageAt ? formatRelative(chat.lastMessageAt) : '';
+  const draftText = draft && draft.trim() ? draft.trim() : '';
+  // Real last-message preview from the local plaintext cache (WhatsApp-style).
+  const previewBody = (() => {
+    if (!lastMsg) return chat.lastMessageId ? 'Tap to open chat' : 'No messages yet';
+    const t = lastMsg.type;
+    const label = t === 'image' ? '📷 Photo'
+      : t === 'video' ? '🎥 Video'
+      : t === 'audio' ? '🎙️ Voice message'
+      : t === 'file' ? '📎 File'
+      : t === 'vaultbeam' ? '📦 File'
+      : t === 'location' ? '📍 Location'
+      : t === 'poll' ? '📊 Poll'
+      : t === 'sticker' ? 'Sticker'
+      : (lastMsg.content || '');
+    const mine = !!meId && lastMsg.senderId === meId;
+    return (mine ? 'You: ' : '') + label;
+  })();
+  const preview = draftText || previewBody;
 
-  screen: { flex: 1, backgroundColor: '#FFFFFF', padding:3 },
-  headerBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 48, paddingBottom: 12, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E9ECEF' },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  headerTitle: { fontSize: 20, fontWeight: '700', color: '#212529' },
-  e2eBadge: { backgroundColor: '#6C63FF20', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 3 },
-  e2eTxt: { fontSize: 10, color: '#6C63FF', fontWeight: '600' },
-  searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8F9FA', paddingHorizontal: 16, paddingVertical: 10, gap: 8, borderBottomWidth: 1, borderBottomColor: '#E9ECEF' },
-  searchIcon: { fontSize: 16, color: '#6C757D' },
-  searchInput: { flex: 1, color: '#000000', fontSize: 16 },
+  const close = () => swipeRef.current?.close();
+  const act = (fn: () => void) => { close(); fn(); };
 
-  chatContainer: { flex: 1 },
+  const leftActions = () => (
+    <View style={S.actionsRow}>
+      <TouchableOpacity style={[S.action, { backgroundColor: colors.primary }]} onPress={() => act(onPin)}>
+        <Ionicons name={chat.pinned ? 'pin' : 'pin-outline'} size={20} color="#fff" /><Text style={S.actionLbl}>{chat.pinned ? 'Unpin' : 'Pin'}</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={[S.action, { backgroundColor: colors.purple }]} onPress={() => act(onMute)}>
+        <Ionicons name={chat.muted ? 'notifications-outline' : 'notifications-off-outline'} size={20} color="#fff" /><Text style={S.actionLbl}>{chat.muted ? 'Unmute' : 'Mute'}</Text>
+      </TouchableOpacity>
+    </View>
+  );
+  const rightActions = () => (
+    <View style={S.actionsRow}>
+      <TouchableOpacity style={[S.action, { backgroundColor: '#475569' }]} onPress={() => act(onArchive)}>
+        <Ionicons name={chat.archived ? 'archive' : 'archive-outline'} size={20} color="#fff" /><Text style={S.actionLbl}>{chat.archived ? 'Unarchive' : 'Archive'}</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={[S.action, { backgroundColor: colors.danger }]} onPress={() => act(onDelete)}>
+        <Ionicons name="trash-outline" size={20} color="#fff" /><Text style={S.actionLbl}>Delete</Text>
+      </TouchableOpacity>
+    </View>
+  );
 
-  // Smart filters
-  filterRow: { paddingHorizontal: 16, paddingVertical: 2, gap: 4, borderBottomWidth: 0, marginBottom: 0, maxHeight: 34, flexGrow: 0 },
-  filterChip: { 
-    flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8F9FA', borderRadius: 12, borderWidth: 1, borderColor: '#DEE2E6', paddingHorizontal: 8, paddingVertical: 4, maxHeight: 32
-  },
-  filterChipActive: { backgroundColor: '#4A9FFF15', borderColor: '#4A9FFF' },
-  filterTxt: { color: '#495057', fontSize: 12, fontWeight: '500', maxHeight: 16 },
-  filterTxtActive: { color: '#4A9FFF' },
-  filterBadge: { backgroundColor: '#ADB5BD', borderRadius: 4, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3, marginLeft: 3 },
-  filterBadgeActive: { backgroundColor: '#4A9FFF' },
-  filterBadgeTxt: { color: '#FFFFFF', fontSize: 9, fontWeight: '600' },
+  return (
+    <Swipeable ref={swipeRef} enabled={!selectMode} renderLeftActions={leftActions} renderRightActions={rightActions} overshootLeft={false} overshootRight={false} friction={2}>
+      <TouchableOpacity style={[S.row, isSelected && S.rowSelected]} onPress={onPress} onLongPress={onLongPress} delayLongPress={250} activeOpacity={0.7}>
+        <TouchableOpacity style={S.avatarWrap} activeOpacity={0.7} onPress={onAvatarPress}>
+          <Avatar
+            uri={showPhoto ? attachmentUrl(photoId!) : null}
+            headers={authHeader ? { Authorization: authHeader } : undefined}
+            name={title}
+            size={50}
+            presence={chat.type === 'direct' && chat.peerOnline ? 'online' : null}
+          />
+          {selectMode && (
+            <View style={[S.selBadge, isSelected ? S.selBadgeOn : S.selBadgeOff]}>
+              {isSelected && <Ionicons name="checkmark" size={13} color="#fff" />}
+            </View>
+          )}
+        </TouchableOpacity>
 
-  // Chat folders
-  folderRow: { paddingHorizontal: 16, paddingVertical: 2, gap: 3,  marginBottom: 0, maxHeight: 34, flexGrow: 0 },
-  folderChip: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#F8F9FA', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 3, borderWidth: 1, borderColor: '#DEE2E6' },
-  folderChipActive: { backgroundColor: '#7C3AED15', borderColor: '#7C3AED' },
-  folderTxt: { color: '#495057', fontSize: 11, fontWeight: '500' },
-  folderTxtActive: { color: '#7C3AED' },
+        <View style={S.rowBody}>
+          <View style={S.rowTop}>
+            <Text style={S.rowName} numberOfLines={1}>{title}</Text>
+            {chat.muted && <Ionicons name="volume-mute" size={15} color={colors.textFaint} style={{ marginLeft: 2 }} />}
+            {chat.pinned && <Ionicons name="pin" size={14} color={colors.textFaint} style={{ marginLeft: 2 }} />}
+            <Text style={[S.rowTime, chat.unreadCount > 0 && { color: colors.primary, fontWeight: '700' }]}>{time}</Text>
+          </View>
+          <View style={S.rowBottom}>
+            {isTyping ? (
+              <Text style={[S.rowPreview, { color: colors.primary }]} numberOfLines={1}>typing…</Text>
+            ) : (
+              <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                {!draftText && !!lastMsg && !!meId && lastMsg.senderId === meId && chat.type === 'direct' && (
+                  <Ionicons
+                    name={((chat.peerLastReadMessageId ?? 0) >= lastMsg.id || (chat.peerLastDeliveredMessageId ?? 0) >= lastMsg.id) ? 'checkmark-done' : 'checkmark'}
+                    size={15}
+                    color={(chat.peerLastReadMessageId ?? 0) >= lastMsg.id ? '#4A9FFF' : colors.textDim}
+                    style={{ marginRight: 3 }}
+                  />
+                )}
+                <Text style={[S.rowPreview, chat.unreadCount > 0 && S.rowPreviewUnread]} numberOfLines={1}>
+                  {draftText ? <Text style={S.draftLabel}>Draft: </Text> : null}{preview}
+                </Text>
+              </View>
+            )}
+            {chat.unreadCount > 0 && (
+              <View style={S.unreadBadge}><Text style={S.unreadTxt}>{chat.unreadCount > 99 ? '99+' : chat.unreadCount}</Text></View>
+            )}
+          </View>
+        </View>
+      </TouchableOpacity>
+    </Swipeable>
+  );
+}, (a, b) =>
+  // Re-render a row ONLY when its own data changes — not when an unrelated chat
+  // updates (typing, draft, unread on another row). Handler props are inline
+  // closures keyed by the stable chat id, so we deliberately ignore them.
+  a.chat === b.chat &&
+  a.authHeader === b.authHeader &&
+  a.draft === b.draft &&
+  a.lastMsg === b.lastMsg &&
+  a.meId === b.meId &&
+  a.isTyping === b.isTyping &&
+  a.selectMode === b.selectMode &&
+  a.isSelected === b.isSelected,
+);
 
-  archiveToggle: { paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#E9ECEF' },
-  archiveTxt: { color: '#4A9FFF', fontSize: 14, fontWeight: '500' },
-  chatRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F1F3F4' },
-  avatarWrap: { position: 'relative', marginRight: 12 },
-  avatar: { width: 42, height: 42, borderRadius: 21 },
-  avatarFallback: { backgroundColor: '#E9ECEF', alignItems: 'center', justifyContent: 'center' },
-  avatarTxt: { color: '#495057', fontSize: 18, fontWeight: '600' },
-  onlineDot: { position: 'absolute', bottom: 0, right: 0, width: 10, height: 10, borderRadius: 5, backgroundColor: '#00FF88', borderWidth: 2, borderColor: '#FFFFFF' },
-  chatBody: { flex: 1 },
-  chatTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 0 },
-  nameRow: { flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8 },
-  pinIcon: { color: '#FF8C42', fontSize: 11 },
-  muteIcon: { color: '#ADB5BD', fontSize: 11 },
-  chatName: { color: '#212529', fontSize: 15, fontWeight: '600', flex: 1 },
-  chatTime: { color: '#6C757D', fontSize: 12 },
-  chatBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  chatPreview: { color: '#6C757D', fontSize: 13, flex: 1, marginRight: 8 },
-  badge: { backgroundColor: '#4A9FFF', borderRadius: 8, minWidth: 18, height: 18, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
-  badgeTxt: { color: '#FFFFFF', fontSize: 11, fontWeight: '600' },
-  empty: { flex: 1, alignItems: 'center', paddingTop: 60 },
-  emptyIcon: { fontSize: 40, marginBottom: 0 },
-  emptyTxt: { color: '#212529', fontSize: 16, fontWeight: '600', marginBottom: 4 },
-  emptySub: { color: '#6C757D', fontSize: 14, textAlign: 'center', paddingHorizontal: 32 },
-  overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#00000060', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 16, borderTopRightRadius: 16, paddingBottom: 24, paddingTop: 12, shadowColor: '#000', shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 16 },
-  sheetRow: { padding: 16, borderBottomWidth: 1, borderBottomColor: '#F1F3F4' },
-  sheetTxt: { color: '#212529', fontSize: 16 },
+function formatRelative(iso: string): string {
+  try {
+    const d = new Date(iso); const diff = Date.now() - d.getTime();
+    if (diff < 60_000) return 'now';
+    if (diff < 86400_000) return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    if (diff < 7 * 86400_000) return d.toLocaleDateString([], { weekday: 'short' });
+    return d.toLocaleDateString([], { day: '2-digit', month: 'short' });
+  } catch { return ''; }
+}
+
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen: { flex: 1, backgroundColor: c.bg },
+  center: { justifyContent: 'center', alignItems: 'center' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 56, paddingBottom: 12 },
+  title: { color: c.text, fontSize: 28, fontWeight: '800' },
+  headerBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.border },
+  // Avatar photo popup
+  avBackdrop:   { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', alignItems: 'center', justifyContent: 'center', padding: 28 },
+  avCard:       { width: '100%', maxWidth: 360, borderRadius: 16, overflow: 'hidden', backgroundColor: c.surfaceSolid },
+  avImgWrap:    { width: '100%', aspectRatio: 1, backgroundColor: c.primary },
+  avImg:        { width: '100%', height: '100%' },
+  avInitials:   { alignItems: 'center', justifyContent: 'center', backgroundColor: c.primary },
+  avInitialsTxt:{ color: '#fff', fontSize: 84, fontWeight: '800' },
+  avNameBar:    { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: 'rgba(0,0,0,0.45)' },
+  avNameTxt:    { color: '#fff', fontSize: 19, fontWeight: '700' },
+  avActions:    { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 12, backgroundColor: c.surfaceSolid },
+  avActionBtn:  { alignItems: 'center', gap: 4, paddingHorizontal: 6 },
+  avActionTxt:  { color: c.primary, fontSize: 12, fontWeight: '600' },
+  headerBtnTxt: { fontSize: 17 },
+  errorBar: { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.4)', borderWidth: 1, marginHorizontal: 16, padding: 10, borderRadius: 10 },
+  errorTxt: { color: c.danger, fontSize: 12 },
+
+  emptyTitle: { color: c.text, fontSize: 18, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
+  emptySub: { color: c.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 24 },
+  emptyBtn: { backgroundColor: c.primary, paddingHorizontal: 28, paddingVertical: 12, borderRadius: 24 },
+  emptyBtnTxt: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 },
+
+  folderScroll: { flexGrow: 0, maxHeight: 50 },   // keep the chip row compact, never stretch vertically
+  folderRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8, gap: 8 },
+  folderChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 18, backgroundColor: c.surface, borderWidth: 1, borderColor: c.border },
+  folderChipActive: { backgroundColor: c.primary, borderColor: c.primary },
+  folderTxt: { color: c.textDim, fontSize: 13, fontWeight: '600' },
+  folderTxtActive: { color: '#FFFFFF' },
+  folderCount: { color: c.textDim, fontSize: 11, fontWeight: '700', backgroundColor: c.surface, paddingHorizontal: 6, borderRadius: 8, overflow: 'hidden', minWidth: 18, textAlign: 'center' },
+  folderCountActive: { color: c.primary, backgroundColor: '#FFFFFF' },
+
+  sectionHeader: { color: c.textDim, fontSize: 12, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase', paddingHorizontal: 20, paddingTop: 14, paddingBottom: 6, backgroundColor: c.bg },
+  separator: { height: 0.5, backgroundColor: c.separator, marginLeft: 82 },
+
+  row: { flexDirection: 'row', height: 72, paddingHorizontal: 12, alignItems: 'center', gap: 12, backgroundColor: c.bg },
+  rowSelected: { backgroundColor: brandAlpha(0.14) },
+  avatarWrap: { width: 50, height: 50 },
+  selBadge: { position: 'absolute', right: -2, bottom: -2, width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: c.bg },
+  selBadgeOn: { backgroundColor: c.primary },
+  selBadgeOff: { backgroundColor: c.surfaceSolid, borderColor: c.textDim },
+  avatar: { width: 50, height: 50, borderRadius: 25, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  avatarGroup: { backgroundColor: c.accent },
+  avatarImg: { width: '100%', height: '100%' },
+  avatarTxt: { color: '#FFFFFF', fontSize: 20, fontWeight: '800' },
+  presenceDot: { position: 'absolute', right: 0, bottom: 0, width: 14, height: 14, borderRadius: 7, backgroundColor: c.online, borderWidth: 2.5, borderColor: c.bg },
+
+  rowBody: { flex: 1, gap: 4 },
+  rowTop: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  rowPin: { fontSize: 11 },
+  rowName: { color: c.text, fontSize: 16, fontWeight: '700', flexShrink: 1 },
+  rowMuted: { fontSize: 12 },
+  rowTime: { color: c.textFaint, fontSize: 12, marginLeft: 'auto' },
+  rowBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  rowPreview: { color: c.textDim, fontSize: 14, flex: 1 },
+  rowPreviewUnread: { color: c.text, fontWeight: '600' },
+  // Long-press action sheet
+  sheetBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  sheet: { backgroundColor: c.surfaceSolid, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 32, paddingTop: 10 },
+  sheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: c.border, alignSelf: 'center', marginBottom: 8 },
+  sheetTitle: { color: c.textDim, fontSize: 13, fontWeight: '700', paddingHorizontal: 20, paddingVertical: 10 },
+  sheetItem: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingHorizontal: 20, paddingVertical: 15 },
+  sheetItemTxt: { color: c.text, fontSize: 16, fontWeight: '500' },
+  draftLabel: { color: c.danger, fontWeight: '700' },
+  unreadBadge: { backgroundColor: c.primary, borderRadius: 11, minWidth: 22, height: 22, paddingHorizontal: 7, alignItems: 'center', justifyContent: 'center' },
+  unreadTxt: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
+
+  actionsRow: { flexDirection: 'row' },
+  action: { width: 76, alignItems: 'center', justifyContent: 'center', gap: 4 },
+  actionIcon: { fontSize: 20 },
+  actionLbl: { color: '#fff', fontSize: 11, fontWeight: '700' },
+
+  fab: { position: 'absolute', right: 20, bottom: 92, width: 58, height: 58, borderRadius: 29, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', elevation: 8, shadowColor: c.primary, shadowOpacity: 0.4, shadowOffset: { width: 0, height: 4 }, shadowRadius: 10 },
+  fabTxt: { fontSize: 22 },
 });

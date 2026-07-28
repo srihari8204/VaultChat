@@ -1,11 +1,13 @@
 // app/offline-mode.tsx — Offline Mode Manager
 // Connection status, message queue, sync progress, cache management
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   StatusBar, Platform, Alert, ActivityIndicator, Animated,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
 import { Stack, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -14,12 +16,6 @@ import NetInfo from '@react-native-community/netinfo';
 
 const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
 
-const C = {
-  bg: '#FFFFFF', accent: '#4A9FFF', cyan: '#4A9FFF',
-  card: '#F9FAFB', cardBorder: '#112240', white: '#FFFFFF',
-  muted: '#7B8CA8', green: '#10B981', red: '#FF4D6D',
-  orange: '#FF9F43', yellow: '#FBBF24',
-};
 
 const QUEUE_KEY = 'vc_offline_queue';
 
@@ -49,7 +45,14 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function OfflineModeScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
   const [isOnline, setIsOnline] = useState(true);
   const [connectionType, setConnectionType] = useState('wifi');
@@ -183,12 +186,12 @@ export default function OfflineModeScreen() {
   return (
     <View style={s.root}>
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+      <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
 
-      <LinearGradient colors={['#F9FAFB', C.bg]} style={s.header}>
+      <LinearGradient colors={['#F9FAFB', colors.bg]} style={s.header}>
         <View style={[s.headerRow, { marginTop: TOP }]}>
           <TouchableOpacity onPress={() => router.back()} hitSlop={16}>
-            <Ionicons name="arrow-back" size={24} color={C.white} />
+            <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={s.headerTitle}>Offline Mode</Text>
           <View style={{ width: 24 }} />
@@ -205,10 +208,10 @@ export default function OfflineModeScreen() {
           <View style={s.statusRow}>
             <Animated.View style={[
               s.statusDot,
-              { backgroundColor: isOnline ? C.green : C.red, opacity: pulseAnim },
+              { backgroundColor: isOnline ? colors.primary : colors.danger, opacity: pulseAnim },
             ]} />
             <View style={{ flex: 1, marginLeft: 14 }}>
-              <Text style={[s.statusTitle, { color: isOnline ? C.green : C.red }]}>
+              <Text style={[s.statusTitle, { color: isOnline ? colors.primary : colors.danger }]}>
                 {isOnline ? 'Online' : 'Offline'}
               </Text>
               <Text style={s.statusSub}>
@@ -220,7 +223,7 @@ export default function OfflineModeScreen() {
             <Ionicons
               name={isOnline ? 'wifi' : 'wifi-outline'}
               size={28}
-              color={isOnline ? C.green : C.red}
+              color={isOnline ? colors.primary : colors.danger}
             />
           </View>
         </LinearGradient>
@@ -228,7 +231,7 @@ export default function OfflineModeScreen() {
         {/* ── Message Queue ──────────────────────────── */}
         <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.sectionHeader}>
-            <Ionicons name="mail-outline" size={20} color={C.accent} />
+            <Ionicons name="mail-outline" size={20} color={colors.accent} />
             <Text style={s.cardTitle}>Message Queue</Text>
             <View style={s.badge}>
               <Text style={s.badgeText}>{queue.length}</Text>
@@ -238,13 +241,13 @@ export default function OfflineModeScreen() {
           {pendingCount > 0 && (
             <View style={s.queueSummary}>
               <Text style={s.queueText}>{pendingCount} pending</Text>
-              {failedCount > 0 && <Text style={[s.queueText, { color: C.red }]}>{failedCount} failed</Text>}
+              {failedCount > 0 && <Text style={[s.queueText, { color: colors.danger }]}>{failedCount} failed</Text>}
             </View>
           )}
 
           {queue.length === 0 ? (
             <View style={s.emptyQueue}>
-              <Ionicons name="checkmark-circle-outline" size={32} color={C.green} />
+              <Ionicons name="checkmark-circle-outline" size={32} color={colors.primary} />
               <Text style={s.emptyText}>All messages sent</Text>
             </View>
           ) : (
@@ -254,9 +257,9 @@ export default function OfflineModeScreen() {
                   s.msgStatusDot,
                   {
                     backgroundColor:
-                      msg.status === 'pending' ? C.orange
-                      : msg.status === 'sending' ? C.accent
-                      : C.red,
+                      msg.status === 'pending' ? '#FF9F43'
+                      : msg.status === 'sending' ? colors.accent
+                      : colors.danger,
                   },
                 ]} />
                 <View style={{ flex: 1, marginLeft: 12 }}>
@@ -266,7 +269,7 @@ export default function OfflineModeScreen() {
                 <View style={{ alignItems: 'flex-end' }}>
                   <Text style={s.msgTime}>{timeAgo(msg.timestamp)}</Text>
                   <Text style={[s.msgStatus, {
-                    color: msg.status === 'failed' ? C.red : C.muted,
+                    color: msg.status === 'failed' ? colors.danger : colors.textDim,
                   }]}>
                     {msg.status === 'sending' ? 'Sending...' : msg.status}
                   </Text>
@@ -277,7 +280,7 @@ export default function OfflineModeScreen() {
 
           {/* Auto-retry status */}
           <View style={s.autoRetryRow}>
-            <Ionicons name="refresh-outline" size={16} color={C.muted} />
+            <Ionicons name="refresh-outline" size={16} color={colors.textDim} />
             <Text style={s.autoRetryText}>Auto-retry: {isOnline ? 'Active' : 'Waiting for connection'}</Text>
           </View>
         </LinearGradient>
@@ -291,10 +294,10 @@ export default function OfflineModeScreen() {
             activeOpacity={0.7}
           >
             {retrying ? (
-              <ActivityIndicator size="small" color={C.white} />
+              <ActivityIndicator size="small" color={colors.text} />
             ) : (
               <>
-                <Ionicons name="refresh" size={20} color={C.white} />
+                <Ionicons name="refresh" size={20} color={colors.text} />
                 <Text style={s.retryBtnText}>Retry All ({queue.length})</Text>
               </>
             )}
@@ -315,7 +318,7 @@ export default function OfflineModeScreen() {
         {/* ── Last Sync ──────────────────────────────── */}
         <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.sectionHeader}>
-            <Ionicons name="sync-outline" size={20} color={C.cyan} />
+            <Ionicons name="sync-outline" size={20} color={colors.accent} />
             <Text style={s.cardTitle}>Last Sync</Text>
           </View>
           <Text style={s.lastSyncText}>
@@ -331,7 +334,7 @@ export default function OfflineModeScreen() {
         {/* ── Offline Features Available ──────────────── */}
         <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.sectionHeader}>
-            <Ionicons name="apps-outline" size={20} color={C.accent} />
+            <Ionicons name="apps-outline" size={20} color={colors.accent} />
             <Text style={s.cardTitle}>Available Offline</Text>
           </View>
 
@@ -344,14 +347,14 @@ export default function OfflineModeScreen() {
             { icon: 'cloud-upload-outline', label: 'Send media', available: false },
           ].map((feat, i) => (
             <View key={i} style={s.featureRow}>
-              <Ionicons name={feat.icon as any} size={18} color={feat.available ? C.green : C.red} />
-              <Text style={[s.featureLabel, { color: feat.available ? C.white : C.muted }]}>
+              <Ionicons name={feat.icon as any} size={18} color={feat.available ? colors.primary : colors.danger} />
+              <Text style={[s.featureLabel, { color: feat.available ? colors.text : colors.textDim }]}>
                 {feat.label}
               </Text>
               <Ionicons
                 name={feat.available ? 'checkmark-circle' : 'close-circle'}
                 size={18}
-                color={feat.available ? C.green : C.red}
+                color={feat.available ? colors.primary : colors.danger}
               />
             </View>
           ))}
@@ -360,7 +363,7 @@ export default function OfflineModeScreen() {
         {/* ── Cache Management ────────────────────────── */}
         <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <View style={s.sectionHeader}>
-            <Ionicons name="folder-outline" size={20} color={C.orange} />
+            <Ionicons name="folder-outline" size={20} color={'#FF9F43'} />
             <Text style={s.cardTitle}>Cache</Text>
           </View>
 
@@ -370,7 +373,7 @@ export default function OfflineModeScreen() {
           </View>
 
           <TouchableOpacity style={s.clearCacheBtn} onPress={clearCache} activeOpacity={0.7}>
-            <Ionicons name="trash-outline" size={18} color={C.red} />
+            <Ionicons name="trash-outline" size={18} color={colors.danger} />
             <Text style={s.clearCacheText}>Clear Cache</Text>
           </TouchableOpacity>
         </LinearGradient>
@@ -381,64 +384,64 @@ export default function OfflineModeScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: C.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: c.bg },
   header: { paddingBottom: 16, paddingHorizontal: 20 },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  headerTitle: { color: C.white, fontSize: 20, fontWeight: '700' },
+  headerTitle: { color: c.text, fontSize: 20, fontWeight: '700' },
   scroll: { flex: 1 },
   scrollContent: { padding: 16, paddingBottom: 40 },
 
-  card: { borderRadius: 16, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: C.cardBorder },
-  cardTitle: { color: C.white, fontSize: 17, fontWeight: '700', marginLeft: 10 },
-  cardTitlePlain: { color: C.white, fontSize: 17, fontWeight: '700', marginBottom: 12 },
+  card: { borderRadius: 16, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: '#112240' },
+  cardTitle: { color: c.text, fontSize: 17, fontWeight: '700', marginLeft: 10 },
+  cardTitlePlain: { color: c.text, fontSize: 17, fontWeight: '700', marginBottom: 12 },
 
   statusRow: { flexDirection: 'row', alignItems: 'center' },
   statusDot: { width: 16, height: 16, borderRadius: 8 },
   statusTitle: { fontSize: 20, fontWeight: '800' },
-  statusSub: { color: C.muted, fontSize: 13, marginTop: 2 },
+  statusSub: { color: c.textDim, fontSize: 13, marginTop: 2 },
 
   sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
-  badge: { backgroundColor: C.accent, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, marginLeft: 8 },
-  badgeText: { color: C.white, fontSize: 12, fontWeight: '700' },
+  badge: { backgroundColor: c.accent, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, marginLeft: 8 },
+  badgeText: { color: c.text, fontSize: 12, fontWeight: '700' },
 
   queueSummary: { flexDirection: 'row', gap: 14, marginBottom: 12 },
-  queueText: { color: C.orange, fontSize: 13, fontWeight: '600' },
+  queueText: { color: '#FF9F43', fontSize: 13, fontWeight: '600' },
 
   emptyQueue: { alignItems: 'center', paddingVertical: 20, gap: 8 },
-  emptyText: { color: C.green, fontSize: 14 },
+  emptyText: { color: c.primary, fontSize: 14 },
 
-  msgRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: C.cardBorder },
+  msgRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#112240' },
   msgStatusDot: { width: 10, height: 10, borderRadius: 5 },
-  msgChat: { color: C.white, fontSize: 14, fontWeight: '600' },
-  msgPreview: { color: C.muted, fontSize: 13, marginTop: 2 },
-  msgTime: { color: C.muted, fontSize: 11 },
+  msgChat: { color: c.text, fontSize: 14, fontWeight: '600' },
+  msgPreview: { color: c.textDim, fontSize: 13, marginTop: 2 },
+  msgTime: { color: c.textDim, fontSize: 11 },
   msgStatus: { fontSize: 11, marginTop: 2, textTransform: 'capitalize' },
 
-  autoRetryRow: { flexDirection: 'row', alignItems: 'center', marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: C.cardBorder, gap: 8 },
-  autoRetryText: { color: C.muted, fontSize: 12 },
+  autoRetryRow: { flexDirection: 'row', alignItems: 'center', marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#112240', gap: 8 },
+  autoRetryText: { color: c.textDim, fontSize: 12 },
 
   retryBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    backgroundColor: C.accent, borderRadius: 12, paddingVertical: 14, marginBottom: 16, gap: 8,
+    backgroundColor: c.accent, borderRadius: 12, paddingVertical: 14, marginBottom: 16, gap: 8,
   },
   retryBtnDisabled: { opacity: 0.4 },
-  retryBtnText: { color: C.white, fontSize: 16, fontWeight: '700' },
+  retryBtnText: { color: c.text, fontSize: 16, fontWeight: '700' },
 
   syncBarBg: { height: 8, borderRadius: 4, backgroundColor: '#1A2A44', overflow: 'hidden', marginBottom: 8 },
-  syncBarFill: { height: 8, borderRadius: 4, backgroundColor: C.cyan },
-  syncPct: { color: C.cyan, fontSize: 14, fontWeight: '700', textAlign: 'center' },
+  syncBarFill: { height: 8, borderRadius: 4, backgroundColor: c.accent },
+  syncPct: { color: c.accent, fontSize: 14, fontWeight: '700', textAlign: 'center' },
 
-  lastSyncText: { color: C.cyan, fontSize: 18, fontWeight: '700', marginTop: 4 },
-  lastSyncDate: { color: C.muted, fontSize: 13, marginTop: 4 },
+  lastSyncText: { color: c.accent, fontSize: 18, fontWeight: '700', marginTop: 4 },
+  lastSyncDate: { color: c.textDim, fontSize: 13, marginTop: 4 },
 
-  featureRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.cardBorder },
+  featureRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#112240' },
   featureLabel: { flex: 1, fontSize: 14, marginLeft: 10 },
 
   cacheRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10 },
-  cacheLabel: { color: C.white, fontSize: 14 },
-  cacheValue: { color: C.orange, fontSize: 16, fontWeight: '700' },
+  cacheLabel: { color: c.text, fontSize: 14 },
+  cacheValue: { color: '#FF9F43', fontSize: 16, fontWeight: '700' },
 
-  clearCacheBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, borderRadius: 10, borderWidth: 1, borderColor: C.red + '50', marginTop: 10, gap: 8 },
-  clearCacheText: { color: C.red, fontSize: 14, fontWeight: '600' },
+  clearCacheBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, borderRadius: 10, borderWidth: 1, borderColor: c.danger + '50', marginTop: 10, gap: 8 },
+  clearCacheText: { color: c.danger, fontSize: 14, fontWeight: '600' },
 });

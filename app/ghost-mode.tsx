@@ -1,241 +1,346 @@
-// app/ghost-mode.tsx
-// Ghost Mode — per-contact privacy controls
-// Hide: online status, typing indicators, read receipts, last seen
-// Accessed from contact-info screen or chat header
+// app/ghost-mode.tsx — Per-contact privacy overrides (Postgres).
+//
+// Routes:
+//   GET    /user/ghost-mode             — list active overrides
+//   GET    /user/ghost-mode/:targetId   — single (or default)
+//   PUT    /user/ghost-mode/:targetId   — set/upsert per-flag
+//   DELETE /user/ghost-mode/:targetId   — clear all overrides
+//
+// Two modes:
+//   * Without ?targetId param → list view, tap a row to drill into per-target toggles
+//   * With  ?targetId param   → per-target editor with 4 switches
+//
+// Enforced server-side at the fan-out layer (presence, typing, read).
+// Last-seen blanking happens in the GET /chats query.
 
-import React, { useState, useEffect, useCallback } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useEffect, useState , useMemo} from 'react';
 import {
-  View, Text, StyleSheet, Switch, TouchableOpacity,
-  ActivityIndicator, Alert, ScrollView, Platform,
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
+import { readCache, writeCache } from '../lib/localCache';
+import { getAccessToken } from '../lib/api';
 import {
-  getGhostSettings,
-  setGhostSettings,
-  GhostSettings,
-} from '../services/ghostModeService';
+  attachmentUrl,
+  clearGhostMode,
+  getGhostMode,
+  listGhostMode,
+  setGhostMode,
+  type GhostMode,
+} from '../lib/chatService';
 
-const DARK = '#0D0F14';
-const CARD = '#1A1D27';
-const PURPLE = '#6C63FF';
-const BORDER = '#2A2D3A';
-const TEXT = '#E8E8E8';
-const SUB = '#9CA3AF';
-const DANGER = '#EF4444';
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
 
 export default function GhostModeScreen() {
+  const { colors } = useTheme();
+  const S = useS();
   const router = useRouter();
-  const { contactUid, contactName } = useLocalSearchParams<{ contactUid: string; contactName: string }>();
-  const [settings, setSettings] = useState<GhostSettings | null>(null);
+  const { targetId, targetName } = useLocalSearchParams<{ targetId?: string; targetName?: string }>();
+
+  if (targetId) return <PerTargetEditor targetId={targetId} targetName={targetName ?? null} />;
+  return <ListView />;
+}
+
+// ─── List view ────────────────────────────────────────────────
+function ListView() {
+  const S = useS();
+  const { colors } = useTheme();
+  const router = useRouter();
+  const [rows,    setRows]    = useState<GhostMode[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [authHeader, setAuthHeader] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!contactUid) return;
-    getGhostSettings(contactUid).then(s => {
-      setSettings(s);
-      setLoading(false);
-    });
-  }, [contactUid]);
-
-  const update = useCallback(async (key: keyof GhostSettings, value: boolean) => {
-    if (!settings || !contactUid) return;
-    const updated = { ...settings, [key]: value };
-    setSettings(updated);
-    setSaving(true);
-    try {
-      await setGhostSettings(contactUid, { [key]: value });
-    } catch {
-      Alert.alert('Error', 'Failed to save ghost settings');
-    }
-    setSaving(false);
-  }, [settings, contactUid]);
-
-  const toggleMaster = useCallback(async () => {
-    if (!settings || !contactUid) return;
-    const newVal = !settings.enabled;
-    const updated = { ...settings, enabled: newVal };
-    setSettings(updated);
-    setSaving(true);
-    try {
-      await setGhostSettings(contactUid, { enabled: newVal });
-    } catch {
-      Alert.alert('Error', 'Failed to toggle ghost mode');
-    }
-    setSaving(false);
-  }, [settings, contactUid]);
+    let cancel = false;
+    (async () => {
+      // Local-first: paint last-known overrides instantly, then refresh.
+      const cached = await readCache<GhostMode[]>('ghost-mode');
+      if (!cancel && cached) { setRows(cached); setLoading(false); }
+      try {
+        const [list, tok] = await Promise.all([listGhostMode(), getAccessToken()]);
+        if (!cancel) {
+          setRows(list);
+          setAuthHeader(tok ? `Bearer ${tok}` : null);
+        }
+        writeCache('ghost-mode', list);
+      } catch (e: any) {
+        // Keep painted cache for offline read; only surface error when nothing shown.
+        if (!cancel && !cached) Alert.alert('Could not load', e?.message ?? 'Try again');
+      } finally {
+        if (!cancel) setLoading(false);
+      }
+    })();
+    return () => { cancel = true; };
+  }, []);
 
   if (loading) {
-    return (
-      <View style={[s.screen, s.center]}>
-        <Stack.Screen options={{ headerShown: false }} />
-        <ActivityIndicator size="large" color={PURPLE} />
-      </View>
-    );
+    return <View style={[S.screen, S.center]}><ActivityIndicator color={colors.primary} size="large" /></View>;
   }
 
-  if (!settings) return null;
-
   return (
-    <View style={s.screen}>
-      <Stack.Screen options={{ headerShown: false }} />
-
-      {/* Header */}
-      <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-          <Text style={s.backTxt}>{'←'}</Text>
+    <View style={S.screen}>
+      <View style={S.header}>
+        <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <View style={{ flex: 1 }}>
-          <Text style={s.headerTitle}>Ghost Mode</Text>
-          <Text style={s.headerSub}>{contactName || 'Contact'}</Text>
-        </View>
-        {saving && <ActivityIndicator size="small" color={PURPLE} />}
+        <Text style={S.title}>Ghost Mode</Text>
       </View>
 
-      <ScrollView contentContainerStyle={s.content}>
+      <View style={S.intro}>
+        <Text style={S.introTxt}>
+          Per-contact privacy overrides. Hide online, typing, read receipts,
+          or last seen from specific people while staying visible to everyone else.
+        </Text>
+      </View>
 
-        {/* Ghost icon */}
-        <View style={s.iconWrap}>
-          <Text style={s.ghostIcon}>{'👻'}</Text>
-          <Text style={s.ghostLabel}>
-            {settings.enabled ? 'Ghost Mode Active' : 'Ghost Mode Off'}
-          </Text>
-          <Text style={s.ghostDesc}>
-            When active, this contact cannot see your online status, typing indicators, read receipts, or last seen.
-          </Text>
-        </View>
-
-        {/* Master toggle */}
-        <View style={s.card}>
-          <View style={s.row}>
-            <View style={{ flex: 1 }}>
-              <Text style={s.rowTitle}>Enable Ghost Mode</Text>
-              <Text style={s.rowSub}>Become invisible to this contact</Text>
-            </View>
-            <Switch
-              value={settings.enabled}
-              onValueChange={toggleMaster}
-              trackColor={{ false: '#374151', true: PURPLE + '80' }}
-              thumbColor={settings.enabled ? PURPLE : '#6B7280'}
-            />
-          </View>
-        </View>
-
-        {/* Individual toggles */}
-        <View style={[s.card, !settings.enabled && s.cardDisabled]}>
-          <Text style={s.sectionTitle}>Privacy Controls</Text>
-
-          <ToggleRow
-            icon="🟢"
-            title="Hide Online Status"
-            sub="They won't see when you're online"
-            value={settings.hideOnline}
-            disabled={!settings.enabled}
-            onToggle={(v) => update('hideOnline', v)}
-          />
-
-          <ToggleRow
-            icon="✍️"
-            title="Hide Typing Indicator"
-            sub="No 'typing...' shown to them"
-            value={settings.hideTyping}
-            disabled={!settings.enabled}
-            onToggle={(v) => update('hideTyping', v)}
-          />
-
-          <ToggleRow
-            icon="✓✓"
-            title="Hide Read Receipts"
-            sub="Blue ticks won't appear for them"
-            value={settings.hideReadReceipts}
-            disabled={!settings.enabled}
-            onToggle={(v) => update('hideReadReceipts', v)}
-          />
-
-          <ToggleRow
-            icon="🕐"
-            title="Hide Last Seen"
-            sub="Your last seen time stays hidden"
-            value={settings.hideLastSeen}
-            disabled={!settings.enabled}
-            onToggle={(v) => update('hideLastSeen', v)}
-          />
-        </View>
-
-        {/* Info */}
-        <View style={s.infoCard}>
-          <Text style={s.infoIcon}>{'🔒'}</Text>
-          <Text style={s.infoTxt}>
-            Ghost Mode is per-contact. Other contacts are not affected. Settings are encrypted and stored only on your device and your private Firestore collection.
+      {rows.length === 0 ? (
+        <View style={[S.center, { flex: 1, paddingHorizontal: 32 }]}>
+          <Text style={S.emptyTitle}>No overrides set</Text>
+          <Text style={S.emptySub}>
+            Open any chat → tap the ⋮ menu → "Ghost Mode" to hide live signals from that person.
           </Text>
         </View>
-
-      </ScrollView>
+      ) : (
+        <FlatList
+          data={rows}
+          keyExtractor={(r) => r.targetId}
+          contentContainerStyle={{ paddingBottom: 32 }}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={S.row}
+              activeOpacity={0.7}
+              onPress={() => router.push({
+                pathname: '/ghost-mode' as any,
+                params: { targetId: item.targetId, targetName: item.name ?? item.email ?? '' },
+              })}
+            >
+              <View style={S.avatar}>
+                {item.photoURL && authHeader ? (
+                  <Image
+                    source={{ uri: attachmentUrl(item.photoURL), headers: { Authorization: authHeader } }}
+                    style={S.avatarImg}
+                  />
+                ) : (
+                  <Text style={S.avatarTxt}>{(item.name || item.email || '?').trim()[0].toUpperCase()}</Text>
+                )}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={S.rowName} numberOfLines={1}>{item.name || item.email || item.targetId.slice(0, 8)}</Text>
+                <Text style={S.rowSub} numberOfLines={1}>{summarise(item)}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
+            </TouchableOpacity>
+          )}
+        />
+      )}
     </View>
   );
 }
 
-function ToggleRow({ icon, title, sub, value, disabled, onToggle }: {
-  icon: string; title: string; sub: string;
-  value: boolean; disabled: boolean; onToggle: (v: boolean) => void;
-}) {
+function summarise(g: GhostMode): string {
+  const hidden: string[] = [];
+  if (g.hideOnline)   hidden.push('online');
+  if (g.hideTyping)   hidden.push('typing');
+  if (g.hideRead)     hidden.push('read');
+  if (g.hideLastSeen) hidden.push('last seen');
+  return hidden.length === 0 ? 'no overrides' : `Hidden: ${hidden.join(' · ')}`;
+}
+
+// ─── Per-target editor ────────────────────────────────────────
+function PerTargetEditor({ targetId, targetName }: { targetId: string; targetName: string | null }) {
+  const S = useS();
+  const { colors } = useTheme();
+  const router = useRouter();
+  const [state,   setState]   = useState<GhostMode | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving,  setSaving]  = useState<null | keyof GhostMode>(null);
+
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      // Local-first: paint this contact's last-known overrides, then refresh.
+      const cached = await readCache<GhostMode>('ghost-mode:' + targetId);
+      if (!cancel && cached) { setState(cached); setLoading(false); }
+      try {
+        const g = await getGhostMode(targetId);
+        if (!cancel) setState(g);
+        writeCache('ghost-mode:' + targetId, g);
+      } catch (e: any) {
+        if (!cancel && !cached) Alert.alert('Could not load', e?.message ?? 'Try again');
+      } finally {
+        if (!cancel) setLoading(false);
+      }
+    })();
+    return () => { cancel = true; };
+  }, [targetId]);
+
+  const toggle = useCallback(async (key: keyof Pick<GhostMode, 'hideOnline' | 'hideTyping' | 'hideRead' | 'hideLastSeen'>) => {
+    if (!state || saving) return;
+    const next = { ...state, [key]: !state[key] };
+    setState(next);
+    setSaving(key);
+    try {
+      await setGhostMode(targetId, { [key]: next[key] });
+    } catch (e: any) {
+      setState(state); // rollback
+      Alert.alert('Save failed', e?.message ?? 'Try again');
+    } finally {
+      setSaving(null);
+    }
+  }, [state, saving, targetId]);
+
+  const onClearAll = useCallback(() => {
+    Alert.alert(
+      'Clear Ghost Mode?',
+      'All overrides for this contact will be removed. They\'ll see your live signals normally again.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Clear', style: 'destructive', onPress: async () => {
+            try {
+              await clearGhostMode(targetId);
+              router.back();
+            } catch (e: any) {
+              Alert.alert('Failed', e?.message ?? 'Try again');
+            }
+          }
+        },
+      ],
+    );
+  }, [targetId, router]);
+
+  if (loading || !state) {
+    return <View style={[S.screen, S.center]}><ActivityIndicator color={colors.primary} size="large" /></View>;
+  }
+
+  const anySet = state.hideOnline || state.hideTyping || state.hideRead || state.hideLastSeen;
+
   return (
-    <View style={[s.row, s.rowBorder, disabled && { opacity: 0.4 }]}>
-      <Text style={s.rowIcon}>{icon}</Text>
-      <View style={{ flex: 1 }}>
-        <Text style={s.rowTitle}>{title}</Text>
-        <Text style={s.rowSub}>{sub}</Text>
+    <ScrollView style={S.screen} contentContainerStyle={{ paddingBottom: 64 }}>
+      <View style={S.header}>
+        <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
+        </TouchableOpacity>
+        <Text style={S.title}>Ghost Mode</Text>
       </View>
-      <Switch
-        value={value}
-        onValueChange={onToggle}
-        disabled={disabled}
-        trackColor={{ false: '#374151', true: PURPLE + '80' }}
-        thumbColor={value && !disabled ? PURPLE : '#6B7280'}
-      />
+
+      <View style={S.intro}>
+        <Text style={S.introTxt}>
+          Hide live signals from <Text style={{ color: colors.primary, fontWeight: '700' }}>{targetName || targetId.slice(0, 8)}</Text>.
+          They stay your contact — they just won't see the chosen indicators in real time.
+        </Text>
+      </View>
+
+      <View style={S.section}>
+        <ToggleRow
+          title="Hide online status"
+          sub="Appear offline to this contact even when you're using the app."
+          value={state.hideOnline}
+          busy={saving === 'hideOnline'}
+          onChange={() => toggle('hideOnline')}
+        />
+        <ToggleRow
+          title="Hide typing indicator"
+          sub="They won't see “typing…” when you compose a reply."
+          value={state.hideTyping}
+          busy={saving === 'hideTyping'}
+          onChange={() => toggle('hideTyping')}
+        />
+        <ToggleRow
+          title="Hide read receipts"
+          sub="They'll still see ✓✓ delivered, but not the blue read tick."
+          value={state.hideRead}
+          busy={saving === 'hideRead'}
+          onChange={() => toggle('hideRead')}
+        />
+        <ToggleRow
+          title="Hide last seen"
+          sub="Your last-active timestamp won't appear in their chat list or header."
+          value={state.hideLastSeen}
+          busy={saving === 'hideLastSeen'}
+          onChange={() => toggle('hideLastSeen')}
+        />
+      </View>
+
+      {anySet && (
+        <TouchableOpacity style={S.clearBtn} onPress={onClearAll} activeOpacity={0.85}>
+          <Text style={S.clearBtnTxt}>Clear all overrides</Text>
+        </TouchableOpacity>
+      )}
+    </ScrollView>
+  );
+}
+
+function ToggleRow({
+  title, sub, value, busy, onChange,
+}: {
+  title: string; sub: string; value: boolean; busy: boolean; onChange: () => void;
+}) {
+  const S = useS();
+  const { colors } = useTheme();
+  return (
+    <View style={S.toggleRow}>
+      <View style={{ flex: 1 }}>
+        <Text style={S.toggleTitle}>{title}</Text>
+        <Text style={S.toggleSub}>{sub}</Text>
+      </View>
+      {busy ? (
+        <ActivityIndicator color={colors.primary} style={{ marginLeft: 8 }} />
+      ) : (
+        <Switch
+          value={value}
+          onValueChange={onChange}
+          trackColor={{ true: colors.primary, false: '#374151' }}
+          thumbColor="#fff"
+        />
+      )}
     </View>
   );
 }
 
-const s = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: DARK },
-  center: { justifyContent: 'center', alignItems: 'center' },
 
-  header: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingTop: Platform.OS === 'ios' ? 56 : 44, paddingBottom: 16, paddingHorizontal: 16,
-    backgroundColor: CARD, borderBottomWidth: 1, borderBottomColor: BORDER,
-  },
-  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#2A2D3A', alignItems: 'center', justifyContent: 'center' },
-  backTxt: { fontSize: 18, color: TEXT },
-  headerTitle: { fontSize: 18, fontWeight: '700', color: TEXT },
-  headerSub: { fontSize: 13, color: SUB, marginTop: 1 },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen:        { flex: 1, backgroundColor: c.bg },
+  center:        { justifyContent: 'center', alignItems: 'center' },
 
-  content: { padding: 16, paddingBottom: 40 },
+  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  backTxt:       { color: c.text, fontSize: 26, fontWeight: '600' },
+  title:         { color: c.text, fontSize: 22, fontWeight: '800' },
 
-  iconWrap: { alignItems: 'center', paddingVertical: 24 },
-  ghostIcon: { fontSize: 56, marginBottom: 12 },
-  ghostLabel: { fontSize: 20, fontWeight: '700', color: TEXT, marginBottom: 6 },
-  ghostDesc: { fontSize: 13, color: SUB, textAlign: 'center', lineHeight: 18, paddingHorizontal: 24 },
+  intro:         { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 },
+  introTxt:      { color: c.textDim, fontSize: 13, lineHeight: 18 },
 
-  card: {
-    backgroundColor: CARD, borderRadius: 16, padding: 16, marginBottom: 16,
-    borderWidth: 1, borderColor: BORDER,
-  },
-  cardDisabled: { opacity: 0.5 },
-  sectionTitle: { fontSize: 14, fontWeight: '600', color: PURPLE, marginBottom: 12, textTransform: 'uppercase', letterSpacing: 0.5 },
+  emptyTitle:    { color: c.text, fontSize: 16, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
+  emptySub:      { color: c.textDim, fontSize: 13, lineHeight: 18, textAlign: 'center' },
 
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 4 },
-  rowBorder: { borderTopWidth: 1, borderTopColor: BORDER, paddingTop: 12, marginTop: 8 },
-  rowIcon: { fontSize: 20 },
-  rowTitle: { fontSize: 15, fontWeight: '600', color: TEXT },
-  rowSub: { fontSize: 12, color: SUB, marginTop: 1 },
+  row:           { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  avatar:        { width: 44, height: 44, borderRadius: 22, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  avatarImg:     { width: '100%', height: '100%' },
+  avatarTxt:     { color: '#fff', fontWeight: '700' },
+  rowName:       { color: c.text, fontSize: 15, fontWeight: '600' },
+  rowSub:        { color: c.textDim, fontSize: 12, marginTop: 2 },
+  rowChev:       { color: c.textDim, fontSize: 22, fontWeight: '600' },
 
-  infoCard: {
-    flexDirection: 'row', gap: 10, backgroundColor: PURPLE + '10',
-    borderRadius: 12, padding: 14, marginTop: 8,
-    borderWidth: 1, borderColor: PURPLE + '30',
-  },
-  infoIcon: { fontSize: 18 },
-  infoTxt: { flex: 1, fontSize: 12, color: SUB, lineHeight: 17 },
+  section:       { paddingHorizontal: 16, marginTop: 8 },
+  toggleRow:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  toggleTitle:   { color: c.text, fontSize: 15, fontWeight: '600' },
+  toggleSub:     { color: c.textDim, fontSize: 12, lineHeight: 16, marginTop: 2 },
+
+  clearBtn:      { marginHorizontal: 20, marginTop: 32, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: c.danger, backgroundColor: c.card, alignItems: 'center' },
+  clearBtnTxt:   { color: c.danger, fontWeight: '700' },
 });

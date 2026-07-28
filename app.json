@@ -2,12 +2,13 @@
   "expo": {
     "name": "VaultChat",
     "slug": "VaultChat",
-    "version": "1.1.0",
+    "version": "1.1.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "vaultchat",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "jsEngine": "hermes",
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": false
@@ -17,6 +18,7 @@
       "infoPlist": {
         "NSCameraUsageDescription": "VaultChat needs camera for video calls and face scan",
         "NSMicrophoneUsageDescription": "VaultChat needs microphone for voice and video calls",
+        "NSSpeechRecognitionUsageDescription": "VaultChat uses speech recognition to transcribe your voice into text",
         "NSFaceIDUsageDescription": "VaultChat uses Face ID to protect your messages",
         "NSContactsUsageDescription": "VaultChat needs contacts to find people you know",
         "NSLocationWhenInUseUsageDescription": "VaultChat needs location to share your position with contacts",
@@ -41,6 +43,13 @@
         "android.permission.INTERNET",
         "android.permission.ACCESS_NETWORK_STATE",
         "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.USE_FULL_SCREEN_INTENT",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+        "android.permission.WAKE_LOCK",
+        "android.permission.SYSTEM_ALERT_WINDOW",
         "android.permission.VIBRATE",
         "android.permission.RECEIVE_BOOT_COMPLETED",
         "android.permission.POST_NOTIFICATIONS",
@@ -53,7 +62,7 @@
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.NFC"
       ],
-      "versionCode": 3
+      "versionCode": 10
     },
     "web": {
       "bundler": "metro",
@@ -65,7 +74,11 @@
         "expo-notifications",
         {
           "icon": "./assets/images/icon.png",
-          "color": "#4A9FFF"
+          "color": "#4A9FFF",
+          "sounds": [
+            "./assets/sounds/note_chime.wav",
+            "./assets/sounds/note_bell.wav"
+          ]
         }
       ],
       "expo-secure-store",
@@ -89,7 +102,15 @@
           "cameraPermissionText": "VaultChat needs camera for Face ID",
           "enableMicrophonePermission": false
         }
-      ]
+      ],
+      "./plugins/withAppComponentFactoryFix.js",
+      "./plugins/withVaultChatCalls.js",
+      "./plugins/withVaultBeamStream.js",
+      "./plugins/withVaultChatSync.js",
+      "./plugins/withGradleMemory.js",
+      "./plugins/withCryptoCore.js",
+      "./plugins/withVaultBeamRust.js",
+      "expo-sqlite"
     ],
     "extra": {
       "router": {},

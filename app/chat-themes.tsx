@@ -1,178 +1,159 @@
-// app/chat-themes.tsx — Chat Themes & Wallpapers
-// Per-chat or global theme. Gradient backgrounds, solid colors, patterns.
-// Stored in AsyncStorage per chatId + global default.
+// app/chat-themes.tsx — Bubble Theme (WhatsApp-style).
+//
+// Picks the color of YOUR (outgoing) message bubble; received bubbles always
+// follow the app theme. Live preview over the real chat background. Per-chat or
+// global. Theme-aware (light + dark). Consumed by app/chat.tsx via
+// getBubbleColors(), which returns null for "Default" (theme green).
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, FlatList,
-  StatusBar, Dimensions, Alert, ScrollView,
+  View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert,
 } from 'react-native';
-import { useLocalSearchParams, Stack } from 'expo-router';
+import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '../lib/theme';
+import { type Palette } from '../constants/theme';
 
-const { width: SW } = Dimensions.get('window');
-const TILE = (SW - 56) / 3;
-const C = { bg: '#FFFFFF', accent: '#4A9FFF', card: '#F9FAFB' };
-
-const THEMES = [
-  { id: 'default', name: 'Default Dark', colors: ['#FFFFFF', '#FFFFFF'], type: 'solid' },
-  { id: 'midnight', name: 'Midnight Blue', colors: ['#0a0a2e', '#1a1a4e'], type: 'gradient' },
-  { id: 'ocean', name: 'Deep Ocean', colors: ['#001427', '#003459'], type: 'gradient' },
-  { id: 'forest', name: 'Dark Forest', colors: ['#0b1a0b', '#1a3a1a'], type: 'gradient' },
-  { id: 'aurora', name: 'Aurora', colors: ['#0d0221', '#0a4429', '#150050'], type: 'gradient' },
-  { id: 'sunset', name: 'Sunset', colors: ['#1a0a2e', '#2d1b4e', '#4a1942'], type: 'gradient' },
-  { id: 'cyber', name: 'Cyberpunk', colors: ['#0a0014', '#1a0028', '#00141a'], type: 'gradient' },
-  { id: 'blood', name: 'Dark Red', colors: ['#1a0505', '#2a0a0a'], type: 'gradient' },
-  { id: 'gold', name: 'Black Gold', colors: ['#0a0a00', '#1a1a05'], type: 'gradient' },
-  { id: 'purple', name: 'Deep Purple', colors: ['#0e0020', '#1a0040'], type: 'gradient' },
-  { id: 'arctic', name: 'Arctic', colors: ['#0a1628', '#0d2137'], type: 'gradient' },
-  { id: 'matrix', name: 'Matrix', colors: ['#000a00', '#001a00'], type: 'gradient' },
-  { id: 'warm', name: 'Warm Dark', colors: ['#1a1008', '#0e0a05'], type: 'gradient' },
-  { id: 'steel', name: 'Steel', colors: ['#0e1117', '#1a1e25'], type: 'gradient' },
-  { id: 'neon', name: 'Neon Night', colors: ['#0a0020', '#000a1a', '#1a0028'], type: 'gradient' },
-];
-
-const BUBBLE_COLORS = [
-  { id: 'default', name: 'Default Green', mine: '#DCF8C6', peer: '#F3F4F6' },
-  { id: 'blue', name: 'Blue', mine: '#0a2a4a', peer: '#F3F4F6' },
-  { id: 'purple', name: 'Purple', mine: '#2a0a3a', peer: '#F3F4F6' },
-  { id: 'red', name: 'Crimson', mine: '#3a0a0a', peer: '#F3F4F6' },
-  { id: 'teal', name: 'Teal', mine: '#0a3a3a', peer: '#F3F4F6' },
-  { id: 'orange', name: 'Orange', mine: '#3a2a0a', peer: '#F3F4F6' },
-  { id: 'pink', name: 'Pink', mine: '#3a0a2a', peer: '#0e0e20' },
-  { id: 'gray', name: 'Gray', mine: '#2a2a2a', peer: '#1a1a1a' },
-];
-
-const THEME_KEY = 'vc_chat_theme_';
-const GLOBAL_KEY = 'vc_global_theme';
 const BUBBLE_KEY = 'vc_bubble_color_';
+const GLOBAL_BUBBLE = 'vc_global_bubble';
+
+interface BubbleTheme { id: string; name: string; color: string | null }
+
+const BUBBLE_THEMES: BubbleTheme[] = [
+  { id: 'default', name: 'Default', color: null },
+  { id: 'emerald', name: 'Emerald', color: '#10B981' },
+  { id: 'teal',    name: 'Teal',    color: '#0B6E63' },
+  { id: 'sky',     name: 'Sky',     color: '#0369A1' },
+  { id: 'blue',    name: 'Blue',    color: '#1E40AF' },
+  { id: 'indigo',  name: 'Indigo',  color: '#4338CA' },
+  { id: 'purple',  name: 'Purple',  color: '#6D28D9' },
+  { id: 'magenta', name: 'Magenta', color: '#9D2A6E' },
+  { id: 'rose',    name: 'Rose',    color: '#BE123C' },
+  { id: 'crimson', name: 'Crimson', color: '#B01E3C' },
+  { id: 'sunset',  name: 'Sunset',  color: '#B45309' },
+  { id: 'slate',   name: 'Slate',   color: '#334155' },
+];
+
+// Legible text (black/white) for a given background — matches chat.tsx idealText.
+function idealText(hex: string): string {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.6 ? '#111B21' : '#FFFFFF';
+}
 
 export default function ChatThemesScreen() {
-  const { chatId } = useLocalSearchParams();
+  const router = useRouter();
+  const { colors } = useTheme();
+  const s = useMemo(() => makeStyles(colors), [colors]);
+  const { chatId } = useLocalSearchParams<{ chatId: string }>();
   const isGlobal = !chatId;
-  const [selectedTheme, setSelectedTheme] = useState('default');
-  const [selectedBubble, setSelectedBubble] = useState('default');
+  const key = isGlobal ? GLOBAL_BUBBLE : BUBBLE_KEY + chatId;
+
+  const [selected, setSelected] = useState('default');
 
   useEffect(() => {
     (async () => {
-      const key = isGlobal ? GLOBAL_KEY : THEME_KEY + chatId;
       const saved = await AsyncStorage.getItem(key);
-      if (saved) setSelectedTheme(saved);
-      const bKey = isGlobal ? 'vc_global_bubble' : BUBBLE_KEY + chatId;
-      const bSaved = await AsyncStorage.getItem(bKey);
-      if (bSaved) setSelectedBubble(bSaved);
+      if (saved) setSelected(saved);
     })();
-  }, [chatId, isGlobal]);
+  }, [key]);
 
-  const applyTheme = async (themeId) => {
-    setSelectedTheme(themeId);
-    const key = isGlobal ? GLOBAL_KEY : THEME_KEY + chatId;
-    await AsyncStorage.setItem(key, themeId);
+  const apply = async (id: string) => {
+    setSelected(id);
+    if (id === 'default') await AsyncStorage.removeItem(key);
+    else await AsyncStorage.setItem(key, id);
   };
 
-  const applyBubble = async (bubbleId) => {
-    setSelectedBubble(bubbleId);
-    const bKey = isGlobal ? 'vc_global_bubble' : BUBBLE_KEY + chatId;
-    await AsyncStorage.setItem(bKey, bubbleId);
-  };
-
-  const currentTheme = THEMES.find(t => t.id === selectedTheme) || THEMES[0];
+  const current = BUBBLE_THEMES.find(t => t.id === selected) || BUBBLE_THEMES[0];
+  const mineBg = current.color ?? colors.bubbleOut;
+  const mineText = current.color ? idealText(current.color) : colors.bubbleOutText;
+  const mineMeta = current.color ? (idealText(current.color) === '#FFFFFF' ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.45)') : colors.bubbleMetaOut;
 
   return (
-    <>
-      <Stack.Screen options={{ title: isGlobal ? 'Global Theme' : 'Chat Theme', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
-      <ScrollView style={s.container}>
-        <StatusBar barStyle="light-content" />
+    <View style={s.root}>
+      <Stack.Screen options={{ headerShown: false }} />
 
-        {/* Preview */}
-        <Text style={s.sectionTitle}>PREVIEW</Text>
-        <LinearGradient colors={currentTheme.colors} style={s.preview}>
-          <View style={[s.previewBubbleL, { backgroundColor: BUBBLE_COLORS.find(b => b.id === selectedBubble)?.peer || '#F3F4F6' }]}>
-            <Text style={s.previewTxt}>Hey, how are you?</Text>
-            <Text style={s.previewTime}>10:30 AM</Text>
-          </View>
-          <View style={[s.previewBubbleR, { backgroundColor: BUBBLE_COLORS.find(b => b.id === selectedBubble)?.mine || '#DCF8C6' }]}>
-            <Text style={s.previewTxt}>I&apos;m great! Love this new theme</Text>
-            <Text style={s.previewTime}>10:31 AM</Text>
-          </View>
-          <View style={[s.previewBubbleL, { backgroundColor: BUBBLE_COLORS.find(b => b.id === selectedBubble)?.peer || '#F3F4F6' }]}>
-            <Text style={s.previewTxt}>It looks amazing!</Text>
-            <Text style={s.previewTime}>10:32 AM</Text>
-          </View>
-        </LinearGradient>
-
-        {/* Backgrounds */}
-        <Text style={[s.sectionTitle, { marginTop: 20 }]}>BACKGROUND</Text>
-        <FlatList
-          data={THEMES}
-          horizontal={false}
-          numColumns={3}
-          scrollEnabled={false}
-          keyExtractor={t => t.id}
-          renderItem={({ item }) => (
-            <TouchableOpacity style={[s.themeTile, selectedTheme === item.id && s.themeTileActive]} onPress={() => applyTheme(item.id)}>
-              <LinearGradient colors={item.colors} style={s.themeTileGrad}>
-                {selectedTheme === item.id && <Text style={s.checkmark}>{"\u2713"}</Text>}
-              </LinearGradient>
-              <Text style={s.themeTileName}>{item.name}</Text>
-            </TouchableOpacity>
-          )}
-          contentContainerStyle={{ gap: 8 }}
-        />
-
-        {/* Bubble Colors */}
-        <Text style={[s.sectionTitle, { marginTop: 20 }]}>BUBBLE COLOR</Text>
-        <FlatList
-          data={BUBBLE_COLORS}
-          horizontal
-          scrollEnabled={true}
-          showsHorizontalScrollIndicator={false}
-          keyExtractor={b => b.id}
-          renderItem={({ item }) => (
-            <TouchableOpacity style={[s.bubbleTile, selectedBubble === item.id && s.bubbleTileActive]} onPress={() => applyBubble(item.id)}>
-              <View style={[s.bubblePreview, { backgroundColor: item.mine }]} />
-              <Text style={s.bubbleName}>{item.name}</Text>
-            </TouchableOpacity>
-          )}
-          contentContainerStyle={{ gap: 8, paddingHorizontal: 4 }}
-        />
-
-        <TouchableOpacity style={s.resetBtn} onPress={() => { applyTheme('default'); applyBubble('default'); Alert.alert('Reset', 'Theme reset to default'); }}>
-          <Text style={s.resetTxt}>Reset to Default</Text>
+      <View style={s.header}>
+        <TouchableOpacity onPress={() => router.back()} style={s.iconBtn} hitSlop={8}>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
+        <Text style={s.headerTitle}>{isGlobal ? 'Bubble theme' : 'Bubble theme'}</Text>
+        <TouchableOpacity onPress={() => apply('default')} hitSlop={8}><Text style={s.resetText}>Reset</Text></TouchableOpacity>
+      </View>
 
-        <View style={{ height: 40 }} />
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+        {/* Live preview over the real chat background */}
+        <View style={[s.preview, { backgroundColor: colors.chatBg }]}>
+          <View style={[s.peerBubble, { backgroundColor: colors.bubbleIn }]}>
+            <Text style={[s.txt, { color: colors.bubbleInText }]}>Hey, how are you?</Text>
+            <Text style={[s.time, { color: colors.bubbleMetaIn }]}>10:30</Text>
+          </View>
+          <View style={[s.myBubble, { backgroundColor: mineBg }]}>
+            <Text style={[s.txt, { color: mineText }]}>I&apos;m great — love this theme!</Text>
+            <Text style={[s.time, { color: mineMeta }]}>10:31 ✓✓</Text>
+          </View>
+          <View style={[s.peerBubble, { backgroundColor: colors.bubbleIn }]}>
+            <Text style={[s.txt, { color: colors.bubbleInText }]}>Looks great 🔥</Text>
+            <Text style={[s.time, { color: colors.bubbleMetaIn }]}>10:32</Text>
+          </View>
+        </View>
+
+        <Text style={s.sectionTitle}>YOUR BUBBLE COLOR</Text>
+        <View style={s.grid}>
+          {BUBBLE_THEMES.map(t => {
+            const swatch = t.color ?? colors.bubbleOut;
+            const on = selected === t.id;
+            return (
+              <TouchableOpacity key={t.id} style={s.cell} onPress={() => apply(t.id)} activeOpacity={0.8}>
+                <View style={[s.swatch, { backgroundColor: swatch }, on && s.swatchOn]}>
+                  {on && <Ionicons name="checkmark" size={20} color={idealText(swatch)} />}
+                </View>
+                <Text style={[s.cellName, on && { color: colors.primary, fontWeight: '700' }]} numberOfLines={1}>{t.name}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        <Text style={s.note}>Received messages always use the app theme — only your own bubble changes.</Text>
       </ScrollView>
-    </>
+    </View>
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg, padding: 16 },
-  sectionTitle: { color: '#6B7280', fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 8 },
-  preview: { borderRadius: 16, padding: 16, minHeight: 180 },
-  previewBubbleL: { alignSelf: 'flex-start', maxWidth: '75%', borderRadius: 14, borderBottomLeftRadius: 2, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 6 },
-  previewBubbleR: { alignSelf: 'flex-end', maxWidth: '75%', borderRadius: 14, borderBottomRightRadius: 2, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 6 },
-  previewTxt: { color: '#1F2937', fontSize: 14 },
-  previewTime: { color: '#6B7280', fontSize: 10, marginTop: 3, textAlign: 'right' },
-  themeTile: { width: TILE, marginBottom: 8, marginRight: 8 },
-  themeTileActive: { borderWidth: 2, borderColor: C.accent, borderRadius: 14 },
-  themeTileGrad: { width: '100%', height: 70, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
-  checkmark: { color: '#fff', fontSize: 20, fontWeight: '900' },
-  themeTileName: { color: '#6B7280', fontSize: 10, textAlign: 'center', marginTop: 4 },
-  bubbleTile: { alignItems: 'center', padding: 8 },
-  bubbleTileActive: { backgroundColor: '#4A9FFF22', borderRadius: 10 },
-  bubblePreview: { width: 40, height: 40, borderRadius: 10 },
-  bubbleName: { color: '#6B7280', fontSize: 10, marginTop: 4 },
-  resetBtn: { marginTop: 20, padding: 14, borderRadius: 12, backgroundColor: '#FF3C6E15', borderWidth: 1, borderColor: '#FF3C6E33', alignItems: 'center' },
-  resetTxt: { color: '#FF3C6E', fontSize: 13, fontWeight: '700' },
-});
-
-// Export helper for other screens to read theme
-export async function getChatTheme(chatId) {
-  const specific = await AsyncStorage.getItem(THEME_KEY + chatId);
-  if (specific) return THEMES.find(t => t.id === specific) || THEMES[0];
-  const global = await AsyncStorage.getItem(GLOBAL_KEY);
-  return THEMES.find(t => t.id === global) || THEMES[0];
+// Bubble colors chosen for a chat. Returns null for "Default" so chat.tsx keeps
+// the theme's green outgoing bubble. (peer is unused by chat.tsx now — received
+// bubbles always follow the theme — but kept for the existing call shape.)
+export async function getBubbleColors(chatId: string): Promise<{ mine: string; peer: string } | null> {
+  try {
+    const id = (await AsyncStorage.getItem(BUBBLE_KEY + chatId))
+      || (await AsyncStorage.getItem(GLOBAL_BUBBLE));
+    const found = BUBBLE_THEMES.find(b => b.id === id);
+    if (!found || !found.color) return null;
+    return { mine: found.color, peer: found.color };
+  } catch { return null; }
 }
+
+const makeStyles = (c: Palette) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: c.bg },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingHorizontal: 12, paddingBottom: 12, backgroundColor: c.bg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border, gap: 8 },
+  iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  headerTitle: { flex: 1, color: c.text, fontSize: 18, fontWeight: '700' },
+  resetText: { color: c.primary, fontSize: 14, fontWeight: '700', paddingHorizontal: 8 },
+
+  preview: { borderRadius: 16, padding: 14, minHeight: 180, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, justifyContent: 'center', marginBottom: 20 },
+  peerBubble: { alignSelf: 'flex-start', maxWidth: '78%', borderRadius: 14, borderTopLeftRadius: 4, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 8 },
+  myBubble: { alignSelf: 'flex-end', maxWidth: '78%', borderRadius: 14, borderTopRightRadius: 4, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 8 },
+  txt: { fontSize: 14, lineHeight: 19 },
+  time: { fontSize: 10, alignSelf: 'flex-end', marginTop: 2 },
+
+  sectionTitle: { color: c.textDim, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 12 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, justifyContent: 'space-between' },
+  cell: { width: '22%', alignItems: 'center', gap: 6 },
+  swatch: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
+  swatchOn: { borderWidth: 3, borderColor: c.primary },
+  cellName: { color: c.textDim, fontSize: 11 },
+
+  note: { color: c.textFaint, fontSize: 12, marginTop: 24, lineHeight: 17, textAlign: 'center' },
+});

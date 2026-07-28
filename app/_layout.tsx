@@ -3,36 +3,83 @@
 //
 // Order of operations:
 //   1. Buffer polyfill (crypto needs this)
-//   2. Block screenshots app-wide (FLAG_SECURE)
-//   3. Security scan — jailbreak / Frida / root
+//   2. Sentry init — must happen BEFORE any other code that might throw
+//   3. Block screenshots app-wide (FLAG_SECURE)
+//   4. Security scan — jailbreak / Frida / root
 //      → if threat found → /blocked (keys already wiped)
-//   4. Register push notifications (physical device only)
-//   5. Wire notification tap listeners → navigate to correct chat
-//   6. Handle notification that launched app from killed state
+//   5. Register push notifications (physical device only)
+//   6. Wire notification tap listeners → navigate to correct chat
+//   7. Handle notification that launched app from killed state
 
+import { BRAND_ACCENT } from '../constants/theme';
 import { Buffer } from 'buffer';
 
 import { Stack, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import * as ScreenCapture from 'expo-screen-capture';
+import * as Sentry from '@sentry/react-native';
 import { StatusBar } from 'expo-status-bar';
-import { View, ActivityIndicator, StyleSheet, Platform } from 'react-native';
-import auth from '@react-native-firebase/auth';
+import { View, ActivityIndicator, StyleSheet, Platform, AppState } from 'react-native';
+import notifee, { EventType } from '@notifee/react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { useFonts, Sora_700Bold, Sora_800ExtraBold } from '@expo-google-fonts/sora';
+import { NunitoSans_400Regular, NunitoSans_600SemiBold, NunitoSans_700Bold } from '@expo-google-fonts/nunito-sans';
+import { FontReadyContext } from '../components/ui/Text';
+import { ThemeProvider } from '../lib/theme';
 
 import { runSecurityCheck } from '../services/securityService';
-import { recordLogin } from '../lib/loginTracker';
-import {
-  registerForPushNotifications,
-  setupNotificationListeners,
-  handleInitialNotification,
-} from '../services/notificationService';
+import { attachTapHandler } from '../lib/push';
+import { notify as notifyMessage, setSelfId } from '../lib/messageNotifications';
+import { addPersistentListener, getSocket } from '../lib/socket';
+import { registerForCalls, getInitialCallIntent, drainDeclinedCall } from '../lib/CallService';
+import { getActiveCall } from '../lib/callState';
+import { getRingingPeer, setRingingPeer, consumePendingCall } from '../lib/ringTracker';
+import { displayIncomingCall, cancelIncomingCall } from '../lib/callNotification';
+import '../lib/callBackground';   // registers notifee bg event + bg notification task
+import { getAccessToken } from '../lib/api';
+import { E2EE_ENABLED, SCHEDULED_LOCAL } from '../constants/flags';
+import { runDueScheduled, rearmAllTriggers } from '../lib/scheduledRunner';
+import { getLocalDb } from '../lib/localDb';
+import perf from '../lib/perf';
 global.Buffer = Buffer;
 
-export default function RootLayout() {
+// ── Sentry frontend init (Day 16) ──────────────────────────────────
+// Reads EXPO_PUBLIC_SENTRY_DSN from EAS env. If unset (dev), Sentry is
+// a no-op — events are dropped, no errors. Wrap every screen via the
+// HOC at module level so unhandled errors get captured.
+const SENTRY_DSN = process.env.EXPO_PUBLIC_SENTRY_DSN;
+if (SENTRY_DSN) {
+  Sentry.init({
+    dsn:                SENTRY_DSN,
+    enableAutoSessionTracking: true,
+    // Sample rate kept conservative for launch; ratchet down if quota tight.
+    tracesSampleRate:   0.2,
+    // Sentry captures Hermes JS errors; native crashes via React Native's
+    // own native bridge — no extra config needed.
+    environment:        process.env.EXPO_PUBLIC_ENV || 'production',
+  });
+}
+
+function RootLayout() {
   const router = useRouter();
   const [securityChecked, setSecurityChecked] = useState(false);
+  // U2: load brand fonts (non-blocking — render proceeds on system font, then
+  // swaps to Sora/Nunito Sans when ready via FontReadyContext).
+  const [fontsReady] = useFonts({
+    Sora_700Bold, Sora_800ExtraBold,
+    NunitoSans_400Regular, NunitoSans_600SemiBold, NunitoSans_700Bold,
+  });
 
   useEffect(() => {
+    // ── 0. Warm up the op-sqlite local store (localDb, JSI engine) ──
+    // The local-first source of truth for chats/messages. Guarded so a stale
+    // binary without the native module can't crash launch.
+    if (Platform.OS !== 'web') {
+      getLocalDb()
+        .then(() => perf.mark('db_ready'))
+        .catch((e: any) => console.warn('[db] localDb init failed:', e?.message));
+    }
+
     // ── 1. Block screenshots app-wide (native only) ──────────
     if (Platform.OS !== 'web') {
       ScreenCapture.preventScreenCaptureAsync().catch(() => {});
@@ -44,48 +91,166 @@ export default function RootLayout() {
       configureGoogleSignIn();
     } catch {}
 
-    // ── 3. Run security scan BEFORE showing any screen ─────────
-    const runStartup = async () => {
-      // Skip security checks on web — they require native APIs
-      if (Platform.OS !== 'web') {
-        try {
-          const report = await runSecurityCheck();
-
+    // ── 3. Security scan runs in the BACKGROUND ─────────────────
+    // It used to be awaited before the first paint — and its two localhost
+    // Frida probes alone can stall ~1.4s — so cold start felt slow. The scan
+    // wipes keys + redirects to /blocked ITSELF if the device is compromised,
+    // so running it async (without gating the UI) is safe and WhatsApp-fast.
+    if (Platform.OS !== 'web') {
+      runSecurityCheck()
+        .then(report => {
           if (!report.clean) {
-            router.replace({
-              pathname: '/blocked',
-              params: { threats: JSON.stringify(report.threats) },
-            });
-            return;
+            router.replace({ pathname: '/blocked', params: { threats: JSON.stringify(report.threats) } });
           }
-        } catch {
-          // Security check error — fail open
+        })
+        .catch(() => { /* fail open */ });
+    }
+
+    // Publish this device's E2EE key bundle on startup (lazy, fire-and-forget).
+    getAccessToken()
+      .then(tok => {
+        if (tok && E2EE_ENABLED) {
+          import('../services/crypto/e2eeSession.rn').then(m => m.provisionE2EEIdentity()).catch(() => {});
         }
-      }
+        // Register the native FCM token so calls ring when the app is killed.
+        if (tok) registerForCalls();
+      })
+      .catch(() => {});
 
-      setSecurityChecked(true);
+    // Unblock the UI immediately — nothing awaited gates the first render now.
+    setSecurityChecked(true);
 
-      // ── 3. Register push notifications (after security cleared) ──
-      if (Platform.OS !== 'web') {
-        const uid = auth().currentUser?.uid;
-        if (uid) {
-          recordLogin(uid).catch(() => {});
-          registerForPushNotifications().catch(() => {});
-        }
+    // (attachTapHandler is wired below, after the call handlers are defined)
+    let cleanupListeners = () => {};
 
-        // ── 4. Handle notification that opened app from killed state ──
-        handleInitialNotification(router).catch(() => {});
-      } else {
-        // Web: just mark ready
-      }
+    // Open the in-app ringing screen for a call. `offer` may be empty (push /
+    // backgrounded) — incoming-call captures the caller's re-sent offer live.
+    const routeToIncoming = (p: { chatId?: string; peerUid: string; peerName: string; type: string; offer?: string; group?: boolean; groupName?: string; waiting?: boolean }) => {
+      cancelIncomingCall();             // clear any OS full-screen call once the in-app UI takes over
+      setRingingPeer(p.peerUid);
+      router.push({
+        pathname: '/incoming-call' as any,
+        params: {
+          chatId: p.chatId || '', peerUid: p.peerUid, peerName: p.peerName,
+          type: p.type === 'video' ? 'video' : 'audio',
+          offer: p.offer || '',
+          group: p.group ? '1' : '', groupName: p.groupName ?? '',
+          waiting: p.waiting ? '1' : '',
+        },
+      });
     };
 
-    runStartup();
+    // ── Incoming-call listener (Socket.IO) ──────────────────────────────
+    const onIncoming = (data: any) => {
+      if (!data?.from || !data?.chatId) return;
+      const active = getActiveCall();
+      if (active && active.peerUid === data.from && !data.group) return;   // call-waiting same peer
+      if (getRingingPeer() === data.from) return;                          // de-dupe repeated rings
+      setRingingPeer(data.from);
+      const name = data.group ? (data.groupName || 'Group call') : (data.callerName ?? data.fromName ?? 'VaultChat user');
+      const type = (data.type === 'video' || data.video === '1') ? 'video' : 'audio';
+      // App in the FOREGROUND (or a group call) → show the in-app screen.
+      // App BACKGROUNDED with a live socket → raise the OS full-screen call UI
+      // (lock screen). Answering it routes into the app via the notifee events.
+      if (AppState.currentState === 'active' || data.group) {
+        routeToIncoming({ chatId: data.chatId, peerUid: data.from, peerName: name, type, offer: data.offer ? JSON.stringify(data.offer) : '', group: !!data.group, groupName: data.groupName, waiting: !!active });
+      } else {
+        displayIncomingCall({ fromUid: data.from, callerName: name, callType: type, chatId: data.chatId });
+      }
+    };
+    const cleanupCallListener = addPersistentListener('call_incoming', onIncoming);
 
-    // ── 5. Wire notification tap listeners (native only) ─────
-    let cleanupListeners = () => {};
+    // E2EE Stage-2 auto-recovery: a peer that couldn't decrypt us asks us to
+    // reset our session so our next message re-runs X3DH (persistent so it
+    // survives socket reconnects, like the call listener).
+    const cleanupRekey = addPersistentListener('e2ee_rekey', (data: any) => {
+      const from = data?.from ?? data?.fromUid;
+      if (from) import('../lib/chatService').then(m => m.handleRekeyRequest(String(from))).catch(() => {});
+    });
+
+    // VaultBeam: resume any relay upload that was interrupted by an app kill
+    // (the recipient resumes symmetrically via the server bitmask).
+    import('../lib/vaultBeamController').then(m => m.resumePendingSends()).catch(() => {});
+
+    // Offline forward catch-up: pull everything missed while offline on every
+    // reconnect, across all chats (Phase 2).
+    import('../lib/syncEngine').then(m => m.initSync()).catch(() => {});
+
+    // Durable read/delivered receipts: re-flush any that were dropped offline (Phase 3).
+    import('../lib/receipts').then(m => m.initReceipts()).catch(() => {});
+
+    // Durable media outbox: resume interrupted/offline media sends on reconnect.
+    import('../lib/mediaOutbox').then(m => m.initMediaOutbox()).catch(() => {});
+    // Bound the re-derivable media cache (safe: never touches the user's library).
+    import('../lib/mediaCacheGC').then(m => m.sweepMediaCache()).catch(() => {});
+
+    // No-GMS background delivery (Phase 4): raise a local notification for each
+    // inbound message. Global + persistent so it fires while the app is
+    // backgrounded-but-alive (foreground-service connection). notify() self-gates
+    // (skips push-capable devices, foregrounded app, own echo, duplicates).
+    import('./(constants)/authService').then(m => m.getCurrentUserAsync().then((u: any) => setSelfId(u?.id ?? null))).catch(() => {});
+    const cleanupMsgNotif = addPersistentListener('new_message', (m: any) => { notifyMessage(m).catch(() => {}); });
+
+    // ── Notifee full-screen call events (foreground) ────────────────────
+    const onNotifeeAnswerOrDecline = (action: string, data: any) => {
+      if (data?.type !== 'call' || !data?.fromUid) return;
+      cancelIncomingCall();
+      if (action === 'decline') {
+        setRingingPeer(null);
+        getSocket().then(s => s.emit('webrtc_end', { to: data.fromUid, chatId: data.chatId })).catch(() => {});
+        return;
+      }
+      routeToIncoming({ chatId: data.chatId, peerUid: data.fromUid, peerName: data.callerName || 'VaultChat user', type: data.callType, offer: '' });
+    };
+    const notifeeFg = notifee.onForegroundEvent(({ type, detail }) => {
+      // Scheduled-message trigger fired (#73) → send any due items.
+      if (detail?.notification?.data?.type === 'scheduled_fire') { runDueScheduled(); return; }
+      if (type !== EventType.ACTION_PRESS && type !== EventType.PRESS) return;
+      onNotifeeAnswerOrDecline(detail?.pressAction?.id === 'decline' ? 'decline' : 'answer', detail?.notification?.data);
+    });
+
+    // App launched/woken BY a call notification → act on it once up.
+    (async () => {
+      try {
+        const initial = await notifee.getInitialNotification();
+        if (initial?.notification?.data?.type === 'call') {
+          onNotifeeAnswerOrDecline(initial.pressAction?.id === 'decline' ? 'decline' : 'answer', initial.notification.data);
+        }
+      } catch {}
+      const pending = consumePendingCall();   // chosen from a bg notification action
+      if (pending) onNotifeeAnswerOrDecline(pending.action, pending.data);
+
+      // Native full-screen-intent (FCM) launch → open the in-app ringing screen.
+      // The caller re-emits the offer over the socket; incoming-call captures it live.
+      try {
+        const ci = await getInitialCallIntent();
+        if (ci?.action === 'open_chat' && ci.chatId) {
+          // Native message-notification tap (F2 content-free doorbell).
+          router.push({ pathname: '/chat', params: { id: ci.chatId } } as any);
+        } else if (ci?.callId && ci.action !== 'open_calls') {
+          routeToIncoming({
+            chatId: ci.callId, peerUid: ci.callerId || '', peerName: ci.callerName || 'VaultChat user',
+            type: ci.isVideo ? 'video' : 'audio', offer: '',
+          });
+        }
+      } catch {}
+
+      // A decline tapped on the killed lock-screen notification → stop the caller's ring.
+      try {
+        const declined = await drainDeclinedCall();
+        if (declined) getSocket().then(s => s.emit('webrtc_end', { chatId: declined })).catch(() => {});
+      } catch {}
+    })();
+
+    // Expo notification tap / actions (heads-up call push fallback).
+    const onCallNotification = (data: any, action: string) =>
+      onNotifeeAnswerOrDecline(action === 'decline' ? 'decline' : 'answer', { ...data, type: 'call' });
+
     if (Platform.OS !== 'web') {
-      cleanupListeners = setupNotificationListeners(router);
+      cleanupListeners = attachTapHandler(
+        (chatId) => { router.push({ pathname: '/chat', params: { id: chatId } } as any); },
+        onCallNotification,
+      );
     }
 
     return () => {
@@ -93,61 +258,67 @@ export default function RootLayout() {
         ScreenCapture.allowScreenCaptureAsync().catch(() => {});
       }
       cleanupListeners();
+      cleanupCallListener();
+      cleanupRekey();
+      cleanupMsgNotif();
+      notifeeFg();
     };
   }, [router]);
+
+  // Scheduled messages (#73): fire due items on start + every foreground, and
+  // re-arm OS triggers (some OEMs clear alarms on force-stop). Sends fail-soft
+  // if not signed in yet and retry on the next sweep.
+  useEffect(() => {
+    if (!SCHEDULED_LOCAL) return;
+    runDueScheduled();
+    rearmAllTriggers();
+    const sub = AppState.addEventListener('change', (s) => { if (s === 'active') runDueScheduled(); });
+    return () => sub.remove();
+  }, []);
 
   // Show spinner while security check runs
   // Prevents any screen flashing before check completes
   if (!securityChecked) {
     return (
-      <View style={styles.loading}>
-        <StatusBar style="dark" backgroundColor="#FFFFFF" />
-        <ActivityIndicator size="large" color="#4A9FFF" />
-      </View>
+      <GestureHandlerRootView style={styles.loading}>
+        <StatusBar style="light" />
+        <ActivityIndicator size="large" color={BRAND_ACCENT} />
+      </GestureHandlerRootView>
     );
   }
 
   return (
-    <>
-      <StatusBar style="dark" backgroundColor="#FFFFFF" />
-      <Stack screenOptions={{ headerShown: false }}>
+    <ThemeProvider>
+    <FontReadyContext.Provider value={fontsReady}>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <StatusBar style="light" />
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0A0A0F' } }}>
 
         {/* Security — gesture disabled so user can't swipe back */}
         <Stack.Screen name="blocked" options={{ gestureEnabled: false }} />
 
         {/* Auth flow */}
         <Stack.Screen name="index" />
-        <Stack.Screen name="login" />
-        <Stack.Screen name="signup" />
-        <Stack.Screen name="profile-setup" />
         <Stack.Screen name="security-questions" />
-        <Stack.Screen name="pinentry" />
-        <Stack.Screen name="otp" />
         <Stack.Screen name="facescan" />
         <Stack.Screen name="biometric-setup" />
         {/* Main app — 6-tab navigation */}
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="chat" />
+        <Stack.Screen name="join/[code]" options={{ headerShown: false }} />
         <Stack.Screen name="videocall" />
         <Stack.Screen name="voicecall" />
         <Stack.Screen name="qr-contact" />
+        <Stack.Screen name="add/[...segments]" options={{ headerShown: false }} />
         <Stack.Screen name="file-preview" />
-        <Stack.Screen name="vaultbeam" />
         <Stack.Screen name="voice-transcribe" />
-        <Stack.Screen name="smart-notifications" />
-        <Stack.Screen name="tone-detector" />
         <Stack.Screen name="group-chat" />
         <Stack.Screen name="lock" />
-        <Stack.Screen name="ai-assistant" />
-        <Stack.Screen name="ai-chat-bot" />
-        <Stack.Screen name="chat-summary" />
-        <Stack.Screen name="translate" />
         <Stack.Screen name="media-viewer" />
         <Stack.Screen name="whiteboard" />
         <Stack.Screen name="bookmarks" />
         <Stack.Screen name="receipt-control" />
         <Stack.Screen name="voice-effects" />
-        <Stack.Screen name="auto-reply" />
         <Stack.Screen name="chat-themes" />
         <Stack.Screen name="chat-wallpaper" />
         <Stack.Screen name="chat-export" />
@@ -175,19 +346,12 @@ export default function RootLayout() {
         <Stack.Screen name="d2de-status" />
         <Stack.Screen name="contacts" />
         <Stack.Screen name="location-sharing" />
-        <Stack.Screen name="dark-web-guard" />
         <Stack.Screen name="vault-features" />
         <Stack.Screen name="dashboard" />
         <Stack.Screen name="settings" />
-        <Stack.Screen name="breachguard" />
-        <Stack.Screen name="deepfake" />
-        <Stack.Screen name="trustscore" />
-        <Stack.Screen name="vault-id" />
+        <Stack.Screen name="story-viewer" />
         <Stack.Screen name="meeting-scheduler" />
-        <Stack.Screen name="three-factor-verify" options={{ gestureEnabled: false }} />
-        <Stack.Screen name="zero-knowledge" />
         <Stack.Screen name="decentralized-id" />
-        <Stack.Screen name="bot-api" />
         <Stack.Screen name="mini-apps" />
         <Stack.Screen name="email-bridge" />
         <Stack.Screen name="creator-channels" />
@@ -200,35 +364,24 @@ export default function RootLayout() {
         <Stack.Screen name="last-seen-privacy" />
         <Stack.Screen name="offline-mode" />
         <Stack.Screen name="image-editor" />
-        <Stack.Screen name="digital-wellbeing" />
         <Stack.Screen name="emergency-sos" />
         <Stack.Screen name="network-test" />
         <Stack.Screen name="file-viewer" />
         <Stack.Screen name="video-player" />
         <Stack.Screen name="voice-speed" />
-        <Stack.Screen name="video-notes" />
         <Stack.Screen name="slideshow" />
         <Stack.Screen name="group-calls" />
         <Stack.Screen name="group-info" />
 
         {/* Auth extras */}
-        <Stack.Screen name="welcome" />
-        <Stack.Screen name="phone" />
-        <Stack.Screen name="register" />
-        <Stack.Screen name="forgot" />
-        <Stack.Screen name="recovery" />
         <Stack.Screen name="setup-complete" />
-        <Stack.Screen name="face-verify" />
         <Stack.Screen name="face-verify-new-device" />
-        <Stack.Screen name="secret-code" />
 
         {/* Security & Privacy */}
         <Stack.Screen name="ghost-mode" />
         <Stack.Screen name="aiguardian" />
         <Stack.Screen name="backup-pin" />
-        <Stack.Screen name="behavioral" />
         <Stack.Screen name="duresspin" />
-        <Stack.Screen name="stealth" />
         <Stack.Screen name="permissions" />
         <Stack.Screen name="memoryshield" />
 
@@ -237,40 +390,40 @@ export default function RootLayout() {
         <Stack.Screen name="communities" />
         <Stack.Screen name="sync-contact" />
         <Stack.Screen name="msgrequests" />
-        <Stack.Screen name="family" />
         <Stack.Screen name="create-group" />
 
         {/* Utility */}
         <Stack.Screen name="search" />
         <Stack.Screen name="starred" />
         <Stack.Screen name="scheduled" />
+        <Stack.Screen name="perf-debug" />
         <Stack.Screen name="scanner" />
         <Stack.Screen name="docscanner" />
         <Stack.Screen name="notifications" />
         <Stack.Screen name="location" />
-        <Stack.Screen name="modal" />
         <Stack.Screen name="filevault" />
         <Stack.Screen name="vaultid" />
-        <Stack.Screen name="testconsole" />
 
         {/* Mini Apps destinations */}
         <Stack.Screen name="encrypted-notes" />
-        <Stack.Screen name="watch-together" />
-        <Stack.Screen name="walkie-talkie" />
         <Stack.Screen name="screen-share" />
         <Stack.Screen name="current-location" />
-        <Stack.Screen name="game-lobby" />
-        <Stack.Screen name="game-play" />
       </Stack>
-    </>
+    </GestureHandlerRootView>
+    </FontReadyContext.Provider>
+    </ThemeProvider>
   );
 }
 
 const styles = StyleSheet.create({
   loading: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#0A0A0F',
     justifyContent: 'center',
     alignItems: 'center',
   },
 });
+
+// Sentry.wrap forwards refs + injects a top-level error boundary that
+// reports to Sentry before re-throwing. No-op when Sentry isn't init'd.
+export default SENTRY_DSN ? Sentry.wrap(RootLayout) : RootLayout;

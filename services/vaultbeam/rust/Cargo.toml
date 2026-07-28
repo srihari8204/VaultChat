@@ -1,0 +1,27 @@
+[package]
+name = "vaultbeam-core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Shared Rust transport core for VaultBeam (Phase 3). Wire format FROZEN — proven byte-identical by tests/vectors.rs against services/crypto/__vectors__/vaultbeam.json. GCM delegated to crypto-core (one implementation)."
+
+[lib]
+name = "vaultbeam_core"
+crate-type = ["lib", "staticlib"]
+
+[dependencies]
+# One crypto implementation: reuse the Phase 1 crate's AES-256-GCM.
+crypto-core = { path = "../../crypto/rust" }
+sha2 = "0.10"
+hex = "0.4"
+if-addrs = "0.13"
+base64 = "0.22"
+serde_json = "1"
+
+[dev-dependencies]
+serde_json = "1"
+
+[profile.release]
+lto = true
+opt-level = "z"
+strip = true

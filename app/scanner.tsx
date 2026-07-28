@@ -4,6 +4,7 @@
  * Step 2: Enhance (filters + adjustments)
  * Step 3: Export (8 formats + 6 share targets)
  */
+import { BRAND_ACCENT, brandAlpha } from '../constants/theme';
 import React, { useState } from "react";
 import {
   View, Text, TouchableOpacity, StyleSheet,
@@ -11,6 +12,7 @@ import {
   Image, Platform, Share,
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system";
@@ -22,7 +24,7 @@ const FORMATS = [
   { ext: "JPG",  icon: "???", color: "#3B82F6", desc: "Image" },
   { ext: "PNG",  icon: "??", color: "#8B5CF6", desc: "Lossless" },
   { ext: "DOCX", icon: "??", color: "#2563EB", desc: "Word" },
-  { ext: "XLSX", icon: "??", color: "#10B981", desc: "Excel" },
+  { ext: "XLSX", icon: "??", color: BRAND_ACCENT, desc: "Excel" },
   { ext: "TXT",  icon: "??", color: "#F59E0B", desc: "Plain text" },
   { ext: "TIFF", icon: "???", color: "#6366F1", desc: "Print" },
   { ext: "ZIP",  icon: "???", color: "#EC4899", desc: "Compressed" },
@@ -55,7 +57,7 @@ const StepBar = ({ step }: { step: number }) => (
         <View style={s.stepItem}>
           <LinearGradient
             colors={
-              step > i  ? ["#10B981","#059669"] :
+              step > i  ? [BRAND_ACCENT,"#059669"] :
               step === i ? ["#4A9FFF","#7C3AED"] :
               ["transparent","transparent"]
             }
@@ -69,7 +71,7 @@ const StepBar = ({ step }: { step: number }) => (
           </Text>
         </View>
         {i < 2 && (
-          <View style={[s.stepLine, step > i && { backgroundColor:"#10B981" }]} />
+          <View style={[s.stepLine, step > i && { backgroundColor:BRAND_ACCENT }]} />
         )}
       </React.Fragment>
     ))}
@@ -205,7 +207,7 @@ export default function ScannerScreen() {
       {/* Header */}
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-          <Text style={s.backText}>?</Text>
+          <Ionicons name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
         <View style={s.headerTitleWrap}>
           <LinearGradient colors={["#4A9FFF","#7C3AED"]} style={s.headerIcon}>
@@ -434,7 +436,7 @@ export default function ScannerScreen() {
               </TouchableOpacity>
               <TouchableOpacity onPress={handleExport} disabled={processing} style={{ flex:2 }}>
                 <LinearGradient
-                  colors={processing ? ["#1a2a3a","#1a2a3a"] : ["#10B981","#059669"]}
+                  colors={processing ? ["#1a2a3a","#1a2a3a"] : [BRAND_ACCENT,"#059669"]}
                   style={s.nextBtn}>
                   {processing
                     ? <ActivityIndicator color="#fff" />
@@ -488,10 +490,10 @@ const s = StyleSheet.create({
   headerIcon:        { width:36, height:36, borderRadius:10, justifyContent:"center", alignItems:"center" },
   headerTitle:       { color:"#fff", fontSize:15, fontWeight:"900" },
   headerSub:         { color:"rgba(255,255,255,0.35)", fontSize:11 },
-  secBadge:          { backgroundColor:"rgba(16,185,129,0.1)", borderRadius:8,
+  secBadge:          { backgroundColor:brandAlpha(0.1), borderRadius:8,
                        paddingHorizontal:8, paddingVertical:4,
-                       borderWidth:1, borderColor:"rgba(16,185,129,0.25)" },
-  secText:           { color:"#10B981", fontSize:10, fontWeight:"800" },
+                       borderWidth:1, borderColor:brandAlpha(0.25) },
+  secText:           { color:BRAND_ACCENT, fontSize:10, fontWeight:"800" },
   stepBar:           { flexDirection:"row", alignItems:"center", paddingHorizontal:18,
                        paddingVertical:12, borderBottomWidth:1,
                        borderBottomColor:"rgba(255,255,255,0.05)" },
@@ -611,8 +613,8 @@ const s = StyleSheet.create({
   doneTitle:         { color:"#fff", fontSize:20, fontWeight:"900", marginBottom:8 },
   doneSub:           { color:"rgba(255,255,255,0.4)", fontSize:13, textAlign:"center",
                        lineHeight:20, marginBottom:20, paddingHorizontal:10 },
-  doneEncBadge:      { backgroundColor:"rgba(16,185,129,0.08)", borderRadius:12,
+  doneEncBadge:      { backgroundColor:brandAlpha(0.08), borderRadius:12,
                        padding:12, marginBottom:24, borderWidth:1,
-                       borderColor:"rgba(16,185,129,0.2)", width:"100%" },
-  doneEncText:       { color:"#10B981", fontSize:12, fontWeight:"700", textAlign:"center" },
+                       borderColor:brandAlpha(0.2), width:"100%" },
+  doneEncText:       { color:BRAND_ACCENT, fontSize:12, fontWeight:"700", textAlign:"center" },
 });

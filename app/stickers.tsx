@@ -1,194 +1,131 @@
-// app/stickers.tsx — Sticker Pack Manager
-// Built-in packs + create custom stickers from photos
-// Stickers stored in Firestore: stickerPacks/{packId}/stickers/{id}
+// app/stickers.tsx — Sticker picker (Postgres).
+//
+// Receives ?chatId in the route params. Tap a sticker → POST it as a
+// type='sticker' message and pop back to the chat. The send goes through
+// lib/chatService.sendMessage so the optimistic update / encryption seam
+// / push notification path are all reused.
+//
+// "Stickers" today are just Unicode emoji — pre-defined 6 packs. The
+// previous version managed Firestore-backed custom packs; that's been
+// dropped for MVP (re-add as a Phase-2 user-content feature).
 
-import React, { useState, useEffect } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useState , useMemo} from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, FlatList,
-  StatusBar, Image, Alert, ActivityIndicator, Dimensions, Modal,
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { Stack } from 'expo-router';
-import * as ImagePicker from 'expo-image-picker';
-import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
-import storage from '@react-native-firebase/storage';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
+import { sendMessage } from '../lib/chatService';
 
 const { width: SW } = Dimensions.get('window');
-const TILE = (SW - 60) / 4;
-const C = { bg: '#FFFFFF', accent: '#4A9FFF', green: '#10B981', card: '#F9FAFB' };
+// 8 stickers per row, with padding/gaps factored in
+const TILE = Math.floor((SW - 32 - 8 * 6) / 8);
 
-// Built-in emoji sticker packs
-const BUILTIN_PACKS = [
-  { id: 'emotions', name: 'Emotions', stickers: ['😀','😂','🥰','😎','🤔','😱','🥳','😴','🤗','😤','🥺','😈','👻','💀','🤖','👽'] },
-  { id: 'reactions', name: 'Reactions', stickers: ['👍','👎','❤️','🔥','💯','🎉','💪','🙏','👀','🤝','✅','❌','⚡','🚀','💎','🏆'] },
-  { id: 'animals', name: 'Animals', stickers: ['🐶','🐱','🦁','🐻','🐼','🦊','🐸','🦄','🐳','🦋','🐙','🦅','🐧','🐨','🦈','🐝'] },
-  { id: 'food', name: 'Food & Drink', stickers: ['🍕','🍔','🌮','🍣','🍩','☕','🍺','🧃','🍰','🍟','🥗','🍜','🍗','🍿','🧁','🥤'] },
-  { id: 'travel', name: 'Travel', stickers: ['✈️','🏖️','🗻','🌍','🏕️','🚗','🚀','🏠','🌅','🎢','🗼','⛺','🚢','🏔️','🌴','🎡'] },
-  { id: 'vault', name: 'VaultChat Special', stickers: ['🔐','🛡️','👁️‍🗨️','🔒','🕵️','💂','🔑','🧬','📡','🛰️','⚔️','🗡️','🏴‍☠️','🎯','🔮','💠'] },
+interface Pack {
+  id:       string;
+  name:     string;
+  stickers: string[];
+}
+const PACKS: Pack[] = [
+  { id: 'emotions',  name: 'Emotions',  stickers: ['😀','😂','🥰','😎','🤔','😱','🥳','😴','🤗','😤','🥺','😈','👻','💀','🤖','👽','🥹','😮‍💨','🫠','🫡'] },
+  { id: 'reactions', name: 'Reactions', stickers: ['👍','👎','❤️','🔥','💯','🎉','💪','🙏','👀','🤝','✅','❌','⚡','🚀','💎','🏆','🫶','🤌','👏','🫡'] },
+  { id: 'animals',   name: 'Animals',   stickers: ['🐶','🐱','🦁','🐻','🐼','🦊','🐸','🦄','🐳','🦋','🐙','🦅','🐧','🐨','🦈','🐝','🦒','🐢','🦉','🦥'] },
+  { id: 'food',      name: 'Food & Drink', stickers: ['🍕','🍔','🌮','🍣','🍩','☕','🍺','🧃','🍰','🍟','🥗','🍜','🍗','🍿','🧁','🥤','🥑','🍓','🍑','🥨'] },
+  { id: 'travel',    name: 'Travel',    stickers: ['✈️','🏖️','🗻','🌍','🏕️','🚗','🚀','🏠','🌅','🎢','🗼','⛺','🚢','🏔️','🌴','🎡','🚆','🏨','🗽','🎫'] },
+  { id: 'vault',     name: 'VaultChat', stickers: ['🔐','🛡️','👁️‍🗨️','🔒','🕵️','💂','🔑','🧬','📡','🛰️','⚔️','🗡️','🏴‍☠️','🎯','🔮','💠','🔓','🪪','⚙️','🚨'] },
 ];
 
-export default function StickerScreen() {
-  const myUid = auth().currentUser?.uid || '';
-  const [tab, setTab] = useState('builtin');
-  const [customPacks, setCustomPacks] = useState([]);
-  const [selectedPack, setSelectedPack] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [showPreview, setShowPreview] = useState(null);
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
 
-  const loadCustomPacks = async () => {
+export default function StickerPickerScreen() {
+  const { colors } = useTheme();
+  const S = useS();
+  const router = useRouter();
+  const { chatId, peerName } = useLocalSearchParams<{ chatId?: string; peerName?: string }>();
+  const [sending, setSending] = useState(false);
+
+  const onPick = useCallback(async (emoji: string, packId: string) => {
+    if (!chatId) {
+      Alert.alert('No chat context', 'Open this picker from a chat.');
+      return;
+    }
+    if (sending) return;
+    setSending(true);
     try {
-      const snap = await firestore().collection('stickerPacks')
-        .where('ownerUid', '==', myUid)
-        .orderBy('createdAt', 'desc').get();
-      setCustomPacks(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    } catch {}
-  };
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { loadCustomPacks(); }, [myUid]);
-
-  const createCustomPack = async () => {
-    Alert.prompt('New Sticker Pack', 'Enter a name for your pack:', async (name) => {
-      if (!name?.trim()) return;
-      try {
-        await firestore().collection('stickerPacks').add({
-          name: name.trim(),
-          ownerUid: myUid,
-          stickers: [],
-          isPublic: false,
-          createdAt: firestore.FieldValue.serverTimestamp(),
-        });
-        await loadCustomPacks();
-        Alert.alert('Created!', 'Now add stickers from your photos');
-      } catch { Alert.alert('Error', 'Could not create pack'); }
-    });
-  };
-
-  const addStickerToCustom = async (packId) => {
-    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.7, allowsEditing: true, aspect: [1, 1] });
-    if (result.canceled) return;
-    setLoading(true);
-    try {
-      const uri = result.assets[0].uri;
-      const filename = 'sticker_' + Date.now() + '.jpg';
-      const ref = storage().ref('stickers/' + myUid + '/' + filename);
-      await ref.putFile(uri);
-      const url = await ref.getDownloadURL();
-      await firestore().collection('stickerPacks').doc(packId).update({
-        stickers: firestore.FieldValue.arrayUnion(url),
+      await sendMessage(chatId, emoji, 'sticker', {
+        meta: { stickerPack: packId },
       });
-      await loadCustomPacks();
-    } catch { Alert.alert('Error', 'Could not upload sticker'); }
-    setLoading(false);
-  };
-
-  const renderBuiltinPack = ({ item }) => (
-    <TouchableOpacity style={s.packCard} onPress={() => setSelectedPack(item)}>
-      <Text style={s.packEmoji}>{item.stickers[0]}</Text>
-      <Text style={s.packName}>{item.name}</Text>
-      <Text style={s.packCount}>{item.stickers.length} stickers</Text>
-    </TouchableOpacity>
-  );
-
-  const renderCustomPack = ({ item }) => (
-    <TouchableOpacity style={s.packCard} onPress={() => setSelectedPack({ ...item, isCustom: true })}>
-      <Text style={s.packEmoji}>{"\uD83C\uDFA8"}</Text>
-      <Text style={s.packName}>{item.name}</Text>
-      <Text style={s.packCount}>{(item.stickers || []).length} stickers</Text>
-    </TouchableOpacity>
-  );
-
-  if (selectedPack) {
-    const isCustom = selectedPack.isCustom;
-    const stickers = selectedPack.stickers || [];
-    return (
-      <>
-        <Stack.Screen options={{ title: selectedPack.name, headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
-        <View style={s.container}>
-          <FlatList
-            data={stickers}
-            numColumns={4}
-            keyExtractor={(_, i) => String(i)}
-            renderItem={({ item }) => (
-              <TouchableOpacity style={s.stickerTile} onPress={() => setShowPreview(item)}>
-                {typeof item === 'string' && item.startsWith('http') ? (
-                  <Image source={{ uri: item }} style={s.stickerImg} />
-                ) : (
-                  <Text style={s.stickerEmoji}>{item}</Text>
-                )}
-              </TouchableOpacity>
-            )}
-            contentContainerStyle={{ padding: 12 }}
-          />
-          {isCustom && (
-            <TouchableOpacity style={s.addStickerBtn} onPress={() => addStickerToCustom(selectedPack.id)} disabled={loading}>
-              {loading ? <ActivityIndicator color="#000" /> : <Text style={{ color: '#000', fontWeight: '800' }}>{"\u2795  Add Sticker from Photos"}</Text>}
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity onPress={() => setSelectedPack(null)} style={{ padding: 16, alignItems: 'center' }}>
-            <Text style={{ color: '#6B7280' }}>Back to Packs</Text>
-          </TouchableOpacity>
-          <Modal visible={!!showPreview} transparent animationType="fade" onRequestClose={() => setShowPreview(null)}>
-            <TouchableOpacity style={s.previewBg} activeOpacity={1} onPress={() => setShowPreview(null)}>
-              {showPreview && typeof showPreview === 'string' && showPreview.startsWith('http') ? (
-                <Image source={{ uri: showPreview }} style={{ width: 200, height: 200 }} />
-              ) : (
-                <Text style={{ fontSize: 120 }}>{showPreview}</Text>
-              )}
-            </TouchableOpacity>
-          </Modal>
-        </View>
-      </>
-    );
-  }
+      router.back();
+    } catch (e: any) {
+      Alert.alert('Send failed', e?.message ?? 'Try again');
+    } finally {
+      setSending(false);
+    }
+  }, [chatId, router, sending]);
 
   return (
-    <>
-      <Stack.Screen options={{ title: 'Sticker Packs', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
-      <View style={s.container}>
-        <StatusBar barStyle="light-content" />
-        <View style={s.tabs}>
-          <TouchableOpacity style={[s.tab, tab === 'builtin' && s.tabActive]} onPress={() => setTab('builtin')}>
-            <Text style={[s.tabTxt, tab === 'builtin' && s.tabTxtActive]}>Built-in</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[s.tab, tab === 'custom' && s.tabActive]} onPress={() => setTab('custom')}>
-            <Text style={[s.tabTxt, tab === 'custom' && s.tabTxtActive]}>My Packs</Text>
-          </TouchableOpacity>
+    <View style={S.screen}>
+      <StatusBar barStyle="light-content" />
+      <View style={S.header}>
+        <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
+        </TouchableOpacity>
+        <View style={{ flex: 1 }}>
+          <Text style={S.title}>Stickers</Text>
+          {peerName ? <Text style={S.sub}>to {peerName}</Text> : null}
         </View>
-        {tab === 'builtin' ? (
-          <FlatList data={BUILTIN_PACKS} keyExtractor={p => p.id} renderItem={renderBuiltinPack} contentContainerStyle={{ padding: 12 }} />
-        ) : (
-          <>
-            <FlatList data={customPacks} keyExtractor={p => p.id} renderItem={renderCustomPack}
-              contentContainerStyle={{ padding: 12 }}
-              ListEmptyComponent={<View style={{ alignItems: 'center', padding: 40 }}><Text style={{ color: '#6B7280' }}>No custom packs yet</Text></View>}
-            />
-            <TouchableOpacity style={s.createPackBtn} onPress={createCustomPack}>
-              <Text style={s.createPackTxt}>{"\u2795  Create Sticker Pack"}</Text>
-            </TouchableOpacity>
-          </>
-        )}
+        {sending && <ActivityIndicator color={colors.primary} />}
       </View>
-    </>
+
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }}>
+        {PACKS.map(pack => (
+          <View key={pack.id} style={S.packBlock}>
+            <Text style={S.packName}>{pack.name}</Text>
+            <View style={S.grid}>
+              {pack.stickers.map(s => (
+                <TouchableOpacity
+                  key={s}
+                  style={[S.tile, { width: TILE, height: TILE }]}
+                  onPress={() => onPick(s, pack.id)}
+                  disabled={sending}
+                  activeOpacity={0.7}
+                >
+                  <Text style={S.tileEmoji}>{s}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        ))}
+      </ScrollView>
+    </View>
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg },
-  tabs: { flexDirection: 'row', paddingHorizontal: 12, paddingTop: 8, gap: 6 },
-  tab: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: '#F9FAFB' },
-  tabActive: { backgroundColor: C.accent },
-  tabTxt: { color: '#6B7280', fontSize: 13, fontWeight: '700' },
-  tabTxtActive: { color: '#000' },
-  packCard: { backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 8, borderWidth: 1, borderColor: '#E5E7EB', flexDirection: 'row', alignItems: 'center', gap: 12 },
-  packEmoji: { fontSize: 32 },
-  packName: { color: '#1F2937', fontSize: 15, fontWeight: '700', flex: 1 },
-  packCount: { color: '#6B7280', fontSize: 12 },
-  stickerTile: { width: TILE, height: TILE, margin: 4, borderRadius: 12, backgroundColor: '#F9FAFB', justifyContent: 'center', alignItems: 'center' },
-  stickerEmoji: { fontSize: 36 },
-  stickerImg: { width: TILE - 8, height: TILE - 8, borderRadius: 10 },
-  addStickerBtn: { margin: 12, backgroundColor: C.accent, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
-  createPackBtn: { margin: 12, backgroundColor: '#4A9FFF22', borderRadius: 12, paddingVertical: 14, alignItems: 'center', borderWidth: 1, borderColor: '#4A9FFF44' },
-  createPackTxt: { color: C.accent, fontSize: 14, fontWeight: '700' },
-  previewBg: { flex: 1, backgroundColor: '#000000CC', justifyContent: 'center', alignItems: 'center' },
+
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen:       { flex: 1, backgroundColor: c.bg },
+  header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  backBtn:      { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  backTxt:      { color: c.text, fontSize: 26, fontWeight: '600' },
+  title:        { color: c.text, fontSize: 22, fontWeight: '800' },
+  sub:          { color: c.textDim, fontSize: 12 },
+
+  packBlock:    { marginBottom: 24 },
+  packName:     { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 10 },
+  grid:         { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  tile:         { backgroundColor: c.card, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.border },
+  tileEmoji:    { fontSize: 28 },
 });

@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="dark" />
+<title>VaultChat · Admin Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=Nunito+Sans:wght@400;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
+<style>
+  :root{
+    --bg:#070B14; --panel:#0D1322; --panel2:#111A2E; --line:rgba(232,182,76,.14);
+    --line2:rgba(255,255,255,.07); --gold:#E8B64C; --gold-dim:rgba(232,182,76,.12);
+    --txt:#EAF0FB; --sub:rgba(234,240,251,.55); --faint:rgba(234,240,251,.3);
+    --ok:#3ECf8E; --warn:#E8B64C; --err:#FF5C72; --info:#5AA9FF;
+    --mono:'JetBrains Mono',ui-monospace,monospace; --head:'Sora',sans-serif; --body:'Nunito Sans',sans-serif;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%}
+  body{background:radial-gradient(1200px 700px at 80% -10%,rgba(232,182,76,.06),transparent 60%),var(--bg);color:var(--txt);font-family:var(--body);font-size:14px;line-height:1.5}
+  h1,h2,h3,.h{font-family:var(--head);letter-spacing:.2px}
+  .mono{font-family:var(--mono)}
+  button{font-family:var(--body);cursor:pointer;border:none}
+  input,select,textarea{font-family:var(--body);color:var(--txt);background:var(--panel2);border:1px solid var(--line2);border-radius:10px;padding:11px 13px;font-size:14px;width:100%;outline:none}
+  input:focus,select,textarea:focus{border-color:var(--gold)}
+  ::placeholder{color:var(--faint)}
+  .hide{display:none!important}
+
+  /* ── Login ── */
+  #login{min-height:100%;display:flex;align-items:center;justify-content:center;padding:24px}
+  .card{background:linear-gradient(180deg,var(--panel),#0A0F1C);border:1px solid var(--line);border-radius:18px;padding:24px;width:100%;max-width:380px;box-shadow:0 24px 60px rgba(0,0,0,.5)}
+  .logo{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+  .logo .dot{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,var(--gold),#A8761F);display:grid;place-items:center;color:#1a1305;font-weight:800;font-family:var(--head)}
+  .logo h1{font-size:18px;margin:0;font-weight:700}
+  .muted{color:var(--sub);font-size:12.5px}
+  .field{margin-top:14px}
+  .field label{display:block;font-size:11px;color:var(--sub);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px}
+  .btn{background:linear-gradient(135deg,var(--gold),#C9942F);color:#1a1305;font-weight:800;border-radius:11px;padding:12px 16px;width:100%;margin-top:18px;font-size:14px}
+  .btn:active{transform:translateY(1px)}
+  .btn.ghost{background:transparent;color:var(--gold);border:1px solid var(--line);width:auto;margin:0;padding:8px 14px;font-weight:700}
+  .btn.sm{padding:7px 12px;width:auto;margin:0;font-size:12.5px;border-radius:9px}
+  .btn.danger{background:transparent;border:1px solid rgba(255,92,114,.4);color:var(--err)}
+  .err-box{margin-top:14px;background:rgba(255,92,114,.1);border:1px solid rgba(255,92,114,.35);color:#ffb3bd;border-radius:10px;padding:10px 12px;font-size:12.5px}
+
+  /* ── App shell ── */
+  #app{min-height:100%;display:flex;flex-direction:column}
+  .topbar{position:sticky;top:0;z-index:20;background:rgba(7,11,20,.92);backdrop-filter:blur(12px);border-bottom:1px solid var(--line2);padding:10px 14px;display:flex;align-items:center;gap:10px}
+  .pill{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;font-weight:700;padding:5px 11px;border-radius:99px;border:1px solid var(--line2)}
+  .pill .led{width:8px;height:8px;border-radius:50%;background:var(--faint)}
+  .pill.on .led{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .pill.off .led{background:var(--err)}
+  .pill.warn .led{background:var(--warn)}
+  .topbar .srv{font-family:var(--mono);font-size:11px;color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+  .tabs{display:flex;gap:6px;overflow-x:auto;padding:10px 14px;border-bottom:1px solid var(--line2);scrollbar-width:none}
+  .tabs::-webkit-scrollbar{display:none}
+  .tab{white-space:nowrap;background:var(--panel);border:1px solid var(--line2);color:var(--sub);border-radius:10px;padding:8px 13px;font-size:13px;font-weight:700;font-family:var(--head)}
+  .tab.active{background:var(--gold-dim);border-color:var(--gold);color:var(--gold)}
+  main{padding:16px 14px 40px;max-width:1100px;width:100%;margin:0 auto}
+  .panel{display:none}.panel.active{display:block}
+  .sec-h{font-size:13px;color:var(--sub);text-transform:uppercase;letter-spacing:1.4px;margin:0 0 12px;font-weight:700}
+
+  /* ── Stat cards ── */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+  .stat{background:linear-gradient(180deg,var(--panel),#0A101D);border:1px solid var(--line);border-radius:14px;padding:15px}
+  .stat .lbl{font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:1px}
+  .stat .val{font-family:var(--head);font-size:26px;font-weight:800;margin-top:6px;color:var(--gold)}
+  .stat .val.plain{color:var(--txt)}
+  .health{margin-top:18px;background:var(--panel);border:1px solid var(--line2);border-radius:14px;padding:16px}
+  .hrow{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--line2);font-size:13px}
+  .hrow:last-child{border-bottom:none}
+  .hrow .k{color:var(--sub)}
+  .hrow .v{font-family:var(--mono);font-size:12.5px}
+  .badge{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:99px}
+  .badge.ok{background:rgba(62,207,142,.14);color:var(--ok)}
+  .badge.bad{background:rgba(255,92,114,.14);color:var(--err)}
+  .badge.on{background:rgba(62,207,142,.14);color:var(--ok)}
+  .badge.off{background:rgba(255,255,255,.06);color:var(--faint)}
+
+  /* ── Tables ── */
+  .toolbar{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;align-items:center}
+  .toolbar input,.toolbar select{width:auto;flex:1;min-width:140px}
+  .tablewrap{overflow-x:auto;border:1px solid var(--line2);border-radius:12px;background:var(--panel)}
+  table{border-collapse:collapse;width:100%;min-width:560px}
+  th,td{text-align:left;padding:10px 12px;font-size:12.5px;border-bottom:1px solid var(--line2);white-space:nowrap}
+  th{color:var(--sub);font-weight:700;text-transform:uppercase;letter-spacing:.6px;font-size:10.5px;position:sticky;top:0;background:var(--panel2)}
+  td.mono{font-family:var(--mono);font-size:11.5px;color:var(--sub)}
+  tr:last-child td{border-bottom:none}
+  .pager{display:flex;gap:10px;align-items:center;justify-content:flex-end;margin-top:12px;font-size:12.5px;color:var(--sub)}
+
+  /* ── Live log ── */
+  .logbar{display:flex;gap:10px;margin-bottom:10px;align-items:center}
+  .logwrap{background:#05080F;border:1px solid var(--line2);border-radius:12px;height:62vh;overflow-y:auto;padding:10px;font-family:var(--mono);font-size:11.5px}
+  .logline{padding:3px 6px;border-radius:6px;display:flex;gap:10px;align-items:baseline}
+  .logline:hover{background:rgba(255,255,255,.03)}
+  .logline .t{color:var(--faint);flex-shrink:0}
+  .logline .ev{font-weight:700;flex-shrink:0}
+  .logline .d{color:var(--sub);overflow:hidden;text-overflow:ellipsis}
+  .ev.new_message{color:var(--ok)} .ev.system{color:var(--gold)} .ev.conn{color:var(--info)}
+  .ev.del,.ev.message_deleted{color:var(--err)} .ev.other{color:var(--info)}
+
+  pre.json{background:#05080F;border:1px solid var(--line2);border-radius:12px;padding:14px;overflow:auto;font-family:var(--mono);font-size:12px;color:#cfe3ff;max-height:64vh}
+  .empty{padding:30px;text-align:center;color:var(--faint);font-size:13px}
+  .row2{display:flex;gap:10px;flex-wrap:wrap}
+  @media(min-width:760px){ main{padding:22px 22px 50px} }
+</style>
+</head>
+<body>
+
+<!-- ───────── LOGIN ───────── -->
+<div id="login">
+  <div class="card">
+    <div class="logo"><div class="dot">V</div><h1>VaultChat Admin</h1></div>
+    <div class="muted">Obsidian Aurora · Midnight Gold</div>
+    <div class="field">
+      <label>Server URL</label>
+      <input id="srvUrl" class="mono" value="https://api.corefinite.com" autocomplete="off" />
+    </div>
+    <div class="field">
+      <label>Admin Key</label>
+      <input id="adminKey" type="password" placeholder="x-admin-key" autocomplete="off" />
+    </div>
+    <button class="btn" id="loginBtn">Connect</button>
+    <div id="loginErr" class="err-box hide"></div>
+    <div class="muted" style="margin-top:14px">Key is kept in <b>sessionStorage</b> only — cleared when the tab closes.</div>
+  </div>
+</div>
+
+<!-- ───────── APP ───────── -->
+<div id="app" class="hide">
+  <div class="topbar">
+    <span id="statusPill" class="pill off"><span class="led"></span><span id="statusTxt">Offline</span></span>
+    <span id="srvLabel" class="srv mono"></span>
+    <button class="btn ghost sm" id="logoutBtn">Disconnect</button>
+  </div>
+  <div class="tabs" id="tabs"></div>
+  <main>
+    <!-- Dashboard -->
+    <section class="panel active" data-panel="dashboard">
+      <h2 class="sec-h">Overview</h2>
+      <div class="grid" id="statGrid"><div class="empty">Loading…</div></div>
+      <div class="health" id="healthPanel"><div class="empty">Loading health…</div></div>
+    </section>
+
+    <!-- Users -->
+    <section class="panel" data-panel="users">
+      <h2 class="sec-h">Users</h2>
+      <div class="toolbar">
+        <input id="userSearch" placeholder="Search name / email / phone…" />
+        <button class="btn sm" id="userSearchBtn">Search</button>
+      </div>
+      <div class="tablewrap"><table id="userTable"><thead><tr>
+        <th>Name</th><th>Email</th><th>Phone</th><th>Status</th><th>Last seen</th><th>Joined</th>
+      </tr></thead><tbody><tr><td colspan="6" class="empty">—</td></tr></tbody></table></div>
+      <div class="pager"><span id="userCount"></span>
+        <button class="btn sm" id="userPrev">‹ Prev</button>
+        <button class="btn sm" id="userNext">Next ›</button>
+      </div>
+    </section>
+
+    <!-- Messages -->
+    <section class="panel" data-panel="messages">
+      <h2 class="sec-h">Messages · metadata only (no content / E2EE)</h2>
+      <div class="toolbar">
+        <select id="msgLimit"><option>50</option><option>100</option><option>200</option></select>
+        <button class="btn sm" id="msgRefresh">Refresh</button>
+      </div>
+      <div class="tablewrap"><table id="msgTable"><thead><tr>
+        <th>ID</th><th>Type</th><th>Sender</th><th>Chat</th><th>Status</th><th>Created</th>
+      </tr></thead><tbody><tr><td colspan="6" class="empty">—</td></tr></tbody></table></div>
+    </section>
+
+    <!-- Sessions -->
+    <section class="panel" data-panel="sessions">
+      <h2 class="sec-h">Active sessions</h2>
+      <div class="toolbar"><button class="btn sm" id="sessRefresh">Refresh</button></div>
+      <div class="tablewrap"><table id="sessTable"><thead><tr>
+        <th>User</th><th>Device</th><th>IP</th><th>Last used</th><th>Expires</th><th></th>
+      </tr></thead><tbody><tr><td colspan="6" class="empty">—</td></tr></tbody></table></div>
+    </section>
+
+    <!-- Broadcast -->
+    <section class="panel" data-panel="broadcast">
+      <h2 class="sec-h">Broadcast announcement</h2>
+      <div class="card" style="max-width:520px">
+        <div class="field"><label>Type</label>
+          <select id="bcType"><option value="info">info</option><option value="update">update</option><option value="warning">warning</option><option value="maintenance">maintenance</option></select>
+        </div>
+        <div class="field"><label>Message</label>
+          <textarea id="bcText" rows="4" placeholder="Sent to every connected client via system:announcement"></textarea>
+        </div>
+        <button class="btn" id="bcSend">Send to all online</button>
+        <div id="bcResult" class="muted" style="margin-top:12px"></div>
+      </div>
+    </section>
+
+    <!-- Live log -->
+    <section class="panel" data-panel="log">
+      <h2 class="sec-h">Live event log · socket firehose</h2>
+      <div class="logbar">
+        <button class="btn sm" id="logPause">Pause</button>
+        <button class="btn sm" id="logClear">Clear</button>
+        <span class="muted" id="logCount">0 events</span>
+      </div>
+      <div class="logwrap" id="logWrap"></div>
+    </section>
+
+    <!-- API Explorer -->
+    <section class="panel" data-panel="api">
+      <h2 class="sec-h">API explorer · GET</h2>
+      <div class="toolbar">
+        <input id="apiPath" class="mono" value="/api/admin/stats" />
+        <button class="btn sm" id="apiGo">GET</button>
+      </div>
+      <pre class="json" id="apiOut">—</pre>
+    </section>
+  </main>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  // ── State ──────────────────────────────────────────────────
+  const SS = window.sessionStorage;
+  let SERVER = SS.getItem('vc_admin_srv') || 'https://api.corefinite.com';
+  let KEY    = SS.getItem('vc_admin_key') || '';
+  let socket = null, dashTimer = null, logPaused = false, logBuf = 0;
+  let userOffset = 0; const USER_LIMIT = 25; let userTotal = 0; let userQ = '';
+
+  const $ = s => document.querySelector(s);
+  const el = (t,c,txt)=>{const e=document.createElement(t);if(c)e.className=c;if(txt!=null)e.textContent=txt;return e;};
+  const fmtDate = v => { if(!v) return '—'; try{return new Date(v).toLocaleString();}catch{return String(v);} };
+  const ago = v => { if(!v) return '—'; const d=Date.now()-new Date(v).getTime(); const m=Math.floor(d/60000); if(m<1)return 'now'; if(m<60)return m+'m'; const h=Math.floor(m/60); if(h<24)return h+'h'; return Math.floor(h/24)+'d'; };
+  const esc = s => String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  const short = s => s ? String(s).slice(0,8) : '—';
+  const uptimeStr = sec => { sec=+sec||0; const d=Math.floor(sec/86400),h=Math.floor(sec%86400/3600),m=Math.floor(sec%3600/60); return (d?d+'d ':'')+(h?h+'h ':'')+m+'m'; };
+
+  // ── API (admin key in header, NEVER in URL, NEVER logged) ──
+  async function api(path, opts={}){
+    const url = SERVER.replace(/\/$/,'') + path;
+    let res;
+    try{
+      res = await fetch(url, Object.assign({
+        headers: Object.assign({'x-admin-key':KEY,'content-type':'application/json'}, opts.headers||{})
+      }, opts));
+    }catch(e){
+      throw new Error('Cannot reach server (network/CORS). Check the URL is correct and CORS allows this origin.');
+    }
+    if(res.status===401) throw new Error('401 — invalid admin key');
+    if(res.status===429) throw new Error('429 — rate limited, slow down');
+    if(res.status===503){ const j=await res.json().catch(()=>({})); throw new Error('503 — '+(j.error||'service unavailable')); }
+    if(!res.ok){ const j=await res.json().catch(()=>({})); throw new Error(res.status+' — '+(j.error||'request failed')); }
+    return res.json();
+  }
+
+  // ── Login ──────────────────────────────────────────────────
+  $('#srvUrl').value = SERVER;
+  $('#loginBtn').onclick = async ()=>{
+    const srv = $('#srvUrl').value.trim(); const key = $('#adminKey').value.trim();
+    const errEl = $('#loginErr'); errEl.classList.add('hide');
+    if(!srv || !key){ errEl.textContent='Enter both server URL and admin key.'; errEl.classList.remove('hide'); return; }
+    SERVER = srv; KEY = key;
+    $('#loginBtn').textContent = 'Verifying…';
+    try{
+      await api('/api/admin/stats');            // verifies the key
+      SS.setItem('vc_admin_srv', SERVER); SS.setItem('vc_admin_key', KEY);
+      enterApp();
+    }catch(e){
+      errEl.textContent = e.message; errEl.classList.remove('hide');
+    }finally{ $('#loginBtn').textContent='Connect'; }
+  };
+  $('#adminKey').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#loginBtn').click(); });
+
+  $('#logoutBtn').onclick = ()=>{
+    if(socket){ try{socket.disconnect();}catch{} socket=null; }
+    if(dashTimer) clearInterval(dashTimer);
+    SS.removeItem('vc_admin_key');           // drop the key
+    KEY=''; $('#app').classList.add('hide'); $('#login').classList.remove('hide'); $('#adminKey').value='';
+  };
+
+  // ── Tabs ───────────────────────────────────────────────────
+  const TABS = [
+    ['dashboard','Dashboard'],['users','Users'],['messages','Messages'],
+    ['sessions','Sessions'],['broadcast','Broadcast'],['log','Live Log'],['api','API']
+  ];
+  function buildTabs(){
+    const t=$('#tabs'); t.innerHTML='';
+    TABS.forEach(([id,label],i)=>{
+      const b=el('button','tab'+(i===0?' active':''),label); b.dataset.tab=id;
+      b.onclick=()=>selectTab(id); t.appendChild(b);
+    });
+  }
+  function selectTab(id){
+    document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active',b.dataset.tab===id));
+    document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('active',p.dataset.panel===id));
+    if(id==='dashboard') loadDashboard();
+    if(id==='users') loadUsers();
+    if(id==='messages') loadMessages();
+    if(id==='sessions') loadSessions();
+  }
+
+  function enterApp(){
+    $('#login').classList.add('hide'); $('#app').classList.remove('hide');
+    $('#srvLabel').textContent = SERVER;
+    buildTabs(); selectTab('dashboard'); connectSocket();
+  }
+
+  // ── Dashboard ──────────────────────────────────────────────
+  async function loadDashboard(){
+    try{
+      const s = await api('/api/admin/stats');
+      const cards = [
+        ['Total users', s.totalUsers, true],['Online now', s.onlineNow, false],
+        ['Messages', s.totalMessages, true],['Active sessions', s.activeSessions, false],
+        ['DB size', s.dbSizeMB+' MB', true],['Uptime', uptimeStr(s.uptime), true]
+      ];
+      const g=$('#statGrid'); g.innerHTML='';
+      cards.forEach(([lbl,val,plain])=>{
+        const c=el('div','stat'); c.appendChild(el('div','lbl',lbl));
+        const v=el('div','val'+(plain?' plain':'')); v.textContent=val; c.appendChild(v); g.appendChild(c);
+      });
+    }catch(e){ $('#statGrid').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; }
+    loadHealth();
+  }
+  async function loadHealth(){
+    try{
+      const h = await api('/api/admin/health-detail'); const p=$('#healthPanel'); p.innerHTML='';
+      const row=(k,vNode)=>{const r=el('div','hrow');r.appendChild(el('span','k',k));const w=el('span','v');w.appendChild(vNode);r.appendChild(w);p.appendChild(r);};
+      const badge=(ok,t)=>{const b=el('span','badge '+(ok?'ok':'bad'),t);return b;};
+      const txt=t=>el('span',null,t);
+      p.appendChild(el('h3','sec-h','Infrastructure'));
+      row('Postgres', mix(badge(h.postgres.ok,h.postgres.ok?'UP':'DOWN'), ' '+(h.postgres.pingMs!=null?h.postgres.pingMs+'ms':'')));
+      row('Redis', mix(badge(h.redis.ok,h.redis.ok?'UP':'DOWN'), ' '+(h.redis.pingMs!=null?h.redis.pingMs+'ms':'')));
+      row('PgBouncer pool', txt('total '+h.pgbouncer.total+' · idle '+h.pgbouncer.idle+' · waiting '+h.pgbouncer.waiting));
+      row('Ollama (LLM)', badge(h.ollama.reachable,h.ollama.reachable?'REACHABLE':'OFFLINE'));
+      const sy=h.system;
+      row('Memory', txt(sy.rssMB+'MB rss · '+sy.freeMemMB+'/'+sy.totalMemMB+'MB free'));
+      row('Load avg', txt(sy.loadAvg.join('  ')+'  ('+sy.cpuCount+' cpu)'));
+      row('Process uptime', txt(uptimeStr(sy.uptimeSec)));
+      row('Node', txt(sy.nodeVersion));
+    }catch(e){ $('#healthPanel').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; }
+  }
+  function mix(node,t){const w=el('span');w.appendChild(node);w.appendChild(document.createTextNode(t));return w;}
+
+  // ── Users ──────────────────────────────────────────────────
+  async function loadUsers(){
+    const tb=$('#userTable tbody');
+    tb.innerHTML='<tr><td colspan="6" class="empty">Loading…</td></tr>';
+    try{
+      const qp = new URLSearchParams({limit:USER_LIMIT,offset:userOffset});
+      if(userQ) qp.set('q',userQ);
+      const d = await api('/api/admin/users?'+qp.toString());
+      userTotal=d.total; tb.innerHTML='';
+      if(!d.users.length){ tb.innerHTML='<tr><td colspan="6" class="empty">No users</td></tr>'; }
+      d.users.forEach(u=>{
+        const tr=el('tr');
+        tr.appendChild(cell(u.displayName||'—'));
+        tr.appendChild(cell(u.email||'—'));
+        tr.appendChild(cell(u.phone||'—'));
+        const st=el('td'); const b=el('span','badge '+(u.isOnline?'on':'off'),u.isOnline?'online':'offline'); st.appendChild(b);
+        if(u.isDeleted){st.appendChild(document.createTextNode(' '));st.appendChild(el('span','badge bad','deleted'));} tr.appendChild(st);
+        tr.appendChild(cell(ago(u.lastSeen)));
+        tr.appendChild(cell(fmtDate(u.createdAt)));
+        tb.appendChild(tr);
+      });
+      $('#userCount').textContent = (userTotal? (userOffset+1)+'–'+Math.min(userOffset+USER_LIMIT,userTotal)+' of '+userTotal : '0');
+      $('#userPrev').disabled = userOffset<=0; $('#userNext').disabled = userOffset+USER_LIMIT>=userTotal;
+    }catch(e){ tb.innerHTML='<tr><td colspan="6" class="empty">'+esc(e.message)+'</td></tr>'; }
+  }
+  function cell(t){const td=el('td');td.textContent=t;return td;}
+  $('#userSearchBtn').onclick=()=>{ userQ=$('#userSearch').value.trim(); userOffset=0; loadUsers(); };
+  $('#userSearch').addEventListener('keydown',e=>{ if(e.key==='Enter') $('#userSearchBtn').click(); });
+  $('#userPrev').onclick=()=>{ userOffset=Math.max(0,userOffset-USER_LIMIT); loadUsers(); };
+  $('#userNext').onclick=()=>{ userOffset+=USER_LIMIT; loadUsers(); };
+
+  // ── Messages ───────────────────────────────────────────────
+  async function loadMessages(){
+    const tb=$('#msgTable tbody'); tb.innerHTML='<tr><td colspan="6" class="empty">Loading…</td></tr>';
+    try{
+      const d = await api('/api/admin/messages?limit='+($('#msgLimit').value||50));
+      tb.innerHTML='';
+      if(!d.messages.length){ tb.innerHTML='<tr><td colspan="6" class="empty">No messages</td></tr>'; }
+      d.messages.forEach(m=>{
+        const tr=el('tr');
+        tr.appendChild(mono(m.id));
+        tr.appendChild(cell(m.type));
+        tr.appendChild(mono(short(m.senderId)));
+        tr.appendChild(mono(short(m.chatId)));
+        const st=el('td'); st.appendChild(el('span','badge '+(m.status==='deleted'?'bad':'on'),m.status)); tr.appendChild(st);
+        tr.appendChild(cell(fmtDate(m.createdAt)));
+        tb.appendChild(tr);
+      });
+    }catch(e){ tb.innerHTML='<tr><td colspan="6" class="empty">'+esc(e.message)+'</td></tr>'; }
+  }
+  function mono(t){const td=el('td','mono');td.textContent=t;return td;}
+  $('#msgRefresh').onclick=loadMessages; $('#msgLimit').onchange=loadMessages;
+
+  // ── Sessions ───────────────────────────────────────────────
+  async function loadSessions(){
+    const tb=$('#sessTable tbody'); tb.innerHTML='<tr><td colspan="6" class="empty">Loading…</td></tr>';
+    try{
+      const d = await api('/api/admin/sessions'); tb.innerHTML='';
+      if(!d.sessions.length){ tb.innerHTML='<tr><td colspan="6" class="empty">No active sessions</td></tr>'; }
+      d.sessions.forEach(s=>{
+        const tr=el('tr');
+        tr.appendChild(cell(s.name||s.email||short(s.userId)));
+        tr.appendChild(cell((s.device||'—').slice(0,40)));
+        tr.appendChild(mono(s.ip||'—'));
+        tr.appendChild(cell(ago(s.lastUsedAt)));
+        tr.appendChild(cell(fmtDate(s.expiresAt)));
+        const act=el('td'); const b=el('button','btn sm danger','Revoke');
+        b.onclick=()=>revokeSession(s.id,b); act.appendChild(b); tr.appendChild(act);
+        tb.appendChild(tr);
+      });
+    }catch(e){ tb.innerHTML='<tr><td colspan="6" class="empty">'+esc(e.message)+'</td></tr>'; }
+  }
+  async function revokeSession(id,btn){
+    if(!confirm('Revoke this session? The user will be signed out on next refresh.')) return;
+    btn.disabled=true; btn.textContent='…';
+    try{ await api('/api/admin/sessions/'+encodeURIComponent(id),{method:'DELETE'}); loadSessions(); }
+    catch(e){ alert(e.message); btn.disabled=false; btn.textContent='Revoke'; }
+  }
+  $('#sessRefresh').onclick=loadSessions;
+
+  // ── Broadcast ──────────────────────────────────────────────
+  $('#bcSend').onclick=async ()=>{
+    const text=$('#bcText').value.trim(); const type=$('#bcType').value;
+    const out=$('#bcResult'); if(!text){ out.textContent='Enter a message.'; return; }
+    out.textContent='Sending…';
+    try{ const r=await api('/api/admin/broadcast',{method:'POST',body:JSON.stringify({type,text})});
+      out.innerHTML='<span style="color:var(--ok)">✓ Delivered to '+r.delivered+' online client(s).</span>'; $('#bcText').value='';
+    }catch(e){ out.innerHTML='<span style="color:var(--err)">'+esc(e.message)+'</span>'; }
+  };
+
+  // ── Live log (socket firehose) ─────────────────────────────
+  function logEvent(kind, ev, detail){
+    if(logPaused) return;
+    const w=$('#logWrap');
+    const line=el('div','logline');
+    line.appendChild(el('span','t',new Date().toLocaleTimeString()));
+    line.appendChild(el('span','ev '+kind,ev));
+    line.appendChild(el('span','d',detail||''));
+    w.appendChild(line); logBuf++;
+    while(w.childElementCount>500) w.removeChild(w.firstChild);
+    $('#logCount').textContent = logBuf+' events';
+    if(!logPaused) w.scrollTop=w.scrollHeight;
+  }
+  $('#logPause').onclick=function(){ logPaused=!logPaused; this.textContent=logPaused?'Resume':'Pause'; this.style.color=logPaused?'var(--gold)':''; };
+  $('#logClear').onclick=()=>{ $('#logWrap').innerHTML=''; logBuf=0; $('#logCount').textContent='0 events'; };
+
+  // ── API explorer ───────────────────────────────────────────
+  $('#apiGo').onclick=async ()=>{
+    const p=$('#apiPath').value.trim(); const out=$('#apiOut'); out.textContent='Loading…';
+    if(!p.startsWith('/')){ out.textContent='Path must start with /'; return; }
+    try{ const d=await api(p); out.textContent=JSON.stringify(d,null,2); }
+    catch(e){ out.textContent=e.message; }
+  };
+
+  // ── Socket connection (admin key auth + real event firehose) ─
+  function setStatus(state){
+    const pill=$('#statusPill'), txt=$('#statusTxt');
+    pill.className='pill '+(state==='on'?'on':state==='warn'?'warn':'off');
+    txt.textContent = state==='on'?'Live':state==='warn'?'Reconnecting…':'Offline';
+  }
+  function connectSocket(){
+    if(typeof io==='undefined'){ setStatus('off'); return; }
+    if(socket){ try{socket.disconnect();}catch{} }
+    setStatus('warn');
+    socket = io(SERVER, {
+      transports:['websocket','polling'], auth:{ adminKey:KEY },
+      reconnection:true, reconnectionDelay:800, reconnectionDelayMax:8000, timeout:8000
+    });
+    socket.on('connect', ()=>{ setStatus('on'); logEvent('conn','connect','socket '+socket.id); });
+    socket.io.on('reconnect_attempt', ()=>setStatus('warn'));
+    socket.on('disconnect', r=>{ setStatus('off'); logEvent('conn','disconnect',String(r)); });
+    socket.on('connect_error', e=>{ setStatus('warn'); logEvent('del','connect_error',e.message); });
+    // The real firehose: server mirrors chat events here (no content).
+    socket.on('admin:event', d=>{
+      const kind = d.event==='new_message'?'new_message':(/delete/.test(d.event)?'message_deleted':'other');
+      const det = [d.event,(d.type?('· '+d.type):''),(d.chatId?('chat '+short(d.chatId)):''),(d.senderId?('from '+short(d.senderId)):'')].filter(Boolean).join(' ');
+      logEvent(kind, d.event, det);
+    });
+    socket.on('system:announcement', d=>logEvent('system','system:announcement','['+d.type+'] '+(d.text||'')));
+    // Catch anything else the server sends to this socket.
+    socket.onAny((ev,...args)=>{
+      if(ev==='admin:event'||ev==='system:announcement') return;
+      logEvent('other', ev, typeof args[0]==='object'?JSON.stringify(args[0]).slice(0,120):String(args[0]??''));
+    });
+  }
+
+  // Dashboard auto-refresh 10s while connected + dashboard visible.
+  dashTimer = setInterval(()=>{
+    if($('#app').classList.contains('hide')) return;
+    const active=document.querySelector('.panel.active'); if(active&&active.dataset.panel==='dashboard') loadDashboard();
+  }, 10000);
+
+  // ── Boot: auto-enter if we already have a verified key this session ──
+  (async function boot(){
+    if(KEY){ try{ await api('/api/admin/stats'); enterApp(); return; }catch{ SS.removeItem('vc_admin_key'); KEY=''; } }
+  })();
+})();
+</script>
+</body>
+</html>

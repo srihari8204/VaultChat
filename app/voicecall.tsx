@@ -1,442 +1,404 @@
-// app/voicecall.tsx
-// Real WebRTC voice call (audio only)
-// Same TURN server as videocall.tsx
-// Speaker / earpiece toggle, mute, call timer
+// app/voicecall.tsx — Day 6 voice call (audio-only WebRTC).
+//
+// Real peer-to-peer with our coturn relay fallback. Signaling rides on
+// the shared Socket.IO connection (events: webrtc_offer, webrtc_answer,
+// webrtc_ice, webrtc_end, call_incoming — defined in server.js).
+//
+// Route params:
+//   chatId      — the chat to call (must be a direct chat MVP)
+//   peerUid     — the other user's uuid (we already have this from chats)
+//   peerName    — display name (header)
+//   isIncoming  — "true" when this screen was opened from an incoming-call event
+//
+// State:
+//   getUserMedia({ audio: true }) → RTCPeerConnection → exchange offer/
+//   answer/ICE via socket → ontrack flips state to connected → start timer.
+//
+// Audio routing: earpiece by default (private). Speaker toggle button.
+// Cleanup: stops local tracks, closes pc, emits webrtc_end, leaves screen.
 
-import React, { useState, useEffect, useRef } from 'react';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import InCallManager from 'react-native-incall-manager';
+import { setActiveCall, clearActiveCall, type ActiveCall } from '../lib/callState';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { CALL } from '../constants/callTheme';
 import {
-  View, Text, TouchableOpacity, StyleSheet,
-  Alert, StatusBar,
-} from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
-import {
-  RTCPeerConnection,
-  RTCIceCandidate,
-  RTCSessionDescription,
   mediaDevices,
+  RTCIceCandidate,
+  RTCPeerConnection,
+  RTCSessionDescription,
 } from 'react-native-webrtc';
-import { io, Socket } from 'socket.io-client';
-import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
-import { Audio } from 'expo-av';
+import { getCurrentUserAsync } from './(constants)/authService';
+import { getTurnConfig, type IceServer } from '../lib/chatService';
+import { getSocket } from '../lib/socket';
+import { addCallLog } from '../lib/callLog';
+import { startCallForeground, stopCallForeground, dismissIncomingNotification, initiateCall, cancelCall } from '../lib/CallService';
+import { newCallCipher, openCallOffer, plainCipher, type CallCipher } from '../lib/callCrypto';
+import { Ionicons } from '@expo/vector-icons';
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Same ICE config as videocall.tsx Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-const ICE_SERVERS = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-  {
-    urls:       'turn:openrelay.metered.ca:80',
-    username:   '597bc91ac20a6dbd23f2ceba',
-    credential: '6PIgpt3wvCkVMngH',
-  },
-  {
-    urls:       'turn:openrelay.metered.ca:80?transport=tcp',
-    username:   '597bc91ac20a6dbd23f2ceba',
-    credential: '6PIgpt3wvCkVMngH',
-  },
-  {
-    urls:       'turns:openrelay.metered.ca:443',
-    username:   '597bc91ac20a6dbd23f2ceba',
-    credential: '6PIgpt3wvCkVMngH',
-  },
-  {
-    urls:       'turns:openrelay.metered.ca:443?transport=tcp',
-    username:   '597bc91ac20a6dbd23f2ceba',
-    credential: '6PIgpt3wvCkVMngH',
-  },
-];
-
-import { SERVER_URL as BACKEND_URL } from '../constants/server';
 type CallState = 'connecting' | 'ringing' | 'connected' | 'ended';
 
+// Call chrome is always dark (independent of app theme), so styles are static.
+const S = makeStyles();
+
 export default function VoiceCallScreen() {
+  const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { chatId, name, isIncoming, remoteSocketId } =
+  const { chatId, peerUid, peerName, isIncoming, initialOffer } =
     useLocalSearchParams<{
       chatId: string;
-      name: string;
+      peerUid: string;
+      peerName: string;
       isIncoming?: string;
-      remoteSocketId?: string;
+      initialOffer?: string;        // JSON-stringified RTCSessionDescription
     }>();
 
-  const uid = auth().currentUser?.uid || '';
+  const [state,   setState]   = useState<CallState>('connecting');
+  const [muted,   setMuted]   = useState(false);
+  const [speaker, setSpeaker] = useState(false);
+  const [seconds, setSeconds] = useState(0);
+  const [error,   setError]   = useState<string | null>(null);
 
-  const [callState,  setCallState]  = useState<CallState>('connecting');
-  const [muted,      setMuted]      = useState(false);
-  const [speaker,    setSpeaker]    = useState(false); // earpiece by default for voice
-  const [seconds,    setSeconds]    = useState(0);
+  const pcRef           = useRef<RTCPeerConnection | null>(null);
+  // E2EE signaling cipher (F6) — per-call key; plaintext passthrough for legacy peers.
+  const cipherRef       = useRef<CallCipher>(plainCipher);
+  const localStreamRef  = useRef<any>(null);
+  const meIdRef         = useRef<string>('');
+  const timerRef        = useRef<any>(null);
+  const ringTimerRef    = useRef<any>(null);
+  const offsRef         = useRef<Array<() => void>>([]);
+  const secondsRef      = useRef(0);
+  const connectedRef    = useRef(false);
+  const loggedRef       = useRef(false);
 
-  const pcRef       = useRef<RTCPeerConnection | null>(null);
-  const socketRef   = useRef<Socket | null>(null);
-  const timerRef    = useRef<any>(null);
-  const remoteIdRef = useRef<string>(remoteSocketId || '');
-  const localStreamRef = useRef<any>(null);
+  // Keep refs in sync so endCall (a stable callback) can log accurate history.
+  useEffect(() => { secondsRef.current = seconds; }, [seconds]);
+  useEffect(() => { if (state === 'connected') connectedRef.current = true; }, [state]);
+
+  // ── teardown ──────────────────────────────────────────────
+  const teardown = useCallback((notify = true) => {
+    offsRef.current.forEach(fn => { try { fn(); } catch {} });
+    offsRef.current = [];
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    if (ringTimerRef.current) { clearInterval(ringTimerRef.current); ringTimerRef.current = null; }
+    try { InCallManager.stop(); } catch {}
+    stopCallForeground();   // release the mic foreground service + wake lock
+    try { localStreamRef.current?.getTracks().forEach((t: any) => t.stop()); } catch {}
+    try { pcRef.current?.close(); } catch {}
+    pcRef.current = null;
+    if (notify && peerUid) {
+      getSocket()
+        .then(s => s.emit('webrtc_end', { to: peerUid, from: meIdRef.current, chatId }))
+        .catch(() => {});
+    }
+  }, [peerUid, chatId]);
+
+  const endCall = useCallback((notify = true) => {
+    // Log this call to the local history exactly once.
+    if (!loggedRef.current && peerUid) {
+      loggedRef.current = true;
+      const incoming = isIncoming === 'true' || isIncoming === '1';
+      const dir: 'incoming' | 'outgoing' | 'missed' = incoming ? (connectedRef.current ? 'incoming' : 'missed') : 'outgoing';
+      addCallLog({ chatId, peerUid, peerName: peerName || 'VaultChat user', kind: 'audio', direction: dir, at: Date.now() - secondsRef.current * 1000, durationSec: secondsRef.current }).catch(() => {});
+      // Outgoing call we hung up before it was answered → tell the callee's device
+      // to stop ringing and show a "missed call".
+      if (!incoming && !connectedRef.current && peerUid) {
+        cancelCall(peerUid, String(chatId || peerUid)).catch(() => {});
+      }
+    }
+    setState('ended');
+    teardown(notify);
+    setTimeout(() => router.back(), 200);
+  }, [teardown, router, peerUid, peerName, isIncoming]);
+
+  // ── call-waiting / hold registration ───────────────────────
+  // Lets a call arriving while we're busy become "call waiting": the incoming
+  // screen can hold THIS call (pause our mic) and accept the new one, then we
+  // resume when it ends and we regain focus.
+  const mutedRef = useRef(false);
+  useEffect(() => { mutedRef.current = muted; }, [muted]);
+  const speakerRef = useRef(false);
+  const heldRef = useRef(false);
+  const meRef   = useRef<ActiveCall | null>(null);
 
   useEffect(() => {
-    let mounted = true;
-
-    const makeCallInner = async (pc: RTCPeerConnection, socket: Socket) => {
-      const chatDoc = await firestore().collection('chats').doc(chatId).get();
-      const participants: string[] = chatDoc.data()?.participants || [];
-      const recipientUid = participants.find(p => p !== uid);
-      if (!recipientUid) return;
-
-      const userDoc = await firestore().collection('users').doc(recipientUid).get();
-      remoteIdRef.current = userDoc.data()?.socketId || '';
-
-      const offer = await pc.createOffer({
-        offerToReceiveAudio: true,
-        offerToReceiveVideo: false,
-      });
-      await pc.setLocalDescription(offer);
-
-      socket.emit('call_offer', {
-        toSocketId: remoteIdRef.current,
-        offer,
-        callType:   'voice',
-        callerName: auth().currentUser?.displayName || 'VaultChat User',
-        chatId,
-      });
+    const me: ActiveCall = {
+      chatId, peerUid, peerName: peerName || 'VaultChat user', kind: 'audio',
+      hold:   () => { heldRef.current = true;  try {
+        localStreamRef.current?.getAudioTracks?.().forEach((t: any) => { t.enabled = false; });   // mute my mic
+        pcRef.current?.getReceivers?.().forEach((r: any) => { if (r.track) r.track.enabled = false; }); // silence the held peer
+      } catch {} },
+      resume: () => { heldRef.current = false; try {
+        InCallManager.start({ media: 'audio', auto: true });               // re-acquire the audio route
+        InCallManager.setForceSpeakerphoneOn(speakerRef.current ? true : null);
+        localStreamRef.current?.getAudioTracks?.().forEach((t: any) => { t.enabled = !mutedRef.current; });
+        pcRef.current?.getReceivers?.().forEach((r: any) => { if (r.track) r.track.enabled = true; });
+      } catch {} },
+      hangUp: () => endCall(true),
     };
+    meRef.current = me;
+    setActiveCall(me);
+    return () => clearActiveCall(me);
+  }, [chatId, peerUid, peerName, endCall]);
 
-    const cleanupInner = () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-      localStreamRef.current?.getTracks().forEach((t: any) => t.stop());
-      pcRef.current?.close();
-      socketRef.current?.disconnect();
-    };
+  // Regained focus after a call-waiting call ended → resume + re-assert active.
+  useFocusEffect(useCallback(() => {
+    if (heldRef.current && meRef.current) { meRef.current.resume(); setActiveCall(meRef.current); }
+  }, []));
 
-    const endCallInner = (notify = true) => {
-      if (notify && socketRef.current && remoteIdRef.current) {
-        socketRef.current.emit('call_end', { toSocketId: remoteIdRef.current });
-      }
-      cleanupInner();
-      router.back();
-    };
+  // Once connected: keep audio alive via the mic foreground service, and clear
+  // the native incoming-call ring (so it isn't later turned into a missed call).
+  const fgStartedRef = useRef(false);
+  useEffect(() => {
+    if (state === 'connected' && !fgStartedRef.current) {
+      fgStartedRef.current = true;
+      startCallForeground(String(chatId || peerUid || 'call'), peerName || 'VaultChat user', '', false);
+      dismissIncomingNotification();
+    }
+  }, [state, chatId, peerUid, peerName]);
 
-    const setup = async () => {
+  // ── timer ──────────────────────────────────────────────────
+  const startTimer = useCallback(() => {
+    if (timerRef.current) return;
+    setSeconds(0);
+    timerRef.current = setInterval(() => setSeconds(s => s + 1), 1000);
+  }, []);
+
+  // ── setup pipeline ─────────────────────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+
+    const run = async () => {
       try {
-        // Audio mode Ã¢â‚¬â€ earpiece for private voice calls
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS:         true,
-          playsInSilentModeIOS:       true,
-          playThroughEarpieceAndroid: true, // earpiece default
-        });
+        // 1. Audio session — InCallManager owns the call audio route. `auto`
+        //    makes it follow wired/Bluetooth headsets automatically; earpiece
+        //    is the default for a voice call (speaker off).
+        try {
+          InCallManager.start({ media: 'audio', auto: true });
+          InCallManager.setForceSpeakerphoneOn(false);
+        } catch {}
 
-        // Audio only Ã¢â‚¬â€ no video track
-        const stream = await mediaDevices.getUserMedia({
-          audio: true,
-          video: false,
-        });
+        // 2. Identity
+        const me = await getCurrentUserAsync();
+        if (!me?.id) throw new Error('Not signed in');
+        meIdRef.current = me.id;
 
-        if (!mounted) return;
+        // 3. Get media (audio only)
+        const stream = await mediaDevices.getUserMedia({ audio: true, video: false });
+        if (cancelled) { stream.getTracks().forEach((t: any) => t.stop()); return; }
         localStreamRef.current = stream;
 
-        const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-        pcRef.current = pc;
+        // 4. Fetch ICE config (TURN credentials from our backend)
+        const turn = await getTurnConfig().catch(() => ({ iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+        ] as IceServer[] }));
 
+        // 5. Build peer connection
+        const pc = new RTCPeerConnection({ iceServers: turn.iceServers as any });
+        pcRef.current = pc;
         stream.getTracks().forEach((track: any) => pc.addTrack(track, stream));
 
-        // Remote audio plays automatically via WebRTC
-        (pc as any).ontrack = () => {
-          setCallState('connected');
-          startTimer();
+        (pc as any).ontrack = (e: any) => {
+          // Remote audio plays automatically on native; no <RTCView> needed for audio.
+          if (state !== 'connected') {
+            setState('connected');
+            startTimer();
+          }
         };
 
-        const socket = io(BACKEND_URL, { transports: ['websocket'] });
-        socketRef.current = socket;
+        // 6. Socket + signaling wires
+        const s = await getSocket();
 
-        // Register call_offer listener BEFORE connect to avoid missing events
-        if (isIncoming === 'true') {
-          socket.on('call_offer_for_you', async ({ offer, fromSocketId }: any) => {
-            remoteIdRef.current = fromSocketId;
-            await pc.setRemoteDescription(new RTCSessionDescription(offer));
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-            socket.emit('call_answer', { toSocketId: fromSocketId, answer });
-          });
-        }
-
-        socket.on('connect', async () => {
-          socket.emit('register', uid);
-
-          if (isIncoming === 'true') {
-            setCallState('ringing');
-          } else {
-            setCallState('ringing');
-            await makeCallInner(pc, socket);
-          }
-        });
-
-        socket.on('ice_candidate', async ({ candidate }: any) => {
-          if (candidate && pcRef.current) {
-            await pcRef.current.addIceCandidate(new RTCIceCandidate(candidate));
-          }
-        });
-
-        socket.on('call_answered', async ({ answer }: any) => {
-          await pcRef.current?.setRemoteDescription(new RTCSessionDescription(answer));
-          setCallState('connected');
-          startTimer();
-        });
-
-        socket.on('call_ended', () => endCallInner(false));
+        const onAnswer = async (data: any) => {
+          if (data?.from !== peerUid && data?.fromUid !== peerUid) { console.warn('[call] answer from wrong peer'); return; }
+          const sdp = cipherRef.current.open(data.answer || data.sdp);   // F6: sealed for E2EE calls
+          if (!sdp?.type) { console.warn('[call] answer failed to open (E2EE cipher mismatch or bad sdp)'); return; }
+          if (!pcRef.current || pcRef.current.signalingState !== 'have-local-offer') return; // already applied / closed
+          console.warn('[call] ANSWER applied → setRemoteDescription');
+          try { await pcRef.current.setRemoteDescription(new RTCSessionDescription(sdp)); }
+          catch (e: any) { console.warn('[call] setRemoteDescription failed:', e?.message); return; }
+          if (state !== 'connected') { setState('connected'); startTimer(); }
+        };
+        const onIce = async (data: any) => {
+          if (data?.from !== peerUid && data?.fromUid !== peerUid) return;
+          const cand = cipherRef.current.open(data?.candidate);          // F6: sealed for E2EE calls
+          if (!cand || !pcRef.current) return;
+          try { await pcRef.current.addIceCandidate(new RTCIceCandidate(cand)); } catch {}
+        };
+        const onEnd = (data: any) => {
+          if (data?.from === peerUid || data?.fromUid === peerUid) endCall(false);
+        };
+        s.on('webrtc_answer', onAnswer);
+        s.on('webrtc_ice',    onIce);
+        s.on('webrtc_end',    onEnd);
+        offsRef.current.push(() => s.off('webrtc_answer', onAnswer));
+        offsRef.current.push(() => s.off('webrtc_ice',    onIce));
+        offsRef.current.push(() => s.off('webrtc_end',    onEnd));
 
         (pc as any).onicecandidate = (event: any) => {
-          if (event.candidate && remoteIdRef.current) {
-            socket.emit('ice_candidate', {
-              toSocketId: remoteIdRef.current,
-              candidate:  event.candidate,
-            });
-          }
+          if (!event.candidate || !peerUid) return;
+          s.emit('webrtc_ice', { to: peerUid, from: meIdRef.current, candidate: cipherRef.current.seal(event.candidate) });
         };
 
         (pc as any).onconnectionstatechange = () => {
-          if (pc.connectionState === 'failed' ||
-              pc.connectionState === 'disconnected') {
-            endCallInner(true);
+          const st = (pc as any).connectionState;
+          if (st === 'failed' || st === 'disconnected' || st === 'closed') {
+            endCall(true);
           }
         };
 
+        // 7. Either accept the incoming offer, or create + send our own
+        if (isIncoming === 'true' && initialOffer) {
+          // F6: encrypted sig1 wire (new caller) or raw plaintext (legacy).
+          const parsedWire = JSON.parse(String(initialOffer));
+          const { cipher, offer: offerObj } = await openCallOffer(peerUid, parsedWire);
+          cipherRef.current = cipher;
+          if (!offerObj?.type) {
+            throw new Error('Secure call setup failed — ask the caller to try again');
+          }
+          await pc.setRemoteDescription(new RTCSessionDescription(offerObj));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          // Resend the one-shot answer a few times — a single socket 'transport
+          // error' blip during setup used to drop it and strand the call. The
+          // caller applies only the first (setRemoteDescription is guarded).
+          const answerWire = { to: peerUid, from: meIdRef.current, answer: cipher.seal(answer) };
+          console.warn('[call] sending ANSWER to', peerUid);
+          s.emit('webrtc_answer', answerWire);
+          let ansTries = 0;
+          const ansTimer = setInterval(() => {
+            if (connectedRef.current || ansTries >= 4) { clearInterval(ansTimer); return; }
+            ansTries++; try { s.emit('webrtc_answer', answerWire); } catch {}
+          }, 1500);
+          offsRef.current.push(() => clearInterval(ansTimer));
+          setState('connecting');
+        } else {
+          const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: false });
+          await pc.setLocalDescription(offer);
+          // F6: seal the signaling under a per-call key (ratchet-wrapped once).
+          const sealed = await newCallCipher(peerUid, offer);
+          if (sealed) cipherRef.current = sealed.cipher;
+          const offerWire = sealed ? sealed.offerWire : offer;
+          // Notify peer it's an incoming call (separate event so the
+          // recipient can show a UI before answering, and so that the
+          // OFFER itself can ride alongside)
+          const ringPayload = {
+            to: peerUid,
+            from: meIdRef.current,
+            chatId,
+            type: 'audio',
+            callerName: me.name ?? me.email ?? 'VaultChat user',
+            offer: offerWire,
+          };
+          s.emit('call_incoming', ringPayload);
+          s.emit('webrtc_offer', { to: peerUid, from: meIdRef.current, offer: offerWire });
+          // High-priority FCM wake-up so a killed/doze callee still rings.
+          // Doorbell only — no SDP rides in the push (F6).
+          initiateCall({ calleeId: peerUid, callId: String(chatId || peerUid), isVideo: false }).catch(() => {});
+          setState('ringing');
+          // Re-send the ring + offer every 3s while ringing (same sealed wire —
+          // never re-encrypt per tick). Stops on connect/teardown or after ~30s.
+          let rings = 0;
+          ringTimerRef.current = setInterval(() => {
+            if (connectedRef.current || rings >= 9) { clearInterval(ringTimerRef.current); ringTimerRef.current = null; return; }
+            rings++;
+            try { s.emit('call_incoming', ringPayload); s.emit('webrtc_offer', { to: peerUid, from: meIdRef.current, offer: offerWire }); } catch {}
+          }, 3000);
+        }
       } catch (e: any) {
-        Alert.alert('Error', e.message || 'Could not access microphone');
-        router.back();
+        if (cancelled) return;
+        setError(e?.message ?? 'Call failed');
+        endCall(true);
       }
     };
 
-    setup();
-    return () => { mounted = false; cleanupInner(); };
-  }, [isIncoming, router, uid, chatId]);
+    run();
+    return () => { cancelled = true; teardown(false); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [peerUid, chatId, isIncoming, initialOffer]);
 
-  const startTimer = () => {
-    timerRef.current = setInterval(() => setSeconds(s => s + 1), 1000);
-  };
+  // ── controls ──────────────────────────────────────────────
+  const toggleMute = useCallback(() => {
+    const tracks = localStreamRef.current?.getAudioTracks?.() ?? [];
+    const next = !muted;
+    tracks.forEach((t: any) => { t.enabled = !next; });
+    setMuted(next);
+  }, [muted]);
 
-  const fmt = (s: number) => {
-    const m = Math.floor(s / 60).toString().padStart(2, '0');
-    return `${m}:${(s % 60).toString().padStart(2, '0')}`;
-  };
-
-  const toggleMute = () => {
-    localStreamRef.current?.getAudioTracks().forEach((t: any) => {
-      t.enabled = muted;
-    });
-    setMuted(m => !m);
-  };
-
-  const toggleSpeaker = async () => {
+  const toggleSpeaker = useCallback(() => {
     const next = !speaker;
     setSpeaker(next);
-    await Audio.setAudioModeAsync({
-      playThroughEarpieceAndroid: !next,
-      allowsRecordingIOS:         true,
-      playsInSilentModeIOS:       true,
-    });
-  };
+    speakerRef.current = next;
+    // null route when speaker is OFF lets InCallManager keep using a connected
+    // Bluetooth/wired headset instead of forcing the earpiece.
+    try { InCallManager.setForceSpeakerphoneOn(next ? true : null); } catch {}
+  }, [speaker]);
 
-  const endCall = (notify = true) => {
-    if (notify && socketRef.current && remoteIdRef.current) {
-      socketRef.current.emit('call_end', { toSocketId: remoteIdRef.current });
-    }
-    cleanup();
-    router.back();
-  };
-
-  const cleanup = () => {
-    if (timerRef.current) clearInterval(timerRef.current);
-    localStreamRef.current?.getTracks().forEach((t: any) => t.stop());
-    pcRef.current?.close();
-    socketRef.current?.disconnect();
-  };
-
-  const stateLabel: Record<CallState, string> = {
-    connecting: 'Connecting...',
-    ringing:    'Ringing...',
-    connected:  fmt(seconds),
-    ended:      'Call Ended',
-  };
+  // ── render ────────────────────────────────────────────────
+  const statusText = state === 'connecting' ? 'Connecting…'
+    : state === 'ringing'   ? 'Ringing…'
+    : state === 'connected' ? formatDuration(seconds)
+    : 'Call ended';
+  const initial = (peerName?.trim()[0] ?? '?').toUpperCase();
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#FFFFFF" />
+    <View style={S.screen}>
+      <StatusBar barStyle="light-content" />
 
-      {/* D2DE badge */}
-      <View style={styles.d2deBadge}>
-        <Text style={styles.d2deText}>Ã°Å¸â€ºÂ¡Ã¯Â¸Â D2DE Ã‚Â· Encrypted Voice</Text>
+      <View style={S.body}>
+        <View style={S.avatarWrap}>
+          <View style={S.avatar}><Text style={S.avatarTxt}>{initial}</Text></View>
+        </View>
+        <Text style={S.name}>{peerName || 'VaultChat user'}</Text>
+        <Text style={S.status}>{statusText}</Text>
+        {error && <Text style={S.errorTxt}>{error}</Text>}
       </View>
 
-      {/* Avatar */}
-      <View style={styles.avatarCircle}>
-        <Text style={styles.avatarText}>{name?.slice(0,2).toUpperCase()}</Text>
-      </View>
-
-      <Text style={styles.callerName}>{name}</Text>
-
-      {/* Status / timer */}
-      <Text style={[
-        styles.callStatus,
-        callState === 'connected' && styles.callStatusActive,
-      ]}>
-        {callState === 'connected' ? `Ã¢â€”Â ${stateLabel.connected}` : stateLabel[callState]}
-      </Text>
-
-      {/* Signal strength visual */}
-      {callState === 'connected' && (
-        <View style={styles.signalRow}>
-          {[1,2,3,4,5].map(i => (
-            <View key={i} style={[styles.signalBar, { height: 6 + i * 3 }]} />
-          ))}
-          <Text style={styles.signalLabel}>HD Voice</Text>
-        </View>
-      )}
-
-      {/* Controls */}
-      <View style={styles.controls}>
-        {/* Mute */}
-        <View style={styles.ctrlWrap}>
-          <TouchableOpacity
-            style={[styles.ctrlBtn, muted && styles.ctrlBtnActive]}
-            onPress={toggleMute}
-          >
-            <Text style={styles.ctrlIcon}>{muted ? 'Ã°Å¸â€â€¡' : 'Ã°Å¸Å½Â¤'}</Text>
-          </TouchableOpacity>
-          <Text style={styles.ctrlLabel}>{muted ? 'Unmute' : 'Mute'}</Text>
-        </View>
-
-        {/* End call */}
-        <View style={styles.ctrlWrap}>
-          <TouchableOpacity style={styles.endBtn} onPress={() => endCall(true)}>
-            <Text style={styles.endBtnIcon}>Ã°Å¸â€œÂµ</Text>
-          </TouchableOpacity>
-          <Text style={[styles.ctrlLabel, { color: '#FF4D6D' }]}>End</Text>
-        </View>
-
-        {/* Speaker */}
-        <View style={styles.ctrlWrap}>
-          <TouchableOpacity
-            style={[styles.ctrlBtn, speaker && styles.ctrlBtnActive]}
-            onPress={toggleSpeaker}
-          >
-            <Text style={styles.ctrlIcon}>{speaker ? 'Ã°Å¸â€Å ' : 'Ã°Å¸â€â€°'}</Text>
-          </TouchableOpacity>
-          <Text style={styles.ctrlLabel}>{speaker ? 'Speaker' : 'Earpiece'}</Text>
-        </View>
+      <View style={[S.controls, { paddingBottom: insets.bottom + 24 }]}>
+        <ControlBtn icon={muted ? 'mic-off' : 'mic'} label={muted ? 'Unmute' : 'Mute'} active={muted} onPress={toggleMute} />
+        <ControlBtn icon={speaker ? 'volume-high' : 'volume-low'} label={speaker ? 'Speaker' : 'Earpiece'} active={speaker} onPress={toggleSpeaker} />
+        <ControlBtn icon="call" label="End" danger onPress={() => endCall(true)} />
       </View>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  d2deBadge: {
-    position: 'absolute',
-    top: 52,
-    backgroundColor: '#D1FAE5',
-    borderWidth: 0.5,
-    borderColor: '#10B981',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-  },
-  d2deText: {
-    fontSize: 11,
-    fontWeight: 'bold',
-    color: '#10B981',
-  },
-  avatarCircle: {
-    width: 110,
-    height: 110,
-    borderRadius: 55,
-    backgroundColor: '#D1FAE5',
-    borderWidth: 3,
-    borderColor: '#10B981',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  avatarText: {
-    fontSize: 38,
-    fontWeight: 'bold',
-    color: '#10B981',
-  },
-  callerName: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: '#000000',
-    marginBottom: 8,
-  },
-  callStatus: {
-    fontSize: 15,
-    color: '#6B7280',
-    marginBottom: 16,
-  },
-  callStatusActive: {
-    color: '#10B981',
-    fontWeight: 'bold',
-  },
-  signalRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 3,
-    marginBottom: 60,
-  },
-  signalBar: {
-    width: 4,
-    backgroundColor: '#10B981',
-    borderRadius: 2,
-  },
-  signalLabel: {
-    fontSize: 11,
-    color: '#10B981',
-    marginLeft: 6,
-    fontWeight: 'bold',
-  },
-  controls: {
-    position: 'absolute',
-    bottom: 48,
-    flexDirection: 'row',
-    gap: 36,
-    alignItems: 'center',
-  },
-  ctrlWrap: {
-    alignItems: 'center',
-    gap: 6,
-  },
-  ctrlBtn: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#F3F4F6',
-    borderWidth: 0.5,
-    borderColor: '#E5E7EB',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  ctrlBtnActive: {
-    backgroundColor: '#D1FAE5',
-    borderColor: '#10B981',
-  },
-  ctrlIcon: {
-    fontSize: 24,
-  },
-  ctrlLabel: {
-    fontSize: 11,
-    color: '#6B7280',
-  },
-  endBtn: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    backgroundColor: '#FF4D6D',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  endBtnIcon: {
-    fontSize: 28,
-  },
-});
+function ControlBtn({ icon, label, onPress, active, danger }:
+  { icon: string; label: string; onPress: () => void; active?: boolean; danger?: boolean }) {
+  return (
+    <TouchableOpacity
+      style={[S.btn, active && S.btnActive, danger && S.btnDanger]}
+      onPress={onPress}
+      activeOpacity={0.85}
+    >
+      <Ionicons name={icon as any} size={24} color="#fff" style={S.btnIcon} />
+      <Text style={S.btnLabel}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+function formatDuration(s: number): string {
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
+}
+
+function makeStyles() { return StyleSheet.create({
+  screen:     { flex: 1, backgroundColor: CALL.bg },
+  body:       { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24, gap: 16 },
+  avatarWrap: { marginBottom: 16 },
+  avatar:     { width: 140, height: 140, borderRadius: 70, backgroundColor: CALL.active, alignItems: 'center', justifyContent: 'center', shadowColor: CALL.active, shadowOpacity: 0.6, shadowRadius: 30 },
+  avatarTxt:  { color: '#fff', fontSize: 56, fontWeight: '800' },
+  name:       { color: CALL.text, fontSize: 26, fontWeight: '700', textAlign: 'center' },
+  status:     { color: CALL.textDim, fontSize: 16 },
+  errorTxt:   { color: CALL.danger, fontSize: 13, marginTop: 8 },
+
+  controls:   { flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 24, paddingTop: 12 },
+  btn:        { width: 78, alignItems: 'center', justifyContent: 'center', paddingVertical: 14, borderRadius: 18, backgroundColor: CALL.ctrl, borderWidth: 1, borderColor: CALL.ctrlBorder },
+  btnActive:  { backgroundColor: CALL.active, borderColor: CALL.active },
+  btnDanger:  { backgroundColor: CALL.danger, borderColor: CALL.danger },
+  btnIcon:    { fontSize: 24 },
+  btnLabel:   { color: CALL.text, fontSize: 11, marginTop: 4 },
+}); }

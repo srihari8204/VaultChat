@@ -8,7 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState , useMemo} from 'react';
 import {
   Alert,
   Animated,
@@ -22,36 +22,16 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
+import { listChats } from '../lib/chatService';
+import {
+  getAllLocks, setChatLock, removeChatLock, verifyBiometric, hasBiometric,
+  type LockedChat, type LockMethod, type AutoLockTimer,
+} from '../lib/chatLock';
 
-const C = {
-  bg: '#FFFFFF',
-  card: '#F9FAFB',
-  cardAlt: '#111D32',
-  accent: '#4A9FFF',
-  cyan: '#4A9FFF',
-  green: '#10B981',
-  red: '#EF4444',
-  orange: '#F59E0B',
-  text: '#FFFFFF',
-  textDim: 'rgba(255,255,255,0.5)',
-  textFaint: 'rgba(255,255,255,0.22)',
-  border: 'rgba(74,159,255,0.15)',
-};
 
 const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
-const STORAGE_KEY = 'vc_locked_chats';
-
-type LockMethod = 'biometric' | 'pin' | 'both';
-type AutoLockTimer = 0 | 60 | 300; // 0=immediately, 60=1min, 300=5min
-
-interface LockedChat {
-  chatId: string;
-  chatName: string;
-  locked: boolean;
-  lockMethod: LockMethod;
-  autoLockTimer: AutoLockTimer;
-  pin?: string;
-}
 
 interface ChatItem {
   id: string;
@@ -59,16 +39,6 @@ interface ChatItem {
   avatar?: string;
   lastMessage?: string;
 }
-
-// Demo chats for display
-const DEMO_CHATS: ChatItem[] = [
-  { id: 'c1', name: 'Alice', lastMessage: 'See you tomorrow!' },
-  { id: 'c2', name: 'Bob', lastMessage: 'Got the files, thanks' },
-  { id: 'c3', name: 'Team Vault', lastMessage: 'Meeting at 3pm' },
-  { id: 'c4', name: 'Mom', lastMessage: 'Call me when you can' },
-  { id: 'c5', name: 'Dave', lastMessage: 'Check this out' },
-  { id: 'c6', name: 'Work Group', lastMessage: 'Deadline extended' },
-];
 
 const AUTO_LOCK_OPTIONS: { label: string; value: AutoLockTimer }[] = [
   { label: 'Immediately', value: 0 },
@@ -82,13 +52,21 @@ const LOCK_METHOD_OPTIONS: { label: string; value: LockMethod; icon: string }[] 
   { label: 'Both', value: 'both', icon: 'shield-checkmark' },
 ];
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function AppLockChatsScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const router = useRouter();
 
+  const [chats, setChats] = useState<ChatItem[]>([]);
   const [lockedChats, setLockedChats] = useState<Record<string, LockedChat>>({});
   const [configChat, setConfigChat] = useState<string | null>(null);
   const [pinInput, setPinInput] = useState('');
-  const [, setHasBiometric] = useState(false);
+  const [bioAvailable, setBioAvailable] = useState(false);
   const [configMethod, setConfigMethod] = useState<LockMethod>('biometric');
   const [configTimer, setConfigTimer] = useState<AutoLockTimer>(0);
 
@@ -96,61 +74,33 @@ export default function AppLockChatsScreen() {
 
   useEffect(() => {
     Animated.timing(fadeIn, { toValue: 1, duration: 400, useNativeDriver: true }).start();
-    loadSettings();
-    checkBiometric();
+    (async () => {
+      setBioAvailable(await hasBiometric());
+      setLockedChats(await getAllLocks());
+      try {
+        const list = await listChats();
+        setChats(list.map(c => ({ id: c.id, name: c.name || c.peerName || 'Chat' })));
+      } catch {}
+    })();
   }, [fadeIn]);
 
-  const checkBiometric = async () => {
-    if (Platform.OS === 'web') { setHasBiometric(false); return; }
-    try {
-      const compatible = await LocalAuthentication.hasHardwareAsync();
-      const enrolled = await LocalAuthentication.isEnrolledAsync();
-      setHasBiometric(compatible && enrolled);
-    } catch {
-      setHasBiometric(false);
-    }
-  };
-
-  const loadSettings = async () => {
-    try {
-      const raw = await AsyncStorage.getItem(STORAGE_KEY);
-      if (raw) setLockedChats(JSON.parse(raw));
-    } catch {}
-  };
-
-  const saveSettings = async (data: Record<string, LockedChat>) => {
-    setLockedChats(data);
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  };
+  const reloadLocks = async () => setLockedChats(await getAllLocks());
 
   const toggleLock = async (chat: ChatItem) => {
     const existing = lockedChats[chat.id];
     if (existing?.locked) {
-      // Verify before unlocking
-      const success = await verifyAuth(existing);
-      if (!success) return;
-      const updated = { ...lockedChats };
-      delete updated[chat.id];
-      await saveSettings(updated);
+      // Verify before unlocking. Biometric is required when the device has it
+      // enrolled; PIN-only locks are still enforced at the chat gate on open.
+      const ok = bioAvailable ? await verifyBiometric('Verify to unlock this chat') : true;
+      if (!ok) return;
+      await removeChatLock(chat.id);
+      await reloadLocks();
     } else {
-      // Enable lock — show config
       const ex = lockedChats[chat.id];
-      setConfigMethod(ex?.lockMethod || 'biometric');
+      setConfigMethod(ex?.lockMethod || (bioAvailable ? 'biometric' : 'pin'));
       setConfigTimer(ex?.autoLockTimer || 0);
       setConfigChat(chat.id);
     }
-  };
-
-  const verifyAuth = async (config: LockedChat): Promise<boolean> => {
-    if (Platform.OS === 'web') return true;
-    if (config.lockMethod === 'biometric' || config.lockMethod === 'both') {
-      const result = await LocalAuthentication.authenticateAsync({
-        promptMessage: 'Verify to unlock chat',
-        fallbackLabel: 'Use PIN',
-      });
-      if (!result.success) return false;
-    }
-    return true;
   };
 
   const confirmLockSetup = async (chatId: string, method: LockMethod, timer: AutoLockTimer, pin?: string) => {
@@ -158,19 +108,9 @@ export default function AppLockChatsScreen() {
       Alert.alert('Invalid PIN', 'PIN must be at least 4 digits.');
       return;
     }
-
-    const chat = DEMO_CHATS.find(c => c.id === chatId);
-    const entry: LockedChat = {
-      chatId,
-      chatName: chat?.name || 'Chat',
-      locked: true,
-      lockMethod: method,
-      autoLockTimer: timer,
-      pin: pin || undefined,
-    };
-
-    const updated = { ...lockedChats, [chatId]: entry };
-    await saveSettings(updated);
+    const chat = chats.find(c => c.id === chatId);
+    await setChatLock(chatId, chat?.name || 'Chat', method, timer, pin);
+    await reloadLocks();
     setConfigChat(null);
     setPinInput('');
   };
@@ -178,7 +118,7 @@ export default function AppLockChatsScreen() {
   // ── Config modal for a chat ──
   const renderConfigPanel = () => {
     if (!configChat) return null;
-    const chat = DEMO_CHATS.find(c => c.id === configChat);
+    const chat = chats.find(c => c.id === configChat);
     const method = configMethod;
     const setMethod = setConfigMethod;
     const timer = configTimer;
@@ -197,7 +137,7 @@ export default function AppLockChatsScreen() {
                 style={[s.chip, method === opt.value && s.chipActive]}
                 onPress={() => setMethod(opt.value)}
               >
-                <Ionicons name={opt.icon as any} size={16} color={method === opt.value ? C.accent : C.textDim} />
+                <Ionicons name={opt.icon as any} size={16} color={method === opt.value ? colors.accent : colors.textDim} />
                 <Text style={[s.chipText, method === opt.value && s.chipTextActive]}>{opt.label}</Text>
               </TouchableOpacity>
             ))}
@@ -213,7 +153,7 @@ export default function AppLockChatsScreen() {
                 keyboardType="number-pad"
                 secureTextEntry
                 maxLength={8}
-                placeholderTextColor={C.textFaint}
+                placeholderTextColor={colors.textFaint}
                 placeholder="Enter PIN"
               />
             </>
@@ -244,7 +184,7 @@ export default function AppLockChatsScreen() {
               onPress={() => confirmLockSetup(configChat, method, timer, pinInput)}
             >
               <LinearGradient
-                colors={[C.accent, '#2B7FE0']}
+                colors={[colors.accent, '#2B7FE0']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={s.confirmBtnGrad}
@@ -269,7 +209,7 @@ export default function AppLockChatsScreen() {
           <Text style={s.chatAvatarText}>{item.name.charAt(0)}</Text>
           {isLocked && (
             <View style={s.lockBadge}>
-              <Ionicons name="lock-closed" size={10} color={C.orange} />
+              <Ionicons name="lock-closed" size={10} color={'#F59E0B'} />
             </View>
           )}
         </View>
@@ -284,7 +224,7 @@ export default function AppLockChatsScreen() {
               <Ionicons
                 name={config.lockMethod === 'biometric' ? 'finger-print' : config.lockMethod === 'pin' ? 'keypad' : 'shield-checkmark'}
                 size={12}
-                color={C.accent}
+                color={colors.accent}
               />
               <Text style={s.lockMetaText}>
                 {LOCK_METHOD_OPTIONS.find(o => o.value === config.lockMethod)?.label}
@@ -299,7 +239,7 @@ export default function AppLockChatsScreen() {
           value={isLocked}
           onValueChange={() => toggleLock(item)}
           trackColor={{ false: '#D1D5DB', true: 'rgba(74,159,255,0.4)' }}
-          thumbColor={isLocked ? C.accent : '#9CA3AF'}
+          thumbColor={isLocked ? colors.accent : '#9CA3AF'}
         />
       </View>
     );
@@ -310,13 +250,13 @@ export default function AppLockChatsScreen() {
   return (
     <View style={s.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <LinearGradient colors={[C.bg, '#F9FAFB', C.bg]} style={StyleSheet.absoluteFill} />
+      <LinearGradient colors={[colors.bg, '#F9FAFB', colors.bg]} style={StyleSheet.absoluteFill} />
 
       <Animated.View style={{ flex: 1, opacity: fadeIn }}>
         {/* Header */}
         <View style={s.header}>
           <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-            <Ionicons name="arrow-back" size={24} color={C.text} />
+            <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={s.headerTitle}>Per-Chat Lock</Text>
           <View style={{ width: 40 }} />
@@ -325,7 +265,7 @@ export default function AppLockChatsScreen() {
         {/* Summary */}
         <View style={s.summary}>
           <View style={s.summaryIcon}>
-            <Ionicons name="lock-closed" size={24} color={C.accent} />
+            <Ionicons name="lock-closed" size={24} color={colors.accent} />
           </View>
           <View>
             <Text style={s.summaryTitle}>{lockedCount} Chat{lockedCount !== 1 ? 's' : ''} Locked</Text>
@@ -335,11 +275,12 @@ export default function AppLockChatsScreen() {
 
         {/* Chat list */}
         <FlatList
-          data={DEMO_CHATS}
+          data={chats}
           keyExtractor={c => c.id}
           renderItem={renderChatItem}
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 40 }}
           ItemSeparatorComponent={() => <View style={{ height: 2 }} />}
+          ListEmptyComponent={<Text style={{ color: colors.textDim, textAlign: 'center', marginTop: 40 }}>No chats yet</Text>}
         />
       </Animated.View>
 
@@ -348,8 +289,8 @@ export default function AppLockChatsScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
 
   header: {
     flexDirection: 'row',
@@ -360,7 +301,7 @@ const s = StyleSheet.create({
     paddingBottom: 12,
   },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  headerTitle: { fontSize: 18, fontWeight: '700', color: C.text },
+  headerTitle: { fontSize: 18, fontWeight: '700', color: c.text },
 
   summary: {
     flexDirection: 'row',
@@ -368,10 +309,10 @@ const s = StyleSheet.create({
     marginHorizontal: 16,
     marginBottom: 16,
     padding: 14,
-    backgroundColor: C.card,
+    backgroundColor: c.card,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: c.border,
   },
   summaryIcon: {
     width: 48,
@@ -382,29 +323,29 @@ const s = StyleSheet.create({
     alignItems: 'center',
     marginRight: 14,
   },
-  summaryTitle: { fontSize: 16, fontWeight: '700', color: C.text },
-  summaryHint: { fontSize: 12, color: C.textDim, marginTop: 2 },
+  summaryTitle: { fontSize: 16, fontWeight: '700', color: c.text },
+  summaryHint: { fontSize: 12, color: c.textDim, marginTop: 2 },
 
   chatRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: C.card,
+    backgroundColor: c.card,
     padding: 14,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: c.border,
     marginBottom: 6,
   },
   chatAvatar: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: C.cardAlt,
+    backgroundColor: '#111D32',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
   },
-  chatAvatarText: { fontSize: 18, fontWeight: '700', color: C.accent },
+  chatAvatarText: { fontSize: 18, fontWeight: '700', color: c.accent },
   lockBadge: {
     position: 'absolute',
     bottom: -2,
@@ -412,17 +353,17 @@ const s = StyleSheet.create({
     width: 18,
     height: 18,
     borderRadius: 9,
-    backgroundColor: C.card,
+    backgroundColor: c.card,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: c.border,
   },
   chatInfo: { flex: 1, marginRight: 8 },
-  chatName: { fontSize: 15, fontWeight: '600', color: C.text },
-  chatPreview: { fontSize: 12, color: C.textDim, marginTop: 2 },
+  chatName: { fontSize: 15, fontWeight: '600', color: c.text },
+  chatPreview: { fontSize: 12, color: c.textDim, marginTop: 2 },
   lockMeta: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
-  lockMetaText: { fontSize: 10, color: C.accent, marginLeft: 4, fontWeight: '600' },
+  lockMetaText: { fontSize: 10, color: c.accent, marginLeft: 4, fontWeight: '600' },
 
   // Config overlay
   overlay: {
@@ -434,42 +375,42 @@ const s = StyleSheet.create({
   },
   configPanel: {
     width: '100%',
-    backgroundColor: C.card,
+    backgroundColor: c.card,
     borderRadius: 20,
     padding: 24,
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: c.border,
   },
-  configTitle: { fontSize: 18, fontWeight: '700', color: C.text, marginBottom: 20, textAlign: 'center' },
-  configLabel: { fontSize: 13, color: C.textDim, marginTop: 16, marginBottom: 8, fontWeight: '600' },
+  configTitle: { fontSize: 18, fontWeight: '700', color: c.text, marginBottom: 20, textAlign: 'center' },
+  configLabel: { fontSize: 13, color: c.textDim, marginTop: 16, marginBottom: 8, fontWeight: '600' },
 
   chipRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
   chip: {
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 8,
-    backgroundColor: C.cardAlt,
+    backgroundColor: '#111D32',
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: c.border,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
   },
-  chipActive: { backgroundColor: 'rgba(74,159,255,0.15)', borderColor: C.accent },
-  chipText: { fontSize: 13, color: C.textDim, fontWeight: '600' },
-  chipTextActive: { color: C.accent },
+  chipActive: { backgroundColor: 'rgba(74,159,255,0.15)', borderColor: c.accent },
+  chipText: { fontSize: 13, color: c.textDim, fontWeight: '600' },
+  chipTextActive: { color: c.accent },
 
   pinInput: {
-    backgroundColor: C.cardAlt,
+    backgroundColor: '#111D32',
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    color: C.text,
+    color: c.text,
     fontSize: 18,
     textAlign: 'center',
     letterSpacing: 8,
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: c.border,
   },
 
   configActions: { flexDirection: 'row', marginTop: 24, gap: 12 },
@@ -478,11 +419,11 @@ const s = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: c.border,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  cancelBtnText: { fontSize: 14, color: C.textDim, fontWeight: '600' },
+  cancelBtnText: { fontSize: 14, color: c.textDim, fontWeight: '600' },
   confirmBtn: { flex: 2, borderRadius: 10, overflow: 'hidden' },
   confirmBtnGrad: {
     flexDirection: 'row',

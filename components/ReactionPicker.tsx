@@ -4,7 +4,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Pressable } from 'react-native';
 
-const EMOJIS = ['â¤ï¸', 'ðŸ˜‚', 'ðŸ‘', 'ðŸ˜®', 'ðŸ˜¢', 'ðŸ”¥', 'ðŸ‘', 'ðŸ™'];
+const EMOJIS = ['❤️', '😂', '👍', '😮', '😢', '🔥', '👏', '🙏'];
 
 interface Props {
   visible: boolean;

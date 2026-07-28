@@ -1,18 +1,28 @@
 // app/slideshow.tsx
 // Slideshow viewer for multiple images — swipe through with transitions
 
+import { Ionicons } from '@expo/vector-icons';
 import * as MediaLibrary from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState , useMemo} from 'react';
 import {
   Alert, Dimensions, FlatList, Image, StyleSheet,
   Text, TouchableOpacity, View,
 } from 'react-native';
+import { useTheme } from '../lib/theme';
+import { type Palette } from '../constants/theme';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function SlideshowScreen() {
+  const { colors } = useTheme();
+  const st = useS();
   const router = useRouter();
   const { images: imagesParam, startIndex: startParam } = useLocalSearchParams<{
     images: string; startIndex?: string;
@@ -83,7 +93,7 @@ export default function SlideshowScreen() {
     return (
       <View style={[st.screen, { justifyContent: 'center', alignItems: 'center' }]}>
         <Stack.Screen options={{ headerShown: false }} />
-        <Text style={{ color: '#fff', fontSize: 18 }}>No images</Text>
+        <Text style={{ color: colors.text, fontSize: 18 }}>No images</Text>
         <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 20 }}>
           <Text style={{ color: '#4A9FFF' }}>Go Back</Text>
         </TouchableOpacity>
@@ -115,15 +125,15 @@ export default function SlideshowScreen() {
       {showControls && (
         <View style={st.topBar}>
           <TouchableOpacity onPress={() => { clearInterval(autoplayTimer.current); router.back(); }} style={st.topBtn}>
-            <Text style={{ color: '#fff', fontSize: 20 }}>✕</Text>
+            <Ionicons name="close" size={22} color={colors.text} />
           </TouchableOpacity>
           <Text style={st.counter}>{currentIndex + 1} / {imageList.length}</Text>
           <View style={{ flexDirection: 'row', gap: 12 }}>
             <TouchableOpacity onPress={shareImage} style={st.topBtn}>
-              <Text style={{ fontSize: 18 }}>📤</Text>
+              <Ionicons name="share-outline" size={20} color={colors.text} />
             </TouchableOpacity>
             <TouchableOpacity onPress={saveToGallery} style={st.topBtn}>
-              <Text style={{ fontSize: 18 }}>💾</Text>
+              <Ionicons name="download-outline" size={20} color={colors.text} />
             </TouchableOpacity>
           </View>
         </View>
@@ -156,13 +166,17 @@ export default function SlideshowScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity onPress={toggleAutoplay} style={[st.autoBtn, autoplay && st.autoBtnActive]}>
-              <Text style={{ color: autoplay ? '#000' : '#4A9FFF', fontWeight: '800', fontSize: 13 }}>
-                {autoplay ? '⏸ Stop' : '▶ Slideshow'}
-              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                <Ionicons name={autoplay ? 'pause' : 'play'} size={13} color={autoplay ? '#000' : '#4A9FFF'} />
+                <Text style={{ color: autoplay ? '#000' : '#4A9FFF', fontWeight: '800', fontSize: 13 }}>{autoplay ? 'Stop' : 'Slideshow'}</Text>
+              </View>
             </TouchableOpacity>
 
             <TouchableOpacity onPress={() => goTo(currentIndex + 1)} disabled={currentIndex === imageList.length - 1} style={st.navBtn}>
-              <Text style={[st.navTxt, currentIndex === imageList.length - 1 && { opacity: 0.3 }]}>Next ▶</Text>
+              <View style={[{ flexDirection: 'row', alignItems: 'center', gap: 3 }, currentIndex === imageList.length - 1 && { opacity: 0.3 }]}>
+                <Text style={st.navTxt}>Next</Text>
+                <Ionicons name="chevron-forward" size={15} color={colors.text} />
+              </View>
             </TouchableOpacity>
           </View>
         </View>
@@ -180,17 +194,17 @@ export default function SlideshowScreen() {
   );
 }
 
-const st = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#000' },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  screen: { flex: 1, backgroundColor: c.bg },
   topBar: { position: 'absolute', top: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 50, paddingHorizontal: 16, paddingBottom: 12, backgroundColor: 'rgba(0,0,0,0.6)' },
   topBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
-  counter: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  counter: { color: c.text, fontSize: 16, fontWeight: '700' },
   bottomBar: { position: 'absolute', bottom: 0, left: 0, right: 0, paddingBottom: 36, backgroundColor: 'rgba(0,0,0,0.7)' },
   thumb: { width: 50, height: 50, borderRadius: 8, borderWidth: 2, borderColor: 'transparent' },
   thumbActive: { borderColor: '#4A9FFF' },
   controlRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20 },
   navBtn: { paddingHorizontal: 16, paddingVertical: 10 },
-  navTxt: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  navTxt: { color: c.text, fontSize: 14, fontWeight: '600' },
   autoBtn: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20, borderWidth: 1, borderColor: '#4A9FFF', backgroundColor: 'rgba(0,229,255,0.1)' },
   autoBtnActive: { backgroundColor: '#4A9FFF', borderColor: '#4A9FFF' },
   dots: { position: 'absolute', bottom: 130, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', gap: 6 },

@@ -1,195 +1,190 @@
-// app/chat-export.tsx — Export Chat as Text/HTML
-// Pulls messages from Firestore, formats, shares via system share sheet
-// Options: Text, HTML with styling
+// app/chat-export.tsx — Export Chat as Text/HTML (Postgres-backed).
+//
+// Pulls the full message history via GET /chats/:id/messages (keyset
+// pagination), formats it on-device, and shares via the system sheet.
+// Nothing leaves the device except through the user-initiated share.
 
-import React, { useState } from 'react';
+import React, { useState , useMemo} from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet,
-  StatusBar, Alert, ActivityIndicator, Share,
+  View, Text, TouchableOpacity, StyleSheet, StatusBar, Alert, ActivityIndicator, Share,
 } from 'react-native';
-import { useLocalSearchParams, Stack } from 'expo-router';
-import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
+import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
+import { type Palette, BRAND_ACCENT } from '../constants/theme';
+import { useTheme } from '../lib/theme';
+import { getMessages, type Message } from '../lib/chatService';
+import { getCurrentUserAsync } from './(constants)/authService';
 
-const C = { bg: '#FFFFFF', accent: '#4A9FFF', green: '#10B981', card: '#F9FAFB' };
+const PAGE = 200;
+
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
 
 export default function ChatExportScreen() {
-  const { chatId, peerName } = useLocalSearchParams();
-  const myUid = auth().currentUser?.uid || '';
+  const { colors } = useTheme();
+  const s = useS();
+  const router = useRouter();
+  const params = useLocalSearchParams<{ chatId?: string; id?: string; peerName?: string }>();
+  const chatId = String(params.chatId ?? params.id ?? '');
+  const peerName = (params.peerName as string) || 'Chat';
+
   const [exporting, setExporting] = useState(false);
   const [progress, setProgress] = useState('');
   const [msgCount, setMsgCount] = useState(0);
 
-  const fetchMessages = async () => {
-    const snap = await firestore().collection('chats').doc(chatId)
-      .collection('messages')
-      .orderBy('createdAt', 'asc')
-      .get();
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  // Fetch every message (oldest→newest) by walking the keyset cursor.
+  const fetchAll = async (): Promise<Message[]> => {
+    const all: Message[] = [];
+    let before: number | undefined;
+    for (let i = 0; i < 500; i++) {
+      const page = await getMessages(chatId, { before, limit: PAGE });
+      all.push(...page);
+      setMsgCount(all.length);
+      if (page.length < PAGE) break;
+      before = page[page.length - 1].id; // oldest id in this (desc) page
+    }
+    all.sort((a, b) => a.id - b.id);
+    return all;
   };
 
-  const formatTime = (ts) => {
-    if (!ts?.toDate) return '';
-    return ts.toDate().toLocaleString();
+  const fmtTime = (iso: string) => { try { return new Date(iso).toLocaleString(); } catch { return ''; } };
+
+  const senderLabel = (m: Message, myId: string) => (m.senderId === myId ? 'You' : peerName);
+
+  const bodyOf = (m: Message): string => {
+    if (m.deletedAt) return '[deleted]';
+    switch (m.type) {
+      case 'text': return m.content || '';
+      case 'image': return '[Image]' + (m.content ? ' ' + m.content : '');
+      case 'video': return '[Video]' + (m.content ? ' ' + m.content : '');
+      case 'audio': return '[Voice message]';
+      case 'file': return '[File]' + (m.content ? ' ' + m.content : '');
+      case 'location': return '[Location]';
+      case 'sticker': return '[Sticker ' + (m.content || '') + ']';
+      case 'poll': return '[Poll] ' + (m.content || '');
+      default: return '[' + m.type + ']';
+    }
   };
 
-  const exportAsText = async () => {
+  const shareFile = async (filePath: string, mime: string, fallback: string) => {
+    if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(filePath, { mimeType: mime });
+    else await Share.share({ message: fallback });
+  };
+
+  const writeFile = async (ext: string, content: string) => {
+    const name = 'VaultChat_' + peerName.replace(/[^a-zA-Z0-9]/g, '_') + '_' + Date.now() + '.' + ext;
+    const filePath = FileSystem.documentDirectory + name;
+    await FileSystem.writeAsStringAsync(filePath, content, { encoding: FileSystem.EncodingType.UTF8 });
+    return filePath;
+  };
+
+  const guard = async (fn: (msgs: Message[], myId: string) => Promise<void>) => {
+    if (!chatId) { Alert.alert('Export failed', 'Missing chat id.'); return; }
     setExporting(true);
-    setProgress('Fetching messages...');
+    setProgress('Fetching messages…');
+    setMsgCount(0);
     try {
-      const msgs = await fetchMessages();
-      setMsgCount(msgs.length);
-      setProgress('Formatting ' + msgs.length + ' messages...');
-
-      let text = 'VaultChat Export - ' + (peerName || 'Chat') + '\n';
-      text += 'Exported: ' + new Date().toLocaleString() + '\n';
-      text += 'Messages: ' + msgs.length + '\n';
-      text += '='.repeat(50) + '\n\n';
-
-      for (const msg of msgs) {
-        const sender = msg.senderId === myUid ? 'You' : (peerName || 'Peer');
-        const time = formatTime(msg.createdAt);
-        const type = msg.msgType || 'text';
-
-        if (type === 'text') {
-          text += '[' + time + '] ' + sender + ': ' + (msg.plaintext || msg.ciphertext || '[encrypted]') + '\n';
-        } else if (type === 'image') {
-          text += '[' + time + '] ' + sender + ': [Image] ' + (msg.mediaUrl || '') + '\n';
-        } else if (type === 'video') {
-          text += '[' + time + '] ' + sender + ': [Video] ' + (msg.filename || '') + '\n';
-        } else if (type === 'audio') {
-          text += '[' + time + '] ' + sender + ': [Audio ' + (msg.audioDuration || '') + 's]\n';
-        } else if (type === 'file') {
-          text += '[' + time + '] ' + sender + ': [File] ' + (msg.filename || '') + '\n';
-        } else if (type === 'poll') {
-          text += '[' + time + '] ' + sender + ': [Poll] ' + (msg.pollData?.question || '') + '\n';
-        } else {
-          text += '[' + time + '] ' + sender + ': [' + type + ']\n';
-        }
-
-        if (msg.isForwarded) text += '  (Forwarded)\n';
-        if (msg.isEdited) text += '  (Edited)\n';
-        if (msg.isDeleted) text += '  (Deleted)\n';
-      }
-
-      setProgress('Saving file...');
-      const filename = 'VaultChat_' + (peerName || 'chat').replace(/[^a-zA-Z0-9]/g, '_') + '_' + Date.now() + '.txt';
-      const filePath = FileSystem.documentDirectory + filename;
-      await FileSystem.writeAsStringAsync(filePath, text, { encoding: FileSystem.EncodingType.UTF8 });
-
+      const me = await getCurrentUserAsync();
+      const msgs = await fetchAll();
+      setProgress('Formatting ' + msgs.length + ' messages…');
+      await fn(msgs, me?.id ?? '');
       setProgress('');
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(filePath, { mimeType: 'text/plain' });
-      } else {
-        await Share.share({ message: text });
-      }
-    } catch (e) { Alert.alert('Export Failed', e.message); }
-    setExporting(false);
+    } catch (e: any) {
+      Alert.alert('Export failed', e?.message ?? 'Something went wrong');
+    } finally {
+      setExporting(false);
+    }
   };
 
-  const exportAsHTML = async () => {
-    setExporting(true);
-    setProgress('Fetching messages...');
-    try {
-      const msgs = await fetchMessages();
-      setMsgCount(msgs.length);
-      setProgress('Building HTML...');
+  const exportAsText = () => guard(async (msgs, myId) => {
+    let text = 'VaultChat Export - ' + peerName + '\n';
+    text += 'Exported: ' + new Date().toLocaleString() + '\n';
+    text += 'Messages: ' + msgs.length + '\n' + '='.repeat(50) + '\n\n';
+    for (const m of msgs) {
+      text += '[' + fmtTime(m.createdAt) + '] ' + senderLabel(m, myId) + ': ' + bodyOf(m) + '\n';
+      if (m.editedAt) text += '  (edited)\n';
+    }
+    setProgress('Saving file…');
+    const filePath = await writeFile('txt', text);
+    await shareFile(filePath, 'text/plain', text);
+  });
 
-      let html = '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>VaultChat Export</title>';
-      html += '<style>body{font-family:-apple-system,sans-serif;background:#FFFFFF;color:#1F2937;max-width:600px;margin:0 auto;padding:16px}';
-      html += '.header{text-align:center;padding:20px;border-bottom:1px solid #222;margin-bottom:20px}';
-      html += '.header h1{color:#4A9FFF;margin:0}.header p{color:#666;font-size:12px}';
-      html += '.msg{margin:4px 0;padding:8px 12px;border-radius:14px;max-width:80%}';
-      html += '.mine{background:#DCF8C6;margin-left:auto;border-bottom-right-radius:2px}';
-      html += '.peer{background:#F3F4F6;margin-right:auto;border-bottom-left-radius:2px}';
-      html += '.time{color:#555;font-size:10px;margin-top:4px;text-align:right}';
-      html += '.sender{color:#4A9FFF;font-size:11px;font-weight:700;margin-bottom:2px}';
-      html += '.meta{color:#666;font-size:10px;font-style:italic}';
-      html += '</style></head><body>';
-      html += '<div class="header"><h1>VaultChat</h1><p>Chat with ' + (peerName || 'Unknown') + '</p>';
-      html += '<p>' + msgs.length + ' messages | Exported ' + new Date().toLocaleString() + '</p></div>';
-
-      for (const msg of msgs) {
-        const isMine = msg.senderId === myUid;
-        const cls = isMine ? 'mine' : 'peer';
-        const sender = isMine ? 'You' : (peerName || 'Peer');
-        const type = msg.msgType || 'text';
-
-        html += '<div class="msg ' + cls + '">';
-        if (!isMine) html += '<div class="sender">' + sender + '</div>';
-
-        if (type === 'text') {
-          html += '<div>' + (msg.plaintext || msg.ciphertext || '[encrypted]').replace(/</g, '&lt;').replace(/\n/g, '<br>') + '</div>';
-        } else if (type === 'image' && msg.mediaUrl) {
-          html += '<div>[Image]</div>';
-        } else if (type === 'video') {
-          html += '<div>[Video: ' + (msg.filename || 'video') + ']</div>';
-        } else if (type === 'audio') {
-          html += '<div>[Audio ' + (msg.audioDuration || '?') + 's]</div>';
-        } else if (type === 'file') {
-          html += '<div>[File: ' + (msg.filename || 'file') + ']</div>';
-        } else if (type === 'poll') {
-          html += '<div>[Poll: ' + (msg.pollData?.question || '') + ']</div>';
-        } else {
-          html += '<div>[' + type + ']</div>';
-        }
-
-        html += '<div class="time">' + formatTime(msg.createdAt) + '</div>';
-        if (msg.isEdited) html += '<div class="meta">(edited)</div>';
-        if (msg.isForwarded) html += '<div class="meta">(forwarded)</div>';
-        html += '</div>';
-      }
-
-      html += '</body></html>';
-
-      setProgress('Saving...');
-      const filename = 'VaultChat_' + (peerName || 'chat').replace(/[^a-zA-Z0-9]/g, '_') + '_' + Date.now() + '.html';
-      const filePath = FileSystem.documentDirectory + filename;
-      await FileSystem.writeAsStringAsync(filePath, html, { encoding: FileSystem.EncodingType.UTF8 });
-
-      setProgress('');
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(filePath, { mimeType: 'text/html' });
-      }
-    } catch (e) { Alert.alert('Export Failed', e.message); }
-    setExporting(false);
-  };
+  const exportAsHTML = () => guard(async (msgs, myId) => {
+    const esc = (str: string) => str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    let html = '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">';
+    html += '<title>VaultChat Export</title><style>';
+    html += 'body{font-family:-apple-system,Segoe UI,sans-serif;background:#0A0A0F;color:#fff;max-width:600px;margin:0 auto;padding:16px}';
+    html += '.header{text-align:center;padding:20px;border-bottom:1px solid #222;margin-bottom:20px}';
+    html += `.header h1{color:${BRAND_ACCENT};margin:0}.header p{color:#888;font-size:12px}`;
+    html += '.msg{margin:4px 0;padding:8px 12px;border-radius:14px;max-width:80%;word-wrap:break-word}';
+    html += `.mine{background:${BRAND_ACCENT}22;margin-left:auto;border-bottom-right-radius:2px}`;
+    html += '.peer{background:#1a1a22;margin-right:auto;border-bottom-left-radius:2px}';
+    html += '.time{color:#666;font-size:10px;margin-top:4px;text-align:right}';
+    html += '.sender{color:#06B6D4;font-size:11px;font-weight:700;margin-bottom:2px}';
+    html += '.meta{color:#777;font-size:10px;font-style:italic}';
+    html += '</style></head><body>';
+    html += '<div class="header"><h1>VaultChat</h1><p>Chat with ' + esc(peerName) + '</p>';
+    html += '<p>' + msgs.length + ' messages | Exported ' + new Date().toLocaleString() + '</p></div>';
+    for (const m of msgs) {
+      const isMine = m.senderId === myId;
+      html += '<div class="msg ' + (isMine ? 'mine' : 'peer') + '">';
+      if (!isMine) html += '<div class="sender">' + esc(senderLabel(m, myId)) + '</div>';
+      html += '<div>' + esc(bodyOf(m)).replace(/\n/g, '<br>') + '</div>';
+      html += '<div class="time">' + fmtTime(m.createdAt) + '</div>';
+      if (m.editedAt) html += '<div class="meta">(edited)</div>';
+      html += '</div>';
+    }
+    html += '</body></html>';
+    setProgress('Saving file…');
+    const filePath = await writeFile('html', html);
+    await shareFile(filePath, 'text/html', 'VaultChat export');
+  });
 
   return (
-    <>
-      <Stack.Screen options={{ title: 'Export Chat', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
-      <View style={s.container}>
-        <StatusBar barStyle="light-content" />
+    <View style={s.container}>
+      <Stack.Screen options={{ headerShown: false }} />
+      <StatusBar barStyle="light-content" />
 
+      <View style={s.header}>
+        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
+        </TouchableOpacity>
+        <Text style={s.headerTitle}>Export Chat</Text>
+        <View style={{ width: 40 }} />
+      </View>
+
+      <View style={s.body}>
         <View style={s.infoCard}>
-          <Text style={{ fontSize: 28 }}>{"\uD83D\uDCE4"}</Text>
+          <Ionicons name="share-outline" size={26} color={colors.primary} />
           <View style={{ flex: 1, marginLeft: 12 }}>
-            <Text style={s.infoTitle}>Export {peerName || 'Chat'}</Text>
+            <Text style={s.infoTitle}>Export {peerName}</Text>
             <Text style={s.infoDesc}>Save your conversation as a file you can share or keep as backup.</Text>
           </View>
         </View>
 
-        <TouchableOpacity style={s.exportBtn} onPress={exportAsText} disabled={exporting}>
-          <View style={s.exportIcon}><Text style={{ fontSize: 24 }}>{"\uD83D\uDCC4"}</Text></View>
+        <TouchableOpacity style={s.exportBtn} onPress={exportAsText} disabled={exporting} activeOpacity={0.8}>
+          <View style={s.exportIcon}><Ionicons name="document-text-outline" size={22} color={colors.accent} /></View>
           <View style={{ flex: 1 }}>
             <Text style={s.exportTitle}>Export as Text</Text>
             <Text style={s.exportDesc}>Plain text file (.txt) — lightweight, universal</Text>
           </View>
         </TouchableOpacity>
 
-        <TouchableOpacity style={s.exportBtn} onPress={exportAsHTML} disabled={exporting}>
-          <View style={s.exportIcon}><Text style={{ fontSize: 24 }}>{"\uD83C\uDF10"}</Text></View>
+        <TouchableOpacity style={s.exportBtn} onPress={exportAsHTML} disabled={exporting} activeOpacity={0.8}>
+          <View style={s.exportIcon}><Ionicons name="globe-outline" size={22} color={colors.accent} /></View>
           <View style={{ flex: 1 }}>
             <Text style={s.exportTitle}>Export as HTML</Text>
-            <Text style={s.exportDesc}>Styled web page (.html) — looks like real chat</Text>
+            <Text style={s.exportDesc}>Styled web page (.html) — looks like a real chat</Text>
           </View>
         </TouchableOpacity>
 
         {exporting && (
           <View style={s.progressBox}>
-            <ActivityIndicator color={C.accent} />
+            <ActivityIndicator color={colors.primary} />
             <Text style={s.progressTxt}>{progress}</Text>
             {msgCount > 0 && <Text style={s.progressCount}>{msgCount} messages</Text>}
           </View>
@@ -200,23 +195,27 @@ export default function ChatExportScreen() {
           <Text style={s.noteDesc}>Exported files are NOT encrypted. Only export chats you&apos;re comfortable saving in plain text. The export happens entirely on your device.</Text>
         </View>
       </View>
-    </>
+    </View>
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg, padding: 16 },
-  infoCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 20, borderWidth: 1, borderColor: '#E5E7EB' },
-  infoTitle: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  infoDesc: { color: '#9CA3AF', fontSize: 12, marginTop: 2 },
-  exportBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 10, borderWidth: 1, borderColor: '#E5E7EB' },
-  exportIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center', marginRight: 14 },
-  exportTitle: { color: '#1F2937', fontSize: 15, fontWeight: '700' },
-  exportDesc: { color: '#9CA3AF', fontSize: 12, marginTop: 2 },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingHorizontal: 16, paddingBottom: 8 },
+  backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
+  headerTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
+  body: { flex: 1, padding: 16 },
+  infoCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, borderRadius: 14, padding: 16, marginBottom: 20, borderWidth: 1, borderColor: c.border },
+  infoTitle: { color: c.text, fontSize: 16, fontWeight: '800' },
+  infoDesc: { color: c.textDim, fontSize: 12, marginTop: 2, lineHeight: 18 },
+  exportBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, borderRadius: 14, padding: 16, marginBottom: 10, borderWidth: 1, borderColor: c.border },
+  exportIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: c.surface, justifyContent: 'center', alignItems: 'center', marginRight: 14 },
+  exportTitle: { color: c.text, fontSize: 15, fontWeight: '700' },
+  exportDesc: { color: c.textDim, fontSize: 12, marginTop: 2 },
   progressBox: { alignItems: 'center', padding: 20, marginTop: 10 },
-  progressTxt: { color: '#6B7280', fontSize: 13, marginTop: 8 },
-  progressCount: { color: '#6B7280', fontSize: 11, marginTop: 4 },
-  noteBox: { marginTop: 24, backgroundColor: '#FF3C6E10', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#FF3C6E22' },
-  noteTitle: { color: '#FF3C6E', fontSize: 12, fontWeight: '800', marginBottom: 4 },
-  noteDesc: { color: '#6B7280', fontSize: 11, lineHeight: 18 },
+  progressTxt: { color: c.textDim, fontSize: 13, marginTop: 8 },
+  progressCount: { color: c.textFaint, fontSize: 11, marginTop: 4 },
+  noteBox: { marginTop: 24, backgroundColor: c.surface, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: c.border },
+  noteTitle: { color: c.danger, fontSize: 12, fontWeight: '800', marginBottom: 4 },
+  noteDesc: { color: c.textDim, fontSize: 11, lineHeight: 18 },
 });

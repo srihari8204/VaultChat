@@ -1,8 +1,11 @@
 // app/d2de-status.tsx
-// Live D2DE encryption status screen â€” unique to VaultChat
+// Live D2DE encryption status screen — unique to VaultChat
 
 import React from 'react';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
+import { useMemo } from 'react';
+import { useTheme } from '../lib/theme';
+import { type Palette } from '../constants/theme';
 import { Stack } from 'expo-router';
 import { getD2DEStatus } from '../services/d2deService';
 
@@ -14,13 +17,20 @@ const LAYER_INFO: Record<string, string> = {
   'Android Keystore':  'Private keys stored in hardware-backed secure enclave. Non-exportable even with root access.',
 };
 
+function useS() {
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
+}
+
 export default function D2DEStatusScreen() {
+  const { colors } = useTheme();
+  const s = useS();
   const layers = getD2DEStatus();
   const active = layers.filter(l => l.active).length;
 
   return (
     <>
-      <Stack.Screen options={{ title: 'ðŸ” D2DE Status', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
+      <Stack.Screen options={{ title: '🔐 D2DE Status', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937' }} />
       <ScrollView style={s.screen}>
 
         {/* Score card */}
@@ -34,8 +44,8 @@ export default function D2DEStatusScreen() {
           </View>
           <Text style={s.scoreNote}>
             {active === layers.length
-              ? 'ðŸ† Maximum security â€” all layers active'
-              : `${layers.length - active} layer${layers.length - active > 1 ? 's' : ''} pending â€” see roadmap below`
+              ? '🏆 Maximum security — all layers active'
+              : `${layers.length - active} layer${layers.length - active > 1 ? 's' : ''} pending — see roadmap below`
             }
           </Text>
         </View>
@@ -59,9 +69,9 @@ export default function D2DEStatusScreen() {
 
         {/* Unique callout */}
         <View style={s.uniqueBox}>
-          <Text style={s.uniqueTitle}>ðŸ† Unique to VaultChat</Text>
+          <Text style={s.uniqueTitle}>🏆 Unique to VaultChat</Text>
           <Text style={s.uniqueBody}>
-            No other messaging app â€” not Signal, not WhatsApp, not Telegram â€” shows you a live encryption status screen.
+            No other messaging app — not Signal, not WhatsApp, not Telegram — shows you a live encryption status screen.
             VaultChat is the only app where you can see exactly what protection is active on your conversation right now.
           </Text>
         </View>
@@ -72,23 +82,23 @@ export default function D2DEStatusScreen() {
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (c: Palette) => StyleSheet.create({
   screen:       { flex: 1, backgroundColor: '#FFFFFF' },
-  scoreCard:    { backgroundColor: '#050510', margin: 16, borderRadius: 16, padding: 24, alignItems: 'center', borderWidth: 1, borderColor: '#00FF8822' },
+  scoreCard:    { backgroundColor: c.bg, margin: 16, borderRadius: 16, padding: 24, alignItems: 'center', borderWidth: 1, borderColor: '#00FF8822' },
   scoreNum:     { fontSize: 56, fontWeight: 'bold', color: '#00FF88' },
-  scoreLabel:   { color: '#6B7280', fontSize: 14, marginBottom: 16 },
+  scoreLabel:   { color: c.textDim, fontSize: 14, marginBottom: 16 },
   scoreBar:     { flexDirection: 'row', gap: 6, marginBottom: 12 },
   scoreSeg:     { flex: 1, height: 6, borderRadius: 3 },
-  scoreNote:    { color: '#9CA3AF', fontSize: 12, textAlign: 'center' },
+  scoreNote:    { color: c.textDim, fontSize: 12, textAlign: 'center' },
   layerCard:    { backgroundColor: '#FFFFFF', marginHorizontal: 16, marginBottom: 10, borderRadius: 12, padding: 16, borderLeftWidth: 3 },
   layerHeader:  { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 },
   layerDot:     { width: 10, height: 10, borderRadius: 5 },
   layerName:    { fontSize: 16, fontWeight: '700', flex: 1 },
   layerBadge:   { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
   layerBadgeTxt:{ fontSize: 10, fontWeight: 'bold', letterSpacing: 0.5 },
-  layerLabel:   { color: '#4A9FFF', fontSize: 12, marginBottom: 6 },
-  layerInfo:    { color: '#6B7280', fontSize: 12, lineHeight: 18 },
-  uniqueBox:    { backgroundColor: '#050510', margin: 16, borderRadius: 12, padding: 18, borderWidth: 1, borderColor: '#FFD16633' },
+  layerLabel:   { color: c.accent, fontSize: 12, marginBottom: 6 },
+  layerInfo:    { color: c.textDim, fontSize: 12, lineHeight: 18 },
+  uniqueBox:    { backgroundColor: c.bg, margin: 16, borderRadius: 12, padding: 18, borderWidth: 1, borderColor: '#FFD16633' },
   uniqueTitle:  { color: '#FFD166', fontSize: 15, fontWeight: 'bold', marginBottom: 8 },
-  uniqueBody:   { color: '#6B7280', fontSize: 13, lineHeight: 20 },
+  uniqueBody:   { color: c.textDim, fontSize: 13, lineHeight: 20 },
 });

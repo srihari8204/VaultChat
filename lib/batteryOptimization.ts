@@ -1,0 +1,153 @@
+// lib/batteryOptimization.ts — OEM background-survival helpers.
+//
+// Indian-market OEMs (Xiaomi/MIUI, Oppo/Realme/ColorOS, Vivo/FuntouchOS,
+// Honor/Huawei, Samsung) aggressively kill backgrounded apps, which stops call
+// pushes from ringing. Two things help:
+//   1. Ask the OS to exempt VaultChat from battery optimization.
+//   2. Deep-link the user to the OEM's Auto-start / Background-allowed page,
+//      which is the setting that actually matters on these phones (and which no
+//      API can toggle for you — the user must flip it).
+
+import { Platform } from 'react-native';
+import * as IntentLauncher from 'expo-intent-launcher';
+import DeviceInfo from 'react-native-device-info';
+
+const APP_PACKAGE = 'com.vaultchat.app';
+
+export type Manufacturer =
+  | 'xiaomi' | 'oppo' | 'realme' | 'vivo' | 'huawei' | 'honor' | 'samsung' | 'oneplus' | 'other';
+
+export async function getManufacturer(): Promise<Manufacturer> {
+  try {
+    const m = (await DeviceInfo.getManufacturer()).toLowerCase();
+    if (m.includes('xiaomi') || m.includes('redmi') || m.includes('poco')) return 'xiaomi';
+    if (m.includes('oppo')) return 'oppo';
+    if (m.includes('realme')) return 'realme';
+    if (m.includes('vivo') || m.includes('iqoo')) return 'vivo';
+    if (m.includes('huawei')) return 'huawei';
+    if (m.includes('honor')) return 'honor';
+    if (m.includes('samsung')) return 'samsung';
+    if (m.includes('oneplus')) return 'oneplus';
+    return 'other';
+  } catch { return 'other'; }
+}
+
+/** Ask the OS to exempt the app from battery optimization (system dialog). */
+export async function requestIgnoreBatteryOptimizations(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  try {
+    await IntentLauncher.startActivityAsync(
+      'android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
+      { data: `package:${APP_PACKAGE}` },
+    );
+  } catch {
+    // Fall back to the battery-optimization list if the direct request is blocked.
+    try { await IntentLauncher.startActivityAsync('android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS'); } catch {}
+  }
+}
+
+// Per-OEM Auto-start / startup-manager activities. Tried in order; the first that
+// resolves opens. These class names are stable but vary by OS version — if none
+// resolve we fall back to the app's system settings page.
+const AUTOSTART: Record<Manufacturer, Array<{ packageName: string; className: string }>> = {
+  xiaomi: [
+    { packageName: 'com.miui.securitycenter', className: 'com.miui.permcenter.autostart.AutoStartManagementActivity' },
+  ],
+  oppo: [
+    { packageName: 'com.coloros.safecenter', className: 'com.coloros.safecenter.permission.startup.StartupAppListActivity' },
+    { packageName: 'com.coloros.safecenter', className: 'com.coloros.safecenter.startupapp.StartupAppListActivity' },
+    { packageName: 'com.oppo.safe', className: 'com.oppo.safe.permission.startup.StartupAppListActivity' },
+  ],
+  realme: [
+    { packageName: 'com.coloros.safecenter', className: 'com.coloros.safecenter.permission.startup.StartupAppListActivity' },
+    { packageName: 'com.coloros.safecenter', className: 'com.coloros.safecenter.startupapp.StartupAppListActivity' },
+  ],
+  vivo: [
+    { packageName: 'com.vivo.permissionmanager', className: 'com.vivo.permissionmanager.activity.BgStartUpManagerActivity' },
+    { packageName: 'com.iqoo.secure', className: 'com.iqoo.secure.ui.phoneoptimize.BgStartUpManager' },
+  ],
+  huawei: [
+    { packageName: 'com.huawei.systemmanager', className: 'com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity' },
+    { packageName: 'com.huawei.systemmanager', className: 'com.huawei.systemmanager.optimize.process.ProtectActivity' },
+  ],
+  honor: [
+    { packageName: 'com.hihonor.systemmanager', className: 'com.hihonor.systemmanager.startupmgr.ui.StartupNormalAppListActivity' },
+    { packageName: 'com.huawei.systemmanager', className: 'com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity' },
+  ],
+  samsung: [
+    { packageName: 'com.samsung.android.lool', className: 'com.samsung.android.sm.battery.ui.BatteryActivity' },
+    { packageName: 'com.samsung.android.sm', className: 'com.samsung.android.sm.ui.battery.BatteryActivity' },
+  ],
+  oneplus: [
+    { packageName: 'com.oneplus.security', className: 'com.oneplus.security.chainlaunch.view.ChainLaunchAppListActivity' },
+  ],
+  other: [],
+};
+
+/** Open the OEM auto-start / startup-manager page (or app settings as fallback). */
+export async function openAutoStartSettings(): Promise<boolean> {
+  if (Platform.OS !== 'android') return false;
+  const oem = await getManufacturer();
+  for (const target of AUTOSTART[oem] || []) {
+    try {
+      await IntentLauncher.startActivityAsync('android.intent.action.MAIN', {
+        packageName: target.packageName,
+        className: target.className,
+      });
+      return true;
+    } catch { /* try the next candidate */ }
+  }
+  // Fallback: the app's own settings page (Battery / Permissions live here).
+  try {
+    await IntentLauncher.startActivityAsync('android.settings.APPLICATION_DETAILS_SETTINGS', {
+      data: `package:${APP_PACKAGE}`,
+    });
+    return true;
+  } catch { return false; }
+}
+
+/** Whether this OEM needs the manual auto-start step (used to show the warning). */
+export async function needsAutoStartGuidance(): Promise<boolean> {
+  const oem = await getManufacturer();
+  return oem !== 'other' && oem !== 'samsung'; // Samsung's "never sleeping apps" is softer
+}
+
+export type OemStep = { title: string; steps: string[] };
+
+/** Step-by-step text shown on the Call Reliability screen, per OEM. */
+export async function oemInstructions(): Promise<OemStep> {
+  const oem = await getManufacturer();
+  switch (oem) {
+    case 'xiaomi': return { title: 'Xiaomi / Redmi / POCO (MIUI)', steps: [
+      'Open the Autostart page (button below) and enable VaultChat.',
+      'Settings → Apps → VaultChat → Battery saver → No restrictions.',
+      'Recents screen → lock VaultChat (pull down on the card → padlock).',
+    ]};
+    case 'oppo': case 'realme': return { title: 'Oppo / Realme (ColorOS)', steps: [
+      'Open Startup Manager (button below) and allow VaultChat.',
+      'Settings → Battery → App Battery Management → VaultChat → Allow background activity.',
+      'Recents → lock VaultChat.',
+    ]};
+    case 'vivo': return { title: 'Vivo / iQOO (FuntouchOS)', steps: [
+      'Open Background startup (button below) and allow VaultChat.',
+      'Settings → Battery → High background power consumption → enable VaultChat.',
+      'i Manager → App manager → Autostart → enable VaultChat.',
+    ]};
+    case 'huawei': case 'honor': return { title: 'Honor / Huawei', steps: [
+      'Open App launch (button below), turn OFF "Manage automatically" for VaultChat,',
+      'then turn ON Auto-launch, Secondary launch, and Run in background.',
+    ]};
+    case 'samsung': return { title: 'Samsung (One UI)', steps: [
+      'Settings → Battery → Background usage limits → Never sleeping apps → add VaultChat.',
+      'Settings → Apps → VaultChat → Battery → Unrestricted.',
+    ]};
+    default: return { title: 'Battery optimization', steps: [
+      'Allow VaultChat to ignore battery optimization (button below) so calls ring when the app is closed.',
+    ]};
+  }
+}
+
+export default {
+  getManufacturer, requestIgnoreBatteryOptimizations, openAutoStartSettings,
+  needsAutoStartGuidance, oemInstructions,
+};
