@@ -15,6 +15,7 @@ import (
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/emitx"
 	"vaultchat/backend-go/internal/httpx"
+	"vaultchat/backend-go/internal/jobs"
 	"vaultchat/backend-go/internal/realtime"
 	"vaultchat/backend-go/internal/redisx"
 	"vaultchat/backend-go/internal/routes"
@@ -29,16 +30,24 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	// Go-service health (Node keeps /health; Caddy never routes this to us).
-	mux.HandleFunc("GET /go-health", func(w http.ResponseWriter, r *http.Request) {
+	// Health — Node's exact shape (status/db/redis/uptime), served by Go so a
+	// Node-less prod keeps its monitoring probe. /go-health kept as an alias
+	// for the strangler period.
+	start := time.Now()
+	health := func(w http.ResponseWriter, r *http.Request) {
 		dbOK := db.Pool.Ping(r.Context()) == nil
 		redisOK := redisx.Client != nil && redisx.Client.Ping(r.Context()).Err() == nil
 		status := "ok"
 		if !dbOK {
 			status = "degraded"
 		}
-		httpx.JSON(w, 200, map[string]any{"status": status, "db": dbOK, "redis": redisOK})
-	})
+		httpx.JSON(w, 200, map[string]any{
+			"status": status, "db": dbOK, "redis": redisOK,
+			"uptime": time.Since(start).Seconds(),
+		})
+	}
+	mux.HandleFunc("GET /health", health)
+	mux.HandleFunc("GET /go-health", health)
 
 	routes.RegisterContacts(mux)
 	routes.RegisterLink(mux)
@@ -155,6 +164,10 @@ func main() {
 			}
 		}
 	}()
+
+	// The periodic jobs that lived in Node's server.js — sweepers + the
+	// scheduled-messages worker — so a Node-less prod loses nothing.
+	jobs.StartAll(ctx)
 
 	// Anything else reaching us is a proxy misconfiguration — say so loudly.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

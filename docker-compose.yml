@@ -25,9 +25,9 @@ services:
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
     ports:
-      - "18080:80"            # bench/staging entry; prod binds 80/443 here
+      - "18080:80"            # bench/staging entry; docker-compose.prod.yml maps 80/443
     depends_on:
-      - api
+      - go-api
 
   # ── go-api — the strangler backend (Phase 2 Step 3+) ─────────────────
   # Serves only the routes Caddy sends it; shares the SAME postgres/redis/
@@ -100,6 +100,9 @@ services:
   kafka:
     image: apache/kafka:3.8.1          # official Apache image, KRaft built-in
     restart: unless-stopped
+    # LEGACY: only the Node EVENT_BUS=kafka path consumes this — off in the
+    # Go-first prod shape (in-process fan-out). Revisit at kafka scale-out.
+    profiles: ["legacy"]
     environment:
       KAFKA_NODE_ID: "1"
       KAFKA_PROCESS_ROLES: "broker,controller"
@@ -138,6 +141,11 @@ services:
     build:
       context: ./vaultchat-backend
     restart: unless-stopped
+    # LEGACY: the Node API is no longer routed (Go owns the client surface).
+    # Kept behind a profile for bench parity runs (contract vs Node direct,
+    # shadow-diff) and as the emergency per-route rollback target:
+    #   docker compose --profile legacy up -d api
+    profiles: ["legacy"]
     env_file:
       - path: ./vaultchat-backend/.env     # JWT_SECRET, ADMIN_KEY, etc.
         required: false                     # so `up <infra only>` works without the backend dir present
@@ -248,6 +256,10 @@ services:
       S3_SECRET_KEY: ${MINIO_PASS:-vaultchat_dev_secret}
       MODELSLAB_API_KEY: ${MODELSLAB_API_KEY:-}
       VAULTLENS_CONCURRENCY: "2"
+      # Go-first prod: the worker hosts the QueueEvents listener and pushes
+      # vaultlens:ready/failed into go-api's internal bridge (Go owns sockets).
+      GO_INTERNAL_URL: http://go-api:4000
+      INTERNAL_EMIT_KEY: ${INTERNAL_EMIT_KEY:-bench-internal-emit}
     depends_on:
       postgres:
         condition: service_healthy
@@ -260,6 +272,8 @@ services:
     build:
       context: ./vaultchat-backend
     restart: unless-stopped
+    # LEGACY: pairs with EVENT_BUS=kafka (off in the Go-first prod shape).
+    profiles: ["legacy"]
     command: ["node", "workers/fanout.js"]
     env_file:
       - path: ./vaultchat-backend/.env

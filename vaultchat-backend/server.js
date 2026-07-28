@@ -134,7 +134,11 @@ async function emitToUserSockets(uid, event, payload) {
     });
   } catch (e) { console.error('[emit→go]', e.message); }
 }
-try {
+// Exactly ONE listener per deployment: when GO_INTERNAL_URL is set (Go owns
+// sockets), workers/vaultlens.js hosts the QueueEvents listener and pushes
+// into Go's bridge — this API-process listener stays OFF to avoid double
+// emits. Unset (Node owns sockets) → this listener runs as always.
+if (!GO_INTERNAL_URL) try {
   const { events: vlEvents } = require('./lib/vaultlensQueue');
   const vlStore = require('./lib/storage');
   const qe = vlEvents();
