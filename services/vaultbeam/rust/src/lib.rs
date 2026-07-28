@@ -9,6 +9,7 @@
 //! byte-for-byte, so a Kotlin peer and a Rust peer interop on every tier.
 
 pub mod chunk;
+pub mod ffi;
 pub mod fileio;
 pub mod lan;
 
