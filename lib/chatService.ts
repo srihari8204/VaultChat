@@ -461,42 +461,8 @@ export async function createGroupChat(
   });
 }
 
-// ─── Gaming (durable layer; realtime is Socket.IO) ──────────────────
-export interface GameProfile {
-  coins:       number;
-  wins:        number;
-  losses:      number;
-  gamesPlayed: number;
-}
-export interface GameHistoryItem {
-  id:           string;
-  gameType:     string;
-  bet:          number;
-  opponentId:   string;
-  opponentName: string | null;
-  result:       'win' | 'loss' | 'draw' | 'active' | 'abandoned';
-  startedAt:    string;
-  endedAt:      string | null;
-}
-export async function getGameProfile(): Promise<GameProfile> {
-  return api<GameProfile>('/games/profile');
-}
-export async function getGameHistory(): Promise<GameHistoryItem[]> {
-  return api<GameHistoryItem[]>('/games/history');
-}
-export interface LeaderboardEntry {
-  rank:        number;
-  userId:      string;
-  name:        string | null;
-  coins:       number;
-  wins:        number;
-  losses:      number;
-  gamesPlayed: number;
-  isMe:        boolean;
-}
-export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
-  return api<LeaderboardEntry[]>('/games/leaderboard');
-}
+// Gaming: removed from the app — games ship as a separate WebView deployment.
+// The backend /games surface stays dormant until that integration.
 
 // ─── Emergency SOS ──────────────────────────────────────────────────
 export interface SOSHistoryItem {

@@ -408,8 +408,6 @@ function RootLayout() {
         <Stack.Screen name="encrypted-notes" />
         <Stack.Screen name="screen-share" />
         <Stack.Screen name="current-location" />
-        <Stack.Screen name="game-lobby" />
-        <Stack.Screen name="game-play" />
       </Stack>
     </GestureHandlerRootView>
     </FontReadyContext.Provider>

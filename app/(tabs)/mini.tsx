@@ -322,21 +322,7 @@ export default function MiniAppsScreen() {
           ))}
         </View>
 
-        {/* ── Top Games Banner (matching PDF) ────────── */}
-        <TouchableOpacity
-          style={styles.gamesBanner}
-          activeOpacity={0.8}
-          onPress={() => router.push('/game-lobby' as any)}
-        >
-          <LinearGradient
-            colors={[BRAND_ACCENT, '#D97706']}
-            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-            style={styles.gamesBannerGrad}
-          >
-            <Text style={styles.gamesBannerIcon}>{'\uD83C\uDFC6'}</Text>
-            <Text style={styles.gamesBannerTxt}>Top Games {'\u2192'} 19 games {'\u2022'} 6 continents</Text>
-          </LinearGradient>
-        </TouchableOpacity>
+        {/* Games ship as a separate WebView deployment — no in-app games. */}
 
         {/* ── Utility Apps ───────────────────────────── */}
         <Text style={[styles.sectionTitle, { marginTop: 24 }]}>Tools</Text>
@@ -470,22 +456,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontStyle: 'italic',
   },
-  // ── Games Banner ─────────────────────────────────────
-  gamesBanner: {
-    marginTop: 20,
-    marginBottom: 8,
-    borderRadius: 14,
-    overflow: 'hidden',
-  },
-  gamesBannerGrad: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    gap: 10,
-  },
-  gamesBannerIcon: { fontSize: 22 },
-  gamesBannerTxt: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
 
   // ── Developer card ────────────────────────────────
   devCard: {
