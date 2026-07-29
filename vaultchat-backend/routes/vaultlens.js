@@ -25,7 +25,10 @@ const FREE_WIDTH   = 512;
 const FACE_TTL     = 3600; // presigned face URL lifetime handed to ModelsLab
 const RESULT_TTL   = 3600; // presigned output URL lifetime handed to the client
 const faceKey      = (uid) => `vaultlens/faces/${uid}.jpg`;
-const outputKey    = (uid, id) => `vaultlens/${uid}/${id}.jpg`;
+// Outputs live under their own prefix so the R2 1-day lifecycle rule can be
+// scoped to vaultlens/out/ WITHOUT sweeping the face cache (vaultlens/faces/)
+// or the style previews (vaultlens/previews/) — prefix rules can't exclude.
+const outputKey    = (uid, id) => `vaultlens/out/${uid}/${id}.jpg`;
 const previewKey   = (styleId) => `vaultlens/previews/${styleId}.jpg`;
 
 // Flatten catalog → styleId → { style, packId } for O(1) validation + prompts.
