@@ -61,14 +61,14 @@ export default function VaultBeamBubble({
   let action: React.ReactNode = null;
 
   if (isMine) {
-    if (status === 'uploading') { line = `Uploading… ${pct}%`; action = <CancelBtn onPress={onCancel} colors={colors} />; }
+    if (status === 'uploading') { line = `${st?.tier === 'relay' ? 'Uploading via relay' : 'Sending direct'}… ${pct}%`; action = <CancelBtn onPress={onCancel} colors={colors} />; }
     else if (status === 'sent') { line = `${fmtBytes(totalBytes)} · Sent`; action = <Ionicons name="checkmark-done" size={18} color={colors.textDim} />; }
     else if (status === 'complete') { line = `${fmtBytes(totalBytes)} · Delivered`; action = <Ionicons name="checkmark-done" size={18} color={BRAND_ACCENT} />; }
     else if (status === 'failed') { line = st?.error ? `Upload failed — ${st.error}` : 'Upload failed'; }
     else if (status === 'cancelled') { line = 'Cancelled'; }
     else { line = `${fmtBytes(totalBytes)} · Sent`; action = <Ionicons name="cloud-upload-outline" size={18} color={colors.textDim} />; }
   } else {
-    if (status === 'receiving') { line = `Downloading… ${pct}%`; action = <CancelBtn onPress={onCancel} colors={colors} />; }
+    if (status === 'receiving') { line = `${st?.tier === 'relay' ? 'Downloading via relay' : 'Receiving direct'}… ${pct}%`; action = <CancelBtn onPress={onCancel} colors={colors} />; }
     else if (status === 'complete') { line = `${fmtBytes(totalBytes)} · Saved`; action = <PillBtn label="Open" icon="open-outline" onPress={onOpen} colors={colors} />; }
     else if (status === 'failed') { line = st?.error ? `Failed — ${st.error}` : 'Download failed'; action = <PillBtn label="Retry" icon="refresh" onPress={onAccept} colors={colors} />; }
     else if (status === 'cancelled') { line = 'Cancelled'; action = <PillBtn label="Accept" icon="download-outline" onPress={onAccept} colors={colors} />; }

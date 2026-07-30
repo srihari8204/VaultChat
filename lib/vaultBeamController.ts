@@ -58,6 +58,10 @@ export interface VBTransfer {
   name: string;
   error?: string;
   savedPath?: string;  // recipient: local path once complete
+  // Which pipe is moving bytes right now. When a direct tier (LAN/P2P) dies and
+  // the relay takes over, the upload genuinely RESTARTS from 0 — the bubble
+  // shows "via relay" so the bar reset reads as a tier switch, not a glitch.
+  tier?: 'direct' | 'relay';
 }
 
 // ── tiny external store keyed by transferId ─────────────────────────
@@ -189,7 +193,7 @@ export async function resumePendingSends(): Promise<void> {
     if (controllers.has(r.transferId)) continue; // already running (double-mount guard)
     const fi: any = await FileSystem.getInfoAsync(r.srcPath).catch(() => null);
     if (!fi?.exists) { await unpersistSend(r.transferId); continue; }
-    setState(r.transferId, { transferId: r.transferId, role: 'sender', status: 'uploading', done: 0, total: 0, bytes: 0, totalBytes: r.size, name: r.name });
+    setState(r.transferId, { transferId: r.transferId, role: 'sender', status: 'uploading', tier: 'relay', done: 0, total: 0, bytes: 0, totalBytes: r.size, name: r.name });
     ensureListeners();
     const ac = new AbortController();
     controllers.set(r.transferId, ac);
@@ -278,14 +282,14 @@ export async function startSend(opts: {
       const tier = await serveDirect({
         transferId, fileId, keyB64, token, peerId: opts.recipientId,
         chunkBytes: CHUNK_BYTES, chunkCount, totalBytes: opts.size, srcPath: opts.srcPath, signal: ac.signal,
-        onProgress: (done, total) => setState(transferId, { status: 'uploading', done, total, bytes: done * CHUNK_BYTES, totalBytes: opts.size }),
+        onProgress: (done, total) => setState(transferId, { status: 'uploading', tier: 'direct', done, total, bytes: done * CHUNK_BYTES, totalBytes: opts.size }),
       });
       if (tier) {
         setState(transferId, { status: 'complete', done: chunkCount, total: chunkCount, bytes: opts.size }); // delivered peer-to-peer
         return;
       }
       // Tier 3: R2 relay (guaranteed baseline — works even if the peer is offline).
-      setState(transferId, { status: 'uploading', done: 0, total: 0, bytes: 0, totalBytes: opts.size });
+      setState(transferId, { status: 'uploading', tier: 'relay', done: 0, total: 0, bytes: 0, totalBytes: opts.size });
       await sendTransfer({
         srcPath: opts.srcPath, totalBytes: opts.size, fileId, transferId, keyB64, linkType, signal: ac.signal,
         onProgress: (p) => setState(transferId, { status: 'uploading', done: p.done, total: p.total, bytes: p.bytes, totalBytes: p.totalBytes }),
@@ -325,11 +329,12 @@ export async function startReceive(opts: {
     const gotDirect = manifest.token ? await receiveDirect({
       transferId, fileId: manifest.fileId, keyB64: manifest.keyB64, token: manifest.token, peerId,
       chunkBytes: CHUNK_BYTES, chunkCount, totalBytes: manifest.size, dstPath, signal: ac.signal,
-      onProgress: (done, total) => setState(transferId, { status: 'receiving', done, total, bytes: done * CHUNK_BYTES, totalBytes: manifest.size }),
+      onProgress: (done, total) => setState(transferId, { status: 'receiving', tier: 'direct', done, total, bytes: done * CHUNK_BYTES, totalBytes: manifest.size }),
     }) : false;
 
     if (!gotDirect) {
       // Tier 3: pull from the R2 relay (the sender uploads there as the baseline).
+      setState(transferId, { status: 'receiving', tier: 'relay', done: 0, total: 0, bytes: 0 });
       await receiveTransfer({
         transferId, dstPath, totalBytes: manifest.size, fileId: manifest.fileId, keyB64: manifest.keyB64,
         linkType: await getLinkType(),
