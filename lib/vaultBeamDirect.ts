@@ -98,11 +98,18 @@ function logIceWin(pc: any, tag: string): void {
 // not lost. onIce, once set, drains + forwards queued candidates.
 async function openInbox(transferId: string) {
   const s = await getSocket();
-  const state: { ready?: any; offer?: any; answer?: any; iceQ: any[]; onIce?: (c: any) => void } = { iceQ: [] };
+  const state: {
+    ready?: any; offer?: any; answer?: any; iceQ: any[];
+    onIce?: (c: any) => void;
+    // Set AFTER the initial offer/answer is consumed — late arrivals are ICE
+    // RESTARTS (UITE §12): a network flip mid-transfer renegotiates candidates
+    // over the same DTLS session, so the datachannel (and the transfer) survive.
+    onOffer?: (d: any) => void; onAnswer?: (d: any) => void;
+  } = { iceQ: [] };
   const filt = (h: (d: any) => void) => (d: any) => { if (d?.transferId === transferId) h(d); };
   const hReady = filt((d) => { state.ready = d; });
-  const hOffer = filt((d) => { state.offer = d; });
-  const hAnswer = filt((d) => { state.answer = d; });
+  const hOffer = filt((d) => { state.offer = d; state.onOffer?.(d); });
+  const hAnswer = filt((d) => { state.answer = d; state.onAnswer?.(d); });
   const hIce = filt((d) => { if (state.onIce) state.onIce(d.candidate); else state.iceQ.push(d.candidate); });
   s.on('vaultbeam_ready', hReady); s.on('vaultbeam_offer', hOffer);
   s.on('vaultbeam_answer', hAnswer); s.on('vaultbeam_ice', hIce);
@@ -210,7 +217,39 @@ export async function serveDirect(g: DirectGeom & { srcPath: string; onProgress?
             const ans = cipher ? cipher.open(a.answer) : a.answer;
             if (ans) { try { await pc.setRemoteDescription(new RTC.RTCSessionDescription(ans)); remoteReady = true; for (const c of pendingIce.splice(0)) addIce(c); } catch {} }
           }
+          // From here on, any further answer is the receiver accepting an ICE restart.
+          inbox.state.onAnswer = async (ra: any) => {
+            const rans = cipher ? cipher.open(ra.answer) : ra.answer;
+            if (!rans) return;
+            try { await pc.setRemoteDescription(new RTC.RTCSessionDescription(rans)); } catch {}
+          };
         })();
+
+        // ICE restart (UITE §12): a mid-transfer network flip (Wi-Fi→LTE, new IP)
+        // drops the candidate pair but NOT the DTLS session — renegotiating
+        // candidates lets the datachannel resume where it stopped instead of
+        // failing over to the relay and re-uploading from zero. 'disconnected'
+        // gets a 3s grace (often self-heals); 'failed' restarts immediately.
+        // Capped at 3; a restart that can't recover falls through to the
+        // existing stall→relay safety net.
+        let restarts = 0;
+        let restartTimer: any = null;
+        cleanups.push(() => clearTimeout(restartTimer));
+        const iceRestart = async () => {
+          if (restarts >= 3 || !cipher) return;
+          restarts++;
+          try {
+            const ro = await pc.createOffer({ iceRestart: true });
+            await pc.setLocalDescription(ro);
+            emit('vaultbeam_offer', { to: g.peerId, transferId: g.transferId, offer: cipher.seal(ro) });
+          } catch {}
+        };
+        pc.oniceconnectionstatechange = () => {
+          const st = pc.iceConnectionState;
+          if (st === 'failed') { clearTimeout(restartTimer); iceRestart(); }
+          else if (st === 'disconnected') { clearTimeout(restartTimer); restartTimer = setTimeout(() => { if (pc.iceConnectionState === 'disconnected') iceRestart(); }, 3000); }
+          else if (st === 'connected' || st === 'completed') clearTimeout(restartTimer);
+        };
 
         const offer = await pc.createOffer({});
         await pc.setLocalDescription(offer);
@@ -389,6 +428,18 @@ async function p2pReceive(g: DirectGeom & { dstPath: string; onProgress?: Progre
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           emit('vaultbeam_answer', { to: g.peerId, transferId: g.transferId, answer: cipher.seal(answer) });
+          // Any offer AFTER the initial one is the sender's ICE restart (§12):
+          // apply + answer so the surviving datachannel picks a fresh pair.
+          inbox.state.onOffer = async (om: any) => {
+            const off = cipher.open(om.offer);
+            if (!off) return;
+            try {
+              await pc.setRemoteDescription(new RTC.RTCSessionDescription(off));
+              const rans = await pc.createAnswer();
+              await pc.setLocalDescription(rans);
+              emit('vaultbeam_answer', { to: g.peerId, transferId: g.transferId, answer: cipher.seal(rans) });
+            } catch {}
+          };
           try { g.signal?.addEventListener?.('abort', () => done(false)); } catch {}
         } catch { done(false); }
       })();

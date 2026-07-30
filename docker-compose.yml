@@ -298,8 +298,33 @@ services:
       kafka:
         condition: service_started
 
+  # ── monitoring (UITE §19) — opt-in: `dc --profile monitoring up -d` ──
+  # Prometheus scrapes go-api's in-network /internal/metrics; Grafana is bound
+  # to localhost:3001 (reach it over an SSH tunnel — never exposed publicly).
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3001:3000"
+    volumes:
+      - ./monitoring/grafana-datasource.yml:/etc/grafana/provisioning/datasources/ds.yml:ro
+      - grafanadata:/var/lib/grafana
+    depends_on:
+      - prometheus
+
 volumes:
   pgdata:
   redisdata:
   kafkadata:
   miniodata:
+  promdata:
+  grafanadata:

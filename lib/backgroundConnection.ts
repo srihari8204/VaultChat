@@ -27,6 +27,20 @@ let registered = false;
 let wantRunning = false;
 let stopResolver: (() => void) | null = null;
 
+// Android allows ONE notifee foreground service. It's shared between this
+// module ('connection', no-GMS keep-alive) and active VaultBeam transfers
+// ('transfer', lib/transferForeground). Holds refcount the service: it stops
+// only when the LAST holder releases; each holder manages its own notification.
+const fgsHolds = new Set<string>();
+export function holdFgs(tag: string): void { fgsHolds.add(tag); }
+export async function releaseFgs(tag: string): Promise<void> {
+  fgsHolds.delete(tag);
+  if (fgsHolds.size === 0) {
+    try { stopResolver?.(); stopResolver = null; } catch {}
+    try { await notifee.stopForegroundService(); } catch {}
+  }
+}
+
 /**
  * Register the foreground-service task ONCE at JS load. Notifee invokes it
  * whenever the service is active — including a headless process restart after an
@@ -48,7 +62,7 @@ export function registerBackgroundConnection(): void {
         addPersistentListener('new_message', (m: any) => { notify(m).catch(() => {}); });
         await getSocket().catch(() => {});   // open + keep the connection alive
       } catch {}
-      if (!wantRunning) resolve();           // a stop() raced in before we started
+      if (!wantRunning && fgsHolds.size === 0) resolve(); // all holders stopped before we started
     })();
   }));
 }
@@ -67,6 +81,7 @@ async function ensureChannel(): Promise<void> {
 export async function startBackgroundConnection(): Promise<void> {
   if (Platform.OS !== 'android') return;
   wantRunning = true;
+  holdFgs('connection');
   registerBackgroundConnection();
   await ensureChannel();
   try {
@@ -90,8 +105,7 @@ export async function startBackgroundConnection(): Promise<void> {
 export async function stopBackgroundConnection(): Promise<void> {
   if (Platform.OS !== 'android') return;
   wantRunning = false;
-  try { stopResolver?.(); stopResolver = null; } catch {}
-  try { await notifee.stopForegroundService(); } catch {}
+  await releaseFgs('connection');   // stops the service only if transfers aren't holding it
   try { await notifee.cancelNotification(NOTIF_ID); } catch {}
 }
 

@@ -1,0 +1,10 @@
+# Prometheus scrape config — VaultChat monitoring profile (UITE §19).
+# Runs in-network; go-api's /internal/metrics is unreachable publicly (Caddy 404).
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: go-api
+    metrics_path: /internal/metrics
+    static_configs:
+      - targets: ['go-api:4000']

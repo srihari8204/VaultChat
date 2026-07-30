@@ -19,6 +19,7 @@
 // just their transferId via useTransfer().
 
 import { useSyncExternalStore } from 'react';
+import perf from './perf';
 import { randomBytes } from '@noble/hashes/utils.js';
 import { Buffer } from 'buffer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -113,12 +114,26 @@ function meterTick(id: string, bytes: number, totalBytes: number): Partial<VBTra
   const etaSec = rateBps > 0 && totalBytes > bytes ? (totalBytes - bytes) / rateBps : undefined;
   return { rateBps, avgBps, peakBps: m.peak, etaSec };
 }
+const ACTIVE = (s?: VBStatus) => s === 'uploading' || s === 'receiving';
 function setState(id: string, patch: Partial<VBTransfer>) {
   const prev = states.get(id);
   // Any progress tick with a byte count feeds the meter; terminal states drop it.
-  if (patch.bytes !== undefined && (patch.status === 'uploading' || patch.status === 'receiving')) {
+  if (patch.bytes !== undefined && ACTIVE(patch.status)) {
     Object.assign(patch, meterTick(id, patch.bytes, patch.totalBytes ?? prev?.totalBytes ?? 0));
-  } else if (patch.status && patch.status !== 'uploading' && patch.status !== 'receiving') {
+  } else if (patch.status && !ACTIVE(patch.status)) {
+    // §16 diagnostics: one summary mark per transfer, on the first terminal/idle
+    // transition out of an active state. Content-free (sizes/speeds/tier only).
+    if (ACTIVE(prev?.status)) {
+      const m = meters.get(id);
+      try {
+        perf.mark('vaultbeam_summary', {
+          status: patch.status, role: prev?.role, tier: prev?.tier,
+          bytes: patch.bytes ?? prev?.bytes ?? 0, totalBytes: prev?.totalBytes ?? 0,
+          avgBps: Math.round(prev?.avgBps ?? 0), peakBps: Math.round(prev?.peakBps ?? 0),
+          durMs: m ? Date.now() - m.startT : undefined,
+        });
+      } catch {}
+    }
     meters.delete(id);
     patch = { ...patch, rateBps: undefined, etaSec: undefined };
   }
@@ -126,6 +141,13 @@ function setState(id: string, patch: Partial<VBTransfer>) {
   states.set(id, next);
   emit(id);
   persistSoon(id, patch.status !== undefined);
+  // §13: mirror the set of active transfers into the Android foreground-service
+  // notification so a minimized app keeps big transfers alive.
+  try {
+    let count = 0, bytes = 0, totalBytes = 0;
+    for (const s of states.values()) if (ACTIVE(s.status)) { count++; bytes += s.bytes | 0; totalBytes += s.totalBytes | 0; }
+    require('./transferForeground').updateTransferForeground(count ? { count, bytes, totalBytes } : null);
+  } catch {}
 }
 export function getTransfer(id: string): VBTransfer | undefined { return states.get(id); }
 
