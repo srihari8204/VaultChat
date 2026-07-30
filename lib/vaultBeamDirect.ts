@@ -185,9 +185,20 @@ export async function serveDirect(g: DirectGeom & { srcPath: string; onProgress?
         const dc = pc.createDataChannel('vaultbeam', { ordered: true });
         // Delivery ack: the receiver sends {t:'ack'} only after every chunk is
         // decrypted + on disk. p2pSend waits for this before resolving 'p2p'.
+        // Progress acks {t:'p',n} arrive per chunk the receiver has VERIFIED
+        // (GCM tag ok + written) — the sender's bar tracks those, never bytes
+        // pushed into the SCTP buffer, so it can't show 100% while the receiver
+        // is still at 30%.
         let ackResolve: (() => void) | null = null;
         const ackP = new Promise<void>((r) => { ackResolve = r; });
-        dc.onmessage = (m: any) => { try { if (typeof m.data === 'string' && JSON.parse(m.data)?.t === 'ack') ackResolve?.(); } catch {} };
+        dc.onmessage = (m: any) => {
+          try {
+            if (typeof m.data !== 'string') return;
+            const c = JSON.parse(m.data);
+            if (c?.t === 'ack') ackResolve?.();
+            else if (c?.t === 'p' && Number.isInteger(c.n) && c.n >= 1 && c.n <= g.chunkCount) g.onProgress?.(c.n, g.chunkCount);
+          } catch {}
+        };
         // Connected but stalled / no ack in time → resolve null so the caller
         // falls back to the relay instead of the send hanging on a dead channel.
         dc.onopen = () => { markConnected(); logIceWin(pc, 'send'); p2pSend(dc, g, ackP).then(() => done('p2p')).catch(() => done(null)); };
@@ -299,7 +310,8 @@ async function p2pSend(dc: any, g: DirectGeom & { srcPath: string; onProgress?: 
       while (dc.bufferedAmount > BP_HIGH) { if (g.signal?.aborted) throw new Error('aborted'); await sleep(15); }
       dc.send(new Uint8Array(ct.subarray(off, off + FRAME)));
     }
-    g.onProgress?.(i + 1, g.chunkCount);
+    // No onProgress here: "sent" only means buffered into SCTP. The sender's
+    // progress comes from the receiver's {t:'p'} verified-chunk acks (serveDirect).
   }
   dc.send(JSON.stringify({ t: 'eof' }));
   // Only 'delivered' once the receiver confirms every chunk landed; no ack in
@@ -361,6 +373,11 @@ async function p2pReceive(g: DirectGeom & { dstPath: string; onProgress?: Progre
                   });
                   received++;
                   g.onProgress?.(received, g.chunkCount);
+                  // Verified-progress ack: this chunk passed its GCM tag and is
+                  // on disk. (A tag failure lands in the catch below → tier fails
+                  // → relay takes over; retransmitting identical bytes over a
+                  // reliable ordered channel would fail identically, so we don't.)
+                  try { dc.send(JSON.stringify({ t: 'p', n: received })); } catch {}
                   if (received === g.chunkCount) finishOk();
                 }
               } catch { done(false); }
