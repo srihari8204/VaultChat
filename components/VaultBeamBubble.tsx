@@ -24,6 +24,13 @@ function fmtBytes(n: number): string {
   while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
   return `${v.toFixed(v >= 100 || i === 0 ? 0 : 1)} ${u[i]}`;
 }
+const fmtRate = (bps?: number) => (bps && bps > 0 ? `${fmtBytes(bps)}/s` : null);
+function fmtEta(sec?: number): string | null {
+  if (sec == null || !isFinite(sec) || sec <= 0) return null;
+  const s = Math.round(sec);
+  if (s < 60) return `${s}s left`;
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')} left`;
+}
 
 export default function VaultBeamBubble({
   msg, isMine, plain,
@@ -57,19 +64,22 @@ export default function VaultBeamBubble({
   }, [st?.savedPath]);
 
   // Status line + optional trailing action, per role × status.
+  // Live meter (rate/ETA) comes from verified progress only — same truth as the bar.
+  const meter = active ? [fmtRate(st?.rateBps), fmtEta(st?.etaSec)].filter(Boolean).join(' · ') : '';
+  const avg = fmtRate(st?.avgBps);
   let line = fmtBytes(totalBytes);
   let action: React.ReactNode = null;
 
   if (isMine) {
-    if (status === 'uploading') { line = `${st?.tier === 'relay' ? 'Uploading via relay' : 'Sending direct'}… ${pct}%`; action = <CancelBtn onPress={onCancel} colors={colors} />; }
+    if (status === 'uploading') { line = `${st?.tier === 'relay' ? 'Uploading via relay' : 'Sending direct'}… ${pct}%${meter ? ` · ${meter}` : ''}`; action = <CancelBtn onPress={onCancel} colors={colors} />; }
     else if (status === 'sent') { line = `${fmtBytes(totalBytes)} · Sent`; action = <Ionicons name="checkmark-done" size={18} color={colors.textDim} />; }
-    else if (status === 'complete') { line = `${fmtBytes(totalBytes)} · Delivered`; action = <Ionicons name="checkmark-done" size={18} color={BRAND_ACCENT} />; }
+    else if (status === 'complete') { line = `${fmtBytes(totalBytes)} · Delivered${avg ? ` · avg ${avg}` : ''}`; action = <Ionicons name="checkmark-done" size={18} color={BRAND_ACCENT} />; }
     else if (status === 'failed') { line = st?.error ? `Upload failed — ${st.error}` : 'Upload failed'; }
     else if (status === 'cancelled') { line = 'Cancelled'; }
     else { line = `${fmtBytes(totalBytes)} · Sent`; action = <Ionicons name="cloud-upload-outline" size={18} color={colors.textDim} />; }
   } else {
-    if (status === 'receiving') { line = `${st?.tier === 'relay' ? 'Downloading via relay' : 'Receiving direct'}… ${pct}%`; action = <CancelBtn onPress={onCancel} colors={colors} />; }
-    else if (status === 'complete') { line = `${fmtBytes(totalBytes)} · Saved`; action = <PillBtn label="Open" icon="open-outline" onPress={onOpen} colors={colors} />; }
+    if (status === 'receiving') { line = `${st?.tier === 'relay' ? 'Downloading via relay' : 'Receiving direct'}… ${pct}%${meter ? ` · ${meter}` : ''}`; action = <CancelBtn onPress={onCancel} colors={colors} />; }
+    else if (status === 'complete') { line = `${fmtBytes(totalBytes)} · Saved${avg ? ` · avg ${avg}` : ''}`; action = <PillBtn label="Open" icon="open-outline" onPress={onOpen} colors={colors} />; }
     else if (status === 'failed') { line = st?.error ? `Failed — ${st.error}` : 'Download failed'; action = <PillBtn label="Retry" icon="refresh" onPress={onAccept} colors={colors} />; }
     else if (status === 'cancelled') { line = 'Cancelled'; action = <PillBtn label="Accept" icon="download-outline" onPress={onAccept} colors={colors} />; }
     else { line = fmtBytes(totalBytes); action = <PillBtn label="Accept" icon="download-outline" onPress={onAccept} colors={colors} disabled={!manifest} />; }

@@ -62,6 +62,11 @@ export interface VBTransfer {
   // the relay takes over, the upload genuinely RESTARTS from 0 — the bubble
   // shows "via relay" so the bar reset reads as a tier switch, not a glitch.
   tier?: 'direct' | 'relay';
+  // Live meter (computed from VERIFIED progress ticks — same truth as the bar).
+  rateBps?: number;    // rolling ~5s window
+  avgBps?: number;     // whole-transfer average
+  peakBps?: number;
+  etaSec?: number;     // remaining bytes / rolling rate
 }
 
 // ── tiny external store keyed by transferId ─────────────────────────
@@ -83,8 +88,40 @@ function persistSoon(id: string, immediate: boolean) {
   if (pend) return;
   persistT.set(id, setTimeout(flush, 750));
 }
+// ── live speed meter ────────────────────────────────────────────────
+// Rolling byte samples per transfer; rate over the last ~5s window, ETA from
+// that rate. Fed ONLY by verified progress ticks, so the meter can't claim
+// speed for bytes the peer hasn't confirmed. A tier switch resets the window
+// (bytes restart from 0 on the relay), keeping the rate honest.
+const METER_WINDOW_MS = 5000;
+const meters = new Map<string, { samples: Array<{ t: number; b: number }>; startT: number; peak: number }>();
+function meterTick(id: string, bytes: number, totalBytes: number): Partial<VBTransfer> {
+  const now = Date.now();
+  let m = meters.get(id);
+  if (!m || (m.samples.length && bytes < m.samples[m.samples.length - 1].b)) {
+    m = { samples: [], startT: now, peak: m?.peak ?? 0 }; // new transfer or tier restart
+    meters.set(id, m);
+  }
+  m.samples.push({ t: now, b: bytes });
+  while (m.samples.length > 2 && m.samples[0].t < now - METER_WINDOW_MS) m.samples.shift();
+  const first = m.samples[0];
+  const dt = (now - first.t) / 1000;
+  const rateBps = dt > 0.5 ? Math.max(0, (bytes - first.b) / dt) : 0;
+  if (rateBps > m.peak) m.peak = rateBps;
+  const elapsed = (now - m.startT) / 1000;
+  const avgBps = elapsed > 1 ? bytes / elapsed : rateBps;
+  const etaSec = rateBps > 0 && totalBytes > bytes ? (totalBytes - bytes) / rateBps : undefined;
+  return { rateBps, avgBps, peakBps: m.peak, etaSec };
+}
 function setState(id: string, patch: Partial<VBTransfer>) {
   const prev = states.get(id);
+  // Any progress tick with a byte count feeds the meter; terminal states drop it.
+  if (patch.bytes !== undefined && (patch.status === 'uploading' || patch.status === 'receiving')) {
+    Object.assign(patch, meterTick(id, patch.bytes, patch.totalBytes ?? prev?.totalBytes ?? 0));
+  } else if (patch.status && patch.status !== 'uploading' && patch.status !== 'receiving') {
+    meters.delete(id);
+    patch = { ...patch, rateBps: undefined, etaSec: undefined };
+  }
   const next = { ...(prev ?? ({ transferId: id } as VBTransfer)), ...patch } as VBTransfer;
   states.set(id, next);
   emit(id);
