@@ -3981,6 +3981,12 @@ function MessageBubble({
                 })()}
               </>
             )
+          ) : looksEncrypted(msg.content) ? (
+            // Envelope that never decrypted (desynced ratchet / E2EE off): show the
+            // standard lock indicator instead of a blank bubble or raw ciphertext.
+            <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, { fontStyle: 'italic', opacity: 0.7 }]}>
+              🔒 unable to decrypt
+            </Text>
           ) : null
         )}
 

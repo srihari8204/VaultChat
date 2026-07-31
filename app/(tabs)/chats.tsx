@@ -507,6 +507,9 @@ const ChatRow = memo(function ChatRow({
   const previewBody = (() => {
     if (!lastMsg) return chat.lastMessageId ? 'Tap to open chat' : 'No messages yet';
     const t = lastMsg.type;
+    // content is null for a text message whose ciphertext couldn't be decrypted
+    // (the cache layer withholds raw envelopes) — show a lock, never blank/JSON.
+    const textFallback = lastMsg.content || (chat.lastMessageId ? '🔒 Encrypted message' : '');
     const label = t === 'image' ? '📷 Photo'
       : t === 'video' ? '🎥 Video'
       : t === 'audio' ? '🎙️ Voice message'
@@ -515,7 +518,7 @@ const ChatRow = memo(function ChatRow({
       : t === 'location' ? '📍 Location'
       : t === 'poll' ? '📊 Poll'
       : t === 'sticker' ? 'Sticker'
-      : (lastMsg.content || '');
+      : textFallback;
     const mine = !!meId && lastMsg.senderId === meId;
     return (mine ? 'You: ' : '') + label;
   })();
