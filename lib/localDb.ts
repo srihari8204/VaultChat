@@ -185,6 +185,20 @@ export async function getCachedMessages(chatId: string, limit = 50): Promise<Mes
 }
 
 /**
+ * A cached `content` string that is still an E2EE envelope rather than
+ * decrypted plaintext — a 1:1 double-ratchet blob (`{"v":"dr1",…}`) or a group
+ * sender-key blob (`GSK1:…`). Hydrate leaves these in place when decryption
+ * fails, so the chat-list preview and global search must never surface them as
+ * text (else the row shows raw ciphertext like `{"v":"dr1","env":…}`).
+ */
+export function looksLikeEnvelope(text: string | null | undefined): boolean {
+  if (!text) return false;
+  if (text.startsWith('GSK1:')) return true;
+  if (text[0] === '{') { try { return JSON.parse(text)?.v === 'dr1'; } catch { return true; } }
+  return false;
+}
+
+/**
  * The newest cached message for each chat — used by the chat list to render a
  * real last-message preview (WhatsApp-style) from local plaintext, since the
  * server only holds ciphertext. One query, decrypted at-rest on the way out.
@@ -202,7 +216,13 @@ export async function getLastMessagePerChat(): Promise<Map<string, { content: st
   );
   const out = new Map<string, { content: string | null; type: string | null; senderId: string | null; id: number }>();
   for (const r of rows as any[]) {
-    out.set(r.chat_id, { content: decField(r.content), type: r.type ?? null, senderId: r.sender_id ?? null, id: r.id });
+    const text = decField(r.content);
+    // Never surface an un-decrypted envelope as preview text — null it so the
+    // chat list shows a lock placeholder instead of raw ciphertext.
+    out.set(r.chat_id, {
+      content: looksLikeEnvelope(text) ? null : text,
+      type: r.type ?? null, senderId: r.sender_id ?? null, id: r.id,
+    });
   }
   return out;
 }
@@ -226,7 +246,7 @@ export async function searchAllMessages(
   for (const r of rows as any[]) {
     const text = decField(r.content);
     // Skip un-decrypted envelopes ({..."v":"dr1"...} / GSK1:) and match plaintext.
-    if (!text || text[0] === '{' || text.startsWith('GSK1:')) continue;
+    if (!text || looksLikeEnvelope(text)) continue;
     if (text.toLowerCase().includes(q)) {
       out.push({ chatId: r.chat_id, id: r.id, content: text, senderId: r.sender_id, createdAt: r.created_at });
       if (out.length >= limit) break;
