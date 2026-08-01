@@ -19,7 +19,7 @@
 import * as SecureStore from 'expo-secure-store';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import {
-  createVaultHeaders, newSalt, tryUnlock,
+  createVaultHeaders, newSalt, tryUnlockAsync,
   type VaultUnlock,
 } from './vaultKeys';
 
@@ -71,7 +71,9 @@ export async function unlockWithPin(pin: string): Promise<VaultUnlock | null> {
     SecureStore.getItemAsync(DECOY_HDR),
   ]);
   if (!saltHex || !realHeader || !decoyHeader) return null;
-  return tryUnlock(pin, hexToBytes(saltHex), realHeader, decoyHeader);
+  // P3.2: async twin — scrypt runs on the native background pool, so the lock
+  // screen stays responsive during the derivation. Same result bytes.
+  return tryUnlockAsync(pin, hexToBytes(saltHex), realHeader, decoyHeader);
 }
 
 /** Remove all vault material (e.g. on account reset). */

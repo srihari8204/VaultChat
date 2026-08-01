@@ -9,23 +9,42 @@
 // (plaintext/legacy media or a group chat), fall back to the direct auth'd URL.
 
 import * as FileSystem from 'expo-file-system/legacy';
-import { Buffer } from 'buffer';
 import { uploadAttachment, attachmentUrl, type UploadResult } from './chatService';
 import { getAccessToken } from './api';
-import { newMediaKey, encryptMediaB64, decryptMediaB64, type MediaKey } from './mediaCrypto';
+import {
+  newMediaKey, encryptMediaB64, decryptMediaB64,
+  encryptMediaFile, decryptMediaFile, type MediaKey,
+} from './mediaCrypto';
 import { putMediaKey, getMediaKey } from './mediaKeyStore';
 
 export interface EncryptedUpload { attachmentId: string; mediaKey: MediaKey }
 
 // Encrypt `uri`'s bytes, upload the ciphertext, stash the key by attachment id.
+//
+// P3.1: encryption STREAMS through the native cipher in 4 MB slices
+// (mediaCrypto.encryptMediaFile) — the old path held ~4× the file size in the
+// JS heap at once (base64 read + plaintext Buffer + ciphertext Buffer + base64
+// write) and OOM'd on large videos. Wire format is unchanged (ct||tag, same
+// key+nonce), so recipients on any build decrypt it. The whole-file path
+// remains only as the Expo Go fallback (no native modules there).
 export async function uploadEncryptedAttachment(
   uri: string, filename: string, _mime: string, opts: { viewOnce?: boolean; signal?: AbortSignal } = {},
 ): Promise<EncryptedUpload> {
-  const fileB64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
   const mk = newMediaKey();
-  const ctB64 = encryptMediaB64(fileB64, mk);
   const tmp = (FileSystem as any).cacheDirectory + `enc_${Date.now()}_${filename.replace(/[^\w.-]/g, '_')}`;
-  await FileSystem.writeAsStringAsync(tmp, ctB64, { encoding: 'base64' }); // writes the raw ciphertext bytes
+  let streamed = false;
+  try {
+    streamed = await encryptMediaFile(uri, tmp, mk);
+  } catch (e) {
+    await FileSystem.deleteAsync(tmp, { idempotent: true }).catch(() => {});
+    throw e;
+  }
+  if (!streamed) {
+    // Expo Go fallback — whole file through the JS heap (bounded use only).
+    const fileB64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
+    const ctB64 = encryptMediaB64(fileB64, mk);
+    await FileSystem.writeAsStringAsync(tmp, ctB64, { encoding: 'base64' }); // writes the raw ciphertext bytes
+  }
   let res: UploadResult;
   try {
     // Upload as opaque bytes so the server never treats it as an image/etc.
@@ -35,6 +54,27 @@ export async function uploadEncryptedAttachment(
   }
   await putMediaKey(res.id, mk);
   return { attachmentId: res.id, mediaKey: mk };
+}
+
+// Download an attachment's ciphertext to disk (streaming) and decrypt it to
+// `dest` in bounded memory. Falls back to the whole-file JS path (fetch →
+// arrayBuffer → decrypt) only when the native engines are absent.
+async function downloadAndDecrypt(
+  attachmentId: string, mk: MediaKey, dest: string, headers?: Record<string, string>,
+): Promise<void> {
+  const ctTmp = (FileSystem as any).cacheDirectory + `ct_${attachmentId}_${Date.now()}`;
+  try {
+    const r = await FileSystem.downloadAsync(attachmentUrl(attachmentId), ctTmp, { headers });
+    if ((r.status ?? 0) >= 400) throw new Error(`attachment ${attachmentId} download failed (${r.status})`);
+    const streamed = await decryptMediaFile(ctTmp, dest, mk);
+    if (!streamed) {
+      const ctB64 = await FileSystem.readAsStringAsync(ctTmp, { encoding: 'base64' });
+      const ptB64 = decryptMediaB64(ctB64, mk);
+      await FileSystem.writeAsStringAsync(dest, ptB64, { encoding: 'base64' });
+    }
+  } finally {
+    await FileSystem.deleteAsync(ctTmp, { idempotent: true }).catch(() => {});
+  }
 }
 
 // Resolve a renderable URI for an attachment, decrypting if we hold a key.
@@ -50,11 +90,10 @@ export async function getDecryptedAttachmentUri(
   const cached = (FileSystem as any).cacheDirectory + `dec_${attachmentId}`;
   const info = await FileSystem.getInfoAsync(cached);
   if (!info.exists) {
-    const res = await fetch(attachmentUrl(attachmentId), { headers });
-    if (!res.ok) throw new Error(`attachment ${attachmentId} download failed (${res.status})`);
-    const ctB64 = Buffer.from(await res.arrayBuffer()).toString('base64');
-    const ptB64 = decryptMediaB64(ctB64, mk);
-    await FileSystem.writeAsStringAsync(cached, ptB64, { encoding: 'base64' });
+    // P3.1: download to disk + streaming decrypt — the old fetch→arrayBuffer→
+    // base64 path held the whole ciphertext AND plaintext in the JS heap (the
+    // exact pattern the plaintext branch was rewritten to avoid).
+    await downloadAndDecrypt(attachmentId, mk, cached, headers);
   }
   return { uri: cached }; // local decrypted file; no auth header needed
 }
@@ -100,12 +139,9 @@ export async function getAttachmentLocalUri(attachmentId: string): Promise<strin
     return cached;
   }
 
-  // Encrypted: we must read the bytes to decrypt. (Flag-gated; usually off.)
-  const res = await fetch(attachmentUrl(attachmentId), { headers });
-  if (!res.ok) throw new Error(`attachment ${attachmentId} download failed (${res.status})`);
-  const b64 = Buffer.from(await res.arrayBuffer()).toString('base64');
-  const out = decryptMediaB64(b64, mk);
-  await FileSystem.writeAsStringAsync(cached, out, { encoding: 'base64' });
+  // Encrypted: download to disk + streaming decrypt (P3.1) — bounded memory
+  // even when several video bubbles resolve at once.
+  await downloadAndDecrypt(attachmentId, mk, cached, headers);
   return cached;
 }
 

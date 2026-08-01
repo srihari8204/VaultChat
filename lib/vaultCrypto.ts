@@ -15,10 +15,23 @@ import { Buffer } from 'buffer';
 const SALT = new TextEncoder().encode('vaultchat-vault-aes-gcm-salt-2026');
 const keyCache = new Map<string, Uint8Array>();
 
+// P3.2: native PBKDF2 (react-native-quick-crypto → OpenSSL) when present —
+// the 100k-iteration JS loop blocked the UI on the first Vault operation per
+// PIN. Identical derived bytes (PBKDF2-HMAC-SHA256 is fully specified), so
+// existing payloads decrypt unchanged; @noble stays as the Expo Go fallback.
+let QC: any = null;
+try { QC = require('react-native-quick-crypto'); if (typeof QC?.pbkdf2Sync !== 'function') QC = null; } catch { QC = null; }
+
 function keyFromPin(pin: string): Uint8Array {
   let k = keyCache.get(pin);
   if (!k) {
-    k = pbkdf2(sha256, new TextEncoder().encode(pin), SALT, { c: 100000, dkLen: 32 });
+    if (QC) {
+      try {
+        const dk = QC.pbkdf2Sync(Buffer.from(new TextEncoder().encode(pin)), Buffer.from(SALT), 100000, 32, 'sha256');
+        k = new Uint8Array(dk.buffer ? dk : Buffer.from(dk));
+      } catch { /* fall through to JS */ }
+    }
+    if (!k) k = pbkdf2(sha256, new TextEncoder().encode(pin), SALT, { c: 100000, dkLen: 32 });
     keyCache.set(pin, k);
   }
   return k;
