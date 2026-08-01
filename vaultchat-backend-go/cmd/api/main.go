@@ -66,6 +66,7 @@ func main() {
 	routes.RegisterVaultlens(mux)
 	routes.RegisterAdmin(mux)
 	routes.RegisterChats(mux)
+	routes.RegisterShopBook(mux)
 
 	// ── Realtime (Phase 2 Step 5): Go owns the Socket.IO layer ──────────
 	hub := realtime.New()
