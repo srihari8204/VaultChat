@@ -167,4 +167,39 @@ export function loyaltyTier(points: number): string {
   return 'Bronze';
 }
 
+// ── bulk catalog paste ────────────────────────────────────────────
+export interface ParsedProduct { name: string; brand: string; unit: string; price: number }
+
+// Parse a pasted product list. One product per line. Accepts either:
+//   "Aashirvaad Atta 5kg 285"                (name … trailing price)
+//   "Aashirvaad Atta, Aashirvaad, 5kg, 285"  (name, brand, unit, price — commas)
+//   "Tata Salt, 20"                          (name, price)
+export function parseBulkProducts(text: string): ParsedProduct[] {
+  const out: ParsedProduct[] = [];
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+    let name = '', brand = '', unit = '', price = 0;
+    if (line.includes(',')) {
+      const p = line.split(',').map((x) => x.trim());
+      name = p[0] ?? '';
+      const last = Number((p[p.length - 1] ?? '').replace(/[₹,\s]/g, ''));
+      if (p.length >= 2 && Number.isFinite(last)) {
+        price = last;
+        if (p.length >= 3) brand = p[1];
+        if (p.length >= 4) unit = p[2];
+      } else {
+        brand = p[1] ?? '';
+        unit = p[2] ?? '';
+      }
+    } else {
+      const m = line.match(/^(.*?)[\s₹]+(\d+(?:\.\d+)?)\s*$/);
+      if (m) { name = m[1].trim(); price = Number(m[2]); }
+      else { name = line; }
+    }
+    if (name) out.push({ name, brand, unit, price: Number.isFinite(price) ? price : 0 });
+  }
+  return out;
+}
+
 export default {};

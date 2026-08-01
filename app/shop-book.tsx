@@ -12,17 +12,21 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet,
-  Alert, ActivityIndicator, RefreshControl, Switch, Platform, KeyboardAvoidingView, Share,
+  Alert, ActivityIndicator, RefreshControl, Switch, Platform, KeyboardAvoidingView, Share, Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
 import * as Location from 'expo-location';
+import Voice, { type SpeechResultsEvent } from '@react-native-voice/voice';
+import QRCode from 'react-native-qrcode-svg';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { SHOP_CATEGORIES, categoryIcon, categoryLabel } from '../constants/shopCategories';
 import {
   formatINR, formatDistance, shopOpenState, orderStatusLabel, orderProgress,
   nextOrderStatus, cartTotal, clientKey, ORDER_STEPS,
-  couponDiscount, couponLabel, starText, loyaltyTier,
+  couponDiscount, couponLabel, starText, loyaltyTier, parseBulkProducts,
   type CartItem, type OrderStatus, type ItemAvailability,
 } from '../utils/shopbook';
 import * as SB from '../services/shopBookService';
@@ -44,6 +48,8 @@ const num = (s: string) => { const n = Number(s); return Number.isFinite(n) ? n 
 
 export default function ShopBookScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ shop?: string }>();
+  const initialShopId = typeof params.shop === 'string' ? params.shop : undefined;
   const [mode, setMode] = useState<Mode>('customer');
   const [me, setMe] = useState<{ id: string; name: string } | null>(null);
 
@@ -79,7 +85,7 @@ export default function ShopBookScreen() {
       </View>
 
       {mode === 'customer'
-        ? <CustomerApp me={me} />
+        ? <CustomerApp me={me} initialShopId={initialShopId} />
         : <OwnerApp me={me} />}
     </View>
   );
@@ -88,13 +94,14 @@ export default function ShopBookScreen() {
 // ════════════════════════════════════════════════════════════════
 //  CUSTOMER
 // ════════════════════════════════════════════════════════════════
-function CustomerApp({ me }: { me: { id: string; name: string } | null }) {
+function CustomerApp({ me, initialShopId }: { me: { id: string; name: string } | null; initialShopId?: string }) {
   const [tab, setTab] = useState<CustTab>('shops');
   // drill-down within the Shops tab
   const [selShop, setSelShop] = useState<SB.Shop | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [trackId, setTrackId] = useState<string | null>(null);
   const [ledgerShop, setLedgerShop] = useState<SB.Shop | null>(null);
+  const [productSearch, setProductSearch] = useState(false);
   // Phase 2 — favorites shared across screens
   const [favIds, setFavIds] = useState<Set<string>>(new Set());
 
@@ -102,6 +109,12 @@ function CustomerApp({ me }: { me: { id: string; name: string } | null }) {
     try { const list = await SB.favorites(); setFavIds(new Set(list.map((sh) => sh.id))); } catch {}
   }, []);
   useEffect(() => { loadFavs(); }, [loadFavs]);
+
+  // Deep link / QR: open a specific shop on first mount.
+  useEffect(() => { (async () => {
+    if (!initialShopId) return;
+    try { const sh = await SB.shopDetails(initialShopId); setTab('shops'); setSelShop(sh); } catch {}
+  })(); }, [initialShopId]);
 
   const toggleFav = useCallback(async (shopId: string) => {
     // optimistic
@@ -114,8 +127,16 @@ function CustomerApp({ me }: { me: { id: string; name: string } | null }) {
   return (
     <>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        {tab === 'shops' && !selShop && !ledgerShop && (
-          <FindShops onOpen={(sh) => { setSelShop(sh); }} favIds={favIds} onToggleFav={toggleFav} />
+        {tab === 'shops' && !selShop && !ledgerShop && !productSearch && (
+          <FindShops onOpen={(sh) => { setSelShop(sh); }} favIds={favIds} onToggleFav={toggleFav}
+            onProductSearch={() => setProductSearch(true)} />
+        )}
+        {tab === 'shops' && productSearch && !selShop && (
+          <ProductSearch onBack={() => setProductSearch(false)}
+            onOpenShop={async (shopId) => {
+              try { const sh = await SB.shopDetails(shopId); setProductSearch(false); setSelShop(sh); }
+              catch (e: any) { Alert.alert('Error', e?.message ?? 'Could not open shop'); }
+            }} />
         )}
         {tab === 'shops' && selShop && !ledgerShop && (
           <ShopFlow
@@ -146,14 +167,15 @@ function CustomerApp({ me }: { me: { id: string; name: string } | null }) {
           { id: 'profile', label: 'Profile', icon: 'person-circle' },
         ]}
         active={tab}
-        onChange={(t) => { setTab(t as CustTab); setSelShop(null); setLedgerShop(null); setTrackId(null); }}
+        onChange={(t) => { setTab(t as CustTab); setSelShop(null); setLedgerShop(null); setTrackId(null); setProductSearch(false); }}
       />
     </>
   );
 }
 
-function FindShops({ onOpen, favIds, onToggleFav }: {
+function FindShops({ onOpen, favIds, onToggleFav, onProductSearch }: {
   onOpen: (s: SB.Shop) => void; favIds: Set<string>; onToggleFav: (id: string) => void;
+  onProductSearch: () => void;
 }) {
   const [loading, setLoading] = useState(true);
   const [shops, setShops] = useState<SB.Shop[]>([]);
@@ -199,6 +221,11 @@ function FindShops({ onOpen, favIds, onToggleFav }: {
         <TextInput style={s.searchInput} placeholder="Search shops nearby" placeholderTextColor={C.sub}
           value={q} onChangeText={setQ} />
       </View>
+      <TouchableOpacity style={s.findProductBtn} onPress={onProductSearch}>
+        <Ionicons name="pricetag" size={16} color={C.green} />
+        <Text style={s.findProductText}>Find a product across shops</Text>
+        <Ionicons name="chevron-forward" size={16} color={C.green} style={{ marginLeft: 'auto' }} />
+      </TouchableOpacity>
       {!coords && !loading && (
         <Text style={s.hint}>📍 Location off — showing recent shops. Enable location for distance.</Text>
       )}
@@ -265,6 +292,64 @@ function ShopCard({ shop, onOpen, isFav, onToggleFav }: {
         <Ionicons name={isFav ? 'heart' : 'heart-outline'} size={22} color={isFav ? C.danger : C.sub} />
       </TouchableOpacity>
     </TouchableOpacity>
+  );
+}
+
+function ProductSearch({ onBack, onOpenShop }: { onBack: () => void; onOpenShop: (shopId: string) => void }) {
+  const [q, setQ] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [results, setResults] = useState<SB.ProductHit[]>([]);
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [searched, setSearched] = useState(false);
+
+  useEffect(() => { (async () => {
+    try {
+      const { status } = await Location.getForegroundPermissionsAsync();
+      if (status === 'granted') {
+        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+      }
+    } catch {}
+  })(); }, []);
+
+  const run = async () => {
+    if (q.trim().length < 2) return;
+    setLoading(true); setSearched(true);
+    try { setResults(await SB.searchProducts(q.trim(), coords?.lat, coords?.lng)); }
+    catch {} finally { setLoading(false); }
+  };
+
+  return (
+    <>
+      <SubHeader title="Find a product" onBack={onBack} />
+      <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
+        <View style={s.searchRow}>
+          <Ionicons name="search" size={18} color={C.sub} />
+          <TextInput style={s.searchInput} placeholder="e.g. Maggi, Atta, Paracetamol"
+            placeholderTextColor={C.sub} value={q} onChangeText={setQ}
+            onSubmitEditing={run} returnKeyType="search" autoFocus />
+        </View>
+        <TouchableOpacity style={s.primaryBtn} onPress={run}><Text style={s.primaryBtnText}>Search nearby shops</Text></TouchableOpacity>
+
+        {loading && <ActivityIndicator color={C.green} style={{ marginTop: 20 }} />}
+        {searched && !loading && results.length === 0 && (
+          <Empty icon="search-outline" text="No shop nearby lists that yet." />
+        )}
+        {results.map((h, i) => (
+          <TouchableOpacity key={`${h.shopId}-${i}`} style={s.card} onPress={() => onOpenShop(h.shopId)}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.cardTitle}>{h.productName}{h.unit ? ` · ${h.unit}` : ''}{h.productBrand ? ` (${h.productBrand})` : ''}</Text>
+              <Text style={s.cardSub}>
+                {h.shopName}{h.distanceKm != null ? ` · ${formatDistance(h.distanceKm)}` : ''}
+                {h.ratingCount > 0 ? ` · ⭐ ${h.rating}` : ''}
+              </Text>
+              <Text style={s.price}>{formatINR(h.price)}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={C.sub} />
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </>
   );
 }
 
@@ -377,11 +462,26 @@ function Catalog({ shop, cart, setCart, onCart }: {
   const [tBrand, setTBrand] = useState('');
   const [tQty, setTQty] = useState('1');
   const [tNote, setTNote] = useState('');
+  const [listening, setListening] = useState(false);
 
   useEffect(() => { (async () => {
     try { setProducts(await SB.shopProducts(shop.id)); }
     catch {} finally { setLoading(false); }
   })(); }, [shop.id]);
+
+  // Voice ordering — speak a product name into "Type any product".
+  useEffect(() => {
+    Voice.onSpeechResults = (e: SpeechResultsEvent) => { const t = e.value?.[0]; if (t) setTName(t); };
+    Voice.onSpeechEnd = () => setListening(false);
+    Voice.onSpeechError = () => setListening(false);
+    return () => { Voice.destroy().then(() => Voice.removeAllListeners()).catch(() => {}); };
+  }, []);
+  const mic = async () => {
+    try {
+      if (listening) { await Voice.stop(); setListening(false); return; }
+      setListening(true); await Voice.start('en-IN');
+    } catch { setListening(false); Alert.alert('Voice unavailable', 'Speech input is not available on this device/build.'); }
+  };
 
   const add = (name: string, brand: string, qty: number, price: number, note: string) => {
     setCart([...cart, { key: clientKey(), name, brand, qty, price, note }]);
@@ -402,8 +502,16 @@ function Catalog({ shop, cart, setCart, onCart }: {
       {/* Type any product */}
       <View style={s.panel}>
         <Text style={s.panelTitle}>✍️ Type any product</Text>
-        <TextInput style={s.input} placeholder="Product name (e.g. Maggi)" placeholderTextColor={C.sub}
-          value={tName} onChangeText={setTName} />
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <TextInput style={[s.input, { flex: 1, marginBottom: 0 }]} placeholder="Product name (e.g. Maggi)" placeholderTextColor={C.sub}
+            value={tName} onChangeText={setTName} />
+          <TouchableOpacity style={[s.micBtn, listening && s.micBtnOn]} onPress={mic}>
+            <Ionicons name={listening ? 'stop' : 'mic'} size={20} color={listening ? '#fff' : C.green} />
+          </TouchableOpacity>
+        </View>
+        {listening
+          ? <Text style={[s.hint, { color: C.green }]}>🎤 Listening… say the product name</Text>
+          : <Text style={s.hint}>Tap the mic to speak instead of typing</Text>}
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <TextInput style={[s.input, { flex: 1 }]} placeholder="Brand (optional)" placeholderTextColor={C.sub}
             value={tBrand} onChangeText={setTBrand} />
@@ -632,6 +740,31 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
     }).catch(() => {});
   };
 
+  const bill = async () => {
+    if (!order) return;
+    const rows = order.items.map((it) =>
+      `<tr><td style="padding:6px 0">${it.name}${it.brand ? ` (${it.brand})` : ''}</td>
+       <td style="text-align:center">${it.qty}</td>
+       <td style="text-align:right">${it.price > 0 ? formatINR(it.price * it.qty) : '—'}</td></tr>`).join('');
+    const html = `<html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+      <body style="font-family:-apple-system,Roboto,sans-serif;color:#111;padding:28px">
+        <h2 style="color:#0B7A3B;margin:0">🛍️ Shop Book — Receipt</h2>
+        <p style="color:#666;margin:6px 0 18px">Order ${order.id.slice(0, 8).toUpperCase()} · ${new Date(order.createdAt).toLocaleString('en-IN')}</p>
+        <table style="width:100%;border-collapse:collapse;font-size:14px">
+          <thead><tr style="border-bottom:1px solid #ddd"><th align="left">Item</th><th>Qty</th><th align="right">Amount</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <hr style="margin:16px 0;border:none;border-top:1px solid #eee"/>
+        ${order.discount > 0 ? `<p style="text-align:right;color:#0B7A3B;margin:4px 0">Discount (${order.couponCode}): − ${formatINR(order.discount)}</p>` : ''}
+        <h3 style="text-align:right;margin:8px 0">Total: ${formatINR(order.total)}</h3>
+        <p style="color:#888;font-size:13px">Status: ${orderStatusLabel(order.status)}</p>
+      </body></html>`;
+    try {
+      const { uri } = await Print.printToFileAsync({ html });
+      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: 'Order receipt' });
+    } catch (e: any) { Alert.alert('Error', e?.message ?? 'Could not create the bill'); }
+  };
+
   return (
     <>
       <SubHeader title="Track Order" onBack={onBack}
@@ -690,9 +823,9 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
                 <Ionicons name="repeat" size={18} color={C.green} />
                 <Text style={s.outlineBtnText}>Repeat order</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[s.outlineBtn, { flex: 1 }]} onPress={share}>
-                <Ionicons name="share-social-outline" size={18} color={C.green} />
-                <Text style={s.outlineBtnText}>Share</Text>
+              <TouchableOpacity style={[s.outlineBtn, { flex: 1 }]} onPress={bill}>
+                <Ionicons name="receipt-outline" size={18} color={C.green} />
+                <Text style={s.outlineBtnText}>Bill / Receipt</Text>
               </TouchableOpacity>
             </View>
 
@@ -910,6 +1043,8 @@ function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPlans, onR
 }) {
   const [loading, setLoading] = useState(true);
   const [d, setD] = useState<SB.Dashboard | null>(null);
+  const [qr, setQr] = useState(false);
+  const deepLink = `vaultchat://shop-book?shop=${shop.id}`;
   const load = useCallback(async () => {
     setLoading(true);
     try { setD(await SB.dashboard()); } catch {} finally { setLoading(false); }
@@ -920,6 +1055,23 @@ function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPlans, onR
   return (
     <ScrollView contentContainerStyle={s.body}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
+      <Modal visible={qr} transparent animationType="fade" onRequestClose={() => setQr(false)}>
+        <View style={s.modalWrap}>
+          <View style={s.modalCard}>
+            <Text style={s.modalTitle}>{shop.name}</Text>
+            <Text style={[s.hint, { textAlign: 'center' }]}>Customers scan this to open your shop</Text>
+            <View style={{ alignItems: 'center', marginVertical: 18, backgroundColor: '#fff', padding: 14, borderRadius: 14 }}>
+              <QRCode value={deepLink} size={190} color={C.navy} backgroundColor="#ffffff" />
+            </View>
+            <TouchableOpacity style={s.primaryBtn} onPress={() => Share.share({ message: `Order from ${shop.name} on Shop Book 🛍️\n${deepLink}` })}>
+              <Ionicons name="share-social-outline" size={18} color="#fff" />
+              <Text style={s.primaryBtnText}>Share shop link</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={s.dangerBtn} onPress={() => setQr(false)}><Text style={s.dangerBtnText}>Close</Text></TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       <TouchableOpacity style={s.card} onPress={onSettings}>
         <View style={s.shopIcon}><Text style={{ fontSize: 22 }}>{categoryIcon(shop.category)}</Text></View>
         <View style={{ flex: 1 }}>
@@ -936,6 +1088,9 @@ function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPlans, onR
             <Text style={[s.badgeText, st.tone === 'closed' && { color: C.danger }]}>{st.label}</Text>
           </View>
         </View>
+        <TouchableOpacity onPress={() => setQr(true)} hitSlop={8} style={{ padding: 4 }}>
+          <Ionicons name="qr-code-outline" size={22} color={C.green} />
+        </TouchableOpacity>
         <Ionicons name="settings-outline" size={20} color={C.sub} />
       </TouchableOpacity>
 
@@ -1366,7 +1521,7 @@ function OwnerOrderDetail({ orderId, onBack }: { orderId: string; onBack: () => 
 function OwnerProducts() {
   const [loading, setLoading] = useState(true);
   const [products, setProducts] = useState<SB.Product[]>([]);
-  const [edit, setEdit] = useState<SB.Product | 'new' | null>(null);
+  const [edit, setEdit] = useState<SB.Product | 'new' | 'bulk' | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1374,15 +1529,22 @@ function OwnerProducts() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  if (edit === 'bulk') return <BulkAdd onDone={() => { setEdit(null); load(); }} />;
   if (edit) return <ProductEditor product={edit === 'new' ? null : edit} onDone={() => { setEdit(null); load(); }} />;
 
   return (
     <ScrollView contentContainerStyle={s.body}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
-      <TouchableOpacity style={s.primaryBtn} onPress={() => setEdit('new')}>
-        <Ionicons name="add" size={18} color="#fff" />
-        <Text style={s.primaryBtnText}>Add Product</Text>
-      </TouchableOpacity>
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        <TouchableOpacity style={[s.primaryBtn, { flex: 1, marginTop: 0 }]} onPress={() => setEdit('new')}>
+          <Ionicons name="add" size={18} color="#fff" />
+          <Text style={s.primaryBtnText}>Add Product</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[s.outlineBtn, { flex: 1, marginTop: 0 }]} onPress={() => setEdit('bulk')}>
+          <Ionicons name="documents-outline" size={18} color={C.green} />
+          <Text style={s.outlineBtnText}>Bulk add</Text>
+        </TouchableOpacity>
+      </View>
       {loading && <ActivityIndicator color={C.green} style={{ marginTop: 16 }} />}
       {!loading && products.length === 0 && <Empty icon="pricetags-outline" text="No products yet." />}
       {products.map((p) => (
@@ -1450,6 +1612,59 @@ function ProductEditor({ product, onDone }: { product: SB.Product | null; onDone
           </TouchableOpacity>
         )}
       </ScrollView>
+    </>
+  );
+}
+
+function BulkAdd({ onDone }: { onDone: () => void }) {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const parsed = useMemo(() => parseBulkProducts(text), [text]);
+
+  const save = async () => {
+    if (parsed.length === 0) { Alert.alert('Nothing to add', 'Paste one product per line.'); return; }
+    setBusy(true);
+    try {
+      const res = await SB.bulkAddProducts(parsed.map((p) => ({ name: p.name, brand: p.brand, unit: p.unit, price: p.price })));
+      Alert.alert('Added', `${res.added} product(s) added to your catalog.`);
+      onDone();
+    } catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <>
+      <SubHeader title="Bulk add products" onBack={onDone} />
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
+          <Text style={s.hint}>
+            Paste one product per line. Formats accepted:{'\n'}
+            • Aashirvaad Atta 5kg 285{'\n'}
+            • Tata Salt, Tata, 1kg, 20{'\n'}
+            • Fortune Oil, 145
+          </Text>
+          <TextInput style={[s.input, { height: 200, textAlignVertical: 'top' }]} multiline
+            placeholder={'Aashirvaad Atta 5kg 285\nFortune Oil 1L 145\nTata Salt 1kg 20'}
+            placeholderTextColor={C.sub} value={text} onChangeText={setText} />
+          {parsed.length > 0 && (
+            <>
+              <Text style={s.sectionLabel}>Preview · {parsed.length} product(s)</Text>
+              {parsed.slice(0, 8).map((p, i) => (
+                <View key={i} style={s.card}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.cardTitle}>{p.name}{p.unit ? ` · ${p.unit}` : ''}{p.brand ? ` (${p.brand})` : ''}</Text>
+                  </View>
+                  <Text style={s.price}>{formatINR(p.price)}</Text>
+                </View>
+              ))}
+              {parsed.length > 8 && <Text style={s.hint}>…and {parsed.length - 8} more</Text>}
+            </>
+          )}
+          <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={save}>
+            {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.primaryBtnText}>Add {parsed.length || ''} product(s)</Text>}
+          </TouchableOpacity>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </>
   );
 }
@@ -2031,4 +2246,20 @@ const s = StyleSheet.create({
   barFill: { height: 8, borderRadius: 4, backgroundColor: C.green },
   rankDot: { width: 26, height: 26, borderRadius: 13, backgroundColor: C.greenSoft, justifyContent: 'center', alignItems: 'center' },
   rankDotText: { color: C.green, fontWeight: '800', fontSize: 12 },
+
+  // ── Phase 2c ───────────────────────────────────────
+  micBtn: {
+    width: 44, height: 44, borderRadius: 10, borderWidth: 1.5, borderColor: C.green,
+    justifyContent: 'center', alignItems: 'center', backgroundColor: C.card,
+  },
+  micBtnOn: { backgroundColor: C.green, borderColor: C.green },
+  findProductBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.greenSoft,
+    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, marginTop: 8,
+    borderWidth: 1, borderColor: '#BBF7D0',
+  },
+  findProductText: { color: C.green, fontWeight: '700', fontSize: 13.5 },
+  modalWrap: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', padding: 26 },
+  modalCard: { backgroundColor: C.card, borderRadius: 18, padding: 20 },
+  modalTitle: { color: C.text, fontSize: 18, fontWeight: '800', textAlign: 'center' },
 });

@@ -13,6 +13,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -36,6 +37,7 @@ func RegisterShopBook(mux *http.ServeMux) {
 	mux.HandleFunc("GET /shopbook/orders/{id}", httpx.RequireAuth(sbOrderDetails))
 	mux.HandleFunc("POST /shopbook/orders/{id}/item/{itemId}/decision", httpx.RequireAuth(sbCustomerDecision))
 	mux.HandleFunc("GET /shopbook/ledger/{shopId}", httpx.RequireAuth(sbCustomerLedger))
+	mux.HandleFunc("GET /shopbook/search-products", httpx.RequireAuth(sbSearchProducts))
 
 	// Customer — Phase 2
 	mux.HandleFunc("GET /shopbook/favorites", httpx.RequireAuth(sbFavorites))
@@ -50,6 +52,7 @@ func RegisterShopBook(mux *http.ServeMux) {
 	mux.HandleFunc("POST /shopbook/my-shop", httpx.RequireAuth(sbUpsertShop))
 	mux.HandleFunc("GET /shopbook/my-shop/products", httpx.RequireAuth(sbOwnerProducts))
 	mux.HandleFunc("POST /shopbook/my-shop/products", httpx.RequireAuth(sbSaveProduct))
+	mux.HandleFunc("POST /shopbook/my-shop/products/bulk", httpx.RequireAuth(sbBulkProducts))
 	mux.HandleFunc("DELETE /shopbook/my-shop/products/{id}", httpx.RequireAuth(sbDeleteProduct))
 	mux.HandleFunc("GET /shopbook/my-shop/orders", httpx.RequireAuth(sbOwnerOrders))
 	mux.HandleFunc("POST /shopbook/my-shop/orders/{id}/item/{itemId}", httpx.RequireAuth(sbOwnerSetAvailability))
@@ -1473,4 +1476,109 @@ func sbReports(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	httpx.JSON(w, 200, map[string]any{"days": days, "topProducts": top})
+}
+
+// ════════════════════════════════════════════════════════════════
+//  Phase 2c — cross-shop product search + bulk catalog add
+// ════════════════════════════════════════════════════════════════
+
+// Customer: find one product across nearby shops ("who has Maggi?").
+func sbSearchProducts(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if len(q) < 2 {
+		httpx.JSON(w, 200, map[string]any{"results": []any{}})
+		return
+	}
+	lat, okLat := qfloat(r, "lat")
+	lng, okLng := qfloat(r, "lng")
+	args := []any{q}
+	sql := `SELECT s.id, s.name, s.category, s.lat, s.lng, s.rating_sum, s.rating_count,
+	               p.name, p.brand, p.price, p.unit
+	          FROM shopbook_product p JOIN shopbook_shop s ON s.id=p.shop_id
+	         WHERE p.enabled AND p.in_stock AND p.name ILIKE '%'||$1||'%'`
+	if okLat && okLng {
+		const boxDeg = 0.25
+		sql += ` AND s.lat BETWEEN $2 AND $3 AND s.lng BETWEEN $4 AND $5`
+		args = append(args, lat-boxDeg, lat+boxDeg, lng-boxDeg, lng+boxDeg)
+	}
+	sql += ` ORDER BY p.price LIMIT 60`
+	rows, err := db.Pool.Query(ctx, sql, args...)
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var shopID, shopName, category, pName, pBrand, pUnit string
+		var slat, slng *float64
+		var ratingSum, ratingCount int
+		var price float64
+		if err := rows.Scan(&shopID, &shopName, &category, &slat, &slng, &ratingSum, &ratingCount,
+			&pName, &pBrand, &price, &pUnit); err != nil {
+			continue
+		}
+		var rating float64
+		if ratingCount > 0 {
+			rating = math.Round(float64(ratingSum)/float64(ratingCount)*10) / 10
+		}
+		m := map[string]any{
+			"shopId": shopID, "shopName": shopName, "category": category,
+			"rating": rating, "ratingCount": ratingCount,
+			"productName": pName, "productBrand": pBrand, "price": price, "unit": pUnit,
+		}
+		if okLat && okLng && slat != nil && slng != nil {
+			m["distanceKm"] = math.Round(haversineKm(lat, lng, *slat, *slng)*100) / 100
+		}
+		out = append(out, m)
+	}
+	httpx.JSON(w, 200, map[string]any{"results": out})
+}
+
+// Owner: bulk-add products from a pasted/parsed list. Insert-only (fast setup).
+func sbBulkProducts(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	shopID, ok := ownerShopID(ctx, w, httpx.UserFrom(r).ID)
+	if !ok {
+		return
+	}
+	var b struct {
+		Items []struct {
+			Name     string  `json:"name"`
+			Brand    string  `json:"brand"`
+			Category string  `json:"category"`
+			Unit     string  `json:"unit"`
+			Price    float64 `json:"price"`
+		} `json:"items"`
+	}
+	if err := httpx.Body(r, &b); err != nil || len(b.Items) == 0 {
+		httpx.Err(w, http.StatusBadRequest, "items required")
+		return
+	}
+	if len(b.Items) > 500 {
+		httpx.Err(w, http.StatusRequestEntityTooLarge, "Max 500 products per bulk add")
+		return
+	}
+	added := 0
+	err := db.WithUser(ctx, httpx.UserFrom(r).ID, func(tx pgx.Tx) error {
+		for _, it := range b.Items {
+			if strings.TrimSpace(it.Name) == "" {
+				continue
+			}
+			if _, err := tx.Exec(ctx,
+				`INSERT INTO shopbook_product (shop_id, name, brand, category, unit, price)
+				 VALUES ($1,$2,$3,$4,$5,$6)`,
+				shopID, it.Name, it.Brand, it.Category, it.Unit, it.Price); err != nil {
+				return err
+			}
+			added++
+		}
+		return nil
+	})
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "could not add products")
+		return
+	}
+	httpx.JSON(w, 200, map[string]any{"added": added})
 }

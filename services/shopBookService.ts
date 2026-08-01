@@ -319,4 +319,28 @@ export function reports() {
   return api<Reports>(`/shopbook/my-shop/reports`);
 }
 
+// ── Phase 2c: cross-shop product search + bulk add ────────────────
+export interface ProductHit {
+  shopId: string;
+  shopName: string;
+  category: string;
+  rating: number;
+  ratingCount: number;
+  distanceKm?: number;
+  productName: string;
+  productBrand: string;
+  price: number;
+  unit: string;
+}
+export function searchProducts(q: string, lat?: number, lng?: number) {
+  const p = new URLSearchParams({ q });
+  if (lat != null && lng != null) { p.set('lat', String(lat)); p.set('lng', String(lng)); }
+  return api<{ results: ProductHit[] }>(`/shopbook/search-products?${p.toString()}`).then((r) => r.results);
+}
+
+export interface BulkProduct { name: string; brand?: string; category?: string; unit?: string; price?: number }
+export function bulkAddProducts(items: BulkProduct[]) {
+  return api<{ added: number }>(`/shopbook/my-shop/products/bulk`, { method: 'POST', json: { items } });
+}
+
 export default {};
