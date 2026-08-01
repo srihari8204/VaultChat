@@ -11,7 +11,7 @@
     "jsEngine": "hermes",
     "experiments": {
       "typedRoutes": true,
-      "reactCompiler": false
+      "reactCompiler": true
     },
     "ios": {
       "supportsTablet": true,

@@ -52,6 +52,13 @@ export default function EmergencySOSScreen() {
   const countdownTimer = useRef<any>(null);
   const shakeRef = useRef({ count: 0, lastShake: 0 });
 
+  // P1.4 (leak fix): the countdown interval was only cleared on natural
+  // completion or explicit cancel. Unmounting mid-countdown left it firing
+  // setCountdown() on an unmounted screen. Clear it on unmount unconditionally.
+  useEffect(() => () => {
+    if (countdownTimer.current) { clearInterval(countdownTimer.current); countdownTimer.current = null; }
+  }, []);
+
   // Pulse animation for SOS button
   useEffect(() => {
     const pulse = Animated.loop(

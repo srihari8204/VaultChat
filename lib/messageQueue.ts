@@ -311,19 +311,22 @@ export async function flush(): Promise<void> {
 // ─── Auto-flush on reconnect + periodic safety net ────────────
 
 let initialized = false;
+let online = true;   // P1.4: track connectivity so the periodic safety-net can no-op while offline.
 export function initQueue() {
   if (initialized) return;
   initialized = true;
 
   // Reconnect → flush
   NetInfo.addEventListener(state => {
-    if (state.isConnected && state.isInternetReachable !== false) {
+    online = !!(state.isConnected && state.isInternetReachable !== false);
+    if (online) {
       flush().catch(() => {});
     }
   });
 
-  // Periodic safety net (covers cases where NetInfo doesn't fire)
-  setInterval(() => { flush().catch(() => {}); }, PERIODIC_FLUSH_MS);
+  // Periodic safety net (covers cases where NetInfo doesn't fire). Skips the
+  // work while known-offline so a backgrounded device isn't woken for nothing.
+  setInterval(() => { if (online) flush().catch(() => {}); }, PERIODIC_FLUSH_MS);
 
   // Initial drain on app boot
   flush().catch(() => {});
