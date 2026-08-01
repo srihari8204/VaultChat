@@ -5,24 +5,34 @@
 //
 // It owns all sockets once the single-node proxy flip cuts realtime over from
 // Node. Emit payloads are shaped byte-for-byte like Node's emits (the library
-// JSON-marshals whatever map/struct we pass). No Redis adapter, no Kafka — the
-// cutover is atomic and fan-out is in-process (EVENT_BUS off in prod).
+// JSON-marshals whatever map/struct we pass).
+//
+// Scale-out (P2.1): with REDIS_ADAPTER=1 the Socket.IO Redis adapter
+// (zishang520/socket.io-go-redis — same wire format as Node's
+// @socket.io/redis-adapter) carries room emits across every replica, and
+// presence/rosters move to Redis (cluster.go), so N nodes serve one logical
+// hub. Flag off (default) ⇒ the original single-node in-process behavior,
+// which is also the rollback: scale replicas to 1 and unset the flag.
 package realtime
 
 import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"log"
 	"net/http"
 	"os"
 	"regexp"
 	"sync"
 	"time"
 
+	redisadapter "github.com/zishang520/socket.io-go-redis/adapter"
+	redistypes "github.com/zishang520/socket.io-go-redis/types"
 	"github.com/zishang520/engine.io/v2/types"
 	"github.com/zishang520/socket.io/v2/socket"
 
 	"vaultchat/backend-go/internal/httpx"
+	"vaultchat/backend-go/internal/redisx"
 )
 
 // Default is set by New() so the orchestrator's /internal/* bridge handlers
@@ -79,6 +89,19 @@ func New() *Hub {
 	opts.SetPingInterval(10 * time.Second) // server.js pingInterval 10000
 	opts.SetPingTimeout(5 * time.Second)   // server.js pingTimeout 5000
 
+	// P2.1: REDIS_ADAPTER=1 → cross-node room emits via the Redis adapter
+	// (same pub/sub wire format as Node's @socket.io/redis-adapter, so a mixed
+	// Node/Go fleet during a rollback window still interoperates). Flag off →
+	// the default in-memory adapter, byte-identical single-node behavior.
+	if ClusterEnabled() {
+		opts.SetAdapter(&redisadapter.RedisAdapterBuilder{
+			Redis: redistypes.NewRedisClient(context.Background(), redisx.Client),
+			Opts:  &redisadapter.RedisAdapterOptions{},
+		})
+	} else if os.Getenv("REDIS_ADAPTER") == "1" {
+		log.Printf("[realtime] REDIS_ADAPTER=1 but Redis is not connected — falling back to in-memory adapter (single node)")
+	}
+
 	io := socket.NewServer(nil, opts)
 	h := &Hub{
 		io:          io,
@@ -126,6 +149,9 @@ func New() *Hub {
 	})
 
 	h.startViewerSweep()
+	if ClusterEnabled() {
+		h.startCluster() // heartbeat + dead-node janitor (cluster.go)
+	}
 
 	Default = h
 	return h
@@ -162,6 +188,9 @@ func (h *Hub) onConnection(s *socket.Socket) {
 		for _, room := range s.Rooms().Keys() {
 			if r := string(room); len(r) > 5 && r[:5] == "call:" {
 				s.To(room).Emit("call_peer_left", map[string]any{"chatId": r[5:], "uid": d.uid})
+				if ClusterEnabled() {
+					clusterCallLeave(r[5:], d.uid) // keep the Redis roster honest on drops
+				}
 			}
 		}
 	})
@@ -195,19 +224,32 @@ func (h *Hub) EmitBroadcast(event string, payload any) {
 }
 
 // OnlineCount is the number of distinct online users — matches Node's
-// admin.js getOnlineCount() == userSockets.size.
+// admin.js getOnlineCount() == userSockets.size. Cluster mode counts the
+// whole fleet via the vc:pres:online set (cluster.go).
 func (h *Hub) OnlineCount() int {
+	if ClusterEnabled() {
+		return clusterOnlineCount()
+	}
 	h.pmu.Lock()
 	defer h.pmu.Unlock()
 	return len(h.userSockets)
 }
 
-// hasLiveSocket reports whether a user currently has any connected socket on
-// this node (single-node: equivalent to server.js io.in(user:x).fetchSockets()).
+// hasLiveSocket reports whether a user currently has any connected socket —
+// on this node (single-node) or on any live node (cluster). This gates the
+// call wake push, so cluster correctness here is what stops a callee on
+// replica B from getting a redundant push when ringing via replica A.
 func (h *Hub) hasLiveSocket(uid string) bool {
 	h.pmu.Lock()
-	defer h.pmu.Unlock()
-	return len(h.userSockets[uid]) > 0
+	local := len(h.userSockets[uid]) > 0
+	h.pmu.Unlock()
+	if local {
+		return true // fast path — a local socket is proof enough in any mode
+	}
+	if ClusterEnabled() {
+		return clusterHasLive(uid)
+	}
+	return false
 }
 
 // safeKeyEqual mirrors server.js safeKeyEqual: constant-time sha256 compare.

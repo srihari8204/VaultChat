@@ -7,6 +7,7 @@ import (
 	"github.com/zishang520/socket.io/v2/socket"
 
 	"vaultchat/backend-go/internal/db"
+	"vaultchat/backend-go/internal/workx"
 )
 
 // GHOST_COLS — the allowlisted ghost_mode columns (server.js GHOST_COLS). The
@@ -35,7 +36,20 @@ func (h *Hub) trackSocket(s *socket.Socket) {
 	set[string(s.Id())] = struct{}{}
 	h.pmu.Unlock()
 	if wasEmpty {
-		go h.onUserOnline(d.uid) // first socket → presence online
+		// First LOCAL socket. Single-node that IS the online transition; in a
+		// cluster the user may already be online via another node — register
+		// this node's claim in Redis and only fire the transition if the user
+		// was globally offline (P2.1). Pool-submitted, not raw-spawned: a
+		// reconnect storm must not fork one goroutine per flip (P2.2).
+		workx.Submit(func() {
+			if ClusterEnabled() {
+				if clusterTrackFirst(d.uid) {
+					h.onUserOnline(d.uid)
+				}
+				return
+			}
+			h.onUserOnline(d.uid)
+		})
 	}
 }
 
@@ -57,7 +71,17 @@ func (h *Hub) untrackSocket(s *socket.Socket) {
 	}
 	h.pmu.Unlock()
 	if last {
-		go h.onUserOffline(d.uid) // last socket → presence offline
+		// Last LOCAL socket — mirror of trackSocket: withdraw this node's
+		// claim; fire offline only when no live node still has the user.
+		workx.Submit(func() {
+			if ClusterEnabled() {
+				if clusterUntrackLast(d.uid) {
+					h.onUserOffline(d.uid)
+				}
+				return
+			}
+			h.onUserOffline(d.uid)
+		})
 	}
 }
 

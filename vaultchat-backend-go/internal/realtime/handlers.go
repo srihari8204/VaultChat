@@ -5,6 +5,7 @@ import (
 	"github.com/zishang520/socket.io/v2/socket"
 
 	"vaultchat/backend-go/internal/db"
+	"vaultchat/backend-go/internal/workx"
 )
 
 // ── shared payload helpers ────────────────────────────────────────────
@@ -285,17 +286,26 @@ func (h *Hub) registerSignalHandlers(s *socket.Socket) {
 			"callerName": mstr(m, "callerName"),
 			"callType":   callType,
 		}
-		go h.sendCallWakePush(bg, to, title, body, data)
+		workx.Submit(func() { h.sendCallWakePush(bg, to, title, body, data) }) // P2.2: bounded, not raw-spawned
 	})
 
-	// Group calls (mesh) — a call room per chat.
+	// Group calls (mesh) — a call room per chat. In cluster mode the roster
+	// lives in Redis (cluster.go) because FetchSockets on the local adapter
+	// only sees THIS node's sockets; the room join/leave still happens so the
+	// Redis adapter carries the in-room emits across nodes (P2.1).
 	s.On("join_call", func(args ...any) {
 		chatID := mstr(argMap(args), "chatId")
 		if chatID == "" {
 			return
 		}
 		room := socket.Room("call:" + chatID)
-		existing := h.callRoster(room, d.uid)
+		var existing []string
+		if ClusterEnabled() {
+			existing = clusterCallRoster(chatID, d.uid)
+			clusterCallJoin(chatID, d.uid)
+		} else {
+			existing = h.callRoster(room, d.uid)
+		}
 		s.Join(room)
 		s.Emit("call_roster", map[string]any{"chatId": chatID, "peers": existing})
 		s.To(room).Emit("call_peer_joined", map[string]any{"chatId": chatID, "uid": d.uid})
@@ -308,6 +318,9 @@ func (h *Hub) registerSignalHandlers(s *socket.Socket) {
 		room := socket.Room("call:" + chatID)
 		s.To(room).Emit("call_peer_left", map[string]any{"chatId": chatID, "uid": d.uid})
 		s.Leave(room)
+		if ClusterEnabled() {
+			clusterCallLeave(chatID, d.uid)
+		}
 	})
 }
 

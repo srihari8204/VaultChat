@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -22,19 +21,23 @@ var Pool *pgxpool.Pool
 func NoRows(err error) bool { return errors.Is(err, pgx.ErrNoRows) }
 
 // WithUser mirrors Node db.withUser: a transaction with app.current_user_id
-// set so the RLS policies (004_rls.sql) see the caller. uid is single-quote-
-// escaped exactly like Node (SET LOCAL takes no bind parameters).
+// set so the RLS policies (004_rls.sql) see the caller.
+//
+// P2.3: set_config($1, $2, true) replaces the old string-interpolated
+// `SET LOCAL` — it takes real bind parameters (no quote-escaping, no
+// SQLi-shaped string build) and is transaction-scoped (is_local=true), which
+// is exactly what PgBouncer transaction pooling requires: the setting dies
+// with the txn, so the pooled server connection is never left tainted.
 func WithUser(ctx context.Context, userID string, fn func(pgx.Tx) error) error {
 	if userID == "" {
 		return errors.New("withUser requires a userId")
 	}
-	uid := strings.ReplaceAll(userID, "'", "''")
 	tx, err := Pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck — no-op after Commit
-	if _, err := tx.Exec(ctx, "SET LOCAL app.current_user_id = '"+uid+"'"); err != nil {
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.current_user_id', $1, true)", userID); err != nil {
 		return err
 	}
 	if err := fn(tx); err != nil {
@@ -51,10 +54,15 @@ func env(k, def string) string {
 }
 
 func Connect(ctx context.Context) error {
-	dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?pool_max_conns=%s",
+	// P2.3: default_query_exec_mode=exec avoids named prepared statements,
+	// which PgBouncer transaction pooling cannot track across server
+	// connections. Direct-to-Postgres deploys may set
+	// DB_QUERY_EXEC_MODE=cache_statement to restore pgx statement caching.
+	dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?pool_max_conns=%s&default_query_exec_mode=%s",
 		env("DB_USER", "vaultchat_user"), env("DB_PASS", ""),
 		env("DB_HOST", "127.0.0.1"), env("DB_PORT", "5432"),
-		env("DB_NAME", "vaultchat"), env("DB_POOL_MAX", "30"))
+		env("DB_NAME", "vaultchat"), env("DB_POOL_MAX", "30"),
+		env("DB_QUERY_EXEC_MODE", "exec"))
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		return err

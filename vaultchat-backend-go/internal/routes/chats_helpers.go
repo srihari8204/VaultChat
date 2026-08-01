@@ -20,7 +20,9 @@ import (
 	"vaultchat/backend-go/internal/emitx"
 	"vaultchat/backend-go/internal/fcm"
 	"vaultchat/backend-go/internal/httpx"
+	"vaultchat/backend-go/internal/realtime"
 	"vaultchat/backend-go/internal/vault"
+	"vaultchat/backend-go/internal/workx"
 )
 
 // ─── GET /chats/{id} — chat + members ──────────────────────────────────
@@ -424,14 +426,17 @@ func chatsMessagePost(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, 200, msg)
 
 	if !duplicate && msgType != "reaction" {
-		go func() {
+		// P2.2: pool-submitted, not raw-spawned — every message send used to
+		// fork two goroutines (each holding a DB pool conn); a burst could
+		// spawn tens of thousands. workx bounds concurrency + queues overflow.
+		workx.Submit(func() {
 			bctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			if _, err := db.Pool.Exec(bctx, `SELECT vc_bump_unread($1, $2)`, chatID, user.ID); err != nil {
 				log.Printf("[unread bump] %v", err)
 			}
-		}()
-		go chatsSendMessagePush(chatID, user.ID, msg)
+		})
+		workx.Submit(func() { chatsSendMessagePush(chatID, user.ID, msg) })
 	}
 }
 
@@ -980,6 +985,9 @@ func chatsMembersAdd(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// P2.2: drop the cached roster BEFORE the fan-out so members_added reaches
+	// the users just added (a stale cache would exclude them).
+	realtime.InvalidateChatMembers(ctx, chatID)
 	emitx.ChatEvent(chatID, "members_added", map[string]any{"added": allowed, "by": user.ID})
 	httpx.JSON(w, 200, map[string]any{"added": allowed, "blocked": blocked})
 }
@@ -1509,6 +1517,7 @@ func chatsMemberRemove(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 500, "Failed to remove member")
 		return
 	}
+	realtime.InvalidateChatMembers(ctx, chatID) // P2.2: fresh roster before the fan-out
 	event := "member_removed"
 	if isSelf {
 		event = "member_left"

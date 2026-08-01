@@ -6,8 +6,9 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/jackc/pgx/v5 v5.7.4
 	github.com/minio/minio-go/v7 v7.2.1
-	github.com/redis/go-redis/v9 v9.7.3
+	github.com/redis/go-redis/v9 v9.11.0
 	github.com/zishang520/engine.io/v2 v2.5.0
+	github.com/zishang520/socket.io-go-redis v1.3.0
 	github.com/zishang520/socket.io/v2 v2.5.0
 	golang.org/x/crypto v0.51.0
 )

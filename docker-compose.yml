@@ -41,11 +41,18 @@ services:
         required: false
     environment:
       PORT: "4000"
-      DB_HOST: postgres
-      DB_PORT: "5432"
+      # P2.3: route DB traffic through PgBouncer (transaction pooling) so N
+      # go-api replicas share a bounded set of real Postgres connections.
+      # Rollback: DB_HOST=postgres / DB_PORT=5432 for a direct connection.
+      DB_HOST: ${DB_HOST:-pgbouncer}
+      DB_PORT: ${DB_PORT:-6432}
       DB_NAME: vaultchat
       DB_USER: vaultchat
       DB_PASS: ${DB_PASS:-vaultchat_dev}
+      # P2.1: REDIS_ADAPTER=1 turns on the Socket.IO Redis adapter + Redis
+      # presence/rosters (cluster.go) so go-api can scale past one replica.
+      # Default off — single-node in-process fan-out, the pre-P2 behavior.
+      REDIS_ADAPTER: ${REDIS_ADAPTER:-0}
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       REDIS_PASS: ""
@@ -68,8 +75,31 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      pgbouncer:
+        condition: service_started
       redis:
         condition: service_started
+
+  # ── pgbouncer — connection pooler in front of Postgres (P2.3) ────────
+  # Transaction pooling: many app connections multiplex onto few server
+  # connections, so scaling go-api replicas doesn't blow max_connections.
+  # Go's WithUser uses set_config(..., is_local=true) — txn-scoped, safe here.
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.23.1-p2
+    restart: unless-stopped
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: vaultchat
+      DB_PASSWORD: ${DB_PASS:-vaultchat_dev}
+      DB_NAME: vaultchat
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: "2000"          # app-side connections across replicas
+      DEFAULT_POOL_SIZE: "40"          # real Postgres connections per db/user
+      AUTH_TYPE: scram-sha-256
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   postgres:
     image: postgres:16

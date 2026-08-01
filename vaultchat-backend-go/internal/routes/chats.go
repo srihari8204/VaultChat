@@ -21,6 +21,7 @@ import (
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/emitx"
 	"vaultchat/backend-go/internal/httpx"
+	"vaultchat/backend-go/internal/realtime"
 	"vaultchat/backend-go/internal/vault"
 )
 
@@ -688,6 +689,7 @@ func chatsCreateDirect(w http.ResponseWriter, _ *http.Request, ctx context.Conte
 		httpx.Err(w, 500, "Failed to create chat")
 		return
 	}
+	realtime.InvalidateChatMembers(ctx, chatID) // P2.2: fresh roster before any fan-out
 	httpx.JSON(w, 200, map[string]any{"id": chatID, "type": "direct", "existing": false})
 }
 
@@ -819,6 +821,7 @@ func chatsCreateGroup(w http.ResponseWriter, _ *http.Request, ctx context.Contex
 		httpx.Err(w, 500, "Failed to create chat")
 		return
 	}
+	realtime.InvalidateChatMembers(ctx, chatID) // P2.2: fresh roster before any fan-out
 	httpx.JSON(w, 200, map[string]any{"id": chatID, "type": "group", "name": name})
 }
 
@@ -1047,6 +1050,7 @@ func chatsJoinRequestApprove(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 500, "Failed to approve request")
 		return
 	}
+	realtime.InvalidateChatMembers(ctx, chatID) // P2.2: fresh roster before any fan-out
 	if _, err := db.Pool.Exec(ctx,
 		`DELETE FROM chat_join_requests WHERE chat_id = $1 AND user_id = $2`, chatID, target); err != nil {
 		log.Printf("[join-requests approve] %v", err)
