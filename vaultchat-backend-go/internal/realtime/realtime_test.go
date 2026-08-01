@@ -50,3 +50,46 @@ func TestSenderOfEvent(t *testing.T) {
 		t.Errorf("non-ghost event sender=%q want empty", got)
 	}
 }
+
+// P6.1: the full-mesh participant cap. Guards both the default and the
+// override parsing — a bad override must fall back to the safe default
+// rather than silently admitting an unbounded number of peers.
+func TestMeshMaxParticipants(t *testing.T) {
+	t.Setenv("MESH_MAX_PARTICIPANTS", "")
+	if got := meshMaxParticipants(); got != 5 {
+		t.Errorf("default = %d, want 5", got)
+	}
+	for _, c := range []struct {
+		env  string
+		want int
+	}{
+		{"8", 8}, {"2", 2},
+		{"1", 5},   // below the 2-person minimum → default
+		{"0", 5},   // ditto
+		{"-3", 5},  // ditto
+		{"abc", 5}, // unparseable → default
+	} {
+		t.Setenv("MESH_MAX_PARTICIPANTS", c.env)
+		if got := meshMaxParticipants(); got != c.want {
+			t.Errorf("MESH_MAX_PARTICIPANTS=%q → %d, want %d", c.env, got, c.want)
+		}
+	}
+}
+
+// The admission rule itself: joining is refused when the joiner would push
+// the room past the cap. `existing` excludes the joiner, hence the +1.
+func TestMeshAdmission(t *testing.T) {
+	t.Setenv("MESH_MAX_PARTICIPANTS", "5")
+	for _, c := range []struct {
+		existing int
+		admit    bool
+	}{
+		{0, true}, {3, true}, {4, true}, // 5th person fills the room
+		{5, false}, {6, false}, // 6th and beyond refused
+	} {
+		admit := c.existing+1 <= meshMaxParticipants()
+		if admit != c.admit {
+			t.Errorf("existing=%d admit=%v want %v", c.existing, admit, c.admit)
+		}
+	}
+}

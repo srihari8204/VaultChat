@@ -1,6 +1,9 @@
 package realtime
 
 import (
+	"os"
+	"strconv"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/zishang520/socket.io/v2/socket"
 
@@ -302,9 +305,27 @@ func (h *Hub) registerSignalHandlers(s *socket.Socket) {
 		var existing []string
 		if ClusterEnabled() {
 			existing = clusterCallRoster(chatID, d.uid)
-			clusterCallJoin(chatID, d.uid)
 		} else {
 			existing = h.callRoster(room, d.uid)
+		}
+		// P6.1: enforce the mesh cap SERVER-side. This is a full mesh — each
+		// participant holds N-1 RTCPeerConnections and uploads N-1 encoded
+		// streams, so cost grows quadratically across the call and linearly
+		// per phone. Past ~5-6 the uplink/CPU on mid-tier mobile collapses and
+		// the call degrades for EVERYONE already in it, not just the joiner.
+		// Refusing the join is strictly better than admitting them and melting
+		// the room. The client shows a "call is full" notice (call_full).
+		// Raising this is an SFU decision, not a config decision — see
+		// SCALEOUT.md; MESH_MAX_PARTICIPANTS exists to lower it, or to raise
+		// it deliberately once an SFU terminates the media instead of peers.
+		if max := meshMaxParticipants(); len(existing)+1 > max {
+			s.Emit("call_full", map[string]any{
+				"chatId": chatID, "max": max, "reason": "mesh_capacity",
+			})
+			return
+		}
+		if ClusterEnabled() {
+			clusterCallJoin(chatID, d.uid)
 		}
 		s.Join(room)
 		s.Emit("call_roster", map[string]any{"chatId": chatID, "peers": existing})
@@ -322,6 +343,17 @@ func (h *Hub) registerSignalHandlers(s *socket.Socket) {
 			clusterCallLeave(chatID, d.uid)
 		}
 	})
+}
+
+// meshMaxParticipants is the hard ceiling on a full-mesh group call,
+// including the joiner. Default 5: at 5 participants each phone already runs
+// 4 peer connections and 4 outbound encodes. MESH_MAX_PARTICIPANTS overrides
+// it; values <2 are ignored (a call needs at least two people).
+func meshMaxParticipants() int {
+	if v, err := strconv.Atoi(os.Getenv("MESH_MAX_PARTICIPANTS")); err == nil && v >= 2 {
+		return v
+	}
+	return 5
 }
 
 // callRoster returns the distinct uids already in a call room (excl. me).

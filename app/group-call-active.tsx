@@ -140,15 +140,30 @@ export default function GroupCallActive() {
           else { (pendingIce.current[from] = pendingIce.current[from] || []).push(cand); }
         };
 
+        // P6.1: the server refuses a join that would push a full-mesh call
+        // past its capacity (each extra participant costs EVERY phone another
+        // peer connection + outbound encode). Surface it and leave, rather
+        // than sitting on a call screen that never receives a roster.
+        const onFull = ({ chatId: cid, max }: any) => {
+          if (cid !== chatId) return;
+          Alert.alert(
+            'Call is full',
+            `Group calls support up to ${max ?? 5} people on this connection. Ask someone to leave, then try again.`,
+            [{ text: 'OK', onPress: () => router.back() }],
+          );
+        };
+
         s.on('call_roster', onRoster);
         s.on('call_peer_joined', onJoined);
         s.on('call_peer_left', onLeft);
+        s.on('call_full', onFull);
         s.on('webrtc_offer', onOffer);
         s.on('webrtc_answer', onAnswer);
         s.on('webrtc_ice', onIce);
         offsRef.current = [
           () => s.off('call_roster', onRoster), () => s.off('call_peer_joined', onJoined),
-          () => s.off('call_peer_left', onLeft), () => s.off('webrtc_offer', onOffer),
+          () => s.off('call_peer_left', onLeft), () => s.off('call_full', onFull),
+          () => s.off('webrtc_offer', onOffer),
           () => s.off('webrtc_answer', onAnswer), () => s.off('webrtc_ice', onIce),
         ];
         s.emit('join_call', { chatId });
@@ -165,7 +180,7 @@ export default function GroupCallActive() {
       Object.keys(pcsRef.current).forEach(uid => { try { pcsRef.current[uid].close(); } catch {} });
       try { localStreamRef.current?.getTracks().forEach((t: any) => t.stop()); } catch {}
     };
-  }, [chatId, isVideo, ensurePeer, closePeer]);
+  }, [chatId, isVideo, ensurePeer, closePeer, router]);
 
   const toggleMute = () => {
     const next = !muted; setMuted(next);
