@@ -1226,11 +1226,13 @@ func authLookup(w http.ResponseWriter, r *http.Request) {
 
 	el, err := vault.EmailLookup(email)
 	if err != nil {
+		log.Printf("[auth/lookup] %v", err) // e.g. VAULTCHAT_LOOKUP_PEPPER not set
 		authEnvErr(w, 500, "server_error", "Lookup failed")
 		return
 	}
 	pl, err := vault.PhoneLookup(phone)
 	if err != nil {
+		log.Printf("[auth/lookup] %v", err)
 		authEnvErr(w, 500, "server_error", "Lookup failed")
 		return
 	}
@@ -1239,6 +1241,7 @@ func authLookup(w http.ResponseWriter, r *http.Request) {
 	     WHERE (email_lookup = $1 OR phone_lookup = $2) AND is_deleted = FALSE LIMIT 2`,
 		el, pl)
 	if err != nil {
+		log.Printf("[auth/lookup] %v", err) // e.g. column email_lookup does not exist → run migrations
 		authEnvErr(w, 500, "server_error", "Lookup failed")
 		return
 	}

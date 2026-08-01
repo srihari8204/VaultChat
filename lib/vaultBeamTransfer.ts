@@ -27,6 +27,20 @@ const URL_BATCH = 64;   // matches routes/vaultbeam.js MAX_URLS
 const PARALLEL  = 4;    // concurrent block ops (matches the native I/O pool width)
 const POLL_MS   = 1500; // recipient poll cadence while the sender is still uploading
 
+// Battery awareness (UITE §14): on a low, non-charging battery (or OS low-power
+// mode) halve the concurrent block ops — fewer radio bursts + less CPU. Sampled
+// once per transfer start (ponytail: per-transfer sample, continuous monitoring
+// if users report drain mid-multi-GB sends).
+async function batteryParallelism(): Promise<number> {
+  try {
+    const B = require('expo-battery');
+    const s = await B.getPowerStateAsync();
+    const charging = s?.batteryState === B.BatteryState?.CHARGING || s?.batteryState === B.BatteryState?.FULL;
+    if (s?.lowPowerMode || (typeof s?.batteryLevel === 'number' && s.batteryLevel >= 0 && s.batteryLevel < 0.2 && !charging)) return 2;
+  } catch {}
+  return PARALLEL;
+}
+
 export interface TransferProgress { done: number; total: number; bytes: number; totalBytes: number }
 type ProgressCb = (p: TransferProgress) => void;
 
@@ -65,6 +79,7 @@ export async function sendTransfer(opts: {
   if (opts.totalBytes <= 0 || opts.totalBytes > MAX_BYTES) throw new Error('size out of range (0–12 GB)');
 
   let ns = await loadState(opts.linkType);                    // live throughput brain, seeded from history
+  const par = await batteryParallelism();                     // §14: 2 on low battery, else 4
   const st = await relayState(opts.transferId);               // resume: what does the server already hold?
   let plan: SegmentPlan = (st.plan && deserializePlan(st.plan)) || newPlan(opts.totalBytes);
   const have = new Set(uploadedBlocks(st.uploadedMask, st.blockCount));
@@ -76,7 +91,7 @@ export async function sendTransfer(opts: {
       const batch = indices.slice(i, i + URL_BATCH);
       const { urls } = await relayBlockUrls(opts.transferId, batch, 'put');
       const okBlocks: number[] = [];
-      await mapPool(urls, PARALLEL, async ({ blockIndex, url }) => {
+      await mapPool(urls, par, async ({ blockIndex, url }) => {
         const loc = locateBlock(plan, blockIndex);
         if (!loc) return;                                      // geometry not planned — skip (shouldn't happen)
         const t0 = Date.now();
@@ -123,6 +138,7 @@ export async function receiveTransfer(opts: {
   if (!isNativeStreamAvailable()) throw new Error('native stream unavailable');
 
   await prealloc(opts.dstPath, opts.totalBytes);
+  const par = await batteryParallelism();                     // §14: 2 on low battery, else 4
   const got = new Set<number>();
   let downloadedBytes = 0;
   let plan: SegmentPlan | null = null;
@@ -140,7 +156,7 @@ export async function receiveTransfer(opts: {
       if (opts.signal?.aborted) throw new Error('aborted');
       const batch = avail.slice(i, i + URL_BATCH);
       const { urls } = await relayBlockUrls(opts.transferId, batch, 'get');
-      await mapPool(urls, PARALLEL, async ({ blockIndex, url }) => {
+      await mapPool(urls, par, async ({ blockIndex, url }) => {
         const loc = locateBlock(p, blockIndex)!;
         const t0 = Date.now();
         await downloadBlock({

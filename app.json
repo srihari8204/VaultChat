@@ -2,7 +2,7 @@
   "expo": {
     "name": "VaultChat",
     "slug": "VaultChat",
-    "version": "1.1.1",
+    "version": "1.1.3",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "vaultchat",
@@ -62,7 +62,7 @@
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.NFC"
       ],
-      "versionCode": 10
+      "versionCode": 12
     },
     "web": {
       "bundler": "metro",

@@ -353,6 +353,7 @@ function RootLayout() {
         <Stack.Screen name="meeting-scheduler" />
         <Stack.Screen name="decentralized-id" />
         <Stack.Screen name="mini-apps" />
+        <Stack.Screen name="finance" options={{ headerShown: false }} />
         <Stack.Screen name="email-bridge" />
         <Stack.Screen name="creator-channels" />
         <Stack.Screen name="group-admin" />

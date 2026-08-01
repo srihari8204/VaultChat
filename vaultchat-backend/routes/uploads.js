@@ -308,7 +308,32 @@ router.get('/:id', jwtUtil.requireAuth, async (req, res) => {
           `SELECT 1 FROM users WHERE photo_url = $1 LIMIT 1`,
           [String(att.id)]
         );
-        if (!asPhoto.rows[0]) return res.status(403).json({ error: 'Forbidden' });
+        if (!asPhoto.rows[0]) {
+          // Story media: viewable when the attachment backs an UNEXPIRED story
+          // whose author shares an active chat with the caller and neither has
+          // blocked the other — the exact GET /stories/feed visibility rule.
+          // Stories reference attachments directly (not via messages.meta), so
+          // without this clause every OTHER user's status media 403'd.
+          const asStory = await db.query(
+            `SELECT 1 FROM stories s
+              WHERE s.attachment_id = $1
+                AND s.expires_at > NOW()
+                AND EXISTS (
+                  SELECT 1 FROM chat_members cm_me
+                   JOIN chat_members cm_them ON cm_them.chat_id = cm_me.chat_id
+                   WHERE cm_me.user_id   = $2 AND cm_me.left_at   IS NULL
+                     AND cm_them.user_id = s.user_id AND cm_them.left_at IS NULL
+                )
+                AND NOT EXISTS (
+                  SELECT 1 FROM user_blocks ub
+                   WHERE (ub.blocker_id = s.user_id AND ub.blocked_id = $2)
+                      OR (ub.blocker_id = $2        AND ub.blocked_id = s.user_id)
+                )
+              LIMIT 1`,
+            [String(att.id), req.user.id]
+          );
+          if (!asStory.rows[0]) return res.status(403).json({ error: 'Forbidden' });
+        }
       }
 
       // Record delivery (a recipient is fetching the bytes) so the retention

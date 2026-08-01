@@ -24,10 +24,9 @@ import {
 const MINI_APPS_MAIN = [
   { id: 'vaultlens',   icon: '\u2728', name: 'VaultLens', route: '/vaultlens', gradient: ['#9D6FD0', '#EC4899'] as [string, string] },
   { id: 'navigate',    icon: '\uD83E\uDDED', name: 'Navigate', route: '/navigate', gradient: ['#4A9FFF', '#1D4ED8'] as [string, string] },
-  { id: 'family',      icon: '\uD83D\uDC6A', name: 'Family Circle', route: '/family', gradient: ['#22C55E', '#059669'] as [string, string] },
-  { id: 'sos',         icon: '\uD83C\uDD98', name: 'SOS',      route: '/emergency-sos', gradient: ['#DC2626', '#B91C1C'] as [string, string] },
-  { id: 'interest',    icon: '\uD83D\uDCC8', name: 'Interest Calculator', route: '/interest-calculator', gradient: ['#075E54', '#25D366'] as [string, string] },
-  { id: 'shopbook',    icon: '\uD83D\uDECD\uFE0F', name: 'Shop Book', route: '/shop-book', gradient: ['#0B7A3B', '#16A34A'] as [string, string] },
+  // Family Space absorbs the old Family Circle + SOS tiles \u2014 one app, one hub.
+  { id: 'familyspace', icon: '\uD83D\uDC6A', name: 'Family Space', route: '/family', gradient: ['#7C3AED', '#2563EB'] as [string, string] },
+  { id: 'finance',     icon: '\uD83D\uDCB0', name: 'Vault Finance', route: '/finance', gradient: ['#6D3FA8', '#9D6FD0'] as [string, string] },
   { id: 'notes',       icon: '\uD83D\uDCDD', name: 'Notes',       route: '/encrypted-notes', gradient: ['#F59E0B', '#D97706'] as [string, string] },
   { id: 'scanner',     icon: '\uD83D\uDCC4', name: 'Scanner',     route: '/docscanner',     gradient: ['#4A9FFF', '#1D4ED8'] as [string, string] },
   { id: 'cloud',       icon: '\u2601\uFE0F', name: 'Cloud',       route: null,              gradient: ['#6B7280', '#4B5563'] as [string, string] },

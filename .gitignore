@@ -69,5 +69,3 @@ dist-export/
 
 # build logs (session artifacts)
 build_release*.log
-
-uploads-shared/
