@@ -12,7 +12,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet,
-  Alert, ActivityIndicator, RefreshControl, Switch, Platform, KeyboardAvoidingView,
+  Alert, ActivityIndicator, RefreshControl, Switch, Platform, KeyboardAvoidingView, Share,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
@@ -22,9 +22,11 @@ import { SHOP_CATEGORIES, categoryIcon, categoryLabel } from '../constants/shopC
 import {
   formatINR, formatDistance, shopOpenState, orderStatusLabel, orderProgress,
   nextOrderStatus, cartTotal, clientKey, ORDER_STEPS,
+  couponDiscount, couponLabel, starText, loyaltyTier,
   type CartItem, type OrderStatus, type ItemAvailability,
 } from '../utils/shopbook';
 import * as SB from '../services/shopBookService';
+import { listShopLists, saveShopList, deleteShopList, type ShopList } from '../db/shopLists';
 
 // ── palette (green + navy, from the SHOP BOOK poster) ──────────────
 const C = {
@@ -93,6 +95,19 @@ function CustomerApp({ me }: { me: { id: string; name: string } | null }) {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [trackId, setTrackId] = useState<string | null>(null);
   const [ledgerShop, setLedgerShop] = useState<SB.Shop | null>(null);
+  // Phase 2 — favorites shared across screens
+  const [favIds, setFavIds] = useState<Set<string>>(new Set());
+
+  const loadFavs = useCallback(async () => {
+    try { const list = await SB.favorites(); setFavIds(new Set(list.map((sh) => sh.id))); } catch {}
+  }, []);
+  useEffect(() => { loadFavs(); }, [loadFavs]);
+
+  const toggleFav = useCallback(async (shopId: string) => {
+    // optimistic
+    setFavIds((prev) => { const n = new Set(prev); n.has(shopId) ? n.delete(shopId) : n.add(shopId); return n; });
+    try { await SB.toggleFavorite(shopId); } catch { loadFavs(); }
+  }, [loadFavs]);
 
   const openTrack = (id: string) => { setTrackId(id); };
 
@@ -100,7 +115,7 @@ function CustomerApp({ me }: { me: { id: string; name: string } | null }) {
     <>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         {tab === 'shops' && !selShop && !ledgerShop && (
-          <FindShops onOpen={(sh) => { setSelShop(sh); }} />
+          <FindShops onOpen={(sh) => { setSelShop(sh); }} favIds={favIds} onToggleFav={toggleFav} />
         )}
         {tab === 'shops' && selShop && !ledgerShop && (
           <ShopFlow
@@ -108,6 +123,7 @@ function CustomerApp({ me }: { me: { id: string; name: string } | null }) {
             onBack={() => setSelShop(null)}
             onPlaced={(id) => { setSelShop(null); setCart([]); setTab('orders'); openTrack(id); }}
             onLedger={() => setLedgerShop(selShop)}
+            isFav={favIds.has(selShop.id)} onToggleFav={() => toggleFav(selShop.id)}
           />
         )}
         {tab === 'shops' && ledgerShop && (
@@ -136,9 +152,12 @@ function CustomerApp({ me }: { me: { id: string; name: string } | null }) {
   );
 }
 
-function FindShops({ onOpen }: { onOpen: (s: SB.Shop) => void }) {
+function FindShops({ onOpen, favIds, onToggleFav }: {
+  onOpen: (s: SB.Shop) => void; favIds: Set<string>; onToggleFav: (id: string) => void;
+}) {
   const [loading, setLoading] = useState(true);
   const [shops, setShops] = useState<SB.Shop[]>([]);
+  const [favShops, setFavShops] = useState<SB.Shop[]>([]);
   const [cat, setCat] = useState('all');
   const [q, setQ] = useState('');
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -164,6 +183,7 @@ function FindShops({ onOpen }: { onOpen: (s: SB.Shop) => void }) {
       }
     } catch {}
     load('all', c);
+    try { setFavShops(await SB.favorites()); } catch {}
   })(); }, [load]);
 
   const filtered = useMemo(
@@ -183,6 +203,22 @@ function FindShops({ onOpen }: { onOpen: (s: SB.Shop) => void }) {
         <Text style={s.hint}>📍 Location off — showing recent shops. Enable location for distance.</Text>
       )}
 
+      {/* favorites strip */}
+      {favShops.length > 0 && !q.trim() && (
+        <>
+          <Text style={s.sectionLabel}>⭐ Favorites</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 4 }}>
+            {favShops.map((sh) => (
+              <TouchableOpacity key={sh.id} style={s.favCard} onPress={() => onOpen(sh)}>
+                <Text style={{ fontSize: 22 }}>{categoryIcon(sh.category)}</Text>
+                <Text style={s.favName} numberOfLines={1}>{sh.name}</Text>
+                {sh.ratingCount > 0 && <Text style={s.favRating}>{starText(sh.rating)} {sh.rating}</Text>}
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </>
+      )}
+
       {/* category chips */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginVertical: 6 }}>
         <Chip label="All" icon="🏬" active={cat === 'all'} onPress={() => { setCat('all'); load('all', coords); }} />
@@ -198,33 +234,56 @@ function FindShops({ onOpen }: { onOpen: (s: SB.Shop) => void }) {
         <Empty icon="storefront-outline" text="No shops found nearby yet." />
       )}
 
-      {filtered.map((sh) => {
-        const st = shopOpenState(sh.openTime, sh.closeTime, sh.status);
-        return (
-          <TouchableOpacity key={sh.id} style={s.card} onPress={() => onOpen(sh)} activeOpacity={0.8}>
-            <View style={s.shopIcon}><Text style={{ fontSize: 22 }}>{categoryIcon(sh.category)}</Text></View>
-            <View style={{ flex: 1 }}>
-              <Text style={s.cardTitle}>{sh.name}</Text>
-              <Text style={s.cardSub}>{categoryLabel(sh.category)}{sh.distanceKm != null ? ` · ${formatDistance(sh.distanceKm)}` : ''}</Text>
-              <View style={[s.badge, st.tone === 'open' ? s.badgeOpen : st.tone === 'soon' ? s.badgeSoon : s.badgeClosed]}>
-                <Text style={[s.badgeText, st.tone === 'closed' && { color: C.danger }]}>{st.label}</Text>
-              </View>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={C.sub} />
-          </TouchableOpacity>
-        );
-      })}
+      {filtered.map((sh) => (
+        <ShopCard key={sh.id} shop={sh} onOpen={() => onOpen(sh)}
+          isFav={favIds.has(sh.id)} onToggleFav={() => onToggleFav(sh.id)} />
+      ))}
     </ScrollView>
   );
 }
 
+function ShopCard({ shop, onOpen, isFav, onToggleFav }: {
+  shop: SB.Shop; onOpen: () => void; isFav: boolean; onToggleFav: () => void;
+}) {
+  const st = shopOpenState(shop.openTime, shop.closeTime, shop.status);
+  return (
+    <TouchableOpacity style={s.card} onPress={onOpen} activeOpacity={0.8}>
+      <View style={s.shopIcon}><Text style={{ fontSize: 22 }}>{categoryIcon(shop.category)}</Text></View>
+      <View style={{ flex: 1 }}>
+        <Text style={s.cardTitle}>{shop.name}</Text>
+        <Text style={s.cardSub}>
+          {categoryLabel(shop.category)}{shop.distanceKm != null ? ` · ${formatDistance(shop.distanceKm)}` : ''}
+          {shop.ratingCount > 0 ? `  ·  ⭐ ${shop.rating} (${shop.ratingCount})` : ''}
+        </Text>
+        <View style={{ flexDirection: 'row', gap: 6, marginTop: 6, alignItems: 'center' }}>
+          <View style={[s.badge, { marginTop: 0 }, st.tone === 'open' ? s.badgeOpen : st.tone === 'soon' ? s.badgeSoon : s.badgeClosed]}>
+            <Text style={[s.badgeText, st.tone === 'closed' && { color: C.danger }]}>{st.label}</Text>
+          </View>
+          {shop.delivery && <View style={s.deliveryBadge}><Text style={s.deliveryBadgeText}>🛵 Delivery</Text></View>}
+        </View>
+      </View>
+      <TouchableOpacity onPress={onToggleFav} hitSlop={10} style={{ padding: 4 }}>
+        <Ionicons name={isFav ? 'heart' : 'heart-outline'} size={22} color={isFav ? C.danger : C.sub} />
+      </TouchableOpacity>
+    </TouchableOpacity>
+  );
+}
+
 // Shop details → catalog → cart, all in one drill-down.
-function ShopFlow({ shop, cart, setCart, onBack, onPlaced, onLedger }: {
+function ShopFlow({ shop, cart, setCart, onBack, onPlaced, onLedger, isFav, onToggleFav }: {
   shop: SB.Shop; cart: CartItem[]; setCart: (c: CartItem[]) => void;
   onBack: () => void; onPlaced: (orderId: string) => void; onLedger: () => void;
+  isFav: boolean; onToggleFav: () => void;
 }) {
   const [view, setView] = useState<'details' | 'catalog' | 'cart'>('details');
+  const [coupons, setCoupons] = useState<SB.Coupon[]>([]);
+  const [ratings, setRatings] = useState<SB.Rating[]>([]);
   const st = shopOpenState(shop.openTime, shop.closeTime, shop.status);
+
+  useEffect(() => { (async () => {
+    try { setCoupons(await SB.shopCoupons(shop.id)); } catch {}
+    try { setRatings(await SB.shopRatings(shop.id)); } catch {}
+  })(); }, [shop.id]);
 
   return (
     <>
@@ -238,12 +297,35 @@ function ShopFlow({ shop, cart, setCart, onBack, onPlaced, onLedger }: {
             <View style={s.shopIcon}><Text style={{ fontSize: 26 }}>{categoryIcon(shop.category)}</Text></View>
             <View style={{ flex: 1 }}>
               <Text style={s.cardTitle}>{shop.name}</Text>
-              <Text style={s.cardSub}>{categoryLabel(shop.category)}{shop.distanceKm != null ? ` · ${formatDistance(shop.distanceKm)}` : ''}</Text>
-              <View style={[s.badge, st.tone === 'open' ? s.badgeOpen : st.tone === 'soon' ? s.badgeSoon : s.badgeClosed]}>
-                <Text style={[s.badgeText, st.tone === 'closed' && { color: C.danger }]}>{st.label}</Text>
+              <Text style={s.cardSub}>
+                {categoryLabel(shop.category)}{shop.distanceKm != null ? ` · ${formatDistance(shop.distanceKm)}` : ''}
+                {shop.ratingCount > 0 ? `  ·  ⭐ ${shop.rating} (${shop.ratingCount})` : ''}
+              </Text>
+              <View style={{ flexDirection: 'row', gap: 6, marginTop: 6 }}>
+                <View style={[s.badge, { marginTop: 0 }, st.tone === 'open' ? s.badgeOpen : st.tone === 'soon' ? s.badgeSoon : s.badgeClosed]}>
+                  <Text style={[s.badgeText, st.tone === 'closed' && { color: C.danger }]}>{st.label}</Text>
+                </View>
+                {shop.delivery && <View style={s.deliveryBadge}><Text style={s.deliveryBadgeText}>🛵 Delivery {shop.deliveryFee > 0 ? formatINR(shop.deliveryFee) : 'Free'}</Text></View>}
               </View>
             </View>
+            <TouchableOpacity onPress={onToggleFav} hitSlop={10} style={{ padding: 4 }}>
+              <Ionicons name={isFav ? 'heart' : 'heart-outline'} size={24} color={isFav ? C.danger : C.sub} />
+            </TouchableOpacity>
           </View>
+
+          {/* Offers */}
+          {coupons.length > 0 && (
+            <>
+              <Text style={s.sectionLabel}>🏷️ Offers</Text>
+              {coupons.map((c2) => (
+                <View key={c2.code} style={s.offerCard}>
+                  <View style={s.couponCode}><Text style={s.couponCodeText}>{c2.code}</Text></View>
+                  <Text style={s.offerText}>{couponLabel(c2)}</Text>
+                </View>
+              ))}
+            </>
+          )}
+
           <InfoRow icon="time-outline" label="Timings" value={`${shop.openTime} – ${shop.closeTime}`} />
           {!!shop.address && <InfoRow icon="location-outline" label="Address" value={shop.address} />}
           {!!shop.phone && <InfoRow icon="call-outline" label="Phone" value={shop.phone} />}
@@ -258,13 +340,29 @@ function ShopFlow({ shop, cart, setCart, onBack, onPlaced, onLedger }: {
             <Ionicons name="book-outline" size={18} color={C.green} />
             <Text style={s.outlineBtnText}>My Ledger with this shop</Text>
           </TouchableOpacity>
+
+          {/* Reviews */}
+          {ratings.length > 0 && (
+            <>
+              <Text style={s.sectionLabel}>Reviews</Text>
+              {ratings.slice(0, 5).map((rt, i) => (
+                <View key={i} style={s.card}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.stars}>{starText(rt.stars)}</Text>
+                    {!!rt.review && <Text style={s.cardSub}>{rt.review}</Text>}
+                    <Text style={s.reviewName}>— {rt.customerName || 'Customer'}</Text>
+                  </View>
+                </View>
+              ))}
+            </>
+          )}
         </ScrollView>
       )}
       {view === 'catalog' && (
         <Catalog shop={shop} cart={cart} setCart={setCart} onCart={() => setView('cart')} />
       )}
       {view === 'cart' && (
-        <CartView shop={shop} cart={cart} setCart={setCart} onPlaced={onPlaced} />
+        <CartView shop={shop} cart={cart} setCart={setCart} onPlaced={onPlaced} coupons={coupons} />
       )}
     </>
   );
@@ -353,15 +451,34 @@ function Catalog({ shop, cart, setCart, onCart }: {
   );
 }
 
-function CartView({ shop, cart, setCart, onPlaced }: {
-  shop: SB.Shop; cart: CartItem[]; setCart: (c: CartItem[]) => void; onPlaced: (id: string) => void;
+function CartView({ shop, cart, setCart, onPlaced, coupons }: {
+  shop: SB.Shop; cart: CartItem[]; setCart: (c: CartItem[]) => void;
+  onPlaced: (id: string) => void; coupons: SB.Coupon[];
 }) {
   const [note, setNote] = useState('');
   const [placing, setPlacing] = useState(false);
+  const [couponInput, setCouponInput] = useState('');
+  const [applied, setApplied] = useState<SB.Coupon | null>(null);
+  const [couponMsg, setCouponMsg] = useState('');
+  const [delivery, setDelivery] = useState(false);
+  const [address, setAddress] = useState('');
 
   const setQty = (key: string, d: number) =>
     setCart(cart.map((it) => it.key === key ? { ...it, qty: Math.max(1, it.qty + d) } : it));
   const remove = (key: string) => setCart(cart.filter((it) => it.key !== key));
+
+  const subtotal = cartTotal(cart);
+  const discount = couponDiscount(subtotal, applied);
+  const deliveryFee = delivery && shop.delivery ? shop.deliveryFee : 0;
+  const total = Math.max(0, subtotal - discount) + deliveryFee;
+
+  const applyCoupon = () => {
+    const code = couponInput.trim().toUpperCase();
+    const found = coupons.find((c2) => c2.code.toUpperCase() === code);
+    if (!found) { setCouponMsg('Invalid code'); setApplied(null); return; }
+    if (subtotal < found.minOrder) { setCouponMsg(`Min order ${formatINR(found.minOrder)}`); setApplied(null); return; }
+    setApplied(found); setCouponMsg(`Applied · ${couponLabel(found)}`);
+  };
 
   const place = async () => {
     if (cart.length === 0) return;
@@ -371,6 +488,7 @@ function CartView({ shop, cart, setCart, onPlaced }: {
         shop.id,
         cart.map((it) => ({ name: it.name, brand: it.brand, qty: it.qty, price: it.price, note: it.note })),
         note.trim(),
+        { couponCode: applied?.code, delivery: delivery && shop.delivery, address: address.trim() },
       );
       onPlaced(res.id);
     } catch (e: any) {
@@ -402,12 +520,39 @@ function CartView({ shop, cart, setCart, onPlaced }: {
 
       {cart.length > 0 && (
         <>
+          {/* Coupon */}
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+            <TextInput style={[s.input, { flex: 1, marginBottom: 0 }]} placeholder="Coupon code" placeholderTextColor={C.sub}
+              autoCapitalize="characters" value={couponInput} onChangeText={setCouponInput} />
+            <TouchableOpacity style={[s.outlineBtn, { marginTop: 0, paddingHorizontal: 18 }]} onPress={applyCoupon}>
+              <Text style={s.outlineBtnText}>Apply</Text>
+            </TouchableOpacity>
+          </View>
+          {!!couponMsg && <Text style={[s.hint, { color: applied ? C.green : C.danger }]}>{couponMsg}</Text>}
+
+          {/* Delivery */}
+          {shop.delivery && (
+            <>
+              <ToggleRow label={`Home delivery ${shop.deliveryFee > 0 ? `(${formatINR(shop.deliveryFee)})` : '(Free)'}`} value={delivery} onChange={setDelivery} />
+              {delivery && (
+                <TextInput style={s.input} placeholder="Delivery address" placeholderTextColor={C.sub}
+                  value={address} onChangeText={setAddress} />
+              )}
+            </>
+          )}
+
           <TextInput style={s.input} placeholder="Order note (e.g. deliver before 8 PM)" placeholderTextColor={C.sub}
             value={note} onChangeText={setNote} />
-          <View style={s.totalRow}>
-            <Text style={s.totalLabel}>Estimated total</Text>
-            <Text style={s.totalValue}>{formatINR(cartTotal(cart))}</Text>
+
+          {/* Totals */}
+          <View style={s.panel}>
+            <Row label="Subtotal" value={formatINR(subtotal)} />
+            {discount > 0 && <Row label={`Discount (${applied?.code})`} value={`− ${formatINR(discount)}`} tone={C.green} />}
+            {deliveryFee > 0 && <Row label="Delivery" value={formatINR(deliveryFee)} />}
+            <View style={{ height: 1, backgroundColor: C.border, marginVertical: 6 }} />
+            <Row label="Total" value={formatINR(total)} bold />
           </View>
+
           <TouchableOpacity style={[s.primaryBtn, placing && { opacity: 0.6 }]} disabled={placing} onPress={place}>
             {placing ? <ActivityIndicator color="#fff" /> : <>
               <Ionicons name="checkmark-circle" size={18} color="#fff" />
@@ -417,6 +562,15 @@ function CartView({ shop, cart, setCart, onPlaced }: {
         </>
       )}
     </ScrollView>
+  );
+}
+
+function Row({ label, value, tone, bold }: { label: string; value: string; tone?: string; bold?: boolean }) {
+  return (
+    <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 }}>
+      <Text style={[{ color: C.sub, fontSize: 14 }, bold && { color: C.text, fontWeight: '800', fontSize: 16 }]}>{label}</Text>
+      <Text style={[{ color: tone ?? C.text, fontSize: 14, fontWeight: '600' }, bold && { fontWeight: '800', fontSize: 16 }]}>{value}</Text>
+    </View>
   );
 }
 
@@ -452,6 +606,10 @@ function MyOrders({ onOpen }: { onOpen: (id: string) => void }) {
 function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }) {
   const [loading, setLoading] = useState(true);
   const [order, setOrder] = useState<SB.OrderDetail | null>(null);
+  const [stars, setStars] = useState(0);
+  const [review, setReview] = useState('');
+  const [busy, setBusy] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     try { setOrder(await SB.orderDetails(orderId)); } catch {} finally { setLoading(false); }
@@ -463,9 +621,38 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
     catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
   };
 
+  const submitRating = async () => {
+    if (stars < 1) { Alert.alert('Tap a star to rate'); return; }
+    setBusy(true);
+    try { await SB.rateOrder(orderId, stars, review.trim()); load(); }
+    catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
+    finally { setBusy(false); }
+  };
+
+  const repeat = async () => {
+    if (!order) return;
+    setBusy(true);
+    try {
+      await SB.placeOrder(order.shopId,
+        order.items.map((it) => ({ name: it.name, brand: it.brand, qty: it.qty, price: it.price, note: it.note })),
+        'Repeat order');
+      Alert.alert('Order placed', 'Your repeat order was sent to the shop.');
+    } catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
+    finally { setBusy(false); }
+  };
+
+  const share = async () => {
+    if (!order) return;
+    const lines = order.items.map((it) => `• ${it.name}${it.brand ? ` (${it.brand})` : ''} × ${it.qty}`);
+    await Share.share({
+      message: `🛍️ Shop Book order ${order.id.slice(0, 8).toUpperCase()}\n${lines.join('\n')}\nTotal: ${formatINR(order.total)}`,
+    }).catch(() => {});
+  };
+
   return (
     <>
-      <SubHeader title="Track Order" onBack={onBack} />
+      <SubHeader title="Track Order" onBack={onBack}
+        right={order ? { icon: 'share-social-outline', onPress: share } : undefined} />
       <ScrollView contentContainerStyle={s.body}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
         {loading && !order && <ActivityIndicator color={C.green} style={{ marginTop: 24 }} />}
@@ -508,10 +695,49 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
                 <Text style={s.price}>{it.price > 0 ? formatINR(it.price * it.qty) : '—'}</Text>
               </View>
             ))}
-            <View style={s.totalRow}>
-              <Text style={s.totalLabel}>Total</Text>
-              <Text style={s.totalValue}>{formatINR(order.total)}</Text>
+
+            <View style={s.panel}>
+              {order.discount > 0 && <Row label={`Discount (${order.couponCode})`} value={`− ${formatINR(order.discount)}`} tone={C.green} />}
+              {order.delivery && <Row label="Delivery" value={formatINR(order.deliveryFee)} />}
+              <Row label="Total" value={formatINR(order.total)} bold />
             </View>
+
+            {/* Repeat + Share */}
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TouchableOpacity style={[s.outlineBtn, { flex: 1 }]} disabled={busy} onPress={repeat}>
+                <Ionicons name="repeat" size={18} color={C.green} />
+                <Text style={s.outlineBtnText}>Repeat order</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[s.outlineBtn, { flex: 1 }]} onPress={share}>
+                <Ionicons name="share-social-outline" size={18} color={C.green} />
+                <Text style={s.outlineBtnText}>Share</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Rating */}
+            {order.status === 'completed' && (
+              order.rated ? (
+                <View style={[s.panel, { alignItems: 'center' }]}>
+                  <Text style={{ color: C.green, fontWeight: '700' }}>✓ Thanks for rating this order</Text>
+                </View>
+              ) : (
+                <View style={s.panel}>
+                  <Text style={s.panelTitle}>Rate this order</Text>
+                  <View style={{ flexDirection: 'row', gap: 6, marginVertical: 8 }}>
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <TouchableOpacity key={n} onPress={() => setStars(n)}>
+                        <Ionicons name={n <= stars ? 'star' : 'star-outline'} size={30} color={C.amber} />
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <TextInput style={s.input} placeholder="Write a review (optional)" placeholderTextColor={C.sub}
+                    value={review} onChangeText={setReview} />
+                  <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={submitRating}>
+                    <Text style={s.primaryBtnText}>Submit Rating</Text>
+                  </TouchableOpacity>
+                </View>
+              )
+            )}
           </>
         )}
       </ScrollView>
@@ -550,8 +776,36 @@ function CustomerLedgerView({ shop, onBack }: { shop: SB.Shop; onBack: () => voi
 }
 
 function CustomerProfile({ me }: { me: { id: string; name: string } | null }) {
+  const [loyalty, setLoyalty] = useState<SB.Loyalty | null>(null);
+  const [lists, setLists] = useState<ShopList[]>([]);
+  const [newName, setNewName] = useState('');
+  const [newItems, setNewItems] = useState('');
+  const [adding, setAdding] = useState(false);
+
+  const loadLists = useCallback(async () => {
+    if (!me) return;
+    try { setLists(await listShopLists(me.id)); } catch {}
+  }, [me]);
+
+  useEffect(() => { (async () => {
+    try { setLoyalty(await SB.loyalty()); } catch {}
+    loadLists();
+  })(); }, [loadLists]);
+
+  const addList = async () => {
+    if (!me || !newName.trim()) return;
+    await saveShopList({ user_id: me.id, name: newName.trim(), items: newItems.trim() });
+    setNewName(''); setNewItems(''); setAdding(false); loadLists();
+  };
+
+  const removeList = async (id: string) => { await deleteShopList(id); loadLists(); };
+
+  const shareList = async (l: ShopList) => {
+    await Share.share({ message: `🛒 ${l.name}\n${l.items}` }).catch(() => {});
+  };
+
   return (
-    <ScrollView contentContainerStyle={s.body}>
+    <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
       <View style={s.card}>
         <View style={s.shopIcon}><Ionicons name="person" size={22} color={C.green} /></View>
         <View style={{ flex: 1 }}>
@@ -559,11 +813,52 @@ function CustomerProfile({ me }: { me: { id: string; name: string } | null }) {
           <Text style={s.cardSub}>Customer · Always free</Text>
         </View>
       </View>
-      <InfoRow icon="pricetag-outline" label="Plan" value="Free forever" />
-      <InfoRow icon="notifications-outline" label="Notifications" value="Order & payment updates" />
-      <Text style={s.hint}>
-        Favorites, repeat order and shopping lists arrive in the next update. Everything is text-based for speed.
-      </Text>
+
+      {/* Loyalty */}
+      <View style={s.loyaltyCard}>
+        <View style={{ flex: 1 }}>
+          <Text style={s.loyaltyPoints}>{loyalty?.points ?? 0} pts</Text>
+          <Text style={s.loyaltyTier}>{loyaltyTier(loyalty?.points ?? 0)} member</Text>
+        </View>
+        <View style={{ alignItems: 'flex-end' }}>
+          <Text style={s.loyaltySub}>{loyalty?.completedOrders ?? 0} orders</Text>
+          <Text style={s.loyaltySub}>Spent {formatINR(loyalty?.totalSpent ?? 0)}</Text>
+        </View>
+      </View>
+      <Text style={s.hint}>Earn 1 point for every ₹100 spent on completed orders.</Text>
+
+      {/* Shopping lists */}
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
+        <Text style={s.sectionLabel}>🛒 Shopping Lists</Text>
+        <TouchableOpacity onPress={() => setAdding((v) => !v)}>
+          <Ionicons name={adding ? 'close' : 'add-circle'} size={26} color={C.green} />
+        </TouchableOpacity>
+      </View>
+      {adding && (
+        <View style={s.panel}>
+          <TextInput style={s.input} placeholder="List name (e.g. Monthly groceries)" placeholderTextColor={C.sub}
+            value={newName} onChangeText={setNewName} />
+          <TextInput style={[s.input, { height: 90, textAlignVertical: 'top' }]} multiline
+            placeholder={'Items, one per line:\nAtta 5kg\nSugar 1kg\nOil 1L'} placeholderTextColor={C.sub}
+            value={newItems} onChangeText={setNewItems} />
+          <TouchableOpacity style={s.primaryBtn} onPress={addList}><Text style={s.primaryBtnText}>Save List</Text></TouchableOpacity>
+        </View>
+      )}
+      {lists.length === 0 && !adding && <Empty icon="list-outline" text="No saved lists yet." />}
+      {lists.map((l) => (
+        <View key={l.id} style={s.card}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.cardTitle}>{l.name}</Text>
+            <Text style={s.cardSub} numberOfLines={2}>{l.items.split('\n').filter(Boolean).join(' · ') || 'Empty'}</Text>
+          </View>
+          <TouchableOpacity onPress={() => shareList(l)} hitSlop={8} style={{ padding: 4 }}>
+            <Ionicons name="share-social-outline" size={20} color={C.green} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => removeList(l.id)} hitSlop={8} style={{ padding: 4 }}>
+            <Ionicons name="trash-outline" size={20} color={C.danger} />
+          </TouchableOpacity>
+        </View>
+      ))}
     </ScrollView>
   );
 }
@@ -576,6 +871,7 @@ function OwnerApp({ me }: { me: { id: string; name: string } | null }) {
   const [loading, setLoading] = useState(true);
   const [shop, setShop] = useState<SB.Shop | null>(null);
   const [settings, setSettings] = useState(false);
+  const [sub, setSub] = useState<'coupons' | 'suppliers' | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -595,10 +891,16 @@ function OwnerApp({ me }: { me: { id: string; name: string } | null }) {
     );
   }
 
+  if (sub === 'coupons') return <OwnerCoupons onBack={() => setSub(null)} />;
+  if (sub === 'suppliers') return <OwnerSuppliers onBack={() => setSub(null)} />;
+
   return (
     <>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        {tab === 'dashboard' && <OwnerDashboard shop={shop} onSettings={() => setSettings(true)} />}
+        {tab === 'dashboard' && (
+          <OwnerDashboard shop={shop} onSettings={() => setSettings(true)}
+            onCoupons={() => setSub('coupons')} onSuppliers={() => setSub('suppliers')} />
+        )}
         {tab === 'orders' && <OwnerOrders />}
         {tab === 'products' && <OwnerProducts />}
         {tab === 'khata' && <OwnerKhata />}
@@ -617,7 +919,9 @@ function OwnerApp({ me }: { me: { id: string; name: string } | null }) {
   );
 }
 
-function OwnerDashboard({ shop, onSettings }: { shop: SB.Shop; onSettings: () => void }) {
+function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers }: {
+  shop: SB.Shop; onSettings: () => void; onCoupons: () => void; onSuppliers: () => void;
+}) {
   const [loading, setLoading] = useState(true);
   const [d, setD] = useState<SB.Dashboard | null>(null);
   const load = useCallback(async () => {
@@ -634,6 +938,10 @@ function OwnerDashboard({ shop, onSettings }: { shop: SB.Shop; onSettings: () =>
         <View style={s.shopIcon}><Text style={{ fontSize: 22 }}>{categoryIcon(shop.category)}</Text></View>
         <View style={{ flex: 1 }}>
           <Text style={s.cardTitle}>{shop.name}</Text>
+          <Text style={s.cardSub}>
+            {shop.ratingCount > 0 ? `⭐ ${shop.rating} (${shop.ratingCount})` : 'No ratings yet'}
+            {shop.delivery ? '  ·  🛵 Delivery on' : ''}
+          </Text>
           <View style={[s.badge, st.tone === 'open' ? s.badgeOpen : st.tone === 'soon' ? s.badgeSoon : s.badgeClosed]}>
             <Text style={[s.badgeText, st.tone === 'closed' && { color: C.danger }]}>{st.label}</Text>
           </View>
@@ -652,7 +960,162 @@ function OwnerDashboard({ shop, onSettings }: { shop: SB.Shop; onSettings: () =>
           <Text style={{ color: C.amber, fontWeight: '700' }}>⚠️ {d?.lowStock} product(s) out of stock</Text>
         </View>
       )}
+
+      {/* Phase 2 quick links */}
+      <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
+        <TouchableOpacity style={s.linkCard} onPress={onCoupons}>
+          <Text style={{ fontSize: 24 }}>🏷️</Text>
+          <Text style={s.linkCardText}>Offers & Coupons</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={s.linkCard} onPress={onSuppliers}>
+          <Text style={{ fontSize: 24 }}>🚚</Text>
+          <Text style={s.linkCardText}>Suppliers</Text>
+        </TouchableOpacity>
+      </View>
     </ScrollView>
+  );
+}
+
+function OwnerCoupons({ onBack }: { onBack: () => void }) {
+  const [loading, setLoading] = useState(true);
+  const [coupons, setCoupons] = useState<SB.Coupon[]>([]);
+  const [code, setCode] = useState('');
+  const [kind, setKind] = useState<'percent' | 'flat'>('percent');
+  const [value, setValue] = useState('');
+  const [minOrder, setMinOrder] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setCoupons(await SB.ownerCoupons()); } catch {} finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const add = async () => {
+    if (!code.trim() || num(value) <= 0) { Alert.alert('Enter code and value'); return; }
+    setBusy(true);
+    try {
+      await SB.saveCoupon({ code: code.trim(), kind, value: num(value), minOrder: num(minOrder), active: true });
+      setCode(''); setValue(''); setMinOrder(''); load();
+    } catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
+    finally { setBusy(false); }
+  };
+
+  const remove = async (id?: string) => { if (!id) return; await SB.deleteCoupon(id); load(); };
+
+  return (
+    <>
+      <SubHeader title="Offers & Coupons" onBack={onBack} />
+      <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled"
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
+        <View style={s.panel}>
+          <Text style={s.panelTitle}>New coupon</Text>
+          <TextInput style={s.input} placeholder="Code (e.g. SAVE10)" placeholderTextColor={C.sub}
+            autoCapitalize="characters" value={code} onChangeText={setCode} />
+          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
+            <TouchableOpacity style={[s.statusBtn, kind === 'percent' && s.statusBtnActive]} onPress={() => setKind('percent')}>
+              <Text style={[s.statusBtnText, kind === 'percent' && { color: '#fff' }]}>% Percent</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[s.statusBtn, kind === 'flat' && s.statusBtnActive]} onPress={() => setKind('flat')}>
+              <Text style={[s.statusBtnText, kind === 'flat' && { color: '#fff' }]}>₹ Flat</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <TextInput style={[s.input, { flex: 1 }]} placeholder={kind === 'percent' ? 'Percent off' : 'Rupees off'}
+              placeholderTextColor={C.sub} keyboardType="numeric" value={value} onChangeText={setValue} />
+            <TextInput style={[s.input, { flex: 1 }]} placeholder="Min order ₹" placeholderTextColor={C.sub}
+              keyboardType="numeric" value={minOrder} onChangeText={setMinOrder} />
+          </View>
+          <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={add}>
+            <Text style={s.primaryBtnText}>Add Coupon</Text>
+          </TouchableOpacity>
+        </View>
+
+        <Text style={s.sectionLabel}>Active coupons</Text>
+        {loading && <ActivityIndicator color={C.green} />}
+        {!loading && coupons.length === 0 && <Empty icon="pricetag-outline" text="No coupons yet." />}
+        {coupons.map((c2) => (
+          <View key={c2.id} style={s.card}>
+            <View style={s.couponCode}><Text style={s.couponCodeText}>{c2.code}</Text></View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.cardTitle}>{couponLabel(c2)}</Text>
+              <Text style={s.cardSub}>{c2.active ? 'Active' : 'Inactive'}</Text>
+            </View>
+            <TouchableOpacity onPress={() => remove(c2.id)} hitSlop={8} style={{ padding: 4 }}>
+              <Ionicons name="trash-outline" size={20} color={C.danger} />
+            </TouchableOpacity>
+          </View>
+        ))}
+      </ScrollView>
+    </>
+  );
+}
+
+function OwnerSuppliers({ onBack }: { onBack: () => void }) {
+  const [loading, setLoading] = useState(true);
+  const [suppliers, setSuppliers] = useState<SB.Supplier[]>([]);
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [items, setItems] = useState('');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setSuppliers(await SB.suppliers()); } catch {} finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const add = async () => {
+    if (!name.trim()) { Alert.alert('Enter supplier name'); return; }
+    setBusy(true);
+    try {
+      await SB.saveSupplier({ name: name.trim(), phone: phone.trim(), items: items.trim(), note: note.trim() });
+      setName(''); setPhone(''); setItems(''); setNote(''); load();
+    } catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
+    finally { setBusy(false); }
+  };
+
+  const remove = async (id?: string) => { if (!id) return; await SB.deleteSupplier(id); load(); };
+
+  return (
+    <>
+      <SubHeader title="Suppliers" onBack={onBack} />
+      <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled"
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
+        <View style={s.panel}>
+          <Text style={s.panelTitle}>New supplier</Text>
+          <TextInput style={s.input} placeholder="Supplier / vendor name" placeholderTextColor={C.sub}
+            value={name} onChangeText={setName} />
+          <TextInput style={s.input} placeholder="Phone" placeholderTextColor={C.sub}
+            keyboardType="phone-pad" value={phone} onChangeText={setPhone} />
+          <TextInput style={s.input} placeholder="Items supplied (e.g. Atta, Rice, Oil)" placeholderTextColor={C.sub}
+            value={items} onChangeText={setItems} />
+          <TextInput style={s.input} placeholder="Note (optional)" placeholderTextColor={C.sub}
+            value={note} onChangeText={setNote} />
+          <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={add}>
+            <Text style={s.primaryBtnText}>Add Supplier</Text>
+          </TouchableOpacity>
+        </View>
+
+        <Text style={s.sectionLabel}>My suppliers</Text>
+        {loading && <ActivityIndicator color={C.green} />}
+        {!loading && suppliers.length === 0 && <Empty icon="cube-outline" text="No suppliers yet." />}
+        {suppliers.map((sup) => (
+          <View key={sup.id} style={s.card}>
+            <View style={s.shopIcon}><Ionicons name="cube" size={20} color={C.green} /></View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.cardTitle}>{sup.name}</Text>
+              {!!sup.phone && <Text style={s.cardSub}>📞 {sup.phone}</Text>}
+              {!!sup.items && <Text style={s.cardSub}>{sup.items}</Text>}
+            </View>
+            <TouchableOpacity onPress={() => remove(sup.id)} hitSlop={8} style={{ padding: 4 }}>
+              <Ionicons name="trash-outline" size={20} color={C.danger} />
+            </TouchableOpacity>
+          </View>
+        ))}
+      </ScrollView>
+    </>
   );
 }
 
@@ -1001,6 +1464,8 @@ function ShopSettings({ shop, me, onSaved, onCancel }: {
   const [status, setStatus] = useState(shop?.status ?? 'open');
   const [pickup, setPickup] = useState(shop?.pickup ?? true);
   const [prep, setPrep] = useState(shop ? String(shop.prepMins) : '20');
+  const [delivery, setDelivery] = useState(shop?.delivery ?? false);
+  const [deliveryFee, setDeliveryFee] = useState(shop ? String(shop.deliveryFee) : '0');
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(
     shop?.lat != null && shop?.lng != null ? { lat: shop.lat, lng: shop.lng } : null);
   const [busy, setBusy] = useState(false);
@@ -1022,7 +1487,8 @@ function ShopSettings({ shop, me, onSaved, onCancel }: {
       await SB.saveShop({
         name: name.trim(), category, address: address.trim(), phone: phone.trim(),
         openTime: openTime.trim(), closeTime: closeTime.trim(), status,
-        pickup, prepMins: num(prep), lat: coords?.lat ?? null, lng: coords?.lng ?? null,
+        pickup, prepMins: num(prep), delivery, deliveryFee: num(deliveryFee),
+        lat: coords?.lat ?? null, lng: coords?.lng ?? null,
       });
       const fresh = await SB.myShop();
       if (fresh) onSaved(fresh);
@@ -1051,6 +1517,8 @@ function ShopSettings({ shop, me, onSaved, onCancel }: {
           </View>
           <Field label="Prep time (mins)" value={prep} onChange={setPrep} placeholder="20" keyboardType="numeric" />
           <ToggleRow label="Pickup available" value={pickup} onChange={setPickup} />
+          <ToggleRow label="Home delivery" value={delivery} onChange={setDelivery} />
+          {delivery && <Field label="Delivery fee (₹, 0 = free)" value={deliveryFee} onChange={setDeliveryFee} placeholder="0" keyboardType="numeric" />}
 
           <Text style={s.fieldLabel}>Shop status</Text>
           <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
@@ -1376,4 +1844,43 @@ const s = StyleSheet.create({
   },
   tab: { flex: 1, alignItems: 'center', gap: 2 },
   tabLabel: { fontSize: 11, color: C.sub },
+
+  // ── Phase 2 ────────────────────────────────────────
+  favCard: {
+    width: 120, backgroundColor: C.card, borderRadius: 12, padding: 12, marginRight: 10,
+    borderWidth: 1, borderColor: C.border, alignItems: 'center', gap: 4,
+  },
+  favName: { color: C.text, fontSize: 12.5, fontWeight: '700', textAlign: 'center' },
+  favRating: { color: C.amber, fontSize: 11 },
+
+  deliveryBadge: { backgroundColor: '#E0F2FE', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
+  deliveryBadgeText: { color: C.blue, fontSize: 11, fontWeight: '700' },
+
+  offerCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.greenSoft,
+    borderRadius: 12, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: '#BBF7D0',
+  },
+  offerText: { color: C.green, fontSize: 13.5, fontWeight: '700' },
+  couponCode: {
+    backgroundColor: C.green, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6,
+    borderStyle: 'dashed', borderWidth: 1, borderColor: '#166534',
+  },
+  couponCodeText: { color: '#fff', fontSize: 12.5, fontWeight: '800', letterSpacing: 1 },
+
+  stars: { color: C.amber, fontSize: 15, letterSpacing: 2 },
+  reviewName: { color: C.sub, fontSize: 12, marginTop: 4, fontStyle: 'italic' },
+
+  loyaltyCard: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: C.navy, borderRadius: 16,
+    padding: 18, marginTop: 10,
+  },
+  loyaltyPoints: { color: '#fff', fontSize: 28, fontWeight: '800' },
+  loyaltyTier: { color: '#93C5FD', fontSize: 13, fontWeight: '700', marginTop: 2 },
+  loyaltySub: { color: '#CBD5E1', fontSize: 12, marginTop: 2 },
+
+  linkCard: {
+    flex: 1, backgroundColor: C.card, borderRadius: 14, padding: 16, alignItems: 'center',
+    gap: 6, borderWidth: 1, borderColor: C.border,
+  },
+  linkCardText: { color: C.text, fontSize: 13, fontWeight: '700', textAlign: 'center' },
 });

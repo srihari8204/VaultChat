@@ -21,6 +21,11 @@ export interface Shop {
   pickup: boolean;
   prepMins: number;
   distanceKm?: number;
+  // Phase 2
+  delivery: boolean;
+  deliveryFee: number;
+  rating: number;       // 0–5, avg
+  ratingCount: number;
 }
 
 export interface Product {
@@ -64,6 +69,44 @@ export interface OrderDetail {
   note: string;
   createdAt: string;
   items: OrderItem[];
+  // Phase 2
+  couponCode: string;
+  discount: number;
+  delivery: boolean;
+  deliveryFee: number;
+  address: string;
+  rated: boolean;
+}
+
+// ── Phase 2 shapes ────────────────────────────────────────────────
+export interface Coupon {
+  id?: string;
+  code: string;
+  kind: 'percent' | 'flat';
+  value: number;
+  minOrder: number;
+  active?: boolean;
+}
+
+export interface Rating {
+  stars: number;
+  review: string;
+  customerName: string;
+  createdAt: string;
+}
+
+export interface Loyalty {
+  points: number;
+  completedOrders: number;
+  totalSpent: number;
+}
+
+export interface Supplier {
+  id?: string;
+  name: string;
+  phone: string;
+  items: string;
+  note: string;
 }
 
 export interface LedgerEntry {
@@ -115,10 +158,62 @@ export function shopProducts(id: string) {
 export interface PlaceOrderItem {
   name: string; brand: string; qty: number; price: number; note: string;
 }
-export function placeOrder(shopId: string, items: PlaceOrderItem[], note: string) {
-  return api<{ id: string; status: OrderStatus }>(`/shopbook/orders`, {
-    method: 'POST', json: { shopId, items, note },
+export interface PlaceOrderOpts {
+  couponCode?: string; delivery?: boolean; address?: string;
+}
+export function placeOrder(shopId: string, items: PlaceOrderItem[], note: string, opts: PlaceOrderOpts = {}) {
+  return api<{ id: string; status: OrderStatus; total: number; discount: number; deliveryFee: number }>(
+    `/shopbook/orders`,
+    { method: 'POST', json: { shopId, items, note, ...opts } },
+  );
+}
+
+// ── Phase 2: favorites ────────────────────────────────────────────
+export function favorites() {
+  return api<{ shops: Shop[] }>(`/shopbook/favorites`).then((r) => r.shops);
+}
+export function toggleFavorite(shopId: string) {
+  return api<{ favorite: boolean }>(`/shopbook/favorites`, { method: 'POST', json: { shopId } });
+}
+
+// ── Phase 2: coupons / offers ─────────────────────────────────────
+export function shopCoupons(shopId: string) {
+  return api<{ coupons: Coupon[] }>(`/shopbook/shops/${shopId}/coupons`).then((r) => r.coupons);
+}
+export function ownerCoupons() {
+  return api<{ coupons: Coupon[] }>(`/shopbook/my-shop/coupons`).then((r) => r.coupons);
+}
+export function saveCoupon(c: Coupon) {
+  return api<{ id: string }>(`/shopbook/my-shop/coupons`, { method: 'POST', json: c });
+}
+export function deleteCoupon(id: string) {
+  return api<{ ok: boolean }>(`/shopbook/my-shop/coupons/${id}`, { method: 'DELETE' });
+}
+
+// ── Phase 2: ratings ──────────────────────────────────────────────
+export function shopRatings(shopId: string) {
+  return api<{ ratings: Rating[] }>(`/shopbook/shops/${shopId}/ratings`).then((r) => r.ratings);
+}
+export function rateOrder(orderId: string, stars: number, review = '') {
+  return api<{ ok: boolean }>(`/shopbook/orders/${orderId}/rate`, {
+    method: 'POST', json: { stars, review },
   });
+}
+
+// ── Phase 2: loyalty ──────────────────────────────────────────────
+export function loyalty() {
+  return api<Loyalty>(`/shopbook/loyalty`);
+}
+
+// ── Phase 2: suppliers ────────────────────────────────────────────
+export function suppliers() {
+  return api<{ suppliers: Supplier[] }>(`/shopbook/my-shop/suppliers`).then((r) => r.suppliers);
+}
+export function saveSupplier(sup: Supplier) {
+  return api<{ id: string }>(`/shopbook/my-shop/suppliers`, { method: 'POST', json: sup });
+}
+export function deleteSupplier(id: string) {
+  return api<{ ok: boolean }>(`/shopbook/my-shop/suppliers/${id}`, { method: 'DELETE' });
 }
 
 export function myOrders() {

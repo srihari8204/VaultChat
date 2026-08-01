@@ -109,4 +109,32 @@ export function clientKey(): string {
   return `${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
 }
 
+// ── Phase 2 ───────────────────────────────────────────────────────
+export interface CouponLike { kind: 'percent' | 'flat'; value: number; minOrder: number }
+
+// Client-side preview of a coupon's discount (server re-validates on place).
+export function couponDiscount(subtotal: number, coupon?: CouponLike | null): number {
+  if (!coupon || subtotal < coupon.minOrder) return 0;
+  const d = coupon.kind === 'percent' ? (subtotal * coupon.value) / 100 : coupon.value;
+  return Math.round(Math.min(d, subtotal) * 100) / 100;
+}
+
+export function couponLabel(c: CouponLike & { code?: string }): string {
+  const off = c.kind === 'percent' ? `${c.value}% off` : `${formatINR(c.value)} off`;
+  const min = c.minOrder > 0 ? ` over ${formatINR(c.minOrder)}` : '';
+  return `${off}${min}`;
+}
+
+// ★★★★☆ for a 0–5 rating.
+export function starText(rating: number): string {
+  const full = Math.round(rating);
+  return '★★★★★'.slice(0, full) + '☆☆☆☆☆'.slice(0, 5 - full);
+}
+
+export function loyaltyTier(points: number): string {
+  if (points >= 500) return 'Gold';
+  if (points >= 150) return 'Silver';
+  return 'Bronze';
+}
+
 export default {};

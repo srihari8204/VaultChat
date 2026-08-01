@@ -31,6 +31,14 @@ func RegisterShopBook(mux *http.ServeMux) {
 	mux.HandleFunc("POST /shopbook/orders/{id}/item/{itemId}/decision", httpx.RequireAuth(sbCustomerDecision))
 	mux.HandleFunc("GET /shopbook/ledger/{shopId}", httpx.RequireAuth(sbCustomerLedger))
 
+	// Customer — Phase 2
+	mux.HandleFunc("GET /shopbook/favorites", httpx.RequireAuth(sbFavorites))
+	mux.HandleFunc("POST /shopbook/favorites", httpx.RequireAuth(sbToggleFavorite))
+	mux.HandleFunc("GET /shopbook/shops/{id}/coupons", httpx.RequireAuth(sbShopCoupons))
+	mux.HandleFunc("GET /shopbook/shops/{id}/ratings", httpx.RequireAuth(sbShopRatings))
+	mux.HandleFunc("POST /shopbook/orders/{id}/rate", httpx.RequireAuth(sbRateOrder))
+	mux.HandleFunc("GET /shopbook/loyalty", httpx.RequireAuth(sbLoyalty))
+
 	// Shop owner
 	mux.HandleFunc("GET /shopbook/my-shop", httpx.RequireAuth(sbMyShop))
 	mux.HandleFunc("POST /shopbook/my-shop", httpx.RequireAuth(sbUpsertShop))
@@ -43,6 +51,14 @@ func RegisterShopBook(mux *http.ServeMux) {
 	mux.HandleFunc("GET /shopbook/my-shop/dashboard", httpx.RequireAuth(sbDashboard))
 	mux.HandleFunc("GET /shopbook/my-shop/ledger", httpx.RequireAuth(sbOwnerLedger))
 	mux.HandleFunc("POST /shopbook/my-shop/ledger", httpx.RequireAuth(sbAddLedgerEntry))
+
+	// Shop owner — Phase 2
+	mux.HandleFunc("GET /shopbook/my-shop/coupons", httpx.RequireAuth(sbOwnerCoupons))
+	mux.HandleFunc("POST /shopbook/my-shop/coupons", httpx.RequireAuth(sbSaveCoupon))
+	mux.HandleFunc("DELETE /shopbook/my-shop/coupons/{id}", httpx.RequireAuth(sbDeleteCoupon))
+	mux.HandleFunc("GET /shopbook/my-shop/suppliers", httpx.RequireAuth(sbOwnerSuppliers))
+	mux.HandleFunc("POST /shopbook/my-shop/suppliers", httpx.RequireAuth(sbSaveSupplier))
+	mux.HandleFunc("DELETE /shopbook/my-shop/suppliers/{id}", httpx.RequireAuth(sbDeleteSupplier))
 }
 
 // ── helpers ───────────────────────────────────────────────────────
@@ -76,6 +92,40 @@ func qfloat(r *http.Request, key string) (float64, bool) {
 	return f, err == nil
 }
 
+// shopCols / scanShop centralise the shop projection so the Phase 2 rating +
+// delivery columns are read the same way everywhere. Works with both a single
+// pgx.Row (QueryRow) and a row inside pgx.Rows (both expose Scan).
+const shopCols = `id, name, category, address, lat, lng, phone, open_time, close_time,
+	weekly_holiday, status, pickup, prep_mins, delivery, delivery_fee, rating_sum, rating_count`
+
+type shopScanner interface{ Scan(dest ...any) error }
+
+func scanShop(row shopScanner) (map[string]any, error) {
+	var (
+		id, name, category, address, phone, openT, closeT, holiday, status string
+		slat, slng                                                         *float64
+		pickup, delivery                                                   bool
+		prep, ratingSum, ratingCount                                       int
+		deliveryFee                                                        float64
+	)
+	if err := row.Scan(&id, &name, &category, &address, &slat, &slng, &phone,
+		&openT, &closeT, &holiday, &status, &pickup, &prep,
+		&delivery, &deliveryFee, &ratingSum, &ratingCount); err != nil {
+		return nil, err
+	}
+	var rating float64
+	if ratingCount > 0 {
+		rating = math.Round(float64(ratingSum)/float64(ratingCount)*10) / 10
+	}
+	return map[string]any{
+		"id": id, "name": name, "category": category, "address": address,
+		"lat": slat, "lng": slng, "phone": phone, "openTime": openT, "closeTime": closeT,
+		"weeklyHoliday": holiday, "status": status, "pickup": pickup, "prepMins": prep,
+		"delivery": delivery, "deliveryFee": deliveryFee,
+		"rating": rating, "ratingCount": ratingCount,
+	}, nil
+}
+
 // ── customer: nearby shops ───────────────────────────────────────
 
 func sbNearbyShops(w http.ResponseWriter, r *http.Request) {
@@ -87,9 +137,7 @@ func sbNearbyShops(w http.ResponseWriter, r *http.Request) {
 	// Bounding box ~ 25 km; if no location given, just return a recent slice.
 	const boxDeg = 0.25
 	args := []any{}
-	sql := `SELECT id, name, category, address, lat, lng, phone, open_time, close_time,
-	               weekly_holiday, status, pickup, prep_mins
-	          FROM shopbook_shop`
+	sql := `SELECT ` + shopCols + ` FROM shopbook_shop`
 	where := ""
 	if okLat && okLng {
 		where = ` WHERE lat BETWEEN $1 AND $2 AND lng BETWEEN $3 AND $4`
@@ -113,21 +161,12 @@ func sbNearbyShops(w http.ResponseWriter, r *http.Request) {
 
 	out := []map[string]any{}
 	for rows.Next() {
-		var (
-			id, name, category, address, phone, openT, closeT, holiday, status string
-			slat, slng                                                         *float64
-			pickup                                                             bool
-			prep                                                               int
-		)
-		if err := rows.Scan(&id, &name, &category, &address, &slat, &slng, &phone,
-			&openT, &closeT, &holiday, &status, &pickup, &prep); err != nil {
+		m, err := scanShop(rows)
+		if err != nil {
 			continue
 		}
-		m := map[string]any{
-			"id": id, "name": name, "category": category, "address": address,
-			"lat": slat, "lng": slng, "phone": phone, "openTime": openT, "closeTime": closeT,
-			"weeklyHoliday": holiday, "status": status, "pickup": pickup, "prepMins": prep,
-		}
+		slat, _ := m["lat"].(*float64)
+		slng, _ := m["lng"].(*float64)
 		if okLat && okLng && slat != nil && slng != nil {
 			m["distanceKm"] = math.Round(haversineKm(lat, lng, *slat, *slng)*100) / 100
 		}
@@ -138,17 +177,7 @@ func sbNearbyShops(w http.ResponseWriter, r *http.Request) {
 
 func sbShopDetails(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	id := r.PathValue("id")
-	var (
-		name, category, address, phone, openT, closeT, holiday, status string
-		slat, slng                                                     *float64
-		pickup                                                         bool
-		prep                                                           int
-	)
-	err := db.Pool.QueryRow(ctx, `SELECT name, category, address, lat, lng, phone,
-	        open_time, close_time, weekly_holiday, status, pickup, prep_mins
-	        FROM shopbook_shop WHERE id=$1`, id).Scan(&name, &category, &address, &slat, &slng,
-		&phone, &openT, &closeT, &holiday, &status, &pickup, &prep)
+	m, err := scanShop(db.Pool.QueryRow(ctx, `SELECT `+shopCols+` FROM shopbook_shop WHERE id=$1`, r.PathValue("id")))
 	if db.NoRows(err) {
 		httpx.Err(w, http.StatusNotFound, "Shop not found")
 		return
@@ -157,11 +186,7 @@ func sbShopDetails(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	httpx.JSON(w, 200, map[string]any{
-		"id": id, "name": name, "category": category, "address": address,
-		"lat": slat, "lng": slng, "phone": phone, "openTime": openT, "closeTime": closeT,
-		"weeklyHoliday": holiday, "status": status, "pickup": pickup, "prepMins": prep,
-	})
+	httpx.JSON(w, 200, m)
 }
 
 func scanProducts(rows pgx.Rows) []map[string]any {
@@ -201,9 +226,12 @@ func sbPlaceOrder(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := httpx.UserFrom(r)
 	var body struct {
-		ShopID string `json:"shopId"`
-		Note   string `json:"note"`
-		Items  []struct {
+		ShopID     string `json:"shopId"`
+		Note       string `json:"note"`
+		CouponCode string `json:"couponCode"`
+		Delivery   bool   `json:"delivery"`
+		Address    string `json:"address"`
+		Items      []struct {
 			Name  string  `json:"name"`
 			Brand string  `json:"brand"`
 			Qty   float64 `json:"qty"`
@@ -216,16 +244,61 @@ func sbPlaceOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	subtotal := 0.0
+	for _, it := range body.Items {
+		q := it.Qty
+		if q <= 0 {
+			q = 1
+		}
+		subtotal += it.Price * q
+	}
+
+	// Delivery fee (only if this shop offers delivery).
+	deliveryFee := 0.0
+	delivery := false
+	if body.Delivery {
+		var shopDelivery bool
+		var fee float64
+		if err := db.Pool.QueryRow(ctx, `SELECT delivery, delivery_fee FROM shopbook_shop WHERE id=$1`,
+			body.ShopID).Scan(&shopDelivery, &fee); err == nil && shopDelivery {
+			delivery = true
+			deliveryFee = fee
+		}
+	}
+
+	// Coupon discount (validated server-side against the shop's active coupons).
+	discount := 0.0
+	appliedCoupon := ""
+	if body.CouponCode != "" {
+		var kind string
+		var value, minOrder float64
+		err := db.Pool.QueryRow(ctx,
+			`SELECT kind, value, min_order FROM shopbook_coupon
+			   WHERE shop_id=$1 AND UPPER(code)=UPPER($2) AND active=TRUE`,
+			body.ShopID, body.CouponCode).Scan(&kind, &value, &minOrder)
+		if err == nil && subtotal >= minOrder {
+			if kind == "percent" {
+				discount = subtotal * value / 100
+			} else {
+				discount = value
+			}
+			if discount > subtotal {
+				discount = subtotal
+			}
+			discount = math.Round(discount*100) / 100
+			appliedCoupon = body.CouponCode
+		}
+	}
+
+	total := math.Round((subtotal-discount+deliveryFee)*100) / 100
+
 	var orderID string
 	err := db.WithUser(ctx, user.ID, func(tx pgx.Tx) error {
-		total := 0.0
-		for _, it := range body.Items {
-			total += it.Price * it.Qty
-		}
 		if err := tx.QueryRow(ctx,
-			`INSERT INTO shopbook_order (shop_id, customer_user_id, note, total)
-			 VALUES ($1,$2,$3,$4) RETURNING id`,
-			body.ShopID, user.ID, body.Note, total).Scan(&orderID); err != nil {
+			`INSERT INTO shopbook_order
+			   (shop_id, customer_user_id, note, total, coupon_code, discount, delivery, delivery_fee, address)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+			body.ShopID, user.ID, body.Note, total, appliedCoupon, discount, delivery, deliveryFee, body.Address).Scan(&orderID); err != nil {
 			return err
 		}
 		for _, it := range body.Items {
@@ -246,7 +319,10 @@ func sbPlaceOrder(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, http.StatusInternalServerError, "could not place order")
 		return
 	}
-	httpx.JSON(w, 201, map[string]any{"id": orderID, "status": "new"})
+	httpx.JSON(w, 201, map[string]any{
+		"id": orderID, "status": "new", "total": total,
+		"discount": discount, "deliveryFee": deliveryFee,
+	})
 }
 
 func sbMyOrders(w http.ResponseWriter, r *http.Request) {
@@ -279,12 +355,15 @@ func sbMyOrders(w http.ResponseWriter, r *http.Request) {
 // orderWithItems returns the order header + items, scoped so only the customer
 // or the shop owner can read it.
 func orderWithItems(ctx context.Context, w http.ResponseWriter, orderID, userID string) {
-	var shopID, custID, status, note string
-	var total float64
+	var shopID, custID, status, note, couponCode, address string
+	var total, discount, deliveryFee float64
+	var delivery bool
 	var created time.Time
 	err := db.Pool.QueryRow(ctx,
-		`SELECT shop_id, customer_user_id, status, total, note, created_at
-		   FROM shopbook_order WHERE id=$1`, orderID).Scan(&shopID, &custID, &status, &total, &note, &created)
+		`SELECT shop_id, customer_user_id, status, total, note, created_at,
+		        coupon_code, discount, delivery, delivery_fee, address
+		   FROM shopbook_order WHERE id=$1`, orderID).Scan(&shopID, &custID, &status, &total, &note, &created,
+		&couponCode, &discount, &delivery, &deliveryFee, &address)
 	if db.NoRows(err) {
 		httpx.Err(w, http.StatusNotFound, "Order not found")
 		return
@@ -321,9 +400,13 @@ func orderWithItems(ctx context.Context, w http.ResponseWriter, orderID, userID 
 			"note": inote, "availability": avail, "altName": alt,
 		})
 	}
+	var rated bool
+	_ = db.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM shopbook_rating WHERE order_id=$1)`, orderID).Scan(&rated)
 	httpx.JSON(w, 200, map[string]any{
 		"id": orderID, "shopId": shopID, "status": status, "total": total,
 		"note": note, "createdAt": httpx.JST(&created), "items": items,
+		"couponCode": couponCode, "discount": discount, "delivery": delivery,
+		"deliveryFee": deliveryFee, "address": address, "rated": rated,
 	})
 }
 
@@ -411,16 +494,7 @@ func ledgerJSON(ctx context.Context, w http.ResponseWriter, shopID, custID strin
 func sbMyShop(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := httpx.UserFrom(r)
-	var (
-		id, name, category, address, phone, openT, closeT, holiday, status string
-		slat, slng                                                         *float64
-		pickup                                                             bool
-		prep                                                               int
-	)
-	err := db.Pool.QueryRow(ctx, `SELECT id, name, category, address, lat, lng, phone,
-	        open_time, close_time, weekly_holiday, status, pickup, prep_mins
-	        FROM shopbook_shop WHERE owner_user_id=$1`, user.ID).Scan(&id, &name, &category, &address,
-		&slat, &slng, &phone, &openT, &closeT, &holiday, &status, &pickup, &prep)
+	m, err := scanShop(db.Pool.QueryRow(ctx, `SELECT `+shopCols+` FROM shopbook_shop WHERE owner_user_id=$1`, user.ID))
 	if db.NoRows(err) {
 		httpx.JSON(w, 200, map[string]any{"shop": nil})
 		return
@@ -429,11 +503,7 @@ func sbMyShop(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	httpx.JSON(w, 200, map[string]any{"shop": map[string]any{
-		"id": id, "name": name, "category": category, "address": address,
-		"lat": slat, "lng": slng, "phone": phone, "openTime": openT, "closeTime": closeT,
-		"weeklyHoliday": holiday, "status": status, "pickup": pickup, "prepMins": prep,
-	}})
+	httpx.JSON(w, 200, map[string]any{"shop": m})
 }
 
 func sbUpsertShop(w http.ResponseWriter, r *http.Request) {
@@ -452,6 +522,8 @@ func sbUpsertShop(w http.ResponseWriter, r *http.Request) {
 		Status        string   `json:"status"`
 		Pickup        *bool    `json:"pickup"`
 		PrepMins      *int     `json:"prepMins"`
+		Delivery      *bool    `json:"delivery"`
+		DeliveryFee   *float64 `json:"deliveryFee"`
 	}
 	if err := httpx.Body(r, &b); err != nil || b.Name == "" {
 		httpx.Err(w, http.StatusBadRequest, "name required")
@@ -477,19 +549,27 @@ func sbUpsertShop(w http.ResponseWriter, r *http.Request) {
 	if b.PrepMins != nil {
 		prep = *b.PrepMins
 	}
+	delivery := false
+	if b.Delivery != nil {
+		delivery = *b.Delivery
+	}
+	deliveryFee := 0.0
+	if b.DeliveryFee != nil {
+		deliveryFee = *b.DeliveryFee
+	}
 	var id string
 	err := db.Pool.QueryRow(ctx, `
 		INSERT INTO shopbook_shop
 		  (owner_user_id, name, category, address, lat, lng, phone,
-		   open_time, close_time, weekly_holiday, status, pickup, prep_mins)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+		   open_time, close_time, weekly_holiday, status, pickup, prep_mins, delivery, delivery_fee)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 		ON CONFLICT (owner_user_id) DO UPDATE SET
 		  name=$2, category=$3, address=$4, lat=$5, lng=$6, phone=$7,
 		  open_time=$8, close_time=$9, weekly_holiday=$10, status=$11,
-		  pickup=$12, prep_mins=$13, updated_at=NOW()
+		  pickup=$12, prep_mins=$13, delivery=$14, delivery_fee=$15, updated_at=NOW()
 		RETURNING id`,
 		user.ID, b.Name, b.Category, b.Address, b.Lat, b.Lng, b.Phone,
-		b.OpenTime, b.CloseTime, b.WeeklyHoliday, b.Status, pickup, prep).Scan(&id)
+		b.OpenTime, b.CloseTime, b.WeeklyHoliday, b.Status, pickup, prep, delivery, deliveryFee).Scan(&id)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "could not save shop")
 		return
@@ -712,6 +792,12 @@ func sbOwnerSetStatus(w http.ResponseWriter, r *http.Request) {
 					shopID, custID, total, orderID); err != nil {
 					return err
 				}
+				// Loyalty: 1 point per ₹100 spent, stamped on the order.
+				points := int(total / 100)
+				if _, err := tx.Exec(ctx,
+					`UPDATE shopbook_order SET points_earned=$1 WHERE id=$2`, points, orderID); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
@@ -827,4 +913,370 @@ func sbAddLedgerEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, 201, map[string]any{"id": id})
+}
+
+// ════════════════════════════════════════════════════════════════
+//  Phase 2
+// ════════════════════════════════════════════════════════════════
+
+// ── favorites ────────────────────────────────────────────────────
+
+func sbFavorites(w http.ResponseWriter, r *http.Request) {
+	user := httpx.UserFrom(r)
+	rows, err := db.Pool.Query(r.Context(), `
+		SELECT `+shopColsPrefixed("s")+`
+		  FROM shopbook_favorite f JOIN shopbook_shop s ON s.id=f.shop_id
+		 WHERE f.customer_user_id=$1 ORDER BY f.created_at DESC`, user.ID)
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		if m, err := scanShop(rows); err == nil {
+			out = append(out, m)
+		}
+	}
+	httpx.JSON(w, 200, map[string]any{"shops": out})
+}
+
+// shopColsPrefixed returns shopCols with a table alias, for JOINs.
+func shopColsPrefixed(alias string) string {
+	cols := []string{
+		"id", "name", "category", "address", "lat", "lng", "phone", "open_time", "close_time",
+		"weekly_holiday", "status", "pickup", "prep_mins", "delivery", "delivery_fee",
+		"rating_sum", "rating_count",
+	}
+	out := ""
+	for i, c := range cols {
+		if i > 0 {
+			out += ", "
+		}
+		out += alias + "." + c
+	}
+	return out
+}
+
+func sbToggleFavorite(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := httpx.UserFrom(r)
+	var b struct {
+		ShopID string `json:"shopId"`
+	}
+	if err := httpx.Body(r, &b); err != nil || b.ShopID == "" {
+		httpx.Err(w, http.StatusBadRequest, "shopId required")
+		return
+	}
+	// Toggle: delete if present, else insert.
+	tag, err := db.Pool.Exec(ctx,
+		`DELETE FROM shopbook_favorite WHERE customer_user_id=$1 AND shop_id=$2`, user.ID, b.ShopID)
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	if tag.RowsAffected() > 0 {
+		httpx.JSON(w, 200, map[string]any{"favorite": false})
+		return
+	}
+	if _, err := db.Pool.Exec(ctx,
+		`INSERT INTO shopbook_favorite (customer_user_id, shop_id) VALUES ($1,$2)
+		 ON CONFLICT DO NOTHING`, user.ID, b.ShopID); err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	httpx.JSON(w, 200, map[string]any{"favorite": true})
+}
+
+// ── coupons (customer view) ──────────────────────────────────────
+
+func sbShopCoupons(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Pool.Query(r.Context(),
+		`SELECT code, kind, value, min_order FROM shopbook_coupon
+		   WHERE shop_id=$1 AND active=TRUE ORDER BY created_at DESC`, r.PathValue("id"))
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var code, kind string
+		var value, minOrder float64
+		if err := rows.Scan(&code, &kind, &value, &minOrder); err != nil {
+			continue
+		}
+		out = append(out, map[string]any{"code": code, "kind": kind, "value": value, "minOrder": minOrder})
+	}
+	httpx.JSON(w, 200, map[string]any{"coupons": out})
+}
+
+// ── ratings ──────────────────────────────────────────────────────
+
+func sbShopRatings(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Pool.Query(r.Context(),
+		`SELECT rt.stars, rt.review, COALESCE(u.name,''), rt.created_at
+		   FROM shopbook_rating rt LEFT JOIN users u ON u.id=rt.customer_user_id
+		  WHERE rt.shop_id=$1 ORDER BY rt.created_at DESC LIMIT 50`, r.PathValue("id"))
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var stars int
+		var review, name string
+		var created time.Time
+		if err := rows.Scan(&stars, &review, &name, &created); err != nil {
+			continue
+		}
+		out = append(out, map[string]any{
+			"stars": stars, "review": review, "customerName": name, "createdAt": httpx.JST(&created),
+		})
+	}
+	httpx.JSON(w, 200, map[string]any{"ratings": out})
+}
+
+// Customer rates a completed order once; the shop's cached rating is bumped.
+func sbRateOrder(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := httpx.UserFrom(r)
+	orderID := r.PathValue("id")
+	var b struct {
+		Stars  int    `json:"stars"`
+		Review string `json:"review"`
+	}
+	if err := httpx.Body(r, &b); err != nil || b.Stars < 1 || b.Stars > 5 {
+		httpx.Err(w, http.StatusBadRequest, "stars must be 1-5")
+		return
+	}
+	// Verify the order belongs to this customer and is completed.
+	var shopID, status string
+	err := db.Pool.QueryRow(ctx,
+		`SELECT shop_id, status FROM shopbook_order WHERE id=$1 AND customer_user_id=$2`,
+		orderID, user.ID).Scan(&shopID, &status)
+	if db.NoRows(err) {
+		httpx.Err(w, http.StatusForbidden, "Not your order")
+		return
+	}
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	if status != "completed" {
+		httpx.Err(w, http.StatusBadRequest, "Only completed orders can be rated")
+		return
+	}
+	err = db.WithUser(ctx, user.ID, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx,
+			`INSERT INTO shopbook_rating (shop_id, customer_user_id, order_id, stars, review)
+			 VALUES ($1,$2,$3,$4,$5) ON CONFLICT (order_id) DO NOTHING`,
+			shopID, user.ID, orderID, b.Stars, b.Review)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return nil // already rated
+		}
+		_, err = tx.Exec(ctx,
+			`UPDATE shopbook_shop SET rating_sum=rating_sum+$1, rating_count=rating_count+1 WHERE id=$2`,
+			b.Stars, shopID)
+		return err
+	})
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	httpx.JSON(w, 200, map[string]any{"ok": true})
+}
+
+// ── loyalty ──────────────────────────────────────────────────────
+
+func sbLoyalty(w http.ResponseWriter, r *http.Request) {
+	user := httpx.UserFrom(r)
+	var points, orders int
+	var spent float64
+	_ = db.Pool.QueryRow(r.Context(), `
+		SELECT COALESCE(SUM(points_earned),0), COUNT(*), COALESCE(SUM(total),0)
+		  FROM shopbook_order WHERE customer_user_id=$1 AND status='completed'`,
+		user.ID).Scan(&points, &orders, &spent)
+	httpx.JSON(w, 200, map[string]any{
+		"points": points, "completedOrders": orders, "totalSpent": math.Round(spent*100) / 100,
+	})
+}
+
+// ── owner: coupons ───────────────────────────────────────────────
+
+func sbOwnerCoupons(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	shopID, ok := ownerShopID(ctx, w, httpx.UserFrom(r).ID)
+	if !ok {
+		return
+	}
+	rows, err := db.Pool.Query(ctx,
+		`SELECT id, code, kind, value, min_order, active FROM shopbook_coupon
+		   WHERE shop_id=$1 ORDER BY created_at DESC`, shopID)
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var id, code, kind string
+		var value, minOrder float64
+		var active bool
+		if err := rows.Scan(&id, &code, &kind, &value, &minOrder, &active); err != nil {
+			continue
+		}
+		out = append(out, map[string]any{
+			"id": id, "code": code, "kind": kind, "value": value, "minOrder": minOrder, "active": active,
+		})
+	}
+	httpx.JSON(w, 200, map[string]any{"coupons": out})
+}
+
+func sbSaveCoupon(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	shopID, ok := ownerShopID(ctx, w, httpx.UserFrom(r).ID)
+	if !ok {
+		return
+	}
+	var b struct {
+		Code     string  `json:"code"`
+		Kind     string  `json:"kind"`
+		Value    float64 `json:"value"`
+		MinOrder float64 `json:"minOrder"`
+		Active   *bool   `json:"active"`
+	}
+	if err := httpx.Body(r, &b); err != nil || b.Code == "" || (b.Kind != "percent" && b.Kind != "flat") || b.Value <= 0 {
+		httpx.Err(w, http.StatusBadRequest, "code, kind(percent|flat) and positive value required")
+		return
+	}
+	active := true
+	if b.Active != nil {
+		active = *b.Active
+	}
+	var id string
+	err := db.Pool.QueryRow(ctx, `
+		INSERT INTO shopbook_coupon (shop_id, code, kind, value, min_order, active)
+		VALUES ($1,UPPER($2),$3,$4,$5,$6)
+		ON CONFLICT (shop_id, code) DO UPDATE SET
+		  kind=$3, value=$4, min_order=$5, active=$6
+		RETURNING id`,
+		shopID, b.Code, b.Kind, b.Value, b.MinOrder, active).Scan(&id)
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	httpx.JSON(w, 200, map[string]any{"id": id})
+}
+
+func sbDeleteCoupon(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	shopID, ok := ownerShopID(ctx, w, httpx.UserFrom(r).ID)
+	if !ok {
+		return
+	}
+	tag, err := db.Pool.Exec(ctx, `DELETE FROM shopbook_coupon WHERE id=$1 AND shop_id=$2`,
+		r.PathValue("id"), shopID)
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		httpx.Err(w, http.StatusNotFound, "Coupon not found")
+		return
+	}
+	httpx.JSON(w, 200, map[string]any{"ok": true})
+}
+
+// ── owner: suppliers ─────────────────────────────────────────────
+
+func sbOwnerSuppliers(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	shopID, ok := ownerShopID(ctx, w, httpx.UserFrom(r).ID)
+	if !ok {
+		return
+	}
+	rows, err := db.Pool.Query(ctx,
+		`SELECT id, name, phone, items, note FROM shopbook_supplier
+		   WHERE shop_id=$1 ORDER BY name`, shopID)
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var id, name, phone, items, note string
+		if err := rows.Scan(&id, &name, &phone, &items, &note); err != nil {
+			continue
+		}
+		out = append(out, map[string]any{"id": id, "name": name, "phone": phone, "items": items, "note": note})
+	}
+	httpx.JSON(w, 200, map[string]any{"suppliers": out})
+}
+
+func sbSaveSupplier(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	shopID, ok := ownerShopID(ctx, w, httpx.UserFrom(r).ID)
+	if !ok {
+		return
+	}
+	var b struct {
+		ID    string `json:"id"`
+		Name  string `json:"name"`
+		Phone string `json:"phone"`
+		Items string `json:"items"`
+		Note  string `json:"note"`
+	}
+	if err := httpx.Body(r, &b); err != nil || b.Name == "" {
+		httpx.Err(w, http.StatusBadRequest, "name required")
+		return
+	}
+	var id string
+	if b.ID != "" {
+		err := db.Pool.QueryRow(ctx,
+			`UPDATE shopbook_supplier SET name=$1, phone=$2, items=$3, note=$4
+			   WHERE id=$5 AND shop_id=$6 RETURNING id`,
+			b.Name, b.Phone, b.Items, b.Note, b.ID, shopID).Scan(&id)
+		if db.NoRows(err) {
+			httpx.Err(w, http.StatusNotFound, "Supplier not found")
+			return
+		}
+		if err != nil {
+			httpx.Err(w, http.StatusInternalServerError, "db error")
+			return
+		}
+	} else {
+		if err := db.Pool.QueryRow(ctx,
+			`INSERT INTO shopbook_supplier (shop_id, name, phone, items, note)
+			 VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+			shopID, b.Name, b.Phone, b.Items, b.Note).Scan(&id); err != nil {
+			httpx.Err(w, http.StatusInternalServerError, "db error")
+			return
+		}
+	}
+	httpx.JSON(w, 200, map[string]any{"id": id})
+}
+
+func sbDeleteSupplier(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	shopID, ok := ownerShopID(ctx, w, httpx.UserFrom(r).ID)
+	if !ok {
+		return
+	}
+	tag, err := db.Pool.Exec(ctx, `DELETE FROM shopbook_supplier WHERE id=$1 AND shop_id=$2`,
+		r.PathValue("id"), shopID)
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		httpx.Err(w, http.StatusNotFound, "Supplier not found")
+		return
+	}
+	httpx.JSON(w, 200, map[string]any{"ok": true})
 }
