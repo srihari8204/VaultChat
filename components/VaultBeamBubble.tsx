@@ -12,6 +12,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert } fr
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { BRAND_ACCENT } from '../constants/theme';
+import { VB_AUTO_MAX_BYTES } from '../constants/flags';
 import {
   useTransfer, parseManifest, startReceive, cancelTransfer, openSaved,
 } from '../lib/vaultBeamController';
@@ -78,11 +79,22 @@ export default function VaultBeamBubble({
     else if (status === 'cancelled') { line = 'Cancelled'; }
     else { line = `${fmtBytes(totalBytes)} · Sent`; action = <Ionicons name="cloud-upload-outline" size={18} color={colors.textDim} />; }
   } else {
-    if (status === 'receiving') { line = `${st?.tier === 'relay' ? 'Downloading via relay' : 'Receiving direct'}… ${pct}%${meter ? ` · ${meter}` : ''}`; action = <CancelBtn onPress={onCancel} colors={colors} />; }
+    if (status === 'queued') { line = `${fmtBytes(totalBytes)} · Queued`; action = <CancelBtn onPress={onCancel} colors={colors} />; }
+    else if (status === 'paused') { line = st?.error ? `Paused — ${st.error}` : 'Auto-download paused'; action = <PillBtn label="Resume" icon="download-outline" onPress={onAccept} colors={colors} />; }
+    else if (status === 'receiving') {
+      const verb = st?.auto ? 'Auto-downloading' : (st?.tier === 'relay' ? 'Downloading via relay' : 'Receiving direct');
+      line = `${verb}… ${pct}%${meter ? ` · ${meter}` : ''}`; action = <CancelBtn onPress={onCancel} colors={colors} />;
+    }
     else if (status === 'complete') { line = `${fmtBytes(totalBytes)} · Saved${avg ? ` · avg ${avg}` : ''}`; action = <PillBtn label="Open" icon="open-outline" onPress={onOpen} colors={colors} />; }
     else if (status === 'failed') { line = st?.error ? `Failed — ${st.error}` : 'Download failed'; action = <PillBtn label="Retry" icon="refresh" onPress={onAccept} colors={colors} />; }
     else if (status === 'cancelled') { line = 'Cancelled'; action = <PillBtn label="Accept" icon="download-outline" onPress={onAccept} colors={colors} />; }
-    else { line = fmtBytes(totalBytes); action = <PillBtn label="Accept" icon="download-outline" onPress={onAccept} colors={colors} disabled={!manifest} />; }
+    else {
+      // Incoming, not yet accepted. Files ≥ 2.5 GB always require a manual Accept
+      // (never auto-download), so hint why the tap is required.
+      const large = totalBytes >= VB_AUTO_MAX_BYTES;
+      line = large ? `${fmtBytes(totalBytes)} · manual approval (large file)` : fmtBytes(totalBytes);
+      action = <PillBtn label="Accept" icon="download-outline" onPress={onAccept} colors={colors} disabled={!manifest} />;
+    }
   }
 
   return (

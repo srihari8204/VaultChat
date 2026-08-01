@@ -43,7 +43,9 @@ export type VBStatus =
   | 'uploading'   // sender: pushing blocks to R2
   | 'sent'        // sender: all blocks uploaded, waiting for peer to pull
   | 'incoming'    // recipient: manifest received, not yet accepted
+  | 'queued'      // recipient: auto-download accepted, waiting for a queue slot
   | 'receiving'   // recipient: pulling blocks from R2
+  | 'paused'      // recipient: auto-download paused (e.g. left Wi-Fi)
   | 'complete'    // done (delivered / saved)
   | 'cancelled'
   | 'failed';
@@ -63,6 +65,7 @@ export interface VBTransfer {
   // the relay takes over, the upload genuinely RESTARTS from 0 — the bubble
   // shows "via relay" so the bar reset reads as a tier switch, not a glitch.
   tier?: 'direct' | 'relay';
+  auto?: boolean;      // this receive was auto-started (no manual Accept)
   // Live meter (computed from VERIFIED progress ticks — same truth as the bar).
   rateBps?: number;    // rolling ~5s window
   avgBps?: number;     // whole-transfer average
@@ -367,15 +370,20 @@ export async function startSend(opts: {
 // Accept an incoming transfer: preallocate + pull every block (resumes against
 // the server bitmask), verify natively, and land the plaintext file locally.
 export async function startReceive(opts: {
-  transferId: string; manifest: VBManifest; peerId: string;
+  transferId: string; manifest: VBManifest; peerId: string; auto?: boolean;
 }): Promise<void> {
   if (!isNativeStreamAvailable()) throw new Error('Large-file transfer needs the latest app build (Android).');
   const { transferId, manifest, peerId } = opts;
+  // Single-flight: auto + manual (or a double-tap) must never both drive one
+  // transferId. A live controller or an already-finished/receiving state wins.
+  if (controllers.has(transferId)) return;
+  const cur = states.get(transferId);
+  if (cur && (cur.status === 'receiving' || cur.status === 'complete')) return;
   const dstPath = `${VB_DIR}/${sanitize(manifest.name)}`;
   const chunkCount = chunkCountFor(manifest.size);
 
   setState(transferId, {
-    transferId, role: 'recipient', status: 'receiving',
+    transferId, role: 'recipient', status: 'receiving', auto: !!opts.auto,
     done: 0, total: 0, bytes: 0, totalBytes: manifest.size, name: manifest.name,
   });
   ensureListeners();
@@ -406,6 +414,23 @@ export async function startReceive(opts: {
     if (__DEV__) console.warn('[vb] receive failed:', e?.code ?? '', e?.message ?? e);
     setState(transferId, ac.signal.aborted ? { status: 'cancelled' } : { status: 'failed', error: e?.message });
   } finally { controllers.delete(transferId); }
+}
+
+// ── Auto-download (UITE F2) ─────────────────────────────────────────
+// Mark a transfer as queued for auto-download (waiting for a queue slot) so the
+// bubble can show "Queued" before the receive actually starts.
+export function markTransferQueued(transferId: string, name: string, totalBytes: number): void {
+  const cur = states.get(transferId);
+  if (cur && (cur.status === 'receiving' || cur.status === 'complete')) return;
+  setState(transferId, { transferId, role: 'recipient', status: 'queued', auto: true, done: 0, total: 0, bytes: 0, totalBytes, name });
+}
+
+// Auto-accept an incoming transfer. Thin wrapper over startReceive with the auto
+// flag; the single-flight guard inside startReceive prevents a double-start if
+// the user also tapped Accept. Errors surface via the transfer store, not throw.
+export async function autoStartReceive(opts: { transferId: string; manifest: VBManifest; peerId: string }): Promise<void> {
+  try { await startReceive({ ...opts, auto: true }); }
+  catch (e: any) { setState(opts.transferId, { status: 'failed', error: e?.message }); }
 }
 
 // Cancel an in-flight transfer (either side): abort the byte pipeline + purge

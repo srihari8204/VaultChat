@@ -189,7 +189,11 @@ function RootLayout() {
     // backgrounded-but-alive (foreground-service connection). notify() self-gates
     // (skips push-capable devices, foregrounded app, own echo, duplicates).
     import('./(constants)/authService').then(m => m.getCurrentUserAsync().then((u: any) => setSelfId(u?.id ?? null))).catch(() => {});
-    const cleanupMsgNotif = addPersistentListener('new_message', (m: any) => { notifyMessage(m).catch(() => {}); });
+    const cleanupMsgNotif = addPersistentListener('new_message', (m: any) => {
+      notifyMessage(m).catch(() => {});
+      // VaultBeam auto-download (flag-gated; no-op when off / not a vaultbeam msg).
+      if (m?.meta?.vaultbeam) import('../lib/vaultBeamIngest').then(v => v.onIncomingVaultbeamMessage(m)).catch(() => {});
+    });
 
     // ── Notifee full-screen call events (foreground) ────────────────────
     const onNotifeeAnswerOrDecline = (action: string, data: any) => {
@@ -361,6 +365,7 @@ function RootLayout() {
         <Stack.Screen name="app-lock-chats" />
         <Stack.Screen name="privacy-dashboard" />
         <Stack.Screen name="storage-manager" />
+        <Stack.Screen name="vaultbeam-settings" />
         <Stack.Screen name="chat-backup" />
         <Stack.Screen name="last-seen-privacy" />
         <Stack.Screen name="offline-mode" />
