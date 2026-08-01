@@ -26,6 +26,10 @@ export interface Shop {
   deliveryFee: number;
   rating: number;       // 0–5, avg
   ratingCount: number;
+  // Phase 2b
+  plan: 'free' | 'pro';
+  lunchStart: string;   // HH:MM, '' = none
+  lunchEnd: string;
 }
 
 export interface Product {
@@ -295,6 +299,24 @@ export function addLedgerEntry(
   return api<{ id: string }>(`/shopbook/my-shop/ledger`, {
     method: 'POST', json: { customerId, type, amount, remark },
   });
+}
+
+// ── Phase 2b: payment reminders, plan, reports ────────────────────
+export function sendReminder(customerId: string) {
+  return api<{ ok: boolean; sent: boolean; pending?: number }>(`/shopbook/my-shop/ledger/remind`, {
+    method: 'POST', json: { customerId },
+  });
+}
+
+export function setPlan(plan: 'free' | 'pro') {
+  return api<{ ok: boolean; plan: string }>(`/shopbook/my-shop/plan`, { method: 'POST', json: { plan } });
+}
+
+export interface ReportDay { date: string; orders: number; sales: number }
+export interface TopProduct { name: string; qty: number }
+export interface Reports { days: ReportDay[]; topProducts: TopProduct[] }
+export function reports() {
+  return api<Reports>(`/shopbook/my-shop/reports`);
 }
 
 export default {};

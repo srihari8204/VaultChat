@@ -32,30 +32,60 @@ export function minsOfDay(hhmm: string): number | null {
 
 export interface OpenState {
   isOpen: boolean;
-  label: string; // "Open now" | "Closing soon" | "Opens at 08:00" | "Closed"
+  // "Open now" | "Closing in 20 min" | "Lunch break" | "Opens at 08:00"
+  // | "Opens tomorrow" | "On holiday" | "Closed"
+  label: string;
   tone: 'open' | 'soon' | 'closed';
 }
 
-export function shopOpenState(
-  open: string,
-  close: string,
-  status: ShopStatus,
-  nowMins?: number,
-): OpenState {
-  if (status === 'closed') return { isOpen: false, label: 'Closed', tone: 'closed' };
-  const now = nowMins ?? (() => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); })();
-  const o = minsOfDay(open), c = minsOfDay(close);
+const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+
+export interface ShopTimings {
+  openTime: string;
+  closeTime: string;
+  status: ShopStatus;
+  weeklyHoliday?: string;   // e.g. 'sun'
+  lunchStart?: string;      // HH:MM, '' = none
+  lunchEnd?: string;
+}
+
+// Now accepts a shop-like object so lunch-break + weekly-holiday are honoured.
+// `now` is injectable for tests.
+export function shopOpenState(s: ShopTimings, now?: Date): OpenState {
+  if (s.status === 'closed') return { isOpen: false, label: 'Closed', tone: 'closed' };
+  const d = now ?? new Date();
+  const nowMins = d.getHours() * 60 + d.getMinutes();
+  const today = DAYS[d.getDay()];
+
+  // Weekly holiday → closed today; if it opens tomorrow, say so.
+  if (s.weeklyHoliday && s.weeklyHoliday.toLowerCase() === today) {
+    return { isOpen: false, label: 'On holiday', tone: 'closed' };
+  }
+
+  const o = minsOfDay(s.openTime), c = minsOfDay(s.closeTime);
   if (o == null || c == null) {
-    return status === 'busy'
+    return s.status === 'busy'
       ? { isOpen: true, label: 'Busy', tone: 'soon' }
       : { isOpen: true, label: 'Open now', tone: 'open' };
   }
+
+  // Lunch break window (if set) — shop is temporarily closed.
+  const ls = s.lunchStart ? minsOfDay(s.lunchStart) : null;
+  const le = s.lunchEnd ? minsOfDay(s.lunchEnd) : null;
+  if (ls != null && le != null && nowMins >= ls && nowMins < le) {
+    return { isOpen: false, label: `Lunch break · back ${s.lunchEnd}`, tone: 'soon' };
+  }
+
   // Handle shops that close after midnight (close < open).
-  const within = c >= o ? (now >= o && now < c) : (now >= o || now < c);
-  if (!within) return { isOpen: false, label: `Opens at ${open}`, tone: 'closed' };
-  const minsToClose = (c - now + 1440) % 1440;
+  const within = c >= o ? (nowMins >= o && nowMins < c) : (nowMins >= o || nowMins < c);
+  if (!within) {
+    // Before opening today → "Opens at"; after closing → "Opens tomorrow".
+    if (nowMins < o) return { isOpen: false, label: `Opens at ${s.openTime}`, tone: 'closed' };
+    return { isOpen: false, label: 'Opens tomorrow', tone: 'closed' };
+  }
+  const minsToClose = (c - nowMins + 1440) % 1440;
   if (minsToClose <= 30) return { isOpen: true, label: `Closing in ${minsToClose} min`, tone: 'soon' };
-  if (status === 'busy') return { isOpen: true, label: 'Busy', tone: 'soon' };
+  if (s.status === 'busy') return { isOpen: true, label: 'Busy', tone: 'soon' };
   return { isOpen: true, label: 'Open now', tone: 'open' };
 }
 

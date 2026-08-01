@@ -245,7 +245,7 @@ function FindShops({ onOpen, favIds, onToggleFav }: {
 function ShopCard({ shop, onOpen, isFav, onToggleFav }: {
   shop: SB.Shop; onOpen: () => void; isFav: boolean; onToggleFav: () => void;
 }) {
-  const st = shopOpenState(shop.openTime, shop.closeTime, shop.status);
+  const st = shopOpenState(shop);
   return (
     <TouchableOpacity style={s.card} onPress={onOpen} activeOpacity={0.8}>
       <View style={s.shopIcon}><Text style={{ fontSize: 22 }}>{categoryIcon(shop.category)}</Text></View>
@@ -259,7 +259,6 @@ function ShopCard({ shop, onOpen, isFav, onToggleFav }: {
           <View style={[s.badge, { marginTop: 0 }, st.tone === 'open' ? s.badgeOpen : st.tone === 'soon' ? s.badgeSoon : s.badgeClosed]}>
             <Text style={[s.badgeText, st.tone === 'closed' && { color: C.danger }]}>{st.label}</Text>
           </View>
-          {shop.delivery && <View style={s.deliveryBadge}><Text style={s.deliveryBadgeText}>🛵 Delivery</Text></View>}
         </View>
       </View>
       <TouchableOpacity onPress={onToggleFav} hitSlop={10} style={{ padding: 4 }}>
@@ -278,7 +277,7 @@ function ShopFlow({ shop, cart, setCart, onBack, onPlaced, onLedger, isFav, onTo
   const [view, setView] = useState<'details' | 'catalog' | 'cart'>('details');
   const [coupons, setCoupons] = useState<SB.Coupon[]>([]);
   const [ratings, setRatings] = useState<SB.Rating[]>([]);
-  const st = shopOpenState(shop.openTime, shop.closeTime, shop.status);
+  const st = shopOpenState(shop);
 
   useEffect(() => { (async () => {
     try { setCoupons(await SB.shopCoupons(shop.id)); } catch {}
@@ -305,7 +304,6 @@ function ShopFlow({ shop, cart, setCart, onBack, onPlaced, onLedger, isFav, onTo
                 <View style={[s.badge, { marginTop: 0 }, st.tone === 'open' ? s.badgeOpen : st.tone === 'soon' ? s.badgeSoon : s.badgeClosed]}>
                   <Text style={[s.badgeText, st.tone === 'closed' && { color: C.danger }]}>{st.label}</Text>
                 </View>
-                {shop.delivery && <View style={s.deliveryBadge}><Text style={s.deliveryBadgeText}>🛵 Delivery {shop.deliveryFee > 0 ? formatINR(shop.deliveryFee) : 'Free'}</Text></View>}
               </View>
             </View>
             <TouchableOpacity onPress={onToggleFav} hitSlop={10} style={{ padding: 4 }}>
@@ -460,8 +458,6 @@ function CartView({ shop, cart, setCart, onPlaced, coupons }: {
   const [couponInput, setCouponInput] = useState('');
   const [applied, setApplied] = useState<SB.Coupon | null>(null);
   const [couponMsg, setCouponMsg] = useState('');
-  const [delivery, setDelivery] = useState(false);
-  const [address, setAddress] = useState('');
 
   const setQty = (key: string, d: number) =>
     setCart(cart.map((it) => it.key === key ? { ...it, qty: Math.max(1, it.qty + d) } : it));
@@ -469,8 +465,7 @@ function CartView({ shop, cart, setCart, onPlaced, coupons }: {
 
   const subtotal = cartTotal(cart);
   const discount = couponDiscount(subtotal, applied);
-  const deliveryFee = delivery && shop.delivery ? shop.deliveryFee : 0;
-  const total = Math.max(0, subtotal - discount) + deliveryFee;
+  const total = Math.max(0, subtotal - discount);
 
   const applyCoupon = () => {
     const code = couponInput.trim().toUpperCase();
@@ -488,7 +483,7 @@ function CartView({ shop, cart, setCart, onPlaced, coupons }: {
         shop.id,
         cart.map((it) => ({ name: it.name, brand: it.brand, qty: it.qty, price: it.price, note: it.note })),
         note.trim(),
-        { couponCode: applied?.code, delivery: delivery && shop.delivery, address: address.trim() },
+        { couponCode: applied?.code },
       );
       onPlaced(res.id);
     } catch (e: any) {
@@ -530,25 +525,13 @@ function CartView({ shop, cart, setCart, onPlaced, coupons }: {
           </View>
           {!!couponMsg && <Text style={[s.hint, { color: applied ? C.green : C.danger }]}>{couponMsg}</Text>}
 
-          {/* Delivery */}
-          {shop.delivery && (
-            <>
-              <ToggleRow label={`Home delivery ${shop.deliveryFee > 0 ? `(${formatINR(shop.deliveryFee)})` : '(Free)'}`} value={delivery} onChange={setDelivery} />
-              {delivery && (
-                <TextInput style={s.input} placeholder="Delivery address" placeholderTextColor={C.sub}
-                  value={address} onChangeText={setAddress} />
-              )}
-            </>
-          )}
-
-          <TextInput style={s.input} placeholder="Order note (e.g. deliver before 8 PM)" placeholderTextColor={C.sub}
+          <TextInput style={s.input} placeholder="Order note (e.g. pack before 8 PM)" placeholderTextColor={C.sub}
             value={note} onChangeText={setNote} />
 
           {/* Totals */}
           <View style={s.panel}>
             <Row label="Subtotal" value={formatINR(subtotal)} />
             {discount > 0 && <Row label={`Discount (${applied?.code})`} value={`− ${formatINR(discount)}`} tone={C.green} />}
-            {deliveryFee > 0 && <Row label="Delivery" value={formatINR(deliveryFee)} />}
             <View style={{ height: 1, backgroundColor: C.border, marginVertical: 6 }} />
             <Row label="Total" value={formatINR(total)} bold />
           </View>
@@ -698,7 +681,6 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
 
             <View style={s.panel}>
               {order.discount > 0 && <Row label={`Discount (${order.couponCode})`} value={`− ${formatINR(order.discount)}`} tone={C.green} />}
-              {order.delivery && <Row label="Delivery" value={formatINR(order.deliveryFee)} />}
               <Row label="Total" value={formatINR(order.total)} bold />
             </View>
 
@@ -871,7 +853,7 @@ function OwnerApp({ me }: { me: { id: string; name: string } | null }) {
   const [loading, setLoading] = useState(true);
   const [shop, setShop] = useState<SB.Shop | null>(null);
   const [settings, setSettings] = useState(false);
-  const [sub, setSub] = useState<'coupons' | 'suppliers' | null>(null);
+  const [sub, setSub] = useState<'coupons' | 'suppliers' | 'plans' | 'reports' | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -893,13 +875,16 @@ function OwnerApp({ me }: { me: { id: string; name: string } | null }) {
 
   if (sub === 'coupons') return <OwnerCoupons onBack={() => setSub(null)} />;
   if (sub === 'suppliers') return <OwnerSuppliers onBack={() => setSub(null)} />;
+  if (sub === 'plans') return <OwnerPlans plan={shop.plan} onBack={() => setSub(null)} onChanged={() => { setSub(null); load(); }} />;
+  if (sub === 'reports') return <OwnerReports plan={shop.plan} onBack={() => setSub(null)} onUpgrade={() => setSub('plans')} />;
 
   return (
     <>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         {tab === 'dashboard' && (
           <OwnerDashboard shop={shop} onSettings={() => setSettings(true)}
-            onCoupons={() => setSub('coupons')} onSuppliers={() => setSub('suppliers')} />
+            onCoupons={() => setSub('coupons')} onSuppliers={() => setSub('suppliers')}
+            onPlans={() => setSub('plans')} onReports={() => setSub('reports')} />
         )}
         {tab === 'orders' && <OwnerOrders />}
         {tab === 'products' && <OwnerProducts />}
@@ -919,8 +904,9 @@ function OwnerApp({ me }: { me: { id: string; name: string } | null }) {
   );
 }
 
-function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers }: {
+function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPlans, onReports }: {
   shop: SB.Shop; onSettings: () => void; onCoupons: () => void; onSuppliers: () => void;
+  onPlans: () => void; onReports: () => void;
 }) {
   const [loading, setLoading] = useState(true);
   const [d, setD] = useState<SB.Dashboard | null>(null);
@@ -929,7 +915,7 @@ function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers }: {
     try { setD(await SB.dashboard()); } catch {} finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
-  const st = shopOpenState(shop.openTime, shop.closeTime, shop.status);
+  const st = shopOpenState(shop);
 
   return (
     <ScrollView contentContainerStyle={s.body}
@@ -937,10 +923,14 @@ function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers }: {
       <TouchableOpacity style={s.card} onPress={onSettings}>
         <View style={s.shopIcon}><Text style={{ fontSize: 22 }}>{categoryIcon(shop.category)}</Text></View>
         <View style={{ flex: 1 }}>
-          <Text style={s.cardTitle}>{shop.name}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={s.cardTitle}>{shop.name}</Text>
+            <View style={[s.planTag, shop.plan === 'pro' ? s.planPro : s.planFree]}>
+              <Text style={[s.planTagText, shop.plan === 'pro' && { color: '#fff' }]}>{shop.plan === 'pro' ? '★ PRO' : 'FREE'}</Text>
+            </View>
+          </View>
           <Text style={s.cardSub}>
             {shop.ratingCount > 0 ? `⭐ ${shop.rating} (${shop.ratingCount})` : 'No ratings yet'}
-            {shop.delivery ? '  ·  🛵 Delivery on' : ''}
           </Text>
           <View style={[s.badge, st.tone === 'open' ? s.badgeOpen : st.tone === 'soon' ? s.badgeSoon : s.badgeClosed]}>
             <Text style={[s.badgeText, st.tone === 'closed' && { color: C.danger }]}>{st.label}</Text>
@@ -972,7 +962,113 @@ function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers }: {
           <Text style={s.linkCardText}>Suppliers</Text>
         </TouchableOpacity>
       </View>
+      <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+        <TouchableOpacity style={s.linkCard} onPress={onReports}>
+          <Text style={{ fontSize: 24 }}>📊</Text>
+          <Text style={s.linkCardText}>Daily Reports{shop.plan !== 'pro' ? ' 🔒' : ''}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={s.linkCard} onPress={onPlans}>
+          <Text style={{ fontSize: 24 }}>{shop.plan === 'pro' ? '⭐' : '⬆️'}</Text>
+          <Text style={s.linkCardText}>{shop.plan === 'pro' ? 'My Plan' : 'Upgrade to Pro'}</Text>
+        </TouchableOpacity>
+      </View>
     </ScrollView>
+  );
+}
+
+function OwnerPlans({ plan, onBack, onChanged }: {
+  plan: 'free' | 'pro'; onBack: () => void; onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const change = async (next: 'free' | 'pro') => {
+    setBusy(true);
+    try { await SB.setPlan(next); onChanged(); }
+    catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
+    finally { setBusy(false); }
+  };
+  const FREE = ['1 shop', 'Up to 300 customers', 'Basic ledger (khata)', 'Order management', 'Pending tracking', 'Push notifications'];
+  const PRO = ['Unlimited customers', 'Product & inventory management', 'Daily reports & analytics', 'Coupons & offers', 'Payment tracking & reminders', 'Priority support'];
+  return (
+    <>
+      <SubHeader title="Plans" onBack={onBack} />
+      <ScrollView contentContainerStyle={s.body}>
+        <View style={[s.planCard, plan === 'free' && s.planCardActive]}>
+          <View style={s.row}><Text style={s.planName}>Free</Text><Text style={s.planPrice}>₹0<Text style={s.planPer}>/mo</Text></Text></View>
+          {FREE.map((f) => <Text key={f} style={s.planFeat}>✓ {f}</Text>)}
+          {plan === 'free'
+            ? <View style={[s.btn2Tag]}><Text style={s.btn2TagText}>Current plan</Text></View>
+            : <TouchableOpacity style={[s.outlineBtn, busy && { opacity: .6 }]} disabled={busy} onPress={() => change('free')}><Text style={s.outlineBtnText}>Downgrade</Text></TouchableOpacity>}
+        </View>
+        <View style={[s.planCard, s.planCardPro, plan === 'pro' && s.planCardActive]}>
+          <View style={s.row}><Text style={[s.planName, { color: C.navy }]}>Pro ⭐</Text><Text style={[s.planPrice, { color: C.navy }]}>₹499<Text style={s.planPer}>/mo</Text></Text></View>
+          {PRO.map((f) => <Text key={f} style={s.planFeat}>✓ {f}</Text>)}
+          {plan === 'pro'
+            ? <View style={[s.btn2Tag]}><Text style={s.btn2TagText}>Current plan</Text></View>
+            : <TouchableOpacity style={[s.primaryBtn, busy && { opacity: .6 }]} disabled={busy} onPress={() => change('pro')}><Text style={s.primaryBtnText}>Upgrade to Pro</Text></TouchableOpacity>}
+        </View>
+        <Text style={s.hint}>Payment is handled offline with the shop — activate Pro here once you’ve upgraded. No card details are collected in the app.</Text>
+      </ScrollView>
+    </>
+  );
+}
+
+function OwnerReports({ plan, onBack, onUpgrade }: {
+  plan: 'free' | 'pro'; onBack: () => void; onUpgrade: () => void;
+}) {
+  const [loading, setLoading] = useState(plan === 'pro');
+  const [data, setData] = useState<SB.Reports | null>(null);
+
+  useEffect(() => { (async () => {
+    if (plan !== 'pro') return;
+    try { setData(await SB.reports()); } catch {} finally { setLoading(false); }
+  })(); }, [plan]);
+
+  if (plan !== 'pro') {
+    return (
+      <>
+        <SubHeader title="Daily Reports" onBack={onBack} />
+        <View style={[s.body, { alignItems: 'center', justifyContent: 'center', flex: 1 }]}>
+          <Text style={{ fontSize: 44 }}>🔒</Text>
+          <Text style={[s.sectionLabel, { marginTop: 12 }]}>Reports are a Pro feature</Text>
+          <Text style={[s.hint, { textAlign: 'center' }]}>Upgrade to Pro to unlock daily sales, order trends and your top products.</Text>
+          <TouchableOpacity style={[s.primaryBtn, { alignSelf: 'stretch' }]} onPress={onUpgrade}><Text style={s.primaryBtnText}>Upgrade to Pro</Text></TouchableOpacity>
+        </View>
+      </>
+    );
+  }
+
+  const maxSales = Math.max(1, ...(data?.days ?? []).map((d) => d.sales));
+  return (
+    <>
+      <SubHeader title="Daily Reports" onBack={onBack} />
+      <ScrollView contentContainerStyle={s.body}>
+        {loading && <ActivityIndicator color={C.green} style={{ marginTop: 20 }} />}
+        {data && (
+          <>
+            <Text style={s.sectionLabel}>Sales · last 7 days</Text>
+            {data.days.length === 0 && <Empty icon="bar-chart-outline" text="No completed orders yet." />}
+            {data.days.map((d) => (
+              <View key={d.date} style={{ marginBottom: 10 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <Text style={s.cardSub}>{d.date}</Text>
+                  <Text style={[s.price, { marginTop: 0 }]}>{formatINR(d.sales)} · {d.orders} order(s)</Text>
+                </View>
+                <View style={s.barTrack}><View style={[s.barFill, { width: `${Math.round((d.sales / maxSales) * 100)}%` }]} /></View>
+              </View>
+            ))}
+            <Text style={s.sectionLabel}>Top products</Text>
+            {data.topProducts.length === 0 && <Empty icon="pricetags-outline" text="No products ordered yet." />}
+            {data.topProducts.map((p, i) => (
+              <View key={p.name} style={s.card}>
+                <View style={s.rankDot}><Text style={s.rankDotText}>{i + 1}</Text></View>
+                <Text style={[s.cardTitle, { flex: 1 }]}>{p.name}</Text>
+                <Text style={s.price}>{p.qty} sold</Text>
+              </View>
+            ))}
+          </>
+        )}
+      </ScrollView>
+    </>
   );
 }
 
@@ -1417,6 +1513,16 @@ function KhataDetail({ customer, onBack }: { customer: SB.CustomerPending; onBac
     finally { setBusy(false); }
   };
 
+  const remind = async () => {
+    setBusy(true);
+    try {
+      const res = await SB.sendReminder(customer.customerId);
+      Alert.alert(res.sent ? 'Reminder sent' : 'Nothing to remind',
+        res.sent ? 'A payment reminder was pushed to the customer.' : 'This customer has no pending balance.');
+    } catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
+    finally { setBusy(false); }
+  };
+
   return (
     <>
       <SubHeader title={customer.customerName || 'Customer'} onBack={onBack} />
@@ -1427,6 +1533,12 @@ function KhataDetail({ customer, onBack }: { customer: SB.CustomerPending; onBac
             <StatCard label="Pending" value={formatINR(ledger.pending)} tone="danger" />
             <StatCard label="Paid" value={formatINR(ledger.totalPaid)} tone="green" />
           </View>
+        )}
+        {(ledger?.pending ?? 0) > 0 && (
+          <TouchableOpacity style={[s.outlineBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={remind}>
+            <Ionicons name="notifications-outline" size={18} color={C.green} />
+            <Text style={s.outlineBtnText}>Send payment reminder</Text>
+          </TouchableOpacity>
         )}
         <View style={s.panel}>
           <Text style={s.panelTitle}>Add entry</Text>
@@ -1464,8 +1576,9 @@ function ShopSettings({ shop, me, onSaved, onCancel }: {
   const [status, setStatus] = useState(shop?.status ?? 'open');
   const [pickup, setPickup] = useState(shop?.pickup ?? true);
   const [prep, setPrep] = useState(shop ? String(shop.prepMins) : '20');
-  const [delivery, setDelivery] = useState(shop?.delivery ?? false);
-  const [deliveryFee, setDeliveryFee] = useState(shop ? String(shop.deliveryFee) : '0');
+  const [weeklyHoliday, setWeeklyHoliday] = useState(shop?.weeklyHoliday ?? '');
+  const [lunchStart, setLunchStart] = useState(shop?.lunchStart ?? '');
+  const [lunchEnd, setLunchEnd] = useState(shop?.lunchEnd ?? '');
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(
     shop?.lat != null && shop?.lng != null ? { lat: shop.lat, lng: shop.lng } : null);
   const [busy, setBusy] = useState(false);
@@ -1487,7 +1600,8 @@ function ShopSettings({ shop, me, onSaved, onCancel }: {
       await SB.saveShop({
         name: name.trim(), category, address: address.trim(), phone: phone.trim(),
         openTime: openTime.trim(), closeTime: closeTime.trim(), status,
-        pickup, prepMins: num(prep), delivery, deliveryFee: num(deliveryFee),
+        pickup, prepMins: num(prep), weeklyHoliday,
+        lunchStart: lunchStart.trim(), lunchEnd: lunchEnd.trim(),
         lat: coords?.lat ?? null, lng: coords?.lng ?? null,
       });
       const fresh = await SB.myShop();
@@ -1517,8 +1631,20 @@ function ShopSettings({ shop, me, onSaved, onCancel }: {
           </View>
           <Field label="Prep time (mins)" value={prep} onChange={setPrep} placeholder="20" keyboardType="numeric" />
           <ToggleRow label="Pickup available" value={pickup} onChange={setPickup} />
-          <ToggleRow label="Home delivery" value={delivery} onChange={setDelivery} />
-          {delivery && <Field label="Delivery fee (₹, 0 = free)" value={deliveryFee} onChange={setDeliveryFee} placeholder="0" keyboardType="numeric" />}
+
+          <Text style={s.fieldLabel}>Lunch break (optional)</Text>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <View style={{ flex: 1 }}><Field label="From" value={lunchStart} onChange={setLunchStart} placeholder="13:30" /></View>
+            <View style={{ flex: 1 }}><Field label="To" value={lunchEnd} onChange={setLunchEnd} placeholder="16:30" /></View>
+          </View>
+
+          <Text style={s.fieldLabel}>Weekly holiday</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+            <Chip label="None" icon="—" active={weeklyHoliday === ''} onPress={() => setWeeklyHoliday('')} />
+            {[['sun','Sun'],['mon','Mon'],['tue','Tue'],['wed','Wed'],['thu','Thu'],['fri','Fri'],['sat','Sat']].map(([id, lbl]) => (
+              <Chip key={id} label={lbl} icon="📅" active={weeklyHoliday === id} onPress={() => setWeeklyHoliday(id)} />
+            ))}
+          </ScrollView>
 
           <Text style={s.fieldLabel}>Shop status</Text>
           <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
@@ -1883,4 +2009,26 @@ const s = StyleSheet.create({
     gap: 6, borderWidth: 1, borderColor: C.border,
   },
   linkCardText: { color: C.text, fontSize: 13, fontWeight: '700', textAlign: 'center' },
+
+  // ── Phase 2b ───────────────────────────────────────
+  row: { flexDirection: 'row', alignItems: 'center' },
+  planTag: { borderRadius: 5, paddingHorizontal: 6, paddingVertical: 1 },
+  planFree: { backgroundColor: C.border },
+  planPro: { backgroundColor: C.navy },
+  planTagText: { fontSize: 9.5, fontWeight: '800', color: C.sub, letterSpacing: .5 },
+
+  planCard: { backgroundColor: C.card, borderRadius: 16, padding: 18, marginBottom: 12, borderWidth: 1, borderColor: C.border },
+  planCardPro: { borderColor: C.navy, borderWidth: 1.5 },
+  planCardActive: { borderColor: C.green, borderWidth: 2 },
+  planName: { fontSize: 18, fontWeight: '800', color: C.green, flex: 1 },
+  planPrice: { fontSize: 22, fontWeight: '800', color: C.green },
+  planPer: { fontSize: 12, fontWeight: '600', color: C.sub },
+  planFeat: { color: C.text, fontSize: 13, marginTop: 7 },
+  btn2Tag: { marginTop: 12, backgroundColor: C.greenSoft, borderRadius: 10, paddingVertical: 11, alignItems: 'center' },
+  btn2TagText: { color: C.green, fontWeight: '800', fontSize: 13 },
+
+  barTrack: { height: 8, borderRadius: 4, backgroundColor: C.border, marginTop: 5, overflow: 'hidden' },
+  barFill: { height: 8, borderRadius: 4, backgroundColor: C.green },
+  rankDot: { width: 26, height: 26, borderRadius: 13, backgroundColor: C.greenSoft, justifyContent: 'center', alignItems: 'center' },
+  rankDotText: { color: C.green, fontWeight: '800', fontSize: 12 },
 });
