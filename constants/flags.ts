@@ -95,4 +95,27 @@ export const GROUP_E2EE = true;   // enabled 2026-06-28 — needs migration 040;
 // TRUE = on-device queue, but best-effort timing on Android (Doze/OEM kills).
 export const SCHEDULED_LOCAL = false;
 
-export default { E2EE_ENABLED, VAULT_SESSION_SEALED, VAULT_CACHE_ENCRYPTED, MEDIA_E2EE, STORY_E2EE, GROUP_E2EE, SCHEDULED_LOCAL };
+// VB_AUTODOWNLOAD gates VaultBeam auto-download (UITE F2 Phase A): incoming
+// large-file transfers can be accepted automatically per the user's settings
+// (lib/vaultBeamSettings) instead of requiring a manual Accept tap.
+//
+// DEFAULT OFF — when off, VaultBeam behaves exactly as today: every incoming
+// transfer waits for a manual Accept. When on, the policy engine
+// (lib/vaultBeamAutoDownload) decides per transfer; the user's default settings
+// are still conservative (Wi-Fi + trusted-only + 500 MB). The 2.5 GB ceiling
+// below is enforced independently of settings — files ≥ 2.5 GB ALWAYS require a
+// manual Accept (up to the existing 12 GB hard cap).
+export const VB_AUTODOWNLOAD = false;
+
+// Hard ceiling for auto-download, enforced by the engine regardless of user
+// settings and re-checked at dequeue. Manual Accept still works up to 12 GB.
+export const VB_AUTO_MAX_BYTES = 2.5 * 1024 ** 3; // 2,684,354,560 bytes
+
+// VB_RELIABILITY_FIXES gates the relay-receive companions (UITE): a no-progress
+// watchdog (fails a stuck "Downloading 0%" transfer cleanly instead of forever)
+// and recipient on-disk resume (seeds already-written blocks so a dropped
+// download doesn't restart from 0). DEFAULT ON — both only skip re-work or fail
+// a genuine multi-minute stall; flip OFF to restore the exact prior relay path.
+export const VB_RELIABILITY_FIXES = true;
+
+export default { E2EE_ENABLED, VAULT_SESSION_SEALED, VAULT_CACHE_ENCRYPTED, MEDIA_E2EE, STORY_E2EE, GROUP_E2EE, SCHEDULED_LOCAL, VB_AUTODOWNLOAD, VB_AUTO_MAX_BYTES, VB_RELIABILITY_FIXES };
