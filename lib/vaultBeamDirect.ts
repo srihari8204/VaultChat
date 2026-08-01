@@ -35,7 +35,12 @@ try { RTC = require('react-native-webrtc'); } catch { RTC = null; }
 const FRAME = 16 * 1024;            // SCTP-safe datachannel frame (≤16 KiB)
 const BP_HIGH = 4 * 1024 * 1024;    // datachannel backpressure ceiling
 const PULL_WAIT_MS   = 6000;        // recipient: wait for the sender's "ready"
-const SERVE_WAIT_MS  = 20000;       // sender: wait for a pull before giving up to relay
+const SERVE_WAIT_MS  = 60000;       // sender: wait for a pull before giving up to relay
+                                    // (UITE F1: was 20s — widened so a receiver who accepts
+                                    //  a few tens of seconds later still gets fast LAN/P2P
+                                    //  instead of dropping to relay. STALL_MS/CONNECT_MS are
+                                    //  unchanged, so a *dead* tier still bails in ~15s — only
+                                    //  the wait-for-a-live-pull window grew.)
 const CONNECT_MS     = 12000;       // either side: give up on direct if nothing CONNECTS in time
 const P2P_OFFER_MS   = 8000;        // recipient: wait for the sender's datachannel offer
 const STALL_MS       = 15000;       // recipient: abandon a direct tier that goes silent → relay
