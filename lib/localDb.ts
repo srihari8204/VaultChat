@@ -71,6 +71,11 @@ export function getLocalDb(): Promise<LocalDb> {
       } catch {}
       await db.execAsync(`
         PRAGMA journal_mode = WAL;
+        PRAGMA synchronous = NORMAL;
+        PRAGMA busy_timeout = 5000;
+        PRAGMA mmap_size = 268435456;
+        PRAGMA cache_size = -16000;
+        PRAGMA temp_store = MEMORY;
         CREATE TABLE IF NOT EXISTS messages (
           id           INTEGER PRIMARY KEY,
           chat_id      TEXT NOT NULL,

@@ -1,5 +1,3 @@
-import 'react-native-get-random-values';
-import { Buffer } from 'buffer';
 import { E2EE_ENABLED } from '../constants/flags';
 
 export interface EncryptedPayload {
@@ -16,63 +14,34 @@ export interface D2DEStatusLayer {
   label: string;
 }
 
-async function deriveSharedKey(uid1: string, uid2: string): Promise<CryptoKey> {
-  const [a, b] = [uid1, uid2].sort();
-  const enc = new TextEncoder();
-  const base = await crypto.subtle.importKey(
-    'raw', enc.encode(`vaultchat-v1-${a}-${b}`),
-    { name: 'PBKDF2' }, false, ['deriveKey']
-  );
-  return crypto.subtle.deriveKey(
-    { name: 'PBKDF2', salt: enc.encode('vaultchat-aes-gcm-salt-2026'), iterations: 100000, hash: 'SHA-256' },
-    base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
-  );
-}
+// ⚠️ SECURITY (Phase 1 / P1.3): the previous implementation derived the AES-256
+// key from a PBKDF2 over `vaultchat-v1-${sortedUIDs}` plus a hardcoded salt.
+// That input is fully PUBLIC — anyone who knows the two user IDs can reproduce
+// the key, so it was NOT end-to-end encryption despite the "Double Ratchet /
+// X3DH" labels this module reports. These helpers had zero call sites in the
+// client, so no ciphertext exists in the wild to migrate. Rather than leave a
+// public-derivable key primitive lying around for a future caller to pick up,
+// we FAIL CLOSED: the real per-conversation E2EE lives in
+// services/crypto/e2eeSession.rn.ts (X3DH + Double Ratchet), and all message
+// crypto must go through lib/chatService.ts, which uses it.
 
-const keyCache = new Map<string, CryptoKey>();
+const D2DE_REMOVED =
+  'd2deService message crypto was removed: its key was derivable from public ' +
+  'user IDs and is not end-to-end secure. Use the X3DH/Double-Ratchet session ' +
+  'in services/crypto/e2eeSession.rn.ts (via lib/chatService.ts) instead.';
 
-async function getKey(myUid: string, peerUid: string): Promise<CryptoKey> {
-  const k = [myUid, peerUid].sort().join('_');
-  if (!keyCache.has(k)) keyCache.set(k, await deriveSharedKey(myUid, peerUid));
-  return keyCache.get(k)!;
-}
-
-export function clearKeyCache() { keyCache.clear(); }
+export function clearKeyCache(): void { /* no key cache — kept for API compatibility */ }
 
 export async function encryptMessage(
-  plaintext: string, myUid: string, peerUid: string
+  _plaintext: string, _myUid: string, _peerUid: string
 ): Promise<EncryptedPayload> {
-  const key = await getKey(myUid, peerUid);
-  const iv  = crypto.getRandomValues(new Uint8Array(12));
-  const enc = new TextEncoder();
-  const encrypted = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv, tagLength: 128 }, key, enc.encode(plaintext)
-  );
-  // Web Crypto AES-GCM appends the auth tag to the ciphertext automatically.
-  // The tag field is kept for protocol compatibility but is embedded in ciphertext.
-  const encBytes = new Uint8Array(encrypted);
-  const tagStart = encBytes.length - 16; // 128-bit tag = 16 bytes
-  const ciphertextOnly = encBytes.slice(0, tagStart);
-  const tagBytes = encBytes.slice(tagStart);
-  return {
-    ciphertext: Buffer.from(encBytes).toString('base64'),
-    iv:   Buffer.from(iv).toString('base64'),
-    tag:  Buffer.from(tagBytes).toString('base64'),
-    keyId: 'v1-pbkdf2',
-    v: 1,
-  };
+  throw new Error(D2DE_REMOVED);
 }
 
 export async function decryptMessage(
-  payload: EncryptedPayload, myUid: string, peerUid: string
+  _payload: EncryptedPayload, _myUid: string, _peerUid: string
 ): Promise<string> {
-  const key        = await getKey(myUid, peerUid);
-  const iv         = Buffer.from(payload.iv, 'base64');
-  const ciphertext = Buffer.from(payload.ciphertext, 'base64');
-  const dec = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv, tagLength: 128 }, key, ciphertext
-  );
-  return new TextDecoder().decode(dec);
+  throw new Error(D2DE_REMOVED);
 }
 
 // Reports the REAL encryption posture. TLS is always on (transport). The
