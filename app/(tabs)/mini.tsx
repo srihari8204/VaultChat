@@ -26,7 +26,7 @@ const MINI_APPS_MAIN = [
   { id: 'navigate',    icon: '\uD83E\uDDED', name: 'Navigate', route: '/navigate', gradient: ['#4A9FFF', '#1D4ED8'] as [string, string] },
   // Family Space absorbs the old Family Circle + SOS tiles \u2014 one app, one hub.
   { id: 'familyspace', icon: '\uD83D\uDC6A', name: 'Family Space', route: '/family', gradient: ['#7C3AED', '#2563EB'] as [string, string] },
-  { id: 'interest',    icon: '\uD83D\uDCC8', name: 'Interest Calculator', route: '/interest-calculator', gradient: ['#075E54', '#25D366'] as [string, string] },
+  { id: 'finance',     icon: '\uD83D\uDCB0', name: 'Vault Finance', route: '/finance', gradient: ['#6D3FA8', '#9D6FD0'] as [string, string] },
   { id: 'notes',       icon: '\uD83D\uDCDD', name: 'Notes',       route: '/encrypted-notes', gradient: ['#F59E0B', '#D97706'] as [string, string] },
   { id: 'scanner',     icon: '\uD83D\uDCC4', name: 'Scanner',     route: '/docscanner',     gradient: ['#4A9FFF', '#1D4ED8'] as [string, string] },
   { id: 'cloud',       icon: '\u2601\uFE0F', name: 'Cloud',       route: null,              gradient: ['#6B7280', '#4B5563'] as [string, string] },
