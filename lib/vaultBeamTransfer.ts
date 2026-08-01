@@ -22,10 +22,17 @@ import {
 } from './vaultBeamSegments';
 import { recordSample, loadState, saveState } from './networkStateStore';
 import { geometry as geoOf, sample as sampleNs } from './networkState';
+import { VB_RELIABILITY_FIXES } from '../constants/flags';
+import { loadRecvBitmap, saveRecvBitmapSoon, clearRecvBitmap } from './vaultBeamRecvBitmap';
 
 const URL_BATCH = 64;   // matches routes/vaultbeam.js MAX_URLS
 const PARALLEL  = 4;    // concurrent block ops (matches the native I/O pool width)
 const POLL_MS   = 1500; // recipient poll cadence while the sender is still uploading
+// Companion #1: fail a relay receive that makes zero forward progress for this
+// long (neither a new block downloaded nor the server's plan/bitmap growing) —
+// e.g. the sender only tried direct then died, so the recipient would otherwise
+// poll an empty plan forever. Generous, to never trip a merely-slow link.
+const RECV_WATCHDOG_MS = 180_000;
 
 // Battery awareness (UITE §14): on a low, non-charging battery (or OS low-power
 // mode) halve the concurrent block ops — fewer radio bursts + less CPU. Sampled
@@ -137,20 +144,44 @@ export async function receiveTransfer(opts: {
 }): Promise<{ path: string; verified: boolean }> {
   if (!isNativeStreamAvailable()) throw new Error('native stream unavailable');
 
+  // prealloc opens WITHOUT truncate and set_len()s to the full size, so a resumed
+  // receive keeps every block already written to disk (see vaultBeamRecvBitmap).
   await prealloc(opts.dstPath, opts.totalBytes);
   const par = await batteryParallelism();                     // §14: 2 on low battery, else 4
   const got = new Set<number>();
   let downloadedBytes = 0;
   let plan: SegmentPlan | null = null;
 
+  // Companion #3: resume — seed `got` from the persisted on-disk bitmap so a
+  // dropped download continues instead of restarting from block 0.
+  let seeded = false;
+  if (VB_RELIABILITY_FIXES) {
+    try { for (const b of await loadRecvBitmap(opts.transferId)) got.add(b); } catch {}
+    seeded = got.size > 0;
+  }
+  // Companion #1: no-forward-progress watchdog.
+  let lastProgressAt = Date.now();
+  let prevServerHeld = -1;
+
   for (;;) {
     if (opts.signal?.aborted) throw new Error('aborted');
     const st = await relayState(opts.transferId);
     if (st.state === 'aborted') throw new Error('transfer aborted by sender');
     if (st.plan) { const p = deserializePlan(st.plan); if (p) plan = p; }
-    if (!plan) { await wait(POLL_MS); continue; }              // sender hasn't posted geometry yet
+    if (!plan) {
+      if (VB_RELIABILITY_FIXES && Date.now() - lastProgressAt > RECV_WATCHDOG_MS) throw new Error('transfer stalled — the sender never started uploading');
+      await wait(POLL_MS); continue;                           // sender hasn't posted geometry yet
+    }
 
     const p = plan;
+    if (seeded) {                                              // reconcile the seed against the now-known plan, once
+      for (const b of [...got]) if (!locateBlock(p, b)) got.delete(b);
+      downloadedBytes = [...got].reduce((s, b) => s + (locateBlock(p, b)?.blockBytes ?? 0), 0);
+      opts.onProgress?.({ done: got.size, total: totalBlocks(p) || got.size, bytes: Math.min(downloadedBytes, opts.totalBytes), totalBytes: opts.totalBytes });
+      seeded = false; lastProgressAt = Date.now();
+    }
+
+    const serverHeld = uploadedBlocks(st.uploadedMask, st.blockCount).length;
     const avail = uploadedBlocks(st.uploadedMask, st.blockCount).filter((b) => !got.has(b) && locateBlock(p, b));
     for (let i = 0; i < avail.length; i += URL_BATCH) {
       if (opts.signal?.aborted) throw new Error('aborted');
@@ -166,14 +197,22 @@ export async function receiveTransfer(opts: {
         });
         recordSample(opts.linkType, loc.blockBytes, Math.max(1, Date.now() - t0), Date.now()).catch(() => {});
         got.add(blockIndex); downloadedBytes += loc.blockBytes;
+        lastProgressAt = Date.now();                           // real forward progress
+        if (VB_RELIABILITY_FIXES) saveRecvBitmapSoon(opts.transferId, got);   // persist for resume
         opts.onProgress?.({ done: got.size, total: totalBlocks(p) || got.size, bytes: Math.min(downloadedBytes, opts.totalBytes), totalBytes: opts.totalBytes });
       }, opts.signal);
     }
 
     if (isComplete(plan) && got.size >= totalBlocks(plan)) break;  // plan done + every block held
     if (st.state === 'complete') break;                        // relay already purged
+    // Watchdog: the server plan/bitmap growing also counts as progress (sender alive).
+    if (VB_RELIABILITY_FIXES) {
+      if (serverHeld > prevServerHeld) { prevServerHeld = serverHeld; lastProgressAt = Date.now(); }
+      if (Date.now() - lastProgressAt > RECV_WATCHDOG_MS) throw new Error('transfer stalled — no data from the sender');
+    }
     await wait(POLL_MS);
   }
+  if (VB_RELIABILITY_FIXES) clearRecvBitmap(opts.transferId).catch(() => {});   // resume record no longer needed
 
   // Whole-file integrity gate before we let the server purge the only other copy.
   let verified = true;
