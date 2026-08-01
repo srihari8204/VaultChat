@@ -13,6 +13,15 @@ const PREFIXES = ['dec_', 'enc_', 'mp_'];
 
 /** Delete oldest cache files until under the cap. Call at boot (fire-and-forget). */
 export async function sweepMediaCache(): Promise<void> {
+  // P4.2: the message cache is bounded on the same boot sweep as media. It
+  // grew forever, and the local full-scan paths scale with its size. Runs
+  // first and independently — a media-sweep early return must not skip it.
+  try {
+    const { pruneMessageCache } = await import('./localDb');
+    const n = await pruneMessageCache();
+    if (n > 0) console.log(`[cacheGC] pruned ${n} cached message(s)`);
+  } catch { /* best-effort */ }
+
   try {
     const dir = (FileSystem as any).cacheDirectory;
     if (!dir) return;
