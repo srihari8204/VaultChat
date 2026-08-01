@@ -14,7 +14,7 @@ import {
   insertReminder, listReminders, setReminderStatus, snoozeReminder, deleteReminder,
   type Reminder, type ReminderFreq,
 } from '../../db/reminders';
-import { scheduleAt, cancel } from '../../components/finance/notify';
+import { scheduleReminder, scheduleAt, cancel } from '../../components/finance/notify';
 
 const FREQ_LABEL: Record<ReminderFreq, string> = { once: 'Once', daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', yearly: 'Yearly' };
 
@@ -51,7 +51,7 @@ export default function Reminders() {
   const onAdd = async () => {
     if (!me) return;
     if (!title.trim()) return Alert.alert('Title', 'Enter a reminder title.');
-    const notifId = await scheduleAt('Vault Finance', title.trim(), when);
+    const notifId = await scheduleReminder('Vault Finance', title.trim(), freq, when);
     await insertReminder({
       user_id: me.id,
       ref_type: (params.refType as any) ?? null,

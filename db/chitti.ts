@@ -120,7 +120,55 @@ export async function listCollections(groupId: string, month?: number): Promise<
     : d.getAllAsync<ChittiCollection>(`SELECT * FROM chitti_collections WHERE group_id = ?`, [groupId]);
 }
 
+// ── Auctions ────────────────────────────────────────────────────────
+export interface ChittiAuction {
+  id: string;
+  group_id: string;
+  month: number;
+  winner_id: string | null;
+  winner_name: string;
+  winning_bid: number;
+  commission: number;
+  dividend: number;
+  at: number;
+}
+
+/**
+ * Record an auction result. The prize money forgone by the winner (the bid),
+ * minus the foreman commission, is shared equally as a dividend to every member.
+ *   dividend = (winning_bid − commission) / members
+ * One auction per (group, month) — re-recording replaces the earlier one.
+ */
+export async function recordAuction(
+  group: ChittiGroup, month: number, winnerId: string | null, winnerName: string, winningBid: number, commission: number,
+): Promise<ChittiAuction> {
+  const d = await financeDb();
+  const dividend = Math.max(0, (winningBid - commission)) / (group.members || 1);
+  const at = now();
+  const existing = await d.getFirstAsync<ChittiAuction>(`SELECT * FROM chitti_auctions WHERE group_id = ? AND month = ?`, [group.id, month]);
+  const row: ChittiAuction = { id: existing?.id ?? uuid(), group_id: group.id, month, winner_id: winnerId, winner_name: winnerName, winning_bid: winningBid, commission, dividend: Math.round(dividend * 100) / 100, at };
+  if (existing) {
+    await d.runAsync(`UPDATE chitti_auctions SET winner_id=?, winner_name=?, winning_bid=?, commission=?, dividend=?, at=? WHERE id=?`,
+      [row.winner_id, row.winner_name, row.winning_bid, row.commission, row.dividend, row.at, row.id]);
+  } else {
+    await d.runAsync(`INSERT INTO chitti_auctions (id,group_id,month,winner_id,winner_name,winning_bid,commission,dividend,at) VALUES (?,?,?,?,?,?,?,?,?)`,
+      [row.id, row.group_id, row.month, row.winner_id, row.winner_name, row.winning_bid, row.commission, row.dividend, row.at]);
+  }
+  return row;
+}
+
+export async function listAuctions(groupId: string): Promise<ChittiAuction[]> {
+  const d = await financeDb();
+  return d.getAllAsync<ChittiAuction>(`SELECT * FROM chitti_auctions WHERE group_id = ? ORDER BY month ASC`, [groupId]);
+}
+
+export async function deleteAuction(id: string): Promise<void> {
+  const d = await financeDb();
+  await d.runAsync(`DELETE FROM chitti_auctions WHERE id = ?`, [id]);
+}
+
 export default {
   insertGroup, listGroups, getGroup, deleteGroup, setGroupStatus,
   insertMember, listMembers, deleteMember, markCollection, listCollections,
+  recordAuction, listAuctions, deleteAuction,
 };

@@ -12,6 +12,7 @@ export default function FinanceLayout() {
       <Stack.Screen name="ledger/index" />
       <Stack.Screen name="ledger/new" />
       <Stack.Screen name="ledger/[id]" />
+      <Stack.Screen name="ledger/edit" />
       <Stack.Screen name="ledger/update" />
       <Stack.Screen name="chitti/index" />
       <Stack.Screen name="chitti/new" />
@@ -23,6 +24,8 @@ export default function FinanceLayout() {
       <Stack.Screen name="reports" />
       <Stack.Screen name="saved" />
       <Stack.Screen name="io" />
+      <Stack.Screen name="customer" />
+      <Stack.Screen name="search" />
     </Stack>
   );
 }

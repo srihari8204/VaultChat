@@ -70,6 +70,9 @@ export default function FinanceDashboard() {
             <Text style={s.brand}>Vault Finance</Text>
             <Text style={s.brandSub}>All money tools in one place</Text>
           </View>
+          <TouchableOpacity onPress={() => go('/finance/search')} hitSlop={10} style={s.hBtn}>
+            <Ionicons name="search" size={21} color={FIN.text} />
+          </TouchableOpacity>
           <TouchableOpacity onPress={() => go('/finance/reminders')} hitSlop={10} style={s.hBtn}>
             <Ionicons name="notifications-outline" size={22} color={FIN.text} />
             {t.today > 0 && <View style={s.badge}><Text style={s.badgeTxt}>{t.today}</Text></View>}

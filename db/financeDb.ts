@@ -111,6 +111,19 @@ CREATE TABLE IF NOT EXISTS chitti_collections (
 );
 CREATE INDEX IF NOT EXISTS idx_ccoll_group ON chitti_collections(group_id, month ASC);
 
+CREATE TABLE IF NOT EXISTS chitti_auctions (
+  id             TEXT PRIMARY KEY,
+  group_id       TEXT NOT NULL,
+  month          INTEGER NOT NULL,       -- installment month index (1-based)
+  winner_id      TEXT,                   -- winning member id
+  winner_name    TEXT NOT NULL,
+  winning_bid    REAL NOT NULL,          -- amount forgone by the winner
+  commission     REAL NOT NULL,          -- foreman commission
+  dividend       REAL NOT NULL,          -- per-member dividend
+  at             INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cauction_group ON chitti_auctions(group_id, month ASC);
+
 CREATE TABLE IF NOT EXISTS reminders (
   id         TEXT PRIMARY KEY,
   user_id    TEXT NOT NULL,

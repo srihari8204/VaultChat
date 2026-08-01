@@ -115,9 +115,26 @@ export async function listLedgerUpdates(ledgerId: string): Promise<LedgerUpdate[
   return d.getAllAsync<LedgerUpdate>(`SELECT * FROM ledger_updates WHERE ledger_id = ? ORDER BY updated_at DESC`, [ledgerId]);
 }
 
+type EditableFields = Pick<LedgerEntry,
+  'name' | 'mobile' | 'interest_type' | 'principal' | 'rate' | 'rate_mode' | 'period' | 'start_date' | 'end_date' | 'notes'>;
+
+/** Edit a ledger's terms (not the balance). If principal grows and nothing has
+ *  been repaid yet, remaining tracks the new principal. Appends a timeline note. */
+export async function updateLedgerDetails(id: string, f: EditableFields): Promise<void> {
+  const d = await financeDb();
+  const cur = await d.getFirstAsync<LedgerEntry>(`SELECT * FROM ledger_entries WHERE id = ?`, [id]);
+  if (!cur) return;
+  const remaining = cur.remaining === cur.principal ? f.principal : cur.remaining;
+  await d.runAsync(
+    `UPDATE ledger_entries SET name=?, mobile=?, interest_type=?, principal=?, rate=?, rate_mode=?, period=?, start_date=?, end_date=?, notes=?, remaining=?, last_updated=? WHERE id=?`,
+    [f.name, f.mobile, f.interest_type, f.principal, f.rate, f.rate_mode, f.period, f.start_date, f.end_date, f.notes, remaining, now(), id],
+  );
+  await addTimeline('ledger', id, 'edit', `Terms edited · ${f.name} · ₹${f.principal.toLocaleString('en-IN')} @ ${f.rate}${f.rate_mode === 'rupees' ? '₹' : '%'} ${f.period}`);
+}
+
 export async function setLedgerStatus(id: string, status: LedgerStatus): Promise<void> {
   const d = await financeDb();
   await d.runAsync(`UPDATE ledger_entries SET status = ?, last_updated = ? WHERE id = ?`, [status, now(), id]);
 }
 
-export default { insertLedger, listLedger, getLedger, deleteLedger, restoreLedger, addLedgerUpdate, listLedgerUpdates, setLedgerStatus };
+export default { insertLedger, listLedger, getLedger, deleteLedger, restoreLedger, addLedgerUpdate, listLedgerUpdates, updateLedgerDetails, setLedgerStatus };

@@ -1,7 +1,9 @@
 // components/finance/notify.ts — thin wrapper over expo-notifications for the
-// finance reminders. One-shot local notifications scheduled at a given time.
+// finance reminders. Supports one-shot and truly recurring local notifications
+// (daily / weekly / monthly / yearly) via calendar triggers.
 
 import * as Notifications from 'expo-notifications';
+import type { ReminderFreq } from '../../db/reminders';
 
 let _asked = false;
 
@@ -16,18 +18,35 @@ export async function ensureNotifyPermission(): Promise<boolean> {
   } catch { return false; }
 }
 
-/** Schedule a local notification at `at` (epoch ms). Returns its id, or null. */
-export async function scheduleAt(title: string, body: string, at: number): Promise<string | null> {
+/** Build the expo-notifications trigger for a frequency anchored at `at`. */
+function triggerFor(freq: ReminderFreq, at: number): any {
+  const d = new Date(Math.max(Date.now() + 1000, at));
+  const hour = d.getHours(), minute = d.getMinutes();
+  switch (freq) {
+    case 'daily':   return { type: 'daily', hour, minute };
+    // expo weekday: 1 = Sunday … 7 = Saturday
+    case 'weekly':  return { type: 'weekly', weekday: d.getDay() + 1, hour, minute };
+    case 'monthly': return { type: 'monthly', day: d.getDate(), hour, minute };
+    case 'yearly':  return { type: 'yearly', month: d.getMonth() + 1, day: d.getDate(), hour, minute };
+    default:        return { date: d };   // 'once'
+  }
+}
+
+/** Schedule a (possibly recurring) local notification. Returns its id, or null. */
+export async function scheduleReminder(title: string, body: string, freq: ReminderFreq, at: number): Promise<string | null> {
   const ok = await ensureNotifyPermission();
   if (!ok) return null;
-  const when = Math.max(Date.now() + 1000, at);
   try {
     return await Notifications.scheduleNotificationAsync({
       content: { title, body },
-      // Cast: trigger shape varies across expo-notifications versions.
-      trigger: { date: new Date(when) } as any,
+      trigger: triggerFor(freq, at) as any,   // trigger shape varies across versions
     });
   } catch { return null; }
+}
+
+/** One-shot at a specific time (used for snooze). */
+export async function scheduleAt(title: string, body: string, at: number): Promise<string | null> {
+  return scheduleReminder(title, body, 'once', at);
 }
 
 export async function cancel(notifId: string | null): Promise<void> {

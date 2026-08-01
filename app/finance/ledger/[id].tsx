@@ -65,7 +65,10 @@ export default function LedgerDetail() {
   return (
     <View style={s.screen}>
       <FinHeader title="Ledger Details" right={
-        <TouchableOpacity onPress={onShare} hitSlop={8}><Ionicons name="share-outline" size={22} color={FIN.text} /></TouchableOpacity>
+        <>
+          <TouchableOpacity onPress={() => router.push({ pathname: '/finance/ledger/edit', params: { id: e.id } })} hitSlop={8}><Ionicons name="create-outline" size={22} color={FIN.text} /></TouchableOpacity>
+          <TouchableOpacity onPress={onShare} hitSlop={8}><Ionicons name="share-outline" size={22} color={FIN.text} /></TouchableOpacity>
+        </>
       } />
       <ScrollView contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
         {/* Contact */}
@@ -73,10 +76,11 @@ export default function LedgerDetail() {
           <View style={[s.avatar, { backgroundColor: lent ? FIN.goodSoft : FIN.badSoft }]}>
             <Ionicons name={lent ? 'arrow-up' : 'arrow-down'} size={20} color={lent ? FIN.good : FIN.bad} />
           </View>
-          <View style={{ flex: 1 }}>
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={0.7}
+            onPress={() => router.push({ pathname: '/finance/customer', params: { name: e.name } })}>
             <Text style={s.name}>{e.name}</Text>
-            {e.mobile ? <Text style={s.mobile}>{e.mobile}</Text> : null}
-          </View>
+            <Text style={s.mobile}>{e.mobile ? `${e.mobile} · ` : ''}View profile ›</Text>
+          </TouchableOpacity>
           <Pill label={sc.label} fg={sc.fg} bg={sc.bg} />
         </View>
 
