@@ -1702,10 +1702,25 @@ func userBookmarksPost(w http.ResponseWriter, r *http.Request) {
 
 	// Verify the caller is still an active member of the message's chat.
 	// Two-step so we return 404 for unknown messages vs 403 for member-loss.
+	//
+	// The message read is BOUND to the caller so RLS backs up the check below
+	// rather than the check standing alone. Two independent gates:
+	//
+	//   RLS enforced   → a non-member's read returns no rows → 404, and the
+	//                    membership check never runs. The handler is correct
+	//                    even if that check were removed or written wrongly.
+	//   RLS not enforced (today — see docs/RLS_ENFORCEMENT.md)
+	//                  → the read succeeds and the membership check answers 403,
+	//                    exactly as it does now. No behaviour change.
+	//
+	// So enforcing RLS turns some 403s into 404s on this path. That is the
+	// safer of the two: a 403 confirms the message exists, a 404 does not.
 	var mid int64
 	var chatID string
-	err := db.SysPool.QueryRow(ctx,
-		`SELECT m.id, m.chat_id FROM messages m WHERE m.id = $1 LIMIT 1`, messageID).Scan(&mid, &chatID)
+	err := db.WithUser(ctx, user.ID, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx,
+			`SELECT m.id, m.chat_id FROM messages m WHERE m.id = $1 LIMIT 1`, messageID).Scan(&mid, &chatID)
+	})
 	if err != nil {
 		if db.NoRows(err) {
 			httpx.Err(w, 404, "Message not found")
@@ -1715,10 +1730,12 @@ func userBookmarksPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var one int
-	err = db.SysPool.QueryRow(ctx,
-		`SELECT 1 FROM chat_members
-	      WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL`,
-		chatID, user.ID).Scan(&one)
+	err = db.WithUser(ctx, user.ID, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx,
+			`SELECT 1 FROM chat_members
+		      WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL`,
+			chatID, user.ID).Scan(&one)
+	})
 	if err != nil {
 		if db.NoRows(err) {
 			httpx.Err(w, 403, "Not a member of this chat")

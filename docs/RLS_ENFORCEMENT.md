@@ -130,10 +130,44 @@ They fall into three kinds, and none of them is a mistake to be converted:
   hide the row and silently turn those into 404s — a behaviour change, not an
   improvement.
 
-The third kind is the honest follow-up: those could be tightened to
-`db.WithUser` so RLS backs up the manual check, at the cost of changing some
-403s to 404s. That is a deliberate API decision, so I left it alone rather than
-bundling it into a security fix.
+The third kind was the honest follow-up, and **one of them is now done**:
+`POST /user/bookmarks` reads a message by id and then checks membership itself.
+That read is bound to the caller now, so the database backs the check up instead
+of it standing alone. Measured both ways on Postgres 16:
+
+```
+ENFORCED (owner=postgres, FORCE on)      member: 1 row | non-member: 0 rows
+BYPASSED (owner=app, FORCE off)          member: 1 row | non-member: 1 row
+```
+
+Which means the handler behaves correctly under either:
+
+| | outcome |
+|---|---|
+| RLS enforced | the read returns nothing → **404**, the membership check never runs |
+| RLS bypassed (today) | the read succeeds → the manual check answers **403**, exactly as before |
+
+So enforcing RLS turns some 403s into 404s here. That is the safer direction: a
+403 confirms the message exists, a 404 does not.
+
+### Deliberately not changed: the bookmarks LIST
+
+`GET /user/bookmarks` LEFT JOINs `messages` and `chats` to render each saved
+item. Binding it to the caller would blank out any bookmark whose chat the user
+has since **left** — their own saved item would lose its content.
+
+That is a product decision, not a security fix, and it cuts both ways: retaining
+a message from a chat you left is arguably the leak, and losing your own saved
+item is arguably the bug. The stored body is E2EE ciphertext either way, so the
+exposure is smaller than it first looks. Left alone deliberately — say which
+behaviour you want and it is a one-line change.
+
+### Also corrected
+
+One query marked `SysPool` was `SELECT NOW()`. It touches no table, so there is
+nothing for RLS to gate, and labelling it as a system query weakened the very
+thing the label is for: `SysPool` is meant to be a claim a reviewer can trust —
+"this must see rows no user may see". It is back on the plain pool.
 
 ## What I did and did not change
 

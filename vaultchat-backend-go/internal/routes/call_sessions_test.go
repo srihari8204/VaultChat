@@ -103,6 +103,22 @@ func adminExec(ctx context.Context, q string) error {
 	return err
 }
 
+// adminQueryRow is adminExec's read counterpart, for a fixture that needs a
+// generated id back. Same reason it exists: the app role cannot create these
+// rows under enforced RLS.
+func adminQueryRow(ctx context.Context, q string, dest ...any) error {
+	dsn := os.Getenv("CALL_TEST_ADMIN_DSN")
+	if dsn == "" {
+		return fmt.Errorf("CALL_TEST_ADMIN_DSN is required to seed fixtures")
+	}
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		return err
+	}
+	defer conn.Close(ctx)
+	return conn.QueryRow(ctx, q).Scan(dest...)
+}
+
 func seed(t *testing.T, ctx context.Context) {
 	t.Helper()
 	cleanupFixtures(ctx)

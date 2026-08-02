@@ -330,7 +330,11 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var serverTime time.Time
-	if err := db.SysPool.QueryRow(ctx, `SELECT NOW() AS now`).Scan(&serverTime); err != nil {
+	// Plain pool: reading the clock touches no table, so there is nothing for
+	// RLS to gate. Marking it SysPool would be a false claim — that label means
+	// "this must see rows no user may see", and a reviewer should be able to
+	// trust it.
+	if err := db.Pool.QueryRow(ctx, `SELECT NOW() AS now`).Scan(&serverTime); err != nil {
 		log.Printf("[chats/delta] %v", err)
 		httpx.Err(w, 500, "delta failed")
 		return
