@@ -11,9 +11,10 @@
  *  - registers CallPackage in MainApplication
  *
  * iOS:
- *  - background modes: voip, audio (CallKit/PushKit). The PushKit/CallKit Swift
- *    glue is documented in CALLS_README.md (manual AppDelegate addition) since a
- *    robust automated Swift patch is brittle; iOS is secondary for this app.
+ *  - background modes: audio + remote-notification. `voip` is GATED behind
+ *    IOS_CALLKIT_IMPLEMENTED below — see the note there before flipping it.
+ *    The PushKit/CallKit Swift glue is documented in CALLS_README.md (manual
+ *    AppDelegate addition) since a robust automated Swift patch is brittle.
  *
  * Run: expo prebuild --clean   (the plugin runs during prebuild)
  */
@@ -155,10 +156,30 @@ function withFirebaseMessaging(config) {
   });
 }
 
+/**
+ * Flip to true ONLY together with a real PushKit + CallKit implementation.
+ *
+ * The `voip` background mode is not a hint to iOS — it is a claim that the app
+ * registers a PKPushRegistry for .voIP pushes and reports every one of them to
+ * CallKit via CXProvider.reportNewIncomingCall() immediately on arrival. There
+ * is no such code in this app yet (lib/CallService.ts:21 gates the whole native
+ * call surface behind Platform.OS === 'android'), so declaring the mode today
+ * buys nothing at runtime and is a documented App Review rejection trigger.
+ *
+ * Worse than the rejection: iOS revokes an app's VoIP push privileges if it
+ * receives a VoIP push and fails to report a call, so shipping the entitlement
+ * ahead of the implementation is actively harmful.
+ *
+ * `audio` and `remote-notification` stay — the app really does play audio in the
+ * background (voice notes, video) and really does receive remote notifications.
+ */
+const IOS_CALLKIT_IMPLEMENTED = false;
+
 function withIosVoip(config) {
   return withInfoPlist(config, (cfg) => {
     const modes = new Set(cfg.modResults.UIBackgroundModes || []);
-    modes.add('voip');
+    if (IOS_CALLKIT_IMPLEMENTED) modes.add('voip');
+    else modes.delete('voip');   // never leave a stale entitlement behind
     modes.add('audio');
     modes.add('remote-notification');
     cfg.modResults.UIBackgroundModes = Array.from(modes);

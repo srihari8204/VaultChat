@@ -23,6 +23,8 @@
         "NSContactsUsageDescription": "VaultChat needs contacts to find people you know",
         "NSLocationWhenInUseUsageDescription": "VaultChat needs location to share your position with contacts",
         "NSPhotoLibraryUsageDescription": "VaultChat needs photo access to send and save media",
+        "NSPhotoLibraryAddUsageDescription": "VaultChat saves photos and videos you download or create to your photo library.",
+        "NSLocalNetworkUsageDescription": "VaultChat sends large files directly to a nearby device over your local network, so the transfer is fast and the file never leaves your network.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "VaultChat shares your location with your Family Space circle so they can see you are safe. This continues in the background only while location sharing is switched on.",
         "NSLocationAlwaysUsageDescription": "VaultChat shares your location with your Family Space circle while location sharing is switched on.",
         "NSMotionUsageDescription": "VaultChat uses motion to tell whether you are moving, so Family Space can slow location updates when you are still and save battery.",
