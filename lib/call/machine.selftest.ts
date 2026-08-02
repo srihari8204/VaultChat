@@ -10,7 +10,7 @@ import {
   durationSeconds, reduce, shouldCancelRing, startSnapshot, wasMissed,
   type CallEvent,
 } from './machine';
-import type { CallSnapshot } from './types';
+import { MAX_CALL_CHAT, MAX_CALL_REACTIONS, type CallSnapshot } from './types';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail?: string) {
@@ -102,6 +102,48 @@ mesh = reduce(mesh, { type: 'peer_muted', uid: 'b', muted: true }, T0);
 eq('peer mute tracked', mesh.participants.b.muted, true);
 check('repeat peer_muted is a no-op',
   reduce(mesh, { type: 'peer_muted', uid: 'b', muted: true }, T0) === mesh);
+
+console.log('\nin-call chat + reactions:');
+const line = (id: string, mine: boolean, text = id) =>
+  ({ id, uid: mine ? 'me' : 'them', name: 'Them', text, at: T0, mine });
+
+let ch = reduce(connected, { type: 'chat', message: line('1', false, 'hi') }, T0);
+eq('a peer line lands', ch.chat.map(m => m.text), ['hi']);
+eq('and counts as unread', ch.chatUnread, 1);
+ch = reduce(ch, { type: 'chat', message: line('2', true, 'hello') }, T0);
+eq('ordering is oldest-first', ch.chat.map(m => m.text), ['hi', 'hello']);
+eq('our OWN line is never unread', ch.chatUnread, 1);
+ch = reduce(ch, { type: 'chat_read' }, T0);
+eq('opening the sheet clears the badge', ch.chatUnread, 0);
+check('a second chat_read is a no-op',
+  reduce(ch, { type: 'chat_read' }, T0) === ch);
+check('the history survives being read', ch.chat.length === 2);
+
+// The cap must drop the OLDEST, never the arrival — losing the line that just
+// came in is the one failure a user would actually notice.
+let full = connected;
+for (let i = 0; i < MAX_CALL_CHAT + 5; i++) {
+  full = reduce(full, { type: 'chat', message: line(`m${i}`, false, `m${i}`) }, T0);
+}
+eq('chat is capped', full.chat.length, MAX_CALL_CHAT);
+eq('the newest line is kept', full.chat[full.chat.length - 1].text, `m${MAX_CALL_CHAT + 4}`);
+eq('the oldest were dropped', full.chat[0].text, 'm5');
+eq('unread counts every peer line, uncapped', full.chatUnread, MAX_CALL_CHAT + 5);
+
+let rx = connected;
+for (let i = 0; i < MAX_CALL_REACTIONS + 3; i++) {
+  rx = reduce(rx, { type: 'reaction', reaction: { id: `r${i}`, uid: 'them', emoji: '👍', at: T0 } }, T0);
+}
+eq('reactions are capped', rx.reactions.length, MAX_CALL_REACTIONS);
+eq('newest reaction kept', rx.reactions[rx.reactions.length - 1].id, `r${MAX_CALL_REACTIONS + 2}`);
+
+// Invariant 1 covers the new events too: a message racing teardown is dropped,
+// not appended to a call that has already been logged and disposed.
+const dead = reduce(connected, { type: 'end', reason: 'local_hangup' }, T0);
+check('chat after end is ignored',
+  reduce(dead, { type: 'chat', message: line('late', false) }, T0) === dead);
+check('reaction after end is ignored',
+  reduce(dead, { type: 'reaction', reaction: { id: 'late', uid: 'them', emoji: '👍', at: T0 } }, T0) === dead);
 
 console.log('\nlog derivation (what addCallLog needs):');
 eq('duration of a connected call', durationSeconds(connected, T0 + 65_400), 65);

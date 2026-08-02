@@ -58,6 +58,8 @@ export async function attachCallListeners(handlers: {
   onIce: (from: string, candidate: any) => void;
   onEnd: (from: string) => void;
   onPeerScreenShare: (from: string, on: boolean) => void;
+  onChat: (from: string, sealed: any) => void;
+  onReaction: (from: string, sealed: any) => void;
 }): Promise<Off> {
   const s = await getSocket();
   const route = (fn: (from: string, d: any) => void) => (d: any) => {
@@ -71,6 +73,8 @@ export async function attachCallListeners(handlers: {
   const onEnd     = route((from) => handlers.onEnd(from));
   const onShare   = route((from) => handlers.onPeerScreenShare(from, true));
   const onUnshare = route((from) => handlers.onPeerScreenShare(from, false));
+  const onChat    = route((from, d) => handlers.onChat(from, d?.text));
+  const onEmoji   = route((from, d) => handlers.onReaction(from, d?.emoji));
 
   s.on('webrtc_offer', onOffer);
   s.on('webrtc_answer', onAnswer);
@@ -78,10 +82,13 @@ export async function attachCallListeners(handlers: {
   s.on('webrtc_end', onEnd);
   s.on('screen_share_start', onShare);
   s.on('screen_share_stop', onUnshare);
+  s.on('call_chat', onChat);
+  s.on('call_emoji', onEmoji);
   return () => {
     for (const [e, h] of [['webrtc_offer', onOffer], ['webrtc_answer', onAnswer],
       ['webrtc_ice', onIce], ['webrtc_end', onEnd],
-      ['screen_share_start', onShare], ['screen_share_stop', onUnshare]] as const) {
+      ['screen_share_start', onShare], ['screen_share_stop', onUnshare],
+      ['call_chat', onChat], ['call_emoji', onEmoji]] as const) {
       try { s.off(e, h as any); } catch {}
     }
   };
@@ -169,6 +176,29 @@ export async function sendScreenShare(to: string, chatId: string, on: boolean): 
   try {
     (await getSocket()).emit(on ? 'screen_share_start' : 'screen_share_stop', { to, chatId });
   } catch {}
+}
+
+/**
+ * In-call chat and reactions, sent to ONE peer at a time.
+ *
+ * `sealed` is a CallCipher envelope, not a string — this is the same messenger
+ * whose every other message is end-to-end encrypted, and an in-call side channel
+ * that quietly wasn't would be the one place your text is readable by the
+ * server. The engine seals per peer, so a mesh sends N envelopes rather than one
+ * plaintext broadcast.
+ *
+ * Both events are addressed with `to` and travel the authenticated relay that
+ * stamps `from` server-side (the same one webrtc_* uses). They previously rode a
+ * chat-room broadcast that trusted a client-supplied `from` — spoofable by any
+ * chat member, whether or not they were in the call. No client ever sent or
+ * received either event, so nothing depended on the old shape.
+ */
+export async function sendCallChat(to: string, chatId: string, sealed: any): Promise<void> {
+  try { (await getSocket()).emit('call_chat', { to, chatId, text: sealed }); } catch {}
+}
+
+export async function sendCallEmoji(to: string, chatId: string, sealed: any): Promise<void> {
+  try { (await getSocket()).emit('call_emoji', { to, chatId, emoji: sealed }); } catch {}
 }
 
 /**

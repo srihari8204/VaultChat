@@ -28,6 +28,7 @@ import { newCallCipher, openCallOffer, plainCipher, type CallCipher } from '../l
 import { addCallLog } from '../lib/callLog';
 import { CallTimer, elapsedSeconds } from '../components/call/CallTimer';
 import { CallControlButton } from '../components/call/CallControlButton';
+import { CallExtras } from '../components/call/CallExtras';
 import { CALL_ENGINE_V2 } from '../constants/flags';
 import * as engine from '../lib/call/engine';
 import {
@@ -285,6 +286,8 @@ function VideoCallEngine() {
           </ScrollView>
         </View>
       )}
+
+      {status === 'connected' && <CallExtras bottom={insets.bottom + 108} />}
 
       <View style={[S.controls, { bottom: insets.bottom + 12 }]}>
         <CallControlButton variant="video" icon={muted ? 'mic-off' : 'mic'} label={muted ? 'Unmute' : 'Mute'} active={muted} onPress={engine.toggleMute} />

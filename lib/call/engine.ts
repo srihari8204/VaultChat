@@ -42,7 +42,7 @@ import { CallPeer } from './peer';
 import { durationSeconds, shouldCancelRing, wasMissed, type CallFlag } from './machine';
 import { INITIAL_CURSOR, INITIAL_QUALITY, TIERS, nextQuality, sampleFromTotals } from './quality';
 import { dispatch, getSnapshot, begin, reset } from './store';
-import type { CallKind, EndReason } from './types';
+import type { CallChatMessage, CallKind, EndReason } from './types';
 
 interface Session {
   chatId: string;
@@ -51,6 +51,8 @@ interface Session {
   peerName: string;
   kind: CallKind;
   meId: string;
+  /** Our own display name, so our in-call chat lines are attributed. */
+  meName: string;
   /**
    * Every remote participant, keyed by uid. A 1:1 call holds exactly one entry
    * — that is the whole point: "1:1 is a mesh with N=1", so there is one code
@@ -168,6 +170,68 @@ function addPeer(s: Session, uid: string, name: string, iceServers: any[]): Call
   return peer;
 }
 
+// ── in-call chat + reactions ──────────────────────────────────────────
+//
+// Both ride the per-peer CallCipher the call already established, so the side
+// channel is encrypted by exactly the mechanism the SDP is. A mesh seals once
+// per link and sends N envelopes; there is no shared group key to leak and no
+// plaintext path. A peer on an older build has `plainCipher`, and its seal/open
+// are transparent — such a peer simply can't be reached with anything the server
+// couldn't already read, which is the honest degradation, not a silent one.
+
+let chatSeq = 0;
+const nextId = (): string => `${Date.now().toString(36)}-${(chatSeq++).toString(36)}`;
+
+const chatMessage = (uid: string, name: string, text: string, mine: boolean): CallChatMessage =>
+  ({ id: nextId(), uid, name, text, at: Date.now(), mine });
+
+/** Display name for a peer: the roster name, else the 1:1 peer name. */
+function peerNameOf(s: Session, uid: string): string {
+  return getSnapshot().participants[uid]?.name || (s.wire === 'direct' ? s.peerName : '') || 'Participant';
+}
+
+/** Open an envelope from a known peer. Returns undefined for anything else. */
+function openFromPeer(s: Session, from: string, sealed: any): any {
+  const peer = s.peers.get(from);
+  if (!peer) return undefined;
+  try { return peer.getCipher().open(sealed); } catch { return undefined; }
+}
+
+/** Seal `body` for every peer and hand each envelope to `send`. */
+function fanOutSealed(s: Session, body: string, send: (to: string, sealed: any) => Promise<void>): void {
+  for (const [uid, peer] of s.peers) {
+    try { send(uid, peer.getCipher().seal(body)).catch(() => {}); } catch {}
+  }
+}
+
+/**
+ * Send a line of in-call chat. Trimmed and length-capped here rather than in the
+ * UI so every caller gets the same bound, and echoed locally so our own message
+ * appears immediately instead of waiting on a round trip that never comes back
+ * (the relay excludes the sender).
+ */
+export function sendChat(text: string): void {
+  const s = session;
+  const body = String(text ?? '').trim().slice(0, 500);
+  if (!s || s.disposed || !body) return;
+  fanOutSealed(s, body, (to, sealed) => signal.sendCallChat(to, s.chatId, sealed));
+  dispatch({ type: 'chat', message: chatMessage(s.meId, s.meName, body, true) });
+}
+
+/** Send a tapped reaction. Same path, same encryption, same local echo. */
+export function sendReaction(emoji: string): void {
+  const s = session;
+  const body = String(emoji ?? '').slice(0, 8);
+  if (!s || s.disposed || !body) return;
+  fanOutSealed(s, body, (to, sealed) => signal.sendCallEmoji(to, s.chatId, sealed));
+  dispatch({ type: 'reaction', reaction: { id: nextId(), uid: s.meId, emoji: body, at: Date.now() } });
+}
+
+/** The chat sheet is open — clear the unread badge. */
+export function markChatRead(): void {
+  dispatch({ type: 'chat_read' });
+}
+
 /** Close and forget a participant. Safe to call for an unknown uid. */
 function removePeer(s: Session, uid: string): void {
   const peer = s.peers.get(uid);
@@ -206,7 +270,7 @@ async function bootstrap(a: StartArgs, direction: 'outgoing' | 'incoming', wire:
 
   begin({ ...a, direction });
   session = {
-    ...a, meId: '', peers: new Map(), wire, localStream: null, screenStream: null,
+    ...a, meId: '', meName: '', peers: new Map(), wire, localStream: null, screenStream: null,
     cameraTrack: null, disposers: [], logged: false, disposed: false,
   };
   const s = session;
@@ -216,6 +280,7 @@ async function bootstrap(a: StartArgs, direction: 'outgoing' | 'incoming', wire:
   const me = await getCachedUser();
   if (!me?.id) throw new Error('Not signed in');
   s.meId = me.id;
+  s.meName = me.name ?? me.email ?? 'You';
 
   const local = await media.acquireLocalMedia(a.kind);
   if (s.disposed) { media.stopStream(local.stream); throw new Error('cancelled'); }
@@ -246,6 +311,18 @@ async function bootstrap(a: StartArgs, direction: 'outgoing' | 'incoming', wire:
       else removePeer(s, from);
     },
     onPeerScreenShare: (_from, on) => dispatch({ type: 'flag', key: 'peerSharing', value: on }),
+    onChat: (from, sealed) => {
+      const text = openFromPeer(s, from, sealed);
+      if (typeof text === 'string' && text) {
+        dispatch({ type: 'chat', message: chatMessage(from, peerNameOf(s, from), text, false) });
+      }
+    },
+    onReaction: (from, sealed) => {
+      const emoji = openFromPeer(s, from, sealed);
+      if (typeof emoji === 'string' && emoji) {
+        dispatch({ type: 'reaction', reaction: { id: nextId(), uid: from, emoji, at: Date.now() } });
+      }
+    },
   });
   onDispose(detach);
 

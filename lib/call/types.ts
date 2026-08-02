@@ -49,6 +49,43 @@ export interface Participant {
 }
 
 /**
+ * One line of in-call text chat.
+ *
+ * In-call chat is NOT the chat thread: it lives for the duration of the call,
+ * is never written to the message store, and leaves no trace on either device
+ * afterwards. That is deliberate — it is the side-channel you use to paste a
+ * link or say "you're muted", not a second place your history hides in.
+ *
+ * `mine` is resolved at dispatch time so the renderer never has to know its own
+ * uid, and `uid` is the SERVER-stamped sender (see lib/call/signal.ts) rather
+ * than anything the sender asserted about itself.
+ */
+export interface CallChatMessage {
+  id: string;
+  uid: string;
+  name: string;
+  text: string;
+  at: number;
+  mine: boolean;
+}
+
+/**
+ * A tapped reaction, floating up over the video and gone. Held in the snapshot
+ * only long enough for the UI to pick it up and animate it; `id` is what lets a
+ * memoized burst component animate each one exactly once.
+ */
+export interface CallReaction {
+  id: string;
+  uid: string;
+  emoji: string;
+  at: number;
+}
+
+/** Bounds. A call cannot grow unbounded state no matter how long it runs. */
+export const MAX_CALL_CHAT = 60;
+export const MAX_CALL_REACTIONS = 8;
+
+/**
  * The immutable snapshot screens render from. Replaced wholesale on every
  * change so `useSyncExternalStore` reference checks work; individual selectors
  * (hooks/useCall.ts) then narrow it so a mute toggle does not re-render video.
@@ -86,6 +123,13 @@ export interface CallSnapshot {
   localUrl: string | null;
   /** Keyed by uid. In 1:1 this holds exactly one entry once media arrives. */
   participants: Readonly<Record<string, Participant>>;
+
+  /** In-call chat, oldest first, capped at MAX_CALL_CHAT. */
+  chat: readonly CallChatMessage[];
+  /** Messages that arrived while the chat sheet was closed. */
+  chatUnread: number;
+  /** Recent reactions, capped at MAX_CALL_REACTIONS. */
+  reactions: readonly CallReaction[];
 }
 
 export const IDLE_SNAPSHOT: CallSnapshot = Object.freeze({
@@ -107,6 +151,9 @@ export const IDLE_SNAPSHOT: CallSnapshot = Object.freeze({
   held: false,
   localUrl: null,
   participants: Object.freeze({}),
+  chat: Object.freeze([]),
+  chatUnread: 0,
+  reactions: Object.freeze([]),
 });
 
 export default {};

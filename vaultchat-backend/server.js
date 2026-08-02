@@ -928,14 +928,13 @@ io.on('connection', (socket) => {
     if (chatId) socket.to(`chat:${chatId}`).emit('reaction_updated', { messageId, reactions });
   });
 
-  // ── In-call extras ─────────────────────────────────────────
-  socket.on('call_emoji', ({ chatId, emoji, from }) => {
-    if (chatId) socket.to(`chat:${chatId}`).emit('call_emoji', { emoji, from });
-  });
-
-  socket.on('call_chat', ({ chatId, text, from }) => {
-    if (chatId) socket.to(`chat:${chatId}`).emit('call_chat', { text, from });
-  });
+  // NOTE: the in-call extras (`call_emoji`, `call_chat`) were chat-room
+  // broadcasts that re-emitted a CLIENT-supplied `from` — the same spoofing
+  // shape the message_edited/message_deleted relays above were removed for, and
+  // they reached every chat member rather than the people actually on the call.
+  // Both now ride relayToPeer (below), which requires a `to`, stamps the
+  // authenticated sender, and forwards the payload verbatim so the body can be
+  // an E2EE envelope instead of plaintext. No client had ever used either event.
 
   // ── WebRTC signaling ──────────────────────────────────────
   // Targets a specific peer by uid. Sender must include `to: <peer uid>`.
@@ -998,6 +997,9 @@ io.on('connection', (socket) => {
   });
   socket.on('screen_share_start', relayToPeer('screen_share_start'));
   socket.on('screen_share_stop',  relayToPeer('screen_share_stop'));
+  // In-call chat + reactions — addressed, authenticated, body opaque (E2EE).
+  socket.on('call_chat',          relayToPeer('call_chat'));
+  socket.on('call_emoji',         relayToPeer('call_emoji'));
   // VaultBeam P2P file transfer — own signaling channel so it never collides
   // with an in-progress call.
   socket.on('vaultbeam_offer',    relayToPeer('vaultbeam_offer'));

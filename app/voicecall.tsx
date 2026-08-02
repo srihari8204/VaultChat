@@ -38,6 +38,7 @@ import { startCallForeground, stopCallForeground, dismissIncomingNotification, i
 import { newCallCipher, openCallOffer, plainCipher, type CallCipher } from '../lib/callCrypto';
 import { CallTimer, elapsedSeconds } from '../components/call/CallTimer';
 import { CallControlButton } from '../components/call/CallControlButton';
+import { CallExtras } from '../components/call/CallExtras';
 import { CALL_ENGINE_V2 } from '../constants/flags';
 import * as engine from '../lib/call/engine';
 import { useCallConnectedAt, useCallError, useCallFlag, useCallStatus } from '../hooks/useCall';
@@ -127,6 +128,8 @@ function VoiceCallEngine() {
           : <Text style={S.status}>{statusText}</Text>}
         {error && <Text style={S.errorTxt}>{error}</Text>}
       </View>
+
+      {status === 'connected' && <CallExtras bottom={insets.bottom + 116} />}
 
       <View style={[S.controls, { paddingBottom: insets.bottom + 24 }]}>
         <CallControlButton icon={muted ? 'mic-off' : 'mic'} label={muted ? 'Unmute' : 'Mute'} active={muted} onPress={engine.toggleMute} />

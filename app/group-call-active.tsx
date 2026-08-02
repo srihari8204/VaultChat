@@ -24,6 +24,7 @@ import { newCallCipher, openCallOffer, plainCipher, type CallCipher } from '../l
 import { getCurrentUserAsync } from './(constants)/authService';
 import * as engine from '../lib/call/engine';
 import { CallTimer } from '../components/call/CallTimer';
+import { CallExtras } from '../components/call/CallExtras';
 import {
   useCallConnectedAt, useCallError, useCallFlag, useCallLocalUrl,
   useCallStatus, useParticipant, useParticipantIds,
@@ -137,6 +138,8 @@ function GroupCallEngine() {
           <ParticipantTile key={uid} uid={uid} width={tileW} isVideo={isVideo} />
         ))}
       </ScrollView>
+
+      {status === 'connected' && <CallExtras bottom={110} />}
 
       <View style={S.controls}>
         <CtrlBtn icon={muted ? 'mic-off' : 'mic'} active={muted} onPress={engine.toggleMute} colors={colors} />

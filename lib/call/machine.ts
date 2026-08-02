@@ -24,7 +24,10 @@
 //   5. Unchanged input returns the SAME object reference, so useSyncExternalStore
 //      does not wake subscribers for a no-op.
 
-import { IDLE_SNAPSHOT, type CallSnapshot, type EndReason, type Participant } from './types';
+import {
+  IDLE_SNAPSHOT, MAX_CALL_CHAT, MAX_CALL_REACTIONS,
+  type CallChatMessage, type CallReaction, type CallSnapshot, type EndReason, type Participant,
+} from './types';
 
 /** Local device toggles that never affect the lifecycle. */
 export type CallFlag = 'muted' | 'speaker' | 'cameraOff' | 'sharing' | 'peerSharing' | 'held';
@@ -42,6 +45,12 @@ export type CallEvent =
   | { type: 'peer_left'; uid: string }
   | { type: 'peer_muted'; uid: string; muted: boolean }
   | { type: 'flag'; key: CallFlag; value: boolean }
+  /** One line of in-call chat, ours or a peer's. */
+  | { type: 'chat'; message: CallChatMessage }
+  /** The chat sheet is open — clear the unread badge. */
+  | { type: 'chat_read' }
+  /** A tapped reaction, ours or a peer's. */
+  | { type: 'reaction'; reaction: CallReaction }
   | { type: 'error'; message: string }
   | { type: 'end'; reason: EndReason };
 
@@ -144,6 +153,22 @@ export function reduce(s: CallSnapshot, e: CallEvent, now: number): CallSnapshot
     case 'flag':
       if (s[e.key] === e.value) return s;
       return { ...s, [e.key]: e.value };
+
+    case 'chat': {
+      // Dropping the OLDEST keeps a long call bounded without ever losing the
+      // line that just arrived — the opposite choice would silently discard
+      // exactly the message the user is waiting to read.
+      const chat = [...s.chat, e.message].slice(-MAX_CALL_CHAT);
+      // Our own message can't be unread; it's on screen because we sent it.
+      return { ...s, chat, chatUnread: e.message.mine ? s.chatUnread : s.chatUnread + 1 };
+    }
+
+    case 'chat_read':
+      if (!s.chatUnread) return s;
+      return { ...s, chatUnread: 0 };
+
+    case 'reaction':
+      return { ...s, reactions: [...s.reactions, e.reaction].slice(-MAX_CALL_REACTIONS) };
 
     case 'error':
       if (s.error === e.message) return s;
