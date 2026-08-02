@@ -36,6 +36,9 @@ import { getActiveCall } from '../lib/callState';
 import { getRingingPeer, setRingingPeer, consumePendingCall } from '../lib/ringTracker';
 import { displayIncomingCall, cancelIncomingCall } from '../lib/callNotification';
 import '../lib/callBackground';   // registers notifee bg event + bg notification task
+import '../lib/family/background'; // registers the bg-location task — a headless OS
+                                   // wake runs ONLY this layout's imports, so without
+                                   // this line killed-app Family sharing drops fixes
 import { getAccessToken } from '../lib/api';
 import { E2EE_ENABLED, SCHEDULED_LOCAL } from '../constants/flags';
 import { runDueScheduled, rearmAllTriggers } from '../lib/scheduledRunner';
