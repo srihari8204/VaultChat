@@ -22,10 +22,13 @@ import { encField, decField, clearCacheKeyStore } from './cacheCrypto';
 // Engine: op-sqlite (JSI) — faster than expo-sqlite, same SQL. A thin shim keeps
 // the expo-sqlite-style async API (getAllAsync/runAsync/withTransactionAsync/…)
 // so every call site + all logic below stays byte-identical.
+/** expo-sqlite-shaped result of a write, so call sites can read the new rowid. */
+export interface RunResult { lastInsertRowId: number; changes: number }
+
 export interface LocalDb {
   getAllAsync:          (sql: string, params?: any[]) => Promise<any[]>;
   getFirstAsync:        (sql: string, params?: any[]) => Promise<any>;
-  runAsync:             (sql: string, params?: any[]) => Promise<void>;
+  runAsync:             (sql: string, params?: any[]) => Promise<RunResult>;
   execAsync:            (sql: string) => Promise<void>;
   withTransactionAsync: (fn: () => Promise<void>) => Promise<void>;
 }
@@ -41,7 +44,15 @@ function wrap(db: DB): LocalDb {
   return {
     getAllAsync:   async (sql, params = []) => ((await db.execute(sql, params as any)).rows ?? []) as any[],
     getFirstAsync: async (sql, params = []) => (((await db.execute(sql, params as any)).rows ?? []) as any[])[0] ?? null,
-    runAsync:      async (sql, params = []) => { await db.execute(sql, params as any); },
+    // Returns the write result rather than discarding it. It used to resolve
+    // void, which made `(await runAsync(...)).lastInsertRowId` throw on undefined
+    // — see services/security/auditChain.appendSecurityEvent, whose INSERT landed
+    // but which then rejected while building its return value. Its only caller
+    // swallowed the rejection, so the breakage was invisible.
+    runAsync:      async (sql, params = []) => {
+      const r: any = await db.execute(sql, params as any);
+      return { lastInsertRowId: Number(r?.insertId ?? 0), changes: Number(r?.rowsAffected ?? 0) };
+    },
     // op-sqlite executes ONE statement per call — split the multi-statement schema.
     execAsync:     async (sql) => { for (const s of sql.split(';')) { const t = s.trim(); if (t) db.executeSync(t); } },
     // Manual BEGIN/COMMIT so the inner runAsync (db.execute) calls stay in-txn on

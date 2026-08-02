@@ -24,6 +24,34 @@ const { width: SW } = Dimensions.get('window');
 const TILE = (SW - 40) / 3;
 const PAGE = 200;
 
+type ThumbSrc = { uri: string; headers?: Record<string, string> } | null;
+
+/**
+ * Lazy thumbnail: resolves (and decrypts if needed) only when the tile mounts.
+ *
+ * Declared at module scope on purpose. It used to be built with useCallback
+ * INSIDE the screen component while calling useState/useEffect itself — a
+ * rules-of-hooks violation, and a remount hazard: React compares element types
+ * by reference, so any render that produced a new function identity would tear
+ * down and rebuild every tile, re-running the decrypt for each one.
+ */
+function MediaThumb({ m, style, resizeMode = 'cover', resolveSrc, placeholder }: {
+  m: Message;
+  style: any;
+  resizeMode?: 'cover' | 'contain';
+  resolveSrc: (m: Message) => Promise<ThumbSrc>;
+  placeholder: string;
+}) {
+  const [src, setSrc] = useState<ThumbSrc>(null);
+  useEffect(() => {
+    let cancel = false;
+    (async () => { const r = await resolveSrc(m); if (!cancel) setSrc(r); })();
+    return () => { cancel = true; };
+  }, [m, resolveSrc]);
+  if (!src) return <View style={[style, { backgroundColor: placeholder }]} />;
+  return <Image source={src} style={style} resizeMode={resizeMode} />;
+}
+
 type TabId = 'photos' | 'videos' | 'files' | 'links';
 interface LinkItem { id: number; url: string; createdAt: string }
 
@@ -135,19 +163,6 @@ export default function MediaGalleryScreen() {
     return { uri: attachmentUrl(aid), headers: authHeader ? { Authorization: authHeader } : undefined };
   }, [cid, authHeader]);
 
-  // Lazy thumbnail: resolves (and decrypts if needed) only when the tile mounts.
-  const MediaThumb = useCallback(({ m, style, resizeMode = 'cover' as const }: {
-    m: Message; style: any; resizeMode?: 'cover' | 'contain';
-  }) => {
-    const [src, setSrc] = useState<{ uri: string; headers?: Record<string, string> } | null>(null);
-    useEffect(() => {
-      let cancel = false;
-      (async () => { const r = await resolveSrc(m); if (!cancel) setSrc(r); })();
-      return () => { cancel = true; };
-    }, [m]);
-    if (!src) return <View style={[style, { backgroundColor: colors.surfaceSolid }]} />;
-    return <Image source={src} style={style} resizeMode={resizeMode} />;
-  }, [resolveSrc]);
 
   const openFile = useCallback(async (m: Message) => {
     const r = await resolveSrc(m);
@@ -158,13 +173,13 @@ export default function MediaGalleryScreen() {
 
   const renderPhoto = ({ item }: { item: Message }) => (
     <TouchableOpacity style={s.tile} onPress={() => setViewer(item)} activeOpacity={0.8}>
-      <MediaThumb m={item} style={s.tileImg} />
+      <MediaThumb m={item} style={s.tileImg} resolveSrc={resolveSrc} placeholder={colors.surfaceSolid} />
     </TouchableOpacity>
   );
 
   const renderVideo = ({ item }: { item: Message }) => (
     <TouchableOpacity style={s.tile} onPress={() => setViewer(item)} activeOpacity={0.8}>
-      <MediaThumb m={item} style={s.tileImg} />
+      <MediaThumb m={item} style={s.tileImg} resolveSrc={resolveSrc} placeholder={colors.surfaceSolid} />
       <View style={s.playBadge}><Ionicons name="play" size={16} color="#fff" /></View>
     </TouchableOpacity>
   );
@@ -241,7 +256,7 @@ export default function MediaGalleryScreen() {
           <TouchableOpacity style={s.viewerClose} onPress={() => setViewer(null)} hitSlop={12}>
             <Ionicons name="close" size={28} color="#fff" />
           </TouchableOpacity>
-          {viewer && <MediaThumb m={viewer} style={s.viewerImg} resizeMode="contain" />}
+          {viewer && <MediaThumb m={viewer} style={s.viewerImg} resizeMode="contain" resolveSrc={resolveSrc} placeholder={colors.surfaceSolid} />}
         </View>
       </Modal>
     </View>

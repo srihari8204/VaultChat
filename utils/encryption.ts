@@ -71,7 +71,11 @@ export const decryptMessage = (ciphertext: string, keyBase64: string): string =>
 
 // -- Hash ----------------------------------------------------------------------
 export const sha256 = (input: string): string => {
-  return crypto.createHash('sha256').update(input).digest('hex');
+  // react-native-quick-crypto's .d.ts declares digest(encoding) as returning
+  // Buffer, which contradicts both Node's contract and its own implementation
+  // (lib/module/hash.js returns a string whenever an encoding is passed). The
+  // cast is against the bad typing, not the behaviour.
+  return crypto.createHash('sha256').update(input).digest('hex') as unknown as string;
 };
 
 // -- HMAC ---------------------------------------------------------------------
