@@ -1005,6 +1005,24 @@ export default function ChatScreen() {
     if (isMine && !msg.deletedAt) {
       acts.push({ key: 'edit', label: 'Edit', icon: 'create-outline', onPress: () => { setEditingId(msg.id); setInput(plain); } });
     }
+    // VaultCheck — authenticity verification on received photos/video. Offered
+    // on media you did NOT send (verifying your own file tells you nothing) and
+    // only where there are pixels to analyse.
+    if (!isMine && !msg.deletedAt && msg.meta?.attachmentId && !msg.meta?.revoked
+        && (msg.type === 'image' || msg.type === 'video')) {
+      acts.push({ key: 'verify', label: 'Verify', icon: 'shield-checkmark-outline', onPress: () => {
+          router.push({
+            pathname: '/vaultcheck' as any,
+            params: {
+              attachmentId: String(msg.meta!.attachmentId),
+              msgType: msg.type,
+              mime: String(msg.meta?.mime || ''),
+              filename: String(msg.meta?.filename || ''),
+              isMine: '',
+            },
+          });
+        } });
+    }
     // VaultView remote revoke — sender only, on media you still own. Distinct
     // from "Delete for everyone": that removes the MESSAGE inside a 2d12h
     // window, this destroys the MEDIA itself (server bytes + the recipient's
