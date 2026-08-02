@@ -10,21 +10,149 @@
 // NOTE: WebRTC can only be fully validated on real devices/networks.
 
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, StatusBar, StyleSheet, Text, TouchableOpacity, View, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { mediaDevices, RTCIceCandidate, RTCPeerConnection, RTCSessionDescription, RTCView } from 'react-native-webrtc';
 import InCallManager from 'react-native-incall-manager';
 import { type Palette } from '../constants/theme';
+import { CALL_ENGINE_V2 } from '../constants/flags';
 import { useTheme } from '../lib/theme';
 import { getIceServers } from '../lib/iceConfig';
 import { getSocket } from '../lib/socket';
 import { newCallCipher, openCallOffer, plainCipher, type CallCipher } from '../lib/callCrypto';
 import { getCurrentUserAsync } from './(constants)/authService';
+import * as engine from '../lib/call/engine';
+import { CallTimer } from '../components/call/CallTimer';
+import {
+  useCallConnectedAt, useCallError, useCallFlag, useCallLocalUrl,
+  useCallStatus, useParticipant, useParticipantIds,
+} from '../hooks/useCall';
 
 type Peer = { pc: RTCPeerConnection; url: string | null; name: string };
 
+/**
+ * Route entry. Same dispatcher as the 1:1 screens — one flag picks the
+ * engine-backed renderer or the original body, both drawing the same grid from
+ * the same styles and speaking the same wire.
+ */
 export default function GroupCallActive() {
+  return CALL_ENGINE_V2 ? <GroupCallEngine /> : <GroupCallLegacy />;
+}
+
+/** One remote participant. Memoized and subscribed to its OWN peer, so a tile
+ *  re-renders when that peer's stream changes and not when anyone else's does. */
+const ParticipantTile = memo(function ParticipantTile(
+  { uid, width, isVideo }: { uid: string; width: string; isVideo: boolean },
+) {
+  const { colors } = useTheme();
+  const S = useMemo(() => makeStyles(colors), [colors]);
+  const p = useParticipant(uid);
+  const url = p?.streamUrl ?? null;
+  return (
+    <View style={[S.tile, { width: width as any }]}>
+      {isVideo && url
+        ? <RTCView streamURL={url} style={S.video} objectFit="cover" />
+        : <View style={S.audioTile}>
+            {url ? <RTCView streamURL={url} style={{ width: 1, height: 1 }} /> : null}
+            <Ionicons name="person" size={34} color="#fff" />
+          </View>}
+      <Text style={S.tileName} numberOfLines={1}>
+        {url ? (p?.name || 'Connected') : 'Connecting…'}
+      </Text>
+    </View>
+  );
+});
+
+// ── engine-backed renderer (CALL_ENGINE_V2) ───────────────────────────
+// Everything the legacy body did by hand — peer map, glare rule, offer/answer,
+// ICE buffering, cipher, teardown — now lives in lib/call. This screen draws.
+// It also gains what the mesh never had: a foreground service so audio survives
+// backgrounding, an FCM doorbell so a killed device rings, call logging, call
+// waiting, a duration timer, a speaker toggle and flip camera.
+function GroupCallEngine() {
+  const { colors } = useTheme();
+  const S = useMemo(() => makeStyles(colors), [colors]);
+  const router = useRouter();
+  const { chatId, video, name, members } = useLocalSearchParams<{
+    chatId: string; video?: string; name?: string; members?: string;
+  }>();
+  const isVideo = video === '1';
+
+  const status      = useCallStatus();
+  const connectedAt = useCallConnectedAt();
+  const error       = useCallError();
+  const muted       = useCallFlag('muted');
+  const camOff      = useCallFlag('cameraOff');
+  const speaker     = useCallFlag('speaker');
+  const localUrl    = useCallLocalUrl();
+  const peerIds     = useParticipantIds();
+
+  useEffect(() => {
+    engine.startGroup({
+      chatId: String(chatId ?? ''),
+      groupName: String(name ?? 'Group call'),
+      kind: isVideo ? 'video' : 'audio',
+      // The hub passes the roster so the engine rings each member; joining an
+      // in-progress call passes none.
+      ring: members ? String(members).split(',').filter(Boolean) : [],
+    });
+    return () => { engine.hangUp('local_hangup', true); engine.release(); };
+  }, [chatId, name, isVideo, members]);
+
+  useEffect(() => { if (status === 'connected') engine.onConnected(); }, [status]);
+
+  useEffect(() => {
+    if (status !== 'ended') return;
+    const t = setTimeout(() => router.back(), 200);
+    return () => clearTimeout(t);
+  }, [status, router]);
+
+  const tiles = peerIds.length + 1;
+  const cols = tiles <= 1 ? 1 : tiles <= 4 ? 2 : 3;
+  const tileW = `${100 / cols - 2}%`;
+
+  return (
+    <View style={S.screen}>
+      <Stack.Screen options={{ headerShown: false }} />
+      <StatusBar hidden />
+
+      <View style={S.topBar}>
+        <Text style={S.title} numberOfLines={1}>{name || 'Group call'}</Text>
+        {status === 'connected'
+          ? <CallTimer style={S.sub} startedAt={connectedAt} />
+          : <Text style={S.sub}>{tiles} on call</Text>}
+      </View>
+
+      {error ? <Text style={S.err}>{error}</Text> : null}
+
+      <ScrollView contentContainerStyle={S.grid}>
+        <View style={[S.tile, { width: tileW as any }]}>
+          {isVideo && !camOff && localUrl
+            ? <RTCView streamURL={localUrl} style={S.video} objectFit="cover" mirror />
+            : <View style={S.audioTile}><Ionicons name="person" size={34} color="#fff" /></View>}
+          <Text style={S.tileName}>You{muted ? ' 🔇' : ''}</Text>
+        </View>
+        {peerIds.map(uid => (
+          <ParticipantTile key={uid} uid={uid} width={tileW} isVideo={isVideo} />
+        ))}
+      </ScrollView>
+
+      <View style={S.controls}>
+        <CtrlBtn icon={muted ? 'mic-off' : 'mic'} active={muted} onPress={engine.toggleMute} colors={colors} />
+        {isVideo && <CtrlBtn icon={camOff ? 'videocam-off' : 'videocam'} active={camOff} onPress={engine.toggleCamera} colors={colors} />}
+        {isVideo && <CtrlBtn icon="camera-reverse" onPress={engine.flipCamera} colors={colors} />}
+        <CtrlBtn icon={speaker ? 'volume-high' : 'volume-low'} active={speaker} onPress={engine.toggleSpeaker} colors={colors} />
+        <CtrlBtn icon="call" danger onPress={endGroupCall} colors={colors} />
+      </View>
+    </View>
+  );
+}
+
+const endGroupCall = () => engine.hangUp('local_hangup', true);
+
+// ── original implementation (CALL_ENGINE_V2 off) — unchanged ──────────
+function GroupCallLegacy() {
   const { colors } = useTheme();
   const S = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();

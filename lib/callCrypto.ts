@@ -28,8 +28,19 @@
 // to heal from, unlike text), the callee drops its dead session so the NEXT
 // call/message re-runs X3DH, and this call fails cleanly instead of hanging.
 //
-// SCOPE: 1:1 calls only. Group calls keep plaintext signaling until the
-// group-call SFU work lands (tracked in the parity backlog).
+// SCOPE: every call, 1:1 and group alike.
+//
+// This header used to say "1:1 only — group calls keep plaintext signaling",
+// and that has not been true since the mesh landed. A mesh call is N pairwise
+// links, and each one seals its own offer/answer/ICE through this module with
+// its own per-link call key, so group signalling is E2EE by exactly the same
+// mechanism as a 1:1 call — no SFU required, because there is no SFU to trust.
+// (An SFU changes that calculus and is a separate design problem; nothing here
+// is waiting on it.)
+//
+// Both wire layers are covered: media is DTLS-SRTP as always, and signalling is
+// this. `plainCipher` remains the transparent passthrough that lets a peer on an
+// older build still connect.
 
 import { gcm } from '@noble/ciphers/aes.js';
 import { randomBytes } from '@noble/hashes/utils.js';

@@ -119,6 +119,9 @@ export function hangUp(reason: EndReason = 'local_hangup', notifyPeer = true): v
     addCallLog({
       chatId: s.chatId, peerUid: s.peerUid, peerName: s.peerName || 'VaultChat user',
       kind: s.kind, direction, at: Date.now() - durationSec * 1000, durationSec,
+      // A mesh call has no single peer — the log keys it by chat and redials it
+      // as a group call rather than as a 1:1 with an empty uid.
+      group: s.wire === 'mesh',
     }).catch(() => {});
     // Outgoing call abandoned before it was answered → stop the callee's ring
     // and let it become a "missed call" on their device.

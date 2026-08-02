@@ -22,7 +22,24 @@ export interface CallLogEntry {
   direction: CallDirection;
   at: number;        // epoch ms
   durationSec: number;
+  /**
+   * A group (mesh) call. There is no single peer, so `peerUid` is '' and
+   * `peerName` holds the group's name.
+   *
+   * Optional on purpose: entries written before group calls were logged have no
+   * such field, and `undefined` is falsy, so every existing log entry keeps
+   * behaving exactly as it did — grouped by peer, redialled 1:1.
+   */
+  group?: boolean;
 }
+
+/**
+ * What an entry is grouped and redialled by. A 1:1 call belongs to a person; a
+ * group call belongs to a chat, because its `peerUid` is empty and every group
+ * call would otherwise collapse into one indistinguishable row.
+ */
+export const callLogKey = (e: Pick<CallLogEntry, 'peerUid' | 'chatId' | 'group'>): string =>
+  e.group ? `g:${e.chatId}` : e.peerUid;
 
 export async function getCallLog(): Promise<CallLogEntry[]> {
   try {
@@ -34,9 +51,10 @@ export async function getCallLog(): Promise<CallLogEntry[]> {
 export async function addCallLog(e: Omit<CallLogEntry, 'id'>): Promise<void> {
   try {
     const list = await getCallLog();
-    const entry: CallLogEntry = { ...e, id: `${e.at}-${Math.round(e.durationSec)}-${e.peerUid}` };
-    // De-dupe a rapid double-log of the same call (same peer within 3s).
-    const dup = list[0] && list[0].peerUid === e.peerUid && Math.abs(list[0].at - e.at) < 3000;
+    const key = callLogKey(e);
+    const entry: CallLogEntry = { ...e, id: `${e.at}-${Math.round(e.durationSec)}-${key}` };
+    // De-dupe a rapid double-log of the same call (same peer/group within 3s).
+    const dup = list[0] && callLogKey(list[0]) === key && Math.abs(list[0].at - e.at) < 3000;
     const next = (dup ? list.slice(1) : list);
     next.unshift(entry);
     await AsyncStorage.setItem(KEY, JSON.stringify(next.slice(0, MAX)));

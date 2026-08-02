@@ -13,7 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
 import { Avatar } from '../../components/ui';
-import { getCallLog, clearCallLog, removeCallLog, type CallLogEntry } from '../../lib/callLog';
+import { getCallLog, clearCallLog, removeCallLog, callLogKey, type CallLogEntry } from '../../lib/callLog';
 import { listChats, attachmentUrl } from '../../lib/chatService';
 import { getAccessToken } from '../../lib/api';
 
@@ -41,7 +41,15 @@ function fmtDuration(sec: number): string {
 
 const dirLabel = (d: CallLogEntry['direction']) => d === 'missed' ? 'Missed' : d === 'incoming' ? 'Incoming' : 'Outgoing';
 
-type CallGroup = { peerUid: string; peerName: string; peerPhoto?: string | null; entries: CallLogEntry[] };
+type CallGroup = {
+  key: string;
+  peerUid: string;
+  peerName: string;
+  peerPhoto?: string | null;
+  /** True when the row is a group (mesh) call — see lib/callLog.ts. */
+  group?: boolean;
+  entries: CallLogEntry[];
+};
 
 export default function CallsScreen() {
   const { colors } = useTheme();
@@ -64,18 +72,31 @@ export default function CallsScreen() {
     return () => { alive = false; };
   }, []));
 
-  // Group consecutive calls with the same person (WhatsApp "(3)").
+  // Group consecutive calls with the same person (WhatsApp "(3)"), or with the
+  // same group chat — a group call has no peer uid, so it keys by chat instead.
   const groups = useMemo<CallGroup[]>(() => {
     const out: CallGroup[] = [];
     for (const e of log) {
+      const key = callLogKey(e);
       const last = out[out.length - 1];
-      if (last && last.peerUid === e.peerUid) last.entries.push(e);
-      else out.push({ peerUid: e.peerUid, peerName: e.peerName, peerPhoto: e.peerPhoto, entries: [e] });
+      if (last && last.key === key) last.entries.push(e);
+      else out.push({ key, peerUid: e.peerUid, peerName: e.peerName, peerPhoto: e.peerPhoto, group: e.group, entries: [e] });
     }
     return out;
   }, [log]);
 
-  const call = useCallback((g: { chatId?: string; peerUid: string; peerName: string }, kind: 'audio' | 'video') => {
+  // Redial. A group call can't be redialled 1:1 — it goes back to the group call
+  // hub for that chat, which loads the current member list and rings it.
+  const call = useCallback((
+    g: { chatId?: string; peerUid: string; peerName: string; group?: boolean }, kind: 'audio' | 'video',
+  ) => {
+    if (g.group) {
+      router.push({
+        pathname: '/group-calls' as any,
+        params: { chatId: g.chatId ?? '', groupName: g.peerName, mode: kind === 'video' ? 'video' : 'voice' },
+      });
+      return;
+    }
     const path = kind === 'video' ? '/videocall' : '/voicecall';
     router.push({ pathname: path as any, params: { chatId: g.chatId ?? '', peerUid: g.peerUid, peerName: g.peerName } });
   }, [router]);
@@ -88,8 +109,8 @@ export default function CallsScreen() {
   const onLongPress = useCallback((g: CallGroup) => {
     const latest = g.entries[0];
     Alert.alert(g.peerName, undefined, [
-      { text: 'Voice call', onPress: () => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName }, 'audio') },
-      { text: 'Video call', onPress: () => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName }, 'video') },
+      { text: 'Voice call', onPress: () => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName, group: g.group }, 'audio') },
+      { text: 'Video call', onPress: () => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName, group: g.group }, 'video') },
       { text: 'Call info', onPress: () => setInfoGroup(g) },
       { text: 'Remove from log', style: 'destructive', onPress: () => removeGroup(g) },
       { text: 'Cancel', style: 'cancel' },
@@ -119,7 +140,7 @@ export default function CallsScreen() {
     const dur = fmtDuration(latest.durationSec);
     return (
       <TouchableOpacity style={S.row} activeOpacity={0.7}
-        onPress={() => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName }, latest.kind)}
+        onPress={() => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName, group: g.group }, latest.kind)}
         onLongPress={() => onLongPress(g)} delayLongPress={300}>
         <Avatar uri={photo && authHeader ? attachmentUrl(photo) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={g.peerName} size={48} />
         <View style={{ flex: 1 }}>
@@ -137,7 +158,7 @@ export default function CallsScreen() {
           <TouchableOpacity onPress={() => setInfoGroup(g)} hitSlop={8} style={S.callBtn}>
             <Ionicons name="information-circle-outline" size={22} color={colors.textDim} />
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName }, latest.kind)} hitSlop={8} style={S.callBtn}>
+          <TouchableOpacity onPress={() => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName, group: g.group }, latest.kind)} hitSlop={8} style={S.callBtn}>
             <Ionicons name={latest.kind === 'video' ? 'videocam' : 'call'} size={22} color={colors.primary} />
           </TouchableOpacity>
         </View>
@@ -189,10 +210,10 @@ export default function CallsScreen() {
                   <Text style={S.infoName} numberOfLines={1}>{infoGroup.peerName}</Text>
                 </View>
                 <View style={S.infoActions}>
-                  <TouchableOpacity style={S.infoAction} onPress={() => { const u = infoGroup; setInfoGroup(null); call({ chatId: u.entries[0].chatId, peerUid: u.peerUid, peerName: u.peerName }, 'audio'); }}>
+                  <TouchableOpacity style={S.infoAction} onPress={() => { const u = infoGroup; setInfoGroup(null); call({ chatId: u.entries[0].chatId, peerUid: u.peerUid, peerName: u.peerName, group: u.group }, 'audio'); }}>
                     <Ionicons name="call" size={22} color={colors.primary} /><Text style={S.infoActionTxt}>Voice</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={S.infoAction} onPress={() => { const u = infoGroup; setInfoGroup(null); call({ chatId: u.entries[0].chatId, peerUid: u.peerUid, peerName: u.peerName }, 'video'); }}>
+                  <TouchableOpacity style={S.infoAction} onPress={() => { const u = infoGroup; setInfoGroup(null); call({ chatId: u.entries[0].chatId, peerUid: u.peerUid, peerName: u.peerName, group: u.group }, 'video'); }}>
                     <Ionicons name="videocam" size={22} color={colors.primary} /><Text style={S.infoActionTxt}>Video</Text>
                   </TouchableOpacity>
                 </View>

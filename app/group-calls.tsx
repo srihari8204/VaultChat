@@ -1,11 +1,13 @@
 // app/group-calls.tsx — Group call hub (honest, no fake/Firebase).
 //
-// Real N-way (everyone-at-once) group calling requires a media server (SFU) +
-// TURN — that's a deployment/infra step. Rather than fake it (the old screen
-// simulated participants joining), this lists the group's members and starts a
-// REAL 1:1 WebRTC call with any member (reusing the working voicecall/videocall
-// screens). The full mesh/SFU group call lights up once the media server is
-// provisioned.
+// Two real ways out of this screen:
+//   • "Start group call" → /group-call-active, a full-mesh N-way call over the
+//     existing webrtc_* relay + TURN. No SFU: every participant holds one
+//     RTCPeerConnection to every other, which is why the server caps the room
+//     (meshMaxParticipants). An SFU is a scale step, not a prerequisite.
+//   • tap a member → a 1:1 call on the voicecall/videocall screens.
+//
+// The old screen simulated participants joining; nothing here is simulated.
 
 import { brandAlpha } from '../constants/theme';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
@@ -13,6 +15,7 @@ import React, { useCallback, useEffect, useState , useMemo} from 'react';
 import { FlatList, StyleSheet, Text, TouchableOpacity, View, ActivityIndicator, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
+import { CALL_ENGINE_V2 } from '../constants/flags';
 import { useTheme } from '../lib/theme';
 import { getChat, attachmentUrl, type ChatMember } from '../lib/chatService';
 import { getAccessToken } from '../lib/api';
@@ -61,15 +64,34 @@ export default function GroupCallsScreen() {
   };
 
   // Real mesh group call: ring every member, then join the call room.
+  //
+  // Who rings depends on which build is running, and exactly ONE of them must:
+  //   • engine build — the roster travels as the `members` param and
+  //     engine.startGroup() rings it, so the ring happens after local media is
+  //     up and the peer map exists. Ringing here as well would double-ring.
+  //   • legacy build — the call screen never rang anyone, so this screen must.
+  // Both emit the same `call_incoming` payload, so a caller on either build is
+  // indistinguishable to the callee.
   const startGroupCall = useCallback(async () => {
-    try {
-      const me = await getCurrentUserAsync();
-      const s = await getSocket();
-      for (const m of members) {
-        s.emit('call_incoming', { to: m.userId, chatId, group: true, groupName, video: mode === 'video' ? '1' : '0', fromName: me?.name || 'Someone' });
-      }
-    } catch {}
-    router.push({ pathname: '/group-call-active', params: { chatId, video: mode === 'video' ? '1' : '0', name: groupName } } as any);
+    const uids = members.map(m => m.userId);
+    if (!CALL_ENGINE_V2) {
+      try {
+        const me = await getCurrentUserAsync();
+        const s = await getSocket();
+        for (const to of uids) {
+          s.emit('call_incoming', { to, chatId, group: true, groupName, video: mode === 'video' ? '1' : '0', fromName: me?.name || 'Someone' });
+        }
+      } catch {}
+    }
+    router.push({
+      pathname: '/group-call-active',
+      params: {
+        chatId,
+        video: mode === 'video' ? '1' : '0',
+        name: groupName,
+        members: uids.join(','),
+      },
+    } as any);
   }, [members, chatId, groupName, mode, router]);
 
   return (
