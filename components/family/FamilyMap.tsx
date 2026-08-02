@@ -62,14 +62,31 @@ function fitAll(){ var ids=Object.keys(markers); if(!ids.length)return;
   fitted=true;
 }
 function focus(id){ if(markers[id]) map.setView(markers[id].getLatLng(),16,{animate:true}); }
+// Location-history track. Drawn under the markers; fitting the line wins over
+// fitAll() because when a path is supplied it IS the subject of the view.
+var pathLine=null, pathDots=[];
+function setPath(pts){
+  if(pathLine){ map.removeLayer(pathLine); pathLine=null; }
+  pathDots.forEach(function(d){ map.removeLayer(d); }); pathDots=[];
+  if(!pts||pts.length<2) return;
+  var ll=pts.map(function(p){ return [p.lat,p.lng]; });
+  pathLine=L.polyline(ll,{color:'${selfColor}',weight:4,opacity:.85,lineJoin:'round'}).addTo(map);
+  [[ll[0],'#22C55E'],[ll[ll.length-1],'#EF4444']].forEach(function(e){
+    pathDots.push(L.circleMarker(e[0],{radius:6,color:'#fff',weight:2,fillColor:e[1],fillOpacity:1}).addTo(map));
+  });
+  map.fitBounds(pathLine.getBounds().pad(0.2));
+  fitted=true;
+}
 if(RN)RN.postMessage('ready');
 </script></body></html>`;
 }
 
-export default function FamilyMap({ members, onSelect, focusId, style }: {
+export default function FamilyMap({ members, onSelect, focusId, path, style }: {
   members: FamilyMarker[];
   onSelect?: (id: string) => void;
   focusId?: string | null;
+  /** Location-history track, oldest→newest. Start/end get green/red caps. */
+  path?: { lat: number; lng: number }[];
   style?: any;
 }) {
   const { scheme, colors } = useTheme();
@@ -90,6 +107,19 @@ export default function FamilyMap({ members, onSelect, focusId, style }: {
   useEffect(() => {
     if (ready && focusId && ref.current) ref.current.injectJavaScript(`focus(${JSON.stringify(focusId)});true;`);
   }, [ready, focusId]);
+
+  // Thin the track before it crosses the bridge: a month of samples is thousands
+  // of points and Leaflet gains nothing from more than a few hundred.
+  const trackJs = useMemo(() => {
+    if (!path?.length) return '[]';
+    const step = Math.ceil(path.length / 400);
+    const thinned = step > 1 ? path.filter((_, i) => i % step === 0 || i === path.length - 1) : path;
+    return JSON.stringify(thinned.map((p) => ({ lat: p.lat, lng: p.lng })));
+  }, [path]);
+
+  useEffect(() => {
+    if (ready && ref.current) ref.current.injectJavaScript(`setPath(${trackJs});true;`);
+  }, [ready, trackJs]);
 
   const source = { html: html(TILES[scheme === 'light' ? 'light' : 'dark'], colors.bg, colors.primary) };
 

@@ -22,7 +22,13 @@
         "NSFaceIDUsageDescription": "VaultChat uses Face ID to protect your messages",
         "NSContactsUsageDescription": "VaultChat needs contacts to find people you know",
         "NSLocationWhenInUseUsageDescription": "VaultChat needs location to share your position with contacts",
-        "NSPhotoLibraryUsageDescription": "VaultChat needs photo access to send and save media"
+        "NSPhotoLibraryUsageDescription": "VaultChat needs photo access to send and save media",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "VaultChat shares your location with your Family Space circle so they can see you are safe. This continues in the background only while location sharing is switched on.",
+        "NSLocationAlwaysUsageDescription": "VaultChat shares your location with your Family Space circle while location sharing is switched on.",
+        "NSMotionUsageDescription": "VaultChat uses motion to tell whether you are moving, so Family Space can slow location updates when you are still and save battery.",
+        "UIBackgroundModes": [
+          "location"
+        ]
       },
       "bundleIdentifier": "com.vaultchat.app"
     },
@@ -60,7 +66,10 @@
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.NFC"
+        "android.permission.NFC",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.FOREGROUND_SERVICE_LOCATION",
+        "android.permission.ACTIVITY_RECOGNITION"
       ],
       "versionCode": 14
     },
@@ -79,6 +88,15 @@
             "./assets/sounds/note_chime.wav",
             "./assets/sounds/note_bell.wav"
           ]
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "VaultChat shares your location with your Family Space circle so they can see you are safe.",
+          "locationWhenInUsePermission": "VaultChat shares your location with your Family Space circle so they can see you are safe.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
         }
       ],
       "expo-secure-store",
