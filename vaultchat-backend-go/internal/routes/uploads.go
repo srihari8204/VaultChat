@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"vaultchat/backend-go/internal/db"
+	"vaultchat/backend-go/internal/emitx"
 	"vaultchat/backend-go/internal/httpx"
 	"vaultchat/backend-go/internal/storage"
 	"vaultchat/backend-go/internal/vault"
@@ -107,6 +108,7 @@ func RegisterUploads(mux *http.ServeMux) {
 	mux.HandleFunc("POST /uploads/multipart/abort", httpx.RequireAuth(uploadsMPAbort))
 	mux.HandleFunc("GET /uploads/{id}", httpx.RequireAuth(uploadsGet))
 	mux.HandleFunc("POST /uploads/{id}/viewed", httpx.RequireAuth(uploadsViewed))
+	mux.HandleFunc("POST /uploads/{id}/revoke", httpx.RequireAuth(uploadsRevoke))
 }
 
 // ── POST /uploads — multipart disk upload (multer parity) ──────────────
@@ -489,16 +491,17 @@ func uploadsGet(w http.ResponseWriter, r *http.Request) {
 		StoragePath    string
 		ViewOnce       bool
 		ViewedAt       *time.Time
+		RevokedAt      *time.Time
 		StorageBackend *string
 	}
 	found := true
 	err := db.WithUser(ctx, user.ID, func(tx pgx.Tx) error {
 		e := tx.QueryRow(ctx,
 			`SELECT id, owner_user_id, filename, mime_type, size_bytes, storage_path,
-			        view_once, viewed_at, storage_backend
+			        view_once, viewed_at, revoked_at, storage_backend
 			 FROM attachments WHERE id = $1 LIMIT 1`, id).
 			Scan(&att.ID, &att.OwnerUserID, &att.Filename, &att.MimeType, &att.SizeBytes,
-				&att.StoragePath, &att.ViewOnce, &att.ViewedAt, &att.StorageBackend)
+				&att.StoragePath, &att.ViewOnce, &att.ViewedAt, &att.RevokedAt, &att.StorageBackend)
 		if e != nil && db.NoRows(e) {
 			found = false
 			return nil
@@ -511,6 +514,14 @@ func uploadsGet(w http.ResponseWriter, r *http.Request) {
 	}
 	if !found {
 		httpx.Err(w, 404, "Not found")
+		return
+	}
+
+	// Revoke gate FIRST (mirrors Node): ahead of membership/view-once work so a
+	// revoked attachment never touches storage, and the 410 is the wipe signal —
+	// the client destroys its local key + plaintext when it sees revoked:true.
+	if att.RevokedAt != nil {
+		httpx.JSON(w, 410, map[string]any{"error": "This media was revoked by the sender.", "revoked": true})
 		return
 	}
 
@@ -745,4 +756,99 @@ func uploadsViewed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, 200, map[string]any{"ok": true})
+}
+
+// ── POST /uploads/{id}/revoke ← Node routes/uploads.js ─────────────────
+// VaultView remote revoke. OWNER ONLY. One-way and irreversible:
+//   1. stamp revoked_at            → every later GET 410s, including the owner's
+//   2. delete the stored bytes     → the server no longer holds a copy at all
+//   3. broadcast 'media_revoked'   → online recipients destroy their per-file
+//                                    media key and any decrypted plaintext
+// Offline recipients converge without the socket event: their next fetch 410s
+// and the client wipes on that signal. Deliberately NOT gated on view_once.
+func uploadsRevoke(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := httpx.UserFrom(r)
+	id := r.PathValue("id")
+
+	var ownerID, storagePath string
+	var backend *string
+	var revokedAt *time.Time
+	found := true
+	err := db.WithUser(ctx, user.ID, func(tx pgx.Tx) error {
+		e := tx.QueryRow(ctx,
+			`SELECT owner_user_id, storage_path, storage_backend, revoked_at
+			   FROM attachments WHERE id = $1 LIMIT 1`, id).
+			Scan(&ownerID, &storagePath, &backend, &revokedAt)
+		if e != nil && db.NoRows(e) {
+			found = false
+			return nil
+		}
+		return e
+	})
+	if err != nil {
+		httpx.Err(w, 500, "Failed to revoke media")
+		return
+	}
+	if !found {
+		httpx.Err(w, 404, "Not found")
+		return
+	}
+	if ownerID != user.ID {
+		httpx.Err(w, 403, "Only the sender can revoke this media")
+		return
+	}
+	if revokedAt != nil {
+		httpx.JSON(w, 200, map[string]any{"ok": true, "alreadyRevoked": true})
+		return
+	}
+
+	err = db.WithUser(ctx, user.ID, func(tx pgx.Tx) error {
+		_, e := tx.Exec(ctx, `UPDATE attachments SET revoked_at = NOW() WHERE id = $1`, id)
+		return e
+	})
+	if err != nil {
+		httpx.Err(w, 500, "Failed to revoke media")
+		return
+	}
+
+	// Destroy the bytes. Best-effort per backend — the revoked_at stamp above is
+	// the authoritative gate, so a storage hiccup can't leave the media reachable.
+	if backend != nil && *backend == "s3" {
+		storage.DeleteObject(ctx, storagePath)
+	} else {
+		abs := filepath.Join(upDir(), storagePath)
+		if strings.HasPrefix(abs, upDir()+string(filepath.Separator)) {
+			_ = os.Remove(abs)
+		}
+	}
+
+	// Tell every chat that references this attachment, so recipients wipe now
+	// rather than at next fetch.
+	type ref struct{ chatID, messageID string }
+	refs := []ref{}
+	_ = db.WithUser(ctx, user.ID, func(tx pgx.Tx) error {
+		rows, e := tx.Query(ctx,
+			`SELECT DISTINCT m.chat_id, m.id FROM messages m
+			  WHERE m.meta->>'attachmentId' = $1`, id)
+		if e != nil {
+			return e
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var rf ref
+			if rows.Scan(&rf.chatID, &rf.messageID) == nil {
+				refs = append(refs, rf)
+			}
+		}
+		return rows.Err()
+	})
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, rf := range refs {
+		emitx.ChatEvent(rf.chatID, "media_revoked", map[string]any{
+			"chatId": rf.chatID, "messageId": rf.messageID, "attachmentId": id,
+			"revokedBy": user.ID, "revokedAt": now,
+		})
+	}
+	httpx.JSON(w, 200, map[string]any{"ok": true, "chats": len(refs)})
 }

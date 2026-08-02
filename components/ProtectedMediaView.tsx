@@ -20,7 +20,7 @@
 // is deliberately worded to avoid implying otherwise.
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Dimensions, AppState, type AppStateStatus } from 'react-native';
+import { View, Text, StyleSheet, Dimensions, AppState, type AppStateStatus, type ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { watch, capabilities, isSafeToRender, setSecure, type GuardState } from '../lib/screenGuard';
 
@@ -170,12 +170,16 @@ export default function ProtectedMediaView({
   );
 }
 
+// Typed separately: a mixed rotate+scale array inside StyleSheet.create makes
+// TS collapse EVERY key in the sheet to a style union (11 downstream errors).
+const wmTransform: ViewStyle = { transform: [{ rotate: '-24deg' }, { scale: 1.4 }] };
+
 const S = StyleSheet.create({
   wrap: { flex: 1 },
   overlay: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'space-around',
-    transform: [{ rotate: '-24deg' }, { scale: 1.4 }],
+    ...wmTransform,
   },
   wmRow: { flexDirection: 'row', justifyContent: 'space-around' },
   wmText: {
