@@ -20,3 +20,13 @@ export async function getMediaKey(attachmentId: string): Promise<MediaKey | null
     return raw ? (JSON.parse(raw) as MediaKey) : null;
   } catch { return null; }
 }
+
+/**
+ * Destroy the per-file key. This is what makes VaultView revoke irreversible:
+ * with MEDIA_E2EE on, any ciphertext the device already downloaded becomes
+ * permanently undecryptable once this key is gone. There is no backup and no
+ * recovery — that is the point, so callers must be certain.
+ */
+export async function deleteMediaKey(attachmentId: string): Promise<void> {
+  try { await AsyncStorage.removeItem(K(attachmentId)); } catch {}
+}

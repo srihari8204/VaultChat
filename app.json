@@ -110,6 +110,7 @@
       "./plugins/withGradleMemory.js",
       "./plugins/withCryptoCore.js",
       "./plugins/withVaultBeamRust.js",
+      "./plugins/withVaultView.js",
       "expo-sqlite"
     ],
     "extra": {

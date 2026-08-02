@@ -70,6 +70,7 @@ import { getWallpaper, type WallpaperConfig } from './chat-wallpaper';
 import { getBubbleColors } from './chat-themes';
 import { getLock, verifyBiometric, verifyPin, type LockedChat } from '../lib/chatLock';
 import { preloadViewedOnce, isViewedOnce, isViewedOnceSync, markViewedOnce } from '../lib/viewOnceStore';
+import { preloadRevoked, isRevokedSync, wipeRevokedMedia } from '../lib/protectedMedia';
 
 // Pick black or white text for legibility on an arbitrary bubble color.
 function idealText(hex: string): string {
@@ -111,6 +112,7 @@ import {
   pinMessage,
   reportScreenshotCaptured,
   resetChatSession,
+  revokeAttachment,
   setChatNotifSound,
   sendMessage,
   setDisappearing,
@@ -216,7 +218,7 @@ export default function ChatScreen() {
 
   // Warm the "already viewed" set so view-once bubbles render as consumed
   // immediately (no flash of the shield) on first paint.
-  useEffect(() => { preloadViewedOnce(); }, []);
+  useEffect(() => { preloadViewedOnce(); preloadRevoked(); }, []);
 
   const [meId,      setMeId]      = useState<string | null>(null);
   const [chat,      setChat]      = useState<ChatDetail | null>(null);
@@ -683,6 +685,19 @@ export default function ChatScreen() {
           setPollVotes(prev => bumpPollVote(prev, e.messageId, e.optionIndex, -1, e.userId === meId));
         };
 
+        // VaultView remote revoke. The sender destroyed the media server-side;
+        // this device destroys its per-file key and every decrypted copy, then
+        // repaints the bubble as a tombstone. Irreversible by design — see
+        // lib/protectedMedia.
+        const onMediaRevoked = (e: { chatId: string; messageId: number; attachmentId: string }) => {
+          if (!e?.attachmentId || e.chatId !== chatId) return;
+          wipeRevokedMedia(e.attachmentId).catch(() => {});
+          setMessages(prev => prev.map(m =>
+            String(m.meta?.attachmentId ?? '') === String(e.attachmentId)
+              ? { ...m, meta: { ...(m.meta || {}), revoked: true } }
+              : m));
+        };
+
         const onLiveLocation = (e: any) => {
           if (!e?.userId || e.userId === meId) return;
           if (e.blob) {
@@ -714,6 +729,7 @@ export default function ChatScreen() {
         s.on('typing_stop',       onTypingStop);
         s.on('presence_changed',  onPresence);
         s.on('screenshot_captured', onScreenshotCaptured);
+        s.on('media_revoked',     onMediaRevoked);
         s.on('poll_voted',        onPollVoted);
         s.on('poll_unvoted',      onPollUnvoted);
         const onPinned = (e: any) => setPinnedId(e?.messageId ?? null);
@@ -731,6 +747,7 @@ export default function ChatScreen() {
         off.push(() => s.off('typing_stop',       onTypingStop));
         off.push(() => s.off('presence_changed',  onPresence));
         off.push(() => s.off('screenshot_captured', onScreenshotCaptured));
+        off.push(() => s.off('media_revoked',     onMediaRevoked));
         off.push(() => s.off('poll_voted',        onPollVoted));
         off.push(() => s.off('poll_unvoted',      onPollUnvoted));
       } catch (e) {
@@ -987,6 +1004,40 @@ export default function ChatScreen() {
     }
     if (isMine && !msg.deletedAt) {
       acts.push({ key: 'edit', label: 'Edit', icon: 'create-outline', onPress: () => { setEditingId(msg.id); setInput(plain); } });
+    }
+    // VaultView remote revoke — sender only, on media you still own. Distinct
+    // from "Delete for everyone": that removes the MESSAGE inside a 2d12h
+    // window, this destroys the MEDIA itself (server bytes + the recipient's
+    // key and plaintext) with no time limit and no undo.
+    const revokableAttachment = msg.meta?.attachmentId && !msg.meta?.revoked
+      && ['image', 'video', 'audio', 'voice', 'file'].includes(String(msg.type));
+    if (isMine && msg.id > 0 && !msg.deletedAt && revokableAttachment) {
+      acts.push({ key: 'revoke', label: 'Revoke', icon: 'eye-off-outline', danger: true, onPress: () => {
+          Alert.alert(
+            'Revoke this media?',
+            'It will be deleted from the server and from the other person\'s phone, even if they already downloaded it. This cannot be undone.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Revoke', style: 'destructive', onPress: async () => {
+                  const attId = String(msg.meta!.attachmentId);
+                  // Optimistic tombstone — the sender never receives the
+                  // broadcast for their own revoke.
+                  setMessages(prev => prev.map(x => x.id === msg.id
+                    ? { ...x, meta: { ...(x.meta || {}), revoked: true } } : x));
+                  try {
+                    await revokeAttachment(attId);
+                  } catch (e: any) {
+                    setMessages(prev => prev.map(x => x.id === msg.id
+                      ? { ...x, meta: { ...(x.meta || {}), revoked: false } } : x));
+                    Alert.alert('Could not revoke', e?.message ?? 'Try again when you are back online.');
+                    return;
+                  }
+                  // Wipe our own copies too — revoked means gone on both sides.
+                  await wipeRevokedMedia(attId).catch(() => {});
+                } },
+            ],
+          );
+        } });
     }
     // Delete is available on EVERY message: "Delete for me" always (local-only
     // hide), plus "Delete for everyone" on your own messages (server revoke) —
@@ -1700,7 +1751,8 @@ export default function ChatScreen() {
   }, [chatId]);
 
   // ── Attach menu (bottom sheet — U4) ───────────────────────
-  // Photo / Video / View-once / Sticker / Invisible Ink / Poll / Location / File.
+  // Camera / Gallery / Video / View once / Edit photo / File / Big File / Scan /
+  // Location / Navigate / Poll / Invisible Ink.
   const onPressAttach = useCallback(() => {
     if (sending) return;
     setAttachOpen(true);
@@ -1714,6 +1766,10 @@ export default function ChatScreen() {
       { label: 'Camera',        icon: 'camera' as const,      color: '#E1306C', onPress: () => router.push({ pathname: '/camera' as any, params: { chatId, peerName, returnTo: '/chat' } }) },
       { label: 'Gallery',       icon: 'image' as const,       color: '#7E57C2', onPress: () => onPickMedia('images') },
       { label: 'Video',         icon: 'videocam' as const,    color: '#EC407A', onPress: () => onPickMedia('videos') },
+      // View once was reachable only from the camera toggle and the send-preview
+      // eye button — never from the attach sheet, so the app's headline privacy
+      // affordance was effectively undiscoverable from the main entry point.
+      { label: 'View once',     icon: 'eye-off' as const,     color: BRAND_ACCENT, onPress: () => onPickMedia('images', { viewOnce: true }) },
       { label: 'Edit photo',    icon: 'create' as const,      color: '#5C6BC0', onPress: onEditPhoto },
       { label: 'File',          icon: 'document' as const,    color: '#42A5F5', onPress: onPickFile },
       // VaultBeam large-file transfer (up to 12 GB, R2 relay) — 1:1 only.
@@ -3733,7 +3789,10 @@ function MessageBubble({
     openingRef.current = true;
     setTimeout(() => { openingRef.current = false; }, 700);
     const params: any = { filename: String(msg.meta?.filename || ''), msgType: kind };
-    if (viewOnce) params.viewOnce = '1';                         // viewer loads to cache + marks viewed after load
+    if (viewOnce) {
+      params.viewOnce = '1';        // viewer loads to cache + marks viewed after load
+      params.chatId = chatId;       // so the protected viewer can alert the sender on capture
+    }
     if (msg.meta?.gifUrl) {
       params.mediaUrl = String(msg.meta.gifUrl);                 // external GIF — no auth
     } else if (isEncMedia && mediaSrc?.uri) {
@@ -3747,7 +3806,7 @@ function MessageBubble({
       params.mime = String(msg.meta?.mime || '');
     } else { openingRef.current = false; return; }
     bubbleRouter.push({ pathname: '/media-viewer' as any, params });
-  }, [msg.meta?.attachmentId, msg.meta?.gifUrl, msg.meta?.filename, isEncMedia, mediaSrc?.uri, isMine, bubbleRouter]);
+  }, [msg.meta?.attachmentId, msg.meta?.gifUrl, msg.meta?.filename, isEncMedia, mediaSrc?.uri, isMine, bubbleRouter, chatId]);
   const isSticker = msg.type === 'sticker' && !!msg.content;
   const isPoll  = msg.type === 'poll' && Array.isArray(msg.meta?.options);
   const isLocation = msg.type === 'location';
@@ -3767,8 +3826,16 @@ function MessageBubble({
       isViewedOnce(String(msg.id)).then(v => { if (v) setTombstoned(true); });
     }
   }, [isViewOnceMedia, isMine, msg.id]);
+  // ── Revoked gate (VaultView) ─────────────────────────────
+  // Independent of view-once and of who sent it: once the sender revokes, the
+  // media is gone for BOTH sides. meta.revoked is set by the socket handler
+  // (recipient) or optimistically by the Revoke action (sender); the local
+  // store is the durable record so it survives a restart with no round-trip.
+  const attId = msg.meta?.attachmentId ? String(msg.meta.attachmentId) : '';
+  const isRevokedMedia = !!msg.meta?.revoked || (!!attId && isRevokedSync(attId));
+
   const handleRevealViewOnce = useCallback(() => {
-    if (tombstoned) return;
+    if (tombstoned || isRevokedMedia) return;
     markViewedOnce(String(msg.id));   // persist locally so it never re-appears
     setTombstoned(true);              // bubble becomes "viewed" immediately
     // Open full-screen as view-once: the viewer downloads to CACHE (never the
@@ -3776,7 +3843,7 @@ function MessageBubble({
     // loaded — otherwise the POST /viewed races the GET and the GET 410s
     // ("Failed to load media").
     openFullScreen(isVideo ? 'video' : 'image', true);
-  }, [tombstoned, msg.id, isVideo, openFullScreen]);
+  }, [tombstoned, isRevokedMedia, msg.id, isVideo, openFullScreen]);
 
   // Deleted tombstone — safe here: every hook above has already run this render.
   if (msg.deletedAt) {
@@ -3850,8 +3917,15 @@ function MessageBubble({
           </TouchableOpacity>
         )}
 
-        {/* View-once tombstone — replaces media after it's been viewed */}
-        {(isImage || isVideo) && tombstoned ? (
+        {/* Revoked tombstone — outranks every other media state, both sides */}
+        {isRevokedMedia ? (
+          <View style={S.viewOnceTombstone}>
+            <Text style={S.viewOnceTombstoneTxt}>
+              🚫 {isMine ? 'You revoked this media' : 'Media revoked by sender'}
+            </Text>
+          </View>
+        ) : /* View-once tombstone — replaces media after it's been viewed */
+        (isImage || isVideo) && tombstoned ? (
           <View style={S.viewOnceTombstone}>
             <Text style={S.viewOnceTombstoneTxt}>👁️ {isImage ? 'Photo' : 'Video'} viewed</Text>
           </View>

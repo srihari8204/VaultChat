@@ -179,4 +179,37 @@ export async function getMedia(attachmentId: string, opts: MediaOpts & { cacheOn
   return `file://${path}`;
 }
 
+/**
+ * Delete every local copy of an attachment from the persistent media folders
+ * plus its cached thumbnail. Used by the VaultView revoke path — the sender
+ * destroyed the media, so the recipient's on-disk copies have to go too, not
+ * just the key.
+ *
+ * Scans each media folder (and its Sent/ subfolder) for names carrying the
+ * attachment id rather than reconstructing the exact path, because the
+ * extension depends on mime/filename at save time and a revoke has no message
+ * context to rebuild that from. Returns how many files were removed.
+ */
+export async function purgeLocalCopies(attachmentId: string): Promise<number> {
+  let removed = 0;
+  const id = String(attachmentId);
+  const dirs: string[] = [THUMB_DIR];
+  for (const kind of Object.keys(FOLDER) as MediaKind[]) {
+    dirs.push(`${BASE}/${FOLDER[kind]}`);
+    if (HAS_SENT[kind]) dirs.push(`${BASE}/${FOLDER[kind]}/Sent`);
+  }
+  for (const dir of dirs) {
+    try {
+      if (!(await RNFS.exists(dir))) continue;
+      const entries = await RNFS.readDir(dir);
+      for (const e of entries) {
+        if (!e.isFile() || !e.name.includes(id)) continue;
+        await RNFS.unlink(e.path).catch(() => {});
+        removed++;
+      }
+    } catch { /* best-effort per folder */ }
+  }
+  return removed;
+}
+
 export default {};

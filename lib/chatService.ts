@@ -1490,6 +1490,20 @@ export async function markAttachmentViewed(attachmentId: string): Promise<void> 
 }
 
 /**
+ * VaultView remote revoke — sender-only, irreversible. The server stamps
+ * revoked_at, deletes the stored bytes, and broadcasts 'media_revoked' so
+ * recipients destroy their per-file key and any decrypted plaintext. Recipients
+ * who were offline converge on their next fetch (410 + { revoked: true }).
+ *
+ * The caller is responsible for wiping the SENDER's own local copies —
+ * lib/protectedMedia.wipeRevokedMedia() — since the sender never receives the
+ * broadcast for their own action.
+ */
+export async function revokeAttachment(attachmentId: string): Promise<void> {
+  await api(`/uploads/${encodeURIComponent(attachmentId)}/revoke`, { method: 'POST' });
+}
+
+/**
  * Build the authenticated URL for fetching an attachment. The fetch
  * still needs an Authorization header — that's why callers usually pass
  * this URL through an `Image` source with a `headers` option, or

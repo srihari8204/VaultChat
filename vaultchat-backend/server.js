@@ -92,7 +92,8 @@ require('./lib/storage').ensureBucket().catch(() => {});
 // ── Routes ───────────────────────────────────────────────────
 app.use('/auth',     require('./routes/auth'));
 app.use('/user',     require('./routes/user'));
-app.use('/uploads',  require('./routes/uploads'));
+const uploadsRouter = require('./routes/uploads');
+app.use('/uploads',  uploadsRouter);
 app.use('/ai',       require('./routes/ai'));
 app.use('/contacts', require('./routes/contacts'));
 const chatsRouter = require('./routes/chats');
@@ -214,6 +215,10 @@ function broadcastChatEvent(chatId, event, payload) {
 
 // Wire the chats router so its REST writes broadcast over sockets.
 chatsRouter.setBroadcasters({ newMessage: broadcastNewMessage, chatEvent: broadcastChatEvent });
+
+// Uploads router broadcasts 'media_revoked' to every chat referencing a revoked
+// attachment, so recipients destroy their media key + plaintext immediately.
+uploadsRouter.setBroadcasters({ chatEvent: broadcastChatEvent });
 
 // Bridge form of the same broadcasters, for chat routes served by Go.
 // { kind:'new_message', chatId, payload } | { kind:'chat_event', chatId, event, payload }
