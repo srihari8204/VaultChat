@@ -27,7 +27,7 @@
 import { IDLE_SNAPSHOT, type CallSnapshot, type EndReason, type Participant } from './types';
 
 /** Local device toggles that never affect the lifecycle. */
-export type CallFlag = 'muted' | 'speaker' | 'cameraOff' | 'sharing' | 'held';
+export type CallFlag = 'muted' | 'speaker' | 'cameraOff' | 'sharing' | 'peerSharing' | 'held';
 
 export type CallEvent =
   /** Outgoing offer is on the wire (also fired on each re-ring — idempotent). */

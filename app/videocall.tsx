@@ -165,6 +165,7 @@ export default function VideoCallScreen() {
   const [filter,    setFilter]    = useState<FilterId>('none');
   const [showFilters, setShowFilters] = useState(false);
   const [sharing,   setSharing]   = useState(false);   // screen share (#124)
+  const [peerSharing, setPeerSharing] = useState(false); // peer is sharing theirs
 
   const pcRef           = useRef<RTCPeerConnection | null>(null);
   // E2EE signaling cipher (F6) — per-call key; plaintext passthrough for legacy peers.
@@ -322,12 +323,22 @@ export default function VideoCallScreen() {
         const onEnd = (data: any) => {
           if (data?.from === peerUid || data?.fromUid === peerUid) endCall(false);
         };
+        // The peer telling us they started/stopped sharing. The server has
+        // always relayed these two events; until now neither side used them, so
+        // a screen share arrived as an unexplained change of picture.
+        const onPeerShareStart = (d: any) => { if (d?.from === peerUid || d?.fromUid === peerUid) setPeerSharing(true); };
+        const onPeerShareStop  = (d: any) => { if (d?.from === peerUid || d?.fromUid === peerUid) setPeerSharing(false); };
+
         s.on('webrtc_answer', onAnswer);
         s.on('webrtc_ice',    onIce);
         s.on('webrtc_end',    onEnd);
+        s.on('screen_share_start', onPeerShareStart);
+        s.on('screen_share_stop',  onPeerShareStop);
         offsRef.current.push(() => s.off('webrtc_answer', onAnswer));
         offsRef.current.push(() => s.off('webrtc_ice',    onIce));
         offsRef.current.push(() => s.off('webrtc_end',    onEnd));
+        offsRef.current.push(() => s.off('screen_share_start', onPeerShareStart));
+        offsRef.current.push(() => s.off('screen_share_stop',  onPeerShareStop));
 
         (pc as any).onicecandidate = (event: any) => {
           if (!event.candidate || !peerUid) return;
@@ -439,7 +450,8 @@ export default function VideoCallScreen() {
     cameraTrackRef.current = null;
     try { if (localStreamRef.current) setLocalUrl(localStreamRef.current.toURL()); } catch {}
     setSharing(false);
-  }, []);
+    if (peerUid) getSocket().then(s => s.emit('screen_share_stop', { to: peerUid, chatId })).catch(() => {});
+  }, [peerUid, chatId]);
 
   const startScreenShare = useCallback(async () => {
     const sender = videoSender();
@@ -462,6 +474,9 @@ export default function VideoCallScreen() {
       await sender.replaceTrack(screenTrack);                     // peer now sees the screen
       try { setLocalUrl(screen.toURL()); } catch {}              // show the screen in my preview
       setSharing(true);
+      // Tell the peer, so their side can label the change instead of the
+      // picture silently becoming a desktop.
+      if (peerUid) getSocket().then(s => s.emit('screen_share_start', { to: peerUid, chatId })).catch(() => {});
       try { screenTrack.addEventListener?.('ended', () => { stopScreenShare(); }); } catch {}
     } catch (e: any) {
       const msg = e?.message ? String(e.message) : String(e);
@@ -530,11 +545,16 @@ export default function VideoCallScreen() {
         {error && <Text style={S.errorTxt}>{error}</Text>}
       </View>
 
-      {/* Screen-share banner (#124) */}
-      {sharing && (
+      {/* Screen-share banner (#124). Mine takes precedence over the peer's —
+          both can share at once, and knowing what I'M broadcasting matters more. */}
+      {(sharing || peerSharing) && (
         <View style={S.shareBanner} pointerEvents="none">
           <Ionicons name="phone-portrait" size={14} color="#fff" />
-          <Text style={S.shareBannerTxt}>You're sharing your screen</Text>
+          <Text style={S.shareBannerTxt}>
+            {sharing
+              ? "You're sharing your screen"
+              : `${peerName || 'They'} ${peerName ? 'is' : 'are'} sharing their screen`}
+          </Text>
         </View>
       )}
 

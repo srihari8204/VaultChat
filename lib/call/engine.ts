@@ -168,6 +168,7 @@ async function bootstrap(a: StartArgs, direction: 'outgoing' | 'incoming') {
     },
     onIce: (wire) => { peer.addRemoteCandidate(peer.getCipher().open(wire)).catch(() => {}); },
     onEnd: () => hangUp('remote_hangup', false),
+    onPeerScreenShare: (on) => dispatch({ type: 'flag', key: 'peerSharing', value: on }),
   });
   onDispose(detach);
 
@@ -299,6 +300,7 @@ export async function startScreenShare(): Promise<void> {
   await sender.replaceTrack(track);
   try { dispatch({ type: 'local_stream', url: screen.toURL() }); } catch {}
   setFlag('sharing', true);
+  signal.sendScreenShare(s.peerUid, s.chatId, true).catch(() => {});
   try { track.addEventListener?.('ended', () => { stopScreenShare().catch(() => {}); }); } catch {}
 }
 
@@ -312,6 +314,7 @@ export async function stopScreenShare(): Promise<void> {
   s.cameraTrack = null;
   try { if (s.localStream) dispatch({ type: 'local_stream', url: s.localStream.toURL() }); } catch {}
   setFlag('sharing', false);
+  signal.sendScreenShare(s.peerUid, s.chatId, false).catch(() => {});
 }
 
 // ── call waiting ──────────────────────────────────────────────────────

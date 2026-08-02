@@ -79,6 +79,8 @@ export interface CallSnapshot {
   speaker: boolean;
   cameraOff: boolean;
   sharing: boolean;
+  /** The remote side is sharing THEIR screen (screen_share_start). */
+  peerSharing: boolean;
   held: boolean;
 
   localUrl: string | null;
@@ -101,6 +103,7 @@ export const IDLE_SNAPSHOT: CallSnapshot = Object.freeze({
   speaker: false,
   cameraOff: false,
   sharing: false,
+  peerSharing: false,
   held: false,
   localUrl: null,
   participants: Object.freeze({}),

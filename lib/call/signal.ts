@@ -31,6 +31,7 @@ export async function attachCallListeners(handlers: {
   onAnswer: (sdp: any) => void;
   onIce: (candidate: any) => void;
   onEnd: () => void;
+  onPeerScreenShare: (on: boolean) => void;
 }): Promise<Off> {
   const s = await getSocket();
   const fromPeer = (d: any) => d?.from === handlers.peerUid || d?.fromUid === handlers.peerUid;
@@ -38,14 +39,20 @@ export async function attachCallListeners(handlers: {
   const onAnswer = (d: any) => { if (fromPeer(d)) handlers.onAnswer(d?.answer ?? d?.sdp); };
   const onIce    = (d: any) => { if (fromPeer(d)) handlers.onIce(d?.candidate); };
   const onEnd    = (d: any) => { if (fromPeer(d)) handlers.onEnd(); };
+  const onShare  = (d: any) => { if (fromPeer(d)) handlers.onPeerScreenShare(true); };
+  const onUnshare = (d: any) => { if (fromPeer(d)) handlers.onPeerScreenShare(false); };
 
   s.on('webrtc_answer', onAnswer);
   s.on('webrtc_ice', onIce);
   s.on('webrtc_end', onEnd);
+  s.on('screen_share_start', onShare);
+  s.on('screen_share_stop', onUnshare);
   return () => {
     try { s.off('webrtc_answer', onAnswer); } catch {}
     try { s.off('webrtc_ice', onIce); } catch {}
     try { s.off('webrtc_end', onEnd); } catch {}
+    try { s.off('screen_share_start', onShare); } catch {}
+    try { s.off('screen_share_stop', onUnshare); } catch {}
   };
 }
 
@@ -55,6 +62,17 @@ export async function sendIce(to: string, from: string, candidate: any): Promise
 
 export async function sendEnd(to: string, from: string, chatId: string): Promise<void> {
   try { (await getSocket()).emit('webrtc_end', { to, from, chatId }); } catch {}
+}
+
+/**
+ * Tell the peer we started/stopped sharing our screen. The server has relayed
+ * these two events all along; without them a screen share arrives on the other
+ * side as an unexplained change of picture.
+ */
+export async function sendScreenShare(to: string, chatId: string, on: boolean): Promise<void> {
+  try {
+    (await getSocket()).emit(on ? 'screen_share_start' : 'screen_share_stop', { to, chatId });
+  } catch {}
 }
 
 /**

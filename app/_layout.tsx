@@ -413,7 +413,6 @@ function RootLayout() {
 
         {/* Mini Apps destinations */}
         <Stack.Screen name="encrypted-notes" />
-        <Stack.Screen name="screen-share" />
         <Stack.Screen name="current-location" />
       </Stack>
     </GestureHandlerRootView>
