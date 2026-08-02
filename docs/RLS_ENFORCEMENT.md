@@ -1,8 +1,12 @@
 # Is Row-Level Security actually enforced?
 
-**Status: needs one read-only command against production to answer.**
+**Status: the gap is now closable in one deliberate step.** Migrations 067 and
+068 plus `db.SysPool` are in place; enforcement is a checklist, not a project.
+Nothing is enforced until you run step 3 below, and until then behaviour is
+byte-for-byte what it was.
+
 I found this while building the call-session schema (066) and verifying it
-against a real Postgres. I have not touched any existing table.
+against a real Postgres.
 
 ---
 
@@ -72,6 +76,65 @@ Read the `verdict` column:
 
 ---
 
+## What shipped
+
+| | |
+|---|---|
+| `scripts/check-rls.sql` | read-only diagnostic — tells you which case you're in |
+| **067** | the missing `chats` INSERT policy |
+| `db.SysPool` | a pool for queries that have no acting user, falling back to `db.Pool` when unconfigured |
+| **068** | `FORCE ROW LEVEL SECURITY` on all six policy-bearing tables |
+| `internal/db/syspool_test.go` | pins both halves of the fallback |
+
+All four measured on a real Postgres 16, with FORCE on and a `BYPASSRLS` role:
+
+```
+without 067, as the app role:   ERROR: new row violates RLS policy for "chats"
+with    067, as the app role:   INSERT 0 1
+chat visible to a non-member:   0        ← the protection now exists
+chat visible to the member:     1
+unbound read, app role:         0 rows   ← every sweep, if you skip the system role
+unbound read, system role:      1 row    ← what SysPool restores
+```
+
+That last pair is the whole argument for the system role: it is not a
+precaution, it is the measured difference between a working sweep and one that
+silently does nothing.
+
+## How to turn it on
+
+1. `psql "$DATABASE_URL" -f vaultchat-backend/scripts/check-rls.sql` — if the
+   verdict is already `enforced`/`ENFORCED`, stop, there is nothing to do.
+2. Apply **067**. (Safe on its own: adding a policy to a bypassed table changes
+   nothing today.)
+3. Create the system role, point `DB_SYSTEM_USER`/`DB_SYSTEM_PASS` at it, and
+   restart the API. A misconfigured role makes the API refuse to boot rather
+   than serve wrong data.
+4. Apply **068**. Rollback is `ALTER TABLE <t> NO FORCE ROW LEVEL SECURITY;`,
+   effective immediately, touching no data.
+
+## The 18 queries that made step 3 necessary
+
+Queries against a policy-bearing table with no bound user, now on `db.SysPool`.
+They fall into three kinds, and none of them is a mistake to be converted:
+
+- **No actor exists.** Retention sweeps (`internal/jobs`), presence and
+  notification fan-out (`internal/realtime`), the admin console (x-admin-key,
+  not a user JWT). Binding a user is meaningless here.
+- **Cross-user by design.** Invite-link resolution reads a chat you are *not yet
+  a member of* — that is what an invite is. Story access reads another user's
+  story. Presence fan-out deliberately reads *other people's* memberships.
+  Binding a user would return the wrong answer.
+- **Explicit checks that predate RLS.** Several routes read a row and then check
+  membership themselves, specifically to return 403 rather than 404. RLS would
+  hide the row and silently turn those into 404s — a behaviour change, not an
+  improvement.
+
+The third kind is the honest follow-up: those could be tightened to
+`db.WithUser` so RLS backs up the manual check, at the cost of changing some
+403s to 404s. That is a deliberate API decision, so I left it alone rather than
+bundling it into a security fix.
+
 ## What I did and did not change
 
 **Did:** the two new tables (`calls`, `call_participants`) are `FORCE ROW LEVEL
@@ -79,31 +142,25 @@ SECURITY`. They are new, so there is no existing behaviour to break, and the
 call-role model is exactly the kind of thing that must not depend on a
 deployment detail. `scripts/test-call-rls.sh` proves the policies hold.
 
-**Did not:** flip FORCE on any existing table. That is a behaviour change with
-real breakage risk, and it needs its own verification pass rather than riding
-along with a call feature:
+**Did not:** apply 068 or create the system role. Both are deployment actions on
+a database I cannot see, and the second must come first. The reasons that made
+this risky are now handled rather than merely documented:
 
-- Chat creation would break immediately — `chats` has no INSERT policy, so with
-  FORCE on, every `INSERT INTO chats` is denied. A policy has to be written
-  first.
-- Any server path that queries **without** `SET app.current_user_id` currently
-  succeeds via owner-bypass and would start returning zero rows: system fan-out,
-  sweepers, BullMQ workers, migration-adjacent scripts. `db.WithUser` sets it,
-  but `db.Pool.Query` used directly does not — and there are such calls (for
-  example `callerIdentity` and `fcmTokensFor` in `routes/calls.go`, which read
-  `users` and `devices`; neither table has RLS today, so they are fine now, but
-  they show the pattern exists).
+- ~~Chat creation would break immediately.~~ Fixed by **067**, and the failure
+  and the fix are both reproduced above.
+- ~~Every unbound server query would return zero rows.~~ Those 18 queries now
+  run on `db.SysPool`, which is the user pool until a system role exists.
 
-The safe order, if you want it enforced:
+What remains is genuinely yours: creating a role and applying a migration.
 
-1. Run `check-rls.sql` against production and find out which case you're in.
-2. If INERT: write the missing `chats` INSERT policy.
-3. Audit every direct `db.Pool` query for one that reads a user-owned table
-   without a bound user.
-4. Enable FORCE **one table at a time**, exercising the app after each.
+### Scope note
 
-That is a self-contained piece of work. I can do it if you want it — say the
-word and I'll scope it as its own change with its own test pass.
+RLS covers **six** tables. Everything else — stories, channels, communities,
+shopbook, vaultbeam, devices, users — has never had RLS and is protected by the
+route layer's own checks. That is a defensible design, but it means enforcing
+these six is defence-in-depth for chats, messages, attachments and calls, not a
+blanket guarantee across the schema. Extending RLS further is a separate piece
+of work with a much larger surface.
 
 ---
 

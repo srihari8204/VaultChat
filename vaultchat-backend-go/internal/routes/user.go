@@ -1339,7 +1339,7 @@ func userExport(w http.ResponseWriter, r *http.Request) {
 	rows.Close()
 
 	chats := []map[string]any{}
-	rows, err = db.Pool.Query(ctx,
+	rows, err = db.SysPool.Query(ctx,
 		`SELECT c.id, c.type, c.name, c.photo_url, c.created_at,
 	            cm.role, cm.joined_at, cm.left_at, cm.last_read_message_id
 	       FROM chats c
@@ -1369,7 +1369,7 @@ func userExport(w http.ResponseWriter, r *http.Request) {
 	rows.Close()
 
 	messages := []map[string]any{}
-	rows, err = db.Pool.Query(ctx,
+	rows, err = db.SysPool.Query(ctx,
 		`SELECT m.id, m.chat_id, m.sender_id, m.type, m.content, m.meta,
 	            m.reply_to_id, m.created_at, m.edited_at, m.deleted_at
 	       FROM messages m
@@ -1403,7 +1403,7 @@ func userExport(w http.ResponseWriter, r *http.Request) {
 	rows.Close()
 
 	attachments := []map[string]any{}
-	rows, err = db.Pool.Query(ctx,
+	rows, err = db.SysPool.Query(ctx,
 		`SELECT id, filename, mime_type, size_bytes, created_at
 	       FROM attachments WHERE owner_user_id = $1`, user.ID)
 	if err != nil {
@@ -1621,7 +1621,7 @@ const userMaxBookmarkNote = 280
 func userBookmarksGet(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := httpx.UserFrom(r)
-	rows, err := db.Pool.Query(ctx,
+	rows, err := db.SysPool.Query(ctx,
 		`SELECT b.id, b.note, b.created_at,
 	            m.id   AS message_id,
 	            m.chat_id, m.sender_id, m.type, m.content, m.meta,
@@ -1704,7 +1704,7 @@ func userBookmarksPost(w http.ResponseWriter, r *http.Request) {
 	// Two-step so we return 404 for unknown messages vs 403 for member-loss.
 	var mid int64
 	var chatID string
-	err := db.Pool.QueryRow(ctx,
+	err := db.SysPool.QueryRow(ctx,
 		`SELECT m.id, m.chat_id FROM messages m WHERE m.id = $1 LIMIT 1`, messageID).Scan(&mid, &chatID)
 	if err != nil {
 		if db.NoRows(err) {
@@ -1715,7 +1715,7 @@ func userBookmarksPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var one int
-	err = db.Pool.QueryRow(ctx,
+	err = db.SysPool.QueryRow(ctx,
 		`SELECT 1 FROM chat_members
 	      WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL`,
 		chatID, user.ID).Scan(&one)
@@ -1902,7 +1902,7 @@ var userSchedTypes = map[string]bool{
 func userScheduledGet(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := httpx.UserFrom(r)
-	rows, err := db.Pool.Query(ctx,
+	rows, err := db.SysPool.Query(ctx,
 		`SELECT s.id, s.chat_id, s.type, s.content, s.meta, s.reply_to_id,
 	            s.send_at, s.sent_at, s.message_id, s.created_at,
 	            c.type AS chat_type, c.name AS chat_name
@@ -2038,7 +2038,7 @@ func userScheduledPost(w http.ResponseWriter, r *http.Request) {
 
 	// Verify the caller is still a member of the chat right now.
 	var one int
-	err := db.Pool.QueryRow(ctx,
+	err := db.SysPool.QueryRow(ctx,
 		`SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL`,
 		chatID, user.ID).Scan(&one)
 	if err != nil {

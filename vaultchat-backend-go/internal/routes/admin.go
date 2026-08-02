@@ -94,7 +94,7 @@ func adminAuth(next http.HandlerFunc) http.HandlerFunc {
 // adminOnlineCount — see the divergence note in the file header.
 func adminOnlineCount(r *http.Request) int64 {
 	var n int64
-	if err := db.Pool.QueryRow(r.Context(),
+	if err := db.SysPool.QueryRow(r.Context(),
 		`SELECT COUNT(*) FROM users WHERE online = TRUE`).Scan(&n); err != nil {
 		return 0 // Node's default getOnlineCount is () => 0
 	}
@@ -105,7 +105,7 @@ func adminOnlineCount(r *http.Request) int64 {
 
 func adminStats(w http.ResponseWriter, r *http.Request) {
 	var totalUsers, totalMessages, activeSessions, dbSize int64
-	err := db.Pool.QueryRow(r.Context(), `
+	err := db.SysPool.QueryRow(r.Context(), `
       SELECT
         (SELECT COUNT(*) FROM users WHERE is_deleted = FALSE)                               AS total_users,
         (SELECT COUNT(*) FROM messages)                                                     AS total_messages,
@@ -159,7 +159,7 @@ func adminUsers(w http.ResponseWriter, r *http.Request) {
 		params = []any{like, limit, offset}
 	}
 
-	rows, err := db.Pool.Query(ctx,
+	rows, err := db.SysPool.Query(ctx,
 		fmt.Sprintf(`SELECT id, name, email, phone, online, last_seen_at, created_at, is_deleted, auth_provider
          FROM users %s
         ORDER BY created_at DESC
@@ -195,7 +195,7 @@ func adminUsers(w http.ResponseWriter, r *http.Request) {
 		totalSQL += `WHERE name ILIKE $1 OR email::text ILIKE $1 OR phone ILIKE $1`
 		totalParams = []any{like}
 	}
-	if err := db.Pool.QueryRow(ctx, totalSQL, totalParams...).Scan(&total); err != nil {
+	if err := db.SysPool.QueryRow(ctx, totalSQL, totalParams...).Scan(&total); err != nil {
 		httpx.Err(w, 500, "Failed to load users")
 		return
 	}
@@ -207,7 +207,7 @@ func adminUsers(w http.ResponseWriter, r *http.Request) {
 // ── GET /api/admin/messages?limit= — METADATA ONLY (no content) ───────
 
 func adminMessages(w http.ResponseWriter, r *http.Request) {
-	rows, err := db.Pool.Query(r.Context(),
+	rows, err := db.SysPool.Query(r.Context(),
 		`SELECT id, chat_id, sender_id, type, reply_to_id, edited_at, deleted_at, created_at
          FROM messages ORDER BY id DESC LIMIT $1`,
 		adminLimit(r.URL.Query().Get("limit")))
@@ -252,7 +252,7 @@ func adminMessages(w http.ResponseWriter, r *http.Request) {
 
 func adminSessions(w http.ResponseWriter, r *http.Request) {
 	// rt.ip is INET; ::text matches node-pg's string form ("1.2.3.4", no /32).
-	rows, err := db.Pool.Query(r.Context(),
+	rows, err := db.SysPool.Query(r.Context(),
 		`SELECT rt.id, rt.user_id, u.email, u.name, rt.user_agent, rt.ip::text,
               rt.created_at, rt.last_used_at, rt.expires_at
          FROM refresh_tokens rt JOIN users u ON u.id = rt.user_id
@@ -298,7 +298,7 @@ func adminSessionDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var revoked int64
-	err := db.Pool.QueryRow(r.Context(),
+	err := db.SysPool.QueryRow(r.Context(),
 		`UPDATE refresh_tokens SET revoked_at = NOW() WHERE id = $1 AND revoked_at IS NULL RETURNING id`,
 		id).Scan(&revoked)
 	if db.NoRows(err) {
@@ -336,7 +336,7 @@ func adminBroadcast(w http.ResponseWriter, r *http.Request) {
 	payload := map[string]any{"type": typ, "text": text, "ts": time.Now().UnixMilli()}
 	emitx.Broadcast("system:announcement", payload)
 	var online int
-	if err := db.Pool.QueryRow(r.Context(),
+	if err := db.SysPool.QueryRow(r.Context(),
 		`SELECT COUNT(*)::int FROM users WHERE online = TRUE`).Scan(&online); err != nil {
 		online = 0
 	}

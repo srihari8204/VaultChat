@@ -572,7 +572,7 @@ func uploadsGet(w http.ResponseWriter, r *http.Request) {
 				// stories reference attachments directly, not via messages.meta).
 				// Plain pool like storiesFeed (stories has no RLS policy).
 				var one int
-				e := db.Pool.QueryRow(ctx,
+				e := db.SysPool.QueryRow(ctx,
 					`SELECT 1 FROM stories s
 					  WHERE s.attachment_id = $1
 					    AND s.expires_at > NOW()

@@ -304,7 +304,7 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 	if limit > 500 {
 		limit = 500
 	}
-	rows, err := db.Pool.Query(ctx,
+	rows, err := db.SysPool.Query(ctx,
 		`SELECT `+chatsMsgSel("m")+` FROM messages m
 		   JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1 AND cm.left_at IS NULL
 		  WHERE m.id > $2 AND (m.expires_at IS NULL OR m.expires_at > NOW())
@@ -330,7 +330,7 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var serverTime time.Time
-	if err := db.Pool.QueryRow(ctx, `SELECT NOW() AS now`).Scan(&serverTime); err != nil {
+	if err := db.SysPool.QueryRow(ctx, `SELECT NOW() AS now`).Scan(&serverTime); err != nil {
 		log.Printf("[chats/delta] %v", err)
 		httpx.Err(w, 500, "delta failed")
 		return
@@ -338,7 +338,7 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 	mutations := []chatsPublicMsg{}
 	if raw := q.Get("mutatedSince"); raw != "" {
 		if mutatedSince, ok := userParseJSDate(raw); ok {
-			mrows, err := db.Pool.Query(ctx,
+			mrows, err := db.SysPool.Query(ctx,
 				`SELECT `+chatsMsgSel("m")+` FROM messages m
 				   JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1 AND cm.left_at IS NULL
 				  WHERE (m.edited_at > $2 OR m.deleted_at > $2) AND m.id <= $3
@@ -894,7 +894,7 @@ func chatsJoinByCode(w http.ResponseWriter, r *http.Request) {
 		maxUses, uses  int64
 		approveMembers bool
 	)
-	err := db.Pool.QueryRow(ctx,
+	err := db.SysPool.QueryRow(ctx,
 		`SELECT il.chat_id, il.revoked, il.expires_at, il.max_uses, il.uses, c.approve_members
 		   FROM invite_links il JOIN chats c ON c.id = il.chat_id
 		  WHERE il.code = $1 LIMIT 1`, code).Scan(&chatID, &revoked, &expiresAt, &maxUses, &uses, &approveMembers)
@@ -917,7 +917,7 @@ func chatsJoinByCode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var one int
-	err = db.Pool.QueryRow(ctx,
+	err = db.SysPool.QueryRow(ctx,
 		`SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL`,
 		chatID, user.ID).Scan(&one)
 	if err == nil {

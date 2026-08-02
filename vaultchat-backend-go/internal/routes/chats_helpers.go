@@ -460,7 +460,7 @@ func chatsSendMessagePush(chatID, senderID string, msg chatsPublicMsg) {
 			}
 		}
 	}
-	rows, err := db.Pool.Query(ctx,
+	rows, err := db.SysPool.Query(ctx,
 		`SELECT cm.user_id FROM chat_members cm
 		  WHERE cm.chat_id = $1
 		    AND cm.user_id <> $2
@@ -489,7 +489,7 @@ func chatsSendMessagePush(chatID, senderID string, msg chatsPublicMsg) {
 		return
 	}
 
-	tok, err := db.Pool.Query(ctx,
+	tok, err := db.SysPool.Query(ctx,
 		`SELECT d.push_token, d.fcm_token, cm.notif_sound
 		   FROM devices d
 		   JOIN chat_members cm ON cm.user_id = d.user_id AND cm.chat_id = $2
