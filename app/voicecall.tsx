@@ -38,13 +38,109 @@ import { startCallForeground, stopCallForeground, dismissIncomingNotification, i
 import { newCallCipher, openCallOffer, plainCipher, type CallCipher } from '../lib/callCrypto';
 import { CallTimer, elapsedSeconds } from '../components/call/CallTimer';
 import { CallControlButton } from '../components/call/CallControlButton';
+import { CALL_ENGINE_V2 } from '../constants/flags';
+import * as engine from '../lib/call/engine';
+import { useCallConnectedAt, useCallError, useCallFlag, useCallStatus } from '../hooks/useCall';
 
 type CallState = 'connecting' | 'ringing' | 'connected' | 'ended';
 
 // Call chrome is always dark (independent of app theme), so styles are static.
 const S = makeStyles();
 
+/**
+ * Route entry. Picks the engine-backed renderer or the original implementation
+ * from one flag, so the migration ships dark and rollback is a constant.
+ *
+ * Both render the SAME chrome from the SAME styles and speak the SAME wire, so
+ * a device on either path interoperates with a device on the other. The legacy
+ * body below is deleted once CALL_ENGINE_V2 has passed the OEM matrix in
+ * CALLS_README.md on real hardware.
+ */
 export default function VoiceCallScreen() {
+  return CALL_ENGINE_V2 ? <VoiceCallEngine /> : <VoiceCallLegacy />;
+}
+
+// ── engine-backed renderer (CALL_ENGINE_V2) ───────────────────────────
+// All protocol lives in lib/call/*; this subscribes and draws. Note what is
+// absent: no RTCPeerConnection, no getUserMedia, no socket handlers, no cipher,
+// no teardown bookkeeping, no duration state.
+function VoiceCallEngine() {
+  const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const { chatId, peerUid, peerName, isIncoming, initialOffer } =
+    useLocalSearchParams<{
+      chatId: string; peerUid: string; peerName: string;
+      isIncoming?: string; initialOffer?: string;
+    }>();
+
+  const status      = useCallStatus();
+  const connectedAt = useCallConnectedAt();
+  const error       = useCallError();
+  const muted       = useCallFlag('muted');
+  const speaker     = useCallFlag('speaker');
+
+  // Start exactly once per mount, on the params this screen was opened with.
+  useEffect(() => {
+    const incoming = isIncoming === 'true' || isIncoming === '1';
+    const args = {
+      chatId: String(chatId ?? ''), peerUid: String(peerUid ?? ''),
+      peerName: String(peerName ?? ''), kind: 'audio' as const,
+    };
+    if (incoming && initialOffer) {
+      let wire: any = null;
+      try { wire = JSON.parse(String(initialOffer)); } catch {}
+      engine.acceptIncoming({ ...args, offerWire: wire });
+    } else {
+      engine.startOutgoing(args);
+    }
+    // Unmount for any reason (back gesture, replacement, crash recovery) must
+    // release the mic and the foreground service — the engine's disposal
+    // registry makes this safe to call redundantly.
+    return () => { engine.hangUp('local_hangup', true); engine.release(); };
+  }, [chatId, peerUid, peerName, isIncoming, initialOffer]);
+
+  // Foreground service + clear the OS ring, once, on connect.
+  useEffect(() => { if (status === 'connected') engine.onConnected(); }, [status]);
+
+  // Leave when the call is over, matching the legacy 200 ms settle.
+  useEffect(() => {
+    if (status !== 'ended') return;
+    const t = setTimeout(() => router.back(), 200);
+    return () => clearTimeout(t);
+  }, [status, router]);
+
+  const statusText = status === 'connecting' ? 'Connecting…'
+    : status === 'ringing' ? 'Ringing…'
+    : 'Call ended';
+  const initial = (peerName?.trim()[0] ?? '?').toUpperCase();
+
+  return (
+    <View style={S.screen}>
+      <StatusBar barStyle="light-content" />
+      <View style={S.body}>
+        <View style={S.avatarWrap}>
+          <View style={S.avatar}><Text style={S.avatarTxt}>{initial}</Text></View>
+        </View>
+        <Text style={S.name}>{peerName || 'VaultChat user'}</Text>
+        {status === 'connected'
+          ? <CallTimer style={S.status} startedAt={connectedAt} />
+          : <Text style={S.status}>{statusText}</Text>}
+        {error && <Text style={S.errorTxt}>{error}</Text>}
+      </View>
+
+      <View style={[S.controls, { paddingBottom: insets.bottom + 24 }]}>
+        <CallControlButton icon={muted ? 'mic-off' : 'mic'} label={muted ? 'Unmute' : 'Mute'} active={muted} onPress={engine.toggleMute} />
+        <CallControlButton icon={speaker ? 'volume-high' : 'volume-low'} label={speaker ? 'Speaker' : 'Earpiece'} active={speaker} onPress={engine.toggleSpeaker} />
+        <CallControlButton icon="call" label="End" danger onPress={hangUpFromScreen} />
+      </View>
+    </View>
+  );
+}
+
+const hangUpFromScreen = () => engine.hangUp('local_hangup', true);
+
+// ── original implementation (CALL_ENGINE_V2 off) — unchanged ──────────
+function VoiceCallLegacy() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { chatId, peerUid, peerName, isIncoming, initialOffer } =
