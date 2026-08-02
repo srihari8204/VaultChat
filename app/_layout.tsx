@@ -400,7 +400,6 @@ function RootLayout() {
 
         {/* Utility */}
         <Stack.Screen name="search" />
-        <Stack.Screen name="starred" />
         <Stack.Screen name="scheduled" />
         <Stack.Screen name="perf-debug" />
         <Stack.Screen name="scanner" />
