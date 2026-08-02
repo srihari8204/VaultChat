@@ -43,6 +43,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"vaultchat/backend-go/internal/db"
+	"vaultchat/backend-go/internal/livekit"
 )
 
 const (
@@ -275,6 +276,101 @@ func TestCallSessionAPI(t *testing.T) {
 	}
 	if handOf(tCarl) != nil {
 		t.Fatal("the host's lower did not take effect")
+	}
+
+	// ── SFU token ──
+	// No LiveKit keys in the test environment, so the endpoint must say so
+	// rather than mint something no server would accept.
+	if code, res = call(t, mux, tAnn, "POST", "/calls/"+callID+"/sfu-token", ""); code != 503 {
+		t.Fatalf("unconfigured LiveKit must answer 503, got %d %v", code, res)
+	}
+
+	t.Setenv("LIVEKIT_API_KEY", "APItest")
+	t.Setenv("LIVEKIT_API_SECRET", "test-secret-at-least-32-bytes-long!!")
+	t.Setenv("LIVEKIT_URL", "wss://livekit.example")
+
+	// Set the role explicitly rather than inheriting whatever the previous
+	// blocks left behind — an assertion about audience permissions is worthless
+	// if an earlier promotion silently made the subject a speaker. (It had.)
+	if code, _ = call(t, mux, tAnn, "POST", "/calls/"+callID+"/role",
+		fmt.Sprintf(`{"userId":%q,"role":"audience"}`, tCarl)); code != 200 {
+		t.Fatalf("demote for the token test: got %d", code)
+	}
+
+	// The role in the database becomes the media grant.
+	code, res = call(t, mux, tCarl, "POST", "/calls/"+callID+"/sfu-token", "")
+	if code != 200 {
+		t.Fatalf("audience should still receive a subscribe-only token: %d %v", code, res)
+	}
+	if res["role"] != "audience" {
+		t.Fatalf("token role should come from the DB, got %v", res["role"])
+	}
+	var carlClaims livekit.Claims
+	if _, err := jwt.ParseWithClaims(res["token"].(string), &carlClaims, func(*jwt.Token) (any, error) {
+		return []byte("test-secret-at-least-32-bytes-long!!"), nil
+	}); err != nil {
+		t.Fatalf("minted token does not verify: %v", err)
+	}
+	// The assertion this whole endpoint exists for.
+	if carlClaims.Video.CanPublish || len(carlClaims.Video.CanPublishSources) != 0 {
+		t.Fatalf("an audience member must not receive publish permission: %+v", carlClaims.Video)
+	}
+	if !carlClaims.Video.CanSubscribe {
+		t.Fatal("an audience member must still be able to subscribe")
+	}
+	if carlClaims.Subject != tCarl {
+		t.Fatalf("identity must be the caller, got %q", carlClaims.Subject)
+	}
+
+	code, res = call(t, mux, tAnn, "POST", "/calls/"+callID+"/sfu-token", "")
+	var annClaims livekit.Claims
+	if _, err := jwt.ParseWithClaims(res["token"].(string), &annClaims, func(*jwt.Token) (any, error) {
+		return []byte("test-secret-at-least-32-bytes-long!!"), nil
+	}); err != nil {
+		t.Fatalf("host token: %v", err)
+	}
+	if !annClaims.Video.CanPublish || !annClaims.Video.RoomAdmin {
+		t.Fatalf("the host must publish and moderate: %+v", annClaims.Video)
+	}
+	if annClaims.Video.Room != "call-"+callID {
+		t.Fatalf("room must be per-call, got %q", annClaims.Video.Room)
+	}
+
+	// A promotion must be reflected by the NEXT token, not the previous one —
+	// the role is read fresh on every mint.
+	call(t, mux, tAnn, "POST", "/calls/"+callID+"/role",
+		fmt.Sprintf(`{"userId":%q,"role":"speaker"}`, tCarl))
+	_, res = call(t, mux, tCarl, "POST", "/calls/"+callID+"/sfu-token", "")
+	var carl2 livekit.Claims
+	if _, err := jwt.ParseWithClaims(res["token"].(string), &carl2, func(*jwt.Token) (any, error) {
+		return []byte("test-secret-at-least-32-bytes-long!!"), nil
+	}); err != nil {
+		t.Fatalf("re-mint: %v", err)
+	}
+	if !carl2.Video.CanPublish {
+		t.Fatal("a promoted participant's next token must carry publish")
+	}
+	if carl2.Video.RoomAdmin {
+		t.Fatal("a speaker is not a moderator")
+	}
+
+	// Someone not on the call cannot mint one.
+	if code, _ = call(t, mux, tEve, "POST", "/calls/"+callID+"/sfu-token", ""); code != 404 {
+		t.Fatalf("a non-member must not obtain a token, got %d", code)
+	}
+
+	// Minting should have recorded that this became an SFU call.
+	// Read as a participant, not on the bare pool: with RLS enforced (068) an
+	// unbound query sees zero rows — which is the behaviour db.SysPool exists
+	// for, and this assertion tripping over it is that mechanism working.
+	var transport string
+	if err := db.WithUser(ctx, tAnn, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT transport FROM calls WHERE id = $1`, callID).Scan(&transport)
+	}); err != nil {
+		t.Fatalf("transport read: %v", err)
+	}
+	if transport != "sfu" {
+		t.Fatalf("issuing a token should stamp calls.transport, got %q", transport)
 	}
 
 	// ── ending ──

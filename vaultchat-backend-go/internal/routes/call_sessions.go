@@ -38,6 +38,7 @@ import (
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/emitx"
 	"vaultchat/backend-go/internal/httpx"
+	"vaultchat/backend-go/internal/livekit"
 )
 
 func RegisterCallSessions(mux *http.ServeMux) {
@@ -53,6 +54,7 @@ func RegisterCallSessions(mux *http.ServeMux) {
 	mux.HandleFunc("POST /calls/{id}/end", httpx.RequireAuth(callSessionEnd))
 	mux.HandleFunc("POST /calls/{id}/role", httpx.RequireAuth(callSessionRole))
 	mux.HandleFunc("POST /calls/{id}/hand", httpx.RequireAuth(callSessionHand))
+	mux.HandleFunc("POST /calls/{id}/sfu-token", httpx.RequireAuth(callSessionSfuToken))
 }
 
 // ── shapes ────────────────────────────────────────────────────────────
@@ -535,6 +537,82 @@ func callSessionHand(w http.ResponseWriter, r *http.Request) {
 		"callId": c.ID, "chatId": c.ChatID, "userId": target, "raised": b.Raised, "by": uid,
 	})
 	httpx.JSON(w, 200, map[string]any{"ok": true, "userId": target, "raised": b.Raised})
+}
+
+// ── POST /calls/{id}/sfu-token — a scoped LiveKit join credential ─────
+//
+// The role in call_participants becomes a media-server permission here, and
+// this is the only place that translation happens. An audience member receives
+// a token with canPublish=false and an empty publish-source list, so their
+// camera and microphone are refused by the SFU itself — not hidden by the UI.
+// That is the difference between a convention and a guarantee, and it is why
+// roles were built (B1/B2) before the SFU rather than alongside it.
+//
+// Read the role FRESH on every mint rather than trusting anything the client
+// sends: a participant demoted a second ago must not be able to present a token
+// minted while they were still a speaker. Tokens are short-lived
+// (livekit.DefaultTTL) for the same reason.
+//
+// Works with no cluster provisioned — minting is offline signing. Without keys
+// it answers 503 with a reason rather than a token nothing would accept.
+func callSessionSfuToken(w http.ResponseWriter, r *http.Request) {
+	c, uid, ok := callLoad(w, r)
+	if !ok {
+		return
+	}
+	if c.EndedAt != nil {
+		httpx.Err(w, 409, "This call has ended")
+		return
+	}
+	ctx := r.Context()
+
+	// Must be a LIVE participant. myRole requires left_at IS NULL, so someone
+	// who left cannot mint their way back in without rejoining through POST
+	// /calls, which is where membership is actually checked.
+	role, on := myRole(ctx, uid, c.ID)
+	if !on {
+		httpx.Err(w, 403, "You are not on this call")
+		return
+	}
+
+	cfg := livekit.ConfigFromEnv()
+	if !cfg.Configured() {
+		httpx.Err(w, 503, "Group calling at scale is not configured on this server")
+		return
+	}
+
+	name, _ := callerIdentity(ctx, uid)
+	token, err := livekit.Mint(cfg, livekit.MintArgs{
+		Identity: uid,
+		Name:     name,
+		Room:     livekit.RoomName(c.ID),
+		Role:     livekit.Role(role),
+	})
+	if err != nil {
+		httpx.Err(w, 500, "Failed to issue a call token")
+		return
+	}
+
+	// Record that this call actually became an SFU call. calls.transport exists
+	// for exactly this, and stamping it at the first mint means a mixed-fleet
+	// period stays legible afterwards instead of being guesswork. Best-effort:
+	// a failed bookkeeping write must not cost the caller their token.
+	_ = db.WithUser(ctx, uid, func(tx pgx.Tx) error {
+		_, e := tx.Exec(ctx,
+			`UPDATE calls SET transport = 'sfu' WHERE id = $1 AND transport <> 'sfu'`, c.ID)
+		return e
+	})
+
+	httpx.JSON(w, 200, map[string]any{
+		"token": token,
+		"url":   cfg.URL,
+		"room":  livekit.RoomName(c.ID),
+		// Echoed so the client can render the right controls without re-deriving
+		// the role — and so a demotion that happened between joining and minting
+		// is visible immediately rather than at the next roster event.
+		"identity": uid,
+		"role":     role,
+	})
 }
 
 // ── GET /calls/history ────────────────────────────────────────────────
