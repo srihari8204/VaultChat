@@ -26,7 +26,8 @@
 
 import {
   IDLE_SNAPSHOT, MAX_CALL_CHAT, MAX_CALL_REACTIONS,
-  type CallChatMessage, type CallReaction, type CallSnapshot, type EndReason, type Participant,
+  type CallChatMessage, type CallReaction, type CallRole, type CallSnapshot,
+  type EndReason, type Participant,
 } from './types';
 
 /** Local device toggles that never affect the lifecycle. */
@@ -51,6 +52,19 @@ export type CallEvent =
   | { type: 'chat_read' }
   /** A tapped reaction, ours or a peer's. */
   | { type: 'reaction'; reaction: CallReaction }
+  /**
+   * Our own uid, once identity resolves. Separate from `startSnapshot` because
+   * a call begins rendering BEFORE the cached user is read — the screen must
+   * show "connecting" immediately, not after an await — and the reducer needs
+   * this to tell a role/hand event about US from one about a peer.
+   */
+  | { type: 'me'; uid: string }
+  /** The server session opened (B2). Carries our own role. */
+  | { type: 'session'; sessionId: string; myRole?: CallRole }
+  /** A role changed — ours or someone else's. */
+  | { type: 'role'; uid: string; role: CallRole }
+  /** A hand went up or down. `at` is 0 for lowered. */
+  | { type: 'hand'; uid: string; at: number }
   | { type: 'error'; message: string }
   | { type: 'end'; reason: EndReason };
 
@@ -61,6 +75,8 @@ export interface StartParams {
   kind: CallSnapshot['kind'];
   direction: CallSnapshot['direction'];
   transport?: CallSnapshot['transport'];
+  /** Our own uid, when known at start. The engine fills it in via 'session'. */
+  meId?: string;
 }
 
 /** The snapshot a freshly started call begins from. */
@@ -74,6 +90,7 @@ export function startSnapshot(p: StartParams): CallSnapshot {
     chatId: p.chatId,
     peerUid: p.peerUid,
     peerName: p.peerName,
+    meId: p.meId ?? '',
     // Video calls default to speaker, voice calls to earpiece — the shipped
     // behaviour of app/videocall.tsx and app/voicecall.tsx respectively.
     speaker: p.kind === 'video',
@@ -91,10 +108,12 @@ function withParticipant(
     streamUrl: prev?.streamUrl ?? null,
     role: prev?.role ?? 'speaker',
     muted: prev?.muted ?? false,
+    handRaisedAt: prev?.handRaisedAt ?? 0,
     ...patch,
   };
   if (prev && prev.name === next.name && prev.streamUrl === next.streamUrl
-      && prev.role === next.role && prev.muted === next.muted) {
+      && prev.role === next.role && prev.muted === next.muted
+      && prev.handRaisedAt === next.handRaisedAt) {
     return s.participants;   // no-op: keep the reference
   }
   return { ...s.participants, [uid]: next };
@@ -169,6 +188,37 @@ export function reduce(s: CallSnapshot, e: CallEvent, now: number): CallSnapshot
 
     case 'reaction':
       return { ...s, reactions: [...s.reactions, e.reaction].slice(-MAX_CALL_REACTIONS) };
+
+    case 'me':
+      if (s.meId === e.uid) return s;
+      return { ...s, meId: e.uid };
+
+    case 'session': {
+      const myRole = e.myRole ?? s.myRole;
+      if (s.sessionId === e.sessionId && s.myRole === myRole) return s;
+      return { ...s, sessionId: e.sessionId, myRole };
+    }
+
+    // A role or hand event names a uid that is EITHER a remote participant or
+    // ourselves. Our own state does not live in `participants` — we are not our
+    // own peer — so both cases must be handled here rather than at every call
+    // site in the engine, which would otherwise repeat the same comparison and
+    // eventually forget it in one place.
+    case 'role': {
+      if (e.uid && e.uid === s.meId) {
+        return s.myRole === e.role ? s : { ...s, myRole: e.role };
+      }
+      const participants = withParticipant(s, e.uid, { role: e.role });
+      return participants === s.participants ? s : { ...s, participants };
+    }
+
+    case 'hand': {
+      if (e.uid && e.uid === s.meId) {
+        return s.myHandRaisedAt === e.at ? s : { ...s, myHandRaisedAt: e.at };
+      }
+      const participants = withParticipant(s, e.uid, { handRaisedAt: e.at });
+      return participants === s.participants ? s : { ...s, participants };
+    }
 
     case 'error':
       if (s.error === e.message) return s;

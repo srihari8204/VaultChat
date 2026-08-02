@@ -46,6 +46,14 @@ export interface Participant {
   streamUrl: string | null;
   role: CallRole;
   muted: boolean;
+  /**
+   * Epoch ms this participant raised their hand, or 0.
+   *
+   * A timestamp, not a boolean, so a host's queue orders by who asked FIRST.
+   * With a boolean the order is whatever the roster happens to return, which
+   * quietly favours whoever joined earliest — the opposite of fair.
+   */
+  handRaisedAt: number;
 }
 
 /**
@@ -130,6 +138,19 @@ export interface CallSnapshot {
   chatUnread: number;
   /** Recent reactions, capped at MAX_CALL_REACTIONS. */
   reactions: readonly CallReaction[];
+
+  /**
+   * The server-side call id (calls.id), or '' when this call has no session —
+   * the flag is off, the server isn't migrated, or the request didn't land.
+   * Everything role-related is inert without it, which is the graceful case.
+   */
+  sessionId: string;
+  /** OUR role. Drives whether the moderation controls are shown at all. */
+  myRole: CallRole;
+  /** Epoch ms we raised our own hand, or 0. */
+  myHandRaisedAt: number;
+  /** Our own uid, so the reducer can tell "me" from a peer. */
+  meId: string;
 }
 
 export const IDLE_SNAPSHOT: CallSnapshot = Object.freeze({
@@ -154,6 +175,10 @@ export const IDLE_SNAPSHOT: CallSnapshot = Object.freeze({
   chat: Object.freeze([]),
   chatUnread: 0,
   reactions: Object.freeze([]),
+  sessionId: '',
+  myRole: 'speaker',
+  myHandRaisedAt: 0,
+  meId: '',
 });
 
 export default {};

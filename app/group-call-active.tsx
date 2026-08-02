@@ -27,7 +27,8 @@ import { CallTimer } from '../components/call/CallTimer';
 import { CallExtras } from '../components/call/CallExtras';
 import {
   useCallConnectedAt, useCallError, useCallFlag, useCallLocalUrl,
-  useCallStatus, useParticipant, useParticipantIds,
+  useCallStatus, useCanModerate, useMyHandRaised, useParticipant,
+  useParticipantIds, useRaisedHands,
 } from '../hooks/useCall';
 
 type Peer = { pc: RTCPeerConnection; url: string | null; name: string };
@@ -44,24 +45,38 @@ export default function GroupCallActive() {
 /** One remote participant. Memoized and subscribed to its OWN peer, so a tile
  *  re-renders when that peer's stream changes and not when anyone else's does. */
 const ParticipantTile = memo(function ParticipantTile(
-  { uid, width, isVideo }: { uid: string; width: string; isVideo: boolean },
+  { uid, width, isVideo, onModerate }: {
+    uid: string; width: string; isVideo: boolean; onModerate?: (uid: string, name: string) => void;
+  },
 ) {
   const { colors } = useTheme();
   const S = useMemo(() => makeStyles(colors), [colors]);
   const p = useParticipant(uid);
   const url = p?.streamUrl ?? null;
+  const name = p?.name || (url ? 'Connected' : 'Connecting…');
   return (
-    <View style={[S.tile, { width: width as any }]}>
+    <TouchableOpacity
+      style={[S.tile, { width: width as any }]}
+      activeOpacity={onModerate ? 0.7 : 1}
+      disabled={!onModerate}
+      onPress={() => onModerate?.(uid, name)}
+    >
       {isVideo && url
         ? <RTCView streamURL={url} style={S.video} objectFit="cover" />
         : <View style={S.audioTile}>
             {url ? <RTCView streamURL={url} style={{ width: 1, height: 1 }} /> : null}
             <Ionicons name="person" size={34} color="#fff" />
           </View>}
-      <Text style={S.tileName} numberOfLines={1}>
-        {url ? (p?.name || 'Connected') : 'Connecting…'}
-      </Text>
-    </View>
+      {/* A raised hand has to be visible on the tile, not only in a list a host
+          might not have open — the whole point is that it interrupts. */}
+      {!!p?.handRaisedAt && (
+        <View style={S.handBadge}><Text style={S.handBadgeTxt}>✋</Text></View>
+      )}
+      {p?.role === 'audience' && (
+        <View style={S.roleBadge}><Ionicons name="eye-outline" size={11} color="#fff" /></View>
+      )}
+      <Text style={S.tileName} numberOfLines={1}>{name}</Text>
+    </TouchableOpacity>
   );
 });
 
@@ -88,6 +103,24 @@ function GroupCallEngine() {
   const speaker     = useCallFlag('speaker');
   const localUrl    = useCallLocalUrl();
   const peerIds     = useParticipantIds();
+  const handUp      = useMyHandRaised();
+  const canModerate = useCanModerate();
+  const hands       = useRaisedHands();
+
+  // Moderation is a menu rather than inline buttons: the actions are rare,
+  // mutually exclusive, and destructive-ish (demoting someone mid-sentence), so
+  // they belong behind a deliberate tap rather than next to a video surface
+  // where a mis-tap is easy.
+  const moderate = useCallback((uid: string, name: string) => {
+    Alert.alert(name, 'Change what this person can do', [
+      { text: 'Make co-host', onPress: () => engine.setRole(uid, 'cohost') },
+      { text: 'Make speaker', onPress: () => engine.setRole(uid, 'speaker') },
+      { text: 'Move to audience', onPress: () => engine.setRole(uid, 'audience') },
+      { text: 'Lower hand', onPress: () => engine.lowerPeerHand(uid) },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  }, []);
+  const toggleHand = useCallback(() => engine.raiseHand(!handUp), [handUp]);
 
   useEffect(() => {
     engine.startGroup({
@@ -135,9 +168,21 @@ function GroupCallEngine() {
           <Text style={S.tileName}>You{muted ? ' 🔇' : ''}</Text>
         </View>
         {peerIds.map(uid => (
-          <ParticipantTile key={uid} uid={uid} width={tileW} isVideo={isVideo} />
+          <ParticipantTile
+            key={uid} uid={uid} width={tileW} isVideo={isVideo}
+            onModerate={canModerate ? moderate : undefined}
+          />
         ))}
       </ScrollView>
+
+      {/* The host's queue, in the order people asked. Only shown to someone who
+          can actually act on it — to anyone else it would be a list of requests
+          they are powerless to grant. */}
+      {canModerate && hands.length > 0 && (
+        <Text style={S.handQueue} numberOfLines={1}>
+          ✋ {hands.length} waiting — tap a tile to give the floor
+        </Text>
+      )}
 
       {status === 'connected' && <CallExtras bottom={110} />}
 
@@ -146,6 +191,7 @@ function GroupCallEngine() {
         {isVideo && <CtrlBtn icon={camOff ? 'videocam-off' : 'videocam'} active={camOff} onPress={engine.toggleCamera} colors={colors} />}
         {isVideo && <CtrlBtn icon="camera-reverse" onPress={engine.flipCamera} colors={colors} />}
         <CtrlBtn icon={speaker ? 'volume-high' : 'volume-low'} active={speaker} onPress={engine.toggleSpeaker} colors={colors} />
+        <CtrlBtn icon="hand-left" active={handUp} onPress={toggleHand} colors={colors} />
         <CtrlBtn icon="call" danger onPress={endGroupCall} colors={colors} />
       </View>
     </View>
@@ -387,5 +433,11 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   video:     { ...StyleSheet.absoluteFillObject, backgroundColor: '#000' },
   audioTile: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: c.primary },
   tileName:  { color: '#fff', fontSize: 12, fontWeight: '600', padding: 6, backgroundColor: 'rgba(0,0,0,0.4)' },
+  handBadge: { position: 'absolute', top: 6, left: 6, width: 26, height: 26, borderRadius: 13,
+               alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.55)' },
+  handBadgeTxt: { fontSize: 14 },
+  roleBadge: { position: 'absolute', top: 6, right: 6, width: 22, height: 22, borderRadius: 11,
+               alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.55)' },
+  handQueue: { color: '#FFD479', fontSize: 12, textAlign: 'center', paddingBottom: 6 },
   controls:  { flexDirection: 'row', justifyContent: 'center', gap: 22, paddingVertical: 24, paddingBottom: 36 },
 });

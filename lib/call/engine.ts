@@ -28,7 +28,7 @@
 // no layering inversion, no latent cycle.
 import { getCachedUser } from '../api';
 import { CALL_SESSIONS } from '../../constants/flags';
-import { leaveCallSession, openCallSession } from '../callSession';
+import { leaveCallSession, openCallSession, setCallRole, setHandRaised, type CallRole } from '../callSession';
 import { addCallLog } from '../callLog';
 import { newCallCipher, openCallOffer } from '../callCrypto';
 // The ONE platform seam (lib/call/native): Android foreground service + FCM
@@ -239,6 +239,37 @@ export function markChatRead(): void {
   dispatch({ type: 'chat_read' });
 }
 
+// ── raise hand + moderation (B4) ──────────────────────────────────────
+//
+// All three need a server session; without one (flag off, unmigrated server,
+// failed request) they are no-ops rather than errors. A role is a server fact —
+// the whole reason it lives in the database is that a client asserting its own
+// role is not a role — so nothing here writes to the snapshot directly. The
+// socket event that follows a successful call is what updates every device,
+// including this one, which also means the UI can never show a promotion the
+// server refused.
+
+/** Raise or lower our own hand. */
+export function raiseHand(raised: boolean): void {
+  const s = session;
+  if (!s || !s.serverCallId) return;
+  void setHandRaised(s.serverCallId, raised);
+}
+
+/** Lower someone else's hand. Host/cohost only; the server enforces it. */
+export function lowerPeerHand(uid: string): void {
+  const s = session;
+  if (!s || !s.serverCallId || !uid) return;
+  void setHandRaised(s.serverCallId, false, uid);
+}
+
+/** Promote or demote a participant. Host/cohost only; the server enforces it. */
+export function setRole(uid: string, role: CallRole): void {
+  const s = session;
+  if (!s || !s.serverCallId || !uid) return;
+  void setCallRole(s.serverCallId, uid, role);
+}
+
 /** Close and forget a participant. Safe to call for an unknown uid. */
 function removePeer(s: Session, uid: string): void {
   const peer = s.peers.get(uid);
@@ -288,6 +319,7 @@ async function bootstrap(a: StartArgs, direction: 'outgoing' | 'incoming', wire:
   if (!me?.id) throw new Error('Not signed in');
   s.meId = me.id;
   s.meName = me.name ?? me.email ?? 'You';
+  dispatch({ type: 'me', uid: me.id });
 
   const local = await media.acquireLocalMedia(a.kind);
   if (s.disposed) { media.stopStream(local.stream); throw new Error('cancelled'); }
@@ -357,8 +389,32 @@ async function bootstrap(a: StartArgs, direction: 'outgoing' | 'incoming', wire:
 function openSession(s: Session): void {
   if (!CALL_SESSIONS) return;
   void openCallSession(s.chatId, s.kind, 'meeting')
-    .then(res => { if (res?.call?.id && !s.disposed) s.serverCallId = res.call.id; })
+    .then(res => {
+      if (!res?.call?.id || s.disposed) return;
+      s.serverCallId = res.call.id;
+      const me = res.participants?.find(p => p.userId === s.meId);
+      dispatch({ type: 'session', sessionId: res.call.id, myRole: me?.role });
+      // Seed the roster's roles and hands. Someone already on the call may have
+      // a hand up from before we joined, and without this it would only appear
+      // if they happened to lower and raise it again.
+      for (const p of res.participants ?? []) {
+        if (p.userId === s.meId || p.leftAt) continue;
+        dispatch({ type: 'role', uid: p.userId, role: p.role });
+        dispatch({ type: 'hand', uid: p.userId, at: p.handRaisedAt ? Date.parse(p.handRaisedAt) || 0 : 0 });
+      }
+    })
     .catch(() => {});
+
+  void signal.attachSessionListeners({
+    chatId: s.chatId,
+    currentCallId: () => s.serverCallId,
+    onRole: (uid, role) => dispatch({ type: 'role', uid, role: role as any }),
+    onHand: (uid, raised) => dispatch({ type: 'hand', uid, at: raised ? Date.now() : 0 }),
+    // A host ending the session ends the call on every device. Notify no peer:
+    // everyone got this same event, so a webrtc_end each would be N redundant
+    // messages saying what the server already said.
+    onEnded: () => hangUp('remote_hangup', false),
+  }).then(off => { if (s.disposed) off(); else onDispose(off); }).catch(() => {});
 
   // Leaving is registered as a DISPOSER rather than called from hangUp, so it
   // covers every exit path there is — hangup, remote end, ICE failure, setup

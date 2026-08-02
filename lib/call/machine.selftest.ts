@@ -145,6 +145,42 @@ check('chat after end is ignored',
 check('reaction after end is ignored',
   reduce(dead, { type: 'reaction', reaction: { id: 'late', uid: 'them', emoji: '👍', at: T0 } }, T0) === dead);
 
+console.log('\nroles and raised hands:');
+const withMe = reduce(connected, { type: 'me', uid: 'me' }, T0);
+eq('our own uid lands', withMe.meId, 'me');
+check('repeating it is a no-op', reduce(withMe, { type: 'me', uid: 'me' }, T0) === withMe);
+
+let r = reduce(withMe, { type: 'session', sessionId: 'call-1', myRole: 'host' }, T0);
+eq('the session id lands', r.sessionId, 'call-1');
+eq('and our role with it', r.myRole, 'host');
+check('an identical session event is a no-op',
+  reduce(r, { type: 'session', sessionId: 'call-1', myRole: 'host' }, T0) === r);
+
+// The routing that matters: the SAME event shape means "me" or "a peer"
+// depending only on the uid, so the engine never has to decide.
+r = reduce(r, { type: 'role', uid: 'them', role: 'audience' }, T0);
+eq("a peer's role goes to participants", r.participants.them.role, 'audience');
+eq('and does not touch ours', r.myRole, 'host');
+r = reduce(r, { type: 'role', uid: 'me', role: 'cohost' }, T0);
+eq('our own role updates in place', r.myRole, 'cohost');
+check('and creates no phantom participant for us', !r.participants.me);
+
+r = reduce(r, { type: 'hand', uid: 'them', at: T0 + 5 }, T0);
+eq("a peer's hand is a timestamp", r.participants.them.handRaisedAt, T0 + 5);
+r = reduce(r, { type: 'hand', uid: 'me', at: T0 + 9 }, T0);
+eq('our own hand tracks separately', r.myHandRaisedAt, T0 + 9);
+check('still no phantom participant', !r.participants.me);
+r = reduce(r, { type: 'hand', uid: 'them', at: 0 }, T0);
+eq('lowering is at: 0', r.participants.them.handRaisedAt, 0);
+check('lowering an already-lowered hand is a no-op',
+  reduce(r, { type: 'hand', uid: 'them', at: 0 }, T0) === r);
+
+// A hand raised before we joined must survive the roster seed reaching a peer
+// we have not yet received media from.
+const seeded = reduce(withMe, { type: 'hand', uid: 'early', at: T0 - 1000 }, T0);
+eq('a hand can be seeded for an unseen peer', seeded.participants.early.handRaisedAt, T0 - 1000);
+eq('…without inventing a stream for them', seeded.participants.early.streamUrl, null);
+
 console.log('\nlog derivation (what addCallLog needs):');
 eq('duration of a connected call', durationSeconds(connected, T0 + 65_400), 65);
 eq('duration of a call that never connected', durationSeconds(run(out(), [{ type: 'offer_sent' }]), T0 + 9_000), 0);

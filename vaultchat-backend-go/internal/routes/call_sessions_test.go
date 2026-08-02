@@ -237,6 +237,46 @@ func TestCallSessionAPI(t *testing.T) {
 		t.Fatalf("rejoining must not reset a promoted role: got %q", got)
 	}
 
+	// ── raise hand ──
+	handOf := func(uid string) any {
+		_, r := call(t, mux, tAnn, "GET", "/calls/"+callID, "")
+		for _, p := range r["participants"].([]any) {
+			if m := p.(map[string]any); m["userId"] == uid {
+				return m["handRaisedAt"]
+			}
+		}
+		return nil
+	}
+	if code, _ = call(t, mux, tCarl, "POST", "/calls/"+callID+"/hand", `{"raised":true}`); code != 200 {
+		t.Fatalf("a participant may raise their own hand: got %d", code)
+	}
+	if handOf(tCarl) == nil {
+		t.Fatal("the raised hand was not recorded")
+	}
+	// Raising someone else's hand would let anyone put words in their mouth.
+	if code, _ = call(t, mux, tBob, "POST", "/calls/"+callID+"/hand",
+		fmt.Sprintf(`{"raised":true,"userId":%q}`, tAnn)); code != 403 {
+		t.Fatalf("raising another's hand must be refused: got %d", code)
+	}
+	// Promoting answers the request, so the hand comes down with it — otherwise
+	// the host grants the floor and the queue still shows it pending.
+	if code, _ = call(t, mux, tAnn, "POST", "/calls/"+callID+"/role",
+		fmt.Sprintf(`{"userId":%q,"role":"speaker"}`, tCarl)); code != 200 {
+		t.Fatalf("promote: got %d", code)
+	}
+	if handOf(tCarl) != nil {
+		t.Fatal("promoting to speaker must lower the hand")
+	}
+	// A host may clear a hand without promoting.
+	call(t, mux, tCarl, "POST", "/calls/"+callID+"/hand", `{"raised":true}`)
+	if code, _ = call(t, mux, tAnn, "POST", "/calls/"+callID+"/hand",
+		fmt.Sprintf(`{"raised":false,"userId":%q}`, tCarl)); code != 200 {
+		t.Fatalf("a host may lower another hand: got %d", code)
+	}
+	if handOf(tCarl) != nil {
+		t.Fatal("the host's lower did not take effect")
+	}
+
 	// ── ending ──
 	if code, _ = call(t, mux, tBob, "POST", "/calls/"+callID+"/end", ""); code != 403 {
 		t.Fatalf("a cohost must not end the call: got %d", code)

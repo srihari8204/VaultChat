@@ -152,6 +152,49 @@ export async function joinCallRoom(handlers: {
   };
 }
 
+/**
+ * Session events — roles and raised hands (B2/B4).
+ *
+ * These come from the REST layer's fan-out (emitx.ChatEvent) rather than the
+ * per-peer relay the WebRTC signals use, so they arrive on the CHAT room and
+ * carry a chatId instead of being sender-routed. That is the right shape for
+ * them: a role change is a fact about the call, not a message between two
+ * peers, and it must reach a participant whose media link to the actor may not
+ * even exist.
+ *
+ * Filtered by callId when we have one, so a second call starting in the same
+ * chat cannot reorder the roles of the one we are on.
+ */
+export async function attachSessionListeners(handlers: {
+  chatId: string;
+  currentCallId: () => string;
+  onRole: (uid: string, role: string) => void;
+  onHand: (uid: string, raised: boolean) => void;
+  onEnded: (reason: string) => void;
+}): Promise<Off> {
+  const s = await getSocket();
+  const mine = (d: any) => {
+    if (d?.chatId !== handlers.chatId) return false;
+    const id = handlers.currentCallId();
+    // Before our own session id lands, accept by chat alone — the alternative
+    // is dropping the role we are assigned in the same breath as joining.
+    return !id || !d?.callId || d.callId === id;
+  };
+  const onRole  = (d: any) => { if (mine(d) && d?.userId && d?.role) handlers.onRole(d.userId, d.role); };
+  const onHand  = (d: any) => { if (mine(d) && d?.userId) handlers.onHand(d.userId, !!d.raised); };
+  const onEnded = (d: any) => { if (mine(d)) handlers.onEnded(String(d?.reason ?? 'ended')); };
+
+  s.on('call_role_changed', onRole);
+  s.on('call_hand_changed', onHand);
+  s.on('call_session_ended', onEnded);
+  return () => {
+    for (const [e, h] of [['call_role_changed', onRole], ['call_hand_changed', onHand],
+      ['call_session_ended', onEnded]] as const) {
+      try { s.off(e, h as any); } catch {}
+    }
+  };
+}
+
 /** Ring every member of a group so their device shows the incoming call. */
 export async function ringGroup(
   members: string[], from: string, chatId: string, groupName: string, isVideo: boolean,

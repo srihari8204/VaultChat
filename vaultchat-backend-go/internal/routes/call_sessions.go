@@ -52,6 +52,7 @@ func RegisterCallSessions(mux *http.ServeMux) {
 	mux.HandleFunc("POST /calls/{id}/leave", httpx.RequireAuth(callSessionLeave))
 	mux.HandleFunc("POST /calls/{id}/end", httpx.RequireAuth(callSessionEnd))
 	mux.HandleFunc("POST /calls/{id}/role", httpx.RequireAuth(callSessionRole))
+	mux.HandleFunc("POST /calls/{id}/hand", httpx.RequireAuth(callSessionHand))
 }
 
 // ── shapes ────────────────────────────────────────────────────────────
@@ -438,8 +439,14 @@ func callSessionRole(w http.ResponseWriter, r *http.Request) {
 
 	tag := 0
 	err := db.WithUser(ctx, uid, func(tx pgx.Tx) error {
+		// Promoting answers the raised hand, so it comes down in the same
+		// statement. Leaving it up means the host grants the request and the
+		// queue still shows it pending — and the person who was just given the
+		// floor is the least likely to think about lowering it.
 		ct, e := tx.Exec(ctx,
-			`UPDATE call_participants SET role = $3
+			`UPDATE call_participants
+			    SET role = $3,
+			        hand_raised_at = CASE WHEN $3 IN ('speaker','cohost') THEN NULL ELSE hand_raised_at END
 			  WHERE call_id = $1 AND user_id = $2 AND left_at IS NULL`, c.ID, target, b.Role)
 		if e != nil {
 			return e
@@ -460,6 +467,74 @@ func callSessionRole(w http.ResponseWriter, r *http.Request) {
 		"callId": c.ID, "chatId": c.ChatID, "userId": target, "role": b.Role, "by": uid,
 	})
 	httpx.JSON(w, 200, map[string]any{"ok": true, "userId": target, "role": b.Role})
+}
+
+// ── POST /calls/{id}/hand — raise or lower your own hand ──────────────
+//
+// Stored as a TIMESTAMP rather than a boolean, so the host's list orders by who
+// asked first. That is the fair reading of a raised hand, and a boolean cannot
+// express it — with a boolean the order is whatever the roster happens to
+// return, which quietly favours whoever joined earliest.
+//
+// Lowering someone ELSE's hand is a host action and deliberately allowed: after
+// promoting a speaker the host needs the queue to clear, and the alternative is
+// a stuck hand nobody can put down. The RLS policy permits it for host/cohost
+// and the Go check mirrors that.
+func callSessionHand(w http.ResponseWriter, r *http.Request) {
+	c, uid, ok := callLoad(w, r)
+	if !ok {
+		return
+	}
+	var b struct {
+		Raised bool   `json:"raised"`
+		UserID string `json:"userId"`
+	}
+	_ = httpx.Body(r, &b)
+
+	ctx := r.Context()
+	target := strings.TrimSpace(b.UserID)
+	if target == "" {
+		target = uid
+	}
+	if target != uid {
+		if b.Raised {
+			httpx.Err(w, 403, "You can only raise your own hand")
+			return
+		}
+		if mine, on := myRole(ctx, uid, c.ID); !on || (mine != "host" && mine != "cohost") {
+			httpx.Err(w, 403, "Only a host or cohost can lower another hand")
+			return
+		}
+	}
+
+	affected := 0
+	err := db.WithUser(ctx, uid, func(tx pgx.Tx) error {
+		var at any
+		if b.Raised {
+			at = time.Now()
+		}
+		ct, e := tx.Exec(ctx,
+			`UPDATE call_participants SET hand_raised_at = $3
+			  WHERE call_id = $1 AND user_id = $2 AND left_at IS NULL`, c.ID, target, at)
+		if e != nil {
+			return e
+		}
+		affected = int(ct.RowsAffected())
+		return nil
+	})
+	if err != nil {
+		httpx.Err(w, 403, "Cannot change that hand")
+		return
+	}
+	if affected == 0 {
+		httpx.Err(w, 404, "That participant is not on this call")
+		return
+	}
+
+	emitx.ChatEvent(c.ChatID, "call_hand_changed", map[string]any{
+		"callId": c.ID, "chatId": c.ChatID, "userId": target, "raised": b.Raised, "by": uid,
+	})
+	httpx.JSON(w, 200, map[string]any{"ok": true, "userId": target, "raised": b.Raised})
 }
 
 // ── GET /calls/history ────────────────────────────────────────────────

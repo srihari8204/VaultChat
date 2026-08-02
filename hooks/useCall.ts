@@ -12,7 +12,7 @@
 import { useMemo, useSyncExternalStore } from 'react';
 import { getSnapshot, subscribe } from '../lib/call/store';
 import type {
-  CallChatMessage, CallReaction, CallSnapshot, CallStatus, Participant,
+  CallChatMessage, CallReaction, CallRole, CallSnapshot, CallStatus, Participant,
 } from '../lib/call/types';
 
 function useSelect<T>(select: (s: CallSnapshot) => T): T {
@@ -91,6 +91,43 @@ export function useCallChatUnread(): number {
 /** Recent reactions. Bounded by the reducer; each is animated once, by id. */
 export function useCallReactions(): readonly CallReaction[] {
   return useSelect(s => s.reactions);
+}
+
+/** Our own role. '' sessionId means no server session — see useCanModerate. */
+export function useMyRole(): CallRole {
+  return useSelect(s => s.myRole);
+}
+
+/** Whether our own hand is up. */
+export function useMyHandRaised(): boolean {
+  return useSelect(s => s.myHandRaisedAt > 0);
+}
+
+/**
+ * Whether to show moderation controls at all.
+ *
+ * Requires a server session as well as the role: without one there is nothing
+ * to promote against, and a button that silently does nothing is worse than no
+ * button. The server re-checks the role on every action regardless — this is
+ * what the user sees, not what they are permitted.
+ */
+export function useCanModerate(): boolean {
+  return useSelect(s => !!s.sessionId && (s.myRole === 'host' || s.myRole === 'cohost'));
+}
+
+/**
+ * Uids with a hand up, EARLIEST FIRST — the order they asked in.
+ *
+ * Selects a joined string so the common case (nobody's hand changed) is an
+ * Object.is hit and costs no re-render, the same trick useParticipantIds uses.
+ */
+export function useRaisedHands(): readonly string[] {
+  const joined = useSelect(s => Object.values(s.participants)
+    .filter(p => p.handRaisedAt > 0)
+    .sort((a, b) => a.handRaisedAt - b.handRaisedAt)
+    .map(p => p.uid)
+    .join(' '));
+  return useMemo(() => (joined ? joined.split(' ') : []), [joined]);
 }
 
 export default {};

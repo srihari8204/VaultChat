@@ -103,6 +103,26 @@ export async function setCallRole(callId: string, userId: string, role: CallRole
   }
 }
 
+/**
+ * Raise or lower a hand. Omit `userId` for your own.
+ *
+ * Only a host or cohost may lower someone ELSE's, and nobody may raise another
+ * person's — that would be putting words in their mouth. Both rules are the
+ * server's; this just carries the request.
+ */
+export async function setHandRaised(callId: string, raised: boolean, userId?: string): Promise<boolean> {
+  if (!CALL_SESSIONS || !callId) return false;
+  try {
+    await api(`/calls/${callId}/hand`, {
+      method: 'POST',
+      json: userId ? { raised, userId } : { raised },
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** The current roster, for a mid-call refresh. */
 export async function getCallSession(
   callId: string,
