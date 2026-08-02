@@ -28,6 +28,12 @@ import { newCallCipher, openCallOffer, plainCipher, type CallCipher } from '../l
 import { addCallLog } from '../lib/callLog';
 import { CallTimer, elapsedSeconds } from '../components/call/CallTimer';
 import { CallControlButton } from '../components/call/CallControlButton';
+import { CALL_ENGINE_V2 } from '../constants/flags';
+import * as engine from '../lib/call/engine';
+import {
+  useCallConnectedAt, useCallError, useCallFlag, useCallLocalUrl,
+  useCallStatus, useParticipantStreamUrl,
+} from '../hooks/useCall';
 import { Ionicons } from '@expo/vector-icons';
 
 type CallState = 'connecting' | 'ringing' | 'connected' | 'ended';
@@ -143,7 +149,164 @@ function matrixToOverlay(m: number[] | null): { tint?: string; opacity?: number 
 // Call chrome is always dark (independent of app theme), so styles are static.
 const S = makeStyles();
 
+/**
+ * Route entry. Same dispatcher as app/voicecall.tsx: one flag chooses the
+ * engine-backed renderer or the original implementation, both drawing the same
+ * chrome from the same styles and speaking the same wire. The legacy body is
+ * deleted once CALL_ENGINE_V2 passes the OEM matrix on real hardware.
+ */
 export default function VideoCallScreen() {
+  return CALL_ENGINE_V2 ? <VideoCallEngine /> : <VideoCallLegacy />;
+}
+
+// ── engine-backed renderer (CALL_ENGINE_V2) ───────────────────────────
+// Beautify filters stay here on purpose: they are pure local presentation with
+// no protocol involvement, so they belong to the screen, not the engine.
+function VideoCallEngine() {
+  const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const { chatId, peerUid, peerName, isIncoming, initialOffer } =
+    useLocalSearchParams<{
+      chatId: string; peerUid: string; peerName: string;
+      isIncoming?: string; initialOffer?: string;
+    }>();
+
+  const status      = useCallStatus();
+  const connectedAt = useCallConnectedAt();
+  const error       = useCallError();
+  const muted       = useCallFlag('muted');
+  const speaker     = useCallFlag('speaker');
+  const cameraOff   = useCallFlag('cameraOff');
+  const sharing     = useCallFlag('sharing');
+  const peerSharing = useCallFlag('peerSharing');
+  const localUrl    = useCallLocalUrl();
+  const remoteUrl   = useParticipantStreamUrl(String(peerUid ?? ''));
+
+  const [filter, setFilter] = useState<FilterId>('none');
+  const [showFilters, setShowFilters] = useState(false);
+
+  useEffect(() => {
+    const incoming = isIncoming === 'true' || isIncoming === '1';
+    const args = {
+      chatId: String(chatId ?? ''), peerUid: String(peerUid ?? ''),
+      peerName: String(peerName ?? ''), kind: 'video' as const,
+    };
+    if (incoming && initialOffer) {
+      let wire: any = null;
+      try { wire = JSON.parse(String(initialOffer)); } catch {}
+      engine.acceptIncoming({ ...args, offerWire: wire });
+    } else {
+      engine.startOutgoing(args);
+    }
+    return () => { engine.hangUp('local_hangup', true); engine.release(); };
+  }, [chatId, peerUid, peerName, isIncoming, initialOffer]);
+
+  useEffect(() => { if (status === 'connected') engine.onConnected(); }, [status]);
+
+  useEffect(() => {
+    if (status !== 'ended') return;
+    const t = setTimeout(() => router.back(), 200);
+    return () => clearTimeout(t);
+  }, [status, router]);
+
+  const toggleScreenShare = useCallback(() => {
+    if (sharing) engine.stopScreenShare().catch(() => {});
+    else engine.startScreenShare().catch((e: any) => {
+      const msg = e?.message ? String(e.message) : String(e);
+      // A genuine user cancel is not an error worth interrupting a call for.
+      if (!/cancel|denied by user|user.?cancel|NotAllowed/i.test(msg)) {
+        Alert.alert('Screen share failed', msg || 'Unknown error');
+      }
+    });
+  }, [sharing]);
+  const toggleFilters = useCallback(() => setShowFilters(v => !v), []);
+
+  const statusText = status === 'connecting' ? 'Connecting…'
+    : status === 'ringing' ? 'Ringing…'
+    : 'Call ended';
+  const f = FILTERS.find(x => x.id === filter) ?? FILTERS[0];
+  const overlay = matrixToOverlay(f.matrix);
+
+  return (
+    <View style={S.screen}>
+      <StatusBar barStyle="light-content" />
+
+      <View style={S.remote}>
+        {remoteUrl ? (
+          <RTCView style={S.remoteVid} streamURL={remoteUrl} objectFit="cover" />
+        ) : (
+          <View style={[S.remoteVid, S.remotePlaceholder]}>
+            <Text style={S.placeholderInitial}>{(peerName?.trim()[0] ?? '?').toUpperCase()}</Text>
+          </View>
+        )}
+        {overlay.tint && (
+          <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, { backgroundColor: overlay.tint, opacity: overlay.opacity }]} />
+        )}
+      </View>
+
+      <View style={[S.topBar, { top: insets.top + 8 }]} pointerEvents="none">
+        <Text style={S.name} numberOfLines={1}>{peerName || 'VaultChat user'}</Text>
+        {status === 'connected'
+          ? <CallTimer style={S.status} startedAt={connectedAt} />
+          : <Text style={S.status}>{statusText}</Text>}
+        {error && <Text style={S.errorTxt}>{error}</Text>}
+      </View>
+
+      {(sharing || peerSharing) && (
+        <View style={S.shareBanner} pointerEvents="none">
+          <Ionicons name="phone-portrait" size={14} color="#fff" />
+          <Text style={S.shareBannerTxt}>
+            {sharing ? "You're sharing your screen"
+              : `${peerName || 'They'} ${peerName ? 'is' : 'are'} sharing their screen`}
+          </Text>
+        </View>
+      )}
+
+      {localUrl && (!cameraOff || sharing) && (
+        <View style={[S.localWrap, { top: insets.top + 8 }]}>
+          <RTCView style={S.local} streamURL={localUrl} objectFit="cover" mirror={!sharing} zOrder={1} />
+          {overlay.tint && (
+            <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, { backgroundColor: overlay.tint, opacity: overlay.opacity }]} />
+          )}
+        </View>
+      )}
+
+      {showFilters && (
+        <View style={[S.filterStrip, { bottom: insets.bottom + 150 }]}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={S.filterRow}>
+            {FILTERS.map(opt => (
+              <TouchableOpacity key={opt.id} style={[S.filterChip, filter === opt.id && S.filterChipActive]} onPress={() => setFilter(opt.id)} activeOpacity={0.8}>
+                <View style={[S.filterSwatch,
+                  opt.matrix ? { backgroundColor: opt.swatch } : { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.4)' },
+                  filter === opt.id && { borderColor: '#FFFFFF' }]} />
+                <Text style={[S.filterLabel, filter === opt.id && S.filterLabelActive]}>{opt.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
+      <View style={[S.controls, { bottom: insets.bottom + 12 }]}>
+        <CallControlButton variant="video" icon={muted ? 'mic-off' : 'mic'} label={muted ? 'Unmute' : 'Mute'} active={muted} onPress={engine.toggleMute} />
+        <CallControlButton variant="video" icon={cameraOff ? 'videocam-off' : 'videocam'} label={cameraOff ? 'Camera' : 'Off'} active={cameraOff} onPress={engine.toggleCamera} />
+        {sharing
+          ? <CallControlButton variant="video" icon="stop-circle" label="Stop" active onPress={toggleScreenShare} />
+          : <CallControlButton variant="video" icon="camera-reverse" label="Flip" onPress={engine.flipCamera} />}
+        {Platform.OS === 'android' && !sharing && (
+          <CallControlButton variant="video" icon="phone-portrait" label="Share" onPress={toggleScreenShare} />
+        )}
+        <CallControlButton variant="video" icon="sparkles" label={filter === 'none' ? 'Beauty' : f.label} active={showFilters || filter !== 'none'} onPress={toggleFilters} />
+        <CallControlButton variant="video" icon={speaker ? 'volume-high' : 'volume-low'} label={speaker ? 'Speaker' : 'Earpiece'} active={speaker} onPress={engine.toggleSpeaker} />
+        <CallControlButton variant="video" icon="call" label="End" danger onPress={hangUpFromVideoScreen} />
+      </View>
+    </View>
+  );
+}
+
+const hangUpFromVideoScreen = () => engine.hangUp('local_hangup', true);
+
+// ── original implementation (CALL_ENGINE_V2 off) — unchanged ──────────
+function VideoCallLegacy() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { chatId, peerUid, peerName, isIncoming, initialOffer } =
