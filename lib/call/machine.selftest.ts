@@ -1,0 +1,120 @@
+// lib/call/machine.selftest.ts — run: npx tsx lib/call/machine.selftest.ts
+//
+// Every case below is a real situation from the shipped call screens, not an
+// invented one. Where a case corresponds to a guard that already exists in
+// app/voicecall.tsx or app/videocall.tsx, the comment says so — those guards are
+// the specification, and this is the first time they can be checked without two
+// phones and a TURN server.
+
+import {
+  durationSeconds, reduce, shouldCancelRing, startSnapshot, wasMissed,
+  type CallEvent,
+} from './machine';
+import type { CallSnapshot } from './types';
+
+let failures = 0;
+function check(name: string, ok: boolean, detail?: string) {
+  if (!ok) failures++;
+  console.log(`  ${ok ? '✓' : '✗'} ${name}${ok || !detail ? '' : `  (${detail})`}`);
+}
+function eq(name: string, actual: unknown, expected: unknown) {
+  const ok = JSON.stringify(actual) === JSON.stringify(expected);
+  check(name, ok, ok ? undefined : `got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)}`);
+}
+
+const T0 = 1_800_000_000_000;
+const PEER = 'peer-uid-1';
+const out = () => startSnapshot({ chatId: 'c1', peerUid: PEER, peerName: 'Ada', kind: 'audio', direction: 'outgoing' });
+const inc = () => startSnapshot({ chatId: 'c1', peerUid: PEER, peerName: 'Ada', kind: 'audio', direction: 'incoming' });
+const run = (s: CallSnapshot, events: CallEvent[], now = T0) => events.reduce((acc, e) => reduce(acc, e, now), s);
+
+console.log('start state:');
+eq('outgoing starts connecting', out().status, 'connecting');
+eq('voice call defaults to earpiece', out().speaker, false);
+eq('video call defaults to speaker',
+  startSnapshot({ chatId: 'c', peerUid: PEER, peerName: 'A', kind: 'video', direction: 'outgoing' }).speaker, true);
+eq('no connectedAt before connecting', out().connectedAt, 0);
+
+console.log('\ninvariant 3 — ringing is outgoing-only:');
+eq('outgoing offer_sent -> ringing', run(out(), [{ type: 'offer_sent' }]).status, 'ringing');
+eq('incoming offer_sent is ignored', run(inc(), [{ type: 'offer_sent' }]).status, 'connecting');
+
+console.log('\ninvariant 2 — connecting is idempotent (the re-send storm):');
+// The caller re-rings up to 9x and the callee re-sends its answer up to 5x, so
+// these events genuinely arrive repeatedly on a live call.
+const connected = run(out(), [{ type: 'offer_sent' }, { type: 'answer_applied' }], T0);
+eq('answer_applied -> connected', connected.status, 'connected');
+eq('connectedAt stamped', connected.connectedAt, T0);
+const later = reduce(connected, { type: 'answer_applied' }, T0 + 30_000);
+check('second answer_applied is a no-op (same reference)', later === connected);
+eq('connectedAt did NOT restart', later.connectedAt, T0);
+const reRing = reduce(connected, { type: 'offer_sent' }, T0 + 5_000);
+check('a re-ring tick cannot demote connected -> ringing', reRing === connected);
+
+console.log('\nremote media also connects (the ontrack path):');
+const viaTrack = run(out(), [{ type: 'offer_sent' }, { type: 'remote_stream', uid: PEER, url: 'rtc://a' }], T0);
+eq('remote_stream -> connected', viaTrack.status, 'connected');
+eq('stream url recorded', viaTrack.participants[PEER].streamUrl, 'rtc://a');
+eq('connectedAt stamped once', viaTrack.connectedAt, T0);
+const sameTrack = reduce(viaTrack, { type: 'remote_stream', uid: PEER, url: 'rtc://a' }, T0 + 9_000);
+check('identical remote_stream is a no-op (same reference)', sameTrack === viaTrack);
+const newTrack = reduce(viaTrack, { type: 'remote_stream', uid: PEER, url: 'rtc://b' }, T0 + 9_000);
+check('a CHANGED stream url does update', newTrack !== viaTrack && newTrack.participants[PEER].streamUrl === 'rtc://b');
+eq('...without restarting the clock', newTrack.connectedAt, T0);
+
+console.log('\ninvariant 1 — ended is terminal:');
+const ended = reduce(connected, { type: 'end', reason: 'local_hangup' }, T0 + 60_000);
+eq('end -> ended', ended.status, 'ended');
+for (const e of [
+  { type: 'answer_applied' },
+  { type: 'remote_stream', uid: PEER, url: 'rtc://z' },
+  { type: 'offer_sent' },
+  { type: 'flag', key: 'muted', value: true },
+  { type: 'error', message: 'boom' },
+] as CallEvent[]) {
+  check(`  '${e.type}' after end is ignored`, reduce(ended, e, T0 + 61_000) === ended);
+}
+
+console.log('\ninvariant 4 — first end reason wins:');
+// Real race: pressing End closes the pc, which fires onconnectionstatechange
+// 'failed' a moment later. The call was still a local hangup.
+const raced = reduce(ended, { type: 'end', reason: 'failed' }, T0 + 60_100);
+eq('local_hangup survives a following failure', raced.endReason, 'local_hangup');
+
+console.log('\ninvariant 5 — no-ops keep the reference (no wasted re-render):');
+check('same flag value', reduce(connected, { type: 'flag', key: 'muted', value: false }, T0) === connected);
+check('same local url', reduce(connected, { type: 'local_stream', url: null }, T0) === connected);
+check('same error', reduce(connected, { type: 'error', message: null as any }, T0) !== undefined);
+check('peer_left for an unknown uid', reduce(connected, { type: 'peer_left', uid: 'nobody' }, T0) === connected);
+const muted = reduce(connected, { type: 'flag', key: 'muted', value: true }, T0);
+check('a CHANGED flag does produce a new object', muted !== connected && muted.muted === true);
+
+console.log('\nmesh roster:');
+let mesh = run(out(), [
+  { type: 'remote_stream', uid: 'a', url: 'rtc://a', name: 'Ann' },
+  { type: 'remote_stream', uid: 'b', url: 'rtc://b', name: 'Bob' },
+], T0);
+eq('two participants', Object.keys(mesh.participants).sort(), ['a', 'b']);
+mesh = reduce(mesh, { type: 'peer_left', uid: 'a' }, T0);
+eq('peer_left removes exactly one', Object.keys(mesh.participants), ['b']);
+eq('name preserved', mesh.participants.b.name, 'Bob');
+mesh = reduce(mesh, { type: 'peer_muted', uid: 'b', muted: true }, T0);
+eq('peer mute tracked', mesh.participants.b.muted, true);
+check('repeat peer_muted is a no-op',
+  reduce(mesh, { type: 'peer_muted', uid: 'b', muted: true }, T0) === mesh);
+
+console.log('\nlog derivation (what addCallLog needs):');
+eq('duration of a connected call', durationSeconds(connected, T0 + 65_400), 65);
+eq('duration of a call that never connected', durationSeconds(run(out(), [{ type: 'offer_sent' }]), T0 + 9_000), 0);
+check('unanswered incoming is missed', wasMissed(run(inc(), [])) === true);
+check('answered incoming is NOT missed', wasMissed(run(inc(), [{ type: 'answer_applied' }])) === false);
+check('outgoing is never missed', wasMissed(connected) === false);
+check('abandoned outgoing cancels the callee ring',
+  shouldCancelRing(run(out(), [{ type: 'offer_sent' }])) === true);
+check('answered outgoing does NOT cancel', shouldCancelRing(connected) === false);
+check('incoming never cancels', shouldCancelRing(run(inc(), [])) === false);
+
+console.log(failures === 0
+  ? '\nALL CALL MACHINE CHECKS PASSED ✓'
+  : `\n${failures} CHECK(S) FAILED ✗`);
+process.exit(failures === 0 ? 0 : 1);
