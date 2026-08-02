@@ -37,6 +37,7 @@ import { clearActiveCall, setActiveCall, type ActiveCall } from '../callState';
 import { getIceServers } from '../iceConfig';
 import * as media from './media';
 import * as signal from './signal';
+import type { WireMode } from './signal';
 import { CallPeer } from './peer';
 import { durationSeconds, shouldCancelRing, wasMissed, type CallFlag } from './machine';
 import { INITIAL_CURSOR, INITIAL_QUALITY, TIERS, nextQuality, sampleFromTotals } from './quality';
@@ -45,11 +46,19 @@ import type { CallKind, EndReason } from './types';
 
 interface Session {
   chatId: string;
+  /** The other party in a 1:1 call; '' for a group call. */
   peerUid: string;
   peerName: string;
   kind: CallKind;
   meId: string;
-  peer: CallPeer | null;
+  /**
+   * Every remote participant, keyed by uid. A 1:1 call holds exactly one entry
+   * — that is the whole point: "1:1 is a mesh with N=1", so there is one code
+   * path, not two.
+   */
+  peers: Map<string, CallPeer>;
+  /** Which SDP wire shape this call speaks — see lib/call/signal.ts. */
+  wire: WireMode;
   localStream: any;
   screenStream: any;
   cameraTrack: any;          // held during a screen share, for swap-back
@@ -76,11 +85,16 @@ function dispose(): void {
   nativeCall.endCallSession();
   media.stopStream(s.screenStream);
   media.stopStream(s.localStream);
-  s.peer?.close();
-  s.peer = null;
+  for (const p of s.peers.values()) { try { p.close(); } catch {} }
+  s.peers.clear();
   s.localStream = null;
   s.screenStream = null;
   s.cameraTrack = null;
+}
+
+/** The single remote peer of a 1:1 call, or null. */
+function solePeer(s: Session): CallPeer | null {
+  return s.peers.size === 1 ? s.peers.values().next().value ?? null : null;
 }
 
 const isDone = () => {
@@ -131,13 +145,65 @@ interface StartArgs {
   kind: CallKind;
 }
 
-async function bootstrap(a: StartArgs, direction: 'outgoing' | 'incoming') {
+/**
+ * Build and wire one remote participant. Used once for a 1:1 call and once per
+ * roster entry for a mesh, so both get identical ICE buffering, answer
+ * idempotence, cipher handling and failure treatment.
+ */
+function addPeer(s: Session, uid: string, name: string, iceServers: any[]): CallPeer {
+  const existing = s.peers.get(uid);
+  if (existing) return existing;
+
+  const peer = new CallPeer(uid, iceServers, {
+    onLocalCandidate: (sealed) => { signal.sendIce(uid, s.meId, s.chatId, sealed, s.wire).catch(() => {}); },
+    onRemoteStream: (url) => { dispatch({ type: 'remote_stream', uid, url, name }); },
+    onFailed: () => onPeerFailed(uid),
+  });
+  s.peers.set(uid, peer);
+  peer.addLocalTracks(s.localStream);
+  if (s.kind === 'video') startQualityLoop(peer);
+  return peer;
+}
+
+/** Close and forget a participant. Safe to call for an unknown uid. */
+function removePeer(s: Session, uid: string): void {
+  const peer = s.peers.get(uid);
+  if (!peer) return;
+  try { peer.close(); } catch {}
+  s.peers.delete(uid);
+  dispatch({ type: 'peer_left', uid });
+}
+
+/**
+ * A peer connection died. The right response differs by topology, which is why
+ * this was previously wrong in the mesh:
+ *
+ *   1:1   the call IS that peer — end it, exactly as before.
+ *   mesh  drop that participant only. The legacy mesh screen left this branch
+ *         EMPTY with the comment "peer-left handles removal", but
+ *         call_peer_left only fires when someone deliberately leaves. A phone
+ *         that loses signal or is killed never emits it, so the dead peer stayed
+ *         in the roster forever as a frozen tile with no audio and no retry.
+ *         Removing it here is what actually closes that defect (A1).
+ *
+ * No automatic re-offer: the server re-announces a peer that genuinely comes
+ * back via call_peer_joined, and retrying into a black hole would burn battery
+ * and mint TURN allocations for a device that has gone.
+ */
+function onPeerFailed(uid: string): void {
+  const s = session;
+  if (!s || s.disposed) return;
+  if (s.wire === 'direct') { hangUp('failed', true); return; }
+  removePeer(s, uid);
+}
+
+async function bootstrap(a: StartArgs, direction: 'outgoing' | 'incoming', wire: WireMode = 'direct') {
   // A previous call must be fully gone before a new one acquires the mic.
   if (session) hangUp('replaced', true);
 
   begin({ ...a, direction });
   session = {
-    ...a, meId: '', peer: null, localStream: null, screenStream: null,
+    ...a, meId: '', peers: new Map(), wire, localStream: null, screenStream: null,
     cameraTrack: null, disposers: [], logged: false, disposed: false,
   };
   const s = session;
@@ -154,29 +220,118 @@ async function bootstrap(a: StartArgs, direction: 'outgoing' | 'incoming') {
   dispatch({ type: 'local_stream', url: local.url });
 
   const iceServers = await getIceServers();
-  const peer = new CallPeer(a.peerUid, iceServers, {
-    onLocalCandidate: (sealed) => { signal.sendIce(a.peerUid, s.meId, sealed).catch(() => {}); },
-    onRemoteStream: (url) => { dispatch({ type: 'remote_stream', uid: a.peerUid, url, name: a.peerName }); },
-    onFailed: () => hangUp('failed', true),
-  });
-  s.peer = peer;
-  peer.addLocalTracks(local.stream);
 
+  // Route by SENDER, not by a fixed peer, so the same attachment serves 1:1 and
+  // mesh. For 1:1 only the known peer is accepted; for mesh, anyone the server
+  // has put in our call room.
   const detach = await signal.attachCallListeners({
-    peerUid: a.peerUid,
-    onAnswer: (wire) => {
-      const sdp = peer.getCipher().open(wire);
+    accept: (from) => (s.wire === 'direct' ? from === a.peerUid : true),
+    onOffer: (from, wireSdp) => { void onMeshOffer(from, wireSdp, iceServers); },
+    onAnswer: (from, wireSdp) => {
+      const peer = s.peers.get(from);
+      if (!peer) return;
+      const sdp = peer.getCipher().open(wireSdp);
       peer.applyAnswer(sdp).then(applied => { if (applied) dispatch({ type: 'answer_applied' }); });
     },
-    onIce: (wire) => { peer.addRemoteCandidate(peer.getCipher().open(wire)).catch(() => {}); },
-    onEnd: () => hangUp('remote_hangup', false),
-    onPeerScreenShare: (on) => dispatch({ type: 'flag', key: 'peerSharing', value: on }),
+    onIce: (from, wireCand) => {
+      const peer = s.peers.get(from);
+      if (!peer) return;
+      peer.addRemoteCandidate(peer.getCipher().open(wireCand)).catch(() => {});
+    },
+    onEnd: (from) => {
+      if (s.wire === 'direct') hangUp('remote_hangup', false);
+      else removePeer(s, from);
+    },
+    onPeerScreenShare: (_from, on) => dispatch({ type: 'flag', key: 'peerSharing', value: on }),
   });
   onDispose(detach);
 
+  if (s.wire === 'direct') addPeer(s, a.peerUid, a.peerName, iceServers);
+
   registerForCallWaiting(a, me.name ?? me.email ?? 'VaultChat user');
-  if (a.kind === 'video') startQualityLoop(peer);
-  return { s, peer, me };
+  const peer = solePeer(s) as CallPeer;
+  return { s, peer, me, iceServers };
+}
+
+/**
+ * A mesh peer offered us a connection. Only reachable in mesh mode — a 1:1
+ * callee receives its offer as a route param, not over the socket.
+ */
+async function onMeshOffer(from: string, wireSdp: any, iceServers: any[]): Promise<void> {
+  const s = session;
+  if (!s || s.disposed || s.wire !== 'mesh' || !from) return;
+  const peer = addPeer(s, from, '', iceServers);
+  try {
+    // Either an encrypted sig1 envelope or a raw SDP from a legacy peer;
+    // openCallOffer handles both, so a mesh of mixed builds still connects.
+    const { cipher, offer } = await openCallOffer(from, wireSdp);
+    peer.setCipher(cipher);
+    if (!offer?.type) { removePeer(s, from); return; }
+    const answer = await peer.answer(offer);
+    await signal.sendMeshAnswer(from, s.chatId, cipher.seal(answer));
+  } catch {
+    removePeer(s, from);
+  }
+}
+
+export interface StartGroupArgs {
+  chatId: string;
+  groupName: string;
+  kind: CallKind;
+  /** Members to ring. Empty when joining a call already in progress. */
+  ring?: string[];
+}
+
+/**
+ * Join (or start) a group call on the mesh.
+ *
+ * Glare is resolved the way the legacy screen did it and the way both sides must
+ * agree on: the SMALLER uid sends the offer. Without a deterministic rule both
+ * peers offer simultaneously and neither connects.
+ */
+export async function startGroup(a: StartGroupArgs): Promise<void> {
+  try {
+    const { s, iceServers } = await bootstrap(
+      { chatId: a.chatId, peerUid: '', peerName: a.groupName, kind: a.kind },
+      'outgoing', 'mesh',
+    );
+
+    const connectTo = (uid: string) => {
+      if (!uid || uid === s.meId || s.peers.has(uid)) return;
+      const peer = addPeer(s, uid, '', iceServers);
+      if (s.meId >= uid) return;                       // the other side offers
+      void (async () => {
+        try {
+          const offer = await peer.createOffer(a.kind === 'video');
+          const sealed = await newCallCipher(uid, offer);
+          if (sealed) peer.setCipher(sealed.cipher);
+          await signal.sendMeshOffer(uid, s.chatId, sealed ? sealed.offerWire : offer);
+        } catch { removePeer(s, uid); }
+      })();
+    };
+
+    const leaveRoom = await signal.joinCallRoom({
+      chatId: a.chatId,
+      onRoster: (peers) => peers.forEach(connectTo),
+      onJoined: connectTo,
+      onLeft:   (uid) => removePeer(s, uid),
+      onFull:   (max) => {
+        // Server refused the join — the mesh is at capacity. Surface it and end
+        // cleanly rather than sitting on a screen that never receives a roster.
+        dispatch({ type: 'error', message: `This call is full (up to ${max} people).` });
+        hangUp('setup_error', false);
+      },
+    });
+    onDispose(leaveRoom);
+
+    if (a.ring?.length) {
+      await signal.ringGroup(a.ring, s.meId, a.chatId, a.groupName, a.kind === 'video');
+    }
+    // A group call has no single ringing peer, so it goes straight to
+    // connecting; the first remote track flips it to connected.
+  } catch (e: any) {
+    failSetup(e);
+  }
 }
 
 /**
@@ -320,7 +475,7 @@ export function flipCamera(): void {
 /** Swap the outgoing camera track for the screen — no renegotiation. */
 export async function startScreenShare(): Promise<void> {
   const s = session;
-  const sender = s?.peer?.videoSender();
+  const sender = solePeer(s!)?.videoSender();
   if (!s || !sender || !media.isScreenShareSupported()) return;
   const screen = await media.acquireScreenStream();
   const track = screen?.getVideoTracks?.()[0];
@@ -337,7 +492,7 @@ export async function startScreenShare(): Promise<void> {
 export async function stopScreenShare(): Promise<void> {
   const s = session;
   if (!s) return;
-  const sender = s.peer?.videoSender();
+  const sender = solePeer(s)?.videoSender();
   try { if (sender && s.cameraTrack) await sender.replaceTrack(s.cameraTrack); } catch {}
   media.stopStream(s.screenStream);
   s.screenStream = null;
@@ -359,7 +514,7 @@ function registerForCallWaiting(a: StartArgs, _myName: string): void {
       const s = session; if (!s) return;
       media.setMicEnabled(s.localStream, false);
       if (a.kind === 'video') media.setCameraEnabled(s.localStream, false);
-      s.peer?.setRemoteAudible(false);
+      for (const p of s.peers.values()) p.setRemoteAudible(false);
       setFlag('held', true);
     },
     resume: () => {
@@ -368,7 +523,7 @@ function registerForCallWaiting(a: StartArgs, _myName: string): void {
       media.resumeAudioSession(a.kind, snap.speaker);
       media.setMicEnabled(s.localStream, !snap.muted);
       if (a.kind === 'video') media.setCameraEnabled(s.localStream, !snap.cameraOff);
-      s.peer?.setRemoteAudible(true);
+      for (const p of s.peers.values()) p.setRemoteAudible(true);
       setFlag('held', false);
     },
     hangUp: () => hangUp('local_hangup', true),

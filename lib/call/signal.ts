@@ -25,43 +25,139 @@ export interface RingPayload {
 
 type Off = () => void;
 
-/** Attach the three per-call listeners. Returns one detach for all of them. */
+/**
+ * TWO WIRE SHAPES, both of which must keep working.
+ *
+ * The 1:1 screens and the mesh screen were written at different times and put
+ * the SDP under different keys:
+ *
+ *   direct (1:1)  webrtc_offer  { to, from, offer }      answer: { to, from, answer }
+ *   mesh          webrtc_offer  { to, chatId, sdp }      answer: { to, chatId, sdp }
+ *
+ * The Go relay forwards the whole payload verbatim and stamps `from`/`fromUid`,
+ * so both have always worked — but a build that SENDS the wrong shape is
+ * invisible to the sender and silently unreadable to a legacy peer. The engine
+ * therefore keeps the shapes separate and picks by mode, which is what lets an
+ * engine build and a legacy build call each other in either direction.
+ */
+export type WireMode = 'direct' | 'mesh';
+
+/** Read the SDP from either shape. Receivers are deliberately tolerant. */
+const readSdp = (d: any) => d?.offer ?? d?.answer ?? d?.sdp;
+const senderOf = (d: any): string => d?.from ?? d?.fromUid ?? '';
+
+/**
+ * Attach the per-call socket listeners. Routes by SENDER rather than assuming a
+ * single peer, so one attachment serves a 1:1 call and an N-way mesh alike —
+ * `accept` decides which senders belong to this call.
+ */
 export async function attachCallListeners(handlers: {
-  peerUid: string;
-  onAnswer: (sdp: any) => void;
-  onIce: (candidate: any) => void;
-  onEnd: () => void;
-  onPeerScreenShare: (on: boolean) => void;
+  accept: (from: string) => boolean;
+  onOffer?: (from: string, sdp: any) => void;
+  onAnswer: (from: string, sdp: any) => void;
+  onIce: (from: string, candidate: any) => void;
+  onEnd: (from: string) => void;
+  onPeerScreenShare: (from: string, on: boolean) => void;
 }): Promise<Off> {
   const s = await getSocket();
-  const fromPeer = (d: any) => d?.from === handlers.peerUid || d?.fromUid === handlers.peerUid;
+  const route = (fn: (from: string, d: any) => void) => (d: any) => {
+    const from = senderOf(d);
+    if (from && handlers.accept(from)) fn(from, d);
+  };
 
-  const onAnswer = (d: any) => { if (fromPeer(d)) handlers.onAnswer(d?.answer ?? d?.sdp); };
-  const onIce    = (d: any) => { if (fromPeer(d)) handlers.onIce(d?.candidate); };
-  const onEnd    = (d: any) => { if (fromPeer(d)) handlers.onEnd(); };
-  const onShare  = (d: any) => { if (fromPeer(d)) handlers.onPeerScreenShare(true); };
-  const onUnshare = (d: any) => { if (fromPeer(d)) handlers.onPeerScreenShare(false); };
+  const onOffer   = route((from, d) => handlers.onOffer?.(from, readSdp(d)));
+  const onAnswer  = route((from, d) => handlers.onAnswer(from, readSdp(d)));
+  const onIce     = route((from, d) => handlers.onIce(from, d?.candidate));
+  const onEnd     = route((from) => handlers.onEnd(from));
+  const onShare   = route((from) => handlers.onPeerScreenShare(from, true));
+  const onUnshare = route((from) => handlers.onPeerScreenShare(from, false));
 
+  s.on('webrtc_offer', onOffer);
   s.on('webrtc_answer', onAnswer);
   s.on('webrtc_ice', onIce);
   s.on('webrtc_end', onEnd);
   s.on('screen_share_start', onShare);
   s.on('screen_share_stop', onUnshare);
   return () => {
-    try { s.off('webrtc_answer', onAnswer); } catch {}
-    try { s.off('webrtc_ice', onIce); } catch {}
-    try { s.off('webrtc_end', onEnd); } catch {}
-    try { s.off('screen_share_start', onShare); } catch {}
-    try { s.off('screen_share_stop', onUnshare); } catch {}
+    for (const [e, h] of [['webrtc_offer', onOffer], ['webrtc_answer', onAnswer],
+      ['webrtc_ice', onIce], ['webrtc_end', onEnd],
+      ['screen_share_start', onShare], ['screen_share_stop', onUnshare]] as const) {
+      try { s.off(e, h as any); } catch {}
+    }
   };
 }
 
-export async function sendIce(to: string, from: string, candidate: any): Promise<void> {
-  try { (await getSocket()).emit('webrtc_ice', { to, from, candidate }); } catch {}
+export async function sendIce(
+  to: string, from: string, chatId: string, candidate: any, mode: WireMode,
+): Promise<void> {
+  const p = mode === 'mesh' ? { to, chatId, candidate } : { to, from, candidate };
+  try { (await getSocket()).emit('webrtc_ice', p); } catch {}
 }
 
 export async function sendEnd(to: string, from: string, chatId: string): Promise<void> {
   try { (await getSocket()).emit('webrtc_end', { to, from, chatId }); } catch {}
+}
+
+/** Mesh: offer a peer, in the shape the legacy mesh screen expects. */
+export async function sendMeshOffer(to: string, chatId: string, sdp: any): Promise<void> {
+  try { (await getSocket()).emit('webrtc_offer', { to, chatId, sdp }); } catch {}
+}
+
+/** Mesh: answer a peer, in the shape the legacy mesh screen expects. */
+export async function sendMeshAnswer(to: string, chatId: string, sdp: any): Promise<void> {
+  try { (await getSocket()).emit('webrtc_answer', { to, chatId, sdp }); } catch {}
+}
+
+/**
+ * Join the server-side call room and subscribe to its roster events.
+ *
+ * `call_full` is a real outcome, not an error path: the server enforces the mesh
+ * cap and refuses the joiner rather than admitting them and degrading the call
+ * for everyone already in it.
+ */
+export async function joinCallRoom(handlers: {
+  chatId: string;
+  onRoster: (peers: string[]) => void;
+  onJoined: (uid: string) => void;
+  onLeft: (uid: string) => void;
+  onFull: (max: number) => void;
+}): Promise<Off> {
+  const s = await getSocket();
+  const mine = (d: any) => d?.chatId === handlers.chatId;
+
+  const onRoster = (d: any) => { if (mine(d)) handlers.onRoster(Array.isArray(d?.peers) ? d.peers : []); };
+  const onJoined = (d: any) => { if (mine(d) && d?.uid) handlers.onJoined(d.uid); };
+  const onLeft   = (d: any) => { if (mine(d) && d?.uid) handlers.onLeft(d.uid); };
+  const onFull   = (d: any) => { if (mine(d)) handlers.onFull(Number(d?.max) || 5); };
+
+  s.on('call_roster', onRoster);
+  s.on('call_peer_joined', onJoined);
+  s.on('call_peer_left', onLeft);
+  s.on('call_full', onFull);
+  s.emit('join_call', { chatId: handlers.chatId });
+
+  return () => {
+    try { s.emit('leave_call', { chatId: handlers.chatId }); } catch {}
+    for (const [e, h] of [['call_roster', onRoster], ['call_peer_joined', onJoined],
+      ['call_peer_left', onLeft], ['call_full', onFull]] as const) {
+      try { s.off(e, h as any); } catch {}
+    }
+  };
+}
+
+/** Ring every member of a group so their device shows the incoming call. */
+export async function ringGroup(
+  members: string[], from: string, chatId: string, groupName: string, isVideo: boolean,
+): Promise<void> {
+  try {
+    const s = await getSocket();
+    for (const to of members) {
+      s.emit('call_incoming', {
+        to, from, chatId, group: true, groupName,
+        video: isVideo ? '1' : '0', type: isVideo ? 'video' : 'audio',
+      });
+    }
+  } catch {}
 }
 
 /**
