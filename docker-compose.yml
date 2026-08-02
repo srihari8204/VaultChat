@@ -93,6 +93,7 @@ services:
       DB_USER: vaultchat
       DB_PASSWORD: ${DB_PASS:-vaultchat_dev}
       DB_NAME: vaultchat
+      LISTEN_PORT: "6432"              # edoburu default is 5432 — go-api dials 6432
       POOL_MODE: transaction
       MAX_CLIENT_CONN: "2000"          # app-side connections across replicas
       DEFAULT_POOL_SIZE: "40"          # real Postgres connections per db/user
