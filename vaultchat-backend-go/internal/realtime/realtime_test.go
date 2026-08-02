@@ -2,23 +2,8 @@ package realtime
 
 import "testing"
 
-// Smallest checks that fail if the money/branch/security helpers drift from
+// Smallest checks that fail if the branch/security helpers drift from
 // server.js semantics. No DB, no sockets.
-
-func TestToInt(t *testing.T) {
-	// bet parsing: JSON numbers arrive as float64, legacy clients as strings.
-	cases := []struct {
-		in   any
-		want int
-	}{
-		{float64(5), 5}, {"7", 7}, {"-3", -3}, {"", 0}, {nil, 0}, {int(9), 9},
-	}
-	for _, c := range cases {
-		if got := toInt(c.in); got != c.want {
-			t.Errorf("toInt(%v)=%d want %d", c.in, got, c.want)
-		}
-	}
-}
 
 func TestTruthy(t *testing.T) {
 	for in, want := range map[any]bool{

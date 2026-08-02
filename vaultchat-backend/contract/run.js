@@ -322,15 +322,6 @@ async function main() {
     check(false, `stories harness: ${e.message}`);
   }
 
-  console.log('games (deep):');
-  r = await req('GET', '/games/profile', { token: A.jwt });
-  check(r.status === 200 && hasKeys(r.json, ['coins', 'wins', 'losses', 'gamesPlayed'])
-    && typeof r.json?.coins === 'number', 'profile → {coins, wins, losses, gamesPlayed} numbers', r);
-  r = await req('GET', '/games/history', { token: A.jwt });
-  check(r.status === 200 && Array.isArray(r.json), 'history → array', r);
-  r = await req('GET', '/games/leaderboard', { token: A.jwt });
-  check(r.status === 200 && Array.isArray(r.json), 'leaderboard → array', r);
-
   console.log('communities (deep):');
   r = await req('POST', '/communities', { token: A.jwt, body: {} });
   check(r.status === 400 && r.json?.error === 'name required', 'create w/o name → exact 400', r);

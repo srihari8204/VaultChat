@@ -55,7 +55,6 @@ func main() {
 	routes.RegisterGif(mux)
 	routes.RegisterStories(mux)
 	routes.RegisterNav(mux)
-	routes.RegisterGames(mux)
 	routes.RegisterCommunities(mux)
 	routes.RegisterAuth(mux)
 	routes.RegisterAI(mux)

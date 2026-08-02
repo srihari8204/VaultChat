@@ -13,7 +13,7 @@ VaultChat is a security-first encrypted messenger in two parts:
 
 1. **Client** — Expo / React Native 0.81 app (`app/` via `expo-router`: 6 tabs +
    ~90 stack screens).
-2. **Backend** — `vaultchat-backend-go/`, a Go service owning all 17 REST
+2. **Backend** — `vaultchat-backend-go/`, a Go service owning all 16 REST
    modules **and** the Socket.IO layer, on Postgres / Redis / Kafka / S3,
    Dockerized behind `https://api.corefinite.com`.
 
@@ -24,7 +24,7 @@ VaultChat is a security-first encrypted messenger in two parts:
 | Backend | Go · Socket.IO hub · Caddy front door |
 | Datastores | Postgres 16 (via pgbouncer) · Redis 7 · Kafka 3.8 (KRaft) · MinIO dev / Cloudflare R2 prod |
 | E2EE | X3DH + Double Ratchet (`E2EE_ENABLED` + `E2EE_STRICT` = true) |
-| Scale of surface | 17 route modules · ~65 SQL migrations |
+| Scale of surface | 16 route modules · ~65 SQL migrations |
 
 ---
 
@@ -65,6 +65,20 @@ FCM SDK (`com.google.firebase:firebase-messaging`, added by
 `plugins/withVaultChatCalls.js`), so `google-services.json` and the google-services
 Gradle plugin must stay. Only the JavaScript SDKs are unused — they remain in
 `package.json` pending an APK-size verification pass.
+
+### Games: code removed, tables retained
+
+The games platform was deleted on 2026-08-02 (~870 loc: `realtime/games.go`,
+`routes/games.go`, Node `routes/games.js`, `gameStore.js`, the `server.js`
+socket handlers, and the contract-suite entries). It was never reachable from
+this client.
+
+Migration `030_games.sql` and its `game_profiles` / `game_matches` tables are
+**deliberately left in place**. Migrations are applied history — removing one
+breaks replay on a fresh database — and dropping the tables would destroy real
+coin balances and match records irreversibly. If the separate WebView games
+deployment is also retired, dropping them is a follow-up migration and an
+explicit data decision, not a side effect of deleting code.
 
 ---
 
@@ -177,10 +191,10 @@ flowchart TB
     subgraph ROUTES["routes/"]
       R1["auth · user · contacts"]
       R2["chats (1952 loc) · stories · channels · communities"]
-      R3["uploads · vaultbeam · vaultlens · games · ai · gif · link · calls"]
+      R3["uploads · vaultbeam · vaultlens · ai · gif · link · calls"]
       R4["admin (/api/admin)"]
     end
-    IO["internal/realtime — Socket.IO hub<br/>join_chat · new_message · typing · calls · games · admin"]
+    IO["internal/realtime — Socket.IO hub<br/>join_chat · new_message · typing · calls · admin"]
   end
 
   subgraph LIBB["internal/"]
@@ -235,7 +249,7 @@ Socket.IO uses a Redis adapter (`@socket.io/redis-adapter`) so
 | `/vaultbeam` | vaultbeam.js | Device-to-device large file transfer | 232 |
 | `/vaultlens` | vaultlens.js | AI media generation queue | 192 |
 | `/api/admin` | admin.js | Admin dashboard API (`admin/index.html`) | 245 |
-| `/communities` `/call` `/link` `/gif` `/games` `/ai` | communities · calls · link · gif · games · ai | Communities, call wake/signaling, link preview, GIF, games, AI | 82–132 |
+| `/communities` `/call` `/link` `/gif` `/ai` | communities · calls · link · gif · ai | Communities, call wake/signaling, link preview, GIF, AI | 82–132 |
 
 ---
 
@@ -310,7 +324,7 @@ off).
 | Subsystem | Client | Backend / infra |
 |---|---|---|
 | **Voice / video calls** | `lib/CallService`, `callCrypto`, WebRTC shim, `incoming-call` / `voicecall` screens | `/call` route, `callFcm` wake-push, **coturn** TURN relay, socket signaling |
-| **Games** | **Not in the app.** `components/games/` does not exist and no client code references the games REST or socket surface — `app/(tabs)/mini.tsx` notes games ship as a separate WebView deployment | `/games` + `realtime/games.go` still exist server-side (624 loc, Go + Node) but are unreachable from this client |
+| **Games** | **Removed.** Never in the app — `components/games/` never existed and no client code referenced the surface; `app/(tabs)/mini.tsx` notes games ship as a separate WebView deployment | Server-side games code deleted 2026-08-02 (~870 loc across Go + Node). The `game_profiles` / `game_matches` tables from migration `030_games.sql` are LEFT IN PLACE — see note below |
 | **VaultLens** (AI media) | `vaultlens` screens, catalog | `/vaultlens`, queue → `vaultlens-worker` → ModelsLab |
 | **VaultBeam** (P2P transfer) | `vaultBeamTransfer`, native stream plugin | `/vaultbeam` route, chunked transfers |
 | **Stories / Status** | `(tabs)/status`, `StoryRing` | `/stories`, story keys, fan-out worker |

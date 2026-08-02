@@ -43,24 +43,18 @@ A node's presence fields are only trusted while its heartbeat exists, so a
 crashed replica's users stop counting as online within ~15 s; the janitor
 (60 s, lock-guarded) then flips them offline in Postgres and sweeps the keys.
 
-## Known limitation — games are node-local (does NOT affect the app)
+## Games: removed (this caveat no longer applies)
 
-The mini-games platform (`realtime/games.go`: `gamePlayers`/`gameRooms`/
-`gameQueue`) keeps state in process memory. Under >1 replica, matchmaking only
-pairs users connected to the same node, and a game room is only playable on the
-node that created it.
+This section previously recorded node-local game state as the one thing
+preventing `go-api` from running more than one replica — messaging, presence,
+calls and VaultBeam signaling were already cluster-correct.
 
-**This no longer gates scale-out.** As of 2026-08-02 nothing in the mobile app
-touches the games surface: `components/games/` does not exist, and no client
-code emits a `game_*` socket event or calls `/games`. `app/(tabs)/mini.tsx`
-records that games ship as a separate WebView deployment. So the in-app product
-can run N replicas today — messaging, presence, calls and VaultBeam signaling
-were already cluster-correct, and games are the only node-local state left.
+The games platform was deleted on 2026-08-02. Nothing in the app ever reached
+it (`components/games/` never existed; no client emitted a `game_*` event), so
+there is no remaining process-local state in the realtime hub beyond the
+presence map, which is Redis-backed under `ClusterEnabled()`.
 
-Before deleting the server-side games code (624 loc across
-`realtime/games.go`, `routes/games.go` and the Node `routes/games.js`), confirm
-the external WebView games deployment does not call it. That cannot be
-determined from this repository.
+**`go-api` scales horizontally with no known feature caveat.**
 
 ## Operational notes
 

@@ -1,7 +1,7 @@
 // Package realtime is the Go port of the Socket.IO server in
 // vaultchat-backend/server.js — JWT-authed handshake, multi-device presence,
 // chat/typing/receipt relays, WebRTC + VaultBeam + call signaling, live
-// location, ephemeral chat viewers, and the in-memory games platform.
+// location, and ephemeral chat viewers.
 //
 // It owns all sockets once the single-node proxy flip cuts realtime over from
 // Node. Emit payloads are shaped byte-for-byte like Node's emits (the library
@@ -45,15 +45,14 @@ var bearerRe = regexp.MustCompile(`(?i)^Bearer\s+(.+)$`)
 
 // sockData is the per-socket user context (server.js socket.data). uid/email/
 // admin are written once in the auth middleware and read-only afterwards;
-// gameRoomID + liveLocOk are mutated by handlers so they take mu.
+// liveLocOk is mutated by handlers so it takes mu.
 type sockData struct {
 	uid   string
 	email string
 	admin bool
 
-	mu         sync.Mutex
-	gameRoomID string
-	liveLocOk  map[string]bool
+	mu        sync.Mutex
+	liveLocOk map[string]bool
 }
 
 func sd(s *socket.Socket) *sockData {
@@ -61,7 +60,7 @@ func sd(s *socket.Socket) *sockData {
 	return d
 }
 
-// Hub wraps the Socket.IO server plus the process-local presence + games state.
+// Hub wraps the Socket.IO server plus the process-local presence state.
 type Hub struct {
 	io *socket.Server
 
@@ -69,12 +68,6 @@ type Hub struct {
 	// online-count too — OnlineCount == len(userSockets), matching admin.js.
 	pmu         sync.Mutex
 	userSockets map[string]map[string]struct{}
-
-	// games: ephemeral in-memory coins/rooms/queue (server.js io.game*).
-	gmu         sync.Mutex
-	gamePlayers map[string]*gamePlayer
-	gameRooms   map[string]*gameRoom
-	gameQueue   map[string]*queueEntry
 }
 
 // New constructs the Socket.IO server, registers the JWT/admin-key auth
@@ -106,9 +99,6 @@ func New() *Hub {
 	h := &Hub{
 		io:          io,
 		userSockets: map[string]map[string]struct{}{},
-		gamePlayers: map[string]*gamePlayer{},
-		gameRooms:   map[string]*gameRoom{},
-		gameQueue:   map[string]*queueEntry{},
 	}
 
 	// JWT handshake middleware — runs before 'connection' (server.js io.use).
@@ -179,7 +169,6 @@ func (h *Hub) onConnection(s *socket.Socket) {
 
 	h.registerChatHandlers(s)
 	h.registerSignalHandlers(s)
-	h.registerGameHandlers(s)
 
 	// Disconnect cleanup. 'disconnecting' still has the socket's rooms
 	// populated (the library empties them before 'disconnect'); we read call
@@ -196,7 +185,6 @@ func (h *Hub) onConnection(s *socket.Socket) {
 	})
 	s.On("disconnect", func(_ ...any) {
 		h.untrackSocket(s)
-		h.onGameDisconnect(s)
 	})
 }
 

@@ -22,7 +22,7 @@ const MOUNTS = {
   'auth.js': '/auth', 'user.js': '/user', 'uploads.js': '/uploads', 'ai.js': '/ai',
   'contacts.js': '/contacts', 'chats.js': '/chats', 'stories.js': '/stories',
   'communities.js': '/communities', 'calls.js': '/call', 'link.js': '/link',
-  'gif.js': '/gif', 'channels.js': '/channels', 'games.js': '/games',
+  'gif.js': '/gif', 'channels.js': '/channels',
   'vaultbeam.js': '/vaultbeam', 'nav.js': '/nav', 'vaultlens.js': '/vaultlens',
   'admin.js': '/api/admin',
 };
