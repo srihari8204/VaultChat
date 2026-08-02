@@ -38,6 +38,7 @@ import * as media from './media';
 import * as signal from './signal';
 import { CallPeer } from './peer';
 import { durationSeconds, shouldCancelRing, wasMissed, type CallFlag } from './machine';
+import { INITIAL_CURSOR, INITIAL_QUALITY, TIERS, nextQuality, sampleFromTotals } from './quality';
 import { dispatch, getSnapshot, begin, reset } from './store';
 import type { CallKind, EndReason } from './types';
 
@@ -173,7 +174,36 @@ async function bootstrap(a: StartArgs, direction: 'outgoing' | 'incoming') {
   onDispose(detach);
 
   registerForCallWaiting(a, me.name ?? me.email ?? 'VaultChat user');
+  if (a.kind === 'video') startQualityLoop(peer);
   return { s, peer, me };
+}
+
+/**
+ * Drive the adaptive quality policy (lib/call/quality.ts) from real getStats
+ * every 4 s, and push the resulting ceiling onto the encoder.
+ *
+ * Video only — an audio call has nothing to scale, and polling stats for it
+ * would just be a timer waking the CPU for no reason. 4 s is a deliberate
+ * compromise: fast enough to react inside a few seconds of congestion, slow
+ * enough that the polling itself is not the battery cost it is trying to avoid.
+ */
+function startQualityLoop(peer: CallPeer): void {
+  let quality = INITIAL_QUALITY;
+  let cursor = INITIAL_CURSOR;
+  peer.applyVideoQuality(TIERS[quality.tier]);
+
+  const timer = setInterval(async () => {
+    const totals = await peer.readOutboundStats();
+    if (!totals) return;
+    const { sample, cursor: next } = sampleFromTotals(
+      { packetsSent: totals.packetsSent, packetsLost: totals.packetsLost }, totals.rttMs, cursor,
+    );
+    cursor = next;
+    const prevTier = quality.tier;
+    quality = nextQuality(quality, sample);
+    if (quality.tier !== prevTier) peer.applyVideoQuality(TIERS[quality.tier]);
+  }, 4000);
+  onDispose(() => clearInterval(timer));
 }
 
 /** Place a call. Rejects only on setup failure; the call is torn down first. */

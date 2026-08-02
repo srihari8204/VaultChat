@@ -13,7 +13,7 @@
     "test:e2ee": "tsx services/crypto/e2ee.selftest.ts && tsx services/crypto/senderKey.selftest.ts && tsx services/crypto/shamir.selftest.ts && tsx services/security/safetyNumber.selftest.ts && tsx services/crypto/vectors.selftest.ts && tsx services/crypto/vaultbeam-vectors.selftest.ts && tsx services/crypto/parity.selftest.ts && tsx services/crypto/vaultbeam-parity.selftest.ts",
     "test:vaultcheck": "tsx lib/vaultcheck/vaultcheck.selftest.ts",
     "test:ice": "tsx lib/iceCredentials.selftest.ts",
-    "test:call": "tsx lib/call/machine.selftest.ts",
+    "test:call": "tsx lib/call/machine.selftest.ts && tsx lib/call/quality.selftest.ts",
     "test:crypto:vectors": "tsx services/crypto/vectors.selftest.ts",
     "test:vaultbeam:vectors": "tsx services/crypto/vaultbeam-vectors.selftest.ts",
     "test:crypto:parity": "tsx services/crypto/parity.selftest.ts",

@@ -119,6 +119,43 @@ export class CallPeer {
     } catch { return null; }
   }
 
+  /**
+   * Apply an encoder ceiling to the outgoing video. Best-effort by design:
+   * setParameters is not uniformly implemented across react-native-webrtc
+   * versions and devices, and a call must never fail because a quality hint
+   * could not be applied.
+   */
+  async applyVideoQuality(tier: { maxBitrate: number; maxFramerate: number; scaleResolutionDownBy: number }): Promise<void> {
+    const sender = this.videoSender();
+    if (!sender?.getParameters) return;
+    try {
+      const params = sender.getParameters();
+      if (!params.encodings?.length) params.encodings = [{}];
+      for (const e of params.encodings) {
+        e.maxBitrate = tier.maxBitrate;
+        e.maxFramerate = tier.maxFramerate;
+        e.scaleResolutionDownBy = tier.scaleResolutionDownBy;
+      }
+      await sender.setParameters(params);
+    } catch { /* hint only — never fail a call over it */ }
+  }
+
+  /** Cumulative outbound video counters + RTT, for the quality policy. */
+  async readOutboundStats(): Promise<{ packetsSent: number; packetsLost: number; rttMs: number | null } | null> {
+    try {
+      const report: any = await this.pc.getStats();
+      let packetsSent = 0, packetsLost = 0, rttMs: number | null = null;
+      report.forEach((r: any) => {
+        if (r.type === 'outbound-rtp' && r.kind === 'video') packetsSent += r.packetsSent ?? 0;
+        if (r.type === 'remote-inbound-rtp' && r.kind === 'video') {
+          packetsLost += r.packetsLost ?? 0;
+          if (typeof r.roundTripTime === 'number') rttMs = Math.round(r.roundTripTime * 1000);
+        }
+      });
+      return { packetsSent, packetsLost, rttMs };
+    } catch { return null; }
+  }
+
   /** Silence/restore what we receive from this peer (call-waiting hold). */
   setRemoteAudible(audible: boolean): void {
     try {
