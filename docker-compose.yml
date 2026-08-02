@@ -348,6 +348,12 @@ services:
       - "127.0.0.1:3001:3000"
     volumes:
       - ./monitoring/grafana-datasource.yml:/etc/grafana/provisioning/datasources/ds.yml:ro
+      # Dashboard provider + the SLI board itself, so a fresh stack comes up
+      # with the board already there instead of an empty Grafana. The JSON dir
+      # must NOT be under provisioning/dashboards — that path holds provider
+      # YAML, and mounting a directory over it would shadow the provider.
+      - ./monitoring/grafana-dashboard.yml:/etc/grafana/provisioning/dashboards/dash.yml:ro
+      - ./monitoring/dashboards:/etc/grafana/dashboards:ro
       - grafanadata:/var/lib/grafana
     depends_on:
       - prometheus

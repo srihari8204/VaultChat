@@ -1,0 +1,178 @@
+{
+  "uid": "vaultchat-sli",
+  "title": "VaultChat — Service SLIs",
+  "tags": ["vaultchat", "sli"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Latency SLIs",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "type": "timeseries",
+      "title": "p95 latency by route",
+      "description": "Message send target is p95 < 800ms; call wake target is p95 < 2s. Route label is the ServeMux PATTERN, so chat ids do not fan out into separate series.",
+      "gridPos": { "h": 9, "w": 16, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 800 },
+              { "color": "red", "value": 2000 }
+            ]
+          }
+        }
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (route, le) (rate(vaultchat_http_route_duration_ms_bucket[5m])))",
+          "legendFormat": "{{route}}"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Message send p95",
+      "description": "The headline SLI. Target < 800ms.",
+      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 800 },
+              { "color": "red", "value": 2000 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vaultchat_http_route_duration_ms_bucket{route=~\".*POST /chats.*messages.*\"}[5m])))",
+          "legendFormat": "p95"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Traffic & errors",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 10 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Requests/sec by status code",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 11 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (code) (rate(vaultchat_http_requests_total[5m]))",
+          "legendFormat": "{{code}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "5xx rate",
+      "description": "Any sustained non-zero value here is a page.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 11 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps", "color": { "mode": "fixed", "fixedColor": "red" } } },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(vaultchat_http_requests_total{code=~\"5..\"}[5m]))",
+          "legendFormat": "5xx"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Realtime",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 19 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Sockets online",
+      "description": "Read live from the realtime hub at scrape time (cluster-aware: Redis-backed when ClusterEnabled).",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "vaultchat_sockets_online", "legendFormat": "online" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Socket churn/sec",
+      "description": "Connects vs disconnects. A flat online gauge with high churn means clients are reconnect-looping.",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "rate(vaultchat_events_total{event=\"socket_connect\"}[5m])", "legendFormat": "connect" },
+        { "refId": "B", "expr": "rate(vaultchat_events_total{event=\"socket_disconnect\"}[5m])", "legendFormat": "disconnect" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "In-flight HTTP requests",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "vaultchat_http_inflight", "legendFormat": "in-flight" }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Process health",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 28 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Heap allocated",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 29 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "targets": [
+        { "refId": "A", "expr": "vaultchat_heap_alloc_bytes", "legendFormat": "heap" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Goroutines",
+      "description": "A monotonic climb here is a leak — usually an un-cancelled context or a socket handler that never returns.",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 29 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "vaultchat_goroutines", "legendFormat": "goroutines" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Uptime",
+      "description": "Resets mark restarts. Frequent resets with no deploy means the process is crash-looping.",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 29 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        { "refId": "A", "expr": "vaultchat_uptime_seconds", "legendFormat": "uptime" }
+      ]
+    }
+  ]
+}
