@@ -124,7 +124,7 @@ flowchart TB
   subgraph NAV["app/ — expo-router (file-based routes)"]
     LAYOUT["_layout.tsx<br/>ThemeProvider · fonts · socket · push · sync boot"]
     TABS["(tabs): chats · calls · status · alerts · mini · profile"]
-    SCREENS["~90 screens<br/>chat · vault · vaultlens · games · sos · onboarding"]
+    SCREENS["~90 screens<br/>chat · vault · vaultlens · mini-apps · sos · onboarding"]
   end
 
   subgraph SVC["services/ — feature logic"]
@@ -310,7 +310,7 @@ off).
 | Subsystem | Client | Backend / infra |
 |---|---|---|
 | **Voice / video calls** | `lib/CallService`, `callCrypto`, WebRTC shim, `incoming-call` / `voicecall` screens | `/call` route, `callFcm` wake-push, **coturn** TURN relay, socket signaling |
-| **Games** (chess, ludo, poker, …) | ~22 boards in `components/games/`, `gameEngines.ts` | `/games`, `gameStore.js`, socket game rooms + match queue |
+| **Games** | **Not in the app.** `components/games/` does not exist and no client code references the games REST or socket surface — `app/(tabs)/mini.tsx` notes games ship as a separate WebView deployment | `/games` + `realtime/games.go` still exist server-side (624 loc, Go + Node) but are unreachable from this client |
 | **VaultLens** (AI media) | `vaultlens` screens, catalog | `/vaultlens`, queue → `vaultlens-worker` → ModelsLab |
 | **VaultBeam** (P2P transfer) | `vaultBeamTransfer`, native stream plugin | `/vaultbeam` route, chunked transfers |
 | **Stories / Status** | `(tabs)/status`, `StoryRing` | `/stories`, story keys, fan-out worker |
