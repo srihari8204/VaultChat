@@ -19,7 +19,7 @@ import { useEffect, useState } from 'react';
 import * as ScreenCapture from 'expo-screen-capture';
 import * as Sentry from '@sentry/react-native';
 import { StatusBar } from 'expo-status-bar';
-import { View, ActivityIndicator, StyleSheet, Platform, AppState } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, Platform, AppState, InteractionManager } from 'react-native';
 import notifee, { EventType } from '@notifee/react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useFonts, Sora_700Bold, Sora_800ExtraBold } from '@expo-google-fonts/sora';
@@ -74,6 +74,16 @@ function RootLayout() {
   });
 
   useEffect(() => {
+    // Boot timeline. These marks are what make a startup claim checkable
+    // instead of asserted — read them on-device from app/perf-debug.tsx:
+    //   boot_effect_start  → this effect begins
+    //   db_ready           → op-sqlite open (marked in the promise below)
+    //   boot_unblocked     → first render is no longer gated
+    //   boot_deferred_start→ the first frame has settled; deferred work begins
+    // The gap boot_effect_start → boot_unblocked is cold-start cost the user
+    // actually feels; anything after boot_deferred_start is off that path.
+    perf.mark('boot_effect_start');
+
     // ── 0. Warm up the op-sqlite local store (localDb, JSI engine) ──
     // The local-first source of truth for chats/messages. Guarded so a stale
     // binary without the native module can't crash launch.
@@ -121,6 +131,7 @@ function RootLayout() {
       .catch(() => {});
 
     // Unblock the UI immediately — nothing awaited gates the first render now.
+    perf.mark('boot_unblocked');
     setSecurityChecked(true);
 
     // (attachTapHandler is wired below, after the call handlers are defined)
@@ -171,21 +182,33 @@ function RootLayout() {
       if (from) import('../lib/chatService').then(m => m.handleRekeyRequest(String(from))).catch(() => {});
     });
 
-    // VaultBeam: resume any relay upload that was interrupted by an app kill
-    // (the recipient resumes symmetrically via the server bitmask).
-    import('../lib/vaultBeamController').then(m => m.resumePendingSends()).catch(() => {});
-
-    // Offline forward catch-up: pull everything missed while offline on every
-    // reconnect, across all chats (Phase 2).
+    // ── Boot work that the user is WAITING for ─────────────────────────
+    // These three decide what the first screen shows, so they start now:
+    // catch-up on messages missed while offline, re-flush dropped receipts, and
+    // resume interrupted media sends.
     import('../lib/syncEngine').then(m => m.initSync()).catch(() => {});
-
-    // Durable read/delivered receipts: re-flush any that were dropped offline (Phase 3).
     import('../lib/receipts').then(m => m.initReceipts()).catch(() => {});
-
-    // Durable media outbox: resume interrupted/offline media sends on reconnect.
     import('../lib/mediaOutbox').then(m => m.initMediaOutbox()).catch(() => {});
-    // Bound the re-derivable media cache (safe: never touches the user's library).
-    import('../lib/mediaCacheGC').then(m => m.sweepMediaCache()).catch(() => {});
+
+    // ── Boot work that can wait for the first frame ────────────────────
+    // Neither of these changes anything the user can see on the chat list, and
+    // both are I/O heavy at exactly the wrong moment: resumePendingSends reads
+    // transfer state and re-opens uploads, and sweepMediaCache walks the media
+    // cache directory. Running them during the first render competes with the
+    // JS thread for no visible benefit.
+    //
+    // runAfterInteractions defers to after the initial render/animation settles
+    // — NOT a fixed timeout, so on a slow device it waits longer and on a fast
+    // one it barely waits at all. Both remain fire-and-forget and keep their own
+    // error handling, so a deferred failure is still contained.
+    const deferred = InteractionManager.runAfterInteractions(() => {
+      perf.mark('boot_deferred_start');
+      // VaultBeam: resume any relay upload interrupted by an app kill (the
+      // recipient resumes symmetrically via the server bitmask).
+      import('../lib/vaultBeamController').then(m => m.resumePendingSends()).catch(() => {});
+      // Bound the re-derivable media cache (safe: never touches the user's library).
+      import('../lib/mediaCacheGC').then(m => m.sweepMediaCache()).catch(() => {});
+    });
 
     // No-GMS background delivery (Phase 4): raise a local notification for each
     // inbound message. Global + persistent so it fires while the app is
@@ -264,6 +287,7 @@ function RootLayout() {
       if (Platform.OS !== 'web') {
         ScreenCapture.allowScreenCaptureAsync().catch(() => {});
       }
+      deferred.cancel();   // don't run deferred boot work after unmount
       cleanupListeners();
       cleanupCallListener();
       cleanupRekey();
