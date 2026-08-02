@@ -25,7 +25,7 @@ entirely on the device plus credentials.
 | UI, navigation, theming | ✅ Works | — |
 | Messaging, sync, offline queues, local DB | ✅ Works | — |
 | E2EE (X3DH, ratchet, sender keys, media, stories) | ✅ Works, **TS backend** | `plugins/withCryptoCore.js` has no iOS branch, so iOS runs the TypeScript crypto rather than the Rust core. Correct and vector-proven, just slower on large media |
-| 1:1 call, **foreground** | ✅ Should work | `react-native-webrtc` + `react-native-incall-manager` both support iOS |
+| 1:1 call, **foreground** | ✅ Should work | `@livekit/react-native-webrtc` + `react-native-incall-manager` both support iOS |
 | 1:1 call, **backgrounded** | ❌ Broken | No CallKit → no audio session held |
 | 1:1 call, **app killed** | ❌ Broken | No PushKit → nothing to receive the VoIP push the backend already sends |
 | Incoming-call UI | ❌ Broken | `lib/callNotification.ts:22` returns early on non-Android |

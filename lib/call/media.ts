@@ -14,7 +14,7 @@
 // a replaced call left a live MediaStream holding native camera buffers.
 
 import InCallManager from 'react-native-incall-manager';
-import { mediaDevices } from 'react-native-webrtc';
+import { mediaDevices } from '@livekit/react-native-webrtc';
 import type { CallKind } from './types';
 
 export interface LocalMedia {

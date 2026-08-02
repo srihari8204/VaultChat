@@ -19,7 +19,7 @@ import {
   RTCPeerConnection,
   RTCSessionDescription,
   RTCView,
-} from 'react-native-webrtc';
+} from '@livekit/react-native-webrtc';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { getIceServers } from '../lib/iceConfig';
 import { getSocket } from '../lib/socket';

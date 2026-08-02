@@ -18,7 +18,7 @@
 
 import {
   RTCIceCandidate, RTCPeerConnection, RTCSessionDescription,
-} from 'react-native-webrtc';
+} from '@livekit/react-native-webrtc';
 import { plainCipher, type CallCipher } from '../callCrypto';
 import type { IceServerLike } from '../iceCredentials';
 

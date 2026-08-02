@@ -14,9 +14,14 @@ config.resolver.unstable_enablePackageExports = true;
 // goes through @react-native-firebase.
 const shimDir = path.resolve(__dirname, "shims");
 
-// ─── Redirect react-native-webrtc to web shim on web platform ────
+// ─── Redirect the native WebRTC module to a web shim on web ──────
+// The key must match what source files IMPORT. That is now the LiveKit fork
+// (@livekit/react-native-webrtc) — a drop-in replacement for react-native-webrtc
+// that ships the frame cryptor the SFU work needs; see docs/SFU_SPIKE.md. The
+// shim itself is unchanged: on web these are browser-native APIs, which have no
+// idea which native package the app would have used.
 const webOnlyShims = {
-  "react-native-webrtc": path.join(shimDir, "react-native-webrtc.js"),
+  "@livekit/react-native-webrtc": path.join(shimDir, "react-native-webrtc.js"),
 };
 
 const originalResolveRequest = config.resolver.resolveRequest;

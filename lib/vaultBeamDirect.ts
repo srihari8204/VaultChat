@@ -31,7 +31,7 @@ import { Buffer } from 'buffer';
 // WebRTC is native (react-native-webrtc). Lazy-require so a build without it (or
 // Expo Go) degrades to relay instead of crashing at import.
 let RTC: any = null;
-try { RTC = require('react-native-webrtc'); } catch { RTC = null; }
+try { RTC = require('@livekit/react-native-webrtc'); } catch { RTC = null; }
 
 const FRAME = 16 * 1024;            // SCTP-safe datachannel frame (≤16 KiB)
 const BP_HIGH = 4 * 1024 * 1024;    // datachannel backpressure ceiling

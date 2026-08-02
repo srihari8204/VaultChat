@@ -36,6 +36,30 @@ matters, and several failure modes only appear one way round.
 
 ---
 
+> ### ⚠️ The WebRTC library changed underneath all of this
+>
+> `react-native-webrtc@124` was replaced by `@livekit/react-native-webrtc@144`
+> (see `docs/SFU_SPIKE.md`). The JS API is identical, but the native media stack
+> is **twenty libwebrtc milestones newer**, and that is where ICE behaviour, SDP
+> tolerances and hardware encoder selection can shift.
+>
+> **This means Stage 0 no longer isolates the engine.** Both builds now sit on
+> new libwebrtc, so a "legacy vs legacy" baseline failing tells you the library
+> regressed, not that the engine is fine. Pick one:
+>
+> * **Preferred — two passes.** Check out the commit *before* the swap
+>   (`git log --oneline -- package.json`, the C1a commit), run Stages 0–3 on
+>   `CALL_ENGINE_V2`, then return to HEAD and run the whole plan again. Two
+>   passes, one variable each, and a regression names its own cause.
+> * **Faster — one pass, accepting ambiguity.** Run the plan once at HEAD. If
+>   something fails, `git revert` the swap commit and re-run that stage to find
+>   out which change owns the failure.
+>
+> Either way **VaultBeam is now in scope**, because it rides the same library.
+> Transfer a few hundred MB in both directions and watch for a stall at the
+> 4 MiB backpressure ceiling — the API is verified compatible, the behaviour of
+> the SCTP stack under load is not.
+
 ## Stage 0 — baseline (10 min)
 
 Run **L ↔ L** first. If anything here fails, it is not the engine and the rest
