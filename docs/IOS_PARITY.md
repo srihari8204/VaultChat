@@ -29,6 +29,7 @@ entirely on the device plus credentials.
 | 1:1 call, **backgrounded** | ❌ Broken | No CallKit → no audio session held |
 | 1:1 call, **app killed** | ❌ Broken | No PushKit → nothing to receive the VoIP push the backend already sends |
 | Incoming-call UI | ❌ Broken | `lib/callNotification.ts:22` returns early on non-Android |
+| Screen share in a call | ❌ Not built | Needs a **Broadcast Upload Extension** — see below. The share button is Android-gated in `app/videocall.tsx` |
 | VaultBeam ≤ ~2 GB | ⚠️ Degraded | Rust iOS bridge is scaffolded (`plugins/vaultbeam-core-ios/`, `build-ios-xcframework.sh`) but the xcframework has never been built → JS-heap fallback |
 | VaultBeam, backgrounded / > 2 GB | ❌ Broken | No foreground-service equivalent; needs background `URLSession` |
 | Push (messages) | ⚠️ Unconfigured | `expo-notifications` supports APNs; no auth key, no `aps-environment` entitlement |
@@ -159,3 +160,48 @@ Desktop, Windows, Linux, macOS and Web remain **Pending – Future Development**
 Note for later: both Rust crates are format-frozen and vector-tested, so a future
 Tauri client can link the same crates and be protocol-compatible on day one —
 which is the standing argument for never editing them casually.
+
+---
+
+## iOS screen share — what it actually takes
+
+Recorded here because I got this wrong once and want the next person not to.
+
+Swapping to `@livekit/react-native-webrtc` (C1a) brought a `ScreenCapturePickerView`
+component, and I described iOS screen share as "small, self-contained, now
+unblocked". Reading the fork's implementation says otherwise.
+
+`ScreenCaptureController.m` reads `RTCAppGroupIdentifier` from the app's
+Info.plist, resolves the **App Group container**, and opens a socket file inside
+it:
+
+```objc
+NSString *socketFilePath = [self filePathForApplicationGroupIdentifier:self.appGroupIdentifier];
+SocketConnection *connection = [[SocketConnection alloc] initWithFilePath:socketFilePath];
+[self.capturer startCaptureWithConnection:connection];
+```
+
+Nothing writes to that socket unless a **Broadcast Upload Extension** exists.
+On iOS the app cannot capture its own screen; ReplayKit runs the capture in a
+separate process, and that process is a second Xcode target which must be built,
+signed and provisioned alongside the app.
+
+So the real shopping list is:
+
+1. A Broadcast Upload Extension target — its own `SampleHandler`, Info.plist,
+   entitlements and **its own provisioning profile**.
+2. An App Group (`group.<bundle-id>`) entitled to *both* the app and the
+   extension.
+3. `RTCAppGroupIdentifier` in the app's Info.plist.
+4. `<ScreenCapturePickerView>` rendered in the call screen, plus removing the
+   `Platform.OS === 'android'` gate on the share button.
+
+Only step 4 is JavaScript. Steps 1–3 are native project surgery that needs a
+provisioning profile — which means **the same paid Apple Developer account
+already blocking CallKit**. An Expo config plugin can generate the target, but
+nothing can verify it without Xcode and a device.
+
+**Sequence it after CallKit, not before.** Both need the same credentials, and
+CallKit is worth far more: without it an iOS call cannot survive backgrounding
+or ring a killed device, which makes screen-sharing during one somewhat beside
+the point.
