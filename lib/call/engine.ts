@@ -27,6 +27,8 @@
 // the codebase) while authService itself imports back into lib/. Same value,
 // no layering inversion, no latent cycle.
 import { getCachedUser } from '../api';
+import { CALL_SESSIONS } from '../../constants/flags';
+import { leaveCallSession, openCallSession } from '../callSession';
 import { addCallLog } from '../callLog';
 import { newCallCipher, openCallOffer } from '../callCrypto';
 // The ONE platform seam (lib/call/native): Android foreground service + FCM
@@ -67,6 +69,8 @@ interface Session {
   disposers: (() => void)[];
   logged: boolean;
   disposed: boolean;
+  /** calls.id once the server session opens, or '' — see openSession(). */
+  serverCallId: string;
 }
 
 let session: Session | null = null;
@@ -124,6 +128,9 @@ export function hangUp(reason: EndReason = 'local_hangup', notifyPeer = true): v
       // A mesh call has no single peer — the log keys it by chat and redials it
       // as a group call rather than as a 1:1 with an empty uid.
       group: s.wire === 'mesh',
+      // Present only when the server session opened. It is what lets this same
+      // call be recognised in the synced history instead of appearing twice.
+      callId: s.serverCallId || undefined,
     }).catch(() => {});
     // Outgoing call abandoned before it was answered → stop the callee's ring
     // and let it become a "missed call" on their device.
@@ -271,7 +278,7 @@ async function bootstrap(a: StartArgs, direction: 'outgoing' | 'incoming', wire:
   begin({ ...a, direction });
   session = {
     ...a, meId: '', meName: '', peers: new Map(), wire, localStream: null, screenStream: null,
-    cameraTrack: null, disposers: [], logged: false, disposed: false,
+    cameraTrack: null, disposers: [], logged: false, disposed: false, serverCallId: '',
   };
   const s = session;
 
@@ -329,8 +336,40 @@ async function bootstrap(a: StartArgs, direction: 'outgoing' | 'incoming', wire:
   if (s.wire === 'direct') addPeer(s, a.peerUid, a.peerName, iceServers);
 
   registerForCallWaiting(a, me.name ?? me.email ?? 'VaultChat user');
+  openSession(s);
   const peer = solePeer(s) as CallPeer;
   return { s, peer, me, iceServers };
+}
+
+/**
+ * Open the server-side call record (B2 / migration 066), off the critical path.
+ *
+ * NOT awaited, deliberately. Media is peer-to-peer and signalling is a socket;
+ * neither needs the REST API's permission to exist, so making call setup wait on
+ * a round trip would add latency to every call in exchange for bookkeeping. A
+ * failure — unmigrated server, offline, 403 — leaves `serverCallId` null and the
+ * call proceeds exactly as it did before any of this existed.
+ *
+ * The late arrival is safe because the only reader is hangUp(), which runs at
+ * minimum a ring cycle later; and if the id somehow has not landed by then, the
+ * call is simply logged without one, which is the pre-existing behaviour.
+ */
+function openSession(s: Session): void {
+  if (!CALL_SESSIONS) return;
+  void openCallSession(s.chatId, s.kind, 'meeting')
+    .then(res => { if (res?.call?.id && !s.disposed) s.serverCallId = res.call.id; })
+    .catch(() => {});
+
+  // Leaving is registered as a DISPOSER rather than called from hangUp, so it
+  // covers every exit path there is — hangup, remote end, ICE failure, setup
+  // error, replacement — instead of only the one anybody remembered. It reads
+  // serverCallId at teardown time, which is what makes it correct even though
+  // the id arrives asynchronously above.
+  //
+  // The server ends a call when its last participant leaves, so this is also
+  // what closes the row when everyone hangs up; nobody has to be the one who
+  // "ends" it. Not awaited: teardown must not wait on the network.
+  onDispose(() => { if (s.serverCallId) void leaveCallSession(s.serverCallId); });
 }
 
 /**

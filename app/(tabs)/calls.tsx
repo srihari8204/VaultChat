@@ -13,9 +13,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
 import { Avatar } from '../../components/ui';
-import { getCallLog, clearCallLog, removeCallLog, callLogKey, type CallLogEntry } from '../../lib/callLog';
+import { getCallLog, clearCallLog, removeCallLog, callLogKey, getHiddenServerCalls, hideServerCalls, type CallLogEntry } from '../../lib/callLog';
 import { listChats, attachmentUrl } from '../../lib/chatService';
-import { getAccessToken } from '../../lib/api';
+import { getAccessToken, getCachedUser } from '../../lib/api';
+import { fetchCallHistory } from '../../lib/callSession';
+import { mergeCallHistory, type CallHistoryEntry } from '../../lib/callHistory';
 
 function useS() {
   const { colors } = useTheme();
@@ -48,27 +50,52 @@ type CallGroup = {
   peerPhoto?: string | null;
   /** True when the row is a group (mesh) call — see lib/callLog.ts. */
   group?: boolean;
-  entries: CallLogEntry[];
+  entries: CallHistoryEntry[];
 };
 
 export default function CallsScreen() {
   const { colors } = useTheme();
   const S = useS();
   const router = useRouter();
-  const [log, setLog] = useState<CallLogEntry[]>([]);
+  const [log, setLog] = useState<CallHistoryEntry[]>([]);
   const [photos, setPhotos] = useState<Map<string, string>>(new Map());
   const [authHeader, setAuthHeader] = useState<string | null>(null);
   const [infoGroup, setInfoGroup] = useState<CallGroup | null>(null);
 
   useFocusEffect(useCallback(() => {
     let alive = true;
+    // The device log paints FIRST, on its own, before anything touches the
+    // network. It is already on disk, so the list is never blank waiting on a
+    // request — and on an offline device or an unmigrated server, this is the
+    // whole story and nothing below changes what's on screen.
     getCallLog().then(l => { if (alive) setLog(l); });
-    Promise.all([listChats(), getAccessToken()]).then(([chats, tok]) => {
-      if (!alive) return;
-      const m = new Map<string, string>();
-      for (const c of chats) if (c.peerUserId && c.peerPhotoURL) m.set(c.peerUserId, c.peerPhotoURL);
-      setPhotos(m); setAuthHeader(tok ? `Bearer ${tok}` : null);
-    }).catch(() => {});
+
+    Promise.all([listChats(), getAccessToken(), getCachedUser(), fetchCallHistory(), getHiddenServerCalls()])
+      .then(([chats, tok, me, server, hidden]) => {
+        if (!alive) return;
+        const m = new Map<string, string>();
+        // chatId → how to name a call the server told us about but this device
+        // never made. Built from the chat list the screen already loads.
+        const byChat = new Map<string, { name: string; photo?: string | null; direct?: boolean }>();
+        for (const c of chats) {
+          if (c.peerUserId && c.peerPhotoURL) m.set(c.peerUserId, c.peerPhotoURL);
+          byChat.set(c.id, {
+            name: (c.type === 'direct' ? c.peerName : c.name) || 'Call',
+            photo: c.type === 'direct' ? c.peerPhotoURL : null,
+            direct: c.type === 'direct',
+          });
+        }
+        setPhotos(m);
+        setAuthHeader(tok ? `Bearer ${tok}` : null);
+        // Merge only when the server actually returned something. With
+        // CALL_SESSIONS off fetchCallHistory resolves [] without a request, so
+        // this is a no-op and the log stays exactly as it was.
+        if (server.length && me?.id) {
+          getCallLog().then(local => {
+            if (alive) setLog(mergeCallHistory(local, server, me.id, { get: (id) => byChat.get(id) }, hidden));
+          });
+        }
+      }).catch(() => {});
     return () => { alive = false; };
   }, []));
 
@@ -101,8 +128,13 @@ export default function CallsScreen() {
     router.push({ pathname: path as any, params: { chatId: g.chatId ?? '', peerUid: g.peerUid, peerName: g.peerName } });
   }, [router]);
 
+  // Removing a row has to reach BOTH sources. Local entries are deleted from
+  // the device log; server-only ones have nothing to delete, so their callId is
+  // remembered as dismissed — otherwise the row would disappear and come
+  // straight back on the next sync.
   const removeGroup = useCallback(async (g: CallGroup) => {
-    await removeCallLog(g.entries.map(e => e.id));
+    await removeCallLog(g.entries.filter(e => !e.remote).map(e => e.id));
+    await hideServerCalls(g.entries.filter(e => e.remote && e.callId).map(e => e.callId!));
     setLog(prev => prev.filter(e => !g.entries.some(x => x.id === e.id)));
   }, []);
 
@@ -120,9 +152,17 @@ export default function CallsScreen() {
   const confirmClear = useCallback(() => {
     Alert.alert('Clear call log?', 'This removes all call history from this device.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Clear', style: 'destructive', onPress: async () => { await clearCallLog(); setLog([]); } },
+      { text: 'Clear', style: 'destructive', onPress: async () => {
+        // Synced rows have to be dismissed too, or "clear" would leave the list
+        // repopulating itself from the server a moment later.
+        await Promise.all([
+          clearCallLog(),
+          hideServerCalls(log.filter(e => e.remote && e.callId).map(e => e.callId!)),
+        ]);
+        setLog([]);
+      } },
     ]);
-  }, []);
+  }, [log]);
 
   const DirArrow = ({ d, size = 15 }: { d: CallLogEntry['direction']; size?: number }) => (
     <Ionicons

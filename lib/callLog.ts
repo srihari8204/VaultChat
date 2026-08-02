@@ -31,6 +31,17 @@ export interface CallLogEntry {
    * behaving exactly as it did — grouped by peer, redialled 1:1.
    */
   group?: boolean;
+  /**
+   * The server-side call id (`calls.id`), when this call opened a session.
+   *
+   * This is what lets the same call be recognised in both places: the device's
+   * own log and the synced server history both carry it, so merging them is an
+   * id match rather than a guess about timestamps. Entries written before
+   * CALL_SESSIONS — and any call whose session request failed, went offline, or
+   * hit an unmigrated server — simply have none, and stay local-only. That is
+   * the graceful case, not an error.
+   */
+  callId?: string;
 }
 
 /**
@@ -71,4 +82,36 @@ export async function removeCallLog(ids: string[]): Promise<void> {
 
 export async function clearCallLog(): Promise<void> {
   try { await AsyncStorage.removeItem(KEY); } catch {}
+}
+
+// ── dismissed server calls ────────────────────────────────────────────
+//
+// A call that only the SERVER knows about (made on another device) has no row
+// in the log above, so "remove from log" cannot delete it — it would vanish
+// from the list and reappear on the next sync. Instead the id is remembered
+// here and filtered out of the merge.
+//
+// Device-local on purpose. Hiding a call on this phone must not delete it from
+// the account: another device may be the only place that history now exists,
+// and a tidy-up gesture should not be able to destroy it everywhere. Which is
+// also why "Clear call log" still says "from this device" and still means it.
+const HIDDEN_KEY = 'vc_call_log_hidden_v1';
+const HIDDEN_MAX = 1000;
+
+export async function getHiddenServerCalls(): Promise<Set<string>> {
+  try {
+    const raw = await AsyncStorage.getItem(HIDDEN_KEY);
+    return new Set<string>(raw ? JSON.parse(raw) : []);
+  } catch { return new Set(); }
+}
+
+export async function hideServerCalls(callIds: string[]): Promise<void> {
+  const ids = callIds.filter(Boolean);
+  if (!ids.length) return;
+  try {
+    const set = await getHiddenServerCalls();
+    for (const id of ids) set.add(id);
+    // Bounded like the log itself: the newest dismissals win if it ever grows.
+    await AsyncStorage.setItem(HIDDEN_KEY, JSON.stringify([...set].slice(-HIDDEN_MAX)));
+  } catch {}
 }

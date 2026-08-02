@@ -136,4 +136,21 @@ export const CALL_ENGINE_V2 = false;
 // a genuine multi-minute stall; flip OFF to restore the exact prior relay path.
 export const VB_RELIABILITY_FIXES = true;
 
-export default { E2EE_ENABLED, VAULT_SESSION_SEALED, VAULT_CACHE_ENCRYPTED, MEDIA_E2EE, STORY_E2EE, GROUP_E2EE, SCHEDULED_LOCAL, VB_AUTODOWNLOAD, VB_AUTO_MAX_BYTES, VB_RELIABILITY_FIXES, CALL_ENGINE_V2 };
+// CALL_SESSIONS gates the server-side call record (migration 066 +
+// /calls/* in the Go backend). With it ON, starting or joining a call also
+// opens a session row, so a call gains a real identity: history syncs across a
+// user's devices and survives a reinstall, instead of living only in the 300-
+// entry AsyncStorage log on the handset that made it. It is also the table a
+// role — and therefore a future SFU publish grant — is read from.
+//
+// DEFAULT OFF, and it must stay off until migration 066 has actually been
+// applied to the server this build talks to. With it off, nothing calls the new
+// endpoints and call history behaves exactly as it does today.
+//
+// Even when ON, the session request is fire-and-forget and never blocks media:
+// a 404 (server not migrated), a timeout or an offline device costs the call
+// nothing and simply leaves that call without a server-side id — it still logs
+// locally, exactly as before. Call setup must never depend on a REST round trip.
+export const CALL_SESSIONS = false;
+
+export default { E2EE_ENABLED, VAULT_SESSION_SEALED, VAULT_CACHE_ENCRYPTED, MEDIA_E2EE, STORY_E2EE, GROUP_E2EE, SCHEDULED_LOCAL, VB_AUTODOWNLOAD, VB_AUTO_MAX_BYTES, VB_RELIABILITY_FIXES, CALL_ENGINE_V2, CALL_SESSIONS };
