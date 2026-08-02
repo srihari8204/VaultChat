@@ -10,7 +10,8 @@
 //   lib/call/signal  socket wire + the tuned re-send cadences
 //   lib/call/media   capture + InCallManager routing
 //   lib/call/peer    RTCPeerConnection + ICE buffering + answer idempotence
-//   lib/CallService  native foreground service + FCM doorbell (Android today)
+//   lib/call/native   the ONE platform seam — Android FGS + FCM today,
+//                    CallKit + PushKit when iOS lands
 //   lib/callLog      on-device history
 //   lib/callState    call-waiting hold/resume registration
 //
@@ -28,10 +29,10 @@
 import { getCachedUser } from '../api';
 import { addCallLog } from '../callLog';
 import { newCallCipher, openCallOffer } from '../callCrypto';
-import {
-  cancelCall, dismissIncomingNotification, initiateCall,
-  startCallForeground, stopCallForeground,
-} from '../CallService';
+// The ONE platform seam (lib/call/native): Android foreground service + FCM
+// today, CallKit + PushKit when iOS lands. The engine never branches on
+// Platform.OS itself.
+import { nativeCall } from './native';
 import { clearActiveCall, setActiveCall, type ActiveCall } from '../callState';
 import { getIceServers } from '../iceConfig';
 import * as media from './media';
@@ -72,7 +73,7 @@ function dispose(): void {
   for (const fn of s.disposers.reverse()) { try { fn(); } catch {} }
   s.disposers = [];
   media.stopAudioSession();
-  stopCallForeground();
+  nativeCall.endCallSession();
   media.stopStream(s.screenStream);
   media.stopStream(s.localStream);
   s.peer?.close();
@@ -108,7 +109,7 @@ export function hangUp(reason: EndReason = 'local_hangup', notifyPeer = true): v
     // Outgoing call abandoned before it was answered → stop the callee's ring
     // and let it become a "missed call" on their device.
     if (shouldCancelRing(snap) && s.peerUid) {
-      cancelCall(s.peerUid, String(s.chatId || s.peerUid)).catch(() => {});
+      nativeCall.cancelRing(s.peerUid, String(s.chatId || s.peerUid)).catch(() => {});
     }
   }
 
@@ -229,7 +230,7 @@ export async function startOutgoing(a: StartArgs): Promise<void> {
     // High-priority wake-up so a killed/dozing callee still rings. Doorbell
     // only — the SDP never rides in the push (it carries the DTLS-SRTP
     // fingerprint that anchors media E2EE).
-    initiateCall({ calleeId: a.peerUid, callId: String(a.chatId || a.peerUid), isVideo: a.kind === 'video' })
+    nativeCall.ringPeer({ calleeId: a.peerUid, callId: String(a.chatId || a.peerUid), isVideo: a.kind === 'video' })
       .catch(() => {});
 
     dispatch({ type: 'offer_sent' });
@@ -270,21 +271,20 @@ function failSetup(e: any): void {
  * Promote to the mic/camera foreground service and clear the OS ring. Called by
  * the screen when status becomes 'connected'; idempotent.
  *
- * ANDROID ONLY today — lib/CallService gates on Platform.OS. On iOS this is a
- * silent no-op until CallKit lands, which is the tracked iOS gap.
+ * Android today; on iOS the adapter is a documented no-op until CallKit lands
+ * (lib/call/native/ios.ts). Either way the engine calls the same method.
  */
 let foregrounded = false;
 export function onConnected(): void {
   const s = session;
   if (!s || foregrounded) return;
   foregrounded = true;
-  startCallForeground(
-    String(s.chatId || s.peerUid || 'call'),
-    s.peerName || 'VaultChat user',
-    '',
-    s.kind === 'video',
-  );
-  dismissIncomingNotification();
+  nativeCall.startCallSession({
+    callId: String(s.chatId || s.peerUid || 'call'),
+    peerName: s.peerName || 'VaultChat user',
+    isVideo: s.kind === 'video',
+  });
+  nativeCall.dismissIncomingUi();
 }
 
 // ── controls ──────────────────────────────────────────────────────────
