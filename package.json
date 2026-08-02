@@ -10,6 +10,7 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
+    "test": "node ./scripts/test-all.js",
     "test:e2ee": "tsx services/crypto/e2ee.selftest.ts && tsx services/crypto/senderKey.selftest.ts && tsx services/crypto/shamir.selftest.ts && tsx services/security/safetyNumber.selftest.ts && tsx services/crypto/vectors.selftest.ts && tsx services/crypto/vaultbeam-vectors.selftest.ts && tsx services/crypto/parity.selftest.ts && tsx services/crypto/vaultbeam-parity.selftest.ts",
     "test:vaultcheck": "tsx lib/vaultcheck/vaultcheck.selftest.ts",
     "test:ice": "tsx lib/iceCredentials.selftest.ts",
@@ -31,7 +32,7 @@
     "deploy:firestore:rules": "firebase deploy --only firestore:rules",
     "deploy:firestore:indexes": "firebase deploy --only firestore:indexes",
     "deploy:firestore": "firebase deploy --only firestore",
-    "prod:check": "npm run lint && npm run typecheck",
+    "prod:check": "npm run lint && npm run typecheck && npm test",
     "prod:precheck": "node ./scripts/prod-precheck.js"
   },
   "dependencies": {
