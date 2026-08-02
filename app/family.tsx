@@ -113,6 +113,24 @@ export default function FamilySpaceScreen() {
   // stop broadcasting when the screen loses focus (map still resumes on return)
   useFocusEffect(React.useCallback(() => () => { stopPresence(); }, []));
 
+  // Refresh on focus — /family-add and /family-setup both mutate state this
+  // screen already has in memory, and neither changes active.id, so nothing
+  // else would re-read it.
+  useFocusEffect(React.useCallback(() => {
+    let live = true;
+    (async () => {
+      const cs = await listCircles();
+      if (!live) return;
+      setCircles(cs);
+      if (!cs.length) { router.replace('/family-setup' as any); return; }
+      // Keep the user on the space they were looking at unless it is gone.
+      setActive(prev => (prev && cs.some(c => c.id === prev.id)) ? prev : cs[0]);
+    })();
+    refreshMembers();
+    return () => { live = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router]));
+
   // today's highlights — recent check-ins / SOS decrypted from the circle chat
   useEffect(() => {
     if (!active) return;
@@ -156,6 +174,15 @@ export default function FamilySpaceScreen() {
     const now = Date.now();
     return Object.values(presences).filter((p) => now - p.ts <= STALE_MS).length;
   }, [presences]);
+
+  // Contact picker. The invite code still exists (see invite() below) but it is
+  // the fallback: /family-setup was only ever reachable at zero circles, so a
+  // recipient who already had a space of their own had NO screen on which to
+  // enter a code. Adding a contact directly needs neither screen.
+  const openAdd = () => {
+    if (!active) return;
+    router.push({ pathname: '/family-add' as any, params: { circleId: active.id, circleName: active.name } });
+  };
 
   const invite = async () => {
     if (!active) return;
@@ -326,7 +353,7 @@ export default function FamilySpaceScreen() {
       <Stack.Screen options={{ title: 'Family Space', headerTitleAlign: 'center',
         headerRight: () => (
           <View style={{ flexDirection: 'row' }}>
-            <TouchableOpacity onPress={invite} style={{ paddingHorizontal: 6 }}><Ionicons name="person-add" size={20} color={colors.primary} /></TouchableOpacity>
+            <TouchableOpacity onPress={openAdd} style={{ paddingHorizontal: 6 }}><Ionicons name="person-add" size={20} color={colors.primary} /></TouchableOpacity>
             <TouchableOpacity onPress={() => { setRenameTxt(''); setManage(true); }} style={{ paddingHorizontal: 6 }}><Ionicons name="ellipsis-vertical" size={20} color={colors.primary} /></TouchableOpacity>
           </View>
         ) }} />
@@ -493,8 +520,14 @@ export default function FamilySpaceScreen() {
               </View>
             )}
 
+            <TouchableOpacity onPress={() => { setManage(false); openAdd(); }} style={[st.mRow, { borderColor: colors.border }]}>
+              <Ionicons name="person-add" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Add from contacts</Text>
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => { setManage(false); invite(); }} style={[st.mRow, { borderColor: colors.border }]}>
-              <Ionicons name="person-add" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Invite with code</Text>
+              <Ionicons name="key-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Share an invite code</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => { setManage(false); router.push({ pathname: '/family-setup' as any, params: { from: 'family' } }); }} style={[st.mRow, { borderColor: colors.border }]}>
+              <Ionicons name="add-circle-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Create or join another space</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/chat', params: { id: active.id } } as any); }} style={[st.mRow, { borderColor: colors.border }]}>
               <Ionicons name="chatbubbles" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Open circle chat</Text>
