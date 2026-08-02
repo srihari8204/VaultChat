@@ -53,6 +53,20 @@ function getEmitter(): NativeEventEmitter | null {
   return emitter;
 }
 
+// Native start/stop is refcounted. Without this, two concurrent watchers (say a
+// protected viewer and a screenshot listener) would share one native
+// subscription and the FIRST to unmount would call stopWatch(), silently
+// blinding the one still on screen.
+let watchers = 0;
+function nativeStart(): void {
+  if (!Native?.startWatch) return;
+  if (watchers++ === 0) { try { Native.startWatch(); } catch {} }
+}
+function nativeStop(): void {
+  if (!Native?.stopWatch) return;
+  if (watchers > 0 && --watchers === 0) { try { Native.stopWatch(); } catch {} }
+}
+
 /** True when the build carries the native guard (capture detection works). */
 export function isGuardAvailable(): boolean { return !!Native; }
 
@@ -118,7 +132,7 @@ export function watch(onChange: (s: GuardState) => void): () => void {
 
   const em = getEmitter();
   if (em && Native?.startWatch) {
-    try { Native.startWatch(); } catch {}
+    nativeStart();
     subs.push(em.addListener('vaultview_state', (s: any) => {
       if (disposed) return;
       onChange({
@@ -131,9 +145,10 @@ export function watch(onChange: (s: GuardState) => void): () => void {
   }
 
   return () => {
+    if (disposed) return;          // double-cleanup must not decrement twice
     disposed = true;
     for (const s of subs) { try { s.remove(); } catch {} }
-    if (Native?.stopWatch) { try { Native.stopWatch(); } catch {} }
+    if (em && Native?.startWatch) nativeStop();
   };
 }
 

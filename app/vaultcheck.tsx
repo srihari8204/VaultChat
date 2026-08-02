@@ -14,7 +14,7 @@ import {
   View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity, Share, Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
 import { getMedia } from '../lib/mediaStore';
@@ -29,7 +29,6 @@ const VERDICT_STYLE: Record<string, { icon: any; color: string; label: string }>
 export default function VaultCheckScreen() {
   const { colors } = useTheme();
   const S = useMemo(() => makeStyles(colors), [colors]);
-  const router = useRouter();
   const { attachmentId, uri, msgType, mime, filename, isMine } = useLocalSearchParams();
 
   const kind: 'image' | 'video' = msgType === 'video' ? 'video' : 'image';

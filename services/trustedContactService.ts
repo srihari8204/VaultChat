@@ -84,7 +84,12 @@ export async function isContactVerified(peerUid: string): Promise<boolean> {
   try {
     const doc = await firestore().collection('users').doc(myUid)
       .collection('verifiedContacts').doc(peerUid).get();
-    return doc.exists;
+    // exists() is a METHOD in this Firestore SDK version. Returning the bare
+    // property returned the function itself — always truthy — so EVERY contact
+    // reported as verified. lib/vaultBeamAutoDownload gates "trusted contacts
+    // only" auto-download on this, which meant that setting accepted files from
+    // anyone.
+    return doc.exists();
   } catch {
     return false;
   }

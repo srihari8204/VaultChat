@@ -10,7 +10,7 @@ import {
   PanResponder, Alert, Share,
 } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
-import { Video, Audio, ResizeMode } from 'expo-av';
+import { Video, Audio, ResizeMode, type AVPlaybackStatusSuccess } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as MediaLibrary from 'expo-media-library';
@@ -20,6 +20,11 @@ import { attachmentUrl, markAttachmentViewed, reportScreenshotCaptured } from '.
 import { getCurrentUserAsync } from './(constants)/authService';
 import ProtectedMediaView from '../components/ProtectedMediaView';
 import { onScreenshot } from '../lib/screenGuard';
+
+// Playback status is a union (loaded | error); every read below wants the loaded
+// shape. Partial<> keeps the `{}` initial state honest — the fields genuinely
+// are absent until the first status callback lands.
+type PlaybackState = Partial<AVPlaybackStatusSuccess>;
 
 const { width: SW, height: SH } = Dimensions.get('window');
 const C = { bg: '#000', accent: '#4A9FFF', green: BRAND_ACCENT };
@@ -177,7 +182,7 @@ export default function MediaViewerScreen() {
   // VIDEO — streams while loading
   const VideoPlayer = () => {
     const videoRef = useRef(null);
-    const [st, setSt] = useState({});
+    const [st, setSt] = useState<PlaybackState>({});
     const [ctrl, setCtrl] = useState(true);
     const [shouldPlay, setShouldPlay] = useState(true);
     useEffect(() => { setLoading(false); }, []);
@@ -185,7 +190,7 @@ export default function MediaViewerScreen() {
       <TouchableOpacity style={s.full} activeOpacity={1} onPress={() => setCtrl(!ctrl)}>
         <Video ref={videoRef} source={{ uri: fileUri }} style={s.fullVid} resizeMode={ResizeMode.CONTAIN}
           shouldPlay={shouldPlay} isLooping={false} useNativeControls={false} progressUpdateIntervalMillis={250}
-          onPlaybackStatusUpdate={(status) => { setSt(status); if (status?.didJustFinish) setShouldPlay(false); }}
+          onPlaybackStatusUpdate={(status) => { if (!status.isLoaded) return; setSt(status); if (status.didJustFinish) setShouldPlay(false); }}
           onLoad={() => { setLoading(false); markViewedAfterLoad(); }} onError={() => { setError('Failed to load video'); setLoading(false); }} />
         {st.isBuffering && !st.isPlaying && <View style={s.bufOverlay}><ActivityIndicator color={C.accent} size="large" /><Text style={s.bufTxt}>Streaming...</Text></View>}
         {ctrl && (
@@ -204,8 +209,8 @@ export default function MediaViewerScreen() {
             <View style={s.progRow}>
               <Text style={s.timeTxt}>{formatDur(st.positionMillis)}</Text>
               <View style={s.seekBg}>
-                <View style={[s.seekBuf, { width: ((st.playableDurationMillis||0) / (st.durationMillis||1) * 100) + '%' }]} />
-                <View style={[s.seekFill, { width: ((st.positionMillis||0) / (st.durationMillis||1) * 100) + '%' }]} />
+                <View style={[s.seekBuf, { width: `${(st.playableDurationMillis||0) / (st.durationMillis||1) * 100}%` }]} />
+                <View style={[s.seekFill, { width: `${(st.positionMillis||0) / (st.durationMillis||1) * 100}%` }]} />
               </View>
               <Text style={s.timeTxt}>{formatDur(st.durationMillis)}</Text>
             </View>
@@ -218,11 +223,11 @@ export default function MediaViewerScreen() {
   // AUDIO
   const AudioPlayer = () => {
     const soundRef = useRef(null);
-    const [ast, setAst] = useState({});
+    const [ast, setAst] = useState<PlaybackState>({});
     useEffect(() => {
       (async () => {
         await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
-        const { sound } = await Audio.Sound.createAsync({ uri: fileUri }, { shouldPlay: false, progressUpdateIntervalMillis: 200 }, setAst);
+        const { sound } = await Audio.Sound.createAsync({ uri: fileUri }, { shouldPlay: false, progressUpdateIntervalMillis: 200 }, (st) => { if (st.isLoaded) setAst(st); });
         soundRef.current = sound; setLoading(false);
       })();
       return () => { soundRef.current?.unloadAsync(); };
@@ -262,8 +267,8 @@ export default function MediaViewerScreen() {
     }, []);
     const lines = content.split('\n');
     return (
-      <ScrollView style={{flex:1,background:'#FFFFFF'}}>
-        <View style={{padding:12,background:'#161B22',borderBottomWidth:1,borderBottomColor:'#21262D'}}>
+      <ScrollView style={{flex:1,backgroundColor:'#FFFFFF'}}>
+        <View style={{padding:12,backgroundColor:'#161B22',borderBottomWidth:1,borderBottomColor:'#21262D'}}>
           <Text style={{color:'#1F2937',fontSize:14,fontWeight:800}}>{fileName}</Text>
           <Text style={{color:'#8B949E',fontSize:11,marginTop:4}}>{lines.length} lines | {formatSize(content.length)}</Text>
           <TouchableOpacity style={{marginTop:10,backgroundColor:'#4A9FFF22',borderRadius:10,paddingVertical:10,flexDirection:'row',gap:6,justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:'#4A9FFF44'}}

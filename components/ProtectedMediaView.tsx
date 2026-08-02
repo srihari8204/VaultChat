@@ -52,9 +52,17 @@ export default function ProtectedMediaView({
   const blockedOnce = useRef<string | null>(null);
 
   // FLAG_SECURE while this surface is mounted (no-op on iOS by design).
+  //
+  // On unmount we re-assert the app-wide default, which is ALSO secure
+  // (app/_layout.tsx calls preventScreenCaptureAsync at boot) — we must not
+  // call setSecure(false) here. FLAG_SECURE is a window-level flag, so clearing
+  // it would clear it for whatever screen the user lands on next: returning
+  // from a protected photo into a chat set to "Block screenshots" would leave
+  // that chat capturable, because chat.tsx applies its policy on mount and
+  // never re-runs on the way back.
   useEffect(() => {
     setSecure(true).catch(() => {});
-    return () => { setSecure(false).catch(() => {}); };
+    return () => { setSecure(true).catch(() => {}); };
   }, []);
 
   useEffect(() => {

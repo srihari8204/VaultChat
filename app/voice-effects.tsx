@@ -84,7 +84,9 @@ export default function VoiceEffectsScreen() {
       const { sound } = await Audio.Sound.createAsync(
         { uri: recordedUri },
         { shouldPlay: true, rate: effect?.rate || 1.0, pitchCorrectionQuality: Audio.PitchCorrectionQuality.High },
-        (st) => { if (st.didJustFinish) setPlaying(false); }
+        // isLoaded narrows the AVPlaybackStatus union — the error variant has no
+        // didJustFinish, so reading it unguarded was undefined at runtime.
+        (st) => { if (st.isLoaded && st.didJustFinish) setPlaying(false); }
       );
       soundRef.current = sound;
       setPlaying(true);
