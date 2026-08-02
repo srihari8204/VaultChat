@@ -31,7 +31,7 @@ import {
   RTCSessionDescription,
 } from 'react-native-webrtc';
 import { getCurrentUserAsync } from './(constants)/authService';
-import { getTurnConfig, type IceServer } from '../lib/chatService';
+import { getIceServers } from '../lib/iceConfig';
 import { getSocket } from '../lib/socket';
 import { addCallLog } from '../lib/callLog';
 import { startCallForeground, stopCallForeground, dismissIncomingNotification, initiateCall, cancelCall } from '../lib/CallService';
@@ -191,13 +191,12 @@ export default function VoiceCallScreen() {
         if (cancelled) { stream.getTracks().forEach((t: any) => t.stop()); return; }
         localStreamRef.current = stream;
 
-        // 4. Fetch ICE config (TURN credentials from our backend)
-        const turn = await getTurnConfig().catch(() => ({ iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-        ] as IceServer[] }));
+        // 4. ICE config (cached TURN credentials — see lib/iceConfig). Falls
+        //    back to STUN-only exactly as before if the request fails.
+        const iceServers = await getIceServers();
 
         // 5. Build peer connection
-        const pc = new RTCPeerConnection({ iceServers: turn.iceServers as any });
+        const pc = new RTCPeerConnection({ iceServers: iceServers as any });
         pcRef.current = pc;
         stream.getTracks().forEach((track: any) => pc.addTrack(track, stream));
 

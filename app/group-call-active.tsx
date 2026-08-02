@@ -17,7 +17,7 @@ import { mediaDevices, RTCIceCandidate, RTCPeerConnection, RTCSessionDescription
 import InCallManager from 'react-native-incall-manager';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
-import { getTurnConfig } from '../lib/chatService';
+import { getIceServers } from '../lib/iceConfig';
 import { getSocket } from '../lib/socket';
 import { newCallCipher, openCallOffer, plainCipher, type CallCipher } from '../lib/callCrypto';
 import { getCurrentUserAsync } from './(constants)/authService';
@@ -94,8 +94,9 @@ export default function GroupCallActive() {
       try {
         const me = await getCurrentUserAsync();
         meRef.current = me?.id ?? '';
-        const turn = await getTurnConfig().catch(() => ({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }));
-        iceRef.current = (turn as any).iceServers ?? [];
+        // Cached TURN credentials (lib/iceConfig): one fetch for the whole mesh
+        // instead of a race between the peers coming up.
+        iceRef.current = await getIceServers();
         const stream = await mediaDevices.getUserMedia({ audio: true, video: isVideo ? { facingMode: 'user' } : false });
         if (cancelled) { stream.getTracks().forEach((t: any) => t.stop()); return; }
         localStreamRef.current = stream;

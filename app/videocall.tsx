@@ -21,7 +21,7 @@ import {
   RTCView,
 } from 'react-native-webrtc';
 import { getCurrentUserAsync } from './(constants)/authService';
-import { getTurnConfig, type IceServer } from '../lib/chatService';
+import { getIceServers } from '../lib/iceConfig';
 import { getSocket } from '../lib/socket';
 import { startCallForeground, stopCallForeground, dismissIncomingNotification, initiateCall, cancelCall } from '../lib/CallService';
 import { newCallCipher, openCallOffer, plainCipher, type CallCipher } from '../lib/callCrypto';
@@ -286,11 +286,10 @@ export default function VideoCallScreen() {
         localStreamRef.current = stream;
         setLocalUrl(stream.toURL());
 
-        const turn = await getTurnConfig().catch(() => ({ iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-        ] as IceServer[] }));
+        // Cached TURN credentials (lib/iceConfig) — same STUN-only fallback.
+        const iceServers = await getIceServers();
 
-        const pc = new RTCPeerConnection({ iceServers: turn.iceServers as any });
+        const pc = new RTCPeerConnection({ iceServers: iceServers as any });
         pcRef.current = pc;
         stream.getTracks().forEach((t: any) => pc.addTrack(t, stream));
 

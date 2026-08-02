@@ -314,6 +314,9 @@ export async function logoutUser() {
   } catch {}
   await clearTokens();
   await setCachedUser(null);
+  // TURN credentials are minted per user id ("<expiry>:<uid>"), so they must not
+  // survive into the next account signed in on this device.
+  try { require('../../lib/iceConfig').invalidateIceCache(); } catch {}
   for (let i = 0; i < 3; i++) {
     await AsyncStorage.removeItem('vc_face_' + i).catch(() => {});
   }
