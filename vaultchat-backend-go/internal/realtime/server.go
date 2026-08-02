@@ -32,6 +32,7 @@ import (
 	"github.com/zishang520/socket.io/v2/socket"
 
 	"vaultchat/backend-go/internal/httpx"
+	"vaultchat/backend-go/internal/metrics"
 	"vaultchat/backend-go/internal/redisx"
 )
 
@@ -101,6 +102,12 @@ func New() *Hub {
 		userSockets: map[string]map[string]struct{}{},
 	}
 
+	// Live readers rather than counters we would have to keep in sync — the
+	// hub already owns this state, and a scrape-time read cannot drift from it.
+	// OnlineCount takes pmu (or hits Redis in cluster mode), which is why
+	// metrics.Handler reads gauges outside its own lock.
+	metrics.SetGauge("sockets_online", func() float64 { return float64(h.OnlineCount()) })
+
 	// JWT handshake middleware — runs before 'connection' (server.js io.use).
 	io.Of("/", nil).Use(func(s *socket.Socket, next func(*socket.ExtendedError)) {
 		auth, _ := s.Handshake().Auth.(map[string]any)
@@ -165,6 +172,7 @@ func (h *Hub) onConnection(s *socket.Socket) {
 
 	h.trackSocket(s)
 	s.Join(socket.Room("user:" + d.uid))
+	metrics.Inc("socket_connect")
 	s.Emit("ready", map[string]any{"uid": d.uid})
 
 	h.registerChatHandlers(s)
@@ -185,6 +193,7 @@ func (h *Hub) onConnection(s *socket.Socket) {
 	})
 	s.On("disconnect", func(_ ...any) {
 		h.untrackSocket(s)
+		metrics.Inc("socket_disconnect")
 	})
 }
 

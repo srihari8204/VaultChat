@@ -1305,17 +1305,6 @@ export interface Reactor          { emoji: string; userId: string; name: string 
 // (durable offline), flowing through the normal 'send' path; clients aggregate
 // counts themselves — one reaction per user per message.
 
-export async function listReactors(chatId: string, msgId: number): Promise<Reactor[]> {
-  return api(`/chats/${encodeURIComponent(chatId)}/messages/${msgId}/reactions`);
-}
-
-export async function getReactionCounts(
-  chatId: string, messageIds: number[],
-): Promise<Record<string, ReactionSummary[]>> {
-  if (messageIds.length === 0) return {};
-  const ids = messageIds.join(',');
-  return api(`/chats/${encodeURIComponent(chatId)}/reactions?messageIds=${ids}`);
-}
 
 // ─── Forward (Day 8) ────────────────────────────────────────────────
 // Server-side it's still a normal POST /messages — we just preserve the

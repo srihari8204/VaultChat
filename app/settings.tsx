@@ -337,6 +337,17 @@ export default function SettingsScreen() {
       </View>
 
       <View style={S.section}>
+        <Text style={S.label}>PRIVACY & SECURITY</Text>
+        <View style={S.linkCard}>
+          <LinkRow icon="shield-checkmark-outline" title="Vault features" sub="Screenshot alerts, disappearing messages, incognito keyboard" onPress={() => router.push('/vault-features' as any)} />
+          <LinkRow icon="speedometer-outline" title="Privacy dashboard" sub="Your privacy score and what is protecting you" onPress={() => router.push('/privacy-dashboard' as any)} />
+          <LinkRow icon="checkmark-done-outline" title="Read receipts" sub="Control who sees when you have read a message" onPress={() => router.push('/receipt-control' as any)} />
+          <LinkRow icon="time-outline" title="Last seen & online" sub="Who can see when you were last active" onPress={() => router.push('/last-seen-privacy' as any)} />
+          <LinkRow icon="flame-outline" title="Memory Shield" sub="Panic wipe, auto-destruct, failed-login limit" onPress={() => router.push('/memoryshield' as any)} last />
+        </View>
+      </View>
+
+      <View style={S.section}>
         <Text style={S.label}>DATA & ACCOUNT</Text>
         <View style={S.linkCard}>
           <LinkRow icon="notifications-outline" title="Notifications & Sounds" sub="Message tones, ringtone, vibration" onPress={() => router.push('/notification-sounds' as any)} />
@@ -348,6 +359,9 @@ export default function SettingsScreen() {
           <LinkRow icon="alarm-outline" title="Message reminders" sub="Notifications you've scheduled" onPress={() => router.push('/message-reminder' as any)} />
           <LinkRow icon="eye-off-outline" title="Hidden chats" sub="PIN-gated chats, hidden from the list" onPress={() => router.push('/hidden-chats' as any)} />
           <LinkRow icon="desktop-outline" title="Active devices" sub="Where you're signed in" onPress={() => router.push('/login-history' as any)} />
+          <LinkRow icon="mail-unread-outline" title="Message requests" sub="Messages from people you have not accepted" onPress={() => router.push('/msgrequests' as any)} />
+          <LinkRow icon="pie-chart-outline" title="Storage & data" sub="What is using space on this device" onPress={() => router.push('/storage-manager' as any)} />
+          <LinkRow icon="cloud-offline-outline" title="Offline mode" sub="What works without a connection, and the pending queue" onPress={() => router.push('/offline-mode' as any)} />
           <LinkRow icon="glasses-outline" title="Ghost Mode contacts" sub="Hidden online, typing, read, last-seen" onPress={() => router.push('/ghost-mode' as any)} />
           <LinkRow icon="download-outline" title="Export my data" sub="Download a JSON of your account" onPress={onExport} busy={exporting} last />
         </View>

@@ -359,7 +359,6 @@ function RootLayout() {
         <Stack.Screen name="story-viewer" />
         <Stack.Screen name="meeting-scheduler" />
         <Stack.Screen name="decentralized-id" />
-        <Stack.Screen name="mini-apps" />
         <Stack.Screen name="finance" options={{ headerShown: false }} />
         <Stack.Screen name="email-bridge" />
         <Stack.Screen name="creator-channels" />
@@ -403,7 +402,6 @@ function RootLayout() {
 
         {/* Utility */}
         <Stack.Screen name="search" />
-        <Stack.Screen name="starred" />
         <Stack.Screen name="scheduled" />
         <Stack.Screen name="perf-debug" />
         <Stack.Screen name="scanner" />

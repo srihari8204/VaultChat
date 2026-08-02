@@ -1,0 +1,17 @@
+# Grafana provisioning — dashboard provider. Loads every JSON in ./dashboards
+# on boot, so the SLI board exists on a fresh stack with no manual import.
+apiVersion: 1
+providers:
+  - name: VaultChat
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    # Picked up without a restart, so editing the JSON is a fast loop.
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      # NOT provisioning/dashboards — that directory holds this provider file.
+      # Compose mounts ./monitoring/dashboards here.
+      path: /etc/grafana/dashboards
+      foldersFromFilesStructure: false
