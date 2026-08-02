@@ -59,6 +59,7 @@ func main() {
 	routes.RegisterAuth(mux)
 	routes.RegisterAI(mux)
 	routes.RegisterCalls(mux)
+	routes.RegisterCallSessions(mux)
 	routes.RegisterUploads(mux)
 	routes.RegisterChannels(mux)
 	routes.RegisterVaultbeam(mux)
