@@ -89,7 +89,7 @@ class VaultViewModule(reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun setSecure(enabled: Boolean, promise: Promise) {
-        val activity: Activity? = currentActivity
+        val activity: Activity? = getCurrentActivity()
         if (activity == null) { promise.resolve(false); return }
         activity.runOnUiThread {
             try {
@@ -126,7 +126,7 @@ class VaultViewModule(reactContext: ReactApplicationContext) :
         // API 34+: post-hoc screenshot notification, for the allow_notify path.
         if (Build.VERSION.SDK_INT >= 34) {
             try {
-                val activity = currentActivity ?: return
+                val activity = getCurrentActivity() ?: return
                 val cb = Activity.ScreenCaptureCallback {
                     emit("vaultview_screenshot", Arguments.createMap())
                 }
@@ -145,7 +145,7 @@ class VaultViewModule(reactContext: ReactApplicationContext) :
 
         if (Build.VERSION.SDK_INT >= 34) {
             (screenCaptureCallback as? Activity.ScreenCaptureCallback)?.let { cb ->
-                try { currentActivity?.unregisterScreenCaptureCallback(cb) } catch (_: Throwable) {}
+                try { getCurrentActivity()?.unregisterScreenCaptureCallback(cb) } catch (_: Throwable) {}
             }
         }
         screenCaptureCallback = null
