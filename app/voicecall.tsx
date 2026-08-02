@@ -21,7 +21,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import InCallManager from 'react-native-incall-manager';
 import { setActiveCall, clearActiveCall, type ActiveCall } from '../lib/callState';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StatusBar, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CALL } from '../constants/callTheme';
 import {
@@ -36,7 +36,8 @@ import { getSocket } from '../lib/socket';
 import { addCallLog } from '../lib/callLog';
 import { startCallForeground, stopCallForeground, dismissIncomingNotification, initiateCall, cancelCall } from '../lib/CallService';
 import { newCallCipher, openCallOffer, plainCipher, type CallCipher } from '../lib/callCrypto';
-import { Ionicons } from '@expo/vector-icons';
+import { CallTimer, elapsedSeconds } from '../components/call/CallTimer';
+import { CallControlButton } from '../components/call/CallControlButton';
 
 type CallState = 'connecting' | 'ringing' | 'connected' | 'ended';
 
@@ -58,7 +59,6 @@ export default function VoiceCallScreen() {
   const [state,   setState]   = useState<CallState>('connecting');
   const [muted,   setMuted]   = useState(false);
   const [speaker, setSpeaker] = useState(false);
-  const [seconds, setSeconds] = useState(0);
   const [error,   setError]   = useState<string | null>(null);
 
   const pcRef           = useRef<RTCPeerConnection | null>(null);
@@ -66,22 +66,22 @@ export default function VoiceCallScreen() {
   const cipherRef       = useRef<CallCipher>(plainCipher);
   const localStreamRef  = useRef<any>(null);
   const meIdRef         = useRef<string>('');
-  const timerRef        = useRef<any>(null);
   const ringTimerRef    = useRef<any>(null);
   const offsRef         = useRef<Array<() => void>>([]);
-  const secondsRef      = useRef(0);
+  // Epoch ms the call connected. The elapsed time is DERIVED from this (see
+  // components/call/CallTimer) instead of being counted in screen state, so the
+  // 1 Hz tick no longer re-renders this whole screen — and so the duration stays
+  // accurate when the JS thread is throttled in the background.
+  const connectedAtRef  = useRef(0);
   const connectedRef    = useRef(false);
   const loggedRef       = useRef(false);
 
-  // Keep refs in sync so endCall (a stable callback) can log accurate history.
-  useEffect(() => { secondsRef.current = seconds; }, [seconds]);
   useEffect(() => { if (state === 'connected') connectedRef.current = true; }, [state]);
 
   // ── teardown ──────────────────────────────────────────────
   const teardown = useCallback((notify = true) => {
     offsRef.current.forEach(fn => { try { fn(); } catch {} });
     offsRef.current = [];
-    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     if (ringTimerRef.current) { clearInterval(ringTimerRef.current); ringTimerRef.current = null; }
     try { InCallManager.stop(); } catch {}
     stopCallForeground();   // release the mic foreground service + wake lock
@@ -101,7 +101,8 @@ export default function VoiceCallScreen() {
       loggedRef.current = true;
       const incoming = isIncoming === 'true' || isIncoming === '1';
       const dir: 'incoming' | 'outgoing' | 'missed' = incoming ? (connectedRef.current ? 'incoming' : 'missed') : 'outgoing';
-      addCallLog({ chatId, peerUid, peerName: peerName || 'VaultChat user', kind: 'audio', direction: dir, at: Date.now() - secondsRef.current * 1000, durationSec: secondsRef.current }).catch(() => {});
+      const durationSec = elapsedSeconds(connectedAtRef.current);
+      addCallLog({ chatId, peerUid, peerName: peerName || 'VaultChat user', kind: 'audio', direction: dir, at: Date.now() - durationSec * 1000, durationSec }).catch(() => {});
       // Outgoing call we hung up before it was answered → tell the callee's device
       // to stop ringing and show a "missed call".
       if (!incoming && !connectedRef.current && peerUid) {
@@ -160,10 +161,10 @@ export default function VoiceCallScreen() {
   }, [state, chatId, peerUid, peerName]);
 
   // ── timer ──────────────────────────────────────────────────
+  // Stamp the connect instant once; <CallTimer> derives + renders the elapsed
+  // time on its own, so nothing here re-renders the screen every second.
   const startTimer = useCallback(() => {
-    if (timerRef.current) return;
-    setSeconds(0);
-    timerRef.current = setInterval(() => setSeconds(s => s + 1), 1000);
+    if (!connectedAtRef.current) connectedAtRef.current = Date.now();
   }, []);
 
   // ── setup pipeline ─────────────────────────────────────────
@@ -327,6 +328,10 @@ export default function VoiceCallScreen() {
     setMuted(next);
   }, [muted]);
 
+  // Stable identity so the memoized End button doesn't re-render on every pass
+  // (and so the press event is never mistaken for the `notify` argument).
+  const hangUp = useCallback(() => endCall(true), [endCall]);
+
   const toggleSpeaker = useCallback(() => {
     const next = !speaker;
     setSpeaker(next);
@@ -339,7 +344,6 @@ export default function VoiceCallScreen() {
   // ── render ────────────────────────────────────────────────
   const statusText = state === 'connecting' ? 'Connecting…'
     : state === 'ringing'   ? 'Ringing…'
-    : state === 'connected' ? formatDuration(seconds)
     : 'Call ended';
   const initial = (peerName?.trim()[0] ?? '?').toUpperCase();
 
@@ -352,37 +356,19 @@ export default function VoiceCallScreen() {
           <View style={S.avatar}><Text style={S.avatarTxt}>{initial}</Text></View>
         </View>
         <Text style={S.name}>{peerName || 'VaultChat user'}</Text>
-        <Text style={S.status}>{statusText}</Text>
+        {state === 'connected'
+          ? <CallTimer style={S.status} startedAt={connectedAtRef.current} />
+          : <Text style={S.status}>{statusText}</Text>}
         {error && <Text style={S.errorTxt}>{error}</Text>}
       </View>
 
       <View style={[S.controls, { paddingBottom: insets.bottom + 24 }]}>
-        <ControlBtn icon={muted ? 'mic-off' : 'mic'} label={muted ? 'Unmute' : 'Mute'} active={muted} onPress={toggleMute} />
-        <ControlBtn icon={speaker ? 'volume-high' : 'volume-low'} label={speaker ? 'Speaker' : 'Earpiece'} active={speaker} onPress={toggleSpeaker} />
-        <ControlBtn icon="call" label="End" danger onPress={() => endCall(true)} />
+        <CallControlButton icon={muted ? 'mic-off' : 'mic'} label={muted ? 'Unmute' : 'Mute'} active={muted} onPress={toggleMute} />
+        <CallControlButton icon={speaker ? 'volume-high' : 'volume-low'} label={speaker ? 'Speaker' : 'Earpiece'} active={speaker} onPress={toggleSpeaker} />
+        <CallControlButton icon="call" label="End" danger onPress={hangUp} />
       </View>
     </View>
   );
-}
-
-function ControlBtn({ icon, label, onPress, active, danger }:
-  { icon: string; label: string; onPress: () => void; active?: boolean; danger?: boolean }) {
-  return (
-    <TouchableOpacity
-      style={[S.btn, active && S.btnActive, danger && S.btnDanger]}
-      onPress={onPress}
-      activeOpacity={0.85}
-    >
-      <Ionicons name={icon as any} size={24} color="#fff" style={S.btnIcon} />
-      <Text style={S.btnLabel}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
-
-function formatDuration(s: number): string {
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
 }
 
 function makeStyles() { return StyleSheet.create({
@@ -395,10 +381,7 @@ function makeStyles() { return StyleSheet.create({
   status:     { color: CALL.textDim, fontSize: 16 },
   errorTxt:   { color: CALL.danger, fontSize: 13, marginTop: 8 },
 
+  // Button metrics now live with the button (components/call/CallControlButton,
+  // variant 'voice') — same values, one owner.
   controls:   { flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 24, paddingTop: 12 },
-  btn:        { width: 78, alignItems: 'center', justifyContent: 'center', paddingVertical: 14, borderRadius: 18, backgroundColor: CALL.ctrl, borderWidth: 1, borderColor: CALL.ctrlBorder },
-  btnActive:  { backgroundColor: CALL.active, borderColor: CALL.active },
-  btnDanger:  { backgroundColor: CALL.danger, borderColor: CALL.danger },
-  btnIcon:    { fontSize: 24 },
-  btnLabel:   { color: CALL.text, fontSize: 11, marginTop: 4 },
 }); }

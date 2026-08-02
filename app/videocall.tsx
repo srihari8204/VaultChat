@@ -26,6 +26,8 @@ import { getSocket } from '../lib/socket';
 import { startCallForeground, stopCallForeground, dismissIncomingNotification, initiateCall, cancelCall } from '../lib/CallService';
 import { newCallCipher, openCallOffer, plainCipher, type CallCipher } from '../lib/callCrypto';
 import { addCallLog } from '../lib/callLog';
+import { CallTimer, elapsedSeconds } from '../components/call/CallTimer';
+import { CallControlButton } from '../components/call/CallControlButton';
 import { Ionicons } from '@expo/vector-icons';
 
 type CallState = 'connecting' | 'ringing' | 'connected' | 'ended';
@@ -157,7 +159,6 @@ export default function VideoCallScreen() {
   const [muted,    setMuted]    = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
   const [speaker,  setSpeaker]  = useState(true);    // speaker on by default for video
-  const [seconds,  setSeconds]  = useState(0);
   const [error,    setError]    = useState<string | null>(null);
   const [localUrl,  setLocalUrl]  = useState<string | null>(null);
   const [remoteUrl, setRemoteUrl] = useState<string | null>(null);
@@ -172,20 +173,20 @@ export default function VideoCallScreen() {
   const screenStreamRef = useRef<any>(null);           // active getDisplayMedia stream
   const cameraTrackRef  = useRef<any>(null);           // camera track held for swap-back
   const meIdRef         = useRef<string>('');
-  const timerRef        = useRef<any>(null);
   const ringTimerRef    = useRef<any>(null);
   const offsRef         = useRef<Array<() => void>>([]);
-  const secondsRef      = useRef(0);
+  // Connect instant; elapsed time is DERIVED from it by <CallTimer> rather than
+  // counted in screen state — see components/call/CallTimer for why that matters
+  // most on this screen (the 1 Hz tick used to re-render the <RTCView> subtree).
+  const connectedAtRef  = useRef(0);
   const connectedRef    = useRef(false);
   const loggedRef       = useRef(false);
 
-  useEffect(() => { secondsRef.current = seconds; }, [seconds]);
   useEffect(() => { if (state === 'connected') connectedRef.current = true; }, [state]);
 
   const teardown = useCallback((notify = true) => {
     offsRef.current.forEach(fn => { try { fn(); } catch {} });
     offsRef.current = [];
-    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     if (ringTimerRef.current) { clearInterval(ringTimerRef.current); ringTimerRef.current = null; }
     try { InCallManager.stop(); } catch {}
     stopCallForeground();   // release the mic/camera foreground service + wake lock
@@ -203,7 +204,8 @@ export default function VideoCallScreen() {
       loggedRef.current = true;
       const incoming = isIncoming === 'true' || isIncoming === '1';
       const dir: 'incoming' | 'outgoing' | 'missed' = incoming ? (connectedRef.current ? 'incoming' : 'missed') : 'outgoing';
-      addCallLog({ chatId, peerUid, peerName: peerName || 'VaultChat user', kind: 'video', direction: dir, at: Date.now() - secondsRef.current * 1000, durationSec: secondsRef.current }).catch(() => {});
+      const durationSec = elapsedSeconds(connectedAtRef.current);
+      addCallLog({ chatId, peerUid, peerName: peerName || 'VaultChat user', kind: 'video', direction: dir, at: Date.now() - durationSec * 1000, durationSec }).catch(() => {});
       if (!incoming && !connectedRef.current && peerUid) {
         cancelCall(peerUid, String(chatId || peerUid)).catch(() => {});   // stop the callee's ring → missed call
       }
@@ -256,10 +258,9 @@ export default function VideoCallScreen() {
     }
   }, [state, chatId, peerUid, peerName]);
 
+  // Stamp the connect instant once; <CallTimer> owns the tick.
   const startTimer = useCallback(() => {
-    if (timerRef.current) return;
-    setSeconds(0);
-    timerRef.current = setInterval(() => setSeconds(s => s + 1), 1000);
+    if (!connectedAtRef.current) connectedAtRef.current = Date.now();
   }, []);
 
   useEffect(() => {
@@ -486,8 +487,12 @@ export default function VideoCallScreen() {
 
   const statusText = state === 'connecting' ? 'Connecting…'
     : state === 'ringing'   ? 'Ringing…'
-    : state === 'connected' ? formatDuration(seconds)
     : 'Call ended';
+
+  // Stable identity so the memoized End button doesn't re-render every pass (and
+  // so the press event is never mistaken for endCall's `notify` argument).
+  const hangUp = useCallback(() => endCall(true), [endCall]);
+  const toggleFilters = useCallback(() => setShowFilters(v => !v), []);
 
   const f = FILTERS.find(x => x.id === filter) ?? FILTERS[0];
   // Derive a tint+opacity overlay from the filter's ColorMatrix. When
@@ -520,7 +525,9 @@ export default function VideoCallScreen() {
       {/* Top bar: name + status (offset below the notch / status bar) */}
       <View style={[S.topBar, { top: insets.top + 8 }]} pointerEvents="none">
         <Text style={S.name} numberOfLines={1}>{peerName || 'VaultChat user'}</Text>
-        <Text style={S.status}>{statusText}</Text>
+        {state === 'connected'
+          ? <CallTimer style={S.status} startedAt={connectedAtRef.current} />
+          : <Text style={S.status}>{statusText}</Text>}
         {error && <Text style={S.errorTxt}>{error}</Text>}
       </View>
 
@@ -575,45 +582,26 @@ export default function VideoCallScreen() {
       {/* Controls — wraps to a second row on narrow screens instead of
           overflowing, and clears the gesture bar via the bottom inset. */}
       <View style={[S.controls, { bottom: insets.bottom + 12 }]}>
-        <ControlBtn icon={muted ? 'mic-off' : 'mic'} label={muted ? 'Unmute' : 'Mute'} active={muted} onPress={toggleMute} />
-        <ControlBtn icon={cameraOff ? 'videocam-off' : 'videocam'} label={cameraOff ? 'Camera' : 'Off'} active={cameraOff} onPress={toggleCamera} />
+        <CallControlButton variant="video" icon={muted ? 'mic-off' : 'mic'} label={muted ? 'Unmute' : 'Mute'} active={muted} onPress={toggleMute} />
+        <CallControlButton variant="video" icon={cameraOff ? 'videocam-off' : 'videocam'} label={cameraOff ? 'Camera' : 'Off'} active={cameraOff} onPress={toggleCamera} />
         {sharing
-          ? <ControlBtn icon="stop-circle" label="Stop" active onPress={toggleScreenShare} />
-          : <ControlBtn icon="camera-reverse" label="Flip" onPress={flipCamera} />}
+          ? <CallControlButton variant="video" icon="stop-circle" label="Stop" active onPress={toggleScreenShare} />
+          : <CallControlButton variant="video" icon="camera-reverse" label="Flip" onPress={flipCamera} />}
         {Platform.OS === 'android' && !sharing && (
-          <ControlBtn icon="phone-portrait" label="Share" onPress={toggleScreenShare} />
+          <CallControlButton variant="video" icon="phone-portrait" label="Share" onPress={toggleScreenShare} />
         )}
-        <ControlBtn
+        <CallControlButton
+          variant="video"
           icon="sparkles"
           label={filter === 'none' ? 'Beauty' : f.label}
           active={showFilters || filter !== 'none'}
-          onPress={() => setShowFilters(v => !v)}
+          onPress={toggleFilters}
         />
-        <ControlBtn icon={speaker ? 'volume-high' : 'volume-low'} label={speaker ? 'Speaker' : 'Earpiece'} active={speaker} onPress={toggleSpeaker} />
-        <ControlBtn icon="call" label="End" danger onPress={() => endCall(true)} />
+        <CallControlButton variant="video" icon={speaker ? 'volume-high' : 'volume-low'} label={speaker ? 'Speaker' : 'Earpiece'} active={speaker} onPress={toggleSpeaker} />
+        <CallControlButton variant="video" icon="call" label="End" danger onPress={hangUp} />
       </View>
     </View>
   );
-}
-
-function ControlBtn({ icon, label, onPress, active, danger }:
-  { icon: string; label: string; onPress: () => void; active?: boolean; danger?: boolean }) {
-  return (
-    <TouchableOpacity
-      style={[S.btn, active && S.btnActive, danger && S.btnDanger]}
-      onPress={onPress}
-      activeOpacity={0.85}
-    >
-      <Ionicons name={icon as any} size={22} color="#fff" style={S.btnIcon} />
-      <Text style={S.btnLabel} numberOfLines={1}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
-
-function formatDuration(s: number): string {
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
 }
 
 function makeStyles() { return StyleSheet.create({
@@ -644,9 +632,6 @@ function makeStyles() { return StyleSheet.create({
   // flexWrap → the 7 controls fold onto a second centered row on narrow phones
   // instead of overflowing off-screen.
   controls:   { position: 'absolute', left: 12, right: 12, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', columnGap: 6, rowGap: 8, backgroundColor: CALL.barBg, paddingVertical: 12, paddingHorizontal: 6, borderRadius: 24, borderWidth: 1, borderColor: CALL.ctrlBorder },
-  btn:        { width: 62, alignItems: 'center', justifyContent: 'center', paddingVertical: 8, borderRadius: 14, backgroundColor: CALL.ctrl },
-  btnActive:  { backgroundColor: CALL.active },
-  btnDanger:  { backgroundColor: CALL.danger },
-  btnIcon:    { fontSize: 22 },
-  btnLabel:   { color: CALL.text, fontSize: 10, marginTop: 2 },
+  // Button metrics now live with the button (components/call/CallControlButton,
+  // variant 'video') — same values, one owner.
 }); }
