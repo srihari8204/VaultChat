@@ -22,7 +22,12 @@ import {
   circleMembers, circleInviteCode, renameCircle, leaveCircle, deleteCircle,
   removeCircleMember, setGuardian,
 } from '../lib/family/circle';
-import { startPresence, stopPresence, setSharing, subscribeCircle, type PresenceEvent } from '../lib/family/presence';
+import {
+  startPresence, stopPresence, setSharing, subscribeCircle,
+  canShareInBackground, type PresenceEvent,
+} from '../lib/family/presence';
+import { requestBackgroundPermission } from '../lib/family/background';
+import { loadAlerts, recordAlert, useUnreadCount } from '../lib/family/alerts';
 import { type CircleMember, type MemberPresence, STALE_MS } from '../lib/family/types';
 import { sendMessage, getMessages, decryptFromChat } from '../lib/chatService';
 import { getCurrentUserAsync } from './(constants)/authService';
@@ -76,6 +81,10 @@ export default function FamilySpaceScreen() {
   const [busy, setBusy] = useState(false);
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [bump, setBump] = useState(0); // re-pull highlights after we send something
+  const bgAsked = useRef(false);       // only nag once per mount about always-on location
+  const unread = useUnreadCount(active?.id ?? null);
+
+  useEffect(() => { loadAlerts(); }, []);
 
   // identity + circle list
   useEffect(() => { (async () => {
@@ -158,6 +167,31 @@ export default function FamilySpaceScreen() {
     setShare(v);
     await setSettings({ sharing: v });
     try { await setSharing(v); } catch {}
+    if (v) await offerBackground();
+  };
+
+  /**
+   * Sharing only used to survive while this screen was in front. Ask once for
+   * always-on so it keeps working in a pocket; declining is a valid answer and
+   * simply leaves the foreground-only behaviour in place.
+   */
+  const offerBackground = async () => {
+    if (bgAsked.current) return;
+    bgAsked.current = true;
+    try {
+      if (await canShareInBackground()) return;
+      Alert.alert(
+        'Keep sharing in the background?',
+        'Without always-on location, your family only sees you while this screen is open. You can change this any time in system settings.',
+        [
+          { text: 'Not now', style: 'cancel' },
+          { text: 'Allow', onPress: async () => {
+            const ok = await requestBackgroundPermission();
+            if (ok && active && me) { try { await setSharing(false); await setSharing(true); } catch {} }
+          } },
+        ],
+      );
+    } catch {}
   };
 
   const markers: FamilyMarker[] = useMemo(() => {
@@ -204,6 +238,10 @@ export default function FamilySpaceScreen() {
       let where = '';
       try { const c = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }); where = ` (${c.coords.latitude.toFixed(5)}, ${c.coords.longitude.toFixed(5)})`; } catch {}
       await sendMessage(active.id, `🆘 ${me.name} triggered an SOS — please respond${where}`, 'system');
+      await recordAlert({
+        circleId: active.id, kind: 'sos', actorId: me.id, actorName: me.name,
+        text: `${me.name} triggered an SOS`,
+      });
       setBump((b) => b + 1);
       Alert.alert('SOS sent', 'Your circle has been alerted and your live location is on.', [
         { text: 'Also alert trusted contacts', onPress: () => router.push('/emergency-sos' as any) },
@@ -226,7 +264,12 @@ export default function FamilySpaceScreen() {
     if (!active || !me) return;
     setCheckin(false);
     try {
-      await sendMessage(active.id, `${c.emoji} ${me.name}: ${c.label}${note.trim() ? ` — ${note.trim()}` : ''}`);
+      const suffix = note.trim() ? ` — ${note.trim()}` : '';
+      await sendMessage(active.id, `${c.emoji} ${me.name}: ${c.label}${suffix}`);
+      await recordAlert({
+        circleId: active.id, kind: c.label === 'Need Help' ? 'sos' : 'checkin',
+        actorId: me.id, actorName: me.name, text: `${me.name}: ${c.label}${suffix}`,
+      });
       setNote('');
       setBump((b) => b + 1);
     } catch (e: any) { Alert.alert('Check-in', e?.message ?? 'Could not send.'); }
@@ -308,7 +351,15 @@ export default function FamilySpaceScreen() {
     const isMe = m.id === me?.id;
     const d = p && mine && !isMe ? dist(haversine(mine.pos, p.pos)) : null;
     return (
-      <Pressable key={m.id} onLongPress={() => memberActions(m)} style={[st.row, { borderColor: colors.border }, i === 0 && { borderTopWidth: 0 }]}>
+      <Pressable
+        key={m.id}
+        onLongPress={() => memberActions(m)}
+        onPress={() => active && router.push({
+          pathname: '/family-member' as any,
+          params: { circleId: active.id, circleName: active.name, userId: m.id, name: isMe ? 'You' : m.name, role: m.role },
+        })}
+        style={[st.row, { borderColor: colors.border }, i === 0 && { borderTopWidth: 0 }]}
+      >
         <View style={[st.dot, { backgroundColor: colorFor(m.id), opacity: p ? 1 : 0.5 }]}>
           <Text style={st.dotTxt}>{(m.name || '?').trim()[0]?.toUpperCase()}</Text>
         </View>
@@ -435,6 +486,19 @@ export default function FamilySpaceScreen() {
               style={[st.tile, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <Ionicons name="location" size={21} color={colors.primary} /><Text style={[st.tileTxt, { color: colors.text }]}>Places</Text>
             </TouchableOpacity>
+            <TouchableOpacity onPress={() => active && router.push({ pathname: '/family-alerts' as any, params: { circleId: active.id, circleName: active.name } })}
+              style={[st.tile, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Ionicons name="notifications" size={21} color={colors.primary} /><Text style={[st.tileTxt, { color: colors.text }]}>Alerts</Text>
+              {unread > 0 && (
+                <View style={[st.badge, { backgroundColor: colors.danger, borderColor: colors.card }]}>
+                  <Text style={st.badgeTxt}>{unread > 99 ? '99+' : unread}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => active && router.push({ pathname: '/family-history' as any, params: { circleId: active.id, circleName: active.name } })}
+              style={[st.tile, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Ionicons name="time" size={21} color={colors.primary} /><Text style={[st.tileTxt, { color: colors.text }]}>History</Text>
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => router.push('/emergency-sos' as any)} style={[st.tile, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <Ionicons name="medkit" size={21} color={colors.danger} /><Text style={[st.tileTxt, { color: colors.text }]}>Emergency</Text>
             </TouchableOpacity>
@@ -464,7 +528,7 @@ export default function FamilySpaceScreen() {
           {/* today's highlights */}
           {highlights.length > 0 && (
             <>
-              <View style={st.secHead}><Text style={[st.secTitle, { color: colors.text }]}>Today's Highlights</Text></View>
+              <View style={st.secHead}><Text style={[st.secTitle, { color: colors.text }]}>Today&apos;s Highlights</Text></View>
               <View style={[st.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 {highlights.map((h, i) => (
                   <View key={i} style={[st.row, { borderColor: colors.border }, i === 0 && { borderTopWidth: 0 }]}>
@@ -536,7 +600,7 @@ export default function FamilySpaceScreen() {
               <Ionicons name="medkit" size={19} color={colors.danger} /><Text style={[st.mTxt, { color: colors.text }]}>Emergency SOS (trusted contacts)</Text>
             </TouchableOpacity>
             <Text style={{ color: colors.textFaint, fontSize: 12, paddingVertical: 8 }}>
-              Long-press a member in the list to change their role or remove them.
+              Tap a member for their details and history. Long-press to change their role or remove them.
             </Text>
             <TouchableOpacity onPress={doLeave} style={[st.mRow, { borderColor: colors.border }]}>
               <Ionicons name="exit-outline" size={19} color={colors.danger} /><Text style={[st.mTxt, { color: colors.danger }]}>Leave circle</Text>
@@ -567,9 +631,12 @@ const st = StyleSheet.create({
   mapCard: { height: 200, borderRadius: 18, borderWidth: 1, overflow: 'hidden', marginBottom: 10 },
   mapBadge: { position: 'absolute', top: 10, right: 10, flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, borderWidth: 1 },
   collapse: { position: 'absolute', top: 12, right: 12, width: 38, height: 38, borderRadius: 19, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  tiles: { flexDirection: 'row', gap: 10, marginBottom: 10 },
-  tile: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 5, height: 66, borderWidth: 1, borderRadius: 16 },
+  // 5 tiles wrap onto two rows at ~3 per row (30% basis + the 10px gaps).
+  tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 10 },
+  tile: { flexBasis: '30%', flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 5, height: 66, borderWidth: 1, borderRadius: 16 },
   tileTxt: { fontSize: 12.5, fontWeight: '700' },
+  badge: { position: 'absolute', top: 6, right: 10, minWidth: 18, height: 18, borderRadius: 9, borderWidth: 1.5, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' },
+  badgeTxt: { color: '#fff', fontSize: 10, fontWeight: '800' },
   sosBig: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderWidth: 1.5, borderRadius: 18, overflow: 'hidden', marginBottom: 6 },
   sosIcon: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
   shareRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8 },
