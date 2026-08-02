@@ -87,6 +87,13 @@ func pushRegistry(_ r: PKPushRegistry, didReceiveIncomingPushWith payload: PKPus
 ```
 iOS also needs a **VoIP push certificate** (`apns-push-type: voip`) uploaded to your APNs config. iOS is secondary for this app (Android-OEM user base).
 
+> **Validating the new call engine?** This matrix covers the Android native
+> layer (foreground service, cold-start FCM, full-screen intent), which
+> `CALL_ENGINE_V2` does not change — it calls the same `lib/CallService`. For the
+> engine itself, and for the cross-build cases a staged rollout depends on, see
+> **[docs/CALL_DEVICE_VALIDATION.md](docs/CALL_DEVICE_VALIDATION.md)**, which
+> folds this matrix in as its Stage 5.
+
 ## Test matrix (MUST test on device — cold start can't be validated in a simulator)
 | Device | Background audio | Ring when KILLED | Lock-screen ring (name+DP) | Notes |
 |---|---|---|---|---|
