@@ -1,31 +1,49 @@
-// lib/cloudBackup.ts — WhatsApp-style encrypted backup & restore.
+// lib/cloudBackup.ts — encrypted chat backup & restore.
 //
-// Bundles EVERYTHING needed to fully restore a chat on a new device/reinstall:
+// Bundles what is needed to restore readable chat history on a new device or
+// after a reinstall:
 //   • AsyncStorage prefs (themes, drafts, sound prefs, …)
 //   • the local SQLite message DB (envelopes + chat list)
 //   • the decrypted plaintext cache  ← so restored history is readable
-//   • the E2EE identity + per-peer session ratchets ← so NO re-key, and future
-//     messages keep decrypting on the new device
 //
-// The bundle is encrypted on-device with the user's passphrase (AES-256-GCM via
-// lib/vaultCrypto) and stored as an OPAQUE blob — locally (file) or in the cloud
-// (the server can never read it: zero-knowledge, like WhatsApp's E2E backups).
+// The bundle is AES-256-GCM encrypted on-device (lib/vaultCrypto) and stored as
+// an opaque blob — as a local file, in the user's Google Drive, or on the server.
+//
+// ── What this is NOT ───────────────────────────────────────────────────────
+// This is NOT a zero-knowledge backup, and earlier comments here wrongly said it
+// was. On the default path the encryption key is ACCOUNT-MANAGED: the server
+// generates it, stores it (user_backup_keys.dek), and hands it back to any
+// authenticated session via GET /user/backup/key. Anyone who can authenticate as
+// the user — or who reads that table — can decrypt any of these blobs. Treat the
+// backup's confidentiality as equal to the account's, not better (audit F-2).
+//
+// ── Why E2EE identity keys are no longer included ──────────────────────────
+// The bundle used to carry the long-term E2EE identity and every per-peer
+// session ratchet, so a restore resumed sessions with no re-key. Combined with a
+// server-recoverable bundle key, that meant the server could reconstruct the
+// identity keys protecting every past and future message — retroactively
+// defeating end-to-end encryption for the whole account.
+//
+// Identity material is therefore excluded from both export and import. The cost
+// is real and accepted: restoring on a new device re-keys with peers (the
+// existing X3DH + 'e2ee_rekey' recovery path handles this automatically). What
+// the user actually wants back — readable history — comes from the plaintext
+// cache, which is still included.
 
-import { Platform } from 'react-native';
 import * as RNFS from '@dr.pogodin/react-native-fs';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { vaultEncrypt, vaultDecrypt } from './vaultCrypto';
 import { exportAll, importAll } from './localDb';
 import { api } from './api';
-import {
-  exportE2EEKeys, importE2EEKeys, e2eeGetCached, e2eeCachePlaintext,
-} from '../services/crypto/e2eeSession.rn';
+import { BACKUP_ROOT, ensureDir } from './storageRoots';
+import { e2eeGetCached, e2eeCachePlaintext } from '../services/crypto/e2eeSession.rn';
 
 export interface BackupMeta { exists: boolean; sizeBytes?: number; messageCount?: number; updatedAt?: string }
 
-// Account-managed backup key (WhatsApp default): fetched once from the server
-// (which generates + stores it), cached on-device. No user passphrase needed.
+// Account-managed backup key: fetched once from the server (which generates and
+// stores it), cached on-device. No user passphrase needed — and, as set out
+// above, no secrecy from the server either.
 const BACKUP_KEY_STORE = 'vc_backup_dek';
 export async function getBackupKey(): Promise<string> {
   let k = await SecureStore.getItemAsync(BACKUP_KEY_STORE).catch(() => null);
@@ -36,24 +54,18 @@ export async function getBackupKey(): Promise<string> {
   return r.key;
 }
 
-function safeParse(s: any): any { try { return typeof s === 'string' ? JSON.parse(s) : s; } catch { return null; } }
-
-function peerIdsFromChats(chats: any[]): string[] {
-  const ids = new Set<string>();
-  for (const c of chats) {
-    const d = safeParse(c?.data);
-    if (d?.peerUserId) ids.add(String(d.peerUserId));
-  }
-  return [...ids];
-}
-
 /** Gather everything + encrypt with a secret. Returns the opaque blob. */
 async function buildEncryptedBackup(secret: string): Promise<{ blob: string; messageCount: number; sizeBytes: number }> {
-  // 1. AsyncStorage prefs
+  // 1. AsyncStorage prefs, minus keys that describe THIS INSTALL rather than the
+  //    user. Restoring those onto another device makes it lie about its own
+  //    state — e.g. carrying the media-migration flag across would convince a
+  //    device that still has a legacy external tree that it had already been
+  //    drained, stranding those files outside the sandbox permanently.
+  const DEVICE_LOCAL_KEYS = new Set(['vc_media_migrated_v1', 'vc_restore_prompted']);
   const keys = await AsyncStorage.getAllKeys();
   const pairs = await AsyncStorage.multiGet(keys);
   const asyncStorage: Record<string, string | null> = {};
-  for (const [k, v] of pairs) asyncStorage[k] = v;
+  for (const [k, v] of pairs) if (!DEVICE_LOCAL_KEYS.has(k)) asyncStorage[k] = v;
 
   // 2. Local message DB (envelopes + chats)
   const local = await exportAll();
@@ -68,17 +80,15 @@ async function buildEncryptedBackup(secret: string): Promise<{ blob: string; mes
     } catch {}
   }
 
-  // 4. E2EE identity + per-peer sessions
-  const e2eeKeys = await exportE2EEKeys(peerIdsFromChats(local.chats));
-
+  // NOTE: no e2eeKeys. v2 bundles carried the identity + per-peer ratchets; v3
+  // deliberately does not (see the header). Restores re-key instead.
   const bundle = JSON.stringify({
-    v: 2,
+    v: 3,
     createdAt: new Date().toISOString(),
     asyncStorage,
     messages: local.messages,
     chats: local.chats,
     plaintexts,
-    e2eeKeys,
   });
   const blob = JSON.stringify(vaultEncrypt(secret, bundle)); // real AES-256-GCM
   return { blob, messageCount: local.messages.length, sizeBytes: bundle.length };
@@ -94,7 +104,13 @@ async function applyEncryptedBackup(secret: string, blob: string): Promise<numbe
     if (entries.length) await AsyncStorage.multiSet(entries);
   }
   const n = await importAll({ messages: data.messages, chats: data.chats });
-  if (data.e2eeKeys) await importE2EEKeys(data.e2eeKeys);
+  // v2 bundles carry `data.e2eeKeys` (identity + per-peer ratchets). They are
+  // deliberately IGNORED rather than imported: restoring long-term identity
+  // material out of a bundle whose key the server can recover is what made the
+  // backup a bypass of end-to-end encryption. Sessions re-key on next send.
+  if (data.e2eeKeys) {
+    console.warn('[backup] legacy v2 bundle: ignoring embedded E2EE identity keys — sessions will re-key');
+  }
   if (data.plaintexts) {
     for (const [k, pt] of Object.entries(data.plaintexts as Record<string, string>)) {
       const i = k.lastIndexOf(':');
@@ -165,19 +181,17 @@ export async function restoreFromGoogleDrive(): Promise<number> {
   return applyEncryptedBackup(await getBackupKey(), blob);
 }
 
-// ── Local file backups (WhatsApp-style "Databases" folder) ───────────────
-// Encrypted backup files written to the app's browsable external folder, next
-// to Media/, so a user can see/copy them and restore offline. Rolling retention
-// keeps the latest few (like WhatsApp's daily backups).
-const PKG = 'com.vaultchat.app';
-const DB_BACKUP_DIR = Platform.OS === 'android'
-  ? `${RNFS.ExternalStorageDirectoryPath}/Android/media/${PKG}/VaultChat/Databases`
-  : `${RNFS.DocumentDirectoryPath}/VaultChat/Databases`;
+// ── Local file backups ("Databases" folder) ──────────────────────────────
+// Encrypted backup files written next to Media/ inside the PRIVATE sandbox, so
+// a rolling set of restore points exists offline. Retention keeps the latest few.
+//
+// These used to live in the external media folder, which meant up to 7 full
+// history bundles — decryptable with a server-held key — sat in a world-readable
+// directory that survived uninstall (audit F-2). They are sandbox-only now.
+const DB_BACKUP_DIR = BACKUP_ROOT;
 const KEEP_LOCAL = 7;
 
 export interface LocalBackup { name: string; path: string; size: number; mtime: number }
-
-async function ensureDir(p: string): Promise<void> { if (!(await RNFS.exists(p))) await RNFS.mkdir(p); }
 
 function stamp(d: Date): string {
   const p = (n: number) => String(n).padStart(2, '0');
@@ -190,7 +204,6 @@ export async function writeLocalBackup(when: Date): Promise<{ path: string; mess
   await ensureDir(DB_BACKUP_DIR);
   const path = `${DB_BACKUP_DIR}/msgstore-${stamp(when)}.vcbak`;
   await RNFS.writeFile(path, blob, 'utf8');
-  if (Platform.OS === 'android') { try { await RNFS.scanFile(path); } catch {} }
   await pruneLocalBackups();
   return { path, messageCount, sizeBytes };
 }

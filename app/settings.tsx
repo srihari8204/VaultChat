@@ -169,7 +169,7 @@ export default function SettingsScreen() {
         { text: 'Delete', style: 'destructive', onPress: () => {
             Alert.alert(
               'Are you absolutely sure?',
-              'This cannot be undone.',
+              'This cannot be undone. Chats, media and local backups on this device are erased too.',
               [
                 { text: 'Cancel', style: 'cancel' },
                 { text: 'Yes, delete', style: 'destructive', onPress: async () => {

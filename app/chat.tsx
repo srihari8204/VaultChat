@@ -3220,7 +3220,7 @@ function PollBubble({
 // (Sharing.shareAsync). The /uploads route is auth-gated so we pass
 // the Bearer header on the download request.
 function FileBubble({
-  attachmentId, filename, mime, size, authHeader, resolvedUri, isMine, thumb,
+  attachmentId, filename, mime, size, authHeader, resolvedUri, isMine, thumb, encrypted,
 }: {
   attachmentId: string;
   filename:     string;
@@ -3230,6 +3230,7 @@ function FileBubble({
   resolvedUri?: { uri: string; headers?: Record<string, string> } | null;
   isMine:       boolean;
   thumb?:       string;   // PDF first-page preview (base64 jpeg)
+  encrypted?:   boolean;  // meta.encrypted — see mediaStore.MediaKeyMissingError
 }) {
   const S = useS();
   const [busy, setBusy] = useState(false);
@@ -3241,9 +3242,9 @@ function FileBubble({
       // Persistent local copy (downloaded once). Survives "Clear cache" AND the
       // server's post-delivery purge. Encrypted files arrive decrypted via
       // resolvedUri; everything else resolves through the persistent media store.
-      const localUri = resolvedUri?.uri ?? await getMedia(attachmentId, { kind: 'file', isMine, mime, filename });
-      // Copy into the app cache via RNFS (it can read /Android/media; expo-file-
-      // system can't) so the OS FileProvider can hand the file to another app.
+      const localUri = resolvedUri?.uri ?? await getMedia(attachmentId, { kind: 'file', isMine, mime, filename, encrypted });
+      // Copy into the app cache so the OS FileProvider can hand the file to
+      // another app (the provider is configured over the cache dir).
       const openUri = await copyToCache(localUri, filename || `file-${attachmentId}`);
 
       if (Platform.OS === 'android') {
@@ -3319,7 +3320,7 @@ function formatBytes(n: number): string {
 // auth-gated /uploads endpoint with a Bearer header. Mono speaker icon
 // stays bold while playing, otherwise dim.
 function AudioBubble({
-  attachmentId, durationMs, waveform, authHeader, resolvedUri, isMine, mime,
+  attachmentId, durationMs, waveform, authHeader, resolvedUri, isMine, mime, encrypted,
 }: {
   attachmentId: string;
   durationMs:   number;
@@ -3328,6 +3329,7 @@ function AudioBubble({
   resolvedUri?: { uri: string; headers?: Record<string, string> } | null;
   isMine:       boolean;
   mime?:        string;
+  encrypted?:   boolean;  // meta.encrypted — see mediaStore.MediaKeyMissingError
 }) {
   const S = useS();
   const [playing,  setPlaying]  = useState(false);
@@ -3355,7 +3357,7 @@ function AudioBubble({
         // cache" and the server's post-delivery purge. Encrypted notes already
         // arrive as a local decrypted file via resolvedUri.
         let src: { uri: string } | null = resolvedUri ? { uri: resolvedUri.uri } : null;
-        if (!src) { try { src = { uri: await getMedia(attachmentId, { kind: 'voice', isMine, mime }) }; } catch { return; } }
+        if (!src) { try { src = { uri: await getMedia(attachmentId, { kind: 'voice', isMine, mime, encrypted }) }; } catch { return; } }
         const { sound } = await Audio.Sound.createAsync(
           src,
           { shouldPlay: true, progressUpdateIntervalMillis: 150 },
@@ -3378,7 +3380,7 @@ function AudioBubble({
     } catch (e: any) {
       Alert.alert('Playback failed', e?.message ?? 'Try again');
     }
-  }, [attachmentId, authHeader, resolvedUri, playing]);
+  }, [attachmentId, authHeader, resolvedUri, playing, isMine, mime, encrypted]);
 
   const totalSec = Math.max(1, Math.round(durationMs / 1000));
   const playedSec = Math.min(totalSec, Math.round(position / 1000));
@@ -3447,12 +3449,13 @@ function useRetryOnReconnect(eligible: boolean, retry: () => void) {
   }, [conn, eligible, retry]);
 }
 
-function ImageAttachment({ attachmentId, resolvedUri, isMine, mime, thumb, onError }: {
+function ImageAttachment({ attachmentId, resolvedUri, isMine, mime, thumb, encrypted, onError }: {
   attachmentId: string;
   resolvedUri?: { uri: string; headers?: Record<string, string> } | null;
   isMine?: boolean;
   mime?: string;
   thumb?: string;   // base64 JPEG shown instantly while the full image loads
+  encrypted?: boolean;  // meta.encrypted — lets a missing key be reported as such
   onError?: () => void;
 }) {
   const { colors } = useTheme();
@@ -3460,19 +3463,27 @@ function ImageAttachment({ attachmentId, resolvedUri, isMine, mime, thumb, onErr
   const [uri, setUri] = useState<string | null>(resolvedUri?.uri ?? null);
   const [needTap, setNeedTap] = useState(false);    // gated by auto-download policy
   const [progress, setProgress] = useState<number | null>(null); // null=idle, 0-1=downloading
+  // The bytes exist but this install has no key for them (typically: the media
+  // predates a reinstall, which destroys both the per-file keys and the E2EE
+  // identity). Distinct from a failed download — retrying can never fix it.
+  const [keyMissing, setKeyMissing] = useState(false);
   const download = useCallback(() => {
     setNeedTap(false);
     setProgress(0);
-    getMedia(attachmentId, { kind: 'image', isMine, mime, onProgress: setProgress })
+    getMedia(attachmentId, { kind: 'image', isMine, mime, encrypted, onProgress: setProgress })
       .then(u => { setUri(u || null); setProgress(null); })
-      .catch(() => { setProgress(null); onError?.(); });
-  }, [attachmentId, isMine, mime, onError]);
+      .catch((e: any) => {
+        setProgress(null);
+        if (e?.code === 'MEDIA_KEY_MISSING') { setKeyMissing(true); return; }
+        onError?.();
+      });
+  }, [attachmentId, isMine, mime, encrypted, onError]);
   useEffect(() => {
     if (resolvedUri?.uri) { setUri(resolvedUri.uri); return; }
     let cancel = false;
     (async () => {
       // Already cached? render instantly (no gating). Own media is always local.
-      const local = await getMedia(attachmentId, { kind: 'image', isMine, mime, cacheOnly: true }).catch(() => '');
+      const local = await getMedia(attachmentId, { kind: 'image', isMine, mime, encrypted, cacheOnly: true }).catch(() => '');
       if (cancel) return;
       if (local) { setUri(local); return; }
       // Not cached → honor the media auto-download policy.
@@ -3482,10 +3493,21 @@ function ImageAttachment({ attachmentId, resolvedUri, isMine, mime, thumb, onErr
       else setNeedTap(true);
     })();
     return () => { cancel = true; };
-  }, [attachmentId, resolvedUri?.uri, isMine, mime]);
-  // Auto-download failed offline → retry as soon as we're back online.
-  useRetryOnReconnect(!uri && progress == null && !needTap && !resolvedUri?.uri, download);
+  }, [attachmentId, resolvedUri?.uri, isMine, mime, encrypted]);
+  // Auto-download failed offline → retry as soon as we're back online. Never for
+  // a missing key: the network was never the problem.
+  useRetryOnReconnect(!uri && !keyMissing && progress == null && !needTap && !resolvedUri?.uri, download);
   if (!uri) {
+    // No key on this device → say so, instead of showing a broken image (and
+    // instead of writing ciphertext into the media folder under a .jpg name).
+    if (keyMissing) {
+      return (
+        <View style={[S.attachedImage, S.imageError]}>
+          <Ionicons name="lock-closed-outline" size={26} color={colors.textDim} />
+          <Text style={S.mediaUnavailableTxt}>Not available on this device</Text>
+        </View>
+      );
+    }
     // Downloading → blurred thumb + determinate progress ring.
     if (progress != null) {
       return (
@@ -3522,7 +3544,7 @@ function ImageAttachment({ attachmentId, resolvedUri, isMine, mime, thumb, onErr
 // MessageBubble can flip to a "Viewed" tombstone without an extra
 // HEAD round-trip.
 function VideoBubble({
-  attachmentId, durationMs, authHeader, resolvedUri, onErrorOnce, isNote, onOpen, isMine, mime, thumb,
+  attachmentId, durationMs, authHeader, resolvedUri, onErrorOnce, isNote, onOpen, isMine, mime, thumb, encrypted,
 }: {
   attachmentId:  string;
   durationMs:    number;
@@ -3534,6 +3556,7 @@ function VideoBubble({
   isMine?:       boolean;
   mime?:         string;
   thumb?:        string;    // base64 JPEG poster (instant, no download)
+  encrypted?:    boolean;   // meta.encrypted — see mediaStore.MediaKeyMissingError
 }) {
   const S = useS();
   // WhatsApp-style: do NOT mount a <Video> (ExoPlayer) at rest — each instance
@@ -3551,12 +3574,12 @@ function VideoBubble({
     let uri = noteUri;
     if (!uri) {
       setBusy(true);
-      try { uri = resolvedUri?.uri ?? await getMedia(attachmentId, { kind: 'video', isMine, mime }); setNoteUri(uri); }
+      try { uri = resolvedUri?.uri ?? await getMedia(attachmentId, { kind: 'video', isMine, mime, encrypted }); setNoteUri(uri); }
       catch { onErrorOnce?.(); setBusy(false); return; }
       setBusy(false);
     }
     setPlaying(true);
-  }, [isNote, playing, noteUri, resolvedUri?.uri, attachmentId, onOpen, onErrorOnce]);
+  }, [isNote, playing, noteUri, resolvedUri?.uri, attachmentId, onOpen, onErrorOnce, isMine, mime, encrypted]);
 
   const showingVideo = isNote && playing && !!noteUri;
   return (
@@ -4002,6 +4025,7 @@ function MessageBubble({
             isMine={isMine}
             mime={String(msg.meta?.mime || '')}
             thumb={typeof msg.meta?.thumb === 'string' ? msg.meta.thumb : undefined}
+            encrypted={isEncMedia}
             onError={() => { if (isViewOnceMedia && !isMine) setTombstoned(true); }}
           />
         ) : isVideo ? (
@@ -4016,6 +4040,7 @@ function MessageBubble({
             isMine={isMine}
             mime={String(msg.meta?.mime || '')}
             thumb={typeof msg.meta?.thumb === 'string' ? msg.meta.thumb : undefined}
+            encrypted={isEncMedia}
           />
         ) : isAudio ? (
           <AudioBubble
@@ -4026,6 +4051,7 @@ function MessageBubble({
             resolvedUri={isEncMedia ? mediaSrc : undefined}
             isMine={isMine}
             mime={String(msg.meta?.mime || '')}
+            encrypted={isEncMedia}
           />
         ) : isFile ? (
           <FileBubble
@@ -4037,6 +4063,7 @@ function MessageBubble({
             resolvedUri={isEncMedia ? mediaSrc : undefined}
             isMine={isMine}
             thumb={typeof msg.meta?.thumb === 'string' ? msg.meta.thumb : undefined}
+            encrypted={isEncMedia}
           />
         ) : isVaultbeam ? (
           <VaultBeamBubble msg={msg} isMine={isMine} plain={plain} />
@@ -4388,6 +4415,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   dlOverlay:     { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.25)' },
   dlOverlayTxt:  { color: '#fff', fontSize: 12, fontWeight: '700' },
   imageError:    { width: 180, padding: 16, alignItems: 'center', gap: 4 },
+  mediaUnavailableTxt: { color: c.textDim, fontSize: 12, textAlign: 'center' },
   imageErrorTxt: { color: c.textDim, fontSize: 12 },
 
   // Video bubble — inline player with native controls + duration pill

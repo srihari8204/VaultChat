@@ -213,7 +213,10 @@ export default function ProfileScreen() {
   }, [phone, phoneCode, load]);
 
   const onSignOut = useCallback(async () => {
-    Alert.alert('Sign out?', 'You will need to sign in again next time.', [
+    Alert.alert(
+      'Sign out?',
+      'Chats and media stored on this device will be removed. Anything still on the server syncs back when you sign in again.',
+      [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Sign out', style: 'destructive', onPress: async () => {
           try { await unregisterPushToken(); } catch {}
@@ -222,7 +225,8 @@ export default function ProfileScreen() {
           router.replace('/onboard' as any);
         }
       },
-    ]);
+      ],
+    );
   }, [router]);
 
   if (loading) {
