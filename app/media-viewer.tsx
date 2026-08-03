@@ -10,13 +10,21 @@ import {
   PanResponder, Alert, Share,
 } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
-import { Video, Audio, ResizeMode } from 'expo-av';
+import { Video, Audio, ResizeMode, type AVPlaybackStatusSuccess } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as MediaLibrary from 'expo-media-library';
 import { getMedia } from '../lib/mediaStore';
 import { getAccessToken } from '../lib/api';
-import { attachmentUrl, markAttachmentViewed } from '../lib/chatService';
+import { attachmentUrl, markAttachmentViewed, reportScreenshotCaptured } from '../lib/chatService';
+import { getCurrentUserAsync } from './(constants)/authService';
+import ProtectedMediaView from '../components/ProtectedMediaView';
+import { onScreenshot } from '../lib/screenGuard';
+
+// Playback status is a union (loaded | error); every read below wants the loaded
+// shape. Partial<> keeps the `{}` initial state honest — the fields genuinely
+// are absent until the first status callback lands.
+type PlaybackState = Partial<AVPlaybackStatusSuccess>;
 
 const { width: SW, height: SH } = Dimensions.get('window');
 const C = { bg: '#000', accent: '#4A9FFF', green: BRAND_ACCENT };
@@ -36,9 +44,42 @@ const formatDur = (ms) => { if (!ms) return '0:00'; const s=Math.floor(ms/1000);
 
 export default function MediaViewerScreen() {
   const router = useRouter();
-  const { uri, mediaUrl, attachmentId, needsAuth, save, isMine, mime, filename, msgType, viewOnce } = useLocalSearchParams();
+  const { uri, mediaUrl, attachmentId, needsAuth, save, isMine, mime, filename, msgType, viewOnce, chatId } = useLocalSearchParams();
   const isViewOnce = viewOnce === '1';
+
+  // ── VaultView watermark identity ─────────────────────────
+  // The overlay carries the VIEWER's identity, not the sender's — that is what
+  // makes a second-phone photo self-incriminating. Loaded from the local
+  // session so it works offline.
+  const [me, setMe] = useState<{ name?: string; phone?: string } | null>(null);
+  useEffect(() => {
+    if (!isViewOnce) return;
+    getCurrentUserAsync()
+      .then((u: any) => setMe({ name: u?.name || u?.email, phone: u?.phone || u?.phoneNumber }))
+      .catch(() => {});
+  }, [isViewOnce]);
+
+  // Screenshot while protected media is open → tell the sender. On Android
+  // FLAG_SECURE means this rarely fires (the capture is black); on iOS it is the
+  // whole defence.
+  useEffect(() => {
+    if (!isViewOnce || !chatId) return;
+    const stop = onScreenshot(() => {
+      reportScreenshotCaptured(String(chatId)).catch(() => {});
+    });
+    return stop;
+  }, [isViewOnce, chatId]);
   const viewedRef = useRef(false);
+  // Path of the ephemeral plaintext this viewer wrote (view-once only). The
+  // server burns the attachment on first view, so this cache file is the ONLY
+  // remaining copy — it must not outlive the screen. Deleted on unmount here;
+  // lib/mediaCacheGC.purgeEphemeralMedia() is the crash-recovery path.
+  const ephemeralRef = useRef<string | null>(null);
+  useEffect(() => () => {
+    const p = ephemeralRef.current;
+    ephemeralRef.current = null;
+    if (p) FileSystem.deleteAsync(p, { idempotent: true }).catch(() => {});
+  }, []);
   // Mark the server "viewed" only AFTER the media has loaded — never before, or
   // the POST /viewed flips viewed_at while the GET is still in flight and the GET
   // 410s. View-once is also downloaded to cache (below), never persisted.
@@ -81,7 +122,9 @@ export default function MediaViewerScreen() {
             headers: token ? { Authorization: `Bearer ${token}` } : {},
           });
           if (res.status >= 400) throw new Error('view-once GET ' + res.status);
-          if (!cancel) setFileUri(res.uri);
+          ephemeralRef.current = res.uri;   // wiped on unmount
+          if (cancel) { FileSystem.deleteAsync(res.uri, { idempotent: true }).catch(() => {}); return; }
+          setFileUri(res.uri);
         } catch { onErr(); }
       })();
       return () => { cancel = true; };
@@ -139,7 +182,7 @@ export default function MediaViewerScreen() {
   // VIDEO — streams while loading
   const VideoPlayer = () => {
     const videoRef = useRef(null);
-    const [st, setSt] = useState({});
+    const [st, setSt] = useState<PlaybackState>({});
     const [ctrl, setCtrl] = useState(true);
     const [shouldPlay, setShouldPlay] = useState(true);
     useEffect(() => { setLoading(false); }, []);
@@ -147,7 +190,7 @@ export default function MediaViewerScreen() {
       <TouchableOpacity style={s.full} activeOpacity={1} onPress={() => setCtrl(!ctrl)}>
         <Video ref={videoRef} source={{ uri: fileUri }} style={s.fullVid} resizeMode={ResizeMode.CONTAIN}
           shouldPlay={shouldPlay} isLooping={false} useNativeControls={false} progressUpdateIntervalMillis={250}
-          onPlaybackStatusUpdate={(status) => { setSt(status); if (status?.didJustFinish) setShouldPlay(false); }}
+          onPlaybackStatusUpdate={(status) => { if (!status.isLoaded) return; setSt(status); if (status.didJustFinish) setShouldPlay(false); }}
           onLoad={() => { setLoading(false); markViewedAfterLoad(); }} onError={() => { setError('Failed to load video'); setLoading(false); }} />
         {st.isBuffering && !st.isPlaying && <View style={s.bufOverlay}><ActivityIndicator color={C.accent} size="large" /><Text style={s.bufTxt}>Streaming...</Text></View>}
         {ctrl && (
@@ -166,8 +209,8 @@ export default function MediaViewerScreen() {
             <View style={s.progRow}>
               <Text style={s.timeTxt}>{formatDur(st.positionMillis)}</Text>
               <View style={s.seekBg}>
-                <View style={[s.seekBuf, { width: ((st.playableDurationMillis||0) / (st.durationMillis||1) * 100) + '%' }]} />
-                <View style={[s.seekFill, { width: ((st.positionMillis||0) / (st.durationMillis||1) * 100) + '%' }]} />
+                <View style={[s.seekBuf, { width: `${(st.playableDurationMillis||0) / (st.durationMillis||1) * 100}%` }]} />
+                <View style={[s.seekFill, { width: `${(st.positionMillis||0) / (st.durationMillis||1) * 100}%` }]} />
               </View>
               <Text style={s.timeTxt}>{formatDur(st.durationMillis)}</Text>
             </View>
@@ -180,11 +223,11 @@ export default function MediaViewerScreen() {
   // AUDIO
   const AudioPlayer = () => {
     const soundRef = useRef(null);
-    const [ast, setAst] = useState({});
+    const [ast, setAst] = useState<PlaybackState>({});
     useEffect(() => {
       (async () => {
         await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
-        const { sound } = await Audio.Sound.createAsync({ uri: fileUri }, { shouldPlay: false, progressUpdateIntervalMillis: 200 }, setAst);
+        const { sound } = await Audio.Sound.createAsync({ uri: fileUri }, { shouldPlay: false, progressUpdateIntervalMillis: 200 }, (st) => { if (st.isLoaded) setAst(st); });
         soundRef.current = sound; setLoading(false);
       })();
       return () => { soundRef.current?.unloadAsync(); };
@@ -224,8 +267,8 @@ export default function MediaViewerScreen() {
     }, []);
     const lines = content.split('\n');
     return (
-      <ScrollView style={{flex:1,background:'#FFFFFF'}}>
-        <View style={{padding:12,background:'#161B22',borderBottomWidth:1,borderBottomColor:'#21262D'}}>
+      <ScrollView style={{flex:1,backgroundColor:'#FFFFFF'}}>
+        <View style={{padding:12,backgroundColor:'#161B22',borderBottomWidth:1,borderBottomColor:'#21262D'}}>
           <Text style={{color:'#1F2937',fontSize:14,fontWeight:800}}>{fileName}</Text>
           <Text style={{color:'#8B949E',fontSize:11,marginTop:4}}>{lines.length} lines | {formatSize(content.length)}</Text>
           <TouchableOpacity style={{marginTop:10,backgroundColor:'#4A9FFF22',borderRadius:10,paddingVertical:10,flexDirection:'row',gap:6,justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:'#4A9FFF44'}}
@@ -251,7 +294,11 @@ export default function MediaViewerScreen() {
   return (
     <>
       <Stack.Screen options={{ title: fileName, headerStyle: { backgroundColor: '#000' }, headerTintColor: '#fff',
-        headerRight: () => <View style={{flexDirection:'row',gap:20,marginRight:8}}>
+        // Share/Save are hidden for view-once media. Offering "Download" on a
+        // photo the sender was promised is one-view-only would hand the
+        // recipient a permanent copy through the app's own UI — the protection
+        // has to hold in the viewer, not only on the server.
+        headerRight: () => isViewOnce ? null : <View style={{flexDirection:'row',gap:20,marginRight:8}}>
           <TouchableOpacity onPress={()=>Share.share({url:fileUri,message:fileName})} hitSlop={8}><Ionicons name="share-social-outline" size={22} color="#fff" /></TouchableOpacity>
           <TouchableOpacity onPress={saveToDevice} hitSlop={8}><Ionicons name="download-outline" size={22} color="#fff" /></TouchableOpacity>
         </View>,
@@ -263,13 +310,26 @@ export default function MediaViewerScreen() {
         {!fileUri && !error ? (
           <ActivityIndicator color={C.accent} style={s.center} size="large" />
         ) : fileUri ? (
-          <>
-            {fileType === 'image' && <ImageViewer />}
-            {fileType === 'video' && <VideoPlayer />}
-            {fileType === 'audio' && <AudioPlayer />}
-            {fileType === 'code' && <CodeViewer />}
-            {(fileType === 'pdf' || fileType === 'unknown') && <GenericViewer />}
-          </>
+          // Protected media renders inside the VaultView guard: watermarked, and
+          // refused outright while a recording/mirror is active. Everything else
+          // renders exactly as before.
+          isViewOnce && (fileType === 'image' || fileType === 'video') ? (
+            <ProtectedMediaView
+              watermarkName={me?.name}
+              watermarkPhone={me?.phone}
+              onBlocked={() => { if (chatId) reportScreenshotCaptured(String(chatId)).catch(() => {}); }}
+            >
+              {fileType === 'image' ? <ImageViewer /> : <VideoPlayer />}
+            </ProtectedMediaView>
+          ) : (
+            <>
+              {fileType === 'image' && <ImageViewer />}
+              {fileType === 'video' && <VideoPlayer />}
+              {fileType === 'audio' && <AudioPlayer />}
+              {fileType === 'code' && <CodeViewer />}
+              {(fileType === 'pdf' || fileType === 'unknown') && <GenericViewer />}
+            </>
+          )
         ) : null}
       </View>
     </>

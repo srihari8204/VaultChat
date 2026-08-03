@@ -45,6 +45,63 @@ func senderOfEvent(event string, data any) string {
 	return ""
 }
 
+// ── Chat-membership cache (P2.2) ─────────────────────────────────────
+// Every fan-out used to run `SELECT vc_chat_member_ids($1)` — one DB query
+// per message/typing/receipt event, the single hottest read on the server.
+// Membership changes are rare; cache it in Redis for 30s and DEL on every
+// mutation (InvalidateChatMembers, called from the routes that add/remove
+// members). Redis-down ⇒ straight to the DB (fail-open, same as before).
+const memberCacheTTL = 30 * time.Second
+
+func chatMemberIDs(ctx context.Context, chatID string) ([]string, error) {
+	key := "vc:members:" + chatID
+	if c := redisx.Client; c != nil {
+		if cached, err := c.SMembers(ctx, key).Result(); err == nil && len(cached) > 0 {
+			// "\x00empty" marks a cached empty membership (SETs can't be empty).
+			if len(cached) == 1 && cached[0] == "\x00empty" {
+				return nil, nil
+			}
+			return cached, nil
+		}
+	}
+	rows, err := db.SysPool.Query(ctx, `SELECT * FROM vc_chat_member_ids($1)`, chatID)
+	if err != nil {
+		return nil, err
+	}
+	var memberIDs []string
+	for rows.Next() {
+		var id *string
+		if rows.Scan(&id) == nil && id != nil && *id != "" {
+			memberIDs = append(memberIDs, *id)
+		}
+	}
+	rows.Close()
+	if c := redisx.Client; c != nil {
+		vals := make([]any, 0, len(memberIDs)+1)
+		for _, m := range memberIDs {
+			vals = append(vals, m)
+		}
+		if len(vals) == 0 {
+			vals = append(vals, "\x00empty")
+		}
+		pipe := c.Pipeline()
+		pipe.Del(ctx, key) // never merge with a stale set
+		pipe.SAdd(ctx, key, vals...)
+		pipe.Expire(ctx, key, memberCacheTTL)
+		_, _ = pipe.Exec(ctx)
+	}
+	return memberIDs, nil
+}
+
+// InvalidateChatMembers drops the cached member list — call after any
+// chat_members mutation so fan-out never uses a stale roster for >0ms.
+// (The 30s TTL is only the backstop for missed call sites.)
+func InvalidateChatMembers(ctx context.Context, chatID string) {
+	if c := redisx.Client; c != nil {
+		c.Del(ctx, "vc:members:"+chatID)
+	}
+}
+
 // FanOutToChat is the exact port of server.js fanOutToChat.
 func (h *Hub) FanOutToChat(ctx context.Context, chatID, event string, payload any, senderID string) {
 	ghostCol := eventToGhostCol[event]
@@ -58,25 +115,17 @@ func (h *Hub) FanOutToChat(ctx context.Context, chatID, event string, payload an
 		h.io.To(socket.Room("chat:"+chatID)).Emit(event, payload)
 	}
 
-	// Members of this chat.
-	rows, err := db.Pool.Query(ctx, `SELECT * FROM vc_chat_member_ids($1)`, chatID)
+	// Members of this chat (Redis-cached, 30s TTL — P2.2).
+	memberIDs, err := chatMemberIDs(ctx, chatID)
 	if err != nil {
 		log.Printf("[fanOutToChat] %v", err)
 		return
 	}
-	var memberIDs []string
-	for rows.Next() {
-		var id *string
-		if rows.Scan(&id) == nil && id != nil && *id != "" {
-			memberIDs = append(memberIDs, *id)
-		}
-	}
-	rows.Close()
 
 	// Viewers who blocked the sender — drop those.
 	blockerSet := map[string]bool{}
 	if senderID != "" && len(memberIDs) > 0 {
-		blk, err := db.Pool.Query(ctx,
+		blk, err := db.SysPool.Query(ctx,
 			`SELECT blocker_id FROM user_blocks
 			  WHERE blocked_id = $1 AND blocker_id = ANY($2::uuid[])`, senderID, memberIDs)
 		if err != nil {
@@ -194,6 +243,14 @@ func (h *Hub) startViewerSweep() {
 			if c == nil {
 				continue
 			}
+			// Cluster (P2.1): the sweep reads shared Redis keys, so let ONE
+			// node per tick do it — otherwise every replica emits its own
+			// duplicate viewer_left for the same expiry.
+			if ClusterEnabled() {
+				if ok, err := c.SetNX(bg, "vc:cvsweep:lock", nodeID, 9*time.Second).Result(); err != nil || !ok {
+					continue
+				}
+			}
 			cutoff := time.Now().UnixMilli() - cvTTLms
 			expired, err := c.ZRangeByScore(bg, "cv:exp", &redis.ZRangeBy{
 				Min: "0", Max: strconv.FormatInt(cutoff, 10),
@@ -225,7 +282,7 @@ func (h *Hub) startViewerSweep() {
 var expoHTTP = &http.Client{Timeout: 15 * time.Second}
 
 func (h *Hub) sendCallWakePush(ctx context.Context, calleeID, title, body string, data map[string]any) {
-	rows, err := db.Pool.Query(ctx,
+	rows, err := db.SysPool.Query(ctx,
 		`SELECT push_token FROM devices WHERE user_id = $1 AND push_token IS NOT NULL`, calleeID)
 	if err != nil {
 		return
@@ -273,7 +330,7 @@ func (h *Hub) sendCallWakePush(ctx context.Context, calleeID, title, body string
 		}
 	}
 	if len(dead) > 0 {
-		_, _ = db.Pool.Exec(ctx, `DELETE FROM devices WHERE push_token = ANY($1::text[])`, dead)
+		_, _ = db.SysPool.Exec(ctx, `DELETE FROM devices WHERE push_token = ANY($1::text[])`, dead)
 	}
 }
 

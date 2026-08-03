@@ -1,5 +1,8 @@
-// Web shim for react-native-webrtc
-// On web, use browser-native WebRTC APIs instead of the native module
+// Web shim for the native WebRTC module (@livekit/react-native-webrtc).
+// On web, use browser-native WebRTC APIs instead of the native module.
+//
+// Filename kept as-is: it describes what it shims (a react-native-webrtc-shaped
+// module), and metro maps the import name to this path explicitly.
 
 const RTCPeerConnection =
   typeof window !== 'undefined'

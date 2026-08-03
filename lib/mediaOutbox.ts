@@ -175,12 +175,19 @@ export async function flush(): Promise<void> {
 }
 
 let armed = false;
+let online = true;   // P1.4: track connectivity so the periodic safety-net can no-op while offline.
 /** Wire reconnect + periodic + initial flush. Call once at boot. */
 export function initMediaOutbox(): void {
   if (armed) return;
   armed = true;
-  NetInfo.addEventListener(s => { if (s.isConnected && s.isInternetReachable !== false) flush().catch(() => {}); });
-  setInterval(() => { flush().catch(() => {}); }, PERIODIC_MS);
+  NetInfo.addEventListener(s => {
+    online = !!(s.isConnected && s.isInternetReachable !== false);
+    if (online) flush().catch(() => {});
+  });
+  // Periodic safety net — but skip the DB/network work entirely when we know
+  // we're offline (the reconnect listener above flushes as soon as we're back),
+  // so a backgrounded, offline device isn't woken every PERIODIC_MS for nothing.
+  setInterval(() => { if (online) flush().catch(() => {}); }, PERIODIC_MS);
   flush().catch(() => {});
 }
 

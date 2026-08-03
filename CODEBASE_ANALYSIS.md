@@ -1,5 +1,23 @@
 # VaultChat Application - Complete Codebase Analysis
 
+> ## ⚠️ HISTORICAL — DO NOT USE AS A REFERENCE
+>
+> This document describes a **Firebase / Firestore architecture that no longer
+> exists**. It predates two migrations that have both completed:
+>
+> * **Firestore → Postgres + Go.** All 16 REST modules and the Socket.IO layer
+>   are served by `vaultchat-backend-go`. Nothing in the app imports the
+>   Firebase JS SDK, and those packages have been removed entirely.
+> * **Firebase Auth → JWT.** Sections below describing Firestore listeners,
+>   security rules and `auth().currentUser` are inaccurate for the current code.
+>
+> Kept because the feature inventory and threat model retain historical value,
+> and because deleting it would lose the record of why the migration happened.
+>
+> **For current architecture read `ARCHITECTURE.md`.** For mobile/iOS status read
+> `docs/IOS_PARITY.md`.
+
+
 ## Executive Summary
 VaultChat is a React Native/Expo messaging application with enterprise-grade security features. It combines modern real-time communication with advanced privacy controls, encryption, and anti-surveillance capabilities.
 

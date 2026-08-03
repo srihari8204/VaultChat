@@ -44,6 +44,29 @@ const FOLDERS: { id: FolderId; label: string }[] = [
   { id: 'archive', label: 'Archive' },
 ];
 
+// P1.2: the ChatRow memo compares `a.chat === b.chat` (object identity), so a
+// full `setChats(freshList)` — brand-new objects on every socket event —
+// re-rendered EVERY visible row even when only one chat changed. mergeChats
+// reuses the previous object for any chat whose fields are unchanged, so the
+// memoized rows skip re-render; it also reuses the array identity when the list
+// is positionally identical, so the SectionList itself doesn't churn.
+function chatsShallowEqual(a: ChatSummary, b: ChatSummary): boolean {
+  const ka = Object.keys(a) as (keyof ChatSummary)[];
+  if (ka.length !== Object.keys(b).length) return false;
+  for (const k of ka) if (a[k] !== b[k]) return false;
+  return true;
+}
+function mergeChats(prev: ChatSummary[], next: ChatSummary[]): ChatSummary[] {
+  if (!prev.length) return next;
+  const byId = new Map(prev.map(c => [c.id, c]));
+  const merged = next.map(n => {
+    const p = byId.get(n.id);
+    return p && chatsShallowEqual(p, n) ? p : n;   // reuse identity → memoized row skips
+  });
+  if (merged.length === prev.length && merged.every((c, i) => c === prev[i])) return prev;
+  return merged;
+}
+
 function useS() {
   const { colors } = useTheme();
   return useMemo(() => makeStyles(colors), [colors]);
@@ -79,20 +102,45 @@ export default function ChatsScreen() {
     return () => { cancel = true; };
   }, []);
 
-  const fetchList = useCallback(async () => {
+  // Core list load. `withHistory` runs the once/session background history
+  // pre-fetch — deliberately NOT done on the per-message socket refresh path
+  // (P1.2): a busy chat used to kick syncAllHistory on every inbound message.
+  const loadList = useCallback(async (withHistory: boolean) => {
     try {
       const list = await listChats();
-      setChats(list);
+      setChats(prev => mergeChats(prev, list));                 // identity-preserving → memoized rows skip re-render
       cacheChats(list).catch(() => {});                         // persist for instant next-launch paint (op-sqlite engine)
       getLastMessagePerChat().then(setLastMsgs).catch(() => {}); // refresh row previews
-      // Background: pre-fetch history so offline scroll-back works (once/session, Wi-Fi only).
-      syncAllHistory(list.filter(c => !c.archived).map(c => c.id)).then(() => getLastMessagePerChat().then(setLastMsgs).catch(() => {})).catch(() => {});
+      if (withHistory) {
+        // Background: pre-fetch history so offline scroll-back works (once/session, Wi-Fi only).
+        syncAllHistory(list.filter(c => !c.archived).map(c => c.id)).then(() => getLastMessagePerChat().then(setLastMsgs).catch(() => {})).catch(() => {});
+      }
       setError(null);
       // Publish total unread (non-archived) so the Chats tab can badge it.
       setUnreadTotal(list.reduce((n, c) => n + (c.archived ? 0 : (c.unreadCount > 0 ? 1 : 0)), 0));
     } catch (e: any) {
       setError(e?.message ?? 'Failed to load chats');
     }
+  }, []);
+
+  const fetchList = useCallback(() => loadList(true), [loadList]);
+
+  // P1.2: coalesce bursts of socket events (new/edited/deleted messages) into a
+  // single lightweight refetch (no history pre-fetch), instead of one full
+  // fetchList() per event. Previously a chatty thread triggered a network
+  // listChats() + whole-list re-render + syncAllHistory on every message.
+  const refreshTimer = useRef<any>(null);
+  const scheduleRefresh = useCallback(() => {
+    if (refreshTimer.current) return;   // already scheduled → coalesce
+    refreshTimer.current = setTimeout(() => { refreshTimer.current = null; loadList(false); }, 350);
+  }, [loadList]);
+
+  // Clear coalescing + typing timers on unmount so they can't fire on an
+  // unmounted screen (P1.4).
+  useEffect(() => () => {
+    if (refreshTimer.current) { clearTimeout(refreshTimer.current); refreshTimer.current = null; }
+    Object.values(typingTimers.current).forEach((t: any) => clearTimeout(t));
+    typingTimers.current = {};
   }, []);
 
   useEffect(() => {
@@ -155,7 +203,7 @@ export default function ChatsScreen() {
     (async () => {
       try {
         const s = await getSocket();
-        const refresh = () => fetchList();
+        const refresh = () => scheduleRefresh();   // P1.2: coalesced, history-free refetch
         const onPresence = (e: { userId: string; online: boolean; lastSeenAt: string | null }) => {
           if (!e?.userId) return;
           setChats(prev => prev.map(c => c.peerUserId === e.userId
@@ -187,7 +235,7 @@ export default function ChatsScreen() {
       } catch (e: any) { if (!cancelled) setError(e?.message ?? 'Realtime unavailable'); }
     })();
     return () => { cancelled = true; if (off) off(); };
-  }, [fetchList]);
+  }, [scheduleRefresh]);
 
   useEffect(() => { getCurrentUserAsync().then(u => setMeId(u?.id ?? null)).catch(() => {}); }, []);
 
@@ -507,6 +555,9 @@ const ChatRow = memo(function ChatRow({
   const previewBody = (() => {
     if (!lastMsg) return chat.lastMessageId ? 'Tap to open chat' : 'No messages yet';
     const t = lastMsg.type;
+    // content is null for a text message whose ciphertext couldn't be decrypted
+    // (the cache layer withholds raw envelopes) — show a lock, never blank/JSON.
+    const textFallback = lastMsg.content || (chat.lastMessageId ? '🔒 Encrypted message' : '');
     const label = t === 'image' ? '📷 Photo'
       : t === 'video' ? '🎥 Video'
       : t === 'audio' ? '🎙️ Voice message'
@@ -515,7 +566,7 @@ const ChatRow = memo(function ChatRow({
       : t === 'location' ? '📍 Location'
       : t === 'poll' ? '📊 Poll'
       : t === 'sticker' ? 'Sticker'
-      : (lastMsg.content || '');
+      : textFallback;
     const mine = !!meId && lastMsg.senderId === meId;
     return (mine ? 'You: ' : '') + label;
   })();

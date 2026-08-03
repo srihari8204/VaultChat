@@ -12,7 +12,7 @@
 
 import * as SecureStore from 'expo-secure-store';
 import { bytesToHex, hexToBytes, randomBytes } from '@noble/hashes/utils.js';
-import { deriveVaultKey, open, seal } from './vaultKeys';
+import { deriveVaultKeyAsync, open, seal } from './vaultKeys';
 
 const SALT_KEY   = 'vc_session_salt';
 const SEALED_KEY = 'vc_session_sealed';
@@ -27,7 +27,8 @@ export async function deriveSessionKey(pin: string): Promise<Uint8Array> {
     hex = bytesToHex(s);
     await SecureStore.setItemAsync(SALT_KEY, hex);
   }
-  return deriveVaultKey(pin, hexToBytes(hex));
+  // P3.2: off-thread scrypt on the native engine (same output bytes).
+  return deriveVaultKeyAsync(pin, hexToBytes(hex));
 }
 
 /** Seal the tokens under a derived key (overwrites any prior sealed session). */

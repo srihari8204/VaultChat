@@ -1,5 +1,5 @@
 // VaultChat backend — Phase 1 (Postgres + custom JWT, no Firebase Admin).
-// Keeps the working Socket.IO relays for chat real-time / WebRTC / Walkie / Games
+// Keeps the working Socket.IO relays for chat real-time / WebRTC / Walkie
 // (those don't touch Firebase). Per-feature routes that previously used the
 // Firestore Admin SDK have been removed and will be reintroduced backed by
 // Postgres in subsequent phases.
@@ -40,7 +40,6 @@ function safeKeyEqual(a, b) {
 
 const db      = require('./db');
 const { sendPushToTokens } = require('./push');
-const gameStore = require('./gameStore');
 const redis   = require('./redis');
 const jwtUtil = require('./jwt');
 const kafka   = require('./lib/kafka');
@@ -92,7 +91,8 @@ require('./lib/storage').ensureBucket().catch(() => {});
 // ── Routes ───────────────────────────────────────────────────
 app.use('/auth',     require('./routes/auth'));
 app.use('/user',     require('./routes/user'));
-app.use('/uploads',  require('./routes/uploads'));
+const uploadsRouter = require('./routes/uploads');
+app.use('/uploads',  uploadsRouter);
 app.use('/ai',       require('./routes/ai'));
 app.use('/contacts', require('./routes/contacts'));
 const chatsRouter = require('./routes/chats');
@@ -106,7 +106,6 @@ app.use('/link',     require('./routes/link'));
 app.use('/gif',      require('./routes/gif'));
 const channelsRouter = require('./routes/channels');
 app.use('/channels', channelsRouter);
-app.use('/games',    require('./routes/games'));
 const vaultbeamRouter = require('./routes/vaultbeam');
 app.use('/vaultbeam', vaultbeamRouter);
 app.use('/nav', require('./routes/nav'));   // routing proxy → self-hosted Valhalla
@@ -214,6 +213,10 @@ function broadcastChatEvent(chatId, event, payload) {
 
 // Wire the chats router so its REST writes broadcast over sockets.
 chatsRouter.setBroadcasters({ newMessage: broadcastNewMessage, chatEvent: broadcastChatEvent });
+
+// Uploads router broadcasts 'media_revoked' to every chat referencing a revoked
+// attachment, so recipients destroy their media key + plaintext immediately.
+uploadsRouter.setBroadcasters({ chatEvent: broadcastChatEvent });
 
 // Bridge form of the same broadcasters, for chat routes served by Go.
 // { kind:'new_message', chatId, payload } | { kind:'chat_event', chatId, event, payload }
@@ -925,14 +928,13 @@ io.on('connection', (socket) => {
     if (chatId) socket.to(`chat:${chatId}`).emit('reaction_updated', { messageId, reactions });
   });
 
-  // ── In-call extras ─────────────────────────────────────────
-  socket.on('call_emoji', ({ chatId, emoji, from }) => {
-    if (chatId) socket.to(`chat:${chatId}`).emit('call_emoji', { emoji, from });
-  });
-
-  socket.on('call_chat', ({ chatId, text, from }) => {
-    if (chatId) socket.to(`chat:${chatId}`).emit('call_chat', { text, from });
-  });
+  // NOTE: the in-call extras (`call_emoji`, `call_chat`) were chat-room
+  // broadcasts that re-emitted a CLIENT-supplied `from` — the same spoofing
+  // shape the message_edited/message_deleted relays above were removed for, and
+  // they reached every chat member rather than the people actually on the call.
+  // Both now ride relayToPeer (below), which requires a `to`, stamps the
+  // authenticated sender, and forwards the payload verbatim so the body can be
+  // an E2EE envelope instead of plaintext. No client had ever used either event.
 
   // ── WebRTC signaling ──────────────────────────────────────
   // Targets a specific peer by uid. Sender must include `to: <peer uid>`.
@@ -995,6 +997,9 @@ io.on('connection', (socket) => {
   });
   socket.on('screen_share_start', relayToPeer('screen_share_start'));
   socket.on('screen_share_stop',  relayToPeer('screen_share_stop'));
+  // In-call chat + reactions — addressed, authenticated, body opaque (E2EE).
+  socket.on('call_chat',          relayToPeer('call_chat'));
+  socket.on('call_emoji',         relayToPeer('call_emoji'));
   // VaultBeam P2P file transfer — own signaling channel so it never collides
   // with an in-progress call.
   socket.on('vaultbeam_offer',    relayToPeer('vaultbeam_offer'));
@@ -1033,158 +1038,6 @@ io.on('connection', (socket) => {
     socket.leave(room);
   });
 
-  // ── Gaming Platform ───────────────────────────────────────
-  // Ephemeral in-memory — coins, rooms, queue. Lost on restart (acceptable
-  // until Phase 6+ moves wallet to Postgres).
-  const gamePlayers    = io.gamePlayers    || (io.gamePlayers    = new Map());
-  const gameRooms      = io.gameRooms      || (io.gameRooms      = new Map());
-  const gameMatchQueue = io.gameMatchQueue || (io.gameMatchQueue = new Map());
-
-  socket.on('game_join_lobby', async ({ name }) => {
-    const me = socket.data.uid;
-    if (!me) return;
-    let profile;
-    try { profile = await gameStore.loadProfile(me); }
-    catch (e) { console.error('[game_join_lobby]', e.message); profile = { coins: 1000, wins: 0 }; }
-    gamePlayers.set(me, {
-      uid: me,
-      name: name || socket.data.email || 'Player',
-      socketId: socket.id,
-      coins: profile.coins,
-      wins: profile.wins,
-      inGame: false,
-    });
-    socket.join('game_lobby');
-    socket.emit('game_coins', { coins: profile.coins });
-  });
-
-  socket.on('game_leave_lobby', () => socket.leave('game_lobby'));
-
-  socket.on('game_quick_match', async ({ gameType, bet }) => {
-    const me = socket.data.uid;
-    const player = gamePlayers.get(me);
-    if (!player) return;
-    const wager = Math.max(0, parseInt(bet, 10) || 0);
-    if (player.coins < wager) {
-      socket.emit('game_error', { message: 'Not enough coins' });
-      return;
-    }
-    const waitKey = `${gameType}_${wager}`;
-    const waiting = gameMatchQueue.get(waitKey);
-    if (waiting && waiting.uid !== me) {
-      gameMatchQueue.delete(waitKey);
-      const roomId = `GAME-${Date.now().toString(36).toUpperCase()}`;
-      const room = {
-        id: roomId, gameType, bet: wager,
-        players: [
-          { uid: waiting.uid, name: waiting.name, socketId: waiting.socketId },
-          { uid: me, name: player.name, socketId: socket.id },
-        ],
-        state: {}, turn: waiting.uid, startedAt: Date.now(),
-      };
-      gameRooms.set(roomId, room);
-
-      // Persist: log the match + deduct the wager from both balances.
-      try {
-        await gameStore.recordMatch(room);
-        const aCoins = await gameStore.adjustCoins(waiting.uid, -wager);
-        const bCoins = await gameStore.adjustCoins(me, -wager);
-        const wp = gamePlayers.get(waiting.uid); if (wp) { wp.coins = aCoins; wp.inGame = true; }
-        player.coins = bCoins; player.inGame = true;
-      } catch (e) { console.error('[game_quick_match persist]', e.message); }
-
-      const waitingSocket = io.sockets.sockets.get(waiting.socketId);
-      if (waitingSocket) {
-        waitingSocket.data.gameRoomId = roomId;
-        waitingSocket.emit('game_matched', {
-          roomId, gameType, bet: wager,
-          opponent: { uid: me, name: player.name }, yourTurn: true,
-        });
-        waitingSocket.emit('game_coins', { coins: gamePlayers.get(waiting.uid)?.coins ?? 0 });
-        waitingSocket.join(`game:${roomId}`);
-      }
-      socket.data.gameRoomId = roomId;
-      socket.emit('game_matched', {
-        roomId, gameType, bet: wager,
-        opponent: { uid: waiting.uid, name: waiting.name }, yourTurn: false,
-      });
-      socket.emit('game_coins', { coins: player.coins });
-      socket.join(`game:${roomId}`);
-    } else {
-      gameMatchQueue.set(waitKey, {
-        uid: me, name: player.name, socketId: socket.id, gameType, bet: wager,
-      });
-      socket.emit('game_waiting', { gameType, bet: wager });
-    }
-  });
-
-  socket.on('game_cancel_match', ({ gameType, bet }) => {
-    const me = socket.data.uid;
-    const waitKey = `${gameType}_${Math.max(0, parseInt(bet, 10) || 0)}`;
-    const waiting = gameMatchQueue.get(waitKey);
-    if (waiting && waiting.uid === me) gameMatchQueue.delete(waitKey);
-    socket.emit('game_match_cancelled');
-  });
-
-  // game-play opens its own socket; it must re-join the game room (the
-  // matchmaking socket from the lobby is a different connection). This fixes
-  // the prior bug where game-play joined `chat:<room>` and never received the
-  // events broadcast to `game:<room>`.
-  socket.on('game_rejoin', ({ roomId }) => {
-    const me = socket.data.uid;
-    const room = gameRooms.get(roomId);
-    if (!room) { socket.emit('game_error', { message: 'Match no longer active' }); return; }
-    const p = room.players.find(pl => pl.uid === me);
-    if (!p) return;
-    p.socketId = socket.id;
-    socket.data.gameRoomId = roomId;
-    socket.join(`game:${roomId}`);
-    socket.emit('game_rejoined', { roomId, yourTurn: room.turn === me });
-  });
-
-  socket.on('game_move', ({ roomId, move }) => {
-    const me = socket.data.uid;
-    const room = gameRooms.get(roomId);
-    if (!room) return;
-    socket.to(`game:${roomId}`).emit('game_move', { uid: me, move });
-    room.turn = room.players.find(p => p.uid !== me)?.uid ?? me;
-  });
-
-  // Settle a finished room: pay the winner the pot, persist, notify, clean up.
-  async function settleGame(roomId, winnerId, reason) {
-    const room = gameRooms.get(roomId);
-    if (!room) return;
-    gameRooms.delete(roomId);
-    const pot = room.bet * 2;
-    const loserId = room.players.find(p => p.uid !== winnerId)?.uid ?? null;
-    let winnerCoins = null;
-    try {
-      const r = await gameStore.finishMatch(roomId, winnerId, loserId, pot);
-      winnerCoins = r.winnerCoins;
-    } catch (e) { console.error('[settleGame persist]', e.message); }
-    const wp = winnerId && gamePlayers.get(winnerId);
-    if (wp) { wp.coins = winnerCoins ?? (wp.coins + pot); wp.wins++; wp.inGame = false; }
-    const lp = loserId && gamePlayers.get(loserId);
-    if (lp) lp.inGame = false;
-    io.to(`game:${roomId}`).emit('game_ended', { winnerId, totalPot: pot, reason });
-    room.players.forEach(p => {
-      const s = io.sockets.sockets.get(p.socketId);
-      if (s) {
-        s.leave(`game:${roomId}`);
-        delete s.data.gameRoomId;
-        s.emit('game_coins', { coins: gamePlayers.get(p.uid)?.coins ?? 0 });
-      }
-    });
-  }
-
-  socket.on('game_end', ({ roomId, winnerId, reason }) => {
-    settleGame(roomId, winnerId, reason).catch(e => console.error('[game_end]', e.message));
-  });
-
-  socket.on('game_chat', ({ roomId, text }) => {
-    if (roomId) socket.to(`game:${roomId}`).emit('game_chat', { uid: socket.data.uid, text });
-  });
-
   // ── Disconnect cleanup ────────────────────────────────────
   socket.on('disconnect', () => {
     untrackSocket(socket);
@@ -1192,17 +1045,6 @@ io.on('connection', (socket) => {
     for (const room of socket.rooms) {
       if (typeof room === 'string' && room.startsWith('call:')) {
         socket.to(room).emit('call_peer_left', { chatId: room.slice(5), uid: socket.data.uid });
-      }
-    }
-    // Drop out of any pending matchmaking queue.
-    for (const [k, w] of gameMatchQueue) if (w.socketId === socket.id) gameMatchQueue.delete(k);
-    // Forfeit any active game this socket was in — the remaining player wins.
-    const roomId = socket.data.gameRoomId;
-    if (roomId) {
-      const room = gameRooms.get(roomId);
-      if (room) {
-        const winnerId = room.players.find(p => p.uid !== socket.data.uid)?.uid ?? null;
-        settleGame(roomId, winnerId, 'opponent_left').catch(e => console.error('[disconnect forfeit]', e.message));
       }
     }
   });

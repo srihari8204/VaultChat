@@ -14,8 +14,15 @@ import * as Location from 'expo-location';
 import { emit, getSocket, joinChatRoom, leaveChatRoom } from '../socket';
 import { newLiveKey, sealJSON, openJSON, putLiveKey, getLiveKey, clearLiveKey } from '../liveLocationCrypto';
 import { sendMessage, getMessages, type Message } from '../chatService';
-import { evaluateFences, type Geofence } from './geofence';
+import { type Geofence } from './geofence';
 import { getPlaces } from './store';
+import { readBattery } from './battery';
+import { processFix } from './fixPipeline';
+import { recordSample } from './history';
+import {
+  startBackgroundPresence, stopBackgroundPresence, updateBackgroundKey,
+  hasBackgroundPermission, isBackgroundRunning,
+} from './background';
 import { type FamilyPing, type MemberPresence } from './types';
 import { type LatLng } from '../nav/geo';
 
@@ -30,7 +37,9 @@ let myId = '';
 let myName = 'A member';
 let circleIds: string[] = [];
 const places = new Map<string, Geofence[]>();
-const inside = new Map<string, Set<string>>();
+// NOTE: the "inside" fence state used to live here and died with the screen, so
+// every restart re-announced wherever you already were. It is now persisted by
+// fixPipeline.ts, which is also what lets the background task continue the run.
 let selfCb: ((p: MemberPresence) => void) | null = null;
 
 async function deliverKeys() {
@@ -48,22 +57,28 @@ async function onFix(loc: Location.LocationObject) {
   const pos: LatLng = { lat: loc.coords.latitude, lng: loc.coords.longitude };
   const spd = loc.coords.speed != null && loc.coords.speed >= 0 ? loc.coords.speed : undefined;
   const ts = loc.timestamp || Date.now();
+  const bat = await readBattery();
 
-  selfCb?.({ userId: myId, pos, speed: spd, ts });   // always show myself
+  // always show myself, now with the battery the roster chip was already drawing
+  selfCb?.({ userId: myId, pos, speed: spd, ts, battery: bat.level, charging: bat.charging });
 
-  if (!sharing || !myKey) return;
-  const blob = sealJSON(myKey, { lat: pos.lat, lng: pos.lng, spd, ts } as FamilyPing);
+  const blob = sharing && myKey
+    ? sealJSON(myKey, { lat: pos.lat, lng: pos.lng, spd, ts, bat: bat.level, chg: bat.charging } as FamilyPing)
+    : null;
   const u = until();
+
   for (const cid of circleIds) {
     if (blob) emit('live_location_update', { chatId: cid, blob, until: u }).catch(() => {});
-    const fences = places.get(cid) ?? [];
-    if (fences.length) {
-      const set = inside.get(cid) ?? new Set<string>();
-      inside.set(cid, set);
-      for (const ev of evaluateFences(fences, pos, set)) {
-        sendMessage(cid, `${myName} ${ev.type === 'enter' ? 'arrived at' : 'left'} ${ev.name}`, 'system').catch(() => {});
-      }
-    }
+    // History and geofence alerts are LOCAL, so they run whether or not I am
+    // broadcasting — but the circle is only told about a crossing when I am.
+    await processFix(cid, {
+      userId: myId, name: myName, pos, ts, speed: spd,
+      battery: bat.level, charging: bat.charging,
+    }, {
+      self: true,
+      fences: places.get(cid) ?? [],
+      announce: sharing ? (text) => { sendMessage(cid, text, 'system').catch(() => {}); } : undefined,
+    });
   }
 }
 
@@ -75,27 +90,63 @@ export async function startPresence(o: StartPresenceOpts): Promise<void> {
   const perm = await Location.requestForegroundPermissionsAsync();
   if (perm.status !== 'granted') throw new Error('Location permission is required for Family Circle.');
   circleIds = o.circleIds; myId = o.myId; myName = o.myName || 'A member'; selfCb = o.onSelf; sharing = o.share;
-  for (const cid of circleIds) { places.set(cid, await getPlaces(cid)); inside.set(cid, new Set()); }
-  if (sharing) { myKey = newLiveKey(); await deliverKeys(); }
+  for (const cid of circleIds) places.set(cid, await getPlaces(cid));
+  if (sharing) { myKey = newLiveKey(); await deliverKeys(); await handOffToBackground(); }
   watcher = await Location.watchPositionAsync(
     { accuracy: Location.Accuracy.Balanced, timeInterval: 8000, distanceInterval: 15 },
     onFix,
   );
 }
 
+/**
+ * Mirror the current publishing context into the background task so sharing
+ * survives leaving the screen. A refused always-on permission is not an error:
+ * we simply stay foreground-only, which is the old behaviour.
+ */
+async function handOffToBackground(): Promise<boolean> {
+  if (!sharing || !circleIds.length) return false;
+  try { return await startBackgroundPresence({ circleIds, myId, myName, key: myKey }); }
+  catch { return false; }
+}
+
+/** Is the always-on background publisher currently running? */
+export async function isBackgroundSharing(): Promise<boolean> { return isBackgroundRunning(); }
+export async function canShareInBackground(): Promise<boolean> { return hasBackgroundPermission(); }
+
 /** Toggle broadcast without tearing down the watcher/map. */
 export async function setSharing(share: boolean): Promise<void> {
   if (share === sharing) return;
   sharing = share;
-  if (share) { myKey = newLiveKey(); await deliverKeys(); }
-  else { myKey = null; for (const cid of circleIds) emit('live_location_stop', { chatId: cid }).catch(() => {}); }
+  if (share) {
+    myKey = newLiveKey();
+    await deliverKeys();
+    await handOffToBackground();
+  } else {
+    myKey = null;
+    await stopBackgroundPresence();
+    for (const cid of circleIds) emit('live_location_stop', { chatId: cid }).catch(() => {});
+  }
 }
 
+/**
+ * Tear down the FOREGROUND watcher only.
+ *
+ * This deliberately no longer stops sharing: app/family.tsx calls it whenever the
+ * screen loses focus, and stopping there was exactly the bug — location sharing
+ * died the moment you looked at anything else. When the background publisher is
+ * running, sharing continues; only setSharing(false) is a real "stop".
+ */
 export async function stopPresence(): Promise<void> {
   try { watcher?.remove(); } catch {}
   watcher = null;
+  selfCb = null;
+
+  if (sharing && await isBackgroundRunning()) {
+    await updateBackgroundKey(myKey);   // hand the live key over and let it run
+    return;
+  }
   if (sharing) for (const cid of circleIds) emit('live_location_stop', { chatId: cid }).catch(() => {});
-  sharing = false; myKey = null; circleIds = []; selfCb = null; places.clear(); inside.clear();
+  sharing = false; myKey = null; circleIds = []; places.clear();
 }
 
 export function isSharing(): boolean { return sharing; }
@@ -135,7 +186,16 @@ export async function subscribeCircle(circleId: string, meId: string, onEvent: (
     if (!key) { captureFromHistory(); return; }         // key not captured yet → refetch; next blob decrypts
     const ping = openJSON<FamilyPing>(key, e.blob);
     if (ping && typeof ping.lat === 'number' && typeof ping.lng === 'number') {
-      onEvent({ userId: String(e.userId), presence: { userId: String(e.userId), pos: { lat: ping.lat, lng: ping.lng }, speed: ping.spd, battery: ping.bat, ts: ping.ts || Date.now() } });
+      const uid = String(e.userId);
+      const ts = ping.ts || Date.now();
+      onEvent({ userId: uid, presence: {
+        userId: uid, pos: { lat: ping.lat, lng: ping.lng }, speed: ping.spd,
+        battery: ping.bat, charging: ping.chg, ts,
+      } });
+      // Keep this member's local history. Their geofences are evaluated on THEIR
+      // device, so this records the track only — see fixPipeline.processFix.
+      recordSample(circleId, { u: uid, lat: ping.lat, lng: ping.lng, ts, bat: ping.bat, spd: ping.spd })
+        .catch(() => {});
     }
   };
   const onStop = (e: any) => {

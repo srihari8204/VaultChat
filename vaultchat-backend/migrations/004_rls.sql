@@ -5,6 +5,16 @@
 --   The backend connects as `vaultchat_app` (no BYPASSRLS by default in
 --   Postgres for non-superusers — verify with: \du vaultchat_app).
 --
+--   NOTE: \du checks the BYPASSRLS *attribute*, which is necessary but NOT
+--   sufficient. Postgres also exempts a table's OWNER from that table's own
+--   policies unless the table is set to FORCE ROW LEVEL SECURITY, and no
+--   migration here does that. If vaultchat_app owns these tables, every policy
+--   below is inert and \du will not say so. Check with:
+--       psql "$DATABASE_URL" -f scripts/check-rls.sql
+--   and see docs/RLS_ENFORCEMENT.md. Do not flip FORCE on casually: `chats`
+--   has no INSERT policy at all, so enforcing it denies every chat creation
+--   until one is written.
+--
 --   Before every user-bound query the backend issues:
 --       SET LOCAL app.current_user_id = '<uuid>';
 --   inside a transaction. RLS policies read that setting via

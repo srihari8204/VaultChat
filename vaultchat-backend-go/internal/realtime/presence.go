@@ -7,6 +7,7 @@ import (
 	"github.com/zishang520/socket.io/v2/socket"
 
 	"vaultchat/backend-go/internal/db"
+	"vaultchat/backend-go/internal/workx"
 )
 
 // GHOST_COLS — the allowlisted ghost_mode columns (server.js GHOST_COLS). The
@@ -35,7 +36,20 @@ func (h *Hub) trackSocket(s *socket.Socket) {
 	set[string(s.Id())] = struct{}{}
 	h.pmu.Unlock()
 	if wasEmpty {
-		go h.onUserOnline(d.uid) // first socket → presence online
+		// First LOCAL socket. Single-node that IS the online transition; in a
+		// cluster the user may already be online via another node — register
+		// this node's claim in Redis and only fire the transition if the user
+		// was globally offline (P2.1). Pool-submitted, not raw-spawned: a
+		// reconnect storm must not fork one goroutine per flip (P2.2).
+		workx.Submit(func() {
+			if ClusterEnabled() {
+				if clusterTrackFirst(d.uid) {
+					h.onUserOnline(d.uid)
+				}
+				return
+			}
+			h.onUserOnline(d.uid)
+		})
 	}
 }
 
@@ -57,14 +71,24 @@ func (h *Hub) untrackSocket(s *socket.Socket) {
 	}
 	h.pmu.Unlock()
 	if last {
-		go h.onUserOffline(d.uid) // last socket → presence offline
+		// Last LOCAL socket — mirror of trackSocket: withdraw this node's
+		// claim; fire offline only when no live node still has the user.
+		workx.Submit(func() {
+			if ClusterEnabled() {
+				if clusterUntrackLast(d.uid) {
+					h.onUserOffline(d.uid)
+				}
+				return
+			}
+			h.onUserOffline(d.uid)
+		})
 	}
 }
 
 // ── Presence (server.js onUserOnline/onUserOffline/broadcastPresence) ──
 
 func (h *Hub) onUserOnline(uid string) {
-	if _, err := db.Pool.Exec(bg,
+	if _, err := db.SysPool.Exec(bg,
 		`UPDATE users SET online = TRUE WHERE id = $1 AND COALESCE(online, FALSE) = FALSE`, uid); err != nil {
 		log.Printf("[presence on] %v", err)
 		return
@@ -74,7 +98,7 @@ func (h *Hub) onUserOnline(uid string) {
 
 func (h *Hub) onUserOffline(uid string) {
 	now := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
-	if _, err := db.Pool.Exec(bg,
+	if _, err := db.SysPool.Exec(bg,
 		`UPDATE users SET online = FALSE, last_seen_at = NOW() WHERE id = $1`, uid); err != nil {
 		log.Printf("[presence off] %v", err)
 		return
@@ -85,7 +109,7 @@ func (h *Hub) onUserOffline(uid string) {
 func (h *Hub) broadcastPresence(uid string, payload map[string]any) {
 	// Respect last_seen_visible: blank lastSeenAt if the user hid it.
 	var visible *bool
-	if err := db.Pool.QueryRow(bg, `SELECT last_seen_visible FROM users WHERE id = $1`, uid).Scan(&visible); err != nil {
+	if err := db.SysPool.QueryRow(bg, `SELECT last_seen_visible FROM users WHERE id = $1`, uid).Scan(&visible); err != nil {
 		log.Printf("[broadcastPresence] %v", err)
 		return
 	}
@@ -93,7 +117,7 @@ func (h *Hub) broadcastPresence(uid string, payload map[string]any) {
 		payload["lastSeenAt"] = nil
 	}
 	// Distinct other-users this user shares any live chat with.
-	rows, err := db.Pool.Query(bg,
+	rows, err := db.SysPool.Query(bg,
 		`SELECT DISTINCT cm2.user_id
 		   FROM chat_members cm1
 		   JOIN chat_members cm2 ON cm2.chat_id = cm1.chat_id
@@ -130,7 +154,7 @@ func (h *Hub) loadGhostTargets(senderID, column string) map[string]bool {
 	if senderID == "" || !ghostCols[column] {
 		return out
 	}
-	rows, err := db.Pool.Query(bg,
+	rows, err := db.SysPool.Query(bg,
 		`SELECT target_id FROM ghost_mode WHERE owner_id = $1 AND `+column+` = TRUE`, senderID)
 	if err != nil {
 		log.Printf("[loadGhostTargets] %v", err)
@@ -152,7 +176,7 @@ func (h *Hub) loadGhostOwners(targetID, column string) map[string]bool {
 	if targetID == "" || !ghostCols[column] {
 		return out
 	}
-	rows, err := db.Pool.Query(bg,
+	rows, err := db.SysPool.Query(bg,
 		`SELECT owner_id FROM ghost_mode WHERE target_id = $1 AND `+column+` = TRUE`, targetID)
 	if err != nil {
 		log.Printf("[loadGhostOwners] %v", err)

@@ -1,0 +1,531 @@
+{
+  "uid": "vaultchat-sli",
+  "title": "VaultChat \u2014 Service SLIs",
+  "tags": [
+    "vaultchat",
+    "sli"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Latency SLIs",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "p95 latency by route",
+      "description": "Message send target is p95 < 800ms; call wake target is p95 < 2s. Route label is the ServeMux PATTERN, so chat ids do not fan out into separate series.",
+      "gridPos": {
+        "h": 9,
+        "w": 16,
+        "x": 0,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 5
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 800
+              },
+              {
+                "color": "red",
+                "value": 2000
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (route, le) (rate(vaultchat_http_route_duration_ms_bucket[5m])))",
+          "legendFormat": "{{route}}"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Message send p95",
+      "description": "The headline SLI. Target < 800ms.",
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 16,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 800
+              },
+              {
+                "color": "red",
+                "value": 2000
+              }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vaultchat_http_route_duration_ms_bucket{route=~\".*POST /chats.*messages.*\"}[5m])))",
+          "legendFormat": "p95"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Traffic & errors",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 10
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Requests/sec by status code",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 11
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (code) (rate(vaultchat_http_requests_total[5m]))",
+          "legendFormat": "{{code}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "5xx rate",
+      "description": "Any sustained non-zero value here is a page.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 11
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "red"
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(vaultchat_http_requests_total{code=~\"5..\"}[5m]))",
+          "legendFormat": "5xx"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Realtime",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 19
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Sockets online",
+      "description": "Read live from the realtime hub at scrape time (cluster-aware: Redis-backed when ClusterEnabled).",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 20
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "vaultchat_sockets_online",
+          "legendFormat": "online"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Socket churn/sec",
+      "description": "Connects vs disconnects. A flat online gauge with high churn means clients are reconnect-looping.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 20
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(vaultchat_events_total{event=\"socket_connect\"}[5m])",
+          "legendFormat": "connect"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(vaultchat_events_total{event=\"socket_disconnect\"}[5m])",
+          "legendFormat": "disconnect"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "In-flight HTTP requests",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 20
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "vaultchat_http_inflight",
+          "legendFormat": "in-flight"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Process health",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 28
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Heap allocated",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 29
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "vaultchat_heap_alloc_bytes",
+          "legendFormat": "heap"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Goroutines",
+      "description": "A monotonic climb here is a leak \u2014 usually an un-cancelled context or a socket handler that never returns.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 29
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "vaultchat_goroutines",
+          "legendFormat": "goroutines"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Uptime",
+      "description": "Resets mark restarts. Frequent resets with no deploy means the process is crash-looping.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 29
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "vaultchat_uptime_seconds",
+          "legendFormat": "uptime"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Calls",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 37
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Calls started vs joined",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 38
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(vaultchat_events_total{event=\"call_started\"}[5m]) * 60",
+          "legendFormat": "started/min"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(vaultchat_events_total{event=\"call_joined\"}[5m]) * 60",
+          "legendFormat": "joined/min"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 5
+          }
+        }
+      },
+      "description": "Two lines on purpose: joins climbing while starts stay flat means bigger groups, not more calls."
+    },
+    {
+      "type": "timeseries",
+      "title": "Mean call duration",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 38
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "increase(vaultchat_events_total{event=\"call_seconds_total\"}[1h]) / clamp_min(increase(vaultchat_events_total{event=\"call_ended\"}[1h]), 1)",
+          "legendFormat": "mean"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 5
+          },
+          "unit": "s"
+        }
+      },
+      "description": "Sum/count rather than a histogram: the shared bucket set tops out at 10s, tuned for request latency, and a call is minutes."
+    },
+    {
+      "type": "timeseries",
+      "title": "Refusals \u2014 the ones that cost a user something",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 38
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(vaultchat_events_total{event=\"call_mesh_full\"}[5m]) * 60",
+          "legendFormat": "mesh full (cap 5)"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(vaultchat_events_total{event=\"call_join_refused\"}[5m]) * 60",
+          "legendFormat": "join refused"
+        },
+        {
+          "refId": "C",
+          "expr": "rate(vaultchat_events_total{event=\"call_sfu_unconfigured\"}[5m]) * 60",
+          "legendFormat": "SFU not configured"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 5
+          }
+        }
+      },
+      "description": "Every mesh-full increment is a real person refused entry to a call in progress. A rising rate is the evidence for the SFU, or for raising MESH_MAX_PARTICIPANTS."
+    },
+    {
+      "type": "timeseries",
+      "title": "SFU tokens issued by role",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 46
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(vaultchat_events_total{event=~\"call_sfu_token_.*\"}[5m]) * 60",
+          "legendFormat": "{{event}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 5
+          }
+        }
+      },
+      "description": "An audience token is subscribe-only by grant, not by UI. Watching the mix shows whether webinar mode is actually being used."
+    },
+    {
+      "type": "timeseries",
+      "title": "Socket call signalling",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 46
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(vaultchat_events_total{event=\"socket_connect\"}[5m]) * 60",
+          "legendFormat": "socket connect/min"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(vaultchat_events_total{event=\"socket_disconnect\"}[5m]) * 60",
+          "legendFormat": "socket disconnect/min"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 5
+          }
+        }
+      },
+      "description": "Call signalling rides these sockets; a churn spike during calls points at the transport, not the media."
+    }
+  ]
+}

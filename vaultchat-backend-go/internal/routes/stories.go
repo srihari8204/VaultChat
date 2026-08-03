@@ -34,7 +34,7 @@ func RegisterStories(mux *http.ServeMux) {
 // audienceIDs mirrors stories.js audienceIds: shared-active-chat peers minus
 // blocks, filtered by the author's status_privacy mode.
 func audienceIDs(ctx context.Context, userID string) ([]string, error) {
-	rows, err := db.Pool.Query(ctx,
+	rows, err := db.SysPool.Query(ctx,
 		`SELECT DISTINCT cm_them.user_id AS id
 		   FROM chat_members cm_me
 		   JOIN chat_members cm_them ON cm_them.chat_id = cm_me.chat_id
@@ -291,7 +291,7 @@ func storiesPost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var ownerID *string
-	err := db.Pool.QueryRow(ctx,
+	err := db.SysPool.QueryRow(ctx,
 		`SELECT owner_user_id FROM attachments WHERE id = $1 LIMIT 1`, attachmentID).Scan(&ownerID)
 	if err != nil {
 		if db.NoRows(err) {

@@ -1,10 +1,15 @@
 package realtime
 
 import (
+	"os"
+	"strconv"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/zishang520/socket.io/v2/socket"
 
 	"vaultchat/backend-go/internal/db"
+	"vaultchat/backend-go/internal/metrics"
+	"vaultchat/backend-go/internal/workx"
 )
 
 // ── shared payload helpers ────────────────────────────────────────────
@@ -128,19 +133,14 @@ func (h *Hub) registerChatHandlers(s *socket.Socket) {
 		}
 	})
 
-	// In-call extras — relay into the chat room (excl. self).
-	s.On("call_emoji", func(args ...any) {
-		m := argMap(args)
-		if chatID := mstr(m, "chatId"); chatID != "" {
-			s.To(socket.Room("chat:"+chatID)).Emit("call_emoji", map[string]any{"emoji": m["emoji"], "from": m["from"]})
-		}
-	})
-	s.On("call_chat", func(args ...any) {
-		m := argMap(args)
-		if chatID := mstr(m, "chatId"); chatID != "" {
-			s.To(socket.Room("chat:"+chatID)).Emit("call_chat", map[string]any{"text": m["text"], "from": m["from"]})
-		}
-	})
+	// NOTE: the in-call extras (`call_emoji`, `call_chat`) used to be handled
+	// here as chat-room broadcasts that re-emitted a CLIENT-supplied `from` —
+	// the same spoofing shape the legacy message_edited/message_deleted relays
+	// were removed for (see server.js). They are now registered on the
+	// authenticated per-peer relay in registerSignalHandlers, which requires a
+	// `to`, stamps `from`/`fromUid` from the socket's own uid, and passes the
+	// payload through verbatim so the body can be an E2EE envelope rather than
+	// plaintext. No client had ever sent or received either event.
 }
 
 // liveLocAllowed caches the chat-membership check per socket per chat (RLS,
@@ -246,6 +246,10 @@ func (h *Hub) registerSignalHandlers(s *socket.Socket) {
 	s.On("e2ee_rekey", relay("e2ee_rekey"))
 	s.On("screen_share_start", relay("screen_share_start"))
 	s.On("screen_share_stop", relay("screen_share_stop"))
+	// In-call chat + reactions. Addressed like any other call signal so the
+	// sender is authenticated and the body stays an opaque E2EE envelope.
+	s.On("call_chat", relay("call_chat"))
+	s.On("call_emoji", relay("call_emoji"))
 	s.On("vaultbeam_offer", relay("vaultbeam_offer"))
 	s.On("vaultbeam_answer", relay("vaultbeam_answer"))
 	s.On("vaultbeam_ice", relay("vaultbeam_ice"))
@@ -285,17 +289,49 @@ func (h *Hub) registerSignalHandlers(s *socket.Socket) {
 			"callerName": mstr(m, "callerName"),
 			"callType":   callType,
 		}
-		go h.sendCallWakePush(bg, to, title, body, data)
+		workx.Submit(func() { h.sendCallWakePush(bg, to, title, body, data) }) // P2.2: bounded, not raw-spawned
 	})
 
-	// Group calls (mesh) — a call room per chat.
+	// Group calls (mesh) — a call room per chat. In cluster mode the roster
+	// lives in Redis (cluster.go) because FetchSockets on the local adapter
+	// only sees THIS node's sockets; the room join/leave still happens so the
+	// Redis adapter carries the in-room emits across nodes (P2.1).
 	s.On("join_call", func(args ...any) {
 		chatID := mstr(argMap(args), "chatId")
 		if chatID == "" {
 			return
 		}
 		room := socket.Room("call:" + chatID)
-		existing := h.callRoster(room, d.uid)
+		var existing []string
+		if ClusterEnabled() {
+			existing = clusterCallRoster(chatID, d.uid)
+		} else {
+			existing = h.callRoster(room, d.uid)
+		}
+		// P6.1: enforce the mesh cap SERVER-side. This is a full mesh — each
+		// participant holds N-1 RTCPeerConnections and uploads N-1 encoded
+		// streams, so cost grows quadratically across the call and linearly
+		// per phone. Past ~5-6 the uplink/CPU on mid-tier mobile collapses and
+		// the call degrades for EVERYONE already in it, not just the joiner.
+		// Refusing the join is strictly better than admitting them and melting
+		// the room. The client shows a "call is full" notice (call_full).
+		// Raising this is an SFU decision, not a config decision — see
+		// SCALEOUT.md; MESH_MAX_PARTICIPANTS exists to lower it, or to raise
+		// it deliberately once an SFU terminates the media instead of peers.
+		if max := meshMaxParticipants(); len(existing)+1 > max {
+			// The single most actionable call metric: every increment is a real
+			// person refused entry to a call in progress. A rising rate is the
+			// evidence that the mesh cap is costing users something, and the
+			// argument for the SFU — or for raising MESH_MAX_PARTICIPANTS.
+			metrics.Inc("call_mesh_full")
+			s.Emit("call_full", map[string]any{
+				"chatId": chatID, "max": max, "reason": "mesh_capacity",
+			})
+			return
+		}
+		if ClusterEnabled() {
+			clusterCallJoin(chatID, d.uid)
+		}
 		s.Join(room)
 		s.Emit("call_roster", map[string]any{"chatId": chatID, "peers": existing})
 		s.To(room).Emit("call_peer_joined", map[string]any{"chatId": chatID, "uid": d.uid})
@@ -308,7 +344,21 @@ func (h *Hub) registerSignalHandlers(s *socket.Socket) {
 		room := socket.Room("call:" + chatID)
 		s.To(room).Emit("call_peer_left", map[string]any{"chatId": chatID, "uid": d.uid})
 		s.Leave(room)
+		if ClusterEnabled() {
+			clusterCallLeave(chatID, d.uid)
+		}
 	})
+}
+
+// meshMaxParticipants is the hard ceiling on a full-mesh group call,
+// including the joiner. Default 5: at 5 participants each phone already runs
+// 4 peer connections and 4 outbound encodes. MESH_MAX_PARTICIPANTS overrides
+// it; values <2 are ignored (a call needs at least two people).
+func meshMaxParticipants() int {
+	if v, err := strconv.Atoi(os.Getenv("MESH_MAX_PARTICIPANTS")); err == nil && v >= 2 {
+		return v
+	}
+	return 5
 }
 
 // callRoster returns the distinct uids already in a call room (excl. me).

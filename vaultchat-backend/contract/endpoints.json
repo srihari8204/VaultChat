@@ -173,11 +173,6 @@
     "POST /channels/:id/posts",
     "POST /channels/join"
   ],
-  "games": [
-    "GET /games/history",
-    "GET /games/leaderboard",
-    "GET /games/profile"
-  ],
   "vaultbeam": [
     "GET /vaultbeam/relay/:transferId",
     "POST /vaultbeam/relay/abort",

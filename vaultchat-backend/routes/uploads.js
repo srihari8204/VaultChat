@@ -29,6 +29,14 @@ const vault   = require('../lib/vault');
 
 const router = express.Router();
 
+// Broadcast helper — set by server.js at boot via setBroadcasters(), same shape
+// as the chats router. No-op until wired, so revoke still works (stamp + byte
+// delete) even when the socket layer isn't up.
+let broadcastChatEvent = (_chatId, _event, _payload) => {};
+function setBroadcasters(funcs) {
+  if (funcs.chatEvent) broadcastChatEvent = funcs.chatEvent;
+}
+
 const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR || path.join(process.cwd(), 'uploads'));
 // 50 MB default so a ~30 second 1080p clip fits without bumping env.
 // Override via env in production once we know real distribution.
@@ -283,12 +291,20 @@ router.get('/:id', jwtUtil.requireAuth, async (req, res) => {
   try {
     const r = await req.dbQuery(
       `SELECT id, owner_user_id, filename, mime_type, size_bytes, storage_path,
-              view_once, viewed_at, storage_backend
+              view_once, viewed_at, revoked_at, storage_backend
        FROM attachments WHERE id = $1 LIMIT 1`,
       [req.params.id]
     );
     const att = r.rows[0];
     if (!att) return res.status(404).json({ error: 'Not found' });
+
+    // Revoked media is gone for EVERYONE — sender included. Checked before the
+    // membership work below so a revoked attachment never touches storage, and
+    // ahead of the view-once gate because revoke is the stronger signal: the
+    // client wipes its local key + plaintext when it sees `revoked: true`.
+    if (att.revoked_at) {
+      return res.status(410).json({ error: 'This media was revoked by the sender.', revoked: true });
+    }
 
     // Permission: owner, OR member of any chat that references this attachment in messages.meta,
     // OR any signed-in user when this attachment is currently used as someone's profile photo.
@@ -443,4 +459,74 @@ router.post('/:id/viewed', jwtUtil.requireAuth, async (req, res) => {
   }
 });
 
+// ── POST /uploads/:id/revoke ─────────────────────────────────
+// VaultView remote revoke. OWNER ONLY. One-way and irreversible:
+//   1. stamp revoked_at            → every later GET 410s, including the owner's
+//   2. delete the stored bytes     → the server no longer holds a copy at all
+//   3. broadcast 'media_revoked'   → online recipients destroy their per-file
+//                                    media key and any decrypted plaintext
+//
+// Offline recipients converge without the socket event: their next fetch 410s,
+// and the client wipes local key + plaintext on that signal. With MEDIA_E2EE on,
+// destroying the key is what makes it irreversible — ciphertext already sitting
+// on their device becomes permanently undecryptable.
+//
+// Deliberately NOT gated on view_once: any attachment the sender owns can be
+// pulled back.
+router.post('/:id/revoke', jwtUtil.requireAuth, async (req, res) => {
+  try {
+    const r = await req.dbQuery(
+      `SELECT id, owner_user_id, storage_path, storage_backend, revoked_at
+         FROM attachments WHERE id = $1 LIMIT 1`,
+      [req.params.id],
+    );
+    const att = r.rows[0];
+    if (!att) return res.status(404).json({ error: 'Not found' });
+    // Only the sender can revoke. A recipient calling this would be destroying
+    // someone else's media.
+    if (att.owner_user_id !== req.user.id) return res.status(403).json({ error: 'Only the sender can revoke this media' });
+    if (att.revoked_at) return res.json({ ok: true, alreadyRevoked: true });
+
+    await req.dbQuery(`UPDATE attachments SET revoked_at = NOW() WHERE id = $1`, [att.id]);
+
+    // Destroy the bytes. Best-effort per backend — the revoked_at stamp above is
+    // the authoritative gate, so a storage hiccup can't leave the media
+    // reachable even if the delete fails.
+    try {
+      if (att.storage_backend === 's3') {
+        await objectStore.deleteObject(att.storage_path);
+      } else {
+        const abs = path.join(UPLOAD_DIR, att.storage_path);
+        if (abs.startsWith(UPLOAD_DIR + path.sep)) fs.promises.unlink(abs).catch(() => {});
+      }
+    } catch (e) {
+      console.warn('[uploads revoke] byte delete failed (row still revoked):', e.message);
+    }
+
+    // Tell every chat that references this attachment, so recipients wipe now
+    // rather than at next fetch.
+    const chats = await req.dbQuery(
+      `SELECT DISTINCT m.chat_id, m.id AS message_id
+         FROM messages m
+        WHERE m.meta->>'attachmentId' = $1`,
+      [String(att.id)],
+    );
+    for (const row of chats.rows) {
+      broadcastChatEvent(row.chat_id, 'media_revoked', {
+        chatId:       row.chat_id,
+        messageId:    row.message_id,
+        attachmentId: String(att.id),
+        revokedBy:    req.user.id,
+        revokedAt:    new Date().toISOString(),
+      });
+    }
+
+    res.json({ ok: true, chats: chats.rows.length });
+  } catch (err) {
+    console.error('[uploads revoke]', err.message);
+    res.status(500).json({ error: 'Failed to revoke media' });
+  }
+});
+
 module.exports = router;
+module.exports.setBroadcasters = setBroadcasters;

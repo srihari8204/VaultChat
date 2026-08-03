@@ -26,6 +26,12 @@ services:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
     ports:
       - "18080:80"            # bench/staging entry; docker-compose.prod.yml maps 80/443
+    # livekit runs with network_mode: host (RTC needs the host's real address),
+    # so Caddy cannot reach it by service name. On Linux host.docker.internal
+    # does NOT resolve by default — this mapping is what makes the /livekit
+    # route in the Caddyfile work rather than 502.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - go-api
 
@@ -41,11 +47,18 @@ services:
         required: false
     environment:
       PORT: "4000"
-      DB_HOST: postgres
-      DB_PORT: "5432"
+      # P2.3: route DB traffic through PgBouncer (transaction pooling) so N
+      # go-api replicas share a bounded set of real Postgres connections.
+      # Rollback: DB_HOST=postgres / DB_PORT=5432 for a direct connection.
+      DB_HOST: ${DB_HOST:-pgbouncer}
+      DB_PORT: ${DB_PORT:-6432}
       DB_NAME: vaultchat
       DB_USER: vaultchat
       DB_PASS: ${DB_PASS:-vaultchat_dev}
+      # P2.1: REDIS_ADAPTER=1 turns on the Socket.IO Redis adapter + Redis
+      # presence/rosters (cluster.go) so go-api can scale past one replica.
+      # Default off — single-node in-process fan-out, the pre-P2 behavior.
+      REDIS_ADAPTER: ${REDIS_ADAPTER:-0}
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       REDIS_PASS: ""
@@ -58,6 +71,14 @@ services:
       # owns all sockets until Step 5). Internal-only; never proxied by Caddy.
       NODE_INTERNAL_URL: http://api:3000
       INTERNAL_EMIT_KEY: ${INTERNAL_EMIT_KEY:-bench-internal-emit}
+      # LiveKit — the backend only SIGNS tokens (internal/livekit/token.go); it
+      # never calls the SFU, so these are credentials, not a connection. Absent,
+      # POST /calls/{id}/sfu-token answers 503 with a reason and the mesh keeps
+      # working unchanged. LIVEKIT_URL is what the CLIENT dials, so it must be
+      # the public wss:// address, not the in-network one.
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-}
+      LIVEKIT_URL: ${LIVEKIT_URL:-}
       # Disk-stored attachments MUST be shared with Node while both backends
       # can serve /uploads (strangler period) — same dir, both processes.
       UPLOAD_DIR: /data/uploads
@@ -68,8 +89,32 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      pgbouncer:
+        condition: service_started
       redis:
         condition: service_started
+
+  # ── pgbouncer — connection pooler in front of Postgres (P2.3) ────────
+  # Transaction pooling: many app connections multiplex onto few server
+  # connections, so scaling go-api replicas doesn't blow max_connections.
+  # Go's WithUser uses set_config(..., is_local=true) — txn-scoped, safe here.
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.23.1-p2
+    restart: unless-stopped
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: vaultchat
+      DB_PASSWORD: ${DB_PASS:-vaultchat_dev}
+      DB_NAME: vaultchat
+      LISTEN_PORT: "6432"              # edoburu default is 5432 — go-api dials 6432
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: "2000"          # app-side connections across replicas
+      DEFAULT_POOL_SIZE: "40"          # real Postgres connections per db/user
+      AUTH_TYPE: scram-sha-256
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   postgres:
     image: postgres:16
@@ -228,6 +273,49 @@ services:
       --static-auth-secret=${TURN_SECRET:-changeme-must-match-backend}
       --external-ip=${TURN_EXTERNAL_IP:-65.21.229.167}
 
+  # ── livekit — SFU for group calls beyond the mesh cap ────────────────
+  # The mesh (app/group-call-active.tsx) caps at 5 because every participant
+  # holds N-1 peer connections and N-1 encodes; past that a mid-range phone
+  # gives up. An SFU moves that fan-out to the server: each phone publishes ONCE
+  # and subscribes to what it needs.
+  #
+  # Host networking, same reasoning as coturn: RTC needs its ports reachable at
+  # the host's real address, and NAT-ing media through the Docker bridge both
+  # costs throughput and breaks the ICE candidates clients are handed.
+  #
+  # Media here is CIPHERTEXT — the client encrypts frames before they leave the
+  # device (docs/SFU_SPIKE.md). This container forwards packets it cannot read,
+  # which is why "same box as the database" is a capacity question rather than a
+  # privacy one.
+  #
+  # CAPACITY: an SFU is bandwidth-bound, not CPU-bound — it never transcodes,
+  # and with frame encryption it could not. Roughly 600 kbps per forwarded
+  # stream, so a 10-person call is ~54 Mbps egress. On a shared box, watch for
+  # media interrupt load competing with Postgres before you watch CPU.
+  #
+  # Profile-gated so it does NOT start by default: nothing uses it until
+  # CALL_SESSIONS is on and LIVEKIT_* is set. Start with:
+  #   docker compose --profile sfu up -d livekit
+  livekit:
+    image: livekit/livekit-server:v1.8
+    restart: unless-stopped
+    profiles: ["sfu"]
+    network_mode: host
+    volumes:
+      - ./livekit/livekit.yaml:/etc/livekit.yaml:ro
+    environment:
+      # "key: secret" pairs. Generate with:
+      #   docker run --rm livekit/livekit-server generate-keys
+      # The SAME key and secret go to go-api as LIVEKIT_API_KEY/SECRET — the
+      # backend signs tokens with them and this server verifies the signature.
+      # Deliberately a soft default, NOT ${LIVEKIT_KEYS:?...}: compose
+      # interpolates every service regardless of profile, so a required-variable
+      # guard here would break `docker compose config`, `ps` and `up` for
+      # everyone not running the SFU. LiveKit refuses to start without keys and
+      # says so plainly in its own logs, which is the right place for that error.
+      LIVEKIT_KEYS: ${LIVEKIT_KEYS:-}
+    command: --config /etc/livekit.yaml
+
   # VaultLens BullMQ worker — renders AI avatars (ModelsLab → R2) off the request
   # path. Same image as api, different command. PROD override must also give it the
   # R2 S3_* + MODELSLAB_API_KEY env (same as api) — it needs storage + the model key.
@@ -317,6 +405,12 @@ services:
       - "127.0.0.1:3001:3000"
     volumes:
       - ./monitoring/grafana-datasource.yml:/etc/grafana/provisioning/datasources/ds.yml:ro
+      # Dashboard provider + the SLI board itself, so a fresh stack comes up
+      # with the board already there instead of an empty Grafana. The JSON dir
+      # must NOT be under provisioning/dashboards — that path holds provider
+      # YAML, and mounting a directory over it would shadow the provider.
+      - ./monitoring/grafana-dashboard.yml:/etc/grafana/provisioning/dashboards/dash.yml:ro
+      - ./monitoring/dashboards:/etc/grafana/dashboards:ro
       - grafanadata:/var/lib/grafana
     depends_on:
       - prometheus

@@ -1,45 +1,89 @@
 # VaultChat — Architecture
 
 > Reverse-engineered from source. Every claim below is grounded in the actual
-> files (`server.js`, `routes/*`, `services/crypto/*`, `lib/*`,
-> `constants/flags.ts`, `docker-compose.yml`) — nothing inferred.
+> files (`vaultchat-backend-go/`, `routes/*`, `services/crypto/*`, `lib/*`,
+> `constants/flags.ts`, `docker-compose.yml`, `caddy/Caddyfile`) — nothing
+> inferred.
+>
+> Last reconciled: 2026-08-02. Two sections of this document were stale for
+> several months (a "legacy Firebase plane" that no longer exists, and a Node
+> backend that has since been superseded by Go); both are corrected below.
 
-VaultChat is a security-first encrypted messenger in three parts:
+VaultChat is a security-first encrypted messenger in two parts:
 
 1. **Client** — Expo / React Native 0.81 app (`app/` via `expo-router`: 6 tabs +
    ~90 stack screens).
-2. **Primary backend** — `vaultchat-backend/`, an Express + Socket.IO monolith on
-   Postgres / Redis / Kafka / S3, Dockerized behind `https://api.corefinite.com`.
-3. **Legacy Firebase plane** — still wired into part of the app (Auth / Firestore /
-   Storage) plus a separate `server/index.js` Firebase-admin + Socket.IO server.
+2. **Backend** — `vaultchat-backend-go/`, a Go service owning all 16 REST
+   modules **and** the Socket.IO layer, on Postgres / Redis / Kafka / S3,
+   Dockerized behind `https://api.corefinite.com`.
 
 | | |
 |---|---|
 | App version | `1.1.0`, `main: expo-router/entry` |
 | Runtime | React Native 0.81 · Expo 54 · Hermes · TypeScript |
-| Backend | Node ≥18 · Express 4 · Socket.IO 4 |
-| Datastores | Postgres 16 · Redis 7 · Kafka 3.8 (KRaft) · MinIO/S3 |
+| Backend | Go · Socket.IO hub · Caddy front door |
+| Datastores | Postgres 16 (via pgbouncer) · Redis 7 · Kafka 3.8 (KRaft) · MinIO dev / Cloudflare R2 prod |
 | E2EE | X3DH + Double Ratchet (`E2EE_ENABLED` + `E2EE_STRICT` = true) |
-| Scale of surface | 16 route modules · ~60 SQL migrations |
+| Scale of surface | 16 route modules · ~65 SQL migrations |
 
 ---
 
-## ⚠️ Key finding: two coexisting data planes
+## Data plane: one backend, Go
 
-The app is **mid-migration** between two backends, and both are live in the code:
+The Node→Go strangler migration is **complete for the client-facing surface**
+(`vaultchat-backend-go/MIGRATION.md`). Go owns every REST module and the
+realtime layer; `caddy/Caddyfile` is the switch, with two-line per-route
+rollback to Node if a regression appears.
 
-- **Primary (custom backend)** — `constants/server.ts` → `api.corefinite.com`;
-  `lib/api.ts` (REST + JWT in SecureStore) and `lib/socket.ts` (Socket.IO).
-  `lib/chatService.ts` posts messages to the `/chats` REST routes. **30 files**
-  import `lib/api`.
-- **Legacy (Firebase)** — **17 files** under `services/` and `lib/` still import
-  `@react-native-firebase` (Auth / Firestore / Storage). `services/chatService.ts`
-  writes messages *directly to Firestore*. A separate `server/index.js` runs a
-  Firebase-admin + Socket.IO server.
+`vaultchat-backend/` (Node) is retained for **background jobs only** — the
+VaultLens BullMQ render worker and its QueueEvents listener, which push results
+into Go's sockets over the reverse bridge (`/internal/emit`,
+`/internal/chat-event`, key-guarded and refused from outside by Caddy).
 
-So `services/chatService.ts` (Firestore) and `lib/chatService.ts` (REST backend)
-are parallel implementations of the same concept. Treat the Firebase plane as
-legacy-but-not-dead.
+> **Implication for any new endpoint:** prod serves from Go. A route added only
+> to `vaultchat-backend/routes/*.js` is dead in production. This has already
+> bitten once — VaultView's revoke endpoint 404'd until `uploads.go` caught up
+> (commit `d618639`).
+
+### Firebase: removed
+
+The legacy Firebase plane is **gone**. Nothing in the app imports
+`@react-native-firebase` or the `firebase` web SDK. The last two consumers were
+retired on 2026-08-02:
+
+- `services/securityService.ts` — Firestore threat/screenshot mirrors. Both were
+  already inert: they read identity from `auth().currentUser`, and nothing has
+  signed in to Firebase Auth since the JWT cutover, so every write early-returned
+  on a null uid. `services/security/auditChain.ts` is the real record.
+- `services/trustedContactService.ts` — QR safety-number verification. Same null-uid
+  problem, which made `isContactVerified()` return false unconditionally and left
+  VaultBeam's "trusted contacts only" auto-download failing closed. Verifications
+  now live on-device (correct for a per-device attestation) keyed off the JWT session.
+
+**Firebase is not fully gone from the build**: push notifications use the *native*
+FCM SDK (`com.google.firebase:firebase-messaging`, added by
+`plugins/withVaultChatCalls.js`), so `google-services.json` and the google-services
+Gradle plugin must stay. The JavaScript SDKs were unused and have now been
+REMOVED (`firebase` + the four `@react-native-firebase/*` packages, plus the four
+`shims/firebase-*.js` they were Metro-redirected to). Nothing imported the entry
+point of that chain, so none of it was ever bundled. The google-services Gradle
+plugin comes from Expo's own default prebuild chain via app.json's
+`android.googleServicesFile`, NOT from `@react-native-firebase/app` — verified
+before removal, and guarded since by `scripts/prod-precheck.js`.
+
+### Games: code removed, tables retained
+
+The games platform was deleted on 2026-08-02 (~870 loc: `realtime/games.go`,
+`routes/games.go`, Node `routes/games.js`, `gameStore.js`, the `server.js`
+socket handlers, and the contract-suite entries). It was never reachable from
+this client.
+
+Migration `030_games.sql` and its `game_profiles` / `game_matches` tables are
+**deliberately left in place**. Migrations are applied history — removing one
+breaks replay on a fresh database — and dropping the tables would destroy real
+coin balances and match records irreversibly. If the separate WebView games
+deployment is also retired, dropping them is a follow-up migration and an
+explicit data decision, not a side effect of deleting code.
 
 ---
 
@@ -51,8 +95,8 @@ flowchart TB
     APP["VaultChat app<br/>expo-router · Hermes"]
   end
 
-  subgraph EDGE["Self-hosted backend — docker-compose"]
-    API["api — Node/Express + Socket.IO<br/>server.js"]
+  subgraph EDGE["Self-hosted backend — docker-compose (Caddy front door)"]
+    API["go-api — Go REST + Socket.IO hub"]
     PG[("Postgres 16<br/>~60 migrations")]
     REDIS[("Redis 7<br/>pub/sub adapter + cache")]
     KAFKA[["Kafka 3.8 KRaft<br/>event bus"]]
@@ -60,13 +104,6 @@ flowchart TB
     COTURN["coturn 4.6<br/>TURN/STUN relay"]
     WFAN["fanout-worker"]
     WLENS["vaultlens-worker"]
-  end
-
-  subgraph FB["Firebase (legacy / parallel plane)"]
-    FAUTH["Auth"]
-    FS[("Firestore")]
-    FSTORE[("Storage")]
-    SRV["server/ — Firebase-admin + Socket.IO"]
   end
 
   subgraph EXT["External services"]
@@ -80,10 +117,6 @@ flowchart TB
   APP -- "REST + JWT / lib/api.ts" --> API
   APP -- "Socket.IO / lib/socket.ts" --> API
   APP -- "WebRTC media" --> COTURN
-  APP -. "17 files still use" .-> FAUTH
-  APP -.-> FS
-  APP -.-> FSTORE
-
   API --> PG
   API --> REDIS
   API --> KAFKA
@@ -95,7 +128,6 @@ flowchart TB
   KAFKA --> WLENS
   WLENS --> MLAB
   API --> GIF
-  SRV -. Firestore .-> FS
 ```
 
 `docker-compose.yml` services: `postgres`, `redis`, `kafka`, `minio`, `api`,
@@ -111,12 +143,12 @@ flowchart TB
   subgraph NAV["app/ — expo-router (file-based routes)"]
     LAYOUT["_layout.tsx<br/>ThemeProvider · fonts · socket · push · sync boot"]
     TABS["(tabs): chats · calls · status · alerts · mini · profile"]
-    SCREENS["~90 screens<br/>chat · vault · vaultlens · games · sos · onboarding"]
+    SCREENS["~90 screens<br/>chat · vault · vaultlens · mini-apps · sos · onboarding"]
   end
 
   subgraph SVC["services/ — feature logic"]
-    CHATF["chatService (Firebase)"]
     AUTHF["authService · groupService · mediaService"]
+    TRUST["trustedContactService · securityService<br/>(device-local, no Firebase)"]
     subgraph CRY["services/crypto — E2EE core (pure JS)"]
       E2EE["e2ee.ts — X3DH + Double Ratchet"]
       SK["senderKey · groupSession"]
@@ -145,8 +177,6 @@ flowchart TB
   CALL --> SOCK
   MEDIA --> API
   SYNC --> API
-  AUTHF --> FBSDK["@react-native-firebase"]
-  CHATF --> FBSDK
 ```
 
 `app/_layout.tsx` boots the app: `ThemeProvider`, fonts, Socket.IO, push
@@ -161,36 +191,36 @@ media outbox, and Sentry.
 flowchart TB
   CL["Client"]
 
-  subgraph SERVER["server.js — Express app"]
-    MW["middleware<br/>cors · JSON · JWT verify · rateLimit · Sentry"]
+  subgraph SERVER["go-api — vaultchat-backend-go"]
+    MW["internal/httpx<br/>cors · JSON · JWT verify · rateLimit · Sentry"]
     subgraph ROUTES["routes/"]
       R1["auth · user · contacts"]
       R2["chats (1952 loc) · stories · channels · communities"]
-      R3["uploads · vaultbeam · vaultlens · games · ai · gif · link · calls"]
+      R3["uploads · vaultbeam · vaultlens · ai · gif · link · calls"]
       R4["admin (/api/admin)"]
     end
-    IO["Socket.IO server<br/>join_chat · new_message · typing · calls · games · admin"]
+    IO["internal/realtime — Socket.IO hub<br/>join_chat · new_message · typing · calls · admin"]
   end
 
-  subgraph LIBB["lib/"]
-    STORAGE["storage.js — S3/MinIO presign"]
-    DELIV["delivery.js — receipts"]
-    KAF["kafka.js — producer"]
-    CALLFCM["callFcm.js — call wake push"]
-    VAULT["vault.js · vaultlensQueue"]
-    MODELS["modelslab.js — AI"]
+  subgraph LIBB["internal/"]
+    STORAGE["storage — S3/R2 presign + stream"]
+    EMITX["emitx — socket fan-out"]
+    KAF["jobs — Kafka producer"]
+    CALLFCM["fcm — call wake push"]
+    VAULT["vault — envelope crypto"]
+    METRICS["metrics — Prometheus"]
   end
 
-  subgraph WORKERS["workers/ (BullMQ / Kafka consumers)"]
-    FANOUT["fanout.js — msg fan-out"]
-    VLENS["vaultlens.js — AI media gen"]
+  subgraph WORKERS["workers (Kafka consumers · Node BullMQ)"]
+    FANOUT["fanout — msg fan-out"]
+    VLENS["vaultlens.js (Node) — AI media gen"]
   end
 
   subgraph DATA["Datastores & infra"]
-    PG[("Postgres — db.js / pg pool")]
-    RD[("Redis — redis.js")]
+    PG[("Postgres — internal/db · pgbouncer")]
+    RD[("Redis — internal/redisx")]
     KFK[["Kafka"]]
-    S3[("MinIO / S3")]
+    S3[("MinIO dev / Cloudflare R2 prod")]
   end
 
   CL -- REST --> MW --> ROUTES
@@ -210,7 +240,7 @@ flowchart TB
 Socket.IO uses a Redis adapter (`@socket.io/redis-adapter`) so
 `io.to(room).emit(...)` reaches sockets across processes.
 
-### Route modules (`vaultchat-backend/routes/`)
+### Route modules (`vaultchat-backend-go/internal/routes/`, mirrored from `vaultchat-backend/routes/`)
 
 | Mount | Module | Responsibility | Size |
 |---|---|---|---|
@@ -224,7 +254,7 @@ Socket.IO uses a Redis adapter (`@socket.io/redis-adapter`) so
 | `/vaultbeam` | vaultbeam.js | Device-to-device large file transfer | 232 |
 | `/vaultlens` | vaultlens.js | AI media generation queue | 192 |
 | `/api/admin` | admin.js | Admin dashboard API (`admin/index.html`) | 245 |
-| `/communities` `/call` `/link` `/gif` `/games` `/ai` | communities · calls · link · gif · games · ai | Communities, call wake/signaling, link preview, GIF, games, AI | 82–132 |
+| `/communities` `/call` `/link` `/gif` `/ai` | communities · calls · link · gif · ai | Communities, call wake/signaling, link preview, GIF, AI | 82–132 |
 
 ---
 
@@ -258,10 +288,12 @@ With `E2EE_ENABLED` + `E2EE_STRICT` both **true** (`constants/flags.ts`), the
 server only ever sees ciphertext for direct chats; a missing peer key bundle
 makes the send fail-and-retry rather than leak plaintext.
 
-**Not yet enforced:** group chats send *graceful plaintext* (sender-key / group
-E2EE is scaffolded in `services/crypto/senderKey.ts` + `groupSession` but not the
-enforced path). Media-at-rest encryption is gated behind `MEDIA_E2EE` (default
-off).
+Group chats are ALSO encrypted: `GROUP_E2EE` has been on since 2026-06-28, using
+Signal-style sender keys (`services/crypto/senderKey.ts` + `groupSession`)
+distributed over the pairwise Double Ratchet. Media-at-rest (`MEDIA_E2EE`) and
+per-viewer story encryption (`STORY_E2EE`) are on as of the same date. This
+paragraph previously described all three as unshipped scaffolding; that was
+stale — `constants/flags.ts` is the source of truth.
 
 ---
 
@@ -290,7 +322,13 @@ off).
 | `E2EE_STRICT` | **on** | Never silently sends plaintext (fail + retry) |
 | `VAULT_SESSION_SEALED` | off | Session tokens sealed under unlock PIN |
 | `VAULT_CACHE_ENCRYPTED` | off | At-rest encryption of local SQLite cache |
-| `MEDIA_E2EE` | off | Per-file AES-256-GCM media encryption |
+| `MEDIA_E2EE` | **on** | Per-file AES-256-GCM media encryption |
+| `STORY_E2EE` | **on** | Per-viewer wrapped story content key |
+| `GROUP_E2EE` | **on** | Sender-key group encryption |
+| `SCHEDULED_LOCAL` | off | On-device scheduled queue vs. server-side delivery |
+| `VB_AUTODOWNLOAD` | off | VaultBeam auto-accept per user policy |
+| `VB_RELIABILITY_FIXES` | **on** | Relay watchdog + recipient on-disk resume |
+| `CALL_ENGINE_V2` | off | Consolidated call engine (`lib/call/`) — **unvalidated on hardware** |
 
 ---
 
@@ -299,7 +337,7 @@ off).
 | Subsystem | Client | Backend / infra |
 |---|---|---|
 | **Voice / video calls** | `lib/CallService`, `callCrypto`, WebRTC shim, `incoming-call` / `voicecall` screens | `/call` route, `callFcm` wake-push, **coturn** TURN relay, socket signaling |
-| **Games** (chess, ludo, poker, …) | ~22 boards in `components/games/`, `gameEngines.ts` | `/games`, `gameStore.js`, socket game rooms + match queue |
+| **Games** | **Removed.** Never in the app — `components/games/` never existed and no client code referenced the surface; `app/(tabs)/mini.tsx` notes games ship as a separate WebView deployment | Server-side games code deleted 2026-08-02 (~870 loc across Go + Node). The `game_profiles` / `game_matches` tables from migration `030_games.sql` are LEFT IN PLACE — see note below |
 | **VaultLens** (AI media) | `vaultlens` screens, catalog | `/vaultlens`, queue → `vaultlens-worker` → ModelsLab |
 | **VaultBeam** (P2P transfer) | `vaultBeamTransfer`, native stream plugin | `/vaultbeam` route, chunked transfers |
 | **Stories / Status** | `(tabs)/status`, `StoryRing` | `/stories`, story keys, fan-out worker |
@@ -311,9 +349,12 @@ off).
 ## 07 · Tech stack summary
 
 **Client** — React Native 0.81 · Expo 54 · expo-router · TypeScript · Socket.IO
-client · op-sqlite · Sentry · Firebase RN SDK · TensorFlow.js (blazeface /
-mobilenet for face auth) · ethers (decentralized-id) · `@noble` crypto.
+client · op-sqlite · Sentry · react-native-vision-camera + expo-face-detector
+(face auth) · ethers (decentralized-id, reached only by `constants/vaultID.ts`) ·
+`@noble` crypto. No TensorFlow.js — an earlier revision of this document listed
+it; it is not and was not a dependency.
 
-**Backend & infra** — Node ≥18 · Express 4 · Socket.IO 4 (+ Redis adapter) ·
+**Backend & infra** — Go (all REST + Socket.IO) · Redis adapter ·
 Postgres 16 (pg) · Redis 7 (ioredis) · Kafka (kafkajs) · BullMQ · MinIO / AWS S3 ·
-firebase-admin · Argon2 / bcrypt · JWT · coturn · Docker Compose · PM2 · Sentry.
+Argon2 / bcrypt · JWT · coturn · Caddy · Docker Compose · Sentry. Native FCM
+(`firebase-messaging`) for push wake-up.

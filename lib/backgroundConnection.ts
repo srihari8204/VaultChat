@@ -59,7 +59,11 @@ export function registerBackgroundConnection(): void {
         const { notify } = require('./messageNotifications');
         // Inbound message → OS notification (self-dedupes; safe if also armed
         // from _layout). Persistent so it survives socket reconnects.
-        addPersistentListener('new_message', (m: any) => { notify(m).catch(() => {}); });
+        addPersistentListener('new_message', (m: any) => {
+          notify(m).catch(() => {});
+          // VaultBeam auto-download while backgrounded (flag-gated; no-op when off).
+          if (m?.meta?.vaultbeam) { try { require('./vaultBeamIngest').onIncomingVaultbeamMessage(m); } catch {} }
+        });
         await getSocket().catch(() => {});   // open + keep the connection alive
       } catch {}
       if (!wantRunning && fgsHolds.size === 0) resolve(); // all holders stopped before we started

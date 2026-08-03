@@ -3,28 +3,29 @@ const { getSentryExpoConfig } = require("@sentry/react-native/metro");
 const config = getSentryExpoConfig(__dirname);
 config.resolver.unstable_enablePackageExports = true;
 
-// ─── Redirect @react-native-firebase/* to JS SDK shims ─────────────
+// The @react-native-firebase/* -> JS-SDK shim redirect that used to live here
+// is gone with the packages: nothing imported those modules, so the shims were
+// never resolved and the firebase JS SDK was never bundled.
+//
+// Native FCM is unaffected and MUST stay: the messaging library comes from
+// plugins/withVaultChatCalls.js (implementation "com.google.firebase:firebase-messaging"),
+// and the google-services Gradle plugin + google-services.json come from Expo's
+// own default prebuild chain via app.json's android.googleServicesFile. Neither
+// goes through @react-native-firebase.
 const shimDir = path.resolve(__dirname, "shims");
-const firebaseShims = {
-  "@react-native-firebase/app": path.join(shimDir, "firebase-app.js"),
-  "@react-native-firebase/auth": path.join(shimDir, "firebase-auth.js"),
-  "@react-native-firebase/firestore": path.join(shimDir, "firebase-firestore.js"),
-  "@react-native-firebase/storage": path.join(shimDir, "firebase-storage.js"),
-};
 
-// ─── Redirect react-native-webrtc to web shim on web platform ────
+// ─── Redirect the native WebRTC module to a web shim on web ──────
+// The key must match what source files IMPORT. That is now the LiveKit fork
+// (@livekit/react-native-webrtc) — a drop-in replacement for react-native-webrtc
+// that ships the frame cryptor the SFU work needs; see docs/SFU_SPIKE.md. The
+// shim itself is unchanged: on web these are browser-native APIs, which have no
+// idea which native package the app would have used.
 const webOnlyShims = {
-  "react-native-webrtc": path.join(shimDir, "react-native-webrtc.js"),
+  "@livekit/react-native-webrtc": path.join(shimDir, "react-native-webrtc.js"),
 };
 
 const originalResolveRequest = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {
-  if (firebaseShims[moduleName]) {
-    return {
-      filePath: firebaseShims[moduleName],
-      type: "sourceFile",
-    };
-  }
   // On web, redirect native-only modules to web shims
   if (platform === "web" && webOnlyShims[moduleName]) {
     return {

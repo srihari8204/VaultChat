@@ -1305,17 +1305,6 @@ export interface Reactor          { emoji: string; userId: string; name: string 
 // (durable offline), flowing through the normal 'send' path; clients aggregate
 // counts themselves — one reaction per user per message.
 
-export async function listReactors(chatId: string, msgId: number): Promise<Reactor[]> {
-  return api(`/chats/${encodeURIComponent(chatId)}/messages/${msgId}/reactions`);
-}
-
-export async function getReactionCounts(
-  chatId: string, messageIds: number[],
-): Promise<Record<string, ReactionSummary[]>> {
-  if (messageIds.length === 0) return {};
-  const ids = messageIds.join(',');
-  return api(`/chats/${encodeURIComponent(chatId)}/reactions?messageIds=${ids}`);
-}
 
 // ─── Forward (Day 8) ────────────────────────────────────────────────
 // Server-side it's still a normal POST /messages — we just preserve the
@@ -1487,6 +1476,20 @@ export async function uploadAttachment(
 // — only the first call actually flips the flag.
 export async function markAttachmentViewed(attachmentId: string): Promise<void> {
   await api(`/uploads/${encodeURIComponent(attachmentId)}/viewed`, { method: 'POST' });
+}
+
+/**
+ * VaultView remote revoke — sender-only, irreversible. The server stamps
+ * revoked_at, deletes the stored bytes, and broadcasts 'media_revoked' so
+ * recipients destroy their per-file key and any decrypted plaintext. Recipients
+ * who were offline converge on their next fetch (410 + { revoked: true }).
+ *
+ * The caller is responsible for wiping the SENDER's own local copies —
+ * lib/protectedMedia.wipeRevokedMedia() — since the sender never receives the
+ * broadcast for their own action.
+ */
+export async function revokeAttachment(attachmentId: string): Promise<void> {
+  await api(`/uploads/${encodeURIComponent(attachmentId)}/revoke`, { method: 'POST' });
 }
 
 /**

@@ -2,8 +2,6 @@
 // Real jailbreak / root / Frida detection + key wipe
 // Runs on every app launch before any screen is shown
 
-import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
@@ -234,32 +232,6 @@ export async function wipeAllKeys(): Promise<void> {
 // ─────────────────────────────────────────────────────────────
 // 5. Log Security Event to Firestore
 // ─────────────────────────────────────────────────────────────
-
-async function logThreatToFirestore(report: SecurityReport): Promise<void> {
-  try {
-    const uid = auth().currentUser?.uid;
-    if (!uid) return;
-
-    await firestore()
-      .collection('users')
-      .doc(uid)
-      .collection('securityEvents')
-      .add({
-        threats: report.threats.map(t => ({
-          type: t.type,
-          detail: t.detail,
-        })),
-        platform: report.platform,
-        deviceModel: report.deviceModel,
-        checkedAt: firestore.FieldValue.serverTimestamp(),
-        appVersion: await DeviceInfo.getVersion(),
-        buildNumber: await DeviceInfo.getBuildNumber(),
-      });
-  } catch (e) {
-  }
-}
-
-// ─────────────────────────────────────────────────────────────
 // 6. Main Entry — runSecurityCheck()
 //    Call this in _layout.tsx on every app mount.
 //    Returns SecurityReport.
@@ -304,7 +276,6 @@ export async function runSecurityCheck(): Promise<SecurityReport> {
     await wipeAllKeys();
   }
   if (!report.clean) {
-    logThreatToFirestore(report).catch(() => {});
     // Record threats in the on-device tamper-evident audit chain (#41) so they
     // surface in the Alerts tab. Clean launch scans are intentionally NOT logged
     // (no noise); user-initiated scans always log via scanDeviceAndRecord().
@@ -332,39 +303,6 @@ export async function scanDeviceAndRecord(): Promise<SecurityReport> {
     }).catch(() => {});
   }
   return report;
-}
-
-// ─────────────────────────────────────────────────────────────
-// 7. Screenshot Detection Logger
-// ─────────────────────────────────────────────────────────────
-
-export async function logScreenshotAttempt(chatId: string): Promise<void> {
-  try {
-    const uid = auth().currentUser?.uid;
-    if (!uid) return;
-
-    await firestore()
-      .collection('users')
-      .doc(uid)
-      .collection('securityEvents')
-      .add({
-        type: 'SCREENSHOT_ATTEMPT',
-        chatId,
-        timestamp: firestore.FieldValue.serverTimestamp(),
-        platform: Platform.OS,
-      });
-
-    await firestore()
-      .collection('chats')
-      .doc(chatId)
-      .collection('alerts')
-      .add({
-        type: 'SCREENSHOT',
-        byUid: uid,
-        timestamp: firestore.FieldValue.serverTimestamp(),
-      });
-  } catch (e) {
-  }
 }
 
 // ─────────────────────────────────────────────────────────────

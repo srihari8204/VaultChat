@@ -3,7 +3,7 @@
 
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { createCircle, joinCircle } from '../lib/family/circle';
@@ -11,6 +11,11 @@ import { createCircle, joinCircle } from '../lib/family/circle';
 export default function FamilySetupScreen() {
   const { colors } = useTheme();
   const router = useRouter();
+  // Pushed from an existing space ("create or join another") vs. reached by the
+  // zero-circle redirect. Returning is right in the first case; replacing is
+  // right in the second, where /family is no longer on the stack.
+  const { from } = useLocalSearchParams<{ from?: string }>();
+  const done = () => { if (from === 'family') router.back(); else router.replace('/family' as any); };
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState<'create' | 'join' | null>(null);
@@ -18,14 +23,14 @@ export default function FamilySetupScreen() {
   const create = async () => {
     if (!name.trim() || busy) return;
     setBusy('create');
-    try { await createCircle(name); router.replace('/family' as any); }
+    try { await createCircle(name); done(); }
     catch (e: any) { Alert.alert('Create failed', e?.message ?? 'Could not create the circle.'); }
     finally { setBusy(null); }
   };
   const join = async () => {
     if (!code.trim() || busy) return;
     setBusy('join');
-    try { await joinCircle(code); router.replace('/family' as any); }
+    try { await joinCircle(code); done(); }
     catch (e: any) { Alert.alert('Join failed', e?.message ?? 'Check the code and try again.'); }
     finally { setBusy(null); }
   };

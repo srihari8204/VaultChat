@@ -19,13 +19,22 @@ import {
   RTCPeerConnection,
   RTCSessionDescription,
   RTCView,
-} from 'react-native-webrtc';
+} from '@livekit/react-native-webrtc';
 import { getCurrentUserAsync } from './(constants)/authService';
-import { getTurnConfig, type IceServer } from '../lib/chatService';
+import { getIceServers } from '../lib/iceConfig';
 import { getSocket } from '../lib/socket';
 import { startCallForeground, stopCallForeground, dismissIncomingNotification, initiateCall, cancelCall } from '../lib/CallService';
 import { newCallCipher, openCallOffer, plainCipher, type CallCipher } from '../lib/callCrypto';
 import { addCallLog } from '../lib/callLog';
+import { CallTimer, elapsedSeconds } from '../components/call/CallTimer';
+import { CallControlButton } from '../components/call/CallControlButton';
+import { CallExtras } from '../components/call/CallExtras';
+import { CALL_ENGINE_V2 } from '../constants/flags';
+import * as engine from '../lib/call/engine';
+import {
+  useCallConnectedAt, useCallError, useCallFlag, useCallLocalUrl,
+  useCallStatus, useParticipantStreamUrl,
+} from '../hooks/useCall';
 import { Ionicons } from '@expo/vector-icons';
 
 type CallState = 'connecting' | 'ringing' | 'connected' | 'ended';
@@ -141,7 +150,166 @@ function matrixToOverlay(m: number[] | null): { tint?: string; opacity?: number 
 // Call chrome is always dark (independent of app theme), so styles are static.
 const S = makeStyles();
 
+/**
+ * Route entry. Same dispatcher as app/voicecall.tsx: one flag chooses the
+ * engine-backed renderer or the original implementation, both drawing the same
+ * chrome from the same styles and speaking the same wire. The legacy body is
+ * deleted once CALL_ENGINE_V2 passes the OEM matrix on real hardware.
+ */
 export default function VideoCallScreen() {
+  return CALL_ENGINE_V2 ? <VideoCallEngine /> : <VideoCallLegacy />;
+}
+
+// ── engine-backed renderer (CALL_ENGINE_V2) ───────────────────────────
+// Beautify filters stay here on purpose: they are pure local presentation with
+// no protocol involvement, so they belong to the screen, not the engine.
+function VideoCallEngine() {
+  const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const { chatId, peerUid, peerName, isIncoming, initialOffer } =
+    useLocalSearchParams<{
+      chatId: string; peerUid: string; peerName: string;
+      isIncoming?: string; initialOffer?: string;
+    }>();
+
+  const status      = useCallStatus();
+  const connectedAt = useCallConnectedAt();
+  const error       = useCallError();
+  const muted       = useCallFlag('muted');
+  const speaker     = useCallFlag('speaker');
+  const cameraOff   = useCallFlag('cameraOff');
+  const sharing     = useCallFlag('sharing');
+  const peerSharing = useCallFlag('peerSharing');
+  const localUrl    = useCallLocalUrl();
+  const remoteUrl   = useParticipantStreamUrl(String(peerUid ?? ''));
+
+  const [filter, setFilter] = useState<FilterId>('none');
+  const [showFilters, setShowFilters] = useState(false);
+
+  useEffect(() => {
+    const incoming = isIncoming === 'true' || isIncoming === '1';
+    const args = {
+      chatId: String(chatId ?? ''), peerUid: String(peerUid ?? ''),
+      peerName: String(peerName ?? ''), kind: 'video' as const,
+    };
+    if (incoming && initialOffer) {
+      let wire: any = null;
+      try { wire = JSON.parse(String(initialOffer)); } catch {}
+      engine.acceptIncoming({ ...args, offerWire: wire });
+    } else {
+      engine.startOutgoing(args);
+    }
+    return () => { engine.hangUp('local_hangup', true); engine.release(); };
+  }, [chatId, peerUid, peerName, isIncoming, initialOffer]);
+
+  useEffect(() => { if (status === 'connected') engine.onConnected(); }, [status]);
+
+  useEffect(() => {
+    if (status !== 'ended') return;
+    const t = setTimeout(() => router.back(), 200);
+    return () => clearTimeout(t);
+  }, [status, router]);
+
+  const toggleScreenShare = useCallback(() => {
+    if (sharing) engine.stopScreenShare().catch(() => {});
+    else engine.startScreenShare().catch((e: any) => {
+      const msg = e?.message ? String(e.message) : String(e);
+      // A genuine user cancel is not an error worth interrupting a call for.
+      if (!/cancel|denied by user|user.?cancel|NotAllowed/i.test(msg)) {
+        Alert.alert('Screen share failed', msg || 'Unknown error');
+      }
+    });
+  }, [sharing]);
+  const toggleFilters = useCallback(() => setShowFilters(v => !v), []);
+
+  const statusText = status === 'connecting' ? 'Connecting…'
+    : status === 'ringing' ? 'Ringing…'
+    : 'Call ended';
+  const f = FILTERS.find(x => x.id === filter) ?? FILTERS[0];
+  const overlay = matrixToOverlay(f.matrix);
+
+  return (
+    <View style={S.screen}>
+      <StatusBar barStyle="light-content" />
+
+      <View style={S.remote}>
+        {remoteUrl ? (
+          <RTCView style={S.remoteVid} streamURL={remoteUrl} objectFit="cover" />
+        ) : (
+          <View style={[S.remoteVid, S.remotePlaceholder]}>
+            <Text style={S.placeholderInitial}>{(peerName?.trim()[0] ?? '?').toUpperCase()}</Text>
+          </View>
+        )}
+        {overlay.tint && (
+          <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, { backgroundColor: overlay.tint, opacity: overlay.opacity }]} />
+        )}
+      </View>
+
+      <View style={[S.topBar, { top: insets.top + 8 }]} pointerEvents="none">
+        <Text style={S.name} numberOfLines={1}>{peerName || 'VaultChat user'}</Text>
+        {status === 'connected'
+          ? <CallTimer style={S.status} startedAt={connectedAt} />
+          : <Text style={S.status}>{statusText}</Text>}
+        {error && <Text style={S.errorTxt}>{error}</Text>}
+      </View>
+
+      {(sharing || peerSharing) && (
+        <View style={S.shareBanner} pointerEvents="none">
+          <Ionicons name="phone-portrait" size={14} color="#fff" />
+          <Text style={S.shareBannerTxt}>
+            {sharing ? "You're sharing your screen"
+              : `${peerName || 'They'} ${peerName ? 'is' : 'are'} sharing their screen`}
+          </Text>
+        </View>
+      )}
+
+      {localUrl && (!cameraOff || sharing) && (
+        <View style={[S.localWrap, { top: insets.top + 8 }]}>
+          <RTCView style={S.local} streamURL={localUrl} objectFit="cover" mirror={!sharing} zOrder={1} />
+          {overlay.tint && (
+            <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, { backgroundColor: overlay.tint, opacity: overlay.opacity }]} />
+          )}
+        </View>
+      )}
+
+      {showFilters && (
+        <View style={[S.filterStrip, { bottom: insets.bottom + 150 }]}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={S.filterRow}>
+            {FILTERS.map(opt => (
+              <TouchableOpacity key={opt.id} style={[S.filterChip, filter === opt.id && S.filterChipActive]} onPress={() => setFilter(opt.id)} activeOpacity={0.8}>
+                <View style={[S.filterSwatch,
+                  opt.matrix ? { backgroundColor: opt.swatch } : { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.4)' },
+                  filter === opt.id && { borderColor: '#FFFFFF' }]} />
+                <Text style={[S.filterLabel, filter === opt.id && S.filterLabelActive]}>{opt.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
+      {status === 'connected' && <CallExtras bottom={insets.bottom + 108} />}
+
+      <View style={[S.controls, { bottom: insets.bottom + 12 }]}>
+        <CallControlButton variant="video" icon={muted ? 'mic-off' : 'mic'} label={muted ? 'Unmute' : 'Mute'} active={muted} onPress={engine.toggleMute} />
+        <CallControlButton variant="video" icon={cameraOff ? 'videocam-off' : 'videocam'} label={cameraOff ? 'Camera' : 'Off'} active={cameraOff} onPress={engine.toggleCamera} />
+        {sharing
+          ? <CallControlButton variant="video" icon="stop-circle" label="Stop" active onPress={toggleScreenShare} />
+          : <CallControlButton variant="video" icon="camera-reverse" label="Flip" onPress={engine.flipCamera} />}
+        {Platform.OS === 'android' && !sharing && (
+          <CallControlButton variant="video" icon="phone-portrait" label="Share" onPress={toggleScreenShare} />
+        )}
+        <CallControlButton variant="video" icon="sparkles" label={filter === 'none' ? 'Beauty' : f.label} active={showFilters || filter !== 'none'} onPress={toggleFilters} />
+        <CallControlButton variant="video" icon={speaker ? 'volume-high' : 'volume-low'} label={speaker ? 'Speaker' : 'Earpiece'} active={speaker} onPress={engine.toggleSpeaker} />
+        <CallControlButton variant="video" icon="call" label="End" danger onPress={hangUpFromVideoScreen} />
+      </View>
+    </View>
+  );
+}
+
+const hangUpFromVideoScreen = () => engine.hangUp('local_hangup', true);
+
+// ── original implementation (CALL_ENGINE_V2 off) — unchanged ──────────
+function VideoCallLegacy() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { chatId, peerUid, peerName, isIncoming, initialOffer } =
@@ -157,13 +325,13 @@ export default function VideoCallScreen() {
   const [muted,    setMuted]    = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
   const [speaker,  setSpeaker]  = useState(true);    // speaker on by default for video
-  const [seconds,  setSeconds]  = useState(0);
   const [error,    setError]    = useState<string | null>(null);
   const [localUrl,  setLocalUrl]  = useState<string | null>(null);
   const [remoteUrl, setRemoteUrl] = useState<string | null>(null);
   const [filter,    setFilter]    = useState<FilterId>('none');
   const [showFilters, setShowFilters] = useState(false);
   const [sharing,   setSharing]   = useState(false);   // screen share (#124)
+  const [peerSharing, setPeerSharing] = useState(false); // peer is sharing theirs
 
   const pcRef           = useRef<RTCPeerConnection | null>(null);
   // E2EE signaling cipher (F6) — per-call key; plaintext passthrough for legacy peers.
@@ -172,20 +340,20 @@ export default function VideoCallScreen() {
   const screenStreamRef = useRef<any>(null);           // active getDisplayMedia stream
   const cameraTrackRef  = useRef<any>(null);           // camera track held for swap-back
   const meIdRef         = useRef<string>('');
-  const timerRef        = useRef<any>(null);
   const ringTimerRef    = useRef<any>(null);
   const offsRef         = useRef<Array<() => void>>([]);
-  const secondsRef      = useRef(0);
+  // Connect instant; elapsed time is DERIVED from it by <CallTimer> rather than
+  // counted in screen state — see components/call/CallTimer for why that matters
+  // most on this screen (the 1 Hz tick used to re-render the <RTCView> subtree).
+  const connectedAtRef  = useRef(0);
   const connectedRef    = useRef(false);
   const loggedRef       = useRef(false);
 
-  useEffect(() => { secondsRef.current = seconds; }, [seconds]);
   useEffect(() => { if (state === 'connected') connectedRef.current = true; }, [state]);
 
   const teardown = useCallback((notify = true) => {
     offsRef.current.forEach(fn => { try { fn(); } catch {} });
     offsRef.current = [];
-    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     if (ringTimerRef.current) { clearInterval(ringTimerRef.current); ringTimerRef.current = null; }
     try { InCallManager.stop(); } catch {}
     stopCallForeground();   // release the mic/camera foreground service + wake lock
@@ -203,7 +371,8 @@ export default function VideoCallScreen() {
       loggedRef.current = true;
       const incoming = isIncoming === 'true' || isIncoming === '1';
       const dir: 'incoming' | 'outgoing' | 'missed' = incoming ? (connectedRef.current ? 'incoming' : 'missed') : 'outgoing';
-      addCallLog({ chatId, peerUid, peerName: peerName || 'VaultChat user', kind: 'video', direction: dir, at: Date.now() - secondsRef.current * 1000, durationSec: secondsRef.current }).catch(() => {});
+      const durationSec = elapsedSeconds(connectedAtRef.current);
+      addCallLog({ chatId, peerUid, peerName: peerName || 'VaultChat user', kind: 'video', direction: dir, at: Date.now() - durationSec * 1000, durationSec }).catch(() => {});
       if (!incoming && !connectedRef.current && peerUid) {
         cancelCall(peerUid, String(chatId || peerUid)).catch(() => {});   // stop the callee's ring → missed call
       }
@@ -256,10 +425,9 @@ export default function VideoCallScreen() {
     }
   }, [state, chatId, peerUid, peerName]);
 
+  // Stamp the connect instant once; <CallTimer> owns the tick.
   const startTimer = useCallback(() => {
-    if (timerRef.current) return;
-    setSeconds(0);
-    timerRef.current = setInterval(() => setSeconds(s => s + 1), 1000);
+    if (!connectedAtRef.current) connectedAtRef.current = Date.now();
   }, []);
 
   useEffect(() => {
@@ -285,11 +453,10 @@ export default function VideoCallScreen() {
         localStreamRef.current = stream;
         setLocalUrl(stream.toURL());
 
-        const turn = await getTurnConfig().catch(() => ({ iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-        ] as IceServer[] }));
+        // Cached TURN credentials (lib/iceConfig) — same STUN-only fallback.
+        const iceServers = await getIceServers();
 
-        const pc = new RTCPeerConnection({ iceServers: turn.iceServers as any });
+        const pc = new RTCPeerConnection({ iceServers: iceServers as any });
         pcRef.current = pc;
         stream.getTracks().forEach((t: any) => pc.addTrack(t, stream));
 
@@ -322,12 +489,22 @@ export default function VideoCallScreen() {
         const onEnd = (data: any) => {
           if (data?.from === peerUid || data?.fromUid === peerUid) endCall(false);
         };
+        // The peer telling us they started/stopped sharing. The server has
+        // always relayed these two events; until now neither side used them, so
+        // a screen share arrived as an unexplained change of picture.
+        const onPeerShareStart = (d: any) => { if (d?.from === peerUid || d?.fromUid === peerUid) setPeerSharing(true); };
+        const onPeerShareStop  = (d: any) => { if (d?.from === peerUid || d?.fromUid === peerUid) setPeerSharing(false); };
+
         s.on('webrtc_answer', onAnswer);
         s.on('webrtc_ice',    onIce);
         s.on('webrtc_end',    onEnd);
+        s.on('screen_share_start', onPeerShareStart);
+        s.on('screen_share_stop',  onPeerShareStop);
         offsRef.current.push(() => s.off('webrtc_answer', onAnswer));
         offsRef.current.push(() => s.off('webrtc_ice',    onIce));
         offsRef.current.push(() => s.off('webrtc_end',    onEnd));
+        offsRef.current.push(() => s.off('screen_share_start', onPeerShareStart));
+        offsRef.current.push(() => s.off('screen_share_stop',  onPeerShareStop));
 
         (pc as any).onicecandidate = (event: any) => {
           if (!event.candidate || !peerUid) return;
@@ -439,7 +616,8 @@ export default function VideoCallScreen() {
     cameraTrackRef.current = null;
     try { if (localStreamRef.current) setLocalUrl(localStreamRef.current.toURL()); } catch {}
     setSharing(false);
-  }, []);
+    if (peerUid) getSocket().then(s => s.emit('screen_share_stop', { to: peerUid, chatId })).catch(() => {});
+  }, [peerUid, chatId]);
 
   const startScreenShare = useCallback(async () => {
     const sender = videoSender();
@@ -462,6 +640,9 @@ export default function VideoCallScreen() {
       await sender.replaceTrack(screenTrack);                     // peer now sees the screen
       try { setLocalUrl(screen.toURL()); } catch {}              // show the screen in my preview
       setSharing(true);
+      // Tell the peer, so their side can label the change instead of the
+      // picture silently becoming a desktop.
+      if (peerUid) getSocket().then(s => s.emit('screen_share_start', { to: peerUid, chatId })).catch(() => {});
       try { screenTrack.addEventListener?.('ended', () => { stopScreenShare(); }); } catch {}
     } catch (e: any) {
       const msg = e?.message ? String(e.message) : String(e);
@@ -486,8 +667,12 @@ export default function VideoCallScreen() {
 
   const statusText = state === 'connecting' ? 'Connecting…'
     : state === 'ringing'   ? 'Ringing…'
-    : state === 'connected' ? formatDuration(seconds)
     : 'Call ended';
+
+  // Stable identity so the memoized End button doesn't re-render every pass (and
+  // so the press event is never mistaken for endCall's `notify` argument).
+  const hangUp = useCallback(() => endCall(true), [endCall]);
+  const toggleFilters = useCallback(() => setShowFilters(v => !v), []);
 
   const f = FILTERS.find(x => x.id === filter) ?? FILTERS[0];
   // Derive a tint+opacity overlay from the filter's ColorMatrix. When
@@ -520,15 +705,22 @@ export default function VideoCallScreen() {
       {/* Top bar: name + status (offset below the notch / status bar) */}
       <View style={[S.topBar, { top: insets.top + 8 }]} pointerEvents="none">
         <Text style={S.name} numberOfLines={1}>{peerName || 'VaultChat user'}</Text>
-        <Text style={S.status}>{statusText}</Text>
+        {state === 'connected'
+          ? <CallTimer style={S.status} startedAt={connectedAtRef.current} />
+          : <Text style={S.status}>{statusText}</Text>}
         {error && <Text style={S.errorTxt}>{error}</Text>}
       </View>
 
-      {/* Screen-share banner (#124) */}
-      {sharing && (
+      {/* Screen-share banner (#124). Mine takes precedence over the peer's —
+          both can share at once, and knowing what I'M broadcasting matters more. */}
+      {(sharing || peerSharing) && (
         <View style={S.shareBanner} pointerEvents="none">
           <Ionicons name="phone-portrait" size={14} color="#fff" />
-          <Text style={S.shareBannerTxt}>You're sharing your screen</Text>
+          <Text style={S.shareBannerTxt}>
+            {sharing
+              ? "You're sharing your screen"
+              : `${peerName || 'They'} ${peerName ? 'is' : 'are'} sharing their screen`}
+          </Text>
         </View>
       )}
 
@@ -575,45 +767,26 @@ export default function VideoCallScreen() {
       {/* Controls — wraps to a second row on narrow screens instead of
           overflowing, and clears the gesture bar via the bottom inset. */}
       <View style={[S.controls, { bottom: insets.bottom + 12 }]}>
-        <ControlBtn icon={muted ? 'mic-off' : 'mic'} label={muted ? 'Unmute' : 'Mute'} active={muted} onPress={toggleMute} />
-        <ControlBtn icon={cameraOff ? 'videocam-off' : 'videocam'} label={cameraOff ? 'Camera' : 'Off'} active={cameraOff} onPress={toggleCamera} />
+        <CallControlButton variant="video" icon={muted ? 'mic-off' : 'mic'} label={muted ? 'Unmute' : 'Mute'} active={muted} onPress={toggleMute} />
+        <CallControlButton variant="video" icon={cameraOff ? 'videocam-off' : 'videocam'} label={cameraOff ? 'Camera' : 'Off'} active={cameraOff} onPress={toggleCamera} />
         {sharing
-          ? <ControlBtn icon="stop-circle" label="Stop" active onPress={toggleScreenShare} />
-          : <ControlBtn icon="camera-reverse" label="Flip" onPress={flipCamera} />}
+          ? <CallControlButton variant="video" icon="stop-circle" label="Stop" active onPress={toggleScreenShare} />
+          : <CallControlButton variant="video" icon="camera-reverse" label="Flip" onPress={flipCamera} />}
         {Platform.OS === 'android' && !sharing && (
-          <ControlBtn icon="phone-portrait" label="Share" onPress={toggleScreenShare} />
+          <CallControlButton variant="video" icon="phone-portrait" label="Share" onPress={toggleScreenShare} />
         )}
-        <ControlBtn
+        <CallControlButton
+          variant="video"
           icon="sparkles"
           label={filter === 'none' ? 'Beauty' : f.label}
           active={showFilters || filter !== 'none'}
-          onPress={() => setShowFilters(v => !v)}
+          onPress={toggleFilters}
         />
-        <ControlBtn icon={speaker ? 'volume-high' : 'volume-low'} label={speaker ? 'Speaker' : 'Earpiece'} active={speaker} onPress={toggleSpeaker} />
-        <ControlBtn icon="call" label="End" danger onPress={() => endCall(true)} />
+        <CallControlButton variant="video" icon={speaker ? 'volume-high' : 'volume-low'} label={speaker ? 'Speaker' : 'Earpiece'} active={speaker} onPress={toggleSpeaker} />
+        <CallControlButton variant="video" icon="call" label="End" danger onPress={hangUp} />
       </View>
     </View>
   );
-}
-
-function ControlBtn({ icon, label, onPress, active, danger }:
-  { icon: string; label: string; onPress: () => void; active?: boolean; danger?: boolean }) {
-  return (
-    <TouchableOpacity
-      style={[S.btn, active && S.btnActive, danger && S.btnDanger]}
-      onPress={onPress}
-      activeOpacity={0.85}
-    >
-      <Ionicons name={icon as any} size={22} color="#fff" style={S.btnIcon} />
-      <Text style={S.btnLabel} numberOfLines={1}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
-
-function formatDuration(s: number): string {
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
 }
 
 function makeStyles() { return StyleSheet.create({
@@ -644,9 +817,6 @@ function makeStyles() { return StyleSheet.create({
   // flexWrap → the 7 controls fold onto a second centered row on narrow phones
   // instead of overflowing off-screen.
   controls:   { position: 'absolute', left: 12, right: 12, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', columnGap: 6, rowGap: 8, backgroundColor: CALL.barBg, paddingVertical: 12, paddingHorizontal: 6, borderRadius: 24, borderWidth: 1, borderColor: CALL.ctrlBorder },
-  btn:        { width: 62, alignItems: 'center', justifyContent: 'center', paddingVertical: 8, borderRadius: 14, backgroundColor: CALL.ctrl },
-  btnActive:  { backgroundColor: CALL.active },
-  btnDanger:  { backgroundColor: CALL.danger },
-  btnIcon:    { fontSize: 22 },
-  btnLabel:   { color: CALL.text, fontSize: 10, marginTop: 2 },
+  // Button metrics now live with the button (components/call/CallControlButton,
+  // variant 'video') — same values, one owner.
 }); }

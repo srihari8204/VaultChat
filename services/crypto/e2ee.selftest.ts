@@ -12,7 +12,7 @@ import {
   serializeState, deserializeState, encodeEnvelope, decodeEnvelope,
   utf8, fromUtf8, bytesToHex,
   type KeyPair, type PreKeyBundle, type Envelope, type RatchetState,
-} from './e2ee.ts';
+} from './e2ee';
 
 let failures = 0;
 function check(name: string, cond: boolean): void {

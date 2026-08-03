@@ -9,7 +9,20 @@
 
 import { haversine, type LatLng } from '../nav/geo';
 
-export interface Geofence { id: string; name: string; center: LatLng; radiusM: number; }
+/**
+ * `enabled` is optional and absent-means-ON: places saved before per-place
+ * toggles existed must keep firing, so only an explicit `false` mutes one.
+ * Filtering happens in fixPipeline.activeFences(), not here — evaluateFences
+ * stays a pure geometry fold.
+ */
+export interface Geofence {
+  id: string;
+  name: string;
+  center: LatLng;
+  radiusM: number;
+  enabled?: boolean;
+  icon?: string;        // Ionicons glyph for the Places list
+}
 export interface FenceEvent { id: string; name: string; type: 'enter' | 'leave' }
 
 export const EXIT_MARGIN_M = 40;

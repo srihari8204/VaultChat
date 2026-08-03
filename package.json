@@ -1,7 +1,7 @@
 {
   "name": "vaultchat",
   "main": "expo-router/entry",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "scripts": {
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
@@ -10,7 +10,11 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
+    "test": "node ./scripts/test-all.js",
     "test:e2ee": "tsx services/crypto/e2ee.selftest.ts && tsx services/crypto/senderKey.selftest.ts && tsx services/crypto/shamir.selftest.ts && tsx services/security/safetyNumber.selftest.ts && tsx services/crypto/vectors.selftest.ts && tsx services/crypto/vaultbeam-vectors.selftest.ts && tsx services/crypto/parity.selftest.ts && tsx services/crypto/vaultbeam-parity.selftest.ts",
+    "test:vaultcheck": "tsx lib/vaultcheck/vaultcheck.selftest.ts",
+    "test:ice": "tsx lib/iceCredentials.selftest.ts",
+    "test:call": "tsx lib/call/machine.selftest.ts && tsx lib/call/quality.selftest.ts",
     "test:crypto:vectors": "tsx services/crypto/vectors.selftest.ts",
     "test:vaultbeam:vectors": "tsx services/crypto/vaultbeam-vectors.selftest.ts",
     "test:crypto:parity": "tsx services/crypto/parity.selftest.ts",
@@ -28,7 +32,7 @@
     "deploy:firestore:rules": "firebase deploy --only firestore:rules",
     "deploy:firestore:indexes": "firebase deploy --only firestore:indexes",
     "deploy:firestore": "firebase deploy --only firestore",
-    "prod:check": "npm run lint && npm run typecheck",
+    "prod:check": "npm run lint && npm run typecheck && npm test",
     "prod:precheck": "node ./scripts/prod-precheck.js"
   },
   "dependencies": {
@@ -36,6 +40,7 @@
     "@expo-google-fonts/nunito-sans": "^0.4.2",
     "@expo-google-fonts/sora": "^0.4.2",
     "@expo/vector-icons": "^15.0.3",
+    "@livekit/react-native-webrtc": "^144.1.2",
     "@noble/ciphers": "^2.2.0",
     "@noble/curves": "^2.2.0",
     "@noble/hashes": "^2.0.1",
@@ -44,10 +49,6 @@
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/datetimepicker": "^9.1.0",
     "@react-native-community/netinfo": "11.4.1",
-    "@react-native-firebase/app": "^23.8.6",
-    "@react-native-firebase/auth": "^23.8.6",
-    "@react-native-firebase/firestore": "^23.8.6",
-    "@react-native-firebase/storage": "^23.8.6",
     "@react-native-google-signin/google-signin": "^16.1.2",
     "@react-native-voice/voice": "^3.2.4",
     "@react-navigation/bottom-tabs": "^7.2.0",
@@ -55,10 +56,6 @@
     "@react-navigation/native": "^7.0.14",
     "@react-navigation/stack": "^7.8.2",
     "@sentry/react-native": "~7.2.0",
-    "@supabase/supabase-js": "^2.99.0",
-    "@tensorflow-models/blazeface": "^0.1.0",
-    "@tensorflow-models/mobilenet": "^2.1.1",
-    "@tensorflow/tfjs-backend-cpu": "^4.22.0",
     "babel-plugin-react-compiler": "^1.0.0",
     "buffer": "^6.0.3",
     "ethers": "^6.16.0",
@@ -77,7 +74,6 @@
     "expo-face-detector": "^13.0.2",
     "expo-file-system": "~19.0.21",
     "expo-font": "~14.0.11",
-    "expo-gl": "~16.0.10",
     "expo-haptics": "~15.0.8",
     "expo-image": "~3.0.11",
     "expo-image-manipulator": "~14.0.8",
@@ -105,7 +101,6 @@
     "expo-updates": "~29.0.16",
     "expo-video-thumbnails": "~10.0.8",
     "expo-web-browser": "~15.0.10",
-    "firebase": "^12.10.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
@@ -125,7 +120,6 @@
     "react-native-view-shot": "4.0.3",
     "react-native-vision-camera": "^4.7.3",
     "react-native-web": "^0.21.0",
-    "react-native-webrtc": "^124.0.7",
     "react-native-webview": "13.15.0",
     "react-native-worklets": "0.5.1",
     "socket.io-client": "^4.8.3"
@@ -151,7 +145,7 @@
     "doctor": {
       "reactNativeDirectoryCheck": {
         "exclude": [
-          "react-native-webrtc",
+          "@livekit/react-native-webrtc",
           "expo-face-detector"
         ]
       }

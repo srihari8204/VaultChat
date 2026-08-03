@@ -11,16 +11,24 @@
 // syncChat() to fetch GET /chats/:id/messages?after=<cursor> and cacheMessages().
 
 import { open, type DB } from '@op-engineering/op-sqlite';
+import * as SecureStore from 'expo-secure-store';
+import { hmac } from '@noble/hashes/hmac.js';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { randomBytes } from '@noble/hashes/utils.js';
+import { Buffer } from 'buffer';
 import type { Message } from './chatService';
 import { encField, decField, clearCacheKeyStore } from './cacheCrypto';
 
 // Engine: op-sqlite (JSI) — faster than expo-sqlite, same SQL. A thin shim keeps
 // the expo-sqlite-style async API (getAllAsync/runAsync/withTransactionAsync/…)
 // so every call site + all logic below stays byte-identical.
+/** expo-sqlite-shaped result of a write, so call sites can read the new rowid. */
+export interface RunResult { lastInsertRowId: number; changes: number }
+
 export interface LocalDb {
   getAllAsync:          (sql: string, params?: any[]) => Promise<any[]>;
   getFirstAsync:        (sql: string, params?: any[]) => Promise<any>;
-  runAsync:             (sql: string, params?: any[]) => Promise<void>;
+  runAsync:             (sql: string, params?: any[]) => Promise<RunResult>;
   execAsync:            (sql: string) => Promise<void>;
   withTransactionAsync: (fn: () => Promise<void>) => Promise<void>;
 }
@@ -36,7 +44,15 @@ function wrap(db: DB): LocalDb {
   return {
     getAllAsync:   async (sql, params = []) => ((await db.execute(sql, params as any)).rows ?? []) as any[],
     getFirstAsync: async (sql, params = []) => (((await db.execute(sql, params as any)).rows ?? []) as any[])[0] ?? null,
-    runAsync:      async (sql, params = []) => { await db.execute(sql, params as any); },
+    // Returns the write result rather than discarding it. It used to resolve
+    // void, which made `(await runAsync(...)).lastInsertRowId` throw on undefined
+    // — see services/security/auditChain.appendSecurityEvent, whose INSERT landed
+    // but which then rejected while building its return value. Its only caller
+    // swallowed the rejection, so the breakage was invisible.
+    runAsync:      async (sql, params = []) => {
+      const r: any = await db.execute(sql, params as any);
+      return { lastInsertRowId: Number(r?.insertId ?? 0), changes: Number(r?.rowsAffected ?? 0) };
+    },
     // op-sqlite executes ONE statement per call — split the multi-statement schema.
     execAsync:     async (sql) => { for (const s of sql.split(';')) { const t = s.trim(); if (t) db.executeSync(t); } },
     // Manual BEGIN/COMMIT so the inner runAsync (db.execute) calls stay in-txn on
@@ -71,6 +87,11 @@ export function getLocalDb(): Promise<LocalDb> {
       } catch {}
       await db.execAsync(`
         PRAGMA journal_mode = WAL;
+        PRAGMA synchronous = NORMAL;
+        PRAGMA busy_timeout = 5000;
+        PRAGMA mmap_size = 268435456;
+        PRAGMA cache_size = -16000;
+        PRAGMA temp_store = MEMORY;
         CREATE TABLE IF NOT EXISTS messages (
           id           INTEGER PRIMARY KEY,
           chat_id      TEXT NOT NULL,
@@ -107,11 +128,141 @@ export function getLocalDb(): Promise<LocalDb> {
           saved_path   TEXT,
           updated_at   INTEGER
         );
+        CREATE INDEX IF NOT EXISTS idx_messages_preview
+          ON messages(chat_id, id DESC)
+          WHERE deleted_at IS NULL AND type <> 'reaction';
       `);
+      // P4.2: blind search index — FTS5 over HMAC'd tokens (see the "Encrypted
+      // search" section below). Created OUTSIDE the main schema batch so a
+      // build whose SQLite lacks FTS5 degrades to the legacy scan instead of
+      // failing the whole schema.
+      try {
+        await db.execAsync(`
+          CREATE VIRTUAL TABLE IF NOT EXISTS msg_fts USING fts5(toks, tokenize='ascii');
+          CREATE TABLE IF NOT EXISTS fts_meta (k TEXT PRIMARY KEY, v TEXT);
+        `);
+        _ftsOk = true;
+      } catch (e: any) {
+        _ftsOk = false;
+        console.warn('[localDb] FTS5 unavailable — search falls back to linear scan:', e?.message);
+      }
       return db;
     })();
   }
   return _dbPromise;
+}
+
+// ═══ Encrypted search — blind token index (P4.2) ═══════════════════════
+//
+// Problem: global search decrypted up to 5000 cached rows in JS per keystroke
+// (O(all local messages), lossy beyond the cap). A plaintext FTS index would
+// fix the speed but defeat the at-rest cache sealing (cacheCrypto).
+//
+// Design: index HMAC-SHA256(k, token) instead of the token. k is a random
+// per-install key in the OS keystore (SecureStore) that never leaves the
+// device, so index rows reveal nothing about content without the keystore.
+// For each word we index the blind tokens of its 3..8-char prefixes plus the
+// whole word, so typing "hel" matches "hello" (prefix search parity with the
+// old substring UX; infix matches fall back to the legacy scan when FTS finds
+// nothing). rowid == message id, so results join back to `messages`.
+//
+// Everything here fails OPEN: no FTS5, no key, any error → legacy scan.
+
+let _ftsOk = false;
+let _ftsKey: Uint8Array | null = null;
+const FTS_KEY_STORE = 'vc_search_k_v1';
+const FTS_BACKFILL_CAP = 20000;   // one-time backfill ceiling (== old scan cap ×4)
+
+async function ftsKeyBytes(): Promise<Uint8Array | null> {
+  if (_ftsKey) return _ftsKey;
+  try {
+    let hex = await SecureStore.getItemAsync(FTS_KEY_STORE);
+    if (!hex) {
+      hex = Buffer.from(randomBytes(32)).toString('hex');
+      await SecureStore.setItemAsync(FTS_KEY_STORE, hex);
+    }
+    _ftsKey = new Uint8Array(Buffer.from(hex, 'hex'));
+    return _ftsKey;
+  } catch { return null; }
+}
+
+const TEfts = new TextEncoder();
+function blindTok(key: Uint8Array, s: string): string {
+  return Buffer.from(hmac(sha256, key, TEfts.encode(s))).toString('hex').slice(0, 16);
+}
+
+function splitWords(text: string): string[] {
+  return text.toLowerCase().normalize('NFKD').split(/[^\p{L}\p{N}]+/u).filter(w => w.length >= 2);
+}
+
+// Index-side tokens: per word, blind tokens of prefixes 3..8 + the full word.
+function indexTokens(key: Uint8Array, text: string): string {
+  const out = new Set<string>();
+  for (const w of splitWords(text)) {
+    for (let L = 3; L <= Math.min(8, w.length); L++) out.add(blindTok(key, w.slice(0, L)));
+    if (w.length === 2 || w.length > 8) out.add(blindTok(key, w));
+  }
+  return [...out].join(' ');
+}
+
+// Query-side: one token per query word. A ≤8-char term hits the index's
+// prefix token of that exact length (so it matches every word sharing the
+// prefix); a longer term hits the full-word token (exact-word match).
+function queryTokens(key: Uint8Array, q: string): string[] {
+  return splitWords(q).map(w => blindTok(key, w));
+}
+
+// The text worth indexing for a message: plain text bodies, or the caption of
+// a decrypted media envelope ({t, mk}). Never envelopes, never key material.
+function indexableText(type: string | null | undefined, content: string | null | undefined): string | null {
+  if (!content || looksLikeEnvelope(content)) return null;
+  if (type === 'reaction') return null;
+  if (type && type !== 'text') {
+    try { const j = JSON.parse(content); return typeof j?.t === 'string' && j.t ? j.t : null; } catch { return content; }
+  }
+  return content;
+}
+
+async function ftsUpsert(db: LocalDb, key: Uint8Array, id: number, type: string | null, content: string | null, deleted: boolean): Promise<void> {
+  try {
+    await db.runAsync(`DELETE FROM msg_fts WHERE rowid = ?`, [id]);
+    if (deleted) return;
+    const text = indexableText(type, content);
+    if (!text) return;
+    const toks = indexTokens(key, text);
+    if (toks) await db.runAsync(`INSERT INTO msg_fts (rowid, toks) VALUES (?, ?)`, [id, toks]);
+  } catch { /* index is best-effort; search falls back to scan */ }
+}
+
+// One-time backfill of the newest FTS_BACKFILL_CAP cached rows, run lazily on
+// first search (so boot pays nothing). Also validates the key: if the stored
+// keycheck doesn't match (keystore wiped/rotated), the index is rebuilt.
+async function ensureFtsReady(db: LocalDb): Promise<Uint8Array | null> {
+  if (!_ftsOk) return null;
+  const key = await ftsKeyBytes();
+  if (!key) return null;
+  try {
+    const check = blindTok(key, 'vc-keycheck');
+    const row = await db.getFirstAsync(`SELECT v FROM fts_meta WHERE k = 'keycheck'`);
+    if (row?.v === check) return key;              // index live and key matches
+    // Fresh or key-mismatched index → rebuild.
+    await db.runAsync(`DELETE FROM msg_fts`, []);
+    const rows = await db.getAllAsync(
+      `SELECT id, type, content, deleted_at FROM messages
+        WHERE content IS NOT NULL AND deleted_at IS NULL
+        ORDER BY id DESC LIMIT ?`, [FTS_BACKFILL_CAP]);
+    await db.withTransactionAsync(async () => {
+      for (const r of rows as any[]) {
+        const text = indexableText(r.type, decField(r.content));
+        if (!text) continue;
+        const toks = indexTokens(key, text);
+        if (toks) await db.runAsync(`INSERT INTO msg_fts (rowid, toks) VALUES (?, ?)`, [r.id, toks]);
+      }
+    });
+    await db.runAsync(`INSERT INTO fts_meta (k, v) VALUES ('keycheck', ?)
+                       ON CONFLICT(k) DO UPDATE SET v = excluded.v`, [check]);
+    return key;
+  } catch { return null; }
 }
 
 function rowToMessage(r: any): Message {
@@ -134,6 +285,10 @@ function safeParse(s: string): any { try { return JSON.parse(s); } catch { retur
 export async function cacheMessages(chatId: string, msgs: Message[]): Promise<void> {
   if (!msgs || !msgs.length) return;
   const db = await getLocalDb();
+  // P4.2: this is the single choke point where searchable plaintext passes
+  // through (pre-encField), so the blind index is maintained here. Key is
+  // only fetched when the index is live; failures degrade to legacy search.
+  const ftsKey = _ftsOk ? await ftsKeyBytes() : null;
   await db.withTransactionAsync(async () => {
     for (const m of msgs) {
       if (typeof m.id !== 'number' || m.id <= 0) continue; // skip optimistic temp rows
@@ -162,6 +317,13 @@ export async function cacheMessages(chatId: string, msgs: Message[]): Promise<vo
           m.createdAt ?? null, m.editedAt ?? null, m.deletedAt ?? null, (m as any).expiresAt ?? null,
         ],
       );
+      if (ftsKey) {
+        // Keep the blind index in step: (re)index edits, drop deletions.
+        // Content-null purge (delete-on-delivery) keeps the local copy above,
+        // so it also keeps the index row (only re-index when we HAVE text).
+        if (m.deletedAt) await ftsUpsert(db, ftsKey, m.id, m.type ?? null, null, true);
+        else if (m.content != null) await ftsUpsert(db, ftsKey, m.id, m.type ?? null, m.content, false);
+      }
     }
   });
   const maxId = msgs.reduce((a, m) => (typeof m.id === 'number' && m.id > a ? m.id : a), 0);
@@ -185,24 +347,46 @@ export async function getCachedMessages(chatId: string, limit = 50): Promise<Mes
 }
 
 /**
+ * A cached `content` string that is still an E2EE envelope rather than
+ * decrypted plaintext — a 1:1 double-ratchet blob (`{"v":"dr1",…}`) or a group
+ * sender-key blob (`GSK1:…`). Hydrate leaves these in place when decryption
+ * fails, so the chat-list preview and global search must never surface them as
+ * text (else the row shows raw ciphertext like `{"v":"dr1","env":…}`).
+ */
+export function looksLikeEnvelope(text: string | null | undefined): boolean {
+  if (!text) return false;
+  if (text.startsWith('GSK1:')) return true;
+  if (text[0] === '{') { try { return JSON.parse(text)?.v === 'dr1'; } catch { return true; } }
+  return false;
+}
+
+/**
  * The newest cached message for each chat — used by the chat list to render a
  * real last-message preview (WhatsApp-style) from local plaintext, since the
  * server only holds ciphertext. One query, decrypted at-rest on the way out.
  */
 export async function getLastMessagePerChat(): Promise<Map<string, { content: string | null; type: string | null; senderId: string | null; id: number }>> {
   const db = await getLocalDb();
-  const rows = await db.getAllAsync(
-    `SELECT m.chat_id, m.id, m.content, m.type, m.sender_id
-       FROM messages m
-       JOIN (SELECT chat_id, MAX(id) AS mx FROM messages
-              WHERE deleted_at IS NULL AND type <> 'reaction'   -- F4: reference messages never preview
-              GROUP BY chat_id) t
-         ON t.chat_id = m.chat_id AND t.mx = m.id`,
-    [],
-  );
+  // P4.2: the old single query GROUP BY'd the ENTIRE messages table on every
+  // chat-list render — O(all cached messages), growing forever. Instead: one
+  // cheap DISTINCT for the chat list, then a per-chat newest-row lookup that
+  // idx_messages_preview serves in O(log n) each. Chat counts are dozens, so
+  // this is dozens of index probes instead of a full-table scan.
+  const chats = await db.getAllAsync(`SELECT DISTINCT chat_id FROM messages`, []);
   const out = new Map<string, { content: string | null; type: string | null; senderId: string | null; id: number }>();
-  for (const r of rows as any[]) {
-    out.set(r.chat_id, { content: decField(r.content), type: r.type ?? null, senderId: r.sender_id ?? null, id: r.id });
+  for (const c of chats as any[]) {
+    const r = await db.getFirstAsync(
+      `SELECT chat_id, id, content, type, sender_id FROM messages
+        WHERE chat_id = ? AND deleted_at IS NULL AND type <> 'reaction'   -- F4: reference messages never preview
+        ORDER BY id DESC LIMIT 1`, [c.chat_id]);
+    if (!r) continue;
+    const text = decField(r.content);
+    // Never surface an un-decrypted envelope as preview text — null it so the
+    // chat list shows a lock placeholder instead of raw ciphertext.
+    out.set(r.chat_id, {
+      content: looksLikeEnvelope(text) ? null : text,
+      type: r.type ?? null, senderId: r.sender_id ?? null, id: r.id,
+    });
   }
   return out;
 }
@@ -217,6 +401,43 @@ export async function searchAllMessages(
   const q = query.trim().toLowerCase();
   if (!q) return [];
   const db = await getLocalDb();
+
+  // P4.2: blind-index search first — O(matches) via FTS5 over HMAC tokens
+  // instead of decrypting up to 5000 rows in JS per keystroke. The first call
+  // pays a one-time backfill (ensureFtsReady), then queries are index-served.
+  const key = await ensureFtsReady(db);
+  if (key) {
+    const toks = queryTokens(key, q);
+    if (toks.length) {
+      try {
+        const rows = await db.getAllAsync(
+          `SELECT m.chat_id, m.id, m.content, m.sender_id, m.created_at
+             FROM msg_fts f JOIN messages m ON m.id = f.rowid
+            WHERE msg_fts MATCH ? AND m.deleted_at IS NULL
+            ORDER BY m.id DESC LIMIT ?`,
+          [toks.map(t => `"${t}"`).join(' '), Math.max(limit * 3, 60)],
+        );
+        const out: { chatId: string; id: number; content: string; senderId: string | null; createdAt: string }[] = [];
+        for (const r of rows as any[]) {
+          const text = decField(r.content);
+          if (!text || looksLikeEnvelope(text)) continue;
+          // Candidates are word/prefix matches (any order); this substring
+          // check restores the exact legacy phrase semantics on top.
+          if (text.toLowerCase().includes(q)) {
+            out.push({ chatId: r.chat_id, id: r.id, content: text, senderId: r.sender_id, createdAt: r.created_at });
+            if (out.length >= limit) break;
+          }
+        }
+        // Blind tokens only cover word PREFIXES — an infix query ("ell" in
+        // "hello") legitimately misses. Only fall through to the legacy scan
+        // when FTS produced nothing at all.
+        if (out.length > 0) return out;
+      } catch { /* fall through to the legacy scan */ }
+    }
+  }
+
+  // Legacy scan (FTS unavailable, no tokenizable words, or zero FTS hits —
+  // e.g. infix queries): decrypt-and-match the newest 5000 rows.
   const rows = await db.getAllAsync(
     `SELECT chat_id, id, content, sender_id, created_at FROM messages
       WHERE content IS NOT NULL AND deleted_at IS NULL ORDER BY id DESC LIMIT 5000`,
@@ -226,13 +447,49 @@ export async function searchAllMessages(
   for (const r of rows as any[]) {
     const text = decField(r.content);
     // Skip un-decrypted envelopes ({..."v":"dr1"...} / GSK1:) and match plaintext.
-    if (!text || text[0] === '{' || text.startsWith('GSK1:')) continue;
+    if (!text || looksLikeEnvelope(text)) continue;
     if (text.toLowerCase().includes(q)) {
       out.push({ chatId: r.chat_id, id: r.id, content: text, senderId: r.sender_id, createdAt: r.created_at });
       if (out.length >= limit) break;
     }
   }
   return out;
+}
+
+/**
+ * P4.2: bound the local message cache. It previously grew forever, and the
+ * full-scan paths (search backfill, storage attribution) scale with it. Keeps
+ * the newest `keepPerChat` rows of every chat untouchable, then trims the
+ * globally-oldest surplus above `maxTotal` in bounded batches (≤5000/run, so
+ * a boot sweep can't jank). Server history is unaffected — scroll-back
+ * re-fetches via historySync exactly like a fresh install.
+ */
+export async function pruneMessageCache(maxTotal = 200000, keepPerChat = 300): Promise<number> {
+  const db = await getLocalDb();
+  try {
+    const row = await db.getFirstAsync(`SELECT COUNT(*) AS n FROM messages`);
+    const total = Number(row?.n ?? 0);
+    if (total <= maxTotal) return 0;
+    const surplus = Math.min(total - maxTotal, 5000);
+    const victims = await db.getAllAsync(
+      `SELECT id FROM (
+         SELECT id, ROW_NUMBER() OVER (PARTITION BY chat_id ORDER BY id DESC) AS rn
+           FROM messages
+       ) WHERE rn > ? ORDER BY id ASC LIMIT ?`,
+      [keepPerChat, surplus],
+    );
+    if (!victims.length) return 0;
+    const ids = (victims as any[]).map(v => v.id);
+    await db.withTransactionAsync(async () => {
+      for (let i = 0; i < ids.length; i += 500) {
+        const chunk = ids.slice(i, i + 500);
+        const ph = chunk.map(() => '?').join(',');
+        await db.runAsync(`DELETE FROM messages WHERE id IN (${ph})`, chunk);
+        if (_ftsOk) await db.runAsync(`DELETE FROM msg_fts WHERE rowid IN (${ph})`, chunk).catch(() => {});
+      }
+    });
+    return ids.length;
+  } catch { return 0; }
 }
 
 /**

@@ -43,12 +43,24 @@ function rustToolchainAvailable() {
 
 module.exports = function withCryptoCore(config) {
   if (!rustToolchainAvailable()) {
-    console.warn(
-      '[withCryptoCore] cargo/cargo-ndk not found — native crypto core SKIPPED; ' +
-        'the app will use the TS crypto backend. To enable: install rustup, ' +
-        '`cargo install cargo-ndk`, `rustup target add aarch64-linux-android ' +
-        'armv7-linux-androideabi i686-linux-android x86_64-linux-android`, then prebuild again.',
-    );
+    // P3.3: this skip used to be a single easily-missed console.warn — the
+    // audit found release builds silently shipping pure-JS crypto because the
+    // build machine lacked cargo-ndk. Make it impossible to miss, and give CI
+    // a hard-fail switch: CRYPTO_CORE_REQUIRED=1 turns the skip into an error.
+    const msg =
+      '[withCryptoCore] cargo/cargo-ndk NOT FOUND — the Rust crypto core will NOT be built.\n' +
+      '  ┌──────────────────────────────────────────────────────────────────────┐\n' +
+      '  │  THIS BUILD SHIPS PURE-JS CRYPTO (slower ratchet/KDFs on the JS      │\n' +
+      '  │  thread). Fine for dev; NOT what you want in a release build.        │\n' +
+      '  └──────────────────────────────────────────────────────────────────────┘\n' +
+      '  Fix (one-time): install rustup; `cargo install cargo-ndk`;\n' +
+      '  `rustup target add aarch64-linux-android armv7-linux-androideabi \\\n' +
+      '     i686-linux-android x86_64-linux-android`; then prebuild again.\n' +
+      '  CI: set CRYPTO_CORE_REQUIRED=1 to make this a build FAILURE instead of a skip.';
+    if (process.env.CRYPTO_CORE_REQUIRED === '1') {
+      throw new Error(msg);
+    }
+    console.warn(msg);
     return config;
   }
 

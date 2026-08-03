@@ -173,7 +173,7 @@ COMPLETE: whole-file SHA-256 / merkle verify → move shell to final path → em
 | Module | Role | State |
 |---|---|---|
 | **`VaultBeamStream`** (custom Kotlin→Swift) | prealloc, positional R/W, per-chunk AES-GCM off-thread, sha256, **owns LAN TCP socket** (zero-bridge fast path) | net-new (the big one) |
-| `react-native-webrtc` | Tier 2 DataChannels | installed |
+| `@livekit/react-native-webrtc` | Tier 2 DataChannels | installed (replaced `react-native-webrtc`; API-compatible — see docs/SFU_SPIKE.md) |
 | `react-native-quick-crypto` | native AES-GCM (JSI) — already wired in `mediaCrypto.ts` | installed |
 | mDNS/NSD (`react-native-zeroconf` or Android NSD / iOS Bonjour) | Tier 1 LAN peer discovery | net-new |
 | Foreground service (Android) | background survival | reuse call plugin |

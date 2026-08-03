@@ -11,8 +11,53 @@ import * as FileSystem from 'expo-file-system/legacy';
 const CAP_BYTES = 500 * 1024 * 1024;   // 500 MB cache ceiling
 const PREFIXES = ['dec_', 'enc_', 'mp_'];
 
+// Ephemeral protected-media plaintext (view-once / VaultView). media-viewer
+// deletes these on unmount, but a crash or force-stop mid-view leaves the
+// decrypted file behind — and unlike dec_*, it must NEVER survive the session:
+// the server has already burned the attachment, so the only remaining copy of a
+// "gone" photo would be this file. Purged unconditionally at boot, before the
+// size-capped sweep below.
+const EPHEMERAL_PREFIXES = ['vo_', 'vv_'];
+
+/**
+ * Delete every ephemeral protected-media plaintext left in the cache.
+ * Unconditional (not size-capped) — see EPHEMERAL_PREFIXES. Safe to call any
+ * time no protected viewer is on screen; media-viewer also cleans up its own
+ * file on unmount, so this is the crash-recovery path.
+ */
+export async function purgeEphemeralMedia(): Promise<number> {
+  let n = 0;
+  try {
+    const dir = (FileSystem as any).cacheDirectory;
+    if (!dir) return 0;
+    const names = await FileSystem.readDirectoryAsync(dir);
+    for (const name of names) {
+      if (!EPHEMERAL_PREFIXES.some((p) => name.startsWith(p))) continue;
+      await FileSystem.deleteAsync(dir + name, { idempotent: true }).catch(() => {});
+      n++;
+    }
+  } catch {}
+  return n;
+}
+
 /** Delete oldest cache files until under the cap. Call at boot (fire-and-forget). */
 export async function sweepMediaCache(): Promise<void> {
+  // Protected-media plaintext first, and unconditionally — a size-capped sweep
+  // would leave it on disk whenever the cache happens to be under the ceiling.
+  try {
+    const purged = await purgeEphemeralMedia();
+    if (purged > 0) console.log(`[cacheGC] purged ${purged} ephemeral protected-media file(s)`);
+  } catch { /* best-effort */ }
+
+  // P4.2: the message cache is bounded on the same boot sweep as media. It
+  // grew forever, and the local full-scan paths scale with its size. Runs
+  // first and independently — a media-sweep early return must not skip it.
+  try {
+    const { pruneMessageCache } = await import('./localDb');
+    const n = await pruneMessageCache();
+    if (n > 0) console.log(`[cacheGC] pruned ${n} cached message(s)`);
+  } catch { /* best-effort */ }
+
   try {
     const dir = (FileSystem as any).cacheDirectory;
     if (!dir) return;

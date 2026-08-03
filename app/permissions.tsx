@@ -3,6 +3,7 @@ import { Camera } from "expo-camera";
 import * as Contacts from "expo-contacts";
 import * as Location from "expo-location";
 import * as Notifications from "expo-notifications";
+import { Pedometer } from "expo-sensors";
 import { router } from "expo-router";
 import { useState } from "react";
 import { Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
@@ -12,6 +13,8 @@ const PERMS = [
   {key:"mic",      icon:"🎙️",label:"Microphone",   sub:"Voice and video calls"},
   {key:"contacts", icon:"👥",label:"Contacts",     sub:"Find friends on VaultChat"},
   {key:"location", icon:"📍",label:"Location",     sub:"Secure location sharing"},
+  {key:"background",icon:"🛰️",label:"Background Access",sub:"Keep Family Space sharing when the app is closed"},
+  {key:"motion",   icon:"🏃",label:"Motion & Fitness",sub:"Detect driving so location updates adapt"},
   {key:"notifs",   icon:"🔔",label:"Notifications",sub:"New messages and calls"},
 ];
 
@@ -27,6 +30,14 @@ export default function PermissionsScreen() {
       r.mic      = (await Camera.requestMicrophonePermissionsAsync()).granted;
       r.contacts = Platform.OS === 'web' ? true : (await Contacts.requestPermissionsAsync()).granted;
       r.location = (await Location.requestForegroundPermissionsAsync()).granted;
+      // Background location MUST follow a granted foreground grant — both
+      // platforms reject the always-on prompt otherwise. Family Space only keeps
+      // sharing while the app is closed if this one lands.
+      if (r.location) {
+        try { r.background = (await Location.requestBackgroundPermissionsAsync()).granted; } catch { r.background = false; }
+      }
+      // Motion is an iOS-only prompt; Android resolves granted with no dialog.
+      try { r.motion = (await Pedometer.requestPermissionsAsync()).granted; } catch { r.motion = false; }
       r.notifs   = (await Notifications.requestPermissionsAsync()).granted;
       setGranted(r);
     } catch {}
