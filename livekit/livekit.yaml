@@ -23,11 +23,20 @@ rtc:
   # mobile carriers. Without it those users simply cannot join, and the failure
   # looks like "the call never connects" with no clue why.
   tcp_port: 7881
-  # The box's public address, handed to clients in ICE candidates. MUST be the
-  # real public IP: behind Docker the server sees only a bridge address, and
-  # advertising 172.x sends every client to a dead end.
-  use_external_ip: false
-  external_ip: ${LIVEKIT_EXTERNAL_IP}
+  # Auto-detect the box's public address via STUN and advertise THAT in ICE
+  # candidates. On a cloud VM with a public IP this is the documented setup and
+  # it is correct here.
+  #
+  # It replaced a hardcoded `external_ip: ${LIVEKIT_EXTERNAL_IP}`, which was a
+  # bug: LiveKit reads this file as plain YAML and does NOT expand ${VAR}, so
+  # that line delivered the literal fourteen characters to a field expecting an
+  # IP address. Nothing in the compose file could have fixed it — the
+  # substitution has to happen before LiveKit reads the file, and it never did.
+  #
+  # If a future deploy sits behind NAT where STUN resolves the wrong address,
+  # replace this with a literal `external_ip: 1.2.3.4` — a real address, not a
+  # variable reference.
+  use_external_ip: true
 
 # Reuse the coturn already running on this host rather than LiveKit's embedded
 # TURN. One relay, one credential, one thing to monitor — and it is already
