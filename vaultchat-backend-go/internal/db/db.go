@@ -51,7 +51,9 @@ var Pool *pgxpool.Pool
 // docs/RLS_ENFORCEMENT.md):
 //  1. a DB role with BYPASSRLS exists and DB_SYSTEM_USER/DB_SYSTEM_PASS point
 //     at it, and
-//  2. migration 068 sets FORCE ROW LEVEL SECURITY on the policy-bearing tables.
+//  2. scripts/enable-rls-force.sql has been run (it refuses until step 1 is
+//     done, and is deliberately NOT a migration — a routine `migrate.js up`
+//     must never enforce RLS behind an operator's back).
 //
 // Until then this is documentation that compiles.
 var SysPool *pgxpool.Pool
