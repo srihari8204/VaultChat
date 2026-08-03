@@ -54,12 +54,24 @@ must match or tokens verify against nothing:
 LIVEKIT_KEYS="APIxxxxxxxx: secretsecretsecret"      # the SFU: "key: secret"
 LIVEKIT_API_KEY=APIxxxxxxxx                          # the backend signs with these
 LIVEKIT_API_SECRET=secretsecretsecret
-LIVEKIT_URL=wss://your.domain/livekit                # what the CLIENT dials
+LIVEKIT_URL=ws://65.21.229.167:3000/livekit          # what the CLIENT dials
 ```
 
 `LIVEKIT_URL` is handed to the app, so it must be the **public** address. An
 in-network name like `http://livekit:7880` works from the backend and fails on
 every phone.
+
+**`ws://` or `wss://`?** Match whatever the app already uses for `SERVER_URL`.
+Caddy currently serves plain HTTP on `:80` and `:3000` — its own startup log
+says so: *"server is listening only on the HTTP port, so no automatic HTTPS will
+be applied"*. So today it is `ws://`, on the same host and port the app already
+talks to. The moment a domain and a TLS site block exist in the Caddyfile, this
+becomes `wss://your.domain/livekit` and nothing else changes.
+
+React Native has no secure-context requirement, so `ws://` works — but it does
+mean call signalling is as exposed as the rest of the API is today. Media is
+unaffected either way: it is DTLS-SRTP on the RTC ports, and with frame
+encryption the SFU only ever sees ciphertext.
 
 ## 2. Open the firewall
 
@@ -96,14 +108,27 @@ Then:
 ```bash
 docker compose --profile sfu up -d livekit
 docker compose restart caddy go-api        # pick up the route + the new env
-docker compose logs -f livekit             # expect "starting LiveKit server"
+docker compose logs --tail 40 livekit      # expect "starting LiveKit server"
 ```
+
+**The keys must be in `.env` BEFORE this.** `docker compose up` reads `.env` at
+container-create time; generating keys and starting the container in the same
+breath leaves LiveKit with none, and it will reject every token with a signature
+error that looks like a client bug. If you already started it, edit `.env` and
+then:
+
+```bash
+docker compose --profile sfu up -d --force-recreate livekit
+```
+
+`restart` alone is not enough — it reuses the existing container, environment
+and all.
 
 Confirm signalling is reachable through Caddy — this should be an HTTP 200 with
 LiveKit's version banner, **not** a 502:
 
 ```bash
-curl -fsS https://your.domain/livekit/
+curl -fsS http://127.0.0.1:3000/livekit/     # from the box
 ```
 
 A 502 means Caddy cannot reach the host — check the `extra_hosts` mapping on the

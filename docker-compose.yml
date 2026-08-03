@@ -314,9 +314,6 @@ services:
       # everyone not running the SFU. LiveKit refuses to start without keys and
       # says so plainly in its own logs, which is the right place for that error.
       LIVEKIT_KEYS: ${LIVEKIT_KEYS:-}
-      # Interpolated into livekit.yaml's external_ip. Same value as
-      # TURN_EXTERNAL_IP; they are the same host.
-      LIVEKIT_EXTERNAL_IP: ${TURN_EXTERNAL_IP:-65.21.229.167}
     command: --config /etc/livekit.yaml
 
   # VaultLens BullMQ worker — renders AI avatars (ModelsLab → R2) off the request
