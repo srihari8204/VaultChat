@@ -12,7 +12,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet,
-  Alert, ActivityIndicator, RefreshControl, Switch, Platform, KeyboardAvoidingView, Share, Modal,
+  Alert, ActivityIndicator, RefreshControl, Switch, Platform, KeyboardAvoidingView, Share, Modal, Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
@@ -279,10 +279,16 @@ function ShopCard({ shop, onOpen, isFav, onToggleFav }: {
       <View style={{ flex: 1 }}>
         <Text style={s.cardTitle}>{shop.name}</Text>
         <Text style={s.cardSub}>
-          {categoryLabel(shop.category)}{shop.distanceKm != null ? ` · ${formatDistance(shop.distanceKm)}` : ''}
+          {categoryLabel(shop.category)}
           {shop.ratingCount > 0 ? `  ·  ⭐ ${shop.rating} (${shop.ratingCount})` : ''}
         </Text>
-        <View style={{ flexDirection: 'row', gap: 6, marginTop: 6, alignItems: 'center' }}>
+        <View style={{ flexDirection: 'row', gap: 6, marginTop: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          {shop.distanceKm != null && (
+            <View style={[s.badge, s.badgeDist, { marginTop: 0, flexDirection: 'row', alignItems: 'center' }]}>
+              <Ionicons name="location" size={11} color={C.green} style={{ marginRight: 3 }} />
+              <Text style={[s.badgeText, { color: C.green }]}>{formatDistance(shop.distanceKm)}</Text>
+            </View>
+          )}
           <View style={[s.badge, { marginTop: 0 }, st.tone === 'open' ? s.badgeOpen : st.tone === 'soon' ? s.badgeSoon : s.badgeClosed]}>
             <Text style={[s.badgeText, st.tone === 'closed' && { color: C.danger }]}>{st.label}</Text>
           </View>
@@ -409,6 +415,7 @@ function ShopFlow({ shop, cart, setCart, onBack, onPlaced, onLedger, isFav, onTo
             </>
           )}
 
+          {shop.distanceKm != null && <InfoRow icon="navigate-outline" label="Distance" value={`${formatDistance(shop.distanceKm)} away`} />}
           <InfoRow icon="time-outline" label="Timings" value={`${shop.openTime} – ${shop.closeTime}`} />
           {!!shop.address && <InfoRow icon="location-outline" label="Address" value={shop.address} />}
           {!!shop.phone && <InfoRow icon="call-outline" label="Phone" value={shop.phone} />}
@@ -419,6 +426,14 @@ function ShopFlow({ shop, cart, setCart, onBack, onPlaced, onLedger, isFav, onTo
             <Ionicons name="list" size={18} color="#fff" />
             <Text style={s.primaryBtnText}>View Catalog</Text>
           </TouchableOpacity>
+          {shop.lat != null && shop.lng != null && (
+            <TouchableOpacity style={s.outlineBtn} onPress={() => openDirections(shop)}>
+              <Ionicons name="navigate-outline" size={18} color={C.green} />
+              <Text style={s.outlineBtnText}>
+                Directions{shop.distanceKm != null ? ` · ${formatDistance(shop.distanceKm)}` : ''}
+              </Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={s.outlineBtn} onPress={onLedger}>
             <Ionicons name="book-outline" size={18} color={C.green} />
             <Text style={s.outlineBtnText}>My Ledger with this shop</Text>
@@ -1945,6 +1960,21 @@ function StatCard({ label, value, tone }: { label: string; value: string; tone: 
   );
 }
 
+// Open the customer's maps app with directions to the shop. Tries the
+// platform-native scheme first, falls back to a Google Maps web link.
+function openDirections(shop: SB.Shop) {
+  if (shop.lat == null || shop.lng == null) return;
+  const { lat, lng } = shop;
+  const label = encodeURIComponent(shop.name || 'Shop');
+  const web = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+  const native = Platform.select({
+    ios: `maps://?daddr=${lat},${lng}&q=${label}`,
+    android: `geo:${lat},${lng}?q=${lat},${lng}(${label})`,
+    default: web,
+  }) as string;
+  Linking.openURL(native).catch(() => Linking.openURL(web).catch(() => {}));
+}
+
 function InfoRow({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }) {
   return (
     <View style={s.infoRow}>
@@ -2081,6 +2111,7 @@ const s = StyleSheet.create({
   price: { color: C.text, fontSize: 13.5, fontWeight: '700', marginTop: 4 },
 
   badge: { alignSelf: 'flex-start', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2, marginTop: 6 },
+  badgeDist: { backgroundColor: C.greenSoft, borderWidth: 1, borderColor: '#BBF7D0' },
   badgeOpen: { backgroundColor: C.greenSoft },
   badgeSoon: { backgroundColor: '#FEF3C7' },
   badgeClosed: { backgroundColor: '#FEE2E2' },
