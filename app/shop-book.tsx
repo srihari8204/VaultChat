@@ -1109,6 +1109,17 @@ function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPlans, onR
         <Ionicons name="settings-outline" size={20} color={C.sub} />
       </TouchableOpacity>
 
+      {(shop.lat == null || shop.lng == null) && (
+        <TouchableOpacity style={s.locBanner} onPress={onSettings} activeOpacity={0.85}>
+          <Ionicons name="location-outline" size={20} color={C.amber} />
+          <View style={{ flex: 1 }}>
+            <Text style={s.locBannerTitle}>Set your shop location</Text>
+            <Text style={s.locBannerSub}>Nearby customers can’t find you or see your distance until you do. Tap to add it.</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={C.amber} />
+        </TouchableOpacity>
+      )}
+
       <View style={s.statGrid}>
         <StatCard label="Today's Orders" value={String(d?.todayOrders ?? 0)} tone="navy" />
         <StatCard label="Today's Sales" value={formatINR(d?.todaySales ?? 0)} tone="green" />
@@ -2154,6 +2165,9 @@ const s = StyleSheet.create({
 
   badge: { alignSelf: 'flex-start', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2, marginTop: 6 },
   badgeDist: { backgroundColor: C.greenSoft, borderWidth: 1, borderColor: '#BBF7D0' },
+  locBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#FEF3C7', borderWidth: 1, borderColor: '#FCD34D', borderRadius: 12, padding: 12, marginBottom: 12 },
+  locBannerTitle: { fontSize: 14, fontWeight: '700', color: '#92400E' },
+  locBannerSub: { fontSize: 12, color: '#92400E', marginTop: 2, lineHeight: 16 },
   badgeOpen: { backgroundColor: C.greenSoft },
   badgeSoon: { backgroundColor: '#FEF3C7' },
   badgeClosed: { backgroundColor: '#FEE2E2' },
