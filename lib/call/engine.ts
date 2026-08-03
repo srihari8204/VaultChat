@@ -27,6 +27,7 @@
 // the codebase) while authService itself imports back into lib/. Same value,
 // no layering inversion, no latent cycle.
 import { getCachedUser } from '../api';
+import * as perf from '../perf';
 import { CALL_SESSIONS } from '../../constants/flags';
 import { leaveCallSession, openCallSession, setCallRole, setHandRaised, type CallRole } from '../callSession';
 import { addCallLog } from '../callLog';
@@ -533,6 +534,26 @@ function startQualityLoop(peer: CallPeer): void {
     const prevTier = quality.tier;
     quality = nextQuality(quality, sample);
     if (quality.tier !== prevTier) peer.applyVideoQuality(TIERS[quality.tier]);
+
+    // REPORT the sample, don't only act on it (H1). These three numbers are
+    // already computed here every 4 s and were being thrown away the moment the
+    // tier decision was made — so "why was that call bad?" had no answer beyond
+    // the user's word for it.
+    //
+    // Written to the perf ring buffer rather than sent anywhere: it is already
+    // bounded, already surfaced by app/perf-debug.tsx, and costs no network on
+    // a connection that is by definition already struggling. A tier CHANGE is
+    // marked separately because it is the interesting event — the moment the
+    // call visibly degraded or recovered.
+    perf.mark('call_quality', {
+      lossPct: Math.round(sample.lossRatio * 1000) / 10,
+      rttMs: sample.rttMs,
+      tier: quality.tier,
+      peer: peer.uid,
+    });
+    if (quality.tier !== prevTier) {
+      perf.mark('call_quality_change', { from: prevTier, to: quality.tier, peer: peer.uid });
+    }
   }, 4000);
   onDispose(() => clearInterval(timer));
 }
