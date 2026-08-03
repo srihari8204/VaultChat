@@ -17,7 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { brandAlpha } from '../constants/theme';
 import FamilyMap, { type FamilyMarker } from '../components/family/FamilyMap';
-import { listCircles, getSettings, setSettings, type CircleRef } from '../lib/family/store';
+import { listCircles, removeCircle, getSettings, setSettings, type CircleRef } from '../lib/family/store';
 import {
   circleMembers, circleInviteCode, renameCircle, leaveCircle, deleteCircle,
   removeCircleMember, setGuardian,
@@ -98,7 +98,20 @@ export default function FamilySpaceScreen() {
     setLoading(false);
   })(); }, []);
 
-  const refreshMembers = () => { if (active) circleMembers(active.id).then(setMembers).catch(() => {}); };
+  const refreshMembers = () => {
+    if (!active) return;
+    const id = active.id;
+    circleMembers(id).then(setMembers).catch(async (e: any) => {
+      // Kicked, or the circle was deleted: the group now 403/404s forever.
+      // Forget it locally instead of hammering the server from every focus
+      // and highlights poll (seen live: one phone retrying a dead circle
+      // every few seconds).
+      if (e?.status === 403 || e?.status === 404) {
+        await removeCircle(id);
+        await afterCircleGone();
+      }
+    });
+  };
   useEffect(() => { refreshMembers(); }, [active?.id]);
 
   // presence (broadcast self + receive others) for the active circle
