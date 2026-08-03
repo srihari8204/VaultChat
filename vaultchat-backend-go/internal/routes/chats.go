@@ -12,7 +12,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -287,6 +289,85 @@ func chatsRequireMem(w http.ResponseWriter, r *http.Request, notMemberStatus int
 	return mem
 }
 
+// ─── Cold-sync guard ────────────────────────────────────────────────────
+//
+// `since=0` on /chats/delta is a full-history export — the cursor matches every
+// message the caller can see, and the client pages until it has all of them. A
+// fresh install has a legitimate reason to ask; a stolen token issues the exact
+// same request. The server cannot tell them apart from the request alone, so it
+// uses the one signal it can keep: whether this INSTALL has synced before
+// (user_sync_devices, migration 068).
+//
+// An unrecognised device gets a bounded window of recent history rather than
+// everything. The client pages forward from that floor, so the cap bounds the
+// whole cold sync, not merely the first page.
+//
+// Compatibility: clients that predate the X-Device-Id header send no device id.
+// Those are recorded and logged but NEVER capped — hardening must not break the
+// APKs already in the field. COLD_SYNC_WARN_ONLY keeps even identified devices
+// uncapped until the new build has adoption.
+
+// coldSyncMaxMessages is the recent-history window granted to an unrecognised
+// device. 0 disables the cap entirely.
+func coldSyncMaxMessages() int64 {
+	v, err := strconv.ParseInt(os.Getenv("COLD_SYNC_MAX_MESSAGES"), 10, 64)
+	if err != nil || v < 0 {
+		return 2000
+	}
+	return v
+}
+
+// coldSyncWarnOnly reports the event without capping. Defaults to TRUE so that
+// deploying this code changes no client's behaviour until it is switched off.
+func coldSyncWarnOnly() bool {
+	return os.Getenv("COLD_SYNC_WARN_ONLY") != "false"
+}
+
+// noteSyncDevice upserts the device row and reports whether this (user, device)
+// pair had been seen BEFORE this call. A blank deviceID is never "known".
+func noteSyncDevice(ctx context.Context, userID, deviceID string, cold bool) (known bool) {
+	if deviceID == "" {
+		return false
+	}
+	// xmax = 0 marks a freshly INSERTed row; non-zero means the row already
+	// existed and was UPDATEd — i.e. we had seen this install before.
+	var inserted bool
+	err := db.SysPool.QueryRow(ctx,
+		`INSERT INTO user_sync_devices (user_id, device_id, last_cold_sync_at, cold_sync_count)
+		      VALUES ($1, $2, CASE WHEN $3 THEN NOW() END, CASE WHEN $3 THEN 1 ELSE 0 END)
+		 ON CONFLICT (user_id, device_id) DO UPDATE
+		    SET last_sync_at      = NOW(),
+		        last_cold_sync_at = CASE WHEN $3 THEN NOW() ELSE user_sync_devices.last_cold_sync_at END,
+		        cold_sync_count   = user_sync_devices.cold_sync_count + CASE WHEN $3 THEN 1 ELSE 0 END
+		 RETURNING (xmax = 0)`,
+		userID, deviceID, cold).Scan(&inserted)
+	if err != nil {
+		// Never fail a sync because the audit write failed — but do not silently
+		// grant full history either: an unverifiable device is treated as unknown.
+		log.Printf("[chats/delta] sync-device upsert failed: %v", err)
+		return false
+	}
+	return !inserted
+}
+
+// coldSyncFloor returns the message id just below the newest `limit` messages
+// visible to the user, so `m.id > floor` yields exactly that many rows. Returns
+// 0 when the user has fewer messages than the cap (nothing to bound).
+func coldSyncFloor(ctx context.Context, userID string, limit int64) int64 {
+	var floor int64
+	err := db.SysPool.QueryRow(ctx,
+		`SELECT m.id FROM messages m
+		   JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1 AND cm.left_at IS NULL
+		  WHERE m.expires_at IS NULL OR m.expires_at > NOW()
+		  ORDER BY m.id DESC
+		  OFFSET $2 LIMIT 1`,
+		userID, limit).Scan(&floor)
+	if err != nil {
+		return 0 // fewer messages than the cap, or unreadable — do not bound
+	}
+	return floor
+}
+
 // ─── GET /chats/delta — forward catch-up (plain pool, like Node db.query) ──
 
 func chatsDelta(w http.ResponseWriter, r *http.Request) {
@@ -296,6 +377,23 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 	since, ok := httpx.ParseIntPrefix(q.Get("since"))
 	if !ok || since < 0 {
 		since = 0
+	}
+
+	// Cold start (since=0): bound an unrecognised install to recent history.
+	if since == 0 {
+		deviceID := strings.TrimSpace(r.Header.Get("X-Device-Id"))
+		if !noteSyncDevice(ctx, user.ID, deviceID, true) {
+			capN := coldSyncMaxMessages()
+			enforce := capN > 0 && deviceID != "" && !coldSyncWarnOnly()
+			if floor := coldSyncFloor(ctx, user.ID, capN); enforce && floor > 0 {
+				since = floor
+				log.Printf("[chats/delta] cold sync capped to %d msg(s) for user=%s device=%s", capN, user.ID, deviceID)
+			} else {
+				log.Printf("[chats/delta] cold sync (uncapped) user=%s device=%q warnOnly=%v", user.ID, deviceID, coldSyncWarnOnly())
+			}
+		}
+	} else if deviceID := strings.TrimSpace(r.Header.Get("X-Device-Id")); deviceID != "" {
+		noteSyncDevice(ctx, user.ID, deviceID, false)
 	}
 	limit, ok := httpx.ParseIntPrefix(q.Get("limit"))
 	if !ok || limit == 0 {

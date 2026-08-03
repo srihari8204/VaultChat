@@ -1,10 +1,15 @@
 // app/storage-manager.tsx — Storage Manager (real on-disk usage).
 //
-// Walks the app's document + cache directories and sums real file sizes,
-// bucketed by type. Free space comes from the OS. "Clear cache" really deletes
-// cached files; "Delete old media" deletes cache files older than N days by
-// their real modification time. No fabricated sizes, no hardcoded chat list,
-// and no auto-download/quality toggles that nothing enforced.
+// Walks every root the app writes to (lib/storageRoots.measuredRoots) and sums
+// real file sizes, bucketed by type. Free space comes from the OS. "Clear cache"
+// really deletes cached files; "Delete old media" deletes cache files older than
+// N days by their real modification time. No fabricated sizes, no hardcoded chat
+// list, and no auto-download/quality toggles that nothing enforced.
+//
+// The roots come from the shared authority rather than being listed here. This
+// screen used to hardcode document+cache, which silently excluded the media tree
+// (then on external storage) — so it under-reported usage and offered no way to
+// delete the files that actually took up the space (audit F-6).
 
 import React, { useState, useEffect, useMemo } from 'react';
 import {
@@ -20,6 +25,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { getAttachmentChatMap } from '../lib/localDb';
 import { listChats } from '../lib/chatService';
+import { measuredRoots, purgeMedia, toUri } from '../lib/storageRoots';
 
 type ChatStore = { id: string; name: string; size: number };
 
@@ -105,8 +111,7 @@ export default function StorageManagerScreen() {
       const acc: Record<string, number> = { img: 0, vid: 0, aud: 0, file: 0, other: 0 };
       const attMap = await getAttachmentChatMap().catch(() => ({} as Record<string, string>));
       const perChat = { map: attMap, sizes: {} as Record<string, number> };
-      if (FileSystem.documentDirectory) await walk(FileSystem.documentDirectory, acc, undefined, perChat);
-      if (FileSystem.cacheDirectory) await walk(FileSystem.cacheDirectory, acc, undefined, perChat);
+      for (const root of measuredRoots()) await walk(toUri(root), acc, undefined, perChat);
 
       // Rank chats by how much media they hold (WhatsApp "Manage storage").
       try {
@@ -148,7 +153,7 @@ export default function StorageManagerScreen() {
   const clearCache = () => {
     Alert.alert(
       'Clear Cache',
-      'This deletes cached files (thumbnails, downloaded previews, temporary files). Your messages and saved media are not affected.',
+      'This deletes temporary files only — decrypted previews and interrupted uploads. Your messages and downloaded media stay on this device. To remove those, use “Delete all media” above.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -166,6 +171,33 @@ export default function StorageManagerScreen() {
               await loadStorageData();
             } catch {
               Alert.alert('Error', 'Failed to clear cache.');
+            } finally {
+              setClearing(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  // The counterpart to "Clear Cache": this removes the media the app actually
+  // keeps — downloaded photos/videos/files, thumbnails and local .vcbak backups.
+  // Before this existed there was no in-app way to delete any of it (audit F-6).
+  const deleteAllMedia = () => {
+    Alert.alert(
+      'Delete all media?',
+      'Removes every photo, video, voice note and document this app has downloaded or sent from this device. Messages stay. Media the server still holds re-downloads when you open a chat; older media is gone for good.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete', style: 'destructive', onPress: async () => {
+            setClearing(true);
+            try {
+              const n = await purgeMedia();
+              Alert.alert('Done', n > 0 ? `Removed ${n} file${n === 1 ? '' : 's'}.` : 'No media files to remove.');
+              await loadStorageData();
+            } catch {
+              Alert.alert('Error', 'Failed to delete media.');
             } finally {
               setClearing(false);
             }
@@ -285,6 +317,22 @@ export default function StorageManagerScreen() {
           </LinearGradient>
         )}
 
+        {/* Media */}
+        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
+          <Text style={s.cardTitle}>Media on this device</Text>
+          <Text style={s.cardNote}>
+            Downloaded and sent media is stored privately in the app and is removed when
+            VaultChat is uninstalled. Use “Save to gallery” on a photo to keep your own copy.
+          </Text>
+
+          <TouchableOpacity style={s.actionBtn} onPress={deleteAllMedia} disabled={clearing} activeOpacity={0.7}>
+            <Ionicons name="images-outline" size={20} color={colors.danger} />
+            <Text style={[s.actionText, { color: colors.danger }]}>
+              {clearing ? 'Working…' : 'Delete all media'}
+            </Text>
+          </TouchableOpacity>
+        </LinearGradient>
+
         {/* Cache */}
         <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <Text style={s.cardTitle}>Cache Management</Text>
@@ -345,6 +393,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   actionBtn: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#112240' },
   actionText: { fontSize: 15, fontWeight: '600', marginLeft: 10 },
 
+  cardNote:     { color: c.textDim, fontSize: 12, lineHeight: 17, marginTop: 8 },
   sectionLabel: { color: c.textDim, fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1, marginTop: 14, marginBottom: 10 },
   daysRow: { flexDirection: 'row', gap: 10 },
   dayBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: '#1A2A44', alignItems: 'center' },

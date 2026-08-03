@@ -303,6 +303,14 @@ export async function isSetupComplete(): Promise<boolean> {
 }
 
 // ─── Logout ─────────────────────────────────────────────────
+//
+// Signing out clears this account's DATA, not just its credentials. It used to
+// drop only tokens, the PIN hash and face templates, which left the previous
+// user's cached messages, photos, videos, documents and full encrypted chat
+// backups on disk for whoever signed in next (audit F-6).
+//
+// Both confirmation dialogs (profile "Sign out", settings "Delete account") say
+// that on-device chats and media are removed, so this is not a surprise.
 export async function logoutUser() {
   lockSession();
   try { await signOutGoogle(); } catch {}
@@ -322,6 +330,22 @@ export async function logoutUser() {
   }
   await SecureStore.deleteItemAsync('vc_pin_hash').catch(() => {});
   await AsyncStorage.removeItem('vc_pending_signup').catch(() => {});
+
+  // Cached chats/messages + the sealed cache DEK.
+  try { await require('../../lib/localDb').clearLocalDb(); } catch {}
+
+  // Every on-disk user-content root: media, thumbnails, local .vcbak backups,
+  // note attachments, completed VaultBeam transfers. Enumerated from the single
+  // storage-roots authority so a newly added root can't be missed here.
+  try { await require('../../lib/storageRoots').purgeUserContent(); } catch {}
+
+  // Per-attachment media keys and the local revoke list are scoped to the
+  // account that received them; the files they unlock are gone above.
+  try {
+    const keys = await AsyncStorage.getAllKeys();
+    const scoped = keys.filter(k => k.startsWith('vc_mk_') || k.startsWith('vc_cache_') || k === 'vc_revoked_media');
+    if (scoped.length) await AsyncStorage.multiRemove(scoped);
+  } catch {}
 }
 
 // ✅ Required by expo-router to suppress "no default export" route warning

@@ -142,6 +142,22 @@ type ApiOptions = Omit<RequestInit, 'body'> & {
   body?: BodyInit;    // raw body, mutually exclusive with json
 };
 
+// Stable per-install id, cached in memory after the first read. Sent as
+// X-Device-Id so the server can tell a resumed client from a cold start — see
+// the cold-sync guard in internal/routes/chats.go. It lives in the OS keystore,
+// so uninstall destroys it and a reinstall correctly presents as a NEW device.
+// Best-effort: a device that can't produce one still syncs (uncapped), which is
+// also how older clients behave.
+let _deviceIdPromise: Promise<string | null> | null = null;
+function deviceId(): Promise<string | null> {
+  if (!_deviceIdPromise) {
+    _deviceIdPromise = import('../services/deviceService')
+      .then(m => m.getDeviceId())
+      .catch(() => null);
+  }
+  return _deviceIdPromise;
+}
+
 async function rawFetch(path: string, opts: ApiOptions): Promise<Response> {
   // Strip our internal keys so they don't leak into fetch init.
   const { json, auth, headers: optHeaders, body: optBody, ...init } = opts;
@@ -150,6 +166,9 @@ async function rawFetch(path: string, opts: ApiOptions): Promise<Response> {
     Accept: 'application/json',
     ...(optHeaders as Record<string, string> | undefined),
   };
+
+  const did = await deviceId();
+  if (did) headers['X-Device-Id'] = did;
 
   let body: BodyInit | undefined = optBody;
   if (json !== undefined) {

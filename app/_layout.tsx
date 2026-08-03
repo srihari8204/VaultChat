@@ -208,6 +208,11 @@ function RootLayout() {
       import('../lib/vaultBeamController').then(m => m.resumePendingSends()).catch(() => {});
       // Bound the re-derivable media cache (safe: never touches the user's library).
       import('../lib/mediaCacheGC').then(m => m.sweepMediaCache()).catch(() => {});
+      // One-time: drain the legacy external media tree
+      // (/Android/media/<pkg>/VaultChat) into the private sandbox, then delete
+      // it. That tree is the reason media used to survive uninstall. Self-gating
+      // (no-ops once complete), resumable, and never fatal — see lib/mediaMigration.
+      import('../lib/mediaMigration').then(m => m.migrateLegacyMedia()).catch(() => {});
     });
 
     // No-GMS background delivery (Phase 4): raise a local notification for each

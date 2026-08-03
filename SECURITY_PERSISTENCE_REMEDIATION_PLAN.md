@@ -4,7 +4,20 @@
 **Work branch:** `claude/vaultchat-security-audit-qgxecb`
 **Production:** `vaultchatprod01` (`65.21.229.167`) → `https://api.corefinite.com`, Go-first Docker stack
 **Source audit:** "Why does my data come back after uninstall + reinstall?" (findings F-1 … F-12)
-**Status:** plan only — nothing in this document has been implemented.
+
+**Status: Phases 1, 2, 3 and 5 are implemented.** Phase 4 (at-rest encryption
+flags) and Phase 6 (per-contact avatar keys) remain open — see §14 for exactly
+what shipped, what did not, and what still needs on-device verification.
+
+Decisions taken while implementing, using the recommended default in each case
+(§3.3). Reverse any of them before release if you disagree:
+
+| | Decision | Taken |
+|---|---|---|
+| **D1** | Media location | **Sandbox-only.** Nothing survives uninstall; explicit "Save to gallery" is the only durable route |
+| **D2** | Existing external files | **Migrate then delete**, per-file copy→verify→unlink, resumable |
+| **D3** | Server retention | **Scaffolded but OFF.** `DELETE_ON_DELIVERY=false` documented in `.env.example`; you flip it when ready |
+| **D5** | Identity keys in backups | **Removed** from both export and import |
 
 ---
 
@@ -523,3 +536,115 @@ never switched on.
 That is the good kind of problem, because none of it requires redesigning the
 protocol. It requires deciding where files are allowed to live, and who is
 permitted to hold the keys.
+
+---
+
+## 14. Implementation record
+
+What follows is what actually landed, against the phase plan above.
+
+### 14.1 Shipped
+
+**New modules**
+
+| File | Purpose |
+|---|---|
+| `lib/storageRoots.ts` | The single authority on every disk root. Storage manager, logout wipe and migration all read from it, so a new root cannot be added in one place and missed in the others (fixes the structural half of F-6). Also reads the package id from the native app instead of hardcoding it (F-11). |
+| `lib/mediaMigration.ts` | One-time drain of `/Android/media/<pkg>/VaultChat` into the sandbox, then deletion of the tree. Per-file copy→verify-size→unlink; resumable; idempotent; space-safe by construction; never fatal. |
+| `plugins/withBackupLockdown.js` | Expo config plugin setting `android:allowBackup="false"` and `android:hasFragileUserData="false"` (F-3). |
+| `vaultchat-backend/migrations/068_sync_devices.sql` | `user_sync_devices` — cold-sync guard state and audit trail. |
+
+**Changed**
+
+| File | Change |
+|---|---|
+| `lib/mediaStore.ts` | Media root moved to the sandbox (F-1). `saveThumb` now skips E2E-encrypted attachments, matching `storeSentCopy`'s existing guard (F-7). `RNFS.scanFile` calls removed — chat media is no longer published into the system gallery index. New `MediaKeyMissingError`, thrown instead of downloading ciphertext into a `.jpg` path (F-8). |
+| `lib/cloudBackup.ts` | `.vcbak` files moved to the sandbox (F-2). Bundle bumped to **v3** with E2EE identity + ratchets **removed**; v2 bundles are accepted but their embedded keys are ignored, with a warning (D5). Device-local AsyncStorage keys excluded from backups so a restore can't make another device lie about its own migration state. Header comments corrected — the previous "zero-knowledge, the server can never read it" claim was false (the server issues the key via `GET /user/backup/key`). |
+| `app/chat.tsx` | `encrypted` threaded into all four media bubbles; image bubble renders a lock + "Not available on this device" for a missing key, and never retries on reconnect for a failure the network cannot fix. |
+| `app/(constants)/authService.ts` | `logoutUser` now clears the local DB, every user-content root, per-attachment media keys and the response cache — not just tokens (F-6). |
+| `app/(tabs)/profile.tsx`, `app/settings.tsx` | Confirmation copy states that on-device chats and media are erased. |
+| `app/storage-manager.tsx` | Measures every root from the shared authority instead of a hardcoded two; adds "Delete all media"; corrects the "your saved media is not affected" copy that was true and precisely the problem. |
+| `app/_layout.tsx` | Migration runs in the existing `runAfterInteractions` deferral, off the first-frame path. |
+| `lib/api.ts` | Sends `X-Device-Id` on every request, memoised. Best-effort — a device that cannot produce one still syncs. |
+| `vaultchat-backend-go/internal/routes/chats.go` | Cold-sync guard on `/chats/delta` (F-5). |
+| `app.json` | Registers the plugin, drops `READ/WRITE_EXTERNAL_STORAGE` (F-11), bumps `versionCode` 16 → **17**. |
+| `vaultchat-backend/.env.example` | Documents the retention and cold-sync knobs, with the irreversibility warning. |
+
+### 14.2 How the cold-sync guard behaves
+
+`since=0` is a full-history export. The server now checks `user_sync_devices`
+for the caller's `X-Device-Id`:
+
+- **Known device** → unchanged, full delta.
+- **Unknown device** → the cursor is floored to the id just below the newest
+  `COLD_SYNC_MAX_MESSAGES` (default 2000) visible messages. The client pages
+  forward from that floor, so the cap bounds the **entire** cold sync, not just
+  the first page.
+- **No device id** (every APK currently in the field) → recorded and logged, but
+  **never capped**.
+- `COLD_SYNC_WARN_ONLY=true` (the default) logs without capping even for
+  identified devices.
+
+So deploying this code changes no client's behaviour until you set
+`COLD_SYNC_WARN_ONLY=false`, by which point APK 17 has adoption. The device id
+lives in the OS keystore, so a reinstall correctly presents as a new device.
+
+### 14.3 Verification performed
+
+- `go build ./...` — clean.
+- `go vet ./internal/routes/` — clean.
+- `go test ./internal/routes/ ./internal/db/ ./internal/realtime/ ./internal/metrics/ ./internal/livekit/` — pass.
+  (`internal/vault` fails in this environment only: its interop test shells out
+  to Node and `node_modules` is not installed. Pre-existing, unrelated.)
+- `gofmt` — clean.
+- `node --check plugins/withBackupLockdown.js` — clean.
+- `app.json` re-parsed as JSON after editing.
+- TypeScript: `node_modules` is absent here, so a full `tsc --noEmit` is not
+  possible. Every changed file was syntax/type-checked with a standalone
+  compiler under `--noResolve`, which caught one real defect (a `FileBubble`
+  prop typed but not destructured — fixed). The only errors remaining are two
+  that reproduce identically on the unmodified baseline.
+
+### 14.4 NOT done — still required before release
+
+1. **Full `npm run typecheck` / `npm run lint` / `npm test`** on a machine with
+   `node_modules`. The checks above are a floor, not a substitute.
+2. **On-device acceptance test (§6.4).** None of this has run on real hardware.
+   The migration in particular moves the user's photo library and must be
+   exercised on a device with a large legacy tree, including a kill mid-migration
+   to confirm it resumes.
+3. **Verify the built manifest**, not the source:
+   `aapt2 dump xmltree app-release.apk --file AndroidManifest.xml | grep -i allowBackup`
+4. **Confirm the permission removal is safe.** `expo-media-library` declares its
+   own `WRITE_EXTERNAL_STORAGE` with `maxSdkVersion` for API ≤ 28, so
+   "Save to gallery" should still work on old devices via manifest merge — verify
+   on an API 26–28 device before shipping.
+5. **Phase 4** — `VAULT_CACHE_ENCRYPTED` / `VAULT_SESSION_SEALED` are still
+   `false`. The local message cache remains plaintext at rest (F-4), and
+   `lib/localCache.ts` still stores raw API JSON (F-10). Both need the two-device
+   round trip the flag comments require.
+6. **Phase 6** — avatar keys remain server-recoverable by design (F-9).
+7. **User-facing security event** for "a new device synced your history"
+   (plan item 1.5). The server records and logs it; nothing surfaces it in the
+   app yet. `security_events` cannot carry it — that table is client-encrypted
+   by design — so this needs its own endpoint.
+8. **First-run disclosure** (plan item 3.11) of what is stored and what
+   uninstall removes.
+9. **Decide D3.** Retention is scaffolded and off. Until `DELETE_ON_DELIVERY` is
+   enabled, the server still holds every message body forever and a reinstall
+   still re-downloads full history — mechanism **B** is only *bounded* by the
+   cold-sync guard, not closed.
+
+### 14.5 Behavioural changes users will notice
+
+- **Sign out now erases on-device chats and media.** Both dialogs say so. This
+  is the fix for F-6, but it is a real change: previously sign-out kept data.
+- **Restoring a backup re-keys E2EE sessions** instead of resuming them. Peers
+  re-run X3DH on the next message; the existing `e2ee_rekey` path handles it.
+- **Encrypted media sent before a reinstall shows "Not available on this
+  device"** rather than a broken image. The bytes were already unrecoverable —
+  this reports it honestly instead of failing silently.
+- **Chat media no longer appears in the phone's gallery.** "Save to gallery"
+  still works and is now the only way media gets there.
+- **First launch after upgrade may be busy** while the migration drains a large
+  legacy tree. It runs after the first frame and is resumable.

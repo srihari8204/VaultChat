@@ -1,9 +1,9 @@
-// lib/mediaStore.ts — WhatsApp-style media storage & retrieval.
+// lib/mediaStore.ts — on-device media storage & retrieval.
 //
-// Stores media in the app's EXTERNAL media folder (no runtime permission, freely
-// writable, browsable in any file manager), mirroring WhatsApp's layout:
+// Stores media inside the app's PRIVATE sandbox, keeping the WhatsApp-style
+// folder layout for readability:
 //
-//   /Android/media/com.vaultchat.app/VaultChat/Media/
+//   <documentDirectory>/VaultChat/Media/
 //     ├─ VaultChat Images/        └─ Sent/
 //     ├─ VaultChat Video/         └─ Sent/
 //     ├─ VaultChat Audio/         └─ Sent/
@@ -12,24 +12,50 @@
 //
 // Retrieval = read straight from these files. Media is downloaded once; after
 // that it's local, so it survives "Clear cache" AND the server's post-delivery
-// purge. Encrypted media (flag) falls back to the internal decrypt path.
+// purge. Encrypted media falls back to the internal decrypt path.
+//
+// ── Why this is no longer the external media folder ────────────────────────
+// This tree used to live at /Android/media/<pkg>/VaultChat/Media — the app's
+// EXTERNAL media dir. Android does not delete that path on uninstall, and the
+// filenames here are deterministic (IMG-<attachmentId>.jpg), so a reinstalled
+// app re-adopted every orphaned file and re-displayed media the user believed
+// they had removed with the app — including media the server had already purged
+// (audit F-1). It was also readable by any app holding media permissions.
+//
+// The sandbox is now authoritative. The user's durable copy is the one they
+// explicitly export to the system gallery, which is consent rather than a
+// silent side effect. lib/mediaMigration drains the old external tree into here
+// on first launch and then deletes it.
 
-import { Platform } from 'react-native';
 import * as RNFS from '@dr.pogodin/react-native-fs';
 import { attachmentUrl } from './chatService';
 import { getAccessToken } from './api';
 import { getMediaKey } from './mediaKeyStore';
 import { getDecryptedAttachmentUri } from './mediaAttachments';
+import { MEDIA_ROOT, THUMB_ROOT, APP_CACHE, ensureDir as ensureDirRoot } from './storageRoots';
 
 export type MediaKind = 'image' | 'video' | 'audio' | 'voice' | 'file';
 
-const PKG = 'com.vaultchat.app';
+/**
+ * Thrown by getMedia when an attachment is known to be encrypted but this
+ * install holds no key for it — the normal state after a reinstall, since the
+ * per-file keys live in AsyncStorage and the E2EE identity lives in the OS
+ * keystore, both of which uninstall destroys.
+ *
+ * This exists because the old code inferred "no key ⇒ plaintext media" and so
+ * downloaded raw ciphertext into VaultChat Images/IMG-<id>.jpg (audit F-8),
+ * producing a corrupt file with an image extension. Callers should render an
+ * explicit "can't decrypt on this device" state instead.
+ */
+export class MediaKeyMissingError extends Error {
+  readonly code = 'MEDIA_KEY_MISSING';
+  constructor(public attachmentId: string) {
+    super(`No decryption key on this device for attachment ${attachmentId}`);
+    this.name = 'MediaKeyMissingError';
+  }
+}
 
-// Android → app-specific external media dir (browsable, no permission).
-// iOS → app Documents (no external concept; same persistence guarantees).
-const BASE = Platform.OS === 'android'
-  ? `${RNFS.ExternalStorageDirectoryPath}/Android/media/${PKG}/VaultChat/Media`
-  : `${RNFS.DocumentDirectoryPath}/VaultChat/Media`;
+const BASE = MEDIA_ROOT;
 
 const FOLDER: Record<MediaKind, string> = {
   image: 'VaultChat Images',
@@ -68,18 +94,37 @@ function fileNameFor(attachmentId: string, kind: MediaKind, ext: string, filenam
   return `${prefix}-${attachmentId}.${ext}`;
 }
 
-async function ensureDir(path: string): Promise<void> {
-  if (!(await RNFS.exists(path))) await RNFS.mkdir(path);
+const ensureDir = ensureDirRoot;
+
+export interface MediaOpts {
+  kind: MediaKind;
+  isMine?: boolean;
+  mime?: string;
+  filename?: string;
+  /**
+   * True when the message meta says the bytes are E2E-encrypted (meta.encrypted).
+   * Pass it so a missing key is reported as such instead of being mistaken for
+   * plaintext media — see MediaKeyMissingError.
+   */
+  encrypted?: boolean;
 }
 
-export interface MediaOpts { kind: MediaKind; isMine?: boolean; mime?: string; filename?: string }
+const THUMB_DIR = THUMB_ROOT;
 
-// Hidden thumbnails folder (the leading dot keeps it out of the gallery, exactly
-// like WhatsApp's .Thumbs).
-const THUMB_DIR = `${BASE}/.Thumbs`;
-
+/**
+ * Cache a thumbnail on disk.
+ *
+ * Skipped for E2E-encrypted attachments, mirroring storeSentCopy's guard. A
+ * 240px preview of an "end-to-end encrypted" photo is usually fully identifying,
+ * so writing it in the clear undercut the guarantee the encryption was there to
+ * make (audit F-7 — storeSentCopy had this guard and saveThumb did not).
+ * Encrypted media still previews instantly: the sender embeds the thumbnail in
+ * the E2E message envelope (meta.thumb), which is where the receiver reads it
+ * from anyway.
+ */
 export async function saveThumb(attachmentId: string, base64: string): Promise<void> {
   try {
+    if (await getMediaKey(attachmentId)) return;   // encrypted: never on disk in the clear
     await ensureDir(BASE);
     await ensureDir(THUMB_DIR);
     const path = `${THUMB_DIR}/${attachmentId}.jpg`;
@@ -95,14 +140,13 @@ export async function getThumbUri(attachmentId: string): Promise<string | null> 
 }
 
 /**
- * Copy a media-folder file into the app cache (via RNFS, which CAN read
- * /Android/media) so the OS FileProvider can serve it — needed to open a file
- * with another app (expo-file-system can't touch the media folder). Returns the
- * cache file:// uri.
+ * Copy a media file into the app cache so the OS FileProvider can serve it —
+ * needed to hand a file to another app via an intent, since the FileProvider
+ * is configured over the cache dir. Returns the cache file:// uri.
  */
 export async function copyToCache(sourceUri: string, filename: string): Promise<string> {
   const safe = (filename || 'file').replace(/[/\\:*?"<>|]/g, '_');
-  const dest = `${RNFS.CachesDirectoryPath}/${safe}`;
+  const dest = `${APP_CACHE}/${safe}`;
   const src = sourceUri.replace('file://', '');
   if (src !== dest) {
     try { if (await RNFS.exists(dest)) await RNFS.unlink(dest); } catch {}
@@ -131,12 +175,14 @@ async function ensureTree(opts: MediaOpts, folder: string): Promise<void> {
  */
 export async function storeSentCopy(attachmentId: string, sourceUri: string, opts: MediaOpts): Promise<void> {
   try {
-    if (await getMediaKey(attachmentId)) return;   // encrypted: skip (flag-off path)
+    if (await getMediaKey(attachmentId)) return;   // encrypted: handled by the decrypt path
     const { folder, path } = pathFor(attachmentId, { ...opts, isMine: true });
     if (await RNFS.exists(path)) return;
     await ensureTree({ ...opts, isMine: true }, folder);
     await RNFS.copyFile(sourceUri.replace('file://', ''), path);
-    if (Platform.OS === 'android') { try { await RNFS.scanFile(path); } catch {} }
+    // No RNFS.scanFile: publishing chat media into the system gallery index is a
+    // separate consent decision from receiving it, and a sandbox file cannot be
+    // indexed anyway. The user exports deliberately via "Save to gallery".
   } catch { /* best-effort — sender just re-downloads if this fails */ }
 }
 
@@ -151,7 +197,15 @@ export async function getMedia(attachmentId: string, opts: MediaOpts & { cacheOn
 
   const { folder, path } = pathFor(attachmentId, opts);
 
+  // A plaintext copy from before the key was lost still renders — prefer it over
+  // failing, since the bytes on disk are already readable.
   if (await RNFS.exists(path)) return `file://${path}`;
+
+  // Known-encrypted with no key: stop here. Downloading now would write raw
+  // ciphertext to a path with an image/video extension (audit F-8). Callers
+  // catch this and render an explicit "can't decrypt on this device" state.
+  if (opts.encrypted) throw new MediaKeyMissingError(attachmentId);
+
   // Cache-only probe (for the auto-download gate): don't hit the network.
   if (opts.cacheOnly) return '';
 
@@ -173,9 +227,6 @@ export async function getMedia(attachmentId: string, opts: MediaOpts & { cacheOn
     await RNFS.unlink(path).catch(() => {});
     throw new Error(`attachment ${attachmentId} download failed (${res.statusCode})`);
   }
-  // Make it appear in the gallery (same as WhatsApp — its media folder is
-  // media-scanned). No copy, no permission.
-  if (Platform.OS === 'android') { try { await RNFS.scanFile(path); } catch {} }
   return `file://${path}`;
 }
 
