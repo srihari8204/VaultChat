@@ -141,6 +141,10 @@ export async function sendTransfer(opts: {
 export async function receiveTransfer(opts: {
   transferId: string; dstPath: string; totalBytes: number; fileId: string; keyB64: string;
   linkType?: string | null; expectedSha256?: string; onProgress?: ProgressCb; signal?: AbortSignal;
+  /** Contiguous plaintext prefix a DIRECT tier already landed on dstPath
+   *  (GCM-verified chunk by chunk). Blocks fully inside it are credited, not
+   *  re-downloaded — a 50% direct transfer resumes at 50% on the relay. */
+  haveBytes?: number;
 }): Promise<{ path: string; verified: boolean }> {
   if (!isNativeStreamAvailable()) throw new Error('native stream unavailable');
 
@@ -179,6 +183,26 @@ export async function receiveTransfer(opts: {
       downloadedBytes = [...got].reduce((s, b) => s + (locateBlock(p, b)?.blockBytes ?? 0), 0);
       opts.onProgress?.({ done: got.size, total: totalBlocks(p) || got.size, bytes: Math.min(downloadedBytes, opts.totalBytes), totalBytes: opts.totalBytes });
       seeded = false; lastProgressAt = Date.now();
+    }
+
+    // Cross-tier resume: credit blocks the direct tier already wrote. The plan
+    // grows over time, so newly-defined blocks get credited as they appear.
+    // Same key + same per-chunk GCM verification as the relay path, and the
+    // whole-file sha256 below still gates completion.
+    if (opts.haveBytes && opts.haveBytes > 0) {
+      let credited = false;
+      for (let b = 0, n = totalBlocks(p); b < n; b++) {
+        if (got.has(b)) continue;
+        const loc = locateBlock(p, b);
+        if (loc && loc.blockPlainOffset + loc.blockBytes <= opts.haveBytes) {
+          got.add(b); downloadedBytes += loc.blockBytes; credited = true;
+        }
+      }
+      if (credited) {
+        lastProgressAt = Date.now();
+        if (VB_RELIABILITY_FIXES) saveRecvBitmapSoon(opts.transferId, got);
+        opts.onProgress?.({ done: got.size, total: totalBlocks(p) || got.size, bytes: Math.min(downloadedBytes, opts.totalBytes), totalBytes: opts.totalBytes });
+      }
     }
 
     const serverHeld = uploadedBlocks(st.uploadedMask, st.blockCount).length;

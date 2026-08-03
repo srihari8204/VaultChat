@@ -12,7 +12,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet,
-  Alert, ActivityIndicator, RefreshControl, Switch, Platform, KeyboardAvoidingView, Share, Modal, Linking,
+  Alert, ActivityIndicator, RefreshControl, Switch, Platform, KeyboardAvoidingView, Share, Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
@@ -22,6 +22,7 @@ import QRCode from 'react-native-qrcode-svg';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { getCurrentUserAsync } from './(constants)/authService';
+import { navigateTo } from '../lib/nav/openNavigation';
 import { SHOP_CATEGORIES, categoryIcon, categoryLabel } from '../constants/shopCategories';
 import {
   formatINR, formatDistance, shopOpenState, orderStatusLabel, orderProgress,
@@ -2013,19 +2014,12 @@ function StatCard({ label, value, tone }: { label: string; value: string; tone: 
   );
 }
 
-// Open the customer's maps app with directions to the shop. Tries the
-// platform-native scheme first, falls back to a Google Maps web link.
+// Directions to the shop via the app's own turn-by-turn (Valhalla) — the same
+// openNavigation seam every other location surface uses. No external maps app,
+// works on no-GMS devices.
 function openDirections(shop: SB.Shop) {
   if (shop.lat == null || shop.lng == null) return;
-  const { lat, lng } = shop;
-  const label = encodeURIComponent(shop.name || 'Shop');
-  const web = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
-  const native = Platform.select({
-    ios: `maps://?daddr=${lat},${lng}&q=${label}`,
-    android: `geo:${lat},${lng}?q=${lat},${lng}(${label})`,
-    default: web,
-  }) as string;
-  Linking.openURL(native).catch(() => Linking.openURL(web).catch(() => {}));
+  navigateTo(shop.lat, shop.lng, shop.name || 'Shop');
 }
 
 function InfoRow({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }) {

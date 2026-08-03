@@ -5,6 +5,7 @@ package routes
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -263,11 +264,20 @@ func chatsMessagePost(w http.ResponseWriter, r *http.Request) {
 	}
 	var meta map[string]any
 	var metaParam any
+	// Marshal to a JSON string, never pass the raw map: under
+	// default_query_exec_mode=exec (P2.3, PgBouncer) pgx cannot infer a type
+	// for map[string]any and every media send 500s with "cannot find encode
+	// plan". Postgres casts the text param to jsonb from the column type.
 	switch mv := b["meta"].(type) {
 	case map[string]any:
-		meta, metaParam = mv, mv
+		meta = mv
+		if j, err := json.Marshal(mv); err == nil {
+			metaParam = string(j)
+		}
 	case []any:
-		metaParam = mv // typeof [] === 'object' in JS
+		if j, err := json.Marshal(mv); err == nil {
+			metaParam = string(j) // typeof [] === 'object' in JS
+		}
 	}
 	var replyTo *int64
 	if chatsTruthy(b["replyToId"]) {

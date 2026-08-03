@@ -209,9 +209,27 @@ export async function encryptForChat(chatId: string, plaintext: string): Promise
   }
   try {
     const e2ee = await import('../services/crypto/e2eeSession.rn');
-    return await e2ee.e2eeEncrypt(chatId, peerId, plaintext);
+    const out = await e2ee.e2eeEncrypt(chatId, peerId, plaintext);
+    _encryptFailStreak.delete(peerId);
+    return out;
   } catch (err) {
     console.warn('[e2ee] ENCRYPT-FAILED chat=', chatId, 'peer=', peerId, 'err=', (err as any)?.message, (err as any)?.stack?.slice?.(0, 200));
+    // Symmetric twin of maybeAutoRecoverSession: if OUR outbound session state
+    // is what's broken (corrupt ratchet, backend-migration leftovers), every
+    // retry re-hits the same state and the chat is stuck on "couldn't encrypt"
+    // forever — the decrypt-side healer never fires because nothing ever goes
+    // out. Two consecutive failures → drop the session so the next retry
+    // re-initiates X3DH from the peer's current bundle.
+    const n = (_encryptFailStreak.get(peerId) ?? 0) + 1;
+    _encryptFailStreak.set(peerId, n);
+    if (n >= AUTO_RECOVER_AFTER) {
+      _encryptFailStreak.delete(peerId);
+      try {
+        const e2ee = await import('../services/crypto/e2eeSession.rn');
+        await e2ee.e2eeResetSession(peerId);
+        if (__DEV__) console.warn('[e2ee] AUTO-RESET outbound session for peer', peerId, '— retry re-handshakes');
+      } catch {}
+    }
     // STRICT: never silently send plaintext. Throwing surfaces a failed/retry
     // bubble; the retry re-fetches the peer's key bundle and almost always
     // succeeds. (Legacy graceful mode falls back to plaintext.)
@@ -219,6 +237,7 @@ export async function encryptForChat(chatId: string, plaintext: string): Promise
     return plaintext;
   }
 }
+const _encryptFailStreak = new Map<string, number>();
 
 /**
  * Reset the E2EE session for a direct chat ("reset secure session"). Drops the

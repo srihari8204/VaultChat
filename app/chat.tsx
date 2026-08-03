@@ -1952,7 +1952,9 @@ export default function ChatScreen() {
   // Tap the name/header → the contact's profile page (or group info).
   const openProfile = useCallback(() => {
     if (chat?.type === 'group') {
-      router.push({ pathname: '/group-info' as any, params: { chatId } });
+      // group-info reads `id` — passing `chatId` sent it fetching /chats/ (empty
+      // id), which lands on go-api's catch-all "route not migrated" message.
+      router.push({ pathname: '/group-info' as any, params: { id: chatId } });
       return;
     }
     const peer = directPeer();
