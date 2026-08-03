@@ -13,9 +13,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
 import { Avatar } from '../../components/ui';
-import { getCallLog, clearCallLog, removeCallLog, type CallLogEntry } from '../../lib/callLog';
+import { getCallLog, clearCallLog, removeCallLog, callLogKey, getHiddenServerCalls, hideServerCalls, type CallLogEntry } from '../../lib/callLog';
 import { listChats, attachmentUrl } from '../../lib/chatService';
-import { getAccessToken } from '../../lib/api';
+import { getAccessToken, getCachedUser } from '../../lib/api';
+import { fetchCallHistory } from '../../lib/callSession';
+import { mergeCallHistory, type CallHistoryEntry } from '../../lib/callHistory';
 
 function useS() {
   const { colors } = useTheme();
@@ -41,55 +43,106 @@ function fmtDuration(sec: number): string {
 
 const dirLabel = (d: CallLogEntry['direction']) => d === 'missed' ? 'Missed' : d === 'incoming' ? 'Incoming' : 'Outgoing';
 
-type CallGroup = { peerUid: string; peerName: string; peerPhoto?: string | null; entries: CallLogEntry[] };
+type CallGroup = {
+  key: string;
+  peerUid: string;
+  peerName: string;
+  peerPhoto?: string | null;
+  /** True when the row is a group (mesh) call — see lib/callLog.ts. */
+  group?: boolean;
+  entries: CallHistoryEntry[];
+};
 
 export default function CallsScreen() {
   const { colors } = useTheme();
   const S = useS();
   const router = useRouter();
-  const [log, setLog] = useState<CallLogEntry[]>([]);
+  const [log, setLog] = useState<CallHistoryEntry[]>([]);
   const [photos, setPhotos] = useState<Map<string, string>>(new Map());
   const [authHeader, setAuthHeader] = useState<string | null>(null);
   const [infoGroup, setInfoGroup] = useState<CallGroup | null>(null);
 
   useFocusEffect(useCallback(() => {
     let alive = true;
+    // The device log paints FIRST, on its own, before anything touches the
+    // network. It is already on disk, so the list is never blank waiting on a
+    // request — and on an offline device or an unmigrated server, this is the
+    // whole story and nothing below changes what's on screen.
     getCallLog().then(l => { if (alive) setLog(l); });
-    Promise.all([listChats(), getAccessToken()]).then(([chats, tok]) => {
-      if (!alive) return;
-      const m = new Map<string, string>();
-      for (const c of chats) if (c.peerUserId && c.peerPhotoURL) m.set(c.peerUserId, c.peerPhotoURL);
-      setPhotos(m); setAuthHeader(tok ? `Bearer ${tok}` : null);
-    }).catch(() => {});
+
+    Promise.all([listChats(), getAccessToken(), getCachedUser(), fetchCallHistory(), getHiddenServerCalls()])
+      .then(([chats, tok, me, server, hidden]) => {
+        if (!alive) return;
+        const m = new Map<string, string>();
+        // chatId → how to name a call the server told us about but this device
+        // never made. Built from the chat list the screen already loads.
+        const byChat = new Map<string, { name: string; photo?: string | null; direct?: boolean }>();
+        for (const c of chats) {
+          if (c.peerUserId && c.peerPhotoURL) m.set(c.peerUserId, c.peerPhotoURL);
+          byChat.set(c.id, {
+            name: (c.type === 'direct' ? c.peerName : c.name) || 'Call',
+            photo: c.type === 'direct' ? c.peerPhotoURL : null,
+            direct: c.type === 'direct',
+          });
+        }
+        setPhotos(m);
+        setAuthHeader(tok ? `Bearer ${tok}` : null);
+        // Merge only when the server actually returned something. With
+        // CALL_SESSIONS off fetchCallHistory resolves [] without a request, so
+        // this is a no-op and the log stays exactly as it was.
+        if (server.length && me?.id) {
+          getCallLog().then(local => {
+            if (alive) setLog(mergeCallHistory(local, server, me.id, { get: (id) => byChat.get(id) }, hidden));
+          });
+        }
+      }).catch(() => {});
     return () => { alive = false; };
   }, []));
 
-  // Group consecutive calls with the same person (WhatsApp "(3)").
+  // Group consecutive calls with the same person (WhatsApp "(3)"), or with the
+  // same group chat — a group call has no peer uid, so it keys by chat instead.
   const groups = useMemo<CallGroup[]>(() => {
     const out: CallGroup[] = [];
     for (const e of log) {
+      const key = callLogKey(e);
       const last = out[out.length - 1];
-      if (last && last.peerUid === e.peerUid) last.entries.push(e);
-      else out.push({ peerUid: e.peerUid, peerName: e.peerName, peerPhoto: e.peerPhoto, entries: [e] });
+      if (last && last.key === key) last.entries.push(e);
+      else out.push({ key, peerUid: e.peerUid, peerName: e.peerName, peerPhoto: e.peerPhoto, group: e.group, entries: [e] });
     }
     return out;
   }, [log]);
 
-  const call = useCallback((g: { chatId?: string; peerUid: string; peerName: string }, kind: 'audio' | 'video') => {
+  // Redial. A group call can't be redialled 1:1 — it goes back to the group call
+  // hub for that chat, which loads the current member list and rings it.
+  const call = useCallback((
+    g: { chatId?: string; peerUid: string; peerName: string; group?: boolean }, kind: 'audio' | 'video',
+  ) => {
+    if (g.group) {
+      router.push({
+        pathname: '/group-calls' as any,
+        params: { chatId: g.chatId ?? '', groupName: g.peerName, mode: kind === 'video' ? 'video' : 'voice' },
+      });
+      return;
+    }
     const path = kind === 'video' ? '/videocall' : '/voicecall';
     router.push({ pathname: path as any, params: { chatId: g.chatId ?? '', peerUid: g.peerUid, peerName: g.peerName } });
   }, [router]);
 
+  // Removing a row has to reach BOTH sources. Local entries are deleted from
+  // the device log; server-only ones have nothing to delete, so their callId is
+  // remembered as dismissed — otherwise the row would disappear and come
+  // straight back on the next sync.
   const removeGroup = useCallback(async (g: CallGroup) => {
-    await removeCallLog(g.entries.map(e => e.id));
+    await removeCallLog(g.entries.filter(e => !e.remote).map(e => e.id));
+    await hideServerCalls(g.entries.filter(e => e.remote && e.callId).map(e => e.callId!));
     setLog(prev => prev.filter(e => !g.entries.some(x => x.id === e.id)));
   }, []);
 
   const onLongPress = useCallback((g: CallGroup) => {
     const latest = g.entries[0];
     Alert.alert(g.peerName, undefined, [
-      { text: 'Voice call', onPress: () => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName }, 'audio') },
-      { text: 'Video call', onPress: () => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName }, 'video') },
+      { text: 'Voice call', onPress: () => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName, group: g.group }, 'audio') },
+      { text: 'Video call', onPress: () => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName, group: g.group }, 'video') },
       { text: 'Call info', onPress: () => setInfoGroup(g) },
       { text: 'Remove from log', style: 'destructive', onPress: () => removeGroup(g) },
       { text: 'Cancel', style: 'cancel' },
@@ -99,9 +152,17 @@ export default function CallsScreen() {
   const confirmClear = useCallback(() => {
     Alert.alert('Clear call log?', 'This removes all call history from this device.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Clear', style: 'destructive', onPress: async () => { await clearCallLog(); setLog([]); } },
+      { text: 'Clear', style: 'destructive', onPress: async () => {
+        // Synced rows have to be dismissed too, or "clear" would leave the list
+        // repopulating itself from the server a moment later.
+        await Promise.all([
+          clearCallLog(),
+          hideServerCalls(log.filter(e => e.remote && e.callId).map(e => e.callId!)),
+        ]);
+        setLog([]);
+      } },
     ]);
-  }, []);
+  }, [log]);
 
   const DirArrow = ({ d, size = 15 }: { d: CallLogEntry['direction']; size?: number }) => (
     <Ionicons
@@ -119,7 +180,7 @@ export default function CallsScreen() {
     const dur = fmtDuration(latest.durationSec);
     return (
       <TouchableOpacity style={S.row} activeOpacity={0.7}
-        onPress={() => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName }, latest.kind)}
+        onPress={() => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName, group: g.group }, latest.kind)}
         onLongPress={() => onLongPress(g)} delayLongPress={300}>
         <Avatar uri={photo && authHeader ? attachmentUrl(photo) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={g.peerName} size={48} />
         <View style={{ flex: 1 }}>
@@ -137,7 +198,7 @@ export default function CallsScreen() {
           <TouchableOpacity onPress={() => setInfoGroup(g)} hitSlop={8} style={S.callBtn}>
             <Ionicons name="information-circle-outline" size={22} color={colors.textDim} />
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName }, latest.kind)} hitSlop={8} style={S.callBtn}>
+          <TouchableOpacity onPress={() => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName, group: g.group }, latest.kind)} hitSlop={8} style={S.callBtn}>
             <Ionicons name={latest.kind === 'video' ? 'videocam' : 'call'} size={22} color={colors.primary} />
           </TouchableOpacity>
         </View>
@@ -189,10 +250,10 @@ export default function CallsScreen() {
                   <Text style={S.infoName} numberOfLines={1}>{infoGroup.peerName}</Text>
                 </View>
                 <View style={S.infoActions}>
-                  <TouchableOpacity style={S.infoAction} onPress={() => { const u = infoGroup; setInfoGroup(null); call({ chatId: u.entries[0].chatId, peerUid: u.peerUid, peerName: u.peerName }, 'audio'); }}>
+                  <TouchableOpacity style={S.infoAction} onPress={() => { const u = infoGroup; setInfoGroup(null); call({ chatId: u.entries[0].chatId, peerUid: u.peerUid, peerName: u.peerName, group: u.group }, 'audio'); }}>
                     <Ionicons name="call" size={22} color={colors.primary} /><Text style={S.infoActionTxt}>Voice</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={S.infoAction} onPress={() => { const u = infoGroup; setInfoGroup(null); call({ chatId: u.entries[0].chatId, peerUid: u.peerUid, peerName: u.peerName }, 'video'); }}>
+                  <TouchableOpacity style={S.infoAction} onPress={() => { const u = infoGroup; setInfoGroup(null); call({ chatId: u.entries[0].chatId, peerUid: u.peerUid, peerName: u.peerName, group: u.group }, 'video'); }}>
                     <Ionicons name="videocam" size={22} color={colors.primary} /><Text style={S.infoActionTxt}>Video</Text>
                   </TouchableOpacity>
                 </View>

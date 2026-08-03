@@ -132,19 +132,14 @@ func (h *Hub) registerChatHandlers(s *socket.Socket) {
 		}
 	})
 
-	// In-call extras — relay into the chat room (excl. self).
-	s.On("call_emoji", func(args ...any) {
-		m := argMap(args)
-		if chatID := mstr(m, "chatId"); chatID != "" {
-			s.To(socket.Room("chat:"+chatID)).Emit("call_emoji", map[string]any{"emoji": m["emoji"], "from": m["from"]})
-		}
-	})
-	s.On("call_chat", func(args ...any) {
-		m := argMap(args)
-		if chatID := mstr(m, "chatId"); chatID != "" {
-			s.To(socket.Room("chat:"+chatID)).Emit("call_chat", map[string]any{"text": m["text"], "from": m["from"]})
-		}
-	})
+	// NOTE: the in-call extras (`call_emoji`, `call_chat`) used to be handled
+	// here as chat-room broadcasts that re-emitted a CLIENT-supplied `from` —
+	// the same spoofing shape the legacy message_edited/message_deleted relays
+	// were removed for (see server.js). They are now registered on the
+	// authenticated per-peer relay in registerSignalHandlers, which requires a
+	// `to`, stamps `from`/`fromUid` from the socket's own uid, and passes the
+	// payload through verbatim so the body can be an E2EE envelope rather than
+	// plaintext. No client had ever sent or received either event.
 }
 
 // liveLocAllowed caches the chat-membership check per socket per chat (RLS,
@@ -250,6 +245,10 @@ func (h *Hub) registerSignalHandlers(s *socket.Socket) {
 	s.On("e2ee_rekey", relay("e2ee_rekey"))
 	s.On("screen_share_start", relay("screen_share_start"))
 	s.On("screen_share_stop", relay("screen_share_stop"))
+	// In-call chat + reactions. Addressed like any other call signal so the
+	// sender is authenticated and the body stays an opaque E2EE envelope.
+	s.On("call_chat", relay("call_chat"))
+	s.On("call_emoji", relay("call_emoji"))
 	s.On("vaultbeam_offer", relay("vaultbeam_offer"))
 	s.On("vaultbeam_answer", relay("vaultbeam_answer"))
 	s.On("vaultbeam_ice", relay("vaultbeam_ice"))

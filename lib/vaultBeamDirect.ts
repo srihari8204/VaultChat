@@ -17,7 +17,8 @@
 // lost while the LAN attempt is still running.
 
 import { getSocket } from './socket';
-import { getTurnConfig, type IceServer } from './chatService';
+import { type IceServer } from './chatService';
+import { getIceServers } from './iceConfig';
 import { reprioritizeIceObject, readWinningPair } from './icePriority';
 import perf from './perf';
 import { newCallCipher, openCallOffer, type CallCipher } from './callCrypto';
@@ -30,7 +31,7 @@ import { Buffer } from 'buffer';
 // WebRTC is native (react-native-webrtc). Lazy-require so a build without it (or
 // Expo Go) degrades to relay instead of crashing at import.
 let RTC: any = null;
-try { RTC = require('react-native-webrtc'); } catch { RTC = null; }
+try { RTC = require('@livekit/react-native-webrtc'); } catch { RTC = null; }
 
 const FRAME = 16 * 1024;            // SCTP-safe datachannel frame (≤16 KiB)
 const BP_HIGH = 4 * 1024 * 1024;    // datachannel backpressure ceiling
@@ -84,8 +85,11 @@ async function iceServers(): Promise<IceServer[]> {
   // Cloudflare STUN is dual-stack — helps discover the IPv6 server-reflexive
   // candidate on networks where our coturn STUN is IPv4-only (feeds IPv6-first).
   const CF: IceServer = { urls: 'stun:stun.cloudflare.com:3478' };
-  try { return [CF, ...(await getTurnConfig()).iceServers]; }
-  catch { return [CF, { urls: 'stun:stun.l.google.com:19302' }]; }
+  // getIceServers() caches the TURN credentials and never throws; on failure it
+  // yields the same Google STUN entry this used to fall back to, so the list is
+  // unchanged in both the success and the failure case — it just no longer costs
+  // a round-trip before every transfer.
+  return [CF, ...(await getIceServers())];
 }
 // Log which candidate pair actually won (measures the real Jio/Airtel IPv6
 // hit-rate — direct vs paid relay). Best-effort; never blocks the transfer.

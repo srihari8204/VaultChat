@@ -10,21 +10,198 @@
 // NOTE: WebRTC can only be fully validated on real devices/networks.
 
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, StatusBar, StyleSheet, Text, TouchableOpacity, View, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { mediaDevices, RTCIceCandidate, RTCPeerConnection, RTCSessionDescription, RTCView } from 'react-native-webrtc';
+import { mediaDevices, RTCIceCandidate, RTCPeerConnection, RTCSessionDescription, RTCView } from '@livekit/react-native-webrtc';
 import InCallManager from 'react-native-incall-manager';
 import { type Palette } from '../constants/theme';
+import { CALL_ENGINE_V2 } from '../constants/flags';
 import { useTheme } from '../lib/theme';
-import { getTurnConfig } from '../lib/chatService';
+import { getIceServers } from '../lib/iceConfig';
 import { getSocket } from '../lib/socket';
 import { newCallCipher, openCallOffer, plainCipher, type CallCipher } from '../lib/callCrypto';
 import { getCurrentUserAsync } from './(constants)/authService';
+import * as engine from '../lib/call/engine';
+import { CallTimer } from '../components/call/CallTimer';
+import { CallExtras } from '../components/call/CallExtras';
+import {
+  useCallConnectedAt, useCallError, useCallFlag, useCallLocalUrl,
+  useCallStatus, useCanModerate, useMyHandRaised, useParticipant,
+  useParticipantIds, useRaisedHands,
+} from '../hooks/useCall';
 
 type Peer = { pc: RTCPeerConnection; url: string | null; name: string };
 
+/**
+ * Route entry. Same dispatcher as the 1:1 screens — one flag picks the
+ * engine-backed renderer or the original body, both drawing the same grid from
+ * the same styles and speaking the same wire.
+ */
 export default function GroupCallActive() {
+  return CALL_ENGINE_V2 ? <GroupCallEngine /> : <GroupCallLegacy />;
+}
+
+/** One remote participant. Memoized and subscribed to its OWN peer, so a tile
+ *  re-renders when that peer's stream changes and not when anyone else's does. */
+const ParticipantTile = memo(function ParticipantTile(
+  { uid, width, isVideo, onModerate }: {
+    uid: string; width: string; isVideo: boolean; onModerate?: (uid: string, name: string) => void;
+  },
+) {
+  const { colors } = useTheme();
+  const S = useMemo(() => makeStyles(colors), [colors]);
+  const p = useParticipant(uid);
+  const url = p?.streamUrl ?? null;
+  const name = p?.name || (url ? 'Connected' : 'Connecting…');
+  return (
+    <TouchableOpacity
+      style={[S.tile, { width: width as any }]}
+      activeOpacity={onModerate ? 0.7 : 1}
+      disabled={!onModerate}
+      onPress={() => onModerate?.(uid, name)}
+    >
+      {isVideo && url
+        ? <RTCView streamURL={url} style={S.video} objectFit="cover" />
+        : <View style={S.audioTile}>
+            {url ? <RTCView streamURL={url} style={{ width: 1, height: 1 }} /> : null}
+            <Ionicons name="person" size={34} color="#fff" />
+          </View>}
+      {/* A raised hand has to be visible on the tile, not only in a list a host
+          might not have open — the whole point is that it interrupts. */}
+      {!!p?.handRaisedAt && (
+        <View style={S.handBadge}><Text style={S.handBadgeTxt}>✋</Text></View>
+      )}
+      {p?.role === 'audience' && (
+        <View style={S.roleBadge}><Ionicons name="eye-outline" size={11} color="#fff" /></View>
+      )}
+      <Text style={S.tileName} numberOfLines={1}>{name}</Text>
+    </TouchableOpacity>
+  );
+});
+
+// ── engine-backed renderer (CALL_ENGINE_V2) ───────────────────────────
+// Everything the legacy body did by hand — peer map, glare rule, offer/answer,
+// ICE buffering, cipher, teardown — now lives in lib/call. This screen draws.
+// It also gains what the mesh never had: a foreground service so audio survives
+// backgrounding, an FCM doorbell so a killed device rings, call logging, call
+// waiting, a duration timer, a speaker toggle and flip camera.
+function GroupCallEngine() {
+  const { colors } = useTheme();
+  const S = useMemo(() => makeStyles(colors), [colors]);
+  const router = useRouter();
+  const { chatId, video, name, members } = useLocalSearchParams<{
+    chatId: string; video?: string; name?: string; members?: string;
+  }>();
+  const isVideo = video === '1';
+
+  const status      = useCallStatus();
+  const connectedAt = useCallConnectedAt();
+  const error       = useCallError();
+  const muted       = useCallFlag('muted');
+  const camOff      = useCallFlag('cameraOff');
+  const speaker     = useCallFlag('speaker');
+  const localUrl    = useCallLocalUrl();
+  const peerIds     = useParticipantIds();
+  const handUp      = useMyHandRaised();
+  const canModerate = useCanModerate();
+  const hands       = useRaisedHands();
+
+  // Moderation is a menu rather than inline buttons: the actions are rare,
+  // mutually exclusive, and destructive-ish (demoting someone mid-sentence), so
+  // they belong behind a deliberate tap rather than next to a video surface
+  // where a mis-tap is easy.
+  const moderate = useCallback((uid: string, name: string) => {
+    Alert.alert(name, 'Change what this person can do', [
+      { text: 'Make co-host', onPress: () => engine.setRole(uid, 'cohost') },
+      { text: 'Make speaker', onPress: () => engine.setRole(uid, 'speaker') },
+      { text: 'Move to audience', onPress: () => engine.setRole(uid, 'audience') },
+      { text: 'Lower hand', onPress: () => engine.lowerPeerHand(uid) },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  }, []);
+  const toggleHand = useCallback(() => engine.raiseHand(!handUp), [handUp]);
+
+  useEffect(() => {
+    engine.startGroup({
+      chatId: String(chatId ?? ''),
+      groupName: String(name ?? 'Group call'),
+      kind: isVideo ? 'video' : 'audio',
+      // The hub passes the roster so the engine rings each member; joining an
+      // in-progress call passes none.
+      ring: members ? String(members).split(',').filter(Boolean) : [],
+    });
+    return () => { engine.hangUp('local_hangup', true); engine.release(); };
+  }, [chatId, name, isVideo, members]);
+
+  useEffect(() => { if (status === 'connected') engine.onConnected(); }, [status]);
+
+  useEffect(() => {
+    if (status !== 'ended') return;
+    const t = setTimeout(() => router.back(), 200);
+    return () => clearTimeout(t);
+  }, [status, router]);
+
+  const tiles = peerIds.length + 1;
+  const cols = tiles <= 1 ? 1 : tiles <= 4 ? 2 : 3;
+  const tileW = `${100 / cols - 2}%`;
+
+  return (
+    <View style={S.screen}>
+      <Stack.Screen options={{ headerShown: false }} />
+      <StatusBar hidden />
+
+      <View style={S.topBar}>
+        <Text style={S.title} numberOfLines={1}>{name || 'Group call'}</Text>
+        {status === 'connected'
+          ? <CallTimer style={S.sub} startedAt={connectedAt} />
+          : <Text style={S.sub}>{tiles} on call</Text>}
+      </View>
+
+      {error ? <Text style={S.err}>{error}</Text> : null}
+
+      <ScrollView contentContainerStyle={S.grid}>
+        <View style={[S.tile, { width: tileW as any }]}>
+          {isVideo && !camOff && localUrl
+            ? <RTCView streamURL={localUrl} style={S.video} objectFit="cover" mirror />
+            : <View style={S.audioTile}><Ionicons name="person" size={34} color="#fff" /></View>}
+          <Text style={S.tileName}>You{muted ? ' 🔇' : ''}</Text>
+        </View>
+        {peerIds.map(uid => (
+          <ParticipantTile
+            key={uid} uid={uid} width={tileW} isVideo={isVideo}
+            onModerate={canModerate ? moderate : undefined}
+          />
+        ))}
+      </ScrollView>
+
+      {/* The host's queue, in the order people asked. Only shown to someone who
+          can actually act on it — to anyone else it would be a list of requests
+          they are powerless to grant. */}
+      {canModerate && hands.length > 0 && (
+        <Text style={S.handQueue} numberOfLines={1}>
+          ✋ {hands.length} waiting — tap a tile to give the floor
+        </Text>
+      )}
+
+      {status === 'connected' && <CallExtras bottom={110} />}
+
+      <View style={S.controls}>
+        <CtrlBtn icon={muted ? 'mic-off' : 'mic'} active={muted} onPress={engine.toggleMute} colors={colors} />
+        {isVideo && <CtrlBtn icon={camOff ? 'videocam-off' : 'videocam'} active={camOff} onPress={engine.toggleCamera} colors={colors} />}
+        {isVideo && <CtrlBtn icon="camera-reverse" onPress={engine.flipCamera} colors={colors} />}
+        <CtrlBtn icon={speaker ? 'volume-high' : 'volume-low'} active={speaker} onPress={engine.toggleSpeaker} colors={colors} />
+        <CtrlBtn icon="hand-left" active={handUp} onPress={toggleHand} colors={colors} />
+        <CtrlBtn icon="call" danger onPress={endGroupCall} colors={colors} />
+      </View>
+    </View>
+  );
+}
+
+const endGroupCall = () => engine.hangUp('local_hangup', true);
+
+// ── original implementation (CALL_ENGINE_V2 off) — unchanged ──────────
+function GroupCallLegacy() {
   const { colors } = useTheme();
   const S = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
@@ -94,8 +271,9 @@ export default function GroupCallActive() {
       try {
         const me = await getCurrentUserAsync();
         meRef.current = me?.id ?? '';
-        const turn = await getTurnConfig().catch(() => ({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }));
-        iceRef.current = (turn as any).iceServers ?? [];
+        // Cached TURN credentials (lib/iceConfig): one fetch for the whole mesh
+        // instead of a race between the peers coming up.
+        iceRef.current = await getIceServers();
         const stream = await mediaDevices.getUserMedia({ audio: true, video: isVideo ? { facingMode: 'user' } : false });
         if (cancelled) { stream.getTracks().forEach((t: any) => t.stop()); return; }
         localStreamRef.current = stream;
@@ -255,5 +433,11 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   video:     { ...StyleSheet.absoluteFillObject, backgroundColor: '#000' },
   audioTile: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: c.primary },
   tileName:  { color: '#fff', fontSize: 12, fontWeight: '600', padding: 6, backgroundColor: 'rgba(0,0,0,0.4)' },
+  handBadge: { position: 'absolute', top: 6, left: 6, width: 26, height: 26, borderRadius: 13,
+               alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.55)' },
+  handBadgeTxt: { fontSize: 14 },
+  roleBadge: { position: 'absolute', top: 6, right: 6, width: 22, height: 22, borderRadius: 11,
+               alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.55)' },
+  handQueue: { color: '#FFD479', fontSize: 12, textAlign: 'center', paddingBottom: 6 },
   controls:  { flexDirection: 'row', justifyContent: 'center', gap: 22, paddingVertical: 24, paddingBottom: 36 },
 });

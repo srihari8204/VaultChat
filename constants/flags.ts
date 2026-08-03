@@ -111,6 +111,24 @@ export const VB_AUTODOWNLOAD = false;
 // settings and re-checked at dequeue. Manual Accept still works up to 12 GB.
 export const VB_AUTO_MAX_BYTES = 2.5 * 1024 ** 3; // 2,684,354,560 bytes
 
+// CALL_ENGINE_V2 gates the consolidated call engine (lib/call/*): one headless
+// engine + a pure, self-tested state machine, with the call screens reduced to
+// renderers. It replaces three near-identical copies of the WebRTC pipeline that
+// each re-implemented getUserMedia, TURN fetch, peer connection, offer/answer/ICE,
+// the signalling cipher, audio routing, teardown and call logging.
+//
+// DEFAULT OFF — when off, the screens run their original code path unchanged, so
+// this ships dark and rollback is this one constant. The WIRE IS IDENTICAL either
+// way (same events, same payload fields, same re-send cadences, same E2EE
+// envelope), so an engine build and a legacy build call each other correctly and
+// the flag can be flipped per-release rather than per-fleet.
+//
+// DO NOT enable without a two-device pass on real hardware. WebRTC cannot be
+// validated any other way, and the acceptance gate is the OEM matrix in
+// CALLS_README.md: background audio, ring while KILLED, and lock-screen ring on
+// MIUI / ColorOS / Vivo / Honor / Samsung / stock Android.
+export const CALL_ENGINE_V2 = false;
+
 // VB_RELIABILITY_FIXES gates the relay-receive companions (UITE): a no-progress
 // watchdog (fails a stuck "Downloading 0%" transfer cleanly instead of forever)
 // and recipient on-disk resume (seeds already-written blocks so a dropped
@@ -118,4 +136,21 @@ export const VB_AUTO_MAX_BYTES = 2.5 * 1024 ** 3; // 2,684,354,560 bytes
 // a genuine multi-minute stall; flip OFF to restore the exact prior relay path.
 export const VB_RELIABILITY_FIXES = true;
 
-export default { E2EE_ENABLED, VAULT_SESSION_SEALED, VAULT_CACHE_ENCRYPTED, MEDIA_E2EE, STORY_E2EE, GROUP_E2EE, SCHEDULED_LOCAL, VB_AUTODOWNLOAD, VB_AUTO_MAX_BYTES, VB_RELIABILITY_FIXES };
+// CALL_SESSIONS gates the server-side call record (migration 066 +
+// /calls/* in the Go backend). With it ON, starting or joining a call also
+// opens a session row, so a call gains a real identity: history syncs across a
+// user's devices and survives a reinstall, instead of living only in the 300-
+// entry AsyncStorage log on the handset that made it. It is also the table a
+// role — and therefore a future SFU publish grant — is read from.
+//
+// DEFAULT OFF, and it must stay off until migration 066 has actually been
+// applied to the server this build talks to. With it off, nothing calls the new
+// endpoints and call history behaves exactly as it does today.
+//
+// Even when ON, the session request is fire-and-forget and never blocks media:
+// a 404 (server not migrated), a timeout or an offline device costs the call
+// nothing and simply leaves that call without a server-side id — it still logs
+// locally, exactly as before. Call setup must never depend on a REST round trip.
+export const CALL_SESSIONS = false;
+
+export default { E2EE_ENABLED, VAULT_SESSION_SEALED, VAULT_CACHE_ENCRYPTED, MEDIA_E2EE, STORY_E2EE, GROUP_E2EE, SCHEDULED_LOCAL, VB_AUTODOWNLOAD, VB_AUTO_MAX_BYTES, VB_RELIABILITY_FIXES, CALL_ENGINE_V2, CALL_SESSIONS };

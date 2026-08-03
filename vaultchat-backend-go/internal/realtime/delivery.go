@@ -64,7 +64,7 @@ func chatMemberIDs(ctx context.Context, chatID string) ([]string, error) {
 			return cached, nil
 		}
 	}
-	rows, err := db.Pool.Query(ctx, `SELECT * FROM vc_chat_member_ids($1)`, chatID)
+	rows, err := db.SysPool.Query(ctx, `SELECT * FROM vc_chat_member_ids($1)`, chatID)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +125,7 @@ func (h *Hub) FanOutToChat(ctx context.Context, chatID, event string, payload an
 	// Viewers who blocked the sender — drop those.
 	blockerSet := map[string]bool{}
 	if senderID != "" && len(memberIDs) > 0 {
-		blk, err := db.Pool.Query(ctx,
+		blk, err := db.SysPool.Query(ctx,
 			`SELECT blocker_id FROM user_blocks
 			  WHERE blocked_id = $1 AND blocker_id = ANY($2::uuid[])`, senderID, memberIDs)
 		if err != nil {
@@ -282,7 +282,7 @@ func (h *Hub) startViewerSweep() {
 var expoHTTP = &http.Client{Timeout: 15 * time.Second}
 
 func (h *Hub) sendCallWakePush(ctx context.Context, calleeID, title, body string, data map[string]any) {
-	rows, err := db.Pool.Query(ctx,
+	rows, err := db.SysPool.Query(ctx,
 		`SELECT push_token FROM devices WHERE user_id = $1 AND push_token IS NOT NULL`, calleeID)
 	if err != nil {
 		return
@@ -330,7 +330,7 @@ func (h *Hub) sendCallWakePush(ctx context.Context, calleeID, title, body string
 		}
 	}
 	if len(dead) > 0 {
-		_, _ = db.Pool.Exec(ctx, `DELETE FROM devices WHERE push_token = ANY($1::text[])`, dead)
+		_, _ = db.SysPool.Exec(ctx, `DELETE FROM devices WHERE push_token = ANY($1::text[])`, dead)
 	}
 }
 

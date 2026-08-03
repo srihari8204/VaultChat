@@ -1796,6 +1796,10 @@ export default function ChatScreen() {
       { label: 'Location',      icon: 'location' as const,    color: '#66BB6A', onPress: () => router.push({ pathname: '/location' as any, params: { chatId, name: peerName } }) },
       { label: 'Navigate',      icon: 'navigate' as const,    color: '#4A9FFF', onPress: () => openNavigator() },
       { label: 'Poll',          icon: 'stats-chart' as const, color: '#FFA726', onPress: () => router.push({ pathname: '/create-poll' as any, params: { chatId, peerName } }) },
+      // Whiteboard: a working sketch canvas that shipped with no entry point
+      // anywhere in the app. Its output is shared through the normal share
+      // sheet, so the attach menu is where it belongs.
+      { label: 'Whiteboard',    icon: 'brush' as const,       color: '#26A69A', onPress: () => router.push({ pathname: '/whiteboard' as any, params: { chatId } }) },
       { label: nextInvisibleInk ? 'Ink: armed' : 'Invisible Ink', icon: 'sparkles' as const, color: '#AB47BC', onPress: () => setNextInvisibleInk(v => !v) },
     ];
   }, [onPickMedia, onPickFile, onEditPhoto, onSendVaultBeam, router, chatId, chat, meId, nextInvisibleInk]);
@@ -2092,6 +2096,30 @@ export default function ChatScreen() {
               <TouchableOpacity
                 style={S.headerIconBtn}
                 onPress={() => router.push({ pathname: '/voicecall' as any, params })}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="call" size={20} color={colors.text} />
+              </TouchableOpacity>
+            </>
+          );
+        })()}
+        {/* Group call. Mirrors the direct-chat pair above and opens the group
+            call hub, which rings every member and joins the mesh room. The hub
+            takes `mode`, so both icons land in the right place. */}
+        {chat?.type === 'group' && (() => {
+          const params = { chatId, groupName: chat.name ?? 'Group' };
+          return (
+            <>
+              <TouchableOpacity
+                style={S.headerIconBtn}
+                onPress={() => router.push({ pathname: '/group-calls' as any, params: { ...params, mode: 'video' } })}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="videocam" size={23} color={colors.text} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={S.headerIconBtn}
+                onPress={() => router.push({ pathname: '/group-calls' as any, params: { ...params, mode: 'voice' } })}
                 activeOpacity={0.7}
               >
                 <Ionicons name="call" size={20} color={colors.text} />

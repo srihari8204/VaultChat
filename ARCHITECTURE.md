@@ -63,8 +63,13 @@ retired on 2026-08-02:
 **Firebase is not fully gone from the build**: push notifications use the *native*
 FCM SDK (`com.google.firebase:firebase-messaging`, added by
 `plugins/withVaultChatCalls.js`), so `google-services.json` and the google-services
-Gradle plugin must stay. Only the JavaScript SDKs are unused — they remain in
-`package.json` pending an APK-size verification pass.
+Gradle plugin must stay. The JavaScript SDKs were unused and have now been
+REMOVED (`firebase` + the four `@react-native-firebase/*` packages, plus the four
+`shims/firebase-*.js` they were Metro-redirected to). Nothing imported the entry
+point of that chain, so none of it was ever bundled. The google-services Gradle
+plugin comes from Expo's own default prebuild chain via app.json's
+`android.googleServicesFile`, NOT from `@react-native-firebase/app` — verified
+before removal, and guarded since by `scripts/prod-precheck.js`.
 
 ### Games: code removed, tables retained
 
@@ -283,10 +288,12 @@ With `E2EE_ENABLED` + `E2EE_STRICT` both **true** (`constants/flags.ts`), the
 server only ever sees ciphertext for direct chats; a missing peer key bundle
 makes the send fail-and-retry rather than leak plaintext.
 
-**Not yet enforced:** group chats send *graceful plaintext* (sender-key / group
-E2EE is scaffolded in `services/crypto/senderKey.ts` + `groupSession` but not the
-enforced path). Media-at-rest encryption is gated behind `MEDIA_E2EE` (default
-off).
+Group chats are ALSO encrypted: `GROUP_E2EE` has been on since 2026-06-28, using
+Signal-style sender keys (`services/crypto/senderKey.ts` + `groupSession`)
+distributed over the pairwise Double Ratchet. Media-at-rest (`MEDIA_E2EE`) and
+per-viewer story encryption (`STORY_E2EE`) are on as of the same date. This
+paragraph previously described all three as unshipped scaffolding; that was
+stale — `constants/flags.ts` is the source of truth.
 
 ---
 
@@ -315,7 +322,13 @@ off).
 | `E2EE_STRICT` | **on** | Never silently sends plaintext (fail + retry) |
 | `VAULT_SESSION_SEALED` | off | Session tokens sealed under unlock PIN |
 | `VAULT_CACHE_ENCRYPTED` | off | At-rest encryption of local SQLite cache |
-| `MEDIA_E2EE` | off | Per-file AES-256-GCM media encryption |
+| `MEDIA_E2EE` | **on** | Per-file AES-256-GCM media encryption |
+| `STORY_E2EE` | **on** | Per-viewer wrapped story content key |
+| `GROUP_E2EE` | **on** | Sender-key group encryption |
+| `SCHEDULED_LOCAL` | off | On-device scheduled queue vs. server-side delivery |
+| `VB_AUTODOWNLOAD` | off | VaultBeam auto-accept per user policy |
+| `VB_RELIABILITY_FIXES` | **on** | Relay watchdog + recipient on-disk resume |
+| `CALL_ENGINE_V2` | off | Consolidated call engine (`lib/call/`) — **unvalidated on hardware** |
 
 ---
 
@@ -336,8 +349,10 @@ off).
 ## 07 · Tech stack summary
 
 **Client** — React Native 0.81 · Expo 54 · expo-router · TypeScript · Socket.IO
-client · op-sqlite · Sentry · TensorFlow.js (blazeface /
-mobilenet for face auth) · ethers (decentralized-id) · `@noble` crypto.
+client · op-sqlite · Sentry · react-native-vision-camera + expo-face-detector
+(face auth) · ethers (decentralized-id, reached only by `constants/vaultID.ts`) ·
+`@noble` crypto. No TensorFlow.js — an earlier revision of this document listed
+it; it is not and was not a dependency.
 
 **Backend & infra** — Go (all REST + Socket.IO) · Redis adapter ·
 Postgres 16 (pg) · Redis 7 (ioredis) · Kafka (kafkajs) · BullMQ · MinIO / AWS S3 ·

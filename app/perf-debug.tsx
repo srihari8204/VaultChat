@@ -30,6 +30,15 @@ export default function PerfDebugScreen() {
     return () => clearInterval(id);
   }, []);
 
+  // Boot marks are written once at startup and never change, so unlike the rows
+  // above they are read a single time rather than on the 1s tick.
+  const boot = useMemo(() => {
+    const marks = perf.recentMarks(200).filter(m => m.event.startsWith('boot_') || m.event === 'db_ready');
+    if (!marks.length) return [];
+    const t0 = marks[0].t;
+    return marks.map(m => ({ event: m.event, offset: m.t - t0 }));
+  }, []);
+
   const transportBad = snap.transport === 'polling';
 
   return (
@@ -52,6 +61,27 @@ export default function PerfDebugScreen() {
         {transportBad && (
           <Text style={S.warn}>⚠️ On POLLING — websocket failed to negotiate. Sends will be slow.</Text>
         )}
+
+        {/* Boot timeline — cold-start cost, measured rather than assumed.
+            Offsets are relative to the first mark, so the number that matters
+            is where boot_unblocked lands: that is when the first render stopped
+            being gated. Anything at or after boot_deferred_start is work that
+            was deliberately moved OFF the startup path and is not felt. */}
+        <Text style={S.section}>Boot timeline</Text>
+        <View style={S.card}>
+          {boot.length === 0 ? (
+            <Text style={S.empty}>No boot marks — this build predates them.</Text>
+          ) : boot.map((b, i) => (
+            <View key={`${b.event}-${i}`} style={S.trow}>
+              <Text style={[S.td, { flex: 3 }]} numberOfLines={1}>{b.event}</Text>
+              {/* Deferred work is SUPPOSED to land late — flagging it as slow
+                  would invert the meaning of the change that moved it there. */}
+              <Text style={[S.td, b.event === 'boot_deferred_start' ? undefined : slow(b.offset)]}>
+                +{b.offset}ms
+              </Text>
+            </View>
+          ))}
+        </View>
 
         {/* Send timings */}
         <Text style={S.section}>Last {sends.length} sends</Text>

@@ -81,7 +81,7 @@ const sweepMaxIters = 10
 func batchedSweep(ctx context.Context, name, batchSQL string) {
 	var total int64
 	for i := 0; i < sweepMaxIters; i++ {
-		tag, err := db.Pool.Exec(ctx, batchSQL, sweepBatch)
+		tag, err := db.SysPool.Exec(ctx, batchSQL, sweepBatch)
 		if err != nil {
 			log.Printf("[%s] failed: %v", name, err)
 			return
@@ -113,7 +113,7 @@ func sweepDeliveredMessages(ctx context.Context) {
 	// eligible row in a single statement (lock + WAL burst scaling with backlog).
 	var purged int64
 	for i := 0; i < sweepMaxIters; i++ {
-		tag, err := db.Pool.Exec(ctx,
+		tag, err := db.SysPool.Exec(ctx,
 			`UPDATE messages m
 			    SET content = NULL
 			  WHERE m.ctid IN (
@@ -144,7 +144,7 @@ func sweepDeliveredMessages(ctx context.Context) {
 	}
 	if maxDays > 0 {
 		for i := 0; i < sweepMaxIters; i++ {
-			t2, err := db.Pool.Exec(ctx,
+			t2, err := db.SysPool.Exec(ctx,
 				`UPDATE messages SET content = NULL
 				  WHERE ctid IN (SELECT ctid FROM messages
 				                  WHERE content IS NOT NULL AND deleted_at IS NULL
@@ -176,7 +176,7 @@ func uploadDir() string {
 
 func sweepDeliveredAttachments(ctx context.Context) {
 	ttlDays := envInt("MEDIA_TTL_DAYS", 14)
-	rows, err := db.Pool.Query(ctx,
+	rows, err := db.SysPool.Query(ctx,
 		`SELECT a.id, a.storage_path, a.storage_backend
 		   FROM attachments a
 		  WHERE a.purged_at IS NULL
@@ -219,7 +219,7 @@ func sweepDeliveredAttachments(ctx context.Context) {
 		} else {
 			_ = os.Remove(filepath.Join(uploadDir(), filepath.FromSlash(a.path)))
 		}
-		if _, err := db.Pool.Exec(ctx,
+		if _, err := db.SysPool.Exec(ctx,
 			`UPDATE attachments SET purged_at = NOW() WHERE id = $1`, a.id); err == nil {
 			purged++
 		}
@@ -252,7 +252,7 @@ func sweepScheduledMessages(ctx context.Context) {
 	}
 	// Claim in a tx so FOR UPDATE SKIP LOCKED actually holds across the batch
 	// (multi-replica safe; single instance behaves like Node).
-	tx, err := db.Pool.Begin(ctx)
+	tx, err := db.SysPool.Begin(ctx)
 	if err != nil {
 		log.Printf("[sched sweep] %v", err)
 		return

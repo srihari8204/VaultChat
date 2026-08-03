@@ -342,6 +342,22 @@ export default function GroupInfoScreen() {
         </TouchableOpacity>
       )}
 
+      {/* Group call — rings every member, then joins the mesh call room. */}
+      <View style={S.section}>
+        <TouchableOpacity
+          style={S.navRow}
+          activeOpacity={0.7}
+          onPress={() => router.push({ pathname: '/group-calls', params: { chatId: chat.id, groupName: chat.name ?? 'Group' } } as any)}
+        >
+          <Ionicons name="call-outline" size={22} color={colors.text} style={S.navIcon} />
+          <View style={{ flex: 1 }}>
+            <Text style={S.navTitle}>Group call</Text>
+            <Text style={S.navSub}>Voice or video with this group</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
+        </TouchableOpacity>
+      </View>
+
       {/* Media, links and docs — WhatsApp-style row → shared media gallery */}
       <View style={S.section}>
         <TouchableOpacity

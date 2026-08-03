@@ -572,7 +572,7 @@ func uploadsGet(w http.ResponseWriter, r *http.Request) {
 				// stories reference attachments directly, not via messages.meta).
 				// Plain pool like storiesFeed (stories has no RLS policy).
 				var one int
-				e := db.Pool.QueryRow(ctx,
+				e := db.SysPool.QueryRow(ctx,
 					`SELECT 1 FROM stories s
 					  WHERE s.attachment_id = $1
 					    AND s.expires_at > NOW()
@@ -760,10 +760,11 @@ func uploadsViewed(w http.ResponseWriter, r *http.Request) {
 
 // ── POST /uploads/{id}/revoke ← Node routes/uploads.js ─────────────────
 // VaultView remote revoke. OWNER ONLY. One-way and irreversible:
-//   1. stamp revoked_at            → every later GET 410s, including the owner's
-//   2. delete the stored bytes     → the server no longer holds a copy at all
-//   3. broadcast 'media_revoked'   → online recipients destroy their per-file
-//                                    media key and any decrypted plaintext
+//  1. stamp revoked_at            → every later GET 410s, including the owner's
+//  2. delete the stored bytes     → the server no longer holds a copy at all
+//  3. broadcast 'media_revoked'   → online recipients destroy their per-file
+//     media key and any decrypted plaintext
+//
 // Offline recipients converge without the socket event: their next fetch 410s
 // and the client wipes on that signal. Deliberately NOT gated on view_once.
 func uploadsRevoke(w http.ResponseWriter, r *http.Request) {
