@@ -98,11 +98,18 @@ function logIceWin(pc: any, tag: string): void {
 // not lost. onIce, once set, drains + forwards queued candidates.
 async function openInbox(transferId: string) {
   const s = await getSocket();
-  const state: { ready?: any; offer?: any; answer?: any; iceQ: any[]; onIce?: (c: any) => void } = { iceQ: [] };
+  const state: {
+    ready?: any; offer?: any; answer?: any; iceQ: any[];
+    onIce?: (c: any) => void;
+    // Set AFTER the initial offer/answer is consumed — late arrivals are ICE
+    // RESTARTS (UITE §12): a network flip mid-transfer renegotiates candidates
+    // over the same DTLS session, so the datachannel (and the transfer) survive.
+    onOffer?: (d: any) => void; onAnswer?: (d: any) => void;
+  } = { iceQ: [] };
   const filt = (h: (d: any) => void) => (d: any) => { if (d?.transferId === transferId) h(d); };
   const hReady = filt((d) => { state.ready = d; });
-  const hOffer = filt((d) => { state.offer = d; });
-  const hAnswer = filt((d) => { state.answer = d; });
+  const hOffer = filt((d) => { state.offer = d; state.onOffer?.(d); });
+  const hAnswer = filt((d) => { state.answer = d; state.onAnswer?.(d); });
   const hIce = filt((d) => { if (state.onIce) state.onIce(d.candidate); else state.iceQ.push(d.candidate); });
   s.on('vaultbeam_ready', hReady); s.on('vaultbeam_offer', hOffer);
   s.on('vaultbeam_answer', hAnswer); s.on('vaultbeam_ice', hIce);
@@ -185,9 +192,20 @@ export async function serveDirect(g: DirectGeom & { srcPath: string; onProgress?
         const dc = pc.createDataChannel('vaultbeam', { ordered: true });
         // Delivery ack: the receiver sends {t:'ack'} only after every chunk is
         // decrypted + on disk. p2pSend waits for this before resolving 'p2p'.
+        // Progress acks {t:'p',n} arrive per chunk the receiver has VERIFIED
+        // (GCM tag ok + written) — the sender's bar tracks those, never bytes
+        // pushed into the SCTP buffer, so it can't show 100% while the receiver
+        // is still at 30%.
         let ackResolve: (() => void) | null = null;
         const ackP = new Promise<void>((r) => { ackResolve = r; });
-        dc.onmessage = (m: any) => { try { if (typeof m.data === 'string' && JSON.parse(m.data)?.t === 'ack') ackResolve?.(); } catch {} };
+        dc.onmessage = (m: any) => {
+          try {
+            if (typeof m.data !== 'string') return;
+            const c = JSON.parse(m.data);
+            if (c?.t === 'ack') ackResolve?.();
+            else if (c?.t === 'p' && Number.isInteger(c.n) && c.n >= 1 && c.n <= g.chunkCount) g.onProgress?.(c.n, g.chunkCount);
+          } catch {}
+        };
         // Connected but stalled / no ack in time → resolve null so the caller
         // falls back to the relay instead of the send hanging on a dead channel.
         dc.onopen = () => { markConnected(); logIceWin(pc, 'send'); p2pSend(dc, g, ackP).then(() => done('p2p')).catch(() => done(null)); };
@@ -199,7 +217,39 @@ export async function serveDirect(g: DirectGeom & { srcPath: string; onProgress?
             const ans = cipher ? cipher.open(a.answer) : a.answer;
             if (ans) { try { await pc.setRemoteDescription(new RTC.RTCSessionDescription(ans)); remoteReady = true; for (const c of pendingIce.splice(0)) addIce(c); } catch {} }
           }
+          // From here on, any further answer is the receiver accepting an ICE restart.
+          inbox.state.onAnswer = async (ra: any) => {
+            const rans = cipher ? cipher.open(ra.answer) : ra.answer;
+            if (!rans) return;
+            try { await pc.setRemoteDescription(new RTC.RTCSessionDescription(rans)); } catch {}
+          };
         })();
+
+        // ICE restart (UITE §12): a mid-transfer network flip (Wi-Fi→LTE, new IP)
+        // drops the candidate pair but NOT the DTLS session — renegotiating
+        // candidates lets the datachannel resume where it stopped instead of
+        // failing over to the relay and re-uploading from zero. 'disconnected'
+        // gets a 3s grace (often self-heals); 'failed' restarts immediately.
+        // Capped at 3; a restart that can't recover falls through to the
+        // existing stall→relay safety net.
+        let restarts = 0;
+        let restartTimer: any = null;
+        cleanups.push(() => clearTimeout(restartTimer));
+        const iceRestart = async () => {
+          if (restarts >= 3 || !cipher) return;
+          restarts++;
+          try {
+            const ro = await pc.createOffer({ iceRestart: true });
+            await pc.setLocalDescription(ro);
+            emit('vaultbeam_offer', { to: g.peerId, transferId: g.transferId, offer: cipher.seal(ro) });
+          } catch {}
+        };
+        pc.oniceconnectionstatechange = () => {
+          const st = pc.iceConnectionState;
+          if (st === 'failed') { clearTimeout(restartTimer); iceRestart(); }
+          else if (st === 'disconnected') { clearTimeout(restartTimer); restartTimer = setTimeout(() => { if (pc.iceConnectionState === 'disconnected') iceRestart(); }, 3000); }
+          else if (st === 'connected' || st === 'completed') clearTimeout(restartTimer);
+        };
 
         const offer = await pc.createOffer({});
         await pc.setLocalDescription(offer);
@@ -299,7 +349,8 @@ async function p2pSend(dc: any, g: DirectGeom & { srcPath: string; onProgress?: 
       while (dc.bufferedAmount > BP_HIGH) { if (g.signal?.aborted) throw new Error('aborted'); await sleep(15); }
       dc.send(new Uint8Array(ct.subarray(off, off + FRAME)));
     }
-    g.onProgress?.(i + 1, g.chunkCount);
+    // No onProgress here: "sent" only means buffered into SCTP. The sender's
+    // progress comes from the receiver's {t:'p'} verified-chunk acks (serveDirect).
   }
   dc.send(JSON.stringify({ t: 'eof' }));
   // Only 'delivered' once the receiver confirms every chunk landed; no ack in
@@ -361,6 +412,11 @@ async function p2pReceive(g: DirectGeom & { dstPath: string; onProgress?: Progre
                   });
                   received++;
                   g.onProgress?.(received, g.chunkCount);
+                  // Verified-progress ack: this chunk passed its GCM tag and is
+                  // on disk. (A tag failure lands in the catch below → tier fails
+                  // → relay takes over; retransmitting identical bytes over a
+                  // reliable ordered channel would fail identically, so we don't.)
+                  try { dc.send(JSON.stringify({ t: 'p', n: received })); } catch {}
                   if (received === g.chunkCount) finishOk();
                 }
               } catch { done(false); }
@@ -372,6 +428,18 @@ async function p2pReceive(g: DirectGeom & { dstPath: string; onProgress?: Progre
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           emit('vaultbeam_answer', { to: g.peerId, transferId: g.transferId, answer: cipher.seal(answer) });
+          // Any offer AFTER the initial one is the sender's ICE restart (§12):
+          // apply + answer so the surviving datachannel picks a fresh pair.
+          inbox.state.onOffer = async (om: any) => {
+            const off = cipher.open(om.offer);
+            if (!off) return;
+            try {
+              await pc.setRemoteDescription(new RTC.RTCSessionDescription(off));
+              const rans = await pc.createAnswer();
+              await pc.setLocalDescription(rans);
+              emit('vaultbeam_answer', { to: g.peerId, transferId: g.transferId, answer: cipher.seal(rans) });
+            } catch {}
+          };
           try { g.signal?.addEventListener?.('abort', () => done(false)); } catch {}
         } catch { done(false); }
       })();

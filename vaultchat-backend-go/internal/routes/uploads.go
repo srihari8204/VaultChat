@@ -553,8 +553,38 @@ func uploadsGet(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if !asPhoto {
-				httpx.Err(w, 403, "Forbidden")
-				return
+				// Story media: viewable when the attachment backs an UNEXPIRED
+				// story whose author shares an active chat with the caller and
+				// neither has blocked the other — the exact visibility rule of
+				// GET /stories/feed. Without this clause every OTHER user's
+				// status media 403'd (latent gap inherited from Node uploads.js:
+				// stories reference attachments directly, not via messages.meta).
+				// Plain pool like storiesFeed (stories has no RLS policy).
+				var one int
+				e := db.Pool.QueryRow(ctx,
+					`SELECT 1 FROM stories s
+					  WHERE s.attachment_id = $1
+					    AND s.expires_at > NOW()
+					    AND EXISTS (
+					      SELECT 1 FROM chat_members cm_me
+					       JOIN chat_members cm_them ON cm_them.chat_id = cm_me.chat_id
+					       WHERE cm_me.user_id   = $2 AND cm_me.left_at   IS NULL
+					         AND cm_them.user_id = s.user_id AND cm_them.left_at IS NULL
+					    )
+					    AND NOT EXISTS (
+					      SELECT 1 FROM user_blocks ub
+					       WHERE (ub.blocker_id = s.user_id AND ub.blocked_id = $2)
+					          OR (ub.blocker_id = $2        AND ub.blocked_id = s.user_id)
+					    )
+					  LIMIT 1`, att.ID, user.ID).Scan(&one)
+				if e != nil && !db.NoRows(e) {
+					httpx.Err(w, 500, "Download failed")
+					return
+				}
+				if e != nil { // no visible story either → not authorized
+					httpx.Err(w, 403, "Forbidden")
+					return
+				}
 			}
 		}
 

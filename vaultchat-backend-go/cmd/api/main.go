@@ -16,6 +16,7 @@ import (
 	"vaultchat/backend-go/internal/emitx"
 	"vaultchat/backend-go/internal/httpx"
 	"vaultchat/backend-go/internal/jobs"
+	"vaultchat/backend-go/internal/metrics"
 	"vaultchat/backend-go/internal/realtime"
 	"vaultchat/backend-go/internal/redisx"
 	"vaultchat/backend-go/internal/routes"
@@ -66,6 +67,7 @@ func main() {
 	routes.RegisterVaultlens(mux)
 	routes.RegisterAdmin(mux)
 	routes.RegisterChats(mux)
+	routes.RegisterShopBook(mux)
 
 	// ── Realtime (Phase 2 Step 5): Go owns the Socket.IO layer ──────────
 	hub := realtime.New()
@@ -178,9 +180,11 @@ func main() {
 	if port == "" {
 		port = "4000"
 	}
+	// Prometheus scrape target (in-network only — Caddy 404s /internal/*).
+	mux.HandleFunc("GET /internal/metrics", metrics.Handler)
 	srv := &http.Server{
 		Addr:              ":" + port,
-		Handler:           mux,
+		Handler:           metrics.Wrap(mux),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	log.Printf("[go-api] listening on :%s", port)

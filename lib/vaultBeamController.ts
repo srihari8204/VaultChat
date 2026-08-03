@@ -19,6 +19,7 @@
 // just their transferId via useTransfer().
 
 import { useSyncExternalStore } from 'react';
+import perf from './perf';
 import { randomBytes } from '@noble/hashes/utils.js';
 import { Buffer } from 'buffer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -58,6 +59,15 @@ export interface VBTransfer {
   name: string;
   error?: string;
   savedPath?: string;  // recipient: local path once complete
+  // Which pipe is moving bytes right now. When a direct tier (LAN/P2P) dies and
+  // the relay takes over, the upload genuinely RESTARTS from 0 — the bubble
+  // shows "via relay" so the bar reset reads as a tier switch, not a glitch.
+  tier?: 'direct' | 'relay';
+  // Live meter (computed from VERIFIED progress ticks — same truth as the bar).
+  rateBps?: number;    // rolling ~5s window
+  avgBps?: number;     // whole-transfer average
+  peakBps?: number;
+  etaSec?: number;     // remaining bytes / rolling rate
 }
 
 // ── tiny external store keyed by transferId ─────────────────────────
@@ -79,12 +89,65 @@ function persistSoon(id: string, immediate: boolean) {
   if (pend) return;
   persistT.set(id, setTimeout(flush, 750));
 }
+// ── live speed meter ────────────────────────────────────────────────
+// Rolling byte samples per transfer; rate over the last ~5s window, ETA from
+// that rate. Fed ONLY by verified progress ticks, so the meter can't claim
+// speed for bytes the peer hasn't confirmed. A tier switch resets the window
+// (bytes restart from 0 on the relay), keeping the rate honest.
+const METER_WINDOW_MS = 5000;
+const meters = new Map<string, { samples: Array<{ t: number; b: number }>; startT: number; peak: number }>();
+function meterTick(id: string, bytes: number, totalBytes: number): Partial<VBTransfer> {
+  const now = Date.now();
+  let m = meters.get(id);
+  if (!m || (m.samples.length && bytes < m.samples[m.samples.length - 1].b)) {
+    m = { samples: [], startT: now, peak: m?.peak ?? 0 }; // new transfer or tier restart
+    meters.set(id, m);
+  }
+  m.samples.push({ t: now, b: bytes });
+  while (m.samples.length > 2 && m.samples[0].t < now - METER_WINDOW_MS) m.samples.shift();
+  const first = m.samples[0];
+  const dt = (now - first.t) / 1000;
+  const rateBps = dt > 0.5 ? Math.max(0, (bytes - first.b) / dt) : 0;
+  if (rateBps > m.peak) m.peak = rateBps;
+  const elapsed = (now - m.startT) / 1000;
+  const avgBps = elapsed > 1 ? bytes / elapsed : rateBps;
+  const etaSec = rateBps > 0 && totalBytes > bytes ? (totalBytes - bytes) / rateBps : undefined;
+  return { rateBps, avgBps, peakBps: m.peak, etaSec };
+}
+const ACTIVE = (s?: VBStatus) => s === 'uploading' || s === 'receiving';
 function setState(id: string, patch: Partial<VBTransfer>) {
   const prev = states.get(id);
+  // Any progress tick with a byte count feeds the meter; terminal states drop it.
+  if (patch.bytes !== undefined && ACTIVE(patch.status)) {
+    Object.assign(patch, meterTick(id, patch.bytes, patch.totalBytes ?? prev?.totalBytes ?? 0));
+  } else if (patch.status && !ACTIVE(patch.status)) {
+    // §16 diagnostics: one summary mark per transfer, on the first terminal/idle
+    // transition out of an active state. Content-free (sizes/speeds/tier only).
+    if (ACTIVE(prev?.status)) {
+      const m = meters.get(id);
+      try {
+        perf.mark('vaultbeam_summary', {
+          status: patch.status, role: prev?.role, tier: prev?.tier,
+          bytes: patch.bytes ?? prev?.bytes ?? 0, totalBytes: prev?.totalBytes ?? 0,
+          avgBps: Math.round(prev?.avgBps ?? 0), peakBps: Math.round(prev?.peakBps ?? 0),
+          durMs: m ? Date.now() - m.startT : undefined,
+        });
+      } catch {}
+    }
+    meters.delete(id);
+    patch = { ...patch, rateBps: undefined, etaSec: undefined };
+  }
   const next = { ...(prev ?? ({ transferId: id } as VBTransfer)), ...patch } as VBTransfer;
   states.set(id, next);
   emit(id);
   persistSoon(id, patch.status !== undefined);
+  // §13: mirror the set of active transfers into the Android foreground-service
+  // notification so a minimized app keeps big transfers alive.
+  try {
+    let count = 0, bytes = 0, totalBytes = 0;
+    for (const s of states.values()) if (ACTIVE(s.status)) { count++; bytes += s.bytes | 0; totalBytes += s.totalBytes | 0; }
+    require('./transferForeground').updateTransferForeground(count ? { count, bytes, totalBytes } : null);
+  } catch {}
 }
 export function getTransfer(id: string): VBTransfer | undefined { return states.get(id); }
 
@@ -189,7 +252,7 @@ export async function resumePendingSends(): Promise<void> {
     if (controllers.has(r.transferId)) continue; // already running (double-mount guard)
     const fi: any = await FileSystem.getInfoAsync(r.srcPath).catch(() => null);
     if (!fi?.exists) { await unpersistSend(r.transferId); continue; }
-    setState(r.transferId, { transferId: r.transferId, role: 'sender', status: 'uploading', done: 0, total: 0, bytes: 0, totalBytes: r.size, name: r.name });
+    setState(r.transferId, { transferId: r.transferId, role: 'sender', status: 'uploading', tier: 'relay', done: 0, total: 0, bytes: 0, totalBytes: r.size, name: r.name });
     ensureListeners();
     const ac = new AbortController();
     controllers.set(r.transferId, ac);
@@ -278,14 +341,14 @@ export async function startSend(opts: {
       const tier = await serveDirect({
         transferId, fileId, keyB64, token, peerId: opts.recipientId,
         chunkBytes: CHUNK_BYTES, chunkCount, totalBytes: opts.size, srcPath: opts.srcPath, signal: ac.signal,
-        onProgress: (done, total) => setState(transferId, { status: 'uploading', done, total, bytes: done * CHUNK_BYTES, totalBytes: opts.size }),
+        onProgress: (done, total) => setState(transferId, { status: 'uploading', tier: 'direct', done, total, bytes: done * CHUNK_BYTES, totalBytes: opts.size }),
       });
       if (tier) {
         setState(transferId, { status: 'complete', done: chunkCount, total: chunkCount, bytes: opts.size }); // delivered peer-to-peer
         return;
       }
       // Tier 3: R2 relay (guaranteed baseline — works even if the peer is offline).
-      setState(transferId, { status: 'uploading', done: 0, total: 0, bytes: 0, totalBytes: opts.size });
+      setState(transferId, { status: 'uploading', tier: 'relay', done: 0, total: 0, bytes: 0, totalBytes: opts.size });
       await sendTransfer({
         srcPath: opts.srcPath, totalBytes: opts.size, fileId, transferId, keyB64, linkType, signal: ac.signal,
         onProgress: (p) => setState(transferId, { status: 'uploading', done: p.done, total: p.total, bytes: p.bytes, totalBytes: p.totalBytes }),
@@ -325,11 +388,12 @@ export async function startReceive(opts: {
     const gotDirect = manifest.token ? await receiveDirect({
       transferId, fileId: manifest.fileId, keyB64: manifest.keyB64, token: manifest.token, peerId,
       chunkBytes: CHUNK_BYTES, chunkCount, totalBytes: manifest.size, dstPath, signal: ac.signal,
-      onProgress: (done, total) => setState(transferId, { status: 'receiving', done, total, bytes: done * CHUNK_BYTES, totalBytes: manifest.size }),
+      onProgress: (done, total) => setState(transferId, { status: 'receiving', tier: 'direct', done, total, bytes: done * CHUNK_BYTES, totalBytes: manifest.size }),
     }) : false;
 
     if (!gotDirect) {
       // Tier 3: pull from the R2 relay (the sender uploads there as the baseline).
+      setState(transferId, { status: 'receiving', tier: 'relay', done: 0, total: 0, bytes: 0 });
       await receiveTransfer({
         transferId, dstPath, totalBytes: manifest.size, fileId: manifest.fileId, keyB64: manifest.keyB64,
         linkType: await getLinkType(),

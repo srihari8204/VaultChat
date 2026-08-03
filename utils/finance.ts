@@ -33,6 +33,34 @@ export function emi(principal: number, annualRatePct: number, months: number): E
   return { emi: round2(e), totalPayment: round2(total), totalInterest: round2(total - principal) };
 }
 
+// ── Amortization schedule ───────────────────────────────────────
+export interface AmortRow { month: number; emi: number; principal: number; interest: number; balance: number; }
+/** Month-by-month EMI split into principal / interest with the running balance. */
+export function amortization(principal: number, annualRatePct: number, months: number): AmortRow[] {
+  if (principal <= 0 || months <= 0) return [];
+  const r = annualRatePct / 12 / 100;
+  const e = emi(principal, annualRatePct, months).emi;
+  const rows: AmortRow[] = [];
+  let bal = principal;
+  for (let m = 1; m <= months; m++) {
+    const interest = round2(bal * r);
+    let princ = round2(e - interest);
+    bal = round2(bal - princ);
+    if (m === months || bal < 0) { princ = round2(princ + bal); bal = 0; }  // absorb rounding on the last row
+    rows.push({ month: m, emi: round2(princ + interest), principal: princ, interest, balance: bal });
+  }
+  return rows;
+}
+
+/** Convert an interest "period" to an annualised percent for the ledger. */
+export type LedgerPeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
+export function periodRateToAnnualPct(rate: number, mode: 'rupees' | 'percent', period: LedgerPeriod): number {
+  // "rupees" = ₹ per ₹100 for one period; "percent" = % for one period.
+  const perPeriodPct = mode === 'rupees' ? rate : rate;
+  const periodsPerYear = period === 'daily' ? 365 : period === 'weekly' ? 52 : period === 'monthly' ? 12 : 1;
+  return perPeriodPct * periodsPerYear;
+}
+
 // ── Home-loan part payment ──────────────────────────────────────
 export interface PartPaymentResult {
   oldEmi: number; newEmi: number; oldMonths: number; newMonths: number;

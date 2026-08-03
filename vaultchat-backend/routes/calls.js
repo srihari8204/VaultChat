@@ -20,9 +20,11 @@ router.use(jwtUtil.requireAuth);
 // Caller's display identity for the callee's ring UI (already-known contact data).
 async function callerIdentity(uid) {
   try {
-    const r = await db.query(`SELECT name, profile_photo_id FROM users WHERE id = $1`, [uid]);
+    // users.photo_url holds the profile-photo ATTACHMENT id — profile_photo_id
+    // never existed (latent bug, silently swallowed by the catch below).
+    const r = await db.query(`SELECT name, photo_url FROM users WHERE id = $1`, [uid]);
     const row = r.rows[0] || {};
-    return { name: row.name || 'VaultChat user', dpUrl: row.profile_photo_id ? `/uploads/${row.profile_photo_id}` : '' };
+    return { name: row.name || 'VaultChat user', dpUrl: row.photo_url ? `/uploads/${row.photo_url}` : '' };
   } catch { return { name: 'VaultChat user', dpUrl: '' }; }
 }
 

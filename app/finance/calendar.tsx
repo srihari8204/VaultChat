@@ -1,0 +1,135 @@
+// app/finance/calendar.tsx — month calendar aggregating every finance due date:
+// ledger end-dates, chitti next-auction dates and reminders.
+
+import React, { useCallback, useMemo, useState } from 'react';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from 'expo-router';
+import { FIN } from '../../constants/financeTheme';
+import { FinHeader, EmptyState } from '../../components/finance/ui';
+import { useMe } from '../../components/finance/useMe';
+import { fmtDateTime } from '../../utils/financeFormat';
+import { listLedger } from '../../db/ledger';
+import { listReminders } from '../../db/reminders';
+import { listGroups } from '../../db/chitti';
+
+interface Ev { at: number; label: string; tone: 'good' | 'bad' | 'warn' | 'brand'; }
+const WD = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const MON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const dayKey = (ms: number) => { const d = new Date(ms); return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`; };
+
+export default function FinanceCalendar() {
+  const me = useMe();
+  const today = new Date();
+  const [year, setYear] = useState(today.getFullYear());
+  const [monthIdx, setMonthIdx] = useState(today.getMonth());
+  const [selected, setSelected] = useState<number>(today.getDate());
+  const [events, setEvents] = useState<Ev[]>([]);
+
+  const reload = useCallback(() => {
+    if (!me) return;
+    (async () => {
+      const [ledgers, reminders, groups] = await Promise.all([listLedger(me.id), listReminders(me.id), listGroups(me.id)]);
+      const evs: Ev[] = [];
+      for (const l of ledgers) if (l.end_date) evs.push({ at: l.end_date, label: `${l.name} — ${l.direction === 'lend' ? 'due back' : 'to repay'}`, tone: l.direction === 'lend' ? 'good' : 'bad' });
+      for (const r of reminders) if (r.status === 'active') evs.push({ at: r.next_at, label: r.title, tone: 'warn' });
+      for (const g of groups) if (g.status === 'active') evs.push({ at: g.start_date + 30 * 86400000, label: `${g.name} — auction`, tone: 'brand' });
+      setEvents(evs);
+    })();
+  }, [me]);
+  useFocusEffect(reload);
+
+  const byDay = useMemo(() => {
+    const map: Record<string, Ev[]> = {};
+    for (const e of events) (map[dayKey(e.at)] ??= []).push(e);
+    return map;
+  }, [events]);
+
+  // build the month grid (Mon-first)
+  const cells = useMemo(() => {
+    const first = new Date(year, monthIdx, 1);
+    const startDow = (first.getDay() + 6) % 7; // Mon=0
+    const days = new Date(year, monthIdx + 1, 0).getDate();
+    const arr: (number | null)[] = Array(startDow).fill(null);
+    for (let d = 1; d <= days; d++) arr.push(d);
+    while (arr.length % 7 !== 0) arr.push(null);
+    return arr;
+  }, [year, monthIdx]);
+
+  const step = (dir: -1 | 1) => {
+    let m = monthIdx + dir, y = year;
+    if (m < 0) { m = 11; y -= 1; } if (m > 11) { m = 0; y += 1; }
+    setMonthIdx(m); setYear(y); setSelected(1);
+  };
+
+  const selectedKey = `${year}-${monthIdx}-${selected}`;
+  const dayEvents = (byDay[selectedKey] ?? []).sort((a, b) => a.at - b.at);
+  const toneColor = (t: Ev['tone']) => t === 'good' ? FIN.good : t === 'bad' ? FIN.bad : t === 'brand' ? FIN.brandDeep : FIN.warn;
+
+  return (
+    <View style={s.screen}>
+      <FinHeader title="Calendar" />
+      <ScrollView contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
+        <View style={s.monthHead}>
+          <TouchableOpacity onPress={() => step(-1)} hitSlop={10}><Ionicons name="chevron-back" size={22} color={FIN.text} /></TouchableOpacity>
+          <Text style={s.monthTitle}>{MON[monthIdx]} {year}</Text>
+          <TouchableOpacity onPress={() => step(1)} hitSlop={10}><Ionicons name="chevron-forward" size={22} color={FIN.text} /></TouchableOpacity>
+        </View>
+
+        <View style={s.wdRow}>{WD.map(w => <Text key={w} style={s.wd}>{w}</Text>)}</View>
+        <View style={s.grid}>
+          {cells.map((d, i) => {
+            if (d === null) return <View key={i} style={s.cell} />;
+            const key = `${year}-${monthIdx}-${d}`;
+            const has = !!byDay[key];
+            const isToday = d === today.getDate() && monthIdx === today.getMonth() && year === today.getFullYear();
+            const isSel = d === selected;
+            return (
+              <TouchableOpacity key={i} style={s.cell} onPress={() => setSelected(d)}>
+                <View style={[s.dayWrap, isSel && s.daySel, isToday && !isSel && s.dayToday]}>
+                  <Text style={[s.dayTxt, isSel && { color: '#fff' }]}>{d}</Text>
+                </View>
+                {has && <View style={[s.evDot, { backgroundColor: isSel ? '#fff' : FIN.brand }]} />}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        <Text style={s.section}>{MON[monthIdx]} {selected} · {dayEvents.length} event{dayEvents.length === 1 ? '' : 's'}</Text>
+        {dayEvents.length === 0 ? (
+          <EmptyState icon="calendar-outline" title="Nothing due" sub="No finance events on this day." />
+        ) : dayEvents.map((e, i) => (
+          <View key={i} style={s.evRow}>
+            <View style={[s.evBar, { backgroundColor: toneColor(e.tone) }]} />
+            <View style={{ flex: 1 }}>
+              <Text style={s.evLabel}>{e.label}</Text>
+              <Text style={s.evTime}>{fmtDateTime(e.at)}</Text>
+            </View>
+          </View>
+        ))}
+        <View style={{ height: 30 }} />
+      </ScrollView>
+    </View>
+  );
+}
+
+const s = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: FIN.bg },
+  body: { padding: 16 },
+  monthHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 6 },
+  monthTitle: { color: FIN.text, fontSize: 18, fontWeight: '800' },
+  wdRow: { flexDirection: 'row', marginTop: 10 },
+  wd: { flex: 1, textAlign: 'center', color: FIN.faint, fontSize: 11, fontWeight: '700' },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 6 },
+  cell: { width: `${100 / 7}%`, aspectRatio: 1, alignItems: 'center', justifyContent: 'center' },
+  dayWrap: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
+  daySel: { backgroundColor: FIN.brand },
+  dayToday: { borderWidth: 1.5, borderColor: FIN.brand },
+  dayTxt: { color: FIN.text, fontSize: 14, fontWeight: '600' },
+  evDot: { width: 5, height: 5, borderRadius: 3, marginTop: 2 },
+  section: { color: FIN.text, fontSize: 15, fontWeight: '800', marginTop: 18, marginBottom: 12 },
+  evRow: { flexDirection: 'row', gap: 12, backgroundColor: FIN.card, borderRadius: 12, padding: 13, marginBottom: 9, borderWidth: 1, borderColor: FIN.border },
+  evBar: { width: 4, borderRadius: 2 },
+  evLabel: { color: FIN.text, fontSize: 14, fontWeight: '700' },
+  evTime: { color: FIN.sub, fontSize: 12, marginTop: 2 },
+});

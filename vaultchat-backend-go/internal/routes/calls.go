@@ -22,9 +22,12 @@ func RegisterCalls(mux *http.ServeMux) {
 }
 
 func callerIdentity(ctx context.Context, uid string) (string, string) {
+	// users.photo_url holds the profile-photo ATTACHMENT id (see uploads.go's
+	// as-photo permission check) — "profile_photo_id" never existed; the old
+	// Node code had the same bug, silently swallowed by this fallback.
 	var name, photoID *string
 	if err := db.Pool.QueryRow(ctx,
-		`SELECT name, profile_photo_id FROM users WHERE id = $1`, uid).Scan(&name, &photoID); err != nil {
+		`SELECT name, photo_url FROM users WHERE id = $1`, uid).Scan(&name, &photoID); err != nil {
 		return "VaultChat user", ""
 	}
 	n := "VaultChat user"
