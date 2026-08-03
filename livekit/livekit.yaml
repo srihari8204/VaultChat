@@ -1,0 +1,65 @@
+# LiveKit SFU — config for the single-box deployment.
+#
+# Mounted read-only into the container. Keys are NOT here: they come from the
+# LIVEKIT_KEYS environment variable so the secret lives in .env alongside
+# TURN_SECRET and DB_PASS, never in a file that gets committed.
+#
+# WHAT AN SFU DOES HERE, AND WHAT IT DELIBERATELY CANNOT
+# ------------------------------------------------------
+# It forwards media; it does not transcode. With frame encryption on
+# (RTCFrameCryptor, see docs/SFU_SPIKE.md) it *could not* transcode even if
+# asked — the payloads are ciphertext. That is the security property, and it is
+# also why this box needs bandwidth rather than CPU: no encoder ever runs here.
+
+port: 7880
+
+rtc:
+  # Single UDP port instead of a 50000–60000 range. A range means fifty thousand
+  # firewall rules to reason about on a box that also serves Postgres, Redis and
+  # coturn; one port is one rule. LiveKit multiplexes every participant's media
+  # over it, which is what makes the simplification safe rather than a limit.
+  udp_port: 7882
+  # TCP fallback for networks that block UDP outright — corporate wifi, some
+  # mobile carriers. Without it those users simply cannot join, and the failure
+  # looks like "the call never connects" with no clue why.
+  tcp_port: 7881
+  # The box's public address, handed to clients in ICE candidates. MUST be the
+  # real public IP: behind Docker the server sees only a bridge address, and
+  # advertising 172.x sends every client to a dead end.
+  use_external_ip: false
+  external_ip: ${LIVEKIT_EXTERNAL_IP}
+
+# Reuse the coturn already running on this host rather than LiveKit's embedded
+# TURN. One relay, one credential, one thing to monitor — and it is already
+# port-forwarded and certificate-managed for the 1:1 mesh calls.
+turn:
+  enabled: false
+
+# Single node: no Redis. LiveKit only needs it to share room state across
+# instances, and adding it now would couple the SFU's health to Redis for a
+# benefit that does not exist below a few thousand concurrent participants.
+# When a second node is added, point this at the redis service already in the
+# compose file and nothing else changes.
+# redis:
+#   address: redis:6379
+
+logging:
+  level: info
+  # JSON so Loki/Promtail can parse it if log shipping is ever added; harmless
+  # when read by a human through `docker compose logs`.
+  json: true
+
+# Rooms are created implicitly by the first participant to present a valid
+# token, and reaped when the last one leaves. The Go backend never calls the
+# LiveKit API — it only signs tokens (internal/livekit/token.go) — so there is
+# no room lifecycle to keep in sync between the two.
+room:
+  # Matches the server-side call teardown: a call whose participants have all
+  # gone is over, and holding the room open just consumes memory.
+  empty_timeout: 60
+  # A room whose creator never arrives should not linger.
+  departure_timeout: 20
+  # Hard ceiling, well above the 64-participant target, so a runaway client
+  # cannot exhaust the box. The REAL limit is the role model in
+  # call_participants — this is only a backstop.
+  max_participants: 100

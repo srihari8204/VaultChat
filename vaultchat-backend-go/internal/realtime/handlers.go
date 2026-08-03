@@ -8,6 +8,7 @@ import (
 	"github.com/zishang520/socket.io/v2/socket"
 
 	"vaultchat/backend-go/internal/db"
+	"vaultchat/backend-go/internal/metrics"
 	"vaultchat/backend-go/internal/workx"
 )
 
@@ -318,6 +319,11 @@ func (h *Hub) registerSignalHandlers(s *socket.Socket) {
 		// SCALEOUT.md; MESH_MAX_PARTICIPANTS exists to lower it, or to raise
 		// it deliberately once an SFU terminates the media instead of peers.
 		if max := meshMaxParticipants(); len(existing)+1 > max {
+			// The single most actionable call metric: every increment is a real
+			// person refused entry to a call in progress. A rising rate is the
+			// evidence that the mesh cap is costing users something, and the
+			// argument for the SFU — or for raising MESH_MAX_PARTICIPANTS.
+			metrics.Inc("call_mesh_full")
 			s.Emit("call_full", map[string]any{
 				"chatId": chatID, "max": max, "reason": "mesh_capacity",
 			})

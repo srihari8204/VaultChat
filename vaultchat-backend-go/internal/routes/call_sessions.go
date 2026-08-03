@@ -39,6 +39,7 @@ import (
 	"vaultchat/backend-go/internal/emitx"
 	"vaultchat/backend-go/internal/httpx"
 	"vaultchat/backend-go/internal/livekit"
+	"vaultchat/backend-go/internal/metrics"
 )
 
 func RegisterCallSessions(mux *http.ServeMux) {
@@ -255,6 +256,7 @@ func callSessionStart(w http.ResponseWriter, r *http.Request) {
 	if err != nil || c == nil {
 		// The RLS insert policy refuses a non-member, which is the same 403 the
 		// membership check would produce.
+		metrics.Inc("call_join_refused")
 		httpx.Err(w, 403, "Cannot start a call in this chat")
 		return
 	}
@@ -281,8 +283,18 @@ func callSessionStart(w http.ResponseWriter, r *http.Request) {
 		return e
 	})
 	if err != nil {
+		metrics.Inc("call_join_refused")
 		httpx.Err(w, 403, "Cannot join this call")
 		return
+	}
+
+	// Separate counters rather than one with a flag: "how many calls happen" and
+	// "how many people are on them" are different questions, and a rate of joins
+	// climbing while starts stay flat is a bigger group, not more calls.
+	if created {
+		metrics.Inc("call_started")
+	} else {
+		metrics.Inc("call_joined")
 	}
 
 	people, _ := roster(ctx, uid, c.ID)
@@ -349,6 +361,10 @@ func callSessionLeave(w http.ResponseWriter, r *http.Request) {
 // endCall closes a call and announces it. Safe to call twice — the WHERE clause
 // makes the second one a no-op rather than moving ended_at.
 func endCall(ctx context.Context, uid string, c *callSession, reason string) {
+	durationSec := int64(time.Since(time.Time(c.StartedAt)).Seconds())
+	if durationSec < 0 {
+		durationSec = 0
+	}
 	_ = db.WithUser(ctx, uid, func(tx pgx.Tx) error {
 		if _, e := tx.Exec(ctx,
 			`UPDATE calls SET ended_at = NOW(), end_reason = $2
@@ -362,6 +378,12 @@ func endCall(ctx context.Context, uid string, c *callSession, reason string) {
 			  WHERE call_id = $1 AND left_at IS NULL`, c.ID)
 		return e
 	})
+	// Duration as a counter pair rather than a histogram: the shared bucket set
+	// tops out at 10 s, tuned for request latency, and a call is minutes. A sum
+	// and a count give a truthful mean; bucketing calls into "+Inf" would give a
+	// graph that looks precise and says nothing.
+	metrics.Inc("call_ended")
+	metrics.Add("call_seconds_total", uint64(durationSec))
 	emitx.ChatEvent(c.ChatID, "call_session_ended", map[string]any{
 		"callId": c.ID, "chatId": c.ChatID, "reason": reason,
 	})
@@ -577,6 +599,10 @@ func callSessionSfuToken(w http.ResponseWriter, r *http.Request) {
 
 	cfg := livekit.ConfigFromEnv()
 	if !cfg.Configured() {
+		// Worth counting: a non-zero rate here means clients are trying to use
+		// the SFU on a server that has no keys, which is a deployment gap rather
+		// than a user error.
+		metrics.Inc("call_sfu_unconfigured")
 		httpx.Err(w, 503, "Group calling at scale is not configured on this server")
 		return
 	}
@@ -603,6 +629,7 @@ func callSessionSfuToken(w http.ResponseWriter, r *http.Request) {
 		return e
 	})
 
+	metrics.Inc("call_sfu_token_" + role)
 	httpx.JSON(w, 200, map[string]any{
 		"token": token,
 		"url":   cfg.URL,

@@ -1,7 +1,8 @@
 # Is Row-Level Security actually enforced?
 
-**Status: the gap is now closable in one deliberate step.** Migrations 067 and
-068 plus `db.SysPool` are in place; enforcement is a checklist, not a project.
+**Status: the gap is now closable in one deliberate step.** Migration 067,
+`scripts/enable-rls-force.sql` and `db.SysPool` are in place; enforcement is a
+checklist, not a project.
 Nothing is enforced until you run step 3 below, and until then behaviour is
 byte-for-byte what it was.
 
@@ -83,7 +84,7 @@ Read the `verdict` column:
 | `scripts/check-rls.sql` | read-only diagnostic — tells you which case you're in |
 | **067** | the missing `chats` INSERT policy |
 | `db.SysPool` | a pool for queries that have no acting user, falling back to `db.Pool` when unconfigured |
-| **068** | `FORCE ROW LEVEL SECURITY` on all six policy-bearing tables |
+| `scripts/enable-rls-force.sql` | `FORCE ROW LEVEL SECURITY` on all six policy-bearing tables — **guarded**, and deliberately not a migration |
 | `internal/db/syspool_test.go` | pins both halves of the fallback |
 
 All four measured on a real Postgres 16, with FORCE on and a `BYPASSRLS` role:
@@ -105,13 +106,26 @@ silently does nothing.
 
 1. `psql "$DATABASE_URL" -f vaultchat-backend/scripts/check-rls.sql` — if the
    verdict is already `enforced`/`ENFORCED`, stop, there is nothing to do.
-2. Apply **067**. (Safe on its own: adding a policy to a bypassed table changes
-   nothing today.)
+2. Apply **067** — it rides the normal `migrate.js up`, and is safe on its own:
+   adding a policy to a bypassed table changes nothing today.
 3. Create the system role, point `DB_SYSTEM_USER`/`DB_SYSTEM_PASS` at it, and
    restart the API. A misconfigured role makes the API refuse to boot rather
    than serve wrong data.
-4. Apply **068**. Rollback is `ALTER TABLE <t> NO FORCE ROW LEVEL SECURITY;`,
-   effective immediately, touching no data.
+4. Run `psql "$DATABASE_URL" -f vaultchat-backend/scripts/enable-rls-force.sql`.
+   Rollback is `ALTER TABLE <t> NO FORCE ROW LEVEL SECURITY;`, effective
+   immediately, touching no data.
+
+> **Why step 4 is not a migration.** It was numbered `068` at first, and that was
+> wrong: `deploy.sh` step 4 runs `node migrate.js up`, which applies *every*
+> pending file. A routine deploy would therefore have enforced RLS with no system
+> role configured, and every user-less query would have started returning zero
+> rows — silently, with no error and no crash.
+>
+> It now lives in `scripts/`, outside the migration runner, and **refuses to run**
+> unless a non-superuser `BYPASSRLS` login role exists. Enforcing RLS is an
+> operational switch, not a schema change: it alters no data and its rollback is
+> one statement per table. It should be thrown by a person who has read this
+> page, not swept up by an automated run.
 
 ## The 18 queries that made step 3 necessary
 
@@ -176,14 +190,15 @@ SECURITY`. They are new, so there is no existing behaviour to break, and the
 call-role model is exactly the kind of thing that must not depend on a
 deployment detail. `scripts/test-call-rls.sh` proves the policies hold.
 
-**Did not:** apply 068 or create the system role. Both are deployment actions on
+**Did not:** enable FORCE or create the system role. Both are deployment actions on
 a database I cannot see, and the second must come first. The reasons that made
 this risky are now handled rather than merely documented:
 
 - ~~Chat creation would break immediately.~~ Fixed by **067**, and the failure
   and the fix are both reproduced above.
 - ~~Every unbound server query would return zero rows.~~ Those 18 queries now
-  run on `db.SysPool`, which is the user pool until a system role exists.
+  run on `db.SysPool`, which is the user pool until a system role exists — and
+  the enforcement script refuses to run before that role is there.
 
 What remains is genuinely yours: creating a role and applying a migration.
 
