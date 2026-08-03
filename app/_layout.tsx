@@ -17,6 +17,7 @@ import { Buffer } from 'buffer';
 import { Stack, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import * as ScreenCapture from 'expo-screen-capture';
+import * as SplashScreen from 'expo-splash-screen';
 import * as Sentry from '@sentry/react-native';
 import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet, Platform, AppState, InteractionManager } from 'react-native';
@@ -45,6 +46,13 @@ import { runDueScheduled, rearmAllTriggers } from '../lib/scheduledRunner';
 import { getLocalDb } from '../lib/localDb';
 import perf from '../lib/perf';
 global.Buffer = Buffer;
+
+// Keep the native splash up until the cold-start router (app/index.tsx) has made
+// its auth decision and navigated. This is the WhatsApp trick: no intermediate
+// spinner/white-flash between the splash and the chats list — index.tsx hides
+// the splash once it has routed. preventAutoHide MUST run at module load, before
+// the splash would auto-hide when the JS bundle finishes loading.
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 // ── Sentry frontend init (Day 16) ──────────────────────────────────
 // Reads EXPO_PUBLIC_SENTRY_DSN from EAS env. If unset (dev), Sentry is
