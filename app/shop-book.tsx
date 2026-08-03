@@ -12,7 +12,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet,
-  Alert, ActivityIndicator, RefreshControl, Switch, Platform, KeyboardAvoidingView, Share, Modal,
+  Alert, ActivityIndicator, RefreshControl, Switch, Platform, KeyboardAvoidingView, Share, Modal, Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
@@ -279,10 +279,16 @@ function ShopCard({ shop, onOpen, isFav, onToggleFav }: {
       <View style={{ flex: 1 }}>
         <Text style={s.cardTitle}>{shop.name}</Text>
         <Text style={s.cardSub}>
-          {categoryLabel(shop.category)}{shop.distanceKm != null ? ` · ${formatDistance(shop.distanceKm)}` : ''}
+          {categoryLabel(shop.category)}
           {shop.ratingCount > 0 ? `  ·  ⭐ ${shop.rating} (${shop.ratingCount})` : ''}
         </Text>
-        <View style={{ flexDirection: 'row', gap: 6, marginTop: 6, alignItems: 'center' }}>
+        <View style={{ flexDirection: 'row', gap: 6, marginTop: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          {shop.distanceKm != null && (
+            <View style={[s.badge, s.badgeDist, { marginTop: 0, flexDirection: 'row', alignItems: 'center' }]}>
+              <Ionicons name="location" size={11} color={C.green} style={{ marginRight: 3 }} />
+              <Text style={[s.badgeText, { color: C.green }]}>{formatDistance(shop.distanceKm)}</Text>
+            </View>
+          )}
           <View style={[s.badge, { marginTop: 0 }, st.tone === 'open' ? s.badgeOpen : st.tone === 'soon' ? s.badgeSoon : s.badgeClosed]}>
             <Text style={[s.badgeText, st.tone === 'closed' && { color: C.danger }]}>{st.label}</Text>
           </View>
@@ -409,6 +415,7 @@ function ShopFlow({ shop, cart, setCart, onBack, onPlaced, onLedger, isFav, onTo
             </>
           )}
 
+          {shop.distanceKm != null && <InfoRow icon="navigate-outline" label="Distance" value={`${formatDistance(shop.distanceKm)} away`} />}
           <InfoRow icon="time-outline" label="Timings" value={`${shop.openTime} – ${shop.closeTime}`} />
           {!!shop.address && <InfoRow icon="location-outline" label="Address" value={shop.address} />}
           {!!shop.phone && <InfoRow icon="call-outline" label="Phone" value={shop.phone} />}
@@ -419,6 +426,14 @@ function ShopFlow({ shop, cart, setCart, onBack, onPlaced, onLedger, isFav, onTo
             <Ionicons name="list" size={18} color="#fff" />
             <Text style={s.primaryBtnText}>View Catalog</Text>
           </TouchableOpacity>
+          {shop.lat != null && shop.lng != null && (
+            <TouchableOpacity style={s.outlineBtn} onPress={() => openDirections(shop)}>
+              <Ionicons name="navigate-outline" size={18} color={C.green} />
+              <Text style={s.outlineBtnText}>
+                Directions{shop.distanceKm != null ? ` · ${formatDistance(shop.distanceKm)}` : ''}
+              </Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={s.outlineBtn} onPress={onLedger}>
             <Ionicons name="book-outline" size={18} color={C.green} />
             <Text style={s.outlineBtnText}>My Ledger with this shop</Text>
@@ -1797,19 +1812,53 @@ function ShopSettings({ shop, me, onSaved, onCancel }: {
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(
     shop?.lat != null && shop?.lng != null ? { lat: shop.lat, lng: shop.lng } : null);
   const [busy, setBusy] = useState(false);
+  const [locating, setLocating] = useState(false);
 
-  const useLocation = async () => {
+  // Capture the shop's GPS location. `silent` skips the success alert (used for
+  // the frictionless auto-capture when a new shop form first opens). Returns the
+  // captured coords (or null) so the caller can use them without waiting on state.
+  const useLocation = async (silent = false): Promise<{ lat: number; lng: number } | null> => {
+    setLocating(true);
     try {
       const { status: perm } = await Location.requestForegroundPermissionsAsync();
-      if (perm !== 'granted') { Alert.alert('Location permission needed'); return; }
+      if (perm !== 'granted') {
+        if (!silent) {
+          Alert.alert(
+            'Location needed',
+            'A shop location is required so nearby customers can find you and see how far away you are. Please enable location permission in Settings.',
+          );
+        }
+        return null;
+      }
       const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-      Alert.alert('Location set', 'Your shop location was captured.');
-    } catch { Alert.alert('Could not get location'); }
+      const c = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      setCoords(c);
+      if (!silent) Alert.alert('Location set', 'Your shop location was captured.');
+      return c;
+    } catch {
+      if (!silent) Alert.alert('Could not get location', 'Please try again with GPS on.');
+      return null;
+    } finally { setLocating(false); }
   };
+
+  // Auto-capture location the first time a new shop is being created, so most
+  // owners never have to think about it — location is required to save.
+  useEffect(() => {
+    if (!shop && !coords) { useLocation(true); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const save = async () => {
     if (!name.trim()) { Alert.alert('Shop name required'); return; }
+    // Location is mandatory — it's what powers nearby discovery + distance.
+    let loc = coords;
+    if (!loc) {
+      loc = await useLocation();
+      if (!loc) {
+        Alert.alert('Shop location required', 'Tap “Use current location” to set where your shop is, then save.');
+        return;
+      }
+    }
     setBusy(true);
     try {
       await SB.saveShop({
@@ -1817,7 +1866,7 @@ function ShopSettings({ shop, me, onSaved, onCancel }: {
         openTime: openTime.trim(), closeTime: closeTime.trim(), status,
         pickup, prepMins: num(prep), weeklyHoliday,
         lunchStart: lunchStart.trim(), lunchEnd: lunchEnd.trim(),
-        lat: coords?.lat ?? null, lng: coords?.lng ?? null,
+        lat: loc.lat, lng: loc.lng,
       });
       const fresh = await SB.myShop();
       if (fresh) onSaved(fresh);
@@ -1872,10 +1921,18 @@ function ShopSettings({ shop, me, onSaved, onCancel }: {
             ))}
           </View>
 
-          <TouchableOpacity style={s.outlineBtn} onPress={useLocation}>
-            <Ionicons name="location" size={18} color={C.green} />
-            <Text style={s.outlineBtnText}>{coords ? 'Location captured ✓ — update' : 'Use current location'}</Text>
+          <Text style={s.fieldLabel}>Shop location (required)</Text>
+          <TouchableOpacity style={[s.outlineBtn, locating && { opacity: 0.6 }]} disabled={locating} onPress={() => useLocation()}>
+            {locating
+              ? <ActivityIndicator color={C.green} />
+              : <Ionicons name={coords ? 'checkmark-circle' : 'location'} size={18} color={C.green} />}
+            <Text style={s.outlineBtnText}>
+              {locating ? 'Getting location…' : coords ? 'Location captured ✓ — update' : 'Use current location'}
+            </Text>
           </TouchableOpacity>
+          {!coords && !locating && (
+            <Text style={s.hint}>📍 Required so nearby customers can find your shop and see the distance.</Text>
+          )}
           <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={save}>
             {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.primaryBtnText}>{shop ? 'Save Settings' : 'Create Shop'}</Text>}
           </TouchableOpacity>
@@ -1943,6 +2000,21 @@ function StatCard({ label, value, tone }: { label: string; value: string; tone: 
       <Text style={s.statLabel}>{label}</Text>
     </View>
   );
+}
+
+// Open the customer's maps app with directions to the shop. Tries the
+// platform-native scheme first, falls back to a Google Maps web link.
+function openDirections(shop: SB.Shop) {
+  if (shop.lat == null || shop.lng == null) return;
+  const { lat, lng } = shop;
+  const label = encodeURIComponent(shop.name || 'Shop');
+  const web = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+  const native = Platform.select({
+    ios: `maps://?daddr=${lat},${lng}&q=${label}`,
+    android: `geo:${lat},${lng}?q=${lat},${lng}(${label})`,
+    default: web,
+  }) as string;
+  Linking.openURL(native).catch(() => Linking.openURL(web).catch(() => {}));
 }
 
 function InfoRow({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }) {
@@ -2081,6 +2153,7 @@ const s = StyleSheet.create({
   price: { color: C.text, fontSize: 13.5, fontWeight: '700', marginTop: 4 },
 
   badge: { alignSelf: 'flex-start', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2, marginTop: 6 },
+  badgeDist: { backgroundColor: C.greenSoft, borderWidth: 1, borderColor: '#BBF7D0' },
   badgeOpen: { backgroundColor: C.greenSoft },
   badgeSoon: { backgroundColor: '#FEF3C7' },
   badgeClosed: { backgroundColor: '#FEE2E2' },

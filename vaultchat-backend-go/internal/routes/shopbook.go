@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -188,12 +189,14 @@ func sbNearbyShops(w http.ResponseWriter, r *http.Request) {
 	cat := r.URL.Query().Get("category")
 
 	// Bounding box ~ 25 km; if no location given, just return a recent slice.
+	// Shops without coordinates are still returned (they just carry no distance)
+	// so a freshly-added shop never disappears the moment the customer's GPS is on.
 	const boxDeg = 0.25
 	args := []any{}
 	sql := `SELECT ` + shopCols + ` FROM shopbook_shop`
 	where := ""
 	if okLat && okLng {
-		where = ` WHERE lat BETWEEN $1 AND $2 AND lng BETWEEN $3 AND $4`
+		where = ` WHERE (lat IS NULL OR lng IS NULL OR (lat BETWEEN $1 AND $2 AND lng BETWEEN $3 AND $4))`
 		args = append(args, lat-boxDeg, lat+boxDeg, lng-boxDeg, lng+boxDeg)
 	}
 	if cat != "" && cat != "all" {
@@ -224,6 +227,23 @@ func sbNearbyShops(w http.ResponseWriter, r *http.Request) {
 			m["distanceKm"] = math.Round(haversineKm(lat, lng, *slat, *slng)*100) / 100
 		}
 		out = append(out, m)
+	}
+
+	// Nearest first when we have the customer's location; shops without a known
+	// distance (no coordinates, or outside the box) sort to the end.
+	if okLat && okLng {
+		distOf := func(m map[string]any) (float64, bool) {
+			d, ok := m["distanceKm"].(float64)
+			return d, ok
+		}
+		sort.SliceStable(out, func(i, j int) bool {
+			di, oi := distOf(out[i])
+			dj, oj := distOf(out[j])
+			if oi != oj {
+				return oi // one has a distance, the other doesn't → the one with distance ranks first
+			}
+			return di < dj
+		})
 	}
 	httpx.JSON(w, 200, map[string]any{"shops": out})
 }
