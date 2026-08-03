@@ -160,6 +160,15 @@ export default function FamilyAddScreen() {
         />
       </View>
 
+      {/* The list below only shows people you already have a DM with (same
+          source as new-chat). Address-book discovery lives on /contacts —
+          without this row a fresh user sees an empty list and a dead end. */}
+      <TouchableOpacity onPress={() => router.push('/contacts' as any)} style={s.abRow}>
+        <Ionicons name="book-outline" size={18} color={colors.primary} />
+        <Text style={[s.abTxt, { color: colors.primary }]}>Find contacts from address book</Text>
+        <Ionicons name="chevron-forward" size={16} color={colors.textDim} />
+      </TouchableOpacity>
+
       {!!error && <View style={s.errorBar}><Text style={s.errorTxt}>{error}</Text></View>}
 
       {loading ? (
@@ -204,6 +213,8 @@ export default function FamilyAddScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: c.bg },
+  abRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 12 },
+  abTxt: { flex: 1, fontSize: 14.5, fontWeight: '600' },
   search: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
     margin: 14, paddingHorizontal: 12, height: 44,

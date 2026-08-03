@@ -393,10 +393,14 @@ export async function startReceive(opts: {
     await FileSystem.makeDirectoryAsync(VB_DIR, { intermediates: true }).catch(() => {});
 
     // Tier 1/2: try to pull directly (LAN then P2P) while the sender is online.
+    // Direct chunks land contiguously (ordered channel), so the high-water mark
+    // is a verified plaintext prefix the relay tier can credit instead of
+    // re-downloading — a 50% direct transfer resumes at 50% on the relay.
+    let directDone = 0;
     const gotDirect = manifest.token ? await receiveDirect({
       transferId, fileId: manifest.fileId, keyB64: manifest.keyB64, token: manifest.token, peerId,
       chunkBytes: CHUNK_BYTES, chunkCount, totalBytes: manifest.size, dstPath, signal: ac.signal,
-      onProgress: (done, total) => setState(transferId, { status: 'receiving', tier: 'direct', done, total, bytes: done * CHUNK_BYTES, totalBytes: manifest.size }),
+      onProgress: (done, total) => { if (done > directDone) directDone = done; setState(transferId, { status: 'receiving', tier: 'direct', done, total, bytes: done * CHUNK_BYTES, totalBytes: manifest.size }); },
     }) : false;
 
     if (!gotDirect) {
@@ -405,6 +409,7 @@ export async function startReceive(opts: {
       await receiveTransfer({
         transferId, dstPath, totalBytes: manifest.size, fileId: manifest.fileId, keyB64: manifest.keyB64,
         linkType: await getLinkType(),
+        haveBytes: Math.min(directDone * CHUNK_BYTES, manifest.size),
         signal: ac.signal,
         onProgress: (p) => setState(transferId, { status: 'receiving', done: p.done, total: p.total, bytes: p.bytes, totalBytes: p.totalBytes }),
       });

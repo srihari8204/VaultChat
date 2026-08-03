@@ -609,6 +609,9 @@ export default function FamilySpaceScreen() {
             <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/chat', params: { id: active.id } } as any); }} style={[st.mRow, { borderColor: colors.border }]}>
               <Ionicons name="chatbubbles" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Open circle chat</Text>
             </TouchableOpacity>
+            <TouchableOpacity onPress={() => { setManage(false); router.push('/family-setup' as any); }} style={[st.mRow, { borderColor: colors.border }]}>
+              <Ionicons name="key" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Create or join another circle</Text>
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => { setManage(false); router.push('/emergency-sos' as any); }} style={[st.mRow, { borderColor: colors.border }]}>
               <Ionicons name="medkit" size={19} color={colors.danger} /><Text style={[st.mTxt, { color: colors.text }]}>Emergency SOS (trusted contacts)</Text>
             </TouchableOpacity>
