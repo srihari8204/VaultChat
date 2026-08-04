@@ -17,6 +17,7 @@ import { Buffer } from 'buffer';
 import { Stack, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import * as ScreenCapture from 'expo-screen-capture';
+import * as SplashScreen from 'expo-splash-screen';
 import * as Sentry from '@sentry/react-native';
 import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet, Platform, AppState, InteractionManager } from 'react-native';
@@ -45,6 +46,13 @@ import { runDueScheduled, rearmAllTriggers } from '../lib/scheduledRunner';
 import { getLocalDb } from '../lib/localDb';
 import perf from '../lib/perf';
 global.Buffer = Buffer;
+
+// Keep the native splash up until the cold-start router (app/index.tsx) has made
+// its auth decision and navigated. This is the WhatsApp trick: no intermediate
+// spinner/white-flash between the splash and the chats list — index.tsx hides
+// the splash once it has routed. preventAutoHide MUST run at module load, before
+// the splash would auto-hide when the JS bundle finishes loading.
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 // ── Sentry frontend init (Day 16) ──────────────────────────────────
 // Reads EXPO_PUBLIC_SENTRY_DSN from EAS env. If unset (dev), Sentry is
@@ -117,6 +125,29 @@ function RootLayout() {
           }
         })
         .catch(() => { /* fail open */ });
+
+      // Passive device-security monitoring (Security Hub). Separate, NON-
+      // destructive path: it scores the device, records changes to the audit
+      // chain and notifies on worsenings — it never wipes. Throttled by the
+      // scan scheduler (a quick relaunch won't re-scan) and fully deferred, so
+      // it never gates first paint. Distinct from runSecurityCheck above, which
+      // is the boot self-destruct.
+      import('../services/security/deviceSecurity/monitorService')
+        .then(m => m.runMonitoringScan('launch'))
+        .catch(() => { /* best-effort; dashboard still scans on demand */ });
+
+      // Wire passive triggers: re-scan on foreground return (throttled) and on
+      // network change (debounced). Covers the while-running case; a periodic
+      // scan while KILLED still needs a native background job.
+      import('../services/security/deviceSecurity/monitorTriggers')
+        .then(m => m.startSecurityMonitoring())
+        .catch(() => {});
+
+      // Automatic cache cleanup, if the user enabled it (safe cache only, when
+      // due). Deferred + best-effort; never gates the UI.
+      import('../services/cache/cacheManager')
+        .then(m => m.maybeAutoClean())
+        .catch(() => {});
     }
 
     // Publish this device's E2EE key bundle on startup (lazy, fire-and-forget).
