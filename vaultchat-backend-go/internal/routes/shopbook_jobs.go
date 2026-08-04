@@ -1,0 +1,156 @@
+// shopbook_jobs.go — SHOP BOOK scheduled notifications (openspec:
+// shop-book-upgrade): owner daily summaries and weekly pending-payment
+// reminders. Lives in routes (not internal/jobs) to reuse sbNotify's
+// inbox-persist + Expo push path.
+//
+// Env knobs:
+//
+//	SHOPBOOK_JOBS=off              disable both jobs
+//	SHOPBOOK_SUMMARY_HOUR_UTC=15   hour (UTC) the daily tick fires
+package routes
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"strconv"
+	"time"
+
+	"vaultchat/backend-go/internal/db"
+)
+
+// StartShopBookJobs launches the hourly ticker. Each firing is idempotent —
+// "already sent" is derived from the notification inbox itself, so restarts
+// and multi-hour downtime never double-send.
+func StartShopBookJobs(ctx context.Context) {
+	if os.Getenv("SHOPBOOK_JOBS") == "off" {
+		log.Println("[shopbook-jobs] disabled via SHOPBOOK_JOBS=off")
+		return
+	}
+	go func() {
+		t := time.NewTicker(time.Hour)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				sbJobsTick(ctx)
+			}
+		}
+	}()
+	log.Println("[shopbook-jobs] hourly tick started")
+}
+
+func sbSummaryHourUTC() int {
+	if v, err := strconv.Atoi(os.Getenv("SHOPBOOK_SUMMARY_HOUR_UTC")); err == nil && v >= 0 && v <= 23 {
+		return v
+	}
+	return 15
+}
+
+func sbJobsTick(ctx context.Context) {
+	if time.Now().UTC().Hour() != sbSummaryHourUTC() {
+		return
+	}
+	sbSendDailySummaries(ctx)
+	sbSendWeeklyReminders(ctx)
+}
+
+// Daily summary per shop owner: today's orders, sales, pending khata total
+// and out-of-stock count (spec: notifications / Daily summary). The inbox
+// row (event='daily_summary') doubles as the sent-today marker.
+func sbSendDailySummaries(ctx context.Context) {
+	rows, err := db.Pool.Query(ctx, `
+		SELECT s.id, s.owner_user_id, s.currency,
+		       COALESCE(o.cnt,0), COALESCE(o.sales,0), COALESCE(p.pending,0), COALESCE(st.low,0)
+		  FROM shopbook_shop s
+		  LEFT JOIN LATERAL (
+			SELECT COUNT(*) AS cnt, SUM(total) AS sales FROM shopbook_order
+			 WHERE shop_id=s.id AND created_at::date = NOW()::date) o ON TRUE
+		  LEFT JOIN LATERAL (
+			SELECT SUM(CASE WHEN type='purchase' THEN amount ELSE -amount END) AS pending
+			  FROM shopbook_ledger WHERE shop_id=s.id) p ON TRUE
+		  LEFT JOIN LATERAL (
+			SELECT COUNT(*) AS low FROM shopbook_product
+			 WHERE shop_id=s.id AND enabled AND NOT in_stock) st ON TRUE
+		 WHERE s.approved
+		   AND NOT EXISTS (
+			SELECT 1 FROM shopbook_notification n
+			 WHERE n.user_id=s.owner_user_id AND n.event='daily_summary'
+			   AND n.created_at::date = NOW()::date)`)
+	if err != nil {
+		log.Printf("[shopbook-jobs] summary query failed: %v", err)
+		return
+	}
+	defer rows.Close()
+	type row struct {
+		shopID, ownerID, currency string
+		cnt, low                  int
+		sales, pending            float64
+	}
+	all := []row{}
+	for rows.Next() {
+		var x row
+		if rows.Scan(&x.shopID, &x.ownerID, &x.currency, &x.cnt, &x.sales, &x.pending, &x.low) == nil {
+			all = append(all, x)
+		}
+	}
+	rows.Close()
+	for _, x := range all {
+		if x.cnt == 0 && x.pending <= 0 && x.low == 0 {
+			continue // nothing worth a ping today
+		}
+		body := fmt.Sprintf("%d order(s) · %s%.0f sales · %s%.0f pending",
+			x.cnt, x.currency, x.sales, x.currency, x.pending)
+		if x.low > 0 {
+			body += fmt.Sprintf(" · %d out of stock", x.low)
+		}
+		sbNotify(ctx, x.ownerID, "Today at your shop 📊", body,
+			map[string]any{"event": "daily_summary", "shopId": x.shopID})
+	}
+}
+
+// Weekly pending-payment reminders (spec: notifications / Pending reminder;
+// design open-question default: weekly, any nonzero balance). The inbox row
+// (event='reminder') is the per-customer-per-shop cooldown marker — manual
+// owner reminders count too, so customers are never double-pinged.
+func sbSendWeeklyReminders(ctx context.Context) {
+	rows, err := db.Pool.Query(ctx, `
+		SELECT l.shop_id, s.name, s.currency, l.customer_user_id,
+		       SUM(CASE WHEN l.type='purchase' THEN l.amount ELSE -l.amount END) AS pending
+		  FROM shopbook_ledger l JOIN shopbook_shop s ON s.id=l.shop_id
+		 GROUP BY l.shop_id, s.name, s.currency, l.customer_user_id
+		HAVING SUM(CASE WHEN l.type='purchase' THEN l.amount ELSE -l.amount END) > 0`)
+	if err != nil {
+		log.Printf("[shopbook-jobs] reminder query failed: %v", err)
+		return
+	}
+	defer rows.Close()
+	type row struct {
+		shopID, shopName, currency, custID string
+		pending                            float64
+	}
+	all := []row{}
+	for rows.Next() {
+		var x row
+		if rows.Scan(&x.shopID, &x.shopName, &x.currency, &x.custID, &x.pending) == nil {
+			all = append(all, x)
+		}
+	}
+	rows.Close()
+	for _, x := range all {
+		var recent bool
+		if db.Pool.QueryRow(ctx, `
+			SELECT EXISTS(SELECT 1 FROM shopbook_notification
+			 WHERE user_id=$1 AND event='reminder' AND data->>'shopId'=$2
+			   AND created_at > NOW() - INTERVAL '7 days')`,
+			x.custID, x.shopID).Scan(&recent) != nil || recent {
+			continue
+		}
+		sbNotify(ctx, x.custID, "Payment reminder 🔔",
+			fmt.Sprintf("%s%.0f pending at %s", x.currency, x.pending, x.shopName),
+			map[string]any{"event": "reminder", "shopId": x.shopID})
+	}
+}

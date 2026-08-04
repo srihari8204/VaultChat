@@ -68,6 +68,7 @@ func main() {
 	routes.RegisterAdmin(mux)
 	routes.RegisterChats(mux)
 	routes.RegisterShopBook(mux)
+	routes.RegisterShopBookAdmin(mux)
 
 	// ── Realtime (Phase 2 Step 5): Go owns the Socket.IO layer ──────────
 	hub := realtime.New()
@@ -170,6 +171,7 @@ func main() {
 	// The periodic jobs that lived in Node's server.js — sweepers + the
 	// scheduled-messages worker — so a Node-less prod loses nothing.
 	jobs.StartAll(ctx)
+	routes.StartShopBookJobs(ctx)
 
 	// Anything else reaching us is a proxy misconfiguration — say so loudly.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

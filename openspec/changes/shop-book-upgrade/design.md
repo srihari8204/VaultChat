@@ -1,10 +1,17 @@
 ## Context
 
-See `proposal.md` — Why. The repo today is an Expo Router React Native app (`app/`) with Firebase (phone-OTP auth, Firestore rules/indexes in repo), a Node backend (`vaultchat-backend/`), a Go backend (`vaultchat-backend-go/`), Notifee + FCM push, and a minimal static `admin/` page. Shop Book adds three product surfaces — customer app, shop-owner app, admin portal — on top of this stack. Constraints that shape the design:
+See `proposal.md` — Why. **Implementation survey (2026-08-04) found Shop Book already exists as a working mini-app in this repo** — this change is an *upgrade*, not a greenfield build:
 
-- V1 is text-only catalogs, pickup-only, no online payments, no maps SDK (distance + lists, not map tiles).
-- The same binary must serve both roles (customer and shop owner) and all countries — country and category behavior must be data, not code.
-- Admin changes (countries, tax fields, categories, starter catalogs, plans) must take effect without an app release.
+- Postgres schema: `vaultchat-backend/migrations/061–063_shopbook*.sql` (shop, product, order, order_item, ledger, favorites, ratings, coupons, suppliers, free/pro plan flag).
+- API: `vaultchat-backend-go/internal/routes/shopbook.go` (~1,600 lines; Go-only, no Node parity) — nearby shops (haversine), catalog, orders with per-item availability review + customer alternative decisions, khata ledger, dashboard, reports (Pro), reminders, Expo push via `sbNotify`.
+- Client: `app/shop-book.tsx` single screen with Customer/Owner modes, `services/shopBookService.ts`, `utils/shopbook.ts`, `constants/shopCategories.ts`.
+
+What the upgrade must add: the full order pipeline (pending/accepted/collected/rejected + cancellation windows + reasons + timeline), the Country Tax Engine, invoicing, shop approval + verified badge, server-managed starter catalogs, Free-plan limit enforcement, notification inbox, report tiers, an admin surface, and localization. Constraints that shape the approach:
+
+- V1 is text-only catalogs, pickup-first, no online payments, no maps SDK (distance + lists, not map tiles).
+- The same binary serves both roles and all countries — country and category behavior must be data, not code.
+- Admin changes (countries, tax fields, categories, starter catalogs) must take effect without an app release.
+- Existing shops and orders must keep working — migrations grandfather current rows (e.g. existing shops stay approved; `new` orders map to `pending`).
 
 ## Goals / Non-Goals
 
@@ -22,52 +29,53 @@ See `proposal.md` — Why. The repo today is an Expo Router React Native app (`a
 
 ## Decisions
 
-**D1 — One app, role-scoped route groups (vs. two separate apps).**
-Add Expo Router groups `app/(shopbook-customer)/` and `app/(shopbook-owner)/` plus a shared `(shopbook-onboarding)` flow; role membership on the user profile decides the landing surface, with an in-app switcher for users who are both. One binary halves store-release overhead and lets an owner also shop as a customer with the same identity. Alternative — separate customer/owner apps — was rejected for v1: double the build/release/QA cost before product-market fit; the router groups keep a later split cheap.
+**D1 — Keep the existing one-screen, two-mode mini-app shell.**
+`app/shop-book.tsx` already implements Customer/Owner modes with in-screen tab bars behind one OTP identity. The upgrade extends this screen rather than splitting into route groups — smallest reviewable diff, no navigation rework. A later split into route groups stays cheap because logic lives in `services/` + `utils/`, not in the screen.
 
-**D2 — Firestore as the system of record; Go backend for transactional and geo logic.**
-Shops, products, orders, ledger entries, invoices, notifications, and configs live in Firestore (real-time listeners give order tracking and owner dashboards for free, matching the app's existing Firebase usage). The Go backend owns operations that must be atomic or trusted: order state transitions, ledger balance updates, invoice numbering, plan-limit checks, and nearby-shop queries. Alternative — everything client-side against Firestore with security rules — rejected: sequential invoice numbers, balance math, and 200-customer enforcement cannot be safely done from clients.
+**D2 — Postgres stays the system of record; all logic in the existing Go routes.**
+The mini-app is already Postgres + Go (`shopbook.go`), with every query scoped by caller id. The upgrade adds migration `064` and extends the same route file(s). The Go backend owns everything atomic or trusted: order state transitions, ledger math, invoice numbering, plan-limit checks. (The original greenfield design proposed Firestore; discarded — migrating a working Postgres implementation would be pure churn.)
 
-**D3 — Geohash-based discovery, no map SDK.**
-Store each shop's one-time GPS capture as lat/lng + geohash; nearby queries use geohash prefix ranges filtered by true distance server-side. The UI is list-based (distance text, not map tiles), so no react-native-maps dependency, no extra native module, no prebuild change. Alternative — map-first UI — deferred to the roadmap alongside delivery tracking.
+**D3 — Haversine + bounding-box discovery, no map SDK (unchanged).**
+The existing nearby-shops query (bounding box on indexed lat/lng, haversine distance, server-side sort) is adequate at current scale; geohashing is premature. The UI stays list-based — no react-native-maps, no prebuild change.
 
-**D4 — Country Tax Engine as versioned config documents.**
-A `countries/{code}` config document carries currency, tax type, field definitions (id, label, optional, applies-to), document checklist, and format strings; a `categories/{id}` document carries the starter catalog. Clients render tax settings and invoice layouts from these definitions — no per-country code paths. Every invoice stores a snapshot reference `{countryCode, configVersion}` and the resolved values it was generated with, so admin edits never mutate issued invoices. Alternative — hardcoded per-country modules — rejected; it is exactly what the proposal forbids.
+**D4 — Country Tax Engine as DB-seeded, admin-editable config rows.**
+New tables `shopbook_country` (currency symbol/code, tax type, field definitions JSONB, document checklist JSONB, format hints) and `shopbook_category` + starter items, seeded by migration for the six launch countries and fourteen categories, served by `GET /shopbook/countries` and `GET /shopbook/starter-catalog`, editable via admin routes — no per-country code paths, no app release for changes. The shop row stores its chosen `country`, `currency`, and a `tax_config` JSONB of the optional field values. Every invoice stores the resolved values it was generated with (immutable snapshot), so admin edits never mutate issued invoices.
 
-**D5 — Orders as a state machine with server-validated transitions.**
-Allowed transitions (Pending→Accepted→Preparing→Packing→Ready→Collected→Completed; Pending→Rejected; Pending/Accepted/Preparing→Cancelled with actor rules: customer only from Pending, owner only before Packing) are enforced in the Go backend, which appends a timestamped event to the order's timeline and fans out notifications. The availability-review and alternatives exchange is modeled as per-item sub-state (available / alternative-proposed / alternative-accepted / removed / unavailable) resolved before the order may advance to Preparing. Client-side enforcement alone was rejected — cancellation windows and ledger side effects need one authority.
+**D5 — Extend the existing order flow into the full server-validated state machine.**
+Migration renames `new`→`pending` and adds `accepted`, `collected`, `rejected`; a new `shopbook_order_event` table records every timestamped transition (the customer-visible timeline). Allowed transitions and actor rules are enforced in Go: customer cancels only from Pending; owner cancels before Packing; owner rejects from Pending with one of the six reason codes; cancellation reason required. Marking Collected posts the ledger purchase, generates the invoice, and auto-advances to Completed (both events on the timeline). The existing per-item availability review (pending/available/unavailable/alternative + customer decision) is kept and must be resolved before Accept.
 
-**D6 — Ledger as append-only entries, balances derived.**
-Ledger truth is an append-only entry stream (purchase, payment, adjustment) per shop-customer pair; running balances are maintained transactionally by the backend and recomputable from the stream. Both parties read the same documents, which guarantees the "shared khata" property. Invoices are immutable documents keyed by the shop-scoped sequence from D5's completion event.
+**D6 — Ledger as append-only entries, balances derived (unchanged).**
+The existing `shopbook_ledger` already is an append-only purchase/payment stream with derived pending balances, read identically by both parties. The upgrade only links completed orders to invoices and adds the customer's cross-shop pending summary endpoint.
 
-**D7 — Plan enforcement server-side; store billing for Pro.**
-The Free plan's limits (1 shop, 200 unique ledger customers) are checked in the backend at relationship-creation time, not in the UI. Pro is sold via Play/App Store subscriptions (policy requirement for in-app digital services), with the backend verifying store receipts and stamping the shop's plan. Admin can also grant plan overrides (support, promotions).
+**D7 — Plan limits enforced server-side; Pro upgrade stays a manual flag for now.**
+The Free plan's limits (one shop — already a unique index; 200 unique ledger customers) are checked in Go at relationship-creation time, not in the UI. The repo's existing decision (migration 063: "manual upgrade — no payment gateway") is kept for this change; store-billing receipt verification is deliberate follow-up work before any paid launch, and the admin surface can flip plans for support cases.
 
-**D8 — Reuse existing platform plumbing.**
-Phone-OTP auth (existing Firebase phone auth flow), Notifee/FCM push, Sentry, and EAS build profiles are reused as-is. The `admin/` static page is replaced by a proper admin web portal deployed separately, backed by the same Go backend with role-based admin claims and an audit-log collection (append-only).
+**D8 — Admin surface via the existing `x-admin-key` pattern.**
+Shopbook admin routes (`/api/admin/shopbook/*`) reuse `adminAuth` (constant-time key compare + rate limit) from `routes/admin.go`: pending-shop approval with verified badge, country/tax editing, category/starter-catalog editing, platform stats. UI is a self-contained `admin/shopbook.html` page in the style of the existing console. A full role-based multi-admin portal with audit logs is follow-up; every admin mutation is still recorded to a `shopbook_admin_log` table now so the audit trail starts on day one.
 
-**D9 — i18n via a standard runtime (i18next or equivalent) with remote-loadable bundles.**
-Six launch languages ship in the binary; the loader accepts server-delivered bundle updates so translation fixes and new languages don't require a release. Formatting (currency, date, phone, address) comes from the tax-engine config (D4), not from the UI language — shop-country formats always win on invoices.
+**D9 — Dependency-free in-repo i18n module.**
+A small `lib/shopbookI18n.ts` (typed keys, six language catalogs, device-locale default, persisted override) rather than i18next — matching the repo's dependency-light philosophy and keeping the surface scoped to Shop Book strings. Currency/date formatting comes from the shop's country config (D4), not the UI language — shop-country formats always win on invoices.
 
 ## Risks / Trade-offs
 
-- [Two roles in one binary bloats navigation and onboarding] → Strict route-group isolation, shared code only via `lib/shopbook/`; revisit a split once owner-side complexity grows (D1 keeps it cheap).
-- [Firestore geo queries are approximate at geohash boundaries] → Query neighboring geohash cells and post-filter by true distance in the Go backend; cache per-area shop lists briefly.
-- [Price-comparison matching across shops is fuzzy for free-text catalogs] → Match on normalized product name + unit at launch and show last-updated time so stale/mismatched entries are self-evident; category-scoped canonical product names can improve matching later without an app change.
-- [Config-driven invoices risk producing legally odd layouts in some countries] → Per-country invoice templates reviewed at config time; invoices always carry the config snapshot (D4) so a bad template can be fixed forward without corrupting history.
-- [Store-billing cut on Pro subscriptions reduces margin] → Accepted for v1; alternative billing per store policy can be evaluated per market later.
-- [200-customer limit checks add a backend hop to first-contact flows] → Limit check only fires on first ledger relationship per customer, not per order; cached plan state on the shop document.
-- [Existing VaultChat surfaces and Shop Book share one Firebase project — rule complexity grows] → Namespace all Shop Book collections under a `sb_` prefix (or subtree) with dedicated rules and indexes; no shared documents with chat features.
+- [Status rename `new`→`pending` breaks stale clients] → Old app versions post statuses the new CHECK still accepts (`preparing`…`completed`); the Go layer also maps a legacy `new` write to `pending`, and the client maps cached `new` reads.
+- [Approval gate would hide every existing live shop] → Migration grandfathers current rows (`approved=TRUE`); only shops created after the migration start unapproved.
+- [Price-comparison matching across shops is fuzzy for free-text catalogs] → Match on normalized product name at launch and show last-updated time so stale/mismatched entries are self-evident; category-scoped canonical names can improve matching later without an app change.
+- [Config-driven invoices risk producing legally odd layouts in some countries] → Invoices always carry the resolved snapshot (D4) so a bad config can be fixed forward without corrupting history; per-country review before enabling a market.
+- [Manual Pro flag means no real payment enforcement] → Accepted, matches the repo's existing decision; server-side limit checks land now so store billing can slot in without schema change.
+- [200-customer limit checks add a backend hop to first-contact flows] → Limit check only fires on first ledger relationship per customer, not per order.
+- [One 2,300-line screen keeps growing] → New UI kept in extracted components within the file where practical; logic goes to `utils/shopbook.ts` (testable) and `services/shopBookService.ts`, mirroring the existing pattern.
 
 ## Migration Plan
 
-1. Ship backend first: collections, rules, indexes, Go endpoints, and the six country configs + fourteen category configs seeded (admin-editable thereafter).
-2. Ship the admin portal early (approval + config management) so real shops can be onboarded during beta.
-3. Ship the mobile surfaces behind a feature flag; enable per market (start with India).
-4. No data migration is required — all Shop Book collections are new; existing app features are untouched. Rollback = disable the feature flag; backend collections are inert while hidden.
+1. Migration `064` (idempotent, additive + data backfill) ships first; it is safe with the old Go binary running.
+2. Deploy the Go backend (new endpoints + state machine + seeded configs).
+3. Ship the admin page so real shops can be approved during beta.
+4. Ship the client update (new flows tolerate old backend responses during rollout).
+5. Rollback = redeploy previous Go binary; migration is backward-compatible (old code ignores new columns/tables; `pending` was never written by old code but its CHECK is dropped and recreated to include it).
 
 ## Open Questions
 
-- Reminder cadence and threshold for pending-payment notifications (product tuning; default: weekly, any nonzero balance).
-- Pro pricing per country (₹499/month shown for India; other markets need pricing before their launch — does not affect specs or task breakdown).
-- Whether "Busy" status should pause new orders or only warn (default: warn only).
+- Auto pending-payment reminder cadence (default implemented: weekly, any nonzero balance, per-shop opt-out later).
+- Pro pricing per country (manual flag for now — pricing needed before any paid market launch).
+- Whether "Busy" status should pause new orders or only warn (default implemented: warn only).
