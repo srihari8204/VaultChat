@@ -1164,7 +1164,7 @@ func chatsJoinByCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if db.NoRows(err) || status == nil || *status != "ok" {
-		msg := "Invalid link"
+		msg, code := "Invalid link", http.StatusGone
 		if status != nil {
 			switch *status {
 			case "invalid":
@@ -1173,9 +1173,13 @@ func chatsJoinByCode(w http.ResponseWriter, r *http.Request) {
 				msg = "Link has expired"
 			case "used":
 				msg = "Link has reached its use limit"
+			case "full":
+				// The link is fine; the group has no seats. 410 Gone would tell
+				// the user to stop trying, which is wrong — a seat may free up.
+				msg, code = "This group is full", http.StatusConflict
 			}
 		}
-		httpx.Err(w, http.StatusGone, msg)
+		httpx.Err(w, code, msg)
 		return
 	}
 	emitx.ChatEvent(*rChatID, "members_added", map[string]any{"added": []string{user.ID}, "by": user.ID})
