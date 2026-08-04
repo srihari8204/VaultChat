@@ -28,11 +28,16 @@ Two rules are load-bearing and inherited from the rest of `services/security`:
 | File | Status |
 |------|--------|
 | `riskEngine.ts` | ✅ **Shipped.** Pure, deterministic 0–100 scoring engine: per-signal weight × confidence, cluster overlap-capping, four bands, pending handling, remediation + band presentation tables. No RN imports. |
-| `riskEngine.selftest.ts` | ✅ **Shipped.** 37 Node assertions (`npm test`), auto-discovered by `scripts/test-all.js`. Proves bands, capping, confidence weighting, pending=0-weight, clamping, determinism. |
+| `riskEngine.selftest.ts` | ✅ **Shipped.** 37 Node assertions. |
+| `posture.ts` | ✅ **Shipped.** Turns an assessment into the dashboard's fixed, ordered factor rows (Device Integrity, Root, Frida, USB debugging, …) with `clear`/`warning`/`critical`/`pending`/`not_applicable` status; rollup rows take the worst member; `diffSnapshots()` reports only real, edge-triggered security transitions. Pure. |
+| `posture.selftest.ts` | ✅ **Shipped.** 25 Node assertions. |
+| `notificationPolicy.ts` | ✅ **Shipped.** Pure decision engine: edge-trigger (only worsenings push) + severity floor (warning/critical) + per-severity cooldown (critical 30 min, warning 12 h) + a single "significant score change" event. Injectable clock + last-sent map. |
+| `notificationPolicy.selftest.ts` | ✅ **Shipped.** 12 Node assertions. |
 
-The engine is the foundation every later slice depends on and the only part that
-is fully verifiable off-device. The remaining slices need a custom dev build
-(native module) and/or a real device, so they are **not** written blindly here.
+**74 assertions total**, auto-discovered by `scripts/test-all.js` (`npm test`).
+These three pure modules are the full decision core — scoring, dashboard model,
+and alert policy. The remaining slices need a custom dev build (native module)
+and/or a real device, so they are **not** written blindly here.
 
 ## Scoring model (implemented)
 
@@ -54,11 +59,13 @@ escalate in combination. Full weight/confidence table and cluster caps are in
 Each needs an environment this repo build can't validate in isolation; they land
 behind a feature flag, dark by default, exactly like the E2EE rollout.
 
-1. **`postureStore.ts`** — persist the current + previous `PostureSnapshot`
-   (SecureStore JSON), diff on each scan to emit `SECURITY_STATE_CHANGED` deltas.
+1. **`postureStore.ts`** — thin RN wrapper persisting the current + previous
+   `PostureSnapshot` (SecureStore JSON) and the notification `lastSent` map; calls
+   the pure `diffSnapshots()` + `decideNotifications()` already shipped here.
 2. **JS collectors** — map existing signals (`react-native-device-info`
    `isRooted`/`isEmulator`, `Settings` reads for dev-options/USB) into
-   `SecuritySignal[]`. Reuses libs already in the bundle.
+   `SecuritySignal[]`, reporting `evaluatedTypes`/`pendingTypes`. Reuses libs
+   already in the bundle.
 3. **`VaultShield` native module (Kotlin + Swift + Expo config plugin)** — the
    only substantial new native code: raw-socket Frida probe (replaces the broken
    HTTP probe in `securityService.ts`), `/proc/self/maps` + mount scan, ptrace
