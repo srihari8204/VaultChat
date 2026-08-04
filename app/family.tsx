@@ -290,6 +290,7 @@ export default function FamilySpaceScreen() {
   const canZones   = hasPerm(perms, 'manage_zones')     || isAdminish;
   const canHistory = hasPerm(perms, 'view_history')     || isAdminish;
   const canAnnounce = hasPerm(perms, 'send_announcements') || isAdminish;
+  const canNavigate = hasPerm(perms, 'start_navigation')    || isAdminish;
   // Identity for this group's type — icon and accent drive the whole dashboard.
   const ident = groupIdentity(active ?? {});
   const liveCount = useMemo(() => {
@@ -762,6 +763,11 @@ export default function FamilySpaceScreen() {
             <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-calendar' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: colors.border }]}>
               <Ionicons name="calendar-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Shared calendar</Text>
             </TouchableOpacity>
+            {canNavigate && (
+              <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-trip' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: colors.border }]}>
+                <Ionicons name="navigate-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Start a group trip</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/media-gallery' as any, params: { chatId: active.id, peerName: active.name } }); }} style={[st.mRow, { borderColor: colors.border }]}>
               <Ionicons name="images-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Shared album</Text>
             </TouchableOpacity>
