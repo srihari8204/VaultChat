@@ -22,9 +22,11 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
-import type { CacheCategoryId, CleanupPlan } from './cachePlan';
+import { planCleanup, dueForAutoClean, type CacheCategoryId, type CleanupPlan } from './cachePlan';
 
 const LAST_CLEAN_KEY = 'vc_cache_last_clean';
+const AUTO_DAYS_KEY = 'vc_cache_auto_days';        // 0 = off, else 7/15/30
+const CLEAR_LOGOUT_KEY = 'vc_cache_clear_logout';  // '1' = on
 
 // Cache-category → directories to measure/clear (all under cacheDirectory).
 // dbCache has no directory — it is handled by a VACUUM (see below).
@@ -118,4 +120,49 @@ export async function getLastCleanAt(): Promise<number | null> {
   } catch {
     return null;
   }
+}
+
+// ─── Settings ────────────────────────────────────────────────────────────────
+
+/** Automatic-cleanup interval in days (0 = off). */
+export async function getAutoCleanDays(): Promise<number> {
+  try {
+    const raw = await AsyncStorage.getItem(AUTO_DAYS_KEY);
+    const n = raw ? parseInt(raw, 10) : 0;
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  } catch { return 0; }
+}
+export async function setAutoCleanDays(days: number): Promise<void> {
+  await AsyncStorage.setItem(AUTO_DAYS_KEY, String(days | 0)).catch(() => {});
+}
+
+/** Whether to clear cache automatically on logout. */
+export async function getClearOnLogout(): Promise<boolean> {
+  try { return (await AsyncStorage.getItem(CLEAR_LOGOUT_KEY)) === '1'; } catch { return false; }
+}
+export async function setClearOnLogout(on: boolean): Promise<void> {
+  await AsyncStorage.setItem(CLEAR_LOGOUT_KEY, on ? '1' : '0').catch(() => {});
+}
+
+// ─── Orchestration (boot + logout) ───────────────────────────────────────────
+
+/**
+ * Run automatic Smart Cleanup if it's due per the configured interval. Call from
+ * the app-launch deferred pass. Safe/no-op when automatic cleanup is off or not
+ * yet due. Runs in the background (the caller does not await UI-critically).
+ */
+export async function maybeAutoClean(): Promise<CleanupResult | null> {
+  const days = await getAutoCleanDays();
+  if (days <= 0) return null;
+  const last = await getLastCleanAt();
+  if (!dueForAutoClean(last, Date.now(), days)) return null;
+  const sizes = await measureCacheSizes();
+  return executeCleanup(planCleanup(sizes, { smart: true }));
+}
+
+/** Clear ALL cache on logout when the setting is enabled. No-op otherwise. */
+export async function clearCacheOnLogout(): Promise<CleanupResult | null> {
+  if (!(await getClearOnLogout())) return null;
+  const sizes = await measureCacheSizes();
+  return executeCleanup(planCleanup(sizes, { all: true }));
 }

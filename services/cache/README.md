@@ -21,7 +21,8 @@ separate and the manager only ever touches cache dirs.
 |------|--------|
 | `cachePlan.ts` | ✅ **Shipped, pure.** Category registry, `smartSelection()`, `planCleanup()` (allowlist-guarded), `summarizeSizes()`, `dueForAutoClean()`, `formatBytes()`. No disk access. |
 | `cachePlan.selftest.ts` | ✅ **Shipped.** ~30 Node assertions — headlined by "user data is never selectable". |
-| `cacheManager.ts` | ⚠️ **Device-only** (expo-file-system / AsyncStorage / local DB). Measures cache sizes, executes a plan (per-file idempotent deletes → interruption-safe), VACUUMs the DB cache, records last-clean time. Not Node-tested. |
+| `cacheManager.ts` | ⚠️ **Device-only** (expo-file-system / AsyncStorage / local DB). Measures cache sizes, executes a plan (per-file idempotent deletes → interruption-safe), VACUUMs the DB cache, records last-clean time. Also: auto-clean/clear-on-logout settings, `maybeAutoClean()` (boot), `clearCacheOnLogout()` (logout). Not Node-tested. |
+| `app/cache-cleanup.tsx` | ⚠️ **Device-only.** The screen — per-category sizes, One-Tap Smart Cleanup, clear-selected with a confirm dialog + freed estimate, auto-clean interval (Off/7/15/30), clear-on-logout switch. Reached from `app/storage-manager.tsx`. Thin renderer over the pure planner. |
 
 ## Features covered
 
@@ -38,11 +39,11 @@ separate and the manager only ever touches cache dirs.
 ## Pending on-device (verify on the dev build)
 
 - Confirm each `CACHE_DIRS` path against how each subsystem actually writes its
-  cache (expo-image, media store, doc viewer, AI, search).
-- A confirm-before-clearing dialog showing bytes-to-free (`formatBytes`), a
-  cache screen with per-category sizes + One-Tap, and the settings for automatic
-  cleanup / clear-on-logout. All thin renderers over the pure planner.
-- Run measurement + cleanup in the background so a large scan doesn't block the UI.
+  cache (expo-image, media store, doc viewer, AI, search) — the current paths are
+  sensible defaults, not verified.
+- The screen, confirm dialog, and settings are built (`app/cache-cleanup.tsx`);
+  verify measurement/cleanup run smoothly and consider moving a very large scan
+  fully off the UI thread.
 
 ## Test
 

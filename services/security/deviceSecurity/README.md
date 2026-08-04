@@ -55,8 +55,29 @@ Wired into the app (device-only, not Node-tested):
   separate NON-destructive path alongside the existing self-destruct
   `runSecurityCheck` (never gates first paint).
 
-**150 assertions total** (engine 41 + posture 30 + policy 17 + orchestrator 20 +
-viewModel 26 + scheduler 16), auto-discovered by `scripts/test-all.js` (`npm test`).
+**172 assertions total** (engine 41 + posture 30 + policy 17 + orchestrator 20 +
+viewModel 26 + scheduler 16 + nativeMap 22), auto-discovered by `scripts/test-all.js`
+(`npm test`). Plus 30 in the cache-cleanup planner (`services/cache`) = **202** overall.
+
+### Native detectors (VaultShield) — written, pending dev-build compile
+
+- `plugins/android/VaultShieldModule.kt` + `plugins/vaultshield-ios/VaultShield.swift`
+  — root/su/Magisk, debugger+TracerPid, raw-socket Frida probe + maps scan, hook
+  frameworks, emulator, dev-options, ADB, signing-cert digest, accessibility
+  services (Android); jailbreak, debugger, Frida dylibs, simulator (iOS). One
+  `scan()` call. Config plugin `plugins/withVaultShield.js` (in `app.json`).
+- `nativeMap.ts` (pure, tested) maps the scan → signals + the platform's evaluable
+  set. `nativeSecurity.ts` (device-only) calls it via `NativeModules.VaultShield`
+  and degrades to all-pending when absent. Merged into `postureStore.collectAll`.
+- **Pending:** fill `EXPECTED_SIGNING_SHA256` in `nativeMap.ts` from the release
+  keystore, then `expo prebuild` + two-device verify.
+
+### Passive triggers (while running)
+
+- `monitorTriggers.ts` (device-only) — `startSecurityMonitoring()` wires foreground
+  return (throttled) + network change (debounced) → `runMonitoringScan`; `onPinFailure()`
+  latches a MITM + scans immediately. Wired in `app/_layout.tsx`. A periodic scan
+  while the app is KILLED still needs a native WorkManager/BGTask job.
 
 ### Network Security Monitoring (added)
 
