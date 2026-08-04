@@ -87,7 +87,8 @@ func RegisterChats(mux *http.ServeMux) {
 	id.HandleFunc("POST /chats/{id}/pin-message", httpx.RequireAuth(chatsPinMessage))
 	id.HandleFunc("POST /chats/{id}/sender-keys", httpx.RequireAuth(chatsSenderKeysPost))
 	id.HandleFunc("GET /chats/{id}/sender-keys", httpx.RequireAuth(chatsSenderKeysGet))
-	mux.Handle("/chats/{id}/", id) // subtree forward; `id` re-matches the full path
+	RegisterChatInvitationsOnID(id) // Groups & Circles per-invitee invitations
+	mux.Handle("/chats/{id}/", id)  // subtree forward; `id` re-matches the full path
 }
 
 // ─── RLS plumbing (Node req.dbQuery = one withUser tx per query) ───────

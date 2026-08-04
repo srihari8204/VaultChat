@@ -1168,6 +1168,95 @@ export async function joinViaInvite(
   return api(`/chats/join/${encodeURIComponent(code)}`, { method: 'POST' });
 }
 
+// ─── Per-invitee invitations (Groups & Circles) ─────────────────────
+//
+// An invitation is a PERSON; an invite link is a DOOR. Creating one mints a
+// single-use link behind the scenes, so redeeming still goes through the same
+// server-side path that ordinary links use.
+//
+// The `token` is returned exactly ONCE, at create/resend time — the server
+// stores only its hash. Put it in the QR / share link immediately; it cannot be
+// retrieved later.
+
+export type InvitationStatus = 'pending' | 'accepted' | 'rejected' | 'expired' | 'revoked';
+export type InvitationChannel = 'app' | 'sms' | 'whatsapp' | 'email' | 'qr' | 'link';
+
+export interface Invitation {
+  id:            number;
+  inviteeUserId: string | null;
+  kind:          'user' | 'phone' | 'email' | 'link';
+  /** The email an invitee was addressed at. Never populated for phone — that is stored only as a hash. */
+  ref?:          string | null;
+  name:          string | null;
+  channel:       InvitationChannel;
+  status:        InvitationStatus;
+  expiresAt:     string;
+  respondedAt:   string | null;
+  createdAt:     string;
+}
+
+/** An invitation waiting for ME. */
+export interface MyInvitation {
+  id:          number;
+  chatId:      string;
+  name:        string | null;
+  groupType:   string | null;
+  icon:        string | null;
+  color:       string | null;
+  status:      InvitationStatus;
+  inviterName: string | null;
+  expiresAt:   string;
+  createdAt:   string;
+}
+
+export interface NewInvitation {
+  id:        number;
+  token:     string;   // shown once — embed it now
+  code:      string;   // short code, for typing by hand
+  status:    InvitationStatus;
+  expiresAt: string;
+  channel:   InvitationChannel;
+}
+
+/** Invite one person. Address them by exactly one of userId / phone / email; omit all three for a shareable link. */
+export async function createInvitation(
+  chatId: string,
+  who: { userId?: string; phone?: string; email?: string },
+  opts: { channel?: InvitationChannel; expiresInHours?: number } = {},
+): Promise<NewInvitation> {
+  return api(`/chats/${encodeURIComponent(chatId)}/invitations`, {
+    method: 'POST',
+    json: { ...who, ...opts },
+  });
+}
+
+export async function listInvitations(chatId: string): Promise<Invitation[]> {
+  return api(`/chats/${encodeURIComponent(chatId)}/invitations`);
+}
+
+/** Reissue with a fresh token. The previous token stops working. */
+export async function resendInvitation(chatId: string, invitationId: number): Promise<NewInvitation> {
+  return api(`/chats/${encodeURIComponent(chatId)}/invitations/${invitationId}/resend`, { method: 'POST' });
+}
+
+export async function revokeInvitation(chatId: string, invitationId: number): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/invitations/${invitationId}`, { method: 'DELETE' });
+}
+
+/** Invitations addressed to me and still pending. */
+export async function myInvitations(): Promise<MyInvitation[]> {
+  return api(`/invitations`);
+}
+
+/** Accept via a signed token (from a QR scan or deep link). */
+export async function redeemInvitation(token: string): Promise<{ chatId: string; ok: boolean }> {
+  return api(`/invitations/redeem`, { method: 'POST', json: { token } });
+}
+
+export async function rejectInvitation(invitationId: number): Promise<void> {
+  await api(`/invitations/${invitationId}/reject`, { method: 'POST' });
+}
+
 // Join requests (approve-members groups; admin only).
 export interface JoinRequest {
   userId:      string;

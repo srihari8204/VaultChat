@@ -600,6 +600,9 @@ export default function FamilySpaceScreen() {
             <TouchableOpacity onPress={() => { setManage(false); openAdd(); }} style={[st.mRow, { borderColor: colors.border }]}>
               <Ionicons name="person-add" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Add from contacts</Text>
             </TouchableOpacity>
+            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-invites' as any, params: { chatId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: colors.border }]}>
+              <Ionicons name="qr-code-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Invite by QR, phone or email</Text>
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => { setManage(false); invite(); }} style={[st.mRow, { borderColor: colors.border }]}>
               <Ionicons name="key-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Share an invite code</Text>
             </TouchableOpacity>

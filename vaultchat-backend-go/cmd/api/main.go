@@ -67,6 +67,7 @@ func main() {
 	routes.RegisterVaultlens(mux)
 	routes.RegisterAdmin(mux)
 	routes.RegisterChats(mux)
+	routes.RegisterChatInvitations(mux) // Groups & Circles: /invitations (invitee side)
 	routes.RegisterShopBook(mux)
 	routes.RegisterShopBookAdmin(mux)
 
