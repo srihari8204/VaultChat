@@ -15,9 +15,18 @@ import * as Location from 'expo-location';
 import { Stack, useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
-import { brandAlpha } from '../constants/theme';
 import FamilyMap, { type FamilyMarker } from '../components/family/FamilyMap';
-import { listCircles, removeCircle, getSettings, setSettings, type CircleRef } from '../lib/family/store';
+// removeCircle stays: hetzner-deploy added a path that forgets a circle locally
+// when the server starts 403/404ing it (kicked, or deleted). That is orthogonal
+// to the group registry and must survive the switch — dropping it would bring
+// back a phone retrying a dead circle on every focus.
+import { getSettings, setSettings, removeCircle } from '../lib/family/store';
+// Groups & Circles: the registry is now typed groups. A Family Space circle is
+// one of them (migrated on first load by lib/groups/store), so this screen is
+// the group dashboard and no longer assumes there is exactly one family.
+import { listGroups, resolveActiveGroup, saveGroup, setActiveGroupId, type GroupRef } from '../lib/groups/store';
+import { groupIdentity } from '../lib/groups/catalog';
+import { can as hasPerm, type Permission } from '../lib/groups/permissions';
 import {
   circleMembers, circleInviteCode, renameCircle, leaveCircle, deleteCircle,
   removeCircleMember, setGuardian,
@@ -29,7 +38,7 @@ import {
 import { requestBackgroundPermission } from '../lib/family/background';
 import { loadAlerts, recordAlert, useUnreadCount } from '../lib/family/alerts';
 import { type CircleMember, type MemberPresence, STALE_MS } from '../lib/family/types';
-import { sendMessage, getMessages, decryptFromChat } from '../lib/chatService';
+import { sendMessage, getMessages, decryptFromChat, getChat } from '../lib/chatService';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { navigateTo } from '../lib/nav/openNavigation';
 import { haversine } from '../lib/nav/geo';
@@ -66,8 +75,8 @@ export default function FamilySpaceScreen() {
   const { colors } = useTheme();
   const router = useRouter();
   const [me, setMe] = useState<{ id: string; name: string } | null>(null);
-  const [circles, setCircles] = useState<CircleRef[]>([]);
-  const [active, setActive] = useState<CircleRef | null>(null);
+  const [circles, setCircles] = useState<GroupRef[]>([]);
+  const [active, setActive] = useState<GroupRef | null>(null);
   const [members, setMembers] = useState<CircleMember[]>([]);
   const [presences, setPresences] = useState<Record<string, MemberPresence>>({});
   const [share, setShare] = useState(false);
@@ -83,6 +92,10 @@ export default function FamilySpaceScreen() {
   const [bump, setBump] = useState(0); // re-pull highlights after we send something
   const bgAsked = useRef(false);       // only nag once per mount about always-on location
   const unread = useUnreadCount(active?.id ?? null);
+  // THIS USER's permissions in the active group, as resolved by the server.
+  // Presentation only — every mutating endpoint re-checks. A stale or absent
+  // set must never widen what is shown, so it starts empty.
+  const [perms, setPerms] = useState<Set<Permission>>(new Set());
 
   useEffect(() => { loadAlerts(); }, []);
 
@@ -90,10 +103,12 @@ export default function FamilySpaceScreen() {
   useEffect(() => { (async () => {
     const u = await getCurrentUserAsync().catch(() => null);
     setMe(u ? { id: String(u.id), name: u.name || u.email || 'Me' } : null);
-    const cs = await listCircles();
+    const cs = await listGroups();
     setCircles(cs);
-    if (!cs.length) { router.replace('/family-setup' as any); return; }
-    setActive((prev) => prev ?? cs[0]);
+    if (!cs.length) { router.replace('/group-create' as any); return; }
+    // Reopen on the group the user was last in, not blindly the first.
+    const remembered = await resolveActiveGroup();
+    setActive((prev) => prev ?? remembered ?? cs[0]);
     setShare((await getSettings()).sharing);
     setLoading(false);
   })(); }, []);
@@ -113,6 +128,38 @@ export default function FamilySpaceScreen() {
     });
   };
   useEffect(() => { refreshMembers(); }, [active?.id]);
+
+  // Persist the switch so the next launch reopens here, and refresh the group's
+  // server-side truth (permissions, cap, type) into the local registry.
+  useEffect(() => {
+    if (!active) return;
+    setActiveGroupId(active.id);
+    let live = true;
+    (async () => {
+      try {
+        const chat = await getChat(active.id);
+        if (!live) return;
+        const list = (chat.permissions ?? []) as Permission[];
+        setPerms(new Set(list));
+        await saveGroup({
+          id: active.id, name: chat.name || active.name,
+          groupType: (chat.groupType ?? active.groupType) ?? null,
+          icon: chat.icon ?? active.icon ?? null,
+          color: chat.color ?? active.color ?? null,
+          privacy: chat.privacy, maxMembers: chat.maxMembers ?? null,
+          role: chat.myRole, permissions: list,
+        });
+      } catch {
+        // Offline or a server without the group columns yet: fall back to what
+        // the registry already cached, never to "everything allowed".
+        if (live) setPerms(new Set((active.permissions ?? []) as Permission[]));
+      }
+    })();
+    return () => { live = false; };
+  // Keyed on the id ALONE on purpose: `active` is a fresh object on every
+  // registry refresh, so depending on it would re-fetch permissions endlessly.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active?.id]);
 
   // presence (broadcast self + receive others) for the active circle
   useEffect(() => {
@@ -141,10 +188,10 @@ export default function FamilySpaceScreen() {
   useFocusEffect(React.useCallback(() => {
     let live = true;
     (async () => {
-      const cs = await listCircles();
+      const cs = await listGroups();
       if (!live) return;
       setCircles(cs);
-      if (!cs.length) { router.replace('/family-setup' as any); return; }
+      if (!cs.length) { router.replace('/group-create' as any); return; }
       // Keep the user on the space they were looking at unless it is gone.
       setActive(prev => (prev && cs.some(c => c.id === prev.id)) ? prev : cs[0]);
     })();
@@ -216,7 +263,17 @@ export default function FamilySpaceScreen() {
     }));
   }, [presences, members, me?.id]);
 
-  const myRole = members.find((m) => m.id === me?.id)?.role ?? 'guardian';
+  const myRole = members.find((m) => m.id === me?.id)?.role ?? active?.role ?? 'member';
+  // "Guardian" is the Family type's word for admin; every other group type says
+  // admin. Capability checks below use permissions, never this label.
+  const isAdminish = myRole === 'guardian' || myRole === 'admin' || myRole === 'owner';
+  const canInvite  = hasPerm(perms, 'invite_members')   || isAdminish;
+  const canManage  = hasPerm(perms, 'edit_settings')    || isAdminish;
+  const canRemove  = hasPerm(perms, 'remove_members')   || isAdminish;
+  const canZones   = hasPerm(perms, 'manage_zones')     || isAdminish;
+  const canHistory = hasPerm(perms, 'view_history')     || isAdminish;
+  // Identity for this group's type — icon and accent drive the whole dashboard.
+  const ident = groupIdentity(active ?? {});
   const liveCount = useMemo(() => {
     const now = Date.now();
     return Object.values(presences).filter((p) => now - p.ts <= STALE_MS).length;
@@ -290,7 +347,7 @@ export default function FamilySpaceScreen() {
 
   // ── Member management (guardians) ────────────────────────────────────
   const memberActions = (m: CircleMember) => {
-    if (!active || !me || m.id === me.id || myRole !== 'guardian') return;
+    if (!active || !me || m.id === me.id || !canRemove) return;
     Alert.alert(m.name, 'Manage this member', [
       { text: m.role === 'guardian' ? 'Make member' : 'Make guardian', onPress: async () => {
         try { await setGuardian(active.id, m.id, m.role !== 'guardian'); refreshMembers(); }
@@ -312,9 +369,9 @@ export default function FamilySpaceScreen() {
   // ── Circle management ────────────────────────────────────────────────
   const afterCircleGone = async () => {
     setManage(false);
-    const cs = await listCircles();
+    const cs = await listGroups();
     setCircles(cs);
-    if (!cs.length) { router.replace('/family-setup' as any); return; }
+    if (!cs.length) { router.replace('/group-create' as any); return; }
     setActive(cs[0]);
   };
   const doRename = async () => {
@@ -324,7 +381,7 @@ export default function FamilySpaceScreen() {
       await renameCircle(active.id, renameTxt);
       const name = renameTxt.trim();
       setActive({ ...active, name });
-      setCircles(await listCircles());
+      setCircles(await listGroups());
       setRenameTxt('');
     } catch (e: any) { Alert.alert('Rename', e?.message ?? 'Could not rename.'); }
     finally { setBusy(false); }
@@ -414,10 +471,10 @@ export default function FamilySpaceScreen() {
 
   return (
     <View style={[st.screen, { backgroundColor: colors.bg }]}>
-      <Stack.Screen options={{ title: 'Family Space', headerTitleAlign: 'center',
+      <Stack.Screen options={{ title: active?.name || 'Family Space', headerTitleAlign: 'center',
         headerRight: () => (
           <View style={{ flexDirection: 'row' }}>
-            <TouchableOpacity onPress={openAdd} style={{ paddingHorizontal: 6 }}><Ionicons name="person-add" size={20} color={colors.primary} /></TouchableOpacity>
+            {canInvite && <TouchableOpacity onPress={openAdd} style={{ paddingHorizontal: 6 }}><Ionicons name="person-add" size={20} color={colors.primary} /></TouchableOpacity>}
             <TouchableOpacity onPress={() => { setRenameTxt(''); setManage(true); }} style={{ paddingHorizontal: 6 }}><Ionicons name="ellipsis-vertical" size={20} color={colors.primary} /></TouchableOpacity>
           </View>
         ) }} />
@@ -445,26 +502,35 @@ export default function FamilySpaceScreen() {
           <View style={st.greetRow}>
             <View style={{ flex: 1 }}>
               <Text style={{ color: colors.text, fontSize: 20, fontWeight: '800' }}>{greeting()}, {firstName} 👋</Text>
-              <Text style={{ color: colors.textDim, fontSize: 12.5, marginTop: 2 }}>{active?.name}</Text>
+              <Text style={{ color: colors.textDim, fontSize: 12.5, marginTop: 2 }}>
+              {active?.name}{active?.groupType && ident.label !== active.name ? ` · ${ident.label}` : ''}
+            </Text>
             </View>
           </View>
 
           {/* circle switcher */}
           {circles.length > 1 && (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 10 }} contentContainerStyle={{ gap: 8 }}>
-              {circles.map((c) => (
-                <TouchableOpacity key={c.id} onPress={() => setActive(c)}
-                  style={[st.chip, { borderColor: active?.id === c.id ? colors.primary : colors.border, backgroundColor: active?.id === c.id ? brandAlpha(0.1) : 'transparent' }]}>
-                  <Text style={{ color: active?.id === c.id ? colors.primary : colors.text, fontWeight: active?.id === c.id ? '700' : '500', fontSize: 13 }}>{c.name}</Text>
-                </TouchableOpacity>
-              ))}
+              {circles.map((c) => {
+                const on = active?.id === c.id;
+                const gi = groupIdentity(c);
+                return (
+                  <TouchableOpacity key={c.id} onPress={() => setActive(c)}
+                    style={[st.chip, { flexDirection: 'row', alignItems: 'center', gap: 6,
+                      borderColor: on ? gi.color : colors.border,
+                      backgroundColor: on ? gi.color + '1a' : 'transparent' }]}>
+                    <Ionicons name={gi.icon} size={13} color={on ? gi.color : colors.textDim} />
+                    <Text style={{ color: on ? colors.text : colors.textDim, fontWeight: on ? '700' : '500', fontSize: 13 }}>{c.name}</Text>
+                  </TouchableOpacity>
+                );
+              })}
             </ScrollView>
           )}
 
           {/* status card */}
           <View style={[st.status, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <View style={[st.statusIcon, { backgroundColor: (allGood ? colors.success : colors.textFaint) + '22' }]}>
-              <Ionicons name={allGood ? 'shield-checkmark' : 'shield-outline'} size={20} color={allGood ? colors.success : colors.textDim} />
+            <View style={[st.statusIcon, { backgroundColor: (allGood ? colors.success : ident.color) + '22' }]}>
+              <Ionicons name={allGood ? 'shield-checkmark' : ident.icon} size={20} color={allGood ? colors.success : ident.color} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15 }}>{allGood ? 'All good' : 'Nobody live yet'}</Text>
@@ -495,10 +561,12 @@ export default function FamilySpaceScreen() {
             <TouchableOpacity onPress={() => setCheckin(true)} style={[st.tile, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <Ionicons name="checkmark-done-circle" size={21} color={colors.success} /><Text style={[st.tileTxt, { color: colors.text }]}>Check-in</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => active && router.push({ pathname: '/family-places' as any, params: { circleId: active.id, name: active.name } })}
-              style={[st.tile, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <Ionicons name="location" size={21} color={colors.primary} /><Text style={[st.tileTxt, { color: colors.text }]}>Places</Text>
-            </TouchableOpacity>
+            {canZones && (
+              <TouchableOpacity onPress={() => active && router.push({ pathname: '/family-places' as any, params: { circleId: active.id, name: active.name } })}
+                style={[st.tile, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <Ionicons name="location" size={21} color={colors.primary} /><Text style={[st.tileTxt, { color: colors.text }]}>Places</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity onPress={() => active && router.push({ pathname: '/family-alerts' as any, params: { circleId: active.id, circleName: active.name } })}
               style={[st.tile, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <Ionicons name="notifications" size={21} color={colors.primary} /><Text style={[st.tileTxt, { color: colors.text }]}>Alerts</Text>
@@ -508,10 +576,12 @@ export default function FamilySpaceScreen() {
                 </View>
               )}
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => active && router.push({ pathname: '/family-history' as any, params: { circleId: active.id, circleName: active.name } })}
-              style={[st.tile, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <Ionicons name="time" size={21} color={colors.primary} /><Text style={[st.tileTxt, { color: colors.text }]}>History</Text>
-            </TouchableOpacity>
+            {canHistory && (
+              <TouchableOpacity onPress={() => active && router.push({ pathname: '/family-history' as any, params: { circleId: active.id, circleName: active.name } })}
+                style={[st.tile, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <Ionicons name="time" size={21} color={colors.primary} /><Text style={[st.tileTxt, { color: colors.text }]}>History</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity onPress={() => router.push('/emergency-sos' as any)} style={[st.tile, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <Ionicons name="medkit" size={21} color={colors.danger} /><Text style={[st.tileTxt, { color: colors.text }]}>Emergency</Text>
             </TouchableOpacity>
@@ -532,7 +602,7 @@ export default function FamilySpaceScreen() {
           {/* members */}
           <View style={st.secHead}>
             <Text style={[st.secTitle, { color: colors.text }]}>Family Members</Text>
-            <TouchableOpacity onPress={invite}><Text style={{ color: colors.primary, fontWeight: '700', fontSize: 13 }}>+ Invite</Text></TouchableOpacity>
+            {canInvite && <TouchableOpacity onPress={invite}><Text style={{ color: colors.primary, fontWeight: '700', fontSize: 13 }}>+ Invite</Text></TouchableOpacity>}
           </View>
           <View style={[st.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
             {roster.map(memberRow)}
@@ -585,7 +655,7 @@ export default function FamilySpaceScreen() {
           <View style={[st.modal, { backgroundColor: colors.surfaceSolid, borderColor: colors.border }]}>
             <Text style={[st.modalTitle, { color: colors.text }]}>{active?.name}</Text>
 
-            {myRole === 'guardian' && (
+            {canManage && (
               <View style={{ flexDirection: 'row', gap: 8, marginBottom: 4 }}>
                 <TextInput value={renameTxt} onChangeText={setRenameTxt} placeholder="Rename circle" placeholderTextColor={colors.textFaint}
                   style={[st.noteInput, { flex: 1, marginTop: 0, color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
@@ -600,13 +670,13 @@ export default function FamilySpaceScreen() {
             <TouchableOpacity onPress={() => { setManage(false); openAdd(); }} style={[st.mRow, { borderColor: colors.border }]}>
               <Ionicons name="person-add" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Add from contacts</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-invites' as any, params: { chatId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: colors.border }]}>
+            {canInvite && <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-invites' as any, params: { chatId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: colors.border }]}>
               <Ionicons name="qr-code-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Invite by QR, phone or email</Text>
-            </TouchableOpacity>
+            </TouchableOpacity>}
             <TouchableOpacity onPress={() => { setManage(false); invite(); }} style={[st.mRow, { borderColor: colors.border }]}>
               <Ionicons name="key-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Share an invite code</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => { setManage(false); router.push({ pathname: '/family-setup' as any, params: { from: 'family' } }); }} style={[st.mRow, { borderColor: colors.border }]}>
+            <TouchableOpacity onPress={() => { setManage(false); router.push('/group-create' as any); }} style={[st.mRow, { borderColor: colors.border }]}>
               <Ionicons name="add-circle-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Create or join another group</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/chat', params: { id: active.id } } as any); }} style={[st.mRow, { borderColor: colors.border }]}>
@@ -624,7 +694,7 @@ export default function FamilySpaceScreen() {
             <TouchableOpacity onPress={doLeave} style={[st.mRow, { borderColor: colors.border }]}>
               <Ionicons name="exit-outline" size={19} color={colors.danger} /><Text style={[st.mTxt, { color: colors.danger }]}>Leave circle</Text>
             </TouchableOpacity>
-            {myRole === 'guardian' && (
+            {canManage && (
               <TouchableOpacity onPress={doDelete} disabled={busy} style={[st.mRow, { borderColor: colors.border }]}>
                 <Ionicons name="trash" size={19} color={colors.danger} /><Text style={[st.mTxt, { color: colors.danger, fontWeight: '800' }]}>Delete circle</Text>
               </TouchableOpacity>
