@@ -8,7 +8,7 @@
 
 import React, { useState, useEffect, useCallback , useMemo} from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, FlatList, Dimensions, StatusBar,
+  View, Text, TouchableOpacity, StyleSheet, FlatList, SectionList, Dimensions, StatusBar,
   ActivityIndicator, Linking, Image, Modal,
 } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
@@ -53,6 +53,26 @@ function MediaThumb({ m, style, resizeMode = 'cover', resolveSrc, placeholder }:
 }
 
 type TabId = 'photos' | 'videos' | 'files' | 'links';
+
+// Groups & Circles G4.4: the shared album. A group IS a chat, so its media is
+// already here — the album is not a second store, it is this gallery with the
+// organisation the album needs. Building a parallel screen would have meant
+// duplicating the thumbnail decryption, the cache and the viewer below.
+type GroupBy = 'none' | 'date' | 'member';
+
+/** Chunk a flat list into rows of three, so sections can render a 3-up grid. */
+function toRows<T>(items: T[], per = 3): T[][] {
+  const rows: T[][] = [];
+  for (let i = 0; i < items.length; i += per) rows.push(items.slice(i, i + per));
+  return rows;
+}
+
+const dayKey = (iso: string) => {
+  const d = new Date(iso), now = new Date();
+  if (d.toDateString() === now.toDateString()) return 'Today';
+  if (new Date(now.getTime() - 86400_000).toDateString() === d.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString([], { day: 'numeric', month: 'long', year: 'numeric' });
+};
 interface LinkItem { id: number; url: string; createdAt: string }
 
 // Per-chat media buckets persisted so the gallery opens instantly on re-entry.
@@ -83,6 +103,8 @@ export default function MediaGalleryScreen() {
   const [links, setLinks] = useState<LinkItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewer, setViewer] = useState<Message | null>(null); // message being viewed full-screen
+  const [groupBy, setGroupBy] = useState<GroupBy>('none');
+  const [names, setNames] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let active = true;
@@ -109,7 +131,14 @@ export default function MediaGalleryScreen() {
 
         // Remember the chat's direct peer so encrypted media content can be
         // decrypted (to recover per-file keys) — same as the chat screen does.
-        await getChat(cid).catch(() => {});
+        // We already fetch the chat; keep its member names so the album can
+        // label sections without another request.
+        const chat = await getChat(cid).catch(() => null);
+        if (chat?.members) {
+          const map: Record<string, string> = {};
+          for (const mem of chat.members) map[String(mem.userId)] = mem.name || mem.email || 'Member';
+          setNames(map);
+        }
 
         // Walk the history (cap a few pages) and bucket by type.
         const all: Message[] = [];
@@ -205,6 +234,27 @@ export default function MediaGalleryScreen() {
     </TouchableOpacity>
   );
 
+  // Sections for the active media tab. Memoised so scrolling does not re-chunk
+  // on every render — and so the tile elements keep their identity, which is
+  // what stops MediaThumb from re-running its decrypt (see its comment).
+  const sections = useMemo(() => {
+    if (groupBy === 'none') return [];
+    const items = tab === 'photos' ? photos : tab === 'videos' ? videos : [];
+    const buckets = new Map<string, Message[]>();
+    for (const m of items) {
+      const key = groupBy === 'date' ? dayKey(m.createdAt) : (names[String(m.senderId)] ?? 'Member');
+      const arr = buckets.get(key);
+      if (arr) arr.push(m); else buckets.set(key, [m]);
+    }
+    return [...buckets.entries()].map(([title, list]) => ({ title, data: toRows(list) }));
+  }, [groupBy, tab, photos, videos, names]);
+
+  const GROUPS: { id: GroupBy; label: string }[] = [
+    { id: 'none', label: 'All' },
+    { id: 'date', label: 'By date' },
+    { id: 'member', label: 'By member' },
+  ];
+
   const TABS: { id: TabId; label: string; count: number }[] = [
     { id: 'photos', label: 'Photos', count: photos.length },
     { id: 'videos', label: 'Videos', count: videos.length },
@@ -234,8 +284,37 @@ export default function MediaGalleryScreen() {
         ))}
       </View>
 
+      {(tab === 'photos' || tab === 'videos') && (
+        <View style={s.groupBar}>
+          {GROUPS.map(g => (
+            <TouchableOpacity key={g.id} onPress={() => setGroupBy(g.id)}
+              style={[s.groupChip, groupBy === g.id && { borderColor: colors.primary, backgroundColor: colors.primary + '1a' }]}>
+              <Text style={[s.groupTxt, groupBy === g.id && { color: colors.primary, fontWeight: '700' }]}>{g.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
       {loading ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
+      ) : (tab === 'photos' || tab === 'videos') && groupBy !== 'none' ? (
+        <SectionList
+          sections={sections}
+          keyExtractor={(row, i) => `${row.map(m => m.id).join('-')}-${i}`}
+          stickySectionHeadersEnabled={false}
+          contentContainerStyle={{ padding: 8 }}
+          renderSectionHeader={({ section }) => <Text style={s.sectionHdr}>{section.title}</Text>}
+          renderItem={({ item: row }) => (
+            <View style={{ flexDirection: 'row' }}>
+              {row.map(m => (
+                <React.Fragment key={m.id}>
+                  {tab === 'photos' ? renderPhoto({ item: m }) : renderVideo({ item: m })}
+                </React.Fragment>
+              ))}
+            </View>
+          )}
+          ListEmptyComponent={<Empty label={tab === 'photos' ? 'No photos shared yet' : 'No videos shared yet'} />}
+        />
       ) : tab === 'photos' ? (
         <FlatList data={photos} numColumns={3} keyExtractor={m => String(m.id)} renderItem={renderPhoto}
           contentContainerStyle={{ padding: 8 }} ListEmptyComponent={<Empty label="No photos shared yet" />} />
@@ -283,6 +362,10 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   tabTxt: { color: c.textDim, fontSize: 12, fontWeight: '700' },
   tabTxtActive: { color: '#FFFFFF' },
   tabCount: { color: c.textDim, fontSize: 10, marginTop: 2 },
+  groupBar: { flexDirection: 'row', gap: 7, paddingHorizontal: 12, paddingTop: 10 },
+  groupChip: { paddingHorizontal: 13, paddingVertical: 7, borderRadius: 999, borderWidth: 1, borderColor: c.border },
+  groupTxt: { color: c.textDim, fontSize: 12 },
+  sectionHdr: { color: c.text, fontSize: 12.5, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4, paddingHorizontal: 4, paddingTop: 16, paddingBottom: 6 },
   tile: { width: TILE, height: TILE, margin: 4, borderRadius: 8, overflow: 'hidden', backgroundColor: c.surfaceSolid },
   tileImg: { width: '100%', height: '100%' },
   playBadge: { position: 'absolute', top: '50%', left: '50%', marginLeft: -16, marginTop: -16, width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
