@@ -33,11 +33,29 @@ Two rules are load-bearing and inherited from the rest of `services/security`:
 | `posture.selftest.ts` | ✅ **Shipped.** 25 Node assertions. |
 | `notificationPolicy.ts` | ✅ **Shipped.** Pure decision engine: edge-trigger (only worsenings push) + severity floor (warning/critical) + per-severity cooldown (critical 30 min, warning 12 h) + a single "significant score change" event. Injectable clock + last-sent map. |
 | `notificationPolicy.selftest.ts` | ✅ **Shipped.** 12 Node assertions. |
+| `orchestrator.ts` | ✅ **Shipped.** The scan pipeline — collect → score → build snapshot → diff → decide notifications → persist — pure via injected deps (collector, store, clock, platform). Returns notifications for the caller to record/fire; owns no RN side effects and no wipe. |
+| `orchestrator.selftest.ts` | ✅ **Shipped.** 20 Node assertions (baseline→worsen→repeat, cross-scan cooldown, persistence round-trip, pending honesty). |
+| `collectors.ts` | ⚠️ **Device-only.** JS signal collector reusing the DeviceInfo probes from `securityService.ts` (root/emulator/USB); everything a native module is needed for is reported as `pending` (honest degradation). Not Node-tested — imports react-native. |
+| `postureStore.ts` | ⚠️ **Device-only.** SecureStore-backed `StorageKV` + `scanDevice()` entry point wiring the tested core to the device. Not Node-tested — imports expo-secure-store. |
 
-**74 assertions total**, auto-discovered by `scripts/test-all.js` (`npm test`).
-These three pure modules are the full decision core — scoring, dashboard model,
-and alert policy. The remaining slices need a custom dev build (native module)
-and/or a real device, so they are **not** written blindly here.
+**94 assertions total**, auto-discovered by `scripts/test-all.js` (`npm test`).
+The four pure modules are the complete decision core AND the end-to-end pipeline
+— fully verifiable off-device. `collectors.ts` / `postureStore.ts` are thin RN
+adapters that inject real dependencies into that tested core; they mirror
+already-working app code and are marked device-only. The remaining slices need a
+custom dev build (native module) and/or backend, so they are **not** written
+blindly here.
+
+### How the app calls it
+
+```
+import { scanDevice, getCurrentSnapshot } from 'services/security/deviceSecurity/postureStore';
+
+const { snapshot, notifications } = await scanDevice();
+// caller then: record each notification via auditChain.appendSecurityEvent(...)
+//              and present it via the notifee "Security" channel.
+// dashboard: getCurrentSnapshot() renders the last posture without re-scanning.
+```
 
 ## Scoring model (implemented)
 
@@ -59,25 +77,30 @@ escalate in combination. Full weight/confidence table and cluster caps are in
 Each needs an environment this repo build can't validate in isolation; they land
 behind a feature flag, dark by default, exactly like the E2EE rollout.
 
-1. **`postureStore.ts`** — thin RN wrapper persisting the current + previous
-   `PostureSnapshot` (SecureStore JSON) and the notification `lastSent` map; calls
-   the pure `diffSnapshots()` + `decideNotifications()` already shipped here.
-2. **JS collectors** — map existing signals (`react-native-device-info`
-   `isRooted`/`isEmulator`, `Settings` reads for dev-options/USB) into
-   `SecuritySignal[]`, reporting `evaluatedTypes`/`pendingTypes`. Reuses libs
-   already in the bundle.
-3. **`VaultShield` native module (Kotlin + Swift + Expo config plugin)** — the
+- ✅ **`postureStore.ts`** — SecureStore-backed persistence + `scanDevice()`
+  entry point (shipped, device-only adapter).
+- ✅ **JS collectors** — `collectors.ts` maps `react-native-device-info`
+  `isRooted`/`isEmulator`/`isAdbEnabled` into `SecuritySignal[]` with honest
+  `pending` for everything native-only (shipped, device-only adapter).
+
+Remaining:
+
+1. **`VaultShield` native module (Kotlin + Swift + Expo config plugin)** — the
    only substantial new native code: raw-socket Frida probe (replaces the broken
    HTTP probe in `securityService.ts`), `/proc/self/maps` + mount scan, ptrace
    self-check, signing-certificate digest, accessibility/IME/overlay enumeration.
-   Requires `expo prebuild` + a custom dev build; cannot run in Expo Go.
-4. **Attestation client + `/attest/verify` backend** — Play Integrity / App
+   Its collector output merges into `collectJsSignals`, moving those types from
+   `pending` → evaluated. Requires `expo prebuild` + a custom dev build.
+2. **Attestation client + `/attest/verify` backend** — Play Integrity / App
    Attest, the one signal an on-device attacker can't forge (`INTEGRITY_VERDICT_FAILED`).
-5. **Dashboard UI** — rebuild `/aiguardian` into the Security Hub reading the
-   posture store (score ring, factor pills, last-scan, recommended actions,
-   permanent "what this can't detect" disclosure). Renders bands via `BAND_META`.
-6. **Notification wiring** — dedicated notifee "Security" channel; edge-triggered,
-   cooldown-deduped, high/critical only.
+3. **Dashboard UI** — rebuild `/aiguardian` into the Security Hub reading
+   `getCurrentSnapshot()` (score ring, factor pills, last-scan, recommended
+   actions, permanent "what this can't detect" disclosure). Renders bands via
+   `BAND_META`, actions via `REMEDIATION`.
+4. **Notification + audit wiring** — the caller of `scanDevice()` records each
+   returned notification via `auditChain.appendSecurityEvent` and presents it on
+   a dedicated notifee "Security" channel; wire `scanDevice()` into the
+   app-launch deferred pass + a WorkManager/BGTask periodic job.
 
 Audit-chain recording (`services/security/auditChain.ts`) and its
 zero-knowledge cloud mirror are reused as-is for the event log.
