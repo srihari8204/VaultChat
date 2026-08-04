@@ -2,7 +2,7 @@
   "expo": {
     "name": "VaultChat",
     "slug": "VaultChat",
-    "version": "1.2.0",
+    "version": "1.2.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "vaultchat",
@@ -84,7 +84,9 @@
           "color": "#4A9FFF",
           "sounds": [
             "./assets/sounds/note_chime.wav",
-            "./assets/sounds/note_bell.wav"
+            "./assets/sounds/note_bell.wav",
+            "./assets/sounds/lock_siren.wav",
+            "./assets/sounds/lock_beep.wav"
           ]
         }
       ],
@@ -129,6 +131,7 @@
       "./plugins/withCryptoCore.js",
       "./plugins/withVaultBeamRust.js",
       "./plugins/withVaultView.js",
+      "./plugins/withVaultShield.js",
       "expo-sqlite"
     ],
     "extra": {

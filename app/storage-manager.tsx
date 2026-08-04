@@ -337,6 +337,11 @@ export default function StorageManagerScreen() {
         <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
           <Text style={s.cardTitle}>Cache Management</Text>
 
+          <TouchableOpacity style={s.actionBtn} onPress={() => router.push('/cache-cleanup' as any)} activeOpacity={0.7}>
+            <Ionicons name="sparkles-outline" size={20} color={colors.primary} />
+            <Text style={[s.actionText, { color: colors.primary }]}>Cache cleanup — by category, Smart &amp; auto</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity style={s.actionBtn} onPress={clearCache} disabled={clearing} activeOpacity={0.7}>
             <Ionicons name="trash-outline" size={20} color={colors.danger} />
             <Text style={[s.actionText, { color: colors.danger }]}>

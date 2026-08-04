@@ -1,16 +1,28 @@
 // utils/shopbook.ts — pure, dependency-free helpers for the SHOP BOOK mini-app.
 // Kept out of the screen so the logic is testable and the screen stays thin.
 
-export type ShopStatus = 'open' | 'busy' | 'closed';
+export type ShopStatus = 'open' | 'busy' | 'closed' | 'holiday' | 'vacation';
 export type OrderStatus =
-  | 'new' | 'preparing' | 'packing' | 'ready' | 'completed' | 'cancelled';
+  | 'pending' | 'accepted' | 'preparing' | 'packing' | 'ready'
+  | 'collected' | 'completed' | 'rejected' | 'cancelled';
 export type ItemAvailability =
   | 'pending' | 'available' | 'unavailable' | 'alternative';
 
+// Legacy compat: pre-upgrade orders (and cached responses) used 'new'.
+export function normalizeOrderStatus(s: string): OrderStatus {
+  return (s === 'new' ? 'pending' : s) as OrderStatus;
+}
+
 // ── money ─────────────────────────────────────────────────────────
-export function formatINR(n: number): string {
+// Currency-aware (symbol comes from the shop's country config). formatINR
+// remains for call sites that predate the tax engine.
+export function formatMoney(n: number, symbol = '₹'): string {
   const v = Math.round((Number(n) || 0) * 100) / 100;
-  return '₹' + v.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+  return symbol + v.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+}
+
+export function formatINR(n: number): string {
+  return formatMoney(n, '₹');
 }
 
 // ── distance ──────────────────────────────────────────────────────
@@ -53,6 +65,8 @@ export interface ShopTimings {
 // `now` is injectable for tests.
 export function shopOpenState(s: ShopTimings, now?: Date): OpenState {
   if (s.status === 'closed') return { isOpen: false, label: 'Closed', tone: 'closed' };
+  if (s.status === 'holiday') return { isOpen: false, label: 'On holiday', tone: 'closed' };
+  if (s.status === 'vacation') return { isOpen: false, label: 'On vacation', tone: 'closed' };
   const d = now ?? new Date();
   const nowMins = d.getHours() * 60 + d.getMinutes();
   const today = DAYS[d.getDay()];
@@ -90,36 +104,64 @@ export function shopOpenState(s: ShopTimings, now?: Date): OpenState {
 }
 
 // ── order status → customer-facing label / progress ───────────────
-export const ORDER_STEPS: OrderStatus[] = ['new', 'preparing', 'packing', 'ready', 'completed'];
+export const ORDER_STEPS: OrderStatus[] = [
+  'pending', 'accepted', 'preparing', 'packing', 'ready', 'collected', 'completed',
+];
 
 export function orderStatusLabel(s: OrderStatus): string {
   switch (s) {
-    case 'new':        return 'Order placed';
+    case 'pending':    return 'Order placed';
+    case 'accepted':   return 'Accepted';
     case 'preparing':  return 'Preparing';
     case 'packing':    return 'Packing';
     case 'ready':      return 'Ready to collect';
+    case 'collected':  return 'Collected';
     case 'completed':  return 'Completed';
+    case 'rejected':   return 'Rejected';
     case 'cancelled':  return 'Cancelled';
   }
 }
 
-// Progress 0..1 along the happy path (cancelled = 0).
+// Progress 0..1 along the happy path (terminal failures = 0).
 export function orderProgress(s: OrderStatus): number {
-  if (s === 'cancelled') return 0;
+  if (s === 'cancelled' || s === 'rejected') return 0;
   const i = ORDER_STEPS.indexOf(s);
   return i < 0 ? 0 : i / (ORDER_STEPS.length - 1);
 }
 
-// The next status an owner can advance an order to (null at a terminal state).
+// The next status an owner can advance an order to (null when the next move
+// is a decision — accept/reject from pending — or the state is terminal).
 export function nextOrderStatus(s: OrderStatus): OrderStatus | null {
   switch (s) {
-    case 'new':       return 'preparing';
+    case 'accepted':  return 'preparing';
     case 'preparing': return 'packing';
     case 'packing':   return 'ready';
-    case 'ready':     return 'completed';
+    case 'ready':     return 'collected';
     default:          return null;
   }
 }
+
+// ── cancellation windows (spec: order-management / cancellation) ──
+export function canCustomerCancel(s: OrderStatus): boolean {
+  return s === 'pending';
+}
+
+export function canOwnerCancel(s: OrderStatus): boolean {
+  return s === 'pending' || s === 'accepted' || s === 'preparing';
+}
+
+// The six rejection reason codes (must match the backend's table).
+export const REJECT_REASONS: { code: string; label: string }[] = [
+  { code: 'out_of_stock',  label: 'Out of Stock' },
+  { code: 'shop_closed',   label: 'Shop Closed' },
+  { code: 'quantity',      label: 'Quantity Not Available' },
+  { code: 'outside_hours', label: 'Outside Business Hours' },
+  { code: 'technical',     label: 'Technical Issue' },
+  { code: 'other',         label: 'Other' },
+];
+
+// ── order timeline ────────────────────────────────────────────────
+export interface TimelineEvent { status: OrderStatus; note: string; at: string }
 
 // ── cart ──────────────────────────────────────────────────────────
 export interface CartItem {
@@ -129,6 +171,8 @@ export interface CartItem {
   qty: number;
   price: number;
   note: string;
+  unit?: string;        // from the catalog product, when known
+  taxPercent?: number;  // snapshotted onto the order line for invoicing
 }
 
 export function cartTotal(items: CartItem[]): number {

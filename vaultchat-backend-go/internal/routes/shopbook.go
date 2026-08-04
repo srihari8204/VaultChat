@@ -9,6 +9,7 @@ package routes
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
@@ -23,9 +24,17 @@ import (
 	"vaultchat/backend-go/internal/httpx"
 )
 
-// rupees formats a money amount for push copy, e.g. 1250 → "₹1,250".
-func rupees(n float64) string {
-	return "₹" + fmt.Sprintf("%.0f", n)
+// sbMoney formats a money amount for push copy in the shop's currency,
+// e.g. "₹1,250" / "$12". Falls back to ₹ when the shop is unknown.
+func sbMoney(ctx context.Context, shopID string, n float64) string {
+	cur := "₹"
+	if shopID != "" {
+		var c string
+		if db.Pool.QueryRow(ctx, `SELECT currency FROM shopbook_shop WHERE id=$1`, shopID).Scan(&c) == nil && c != "" {
+			cur = c
+		}
+	}
+	return cur + fmt.Sprintf("%.0f", n)
 }
 
 func RegisterShopBook(mux *http.ServeMux) {
@@ -74,6 +83,16 @@ func RegisterShopBook(mux *http.ServeMux) {
 	mux.HandleFunc("POST /shopbook/my-shop/ledger/remind", httpx.RequireAuth(sbSendReminder))
 	mux.HandleFunc("POST /shopbook/my-shop/plan", httpx.RequireAuth(sbSetPlan))
 	mux.HandleFunc("GET /shopbook/my-shop/reports", httpx.RequireAuth(sbReports))
+
+	// Upgrade (openspec: shop-book-upgrade) — tax engine, full order
+	// pipeline, invoices, notification inbox, cross-shop ledger summary.
+	mux.HandleFunc("GET /shopbook/countries", httpx.RequireAuth(sbCountries))
+	mux.HandleFunc("GET /shopbook/starter-catalog", httpx.RequireAuth(sbStarterCatalog))
+	mux.HandleFunc("POST /shopbook/orders/{id}/cancel", httpx.RequireAuth(sbCustomerCancel))
+	mux.HandleFunc("GET /shopbook/orders/{id}/invoice", httpx.RequireAuth(sbOrderInvoice))
+	mux.HandleFunc("GET /shopbook/notifications", httpx.RequireAuth(sbNotifications))
+	mux.HandleFunc("POST /shopbook/notifications/read", httpx.RequireAuth(sbNotificationsRead))
+	mux.HandleFunc("GET /shopbook/my-ledgers", httpx.RequireAuth(sbMyLedgers))
 }
 
 // ── helpers ───────────────────────────────────────────────────────
@@ -112,28 +131,33 @@ func qfloat(r *http.Request, key string) (float64, bool) {
 // pgx.Row (QueryRow) and a row inside pgx.Rows (both expose Scan).
 const shopCols = `id, name, category, address, lat, lng, phone, open_time, close_time,
 	weekly_holiday, status, pickup, prep_mins, delivery, delivery_fee, rating_sum, rating_count,
-	plan, lunch_start, lunch_end`
+	plan, lunch_start, lunch_end, approved, verified, country, currency, tax_config`
 
 type shopScanner interface{ Scan(dest ...any) error }
 
 func scanShop(row shopScanner) (map[string]any, error) {
 	var (
 		id, name, category, address, phone, openT, closeT, holiday, status string
-		plan, lunchStart, lunchEnd                                         string
+		plan, lunchStart, lunchEnd, country, currency                      string
 		slat, slng                                                         *float64
-		pickup, delivery                                                   bool
+		pickup, delivery, approved, verified                               bool
 		prep, ratingSum, ratingCount                                       int
 		deliveryFee                                                        float64
+		taxCfg                                                             []byte
 	)
 	if err := row.Scan(&id, &name, &category, &address, &slat, &slng, &phone,
 		&openT, &closeT, &holiday, &status, &pickup, &prep,
 		&delivery, &deliveryFee, &ratingSum, &ratingCount,
-		&plan, &lunchStart, &lunchEnd); err != nil {
+		&plan, &lunchStart, &lunchEnd,
+		&approved, &verified, &country, &currency, &taxCfg); err != nil {
 		return nil, err
 	}
 	var rating float64
 	if ratingCount > 0 {
 		rating = math.Round(float64(ratingSum)/float64(ratingCount)*10) / 10
+	}
+	if len(taxCfg) == 0 {
+		taxCfg = []byte(`{}`)
 	}
 	return map[string]any{
 		"id": id, "name": name, "category": category, "address": address,
@@ -142,12 +166,24 @@ func scanShop(row shopScanner) (map[string]any, error) {
 		"delivery": delivery, "deliveryFee": deliveryFee,
 		"rating": rating, "ratingCount": ratingCount,
 		"plan": plan, "lunchStart": lunchStart, "lunchEnd": lunchEnd,
+		"approved": approved, "verified": verified,
+		"country": country, "currency": currency, "taxConfig": json.RawMessage(taxCfg),
 	}, nil
 }
 
 // sbNotify sends an Expo push (title+body, auto-rendered in fg/bg) to every
-// device the user has registered. Best-effort; failures are swallowed.
+// device the user has registered, and persists a copy to the in-app
+// notification inbox so missed pushes remain visible. Best-effort.
 func sbNotify(ctx context.Context, userID, title, body string, data map[string]any) {
+	if data == nil {
+		data = map[string]any{}
+	}
+	event, _ := data["event"].(string)
+	if dataJSON, err := json.Marshal(data); err == nil {
+		_, _ = db.Pool.Exec(ctx,
+			`INSERT INTO shopbook_notification (user_id, title, body, event, data)
+			 VALUES ($1,$2,$3,$4,$5)`, userID, title, body, event, dataJSON)
+	}
 	rows, err := db.Pool.Query(ctx,
 		`SELECT push_token FROM devices WHERE user_id=$1 AND push_token IS NOT NULL`, userID)
 	if err != nil {
@@ -194,18 +230,14 @@ func sbNearbyShops(w http.ResponseWriter, r *http.Request) {
 	const boxDeg = 0.25
 	args := []any{}
 	sql := `SELECT ` + shopCols + ` FROM shopbook_shop`
-	where := ""
+	// Only admin-approved shops are discoverable.
+	where := ` WHERE approved=TRUE`
 	if okLat && okLng {
-		where = ` WHERE (lat IS NULL OR lng IS NULL OR (lat BETWEEN $1 AND $2 AND lng BETWEEN $3 AND $4))`
+		where += ` AND (lat IS NULL OR lng IS NULL OR (lat BETWEEN $1 AND $2 AND lng BETWEEN $3 AND $4))`
 		args = append(args, lat-boxDeg, lat+boxDeg, lng-boxDeg, lng+boxDeg)
 	}
 	if cat != "" && cat != "all" {
-		if where == "" {
-			where = " WHERE"
-		} else {
-			where += " AND"
-		}
-		where += " category=$" + strconv.Itoa(len(args)+1)
+		where += " AND category=$" + strconv.Itoa(len(args)+1)
 		args = append(args, cat)
 	}
 	rows, err := db.Pool.Query(ctx, sql+where+" LIMIT 100", args...)
@@ -262,21 +294,26 @@ func sbShopDetails(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, 200, m)
 }
 
+const productCols = `id, name, brand, category, unit, price, in_stock, enabled, tax_percent, updated_at`
+
 func scanProducts(rows pgx.Rows) []map[string]any {
 	defer rows.Close()
 	out := []map[string]any{}
 	for rows.Next() {
 		var (
 			id, name, brand, category, unit string
-			price                           float64
+			price, taxPercent               float64
 			inStock, enabled                bool
+			updated                         time.Time
 		)
-		if err := rows.Scan(&id, &name, &brand, &category, &unit, &price, &inStock, &enabled); err != nil {
+		if err := rows.Scan(&id, &name, &brand, &category, &unit, &price, &inStock, &enabled,
+			&taxPercent, &updated); err != nil {
 			continue
 		}
 		out = append(out, map[string]any{
 			"id": id, "name": name, "brand": brand, "category": category,
 			"unit": unit, "price": price, "inStock": inStock, "enabled": enabled,
+			"taxPercent": taxPercent, "updatedAt": httpx.JST(&updated),
 		})
 	}
 	return out
@@ -284,7 +321,7 @@ func scanProducts(rows pgx.Rows) []map[string]any {
 
 func sbShopProducts(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.Pool.Query(r.Context(),
-		`SELECT id, name, brand, category, unit, price, in_stock, enabled
+		`SELECT `+productCols+`
 		   FROM shopbook_product WHERE shop_id=$1 AND enabled=TRUE ORDER BY name`, r.PathValue("id"))
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "db error")
@@ -305,15 +342,30 @@ func sbPlaceOrder(w http.ResponseWriter, r *http.Request) {
 		Delivery   bool   `json:"delivery"`
 		Address    string `json:"address"`
 		Items      []struct {
-			Name  string  `json:"name"`
-			Brand string  `json:"brand"`
-			Qty   float64 `json:"qty"`
-			Price float64 `json:"price"`
-			Note  string  `json:"note"`
+			Name       string  `json:"name"`
+			Brand      string  `json:"brand"`
+			Unit       string  `json:"unit"`
+			Qty        float64 `json:"qty"`
+			Price      float64 `json:"price"`
+			TaxPercent float64 `json:"taxPercent"`
+			Note       string  `json:"note"`
 		} `json:"items"`
 	}
 	if err := httpx.Body(r, &body); err != nil || body.ShopID == "" || len(body.Items) == 0 {
 		httpx.Err(w, http.StatusBadRequest, "shopId and at least one item required")
+		return
+	}
+
+	// Free-plan limit: up to 200 unique customers per shop. Existing customers
+	// keep working — only a brand-new relationship is blocked (spec:
+	// subscription-plans / Customer limit reached).
+	if ok, err := sbCustomerLimitOK(ctx, body.ShopID, user.ID); err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "db error")
+		return
+	} else if !ok {
+		httpx.Err(w, http.StatusForbidden,
+			"This shop reached its customer limit on the Free plan",
+			map[string]any{"upgrade": true, "limit": "customers"})
 		return
 	}
 
@@ -380,13 +432,13 @@ func sbPlaceOrder(w http.ResponseWriter, r *http.Request) {
 				qty = 1
 			}
 			if _, err := tx.Exec(ctx,
-				`INSERT INTO shopbook_order_item (order_id, name, brand, qty, price, note)
-				 VALUES ($1,$2,$3,$4,$5,$6)`,
-				orderID, it.Name, it.Brand, qty, it.Price, it.Note); err != nil {
+				`INSERT INTO shopbook_order_item (order_id, name, brand, unit, qty, price, tax_percent, note)
+				 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+				orderID, it.Name, it.Brand, it.Unit, qty, it.Price, it.TaxPercent, it.Note); err != nil {
 				return err
 			}
 		}
-		return nil
+		return sbOrderEvent(ctx, tx, orderID, "pending", "Order placed")
 	})
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "could not place order")
@@ -396,19 +448,69 @@ func sbPlaceOrder(w http.ResponseWriter, r *http.Request) {
 	var ownerID string
 	if db.Pool.QueryRow(ctx, `SELECT owner_user_id FROM shopbook_shop WHERE id=$1`, body.ShopID).Scan(&ownerID) == nil && ownerID != "" {
 		sbNotify(ctx, ownerID, "New order 🛎️",
-			fmt.Sprintf("%d item(s) · %s", len(body.Items), rupees(total)),
+			fmt.Sprintf("%d item(s) · %s", len(body.Items), sbMoney(ctx, body.ShopID, total)),
 			map[string]any{"event": "new_order", "orderId": orderID})
 	}
 	httpx.JSON(w, 201, map[string]any{
-		"id": orderID, "status": "new", "total": total,
+		"id": orderID, "status": "pending", "total": total,
 		"discount": discount, "deliveryFee": deliveryFee,
 	})
+}
+
+// sbOrderEvent appends one timestamped entry to the order's status timeline.
+func sbOrderEvent(ctx context.Context, tx pgx.Tx, orderID, status, note string) error {
+	_, err := tx.Exec(ctx,
+		`INSERT INTO shopbook_order_event (order_id, status, note) VALUES ($1,$2,$3)`,
+		orderID, status, note)
+	return err
+}
+
+// sbCustomerLimitOK enforces the Free plan's 200-unique-customer cap at
+// relationship-creation time. Pro shops and existing relationships pass.
+func sbCustomerLimitOK(ctx context.Context, shopID, custID string) (bool, error) {
+	if shopPlan(ctx, shopID) == "pro" {
+		return true, nil
+	}
+	var existing bool
+	err := db.Pool.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM shopbook_order  WHERE shop_id=$1 AND customer_user_id=$2)
+		    OR EXISTS(SELECT 1 FROM shopbook_ledger WHERE shop_id=$1 AND customer_user_id=$2)`,
+		shopID, custID).Scan(&existing)
+	if err != nil {
+		return false, err
+	}
+	if existing {
+		return true, nil
+	}
+	var count int
+	err = db.Pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM (
+			SELECT customer_user_id FROM shopbook_order  WHERE shop_id=$1
+			UNION
+			SELECT customer_user_id FROM shopbook_ledger WHERE shop_id=$1
+		) t`, shopID).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count < 200, nil
+}
+
+// sbRecomputeOrderTotal re-derives an order's total after availability or
+// alternative decisions change its effective line items ('unavailable' lines
+// no longer count). Keeps the coupon discount and delivery fee.
+func sbRecomputeOrderTotal(ctx context.Context, orderID string) {
+	_, _ = db.Pool.Exec(ctx, `
+		UPDATE shopbook_order o SET total = GREATEST(0, ROUND((COALESCE((
+			SELECT SUM(i.price * i.qty) FROM shopbook_order_item i
+			 WHERE i.order_id = o.id AND i.availability <> 'unavailable'
+		),0) - o.discount + o.delivery_fee)::numeric, 2)), updated_at = NOW()
+		 WHERE o.id = $1`, orderID)
 }
 
 func sbMyOrders(w http.ResponseWriter, r *http.Request) {
 	user := httpx.UserFrom(r)
 	rows, err := db.Pool.Query(r.Context(),
-		`SELECT o.id, o.shop_id, s.name, o.status, o.total, o.created_at
+		`SELECT o.id, o.shop_id, s.name, s.currency, o.status, o.total, o.created_at
 		   FROM shopbook_order o JOIN shopbook_shop s ON s.id=o.shop_id
 		  WHERE o.customer_user_id=$1 ORDER BY o.created_at DESC LIMIT 100`, user.ID)
 	if err != nil {
@@ -418,15 +520,18 @@ func sbMyOrders(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	out := []map[string]any{}
 	for rows.Next() {
-		var id, shopID, shopName, status string
+		var id, shopID, shopName, currency, status string
 		var total float64
 		var created time.Time
-		if err := rows.Scan(&id, &shopID, &shopName, &status, &total, &created); err != nil {
+		if err := rows.Scan(&id, &shopID, &shopName, &currency, &status, &total, &created); err != nil {
 			continue
 		}
+		if status == "new" {
+			status = "pending"
+		}
 		out = append(out, map[string]any{
-			"id": id, "shopId": shopID, "shopName": shopName, "status": status,
-			"total": total, "createdAt": httpx.JST(&created),
+			"id": id, "shopId": shopID, "shopName": shopName, "currency": currency,
+			"status": status, "total": total, "createdAt": httpx.JST(&created),
 		})
 	}
 	httpx.JSON(w, 200, map[string]any{"orders": out})
@@ -436,14 +541,18 @@ func sbMyOrders(w http.ResponseWriter, r *http.Request) {
 // or the shop owner can read it.
 func orderWithItems(ctx context.Context, w http.ResponseWriter, orderID, userID string) {
 	var shopID, custID, status, note, couponCode, address string
+	var cancelReason, cancelledBy, rejectReason, currency string
 	var total, discount, deliveryFee float64
 	var delivery bool
 	var created time.Time
 	err := db.Pool.QueryRow(ctx,
-		`SELECT shop_id, customer_user_id, status, total, note, created_at,
-		        coupon_code, discount, delivery, delivery_fee, address
-		   FROM shopbook_order WHERE id=$1`, orderID).Scan(&shopID, &custID, &status, &total, &note, &created,
-		&couponCode, &discount, &delivery, &deliveryFee, &address)
+		`SELECT o.shop_id, o.customer_user_id, o.status, o.total, o.note, o.created_at,
+		        o.coupon_code, o.discount, o.delivery, o.delivery_fee, o.address,
+		        o.cancel_reason, o.cancelled_by, o.reject_reason, s.currency
+		   FROM shopbook_order o JOIN shopbook_shop s ON s.id=o.shop_id
+		  WHERE o.id=$1`, orderID).Scan(&shopID, &custID, &status, &total, &note, &created,
+		&couponCode, &discount, &delivery, &deliveryFee, &address,
+		&cancelReason, &cancelledBy, &rejectReason, &currency)
 	if db.NoRows(err) {
 		httpx.Err(w, http.StatusNotFound, "Order not found")
 		return
@@ -451,6 +560,9 @@ func orderWithItems(ctx context.Context, w http.ResponseWriter, orderID, userID 
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "db error")
 		return
+	}
+	if status == "new" { // rows predating migration 064's backfill
+		status = "pending"
 	}
 	// Access: customer who placed it, or the shop's owner.
 	if custID != userID {
@@ -461,7 +573,7 @@ func orderWithItems(ctx context.Context, w http.ResponseWriter, orderID, userID 
 		}
 	}
 	rows, err := db.Pool.Query(ctx,
-		`SELECT id, name, brand, qty, price, note, availability, alt_name
+		`SELECT id, name, brand, unit, qty, price, tax_percent, note, availability, alt_name, alt_price
 		   FROM shopbook_order_item WHERE order_id=$1 ORDER BY id`, orderID)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "db error")
@@ -470,23 +582,45 @@ func orderWithItems(ctx context.Context, w http.ResponseWriter, orderID, userID 
 	defer rows.Close()
 	items := []map[string]any{}
 	for rows.Next() {
-		var id, name, brand, inote, avail, alt string
-		var qty, price float64
-		if err := rows.Scan(&id, &name, &brand, &qty, &price, &inote, &avail, &alt); err != nil {
+		var id, name, brand, unit, inote, avail, alt string
+		var qty, price, taxPercent, altPrice float64
+		if err := rows.Scan(&id, &name, &brand, &unit, &qty, &price, &taxPercent, &inote, &avail, &alt, &altPrice); err != nil {
 			continue
 		}
 		items = append(items, map[string]any{
-			"id": id, "name": name, "brand": brand, "qty": qty, "price": price,
-			"note": inote, "availability": avail, "altName": alt,
+			"id": id, "name": name, "brand": brand, "unit": unit, "qty": qty, "price": price,
+			"taxPercent": taxPercent, "note": inote, "availability": avail,
+			"altName": alt, "altPrice": altPrice,
 		})
 	}
+	rows.Close()
+
+	// Timestamped status timeline (spec: order-management / progress tracking).
+	timeline := []map[string]any{}
+	if evRows, err := db.Pool.Query(ctx,
+		`SELECT status, note, at FROM shopbook_order_event WHERE order_id=$1 ORDER BY id`, orderID); err == nil {
+		defer evRows.Close()
+		for evRows.Next() {
+			var st, evNote string
+			var at time.Time
+			if evRows.Scan(&st, &evNote, &at) == nil {
+				timeline = append(timeline, map[string]any{"status": st, "note": evNote, "at": httpx.JST(&at)})
+			}
+		}
+	}
+
 	var rated bool
 	_ = db.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM shopbook_rating WHERE order_id=$1)`, orderID).Scan(&rated)
+	var hasInvoice bool
+	_ = db.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM shopbook_invoice WHERE order_id=$1)`, orderID).Scan(&hasInvoice)
 	httpx.JSON(w, 200, map[string]any{
 		"id": orderID, "shopId": shopID, "status": status, "total": total,
 		"note": note, "createdAt": httpx.JST(&created), "items": items,
 		"couponCode": couponCode, "discount": discount, "delivery": delivery,
 		"deliveryFee": deliveryFee, "address": address, "rated": rated,
+		"cancelReason": cancelReason, "cancelledBy": cancelledBy,
+		"rejectReason": rejectReason, "currency": currency,
+		"timeline": timeline, "hasInvoice": hasInvoice,
 	})
 }
 
@@ -505,18 +639,22 @@ func sbCustomerDecision(w http.ResponseWriter, r *http.Request) {
 	_ = httpx.Body(r, &body)
 
 	// Only the owning customer may decide.
-	var custID string
-	if err := db.Pool.QueryRow(ctx, `SELECT customer_user_id FROM shopbook_order WHERE id=$1`, orderID).Scan(&custID); err != nil || custID != user.ID {
+	var custID, shopID string
+	if err := db.Pool.QueryRow(ctx, `SELECT customer_user_id, shop_id FROM shopbook_order WHERE id=$1`, orderID).Scan(&custID, &shopID); err != nil || custID != user.ID {
 		httpx.Err(w, http.StatusForbidden, "Not your order")
 		return
 	}
-	newAvail := "unavailable"
+	// Accepting adopts the suggested substitute: the line is replaced with
+	// the alternative's name/price and the order total is re-derived.
+	q := `UPDATE shopbook_order_item SET availability='unavailable'
+	       WHERE id=$1 AND order_id=$2 AND availability='alternative'`
 	if body.Accept {
-		newAvail = "available"
+		q = `UPDATE shopbook_order_item SET availability='available',
+		       name  = COALESCE(NULLIF(alt_name,''), name),
+		       price = CASE WHEN alt_price > 0 THEN alt_price ELSE price END
+		     WHERE id=$1 AND order_id=$2 AND availability='alternative'`
 	}
-	tag, err := db.Pool.Exec(ctx,
-		`UPDATE shopbook_order_item SET availability=$1
-		   WHERE id=$2 AND order_id=$3 AND availability='alternative'`, newAvail, itemID, orderID)
+	tag, err := db.Pool.Exec(ctx, q, itemID, orderID)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "db error")
 		return
@@ -524,6 +662,19 @@ func sbCustomerDecision(w http.ResponseWriter, r *http.Request) {
 	if tag.RowsAffected() == 0 {
 		httpx.Err(w, http.StatusNotFound, "No pending alternative for that item")
 		return
+	}
+	sbRecomputeOrderTotal(ctx, orderID)
+	newAvail := "unavailable"
+	verdict := "rejected"
+	if body.Accept {
+		newAvail, verdict = "available", "accepted"
+	}
+	// Owner notification (spec: notifications / Customer accepted alternative).
+	var ownerID string
+	if db.Pool.QueryRow(ctx, `SELECT owner_user_id FROM shopbook_shop WHERE id=$1`, shopID).Scan(&ownerID) == nil && ownerID != "" {
+		sbNotify(ctx, ownerID, "Alternative "+verdict,
+			"The customer "+verdict+" your suggested alternative",
+			map[string]any{"event": "alternative_decision", "orderId": orderID, "accepted": body.Accept})
 	}
 	httpx.JSON(w, 200, map[string]any{"ok": true, "availability": newAvail})
 }
@@ -590,22 +741,24 @@ func sbUpsertShop(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := httpx.UserFrom(r)
 	var b struct {
-		Name          string   `json:"name"`
-		Category      string   `json:"category"`
-		Address       string   `json:"address"`
-		Lat           *float64 `json:"lat"`
-		Lng           *float64 `json:"lng"`
-		Phone         string   `json:"phone"`
-		OpenTime      string   `json:"openTime"`
-		CloseTime     string   `json:"closeTime"`
-		WeeklyHoliday string   `json:"weeklyHoliday"`
-		Status        string   `json:"status"`
-		Pickup        *bool    `json:"pickup"`
-		PrepMins      *int     `json:"prepMins"`
-		Delivery      *bool    `json:"delivery"`
-		DeliveryFee   *float64 `json:"deliveryFee"`
-		LunchStart    string   `json:"lunchStart"`
-		LunchEnd      string   `json:"lunchEnd"`
+		Name          string          `json:"name"`
+		Category      string          `json:"category"`
+		Address       string          `json:"address"`
+		Lat           *float64        `json:"lat"`
+		Lng           *float64        `json:"lng"`
+		Phone         string          `json:"phone"`
+		OpenTime      string          `json:"openTime"`
+		CloseTime     string          `json:"closeTime"`
+		WeeklyHoliday string          `json:"weeklyHoliday"`
+		Status        string          `json:"status"`
+		Pickup        *bool           `json:"pickup"`
+		PrepMins      *int            `json:"prepMins"`
+		Delivery      *bool           `json:"delivery"`
+		DeliveryFee   *float64        `json:"deliveryFee"`
+		LunchStart    string          `json:"lunchStart"`
+		LunchEnd      string          `json:"lunchEnd"`
+		Country       string          `json:"country"`
+		TaxConfig     json.RawMessage `json:"taxConfig"`
 	}
 	if err := httpx.Body(r, &b); err != nil || b.Name == "" {
 		httpx.Err(w, http.StatusBadRequest, "name required")
@@ -620,8 +773,31 @@ func sbUpsertShop(w http.ResponseWriter, r *http.Request) {
 	if b.CloseTime == "" {
 		b.CloseTime = "21:00"
 	}
-	if b.Status != "open" && b.Status != "busy" && b.Status != "closed" {
+	switch b.Status {
+	case "open", "busy", "closed", "holiday", "vacation":
+	default:
 		b.Status = "open"
+	}
+	// Country selection loads the tax engine config; the shop's currency is
+	// stamped from it (spec: country-tax-engine / configuration loading).
+	if b.Country == "" {
+		b.Country = "IN"
+	}
+	currency := "₹"
+	if cc, okC := sbLoadCountry(ctx, b.Country); okC {
+		currency = cc.CurrencySymbol
+	} else {
+		httpx.Err(w, http.StatusBadRequest, "unknown country")
+		return
+	}
+	taxCfg := []byte(`{}`)
+	if len(b.TaxConfig) > 0 {
+		probe := map[string]any{}
+		if json.Unmarshal(b.TaxConfig, &probe) != nil {
+			httpx.Err(w, http.StatusBadRequest, "taxConfig must be an object")
+			return
+		}
+		taxCfg = b.TaxConfig
 	}
 	pickup := true
 	if b.Pickup != nil {
@@ -639,27 +815,31 @@ func sbUpsertShop(w http.ResponseWriter, r *http.Request) {
 	if b.DeliveryFee != nil {
 		deliveryFee = *b.DeliveryFee
 	}
+	// New shops start unapproved (spec: shop-accounts / approval before
+	// public listing); shops existing before migration 064 stay approved.
 	var id string
+	var approved bool
 	err := db.Pool.QueryRow(ctx, `
 		INSERT INTO shopbook_shop
 		  (owner_user_id, name, category, address, lat, lng, phone,
 		   open_time, close_time, weekly_holiday, status, pickup, prep_mins, delivery, delivery_fee,
-		   lunch_start, lunch_end)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+		   lunch_start, lunch_end, country, currency, tax_config)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
 		ON CONFLICT (owner_user_id) DO UPDATE SET
 		  name=$2, category=$3, address=$4, lat=$5, lng=$6, phone=$7,
 		  open_time=$8, close_time=$9, weekly_holiday=$10, status=$11,
 		  pickup=$12, prep_mins=$13, delivery=$14, delivery_fee=$15,
-		  lunch_start=$16, lunch_end=$17, updated_at=NOW()
-		RETURNING id`,
+		  lunch_start=$16, lunch_end=$17, country=$18, currency=$19, tax_config=$20,
+		  updated_at=NOW()
+		RETURNING id, approved`,
 		user.ID, b.Name, b.Category, b.Address, b.Lat, b.Lng, b.Phone,
 		b.OpenTime, b.CloseTime, b.WeeklyHoliday, b.Status, pickup, prep, delivery, deliveryFee,
-		b.LunchStart, b.LunchEnd).Scan(&id)
+		b.LunchStart, b.LunchEnd, b.Country, currency, taxCfg).Scan(&id, &approved)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "could not save shop")
 		return
 	}
-	httpx.JSON(w, 200, map[string]any{"id": id})
+	httpx.JSON(w, 200, map[string]any{"id": id, "approved": approved})
 }
 
 // ── owner: products ──────────────────────────────────────────────
@@ -671,7 +851,7 @@ func sbOwnerProducts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := db.Pool.Query(ctx,
-		`SELECT id, name, brand, category, unit, price, in_stock, enabled
+		`SELECT `+productCols+`
 		   FROM shopbook_product WHERE shop_id=$1 ORDER BY name`, shopID)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "db error")
@@ -687,14 +867,15 @@ func sbSaveProduct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var b struct {
-		ID       string  `json:"id"`
-		Name     string  `json:"name"`
-		Brand    string  `json:"brand"`
-		Category string  `json:"category"`
-		Unit     string  `json:"unit"`
-		Price    float64 `json:"price"`
-		InStock  *bool   `json:"inStock"`
-		Enabled  *bool   `json:"enabled"`
+		ID         string  `json:"id"`
+		Name       string  `json:"name"`
+		Brand      string  `json:"brand"`
+		Category   string  `json:"category"`
+		Unit       string  `json:"unit"`
+		Price      float64 `json:"price"`
+		TaxPercent float64 `json:"taxPercent"`
+		InStock    *bool   `json:"inStock"`
+		Enabled    *bool   `json:"enabled"`
 	}
 	if err := httpx.Body(r, &b); err != nil || b.Name == "" {
 		httpx.Err(w, http.StatusBadRequest, "name required")
@@ -709,12 +890,13 @@ func sbSaveProduct(w http.ResponseWriter, r *http.Request) {
 	}
 	var id string
 	if b.ID != "" {
-		// Update — scoped to this owner's shop.
+		// Update — scoped to this owner's shop. updated_at feeds the
+		// price-comparison freshness indicator.
 		err := db.Pool.QueryRow(ctx, `
 			UPDATE shopbook_product SET name=$1, brand=$2, category=$3, unit=$4,
-			   price=$5, in_stock=$6, enabled=$7
-			 WHERE id=$8 AND shop_id=$9 RETURNING id`,
-			b.Name, b.Brand, b.Category, b.Unit, b.Price, inStock, enabled, b.ID, shopID).Scan(&id)
+			   price=$5, in_stock=$6, enabled=$7, tax_percent=$8, updated_at=NOW()
+			 WHERE id=$9 AND shop_id=$10 RETURNING id`,
+			b.Name, b.Brand, b.Category, b.Unit, b.Price, inStock, enabled, b.TaxPercent, b.ID, shopID).Scan(&id)
 		if db.NoRows(err) {
 			httpx.Err(w, http.StatusNotFound, "Product not found")
 			return
@@ -725,9 +907,9 @@ func sbSaveProduct(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		if err := db.Pool.QueryRow(ctx, `
-			INSERT INTO shopbook_product (shop_id, name, brand, category, unit, price, in_stock, enabled)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-			shopID, b.Name, b.Brand, b.Category, b.Unit, b.Price, inStock, enabled).Scan(&id); err != nil {
+			INSERT INTO shopbook_product (shop_id, name, brand, category, unit, price, in_stock, enabled, tax_percent)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+			shopID, b.Name, b.Brand, b.Category, b.Unit, b.Price, inStock, enabled, b.TaxPercent).Scan(&id); err != nil {
 			httpx.Err(w, http.StatusInternalServerError, "db error")
 			return
 		}
@@ -803,8 +985,9 @@ func sbOwnerSetAvailability(w http.ResponseWriter, r *http.Request) {
 	}
 	orderID, itemID := r.PathValue("id"), r.PathValue("itemId")
 	var b struct {
-		Availability string `json:"availability"` // available | unavailable | alternative
-		AltName      string `json:"altName"`
+		Availability string  `json:"availability"` // available | unavailable | alternative
+		AltName      string  `json:"altName"`
+		AltPrice     float64 `json:"altPrice"`
 	}
 	_ = httpx.Body(r, &b)
 	switch b.Availability {
@@ -815,10 +998,10 @@ func sbOwnerSetAvailability(w http.ResponseWriter, r *http.Request) {
 	}
 	// Ensure the order belongs to this owner's shop.
 	tag, err := db.Pool.Exec(ctx, `
-		UPDATE shopbook_order_item SET availability=$1, alt_name=$2
-		 WHERE id=$3 AND order_id=$4
-		   AND order_id IN (SELECT id FROM shopbook_order WHERE shop_id=$5)`,
-		b.Availability, b.AltName, itemID, orderID, shopID)
+		UPDATE shopbook_order_item SET availability=$1, alt_name=$2, alt_price=$3
+		 WHERE id=$4 AND order_id=$5
+		   AND order_id IN (SELECT id FROM shopbook_order WHERE shop_id=$6)`,
+		b.Availability, b.AltName, b.AltPrice, itemID, orderID, shopID)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "db error")
 		return
@@ -827,6 +1010,7 @@ func sbOwnerSetAvailability(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, http.StatusNotFound, "Item not found for your shop")
 		return
 	}
+	sbRecomputeOrderTotal(ctx, orderID)
 	if b.Availability == "alternative" {
 		var custID string
 		if db.Pool.QueryRow(ctx, `SELECT customer_user_id FROM shopbook_order WHERE id=$1`, orderID).Scan(&custID) == nil && custID != "" {
@@ -840,13 +1024,67 @@ func sbOwnerSetAvailability(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, 200, map[string]any{"ok": true})
 }
 
-var orderFlow = map[string]bool{
-	"new": true, "preparing": true, "packing": true, "ready": true,
-	"completed": true, "cancelled": true,
+// Owner-driven transitions of the order pipeline. "preparing" from "pending"
+// is a legacy path (pre-upgrade clients skip the explicit accept) and records
+// an implicit 'accepted' event so the timeline stays truthful.
+var sbOwnerNext = map[string][]string{
+	"pending":   {"accepted", "preparing", "rejected", "cancelled"},
+	"accepted":  {"preparing", "cancelled"},
+	"preparing": {"packing", "cancelled"},
+	"packing":   {"ready"},
+	"ready":     {"collected", "completed"},
+	"collected": {"completed"},
 }
 
-// Owner advances an order through the fulfilment states. Marking 'completed'
-// also posts the order total to the customer's khata as a purchase.
+// The six rejection reason codes (spec: order-management / rejection).
+var sbRejectReasons = map[string]string{
+	"out_of_stock":  "Out of Stock",
+	"shop_closed":   "Shop Closed",
+	"quantity":      "Quantity Not Available",
+	"outside_hours": "Outside Business Hours",
+	"technical":     "Technical Issue",
+	"other":         "Other",
+}
+
+func sbTransitionAllowed(from, to string) bool {
+	for _, s := range sbOwnerNext[from] {
+		if s == to {
+			return true
+		}
+	}
+	return false
+}
+
+// sbSettleOrder posts the khata purchase, stamps loyalty points and issues
+// the invoice — exactly once per order (all guards are idempotent).
+func sbSettleOrder(ctx context.Context, tx pgx.Tx, shopID, custID, orderID string, total float64) error {
+	var exists bool
+	if err := tx.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM shopbook_ledger WHERE order_id=$1 AND type='purchase')`,
+		orderID).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO shopbook_ledger (shop_id, customer_user_id, type, amount, remark, order_id)
+			 VALUES ($1,$2,'purchase',$3,'Order completed',$4)`,
+			shopID, custID, total, orderID); err != nil {
+			return err
+		}
+		// Loyalty: 1 point per 100 spent, stamped on the order.
+		points := int(total / 100)
+		if _, err := tx.Exec(ctx,
+			`UPDATE shopbook_order SET points_earned=$1 WHERE id=$2`, points, orderID); err != nil {
+			return err
+		}
+	}
+	return sbCreateInvoice(ctx, tx, orderID)
+}
+
+// Owner advances an order through the pipeline (pending → accepted →
+// preparing → packing → ready → collected → completed), rejects it from
+// pending with a reason code, or cancels it before packing with a reason.
+// Marking collected settles the khata + invoice and auto-completes.
 func sbOwnerSetStatus(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := httpx.UserFrom(r)
@@ -857,42 +1095,104 @@ func sbOwnerSetStatus(w http.ResponseWriter, r *http.Request) {
 	orderID := r.PathValue("id")
 	var b struct {
 		Status string `json:"status"`
+		Reason string `json:"reason"` // rejection code or cancellation text
 	}
 	_ = httpx.Body(r, &b)
-	if !orderFlow[b.Status] {
-		httpx.Err(w, http.StatusBadRequest, "invalid status")
+	if b.Status == "new" { // legacy client alias
+		b.Status = "pending"
+	}
+
+	if b.Status == "rejected" {
+		if _, okR := sbRejectReasons[b.Reason]; !okR {
+			httpx.Err(w, http.StatusBadRequest,
+				"reason must be one of out_of_stock|shop_closed|quantity|outside_hours|technical|other")
+			return
+		}
+	}
+	if b.Status == "cancelled" && strings.TrimSpace(b.Reason) == "" {
+		httpx.Err(w, http.StatusBadRequest, "cancellation reason required")
 		return
 	}
-	var custID string
+
+	var custID, finalStatus string
 	err := db.WithUser(ctx, user.ID, func(tx pgx.Tx) error {
+		var cur string
 		var total float64
 		if err := tx.QueryRow(ctx,
-			`UPDATE shopbook_order SET status=$1, updated_at=NOW()
-			   WHERE id=$2 AND shop_id=$3 RETURNING customer_user_id, total`,
-			b.Status, orderID, shopID).Scan(&custID, &total); err != nil {
+			`SELECT status, customer_user_id, total FROM shopbook_order
+			  WHERE id=$1 AND shop_id=$2 FOR UPDATE`,
+			orderID, shopID).Scan(&cur, &custID, &total); err != nil {
 			return err
 		}
-		if b.Status == "completed" {
-			// Idempotent: only post to the ledger once per order.
-			var exists bool
-			if err := tx.QueryRow(ctx,
-				`SELECT EXISTS(SELECT 1 FROM shopbook_ledger WHERE order_id=$1 AND type='purchase')`,
-				orderID).Scan(&exists); err != nil {
+		if cur == "new" { // rows predating migration 064's backfill
+			cur = "pending"
+		}
+		if !sbTransitionAllowed(cur, b.Status) {
+			return fmt.Errorf("bad transition %s->%s", cur, b.Status)
+		}
+
+		if b.Status == "accepted" || (cur == "pending" && b.Status == "preparing") {
+			// Every line item must be reviewed before the order proceeds
+			// (spec: order-management / availability review).
+			var unreviewed, usable int
+			if err := tx.QueryRow(ctx, `
+				SELECT COUNT(*) FILTER (WHERE availability IN ('pending','alternative')),
+				       COUNT(*) FILTER (WHERE availability <> 'unavailable')
+				  FROM shopbook_order_item WHERE order_id=$1`, orderID).Scan(&unreviewed, &usable); err != nil {
 				return err
 			}
-			if !exists {
-				if _, err := tx.Exec(ctx,
-					`INSERT INTO shopbook_ledger (shop_id, customer_user_id, type, amount, remark, order_id)
-					 VALUES ($1,$2,'purchase',$3,'Order completed',$4)`,
-					shopID, custID, total, orderID); err != nil {
-					return err
-				}
-				// Loyalty: 1 point per ₹100 spent, stamped on the order.
-				points := int(total / 100)
-				if _, err := tx.Exec(ctx,
-					`UPDATE shopbook_order SET points_earned=$1 WHERE id=$2`, points, orderID); err != nil {
-					return err
-				}
+			if unreviewed > 0 {
+				return fmt.Errorf("review pending")
+			}
+			if usable == 0 {
+				return fmt.Errorf("all unavailable")
+			}
+		}
+
+		finalStatus = b.Status
+		events := []string{b.Status}
+		switch b.Status {
+		case "preparing":
+			if cur == "pending" { // legacy path: implicit accept
+				events = []string{"accepted", "preparing"}
+			}
+		case "collected":
+			if err := sbSettleOrder(ctx, tx, shopID, custID, orderID, total); err != nil {
+				return err
+			}
+			finalStatus = "completed"
+			events = []string{"collected", "completed"}
+		case "completed":
+			if err := sbSettleOrder(ctx, tx, shopID, custID, orderID, total); err != nil {
+				return err
+			}
+			if cur == "ready" { // direct completion still records the handover
+				events = []string{"collected", "completed"}
+			}
+		}
+
+		set := `status=$1, updated_at=NOW()`
+		args := []any{finalStatus, orderID, shopID}
+		if b.Status == "rejected" {
+			set = `status=$1, reject_reason=$4, updated_at=NOW()`
+			args = append(args, b.Reason)
+		} else if b.Status == "cancelled" {
+			set = `status=$1, cancel_reason=$4, cancelled_by='owner', updated_at=NOW()`
+			args = append(args, b.Reason)
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE shopbook_order SET `+set+` WHERE id=$2 AND shop_id=$3`, args...); err != nil {
+			return err
+		}
+		for _, ev := range events {
+			note := ""
+			if ev == "rejected" {
+				note = sbRejectReasons[b.Reason]
+			} else if ev == "cancelled" {
+				note = b.Reason
+			}
+			if err := sbOrderEvent(ctx, tx, orderID, ev, note); err != nil {
+				return err
 			}
 		}
 		return nil
@@ -901,19 +1201,96 @@ func sbOwnerSetStatus(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, http.StatusNotFound, "Order not found for your shop")
 		return
 	}
-	if err == nil && custID != "" {
-		msg := map[string]string{
-			"new": "Your order was accepted", "preparing": "Your order is being prepared",
-			"packing": "Your order is being packed", "ready": "Your order is ready to collect 🎉",
-			"completed": "Order completed — thank you!", "cancelled": "Your order was cancelled",
-		}[b.Status]
-		sbNotify(ctx, custID, "Order update", msg, map[string]any{"event": "order_status", "orderId": orderID, "status": b.Status})
-	}
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "db error")
+		switch err.Error() {
+		case "review pending":
+			httpx.Err(w, http.StatusBadRequest, "Review every item before accepting the order")
+		case "all unavailable":
+			httpx.Err(w, http.StatusBadRequest,
+				"Every item is unavailable — reject the order as Out of Stock instead")
+		default:
+			if strings.HasPrefix(err.Error(), "bad transition") {
+				httpx.Err(w, http.StatusConflict, "That status change is not allowed from the order's current state")
+			} else {
+				httpx.Err(w, http.StatusInternalServerError, "db error")
+			}
+		}
 		return
 	}
-	httpx.JSON(w, 200, map[string]any{"ok": true, "status": b.Status})
+	if custID != "" {
+		msg := map[string]string{
+			"accepted":  "Your order was accepted",
+			"preparing": "Your order is being prepared",
+			"packing":   "Your order is being packed",
+			"ready":     "Your order is ready to collect 🎉",
+			"collected": "Order collected — thank you!",
+			"completed": "Order completed — thank you!",
+			"rejected":  "Your order was rejected: " + sbRejectReasons[b.Reason],
+			"cancelled": "Your order was cancelled: " + b.Reason,
+		}[b.Status]
+		sbNotify(ctx, custID, "Order update", msg,
+			map[string]any{"event": "order_status", "orderId": orderID, "status": finalStatus})
+	}
+	httpx.JSON(w, 200, map[string]any{"ok": true, "status": finalStatus})
+}
+
+// Customer cancels their own order — allowed only before the owner accepts
+// it (spec: order-management / cancellation rules). Reason required.
+func sbCustomerCancel(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := httpx.UserFrom(r)
+	orderID := r.PathValue("id")
+	var b struct {
+		Reason string `json:"reason"`
+	}
+	_ = httpx.Body(r, &b)
+	if strings.TrimSpace(b.Reason) == "" {
+		httpx.Err(w, http.StatusBadRequest, "cancellation reason required")
+		return
+	}
+	var shopID string
+	err := db.WithUser(ctx, user.ID, func(tx pgx.Tx) error {
+		var cur string
+		if err := tx.QueryRow(ctx,
+			`SELECT status, shop_id FROM shopbook_order
+			  WHERE id=$1 AND customer_user_id=$2 FOR UPDATE`,
+			orderID, user.ID).Scan(&cur, &shopID); err != nil {
+			return err
+		}
+		if cur == "new" {
+			cur = "pending"
+		}
+		if cur != "pending" {
+			return fmt.Errorf("too late")
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE shopbook_order SET status='cancelled', cancel_reason=$2,
+			       cancelled_by='customer', updated_at=NOW() WHERE id=$1`,
+			orderID, b.Reason); err != nil {
+			return err
+		}
+		return sbOrderEvent(ctx, tx, orderID, "cancelled", b.Reason)
+	})
+	if db.NoRows(err) {
+		httpx.Err(w, http.StatusNotFound, "Order not found")
+		return
+	}
+	if err != nil {
+		if err.Error() == "too late" {
+			httpx.Err(w, http.StatusConflict,
+				"The shop already accepted this order — contact the shop to cancel")
+		} else {
+			httpx.Err(w, http.StatusInternalServerError, "db error")
+		}
+		return
+	}
+	var ownerID string
+	if db.Pool.QueryRow(ctx, `SELECT owner_user_id FROM shopbook_shop WHERE id=$1`, shopID).Scan(&ownerID) == nil && ownerID != "" {
+		sbNotify(ctx, ownerID, "Order cancelled",
+			"The customer cancelled an order: "+b.Reason,
+			map[string]any{"event": "order_cancelled", "orderId": orderID})
+	}
+	httpx.JSON(w, 200, map[string]any{"ok": true, "status": "cancelled"})
 }
 
 // ── owner: dashboard ─────────────────────────────────────────────
@@ -1007,6 +1384,17 @@ func sbAddLedgerEntry(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, http.StatusBadRequest, "customerId, type(purchase|payment) and positive amount required")
 		return
 	}
+	// A manually added customer is a new khata relationship — the Free
+	// plan's 200-customer cap applies here exactly as on first order.
+	if okLimit, err := sbCustomerLimitOK(ctx, shopID, b.CustomerID); err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "db error")
+		return
+	} else if !okLimit {
+		httpx.Err(w, http.StatusForbidden,
+			"Customer limit reached on the Free plan — upgrade to add more customers",
+			map[string]any{"upgrade": true, "limit": "customers"})
+		return
+	}
 	var id string
 	if err := db.Pool.QueryRow(ctx,
 		`INSERT INTO shopbook_ledger (shop_id, customer_user_id, type, amount, remark)
@@ -1017,7 +1405,7 @@ func sbAddLedgerEntry(w http.ResponseWriter, r *http.Request) {
 	}
 	if b.Type == "payment" {
 		sbNotify(ctx, b.CustomerID, "Payment recorded ✅",
-			rupees(b.Amount)+" payment recorded on your account",
+			sbMoney(ctx, shopID, b.Amount)+" payment recorded on your account",
 			map[string]any{"event": "payment", "shopId": shopID})
 	}
 	httpx.JSON(w, 201, map[string]any{"id": id})
@@ -1055,6 +1443,7 @@ func shopColsPrefixed(alias string) string {
 		"id", "name", "category", "address", "lat", "lng", "phone", "open_time", "close_time",
 		"weekly_holiday", "status", "pickup", "prep_mins", "delivery", "delivery_fee",
 		"rating_sum", "rating_count", "plan", "lunch_start", "lunch_end",
+		"approved", "verified", "country", "currency", "tax_config",
 	}
 	out := ""
 	for i, c := range cols {
@@ -1420,7 +1809,7 @@ func sbSendReminder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sbNotify(ctx, b.CustomerID, "Payment reminder 🔔",
-		fmt.Sprintf("%s pending at %s", rupees(pending), shopName),
+		fmt.Sprintf("%s pending at %s", sbMoney(ctx, shopID, pending), shopName),
 		map[string]any{"event": "reminder", "shopId": shopID})
 	httpx.JSON(w, 200, map[string]any{"ok": true, "sent": true, "pending": math.Round(pending*100) / 100})
 }
@@ -1447,62 +1836,158 @@ func sbSetPlan(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, 200, map[string]any{"ok": true, "plan": b.Plan})
 }
 
-// Daily reports — Pro only. Last 7 days of orders + sales, and top products.
+// sbSalesBuckets groups completed-order sales by a to_char pattern over an
+// interval, e.g. daily for 7 days or monthly for 12 months.
+func sbSalesBuckets(ctx context.Context, shopID, pattern, interval string) []map[string]any {
+	out := []map[string]any{}
+	rows, err := db.Pool.Query(ctx, `
+		SELECT to_char(created_at, '`+pattern+`') AS d, COUNT(*), COALESCE(SUM(total),0)
+		  FROM shopbook_order
+		 WHERE shop_id=$1 AND status='completed' AND created_at >= NOW() - INTERVAL '`+interval+`'
+		 GROUP BY d ORDER BY d`, shopID)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var d string
+		var count int
+		var sales float64
+		if rows.Scan(&d, &count, &sales) == nil {
+			out = append(out, map[string]any{"date": d, "orders": count, "sales": sales})
+		}
+	}
+	return out
+}
+
+// Reports (spec: reports-analytics). Basic — daily/weekly/monthly sales and
+// pending payments — is available on every plan; scope=advanced (yearly, tax
+// report, best sellers, top customers, product performance) is Pro-gated.
 func sbReports(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	shopID, ok := ownerShopID(ctx, w, httpx.UserFrom(r).ID)
 	if !ok {
 		return
 	}
-	if shopPlan(ctx, shopID) != "pro" {
-		httpx.Err(w, http.StatusForbidden, "Reports are a Pro feature", map[string]any{"upgrade": true})
+	scope := r.URL.Query().Get("scope")
+	pro := shopPlan(ctx, shopID) == "pro"
+	if scope == "advanced" && !pro {
+		httpx.Err(w, http.StatusForbidden, "Advanced reports are a Pro feature", map[string]any{"upgrade": true})
 		return
 	}
-	// Daily sales for the last 7 days (completed orders).
-	rows, err := db.Pool.Query(ctx, `
-		SELECT to_char(created_at::date,'YYYY-MM-DD') AS d, COUNT(*), COALESCE(SUM(total),0)
-		  FROM shopbook_order
-		 WHERE shop_id=$1 AND status='completed' AND created_at >= NOW() - INTERVAL '7 days'
-		 GROUP BY d ORDER BY d`, shopID)
-	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "db error")
-		return
+
+	days := sbSalesBuckets(ctx, shopID, "YYYY-MM-DD", "7 days")
+	weeks := sbSalesBuckets(ctx, shopID, `IYYY-"W"IW`, "28 days")
+	months := sbSalesBuckets(ctx, shopID, "YYYY-MM", "12 months")
+
+	var pendingTotal float64
+	var debtors int
+	_ = db.Pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(pending),0), COUNT(*) FILTER (WHERE pending > 0) FROM (
+			SELECT SUM(CASE WHEN type='purchase' THEN amount ELSE -amount END) AS pending
+			  FROM shopbook_ledger WHERE shop_id=$1 GROUP BY customer_user_id
+		) t WHERE pending > 0`, shopID).Scan(&pendingTotal, &debtors)
+
+	out := map[string]any{
+		"plan": map[bool]string{true: "pro", false: "free"}[pro],
+		"days": days, "weeks": weeks, "months": months,
+		"pendingTotal": math.Round(pendingTotal*100) / 100, "pendingCustomers": debtors,
 	}
-	defer rows.Close()
-	days := []map[string]any{}
-	for rows.Next() {
-		var d string
-		var count int
-		var sales float64
-		if rows.Scan(&d, &count, &sales) == nil {
-			days = append(days, map[string]any{"date": d, "orders": count, "sales": sales})
-		}
-	}
-	// Top products by quantity across all this shop's orders.
-	prows, err := db.Pool.Query(ctx, `
-		SELECT oi.name, SUM(oi.qty) AS q
-		  FROM shopbook_order_item oi JOIN shopbook_order o ON o.id=oi.order_id
-		 WHERE o.shop_id=$1
-		 GROUP BY oi.name ORDER BY q DESC LIMIT 5`, shopID)
-	top := []map[string]any{}
-	if err == nil {
-		defer prows.Close()
-		for prows.Next() {
-			var name string
-			var q float64
-			if prows.Scan(&name, &q) == nil {
-				top = append(top, map[string]any{"name": name, "qty": q})
+
+	if scope == "advanced" || (scope == "" && pro) {
+		out["years"] = sbSalesBuckets(ctx, shopID, "YYYY", "3 years")
+
+		// Tax report — from invoice snapshots, so config edits never shift it.
+		taxRows, err := db.Pool.Query(ctx, `
+			SELECT to_char(created_at,'YYYY-MM') AS m,
+			       COALESCE(SUM(subtotal),0), COALESCE(SUM(tax_total),0)
+			  FROM shopbook_invoice
+			 WHERE shop_id=$1 AND created_at >= NOW() - INTERVAL '12 months'
+			 GROUP BY m ORDER BY m`, shopID)
+		tax := []map[string]any{}
+		if err == nil {
+			defer taxRows.Close()
+			for taxRows.Next() {
+				var m string
+				var subtotal, taxTotal float64
+				if taxRows.Scan(&m, &subtotal, &taxTotal) == nil {
+					tax = append(tax, map[string]any{"month": m, "taxableSales": subtotal, "taxCollected": taxTotal})
+				}
 			}
 		}
+		out["taxReport"] = tax
+
+		// Best sellers by quantity + revenue.
+		prows, err := db.Pool.Query(ctx, `
+			SELECT oi.name, SUM(oi.qty) AS q, COALESCE(SUM(oi.qty*oi.price),0) AS rev
+			  FROM shopbook_order_item oi JOIN shopbook_order o ON o.id=oi.order_id
+			 WHERE o.shop_id=$1 AND o.status='completed'
+			 GROUP BY oi.name ORDER BY q DESC LIMIT 10`, shopID)
+		top := []map[string]any{}
+		if err == nil {
+			defer prows.Close()
+			for prows.Next() {
+				var name string
+				var q, rev float64
+				if prows.Scan(&name, &q, &rev) == nil {
+					top = append(top, map[string]any{"name": name, "qty": q, "revenue": math.Round(rev*100) / 100})
+				}
+			}
+		}
+		out["topProducts"] = top
+
+		// Top customers by completed-order spend.
+		crows, err := db.Pool.Query(ctx, `
+			SELECT o.customer_user_id, COALESCE(u.name,''), COUNT(*), COALESCE(SUM(o.total),0) AS spent
+			  FROM shopbook_order o LEFT JOIN users u ON u.id=o.customer_user_id
+			 WHERE o.shop_id=$1 AND o.status='completed'
+			 GROUP BY o.customer_user_id, u.name ORDER BY spent DESC LIMIT 10`, shopID)
+		topCust := []map[string]any{}
+		if err == nil {
+			defer crows.Close()
+			for crows.Next() {
+				var id, name string
+				var orders int
+				var spent float64
+				if crows.Scan(&id, &name, &orders, &spent) == nil {
+					topCust = append(topCust, map[string]any{
+						"customerId": id, "customerName": name, "orders": orders,
+						"spent": math.Round(spent*100) / 100,
+					})
+				}
+			}
+		}
+		out["topCustomers"] = topCust
+
+		// Product performance — last 30 days movement.
+		perfRows, err := db.Pool.Query(ctx, `
+			SELECT oi.name, SUM(oi.qty) AS q, COALESCE(SUM(oi.qty*oi.price),0) AS rev
+			  FROM shopbook_order_item oi JOIN shopbook_order o ON o.id=oi.order_id
+			 WHERE o.shop_id=$1 AND o.status='completed' AND o.created_at >= NOW() - INTERVAL '30 days'
+			 GROUP BY oi.name ORDER BY rev DESC LIMIT 20`, shopID)
+		perf := []map[string]any{}
+		if err == nil {
+			defer perfRows.Close()
+			for perfRows.Next() {
+				var name string
+				var q, rev float64
+				if perfRows.Scan(&name, &q, &rev) == nil {
+					perf = append(perf, map[string]any{"name": name, "qty": q, "revenue": math.Round(rev*100) / 100})
+				}
+			}
+		}
+		out["productPerformance"] = perf
 	}
-	httpx.JSON(w, 200, map[string]any{"days": days, "topProducts": top})
+	httpx.JSON(w, 200, out)
 }
 
 // ════════════════════════════════════════════════════════════════
 //  Phase 2c — cross-shop product search + bulk catalog add
 // ════════════════════════════════════════════════════════════════
 
-// Customer: find one product across nearby shops ("who has Maggi?").
+// Customer: price comparison — find one product across nearby approved
+// shops with price, stock, freshness and enough timing data for the client
+// to compute open-now (spec: price-comparison). sort=price|nearest.
 func sbSearchProducts(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
@@ -1514,15 +1999,17 @@ func sbSearchProducts(w http.ResponseWriter, r *http.Request) {
 	lng, okLng := qfloat(r, "lng")
 	args := []any{q}
 	sql := `SELECT s.id, s.name, s.category, s.lat, s.lng, s.rating_sum, s.rating_count,
-	               p.name, p.brand, p.price, p.unit
+	               s.currency, s.status, s.open_time, s.close_time, s.weekly_holiday,
+	               s.lunch_start, s.lunch_end,
+	               p.name, p.brand, p.price, p.unit, p.in_stock, p.updated_at
 	          FROM shopbook_product p JOIN shopbook_shop s ON s.id=p.shop_id
-	         WHERE p.enabled AND p.in_stock AND p.name ILIKE '%'||$1||'%'`
+	         WHERE s.approved AND p.enabled AND p.name ILIKE '%'||$1||'%'`
 	if okLat && okLng {
 		const boxDeg = 0.25
 		sql += ` AND s.lat BETWEEN $2 AND $3 AND s.lng BETWEEN $4 AND $5`
 		args = append(args, lat-boxDeg, lat+boxDeg, lng-boxDeg, lng+boxDeg)
 	}
-	sql += ` ORDER BY p.price LIMIT 60`
+	sql += ` ORDER BY p.in_stock DESC, p.price LIMIT 60`
 	rows, err := db.Pool.Query(ctx, sql, args...)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "db error")
@@ -1531,12 +2018,17 @@ func sbSearchProducts(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	out := []map[string]any{}
 	for rows.Next() {
-		var shopID, shopName, category, pName, pBrand, pUnit string
+		var shopID, shopName, category, currency, status string
+		var openT, closeT, holiday, lunchS, lunchE string
+		var pName, pBrand, pUnit string
 		var slat, slng *float64
 		var ratingSum, ratingCount int
 		var price float64
+		var inStock bool
+		var updated time.Time
 		if err := rows.Scan(&shopID, &shopName, &category, &slat, &slng, &ratingSum, &ratingCount,
-			&pName, &pBrand, &price, &pUnit); err != nil {
+			&currency, &status, &openT, &closeT, &holiday, &lunchS, &lunchE,
+			&pName, &pBrand, &price, &pUnit, &inStock, &updated); err != nil {
 			continue
 		}
 		var rating float64
@@ -1545,13 +2037,26 @@ func sbSearchProducts(w http.ResponseWriter, r *http.Request) {
 		}
 		m := map[string]any{
 			"shopId": shopID, "shopName": shopName, "category": category,
-			"rating": rating, "ratingCount": ratingCount,
+			"rating": rating, "ratingCount": ratingCount, "currency": currency,
+			"shopStatus": status, "openTime": openT, "closeTime": closeT,
+			"weeklyHoliday": holiday, "lunchStart": lunchS, "lunchEnd": lunchE,
 			"productName": pName, "productBrand": pBrand, "price": price, "unit": pUnit,
+			"inStock": inStock, "updatedAt": httpx.JST(&updated),
 		}
 		if okLat && okLng && slat != nil && slng != nil {
 			m["distanceKm"] = math.Round(haversineKm(lat, lng, *slat, *slng)*100) / 100
 		}
 		out = append(out, m)
+	}
+	if r.URL.Query().Get("sort") == "nearest" && okLat && okLng {
+		sort.SliceStable(out, func(i, j int) bool {
+			di, oi := out[i]["distanceKm"].(float64)
+			dj, oj := out[j]["distanceKm"].(float64)
+			if oi != oj {
+				return oi
+			}
+			return di < dj
+		})
 	}
 	httpx.JSON(w, 200, map[string]any{"results": out})
 }
@@ -1565,11 +2070,12 @@ func sbBulkProducts(w http.ResponseWriter, r *http.Request) {
 	}
 	var b struct {
 		Items []struct {
-			Name     string  `json:"name"`
-			Brand    string  `json:"brand"`
-			Category string  `json:"category"`
-			Unit     string  `json:"unit"`
-			Price    float64 `json:"price"`
+			Name       string  `json:"name"`
+			Brand      string  `json:"brand"`
+			Category   string  `json:"category"`
+			Unit       string  `json:"unit"`
+			Price      float64 `json:"price"`
+			TaxPercent float64 `json:"taxPercent"`
 		} `json:"items"`
 	}
 	if err := httpx.Body(r, &b); err != nil || len(b.Items) == 0 {
@@ -1587,9 +2093,9 @@ func sbBulkProducts(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if _, err := tx.Exec(ctx,
-				`INSERT INTO shopbook_product (shop_id, name, brand, category, unit, price)
-				 VALUES ($1,$2,$3,$4,$5,$6)`,
-				shopID, it.Name, it.Brand, it.Category, it.Unit, it.Price); err != nil {
+				`INSERT INTO shopbook_product (shop_id, name, brand, category, unit, price, tax_percent)
+				 VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+				shopID, it.Name, it.Brand, it.Category, it.Unit, it.Price, it.TaxPercent); err != nil {
 				return err
 			}
 			added++

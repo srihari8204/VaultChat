@@ -21,6 +21,14 @@ notifee.onBackgroundEvent(async ({ type, detail }) => {
     try { await require('./scheduledRunner').runDueScheduled(); } catch {}
     return;
   }
+  // Location Lock: "Stop alarm" pressed on the exit-alarm notification while
+  // backgrounded/killed (lazy require keeps the headless load path light).
+  if (data?.type === 'lock-alarm') {
+    if (type === EventType.ACTION_PRESS && detail?.pressAction?.id === 'lock-stop-alarm') {
+      try { await require('./lock/background').silenceAlarmFromNotification(); } catch {}
+    }
+    return;
+  }
   if (data?.type !== 'call') return;
   const id = detail?.pressAction?.id;
   if (type === EventType.ACTION_PRESS && id === 'decline') {
