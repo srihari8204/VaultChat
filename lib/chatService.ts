@@ -1168,6 +1168,25 @@ export async function joinViaInvite(
   return api(`/chats/join/${encodeURIComponent(code)}`, { method: 'POST' });
 }
 
+// ─── Announcements (Groups & Circles) ───────────────────────────────
+//
+// An announcement is an ordinary encrypted message carrying `meta.announcement`.
+// The flag lives in meta because the SERVER must be able to enforce the
+// send_announcements permission, and meta is the only part of a message it can
+// read. It discloses that a message is an announcement, never what it says.
+
+export const ANNOUNCEMENT_META = { announcement: true } as const;
+
+/** Post an announcement. Rejected server-side without send_announcements. */
+export async function sendAnnouncement(chatId: string, text: string): Promise<Message> {
+  return sendMessage(chatId, text, 'text', { meta: { announcement: true } });
+}
+
+/** Is this message an announcement? Reads meta, so no decryption is needed. */
+export function isAnnouncement(m: Pick<Message, 'meta'>): boolean {
+  return !!m.meta && (m.meta as any).announcement === true;
+}
+
 // ─── Shared group calendar (Groups & Circles) ───────────────────────
 //
 // `payload` is CIPHERTEXT the caller seals and opens itself — title, notes,

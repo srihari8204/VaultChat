@@ -292,6 +292,21 @@ func chatsMessagePost(w http.ResponseWriter, r *http.Request) {
 			metaParam = string(j) // typeof [] === 'object' in JS
 		}
 	}
+
+	// Groups & Circles: an ANNOUNCEMENT is an ordinary encrypted message flagged
+	// in `meta`. The server can read meta (it is deliberately PII-free) even
+	// though the body is ciphertext, which is what makes send_announcements a
+	// REAL permission rather than a client-side decoration — gating only in the
+	// UI would let any modified client post one.
+	//
+	// The flag discloses that a message IS an announcement, never what it says.
+	// Checked here, before the per-type validation, so it applies to every
+	// message kind rather than only the one branch it happens to sit in.
+	if meta != nil && chatsTruthy(meta["announcement"]) && !mem.can(groups.PermSendAnnouncement) {
+		httpx.Err(w, 403, "You do not have permission to send announcements")
+		return
+	}
+
 	var replyTo *int64
 	if chatsTruthy(b["replyToId"]) {
 		if n, ok := chatsParseInt(b["replyToId"]); ok {

@@ -170,3 +170,37 @@ func TestNilIfEmpty(t *testing.T) {
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+// Announcements are gated on a permission the SERVER can enforce, because the
+// flag lives in meta (which the server reads) rather than in the ciphertext
+// body (which it cannot). These pin the resolution the gate depends on.
+
+func TestAnnouncementPermissionIsEnforceable(t *testing.T) {
+	// A typed group whose members may NOT announce.
+	member := typedMem("member", map[string][]string{
+		"member": {"view_history"},
+		"admin":  {"send_announcements"},
+	})
+	if member.can(groups.PermSendAnnouncement) {
+		t.Fatal("a member without the grant must not be able to announce")
+	}
+
+	admin := typedMem("admin", map[string][]string{
+		"member": {"view_history"},
+		"admin":  {"send_announcements"},
+	})
+	if !admin.can(groups.PermSendAnnouncement) {
+		t.Fatal("an admin with the grant must be able to announce")
+	}
+}
+
+func TestLegacyGroupAnnouncementFollowsTheOldAdminRule(t *testing.T) {
+	// An untyped group has no matrix, so announcing follows the pre-existing
+	// admin-or-nothing rule rather than becoming impossible for everyone.
+	if !legacyMem("admin").can(groups.PermSendAnnouncement) {
+		t.Fatal("legacy admin should be able to announce")
+	}
+	if legacyMem("member").can(groups.PermSendAnnouncement) {
+		t.Fatal("legacy member should not be able to announce")
+	}
+}

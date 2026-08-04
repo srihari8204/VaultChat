@@ -15,6 +15,7 @@ import * as Location from 'expo-location';
 import { Stack, useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
+import { brandAlpha } from '../constants/theme';
 import FamilyMap, { type FamilyMarker } from '../components/family/FamilyMap';
 // removeCircle stays: hetzner-deploy added a path that forgets a circle locally
 // when the server starts 403/404ing it (kicked, or deleted). That is orthogonal
@@ -38,7 +39,7 @@ import {
 import { requestBackgroundPermission } from '../lib/family/background';
 import { loadAlerts, recordAlert, useUnreadCount } from '../lib/family/alerts';
 import { type CircleMember, type MemberPresence, STALE_MS } from '../lib/family/types';
-import { sendMessage, getMessages, decryptFromChat, getChat } from '../lib/chatService';
+import { sendMessage, getMessages, decryptFromChat, getChat, sendAnnouncement, isAnnouncement } from '../lib/chatService';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { navigateTo } from '../lib/nav/openNavigation';
 import { haversine } from '../lib/nav/geo';
@@ -96,6 +97,10 @@ export default function FamilySpaceScreen() {
   // Presentation only — every mutating endpoint re-checks. A stale or absent
   // set must never widen what is shown, so it starts empty.
   const [perms, setPerms] = useState<Set<Permission>>(new Set());
+  // The most recent announcement, pinned to the dashboard.
+  const [announcement, setAnnouncement] = useState<{ text: string; at: number } | null>(null);
+  const [announcing, setAnnouncing] = useState(false);
+  const [announceTxt, setAnnounceTxt] = useState('');
 
   useEffect(() => { loadAlerts(); }, []);
 
@@ -208,6 +213,18 @@ export default function FamilySpaceScreen() {
       try {
         const msgs = await getMessages(active.id, { limit: 30 });
         const out: Highlight[] = [];
+        // Announcements are identified from meta, so finding the latest costs
+        // no extra request and no decryption of unrelated messages.
+        let latest: { text: string; at: number } | null = null;
+        for (const m of msgs) {
+          if (!m.deletedAt && m.content && isAnnouncement(m)) {
+            const at = new Date(m.createdAt).getTime();
+            if (!latest || at > latest.at) {
+              try { latest = { text: await decryptFromChat(active.id, m.senderId, m.content, m.id), at }; } catch {}
+            }
+          }
+        }
+        if (!dead) setAnnouncement(latest);
         for (const m of msgs) {
           if (m.deletedAt || !m.content || (m.type !== 'text' && m.type !== 'system')) continue;
           let t = '';
@@ -272,6 +289,7 @@ export default function FamilySpaceScreen() {
   const canRemove  = hasPerm(perms, 'remove_members')   || isAdminish;
   const canZones   = hasPerm(perms, 'manage_zones')     || isAdminish;
   const canHistory = hasPerm(perms, 'view_history')     || isAdminish;
+  const canAnnounce = hasPerm(perms, 'send_announcements') || isAdminish;
   // Identity for this group's type — icon and accent drive the whole dashboard.
   const ident = groupIdentity(active ?? {});
   const liveCount = useMemo(() => {
@@ -527,6 +545,19 @@ export default function FamilySpaceScreen() {
             </ScrollView>
           )}
 
+          {/* pinned announcement */}
+          {!!announcement && (
+            <View style={[st.announce, { backgroundColor: brandAlpha(0.08), borderColor: colors.primary }]}>
+              <Ionicons name="megaphone" size={17} color={colors.primary} />
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: colors.text, fontSize: 13.5, fontWeight: '600' }} numberOfLines={3}>
+                  {announcement.text}
+                </Text>
+                <Text style={{ color: colors.textDim, fontSize: 11 }}>{ago(announcement.at)}</Text>
+              </View>
+            </View>
+          )}
+
           {/* status card */}
           <View style={[st.status, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={[st.statusIcon, { backgroundColor: (allGood ? colors.success : ident.color) + '22' }]}>
@@ -648,6 +679,50 @@ export default function FamilySpaceScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
+      {/* ── Announcement sheet ── */}
+      <Modal visible={announcing} transparent animationType="slide" onRequestClose={() => setAnnouncing(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={st.modalWrap}>
+          <Pressable style={{ flex: 1 }} onPress={() => setAnnouncing(false)} />
+          <View style={[st.modal, { backgroundColor: colors.surfaceSolid, borderColor: colors.border }]}>
+            <Text style={[st.modalTitle, { color: colors.text }]}>Announcement</Text>
+            <Text style={{ color: colors.textDim, fontSize: 12.5, textAlign: 'center', marginBottom: 8 }}>
+              Pinned to everyone&apos;s dashboard and raised as an alert.
+            </Text>
+            <TextInput
+              value={announceTxt} onChangeText={setAnnounceTxt} multiline
+              placeholder="What should everyone know?" placeholderTextColor={colors.textFaint}
+              style={[st.noteInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface, height: 96, paddingTop: 12 }]}
+              maxLength={500}
+            />
+            <TouchableOpacity
+              onPress={async () => {
+                const t = announceTxt.trim();
+                if (!t || !active || !me || busy) return;
+                setBusy(true);
+                try {
+                  await sendAnnouncement(active.id, t);
+                  await recordAlert({
+                    circleId: active.id, kind: 'announcement',
+                    actorId: me.id, actorName: me.name, text: t,
+                  });
+                  setAnnouncing(false); setAnnounceTxt('');
+                  setBump((b) => b + 1);
+                } catch (e: any) {
+                  // The server re-checks the permission, so this can legitimately
+                  // fail even though the button was drawn.
+                  Alert.alert('Not posted', e?.message ?? 'Could not post the announcement.');
+                } finally { setBusy(false); }
+              }}
+              disabled={!announceTxt.trim() || busy}
+              style={[st.btnWide, { backgroundColor: announceTxt.trim() && !busy ? colors.primary : colors.border }]}
+            >
+              {busy ? <ActivityIndicator color="#fff" />
+                : <><Ionicons name="megaphone" size={17} color="#fff" /><Text style={{ color: '#fff', fontWeight: '800', fontSize: 15 }}>Post to group</Text></>}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
       {/* ── Manage circle sheet ── */}
       <Modal visible={manage} transparent animationType="slide" onRequestClose={() => setManage(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={st.modalWrap}>
@@ -679,6 +754,11 @@ export default function FamilySpaceScreen() {
             <TouchableOpacity onPress={() => { setManage(false); router.push('/group-create' as any); }} style={[st.mRow, { borderColor: colors.border }]}>
               <Ionicons name="add-circle-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Create or join another group</Text>
             </TouchableOpacity>
+            {canAnnounce && (
+              <TouchableOpacity onPress={() => { setManage(false); setAnnounceTxt(''); setAnnouncing(true); }} style={[st.mRow, { borderColor: colors.border }]}>
+                <Ionicons name="megaphone-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Post an announcement</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-calendar' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: colors.border }]}>
               <Ionicons name="calendar-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Shared calendar</Text>
             </TouchableOpacity>
@@ -735,6 +815,7 @@ const st = StyleSheet.create({
   tileTxt: { fontSize: 12.5, fontWeight: '700' },
   badge: { position: 'absolute', top: 6, right: 10, minWidth: 18, height: 18, borderRadius: 9, borderWidth: 1.5, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' },
   badgeTxt: { color: '#fff', fontSize: 10, fontWeight: '800' },
+  announce: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderWidth: 1, borderRadius: 14, marginBottom: 10 },
   sosBig: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderWidth: 1.5, borderRadius: 18, overflow: 'hidden', marginBottom: 6 },
   sosIcon: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
   shareRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8 },
@@ -752,6 +833,7 @@ const st = StyleSheet.create({
   checkGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   checkBtn: { flexBasis: '47%', flexGrow: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 52, borderRadius: 14, borderWidth: 1 },
   noteInput: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, height: 46, marginTop: 4, fontSize: 14.5 },
+  btnWide: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 50, borderRadius: 13, marginTop: 12 },
   saveBtn: { width: 46, height: 46, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   mRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 13, borderTopWidth: StyleSheet.hairlineWidth },
   mTxt: { fontSize: 15, fontWeight: '600' },
