@@ -22,6 +22,7 @@ import { assessRisk, type SecuritySignal, type SecuritySignalType } from './risk
 import {
   buildSnapshot, diffSnapshots, type Platform, type PostureDiff, type PostureSnapshot,
 } from './posture';
+export type { Platform } from './posture';
 import {
   decideNotifications, type SecurityNotification,
 } from './notificationPolicy';

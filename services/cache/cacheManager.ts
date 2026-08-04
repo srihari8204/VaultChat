@@ -21,7 +21,7 @@
 // run — it never leaves a half-deleted, corrupt cache.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { planCleanup, dueForAutoClean, type CacheCategoryId, type CleanupPlan } from './cachePlan';
 
 const LAST_CLEAN_KEY = 'vc_cache_last_clean';
@@ -46,7 +46,7 @@ function cacheDirs(): Record<Exclude<CacheCategoryId, 'dbCache'>, string[]> {
 
 async function dirSize(uri: string): Promise<number> {
   try {
-    const info = await FileSystem.getInfoAsync(uri, { size: true });
+    const info = await FileSystem.getInfoAsync(uri);
     if (!info.exists) return 0;
     if (!info.isDirectory) return (info as any).size ?? 0;
     const base = uri.endsWith('/') ? uri : uri + '/';
