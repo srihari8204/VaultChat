@@ -1,59 +1,37 @@
-// app/aiguardian.tsx — Security Guardian.
+// app/aiguardian.tsx — Security Hub (Device Security & Monitoring).
 //
-// Honest device & account security overview. Replaces the old screen that
-// hardcoded a "97/100" score and a fake 3-second "AI analysis". Everything here
-// is real: the score is computed from actual signals (services/security/
-// securityScore), recent events come from the on-device tamper-evident audit
-// chain, and "Run device scan" performs a real root/Frida/emulator scan.
-// No invented numbers, no behavioral-AI claims we don't implement.
+// The screen behind the mini-apps "Security Hub" tile (formerly "Pegasus").
+// A THIN renderer: all logic lives in the Node-tested pure core under
+// services/security/deviceSecurity (riskEngine → posture → viewModel). This file
+// only calls scanDevice()/getCurrentSnapshot(), records the returned
+// notifications into the tamper-evident audit chain, and paints the view model.
+//
+// Honest by construction: the score, bands, and factor rows come straight from
+// the pure modules, and a factor the collectors couldn't evaluate shows as
+// "Not evaluated" — never a fabricated "clear". This screen observes and alerts;
+// it never wipes (that lives in the separate boot-time securityService).
 
-import { BRAND_ACCENT } from '../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useState , useMemo} from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
-  ActivityIndicator, Alert, ScrollView, StyleSheet, Text,
-  TouchableOpacity, View,
+  ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
-import {
-  listSecurityEvents, type AuditSeverity, type SecurityEvent,
-} from '../services/security/auditChain';
-import { computeSecurityScore, type SecurityScore } from '../services/security/securityScore';
-import { scanDeviceAndRecord } from '../services/securityService';
+import { appendSecurityEvent, type AuditSeverity } from '../services/security/auditChain';
+import { getCurrentSnapshot, scanDevice } from '../services/security/deviceSecurity/postureStore';
+import { buildDashboardViewModel, type DashboardVM } from '../services/security/deviceSecurity/viewModel';
+import type { SecurityNotification } from '../services/security/deviceSecurity/notificationPolicy';
 
-const SEV_COLOR: Record<AuditSeverity, string> = {
-  critical: '#EF4444', high: '#F59E0B', medium: '#FBBF24', low: '#34D399', info: '#06B6D4',
+const STATUS_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
+  critical: 'close-circle', warning: 'alert-circle', clear: 'checkmark-circle',
+  pending: 'help-circle', not_applicable: 'remove-circle',
 };
 
-const GRADE_META: Record<SecurityScore['grade'], { color: string; label: string }> = {
-  strong:  { color: BRAND_ACCENT, label: 'Strong'      },
-  good:    { color: '#34D399',      label: 'Good'        },
-  fair:    { color: '#F59E0B',      label: 'Fair'        },
-  weak:    { color: '#EF4444',      label: 'Needs work'  },
-  unknown: { color: '#9CA3AF', label: 'Run a scan'  },
-};
-
-function iconForType(type: string): keyof typeof Ionicons.glyphMap {
-  switch (type) {
-    case 'SCREENSHOT_ATTEMPT': return 'camera';
-    case 'DEVICE_SCAN':
-    case 'DEVICE_INTEGRITY':   return 'shield-checkmark';
-    case 'ROOT_DETECTED':      return 'bug';
-    case 'KEY_CHANGE':         return 'key';
-    case 'LOGIN':              return 'log-in';
-    default:                   return 'notifications';
-  }
-}
-
-function timeAgo(ts: number): string {
-  const s = (Date.now() - ts) / 1000;
-  if (s < 60) return 'just now';
-  const m = s / 60; if (m < 60) return `${Math.floor(m)}m ago`;
-  const h = m / 60; if (h < 24) return `${Math.floor(h)}h ago`;
-  const d = h / 24; if (d < 7) return `${Math.floor(d)}d ago`;
-  return new Date(ts).toLocaleDateString();
+// notification severity → audit-chain severity for the recorded event.
+function auditSeverity(n: SecurityNotification): AuditSeverity {
+  return n.severity === 'critical' ? 'critical' : 'medium';
 }
 
 function useS() {
@@ -61,18 +39,16 @@ function useS() {
   return useMemo(() => makeStyles(colors), [colors]);
 }
 
-export default function SecurityGuardianScreen() {
+export default function SecurityHubScreen() {
   const { colors } = useTheme();
   const S = useS();
   const router = useRouter();
-  const [data, setData] = useState<SecurityScore | null>(null);
-  const [events, setEvents] = useState<SecurityEvent[]>([]);
+  const [vm, setVm] = useState<DashboardVM>(() => buildDashboardViewModel(null, Date.now()));
   const [scanning, setScanning] = useState(false);
 
   const load = useCallback(async () => {
-    const [score, evs] = await Promise.all([computeSecurityScore(), listSecurityEvents(8)]);
-    setData(score);
-    setEvents(evs);
+    const snap = await getCurrentSnapshot();
+    setVm(buildDashboardViewModel(snap, Date.now()));
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -81,12 +57,35 @@ export default function SecurityGuardianScreen() {
     if (scanning) return;
     setScanning(true);
     try {
-      const report = await scanDeviceAndRecord();
+      const { snapshot, notifications } = await scanDevice();
+
+      // Record each meaningful notification into the tamper-evident audit chain
+      // (which also surfaces them in the Alerts tab + zero-knowledge backup).
+      for (const n of notifications) {
+        appendSecurityEvent({
+          type: n.event,
+          severity: auditSeverity(n),
+          title: n.title,
+          detail: n.body,
+          meta: { factorKey: n.factorKey ?? null, band: snapshot.band, score: snapshot.score },
+        }).catch(() => {});
+      }
+      // Always leave a scan-completed trace so the log shows the check ran.
+      appendSecurityEvent({
+        type: 'DEVICE_SCAN',
+        severity: snapshot.band === 'low' ? 'info' : snapshot.band === 'critical' ? 'critical' : 'medium',
+        title: `Device scan: ${snapshot.band} risk (${snapshot.score}/100)`,
+        detail: 'Device-security scan completed. Clean ≠ guaranteed safe — a sandboxed app cannot see kernel-level implants.',
+        meta: { band: snapshot.band, score: snapshot.score, platform: snapshot.platform },
+      }).catch(() => {});
+
+      const view = buildDashboardViewModel(snapshot, Date.now());
+      setVm(view);
       Alert.alert(
-        report.clean ? 'Scan complete — clean' : 'Scan complete — issues found',
-        report.clean
-          ? 'No root, instrumentation, or tampering indicators were detected.\n\nNote: a sandboxed app cannot detect kernel-level implants, so clean does not guarantee safety.'
-          : report.threats.map((t) => `• ${t.detail}`).join('\n'),
+        `Scan complete — ${view.bandLabel}`,
+        view.actions.length
+          ? view.actions.map((a) => `• ${a.text}`).join('\n')
+          : 'No security indicators were found.\n\nNote: a sandboxed app cannot detect kernel-level implants, so clean does not guarantee safety.',
       );
     } catch {
       Alert.alert('Scan failed', 'The device scan could not complete. Please try again.');
@@ -96,8 +95,6 @@ export default function SecurityGuardianScreen() {
     }
   }, [scanning, load]);
 
-  const grade = GRADE_META[data?.grade ?? 'unknown'];
-
   return (
     <View style={S.container}>
       <View style={S.header}>
@@ -105,91 +102,84 @@ export default function SecurityGuardianScreen() {
           <Ionicons name="chevron-back" size={26} color={colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
-          <Text style={S.headerTitle}>Security Guardian</Text>
-          <Text style={S.headerSub}>Live checks on this device & account</Text>
+          <Text style={S.headerTitle}>Security Hub</Text>
+          <Text style={S.headerSub}>Live checks on this device</Text>
         </View>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
-        {/* Score hero */}
+        {/* Score hero — risk 0–100 (lower is safer). */}
         <View style={S.hero}>
-          <View style={[S.ring, { borderColor: grade.color }]}>
-            <Text style={[S.scoreNum, { color: grade.color }]}>
-              {data?.score ?? '—'}
-            </Text>
-            {data?.score != null && <Text style={S.scoreMax}>/100</Text>}
+          <View style={[S.ring, { borderColor: vm.bandColor }]}>
+            <Text style={[S.scoreNum, { color: vm.bandColor }]}>{vm.score ?? '—'}</Text>
+            {vm.score != null && <Text style={S.scoreMax}>/100</Text>}
           </View>
-          <Text style={[S.gradeLabel, { color: grade.color }]}>{grade.label}</Text>
-          <Text style={S.heroSub}>
-            {data?.score == null
-              ? 'Run a device scan to evaluate device integrity.'
-              : 'Score reflects encryption, app lock, and your latest device scan.'}
-          </Text>
+          <Text style={[S.bandLabel, { color: vm.bandColor }]}>{vm.bandLabel}</Text>
+          <Text style={S.heroSub}>{vm.hasScanned ? vm.bandBlurb : 'Run a device scan to evaluate this device.'}</Text>
+          {vm.hasScanned && <Text style={S.lastScan}>Last scan {vm.lastScanText} · lower risk is safer</Text>}
         </View>
 
-        {/* Run scan */}
         <TouchableOpacity style={S.scanBtn} onPress={onScan} disabled={scanning} activeOpacity={0.85}>
-          {scanning
-            ? <ActivityIndicator size="small" color="#fff" />
-            : <Ionicons name="shield-checkmark" size={18} color="#fff" />}
+          {scanning ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="shield-checkmark" size={18} color="#fff" />}
           <Text style={S.scanBtnText}>{scanning ? 'Scanning device…' : 'Run device scan'}</Text>
         </TouchableOpacity>
 
-        {/* Checks */}
-        <Text style={S.sectionTitle}>CHECKS</Text>
-        <View style={S.card}>
-          {(data?.factors ?? []).map((f, i) => {
-            const color = f.pending ? colors.textDim : f.ok ? BRAND_ACCENT : '#EF4444';
-            const icon = f.pending ? 'help-circle' : f.ok ? 'checkmark-circle' : 'close-circle';
-            return (
-              <View key={f.key}>
-                <View style={S.checkRow}>
-                  <Ionicons name={icon} size={22} color={color} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={S.checkLabel}>{f.label}</Text>
-                    <Text style={S.checkDetail}>{f.detail}</Text>
+        {/* Recommended actions (only when there are any). */}
+        {vm.actions.length > 0 && (
+          <>
+            <Text style={S.sectionTitle}>RECOMMENDED ACTIONS</Text>
+            <View style={S.card}>
+              {vm.actions.map((a, i) => (
+                <View key={a.key + i}>
+                  <View style={S.actionRow}>
+                    <Ionicons
+                      name={a.severity === 'critical' ? 'alert-circle' : 'warning'}
+                      size={20}
+                      color={a.severity === 'critical' ? '#EF4444' : '#F59E0B'}
+                    />
+                    <Text style={S.actionText}>{a.text}</Text>
                   </View>
+                  {i < vm.actions.length - 1 && <View style={S.divider} />}
                 </View>
-                {i < (data!.factors.length - 1) && <View style={S.divider} />}
-              </View>
-            );
-          })}
-        </View>
+              ))}
+            </View>
+          </>
+        )}
 
-        {/* Recent events */}
-        <Text style={S.sectionTitle}>RECENT SECURITY EVENTS</Text>
-        {events.length === 0 ? (
+        {/* Checks — every dashboard factor row. */}
+        <Text style={S.sectionTitle}>CHECKS</Text>
+        {vm.factors.length === 0 ? (
           <View style={[S.card, S.emptyCard]}>
-            <Text style={S.emptyText}>
-              No events recorded yet. Captures and scans appear here and in the Alerts tab.
-            </Text>
+            <Text style={S.emptyText}>Run a device scan to see per-check results.</Text>
           </View>
         ) : (
           <View style={S.card}>
-            {events.map((e, i) => {
-              const color = SEV_COLOR[e.severity] ?? SEV_COLOR.info;
-              return (
-                <View key={e.seq}>
-                  <TouchableOpacity
-                    style={S.eventRow}
-                    activeOpacity={0.7}
-                    onPress={() => Alert.alert(e.title, `${e.detail || '—'}\n\n${new Date(e.ts).toLocaleString()}`)}
-                  >
-                    <View style={[S.eventIcon, { backgroundColor: color + '22' }]}>
-                      <Ionicons name={iconForType(e.type)} size={18} color={color} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={S.eventTitle} numberOfLines={1}>{e.title}</Text>
-                      <Text style={S.eventDetail} numberOfLines={1}>{e.detail || '—'}</Text>
-                    </View>
-                    <Text style={S.eventTime}>{timeAgo(e.ts)}</Text>
-                  </TouchableOpacity>
-                  {i < events.length - 1 && <View style={S.divider} />}
+            {vm.factors.map((f, i) => (
+              <View key={f.key}>
+                <View style={S.checkRow}>
+                  <Ionicons name={STATUS_ICON[f.status] ?? 'help-circle'} size={22} color={f.statusColor} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={S.checkLabel}>{f.label}</Text>
+                    {!!f.detail && <Text style={S.checkDetail}>{f.detail}</Text>}
+                  </View>
+                  <Text style={[S.statusPill, { color: f.statusColor, borderColor: f.statusColor }]}>{f.statusLabel}</Text>
                 </View>
-              );
-            })}
+                {i < vm.factors.length - 1 && <View style={S.divider} />}
+              </View>
+            ))}
           </View>
         )}
+
+        {/* Permanent honesty disclosure. */}
+        <Text style={S.sectionTitle}>WHAT THIS CAN &amp; CAN'T DETECT</Text>
+        <View style={[S.card, S.discCard]}>
+          <Text style={S.discText}>
+            This checks for indicators a phone app can see — root/jailbreak, instrumentation, debuggers,
+            emulators, and risky device settings. It <Text style={S.discBold}>cannot</Text> detect
+            kernel-level implants (true Pegasus-class spyware) or well-hidden root, so a clean result
+            lowers risk but is not a guarantee of safety.
+          </Text>
+        </View>
 
         <TouchableOpacity style={S.alertsLink} onPress={() => router.push('/(tabs)/alerts')} activeOpacity={0.7}>
           <Text style={S.alertsLinkText}>View full security log</Text>
@@ -207,12 +197,13 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   headerTitle: { color: c.text, fontSize: 18, fontWeight: '800' },
   headerSub: { color: c.textDim, fontSize: 12, marginTop: 1 },
 
-  hero: { alignItems: 'center', paddingVertical: 28, gap: 8 },
+  hero: { alignItems: 'center', paddingVertical: 26, gap: 6 },
   ring: { width: 130, height: 130, borderRadius: 65, borderWidth: 5, justifyContent: 'center', alignItems: 'center', flexDirection: 'row' },
   scoreNum: { fontSize: 44, fontWeight: '900' },
   scoreMax: { color: c.textFaint, fontSize: 15, fontWeight: '700', marginLeft: 2, marginTop: 14 },
-  gradeLabel: { fontSize: 18, fontWeight: '800', marginTop: 4 },
+  bandLabel: { fontSize: 18, fontWeight: '800', marginTop: 4 },
   heroSub: { color: c.textDim, fontSize: 13, textAlign: 'center', paddingHorizontal: 40, lineHeight: 19 },
+  lastScan: { color: c.textFaint, fontSize: 11.5, marginTop: 2 },
 
   scanBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginHorizontal: 16, backgroundColor: c.primary, paddingVertical: 15, borderRadius: 14 },
   scanBtnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
@@ -221,18 +212,20 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   card: { marginHorizontal: 16, backgroundColor: c.card, borderRadius: 16, borderWidth: 1, borderColor: c.border, overflow: 'hidden' },
   divider: { height: 1, backgroundColor: c.separator, marginLeft: 16 },
 
+  actionRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 14 },
+  actionText: { color: c.text, fontSize: 13.5, flex: 1, lineHeight: 19 },
+
   checkRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 },
   checkLabel: { color: c.text, fontSize: 14.5, fontWeight: '700' },
   checkDetail: { color: c.textDim, fontSize: 12.5, marginTop: 2, lineHeight: 17 },
+  statusPill: { fontSize: 10.5, fontWeight: '800', borderWidth: 1, borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2, overflow: 'hidden' },
 
   emptyCard: { padding: 18 },
   emptyText: { color: c.textDim, fontSize: 13, lineHeight: 19, textAlign: 'center' },
 
-  eventRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12 },
-  eventIcon: { width: 36, height: 36, borderRadius: 11, justifyContent: 'center', alignItems: 'center' },
-  eventTitle: { color: c.text, fontSize: 14, fontWeight: '700' },
-  eventDetail: { color: c.textDim, fontSize: 12, marginTop: 1 },
-  eventTime: { color: c.textFaint, fontSize: 11 },
+  discCard: { padding: 16 },
+  discText: { color: c.textDim, fontSize: 12.5, lineHeight: 19 },
+  discBold: { color: c.text, fontWeight: '800' },
 
   alertsLink: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 22 },
   alertsLinkText: { color: c.primary, fontSize: 14, fontWeight: '700' },
