@@ -30,6 +30,12 @@ export interface Shop {
   plan: 'free' | 'pro';
   lunchStart: string;   // HH:MM, '' = none
   lunchEnd: string;
+  // Upgrade (openspec: shop-book-upgrade)
+  approved: boolean;
+  verified: boolean;
+  country: string;               // ISO-3166 alpha-2, e.g. 'IN'
+  currency: string;              // display symbol from the country config
+  taxConfig: Record<string, string | boolean>;
 }
 
 export interface Product {
@@ -41,6 +47,33 @@ export interface Product {
   price: number;
   inStock: boolean;
   enabled: boolean;
+  taxPercent: number;
+  updatedAt: string;   // price freshness (shown in comparison)
+}
+
+// ── Country Tax Engine ────────────────────────────────────────────
+export interface CountryTaxField { id: string; label: string; type?: 'bool' }
+export interface CountryConfig {
+  code: string;
+  name: string;
+  currencySymbol: string;
+  currencyCode: string;
+  taxType: string;               // GST | VAT | Sales Tax | GST/HST/PST
+  taxSplit: string[];            // e.g. ['CGST','SGST']
+  taxFields: CountryTaxField[];  // all optional, always
+  documents: string[];
+  dateFormat: string;
+}
+
+export function countries() {
+  return api<{ countries: CountryConfig[] }>(`/shopbook/countries`).then((r) => r.countries);
+}
+
+export interface StarterItem { name: string; unit: string }
+export function starterCatalog(category: string) {
+  return api<{ items: StarterItem[] }>(
+    `/shopbook/starter-catalog?category=${encodeURIComponent(category)}`,
+  ).then((r) => r.items);
 }
 
 export interface OrderSummary {
@@ -52,18 +85,24 @@ export interface OrderSummary {
   status: OrderStatus;
   total: number;
   createdAt: string;
+  currency?: string;
 }
 
 export interface OrderItem {
   id: string;
   name: string;
   brand: string;
+  unit: string;
   qty: number;
   price: number;
+  taxPercent: number;
   note: string;
   availability: ItemAvailability;
   altName: string;
+  altPrice: number;
 }
+
+export interface TimelineEvent { status: OrderStatus; note: string; at: string }
 
 export interface OrderDetail {
   id: string;
@@ -80,6 +119,69 @@ export interface OrderDetail {
   deliveryFee: number;
   address: string;
   rated: boolean;
+  // Upgrade
+  currency: string;
+  timeline: TimelineEvent[];
+  cancelReason: string;
+  cancelledBy: '' | 'customer' | 'owner';
+  rejectReason: string;
+  hasInvoice: boolean;
+}
+
+// ── invoices ──────────────────────────────────────────────────────
+export interface InvoiceLine {
+  name: string; brand: string; unit: string; qty: number; price: number; taxPercent: number;
+}
+export interface Invoice {
+  id: string;
+  orderId: string;
+  number: number;
+  invoiceNo: string;      // e.g. INV-0042
+  country: string;
+  taxType: string;        // '' when the shop has no tax configured
+  currency: string;
+  subtotal: number;
+  discount: number;
+  taxTotal: number;
+  total: number;
+  business: { name: string; address: string; phone: string; tax: Record<string, string | boolean> };
+  customerName: string;
+  items: InvoiceLine[];
+  taxBreakdown: { label: string; amount: number }[];
+  createdAt: string;
+}
+
+export function orderInvoice(orderId: string) {
+  return api<Invoice>(`/shopbook/orders/${orderId}/invoice`);
+}
+
+// ── notification inbox ────────────────────────────────────────────
+export interface Notification {
+  id: string;
+  title: string;
+  body: string;
+  event: string;
+  data: Record<string, unknown>;
+  read: boolean;
+  createdAt: string;
+}
+
+export function notifications() {
+  return api<{ notifications: Notification[]; unread: number }>(`/shopbook/notifications`);
+}
+
+export function markNotificationsRead(ids?: string[]) {
+  return api<{ ok: boolean }>(`/shopbook/notifications/read`, {
+    method: 'POST', json: ids?.length ? { ids } : { all: true },
+  });
+}
+
+// ── customer: cross-shop pending summary ──────────────────────────
+export interface LedgerSummary {
+  shopId: string; shopName: string; currency: string; pending: number; totalPurchase: number;
+}
+export function myLedgers() {
+  return api<{ ledgers: LedgerSummary[]; totalPending: number }>(`/shopbook/my-ledgers`);
 }
 
 // ── Phase 2 shapes ────────────────────────────────────────────────
@@ -161,6 +263,7 @@ export function shopProducts(id: string) {
 
 export interface PlaceOrderItem {
   name: string; brand: string; qty: number; price: number; note: string;
+  unit?: string; taxPercent?: number;
 }
 export interface PlaceOrderOpts {
   couponCode?: string; delivery?: boolean; address?: string;
@@ -235,6 +338,13 @@ export function decideAlternative(orderId: string, itemId: string, accept: boole
   );
 }
 
+// Customer cancels their own order — allowed only while it is still pending.
+export function cancelOrder(orderId: string, reason: string) {
+  return api<{ ok: boolean; status: OrderStatus }>(`/shopbook/orders/${orderId}/cancel`, {
+    method: 'POST', json: { reason },
+  });
+}
+
 export function customerLedger(shopId: string) {
   return api<Ledger>(`/shopbook/ledger/${shopId}`);
 }
@@ -268,16 +378,18 @@ export function ownerOrders(status?: string) {
 }
 
 export function setItemAvailability(
-  orderId: string, itemId: string, availability: ItemAvailability, altName = '',
+  orderId: string, itemId: string, availability: ItemAvailability, altName = '', altPrice = 0,
 ) {
   return api<{ ok: boolean }>(`/shopbook/my-shop/orders/${orderId}/item/${itemId}`, {
-    method: 'POST', json: { availability, altName },
+    method: 'POST', json: { availability, altName, altPrice },
   });
 }
 
-export function setOrderStatus(orderId: string, status: OrderStatus) {
+// `reason` is required for 'rejected' (one of the six codes) and 'cancelled'
+// (free text); the backend validates transitions and windows.
+export function setOrderStatus(orderId: string, status: OrderStatus, reason = '') {
   return api<{ ok: boolean; status: OrderStatus }>(`/shopbook/my-shop/orders/${orderId}/status`, {
-    method: 'POST', json: { status },
+    method: 'POST', json: { status, reason },
   });
 }
 
@@ -313,10 +425,26 @@ export function setPlan(plan: 'free' | 'pro') {
 }
 
 export interface ReportDay { date: string; orders: number; sales: number }
-export interface TopProduct { name: string; qty: number }
-export interface Reports { days: ReportDay[]; topProducts: TopProduct[] }
-export function reports() {
-  return api<Reports>(`/shopbook/my-shop/reports`);
+export interface TopProduct { name: string; qty: number; revenue?: number }
+export interface TopCustomer { customerId: string; customerName: string; orders: number; spent: number }
+export interface TaxMonth { month: string; taxableSales: number; taxCollected: number }
+export interface Reports {
+  plan: 'free' | 'pro';
+  // basic (every plan)
+  days: ReportDay[];
+  weeks: ReportDay[];
+  months: ReportDay[];
+  pendingTotal: number;
+  pendingCustomers: number;
+  // advanced (Pro)
+  years?: ReportDay[];
+  taxReport?: TaxMonth[];
+  topProducts?: TopProduct[];
+  topCustomers?: TopCustomer[];
+  productPerformance?: TopProduct[];
+}
+export function reports(scope: 'basic' | 'advanced' = 'basic') {
+  return api<Reports>(`/shopbook/my-shop/reports?scope=${scope}`);
 }
 
 // ── Phase 2c: cross-shop product search + bulk add ────────────────
@@ -331,9 +459,21 @@ export interface ProductHit {
   productBrand: string;
   price: number;
   unit: string;
+  // Upgrade: stock, freshness + enough timing data for open-now sorting
+  inStock: boolean;
+  updatedAt: string;
+  currency: string;
+  shopStatus: ShopStatus;
+  openTime: string;
+  closeTime: string;
+  weeklyHoliday: string;
+  lunchStart: string;
+  lunchEnd: string;
 }
-export function searchProducts(q: string, lat?: number, lng?: number) {
-  const p = new URLSearchParams({ q });
+export function searchProducts(
+  q: string, lat?: number, lng?: number, sort: 'price' | 'nearest' = 'price',
+) {
+  const p = new URLSearchParams({ q, sort });
   if (lat != null && lng != null) { p.set('lat', String(lat)); p.set('lng', String(lng)); }
   return api<{ results: ProductHit[] }>(`/shopbook/search-products?${p.toString()}`).then((r) => r.results);
 }

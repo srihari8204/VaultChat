@@ -25,13 +25,17 @@ import { getCurrentUserAsync } from './(constants)/authService';
 import { navigateTo } from '../lib/nav/openNavigation';
 import { SHOP_CATEGORIES, categoryIcon, categoryLabel } from '../constants/shopCategories';
 import {
-  formatINR, formatDistance, shopOpenState, orderStatusLabel, orderProgress,
+  formatINR, formatMoney, formatDistance, shopOpenState, orderStatusLabel, orderProgress,
   nextOrderStatus, cartTotal, clientKey, ORDER_STEPS,
+  canCustomerCancel, canOwnerCancel, REJECT_REASONS,
   couponDiscount, couponLabel, starText, loyaltyTier, parseBulkProducts,
   type CartItem, type OrderStatus, type ItemAvailability,
 } from '../utils/shopbook';
 import * as SB from '../services/shopBookService';
 import { listShopLists, saveShopList, deleteShopList, type ShopList } from '../db/shopLists';
+import {
+  t, useShopBookLang, initShopBookLang, setShopBookLang, SB_LANGUAGES,
+} from '../lib/shopbookI18n';
 
 // ── palette (green + navy, from the SHOP BOOK poster) ──────────────
 const C = {
@@ -53,11 +57,25 @@ export default function ShopBookScreen() {
   const initialShopId = typeof params.shop === 'string' ? params.shop : undefined;
   const [mode, setMode] = useState<Mode>('customer');
   const [me, setMe] = useState<{ id: string; name: string } | null>(null);
+  const [inbox, setInbox] = useState(false);
+  const [unread, setUnread] = useState(0);
+  useShopBookLang(); // re-render on language change
 
   useEffect(() => { (async () => {
+    await initShopBookLang();
     const u = await getCurrentUserAsync().catch(() => null);
     setMe({ id: u?.id ?? 'local', name: u?.name ?? u?.email ?? 'You' });
+    try { setUnread((await SB.notifications()).unread); } catch {}
   })(); }, []);
+
+  if (inbox) {
+    return (
+      <View style={s.screen}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <NotificationCenter onBack={() => setInbox(false)} onRead={() => setUnread(0)} />
+      </View>
+    );
+  }
 
   return (
     <View style={s.screen}>
@@ -71,6 +89,10 @@ export default function ShopBookScreen() {
           <Text style={s.headerTitle}>🛍️ Shop Book</Text>
           <Text style={s.headerSub}>Find shops • Order • Digital Khata</Text>
         </View>
+        <TouchableOpacity onPress={() => setInbox(true)} hitSlop={10} style={s.hBtn}>
+          <Ionicons name="notifications-outline" size={22} color="#fff" />
+          {unread > 0 && <View style={s.cartBadge}><Text style={s.cartBadgeText}>{unread > 9 ? '9+' : unread}</Text></View>}
+        </TouchableOpacity>
       </View>
       <View style={s.modeRow}>
         {(['customer', 'owner'] as Mode[]).map((m) => (
@@ -163,9 +185,9 @@ function CustomerApp({ me, initialShopId }: { me: { id: string; name: string } |
 
       <TabBar
         tabs={[
-          { id: 'shops', label: 'Shops', icon: 'storefront' },
-          { id: 'orders', label: 'Orders', icon: 'receipt' },
-          { id: 'profile', label: 'Profile', icon: 'person-circle' },
+          { id: 'shops', label: t('tab.shops'), icon: 'storefront' },
+          { id: 'orders', label: t('tab.orders'), icon: 'receipt' },
+          { id: 'profile', label: t('tab.profile'), icon: 'person-circle' },
         ]}
         active={tab}
         onChange={(t) => { setTab(t as CustTab); setSelShop(null); setLedgerShop(null); setTrackId(null); setProductSearch(false); }}
@@ -319,16 +341,32 @@ function ProductSearch({ onBack, onOpenShop }: { onBack: () => void; onOpenShop:
     } catch {}
   })(); }, []);
 
+  const [sort, setSort] = useState<'price' | 'nearest' | 'open'>('price');
+
   const run = async () => {
     if (q.trim().length < 2) return;
     setLoading(true); setSearched(true);
-    try { setResults(await SB.searchProducts(q.trim(), coords?.lat, coords?.lng)); }
-    catch {} finally { setLoading(false); }
+    try {
+      setResults(await SB.searchProducts(
+        q.trim(), coords?.lat, coords?.lng, sort === 'nearest' ? 'nearest' : 'price'));
+    } catch {} finally { setLoading(false); }
   };
+  // Re-run when the sort changes after a search.
+  useEffect(() => { if (searched) run(); /* eslint-disable-line react-hooks/exhaustive-deps */ }, [sort]);
+
+  // "Open now" ranks currently-open shops first (computed client-side from
+  // the timing fields; spec: price-comparison / sorting).
+  const shown = useMemo(() => {
+    if (sort !== 'open') return results;
+    const openRank = (h: SB.ProductHit) =>
+      shopOpenState({ openTime: h.openTime, closeTime: h.closeTime, status: h.shopStatus,
+        weeklyHoliday: h.weeklyHoliday, lunchStart: h.lunchStart, lunchEnd: h.lunchEnd }).isOpen ? 0 : 1;
+    return [...results].sort((a, b) => openRank(a) - openRank(b) || (a.distanceKm ?? 1e9) - (b.distanceKm ?? 1e9));
+  }, [results, sort]);
 
   return (
     <>
-      <SubHeader title="Find a product" onBack={onBack} />
+      <SubHeader title={t('shops.compare')} onBack={onBack} />
       <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
         <View style={s.searchRow}>
           <Ionicons name="search" size={18} color={C.sub} />
@@ -338,11 +376,21 @@ function ProductSearch({ onBack, onOpenShop }: { onBack: () => void; onOpenShop:
         </View>
         <TouchableOpacity style={s.primaryBtn} onPress={run}><Text style={s.primaryBtnText}>Search nearby shops</Text></TouchableOpacity>
 
+        {searched && (
+          <View style={{ flexDirection: 'row', gap: 6, marginTop: 10 }}>
+            {([['price', 'Lowest price'], ['nearest', 'Nearest'], ['open', 'Open now']] as const).map(([id, lbl]) => (
+              <TouchableOpacity key={id} style={[s.filterChip, sort === id && s.filterChipActive]} onPress={() => setSort(id)}>
+                <Text style={[s.filterChipText, sort === id && s.filterChipTextActive]}>{lbl}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
         {loading && <ActivityIndicator color={C.green} style={{ marginTop: 20 }} />}
         {searched && !loading && results.length === 0 && (
           <Empty icon="search-outline" text="No shop nearby lists that yet." />
         )}
-        {results.map((h, i) => (
+        {shown.map((h, i) => (
           <TouchableOpacity key={`${h.shopId}-${i}`} style={s.card} onPress={() => onOpenShop(h.shopId)}>
             <View style={{ flex: 1 }}>
               <Text style={s.cardTitle}>{h.productName}{h.unit ? ` · ${h.unit}` : ''}{h.productBrand ? ` (${h.productBrand})` : ''}</Text>
@@ -350,7 +398,11 @@ function ProductSearch({ onBack, onOpenShop }: { onBack: () => void; onOpenShop:
                 {h.shopName}{h.distanceKm != null ? ` · ${formatDistance(h.distanceKm)}` : ''}
                 {h.ratingCount > 0 ? ` · ⭐ ${h.rating}` : ''}
               </Text>
-              <Text style={s.price}>{formatINR(h.price)}</Text>
+              <Text style={s.cardSub}>
+                {h.inStock ? '🟢 In stock' : '🔴 Out of stock'}
+                {h.updatedAt ? ` · updated ${new Date(h.updatedAt).toLocaleDateString('en-IN')}` : ''}
+              </Text>
+              <Text style={s.price}>{formatMoney(h.price, h.currency || '₹')}</Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color={C.sub} />
           </TouchableOpacity>
@@ -499,8 +551,8 @@ function Catalog({ shop, cart, setCart, onCart }: {
     } catch { setListening(false); Alert.alert('Voice unavailable', 'Speech input is not available on this device/build.'); }
   };
 
-  const add = (name: string, brand: string, qty: number, price: number, note: string) => {
-    setCart([...cart, { key: clientKey(), name, brand, qty, price, note }]);
+  const add = (name: string, brand: string, qty: number, price: number, note: string, unit = '', taxPercent = 0) => {
+    setCart([...cart, { key: clientKey(), name, brand, qty, price, note, unit, taxPercent }]);
   };
 
   const filtered = products.filter(
@@ -557,7 +609,7 @@ function Catalog({ shop, cart, setCart, onCart }: {
             <Text style={s.price}>{formatINR(p.price)}{!p.inStock ? '  ·  Out of stock' : ''}</Text>
           </View>
           <TouchableOpacity style={[s.addBtn, !p.inStock && { opacity: 0.4 }]} disabled={!p.inStock}
-            onPress={() => add(p.name, p.brand, 1, p.price, '')}>
+            onPress={() => add(p.name, p.brand, 1, p.price, '', p.unit, p.taxPercent)}>
             <Text style={s.addBtnText}>Add</Text>
           </TouchableOpacity>
         </View>
@@ -605,7 +657,10 @@ function CartView({ shop, cart, setCart, onPlaced, coupons }: {
     try {
       const res = await SB.placeOrder(
         shop.id,
-        cart.map((it) => ({ name: it.name, brand: it.brand, qty: it.qty, price: it.price, note: it.note })),
+        cart.map((it) => ({
+          name: it.name, brand: it.brand, qty: it.qty, price: it.price, note: it.note,
+          unit: it.unit, taxPercent: it.taxPercent,
+        })),
         note.trim(),
         { couponCode: applied?.code },
       );
@@ -700,7 +755,7 @@ function MyOrders({ onOpen }: { onOpen: (id: string) => void }) {
         <TouchableOpacity key={o.id} style={s.card} onPress={() => onOpen(o.id)}>
           <View style={{ flex: 1 }}>
             <Text style={s.cardTitle}>{o.shopName}</Text>
-            <Text style={s.cardSub}>{o.id.slice(0, 8).toUpperCase()} · {formatINR(o.total)}</Text>
+            <Text style={s.cardSub}>{o.id.slice(0, 8).toUpperCase()} · {formatMoney(o.total, o.currency || '₹')}</Text>
             <StatusPill status={o.status} />
           </View>
           <Ionicons name="chevron-forward" size={20} color={C.sub} />
@@ -716,6 +771,8 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
   const [stars, setStars] = useState(0);
   const [review, setReview] = useState('');
   const [busy, setBusy] = useState(false);
+  const [cancelAsk, setCancelAsk] = useState(false);
+  const [invoice, setInvoice] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -726,6 +783,13 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
   const decide = async (itemId: string, accept: boolean) => {
     try { await SB.decideAlternative(orderId, itemId, accept); load(); }
     catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
+  };
+
+  const cancelOrder = async (reason: string) => {
+    setBusy(true);
+    try { await SB.cancelOrder(orderId, reason); load(); }
+    catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
+    finally { setBusy(false); }
   };
 
   const submitRating = async () => {
@@ -741,7 +805,10 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
     setBusy(true);
     try {
       await SB.placeOrder(order.shopId,
-        order.items.map((it) => ({ name: it.name, brand: it.brand, qty: it.qty, price: it.price, note: it.note })),
+        order.items.map((it) => ({
+          name: it.name, brand: it.brand, qty: it.qty, price: it.price, note: it.note,
+          unit: it.unit, taxPercent: it.taxPercent,
+        })),
         'Repeat order');
       Alert.alert('Order placed', 'Your repeat order was sent to the shop.');
     } catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
@@ -781,67 +848,109 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
     } catch (e: any) { Alert.alert('Error', e?.message ?? 'Could not create the bill'); }
   };
 
+  if (invoice) return <InvoiceView orderId={orderId} onBack={() => setInvoice(false)} />;
+
+  const money = (n: number) => formatMoney(n, order?.currency || '₹');
+  const failed = order && (order.status === 'cancelled' || order.status === 'rejected');
   return (
     <>
-      <SubHeader title="Track Order" onBack={onBack}
+      <SubHeader title={t('orders.track')} onBack={onBack}
         right={order ? { icon: 'share-social-outline', onPress: share } : undefined} />
+      <ReasonModal visible={cancelAsk} title={t('orders.cancelReason')}
+        onSubmit={(reason) => cancelOrder(reason)} onClose={() => setCancelAsk(false)} />
       <ScrollView contentContainerStyle={s.body}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
         {loading && !order && <ActivityIndicator color={C.green} style={{ marginTop: 24 }} />}
         {order && (
           <>
             <StatusPill status={order.status} big />
-            {/* progress steps */}
-            <View style={s.stepper}>
-              {ORDER_STEPS.map((step, i) => {
-                const done = orderProgress(order.status) >= i / (ORDER_STEPS.length - 1);
-                return (
-                  <View key={step} style={{ alignItems: 'center', flex: 1 }}>
-                    <View style={[s.stepDot, done && s.stepDotDone]}>
-                      {done && <Ionicons name="checkmark" size={12} color="#fff" />}
+            {/* cancelled/rejected: reason banner instead of progress steps */}
+            {failed ? (
+              <View style={[s.panel, { borderColor: C.danger }]}>
+                <Text style={{ color: C.danger, fontWeight: '700' }}>
+                  {order.status === 'rejected'
+                    ? `${t('orders.rejectedByShop')}${order.rejectReason ? ` — ${REJECT_REASONS.find((r) => r.code === order.rejectReason)?.label ?? order.rejectReason}` : ''}`
+                    : `${order.cancelledBy === 'customer' ? t('orders.cancelledByYou') : t('orders.cancelledByShop')}${order.cancelReason ? ` — ${order.cancelReason}` : ''}`}
+                </Text>
+              </View>
+            ) : (
+              <View style={s.stepper}>
+                {ORDER_STEPS.map((step, i) => {
+                  const done = orderProgress(order.status) >= i / (ORDER_STEPS.length - 1);
+                  return (
+                    <View key={step} style={{ alignItems: 'center', flex: 1 }}>
+                      <View style={[s.stepDot, done && s.stepDotDone]}>
+                        {done && <Ionicons name="checkmark" size={12} color="#fff" />}
+                      </View>
+                      <Text style={s.stepLabel}>{orderStatusLabel(step)}</Text>
                     </View>
-                    <Text style={s.stepLabel}>{orderStatusLabel(step)}</Text>
+                  );
+                })}
+              </View>
+            )}
+
+            {/* timestamped timeline (spec: order-management / tracking) */}
+            {order.timeline.length > 0 && (
+              <View style={s.panel}>
+                {order.timeline.map((ev, i) => (
+                  <View key={`${ev.status}-${i}`} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginVertical: 3 }}>
+                    <View style={[s.pillDot, { backgroundColor: C.green }]} />
+                    <Text style={[s.cardSub, { flex: 1 }]}>
+                      {orderStatusLabel(ev.status)}{ev.note ? ` · ${ev.note}` : ''}
+                    </Text>
+                    <Text style={[s.cardSub, { fontSize: 11 }]}>
+                      {new Date(ev.at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                    </Text>
                   </View>
-                );
-              })}
-            </View>
+                ))}
+              </View>
+            )}
 
             <Text style={s.sectionLabel}>Items</Text>
             {order.items.map((it) => (
               <View key={it.id} style={s.card}>
                 <View style={{ flex: 1 }}>
-                  <Text style={s.cardTitle}>{it.name}{it.brand ? ` (${it.brand})` : ''} × {it.qty}</Text>
+                  <Text style={s.cardTitle}>{it.name}{it.brand ? ` (${it.brand})` : ''}{it.unit ? ` · ${it.unit}` : ''} × {it.qty}</Text>
                   {!!it.note && <Text style={s.cardSub}>📝 {it.note}</Text>}
                   <AvailabilityTag a={it.availability} altName={it.altName} />
                   {it.availability === 'alternative' && (
                     <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
                       <TouchableOpacity style={s.smallGreen} onPress={() => decide(it.id, true)}>
-                        <Text style={s.smallGreenText}>Accept {it.altName}</Text>
+                        <Text style={s.smallGreenText}>
+                          {t('orders.acceptAlt')} {it.altName}{it.altPrice > 0 ? ` (${money(it.altPrice)})` : ''}
+                        </Text>
                       </TouchableOpacity>
                       <TouchableOpacity style={s.smallOutline} onPress={() => decide(it.id, false)}>
-                        <Text style={s.smallOutlineText}>Reject</Text>
+                        <Text style={s.smallOutlineText}>{t('orders.rejectAlt')}</Text>
                       </TouchableOpacity>
                     </View>
                   )}
                 </View>
-                <Text style={s.price}>{it.price > 0 ? formatINR(it.price * it.qty) : '—'}</Text>
+                <Text style={s.price}>{it.price > 0 ? money(it.price * it.qty) : '—'}</Text>
               </View>
             ))}
 
             <View style={s.panel}>
-              {order.discount > 0 && <Row label={`Discount (${order.couponCode})`} value={`− ${formatINR(order.discount)}`} tone={C.green} />}
-              <Row label="Total" value={formatINR(order.total)} bold />
+              {order.discount > 0 && <Row label={`Discount (${order.couponCode})`} value={`− ${money(order.discount)}`} tone={C.green} />}
+              <Row label={t('common.total')} value={money(order.total)} bold />
             </View>
 
-            {/* Repeat + Share */}
+            {/* customer may cancel only while the order is still pending */}
+            {canCustomerCancel(order.status) && (
+              <TouchableOpacity style={s.dangerBtn} disabled={busy} onPress={() => setCancelAsk(true)}>
+                <Text style={s.dangerBtnText}>{t('orders.cancel')}</Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Repeat + Share + Invoice */}
             <View style={{ flexDirection: 'row', gap: 8 }}>
               <TouchableOpacity style={[s.outlineBtn, { flex: 1 }]} disabled={busy} onPress={repeat}>
                 <Ionicons name="repeat" size={18} color={C.green} />
                 <Text style={s.outlineBtnText}>Repeat order</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[s.outlineBtn, { flex: 1 }]} onPress={bill}>
+              <TouchableOpacity style={[s.outlineBtn, { flex: 1 }]} onPress={order.hasInvoice ? () => setInvoice(true) : bill}>
                 <Ionicons name="receipt-outline" size={18} color={C.green} />
-                <Text style={s.outlineBtnText}>Bill / Receipt</Text>
+                <Text style={s.outlineBtnText}>{order.hasInvoice ? t('orders.invoice') : 'Bill / Receipt'}</Text>
               </TouchableOpacity>
             </View>
 
@@ -912,6 +1021,8 @@ function CustomerProfile({ me }: { me: { id: string; name: string } | null }) {
   const [newName, setNewName] = useState('');
   const [newItems, setNewItems] = useState('');
   const [adding, setAdding] = useState(false);
+  const [ledgers, setLedgers] = useState<SB.LedgerSummary[]>([]);
+  const lang = useShopBookLang();
 
   const loadLists = useCallback(async () => {
     if (!me) return;
@@ -920,6 +1031,7 @@ function CustomerProfile({ me }: { me: { id: string; name: string } | null }) {
 
   useEffect(() => { (async () => {
     try { setLoyalty(await SB.loyalty()); } catch {}
+    try { setLedgers((await SB.myLedgers()).ledgers); } catch {}
     loadLists();
   })(); }, [loadLists]);
 
@@ -957,6 +1069,33 @@ function CustomerProfile({ me }: { me: { id: string; name: string } | null }) {
         </View>
       </View>
       <Text style={s.hint}>Earn 1 point for every ₹100 spent on completed orders.</Text>
+
+      {/* Pending across shops (spec: customer-accounts / dashboard) */}
+      {ledgers.some((l) => l.pending > 0) && (
+        <>
+          <Text style={s.sectionLabel}>💰 {t('profile.pendingAcross')}</Text>
+          {ledgers.filter((l) => l.pending > 0).map((l) => (
+            <View key={l.shopId} style={s.card}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.cardTitle}>{l.shopName}</Text>
+                <Text style={s.cardSub}>{t('common.pending')}</Text>
+              </View>
+              <Text style={[s.price, { color: C.danger }]}>{formatMoney(l.pending, l.currency)}</Text>
+            </View>
+          ))}
+        </>
+      )}
+
+      {/* Language (spec: localization) */}
+      <Text style={s.sectionLabel}>🌐 {t('lang.title')}</Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+        {SB_LANGUAGES.map((l) => (
+          <TouchableOpacity key={l.id} style={[s.chip, lang === l.id && s.chipActive]}
+            onPress={() => setShopBookLang(l.id)}>
+            <Text style={[s.chipText, lang === l.id && { color: '#fff' }]}>{l.native}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
 
       {/* Shopping lists */}
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
@@ -1025,7 +1164,7 @@ function OwnerApp({ me }: { me: { id: string; name: string } | null }) {
   if (sub === 'coupons') return <OwnerCoupons onBack={() => setSub(null)} />;
   if (sub === 'suppliers') return <OwnerSuppliers onBack={() => setSub(null)} />;
   if (sub === 'plans') return <OwnerPlans plan={shop.plan} onBack={() => setSub(null)} onChanged={() => { setSub(null); load(); }} />;
-  if (sub === 'reports') return <OwnerReports plan={shop.plan} onBack={() => setSub(null)} onUpgrade={() => setSub('plans')} />;
+  if (sub === 'reports') return <OwnerReports plan={shop.plan} currency={shop.currency} onBack={() => setSub(null)} onUpgrade={() => setSub('plans')} />;
 
   return (
     <>
@@ -1036,15 +1175,15 @@ function OwnerApp({ me }: { me: { id: string; name: string } | null }) {
             onPlans={() => setSub('plans')} onReports={() => setSub('reports')} />
         )}
         {tab === 'orders' && <OwnerOrders />}
-        {tab === 'products' && <OwnerProducts />}
+        {tab === 'products' && <OwnerProducts shop={shop} />}
         {tab === 'khata' && <OwnerKhata />}
       </KeyboardAvoidingView>
       <TabBar
         tabs={[
-          { id: 'dashboard', label: 'Home', icon: 'grid' },
-          { id: 'orders', label: 'Orders', icon: 'receipt' },
-          { id: 'products', label: 'Products', icon: 'pricetags' },
-          { id: 'khata', label: 'Khata', icon: 'book' },
+          { id: 'dashboard', label: t('tab.dashboard'), icon: 'grid' },
+          { id: 'orders', label: t('tab.orders'), icon: 'receipt' },
+          { id: 'products', label: t('tab.products'), icon: 'pricetags' },
+          { id: 'khata', label: t('tab.khata'), icon: 'book' },
         ]}
         active={tab}
         onChange={(t) => setTab(t as OwnerTab)}
@@ -1088,11 +1227,18 @@ function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPlans, onR
         </View>
       </Modal>
 
+      {!shop.approved && (
+        <View style={[s.panel, { borderColor: C.amber }]}>
+          <Text style={{ color: C.amber, fontWeight: '700' }}>⏳ {t('owner.pendingApproval')}</Text>
+        </View>
+      )}
+
       <TouchableOpacity style={s.card} onPress={onSettings}>
         <View style={s.shopIcon}><Text style={{ fontSize: 22 }}>{categoryIcon(shop.category)}</Text></View>
         <View style={{ flex: 1 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <Text style={s.cardTitle}>{shop.name}</Text>
+            {shop.verified && <Ionicons name="checkmark-circle" size={16} color={C.blue} />}
             <View style={[s.planTag, shop.plan === 'pro' ? s.planPro : s.planFree]}>
               <Text style={[s.planTagText, shop.plan === 'pro' && { color: '#fff' }]}>{shop.plan === 'pro' ? '★ PRO' : 'FREE'}</Text>
             </View>
@@ -1123,9 +1269,9 @@ function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPlans, onR
 
       <View style={s.statGrid}>
         <StatCard label="Today's Orders" value={String(d?.todayOrders ?? 0)} tone="navy" />
-        <StatCard label="Today's Sales" value={formatINR(d?.todaySales ?? 0)} tone="green" />
+        <StatCard label="Today's Sales" value={formatMoney(d?.todaySales ?? 0, shop.currency)} tone="green" />
         <StatCard label="Pending Orders" value={String(d?.pendingOrders ?? 0)} tone="amber" />
-        <StatCard label="Total Pending" value={formatINR(d?.totalPending ?? 0)} tone="danger" />
+        <StatCard label="Total Pending" value={formatMoney(d?.totalPending ?? 0, shop.currency)} tone="danger" />
       </View>
       {(d?.lowStock ?? 0) > 0 && (
         <View style={[s.panel, { borderColor: C.amber }]}>
@@ -1194,62 +1340,124 @@ function OwnerPlans({ plan, onBack, onChanged }: {
   );
 }
 
-function OwnerReports({ plan, onBack, onUpgrade }: {
-  plan: 'free' | 'pro'; onBack: () => void; onUpgrade: () => void;
+// Reports (spec: reports-analytics): basic — daily/weekly/monthly sales and
+// pending payments — for every plan; the Advanced tab (yearly, tax report,
+// best sellers, top customers, product performance) is Pro-gated server-side.
+function OwnerReports({ plan, currency, onBack, onUpgrade }: {
+  plan: 'free' | 'pro'; currency?: string; onBack: () => void; onUpgrade: () => void;
 }) {
-  const [loading, setLoading] = useState(plan === 'pro');
+  const [scope, setScope] = useState<'basic' | 'advanced'>('basic');
+  const [loading, setLoading] = useState(true);
   const [data, setData] = useState<SB.Reports | null>(null);
+  const money = (n: number) => formatMoney(n, currency || '₹');
 
   useEffect(() => { (async () => {
-    if (plan !== 'pro') return;
-    try { setData(await SB.reports()); } catch {} finally { setLoading(false); }
-  })(); }, [plan]);
+    if (scope === 'advanced' && plan !== 'pro') { setData(null); return; }
+    setLoading(true);
+    try { setData(await SB.reports(scope)); } catch {} finally { setLoading(false); }
+  })(); }, [scope, plan]);
 
-  if (plan !== 'pro') {
+  const Bars = ({ title, rows }: { title: string; rows: SB.ReportDay[] }) => {
+    const max = Math.max(1, ...rows.map((d) => d.sales));
     return (
       <>
-        <SubHeader title="Daily Reports" onBack={onBack} />
-        <View style={[s.body, { alignItems: 'center', justifyContent: 'center', flex: 1 }]}>
-          <Text style={{ fontSize: 44 }}>🔒</Text>
-          <Text style={[s.sectionLabel, { marginTop: 12 }]}>Reports are a Pro feature</Text>
-          <Text style={[s.hint, { textAlign: 'center' }]}>Upgrade to Pro to unlock daily sales, order trends and your top products.</Text>
-          <TouchableOpacity style={[s.primaryBtn, { alignSelf: 'stretch' }]} onPress={onUpgrade}><Text style={s.primaryBtnText}>Upgrade to Pro</Text></TouchableOpacity>
-        </View>
+        <Text style={s.sectionLabel}>{title}</Text>
+        {rows.length === 0 && <Empty icon="bar-chart-outline" text="No completed orders yet." />}
+        {rows.map((d) => (
+          <View key={d.date} style={{ marginBottom: 10 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+              <Text style={s.cardSub}>{d.date}</Text>
+              <Text style={[s.price, { marginTop: 0 }]}>{money(d.sales)} · {d.orders} order(s)</Text>
+            </View>
+            <View style={s.barTrack}><View style={[s.barFill, { width: `${Math.round((d.sales / max) * 100)}%` }]} /></View>
+          </View>
+        ))}
       </>
     );
-  }
+  };
 
-  const maxSales = Math.max(1, ...(data?.days ?? []).map((d) => d.sales));
   return (
     <>
-      <SubHeader title="Daily Reports" onBack={onBack} />
-      <ScrollView contentContainerStyle={s.body}>
-        {loading && <ActivityIndicator color={C.green} style={{ marginTop: 20 }} />}
-        {data && (
-          <>
-            <Text style={s.sectionLabel}>Sales · last 7 days</Text>
-            {data.days.length === 0 && <Empty icon="bar-chart-outline" text="No completed orders yet." />}
-            {data.days.map((d) => (
-              <View key={d.date} style={{ marginBottom: 10 }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                  <Text style={s.cardSub}>{d.date}</Text>
-                  <Text style={[s.price, { marginTop: 0 }]}>{formatINR(d.sales)} · {d.orders} order(s)</Text>
+      <SubHeader title={t('owner.reports')} onBack={onBack} />
+      <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingTop: 10 }}>
+        {(['basic', 'advanced'] as const).map((sc) => (
+          <TouchableOpacity key={sc} style={[s.filterChip, scope === sc && s.filterChipActive]} onPress={() => setScope(sc)}>
+            <Text style={[s.filterChipText, scope === sc && s.filterChipTextActive]}>
+              {sc === 'basic' ? t('owner.reports.basic') : `${t('owner.reports.advanced')}${plan !== 'pro' ? ' 🔒' : ''}`}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      {scope === 'advanced' && plan !== 'pro' ? (
+        <View style={[s.body, { alignItems: 'center', justifyContent: 'center', flex: 1 }]}>
+          <Text style={{ fontSize: 44 }}>🔒</Text>
+          <Text style={[s.sectionLabel, { marginTop: 12 }]}>{t('owner.reports.upgrade')}</Text>
+          <TouchableOpacity style={[s.primaryBtn, { alignSelf: 'stretch' }]} onPress={onUpgrade}><Text style={s.primaryBtnText}>Upgrade to Pro</Text></TouchableOpacity>
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={s.body}>
+          {loading && <ActivityIndicator color={C.green} style={{ marginTop: 20 }} />}
+          {data && scope === 'basic' && (
+            <>
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <StatCard label={t('owner.reports.pendingPayments')} value={money(data.pendingTotal)} tone="danger" />
+                <StatCard label="Customers with dues" value={String(data.pendingCustomers)} tone="amber" />
+              </View>
+              <Bars title="Sales · last 7 days" rows={data.days} />
+              <Bars title="Sales · weekly" rows={data.weeks} />
+              <Bars title="Sales · monthly" rows={data.months} />
+            </>
+          )}
+          {data && scope === 'advanced' && (
+            <>
+              <Bars title="Sales · yearly" rows={data.years ?? []} />
+              <Text style={s.sectionLabel}>{t('owner.reports.taxReport')}</Text>
+              {(data.taxReport ?? []).length === 0 && <Empty icon="document-text-outline" text="No invoices with tax yet." />}
+              {(data.taxReport ?? []).map((m) => (
+                <View key={m.month} style={s.card}>
+                  <Text style={[s.cardTitle, { flex: 1 }]}>{m.month}</Text>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={s.price}>{money(m.taxCollected)} tax</Text>
+                    <Text style={s.cardSub}>on {money(m.taxableSales)}</Text>
+                  </View>
                 </View>
-                <View style={s.barTrack}><View style={[s.barFill, { width: `${Math.round((d.sales / maxSales) * 100)}%` }]} /></View>
-              </View>
-            ))}
-            <Text style={s.sectionLabel}>Top products</Text>
-            {data.topProducts.length === 0 && <Empty icon="pricetags-outline" text="No products ordered yet." />}
-            {data.topProducts.map((p, i) => (
-              <View key={p.name} style={s.card}>
-                <View style={s.rankDot}><Text style={s.rankDotText}>{i + 1}</Text></View>
-                <Text style={[s.cardTitle, { flex: 1 }]}>{p.name}</Text>
-                <Text style={s.price}>{p.qty} sold</Text>
-              </View>
-            ))}
-          </>
-        )}
-      </ScrollView>
+              ))}
+              <Text style={s.sectionLabel}>{t('owner.reports.topProducts')}</Text>
+              {(data.topProducts ?? []).map((p, i) => (
+                <View key={p.name} style={s.card}>
+                  <View style={s.rankDot}><Text style={s.rankDotText}>{i + 1}</Text></View>
+                  <Text style={[s.cardTitle, { flex: 1 }]}>{p.name}</Text>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={s.price}>{p.qty} sold</Text>
+                    {p.revenue != null && <Text style={s.cardSub}>{money(p.revenue)}</Text>}
+                  </View>
+                </View>
+              ))}
+              <Text style={s.sectionLabel}>{t('owner.reports.topCustomers')}</Text>
+              {(data.topCustomers ?? []).map((c2, i) => (
+                <View key={c2.customerId} style={s.card}>
+                  <View style={s.rankDot}><Text style={s.rankDotText}>{i + 1}</Text></View>
+                  <Text style={[s.cardTitle, { flex: 1 }]}>{c2.customerName || 'Customer'}</Text>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={s.price}>{money(c2.spent)}</Text>
+                    <Text style={s.cardSub}>{c2.orders} order(s)</Text>
+                  </View>
+                </View>
+              ))}
+              <Text style={s.sectionLabel}>Product performance · 30 days</Text>
+              {(data.productPerformance ?? []).map((p) => (
+                <View key={p.name} style={s.card}>
+                  <Text style={[s.cardTitle, { flex: 1 }]}>{p.name}</Text>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={s.price}>{p.revenue != null ? money(p.revenue) : ''}</Text>
+                    <Text style={s.cardSub}>{p.qty} sold</Text>
+                  </View>
+                </View>
+              ))}
+            </>
+          )}
+        </ScrollView>
+      )}
     </>
   );
 }
@@ -1398,13 +1606,14 @@ function OwnerSuppliers({ onBack }: { onBack: () => void }) {
 }
 
 const OWNER_ORDER_TABS: { id: string; label: string }[] = [
-  { id: 'new', label: 'New' }, { id: 'preparing', label: 'Preparing' },
-  { id: 'packing', label: 'Packing' }, { id: 'ready', label: 'Ready' },
-  { id: 'completed', label: 'Completed' },
+  { id: 'pending', label: 'New' }, { id: 'accepted', label: 'Accepted' },
+  { id: 'preparing', label: 'Preparing' }, { id: 'packing', label: 'Packing' },
+  { id: 'ready', label: 'Ready' }, { id: 'completed', label: 'Completed' },
+  { id: 'all', label: 'All' },
 ];
 
 function OwnerOrders() {
-  const [filter, setFilter] = useState('new');
+  const [filter, setFilter] = useState('pending');
   const [loading, setLoading] = useState(true);
   const [orders, setOrders] = useState<SB.OrderSummary[]>([]);
   const [open, setOpen] = useState<string | null>(null);
@@ -1449,6 +1658,11 @@ function OwnerOrderDetail({ orderId, onBack }: { orderId: string; onBack: () => 
   const [loading, setLoading] = useState(true);
   const [order, setOrder] = useState<SB.OrderDetail | null>(null);
   const [busy, setBusy] = useState(false);
+  const [rejectAsk, setRejectAsk] = useState(false);
+  const [cancelAsk, setCancelAsk] = useState(false);
+  const [altFor, setAltFor] = useState<string | null>(null);
+  const [altName, setAltName] = useState('');
+  const [altPrice, setAltPrice] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1456,86 +1670,130 @@ function OwnerOrderDetail({ orderId, onBack }: { orderId: string; onBack: () => 
   }, [orderId]);
   useEffect(() => { load(); }, [load]);
 
-  const setAvail = async (itemId: string, a: ItemAvailability, altName = '') => {
-    try { await SB.setItemAvailability(orderId, itemId, a, altName); load(); }
+  const setAvail = async (itemId: string, a: ItemAvailability, name = '', price = 0) => {
+    try { await SB.setItemAvailability(orderId, itemId, a, name, price); load(); }
     catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
   };
 
-  const suggestAlt = (itemId: string) => {
-    Alert.prompt?.('Suggest alternative', 'Enter alternative product name', (text) => {
-      if (text?.trim()) setAvail(itemId, 'alternative', text.trim());
-    });
-    // Android has no Alert.prompt — fall back to marking unavailable.
-    if (Platform.OS === 'android') {
-      Alert.alert('Alternative', 'Type-in alternatives use the item’s note flow on Android — marking as unavailable for now.',
-        [{ text: 'OK', onPress: () => setAvail(itemId, 'unavailable') }]);
-    }
+  const submitAlt = () => {
+    if (!altFor || !altName.trim()) { Alert.alert(t('owner.suggestAlt'), 'Enter the alternative product'); return; }
+    setAvail(altFor, 'alternative', altName.trim(), num(altPrice));
+    setAltFor(null); setAltName(''); setAltPrice('');
   };
 
-  const advance = async () => {
-    if (!order) return;
-    const next = nextOrderStatus(order.status);
-    if (!next) return;
+  const setStatus = async (status: OrderStatus, reason = '') => {
     setBusy(true);
-    try { await SB.setOrderStatus(orderId, next); load(); }
+    try { await SB.setOrderStatus(orderId, status, reason); load(); }
     catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
     finally { setBusy(false); }
   };
 
-  const cancel = async () => {
-    setBusy(true);
-    try { await SB.setOrderStatus(orderId, 'cancelled'); load(); }
-    catch {} finally { setBusy(false); }
-  };
-
+  const money = (n: number) => formatMoney(n, order?.currency || '₹');
   const next = order ? nextOrderStatus(order.status) : null;
+  const reviewed = order ? order.items.every((it) => it.availability !== 'pending' && it.availability !== 'alternative') : false;
+  const terminal = order && ['completed', 'cancelled', 'rejected'].includes(order.status);
 
   return (
     <>
-      <SubHeader title="Order" onBack={onBack} />
+      <SubHeader title={t('owner.newOrder')} onBack={onBack} />
+      <ReasonModal visible={rejectAsk} title={t('owner.rejectReason')} codes={REJECT_REASONS}
+        onSubmit={(text, code) => setStatus('rejected', code === 'other' ? 'other' : code ?? 'other')}
+        onClose={() => setRejectAsk(false)} />
+      <ReasonModal visible={cancelAsk} title={t('orders.cancelReason')}
+        onSubmit={(reason) => setStatus('cancelled', reason)} onClose={() => setCancelAsk(false)} />
+      {/* alternative suggestion: name + price, cross-platform */}
+      <Modal visible={altFor != null} transparent animationType="fade" onRequestClose={() => setAltFor(null)}>
+        <View style={s.modalWrap}>
+          <View style={s.modalCard}>
+            <Text style={s.modalTitle}>{t('owner.suggestAlt')}</Text>
+            <TextInput style={s.input} placeholder={t('owner.altName')} placeholderTextColor={C.sub}
+              value={altName} onChangeText={setAltName} autoFocus />
+            <TextInput style={s.input} placeholder={t('owner.altPrice')} placeholderTextColor={C.sub}
+              value={altPrice} onChangeText={setAltPrice} keyboardType="numeric" />
+            <TouchableOpacity style={s.primaryBtn} onPress={submitAlt}>
+              <Text style={s.primaryBtnText}>{t('common.save')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={s.dangerBtn} onPress={() => setAltFor(null)}>
+              <Text style={s.dangerBtnText}>{t('common.cancel')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
       <ScrollView contentContainerStyle={s.body}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
         {order && (
           <>
             <StatusPill status={order.status} big />
             {!!order.note && <Text style={s.hint}>📝 {order.note}</Text>}
+            {(order.status === 'cancelled' || order.status === 'rejected') && (
+              <View style={[s.panel, { borderColor: C.danger }]}>
+                <Text style={{ color: C.danger, fontWeight: '700' }}>
+                  {order.status === 'rejected'
+                    ? (REJECT_REASONS.find((r) => r.code === order.rejectReason)?.label ?? order.rejectReason)
+                    : `${order.cancelledBy === 'customer' ? 'Customer cancelled' : 'Cancelled'}: ${order.cancelReason}`}
+                </Text>
+              </View>
+            )}
             <Text style={s.sectionLabel}>Items — mark availability</Text>
             {order.items.map((it) => (
               <View key={it.id} style={s.card}>
                 <View style={{ flex: 1 }}>
-                  <Text style={s.cardTitle}>{it.name}{it.brand ? ` (${it.brand})` : ''} × {it.qty}</Text>
+                  <Text style={s.cardTitle}>{it.name}{it.brand ? ` (${it.brand})` : ''}{it.unit ? ` · ${it.unit}` : ''} × {it.qty}</Text>
                   {!!it.note && <Text style={s.cardSub}>📝 {it.note}</Text>}
                   <AvailabilityTag a={it.availability} altName={it.altName} />
-                  <View style={{ flexDirection: 'row', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-                    <TouchableOpacity style={s.smallGreen} onPress={() => setAvail(it.id, 'available')}>
-                      <Text style={s.smallGreenText}>Available</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={s.smallOutline} onPress={() => setAvail(it.id, 'unavailable')}>
-                      <Text style={s.smallOutlineText}>Not available</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={s.smallOutline} onPress={() => suggestAlt(it.id)}>
-                      <Text style={s.smallOutlineText}>Suggest alt</Text>
-                    </TouchableOpacity>
-                  </View>
+                  {order.status === 'pending' && (
+                    <View style={{ flexDirection: 'row', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                      <TouchableOpacity style={s.smallGreen} onPress={() => setAvail(it.id, 'available')}>
+                        <Text style={s.smallGreenText}>{t('owner.markAvailable')}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={s.smallOutline} onPress={() => setAvail(it.id, 'unavailable')}>
+                        <Text style={s.smallOutlineText}>{t('owner.markUnavailable')}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={s.smallOutline} onPress={() => { setAltFor(it.id); setAltName(''); setAltPrice(''); }}>
+                        <Text style={s.smallOutlineText}>{t('owner.suggestAlt')}</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
                 </View>
+                <Text style={s.price}>{it.price > 0 ? money(it.price * it.qty) : '—'}</Text>
               </View>
             ))}
             <View style={s.totalRow}>
-              <Text style={s.totalLabel}>Total</Text>
-              <Text style={s.totalValue}>{formatINR(order.total)}</Text>
+              <Text style={s.totalLabel}>{t('common.total')}</Text>
+              <Text style={s.totalValue}>{money(order.total)}</Text>
             </View>
 
-            {order.status !== 'completed' && order.status !== 'cancelled' && (
+            {!terminal && (
               <>
-                {next && (
-                  <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={advance}>
+                {order.status === 'pending' && (
+                  <>
+                    {!reviewed && <Text style={s.hint}>⏳ {t('owner.reviewFirst')}</Text>}
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                      <TouchableOpacity
+                        style={[s.primaryBtn, { flex: 2 }, (busy || !reviewed) && { opacity: 0.6 }]}
+                        disabled={busy || !reviewed} onPress={() => setStatus('accepted')}>
+                        <Ionicons name="checkmark-circle" size={18} color="#fff" />
+                        <Text style={s.primaryBtnText}>{t('owner.accept')}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={[s.dangerBtn, { flex: 1, marginTop: 12 }]} disabled={busy} onPress={() => setRejectAsk(true)}>
+                        <Text style={s.dangerBtnText}>{t('owner.reject')}</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                )}
+                {order.status !== 'pending' && next && (
+                  <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={() => setStatus(next)}>
                     <Ionicons name="arrow-forward-circle" size={18} color="#fff" />
-                    <Text style={s.primaryBtnText}>Mark as {orderStatusLabel(next)}</Text>
+                    <Text style={s.primaryBtnText}>
+                      {next === 'collected' ? t('owner.markCollected') : `Mark as ${orderStatusLabel(next)}`}
+                    </Text>
                   </TouchableOpacity>
                 )}
-                <TouchableOpacity style={s.dangerBtn} disabled={busy} onPress={cancel}>
-                  <Text style={s.dangerBtnText}>Reject / Cancel</Text>
-                </TouchableOpacity>
+                {canOwnerCancel(order.status) && order.status !== 'pending' && (
+                  <TouchableOpacity style={s.dangerBtn} disabled={busy} onPress={() => setCancelAsk(true)}>
+                    <Text style={s.dangerBtnText}>{t('orders.cancel')}</Text>
+                  </TouchableOpacity>
+                )}
               </>
             )}
           </>
@@ -1545,10 +1803,11 @@ function OwnerOrderDetail({ orderId, onBack }: { orderId: string; onBack: () => 
   );
 }
 
-function OwnerProducts() {
+function OwnerProducts({ shop }: { shop: SB.Shop }) {
   const [loading, setLoading] = useState(true);
   const [products, setProducts] = useState<SB.Product[]>([]);
   const [edit, setEdit] = useState<SB.Product | 'new' | 'bulk' | null>(null);
+  const [seeding, setSeeding] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1556,8 +1815,24 @@ function OwnerProducts() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  // One-tap category starter catalog (server-managed; spec: product-catalog).
+  // Items land with price 0 + disabled — the owner prices and activates them.
+  const seedStarter = async () => {
+    setSeeding(true);
+    try {
+      const items = await SB.starterCatalog(shop.category);
+      const have = new Set(products.map((p) => p.name.toLowerCase()));
+      const fresh = items.filter((it) => !have.has(it.name.toLowerCase()));
+      if (fresh.length === 0) { Alert.alert(t('owner.starterCatalog'), 'Your catalog already has these items.'); return; }
+      await SB.bulkAddProducts(fresh.map((it) => ({ name: it.name, unit: it.unit, price: 0 })));
+      Alert.alert(t('owner.starterCatalog'), t('owner.starterLoaded'));
+      load();
+    } catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
+    finally { setSeeding(false); }
+  };
+
   if (edit === 'bulk') return <BulkAdd onDone={() => { setEdit(null); load(); }} />;
-  if (edit) return <ProductEditor product={edit === 'new' ? null : edit} onDone={() => { setEdit(null); load(); }} />;
+  if (edit) return <ProductEditor product={edit === 'new' ? null : edit} currency={shop.currency} onDone={() => { setEdit(null); load(); }} />;
 
   return (
     <ScrollView contentContainerStyle={s.body}
@@ -1572,6 +1847,10 @@ function OwnerProducts() {
           <Text style={s.outlineBtnText}>Bulk add</Text>
         </TouchableOpacity>
       </View>
+      <TouchableOpacity style={[s.outlineBtn, seeding && { opacity: 0.6 }]} disabled={seeding} onPress={seedStarter}>
+        {seeding ? <ActivityIndicator color={C.green} /> : <Ionicons name="sparkles-outline" size={18} color={C.green} />}
+        <Text style={s.outlineBtnText}>{t('owner.starterCatalog')} · {categoryLabel(shop.category)}</Text>
+      </TouchableOpacity>
       {loading && <ActivityIndicator color={C.green} style={{ marginTop: 16 }} />}
       {!loading && products.length === 0 && <Empty icon="pricetags-outline" text="No products yet." />}
       {products.map((p) => (
@@ -1579,7 +1858,7 @@ function OwnerProducts() {
           <View style={{ flex: 1 }}>
             <Text style={[s.cardTitle, !p.enabled && { color: C.sub }]}>{p.name}{p.unit ? ` · ${p.unit}` : ''}</Text>
             <Text style={s.cardSub}>{[p.brand, p.category].filter(Boolean).join(' · ')}</Text>
-            <Text style={s.price}>{formatINR(p.price)} · {p.inStock ? 'In stock' : 'Out of stock'}{!p.enabled ? ' · Disabled' : ''}</Text>
+            <Text style={s.price}>{formatMoney(p.price, shop.currency)} · {p.inStock ? 'In stock' : 'Out of stock'}{!p.enabled ? ' · Disabled' : ''}</Text>
           </View>
           <Ionicons name="create-outline" size={20} color={C.sub} />
         </TouchableOpacity>
@@ -1588,12 +1867,15 @@ function OwnerProducts() {
   );
 }
 
-function ProductEditor({ product, onDone }: { product: SB.Product | null; onDone: () => void }) {
+function ProductEditor({ product, currency, onDone }: {
+  product: SB.Product | null; currency?: string; onDone: () => void;
+}) {
   const [name, setName] = useState(product?.name ?? '');
   const [brand, setBrand] = useState(product?.brand ?? '');
   const [category, setCategory] = useState(product?.category ?? '');
   const [unit, setUnit] = useState(product?.unit ?? '');
   const [price, setPrice] = useState(product ? String(product.price) : '');
+  const [taxPercent, setTaxPercent] = useState(product && product.taxPercent > 0 ? String(product.taxPercent) : '');
   const [inStock, setInStock] = useState(product?.inStock ?? true);
   const [enabled, setEnabled] = useState(product?.enabled ?? true);
   const [busy, setBusy] = useState(false);
@@ -1604,7 +1886,7 @@ function ProductEditor({ product, onDone }: { product: SB.Product | null; onDone
     try {
       await SB.saveProduct({
         id: product?.id, name: name.trim(), brand: brand.trim(), category: category.trim(),
-        unit: unit.trim(), price: num(price), inStock, enabled,
+        unit: unit.trim(), price: num(price), taxPercent: num(taxPercent), inStock, enabled,
       });
       onDone();
     } catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
@@ -1627,7 +1909,8 @@ function ProductEditor({ product, onDone }: { product: SB.Product | null; onDone
         <Field label="Brand (optional)" value={brand} onChange={setBrand} placeholder="Aashirvaad" />
         <Field label="Category" value={category} onChange={setCategory} placeholder="Groceries" />
         <Field label="Unit" value={unit} onChange={setUnit} placeholder="5kg" />
-        <Field label="Price (₹)" value={price} onChange={setPrice} placeholder="285" keyboardType="numeric" />
+        <Field label={`Price (${currency || '₹'})`} value={price} onChange={setPrice} placeholder="285" keyboardType="numeric" />
+        <Field label="Tax % (optional)" value={taxPercent} onChange={setTaxPercent} placeholder="5" keyboardType="numeric" />
         <ToggleRow label="In stock" value={inStock} onChange={setInStock} />
         <ToggleRow label="Enabled (visible to customers)" value={enabled} onChange={setEnabled} />
         <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={save}>
@@ -1825,6 +2108,15 @@ function ShopSettings({ shop, me, onSaved, onCancel }: {
     shop?.lat != null && shop?.lng != null ? { lat: shop.lat, lng: shop.lng } : null);
   const [busy, setBusy] = useState(false);
   const [locating, setLocating] = useState(false);
+  // Country Tax Engine: selecting a country loads its currency + optional
+  // tax fields (spec: country-tax-engine). All tax fields stay optional.
+  const [countryList, setCountryList] = useState<SB.CountryConfig[]>([]);
+  const [country, setCountry] = useState(shop?.country ?? 'IN');
+  const [taxConfig, setTaxConfig] = useState<Record<string, string | boolean>>(shop?.taxConfig ?? {});
+  useEffect(() => { (async () => {
+    try { setCountryList(await SB.countries()); } catch {}
+  })(); }, []);
+  const countryCfg = countryList.find((c2) => c2.code === country);
 
   // Capture the shop's GPS location. `silent` skips the success alert (used for
   // the frictionless auto-capture when a new shop form first opens). Returns the
@@ -1879,6 +2171,7 @@ function ShopSettings({ shop, me, onSaved, onCancel }: {
         pickup, prepMins: num(prep), weeklyHoliday,
         lunchStart: lunchStart.trim(), lunchEnd: lunchEnd.trim(),
         lat: loc.lat, lng: loc.lng,
+        country, taxConfig,
       });
       const fresh = await SB.myShop();
       if (fresh) onSaved(fresh);
@@ -1923,15 +2216,44 @@ function ShopSettings({ shop, me, onSaved, onCancel }: {
           </ScrollView>
 
           <Text style={s.fieldLabel}>Shop status</Text>
-          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
-            {(['open', 'busy', 'closed'] as const).map((st) => (
+          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+            {([
+              ['open', `🟢 ${t('owner.status.open')}`], ['busy', `🟡 ${t('owner.status.busy')}`],
+              ['closed', `🔴 ${t('owner.status.closed')}`], ['holiday', `📅 ${t('owner.status.holiday')}`],
+              ['vacation', `🏖️ ${t('owner.status.vacation')}`],
+            ] as const).map(([st, lbl]) => (
               <TouchableOpacity key={st} style={[s.statusBtn, status === st && s.statusBtnActive]} onPress={() => setStatus(st)}>
-                <Text style={[s.statusBtnText, status === st && { color: '#fff' }]}>
-                  {st === 'open' ? '🟢 Open' : st === 'busy' ? '🟡 Busy' : '🔴 Closed'}
-                </Text>
+                <Text style={[s.statusBtnText, status === st && { color: '#fff' }]}>{lbl}</Text>
               </TouchableOpacity>
             ))}
           </View>
+
+          {/* Country + tax engine */}
+          <Text style={s.fieldLabel}>{t('owner.country')}</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+            {countryList.map((c2) => (
+              <Chip key={c2.code} label={`${c2.name} (${c2.currencySymbol})`} icon="🌍"
+                active={country === c2.code} onPress={() => setCountry(c2.code)} />
+            ))}
+          </ScrollView>
+          {countryCfg && (
+            <>
+              <Text style={s.fieldLabel}>{t('owner.taxDetails')} — {countryCfg.taxType}</Text>
+              <Text style={s.hint}>{t('owner.taxNote')}</Text>
+              {countryCfg.taxFields.map((f) => f.type === 'bool' ? (
+                <ToggleRow key={f.id} label={f.label} value={taxConfig[f.id] === true}
+                  onChange={(v) => setTaxConfig((cfg) => ({ ...cfg, [f.id]: v }))} />
+              ) : (
+                <Field key={f.id} label={f.label}
+                  value={typeof taxConfig[f.id] === 'string' ? (taxConfig[f.id] as string) : ''}
+                  onChange={(v) => setTaxConfig((cfg) => ({ ...cfg, [f.id]: v }))}
+                  placeholder={f.label} />
+              ))}
+              {countryCfg.documents.length > 0 && (
+                <Text style={s.hint}>📄 Optional documents for verification: {countryCfg.documents.join(', ')}</Text>
+              )}
+            </>
+          )}
 
           <Text style={s.fieldLabel}>Shop location (required)</Text>
           <TouchableOpacity style={[s.outlineBtn, locating && { opacity: 0.6 }]} disabled={locating} onPress={() => useLocation()}>
@@ -1950,6 +2272,185 @@ function ShopSettings({ shop, me, onSaved, onCancel }: {
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
+    </>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
+//  upgrade surfaces — notification inbox, reason modal, invoice
+// ════════════════════════════════════════════════════════════════
+
+function NotificationCenter({ onBack, onRead }: { onBack: () => void; onRead: () => void }) {
+  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState<SB.Notification[]>([]);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setItems((await SB.notifications()).notifications); } catch {} finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const markAll = async () => {
+    try { await SB.markNotificationsRead(); onRead(); load(); } catch {}
+  };
+
+  return (
+    <>
+      <SubHeader title={t('notif.title')} onBack={onBack}
+        right={{ icon: 'checkmark-done-outline', onPress: markAll }} />
+      <ScrollView contentContainerStyle={s.body}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
+        {!loading && items.length === 0 && <Empty icon="notifications-off-outline" text={t('notif.empty')} />}
+        {items.map((n) => (
+          <View key={n.id} style={[s.card, !n.read && { borderColor: C.green }]}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.cardTitle}>{n.title}</Text>
+              {!!n.body && <Text style={s.cardSub}>{n.body}</Text>}
+              <Text style={[s.cardSub, { fontSize: 11 }]}>{new Date(n.createdAt).toLocaleString('en-IN')}</Text>
+            </View>
+            {!n.read && <View style={[s.pillDot, { backgroundColor: C.green }]} />}
+          </View>
+        ))}
+        {items.length > 0 && (
+          <TouchableOpacity style={s.outlineBtn} onPress={markAll}>
+            <Ionicons name="checkmark-done" size={18} color={C.green} />
+            <Text style={s.outlineBtnText}>{t('notif.markAllRead')}</Text>
+          </TouchableOpacity>
+        )}
+      </ScrollView>
+    </>
+  );
+}
+
+// Cross-platform "why?" prompt (Alert.prompt is iOS-only): free-text reason,
+// optionally preceded by the fixed rejection reason codes.
+function ReasonModal({ visible, title, codes, placeholder, onSubmit, onClose }: {
+  visible: boolean; title: string; codes?: typeof REJECT_REASONS;
+  placeholder?: string; onSubmit: (reason: string, code?: string) => void; onClose: () => void;
+}) {
+  const [text, setText] = useState('');
+  const [code, setCode] = useState<string | null>(null);
+  useEffect(() => { if (visible) { setText(''); setCode(null); } }, [visible]);
+  const needText = !codes || code === 'other';
+  const submit = () => {
+    if (codes && !code) { Alert.alert(title, 'Pick a reason'); return; }
+    if (needText && !text.trim()) { Alert.alert(title, 'Please give a reason'); return; }
+    onSubmit(text.trim(), code ?? undefined);
+    onClose();
+  };
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={s.modalWrap}>
+        <View style={s.modalCard}>
+          <Text style={s.modalTitle}>{title}</Text>
+          {codes && (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 10 }}>
+              {codes.map((rc) => (
+                <TouchableOpacity key={rc.code} style={[s.chip, code === rc.code && s.chipActive]}
+                  onPress={() => setCode(rc.code)}>
+                  <Text style={[s.chipText, code === rc.code && { color: '#fff' }]}>{rc.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+          {needText && (
+            <TextInput style={s.input} placeholder={placeholder ?? 'Reason'} placeholderTextColor={C.sub}
+              value={text} onChangeText={setText} autoFocus />
+          )}
+          <TouchableOpacity style={s.primaryBtn} onPress={submit}>
+            <Text style={s.primaryBtnText}>{t('common.save')}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.dangerBtn} onPress={onClose}>
+            <Text style={s.dangerBtnText}>{t('common.cancel')}</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// Country-rule-driven invoice (spec: invoicing). Tax lines appear only when
+// the shop configured tax details — the backend snapshot decides, not the UI.
+function InvoiceView({ orderId, onBack }: { orderId: string; onBack: () => void }) {
+  const [inv, setInv] = useState<SB.Invoice | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => { (async () => {
+    try { setInv(await SB.orderInvoice(orderId)); }
+    catch (e: any) { Alert.alert('Invoice', e?.message ?? 'Not available yet'); }
+    finally { setLoading(false); }
+  })(); }, [orderId]);
+
+  const sharePdf = async () => {
+    if (!inv) return;
+    const money = (n: number) => formatMoney(n, inv.currency);
+    const taxRows = inv.taxBreakdown.map((b) =>
+      `<p style="text-align:right;margin:2px 0;color:#333">${b.label}: ${money(b.amount)}</p>`).join('');
+    const taxIds = Object.entries(inv.business.tax ?? {})
+      .filter(([, v]) => v && v !== true).map(([k, v]) => `${k.toUpperCase()}: ${v}`).join(' · ');
+    const rows = inv.items.map((it) =>
+      `<tr><td style="padding:6px 0">${it.name}${it.brand ? ` (${it.brand})` : ''}${it.unit ? ` · ${it.unit}` : ''}</td>
+       <td style="text-align:center">${it.qty}</td>
+       <td style="text-align:right">${money(it.price * it.qty)}</td></tr>`).join('');
+    const html = `<html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+      <body style="font-family:-apple-system,Roboto,sans-serif;color:#111;padding:28px">
+        <h2 style="color:#0B7A3B;margin:0">${inv.business.name}</h2>
+        <p style="color:#666;margin:4px 0">${inv.business.address}${inv.business.phone ? ` · ${inv.business.phone}` : ''}</p>
+        ${taxIds ? `<p style="color:#666;margin:2px 0;font-size:13px">${taxIds}</p>` : ''}
+        <p style="margin:12px 0 4px"><b>${inv.invoiceNo}</b> · ${new Date(inv.createdAt).toLocaleDateString('en-IN')}</p>
+        <p style="color:#666;margin:0 0 14px">Billed to: ${inv.customerName || 'Customer'}</p>
+        <table style="width:100%;border-collapse:collapse;font-size:14px">
+          <thead><tr style="border-bottom:1px solid #ddd"><th align="left">Item</th><th>Qty</th><th align="right">Amount</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <hr style="margin:14px 0;border:none;border-top:1px solid #eee"/>
+        <p style="text-align:right;margin:2px 0">Subtotal: ${money(inv.subtotal)}</p>
+        ${inv.discount > 0 ? `<p style="text-align:right;margin:2px 0;color:#0B7A3B">Discount: − ${money(inv.discount)}</p>` : ''}
+        ${taxRows}
+        <h3 style="text-align:right;margin:8px 0">Total: ${money(inv.total)}</h3>
+        <p style="color:#888;font-size:12px;text-align:center;margin-top:22px">Thank you for shopping with us!</p>
+      </body></html>`;
+    try {
+      const { uri } = await Print.printToFileAsync({ html });
+      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: inv.invoiceNo });
+    } catch (e: any) { Alert.alert('Error', e?.message ?? 'Could not create the invoice PDF'); }
+  };
+
+  const money = (n: number) => formatMoney(n, inv?.currency ?? '₹');
+  return (
+    <>
+      <SubHeader title={t('orders.invoice')} onBack={onBack}
+        right={inv ? { icon: 'share-social-outline', onPress: sharePdf } : undefined} />
+      <ScrollView contentContainerStyle={s.body}>
+        {loading && <ActivityIndicator color={C.green} style={{ marginTop: 24 }} />}
+        {inv && (
+          <>
+            <View style={s.panel}>
+              <Text style={s.panelTitle}>{inv.business.name}</Text>
+              {!!inv.business.address && <Text style={s.cardSub}>{inv.business.address}</Text>}
+              <Text style={s.cardSub}>{inv.invoiceNo} · {new Date(inv.createdAt).toLocaleDateString('en-IN')}</Text>
+              {!!inv.customerName && <Text style={s.cardSub}>Billed to: {inv.customerName}</Text>}
+            </View>
+            {inv.items.map((it, i) => (
+              <View key={`${it.name}-${i}`} style={s.card}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.cardTitle}>{it.name}{it.brand ? ` (${it.brand})` : ''} × {it.qty}</Text>
+                  {!!it.unit && <Text style={s.cardSub}>{it.unit}</Text>}
+                </View>
+                <Text style={s.price}>{money(it.price * it.qty)}</Text>
+              </View>
+            ))}
+            <View style={s.panel}>
+              <Row label="Subtotal" value={money(inv.subtotal)} />
+              {inv.discount > 0 && <Row label="Discount" value={`− ${money(inv.discount)}`} tone={C.green} />}
+              {inv.taxBreakdown.map((b) => <Row key={b.label} label={b.label} value={money(b.amount)} />)}
+              <Row label={t('common.total')} value={money(inv.total)} bold />
+            </View>
+            <TouchableOpacity style={s.primaryBtn} onPress={sharePdf}>
+              <Ionicons name="download-outline" size={18} color="#fff" />
+              <Text style={s.primaryBtnText}>PDF</Text>
+            </TouchableOpacity>
+          </>
+        )}
+      </ScrollView>
     </>
   );
 }
@@ -2055,8 +2556,9 @@ function ToggleRow({ label, value, onChange }: { label: string; value: boolean; 
 }
 
 function StatusPill({ status, big }: { status: OrderStatus; big?: boolean }) {
-  const done = status === 'completed', cancelled = status === 'cancelled';
-  const color = cancelled ? C.danger : done ? C.green : C.blue;
+  const done = status === 'completed' || status === 'collected';
+  const failed = status === 'cancelled' || status === 'rejected';
+  const color = failed ? C.danger : done ? C.green : C.blue;
   return (
     <View style={[s.pill, { backgroundColor: color + '20' }, big && { alignSelf: 'flex-start', marginBottom: 12 }]}>
       <View style={[s.pillDot, { backgroundColor: color }]} />
