@@ -16,6 +16,8 @@ import { newLiveKey, sealJSON, openJSON, putLiveKey, getLiveKey, clearLiveKey } 
 import { sendMessage, getMessages, type Message } from '../chatService';
 import { type Geofence } from './geofence';
 import { getPlaces } from './store';
+import { getGroupPrivacy } from '../groups/store';
+import { applyPrivacy, isPublishing, type GroupPrivacy } from '../groups/privacy';
 import { readBattery } from './battery';
 import { processFix } from './fixPipeline';
 import { recordSample } from './history';
@@ -37,6 +39,9 @@ let myId = '';
 let myName = 'A member';
 let circleIds: string[] = [];
 const places = new Map<string, Geofence[]>();
+// Per-group privacy, loaded at start and refreshed by reloadPrivacy(). Absent
+// means "not loaded yet", which publishes nothing — failing closed.
+const privacy = new Map<string, GroupPrivacy>();
 // NOTE: the "inside" fence state used to live here and died with the screen, so
 // every restart re-announced wherever you already were. It is now persisted by
 // fixPipeline.ts, which is also what lets the background task continue the run.
@@ -63,22 +68,35 @@ async function onFix(loc: Location.LocationObject) {
   // always show myself, now with the battery the roster chip was already drawing
   selfCb?.({ userId: myId, pos, speed: spd, accuracy: acc, ts, battery: bat.level, charging: bat.charging });
 
-  const blob = sharing && myKey
-    ? sealJSON(myKey, { lat: pos.lat, lng: pos.lng, spd, acc, ts, bat: bat.level, chg: bat.charging } as FamilyPing)
-    : null;
   const u = until();
+  const now = Date.now();
+  const raw = { lat: pos.lat, lng: pos.lng, spd, acc, ts, bat: bat.level, chg: bat.charging };
 
   for (const cid of circleIds) {
-    if (blob) emit('live_location_update', { chatId: cid, blob, until: u }).catch(() => {});
-    // History and geofence alerts are LOCAL, so they run whether or not I am
-    // broadcasting — but the circle is only told about a crossing when I am.
+    // Seal PER GROUP, not once for all of them. Each group may be entitled to a
+    // different reduction — precise for family, approximate for a riders club —
+    // so a single shared blob would leak the most precise version to everyone.
+    const priv = privacy.get(cid);
+    if (sharing && myKey && priv) {
+      const reduced = applyPrivacy(raw, priv, now);
+      if (reduced) {
+        const blob = sealJSON(myKey, reduced as FamilyPing);
+        if (blob) emit('live_location_update', { chatId: cid, blob, until: u }).catch(() => {});
+      }
+    }
+
+    // LOCAL state uses the PRECISE fix on purpose. Privacy governs what leaves
+    // this device; my own history and my own geofences are mine, and blurring
+    // them would break arrive/leave detection for no privacy gain.
+    const announcing = sharing && !!priv && isPublishing(priv, now);
     await processFix(cid, {
       userId: myId, name: myName, pos, ts, speed: spd, accuracy: acc,
       battery: bat.level, charging: bat.charging,
     }, {
       self: true,
       fences: places.get(cid) ?? [],
-      announce: sharing ? (text) => { sendMessage(cid, text, 'system').catch(() => {}); } : undefined,
+      // Only tell a group about a crossing if I am actually visible to it.
+      announce: announcing ? (text) => { sendMessage(cid, text, 'system').catch(() => {}); } : undefined,
     });
   }
 }
@@ -91,7 +109,10 @@ export async function startPresence(o: StartPresenceOpts): Promise<void> {
   const perm = await Location.requestForegroundPermissionsAsync();
   if (perm.status !== 'granted') throw new Error('Location permission is required for Family Circle.');
   circleIds = o.circleIds; myId = o.myId; myName = o.myName || 'A member'; selfCb = o.onSelf; sharing = o.share;
-  for (const cid of circleIds) places.set(cid, await getPlaces(cid));
+  for (const cid of circleIds) {
+    places.set(cid, await getPlaces(cid));
+    privacy.set(cid, await getGroupPrivacy(cid));
+  }
   if (sharing) { myKey = newLiveKey(); await deliverKeys(); await handOffToBackground(); }
   watcher = await Location.watchPositionAsync(
     { accuracy: Location.Accuracy.Balanced, timeInterval: 8000, distanceInterval: 15 },
@@ -147,7 +168,7 @@ export async function stopPresence(): Promise<void> {
     return;
   }
   if (sharing) for (const cid of circleIds) emit('live_location_stop', { chatId: cid }).catch(() => {});
-  sharing = false; myKey = null; circleIds = []; places.clear();
+  sharing = false; myKey = null; circleIds = []; places.clear(); privacy.clear();
 }
 
 export function isSharing(): boolean { return sharing; }
@@ -155,6 +176,11 @@ export function isSharing(): boolean { return sharing; }
 /** Refresh a circle's geofences into the live broadcaster (call after editing Places). */
 export async function reloadPlaces(circleId: string): Promise<void> {
   if (circleIds.includes(circleId)) places.set(circleId, await getPlaces(circleId));
+}
+
+/** Refresh a group's privacy into the live publisher (call after editing it). */
+export async function reloadPrivacy(groupId: string): Promise<void> {
+  if (circleIds.includes(groupId)) privacy.set(groupId, await getGroupPrivacy(groupId));
 }
 
 // ── receive others' positions for one circle ──

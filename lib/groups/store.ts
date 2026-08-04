@@ -23,6 +23,7 @@
 
 import type { GroupType } from './catalog';
 import type { Permission } from './permissions';
+import { normalizePrivacy, DEFAULT_GROUP_PRIVACY, type GroupPrivacy } from './privacy';
 
 // Lazy-required so the pure half stays free of the react-native graph — same
 // pattern as lib/nav/routing.ts and lib/family/history.ts.
@@ -247,3 +248,32 @@ if (require.main === module) {
     console.log('groups/store self-check OK');
   })();
 }
+
+// ── per-group privacy ──
+//
+// Stored per group rather than globally: being precise with family and
+// approximate with a riders club is the entire point of per-group privacy.
+
+const kPrivacy = (groupId: string) => `vc_groups_privacy_${groupId}`;
+
+/** Read a group's privacy. Unreadable or absent falls back to the DEFAULT. */
+export async function getGroupPrivacy(groupId: string): Promise<GroupPrivacy> {
+  return normalizePrivacy(await readJSON<Partial<GroupPrivacy> | null>(kPrivacy(groupId), null));
+}
+
+/** Patch a group's privacy and return the stored result. */
+export async function setGroupPrivacy(
+  groupId: string,
+  patch: Partial<GroupPrivacy>,
+): Promise<GroupPrivacy> {
+  const next = normalizePrivacy({ ...(await getGroupPrivacy(groupId)), ...patch });
+  await writeJSON(kPrivacy(groupId), next);
+  return next;
+}
+
+/** Clear a group's privacy (on leave/delete). */
+export async function clearGroupPrivacy(groupId: string): Promise<void> {
+  try { await storage().removeItem(kPrivacy(groupId)); } catch { /* best-effort */ }
+}
+
+export { DEFAULT_GROUP_PRIVACY };

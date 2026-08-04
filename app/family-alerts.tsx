@@ -33,6 +33,10 @@ const ICON_FOR: Record<AlertKind, keyof typeof Ionicons.glyphMap> = {
   checkin: 'checkmark-done-circle',
   battery: 'battery-dead',
   sharing: 'navigate-circle',
+  gps: 'locate-outline',
+  offline: 'cloud-offline-outline',
+  deviation: 'git-branch-outline',
+  announcement: 'megaphone-outline',
 };
 
 function when(ts: number): string {

@@ -26,6 +26,8 @@ import { emit } from '../socket';
 import { sealJSON } from '../liveLocationCrypto';
 import { sendMessage } from '../chatService';
 import { getPlaces } from './store';
+import { getGroupPrivacy } from '../groups/store';
+import { applyPrivacy, isPublishing } from '../groups/privacy';
 import { readBattery } from './battery';
 import { processFix } from './fixPipeline';
 import { type FamilyPing } from './types';
@@ -69,22 +71,35 @@ TaskManager.defineTask(BG_TASK, async ({ data, error }: any) => {
   const ts = loc.timestamp || Date.now();
   const bat = await readBattery();
 
+  const now = Date.now();
+  const raw = { lat: pos.lat, lng: pos.lng, spd, acc, ts, bat: bat.level, chg: bat.charging };
+
   for (const cid of ctx.circleIds) {
-    if (key) {
-      const blob = sealJSON(key, {
-        lat: pos.lat, lng: pos.lng, spd, acc, ts, bat: bat.level, chg: bat.charging,
-      } as FamilyPing);
-      // Best-effort: in a headless start the socket may not be connected. The
-      // fix is still recorded locally, so history stays complete either way.
-      if (blob) emit('live_location_update', { chatId: cid, blob, until: Date.now() + LIVE_WINDOW_MS }).catch(() => {});
+    // The background publisher MUST honour privacy too. Applying it only in the
+    // foreground would mean a member set to "approximate" leaked their precise
+    // position for as long as their phone was in a pocket — which is most of
+    // the time, and is exactly when the setting matters.
+    const priv = await getGroupPrivacy(cid);
+    const visible = isPublishing(priv, now);
+
+    if (key && visible) {
+      const reduced = applyPrivacy(raw, priv, now);
+      if (reduced) {
+        const blob = sealJSON(key, reduced as FamilyPing);
+        // Best-effort: in a headless start the socket may not be connected. The
+        // fix is still recorded locally, so history stays complete either way.
+        if (blob) emit('live_location_update', { chatId: cid, blob, until: now + LIVE_WINDOW_MS }).catch(() => {});
+      }
     }
+
+    // Local state keeps the precise fix — see the same note in presence.onFix.
     await processFix(cid, {
       userId: ctx.myId, name: ctx.myName, pos, ts, speed: spd, accuracy: acc,
       battery: bat.level, charging: bat.charging,
     }, {
       self: true,
       fences: await getPlaces(cid),
-      announce: (text) => { sendMessage(cid, text, 'system').catch(() => {}); },
+      announce: visible ? (text) => { sendMessage(cid, text, 'system').catch(() => {}); } : undefined,
     });
   }
 });

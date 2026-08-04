@@ -24,9 +24,12 @@ const storage = () => require('@react-native-async-storage/async-storage').defau
 const crypt = () => require('../cacheCrypto') as typeof import('../cacheCrypto');
 
 export type AlertKind =
-  | 'enter' | 'leave'        // geofence crossings
-  | 'sos' | 'checkin'        // people
-  | 'battery' | 'sharing';   // device state
+  | 'enter' | 'leave'          // geofence crossings
+  | 'sos' | 'checkin'          // people
+  | 'battery' | 'sharing'      // device state
+  | 'gps' | 'offline'          // the device stopped being able to report
+  | 'deviation'                // left the expected route (group navigation)
+  | 'announcement';            // a permitted member addressed the group
 
 export type AlertSeverity = 'critical' | 'important' | 'info';
 
@@ -48,12 +51,18 @@ export type AlertFilter = 'all' | 'important' | 'system';
 const KEY = 'vc_family_alerts_v1';
 const MAX_ALERTS = 300;
 /** Kinds that count as "system" rather than a person doing something. */
-const SYSTEM_KINDS: AlertKind[] = ['battery', 'sharing'];
+const SYSTEM_KINDS: AlertKind[] = ['battery', 'sharing', 'gps', 'offline'];
 
 export const SEVERITY_OF: Record<AlertKind, AlertSeverity> = {
   sos: 'critical',
+  // "I can no longer tell you where they are" outranks an ordinary arrival:
+  // silence is the state a worried person most needs surfaced.
+  gps: 'important',
+  offline: 'important',
+  deviation: 'important',
   battery: 'important',
   leave: 'important',
+  announcement: 'important',
   enter: 'info',
   checkin: 'info',
   sharing: 'info',
