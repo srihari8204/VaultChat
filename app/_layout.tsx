@@ -125,6 +125,29 @@ function RootLayout() {
           }
         })
         .catch(() => { /* fail open */ });
+
+      // Passive device-security monitoring (Security Hub). Separate, NON-
+      // destructive path: it scores the device, records changes to the audit
+      // chain and notifies on worsenings — it never wipes. Throttled by the
+      // scan scheduler (a quick relaunch won't re-scan) and fully deferred, so
+      // it never gates first paint. Distinct from runSecurityCheck above, which
+      // is the boot self-destruct.
+      import('../services/security/deviceSecurity/monitorService')
+        .then(m => m.runMonitoringScan('launch'))
+        .catch(() => { /* best-effort; dashboard still scans on demand */ });
+
+      // Wire passive triggers: re-scan on foreground return (throttled) and on
+      // network change (debounced). Covers the while-running case; a periodic
+      // scan while KILLED still needs a native background job.
+      import('../services/security/deviceSecurity/monitorTriggers')
+        .then(m => m.startSecurityMonitoring())
+        .catch(() => {});
+
+      // Automatic cache cleanup, if the user enabled it (safe cache only, when
+      // due). Deferred + best-effort; never gates the UI.
+      import('../services/cache/cacheManager')
+        .then(m => m.maybeAutoClean())
+        .catch(() => {});
     }
 
     // Publish this device's E2EE key bundle on startup (lazy, fire-and-forget).

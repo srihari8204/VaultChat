@@ -20,7 +20,7 @@ import {
 // ── Mini Apps matching PDF (page 12) ─────────────────────────────
 // Row 1: Watch, Walkie, Screen
 // Row 2: Notes, Scanner, Location
-// Row 3: Current Loc, Cloud, Pegasus
+// Row 3: Current Loc, Cloud, Security Hub
 const MINI_APPS_MAIN = [
   { id: 'vaultlens',   icon: '\u2728', name: 'VaultLens', route: '/vaultlens', gradient: ['#9D6FD0', '#EC4899'] as [string, string] },
   { id: 'navigate',    icon: '\uD83E\uDDED', name: 'Navigate', route: '/navigate', gradient: ['#4A9FFF', '#1D4ED8'] as [string, string] },
@@ -31,7 +31,7 @@ const MINI_APPS_MAIN = [
   { id: 'notes',       icon: '\uD83D\uDCDD', name: 'Notes',       route: '/encrypted-notes', gradient: ['#F59E0B', '#D97706'] as [string, string] },
   { id: 'scanner',     icon: '\uD83D\uDCC4', name: 'Scanner',     route: '/docscanner',     gradient: ['#4A9FFF', '#1D4ED8'] as [string, string] },
   { id: 'cloud',       icon: '\u2601\uFE0F', name: 'Cloud',       route: null,              gradient: ['#6B7280', '#4B5563'] as [string, string] },
-  { id: 'pegasus',     icon: '\uD83E\uDD85', name: 'Pegasus',     route: '/aiguardian',     gradient: ['#B91C1C', '#DC2626'] as [string, string] },
+  { id: 'security',    icon: '\uD83D\uDEE1\uFE0F', name: 'Security Hub', route: '/aiguardian', gradient: ['#0E7490', '#164E63'] as [string, string] },
   { id: 'vaultid',     icon: '\uD83C\uDD94', name: 'VaultID',     route: '/decentralized-id', gradient: ['#7C3AED', '#4A9FFF'] as [string, string] },
 ];
 
