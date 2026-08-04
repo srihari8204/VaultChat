@@ -88,6 +88,7 @@ func RegisterChats(mux *http.ServeMux) {
 	id.HandleFunc("POST /chats/{id}/sender-keys", httpx.RequireAuth(chatsSenderKeysPost))
 	id.HandleFunc("GET /chats/{id}/sender-keys", httpx.RequireAuth(chatsSenderKeysGet))
 	RegisterChatInvitationsOnID(id) // Groups & Circles per-invitee invitations
+	RegisterChatCalendarOnID(id)    // Groups & Circles shared calendar
 	mux.Handle("/chats/{id}/", id)  // subtree forward; `id` re-matches the full path
 }
 

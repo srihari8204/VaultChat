@@ -1168,6 +1168,48 @@ export async function joinViaInvite(
   return api(`/chats/join/${encodeURIComponent(code)}`, { method: 'POST' });
 }
 
+// ─── Shared group calendar (Groups & Circles) ───────────────────────
+//
+// `payload` is CIPHERTEXT the caller seals and opens itself — title, notes,
+// location, exact time, duration and recurrence all live inside it. The server
+// only ever sees the month bucket it filters on. See migration 068.
+
+export interface GroupEventRow {
+  id:          number;
+  createdBy:   string | null;
+  /** 'YYYY-MM', or null for a recurring event (always returned). */
+  monthKey:    string | null;
+  payload:     string;
+  repeatUntil: string | null;
+  createdAt:   string;
+  updatedAt:   string;
+}
+
+/** Fetch the given month buckets plus every still-live recurring event. */
+export async function listGroupEvents(chatId: string, months: string[]): Promise<GroupEventRow[]> {
+  const qs = months.length ? `?months=${encodeURIComponent(months.join(','))}` : '';
+  return api(`/chats/${encodeURIComponent(chatId)}/events${qs}`);
+}
+
+export async function createGroupEvent(
+  chatId: string,
+  e: { payload: string; monthKey?: string | null; repeatUntil?: string | null },
+): Promise<{ id: number }> {
+  return api(`/chats/${encodeURIComponent(chatId)}/events`, { method: 'POST', json: e });
+}
+
+export async function updateGroupEvent(
+  chatId: string,
+  eventId: number,
+  e: { payload: string; monthKey?: string | null; repeatUntil?: string | null },
+): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/events/${eventId}`, { method: 'PATCH', json: e });
+}
+
+export async function deleteGroupEvent(chatId: string, eventId: number): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/events/${eventId}`, { method: 'DELETE' });
+}
+
 // ─── Per-invitee invitations (Groups & Circles) ─────────────────────
 //
 // An invitation is a PERSON; an invite link is a DOOR. Creating one mints a

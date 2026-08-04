@@ -679,6 +679,9 @@ export default function FamilySpaceScreen() {
             <TouchableOpacity onPress={() => { setManage(false); router.push('/group-create' as any); }} style={[st.mRow, { borderColor: colors.border }]}>
               <Ionicons name="add-circle-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Create or join another group</Text>
             </TouchableOpacity>
+            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-calendar' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: colors.border }]}>
+              <Ionicons name="calendar-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Shared calendar</Text>
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-tasks' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: colors.border }]}>
               <Ionicons name="checkbox-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Shared tasks</Text>
             </TouchableOpacity>
