@@ -19,20 +19,14 @@ import {
 } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
-import { appendSecurityEvent, type AuditSeverity } from '../services/security/auditChain';
-import { getCurrentSnapshot, scanDevice } from '../services/security/deviceSecurity/postureStore';
+import { getCurrentSnapshot } from '../services/security/deviceSecurity/postureStore';
+import { runMonitoringScan } from '../services/security/deviceSecurity/monitorService';
 import { buildDashboardViewModel, type DashboardVM } from '../services/security/deviceSecurity/viewModel';
-import type { SecurityNotification } from '../services/security/deviceSecurity/notificationPolicy';
 
 const STATUS_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
   critical: 'close-circle', warning: 'alert-circle', clear: 'checkmark-circle',
   pending: 'help-circle', not_applicable: 'remove-circle',
 };
-
-// notification severity → audit-chain severity for the recorded event.
-function auditSeverity(n: SecurityNotification): AuditSeverity {
-  return n.severity === 'critical' ? 'critical' : 'medium';
-}
 
 function useS() {
   const { colors } = useTheme();
@@ -57,28 +51,10 @@ export default function SecurityHubScreen() {
     if (scanning) return;
     setScanning(true);
     try {
-      const { snapshot, notifications } = await scanDevice();
-
-      // Record each meaningful notification into the tamper-evident audit chain
-      // (which also surfaces them in the Alerts tab + zero-knowledge backup).
-      for (const n of notifications) {
-        appendSecurityEvent({
-          type: n.event,
-          severity: auditSeverity(n),
-          title: n.title,
-          detail: n.body,
-          meta: { factorKey: n.factorKey ?? null, band: snapshot.band, score: snapshot.score },
-        }).catch(() => {});
-      }
-      // Always leave a scan-completed trace so the log shows the check ran.
-      appendSecurityEvent({
-        type: 'DEVICE_SCAN',
-        severity: snapshot.band === 'low' ? 'info' : snapshot.band === 'critical' ? 'critical' : 'medium',
-        title: `Device scan: ${snapshot.band} risk (${snapshot.score}/100)`,
-        detail: 'Device-security scan completed. Clean ≠ guaranteed safe — a sandboxed app cannot see kernel-level implants.',
-        meta: { band: snapshot.band, score: snapshot.score, platform: snapshot.platform },
-      }).catch(() => {});
-
+      // Manual trigger always scans; monitorService records events into the
+      // audit chain + fires the "Security" channel, so the screen just renders.
+      const { outcome } = await runMonitoringScan('manual');
+      const snapshot = outcome?.snapshot ?? (await getCurrentSnapshot());
       const view = buildDashboardViewModel(snapshot, Date.now());
       setVm(view);
       Alert.alert(

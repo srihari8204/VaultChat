@@ -37,19 +37,25 @@ Two rules are load-bearing and inherited from the rest of `services/security`:
 | `orchestrator.selftest.ts` | ✅ **Shipped.** 20 Node assertions (baseline→worsen→repeat, cross-scan cooldown, persistence round-trip, pending honesty). |
 | `viewModel.ts` | ✅ **Shipped.** Pure mapping from a snapshot to the dashboard's render data: score/band header, per-status factor rows (colour + label), ranked & de-duplicated recommended actions, honest empty state, relative last-scan time. |
 | `viewModel.selftest.ts` | ✅ **Shipped.** 26 Node assertions. |
+| `scanScheduler.ts` | ✅ **Shipped.** Pure "scan-if-due" policy: manual/event scan deeply and immediately; launch/foreground do throttled light scans; the periodic job is deep on a 12 h cadence; clock-skew-safe. |
+| `scanScheduler.selftest.ts` | ✅ **Shipped.** 16 Node assertions. |
 | `collectors.ts` | ⚠️ **Device-only.** JS signal collector reusing the DeviceInfo probes from `securityService.ts` (root/emulator/USB); everything a native module is needed for is reported as `pending` (honest degradation). Not Node-tested — imports react-native. |
 | `postureStore.ts` | ⚠️ **Device-only.** SecureStore-backed `StorageKV` + `scanDevice()` entry point wiring the tested core to the device. Not Node-tested — imports expo-secure-store. |
+| `securityNotifications.ts` | ⚠️ **Device-only.** Presents the decided notifications on a dedicated notifee "Security" channel (guarded require, fire-and-forget). Not Node-tested. |
+| `monitorService.ts` | ⚠️ **Device-only.** `runMonitoringScan(trigger)` — the single entry point that scans-if-due (via `scanScheduler`), records outcomes to the audit chain, and fires the Security channel. Shared by the screen and the launch/background paths. Not Node-tested. |
 
 Wired into the app (device-only, not Node-tested):
 - `app/aiguardian.tsx` — the **Security Hub** screen, a thin renderer over
-  `viewModel`; calls `scanDevice()`, records each returned notification into the
-  tamper-evident audit chain, shows the permanent "what this can't detect"
-  disclosure.
+  `viewModel`; calls `runMonitoringScan('manual')`, shows the permanent "what
+  this can't detect" disclosure.
 - `app/(tabs)/mini.tsx` — the tile is renamed **Pegasus → Security Hub** (🛡️),
   same `/aiguardian` route.
+- `app/_layout.tsx` — a deferred `runMonitoringScan('launch')` on boot, a
+  separate NON-destructive path alongside the existing self-destruct
+  `runSecurityCheck` (never gates first paint).
 
-**120 assertions total** (engine 37 + posture 25 + policy 12 + orchestrator 20 +
-viewModel 26), auto-discovered by `scripts/test-all.js` (`npm test`).
+**136 assertions total** (engine 37 + posture 25 + policy 12 + orchestrator 20 +
+viewModel 26 + scheduler 16), auto-discovered by `scripts/test-all.js` (`npm test`).
 The four pure modules are the complete decision core AND the end-to-end pipeline
 — fully verifiable off-device. `collectors.ts` / `postureStore.ts` are thin RN
 adapters that inject real dependencies into that tested core; they mirror
@@ -110,12 +116,20 @@ Remaining:
 
 Remaining:
 
+- ✅ **Push + launch wiring** — `securityNotifications.ts` (notifee "Security"
+  channel) + `monitorService.runMonitoringScan()` wired into the boot pass and
+  the screen. What's LEFT of this item: registering the actual periodic
+  background job (WorkManager on Android / BGTaskScheduler on iOS) and the OS
+  broadcast receivers (`event` trigger) — both need the native dev build.
+
+Remaining:
+
 2. **Attestation client + `/attest/verify` backend** — Play Integrity / App
    Attest, the one signal an on-device attacker can't forge (`INTEGRITY_VERDICT_FAILED`).
-3. **Push + background wiring** — present notifications on a dedicated notifee
-   "Security" channel and wire `scanDevice()` into the app-launch deferred pass
-   plus a WorkManager/BGTask periodic job. (The screen already runs a scan on
-   demand; this adds passive, scheduled monitoring.)
+3. **Periodic + broadcast triggers** — native WorkManager/BGTask job calling
+   `runMonitoringScan('periodic')` and OS receivers calling `('event')`. The
+   scheduler + service already handle both trigger types; only the native
+   registration remains.
 
 Audit-chain recording (`services/security/auditChain.ts`) and its
 zero-knowledge cloud mirror are reused as-is for the event log.

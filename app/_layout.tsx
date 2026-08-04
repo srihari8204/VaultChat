@@ -125,6 +125,16 @@ function RootLayout() {
           }
         })
         .catch(() => { /* fail open */ });
+
+      // Passive device-security monitoring (Security Hub). Separate, NON-
+      // destructive path: it scores the device, records changes to the audit
+      // chain and notifies on worsenings — it never wipes. Throttled by the
+      // scan scheduler (a quick relaunch won't re-scan) and fully deferred, so
+      // it never gates first paint. Distinct from runSecurityCheck above, which
+      // is the boot self-destruct.
+      import('../services/security/deviceSecurity/monitorService')
+        .then(m => m.runMonitoringScan('launch'))
+        .catch(() => { /* best-effort; dashboard still scans on demand */ });
     }
 
     // Publish this device's E2EE key bundle on startup (lazy, fire-and-forget).
