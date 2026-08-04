@@ -21,6 +21,7 @@ const ALL: SecuritySignalType[] = [
   'ROOT_DETECTED', 'FRIDA_DETECTED', 'DEBUGGER_ATTACHED', 'HOOK_FRAMEWORK', 'EMULATOR_DETECTED',
   'APK_RESIGNED', 'ACCESSIBILITY_RISK', 'OVERLAY_RISK', 'USB_DEBUGGING_ON', 'DEV_OPTIONS_ON',
   'MAGISK_DETECTED', 'SU_BINARY_FOUND', 'JAILBREAK_DETECTED', 'APK_UNOFFICIAL', 'INTEGRITY_VERDICT_FAILED', 'HIGH_POWER_APP',
+  'NETWORK_MITM', 'PROXY_CONFIGURED', 'OPEN_WIFI',
 ];
 function snap(signals: ReturnType<typeof riskSignal>[], scannedAt = 0): PostureSnapshot {
   const opts: BuildOptions = { evaluatedTypes: ALL, pendingTypes: [], platform: 'android', scannedAt };
@@ -42,6 +43,17 @@ function snap(signals: ReturnType<typeof riskSignal>[], scannedAt = 0): PostureS
   check('improvement (rooted→clean) → no push', decideNotifications(diffSnapshots(rooted, clean), clean, { now: 2_000_000, lastSent: {} }).notifications.length === 0);
   check('no change → no push', decideNotifications(diffSnapshots(rooted, rooted), rooted, { now: 3_000_000, lastSent: {} }).notifications.length === 0);
   check('warning-floor: dev options ON → a notification', decideNotifications(diffSnapshots(clean, devOn), devOn, { now: 4_000_000, lastSent: {} }).notifications.some((n) => n.factorKey === 'devOptions'));
+
+  // ── Network + silent (dashboard-only) rows ───────────────────────
+  console.log('Network & silent rows:');
+  const mitm = snap([riskSignal('NETWORK_MITM')]);
+  const mitmNotifs = decideNotifications(diffSnapshots(clean, mitm), mitm, { now: 5_000_000, lastSent: {} });
+  check('MITM → connection-integrity critical push', mitmNotifs.notifications.some((n) => n.factorKey === 'connectionIntegrity' && n.severity === 'critical'));
+  check('MITM: network rollup is silent (no double push)', !mitmNotifs.notifications.some((n) => n.factorKey === 'network'));
+  const owifi = snap([riskSignal('OPEN_WIFI')]);
+  check('open Wi-Fi → dashboard-only, no push', decideNotifications(diffSnapshots(clean, owifi), owifi, { now: 6_000_000, lastSent: {} }).notifications.length === 0);
+  check('root: deviceIntegrity rollup does NOT push (only root leaf)',
+    !decideNotifications(diffSnapshots(clean, rooted), rooted, { now: 7_000_000, lastSent: {} }).notifications.some((n) => n.factorKey === 'deviceIntegrity'));
 
   // ── Cooldown ─────────────────────────────────────────────────────
   console.log('Cooldown:');

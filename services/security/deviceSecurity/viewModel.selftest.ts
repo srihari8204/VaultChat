@@ -20,6 +20,7 @@ const ALL: SecuritySignalType[] = [
   'ROOT_DETECTED', 'FRIDA_DETECTED', 'DEBUGGER_ATTACHED', 'HOOK_FRAMEWORK', 'EMULATOR_DETECTED',
   'APK_RESIGNED', 'ACCESSIBILITY_RISK', 'OVERLAY_RISK', 'USB_DEBUGGING_ON', 'DEV_OPTIONS_ON',
   'MAGISK_DETECTED', 'SU_BINARY_FOUND', 'JAILBREAK_DETECTED', 'APK_UNOFFICIAL', 'INTEGRITY_VERDICT_FAILED', 'HIGH_POWER_APP',
+  'NETWORK_MITM', 'PROXY_CONFIGURED', 'OPEN_WIFI',
 ];
 function snap(signals: ReturnType<typeof riskSignal>[], scannedAt: number) {
   const opts: BuildOptions = { evaluatedTypes: ALL, pendingTypes: [], platform: 'android', scannedAt };

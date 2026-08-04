@@ -40,6 +40,7 @@ Two rules are load-bearing and inherited from the rest of `services/security`:
 | `scanScheduler.ts` | ✅ **Shipped.** Pure "scan-if-due" policy: manual/event scan deeply and immediately; launch/foreground do throttled light scans; the periodic job is deep on a 12 h cadence; clock-skew-safe. |
 | `scanScheduler.selftest.ts` | ✅ **Shipped.** 16 Node assertions. |
 | `collectors.ts` | ⚠️ **Device-only.** JS signal collector reusing the DeviceInfo probes from `securityService.ts` (root/emulator/USB); everything a native module is needed for is reported as `pending` (honest degradation). Not Node-tested — imports react-native. |
+| `networkCollector.ts` | ⚠️ **Device-only.** Network-posture collector: `NETWORK_MITM` from a TLS pin-failure latch (`reportPinFailure`, set by the HTTP layer), open-Wi-Fi via netinfo; proxy stays `pending` until VaultShield. On-device only, no host reputation lookups. Not Node-tested. |
 | `postureStore.ts` | ⚠️ **Device-only.** SecureStore-backed `StorageKV` + `scanDevice()` entry point wiring the tested core to the device. Not Node-tested — imports expo-secure-store. |
 | `securityNotifications.ts` | ⚠️ **Device-only.** Presents the decided notifications on a dedicated notifee "Security" channel (guarded require, fire-and-forget). Not Node-tested. |
 | `monitorService.ts` | ⚠️ **Device-only.** `runMonitoringScan(trigger)` — the single entry point that scans-if-due (via `scanScheduler`), records outcomes to the audit chain, and fires the Security channel. Shared by the screen and the launch/background paths. Not Node-tested. |
@@ -54,8 +55,23 @@ Wired into the app (device-only, not Node-tested):
   separate NON-destructive path alongside the existing self-destruct
   `runSecurityCheck` (never gates first paint).
 
-**136 assertions total** (engine 37 + posture 25 + policy 12 + orchestrator 20 +
+**150 assertions total** (engine 41 + posture 30 + policy 17 + orchestrator 20 +
 viewModel 26 + scheduler 16), auto-discovered by `scripts/test-all.js` (`npm test`).
+
+### Network Security Monitoring (added)
+
+On-device connection posture folded into the same pipeline — NOT a threat-intel
+service (no host reputation, no remote lookups, no phone-home):
+- Signals `NETWORK_MITM` (own-server TLS pin failure → critical), `PROXY_CONFIGURED`
+  (medium), `OPEN_WIFI` (low), in a capped `network` cluster (riskEngine).
+- Dashboard rows: Network protection (rollup) · Connection integrity · System
+  proxy · Wi-Fi security (androidOnly) (posture).
+- `NETWORK_MITM`/proxy push; the `network` rollup and `wifiSecurity` are
+  dashboard-only via `SILENT_FACTORS` (which also fixed a latent double-notify
+  where a rollup and its leaf both pushed).
+- `networkCollector.ts` + `postureStore.collectAll` merge it in. **Pending device
+  test:** the TLS pin-failure hook in the HTTP layer + a network-change `event`
+  trigger (native), verified on the first dev build.
 The four pure modules are the complete decision core AND the end-to-end pipeline
 — fully verifiable off-device. `collectors.ts` / `postureStore.ts` are thin RN
 adapters that inject real dependencies into that tested core; they mirror

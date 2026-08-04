@@ -60,15 +60,21 @@ const COPY: Record<string, { event: string; title: string; body: string }> = {
   frida:           { event: 'FRIDA_DETECTED',           title: 'Instrumentation detected',        body: 'Debugging/instrumentation tooling is active on this device.' },
   debugger:        { event: 'DEBUGGER_ATTACHED',        title: 'Debugger attached',               body: 'A debugger is attached to VaultChat.' },
   appIntegrity:    { event: 'APK_INTEGRITY_FAILED',     title: 'App integrity check failed',      body: 'This build may not be the official VaultChat. Open to review.' },
-  runtimeProtection:{ event: 'RUNTIME_INTEGRITY_FAILED', title: 'Runtime protection alert',       body: 'Runtime tampering was detected. Open VaultChat to review.' },
-  deviceIntegrity: { event: 'DEVICE_INTEGRITY_FAILED',  title: 'Device integrity alert',          body: 'A device-integrity indicator changed. Open VaultChat to review.' },
   hooks:           { event: 'HOOK_FRAMEWORK_DETECTED',  title: 'Hooking framework detected',      body: 'An Xposed/LSPosed-type module may be active.' },
   accessibility:   { event: 'ACCESSIBILITY_RISK',       title: 'Unknown accessibility service',   body: 'A screen-reader service you may not recognise is enabled.' },
   emulator:        { event: 'EMULATOR_DETECTED',        title: 'Emulator detected',               body: 'VaultChat is running on an emulator.' },
   usbDebugging:    { event: 'USB_DEBUGGING_ON',         title: 'USB debugging enabled',           body: 'USB debugging was turned on. Turn it off when not developing.' },
   devOptions:      { event: 'DEV_OPTIONS_ON',           title: 'Developer options enabled',       body: 'Developer options were turned on.' },
   permissionRisk:  { event: 'OVERLAY_RISK',             title: 'Screen-overlay permission',       body: 'An app can draw over the screen. Open VaultChat to review.' },
+  connectionIntegrity: { event: 'NETWORK_MITM',         title: 'Connection may be intercepted',   body: "VaultChat's secure connection failed a check. Switch networks and open VaultChat." },
+  proxy:           { event: 'PROXY_CONFIGURED',         title: 'System proxy detected',           body: 'A network proxy is configured. Open VaultChat to review.' },
 };
+
+// Rollup rows fully covered by their own leaf rows push NOTHING (the leaf row
+// already alerts — pushing both would double-notify), and Wi-Fi changes too
+// often (every café) to interrupt. These still update the dashboard + score and
+// are still recorded; they just never fire a notification.
+const SILENT_FACTORS = new Set<string>(['deviceIntegrity', 'runtimeProtection', 'network', 'wifiSecurity']);
 
 function copyFor(factorKey: string): { event: string; title: string; body: string } {
   return COPY[factorKey] ?? { event: 'SECURITY_STATE_CHANGED', title: 'Device security changed', body: 'A device-security indicator changed. Open VaultChat to review.' };
@@ -107,6 +113,7 @@ export function decideNotifications(
   // 1. Edge-triggered factor worsenings (warning/critical floor).
   for (const d of diff.factorDeltas) {
     if (d.direction !== 'worsened') continue;
+    if (SILENT_FACTORS.has(d.key)) continue;      // dashboard-only rows never push
     const severity = severityOf(d.to);
     if (!severity) continue;
     const c = copyFor(d.key);

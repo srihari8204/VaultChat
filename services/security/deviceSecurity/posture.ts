@@ -63,6 +63,10 @@ const FACTOR_CATALOG: FactorDef[] = [
   { key: 'usbDebugging',      label: 'USB debugging',         signalTypes: ['USB_DEBUGGING_ON'], androidOnly: true },
   { key: 'accessibility',     label: 'Accessibility risk',    signalTypes: ['ACCESSIBILITY_RISK'], androidOnly: true },
   { key: 'permissionRisk',    label: 'Permission / overlay risk', signalTypes: ['OVERLAY_RISK', 'HIGH_POWER_APP'], androidOnly: true },
+  { key: 'network',           label: 'Network protection',    signalTypes: ['NETWORK_MITM', 'PROXY_CONFIGURED', 'OPEN_WIFI'] },
+  { key: 'connectionIntegrity', label: 'Connection integrity', signalTypes: ['NETWORK_MITM'] },
+  { key: 'proxy',             label: 'System proxy',          signalTypes: ['PROXY_CONFIGURED'] },
+  { key: 'wifiSecurity',      label: 'Wi-Fi security',        signalTypes: ['OPEN_WIFI'], androidOnly: true },
 ];
 
 const STATUS_RANK: Record<FactorStatus, number> = {

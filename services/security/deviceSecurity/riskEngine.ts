@@ -50,6 +50,10 @@ export type SecuritySignalType =
   | 'USB_DEBUGGING_ON'
   | 'DEV_OPTIONS_ON'
   | 'HIGH_POWER_APP'          // an app holding device-admin / notif-listener / usage-access
+  // ── network posture (on-device only; NOT a threat-intel service) ─────
+  | 'NETWORK_MITM'           // VaultChat's own TLS pin failed → active interception
+  | 'PROXY_CONFIGURED'       // a system HTTP proxy is set
+  | 'OPEN_WIFI'              // connected to an open / unencrypted Wi-Fi
   | (string & {});
 
 export interface SecuritySignal {
@@ -68,16 +72,17 @@ interface CatalogEntry {
   cluster?: ClusterKey; // signals in the same cluster share a capped budget
 }
 
-type ClusterKey = 'root' | 'runtime' | 'integrity';
+type ClusterKey = 'root' | 'runtime' | 'integrity' | 'network';
 
-// Combined contribution ceilings per cluster. root/runtime/integrity each
-// describe ONE compromise story; without a cap, three overlapping indicators of
-// the same root would sum to an absurd score. The cap is set so a single strong
-// indicator already reaches `critical`, and piling on more can't inflate further.
+// Combined contribution ceilings per cluster. Each cluster describes ONE story
+// (compromise, interception, …); without a cap, several overlapping indicators
+// of the same condition would sum to an absurd score. The cap is set so a single
+// strong indicator already reaches `critical`, and piling on more can't inflate.
 const CLUSTER_CAP: Record<ClusterKey, number> = {
   root: 80,
   runtime: 85,
   integrity: 80,
+  network: 70,
 };
 
 // The weight/confidence table. Weights are chosen so that, at the band cutoffs
@@ -101,6 +106,9 @@ const CATALOG: Record<string, CatalogEntry> = {
   USB_DEBUGGING_ON:         { weight: 12, confidence: 1.0, label: 'USB debugging' },
   DEV_OPTIONS_ON:           { weight: 8,  confidence: 1.0, label: 'Developer options' },
   HIGH_POWER_APP:           { weight: 8,  confidence: 0.7, label: 'High-power app access' },
+  NETWORK_MITM:             { weight: 65, confidence: 1.0, label: 'Connection interception', cluster: 'network' },
+  PROXY_CONFIGURED:         { weight: 32, confidence: 0.9, label: 'System proxy',            cluster: 'network' },
+  OPEN_WIFI:                { weight: 12, confidence: 0.8, label: 'Open Wi-Fi',              cluster: 'network' },
 };
 
 // Conservative default for an unrecognised signal type: treated as a real but
@@ -152,6 +160,9 @@ export const REMEDIATION: Record<string, string> = {
   USB_DEBUGGING_ON:         'Turn off USB debugging in Developer options when not developing.',
   DEV_OPTIONS_ON:           'Turn off Developer options if you are not actively developing.',
   HIGH_POWER_APP:           'An app holds powerful device access. Review app permissions in Settings.',
+  NETWORK_MITM:             'This connection may be intercepted. Switch to mobile data and avoid this network.',
+  PROXY_CONFIGURED:         'A system proxy is set. Remove it in Settings unless you configured it intentionally.',
+  OPEN_WIFI:                'You are on an open Wi-Fi network. Avoid sending sensitive messages here.',
 };
 
 export interface RiskContribution {

@@ -46,6 +46,9 @@ const score = (sigs: SecuritySignal[]) => assessRisk(sigs).score;
   check('emulator alone → medium',          band([riskSignal('EMULATOR_DETECTED')]) === 'medium');
   check('usb debugging alone → low',        band([riskSignal('USB_DEBUGGING_ON')]) === 'low');
   check('dev options alone → low',          band([riskSignal('DEV_OPTIONS_ON')]) === 'low');
+  check('network MITM alone → critical',    band([riskSignal('NETWORK_MITM')]) === 'critical');
+  check('system proxy alone → medium',      band([riskSignal('PROXY_CONFIGURED')]) === 'medium');
+  check('open wifi alone → low',            band([riskSignal('OPEN_WIFI')]) === 'low');
 
   // ── Cluster capping (one condition can't be multiply-counted) ─────
   console.log('Overlap capping:');
@@ -59,6 +62,10 @@ const score = (sigs: SecuritySignal[]) => assessRisk(sigs).score;
     riskSignal('FRIDA_DETECTED'), riskSignal('DEBUGGER_ATTACHED'), riskSignal('HOOK_FRAMEWORK'),
   ]);
   check('frida+debugger+hook capped (≤85) but critical', runtimeStack.score <= 85 && runtimeStack.band === 'critical');
+  const netStack = assessRisk([
+    riskSignal('NETWORK_MITM'), riskSignal('PROXY_CONFIGURED'), riskSignal('OPEN_WIFI'),
+  ]);
+  check('mitm+proxy+openwifi capped (≤70) but critical', netStack.score <= 70 && netStack.band === 'critical');
 
   // ── Combination escalation across clusters (NOT capped together) ──
   console.log('Cross-cluster escalation:');

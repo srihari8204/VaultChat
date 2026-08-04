@@ -22,6 +22,7 @@ const ALL_TYPES: SecuritySignalType[] = [
   'FRIDA_DETECTED', 'DEBUGGER_ATTACHED', 'HOOK_FRAMEWORK', 'EMULATOR_DETECTED',
   'APK_RESIGNED', 'APK_UNOFFICIAL', 'INTEGRITY_VERDICT_FAILED',
   'ACCESSIBILITY_RISK', 'OVERLAY_RISK', 'USB_DEBUGGING_ON', 'DEV_OPTIONS_ON', 'HIGH_POWER_APP',
+  'NETWORK_MITM', 'PROXY_CONFIGURED', 'OPEN_WIFI',
 ];
 
 function snap(signals: ReturnType<typeof riskSignal>[], opts?: Partial<BuildOptions>): PostureSnapshot {
@@ -52,6 +53,13 @@ const factor = (s: PostureSnapshot, key: string) => s.factors.find((f) => f.key 
   check('overlay (medium pts) → warning not critical', factor(overlay, 'permissionRisk').status === 'warning');
   const acc = snap([riskSignal('ACCESSIBILITY_RISK')]);
   check('accessibility (≥high pts) → critical', factor(acc, 'accessibility').status === 'critical');
+  const mitm = snap([riskSignal('NETWORK_MITM')]);
+  check('MITM → connection integrity critical', factor(mitm, 'connectionIntegrity').status === 'critical');
+  check('MITM → network rollup critical', factor(mitm, 'network').status === 'critical');
+  const proxy = snap([riskSignal('PROXY_CONFIGURED')]);
+  check('proxy → proxy row warning', factor(proxy, 'proxy').status === 'warning');
+  const owifi = snap([riskSignal('OPEN_WIFI')], { platform: 'ios' });
+  check('open-wifi row is androidOnly → N/A on iOS', factor(owifi, 'wifiSecurity').status === 'not_applicable');
 
   // ── Rollup takes the worst member ────────────────────────────────
   console.log('Rollups:');

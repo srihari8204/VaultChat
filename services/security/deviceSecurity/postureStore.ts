@@ -20,7 +20,32 @@ import {
   type ScanOutcome, type StorageKV,
 } from './orchestrator';
 import { collectJsSignals, currentPlatform } from './collectors';
+import { collectNetworkSignals } from './networkCollector';
+import type { CollectorResult } from './orchestrator';
+import type { Platform } from './posture';
 import type { PostureSnapshot } from './posture';
+
+// Merge the device-integrity collector and the network-posture collector into
+// one CollectorResult: union the evaluated/pending type sets (evaluated wins),
+// concatenate signals. Adding the native VaultShield collector later is one more
+// entry in this merge — nothing downstream changes.
+async function collectAll(platform: Platform): Promise<CollectorResult> {
+  const parts = await Promise.all([
+    collectJsSignals(platform).catch(() => emptyResult()),
+    collectNetworkSignals(platform).catch(() => emptyResult()),
+  ]);
+  const evaluated = new Set<CollectorResult['evaluatedTypes'][number]>();
+  const pending = new Set<CollectorResult['pendingTypes'][number]>();
+  const signals = parts.flatMap((p) => p.signals);
+  for (const p of parts) for (const t of p.evaluatedTypes) evaluated.add(t);
+  for (const p of parts) for (const t of p.pendingTypes) pending.add(t);
+  for (const t of evaluated) pending.delete(t);   // evaluated wins over pending
+  return { signals, evaluatedTypes: Array.from(evaluated), pendingTypes: Array.from(pending) };
+}
+
+function emptyResult(): CollectorResult {
+  return { signals: [], evaluatedTypes: [], pendingTypes: [] };
+}
 
 /** Real SecureStore-backed key/value store (OS-keystore encrypted at rest). */
 export const secureKV: StorageKV = {
@@ -37,7 +62,7 @@ export const secureKV: StorageKV = {
  */
 export async function scanDevice(): Promise<ScanOutcome> {
   return runDeviceScan({
-    collect: collectJsSignals,
+    collect: collectAll,
     store: secureKV,
     now: () => Date.now(),
     platform: currentPlatform(),
