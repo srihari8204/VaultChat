@@ -21,6 +21,7 @@ import {
 } from './orchestrator';
 import { collectJsSignals, currentPlatform } from './collectors';
 import { collectNetworkSignals } from './networkCollector';
+import { collectNativeSignals } from './nativeSecurity';
 import type { CollectorResult } from './orchestrator';
 import type { Platform } from './posture';
 import type { PostureSnapshot } from './posture';
@@ -33,6 +34,7 @@ async function collectAll(platform: Platform): Promise<CollectorResult> {
   const parts = await Promise.all([
     collectJsSignals(platform).catch(() => emptyResult()),
     collectNetworkSignals(platform).catch(() => emptyResult()),
+    collectNativeSignals(platform).catch(() => emptyResult()),
   ]);
   const evaluated = new Set<CollectorResult['evaluatedTypes'][number]>();
   const pending = new Set<CollectorResult['pendingTypes'][number]>();
