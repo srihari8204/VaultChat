@@ -5,10 +5,12 @@
 
 import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert, ActivityIndicator, Platform } from 'react-native';
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useTheme } from '../lib/theme';
+import { LOCATION_LOCK } from '../constants/flags';
+import { useLockView } from '../lib/lock/lockService';
 import { useNavSettings, setNavSettings, loadNavSettings } from '../lib/nav/navSettings';
 import { startNavigation, stopNavigation, useNavBanner, type NavGeo } from '../lib/nav/navigationService';
 import { fetchRoute } from '../lib/nav/routing';
@@ -31,8 +33,10 @@ const MODES: { key: DisplayMode; label: string }[] = [
 
 export default function NavigateScreen() {
   const { colors } = useTheme();
+  const router = useRouter();
   const s = useNavSettings();
   const banner = useNavBanner();
+  const lock = useLockView();
   const params = useLocalSearchParams<{ lat?: string; lng?: string; name?: string }>();
 
   const [query, setQuery] = useState('');
@@ -128,6 +132,28 @@ export default function NavigateScreen() {
         </View>
       ) : (
         <ScrollView contentContainerStyle={st.setup} keyboardShouldPersistTaps="handled">
+          {/* Location Lock — geofence utility (openspec: location-lock) */}
+          {LOCATION_LOCK && (
+            <TouchableOpacity onPress={() => router.push('/location-lock')}
+              style={[st.lockEntry, { borderColor: lock.active ? '#22C55E' : colors.border, backgroundColor: colors.card }]}>
+              <View style={[st.lockEntryIcon, { backgroundColor: (lock.active ? '#22C55E' : colors.primary) + '1a' }]}>
+                <Ionicons name={lock.active ? 'lock-closed' : 'radio-button-on'} size={20}
+                  color={lock.active ? '#22C55E' : colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: colors.text, fontWeight: '800', fontSize: 14.5 }}>
+                  {lock.active ? 'Location Locked' : 'Location Lock'}
+                </Text>
+                <Text style={{ color: colors.text + '88', fontSize: 12.5, marginTop: 1 }}>
+                  {lock.active
+                    ? `${Math.round(lock.distance)} m of ${Math.round(lock.radius)} m · ${(lock.state ?? 'safe').toUpperCase()}`
+                    : 'Lock a spot, get alarmed if you leave it'}
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.text + '66'} />
+            </TouchableOpacity>
+          )}
+
           {/* destination */}
           <Text style={[st.h, { color: colors.text }]}>Destination</Text>
           <View style={[st.searchRow, { borderColor: colors.border, backgroundColor: colors.surface }]}>
@@ -192,6 +218,8 @@ export default function NavigateScreen() {
 const st = StyleSheet.create({
   screen: { flex: 1 },
   setup: { padding: 16, paddingBottom: 48 },
+  lockEntry: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1.5, borderRadius: 14, padding: 12, marginBottom: 20 },
+  lockEntryIcon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   h: { fontSize: 13, fontWeight: '700', letterSpacing: 0.3, textTransform: 'uppercase', marginBottom: 10, opacity: 0.9 },
   searchRow: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, height: 48 },
   input: { flex: 1, fontSize: 15 },

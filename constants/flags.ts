@@ -153,4 +153,15 @@ export const VB_RELIABILITY_FIXES = true;
 // locally, exactly as before. Call setup must never depend on a REST round trip.
 export const CALL_SESSIONS = false;
 
-export default { E2EE_ENABLED, VAULT_SESSION_SEALED, VAULT_CACHE_ENCRYPTED, MEDIA_E2EE, STORY_E2EE, GROUP_E2EE, SCHEDULED_LOCAL, VB_AUTODOWNLOAD, VB_AUTO_MAX_BYTES, VB_RELIABILITY_FIXES, CALL_ENGINE_V2, CALL_SESSIONS };
+// LOCATION_LOCK gates the Location Lock utility inside the Navigate mini-app
+// (openspec change: location-lock): lock a point + radius, on-device geofence
+// with warning/at-limit/outside zones, multi-channel alarm, kill-safe
+// background monitoring, navigate-back, local-only history. Everything is
+// on-device — the only network calls are the existing /nav/route proxy.
+//
+// ON for development/field-testing. The production release gate is tasks.md
+// 6.3 (two-device field test: arm → walk out → alarm in background → navigate
+// back → auto-stop → history correct) — flip OFF for store builds until then.
+export const LOCATION_LOCK = true;
+
+export default { E2EE_ENABLED, VAULT_SESSION_SEALED, VAULT_CACHE_ENCRYPTED, MEDIA_E2EE, STORY_E2EE, GROUP_E2EE, SCHEDULED_LOCAL, VB_AUTODOWNLOAD, VB_AUTO_MAX_BYTES, VB_RELIABILITY_FIXES, CALL_ENGINE_V2, CALL_SESSIONS, LOCATION_LOCK };

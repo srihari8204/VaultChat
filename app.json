@@ -84,7 +84,9 @@
           "color": "#4A9FFF",
           "sounds": [
             "./assets/sounds/note_chime.wav",
-            "./assets/sounds/note_bell.wav"
+            "./assets/sounds/note_bell.wav",
+            "./assets/sounds/lock_siren.wav",
+            "./assets/sounds/lock_beep.wav"
           ]
         }
       ],
