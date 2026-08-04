@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="dark" />
+<title>Shop Book · Admin</title>
+<style>
+  :root{
+    --bg:#070B14; --panel:#0D1322; --panel2:#111A2E; --line:rgba(11,122,59,.35);
+    --line2:rgba(255,255,255,.07); --green:#22C55E; --green-dim:rgba(34,197,94,.12);
+    --txt:#EAF0FB; --sub:rgba(234,240,251,.55); --err:#FF5C72; --warn:#E8B64C;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;min-height:100%}
+  body{background:var(--bg);color:var(--txt);font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;padding:20px}
+  h1{font-size:20px;margin:0 0 4px} h2{font-size:15px;margin:22px 0 10px;color:var(--green)}
+  .sub{color:var(--sub);font-size:13px}
+  input,select,textarea{color:var(--txt);background:var(--panel2);border:1px solid var(--line2);border-radius:9px;padding:9px 11px;font-size:13px;outline:none}
+  input:focus,textarea:focus{border-color:var(--green)}
+  button{cursor:pointer;border:none;border-radius:9px;padding:9px 14px;font-weight:700;font-size:13px;background:var(--green);color:#052e12}
+  button.ghost{background:var(--panel2);color:var(--txt);border:1px solid var(--line2)}
+  button.danger{background:var(--err);color:#fff}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:14px 0}
+  .bar input{flex:1;min-width:180px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+  .stat{background:var(--panel);border:1px solid var(--line2);border-radius:12px;padding:14px}
+  .stat b{display:block;font-size:22px;color:var(--green)}
+  .card{background:var(--panel);border:1px solid var(--line2);border-radius:12px;padding:14px;margin-bottom:10px}
+  .card .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .tag{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11px;font-weight:700}
+  .tag.ok{background:var(--green-dim);color:var(--green)} .tag.pend{background:rgba(232,182,76,.14);color:var(--warn)}
+  .muted{color:var(--sub);font-size:12px}
+  textarea{width:100%;min-height:120px;font-family:ui-monospace,monospace;font-size:12px}
+  .hide{display:none!important}
+  #msg{position:fixed;bottom:16px;right:16px;background:var(--panel2);border:1px solid var(--line);padding:10px 16px;border-radius:10px;opacity:0;transition:opacity .3s}
+</style>
+</head>
+<body>
+<h1>🛍️ Shop Book · Admin</h1>
+<p class="sub">Approvals, country tax engine, categories &amp; starter catalogs. Every action is audit-logged server-side.</p>
+
+<div class="bar">
+  <input id="base" placeholder="API base (e.g. https://api.example.com)" />
+  <input id="key" type="password" placeholder="x-admin-key" />
+  <button onclick="loadAll()">Connect</button>
+</div>
+
+<div id="app" class="hide">
+  <h2>Platform</h2>
+  <div class="grid" id="stats"></div>
+
+  <h2>Shop approvals</h2>
+  <div class="bar">
+    <button class="ghost" onclick="loadShops('pending')">Pending only</button>
+    <button class="ghost" onclick="loadShops('all')">All shops</button>
+  </div>
+  <div id="shops"></div>
+
+  <h2>Country tax engine</h2>
+  <p class="muted">Edit the JSON of a country and save — changes apply to shops with no app release. Tax fields are always optional for shops.</p>
+  <div id="countries"></div>
+  <button class="ghost" onclick="newCountry()">+ Add country</button>
+
+  <h2>Categories &amp; starter catalogs</h2>
+  <div id="categories"></div>
+</div>
+
+<div id="msg"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function toast(t){ const m=$('msg'); m.textContent=t; m.style.opacity=1; setTimeout(()=>m.style.opacity=0, 2500); }
+
+async function api(path, opts={}) {
+  const res = await fetch($('base').value.replace(/\/+$/,'') + path, {
+    ...opts,
+    headers: { 'content-type':'application/json', 'x-admin-key': $('key').value, ...(opts.headers||{}) },
+  });
+  const body = await res.json().catch(()=> ({}));
+  if (!res.ok) throw new Error(body.error || body.message || ('HTTP ' + res.status));
+  return body;
+}
+
+async function loadAll(){
+  try {
+    await loadStats();
+    $('app').classList.remove('hide');
+    await Promise.all([loadShops('pending'), loadCountries(), loadCategories()]);
+    localStorage.setItem('sb_admin_base', $('base').value);
+    toast('Connected');
+  } catch (e) { toast('❌ ' + e.message); }
+}
+
+async function loadStats(){
+  const s = await api('/api/admin/shopbook/stats');
+  $('stats').innerHTML = `
+    <div class="stat"><b>${s.shops}</b>Shops</div>
+    <div class="stat"><b>${s.pendingApproval}</b>Pending approval</div>
+    <div class="stat"><b>${s.orders}</b>Orders</div>
+    <div class="stat"><b>${Math.round(s.gmv).toLocaleString()}</b>GMV (completed)</div>
+    <div class="stat"><b>${s.customers}</b>Customers</div>`;
+}
+
+async function loadShops(filter){
+  const { shops } = await api('/api/admin/shopbook/shops?filter=' + filter);
+  $('shops').innerHTML = shops.length ? shops.map((sh) => `
+    <div class="card">
+      <div class="row">
+        <b>${esc(sh.name)}</b>
+        <span class="tag ${sh.approved ? 'ok':'pend'}">${sh.approved ? 'APPROVED':'PENDING'}</span>
+        ${sh.verified ? '<span class="tag ok">✓ VERIFIED</span>' : ''}
+        <span class="muted">${esc(sh.category)} · ${esc(sh.country)}</span>
+      </div>
+      <div class="muted">${esc(sh.address)} · Owner: ${esc(sh.ownerName)} ${esc(sh.ownerPhone)}</div>
+      <div class="row" style="margin-top:8px">
+        ${sh.approved ? '' : `<button onclick="approve('${sh.id}', true, false)">Approve</button>
+        <button onclick="approve('${sh.id}', true, true)">Approve + Verified ✓</button>
+        <button class="danger" onclick="rejectShop('${sh.id}')">Reject…</button>`}
+        ${sh.approved ? `<button class="ghost" onclick="approve('${sh.id}', true, ${!sh.verified})">${sh.verified ? 'Remove verified badge' : 'Grant verified badge'}</button>` : ''}
+      </div>
+    </div>`).join('') : '<p class="muted">Nothing here.</p>';
+}
+
+async function approve(id, approved, verified){
+  try { await api(`/api/admin/shopbook/shops/${id}/approve`, { method:'POST', body: JSON.stringify({ approved, verified }) });
+    toast('Saved'); loadShops('pending'); loadStats(); } catch(e){ toast('❌ ' + e.message); }
+}
+async function rejectShop(id){
+  const reason = prompt('Rejection reason (sent to the owner):');
+  if (!reason) return;
+  try { await api(`/api/admin/shopbook/shops/${id}/approve`, { method:'POST', body: JSON.stringify({ approved:false, verified:false, reason }) });
+    toast('Rejected'); loadShops('pending'); } catch(e){ toast('❌ ' + e.message); }
+}
+
+async function loadCountries(){
+  const { countries } = await api('/api/admin/shopbook/countries');
+  $('countries').innerHTML = countries.map((c, i) => `
+    <div class="card">
+      <div class="row"><b>${esc(c.name)} (${esc(c.code)})</b>
+        <span class="muted">${esc(c.currencySymbol)} ${esc(c.currencyCode)} · ${esc(c.taxType)}</span>
+        <span class="tag ${c.enabled ? 'ok':'pend'}">${c.enabled ? 'ENABLED':'DISABLED'}</span></div>
+      <textarea id="country-${i}">${esc(JSON.stringify(c, null, 2))}</textarea>
+      <div class="row" style="margin-top:8px"><button onclick="saveCountry(${i})">Save</button></div>
+    </div>`).join('');
+}
+async function saveCountry(i){
+  try {
+    const body = JSON.parse($('country-' + i).value);
+    await api('/api/admin/shopbook/countries', { method:'POST', body: JSON.stringify(body) });
+    toast('Country saved'); loadCountries();
+  } catch(e){ toast('❌ ' + e.message); }
+}
+function newCountry(){
+  const tpl = { code:'XX', name:'New Country', currencySymbol:'$', currencyCode:'USD', taxType:'VAT',
+    taxSplit:[], taxFields:[{id:'tax_number',label:'Tax Number'}], documents:[], dateFormat:'DD/MM/YYYY', sort:100, enabled:true };
+  const div = document.createElement('div');
+  div.className = 'card';
+  div.innerHTML = `<textarea id="country-new">${esc(JSON.stringify(tpl, null, 2))}</textarea>
+    <div class="row" style="margin-top:8px"><button onclick="saveNewCountry()">Create</button></div>`;
+  $('countries').appendChild(div);
+}
+async function saveNewCountry(){
+  try {
+    const body = JSON.parse($('country-new').value);
+    await api('/api/admin/shopbook/countries', { method:'POST', body: JSON.stringify(body) });
+    toast('Country created'); loadCountries();
+  } catch(e){ toast('❌ ' + e.message); }
+}
+
+async function loadCategories(){
+  const { categories } = await api('/api/admin/shopbook/categories');
+  $('categories').innerHTML = categories.map((c, i) => `
+    <div class="card">
+      <div class="row"><b>${esc(c.icon)} ${esc(c.label)}</b><span class="muted">${esc(c.id)} · ${c.items.length} starter item(s)</span></div>
+      <textarea id="cat-${i}">${esc(JSON.stringify(c, null, 2))}</textarea>
+      <div class="row" style="margin-top:8px"><button onclick="saveCategory(${i})">Save</button></div>
+    </div>`).join('');
+}
+async function saveCategory(i){
+  try {
+    const body = JSON.parse($('cat-' + i).value);
+    await api('/api/admin/shopbook/categories', { method:'POST', body: JSON.stringify(body) });
+    toast('Category saved'); loadCategories();
+  } catch(e){ toast('❌ ' + e.message); }
+}
+
+$('base').value = localStorage.getItem('sb_admin_base') || '';
+</script>
+</body>
+</html>
