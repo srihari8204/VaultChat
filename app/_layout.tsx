@@ -40,6 +40,8 @@ import '../lib/callBackground';   // registers notifee bg event + bg notificatio
 import '../lib/family/background'; // registers the bg-location task — a headless OS
                                    // wake runs ONLY this layout's imports, so without
                                    // this line killed-app Family sharing drops fixes
+import '../lib/lock/background';   // registers the Location Lock geofence task — same
+                                   // rule: headless wakes need it defined at load
 import { getAccessToken } from '../lib/api';
 import { E2EE_ENABLED, SCHEDULED_LOCAL } from '../constants/flags';
 import { runDueScheduled, rearmAllTriggers } from '../lib/scheduledRunner';
