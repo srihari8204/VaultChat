@@ -10,6 +10,10 @@ import { unwrapPreview } from './linkPreview';
 import perf from './perf';
 import { SERVER_URL } from '../constants/server';
 import { E2EE_ENABLED, GROUP_E2EE, E2EE_STRICT } from '../constants/flags';
+// Group types and permissions are defined once, in lib/groups, and mirrored
+// server-side in internal/groups. Import rather than restate them.
+import type { GroupType } from './groups/catalog';
+import type { Permission } from './groups/permissions';
 
 export interface ChatSummary {
   id:            string;
@@ -100,6 +104,22 @@ export interface ChatDetail extends ChatSummary {
   approveMembers?:      boolean;
   // W15: a chat-wide pinned message (null = none).
   pinnedMessageId?:     string | null;
+
+  // ── Groups & Circles (migration 066) ──
+  // groupType is null for every group created before that migration; such a
+  // group is an "untyped group" and keeps the legacy admin-only rules.
+  groupType?:           GroupType | null;
+  icon?:                string | null;
+  color?:               string | null;
+  privacy?:             'private' | 'invite_only';
+  /** Server-owned cap for this group's type. Never hardcode a cap client-side. */
+  maxMembers?:          number | null;
+  /**
+   * THIS USER's resolved permissions in this group. Use it to decide what to
+   * DRAW — never to decide what is allowed. The server re-resolves the same
+   * layers on every mutating endpoint, and that check is the real one.
+   */
+  permissions?:         Permission[];
 }
 
 /** Pin a message chat-wide (messageId = null clears the pin). */
@@ -466,10 +486,19 @@ export async function createDirectChat(
   return api(`/chats`, { method: 'POST', json: body });
 }
 
+export interface GroupMeta {
+  groupType?:   GroupType;
+  icon?:        string;
+  color?:       string;
+  description?: string;
+  privacy?:     'private' | 'invite_only';
+}
+
 export async function createGroupChat(
   name: string,
   members: { ids?: string[]; emails?: string[]; allowEmpty?: boolean } = {},
-): Promise<{ id: string; type: 'group'; name: string }> {
+  meta: GroupMeta = {},
+): Promise<{ id: string; type: 'group'; name: string; groupType?: GroupType | null }> {
   return api(`/chats`, {
     method: 'POST',
     json: {
@@ -477,6 +506,8 @@ export async function createGroupChat(
       memberIds:    members.ids    ?? [],
       memberEmails: members.emails ?? [],
       allowEmpty:   members.allowEmpty === true,
+      // Omitted keys leave the group untyped, which is a valid state.
+      ...meta,
     },
   });
 }
@@ -1031,6 +1062,10 @@ export async function updateChat(
     slowModeSeconds?: number; sendPolicy?: 'everyone' | 'admins';
     mediaPolicy?: 'everyone' | 'admins'; addMembersPolicy?: 'everyone' | 'admins';
     antiSpamLinks?: boolean; approveMembers?: boolean;
+    // Groups & Circles. Stamping groupType is how an existing Family Space
+    // circle becomes a typed group — the server cannot identify circles itself.
+    groupType?: GroupType; icon?: string; color?: string;
+    privacy?: 'private' | 'invite_only';
   },
 ): Promise<void> {
   await api(`/chats/${encodeURIComponent(chatId)}`, { method: 'PATCH', json: patch });
