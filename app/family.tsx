@@ -607,7 +607,7 @@ export default function FamilySpaceScreen() {
               <Ionicons name="key-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Share an invite code</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => { setManage(false); router.push({ pathname: '/family-setup' as any, params: { from: 'family' } }); }} style={[st.mRow, { borderColor: colors.border }]}>
-              <Ionicons name="add-circle-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Create or join another space</Text>
+              <Ionicons name="add-circle-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Create or join another group</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/chat', params: { id: active.id } } as any); }} style={[st.mRow, { borderColor: colors.border }]}>
               <Ionicons name="chatbubbles" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Open circle chat</Text>
