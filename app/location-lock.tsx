@@ -8,6 +8,7 @@
 //             the map with the zone-colored radius + compass, Stop Alarm /
 //             Navigate back / Unlock, and the kill-safe upgrade banner.
 
+import { geocodeSearch } from '../lib/nav/geocode';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet,
@@ -99,9 +100,12 @@ export default function LocationLockScreen() {
     if (m) { setPoint({ name: q, coords: { lat: +m[1], lng: +m[2] } }); setPinMode(false); return; }
     setSearching(true);
     try {
+      // Server-proxied geocoder first (works on no-GMS), platform fallback second.
+      const hits = await geocodeSearch(q).catch(() => []);
+      if (hits[0]) { setPoint({ name: hits[0].name || hits[0].label, coords: { lat: hits[0].lat, lng: hits[0].lng } }); setPinMode(false); return; }
       const res = await Location.geocodeAsync(q);
       if (res[0]) { setPoint({ name: q, coords: { lat: res[0].latitude, lng: res[0].longitude } }); setPinMode(false); }
-      else Alert.alert('Not found', 'No match. On no-GMS devices the address geocoder may be unavailable — enter coordinates as "lat, lng" or drop a pin.');
+      else Alert.alert('Not found', 'No match — try a nearby landmark, enter "lat, lng", or drop a pin.');
     } catch {
       Alert.alert('Search failed', 'Enter coordinates as "lat, lng" or drop a pin on the map.');
     } finally { setSearching(false); }
