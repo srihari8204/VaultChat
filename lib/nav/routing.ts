@@ -15,6 +15,29 @@ import { type HapticEvent } from './hapticLanguage';
 
 export type Costing = 'auto' | 'motorcycle' | 'bicycle' | 'pedestrian' | 'truck';
 
+/** Route preferences → Valhalla request extras (v2: Location Lock Pro). */
+export interface RouteOpts {
+  shortest?: boolean;        // minimize distance instead of time
+  avoidTolls?: boolean;
+  avoidHighways?: boolean;
+}
+
+/** Build the /nav/route request body (pure — the proxy forwards this shape to
+ *  Valhalla, so costing_options ride along without a backend change). Toll/
+ *  highway avoidance only applies to motorized costings. */
+export function buildRouteRequest(from: LatLng, to: LatLng, costing: Costing, opts?: RouteOpts): any {
+  const body: any = { from, to, costing };
+  if (!opts) return body;
+  const co: any = {};
+  if (opts.shortest) co.shortest = true;
+  if ((costing === 'auto' || costing === 'motorcycle' || costing === 'truck')) {
+    if (opts.avoidTolls) co.use_tolls = 0;
+    if (opts.avoidHighways) co.use_highways = 0;
+  }
+  if (Object.keys(co).length) body.costing_options = { [costing]: co };
+  return body;
+}
+
 export interface Maneuver {
   event: HapticEvent | null;   // the haptic to fire for this maneuver (null = no buzz, e.g. continue)
   turnAngle: number;           // approx sharpness, deg (feeds adaptiveDistance)
@@ -92,9 +115,9 @@ export function parseRoute(resp: any): Route {
 }
 
 /** Request a real route from the self-hosted Valhalla via the backend proxy. */
-export async function fetchRoute(from: LatLng, to: LatLng, costing: Costing = 'auto'): Promise<Route> {
+export async function fetchRoute(from: LatLng, to: LatLng, costing: Costing = 'auto', opts?: RouteOpts): Promise<Route> {
   const { api } = require('../api');
-  const resp = await api('/nav/route', { method: 'POST', json: { from, to, costing } });
+  const resp = await api('/nav/route', { method: 'POST', json: buildRouteRequest(from, to, costing, opts) });
   return parseRoute(resp);
 }
 
@@ -128,6 +151,17 @@ function _selfCheck(): void {
   A(route.maneuvers[0].event === 'left' && route.maneuvers[0].roadName === 'Main St', 'left onto Main St');
   A(route.maneuvers[0].lengthM === 120 && route.lengthM === 1200, 'km→m conversion');
   A(route.maneuvers[1].event === 'destination', 'destination maneuver');
+
+  // route options → Valhalla costing_options mapping
+  const p0 = { lat: 0, lng: 0 };
+  A(!buildRouteRequest(p0, p0, 'auto').costing_options, 'no opts → no costing_options');
+  const rq = buildRouteRequest(p0, p0, 'auto', { shortest: true, avoidTolls: true, avoidHighways: true });
+  A(rq.costing_options.auto.shortest === true && rq.costing_options.auto.use_tolls === 0
+    && rq.costing_options.auto.use_highways === 0, 'auto: shortest + avoid tolls/highways');
+  const rw = buildRouteRequest(p0, p0, 'pedestrian', { avoidTolls: true, avoidHighways: true });
+  A(!rw.costing_options, 'pedestrian ignores toll/highway avoidance');
+  const rs = buildRouteRequest(p0, p0, 'pedestrian', { shortest: true });
+  A(rs.costing_options.pedestrian.shortest === true, 'pedestrian shortest still applies');
 
   console.log('routing self-check: OK');
 }

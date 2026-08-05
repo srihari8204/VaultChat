@@ -8,7 +8,7 @@ import { useSyncExternalStore } from 'react';
 import { type NavProfile, type HapticEvent, type HapticPattern } from './hapticLanguage';
 import { type DisplayMode } from './hapticPlayer';
 import { type NotifTiming } from './adaptiveDistance';
-import { type Costing } from './routing';
+import { type Costing, type RouteOpts } from './routing';
 
 export interface NavSettings {
   profile: NavProfile;
@@ -16,8 +16,9 @@ export interface NavSettings {
   timing: NotifTiming;
   costing: Costing;
   custom: Partial<Record<HapticEvent, HapticPattern>>;   // used when profile === 'custom'
+  routeOpts: RouteOpts;                                  // fastest/shortest + avoidances (v2)
 }
-const DEFAULT: NavSettings = { profile: 'standard', mode: 'vibrationOnly', timing: 'normal', costing: 'auto', custom: {} };
+const DEFAULT: NavSettings = { profile: 'standard', mode: 'vibrationOnly', timing: 'normal', costing: 'auto', custom: {}, routeOpts: {} };
 const KEY = 'vc_nav_settings_v1';
 
 let settings: NavSettings = DEFAULT;

@@ -100,6 +100,48 @@ While the state is Outside, the system SHALL offer one-tap navigation from the c
 - **WHEN** the user strays off the return route beyond the GPS margin
 - **THEN** the route is recalculated automatically and guidance continues on the new route
 
+### Requirement: Live GPS diagnostics
+While a lock is armed the status surface SHALL show, alongside distance/radius/accuracy: current speed, compass heading, device battery level, and a GPS quality tier (Excellent < 8 m, Good < 15 m, Fair < 30 m, Poor ≥ 30 m accuracy). Raw satellite counts and cellular signal strength are explicitly out of scope (no native GNSS access); the quality tier stands in for them.
+
+#### Scenario: Diagnostics update with fixes
+- **WHEN** an accepted fix arrives with speed 1.4 m/s and accuracy ±6 m
+- **THEN** the card shows ~5 km/h, the current heading, the battery percentage, and quality "Excellent"
+
+### Requirement: Monitoring modes
+The system SHALL offer Walking, Cycling, Driving, and Custom modes. A mode tunes the zone engine's sensitivity (warning band, hysteresis) and GPS cadence for the expected speed, and pre-selects the navigate-back travel mode. Custom SHALL expose the sensitivity levels directly. The mode SHALL be changeable before arming and while armed.
+
+#### Scenario: Driving mode widens the envelope
+- **WHEN** the user selects Driving mode on a 500 m lock
+- **THEN** the warning band and hysteresis widen for high-speed fixes, the GPS cadence tightens, and navigate-back defaults to the car route
+
+### Requirement: Navigate-back route options
+Navigate-back SHALL support route preferences: fastest (default) or shortest, avoid tolls, and avoid highways, passed to the routing engine; changing an option or tapping "Re-route now" SHALL recalculate immediately from the current position.
+
+#### Scenario: Avoid highways
+- **WHEN** the user enables "avoid highways" while navigating back
+- **THEN** the route is recalculated without highway segments and guidance continues on the new route
+
+### Requirement: Voice guidance during navigate-back
+When voice is enabled, navigate-back SHALL speak each upcoming maneuver (e.g. "In 120 meters, turn right") as the banner instruction changes, plus rerouting and arrival announcements, without requiring the screen to be on.
+
+#### Scenario: Spoken turn
+- **WHEN** the next maneuver becomes "Turn right" at 120 m during navigate-back
+- **THEN** the instruction is spoken once, and again ("Turn right now") when the maneuver distance crosses the immediate threshold
+
+### Requirement: Map zoom controls
+The lock map SHALL provide zoom in / zoom out buttons and a re-center control alongside the compass, all usable during active monitoring and navigate-back.
+
+#### Scenario: Zoom while locked
+- **WHEN** the user taps zoom-in twice on the active lock map
+- **THEN** the map zooms two levels around its current center without disturbing monitoring
+
+### Requirement: Settings hub
+The feature SHALL provide a settings screen grouped as: General (units metric/imperial, monitoring mode), Sound & Vibration (the alert channel settings), Battery (background tracking on/off, battery-optimization exemption), and About (version, privacy summary). Unit choice SHALL apply to every distance/speed readout.
+
+#### Scenario: Imperial units
+- **WHEN** the user switches units to imperial
+- **THEN** distances render in feet/miles and speeds in mph across the status card, alerts, history, and statistics
+
 ### Requirement: Location privacy
 All geofence evaluation SHALL happen on-device; lock coordinates, fixes, zone events, and history SHALL never be transmitted off the device by this feature. The only permitted network calls are route requests to the app's own authenticated routing proxy and (if enabled) geocoding queries to the app's own search proxy.
 

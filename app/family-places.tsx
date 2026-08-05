@@ -18,13 +18,20 @@ import {
   ScrollView, Switch, Modal, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import * as Location from 'expo-location';
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { brandAlpha } from '../constants/theme';
 import { getPlaces, setPlaces } from '../lib/family/store';
 import { reloadPlaces } from '../lib/family/presence';
 import { type Geofence } from '../lib/family/geofence';
+// v3 — shared Location Lock engine (ONE engine app-wide; see lib/family/lockBridge)
+import { armFamilyPlaceLock, isFamilyLockFor } from '../lib/family/lockBridge';
+import { useLockView, unlockLock } from '../lib/lock/lockService';
+import { zoneColor, clampRadius } from '../lib/lock/zoneMachine';
+import { statsForPlace, type PlaceLockStats } from '../lib/lock/lockStore';
+import { navigateTo } from '../lib/nav/openNavigation';
+import { getCurrentUserAsync } from './(constants)/authService';
 
 const RADII = [100, 200, 500, 1000];
 const MIN_RADIUS = 50;
@@ -56,8 +63,20 @@ export default function FamilyPlacesScreen() {
   const [editing, setEditing] = useState<Geofence | null>(null);
   const [editName, setEditName] = useState('');
   const [editRadius, setEditRadius] = useState('');
+  const [lockStats, setLockStats] = useState<Record<string, PlaceLockStats>>({});
+  const router = useRouter();
+  const lock = useLockView();   // shared engine's live state (chip on locked place)
 
   useEffect(() => { if (cid) getPlaces(cid).then(setPlacesState).catch(() => {}); }, [cid]);
+
+  // Per-place lock stats from the SHARED history store (visits · time inside).
+  useEffect(() => {
+    (async () => {
+      const out: Record<string, PlaceLockStats> = {};
+      for (const p of places) { try { out[p.name] = await statsForPlace(p.name); } catch {} }
+      setLockStats(out);
+    })();
+  }, [places]);
 
   const persist = async (next: Geofence[]) => {
     setPlacesState(next);
@@ -119,6 +138,33 @@ export default function FamilyPlacesScreen() {
     setEditing(p);
     setEditName(p.name);
     setEditRadius(String(p.radiusM));
+  };
+
+  // ── v3: family-aware actions on the SHARED engine (never a second engine) ──
+  const lockedHere = (p: Geofence) => lock.active && isFamilyLockFor(p.id);
+
+  const lockPlace = async (p: Geofence) => {
+    const r = clampRadius(p.radiusM);
+    const doArm = async () => {
+      const me = await getCurrentUserAsync().catch(() => null);
+      const res = await armFamilyPlaceLock({
+        circleId: cid, place: p,
+        myId: String(me?.id ?? 'me'), myName: me?.name || me?.email || 'Me',
+      });
+      if (!res.ok) { Alert.alert('Could not lock', res.reason ?? 'Try again.'); return; }
+      setEditing(null);
+    };
+    if (r !== p.radiusM) {
+      Alert.alert('Radius adjusted', `Location Lock monitors 10 m – 1 km, so "${p.name}" will be locked at ${r} m (place alerts keep the full ${p.radiusM} m).`,
+        [{ text: 'Cancel', style: 'cancel' }, { text: `Lock at ${r} m`, onPress: doArm }]);
+    } else { await doArm(); }
+  };
+
+  const unlockPlace = () => {
+    Alert.alert('Unlock?', 'Monitoring stops and the session is saved to history.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Unlock', style: 'destructive', onPress: () => { unlockLock().catch(() => {}); setEditing(null); } },
+    ]);
   };
 
   const saveEdit = async () => {
@@ -198,9 +244,20 @@ export default function FamilyPlacesScreen() {
                   color={on ? colors.primary : colors.textFaint} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ color: on ? colors.text : colors.textDim, fontWeight: '600' }} numberOfLines={1}>{p.name}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={{ color: on ? colors.text : colors.textDim, fontWeight: '600' }} numberOfLines={1}>{p.name}</Text>
+                  {lockedHere(p) && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 2, backgroundColor: zoneColor(lock.state ?? 'safe') + '22' }}>
+                      <Ionicons name="lock-closed" size={9} color={zoneColor(lock.state ?? 'safe')} />
+                      <Text style={{ color: zoneColor(lock.state ?? 'safe'), fontSize: 9.5, fontWeight: '800' }}>
+                        {(lock.state ?? 'safe') === 'safe' ? 'LOCKED · SAFE' : (lock.state ?? '').toUpperCase()}
+                      </Text>
+                    </View>
+                  )}
+                </View>
                 <Text style={{ color: colors.textDim, fontSize: 11.5 }} numberOfLines={1}>
                   {p.radiusM} m · {p.center.lat.toFixed(4)}, {p.center.lng.toFixed(4)}
+                  {lockStats[p.name]?.visits ? ` · ${lockStats[p.name].visits} lock${lockStats[p.name].visits > 1 ? 's' : ''}` : ''}
                 </Text>
               </View>
               <Switch value={on} onValueChange={(v) => toggle(p.id, v)} trackColor={{ true: colors.primary }} />
@@ -237,6 +294,36 @@ export default function FamilyPlacesScreen() {
                 </TouchableOpacity>
               ))}
             </View>
+
+            {/* v3 — actions on the shared engines (Navigate module + Lock engine) */}
+            {editing && (
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 14 }}>
+                <TouchableOpacity
+                  onPress={() => { navigateTo(editing.center.lat, editing.center.lng, editing.name); setEditing(null); }}
+                  style={[st.btn, { flex: 1, marginTop: 0, backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border }]}>
+                  <Ionicons name="navigate" size={17} color={colors.primary} />
+                  <Text style={[st.btnTxt, { color: colors.text }]}>Navigate</Text>
+                </TouchableOpacity>
+                {lockedHere(editing) ? (
+                  <TouchableOpacity onPress={unlockPlace}
+                    style={[st.btn, { flex: 1, marginTop: 0, backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.danger }]}>
+                    <Ionicons name="lock-open" size={17} color={colors.danger} />
+                    <Text style={[st.btnTxt, { color: colors.danger }]}>Unlock</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity onPress={() => lockPlace(editing)}
+                    style={[st.btn, { flex: 1, marginTop: 0, backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.primary }]}>
+                    <Ionicons name="lock-closed" size={17} color={colors.primary} />
+                    <Text style={[st.btnTxt, { color: colors.primary }]}>Lock here</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+            {editing && lockedHere(editing) && (
+              <TouchableOpacity onPress={() => { setEditing(null); router.push('/location-lock' as any); }} style={{ alignSelf: 'center', marginTop: 10 }}>
+                <Text style={{ color: colors.primary, fontWeight: '600', fontSize: 13 }}>View live lock status</Text>
+              </TouchableOpacity>
+            )}
 
             <TouchableOpacity onPress={saveEdit} style={[st.btn, { backgroundColor: colors.primary }]}>
               <Ionicons name="checkmark" size={18} color="#fff" /><Text style={st.btnTxt}>Save</Text>

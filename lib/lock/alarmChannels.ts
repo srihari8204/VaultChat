@@ -24,7 +24,8 @@ const TONE_ASSET: Record<LockTone, any> = {
 };
 
 // [wait, on, off, …] ms — looped by Vibration.vibrate(pattern, true).
-const VIBE_PATTERN: Record<LockVibe, number[]> = {
+// Exported for the settings screen's single-shot "test vibration" (v2.1).
+export const VIBE_PATTERN: Record<LockVibe, number[]> = {
   strong: [0, 800, 250],
   medium: [0, 400, 300],
   pulse: [0, 150, 150],

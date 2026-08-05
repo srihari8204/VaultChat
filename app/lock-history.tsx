@@ -5,15 +5,17 @@
 // these screens make no network requests (spec: lock-history).
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, FlatList, Alert, Share } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, FlatList, Alert, Share, TextInput } from 'react-native';
 import { Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import {
-  getSessions, getEvents, statsForRange, deleteSession, clearAllHistory,
-  exportHistoryJSON, exportHistoryCSV,
+  getSessions, getEvents, statsForRange, distancePerDay, deleteSession, clearAllHistory,
+  exportHistoryJSON, exportHistoryCSV, setSessionNotes,
   type LockSessionRow, type LockEventRow, type HistoryFilter, type LockStats,
 } from '../lib/lock/lockStore';
+import { fmtDistance } from '../lib/lock/format';
+import { useLockSettings } from '../lib/lock/lockSettings';
 
 const FILTERS: { key: HistoryFilter; label: string }[] = [
   { key: 'all', label: 'All' }, { key: 'exits', label: 'Exits' },
@@ -43,12 +45,15 @@ const EVENT_META: Record<string, { icon: any; color: string; label: string }> = 
 
 export default function LockHistoryScreen() {
   const { colors } = useTheme();
+  const settings = useLockSettings();
   const [filter, setFilter] = useState<HistoryFilter>('all');
   const [range, setRange] = useState<(typeof RANGES)[number]['key']>('today');
   const [sessions, setSessions] = useState<LockSessionRow[]>([]);
   const [stats, setStats] = useState<LockStats | null>(null);
+  const [trend, setTrend] = useState<{ day: string; meters: number }[]>([]);
   const [open, setOpen] = useState<number | null>(null);
   const [events, setEvents] = useState<LockEventRow[]>([]);
+  const [noteDraft, setNoteDraft] = useState('');
 
   const reload = useCallback(async () => {
     setSessions(await getSessions(filter));
@@ -58,6 +63,7 @@ export default function LockHistoryScreen() {
       ? new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
       : Date.now() - days * 86_400_000;
     setStats(await statsForRange(from, Date.now() + 1));
+    setTrend(await distancePerDay(7));
   }, [filter, range]);
 
   useEffect(() => { reload().catch(() => {}); }, [reload]);
@@ -65,6 +71,7 @@ export default function LockHistoryScreen() {
   const toggle = async (id: number) => {
     if (open === id) { setOpen(null); return; }
     setOpen(id);
+    setNoteDraft(sessions.find((s) => s.id === id)?.notes ?? '');
     setEvents(await getEvents(id));
   };
 
@@ -107,10 +114,36 @@ export default function LockHistoryScreen() {
         <View style={[st.statsCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <StatCell label="Locks" value={String(stats.locks)} colors={colors} />
           <StatCell label="Exits" value={String(stats.exits)} colors={colors} />
+          <StatCell label="Alarms" value={String(stats.alarms)} colors={colors} />
           <StatCell label="Time outside" value={fmtMs(stats.timeOutsideMs)} colors={colors} />
           <StatCell label="Protected" value={fmtMs(stats.timeProtectedMs)} colors={colors} />
-          <StatCell label="Distance" value={`${(stats.distanceTraveled / 1000).toFixed(1)} km`} colors={colors} />
-          <StatCell label="Avg speed" value={`${stats.avgSpeedKmh.toFixed(1)} km/h`} colors={colors} />
+          <StatCell label="Avg duration" value={stats.avgDurationMs ? fmtMs(stats.avgDurationMs) : '—'} colors={colors} />
+          <StatCell label="Distance" value={fmtDistance(stats.distanceTraveled, settings.units)} colors={colors} />
+          <StatCell label="Avg GPS ±" value={stats.avgAccuracyM ? fmtDistance(stats.avgAccuracyM, settings.units) : '—'} colors={colors} />
+          <StatCell label="Avg radius" value={stats.avgRadiusM ? fmtDistance(stats.avgRadiusM, settings.units) : '—'} colors={colors} />
+        </View>
+      )}
+
+      {/* 7-day distance trend (plain Views — no chart lib) */}
+      {trend.some((t) => t.meters > 0) && (
+        <View style={[st.trendCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={{ color: colors.text + '88', fontSize: 11.5, fontWeight: '700', marginBottom: 8 }}>
+            DISTANCE WHILE LOCKED — LAST 7 DAYS
+          </Text>
+          <View style={st.trendRow}>
+            {trend.map((t, i) => {
+              const max = Math.max(...trend.map((x) => x.meters), 1);
+              return (
+                <View key={i} style={st.trendCol}>
+                  <View style={[st.trendBar, {
+                    height: Math.max(3, (t.meters / max) * 56),
+                    backgroundColor: t.meters > 0 ? colors.primary : colors.border,
+                  }]} />
+                  <Text style={{ color: colors.text + '77', fontSize: 10, marginTop: 4 }}>{t.day}</Text>
+                </View>
+              );
+            })}
+          </View>
         </View>
       )}
 
@@ -152,17 +185,20 @@ export default function LockHistoryScreen() {
             <View style={st.rowBetween}>
               <Text style={{ color: colors.text, fontWeight: '800', fontSize: 14 }}>{fmtT(s.started_at)}</Text>
               <Text style={{ color: colors.text + '88', fontSize: 12.5 }}>
-                {s.radius >= 1000 ? '1 km' : `${Math.round(s.radius)} m`} · {s.ended_at ? fmtMs(s.ended_at - s.started_at) : 'active'}
+                {fmtDistance(s.radius, settings.units)} · {s.ended_at ? fmtMs(s.ended_at - s.started_at) : 'active'}
               </Text>
             </View>
             <View style={[st.rowBetween, { marginTop: 6 }]}>
               <Text style={{ color: s.exits ? '#EF4444' : '#22C55E', fontSize: 12.5, fontWeight: '600' }}>
-                {s.exits ? `${s.exits} exit${s.exits > 1 ? 's' : ''} · max ${Math.round(s.max_distance)} m` : 'Stayed inside'}
+                {s.exits ? `${s.exits} exit${s.exits > 1 ? 's' : ''} · max ${fmtDistance(s.max_distance, settings.units)}` : 'Stayed inside'}
               </Text>
               <Text style={{ color: colors.text + '77', fontSize: 12.5 }}>
                 {s.alarm_ms > 0 ? `alarm ${fmtMs(s.alarm_ms)} · ` : ''}outside {fmtMs(s.time_outside_ms)}
               </Text>
             </View>
+            {!!s.notes && open !== s.id && (
+              <Text numberOfLines={1} style={{ color: colors.text + '66', fontSize: 12, marginTop: 4 }}>📝 {s.notes}</Text>
+            )}
 
             {open === s.id && (
               <View style={[st.timeline, { borderColor: colors.border }]}>
@@ -179,6 +215,20 @@ export default function LockHistoryScreen() {
                     </View>
                   );
                 })}
+                {/* optional note (v2.1) */}
+                <View style={{ flexDirection: 'row', gap: 6, marginTop: 8, alignItems: 'center' }}>
+                  <TextInput
+                    value={noteDraft} onChangeText={setNoteDraft}
+                    placeholder="Add a note (e.g. “parked at north gate”)…"
+                    placeholderTextColor={colors.text + '55'}
+                    style={{ flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5, color: colors.text, fontSize: 12 }}
+                  />
+                  <TouchableOpacity
+                    accessibilityRole="button" accessibilityLabel="Save note"
+                    onPress={async () => { await setSessionNotes(s.id, noteDraft); reload(); }}>
+                    <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 12 }}>Save</Text>
+                  </TouchableOpacity>
+                </View>
                 <Text style={{ color: colors.text + '55', fontSize: 11, marginTop: 6 }}>
                   {s.center_lat.toFixed(5)}, {s.center_lng.toFixed(5)} · long-press card to delete
                 </Text>
@@ -207,6 +257,10 @@ const st = StyleSheet.create({
   chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
   statsCard: { flexDirection: 'row', flexWrap: 'wrap', borderWidth: 1, borderRadius: 14, marginTop: 12, paddingVertical: 6 },
   statCell: { width: '33.33%', alignItems: 'center', paddingVertical: 10 },
+  trendCard: { borderWidth: 1, borderRadius: 14, marginTop: 10, padding: 12 },
+  trendRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
+  trendCol: { alignItems: 'center', flex: 1 },
+  trendBar: { width: 18, borderRadius: 5 },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   linkRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   session: { borderWidth: 1, borderRadius: 12, padding: 12, marginTop: 10 },

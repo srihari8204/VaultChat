@@ -10,6 +10,7 @@ import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { type Costing } from '../lib/nav/routing';
 import { useLockSettings } from '../lib/lock/lockSettings';
+import { fmtDistance } from '../lib/lock/format';
 import {
   useLockView, stopLockAlarm, navigateBackToLock, restoreLock,
 } from '../lib/lock/lockService';
@@ -72,9 +73,9 @@ export default function LockAlertScreen() {
 
       <View style={st.distBox}>
         <Text style={st.distLabel}>DISTANCE OUTSIDE</Text>
-        <Text style={st.dist}>{over.toFixed(1)} m</Text>
+        <Text style={st.dist}>{fmtDistance(over, settings.units)}</Text>
         <Text style={st.distSub}>
-          {Math.round(lock.distance)} m from center · radius {Math.round(lock.radius)} m · GPS ±{Math.round(lock.accuracy)} m
+          {fmtDistance(lock.distance, settings.units)} from center · radius {fmtDistance(lock.radius, settings.units)} · GPS ±{fmtDistance(lock.accuracy, settings.units)}
         </Text>
       </View>
 

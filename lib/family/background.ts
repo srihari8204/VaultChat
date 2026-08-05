@@ -65,20 +65,21 @@ TaskManager.defineTask(BG_TASK, async ({ data, error }: any) => {
   const loc = locations[locations.length - 1];   // only the freshest matters
   const pos = { lat: loc.coords.latitude, lng: loc.coords.longitude };
   const spd = loc.coords.speed != null && loc.coords.speed >= 0 ? loc.coords.speed : undefined;
+  const acc = loc.coords.accuracy != null && loc.coords.accuracy >= 0 ? Math.round(loc.coords.accuracy) : undefined;
   const ts = loc.timestamp || Date.now();
   const bat = await readBattery();
 
   for (const cid of ctx.circleIds) {
     if (key) {
       const blob = sealJSON(key, {
-        lat: pos.lat, lng: pos.lng, spd, ts, bat: bat.level, chg: bat.charging,
+        lat: pos.lat, lng: pos.lng, spd, acc, ts, bat: bat.level, chg: bat.charging,
       } as FamilyPing);
       // Best-effort: in a headless start the socket may not be connected. The
       // fix is still recorded locally, so history stays complete either way.
       if (blob) emit('live_location_update', { chatId: cid, blob, until: Date.now() + LIVE_WINDOW_MS }).catch(() => {});
     }
     await processFix(cid, {
-      userId: ctx.myId, name: ctx.myName, pos, ts, speed: spd,
+      userId: ctx.myId, name: ctx.myName, pos, ts, speed: spd, accuracy: acc,
       battery: bat.level, charging: bat.charging,
     }, {
       self: true,

@@ -43,5 +43,59 @@
 
 ## 7. Optional — self-hosted geocoding (separable)
 
-- [ ] 7.1 Photon container in docker-compose + authenticated `GET /nav/geocode` backend proxy (rate-limited, no query logging)
-- [ ] 7.2 Client search tries the proxy when flagged on; falls back to `lat,lng` parse / device geocoder as today
+- [x] 7.1 `GET /nav/geocode` backend proxy — landed on hetzner-deploy (`3c04a23 feat(nav): address search that works`), merged into this branch
+- [x] 7.2 Client search uses the proxy first with type-ahead suggestions, platform geocoder / `lat,lng` fallback (same commit; lock setup search wired the same way)
+
+## 8. Pro — GPS diagnostics + map controls
+
+- [x] 8.1 Status card extras: speed (fix + derived fallback), heading readout, battery (reuse `lib/family/battery.ts`), 4-tier GPS quality label (Excellent/Good/Fair/Poor); wired into `lockService` view + active card
+- [x] 8.2 Units support: metric/imperial in `lockSettings` + shared `lib/lock/format.ts` (`fmtDistance`/`fmtSpeed`/`fmtHeading`, self-checked) applied to status card, alert screen, history, statistics
+- [x] 8.3 NavMap zoom in/out buttons (Leaflet `setZoom` via the bridge) next to the existing re-center + compass controls
+
+## 9. Pro — modes + route options
+
+- [x] 9.1 Mode presets (Walking/Cycling/Driving/Custom): `MODE_CONFIGS`/`MODE_COSTING` in zoneMachine (self-checked), threaded via `ActiveLock.zone`; Custom exposes warning band + hysteresis in settings; mode picker in setup + settings; persists and applies live
+- [x] 9.2 `fetchRoute` route options: `{ shortest, avoidTolls, avoidHighways }` → Valhalla `costing_options` via pure `buildRouteRequest` (self-checked; pedestrian ignores toll/highway avoidance)
+- [x] 9.3 Route options chips (Fastest/Shortest, Avoid tolls/highways) in Navigate with live re-route on change, "Re-route now" button in the active sheet (`forceReroute`); mode pre-selects navigate-back costing
+
+## 10. Pro — voice guidance
+
+- [x] 10.1 `lib/nav/voiceGuide.ts`: pure announcement core (far cue → now cue → arrival, reroute once per episode; self-checked) + expo-speech playback, fed from the nav banner publish
+- [x] 10.2 Voice modes (Voice+banner+vibration / Voice+vibration / Voice+banner) in the Navigate guidance picker; lock navigate-back follows the lock's voice alert setting
+
+## 11. Pro — richer statistics
+
+- [x] 11.1 Additive columns `acc_sum`/`acc_n` on `lock_sessions` (with ALTER migration for existing installs) bumped per accepted fix; alarms-triggered from `alarm_start` event count
+- [x] 11.2 Stats screen: alarms count, avg GPS accuracy, avg lock duration, avg radius + 7-day distance-per-day bar trend (plain Views, no chart lib)
+
+## 12. Pro — settings hub
+
+- [x] 12.1 Extended `app/lock-settings.tsx` into the hub: General (units, mode + custom sensitivity) / Sound & Vibration (existing alert settings) / Battery (background toggle + optimization exemption) / About (privacy summary)
+- [x] 12.2 Background-tracking toggle wires to `enableKillSafe`/`disableKillSafe` with the foreground-only status-notification path
+- [x] 12.3 ~~Family Space tile~~ REVERTED per user direction — Location Lock lives in the Navigate mini-app ONLY and Family Space screens are untouched; saved places remain available in lock setup as the "Saved location" lock type (read-only, labeled "Saved places")
+
+## 13. v2.1 polish (Location Lock Pro final plan)
+
+- [x] 13.1 Map: Leaflet scale bar (metric/imperial follows units), free-explore pause with auto-recenter after 10 s idle
+- [x] 13.2 GPS intelligence: confidence % (`gpsConfidence`, self-checked), "GPS updated Ns ago" readout, indoor/degraded detection on raw fixes with spoken "weak GPS" + "GPS signal recovered" alerts
+- [x] 13.3 Boundary prediction: "X remaining to the boundary" banner in warning/at-limit states
+- [x] 13.4 Navigation: overall route progress bar in the active sheet (banner `totalM`)
+- [x] 13.5 Alarm controls: separate Test voice and Test vibration in settings
+- [x] 13.6 History: optional per-session notes (additive `notes` column, inline editor, shown on cards)
+- [x] 13.7 Battery: stationary detection relaxes cadence; tracking-frequency setting (Adaptive / Battery saver / High precision)
+- [x] 13.8 Reliability: GPS-services-off detected at arm with clear recovery guidance
+- [x] 13.9 Accessibility pass: roles + labels on primary lock controls
+- [ ] 13.10 Map rotation / 3D tilt / camera modes beyond follow+explore+overview — deferred to the MapLibre upgrade (user: "if we want we will update maplibre")
+- [ ] 13.11 Language setting, screen-reader field audit, device matrix — app-level / physical-device work
+
+## 14. One engine, two experiences — family-aware extensions (no Family core changes)
+
+- [x] 14.1 Engine stays generic: `classifyDistance` pure shared classifier (self-checked), `onLockEvent` observer hook, `armLock` place tagging (`place_name` additive column), `statsForPlace` rollup — zero family knowledge in lib/lock/*
+- [x] 14.2 `lib/family/lockBridge.ts`: the ONLY family↔engine glue — arming a Family Place runs the shared engine and translates engine events into the existing family alerts feed ("left Home", "returned to Home", ALARM); radius clamped to the engine's 10 m–1 km with user-visible note
+- [x] 14.3 Family Places extensions (existing screen, existing workflows kept): Navigate + Lock here/Unlock actions in the edit sheet, live zone-colored LOCKED chip on the place row, per-place lock visits from shared history
+- [x] 14.4 Member profile extensions: per-place zone chips (INSIDE/NEAR EDGE/AT LIMIT/OUTSIDE) via the shared classifier on the member's last sealed ping, speed/updated/battery diagnostics line via shared formatters
+- [x] 14.5 Do-not-modify honored: family dashboard, groups, invites, chat, live location, and settings untouched; no duplicate GPS/geofence/alarm/nav/history services (one engine instance app-wide)
+- [ ] 14.6 Shared lock DISTRIBUTION (owner pushes a place lock to members' devices with per-member permissions) — requires cross-device place sync over E2EE system messages; tracked with the `family-circle` change (F4), not duplicated here
+- [x] 14.7 Family statistics from presence tracks: pure `timeAtPlace` (visits, time inside with ping-gap guard, first arrival; self-checked) shown per Safe Zone on the member profile ("2h 10m today, arrived 8:15 AM")
+- [x] 14.8 Member GPS quality: optional `acc` field threaded through the sealed FamilyPing → presence → TrackSample chain (backward compatible — old pings simply lack it); quality chip (±m + tier) on the member diagnostics row
+- [x] 14.9 Quick wins: live ETA + km-aware remaining distance in the navigation sheet; CSV export gains avg_accuracy/place/notes columns (quoted-safe)

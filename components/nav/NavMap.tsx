@@ -66,7 +66,12 @@ var map=L.map('map',{zoomControl:false}).setView([20.6,78.9],4);
 L.tileLayer('${tileUrl}',{maxZoom:19,subdomains:'abcd',
   attribution:'&copy; OpenStreetMap &copy; CARTO'}).addTo(map);
 var RN=window.ReactNativeWebView;
-var line=null,you=null,flag=null,fitted=false,lockC=null,accC=null,pinM=null,pinMode=0,hdg=0;
+var line=null,you=null,flag=null,fitted=false,lockC=null,accC=null,pinM=null,pinMode=0,hdg=0,scaleC=null,lastTouch=0;
+// Free-explore: a manual pan/zoom pauses follow; it auto-recenters after 10 s idle.
+map.on('dragstart zoomstart',function(){lastTouch=Date.now();});
+function setScale(imp){ if(scaleC)map.removeControl(scaleC);
+  scaleC=L.control.scale({metric:!imp,imperial:!!imp,position:'bottomleft',maxWidth:80}).addTo(map); }
+setScale(0);
 function setRoute(cs){ if(line)map.removeLayer(line); if(!cs||!cs.length)return;
   line=L.polyline(cs,{color:'${accent}',weight:6,opacity:.85,lineJoin:'round'}).addTo(map);
   if(!fitted){map.fitBounds(line.getBounds().pad(0.18));fitted=true;} }
@@ -79,7 +84,7 @@ function setPos(la,ln,follow,acc){
   if(!you){you=L.marker([la,ln],{icon:youIcon(),zIndexOffset:1000}).addTo(map);}else{you.setLatLng([la,ln]);you.setIcon(youIcon());}
   if(acc&&acc>0){ if(!accC){accC=L.circle([la,ln],{radius:acc,color:'#2f7bff',weight:1,opacity:.5,fillColor:'#2f7bff',fillOpacity:.12,interactive:false}).addTo(map);}else{accC.setLatLng([la,ln]);accC.setRadius(acc);} }
   else if(accC){map.removeLayer(accC);accC=null;}
-  if(follow)map.setView([la,ln],Math.max(map.getZoom(),16),{animate:true}); }
+  if(follow&&Date.now()-lastTouch>10000)map.setView([la,ln],Math.max(map.getZoom(),16),{animate:true}); }
 function setHeading(h){ hdg=h; var el=document.getElementById('needle');
   if(el)el.style.transform='rotate('+(-h)+'deg)';
   if(you)you.setIcon(youIcon()); }
@@ -103,6 +108,7 @@ function recenter(){ if(you)map.setView(you.getLatLng(),Math.max(map.getZoom(),1
   else if(lockC)map.fitBounds(lockC.getBounds().pad(0.35));
   else if(line)map.fitBounds(line.getBounds().pad(0.18));
   else if(flag)map.setView(flag.getLatLng(),14); }
+function zoomBy(d){ map.setZoom(map.getZoom()+d,{animate:true}); }
 if(RN)RN.postMessage('ready');
 </script></body></html>`;
 }
@@ -110,7 +116,7 @@ if(RN)RN.postMessage('ready');
 export default function NavMap({
   style, data, follow = true,
   lock, accuracyM, headingDeg, showCompass = false,
-  pin, pinMode = false, onPinDrop,
+  pin, pinMode = false, onPinDrop, zoomControls = false, imperialScale = false,
 }: {
   style?: any;
   data?: NavGeo;
@@ -122,6 +128,8 @@ export default function NavMap({
   pin?: LatLng | null;
   pinMode?: boolean;
   onPinDrop?: (p: LatLng) => void;
+  zoomControls?: boolean;
+  imperialScale?: boolean;
 }) {
   const { scheme, colors } = useTheme();
   const storeGeo = useNavGeo();
@@ -166,6 +174,10 @@ export default function NavMap({
     ref.current.injectJavaScript(`showCompass(${showCompass ? 1 : 0});true;`);
   }, [ready, showCompass]);
   useEffect(() => {
+    if (!ready || !ref.current) return;
+    ref.current.injectJavaScript(`setScale(${imperialScale ? 1 : 0});true;`);
+  }, [ready, imperialScale]);
+  useEffect(() => {
     if (!ready || !ref.current || headingDeg == null) return;
     ref.current.injectJavaScript(`setHeading(${Math.round(headingDeg)});true;`);
   }, [ready, headingDeg]);
@@ -203,6 +215,17 @@ export default function NavMap({
         style={{ backgroundColor: colors.bg }}
         androidLayerType="hardware"
       />
+      {zoomControls && (
+        <View style={[styles.zoomBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <TouchableOpacity onPress={() => ref.current?.injectJavaScript('zoomBy(1);true;')} style={styles.zoomBtn}>
+            <Ionicons name="add" size={20} color={colors.text} />
+          </TouchableOpacity>
+          <View style={[styles.zoomSep, { backgroundColor: colors.border }]} />
+          <TouchableOpacity onPress={() => ref.current?.injectJavaScript('zoomBy(-1);true;')} style={styles.zoomBtn}>
+            <Ionicons name="remove" size={20} color={colors.text} />
+          </TouchableOpacity>
+        </View>
+      )}
       {(geo.pos || geo.dest || lock) && (
         <TouchableOpacity onPress={recenter} style={[styles.fab, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Ionicons name="locate" size={20} color={colors.primary} />
@@ -215,4 +238,7 @@ export default function NavMap({
 const styles = StyleSheet.create({
   wrap: { flex: 1, overflow: 'hidden' },
   fab: { position: 'absolute', right: 12, bottom: 12, width: 44, height: 44, borderRadius: 22, borderWidth: 1, alignItems: 'center', justifyContent: 'center', elevation: 3 },
+  zoomBox: { position: 'absolute', right: 12, bottom: 66, width: 44, borderRadius: 14, borderWidth: 1, overflow: 'hidden', elevation: 3 },
+  zoomBtn: { height: 40, alignItems: 'center', justifyContent: 'center' },
+  zoomSep: { height: StyleSheet.hairlineWidth, marginHorizontal: 8 },
 });

@@ -36,6 +36,7 @@ export interface TrackSample {
   ts: number;     // epoch ms of the fix
   bat?: number;   // battery 0..100 at the fix
   spd?: number;   // m/s
+  acc?: number;   // GPS accuracy m (optional; older samples lack it)
 }
 
 export const RETENTION_MS = 31 * 24 * 3600 * 1000;  // Day/Week/Month views need 31d
@@ -133,6 +134,38 @@ export function summarize(samples: TrackSample[]): TrackSummary {
   };
 }
 
+export interface PlaceTime {
+  timeMs: number;        // time spent inside the place across the sample window
+  visits: number;        // outside→inside transitions
+  firstArrival: number | null;  // ts of the first arrival in the window
+}
+
+/**
+ * Time-at-place from a (time-ordered) track (v3 family statistics). A gap
+ * between samples longer than `maxGapMs` contributes nothing — pings pausing
+ * (app killed, sharing off) must not count as "5 hours at Home". Pure; uses
+ * the same haversine the geofence and lock engines use.
+ */
+export function timeAtPlace(
+  samples: TrackSample[],
+  place: { center: { lat: number; lng: number }; radiusM: number },
+  maxGapMs = 5 * 60_000,
+): PlaceTime {
+  let timeMs = 0, visits = 0, firstArrival: number | null = null;
+  let prevIn = false, prevTs = 0;
+  for (const s of samples) {
+    const inside = haversine({ lat: s.lat, lng: s.lng }, place.center) <= place.radiusM;
+    if (inside && !prevIn) { visits++; if (firstArrival == null) firstArrival = s.ts; }
+    if (inside && prevIn && prevTs) {
+      const dt = s.ts - prevTs;
+      if (dt > 0 && dt <= maxGapMs) timeMs += dt;
+    }
+    prevIn = inside;
+    prevTs = s.ts;
+  }
+  return { timeMs, visits, firstArrival };
+}
+
 /** Forget a circle's history (called when a circle is left/deleted). */
 export async function clearHistory(circleId: string): Promise<void> {
   for (const k of [...lastKept.keys()]) if (k.startsWith(`${circleId}|`)) lastKept.delete(k);
@@ -176,6 +209,23 @@ if (require.main === module) {
   if (sum.points !== 2 || sum.maxSpeed !== 12) throw new Error('summarize fields wrong: ' + JSON.stringify(sum));
   if (Math.abs(sum.distanceM - 500) > 30) throw new Error('distance off: ' + sum.distanceM);
   if (summarize([]).distanceM !== 0) throw new Error('empty summarize must be zero');
+
+  // 7. timeAtPlace: in→out→in counts 2 visits, sums only in-place spans, and a
+  //    long ping gap contributes nothing
+  const home = { center: { lat: base.lat, lng: base.lng }, radiusM: 100 };
+  const far = base.lat + 0.01;                                   // ~1.1 km away
+  const tp = timeAtPlace([
+    { ...base, ts: t0 },                                          // inside (visit 1)
+    { ...base, ts: t0 + 60_000 },                                 // inside +60s
+    { ...base, lat: far, ts: t0 + 120_000 },                      // outside
+    { ...base, ts: t0 + 180_000 },                                // inside (visit 2)
+    { ...base, ts: t0 + 240_000 },                                // inside +60s
+    { ...base, ts: t0 + 240_000 + 20 * 60_000 },                  // inside, but 20 min gap → ignored
+  ], home);
+  if (tp.visits !== 2) throw new Error('timeAtPlace visits: ' + tp.visits);
+  if (tp.timeMs !== 120_000) throw new Error('timeAtPlace ms: ' + tp.timeMs);
+  if (tp.firstArrival !== t0) throw new Error('timeAtPlace firstArrival');
+  if (timeAtPlace([], home).visits !== 0) throw new Error('empty timeAtPlace');
 
   console.log('family/history self-check OK');
 }

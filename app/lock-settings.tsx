@@ -1,29 +1,47 @@
-// app/lock-settings.tsx — Alarm & Alert Settings for Location Lock. Every
-// channel independently togglable (spec: lock-alarm), volume, tone, vibration
-// pattern, grace time, repeat-until-return, and Test Alarm. Edits persist via
-// lockSettings and apply live to an armed lock (applyAlertSettings).
+// app/lock-settings.tsx — the Location Lock settings hub (v2): General (units,
+// monitoring mode + custom sensitivity), Sound & Vibration (every alert channel
+// independently togglable, volume, tone, pattern, grace, repeat, Test Alarm),
+// Battery (kill-safe background toggle + optimization exemption), and About.
+// Edits persist via lockSettings and apply live to an armed lock.
 
 import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Switch, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Switch, Platform, Alert, Vibration } from 'react-native';
 import { Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import notifee from '@notifee/react-native';
+import * as Speech from 'expo-speech';
 import { useTheme } from '../lib/theme';
+import { VIBE_PATTERN } from '../lib/lock/alarmChannels';
+import { VOICE } from '../lib/lock/alarmController';
 import {
-  useLockSettings, setLockAlerts, type LockAlertSettings,
+  useLockSettings, setLockAlerts, setLockSettings, type LockAlertSettings,
 } from '../lib/lock/lockSettings';
-import { applyAlertSettings, testAlarm } from '../lib/lock/lockService';
+import { type LockMode } from '../lib/lock/zoneMachine';
+import {
+  applyAlertSettings, testAlarm, useLockView, enableKillSafe, disableKillSafe,
+} from '../lib/lock/lockService';
 
 const VOLUMES = [0.2, 0.4, 0.6, 0.8, 1];
 const GRACES = [0, 5, 10, 30, 60];
 const REPEAT_GAPS = [5, 10, 30, 60];
+const MODES: { key: LockMode; label: string }[] = [
+  { key: 'walking', label: 'Walking' }, { key: 'cycling', label: 'Cycling' },
+  { key: 'driving', label: 'Driving' }, { key: 'custom', label: 'Custom' },
+];
+const BANDS = [3, 5, 10, 15, 25];
+const HYSTS = [2, 3, 5, 10];
 
 export default function LockSettingsScreen() {
   const { colors } = useTheme();
   const s = useLockSettings();
+  const lock = useLockView();
   const a = s.alerts;
 
   const set = (patch: Partial<LockAlertSettings>) => {
     setLockAlerts(patch).then(() => applyAlertSettings()).catch(() => {});
+  };
+  const setGeneral = (patch: Parameters<typeof setLockSettings>[0]) => {
+    setLockSettings(patch).then(() => applyAlertSettings()).catch(() => {});
   };
 
   const Row = ({ icon, label, keyName }: { icon: any; label: string; keyName: keyof LockAlertSettings }) => (
@@ -50,7 +68,75 @@ export default function LockSettingsScreen() {
     <View style={[st.screen, { backgroundColor: colors.bg }]}>
       <Stack.Screen options={{ title: 'Alarm & Alert Settings', headerTitleAlign: 'center' }} />
       <ScrollView contentContainerStyle={st.body}>
-        <Text style={[st.h, { color: colors.text }]}>Channels</Text>
+        {/* ── General ── */}
+        <Text style={[st.h, { color: colors.text }]}>General · Units</Text>
+        <View style={st.chips}>
+          <Chip on={s.units === 'metric'} label="Metric (m, km)" onPress={() => setGeneral({ units: 'metric' })} />
+          <Chip on={s.units === 'imperial'} label="Imperial (ft, mi)" onPress={() => setGeneral({ units: 'imperial' })} />
+        </View>
+
+        <Text style={[st.h, { color: colors.text, marginTop: 20 }]}>General · Monitoring mode</Text>
+        <View style={st.chips}>
+          {MODES.map((m) => <Chip key={m.key} on={s.mode === m.key} label={m.label} onPress={() => setGeneral({ mode: m.key })} />)}
+        </View>
+        {s.mode === 'custom' && (
+          <View style={{ marginTop: 10 }}>
+            <Text style={{ color: colors.text + '88', fontSize: 12.5, marginBottom: 6 }}>Warning band (m inside the boundary)</Text>
+            <View style={st.chips}>
+              {BANDS.map((b) => <Chip key={b} on={s.customSensitivity.warningBand === b} label={`${b} m`}
+                onPress={() => setGeneral({ customSensitivity: { ...s.customSensitivity, warningBand: b } })} />)}
+            </View>
+            <Text style={{ color: colors.text + '88', fontSize: 12.5, marginVertical: 6 }}>Hysteresis (m past the boundary before alarm)</Text>
+            <View style={st.chips}>
+              {HYSTS.map((h) => <Chip key={h} on={s.customSensitivity.hysteresis === h} label={`${h} m`}
+                onPress={() => setGeneral({ customSensitivity: { ...s.customSensitivity, hysteresis: h } })} />)}
+            </View>
+          </View>
+        )}
+        <Text style={{ color: colors.text + '77', fontSize: 12, marginTop: 6 }}>
+          Faster modes use a wider envelope so highway-speed GPS scatter can’t false-alarm.
+        </Text>
+
+        {/* ── Battery ── */}
+        <View style={[st.row, { borderColor: colors.border, marginTop: 24 }]}>
+          <Ionicons name="shield-half" size={19} color={colors.primary} />
+          <Text style={[st.rowTxt, { color: colors.text }]}>
+            Background tracking{lock.active ? '' : ' (arms with the next lock)'}
+          </Text>
+          <Switch
+            value={lock.active ? lock.killSafe : true}
+            disabled={!lock.active}
+            onValueChange={(v) => { (v ? enableKillSafe() : disableKillSafe()).catch(() => {}); }}
+            trackColor={{ true: colors.primary + '88', false: colors.border }}
+            thumbColor={lock.killSafe ? colors.primary : '#999'}
+          />
+        </View>
+        {Platform.OS === 'android' && (
+          <TouchableOpacity
+            onPress={async () => {
+              try {
+                if (await notifee.isBatteryOptimizationEnabled()) await notifee.openBatteryOptimizationSettings();
+                else Alert.alert('All good', 'VaultChat is already exempt from battery optimization.');
+              } catch {}
+            }}
+            style={[st.row, { borderColor: colors.border }]}>
+            <Ionicons name="battery-charging" size={19} color={colors.primary} />
+            <Text style={[st.rowTxt, { color: colors.text }]}>Battery optimization exemption</Text>
+            <Ionicons name="chevron-forward" size={16} color={colors.text + '66'} />
+          </TouchableOpacity>
+        )}
+        <Text style={[st.h, { color: colors.text, marginTop: 20 }]}>Tracking frequency</Text>
+        <View style={st.chips}>
+          <Chip on={s.cadence === 'auto'} label="Adaptive (recommended)" onPress={() => setGeneral({ cadence: 'auto' })} />
+          <Chip on={s.cadence === 'saver'} label="Battery saver" onPress={() => setGeneral({ cadence: 'saver' })} />
+          <Chip on={s.cadence === 'high'} label="High precision" onPress={() => setGeneral({ cadence: 'high' })} />
+        </View>
+        <Text style={{ color: colors.text + '77', fontSize: 12, marginTop: 6 }}>
+          Adaptive speeds up GPS only near the boundary or while moving; saver stays slow while safe; high precision always runs at navigation cadence.
+        </Text>
+
+        {/* ── Sound & Vibration ── */}
+        <Text style={[st.h, { color: colors.text, marginTop: 24 }]}>Channels</Text>
         <Row icon="volume-high" label="Loud siren" keyName="siren" />
         <Row icon="pulse" label="Continuous beep" keyName="continuousBeep" />
         <Row icon="phone-portrait" label="Vibration" keyName="vibration" />
@@ -104,13 +190,34 @@ export default function LockSettingsScreen() {
           </View>
         )}
 
-        <TouchableOpacity onPress={() => testAlarm()} style={[st.testBtn, { backgroundColor: colors.primary }]}>
+        <TouchableOpacity onPress={() => testAlarm()} accessibilityRole="button" accessibilityLabel="Test the full alarm"
+          style={[st.testBtn, { backgroundColor: colors.primary }]}>
           <Ionicons name="play" size={17} color="#fff" />
           <Text style={st.testTxt}>Test Alarm</Text>
         </TouchableOpacity>
+        <View style={[st.chips, { marginTop: 8, justifyContent: 'center' }]}>
+          <Chip on={false} label="🗣 Test voice" onPress={() => { try { Speech.stop(); Speech.speak(VOICE.outside, { rate: 1.0 }); } catch {} }} />
+          <Chip on={false} label="〰 Test vibration" onPress={() => { try { Vibration.vibrate(VIBE_PATTERN[a.vibePattern], false); } catch {} }} />
+        </View>
         <Text style={{ color: colors.text + '77', fontSize: 12, textAlign: 'center', marginTop: 8 }}>
           Plays the enabled channels for a few seconds. Nothing is written to history.
         </Text>
+
+        {/* ── About ── */}
+        <Text style={[st.h, { color: colors.text, marginTop: 28 }]}>About Location Lock</Text>
+        <View style={[st.about, { borderColor: colors.border, backgroundColor: colors.card }]}>
+          <Text style={{ color: colors.text, fontSize: 13.5, fontWeight: '700' }}>Location Lock · Navigate mini-app</Text>
+          <Text style={{ color: colors.text + '88', fontSize: 12.5, marginTop: 6, lineHeight: 18 }}>
+            Geofencing runs entirely on this device. Your coordinates and history never
+            leave it — the only network call is to VaultChat’s own routing engine when
+            you navigate back.
+          </Text>
+          <Text style={{ color: colors.text + '66', fontSize: 11.5, marginTop: 8, lineHeight: 16 }}>
+            Open-source components: OpenStreetMap data (ODbL) · Leaflet (BSD-2) ·
+            Valhalla routing (MIT) · CARTO basemap tiles. Alarm sounds are generated,
+            license-free.
+          </Text>
+        </View>
       </ScrollView>
     </View>
   );
@@ -126,4 +233,5 @@ const st = StyleSheet.create({
   chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
   testBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 48, borderRadius: 12, marginTop: 30 },
   testTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  about: { borderWidth: 1, borderRadius: 12, padding: 14 },
 });

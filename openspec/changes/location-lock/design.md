@@ -30,6 +30,15 @@ Project conventions that shape the approach: pure logic modules with embedded se
 - **Navigate-back is a thin wrapper** over `startNavigation({ to: lockCenter, costing })`; the lock service listens for the zone machine's `return` event and calls `stopNavigation()`. No routing code changes.
 - **Search**: client keeps today's behavior (`lat,lng` parse → `Location.geocodeAsync` → error hint). Optional backend work adds a Photon container to docker-compose and an authenticated `GET /nav/geocode?q=` proxy; the client tries it first when the feature flag is on. This is separable and can ship after v1.
 
+### Pro (v2) decisions
+
+- **GPS diagnostics from what the stack already exposes.** Speed comes from the location fix (with the derived-from-last-fix fallback the nav loop already uses), heading from the existing heading watcher, battery via `lib/family/battery.ts` (`expo-battery` already wrapped there). Satellite count and cellular signal need `LocationManager.registerGnssStatusCallback` / `TelephonyManager` — a custom native module and prebuild churn for cosmetic numbers. **Excluded**; a 4-tier GPS quality label derived from accuracy replaces them honestly.
+- **Route options = Valhalla `costing_options`.** `fetchRoute` gains an options param mapped to `{ shortest: true }` and `costing_options.{auto,truck}.{use_tolls: 0, use_highways: 0}` in the `/nav/route` proxy body — no backend change (the proxy forwards the Valhalla request shape). UI: chips on the navigate-back sheet + "Re-route now" that calls the existing reroute path.
+- **Modes tune the existing knobs, not new machinery.** Walking/Cycling/Driving/Custom map to a `ZoneConfig` + cadence preset table (warning band, hysteresis floor, tight/relaxed thresholds) fed into the already-parameterized `zoneMachine`/`lockService`; Custom exposes the same three sliders. Mode also pre-selects navigate-back costing.
+- **Voice guidance is a thin observer on the nav banner.** A speech module subscribes to the existing `NavBanner` store; when `instruction`/`distanceToManeuver` crosses the announce thresholds it speaks via `expo-speech` (already a dependency). No changes to the tested nav core — it stays a pure listener, and works for both plain Navigate trips and lock navigate-back.
+- **Avg accuracy: two additive columns.** `lock_sessions` gains `acc_sum`/`acc_n` bumped per accepted fix (same `bumpAggregates` path); avg accuracy and alarms-triggered (COUNT of `alarm_start` events) come out in the stats SQL. The 7-day trend is a per-day `SUM(distance_traveled)` GROUP BY — rendered as plain Views, no chart library.
+- **Settings hub is one screen, four groups.** General (units, mode) / Sound & Vibration (embeds the existing alert settings) / Battery (background toggle + exemption) / About. Units live in `lockSettings` and a shared `fmtDistance`/`fmtSpeed` helper used by every readout.
+
 ## Risks / Trade-offs
 
 - [OEM battery killers / Doze stop the background task] → foreground service + battery-optimization exemption prompt at arm time; on resume, the persisted state restores; document per-OEM caveats. The lock is also fully usable foreground-only.

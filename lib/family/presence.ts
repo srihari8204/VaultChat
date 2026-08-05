@@ -56,14 +56,15 @@ async function deliverKeys() {
 async function onFix(loc: Location.LocationObject) {
   const pos: LatLng = { lat: loc.coords.latitude, lng: loc.coords.longitude };
   const spd = loc.coords.speed != null && loc.coords.speed >= 0 ? loc.coords.speed : undefined;
+  const acc = loc.coords.accuracy != null && loc.coords.accuracy >= 0 ? Math.round(loc.coords.accuracy) : undefined;
   const ts = loc.timestamp || Date.now();
   const bat = await readBattery();
 
   // always show myself, now with the battery the roster chip was already drawing
-  selfCb?.({ userId: myId, pos, speed: spd, ts, battery: bat.level, charging: bat.charging });
+  selfCb?.({ userId: myId, pos, speed: spd, accuracy: acc, ts, battery: bat.level, charging: bat.charging });
 
   const blob = sharing && myKey
-    ? sealJSON(myKey, { lat: pos.lat, lng: pos.lng, spd, ts, bat: bat.level, chg: bat.charging } as FamilyPing)
+    ? sealJSON(myKey, { lat: pos.lat, lng: pos.lng, spd, acc, ts, bat: bat.level, chg: bat.charging } as FamilyPing)
     : null;
   const u = until();
 
@@ -72,7 +73,7 @@ async function onFix(loc: Location.LocationObject) {
     // History and geofence alerts are LOCAL, so they run whether or not I am
     // broadcasting — but the circle is only told about a crossing when I am.
     await processFix(cid, {
-      userId: myId, name: myName, pos, ts, speed: spd,
+      userId: myId, name: myName, pos, ts, speed: spd, accuracy: acc,
       battery: bat.level, charging: bat.charging,
     }, {
       self: true,
@@ -190,11 +191,11 @@ export async function subscribeCircle(circleId: string, meId: string, onEvent: (
       const ts = ping.ts || Date.now();
       onEvent({ userId: uid, presence: {
         userId: uid, pos: { lat: ping.lat, lng: ping.lng }, speed: ping.spd,
-        battery: ping.bat, charging: ping.chg, ts,
+        battery: ping.bat, charging: ping.chg, accuracy: ping.acc, ts,
       } });
       // Keep this member's local history. Their geofences are evaluated on THEIR
       // device, so this records the track only — see fixPipeline.processFix.
-      recordSample(circleId, { u: uid, lat: ping.lat, lng: ping.lng, ts, bat: ping.bat, spd: ping.spd })
+      recordSample(circleId, { u: uid, lat: ping.lat, lng: ping.lng, ts, bat: ping.bat, spd: ping.spd, acc: ping.acc })
         .catch(() => {});
     }
   };

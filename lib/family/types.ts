@@ -15,6 +15,7 @@ export interface FamilyPing {
   bat?: number;    // battery 0..100
   chg?: boolean;   // charging
   spd?: number;    // m/s (for a "driving" hint)
+  acc?: number;    // GPS accuracy, m (member quality chip; optional → old pings fine)
   ts: number;      // epoch ms of the GPS fix
 }
 
@@ -42,6 +43,7 @@ export interface MemberPresence {
   battery?: number;
   charging?: boolean;
   speed?: number;
+  accuracy?: number;        // m, when the ping carried it
   ts: number;               // last fix epoch ms
 }
 
