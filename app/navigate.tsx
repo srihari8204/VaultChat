@@ -6,6 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert, ActivityIndicator, Platform } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { geocodeSearch, type GeoHit } from '../lib/nav/geocode';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useTheme } from '../lib/theme';
@@ -74,6 +75,24 @@ export default function NavigateScreen() {
     }
   }, [params.lat, params.lng]);
 
+  // Type-ahead: debounced /nav/geocode suggestions (server-proxied Photon/OSM —
+  // works on no-GMS where Location.geocodeAsync is dead). Coordinates still parse
+  // instantly without any geocoder.
+  const [sugs, setSugs] = useState<GeoHit[]>([]);
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 3 || /(-?\d+(\.\d+)?)\s*,/.test(q)) { setSugs([]); return; }
+    const t = setTimeout(async () => {
+      try {
+        const near = await Location.getLastKnownPositionAsync().catch(() => null);
+        const hits = await geocodeSearch(q, near ? { lat: near.coords.latitude, lng: near.coords.longitude } : null);
+        setSugs(hits);
+      } catch { setSugs([]); }
+    }, 350);
+    return () => clearTimeout(t);
+  }, [query]);
+  const pickSug = (h: GeoHit) => { setSugs([]); setQuery(h.label); setDest({ name: h.name || h.label, coords: { lat: h.lat, lng: h.lng } }); };
+
   const search = async () => {
     const q = query.trim();
     if (!q) return;
@@ -82,11 +101,13 @@ export default function NavigateScreen() {
     if (m) { setDest({ name: q, coords: { lat: +m[1], lng: +m[2] } }); return; }
     setSearching(true);
     try {
-      const res = await Location.geocodeAsync(q);
+      const hits = await geocodeSearch(q).catch(() => [] as GeoHit[]);
+      if (hits[0]) { pickSug(hits[0]); return; }
+      const res = await Location.geocodeAsync(q);   // platform fallback (GMS devices)
       if (res[0]) setDest({ name: q, coords: { lat: res[0].latitude, lng: res[0].longitude } });
-      else Alert.alert('Not found', 'No match. On no-GMS devices the address geocoder may be unavailable — enter coordinates as "lat, lng".');
+      else Alert.alert('Not found', 'No match — try a nearby landmark, or enter coordinates as "lat, lng".');
     } catch {
-      Alert.alert('Search failed', 'Enter coordinates as "lat, lng" (a self-hosted geocoder is the follow-up for address search).');
+      Alert.alert('Search failed', 'Check your connection, or enter coordinates as "lat, lng".');
     } finally { setSearching(false); }
   };
 
@@ -189,6 +210,17 @@ export default function NavigateScreen() {
             {searching ? <ActivityIndicator size="small" color={colors.primary} />
               : <TouchableOpacity onPress={search}><Text style={{ color: colors.primary, fontWeight: '700' }}>Find</Text></TouchableOpacity>}
           </View>
+          {sugs.length > 0 && (
+            <View style={[st.sugBox, { borderColor: colors.border, backgroundColor: colors.card }]}>
+              {sugs.map((h, i) => (
+                <TouchableOpacity key={i} onPress={() => pickSug(h)}
+                  style={[st.sugRow, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.border }]}>
+                  <Ionicons name="location-outline" size={16} color={colors.primary} />
+                  <Text numberOfLines={1} style={{ color: colors.text, flex: 1, fontSize: 14 }}>{h.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
           {dest && (
             <View style={[st.destPill, { backgroundColor: colors.primary + '14' }]}>
               <Ionicons name="flag" size={16} color={colors.primary} />
@@ -254,6 +286,8 @@ const st = StyleSheet.create({
   lockEntryIcon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   h: { fontSize: 13, fontWeight: '700', letterSpacing: 0.3, textTransform: 'uppercase', marginBottom: 10, opacity: 0.9 },
   searchRow: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, height: 48 },
+  sugBox: { borderWidth: 1, borderRadius: 12, marginTop: 6, overflow: 'hidden' },
+  sugRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 11 },
   input: { flex: 1, fontSize: 15 },
   destPill: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, padding: 12, borderRadius: 10 },
   previewMap: { height: 210, borderRadius: 14, borderWidth: 1, marginTop: 14 },

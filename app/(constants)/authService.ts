@@ -322,6 +322,10 @@ export async function logoutUser() {
   } catch {}
   await clearTokens();
   await setCachedUser(null);
+  // Clear cache on logout when the user enabled that setting (cache only — the
+  // user-content purge below handles saved data). Read before the vc_cache_*
+  // keys are removed further down. Best-effort.
+  try { await require('../../services/cache/cacheManager').clearCacheOnLogout(); } catch {}
   // TURN credentials are minted per user id ("<expiry>:<uid>"), so they must not
   // survive into the next account signed in on this device.
   try { require('../../lib/iceConfig').invalidateIceCache(); } catch {}
