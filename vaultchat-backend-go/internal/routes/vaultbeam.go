@@ -99,6 +99,37 @@ func vbSetBit(buf []byte, i int) {
 	}
 }
 
+func vbMaskWidth(n int) int { return (n + 7) / 8 }
+
+// vbUnionMask ORs `incoming` into `stored`, widened to hold chunkCount bits with
+// any bits past the end masked off. UNION-ONLY by construction: a stale,
+// duplicated or out-of-order post can never clear a bit, so convergence is
+// monotone and ordering does not matter.
+func vbUnionMask(stored, incoming []byte, chunkCount int) []byte {
+	w := vbMaskWidth(chunkCount)
+	out := make([]byte, w)
+	copy(out, stored)
+	for i := 0; i < w && i < len(incoming); i++ {
+		out[i] |= incoming[i]
+	}
+	if rem := chunkCount % 8; rem != 0 && w > 0 {
+		out[w-1] &= byte(1<<uint(rem)) - 1
+	}
+	return out
+}
+
+// vbStaleVersion reports whether a client-supplied session version disagrees
+// with the stored one. An ABSENT version is not a mismatch: pre-vbm3 clients do
+// not send it, and they also predate the canonical wire, so they are handled by
+// the dual-read window rather than rejected here.
+func vbStaleVersion(raw any, stored int) bool {
+	f, ok := vbNum(raw)
+	if !vbIsInt(f, ok) {
+		return false
+	}
+	return int(f) != stored
+}
+
 func vbCountSet(buf []byte, n int) int {
 	c := 0
 	for i := 0; i < n; i++ {
@@ -123,6 +154,8 @@ type vbTransfer struct {
 	State        string
 	ExpiresAt    time.Time
 	Plan         *string
+	RecvMask     []byte
+	Version      int
 }
 
 // vbLoadTransfer mirrors loadTransfer: authStatus 404 (missing) / 403 (not a
@@ -131,10 +164,12 @@ func vbLoadTransfer(ctx context.Context, transferID, userID string) (*vbTransfer
 	t := &vbTransfer{}
 	err := db.Pool.QueryRow(ctx,
 		`SELECT transfer_id, sender_id, recipient_id, chat_id, total_bytes, block_count,
-		        chunk_count, uploaded_mask, state, expires_at, plan
+		        chunk_count, uploaded_mask, state, expires_at, plan,
+		        COALESCE(recv_mask, ''::bytea), session_version
 		   FROM vb_transfer WHERE transfer_id = $1`, transferID).
 		Scan(&t.TransferID, &t.SenderID, &t.RecipientID, &t.ChatID, &t.TotalBytes,
-			&t.BlockCount, &t.ChunkCount, &t.UploadedMask, &t.State, &t.ExpiresAt, &t.Plan)
+			&t.BlockCount, &t.ChunkCount, &t.UploadedMask, &t.State, &t.ExpiresAt, &t.Plan,
+			&t.RecvMask, &t.Version)
 	if err != nil {
 		if db.NoRows(err) {
 			return nil, 404, nil
@@ -425,6 +460,7 @@ func RegisterVaultbeam(mux *http.ServeMux) {
 	mux.HandleFunc("POST /vaultbeam/relay/block-url", httpx.RequireAuth(vbRelayBlockURL))
 	mux.HandleFunc("POST /vaultbeam/relay/uploaded", httpx.RequireAuth(vbRelayUploaded))
 	mux.HandleFunc("POST /vaultbeam/relay/grow", httpx.RequireAuth(vbRelayGrow))
+	mux.HandleFunc("POST /vaultbeam/relay/received", httpx.RequireAuth(vbRelayReceived))
 	mux.HandleFunc("GET /vaultbeam/relay/{transferId}", httpx.RequireAuth(vbRelayState))
 	mux.HandleFunc("POST /vaultbeam/relay/complete", httpx.RequireAuth(vbRelayComplete))
 	mux.HandleFunc("POST /vaultbeam/relay/abort", httpx.RequireAuth(vbRelayAbort))
@@ -521,6 +557,7 @@ func vbRelayInit(w http.ResponseWriter, r *http.Request) {
 	// the same id (client retry). ON CONFLICT keeps ownership stable.
 	var retID string
 	var expiresAt time.Time
+	sessionVersion := 1
 	err = db.Pool.QueryRow(ctx,
 		`INSERT INTO vb_transfer
 		   (transfer_id, sender_id, recipient_id, chat_id, total_bytes, block_count, chunk_count, uploaded_mask, state, plan)
@@ -545,12 +582,13 @@ func vbRelayInit(w http.ResponseWriter, r *http.Request) {
 	emitx.ToUids([]string{recipientID}, "vb_invite", map[string]any{
 		"transferId": transferID, "senderId": user.ID, "totalBytes": tbParam,
 		"blockCount": blockCount, "chunkCount": chunkCount, "chatId": chatID,
+		"sessionVersion": sessionVersion,
 	})
 
 	httpx.JSON(w, 200, map[string]any{
 		"transferId": transferID, "blockCount": blockCount, "chunkCount": chunkCount,
 		"chunkBytes": vbChunkBytes, "blockBytes": vbBlockBytes,
-		"expiresAt": httpx.JSTime(expiresAt),
+		"expiresAt": httpx.JSTime(expiresAt), "sessionVersion": sessionVersion,
 	})
 }
 
@@ -635,8 +673,9 @@ func vbRelayUploaded(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := httpx.UserFrom(r)
 	var b struct {
-		TransferID any   `json:"transferId"`
-		Blocks     []any `json:"blocks"`
+		TransferID     any   `json:"transferId"`
+		Blocks         []any `json:"blocks"`
+		SessionVersion any   `json:"sessionVersion"`
 	}
 	_ = httpx.Body(r, &b)
 	tid := fmt.Sprintf("%v", orEmpty(b.TransferID))
@@ -656,6 +695,17 @@ func vbRelayUploaded(w http.ResponseWriter, r *http.Request) {
 	}
 	if t.SenderID != user.ID {
 		httpx.Err(w, 403, "sender only")
+		return
+	}
+	// A COMPLETED session is immutable. Without this a sender still in flight
+	// could set bits on a transfer the recipient already finished — the gap that
+	// let a lost completion notification turn into a re-upload.
+	if t.State == "complete" || t.State == "aborted" {
+		httpx.Err(w, 410, "transfer "+t.State)
+		return
+	}
+	if vbStaleVersion(b.SessionVersion, t.Version) {
+		httpx.Err(w, 409, "stale session")
 		return
 	}
 
@@ -696,9 +746,10 @@ func vbRelayGrow(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := httpx.UserFrom(r)
 	var b struct {
-		TransferID any `json:"transferId"`
-		BlockCount any `json:"blockCount"`
-		Plan       any `json:"plan"`
+		TransferID     any `json:"transferId"`
+		BlockCount     any `json:"blockCount"`
+		Plan           any `json:"plan"`
+		SessionVersion any `json:"sessionVersion"`
 	}
 	_ = httpx.Body(r, &b)
 	tid := fmt.Sprintf("%v", orEmpty(b.TransferID))
@@ -730,6 +781,10 @@ func vbRelayGrow(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 410, "transfer "+t.State)
 		return
 	}
+	if vbStaleVersion(b.SessionVersion, t.Version) {
+		httpx.Err(w, 409, "stale session")
+		return
+	}
 
 	capBlocks := vbCeilDiv(float64(t.TotalBytes), 256*1024)
 	if !vbIsInt(newCountF, ncOK) || int(newCountF) < t.BlockCount || int(newCountF) > capBlocks {
@@ -753,6 +808,85 @@ func vbRelayGrow(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, 200, map[string]any{"blockCount": newCount})
 }
 
+// POST /vaultbeam/relay/received — the recipient publishes its verified-chunk
+// bitmap so the SENDER can skip what the peer already holds. This is the durable
+// half of the PeerHave sync (the live half is the sealed `vaultbeam_have`
+// signaling event); it covers an offline sender, an app restart and a reboot.
+//
+// Union-merge server-side, so a stale or out-of-order post can never clear a
+// bit. The server cannot verify the claim and does not try — see the rationale
+// in migration 070.
+func vbRelayReceived(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := httpx.UserFrom(r)
+	var b struct {
+		TransferID     any `json:"transferId"`
+		Mask           any `json:"mask"`
+		SessionVersion any `json:"sessionVersion"`
+	}
+	_ = httpx.Body(r, &b)
+	tid := fmt.Sprintf("%v", orEmpty(b.TransferID))
+	if tid == "" {
+		httpx.Err(w, 400, "transferId required")
+		return
+	}
+	maskStr, _ := b.Mask.(string)
+	if maskStr == "" {
+		httpx.Err(w, 400, "mask required")
+		return
+	}
+	raw, derr := base64.StdEncoding.DecodeString(maskStr)
+	if derr != nil {
+		httpx.Err(w, 400, "invalid mask")
+		return
+	}
+
+	t, status, err := vbLoadTransfer(ctx, tid, user.ID)
+	if err != nil {
+		httpx.Err(w, 500, "received failed")
+		return
+	}
+	if status != 0 {
+		vbAuthErr(w, status)
+		return
+	}
+	if t.RecipientID != user.ID {
+		httpx.Err(w, 403, "recipient only")
+		return
+	}
+	if t.State == "complete" || t.State == "aborted" {
+		httpx.Err(w, 410, "transfer "+t.State)
+		return
+	}
+	if vbStaleVersion(b.SessionVersion, t.Version) {
+		httpx.Err(w, 409, "stale session")
+		return
+	}
+	// Reject a mask wider than the transfer could possibly need — a bad value
+	// must not be able to allocate memory out of proportion to the transfer.
+	if len(raw) > vbMaskWidth(t.ChunkCount)+8 {
+		httpx.Err(w, 400, "mask too wide")
+		return
+	}
+
+	merged := vbUnionMask(t.RecvMask, raw, t.ChunkCount)
+	if _, err := db.Pool.Exec(ctx,
+		`UPDATE vb_transfer SET recv_mask = $1 WHERE transfer_id = $2 AND session_version = $3`,
+		merged, tid, t.Version); err != nil {
+		httpx.Err(w, 500, "received failed")
+		return
+	}
+	received := vbCountSet(merged, t.ChunkCount)
+	// Nudge the sender so it re-derives its work-list immediately rather than
+	// waiting for its next poll.
+	emitx.ToUids([]string{t.SenderID}, "vb_have", map[string]any{
+		"transferId": tid, "received": received, "chunkCount": t.ChunkCount, "sessionVersion": t.Version,
+	})
+	httpx.JSON(w, 200, map[string]any{
+		"received": received, "chunkCount": t.ChunkCount, "complete": received == t.ChunkCount,
+	})
+}
+
 // GET /vaultbeam/relay/:transferId — state + uploaded-block bitmap + plan.
 func vbRelayState(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -772,7 +906,12 @@ func vbRelayState(w http.ResponseWriter, r *http.Request) {
 		"chunkBytes": vbChunkBytes, "blockBytes": vbBlockBytes, "plan": t.Plan,
 		"uploadedMask": base64.StdEncoding.EncodeToString(t.UploadedMask),
 		"uploaded":     vbCountSet(t.UploadedMask, t.BlockCount),
-		"isSender":     t.SenderID == user.ID, "expiresAt": httpx.JSTime(t.ExpiresAt),
+		// The receiver's verified-chunk bitmap — how a sender learns what the
+		// peer already holds, so it never stages a delivered chunk again.
+		"recvMask":       base64.StdEncoding.EncodeToString(t.RecvMask),
+		"received":       vbCountSet(t.RecvMask, t.ChunkCount),
+		"sessionVersion": t.Version,
+		"isSender":       t.SenderID == user.ID, "expiresAt": httpx.JSTime(t.ExpiresAt),
 	})
 }
 
@@ -781,7 +920,9 @@ func vbRelayComplete(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := httpx.UserFrom(r)
 	var b struct {
-		TransferID any `json:"transferId"`
+		TransferID     any `json:"transferId"`
+		SessionVersion any `json:"sessionVersion"`
+		Mask           any `json:"mask"`
 	}
 	_ = httpx.Body(r, &b)
 	t, status, err := vbLoadTransfer(ctx, fmt.Sprintf("%v", orEmpty(b.TransferID)), user.ID)
@@ -797,6 +938,35 @@ func vbRelayComplete(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 403, "recipient only")
 		return
 	}
+	// Idempotent: retrying after a transient error must not fail or change the
+	// recorded outcome. The receiver retries with backoff, so this matters.
+	if t.State == "complete" {
+		httpx.JSON(w, 200, map[string]any{"ok": true})
+		return
+	}
+	if t.State == "aborted" {
+		httpx.Err(w, 410, "transfer aborted")
+		return
+	}
+	if vbStaleVersion(b.SessionVersion, t.Version) {
+		httpx.Err(w, 409, "stale session")
+		return
+	}
+	// A completion claim carrying a bitmap must actually cover every chunk. The
+	// server cannot verify the BYTES (it never sees plaintext), but it can
+	// refuse a claim that does not even assert the whole file.
+	if ms, ok := b.Mask.(string); ok && ms != "" {
+		raw, derr := base64.StdEncoding.DecodeString(ms)
+		if derr != nil {
+			httpx.Err(w, 400, "invalid mask")
+			return
+		}
+		merged := vbUnionMask(t.RecvMask, raw, t.ChunkCount)
+		if vbCountSet(merged, t.ChunkCount) != t.ChunkCount {
+			httpx.Err(w, 409, "incomplete mask")
+			return
+		}
+	}
 	vbDeletePrefix(ctx, "vault_relay/"+t.TransferID+"/")
 	if _, err := db.Pool.Exec(ctx,
 		`UPDATE vb_transfer SET state = 'complete', uploaded_mask = '\x' WHERE transfer_id = $1`,
@@ -804,7 +974,9 @@ func vbRelayComplete(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 500, "complete failed")
 		return
 	}
-	emitx.ToUids([]string{t.SenderID}, "vb_complete", map[string]any{"transferId": t.TransferID})
+	emitx.ToUids([]string{t.SenderID}, "vb_complete", map[string]any{
+		"transferId": t.TransferID, "sessionVersion": t.Version,
+	})
 	httpx.JSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -823,6 +995,11 @@ func vbRelayAbort(w http.ResponseWriter, r *http.Request) {
 	}
 	if status != 0 {
 		vbAuthErr(w, status)
+		return
+	}
+	// A completed session is immutable — it cannot be walked back into aborted.
+	if t.State == "complete" {
+		httpx.Err(w, 410, "transfer complete")
 		return
 	}
 	vbDeletePrefix(ctx, "vault_relay/"+t.TransferID+"/")

@@ -257,6 +257,10 @@ func (h *Hub) registerSignalHandlers(s *socket.Socket) {
 	s.On("vaultbeam_pull", relay("vaultbeam_pull"))
 	s.On("vaultbeam_ready", relay("vaultbeam_ready"))
 	s.On("vaultbeam_tier", relay("vaultbeam_tier"))
+	// have — recipient: sealed verified-chunk bitmap, so the sender can skip
+	// what the peer already holds. Opaque routing; the mask never touches
+	// this process in cleartext.
+	s.On("vaultbeam_have", relay("vaultbeam_have"))
 
 	// call_incoming — relay over socket AND fire a high-priority wake-up push
 	// when the callee has NO live socket (killed/doze).

@@ -36,6 +36,31 @@ const ceilDiv  = (a, b) => Math.ceil(a / b);
 const testBit  = (buf, i) => (buf[i >> 3] >> (i & 7)) & 1;
 const setBit   = (buf, i) => { buf[i >> 3] |= (1 << (i & 7)); };
 function countSet(buf, n) { let c = 0; for (let i = 0; i < n; i++) if (testBit(buf, i)) c++; return c; }
+const maskWidth = (n) => Math.ceil(n / 8);
+
+// UNION-ONLY merge, widened to chunkCount bits with the spare tail masked off.
+// A stale, duplicated or out-of-order post can never clear a bit, so the sync
+// protocol converges regardless of ordering. The tail mask matters because the
+// completion guard is popcount === chunkCount — spare high bits would overcount
+// and let an incomplete transfer claim completion.
+function unionMask(stored, incoming, chunkCount) {
+  const w = maskWidth(chunkCount);
+  const out = Buffer.alloc(w);
+  if (stored) Buffer.from(stored).copy(out, 0, 0, Math.min(w, stored.length));
+  if (incoming) for (let i = 0; i < w && i < incoming.length; i++) out[i] |= incoming[i];
+  const rem = chunkCount % 8;
+  if (rem !== 0 && w > 0) out[w - 1] &= (1 << rem) - 1;
+  return out;
+}
+
+// An ABSENT version is not a mismatch: pre-vbm3 clients do not send one, and
+// they also predate the canonical wire, so the dual-read window handles them.
+function staleVersion(raw, stored) {
+  if (raw === undefined || raw === null) return false;
+  const n = Number(raw);
+  if (!Number.isInteger(n)) return false;
+  return n !== stored;
+}
 
 // Load a transfer and authorize the caller as sender or recipient.
 async function loadTransfer(transferId, userId) {
@@ -104,19 +129,24 @@ router.post('/relay/init', async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending',$9)
        ON CONFLICT (transfer_id) DO UPDATE
          SET total_bytes = EXCLUDED.total_bytes, block_count = EXCLUDED.block_count,
-             chunk_count = EXCLUDED.chunk_count, plan = EXCLUDED.plan
+             chunk_count = EXCLUDED.chunk_count, plan = EXCLUDED.plan,
+             -- a re-init is a MATERIAL RESET: the layout may differ, so any state
+             -- a peer still holds for the old version must be refused
+             session_version = vb_transfer.session_version + 1,
+             recv_mask = NULL
          WHERE vb_transfer.sender_id = $2 AND vb_transfer.state IN ('pending','ready')
-       RETURNING transfer_id, expires_at`,
+       RETURNING transfer_id, expires_at, session_version`,
       [transferId, req.user.id, recipientId, chatId, totalBytes, blockCount, chunkCount, mask, plan]);
     if (!ins.rows[0]) return res.status(409).json({ error: 'transferId already used' });
 
     // Opaque doorbell — name/type arrive over E2EE, not here.
+    const sessionVersion = ins.rows[0].session_version ?? 1;
     emitToUid(recipientId, 'vb_invite', {
-      transferId, senderId: req.user.id, totalBytes, blockCount, chunkCount, chatId,
+      transferId, senderId: req.user.id, totalBytes, blockCount, chunkCount, chatId, sessionVersion,
     });
 
     res.json({ transferId, blockCount, chunkCount, chunkBytes: CHUNK_BYTES, blockBytes: BLOCK_BYTES,
-      expiresAt: ins.rows[0].expires_at });
+      expiresAt: ins.rows[0].expires_at, sessionVersion });
   } catch (e) { console.error('[vb/init]', e.message); res.status(500).json({ error: 'init failed' }); }
 });
 
@@ -166,6 +196,11 @@ router.post('/relay/uploaded', async (req, res) => {
     const { t, err } = await loadTransfer(String(transferId), req.user.id);
     if (err) return res.status(err).json({ error: err === 404 ? 'not found' : 'forbidden' });
     if (t.sender_id !== req.user.id) return res.status(403).json({ error: 'sender only' });
+    // A COMPLETED session is immutable. Without this a sender still in flight
+    // could set bits on a transfer the recipient already finished — the gap that
+    // let a lost completion notification turn into a re-upload.
+    if (t.state === 'complete' || t.state === 'aborted') return res.status(410).json({ error: `transfer ${t.state}` });
+    if (staleVersion(req.body?.sessionVersion, t.session_version)) return res.status(409).json({ error: 'stale session' });
 
     const mask = Buffer.from(t.uploaded_mask); // mutable copy
     for (const raw of blocks.slice(0, MAX_URLS)) {
@@ -200,6 +235,7 @@ router.post('/relay/grow', async (req, res) => {
     if (err) return res.status(err).json({ error: err === 404 ? 'not found' : 'forbidden' });
     if (t.sender_id !== req.user.id) return res.status(403).json({ error: 'sender only' });
     if (t.state === 'complete' || t.state === 'aborted') return res.status(410).json({ error: `transfer ${t.state}` });
+    if (staleVersion(req.body?.sessionVersion, t.session_version)) return res.status(409).json({ error: 'stale session' });
 
     const capBlocks = ceilDiv(Number(t.total_bytes), 256 * 1024);
     if (!Number.isInteger(newCount) || newCount < t.block_count || newCount > capBlocks) {
@@ -217,6 +253,41 @@ router.post('/relay/grow', async (req, res) => {
   } catch (e) { console.error('[vb/grow]', e.message); res.status(500).json({ error: 'grow failed' }); }
 });
 
+// ── POST /vaultbeam/relay/received ──────────────────────────────────
+// The recipient publishes its verified-chunk bitmap so the SENDER can skip what
+// the peer already holds. Durable half of the PeerHave sync (the live half is
+// the sealed `vaultbeam_have` signaling event); covers an offline sender, an app
+// restart and a reboot. Union-merge, so ordering cannot lose a bit.
+router.post('/relay/received', async (req, res) => {
+  try {
+    const transferId = String(req.body?.transferId || '');
+    if (!transferId) return res.status(400).json({ error: 'transferId required' });
+    const maskStr = typeof req.body?.mask === 'string' ? req.body.mask : '';
+    if (!maskStr) return res.status(400).json({ error: 'mask required' });
+    let raw;
+    try { raw = Buffer.from(maskStr, 'base64'); } catch { return res.status(400).json({ error: 'invalid mask' }); }
+
+    const { t, err } = await loadTransfer(transferId, req.user.id);
+    if (err) return res.status(err).json({ error: err === 404 ? 'not found' : 'forbidden' });
+    if (t.recipient_id !== req.user.id) return res.status(403).json({ error: 'recipient only' });
+    if (t.state === 'complete' || t.state === 'aborted') return res.status(410).json({ error: `transfer ${t.state}` });
+    if (staleVersion(req.body?.sessionVersion, t.session_version)) return res.status(409).json({ error: 'stale session' });
+    // Reject a mask wider than the transfer could possibly need.
+    if (raw.length > maskWidth(t.chunk_count) + 8) return res.status(400).json({ error: 'mask too wide' });
+
+    const merged = unionMask(t.recv_mask, raw, t.chunk_count);
+    await db.query(
+      `UPDATE vb_transfer SET recv_mask = $1 WHERE transfer_id = $2 AND session_version = $3`,
+      [merged, transferId, t.session_version]);
+    const received = countSet(merged, t.chunk_count);
+    // Nudge the sender so it re-derives its work-list immediately.
+    emitToUid(t.sender_id, 'vb_have', {
+      transferId, received, chunkCount: t.chunk_count, sessionVersion: t.session_version,
+    });
+    res.json({ received, chunkCount: t.chunk_count, complete: received === t.chunk_count });
+  } catch (e) { console.error('[vb/received]', e.message); res.status(500).json({ error: 'received failed' }); }
+});
+
 // ── GET /vaultbeam/relay/:transferId ────────────────────────────────
 // Either party polls state + the uploaded-block bitmap (recipient uses it to
 // know which GETs are fetchable — drives resume; only the 0-bits remain) + the
@@ -231,6 +302,11 @@ router.get('/relay/:transferId', async (req, res) => {
       chunkBytes: CHUNK_BYTES, blockBytes: BLOCK_BYTES, plan: t.plan ?? null,
       uploadedMask: Buffer.from(t.uploaded_mask).toString('base64'),
       uploaded: countSet(t.uploaded_mask, t.block_count),
+      // The receiver's verified-chunk bitmap — how a sender learns what the peer
+      // already holds, so it never stages a delivered chunk again.
+      recvMask: Buffer.from(t.recv_mask ?? Buffer.alloc(0)).toString('base64'),
+      received: countSet(t.recv_mask ?? Buffer.alloc(0), t.chunk_count),
+      sessionVersion: t.session_version,
       isSender: t.sender_id === req.user.id, expiresAt: t.expires_at,
     });
   } catch (e) { console.error('[vb/state]', e.message); res.status(500).json({ error: 'state failed' }); }
@@ -244,9 +320,23 @@ router.post('/relay/complete', async (req, res) => {
     const { t, err } = await loadTransfer(String(req.body?.transferId), req.user.id);
     if (err) return res.status(err).json({ error: err === 404 ? 'not found' : 'forbidden' });
     if (t.recipient_id !== req.user.id) return res.status(403).json({ error: 'recipient only' });
+    // Idempotent: the receiver retries with backoff, so a repeat must succeed
+    // without changing the recorded outcome.
+    if (t.state === 'complete') return res.json({ ok: true });
+    if (t.state === 'aborted') return res.status(410).json({ error: 'transfer aborted' });
+    if (staleVersion(req.body?.sessionVersion, t.session_version)) return res.status(409).json({ error: 'stale session' });
+    // A completion claim carrying a bitmap must actually cover every chunk. The
+    // server cannot verify the BYTES (it never sees plaintext), but it can refuse
+    // a claim that does not even assert the whole file.
+    if (typeof req.body?.mask === 'string' && req.body.mask) {
+      let raw;
+      try { raw = Buffer.from(req.body.mask, 'base64'); } catch { return res.status(400).json({ error: 'invalid mask' }); }
+      const merged = unionMask(t.recv_mask, raw, t.chunk_count);
+      if (countSet(merged, t.chunk_count) !== t.chunk_count) return res.status(409).json({ error: 'incomplete mask' });
+    }
     await store.deletePrefix(`vault_relay/${t.transfer_id}/`);
     await db.query(`UPDATE vb_transfer SET state = 'complete', uploaded_mask = '\\x' WHERE transfer_id = $1`, [t.transfer_id]);
-    emitToUid(t.sender_id, 'vb_complete', { transferId: t.transfer_id });
+    emitToUid(t.sender_id, 'vb_complete', { transferId: t.transfer_id, sessionVersion: t.session_version });
     res.json({ ok: true });
   } catch (e) { console.error('[vb/complete]', e.message); res.status(500).json({ error: 'complete failed' }); }
 });
@@ -257,6 +347,8 @@ router.post('/relay/abort', async (req, res) => {
   try {
     const { t, err } = await loadTransfer(String(req.body?.transferId), req.user.id);
     if (err) return res.status(err).json({ error: err === 404 ? 'not found' : 'forbidden' });
+    // A completed session is immutable — it cannot be walked back into aborted.
+    if (t.state === 'complete') return res.status(410).json({ error: 'transfer complete' });
     await store.deletePrefix(`vault_relay/${t.transfer_id}/`);
     await db.query(`UPDATE vb_transfer SET state = 'aborted', uploaded_mask = '\\x' WHERE transfer_id = $1`, [t.transfer_id]);
     const other = t.sender_id === req.user.id ? t.recipient_id : t.sender_id;
