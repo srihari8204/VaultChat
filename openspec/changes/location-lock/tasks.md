@@ -45,3 +45,30 @@
 
 - [ ] 7.1 Photon container in docker-compose + authenticated `GET /nav/geocode` backend proxy (rate-limited, no query logging)
 - [ ] 7.2 Client search tries the proxy when flagged on; falls back to `lat,lng` parse / device geocoder as today
+
+## 8. Pro — GPS diagnostics + map controls
+
+- [ ] 8.1 Status card extras: speed (fix + derived fallback), heading readout, battery (reuse `lib/family/battery.ts`), 4-tier GPS quality label (Excellent/Good/Fair/Poor); wire into `lockService` view + active card
+- [ ] 8.2 Units support: metric/imperial in `lockSettings` + shared `fmtDistance`/`fmtSpeed` helpers applied to status card, alert screen, history, statistics
+- [ ] 8.3 NavMap zoom in/out buttons (Leaflet `map.zoomIn/zoomOut` via the bridge) next to the existing re-center + compass controls
+
+## 9. Pro — modes + route options
+
+- [ ] 9.1 Mode presets (Walking/Cycling/Driving/Custom): `ZoneConfig` + cadence preset table feeding zoneMachine/lockService; Custom exposes warning band, hysteresis, cadence; mode picker in setup + settings; persists and applies live
+- [ ] 9.2 `fetchRoute` route options: `{ shortest, avoidTolls, avoidHighways }` → Valhalla `costing_options` through the existing proxy; self-check for request mapping
+- [ ] 9.3 Navigate-back sheet: fastest/shortest chips, avoid-tolls/highways toggles, "Re-route now" button; mode pre-selects costing
+
+## 10. Pro — voice guidance
+
+- [ ] 10.1 `lib/nav/voiceGuide.ts`: observer on the NavBanner store speaking maneuvers via expo-speech ("In 120 meters, turn right" → "Turn right now"), reroute + arrival lines; announce-threshold logic self-checked
+- [ ] 10.2 Voice mode toggles in Navigate guidance settings and lock navigate-back; respects the existing DisplayMode voice variants
+
+## 11. Pro — richer statistics
+
+- [ ] 11.1 Additive columns `acc_sum`/`acc_n` on `lock_sessions` bumped per accepted fix; alarms-triggered from `alarm_start` event count
+- [ ] 11.2 Stats screen: alarms count, avg GPS accuracy, avg lock duration + 7-day distance-per-day bar trend (plain Views, no chart lib)
+
+## 12. Pro — settings hub
+
+- [ ] 12.1 `app/lock-hub-settings.tsx` (or extend lock-settings): General (units, mode) / Sound & Vibration (existing alert settings embedded) / Battery (background tracking toggle + optimization exemption) / About (version, privacy summary)
+- [ ] 12.2 Background-tracking toggle wires to `startLockBackground`/`stopLockBackground` with the foreground-only warning path
