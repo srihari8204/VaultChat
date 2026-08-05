@@ -169,10 +169,93 @@ func membershipCooldown(ctx context.Context, uid, chatID, userID string) (*time.
 	return until, err
 }
 
-// membershipNotify emits the in-app event for a membership change. Delivery is
-// the notification layer's job; this only says what happened and to whom.
-func membershipNotify(chatID, event string, payload map[string]any) {
-	emitx.ChatEvent(chatID, event, payload)
+// ── notifications ───────────────────────────────────────────────────
+//
+// Membership events have TWO possible audiences and getting them wrong is not
+// cosmetic. Chat fan-out reaches the group's socket room, which by definition
+// excludes the invitee — being outside it is what being invited means. So an
+// invitation announced only to the group is announced to everyone except the
+// one person who has to answer it.
+//
+// The table below is the whole routing decision in one place, so "who hears
+// about this?" is answerable by reading rather than by tracing call sites.
+
+// membershipAudience says who an event is for.
+type membershipAudience int
+
+const (
+	audGroup membershipAudience = iota // existing members: the owner's queue
+	audUser                            // the invitee/requester, wherever they are
+)
+
+// membershipEvent describes one membership notification.
+type membershipEvent struct {
+	audience membershipAudience
+	// title/body are used only for audUser, and only when the recipient has no
+	// live socket. An empty title means socket-only: worth interrupting for is a
+	// higher bar than worth telling.
+	title string
+	body  string
+}
+
+// Every membership event, with who hears it and whether it is worth a push.
+//
+// Push is reserved for the three that are ABOUT the recipient and that they
+// cannot discover any other way: being invited, being let in, being turned
+// down. Withdrawals and revocations reach them silently — a notification whose
+// entire content is that something is no longer on offer is not worth an
+// interruption. Acceptances and join requests go to admins over the socket
+// only: an owner who is asleep does not need waking because somebody wants to
+// join a cycling group.
+var membershipEvents = map[string]membershipEvent{
+	"invitation_created":    {audience: audUser, title: "Group invitation", body: "You have been invited to a group on VaultChat"},
+	"invitation_cancelled":  {audience: audUser},
+	"invitation_revoked":    {audience: audUser},
+	"member_approved":       {audience: audUser, title: "You are in", body: "You have been added to a group on VaultChat"},
+	"member_rejected":       {audience: audUser, title: "Group request declined", body: "Your request to join a group was not approved"},
+	"ownership_transferred": {audience: audGroup},
+	"invitation_accepted":   {audience: audGroup},
+	"invitation_declined":   {audience: audGroup},
+	"join_requested":        {audience: audGroup},
+	"members_added":         {audience: audGroup},
+}
+
+// membershipNotify routes one membership event to the right people.
+//
+// userID is who the event is ABOUT. For an audUser event that is also the
+// recipient; for an audGroup event it is only part of the payload. An unknown
+// event falls back to the group, which is the safe direction: telling members
+// something is a smaller mistake than telling a non-member.
+func membershipNotify(chatID, event string, userID *string, payload map[string]any) {
+	spec, known := membershipEvents[event]
+	if !known {
+		log.Printf("[membership notify] unknown event %q, defaulting to the group", event)
+		emitx.ChatEvent(chatID, event, payload)
+		return
+	}
+	if spec.audience == audGroup {
+		emitx.ChatEvent(chatID, event, payload)
+		return
+	}
+	if userID == nil {
+		// An audUser event with nobody to send it to is a bug at the call site,
+		// not something to paper over by broadcasting it to the group instead.
+		log.Printf("[membership notify] %s has no recipient, dropped", event)
+		return
+	}
+	var push *emitx.Push
+	if spec.title != "" {
+		// The group's NAME is deliberately absent from the push body. A lock
+		// screen is readable by whoever is holding the phone, and "You have been
+		// invited to Anand Family" tells them something the invitee has not yet
+		// agreed to share. The app fills in the detail once it is unlocked.
+		push = &emitx.Push{
+			Title: spec.title,
+			Body:  spec.body,
+			Data:  map[string]any{"chatId": chatID, "event": event},
+		}
+	}
+	emitx.NotifyUsers([]string{*userID}, event, payload, push)
 }
 
 // ── invitee side: accept ────────────────────────────────────────────
@@ -225,7 +308,7 @@ func membershipAccept(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		realtime.InvalidateChatMembers(ctx, chatID)
-		membershipNotify(chatID, "members_added",
+		membershipNotify(chatID, "members_added", nil,
 			map[string]any{"added": []string{user.ID}, "by": user.ID})
 		httpx.JSON(w, 200, map[string]any{
 			"id": invID, "chatId": chatID, "status": string(invites.StatusJoined), "joined": true,
@@ -242,7 +325,7 @@ func membershipAccept(w http.ResponseWriter, r *http.Request) {
 	}
 	// The group is told someone is waiting, so an owner sees the pending list
 	// light up without polling.
-	membershipNotify(chatID, "invitation_accepted",
+	membershipNotify(chatID, "invitation_accepted", nil,
 		map[string]any{"userId": user.ID, "invitationId": invID})
 	httpx.JSON(w, 200, map[string]any{
 		"id": invID, "chatId": chatID, "status": string(invites.StatusAccepted), "joined": false,
@@ -335,8 +418,13 @@ func membershipApprove(w http.ResponseWriter, r *http.Request) {
 	}
 	realtime.InvalidateChatMembers(ctx, chatID)
 	chatsAudit(ctx, user.ID, chatID, "member_approved", inv.InviteeID, map[string]any{"invitationId": invID})
-	membershipNotify(chatID, "members_added",
+	membershipNotify(chatID, "members_added", nil,
 		map[string]any{"added": []string{*inv.InviteeID}, "by": user.ID})
+	// Separately to the person it happened to: they are not in the group's
+	// socket room until their client reconnects, so the fan-out above does not
+	// reach the one reader who most needs it.
+	membershipNotify(chatID, "member_approved", inv.InviteeID,
+		map[string]any{"chatId": chatID, "invitationId": invID})
 	httpx.JSON(w, 200, map[string]any{"ok": true, "id": invID, "status": string(invites.StatusJoined)})
 }
 
@@ -382,8 +470,8 @@ func membershipRejectByAdmin(w http.ResponseWriter, r *http.Request) {
 	}
 	chatsAudit(ctx, user.ID, chatID, "member_rejected", inv.InviteeID, map[string]any{"invitationId": invID})
 	if inv.InviteeID != nil {
-		membershipNotify(chatID, "invitation_rejected",
-			map[string]any{"userId": *inv.InviteeID, "by": user.ID, "invitationId": invID})
+		membershipNotify(chatID, "member_rejected", inv.InviteeID,
+			map[string]any{"chatId": chatID, "by": user.ID, "invitationId": invID})
 	}
 	httpx.JSON(w, 200, map[string]any{"ok": true, "id": invID, "status": string(invites.StatusRejected)})
 }
@@ -437,8 +525,8 @@ func membershipCancel(w http.ResponseWriter, r *http.Request) {
 	}
 	chatsAudit(ctx, user.ID, chatID, "invitation_cancelled", inv.InviteeID, map[string]any{"invitationId": invID})
 	if inv.InviteeID != nil {
-		membershipNotify(chatID, "invitation_cancelled",
-			map[string]any{"userId": *inv.InviteeID, "invitationId": invID})
+		membershipNotify(chatID, "invitation_cancelled", inv.InviteeID,
+			map[string]any{"chatId": chatID, "invitationId": invID})
 	}
 	httpx.JSON(w, 200, map[string]any{"ok": true, "id": invID, "status": string(invites.StatusCancelled)})
 }
@@ -782,7 +870,7 @@ func membershipRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	membershipNotify(chatID, "join_requested", map[string]any{"userId": user.ID, "invitationId": invID})
+	membershipNotify(chatID, "join_requested", nil, map[string]any{"userId": user.ID, "invitationId": invID})
 	httpx.JSON(w, 200, map[string]any{"id": invID, "chatId": chatID, "status": "accepted", "pending": true})
 }
 
@@ -867,7 +955,7 @@ func membershipTransfer(w http.ResponseWriter, r *http.Request) {
 	realtime.InvalidateChatMembers(ctx, chatID)
 	chatsAudit(ctx, user.ID, chatID, "ownership_transferred", &target,
 		map[string]any{"from": user.ID, "to": target})
-	membershipNotify(chatID, "ownership_transferred", map[string]any{"from": user.ID, "to": target})
+	membershipNotify(chatID, "ownership_transferred", nil, map[string]any{"from": user.ID, "to": target})
 	httpx.JSON(w, 200, map[string]any{"ok": true, "ownerId": target, "yourRole": "admin"})
 }
 

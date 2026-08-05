@@ -233,6 +233,74 @@ app.post('/internal/chat-event', (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Internal user notify (membership v2) ────────────────────────────────
+// Emit to specific users AND wake the ones who are not connected. Used by the
+// Go membership routes, whose audience is precisely the people chat fan-out
+// cannot reach: an invitee is not in the group's socket room — that is what
+// being invited means — and someone invited while their app is closed learns
+// nothing from an emit into the void.
+//
+// Body: { userIds:[uid], event, payload, socket?:bool, push?:{title,body,data} }
+// `socket:false` means Go already emitted in-process; only the push is wanted.
+//
+// A user with a LIVE socket gets no push, mirroring the call path: they have
+// already been told in-app, and a banner on top of that reads as a duplicate.
+// The check lives here rather than in Go because Go has no socket state while
+// Node still owns the sockets.
+app.post('/internal/notify', async (req, res) => {
+  const key = process.env.INTERNAL_EMIT_KEY || '';
+  if (!key || req.get('x-internal-key') !== key) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  const { userIds, event, payload, push, socket } = req.body || {};
+  if (!event || typeof event !== 'string') return res.status(400).json({ error: 'event required' });
+  const uids = Array.isArray(userIds) ? userIds.filter(u => typeof u === 'string') : [];
+  if (uids.length === 0) return res.json({ ok: true, users: 0 });
+
+  if (socket !== false) {
+    for (const uid of uids) io.to(`user:${uid}`).emit(event, payload);
+  }
+
+  // Best-effort from here: a failed push must never fail the membership change
+  // that triggered it. The action already happened; the notification is a
+  // courtesy on top of it.
+  let pushed = 0;
+  if (push && typeof push.title === 'string' && typeof push.body === 'string') {
+    try {
+      const offline = [];
+      for (const uid of uids) {
+        const live = await io.in(`user:${uid}`).fetchSockets();
+        if (live.length === 0) offline.push(uid);
+      }
+      if (offline.length) {
+        const r = await db.query(
+          `SELECT push_token FROM devices
+            WHERE user_id = ANY($1::uuid[]) AND push_token IS NOT NULL`,
+          [offline],
+        );
+        const tokens = r.rows.map(x => x.push_token).filter(Boolean);
+        if (tokens.length) {
+          const { dead } = await sendPushToTokens(tokens, {
+            title: push.title,
+            body: push.body,
+            data: { type: 'membership', event, ...(push.data || {}) },
+          });
+          pushed = tokens.length - (dead?.length ?? 0);
+          // Expo told us these devices are gone. Pruning them here is what stops
+          // an uninstalled device from silently eating every future send.
+          if (dead?.length) {
+            await db.query(`UPDATE devices SET push_token = NULL WHERE push_token = ANY($1::text[])`, [dead])
+              .catch(() => {});
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[internal/notify] push failed:', e.message);
+    }
+  }
+  res.json({ ok: true, users: uids.length, pushed });
+});
+
 // Expose the live runtime to the admin router (online count + socket emitter).
 adminRouter.setRuntime({ io, getOnlineCount: () => userSockets.size });
 

@@ -119,3 +119,46 @@ func senderOf(payload any) string {
 	}
 	return ""
 }
+
+// Push is the notification to raise on a device whose app is not running.
+// Optional: an event with no Push is socket-only.
+type Push struct {
+	Title string         `json:"title"`
+	Body  string         `json:"body"`
+	Data  map[string]any `json:"data,omitempty"`
+}
+
+// NotifyUsers emits an event to specific users AND wakes the ones who are not
+// connected.
+//
+// Distinct from ToUids, which is socket-only. The membership flow needs this
+// because its whole audience is people the socket fan-out cannot reach: an
+// invitee is not in the chat room (that is the point of being invited), and
+// somebody who is invited while the app is closed learns nothing from an emit
+// into the void.
+//
+// Node decides per user whether a push is warranted — it suppresses one for
+// anybody with a live socket, since they have already been told in-app. Doing
+// that here would need socket state Go does not have in bridge mode.
+//
+// Always local-plus-bridge, never local-only: even when Go owns sockets, the
+// push itself is still sent by Node.
+func NotifyUsers(uids []string, event string, payload any, push *Push) {
+	if len(uids) == 0 {
+		return
+	}
+	if LocalToUids != nil {
+		LocalToUids(uids, event, payload)
+	}
+	body := map[string]any{
+		"userIds": uids,
+		"event":   event,
+		"payload": payload,
+		// Tell Node not to emit twice when Go already did.
+		"socket": LocalToUids == nil,
+	}
+	if push != nil {
+		body["push"] = push
+	}
+	go postTo("/internal/notify", body)
+}

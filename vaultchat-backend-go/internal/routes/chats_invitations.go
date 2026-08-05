@@ -1,12 +1,18 @@
-// chats_invitations.go — per-invitee group invitations (Groups & Circles, G1).
+// chats_invitations.go — creating and withdrawing group invitations
+// (Groups & Circles; rewritten for membership v2).
 //
-// The invitation is the PERSON; the invite_links row it mints is the DOOR.
-// Redemption always goes through vc_redeem_invite(), the existing row-locked
-// path, so this file never reimplements joining — it only addresses people,
-// tracks status, and hands out signed tokens.
+// An invitation is a PERSON, and since membership v2 it is ONLY a person. It no
+// longer mints an invite_links row, no longer returns a token, and cannot be
+// addressed to anyone who is not already on VaultChat. Answering one lives in
+// chats_membership.go, because accepting and approving are separate acts with
+// separate audiences.
 //
-// See migration 067 for the schema and internal/invites for the token format
-// and the legal status transitions.
+// invitationsRedeem is the one thing here that still speaks the old language:
+// it exists so a link already sitting in somebody's messages keeps working, and
+// nothing produces a new one.
+//
+// See migrations 067 and 069/070 for the schema, and internal/invites for the
+// legal status transitions.
 
 package routes
 
@@ -214,7 +220,11 @@ func invitationsCreate(w http.ResponseWriter, r *http.Request) {
 
 	chatsAudit(ctx, user.ID, chatID, "invitation_created", target.userID,
 		map[string]any{"kind": string(target.kind)})
-	emitx.ChatEvent(chatID, "invitation_created", map[string]any{"userId": *target.userID, "by": user.ID})
+	// To the INVITEE, not the group. They are not in the group's socket room —
+	// that is what being invited means — so a chat fan-out would announce the
+	// invitation to everyone except the one person who has to answer it.
+	membershipNotify(chatID, "invitation_created", target.userID,
+		map[string]any{"chatId": chatID, "by": user.ID, "invitationId": invID})
 
 	httpx.JSON(w, 200, map[string]any{
 		"id":            invID,
@@ -361,9 +371,8 @@ func invitationsResend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	chatsAudit(ctx, user.ID, chatID, "invitation_resent", nil, map[string]any{"id": invID})
-	if inviteeID != nil {
-		emitx.ChatEvent(chatID, "invitation_created", map[string]any{"userId": *inviteeID, "by": user.ID})
-	}
+	membershipNotify(chatID, "invitation_created", inviteeID,
+		map[string]any{"chatId": chatID, "by": user.ID, "invitationId": invID})
 	httpx.JSON(w, 200, map[string]any{
 		"id": invID, "status": string(invites.StatusPending), "expiresAt": httpx.JSTime(expiresAt),
 	})
@@ -385,7 +394,7 @@ func invitationsRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	status, linkID, _, err := loadInvitation(ctx, user.ID, chatID, invID)
+	status, linkID, inviteeID, err := loadInvitation(ctx, user.ID, chatID, invID)
 	if db.NoRows(err) {
 		httpx.Err(w, 404, "Invitation not found")
 		return
@@ -418,7 +427,9 @@ func invitationsRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	chatsAudit(ctx, user.ID, chatID, "invitation_revoked", nil, map[string]any{"id": invID})
+	chatsAudit(ctx, user.ID, chatID, "invitation_revoked", inviteeID, map[string]any{"id": invID})
+	membershipNotify(chatID, "invitation_revoked", inviteeID,
+		map[string]any{"chatId": chatID, "invitationId": invID})
 	httpx.JSON(w, 200, map[string]any{"ok": true, "id": invID, "status": "revoked"})
 }
 
@@ -529,7 +540,7 @@ func invitationsReject(w http.ResponseWriter, r *http.Request) {
 	}
 	// The group is told, so an owner watching the pending list sees it clear
 	// rather than approving someone who has already backed out.
-	emitx.ChatEvent(chatID, "invitation_declined",
+	membershipNotify(chatID, "invitation_declined", nil,
 		map[string]any{"userId": user.ID, "invitationId": invID})
 	httpx.JSON(w, 200, map[string]any{"ok": true, "id": invID, "status": "rejected"})
 }
