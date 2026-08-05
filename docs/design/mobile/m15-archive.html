@@ -1,0 +1,218 @@
+<style>
+#m-archive .who { min-width: 0; }
+#m-archive .who .vs { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#m-archive .who .vt { font-size: 14px; }
+#m-archive .m-viewerbar { gap: 8px; }
+#m-archive .fchips { display: flex; gap: 4px; flex: none; }
+#m-archive .fchips .m-chip { height: 20px; padding: 0 6px; font-size: 8.5px; letter-spacing: .3px; font-weight: 700; }
+
+/* ---- breadcrumb + stats ---- */
+#m-archive .crumbbar { flex: none; padding: 12px 16px 0; }
+#m-archive .crumb { display: flex; align-items: center; gap: 6px; font-size: 13.5px; min-width: 0; }
+#m-archive .crumb .root { color: var(--txt-2); white-space: nowrap; }
+#m-archive .crumb .cur { color: var(--txt-1); font-weight: 680; white-space: nowrap; }
+#m-archive .crumb .ic { width: 13px; height: 13px; color: var(--txt-3); flex: none; }
+#m-archive .stats { display: flex; align-items: center; gap: 7px; margin-top: 5px; font-size: 11px; color: var(--txt-3); font-variant-numeric: tabular-nums; }
+#m-archive .stats i { width: 3px; height: 3px; border-radius: 50%; background: var(--txt-3); display: block; }
+#m-archive .cmp { position: relative; height: 3px; width: 62px; border-radius: 3px; background: rgba(235,232,255,.12); overflow: hidden; }
+#m-archive .cmp b { position: absolute; inset: 0 auto 0 0; width: 62%; border-radius: 3px; background: var(--grad-acc); }
+
+/* ---- folder chips ---- */
+#m-archive .folders { flex: none; padding: 11px 0 0 16px; position: relative; }
+#m-archive .folders::after {
+  content: ""; position: absolute; right: 0; top: 11px; bottom: 0; width: 34px;
+  background: linear-gradient(90deg, rgba(9,8,15,0), #0A0912 78%); pointer-events: none;
+}
+#m-archive .folders .m-chips { gap: 6px; }
+#m-archive .folders .m-chip { padding: 0 9px; font-size: 11px; gap: 5px; height: 31px; }
+#m-archive .folders .m-chip .ic { width: 13px; height: 13px; }
+
+/* ---- grid ---- */
+#m-archive .grid { flex: none; display: grid; grid-template-columns: 1fr 1fr; gap: 11px; padding: 12px 16px 0; }
+#m-archive .fcard {
+  border-radius: 14px; overflow: hidden; position: relative;
+  background: var(--glass); border: 1px solid var(--stroke);
+  box-shadow: var(--sh-1), var(--inner-hi);
+}
+#m-archive .fcard.sel { box-shadow: 0 0 0 2px var(--acc), 0 8px 24px rgba(124,77,255,.35); border-color: transparent; }
+#m-archive .fcard .thumb { height: 92px; position: relative; }
+#m-archive .fcard .fmeta { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--stroke); }
+#m-archive .fcard .fname { font-size: 11.5px; font-weight: 620; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+#m-archive .fcard .fsz { font-family: var(--font-mono); font-size: 9.5px; color: var(--txt-3); flex: none; }
+#m-archive .fcard.sel .fname { color: var(--acc-3); }
+#m-archive .ext {
+  position: absolute; right: 6px; top: 6px; z-index: 2;
+  font-size: 7px; font-weight: 750; letter-spacing: .5px;
+  padding: 2px 5px; border-radius: 5px;
+  background: rgba(8,7,13,.72); border: 1px solid var(--stroke-2); color: var(--txt-2);
+}
+#m-archive .selchk {
+  position: absolute; left: 6px; top: 6px; z-index: 2;
+  width: 17px; height: 17px; border-radius: 50%;
+  background: var(--grad-acc); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 8px rgba(124,77,255,.55);
+}
+#m-archive .selchk .ic { width: 10px; height: 10px; }
+
+#m-archive .sk::after {
+  content: ""; position: absolute; inset: 0;
+  background:
+    linear-gradient(rgba(237,232,255,.07),rgba(237,232,255,.07)) left 8px top 8px / 30px calc(100% - 16px),
+    linear-gradient(rgba(237,232,255,.14),rgba(237,232,255,.14)) left 44px top 13px / 62px 7px,
+    linear-gradient(rgba(237,232,255,.07),rgba(237,232,255,.07)) left 44px top 26px / 88px 7px,
+    linear-gradient(rgba(124,77,255,.42),rgba(124,77,255,.42)) right 10px top 44px / 54px 10px,
+    linear-gradient(rgba(237,232,255,.08),rgba(237,232,255,.08)) left 44px bottom 12px / 70px 9px;
+  background-repeat: no-repeat;
+}
+#m-archive .sk2::after {
+  content: ""; position: absolute; inset: 0;
+  background:
+    linear-gradient(rgba(247,245,255,.17),rgba(247,245,255,.17)) center top 9px / 58% calc(100% - 18px),
+    linear-gradient(rgba(8,7,13,.3),rgba(8,7,13,.3)) center top 19px / 42% 6px,
+    linear-gradient(rgba(8,7,13,.22),rgba(8,7,13,.22)) center top 32px / 46% 5px,
+    linear-gradient(rgba(8,7,13,.22),rgba(8,7,13,.22)) center top 43px / 40% 5px;
+  background-repeat: no-repeat;
+}
+#m-archive .h1 { background: linear-gradient(155deg, #17162A 0%, #0D0C16 100%); }
+#m-archive .h2 { background: radial-gradient(90px 60px at 80% 0%, rgba(124,77,255,.22), transparent 66%), linear-gradient(155deg, #151426 0%, #0C0B14 100%); }
+#m-archive .h3 { background: linear-gradient(155deg, #1A1E2E 0%, #0D0F18 100%); }
+#m-archive .h4 { background: radial-gradient(90px 60px at 20% 100%, rgba(96,165,250,.16), transparent 66%), linear-gradient(155deg, #141828 0%, #0B0D16 100%); }
+#m-archive .h5 { background: linear-gradient(155deg, #241E14 0%, #141008 100%); }
+#m-archive .h6 { background: radial-gradient(90px 60px at 75% 20%, rgba(52,211,153,.14), transparent 66%), linear-gradient(155deg, #14201C 0%, #0A100E 100%); }
+
+/* ---- preview card ---- */
+#m-archive .prev { margin: 12px 16px 0; flex: none; padding: 12px; }
+#m-archive .prow { display: flex; align-items: center; gap: 11px; }
+#m-archive .bigprev {
+  width: 92px; height: 60px; flex: none; border-radius: 10px; position: relative; overflow: hidden;
+  border: 1px solid var(--stroke-2); box-shadow: var(--sh-1);
+}
+#m-archive .pn { font-size: 13.5px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#m-archive .ps { font-size: 11px; color: var(--txt-3); margin-top: 2px; }
+#m-archive .psz { font-size: 11.5px; color: var(--txt-2); margin-top: 5px; font-variant-numeric: tabular-nums; }
+#m-archive .psz b { color: var(--txt-1); font-weight: 650; }
+#m-archive .psz .arr { color: var(--acc-3); padding: 0 2px; }
+#m-archive .pbtns { display: flex; gap: 8px; margin-top: 11px; }
+#m-archive .pbtns .m-btn { flex: 1; height: 40px; font-size: 13.5px; border-radius: 13px; gap: 7px; }
+#m-archive .path {
+  display: flex; align-items: center; gap: 7px; margin-top: 10px;
+  padding: 7px 9px; border-radius: 9px;
+  background: rgba(235,232,255,.04); border: 1px solid var(--stroke);
+  font-family: var(--font-mono); font-size: 9.5px; color: var(--txt-2);
+}
+#m-archive .path .p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+#m-archive .tipwrap { display: flex; justify-content: center; padding: 12px 16px 0; flex: none; }
+#m-archive .tipwrap .m-tip { gap: 8px; }
+#m-archive .tipwrap .m-tip .ic { color: var(--ok); }
+</style>
+<div class="mscreen" id="m-archive">
+  <div class="m-status">
+    <span>9:41</span>
+    <div class="sb-right">
+      <span class="m-sig"><i></i><i></i><i></i><i></i></span>
+      <span class="m-wifi"></span>
+      <span class="m-batt"><i></i></span>
+    </div>
+  </div>
+
+  <header class="m-viewerbar">
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-chev-l"/></svg></span>
+    <span class="m-tile sm ft-zip">ZIP</span>
+    <div class="col grow who" style="gap:2px">
+      <span class="vt">Design-Assets.zip</span>
+      <span class="vs">Maya Chen · 86 MB</span>
+    </div>
+    <div class="fchips">
+      <span class="m-chip on">ZIP</span>
+      <span class="m-chip">RAR</span>
+      <span class="m-chip">7Z</span>
+    </div>
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-more-v"/></svg></span>
+  </header>
+
+  <div class="m-secure"><svg class="ic sm"><use href="#i-lock"/></svg>Opens inside VaultChat — no external app</div>
+
+  <div class="crumbbar">
+    <div class="crumb">
+      <svg class="ic" style="color:var(--acc-2);width:15px;height:15px"><use href="#i-zip"/></svg>
+      <span class="root">Design-Assets.zip</span>
+      <svg class="ic"><use href="#i-chev-r"/></svg>
+      <span class="cur">02-Screens</span>
+    </div>
+    <div class="stats">
+      <span>247 files</span><i></i>
+      <span>86 MB</span><i></i>
+      <span>62% compressed</span>
+      <span class="cmp"><b></b></span>
+    </div>
+  </div>
+
+  <div class="folders">
+    <div class="m-chips">
+      <span class="m-chip">01-Brand</span>
+      <span class="m-chip on"><svg class="ic"><use href="#i-folder"/></svg>02-Screens</span>
+      <span class="m-chip">03-Motion</span>
+      <span class="m-chip">fonts</span>
+      <span class="m-chip">README.md</span>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="fcard sel">
+      <div class="thumb h1 sk"><span class="selchk"><svg class="ic"><use href="#i-check"/></svg></span><span class="ext">PNG</span></div>
+      <div class="fmeta"><span class="fname grow">chat-dark.png</span><span class="fsz">1.2 MB</span></div>
+    </div>
+    <div class="fcard">
+      <div class="thumb h3 sk2"><span class="ext">PNG</span></div>
+      <div class="fmeta"><span class="fname grow">chat-light.png</span><span class="fsz">1.1 MB</span></div>
+    </div>
+    <div class="fcard">
+      <div class="thumb h2 sk"><span class="ext">PNG</span></div>
+      <div class="fmeta"><span class="fname grow">home-dark.png</span><span class="fsz">1.4 MB</span></div>
+    </div>
+    <div class="fcard">
+      <div class="thumb h4 sk"><span class="ext">PNG</span></div>
+      <div class="fmeta"><span class="fname grow">split-view.png</span><span class="fsz">1.6 MB</span></div>
+    </div>
+    <div class="fcard">
+      <div class="thumb h6 sk"><span class="ext">PNG</span></div>
+      <div class="fmeta"><span class="fname grow">viewer-excel.png</span><span class="fsz">1.5 MB</span></div>
+    </div>
+    <div class="fcard">
+      <div class="thumb h5 sk2"><span class="ext">PNG</span></div>
+      <div class="fmeta"><span class="fname grow">reader-sepia.png</span><span class="fsz">1.1 MB</span></div>
+    </div>
+  </div>
+
+  <div class="m-card prev">
+    <div class="prow">
+      <div class="bigprev h1 sk"></div>
+      <div class="col grow" style="gap:0;min-width:0">
+        <span class="pn">chat-dark.png</span>
+        <span class="ps">2880 × 1800 · in 02-Screens</span>
+        <span class="psz"><b>1.2 MB</b> compressed <span class="arr">→</span> <b>3.8 MB</b></span>
+      </div>
+      <span class="m-chip" style="height:24px;font-size:10px;padding:0 8px;color:var(--ok);border-color:rgba(52,211,153,.32);background:rgba(52,211,153,.09)"><svg class="ic sm" style="width:11px;height:11px"><use href="#i-check"/></svg>CRC ok</span>
+    </div>
+    <div class="path">
+      <svg class="ic sm" style="flex:none;color:var(--txt-3);width:12px;height:12px"><use href="#i-zip"/></svg>
+      <span class="p grow">Design-Assets.zip / 02-Screens / chat-dark.png</span>
+      <svg class="ic sm" style="flex:none;color:var(--txt-3);width:12px;height:12px"><use href="#i-copy"/></svg>
+    </div>
+    <div class="pbtns">
+      <span class="m-btn primary"><svg class="ic sm"><use href="#i-eye"/></svg>Preview</span>
+      <span class="m-btn"><svg class="ic sm"><use href="#i-download"/></svg>Extract file</span>
+    </div>
+  </div>
+
+  <div class="grow"></div>
+
+  <div class="tipwrap">
+    <span class="m-tip"><svg class="ic sm"><use href="#i-lock"/></svg>Nothing is written to your phone</span>
+  </div>
+
+  <div class="grow"></div>
+  <div class="m-home"><i></i></div>
+</div>

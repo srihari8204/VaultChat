@@ -1,0 +1,323 @@
+<style>
+#s-search .body { align-items: stretch; min-height: 0; }
+#s-search .main { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; padding: 26px 46px 16px; position: relative; }
+
+/* ---- Big search field ---- */
+#s-search .bigfield {
+  width: 720px; height: 46px; flex: none;
+  display: flex; align-items: center; gap: 12px;
+  padding: 0 18px; border-radius: 14px;
+  background: rgba(235,232,255,.06);
+  border: 1px solid var(--stroke-acc);
+  box-shadow: 0 0 0 3px rgba(124,77,255,.16), 0 10px 34px rgba(124,77,255,.14), var(--inner-hi);
+  font-size: 15px; color: var(--txt-1);
+}
+#s-search .bigfield .ic { color: var(--acc-2); }
+#s-search .q { font-weight: 550; letter-spacing: .1px; }
+#s-search .caret { width: 2px; height: 20px; border-radius: 2px; background: var(--acc-2); box-shadow: 0 0 8px rgba(124,77,255,.9); }
+
+#s-search .scopes { display: flex; gap: 8px; margin-top: 14px; flex: none; }
+
+/* ---- Result columns ---- */
+#s-search .results { display: flex; gap: 20px; width: 1760px; margin-top: 18px; flex: 1; min-height: 0; position: relative; }
+#s-search .rescol { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+#s-search .grp { border-radius: var(--r-lg); }
+#s-search .grp-h {
+  display: flex; align-items: center; gap: 9px;
+  padding: 11px 16px; font-size: 12.5px; font-weight: 650;
+  border-bottom: 1px solid var(--stroke);
+}
+#s-search .grp-h .ic { color: var(--txt-2); }
+#s-search .grp-h .chev { color: var(--txt-3); }
+#s-search .cnt {
+  min-width: 20px; height: 19px; padding: 0 7px; border-radius: var(--r-pill);
+  background: rgba(235,232,255,.07); border: 1px solid var(--stroke);
+  font-size: 10.5px; font-weight: 650; color: var(--txt-2);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+#s-search .hit { display: flex; align-items: flex-start; gap: 12px; padding: 10px 16px; border-bottom: 1px solid rgba(235,232,255,.04); }
+#s-search .grp .hit:last-child { border-bottom: 0; }
+#s-search .hit.sel { background: var(--acc-soft); box-shadow: inset 0 0 0 1px var(--stroke-acc); }
+#s-search .h-name { font-size: 12.5px; font-weight: 600; }
+#s-search .h-meta { font-size: 10.5px; color: var(--txt-3); }
+#s-search .h-snip { font-size: 12px; color: var(--txt-2); line-height: 1.5; }
+#s-search .hl { color: var(--acc-3); background: var(--acc-soft-2); border-radius: 4px; padding: 0 4px; font-weight: 650; }
+#s-search .src { display: flex; align-items: center; gap: 11px; padding: 11px 16px 9px; }
+#s-search .tile {
+  width: 34px; height: 34px; border-radius: 10px; flex: none; position: relative;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 9px; font-weight: 700; letter-spacing: .4px;
+  box-shadow: var(--inner-hi), 0 2px 8px rgba(0,0,0,.35);
+}
+#s-search .loc {
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--txt-2);
+  padding: 3px 8px; border-radius: 6px; margin-top: 1px;
+  background: rgba(235,232,255,.06); border: 1px solid var(--stroke);
+  white-space: nowrap; flex: none; display: inline-flex; align-items: center; gap: 5px;
+}
+#s-search .chip.mini { height: 22px; padding: 0 9px; font-size: 10.5px; }
+
+/* ---- Media thumbs (pure CSS) ---- */
+#s-search .sthumb {
+  width: 168px; height: 94px; border-radius: 9px; flex: none; position: relative; overflow: hidden;
+  background: linear-gradient(140deg, #1E1A33 0%, #262045 70%, #2E2656 100%);
+  border: 1px solid var(--stroke-2); box-shadow: var(--sh-1);
+  padding: 10px 12px;
+}
+#s-search .sthumb .st-t { font-size: 9px; font-weight: 700; color: #EDEBFA; letter-spacing: .2px; }
+#s-search .sthumb .st-bars { position: absolute; left: 12px; bottom: 10px; display: flex; align-items: flex-end; gap: 7px; height: 40px; }
+#s-search .sthumb .st-bars i { width: 13px; border-radius: 3px 3px 0 0; background: var(--grad-acc); opacity: .9; }
+#s-search .sthumb .st-num {
+  position: absolute; right: 7px; bottom: 6px;
+  font-size: 8.5px; font-weight: 700; color: var(--txt-2);
+  padding: 2px 6px; border-radius: 5px; background: rgba(8,7,13,.6); border: 1px solid var(--stroke);
+}
+#s-search .ithumb {
+  width: 118px; height: 74px; border-radius: 8px; position: relative; overflow: hidden; flex: none;
+  border: 1px solid var(--stroke-2); box-shadow: var(--sh-1);
+}
+#s-search .ithumb .tag {
+  position: absolute; left: 4px; right: 4px; bottom: 4px;
+  font-size: 8px; font-weight: 700; letter-spacing: .3px; text-align: center;
+  padding: 3px 4px; border-radius: 5px;
+  background: rgba(18,12,40,.82); color: var(--acc-3); border: 1px solid var(--stroke-acc);
+}
+#s-search .ith-cap { font-size: 10px; color: var(--txt-3); margin-top: 6px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 118px; }
+#s-search .vthumb {
+  width: 128px; height: 72px; border-radius: 8px; flex: none; position: relative; overflow: hidden;
+  background: radial-gradient(90px 60px at 62% 38%, rgba(124,77,255,.55), transparent 70%), linear-gradient(140deg, #17142a, #0d0b18);
+  border: 1px solid var(--stroke-2); box-shadow: var(--sh-1);
+}
+#s-search .vthumb .pl {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+  width: 24px; height: 24px; border-radius: 50%;
+  background: rgba(8,7,13,.65); border: 1px solid rgba(235,232,255,.35);
+  display: flex; align-items: center; justify-content: center; color: #fff;
+}
+#s-search .vthumb .tc {
+  position: absolute; right: 5px; bottom: 5px;
+  font-family: var(--font-mono); font-size: 8.5px; font-weight: 600; color: #EDEBFA;
+  padding: 2px 5px; border-radius: 4px; background: rgba(8,7,13,.7);
+}
+#s-search .wv { display: flex; align-items: center; gap: 2.5px; height: 34px; flex: none; }
+#s-search .wv i { width: 3px; border-radius: 2px; background: rgba(235,232,255,.20); height: 45%; }
+#s-search .wv i:nth-child(3n+1) { height: 70%; }
+#s-search .wv i:nth-child(4n+2) { height: 95%; }
+#s-search .wv i:nth-child(5n)   { height: 30%; }
+#s-search .wv i.p { background: var(--acc-2); box-shadow: 0 0 6px rgba(124,77,255,.55); }
+#s-search .mono { font-family: var(--font-mono); font-size: 11px; }
+
+/* ---- Footer status ---- */
+#s-search .foot {
+  margin-top: 14px; flex: none;
+  display: flex; align-items: center; gap: 9px;
+  height: 40px; padding: 0 22px; border-radius: var(--r-pill);
+  background: rgba(235,232,255,.04); border: 1px solid var(--stroke);
+  font-size: 12px; color: var(--txt-3);
+}
+#s-search .foot b { color: var(--txt-2); font-weight: 600; }
+#s-search .foot .ok-part { display: inline-flex; align-items: center; gap: 6px; color: var(--ok); font-weight: 600; }
+#s-search .fsep { width: 3px; height: 3px; border-radius: 50%; background: var(--txt-3); opacity: .6; }
+</style>
+<div class="screen" id="s-search">
+  <header class="vc-titlebar">
+    <div class="vc-brand"><span class="vc-logo"><svg class="ic"><use href="#i-shield"/></svg></span>VaultChat</div>
+    <div class="vc-search"><svg class="ic sm"><use href="#i-search"/></svg><span class="grow">Search chats, people, and every file…</span><span class="kbd">Ctrl K</span></div>
+    <div class="row gap-4">
+      <span class="icon-btn sm"><svg class="ic sm"><use href="#i-cloud-check"/></svg></span>
+      <span class="icon-btn sm"><svg class="ic sm"><use href="#i-bell"/></svg></span>
+      <span class="avatar sm av-6" style="width:26px;height:26px;font-size:10px;border-radius:9px">SB</span>
+    </div>
+    <div class="vc-win"><span>─</span><span>▢</span><span class="close">✕</span></div>
+  </header>
+
+  <div class="row grow body">
+    <nav class="vc-rail">
+      <div class="rail-btn"><svg class="ic lg"><use href="#i-chat"/></svg></div><div class="rail-label">Chats</div>
+      <div class="rail-btn"><svg class="ic lg"><use href="#i-book"/></svg></div><div class="rail-label">Shelf</div>
+      <div class="rail-btn active"><svg class="ic lg"><use href="#i-search"/></svg></div><div class="rail-label">Search</div>
+      <div class="rail-btn"><svg class="ic lg"><use href="#i-cloud-off"/></svg></div><div class="rail-label">Offline</div>
+      <div class="rail-btn"><svg class="ic lg"><use href="#i-shield"/></svg></div><div class="rail-label">Vault</div>
+      <div class="rail-spacer"></div>
+      <div class="rail-btn"><svg class="ic lg"><use href="#i-settings"/></svg></div>
+    </nav>
+
+    <main class="main">
+      <div class="bigfield">
+        <svg class="ic"><use href="#i-search"/></svg>
+        <span class="q">atlas pricing</span><span class="caret"></span>
+        <span class="grow"></span>
+        <span class="kbd">Esc</span>
+      </div>
+
+      <div class="scopes">
+        <span class="chip active">All</span><span class="chip">Chats</span><span class="chip">Documents</span><span class="chip">Spreadsheets</span><span class="chip">Slides</span><span class="chip">PDFs</span><span class="chip">Images</span><span class="chip">Videos</span><span class="chip">Audio</span><span class="chip">Files</span>
+      </div>
+
+      <div class="results">
+        <!-- LEFT column -->
+        <div class="rescol">
+          <div class="grp glass">
+            <div class="grp-h"><svg class="ic sm"><use href="#i-chat"/></svg><span>Chats</span><span class="cnt">2</span><div class="grow"></div><svg class="ic sm chev"><use href="#i-chev-r"/></svg></div>
+            <div class="hit sel">
+              <span class="avatar sm av-1">MC</span>
+              <div class="col grow" style="gap:3px">
+                <div class="row gap-8"><span class="h-name">Maya Chen</span><span class="h-meta">Direct chat · today 09:12</span></div>
+                <div class="h-snip">"the <b class="hl">pricing</b> tiers land tomorrow — sanity-check the enterprise column before Elena sees it?"</div>
+              </div>
+              <span class="kbd" style="margin-top:8px">↵ Open</span>
+            </div>
+            <div class="hit">
+              <span class="avatar sm av-5">AL</span>
+              <div class="col grow" style="gap:3px">
+                <div class="row gap-8"><span class="h-name">Atlas Launch</span><span class="h-meta">Group · yesterday 16:40</span></div>
+                <div class="h-snip">Ravi: "locking <b class="hl">pricing</b> for the launch deck tonight — final call at 5."</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grp glass">
+            <div class="grp-h"><svg class="ic sm"><use href="#i-doc-lines"/></svg><span>Word</span><span class="cnt">2</span><div class="grow"></div><svg class="ic sm chev"><use href="#i-chev-r"/></svg></div>
+            <div class="src">
+              <span class="tile ft-doc">DOC</span>
+              <div class="col grow" style="gap:1px">
+                <span class="h-name">Atlas-Proposal.docx</span>
+                <span class="h-meta">4.2 MB · 24 pages · Maya Chen in Atlas Launch</span>
+              </div>
+            </div>
+            <div class="hit"><span class="loc">Page 12</span><div class="h-snip grow">Section 4.2 — <b class="hl">Pricing</b> strategy: three tiers priced against Atlas usage bands, reviewed quarterly…</div></div>
+            <div class="hit"><span class="loc">Page 21</span><div class="h-snip grow">Appendix C — <b class="hl">pricing</b> sensitivity by segment (enterprise ±8%)…</div></div>
+          </div>
+
+          <div class="grp glass">
+            <div class="grp-h"><svg class="ic sm"><use href="#i-grid"/></svg><span>Excel</span><span class="cnt">2</span><div class="grow"></div><svg class="ic sm chev"><use href="#i-chev-r"/></svg></div>
+            <div class="src">
+              <span class="tile ft-xls">XLS</span>
+              <div class="col grow" style="gap:1px">
+                <span class="h-name">Atlas-Financials-FY26.xlsx</span>
+                <span class="h-meta">1.8 MB · 6 sheets · Ravi Patel in Atlas Launch</span>
+              </div>
+            </div>
+            <div class="hit"><span class="loc"><svg class="ic sm" style="width:11px;height:11px"><use href="#i-fx"/></svg>Revenue!D14</span><div class="h-snip grow">Enterprise <b class="hl">pricing</b> — uplift ×1.18 <span class="mono" style="color:var(--txt-3)">=SUM(D2:D13)*1.18</span></div></div>
+            <div class="hit"><span class="loc"><svg class="ic sm" style="width:11px;height:11px"><use href="#i-fx"/></svg>Summary!B4</span><div class="h-snip grow"><b class="hl">Pricing</b> assumptions (annual, USD)…</div></div>
+          </div>
+
+          <div class="grp glass">
+            <div class="grp-h"><svg class="ic sm"><use href="#i-presenter"/></svg><span>Slides</span><span class="cnt">1</span><div class="grow"></div><svg class="ic sm chev"><use href="#i-chev-r"/></svg></div>
+            <div class="src">
+              <span class="tile ft-ppt">PPT</span>
+              <div class="col grow" style="gap:1px">
+                <span class="h-name">Atlas-Launch-Deck.pptx</span>
+                <span class="h-meta">12.6 MB · 18 slides · Srihari in Atlas Launch</span>
+              </div>
+            </div>
+            <div class="hit" style="align-items:center">
+              <div class="sthumb">
+                <div class="st-t">Pricing — 3 tiers</div>
+                <div class="st-bars"><i style="height:16px"></i><i style="height:26px"></i><i style="height:38px"></i></div>
+                <span class="st-num">9</span>
+              </div>
+              <div class="col grow" style="gap:6px">
+                <div class="h-snip">"<b class="hl">Pricing</b> — 3 tiers · Starter / Growth / Enterprise"</div>
+                <div class="row gap-8"><span class="loc">Slide 9</span><span class="h-meta">title + chart text</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT column -->
+        <div class="rescol">
+          <div class="grp glass">
+            <div class="grp-h"><svg class="ic sm"><use href="#i-file"/></svg><span>PDF</span><span class="cnt">1</span><div class="grow"></div><svg class="ic sm chev"><use href="#i-chev-r"/></svg></div>
+            <div class="src">
+              <span class="tile ft-pdf">PDF</span>
+              <div class="col grow" style="gap:1px">
+                <span class="h-name">Atlas-MSA-Contract.pdf</span>
+                <span class="h-meta">2.1 MB · 14 pages · Elena Voss in Legal — NDA Review</span>
+              </div>
+              <span class="chip mini active"><svg class="ic sm" style="width:11px;height:11px"><use href="#i-ocr"/></svg>OCR match</span>
+            </div>
+            <div class="hit"><span class="loc">Page 7 · §7</span><div class="h-snip grow">§7 Fees — "the <b class="hl">pricing</b> schedule in Exhibit B applies for the initial term" <span class="h-meta">(found in scanned text)</span></div></div>
+          </div>
+
+          <div class="grp glass">
+            <div class="grp-h"><svg class="ic sm"><use href="#i-image"/></svg><span>Images</span><span class="cnt">3</span><div class="grow"></div><svg class="ic sm chev"><use href="#i-chev-r"/></svg></div>
+            <div class="hit" style="gap:16px;padding:12px 16px">
+              <div class="col">
+                <div class="ithumb" style="background:linear-gradient(140deg,#3A2F63,#7C4DFF 62%,#B388FF)"></div>
+                <span class="ith-cap">hero-shoot-042.jpg</span>
+              </div>
+              <div class="col">
+                <div class="ithumb" style="background:linear-gradient(140deg,#241F3F,#6C3DF4 55%,#EC4899)">
+                  <span class="tag">text-in-image match</span>
+                </div>
+                <span class="ith-cap">hero-v2.webp</span>
+              </div>
+              <div class="col">
+                <div class="ithumb" style="background:linear-gradient(140deg,#1D3A4F,#2DD4BF 70%,#60A5FA)"></div>
+                <span class="ith-cap">hero-shoot-051.jpg</span>
+              </div>
+              <div class="col grow" style="gap:5px;padding-top:4px">
+                <div class="h-snip">hero-v2.webp contains the text "Atlas <b class="hl">pricing</b>"</div>
+                <span class="h-meta">Design Guild · 02 Aug</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="grp glass">
+            <div class="grp-h"><svg class="ic sm"><use href="#i-film"/></svg><span>Video</span><span class="cnt">1</span><div class="grow"></div><svg class="ic sm chev"><use href="#i-chev-r"/></svg></div>
+            <div class="hit" style="align-items:center;padding:12px 16px">
+              <div class="vthumb"><span class="pl"><svg class="ic sm" style="width:11px;height:11px"><use href="#i-play"/></svg></span><span class="tc">02:41</span></div>
+              <div class="col grow" style="gap:6px">
+                <div class="row gap-8"><span class="h-name">Atlas-Demo-v3.mp4</span><span class="h-meta">148 MB · 04:36 · Atlas Launch</span></div>
+                <div class="h-snip">"…and this is where <b class="hl">pricing</b> updates live in the sheet…"</div>
+                <div class="row gap-8"><span class="loc"><svg class="ic sm" style="width:11px;height:11px"><use href="#i-transcript"/></svg>Transcript · 02:41</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grp glass">
+            <div class="grp-h"><svg class="ic sm"><use href="#i-wave"/></svg><span>Audio</span><span class="cnt">1</span><div class="grow"></div><svg class="ic sm chev"><use href="#i-chev-r"/></svg></div>
+            <div class="hit" style="align-items:center;padding:12px 16px">
+              <div class="wv"><i class="p"></i><i class="p"></i><i class="p"></i><i class="p"></i><i class="p"></i><i class="p"></i><i class="p"></i><i class="p"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+              <div class="col grow" style="gap:6px">
+                <div class="row gap-8"><span class="h-name">Standup-2026-08-04.mp3</span><span class="h-meta">9.2 MB · 12:04 · Ravi Patel</span></div>
+                <div class="h-snip">Ravi: "…before Friday we need to align on <b class="hl">pricing</b> with legal…"</div>
+                <div class="row gap-8"><span class="loc"><svg class="ic sm" style="width:11px;height:11px"><use href="#i-transcript"/></svg>Transcript · 04:12</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grp glass">
+            <div class="grp-h"><svg class="ic sm"><use href="#i-code"/></svg><span>Files</span><span class="cnt">2</span><div class="grow"></div><svg class="ic sm chev"><use href="#i-chev-r"/></svg></div>
+            <div class="hit" style="align-items:center">
+              <span class="tile ft-txt">CSV</span>
+              <div class="col grow" style="gap:2px">
+                <div class="row gap-8"><span class="h-name">metrics.csv</span><span class="h-meta">64 KB · Release 1.3</span></div>
+                <div class="h-snip mono">column: plan_<b class="hl">pricing</b>_tier · 1,204 rows</div>
+              </div>
+            </div>
+            <div class="hit" style="align-items:center">
+              <span class="tile ft-code">JSON</span>
+              <div class="col grow" style="gap:2px">
+                <div class="row gap-8"><span class="h-name">config.json</span><span class="h-meta">6 KB · Release 1.3</span></div>
+                <div class="h-snip mono">"<b class="hl">pricing</b>": { "tiers": 3, "currency": "USD" }</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="scroll-rail"><div class="thumb" style="top:5%;height:34%"></div></div>
+      </div>
+
+      <div class="foot">
+        <svg class="ic sm" style="color:var(--txt-2)"><use href="#i-check2"/></svg>
+        <span><b>9 sources</b> searched</span>
+        <span class="fsep"></span>
+        <span class="mono" style="font-size:11.5px;color:var(--txt-2)">0.14 s</span>
+        <span class="fsep"></span>
+        <span class="ok-part"><svg class="ic sm"><use href="#i-lock"/></svg>encrypted index, on-device</span>
+      </div>
+    </main>
+  </div>
+</div>

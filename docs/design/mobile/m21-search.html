@@ -1,0 +1,224 @@
+<style>
+#m-search .m-largehead { padding: 2px 20px 6px; }
+#m-search .m-largehead h1 { font-size: 28px; }
+#m-search .pad { padding: 0 16px; flex: none; }
+#m-search .m-search {
+  height: 42px; border-radius: 14px;
+  border-color: var(--stroke-acc); color: var(--txt-1);
+  background: rgba(235,232,255,.07);
+  box-shadow: 0 0 0 3px rgba(124,77,255,.14), 0 10px 26px rgba(124,77,255,.12), var(--inner-hi);
+  font-size: 15px;
+}
+#m-search .m-search .ic { color: var(--acc-2); }
+#m-search .q { font-weight: 600; letter-spacing: .1px; }
+#m-search .caret { width: 2px; height: 19px; border-radius: 2px; background: var(--acc-2); box-shadow: 0 0 8px rgba(124,77,255,.9); }
+#m-search .kbd { margin-left: auto; }
+
+#m-search .scopes { padding: 9px 16px 0; }
+#m-search .m-chips { gap: 7px; }
+#m-search .m-chip { height: 30px; padding: 0 12px; font-size: 12.5px; }
+
+#m-search .results { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 5px; padding: 8px 16px 0; }
+#m-search .grp { overflow: hidden; flex: none; }
+#m-search .grp-h {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 13px; font-size: 11.5px; font-weight: 680;
+  border-bottom: 1px solid var(--stroke);
+  background: rgba(235,232,255,.025);
+}
+#m-search .grp-h .ic { width: 15px; height: 15px; color: var(--txt-2); }
+#m-search .cnt {
+  min-width: 19px; height: 18px; padding: 0 6px; border-radius: 999px;
+  background: rgba(235,232,255,.08); border: 1px solid var(--stroke);
+  font-size: 10px; font-weight: 700; color: var(--txt-2);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+#m-search .grp-h .chev { margin-left: auto; color: var(--txt-3); }
+#m-search .hit { display: flex; align-items: flex-start; gap: 10px; padding: 6px 13px; }
+#m-search .h-snip { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#m-search .hit.sel .h-snip { white-space: normal; }
+#m-search .hit + .hit { border-top: 1px solid rgba(235,232,255,.05); }
+#m-search .hit.sel { background: var(--acc-soft); box-shadow: inset 0 0 0 1px var(--stroke-acc); }
+#m-search .hit .avatar { width: 28px; height: 28px; border-radius: 10px; font-size: 10px; }
+#m-search .h-name { font-size: 12.5px; font-weight: 640; }
+#m-search .h-meta { font-size: 10px; color: var(--txt-3); }
+#m-search .h-snip { font-size: 12px; color: var(--txt-2); line-height: 1.42; }
+#m-search .hl { color: var(--acc-3); background: var(--acc-soft-2); border-radius: 4px; padding: 0 4px; font-weight: 680; }
+#m-search .src { display: flex; align-items: center; gap: 10px; padding: 7px 13px 4px; }
+#m-search .m-tile.sm { width: 30px; height: 30px; border-radius: 10px; font-size: 8px; }
+#m-search .loc {
+  font-family: var(--font-mono); font-size: 9.5px; color: var(--txt-2);
+  padding: 3px 7px; border-radius: 6px;
+  background: rgba(235,232,255,.06); border: 1px solid var(--stroke);
+  white-space: nowrap; flex: none; display: inline-flex; align-items: center; gap: 4px;
+}
+#m-search .loc .ic { width: 10px; height: 10px; color: var(--txt-3); }
+#m-search .mini { height: 20px; padding: 0 8px; font-size: 10px; margin-left: auto; }
+
+#m-search .vthumb {
+  width: 58px; height: 34px; border-radius: 8px; flex: none; position: relative; overflow: hidden;
+  background: radial-gradient(46px 30px at 62% 38%, rgba(124,77,255,.55), transparent 70%), linear-gradient(140deg, #17142a, #0d0b18);
+  border: 1px solid var(--stroke-2);
+}
+#m-search .vthumb .pl {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+  width: 18px; height: 18px; border-radius: 50%;
+  background: rgba(8,7,13,.7); border: 1px solid rgba(235,232,255,.35);
+  display: flex; align-items: center; justify-content: center; color: #fff;
+}
+#m-search .vthumb .pl .ic { width: 9px; height: 9px; }
+#m-search .wv { display: flex; align-items: center; gap: 2px; height: 24px; width: 58px; flex: none; }
+#m-search .wv i { flex: 1; border-radius: 2px; background: rgba(235,232,255,.2); height: 45%; }
+#m-search .wv i:nth-child(3n+1) { height: 72%; }
+#m-search .wv i:nth-child(4n+2) { height: 96%; }
+#m-search .wv i:nth-child(5n)   { height: 32%; }
+#m-search .wv i.p { background: var(--acc-2); box-shadow: 0 0 6px rgba(124,77,255,.5); }
+
+#m-search .foot {
+  margin: 7px 16px 7px; flex: none;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  height: 34px; border-radius: 999px;
+  background: rgba(235,232,255,.04); border: 1px solid var(--stroke);
+  font-size: 11px; color: var(--txt-3);
+}
+#m-search .foot b { color: var(--txt-2); font-weight: 650; }
+#m-search .foot .ok { display: inline-flex; align-items: center; gap: 5px; color: var(--ok); font-weight: 650; }
+#m-search .foot .ok .ic { width: 12px; height: 12px; }
+#m-search .fsep { width: 3px; height: 3px; border-radius: 50%; background: var(--txt-3); opacity: .6; flex: none; }
+#m-search .mono { font-family: var(--font-mono); }
+</style>
+<div class="mscreen" id="m-search">
+  <div class="m-status">
+    <span>9:24</span>
+    <div class="sb-right">
+      <span class="m-sig"><i></i><i></i><i></i><i></i></span>
+      <span class="m-wifi"></span>
+      <span class="m-batt"><i></i></span>
+    </div>
+  </div>
+
+  <div class="m-largehead">
+    <h1>Search</h1>
+    <div class="sub">One query, every chat and every format</div>
+  </div>
+
+  <div class="pad">
+    <div class="m-search focus">
+      <svg class="ic"><use href="#i-search"/></svg>
+      <span class="q">atlas pricing</span><span class="caret"></span>
+      <span class="grow"></span>
+      <svg class="ic" style="color:var(--txt-3)"><use href="#i-close"/></svg>
+    </div>
+  </div>
+
+  <div class="scopes">
+    <div class="m-chips">
+      <span class="m-chip on">All</span>
+      <span class="m-chip">Chats</span>
+      <span class="m-chip">Docs</span>
+      <span class="m-chip">Sheets</span>
+      <span class="m-chip">Slides</span>
+      <span class="m-chip">PDF</span>
+      <span class="m-chip">Images</span>
+      <span class="m-chip">Video</span>
+    </div>
+  </div>
+
+  <div class="results">
+    <div class="grp m-card">
+      <div class="grp-h"><svg class="ic"><use href="#i-chat"/></svg>Chats<span class="cnt">2</span><svg class="ic chev"><use href="#i-chev-r"/></svg></div>
+      <div class="hit sel">
+        <span class="avatar av-1">MC</span>
+        <div class="col grow" style="gap:2px">
+          <div class="row gap-8"><span class="h-name">Maya Chen</span><span class="h-meta">today 09:12</span></div>
+          <div class="h-snip">"the <b class="hl">pricing</b> tiers land tomorrow — sanity-check the enterprise column?"</div>
+        </div>
+      </div>
+      <div class="hit">
+        <span class="avatar av-5">AL</span>
+        <div class="col grow" style="gap:2px">
+          <div class="row gap-8"><span class="h-name">Atlas Launch</span><span class="h-meta">yesterday 16:40</span></div>
+          <div class="h-snip">Ravi: "locking <b class="hl">pricing</b> for the launch deck tonight."</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grp m-card">
+      <div class="grp-h"><svg class="ic"><use href="#i-doc-lines"/></svg>Word<span class="cnt">2</span><svg class="ic chev"><use href="#i-chev-r"/></svg></div>
+      <div class="hit">
+        <span class="m-tile sm ft-doc">DOC</span>
+        <div class="col grow" style="gap:3px;min-width:0">
+          <div class="row gap-8"><span class="h-name">Atlas-Proposal.docx</span><span class="h-meta">24 pages · Maya Chen</span></div>
+          <div class="row gap-8" style="min-width:0"><span class="loc">Page 12</span><span class="h-snip grow">Section 4.2 — <b class="hl">Pricing</b> strategy…</span></div>
+          <div class="row gap-8" style="min-width:0"><span class="loc">Page 21</span><span class="h-snip grow">Appendix C — <b class="hl">pricing</b> sensitivity by segment…</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grp m-card">
+      <div class="grp-h"><svg class="ic"><use href="#i-grid"/></svg>Excel<span class="cnt">2</span><svg class="ic chev"><use href="#i-chev-r"/></svg></div>
+      <div class="hit" style="align-items:center">
+        <span class="m-tile sm ft-xls">XLS</span>
+        <div class="col grow" style="gap:2px">
+          <div class="row gap-8"><span class="h-name">Atlas-Financials-FY26.xlsx</span></div>
+          <div class="h-snip">Enterprise <b class="hl">pricing</b> uplift ×1.18</div>
+        </div>
+        <span class="loc"><svg class="ic"><use href="#i-fx"/></svg>Revenue!D14</span>
+      </div>
+    </div>
+
+    <div class="grp m-card">
+      <div class="grp-h"><svg class="ic"><use href="#i-file"/></svg>PDF<span class="cnt">1</span><span class="m-chip on mini"><svg class="ic sm" style="width:11px;height:11px"><use href="#i-ocr"/></svg>OCR match</span></div>
+      <div class="hit" style="align-items:center">
+        <span class="m-tile sm ft-pdf">PDF</span>
+        <div class="col grow" style="gap:2px">
+          <div class="row gap-8"><span class="h-name">Atlas-MSA-Contract.pdf</span><span class="h-meta">Page 7 · §7</span></div>
+          <div class="h-snip">"the <b class="hl">pricing</b> schedule in Exhibit B applies" <span class="h-meta">— scanned text</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grp m-card">
+      <div class="grp-h"><svg class="ic"><use href="#i-film"/></svg>Video<span class="cnt">1</span><svg class="ic chev"><use href="#i-chev-r"/></svg></div>
+      <div class="hit" style="align-items:center">
+        <span class="vthumb"><span class="pl"><svg class="ic"><use href="#i-play"/></svg></span></span>
+        <div class="col grow" style="gap:2px">
+          <div class="row gap-8"><span class="h-name">Atlas-Demo-v3.mp4</span><span class="h-meta">04:36</span></div>
+          <div class="h-snip">"…where <b class="hl">pricing</b> updates live in the sheet…"</div>
+        </div>
+        <span class="loc"><svg class="ic"><use href="#i-transcript"/></svg>02:41</span>
+      </div>
+    </div>
+
+    <div class="grp m-card">
+      <div class="grp-h"><svg class="ic"><use href="#i-wave"/></svg>Audio<span class="cnt">1</span><svg class="ic chev"><use href="#i-chev-r"/></svg></div>
+      <div class="hit" style="align-items:center">
+        <span class="wv"><i class="p"></i><i class="p"></i><i class="p"></i><i class="p"></i><i class="p"></i><i class="p"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+        <div class="col grow" style="gap:2px">
+          <div class="row gap-8"><span class="h-name">Standup-2026-08-04.mp3</span><span class="h-meta">12:04</span></div>
+          <div class="h-snip">Ravi: "…align on <b class="hl">pricing</b> with legal before Friday…"</div>
+        </div>
+        <span class="loc"><svg class="ic"><use href="#i-transcript"/></svg>04:12</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <svg class="ic sm" style="color:var(--txt-2)"><use href="#i-check2"/></svg>
+    <span><b>9 sources</b></span>
+    <span class="fsep"></span>
+    <span class="mono" style="color:var(--txt-2)">0.14 s</span>
+    <span class="fsep"></span>
+    <span class="ok"><svg class="ic"><use href="#i-lock"/></svg>encrypted index, on-device</span>
+  </div>
+
+  <nav class="m-tabbar">
+    <span class="m-tab"><svg class="ic"><use href="#i-chat"/></svg><span>Chats</span></span>
+    <span class="m-tab"><svg class="ic"><use href="#i-book"/></svg><span>Shelf</span></span>
+    <span class="m-tab on"><svg class="ic"><use href="#i-search"/></svg><span>Search</span></span>
+    <span class="m-tab"><svg class="ic"><use href="#i-cloud-off"/></svg><span>Offline</span></span>
+    <span class="m-tab"><svg class="ic"><use href="#i-shield"/></svg><span>Vault</span></span>
+  </nav>
+
+  <div class="m-home"><i></i></div>
+</div>

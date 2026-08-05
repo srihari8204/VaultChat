@@ -1,0 +1,260 @@
+<style>
+/* ---- Reader chrome ---- */
+#m-rsettings .rd-bar {
+  flex: none; position: relative; z-index: 25;
+  display: flex; flex-direction: column; gap: 9px;
+  padding: 4px 12px 11px;
+  background: rgba(14, 13, 22, 0.7);
+  border-bottom: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+}
+#m-rsettings .rd-top { display: flex; align-items: center; gap: 8px; }
+#m-rsettings .rd-src { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+#m-rsettings .rd-src .l1 { font-size: 14.5px; font-weight: 650; letter-spacing: -.2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#m-rsettings .rd-src .l2 { font-size: 11px; color: var(--txt-3); }
+#m-rsettings .rd-src .l2 b { color: var(--txt-2); font-weight: 600; }
+#m-rsettings .m-seg .sg { height: 32px; font-size: 12.5px; }
+
+/* ---- Stage + DARK paper ---- */
+#m-rsettings .stage { flex: 1; min-height: 0; position: relative; padding: 10px 22px 0 13px; }
+#m-rsettings .paper {
+  position: relative; height: 100%; overflow: hidden;
+  border-radius: 16px 16px 0 0;
+  padding: 18px 24px 0;
+  background: linear-gradient(180deg, #191724 0%, #15131F 55%, #131120 100%);
+  box-shadow: 0 26px 60px rgba(0,0,0,.6), 0 0 0 1px rgba(235,232,255,.07), inset 0 1px 0 rgba(255,255,255,.06);
+  font-family: var(--font-serif);
+  color: #D9D3E8;
+}
+#m-rsettings .kicker {
+  font-family: var(--font-ui);
+  font-size: 9.5px; font-weight: 750; letter-spacing: 2px; text-transform: uppercase;
+  color: var(--acc-2);
+}
+#m-rsettings h1.title {
+  font-size: 26px; font-weight: 650; letter-spacing: -.3px; line-height: 1.16;
+  color: #F0ECFB; margin-top: 6px;
+}
+#m-rsettings .byline { display: flex; align-items: center; gap: 9px; margin-top: 10px; font-family: var(--font-ui); }
+#m-rsettings .byline .avatar { width: 26px; height: 26px; font-size: 9.5px; border-radius: 9px; }
+#m-rsettings .byline .nm { font-size: 12px; font-weight: 650; color: #E4DFF2; }
+#m-rsettings .byline .mt { font-size: 11px; color: #8B84A8; }
+#m-rsettings .rule { height: 1px; background: rgba(235,232,255,.10); margin: 10px 0 11px; }
+#m-rsettings .paper p { font-size: 15px; line-height: 1.62; }
+#m-rsettings .lede::first-letter {
+  float: left; font-size: 46px; line-height: .84;
+  padding: 5px 8px 0 0; font-weight: 600; color: #F0ECFB;
+}
+#m-rsettings h2.h2 {
+  font-size: 17.5px; font-weight: 700; color: #F0ECFB; margin: 13px 0 6px;
+}
+#m-rsettings .hl {
+  background: rgba(247,197,61,.16);
+  box-shadow: inset 0 0 0 1px rgba(247,197,61,.2);
+  border-radius: 3px; padding: 1px 3px 2px;
+  box-decoration-break: clone; -webkit-box-decoration-break: clone;
+}
+
+/* ---- rail ---- */
+#m-rsettings .rail {
+  position: absolute; right: 9px; top: 24px; bottom: 10px; width: 3.5px;
+  border-radius: 4px; background: rgba(235,232,255,.11);
+}
+#m-rsettings .rail .fl {
+  position: absolute; left: 0; right: 0; top: 0; height: 42%;
+  border-radius: 4px; background: var(--grad-acc); box-shadow: 0 0 10px rgba(124,77,255,.55);
+}
+
+/* ---- Settings sheet ---- */
+#m-rsettings .m-home { z-index: 70; }
+#m-rsettings .m-sheet { padding: 10px 16px 24px; }
+#m-rsettings .sh-h { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+#m-rsettings .sh-h .ic { color: var(--acc-2); }
+#m-rsettings .sh-h .t { font-size: 16px; font-weight: 700; letter-spacing: -.2px; }
+#m-rsettings .sh-h .x {
+  width: 30px; height: 30px; border-radius: 10px; margin-left: auto;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(235,232,255,.06); border: 1px solid var(--stroke); color: var(--txt-2);
+}
+#m-rsettings .sh-h .x .ic { width: 14px; height: 14px; color: var(--txt-2); }
+#m-rsettings .sec + .sec { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--stroke); }
+#m-rsettings .m-label { display: block; margin-bottom: 6px; }
+#m-rsettings .m-grab { margin-bottom: 10px; }
+#m-rsettings .slrow .m-label { display: block; margin: 0; flex: none; width: 86px; font-size: 9px; letter-spacing: .7px; line-height: 1.2; }
+
+/* theme swatches */
+#m-rsettings .themes { display: flex; gap: 9px; }
+#m-rsettings .th { flex: 1; text-align: center; }
+#m-rsettings .th .sw {
+  height: 48px; border-radius: 12px; position: relative;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-serif); font-size: 19px; font-weight: 600;
+  border: 1px solid var(--stroke-2);
+}
+#m-rsettings .th.on .sw { box-shadow: 0 0 0 2px var(--acc), 0 0 18px rgba(124,77,255,.4); border-color: transparent; }
+#m-rsettings .th .nm { font-size: 10.5px; color: var(--txt-3); margin-top: 5px; font-weight: 550; }
+#m-rsettings .th.on .nm { color: var(--acc-3); }
+#m-rsettings .sw.dark  { background: #1A1826; color: #E8E4F5; }
+#m-rsettings .sw.light { background: #FFFFFF; color: #26232E; }
+#m-rsettings .sw.sepia { background: #F6F1E7; color: #3A3226; }
+#m-rsettings .sw.oled  { background: #000; color: #DCD6EC; border-color: rgba(235,232,255,.2); }
+#m-rsettings .oled-tag {
+  position: absolute; top: 4px; right: 4px;
+  font-family: var(--font-ui); font-size: 7.5px; font-weight: 800; letter-spacing: .8px;
+  color: #9A93B5; background: rgba(235,232,255,.12);
+  padding: 2px 5px; border-radius: 5px;
+}
+#m-rsettings .th .tick {
+  position: absolute; top: -7px; left: -7px;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--grad-acc); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 8px rgba(124,77,255,.6);
+}
+#m-rsettings .th .tick .ic { width: 11px; height: 11px; }
+
+#m-rsettings .m-seg.set .sg { height: 34px; font-size: 12.5px; }
+#m-rsettings .f-serif { font-family: var(--font-serif); font-size: 14.5px; }
+#m-rsettings .f-mono { font-family: var(--font-mono); font-size: 11.5px; }
+
+/* slider rows */
+#m-rsettings .slrow { display: flex; align-items: center; gap: 10px; }
+#m-rsettings .slrow .slider { flex: 1; }
+#m-rsettings .slrow .end { color: var(--txt-2); flex: none; width: 20px; text-align: center; font-family: var(--font-serif); }
+#m-rsettings .slrow .end.b { font-size: 18px; }
+#m-rsettings .slrow .end.s { font-size: 12px; }
+#m-rsettings .slrow .end .ic { width: 15px; height: 15px; color: var(--txt-3); }
+#m-rsettings .val {
+  flex: none; min-width: 46px; text-align: center;
+  font-size: 11.5px; font-weight: 700; color: var(--acc-3);
+  background: var(--acc-soft); border: 1px solid var(--stroke-acc);
+  border-radius: 8px; padding: 4px 8px;
+  font-variant-numeric: tabular-nums;
+}
+#m-rsettings .foot {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--stroke);
+}
+#m-rsettings .foot .m-btn { height: 44px; flex: 1; }
+#m-rsettings .foot .m-btn.ghost { flex: 0 0 110px; border-color: var(--stroke-2); background: rgba(235,232,255,.035); }
+</style>
+<div class="mscreen" id="m-rsettings">
+  <div class="m-status">
+    <span>9:21</span>
+    <div class="sb-right">
+      <span class="m-sig"><i></i><i></i><i></i><i></i></span>
+      <span class="m-wifi"></span>
+      <span class="m-batt"><i></i></span>
+    </div>
+  </div>
+
+  <header class="rd-bar">
+    <div class="rd-top">
+      <span class="m-ic-btn"><svg class="ic"><use href="#i-chev-l"/></svg></span>
+      <span class="avatar av-3" style="width:30px;height:30px;border-radius:10px;font-size:11px">DG</span>
+      <div class="rd-src grow">
+        <span class="l1">Design Guild</span>
+        <span class="l2">From <b>Marcus Webb</b> · today 09:12</span>
+      </div>
+      <span class="m-ic-btn active"><svg class="ic"><use href="#i-type"/></svg></span>
+      <span class="m-ic-btn"><svg class="ic"><use href="#i-more-v"/></svg></span>
+    </div>
+    <div class="m-seg">
+      <span class="sg"><svg class="ic sm"><use href="#i-chat"/></svg>Chat</span>
+      <span class="sg on"><svg class="ic sm"><use href="#i-book"/></svg>Reader</span>
+    </div>
+  </header>
+
+  <div class="stage">
+    <article class="paper">
+      <div class="kicker">Design Guild · Long message</div>
+      <h1 class="title">The Atlas Rollout Plan</h1>
+      <div class="byline">
+        <span class="avatar av-3">MW</span>
+        <span class="nm">Marcus Webb</span>
+        <span class="mt">6 min read · 3 pages · 1,412 words</span>
+      </div>
+      <div class="rule"></div>
+      <p class="lede">We're changing how Atlas ships. The June plan assumed one launch day — press, pricing and product landing on September 2. After three weeks of dogfooding, that is no longer responsible.</p>
+      <h2 class="h2">Why we're changing it</h2>
+      <p>Checkout is a week behind, and pretending otherwise only moves the slip somewhere more expensive. <span class="hl">If partner-cohort usage drops below 60%, we pause the GA date.</span></p>
+    </article>
+    <div class="rail"><div class="fl"></div></div>
+  </div>
+
+  <div class="m-dim"></div>
+
+  <div class="m-sheet">
+    <div class="m-grab"></div>
+    <div class="sh-h">
+      <svg class="ic"><use href="#i-type"/></svg>
+      <span class="t">Reader settings</span>
+      <span class="x"><svg class="ic"><use href="#i-close"/></svg></span>
+    </div>
+
+    <div class="sec">
+      <span class="m-label">Theme</span>
+      <div class="themes">
+        <div class="th on">
+          <div class="sw dark">Aa<span class="tick"><svg class="ic"><use href="#i-check"/></svg></span></div>
+          <div class="nm">Dark</div>
+        </div>
+        <div class="th"><div class="sw light">Aa</div><div class="nm">Light</div></div>
+        <div class="th"><div class="sw sepia">Aa</div><div class="nm">Sepia</div></div>
+        <div class="th"><div class="sw oled">Aa<span class="oled-tag">OLED</span></div><div class="nm">AMOLED</div></div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <span class="m-label">Font</span>
+      <div class="m-seg set">
+        <span class="sg on f-serif">Serif</span>
+        <span class="sg">Sans</span>
+        <span class="sg f-mono">Monospace</span>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="slrow">
+        <span class="m-label">Text size</span>
+        <span class="end s">A</span>
+        <div class="slider"><div class="fill" style="width:58%"></div><div class="thumb" style="left:58%"></div></div>
+        <span class="end b">A</span>
+        <span class="val">18px</span>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="slrow">
+        <span class="m-label">Line spacing</span>
+        <span class="end"><svg class="ic"><use href="#i-toc"/></svg></span>
+        <div class="slider"><div class="fill" style="width:45%"></div><div class="thumb" style="left:45%"></div></div>
+        <span class="val">1.6</span>
+      </div>
+    </div>
+
+    <div class="sec">
+      <span class="m-label">Margins</span>
+      <div class="m-seg set">
+        <span class="sg">Narrow</span>
+        <span class="sg on">Comfortable</span>
+        <span class="sg">Wide</span>
+      </div>
+    </div>
+
+    <div class="sec">
+      <span class="m-label">Layout</span>
+      <div class="m-seg set">
+        <span class="sg on"><svg class="ic sm"><use href="#i-toc"/></svg>Scroll</span>
+        <span class="sg"><svg class="ic sm"><use href="#i-book"/></svg>Pages</span>
+      </div>
+    </div>
+
+    <div class="foot">
+      <span class="m-btn ghost">Reset</span>
+      <span class="m-btn primary"><svg class="ic"><use href="#i-check2"/></svg>Done</span>
+    </div>
+  </div>
+
+  <div class="m-home"><i></i></div>
+</div>

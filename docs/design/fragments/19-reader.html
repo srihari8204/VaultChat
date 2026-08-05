@@ -1,0 +1,309 @@
+<style>
+/* ---- Reader top bar ---- */
+#s-reader .rd-bar {
+  height: 56px; flex: none; position: relative; z-index: 40;
+  display: flex; align-items: center; gap: 12px;
+  padding: 0 8px 0 16px;
+  background: rgba(14, 13, 22, 0.72);
+  border-bottom: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+}
+#s-reader .rd-src {
+  display: inline-flex; align-items: center; gap: 9px;
+  height: 32px; padding: 0 13px 0 6px;
+  border-radius: var(--r-pill);
+  background: rgba(235,232,255,.05); border: 1px solid var(--stroke);
+  font-size: 12px; color: var(--txt-2); white-space: nowrap;
+}
+#s-reader .rd-src b { color: var(--txt-1); font-weight: 600; }
+#s-reader .rd-src i { font-style: normal; color: var(--txt-3); }
+#s-reader .rd-seg {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  display: flex; gap: 3px; padding: 3px;
+  border-radius: 11px;
+  background: rgba(235,232,255,.05); border: 1px solid var(--stroke);
+  box-shadow: var(--inner-hi);
+}
+#s-reader .rd-seg .s-it {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 30px; padding: 0 15px; border-radius: 8px;
+  font-size: 12.5px; font-weight: 550; color: var(--txt-2);
+  white-space: nowrap;
+}
+#s-reader .rd-seg .s-it .ic { color: var(--txt-3); }
+#s-reader .rd-seg .s-it.active {
+  background: var(--acc-soft-2); color: #fff;
+  box-shadow: inset 0 0 0 1px var(--stroke-acc), 0 0 18px rgba(124,77,255,.25);
+}
+#s-reader .rd-seg .s-it.active .ic { color: var(--acc-3); }
+
+/* ---- Body ---- */
+#s-reader .rd-body { align-items: stretch; min-height: 0; position: relative; }
+
+/* ---- TOC panel ---- */
+#s-reader .rd-toc {
+  width: 240px; flex: none;
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 20px 14px 18px;
+  background: rgba(15, 14, 24, 0.55);
+  border-right: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+}
+#s-reader .rd-toc .section-label { padding: 0 10px 8px; }
+#s-reader .rd-toc .doc-title {
+  font-family: var(--font-serif); font-size: 15.5px; font-weight: 600;
+  letter-spacing: .1px; color: var(--txt-1);
+  padding: 0 10px 12px; line-height: 1.35;
+  border-bottom: 1px solid var(--stroke); margin-bottom: 10px;
+}
+#s-reader .rd-toc .tree-item { white-space: normal; line-height: 1.35; }
+#s-reader .toc-foot { margin-top: auto; padding: 12px 10px 0; border-top: 1px solid var(--stroke); }
+#s-reader .toc-foot .lbl { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--txt-3); margin-top: 7px; }
+
+/* ---- Stage ---- */
+#s-reader .rd-stage { flex: 1; min-width: 0; position: relative; overflow: hidden; }
+#s-reader .rd-stage::before {
+  content: ""; position: absolute; left: 50%; top: -220px; transform: translateX(-50%);
+  width: 1100px; height: 560px; border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(124,77,255,.13), transparent 70%);
+}
+
+/* ---- The paper page (sepia · dark ink) ---- */
+#s-reader .paper {
+  position: absolute; top: 24px; bottom: 88px; left: 50%; transform: translateX(-50%);
+  width: 720px;
+  padding: 46px 92px 60px;
+  border-radius: 14px;
+  overflow: hidden;
+  background: linear-gradient(180deg, #F8F3E9 0%, #F6F1E7 55%, #F3EDE0 100%);
+  box-shadow: 0 40px 90px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.05), inset 0 1px 0 rgba(255,255,255,.75);
+  font-family: var(--font-serif);
+  color: #3A3226;
+}
+#s-reader .kicker {
+  font-family: var(--font-ui);
+  font-size: 10.5px; font-weight: 750; letter-spacing: 2.4px; text-transform: uppercase;
+  color: #6D45E8;
+}
+#s-reader h1.title {
+  font-size: 34px; font-weight: 650; letter-spacing: -.4px; line-height: 1.15;
+  color: #2A2318; margin-top: 10px;
+}
+#s-reader .byline { display: flex; align-items: center; gap: 10px; margin-top: 15px; font-family: var(--font-ui); }
+#s-reader .byline .avatar { width: 30px; height: 30px; font-size: 11px; border-radius: 10px; }
+#s-reader .byline .nm { font-size: 12.5px; font-weight: 650; color: #3A3226; }
+#s-reader .byline .mt { font-size: 11.5px; color: #8A7D69; }
+#s-reader .rule { height: 1px; background: #E3D9C5; margin: 18px 0 20px; }
+
+#s-reader .paper p { font-size: 15.5px; line-height: 1.68; }
+#s-reader .paper p + p { margin-top: 13px; }
+#s-reader .lede::first-letter {
+  float: left; font-size: 52px; line-height: .82;
+  padding: 6px 9px 0 0; font-weight: 600; color: #2A2318;
+}
+#s-reader h2.h2 {
+  font-size: 20px; font-weight: 700; letter-spacing: -.2px; color: #2A2318;
+  margin: 24px 0 10px;
+}
+#s-reader .lnk {
+  color: #5B34D6; text-decoration: underline;
+  text-decoration-color: rgba(124,77,255,.55); text-underline-offset: 3px;
+}
+
+#s-reader ul.pts { margin: 13px 0 0; padding: 0; list-style: none; }
+#s-reader ul.pts li {
+  position: relative; padding-left: 22px;
+  font-size: 15px; line-height: 1.55;
+}
+#s-reader ul.pts li + li { margin-top: 8px; }
+#s-reader ul.pts li::before {
+  content: ""; position: absolute; left: 4px; top: 9px;
+  width: 6px; height: 6px; border-radius: 2px;
+  background: #7C4DFF; opacity: .75; transform: rotate(45deg);
+}
+#s-reader ul.pts b { color: #2A2318; }
+
+#s-reader table.ph {
+  width: 100%; border-collapse: collapse; margin: 18px 0 0;
+  font-family: var(--font-ui); font-size: 12.5px; color: #4A4133;
+}
+#s-reader table.ph th {
+  text-align: left; font-size: 10.5px; font-weight: 750; letter-spacing: 1.2px; text-transform: uppercase;
+  color: #8A7D69; background: #EFE8D7;
+  border: 1px solid #E3D9C5; padding: 8px 12px;
+}
+#s-reader table.ph td { border: 1px solid #E3D9C5; padding: 8.5px 12px; font-variant-numeric: tabular-nums; }
+#s-reader table.ph td b { font-weight: 650; color: #2A2318; }
+
+#s-reader .codeblk {
+  margin: 18px 0 0; padding: 13px 18px;
+  border-radius: 10px;
+  background: #262119;
+  box-shadow: inset 0 2px 8px rgba(0,0,0,.4), 0 1px 0 rgba(255,255,255,.5);
+  font-family: var(--font-mono); font-size: 12.5px; line-height: 1.75;
+  color: #D8CFBA; white-space: pre;
+}
+#s-reader .codeblk .k { color: #E9E0CB; }
+#s-reader .codeblk .eq { color: #8A7D69; }
+#s-reader .codeblk .s { color: #C7A9FF; }
+#s-reader .codeblk .n { color: #E8B84B; }
+
+#s-reader .pull {
+  margin: 20px 0 0; padding: 4px 0 4px 20px;
+  border-left: 3px solid #7C4DFF;
+  font-size: 18.5px; line-height: 1.5; font-style: italic;
+  color: #4A4133;
+}
+
+#s-reader .hlwrap { position: relative; margin-top: 16px; }
+#s-reader .hl {
+  background: linear-gradient(180deg, rgba(247,197,61,.18), rgba(247,197,61,.42));
+  border-radius: 3px; padding: 1px 3px 2px;
+  box-decoration-break: clone; -webkit-box-decoration-break: clone;
+}
+#s-reader .hl-mark {
+  position: absolute; right: -66px; top: 4px;
+  width: 30px; height: 30px; border-radius: 10px;
+  background: rgba(247,197,61,.22); border: 1px solid rgba(180,130,20,.35);
+  display: flex; align-items: center; justify-content: center;
+  color: #A8790F;
+}
+#s-reader .hl-mark .ic { width: 15px; height: 15px; }
+
+/* ---- Right progress rail + page chip ---- */
+#s-reader .prog-rail {
+  position: absolute; right: 30px; top: 110px; bottom: 130px; width: 5px;
+  border-radius: 5px; background: rgba(235,232,255,.07);
+}
+#s-reader .prog-rail .fill {
+  position: absolute; left: 0; right: 0; top: 0; height: 42%;
+  border-radius: 5px; background: var(--grad-acc);
+  box-shadow: 0 0 14px rgba(124,77,255,.7);
+}
+#s-reader .prog-rail .knob {
+  position: absolute; left: 50%; top: 42%; transform: translate(-50%,-50%);
+  width: 13px; height: 13px; border-radius: 50%;
+  background: #fff; box-shadow: 0 0 0 4px rgba(124,77,255,.35), 0 2px 6px rgba(0,0,0,.5);
+}
+#s-reader .prog-pct {
+  position: absolute; right: 18px; top: calc(110px + (100% - 240px) * .42 + 18px);
+  width: 30px; text-align: center;
+  font-size: 10.5px; font-weight: 700; color: var(--acc-2);
+  font-variant-numeric: tabular-nums;
+}
+#s-reader .page-chip { position: absolute; right: 56px; top: calc(110px + (100% - 240px) * .42 - 12px); }
+
+#s-reader .paper::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 96px;
+  background: linear-gradient(180deg, rgba(243,237,224,0) 0%, #F3EDE0 68%);
+  pointer-events: none;
+}
+
+/* ---- Bottom toolbar ---- */
+#s-reader .rd-toolbar {
+  position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%);
+  padding: 6px;
+}
+#s-reader .tb-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 34px; padding: 0 13px; border-radius: 9px;
+  font-size: 12px; font-weight: 550; color: var(--txt-2);
+  white-space: nowrap;
+}
+#s-reader .tb-btn .ic { width: 15px; height: 15px; color: var(--txt-3); }
+#s-reader .tb-btn.hl-act { background: rgba(235,232,255,.06); color: var(--txt-1); }
+#s-reader .tb-btn.hl-act .ic { color: var(--warn); }
+#s-reader .rd-toolbar .btn-primary { margin-left: 4px; }
+</style>
+<div class="screen" id="s-reader">
+  <header class="rd-bar">
+    <span class="icon-btn framed"><svg class="ic"><use href="#i-chev-l"/></svg></span>
+    <span class="rd-src">
+      <span class="avatar sm av-3" style="width:22px;height:22px;font-size:9px;border-radius:8px">DG</span>
+      From <b>Design Guild</b> <i>·</i> Marcus Webb <i>·</i> today 09:12
+    </span>
+    <div class="rd-seg">
+      <span class="s-it"><svg class="ic sm"><use href="#i-chat"/></svg>Chat view</span>
+      <span class="s-it active"><svg class="ic sm"><use href="#i-book"/></svg>Reader view</span>
+    </div>
+    <div class="grow"></div>
+    <span class="icon-btn"><svg class="ic"><use href="#i-search"/></svg></span>
+    <span class="icon-btn"><svg class="ic"><use href="#i-bookmark"/></svg></span>
+    <span class="icon-btn"><svg class="ic"><use href="#i-type"/></svg></span>
+    <span class="icon-btn"><svg class="ic"><use href="#i-share"/></svg></span>
+    <span class="icon-btn"><svg class="ic"><use href="#i-more-v"/></svg></span>
+    <div class="vc-win"><span>─</span><span>▢</span><span class="close">✕</span></div>
+  </header>
+
+  <div class="row grow rd-body">
+    <aside class="rd-toc">
+      <div class="section-label">Contents</div>
+      <div class="doc-title">The Atlas Rollout Plan</div>
+      <div class="tree-item active"><svg class="ic sm"><use href="#i-toc"/></svg>Why we're changing the rollout</div>
+      <div class="tree-item"><svg class="ic sm"><use href="#i-clock"/></svg>Phase timeline</div>
+      <div class="tree-item"><svg class="ic sm"><use href="#i-shield"/></svg>Risks we accept</div>
+      <div class="tree-item"><svg class="ic sm"><use href="#i-check2"/></svg>What we need from every team</div>
+      <div class="tree-item"><svg class="ic sm"><use href="#i-comment"/></svg>FAQ</div>
+      <div class="toc-foot">
+        <div class="progress"><div class="fill" style="width:42%"></div></div>
+        <div class="lbl"><span>42% read</span><span>4 min left</span></div>
+      </div>
+    </aside>
+
+    <main class="rd-stage">
+      <article class="paper">
+        <div class="kicker">Design Guild · Long message</div>
+        <h1 class="title">The Atlas Rollout Plan</h1>
+        <div class="byline">
+          <span class="avatar av-3">MW</span>
+          <span class="nm">Marcus Webb</span>
+          <span class="mt">· 6 min read · 3 pages · 1,412 words</span>
+        </div>
+        <div class="rule"></div>
+
+        <p class="lede">We're changing how Atlas ships. The June plan assumed a single launch day — press, pricing and product landing together on September 2. After three weeks of dogfooding and one humbling incident review, I no longer believe a big-bang launch is the responsible move. This message replaces the June plan; it freezes after Thursday's review.</p>
+
+        <h2 class="h2">Why we're changing the rollout</h2>
+        <p>Two things changed. The checkout migration is running a week behind, and pretending otherwise only moves the slip somewhere more expensive. And <span class="lnk">the August 1 incident review</span> showed our rollback path under load was theory, not practice. A staged rollout gives the fix three chances to fail safely before anyone important is watching.</p>
+
+        <ul class="pts">
+          <li><b>Phases replace the launch day</b> — each with an owner, an entry gate, and a rehearsed rollback.</li>
+          <li><b>Pricing ships dark in Phase 1.</b> We meter real usage for two weeks before a customer sees a number.</li>
+          <li><b>No phase starts on a Friday.</b> This is now written down.</li>
+        </ul>
+
+        <table class="ph">
+          <tr><th>Phase</th><th>Date</th><th>Owner</th></tr>
+          <tr><td><b>1 — Internal dogfood</b></td><td>Mon, Aug 11</td><td>Ravi Patel</td></tr>
+          <tr><td><b>2 — Design partners</b> (12 accounts)</td><td>Mon, Aug 25</td><td>Maya Chen</td></tr>
+          <tr><td><b>3 — General availability</b></td><td>Tue, Sep 15</td><td>Elena Voss</td></tr>
+        </table>
+
+        <div class="codeblk"><span class="k">atlas.rollout.cohort</span>  <span class="eq">=</span> <span class="s">"design-partners"</span>
+<span class="k">atlas.rollout.percent</span> <span class="eq">=</span> <span class="n">10</span>
+<span class="k">atlas.rollback.target</span> <span class="eq">=</span> <span class="s">"checkout-legacy"</span></div>
+
+        <div class="pull">"We'd rather slip a week we chose than lose a quarter we didn't."</div>
+
+        <div class="hlwrap">
+          <p>One number decides everything: <span class="hl">if weekly active usage in the partner cohort drops below 60%, we pause the GA date — no meeting, no debate.</span> The decision is pre-made, which is the entire point of writing it down now, while nobody is tired and nothing is on fire.</p>
+          <span class="hl-mark"><svg class="ic"><use href="#i-marker"/></svg></span>
+        </div>
+      </article>
+
+      <div class="prog-rail"><div class="fill"></div><div class="knob"></div></div>
+      <div class="prog-pct">42%</div>
+      <span class="chip page-chip"><svg class="ic sm"><use href="#i-file"/></svg>Page 1 of 3</span>
+
+      <div class="toolbar rd-toolbar">
+        <span class="tb-btn hl-act"><svg class="ic"><use href="#i-marker"/></svg>Highlight</span>
+        <span class="tb-btn"><svg class="ic"><use href="#i-copy"/></svg>Copy</span>
+        <span class="tb-btn"><svg class="ic"><use href="#i-share"/></svg>Share</span>
+        <span class="tb-btn"><svg class="ic"><use href="#i-download"/></svg>Download</span>
+        <span class="tb-btn"><svg class="ic"><use href="#i-print"/></svg>Print</span>
+        <span class="sep"></span>
+        <span class="btn sm btn-primary">Export PDF</span>
+      </div>
+    </main>
+  </div>
+</div>

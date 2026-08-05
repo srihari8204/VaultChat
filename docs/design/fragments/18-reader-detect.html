@@ -1,0 +1,281 @@
+<style>
+#s-reader-detect .body { align-items: stretch; min-height: 0; }
+
+/* ---- Sidebar (compact 300px) ---- */
+#s-reader-detect .sidebar {
+  width: 300px; flex: none;
+  display: flex; flex-direction: column;
+  background: rgba(15, 14, 24, 0.55);
+  border-right: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+  position: relative;
+}
+#s-reader-detect .sidebar-head { padding: 16px 16px 10px; display: flex; align-items: center; gap: 10px; }
+#s-reader-detect .sidebar-head h1 { font-size: 18px; font-weight: 700; letter-spacing: -.2px; }
+#s-reader-detect .sidebar-search { padding: 0 12px 10px; }
+#s-reader-detect .chip-row { display: flex; gap: 6px; padding: 0 12px 12px; }
+#s-reader-detect .chip-row .chip { padding: 0 10px; height: 24px; font-size: 11px; }
+#s-reader-detect .convo-list { display: flex; flex-direction: column; gap: 2px; padding: 0 8px; overflow: hidden; }
+#s-reader-detect .convo { padding: 9px 10px; gap: 10px; }
+#s-reader-detect .convo .avatar { width: 38px; height: 38px; font-size: 12.5px; }
+#s-reader-detect .convo .name { font-size: 13px; }
+#s-reader-detect .convo .preview { font-size: 11.5px; }
+
+/* ---- Chat pane ---- */
+#s-reader-detect .chat { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
+#s-reader-detect .chat-head {
+  height: 76px; flex: none;
+  display: flex; align-items: center; gap: 14px;
+  padding: 0 22px;
+  border-bottom: 1px solid var(--stroke);
+  background: rgba(14, 13, 22, 0.4);
+  backdrop-filter: var(--blur);
+}
+#s-reader-detect .chat-head .who .nm { font-size: 15px; font-weight: 650; }
+#s-reader-detect .chat-head .who .st { font-size: 11.5px; color: var(--txt-3); display: flex; align-items: center; gap: 6px; }
+
+#s-reader-detect .msgs {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column; gap: 18px;
+  justify-content: flex-end;
+  padding: 26px 96px 18px 32px;
+  position: relative;
+}
+#s-reader-detect .m-in  { display: flex; align-items: flex-end; gap: 10px; max-width: 66%; align-self: flex-start; }
+#s-reader-detect .m-in .bubble { max-width: none; }
+#s-reader-detect .m-out { align-self: flex-end; max-width: 58%; display: flex; }
+#s-reader-detect .b-name { font-size: 11.5px; font-weight: 650; margin-bottom: 3px; letter-spacing: .1px; }
+#s-reader-detect .day-wrap { display: flex; justify-content: center; }
+
+/* ---- The long message (spotlit above the dim) ---- */
+#s-reader-detect .spot { position: relative; z-index: 46; }
+#s-reader-detect .bubble.long { width: 640px; max-width: none; padding-bottom: 12px; }
+#s-reader-detect .longtext {
+  max-height: 143px; overflow: hidden;
+  -webkit-mask-image: linear-gradient(180deg, #000 48%, transparent 97%);
+  mask-image: linear-gradient(180deg, #000 48%, transparent 97%);
+}
+#s-reader-detect .longtext p + p { margin-top: 9px; }
+#s-reader-detect .long-foot { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+#s-reader-detect .long-foot .chip { height: 25px; font-size: 11px; }
+#s-reader-detect .long-foot .when { margin-left: auto; font-size: 10px; color: var(--txt-3); display: flex; align-items: center; gap: 5px; }
+#s-reader-detect .spot .tip { position: absolute; top: -34px; left: 2px; color: var(--txt-2); }
+#s-reader-detect .spot .tip .ic { color: var(--acc-2); }
+
+/* ---- Dim + dialog ---- */
+#s-reader-detect .dim {
+  position: absolute; left: 0; right: 0; top: 48px; bottom: 0;
+  background: rgba(6, 5, 10, 0.52);
+  backdrop-filter: blur(2px);
+  z-index: 44;
+}
+#s-reader-detect .dialog {
+  position: absolute; z-index: 50;
+  left: 1144px; bottom: 132px; transform: translateX(-50%);
+  width: 460px; padding: 22px 22px 18px;
+}
+#s-reader-detect .dialog .d-head { display: flex; gap: 14px; align-items: flex-start; }
+#s-reader-detect .dialog .d-ic {
+  width: 44px; height: 44px; flex: none; border-radius: 14px;
+  background: var(--acc-soft-2);
+  box-shadow: inset 0 0 0 1px var(--stroke-acc), 0 6px 22px rgba(124,77,255,.28);
+  display: flex; align-items: center; justify-content: center; color: var(--acc-3);
+}
+#s-reader-detect .dialog h2 { font-size: 16.5px; font-weight: 700; letter-spacing: -.2px; }
+#s-reader-detect .dialog .d-body { font-size: 12.5px; line-height: 1.55; color: var(--txt-2); margin-top: 5px; }
+#s-reader-detect .dialog .d-meta {
+  display: flex; align-items: center; gap: 7px;
+  margin: 14px 0 0; padding: 9px 12px;
+  border-radius: 10px;
+  background: rgba(235,232,255,.04); border: 1px solid var(--stroke);
+  font-size: 11.5px; color: var(--txt-2); font-weight: 500;
+}
+#s-reader-detect .dialog .d-meta .ic { color: var(--acc-2); }
+#s-reader-detect .dialog .d-meta i { font-style: normal; color: var(--txt-3); }
+#s-reader-detect .dialog .d-btns { display: flex; gap: 10px; margin-top: 16px; }
+#s-reader-detect .dialog .d-btns .btn-primary { flex: 1; justify-content: center; }
+#s-reader-detect .dialog .d-check {
+  display: flex; align-items: center; gap: 9px;
+  margin-top: 15px; padding-top: 13px;
+  border-top: 1px solid var(--stroke);
+  font-size: 11.5px; color: var(--txt-3);
+}
+#s-reader-detect .cb {
+  width: 15px; height: 15px; flex: none; border-radius: 5px;
+  background: rgba(235,232,255,.05); border: 1px solid var(--stroke-2);
+  box-shadow: var(--inner-hi);
+}
+
+#s-reader-detect .composer-wrap { padding: 12px 24px 20px; flex: none; }
+#s-reader-detect .composer { width: 100%; }
+</style>
+<div class="screen" id="s-reader-detect">
+  <header class="vc-titlebar">
+    <div class="vc-brand"><span class="vc-logo"><svg class="ic"><use href="#i-shield"/></svg></span>VaultChat</div>
+    <div class="vc-search"><svg class="ic sm"><use href="#i-search"/></svg><span class="grow">Search chats, people, and every file…</span><span class="kbd">Ctrl K</span></div>
+    <div class="row gap-4">
+      <span class="icon-btn sm"><svg class="ic sm"><use href="#i-cloud-check"/></svg></span>
+      <span class="icon-btn sm"><svg class="ic sm"><use href="#i-bell"/></svg></span>
+      <span class="avatar sm av-6" style="width:26px;height:26px;font-size:10px;border-radius:9px">SB</span>
+    </div>
+    <div class="vc-win"><span>─</span><span>▢</span><span class="close">✕</span></div>
+  </header>
+
+  <div class="row grow body">
+    <nav class="vc-rail">
+      <div class="rail-btn active"><svg class="ic lg"><use href="#i-chat"/></svg></div><div class="rail-label">Chats</div>
+      <div class="rail-btn"><svg class="ic lg"><use href="#i-book"/></svg></div><div class="rail-label">Shelf</div>
+      <div class="rail-btn"><svg class="ic lg"><use href="#i-search"/></svg></div><div class="rail-label">Search</div>
+      <div class="rail-btn"><svg class="ic lg"><use href="#i-cloud-off"/></svg></div><div class="rail-label">Offline</div>
+      <div class="rail-btn"><svg class="ic lg"><use href="#i-shield"/></svg></div><div class="rail-label">Vault</div>
+      <div class="rail-spacer"></div>
+      <div class="rail-btn"><svg class="ic lg"><use href="#i-settings"/></svg></div>
+    </nav>
+
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <h1 class="grow">Chats</h1>
+        <span class="icon-btn framed"><svg class="ic"><use href="#i-pen"/></svg></span>
+      </div>
+      <div class="sidebar-search"><div class="field"><svg class="ic sm"><use href="#i-search"/></svg><span class="grow">Search conversations</span></div></div>
+      <div class="chip-row">
+        <span class="chip active">All</span><span class="chip">Unread</span><span class="chip">Groups</span><span class="chip">Pinned</span>
+      </div>
+      <div class="convo-list grow">
+        <div class="convo">
+          <span class="avatar av-1">MC<span class="presence" style="background:var(--ok)"></span></span>
+          <div class="col grow" style="gap:2px"><span class="name">Maya Chen</span><span class="preview">pricing walkthrough at 10?</span></div>
+          <div class="col" style="align-items:flex-end;gap:5px"><span class="when">09:16</span><svg class="ic sm" style="color:var(--acc-2)"><use href="#i-pin"/></svg></div>
+        </div>
+        <div class="convo">
+          <span class="avatar av-5">AL</span>
+          <div class="col grow" style="gap:2px"><span class="name">Atlas Launch</span><span class="preview">Ravi: uploaded Atlas-Financials-FY26.xlsx</span></div>
+          <div class="col" style="align-items:flex-end;gap:5px"><span class="when">09:02</span><span class="badge">3</span></div>
+        </div>
+        <div class="convo active">
+          <span class="avatar av-3">DG</span>
+          <div class="col grow" style="gap:2px"><span class="name">Design Guild</span><span class="preview">Marcus: The Atlas Rollout Plan — long one</span></div>
+          <div class="col" style="align-items:flex-end;gap:5px"><span class="when">09:12</span></div>
+        </div>
+        <div class="convo">
+          <span class="avatar av-2">EV</span>
+          <div class="col grow" style="gap:2px"><span class="name">Elena Voss</span><span class="preview">You: signed page 14, back to you ✓</span></div>
+          <div class="col" style="align-items:flex-end;gap:5px"><span class="when">08:31</span><svg class="ic sm" style="color:var(--txt-3)"><use href="#i-pin"/></svg></div>
+        </div>
+        <div class="convo">
+          <span class="avatar av-4">R3</span>
+          <div class="col grow" style="gap:2px"><span class="name">Release 1.3</span><span class="preview">deploy.log — 2 warnings, 0 errors</span></div>
+          <div class="col" style="align-items:flex-end;gap:5px"><span class="when">Yesterday</span><span class="badge">12</span></div>
+        </div>
+        <div class="convo">
+          <span class="avatar av-4">RP<span class="presence" style="background:var(--ok)"></span></span>
+          <div class="col grow" style="gap:2px"><span class="name">Ravi Patel</span><span class="preview">pivot table looks right now, check D14</span></div>
+          <div class="col" style="align-items:flex-end;gap:5px"><span class="when">Yesterday</span></div>
+        </div>
+        <div class="convo">
+          <span class="avatar av-3">MW</span>
+          <div class="col grow" style="gap:2px"><span class="name">Marcus Webb</span><span class="preview">voice note · 0:42</span></div>
+          <div class="col" style="align-items:flex-end;gap:5px"><span class="when">Mon</span></div>
+        </div>
+        <div class="convo">
+          <span class="avatar av-2">LN</span>
+          <div class="col grow" style="gap:2px"><span class="name">Legal — NDA Review</span><span class="preview">Elena: expiring link set — 24h</span></div>
+          <div class="col" style="align-items:flex-end;gap:5px"><span class="when">Mon</span></div>
+        </div>
+      </div>
+      <div class="scroll-rail"><div class="thumb" style="top:22%"></div></div>
+    </aside>
+
+    <main class="chat">
+      <div class="chat-head">
+        <span class="avatar av-3">DG</span>
+        <div class="who col grow" style="gap:2px">
+          <span class="nm">Design Guild</span>
+          <span class="st"><span class="dot on"></span>12 members · 4 online</span>
+        </div>
+        <span class="chip ok"><svg class="ic sm"><use href="#i-lock"/></svg>End-to-end encrypted</span>
+        <span class="icon-btn"><svg class="ic"><use href="#i-search"/></svg></span>
+        <span class="icon-btn"><svg class="ic"><use href="#i-phone"/></svg></span>
+        <span class="icon-btn"><svg class="ic"><use href="#i-video"/></svg></span>
+        <span class="icon-btn"><svg class="ic"><use href="#i-more-v"/></svg></span>
+      </div>
+
+      <div class="msgs">
+        <div class="day-wrap"><span class="msg-day">Today</span></div>
+
+        <div class="m-in">
+          <span class="avatar sm av-2">EV</span>
+          <div class="bubble in"><div class="b-name" style="color:#F98BB4">Elena Voss</div>Reminder — rollout review moved to Thursday 14:00. Agenda is in the invite.
+            <div class="b-meta">08:47</div>
+          </div>
+        </div>
+
+        <div class="m-out"><div class="bubble out">I'll bring the updated flag config and the partner-cohort numbers.
+          <div class="b-meta">08:52 <svg class="ic sm"><use href="#i-check2"/></svg></div>
+        </div></div>
+
+        <div class="m-in">
+          <span class="avatar sm av-3">MW</span>
+          <div class="bubble in"><div class="b-name" style="color:#45D6A8">Marcus Webb</div>Almost done writing the new plan up. Fair warning — it's long.
+            <div class="b-meta">08:58</div>
+          </div>
+        </div>
+
+        <div class="m-in">
+          <span class="avatar sm av-1">MC</span>
+          <div class="bubble in"><div class="b-name" style="color:var(--acc-3)">Maya Chen</div>Post the whole thing here, please. Easier to argue in thread than in a doc.
+            <div class="b-meta">09:04</div>
+          </div>
+        </div>
+
+        <div class="m-in spot">
+          <span class="avatar sm av-3">MW</span>
+          <div class="bubble in long">
+            <div class="b-name" style="color:#45D6A8">Marcus Webb</div>
+            <div class="longtext">
+              <p>Team — apologies in advance, this is a long one. We're changing how Atlas ships. The plan we signed off in June assumed a single launch day: press, pricing and product landing together on September 2. After three weeks of dogfooding and one genuinely humbling incident review, I no longer believe a big-bang launch is the responsible move. This message replaces the June plan; read it before Thursday's review, because everything below freezes after that.</p>
+              <p>Two things changed. First, the checkout migration is running a week behind, and pretending otherwise only moves the slip somewhere more expensive. Second, the August 1 incident review showed that our rollback path under load was theory, not practice — the flag service is fixed now, but the fix has never seen real traffic. A staged rollout gives it three chances to fail safely…</p>
+            </div>
+            <div class="long-foot">
+              <span class="chip active"><svg class="ic sm"><use href="#i-book"/></svg>Long read · ~1,400 words</span>
+              <span class="when">09:12</span>
+            </div>
+            <span class="tip"><svg class="ic sm"><use href="#i-book"/></svg>Auto-detected: too long for a bubble</span>
+          </div>
+        </div>
+
+        <div class="scroll-rail"><div class="thumb" style="bottom:4%; top:auto; height:34%"></div></div>
+      </div>
+
+      <div class="composer-wrap">
+        <div class="composer">
+          <span class="icon-btn"><svg class="ic lg"><use href="#i-clip"/></svg></span>
+          <span class="grow placeholder">Message Design Guild…</span>
+          <span class="icon-btn"><svg class="ic lg"><use href="#i-smile"/></svg></span>
+          <span class="icon-btn"><svg class="ic lg"><use href="#i-mic"/></svg></span>
+          <span class="send-btn"><svg class="ic lg"><use href="#i-send"/></svg></span>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="dim"></div>
+
+  <div class="dialog glass-float">
+    <div class="d-head">
+      <span class="d-ic"><svg class="ic lg"><use href="#i-book"/></svg></span>
+      <div class="grow">
+        <h2>This message is easier as a page</h2>
+        <div class="d-body">VaultChat converts long messages into a clean reading view when they're too large for comfortable chat. You can switch back any time.</div>
+      </div>
+    </div>
+    <div class="d-meta">
+      <svg class="ic sm"><use href="#i-doc-lines"/></svg>~1,400 words <i>·</i> 6 min read <i>·</i> 3 pages
+    </div>
+    <div class="d-btns">
+      <span class="btn btn-primary"><svg class="ic sm"><use href="#i-book"/></svg>Open in Reader</span>
+      <span class="btn btn-ghost">View as chat</span>
+    </div>
+    <div class="d-check"><span class="cb"></span>Always open long messages in Reader</div>
+  </div>
+</div>

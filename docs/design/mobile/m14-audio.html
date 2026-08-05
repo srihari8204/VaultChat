@@ -1,0 +1,245 @@
+<style>
+#m-audio .who { min-width: 0; }
+#m-audio .who .vs { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#m-audio .m-viewerbar { gap: 8px; }
+#m-audio .who .vt { font-size: 12.5px; }
+#m-audio .fchips { display: flex; gap: 4px; flex: none; }
+#m-audio .fchips .m-chip { height: 20px; padding: 0 6px; font-size: 8px; letter-spacing: .3px; font-weight: 700; }
+
+/* ---- player card ---- */
+#m-audio .player { margin: 12px 14px 0; flex: none; padding: 12px 14px 12px; }
+#m-audio .p-top { display: flex; align-items: center; gap: 8px; }
+#m-audio .p-top .rec { font-size: 11px; color: var(--txt-3); display: flex; align-items: center; gap: 6px; min-width: 0; }
+#m-audio .p-top .rec .ic { color: var(--acc-2); flex: none; }
+#m-audio .p-top .m-chip { height: 24px; padding: 0 9px; font-size: 10.5px; }
+
+#m-audio .wave { position: relative; height: 176px; margin-top: 6px; }
+#m-audio .bars {
+  position: absolute; left: 0; right: 0; top: 34px; bottom: 22px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+#m-audio .bars i { width: 4px; border-radius: 3px; flex: none; background: rgba(237,232,255,.16); }
+#m-audio .bars i.p {
+  background: linear-gradient(180deg, #B388FF 0%, #7C4DFF 62%, #6C3DF4 100%);
+  box-shadow: 0 0 8px rgba(124,77,255,.4);
+}
+
+#m-audio .phead {
+  position: absolute; left: 34.8%; top: 26px; bottom: 18px; width: 2px; z-index: 4;
+  background: #fff; border-radius: 2px;
+  box-shadow: 0 0 12px rgba(124,77,255,.9), 0 0 3px rgba(0,0,0,.6);
+}
+#m-audio .ptime {
+  position: absolute; left: 34.8%; top: 0; transform: translateX(-50%); z-index: 6;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 700; color: #fff;
+  padding: 4px 9px; border-radius: 8px;
+  background: var(--grad-acc);
+  box-shadow: 0 4px 14px rgba(124,77,255,.55), var(--inner-hi);
+}
+#m-audio .ptime::after {
+  content: ""; position: absolute; left: 50%; top: 100%; transform: translateX(-50%);
+  border: 5px solid transparent; border-top-color: #7043F8;
+}
+
+#m-audio .pin { position: absolute; top: 24px; bottom: 20px; width: 0; z-index: 3; border-left: 1.5px dashed rgba(179,136,255,.45); }
+#m-audio .pin-tag {
+  position: absolute; top: -22px; left: 0; transform: translateX(-50%);
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 21px; padding: 0 8px; border-radius: 999px;
+  background: var(--bg-4); border: 1px solid var(--stroke-acc);
+  box-shadow: var(--sh-1);
+  font-size: 9.5px; font-weight: 650; color: var(--txt-1); white-space: nowrap;
+}
+#m-audio .pin-tag .ic { width: 10px; height: 10px; color: var(--acc-3); flex: none; }
+#m-audio .pin::after {
+  content: ""; position: absolute; left: -3.25px; bottom: -2px;
+  width: 5px; height: 5px; border-radius: 50%; background: var(--acc-2);
+  box-shadow: 0 0 8px rgba(124,77,255,.8);
+}
+
+#m-audio .ruler { position: absolute; left: 0; right: 0; bottom: 0; height: 14px; }
+#m-audio .ruler span { position: absolute; transform: translateX(-50%); font-family: var(--font-mono); font-size: 9px; color: var(--txt-3); }
+#m-audio .ruler span:first-child { transform: none; }
+#m-audio .ruler span:last-child { transform: translateX(-100%); }
+
+/* ---- transport ---- */
+#m-audio .ctr { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+#m-audio .skip {
+  width: 40px; height: 40px; border-radius: 13px; flex: none; position: relative;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(235,232,255,.06); border: 1px solid var(--stroke); color: var(--txt-2);
+}
+#m-audio .skip .ic { width: 19px; height: 19px; }
+#m-audio .skip.fwd .ic { transform: scaleX(-1); }
+#m-audio .skip .n {
+  position: absolute; right: -3px; bottom: -4px;
+  font-size: 8px; font-weight: 750; color: var(--txt-1);
+  padding: 1px 4px; border-radius: 5px;
+  background: var(--bg-4); border: 1px solid var(--stroke-2);
+}
+#m-audio .play {
+  width: 52px; height: 52px; border-radius: 50%; flex: none;
+  background: var(--grad-acc);
+  display: flex; align-items: center; justify-content: center; color: #fff;
+  box-shadow: 0 6px 22px rgba(124,77,255,.55), var(--inner-hi);
+}
+#m-audio .play .ic { width: 22px; height: 22px; }
+#m-audio .time { font-family: var(--font-mono); font-size: 11.5px; color: var(--txt-3); white-space: nowrap; }
+#m-audio .time b { color: var(--txt-1); font-weight: 700; }
+#m-audio .cpill {
+  display: inline-flex; align-items: center; gap: 5px; flex: none;
+  height: 32px; padding: 0 9px; border-radius: 11px;
+  background: rgba(235,232,255,.05); border: 1px solid var(--stroke);
+  color: var(--txt-2); font-size: 12px; font-weight: 620;
+}
+#m-audio .cpill.on { background: var(--acc-soft); border-color: var(--stroke-acc); color: var(--acc-3); }
+#m-audio .cpill .ic { width: 15px; height: 15px; }
+
+/* ---- transcript ---- */
+#m-audio .trans { margin: 12px 14px 0; flex: none; overflow: hidden; }
+#m-audio .t-head { display: flex; align-items: center; gap: 10px; padding: 10px 13px; border-bottom: 1px solid var(--stroke); }
+#m-audio .t-ic {
+  width: 28px; height: 28px; border-radius: 9px; flex: none;
+  background: var(--acc-soft); color: var(--acc-3);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: inset 0 0 0 1px var(--stroke-acc);
+}
+#m-audio .t-ic .ic { width: 15px; height: 15px; }
+#m-audio .tl { display: flex; gap: 10px; padding: 12px 12px; align-items: flex-start; }
+#m-audio .tl .avatar { width: 24px; height: 24px; font-size: 9px; border-radius: 8px; margin-top: 2px; }
+#m-audio .tl .nm { font-size: 11.5px; font-weight: 680; }
+#m-audio .tl .ts { font-family: var(--font-mono); font-size: 10px; color: var(--txt-3); }
+#m-audio .tl .tx { font-size: 12.5px; color: var(--txt-2); line-height: 1.42; margin-top: 1px; }
+#m-audio .tl.cur { background: var(--acc-soft); box-shadow: inset 2px 0 0 var(--acc); }
+#m-audio .tl.cur .ts { color: var(--acc-3); }
+#m-audio .tl.cur .tx { color: var(--txt-1); }
+#m-audio .tl.cur .tx b { color: #fff; font-weight: 750; }
+#m-audio .eq { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; margin-left: auto; flex: none; }
+#m-audio .eq i { width: 3px; border-radius: 2px; background: var(--acc-2); }
+
+#m-audio .t-foot { display: flex; align-items: center; gap: 9px; padding: 9px 12px; border-top: 1px solid var(--stroke); }
+#m-audio .t-foot .m-search { flex: 1; min-width: 0; height: 34px; font-size: 12.5px; border-radius: 11px; }
+#m-audio .t-foot .m-btn { height: 34px; padding: 0 12px; font-size: 12.5px; border-radius: 11px; flex: none; gap: 6px; }
+#m-audio .lastline { display: flex; align-items: center; gap: 7px; padding: 0 18px; margin-top: 10px; margin-bottom: 6px; font-size: 10.5px; color: var(--txt-3); }
+</style>
+<div class="mscreen" id="m-audio">
+  <div class="m-status">
+    <span>9:41</span>
+    <div class="sb-right">
+      <span class="m-sig"><i></i><i></i><i></i><i></i></span>
+      <span class="m-wifi"></span>
+      <span class="m-batt"><i></i></span>
+    </div>
+  </div>
+
+  <header class="m-viewerbar">
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-chev-l"/></svg></span>
+    <span class="m-tile sm ft-aud">MP3</span>
+    <div class="col grow who" style="gap:2px">
+      <span class="vt">Standup-2026-08-04.mp3</span>
+      <span class="vs">Ravi Patel · 9.2 MB · 12:04</span>
+    </div>
+    <div class="fchips">
+      <span class="m-chip on">MP3</span>
+      <span class="m-chip">WAV</span>
+    </div>
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-more-v"/></svg></span>
+  </header>
+
+  <div class="m-secure"><svg class="ic sm"><use href="#i-lock"/></svg>Opens inside VaultChat — no external app</div>
+
+  <div class="m-card player">
+    <div class="p-top">
+      <span class="rec"><svg class="ic sm"><use href="#i-wave"/></svg>Mon 04 Aug · Atlas Launch standup</span>
+      <div class="grow"></div>
+      <span class="m-chip"><svg class="ic sm"><use href="#i-bookmark"/></svg>3</span>
+      <span class="m-chip" style="color:var(--ok);border-color:rgba(52,211,153,.3);background:rgba(52,211,153,.09)"><svg class="ic sm"><use href="#i-transcript"/></svg>Synced</span>
+    </div>
+
+    <div class="wave">
+      <div class="pin" style="left:12%"><span class="pin-tag"><svg class="ic"><use href="#i-bookmark"/></svg>Ship Friday</span></div>
+      <div class="pin" style="left:57%"><span class="pin-tag"><svg class="ic"><use href="#i-bookmark"/></svg>QA env</span></div>
+      <div class="pin" style="left:84%"><span class="pin-tag"><svg class="ic"><use href="#i-bookmark"/></svg>Maya designs</span></div>
+
+      <div class="bars">
+<i class="p" style="height:38%"></i><i class="p" style="height:52%"></i><i class="p" style="height:71%"></i><i class="p" style="height:64%"></i><i class="p" style="height:83%"></i><i class="p" style="height:57%"></i><i class="p" style="height:44%"></i><i class="p" style="height:69%"></i><i class="p" style="height:88%"></i><i class="p" style="height:74%"></i>
+<i class="p" style="height:31%"></i><i class="p" style="height:12%"></i><i class="p" style="height:22%"></i><i class="p" style="height:48%"></i><i class="p" style="height:66%"></i><i class="p" style="height:79%"></i>
+<i style="height:61%"></i><i style="height:45%"></i><i style="height:33%"></i><i style="height:54%"></i><i style="height:72%"></i><i style="height:90%"></i><i style="height:68%"></i><i style="height:41%"></i><i style="height:15%"></i><i style="height:11%"></i>
+<i style="height:26%"></i><i style="height:58%"></i><i style="height:77%"></i><i style="height:63%"></i><i style="height:49%"></i><i style="height:70%"></i><i style="height:86%"></i><i style="height:59%"></i><i style="height:37%"></i><i style="height:20%"></i>
+<i style="height:44%"></i><i style="height:67%"></i><i style="height:81%"></i><i style="height:73%"></i><i style="height:52%"></i><i style="height:35%"></i><i style="height:60%"></i><i style="height:76%"></i><i style="height:47%"></i><i style="height:28%"></i>
+      </div>
+
+      <div class="phead"></div>
+      <span class="ptime">04:12</span>
+
+      <div class="ruler">
+        <span style="left:0">00:00</span>
+        <span style="left:24.9%">03:00</span>
+        <span style="left:49.7%">06:00</span>
+        <span style="left:74.6%">09:00</span>
+        <span style="left:100%">12:04</span>
+      </div>
+    </div>
+
+    <div class="ctr">
+      <span class="skip"><svg class="ic"><use href="#i-rotate"/></svg><span class="n">15</span></span>
+      <span class="play"><svg class="ic"><use href="#i-pause"/></svg></span>
+      <span class="skip fwd"><svg class="ic"><use href="#i-rotate"/></svg><span class="n">30</span></span>
+      <span class="time"><b>04:12</b> / 12:04</span>
+      <div class="grow"></div>
+      <span class="cpill on"><svg class="ic"><use href="#i-speed"/></svg>1.5×</span>
+      <span class="cpill" style="width:34px;padding:0;justify-content:center"><svg class="ic"><use href="#i-bookmark"/></svg></span>
+    </div>
+  </div>
+
+  <div class="m-card trans">
+    <div class="t-head">
+      <span class="t-ic"><svg class="ic"><use href="#i-transcript"/></svg></span>
+      <span style="font-size:13.5px;font-weight:660" class="grow">Live transcript</span>
+      <span class="m-chip" style="height:24px;font-size:10.5px;padding:0 9px">Auto · EN</span>
+    </div>
+
+    <div class="tl">
+      <span class="avatar av-1">MC</span>
+      <div class="col grow" style="gap:0;min-width:0">
+        <div class="row gap-8"><span class="nm">Maya Chen</span><span class="ts">03:12</span></div>
+        <span class="tx">Both hero shots are edited — hero-v2 is the one I'd ship.</span>
+      </div>
+    </div>
+    <div class="tl">
+      <span class="avatar av-4">RP</span>
+      <div class="col grow" style="gap:0;min-width:0">
+        <div class="row gap-8"><span class="nm">Ravi Patel</span><span class="ts">03:41</span></div>
+        <span class="tx">FY26 sheet is restated — D14 picks up the vendor credit now.</span>
+      </div>
+    </div>
+    <div class="tl cur">
+      <span class="avatar av-6">SB</span>
+      <div class="col grow" style="gap:0;min-width:0">
+        <div class="row gap-8"><span class="nm">Srihari</span><span class="ts">04:12</span><span class="eq"><i style="height:5px"></i><i style="height:11px"></i><i style="height:7px"></i></span></div>
+        <span class="tx">Okay, decision made — we <b>ship Friday</b>, pending the QA environment fix.</span>
+      </div>
+    </div>
+    <div class="tl">
+      <span class="avatar av-2">EV</span>
+      <div class="col grow" style="gap:0;min-width:0">
+        <div class="row gap-8"><span class="nm">Elena Voss</span><span class="ts">04:36</span></div>
+        <span class="tx">Legal is fine with that date as long as the MSA redline lands today.</span>
+      </div>
+    </div>
+
+    <div class="t-foot">
+      <div class="m-search"><svg class="ic sm"><use href="#i-search"/></svg><span class="grow">Search transcript</span></div>
+      <span class="m-btn"><svg class="ic sm"><use href="#i-download"/></svg>Export</span>
+    </div>
+  </div>
+
+  <div class="grow"></div>
+
+  <div class="lastline">
+    <svg class="ic sm" style="width:12px;height:12px;color:var(--acc-3)"><use href="#i-play"/></svg>
+    Lines follow playback — tap any line to jump to that moment.
+  </div>
+
+  <div class="m-home"><i></i></div>
+</div>

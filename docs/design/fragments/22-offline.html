@@ -1,0 +1,299 @@
+<style>
+#s-offline .body { align-items: stretch; min-height: 0; }
+#s-offline .main { flex: 1; min-width: 0; display: flex; gap: 20px; padding: 26px 36px 24px; }
+#s-offline .left { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 18px; }
+
+/* ---- Header ---- */
+#s-offline .head { display: flex; align-items: center; gap: 16px; flex: none; }
+#s-offline .amber-tile {
+  width: 54px; height: 54px; border-radius: 16px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(251,191,36,.10); border: 1px solid rgba(251,191,36,.35);
+  color: var(--warn); box-shadow: var(--inner-hi), 0 4px 18px rgba(251,191,36,.12);
+}
+#s-offline .head h1 { font-size: 26px; font-weight: 720; letter-spacing: -.4px; line-height: 1.1;
+  background: var(--grad-text); -webkit-background-clip: text; background-clip: text; color: transparent; }
+#s-offline .head .sub { font-size: 12px; color: var(--txt-3); margin-top: 2px; }
+#s-offline .tg-row { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-radius: var(--r-md); }
+#s-offline .tg-row .t1 { font-size: 12.5px; font-weight: 600; }
+#s-offline .tg-row .t2 { font-size: 10.5px; color: var(--txt-3); }
+
+/* ---- KPI strip ---- */
+#s-offline .kpis { display: flex; gap: 14px; flex: none; }
+#s-offline .kpi { flex: 1; display: flex; align-items: center; gap: 13px; padding: 16px 18px; border-radius: var(--r-lg); }
+#s-offline .kpi .k-ic {
+  width: 38px; height: 38px; border-radius: 11px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(235,232,255,.06); border: 1px solid var(--stroke); color: var(--txt-2);
+}
+#s-offline .kpi .k-ic.acc  { background: var(--acc-soft); border-color: var(--stroke-acc); color: var(--acc-3); }
+#s-offline .kpi .k-ic.warn { background: rgba(251,191,36,.10); border-color: rgba(251,191,36,.35); color: var(--warn); }
+#s-offline .kpi .k-ic.ok   { background: rgba(52,211,153,.09); border-color: rgba(52,211,153,.35); color: var(--ok); }
+#s-offline .kpi .k-l { font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--txt-3); }
+#s-offline .kpi .k-v { font-size: 18px; font-weight: 700; letter-spacing: -.2px; margin-top: 1px; }
+#s-offline .kpi .k-s { font-size: 11px; color: var(--txt-3); margin-top: 1px; }
+
+/* ---- Files table card ---- */
+#s-offline .tcard { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; overflow: hidden; }
+#s-offline .tcard-h { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--stroke); flex: none; }
+#s-offline .tcard-h .tt { font-size: 14px; font-weight: 650; }
+#s-offline .tcard-h .field { width: 240px; height: 32px; }
+#s-offline .dtable { width: 100%; font-size: 12.5px; }
+#s-offline .dtable th {
+  background: transparent; border: 0; border-bottom: 1px solid var(--stroke);
+  padding: 11px 18px; font-size: 10.5px; font-weight: 700; letter-spacing: .9px;
+  text-transform: uppercase; color: var(--txt-3);
+}
+#s-offline .dtable td { border: 0; border-bottom: 1px solid rgba(235,232,255,.05); padding: 12px 18px; color: var(--txt-1); }
+#s-offline .dtable tr:last-child td { border-bottom: 0; }
+#s-offline .dtable .num { text-align: right; color: var(--txt-2); font-variant-numeric: tabular-nums; }
+#s-offline .tile {
+  width: 36px; height: 36px; border-radius: 10px; flex: none; position: relative;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 9px; font-weight: 700; letter-spacing: .4px;
+  box-shadow: var(--inner-hi), 0 2px 8px rgba(0,0,0,.35);
+}
+#s-offline .tick {
+  position: absolute; right: -5px; bottom: -5px; width: 16px; height: 16px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--ok); border: 2px solid #14121F; color: #06251A;
+}
+#s-offline .tick .ic { width: 8px; height: 8px; }
+#s-offline .tick.pend { background: var(--warn); color: #2E1F02; }
+#s-offline .f-nm { font-size: 12.5px; font-weight: 600; }
+#s-offline .f-mt { font-size: 10.5px; color: var(--txt-3); }
+#s-offline .whr { display: flex; align-items: center; gap: 8px; color: var(--txt-2); }
+#s-offline .whr .avatar { width: 20px; height: 20px; font-size: 8px; border-radius: 7px; }
+#s-offline tr.ghost td { opacity: .62; }
+#s-offline .chip.ghost { color: var(--txt-3); }
+#s-offline .tcard-f { display: flex; align-items: center; gap: 16px; padding: 12px 18px; border-top: 1px solid var(--stroke); flex: none; font-size: 11px; color: var(--txt-3); }
+#s-offline .lg-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+#s-offline .cache-bar { width: 180px; }
+
+/* ---- Sync queue panel ---- */
+#s-offline .queue { width: 396px; flex: none; display: flex; flex-direction: column; overflow: hidden; }
+#s-offline .q-h { display: flex; align-items: center; gap: 10px; padding: 15px 18px; border-bottom: 1px solid var(--stroke); font-size: 14px; font-weight: 650; flex: none; }
+#s-offline .qrow { display: flex; flex-direction: column; gap: 8px; padding: 13px 18px; border-bottom: 1px solid rgba(235,232,255,.05); }
+#s-offline .qrow .q-top { display: flex; align-items: center; gap: 11px; }
+#s-offline .qrow .tile { width: 32px; height: 32px; border-radius: 9px; font-size: 8.5px; }
+#s-offline .qrow .q-nm { font-size: 12px; font-weight: 600; }
+#s-offline .qrow .q-st { font-size: 10.5px; color: var(--txt-3); }
+#s-offline .qrow .q-pct { font-family: var(--font-mono); font-size: 11px; color: var(--txt-2); margin-left: auto; }
+#s-offline .qrow .progress { height: 4px; }
+#s-offline .fill.done { background: rgba(52,211,153,.55); box-shadow: none; }
+#s-offline .fill.up {
+  background-image: repeating-linear-gradient(60deg, rgba(255,255,255,.28) 0 5px, transparent 5px 10px), var(--grad-acc);
+}
+#s-offline .q-done { color: var(--ok); }
+#s-offline .q-sec { padding: 12px 18px 6px; font-size: 10px; font-weight: 700; letter-spacing: 1.1px; text-transform: uppercase; color: var(--txt-3); }
+#s-offline .q-queued { display: flex; align-items: center; gap: 11px; padding: 9px 18px; }
+#s-offline .q-note {
+  margin: auto 14px 14px; padding: 12px 14px; border-radius: var(--r-md);
+  background: rgba(52,211,153,.07); border: 1px solid rgba(52,211,153,.25);
+  display: flex; gap: 10px; align-items: flex-start; font-size: 11.5px; color: var(--txt-2); line-height: 1.5;
+}
+#s-offline .q-note .ic { color: var(--ok); margin-top: 1px; }
+#s-offline .q-note b { color: var(--ok); font-weight: 650; }
+</style>
+<div class="screen" id="s-offline">
+  <header class="vc-titlebar">
+    <div class="vc-brand"><span class="vc-logo"><svg class="ic"><use href="#i-shield"/></svg></span>VaultChat</div>
+    <div class="vc-search"><svg class="ic sm"><use href="#i-search"/></svg><span class="grow">Search chats, people, and every file…</span><span class="kbd">Ctrl K</span></div>
+    <div class="row gap-4">
+      <span class="icon-btn sm" style="color:var(--warn)"><svg class="ic sm"><use href="#i-cloud-off"/></svg></span>
+      <span class="icon-btn sm"><svg class="ic sm"><use href="#i-bell"/></svg></span>
+      <span class="avatar sm av-6" style="width:26px;height:26px;font-size:10px;border-radius:9px">SB</span>
+    </div>
+    <div class="vc-win"><span>─</span><span>▢</span><span class="close">✕</span></div>
+  </header>
+
+  <div class="row grow body">
+    <nav class="vc-rail">
+      <div class="rail-btn"><svg class="ic lg"><use href="#i-chat"/></svg></div><div class="rail-label">Chats</div>
+      <div class="rail-btn"><svg class="ic lg"><use href="#i-book"/></svg></div><div class="rail-label">Shelf</div>
+      <div class="rail-btn"><svg class="ic lg"><use href="#i-search"/></svg></div><div class="rail-label">Search</div>
+      <div class="rail-btn active"><svg class="ic lg"><use href="#i-cloud-off"/></svg></div><div class="rail-label">Offline</div>
+      <div class="rail-btn"><svg class="ic lg"><use href="#i-shield"/></svg></div><div class="rail-label">Vault</div>
+      <div class="rail-spacer"></div>
+      <div class="rail-btn"><svg class="ic lg"><use href="#i-settings"/></svg></div>
+    </nav>
+
+    <main class="main">
+      <div class="left">
+        <div class="head">
+          <span class="amber-tile"><svg class="ic lg"><use href="#i-cloud-off"/></svg></span>
+          <div class="col">
+            <h1>Offline</h1>
+            <span class="sub">Your vault, with or without a connection</span>
+          </div>
+          <span class="chip warn" style="margin-left:6px"><svg class="ic sm"><use href="#i-cloud-off"/></svg>You're offline — changes sync when you're back</span>
+          <div class="grow"></div>
+          <div class="tg-row glass-quiet">
+            <div class="col" style="gap:1px">
+              <span class="t1">Available offline</span>
+              <span class="t2">Keep these files on this device</span>
+            </div>
+            <span class="toggle on"></span>
+          </div>
+        </div>
+
+        <div class="kpis">
+          <div class="kpi glass">
+            <span class="k-ic acc"><svg class="ic"><use href="#i-download"/></svg></span>
+            <div class="col"><span class="k-l">Downloaded</span><span class="k-v">1.2 GB</span><span class="k-s">34 files on this device</span></div>
+          </div>
+          <div class="kpi glass">
+            <span class="k-ic warn"><svg class="ic"><use href="#i-sync"/></svg></span>
+            <div class="col"><span class="k-l">Sync pending</span><span class="k-v">3</span><span class="k-s">items upload on reconnect</span></div>
+          </div>
+          <div class="kpi glass">
+            <span class="k-ic ok"><svg class="ic"><use href="#i-cloud-check"/></svg></span>
+            <div class="col"><span class="k-l">Synced</span><span class="k-v">Everything else</span><span class="k-s">up to date as of 09:41</span></div>
+          </div>
+          <div class="kpi glass">
+            <span class="k-ic"><svg class="ic"><use href="#i-globe"/></svg></span>
+            <div class="col"><span class="k-l">Auto-download</span><span class="k-v" style="display:flex"><span class="chip" style="height:24px;font-size:11px">Wi-Fi only</span></span><span class="k-s" style="margin-top:3px">videos over 100 MB stay in cloud</span></div>
+          </div>
+        </div>
+
+        <div class="tcard glass">
+          <div class="tcard-h">
+            <span class="tt">Offline files</span>
+            <span class="chip" style="height:23px;font-size:10.5px">34 kept offline</span>
+            <div class="grow"></div>
+            <span class="chip active" style="height:24px;font-size:11px">All</span>
+            <span class="chip" style="height:24px;font-size:11px">Pending</span>
+            <span class="chip" style="height:24px;font-size:11px">Cloud-only</span>
+            <div class="field"><svg class="ic sm"><use href="#i-search"/></svg><span class="grow">Filter files…</span></div>
+          </div>
+          <table class="dtable">
+            <tr><th style="width:44%">Name</th><th style="width:22%">Where</th><th class="num" style="width:10%;text-align:right">Size</th><th style="width:24%">State</th></tr>
+            <tr>
+              <td><div class="row gap-12"><span class="tile ft-doc">DOC<span class="tick"><svg class="ic"><use href="#i-check"/></svg></span></span><div class="col" style="gap:1px"><span class="f-nm">Atlas-Proposal.docx</span><span class="f-mt">24 pages · opened 2h ago</span></div></div></td>
+              <td><span class="whr"><span class="avatar av-5">AL</span>Atlas Launch</span></td>
+              <td class="num">4.2 MB</td>
+              <td><span class="chip ok" style="height:24px;font-size:11px"><svg class="ic sm"><use href="#i-check"/></svg>Available offline</span></td>
+            </tr>
+            <tr>
+              <td><div class="row gap-12"><span class="tile ft-xls">XLS<span class="tick"><svg class="ic"><use href="#i-check"/></svg></span></span><div class="col" style="gap:1px"><span class="f-nm">Atlas-Financials-FY26.xlsx</span><span class="f-mt">6 sheets · opened yesterday</span></div></div></td>
+              <td><span class="whr"><span class="avatar av-5">AL</span>Atlas Launch</span></td>
+              <td class="num">1.8 MB</td>
+              <td><span class="chip ok" style="height:24px;font-size:11px"><svg class="ic sm"><use href="#i-check"/></svg>Available offline</span></td>
+            </tr>
+            <tr>
+              <td><div class="row gap-12"><span class="tile ft-aud">MP3<span class="tick"><svg class="ic"><use href="#i-check"/></svg></span></span><div class="col" style="gap:1px"><span class="f-nm">Standup-2026-08-04.mp3</span><span class="f-mt">12:04 · transcript saved</span></div></div></td>
+              <td><span class="whr"><span class="avatar av-4">RP</span>Ravi Patel</span></td>
+              <td class="num">9.2 MB</td>
+              <td><span class="chip ok" style="height:24px;font-size:11px"><svg class="ic sm"><use href="#i-check"/></svg>Available offline</span></td>
+            </tr>
+            <tr>
+              <td><div class="row gap-12"><span class="tile ft-img">WEBP<span class="tick pend"><svg class="ic"><use href="#i-sync"/></svg></span></span><div class="col" style="gap:1px"><span class="f-nm">hero-v2.webp</span><span class="f-mt">edited 22 min ago</span></div></div></td>
+              <td><span class="whr"><span class="avatar av-3">DG</span>Design Guild</span></td>
+              <td class="num">3.4 MB</td>
+              <td><span class="chip warn" style="height:24px;font-size:11px"><svg class="ic sm"><use href="#i-sync"/></svg>Sync pending ↑</span></td>
+            </tr>
+            <tr>
+              <td><div class="row gap-12"><span class="tile ft-pdf">PDF<span class="tick pend"><svg class="ic"><use href="#i-sync"/></svg></span></span><div class="col" style="gap:1px"><span class="f-nm">Atlas-MSA-Contract.pdf</span><span class="f-mt">14 pages · 2 new annotations</span></div></div></td>
+              <td><span class="whr"><span class="avatar av-2">LN</span>Legal — NDA Review</span></td>
+              <td class="num">2.1 MB</td>
+              <td><span class="chip warn" style="height:24px;font-size:11px"><svg class="ic sm"><use href="#i-sync"/></svg>Sync pending · edited offline</span></td>
+            </tr>
+            <tr class="ghost">
+              <td><div class="row gap-12"><span class="tile ft-vid">MP4</span><div class="col" style="gap:1px"><span class="f-nm">Atlas-Demo-v3.mp4</span><span class="f-mt">04:36 · over Wi-Fi limit</span></div></div></td>
+              <td><span class="whr"><span class="avatar av-5">AL</span>Atlas Launch</span></td>
+              <td class="num">148 MB</td>
+              <td><span class="chip ghost" style="height:24px;font-size:11px">☁ Cloud only · 148 MB</span></td>
+            </tr>
+            <tr class="ghost">
+              <td><div class="row gap-12"><span class="tile ft-zip">ZIP</span><div class="col" style="gap:1px"><span class="f-nm">Design-Assets.zip</span><span class="f-mt">247 files inside</span></div></div></td>
+              <td><span class="whr"><span class="avatar av-3">DG</span>Design Guild</span></td>
+              <td class="num">86 MB</td>
+              <td><span class="chip ghost" style="height:24px;font-size:11px">☁ Cloud only</span></td>
+            </tr>
+            <tr>
+              <td><div class="row gap-12"><span class="tile ft-ppt">PPT<span class="tick"><svg class="ic"><use href="#i-check"/></svg></span></span><div class="col" style="gap:1px"><span class="f-nm">Atlas-Launch-Deck.pptx</span><span class="f-mt">18 slides · notes cached</span></div></div></td>
+              <td><span class="whr"><span class="avatar av-5">AL</span>Atlas Launch</span></td>
+              <td class="num">12.6 MB</td>
+              <td><span class="chip ok" style="height:24px;font-size:11px"><svg class="ic sm"><use href="#i-check"/></svg>Available offline</span></td>
+            </tr>
+            <tr>
+              <td><div class="row gap-12"><span class="tile ft-txt">MD<span class="tick pend"><svg class="ic"><use href="#i-sync"/></svg></span></span><div class="col" style="gap:1px"><span class="f-nm">release-notes.md</span><span class="f-mt">edited offline · 12 KB</span></div></div></td>
+              <td><span class="whr"><span class="avatar av-4">R3</span>Release 1.3</span></td>
+              <td class="num">12 KB</td>
+              <td><span class="chip warn" style="height:24px;font-size:11px"><svg class="ic sm"><use href="#i-sync"/></svg>Sync pending · edited offline</span></td>
+            </tr>
+            <tr>
+              <td><div class="row gap-12"><span class="tile ft-txt">CSV<span class="tick"><svg class="ic"><use href="#i-check"/></svg></span></span><div class="col" style="gap:1px"><span class="f-nm">metrics.csv</span><span class="f-mt">1,204 rows · pinned</span></div></div></td>
+              <td><span class="whr"><span class="avatar av-4">R3</span>Release 1.3</span></td>
+              <td class="num">64 KB</td>
+              <td><span class="chip ok" style="height:24px;font-size:11px"><svg class="ic sm"><use href="#i-check"/></svg>Available offline</span></td>
+            </tr>
+                                  </table>
+          <div class="grow"></div>
+          <div class="tcard-f">
+            <span class="row gap-6"><span class="lg-dot" style="background:var(--ok)"></span>Available offline</span>
+            <span class="row gap-6"><span class="lg-dot" style="background:var(--warn)"></span>Sync pending</span>
+            <span class="row gap-6"><span class="lg-dot" style="background:var(--txt-3)"></span>Cloud-only</span>
+            <div class="grow"></div>
+            <span>Offline cache · <b style="color:var(--txt-2)">1.2 GB of 4 GB</b></span>
+            <div class="progress cache-bar"><div class="fill" style="width:30%"></div></div>
+          </div>
+          <div class="scroll-rail"><div class="thumb" style="top:22%;height:30%"></div></div>
+        </div>
+      </div>
+
+      <aside class="queue glass">
+        <div class="q-h">
+          <svg class="ic" style="color:var(--txt-2)"><use href="#i-sync"/></svg>
+          <span>Sync queue</span>
+          <div class="grow"></div>
+          <span class="chip warn" style="height:23px;font-size:10.5px">Paused — offline</span>
+        </div>
+
+        <div class="qrow">
+          <div class="q-top">
+            <span class="tile ft-doc">DOC</span>
+            <div class="col" style="gap:1px"><span class="q-nm">Atlas-Proposal.docx</span><span class="q-st q-done">Synced · 09:41</span></div>
+            <span class="q-pct q-done"><svg class="ic sm" style="display:inline-block;vertical-align:-2px"><use href="#i-check"/></svg></span>
+          </div>
+          <div class="progress"><div class="fill done" style="width:100%"></div></div>
+        </div>
+
+        <div class="qrow">
+          <div class="q-top">
+            <span class="tile ft-xls">XLS</span>
+            <div class="col" style="gap:1px"><span class="q-nm">Atlas-Financials-FY26.xlsx</span><span class="q-st q-done">Synced · 09:12</span></div>
+            <span class="q-pct q-done"><svg class="ic sm" style="display:inline-block;vertical-align:-2px"><use href="#i-check"/></svg></span>
+          </div>
+          <div class="progress"><div class="fill done" style="width:100%"></div></div>
+        </div>
+
+        <div class="qrow" style="background:rgba(124,77,255,.05)">
+          <div class="q-top">
+            <span class="tile ft-img">WEBP</span>
+            <div class="col" style="gap:1px"><span class="q-nm">hero-v2.webp</span><span class="q-st">Uploading — resumes when you're back online</span></div>
+            <span class="q-pct">64%</span>
+          </div>
+          <div class="progress"><div class="fill up" style="width:64%"></div></div>
+        </div>
+
+        <div class="q-sec">Queued · 2</div>
+        <div class="q-queued">
+          <span class="tile ft-pdf" style="width:32px;height:32px;border-radius:9px;font-size:8.5px">PDF</span>
+          <div class="col grow" style="gap:1px"><span class="q-nm">Atlas-MSA-Contract.pdf</span><span class="q-st">2 annotations · edited offline</span></div>
+          <span class="chip" style="height:22px;font-size:10px">Queued</span>
+        </div>
+        <div class="q-queued">
+          <span class="tile ft-txt" style="width:32px;height:32px;border-radius:9px;font-size:8.5px">MD</span>
+          <div class="col grow" style="gap:1px"><span class="q-nm">release-notes.md</span><span class="q-st">edited offline · 12 KB</span></div>
+          <span class="chip" style="height:22px;font-size:10px">Queued</span>
+        </div>
+
+        <div class="q-note">
+          <svg class="ic sm"><use href="#i-check2"/></svg>
+          <span><b>Conflict-free:</b> edits merge when you reconnect. Nothing is overwritten — every offline change keeps its history.</span>
+        </div>
+      </aside>
+    </main>
+  </div>
+</div>

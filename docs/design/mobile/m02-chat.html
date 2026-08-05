@@ -1,0 +1,126 @@
+<style>
+#m-chat .avatar.hd { width: 38px; height: 38px; border-radius: 13px; font-size: 13px; }
+#m-chat .who { min-width: 0; }
+#m-chat .who .n { font-size: 15.5px; font-weight: 660; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#m-chat .who .s { font-size: 11.5px; color: var(--ok); display: flex; align-items: center; gap: 5px; }
+
+#m-chat .e2e {
+  flex: none;
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  height: 28px;
+  background: rgba(52,211,153,.07);
+  border-bottom: 1px solid rgba(52,211,153,.16);
+  color: var(--ok); font-size: 11px; font-weight: 600;
+}
+
+#m-chat .m-in { display: flex; align-items: flex-end; gap: 8px; align-self: flex-start; max-width: 86%; }
+#m-chat .m-in .avatar { width: 26px; height: 26px; border-radius: 9px; font-size: 9.5px; flex: none; }
+#m-chat .m-in .m-bub { max-width: none; }
+
+#m-chat .fcard {
+  display: flex; align-items: center; gap: 11px;
+  padding: 10px; border-radius: 14px; margin-bottom: 8px;
+  background: rgba(8,7,13,.4);
+  border: 1px solid var(--stroke);
+}
+#m-chat .fcard .fn { font-size: 13.5px; font-weight: 620; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#m-chat .fcard .col { min-width: 0; }
+#m-chat .fcard .fs { font-size: 11px; opacity: .72; }
+
+#m-chat .typing {
+  align-self: flex-start; margin-left: 34px;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 9px 14px; border-radius: 16px; border-bottom-left-radius: 6px;
+  background: var(--glass-2); border: 1px solid var(--stroke);
+  font-size: 12px; color: var(--txt-3);
+}
+#m-chat .typing i { width: 5px; height: 5px; border-radius: 50%; background: var(--acc-2); }
+#m-chat .typing i:nth-child(2) { opacity: .55; }
+#m-chat .typing i:nth-child(3) { opacity: .3; }
+
+#m-chat .reactions {
+  position: absolute; bottom: -11px; left: 12px;
+  display: flex; gap: 4px; font-size: 11px;
+  padding: 2px 8px; border-radius: 999px;
+  background: var(--bg-3); border: 1px solid var(--stroke-2);
+  color: var(--txt-2);
+}
+</style>
+<div class="mscreen" id="m-chat">
+  <div class="m-status">
+    <span>9:16</span>
+    <div class="sb-right">
+      <span class="m-sig"><i></i><i></i><i></i><i></i></span>
+      <span class="m-wifi"></span>
+      <span class="m-batt"><i></i></span>
+    </div>
+  </div>
+
+  <header class="m-appbar">
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-chev-l"/></svg></span>
+    <span class="avatar av-1 hd">MC<span class="presence" style="background:var(--ok);border-color:#0F0E18"></span></span>
+    <div class="col grow who" style="gap:1px">
+      <span class="n">Maya Chen</span>
+      <span class="s"><span class="dot on" style="width:7px;height:7px"></span>Online</span>
+    </div>
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-phone"/></svg></span>
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-video"/></svg></span>
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-more-v"/></svg></span>
+  </header>
+
+  <div class="e2e"><svg class="ic sm"><use href="#i-lock"/></svg>End-to-end encrypted</div>
+
+  <div class="m-msgs">
+    <span class="m-day">Today</span>
+
+    <div class="m-in">
+      <span class="avatar av-1">MC</span>
+      <div class="m-bub in">Morning! Proposal draft is done — the pricing section still needs your FY26 numbers before I send it up.
+        <div class="bm">09:12</div>
+      </div>
+    </div>
+
+    <div class="m-bub out">Nice timing. I'll drop the financials sheet in here right after standup.
+      <div class="bm">09:13 <svg class="ic sm"><use href="#i-check2"/></svg></div>
+    </div>
+
+    <div class="m-in">
+      <span class="avatar av-1">MC</span>
+      <div class="m-bub in" style="padding:10px">
+        <div class="fcard">
+          <span class="m-tile ft-doc">DOC</span>
+          <div class="col grow" style="gap:1px">
+            <span class="fn">Atlas-Proposal.docx</span>
+            <span class="fs">4.2 MB · 24 pages</span>
+          </div>
+          <span class="m-btn sm primary" style="height:32px;padding:0 13px">Open</span>
+        </div>
+        <div style="padding:0 4px 2px">Full draft — section 4 is the one to read.</div>
+        <div class="bm">09:14</div>
+        <div class="reactions">👍 2 &nbsp;🔥 1</div>
+      </div>
+    </div>
+
+    <div class="m-bub out" style="margin-top:6px">Opening it now — reading mode makes a 24-pager painless on the phone.
+      <div class="bm">09:15 <svg class="ic sm"><use href="#i-check2"/></svg></div>
+    </div>
+
+    <div class="m-in">
+      <span class="avatar av-1">MC</span>
+      <div class="m-bub in">Ping me when you hit the pricing table.
+        <div class="bm">09:16</div>
+      </div>
+    </div>
+
+    <div class="typing"><i></i><i></i><i></i>Maya is typing</div>
+  </div>
+
+  <div class="m-composer">
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-clip"/></svg></span>
+    <div class="field-in"><span class="grow">Message</span><svg class="ic" style="color:var(--txt-3)"><use href="#i-smile"/></svg></div>
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-mic"/></svg></span>
+    <span class="m-send"><svg class="ic"><use href="#i-send"/></svg></span>
+  </div>
+
+  <div class="m-home"><i></i></div>
+</div>
