@@ -1,0 +1,321 @@
+<style>
+#s-word .body { align-items: stretch; min-height: 0; }
+
+/* ---- Viewer bar extras ---- */
+#s-word .mini-tile {
+  width: 30px; height: 30px; border-radius: 9px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 8.5px; font-weight: 700; letter-spacing: .5px;
+  box-shadow: var(--inner-hi), 0 2px 8px rgba(0,0,0,.35);
+}
+#s-word .seg {
+  display: flex; gap: 2px; padding: 3px; border-radius: 10px;
+  background: rgba(235,232,255,.05); border: 1px solid var(--stroke);
+}
+#s-word .seg-btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 28px; padding: 0 12px; border-radius: 8px;
+  font-size: 11.5px; font-weight: 500; color: var(--txt-2); white-space: nowrap;
+}
+#s-word .seg-btn.active { background: var(--acc-soft); color: var(--acc-3); box-shadow: inset 0 0 0 1px var(--stroke-acc); }
+#s-word .seg-btn.icon { width: 30px; padding: 0; justify-content: center; }
+#s-word .vbar-sep { width: 1px; height: 22px; background: var(--stroke-2); flex: none; }
+
+/* ---- TOC panel ---- */
+#s-word .toc {
+  width: 300px; flex: none; display: flex; flex-direction: column;
+  background: rgba(15, 14, 24, 0.55);
+  border-right: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+  position: relative;
+}
+#s-word .toc-tabs { display: flex; gap: 2px; padding: 12px 12px 11px; border-bottom: 1px solid var(--stroke); }
+#s-word .toc-tabs .tab { padding: 0 12px; }
+#s-word .tab-count {
+  min-width: 16px; height: 16px; padding: 0 5px; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(235,232,255,.08); font-size: 9.5px; font-weight: 700; color: var(--txt-2);
+}
+#s-word .toc-tree { padding: 14px 10px 10px; display: flex; flex-direction: column; gap: 2px; }
+#s-word .toc-label { padding: 0 12px 8px; }
+#s-word .toc .tree-item { color: var(--txt-2); }
+#s-word .toc .tree-item .lbl { overflow: hidden; text-overflow: ellipsis; }
+#s-word .toc .tree-item .pg { margin-left: auto; font-size: 11px; color: var(--txt-3); font-variant-numeric: tabular-nums; }
+#s-word .toc .tree-item.active .pg { color: var(--acc-3); }
+#s-word .toc .tree-item .ic.tw { width: 12px; height: 12px; }
+#s-word .toc-foot { margin-top: auto; border-top: 1px solid var(--stroke); padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 10px; }
+#s-word .toc-foot .pos-row { display: flex; align-items: baseline; justify-content: space-between; font-size: 11px; color: var(--txt-2); }
+#s-word .toc-foot .pos-row b { font-size: 11.5px; font-weight: 600; color: var(--txt-1); }
+#s-word .toc-foot .meta { font-size: 10.5px; color: var(--txt-3); }
+
+/* ---- Reading stage ---- */
+#s-word .stage { flex: 1; min-width: 0; position: relative; }
+#s-word .spread {
+  position: absolute; top: 30px; left: 50%; transform: translateX(-50%);
+  display: flex; border-radius: 10px;
+  box-shadow: var(--sh-3), 0 0 90px rgba(124,77,255,.08), 0 0 0 1px rgba(235,232,255,.06);
+}
+#s-word .page {
+  width: 608px; height: 860px; flex: none;
+  background: linear-gradient(180deg, #FCFBFF 0%, #F5F3FC 100%);
+  color: #3A3548;
+  padding: 40px 52px 34px;
+  display: flex; flex-direction: column;
+  font-size: 12.5px; line-height: 1.66;
+  position: relative;
+}
+#s-word .page.pl { border-radius: 10px 0 0 10px; }
+#s-word .page.pr { border-radius: 0 10px 10px 0; }
+#s-word .gutter {
+  position: absolute; top: 0; bottom: 0; left: 50%; width: 84px;
+  transform: translateX(-50%); pointer-events: none;
+  background: linear-gradient(90deg, rgba(24,16,52,0) 0%, rgba(24,16,52,.09) 42%, rgba(24,16,52,.17) 50%, rgba(24,16,52,.09) 58%, rgba(24,16,52,0) 100%);
+}
+#s-word .runhead {
+  display: flex; justify-content: space-between; flex: none;
+  font-size: 9px; font-weight: 700; letter-spacing: 1.8px; text-transform: uppercase;
+  color: #9B95B2;
+  padding-bottom: 10px; margin-bottom: 24px;
+  border-bottom: 1px solid rgba(42,39,53,.12);
+}
+#s-word .page h2 { font-size: 24px; font-weight: 700; letter-spacing: -.4px; color: #221E33; margin: 0 0 6px; }
+#s-word .page .h2-sub { font-size: 11px; color: #8A84A0; margin: 0 0 16px; }
+#s-word .page h3 { font-size: 15px; font-weight: 650; color: #221E33; margin: 2px 0 10px; }
+#s-word .page p { margin: 0 0 13px; }
+#s-word .doclink { color: #6435F0; font-weight: 500; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2.5px; text-decoration-color: rgba(100,53,240,.55); }
+#s-word .hl-cmt {
+  background: rgba(251,191,36,.42);
+  box-shadow: 0 1.5px 0 rgba(202,138,4,.6);
+  border-radius: 2px; padding: 0 2px;
+}
+#s-word .dt { width: 100%; border-collapse: collapse; font-size: 11.5px; color: #3A3548; margin: 4px 0 8px; }
+#s-word .dt th {
+  text-align: left; font-size: 10px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase;
+  color: #221E33; background: rgba(124,77,255,.08);
+  border: 1px solid rgba(42,39,53,.15); padding: 7px 11px;
+}
+#s-word .dt td { border: 1px solid rgba(42,39,53,.15); padding: 7px 11px; font-variant-numeric: tabular-nums; }
+#s-word .dt td.num { text-align: right; }
+#s-word .tcap { font-size: 10.5px; color: #8A84A0; margin: 0 0 14px; }
+#s-word .pfoot {
+  margin-top: auto; flex: none;
+  padding-top: 11px; border-top: 1px solid rgba(42,39,53,.10);
+  display: flex; justify-content: center;
+  font-size: 10.5px; color: #9B95B2; font-variant-numeric: tabular-nums;
+}
+
+/* figure block */
+#s-word .fig {
+  height: 218px; border-radius: 8px; position: relative; overflow: hidden;
+  border: 1px solid rgba(42,39,53,.13);
+  background:
+    linear-gradient(0deg, rgba(124,77,255,.045) 1px, transparent 1px) 0 0 / 100% 36px,
+    linear-gradient(90deg, rgba(124,77,255,.045) 1px, transparent 1px) 0 0 / 42px 100%,
+    linear-gradient(135deg, #F2EDFE 0%, #F9F3FB 100%);
+  margin: 2px 0 8px;
+}
+#s-word .fig-axes {
+  position: absolute; inset: 26px 20px 28px 24px;
+  border-left: 1.5px solid rgba(42,39,53,.30);
+  border-bottom: 1.5px solid rgba(42,39,53,.30);
+}
+#s-word .ax { position: absolute; font-size: 9.5px; font-weight: 600; letter-spacing: .6px; color: #7A7490; text-transform: uppercase; }
+#s-word .ax-y { left: 12px; top: 8px; }
+#s-word .ax-x { right: 20px; bottom: 8px; }
+#s-word .fdot { position: absolute; font-size: 10px; font-weight: 600; color: #6B6584; padding-left: 15px; white-space: nowrap; }
+#s-word .fdot::before {
+  content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 9px; height: 9px; border-radius: 50%;
+  background: #A9A2C0; box-shadow: 0 1px 3px rgba(42,39,53,.3);
+}
+#s-word .fdot.atlas { color: #5B2FE8; font-weight: 700; font-size: 11px; padding-left: 18px; }
+#s-word .fdot.atlas::before {
+  width: 11px; height: 11px; background: var(--acc);
+  box-shadow: 0 0 0 3.5px rgba(124,77,255,.22), 0 2px 6px rgba(124,77,255,.5);
+}
+#s-word .figcap { font-size: 10.5px; color: #8A84A0; text-align: center; margin: 0 0 14px; }
+
+/* stat strip */
+#s-word .stats { display: flex; gap: 10px; margin: 2px 0 15px; }
+#s-word .stat {
+  flex: 1; padding: 10px 12px 9px; border-radius: 8px;
+  background: rgba(124,77,255,.06); border: 1px solid rgba(124,77,255,.17);
+}
+#s-word .stat b { display: block; font-size: 17px; font-weight: 700; letter-spacing: -.3px; color: #4C2FD9; font-variant-numeric: tabular-nums; }
+#s-word .stat span { display: block; font-size: 9.5px; color: #7A7490; margin-top: 2px; letter-spacing: .2px; }
+
+/* ---- Margin comment (app chrome, dark glass) ---- */
+#s-word .cmt {
+  position: absolute; left: 16px; top: 268px; width: 232px; z-index: 5;
+  padding: 12px 14px 11px;
+  border-left: 3px solid var(--warn);
+  border-radius: var(--r-lg);
+}
+#s-word .cmt .who { font-size: 12px; font-weight: 650; }
+#s-word .cmt .when { font-size: 10px; color: var(--txt-3); }
+#s-word .cmt .txt { font-size: 11.5px; line-height: 1.5; color: var(--txt-2); margin-top: 7px; }
+#s-word .cmt .acts { display: flex; gap: 4px; margin-top: 9px; }
+#s-word .cmt-line {
+  position: absolute; left: 248px; top: 296px; z-index: 4;
+  width: 92px; height: 2px; border-top: 2px dashed rgba(251,191,36,.55);
+}
+#s-word .cmt-line::after {
+  content: ""; position: absolute; right: -3px; top: -5px;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--warn); box-shadow: 0 0 8px rgba(251,191,36,.7);
+}
+
+/* ---- Floating toolbar + progress footer ---- */
+#s-word .read-toolbar { position: absolute; bottom: 26px; left: 50%; transform: translateX(-50%); z-index: 6; }
+#s-word .read-toolbar .lab { font-size: 12px; font-weight: 600; padding: 0 10px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+#s-word .read-toolbar .tlab { font-size: 11.5px; font-weight: 500; color: var(--txt-2); padding: 0 8px 0 2px; white-space: nowrap; }
+#s-word .read-toolbar .tbtn { display: inline-flex; align-items: center; gap: 7px; padding: 0 6px; }
+
+#s-word .readfoot { height: 26px; flex: none; position: relative; background: rgba(14,13,22,.72); border-top: 1px solid var(--stroke); }
+#s-word .readfoot .rlabel {
+  position: absolute; right: 18px; top: 50%; transform: translateY(-50%);
+  font-size: 10.5px; font-weight: 600; color: var(--txt-2);
+  display: flex; align-items: center; gap: 7px;
+}
+#s-word .readfoot .rlabel .ic { color: var(--acc-2); }
+#s-word .readfoot .progress { position: absolute; left: 0; right: 0; bottom: -1px; height: 3px; border-radius: 0; }
+</style>
+<div class="screen" id="s-word">
+  <header class="vc-viewerbar">
+    <span class="icon-btn framed"><svg class="ic"><use href="#i-chev-l"/></svg></span>
+    <span class="mini-tile ft-doc">DOC</span>
+    <div class="col" style="gap:1px">
+      <span style="font-size:13.5px;font-weight:600">Atlas-Proposal.docx</span>
+      <span style="font-size:11px;color:var(--txt-3)">Shared by Maya Chen · 4.2 MB · 24 pages · in Atlas Launch</span>
+    </div>
+    <span class="secure-pill"><svg class="ic sm"><use href="#i-lock"/></svg>Rendered inside VaultChat — no external apps, nothing leaves the vault</span>
+    <div class="grow"></div>
+    <div class="seg">
+      <span class="seg-btn active"><svg class="ic sm"><use href="#i-book"/></svg>Two-page book</span>
+      <span class="seg-btn"><svg class="ic sm"><use href="#i-file"/></svg>Single page</span>
+      <span class="seg-btn"><svg class="ic sm"><use href="#i-toc"/></svg>Continuous</span>
+    </div>
+    <div class="vbar-sep"></div>
+    <div class="seg">
+      <span class="seg-btn icon active"><svg class="ic sm"><use href="#i-moon"/></svg></span>
+      <span class="seg-btn icon"><svg class="ic sm"><use href="#i-sun"/></svg></span>
+    </div>
+    <div class="vbar-sep"></div>
+    <span class="icon-btn"><svg class="ic"><use href="#i-print"/></svg></span>
+    <span class="icon-btn"><svg class="ic"><use href="#i-share"/></svg></span>
+    <span class="icon-btn"><svg class="ic"><use href="#i-download"/></svg></span>
+    <div class="vc-win"><span>─</span><span>▢</span><span class="close">✕</span></div>
+  </header>
+
+  <div class="row grow body">
+    <aside class="toc">
+      <div class="toc-tabs tabs">
+        <span class="tab active"><svg class="ic sm"><use href="#i-toc"/></svg>Contents</span>
+        <span class="tab"><svg class="ic sm"><use href="#i-bookmark"/></svg>Bookmarks</span>
+        <span class="tab"><svg class="ic sm"><use href="#i-comment"/></svg>Comments<span class="tab-count">3</span></span>
+      </div>
+      <div class="toc-tree">
+        <div class="tree-item"><svg class="ic sm tw"><use href="#i-chev-r"/></svg><span class="lbl">1&ensp;Executive Summary</span><span class="pg">2</span></div>
+        <div class="tree-item active"><svg class="ic sm tw"><use href="#i-chev-d"/></svg><span class="lbl">2&ensp;Market Opportunity</span><span class="pg">8</span></div>
+        <div class="tree-item lvl2"><span class="lbl">2.1&ensp;Segment analysis</span><span class="pg">8</span></div>
+        <div class="tree-item lvl2"><span class="lbl">2.2&ensp;Where Atlas wins first</span><span class="pg">9</span></div>
+        <div class="tree-item"><svg class="ic sm tw"><use href="#i-chev-d"/></svg><span class="lbl">3&ensp;Product Strategy</span><span class="pg">11</span></div>
+        <div class="tree-item lvl2"><span class="lbl">3.1&ensp;Architecture</span><span class="pg">12</span></div>
+        <div class="tree-item lvl2"><span class="lbl">3.2&ensp;Rollout Phases</span><span class="pg">14</span></div>
+        <div class="tree-item"><svg class="ic sm tw"><use href="#i-chev-r"/></svg><span class="lbl">4&ensp;Financial Model</span><span class="pg">17</span></div>
+        <div class="tree-item"><svg class="ic sm tw"><use href="#i-chev-r"/></svg><span class="lbl">5&ensp;Risk Register</span><span class="pg">20</span></div>
+        <div class="tree-item"><svg class="ic sm tw"><use href="#i-chev-r"/></svg><span class="lbl">Appendix A — Data sources</span><span class="pg">22</span></div>
+        <div class="tree-item"><svg class="ic sm tw"><use href="#i-chev-r"/></svg><span class="lbl">Appendix B — Glossary</span><span class="pg">23</span></div>
+      </div>
+      <div class="toc-foot">
+        <div class="pos-row"><b>Your position</b><span>Page 8 of 24</span></div>
+        <div class="progress"><div class="fill" style="width:35%"></div></div>
+        <div class="meta">6,418 words · 32 min total · edited by Maya Chen today 08:52</div>
+        <div class="row gap-6">
+          <span class="chip" style="height:23px;font-size:10.5px"><svg class="ic sm"><use href="#i-cloud-check"/></svg>Synced</span>
+          <span class="chip" style="height:23px;font-size:10.5px"><svg class="ic sm"><use href="#i-comment"/></svg>3 comments</span>
+        </div>
+      </div>
+      <div class="scroll-rail"><div class="thumb" style="top:22%"></div></div>
+    </aside>
+
+    <main class="stage">
+      <div class="spread">
+        <div class="page pl">
+          <div class="runhead"><span>Atlas Proposal</span><span>Confidential</span></div>
+          <h2>2.&ensp;Market Opportunity</h2>
+          <div class="h2-sub">Section owner: Maya Chen · reviewed by Finance 03 Aug 2026</div>
+          <p>Enterprise teams now exchange more than 60% of their working documents inside chat tools that were never designed to hold them. A file leaves the conversation the moment it is opened — handed to a desktop application, duplicated into a downloads folder, and stripped of every access control the sender intended. Atlas closes that gap by keeping the document, the conversation, and the policy in a single sealed surface.</p>
+          <p>Our bottom-up model, built from the <span class="doclink">2026 Secure Collaboration Benchmark</span> and 41 buyer interviews, places the combined addressable market at <span class="hl-cmt">$4.6B by FY28</span>, growing 19% annually as regulated industries retire legacy intranet and managed-file-transfer tooling.</p>
+          <table class="dt">
+            <tr><th>Segment</th><th style="text-align:right">TAM (FY28)</th><th style="text-align:right">Growth</th></tr>
+            <tr><td>Regulated enterprise</td><td class="num">$2.1B</td><td class="num">18%</td></tr>
+            <tr><td>Mid-market SaaS</td><td class="num">$1.4B</td><td class="num">23%</td></tr>
+            <tr><td>Public sector</td><td class="num">$1.1B</td><td class="num">9%</td></tr>
+          </table>
+          <div class="tcap">Table 2 — Addressable segments, bottom-up estimate (Finance model v4).</div>
+          <p>Three procurement signals make the timing favourable. Security review now precedes tooling selection in 71% of target accounts; consolidation budgets reward suites that replace two or more point tools; and data-residency mandates coming into force across the EU and India fall inside the plan horizon.</p>
+          <div class="pfoot">8</div>
+        </div>
+        <div class="page pr">
+          <div class="runhead"><span>2 · Market Opportunity</span><span>Aug 2026</span></div>
+          <h3>2.2&ensp;Where Atlas wins first</h3>
+          <p>The beachhead is the regulated mid-market: firms of 200–2,000 seats in financial services, health, and legal that already mandate end-to-end encryption for messaging, yet still route documents through unmanaged local viewers. For these buyers the purchase is a security decision first and a productivity decision second — a sequencing Atlas's sealed viewer is uniquely positioned to satisfy.</p>
+          <div class="fig">
+            <div class="fig-axes"></div>
+            <span class="ax ax-y">Control ↑</span>
+            <span class="ax ax-x">Ease of adoption →</span>
+            <span class="fdot" style="left:15%;top:26%">Legacy ECM</span>
+            <span class="fdot" style="left:27%;top:62%">E-mail + file drive</span>
+            <span class="fdot" style="left:60%;top:74%">Consumer chat</span>
+            <span class="fdot atlas" style="left:68%;top:18%">Atlas</span>
+          </div>
+          <div class="figcap">Fig 3 — Atlas positioning map: control without an adoption tax.</div>
+          <p>The landing motion follows the file. A single shared proposal or contract seats the viewer inside the buyer's existing workflow, and expansion tracks the conversation graph rather than the org chart: in FY26 pilots, each sealed document brought a median of 3.2 new active readers into the workspace within two weeks.</p>
+          <div class="stats">
+            <div class="stat"><b>$4.6B</b><span>TAM by FY28</span></div>
+            <div class="stat"><b>19%</b><span>CAGR through plan</span></div>
+            <div class="stat"><b>3.2×</b><span>readers per sealed file</span></div>
+          </div>
+          <div class="pfoot">9 of 24</div>
+        </div>
+        <div class="gutter"></div>
+      </div>
+
+      <div class="cmt glass-float">
+        <div class="row gap-8">
+          <span class="avatar sm av-2" style="width:26px;height:26px;font-size:10px;border-radius:9px">EV</span>
+          <span class="who grow">Elena Voss</span>
+          <span class="when">2d ago</span>
+        </div>
+        <div class="txt">Verify this TAM figure — the analyst cut we licensed says $4.1B. Footnote both?</div>
+        <div class="acts">
+          <span class="btn sm btn-ghost">Reply</span>
+          <span class="btn sm btn-ghost"><svg class="ic sm"><use href="#i-check"/></svg>Resolve</span>
+        </div>
+      </div>
+      <div class="cmt-line"></div>
+
+      <div class="read-toolbar toolbar">
+        <span class="icon-btn"><svg class="ic"><use href="#i-chev-l"/></svg></span>
+        <span class="lab">Pages 8–9 of 24</span>
+        <span class="icon-btn"><svg class="ic"><use href="#i-chev-r"/></svg></span>
+        <span class="sep"></span>
+        <span class="icon-btn"><svg class="ic"><use href="#i-zoom-out"/></svg></span>
+        <span class="lab" style="padding:0 4px">110%</span>
+        <span class="icon-btn"><svg class="ic"><use href="#i-zoom-in"/></svg></span>
+        <span class="sep"></span>
+        <span class="tbtn"><span class="icon-btn"><svg class="ic"><use href="#i-search"/></svg></span><span class="tlab">Search in document</span></span>
+        <span class="sep"></span>
+        <span class="tbtn"><span class="icon-btn"><svg class="ic"><use href="#i-bookmark"/></svg></span><span class="tlab">Bookmark page</span></span>
+      </div>
+
+      <div class="scroll-rail"><div class="thumb" style="top:31%; height:22%"></div></div>
+    </main>
+  </div>
+
+  <div class="readfoot">
+    <span class="rlabel"><svg class="ic sm"><use href="#i-book"/></svg>35% read · 18 min left</span>
+    <div class="progress"><div class="fill" style="width:35%"></div></div>
+  </div>
+</div>

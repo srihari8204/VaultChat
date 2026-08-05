@@ -52,7 +52,7 @@
 
 /* ---- Pane header ---- */
 #s-split-h .p-head {
-  height: 58px; flex: none;
+  height: 54px; flex: none;
   display: flex; align-items: center; gap: 12px;
   padding: 0 18px;
   border-bottom: 1px solid var(--stroke);
@@ -70,14 +70,15 @@
   flex: 1; min-height: 0;
   display: flex; flex-direction: column; gap: 12px;
   justify-content: flex-end;
-  padding: 14px 30px 10px 22px;
-  position: relative;
+  padding: 10px 30px 8px 22px;
+  position: relative; overflow: hidden;
 }
 #s-split-h .day-wrap { display: flex; justify-content: center; }
-#s-split-h .m-in { display: flex; align-items: flex-end; gap: 10px; max-width: 640px; align-self: flex-start; }
+#s-split-h .m-in { display: flex; align-items: flex-end; gap: 10px; max-width: 700px; align-self: flex-start; }
 #s-split-h .m-in .bubble { max-width: none; }
 #s-split-h .m-in.cont { padding-left: 42px; }
-#s-split-h .m-out { align-self: flex-end; max-width: 620px; display: flex; }
+#s-split-h .m-out { align-self: flex-end; max-width: 700px; display: flex; }
+#s-split-h .m-out .bubble { max-width: none; }
 #s-split-h .bubble .snd { font-size: 11px; font-weight: 650; margin-bottom: 3px; letter-spacing: .1px; }
 #s-split-h .snd.c-elena { color: #F582BE; }
 #s-split-h .snd.c-marcus { color: #3FDCA4; }
@@ -94,7 +95,7 @@
 #s-split-h .typing i:nth-child(2) { opacity: .55; }
 #s-split-h .typing i:nth-child(3) { opacity: .3; }
 
-#s-split-h .composer-wrap { padding: 8px 18px 12px; flex: none; }
+#s-split-h .composer-wrap { padding: 6px 18px 10px; flex: none; }
 #s-split-h .composer { width: 100%; height: 52px; }
 #s-split-h .att-open { margin-left: auto; }
 </style>
@@ -224,8 +225,6 @@
           </div>
 
           <div class="msgs">
-            <div class="day-wrap"><span class="msg-day">Today</span></div>
-
             <div class="m-in">
               <span class="avatar sm av-3">MW</span>
               <div class="bubble in" style="max-width:470px"><div class="snd c-marcus">Marcus Webb</div>
@@ -250,7 +249,7 @@
               </div>
             </div>
 
-            <div class="m-out"><div class="bubble out">Tagline locks this afternoon — I'm confirming pricing with Maya in the pane right above you.
+            <div class="m-out"><div class="bubble out">Tagline locks today — confirming pricing with Maya right above you.
               <div class="b-meta">09:21 <svg class="ic sm"><use href="#i-check2"/></svg></div>
             </div></div>
 

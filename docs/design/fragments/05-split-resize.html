@@ -38,7 +38,7 @@
 
 /* ---- Snap segmented control (under top bar, centered) ---- */
 #s-split-resize .snap {
-  position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
+  position: absolute; left: 50%; top: 78px; transform: translateX(-50%);
   z-index: 35;
   display: flex; align-items: center; gap: 3px;
   padding: 4px; border-radius: 12px;
@@ -110,7 +110,7 @@
   display: flex; flex-direction: column; gap: 16px;
   justify-content: flex-end;
   padding: 22px 30px 16px 22px;
-  position: relative;
+  position: relative; overflow: hidden;
 }
 #s-split-resize .pane-l .msgs { padding: 18px 18px 14px 16px; gap: 14px; }
 #s-split-resize .day-wrap { display: flex; justify-content: center; }
@@ -216,6 +216,10 @@
           <div class="msgs">
             <div class="day-wrap"><span class="msg-day">Today</span></div>
 
+            <div class="m-out"><div class="bubble out">Morning — how's the draft looking?
+              <div class="b-meta">09:10 <svg class="ic sm"><use href="#i-check2"/></svg></div>
+            </div></div>
+
             <div class="m-in">
               <span class="avatar sm av-1">MC</span>
               <div class="bubble in">Proposal draft is done — pricing still needs your FY26 numbers.
@@ -247,6 +251,12 @@
                 <div class="b-meta">09:16</div>
               </div>
             </div>
+
+            <div class="m-out"><div class="bubble out">Opening it now — book mode 📖
+              <div class="b-meta">09:17 <svg class="ic sm"><use href="#i-check2"/></svg></div>
+            </div></div>
+
+            <div class="typing"><i></i><i></i><i></i>Maya is typing</div>
 
             <div class="scroll-rail"><div class="thumb" style="bottom:4%; top:auto; height:30%"></div></div>
           </div>
@@ -285,13 +295,6 @@
 
           <div class="msgs">
             <div class="day-wrap"><span class="msg-day">Today</span></div>
-
-            <div class="m-in">
-              <span class="avatar sm av-2">EV</span>
-              <div class="bubble in"><div class="snd c-elena">Elena Voss</div>Morning all — final week. Scope locks today, so flag anything still moving.
-                <div class="b-meta">08:41</div>
-              </div>
-            </div>
 
             <div class="m-in">
               <span class="avatar sm av-4">RP</span>
