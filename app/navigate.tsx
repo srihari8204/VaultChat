@@ -123,6 +123,15 @@ export default function NavigateScreen() {
       {banner.active ? (
         <View style={{ flex: 1 }}>
           <NavMap style={{ flex: 1 }} />
+          {/* overall route progress (v2.1) */}
+          {banner.totalM > 0 && (
+            <View style={{ height: 3, backgroundColor: colors.border }}>
+              <View style={{
+                height: 3, backgroundColor: colors.primary,
+                width: `${Math.round(Math.max(0, Math.min(1, 1 - banner.remainingM / banner.totalM)) * 100)}%`,
+              }} />
+            </View>
+          )}
           <View style={[st.sheet, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
             <View style={{ flex: 1 }}>
               <Text numberOfLines={1} style={[st.sheetInstr, { color: colors.text }]}>

@@ -5,11 +5,14 @@
 // Edits persist via lockSettings and apply live to an armed lock.
 
 import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Switch, Platform, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Switch, Platform, Alert, Vibration } from 'react-native';
 import { Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import notifee from '@notifee/react-native';
+import * as Speech from 'expo-speech';
 import { useTheme } from '../lib/theme';
+import { VIBE_PATTERN } from '../lib/lock/alarmChannels';
+import { VOICE } from '../lib/lock/alarmController';
 import {
   useLockSettings, setLockAlerts, setLockSettings, type LockAlertSettings,
 } from '../lib/lock/lockSettings';
@@ -122,6 +125,15 @@ export default function LockSettingsScreen() {
             <Ionicons name="chevron-forward" size={16} color={colors.text + '66'} />
           </TouchableOpacity>
         )}
+        <Text style={[st.h, { color: colors.text, marginTop: 20 }]}>Tracking frequency</Text>
+        <View style={st.chips}>
+          <Chip on={s.cadence === 'auto'} label="Adaptive (recommended)" onPress={() => setGeneral({ cadence: 'auto' })} />
+          <Chip on={s.cadence === 'saver'} label="Battery saver" onPress={() => setGeneral({ cadence: 'saver' })} />
+          <Chip on={s.cadence === 'high'} label="High precision" onPress={() => setGeneral({ cadence: 'high' })} />
+        </View>
+        <Text style={{ color: colors.text + '77', fontSize: 12, marginTop: 6 }}>
+          Adaptive speeds up GPS only near the boundary or while moving; saver stays slow while safe; high precision always runs at navigation cadence.
+        </Text>
 
         {/* ── Sound & Vibration ── */}
         <Text style={[st.h, { color: colors.text, marginTop: 24 }]}>Channels</Text>
@@ -178,10 +190,15 @@ export default function LockSettingsScreen() {
           </View>
         )}
 
-        <TouchableOpacity onPress={() => testAlarm()} style={[st.testBtn, { backgroundColor: colors.primary }]}>
+        <TouchableOpacity onPress={() => testAlarm()} accessibilityRole="button" accessibilityLabel="Test the full alarm"
+          style={[st.testBtn, { backgroundColor: colors.primary }]}>
           <Ionicons name="play" size={17} color="#fff" />
           <Text style={st.testTxt}>Test Alarm</Text>
         </TouchableOpacity>
+        <View style={[st.chips, { marginTop: 8, justifyContent: 'center' }]}>
+          <Chip on={false} label="🗣 Test voice" onPress={() => { try { Speech.stop(); Speech.speak(VOICE.outside, { rate: 1.0 }); } catch {} }} />
+          <Chip on={false} label="〰 Test vibration" onPress={() => { try { Vibration.vibrate(VIBE_PATTERN[a.vibePattern], false); } catch {} }} />
+        </View>
         <Text style={{ color: colors.text + '77', fontSize: 12, textAlign: 'center', marginTop: 8 }}>
           Plays the enabled channels for a few seconds. Nothing is written to history.
         </Text>
@@ -193,8 +210,12 @@ export default function LockSettingsScreen() {
           <Text style={{ color: colors.text + '88', fontSize: 12.5, marginTop: 6, lineHeight: 18 }}>
             Geofencing runs entirely on this device. Your coordinates and history never
             leave it — the only network call is to VaultChat’s own routing engine when
-            you navigate back. Open-source stack: OpenStreetMap tiles, self-hosted
-            Valhalla routing, Leaflet rendering.
+            you navigate back.
+          </Text>
+          <Text style={{ color: colors.text + '66', fontSize: 11.5, marginTop: 8, lineHeight: 16 }}>
+            Open-source components: OpenStreetMap data (ODbL) · Leaflet (BSD-2) ·
+            Valhalla routing (MIT) · CARTO basemap tiles. Alarm sounds are generated,
+            license-free.
           </Text>
         </View>
       </ScrollView>

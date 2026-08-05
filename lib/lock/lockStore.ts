@@ -77,7 +77,8 @@ export function lockDb(): Promise<LocalDb> {
           alarm_ms        INTEGER NOT NULL DEFAULT 0,
           distance_traveled REAL NOT NULL DEFAULT 0,
           acc_sum         REAL NOT NULL DEFAULT 0,
-          acc_n           INTEGER NOT NULL DEFAULT 0
+          acc_n           INTEGER NOT NULL DEFAULT 0,
+          notes           TEXT
         );
         CREATE TABLE IF NOT EXISTS lock_events (
           id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,9 +89,9 @@ export function lockDb(): Promise<LocalDb> {
         );
         CREATE INDEX IF NOT EXISTS idx_lock_events_session ON lock_events(session_id, t)
       `);
-      // v2 additive migration for installs that created the table before
-      // acc_sum/acc_n existed (ADD COLUMN throws if present — that's fine).
-      for (const col of ['acc_sum REAL NOT NULL DEFAULT 0', 'acc_n INTEGER NOT NULL DEFAULT 0']) {
+      // v2/v2.1 additive migrations for installs that created the table before
+      // these columns existed (ADD COLUMN throws if present — that's fine).
+      for (const col of ['acc_sum REAL NOT NULL DEFAULT 0', 'acc_n INTEGER NOT NULL DEFAULT 0', 'notes TEXT']) {
         try { await db.execAsync(`ALTER TABLE lock_sessions ADD COLUMN ${col}`); } catch {}
       }
       return db;
@@ -115,6 +116,9 @@ export interface LockSessionRow {
   max_distance: number;
   alarm_ms: number;
   distance_traveled: number;
+  acc_sum: number;
+  acc_n: number;
+  notes: string | null;
 }
 
 export interface LockEventRow { id: number; session_id: number; type: LockEventType; t: number; distance: number | null }
@@ -296,6 +300,12 @@ export async function exportHistoryCSV(): Promise<string> {
     s.exits, s.returns, Math.round(s.max_distance * 10) / 10, s.alarm_ms, Math.round(s.distance_traveled),
   ].join(','));
   return [head, ...lines].join('\n');
+}
+
+/** Optional per-session note (v2.1) — set empty/null to clear. */
+export async function setSessionNotes(sessionId: number, notes: string | null): Promise<void> {
+  const db = await lockDb();
+  await db.runAsync(`UPDATE lock_sessions SET notes = ? WHERE id = ?`, [notes?.trim() || null, sessionId]);
 }
 
 export async function deleteSession(sessionId: number): Promise<void> {

@@ -72,4 +72,18 @@
 
 - [x] 12.1 Extended `app/lock-settings.tsx` into the hub: General (units, mode + custom sensitivity) / Sound & Vibration (existing alert settings) / Battery (background toggle + optimization exemption) / About (privacy summary)
 - [x] 12.2 Background-tracking toggle wires to `enableKillSafe`/`disableKillSafe` with the foreground-only status-notification path
-- [x] 12.3 Family Space integration: Location Lock tile in the family hub; Family Places listed as one-tap lock points in setup (place sets point AND radius)
+- [x] 12.3 ~~Family Space tile~~ REVERTED per user direction — Location Lock lives in the Navigate mini-app ONLY and Family Space screens are untouched; saved places remain available in lock setup as the "Saved location" lock type (read-only, labeled "Saved places")
+
+## 13. v2.1 polish (Location Lock Pro final plan)
+
+- [x] 13.1 Map: Leaflet scale bar (metric/imperial follows units), free-explore pause with auto-recenter after 10 s idle
+- [x] 13.2 GPS intelligence: confidence % (`gpsConfidence`, self-checked), "GPS updated Ns ago" readout, indoor/degraded detection on raw fixes with spoken "weak GPS" + "GPS signal recovered" alerts
+- [x] 13.3 Boundary prediction: "X remaining to the boundary" banner in warning/at-limit states
+- [x] 13.4 Navigation: overall route progress bar in the active sheet (banner `totalM`)
+- [x] 13.5 Alarm controls: separate Test voice and Test vibration in settings
+- [x] 13.6 History: optional per-session notes (additive `notes` column, inline editor, shown on cards)
+- [x] 13.7 Battery: stationary detection relaxes cadence; tracking-frequency setting (Adaptive / Battery saver / High precision)
+- [x] 13.8 Reliability: GPS-services-off detected at arm with clear recovery guidance
+- [x] 13.9 Accessibility pass: roles + labels on primary lock controls
+- [ ] 13.10 Map rotation / 3D tilt / camera modes beyond follow+explore+overview — deferred to the MapLibre upgrade (user: "if we want we will update maplibre")
+- [ ] 13.11 Language setting, screen-reader field audit, device matrix — app-level / physical-device work

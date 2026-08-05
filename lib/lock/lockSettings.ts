@@ -25,12 +25,15 @@ export interface LockAlertSettings {
   repeatIntervalS: number;   // gap between alarm cycles when repeating
 }
 
+export type LockCadence = 'auto' | 'saver' | 'high';
+
 export interface LockSettings {
   alerts: LockAlertSettings;
   lastRadius: number;        // last chosen radius (m), pre-selected next time
   units: Units;              // applies to every distance/speed readout
   mode: LockMode;            // monitoring sensitivity + navigate-back default
   customSensitivity: { warningBand: number; hysteresis: number };  // mode === 'custom'
+  cadence: LockCadence;      // tracking frequency: adaptive / battery saver / high precision
 }
 
 export const DEFAULT_LOCK_ALERTS: LockAlertSettings = {
@@ -42,6 +45,7 @@ export const DEFAULT_LOCK_ALERTS: LockAlertSettings = {
 const DEFAULT: LockSettings = {
   alerts: DEFAULT_LOCK_ALERTS, lastRadius: 30,
   units: 'metric', mode: 'walking', customSensitivity: { warningBand: 5, hysteresis: 3 },
+  cadence: 'auto',
 };
 const KEY = 'vc_lock_settings_v1';
 

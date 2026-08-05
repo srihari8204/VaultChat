@@ -23,7 +23,7 @@ import { type Costing } from '../lib/nav/routing';
 import NavMap from '../components/nav/NavMap';
 import { clampRadius, zoneColor, type LockMode } from '../lib/lock/zoneMachine';
 import { useLockSettings, setLockSettings } from '../lib/lock/lockSettings';
-import { fmtDistance, fmtSpeed, fmtHeading, QUALITY_LABEL, QUALITY_COLOR } from '../lib/lock/format';
+import { fmtDistance, fmtSpeed, fmtHeading, fmtAgo, gpsConfidence, QUALITY_LABEL, QUALITY_COLOR } from '../lib/lock/format';
 import {
   useLockView, armLock, unlockLock, restoreLock, stopLockAlarm,
   navigateBackToLock, enableKillSafe, testAlarm, applyAlertSettings,
@@ -191,6 +191,7 @@ export default function LocationLockScreen() {
 
         {(alarming || lock.alarmPhase === 'grace') && (
           <TouchableOpacity
+            accessibilityRole="button" accessibilityLabel="Stop alarm"
             onPress={() => (alarming ? stopLockAlarm() : undefined)}
             style={[st.alarmBar, { backgroundColor: alarming ? '#DC2626' : '#F97316' }]}>
             <Ionicons name={alarming ? 'alert-circle' : 'time'} size={18} color="#fff" />
@@ -198,6 +199,23 @@ export default function LocationLockScreen() {
               {alarming ? 'ALARM — you left the locked area. Tap to stop.' : 'Outside the radius — alarm imminent…'}
             </Text>
           </TouchableOpacity>
+        )}
+        {/* boundary prediction (v2.1): how much room is left before the edge */}
+        {lock.alarmPhase === 'idle' && (lock.state === 'warning' || lock.state === 'atLimit') && (
+          <View style={[st.alarmBar, { backgroundColor: lock.state === 'warning' ? '#A16207' : '#C2410C' }]}>
+            <Ionicons name="warning" size={16} color="#fff" />
+            <Text style={st.alarmBarTxt}>
+              {fmtDistance(Math.max(0, lock.radius - lock.distance), settings.units)} remaining to the boundary
+            </Text>
+          </View>
+        )}
+        {lock.gpsDegraded && (
+          <View style={[st.alarmBar, { backgroundColor: '#374151' }]}>
+            <Ionicons name="cellular" size={15} color="#F97316" />
+            <Text style={[st.alarmBarTxt, { fontWeight: '600' }]}>
+              Weak GPS — possibly indoors. Monitoring continues with drift protection.
+            </Text>
+          </View>
         )}
 
         <NavMap
@@ -208,6 +226,7 @@ export default function LocationLockScreen() {
           headingDeg={lock.heading}
           showCompass
           zoomControls
+          imperialScale={settings.units === 'imperial'}
           style={{ flex: 1 }}
         />
 
@@ -227,8 +246,11 @@ export default function LocationLockScreen() {
             <Stat label="Speed" value={fmtSpeed(lock.speedKmh, settings.units)} colors={colors} />
             <Stat label="Heading" value={fmtHeading(lock.heading)} colors={colors} />
             <Stat label="Battery" value={lock.battery != null ? `${lock.battery}%${lock.charging ? ' ⚡' : ''}` : '—'} colors={colors} />
-            <Stat label="Quality" value={QUALITY_LABEL[lock.quality]} colors={colors} valueColor={QUALITY_COLOR[lock.quality]} />
+            <Stat label="Confidence" value={`${QUALITY_LABEL[lock.quality]} · ${gpsConfidence(lock.accuracy)}%`} colors={colors} valueColor={QUALITY_COLOR[lock.quality]} />
           </View>
+          <Text style={{ color: colors.text + '66', fontSize: 11 }}>
+            GPS updated {lock.lastFixAt ? fmtAgo(Date.now() - lock.lastFixAt) : '—'}
+          </Text>
 
           {!lock.killSafe && (
             <TouchableOpacity onPress={() => enableKillSafe()} style={[st.bgBanner, { borderColor: colors.border }]}>
@@ -249,7 +271,8 @@ export default function LocationLockScreen() {
           )}
 
           <View style={[st.row, { marginTop: 14, gap: 10 }]}>
-            <TouchableOpacity onPress={unlock} style={[st.btn, { borderColor: '#EF4444', borderWidth: 1.5 }]}>
+            <TouchableOpacity onPress={unlock} accessibilityRole="button" accessibilityLabel="Unlock and stop monitoring"
+              style={[st.btn, { borderColor: '#EF4444', borderWidth: 1.5 }]}>
               <Ionicons name="lock-open" size={16} color="#EF4444" />
               <Text style={[st.btnTxt, { color: '#EF4444' }]}>Unlock</Text>
             </TouchableOpacity>
@@ -304,10 +327,11 @@ export default function LocationLockScreen() {
             : <TouchableOpacity onPress={search}><Text style={{ color: colors.primary, fontWeight: '700' }}>Find</Text></TouchableOpacity>}
         </View>
 
-        {/* Family Space places — one tap sets both point and radius */}
+        {/* Saved places (lock type: saved location) — one tap sets both point
+            and radius. Sourced read-only from the user's saved place list. */}
         {saved.length > 0 && (
           <View style={{ marginTop: 12 }}>
-            <Text style={{ color: colors.text + '88', fontSize: 12, fontWeight: '700', marginBottom: 6 }}>SAVED PLACES (FAMILY SPACE)</Text>
+            <Text style={{ color: colors.text + '88', fontSize: 12, fontWeight: '700', marginBottom: 6 }}>SAVED PLACES</Text>
             <View style={st.chips}>
               {saved.map((p, i) => (
                 <TouchableOpacity key={`${p.name}-${i}`}
@@ -340,6 +364,7 @@ export default function LocationLockScreen() {
           pinMode={pinMode}
           onPinDrop={(p) => setPoint({ name: 'Dropped pin', coords: p })}
           zoomControls
+          imperialScale={settings.units === 'imperial'}
           style={[st.previewMap, { borderColor: colors.border }]}
         />
 
@@ -407,6 +432,7 @@ export default function LocationLockScreen() {
         </View>
 
         <TouchableOpacity disabled={!point || arming} onPress={arm}
+          accessibilityRole="button" accessibilityLabel="Lock this location and start monitoring"
           style={[st.lockBtn, { backgroundColor: point ? colors.primary : colors.border }]}>
           {arming ? <ActivityIndicator color="#fff" />
             : <><Ionicons name="lock-closed" size={18} color="#fff" /><Text style={st.lockTxt}>Lock Location</Text></>}

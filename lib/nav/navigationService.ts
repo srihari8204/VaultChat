@@ -24,11 +24,12 @@ export interface NavBanner {
   roadName: string;
   distanceToManeuver: number;  // m to the next maneuver
   remainingM: number;          // m to destination
+  totalM: number;              // full route length (v2.1: overall progress bar)
   etaEpochMs: number;          // arrival time
   progress: number;            // 0..1 toward the next maneuver (banner's shrinking line)
   rerouting: boolean;
 }
-const IDLE: NavBanner = { active: false, event: null, instruction: '', roadName: '', distanceToManeuver: 0, remainingM: 0, etaEpochMs: 0, progress: 0, rerouting: false };
+const IDLE: NavBanner = { active: false, event: null, instruction: '', roadName: '', distanceToManeuver: 0, remainingM: 0, totalM: 0, etaEpochMs: 0, progress: 0, rerouting: false };
 
 // ── tiny external store for the banner ──
 let banner: NavBanner = IDLE;
@@ -103,6 +104,7 @@ async function reroute() {
     route = await fetchRoute(last.pos, dest, opts.costing ?? 'auto', opts.routeOpts);
     maneuverIdx = 0; timeline = null;
     setGeo({ shape: route.shape });
+    setBanner({ totalM: route.lengthM });
   } catch { /* keep the old route; next fix retries via missed-turn */ }
   finally { rerouting = false; setBanner({ rerouting: false }); }
 }
@@ -187,7 +189,7 @@ export async function startNavigation(o: StartNavOpts): Promise<void> {
   route = await fetchRoute(fromLL, o.to, o.costing ?? 'auto', o.routeOpts);
   maneuverIdx = 0; timeline = null; last = null;
   startVoiceGuide(o.mode ?? 'vibrationOnly');
-  setBanner({ ...IDLE, active: true });
+  setBanner({ ...IDLE, active: true, totalM: route.lengthM });
   setGeo({ shape: route.shape, dest: o.to, pos: fromLL, heading: 0 });
 
   watcher = await Location.watchPositionAsync(

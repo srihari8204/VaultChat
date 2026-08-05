@@ -53,12 +53,15 @@ export interface LockView {
   heading: number;           // device compass heading, degrees
   killSafe: boolean;         // background task running (survives app kill)
   navBack: boolean;          // navigate-back session started by the lock
+  lastFixAt: number;         // t of the last accepted fix ("updated Ns ago")
+  gpsDegraded: boolean;      // sustained poor accuracy (indoors / canyon)
 }
 
 const IDLE: LockView = {
   active: false, center: null, radius: 30, armedAt: 0, state: null,
   distance: 0, accuracy: 0, quality: 'good', speedKmh: 0, battery: null, charging: false,
   alarmPhase: 'idle', heading: 0, killSafe: false, navBack: false,
+  lastFixAt: 0, gpsDegraded: false,
 };
 
 let view: LockView = IDLE;
@@ -80,13 +83,31 @@ let watchProfile: 'tight' | 'relaxed' | null = null;
 let navStartedByLock = false;
 let fixQueue: Promise<void> = Promise.resolve();
 let alertRouted = false;
+let poorRun = 0;    // consecutive raw fixes with poor accuracy (indoor detection)
+let stillRun = 0;   // consecutive near-zero-speed fixes (stationary tracking)
 
-// Cadence by distance-to-boundary: deep in the green a slow, cheap watch is
-// enough; near the boundary (or outside) we need the nav-grade cadence. This
-// is the main battery lever (see design.md).
+// Cadence by distance-to-boundary, movement, and the user's tracking-frequency
+// setting: deep in the green (or parked) a slow, cheap watch is enough; near
+// the boundary or in high-precision mode we run the nav-grade cadence. This is
+// the main battery lever (see design.md).
 function profileFor(a: ActiveLock): 'tight' | 'relaxed' {
+  const cad = getLockSettings().cadence;
+  if (cad === 'high') return 'tight';
+  if (cad === 'saver') return a.snap.state === 'safe' ? 'relaxed' : 'tight';
   const margin = a.radius - a.snap.distance;
-  return a.snap.state === 'safe' && margin > Math.max(40, a.radius * 0.25) ? 'relaxed' : 'tight';
+  const need = stillRun >= 5 ? Math.max(15, a.radius * 0.15) : Math.max(40, a.radius * 0.25);
+  return a.snap.state === 'safe' && margin > need ? 'relaxed' : 'tight';
+}
+
+// Short spoken status lines (indoor / recovered) — gated on the voice channel.
+// Lazy require (family/battery pattern): degrades to silence where TTS is absent.
+function speakStatus(text: string): void {
+  if (!getLockSettings().alerts.voice) return;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const S = require('expo-speech');
+    S.stop(); S.speak(text, { rate: 1.0 });
+  } catch {}
 }
 
 const WATCH_OPTS = {
@@ -166,6 +187,19 @@ function onPhase(p: AlarmPhase): void {
 
 async function onFix(loc: Location.LocationObject): Promise<void> {
   if (!active) return;
+
+  // Indoor / degraded-GPS detection runs on RAW fixes — a truly degraded
+  // environment produces mostly gate-rejected fixes, which must still count.
+  const rawAcc = loc.coords.accuracy ?? 15;
+  poorRun = rawAcc > 30 ? poorRun + 1 : 0;
+  if (!view.gpsDegraded && poorRun >= 4) {
+    setView({ gpsDegraded: true });
+    speakStatus('GPS signal is weak. Location may be indoors.');
+  } else if (view.gpsDegraded && rawAcc < 15) {
+    setView({ gpsDegraded: false });
+    speakStatus('GPS signal recovered.');
+  }
+
   const prevPos = active.lastPos;
   const prevT = active.snap.t;
   const r = advanceActiveLock(active, toZoneFix(loc));
@@ -178,6 +212,7 @@ async function onFix(loc: Location.LocationObject): Promise<void> {
   let speedMs = loc.coords.speed != null && loc.coords.speed >= 0 ? loc.coords.speed : 0;
   const dt = (active.snap.t - prevT) / 1000;
   if (speedMs === 0 && prevPos && dt > 0) speedMs = r.deltas.traveled / dt;
+  stillRun = speedMs < 0.3 ? stillRun + 1 : 0;
   const bat = await readBattery();
 
   setView({
@@ -188,6 +223,7 @@ async function onFix(loc: Location.LocationObject): Promise<void> {
     speedKmh: Math.round(speedMs * 3.6),
     battery: bat.level ?? null,
     charging: !!bat.charging,
+    lastFixAt: active.snap.t,
   });
 
   for (const ev of r.events) {
@@ -217,6 +253,12 @@ export async function armLock(center: LatLng, radius: number): Promise<ArmResult
   await unlockInternal(false);             // safety: never two sessions
   await loadLockSettings();
 
+  // Reliability (v2.1): clear guidance for GPS-off and permission-denied.
+  try {
+    if (!(await Location.hasServicesEnabledAsync())) {
+      return { ok: false, killSafe: false, reason: 'Location (GPS) is turned off. Enable Location in system settings, then lock again.' };
+    }
+  } catch { /* API unavailable → let the permission/fix path report */ }
   const perm = await Location.requestForegroundPermissionsAsync();
   if (perm.status !== 'granted') return { ok: false, killSafe: false, reason: 'Location permission is required to lock a location.' };
 
@@ -356,6 +398,7 @@ export async function unlockLock(): Promise<void> {
 async function unlockInternal(record: boolean): Promise<void> {
   const a = active;
   active = null;
+  poorRun = 0; stillRun = 0;
   stopSensors();
   controller?.dispose();
   controller = null;

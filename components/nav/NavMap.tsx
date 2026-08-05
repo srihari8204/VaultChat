@@ -66,7 +66,12 @@ var map=L.map('map',{zoomControl:false}).setView([20.6,78.9],4);
 L.tileLayer('${tileUrl}',{maxZoom:19,subdomains:'abcd',
   attribution:'&copy; OpenStreetMap &copy; CARTO'}).addTo(map);
 var RN=window.ReactNativeWebView;
-var line=null,you=null,flag=null,fitted=false,lockC=null,accC=null,pinM=null,pinMode=0,hdg=0;
+var line=null,you=null,flag=null,fitted=false,lockC=null,accC=null,pinM=null,pinMode=0,hdg=0,scaleC=null,lastTouch=0;
+// Free-explore: a manual pan/zoom pauses follow; it auto-recenters after 10 s idle.
+map.on('dragstart zoomstart',function(){lastTouch=Date.now();});
+function setScale(imp){ if(scaleC)map.removeControl(scaleC);
+  scaleC=L.control.scale({metric:!imp,imperial:!!imp,position:'bottomleft',maxWidth:80}).addTo(map); }
+setScale(0);
 function setRoute(cs){ if(line)map.removeLayer(line); if(!cs||!cs.length)return;
   line=L.polyline(cs,{color:'${accent}',weight:6,opacity:.85,lineJoin:'round'}).addTo(map);
   if(!fitted){map.fitBounds(line.getBounds().pad(0.18));fitted=true;} }
@@ -79,7 +84,7 @@ function setPos(la,ln,follow,acc){
   if(!you){you=L.marker([la,ln],{icon:youIcon(),zIndexOffset:1000}).addTo(map);}else{you.setLatLng([la,ln]);you.setIcon(youIcon());}
   if(acc&&acc>0){ if(!accC){accC=L.circle([la,ln],{radius:acc,color:'#2f7bff',weight:1,opacity:.5,fillColor:'#2f7bff',fillOpacity:.12,interactive:false}).addTo(map);}else{accC.setLatLng([la,ln]);accC.setRadius(acc);} }
   else if(accC){map.removeLayer(accC);accC=null;}
-  if(follow)map.setView([la,ln],Math.max(map.getZoom(),16),{animate:true}); }
+  if(follow&&Date.now()-lastTouch>10000)map.setView([la,ln],Math.max(map.getZoom(),16),{animate:true}); }
 function setHeading(h){ hdg=h; var el=document.getElementById('needle');
   if(el)el.style.transform='rotate('+(-h)+'deg)';
   if(you)you.setIcon(youIcon()); }
@@ -111,7 +116,7 @@ if(RN)RN.postMessage('ready');
 export default function NavMap({
   style, data, follow = true,
   lock, accuracyM, headingDeg, showCompass = false,
-  pin, pinMode = false, onPinDrop, zoomControls = false,
+  pin, pinMode = false, onPinDrop, zoomControls = false, imperialScale = false,
 }: {
   style?: any;
   data?: NavGeo;
@@ -124,6 +129,7 @@ export default function NavMap({
   pinMode?: boolean;
   onPinDrop?: (p: LatLng) => void;
   zoomControls?: boolean;
+  imperialScale?: boolean;
 }) {
   const { scheme, colors } = useTheme();
   const storeGeo = useNavGeo();
@@ -167,6 +173,10 @@ export default function NavMap({
     if (!ready || !ref.current) return;
     ref.current.injectJavaScript(`showCompass(${showCompass ? 1 : 0});true;`);
   }, [ready, showCompass]);
+  useEffect(() => {
+    if (!ready || !ref.current) return;
+    ref.current.injectJavaScript(`setScale(${imperialScale ? 1 : 0});true;`);
+  }, [ready, imperialScale]);
   useEffect(() => {
     if (!ready || !ref.current || headingDeg == null) return;
     ref.current.injectJavaScript(`setHeading(${Math.round(headingDeg)});true;`);

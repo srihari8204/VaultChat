@@ -5,13 +5,13 @@
 // these screens make no network requests (spec: lock-history).
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, FlatList, Alert, Share } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, FlatList, Alert, Share, TextInput } from 'react-native';
 import { Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import {
   getSessions, getEvents, statsForRange, distancePerDay, deleteSession, clearAllHistory,
-  exportHistoryJSON, exportHistoryCSV,
+  exportHistoryJSON, exportHistoryCSV, setSessionNotes,
   type LockSessionRow, type LockEventRow, type HistoryFilter, type LockStats,
 } from '../lib/lock/lockStore';
 import { fmtDistance } from '../lib/lock/format';
@@ -53,6 +53,7 @@ export default function LockHistoryScreen() {
   const [trend, setTrend] = useState<{ day: string; meters: number }[]>([]);
   const [open, setOpen] = useState<number | null>(null);
   const [events, setEvents] = useState<LockEventRow[]>([]);
+  const [noteDraft, setNoteDraft] = useState('');
 
   const reload = useCallback(async () => {
     setSessions(await getSessions(filter));
@@ -70,6 +71,7 @@ export default function LockHistoryScreen() {
   const toggle = async (id: number) => {
     if (open === id) { setOpen(null); return; }
     setOpen(id);
+    setNoteDraft(sessions.find((s) => s.id === id)?.notes ?? '');
     setEvents(await getEvents(id));
   };
 
@@ -194,6 +196,9 @@ export default function LockHistoryScreen() {
                 {s.alarm_ms > 0 ? `alarm ${fmtMs(s.alarm_ms)} · ` : ''}outside {fmtMs(s.time_outside_ms)}
               </Text>
             </View>
+            {!!s.notes && open !== s.id && (
+              <Text numberOfLines={1} style={{ color: colors.text + '66', fontSize: 12, marginTop: 4 }}>📝 {s.notes}</Text>
+            )}
 
             {open === s.id && (
               <View style={[st.timeline, { borderColor: colors.border }]}>
@@ -210,6 +215,20 @@ export default function LockHistoryScreen() {
                     </View>
                   );
                 })}
+                {/* optional note (v2.1) */}
+                <View style={{ flexDirection: 'row', gap: 6, marginTop: 8, alignItems: 'center' }}>
+                  <TextInput
+                    value={noteDraft} onChangeText={setNoteDraft}
+                    placeholder="Add a note (e.g. “parked at north gate”)…"
+                    placeholderTextColor={colors.text + '55'}
+                    style={{ flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5, color: colors.text, fontSize: 12 }}
+                  />
+                  <TouchableOpacity
+                    accessibilityRole="button" accessibilityLabel="Save note"
+                    onPress={async () => { await setSessionNotes(s.id, noteDraft); reload(); }}>
+                    <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 12 }}>Save</Text>
+                  </TouchableOpacity>
+                </View>
                 <Text style={{ color: colors.text + '55', fontSize: 11, marginTop: 6 }}>
                   {s.center_lat.toFixed(5)}, {s.center_lng.toFixed(5)} · long-press card to delete
                 </Text>
