@@ -14,8 +14,17 @@ export const CHUNK_BYTES = 512 * 1024;
 export const MAX_BYTES   = 12 * 1024 * 1024 * 1024;
 
 // ── Relay control-plane API (against routes/vaultbeam.js) ───────────
-export interface RelayInit { transferId: string; blockCount: number; chunkCount: number; chunkBytes: number; blockBytes: number; expiresAt: string }
-export interface RelayState { transferId: string; state: string; totalBytes: number; blockCount: number; chunkCount: number; chunkBytes: number; blockBytes: number; plan?: string | null; uploadedMask: string; uploaded: number; isSender: boolean; expiresAt: string }
+export interface RelayInit { transferId: string; blockCount: number; chunkCount: number; chunkBytes: number; blockBytes: number; expiresAt: string; sessionVersion?: number }
+export interface RelayState {
+  transferId: string; state: string; totalBytes: number; blockCount: number; chunkCount: number;
+  chunkBytes: number; blockBytes: number; plan?: string | null; uploadedMask: string; uploaded: number;
+  isSender: boolean; expiresAt: string;
+  /** Receiver's verified-chunk bitmap (base64) — how a SENDER learns what the
+   *  peer already holds, so it never stages a delivered chunk again. */
+  recvMask?: string; received?: number;
+  /** Monotonic server-held version; a mismatch on any mutating call is a 409. */
+  sessionVersion?: number;
+}
 export interface BlockUrl { blockIndex: number; url: string }
 
 export const relayInit = (transferId: string, recipientId: string, totalBytes: number, chatId?: string, blockCount?: number, plan?: string) =>
@@ -35,8 +44,18 @@ export const relayMarkUploaded = (transferId: string, blocks: number[]) =>
 export const relayState = (transferId: string) =>
   api<RelayState>(`/vaultbeam/relay/${encodeURIComponent(transferId)}`);
 
-export const relayComplete = (transferId: string) =>
-  api<{ ok: boolean }>('/vaultbeam/relay/complete', { method: 'POST', json: { transferId } });
+// Recipient publishes its verified-chunk bitmap. Union-merged server-side, so
+// posting a stale mask is harmless and ordering does not matter.
+export const relayReceived = (transferId: string, mask: string, sessionVersion?: number) =>
+  api<{ received: number; chunkCount: number; complete: boolean }>('/vaultbeam/relay/received',
+    { method: 'POST', json: { transferId, mask, sessionVersion } });
+
+// Completion is recorded by the SERVER and is authoritative from that moment,
+// whether or not the sender ever hears about it — which is why a lost final
+// acknowledgement can no longer cause a re-upload. Idempotent.
+export const relayComplete = (transferId: string, opts?: { sessionVersion?: number; mask?: string }) =>
+  api<{ ok: boolean }>('/vaultbeam/relay/complete',
+    { method: 'POST', json: { transferId, sessionVersion: opts?.sessionVersion, mask: opts?.mask } });
 
 export const relayAbort = (transferId: string) =>
   api<{ ok: boolean }>('/vaultbeam/relay/abort', { method: 'POST', json: { transferId } });

@@ -49,21 +49,51 @@ pub struct ChunkSpec {
     pub plain_len: usize,  // <= chunkBytes; the tail chunk is shorter
 }
 
+/// How a chunk's identity (nonce + AAD) is derived from its position.
+///
+/// `Canonical` is the vbm3 scheme and the only one used by new transfers: the
+/// logical chunk size is globally constant, so a chunk's id is its GLOBAL
+/// LOGICAL INDEX regardless of which transport carries it or how large the
+/// physical block is. That equality across transports is what makes a single
+/// resume bitmap meaningful.
+///
+/// The other two are retained to read data written by older clients during the
+/// one-release dual-read window (relay objects expire in 24 h, so the window
+/// only needs to exceed a day):
+///   * `Uniform`      — legacy, `id = blockIndex * chunksPerBlock + i`. Correct
+///                      only when every block has the same size.
+///   * `LegacyOffset` — vbm2 segmented relay, `id = plainOffset`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdScheme {
+    Uniform,
+    LegacyOffset,
+    Canonical,
+}
+
+impl IdScheme {
+    /// Back-compat default: what the pre-vbm3 code did for a given call shape.
+    /// `block_plain_offset = Some` meant the segmented relay path.
+    pub fn legacy_default(block_plain_offset: Option<u64>) -> Self {
+        if block_plain_offset.is_some() { IdScheme::LegacyOffset } else { IdScheme::Uniform }
+    }
+}
+
 /// Recompute a block's chunk geometry — identical on the pack (upload) and
 /// split (download) side, so no per-chunk length rides the wire.
 ///
-/// `block_plain_offset = Some` ⇒ segmented/offset scheme (chunkId = plaintext
-/// offset). `None` ⇒ uniform R2 (chunkId = blockIndex*chunksPerBlock + i).
+/// `block_plain_offset = Some` supplies the block's plaintext base offset
+/// (segmented geometry); `None` derives it as `blockIndex * blockBytes`.
+/// `scheme` selects how the chunk id is derived — see [`IdScheme`].
 pub fn plan_block(
     block_index: u64,
     chunk_bytes: u64,
     block_bytes: u64,
     total_bytes: u64,
     block_plain_offset: Option<u64>,
+    scheme: IdScheme,
 ) -> Vec<ChunkSpec> {
     let chunks_per_block = block_bytes / chunk_bytes;
     let first_chunk = block_index * chunks_per_block;
-    let offset_scheme = block_plain_offset.is_some();
     let base = block_plain_offset.unwrap_or(block_index * block_bytes);
     let mut out = Vec::with_capacity(chunks_per_block as usize);
     for i in 0..chunks_per_block {
@@ -71,7 +101,11 @@ pub fn plan_block(
         if plain_offset >= total_bytes {
             break;
         }
-        let id = if offset_scheme { plain_offset } else { first_chunk + i };
+        let id = match scheme {
+            IdScheme::Uniform => first_chunk + i,
+            IdScheme::LegacyOffset => plain_offset,
+            IdScheme::Canonical => plain_offset / chunk_bytes,
+        };
         let plain_len = chunk_bytes.min(total_bytes - plain_offset) as usize;
         out.push(ChunkSpec { id, plain_offset, plain_len });
     }
@@ -132,27 +166,74 @@ mod tests {
     #[test]
     fn block_plan_uniform_tail() {
         // total 100, chunk 16, block 64 → block0 = 4 full; block1 = 2 full + tail(4).
-        let b0 = plan_block(0, 16, 64, 100, None);
+        let b0 = plan_block(0, 16, 64, 100, None, IdScheme::Uniform);
         assert_eq!(b0.iter().map(|s| s.id).collect::<Vec<_>>(), vec![0, 1, 2, 3]);
-        let b1 = plan_block(1, 16, 64, 100, None);
+        let b1 = plan_block(1, 16, 64, 100, None, IdScheme::Uniform);
         assert_eq!(b1.iter().map(|s| (s.id, s.plain_len)).collect::<Vec<_>>(), vec![(4, 16), (5, 16), (6, 4)]);
     }
 
     #[test]
     fn block_plan_offset_scheme_uses_offset_ids() {
-        let b = plan_block(1, 16, 64, 100, Some(64));
+        let b = plan_block(1, 16, 64, 100, Some(64), IdScheme::LegacyOffset);
         assert_eq!(b.iter().map(|s| s.id).collect::<Vec<_>>(), vec![64, 80, 96]);
+    }
+
+    #[test]
+    fn block_plan_canonical_uses_global_logical_index() {
+        // Same block as above, canonical: id = offset / chunkBytes.
+        let b = plan_block(1, 16, 64, 100, Some(64), IdScheme::Canonical);
+        assert_eq!(b.iter().map(|s| s.id).collect::<Vec<_>>(), vec![4, 5, 6]);
+    }
+
+    #[test]
+    fn canonical_id_is_transport_invariant() {
+        // THE property the whole seamless-resume design rests on: the chunk
+        // covering plaintext offset X has the SAME id whether it arrives in a
+        // 64-byte physical block, a 32-byte one, or one chunk at a time over a
+        // direct transport. `Uniform` does NOT have this property once physical
+        // block sizes differ, which is exactly why the scheme changed.
+        // Same plaintext base (offset 64), two different physical block sizes.
+        let big = plan_block(1, 16, 64, 100, Some(64), IdScheme::Canonical);
+        let small = plan_block(1, 16, 32, 100, Some(64), IdScheme::Canonical);
+        assert_eq!(big[0].id, small[0].id, "same offset ⇒ same id across physical unit sizes");
+        assert_eq!(big[0].plain_offset, small[0].plain_offset);
+
+        // and it equals the direct-transport global index for that offset
+        assert_eq!(small[0].id, small[0].plain_offset / 16);
+
+        // The legacy uniform scheme is NOT offset-stable once physical block
+        // sizes differ between segments: global block 1 here starts at offset 64
+        // (logical chunk 4), but uniform computes 1 * (32/16) = 2. Two transports
+        // disagreeing about a chunk's name is precisely RC-2.
+        let legacy_small = plan_block(1, 16, 32, 100, Some(64), IdScheme::Uniform);
+        assert_eq!(legacy_small[0].id, 2, "uniform derives the id from the block index");
+        assert_ne!(legacy_small[0].id, small[0].id, "uniform is not offset-stable");
     }
 
     #[test]
     fn block_round_trip() {
         let key = [9u8; 32];
         let data: Vec<u8> = (0..100u32).map(|o| (o.wrapping_mul(31).wrapping_add(7)) as u8).collect();
-        let specs = plan_block(1, 16, 64, 100, None);
-        let wire = seal_block(&key, "tid", "fid", &specs, &data);
-        let opened = open_block(&key, "tid", "fid", &specs, &wire).unwrap();
-        for (off, plain) in opened {
-            assert_eq!(plain, data[off as usize..off as usize + plain.len()]);
+        for scheme in [IdScheme::Uniform, IdScheme::LegacyOffset, IdScheme::Canonical] {
+            let specs = plan_block(1, 16, 64, 100, Some(64), scheme);
+            let wire = seal_block(&key, "tid", "fid", &specs, &data);
+            let opened = open_block(&key, "tid", "fid", &specs, &wire).unwrap();
+            for (off, plain) in opened {
+                assert_eq!(plain, data[off as usize..off as usize + plain.len()], "{scheme:?}");
+            }
         }
+    }
+
+    #[test]
+    fn cross_scheme_open_fails() {
+        // A block sealed canonical must NOT open as legacy — the AAD/nonce differ,
+        // so a version mix is a clean authentication failure, never a silent
+        // mis-decrypt. This is what makes the dual-read window safe.
+        let key = [9u8; 32];
+        let data: Vec<u8> = (0..100u32).map(|o| (o.wrapping_mul(31).wrapping_add(7)) as u8).collect();
+        let canon = plan_block(1, 16, 64, 100, Some(64), IdScheme::Canonical);
+        let wire = seal_block(&key, "tid", "fid", &canon, &data);
+        let legacy = plan_block(1, 16, 64, 100, Some(64), IdScheme::LegacyOffset);
+        assert!(open_block(&key, "tid", "fid", &legacy, &wire).is_err());
     }
 }

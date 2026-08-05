@@ -141,6 +141,54 @@
       "blockPlainOffset": 64
     }
   ],
+  "blocksCanonical": [
+    {
+      "name": "canonical block0 (offset 0, 64B block)",
+      "transferId": "TQF9k2mZ7pXaLdRb",
+      "fileId": "file-9d3c1f",
+      "blockIndex": 0,
+      "chunkBytes": 16,
+      "blockBytes": 64,
+      "totalBytes": 100,
+      "blockPlainOffset": 0,
+      "chunkIds": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "wireHex": "8db4dd706c28a1b6bdfa2cfc9ea9cf33ad1c24791f81de7ef3f37335751f440ae1aaf4f676975eab156fb5b189c292aa763b0832b83fa605dd8e319b3adf5359f1ccc66986888853591c1b6c0f624ca2a07ed26d74c4e6c49b09699722184ade49126e4617c67a704ac987b65d2dc116486b5ca4dc87c945531a82b5aa9f6a97"
+    },
+    {
+      "name": "canonical segment-1 block, smaller physical block",
+      "transferId": "TQF9k2mZ7pXaLdRb",
+      "fileId": "file-9d3c1f",
+      "blockIndex": 2,
+      "chunkBytes": 16,
+      "blockBytes": 32,
+      "totalBytes": 100,
+      "blockPlainOffset": 64,
+      "chunkIds": [
+        4,
+        5
+      ],
+      "wireHex": "81b2b14f9ff5efa8000d6236a9ac04a343f7e75056bb32bd82d17a41c23bdcddb28a58bb80a7189f24d48d0f25e9a1456971cc02a0abad00b02a446aeb3580a4"
+    },
+    {
+      "name": "canonical tail block, partial last chunk",
+      "transferId": "TQF9k2mZ7pXaLdRb",
+      "fileId": "file-9d3c1f",
+      "blockIndex": 3,
+      "chunkBytes": 16,
+      "blockBytes": 32,
+      "totalBytes": 100,
+      "blockPlainOffset": 96,
+      "chunkIds": [
+        6
+      ],
+      "wireHex": "6c6e0fd4bf61ead4e818dc4492d84d4b756b76f5"
+    }
+  ],
   "lan": {
     "transferId": "TQF9k2mZ7pXaLdRb",
     "fileId": "file-9d3c1f",

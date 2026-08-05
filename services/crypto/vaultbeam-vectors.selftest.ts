@@ -144,6 +144,56 @@ const blockCases: BlockCase[] = [
   blockCase('block1 offset-scheme (id = plaintext offset)', TID, FID, 1, FILE_LEN, true),
 ];
 
+// ── CANONICAL id scheme (vbm3): id = plainOffset / chunkBytes ────────────────
+//
+// The logical chunk size is now globally constant, so a chunk's identity is its
+// GLOBAL LOGICAL INDEX on every transport — which is what makes one resume
+// bitmap meaningful across LAN, P2P and the relay. The physical block size may
+// still vary per segment; identity does not follow it.
+//
+// Note the third case: with a segment whose blockBytes differs from the first
+// segment's, `blockIndex * chunksPerBlock` no longer equals the global chunk
+// index — which is exactly why the canonical scheme derives the id from the
+// plaintext offset instead of from the block index.
+//
+// These are ADDITIVE. The `blocks` array above is the frozen vbm2 record and is
+// retained byte-for-byte so the one-release dual-read window can be tested.
+
+interface CanonicalBlockCase {
+  name: string; transferId: string; fileId: string; blockIndex: number;
+  chunkBytes: number; blockBytes: number; totalBytes: number;
+  blockPlainOffset: number; chunkIds: number[]; wireHex: string;
+}
+function canonicalBlockCase(
+  name: string, blockIndex: number, blockPlainOffset: number, blkBytes: number, totalBytes: number,
+): CanonicalBlockCase {
+  const ids: number[] = [];
+  const parts: Buffer[] = [];
+  const n = blkBytes / chunkBytes;
+  for (let i = 0; i < n; i++) {
+    const plainOffset = blockPlainOffset + i * chunkBytes;
+    if (plainOffset >= totalBytes) break;
+    const id = plainOffset / chunkBytes;              // ← canonical: global logical index
+    const plainLen = Math.min(chunkBytes, totalBytes - plainOffset);
+    ids.push(id);
+    parts.push(seal(KEY, TID, FID, id, DATA.subarray(plainOffset, plainOffset + plainLen)));
+  }
+  return {
+    name, transferId: TID, fileId: FID, blockIndex, chunkBytes, blockBytes: blkBytes,
+    totalBytes, blockPlainOffset, chunkIds: ids, wireHex: hex(Buffer.concat(parts)),
+  };
+}
+
+const canonicalBlockCases: CanonicalBlockCase[] = [
+  // segment 0 geometry: 64-byte physical blocks of 16-byte logical chunks
+  canonicalBlockCase('canonical block0 (offset 0, 64B block)', 0, 0, 64, FILE_LEN),
+  // segment 1 geometry: 32-byte physical blocks — blockIndex*chunksPerBlock (=8)
+  // would be WRONG here; the canonical id is 4,5 from the offset
+  canonicalBlockCase('canonical segment-1 block, smaller physical block', 2, 64, 32, FILE_LEN),
+  // tail: last logical chunk is partial (4 bytes of a 16-byte chunk)
+  canonicalBlockCase('canonical tail block, partial last chunk', 3, 96, 32, FILE_LEN),
+];
+
 // ── LAN frame case: [i32_be idx][i32_be ctLen][ct‖tag] per chunk ─────────────
 
 function lanFrames(transferId: string, fileId: string, totalBytes: number): { chunkCount: number; framesHex: string } {
@@ -169,6 +219,7 @@ function build() {
     inputs: { keyHex: hex(KEY), chunkBytes, blockBytes, fileLen: FILE_LEN, fileDataHex: hex(DATA) },
     chunks: chunkCases,
     blocks: blockCases,
+    blocksCanonical: canonicalBlockCases,
     lan: { transferId: TID, fileId: FID, totalBytes: FILE_LEN, ...lanFrames(TID, FID, FILE_LEN) },
     sha256: { dataHex: hex(DATA), hex: crypto.createHash('sha256').update(DATA).digest('hex') },
   };
@@ -182,7 +233,7 @@ const golden = build();
 if (WRITE) {
   fs.mkdirSync(DIR, { recursive: true });
   fs.writeFileSync(FILE, JSON.stringify(golden, null, 2) + '\n');
-  console.log(`wrote ${path.relative(process.cwd(), FILE)} (${chunkCases.length} chunk, ${blockCases.length} block, 1 LAN, 1 sha256 vectors)`);
+  console.log(`wrote ${path.relative(process.cwd(), FILE)} (${chunkCases.length} chunk, ${blockCases.length} block, ${canonicalBlockCases.length} canonical-block, 1 LAN, 1 sha256 vectors)`);
 } else {
   if (!fs.existsSync(FILE)) throw new Error(`missing ${FILE} — run with --write first`);
   const committed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
@@ -197,6 +248,25 @@ if (WRITE) {
     d.setAAD(Buffer.from(c.aad, 'utf8')); d.setAuthTag(tag);
     const plain = Buffer.concat([d.update(ct), d.final()]);
     deepStrictEqual(hex(plain), c.plaintextHex, `open(seal) mismatch for "${c.name}"`);
+  }
+  // Canonical blocks: every chunk wire in the concatenation must open with the
+  // canonical id (offset/chunkBytes), proving the scheme is self-consistent and
+  // not merely reproduced from the same generator.
+  for (const b of canonicalBlockCases) {
+    const wire = Buffer.from(b.wireHex, 'hex');
+    let off = 0;
+    for (const id of b.chunkIds) {
+      const plainOffset = id * b.chunkBytes;
+      deepStrictEqual(plainOffset >= b.blockPlainOffset, true, `canonical id maps inside the block for "${b.name}"`);
+      const plainLen = Math.min(b.chunkBytes, b.totalBytes - plainOffset);
+      const ct = wire.subarray(off, off + plainLen), tag = wire.subarray(off + plainLen, off + plainLen + 16);
+      const d = crypto.createDecipheriv('aes-256-gcm', KEY, chunkNonce(b.transferId, id), { authTagLength: 16 });
+      d.setAAD(Buffer.from(`${b.transferId}|${b.fileId}|${id}`, 'utf8')); d.setAuthTag(tag);
+      const plain = Buffer.concat([d.update(ct), d.final()]);
+      deepStrictEqual(hex(plain), hex(DATA.subarray(plainOffset, plainOffset + plainLen)), `canonical block open mismatch "${b.name}" id=${id}`);
+      off += plainLen + 16;
+    }
+    deepStrictEqual(off, wire.length, `canonical block wire fully consumed for "${b.name}"`);
   }
   console.log('vaultbeam vectors self-check: OK');
 }

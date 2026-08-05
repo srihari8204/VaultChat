@@ -18,7 +18,20 @@ use serde_json::{json, Value};
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_void};
 
+use crate::chunk::IdScheme;
 use crate::{chunk, fileio, lan, VbError};
+
+/// Optional `idScheme` arg → the chunk-identity scheme. Absent falls back to the
+/// pre-vbm3 behaviour for the call shape, so an un-upgraded caller is unchanged.
+fn id_scheme(a: &Value, block_plain_offset: Option<u64>) -> Res<IdScheme> {
+    match a.get("idScheme").and_then(Value::as_str) {
+        None => Ok(IdScheme::legacy_default(block_plain_offset)),
+        Some("canonical") => Ok(IdScheme::Canonical),
+        Some("legacyOffset") => Ok(IdScheme::LegacyOffset),
+        Some("uniform") => Ok(IdScheme::Uniform),
+        Some(other) => Err(VbError(format!("vaultbeam: unknown idScheme '{other}'"))),
+    }
+}
 
 type Res<T> = Result<T, VbError>;
 
@@ -68,18 +81,20 @@ pub fn dispatch(op: &str, a: &Value) -> Res<Value> {
         // R2 block ops — Rust seals/opens+writes; the platform layer does the
         // presigned-URL HTTP PUT/GET with the base64 body returned/passed here.
         "sealBlockFromFile" => {
+            let bpo = a.get("blockPlainOffset").and_then(Value::as_u64);
             let ct = fileio::seal_block_from_file(
                 s(a, "srcPath")?, &key32(a, "keyB64")?, s(a, "transferId")?, s(a, "fileId")?,
                 u64_(a, "blockIndex")?, u64_(a, "chunkBytes")?, u64_(a, "blockBytes")?, u64_(a, "totalBytes")?,
-                a.get("blockPlainOffset").and_then(Value::as_u64),
+                bpo, id_scheme(a, bpo)?,
             )?;
             Ok(json!(B64.encode(ct)))
         }
         "writeBlockFromBody" => {
+            let bpo = a.get("blockPlainOffset").and_then(Value::as_u64);
             let n = fileio::write_block_from_body(
                 s(a, "dstPath")?, &key32(a, "keyB64")?, s(a, "transferId")?, s(a, "fileId")?,
                 u64_(a, "blockIndex")?, u64_(a, "chunkBytes")?, u64_(a, "blockBytes")?, u64_(a, "totalBytes")?,
-                a.get("blockPlainOffset").and_then(Value::as_u64), &b64(a, "bodyB64")?,
+                bpo, id_scheme(a, bpo)?, &b64(a, "bodyB64")?,
             )?;
             Ok(json!(n))
         }
@@ -158,6 +173,25 @@ fn emit(cb: EventCb, ctx: *mut c_void, name: &str, payload: &Value) {
     }
 }
 
+/// Optional `runs` arg: `[{"start":n,"count":n}, …]`. Absent ⇒ the whole file,
+/// which is the pre-resume behaviour. Used to stream only the missing chunks.
+fn parse_runs(a: &Value) -> Res<Option<Vec<lan::ChunkRun>>> {
+    let Some(v) = a.get("runs") else { return Ok(None) };
+    if v.is_null() {
+        return Ok(None);
+    }
+    let arr = v.as_array().ok_or_else(|| VbError("vaultbeam: 'runs' must be an array".into()))?;
+    let mut out = Vec::with_capacity(arr.len());
+    for r in arr {
+        let start = r.get("start").and_then(Value::as_u64)
+            .ok_or_else(|| VbError("vaultbeam: run.start must be a u64".into()))?;
+        let count = r.get("count").and_then(Value::as_u64)
+            .ok_or_else(|| VbError("vaultbeam: run.count must be a u64".into()))?;
+        out.push(lan::ChunkRun { start, count });
+    }
+    Ok(Some(out))
+}
+
 fn lan_serve_inner(a: &Value, cb: EventCb, ctx: *mut c_void) -> Res<Value> {
     let key = key32(a, "keyB64")?;
     let token = b64(a, "token")?;
@@ -167,6 +201,7 @@ fn lan_serve_inner(a: &Value, cb: EventCb, ctx: *mut c_void) -> Res<Value> {
             src_path: s(a, "srcPath")?, key, transfer_id: &tid, file_id: s(a, "fileId")?, token,
             chunk_bytes: u64_(a, "chunkBytes")?, chunk_count: u64_(a, "chunkCount")?,
             total_bytes: u64_(a, "totalBytes")?, port: a.get("port").and_then(Value::as_u64).map(|p| p as u16),
+            runs: parse_runs(a)?,
         },
         |port| emit(cb, ctx, "vbLanBound", &json!({ "transferId": tid, "port": port })),
         |done, total| emit(cb, ctx, "vbLanProgress", &json!({ "transferId": tid, "done": done, "total": total })),
@@ -183,6 +218,7 @@ fn lan_connect_inner(a: &Value, cb: EventCb, ctx: *mut c_void) -> Res<Value> {
             host: s(a, "host")?, port: u64_(a, "port")? as u16, dst_path: s(a, "dstPath")?, key,
             transfer_id: &tid, file_id: s(a, "fileId")?, token,
             chunk_bytes: u64_(a, "chunkBytes")?, chunk_count: u64_(a, "chunkCount")?,
+            runs: parse_runs(a)?,
         },
         |done, total| emit(cb, ctx, "vbLanProgress", &json!({ "transferId": tid, "done": done, "total": total })),
     )?;

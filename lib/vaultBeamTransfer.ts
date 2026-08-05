@@ -19,10 +19,11 @@ import {
 import {
   type SegmentPlan, newPlan, appendSegment, isComplete, totalBlocks, segBlockCount,
   locateBlock, serialize as serializePlan, deserialize as deserializePlan,
+  idSchemeForPlan, SEGMENT_PLAN_V1, SEGMENT_PLAN_V2,
 } from './vaultBeamSegments';
 import { recordSample, loadState, saveState } from './networkStateStore';
 import { geometry as geoOf, sample as sampleNs } from './networkState';
-import { VB_RELIABILITY_FIXES } from '../constants/flags';
+import { VB_RELIABILITY_FIXES, VB_SEAMLESS_RESUME } from '../constants/flags';
 import { loadRecvBitmap, saveRecvBitmapSoon, clearRecvBitmap } from './vaultBeamRecvBitmap';
 
 const URL_BATCH = 64;   // matches routes/vaultbeam.js MAX_URLS
@@ -88,7 +89,8 @@ export async function sendTransfer(opts: {
   let ns = await loadState(opts.linkType);                    // live throughput brain, seeded from history
   const par = await batteryParallelism();                     // §14: 2 on low battery, else 4
   const st = await relayState(opts.transferId);               // resume: what does the server already hold?
-  let plan: SegmentPlan = (st.plan && deserializePlan(st.plan)) || newPlan(opts.totalBytes);
+  let plan: SegmentPlan = (st.plan && deserializePlan(st.plan))
+    || newPlan(opts.totalBytes, VB_SEAMLESS_RESUME ? SEGMENT_PLAN_V2 : SEGMENT_PLAN_V1);
   const have = new Set(uploadedBlocks(st.uploadedMask, st.blockCount));
   let uploadedBytes = 0;
 
@@ -106,6 +108,7 @@ export async function sendTransfer(opts: {
           url, srcPath: opts.srcPath, keyB64: opts.keyB64, transferId: opts.transferId,
           fileId: opts.fileId, blockIndex, chunkBytes: loc.chunkBytes, blockBytes: loc.blockBytes,
           chunkCount: 0, totalBytes: opts.totalBytes, blockPlainOffset: loc.blockPlainOffset,
+          idScheme: idSchemeForPlan(plan),
         });
         ns = sampleNs(ns, { bytes, elapsedMs: Math.max(1, Date.now() - t0), nowMs: Date.now() });
         okBlocks.push(blockIndex); uploadedBytes += bytes; have.add(blockIndex);
@@ -120,7 +123,10 @@ export async function sendTransfer(opts: {
   while (!isComplete(plan) && guard++ < 200_000) {
     if (opts.signal?.aborted) throw new Error('aborted');
     const geo = geoOf(ns);
-    plan = appendSegment(plan, geo.chunkBytes, geo.blockBytes);
+    // v2: the LOGICAL chunk is fixed; only the PHYSICAL block adapts to throughput.
+    plan = plan.version >= SEGMENT_PLAN_V2
+      ? appendSegment(plan, geo.blockBytes)
+      : appendSegment(plan, geo.blockBytes, undefined, geo.chunkBytes);
     await relayGrow(opts.transferId, totalBlocks(plan), serializePlan(plan));
     const seg = plan.segments[plan.segments.length - 1];
     await push(range(segBlockCount(seg)).map((k) => seg.firstBlock + k).filter((b) => !have.has(b)));
@@ -218,6 +224,7 @@ export async function receiveTransfer(opts: {
           url, dstPath: opts.dstPath, keyB64: opts.keyB64, transferId: opts.transferId,
           fileId: opts.fileId, blockIndex, chunkBytes: loc.chunkBytes, blockBytes: loc.blockBytes,
           chunkCount: 0, totalBytes: opts.totalBytes, blockPlainOffset: loc.blockPlainOffset,
+          idScheme: idSchemeForPlan(p),
         });
         recordSample(opts.linkType, loc.blockBytes, Math.max(1, Date.now() - t0), Date.now()).catch(() => {});
         got.add(blockIndex); downloadedBytes += loc.blockBytes;

@@ -1,0 +1,35 @@
+-- 070_vaultbeam_recv_mask.sql
+-- Idempotent.
+--
+-- VaultBeam seamless resume (openspec/changes/vaultbeam-seamless-resume).
+--
+-- recv_mask — the RECEIVER's verified-chunk bitmap, one bit per 512 KiB logical
+-- chunk, published by the recipient so the SENDER can learn what the peer
+-- already holds and never stage it again. Before this column the receiver's
+-- verified state was device-local (AsyncStorage), so a sender falling back from
+-- a direct transport had no way to know what had already been delivered and
+-- re-uploaded the entire file.
+--
+-- This is CONTENT-FREE, exactly like uploaded_mask: positions and sizes only.
+-- It is a receiver ASSERTION — the server cannot verify it and does not try.
+-- The threat that buys is nil in a 1:1 transfer: a receiver that lies about
+-- holding a chunk only denies itself the data, and can re-request it by
+-- clearing its local bit and republishing. Merges are union-only server-side,
+-- so a stale or out-of-order post can never clear a bit.
+--
+-- The marginal disclosure over uploaded_mask (which already reveals upload
+-- progress) is the receiver's download RATE. Accepted and documented; when both
+-- peers are online the live `vaultbeam_have` signaling path is sealed and
+-- preferred, and this column is the durable fallback for an offline peer.
+--
+-- session_version — monotonic, server-held. Rides every stateful message and
+-- mutating request; a mismatch is a 409 that makes the client rehydrate. It
+-- increments ONLY on a material reset of the transfer (a re-init of the same
+-- transfer_id, or a replaced source file), never on a transport change, crash,
+-- resume, or plan growth. Without it, this sequence corrupts state: sender
+-- crashes -> user re-sends the same file -> relay/init resets the row -> the
+-- OLD in-memory receiver session posts recv_mask bits describing the PREVIOUS
+-- file's chunk layout.
+
+ALTER TABLE vb_transfer ADD COLUMN IF NOT EXISTS recv_mask BYTEA;
+ALTER TABLE vb_transfer ADD COLUMN IF NOT EXISTS session_version INT NOT NULL DEFAULT 1;

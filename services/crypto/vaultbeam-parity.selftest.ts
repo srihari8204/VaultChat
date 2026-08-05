@@ -160,6 +160,61 @@ async function main(): Promise<void> {
     }
     check(rustBlock.equals(Buffer.concat(parts)), `sealBlockFromFile ≡ JS oracle (block ${blockIndex})`);
   }
+
+  // 5) CANONICAL id scheme (vbm3): id = plainOffset / chunkBytes, on every
+  //    transport. Driven through the REAL FFI dispatch, so this proves the Rust
+  //    binding honours `idScheme` — not just that the pure function is right.
+  console.log('canonical id-scheme parity:');
+  const canonJs = (blockPlainOffset: number, blkBytes: number) => {
+    const parts: Buffer[] = [];
+    for (let i = 0; i < blkBytes / chunkBytes; i++) {
+      const off = blockPlainOffset + i * chunkBytes;
+      if (off >= total) break;
+      const len = Math.min(chunkBytes, total - off);
+      parts.push(jsSeal(bkey, 'Blk', 'F', off / chunkBytes, fileData.subarray(off, off + len)));
+    }
+    return Buffer.concat(parts);
+  };
+  // Two DIFFERENT physical block sizes over the same plaintext base: the wires
+  // must agree chunk-for-chunk, which is the transport-invariance the resume
+  // bitmap depends on.
+  for (const [blockIndex, blockPlainOffset, blkBytes] of [[0, 0, 64], [1, 64, 32], [1, 64, 64]] as const) {
+    const rustCanon = Buffer.from(await rust.call('sealBlockFromFile', {
+      srcPath: src, keyB64: b64(bkey), transferId: 'Blk', fileId: 'F', blockIndex,
+      chunkBytes, blockBytes: blkBytes, totalBytes: total, blockPlainOffset, idScheme: 'canonical',
+    }), 'base64');
+    check(rustCanon.equals(canonJs(blockPlainOffset, blkBytes)),
+      `canonical sealBlockFromFile ≡ JS oracle (offset ${blockPlainOffset}, ${blkBytes}B unit)`);
+  }
+  // The 32B-unit block at offset 64 must be a strict PREFIX of the 64B-unit one:
+  // same chunks, same ids, same bytes — only the packing differs.
+  check(canonJs(64, 64).subarray(0, canonJs(64, 32).length).equals(canonJs(64, 32)),
+    'physical unit size does not change chunk bytes or identity');
+
+  // A canonical block must NOT open as legacy — a version mix is a clean auth
+  // failure, never a silent mis-decrypt. This is what makes dual-read safe.
+  const dst = path.join(os.tmpdir(), `vbparity-canon-dst-${process.pid}.bin`);
+  await rust.call('prealloc', { path: dst, totalBytes: total });
+  const canonWire = canonJs(64, 32).toString('base64');
+  let legacyOpenFailed = false;
+  try {
+    await rust.call('writeBlockFromBody', {
+      dstPath: dst, keyB64: b64(bkey), transferId: 'Blk', fileId: 'F', blockIndex: 1,
+      chunkBytes, blockBytes: 32, totalBytes: total, blockPlainOffset: 64,
+      idScheme: 'legacyOffset', bodyB64: canonWire,
+    });
+  } catch { legacyOpenFailed = true; }
+  check(legacyOpenFailed, 'canonical block rejected by the legacy reader (clean auth failure)');
+  // …and DOES open with the matching scheme, landing the right plaintext.
+  const wrote = await rust.call('writeBlockFromBody', {
+    dstPath: dst, keyB64: b64(bkey), transferId: 'Blk', fileId: 'F', blockIndex: 1,
+    chunkBytes, blockBytes: 32, totalBytes: total, blockPlainOffset: 64,
+    idScheme: 'canonical', bodyB64: canonWire,
+  });
+  check(wrote === 2, 'canonical block opens with the matching scheme (2 chunks)');
+  check(fs.readFileSync(dst).subarray(64, 96).equals(fileData.subarray(64, 96)),
+    'canonical block wrote the correct plaintext at its offsets');
+  fs.rmSync(dst, { force: true });
   fs.rmSync(src, { force: true });
 
   rust.close();

@@ -1014,6 +1014,9 @@ io.on('connection', (socket) => {
   socket.on('vaultbeam_pull',     relayToPeer('vaultbeam_pull'));
   socket.on('vaultbeam_ready',    relayToPeer('vaultbeam_ready'));
   socket.on('vaultbeam_tier',     relayToPeer('vaultbeam_tier'));
+  //   have  — recipient: sealed verified-chunk bitmap, so the sender skips what
+  //           the peer already holds (seamless resume). Opaque routing.
+  socket.on('vaultbeam_have',     relayToPeer('vaultbeam_have'));
 
   // ── Group calls (mesh) ────────────────────────────────────────────
   // A call room per chat. Joiners learn the existing roster; the per-pair
