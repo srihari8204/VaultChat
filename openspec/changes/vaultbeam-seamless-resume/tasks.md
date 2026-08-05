@@ -18,7 +18,7 @@ protocol can be reviewed before later work depends on it:**
 | ✅ 3 | Transport drivers (§5) — relay, P2P, LAN + contract harness — **DONE** | driver contract + physical-unit tests green; Rust 16+6; parity green |
 | ✅ 4 | Resume engine — `recv_mask`, versioning, handshake (§4) — **backend DONE**; client wiring (§6.7) lands with stage 6 | 5 pure Go tests green, 5 DB-gated ready; Node mirrored |
 | ✅ 5 | Crash recovery (§3) — **DONE** (call-site swap + legacy cleanup ride with stage 6) | 9/9 vaultBeam suites; restart/reboot matrix rows still on-device |
-| 6 | Production hardening (§6.4–6.6, §7, §8) | full transport-switching matrix (§8.2) |
+| 🟡 6 | Production hardening — composition root, standing audit, F-2 **DONE**; controller swap + progress + flag flip remain | full transport-switching matrix (§8.2), **on-device** |
 
 Phase 1 must not merge unless every compatibility and parity test passes.
 
@@ -173,7 +173,7 @@ Phase 1 must not merge unless every compatibility and parity test passes.
       `vaultchat-backend/server.js:1014-1016` and
       `vaultchat-backend-go/internal/realtime/handlers.go:257-259`; seal/open it with the
       existing `callCrypto` cipher in the P2P driver.
-- [ ] 6.4 **Memory audit** — fix and add a regression test that runs 50 fallback cycles and
+- [x] 6.4 **Memory audit** — fix and add a regression test that runs 50 fallback cycles and
       asserts steady-state counts:
       - `openInbox` registers 4 socket handlers per call; `close()` exists but is only
         reached on some paths (`vaultBeamDirect.ts:123-129`) → guarantee via `dispose()`.
@@ -188,7 +188,7 @@ Phase 1 must not merge unless every compatibility and parity test passes.
         when a session performs repeated ICE restarts.
       - No re-encryption of completed chunks: guaranteed structurally, since the work-list
         excludes `PeerHave`.
-- [ ] 6.5 **Concurrency audit** — assert one upload worker, one download worker, one driver,
+- [x] 6.5 **Concurrency audit** — assert one upload worker, one download worker, one driver,
       one transport controller per transfer:
       - `TransferManager` single-flight replaces the `controllers.has()` guard.
       - `mapPool` (`vaultBeamTransfer.ts:57`) stays the only concurrency primitive; width
@@ -197,7 +197,7 @@ Phase 1 must not merge unless every compatibility and parity test passes.
         manual transfers become admitted work too (today they bypass the queue entirely,
         which is why test-matrix row 12 is reachable in production).
       - one `AbortController` per session, held by the session, borrowed by the driver.
-- [ ] 6.6 Fix secondary finding F-2 via the §8 handshake: the receiver runs the completion
+- [x] 6.6 Fix secondary finding F-2 via the §8 handshake: the receiver runs the completion
       report on **any** terminal success, whichever transport delivered the last chunk.
 - [ ] 6.7 Client side of §7/§8: session key becomes `(transferId, sessionVersion)`; a 409
       `stale session` triggers rehydrate-from-server then re-derive; the sender treats an
@@ -218,7 +218,7 @@ Phase 1 must not merge unless every compatibility and parity test passes.
 
 ## 8. Flag flip + verification
 
-- [ ] 8.1 `constants/flags.ts` — add `VB_SEAMLESS_RESUME` (default off), export it in the
+- [x] 8.1 `constants/flags.ts` — add `VB_SEAMLESS_RESUME` (default off), export it in the
       default object.
 - [ ] 8.2 **Transport-switching matrix — merge blocker.** Cannot be CI-tested (NAT traversal
       and LAN sockets are inherently on-device). Every row asserts the same three invariants
