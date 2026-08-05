@@ -15,7 +15,7 @@ protocol can be reviewed before later work depends on it:**
 |---|---|---|
 | ✅ 1 | Wire protocol & logical chunk identity (§1) — **DONE**, PR #23 | vectors + Rust + parity + `tsc` all green; existing vectors verified byte-identical |
 | ✅ 2 | `TransferManager` + bitmaps + session core (§2) — **DONE** | 5/5 vaultBeam suites green under `tsx`; tsc 0 |
-| 3 | Transport drivers (§5) | driver contract + physical-unit tests |
+| 🟡 3 | Transport drivers (§5) — relay + contract harness **DONE**; P2P/LAN next | driver contract + physical-unit tests |
 | 4 | Resume engine — `recv_mask`, versioning, handshake (§4, §6.7) | Go tests + Node contract parity |
 | 5 | Crash recovery (§3) | restart/reboot rows of the matrix |
 | 6 | Production hardening (§6.4–6.6, §7, §8) | full transport-switching matrix (§8.2) |
@@ -44,10 +44,12 @@ Phase 1 must not merge unless every compatibility and parity test passes.
       (`blockBytes % CHUNK === 0`) and the self-check; add "logical chunk size is uniform
       across every segment" to it. Segments continue to carry the adaptive **physical**
       block size — only the logical chunk is fixed.
-- [ ] 1.7 **DEFERRED to stage 3** (`lib/networkState.ts` — `BUCKETS` becomes
-      **physical-unit-only**). Reason: the v1 dual-read path still constructs plans with
-      per-segment `chunkBytes`, so the bucket table cannot drop it until the drivers land
-      and v1 plans are no longer built.
+- [ ] 1.7 **DEFERRED to stage 6** (`lib/networkState.ts` — `BUCKETS` becomes
+      **physical-unit-only**). Re-checked during stage 3: `lib/vaultBeamTransfer.ts` still
+      constructs v1 plans whenever `VB_SEAMLESS_RESUME` is off, and that is the production
+      path until the flag flips. The bucket table therefore cannot drop `chunkBytes` until
+      stage 6. The new `RelayDriver` already ignores it (it reads only `nextBlockBytes()`),
+      so this is a cosmetic cleanup, not a functional gap.
       (2/4/8/8 MiB); `geometry()` returns `{ blockBytes }`. Update the self-check (the
       divisibility assertion now uses the `CHUNK` constant). The same bucket state also
       feeds the LAN/P2P drivers' `unitChunks()`, so one throughput brain sizes every
@@ -125,10 +127,10 @@ Phase 1 must not merge unless every compatibility and parity test passes.
 
 ## 5. Transport drivers (wrap existing code — do not rewrite the byte paths)
 
-- [ ] 5.1 `lib/vaultBeam/drivers/types.ts` (new) — the `TransportDriver` interface from
+- [x] 5.1 `lib/vaultBeam/drivers/types.ts` (new) — the `TransportDriver` interface from
       `design.md` §3, plus a shared contract test every driver must pass (no counters,
       `onVerified` only after durability, `dispose()` idempotent, abort honoured).
-- [ ] 5.2 `lib/vaultBeam/drivers/relay.ts` (new) — wraps today's `sendTransfer` /
+- [x] 5.2 `lib/vaultBeam/drivers/relay.ts` (new) — wraps today's `sendTransfer` /
       `receiveTransfer` from `lib/vaultBeamTransfer.ts`, converting the work-list into block
       batches via `blockMap` and reporting `onVerified` per verified chunk. Delete the
       `haveBytes` prefix logic (`vaultBeamTransfer.ts:144-147, 192-206`).
