@@ -43,8 +43,8 @@
 
 ## 7. Optional — self-hosted geocoding (separable)
 
-- [ ] 7.1 Photon container in docker-compose + authenticated `GET /nav/geocode` backend proxy (rate-limited, no query logging)
-- [ ] 7.2 Client search tries the proxy when flagged on; falls back to `lat,lng` parse / device geocoder as today
+- [x] 7.1 `GET /nav/geocode` backend proxy — landed on hetzner-deploy (`3c04a23 feat(nav): address search that works`), merged into this branch
+- [x] 7.2 Client search uses the proxy first with type-ahead suggestions, platform geocoder / `lat,lng` fallback (same commit; lock setup search wired the same way)
 
 ## 8. Pro — GPS diagnostics + map controls
 
