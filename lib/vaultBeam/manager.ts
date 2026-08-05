@@ -61,6 +61,10 @@ export class TransferManager {
     };
   }
 
+  /** Set the progress/persistence sink after construction (the engine wires its
+   *  write-behind here, so state and disk cannot drift apart). */
+  setOnChange(cb: (session: TransferSession) => void): void { this.opts.onChange = cb; }
+
   registerDriver(d: TransportDriver): void {
     if (this.drivers.some((x) => x.id === d.id)) throw new Error(`driver ${d.id} already registered`);
     this.drivers.push(d);

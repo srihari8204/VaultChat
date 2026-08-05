@@ -65,6 +65,25 @@ export interface DirectGeom {
   transferId: string; fileId: string; keyB64: string; token: string; peerId: string;
   chunkBytes: number; chunkCount: number; totalBytes: number;
 }
+
+/**
+ * Seamless-resume hooks (VB_SEAMLESS_RESUME). When supplied, negotiation is
+ * reused verbatim — the sealed offer/answer/ICE exchange, the IPv6-first
+ * priority rewrite, the stall guards, the tier signalling — but the DATA PATH is
+ * handed to the caller's transport driver instead of running p2pSend/p2pReceive
+ * or lanConnect here. That is what lets the driver move only the missing chunks.
+ *
+ * Absent ⇒ byte-identical to today, so the legacy path is untouched.
+ */
+export interface DirectHooks {
+  /** Called once the datachannel opens. Resolve true if the transfer is done. */
+  onChannel?: (dc: any) => Promise<boolean>;
+  /** RECIPIENT: called with the sender's advertised LAN endpoint. */
+  onLan?: (host: string, port: number) => Promise<boolean>;
+  /** SENDER: the LAN listener is owned by the caller's driver, so do not bind
+   *  one here; just forward the bound port to the peer when the driver emits it. */
+  skipLanServe?: boolean;
+}
 export type ProgressCb = (done: number, total: number) => void;
 
 const b64ToU8 = (b64: string): Uint8Array => new Uint8Array(Buffer.from(b64, 'base64'));
@@ -141,7 +160,7 @@ async function until<T>(get: () => T | undefined, timeoutMs: number, signal?: Ab
 // ── SENDER ──────────────────────────────────────────────────────────
 // Serve both transports after a pull; return 'lan' | 'p2p' on success, or null
 // (→ caller uploads to the relay). Never throws.
-export async function serveDirect(g: DirectGeom & { srcPath: string; onProgress?: ProgressCb; signal?: AbortSignal }): Promise<'lan' | 'p2p' | null> {
+export async function serveDirect(g: DirectGeom & DirectHooks & { srcPath: string; onProgress?: ProgressCb; signal?: AbortSignal }): Promise<'lan' | 'p2p' | null> {
   if (!isNativeStreamAvailable() || !RTC) return null;
   const inbox = await openInbox(g.transferId);
   let pc: any = null;
@@ -166,10 +185,12 @@ export async function serveDirect(g: DirectGeom & { srcPath: string; onProgress?
     cleanups.push(onLanEvent('vbLanProgress', (d) => {
       if (d?.transferId === g.transferId) { markConnected(); g.onProgress?.(d.done, d.total); }
     }));
-    lanServe({
-      srcPath: g.srcPath, keyB64: g.keyB64, transferId: g.transferId, fileId: g.fileId, token: g.token,
-      chunkBytes: g.chunkBytes, chunkCount: g.chunkCount, totalBytes: g.totalBytes,
-    }).then(() => done('lan')).catch(() => {});
+    if (!g.skipLanServe) {
+      lanServe({
+        srcPath: g.srcPath, keyB64: g.keyB64, transferId: g.transferId, fileId: g.fileId, token: g.token,
+        chunkBytes: g.chunkBytes, chunkCount: g.chunkCount, totalBytes: g.totalBytes,
+      }).then(() => done('lan')).catch(() => {});
+    }
 
     // P2P: offer a datachannel; stream once the recipient opens it. The SDP + ICE
     // are sealed with the per-transfer call cipher (callCrypto) so the server
@@ -217,7 +238,13 @@ export async function serveDirect(g: DirectGeom & { srcPath: string; onProgress?
         };
         // Connected but stalled / no ack in time → resolve null so the caller
         // falls back to the relay instead of the send hanging on a dead channel.
-        dc.onopen = () => { markConnected(); logIceWin(pc, 'send'); p2pSend(dc, g, ackP).then(() => done('p2p')).catch(() => done(null)); };
+        dc.onopen = () => {
+          markConnected(); logIceWin(pc, 'send');
+          const drive = g.onChannel
+            ? g.onChannel(dc).then((ok) => (ok ? 'p2p' as const : null))
+            : p2pSend(dc, g, ackP).then(() => 'p2p' as const);
+          drive.then((r) => done(r)).catch(() => done(null));
+        };
 
         // Apply the (buffered) answer, THEN release the queued remote candidates.
         (async () => {
@@ -301,7 +328,7 @@ async function waitFor(event: string, transferId: string, timeoutMs: number, sig
 
 // ── RECIPIENT ───────────────────────────────────────────────────────
 // Try direct; return true if fully received, false → use the relay.
-export async function receiveDirect(g: DirectGeom & { dstPath: string; onProgress?: ProgressCb; signal?: AbortSignal }): Promise<boolean> {
+export async function receiveDirect(g: DirectGeom & DirectHooks & { dstPath: string; onProgress?: ProgressCb; signal?: AbortSignal }): Promise<boolean> {
   if (!isNativeStreamAvailable() || !RTC) return false;
   await prealloc(g.dstPath, g.totalBytes);
 
@@ -316,14 +343,14 @@ export async function receiveDirect(g: DirectGeom & { dstPath: string; onProgres
       const guard = stallGuard(STALL_MS);
       const offP = onLanEvent('vbLanProgress', (d) => { if (d?.transferId === g.transferId) { guard.ping(); g.onProgress?.(d.done, d.total); } });
       try {
-        const res = await Promise.race([
-          lanConnect({
-            host: ready.lanIp, port: ready.lanPort, dstPath: g.dstPath, keyB64: g.keyB64,
-            transferId: g.transferId, fileId: g.fileId, token: g.token,
-            chunkBytes: g.chunkBytes, chunkCount: g.chunkCount, totalBytes: g.totalBytes,
-          }).then((n) => (n === g.chunkCount ? 'done' : 'fail')).catch(() => 'fail'),
-          guard.promise, // 'stalled'
-        ]);
+        const pull = g.onLan
+          ? g.onLan(ready.lanIp, ready.lanPort).then((ok) => (ok ? 'done' : 'fail')).catch(() => 'fail')
+          : lanConnect({
+              host: ready.lanIp, port: ready.lanPort, dstPath: g.dstPath, keyB64: g.keyB64,
+              transferId: g.transferId, fileId: g.fileId, token: g.token,
+              chunkBytes: g.chunkBytes, chunkCount: g.chunkCount, totalBytes: g.totalBytes,
+            }).then((n) => (n === g.chunkCount ? 'done' : 'fail')).catch(() => 'fail');
+        const res = await Promise.race([pull, guard.promise]);
         if (res === 'done') { g.onProgress?.(g.chunkCount, g.chunkCount); return true; }
       } finally { guard.cancel(); offP(); }
     }
@@ -367,7 +394,7 @@ async function p2pSend(dc: any, g: DirectGeom & { srcPath: string; onProgress?: 
   await Promise.race([ackP, sleep(ACK_TIMEOUT_MS).then(() => { throw new Error('no p2p delivery ack'); })]);
 }
 
-async function p2pReceive(g: DirectGeom & { dstPath: string; onProgress?: ProgressCb; signal?: AbortSignal }, inbox: Awaited<ReturnType<typeof openInbox>>): Promise<boolean> {
+async function p2pReceive(g: DirectGeom & DirectHooks & { dstPath: string; onProgress?: ProgressCb; signal?: AbortSignal }, inbox: Awaited<ReturnType<typeof openInbox>>): Promise<boolean> {
   const offerMsg = await until(() => inbox.state.offer, P2P_OFFER_MS, g.signal);
   if (!offerMsg?.offer) return false;
   // Decrypt the sealed offer + derive the cipher (plaintext passthrough for a
@@ -394,6 +421,10 @@ async function p2pReceive(g: DirectGeom & { dstPath: string; onProgress?: Progre
           pc.ondatachannel = (ev: any) => {
             const dc = ev.channel;
             dc.onopen = () => logIceWin(pc, 'recv');   // measure the winning pair (IPv6 vs relay)
+            if (g.onChannel) {                          // driver owns the data path
+              g.onChannel(dc).then((ok) => done(ok)).catch(() => done(false));
+              return;
+            }
             let cur: { i: number; len: number; buf: Uint8Array; off: number } | null = null;
             let received = 0;
             // Ack only after every chunk is decrypted + written, so the sender's

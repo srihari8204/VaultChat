@@ -31,6 +31,7 @@ import NetInfo from '@react-native-community/netinfo';
 import { serveDirect, receiveDirect } from './vaultBeamDirect';
 import { isNativeStreamAvailable } from './vaultBeamStreamNative';
 import { relayAbort, MAX_BYTES, CHUNK_BYTES } from './vaultbeamRelay';
+import { VB_SEAMLESS_RESUME } from '../constants/flags';
 
 // vbm2 (2026-07): manifest gained the segmented-geometry `plan`. A version bump
 // (not an additive field) on purpose — an old client that ignored `plan` would
@@ -298,6 +299,48 @@ async function ensureListeners() {
   } catch { _listenersArmed = false; }
 }
 
+// ── Seamless-resume bridge (VB_SEAMLESS_RESUME) ─────────────────────
+// Maps an engine session onto the bubble's existing store shape. Progress is
+// session.progressBytes() — VERIFIED bytes only — so it can never move backwards
+// on a transport change, which is what made the old bar reset to 0%.
+//
+// NOT YET DEVICE-TESTED: gated off, pending the transport-switching matrix in
+// openspec/changes/vaultbeam-seamless-resume/tasks.md §8.2.
+function bridgeSession(transferId: string, role: 'sender' | 'recipient', name: string, totalBytes: number) {
+  return (s: any) => {
+    if (s?.transferId !== transferId) return;
+    const status: VBStatus =
+      s.state === 'complete' ? 'complete'
+      : s.state === 'cancelled' ? 'cancelled'
+      : s.state === 'failed' ? 'failed'
+      : role === 'sender' ? 'uploading' : 'receiving';
+    setState(transferId, {
+      transferId, role, status, name, totalBytes,
+      done: s.peerHave?.popcount?.() ?? 0,
+      total: s.chunkCount ?? 0,
+      bytes: s.progressBytes?.() ?? 0,
+      tier: s.lastTransport === 'relay' ? 'relay' : s.lastTransport ? 'direct' : undefined,
+    });
+  };
+}
+
+async function runSeamless(opts: {
+  transferId: string; manifest: VBManifest; peerId: string; role: 'sender' | 'recipient';
+  srcPath?: string; dstPath?: string; signal?: AbortSignal; sessionVersion?: number;
+}): Promise<void> {
+  const { runTransfer } = await import('./vaultBeam/run');
+  await runTransfer({
+    transferId: opts.transferId,
+    sessionVersion: opts.sessionVersion ?? 1,
+    manifest: opts.manifest,
+    peerId: opts.peerId,
+    srcPath: opts.srcPath,
+    dstPath: opts.dstPath,
+    signal: opts.signal,
+    onChange: bridgeSession(opts.transferId, opts.role, opts.manifest.name, opts.manifest.size),
+  });
+}
+
 // ── SENDER ──────────────────────────────────────────────────────────
 // Pick-to-send: open a relay transfer, post the E2EE manifest message (returned
 // so the chat screen inserts it optimistically), and kick off the block upload
@@ -339,6 +382,15 @@ export async function startSend(opts: {
   const chunkCount = chunkCountFor(opts.size);
   (async () => {
     try {
+      if (VB_SEAMLESS_RESUME) {
+        // One session across every transport: a fallback re-derives the
+        // work-list from the bitmaps instead of restarting the upload.
+        await runSeamless({
+          transferId, manifest, peerId: opts.recipientId, role: 'sender',
+          srcPath: opts.srcPath, signal: ac.signal,
+        });
+        return;
+      }
       // Tier 1/2: serve the peer directly (LAN then P2P) if it comes online and
       // asks. Returns the tier used, or null → nobody pulled → use the relay.
       const tier = await serveDirect({
@@ -391,6 +443,14 @@ export async function startReceive(opts: {
   controllers.set(transferId, ac);
   try {
     await FileSystem.makeDirectoryAsync(VB_DIR, { intermediates: true }).catch(() => {});
+
+    if (VB_SEAMLESS_RESUME) {
+      await runSeamless({
+        transferId, manifest, peerId, role: 'recipient', dstPath, signal: ac.signal,
+      });
+      setState(transferId, { status: 'complete', savedPath: dstPath, bytes: manifest.size });
+      return;
+    }
 
     // Tier 1/2: try to pull directly (LAN then P2P) while the sender is online.
     // Direct chunks land contiguously (ordered channel), so the high-water mark
