@@ -13,7 +13,7 @@ protocol can be reviewed before later work depends on it:**
 
 | Stage | Scope | Merge gate |
 |---|---|---|
-| 1 | Wire protocol & logical chunk identity (§1) | vectors + Rust + parity + `tsc` all green; **existing vectors unchanged** |
+| ✅ 1 | Wire protocol & logical chunk identity (§1) — **DONE**, PR #23 | vectors + Rust + parity + `tsc` all green; existing vectors verified byte-identical |
 | 2 | `TransferManager` + bitmaps + session core (§2) | pure self-checks green under `tsx` |
 | 3 | Transport drivers (§5) | driver contract + physical-unit tests |
 | 4 | Resume engine — `recv_mask`, versioning, handshake (§4, §6.7) | Go tests + Node contract parity |
@@ -26,25 +26,28 @@ Phase 1 must not merge unless every compatibility and parity test passes.
 
 ## 1. Canonical chunk grid (the wire change — do this first, alone)
 
-- [ ] 1.1 `services/crypto/vaultbeam-vectors.selftest.ts` — add a canonical-relay-id vector
+- [x] 1.1 `services/crypto/vaultbeam-vectors.selftest.ts` — add a canonical-relay-id vector
       set (`id = plainOffset / chunkBytes`) alongside the existing offset-scheme vectors.
       Regenerate `services/crypto/__vectors__/vaultbeam.json` with `--write`; the diff is
       the review artifact. **Existing vectors must not change.**
-- [ ] 1.2 `services/vaultbeam/rust/src/chunk.rs` — `plan_block`: in the offset scheme emit
+- [x] 1.2 `services/vaultbeam/rust/src/chunk.rs` — `plan_block`: in the offset scheme emit
       `id = plain_offset / chunk_bytes` (was `plain_offset`). Extend the unit tests
       (`block_plan_offset_scheme_uses_offset_ids` becomes the canonical-id case).
-- [ ] 1.3 `plugins/android/VaultBeamStreamModule.kt` — same one-line change in `uploadBlock`
+- [x] 1.3 `plugins/android/VaultBeamStreamModule.kt` — same one-line change in `uploadBlock`
       and `downloadBlock` (`val id = if (offsetScheme) plainOffset / chunkBytes else …`).
       Both must change together or every GCM open fails.
-- [ ] 1.4 iOS inherits via the Rust core — no Swift change; confirm through the parity run.
-- [ ] 1.5 `services/crypto/vaultbeam-parity.selftest.ts` — assert Rust ≡ JS oracle ≡ vectors
+- [x] 1.4 iOS inherits via the Rust core — no Swift change; confirm through the parity run.
+- [x] 1.5 `services/crypto/vaultbeam-parity.selftest.ts` — assert Rust ≡ JS oracle ≡ vectors
       for the canonical ids. Must stay green in `npm run test:e2ee`.
-- [ ] 1.6 `lib/vaultBeamSegments.ts` — `appendSegment` takes only `blockBytes`; `chunkBytes`
+- [x] 1.6 `lib/vaultBeamSegments.ts` — `appendSegment` takes only `blockBytes`; `chunkBytes`
       is the module constant `CHUNK = 512 KiB`. Keep the invariant check
       (`blockBytes % CHUNK === 0`) and the self-check; add "logical chunk size is uniform
       across every segment" to it. Segments continue to carry the adaptive **physical**
       block size — only the logical chunk is fixed.
-- [ ] 1.7 `lib/networkState.ts` — `BUCKETS` becomes **physical-unit-only**
+- [ ] 1.7 **DEFERRED to stage 3** (`lib/networkState.ts` — `BUCKETS` becomes
+      **physical-unit-only**). Reason: the v1 dual-read path still constructs plans with
+      per-segment `chunkBytes`, so the bucket table cannot drop it until the drivers land
+      and v1 plans are no longer built.
       (2/4/8/8 MiB); `geometry()` returns `{ blockBytes }`. Update the self-check (the
       divisibility assertion now uses the `CHUNK` constant). The same bucket state also
       feeds the LAN/P2P drivers' `unitChunks()`, so one throughput brain sizes every
