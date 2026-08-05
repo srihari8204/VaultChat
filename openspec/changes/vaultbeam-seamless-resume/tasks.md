@@ -1,10 +1,26 @@
 # Implementation plan (deliverable 7) + file-by-file change list (deliverable 8)
 
-**Status: awaiting approval. No code written.**
+**Status: APPROVED for implementation** (review conditions folded in: logical/physical
+split, `TransferManager`, persisted transport + cooldowns, completion handshake, session
+versioning, transport-switching matrix as a merge blocker).
 
 Strangler order — every phase is independently shippable, behind `VB_SEAMLESS_RESUME`
 (`constants/flags.ts`, default **off**). Phases 1–4 change no behaviour with the flag off;
 phase 6 flips it. Rollback at any point is one constant.
+
+**Staged delivery — one reviewable PR stage per phase, opened as a draft up front so the
+protocol can be reviewed before later work depends on it:**
+
+| Stage | Scope | Merge gate |
+|---|---|---|
+| 1 | Wire protocol & logical chunk identity (§1) | vectors + Rust + parity + `tsc` all green; **existing vectors unchanged** |
+| 2 | `TransferManager` + bitmaps + session core (§2) | pure self-checks green under `tsx` |
+| 3 | Transport drivers (§5) | driver contract + physical-unit tests |
+| 4 | Resume engine — `recv_mask`, versioning, handshake (§4, §6.7) | Go tests + Node contract parity |
+| 5 | Crash recovery (§3) | restart/reboot rows of the matrix |
+| 6 | Production hardening (§6.4–6.6, §7, §8) | full transport-switching matrix (§8.2) |
+
+Phase 1 must not merge unless every compatibility and parity test passes.
 
 ---
 
@@ -56,8 +72,8 @@ phase 6 flips it. Rollback at any point is one constant.
 
 ## 3. Persistence + crash recovery
 
-- [ ] 3.1 `lib/localDb.ts` — add the `vb_chunk_state` table (see `design.md` §6) to the
-      schema block at line 118; add `persistChunkState` / `loadChunkState` /
+- [ ] 3.1 `lib/localDb.ts` — add the `vb_chunk_state` table (see `design.md` §6, incl.
+      `session_version`, `last_transport`, `driver_state`) to the schema block at line 118; add `persistChunkState` / `loadChunkState` /
       `deleteChunkState` / prune alongside the existing `vb_transfers` helpers.
 - [ ] 3.2 `lib/vaultBeam/session.ts` — write-behind persistence: coalesce 1.5 s, flush
       immediately on tier switch, pause, terminal, and `AppState` background.
@@ -70,11 +86,22 @@ phase 6 flips it. Rollback at any point is one constant.
 - [ ] 3.5 Migrate `vc_vaultbeam_sends` (AsyncStorage) into `vb_chunk_state.src_*` so all
       sender resume state lives in one store.
 
-## 4. Backend: `recv_mask`
+## 4. Backend: `recv_mask`, session versioning, completion handshake
 
 - [ ] 4.1 `vaultchat-backend/migrations/070_vaultbeam_recv_mask.sql` (new) —
-      `ALTER TABLE vb_transfer ADD COLUMN IF NOT EXISTS recv_mask BYTEA;` Idempotent,
-      content-free, mirrors the 060 header rationale.
+      `ALTER TABLE vb_transfer ADD COLUMN IF NOT EXISTS recv_mask BYTEA;`
+      `ALTER TABLE vb_transfer ADD COLUMN IF NOT EXISTS session_version INT NOT NULL DEFAULT 1;`
+      Idempotent, content-free, mirrors the 060 header rationale.
+- [ ] 4.1a Session versioning (`design.md` §7) in **both** backends: return
+      `sessionVersion` from `/relay/init` and `GET /relay/:id`; require and validate it on
+      `/relay/{uploaded,grow,received,complete,abort}`; **409 `stale session`** on mismatch;
+      increment only on the `ON CONFLICT … DO UPDATE` re-init path.
+- [ ] 4.1b Completion handshake (`design.md` §8) in **both** backends: `/relay/complete`
+      gains the `sessionVersion` + `popcount == chunk_count` guards and stays idempotent;
+      **`/relay/uploaded` gains the missing `complete`/`aborted` state check** (410) — today
+      it has none (`vaultbeam.go:634-692`, `vaultbeam.js:160-185`), so a sender can still set
+      bits on a completed transfer; `/relay/abort` refuses to abort a completed session.
+      `vb_complete` carries `sessionVersion`.
 - [ ] 4.2 `vaultchat-backend-go/internal/routes/vaultbeam.go` — `POST /vaultbeam/relay/received`
       (recipient-only, mask width validated against `chunk_count`, union-merge server-side
       so an out-of-order post cannot clear bits); add `recvMask` to `vbRelayState`; register
@@ -86,6 +113,9 @@ phase 6 flips it. Rollback at any point is one constant.
       contract runner covers it.
 - [ ] 4.5 Confirm the union-merge semantics with a test that posts an older mask after a
       newer one and asserts no bit is lost.
+- [ ] 4.6 Go tests (`vaultchat-backend-go/internal/routes/`): stale-version 409; completion
+      idempotence; completion rejected on an incomplete mask; `uploaded` 410 after complete;
+      abort refused after complete. Node parity via `vaultchat-backend/contract/run.js`.
 
 ## 5. Transport drivers (wrap existing code — do not rewrite the byte paths)
 
@@ -154,8 +184,12 @@ phase 6 flips it. Rollback at any point is one constant.
         manual transfers become admitted work too (today they bypass the queue entirely,
         which is why test-matrix row 12 is reachable in production).
       - one `AbortController` per session, held by the session, borrowed by the driver.
-- [ ] 6.6 Fix secondary finding F-2: finalize the `vb_transfer` row (`/relay/complete` or
-      `/relay/abort`) on **any** terminal state, whichever transport won.
+- [ ] 6.6 Fix secondary finding F-2 via the §8 handshake: the receiver runs the completion
+      report on **any** terminal success, whichever transport delivered the last chunk.
+- [ ] 6.7 Client side of §7/§8: session key becomes `(transferId, sessionVersion)`; a 409
+      `stale session` triggers rehydrate-from-server then re-derive; the sender treats an
+      unknown/expired transfer on resume as complete-or-expired and drops its persisted send
+      rather than re-uploading.
 
 ## 7. Progress semantics + UI
 

@@ -65,6 +65,16 @@ a contiguous prefix, only on the receiver, and cannot express holes.
   so it survives an offline sender, an app restart, and a device reboot.
 - **Progress means verified bytes on both sides** — `popcount(PeerHave) × 512 KiB`. Because
   `PeerHave` is monotonic, a transport switch can no longer move the bar backwards.
+- **A server-authoritative completion handshake.** The receiver reports a fully verified
+  bitmap; the server records completion and the session becomes immutable **at that moment**,
+  whether or not any notification reaches the sender. Every mutating endpoint then rejects
+  the transfer, so a lost final acknowledgement can no longer cause a re-upload. This also
+  closes a live gap: `/relay/uploaded` has no state check today, so a sender can set bits on
+  an already-completed transfer.
+- **Session versioning.** A monotonic, server-held `sessionVersion` rides every stateful
+  message and mutating request; a mismatch is a `409 stale session` that makes the client
+  rehydrate. A device resurrecting an old in-memory session after a crash can no longer
+  poison its peer or the server.
 - **Per-chunk retry with bounded backoff inside the driver.** A failed block removes itself
   from the in-flight set; it never fails the session. The session fails only on
   unrecoverable errors (auth, `410 gone`, out of disk).
@@ -97,8 +107,10 @@ a contiguous prefix, only on the receiver, and cannot express holes.
   `plugins/android/VaultBeamStreamModule.kt`, `services/vaultbeam/rust/src/chunk.rs`
   (`plan_block`), inherited by the iOS Swift shim. Gated by the parity suite.
 - **Backend (both Node and Go — Go is live, Node is the rollback)**: migration 070 adds
-  `recv_mask BYTEA`; new `POST /vaultbeam/relay/received`; `GET /relay/:id` returns
-  `recvMask`. Additive — old clients ignore both.
+  `recv_mask BYTEA` + `session_version INT`; new `POST /vaultbeam/relay/received`;
+  `GET /relay/:id` returns `recvMask` + `sessionVersion`; version + state guards on every
+  mutating endpoint. Additive for old clients, which omit the version and are treated as
+  version-1.
 - **Wire/compat**: manifest `vbm2` → `vbm3`. `parseManifest` already hard-rejects unknown
   versions, so old↔new is a clean reject, never a corrupt decrypt. The vbm2 relay reader is
   retained for one release so a transfer started before the update still completes.

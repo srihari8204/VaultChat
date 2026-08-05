@@ -206,6 +206,58 @@ never disagree with them after a crash.
 - **THEN** previously written regions of the preallocated destination file are retained and
   not rewritten
 
+### Requirement: Session versioning
+Every transfer SHALL carry a server-held monotonic `sessionVersion`, and every stateful
+message and mutating request SHALL carry it. The server SHALL reject a request whose version
+does not match the stored one. A version SHALL increment only on a material reset of the
+transfer — a re-init of the same transfer id, or a replaced source file — and SHALL NOT
+increment on a transport change, crash, resume, or plan growth.
+
+#### Scenario: Stale session cannot poison a peer
+- **WHEN** a device resurrects an in-memory session after a crash and posts state for an
+  older `sessionVersion`
+- **THEN** the server rejects the write with a stale-session error and the peer ignores the
+  message
+
+#### Scenario: Client rehydrates on version mismatch
+- **WHEN** a client receives a stale-session rejection
+- **THEN** it re-reads the authoritative state, adopts the current version, bitmaps and
+  transfer state, and re-derives its work-list
+
+#### Scenario: Continuation does not bump the version
+- **WHEN** a transfer switches transport, resumes after a crash, or grows its plan
+- **THEN** the `sessionVersion` is unchanged
+
+### Requirement: Server-authoritative completion
+Completion SHALL be recorded by the server when the receiver reports a fully verified
+bitmap, and the session SHALL become immutable at that moment regardless of whether any
+notification reaches the sender. The server SHALL reject every mutating request on a
+completed session. The receiver's completion report SHALL be idempotent and SHALL be
+rejected if its bitmap is not complete.
+
+#### Scenario: Lost completion notification does not restart the transfer
+- **WHEN** the server has recorded completion but the sender never receives the notification
+- **THEN** the sender cannot upload further chunks, because every mutating request is
+  rejected, and it observes completion on its next state read
+
+#### Scenario: Completion is transport-independent
+- **WHEN** the last chunk is delivered over LAN, over P2P, or over the relay
+- **THEN** the same completion handshake runs and the transfer record is finalized in all
+  three cases
+
+#### Scenario: Receiver crashes before reporting completion
+- **WHEN** the receiver verified every chunk but crashed before reporting
+- **THEN** on relaunch its work-list is empty, it reports completion, and no bytes are
+  transferred
+
+#### Scenario: Incomplete bitmap cannot claim completion
+- **WHEN** a completion report arrives whose bitmap does not cover every chunk
+- **THEN** the server rejects it and the session stays active
+
+#### Scenario: Completion report is idempotent
+- **WHEN** the receiver retries completion after a transient server error
+- **THEN** the repeated report succeeds without changing the recorded outcome
+
 ### Requirement: Failed-chunk retry isolation
 The system SHALL retry only failed chunks, with bounded backoff inside the driver, and SHALL
 NOT fail or restart the session because individual chunks failed. A failed chunk SHALL be

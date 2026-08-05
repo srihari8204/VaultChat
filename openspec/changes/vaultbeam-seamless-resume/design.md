@@ -264,13 +264,22 @@ A physical unit is **only** a packing decision. It never changes what a chunk *i
 can differ between transports, change mid-transfer, and differ between the two directions
 without any effect on identity, acknowledgement, or resume.
 
-| Transport | Physical unit | Chosen by |
-|---|---|---|
-| R2 relay | 2 / 4 / 8 MiB block = 4 / 8 / 16 chunks | `networkState` throughput bucket, per segment (as today) |
-| LAN | batch of 1–16 chunks per framing header | link speed; **new** — pinned at 1 today |
-| P2P | 1–8 chunks per control frame, then ≤16 KiB SCTP fragments | `bufferedAmount` pressure; **new** — pinned at 1 today |
-| future CDN | range request spanning N chunks | range-request efficiency |
-| future BT/Nearby | 1 chunk, or a sub-chunk fragment stream | MTU |
+| Transport | Physical unit | Chosen by | Value of varying it |
+|---|---|---|---|
+| R2 relay | 2 / 4 / 8 MiB block = 4 / 8 / 16 chunks | `networkState` bucket, per segment (as today) | **High** — 16× fewer HTTP round-trips and presign slots per byte |
+| LAN | run of 1–16 chunks | link speed; **new** — pinned at 1 today | **Resume only** — see note |
+| P2P | run of 1–8 chunks per control frame | `bufferedAmount` pressure; **new** — pinned at 1 today | **Resume + fewer JSON parses** — see note |
+| future CDN | range request spanning N chunks | range-request efficiency | High (same shape as relay) |
+| future BT/Nearby | 1 chunk, or a sub-chunk fragment stream | MTU | Enables the transport at all |
+
+> **Honest accounting for LAN and P2P.** The LAN frame header is 8 bytes per 512 KiB
+> (0.0015 %) and writes are already flushed every 16 chunks (`lan.rs:98`), so batching buys
+> effectively **no** throughput there. P2P saves one ~30-byte JSON control frame and its
+> parse per chunk — also marginal. The reason LAN and P2P still need `unitChunks()` is
+> **resume**: a resumed attempt must stream *runs of missing chunks* rather than
+> `0..chunkCount`, and a run is the natural way to express that. The future-transport
+> argument is the second reason. Do not expect a speed-up on LAN from this; expect it on the
+> relay, where the unit maps to an HTTP request.
 
 Native change, offset scheme only: `id = plain_offset / CHUNK` (was `plain_offset`). Legal
 because the *logical* chunk size is constant, making offset and index a bijection. The
@@ -439,6 +448,127 @@ The bitmap is the only thing that was missing on the sender side, and now exists
 **Reboot / background:** identical path — nothing depends on process continuity. The
 Android FGS (`transferForeground.ts`) keeps an active transfer alive while backgrounded;
 if the OS kills it anyway, the next launch resumes from the bitmaps.
+
+---
+
+## 7. Session versioning
+
+A `sessionVersion` (monotonic integer, server-held) makes stale state detectable, so a
+device that resurrects an in-memory session after a crash or a long disconnect cannot
+poison its peer or the server.
+
+```
+vb_transfer.session_version INT NOT NULL DEFAULT 1
+```
+
+**Identity tuple carried by every stateful message:**
+```
+{ transferId, sessionVersion, ... }        // vaultbeam_have, pull/ready/offer/answer/ice/tier
+                                           // POST /relay/{uploaded,grow,received,complete,abort}
+```
+The client-side session key is `(transferId, sessionVersion)`; the durable record stores
+both, alongside the logical-chunk bitmap and `last_transport`.
+
+**When it increments.** Only on a *material reset* of the transfer:
+- the sender re-inits an existing `transferId` (today's `ON CONFLICT … DO UPDATE` path in
+  `/relay/init`, which already resets `total_bytes`/`block_count`/`plan`), or
+- the source file is replaced (size/mtime mismatch caught at resume).
+
+A transport change, a crash, a resume, or a plan growth **never** bumps it — those are
+continuations of the same session, which is the entire point of the change.
+
+**Enforcement (server is the arbiter):**
+
+| Received version vs stored | Server | Peer |
+|---|---|---|
+| lower | **409 `stale session`** — write rejected | ignore the message |
+| equal | accept | accept |
+| higher | **409 `unknown session version`** (server is authoritative; a client cannot invent one) | drop local state, rehydrate from `GET /relay/:id` |
+
+On a 409 the client re-reads `GET /relay/:id`, adopts the authoritative
+`(sessionVersion, masks, state)`, and re-derives its work-list. Because merges are
+union-only and `PeerHave` is monotonic *within* a version, adopting is always safe.
+
+**Why this is not just belt-and-braces.** Without it, this sequence corrupts state: sender
+crashes → user re-sends the same file → `/relay/init` resets the row → the *old* in-memory
+receiver session, still holding the previous bitmap, posts `recv_mask` bits that refer to
+the previous file's chunk layout. The version check turns that into a clean 409 and a
+rehydrate.
+
+---
+
+## 8. Server-authoritative completion handshake
+
+Completion is a server-recorded fact, not a message that must arrive. This is what
+structurally removes RC-6.
+
+```
+  RECEIVER                          SERVER                          SENDER
+     │                                 │                               │
+     │ last logical chunk verified     │                               │
+     │ (GCM ok + written + durable)    │                               │
+     │ popcount(PeerHave)==chunkCount  │                               │
+     │                                 │                               │
+     ├─ POST /relay/complete ─────────▶│                               │
+     │   {transferId, sessionVersion,  │ validate: recipient?          │
+     │    mask}                        │           version matches?    │
+     │                                 │           popcount==count?    │
+     │                                 │                               │
+     │                                 ├─ state='complete'  ◀── AUTHORITATIVE, IMMEDIATE
+     │                                 ├─ purge vault_relay/<id>/      │
+     │                                 ├─ clear masks                  │
+     │                                 │                               │
+     │◀────────── 200 {ok} ────────────┤                               │
+     │ session immutable locally       ├─ emit vb_complete ───────────▶│  (best effort)
+     │                                 │   {transferId, sessionVersion}│  session immutable
+     │                                 │                               │
+     │                                 │◀─ GET /relay/:id ─────────────┤  (durable path:
+     │                                 │   state='complete' ──────────▶│   on resume/poll)
+```
+
+**Refinement of the requested sequence — deliberate, and the core of the fix.** The
+requested flow ends "Sender receives COMPLETE ACK → session becomes immutable". Making
+immutability *conditional on the sender receiving a message* would reinstate exactly the
+single-point-of-failure that RC-6 describes: one lost packet, and a completed transfer is
+still live. So instead:
+
+- **The server records completion the moment the receiver reports it.** From that instant
+  the session is immutable *globally*, whether or not the sender ever hears about it.
+- **The sender learns completion two ways**, and needs only one: the `vb_complete` socket
+  event (fast, best-effort) or `GET /relay/:id` returning `state='complete'` (durable,
+  checked on every resume and on every relay poll).
+- **A sender that never hears anything cannot restart the upload anyway**, because the
+  server 410s every mutating call on a completed session. The worst case degrades to a
+  stale progress bar that self-corrects on the next poll — not a re-upload.
+
+**Immutability enforcement — a real gap today.** `/relay/block-url` and `/relay/grow`
+already reject `complete`/`aborted` (410), but **`/relay/uploaded` does not check state at
+all** (`vaultbeam.go:634-692`, `vaultbeam.js:160-185`). A sender in flight can therefore
+still set bits on a completed transfer. Closing this is part of the handshake:
+
+| Endpoint | Today | After |
+|---|---|---|
+| `/relay/block-url` | 410 on complete/aborted ✓ | unchanged |
+| `/relay/grow` | 410 on complete/aborted ✓ | + version check |
+| `/relay/uploaded` | **no state check** ✗ | 410 on complete/aborted, + version check |
+| `/relay/received` | n/a (new) | 410 on complete/aborted, + version check |
+| `/relay/complete` | recipient-only ✓ | + version check, + `popcount == chunkCount` guard |
+| `/relay/abort` | either party ✓ | + version check; refuses to abort a `complete` session |
+
+**Transport independence.** The handshake is identical whichever transport delivered the
+last chunk — the `vb_transfer` row exists from `/relay/init`, so a pure-LAN or pure-P2P
+transfer completes through the same call. This also fixes secondary finding F-2, where a
+direct-tier completion never finalised the row.
+
+**Failure modes:**
+
+| Failure | Outcome |
+|---|---|
+| Receiver crashes after verifying the last chunk, before POSTing | on relaunch, `PeerHave` is full → work-list empty → POST completion → done. No bytes move. |
+| `/relay/complete` returns 5xx | receiver retries with backoff; it is idempotent (`state='complete'` twice is a no-op) |
+| `vb_complete` socket event lost | sender learns on its next poll or resume; cannot re-upload meanwhile (410) |
+| Sender offline for days | learns on next launch via `GET /relay/:id`; if the row was reaped at 24 h, the sender treats an unknown transfer as complete-or-expired and drops its persisted send rather than re-uploading |
+| Receiver reports complete with an incomplete mask | rejected by the `popcount == chunkCount` guard |
 
 ---
 
