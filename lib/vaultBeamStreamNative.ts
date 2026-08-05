@@ -122,6 +122,13 @@ export interface BlockOp {
   // native op uses offset-based chunk identity (AAD+nonce) so per-segment size
   // changes stay clean. Omitted ⇒ legacy uniform path (offset = blockIndex·blockBytes).
   blockPlainOffset?: number;
+  // Chunk-identity scheme (mirrors services/vaultbeam/rust/src/chunk.rs IdScheme).
+  // 'canonical' ⇒ id = blockPlainOffset/chunkBytes, i.e. the chunk's GLOBAL LOGICAL
+  // INDEX — identical on every transport, which is what lets one resume bitmap
+  // span LAN, P2P and the relay. Omitted ⇒ the pre-vbm3 default for the call
+  // shape ('legacyOffset' when blockPlainOffset is present, else 'uniform'), so
+  // an un-upgraded caller is byte-identical to before.
+  idScheme?: 'uniform' | 'legacyOffset' | 'canonical';
 }
 
 export interface UploadBlockOp extends BlockOp { srcPath: string }

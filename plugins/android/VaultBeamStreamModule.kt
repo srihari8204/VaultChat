@@ -77,6 +77,24 @@ class VaultBeamStreamModule(reactContext: ReactApplicationContext) : ReactContex
         return n
     }
 
+    // Chunk-identity scheme — MUST match services/vaultbeam/rust/src/chunk.rs IdScheme
+    // and the golden vectors. "canonical" (vbm3) makes a chunk's id its GLOBAL LOGICAL
+    // INDEX on every transport, which is what lets one resume bitmap span LAN, P2P and
+    // the relay. The other two only read data written by older clients during the
+    // one-release dual-read window.
+    private fun schemeOf(opts: ReadableMap): String {
+        val explicit = if (opts.hasKey("idScheme")) opts.getString("idScheme") else null
+        if (explicit != null) return explicit
+        return if (opts.hasKey("blockPlainOffset")) "legacyOffset" else "uniform"
+    }
+
+    private fun chunkIdFor(scheme: String, firstChunk: Long, i: Int, plainOffset: Long, chunkBytes: Int): Long =
+        when (scheme) {
+            "canonical" -> plainOffset / chunkBytes
+            "legacyOffset" -> plainOffset
+            else -> firstChunk + i
+        }
+
     private fun gcm(mode: Int, keyBytes: ByteArray, nonce: ByteArray, aad: ByteArray): Cipher {
         val c = Cipher.getInstance("AES/GCM/NoPadding")
         c.init(mode, SecretKeySpec(keyBytes, "AES"), GCMParameterSpec(128, nonce))
@@ -126,6 +144,7 @@ class VaultBeamStreamModule(reactContext: ReactApplicationContext) : ReactContex
                 // per-segment chunk sizes differ. Absent → legacy uniform path, which is
                 // byte-identical to before (offset = blockIndex*blockBytes, id = g).
                 val offsetScheme = opts.hasKey("blockPlainOffset")
+                val scheme = schemeOf(opts)
                 val blockPlainOffset = if (offsetScheme) opts.getDouble("blockPlainOffset").toLong()
                                        else blockIndex.toLong() * blockBytes
 
@@ -137,7 +156,7 @@ class VaultBeamStreamModule(reactContext: ReactApplicationContext) : ReactContex
                     while (i < chunksPerBlock) {
                         val plainOffset = blockPlainOffset + i.toLong() * chunkBytes
                         if (plainOffset >= totalBytes) break
-                        val id = if (offsetScheme) plainOffset else firstChunk + i
+                        val id = chunkIdFor(scheme, firstChunk, i, plainOffset, chunkBytes)
                         val plainLen = minOf(chunkBytes.toLong(), totalBytes - plainOffset).toInt()
                         val plain = ByteArray(plainLen)
                         raf.seek(plainOffset); raf.readFully(plain, 0, plainLen)
@@ -190,6 +209,7 @@ class VaultBeamStreamModule(reactContext: ReactApplicationContext) : ReactContex
                 // Segmented geometry (R4) — mirror uploadBlock exactly, or the AAD/nonce
                 // won't match and every chunk fails to open.
                 val offsetScheme = opts.hasKey("blockPlainOffset")
+                val scheme = schemeOf(opts)
                 val blockPlainOffset = if (offsetScheme) opts.getDouble("blockPlainOffset").toLong()
                                        else blockIndex.toLong() * blockBytes
 
@@ -208,7 +228,7 @@ class VaultBeamStreamModule(reactContext: ReactApplicationContext) : ReactContex
                     while (i < chunksPerBlock) {
                         val plainOffset = blockPlainOffset + i.toLong() * chunkBytes
                         if (plainOffset >= totalBytes) break
-                        val id = if (offsetScheme) plainOffset else firstChunk + i
+                        val id = chunkIdFor(scheme, firstChunk, i, plainOffset, chunkBytes)
                         val plainLen = minOf(chunkBytes.toLong(), totalBytes - plainOffset).toInt()
                         val ctLen = plainLen + 16 // + GCM tag
                         if (off + ctLen > body.size) throw IllegalStateException("short block body for block $blockIndex")

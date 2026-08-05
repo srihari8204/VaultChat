@@ -8,7 +8,7 @@ use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
-use crate::chunk::{open_block, open_chunk, plan_block, seal_chunk};
+use crate::chunk::{open_block, open_chunk, plan_block, seal_chunk, IdScheme};
 use crate::VbError;
 
 fn io<E: std::fmt::Display>(ctx: &str) -> impl FnOnce(E) -> VbError + '_ {
@@ -95,8 +95,9 @@ pub fn seal_block_from_file(
     block_bytes: u64,
     total_bytes: u64,
     block_plain_offset: Option<u64>,
+    scheme: IdScheme,
 ) -> Result<Vec<u8>, VbError> {
-    let specs = plan_block(block_index, chunk_bytes, block_bytes, total_bytes, block_plain_offset);
+    let specs = plan_block(block_index, chunk_bytes, block_bytes, total_bytes, block_plain_offset, scheme);
     let mut f = File::open(fs_path(src_path)).map_err(io("uploadBlock open"))?;
     let mut out = Vec::new();
     for s in &specs {
@@ -123,9 +124,10 @@ pub fn write_block_from_body(
     block_bytes: u64,
     total_bytes: u64,
     block_plain_offset: Option<u64>,
+    scheme: IdScheme,
     body: &[u8],
 ) -> Result<usize, VbError> {
-    let specs = plan_block(block_index, chunk_bytes, block_bytes, total_bytes, block_plain_offset);
+    let specs = plan_block(block_index, chunk_bytes, block_bytes, total_bytes, block_plain_offset, scheme);
     let opened = open_block(key, transfer_id, file_id, &specs, body)?;
     let mut f = OpenOptions::new().write(true).read(true).open(fs_path(dst_path)).map_err(io("downloadBlock open"))?;
     for (off, plain) in &opened {

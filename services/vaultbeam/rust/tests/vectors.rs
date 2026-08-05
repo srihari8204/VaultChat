@@ -8,7 +8,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 
-use vaultbeam_core::chunk::{chunk_aad, chunk_count, chunk_nonce, open_block, plan_block, seal_block, seal_chunk};
+use vaultbeam_core::chunk::{chunk_aad, chunk_count, chunk_nonce, open_block, plan_block, seal_block, seal_chunk, IdScheme};
 
 fn golden() -> Value {
     let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -58,7 +58,7 @@ fn block_layout_vectors_byte_identical() {
         let total = u64_of(b, "totalBytes");
         let bpo = if b["offsetScheme"].as_bool().unwrap() { b["blockPlainOffset"].as_u64() } else { None };
 
-        let specs = plan_block(block_index, chunk_bytes, block_bytes, total, bpo);
+        let specs = plan_block(block_index, chunk_bytes, block_bytes, total, bpo, IdScheme::legacy_default(bpo));
         let want_ids: Vec<u64> = b["chunkIds"].as_array().unwrap().iter().map(|x| x.as_u64().unwrap()).collect();
         assert_eq!(specs.iter().map(|s| s.id).collect::<Vec<_>>(), want_ids, "chunk ids: {name}");
 
@@ -68,6 +68,46 @@ fn block_layout_vectors_byte_identical() {
         // split + open round-trips to the exact plaintext regions
         for (off, plain) in open_block(&key, tid, fid, &specs, &wire).unwrap() {
             assert_eq!(plain, file_data[off as usize..off as usize + plain.len()], "block open: {name}");
+        }
+    }
+}
+
+/// The vbm3 canonical scheme: id = plainOffset / chunkBytes on every transport.
+/// Drives the ADDITIVE `blocksCanonical` vectors; the legacy `blocks` above are
+/// unchanged and still checked, which is what proves the dual-read window works.
+#[test]
+fn canonical_block_vectors_byte_identical() {
+    let g = golden();
+    let key = key32(&g);
+    let file_data = hex::decode(g["inputs"]["fileDataHex"].as_str().unwrap()).unwrap();
+    let cases = g["blocksCanonical"].as_array().expect("blocksCanonical vectors present");
+    assert!(!cases.is_empty(), "canonical vectors must not be empty");
+
+    for b in cases {
+        let name = b["name"].as_str().unwrap();
+        let tid = b["transferId"].as_str().unwrap();
+        let fid = b["fileId"].as_str().unwrap();
+        let bi = u64_of(b, "blockIndex");
+        let cb = u64_of(b, "chunkBytes");
+        let bb = u64_of(b, "blockBytes");
+        let total = u64_of(b, "totalBytes");
+        let bpo = Some(u64_of(b, "blockPlainOffset"));
+
+        let specs = plan_block(bi, cb, bb, total, bpo, IdScheme::Canonical);
+        let want_ids: Vec<u64> = b["chunkIds"].as_array().unwrap().iter().map(|x| x.as_u64().unwrap()).collect();
+        assert_eq!(specs.iter().map(|s| s.id).collect::<Vec<_>>(), want_ids, "canonical chunk ids: {name}");
+
+        // every id is the chunk's global logical index — the transport-invariant
+        // property the resume bitmap depends on
+        for s in &specs {
+            assert_eq!(s.id, s.plain_offset / cb, "id == offset/chunkBytes: {name}");
+        }
+
+        let wire = seal_block(&key, tid, fid, &specs, &file_data);
+        assert_eq!(hex::encode(&wire), b["wireHex"].as_str().unwrap(), "canonical block wire: {name}");
+
+        for (off, plain) in open_block(&key, tid, fid, &specs, &wire).unwrap() {
+            assert_eq!(plain, file_data[off as usize..off as usize + plain.len()], "canonical open: {name}");
         }
     }
 }
@@ -118,7 +158,7 @@ fn block_from_file_matches_vectors_and_round_trips() {
         let bpo = if b["offsetScheme"].as_bool().unwrap() { b["blockPlainOffset"].as_u64() } else { None };
 
         // seal from the file == the golden block wire
-        let ct = vaultbeam_core::fileio::seal_block_from_file(&src, &key, tid, fid, bi, cb, bb, total, bpo).unwrap();
+        let ct = vaultbeam_core::fileio::seal_block_from_file(&src, &key, tid, fid, bi, cb, bb, total, bpo, IdScheme::legacy_default(bpo)).unwrap();
         assert_eq!(hex::encode(&ct), b["wireHex"].as_str().unwrap(), "seal_block_from_file: {}", b["name"]);
 
         // write that body into a fresh prealloc'd dst → the plaintext regions match
@@ -126,10 +166,10 @@ fn block_from_file_matches_vectors_and_round_trips() {
         dst.push(format!("vbcore-blk-dst-{}-{bi}.bin", std::process::id()));
         let dst = dst.to_string_lossy().into_owned();
         vaultbeam_core::fileio::prealloc(&dst, total).unwrap();
-        let n = vaultbeam_core::fileio::write_block_from_body(&dst, &key, tid, fid, bi, cb, bb, total, bpo, &ct).unwrap();
+        let n = vaultbeam_core::fileio::write_block_from_body(&dst, &key, tid, fid, bi, cb, bb, total, bpo, IdScheme::legacy_default(bpo), &ct).unwrap();
         assert!(n > 0);
         let written = std::fs::read(&dst).unwrap();
-        for spec in vaultbeam_core::chunk::plan_block(bi, cb, bb, total, bpo) {
+        for spec in vaultbeam_core::chunk::plan_block(bi, cb, bb, total, bpo, IdScheme::legacy_default(bpo)) {
             let o = spec.plain_offset as usize;
             assert_eq!(written[o..o + spec.plain_len], file_data[o..o + spec.plain_len], "block open write: {}", b["name"]);
         }

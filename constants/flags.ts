@@ -136,6 +136,20 @@ export const CALL_ENGINE_V2 = false;
 // a genuine multi-minute stall; flip OFF to restore the exact prior relay path.
 export const VB_RELIABILITY_FIXES = true;
 
+// VB_SEAMLESS_RESUME gates the transport-independent transfer session
+// (openspec/changes/vaultbeam-seamless-resume): one canonical logical chunk
+// identity across LAN/P2P/relay, the PeerHave+R2Have bitmap pair, and resume
+// without restarting when a transport changes.
+//
+// DEFAULT OFF — when off, new transfers build a v1 (legacy) segment plan and use
+// the legacyOffset chunk-identity scheme, which is byte-identical to today. When
+// ON, plans are v2 and chunks are sealed with the canonical scheme (id = global
+// logical index), which is a BREAKING wire change on the relay tier — the
+// manifest version bump makes old<->new a clean reject, never a corrupt decrypt.
+// Readers accept BOTH schemes, so a transfer started before an app update still
+// completes (relay objects expire in 24 h, so the window need only exceed a day).
+export const VB_SEAMLESS_RESUME = false;
+
 // CALL_SESSIONS gates the server-side call record (migration 066 +
 // /calls/* in the Go backend). With it ON, starting or joining a call also
 // opens a session row, so a call gains a real identity: history syncs across a
@@ -164,4 +178,4 @@ export const CALL_SESSIONS = false;
 // back → auto-stop → history correct) — flip OFF for store builds until then.
 export const LOCATION_LOCK = true;
 
-export default { E2EE_ENABLED, VAULT_SESSION_SEALED, VAULT_CACHE_ENCRYPTED, MEDIA_E2EE, STORY_E2EE, GROUP_E2EE, SCHEDULED_LOCAL, VB_AUTODOWNLOAD, VB_AUTO_MAX_BYTES, VB_RELIABILITY_FIXES, CALL_ENGINE_V2, CALL_SESSIONS, LOCATION_LOCK };
+export default { E2EE_ENABLED, VAULT_SESSION_SEALED, VAULT_CACHE_ENCRYPTED, MEDIA_E2EE, STORY_E2EE, GROUP_E2EE, SCHEDULED_LOCAL, VB_AUTODOWNLOAD, VB_AUTO_MAX_BYTES, VB_RELIABILITY_FIXES, VB_SEAMLESS_RESUME, CALL_ENGINE_V2, CALL_SESSIONS, LOCATION_LOCK };
