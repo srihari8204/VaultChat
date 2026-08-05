@@ -1,0 +1,1232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VaultChat Mobile · M2 — Open a chat</title>
+<style>/* ============================================================
+   VaultChat Design System — tokens.css
+   Dark · Glassmorphism · Fluent/Linear-grade · Accent #7C4DFF
+   Every screen fragment builds on these tokens + components.
+   ============================================================ */
+
+:root {
+  /* ---- Color: violet-biased dark neutrals ---- */
+  --bg-0: #08070D;
+  --bg-1: #0C0B14;
+  --bg-2: #12111C;
+  --bg-3: #181726;
+  --bg-4: #1F1D30;
+
+  --glass:    rgba(24, 22, 40, 0.55);
+  --glass-2:  rgba(31, 29, 52, 0.50);
+  --glass-hi: rgba(42, 39, 68, 0.55);
+
+  --stroke:    rgba(235, 232, 255, 0.07);
+  --stroke-2:  rgba(235, 232, 255, 0.13);
+  --stroke-acc: rgba(124, 77, 255, 0.45);
+
+  --txt-1: #EDEBFA;
+  --txt-2: #A29DC0;
+  --txt-3: #6B6684;
+
+  --acc:      #7C4DFF;
+  --acc-2:    #9E7BFF;
+  --acc-3:    #B388FF;
+  --acc-soft: rgba(124, 77, 255, 0.14);
+  --acc-soft-2: rgba(124, 77, 255, 0.24);
+  --grad-acc: linear-gradient(135deg, #9257FF 0%, #7C4DFF 55%, #6C3DF4 100%);
+  --grad-text: linear-gradient(100deg, #EDEBFA 20%, #B388FF 80%);
+
+  --ok:   #34D399;
+  --warn: #FBBF24;
+  --err:  #F87171;
+  --info: #60A5FA;
+
+  /* ---- Elevation ---- */
+  --sh-1: 0 1px 2px rgba(0,0,0,.45);
+  --sh-2: 0 8px 24px rgba(0,0,0,.45);
+  --sh-3: 0 24px 64px rgba(0,0,0,.55);
+  --glow: 0 0 0 1px rgba(124,77,255,.4), 0 6px 28px rgba(124,77,255,.35);
+  --inner-hi: inset 0 1px 0 rgba(255,255,255,.06);
+
+  /* ---- Geometry ---- */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 20px;
+  --r-pill: 999px;
+
+  --blur: blur(24px) saturate(1.5);
+
+  /* ---- Type ---- */
+  --font-ui: "Segoe UI Variable Display", "Segoe UI", -apple-system, "SF Pro Display", Inter, Roboto, system-ui, sans-serif;
+  --font-mono: "Cascadia Code", "SF Mono", "JetBrains Mono", Consolas, "Roboto Mono", monospace;
+  --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* ============ Screen canvas ============ */
+.screen {
+  position: relative;
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  flex: none;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--txt-1);
+  background:
+    radial-gradient(1200px 800px at 82% -12%, rgba(124,77,255,.15), transparent 62%),
+    radial-gradient(1000px 700px at -6% 112%, rgba(124,77,255,.09), transparent 55%),
+    linear-gradient(180deg, #0B0A13 0%, #08070D 100%);
+  -webkit-font-smoothing: antialiased;
+  display: flex;
+  flex-direction: column;
+}
+.screen ::selection { background: var(--acc-soft-2); }
+
+/* ============ Icons ============ */
+.ic { width: 18px; height: 18px; flex: none; display: block; }
+.ic.sm { width: 14px; height: 14px; }
+.ic.lg { width: 22px; height: 22px; }
+.ic.xl { width: 28px; height: 28px; }
+
+/* ============ Layout helpers ============ */
+.row  { display: flex; align-items: center; }
+.col  { display: flex; flex-direction: column; }
+.grow { flex: 1 1 auto; min-width: 0; }
+.center { display: flex; align-items: center; justify-content: center; }
+.gap-4  { gap: 4px; }  .gap-6  { gap: 6px; }  .gap-8  { gap: 8px; }
+.gap-10 { gap: 10px; } .gap-12 { gap: 12px; } .gap-16 { gap: 16px; }
+.gap-20 { gap: 20px; } .gap-24 { gap: 24px; }
+
+/* ============ Glass surfaces ============ */
+.glass {
+  background: var(--glass);
+  border: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--sh-2), var(--inner-hi);
+  border-radius: var(--r-lg);
+}
+.glass-quiet {
+  background: var(--glass);
+  border: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--inner-hi);
+  border-radius: var(--r-md);
+}
+.glass-float {
+  background: var(--glass-2);
+  border: 1px solid var(--stroke-2);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--sh-3), var(--inner-hi);
+  border-radius: var(--r-xl);
+}
+
+/* ============ Window titlebar (Fluent) ============ */
+.vc-titlebar {
+  height: 48px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 8px 0 16px;
+  background: rgba(14, 13, 22, 0.72);
+  border-bottom: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+  z-index: 40;
+}
+.vc-brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 14px; letter-spacing: .1px; }
+.vc-logo {
+  width: 26px; height: 26px; border-radius: 8px;
+  background: var(--grad-acc);
+  box-shadow: 0 2px 10px rgba(124,77,255,.5), var(--inner-hi);
+  display: flex; align-items: center; justify-content: center;
+  color: #fff;
+}
+.vc-logo .ic { width: 15px; height: 15px; }
+.vc-search {
+  width: 420px; height: 32px;
+  margin: 0 auto;
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  background: rgba(235,232,255,.05);
+  border: 1px solid var(--stroke);
+  color: var(--txt-3);
+  font-size: 12.5px;
+}
+.vc-search .ic { color: var(--txt-3); }
+.vc-win { display: flex; align-items: center; }
+.vc-win span {
+  width: 44px; height: 34px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--txt-2); font-size: 11px; border-radius: 6px;
+}
+.vc-win span:hover { background: rgba(235,232,255,.06); }
+.vc-win .close:hover { background: #E81123; color: #fff; }
+
+/* ============ Left nav rail ============ */
+.vc-rail {
+  width: 68px; flex: none;
+  display: flex; flex-direction: column; align-items: center;
+  gap: 6px; padding: 14px 0;
+  background: rgba(12, 11, 19, 0.65);
+  border-right: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+}
+.rail-btn {
+  width: 44px; height: 44px; border-radius: var(--r-md);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--txt-3); position: relative;
+}
+.rail-btn:hover { color: var(--txt-2); background: rgba(235,232,255,.05); }
+.rail-btn.active {
+  color: #fff;
+  background: var(--acc-soft);
+  box-shadow: inset 0 0 0 1px var(--stroke-acc);
+}
+.rail-btn.active::before {
+  content: ""; position: absolute; left: -12px; top: 10px; bottom: 10px;
+  width: 3px; border-radius: 3px; background: var(--grad-acc);
+  box-shadow: 0 0 12px rgba(124,77,255,.8);
+}
+.rail-spacer { flex: 1; }
+.rail-label { font-size: 8.5px; color: var(--txt-3); margin-top: -4px; letter-spacing: .2px; }
+
+/* ============ Buttons ============ */
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 34px; padding: 0 14px;
+  border-radius: var(--r-sm);
+  background: rgba(235,232,255,.06);
+  border: 1px solid var(--stroke-2);
+  color: var(--txt-1); font-size: 12.5px; font-weight: 500;
+  white-space: nowrap;
+}
+.btn-primary {
+  background: var(--grad-acc);
+  border: 1px solid rgba(179,136,255,.5);
+  box-shadow: 0 4px 18px rgba(124,77,255,.4), var(--inner-hi);
+  color: #fff;
+}
+.btn-ghost { background: transparent; border-color: transparent; color: var(--txt-2); }
+.btn.sm { height: 28px; padding: 0 10px; font-size: 11.5px; border-radius: 7px; }
+.icon-btn {
+  width: 34px; height: 34px; flex: none;
+  border-radius: var(--r-sm);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--txt-2);
+  background: transparent;
+}
+.icon-btn:hover { background: rgba(235,232,255,.06); color: var(--txt-1); }
+.icon-btn.active { background: var(--acc-soft); color: var(--acc-3); box-shadow: inset 0 0 0 1px var(--stroke-acc); }
+.icon-btn.sm { width: 28px; height: 28px; }
+.icon-btn.framed { background: rgba(235,232,255,.05); border: 1px solid var(--stroke); }
+
+/* ============ Chips, badges, status ============ */
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 26px; padding: 0 12px;
+  border-radius: var(--r-pill);
+  background: rgba(235,232,255,.05);
+  border: 1px solid var(--stroke);
+  color: var(--txt-2); font-size: 11.5px; font-weight: 500;
+  white-space: nowrap;
+}
+.chip.active {
+  background: var(--acc-soft);
+  border-color: var(--stroke-acc);
+  color: var(--acc-3);
+}
+.chip.ok   { color: var(--ok);   border-color: rgba(52,211,153,.35);  background: rgba(52,211,153,.09); }
+.chip.warn { color: var(--warn); border-color: rgba(251,191,36,.35);  background: rgba(251,191,36,.09); }
+.chip.err  { color: var(--err);  border-color: rgba(248,113,113,.35); background: rgba(248,113,113,.09); }
+.badge {
+  min-width: 19px; height: 19px; padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--grad-acc);
+  color: #fff; font-size: 10.5px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 8px rgba(124,77,255,.5);
+}
+.dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.dot.on  { background: var(--ok); box-shadow: 0 0 8px rgba(52,211,153,.7); }
+.dot.off { background: var(--txt-3); }
+.dot.acc { background: var(--acc-2); box-shadow: 0 0 8px rgba(124,77,255,.7); }
+
+/* ============ Avatars ============ */
+.avatar {
+  width: 42px; height: 42px; flex: none;
+  border-radius: 14px;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 600; font-size: 14px; color: #fff;
+  box-shadow: var(--inner-hi), 0 2px 8px rgba(0,0,0,.35);
+  position: relative;
+}
+.avatar.sm { width: 32px; height: 32px; font-size: 11.5px; border-radius: 11px; }
+.avatar.lg { width: 52px; height: 52px; font-size: 17px; border-radius: 17px; }
+.avatar .presence {
+  position: absolute; right: -2px; bottom: -2px;
+  width: 12px; height: 12px; border-radius: 50%;
+  border: 2.5px solid var(--bg-1);
+}
+.av-1 { background: linear-gradient(135deg, #7C4DFF, #B388FF); }
+.av-2 { background: linear-gradient(135deg, #F472B6, #FB7185); }
+.av-3 { background: linear-gradient(135deg, #34D399, #2DD4BF); }
+.av-4 { background: linear-gradient(135deg, #60A5FA, #818CF8); }
+.av-5 { background: linear-gradient(135deg, #FBBF24, #FB923C); }
+.av-6 { background: linear-gradient(135deg, #A78BFA, #6366F1); }
+
+/* ============ Chat: conversation list item ============ */
+.convo {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 14px; border-radius: var(--r-md);
+  border: 1px solid transparent;
+}
+.convo:hover { background: rgba(235,232,255,.04); }
+.convo.active {
+  background: var(--acc-soft);
+  border-color: var(--stroke-acc);
+  box-shadow: var(--inner-hi);
+}
+.convo .name { font-size: 13.5px; font-weight: 600; color: var(--txt-1); }
+.convo .preview { font-size: 12px; color: var(--txt-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.convo.active .preview { color: var(--txt-2); }
+.convo .when { font-size: 10.5px; color: var(--txt-3); }
+
+/* ============ Chat: bubbles ============ */
+.bubble {
+  max-width: 62%;
+  padding: 11px 15px;
+  border-radius: 16px;
+  font-size: 13.5px; line-height: 1.5;
+  box-shadow: var(--sh-1), var(--inner-hi);
+  position: relative;
+}
+.bubble.in {
+  align-self: flex-start;
+  background: var(--glass-2);
+  border: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+  border-bottom-left-radius: 6px;
+  color: var(--txt-1);
+}
+.bubble.out {
+  align-self: flex-end;
+  background: linear-gradient(135deg, rgba(146,87,255,.92), rgba(108,61,244,.92));
+  border: 1px solid rgba(179,136,255,.4);
+  border-bottom-right-radius: 6px;
+  color: #fff;
+  box-shadow: 0 4px 18px rgba(124,77,255,.28), var(--inner-hi);
+}
+.bubble .b-meta {
+  display: flex; align-items: center; gap: 5px; justify-content: flex-end;
+  margin-top: 5px; font-size: 10px; opacity: .75;
+}
+.bubble.out .b-meta { color: rgba(255,255,255,.9); }
+.bubble.in  .b-meta { color: var(--txt-3); }
+.msg-day {
+  align-self: center;
+  font-size: 10.5px; font-weight: 600; letter-spacing: .8px; text-transform: uppercase;
+  color: var(--txt-3);
+  padding: 5px 14px; border-radius: var(--r-pill);
+  background: rgba(235,232,255,.04); border: 1px solid var(--stroke);
+}
+.reactions {
+  position: absolute; bottom: -12px; left: 12px;
+  display: flex; gap: 4px;
+  font-size: 10.5px;
+  padding: 3px 8px; border-radius: var(--r-pill);
+  background: var(--bg-3); border: 1px solid var(--stroke-2);
+  box-shadow: var(--sh-1);
+  color: var(--txt-2);
+}
+
+/* ============ Chat: file card inside a bubble ============ */
+.filecard {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px; border-radius: var(--r-md);
+  background: rgba(8,7,13,.35);
+  border: 1px solid var(--stroke);
+  min-width: 300px;
+}
+.filecard .f-ic {
+  width: 42px; height: 42px; border-radius: 11px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .5px;
+  box-shadow: var(--inner-hi);
+}
+.filecard .f-name { font-size: 12.5px; font-weight: 600; }
+.filecard .f-sub  { font-size: 10.5px; opacity: .7; }
+.ft-doc   { background: linear-gradient(135deg,#2B6BE4,#3F8CFF); }
+.ft-xls   { background: linear-gradient(135deg,#1D9E6C,#34D399); }
+.ft-ppt   { background: linear-gradient(135deg,#D64B27,#FB923C); }
+.ft-pdf   { background: linear-gradient(135deg,#DC3545,#F87171); }
+.ft-img   { background: linear-gradient(135deg,#8B5CF6,#EC4899); }
+.ft-vid   { background: linear-gradient(135deg,#6366F1,#60A5FA); }
+.ft-aud   { background: linear-gradient(135deg,#0EA5E9,#2DD4BF); }
+.ft-zip   { background: linear-gradient(135deg,#B45309,#FBBF24); }
+.ft-txt   { background: linear-gradient(135deg,#64748B,#94A3B8); }
+.ft-code  { background: linear-gradient(135deg,#7C4DFF,#4F46E5); }
+
+/* ============ Chat: composer ============ */
+.composer {
+  display: flex; align-items: center; gap: 8px;
+  height: 56px; padding: 0 10px 0 6px;
+  border-radius: var(--r-lg);
+  background: var(--glass-2);
+  border: 1px solid var(--stroke-2);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--sh-2), var(--inner-hi);
+}
+.composer .placeholder { color: var(--txt-3); font-size: 13.5px; }
+.send-btn {
+  width: 40px; height: 40px; border-radius: 13px; flex: none;
+  background: var(--grad-acc);
+  display: flex; align-items: center; justify-content: center;
+  color: #fff;
+  box-shadow: 0 4px 16px rgba(124,77,255,.5), var(--inner-hi);
+}
+
+/* ============ Inputs ============ */
+.field {
+  display: flex; align-items: center; gap: 8px;
+  height: 36px; padding: 0 12px;
+  border-radius: var(--r-md);
+  background: rgba(235,232,255,.05);
+  border: 1px solid var(--stroke);
+  color: var(--txt-3); font-size: 12.5px;
+}
+.field.focus { border-color: var(--stroke-acc); box-shadow: 0 0 0 3px rgba(124,77,255,.15); color: var(--txt-1); }
+.kbd {
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--txt-3);
+  padding: 2px 6px; border-radius: 5px;
+  background: rgba(235,232,255,.06);
+  border: 1px solid var(--stroke);
+  box-shadow: 0 1px 0 rgba(0,0,0,.4);
+}
+
+/* ============ Context menu ============ */
+.menu {
+  width: 264px;
+  padding: 6px;
+  border-radius: var(--r-lg);
+  background: rgba(26, 24, 44, 0.85);
+  border: 1px solid var(--stroke-2);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--sh-3), var(--inner-hi);
+}
+.menu-item {
+  display: flex; align-items: center; gap: 11px;
+  padding: 9px 11px; border-radius: 9px;
+  font-size: 12.5px; color: var(--txt-1);
+}
+.menu-item .ic { color: var(--txt-2); }
+.menu-item .mi-kbd { margin-left: auto; }
+.menu-item.hl {
+  background: var(--acc-soft-2);
+  box-shadow: inset 0 0 0 1px var(--stroke-acc), 0 0 20px rgba(124,77,255,.25);
+  color: #fff;
+}
+.menu-item.hl .ic { color: var(--acc-3); }
+.menu-item.danger, .menu-item.danger .ic { color: var(--err); }
+.menu-sep { height: 1px; margin: 5px 8px; background: var(--stroke); }
+.menu-title { font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--txt-3); padding: 8px 11px 4px; }
+
+/* ============ Panels & headers ============ */
+.panel-h {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--stroke);
+  font-size: 13px; font-weight: 600;
+}
+.section-label {
+  font-size: 10px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--txt-3);
+}
+
+/* ============ Toolbar (viewer chrome) ============ */
+.toolbar {
+  display: flex; align-items: center; gap: 4px;
+  padding: 6px;
+  border-radius: var(--r-lg);
+  background: rgba(26, 24, 44, 0.8);
+  border: 1px solid var(--stroke-2);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--sh-2), var(--inner-hi);
+}
+.toolbar .sep { width: 1px; height: 20px; background: var(--stroke-2); margin: 0 4px; }
+
+/* ============ Viewer top bar ============ */
+.vc-viewerbar {
+  height: 56px; flex: none;
+  display: flex; align-items: center; gap: 14px;
+  padding: 0 16px;
+  background: rgba(14, 13, 22, 0.72);
+  border-bottom: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+  z-index: 40;
+}
+.secure-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 28px; padding: 0 13px;
+  border-radius: var(--r-pill);
+  background: rgba(52,211,153,.08);
+  border: 1px solid rgba(52,211,153,.3);
+  color: var(--ok); font-size: 11px; font-weight: 600;
+}
+
+/* ============ Toggle / slider / progress ============ */
+.toggle {
+  width: 38px; height: 22px; border-radius: var(--r-pill); flex: none;
+  background: rgba(235,232,255,.1); border: 1px solid var(--stroke-2);
+  position: relative;
+}
+.toggle::after {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--txt-2);
+}
+.toggle.on { background: var(--grad-acc); border-color: rgba(179,136,255,.5); box-shadow: 0 2px 10px rgba(124,77,255,.4); }
+.toggle.on::after { left: auto; right: 2px; background: #fff; }
+.slider { position: relative; height: 4px; border-radius: 4px; background: rgba(235,232,255,.12); }
+.slider .fill { position: absolute; inset: 0 auto 0 0; border-radius: 4px; background: var(--grad-acc); box-shadow: 0 0 10px rgba(124,77,255,.6); }
+.slider .thumb {
+  position: absolute; top: 50%; transform: translate(-50%,-50%);
+  width: 14px; height: 14px; border-radius: 50%;
+  background: #fff; box-shadow: 0 0 0 4px rgba(124,77,255,.35), 0 2px 6px rgba(0,0,0,.5);
+}
+.progress { height: 3px; border-radius: 3px; background: rgba(235,232,255,.1); overflow: hidden; }
+.progress .fill { height: 100%; border-radius: 3px; background: var(--grad-acc); box-shadow: 0 0 12px rgba(124,77,255,.7); }
+
+/* ============ Decorative scrollbar ============ */
+.scroll-rail {
+  position: absolute; right: 5px; top: 10px; bottom: 10px; width: 5px;
+  border-radius: 5px; background: rgba(235,232,255,.04);
+}
+.scroll-rail .thumb {
+  position: absolute; left: 0; right: 0; height: 26%;
+  border-radius: 5px; background: rgba(235,232,255,.14);
+}
+
+/* ============ Tabs ============ */
+.tabs { display: flex; align-items: center; gap: 2px; }
+.tab {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 32px; padding: 0 14px;
+  border-radius: 9px;
+  font-size: 12px; font-weight: 500; color: var(--txt-2);
+  white-space: nowrap;
+}
+.tab:hover { background: rgba(235,232,255,.05); }
+.tab.active { background: var(--acc-soft); color: var(--acc-3); box-shadow: inset 0 0 0 1px var(--stroke-acc); }
+
+/* ============ Tree (folders / TOC / archive) ============ */
+.tree-item {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 10px; border-radius: 8px;
+  font-size: 12.5px; color: var(--txt-2);
+  white-space: nowrap;
+}
+.tree-item .ic { color: var(--txt-3); }
+.tree-item.active { background: var(--acc-soft); color: var(--txt-1); box-shadow: inset 0 0 0 1px var(--stroke-acc); }
+.tree-item.active .ic { color: var(--acc-3); }
+.tree-item.lvl2 { padding-left: 30px; font-size: 12px; }
+.tree-item.lvl3 { padding-left: 50px; font-size: 12px; }
+
+/* ============ Data table ============ */
+.dtable { border-collapse: collapse; font-size: 12px; color: var(--txt-2); }
+.dtable th {
+  text-align: left; font-weight: 600; color: var(--txt-2);
+  background: rgba(235,232,255,.04);
+  border: 1px solid var(--stroke);
+  padding: 8px 12px; font-size: 11.5px;
+}
+.dtable td { border: 1px solid var(--stroke); padding: 8px 12px; font-variant-numeric: tabular-nums; }
+
+/* ============ Tooltip ============ */
+.tip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 11px; border-radius: 9px;
+  background: var(--bg-4);
+  border: 1px solid var(--stroke-2);
+  box-shadow: var(--sh-2);
+  font-size: 11px; font-weight: 600; color: var(--txt-1);
+  white-space: nowrap;
+}
+
+/* ============ Cursor glyph (for interaction states) ============ */
+.cursor {
+  position: absolute; z-index: 60; pointer-events: none;
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,.6));
+}
+</style>
+<style>/* ============================================================
+   VaultChat Mobile — tokens-mobile.css
+   Layers ON TOP of tokens.css. Same palette, same accent (#7C4DFF),
+   same icon sprite — only the layout system is mobile.
+   Device canvas: 430 × 932 (large phone, 3x).
+   ============================================================ */
+
+/* ---- Mobile screen canvas ---- */
+.mscreen {
+  position: relative;
+  width: 430px;
+  height: 932px;
+  overflow: hidden;
+  flex: none;
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--txt-1);
+  background:
+    radial-gradient(420px 320px at 88% -6%, rgba(124,77,255,.18), transparent 64%),
+    radial-gradient(360px 300px at -12% 104%, rgba(124,77,255,.10), transparent 58%),
+    linear-gradient(180deg, #0B0A13 0%, #08070D 100%);
+  -webkit-font-smoothing: antialiased;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- Status bar (OS chrome, drawn with shapes — not app icons) ---- */
+.m-status {
+  height: 54px; flex: none;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 26px 0;
+  font-size: 15px; font-weight: 650; letter-spacing: .2px;
+  color: var(--txt-1);
+  position: relative; z-index: 30;
+}
+.m-status .sb-right { display: flex; align-items: center; gap: 6px; }
+.m-sig { display: flex; align-items: flex-end; gap: 2px; height: 11px; }
+.m-sig i { width: 3px; border-radius: 1px; background: var(--txt-1); }
+.m-sig i:nth-child(1) { height: 4px; }
+.m-sig i:nth-child(2) { height: 6px; }
+.m-sig i:nth-child(3) { height: 8.5px; }
+.m-sig i:nth-child(4) { height: 11px; }
+.m-wifi {
+  width: 15px; height: 11px; position: relative;
+}
+.m-wifi::before {
+  content: ""; position: absolute; inset: 0;
+  border: 2.2px solid var(--txt-1); border-radius: 50% 50% 0 0;
+  border-bottom-color: transparent; border-left-color: transparent; border-right-color: transparent;
+  transform: rotate(0deg);
+}
+.m-wifi::after {
+  content: ""; position: absolute; left: 5.5px; bottom: 0;
+  width: 4px; height: 4px; border-radius: 50%; background: var(--txt-1);
+}
+.m-batt {
+  width: 25px; height: 12px; border-radius: 3.5px;
+  border: 1.4px solid rgba(237,232,255,.55);
+  position: relative; padding: 1.6px;
+}
+.m-batt i { display: block; height: 100%; width: 72%; border-radius: 1.6px; background: var(--txt-1); }
+.m-batt::after {
+  content: ""; position: absolute; right: -3.4px; top: 3.4px;
+  width: 2px; height: 4px; border-radius: 0 2px 2px 0;
+  background: rgba(237,232,255,.55);
+}
+
+/* ---- Home indicator ---- */
+.m-home {
+  height: 22px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  position: relative; z-index: 30;
+}
+.m-home i { width: 140px; height: 5px; border-radius: 5px; background: rgba(237,232,255,.30); }
+
+/* ---- Top app bar ---- */
+.m-appbar {
+  height: 58px; flex: none;
+  display: flex; align-items: center; gap: 12px;
+  padding: 0 14px;
+  background: rgba(14, 13, 22, 0.66);
+  border-bottom: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+  position: relative; z-index: 25;
+}
+.m-appbar .m-title { font-size: 17px; font-weight: 680; letter-spacing: -.2px; }
+.m-appbar .m-sub { font-size: 11.5px; color: var(--txt-3); margin-top: 1px; }
+.m-appbar.tall { height: auto; padding: 6px 14px 12px; flex-direction: column; align-items: stretch; gap: 10px; }
+
+/* large title header (list screens) */
+.m-largehead { padding: 6px 20px 12px; flex: none; }
+.m-largehead h1 { font-size: 30px; font-weight: 750; letter-spacing: -.8px; line-height: 1.1; }
+.m-largehead .sub { font-size: 12.5px; color: var(--txt-3); margin-top: 3px; }
+
+/* ---- Icon button (mobile touch size) ---- */
+.m-ic-btn {
+  width: 40px; height: 40px; flex: none;
+  border-radius: 13px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--txt-2);
+}
+.m-ic-btn.framed { background: rgba(235,232,255,.06); border: 1px solid var(--stroke); }
+.m-ic-btn.active { background: var(--acc-soft); color: var(--acc-3); box-shadow: inset 0 0 0 1px var(--stroke-acc); }
+.m-ic-btn .ic { width: 21px; height: 21px; }
+
+/* ---- Bottom tab bar (same icons as desktop rail) ---- */
+.m-tabbar {
+  flex: none;
+  display: flex; align-items: stretch;
+  padding: 8px 6px 2px;
+  background: rgba(12, 11, 19, 0.82);
+  border-top: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+  position: relative; z-index: 25;
+}
+.m-tab {
+  flex: 1;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 6px 0 4px;
+  color: var(--txt-3);
+  position: relative;
+}
+.m-tab .ic { width: 22px; height: 22px; }
+.m-tab span { font-size: 10px; font-weight: 550; letter-spacing: .1px; }
+.m-tab.on { color: var(--acc-3); }
+.m-tab.on::before {
+  content: ""; position: absolute; top: -8px; left: 50%; transform: translateX(-50%);
+  width: 26px; height: 3px; border-radius: 3px;
+  background: var(--grad-acc); box-shadow: 0 0 12px rgba(124,77,255,.8);
+}
+.m-tab .m-badge {
+  position: absolute; top: 2px; right: 50%; margin-right: -20px;
+  min-width: 17px; height: 17px; padding: 0 5px;
+  border-radius: 999px; background: var(--grad-acc);
+  color: #fff; font-size: 9.5px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid #0B0A13;
+}
+
+/* ---- Search field ---- */
+.m-search {
+  height: 40px;
+  display: flex; align-items: center; gap: 9px;
+  padding: 0 13px;
+  border-radius: 13px;
+  background: rgba(235,232,255,.055);
+  border: 1px solid var(--stroke);
+  color: var(--txt-3); font-size: 14px;
+}
+.m-search.focus { border-color: var(--stroke-acc); box-shadow: 0 0 0 3px rgba(124,77,255,.14); color: var(--txt-1); }
+
+/* ---- Segmented control / filter chips ---- */
+.m-chips { display: flex; gap: 8px; overflow: hidden; }
+.m-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 32px; padding: 0 14px;
+  border-radius: 999px;
+  background: rgba(235,232,255,.05);
+  border: 1px solid var(--stroke);
+  color: var(--txt-2); font-size: 13px; font-weight: 550;
+  white-space: nowrap; flex: none;
+}
+.m-chip.on { background: var(--acc-soft); border-color: var(--stroke-acc); color: var(--acc-3); }
+.m-seg {
+  display: flex; gap: 3px; padding: 3px;
+  border-radius: 13px;
+  background: rgba(235,232,255,.05);
+  border: 1px solid var(--stroke);
+}
+.m-seg .sg {
+  flex: 1; height: 34px;
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  border-radius: 10px;
+  font-size: 13px; font-weight: 550; color: var(--txt-2);
+  white-space: nowrap;
+}
+.m-seg .sg.on { background: var(--acc-soft); color: var(--acc-3); box-shadow: inset 0 0 0 1px var(--stroke-acc); }
+
+/* ---- Conversation row ---- */
+.m-convo {
+  display: flex; align-items: center; gap: 13px;
+  padding: 12px 16px;
+  position: relative;
+}
+.m-convo .nm { font-size: 15.5px; font-weight: 620; }
+.m-convo .pv { font-size: 13px; color: var(--txt-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-convo .tm { font-size: 11.5px; color: var(--txt-3); }
+.m-convo.on { background: var(--acc-soft); }
+.m-convo .avatar { width: 50px; height: 50px; border-radius: 17px; font-size: 16px; }
+
+/* ---- Message bubbles (mobile widths) ---- */
+.m-msgs { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 14px 14px 8px; justify-content: flex-end; position: relative; }
+.m-bub {
+  max-width: 82%;
+  padding: 10px 14px;
+  border-radius: 18px;
+  font-size: 14.5px; line-height: 1.45;
+  box-shadow: var(--sh-1), var(--inner-hi);
+  position: relative;
+}
+.m-bub.in {
+  align-self: flex-start;
+  background: var(--glass-2);
+  border: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+  border-bottom-left-radius: 7px;
+}
+.m-bub.out {
+  align-self: flex-end;
+  background: linear-gradient(135deg, rgba(146,87,255,.94), rgba(108,61,244,.94));
+  border: 1px solid rgba(179,136,255,.42);
+  border-bottom-right-radius: 7px;
+  color: #fff;
+  box-shadow: 0 4px 18px rgba(124,77,255,.28), var(--inner-hi);
+}
+.m-bub .bm { display: flex; align-items: center; gap: 5px; justify-content: flex-end; margin-top: 4px; font-size: 10.5px; opacity: .75; }
+.m-sender { font-size: 12px; font-weight: 650; margin-bottom: 3px; }
+.m-day {
+  align-self: center;
+  font-size: 11px; font-weight: 620; letter-spacing: .6px; text-transform: uppercase;
+  color: var(--txt-3);
+  padding: 5px 14px; border-radius: 999px;
+  background: rgba(235,232,255,.04); border: 1px solid var(--stroke);
+}
+
+/* ---- Composer ---- */
+.m-composer {
+  flex: none;
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--stroke);
+  background: rgba(12, 11, 19, 0.7);
+  backdrop-filter: var(--blur);
+}
+.m-composer .field-in {
+  flex: 1; min-width: 0; height: 42px;
+  display: flex; align-items: center; gap: 9px;
+  padding: 0 14px;
+  border-radius: 21px;
+  background: rgba(235,232,255,.06);
+  border: 1px solid var(--stroke);
+  color: var(--txt-3); font-size: 14.5px;
+}
+.m-send {
+  width: 42px; height: 42px; border-radius: 15px; flex: none;
+  background: var(--grad-acc);
+  display: flex; align-items: center; justify-content: center; color: #fff;
+  box-shadow: 0 4px 16px rgba(124,77,255,.5), var(--inner-hi);
+}
+
+/* ---- Bottom sheet ---- */
+.m-sheet {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 60;
+  border-radius: 26px 26px 0 0;
+  background: rgba(24, 22, 40, 0.93);
+  border: 1px solid var(--stroke-2);
+  border-bottom: 0;
+  backdrop-filter: var(--blur);
+  box-shadow: 0 -20px 60px rgba(0,0,0,.6), var(--inner-hi);
+  padding: 10px 16px 26px;
+}
+.m-grab { width: 40px; height: 4.5px; border-radius: 4px; background: rgba(237,232,255,.24); margin: 0 auto 14px; }
+.m-sheet-t { font-size: 18px; font-weight: 700; letter-spacing: -.3px; }
+.m-sheet-s { font-size: 13.5px; color: var(--txt-2); line-height: 1.5; margin-top: 6px; }
+
+/* sheet action rows */
+.m-act {
+  display: flex; align-items: center; gap: 14px;
+  padding: 13px 12px; border-radius: 14px;
+  font-size: 15px; color: var(--txt-1);
+}
+.m-act .ic { width: 21px; height: 21px; color: var(--txt-2); }
+.m-act.hl { background: var(--acc-soft-2); box-shadow: inset 0 0 0 1px var(--stroke-acc); color: #fff; }
+.m-act.hl .ic { color: var(--acc-3); }
+.m-act.danger, .m-act.danger .ic { color: var(--err); }
+.m-act .m-arrow { margin-left: auto; color: var(--txt-3); }
+
+/* ---- Dim scrim ---- */
+.m-dim { position: absolute; inset: 0; z-index: 50; background: rgba(5, 4, 9, 0.6); }
+
+/* ---- Buttons ---- */
+.m-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+  height: 50px; padding: 0 20px;
+  border-radius: 16px;
+  background: rgba(235,232,255,.07);
+  border: 1px solid var(--stroke-2);
+  color: var(--txt-1); font-size: 15px; font-weight: 600;
+}
+.m-btn.primary {
+  background: var(--grad-acc);
+  border-color: rgba(179,136,255,.5);
+  box-shadow: 0 6px 22px rgba(124,77,255,.42), var(--inner-hi);
+  color: #fff;
+}
+.m-btn.ghost { background: transparent; border-color: transparent; color: var(--txt-2); }
+.m-btn.sm { height: 38px; padding: 0 14px; font-size: 13.5px; border-radius: 12px; }
+.m-btn.block { width: 100%; }
+
+/* ---- FAB ---- */
+.m-fab {
+  position: absolute; right: 18px; z-index: 20;
+  width: 58px; height: 58px; border-radius: 20px;
+  background: var(--grad-acc);
+  display: flex; align-items: center; justify-content: center; color: #fff;
+  box-shadow: 0 10px 30px rgba(124,77,255,.5), var(--inner-hi);
+}
+.m-fab .ic { width: 25px; height: 25px; }
+
+/* ---- Card / list surfaces ---- */
+.m-card {
+  border-radius: 18px;
+  background: var(--glass);
+  border: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--sh-2), var(--inner-hi);
+}
+.m-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 13px 15px;
+}
+.m-row + .m-row { border-top: 1px solid rgba(235,232,255,.055); }
+.m-row .r-nm { font-size: 14.5px; font-weight: 600; }
+.m-row .r-mt { font-size: 11.5px; color: var(--txt-3); margin-top: 1px; }
+
+/* file tile (reuses the desktop ft-* gradients) */
+.m-tile {
+  width: 44px; height: 44px; border-radius: 14px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .4px;
+  box-shadow: var(--inner-hi), 0 2px 8px rgba(0,0,0,.35);
+  position: relative;
+}
+.m-tile.sm { width: 34px; height: 34px; border-radius: 11px; font-size: 8.5px; }
+
+/* ---- Viewer chrome (mobile) ---- */
+.m-viewerbar {
+  height: 56px; flex: none;
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 10px 0 6px;
+  background: rgba(14, 13, 22, 0.72);
+  border-bottom: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+  position: relative; z-index: 25;
+}
+.m-viewerbar .vt { font-size: 14.5px; font-weight: 620; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-viewerbar .vs { font-size: 11px; color: var(--txt-3); }
+.m-secure {
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  height: 30px; flex: none;
+  background: rgba(52,211,153,.08);
+  border-bottom: 1px solid rgba(52,211,153,.18);
+  color: var(--ok); font-size: 11px; font-weight: 600;
+}
+/* bottom toolbar for viewers */
+.m-toolbar {
+  flex: none;
+  display: flex; align-items: center; justify-content: space-around;
+  padding: 8px 6px;
+  background: rgba(16, 15, 26, 0.8);
+  border-top: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+}
+.m-tool {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 4px 10px; border-radius: 12px;
+  color: var(--txt-2); font-size: 10px; font-weight: 550;
+}
+.m-tool .ic { width: 21px; height: 21px; }
+.m-tool.on { color: var(--acc-3); background: var(--acc-soft); box-shadow: inset 0 0 0 1px var(--stroke-acc); }
+
+/* floating pill toolbar */
+.m-float {
+  position: absolute; left: 50%; transform: translateX(-50%); z-index: 20;
+  display: flex; align-items: center; gap: 4px;
+  padding: 6px;
+  border-radius: 18px;
+  background: rgba(26, 24, 44, 0.86);
+  border: 1px solid var(--stroke-2);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--sh-3), var(--inner-hi);
+}
+
+/* ---- Split divider (stacked panes) ---- */
+.m-divider {
+  flex: none; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  gap: 4px;
+  background: rgba(20, 18, 34, 0.75);
+  border-top: 1px solid var(--stroke);
+  border-bottom: 1px solid var(--stroke);
+  position: relative;
+}
+.m-divider i { width: 4px; height: 4px; border-radius: 50%; background: rgba(237,232,255,.32); }
+.m-divider.hot { background: var(--acc-soft-2); box-shadow: var(--glow); }
+.m-divider.hot i { background: var(--acc-3); }
+
+/* ---- Pane header (split) ---- */
+.m-panehead {
+  height: 48px; flex: none;
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 12px;
+  background: rgba(14, 13, 22, 0.55);
+  border-bottom: 1px solid var(--stroke);
+}
+.m-panehead .pn { font-size: 14px; font-weight: 640; }
+.m-panehead .ps { font-size: 10.5px; color: var(--txt-3); }
+
+/* ---- Toast / tip ---- */
+.m-tip {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 8px 13px; border-radius: 12px;
+  background: var(--bg-4);
+  border: 1px solid var(--stroke-2);
+  box-shadow: var(--sh-2);
+  font-size: 12px; font-weight: 600; color: var(--txt-1);
+  white-space: nowrap;
+}
+
+/* ---- Scroll hint ---- */
+.m-scroll {
+  position: absolute; right: 3px; width: 3.5px; border-radius: 4px;
+  background: rgba(237,232,255,.16);
+}
+
+/* ---- Section label ---- */
+.m-label {
+  font-size: 11px; font-weight: 720; letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--txt-3);
+}
+</style>
+<style>#m-chat .avatar.hd { width: 38px; height: 38px; border-radius: 13px; font-size: 13px; }
+#m-chat .who { min-width: 0; }
+#m-chat .who .n { font-size: 15.5px; font-weight: 660; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#m-chat .who .s { font-size: 11.5px; color: var(--ok); display: flex; align-items: center; gap: 5px; }
+
+#m-chat .e2e {
+  flex: none;
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  height: 28px;
+  background: rgba(52,211,153,.07);
+  border-bottom: 1px solid rgba(52,211,153,.16);
+  color: var(--ok); font-size: 11px; font-weight: 600;
+}
+
+#m-chat .m-in { display: flex; align-items: flex-end; gap: 8px; align-self: flex-start; max-width: 86%; }
+#m-chat .m-in .avatar { width: 26px; height: 26px; border-radius: 9px; font-size: 9.5px; flex: none; }
+#m-chat .m-in .m-bub { max-width: none; }
+
+#m-chat .fcard {
+  display: flex; align-items: center; gap: 11px;
+  padding: 10px; border-radius: 14px; margin-bottom: 8px;
+  background: rgba(8,7,13,.4);
+  border: 1px solid var(--stroke);
+}
+#m-chat .fcard .fn { font-size: 13.5px; font-weight: 620; }
+#m-chat .fcard .fs { font-size: 11px; opacity: .72; }
+
+#m-chat .typing {
+  align-self: flex-start; margin-left: 34px;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 9px 14px; border-radius: 16px; border-bottom-left-radius: 6px;
+  background: var(--glass-2); border: 1px solid var(--stroke);
+  font-size: 12px; color: var(--txt-3);
+}
+#m-chat .typing i { width: 5px; height: 5px; border-radius: 50%; background: var(--acc-2); }
+#m-chat .typing i:nth-child(2) { opacity: .55; }
+#m-chat .typing i:nth-child(3) { opacity: .3; }
+
+#m-chat .reactions {
+  position: absolute; bottom: -11px; left: 12px;
+  display: flex; gap: 4px; font-size: 11px;
+  padding: 2px 8px; border-radius: 999px;
+  background: var(--bg-3); border: 1px solid var(--stroke-2);
+  color: var(--txt-2);
+}</style>
+<style>
+  html, body { margin: 0; background: #050409; }
+  body { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px 0; }
+  .vcxm-device { border-radius: 44px; overflow: hidden; box-shadow: 0 30px 90px rgba(0,0,0,.65), 0 0 0 10px #17161f, 0 0 0 11px rgba(235,232,255,.12); }
+  .vcxm-meta { font: 500 12px/1 "Segoe UI", system-ui, sans-serif; color: #6B6684; letter-spacing: .3px; }
+  .vcxm-meta b { color: #A29DC0; font-weight: 600; }
+</style>
+</head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <defs>
+    <g id="_s" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></g>
+  </defs>
+
+  <symbol id="i-lock" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></g></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6z"/><path d="M9.5 12l2 2 3.5-4"/></g></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-8 8H4l2.3-2.7A8 8 0 1 1 21 12z"/></g></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></g></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></g></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.5l-7.8 7.8a5 5 0 0 1-7-7l8.5-8.5a3.4 3.4 0 0 1 4.8 4.8l-8.2 8.2a1.8 1.8 0 0 1-2.5-2.5l7.4-7.4"/></g></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l16-8-5 16-3.5-6.5L4 12z"/><path d="M11.5 13.5L20 4"/></g></symbol>
+  <symbol id="i-smile" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 14a4.5 4.5 0 0 0 7 0"/><path d="M9.2 9.6h.01M14.8 9.6h.01" stroke-width="2.4"/></g></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h4l1.5 4.5L8 10a12 12 0 0 0 6 6l1.5-2.5L20 15v4a2 2 0 0 1-2 2A15 15 0 0 1 3 6a2 2 0 0 1 2-2z"/></g></symbol>
+  <symbol id="i-video" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6.5" width="12.5" height="11" rx="2.5"/><path d="M15.5 12.5l5.5 3.5V8l-5.5 3.5z"/></g></symbol>
+  <symbol id="i-more-v" viewBox="0 0 24 24"><g fill="currentColor"><circle cx="12" cy="5.5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="18.5" r="1.6"/></g></symbol>
+  <symbol id="i-more-h" viewBox="0 0 24 24"><g fill="currentColor"><circle cx="5.5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18.5" cy="12" r="1.6"/></g></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></g></symbol>
+  <symbol id="i-check2" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12.5l4 4L14 9"/><path d="M10.5 14.5l2 2L21 8"/></g></symbol>
+  <symbol id="i-chev-l" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5L8 12l6.5 6.5"/></g></symbol>
+  <symbol id="i-chev-r" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 5.5L16 12l-6.5 6.5"/></g></symbol>
+  <symbol id="i-chev-d" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 9.5L12 16l6.5-6.5"/></g></symbol>
+  <symbol id="i-chev-u" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 14.5L12 8l6.5 6.5"/></g></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></g></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></g></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 12h14"/></g></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l-.7 6.2 2.7 3.3H7l2.7-3.3L9 4z"/><path d="M12 13.5V20"/></g></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3.5l2.7 5.6 6.1.8-4.5 4.2 1.1 6-5.4-3-5.4 3 1.1-6L3.2 9.9l6.1-.8z"/></g></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M3.5 7a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></g></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5h8L19 8.5V20.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 20.5v-16A1.5 1.5 0 0 1 6.5 3.5z"/><path d="M14 3.5V9h5"/></g></symbol>
+  <symbol id="i-doc-lines" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5h8L19 8.5V20.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 20.5v-16A1.5 1.5 0 0 1 6.5 3.5z"/><path d="M8.5 12h7M8.5 15.5h7M8.5 18.5h4.5"/></g></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16M4 15h16M10 4v16M15 4v16" stroke-width="1.3"/></g></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="M3.5 17l5-4.5 3.5 3 4-4.5 4.5 5"/></g></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path fill="currentColor" d="M8 5.5v13a1 1 0 0 0 1.5.9l10.4-6.5a1 1 0 0 0 0-1.7L9.5 4.6A1 1 0 0 0 8 5.5z"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><g fill="currentColor"><rect x="6.5" y="5" width="3.6" height="14" rx="1.2"/><rect x="14" y="5" width="3.6" height="14" rx="1.2"/></g></symbol>
+  <symbol id="i-volume" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5v5h3.5L12 19V5L7.5 9.5H4z"/><path d="M15.5 9a4.5 4.5 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11"/></g></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v10.5M7.5 10.5L12 15l4.5-4.5"/><path d="M4.5 19.5h15"/></g></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="12" r="2.5"/><circle cx="17.5" cy="5.5" r="2.5"/><circle cx="17.5" cy="18.5" r="2.5"/><path d="M8.3 10.8l7-4M8.3 13.2l7 4"/></g></symbol>
+  <symbol id="i-print" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 8V4h10v4"/><rect x="4" y="8" width="16" height="8" rx="2"/><rect x="7" y="14" width="10" height="6" rx="1"/></g></symbol>
+  <symbol id="i-bookmark" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M7 4h10v16l-5-3.5L7 20V4z"/></g></symbol>
+  <symbol id="i-zoom-in" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5M8.5 11h5M11 8.5v5"/></g></symbol>
+  <symbol id="i-zoom-out" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5M8.5 11h5"/></g></symbol>
+  <symbol id="i-rotate" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12a7.5 7.5 0 1 1 2.2 5.3"/><path d="M4.5 21v-4.5H9"/></g></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"/></g></symbol>
+  <symbol id="i-pip" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><rect x="12.5" y="11.5" width="6.5" height="5" rx="1" fill="currentColor" stroke="none"/></g></symbol>
+  <symbol id="i-pen" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19l-4 1z"/><path d="M14.5 6.5l3 3"/></g></symbol>
+  <symbol id="i-marker" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 15l-2 2 1 2H4l3.5-3.5"/><path d="M9 15L18.5 5.5a1.8 1.8 0 0 1 2.6 2.6L11.5 17.5 9 15z"/></g></symbol>
+  <symbol id="i-sign" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17c2-4 4-8.5 6-8.5s1 6 2.5 6 2-3 3.5-3 1.5 2.5 4 2.5"/><path d="M4 20.5h16"/></g></symbol>
+  <symbol id="i-comment" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H4.5l2-2.4A7.5 7.5 0 1 1 20 11.5z"/><path d="M8.5 10.5h7M8.5 13.5h4.5"/></g></symbol>
+  <symbol id="i-toc" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="4.5" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="4.5" cy="18" r="1.3" fill="currentColor" stroke="none"/></g></symbol>
+  <symbol id="i-type" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7V4.5h14V7M12 4.5v15M9 19.5h6"/></g></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4"/></g></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/></g></symbol>
+  <symbol id="i-cloud-off" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18.5h11a3.5 3.5 0 0 0 .8-6.9A6 6 0 0 0 9 8.5"/><path d="M5.5 9a4.5 4.5 0 0 0 1.5 9.5"/><path d="M4 4l16 16"/></g></symbol>
+  <symbol id="i-cloud-check" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18.5h11a3.5 3.5 0 0 0 .8-6.9A6 6 0 0 0 7.1 10 4.5 4.5 0 0 0 7 18.5z"/><path d="M9.5 14l2 2 3.5-4"/></g></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2.5"/></g></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7"><path d="M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/></g></symbol>
+  <symbol id="i-eye-off" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M2.5 12S6 5.8 12 5.8a9 9 0 0 1 4.5 1.2M21.5 12S18 18.2 12 18.2a9 9 0 0 1-4.5-1.2"/><path d="M4 4l16 16"/></g></symbol>
+  <symbol id="i-droplet" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3.5s6 6.2 6 10.5a6 6 0 0 1-12 0C6 9.7 12 3.5 12 3.5z"/></g></symbol>
+  <symbol id="i-swap" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4L3.5 7.5 7 11M3.5 7.5h13"/><path d="M17 13l3.5 3.5L17 20M20.5 16.5h-13"/></g></symbol>
+  <symbol id="i-split-v" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M12 4.5v15" stroke-width="1.9"/></g></symbol>
+  <symbol id="i-split-h" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M3.5 12h17" stroke-width="1.9"/></g></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="8.5" y="8.5" width="12" height="12" rx="2"/><path d="M5.5 15.5h-1a1.5 1.5 0 0 1-1.5-1.5V5a1.5 1.5 0 0 1 1.5-1.5H14A1.5 1.5 0 0 1 15.5 5v1"/></g></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10 4.8 7 4.5 4 4.8v13.7c3-.3 6 0 8 1.7 2-1.7 5-2 8-1.7V4.8c-3-.3-6 0-8 1.7z"/><path d="M12 6.5v13.7"/></g></symbol>
+  <symbol id="i-sync" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19.5 12a7.5 7.5 0 0 1-13 5.1M4.5 12a7.5 7.5 0 0 1 13-5.1"/><path d="M17.5 3v4h-4M6.5 21v-4h4"/></g></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.3 3.8 5.2 3.8 8.5S14.5 18.2 12 20.5C9.5 18.2 8.2 15.3 8.2 12S9.5 5.8 12 3.5z"/></g></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5"/></g></symbol>
+  <symbol id="i-zip" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5h8L19 8.5V20.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 20.5v-16A1.5 1.5 0 0 1 6.5 3.5z"/><path d="M9.5 6h2M9.5 9h2M9.5 12h2M9.5 15h2" stroke-width="1.9"/></g></symbol>
+  <symbol id="i-music" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18.5V6l11-2.5V16"/><circle cx="6.5" cy="18.5" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/></g></symbol>
+  <symbol id="i-film" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M8 4.5v15M16 4.5v15M3.5 9h4.5M3.5 15h4.5M16 9h4.5M16 15h4.5" stroke-width="1.4"/></g></symbol>
+  <symbol id="i-filter" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5h16l-6.2 7.2v5.8l-3.6-2v-3.8z"/></g></symbol>
+  <symbol id="i-sort" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 5v14M7 19l-3-3M7 19l3-3"/><path d="M17 19V5M17 5l-3 3M17 5l3 3"/></g></symbol>
+  <symbol id="i-freeze" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 3v18M12 3l-2.5 2.5M12 3l2.5 2.5M12 21l-2.5-2.5M12 21l2.5-2.5M4.2 7.5l15.6 9M4.2 7.5L7.6 7M4.2 7.5l.5 3.4M19.8 16.5l-3.4.5M19.8 16.5l-.5-3.4M4.2 16.5l15.6-9M4.2 16.5l.5-3.4M4.2 16.5l3.4.5M19.8 7.5l-.5 3.4M19.8 7.5L16.4 7"/></g></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 20h16"/><path d="M7 16v-4M12 16V7M17 16v-6"/></g></symbol>
+  <symbol id="i-pivot" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="2.5"/><path d="M3.5 9h17M9 3.5v17" stroke-width="1.4"/><path d="M13 13l5 5M18 13v5h-5"/></g></symbol>
+  <symbol id="i-fx" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 4c-2.5 0-3 1.5-3.3 3.5L8.2 17c-.3 2-1 3-2.7 3"/><path d="M5.5 9.5H12"/><path d="M14.5 12.5l6 6M20.5 12.5l-6 6"/></g></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.8 2H4.2l1.8-2z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></g></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.14-1.4l2.1-1.6-2-3.5-2.5 1a7 7 0 0 0-2.4-1.4L13.7 2.5h-3.4l-.36 2.6a7 7 0 0 0-2.4 1.4l-2.5-1-2 3.5 2.1 1.6a7 7 0 0 0 0 2.8l-2.1 1.6 2 3.5 2.5-1a7 7 0 0 0 2.4 1.4l.36 2.6h3.4l.36-2.6a7 7 0 0 0 2.4-1.4l2.5 1 2-3.5-2.1-1.6A7 7 0 0 0 19 12z"/></g></symbol>
+  <symbol id="i-speed" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4.5 17.5a8.5 8.5 0 1 1 15 0"/><path d="M12 14.5l4-5.5"/><circle cx="12" cy="15.5" r="1.6" fill="currentColor" stroke="none"/></g></symbol>
+  <symbol id="i-subtitles" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="M6.5 12h4M13 12h4.5M6.5 15h2M11 15h6.5"/></g></symbol>
+  <symbol id="i-chapters" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="6.5" height="6" rx="1.5"/><path d="M13 6.5h7.5M13 9.5h5"/><rect x="3.5" y="14" width="6.5" height="6" rx="1.5"/><path d="M13 15.5h7.5M13 18.5h5"/></g></symbol>
+  <symbol id="i-wave" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3.5 12v.01M7 9v6M10.5 6v12M14 8.5v7M17.5 10v4M21 11.5v1"/></g></symbol>
+  <symbol id="i-transcript" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="17" height="16" rx="2.5"/><path d="M7 9h10M7 12.5h10M7 16h5.5"/></g></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3.5l9 5-9 5-9-5 9-5z"/><path d="M4.5 13l7.5 4.2L19.5 13"/><path d="M4.5 16.8L12 21l7.5-4.2"/></g></symbol>
+  <symbol id="i-hyperlink" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M10 14a4 4 0 0 0 5.7 0l3.2-3.2a4 4 0 1 0-5.7-5.7L11.8 6.5"/><path d="M14 10a4 4 0 0 0-5.7 0l-3.2 3.2a4 4 0 1 0 5.7 5.7l1.4-1.4"/></g></symbol>
+  <symbol id="i-timer" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="13" r="7.5"/><path d="M12 9.5V13l2.5 2M9.5 2.5h5M12 2.5v3"/></g></symbol>
+  <symbol id="i-notes" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 5.5A1.5 1.5 0 0 1 6 4h12a1.5 1.5 0 0 1 1.5 1.5v9L15 19H6a1.5 1.5 0 0 1-1.5-1.5v-12z"/><path d="M15 19v-4.5h4.5M8 9h8M8 12.5h5"/></g></symbol>
+  <symbol id="i-presenter" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M12 16v4M8.5 20h7"/><path d="M7 12l3-3 2 2 4-4" /></g></symbol>
+  <symbol id="i-ocr" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/><path d="M8 9.5h8M8 12.5h8M8 15.5h4.5"/></g></symbol>
+  <symbol id="i-form" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="17" height="16" rx="2.5"/><rect x="6.5" y="7.5" width="4" height="3" rx="1"/><path d="M13 9h5M6.5 14h11M6.5 17h7"/></g></symbol>
+  <symbol id="i-slideshow" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M2.5 9v6M21.5 9v6"/><path d="M10.5 9.8v4.4l3.8-2.2-3.8-2.2z" fill="currentColor" stroke="none"/></g></symbol>
+  <symbol id="i-compare" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="M12 3.5v17" stroke-width="1.9"/><path d="M9 10l-2.5 2L9 14M15 10l2.5 2L15 14"/></g></symbol>
+  <symbol id="i-exif" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v.01M12 11v5" stroke-width="1.9"/></g></symbol>
+  <symbol id="i-frame" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M7 3v18M17 3v18M3 7h18M3 17h18"/></g></symbol>
+  <symbol id="i-log" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 5.5h16M4 9.5h10M4 13.5h16M4 17.5h7"/><circle cx="19" cy="9.5" r="1.3" fill="currentColor" stroke="none"/></g></symbol>
+</svg>
+
+<div class="vcxm-device"><div class="mscreen" id="m-chat">
+  <div class="m-status">
+    <span>9:16</span>
+    <div class="sb-right">
+      <span class="m-sig"><i></i><i></i><i></i><i></i></span>
+      <span class="m-wifi"></span>
+      <span class="m-batt"><i></i></span>
+    </div>
+  </div>
+
+  <header class="m-appbar">
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-chev-l"/></svg></span>
+    <span class="avatar av-1 hd">MC<span class="presence" style="background:var(--ok);border-color:#0F0E18"></span></span>
+    <div class="col grow who" style="gap:1px">
+      <span class="n">Maya Chen</span>
+      <span class="s"><span class="dot on" style="width:7px;height:7px"></span>Online</span>
+    </div>
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-phone"/></svg></span>
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-video"/></svg></span>
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-more-v"/></svg></span>
+  </header>
+
+  <div class="e2e"><svg class="ic sm"><use href="#i-lock"/></svg>End-to-end encrypted</div>
+
+  <div class="m-msgs">
+    <span class="m-day">Today</span>
+
+    <div class="m-in">
+      <span class="avatar av-1">MC</span>
+      <div class="m-bub in">Morning! Proposal draft is done — the pricing section still needs your FY26 numbers before I send it up.
+        <div class="bm">09:12</div>
+      </div>
+    </div>
+
+    <div class="m-bub out">Nice timing. I'll drop the financials sheet in here right after standup.
+      <div class="bm">09:13 <svg class="ic sm"><use href="#i-check2"/></svg></div>
+    </div>
+
+    <div class="m-in">
+      <span class="avatar av-1">MC</span>
+      <div class="m-bub in" style="padding:10px">
+        <div class="fcard">
+          <span class="m-tile ft-doc">DOC</span>
+          <div class="col grow" style="gap:1px">
+            <span class="fn">Atlas-Proposal.docx</span>
+            <span class="fs">4.2 MB · 24 pages</span>
+          </div>
+          <span class="m-btn sm primary" style="height:32px;padding:0 13px">Open</span>
+        </div>
+        <div style="padding:0 4px 2px">Full draft — section 4 is the one to read.</div>
+        <div class="bm">09:14</div>
+        <div class="reactions">👍 2 &nbsp;🔥 1</div>
+      </div>
+    </div>
+
+    <div class="m-bub out" style="margin-top:6px">Opening it now — reading mode makes a 24-pager painless on the phone.
+      <div class="bm">09:15 <svg class="ic sm"><use href="#i-check2"/></svg></div>
+    </div>
+
+    <div class="m-in">
+      <span class="avatar av-1">MC</span>
+      <div class="m-bub in">Ping me when you hit the pricing table.
+        <div class="bm">09:16</div>
+      </div>
+    </div>
+
+    <div class="typing"><i></i><i></i><i></i>Maya is typing</div>
+  </div>
+
+  <div class="m-composer">
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-clip"/></svg></span>
+    <div class="field-in"><span class="grow">Message</span><svg class="ic" style="color:var(--txt-3)"><use href="#i-smile"/></svg></div>
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-mic"/></svg></span>
+    <span class="m-send"><svg class="ic"><use href="#i-send"/></svg></span>
+  </div>
+
+  <div class="m-home"><i></i></div>
+</div></div>
+<div class="vcxm-meta"><b>VaultChat Mobile</b> · M2 — Open a chat · 430 × 932 · dark / glass / #7C4DFF</div>
+</body>
+</html>
