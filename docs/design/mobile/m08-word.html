@@ -1,0 +1,180 @@
+<style>
+#m-word .vtile { width: 34px; height: 34px; border-radius: 11px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 8.5px; font-weight: 700; letter-spacing: .5px;
+  box-shadow: var(--inner-hi), 0 2px 8px rgba(0,0,0,.35); }
+#m-word .vmeta { min-width: 0; display: flex; flex-direction: column; gap: 1px; flex: 1; }
+
+#m-word .segrow { flex: none; display: flex; align-items: center; gap: 9px; padding: 9px 14px 8px; }
+#m-word .segrow .m-seg { flex: 1; }
+#m-word .segrow .m-seg .sg { height: 30px; font-size: 12.5px; gap: 6px; }
+#m-word .segrow .m-seg .sg .ic { width: 14px; height: 14px; }
+#m-word .segrow .m-ic-btn { width: 36px; height: 36px; border-radius: 12px; }
+
+/* ---- paper ---- */
+#m-word .stage { flex: 1; min-height: 0; padding: 0 12px 8px; position: relative; }
+#m-word .page {
+  height: 100%; border-radius: 10px; position: relative; overflow: hidden;
+  background: linear-gradient(180deg, #FCFBFF 0%, #F4F2FC 100%);
+  box-shadow: 0 14px 40px rgba(0,0,0,.5), 0 0 0 1px rgba(235,232,255,.08), 0 0 60px rgba(124,77,255,.07);
+  color: #2A2735;
+  font-size: 12.5px; line-height: 1.62;
+  padding: 16px 18px 12px;
+  display: flex; flex-direction: column;
+}
+#m-word .runhead {
+  display: flex; justify-content: space-between; flex: none;
+  font-size: 8px; font-weight: 750; letter-spacing: 1.5px; text-transform: uppercase;
+  color: #9B95B2;
+  padding-bottom: 8px; margin-bottom: 12px;
+  border-bottom: 1px solid rgba(42,39,53,.13);
+}
+#m-word .page h2 { font-size: 19px; font-weight: 720; letter-spacing: -.3px; color: #1E1A2E; margin-bottom: 3px; }
+#m-word .page .h2sub { font-size: 10px; color: #857EA0; margin-bottom: 10px; }
+#m-word .page p { margin-bottom: 9px; }
+#m-word .doclink { color: #5B2FE8; font-weight: 600; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2.5px; text-decoration-color: rgba(91,47,232,.5); }
+#m-word .hl-cmt { background: rgba(251,191,36,.45); box-shadow: 0 1.5px 0 rgba(202,138,4,.6); border-radius: 2px; padding: 0 2px; }
+
+#m-word .dt { width: 100%; border-collapse: collapse; font-size: 11px; color: #2A2735; margin-bottom: 4px; }
+#m-word .dt th {
+  text-align: left; font-size: 9px; font-weight: 750; letter-spacing: .8px; text-transform: uppercase;
+  color: #1E1A2E; background: rgba(124,77,255,.09);
+  border: 1px solid rgba(42,39,53,.16); padding: 5px 8px;
+}
+#m-word .dt td { border: 1px solid rgba(42,39,53,.16); padding: 5px 8px; font-variant-numeric: tabular-nums; }
+#m-word .dt td.num, #m-word .dt th.num { text-align: right; }
+#m-word .tcap { font-size: 9.5px; color: #857EA0; margin-bottom: 10px; }
+
+/* margin comment on the paper */
+#m-word .cmt {
+  align-self: flex-end; width: 232px; margin: 2px 0 10px;
+  background: #FFF7E4; border: 1px solid rgba(202,138,4,.35);
+  border-left: 3px solid #E9A612;
+  border-radius: 9px; padding: 8px 10px;
+  box-shadow: 0 3px 10px rgba(42,39,53,.10);
+  position: relative;
+}
+#m-word .cmt::before {
+  content: ""; position: absolute; left: -34px; top: 16px;
+  width: 30px; border-top: 1.5px dashed rgba(202,138,4,.6);
+}
+#m-word .cmt .top { display: flex; align-items: center; gap: 6px; }
+#m-word .cmt .av { width: 18px; height: 18px; border-radius: 6px; font-size: 8px; }
+#m-word .cmt .who { font-size: 10.5px; font-weight: 700; color: #4A3D1A; }
+#m-word .cmt .when { margin-left: auto; font-size: 9px; color: #97854F; }
+#m-word .cmt .txt { font-size: 10.5px; line-height: 1.45; color: #5A4A22; margin-top: 4px; }
+#m-word .cmt .acts { display: flex; gap: 12px; margin-top: 6px; font-size: 9.5px; font-weight: 700; color: #8A6A17; }
+
+#m-word .pfoot {
+  margin-top: auto; flex: none; padding-top: 8px;
+  border-top: 1px solid rgba(42,39,53,.1);
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 9.5px; color: #9B95B2; font-variant-numeric: tabular-nums;
+}
+
+/* floating page nav */
+#m-word .pagenav { position: absolute; right: 22px; bottom: 20px; display: flex; gap: 6px; z-index: 5; }
+#m-word .pagenav span {
+  width: 32px; height: 32px; border-radius: 11px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(20,18,32,.82); border: 1px solid var(--stroke-2);
+  color: var(--txt-1); backdrop-filter: var(--blur); box-shadow: var(--sh-2);
+}
+#m-word .pagenav .ic { width: 16px; height: 16px; }
+
+/* reading progress strip */
+#m-word .readrow { flex: none; padding: 8px 16px 10px; display: flex; flex-direction: column; gap: 6px; }
+#m-word .readrow .lbls { display: flex; align-items: center; justify-content: space-between; font-size: 11px; }
+#m-word .readrow .lbls b { font-weight: 650; color: var(--txt-1); display: inline-flex; align-items: center; gap: 6px; }
+#m-word .readrow .lbls b .ic { width: 13px; height: 13px; color: var(--acc-2); }
+#m-word .readrow .lbls span { color: var(--txt-3); font-variant-numeric: tabular-nums; }
+</style>
+<div class="mscreen" id="m-word">
+  <div class="m-status">
+    <span>9:41</span>
+    <div class="sb-right">
+      <span class="m-sig"><i></i><i></i><i></i><i></i></span>
+      <span class="m-wifi"></span>
+      <span class="m-batt"><i></i></span>
+    </div>
+  </div>
+
+  <header class="m-viewerbar">
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-chev-l"/></svg></span>
+    <span class="vtile ft-doc">DOC</span>
+    <div class="vmeta">
+      <span class="vt">Atlas-Proposal.docx</span>
+      <span class="vs">Maya Chen · 4.2 MB · 24 pages</span>
+    </div>
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-zoom-in"/></svg></span>
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-more-v"/></svg></span>
+  </header>
+
+  <div class="m-secure"><svg class="ic sm"><use href="#i-lock"/></svg>Opens inside VaultChat — no external app</div>
+
+  <div class="segrow">
+    <div class="m-seg">
+      <span class="sg on"><svg class="ic"><use href="#i-file"/></svg>Page</span>
+      <span class="sg"><svg class="ic"><use href="#i-book"/></svg>Book</span>
+      <span class="sg"><svg class="ic"><use href="#i-toc"/></svg>Scroll</span>
+    </div>
+    <span class="m-ic-btn framed"><svg class="ic"><use href="#i-comment"/></svg></span>
+  </div>
+
+  <div class="stage">
+    <div class="page">
+      <div class="runhead"><span>Atlas Proposal — Confidential</span><span>Aug 2026</span></div>
+      <h2>2.&ensp;Market Opportunity</h2>
+      <div class="h2sub">Section owner: Maya Chen · reviewed by Finance 03 Aug 2026</div>
+
+      <p>Enterprise teams now exchange more than 60% of their working documents inside chat tools that were never designed to hold them. A file leaves the conversation the moment it is opened — handed to another application, copied into a downloads folder, and stripped of every control the sender intended.</p>
+
+      <p>Our bottom-up model, built from the <span class="doclink">2026 Secure Collaboration Benchmark</span> and 41 buyer interviews, places the combined addressable market at <span class="hl-cmt">$4.6B by FY28</span>, growing 19% a year as regulated industries retire legacy file-transfer tooling.</p>
+
+      <div class="cmt">
+        <div class="top">
+          <span class="avatar av-2 av">EV</span>
+          <span class="who">Elena Voss</span>
+          <span class="when">2d ago</span>
+        </div>
+        <div class="txt">Verify this TAM figure — the analyst cut we licensed says $4.1B. Footnote both?</div>
+        <div class="acts"><span>Reply</span><span>Resolve</span></div>
+      </div>
+
+      <table class="dt">
+        <tr><th>Segment</th><th class="num">TAM FY28</th><th class="num">Growth</th></tr>
+        <tr><td>Regulated enterprise</td><td class="num">$2.1B</td><td class="num">18%</td></tr>
+        <tr><td>Mid-market SaaS</td><td class="num">$1.4B</td><td class="num">23%</td></tr>
+        <tr><td>Public sector</td><td class="num">$1.1B</td><td class="num">9%</td></tr>
+      </table>
+      <div class="tcap">Table 2 — Addressable segments, bottom-up estimate (Finance model v4).</div>
+
+      <p>Three procurement signals make the timing favourable: security review now precedes tooling selection in 71% of target accounts, consolidation budgets reward suites that replace two or more point tools, and data-residency mandates land inside the plan horizon.</p>
+
+      <div class="pfoot"><span>2.1 Segment analysis</span><span>8 of 24</span></div>
+    </div>
+
+    <div class="pagenav">
+      <span><svg class="ic"><use href="#i-chev-l"/></svg></span>
+      <span><svg class="ic"><use href="#i-chev-r"/></svg></span>
+    </div>
+  </div>
+
+  <div class="readrow">
+    <div class="lbls">
+      <b><svg class="ic"><use href="#i-book"/></svg>35% read · 18 min left</b>
+      <span>Page 8 / 24</span>
+    </div>
+    <div class="progress"><div class="fill" style="width:35%"></div></div>
+  </div>
+
+  <div class="m-toolbar">
+    <span class="m-tool"><svg class="ic"><use href="#i-toc"/></svg>Contents</span>
+    <span class="m-tool"><svg class="ic"><use href="#i-bookmark"/></svg>Bookmarks</span>
+    <span class="m-tool"><svg class="ic"><use href="#i-search"/></svg>Search</span>
+    <span class="m-tool on"><svg class="ic"><use href="#i-moon"/></svg>Theme</span>
+    <span class="m-tool"><svg class="ic"><use href="#i-share"/></svg>Share</span>
+  </div>
+
+  <div class="m-home"><i></i></div>
+</div>

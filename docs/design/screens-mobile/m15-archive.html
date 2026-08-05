@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VaultChat Mobile · M21 — Search everywhere</title>
+<title>VaultChat Mobile · M15 — Archives</title>
 <style>/* ============================================================
    VaultChat Design System — tokens.css
    Dark · Glassmorphism · Fluent/Linear-grade · Accent #7C4DFF
@@ -998,93 +998,112 @@
   color: var(--txt-3);
 }
 </style>
-<style>#m-search .m-largehead { padding: 2px 20px 6px; }
-#m-search .m-largehead h1 { font-size: 28px; }
-#m-search .pad { padding: 0 16px; flex: none; }
-#m-search .m-search {
-  height: 42px; border-radius: 14px;
-  border-color: var(--stroke-acc); color: var(--txt-1);
-  background: rgba(235,232,255,.07);
-  box-shadow: 0 0 0 3px rgba(124,77,255,.14), 0 10px 26px rgba(124,77,255,.12), var(--inner-hi);
-  font-size: 15px;
-}
-#m-search .m-search .ic { color: var(--acc-2); }
-#m-search .q { font-weight: 600; letter-spacing: .1px; }
-#m-search .caret { width: 2px; height: 19px; border-radius: 2px; background: var(--acc-2); box-shadow: 0 0 8px rgba(124,77,255,.9); }
-#m-search .kbd { margin-left: auto; }
+<style>#m-archive .who { min-width: 0; }
+#m-archive .who .vs { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#m-archive .who .vt { font-size: 14px; }
+#m-archive .m-viewerbar { gap: 8px; }
+#m-archive .fchips { display: flex; gap: 4px; flex: none; }
+#m-archive .fchips .m-chip { height: 20px; padding: 0 6px; font-size: 8.5px; letter-spacing: .3px; font-weight: 700; }
 
-#m-search .scopes { padding: 9px 16px 0; }
-#m-search .m-chips { gap: 7px; }
-#m-search .m-chip { height: 30px; padding: 0 12px; font-size: 12.5px; }
+/* ---- breadcrumb + stats ---- */
+#m-archive .crumbbar { flex: none; padding: 12px 16px 0; }
+#m-archive .crumb { display: flex; align-items: center; gap: 6px; font-size: 13.5px; min-width: 0; }
+#m-archive .crumb .root { color: var(--txt-2); white-space: nowrap; }
+#m-archive .crumb .cur { color: var(--txt-1); font-weight: 680; white-space: nowrap; }
+#m-archive .crumb .ic { width: 13px; height: 13px; color: var(--txt-3); flex: none; }
+#m-archive .stats { display: flex; align-items: center; gap: 7px; margin-top: 5px; font-size: 11px; color: var(--txt-3); font-variant-numeric: tabular-nums; }
+#m-archive .stats i { width: 3px; height: 3px; border-radius: 50%; background: var(--txt-3); display: block; }
+#m-archive .cmp { position: relative; height: 3px; width: 62px; border-radius: 3px; background: rgba(235,232,255,.12); overflow: hidden; }
+#m-archive .cmp b { position: absolute; inset: 0 auto 0 0; width: 62%; border-radius: 3px; background: var(--grad-acc); }
 
-#m-search .results { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 5px; padding: 8px 16px 0; }
-#m-search .grp { overflow: hidden; flex: none; }
-#m-search .grp-h {
-  display: flex; align-items: center; gap: 8px;
-  padding: 5px 13px; font-size: 11.5px; font-weight: 680;
-  border-bottom: 1px solid var(--stroke);
-  background: rgba(235,232,255,.025);
+/* ---- folder chips ---- */
+#m-archive .folders { flex: none; padding: 11px 0 0 16px; position: relative; }
+#m-archive .folders::after {
+  content: ""; position: absolute; right: 0; top: 11px; bottom: 0; width: 34px;
+  background: linear-gradient(90deg, rgba(9,8,15,0), #0A0912 78%); pointer-events: none;
 }
-#m-search .grp-h .ic { width: 15px; height: 15px; color: var(--txt-2); }
-#m-search .cnt {
-  min-width: 19px; height: 18px; padding: 0 6px; border-radius: 999px;
-  background: rgba(235,232,255,.08); border: 1px solid var(--stroke);
-  font-size: 10px; font-weight: 700; color: var(--txt-2);
-  display: inline-flex; align-items: center; justify-content: center;
-}
-#m-search .grp-h .chev { margin-left: auto; color: var(--txt-3); }
-#m-search .hit { display: flex; align-items: flex-start; gap: 10px; padding: 6px 13px; }
-#m-search .h-snip { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#m-search .hit.sel .h-snip { white-space: normal; }
-#m-search .hit + .hit { border-top: 1px solid rgba(235,232,255,.05); }
-#m-search .hit.sel { background: var(--acc-soft); box-shadow: inset 0 0 0 1px var(--stroke-acc); }
-#m-search .hit .avatar { width: 28px; height: 28px; border-radius: 10px; font-size: 10px; }
-#m-search .h-name { font-size: 12.5px; font-weight: 640; }
-#m-search .h-meta { font-size: 10px; color: var(--txt-3); }
-#m-search .h-snip { font-size: 12px; color: var(--txt-2); line-height: 1.42; }
-#m-search .hl { color: var(--acc-3); background: var(--acc-soft-2); border-radius: 4px; padding: 0 4px; font-weight: 680; }
-#m-search .src { display: flex; align-items: center; gap: 10px; padding: 7px 13px 4px; }
-#m-search .m-tile.sm { width: 30px; height: 30px; border-radius: 10px; font-size: 8px; }
-#m-search .loc {
-  font-family: var(--font-mono); font-size: 9.5px; color: var(--txt-2);
-  padding: 3px 7px; border-radius: 6px;
-  background: rgba(235,232,255,.06); border: 1px solid var(--stroke);
-  white-space: nowrap; flex: none; display: inline-flex; align-items: center; gap: 4px;
-}
-#m-search .loc .ic { width: 10px; height: 10px; color: var(--txt-3); }
-#m-search .mini { height: 20px; padding: 0 8px; font-size: 10px; margin-left: auto; }
+#m-archive .folders .m-chip { padding: 0 12px; font-size: 12.5px; gap: 5px; }
+#m-archive .folders .m-chip .ic { width: 14px; height: 14px; }
 
-#m-search .vthumb {
-  width: 58px; height: 34px; border-radius: 8px; flex: none; position: relative; overflow: hidden;
-  background: radial-gradient(46px 30px at 62% 38%, rgba(124,77,255,.55), transparent 70%), linear-gradient(140deg, #17142a, #0d0b18);
-  border: 1px solid var(--stroke-2);
+/* ---- grid ---- */
+#m-archive .grid { flex: none; display: grid; grid-template-columns: 1fr 1fr; gap: 11px; padding: 12px 16px 0; }
+#m-archive .fcard {
+  border-radius: 14px; overflow: hidden; position: relative;
+  background: var(--glass); border: 1px solid var(--stroke);
+  box-shadow: var(--sh-1), var(--inner-hi);
 }
-#m-search .vthumb .pl {
-  position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
-  width: 18px; height: 18px; border-radius: 50%;
-  background: rgba(8,7,13,.7); border: 1px solid rgba(235,232,255,.35);
-  display: flex; align-items: center; justify-content: center; color: #fff;
+#m-archive .fcard.sel { box-shadow: 0 0 0 2px var(--acc), 0 8px 24px rgba(124,77,255,.35); border-color: transparent; }
+#m-archive .fcard .thumb { height: 92px; position: relative; }
+#m-archive .fcard .fmeta { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--stroke); }
+#m-archive .fcard .fname { font-size: 11.5px; font-weight: 620; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+#m-archive .fcard .fsz { font-family: var(--font-mono); font-size: 9.5px; color: var(--txt-3); flex: none; }
+#m-archive .fcard.sel .fname { color: var(--acc-3); }
+#m-archive .ext {
+  position: absolute; right: 6px; top: 6px; z-index: 2;
+  font-size: 7px; font-weight: 750; letter-spacing: .5px;
+  padding: 2px 5px; border-radius: 5px;
+  background: rgba(8,7,13,.72); border: 1px solid var(--stroke-2); color: var(--txt-2);
 }
-#m-search .vthumb .pl .ic { width: 9px; height: 9px; }
-#m-search .wv { display: flex; align-items: center; gap: 2px; height: 24px; width: 58px; flex: none; }
-#m-search .wv i { flex: 1; border-radius: 2px; background: rgba(235,232,255,.2); height: 45%; }
-#m-search .wv i:nth-child(3n+1) { height: 72%; }
-#m-search .wv i:nth-child(4n+2) { height: 96%; }
-#m-search .wv i:nth-child(5n)   { height: 32%; }
-#m-search .wv i.p { background: var(--acc-2); box-shadow: 0 0 6px rgba(124,77,255,.5); }
+#m-archive .selchk {
+  position: absolute; left: 6px; top: 6px; z-index: 2;
+  width: 17px; height: 17px; border-radius: 50%;
+  background: var(--grad-acc); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 8px rgba(124,77,255,.55);
+}
+#m-archive .selchk .ic { width: 10px; height: 10px; }
 
-#m-search .foot {
-  margin: 7px 16px 7px; flex: none;
-  display: flex; align-items: center; justify-content: center; gap: 8px;
-  height: 34px; border-radius: 999px;
+#m-archive .sk::after {
+  content: ""; position: absolute; inset: 0;
+  background:
+    linear-gradient(rgba(237,232,255,.07),rgba(237,232,255,.07)) left 8px top 8px / 30px calc(100% - 16px),
+    linear-gradient(rgba(237,232,255,.14),rgba(237,232,255,.14)) left 44px top 13px / 62px 7px,
+    linear-gradient(rgba(237,232,255,.07),rgba(237,232,255,.07)) left 44px top 26px / 88px 7px,
+    linear-gradient(rgba(124,77,255,.42),rgba(124,77,255,.42)) right 10px top 44px / 54px 10px,
+    linear-gradient(rgba(237,232,255,.08),rgba(237,232,255,.08)) left 44px bottom 12px / 70px 9px;
+  background-repeat: no-repeat;
+}
+#m-archive .sk2::after {
+  content: ""; position: absolute; inset: 0;
+  background:
+    linear-gradient(rgba(247,245,255,.17),rgba(247,245,255,.17)) center top 9px / 58% calc(100% - 18px),
+    linear-gradient(rgba(8,7,13,.3),rgba(8,7,13,.3)) center top 19px / 42% 6px,
+    linear-gradient(rgba(8,7,13,.22),rgba(8,7,13,.22)) center top 32px / 46% 5px,
+    linear-gradient(rgba(8,7,13,.22),rgba(8,7,13,.22)) center top 43px / 40% 5px;
+  background-repeat: no-repeat;
+}
+#m-archive .h1 { background: linear-gradient(155deg, #17162A 0%, #0D0C16 100%); }
+#m-archive .h2 { background: radial-gradient(90px 60px at 80% 0%, rgba(124,77,255,.22), transparent 66%), linear-gradient(155deg, #151426 0%, #0C0B14 100%); }
+#m-archive .h3 { background: linear-gradient(155deg, #1A1E2E 0%, #0D0F18 100%); }
+#m-archive .h4 { background: radial-gradient(90px 60px at 20% 100%, rgba(96,165,250,.16), transparent 66%), linear-gradient(155deg, #141828 0%, #0B0D16 100%); }
+#m-archive .h5 { background: linear-gradient(155deg, #241E14 0%, #141008 100%); }
+#m-archive .h6 { background: radial-gradient(90px 60px at 75% 20%, rgba(52,211,153,.14), transparent 66%), linear-gradient(155deg, #14201C 0%, #0A100E 100%); }
+
+/* ---- preview card ---- */
+#m-archive .prev { margin: 12px 16px 0; flex: none; padding: 12px; }
+#m-archive .prow { display: flex; align-items: center; gap: 11px; }
+#m-archive .bigprev {
+  width: 92px; height: 60px; flex: none; border-radius: 10px; position: relative; overflow: hidden;
+  border: 1px solid var(--stroke-2); box-shadow: var(--sh-1);
+}
+#m-archive .pn { font-size: 13.5px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#m-archive .ps { font-size: 11px; color: var(--txt-3); margin-top: 2px; }
+#m-archive .psz { font-size: 11.5px; color: var(--txt-2); margin-top: 5px; font-variant-numeric: tabular-nums; }
+#m-archive .psz b { color: var(--txt-1); font-weight: 650; }
+#m-archive .psz .arr { color: var(--acc-3); padding: 0 2px; }
+#m-archive .pbtns { display: flex; gap: 8px; margin-top: 11px; }
+#m-archive .pbtns .m-btn { flex: 1; height: 40px; font-size: 13.5px; border-radius: 13px; gap: 7px; }
+#m-archive .path {
+  display: flex; align-items: center; gap: 7px; margin-top: 10px;
+  padding: 7px 9px; border-radius: 9px;
   background: rgba(235,232,255,.04); border: 1px solid var(--stroke);
-  font-size: 11px; color: var(--txt-3);
+  font-family: var(--font-mono); font-size: 9.5px; color: var(--txt-2);
 }
-#m-search .foot b { color: var(--txt-2); font-weight: 650; }
-#m-search .foot .ok { display: inline-flex; align-items: center; gap: 5px; color: var(--ok); font-weight: 650; }
-#m-search .foot .ok .ic { width: 12px; height: 12px; }
-#m-search .fsep { width: 3px; height: 3px; border-radius: 50%; background: var(--txt-3); opacity: .6; flex: none; }
-#m-search .mono { font-family: var(--font-mono); }</style>
+#m-archive .path .p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+#m-archive .tipwrap { display: flex; justify-content: center; padding: 12px 16px 0; flex: none; }
+#m-archive .tipwrap .m-tip { gap: 8px; }
+#m-archive .tipwrap .m-tip .ic { color: var(--ok); }</style>
 <style>
   html, body { margin: 0; background: #050409; }
   body { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px 0; }
@@ -1191,9 +1210,9 @@
   <symbol id="i-log" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 5.5h16M4 9.5h10M4 13.5h16M4 17.5h7"/><circle cx="19" cy="9.5" r="1.3" fill="currentColor" stroke="none"/></g></symbol>
 </svg>
 
-<div class="vcxm-device"><div class="mscreen" id="m-search">
+<div class="vcxm-device"><div class="mscreen" id="m-archive">
   <div class="m-status">
-    <span>9:24</span>
+    <span>9:41</span>
     <div class="sb-right">
       <span class="m-sig"><i></i><i></i><i></i><i></i></span>
       <span class="m-wifi"></span>
@@ -1201,131 +1220,103 @@
     </div>
   </div>
 
-  <div class="m-largehead">
-    <h1>Search</h1>
-    <div class="sub">One query, every chat and every format</div>
-  </div>
+  <header class="m-viewerbar">
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-chev-l"/></svg></span>
+    <span class="m-tile sm ft-zip">ZIP</span>
+    <div class="col grow who" style="gap:2px">
+      <span class="vt">Design-Assets.zip</span>
+      <span class="vs">Maya Chen · 86 MB · Atlas Launch</span>
+    </div>
+    <div class="fchips">
+      <span class="m-chip on">ZIP</span>
+      <span class="m-chip">RAR</span>
+      <span class="m-chip">7Z</span>
+    </div>
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-more-v"/></svg></span>
+  </header>
 
-  <div class="pad">
-    <div class="m-search focus">
-      <svg class="ic"><use href="#i-search"/></svg>
-      <span class="q">atlas pricing</span><span class="caret"></span>
-      <span class="grow"></span>
-      <svg class="ic" style="color:var(--txt-3)"><use href="#i-close"/></svg>
+  <div class="m-secure"><svg class="ic sm"><use href="#i-lock"/></svg>Opens inside VaultChat — no external app</div>
+
+  <div class="crumbbar">
+    <div class="crumb">
+      <svg class="ic" style="color:var(--acc-2);width:15px;height:15px"><use href="#i-zip"/></svg>
+      <span class="root">Design-Assets.zip</span>
+      <svg class="ic"><use href="#i-chev-r"/></svg>
+      <span class="cur">02-Screens</span>
+    </div>
+    <div class="stats">
+      <span>247 files</span><i></i>
+      <span>86 MB</span><i></i>
+      <span>62% compressed</span>
+      <span class="cmp"><b></b></span>
     </div>
   </div>
 
-  <div class="scopes">
+  <div class="folders">
     <div class="m-chips">
-      <span class="m-chip on">All</span>
-      <span class="m-chip">Chats</span>
-      <span class="m-chip">Docs</span>
-      <span class="m-chip">Sheets</span>
-      <span class="m-chip">Slides</span>
-      <span class="m-chip">PDF</span>
-      <span class="m-chip">Images</span>
-      <span class="m-chip">Video</span>
+      <span class="m-chip"><svg class="ic"><use href="#i-folder"/></svg>01-Brand</span>
+      <span class="m-chip on"><svg class="ic"><use href="#i-folder"/></svg>02-Screens</span>
+      <span class="m-chip"><svg class="ic"><use href="#i-folder"/></svg>03-Motion</span>
+      <span class="m-chip"><svg class="ic"><use href="#i-folder"/></svg>fonts</span>
+      <span class="m-chip">README.md</span>
     </div>
   </div>
 
-  <div class="results">
-    <div class="grp m-card">
-      <div class="grp-h"><svg class="ic"><use href="#i-chat"/></svg>Chats<span class="cnt">2</span><svg class="ic chev"><use href="#i-chev-r"/></svg></div>
-      <div class="hit sel">
-        <span class="avatar av-1">MC</span>
-        <div class="col grow" style="gap:2px">
-          <div class="row gap-8"><span class="h-name">Maya Chen</span><span class="h-meta">today 09:12</span></div>
-          <div class="h-snip">"the <b class="hl">pricing</b> tiers land tomorrow — sanity-check the enterprise column?"</div>
-        </div>
-      </div>
-      <div class="hit">
-        <span class="avatar av-5">AL</span>
-        <div class="col grow" style="gap:2px">
-          <div class="row gap-8"><span class="h-name">Atlas Launch</span><span class="h-meta">yesterday 16:40</span></div>
-          <div class="h-snip">Ravi: "locking <b class="hl">pricing</b> for the launch deck tonight."</div>
-        </div>
-      </div>
+  <div class="grid">
+    <div class="fcard sel">
+      <div class="thumb h1 sk"><span class="selchk"><svg class="ic"><use href="#i-check"/></svg></span><span class="ext">PNG</span></div>
+      <div class="fmeta"><span class="fname grow">chat-dark.png</span><span class="fsz">1.2 MB</span></div>
     </div>
-
-    <div class="grp m-card">
-      <div class="grp-h"><svg class="ic"><use href="#i-doc-lines"/></svg>Word<span class="cnt">2</span><svg class="ic chev"><use href="#i-chev-r"/></svg></div>
-      <div class="hit">
-        <span class="m-tile sm ft-doc">DOC</span>
-        <div class="col grow" style="gap:3px;min-width:0">
-          <div class="row gap-8"><span class="h-name">Atlas-Proposal.docx</span><span class="h-meta">24 pages · Maya Chen</span></div>
-          <div class="row gap-8" style="min-width:0"><span class="loc">Page 12</span><span class="h-snip grow">Section 4.2 — <b class="hl">Pricing</b> strategy…</span></div>
-          <div class="row gap-8" style="min-width:0"><span class="loc">Page 21</span><span class="h-snip grow">Appendix C — <b class="hl">pricing</b> sensitivity by segment…</span></div>
-        </div>
-      </div>
+    <div class="fcard">
+      <div class="thumb h3 sk2"><span class="ext">PNG</span></div>
+      <div class="fmeta"><span class="fname grow">chat-light.png</span><span class="fsz">1.1 MB</span></div>
     </div>
-
-    <div class="grp m-card">
-      <div class="grp-h"><svg class="ic"><use href="#i-grid"/></svg>Excel<span class="cnt">2</span><svg class="ic chev"><use href="#i-chev-r"/></svg></div>
-      <div class="hit" style="align-items:center">
-        <span class="m-tile sm ft-xls">XLS</span>
-        <div class="col grow" style="gap:2px">
-          <div class="row gap-8"><span class="h-name">Atlas-Financials-FY26.xlsx</span></div>
-          <div class="h-snip">Enterprise <b class="hl">pricing</b> uplift ×1.18</div>
-        </div>
-        <span class="loc"><svg class="ic"><use href="#i-fx"/></svg>Revenue!D14</span>
-      </div>
+    <div class="fcard">
+      <div class="thumb h2 sk"><span class="ext">PNG</span></div>
+      <div class="fmeta"><span class="fname grow">home-dark.png</span><span class="fsz">1.4 MB</span></div>
     </div>
-
-    <div class="grp m-card">
-      <div class="grp-h"><svg class="ic"><use href="#i-file"/></svg>PDF<span class="cnt">1</span><span class="m-chip on mini"><svg class="ic sm" style="width:11px;height:11px"><use href="#i-ocr"/></svg>OCR match</span></div>
-      <div class="hit" style="align-items:center">
-        <span class="m-tile sm ft-pdf">PDF</span>
-        <div class="col grow" style="gap:2px">
-          <div class="row gap-8"><span class="h-name">Atlas-MSA-Contract.pdf</span><span class="h-meta">Page 7 · §7</span></div>
-          <div class="h-snip">"the <b class="hl">pricing</b> schedule in Exhibit B applies" <span class="h-meta">— scanned text</span></div>
-        </div>
-      </div>
+    <div class="fcard">
+      <div class="thumb h4 sk"><span class="ext">PNG</span></div>
+      <div class="fmeta"><span class="fname grow">split-view.png</span><span class="fsz">1.6 MB</span></div>
     </div>
-
-    <div class="grp m-card">
-      <div class="grp-h"><svg class="ic"><use href="#i-film"/></svg>Video<span class="cnt">1</span><svg class="ic chev"><use href="#i-chev-r"/></svg></div>
-      <div class="hit" style="align-items:center">
-        <span class="vthumb"><span class="pl"><svg class="ic"><use href="#i-play"/></svg></span></span>
-        <div class="col grow" style="gap:2px">
-          <div class="row gap-8"><span class="h-name">Atlas-Demo-v3.mp4</span><span class="h-meta">04:36</span></div>
-          <div class="h-snip">"…where <b class="hl">pricing</b> updates live in the sheet…"</div>
-        </div>
-        <span class="loc"><svg class="ic"><use href="#i-transcript"/></svg>02:41</span>
-      </div>
+    <div class="fcard">
+      <div class="thumb h6 sk"><span class="ext">PNG</span></div>
+      <div class="fmeta"><span class="fname grow">viewer-excel.png</span><span class="fsz">1.5 MB</span></div>
     </div>
-
-    <div class="grp m-card">
-      <div class="grp-h"><svg class="ic"><use href="#i-wave"/></svg>Audio<span class="cnt">1</span><svg class="ic chev"><use href="#i-chev-r"/></svg></div>
-      <div class="hit" style="align-items:center">
-        <span class="wv"><i class="p"></i><i class="p"></i><i class="p"></i><i class="p"></i><i class="p"></i><i class="p"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
-        <div class="col grow" style="gap:2px">
-          <div class="row gap-8"><span class="h-name">Standup-2026-08-04.mp3</span><span class="h-meta">12:04</span></div>
-          <div class="h-snip">Ravi: "…align on <b class="hl">pricing</b> with legal before Friday…"</div>
-        </div>
-        <span class="loc"><svg class="ic"><use href="#i-transcript"/></svg>04:12</span>
-      </div>
+    <div class="fcard">
+      <div class="thumb h5 sk2"><span class="ext">PNG</span></div>
+      <div class="fmeta"><span class="fname grow">reader-sepia.png</span><span class="fsz">1.1 MB</span></div>
     </div>
   </div>
 
-  <div class="foot">
-    <svg class="ic sm" style="color:var(--txt-2)"><use href="#i-check2"/></svg>
-    <span><b>9 sources</b></span>
-    <span class="fsep"></span>
-    <span class="mono" style="color:var(--txt-2)">0.14 s</span>
-    <span class="fsep"></span>
-    <span class="ok"><svg class="ic"><use href="#i-lock"/></svg>encrypted index, on-device</span>
+  <div class="m-card prev">
+    <div class="prow">
+      <div class="bigprev h1 sk"></div>
+      <div class="col grow" style="gap:0;min-width:0">
+        <span class="pn">chat-dark.png</span>
+        <span class="ps">2880 × 1800 · in 02-Screens</span>
+        <span class="psz"><b>1.2 MB</b> compressed <span class="arr">→</span> <b>3.8 MB</b></span>
+      </div>
+      <span class="m-chip" style="height:24px;font-size:10px;padding:0 8px;color:var(--ok);border-color:rgba(52,211,153,.32);background:rgba(52,211,153,.09)"><svg class="ic sm" style="width:11px;height:11px"><use href="#i-check"/></svg>CRC ok</span>
+    </div>
+    <div class="path">
+      <svg class="ic sm" style="flex:none;color:var(--txt-3);width:12px;height:12px"><use href="#i-zip"/></svg>
+      <span class="p grow">Design-Assets.zip / 02-Screens / chat-dark.png</span>
+      <svg class="ic sm" style="flex:none;color:var(--txt-3);width:12px;height:12px"><use href="#i-copy"/></svg>
+    </div>
+    <div class="pbtns">
+      <span class="m-btn primary"><svg class="ic sm"><use href="#i-eye"/></svg>Preview</span>
+      <span class="m-btn"><svg class="ic sm"><use href="#i-download"/></svg>Extract file</span>
+    </div>
   </div>
 
-  <nav class="m-tabbar">
-    <span class="m-tab"><svg class="ic"><use href="#i-chat"/></svg><span>Chats</span></span>
-    <span class="m-tab"><svg class="ic"><use href="#i-book"/></svg><span>Shelf</span></span>
-    <span class="m-tab on"><svg class="ic"><use href="#i-search"/></svg><span>Search</span></span>
-    <span class="m-tab"><svg class="ic"><use href="#i-cloud-off"/></svg><span>Offline</span></span>
-    <span class="m-tab"><svg class="ic"><use href="#i-shield"/></svg><span>Vault</span></span>
-  </nav>
+  <div class="tipwrap">
+    <span class="m-tip"><svg class="ic sm"><use href="#i-lock"/></svg>Nothing is written to your phone</span>
+  </div>
 
+  <div class="grow"></div>
   <div class="m-home"><i></i></div>
 </div></div>
-<div class="vcxm-meta"><b>VaultChat Mobile</b> · M21 — Search everywhere · 430 × 932 · dark / glass / #7C4DFF</div>
+<div class="vcxm-meta"><b>VaultChat Mobile</b> · M15 — Archives · 430 × 932 · dark / glass / #7C4DFF</div>
 </body>
 </html>
