@@ -252,7 +252,7 @@ func invitationsList(w http.ResponseWriter, r *http.Request) {
 	// vc_invitation_status collapses a pending row that has silently passed its
 	// expiry, so the list can never show a dead invitation as live.
 	err := chatsQueryU(ctx, user.ID,
-		`SELECT ci.id, ci.invitee_user_id, ci.invitee_kind, ci.invitee_ref, ci.channel,
+		`SELECT ci.id, ci.invitee_user_id, ci.inviter_id, ci.invitee_kind, ci.invitee_ref, ci.channel,
 		        vc_invitation_status(ci.status, ci.expires_at) AS status,
 		        ci.expires_at, ci.responded_at, ci.created_at,
 		        u.name, u.email
@@ -265,11 +265,12 @@ func invitationsList(w http.ResponseWriter, r *http.Request) {
 			var (
 				id                          int64
 				inviteeID, ref, name, email *string
+				inviterID                   string
 				kind, channel, status       string
 				expiresAt, createdAt        time.Time
 				respondedAt                 *time.Time
 			)
-			if e := rows.Scan(&id, &inviteeID, &kind, &ref, &channel, &status,
+			if e := rows.Scan(&id, &inviteeID, &inviterID, &kind, &ref, &channel, &status,
 				&expiresAt, &respondedAt, &createdAt, &name, &email); e != nil {
 				return e
 			}
@@ -278,6 +279,11 @@ func invitationsList(w http.ResponseWriter, r *http.Request) {
 				"status": status, "expiresAt": httpx.JSTime(expiresAt),
 				"respondedAt": httpx.JST(respondedAt), "createdAt": httpx.JSTime(createdAt),
 				"name": name,
+				// Whether the CALLER sent this one. Withdrawing your own
+				// invitation and revoking someone else's are different acts that
+				// land in different statuses, so the client has to be able to
+				// tell them apart to offer the right one.
+				"mine": inviterID == user.ID,
 			}
 			// A phone invitee's ref is a lookup hash — never expose it. An email
 			// invitee's ref is the address they were invited at, which the

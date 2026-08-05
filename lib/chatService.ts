@@ -13,7 +13,7 @@ import { E2EE_ENABLED, GROUP_E2EE, E2EE_STRICT } from '../constants/flags';
 // Group types and permissions are defined once, in lib/groups, and mirrored
 // server-side in internal/groups. Import rather than restate them.
 import type { GroupType } from './groups/catalog';
-import type { Permission } from './groups/permissions';
+import type { Permission, GroupRole } from './groups/permissions';
 
 export interface ChatSummary {
   id:            string;
@@ -25,7 +25,7 @@ export interface ChatSummary {
   updatedAt:     string;
   lastMessageId: number | null;
   lastMessageAt: string | null;
-  myRole:        'member' | 'admin' | 'owner';
+  myRole:        GroupRole;
   myLastReadId:  number | null;
   muted:         boolean;
   pinned:        boolean;
@@ -76,7 +76,13 @@ export async function setVanishMode(chatId: string, enabled: boolean): Promise<v
 
 export interface ChatMember {
   userId:                 string;
-  role:                   'member' | 'admin' | 'owner';
+  /**
+   * Groups & Circles added 'guest' (066) and 'moderator' (069). Widened rather
+   * than mapped onto the old pair: collapsing them, as lib/family/circle.ts
+   * still does for the legacy Family Space view, makes a moderator
+   * indistinguishable from an admin in any screen that reads this.
+   */
+  role:                   'guest' | 'member' | 'moderator' | 'admin' | 'owner';
   joinedAt:               string;
   lastReadMessageId:      number | null;
   lastDeliveredMessageId: number | null;
@@ -114,6 +120,12 @@ export interface ChatDetail extends ChatSummary {
   privacy?:             'private' | 'invite_only';
   /** Server-owned cap for this group's type. Never hardcode a cap client-side. */
   maxMembers?:          number | null;
+  /**
+   * How many gates stand between an invitation and membership. Server-
+   * normalised: an unrecognised stored value arrives as 'strict', so the client
+   * never draws a looser flow than the server will actually honour.
+   */
+  approvalMode?:        ApprovalMode;
   /**
    * THIS USER's resolved permissions in this group. Use it to decide what to
    * DRAW — never to decide what is allowed. The server re-resolves the same
@@ -1093,12 +1105,19 @@ export async function removeChatMember(chatId: string, userId: string): Promise<
   });
 }
 
-// Promote/demote a group member between 'admin' and 'member' (owner-gated
-// for demotions). The 'owner' role can't be set through this endpoint.
+/**
+ * Change a member's role.
+ *
+ * 'owner' is deliberately not accepted: handing the group over is a separate,
+ * irreversible operation with its own endpoint (transferOwnership), so it
+ * cannot happen as a side effect of editing somebody's role. 'moderator' and
+ * 'guest' apply to typed groups only — the server refuses them on a legacy
+ * untyped group, which has no semantics for either.
+ */
 export async function setMemberRole(
   chatId: string,
   userId: string,
-  role: 'admin' | 'member',
+  role: 'admin' | 'moderator' | 'member' | 'guest',
 ): Promise<void> {
   await api(`/chats/${encodeURIComponent(chatId)}/members/${encodeURIComponent(userId)}/role`, {
     method: 'PATCH',
@@ -1266,6 +1285,12 @@ export interface Invitation {
   name:          string | null;
   channel:       InvitationChannel;
   status:        InvitationStatus;
+  /**
+   * True when the CALLER sent this one. Withdrawing your own invitation and
+   * revoking someone else's are different acts landing in different statuses,
+   * so the UI has to know which to offer.
+   */
+  mine:          boolean;
   expiresAt:     string;
   respondedAt:   string | null;
   createdAt:     string;

@@ -25,7 +25,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { brandAlpha } from '../constants/theme';
 import {
-  createInvitation, listInvitations, resendInvitation, revokeInvitation,
+  createInvitation, listInvitations, resendInvitation, revokeInvitation, cancelInvitation,
   inviteCandidates, pendingMembers, approveMember, rejectMember,
   type Invitation, type InvitationStatus, type InviteCandidate, type PendingMember,
 } from '../lib/chatService';
@@ -156,14 +156,25 @@ export default function GroupInvitesScreen() {
     catch (e: any) { Alert.alert('Could not renew', e?.message ?? 'Try again.'); }
   };
 
-  const doRevoke = (inv: Invitation) => {
-    Alert.alert('Withdraw invitation?', 'It disappears from their invitations straight away.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Withdraw', style: 'destructive', onPress: async () => {
-        try { await revokeInvitation(chatId, inv.id); refresh(); }
-        catch (e: any) { Alert.alert('Could not withdraw', e?.message ?? 'Try again.'); }
-      } },
-    ]);
+  // Withdrawing your OWN invitation and revoking somebody else's are different
+  // acts on the server — they land in different statuses so the group's history
+  // still says who ended it. Offering the right one is the only way that
+  // distinction survives contact with a user.
+  const doWithdraw = (inv: Invitation) => {
+    Alert.alert(
+      inv.mine ? 'Withdraw your invitation?' : 'Revoke this invitation?',
+      'It disappears from their invitations straight away.',
+      [
+        { text: 'Keep it', style: 'cancel' },
+        { text: inv.mine ? 'Withdraw' : 'Revoke', style: 'destructive', onPress: async () => {
+          try {
+            if (inv.mine) await cancelInvitation(chatId, inv.id);
+            else await revokeInvitation(chatId, inv.id);
+            refresh();
+          } catch (e: any) { Alert.alert('Could not do that', e?.message ?? 'Try again.'); }
+        } },
+      ],
+    );
   };
 
   // Anyone still to answer. Accepted invitations live in "Waiting" instead, so
@@ -320,7 +331,7 @@ export default function GroupInvitesScreen() {
               <TouchableOpacity onPress={() => doResend(inv)} style={st.rowBtn}>
                 <Ionicons name="refresh" size={17} color={colors.primary} />
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => doRevoke(inv)} style={st.rowBtn}>
+              <TouchableOpacity onPress={() => doWithdraw(inv)} style={st.rowBtn}>
                 <Ionicons name="close-circle" size={17} color={colors.danger} />
               </TouchableOpacity>
             </View>

@@ -20,6 +20,7 @@ import (
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/groups"
 	"vaultchat/backend-go/internal/httpx"
+	"vaultchat/backend-go/internal/invites"
 )
 
 // Group metadata limits. Names and descriptions are user text, so they are
@@ -63,6 +64,10 @@ type chatsGroupMeta struct {
 	MaxMembers  *int32   `json:"maxMembers"`
 	Permissions []string `json:"permissions"` // the CALLER's resolved set
 	Role        string   `json:"role"`        // the CALLER's role
+	// How many gates stand between an invitation and membership. Normalised, so
+	// a corrupt stored value is reported as the STRICTEST mode rather than
+	// letting the client draw a looser one than the server will honour.
+	ApprovalMode string `json:"approvalMode"`
 }
 
 // chatsBuildGroupMeta assembles what the client needs to render a typed group
@@ -89,13 +94,14 @@ func chatsBuildGroupMeta(mem *chatsMem, icon, color *string, privacy string) cha
 		}
 	}
 	return chatsGroupMeta{
-		GroupType:   mem.GroupType,
-		Icon:        icon,
-		Color:       color,
-		Privacy:     privacy,
-		MaxMembers:  mem.MaxMembers,
-		Permissions: perms,
-		Role:        mem.Role,
+		GroupType:    mem.GroupType,
+		Icon:         icon,
+		Color:        color,
+		Privacy:      privacy,
+		MaxMembers:   mem.MaxMembers,
+		Permissions:  perms,
+		Role:         mem.Role,
+		ApprovalMode: string(invites.NormalizeMode(mem.ApprovalModeRaw)),
 	}
 }
 

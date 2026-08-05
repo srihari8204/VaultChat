@@ -196,6 +196,7 @@ func chatsGet(w http.ResponseWriter, r *http.Request) {
 		"color":          gm.Color,
 		"privacy":        gm.Privacy,
 		"maxMembers":     gm.MaxMembers,
+		"approvalMode":   gm.ApprovalMode,
 		"permissions":    gm.Permissions,
 		"myRole":         mem.Role,
 		"myLastReadId":   userBigStr(mem.LastReadMessageID),
