@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VaultChat Mobile · M2 — Open a chat</title>
+<title>VaultChat Mobile · M18 — A long message lands</title>
 <style>/* ============================================================
    VaultChat Design System — tokens.css
    Dark · Glassmorphism · Fluent/Linear-grade · Accent #7C4DFF
@@ -998,12 +998,12 @@
   color: var(--txt-3);
 }
 </style>
-<style>#m-chat .avatar.hd { width: 38px; height: 38px; border-radius: 13px; font-size: 13px; }
-#m-chat .who { min-width: 0; }
-#m-chat .who .n { font-size: 15.5px; font-weight: 660; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#m-chat .who .s { font-size: 11.5px; color: var(--ok); display: flex; align-items: center; gap: 5px; }
+<style>#m-detect .avatar.hd { width: 38px; height: 38px; border-radius: 13px; font-size: 13px; }
+#m-detect .who { min-width: 0; }
+#m-detect .who .n { font-size: 15.5px; font-weight: 660; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#m-detect .who .s { font-size: 11.5px; color: var(--txt-3); display: flex; align-items: center; gap: 5px; }
 
-#m-chat .e2e {
+#m-detect .e2e {
   flex: none;
   display: flex; align-items: center; justify-content: center; gap: 7px;
   height: 28px;
@@ -1012,37 +1012,61 @@
   color: var(--ok); font-size: 11px; font-weight: 600;
 }
 
-#m-chat .m-in { display: flex; align-items: flex-end; gap: 8px; align-self: flex-start; max-width: 86%; }
-#m-chat .m-in .avatar { width: 26px; height: 26px; border-radius: 9px; font-size: 9.5px; flex: none; }
-#m-chat .m-in .m-bub { max-width: none; }
+#m-detect .m-msgs { gap: 10px; padding-bottom: 308px; }
+#m-detect .m-in { display: flex; align-items: flex-end; gap: 8px; align-self: flex-start; max-width: 88%; }
+#m-detect .m-in .avatar { width: 26px; height: 26px; border-radius: 9px; font-size: 9.5px; flex: none; }
+#m-detect .m-in .m-bub { max-width: none; }
+#m-detect .m-sender.ev { color: #F98BB4; }
+#m-detect .m-sender.mw { color: #45D6A8; }
 
-#m-chat .fcard {
+/* ---- the long message ---- */
+#m-detect .longbub { padding-bottom: 8px; }
+#m-detect .longtext {
+  max-height: 148px; overflow: hidden;
+  font-size: 14px; line-height: 1.5;
+  -webkit-mask-image: linear-gradient(180deg, #000 52%, transparent 98%);
+  mask-image: linear-gradient(180deg, #000 52%, transparent 98%);
+}
+#m-detect .longtext p + p { margin-top: 8px; }
+#m-detect .long-foot { display: flex; align-items: center; gap: 9px; margin-top: 8px; }
+#m-detect .long-foot .m-chip { height: 26px; padding: 0 11px; font-size: 11px; }
+#m-detect .long-foot .when { margin-left: auto; font-size: 10.5px; color: var(--txt-3); }
+
+/* ---- sheet ---- */
+#m-detect .m-home { z-index: 70; }
+#m-detect .m-sheet { padding: 10px 18px 26px; }
+#m-detect .sh-head { display: flex; gap: 14px; align-items: flex-start; }
+#m-detect .sh-ic {
+  width: 44px; height: 44px; flex: none; border-radius: 15px;
+  background: var(--acc-soft-2);
+  box-shadow: inset 0 0 0 1px var(--stroke-acc), 0 8px 26px rgba(124,77,255,.3);
+  display: flex; align-items: center; justify-content: center; color: var(--acc-3);
+}
+#m-detect .sh-ic .ic { width: 23px; height: 23px; }
+#m-detect .m-sheet-t { font-size: 18px; line-height: 1.25; letter-spacing: -.4px; }
+#m-detect .m-sheet-s { font-size: 13px; margin-top: 12px; }
+#m-detect .meta {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 13px; padding: 10px 13px;
+  border-radius: 12px;
+  background: rgba(235,232,255,.045); border: 1px solid var(--stroke);
+  font-size: 12.5px; font-weight: 550; color: var(--txt-2);
+}
+#m-detect .meta .ic { color: var(--acc-2); }
+#m-detect .meta i { font-style: normal; color: var(--txt-3); }
+#m-detect .btns { display: flex; flex-direction: column; gap: 9px; margin-top: 13px; }
+#m-detect .btns .m-btn { height: 48px; }
+#m-detect .m-btn.ghost { border-color: var(--stroke-2); background: rgba(235,232,255,.035); }
+#m-detect .check {
   display: flex; align-items: center; gap: 11px;
-  padding: 10px; border-radius: 14px; margin-bottom: 8px;
-  background: rgba(8,7,13,.4);
-  border: 1px solid var(--stroke);
+  margin-top: 13px; padding-top: 13px;
+  border-top: 1px solid var(--stroke);
+  font-size: 13px; color: var(--txt-2);
 }
-#m-chat .fcard .fn { font-size: 13.5px; font-weight: 620; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#m-chat .fcard .col { min-width: 0; }
-#m-chat .fcard .fs { font-size: 11px; opacity: .72; }
-
-#m-chat .typing {
-  align-self: flex-start; margin-left: 34px;
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 9px 14px; border-radius: 16px; border-bottom-left-radius: 6px;
-  background: var(--glass-2); border: 1px solid var(--stroke);
-  font-size: 12px; color: var(--txt-3);
-}
-#m-chat .typing i { width: 5px; height: 5px; border-radius: 50%; background: var(--acc-2); }
-#m-chat .typing i:nth-child(2) { opacity: .55; }
-#m-chat .typing i:nth-child(3) { opacity: .3; }
-
-#m-chat .reactions {
-  position: absolute; bottom: -11px; left: 12px;
-  display: flex; gap: 4px; font-size: 11px;
-  padding: 2px 8px; border-radius: 999px;
-  background: var(--bg-3); border: 1px solid var(--stroke-2);
-  color: var(--txt-2);
+#m-detect .cb {
+  width: 20px; height: 20px; flex: none; border-radius: 7px;
+  background: rgba(235,232,255,.05); border: 1.5px solid var(--stroke-2);
+  box-shadow: var(--inner-hi);
 }</style>
 <style>
   html, body { margin: 0; background: #050409; }
@@ -1150,7 +1174,7 @@
   <symbol id="i-log" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 5.5h16M4 9.5h10M4 13.5h16M4 17.5h7"/><circle cx="19" cy="9.5" r="1.3" fill="currentColor" stroke="none"/></g></symbol>
 </svg>
 
-<div class="vcxm-device"><div class="mscreen" id="m-chat">
+<div class="vcxm-device"><div class="mscreen" id="m-detect">
   <div class="m-status">
     <span>9:16</span>
     <div class="sb-right">
@@ -1162,13 +1186,12 @@
 
   <header class="m-appbar">
     <span class="m-ic-btn"><svg class="ic"><use href="#i-chev-l"/></svg></span>
-    <span class="avatar av-1 hd">MC<span class="presence" style="background:var(--ok);border-color:#0F0E18"></span></span>
+    <span class="avatar av-3 hd">DG</span>
     <div class="col grow who" style="gap:1px">
-      <span class="n">Maya Chen</span>
-      <span class="s"><span class="dot on" style="width:7px;height:7px"></span>Online</span>
+      <span class="n">Design Guild</span>
+      <span class="s"><span class="dot on" style="width:7px;height:7px"></span>12 members · 4 online</span>
     </div>
-    <span class="m-ic-btn"><svg class="ic"><use href="#i-phone"/></svg></span>
-    <span class="m-ic-btn"><svg class="ic"><use href="#i-video"/></svg></span>
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-search"/></svg></span>
     <span class="m-ic-btn"><svg class="ic"><use href="#i-more-v"/></svg></span>
   </header>
 
@@ -1179,55 +1202,59 @@
 
     <div class="m-in">
       <span class="avatar av-1">MC</span>
-      <div class="m-bub in">Morning! Proposal draft is done — the pricing section still needs your FY26 numbers before I send it up.
-        <div class="bm">09:12</div>
+      <div class="m-bub in">
+        <div class="m-sender" style="color:var(--acc-3)">Maya Chen</div>
+        Post the whole plan here — easier to argue in thread than in a doc.
+        <div class="bm">09:04</div>
       </div>
     </div>
 
-    <div class="m-bub out">Nice timing. I'll drop the financials sheet in here right after standup.
-      <div class="bm">09:13 <svg class="ic sm"><use href="#i-check2"/></svg></div>
-    </div>
-
     <div class="m-in">
-      <span class="avatar av-1">MC</span>
-      <div class="m-bub in" style="padding:10px">
-        <div class="fcard">
-          <span class="m-tile ft-doc">DOC</span>
-          <div class="col grow" style="gap:1px">
-            <span class="fn">Atlas-Proposal.docx</span>
-            <span class="fs">4.2 MB · 24 pages</span>
-          </div>
-          <span class="m-btn sm primary" style="height:32px;padding:0 13px">Open</span>
+      <span class="avatar av-3">MW</span>
+      <div class="m-bub in longbub">
+        <div class="m-sender mw">Marcus Webb</div>
+        <div class="longtext">
+          <p>Team — apologies in advance, this is a long one. We're changing how Atlas ships. The plan we signed off in June assumed a single launch day: press, pricing and product landing together on September 2. After three weeks of dogfooding and one genuinely humbling incident review, I no longer believe a big-bang launch is the responsible move.</p>
+          <p>Two things changed. The checkout migration is running a week behind, and pretending otherwise only moves the slip somewhere more expensive. And the August 1 review showed our rollback path under load was theory, not practice…</p>
         </div>
-        <div style="padding:0 4px 2px">Full draft — section 4 is the one to read.</div>
-        <div class="bm">09:14</div>
-        <div class="reactions">👍 2 &nbsp;🔥 1</div>
+        <div class="long-foot">
+          <span class="m-chip on"><svg class="ic sm"><use href="#i-book"/></svg>Long read · ~1,400 words</span>
+          <span class="when">09:12</span>
+        </div>
       </div>
     </div>
-
-    <div class="m-bub out" style="margin-top:6px">Opening it now — reading mode makes a 24-pager painless on the phone.
-      <div class="bm">09:15 <svg class="ic sm"><use href="#i-check2"/></svg></div>
-    </div>
-
-    <div class="m-in">
-      <span class="avatar av-1">MC</span>
-      <div class="m-bub in">Ping me when you hit the pricing table.
-        <div class="bm">09:16</div>
-      </div>
-    </div>
-
-    <div class="typing"><i></i><i></i><i></i>Maya is typing</div>
   </div>
 
   <div class="m-composer">
     <span class="m-ic-btn"><svg class="ic"><use href="#i-clip"/></svg></span>
-    <div class="field-in"><span class="grow">Message</span><svg class="ic" style="color:var(--txt-3)"><use href="#i-smile"/></svg></div>
+    <div class="field-in"><span class="grow">Message Design Guild</span><svg class="ic" style="color:var(--txt-3)"><use href="#i-smile"/></svg></div>
     <span class="m-ic-btn"><svg class="ic"><use href="#i-mic"/></svg></span>
     <span class="m-send"><svg class="ic"><use href="#i-send"/></svg></span>
   </div>
 
+  <div class="m-dim"></div>
+
+  <div class="m-sheet">
+    <div class="m-grab"></div>
+    <div class="sh-head">
+      <span class="sh-ic"><svg class="ic"><use href="#i-book"/></svg></span>
+      <div class="grow">
+        <div class="m-sheet-t">This message is easier as a page</div>
+      </div>
+    </div>
+    <div class="m-sheet-s">VaultChat converts long messages into a clean reading view when they're too large for comfortable chat. You can switch back any time.</div>
+    <div class="meta">
+      <svg class="ic sm"><use href="#i-doc-lines"/></svg>~1,400 words <i>·</i> 6 min read <i>·</i> 3 pages
+    </div>
+    <div class="btns">
+      <span class="m-btn primary block"><svg class="ic"><use href="#i-book"/></svg>Open in Reader</span>
+      <span class="m-btn ghost block"><svg class="ic"><use href="#i-chat"/></svg>View as chat</span>
+    </div>
+    <div class="check"><span class="cb"></span>Always open long messages in Reader</div>
+  </div>
+
   <div class="m-home"><i></i></div>
 </div></div>
-<div class="vcxm-meta"><b>VaultChat Mobile</b> · M2 — Open a chat · 430 × 932 · dark / glass / #7C4DFF</div>
+<div class="vcxm-meta"><b>VaultChat Mobile</b> · M18 — A long message lands · 430 × 932 · dark / glass / #7C4DFF</div>
 </body>
 </html>

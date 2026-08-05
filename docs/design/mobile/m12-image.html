@@ -1,0 +1,240 @@
+<style>
+#m-image .m-home { z-index: 70; }
+#m-image .who { min-width: 0; }
+
+/* ---- compare stage ---- */
+#m-image .stage {
+  flex: none; height: 288px; position: relative; overflow: hidden;
+  border-bottom: 1px solid var(--stroke);
+  background: #0B1120;
+}
+#m-image .ph { position: absolute; inset: 0; }
+#m-image .ph-o {
+  background:
+    linear-gradient(115deg, transparent 40%, rgba(255,255,255,.05) 50%, transparent 60%),
+    radial-gradient(300px 210px at 56% 62%, rgba(125,145,175,.36), rgba(125,145,175,0) 66%),
+    radial-gradient(150px 110px at 50% 44%, rgba(190,210,235,.30), transparent 72%),
+    radial-gradient(520px 220px at 50% 4%, rgba(71,85,105,.52), transparent 66%),
+    linear-gradient(15deg, rgba(2,6,23,.86), rgba(2,6,23,0) 56%),
+    linear-gradient(160deg, #232C3F 0%, #141B2B 52%, #0B1120 100%);
+}
+#m-image .ph-e {
+  background:
+    linear-gradient(115deg, transparent 40%, rgba(255,255,255,.08) 50%, transparent 60%),
+    radial-gradient(300px 210px at 56% 62%, rgba(196,140,255,.52), rgba(196,140,255,0) 66%),
+    radial-gradient(150px 110px at 50% 44%, rgba(255,214,245,.44), transparent 72%),
+    radial-gradient(520px 220px at 50% 4%, rgba(124,77,255,.44), transparent 66%),
+    radial-gradient(340px 240px at 92% 98%, rgba(251,113,133,.26), transparent 62%),
+    linear-gradient(15deg, rgba(24,4,44,.84), rgba(24,4,44,0) 56%),
+    linear-gradient(160deg, #2E1B4E 0%, #221238 52%, #140A26 100%);
+}
+#m-image .clip { position: absolute; inset: 0; width: 47%; overflow: hidden; z-index: 2; }
+#m-image .clip .ph { width: 430px; }
+#m-image .veil {
+  position: absolute; inset: 0; z-index: 3;
+  background: radial-gradient(150% 110% at 50% 44%, transparent 54%, rgba(0,0,0,.40));
+}
+
+#m-image .handle {
+  position: absolute; left: 47%; top: 0; bottom: 0; width: 2px; z-index: 5;
+  background: rgba(255,255,255,.88);
+  box-shadow: 0 0 20px rgba(124,77,255,.7), 0 0 3px rgba(0,0,0,.6);
+}
+#m-image .grip {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+  width: 48px; height: 48px; border-radius: 50%;
+  background: rgba(20,18,34,.86);
+  border: 1.5px solid rgba(255,255,255,.72);
+  box-shadow: var(--sh-2), 0 0 26px rgba(124,77,255,.55);
+  display: flex; align-items: center; justify-content: center; color: #fff;
+  backdrop-filter: var(--blur);
+}
+#m-image .grip .ic { width: 20px; height: 20px; }
+#m-image .handle .m-tip { position: absolute; left: 50%; top: calc(50% + 42px); transform: translateX(-50%); height: 30px; }
+
+#m-image .ph-tag {
+  position: absolute; top: 12px; z-index: 4;
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 26px; padding: 0 11px; border-radius: 999px;
+  background: rgba(10,9,17,.7); border: 1px solid var(--stroke-2);
+  backdrop-filter: var(--blur);
+  font-size: 11px; font-weight: 620; color: var(--txt-1); white-space: nowrap;
+}
+#m-image .ph-tag.orig { left: 12px; }
+#m-image .ph-tag.edit { right: 12px; border-color: var(--stroke-acc); color: var(--acc-3); background: rgba(31,19,58,.72); }
+#m-image .ph-tag .sw { width: 8px; height: 8px; border-radius: 3px; flex: none; }
+#m-image .zoombadge {
+  position: absolute; left: 12px; bottom: 12px; z-index: 4;
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--txt-1);
+  padding: 4px 9px; border-radius: 8px;
+  background: rgba(10,9,17,.66); border: 1px solid var(--stroke-2);
+  backdrop-filter: var(--blur);
+}
+
+/* ---- filmstrip ---- */
+#m-image .strip { flex: none; padding: 9px 14px 0; }
+#m-image .strip .sh { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--txt-3); margin-bottom: 7px; }
+#m-image .strip .sh b { color: var(--txt-2); font-weight: 620; }
+#m-image .ths { display: flex; gap: 8px; }
+#m-image .th {
+  width: 60px; height: 60px; border-radius: 11px; position: relative; flex: none;
+  border: 1px solid var(--stroke-2); box-shadow: var(--sh-1), var(--inner-hi);
+  overflow: hidden;
+}
+#m-image .th.sel { box-shadow: 0 0 0 2px var(--acc), 0 4px 16px rgba(124,77,255,.45); border-color: transparent; }
+#m-image .th .bdg {
+  position: absolute; right: 4px; bottom: 4px;
+  font-size: 7.5px; font-weight: 700; letter-spacing: .5px;
+  padding: 1.5px 5px; border-radius: 5px;
+  background: rgba(8,7,13,.78); border: 1px solid var(--stroke-2); color: var(--txt-1);
+}
+#m-image .th .ab {
+  position: absolute; left: 4px; top: 4px;
+  width: 15px; height: 15px; border-radius: 5px;
+  background: var(--grad-acc); color: #fff;
+  font-size: 8.5px; font-weight: 800;
+  display: flex; align-items: center; justify-content: center;
+}
+#m-image .t1 { background: radial-gradient(58px 34px at 60% 40%, rgba(148,163,184,.36), transparent 72%), linear-gradient(150deg,#28303F,#10151F); }
+#m-image .t2 { background: radial-gradient(58px 34px at 58% 56%, rgba(125,145,175,.42), transparent 72%), linear-gradient(160deg,#232C3F,#0B1120); }
+#m-image .t3 { background: radial-gradient(58px 34px at 58% 56%, rgba(196,140,255,.58), transparent 72%), linear-gradient(160deg,#2E1B4E,#140A26); }
+#m-image .t4 { background: radial-gradient(44px 30px at 50% 50%, rgba(52,211,153,.42), transparent 72%), linear-gradient(150deg,#12241E,#0A0F0D); }
+#m-image .t5 { background: radial-gradient(24px 24px at 50% 50%, rgba(158,123,255,.78), rgba(158,123,255,.12) 62%, transparent 76%), linear-gradient(150deg,#191726,#0C0B14); }
+#m-image .t6 { background: radial-gradient(54px 34px at 42% 60%, rgba(251,191,36,.34), transparent 72%), linear-gradient(150deg,#2E2416,#150F08); }
+
+/* ---- floating toolbar ---- */
+#m-image .m-float { bottom: 348px; }
+#m-image .m-float .fb {
+  width: 38px; height: 38px; border-radius: 13px; flex: none;
+  display: flex; align-items: center; justify-content: center; color: var(--txt-2);
+}
+#m-image .m-float .fb .ic { width: 19px; height: 19px; }
+#m-image .m-float .fb.on { background: var(--acc-soft-2); color: var(--acc-3); box-shadow: inset 0 0 0 1px var(--stroke-acc); }
+#m-image .m-float .zt { font-family: var(--font-mono); font-size: 11.5px; color: var(--txt-1); min-width: 40px; text-align: center; }
+#m-image .m-float .sep { width: 1px; height: 20px; background: var(--stroke-2); margin: 0 3px; }
+
+/* ---- EXIF sheet ---- */
+#m-image .m-sheet { height: 336px; padding: 10px 16px 22px; }
+#m-image .sh-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+#m-image .sh-ic {
+  width: 30px; height: 30px; border-radius: 10px; flex: none;
+  background: var(--acc-soft); color: var(--acc-3);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: inset 0 0 0 1px var(--stroke-acc);
+}
+#m-image .xgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+#m-image .xrow { display: flex; flex-direction: column; gap: 0; padding: 6px 0; border-bottom: 1px solid rgba(235,232,255,.06); min-width: 0; }
+#m-image .xrow .k { font-size: 10px; color: var(--txt-3); letter-spacing: .3px; text-transform: uppercase; font-weight: 650; }
+#m-image .xrow .v { font-size: 12.5px; color: var(--txt-1); font-weight: 560; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#m-image .locrow { display: flex; align-items: center; gap: 8px; margin-top: 11px; }
+#m-image .loccoord { font-family: var(--font-mono); font-size: 10px; color: var(--txt-3); white-space: nowrap; }
+#m-image .sh-foot {
+  display: flex; align-items: center; gap: 7px; margin-top: 11px;
+  font-size: 10.5px; line-height: 1.3; color: var(--txt-3); white-space: nowrap;
+}
+</style>
+<div class="mscreen" id="m-image">
+  <div class="m-status">
+    <span>9:41</span>
+    <div class="sb-right">
+      <span class="m-sig"><i></i><i></i><i></i><i></i></span>
+      <span class="m-wifi"></span>
+      <span class="m-batt"><i></i></span>
+    </div>
+  </div>
+
+  <header class="m-viewerbar">
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-chev-l"/></svg></span>
+    <span class="m-tile sm ft-img">JPG</span>
+    <div class="col grow who" style="gap:1px">
+      <span class="vt">hero-shoot-042.jpg</span>
+      <span class="vs">Maya Chen · 8.4 MB · Atlas Launch</span>
+    </div>
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-share"/></svg></span>
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-more-v"/></svg></span>
+  </header>
+
+  <div class="m-secure"><svg class="ic sm"><use href="#i-lock"/></svg>Opens inside VaultChat — no external app</div>
+
+  <div class="stage">
+    <div class="ph ph-e"></div>
+    <div class="clip"><div class="ph ph-o"></div></div>
+    <div class="veil"></div>
+
+    <span class="ph-tag orig"><span class="sw" style="background:linear-gradient(135deg,#3B4A63,#141B2B)"></span>Original</span>
+    <span class="ph-tag edit"><span class="sw" style="background:var(--grad-acc)"></span>hero-v2.webp · Edited</span>
+    <span class="zoombadge">100% · 6000 × 4000</span>
+
+    <div class="handle">
+      <span class="grip"><svg class="ic"><use href="#i-swap"/></svg></span>
+      <span class="m-tip">Drag to compare</span>
+    </div>
+  </div>
+
+  <div class="strip">
+    <div class="sh">
+      <svg class="ic sm" style="color:var(--acc-3)"><use href="#i-image"/></svg>
+      <b>Atlas hero shoot</b>
+      <span>· 6 of 42</span>
+      <div class="grow"></div>
+      <span>comparing 2</span>
+      <svg class="ic sm"><use href="#i-chev-r"/></svg>
+    </div>
+    <div class="ths">
+      <div class="th t1"></div>
+      <div class="th t2 sel"><span class="ab">A</span></div>
+      <div class="th t3 sel"><span class="ab">B</span></div>
+      <div class="th t4"><span class="bdg">GIF</span></div>
+      <div class="th t5"><span class="bdg">SVG</span></div>
+      <div class="th t6"></div>
+    </div>
+  </div>
+
+  <div class="grow"></div>
+
+  <div class="m-float">
+    <span class="fb"><svg class="ic"><use href="#i-zoom-out"/></svg></span>
+    <span class="zt">100%</span>
+    <span class="fb"><svg class="ic"><use href="#i-zoom-in"/></svg></span>
+    <span class="sep"></span>
+    <span class="fb"><svg class="ic"><use href="#i-rotate"/></svg></span>
+    <span class="fb on"><svg class="ic"><use href="#i-compare"/></svg></span>
+    <span class="fb"><svg class="ic"><use href="#i-slideshow"/></svg></span>
+    <span class="fb"><svg class="ic"><use href="#i-expand"/></svg></span>
+  </div>
+
+  <div class="m-sheet">
+    <div class="m-grab"></div>
+    <div class="sh-head">
+      <span class="sh-ic"><svg class="ic sm"><use href="#i-exif"/></svg></span>
+      <div class="col grow" style="gap:1px;min-width:0">
+        <span class="m-sheet-t" style="font-size:16px">Info · EXIF</span>
+        <span style="font-size:11px;color:var(--txt-3)">JPEG image · read from inside the vault</span>
+      </div>
+      <span class="m-chip on" style="height:26px;padding:0 11px;font-size:11px">EXIF</span>
+    </div>
+
+    <div class="xgrid">
+      <div class="xrow"><span class="k">Camera</span><span class="v">Sony A7 IV</span></div>
+      <div class="xrow"><span class="k">Lens</span><span class="v">FE 35mm f/1.8</span></div>
+      <div class="xrow"><span class="k">Shutter</span><span class="v">1/250 s</span></div>
+      <div class="xrow"><span class="k">ISO</span><span class="v">200</span></div>
+      <div class="xrow"><span class="k">Dimensions</span><span class="v">6000 × 4000</span></div>
+      <div class="xrow"><span class="k">File size</span><span class="v">8.4 MB</span></div>
+      <div class="xrow" style="border-bottom:none"><span class="k">Taken</span><span class="v">02 Aug 2026 · 18:42</span></div>
+      <div class="xrow" style="border-bottom:none"><span class="k">Color</span><span class="v">sRGB IEC61966</span></div>
+    </div>
+
+    <div class="locrow">
+      <span class="m-chip" style="height:28px;font-size:12px"><svg class="ic sm"><use href="#i-globe"/></svg>Presidio, San Francisco</span>
+      <span class="loccoord">37.798 N · 122.466 W</span>
+    </div>
+
+    <div class="sh-foot">
+      <svg class="ic sm" style="flex:none;color:var(--ok)"><use href="#i-lock"/></svg>
+      <span>Read inside the vault — the original never leaves this device.</span>
+    </div>
+  </div>
+
+  <div class="m-home"><i></i></div>
+</div>

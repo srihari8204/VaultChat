@@ -1,0 +1,221 @@
+<style>
+/* ---- split bar ---- */
+#m-resize .splitbar {
+  height: 48px; flex: none;
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 12px 0 14px;
+  background: rgba(14, 13, 22, 0.7);
+  border-bottom: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+  position: relative; z-index: 26;
+}
+#m-resize .splitbar .m-ic-btn { width: 38px; height: 38px; border-radius: 12px; }
+#m-resize .splitbar .m-ic-btn .ic { width: 19px; height: 19px; }
+#m-resize .sb-meta { font-size: 11px; color: var(--txt-3); }
+
+/* ---- snap segmented ---- */
+#m-resize .snaprow { flex: none; padding: 8px 12px 8px; display: flex; align-items: center; gap: 10px; }
+#m-resize .snaplbl { font-size: 10px; font-weight: 720; letter-spacing: 1px; text-transform: uppercase; color: var(--txt-3); flex: none; }
+#m-resize .m-seg { flex: 1; }
+#m-resize .m-seg .sg { height: 30px; font-size: 12px; }
+#m-resize .m-seg .sg .ic { width: 14px; height: 14px; }
+
+/* ---- panes ---- */
+#m-resize .pane { min-height: 0; display: flex; flex-direction: column; position: relative; }
+#m-resize .pane.a { flex: 30 1 0; }
+#m-resize .pane.b { flex: 70 1 0; background: rgba(235,232,255,.018); }
+#m-resize .m-panehead { height: 44px; }
+#m-resize .m-panehead .avatar { width: 28px; height: 28px; border-radius: 10px; font-size: 10px; }
+#m-resize .m-panehead .who { min-width: 0; }
+#m-resize .m-panehead .pn { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#m-resize .m-panehead .m-ic-btn { width: 32px; height: 32px; border-radius: 10px; }
+#m-resize .m-panehead .m-ic-btn .ic { width: 17px; height: 17px; }
+#m-resize .pct { height: 21px; padding: 0 8px; font-size: 10.5px; }
+#m-resize .pct.live { box-shadow: 0 0 14px rgba(124,77,255,.45); }
+
+#m-resize .m-msgs { gap: 8px; padding: 6px 12px 6px; overflow: hidden; }
+#m-resize .m-bub { font-size: 13px; padding: 8px 11px; border-radius: 15px; max-width: 84%; }
+#m-resize .m-bub.in { border-bottom-left-radius: 6px; }
+#m-resize .m-bub.out { border-bottom-right-radius: 6px; }
+#m-resize .m-bub .bm { font-size: 9px; margin-top: 2px; }
+#m-resize .m-day { font-size: 9.5px; padding: 3px 11px; }
+#m-resize .m-in { display: flex; align-items: flex-end; gap: 7px; align-self: flex-start; max-width: 90%; }
+#m-resize .m-in .avatar { width: 21px; height: 21px; border-radius: 8px; font-size: 7.5px; flex: none; }
+#m-resize .m-in .m-bub { max-width: none; }
+#m-resize .m-sender { font-size: 10.5px; margin-bottom: 2px; }
+
+#m-resize .fcard {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px; border-radius: 12px; margin-bottom: 6px;
+  background: rgba(8,7,13,.42); border: 1px solid var(--stroke);
+}
+#m-resize .fcard .col { min-width: 0; }
+#m-resize .fcard .fn { font-size: 12.5px; font-weight: 620; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#m-resize .fcard .fs { font-size: 10.5px; opacity: .7; }
+#m-resize .fcard .m-tile { width: 36px; height: 36px; border-radius: 11px; font-size: 8.5px; }
+
+/* ---- compact composer ---- */
+#m-resize .m-composer { padding: 6px 10px 8px; gap: 7px; }
+#m-resize .m-composer .m-ic-btn { width: 36px; height: 36px; border-radius: 12px; }
+#m-resize .m-composer .m-ic-btn .ic { width: 18px; height: 18px; }
+#m-resize .m-composer .field-in { height: 36px; font-size: 13px; border-radius: 18px; padding: 0 12px; }
+#m-resize .m-send { width: 36px; height: 36px; border-radius: 12px; }
+#m-resize .m-send .ic { width: 17px; height: 17px; }
+
+/* ---- hot divider ---- */
+#m-resize .m-divider { height: 30px; gap: 6px; z-index: 15; }
+#m-resize .m-divider.hot i { width: 5px; height: 5px; box-shadow: 0 0 8px rgba(179,136,255,.9); }
+#m-resize .m-divider::before, #m-resize .m-divider::after {
+  content: ""; position: absolute; left: 0; right: 0; height: 26px; pointer-events: none;
+}
+#m-resize .m-divider::before { bottom: 100%; background: linear-gradient(0deg, rgba(124,77,255,.20), transparent); }
+#m-resize .m-divider::after  { top: 100%; background: linear-gradient(180deg, rgba(124,77,255,.20), transparent); }
+
+#m-resize .thumb-ring {
+  position: absolute; z-index: 22;
+  left: 50%; margin-left: -31px;
+  width: 62px; height: 62px; border-radius: 50%;
+  border: 1.5px solid rgba(179,136,255,.5);
+  background: radial-gradient(circle, rgba(179,136,255,.30), rgba(179,136,255,.05) 68%);
+  box-shadow: 0 0 34px rgba(124,77,255,.55);
+}
+#m-resize .thumb-dot {
+  position: absolute; z-index: 23;
+  left: 50%; margin-left: -9px;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.5);
+}
+#m-resize .ratio-tip {
+  position: absolute; z-index: 24;
+  left: 50%; transform: translateX(-50%);
+  font-size: 13px; letter-spacing: .2px;
+  background: var(--bg-4);
+  box-shadow: var(--sh-3), 0 0 0 1px var(--stroke-acc), 0 0 26px rgba(124,77,255,.35);
+}
+#m-resize .ratio-tip b { color: var(--acc-3); font-weight: 700; }
+#m-resize .ratio-tip .ic { width: 15px; height: 15px; color: var(--acc-3); }
+</style>
+<div class="mscreen" id="m-resize">
+  <div class="m-status">
+    <span>9:23</span>
+    <div class="sb-right">
+      <span class="m-sig"><i></i><i></i><i></i><i></i></span>
+      <span class="m-wifi"></span>
+      <span class="m-batt"><i></i></span>
+    </div>
+  </div>
+
+  <div class="splitbar">
+    <span class="m-chip on"><svg class="ic sm"><use href="#i-split-h"/></svg>Split view</span>
+    <span class="sb-meta grow">Resizing…</span>
+    <span class="m-ic-btn framed"><svg class="ic"><use href="#i-swap"/></svg></span>
+    <span class="m-ic-btn framed"><svg class="ic"><use href="#i-close"/></svg></span>
+  </div>
+
+  <div class="snaprow">
+    <span class="snaplbl">Snap</span>
+    <div class="m-seg">
+      <span class="sg on"><svg class="ic"><use href="#i-split-h"/></svg>30 / 70</span>
+      <span class="sg">50 / 50</span>
+      <span class="sg">70 / 30</span>
+    </div>
+  </div>
+
+  <!-- ============ TOP PANE — 30% ============ -->
+  <section class="pane a">
+    <div class="m-panehead">
+      <span class="avatar av-1">MC<span class="presence" style="background:var(--ok);border-color:#12111C;width:9px;height:9px;border-width:2px"></span></span>
+      <div class="col grow who" style="gap:0">
+        <span class="pn">Maya Chen</span>
+        <span class="ps">Online</span>
+      </div>
+      <span class="chip active pct live">30%</span>
+      <span class="m-ic-btn"><svg class="ic"><use href="#i-more-v"/></svg></span>
+    </div>
+
+    <div class="m-msgs">
+      <div class="m-in">
+        <span class="avatar av-1">MC</span>
+        <div class="m-bub in">Ping me when you hit the pricing table.
+          <div class="bm">09:22</div>
+        </div>
+      </div>
+      <div class="m-bub out">Almost there — shrinking this pane.
+        <div class="bm">09:23 <svg class="ic sm"><use href="#i-check2"/></svg></div>
+      </div>
+    </div>
+
+    <div class="m-composer">
+      <span class="m-ic-btn"><svg class="ic"><use href="#i-clip"/></svg></span>
+      <div class="field-in"><span class="grow">Message Maya</span><svg class="ic sm" style="color:var(--txt-3)"><use href="#i-smile"/></svg></div>
+      <span class="m-send"><svg class="ic"><use href="#i-send"/></svg></span>
+    </div>
+  </section>
+
+  <!-- ============ DIVIDER (mid-drag) ============ -->
+  <div class="m-divider hot">
+    <span class="m-tip ratio-tip" style="bottom:48px"><svg class="ic"><use href="#i-split-h"/></svg><b>30%</b> · <b>70%</b></span>
+    <i></i><i></i><i></i><i></i><i></i>
+    <span class="thumb-ring" style="top:-16px"></span>
+    <span class="thumb-dot" style="top:6px"></span>
+  </div>
+
+  <!-- ============ BOTTOM PANE — 70% ============ -->
+  <section class="pane b">
+    <div class="m-panehead">
+      <span class="avatar av-5">AL</span>
+      <div class="col grow who" style="gap:0">
+        <span class="pn">Atlas Launch</span>
+        <span class="ps">6 members · 64 files</span>
+      </div>
+      <span class="chip active pct live">70%</span>
+      <span class="m-ic-btn"><svg class="ic"><use href="#i-more-v"/></svg></span>
+    </div>
+
+    <div class="m-msgs">
+      <div class="m-in">
+        <span class="avatar av-4">RP</span>
+        <div class="m-bub in">
+          <div class="m-sender" style="color:#8FB6FF">Ravi Patel</div>
+          Financials are locked for FY26 — D14 reconciles with the deck now, margin column included.
+          <div class="bm">09:20</div>
+        </div>
+      </div>
+      <div class="m-in">
+        <span class="avatar av-1">MC</span>
+        <div class="m-bub in" style="padding:8px">
+          <div class="m-sender" style="color:var(--acc-3);padding:0 3px 4px">Maya Chen</div>
+          <div class="fcard">
+            <span class="m-tile ft-ppt">PPT</span>
+            <div class="col grow" style="gap:1px">
+              <span class="fn">Atlas-Launch-Deck.pptx</span>
+              <span class="fs">12.6 MB · 18 slides</span>
+            </div>
+            <span class="m-btn sm primary" style="height:30px;padding:0 12px;font-size:12.5px">Open</span>
+          </div>
+          <div style="padding:0 3px 2px">Slide 5 is the one Ravi's numbers feed.</div>
+          <div class="bm">09:21</div>
+        </div>
+      </div>
+      <div class="m-bub out">Got both open side by side — giving Atlas the bigger half while I read.
+        <div class="bm">09:22 <svg class="ic sm"><use href="#i-check2"/></svg></div>
+      </div>
+      <div class="m-in">
+        <span class="avatar av-2">EV</span>
+        <div class="m-bub in">
+          <div class="m-sender" style="color:#FB9BC0">Elena Voss</div>
+          MSA is back with two redlines — neither touches fees, so the pricing table stands.
+          <div class="bm">09:23</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="m-composer">
+      <span class="m-ic-btn"><svg class="ic"><use href="#i-clip"/></svg></span>
+      <div class="field-in"><span class="grow">Message Atlas Launch</span><svg class="ic sm" style="color:var(--txt-3)"><use href="#i-smile"/></svg></div>
+      <span class="m-send"><svg class="ic"><use href="#i-send"/></svg></span>
+    </div>
+  </section>
+
+  <div class="m-home"><i></i></div>
+</div>

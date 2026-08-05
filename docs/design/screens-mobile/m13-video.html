@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VaultChat Mobile · M2 — Open a chat</title>
+<title>VaultChat Mobile · M13 — Video player</title>
 <style>/* ============================================================
    VaultChat Design System — tokens.css
    Dark · Glassmorphism · Fluent/Linear-grade · Accent #7C4DFF
@@ -998,52 +998,175 @@
   color: var(--txt-3);
 }
 </style>
-<style>#m-chat .avatar.hd { width: 38px; height: 38px; border-radius: 13px; font-size: 13px; }
-#m-chat .who { min-width: 0; }
-#m-chat .who .n { font-size: 15.5px; font-weight: 660; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#m-chat .who .s { font-size: 11.5px; color: var(--ok); display: flex; align-items: center; gap: 5px; }
+<style>#m-video .who { min-width: 0; }
+#m-video .who .vs { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#m-video .who .vt { font-size: 14px; }
+#m-video .m-viewerbar { gap: 8px; }
+#m-video .fchips { display: flex; gap: 4px; flex: none; }
+#m-video .fchips .m-chip { height: 20px; padding: 0 6px; font-size: 8.5px; letter-spacing: .3px; font-weight: 700; }
 
-#m-chat .e2e {
-  flex: none;
-  display: flex; align-items: center; justify-content: center; gap: 7px;
-  height: 28px;
-  background: rgba(52,211,153,.07);
-  border-bottom: 1px solid rgba(52,211,153,.16);
-  color: var(--ok); font-size: 11px; font-weight: 600;
+/* ---- 16:9 stage ---- */
+#m-video .stage {
+  flex: none; width: 430px; height: 242px; position: relative; overflow: hidden;
+  border-bottom: 1px solid var(--stroke);
+  background:
+    radial-gradient(60% 70% at 62% 42%, rgba(146,87,255,.42), transparent 62%),
+    radial-gradient(42% 52% at 22% 76%, rgba(56,189,248,.16), transparent 68%),
+    linear-gradient(165deg, #171528 0%, #0C0B16 58%, #08070D 100%);
+}
+#m-video .sc-glow { position: absolute; left: 52%; top: 22%; width: 26%; height: 44%; border-radius: 50%; filter: blur(42px); background: rgba(146,87,255,.6); }
+#m-video .slab {
+  position: absolute; border-radius: 10px;
+  background: linear-gradient(150deg, rgba(255,255,255,.12), rgba(255,255,255,.03));
+  border: 1px solid rgba(235,232,255,.15);
+  box-shadow: 0 18px 44px rgba(0,0,0,.5);
+}
+#m-video .s1 { left: 54%; top: 20%; width: 24%; height: 46%; transform: rotate(-6deg); }
+#m-video .s2 { left: 68%; top: 28%; width: 21%; height: 39%; transform: rotate(5deg); background: linear-gradient(150deg, rgba(179,136,255,.36), rgba(124,77,255,.12)); }
+#m-video .sline { position: absolute; height: 4px; border-radius: 3px; background: rgba(255,255,255,.17); }
+#m-video .sc-copy { position: absolute; left: 6%; top: 18%; max-width: 164px; z-index: 3; }
+#m-video .sc-title {
+  font-size: 15.5px; font-weight: 720; letter-spacing: -.3px; line-height: 1.3;
+  color: rgba(255,255,255,.95); text-shadow: 0 4px 24px rgba(0,0,0,.75);
+}
+#m-video .sc-sub { margin-top: 6px; font-size: 10px; color: rgba(235,232,255,.62); line-height: 1.4; }
+
+#m-video .stagechips { position: absolute; left: 12px; top: 12px; z-index: 4; display: flex; gap: 6px; }
+#m-video .stagechips .m-chip { height: 24px; padding: 0 10px; font-size: 10.5px; background: rgba(8,7,13,.66); }
+#m-video .bigplay {
+  position: absolute; left: 56%; top: 46%; transform: translate(-50%,-50%); z-index: 4;
+  width: 62px; height: 62px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(20,18,34,.5);
+  border: 1px solid rgba(235,232,255,.24);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 12px 40px rgba(0,0,0,.55), 0 0 0 8px rgba(124,77,255,.10);
+  color: #fff;
+}
+#m-video .bigplay .ic { width: 24px; height: 24px; }
+#m-video .cc {
+  position: absolute; left: 50%; bottom: 92px; transform: translateX(-50%); z-index: 4;
+  padding: 7px 13px; border-radius: 10px; max-width: 92%; white-space: nowrap;
+  background: rgba(8,7,13,.78); border: 1px solid var(--stroke-2);
+  backdrop-filter: blur(10px);
+  font-size: 12.5px; font-weight: 520; color: #fff; text-align: center; line-height: 1.3;
+  box-shadow: var(--sh-2);
 }
 
-#m-chat .m-in { display: flex; align-items: flex-end; gap: 8px; align-self: flex-start; max-width: 86%; }
-#m-chat .m-in .avatar { width: 26px; height: 26px; border-radius: 9px; font-size: 9.5px; flex: none; }
-#m-chat .m-in .m-bub { max-width: none; }
-
-#m-chat .fcard {
-  display: flex; align-items: center; gap: 11px;
-  padding: 10px; border-radius: 14px; margin-bottom: 8px;
-  background: rgba(8,7,13,.4);
+/* ---- control deck ---- */
+#m-video .deck {
+  flex: none; margin: 12px 14px 0; padding: 14px 12px 12px;
+  border-radius: 18px; position: relative;
+  background: rgba(22, 20, 38, 0.72);
+  border: 1px solid var(--stroke-2);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--sh-2), var(--inner-hi);
+}
+#m-video .seek { position: relative; height: 6px; border-radius: 4px; background: rgba(235,232,255,.10); margin: 4px 0 14px; }
+#m-video .seek .buf { position: absolute; inset: 0 auto 0 0; width: 78%; border-radius: 4px; background: rgba(235,232,255,.15); }
+#m-video .seek .fill { position: absolute; inset: 0 auto 0 0; width: 58.7%; border-radius: 4px; background: var(--grad-acc); box-shadow: 0 0 14px rgba(124,77,255,.65); }
+#m-video .seek .thumb {
+  position: absolute; left: 58.7%; top: 50%; transform: translate(-50%,-50%);
+  width: 15px; height: 15px; border-radius: 50%; background: #fff;
+  box-shadow: 0 0 0 5px rgba(124,77,255,.35), 0 2px 8px rgba(0,0,0,.6); z-index: 3;
+}
+#m-video .seek .tick { position: absolute; top: -3px; width: 2px; height: 12px; border-radius: 2px; background: rgba(235,232,255,.42); z-index: 2; }
+#m-video .seek .tick.done { background: rgba(255,255,255,.85); }
+#m-video .fprev {
+  position: absolute; left: 58.7%; bottom: 100%; transform: translateX(-50%);
+  margin-bottom: 11px; padding: 5px; border-radius: 10px;
+  background: rgba(26,24,44,.96); border: 1px solid var(--stroke-2);
+  box-shadow: var(--sh-3); z-index: 8;
+}
+#m-video .fprev .fp {
+  width: 104px; height: 58px; border-radius: 6px; position: relative; overflow: hidden;
   border: 1px solid var(--stroke);
+  background: radial-gradient(60% 70% at 60% 44%, rgba(146,87,255,.5), transparent 62%), linear-gradient(165deg, #1B1930, #0B0A14);
 }
-#m-chat .fcard .fn { font-size: 13.5px; font-weight: 620; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#m-chat .fcard .col { min-width: 0; }
-#m-chat .fcard .fs { font-size: 11px; opacity: .72; }
-
-#m-chat .typing {
-  align-self: flex-start; margin-left: 34px;
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 9px 14px; border-radius: 16px; border-bottom-left-radius: 6px;
-  background: var(--glass-2); border: 1px solid var(--stroke);
-  font-size: 12px; color: var(--txt-3);
+#m-video .fprev .fp i { position: absolute; left: 28%; top: 28%; width: 28%; height: 42%; border-radius: 4px; background: rgba(255,255,255,.2); transform: rotate(-6deg); }
+#m-video .fprev .ft { text-align: center; font-family: var(--font-mono); font-size: 10.5px; color: var(--txt-1); padding-top: 5px; }
+#m-video .fprev::after {
+  content: ""; position: absolute; left: 50%; bottom: -5px; transform: translateX(-50%) rotate(45deg);
+  width: 9px; height: 9px; background: rgba(26,24,44,.96);
+  border-right: 1px solid var(--stroke-2); border-bottom: 1px solid var(--stroke-2);
 }
-#m-chat .typing i { width: 5px; height: 5px; border-radius: 50%; background: var(--acc-2); }
-#m-chat .typing i:nth-child(2) { opacity: .55; }
-#m-chat .typing i:nth-child(3) { opacity: .3; }
+#m-video .ctrls { display: flex; align-items: center; gap: 6px; }
+#m-video .pbtn {
+  width: 40px; height: 40px; border-radius: 14px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--grad-acc); color: #fff;
+  box-shadow: 0 4px 16px rgba(124,77,255,.45), var(--inner-hi);
+}
+#m-video .pbtn .ic { width: 20px; height: 20px; }
+#m-video .time { font-family: var(--font-mono); font-size: 11.5px; color: var(--txt-1); font-variant-numeric: tabular-nums; white-space: nowrap; }
+#m-video .time span { color: var(--txt-3); }
+#m-video .cpill {
+  display: inline-flex; align-items: center; gap: 4px; flex: none;
+  height: 30px; padding: 0 8px; border-radius: 10px;
+  background: rgba(235,232,255,.05); border: 1px solid var(--stroke);
+  color: var(--txt-2); font-size: 11.5px; font-weight: 600;
+}
+#m-video .cpill.on { background: var(--acc-soft); border-color: var(--stroke-acc); color: var(--acc-3); }
+#m-video .cpill .ic { width: 15px; height: 15px; }
+#m-video .cbtn {
+  width: 30px; height: 30px; border-radius: 10px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--txt-2); background: rgba(235,232,255,.05); border: 1px solid var(--stroke);
+}
+#m-video .cbtn .ic { width: 16px; height: 16px; }
 
-#m-chat .reactions {
-  position: absolute; bottom: -11px; left: 12px;
-  display: flex; gap: 4px; font-size: 11px;
-  padding: 2px 8px; border-radius: 999px;
-  background: var(--bg-3); border: 1px solid var(--stroke-2);
-  color: var(--txt-2);
-}</style>
+/* ---- chapters ---- */
+#m-video .chapters { margin: 12px 14px 0; flex: none; overflow: hidden; }
+#m-video .ch-head { display: flex; align-items: center; gap: 9px; padding: 11px 14px; border-bottom: 1px solid var(--stroke); }
+#m-video .ch-head .ic { color: var(--acc-3); }
+#m-video .ch-head .t { font-size: 13.5px; font-weight: 650; }
+#m-video .chp { display: flex; align-items: center; gap: 11px; padding: 8px 12px; }
+#m-video .chp + .chp { border-top: 1px solid rgba(235,232,255,.05); }
+#m-video .chp .th { width: 62px; height: 36px; flex: none; border-radius: 7px; border: 1px solid var(--stroke); position: relative; overflow: hidden; }
+#m-video .chp .th i { position: absolute; left: 26%; top: 26%; width: 32%; height: 44%; border-radius: 3px; background: rgba(255,255,255,.22); transform: rotate(-7deg); }
+#m-video .chp .nm { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#m-video .chp .tm { font-family: var(--font-mono); font-size: 10.5px; color: var(--txt-3); margin-top: 1px; }
+#m-video .chp.on { background: var(--acc-soft); box-shadow: inset 2px 0 0 var(--acc); }
+#m-video .chp.on .tm { color: var(--acc-3); }
+#m-video .eqm { display: inline-flex; align-items: flex-end; gap: 2px; height: 13px; flex: none; }
+#m-video .eqm i { width: 3px; border-radius: 2px; background: var(--acc-2); }
+
+/* ---- bottom band + PiP ---- */
+#m-video .band { display: flex; align-items: center; padding: 0 14px; }
+#m-video .band .bl { max-width: 216px; }
+#m-video .band .bt { font-size: 10px; font-weight: 720; letter-spacing: 1.1px; text-transform: uppercase; color: var(--txt-3); }
+#m-video .band .bd { font-size: 11.5px; color: var(--txt-2); line-height: 1.45; margin-top: 4px; }
+
+#m-video .pip {
+  position: absolute; right: 12px; bottom: 30px; z-index: 40;
+  width: 168px; border-radius: 14px; overflow: hidden;
+  border: 1px solid var(--stroke-2);
+  box-shadow: 0 22px 56px rgba(0,0,0,.75), 0 0 0 1px rgba(124,77,255,.2);
+  background: #0B0A14;
+}
+#m-video .pip .pv {
+  height: 94px; position: relative;
+  background: radial-gradient(60% 70% at 62% 42%, rgba(146,87,255,.44), transparent 62%), linear-gradient(165deg, #171528, #08070D);
+}
+#m-video .pip .pv i { position: absolute; left: 30%; top: 26%; width: 28%; height: 44%; border-radius: 6px; background: rgba(255,255,255,.15); border: 1px solid rgba(235,232,255,.17); transform: rotate(-6deg); }
+#m-video .pip .pl {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+  width: 32px; height: 32px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(20,18,34,.55); border: 1px solid rgba(235,232,255,.22);
+  backdrop-filter: blur(8px); color: #fff;
+}
+#m-video .pip .pl .ic { width: 14px; height: 14px; }
+#m-video .pip .ptag {
+  position: absolute; left: 8px; top: 8px;
+  padding: 2px 7px; border-radius: 999px;
+  background: rgba(8,7,13,.72); border: 1px solid var(--stroke-2);
+  font-size: 8px; font-weight: 750; letter-spacing: .7px; color: var(--txt-2);
+}
+#m-video .pip .pbar { display: flex; align-items: center; gap: 7px; padding: 8px 9px; background: rgba(18,17,28,.94); }
+#m-video .pip .pbar .ic { width: 13px; height: 13px; color: var(--txt-2); }
+#m-video .pip .pg { flex: 1; height: 3px; border-radius: 3px; background: rgba(235,232,255,.13); position: relative; }
+#m-video .pip .pg i { position: absolute; inset: 0 auto 0 0; width: 58%; border-radius: 3px; background: var(--grad-acc); }</style>
 <style>
   html, body { margin: 0; background: #050409; }
   body { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px 0; }
@@ -1150,9 +1273,9 @@
   <symbol id="i-log" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 5.5h16M4 9.5h10M4 13.5h16M4 17.5h7"/><circle cx="19" cy="9.5" r="1.3" fill="currentColor" stroke="none"/></g></symbol>
 </svg>
 
-<div class="vcxm-device"><div class="mscreen" id="m-chat">
+<div class="vcxm-device"><div class="mscreen" id="m-video">
   <div class="m-status">
-    <span>9:16</span>
+    <span>9:41</span>
     <div class="sb-right">
       <span class="m-sig"><i></i><i></i><i></i><i></i></span>
       <span class="m-wifi"></span>
@@ -1160,74 +1283,131 @@
     </div>
   </div>
 
-  <header class="m-appbar">
+  <header class="m-viewerbar">
     <span class="m-ic-btn"><svg class="ic"><use href="#i-chev-l"/></svg></span>
-    <span class="avatar av-1 hd">MC<span class="presence" style="background:var(--ok);border-color:#0F0E18"></span></span>
-    <div class="col grow who" style="gap:1px">
-      <span class="n">Maya Chen</span>
-      <span class="s"><span class="dot on" style="width:7px;height:7px"></span>Online</span>
+    <span class="m-tile sm ft-vid">MP4</span>
+    <div class="col grow who" style="gap:2px">
+      <span class="vt">Atlas-Demo-v3.mp4</span>
+      <span class="vs">Maya Chen · 148 MB · 04:36</span>
     </div>
-    <span class="m-ic-btn"><svg class="ic"><use href="#i-phone"/></svg></span>
-    <span class="m-ic-btn"><svg class="ic"><use href="#i-video"/></svg></span>
+    <div class="fchips">
+      <span class="m-chip on">MP4</span>
+      <span class="m-chip">MOV</span>
+      <span class="m-chip">MKV</span>
+    </div>
     <span class="m-ic-btn"><svg class="ic"><use href="#i-more-v"/></svg></span>
   </header>
 
-  <div class="e2e"><svg class="ic sm"><use href="#i-lock"/></svg>End-to-end encrypted</div>
+  <div class="m-secure"><svg class="ic sm"><use href="#i-lock"/></svg>Opens inside VaultChat — no external app</div>
 
-  <div class="m-msgs">
-    <span class="m-day">Today</span>
-
-    <div class="m-in">
-      <span class="avatar av-1">MC</span>
-      <div class="m-bub in">Morning! Proposal draft is done — the pricing section still needs your FY26 numbers before I send it up.
-        <div class="bm">09:12</div>
-      </div>
+  <div class="stage">
+    <div class="sc-glow"></div>
+    <div class="slab s1"></div>
+    <div class="slab s2"></div>
+    <div class="sline" style="left:45%;top:30%;width:12%"></div>
+    <div class="sline" style="left:45%;top:36%;width:17%;opacity:.6"></div>
+    <div class="sline" style="left:45%;top:42%;width:9%;opacity:.4"></div>
+    <div class="sc-copy">
+      <div class="sc-title">Open any file right in the chat.</div>
+      <div class="sc-sub">Atlas product demo · chapter 3</div>
     </div>
 
-    <div class="m-bub out">Nice timing. I'll drop the financials sheet in here right after standup.
-      <div class="bm">09:13 <svg class="ic sm"><use href="#i-check2"/></svg></div>
+    <div class="stagechips">
+      <span class="m-chip"><span class="dot acc" style="width:7px;height:7px"></span>Playing · chapter 3</span>
+      <span class="m-chip">1080p</span>
     </div>
-
-    <div class="m-in">
-      <span class="avatar av-1">MC</span>
-      <div class="m-bub in" style="padding:10px">
-        <div class="fcard">
-          <span class="m-tile ft-doc">DOC</span>
-          <div class="col grow" style="gap:1px">
-            <span class="fn">Atlas-Proposal.docx</span>
-            <span class="fs">4.2 MB · 24 pages</span>
-          </div>
-          <span class="m-btn sm primary" style="height:32px;padding:0 13px">Open</span>
-        </div>
-        <div style="padding:0 4px 2px">Full draft — section 4 is the one to read.</div>
-        <div class="bm">09:14</div>
-        <div class="reactions">👍 2 &nbsp;🔥 1</div>
-      </div>
-    </div>
-
-    <div class="m-bub out" style="margin-top:6px">Opening it now — reading mode makes a 24-pager painless on the phone.
-      <div class="bm">09:15 <svg class="ic sm"><use href="#i-check2"/></svg></div>
-    </div>
-
-    <div class="m-in">
-      <span class="avatar av-1">MC</span>
-      <div class="m-bub in">Ping me when you hit the pricing table.
-        <div class="bm">09:16</div>
-      </div>
-    </div>
-
-    <div class="typing"><i></i><i></i><i></i>Maya is typing</div>
+    <div class="bigplay"><svg class="ic"><use href="#i-pause"/></svg></div>
+    <div class="cc">“Every file opens right where the conversation is.”</div>
   </div>
 
-  <div class="m-composer">
-    <span class="m-ic-btn"><svg class="ic"><use href="#i-clip"/></svg></span>
-    <div class="field-in"><span class="grow">Message</span><svg class="ic" style="color:var(--txt-3)"><use href="#i-smile"/></svg></div>
-    <span class="m-ic-btn"><svg class="ic"><use href="#i-mic"/></svg></span>
-    <span class="m-send"><svg class="ic"><use href="#i-send"/></svg></span>
+  <div class="deck">
+    <div class="fprev">
+      <div class="fp"><i></i></div>
+      <div class="ft">02:41</div>
+    </div>
+    <div class="seek">
+      <div class="buf"></div>
+      <div class="fill"></div>
+      <div class="tick done" style="left:0%"></div>
+      <div class="tick done" style="left:17.4%"></div>
+      <div class="tick done" style="left:47.1%"></div>
+      <div class="tick" style="left:73.9%"></div>
+      <div class="thumb"></div>
+    </div>
+    <div class="ctrls">
+      <span class="pbtn"><svg class="ic"><use href="#i-pause"/></svg></span>
+      <span class="time">02:41 <span>/ 04:36</span></span>
+      <div class="grow"></div>
+      <span class="cpill on"><svg class="ic"><use href="#i-subtitles"/></svg>CC</span>
+      <span class="cpill"><svg class="ic"><use href="#i-speed"/></svg>1.5×</span>
+      <span class="cbtn"><svg class="ic"><use href="#i-pip"/></svg></span>
+      <span class="cbtn"><svg class="ic"><use href="#i-rotate"/></svg></span>
+      <span class="cbtn"><svg class="ic"><use href="#i-expand"/></svg></span>
+    </div>
+  </div>
+
+  <div class="m-card chapters">
+    <div class="ch-head">
+      <svg class="ic"><use href="#i-chapters"/></svg>
+      <span class="t grow">Chapters</span>
+      <span class="m-chip" style="height:24px;font-size:11px;padding:0 10px">4</span>
+    </div>
+    <div class="chp">
+      <div class="th" style="background:linear-gradient(150deg,#241f3d,#0E0D18)"><i></i></div>
+      <div class="col grow" style="gap:0;min-width:0">
+        <span class="nm">Intro — what Atlas is</span>
+        <span class="tm">00:00 · 48s</span>
+      </div>
+    </div>
+    <div class="chp">
+      <div class="th" style="background:linear-gradient(150deg,#2A2350,#0E0D18)"><i></i></div>
+      <div class="col grow" style="gap:0;min-width:0">
+        <span class="nm">Split view in practice</span>
+        <span class="tm">00:48 · 1m 22s</span>
+      </div>
+    </div>
+    <div class="chp on">
+      <div class="th" style="background:radial-gradient(70% 80% at 60% 40%, rgba(146,87,255,.62), transparent 66%), linear-gradient(150deg,#2E2660,#0E0D18)"><i></i></div>
+      <div class="col grow" style="gap:0;min-width:0">
+        <span class="nm">The file viewer</span>
+        <span class="tm">02:10 · 1m 12s · now playing</span>
+      </div>
+      <span class="eqm"><i style="height:5px"></i><i style="height:12px"></i><i style="height:8px"></i></span>
+    </div>
+    <div class="chp">
+      <div class="th" style="background:linear-gradient(150deg,#1F2A44,#0E0D18)"><i></i></div>
+      <div class="col grow" style="gap:0;min-width:0">
+        <span class="nm">Reading mode</span>
+        <span class="tm">03:22 · 1m 14s</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="grow"></div>
+
+  <div class="band">
+    <div class="bl">
+      <div class="bt">Picture in picture</div>
+      <div class="bd">Keeps playing while you read the thread — decrypted on this device.</div>
+    </div>
+  </div>
+
+  <div class="pip">
+    <div class="pv">
+      <span class="ptag">PIP</span>
+      <i></i>
+      <span class="pl"><svg class="ic"><use href="#i-pause"/></svg></span>
+    </div>
+    <div class="pbar">
+      <svg class="ic"><use href="#i-pause"/></svg>
+      <div class="pg"><i></i></div>
+      <span style="font-family:var(--font-mono);font-size:9.5px;color:var(--txt-3)">02:41</span>
+      <svg class="ic"><use href="#i-close"/></svg>
+    </div>
   </div>
 
   <div class="m-home"><i></i></div>
 </div></div>
-<div class="vcxm-meta"><b>VaultChat Mobile</b> · M2 — Open a chat · 430 × 932 · dark / glass / #7C4DFF</div>
+<div class="vcxm-meta"><b>VaultChat Mobile</b> · M13 — Video player · 430 × 932 · dark / glass / #7C4DFF</div>
 </body>
 </html>
