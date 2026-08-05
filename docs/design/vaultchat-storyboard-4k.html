@@ -1,0 +1,1345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VaultChat — Premium UI Storyboard</title>
+<style>/* ============================================================
+   VaultChat Design System — tokens.css
+   Dark · Glassmorphism · Fluent/Linear-grade · Accent #7C4DFF
+   Every screen fragment builds on these tokens + components.
+   ============================================================ */
+
+:root {
+  /* ---- Color: violet-biased dark neutrals ---- */
+  --bg-0: #08070D;
+  --bg-1: #0C0B14;
+  --bg-2: #12111C;
+  --bg-3: #181726;
+  --bg-4: #1F1D30;
+
+  --glass:    rgba(24, 22, 40, 0.55);
+  --glass-2:  rgba(31, 29, 52, 0.50);
+  --glass-hi: rgba(42, 39, 68, 0.55);
+
+  --stroke:    rgba(235, 232, 255, 0.07);
+  --stroke-2:  rgba(235, 232, 255, 0.13);
+  --stroke-acc: rgba(124, 77, 255, 0.45);
+
+  --txt-1: #EDEBFA;
+  --txt-2: #A29DC0;
+  --txt-3: #6B6684;
+
+  --acc:      #7C4DFF;
+  --acc-2:    #9E7BFF;
+  --acc-3:    #B388FF;
+  --acc-soft: rgba(124, 77, 255, 0.14);
+  --acc-soft-2: rgba(124, 77, 255, 0.24);
+  --grad-acc: linear-gradient(135deg, #9257FF 0%, #7C4DFF 55%, #6C3DF4 100%);
+  --grad-text: linear-gradient(100deg, #EDEBFA 20%, #B388FF 80%);
+
+  --ok:   #34D399;
+  --warn: #FBBF24;
+  --err:  #F87171;
+  --info: #60A5FA;
+
+  /* ---- Elevation ---- */
+  --sh-1: 0 1px 2px rgba(0,0,0,.45);
+  --sh-2: 0 8px 24px rgba(0,0,0,.45);
+  --sh-3: 0 24px 64px rgba(0,0,0,.55);
+  --glow: 0 0 0 1px rgba(124,77,255,.4), 0 6px 28px rgba(124,77,255,.35);
+  --inner-hi: inset 0 1px 0 rgba(255,255,255,.06);
+
+  /* ---- Geometry ---- */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 20px;
+  --r-pill: 999px;
+
+  --blur: blur(24px) saturate(1.5);
+
+  /* ---- Type ---- */
+  --font-ui: "Segoe UI Variable Display", "Segoe UI", -apple-system, "SF Pro Display", Inter, Roboto, system-ui, sans-serif;
+  --font-mono: "Cascadia Code", "SF Mono", "JetBrains Mono", Consolas, "Roboto Mono", monospace;
+  --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* ============ Screen canvas ============ */
+.screen {
+  position: relative;
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  flex: none;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--txt-1);
+  background:
+    radial-gradient(1200px 800px at 82% -12%, rgba(124,77,255,.15), transparent 62%),
+    radial-gradient(1000px 700px at -6% 112%, rgba(124,77,255,.09), transparent 55%),
+    linear-gradient(180deg, #0B0A13 0%, #08070D 100%);
+  -webkit-font-smoothing: antialiased;
+  display: flex;
+  flex-direction: column;
+}
+.screen ::selection { background: var(--acc-soft-2); }
+
+/* ============ Icons ============ */
+.ic { width: 18px; height: 18px; flex: none; display: block; }
+.ic.sm { width: 14px; height: 14px; }
+.ic.lg { width: 22px; height: 22px; }
+.ic.xl { width: 28px; height: 28px; }
+
+/* ============ Layout helpers ============ */
+.row  { display: flex; align-items: center; }
+.col  { display: flex; flex-direction: column; }
+.grow { flex: 1 1 auto; min-width: 0; }
+.center { display: flex; align-items: center; justify-content: center; }
+.gap-4  { gap: 4px; }  .gap-6  { gap: 6px; }  .gap-8  { gap: 8px; }
+.gap-10 { gap: 10px; } .gap-12 { gap: 12px; } .gap-16 { gap: 16px; }
+.gap-20 { gap: 20px; } .gap-24 { gap: 24px; }
+
+/* ============ Glass surfaces ============ */
+.glass {
+  background: var(--glass);
+  border: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--sh-2), var(--inner-hi);
+  border-radius: var(--r-lg);
+}
+.glass-quiet {
+  background: var(--glass);
+  border: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--inner-hi);
+  border-radius: var(--r-md);
+}
+.glass-float {
+  background: var(--glass-2);
+  border: 1px solid var(--stroke-2);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--sh-3), var(--inner-hi);
+  border-radius: var(--r-xl);
+}
+
+/* ============ Window titlebar (Fluent) ============ */
+.vc-titlebar {
+  height: 48px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 8px 0 16px;
+  background: rgba(14, 13, 22, 0.72);
+  border-bottom: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+  z-index: 40;
+}
+.vc-brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 14px; letter-spacing: .1px; }
+.vc-logo {
+  width: 26px; height: 26px; border-radius: 8px;
+  background: var(--grad-acc);
+  box-shadow: 0 2px 10px rgba(124,77,255,.5), var(--inner-hi);
+  display: flex; align-items: center; justify-content: center;
+  color: #fff;
+}
+.vc-logo .ic { width: 15px; height: 15px; }
+.vc-search {
+  width: 420px; height: 32px;
+  margin: 0 auto;
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  background: rgba(235,232,255,.05);
+  border: 1px solid var(--stroke);
+  color: var(--txt-3);
+  font-size: 12.5px;
+}
+.vc-search .ic { color: var(--txt-3); }
+.vc-win { display: flex; align-items: center; }
+.vc-win span {
+  width: 44px; height: 34px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--txt-2); font-size: 11px; border-radius: 6px;
+}
+.vc-win span:hover { background: rgba(235,232,255,.06); }
+.vc-win .close:hover { background: #E81123; color: #fff; }
+
+/* ============ Left nav rail ============ */
+.vc-rail {
+  width: 68px; flex: none;
+  display: flex; flex-direction: column; align-items: center;
+  gap: 6px; padding: 14px 0;
+  background: rgba(12, 11, 19, 0.65);
+  border-right: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+}
+.rail-btn {
+  width: 44px; height: 44px; border-radius: var(--r-md);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--txt-3); position: relative;
+}
+.rail-btn:hover { color: var(--txt-2); background: rgba(235,232,255,.05); }
+.rail-btn.active {
+  color: #fff;
+  background: var(--acc-soft);
+  box-shadow: inset 0 0 0 1px var(--stroke-acc);
+}
+.rail-btn.active::before {
+  content: ""; position: absolute; left: -12px; top: 10px; bottom: 10px;
+  width: 3px; border-radius: 3px; background: var(--grad-acc);
+  box-shadow: 0 0 12px rgba(124,77,255,.8);
+}
+.rail-spacer { flex: 1; }
+.rail-label { font-size: 8.5px; color: var(--txt-3); margin-top: -4px; letter-spacing: .2px; }
+
+/* ============ Buttons ============ */
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 34px; padding: 0 14px;
+  border-radius: var(--r-sm);
+  background: rgba(235,232,255,.06);
+  border: 1px solid var(--stroke-2);
+  color: var(--txt-1); font-size: 12.5px; font-weight: 500;
+  white-space: nowrap;
+}
+.btn-primary {
+  background: var(--grad-acc);
+  border: 1px solid rgba(179,136,255,.5);
+  box-shadow: 0 4px 18px rgba(124,77,255,.4), var(--inner-hi);
+  color: #fff;
+}
+.btn-ghost { background: transparent; border-color: transparent; color: var(--txt-2); }
+.btn.sm { height: 28px; padding: 0 10px; font-size: 11.5px; border-radius: 7px; }
+.icon-btn {
+  width: 34px; height: 34px; flex: none;
+  border-radius: var(--r-sm);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--txt-2);
+  background: transparent;
+}
+.icon-btn:hover { background: rgba(235,232,255,.06); color: var(--txt-1); }
+.icon-btn.active { background: var(--acc-soft); color: var(--acc-3); box-shadow: inset 0 0 0 1px var(--stroke-acc); }
+.icon-btn.sm { width: 28px; height: 28px; }
+.icon-btn.framed { background: rgba(235,232,255,.05); border: 1px solid var(--stroke); }
+
+/* ============ Chips, badges, status ============ */
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 26px; padding: 0 12px;
+  border-radius: var(--r-pill);
+  background: rgba(235,232,255,.05);
+  border: 1px solid var(--stroke);
+  color: var(--txt-2); font-size: 11.5px; font-weight: 500;
+  white-space: nowrap;
+}
+.chip.active {
+  background: var(--acc-soft);
+  border-color: var(--stroke-acc);
+  color: var(--acc-3);
+}
+.chip.ok   { color: var(--ok);   border-color: rgba(52,211,153,.35);  background: rgba(52,211,153,.09); }
+.chip.warn { color: var(--warn); border-color: rgba(251,191,36,.35);  background: rgba(251,191,36,.09); }
+.chip.err  { color: var(--err);  border-color: rgba(248,113,113,.35); background: rgba(248,113,113,.09); }
+.badge {
+  min-width: 19px; height: 19px; padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--grad-acc);
+  color: #fff; font-size: 10.5px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 8px rgba(124,77,255,.5);
+}
+.dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.dot.on  { background: var(--ok); box-shadow: 0 0 8px rgba(52,211,153,.7); }
+.dot.off { background: var(--txt-3); }
+.dot.acc { background: var(--acc-2); box-shadow: 0 0 8px rgba(124,77,255,.7); }
+
+/* ============ Avatars ============ */
+.avatar {
+  width: 42px; height: 42px; flex: none;
+  border-radius: 14px;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 600; font-size: 14px; color: #fff;
+  box-shadow: var(--inner-hi), 0 2px 8px rgba(0,0,0,.35);
+  position: relative;
+}
+.avatar.sm { width: 32px; height: 32px; font-size: 11.5px; border-radius: 11px; }
+.avatar.lg { width: 52px; height: 52px; font-size: 17px; border-radius: 17px; }
+.avatar .presence {
+  position: absolute; right: -2px; bottom: -2px;
+  width: 12px; height: 12px; border-radius: 50%;
+  border: 2.5px solid var(--bg-1);
+}
+.av-1 { background: linear-gradient(135deg, #7C4DFF, #B388FF); }
+.av-2 { background: linear-gradient(135deg, #F472B6, #FB7185); }
+.av-3 { background: linear-gradient(135deg, #34D399, #2DD4BF); }
+.av-4 { background: linear-gradient(135deg, #60A5FA, #818CF8); }
+.av-5 { background: linear-gradient(135deg, #FBBF24, #FB923C); }
+.av-6 { background: linear-gradient(135deg, #A78BFA, #6366F1); }
+
+/* ============ Chat: conversation list item ============ */
+.convo {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 14px; border-radius: var(--r-md);
+  border: 1px solid transparent;
+}
+.convo:hover { background: rgba(235,232,255,.04); }
+.convo.active {
+  background: var(--acc-soft);
+  border-color: var(--stroke-acc);
+  box-shadow: var(--inner-hi);
+}
+.convo .name { font-size: 13.5px; font-weight: 600; color: var(--txt-1); }
+.convo .preview { font-size: 12px; color: var(--txt-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.convo.active .preview { color: var(--txt-2); }
+.convo .when { font-size: 10.5px; color: var(--txt-3); }
+
+/* ============ Chat: bubbles ============ */
+.bubble {
+  max-width: 62%;
+  padding: 11px 15px;
+  border-radius: 16px;
+  font-size: 13.5px; line-height: 1.5;
+  box-shadow: var(--sh-1), var(--inner-hi);
+  position: relative;
+}
+.bubble.in {
+  align-self: flex-start;
+  background: var(--glass-2);
+  border: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+  border-bottom-left-radius: 6px;
+  color: var(--txt-1);
+}
+.bubble.out {
+  align-self: flex-end;
+  background: linear-gradient(135deg, rgba(146,87,255,.92), rgba(108,61,244,.92));
+  border: 1px solid rgba(179,136,255,.4);
+  border-bottom-right-radius: 6px;
+  color: #fff;
+  box-shadow: 0 4px 18px rgba(124,77,255,.28), var(--inner-hi);
+}
+.bubble .b-meta {
+  display: flex; align-items: center; gap: 5px; justify-content: flex-end;
+  margin-top: 5px; font-size: 10px; opacity: .75;
+}
+.bubble.out .b-meta { color: rgba(255,255,255,.9); }
+.bubble.in  .b-meta { color: var(--txt-3); }
+.msg-day {
+  align-self: center;
+  font-size: 10.5px; font-weight: 600; letter-spacing: .8px; text-transform: uppercase;
+  color: var(--txt-3);
+  padding: 5px 14px; border-radius: var(--r-pill);
+  background: rgba(235,232,255,.04); border: 1px solid var(--stroke);
+}
+.reactions {
+  position: absolute; bottom: -12px; left: 12px;
+  display: flex; gap: 4px;
+  font-size: 10.5px;
+  padding: 3px 8px; border-radius: var(--r-pill);
+  background: var(--bg-3); border: 1px solid var(--stroke-2);
+  box-shadow: var(--sh-1);
+  color: var(--txt-2);
+}
+
+/* ============ Chat: file card inside a bubble ============ */
+.filecard {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px; border-radius: var(--r-md);
+  background: rgba(8,7,13,.35);
+  border: 1px solid var(--stroke);
+  min-width: 300px;
+}
+.filecard .f-ic {
+  width: 42px; height: 42px; border-radius: 11px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .5px;
+  box-shadow: var(--inner-hi);
+}
+.filecard .f-name { font-size: 12.5px; font-weight: 600; }
+.filecard .f-sub  { font-size: 10.5px; opacity: .7; }
+.ft-doc   { background: linear-gradient(135deg,#2B6BE4,#3F8CFF); }
+.ft-xls   { background: linear-gradient(135deg,#1D9E6C,#34D399); }
+.ft-ppt   { background: linear-gradient(135deg,#D64B27,#FB923C); }
+.ft-pdf   { background: linear-gradient(135deg,#DC3545,#F87171); }
+.ft-img   { background: linear-gradient(135deg,#8B5CF6,#EC4899); }
+.ft-vid   { background: linear-gradient(135deg,#6366F1,#60A5FA); }
+.ft-aud   { background: linear-gradient(135deg,#0EA5E9,#2DD4BF); }
+.ft-zip   { background: linear-gradient(135deg,#B45309,#FBBF24); }
+.ft-txt   { background: linear-gradient(135deg,#64748B,#94A3B8); }
+.ft-code  { background: linear-gradient(135deg,#7C4DFF,#4F46E5); }
+
+/* ============ Chat: composer ============ */
+.composer {
+  display: flex; align-items: center; gap: 8px;
+  height: 56px; padding: 0 10px 0 6px;
+  border-radius: var(--r-lg);
+  background: var(--glass-2);
+  border: 1px solid var(--stroke-2);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--sh-2), var(--inner-hi);
+}
+.composer .placeholder { color: var(--txt-3); font-size: 13.5px; }
+.send-btn {
+  width: 40px; height: 40px; border-radius: 13px; flex: none;
+  background: var(--grad-acc);
+  display: flex; align-items: center; justify-content: center;
+  color: #fff;
+  box-shadow: 0 4px 16px rgba(124,77,255,.5), var(--inner-hi);
+}
+
+/* ============ Inputs ============ */
+.field {
+  display: flex; align-items: center; gap: 8px;
+  height: 36px; padding: 0 12px;
+  border-radius: var(--r-md);
+  background: rgba(235,232,255,.05);
+  border: 1px solid var(--stroke);
+  color: var(--txt-3); font-size: 12.5px;
+}
+.field.focus { border-color: var(--stroke-acc); box-shadow: 0 0 0 3px rgba(124,77,255,.15); color: var(--txt-1); }
+.kbd {
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--txt-3);
+  padding: 2px 6px; border-radius: 5px;
+  background: rgba(235,232,255,.06);
+  border: 1px solid var(--stroke);
+  box-shadow: 0 1px 0 rgba(0,0,0,.4);
+}
+
+/* ============ Context menu ============ */
+.menu {
+  width: 264px;
+  padding: 6px;
+  border-radius: var(--r-lg);
+  background: rgba(26, 24, 44, 0.85);
+  border: 1px solid var(--stroke-2);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--sh-3), var(--inner-hi);
+}
+.menu-item {
+  display: flex; align-items: center; gap: 11px;
+  padding: 9px 11px; border-radius: 9px;
+  font-size: 12.5px; color: var(--txt-1);
+}
+.menu-item .ic { color: var(--txt-2); }
+.menu-item .mi-kbd { margin-left: auto; }
+.menu-item.hl {
+  background: var(--acc-soft-2);
+  box-shadow: inset 0 0 0 1px var(--stroke-acc), 0 0 20px rgba(124,77,255,.25);
+  color: #fff;
+}
+.menu-item.hl .ic { color: var(--acc-3); }
+.menu-item.danger, .menu-item.danger .ic { color: var(--err); }
+.menu-sep { height: 1px; margin: 5px 8px; background: var(--stroke); }
+.menu-title { font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--txt-3); padding: 8px 11px 4px; }
+
+/* ============ Panels & headers ============ */
+.panel-h {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--stroke);
+  font-size: 13px; font-weight: 600;
+}
+.section-label {
+  font-size: 10px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--txt-3);
+}
+
+/* ============ Toolbar (viewer chrome) ============ */
+.toolbar {
+  display: flex; align-items: center; gap: 4px;
+  padding: 6px;
+  border-radius: var(--r-lg);
+  background: rgba(26, 24, 44, 0.8);
+  border: 1px solid var(--stroke-2);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--sh-2), var(--inner-hi);
+}
+.toolbar .sep { width: 1px; height: 20px; background: var(--stroke-2); margin: 0 4px; }
+
+/* ============ Viewer top bar ============ */
+.vc-viewerbar {
+  height: 56px; flex: none;
+  display: flex; align-items: center; gap: 14px;
+  padding: 0 16px;
+  background: rgba(14, 13, 22, 0.72);
+  border-bottom: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+  z-index: 40;
+}
+.secure-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 28px; padding: 0 13px;
+  border-radius: var(--r-pill);
+  background: rgba(52,211,153,.08);
+  border: 1px solid rgba(52,211,153,.3);
+  color: var(--ok); font-size: 11px; font-weight: 600;
+}
+
+/* ============ Toggle / slider / progress ============ */
+.toggle {
+  width: 38px; height: 22px; border-radius: var(--r-pill); flex: none;
+  background: rgba(235,232,255,.1); border: 1px solid var(--stroke-2);
+  position: relative;
+}
+.toggle::after {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--txt-2);
+}
+.toggle.on { background: var(--grad-acc); border-color: rgba(179,136,255,.5); box-shadow: 0 2px 10px rgba(124,77,255,.4); }
+.toggle.on::after { left: auto; right: 2px; background: #fff; }
+.slider { position: relative; height: 4px; border-radius: 4px; background: rgba(235,232,255,.12); }
+.slider .fill { position: absolute; inset: 0 auto 0 0; border-radius: 4px; background: var(--grad-acc); box-shadow: 0 0 10px rgba(124,77,255,.6); }
+.slider .thumb {
+  position: absolute; top: 50%; transform: translate(-50%,-50%);
+  width: 14px; height: 14px; border-radius: 50%;
+  background: #fff; box-shadow: 0 0 0 4px rgba(124,77,255,.35), 0 2px 6px rgba(0,0,0,.5);
+}
+.progress { height: 3px; border-radius: 3px; background: rgba(235,232,255,.1); overflow: hidden; }
+.progress .fill { height: 100%; border-radius: 3px; background: var(--grad-acc); box-shadow: 0 0 12px rgba(124,77,255,.7); }
+
+/* ============ Decorative scrollbar ============ */
+.scroll-rail {
+  position: absolute; right: 5px; top: 10px; bottom: 10px; width: 5px;
+  border-radius: 5px; background: rgba(235,232,255,.04);
+}
+.scroll-rail .thumb {
+  position: absolute; left: 0; right: 0; height: 26%;
+  border-radius: 5px; background: rgba(235,232,255,.14);
+}
+
+/* ============ Tabs ============ */
+.tabs { display: flex; align-items: center; gap: 2px; }
+.tab {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 32px; padding: 0 14px;
+  border-radius: 9px;
+  font-size: 12px; font-weight: 500; color: var(--txt-2);
+  white-space: nowrap;
+}
+.tab:hover { background: rgba(235,232,255,.05); }
+.tab.active { background: var(--acc-soft); color: var(--acc-3); box-shadow: inset 0 0 0 1px var(--stroke-acc); }
+
+/* ============ Tree (folders / TOC / archive) ============ */
+.tree-item {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 10px; border-radius: 8px;
+  font-size: 12.5px; color: var(--txt-2);
+  white-space: nowrap;
+}
+.tree-item .ic { color: var(--txt-3); }
+.tree-item.active { background: var(--acc-soft); color: var(--txt-1); box-shadow: inset 0 0 0 1px var(--stroke-acc); }
+.tree-item.active .ic { color: var(--acc-3); }
+.tree-item.lvl2 { padding-left: 30px; font-size: 12px; }
+.tree-item.lvl3 { padding-left: 50px; font-size: 12px; }
+
+/* ============ Data table ============ */
+.dtable { border-collapse: collapse; font-size: 12px; color: var(--txt-2); }
+.dtable th {
+  text-align: left; font-weight: 600; color: var(--txt-2);
+  background: rgba(235,232,255,.04);
+  border: 1px solid var(--stroke);
+  padding: 8px 12px; font-size: 11.5px;
+}
+.dtable td { border: 1px solid var(--stroke); padding: 8px 12px; font-variant-numeric: tabular-nums; }
+
+/* ============ Tooltip ============ */
+.tip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 11px; border-radius: 9px;
+  background: var(--bg-4);
+  border: 1px solid var(--stroke-2);
+  box-shadow: var(--sh-2);
+  font-size: 11px; font-weight: 600; color: var(--txt-1);
+  white-space: nowrap;
+}
+
+/* ============ Cursor glyph (for interaction states) ============ */
+.cursor {
+  position: absolute; z-index: 60; pointer-events: none;
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,.6));
+}
+</style>
+<style>
+  .ig-root { background: #050409; font-family: var(--font-ui); color: var(--txt-1); -webkit-font-smoothing: antialiased; }
+  .ig-viewport { width: 100%; overflow-x: auto; }
+  .ig-canvas {
+    width: 3840px; margin: 0 auto; padding: 120px 160px 140px;
+    transform-origin: top left; position: relative;
+    background:
+      radial-gradient(1600px 900px at 75% -5%, rgba(124,77,255,.13), transparent 60%),
+      radial-gradient(1400px 900px at 8% 30%, rgba(124,77,255,.06), transparent 55%),
+      radial-gradient(1400px 900px at 92% 78%, rgba(124,77,255,.07), transparent 55%),
+      #050409;
+  }
+  .ig-head { display: flex; align-items: flex-start; gap: 60px; margin-bottom: 40px; }
+  .ig-mark { width: 92px; height: 92px; border-radius: 26px; background: var(--grad-acc); box-shadow: 0 10px 50px rgba(124,77,255,.55), var(--inner-hi); display: flex; align-items: center; justify-content: center; color: #fff; }
+  .ig-mark .ic { width: 48px; height: 48px; }
+  .ig-head h1 { font-size: 64px; font-weight: 750; letter-spacing: -1.5px; line-height: 1.05; background: var(--grad-text); -webkit-background-clip: text; background-clip: text; color: transparent; text-wrap: balance; }
+  .ig-head .sub { margin-top: 16px; font-size: 19px; color: var(--txt-2); max-width: 980px; line-height: 1.55; }
+  .ig-head .meta { margin-top: 22px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .ig-legend { margin-left: auto; flex: none; width: 900px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .lg-card { padding: 18px 20px; }
+  .lg-card h3 { font-size: 11px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: var(--txt-3); margin-bottom: 12px; }
+  .swatches { display: flex; gap: 8px; }
+  .sw { flex: 1; }
+  .sw i { display: block; height: 40px; border-radius: 9px; border: 1px solid var(--stroke-2); }
+  .sw b { display: block; font: 600 10px/1 var(--font-mono); color: var(--txt-2); margin-top: 7px; }
+  .sw span { display: block; font-size: 9.5px; color: var(--txt-3); margin-top: 3px; }
+  .type-row { display: flex; align-items: baseline; gap: 18px; }
+  .geo-row { display: flex; gap: 10px; align-items: center; }
+
+  .ig-section { margin-top: 96px; }
+  .sec-head { display: flex; align-items: flex-end; gap: 28px; margin-bottom: 44px; }
+  .sec-kicker { font-size: 13px; font-weight: 800; letter-spacing: 3px; text-transform: uppercase; color: var(--acc-2); }
+  .sec-head h2 { font-size: 42px; font-weight: 720; letter-spacing: -1px; margin-top: 6px; }
+  .sec-head .desc { font-size: 15.5px; color: var(--txt-2); max-width: 1240px; line-height: 1.6; margin-left: auto; padding-bottom: 6px; }
+  .sec-rule { height: 1px; background: linear-gradient(90deg, var(--stroke-acc), transparent 70%); margin: 18px 0 0; }
+
+  .ig-row { display: flex; align-items: flex-start; }
+  .ig-row + .ig-rowgap { position: relative; height: 96px; }
+  .frame { width: 806px; flex: none; }
+  .frame-top { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .step-pill { display: inline-flex; align-items: center; justify-content: center; min-width: 52px; height: 30px; padding: 0 13px; border-radius: 999px; background: var(--grad-acc); color: #fff; font-size: 13px; font-weight: 800; letter-spacing: .5px; box-shadow: 0 4px 18px rgba(124,77,255,.45); }
+  .frame-title { font-size: 17px; font-weight: 650; letter-spacing: -.2px; }
+  .shot { width: 806px; height: 454px; border-radius: 16px; overflow: hidden; border: 1px solid var(--stroke-2); box-shadow: 0 24px 70px rgba(0,0,0,.55), 0 0 0 1px rgba(124,77,255,.07); position: relative; background: #0B0A13; }
+  .shot-inner { width: 1920px; height: 1080px; transform: scale(0.42); transform-origin: top left; }
+  .frame-cap { margin-top: 12px; font-size: 12.5px; line-height: 1.55; color: var(--txt-2); padding-right: 8px; }
+  .frame.missing .shot { display: flex; align-items: center; justify-content: center; color: var(--txt-3); font-size: 14px; }
+
+  .arr { flex: none; width: 86px; height: 454px; margin-top: 42px; display: flex; align-items: center; justify-content: center; }
+  .rowlink { position: absolute; inset: 0; overflow: visible; }
+
+  .ig-flow { margin-top: 110px; }
+  .flow-canvas { position: relative; height: 700px; margin-top: 40px; }
+  .fl-node { position: absolute; display: flex; align-items: center; gap: 12px; padding: 16px 22px; border-radius: 16px; background: var(--glass-2); border: 1px solid var(--stroke-2); backdrop-filter: var(--blur); box-shadow: var(--sh-2), var(--inner-hi); font-size: 15px; font-weight: 600; white-space: nowrap; }
+  .fl-node .ic { color: var(--acc-2); }
+  .fl-node small { display: block; font-size: 11px; font-weight: 500; color: var(--txt-3); margin-top: 2px; }
+  .fl-node.hub { background: var(--acc-soft-2); border-color: var(--stroke-acc); box-shadow: var(--glow); }
+  .fl-node.dim { opacity: .92; font-size: 13.5px; padding: 12px 18px; }
+  .fl-svg { position: absolute; inset: 0; overflow: visible; }
+  .fl-label { position: absolute; font-size: 11px; font-weight: 700; letter-spacing: 1.6px; text-transform: uppercase; color: var(--txt-3); }
+
+  .ig-foot { margin-top: 120px; display: flex; align-items: center; gap: 24px; border-top: 1px solid var(--stroke); padding-top: 36px; color: var(--txt-3); font-size: 13px; }
+  .ig-foot .chips { display: flex; gap: 10px; margin-left: auto; }
+  .fitbar { position: sticky; top: 0; z-index: 90; display: flex; justify-content: center; padding: 10px 0; }
+</style>
+<style>html,body{margin:0;background:#050409}</style>
+</head>
+<body>
+  <div class="ig-root">
+  <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <defs>
+    <g id="_s" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></g>
+  </defs>
+
+  <symbol id="i-lock" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></g></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6z"/><path d="M9.5 12l2 2 3.5-4"/></g></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-8 8H4l2.3-2.7A8 8 0 1 1 21 12z"/></g></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></g></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></g></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.5l-7.8 7.8a5 5 0 0 1-7-7l8.5-8.5a3.4 3.4 0 0 1 4.8 4.8l-8.2 8.2a1.8 1.8 0 0 1-2.5-2.5l7.4-7.4"/></g></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l16-8-5 16-3.5-6.5L4 12z"/><path d="M11.5 13.5L20 4"/></g></symbol>
+  <symbol id="i-smile" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 14a4.5 4.5 0 0 0 7 0"/><path d="M9.2 9.6h.01M14.8 9.6h.01" stroke-width="2.4"/></g></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h4l1.5 4.5L8 10a12 12 0 0 0 6 6l1.5-2.5L20 15v4a2 2 0 0 1-2 2A15 15 0 0 1 3 6a2 2 0 0 1 2-2z"/></g></symbol>
+  <symbol id="i-video" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6.5" width="12.5" height="11" rx="2.5"/><path d="M15.5 12.5l5.5 3.5V8l-5.5 3.5z"/></g></symbol>
+  <symbol id="i-more-v" viewBox="0 0 24 24"><g fill="currentColor"><circle cx="12" cy="5.5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="18.5" r="1.6"/></g></symbol>
+  <symbol id="i-more-h" viewBox="0 0 24 24"><g fill="currentColor"><circle cx="5.5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18.5" cy="12" r="1.6"/></g></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></g></symbol>
+  <symbol id="i-check2" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12.5l4 4L14 9"/><path d="M10.5 14.5l2 2L21 8"/></g></symbol>
+  <symbol id="i-chev-l" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5L8 12l6.5 6.5"/></g></symbol>
+  <symbol id="i-chev-r" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 5.5L16 12l-6.5 6.5"/></g></symbol>
+  <symbol id="i-chev-d" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 9.5L12 16l6.5-6.5"/></g></symbol>
+  <symbol id="i-chev-u" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 14.5L12 8l6.5 6.5"/></g></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></g></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></g></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 12h14"/></g></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l-.7 6.2 2.7 3.3H7l2.7-3.3L9 4z"/><path d="M12 13.5V20"/></g></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3.5l2.7 5.6 6.1.8-4.5 4.2 1.1 6-5.4-3-5.4 3 1.1-6L3.2 9.9l6.1-.8z"/></g></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M3.5 7a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></g></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5h8L19 8.5V20.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 20.5v-16A1.5 1.5 0 0 1 6.5 3.5z"/><path d="M14 3.5V9h5"/></g></symbol>
+  <symbol id="i-doc-lines" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5h8L19 8.5V20.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 20.5v-16A1.5 1.5 0 0 1 6.5 3.5z"/><path d="M8.5 12h7M8.5 15.5h7M8.5 18.5h4.5"/></g></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16M4 15h16M10 4v16M15 4v16" stroke-width="1.3"/></g></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="M3.5 17l5-4.5 3.5 3 4-4.5 4.5 5"/></g></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path fill="currentColor" d="M8 5.5v13a1 1 0 0 0 1.5.9l10.4-6.5a1 1 0 0 0 0-1.7L9.5 4.6A1 1 0 0 0 8 5.5z"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><g fill="currentColor"><rect x="6.5" y="5" width="3.6" height="14" rx="1.2"/><rect x="14" y="5" width="3.6" height="14" rx="1.2"/></g></symbol>
+  <symbol id="i-volume" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5v5h3.5L12 19V5L7.5 9.5H4z"/><path d="M15.5 9a4.5 4.5 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11"/></g></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v10.5M7.5 10.5L12 15l4.5-4.5"/><path d="M4.5 19.5h15"/></g></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="12" r="2.5"/><circle cx="17.5" cy="5.5" r="2.5"/><circle cx="17.5" cy="18.5" r="2.5"/><path d="M8.3 10.8l7-4M8.3 13.2l7 4"/></g></symbol>
+  <symbol id="i-print" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 8V4h10v4"/><rect x="4" y="8" width="16" height="8" rx="2"/><rect x="7" y="14" width="10" height="6" rx="1"/></g></symbol>
+  <symbol id="i-bookmark" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M7 4h10v16l-5-3.5L7 20V4z"/></g></symbol>
+  <symbol id="i-zoom-in" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5M8.5 11h5M11 8.5v5"/></g></symbol>
+  <symbol id="i-zoom-out" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5M8.5 11h5"/></g></symbol>
+  <symbol id="i-rotate" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12a7.5 7.5 0 1 1 2.2 5.3"/><path d="M4.5 21v-4.5H9"/></g></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"/></g></symbol>
+  <symbol id="i-pip" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><rect x="12.5" y="11.5" width="6.5" height="5" rx="1" fill="currentColor" stroke="none"/></g></symbol>
+  <symbol id="i-pen" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19l-4 1z"/><path d="M14.5 6.5l3 3"/></g></symbol>
+  <symbol id="i-marker" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 15l-2 2 1 2H4l3.5-3.5"/><path d="M9 15L18.5 5.5a1.8 1.8 0 0 1 2.6 2.6L11.5 17.5 9 15z"/></g></symbol>
+  <symbol id="i-sign" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17c2-4 4-8.5 6-8.5s1 6 2.5 6 2-3 3.5-3 1.5 2.5 4 2.5"/><path d="M4 20.5h16"/></g></symbol>
+  <symbol id="i-comment" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H4.5l2-2.4A7.5 7.5 0 1 1 20 11.5z"/><path d="M8.5 10.5h7M8.5 13.5h4.5"/></g></symbol>
+  <symbol id="i-toc" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="4.5" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="4.5" cy="18" r="1.3" fill="currentColor" stroke="none"/></g></symbol>
+  <symbol id="i-type" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7V4.5h14V7M12 4.5v15M9 19.5h6"/></g></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4"/></g></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/></g></symbol>
+  <symbol id="i-cloud-off" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18.5h11a3.5 3.5 0 0 0 .8-6.9A6 6 0 0 0 9 8.5"/><path d="M5.5 9a4.5 4.5 0 0 0 1.5 9.5"/><path d="M4 4l16 16"/></g></symbol>
+  <symbol id="i-cloud-check" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18.5h11a3.5 3.5 0 0 0 .8-6.9A6 6 0 0 0 7.1 10 4.5 4.5 0 0 0 7 18.5z"/><path d="M9.5 14l2 2 3.5-4"/></g></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2.5"/></g></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7"><path d="M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/></g></symbol>
+  <symbol id="i-eye-off" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M2.5 12S6 5.8 12 5.8a9 9 0 0 1 4.5 1.2M21.5 12S18 18.2 12 18.2a9 9 0 0 1-4.5-1.2"/><path d="M4 4l16 16"/></g></symbol>
+  <symbol id="i-droplet" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3.5s6 6.2 6 10.5a6 6 0 0 1-12 0C6 9.7 12 3.5 12 3.5z"/></g></symbol>
+  <symbol id="i-swap" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4L3.5 7.5 7 11M3.5 7.5h13"/><path d="M17 13l3.5 3.5L17 20M20.5 16.5h-13"/></g></symbol>
+  <symbol id="i-split-v" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M12 4.5v15" stroke-width="1.9"/></g></symbol>
+  <symbol id="i-split-h" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M3.5 12h17" stroke-width="1.9"/></g></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="8.5" y="8.5" width="12" height="12" rx="2"/><path d="M5.5 15.5h-1a1.5 1.5 0 0 1-1.5-1.5V5a1.5 1.5 0 0 1 1.5-1.5H14A1.5 1.5 0 0 1 15.5 5v1"/></g></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10 4.8 7 4.5 4 4.8v13.7c3-.3 6 0 8 1.7 2-1.7 5-2 8-1.7V4.8c-3-.3-6 0-8 1.7z"/><path d="M12 6.5v13.7"/></g></symbol>
+  <symbol id="i-sync" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19.5 12a7.5 7.5 0 0 1-13 5.1M4.5 12a7.5 7.5 0 0 1 13-5.1"/><path d="M17.5 3v4h-4M6.5 21v-4h4"/></g></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.3 3.8 5.2 3.8 8.5S14.5 18.2 12 20.5C9.5 18.2 8.2 15.3 8.2 12S9.5 5.8 12 3.5z"/></g></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5"/></g></symbol>
+  <symbol id="i-zip" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5h8L19 8.5V20.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 20.5v-16A1.5 1.5 0 0 1 6.5 3.5z"/><path d="M9.5 6h2M9.5 9h2M9.5 12h2M9.5 15h2" stroke-width="1.9"/></g></symbol>
+  <symbol id="i-music" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18.5V6l11-2.5V16"/><circle cx="6.5" cy="18.5" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/></g></symbol>
+  <symbol id="i-film" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M8 4.5v15M16 4.5v15M3.5 9h4.5M3.5 15h4.5M16 9h4.5M16 15h4.5" stroke-width="1.4"/></g></symbol>
+  <symbol id="i-filter" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5h16l-6.2 7.2v5.8l-3.6-2v-3.8z"/></g></symbol>
+  <symbol id="i-sort" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 5v14M7 19l-3-3M7 19l3-3"/><path d="M17 19V5M17 5l-3 3M17 5l3 3"/></g></symbol>
+  <symbol id="i-freeze" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 3v18M12 3l-2.5 2.5M12 3l2.5 2.5M12 21l-2.5-2.5M12 21l2.5-2.5M4.2 7.5l15.6 9M4.2 7.5L7.6 7M4.2 7.5l.5 3.4M19.8 16.5l-3.4.5M19.8 16.5l-.5-3.4M4.2 16.5l15.6-9M4.2 16.5l.5-3.4M4.2 16.5l3.4.5M19.8 7.5l-.5 3.4M19.8 7.5L16.4 7"/></g></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 20h16"/><path d="M7 16v-4M12 16V7M17 16v-6"/></g></symbol>
+  <symbol id="i-pivot" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="2.5"/><path d="M3.5 9h17M9 3.5v17" stroke-width="1.4"/><path d="M13 13l5 5M18 13v5h-5"/></g></symbol>
+  <symbol id="i-fx" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 4c-2.5 0-3 1.5-3.3 3.5L8.2 17c-.3 2-1 3-2.7 3"/><path d="M5.5 9.5H12"/><path d="M14.5 12.5l6 6M20.5 12.5l-6 6"/></g></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.8 2H4.2l1.8-2z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></g></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.14-1.4l2.1-1.6-2-3.5-2.5 1a7 7 0 0 0-2.4-1.4L13.7 2.5h-3.4l-.36 2.6a7 7 0 0 0-2.4 1.4l-2.5-1-2 3.5 2.1 1.6a7 7 0 0 0 0 2.8l-2.1 1.6 2 3.5 2.5-1a7 7 0 0 0 2.4 1.4l.36 2.6h3.4l.36-2.6a7 7 0 0 0 2.4-1.4l2.5 1 2-3.5-2.1-1.6A7 7 0 0 0 19 12z"/></g></symbol>
+  <symbol id="i-speed" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4.5 17.5a8.5 8.5 0 1 1 15 0"/><path d="M12 14.5l4-5.5"/><circle cx="12" cy="15.5" r="1.6" fill="currentColor" stroke="none"/></g></symbol>
+  <symbol id="i-subtitles" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="M6.5 12h4M13 12h4.5M6.5 15h2M11 15h6.5"/></g></symbol>
+  <symbol id="i-chapters" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="6.5" height="6" rx="1.5"/><path d="M13 6.5h7.5M13 9.5h5"/><rect x="3.5" y="14" width="6.5" height="6" rx="1.5"/><path d="M13 15.5h7.5M13 18.5h5"/></g></symbol>
+  <symbol id="i-wave" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3.5 12v.01M7 9v6M10.5 6v12M14 8.5v7M17.5 10v4M21 11.5v1"/></g></symbol>
+  <symbol id="i-transcript" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="17" height="16" rx="2.5"/><path d="M7 9h10M7 12.5h10M7 16h5.5"/></g></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3.5l9 5-9 5-9-5 9-5z"/><path d="M4.5 13l7.5 4.2L19.5 13"/><path d="M4.5 16.8L12 21l7.5-4.2"/></g></symbol>
+  <symbol id="i-hyperlink" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M10 14a4 4 0 0 0 5.7 0l3.2-3.2a4 4 0 1 0-5.7-5.7L11.8 6.5"/><path d="M14 10a4 4 0 0 0-5.7 0l-3.2 3.2a4 4 0 1 0 5.7 5.7l1.4-1.4"/></g></symbol>
+  <symbol id="i-timer" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="13" r="7.5"/><path d="M12 9.5V13l2.5 2M9.5 2.5h5M12 2.5v3"/></g></symbol>
+  <symbol id="i-notes" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 5.5A1.5 1.5 0 0 1 6 4h12a1.5 1.5 0 0 1 1.5 1.5v9L15 19H6a1.5 1.5 0 0 1-1.5-1.5v-12z"/><path d="M15 19v-4.5h4.5M8 9h8M8 12.5h5"/></g></symbol>
+  <symbol id="i-presenter" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M12 16v4M8.5 20h7"/><path d="M7 12l3-3 2 2 4-4" /></g></symbol>
+  <symbol id="i-ocr" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/><path d="M8 9.5h8M8 12.5h8M8 15.5h4.5"/></g></symbol>
+  <symbol id="i-form" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="17" height="16" rx="2.5"/><rect x="6.5" y="7.5" width="4" height="3" rx="1"/><path d="M13 9h5M6.5 14h11M6.5 17h7"/></g></symbol>
+  <symbol id="i-slideshow" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M2.5 9v6M21.5 9v6"/><path d="M10.5 9.8v4.4l3.8-2.2-3.8-2.2z" fill="currentColor" stroke="none"/></g></symbol>
+  <symbol id="i-compare" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="M12 3.5v17" stroke-width="1.9"/><path d="M9 10l-2.5 2L9 14M15 10l2.5 2L15 14"/></g></symbol>
+  <symbol id="i-exif" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v.01M12 11v5" stroke-width="1.9"/></g></symbol>
+  <symbol id="i-frame" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M7 3v18M17 3v18M3 7h18M3 17h18"/></g></symbol>
+  <symbol id="i-log" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 5.5h16M4 9.5h10M4 13.5h16M4 17.5h7"/><circle cx="19" cy="9.5" r="1.3" fill="currentColor" stroke="none"/></g></symbol>
+</svg>
+
+  <div class="fitbar"><span class="chip" id="fit-toggle" style="cursor:pointer;height:30px;font-size:12px">Fit width · click for 100%</span></div>
+  <div class="ig-viewport"><div class="ig-canvas" id="ig-canvas">
+    <div class="ig-head">
+      <div class="ig-mark"><svg class="ic"><use href="#i-shield"/></svg></div>
+      <div>
+        <h1>VaultChat — a secure chat<br>that opens everything</h1>
+        <div class="sub">Premium desktop concept: end-to-end encrypted messaging with split-screen conversations, a Universal File Viewer that renders every shared format natively — no external apps, no downloads — and a Reading Mode that turns long messages into pages. Dark, glass, and precise.</div>
+        <div class="meta">
+          <span class="chip active">23 screens · 4 sections</span><span class="chip">Desktop · 1920×1080 each</span>
+          <span class="chip">Dark · Glassmorphism · #7C4DFF</span><span class="chip">For developers &amp; designers</span>
+        </div>
+      </div>
+      
+<div class="ig-legend">
+  <div class="glass lg-card">
+    <h3>Palette</h3>
+    <div class="swatches">
+      <div class="sw"><i style="background:#08070D"></i><b>#08070D</b><span>ground</span></div>
+      <div class="sw"><i style="background:#12111C"></i><b>#12111C</b><span>surface</span></div>
+      <div class="sw"><i style="background:rgba(24,22,40,.55);backdrop-filter:blur(24px)"></i><b>glass 55%</b><span>blur 24</span></div>
+      <div class="sw"><i style="background:#7C4DFF"></i><b>#7C4DFF</b><span>accent</span></div>
+      <div class="sw"><i style="background:linear-gradient(135deg,#9257FF,#6C3DF4)"></i><b>gradient</b><span>primary</span></div>
+      <div class="sw"><i style="background:#EDEBFA"></i><b>#EDEBFA</b><span>text</span></div>
+    </div>
+  </div>
+  <div class="glass lg-card">
+    <h3>Type &amp; geometry</h3>
+    <div class="type-row" style="margin-bottom:12px">
+      <span style="font-size:26px;font-weight:700;letter-spacing:-.5px">Display 26</span>
+      <span style="font-size:15px;font-weight:600">Title 15</span>
+      <span style="font-size:13px;color:var(--txt-2)">Body 13</span>
+      <span style="font-size:11px;color:var(--txt-3)">Caption 11</span>
+      <span style="font-family:var(--font-mono);font-size:12px;color:var(--acc-2)">mono 12</span>
+    </div>
+    <div class="geo-row">
+      <span class="chip">radius 8–20</span><span class="chip">8pt spacing grid</span>
+      <span class="chip">blur 24 · saturate 1.5</span><span class="chip">1px inner light</span>
+      <span class="chip active">accent = state</span>
+    </div>
+  </div>
+  <div class="glass lg-card" style="grid-column:1/-1">
+    <h3>Formats the viewer renders natively — never an external app</h3>
+    <div class="geo-row" style="flex-wrap:wrap;gap:7px">
+      <span class="chip" style="height:23px;font-size:10.5px">DOC</span><span class="chip" style="height:23px;font-size:10.5px">DOCX</span><span class="chip" style="height:23px;font-size:10.5px">XLS</span><span class="chip" style="height:23px;font-size:10.5px">XLSX</span><span class="chip" style="height:23px;font-size:10.5px">PPT</span><span class="chip" style="height:23px;font-size:10.5px">PPTX</span><span class="chip" style="height:23px;font-size:10.5px">PDF</span><span class="chip" style="height:23px;font-size:10.5px">TXT</span><span class="chip" style="height:23px;font-size:10.5px">MD</span><span class="chip" style="height:23px;font-size:10.5px">CSV</span><span class="chip" style="height:23px;font-size:10.5px">JSON</span><span class="chip" style="height:23px;font-size:10.5px">XML</span><span class="chip" style="height:23px;font-size:10.5px">HTML</span><span class="chip" style="height:23px;font-size:10.5px">JPG</span><span class="chip" style="height:23px;font-size:10.5px">PNG</span><span class="chip" style="height:23px;font-size:10.5px">GIF</span><span class="chip" style="height:23px;font-size:10.5px">SVG</span><span class="chip" style="height:23px;font-size:10.5px">WEBP</span><span class="chip" style="height:23px;font-size:10.5px">MP4</span><span class="chip" style="height:23px;font-size:10.5px">MOV</span><span class="chip" style="height:23px;font-size:10.5px">MKV</span><span class="chip" style="height:23px;font-size:10.5px">MP3</span><span class="chip" style="height:23px;font-size:10.5px">WAV</span><span class="chip" style="height:23px;font-size:10.5px">ZIP</span><span class="chip" style="height:23px;font-size:10.5px">RAR</span><span class="chip" style="height:23px;font-size:10.5px">7Z</span><span class="chip" style="height:23px;font-size:10.5px">CODE</span><span class="chip" style="height:23px;font-size:10.5px">LOG</span>
+    </div>
+  </div>
+</div>
+    </div>
+    
+    <div class="ig-section">
+      <div class="sec-head">
+        <div><div class="sec-kicker">Section A</div><h2>Chat, split in two</h2></div>
+        <div class="desc">The core conversation surface — and how one window holds two of them. Long-press any conversation to open it beside (or below) the one you're in, resize with a glass divider, swap panes, and close back to a single chat.</div>
+      </div>
+      <div class="sec-rule"></div>
+      <div style="height:40px"></div>
+      <div class="ig-row"><div class="frame missing">
+        <div class="frame-top"><span class="step-pill">A1</span><span class="frame-title">Open VaultChat</span></div>
+        <div class="shot">screen pending — 01-home.html</div>
+        <div class="frame-cap">The encrypted workspace opens to your conversations. Messages and files are sealed on-device — the welcome card says exactly that.</div>
+      </div><div class="arr">
+<svg width="86" height="60" viewBox="0 0 86 60" fill="none">
+  <defs>
+    <linearGradient id="ag160805" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7C4DFF" stop-opacity=".25"/><stop offset="1" stop-color="#9E7BFF"/>
+    </linearGradient>
+  </defs>
+  <path d="M4 30h64" stroke="#8f68ff" stroke-opacity=".85" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M60 18l16 12-16 12" fill="none" stroke="#9E7BFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="6" cy="30" r="3.4" fill="#7C4DFF"/>
+</svg></div><div class="frame">
+        <div class="frame-top"><span class="step-pill">A2</span><span class="frame-title">Open the first chat</span></div>
+        <div class="shot"><div class="shot-inner"><div class="screen" id="s-chat">
+  <header class="vc-titlebar">
+    <div class="vc-brand"><span class="vc-logo"><svg class="ic"><use href="#i-shield"/></svg></span>VaultChat</div>
+    <div class="vc-search"><svg class="ic sm"><use href="#i-search"/></svg><span class="grow">Search chats, people, and every file…</span><span class="kbd">Ctrl K</span></div>
+    <div class="row gap-4">
+      <span class="icon-btn sm"><svg class="ic sm"><use href="#i-cloud-check"/></svg></span>
+      <span class="icon-btn sm"><svg class="ic sm"><use href="#i-bell"/></svg></span>
+      <span class="avatar sm av-6" style="width:26px;height:26px;font-size:10px;border-radius:9px">SB</span>
+    </div>
+    <div class="vc-win"><span>─</span><span>▢</span><span class="close">✕</span></div>
+  </header>
+
+  <div class="row grow body">
+    <nav class="vc-rail">
+      <div class="rail-btn active"><svg class="ic lg"><use href="#i-chat"/></svg></div><div class="rail-label">Chats</div>
+      <div class="rail-btn"><svg class="ic lg"><use href="#i-book"/></svg></div><div class="rail-label">Shelf</div>
+      <div class="rail-btn"><svg class="ic lg"><use href="#i-search"/></svg></div><div class="rail-label">Search</div>
+      <div class="rail-btn"><svg class="ic lg"><use href="#i-cloud-off"/></svg></div><div class="rail-label">Offline</div>
+      <div class="rail-btn"><svg class="ic lg"><use href="#i-shield"/></svg></div><div class="rail-label">Vault</div>
+      <div class="rail-spacer"></div>
+      <div class="rail-btn"><svg class="ic lg"><use href="#i-settings"/></svg></div>
+    </nav>
+
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <h1 class="grow">Chats</h1>
+        <span class="icon-btn framed"><svg class="ic"><use href="#i-pen"/></svg></span>
+      </div>
+      <div class="sidebar-search"><div class="field"><svg class="ic sm"><use href="#i-search"/></svg><span class="grow">Search conversations</span></div></div>
+      <div class="chip-row">
+        <span class="chip active">All</span><span class="chip">Unread</span><span class="chip">Groups</span><span class="chip">Pinned</span>
+      </div>
+      <div class="convo-list grow">
+        <div class="convo active">
+          <span class="avatar av-1">MC<span class="presence" style="background:var(--ok)"></span></span>
+          <div class="col grow" style="gap:2px"><span class="name">Maya Chen</span><span class="preview">typing…</span></div>
+          <div class="col" style="align-items:flex-end;gap:5px"><span class="when">09:16</span><svg class="ic sm" style="color:var(--acc-2)"><use href="#i-pin"/></svg></div>
+        </div>
+        <div class="convo">
+          <span class="avatar av-5">AL</span>
+          <div class="col grow" style="gap:2px"><span class="name">Atlas Launch</span><span class="preview">Ravi: uploaded Atlas-Financials-FY26.xlsx</span></div>
+          <div class="col" style="align-items:flex-end;gap:5px"><span class="when">09:02</span><span class="badge">3</span></div>
+        </div>
+        <div class="convo">
+          <span class="avatar av-3">DG</span>
+          <div class="col grow" style="gap:2px"><span class="name">Design Guild</span><span class="preview">Marcus: posted the rollout plan — long one</span></div>
+          <div class="col" style="align-items:flex-end;gap:5px"><span class="when">08:47</span></div>
+        </div>
+        <div class="convo">
+          <span class="avatar av-2">EV</span>
+          <div class="col grow" style="gap:2px"><span class="name">Elena Voss</span><span class="preview">You: signed page 14, back to you ✓</span></div>
+          <div class="col" style="align-items:flex-end;gap:5px"><span class="when">08:31</span><svg class="ic sm" style="color:var(--txt-3)"><use href="#i-pin"/></svg></div>
+        </div>
+        <div class="convo">
+          <span class="avatar av-4">R3</span>
+          <div class="col grow" style="gap:2px"><span class="name">Release 1.3</span><span class="preview">deploy.log — 2 warnings, 0 errors</span></div>
+          <div class="col" style="align-items:flex-end;gap:5px"><span class="when">Yesterday</span><span class="badge">12</span></div>
+        </div>
+        <div class="convo">
+          <span class="avatar av-4">RP<span class="presence" style="background:var(--ok)"></span></span>
+          <div class="col grow" style="gap:2px"><span class="name">Ravi Patel</span><span class="preview">pivot table looks right now, check D14</span></div>
+          <div class="col" style="align-items:flex-end;gap:5px"><span class="when">Yesterday</span></div>
+        </div>
+        <div class="convo">
+          <span class="avatar av-3">MW</span>
+          <div class="col grow" style="gap:2px"><span class="name">Marcus Webb</span><span class="preview">voice note · 0:42</span></div>
+          <div class="col" style="align-items:flex-end;gap:5px"><span class="when">Mon</span></div>
+        </div>
+        <div class="convo">
+          <span class="avatar av-2">LN</span>
+          <div class="col grow" style="gap:2px"><span class="name">Legal — NDA Review</span><span class="preview">Elena: expiring link set — 24h</span></div>
+          <div class="col" style="align-items:flex-end;gap:5px"><span class="when">Mon</span></div>
+        </div>
+      </div>
+      <div class="scroll-rail"><div class="thumb" style="top:18%"></div></div>
+    </aside>
+
+    <main class="chat">
+      <div class="chat-head">
+        <span class="avatar av-1">MC<span class="presence" style="background:var(--ok)"></span></span>
+        <div class="who col grow" style="gap:2px">
+          <span class="nm">Maya Chen</span>
+          <span class="st"><span class="dot on"></span>Online</span>
+        </div>
+        <span class="chip ok"><svg class="ic sm"><use href="#i-lock"/></svg>End-to-end encrypted</span>
+        <span class="icon-btn"><svg class="ic"><use href="#i-search"/></svg></span>
+        <span class="icon-btn"><svg class="ic"><use href="#i-phone"/></svg></span>
+        <span class="icon-btn"><svg class="ic"><use href="#i-video"/></svg></span>
+        <span class="icon-btn"><svg class="ic"><use href="#i-more-v"/></svg></span>
+      </div>
+
+      <div class="msgs">
+        <div class="day-wrap"><span class="msg-day">Today</span></div>
+
+        <div class="m-in">
+          <span class="avatar sm av-1">MC</span>
+          <div class="bubble in">Morning! Proposal draft is done — the pricing section still needs your FY26 numbers before I send it up.
+            <div class="b-meta">09:12</div>
+          </div>
+        </div>
+
+        <div class="m-out"><div class="bubble out">Nice timing. I'll drop the financials sheet in here right after standup.
+          <div class="b-meta">09:13 <svg class="ic sm"><use href="#i-check2"/></svg></div>
+        </div></div>
+
+        <div class="m-in">
+          <span class="avatar sm av-1">MC</span>
+          <div class="bubble in" style="max-width:520px">
+            <div class="filecard">
+              <span class="f-ic ft-doc">DOC</span>
+              <div class="col grow" style="gap:2px">
+                <span class="f-name">Atlas-Proposal.docx</span>
+                <span class="f-sub">4.2 MB · 24 pages · opens in VaultChat</span>
+              </div>
+              <span class="btn sm btn-primary att-open">Open</span>
+            </div>
+            <div style="margin-top:9px">Full draft — section 4 is the one to read.</div>
+            <div class="b-meta">09:14</div>
+            <div class="reactions">👍 2 &nbsp;🔥 1</div>
+          </div>
+        </div>
+
+        <div class="m-out" style="margin-top:8px"><div class="bubble out">Opening it now — book mode makes a 24-pager painless. I'll leave comments inline.
+          <div class="b-meta">09:15 <svg class="ic sm"><use href="#i-check2"/></svg></div>
+        </div></div>
+
+        <div class="typing"><i></i><i></i><i></i>Maya is typing</div>
+
+        <div class="scroll-rail"><div class="thumb" style="bottom:4%; top:auto; height:32%"></div></div>
+      </div>
+
+      <div class="composer-wrap">
+        <div class="composer">
+          <span class="icon-btn"><svg class="ic lg"><use href="#i-clip"/></svg></span>
+          <span class="grow placeholder">Message Maya Chen…</span>
+          <span class="icon-btn"><svg class="ic lg"><use href="#i-smile"/></svg></span>
+          <span class="icon-btn"><svg class="ic lg"><use href="#i-mic"/></svg></span>
+          <span class="send-btn"><svg class="ic lg"><use href="#i-send"/></svg></span>
+        </div>
+      </div>
+    </main>
+  </div>
+</div></div></div>
+        <div class="frame-cap">A full conversation: header with presence and E2E badge, message history, attachments, and a composer with voice, emoji and attach.</div>
+      </div><div class="arr">
+<svg width="86" height="60" viewBox="0 0 86 60" fill="none">
+  <defs>
+    <linearGradient id="ag160805" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7C4DFF" stop-opacity=".25"/><stop offset="1" stop-color="#9E7BFF"/>
+    </linearGradient>
+  </defs>
+  <path d="M4 30h64" stroke="#8f68ff" stroke-opacity=".85" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M60 18l16 12-16 12" fill="none" stroke="#9E7BFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="6" cy="30" r="3.4" fill="#7C4DFF"/>
+</svg></div><div class="frame missing">
+        <div class="frame-top"><span class="step-pill">A3</span><span class="frame-title">Long-press another chat</span></div>
+        <div class="shot">screen pending — 03-context-menu.html</div>
+        <div class="frame-cap">Press-and-hold (or right-click) any conversation. The context menu offers Split View — vertically or horizontally.</div>
+      </div><div class="arr">
+<svg width="86" height="60" viewBox="0 0 86 60" fill="none">
+  <defs>
+    <linearGradient id="ag160805" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7C4DFF" stop-opacity=".25"/><stop offset="1" stop-color="#9E7BFF"/>
+    </linearGradient>
+  </defs>
+  <path d="M4 30h64" stroke="#8f68ff" stroke-opacity=".85" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M60 18l16 12-16 12" fill="none" stroke="#9E7BFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="6" cy="30" r="3.4" fill="#7C4DFF"/>
+</svg></div><div class="frame missing">
+        <div class="frame-top"><span class="step-pill">A4</span><span class="frame-title">Two chats, side by side</span></div>
+        <div class="shot">screen pending — 04-split-vertical.html</div>
+        <div class="frame-cap">Each pane keeps its own header, history, search and composer. A grip divider with a swap control sits between them.</div>
+      </div></div><div class="ig-rowgap"><svg class="rowlink" width="3520" height="96" viewBox="0 0 3520 96" fill="none">
+    <path d="M3079 6 C 3079 59.519999999999996, 403 28.799999999999997, 403 84"
+      stroke="#8f68ff" stroke-opacity=".7" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="1 9"/>
+    <path d="M394 72l9 14 9-14" fill="none" stroke="#9E7BFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="3079" cy="7" r="3.4" fill="#7C4DFF"/>
+  </svg></div><div class="ig-row"><div class="frame missing">
+        <div class="frame-top"><span class="step-pill">A5</span><span class="frame-title">Drag the divider</span></div>
+        <div class="shot">screen pending — 05-split-resize.html</div>
+        <div class="frame-cap">Free resize with snap points at 30/70, 50/50 and 70/30. The live ratio follows the cursor.</div>
+      </div><div class="arr">
+<svg width="86" height="60" viewBox="0 0 86 60" fill="none">
+  <defs>
+    <linearGradient id="ag160805" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7C4DFF" stop-opacity=".25"/><stop offset="1" stop-color="#9E7BFF"/>
+    </linearGradient>
+  </defs>
+  <path d="M4 30h64" stroke="#8f68ff" stroke-opacity=".85" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M60 18l16 12-16 12" fill="none" stroke="#9E7BFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="6" cy="30" r="3.4" fill="#7C4DFF"/>
+</svg></div><div class="frame missing">
+        <div class="frame-top"><span class="step-pill">A6</span><span class="frame-title">Stack, swap, or close</span></div>
+        <div class="shot">screen pending — 06-split-horizontal.html</div>
+        <div class="frame-cap">The same split, stacked horizontally. Swap panes in place; closing the split returns to a single full-width chat.</div>
+      </div></div>
+    </div>
+    <div class="ig-section">
+      <div class="sec-head">
+        <div><div class="sec-kicker">Section B</div><h2>The Universal File Viewer</h2></div>
+        <div class="desc">Word, Excel, PowerPoint, PDF, text, Markdown, CSV, JSON, XML, HTML, images (JPG · PNG · GIF · SVG · WEBP), video (MP4 · MOV · MKV), audio (MP3 · WAV), archives (ZIP · RAR · 7Z), code and logs — every file a chat can carry renders natively inside VaultChat. No external application ever opens. Nothing requires a download.</div>
+      </div>
+      <div class="sec-rule"></div>
+      <div style="height:40px"></div>
+      <div class="ig-row"><div class="frame missing">
+        <div class="frame-top"><span class="step-pill">B1</span><span class="frame-title">A file arrives</span></div>
+        <div class="shot">screen pending — 07-files-in-chat.html</div>
+        <div class="frame-cap">Every format shared into a chat opens in place. The side panel indexes all supported types — documents, data, media, code, archives.</div>
+      </div><div class="arr">
+<svg width="86" height="60" viewBox="0 0 86 60" fill="none">
+  <defs>
+    <linearGradient id="ag160805" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7C4DFF" stop-opacity=".25"/><stop offset="1" stop-color="#9E7BFF"/>
+    </linearGradient>
+  </defs>
+  <path d="M4 30h64" stroke="#8f68ff" stroke-opacity=".85" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M60 18l16 12-16 12" fill="none" stroke="#9E7BFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="6" cy="30" r="3.4" fill="#7C4DFF"/>
+</svg></div><div class="frame missing">
+        <div class="frame-top"><span class="step-pill">B2</span><span class="frame-title">Word — book mode</span></div>
+        <div class="shot">screen pending — 08-word.html</div>
+        <div class="frame-cap">Two-page book reading with single-page and continuous-scroll modes, contents, bookmarks, comments, tables, hyperlinks, headers, footers, search, zoom, themes, and reading progress.</div>
+      </div><div class="arr">
+<svg width="86" height="60" viewBox="0 0 86 60" fill="none">
+  <defs>
+    <linearGradient id="ag160805" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7C4DFF" stop-opacity=".25"/><stop offset="1" stop-color="#9E7BFF"/>
+    </linearGradient>
+  </defs>
+  <path d="M4 30h64" stroke="#8f68ff" stroke-opacity=".85" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M60 18l16 12-16 12" fill="none" stroke="#9E7BFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="6" cy="30" r="3.4" fill="#7C4DFF"/>
+</svg></div><div class="frame missing">
+        <div class="frame-top"><span class="step-pill">B3</span><span class="frame-title">Excel — native grid</span></div>
+        <div class="shot">screen pending — 09-excel.html</div>
+        <div class="frame-cap">Sheets, formula inspection, freeze panes, filters, sorting, conditional formatting, cell comments, pivot tables, charts, and hidden-sheet awareness.</div>
+      </div><div class="arr">
+<svg width="86" height="60" viewBox="0 0 86 60" fill="none">
+  <defs>
+    <linearGradient id="ag160805" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7C4DFF" stop-opacity=".25"/><stop offset="1" stop-color="#9E7BFF"/>
+    </linearGradient>
+  </defs>
+  <path d="M4 30h64" stroke="#8f68ff" stroke-opacity=".85" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M60 18l16 12-16 12" fill="none" stroke="#9E7BFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="6" cy="30" r="3.4" fill="#7C4DFF"/>
+</svg></div><div class="frame missing">
+        <div class="frame-top"><span class="step-pill">B4</span><span class="frame-title">PowerPoint — presenter</span></div>
+        <div class="shot">screen pending — 10-powerpoint.html</div>
+        <div class="frame-cap">Presenter mode with next-slide preview, speaker notes and timer; slide sorter, thumbnails, animations, embedded video, fullscreen and zoom.</div>
+      </div></div><div class="ig-rowgap"><svg class="rowlink" width="3520" height="96" viewBox="0 0 3520 96" fill="none">
+    <path d="M3079 6 C 3079 59.519999999999996, 403 28.799999999999997, 403 84"
+      stroke="#8f68ff" stroke-opacity=".7" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="1 9"/>
+    <path d="M394 72l9 14 9-14" fill="none" stroke="#9E7BFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="3079" cy="7" r="3.4" fill="#7C4DFF"/>
+  </svg></div><div class="ig-row"><div class="frame missing">
+        <div class="frame-top"><span class="step-pill">B5</span><span class="frame-title">PDF — annotate & sign</span></div>
+        <div class="shot">screen pending — 11-pdf.html</div>
+        <div class="frame-cap">Highlight, draw, comment, fill forms, sign digitally, bookmark, and search — including OCR text found inside scanned pages.</div>
+      </div><div class="arr">
+<svg width="86" height="60" viewBox="0 0 86 60" fill="none">
+  <defs>
+    <linearGradient id="ag160805" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7C4DFF" stop-opacity=".25"/><stop offset="1" stop-color="#9E7BFF"/>
+    </linearGradient>
+  </defs>
+  <path d="M4 30h64" stroke="#8f68ff" stroke-opacity=".85" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M60 18l16 12-16 12" fill="none" stroke="#9E7BFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="6" cy="30" r="3.4" fill="#7C4DFF"/>
+</svg></div><div class="frame missing">
+        <div class="frame-top"><span class="step-pill">B6</span><span class="frame-title">Images — compare & inspect</span></div>
+        <div class="shot">screen pending — 12-image.html</div>
+        <div class="frame-cap">Zoom, rotate, slideshow and fullscreen, plus a draggable before/after compare and full EXIF metadata. JPG, PNG, GIF, SVG and WEBP.</div>
+      </div><div class="arr">
+<svg width="86" height="60" viewBox="0 0 86 60" fill="none">
+  <defs>
+    <linearGradient id="ag160805" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7C4DFF" stop-opacity=".25"/><stop offset="1" stop-color="#9E7BFF"/>
+    </linearGradient>
+  </defs>
+  <path d="M4 30h64" stroke="#8f68ff" stroke-opacity=".85" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M60 18l16 12-16 12" fill="none" stroke="#9E7BFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="6" cy="30" r="3.4" fill="#7C4DFF"/>
+</svg></div><div class="frame missing">
+        <div class="frame-top"><span class="step-pill">B7</span><span class="frame-title">Video player</span></div>
+        <div class="shot">screen pending — 13-video.html</div>
+        <div class="frame-cap">Chapters, subtitles, playback speed, frame-preview scrubbing, picture-in-picture and landscape fullscreen. MP4, MOV, MKV.</div>
+      </div><div class="arr">
+<svg width="86" height="60" viewBox="0 0 86 60" fill="none">
+  <defs>
+    <linearGradient id="ag160805" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7C4DFF" stop-opacity=".25"/><stop offset="1" stop-color="#9E7BFF"/>
+    </linearGradient>
+  </defs>
+  <path d="M4 30h64" stroke="#8f68ff" stroke-opacity=".85" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M60 18l16 12-16 12" fill="none" stroke="#9E7BFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="6" cy="30" r="3.4" fill="#7C4DFF"/>
+</svg></div><div class="frame missing">
+        <div class="frame-top"><span class="step-pill">B8</span><span class="frame-title">Audio — waveform</span></div>
+        <div class="shot">screen pending — 14-audio.html</div>
+        <div class="frame-cap">A real waveform with bookmarks pinned to moments, playback speed, and a live speaker-labelled transcript. MP3, WAV.</div>
+      </div></div><div class="ig-rowgap"><svg class="rowlink" width="3520" height="96" viewBox="0 0 3520 96" fill="none">
+    <path d="M3079 6 C 3079 59.519999999999996, 403 28.799999999999997, 403 84"
+      stroke="#8f68ff" stroke-opacity=".7" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="1 9"/>
+    <path d="M394 72l9 14 9-14" fill="none" stroke="#9E7BFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="3079" cy="7" r="3.4" fill="#7C4DFF"/>
+  </svg></div><div class="ig-row"><div class="frame missing">
+        <div class="frame-top"><span class="step-pill">B9</span><span class="frame-title">Archives — browse inside</span></div>
+        <div class="shot">screen pending — 15-archive.html</div>
+        <div class="frame-cap">ZIP, RAR and 7Z open as a browsable tree with previews — inspect and pull single files without extracting anything.</div>
+      </div><div class="arr">
+<svg width="86" height="60" viewBox="0 0 86 60" fill="none">
+  <defs>
+    <linearGradient id="ag160805" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7C4DFF" stop-opacity=".25"/><stop offset="1" stop-color="#9E7BFF"/>
+    </linearGradient>
+  </defs>
+  <path d="M4 30h64" stroke="#8f68ff" stroke-opacity=".85" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M60 18l16 12-16 12" fill="none" stroke="#9E7BFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="6" cy="30" r="3.4" fill="#7C4DFF"/>
+</svg></div><div class="frame missing">
+        <div class="frame-top"><span class="step-pill">B10</span><span class="frame-title">Code, data & logs</span></div>
+        <div class="shot">screen pending — 16-code-data.html</div>
+        <div class="frame-cap">Syntax-highlighted code, JSON trees, XML, Markdown, CSV and live-tail logs with severity — read-only copies straight from the vault.</div>
+      </div><div class="arr">
+<svg width="86" height="60" viewBox="0 0 86 60" fill="none">
+  <defs>
+    <linearGradient id="ag160805" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7C4DFF" stop-opacity=".25"/><stop offset="1" stop-color="#9E7BFF"/>
+    </linearGradient>
+  </defs>
+  <path d="M4 30h64" stroke="#8f68ff" stroke-opacity=".85" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M60 18l16 12-16 12" fill="none" stroke="#9E7BFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="6" cy="30" r="3.4" fill="#7C4DFF"/>
+</svg></div><div class="frame missing">
+        <div class="frame-top"><span class="step-pill">B11</span><span class="frame-title">The Bookshelf</span></div>
+        <div class="shot">screen pending — 17-bookshelf.html</div>
+        <div class="frame-cap">Everything ever shared, in one place: Recent, Pinned, Favorites, Shared with me, Downloads, Collections and Folders.</div>
+      </div></div>
+    </div>
+    <div class="ig-section">
+      <div class="sec-head">
+        <div><div class="sec-kicker">Section C</div><h2>Reading Mode</h2></div>
+        <div class="desc">When a message is too large to read comfortably as a bubble, VaultChat offers it as a page instead. Readers get typography, structure and focus — and can flip back to chat view at any time.</div>
+      </div>
+      <div class="sec-rule"></div>
+      <div style="height:40px"></div>
+      <div class="ig-row"><div class="frame missing">
+        <div class="frame-top"><span class="step-pill">C1</span><span class="frame-title">A long message lands</span></div>
+        <div class="shot">screen pending — 18-reader-detect.html</div>
+        <div class="frame-cap">VaultChat detects content too large for comfortable chat viewing and offers Reader — or keep it as chat. Your choice is remembered.</div>
+      </div><div class="arr">
+<svg width="86" height="60" viewBox="0 0 86 60" fill="none">
+  <defs>
+    <linearGradient id="ag160805" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7C4DFF" stop-opacity=".25"/><stop offset="1" stop-color="#9E7BFF"/>
+    </linearGradient>
+  </defs>
+  <path d="M4 30h64" stroke="#8f68ff" stroke-opacity=".85" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M60 18l16 12-16 12" fill="none" stroke="#9E7BFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="6" cy="30" r="3.4" fill="#7C4DFF"/>
+</svg></div><div class="frame missing">
+        <div class="frame-top"><span class="step-pill">C2</span><span class="frame-title">The message as a page</span></div>
+        <div class="shot">screen pending — 19-reader.html</div>
+        <div class="frame-cap">Cover title, reading time and page count, then real typography: headings, lists, tables, images, code, links, highlights — with contents, search, progress, copy, share, print and Export PDF. Switch Chat ⇄ Reader any time.</div>
+      </div><div class="arr">
+<svg width="86" height="60" viewBox="0 0 86 60" fill="none">
+  <defs>
+    <linearGradient id="ag160805" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7C4DFF" stop-opacity=".25"/><stop offset="1" stop-color="#9E7BFF"/>
+    </linearGradient>
+  </defs>
+  <path d="M4 30h64" stroke="#8f68ff" stroke-opacity=".85" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M60 18l16 12-16 12" fill="none" stroke="#9E7BFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="6" cy="30" r="3.4" fill="#7C4DFF"/>
+</svg></div><div class="frame missing">
+        <div class="frame-top"><span class="step-pill">C3</span><span class="frame-title">Make it yours</span></div>
+        <div class="shot">screen pending — 20-reader-settings.html</div>
+        <div class="frame-cap">Dark, Light, Sepia and AMOLED themes; Serif, Sans and Monospace faces; text size, line spacing, margins; continuous scroll or book pages.</div>
+      </div></div>
+    </div>
+    <div class="ig-section">
+      <div class="sec-head">
+        <div><div class="sec-kicker">Section D</div><h2>Everywhere features</h2></div>
+        <div class="desc">Three surfaces that hold the whole product together: one search across every chat and every file format, a first-class offline vault, and the security controls wrapped around each shared file.</div>
+      </div>
+      <div class="sec-rule"></div>
+      <div style="height:40px"></div>
+      <div class="ig-row"><div class="frame missing">
+        <div class="frame-top"><span class="step-pill">D1</span><span class="frame-title">Search everywhere</span></div>
+        <div class="shot">screen pending — 21-search.html</div>
+        <div class="frame-cap">One query sweeps chats, Word, Excel, slides, PDFs (incl. OCR), images, video and audio transcripts, and raw files — on an encrypted, on-device index.</div>
+      </div><div class="arr">
+<svg width="86" height="60" viewBox="0 0 86 60" fill="none">
+  <defs>
+    <linearGradient id="ag160805" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7C4DFF" stop-opacity=".25"/><stop offset="1" stop-color="#9E7BFF"/>
+    </linearGradient>
+  </defs>
+  <path d="M4 30h64" stroke="#8f68ff" stroke-opacity=".85" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M60 18l16 12-16 12" fill="none" stroke="#9E7BFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="6" cy="30" r="3.4" fill="#7C4DFF"/>
+</svg></div><div class="frame missing">
+        <div class="frame-top"><span class="step-pill">D2</span><span class="frame-title">The offline vault</span></div>
+        <div class="shot">screen pending — 22-offline.html</div>
+        <div class="frame-cap">Downloaded, sync-pending and cloud-only states per file; a visible sync queue; edits merge conflict-free on reconnect.</div>
+      </div><div class="arr">
+<svg width="86" height="60" viewBox="0 0 86 60" fill="none">
+  <defs>
+    <linearGradient id="ag160805" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7C4DFF" stop-opacity=".25"/><stop offset="1" stop-color="#9E7BFF"/>
+    </linearGradient>
+  </defs>
+  <path d="M4 30h64" stroke="#8f68ff" stroke-opacity=".85" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M60 18l16 12-16 12" fill="none" stroke="#9E7BFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="6" cy="30" r="3.4" fill="#7C4DFF"/>
+</svg></div><div class="frame missing">
+        <div class="frame-top"><span class="step-pill">D3</span><span class="frame-title">Vault controls</span></div>
+        <div class="shot">screen pending — 23-security.html</div>
+        <div class="frame-cap">End-to-end encryption, a sandboxed viewer, view-only sharing, expiring files, disabled downloads, and per-viewer watermarks.</div>
+      </div></div>
+    </div>
+    
+  <div class="ig-section ig-flow">
+    <div class="sec-head"><div><div class="sec-kicker">How it all connects</div><h2>One window, four surfaces</h2></div>
+      <div class="desc">The navigation model in one picture: chat is the hub; splitting, viewing and reading are one gesture away; the bookshelf, search, offline vault and security wrap around everything.</div></div>
+    <div class="sec-rule"></div>
+    <div class="flow-canvas">
+      <svg class="fl-svg"><path d="M320 330 C 366 330, 366 330, 412 330" stroke="#8f68ff" stroke-opacity=".45" stroke-width="2" fill="none"/>
+            <path d="M400 323l12 7-12 7" stroke="#9E7BFF" stroke-opacity=".8" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M680 330 C 766 330, 766 90, 852 90" stroke="#8f68ff" stroke-opacity=".45" stroke-width="2" fill="none"/>
+            <path d="M840 83l12 7-12 7" stroke="#9E7BFF" stroke-opacity=".8" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M680 330 C 766 330, 766 330, 852 330" stroke="#8f68ff" stroke-opacity=".45" stroke-width="2" fill="none"/>
+            <path d="M840 323l12 7-12 7" stroke="#9E7BFF" stroke-opacity=".8" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M680 330 C 766 330, 766 570, 852 570" stroke="#8f68ff" stroke-opacity=".45" stroke-width="2" fill="none"/>
+            <path d="M840 563l12 7-12 7" stroke="#9E7BFF" stroke-opacity=".8" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M1120 330 C 1336 330, 1336 70, 1552 70" stroke="#8f68ff" stroke-opacity=".45" stroke-width="2" fill="none"/>
+            <path d="M1540 63l12 7-12 7" stroke="#9E7BFF" stroke-opacity=".8" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M1120 330 C 1336 330, 1336 160, 1552 160" stroke="#8f68ff" stroke-opacity=".45" stroke-width="2" fill="none"/>
+            <path d="M1540 153l12 7-12 7" stroke="#9E7BFF" stroke-opacity=".8" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M1120 330 C 1336 330, 1336 250, 1552 250" stroke="#8f68ff" stroke-opacity=".45" stroke-width="2" fill="none"/>
+            <path d="M1540 243l12 7-12 7" stroke="#9E7BFF" stroke-opacity=".8" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M1120 330 C 1336 330, 1336 340, 1552 340" stroke="#8f68ff" stroke-opacity=".45" stroke-width="2" fill="none"/>
+            <path d="M1540 333l12 7-12 7" stroke="#9E7BFF" stroke-opacity=".8" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M1120 330 C 1336 330, 1336 430, 1552 430" stroke="#8f68ff" stroke-opacity=".45" stroke-width="2" fill="none"/>
+            <path d="M1540 423l12 7-12 7" stroke="#9E7BFF" stroke-opacity=".8" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M1120 330 C 1456 330, 1456 115, 1792 115" stroke="#8f68ff" stroke-opacity=".45" stroke-width="2" fill="none"/>
+            <path d="M1780 108l12 7-12 7" stroke="#9E7BFF" stroke-opacity=".8" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M1120 330 C 1456 330, 1456 205, 1792 205" stroke="#8f68ff" stroke-opacity=".45" stroke-width="2" fill="none"/>
+            <path d="M1780 198l12 7-12 7" stroke="#9E7BFF" stroke-opacity=".8" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M1120 330 C 1456 330, 1456 295, 1792 295" stroke="#8f68ff" stroke-opacity=".45" stroke-width="2" fill="none"/>
+            <path d="M1780 288l12 7-12 7" stroke="#9E7BFF" stroke-opacity=".8" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M1120 330 C 1456 330, 1456 385, 1792 385" stroke="#8f68ff" stroke-opacity=".45" stroke-width="2" fill="none"/>
+            <path d="M1780 378l12 7-12 7" stroke="#9E7BFF" stroke-opacity=".8" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M1820 70 C 2116 70, 2116 250, 2412 250" stroke="#8f68ff" stroke-opacity=".45" stroke-width="2" fill="none"/>
+            <path d="M2400 243l12 7-12 7" stroke="#9E7BFF" stroke-opacity=".8" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M2060 115 C 2236 115, 2236 250, 2412 250" stroke="#8f68ff" stroke-opacity=".45" stroke-width="2" fill="none"/>
+            <path d="M2400 243l12 7-12 7" stroke="#9E7BFF" stroke-opacity=".8" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      
+    <div class="fl-node " style="left:60px; top:300px">
+      <svg class="ic"><use href="#i-shield"/></svg>
+      <div>Open VaultChat<small>A1</small></div>
+    </div>
+    <div class="fl-node hub" style="left:420px; top:300px">
+      <svg class="ic"><use href="#i-chat"/></svg>
+      <div>Chat<small>A2 · the center of everything</small></div>
+    </div>
+    <div class="fl-node " style="left:860px; top:60px">
+      <svg class="ic"><use href="#i-split-v"/></svg>
+      <div>Split View<small>A3–A6 · vertical · horizontal · resize · swap</small></div>
+    </div>
+    <div class="fl-node hub" style="left:860px; top:300px">
+      <svg class="ic"><use href="#i-file"/></svg>
+      <div>Universal File Viewer<small>B1–B10 · every format, in place</small></div>
+    </div>
+    <div class="fl-node " style="left:860px; top:540px">
+      <svg class="ic"><use href="#i-book"/></svg>
+      <div>Reading Mode<small>C1–C3 · long messages become pages</small></div>
+    </div>
+    <div class="fl-node dim" style="left:1560px; top:40px">
+      <svg class="ic"><use href="#i-doc-lines"/></svg>
+      <div>Word<small>B2</small></div>
+    </div>
+    <div class="fl-node dim" style="left:1560px; top:130px">
+      <svg class="ic"><use href="#i-grid"/></svg>
+      <div>Excel<small>B3</small></div>
+    </div>
+    <div class="fl-node dim" style="left:1560px; top:220px">
+      <svg class="ic"><use href="#i-presenter"/></svg>
+      <div>PowerPoint<small>B4</small></div>
+    </div>
+    <div class="fl-node dim" style="left:1560px; top:310px">
+      <svg class="ic"><use href="#i-sign"/></svg>
+      <div>PDF<small>B5</small></div>
+    </div>
+    <div class="fl-node dim" style="left:1560px; top:400px">
+      <svg class="ic"><use href="#i-image"/></svg>
+      <div>Images<small>B6</small></div>
+    </div>
+    <div class="fl-node dim" style="left:1800px; top:85px">
+      <svg class="ic"><use href="#i-film"/></svg>
+      <div>Video<small>B7</small></div>
+    </div>
+    <div class="fl-node dim" style="left:1800px; top:175px">
+      <svg class="ic"><use href="#i-wave"/></svg>
+      <div>Audio<small>B8</small></div>
+    </div>
+    <div class="fl-node dim" style="left:1800px; top:265px">
+      <svg class="ic"><use href="#i-zip"/></svg>
+      <div>Archives<small>B9</small></div>
+    </div>
+    <div class="fl-node dim" style="left:1800px; top:355px">
+      <svg class="ic"><use href="#i-code"/></svg>
+      <div>Code & logs<small>B10</small></div>
+    </div>
+    <div class="fl-node " style="left:2420px; top:220px">
+      <svg class="ic"><use href="#i-book"/></svg>
+      <div>Bookshelf<small>B11 · everything, organized</small></div>
+    </div>
+    <div class="fl-node " style="left:2420px; top:480px">
+      <svg class="ic"><use href="#i-search"/></svg>
+      <div>Search everywhere<small>D1</small></div>
+    </div>
+    <div class="fl-node " style="left:2830px; top:480px">
+      <svg class="ic"><use href="#i-cloud-off"/></svg>
+      <div>Offline vault<small>D2</small></div>
+    </div>
+    <div class="fl-node " style="left:3200px; top:480px">
+      <svg class="ic"><use href="#i-lock"/></svg>
+      <div>Security<small>D3</small></div>
+    </div>
+    </div>
+  </div>
+    <div class="ig-foot">
+      <span><b style="color:var(--txt-2)">VaultChat design package</b> · storyboard + 23 implementation screens · docs/design/screens/</span>
+      <div class="chips"><span class="chip">No whiteboard</span><span class="chip">No canvas</span><span class="chip">No AI meeting</span><span class="chip">No analytics</span><span class="chip ok">Chat · Files · Reader only</span></div>
+    </div>
+  </div></div>
+  </div>
+  <script>
+    (function () {
+      const c = document.getElementById("ig-canvas"), t = document.getElementById("fit-toggle");
+      let fit = true;
+      function apply() {
+        const vw = document.querySelector(".ig-viewport").clientWidth;
+        const k = fit ? Math.min(1, vw / 3840) : 1;
+        c.style.transform = "scale(" + k + ")";
+        c.parentElement.style.height = c.scrollHeight * k + "px";
+        t.textContent = fit ? "Fit width · click for 100%" : "100% · click to fit width";
+      }
+      t.addEventListener("click", () => { fit = !fit; apply(); });
+      addEventListener("resize", apply); apply();
+    })();
+  </script></body>
+</html>
