@@ -32,6 +32,9 @@ const (
 	PermViewHistory      Permission = "view_history"
 	PermStartNavigation  Permission = "start_navigation"
 	PermSendAnnouncement Permission = "send_announcements"
+	PermCreateTasks      Permission = "create_tasks"
+	PermManageCalendar   Permission = "manage_calendar"
+	PermManageAlbum      Permission = "manage_album"
 )
 
 // All is the complete permission set, in a stable order for display and tests.
@@ -43,14 +46,20 @@ var All = []Permission{
 	PermViewHistory,
 	PermStartNavigation,
 	PermSendAnnouncement,
+	PermCreateTasks,
+	PermManageCalendar,
+	PermManageAlbum,
 }
 
 // Roles, ordered least to most privileged.
 const (
 	RoleGuest  = "guest"
 	RoleMember = "member"
-	RoleAdmin  = "admin"
-	RoleOwner  = "owner"
+	// Moderator sits between member and admin: manages people and content, but
+	// not the group itself and not other people's roles.
+	RoleModerator = "moderator"
+	RoleAdmin     = "admin"
+	RoleOwner     = "owner"
 )
 
 // Layers carries the three JSONB permission maps as loaded from the database.
@@ -99,7 +108,7 @@ func IsValidPermission(name string) bool {
 // IsValidRole reports whether name is a role this build knows.
 func IsValidRole(name string) bool {
 	switch name {
-	case RoleGuest, RoleMember, RoleAdmin, RoleOwner:
+	case RoleGuest, RoleMember, RoleModerator, RoleAdmin, RoleOwner:
 		return true
 	}
 	return false
@@ -167,10 +176,38 @@ func CanManageRole(actorRole, targetRole, newRole string) bool {
 	case RoleOwner:
 		return true
 	case RoleAdmin:
-		// An admin may manage members and guests, but not other admins —
+		// An admin may manage everyone below admin, but not another admin —
 		// otherwise two admins can demote each other in a loop.
+		return targetRole == RoleModerator || targetRole == RoleMember || targetRole == RoleGuest
+	case RoleModerator:
+		// A moderator manages the ranks below it and cannot promote anyone into
+		// or above its own rank — a moderator who could mint admins would make
+		// the distinction meaningless.
+		if newRole == RoleAdmin || newRole == RoleModerator {
+			return false
+		}
 		return targetRole == RoleMember || targetRole == RoleGuest
 	}
+	return false
+}
+
+// CanTransferOwnership reports whether actor may hand the group to target.
+//
+// Deliberately NOT part of CanManageRole. Ownership transfer is a two-party
+// operation — the current owner offers, the new owner accepts — and modelling
+// it as a role edit would let one side complete it alone. CanManageRole
+// therefore refuses anything touching owner, and this is the only door.
+func CanTransferOwnership(actorRole, targetRole string) bool {
+	if actorRole != RoleOwner {
+		return false
+	}
+	// The target must be an existing member, and cannot already be the owner.
+	switch targetRole {
+	case RoleAdmin, RoleModerator, RoleMember:
+		return true
+	}
+	// Guests are excluded: handing a group to someone who cannot even see it
+	// would orphan it.
 	return false
 }
 
@@ -190,7 +227,7 @@ func SeatsRemaining(activeMembers, maxMembers int) int {
 
 // SortedRoles returns known roles most privileged first, for display.
 func SortedRoles() []string {
-	r := []string{RoleOwner, RoleAdmin, RoleMember, RoleGuest}
+	r := []string{RoleOwner, RoleAdmin, RoleModerator, RoleMember, RoleGuest}
 	sort.SliceStable(r, func(i, j int) bool { return rank(r[i]) > rank(r[j]) })
 	return r
 }
@@ -198,8 +235,10 @@ func SortedRoles() []string {
 func rank(role string) int {
 	switch role {
 	case RoleOwner:
-		return 3
+		return 4
 	case RoleAdmin:
+		return 3
+	case RoleModerator:
 		return 2
 	case RoleMember:
 		return 1

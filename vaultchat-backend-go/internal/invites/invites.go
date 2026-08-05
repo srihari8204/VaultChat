@@ -35,12 +35,60 @@ import (
 type Status string
 
 const (
-	StatusPending  Status = "pending"
+	StatusPending Status = "pending"
+	// The invitee consented. NOT yet a member: in strict mode an owner still
+	// has to approve. Keeping this distinct from StatusJoined is what makes the
+	// three-step flow expressible at all.
 	StatusAccepted Status = "accepted"
+	StatusJoined   Status = "joined"
 	StatusRejected Status = "rejected"
-	StatusExpired  Status = "expired"
-	StatusRevoked  Status = "revoked"
+	// The INVITER withdrew, as opposed to StatusRejected where the INVITEE
+	// declined. Merging them would lose who ended it.
+	StatusCancelled Status = "cancelled"
+	StatusExpired   Status = "expired"
+	StatusRevoked   Status = "revoked"
 )
+
+// ApprovalMode decides how many gates stand between an invitation and
+// membership. Mirrors chats.approval_mode (migration 069).
+type ApprovalMode string
+
+const (
+	// ModeStrict is the default: both sides must say yes.
+	ModeStrict        ApprovalMode = "strict"
+	ModeUserApproval  ApprovalMode = "user_approval"
+	ModeAdminApproval ApprovalMode = "admin_approval"
+)
+
+func ValidMode(m string) bool {
+	switch ApprovalMode(m) {
+	case ModeStrict, ModeUserApproval, ModeAdminApproval:
+		return true
+	}
+	return false
+}
+
+// NormalizeMode falls back to the STRICTEST mode for anything unrecognised.
+// A corrupt or future value must not silently downgrade a group to
+// auto-joining, which is the one outcome nobody could undo.
+func NormalizeMode(m string) ApprovalMode {
+	if ValidMode(m) {
+		return ApprovalMode(m)
+	}
+	return ModeStrict
+}
+
+// NextAfterAccept is where an invitation lands once the invitee consents.
+//
+// Under user_approval that is membership immediately; under strict it waits for
+// an owner. admin_approval never reaches here by this path — its invitations
+// start as a request from the user, not an invite from the owner.
+func NextAfterAccept(mode ApprovalMode) Status {
+	if mode == ModeUserApproval {
+		return StatusJoined
+	}
+	return StatusAccepted
+}
 
 // InviteeKind is how the invitee was addressed.
 type InviteeKind string
@@ -180,9 +228,13 @@ func Effective(stored Status, expiresAt time.Time, now time.Time) Status {
 }
 
 // IsTerminal reports whether a status can never change again.
+//
+// StatusAccepted is deliberately NOT terminal any more: it is now the waiting
+// room before an owner approves. StatusJoined is, because membership is granted
+// and any later change belongs to the member list, not the invitation.
 func IsTerminal(s Status) bool {
 	switch s {
-	case StatusAccepted, StatusRejected, StatusRevoked:
+	case StatusJoined, StatusRejected, StatusRevoked, StatusCancelled:
 		return true
 	}
 	return false
@@ -203,13 +255,36 @@ func CanTransition(from, to Status) bool {
 	}
 	switch from {
 	case StatusPending:
-		return to == StatusAccepted || to == StatusRejected ||
+		// user_approval jumps straight to joined; strict stops at accepted.
+		return to == StatusAccepted || to == StatusJoined ||
+			to == StatusRejected || to == StatusCancelled ||
 			to == StatusRevoked || to == StatusExpired
+	case StatusAccepted:
+		// The owner's decision, or the invitee changing their mind before it.
+		return to == StatusJoined || to == StatusRejected ||
+			to == StatusCancelled || to == StatusExpired
 	case StatusExpired:
-		return to == StatusRevoked || to == StatusPending
+		return to == StatusRevoked || to == StatusCancelled || to == StatusPending
 	}
 	return false
 }
+
+// CanAccept reports whether the INVITEE may consent right now.
+func CanAccept(s Status) bool { return s == StatusPending }
+
+// CanApprove reports whether an owner/admin may grant membership.
+//
+// Only from Accepted: approving a Pending invitation would grant membership to
+// someone who has not yet agreed to join, which is the one thing the consent
+// step exists to prevent.
+func CanApprove(s Status) bool { return s == StatusAccepted }
+
+// CanCancel reports whether the INVITER may withdraw.
+func CanCancel(s Status) bool { return s == StatusPending || s == StatusAccepted || s == StatusExpired }
+
+// CanDecline reports whether the INVITEE may say no. Allowed after accepting
+// too — someone may change their mind while waiting on an owner.
+func CanDecline(s Status) bool { return s == StatusPending || s == StatusAccepted }
 
 // CanResend reports whether an invitation may be reissued with a fresh token.
 // Resending an accepted invitation is meaningless; resending a revoked one
@@ -217,6 +292,10 @@ func CanTransition(from, to Status) bool {
 func CanResend(s Status) bool {
 	return s == StatusPending || s == StatusExpired
 }
+
+// IsLive reports whether an invitation still occupies its invitee's slot, which
+// is what the duplicate guard in migration 069 keys on.
+func IsLive(s Status) bool { return s == StatusPending || s == StatusAccepted }
 
 // CanRevoke reports whether an invitation may still be withdrawn.
 func CanRevoke(s Status) bool {
@@ -226,7 +305,8 @@ func CanRevoke(s Status) bool {
 // ValidStatus reports whether a stored string is a status this build knows.
 func ValidStatus(s string) bool {
 	switch Status(s) {
-	case StatusPending, StatusAccepted, StatusRejected, StatusExpired, StatusRevoked:
+	case StatusPending, StatusAccepted, StatusJoined,
+		StatusRejected, StatusCancelled, StatusExpired, StatusRevoked:
 		return true
 	}
 	return false

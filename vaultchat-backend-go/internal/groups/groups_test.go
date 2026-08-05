@@ -155,8 +155,130 @@ func TestSeatsRemaining(t *testing.T) {
 }
 
 func TestRolesSortedMostPrivilegedFirst(t *testing.T) {
-	want := []string{RoleOwner, RoleAdmin, RoleMember, RoleGuest}
+	// Moderator was inserted between admin and member in membership v2.
+	want := []string{RoleOwner, RoleAdmin, RoleModerator, RoleMember, RoleGuest}
 	if got := SortedRoles(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("SortedRoles() = %v, want %v", got, want)
+	}
+}
+
+// ── membership v2: moderator and ownership transfer ──
+
+func TestModeratorSitsBetweenMemberAndAdmin(t *testing.T) {
+	if !IsValidRole(RoleModerator) {
+		t.Fatal("moderator must be a known role")
+	}
+	// Rank, not just membership of the set: a moderator outranks a member and
+	// is outranked by an admin. TestRolesSortedMostPrivilegedFirst pins the
+	// exact order; this pins the relationships that order is meant to encode.
+	if !CanManageRole(RoleAdmin, RoleModerator, RoleMember) {
+		t.Error("an admin must be able to demote a moderator")
+	}
+	if CanManageRole(RoleModerator, RoleAdmin, RoleMember) {
+		t.Error("a moderator must not be able to demote an admin")
+	}
+}
+
+func TestModeratorCannotMintPeers(t *testing.T) {
+	// A moderator who could promote someone to moderator or admin would make
+	// the rank meaningless — anyone could grant themselves company.
+	if CanManageRole(RoleModerator, RoleMember, RoleModerator) {
+		t.Fatal("a moderator must not promote into its own rank")
+	}
+	if CanManageRole(RoleModerator, RoleMember, RoleAdmin) {
+		t.Fatal("a moderator must not mint admins")
+	}
+	// …but may manage the ranks below it.
+	if !CanManageRole(RoleModerator, RoleMember, RoleGuest) {
+		t.Fatal("a moderator should manage members")
+	}
+	if !CanManageRole(RoleModerator, RoleGuest, RoleMember) {
+		t.Fatal("a moderator should promote a guest to member")
+	}
+	// …and not touch its peers or superiors.
+	if CanManageRole(RoleModerator, RoleModerator, RoleMember) {
+		t.Fatal("moderators must not demote each other")
+	}
+	if CanManageRole(RoleModerator, RoleAdmin, RoleMember) {
+		t.Fatal("a moderator must not demote an admin")
+	}
+}
+
+func TestAdminManagesModerators(t *testing.T) {
+	if !CanManageRole(RoleAdmin, RoleModerator, RoleMember) {
+		t.Fatal("an admin should be able to demote a moderator")
+	}
+	if !CanManageRole(RoleAdmin, RoleMember, RoleModerator) {
+		t.Fatal("an admin should be able to promote a member to moderator")
+	}
+	if CanManageRole(RoleAdmin, RoleAdmin, RoleMember) {
+		t.Fatal("admins still must not demote each other")
+	}
+}
+
+func TestOwnershipTransferIsItsOwnDoor(t *testing.T) {
+	// Modelling transfer as a role edit would let one side complete it alone.
+	// CanManageRole must keep refusing anything touching owner...
+	if CanManageRole(RoleOwner, RoleAdmin, RoleOwner) {
+		t.Fatal("promotion to owner must not be a role edit")
+	}
+	if CanManageRole(RoleOwner, RoleOwner, RoleAdmin) {
+		t.Fatal("demoting the owner must not be a role edit")
+	}
+	// ...and the dedicated door must be owner-only.
+	if !CanTransferOwnership(RoleOwner, RoleAdmin) {
+		t.Fatal("an owner should be able to offer ownership to an admin")
+	}
+	if !CanTransferOwnership(RoleOwner, RoleMember) {
+		t.Fatal("an owner should be able to offer ownership to a member")
+	}
+	for _, actor := range []string{RoleAdmin, RoleModerator, RoleMember, RoleGuest, "bogus"} {
+		if CanTransferOwnership(actor, RoleMember) {
+			t.Errorf("%s must not be able to transfer ownership", actor)
+		}
+	}
+	// A guest cannot receive it: handing the group to someone who cannot even
+	// see it would orphan it.
+	if CanTransferOwnership(RoleOwner, RoleGuest) {
+		t.Fatal("a guest must not receive ownership")
+	}
+	if CanTransferOwnership(RoleOwner, RoleOwner) {
+		t.Fatal("transferring to the existing owner is a no-op, not a transfer")
+	}
+}
+
+func TestNewPermissionsAreKnown(t *testing.T) {
+	for _, p := range []string{"create_tasks", "manage_calendar", "manage_album"} {
+		if !IsValidPermission(p) {
+			t.Errorf("%s should be a known permission", p)
+		}
+	}
+	if len(All) != 10 {
+		t.Fatalf("expected 10 permissions, got %d", len(All))
+	}
+	// The owner still holds every one of them, including the new ones.
+	owner := Resolve(RoleOwner, Layers{})
+	for _, p := range All {
+		if !owner.Has(p) {
+			t.Errorf("owner missing %s", p)
+		}
+	}
+}
+
+func TestModeratorResolvesFromItsOwnPreset(t *testing.T) {
+	l := Layers{TypeDefault: map[string][]string{
+		"admin":     {"edit_settings", "create_tasks"},
+		"moderator": {"create_tasks", "manage_album"},
+		"member":    {"view_history"},
+	}}
+	got := Resolve(RoleModerator, l).List()
+	want := []string{"create_tasks", "manage_album"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("moderator perms = %v, want %v", got, want)
+	}
+	// A type with no moderator preset denies rather than inheriting admin's.
+	bare := Resolve(RoleModerator, Layers{TypeDefault: map[string][]string{"admin": {"edit_settings"}}})
+	if len(bare.List()) != 0 {
+		t.Fatalf("an absent moderator preset must deny, got %v", bare.List())
 	}
 }
