@@ -266,6 +266,17 @@ function flowMap() {
     svg += `<path d="M${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}" stroke="#8f68ff" stroke-opacity=".45" stroke-width="2" fill="none"/>
             <path d="M${x2 - 12} ${y2 - 7}l12 7-12 7" stroke="#9E7BFF" stroke-opacity=".8" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`;
   }
+  // The three "wrap around everything" surfaces: a chain hanging off the Bookshelf.
+  const chain = [
+    { d: "M2520 282 L2520 462", head: "M2511 452l9 14 9-14" },      // shelf ↓ search
+    { d: "M2660 510 L2812 510", head: "M2802 501l12 9-12 9" },      // search → offline
+    { d: "M3030 510 L3182 510", head: "M3172 501l12 9-12 9" },      // offline → security
+  ];
+  for (const c of chain) {
+    svg += `<path d="${c.d}" stroke="#8f68ff" stroke-opacity=".45" stroke-width="2" fill="none" stroke-dasharray="1 8" stroke-linecap="round"/>
+            <path d="${c.head}" stroke="#9E7BFF" stroke-opacity=".8" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`;
+  }
+
   const nodesHtml = nodes.map(n => `
     <div class="fl-node ${n.cls}" style="left:${n.x}px; top:${n.y}px">
       <svg class="ic"><use href="#i-${n.ic}"/></svg>
@@ -374,7 +385,7 @@ function buildInfographic(frags, bodyOnly) {
   </script>`;
 
   if (bodyOnly) {
-    return `<title>VaultChat — Premium UI Storyboard</title>\n<style>${tokens}</style>\n<style>${infographicCss}</style>\n<style>html,body{background:#050409}</style>\n${canvas}`;
+    return `<style>${tokens}</style>\n<style>${infographicCss}</style>\n<style>html,body{background:#050409}</style>\n${canvas}`;
   }
   return `<!doctype html>
 <html lang="en">
