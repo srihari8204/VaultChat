@@ -98,9 +98,12 @@ export class LanDriver implements TransportDriver {
       const upto = Math.min(done, wanted.length);
       for (; credited < upto; credited++) report.verified(wanted[credited]);
     };
-    this.offs.push(this.opts.native.onEvent('vbLanProgress', (d) => {
+    // Released in the finally below, NOT in dispose(): a driver is reused across
+    // rounds, so a per-run listener that only went away at teardown would
+    // accumulate one subscription per round.
+    const offProgress = this.opts.native.onEvent('vbLanProgress', (d) => {
       if (d?.transferId === session.transferId && Number.isInteger(d?.done)) creditTo(d.done);
-    }));
+    });
 
     try {
       const moved = session.role === 'sender'
@@ -115,6 +118,8 @@ export class LanDriver implements TransportDriver {
         : { kind: 'failed', reason: `lan moved ${moved}/${wanted.length}` };
     } catch (e: any) {
       return { kind: 'failed', reason: e?.message ?? 'lan error' };
+    } finally {
+      try { offProgress(); } catch { /* already removed */ }
     }
   }
 }
@@ -220,17 +225,25 @@ function _selfCheck(): void {
     A((await new LanDriver({ native: new FakeNative(), token: 't', chunkBytes: CHUNK }).available(mkSession('sender'))) === false,
       'sender without a source path is unavailable');
 
-    // 6. dispose releases every native listener and is idempotent
+    // 6. the per-run listener is released by run() ITSELF, not by dispose().
+    //    A driver is reused across rounds, so a subscription that only went away
+    //    at teardown would accumulate one handler per round.
     const leakNat = new FakeNative({ emitEvery: 1 });
     const leaky = new LanDriver({ native: leakNat, token: 't', chunkBytes: CHUNK, srcPath: '/s' });
     const ls = mkSession('sender');
+    A(leakNat.listenerCount() === 0, 'no listener before the first run');
     await leaky.run(ls, [{ start: 0, count: 2 }], { verified: (c) => ls.markVerified(c), staged: () => {} },
       new AbortController().signal);
-    A(leakNat.listenerCount() === 1, 'a listener was registered');
+    A(leakNat.listenerCount() === 0, 'run() released its own listener');
+    // …and repeated rounds on the SAME driver stay flat
+    for (let i = 0; i < 10; i++) {
+      await leaky.run(ls, [{ start: 0, count: 1 }], { verified: () => {}, staged: () => {} }, new AbortController().signal);
+    }
+    A(leakNat.listenerCount() === 0, '10 rounds on one driver leak no listeners');
     leaky.dispose(); leaky.dispose();
-    A(leakNat.listenerCount() === 0, 'dispose removes every native listener');
+    A(leakNat.listenerCount() === 0, 'dispose is idempotent and leaves nothing');
 
-    // 7. repeated run/dispose cycles do not accumulate listeners (leak guard)
+    // 7. repeated construct/run/dispose cycles do not accumulate listeners either
     const cycleNat = new FakeNative({ emitEvery: 1 });
     for (let i = 0; i < 20; i++) {
       const cd = new LanDriver({ native: cycleNat, token: 't', chunkBytes: CHUNK, srcPath: '/s' });

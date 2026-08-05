@@ -88,37 +88,113 @@ async function main() {
       const mgr = mkMgr();
       const p2p = new AuditDriver('p2p', 20, { verifyLimit: 3, fail: true });
       const relay = new AuditDriver('relay', 30);
-      mgr.registerDriver(relay);
-      mgr.registerDriver(p2p);
-      const s = mkSession(10, `Taudit${String(i).padStart(10, '0')}`);
+      const id = `Taudit${String(i).padStart(10, '0')}`;
+      // Scoped, like a real transfer: these drivers hold this transfer's paths
+      // and channel, and the manager owns their teardown.
+      mgr.setDriversFor(id, [p2p, relay]);
+      const s = mkSession(10, id);
       await mgr.start(s);
       disposals.push(p2p.disposals + relay.disposals);
       if (mgr.activeCount() !== 0 || mgr.queuedCount() !== 0) leftRunning.push(i);
-      if (p2p.disposals !== p2p.runs || relay.disposals !== relay.runs) undisposed.push(i);
+      // Disposed once per SESSION now, not once per run.
+      if (p2p.disposals !== 1 || relay.disposals !== 1) undisposed.push(i);
       if (!s.isComplete()) undisposed.push(-i);
     }
     check(disposals.length === CYCLES, `${CYCLES} fallback cycles ran`);
     check(leftRunning.length === 0, `no cycle left a session running or queued (bad: ${leftRunning.join(',') || 'none'})`);
     check(undisposed.length === 0, `every cycle disposed every driver and completed (bad: ${undisposed.join(',') || 'none'})`);
-    check(disposals.every((d) => d > 0), 'every cycle disposed its drivers');
+    check(disposals.every((d) => d === 2), 'every cycle disposed both of its drivers exactly once');
     check(AuditDriver.peakLive <= 1, `at most ONE driver ran at a time across ${CYCLES} cycles (peak ${AuditDriver.peakLive})`);
   }
 
-  console.log('Driver disposal on every exit path:');
+  console.log('Driver lifecycle — disposed when the SESSION ends, not per run:');
   {
-    for (const cfg of [{}, { fail: true }, { verifyLimit: 0, fail: true }]) {
-      const mgr = mkMgr();
-      const d = new AuditDriver('relay', 30, cfg);
-      mgr.registerDriver(d);
-      await mgr.start(mkSession(4, `Tdisp${JSON.stringify(cfg).length}xxxxxxxx`));
-      check(d.disposals === d.runs, `disposed once per run for ${JSON.stringify(cfg)} (${d.disposals}/${d.runs})`);
+    // REGRESSION: the manager used to dispose after every run. Real drivers set
+    // disposed=true and then report available()===false forever, so any transfer
+    // needing more than one round stalled at whatever the first round moved.
+    // The audit fake could not catch it because its dispose() only counted, so
+    // this driver models the real semantics.
+    class RealisticDriver implements TransportDriver {
+      readonly channel = 'relay' as const;
+      private disposed = false;
+      runs = 0; disposals = 0; liveListeners = 0;
+      constructor(readonly id: string, readonly cost: number, private perRun: number) {}
+      unitChunks() { return this.perRun; }
+      async available() { return !this.disposed; }
+      async run(_s: TransferSession, work: ChunkRun[], report: DriverReport): Promise<DriverOutcome> {
+        this.runs++;
+        this.liveListeners++;                    // a per-run subscription…
+        try {
+          let n = 0;
+          for (const r of work) for (let i = r.start; i < r.start + r.count; i++) {
+            if (n++ >= this.perRun) break;
+            report.verified(i);
+          }
+          return { kind: 'drained' };
+        } finally { this.liveListeners--; }      // …released inside run(), per the contract
+      }
+      dispose() { this.disposed = true; this.disposals++; }
     }
-    // an unavailable driver is never run, so never disposed by the loop
+
     const mgr = mkMgr();
-    const idle = new AuditDriver('relay', 30, { unavailable: true });
-    mgr.registerDriver(idle);
-    await mgr.start(mkSession(4, 'Tunavailable00001'));
-    check(idle.runs === 0 && idle.disposals === 0, 'an unavailable driver is neither run nor disposed');
+    const d = new RealisticDriver('relay', 30, 2);        // only 2 chunks per round
+    mgr.setDriversFor('Tmultiround000001', [d]);
+    const s = mkSession(10, 'Tmultiround000001');
+    const res = await mgr.start(s);
+    check(res.state === 'complete', `a multi-round transfer completes (got ${res.state})`);
+    check(s.isComplete() && s.peerHave.popcount() === 10, `all 10 chunks moved (got ${s.peerHave.popcount()})`);
+    check(d.runs === 5, `the driver was reused across rounds (${d.runs} runs)`);
+    check(d.disposals === 1, `disposed exactly once, at session end (${d.disposals})`);
+    check(d.liveListeners === 0, 'no per-run subscription outlived its run');
+
+    // scoped drivers are disposed on a terminal session…
+    const mgr2 = mkMgr();
+    const t = new RealisticDriver('relay', 30, 99);
+    mgr2.setDriversFor('Tterm00000000001', [t]);
+    await mgr2.start(mkSession(3, 'Tterm00000000001'));
+    check(t.disposals === 1, 'terminal session disposes its transports');
+
+    // …but a PARKED session keeps them, because a poke may resume it
+    const mgr3 = mkMgr();
+    const parked = new RealisticDriver('relay', 30, 0);   // moves nothing → parks
+    mgr3.setDriversFor('Tparked000000001', [parked]);
+    const ps = mkSession(3, 'Tparked000000001');
+    const pres = await mgr3.start(ps);
+    check(pres.state === 'parked', 'the session parked');
+    check(parked.disposals === 0, 'a parked session keeps its transports for a later poke');
+  }
+
+  console.log('Drivers are scoped per transfer:');
+  {
+    // REGRESSION: the driver registry was process-wide, but real drivers carry
+    // per-transfer state (source path, datachannel, LAN endpoint). A second
+    // transfer reused the first one's driver — and would have uploaded the
+    // WRONG FILE.
+    class PathDriver implements TransportDriver {
+      readonly channel = 'relay' as const;
+      readonly id = 'relay'; readonly cost = 30;
+      served: string[] = [];
+      constructor(private myPath: string) {}
+      unitChunks() { return Infinity; }
+      async available() { return true; }
+      async run(s: TransferSession, work: ChunkRun[], report: DriverReport): Promise<DriverOutcome> {
+        this.served.push(`${s.transferId}<-${this.myPath}`);
+        for (const r of work) for (let i = r.start; i < r.start + r.count; i++) report.verified(i);
+        return { kind: 'drained' };
+      }
+      dispose() {}
+    }
+    const mgr = mkMgr();
+    const dA = new PathDriver('/files/A.bin');
+    const dB = new PathDriver('/files/B.bin');
+    mgr.setDriversFor('TxferAAAAAAAAAAA', [dA]);
+    await mgr.start(mkSession(2, 'TxferAAAAAAAAAAA'));
+    mgr.setDriversFor('TxferBBBBBBBBBBB', [dB]);
+    await mgr.start(mkSession(2, 'TxferBBBBBBBBBBB'));
+    check(dA.served.length === 1 && dA.served[0].startsWith('TxferAAA'),
+      "transfer A's driver served only transfer A");
+    check(dB.served.length === 1 && dB.served[0].endsWith('/files/B.bin'),
+      "transfer B was served by ITS OWN driver, with its own source file");
   }
 
   console.log('One worker per session:');

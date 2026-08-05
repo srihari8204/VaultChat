@@ -84,6 +84,12 @@ export class P2pDriver implements TransportDriver {
         : await this.receive(session, work, report, signal);
     } catch (e: any) {
       return { kind: 'failed', reason: e?.message ?? 'p2p error' };
+    } finally {
+      // Per-run subscription released here, NOT in dispose(): the driver is
+      // reused across rounds, so a listener that only went away at teardown
+      // would accumulate one handler per round on the datachannel.
+      try { this.off?.(); } catch { /* already removed */ }
+      this.off = null;
     }
   }
 

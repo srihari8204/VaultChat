@@ -41,6 +41,10 @@ export interface RunResult { state: 'complete' | 'failed' | 'cancelled' | 'parke
 
 export class TransferManager {
   private readonly drivers: TransportDriver[] = [];
+  /** Drivers scoped to ONE transfer. Real drivers carry per-transfer state —
+   *  a source path, a datachannel, a LAN endpoint — so a process-wide registry
+   *  would serve the wrong file to the second transfer. */
+  private readonly scoped = new Map<string, TransportDriver[]>();
   private readonly sessions = new Map<string, TransferSession>();
   private readonly running = new Map<string, Promise<RunResult>>();
   private readonly aborts = new Map<string, AbortController>();
@@ -73,6 +77,25 @@ export class TransferManager {
 
   driverIds(): TransportId[] { return this.drivers.map((d) => d.id); }
 
+  /** Register drivers for exactly one transfer; they replace the global set for
+   *  that session and are disposed when it ends. */
+  setDriversFor(transferId: string, drivers: TransportDriver[]): void {
+    this.scoped.set(transferId, [...drivers].sort((a, b) => a.cost - b.cost));
+  }
+
+  driversFor(transferId: string): TransportDriver[] {
+    return this.scoped.get(transferId) ?? this.drivers;
+  }
+
+  /** Release a transfer's drivers. Called when its session loop exits — NOT
+   *  after each run, because a driver is reused across rounds. */
+  private disposeScoped(transferId: string): void {
+    const ds = this.scoped.get(transferId);
+    if (!ds) return;
+    this.scoped.delete(transferId);
+    for (const d of ds) { try { d.dispose(); } catch { /* dispose must never throw upward */ } }
+  }
+
   /** Single-flight: one session object per transferId, process-wide. */
   adopt(session: TransferSession): TransferSession {
     const existing = this.sessions.get(session.transferId);
@@ -98,6 +121,9 @@ export class TransferManager {
     const p = this.admitAndRun(s).finally(() => {
       this.running.delete(s.transferId);
       this.aborts.delete(s.transferId);
+      // A parked session may be poked later, so keep its transports alive; a
+      // terminal one is done with them.
+      if (s.state !== 'active') this.disposeScoped(s.transferId);
       this.pump();
     });
     this.running.set(s.transferId, p);
@@ -216,7 +242,7 @@ export class TransferManager {
 
   private async selectDriver(s: TransferSession): Promise<TransportDriver | null> {
     const now = this.opts.now();
-    for (const d of this.drivers) {                       // pre-sorted by cost
+    for (const d of this.driversFor(s.transferId)) {      // pre-sorted by cost
       const h = this.healthFor(s.transferId, d.id);
       if (h.cooldownUntil > now) continue;                // demoted, still cooling
       let ok = false;
@@ -280,6 +306,11 @@ export class TransferManager {
 
       s.noteTransport(driver.id);
       s.claim(work);
+      // Snapshot BEFORE the run. The report callbacks below also advance
+      // `lastRevision` (they throttle onChange with it), so comparing against
+      // that afterwards would score every productive round as idle — which
+      // parked a healthy multi-round transfer partway through.
+      const revBefore = s.revision;
       let outcome: DriverOutcome;
       try {
         // Two channels, because they are two different facts (RC-4): `verified`
@@ -296,7 +327,12 @@ export class TransferManager {
         outcome = { kind: 'failed', reason: e?.message ?? 'driver threw' };
       } finally {
         s.release(work);                 // R3: nothing verified is lost by releasing
-        try { driver.dispose(); } catch { /* dispose must never break the loop */ }
+        // NOT disposed here. A driver is reused across rounds — a transport that
+        // moves part of the work-list must still be available for the next one.
+        // Disposing per run made any multi-round transfer stall at whatever the
+        // first round happened to move. Per-run resources are released by the
+        // driver itself, inside run(); dispose() is final teardown, and happens
+        // when the session loop exits.
       }
 
       if (outcome.kind === 'failed') {
@@ -307,8 +343,8 @@ export class TransferManager {
         this.promote(s, driver);
       }
 
-      // Progress in this round resets the idle counter.
-      if (s.revision !== lastRevision) { lastRevision = s.revision; idleRounds = 0; this.opts.onChange?.(s); }
+      // Real forward progress in this round resets the idle counter.
+      if (s.revision !== revBefore) { lastRevision = s.revision; idleRounds = 0; this.opts.onChange?.(s); }
       else idleRounds++;
       if (idleRounds > this.opts.maxIdleRounds) return { state: 'parked', reason: 'no forward progress' };
     }
@@ -316,6 +352,9 @@ export class TransferManager {
     if (ac.signal.aborted && s.state === 'active') { s.finish('cancelled'); this.opts.onChange?.(s); }
     return { state: s.state === 'active' ? 'parked' : (s.state as RunResult['state']) };
   }
+
+  /** Final teardown for a transfer's transports. Safe to call more than once. */
+  releaseTransports(transferId: string): void { this.disposeScoped(transferId); }
 }
 
 // ── self-check: `npx tsx lib/vaultBeam/manager.ts` ──
@@ -372,7 +411,7 @@ function _selfCheck(): void {
     let res = await mgr.start(s);
     A(res.state === 'complete', 'single driver completes the transfer');
     A(s.progressBytes() === s.totalBytes, 'progress reaches the total');
-    A(d.disposals === d.runs, 'dispose called once per run');
+    A(d.disposals === 0, 'a GLOBALLY registered driver is shared, so the manager never disposes it');
     A(new Set(d.asked).size === d.asked.length, 'no chunk asked for twice');
 
     // 2. driver fails midway → session stays active, bitmaps kept, next driver

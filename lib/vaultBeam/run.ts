@@ -16,7 +16,7 @@ import { Buffer } from 'buffer';
 import { CHUNK_BYTES } from './bitmap';
 import { TransferSession } from './session';
 import { TransferManager } from './manager';
-import { VaultBeamEngine, channelFromDataChannel, cryptoForSession, lanNativeFrom, registerAvailable, type VBManifestLike } from './wiring';
+import { VaultBeamEngine, channelFromDataChannel, cryptoForSession, lanNativeFrom, type VBManifestLike } from './wiring';
 import { gateUntilReady, graceGate } from './gate';
 import { RelayDriver, type RelayIO, type RelayStateLike } from './drivers/relay';
 import { P2pDriver, type P2pDriverOpts, type P2pChannel } from './drivers/p2p';
@@ -29,13 +29,13 @@ let _engine: VaultBeamEngine | null = null;
 let _manager: TransferManager | null = null;
 
 /** Process-wide engine. Built once, lazily, so nothing loads react-native at import. */
-export async function engine(onChange?: (s: TransferSession) => void): Promise<VaultBeamEngine> {
+export async function engine(): Promise<VaultBeamEngine> {
   if (_engine) return _engine;
   const { defaultSessionStore } = await import('./persistence');
   const store = await defaultSessionStore();
   const mgr = new TransferManager({ concurrency: 1 });
   _manager = mgr;
-  const eng = new VaultBeamEngine({ manager: mgr, store, onChange });
+  const eng = new VaultBeamEngine({ manager: mgr, store });
   // The manager's change hook IS the persistence + progress seam, so a caller
   // cannot forget to wire one of them.
   mgr.setOnChange(eng.handleChange);
@@ -97,12 +97,14 @@ export interface RunOpts {
  */
 export async function runTransfer(opts: RunOpts): Promise<TransferSession> {
   const role = opts.srcPath ? 'sender' : 'recipient';
-  const eng = await engine(opts.onChange);
+  const eng = await engine();
   const mgr = eng.manager;
   const session = eng.session({
     transferId: opts.transferId, sessionVersion: opts.sessionVersion,
     manifest: opts.manifest, role,
   });
+  // Per transfer, not per engine: the engine outlives any one transfer.
+  if (opts.onChange) eng.setSink(opts.transferId, opts.onChange);
 
   const native = await import('../vaultBeamStreamNative');
   const direct = await import('../vaultBeamDirect');
@@ -143,7 +145,10 @@ export async function runTransfer(opts: RunOpts): Promise<TransferSession> {
     dstPath: opts.dstPath,
   });
 
-  registerAvailable(mgr, [
+  // Scoped to THIS transfer. These drivers hold per-transfer state — a source
+  // path, a datachannel, a LAN endpoint — so a process-wide registry would serve
+  // the second transfer using the first one's file.
+  mgr.setDriversFor(opts.transferId, [
     gateUntilReady(lan, () => role === 'sender' ? !!opts.srcPath : !!lanEndpoint),
     gateUntilReady(p2p, () => !!channel),
     // The relay is always reachable, so hold it back briefly or it wins every
@@ -193,6 +198,7 @@ export async function runTransfer(opts: RunOpts): Promise<TransferSession> {
     await mgr.start(session);
   } finally {
     try { offBound(); } catch { /* already removed */ }
+    if (session.state !== 'active') { mgr.releaseTransports(opts.transferId); eng.clearSink(opts.transferId); }
     await eng.flush();
   }
   return session;

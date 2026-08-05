@@ -47,6 +47,10 @@ export class VaultBeamEngine {
   readonly manager: TransferManager;
   private readonly wb: WriteBehind;
   private readonly onChange?: (s: TransferSession) => void;
+  /** Per-transfer progress sinks. The engine is process-wide and long-lived, so
+   *  a single stored callback would belong to whichever transfer happened to
+   *  build it first and every later transfer's UI would go dark. */
+  private readonly sinks = new Map<string, (s: TransferSession) => void>();
 
   constructor(o: EngineOpts) {
     this.manager = o.manager;
@@ -57,11 +61,16 @@ export class VaultBeamEngine {
     });
   }
 
+  /** Route this transfer's progress to a specific sink (its chat bubble). */
+  setSink(transferId: string, cb: (s: TransferSession) => void): void { this.sinks.set(transferId, cb); }
+  clearSink(transferId: string): void { this.sinks.delete(transferId); }
+
   /** Wire this into TransferManager({ onChange }) so state and disk stay in step. */
   handleChange = (s: TransferSession): void => {
     // A terminal state or a transport change is flushed at once; ordinary
     // progress coalesces. Both are the same call, so a caller cannot forget.
     this.wb.schedule(s, s.state !== 'active');
+    this.sinks.get(s.transferId)?.(s);
     this.onChange?.(s);
   };
 
@@ -280,6 +289,29 @@ function _selfCheck(): void {
     await lan.connect({ runs: [] } as any);
     A(lanCalls[0][0] === 'serve' && lanCalls[0][1].runs[0].count === 2, 'serve forwards runs');
     A(lanCalls[1][0] === 'connect', 'connect forwards');
+
+    // 7b. REGRESSION: sinks are PER TRANSFER. The engine is process-wide and
+    //     outlives any one transfer, so a single stored callback belonged to
+    //     whichever transfer built it first and every later transfer's bubble
+    //     went dark.
+    {
+      const st = new FakeStore();
+      const m = new TransferManager({ sleep: async () => {} });
+      const e = new VaultBeamEngine({ manager: m, store: st, writeDelayMs: 0 });
+      m.setOnChange(e.handleChange);
+      const a = e.session({ transferId: 'TsinkA0000000001', sessionVersion: 1, manifest, role: 'recipient' });
+      const b = e.session({ transferId: 'TsinkB0000000001', sessionVersion: 1, manifest, role: 'recipient' });
+      const seen: string[] = [];
+      e.setSink('TsinkA0000000001', (x) => seen.push('A:' + x.peerHave.popcount()));
+      e.setSink('TsinkB0000000001', (x) => seen.push('B:' + x.peerHave.popcount()));
+      a.markVerified(0); e.handleChange(a);
+      b.markVerified(0); b.markVerified(1); e.handleChange(b);
+      A(seen.join(',') === 'A:1,B:2', `each transfer reached its OWN sink (got ${seen.join(',')})`);
+      e.clearSink('TsinkA0000000001');
+      a.markVerified(1); e.handleChange(a);
+      A(seen.length === 2, 'a cleared sink stops receiving');
+      A(seen.filter((x) => x.startsWith('B')).length === 1, "clearing A did not disturb B's sink");
+    }
 
     // 8. flush + forget
     await eng.flush();
