@@ -1000,10 +1000,10 @@
 </style>
 <style>#m-video .who { min-width: 0; }
 #m-video .who .vs { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#m-video .who .vt { font-size: 14px; }
+#m-video .who .vt { font-size: 13.5px; }
 #m-video .m-viewerbar { gap: 8px; }
 #m-video .fchips { display: flex; gap: 4px; flex: none; }
-#m-video .fchips .m-chip { height: 20px; padding: 0 6px; font-size: 8.5px; letter-spacing: .3px; font-weight: 700; }
+#m-video .fchips .m-chip { height: 20px; padding: 0 5px; font-size: 8px; letter-spacing: .3px; font-weight: 700; }
 
 /* ---- 16:9 stage ---- */
 #m-video .stage {
@@ -1132,7 +1132,7 @@
 #m-video .eqm i { width: 3px; border-radius: 2px; background: var(--acc-2); }
 
 /* ---- bottom band + PiP ---- */
-#m-video .band { display: flex; align-items: center; padding: 0 14px; }
+#m-video .band { flex: 1; min-height: 0; display: flex; align-items: center; padding: 0 14px; }
 #m-video .band .bl { max-width: 216px; }
 #m-video .band .bt { font-size: 10px; font-weight: 720; letter-spacing: 1.1px; text-transform: uppercase; color: var(--txt-3); }
 #m-video .band .bd { font-size: 11.5px; color: var(--txt-2); line-height: 1.45; margin-top: 4px; }
@@ -1288,7 +1288,7 @@
     <span class="m-tile sm ft-vid">MP4</span>
     <div class="col grow who" style="gap:2px">
       <span class="vt">Atlas-Demo-v3.mp4</span>
-      <span class="vs">Maya Chen · 148 MB · 04:36</span>
+      <span class="vs">Maya Chen · 148 MB</span>
     </div>
     <div class="fchips">
       <span class="m-chip on">MP4</span>
@@ -1382,8 +1382,6 @@
       </div>
     </div>
   </div>
-
-  <div class="grow"></div>
 
   <div class="band">
     <div class="bl">

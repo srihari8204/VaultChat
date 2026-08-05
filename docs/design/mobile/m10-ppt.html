@@ -1,0 +1,254 @@
+<style>
+#m-ppt .vtile { width: 34px; height: 34px; border-radius: 11px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 8.5px; font-weight: 700; letter-spacing: .5px;
+  box-shadow: var(--inner-hi), 0 2px 8px rgba(0,0,0,.35); }
+#m-ppt .vmeta { min-width: 0; display: flex; flex-direction: column; gap: 1px; flex: 1; }
+
+/* ---- slide ---- */
+#m-ppt .slidewrap { flex: none; padding: 12px 12px 0; position: relative; }
+#m-ppt .slide {
+  height: 244px; border-radius: 14px; overflow: hidden; position: relative;
+  padding: 14px 16px 10px;
+  display: flex; flex-direction: column;
+  background:
+    radial-gradient(220px 150px at 88% 6%, rgba(124,77,255,.36), transparent 68%),
+    radial-gradient(200px 160px at 4% 104%, rgba(96,165,250,.16), transparent 64%),
+    linear-gradient(150deg, #17142B 0%, #100E1E 55%, #0A0912 100%);
+  border: 1px solid rgba(235,232,255,.10);
+  box-shadow: 0 16px 44px rgba(0,0,0,.55), 0 0 44px rgba(124,77,255,.10);
+}
+#m-ppt .slide::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background:
+    linear-gradient(0deg, rgba(235,232,255,.028) 1px, transparent 1px) 0 0 / 100% 26px,
+    linear-gradient(90deg, rgba(235,232,255,.028) 1px, transparent 1px) 0 0 / 34px 100%;
+}
+#m-ppt .sl-kick {
+  display: flex; align-items: center; gap: 7px; flex: none;
+  font-size: 8.5px; font-weight: 750; letter-spacing: 2px; color: var(--acc-3);
+}
+#m-ppt .sl-kick i { width: 16px; height: 2px; border-radius: 2px; background: var(--grad-acc); display: block; }
+#m-ppt .sl-title { font-size: 21px; font-weight: 750; letter-spacing: -.5px; line-height: 1.15; margin-top: 7px; color: #fff; }
+#m-ppt .sl-sub { font-size: 10px; color: var(--txt-2); margin-top: 4px; line-height: 1.4; }
+
+#m-ppt .sl-chart { flex: 1; display: flex; align-items: flex-end; gap: 8px; margin-top: 9px; padding-bottom: 2px; }
+#m-ppt .cb { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; height: 100%; justify-content: flex-end; }
+#m-ppt .cb b { font-size: 9px; font-weight: 700; color: var(--txt-2); }
+#m-ppt .cb i {
+  width: 100%; border-radius: 4px 4px 2px 2px; display: block;
+  background: linear-gradient(180deg, rgba(146,87,255,.55), rgba(108,61,244,.35));
+}
+#m-ppt .cb.hero b { color: #fff; }
+#m-ppt .cb.hero i { background: linear-gradient(180deg, #9257FF, #6C3DF4); box-shadow: 0 -2px 14px rgba(124,77,255,.55); }
+#m-ppt .cb span { font-size: 8px; color: var(--txt-3); letter-spacing: .2px; }
+#m-ppt .sl-foot {
+  flex: none; display: flex; align-items: center; justify-content: space-between;
+  border-top: 1px solid rgba(235,232,255,.08); padding-top: 7px; margin-top: 4px;
+  font-size: 8.5px; color: var(--txt-3); letter-spacing: .4px;
+}
+#m-ppt .sl-foot b { color: var(--txt-1); font-weight: 700; font-variant-numeric: tabular-nums; }
+#m-ppt .animchip {
+  position: absolute; right: 22px; top: 22px; z-index: 4;
+  height: 24px; font-size: 10px; padding: 0 10px;
+}
+#m-ppt .tip-rot { font-size: 10.5px; padding: 6px 10px; flex: none; }
+#m-ppt .tip-rot .ic { width: 13px; height: 13px; color: var(--acc-3); }
+
+/* ---- thumbnail strip ---- */
+#m-ppt .strip { flex: none; padding: 12px 0 4px 12px; overflow: hidden; }
+#m-ppt .strip .lab { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding-right: 12px; }
+#m-ppt .strip .lab .m-label { flex: 1; }
+#m-ppt .thumbs { display: flex; gap: 8px; }
+#m-ppt .th { width: 90px; flex: none; }
+#m-ppt .th .tp {
+  height: 51px; border-radius: 8px; position: relative; overflow: hidden;
+  background: linear-gradient(150deg, #17142B 0%, #100E1E 60%, #0A0912 100%);
+  border: 1px solid rgba(235,232,255,.10);
+}
+#m-ppt .th .tp .tl { position: absolute; height: 3px; border-radius: 2px; background: rgba(235,232,255,.22); }
+#m-ppt .th .tp .tb { position: absolute; bottom: 8px; width: 7px; border-radius: 2px 2px 0 0; background: rgba(146,87,255,.55); }
+#m-ppt .th.on .tp { border-color: transparent; box-shadow: 0 0 0 2px var(--acc), 0 4px 14px rgba(124,77,255,.45); }
+#m-ppt .th .n { text-align: center; font-size: 9.5px; color: var(--txt-3); margin-top: 4px; font-variant-numeric: tabular-nums; }
+#m-ppt .th.on .n { color: var(--acc-3); font-weight: 700; }
+#m-ppt .th .vidbadge {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+  width: 22px; height: 22px; border-radius: 50%;
+  background: rgba(8,7,13,.7); border: 1px solid rgba(255,255,255,.4);
+  display: flex; align-items: center; justify-content: center; color: #fff;
+}
+#m-ppt .th .vidbadge .ic { width: 11px; height: 11px; margin-left: 1px; }
+#m-ppt .th .vidtag {
+  position: absolute; right: 4px; bottom: 4px;
+  font-size: 7.5px; font-weight: 700; letter-spacing: .3px; color: #fff;
+  background: rgba(8,7,13,.8); border-radius: 4px; padding: 1px 4px;
+}
+
+/* ---- notes ---- */
+#m-ppt .notes { margin: 10px 12px 0; flex: 1; min-height: 0; padding: 12px 14px; display: flex; flex-direction: column; }
+#m-ppt .notes .nh { display: flex; align-items: center; gap: 8px; }
+#m-ppt .notes .nh .ic { width: 16px; height: 16px; color: var(--acc-2); }
+#m-ppt .notes .nh b { font-size: 13px; font-weight: 660; }
+#m-ppt .notes .nh .chip { height: 21px; font-size: 10px; margin-left: auto; }
+#m-ppt .nb { display: flex; gap: 9px; margin-top: 10px; font-size: 12px; line-height: 1.5; color: var(--txt-2); }
+#m-ppt .nb i { width: 5px; height: 5px; border-radius: 50%; background: var(--acc-2); flex: none; margin-top: 7px; }
+#m-ppt .nb b { color: var(--txt-1); font-weight: 650; }
+#m-ppt .nb.now { color: var(--txt-1); }
+#m-ppt .nextup {
+  margin-top: auto; display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 12px;
+  background: rgba(235,232,255,.045); border: 1px solid var(--stroke);
+}
+#m-ppt .nextup .nt {
+  width: 44px; height: 26px; border-radius: 7px; flex: none;
+  display: flex; align-items: center; justify-content: center; color: #fff;
+  background: radial-gradient(24px 16px at 55% 45%, rgba(179,136,255,.6), transparent 70%), linear-gradient(150deg,#171436,#0F0D1E);
+  border: 1px solid rgba(235,232,255,.14);
+}
+#m-ppt .nextup .nt .ic { width: 12px; height: 12px; }
+#m-ppt .nextup .col-x { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+#m-ppt .nextup .t { font-size: 11.5px; font-weight: 620; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#m-ppt .nextup .s { font-size: 9.5px; color: var(--txt-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#m-ppt .nstat {
+  margin-top: 9px; display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: 11px;
+  background: rgba(52,211,153,.08); border: 1px solid rgba(52,211,153,.22);
+  font-size: 11px; color: var(--ok); font-weight: 600;
+}
+#m-ppt .nstat em { font-style: normal; color: var(--txt-1); font-weight: 650; }
+#m-ppt .nstat .ic { width: 14px; height: 14px; flex: none; }
+</style>
+<div class="mscreen" id="m-ppt">
+  <div class="m-status">
+    <span>9:41</span>
+    <div class="sb-right">
+      <span class="m-sig"><i></i><i></i><i></i><i></i></span>
+      <span class="m-wifi"></span>
+      <span class="m-batt"><i></i></span>
+    </div>
+  </div>
+
+  <header class="m-viewerbar">
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-chev-l"/></svg></span>
+    <span class="vtile ft-ppt">PPT</span>
+    <div class="vmeta">
+      <span class="vt">Atlas-Launch-Deck.pptx</span>
+      <span class="vs">Ravi Patel · 12.6 MB · 18 slides</span>
+    </div>
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-expand"/></svg></span>
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-more-v"/></svg></span>
+  </header>
+
+  <div class="m-secure"><svg class="ic sm"><use href="#i-lock"/></svg>Opens inside VaultChat — no external app</div>
+
+  <div class="slidewrap">
+    <div class="slide">
+      <div class="sl-kick"><i></i>ATLAS · LAUNCH DECK</div>
+      <div class="sl-title">Atlas changes how teams ship.</div>
+      <div class="sl-sub">Six pilot teams, one quarter on Atlas — cycle time down, release cadence up, no new process to learn.</div>
+      <div class="sl-chart">
+        <div class="cb"><b>34</b><i style="height:24%"></i><span>Q1 25</span></div>
+        <div class="cb"><b>41</b><i style="height:30%"></i><span>Q2 25</span></div>
+        <div class="cb"><b>52</b><i style="height:38%"></i><span>Q3 25</span></div>
+        <div class="cb"><b>67</b><i style="height:49%"></i><span>Q4 25</span></div>
+        <div class="cb"><b>96</b><i style="height:70%"></i><span>Q1 26</span></div>
+        <div class="cb hero"><b>128</b><i style="height:92%"></i><span>Q2 26</span></div>
+      </div>
+      <div class="sl-foot"><span>Releases shipped per quarter · Confidential</span><b>5 / 18</b></div>
+    </div>
+    <span class="chip active animchip"><svg class="ic sm" style="width:12px;height:12px"><use href="#i-layers"/></svg>Animations: 3</span>
+  </div>
+
+  <div class="strip">
+    <div class="lab">
+      <span class="m-label">Slides &middot; 2 with video</span>
+      <span class="m-tip tip-rot"><svg class="ic"><use href="#i-rotate"/></svg>Rotate for fullscreen</span>
+    </div>
+    <div class="thumbs">
+      <div class="th">
+        <div class="tp">
+          <span class="tl" style="left:8px;width:44px;top:10px"></span>
+          <span class="tl" style="left:8px;width:62px;top:18px;opacity:.6"></span>
+          <span class="tl" style="left:8px;width:54px;top:26px;opacity:.6"></span>
+        </div>
+        <div class="n">3</div>
+      </div>
+      <div class="th">
+        <div class="tp">
+          <span class="tl" style="left:8px;width:38px;top:9px"></span>
+          <span class="tb" style="left:10px;height:14px"></span>
+          <span class="tb" style="left:22px;height:22px"></span>
+          <span class="tb" style="left:34px;height:18px"></span>
+          <span class="tb" style="left:46px;height:28px"></span>
+        </div>
+        <div class="n">4</div>
+      </div>
+      <div class="th on">
+        <div class="tp">
+          <span class="tl" style="left:8px;width:52px;top:9px;background:rgba(179,136,255,.75)"></span>
+          <span class="tl" style="left:8px;width:66px;top:17px;opacity:.55"></span>
+          <span class="tb" style="left:10px;height:10px"></span>
+          <span class="tb" style="left:22px;height:14px"></span>
+          <span class="tb" style="left:34px;height:18px"></span>
+          <span class="tb" style="left:46px;height:22px"></span>
+          <span class="tb" style="left:58px;height:26px;background:var(--acc-2)"></span>
+          <span class="tb" style="left:70px;height:32px;background:var(--acc-2)"></span>
+        </div>
+        <div class="n">5</div>
+      </div>
+      <div class="th">
+        <div class="tp" style="background:radial-gradient(40px 26px at 55% 45%, rgba(179,136,255,.55), transparent 70%), linear-gradient(150deg,#171436,#0F0D1E)">
+          <span class="vidbadge"><svg class="ic"><use href="#i-play"/></svg></span>
+          <span class="vidtag">VIDEO</span>
+        </div>
+        <div class="n">6</div>
+      </div>
+      <div class="th">
+        <div class="tp">
+          <span class="tl" style="left:8px;width:46px;top:10px"></span>
+          <span class="tl" style="left:8px;width:60px;top:20px;opacity:.6"></span>
+          <span class="tl" style="left:8px;width:36px;top:28px;opacity:.6"></span>
+          <span class="tl" style="left:8px;width:54px;top:36px;opacity:.6"></span>
+        </div>
+        <div class="n">7</div>
+      </div>
+      <div class="th">
+        <div class="tp">
+          <span class="tl" style="left:8px;width:40px;top:10px"></span>
+          <span class="tl" style="left:8px;width:64px;top:22px;opacity:.6"></span>
+        </div>
+        <div class="n">8</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="m-card notes">
+    <div class="nh">
+      <svg class="ic"><use href="#i-notes"/></svg>
+      <b>Speaker notes</b>
+      <span class="chip">Slide 5</span>
+    </div>
+    <div class="nb"><i></i><span>Open with the pilot numbers — six teams, one full quarter, and nothing changed in their process except Atlas.</span></div>
+    <div class="nb now"><i></i><span>Land the <b>38% cycle-time drop</b> before the chart animates — the last bar rising punctuates the sentence.</span></div>
+    <div class="nb"><i></i><span>Hand off to Ravi for the demo on slide 6 — the video auto-plays, so pause for questions here first.</span></div>
+    <div class="nextup">
+      <span class="nt"><svg class="ic"><use href="#i-play"/></svg></span>
+      <span class="col-x">
+        <span class="t">Up next · Slide 6 — Product demo</span>
+        <span class="s">Embedded video · Atlas-Demo-v3.mp4 · 00:48</span>
+      </span>
+      <span class="chip" style="height:21px;font-size:9.5px"><svg class="ic sm" style="width:11px;height:11px"><use href="#i-film"/></svg>Auto</span>
+    </div>
+    <div class="nstat"><svg class="ic"><use href="#i-check"/></svg>Key stat — <em>128 releases in Q2 FY26 · 2.4× baseline</em></div>
+  </div>
+
+  <div class="m-toolbar">
+    <span class="m-tool on"><svg class="ic"><use href="#i-notes"/></svg>Notes</span>
+    <span class="m-tool"><svg class="ic"><use href="#i-grid"/></svg>Sorter</span>
+    <span class="m-tool"><svg class="ic"><use href="#i-presenter"/></svg>Present</span>
+    <span class="m-tool"><svg class="ic"><use href="#i-rotate"/></svg>Rotate</span>
+    <span class="m-tool"><svg class="ic"><use href="#i-share"/></svg>Share</span>
+  </div>
+
+  <div class="m-home"><i></i></div>
+</div>
