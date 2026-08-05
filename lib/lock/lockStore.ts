@@ -296,11 +296,14 @@ export async function exportHistoryJSON(): Promise<string> {
 export async function exportHistoryCSV(): Promise<string> {
   const db = await lockDb();
   const rows = await db.getAllAsync(`SELECT * FROM lock_sessions ORDER BY started_at DESC`) as LockSessionRow[];
-  const head = 'id,started_at,ended_at,center_lat,center_lng,radius_m,time_inside_ms,time_outside_ms,exits,returns,max_distance_m,alarm_ms,distance_traveled_m';
+  const head = 'id,started_at,ended_at,center_lat,center_lng,radius_m,time_inside_ms,time_outside_ms,exits,returns,max_distance_m,alarm_ms,distance_traveled_m,avg_accuracy_m,place,notes';
+  const csvSafe = (v: string | null | undefined) => (v ? `"${v.replace(/"/g, '""')}"` : '');
   const lines = rows.map((s) => [
     s.id, new Date(s.started_at).toISOString(), s.ended_at ? new Date(s.ended_at).toISOString() : '',
     s.center_lat, s.center_lng, s.radius, s.time_inside_ms, s.time_outside_ms,
     s.exits, s.returns, Math.round(s.max_distance * 10) / 10, s.alarm_ms, Math.round(s.distance_traveled),
+    s.acc_n > 0 ? Math.round((s.acc_sum / s.acc_n) * 10) / 10 : '',
+    csvSafe(s.place_name), csvSafe(s.notes),
   ].join(','));
   return [head, ...lines].join('\n');
 }

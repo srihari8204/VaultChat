@@ -138,7 +138,9 @@ export default function NavigateScreen() {
                 {banner.rerouting ? 'Rerouting…' : (banner.instruction || 'Continue')}
               </Text>
               <Text numberOfLines={1} style={{ color: colors.text + '88', fontSize: 12.5, marginTop: 2 }}>
-                {banner.roadName ? banner.roadName + ' · ' : ''}{Math.round(banner.remainingM)} m to go · {s.profile}
+                {banner.roadName ? banner.roadName + ' · ' : ''}
+                {banner.remainingM >= 1000 ? `${(banner.remainingM / 1000).toFixed(1)} km` : `${Math.round(banner.remainingM)} m`} to go
+                {banner.etaEpochMs > 0 ? ` · ETA ${new Date(banner.etaEpochMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
               </Text>
             </View>
             <TouchableOpacity onPress={() => forceReroute()} disabled={banner.rerouting}

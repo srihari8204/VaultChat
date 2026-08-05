@@ -34,6 +34,7 @@ export interface Fix {
   speed?: number;
   battery?: number;
   charging?: boolean;
+  accuracy?: number;   // GPS accuracy m of this fix
 }
 
 export interface ProcessOpts {
@@ -69,7 +70,7 @@ export function activeFences(fences: Geofence[]): Geofence[] {
 export async function processFix(circleId: string, fix: Fix, opts: ProcessOpts): Promise<void> {
   await recordSample(circleId, {
     u: fix.userId, lat: fix.pos.lat, lng: fix.pos.lng, ts: fix.ts,
-    bat: fix.battery, spd: fix.speed,
+    bat: fix.battery, spd: fix.speed, acc: fix.accuracy,
   });
 
   if (!opts.self) return;

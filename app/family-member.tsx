@@ -26,7 +26,8 @@ import { haversine } from '../lib/nav/geo';
 import { STALE_MS } from '../lib/family/types';
 // v3 — shared Location Lock engine classifiers/formatters (same bands as Navigate)
 import { classifyDistance, zoneColor } from '../lib/lock/zoneMachine';
-import { fmtSpeed } from '../lib/lock/format';
+import { fmtSpeed, gpsQuality, QUALITY_LABEL, QUALITY_COLOR } from '../lib/lock/format';
+import { timeAtPlace } from '../lib/family/history';
 
 const REFRESH_MS = 15_000;
 const AVATAR_COLORS = ['#4A9FFF', '#EC4899', '#22C55E', '#F59E0B', '#A855F7', '#EF4444', '#14B8A6', '#F97316'];
@@ -228,6 +229,13 @@ export default function FamilyMemberScreen() {
               {fmtSpeed((last.spd ?? 0) * 3.6)} · updated {ago(last.ts)}
               {last.bat != null ? ` · battery ${Math.round(last.bat)}%` : ''}
             </Text>
+            {last.acc != null && (
+              <View style={{ borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, backgroundColor: QUALITY_COLOR[gpsQuality(last.acc)] + '22' }}>
+                <Text style={{ color: QUALITY_COLOR[gpsQuality(last.acc)], fontSize: 10.5, fontWeight: '800' }}>
+                  GPS {QUALITY_LABEL[gpsQuality(last.acc)].toUpperCase()} ±{Math.round(last.acc)}m
+                </Text>
+              </View>
+            )}
           </View>
         )}
 
@@ -244,6 +252,11 @@ export default function FamilyMemberScreen() {
           const zone = d != null && fresh ? classifyDistance(d, p.radiusM) : null;
           const zc = zone ? zoneColor(zone) : colors.textFaint;
           const zoneLabel = zone === 'safe' ? 'INSIDE' : zone === 'warning' ? 'NEAR EDGE' : zone === 'atLimit' ? 'AT LIMIT' : zone === 'outside' ? 'OUTSIDE' : null;
+          // Today's time at this place from the presence track (v3 statistics).
+          const tp = timeAtPlace(today, p);
+          const tpTxt = tp.timeMs > 0
+            ? ` · ${tp.timeMs >= 3_600_000 ? `${Math.floor(tp.timeMs / 3_600_000)}h ${Math.round((tp.timeMs % 3_600_000) / 60_000)}m` : `${Math.max(1, Math.round(tp.timeMs / 60_000))}m`} today${tp.firstArrival ? `, arrived ${clock(tp.firstArrival)}` : ''}`
+            : '';
           return (
             <View key={p.id} style={[st.evt, { borderColor: colors.border }]}>
               <View style={[st.evtIcon, { backgroundColor: (here ? colors.success : colors.textFaint) + '22' }]}>
@@ -253,7 +266,7 @@ export default function FamilyMemberScreen() {
                 <Text style={{ color: colors.text, fontSize: 14, fontWeight: '600' }}>{p.name}</Text>
                 <Text style={{ color: colors.textDim, fontSize: 11.5 }}>
                   {p.enabled === false ? 'Alerts off' : `${p.radiusM} m radius`}
-                  {d != null ? ` · ${dist(d)} away` : ''}
+                  {d != null ? ` · ${dist(d)} away` : ''}{tpTxt}
                 </Text>
               </View>
               {zoneLabel && (

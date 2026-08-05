@@ -96,5 +96,6 @@
 - [x] 14.4 Member profile extensions: per-place zone chips (INSIDE/NEAR EDGE/AT LIMIT/OUTSIDE) via the shared classifier on the member's last sealed ping, speed/updated/battery diagnostics line via shared formatters
 - [x] 14.5 Do-not-modify honored: family dashboard, groups, invites, chat, live location, and settings untouched; no duplicate GPS/geofence/alarm/nav/history services (one engine instance app-wide)
 - [ ] 14.6 Shared lock DISTRIBUTION (owner pushes a place lock to members' devices with per-member permissions) — requires cross-device place sync over E2EE system messages; tracked with the `family-circle` change (F4), not duplicated here
-- [ ] 14.7 Family statistics beyond lock sessions (time-at-place from presence, average arrival) — builds on family history tracks; follow-up
-- [ ] 14.8 Member GPS accuracy/quality chip — needs `acc` added to the sealed FamilyPing payload (family-circle presence task); until then quality is shown only for the local device
+- [x] 14.7 Family statistics from presence tracks: pure `timeAtPlace` (visits, time inside with ping-gap guard, first arrival; self-checked) shown per Safe Zone on the member profile ("2h 10m today, arrived 8:15 AM")
+- [x] 14.8 Member GPS quality: optional `acc` field threaded through the sealed FamilyPing → presence → TrackSample chain (backward compatible — old pings simply lack it); quality chip (±m + tier) on the member diagnostics row
+- [x] 14.9 Quick wins: live ETA + km-aware remaining distance in the navigation sheet; CSV export gains avg_accuracy/place/notes columns (quoted-safe)
