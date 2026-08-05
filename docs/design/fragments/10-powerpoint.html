@@ -68,7 +68,7 @@
 #s-ppt .thumbs .scroll-rail { right: -8px; top: 34px; bottom: 46px; }
 
 /* ---- Center stage ---- */
-#s-ppt .stagecol { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; position: relative; }
+#s-ppt .stagecol { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; min-height: 0; position: relative; }
 #s-ppt .slide-wrap { position: relative; flex: none; }
 #s-ppt .slide {
   width: 100%; aspect-ratio: 16/9; border-radius: 14px; position: relative; overflow: hidden;
@@ -155,7 +155,7 @@
   background: radial-gradient(50% 90% at 50% 0%, rgba(124,77,255,.16), transparent 72%);
   pointer-events: none;
 }
-#s-ppt .stage-row { margin-top: auto; display: flex; align-items: center; gap: 16px; padding: 0 4px 16px; }
+#s-ppt .stage-row { position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 16px; padding: 0 4px 16px; }
 #s-ppt .stage-note { font-size: 11.5px; color: var(--txt-3); }
 #s-ppt .stage-row .toolbar { position: absolute; left: 50%; transform: translateX(-50%); bottom: 12px; }
 #s-ppt .laser { width: 34px; height: 34px; border-radius: var(--r-sm); display: flex; align-items: center; justify-content: center; }

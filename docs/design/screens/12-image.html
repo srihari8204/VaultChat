@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VaultChat · D2 — The offline vault</title>
+<title>VaultChat · B6 — Images — compare & inspect</title>
 <style>/* ============================================================
    VaultChat Design System — tokens.css
    Dark · Glassmorphism · Fluent/Linear-grade · Accent #7C4DFF
@@ -566,101 +566,153 @@
   filter: drop-shadow(0 2px 6px rgba(0,0,0,.6));
 }
 </style>
-<style>#s-offline .body { align-items: stretch; min-height: 0; }
-#s-offline .main { flex: 1; min-width: 0; display: flex; gap: 20px; padding: 26px 36px 24px; }
-#s-offline .left { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 18px; }
+<style>#s-image .body { flex: 1; min-height: 0; display: flex; align-items: stretch; }
 
-/* ---- Header ---- */
-#s-offline .head { display: flex; align-items: center; gap: 16px; flex: none; }
-#s-offline .amber-tile {
-  width: 54px; height: 54px; border-radius: 16px; flex: none;
+#s-image .filecard-mini {
+  width: 30px; height: 30px; border-radius: 9px; flex: none;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(251,191,36,.10); border: 1px solid rgba(251,191,36,.35);
-  color: var(--warn); box-shadow: var(--inner-hi), 0 4px 18px rgba(251,191,36,.12);
+  color: #fff; font-size: 8.5px; font-weight: 700; letter-spacing: .4px;
+  box-shadow: var(--inner-hi);
 }
-#s-offline .head h1 { font-size: 26px; font-weight: 720; letter-spacing: -.4px; line-height: 1.1;
-  background: var(--grad-text); -webkit-background-clip: text; background-clip: text; color: transparent; }
-#s-offline .head .sub { font-size: 12px; color: var(--txt-3); margin-top: 2px; }
-#s-offline .tg-row { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-radius: var(--r-md); }
-#s-offline .tg-row .t1 { font-size: 12.5px; font-weight: 600; }
-#s-offline .tg-row .t2 { font-size: 10.5px; color: var(--txt-3); }
+#s-image .fmt-lbl { font-size: 10.5px; color: var(--txt-3); margin-left: 2px; }
 
-/* ---- KPI strip ---- */
-#s-offline .kpis { display: flex; gap: 14px; flex: none; }
-#s-offline .kpi { flex: 1; display: flex; align-items: center; gap: 13px; padding: 16px 18px; border-radius: var(--r-lg); }
-#s-offline .kpi .k-ic {
-  width: 38px; height: 38px; border-radius: 11px; flex: none;
-  display: flex; align-items: center; justify-content: center;
-  background: rgba(235,232,255,.06); border: 1px solid var(--stroke); color: var(--txt-2);
+/* ---- Stage ---- */
+#s-image .stage { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; padding: 20px; position: relative; }
+#s-image .photo {
+  position: relative; flex: 1; min-height: 0;
+  border-radius: var(--r-lg); overflow: hidden;
+  border: 1px solid var(--stroke-2);
+  box-shadow: var(--sh-3), var(--inner-hi);
+  background: #0B1120;
 }
-#s-offline .kpi .k-ic.acc  { background: var(--acc-soft); border-color: var(--stroke-acc); color: var(--acc-3); }
-#s-offline .kpi .k-ic.warn { background: rgba(251,191,36,.10); border-color: rgba(251,191,36,.35); color: var(--warn); }
-#s-offline .kpi .k-ic.ok   { background: rgba(52,211,153,.09); border-color: rgba(52,211,153,.35); color: var(--ok); }
-#s-offline .kpi .k-l { font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--txt-3); }
-#s-offline .kpi .k-v { font-size: 18px; font-weight: 700; letter-spacing: -.2px; margin-top: 1px; }
-#s-offline .kpi .k-s { font-size: 11px; color: var(--txt-3); margin-top: 1px; }
+#s-image .ph { position: absolute; inset: 0; }
+#s-image .ph-o {
+  background:
+    linear-gradient(115deg, transparent 42%, rgba(255,255,255,.045) 50%, transparent 58%),
+    radial-gradient(680px 420px at 58% 62%, rgba(125,145,175,.34), rgba(125,145,175,0) 62%),
+    radial-gradient(300px 200px at 52% 46%, rgba(190,210,235,.28), transparent 70%),
+    radial-gradient(1400px 520px at 50% 6%, rgba(71,85,105,.5), transparent 65%),
+    linear-gradient(15deg, rgba(2,6,23,.85), rgba(2,6,23,0) 55%),
+    linear-gradient(160deg, #232C3F 0%, #141B2B 50%, #0B1120 100%);
+}
+#s-image .ph-e {
+  background:
+    linear-gradient(115deg, transparent 42%, rgba(255,255,255,.07) 50%, transparent 58%),
+    radial-gradient(680px 420px at 58% 62%, rgba(196,140,255,.5), rgba(196,140,255,0) 62%),
+    radial-gradient(300px 200px at 52% 46%, rgba(255,214,245,.42), transparent 70%),
+    radial-gradient(1400px 520px at 50% 6%, rgba(124,77,255,.42), transparent 65%),
+    radial-gradient(900px 600px at 90% 96%, rgba(251,113,133,.24), transparent 60%),
+    linear-gradient(15deg, rgba(24,4,44,.82), rgba(24,4,44,0) 55%),
+    linear-gradient(160deg, #2E1B4E 0%, #221238 50%, #140A26 100%);
+}
+#s-image .clip { position: absolute; inset: 0; width: 46%; overflow: hidden; z-index: 2; }
+#s-image .clip .ph { width: 1520px; }
+#s-image .veil {
+  position: absolute; inset: 0; z-index: 3; pointer-events: none;
+  background: radial-gradient(140% 105% at 50% 42%, transparent 58%, rgba(0,0,0,.36));
+}
 
-/* ---- Files table card ---- */
-#s-offline .tcard { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; overflow: hidden; }
-#s-offline .tcard-h { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--stroke); flex: none; }
-#s-offline .tcard-h .tt { font-size: 14px; font-weight: 650; }
-#s-offline .tcard-h .field { width: 240px; height: 32px; }
-#s-offline .dtable { width: 100%; font-size: 12.5px; }
-#s-offline .dtable th {
-  background: transparent; border: 0; border-bottom: 1px solid var(--stroke);
-  padding: 11px 18px; font-size: 10.5px; font-weight: 700; letter-spacing: .9px;
-  text-transform: uppercase; color: var(--txt-3);
+/* compare handle */
+#s-image .handle {
+  position: absolute; left: 46%; top: 0; bottom: 0; width: 2px; z-index: 5;
+  background: rgba(255,255,255,.85);
+  box-shadow: 0 0 18px rgba(124,77,255,.65), 0 0 3px rgba(0,0,0,.5);
 }
-#s-offline .dtable td { border: 0; border-bottom: 1px solid rgba(235,232,255,.05); padding: 12px 18px; color: var(--txt-1); }
-#s-offline .dtable tr:last-child td { border-bottom: 0; }
-#s-offline .dtable .num { text-align: right; color: var(--txt-2); font-variant-numeric: tabular-nums; }
-#s-offline .tile {
-  width: 36px; height: 36px; border-radius: 10px; flex: none; position: relative;
-  display: flex; align-items: center; justify-content: center;
-  color: #fff; font-size: 9px; font-weight: 700; letter-spacing: .4px;
-  box-shadow: var(--inner-hi), 0 2px 8px rgba(0,0,0,.35);
+#s-image .grip {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+  width: 46px; height: 46px; border-radius: 50%;
+  background: rgba(20,18,34,.88);
+  border: 1.5px solid rgba(255,255,255,.72);
+  box-shadow: var(--sh-2), 0 0 24px rgba(124,77,255,.5);
+  display: flex; align-items: center; justify-content: center; color: #fff;
+  backdrop-filter: var(--blur);
 }
-#s-offline .tick {
-  position: absolute; right: -5px; bottom: -5px; width: 16px; height: 16px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  background: var(--ok); border: 2px solid #14121F; color: #06251A;
-}
-#s-offline .tick .ic { width: 8px; height: 8px; }
-#s-offline .tick.pend { background: var(--warn); color: #2E1F02; }
-#s-offline .f-nm { font-size: 12.5px; font-weight: 600; }
-#s-offline .f-mt { font-size: 10.5px; color: var(--txt-3); }
-#s-offline .whr { display: flex; align-items: center; gap: 8px; color: var(--txt-2); }
-#s-offline .whr .avatar { width: 20px; height: 20px; font-size: 8px; border-radius: 7px; }
-#s-offline tr.ghost td { opacity: .62; }
-#s-offline .chip.ghost { color: var(--txt-3); }
-#s-offline .tcard-f { display: flex; align-items: center; gap: 16px; padding: 12px 18px; border-top: 1px solid var(--stroke); flex: none; font-size: 11px; color: var(--txt-3); }
-#s-offline .lg-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-#s-offline .cache-bar { width: 180px; }
+#s-image .handle .tip { position: absolute; left: 50%; top: calc(50% + 40px); transform: translateX(-50%); }
 
-/* ---- Sync queue panel ---- */
-#s-offline .queue { width: 396px; flex: none; display: flex; flex-direction: column; overflow: hidden; }
-#s-offline .q-h { display: flex; align-items: center; gap: 10px; padding: 15px 18px; border-bottom: 1px solid var(--stroke); font-size: 14px; font-weight: 650; flex: none; }
-#s-offline .qrow { display: flex; flex-direction: column; gap: 8px; padding: 13px 18px; border-bottom: 1px solid rgba(235,232,255,.05); }
-#s-offline .qrow .q-top { display: flex; align-items: center; gap: 11px; }
-#s-offline .qrow .tile { width: 32px; height: 32px; border-radius: 9px; font-size: 8.5px; }
-#s-offline .qrow .q-nm { font-size: 12px; font-weight: 600; }
-#s-offline .qrow .q-st { font-size: 10.5px; color: var(--txt-3); }
-#s-offline .qrow .q-pct { font-family: var(--font-mono); font-size: 11px; color: var(--txt-2); margin-left: auto; }
-#s-offline .qrow .progress { height: 4px; }
-#s-offline .fill.done { background: rgba(52,211,153,.55); box-shadow: none; }
-#s-offline .fill.up {
-  background-image: repeating-linear-gradient(60deg, rgba(255,255,255,.28) 0 5px, transparent 5px 10px), var(--grad-acc);
+/* labels & toolbar over photo */
+#s-image .ph-tag {
+  position: absolute; top: 16px; z-index: 4;
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 28px; padding: 0 13px; border-radius: var(--r-pill);
+  background: rgba(10,9,17,.66); border: 1px solid var(--stroke-2);
+  backdrop-filter: var(--blur);
+  font-size: 11.5px; font-weight: 600; color: var(--txt-1);
 }
-#s-offline .q-done { color: var(--ok); }
-#s-offline .q-sec { padding: 12px 18px 6px; font-size: 10px; font-weight: 700; letter-spacing: 1.1px; text-transform: uppercase; color: var(--txt-3); }
-#s-offline .q-queued { display: flex; align-items: center; gap: 11px; padding: 9px 18px; }
-#s-offline .q-note {
-  margin: auto 14px 14px; padding: 12px 14px; border-radius: var(--r-md);
-  background: rgba(52,211,153,.07); border: 1px solid rgba(52,211,153,.25);
-  display: flex; gap: 10px; align-items: flex-start; font-size: 11.5px; color: var(--txt-2); line-height: 1.5;
+#s-image .ph-tag.orig { left: 16px; }
+#s-image .ph-tag.edit { right: 16px; border-color: var(--stroke-acc); color: var(--acc-3); background: rgba(31,19,58,.66); }
+#s-image .ph-tag .sw { width: 9px; height: 9px; border-radius: 3px; }
+
+#s-image .vtool { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 6; }
+#s-image .zoomtxt { font-family: var(--font-mono); font-size: 11.5px; color: var(--txt-1); padding: 0 4px; min-width: 40px; text-align: center; }
+#s-image .tool {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 34px; padding: 0 13px; border-radius: var(--r-sm);
+  font-size: 12px; font-weight: 600; color: var(--txt-2);
 }
-#s-offline .q-note .ic { color: var(--ok); margin-top: 1px; }
-#s-offline .q-note b { color: var(--ok); font-weight: 650; }</style>
+#s-image .tool.active { background: var(--acc-soft-2); color: var(--acc-3); box-shadow: inset 0 0 0 1px var(--stroke-acc); }
+
+/* ---- Filmstrip ---- */
+#s-image .strip { flex: none; display: flex; align-items: center; gap: 12px; padding: 0 4px; }
+#s-image .ths { display: flex; gap: 12px; margin: 0 auto; }
+#s-image .thw { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 132px; }
+#s-image .th {
+  width: 132px; height: 76px; border-radius: 10px; position: relative;
+  border: 1px solid var(--stroke-2); box-shadow: var(--sh-1), var(--inner-hi);
+}
+#s-image .th.sel { box-shadow: 0 0 0 2px var(--acc), 0 4px 18px rgba(124,77,255,.4); }
+#s-image .thw span { font-size: 10px; color: var(--txt-3); max-width: 132px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#s-image .thw.on span { color: var(--txt-1); font-weight: 600; }
+#s-image .bdg {
+  position: absolute; right: 5px; bottom: 5px;
+  font-size: 8px; font-weight: 700; letter-spacing: .5px;
+  padding: 2px 6px; border-radius: 5px;
+  background: rgba(8,7,13,.72); border: 1px solid var(--stroke-2); color: var(--txt-1);
+}
+#s-image .t1 { background: radial-gradient(120px 70px at 60% 40%, rgba(148,163,184,.35), transparent 70%), linear-gradient(150deg,#28303F,#10151F); }
+#s-image .t2 { background: radial-gradient(120px 70px at 58% 55%, rgba(125,145,175,.4), transparent 70%), linear-gradient(160deg,#232C3F,#0B1120); }
+#s-image .t3 { background: radial-gradient(120px 70px at 58% 55%, rgba(196,140,255,.55), transparent 70%), linear-gradient(160deg,#2E1B4E,#140A26); }
+#s-image .t4 { background: radial-gradient(90px 60px at 50% 50%, rgba(52,211,153,.4), transparent 70%), linear-gradient(150deg,#12241E,#0A0F0D); }
+#s-image .t5 { background: radial-gradient(46px 46px at 50% 50%, rgba(158,123,255,.75), rgba(158,123,255,.12) 60%, transparent 75%), linear-gradient(150deg,#191726,#0C0B14); }
+#s-image .t6 { background: radial-gradient(110px 70px at 40% 60%, rgba(251,191,36,.32), transparent 70%), linear-gradient(150deg,#2E2416,#150F08); }
+#s-image .t7 { background: radial-gradient(120px 70px at 55% 40%, rgba(96,165,250,.35), transparent 70%), linear-gradient(150deg,#1A2334,#0B101C); }
+#s-image .strip-count { font-size: 11px; color: var(--txt-3); white-space: nowrap; }
+
+/* ---- Info panel ---- */
+#s-image .info {
+  width: 320px; flex: none;
+  display: flex; flex-direction: column;
+  background: rgba(15, 14, 24, 0.55);
+  border-left: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+  position: relative;
+}
+#s-image .info-body { padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 12px; overflow: hidden; min-height: 0; }
+#s-image .ihead-ic {
+  width: 30px; height: 30px; border-radius: 9px; flex: none;
+  background: var(--acc-soft); color: var(--acc-3);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: inset 0 0 0 1px var(--stroke-acc);
+}
+#s-image .fileblock { display: flex; align-items: center; gap: 11px; padding: 11px 12px; border-radius: var(--r-md); background: rgba(235,232,255,.04); border: 1px solid var(--stroke); }
+#s-image .fileblock .f-ic {
+  width: 38px; height: 38px; border-radius: 10px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 9px; font-weight: 700; box-shadow: var(--inner-hi);
+}
+#s-image .xrows { display: flex; flex-direction: column; }
+#s-image .xrow { display: flex; align-items: center; justify-content: space-between; padding: 6.5px 2px; border-bottom: 1px solid var(--stroke); }
+#s-image .xrow:last-child { border-bottom: none; }
+#s-image .xrow .k { font-size: 11px; color: var(--txt-3); }
+#s-image .xrow .v { font-size: 12px; color: var(--txt-1); font-variant-numeric: tabular-nums; font-weight: 500; }
+#s-image .hist { display: flex; align-items: flex-end; gap: 3px; height: 42px; padding: 0 2px; }
+#s-image .hist i { flex: 1; border-radius: 2px 2px 0 0; background: rgba(237,232,255,.28); }
+#s-image .locrow { display: flex; align-items: center; gap: 8px; }
+#s-image .loccoord { font-family: var(--font-mono); font-size: 10px; color: var(--txt-3); }
+#s-image .ver { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--stroke); background: rgba(235,232,255,.03); }
+#s-image .ver.on { border-color: var(--stroke-acc); background: var(--acc-soft); }
+#s-image .ver .mini { width: 26px; height: 26px; border-radius: 8px; flex: none; border: 1px solid var(--stroke-2); }
+#s-image .ver .vn { font-size: 11.5px; font-weight: 600; }
+#s-image .ver .vs { font-size: 10px; color: var(--txt-3); }</style>
 <style>
   html, body { margin: 0; background: #050409; }
   body { min-height: 100vh; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 20px 0 28px; }
@@ -768,221 +820,146 @@
   <symbol id="i-log" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 5.5h16M4 9.5h10M4 13.5h16M4 17.5h7"/><circle cx="19" cy="9.5" r="1.3" fill="currentColor" stroke="none"/></g></symbol>
 </svg>
 
-<div class="vcx-fit"><div class="vcx-stage"><div class="screen" id="s-offline">
-  <header class="vc-titlebar">
-    <div class="vc-brand"><span class="vc-logo"><svg class="ic"><use href="#i-shield"/></svg></span>VaultChat</div>
-    <div class="vc-search"><svg class="ic sm"><use href="#i-search"/></svg><span class="grow">Search chats, people, and every file…</span><span class="kbd">Ctrl K</span></div>
-    <div class="row gap-4">
-      <span class="icon-btn sm" style="color:var(--warn)"><svg class="ic sm"><use href="#i-cloud-off"/></svg></span>
-      <span class="icon-btn sm"><svg class="ic sm"><use href="#i-bell"/></svg></span>
-      <span class="avatar sm av-6" style="width:26px;height:26px;font-size:10px;border-radius:9px">SB</span>
+<div class="vcx-fit"><div class="vcx-stage"><div class="screen" id="s-image">
+  <header class="vc-viewerbar">
+    <span class="icon-btn framed"><svg class="ic"><use href="#i-chev-l"/></svg></span>
+    <span class="filecard-mini ft-img">JPG</span>
+    <div class="col" style="gap:1px">
+      <span style="font-size:13.5px;font-weight:600">hero-shoot-042.jpg</span>
+      <span style="font-size:11px;color:var(--txt-3)">Shared by Maya Chen · 8.4 MB · in Atlas Launch</span>
     </div>
+    <span class="secure-pill"><svg class="ic sm"><use href="#i-lock"/></svg>Rendered inside VaultChat — no external apps, nothing leaves the vault</span>
+    <div class="grow"></div>
+    <div class="row gap-6">
+      <span class="chip active" style="height:24px;font-size:10.5px;padding:0 10px">JPG</span>
+      <span class="chip" style="height:24px;font-size:10.5px;padding:0 10px">GIF</span>
+      <span class="chip" style="height:24px;font-size:10.5px;padding:0 10px">SVG</span>
+      <span class="chip" style="height:24px;font-size:10.5px;padding:0 10px">WEBP</span>
+      <span class="fmt-lbl">supported</span>
+    </div>
+    <span class="icon-btn"><svg class="ic"><use href="#i-download"/></svg></span>
+    <span class="icon-btn"><svg class="ic"><use href="#i-share"/></svg></span>
+    <span class="icon-btn"><svg class="ic"><use href="#i-more-v"/></svg></span>
     <div class="vc-win"><span>─</span><span>▢</span><span class="close">✕</span></div>
   </header>
 
-  <div class="row grow body">
-    <nav class="vc-rail">
-      <div class="rail-btn"><svg class="ic lg"><use href="#i-chat"/></svg></div><div class="rail-label">Chats</div>
-      <div class="rail-btn"><svg class="ic lg"><use href="#i-book"/></svg></div><div class="rail-label">Shelf</div>
-      <div class="rail-btn"><svg class="ic lg"><use href="#i-search"/></svg></div><div class="rail-label">Search</div>
-      <div class="rail-btn active"><svg class="ic lg"><use href="#i-cloud-off"/></svg></div><div class="rail-label">Offline</div>
-      <div class="rail-btn"><svg class="ic lg"><use href="#i-shield"/></svg></div><div class="rail-label">Vault</div>
-      <div class="rail-spacer"></div>
-      <div class="rail-btn"><svg class="ic lg"><use href="#i-settings"/></svg></div>
-    </nav>
+  <div class="body">
+    <main class="stage">
+      <div class="photo">
+        <div class="ph ph-e"></div>
+        <div class="clip"><div class="ph ph-o"></div></div>
+        <div class="veil"></div>
 
-    <main class="main">
-      <div class="left">
-        <div class="head">
-          <span class="amber-tile"><svg class="ic lg"><use href="#i-cloud-off"/></svg></span>
-          <div class="col">
-            <h1>Offline</h1>
-            <span class="sub">Your vault, with or without a connection</span>
-          </div>
-          <span class="chip warn" style="margin-left:6px"><svg class="ic sm"><use href="#i-cloud-off"/></svg>You're offline — changes sync when you're back</span>
-          <div class="grow"></div>
-          <div class="tg-row glass-quiet">
-            <div class="col" style="gap:1px">
-              <span class="t1">Available offline</span>
-              <span class="t2">Keep these files on this device</span>
-            </div>
-            <span class="toggle on"></span>
-          </div>
+        <span class="ph-tag orig"><span class="sw" style="background:linear-gradient(135deg,#3B4A63,#141B2B)"></span>hero-shoot-042.jpg · Original</span>
+        <span class="ph-tag edit"><span class="sw" style="background:var(--grad-acc)"></span>hero-v2.webp · Edited</span>
+
+        <div class="handle">
+          <span class="grip"><svg class="ic"><use href="#i-swap"/></svg></span>
+          <span class="tip">Drag to compare</span>
         </div>
 
-        <div class="kpis">
-          <div class="kpi glass">
-            <span class="k-ic acc"><svg class="ic"><use href="#i-download"/></svg></span>
-            <div class="col"><span class="k-l">Downloaded</span><span class="k-v">1.2 GB</span><span class="k-s">34 files on this device</span></div>
-          </div>
-          <div class="kpi glass">
-            <span class="k-ic warn"><svg class="ic"><use href="#i-sync"/></svg></span>
-            <div class="col"><span class="k-l">Sync pending</span><span class="k-v">3</span><span class="k-s">items upload on reconnect</span></div>
-          </div>
-          <div class="kpi glass">
-            <span class="k-ic ok"><svg class="ic"><use href="#i-cloud-check"/></svg></span>
-            <div class="col"><span class="k-l">Synced</span><span class="k-v">Everything else</span><span class="k-s">up to date as of 09:41</span></div>
-          </div>
-          <div class="kpi glass">
-            <span class="k-ic"><svg class="ic"><use href="#i-globe"/></svg></span>
-            <div class="col"><span class="k-l">Auto-download</span><span class="k-v" style="display:flex"><span class="chip" style="height:24px;font-size:11px">Wi-Fi only</span></span><span class="k-s" style="margin-top:3px">videos over 100 MB stay in cloud</span></div>
-          </div>
-        </div>
-
-        <div class="tcard glass">
-          <div class="tcard-h">
-            <span class="tt">Offline files</span>
-            <span class="chip" style="height:23px;font-size:10.5px">34 kept offline</span>
-            <div class="grow"></div>
-            <span class="chip active" style="height:24px;font-size:11px">All</span>
-            <span class="chip" style="height:24px;font-size:11px">Pending</span>
-            <span class="chip" style="height:24px;font-size:11px">Cloud-only</span>
-            <div class="field"><svg class="ic sm"><use href="#i-search"/></svg><span class="grow">Filter files…</span></div>
-          </div>
-          <table class="dtable">
-            <tr><th style="width:44%">Name</th><th style="width:22%">Where</th><th class="num" style="width:10%;text-align:right">Size</th><th style="width:24%">State</th></tr>
-            <tr>
-              <td><div class="row gap-12"><span class="tile ft-doc">DOC<span class="tick"><svg class="ic"><use href="#i-check"/></svg></span></span><div class="col" style="gap:1px"><span class="f-nm">Atlas-Proposal.docx</span><span class="f-mt">24 pages · opened 2h ago</span></div></div></td>
-              <td><span class="whr"><span class="avatar av-5">AL</span>Atlas Launch</span></td>
-              <td class="num">4.2 MB</td>
-              <td><span class="chip ok" style="height:24px;font-size:11px"><svg class="ic sm"><use href="#i-check"/></svg>Available offline</span></td>
-            </tr>
-            <tr>
-              <td><div class="row gap-12"><span class="tile ft-xls">XLS<span class="tick"><svg class="ic"><use href="#i-check"/></svg></span></span><div class="col" style="gap:1px"><span class="f-nm">Atlas-Financials-FY26.xlsx</span><span class="f-mt">6 sheets · opened yesterday</span></div></div></td>
-              <td><span class="whr"><span class="avatar av-5">AL</span>Atlas Launch</span></td>
-              <td class="num">1.8 MB</td>
-              <td><span class="chip ok" style="height:24px;font-size:11px"><svg class="ic sm"><use href="#i-check"/></svg>Available offline</span></td>
-            </tr>
-            <tr>
-              <td><div class="row gap-12"><span class="tile ft-aud">MP3<span class="tick"><svg class="ic"><use href="#i-check"/></svg></span></span><div class="col" style="gap:1px"><span class="f-nm">Standup-2026-08-04.mp3</span><span class="f-mt">12:04 · transcript saved</span></div></div></td>
-              <td><span class="whr"><span class="avatar av-4">RP</span>Ravi Patel</span></td>
-              <td class="num">9.2 MB</td>
-              <td><span class="chip ok" style="height:24px;font-size:11px"><svg class="ic sm"><use href="#i-check"/></svg>Available offline</span></td>
-            </tr>
-            <tr>
-              <td><div class="row gap-12"><span class="tile ft-img">WEBP<span class="tick pend"><svg class="ic"><use href="#i-sync"/></svg></span></span><div class="col" style="gap:1px"><span class="f-nm">hero-v2.webp</span><span class="f-mt">edited 22 min ago</span></div></div></td>
-              <td><span class="whr"><span class="avatar av-3">DG</span>Design Guild</span></td>
-              <td class="num">3.4 MB</td>
-              <td><span class="chip warn" style="height:24px;font-size:11px"><svg class="ic sm"><use href="#i-sync"/></svg>Sync pending ↑</span></td>
-            </tr>
-            <tr>
-              <td><div class="row gap-12"><span class="tile ft-pdf">PDF<span class="tick pend"><svg class="ic"><use href="#i-sync"/></svg></span></span><div class="col" style="gap:1px"><span class="f-nm">Atlas-MSA-Contract.pdf</span><span class="f-mt">14 pages · 2 new annotations</span></div></div></td>
-              <td><span class="whr"><span class="avatar av-2">LN</span>Legal — NDA Review</span></td>
-              <td class="num">2.1 MB</td>
-              <td><span class="chip warn" style="height:24px;font-size:11px"><svg class="ic sm"><use href="#i-sync"/></svg>Sync pending · edited offline</span></td>
-            </tr>
-            <tr class="ghost">
-              <td><div class="row gap-12"><span class="tile ft-vid">MP4</span><div class="col" style="gap:1px"><span class="f-nm">Atlas-Demo-v3.mp4</span><span class="f-mt">04:36 · over Wi-Fi limit</span></div></div></td>
-              <td><span class="whr"><span class="avatar av-5">AL</span>Atlas Launch</span></td>
-              <td class="num">148 MB</td>
-              <td><span class="chip ghost" style="height:24px;font-size:11px">☁ Cloud only · 148 MB</span></td>
-            </tr>
-            <tr class="ghost">
-              <td><div class="row gap-12"><span class="tile ft-zip">ZIP</span><div class="col" style="gap:1px"><span class="f-nm">Design-Assets.zip</span><span class="f-mt">247 files inside</span></div></div></td>
-              <td><span class="whr"><span class="avatar av-3">DG</span>Design Guild</span></td>
-              <td class="num">86 MB</td>
-              <td><span class="chip ghost" style="height:24px;font-size:11px">☁ Cloud only</span></td>
-            </tr>
-            <tr>
-              <td><div class="row gap-12"><span class="tile ft-ppt">PPT<span class="tick"><svg class="ic"><use href="#i-check"/></svg></span></span><div class="col" style="gap:1px"><span class="f-nm">Atlas-Launch-Deck.pptx</span><span class="f-mt">18 slides · notes cached</span></div></div></td>
-              <td><span class="whr"><span class="avatar av-5">AL</span>Atlas Launch</span></td>
-              <td class="num">12.6 MB</td>
-              <td><span class="chip ok" style="height:24px;font-size:11px"><svg class="ic sm"><use href="#i-check"/></svg>Available offline</span></td>
-            </tr>
-            <tr>
-              <td><div class="row gap-12"><span class="tile ft-txt">MD<span class="tick pend"><svg class="ic"><use href="#i-sync"/></svg></span></span><div class="col" style="gap:1px"><span class="f-nm">release-notes.md</span><span class="f-mt">edited offline · 12 KB</span></div></div></td>
-              <td><span class="whr"><span class="avatar av-4">R3</span>Release 1.3</span></td>
-              <td class="num">12 KB</td>
-              <td><span class="chip warn" style="height:24px;font-size:11px"><svg class="ic sm"><use href="#i-sync"/></svg>Sync pending · edited offline</span></td>
-            </tr>
-            <tr>
-              <td><div class="row gap-12"><span class="tile ft-txt">CSV<span class="tick"><svg class="ic"><use href="#i-check"/></svg></span></span><div class="col" style="gap:1px"><span class="f-nm">metrics.csv</span><span class="f-mt">1,204 rows · pinned</span></div></div></td>
-              <td><span class="whr"><span class="avatar av-4">R3</span>Release 1.3</span></td>
-              <td class="num">64 KB</td>
-              <td><span class="chip ok" style="height:24px;font-size:11px"><svg class="ic sm"><use href="#i-check"/></svg>Available offline</span></td>
-            </tr>
-            <tr>
-              <td><div class="row gap-12"><span class="tile ft-img">JPG<span class="tick"><svg class="ic"><use href="#i-check"/></svg></span></span><div class="col" style="gap:1px"><span class="f-nm">hero-shoot-042.jpg</span><span class="f-mt">6000×4000 · full resolution</span></div></div></td>
-              <td><span class="whr"><span class="avatar av-3">DG</span>Design Guild</span></td>
-              <td class="num">8.4 MB</td>
-              <td><span class="chip ok" style="height:24px;font-size:11px"><svg class="ic sm"><use href="#i-check"/></svg>Available offline</span></td>
-            </tr>
-            <tr class="ghost">
-              <td><div class="row gap-12"><span class="tile ft-aud">WAV</span><div class="col" style="gap:1px"><span class="f-nm">Standup-2026-07-28.wav</span><span class="f-mt">28:11 · archived</span></div></div></td>
-              <td><span class="whr"><span class="avatar av-5">AL</span>Atlas Launch</span></td>
-              <td class="num">302 MB</td>
-              <td><span class="chip ghost" style="height:24px;font-size:11px">☁ Cloud only</span></td>
-            </tr>
-          </table>
-          <div class="grow"></div>
-          <div class="tcard-f">
-            <span class="row gap-6"><span class="lg-dot" style="background:var(--ok)"></span>Available offline</span>
-            <span class="row gap-6"><span class="lg-dot" style="background:var(--warn)"></span>Sync pending</span>
-            <span class="row gap-6"><span class="lg-dot" style="background:var(--txt-3)"></span>Cloud-only</span>
-            <div class="grow"></div>
-            <span>Offline cache · <b style="color:var(--txt-2)">1.2 GB of 4 GB</b></span>
-            <div class="progress cache-bar"><div class="fill" style="width:30%"></div></div>
-          </div>
-          <div class="scroll-rail"><div class="thumb" style="top:22%;height:30%"></div></div>
+        <div class="toolbar vtool">
+          <span class="icon-btn"><svg class="ic"><use href="#i-zoom-out"/></svg></span>
+          <span class="zoomtxt">100%</span>
+          <span class="icon-btn"><svg class="ic"><use href="#i-zoom-in"/></svg></span>
+          <span class="sep"></span>
+          <span class="icon-btn"><svg class="ic"><use href="#i-rotate"/></svg></span>
+          <span class="tool active"><svg class="ic"><use href="#i-compare"/></svg>Compare</span>
+          <span class="icon-btn"><svg class="ic"><use href="#i-slideshow"/></svg></span>
+          <span class="icon-btn"><svg class="ic"><use href="#i-expand"/></svg></span>
+          <span class="sep"></span>
+          <span class="icon-btn active"><svg class="ic"><use href="#i-exif"/></svg></span>
         </div>
       </div>
 
-      <aside class="queue glass">
-        <div class="q-h">
-          <svg class="ic" style="color:var(--txt-2)"><use href="#i-sync"/></svg>
-          <span>Sync queue</span>
-          <div class="grow"></div>
-          <span class="chip warn" style="height:23px;font-size:10.5px">Paused — offline</span>
+      <div class="strip">
+        <span class="icon-btn sm"><svg class="ic sm"><use href="#i-chev-l"/></svg></span>
+        <div class="ths">
+          <div class="thw"><div class="th t1"></div><span>hero-shoot-041.jpg</span></div>
+          <div class="thw on"><div class="th t2 sel"></div><span>hero-shoot-042.jpg</span></div>
+          <div class="thw on"><div class="th t3 sel"></div><span>hero-v2.webp</span></div>
+          <div class="thw"><div class="th t4"><span class="bdg">GIF</span></div><span>logo-motion.gif</span></div>
+          <div class="thw"><div class="th t5"><span class="bdg">SVG</span></div><span>atlas-mark.svg</span></div>
+          <div class="thw"><div class="th t6"></div><span>booth-04.jpg</span></div>
+          <div class="thw"><div class="th t7"></div><span>team-offsite.jpg</span></div>
         </div>
-
-        <div class="qrow">
-          <div class="q-top">
-            <span class="tile ft-doc">DOC</span>
-            <div class="col" style="gap:1px"><span class="q-nm">Atlas-Proposal.docx</span><span class="q-st q-done">Synced · 09:41</span></div>
-            <span class="q-pct q-done"><svg class="ic sm" style="display:inline-block;vertical-align:-2px"><use href="#i-check"/></svg></span>
-          </div>
-          <div class="progress"><div class="fill done" style="width:100%"></div></div>
-        </div>
-
-        <div class="qrow">
-          <div class="q-top">
-            <span class="tile ft-xls">XLS</span>
-            <div class="col" style="gap:1px"><span class="q-nm">Atlas-Financials-FY26.xlsx</span><span class="q-st q-done">Synced · 09:12</span></div>
-            <span class="q-pct q-done"><svg class="ic sm" style="display:inline-block;vertical-align:-2px"><use href="#i-check"/></svg></span>
-          </div>
-          <div class="progress"><div class="fill done" style="width:100%"></div></div>
-        </div>
-
-        <div class="qrow" style="background:rgba(124,77,255,.05)">
-          <div class="q-top">
-            <span class="tile ft-img">WEBP</span>
-            <div class="col" style="gap:1px"><span class="q-nm">hero-v2.webp</span><span class="q-st">Uploading — resumes when you're back online</span></div>
-            <span class="q-pct">64%</span>
-          </div>
-          <div class="progress"><div class="fill up" style="width:64%"></div></div>
-        </div>
-
-        <div class="q-sec">Queued · 2</div>
-        <div class="q-queued">
-          <span class="tile ft-pdf" style="width:32px;height:32px;border-radius:9px;font-size:8.5px">PDF</span>
-          <div class="col grow" style="gap:1px"><span class="q-nm">Atlas-MSA-Contract.pdf</span><span class="q-st">2 annotations · edited offline</span></div>
-          <span class="chip" style="height:22px;font-size:10px">Queued</span>
-        </div>
-        <div class="q-queued">
-          <span class="tile ft-txt" style="width:32px;height:32px;border-radius:9px;font-size:8.5px">MD</span>
-          <div class="col grow" style="gap:1px"><span class="q-nm">release-notes.md</span><span class="q-st">edited offline · 12 KB</span></div>
-          <span class="chip" style="height:22px;font-size:10px">Queued</span>
-        </div>
-
-        <div class="q-note">
-          <svg class="ic sm"><use href="#i-check2"/></svg>
-          <span><b>Conflict-free:</b> edits merge when you reconnect. Nothing is overwritten — every offline change keeps its history.</span>
-        </div>
-      </aside>
+        <span class="icon-btn sm"><svg class="ic sm"><use href="#i-chev-r"/></svg></span>
+        <span class="strip-count">7 items · comparing 2</span>
+      </div>
     </main>
+
+    <aside class="info">
+      <div class="panel-h">
+        <span class="ihead-ic"><svg class="ic sm"><use href="#i-exif"/></svg></span>
+        <span class="grow">Info</span>
+        <span class="chip active" style="height:22px;font-size:10px;padding:0 9px">EXIF</span>
+        <span class="icon-btn sm"><svg class="ic sm"><use href="#i-close"/></svg></span>
+      </div>
+      <div class="info-body grow">
+        <div class="fileblock">
+          <span class="f-ic ft-img">JPG</span>
+          <div class="col grow" style="gap:1px">
+            <span style="font-size:12.5px;font-weight:600">hero-shoot-042.jpg</span>
+            <span style="font-size:10.5px;color:var(--txt-3)">JPEG image · 8.4 MB</span>
+          </div>
+        </div>
+
+        <div class="col" style="gap:6px">
+          <span class="section-label">Camera</span>
+          <div class="xrows">
+            <div class="xrow"><span class="k">Camera</span><span class="v">Sony A7 IV</span></div>
+            <div class="xrow"><span class="k">Lens</span><span class="v">FE 35mm f/1.8</span></div>
+            <div class="xrow"><span class="k">Shutter</span><span class="v">1/250 s</span></div>
+            <div class="xrow"><span class="k">Aperture</span><span class="v">ƒ/1.8</span></div>
+            <div class="xrow"><span class="k">ISO</span><span class="v">200</span></div>
+          </div>
+        </div>
+
+        <div class="col" style="gap:6px">
+          <span class="section-label">Image</span>
+          <div class="xrows">
+            <div class="xrow"><span class="k">Dimensions</span><span class="v">6000 × 4000 · 24 MP</span></div>
+            <div class="xrow"><span class="k">File size</span><span class="v">8.4 MB</span></div>
+            <div class="xrow"><span class="k">Color profile</span><span class="v">sRGB IEC61966-2.1</span></div>
+            <div class="xrow"><span class="k">Taken</span><span class="v">02 Aug 2026 · 18:42</span></div>
+          </div>
+        </div>
+
+        <div class="col" style="gap:7px">
+          <span class="section-label">Histogram</span>
+          <div class="hist">
+            <i style="height:8%"></i><i style="height:14%"></i><i style="height:22%"></i><i style="height:31%"></i><i style="height:27%"></i><i style="height:36%"></i><i style="height:46%"></i><i style="height:58%"></i><i style="height:52%"></i><i style="height:66%"></i><i style="height:78%"></i><i style="height:70%"></i><i style="height:60%"></i><i style="height:50%"></i><i style="height:57%"></i><i style="height:68%"></i><i style="height:55%"></i><i style="height:44%"></i><i style="height:35%"></i><i style="height:40%"></i><i style="height:30%"></i><i style="height:24%"></i><i style="height:29%"></i><i style="height:20%"></i><i style="height:15%"></i><i style="height:11%"></i><i style="height:7%"></i><i style="height:4%"></i>
+          </div>
+        </div>
+
+        <div class="col" style="gap:7px">
+          <span class="section-label">Location</span>
+          <div class="locrow">
+            <span class="chip"><svg class="ic sm"><use href="#i-globe"/></svg>Presidio, San Francisco</span>
+            <span class="loccoord">37.798 N · 122.466 W</span>
+          </div>
+        </div>
+
+        <div class="col grow" style="gap:7px;justify-content:flex-end">
+          <div class="row" style="justify-content:space-between">
+            <span class="section-label">Versions</span>
+            <span class="chip active" style="height:20px;font-size:9.5px;padding:0 8px"><svg class="ic sm" style="width:11px;height:11px"><use href="#i-compare"/></svg>Comparing</span>
+          </div>
+          <div class="ver on">
+            <span class="mini" style="background:radial-gradient(26px 18px at 55% 55%, rgba(125,145,175,.4), transparent 75%), linear-gradient(160deg,#232C3F,#0B1120)"></span>
+            <div class="col grow" style="gap:1px"><span class="vn">Original</span><span class="vs">hero-shoot-042.jpg · 8.4 MB</span></div>
+          </div>
+          <div class="ver on">
+            <span class="mini" style="background:radial-gradient(26px 18px at 55% 55%, rgba(196,140,255,.55), transparent 75%), linear-gradient(160deg,#2E1B4E,#140A26)"></span>
+            <div class="col grow" style="gap:1px"><span class="vn">Edited</span><span class="vs">hero-v2.webp · 2.1 MB · WEBP</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="scroll-rail"><div class="thumb" style="top:12%"></div></div>
+    </aside>
   </div>
 </div></div></div>
-<div class="vcx-meta"><b>VaultChat</b> · D2 — The offline vault · 1920 × 1080 · dark / glass / #7C4DFF</div>
+<div class="vcx-meta"><b>VaultChat</b> · B6 — Images — compare & inspect · 1920 × 1080 · dark / glass / #7C4DFF</div>
 <script>
   const fit = () => {
     const k = Math.min(1, (innerWidth - 48) / 1920);

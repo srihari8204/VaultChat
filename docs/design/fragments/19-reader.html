@@ -70,10 +70,11 @@
 
 /* ---- The paper page (sepia · dark ink) ---- */
 #s-reader .paper {
-  position: absolute; top: 24px; bottom: -40px; left: 50%; transform: translateX(-50%);
+  position: absolute; top: 24px; bottom: 88px; left: 50%; transform: translateX(-50%);
   width: 720px;
   padding: 46px 92px 60px;
-  border-radius: 14px 14px 0 0;
+  border-radius: 14px;
+  overflow: hidden;
   background: linear-gradient(180deg, #F8F3E9 0%, #F6F1E7 55%, #F3EDE0 100%);
   box-shadow: 0 40px 90px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.05), inset 0 1px 0 rgba(255,255,255,.75);
   font-family: var(--font-serif);
@@ -191,6 +192,12 @@
   font-variant-numeric: tabular-nums;
 }
 #s-reader .page-chip { position: absolute; right: 56px; top: calc(110px + (100% - 240px) * .42 - 12px); }
+
+#s-reader .paper::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 96px;
+  background: linear-gradient(180deg, rgba(243,237,224,0) 0%, #F3EDE0 68%);
+  pointer-events: none;
+}
 
 /* ---- Bottom toolbar ---- */
 #s-reader .rd-toolbar {

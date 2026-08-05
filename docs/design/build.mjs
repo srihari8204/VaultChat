@@ -85,21 +85,21 @@ const screenShell = (s, frag) => `<!doctype html>
 <style>
   html, body { margin: 0; background: #050409; }
   body { min-height: 100vh; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 20px 0 28px; }
-  .fitwrap { flex: none; overflow: hidden; border-radius: 18px; box-shadow: 0 30px 90px rgba(0,0,0,.6), 0 0 0 1px rgba(235,232,255,.08); }
-  .stage { width: 1920px; height: 1080px; transform-origin: top left; }
-  .metabar { font: 500 12px/1 "Segoe UI", system-ui, sans-serif; color: #6B6684; letter-spacing: .3px; }
-  .metabar b { color: #A29DC0; font-weight: 600; }
+  .vcx-fit { flex: none; overflow: hidden; border-radius: 18px; box-shadow: 0 30px 90px rgba(0,0,0,.6), 0 0 0 1px rgba(235,232,255,.08); }
+  .vcx-stage { width: 1920px; height: 1080px; transform-origin: top left; }
+  .vcx-meta { font: 500 12px/1 "Segoe UI", system-ui, sans-serif; color: #6B6684; letter-spacing: .3px; }
+  .vcx-meta b { color: #A29DC0; font-weight: 600; }
 </style>
 </head>
 <body>
 ${sprite}
-<div class="fitwrap"><div class="stage">${frag.html}</div></div>
-<div class="metabar"><b>VaultChat</b> · ${s.step} — ${s.title} · 1920 × 1080 · dark / glass / #7C4DFF</div>
+<div class="vcx-fit"><div class="vcx-stage">${frag.html}</div></div>
+<div class="vcx-meta"><b>VaultChat</b> · ${s.step} — ${s.title} · 1920 × 1080 · dark / glass / #7C4DFF</div>
 <script>
   const fit = () => {
     const k = Math.min(1, (innerWidth - 48) / 1920);
-    document.querySelector(".stage").style.transform = "scale(" + k + ")";
-    const w = document.querySelector(".fitwrap");
+    document.querySelector(".vcx-stage").style.transform = "scale(" + k + ")";
+    const w = document.querySelector(".vcx-fit");
     w.style.width = 1920 * k + "px"; w.style.height = 1080 * k + "px";
   };
   addEventListener("resize", fit); fit();
@@ -129,39 +129,39 @@ const infographicCss = `
   .ig-head .sub { margin-top: 16px; font-size: 19px; color: var(--txt-2); max-width: 980px; line-height: 1.55; }
   .ig-head .meta { margin-top: 22px; display: flex; gap: 10px; flex-wrap: wrap; }
   .ig-legend { margin-left: auto; flex: none; width: 900px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-  .lg-card { padding: 18px 20px; }
-  .lg-card h3 { font-size: 11px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: var(--txt-3); margin-bottom: 12px; }
-  .swatches { display: flex; gap: 8px; }
-  .sw { flex: 1; }
-  .sw i { display: block; height: 40px; border-radius: 9px; border: 1px solid var(--stroke-2); }
-  .sw b { display: block; font: 600 10px/1 var(--font-mono); color: var(--txt-2); margin-top: 7px; }
-  .sw span { display: block; font-size: 9.5px; color: var(--txt-3); margin-top: 3px; }
-  .type-row { display: flex; align-items: baseline; gap: 18px; }
-  .geo-row { display: flex; gap: 10px; align-items: center; }
+  .ig-lgcard { padding: 18px 20px; }
+  .ig-lgcard h3 { font-size: 11px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: var(--txt-3); margin-bottom: 12px; }
+  .ig-swatches { display: flex; gap: 8px; }
+  .ig-sw { flex: 1; }
+  .ig-sw i { display: block; height: 40px; border-radius: 9px; border: 1px solid var(--stroke-2); }
+  .ig-sw b { display: block; font: 600 10px/1 var(--font-mono); color: var(--txt-2); margin-top: 7px; }
+  .ig-sw span { display: block; font-size: 9.5px; color: var(--txt-3); margin-top: 3px; }
+  .ig-typerow { display: flex; align-items: baseline; gap: 18px; }
+  .ig-georow { display: flex; gap: 10px; align-items: center; }
 
   .ig-section { margin-top: 96px; }
-  .sec-head { display: flex; align-items: flex-end; gap: 28px; margin-bottom: 44px; }
-  .sec-kicker { font-size: 13px; font-weight: 800; letter-spacing: 3px; text-transform: uppercase; color: var(--acc-2); }
-  .sec-head h2 { font-size: 42px; font-weight: 720; letter-spacing: -1px; margin-top: 6px; }
-  .sec-head .desc { font-size: 15.5px; color: var(--txt-2); max-width: 1240px; line-height: 1.6; margin-left: auto; padding-bottom: 6px; }
-  .sec-rule { height: 1px; background: linear-gradient(90deg, var(--stroke-acc), transparent 70%); margin: 18px 0 0; }
+  .ig-sechead { display: flex; align-items: flex-end; gap: 28px; margin-bottom: 44px; }
+  .ig-seckicker { font-size: 13px; font-weight: 800; letter-spacing: 3px; text-transform: uppercase; color: var(--acc-2); }
+  .ig-sechead h2 { font-size: 42px; font-weight: 720; letter-spacing: -1px; margin-top: 6px; }
+  .ig-sechead .desc { font-size: 15.5px; color: var(--txt-2); max-width: 1240px; line-height: 1.6; margin-left: auto; padding-bottom: 6px; }
+  .ig-secrule { height: 1px; background: linear-gradient(90deg, var(--stroke-acc), transparent 70%); margin: 18px 0 0; }
 
   .ig-row { display: flex; align-items: flex-start; }
   .ig-row + .ig-rowgap { position: relative; height: 96px; }
-  .frame { width: ${FRAME_W}px; flex: none; }
-  .frame-top { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
-  .step-pill { display: inline-flex; align-items: center; justify-content: center; min-width: 52px; height: 30px; padding: 0 13px; border-radius: 999px; background: var(--grad-acc); color: #fff; font-size: 13px; font-weight: 800; letter-spacing: .5px; box-shadow: 0 4px 18px rgba(124,77,255,.45); }
-  .frame-title { font-size: 17px; font-weight: 650; letter-spacing: -.2px; }
-  .shot { width: ${FRAME_W}px; height: ${FRAME_H}px; border-radius: 16px; overflow: hidden; border: 1px solid var(--stroke-2); box-shadow: 0 24px 70px rgba(0,0,0,.55), 0 0 0 1px rgba(124,77,255,.07); position: relative; background: #0B0A13; }
-  .shot-inner { width: 1920px; height: 1080px; transform: scale(${SCALE}); transform-origin: top left; }
-  .frame-cap { margin-top: 12px; font-size: 12.5px; line-height: 1.55; color: var(--txt-2); padding-right: 8px; }
-  .frame.missing .shot { display: flex; align-items: center; justify-content: center; color: var(--txt-3); font-size: 14px; }
+  .ig-frame { width: ${FRAME_W}px; flex: none; }
+  .ig-frametop { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .ig-steppill { display: inline-flex; align-items: center; justify-content: center; min-width: 52px; height: 30px; padding: 0 13px; border-radius: 999px; background: var(--grad-acc); color: #fff; font-size: 13px; font-weight: 800; letter-spacing: .5px; box-shadow: 0 4px 18px rgba(124,77,255,.45); }
+  .ig-frametitle { font-size: 17px; font-weight: 650; letter-spacing: -.2px; }
+  .ig-shot { width: ${FRAME_W}px; height: ${FRAME_H}px; border-radius: 16px; overflow: hidden; border: 1px solid var(--stroke-2); box-shadow: 0 24px 70px rgba(0,0,0,.55), 0 0 0 1px rgba(124,77,255,.07); position: relative; background: #0B0A13; }
+  .ig-shotin { width: 1920px; height: 1080px; transform: scale(${SCALE}); transform-origin: top left; }
+  .ig-framecap { margin-top: 12px; font-size: 12.5px; line-height: 1.55; color: var(--txt-2); padding-right: 8px; }
+  .ig-frame.missing .ig-shot { display: flex; align-items: center; justify-content: center; color: var(--txt-3); font-size: 14px; }
 
-  .arr { flex: none; width: 86px; height: ${FRAME_H}px; margin-top: 42px; display: flex; align-items: center; justify-content: center; }
-  .rowlink { position: absolute; inset: 0; overflow: visible; }
+  .ig-arr { flex: none; width: 86px; height: ${FRAME_H}px; margin-top: 42px; display: flex; align-items: center; justify-content: center; }
+  .ig-rowlink { position: absolute; inset: 0; overflow: visible; }
 
   .ig-flow { margin-top: 110px; }
-  .flow-canvas { position: relative; height: 700px; margin-top: 40px; }
+  .ig-flowcanvas { position: relative; height: 700px; margin-top: 40px; }
   .fl-node { position: absolute; display: flex; align-items: center; gap: 12px; padding: 16px 22px; border-radius: 16px; background: var(--glass-2); border: 1px solid var(--stroke-2); backdrop-filter: var(--blur); box-shadow: var(--sh-2), var(--inner-hi); font-size: 15px; font-weight: 600; white-space: nowrap; }
   .fl-node .ic { color: var(--acc-2); }
   .fl-node small { display: block; font-size: 11px; font-weight: 500; color: var(--txt-3); margin-top: 2px; }
@@ -172,7 +172,7 @@ const infographicCss = `
 
   .ig-foot { margin-top: 120px; display: flex; align-items: center; gap: 24px; border-top: 1px solid var(--stroke); padding-top: 36px; color: var(--txt-3); font-size: 13px; }
   .ig-foot .chips { display: flex; gap: 10px; margin-left: auto; }
-  .fitbar { position: sticky; top: 0; z-index: 90; display: flex; justify-content: center; padding: 10px 0; }
+  .ig-fitbar { position: sticky; top: 0; z-index: 90; display: flex; justify-content: center; padding: 10px 0; }
 `;
 
 const arrowSvg = `
@@ -189,7 +189,7 @@ const arrowSvg = `
 
 function rowLink(fromX, toX, h) {
   // S-curve from bottom-center of last frame in row to top-center of first frame in next row
-  return `<svg class="rowlink" width="3520" height="${h}" viewBox="0 0 3520 ${h}" fill="none">
+  return `<svg class="ig-rowlink" width="3520" height="${h}" viewBox="0 0 3520 ${h}" fill="none">
     <path d="M${fromX} 6 C ${fromX} ${h * 0.62}, ${toX} ${h * 0.3}, ${toX} ${h - 12}"
       stroke="#8f68ff" stroke-opacity=".7" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="1 9"/>
     <path d="M${toX - 9} ${h - 24}l9 14 9-14" fill="none" stroke="#9E7BFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -207,14 +207,14 @@ function buildFrames(section, frags) {
     row.forEach((s, i) => {
       const frag = frags.get(s.slug);
       const shot = frag
-        ? `<div class="shot"><div class="shot-inner">${frag.html}</div></div>`
-        : `<div class="shot">screen pending — ${s.file}</div>`;
-      html += `<div class="frame${frag ? "" : " missing"}">
-        <div class="frame-top"><span class="step-pill">${s.step}</span><span class="frame-title">${s.title}</span></div>
+        ? `<div class="ig-shot"><div class="ig-shotin">${frag.html}</div></div>`
+        : `<div class="ig-shot">screen pending — ${s.file}</div>`;
+      html += `<div class="ig-frame${frag ? "" : " missing"}">
+        <div class="ig-frametop"><span class="ig-steppill">${s.step}</span><span class="ig-frametitle">${s.title}</span></div>
         ${shot}
-        <div class="frame-cap">${s.caption}</div>
+        <div class="ig-framecap">${s.caption}</div>
       </div>`;
-      if (i < row.length - 1) html += `<div class="arr">${arrowSvg}</div>`;
+      if (i < row.length - 1) html += `<div class="ig-arr">${arrowSvg}</div>`;
     });
     html += `</div>`;
     if (ri < rows.length - 1) {
@@ -273,10 +273,10 @@ function flowMap() {
     </div>`).join("");
   return `
   <div class="ig-section ig-flow">
-    <div class="sec-head"><div><div class="sec-kicker">How it all connects</div><h2>One window, four surfaces</h2></div>
+    <div class="ig-sechead"><div><div class="ig-seckicker">How it all connects</div><h2>One window, four surfaces</h2></div>
       <div class="desc">The navigation model in one picture: chat is the hub; splitting, viewing and reading are one gesture away; the bookshelf, search, offline vault and security wrap around everything.</div></div>
-    <div class="sec-rule"></div>
-    <div class="flow-canvas">
+    <div class="ig-secrule"></div>
+    <div class="ig-flowcanvas">
       <svg class="fl-svg">${svg}</svg>
       ${nodesHtml}
     </div>
@@ -286,35 +286,35 @@ function flowMap() {
 /* ---- Header legend ---- */
 const legend = `
 <div class="ig-legend">
-  <div class="glass lg-card">
+  <div class="glass ig-lgcard">
     <h3>Palette</h3>
-    <div class="swatches">
-      <div class="sw"><i style="background:#08070D"></i><b>#08070D</b><span>ground</span></div>
-      <div class="sw"><i style="background:#12111C"></i><b>#12111C</b><span>surface</span></div>
-      <div class="sw"><i style="background:rgba(24,22,40,.55);backdrop-filter:blur(24px)"></i><b>glass 55%</b><span>blur 24</span></div>
-      <div class="sw"><i style="background:#7C4DFF"></i><b>#7C4DFF</b><span>accent</span></div>
-      <div class="sw"><i style="background:linear-gradient(135deg,#9257FF,#6C3DF4)"></i><b>gradient</b><span>primary</span></div>
-      <div class="sw"><i style="background:#EDEBFA"></i><b>#EDEBFA</b><span>text</span></div>
+    <div class="ig-swatches">
+      <div class="ig-sw"><i style="background:#08070D"></i><b>#08070D</b><span>ground</span></div>
+      <div class="ig-sw"><i style="background:#12111C"></i><b>#12111C</b><span>surface</span></div>
+      <div class="ig-sw"><i style="background:rgba(24,22,40,.55);backdrop-filter:blur(24px)"></i><b>glass 55%</b><span>blur 24</span></div>
+      <div class="ig-sw"><i style="background:#7C4DFF"></i><b>#7C4DFF</b><span>accent</span></div>
+      <div class="ig-sw"><i style="background:linear-gradient(135deg,#9257FF,#6C3DF4)"></i><b>gradient</b><span>primary</span></div>
+      <div class="ig-sw"><i style="background:#EDEBFA"></i><b>#EDEBFA</b><span>text</span></div>
     </div>
   </div>
-  <div class="glass lg-card">
+  <div class="glass ig-lgcard">
     <h3>Type &amp; geometry</h3>
-    <div class="type-row" style="margin-bottom:12px">
+    <div class="ig-typerow" style="margin-bottom:12px">
       <span style="font-size:26px;font-weight:700;letter-spacing:-.5px">Display 26</span>
       <span style="font-size:15px;font-weight:600">Title 15</span>
       <span style="font-size:13px;color:var(--txt-2)">Body 13</span>
       <span style="font-size:11px;color:var(--txt-3)">Caption 11</span>
       <span style="font-family:var(--font-mono);font-size:12px;color:var(--acc-2)">mono 12</span>
     </div>
-    <div class="geo-row">
+    <div class="ig-georow">
       <span class="chip">radius 8–20</span><span class="chip">8pt spacing grid</span>
       <span class="chip">blur 24 · saturate 1.5</span><span class="chip">1px inner light</span>
       <span class="chip active">accent = state</span>
     </div>
   </div>
-  <div class="glass lg-card" style="grid-column:1/-1">
+  <div class="glass ig-lgcard" style="grid-column:1/-1">
     <h3>Formats the viewer renders natively — never an external app</h3>
-    <div class="geo-row" style="flex-wrap:wrap;gap:7px">
+    <div class="ig-georow" style="flex-wrap:wrap;gap:7px">
       ${"DOC DOCX XLS XLSX PPT PPTX PDF TXT MD CSV JSON XML HTML JPG PNG GIF SVG WEBP MP4 MOV MKV MP3 WAV ZIP RAR 7Z CODE LOG".split(" ").map(f => `<span class="chip" style="height:23px;font-size:10.5px">${f}</span>`).join("")}
     </div>
   </div>
@@ -323,11 +323,11 @@ const legend = `
 function buildInfographic(frags, bodyOnly) {
   const sections = SECTIONS.map(sec => `
     <div class="ig-section">
-      <div class="sec-head">
-        <div><div class="sec-kicker">${sec.kicker}</div><h2>${sec.title}</h2></div>
+      <div class="ig-sechead">
+        <div><div class="ig-seckicker">${sec.kicker}</div><h2>${sec.title}</h2></div>
         <div class="desc">${sec.desc}</div>
       </div>
-      <div class="sec-rule"></div>
+      <div class="ig-secrule"></div>
       <div style="height:40px"></div>
       ${buildFrames(sec, frags)}
     </div>`).join("");
@@ -335,7 +335,7 @@ function buildInfographic(frags, bodyOnly) {
   const canvas = `
   <div class="ig-root">
   ${sprite}
-  <div class="fitbar"><span class="chip" id="fit-toggle" style="cursor:pointer;height:30px;font-size:12px">Fit width · click for 100%</span></div>
+  <div class="ig-fitbar"><span class="chip" id="fit-toggle" style="cursor:pointer;height:30px;font-size:12px">Fit width · click for 100%</span></div>
   <div class="ig-viewport"><div class="ig-canvas" id="ig-canvas">
     <div class="ig-head">
       <div class="ig-mark"><svg class="ic"><use href="#i-shield"/></svg></div>
