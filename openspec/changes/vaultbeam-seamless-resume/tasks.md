@@ -14,7 +14,7 @@ protocol can be reviewed before later work depends on it:**
 | Stage | Scope | Merge gate |
 |---|---|---|
 | ✅ 1 | Wire protocol & logical chunk identity (§1) — **DONE**, PR #23 | vectors + Rust + parity + `tsc` all green; existing vectors verified byte-identical |
-| 2 | `TransferManager` + bitmaps + session core (§2) | pure self-checks green under `tsx` |
+| ✅ 2 | `TransferManager` + bitmaps + session core (§2) — **DONE** | 5/5 vaultBeam suites green under `tsx`; tsc 0 |
 | 3 | Transport drivers (§5) | driver contract + physical-unit tests |
 | 4 | Resume engine — `recv_mask`, versioning, handshake (§4, §6.7) | Go tests + Node contract parity |
 | 5 | Crash recovery (§3) | restart/reboot rows of the matrix |
@@ -55,23 +55,26 @@ Phase 1 must not merge unless every compatibility and parity test passes.
 
 ## 2. Bitmaps + session core (pure, unit-testable, no I/O)
 
-- [ ] 2.1 `lib/vaultBeam/bitmap.ts` (new) — `ChunkBitmap`: `set/test/popcount/union/
+- [x] 2.1 `lib/vaultBeam/bitmap.ts` (new) — `ChunkBitmap`: `set/test/popcount/union/
       toBase64/fromBase64/toRLE/fromRLE/complement/firstUnset`, fixed width from
       `chunkCount`. Embedded self-check in the house style (`lib/vaultBeamSegments.ts`
       pattern): round-trip, union idempotence, RLE round-trip, out-of-range safety.
-- [ ] 2.2 `lib/vaultBeam/session.ts` (new) — `TransferSession`: identity, grid, `PeerHave`,
+- [x] 2.2 `lib/vaultBeam/session.ts` (new) — `TransferSession`: identity, grid, `PeerHave`,
       `R2Have`, in-memory `inflight`, `workList()`, `progressBytes()`, `isComplete()`,
       `mergePeerHave()`, `markVerified()`. Pure w.r.t. transport; no imports from any
       driver. Self-check covers §2 rules R1–R5 of `design.md`.
-- [ ] 2.3 `lib/vaultBeam/manager.ts` (new) — `TransferManager`, the process-wide singleton:
+- [x] 2.3 `lib/vaultBeam/manager.ts` (new) — `TransferManager`, the process-wide singleton:
       session map (single-flight by transferId), admission queue, driver registry
       (`registerDriver`), scheduling, retry/cooldown policy, and launch recovery. Absorbs
       `lib/vaultBeamQueue.ts` and the ad-hoc `controllers` map in `vaultBeamController.ts`
       so there is exactly one scheduler. Slices `workList()` into `ChunkRun[]` of the active
       driver's `unitChunks()` width.
-- [ ] 2.4 `lib/vaultBeam/blockMap.ts` (new) — block ↔ canonical-chunk-run mapping, so
-      `R2Have` (chunk granularity) derives from `uploaded_mask` (block granularity) ∧ plan,
-      and a block is uploadable iff every chunk in its run is in the work-list.
+- [x] 2.4 `lib/vaultBeam/blockMap.ts` (new) — block ↔ canonical-chunk-run mapping, so
+      `R2Have` (chunk granularity) derives from `uploaded_mask` (block granularity) ∧ plan.
+      **Corrected during implementation:** a block moves when **any** of its chunks is
+      needed, not when *every* one is — an R2 object is written and read whole, so a block
+      straddling the edge of a needed region must still move. Bounded to one partial block
+      per edge; the common resume shape (a held prefix) has exactly one.
 
 ## 3. Persistence + crash recovery
 
