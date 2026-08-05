@@ -16,7 +16,7 @@ protocol can be reviewed before later work depends on it:**
 | ✅ 1 | Wire protocol & logical chunk identity (§1) — **DONE**, PR #23 | vectors + Rust + parity + `tsc` all green; existing vectors verified byte-identical |
 | ✅ 2 | `TransferManager` + bitmaps + session core (§2) — **DONE** | 5/5 vaultBeam suites green under `tsx`; tsc 0 |
 | ✅ 3 | Transport drivers (§5) — relay, P2P, LAN + contract harness — **DONE** | driver contract + physical-unit tests green; Rust 16+6; parity green |
-| 4 | Resume engine — `recv_mask`, versioning, handshake (§4, §6.7) | Go tests + Node contract parity |
+| ✅ 4 | Resume engine — `recv_mask`, versioning, handshake (§4) — **backend DONE**; client wiring (§6.7) lands with stage 6 | 5 pure Go tests green, 5 DB-gated ready; Node mirrored |
 | 5 | Crash recovery (§3) | restart/reboot rows of the matrix |
 | 6 | Production hardening (§6.4–6.6, §7, §8) | full transport-switching matrix (§8.2) |
 
@@ -96,32 +96,32 @@ Phase 1 must not merge unless every compatibility and parity test passes.
 
 ## 4. Backend: `recv_mask`, session versioning, completion handshake
 
-- [ ] 4.1 `vaultchat-backend/migrations/070_vaultbeam_recv_mask.sql` (new) —
+- [x] 4.1 `vaultchat-backend/migrations/070_vaultbeam_recv_mask.sql` (new) —
       `ALTER TABLE vb_transfer ADD COLUMN IF NOT EXISTS recv_mask BYTEA;`
       `ALTER TABLE vb_transfer ADD COLUMN IF NOT EXISTS session_version INT NOT NULL DEFAULT 1;`
       Idempotent, content-free, mirrors the 060 header rationale.
-- [ ] 4.1a Session versioning (`design.md` §7) in **both** backends: return
+- [x] 4.1a Session versioning (`design.md` §7) in **both** backends: return
       `sessionVersion` from `/relay/init` and `GET /relay/:id`; require and validate it on
       `/relay/{uploaded,grow,received,complete,abort}`; **409 `stale session`** on mismatch;
       increment only on the `ON CONFLICT … DO UPDATE` re-init path.
-- [ ] 4.1b Completion handshake (`design.md` §8) in **both** backends: `/relay/complete`
+- [x] 4.1b Completion handshake (`design.md` §8) in **both** backends: `/relay/complete`
       gains the `sessionVersion` + `popcount == chunk_count` guards and stays idempotent;
       **`/relay/uploaded` gains the missing `complete`/`aborted` state check** (410) — today
       it has none (`vaultbeam.go:634-692`, `vaultbeam.js:160-185`), so a sender can still set
       bits on a completed transfer; `/relay/abort` refuses to abort a completed session.
       `vb_complete` carries `sessionVersion`.
-- [ ] 4.2 `vaultchat-backend-go/internal/routes/vaultbeam.go` — `POST /vaultbeam/relay/received`
+- [x] 4.2 `vaultchat-backend-go/internal/routes/vaultbeam.go` — `POST /vaultbeam/relay/received`
       (recipient-only, mask width validated against `chunk_count`, union-merge server-side
       so an out-of-order post cannot clear bits); add `recvMask` to `vbRelayState`; register
       in `RegisterVaultbeam`.
-- [ ] 4.3 `vaultchat-backend/routes/vaultbeam.js` — the same endpoint and field, byte-for-byte
+- [x] 4.3 `vaultchat-backend/routes/vaultbeam.js` — the same endpoint and field, byte-for-byte
       equivalent. **Required**: Node is the documented rollback target; shipping only Go
       silently breaks rollback.
-- [ ] 4.4 `vaultchat-backend/contract/endpoints.json` — register the new route so the
+- [x] 4.4 `vaultchat-backend/contract/endpoints.json` — register the new route so the
       contract runner covers it.
-- [ ] 4.5 Confirm the union-merge semantics with a test that posts an older mask after a
+- [x] 4.5 Confirm the union-merge semantics with a test that posts an older mask after a
       newer one and asserts no bit is lost.
-- [ ] 4.6 Go tests (`vaultchat-backend-go/internal/routes/`): stale-version 409; completion
+- [x] 4.6 Go tests (`vaultchat-backend-go/internal/routes/`): stale-version 409; completion
       idempotence; completion rejected on an incomplete mask; `uploaded` 410 after complete;
       abort refused after complete. Node parity via `vaultchat-backend/contract/run.js`.
 
