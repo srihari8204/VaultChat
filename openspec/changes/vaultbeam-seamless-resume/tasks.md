@@ -18,7 +18,7 @@ protocol can be reviewed before later work depends on it:**
 | ✅ 3 | Transport drivers (§5) — relay, P2P, LAN + contract harness — **DONE** | driver contract + physical-unit tests green; Rust 16+6; parity green |
 | ✅ 4 | Resume engine — `recv_mask`, versioning, handshake (§4) — **backend DONE**; client wiring (§6.7) lands with stage 6 | 5 pure Go tests green, 5 DB-gated ready; Node mirrored |
 | ✅ 5 | Crash recovery (§3) — **DONE** (call-site swap + legacy cleanup ride with stage 6) | 9/9 vaultBeam suites; restart/reboot matrix rows still on-device |
-| 🟡 6 | Production hardening — composition root, standing audit, F-2 **DONE**; controller swap + progress + flag flip remain | full transport-switching matrix (§8.2), **on-device** |
+| 🟡 6 | Production hardening — wiring, audit, F-2, engine entry point, flag-gated controller swap **DONE**. Remaining: bubble copy (7.2/7.3), legacy cleanups (1.7/3.4/3.5), **flag flip** | full transport-switching matrix (§8.2), **on-device — BLOCKING** |
 
 Phase 1 must not merge unless every compatibility and parity test passes.
 
@@ -161,15 +161,15 @@ Phase 1 must not merge unless every compatibility and parity test passes.
 
 ## 6. Session-owned orchestration + the audits
 
-- [ ] 6.1 `lib/vaultBeamController.ts` — replace the tier ladder in `startSend`/`startReceive`
+- [x] 6.1 `lib/vaultBeamController.ts` — replace the tier ladder in `startSend`/`startReceive`
       with `manager.start(session)`. **Delete the reset at line 354.** The controller keeps
       only: manifest mint/parse, the UI store, and socket listener arming.
-- [ ] 6.2 `lib/vaultBeam/manager.ts` — driver selection, cooldown/demotion, re-promotion
+- [x] 6.2 `lib/vaultBeam/manager.ts` — driver selection, cooldown/demotion, re-promotion
       (relay→P2P), and the `ACTIVE` park-with-retry state from `design.md` §2 R5. Persist
       `last_transport` + `driver_state` so backoff survives a restart.
 - [ ] 6.2a Delete `lib/vaultBeamQueue.ts`; auto-download admission becomes
       `manager.enqueue()`. `lib/vaultBeamIngest.ts` calls the manager instead.
-- [ ] 6.3 Signaling: add `vaultbeam_have` to `relayToPeer` in **both**
+- [x] 6.3 Signaling: add `vaultbeam_have` to `relayToPeer` in **both**
       `vaultchat-backend/server.js:1014-1016` and
       `vaultchat-backend-go/internal/realtime/handlers.go:257-259`; seal/open it with the
       existing `callCrypto` cipher in the P2P driver.
@@ -199,14 +199,14 @@ Phase 1 must not merge unless every compatibility and parity test passes.
       - one `AbortController` per session, held by the session, borrowed by the driver.
 - [x] 6.6 Fix secondary finding F-2 via the §8 handshake: the receiver runs the completion
       report on **any** terminal success, whichever transport delivered the last chunk.
-- [ ] 6.7 Client side of §7/§8: session key becomes `(transferId, sessionVersion)`; a 409
+- [x] 6.7 Client side of §7/§8: session key becomes `(transferId, sessionVersion)`; a 409
       `stale session` triggers rehydrate-from-server then re-derive; the sender treats an
       unknown/expired transfer on resume as complete-or-expired and drops its persisted send
       rather than re-uploading.
 
 ## 7. Progress semantics + UI
 
-- [ ] 7.1 `lib/vaultBeamController.ts` — `setState` progress comes from
+- [x] 7.1 `lib/vaultBeamController.ts` — `setState` progress comes from
       `session.progressBytes()` (verified only). The `meterTick` reset-on-decrease branch
       (`vaultBeamController.ts:105`) becomes dead code — `PeerHave` is monotonic — and is
       removed.
