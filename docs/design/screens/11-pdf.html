@@ -735,8 +735,15 @@
 
 /* ---- Vertical annotation toolbar ---- */
 #s-pdf .atools { position: absolute; left: 36px; top: 50%; transform: translateY(-50%); flex-direction: column; z-index: 7; }
-#s-pdf .atools .sep { width: 22px; height: 1px; margin: 4px auto; }
-#s-pdf .atool-tip { position: absolute; left: 88px; top: calc(50% - 76px); z-index: 7; }
+#s-pdf .atools .sep { width: 44px; height: 1px; margin: 4px auto; }
+#s-pdf .atool {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 6px 4px 5px; border-radius: 10px; width: 62px;
+  color: var(--txt-2);
+}
+#s-pdf .atool span { font-size: 9px; font-weight: 600; letter-spacing: .2px; }
+#s-pdf .atool.active { background: var(--acc-soft); color: var(--acc-3); box-shadow: inset 0 0 0 1px var(--stroke-acc); }
+#s-pdf .atool-tip { position: absolute; left: 112px; top: calc(50% - 106px); z-index: 7; }
 
 /* ---- Search ---- */
 #s-pdf .fsearch { position: absolute; top: 22px; right: 40px; width: 292px; z-index: 8; }
@@ -1055,14 +1062,14 @@
       </svg>
 
       <div class="toolbar atools">
-        <span class="icon-btn"><svg class="ic"><use href="#i-frame"/></svg></span>
-        <span class="icon-btn active"><svg class="ic"><use href="#i-marker"/></svg></span>
-        <span class="icon-btn"><svg class="ic"><use href="#i-pen"/></svg></span>
-        <span class="icon-btn"><svg class="ic"><use href="#i-comment"/></svg></span>
-        <span class="icon-btn"><svg class="ic"><use href="#i-form"/></svg></span>
-        <span class="icon-btn"><svg class="ic"><use href="#i-sign"/></svg></span>
+        <span class="atool"><svg class="ic"><use href="#i-frame"/></svg><span>Select</span></span>
+        <span class="atool active"><svg class="ic"><use href="#i-marker"/></svg><span>Highlight</span></span>
+        <span class="atool"><svg class="ic"><use href="#i-pen"/></svg><span>Draw</span></span>
+        <span class="atool"><svg class="ic"><use href="#i-comment"/></svg><span>Comment</span></span>
+        <span class="atool"><svg class="ic"><use href="#i-form"/></svg><span>Fill form</span></span>
+        <span class="atool"><svg class="ic"><use href="#i-sign"/></svg><span>Sign</span></span>
         <span class="sep"></span>
-        <span class="icon-btn"><svg class="ic"><use href="#i-ocr"/></svg></span>
+        <span class="atool"><svg class="ic"><use href="#i-ocr"/></svg><span>OCR find</span></span>
       </div>
       <span class="tip atool-tip"><svg class="ic sm" style="color:var(--warn)"><use href="#i-marker"/></svg>Highlight — drag over text</span>
 
