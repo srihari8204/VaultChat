@@ -1,0 +1,168 @@
+<style>
+#m-home .head-row { display: flex; align-items: flex-end; gap: 12px; }
+#m-home .head-row .m-ic-btn { margin-bottom: 2px; }
+
+#m-home .pad { padding: 0 16px 12px; }
+#m-home .chips-pad { padding: 0 16px 10px; }
+
+#m-home .list { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#m-home .m-convo { padding: 14px 16px; }
+#m-home .m-convo + .m-convo::before {
+  content: ""; position: absolute; left: 79px; right: 0; top: 0;
+  height: 1px; background: rgba(235,232,255,.055);
+}
+#m-home .m-convo .col-r { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex: none; }
+#m-home .typing { color: var(--acc-2); font-weight: 560; }
+#m-home .nm-row { display: flex; align-items: center; gap: 7px; min-width: 0; }
+#m-home .nm-row .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#m-home .grp { flex: none; color: var(--txt-3); }
+#m-home .pv-row { display: flex; align-items: center; gap: 6px; min-width: 0; margin-top: 2px; }
+#m-home .pv-row .ic { flex: none; color: var(--txt-3); }
+
+#m-home .e2e-note {
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  padding: 14px 86px 14px 20px;
+  font-size: 11.5px; color: var(--txt-3);
+}
+#m-home .e2e-note .ic { width: 13px; height: 13px; color: var(--ok); }
+
+#m-home .m-fab { bottom: 98px; }
+</style>
+<div class="mscreen" id="m-home">
+  <div class="m-status">
+    <span>9:16</span>
+    <div class="sb-right">
+      <span class="m-sig"><i></i><i></i><i></i><i></i></span>
+      <span class="m-wifi"></span>
+      <span class="m-batt"><i></i></span>
+    </div>
+  </div>
+
+  <div class="m-largehead">
+    <div class="head-row">
+      <div class="grow">
+        <h1>Chats</h1>
+        <div class="sub">8 conversations · all sealed</div>
+      </div>
+      <span class="m-ic-btn framed"><svg class="ic"><use href="#i-pen"/></svg></span>
+    </div>
+  </div>
+
+  <div class="pad">
+    <div class="m-search">
+      <svg class="ic sm"><use href="#i-search"/></svg>
+      <span class="grow">Search chats, people, and every file</span>
+    </div>
+  </div>
+
+  <div class="chips-pad">
+    <div class="m-chips">
+      <span class="m-chip on">All</span>
+      <span class="m-chip">Unread <span class="badge" style="height:17px;min-width:17px;font-size:9.5px">15</span></span>
+      <span class="m-chip">Groups</span>
+      <span class="m-chip">Pinned</span>
+    </div>
+  </div>
+
+  <div class="list">
+    <div class="m-convo">
+      <span class="avatar av-1">MC<span class="presence" style="background:var(--ok);border-color:#0B0A13"></span></span>
+      <div class="col grow" style="gap:0">
+        <div class="nm-row"><span class="nm">Maya Chen</span></div>
+        <div class="pv-row"><span class="pv typing">typing…</span></div>
+      </div>
+      <div class="col-r">
+        <span class="tm" style="color:var(--acc-2)">09:16</span>
+        <svg class="ic sm" style="color:var(--acc-2)"><use href="#i-pin"/></svg>
+      </div>
+    </div>
+
+    <div class="m-convo">
+      <span class="avatar av-5">AL</span>
+      <div class="col grow" style="gap:0">
+        <div class="nm-row"><span class="nm">Atlas Launch</span><svg class="ic sm grp"><use href="#i-folder"/></svg></div>
+        <div class="pv-row"><span class="pv">Maya: uploaded Atlas-Proposal.docx</span></div>
+      </div>
+      <div class="col-r">
+        <span class="tm">09:02</span>
+        <span class="badge">3</span>
+      </div>
+    </div>
+
+    <div class="m-convo">
+      <span class="avatar av-3">DG</span>
+      <div class="col grow" style="gap:0">
+        <div class="nm-row"><span class="nm">Design Guild</span><svg class="ic sm grp"><use href="#i-folder"/></svg></div>
+        <div class="pv-row"><span class="pv">Marcus: rollout plan — long one</span></div>
+      </div>
+      <div class="col-r">
+        <span class="tm">08:47</span>
+        <span class="m-chip" style="height:19px;padding:0 8px;font-size:10px">Long read</span>
+      </div>
+    </div>
+
+    <div class="m-convo">
+      <span class="avatar av-2">EV</span>
+      <div class="col grow" style="gap:0">
+        <div class="nm-row"><span class="nm">Elena Voss</span></div>
+        <div class="pv-row"><svg class="ic sm"><use href="#i-check2"/></svg><span class="pv">You: signed page 14, back to you</span></div>
+      </div>
+      <div class="col-r">
+        <span class="tm">08:31</span>
+        <svg class="ic sm" style="color:var(--txt-3)"><use href="#i-pin"/></svg>
+      </div>
+    </div>
+
+    <div class="m-convo">
+      <span class="avatar av-4">R3</span>
+      <div class="col grow" style="gap:0">
+        <div class="nm-row"><span class="nm">Release 1.3</span><svg class="ic sm grp"><use href="#i-folder"/></svg></div>
+        <div class="pv-row"><svg class="ic sm"><use href="#i-log"/></svg><span class="pv">deploy.log — 2 warnings, 0 errors</span></div>
+      </div>
+      <div class="col-r">
+        <span class="tm">Yesterday</span>
+        <span class="badge">12</span>
+      </div>
+    </div>
+
+    <div class="m-convo">
+      <span class="avatar av-4">RP<span class="presence" style="background:var(--ok);border-color:#0B0A13"></span></span>
+      <div class="col grow" style="gap:0">
+        <div class="nm-row"><span class="nm">Ravi Patel</span></div>
+        <div class="pv-row"><span class="pv">pivot table looks right now, check D14</span></div>
+      </div>
+      <div class="col-r">
+        <span class="tm">Yesterday</span>
+        <svg class="ic sm" style="color:var(--txt-3)"><use href="#i-bell"/></svg>
+      </div>
+    </div>
+
+    <div class="m-convo">
+      <span class="avatar av-2">LN</span>
+      <div class="col grow" style="gap:0">
+        <div class="nm-row"><span class="nm">Legal — NDA Review</span><svg class="ic sm grp"><use href="#i-folder"/></svg></div>
+        <div class="pv-row"><svg class="ic sm"><use href="#i-timer"/></svg><span class="pv">Elena: expiring link set — 24h</span></div>
+      </div>
+      <div class="col-r">
+        <span class="tm">Mon</span>
+      </div>
+    </div>
+
+    <div class="e2e-note">
+      <svg class="ic"><use href="#i-lock"/></svg>
+      Every conversation is end-to-end encrypted
+    </div>
+  </div>
+
+  <span class="m-fab"><svg class="ic"><use href="#i-pen"/></svg></span>
+
+  <nav class="m-tabbar">
+    <span class="m-tab on"><svg class="ic"><use href="#i-chat"/></svg><span>Chats</span><span class="m-badge">15</span></span>
+    <span class="m-tab"><svg class="ic"><use href="#i-book"/></svg><span>Shelf</span></span>
+    <span class="m-tab"><svg class="ic"><use href="#i-search"/></svg><span>Search</span></span>
+    <span class="m-tab"><svg class="ic"><use href="#i-cloud-off"/></svg><span>Offline</span><span class="m-badge">3</span></span>
+    <span class="m-tab"><svg class="ic"><use href="#i-shield"/></svg><span>Vault</span></span>
+  </nav>
+
+  <div class="m-home"><i></i></div>
+</div>
