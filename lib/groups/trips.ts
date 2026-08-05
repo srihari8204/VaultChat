@@ -40,6 +40,13 @@ export interface TripPing {
   arrived: boolean;
   /** Distance from the shared route, if the trip has one. */
   offRouteM?: number;
+  /**
+   * Follow-the-leader: the leader's route, so followers measure deviation
+   * against the agreed road rather than against whatever each phone routed for
+   * itself. Only ever set by the leader, and only periodically — it is coarse
+   * and bounded, not a full-fidelity polyline.
+   */
+  route?: LatLng[];
   at: number;
 }
 
@@ -160,6 +167,31 @@ export function everyoneArrived(list: Participant[]): boolean {
 }
 
 /** Minutes until an ETA, floored at zero. */
+/** Points kept when a leader shares its route. Enough to measure against. */
+export const ROUTE_MAX_POINTS = 120;
+
+/**
+ * Reduce a route to at most `max` points by even sampling, always keeping the
+ * first and last.
+ *
+ * Even sampling rather than Douglas-Peucker: this only has to be good enough to
+ * measure cross-track distance against, and an even sample cannot drop a whole
+ * limb of the route the way an aggressive tolerance can. Losing a limb would
+ * report every member travelling along it as off-route — a false alarm about
+ * the one thing the group is watching for.
+ */
+export function simplifyRoute(shape: LatLng[], max: number = ROUTE_MAX_POINTS): LatLng[] {
+  if (max < 2) return shape.length ? [shape[0]] : [];
+  if (shape.length <= max) return shape;
+  const out: LatLng[] = [];
+  const step = (shape.length - 1) / (max - 1);
+  for (let i = 0; i < max; i++) out.push(shape[Math.round(i * step)]);
+  // Rounding can land the last sample short of the end; the destination end of
+  // a route is exactly where deviation matters most.
+  out[out.length - 1] = shape[shape.length - 1];
+  return out;
+}
+
 export function minutesUntil(etaAt: number, now: number): number {
   return Math.max(0, Math.round((etaAt - now) / 60000));
 }
@@ -251,6 +283,28 @@ if (require.main === module) {
   // 10. minutes
   if (minutesUntil(now + 90_000, now) !== 2) throw new Error('90s rounds to 2 minutes');
   if (minutesUntil(now - 60_000, now) !== 0) throw new Error('a passed ETA floors at zero');
+
+  // simplifyRoute — follow-the-leader shares a bounded route
+  const line = (n: number): LatLng[] =>
+    Array.from({ length: n }, (_, i) => ({ lat: 10 + i * 0.001, lng: 20 }));
+
+  if (simplifyRoute(line(50), 120).length !== 50) throw new Error('a short route is untouched');
+  const cut = simplifyRoute(line(1000), 120);
+  if (cut.length !== 120) throw new Error(`expected 120 points, got ${cut.length}`);
+  if (cut[0].lat !== 10) throw new Error('the start must be kept');
+  if (cut[cut.length - 1].lat !== line(1000)[999].lat) throw new Error('the END must be kept — deviation matters most there');
+  // strictly increasing: an even sample must not repeat or reverse points
+  for (let i = 1; i < cut.length; i++) {
+    if (cut[i].lat <= cut[i - 1].lat) throw new Error('sampled route must stay ordered and distinct');
+  }
+  // A simplified route must still measure deviation sanely: a point ON the
+  // original line is on the sample too.
+  const onLine = { lat: 10 + 500 * 0.001, lng: 20 };
+  if (distanceFromRoute(onLine, cut) > 50) throw new Error('a point on the route must not read as off it');
+  // …and one well off it still reads as off.
+  if (distanceFromRoute({ lat: 10.5, lng: 21 }, cut) < 1000) throw new Error('a far point must read as off route');
+  if (simplifyRoute([], 120).length !== 0) throw new Error('empty route stays empty');
+  if (simplifyRoute(line(3), 1).length !== 1) throw new Error('a degenerate max must not crash');
 
   console.log('groups/trips self-check OK');
 }

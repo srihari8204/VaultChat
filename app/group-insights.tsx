@@ -23,8 +23,11 @@ import { can as hasPerm, type Permission } from '../lib/groups/permissions';
 import { getCurrentUserAsync } from './(constants)/authService';
 import {
   summarise, groupSummary, weekBounds, formatDistance,
-  type MemberInsight, type Range,
+  foldTripHistory, frequentDestinations,
+  type MemberInsight, type Range, type TripRecord, type TripAnnounce,
 } from '../lib/groups/analytics';
+import { announceFromMessage } from '../lib/groups/tripSession';
+import { getMessages } from '../lib/chatService';
 import { type CircleMember } from '../lib/family/types';
 
 type Span = 'week' | 'month';
@@ -51,6 +54,7 @@ export default function GroupInsightsScreen() {
   const [me, setMe] = useState<string | null>(null);
   // Whether this user may see OTHER members' figures. Starts denied.
   const [mayViewOthers, setMayViewOthers] = useState(false);
+  const [trips, setTrips] = useState<TripRecord[]>([]);
 
   const range: Range = useMemo(() => {
     const now = Date.now();
@@ -88,6 +92,28 @@ export default function GroupInsightsScreen() {
       // filtering at render would still have built everyone else's numbers.
       const ids = allowed ? mem.map((m) => m.id) : (myId ? [myId] : []);
       setInsights(summarise(ids, track, alerts, range));
+
+      // Trip history is a FOLD over the group thread's own announcements plus
+      // the local alert inbox — nothing new is stored and nothing is fetched
+      // for it beyond messages this device already syncs.
+      try {
+        const msgs = await getMessages(groupId, { limit: 300 });
+        const announces: TripAnnounce[] = [];
+        for (const m of msgs) {
+          const a = announceFromMessage(m);
+          if (a?.trip) {
+            announces.push({
+              id: a.trip.id,
+              destinationName: a.trip.destinationName,
+              startedBy: a.trip.startedBy,
+              startedAt: a.trip.startedAt,
+              leaderId: a.trip.leaderId ?? null,
+            });
+          }
+        }
+        if (live) setTrips(foldTripHistory(announces, alerts, range));
+      } catch { /* offline: the rest of the screen still works */ }
+
       setLoading(false);
     })();
     return () => { live = false; };
@@ -184,6 +210,39 @@ export default function GroupInsightsScreen() {
               </Text>
             </View>
           ))}
+
+          <Text style={[st.h, { color: colors.text }]}>Trips</Text>
+          {trips.length === 0 ? (
+            <Text style={{ color: colors.textDim, fontSize: 13.5 }}>
+              No group trips this {span}.
+            </Text>
+          ) : (
+            <>
+              {frequentDestinations(trips, 3).filter((d) => d.count > 1).length > 0 && (
+                <Text style={{ color: colors.textDim, fontSize: 12.5, marginBottom: 10 }}>
+                  Most visited: {frequentDestinations(trips, 3).filter((d) => d.count > 1)
+                    .map((d) => `${d.name} (${d.count})`).join(' · ')}
+                </Text>
+              )}
+              {trips.map((t) => (
+                <View key={t.id} style={[st.row, { borderColor: colors.border }]}>
+                  <View style={[st.avatar, { backgroundColor: colors.primary + '22' }]}>
+                    <Ionicons name="car" size={16} color={colors.primary} />
+                  </View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14 }} numberOfLines={1}>
+                      {t.destinationName}
+                    </Text>
+                    <Text style={{ color: colors.textDim, fontSize: 11.5 }} numberOfLines={1}>
+                      {new Date(t.startedAt).toLocaleDateString()} · {nameOf(t.startedBy)}
+                      {t.arrivals.length ? ` · ${t.arrivals.length} arrived` : ' · nobody arrived'}
+                      {t.deviations ? ` · ${t.deviations} off-route` : ''}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </>
+          )}
 
           <View style={[st.footer, { borderColor: colors.border }]}>
             <Ionicons name="phone-portrait-outline" size={15} color={colors.textDim} />

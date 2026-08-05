@@ -42,6 +42,11 @@ import { type CircleMember, type MemberPresence, STALE_MS } from '../lib/family/
 import { sendMessage, getMessages, decryptFromChat, getChat, sendAnnouncement, isAnnouncement } from '../lib/chatService';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { navigateTo } from '../lib/nav/openNavigation';
+import { subscribeTrip, currentTrip } from '../lib/groups/tripSession';
+import {
+  foldParticipants, lastEta, everyoneArrived, minutesUntil,
+  type Trip, type TripPing,
+} from '../lib/groups/trips';
 import { haversine } from '../lib/nav/geo';
 
 const SOS_HOLD_MS = 1500;
@@ -101,6 +106,10 @@ export default function FamilySpaceScreen() {
   const [announcement, setAnnouncement] = useState<{ text: string; at: number } | null>(null);
   const [announcing, setAnnouncing] = useState(false);
   const [announceTxt, setAnnounceTxt] = useState('');
+  // A trip already running in this group, so the dashboard says so instead of
+  // leaving it discoverable only by opening the trip screen.
+  const [trip, setTrip] = useState<Trip | null>(null);
+  const [tripPings, setTripPings] = useState<TripPing[]>([]);
 
   useEffect(() => { loadAlerts(); }, []);
 
@@ -118,6 +127,35 @@ export default function FamilySpaceScreen() {
     setLoading(false);
   })(); }, []);
 
+  // Watch for a live trip in the active group. Subscribing here rather than
+  // only inside the trip screen is the whole point of 5.7: a convoy that is
+  // already moving should be visible without going looking for it.
+  useEffect(() => {
+    if (!active?.id || !me?.id) { setTrip(null); setTripPings([]); return; }
+    let live = true;
+    let off: (() => void) | null = null;
+    setTrip(currentTrip());
+    setTripPings([]);
+    (async () => {
+      const unsub = await subscribeTrip(
+        active.id, me.id,
+        (e) => {
+          if (!live) return;
+          setTripPings((prev) => (e.ping
+            ? [...prev.filter((p) => p.userId !== e.userId), e.ping]
+            : prev.filter((p) => p.userId !== e.userId)));
+        },
+        (t) => { if (live) setTrip((cur) => cur ?? t); },
+      ).catch(() => null);
+      if (live && unsub) off = unsub; else unsub?.();
+    })();
+    return () => { live = false; off?.(); };
+  }, [active?.id, me?.id]);
+
+  // Keeps hetzner-deploy's dead-circle handling. My side of this rebase had
+  // simplified it back to a bare .catch(() => {}), which would have silently
+  // reverted a real fix: a kicked member's phone retrying a 403 circle on every
+  // focus and highlights poll.
   const refreshMembers = () => {
     if (!active) return;
     const id = active.id;
@@ -624,6 +662,39 @@ export default function FamilySpaceScreen() {
           </Pressable>
 
           {shareToggleRow}
+
+          {/* active trip (G5.7) — only when one is actually running */}
+          {!!trip && (() => {
+            const parts = foldParticipants(
+              tripPings,
+              Object.fromEntries(members.map((m) => [m.id, m.id === me?.id ? 'You' : m.name])),
+              Date.now(),
+            );
+            const eta = lastEta(parts);
+            const done = everyoneArrived(parts);
+            return (
+              <TouchableOpacity
+                onPress={() => router.push({ pathname: '/group-trip' as any, params: { groupId: active!.id, name: active!.name } })}
+                style={[st.card, { backgroundColor: colors.card, borderColor: done ? colors.success : colors.primary, flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 }]}
+              >
+                <View style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: (done ? colors.success : colors.primary) + '22' }}>
+                  <Ionicons name={done ? 'checkmark-done' : 'car'} size={20} color={done ? colors.success : colors.primary} />
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={{ color: colors.text, fontWeight: '700', fontSize: 14.5 }} numberOfLines={1}>
+                    {trip.destinationName}
+                  </Text>
+                  <Text style={{ color: colors.textDim, fontSize: 12 }} numberOfLines={1}>
+                    {done ? 'Everyone has arrived'
+                      : parts.length === 0 ? 'Trip started · no ETAs yet'
+                      : eta != null ? `${parts.length} on the way · all in by about ${minutesUntil(eta, Date.now())} min`
+                      : `${parts.length} on the way`}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
+              </TouchableOpacity>
+            );
+          })()}
 
           {/* members */}
           <View style={st.secHead}>

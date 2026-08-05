@@ -892,6 +892,25 @@ io.on('connection', (socket) => {
 
   // Live location — relay position updates to the chat room. The sender's
   // location screen emits; the peers' open chat screens render a live banner.
+  // Only relay into a chat the sender is actually a member of. Cached per chat
+  // for this socket so it is one query per session, not one per ping.
+  //
+  // Shared by live location AND group trips deliberately: they are the same
+  // trust decision, and two copies would eventually disagree about who may
+  // broadcast into a chat.
+  const liveRelayAllowed = async (sock, chatId) => {
+    sock.data.liveLocOk = sock.data.liveLocOk || {};
+    if (sock.data.liveLocOk[chatId] === undefined) {
+      try {
+        const r = await db.queryAs(sock.data.uid,
+          `SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL LIMIT 1`,
+          [chatId, sock.data.uid]);
+        sock.data.liveLocOk[chatId] = r.rowCount > 0;
+      } catch { sock.data.liveLocOk[chatId] = false; }
+    }
+    return sock.data.liveLocOk[chatId];
+  };
+
   // Server only RELAYS (no storage) and is ZERO-KNOWLEDGE: the position is an
   // opaque `blob` (client-side AES-256-GCM under a per-session key delivered E2E
   // in the initial 'location' message). We never see coordinates. `until` is a
@@ -899,18 +918,7 @@ io.on('connection', (socket) => {
   // cross-version rollout but new clients send only `blob`.
   socket.on('live_location_update', async ({ chatId, blob, latitude, longitude, address, until }) => {
     if (!chatId) return;
-    // Only relay into a chat the sender is actually a member of (cache the
-    // membership check per chat for this socket so it's one query per session).
-    socket.data.liveLocOk = socket.data.liveLocOk || {};
-    if (socket.data.liveLocOk[chatId] === undefined) {
-      try {
-        const r = await db.queryAs(socket.data.uid,
-          `SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL LIMIT 1`,
-          [chatId, socket.data.uid]);
-        socket.data.liveLocOk[chatId] = r.rowCount > 0;
-      } catch { socket.data.liveLocOk[chatId] = false; }
-    }
-    if (!socket.data.liveLocOk[chatId]) return;
+    if (!(await liveRelayAllowed(socket, chatId))) return;
     const out = { userId: socket.data.uid, until };
     if (blob) out.blob = blob;                                  // E2E path (preferred)
     else if (latitude != null) { out.latitude = latitude; out.longitude = longitude; out.address = address; } // legacy
@@ -919,6 +927,29 @@ io.on('connection', (socket) => {
   socket.on('live_location_stop', ({ chatId }) => {
     if (!chatId) return;
     socket.to(`chat:${chatId}`).emit('live_location_stop', { userId: socket.data.uid });
+  });
+
+  // Group trips (Groups & Circles, G5) — the SAME zero-knowledge relay shape as
+  // live location, reusing its cached membership check.
+  //
+  // These were missing entirely: the client has emitted trip_update since G5
+  // shipped and nothing on the server listened, so every ping went into a void
+  // and no member ever saw another member's ETA. Socket.IO drops unknown events
+  // silently, which is why it looked like it worked.
+  //
+  // `blob` is sealed with the trip key the starter published in an E2EE message,
+  // so the server relays an opaque payload and never learns a destination, an
+  // ETA or a route. tripId travels in the clear because it is an opaque id the
+  // client uses to ignore pings from a trip it is not on.
+  socket.on('trip_update', async ({ chatId, tripId, blob }) => {
+    if (!chatId || !blob) return;
+    if (!(await liveRelayAllowed(socket, chatId))) return;
+    socket.to(`chat:${chatId}`).emit('trip_update', { userId: socket.data.uid, tripId, blob });
+  });
+  socket.on('trip_end', async ({ chatId, tripId }) => {
+    if (!chatId) return;
+    if (!(await liveRelayAllowed(socket, chatId))) return;
+    socket.to(`chat:${chatId}`).emit('trip_end', { userId: socket.data.uid, tripId });
   });
 
   // Route via fanOutToChat so it reaches every member's user-room (the chat

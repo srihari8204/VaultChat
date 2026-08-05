@@ -43,6 +43,15 @@ export interface FamilyAlert {
   text: string;              // already-rendered one-liner
   at: number;                // epoch ms
   read: boolean;
+  /**
+   * The trip this alert belongs to, for 'deviation' and trip arrivals.
+   *
+   * Present so trip history can attribute an arrival to a trip WITHOUT parsing
+   * `text` — that string is rendered for humans and changes whenever the copy
+   * is reworded, which is exactly the sort of coupling that breaks silently.
+   * Absent on every other kind, and on alerts recorded before this existed.
+   */
+  tripId?: string;
 }
 
 /** The three tabs the alerts screen shows. */
@@ -110,6 +119,8 @@ export interface RecordAlertInput {
   actorName: string;
   text: string;
   at?: number;
+  /** Set for trip alerts so history can attribute them without parsing text. */
+  tripId?: string;
 }
 
 /** Append an alert. Returns the stored alert, or null when deduped. */
@@ -130,6 +141,7 @@ export async function recordAlert(input: RecordAlertInput): Promise<FamilyAlert 
     text: input.text,
     at,
     read: false,
+    ...(input.tripId ? { tripId: input.tripId } : {}),
   };
   alerts = [alert, ...alerts].slice(0, MAX_ALERTS);
   emit();

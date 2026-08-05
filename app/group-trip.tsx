@@ -48,6 +48,7 @@ export default function GroupTripScreen() {
   const [trip, setTrip] = useState<Trip | null>(currentTrip());
   const [pings, setPings] = useState<TripPing[]>([]);
   const [where, setWhere] = useState('');
+  const [lead, setLead] = useState(false);
   const [busy, setBusy] = useState(false);
   const [tick, setTick] = useState(0);
 
@@ -108,7 +109,10 @@ export default function GroupTripScreen() {
       }
       if (!dest) { Alert.alert('Not found', `Could not find "${q}". Try an address, or "lat, lng".`); return; }
 
-      const t = await startTrip(groupId, me, dest, q);
+      // Leading means everyone measures "on route" against MY road, not their
+      // own. Opt-in: silently making the starter the leader would quietly
+      // redefine off-route for the whole group.
+      const t = await startTrip(groupId, me, dest, q, { leaderId: lead ? me : null });
       setTrip(t);
       setWhere('');
       // Start navigating immediately — a trip nobody is driving is just a pin.
@@ -153,6 +157,18 @@ export default function GroupTripScreen() {
                 placeholderTextColor={colors.textFaint} style={[st.input, { color: colors.text }]}
                 autoCapitalize="none" returnKeyType="go" onSubmitEditing={begin} />
             </View>
+            <TouchableOpacity onPress={() => setLead((v) => !v)}
+              style={[st.lead, { borderColor: lead ? colors.primary : colors.border, backgroundColor: lead ? colors.primary + '14' : 'transparent' }]}>
+              <Ionicons name={lead ? 'checkbox' : 'square-outline'} size={19} color={lead ? colors.primary : colors.textFaint} />
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13.5 }}>Everyone follows my route</Text>
+                <Text style={{ color: colors.textDim, fontSize: 12, marginTop: 2, lineHeight: 16 }}>
+                  Off-route warnings are measured against the road you take. Without this each
+                  phone judges itself against its own route.
+                </Text>
+              </View>
+            </TouchableOpacity>
+
             <TouchableOpacity onPress={begin} disabled={!where.trim() || busy}
               style={[st.btn, { backgroundColor: where.trim() && !busy ? colors.primary : colors.border }]}>
               {busy ? <ActivityIndicator color="#fff" />
@@ -178,6 +194,11 @@ export default function GroupTripScreen() {
                     : convoyEta != null ? `All in by about ${minutesUntil(convoyEta, now)} min`
                     : 'Waiting for ETAs…'}
                 </Text>
+                {!!trip.leaderId && (
+                  <Text style={{ color: colors.primary, fontSize: 11.5, marginTop: 2 }}>
+                    Following {trip.leaderId === me ? 'your' : `${names[trip.leaderId] ?? 'the leader'}'s`} route
+                  </Text>
+                )}
               </View>
             </View>
 
@@ -239,6 +260,7 @@ const st = StyleSheet.create({
   field: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, height: 50 },
   input: { flex: 1, fontSize: 15 },
   btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 50, borderRadius: 13, marginTop: 14 },
+  lead: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, padding: 13, borderWidth: 1, borderRadius: 13, marginTop: 14 },
   btnTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
   dest: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderWidth: 1, borderRadius: 16 },
   destIcon: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },

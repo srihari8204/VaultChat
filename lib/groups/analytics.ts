@@ -175,6 +175,96 @@ export interface GroupSummary {
 }
 
 /** Roll per-member insights into the one-line group picture. */
+// ── shared trip history (G6.3) ──────────────────────────────────────
+//
+// Derived, not stored. Every trip already announces itself as an E2EE message
+// in the group thread, and arrivals already land in the local alert inbox — so
+// history is a FOLD over data this phone holds, exactly like tasks. A separate
+// trips table would mean new storage, new sync and a new thing to keep private,
+// to record something already recorded twice.
+
+/** One trip the group took. */
+export interface TripRecord {
+  id: string;
+  destinationName: string;
+  startedBy: string;
+  startedAt: number;
+  leaderId: string | null;
+  /** Who reached it, and when. */
+  arrivals: { userId: string; at: number }[];
+  /** How many times somebody left the route on this trip. */
+  deviations: number;
+}
+
+/** The announce fields history needs. Matches the trip message payload. */
+export interface TripAnnounce {
+  id: string;
+  destinationName: string;
+  startedBy: string;
+  startedAt: number;
+  leaderId?: string | null;
+}
+
+/**
+ * Fold trip announcements and alerts into a history, newest first.
+ *
+ * Attribution is by `tripId` on the alert, never by matching its text: that
+ * string is rendered for humans and is reworded whenever the copy changes,
+ * which would break history silently and at a distance.
+ *
+ * A duplicate announcement — the same trip re-read from history on every
+ * subscribe — must not produce two entries, so trips are keyed by id.
+ */
+export function foldTripHistory(
+  announces: TripAnnounce[],
+  alerts: AlertLike[],
+  range: Range,
+): TripRecord[] {
+  const byId = new Map<string, TripRecord>();
+  for (const a of announces) {
+    if (!a?.id || a.startedAt < range.from || a.startedAt > range.to) continue;
+    if (byId.has(a.id)) continue;
+    byId.set(a.id, {
+      id: a.id,
+      destinationName: a.destinationName || 'Somewhere',
+      startedBy: a.startedBy,
+      startedAt: a.startedAt,
+      leaderId: a.leaderId ?? null,
+      arrivals: [],
+      deviations: 0,
+    });
+  }
+
+  for (const al of alerts) {
+    const tripId = (al as AlertLike & { tripId?: string }).tripId;
+    if (!tripId) continue;             // not a trip alert, or predates tripId
+    const t = byId.get(tripId);
+    if (!t) continue;                  // an alert for a trip outside this range
+    if (al.kind === 'enter') {
+      // One arrival per person: a re-delivered alert must not inflate the count.
+      if (!t.arrivals.some((x) => x.userId === al.actorId)) {
+        t.arrivals.push({ userId: al.actorId, at: al.at });
+      }
+    } else if (al.kind === 'deviation') {
+      t.deviations += 1;
+    }
+  }
+
+  return [...byId.values()].sort((a, b) => b.startedAt - a.startedAt);
+}
+
+/** Distinct destinations visited, most frequent first. */
+export function frequentDestinations(trips: TripRecord[], top = 5): { name: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const t of trips) counts.set(t.destinationName, (counts.get(t.destinationName) ?? 0) + 1);
+  return [...counts.entries()]
+    .map(([name, count]) => ({ name, count }))
+    // Ties broken by name so the list is stable rather than reshuffling on
+    // every render.
+    .sort((a, b) => b.count - a.count || (a.name < b.name ? -1 : 1))
+    .slice(0, top);
+}
+
 export function groupSummary(insights: MemberInsight[]): GroupSummary {
   let distanceM = 0, arrivals = 0, checkIns = 0, deviations = 0, activeMembers = 0;
   let busiest: MemberInsight | null = null;
@@ -289,6 +379,55 @@ if (require.main === module) {
   if (formatDistance(120) !== '100 m') throw new Error('sub-km rounds to 50m: ' + formatDistance(120));
   if (formatDistance(1500) !== '1.5 km') throw new Error('km with one decimal');
   if (formatDistance(42_000) !== '42 km') throw new Error('large distances drop the decimal');
+
+  // ── trip history ──
+  const tr = (id: string, at: number, extra: Partial<TripAnnounce> = {}): TripAnnounce =>
+    ({ id, destinationName: 'Beach', startedBy: 'u1', startedAt: at, ...extra });
+  const week: Range = { from: wed, to: wed + 7 * 86_400_000 };
+  const trAlert = (kind: string, actorId: string, at: number, tripId?: string): AlertLike =>
+    ({ kind, actorId, at, ...(tripId ? { tripId } : {}) } as AlertLike);
+
+  const hist = foldTripHistory(
+    [tr('t1', wed + 1000), tr('t2', wed + 5000, { destinationName: 'School' })],
+    [
+      trAlert('enter', 'u1', wed + 2000, 't1'),
+      trAlert('enter', 'u2', wed + 2500, 't1'),
+      trAlert('deviation', 'u2', wed + 1500, 't1'),
+      trAlert('enter', 'u9', wed + 3000),            // no tripId: a geofence arrival
+      trAlert('enter', 'u1', wed + 4000, 'unknown'), // a trip outside this range
+    ],
+    week,
+  );
+  if (hist.length !== 2) throw new Error(`expected 2 trips, got ${hist.length}`);
+  if (hist[0].id !== 't2') throw new Error('history must be newest first');
+  const t1 = hist.find((h) => h.id === 't1')!;
+  if (t1.arrivals.length !== 2) throw new Error('both arrivals should attach to their trip');
+  if (t1.deviations !== 1) throw new Error('deviation should attach to its trip');
+
+  // a geofence arrival with no tripId must never be counted as a trip arrival
+  if (hist.some((h) => h.arrivals.some((a) => a.userId === 'u9'))) {
+    throw new Error('a non-trip alert must not be attributed to a trip');
+  }
+
+  // duplicate announcements (re-read from history on every subscribe) collapse
+  if (foldTripHistory([tr('t1', wed + 1000), tr('t1', wed + 1000)], [], week).length !== 1) {
+    throw new Error('a duplicate announcement must not create a second trip');
+  }
+  // …and a re-delivered arrival does not inflate the count
+  const dupArr = foldTripHistory([tr('t1', wed + 1000)],
+    [trAlert('enter', 'u1', wed + 2000, 't1'), trAlert('enter', 'u1', wed + 2100, 't1')], week);
+  if (dupArr[0].arrivals.length !== 1) throw new Error('one arrival per person');
+
+  // range is honoured on the trip's start
+  if (foldTripHistory([tr('old', wed - 1)], [], week).length !== 0) throw new Error('out-of-range trip must be dropped');
+
+  // frequent destinations, stable under ties
+  const freq = frequentDestinations(foldTripHistory(
+    [tr('a', wed + 1), tr('b', wed + 2), tr('c', wed + 3, { destinationName: 'School' })], [], week));
+  if (freq[0].name !== 'Beach' || freq[0].count !== 2) throw new Error('most frequent destination wrong');
+  const tie = frequentDestinations(foldTripHistory(
+    [tr('a', wed + 1, { destinationName: 'Zoo' }), tr('b', wed + 2, { destinationName: 'Aquarium' })], [], week));
+  if (tie[0].name !== 'Aquarium') throw new Error('ties must break by name so the list is stable');
 
   console.log('groups/analytics self-check OK');
 }

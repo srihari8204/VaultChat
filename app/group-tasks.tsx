@@ -18,6 +18,7 @@ import { brandAlpha } from '../constants/theme';
 import { sendMessage, getMessages, decryptFromChat } from '../lib/chatService';
 import { circleMembers } from '../lib/family/circle';
 import { getCurrentUserAsync } from './(constants)/authService';
+import { syncTaskReminders } from '../lib/groups/taskReminders';
 import {
   encodeOp, decodeOp, foldTasks, sortTasks, isOverdue, newTaskId,
   type Task, type TaskOp,
@@ -70,7 +71,14 @@ export default function GroupTasksScreen() {
         const op = decodeOp(body);
         if (op) ops.push(op);
       }
-      setTasks(foldTasks(ops));
+      const folded = foldTasks(ops);
+      setTasks(folded);
+      // Reconcile OS reminders against the list we just rebuilt. Driven from
+      // here rather than from the save handler because the list is a fold: a
+      // due date moved on somebody else's phone arrives as a rebuild, not as a
+      // tap. Idempotent, so an unchanged list books and cancels nothing.
+      const u = await getCurrentUserAsync().catch(() => null);
+      syncTaskReminders(groupId, folded, u ? String(u.id) : null).catch(() => {});
     } catch {
       // Offline: keep whatever is already on screen rather than blanking it.
     } finally { setLoading(false); }

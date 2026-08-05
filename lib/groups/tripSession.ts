@@ -17,7 +17,7 @@ import { sendMessage, getMessages, type Message } from '../chatService';
 import { recordAlert } from '../family/alerts';
 import { haversine, type LatLng } from '../nav/geo';
 import {
-  estimateEta, hasArrived, distanceFromRoute, isDeviating,
+  estimateEta, hasArrived, distanceFromRoute, isDeviating, simplifyRoute,
   type Trip, type TripPing,
 } from './trips';
 
@@ -39,6 +39,11 @@ let routeShape: LatLng[] = [];
 /** Alerts are raised on the EDGE, so a member who stays off-route is reported once. */
 let wasDeviating = false;
 let announcedArrival = false;
+/** When the leader last put its route on the wire. */
+let lastRouteAt = 0;
+
+/** How often the leader re-sends its route, for devices that joined late. */
+const ROUTE_REBROADCAST_MS = 60_000;
 
 export function currentTrip(): Trip | null { return active; }
 
@@ -64,6 +69,7 @@ export async function startTrip(
   active = trip;
   wasDeviating = false;
   announcedArrival = false;
+  lastRouteAt = 0;
 
   const announce: Announce = { trip, key: myKey };
   await sendMessage(groupId, TRIP_PREFIX + JSON.stringify(announce), 'system');
@@ -80,6 +86,10 @@ export async function joinTrip(trip: Trip, me: string, key: string): Promise<voi
   myKey = key;
   wasDeviating = false;
   announcedArrival = false;
+  lastRouteAt = 0;
+  // A follower's own route is irrelevant once there is a leader — theirs
+  // arrives on the next ping and replaces it.
+  if (trip.leaderId && trip.leaderId !== me) routeShape = [];
   await joinChatRoom(trip.groupId);
 }
 
@@ -112,6 +122,21 @@ export async function publishTripState(pos: LatLng, speed: number | undefined, n
     at: now,
   };
 
+  // FOLLOW-THE-LEADER. The leader carries their route in the ping so followers
+  // measure deviation against the road the group agreed on rather than against
+  // whatever each phone routed for itself. Without it "follow the leader" means
+  // nothing — everyone is still navigating independently and merely sharing a
+  // destination.
+  //
+  // Sent on a cadence, not once: a follower who joins late, or reconnects, has
+  // no history to replay a socket event from. It is coarse and bounded before
+  // sending, because a full-fidelity polyline on every fix would dwarf the ping
+  // it rides on.
+  if (active.leaderId === myId && routeShape.length > 1 && now - lastRouteAt > ROUTE_REBROADCAST_MS) {
+    ping.route = simplifyRoute(routeShape);
+    lastRouteAt = now;
+  }
+
   const blob = sealJSON(myKey, ping);
   if (blob) emit(EV_UPDATE, { chatId: active.groupId, tripId: active.id, blob }).catch(() => {});
 
@@ -120,6 +145,7 @@ export async function publishTripState(pos: LatLng, speed: number | undefined, n
   if (nowDeviating && !wasDeviating) {
     await recordAlert({
       circleId: active.groupId, kind: 'deviation', actorId: myId, actorName: name,
+      tripId: active.id,
       // Reports the FACT of leaving the route, never a position — a member
       // sharing approximately or not at all must not be pinpointed by a trip.
       text: `${name} left the route to ${active.destinationName}`,
@@ -131,6 +157,7 @@ export async function publishTripState(pos: LatLng, speed: number | undefined, n
     announcedArrival = true;
     await recordAlert({
       circleId: active.groupId, kind: 'enter', actorId: myId, actorName: name,
+      tripId: active.id,
       text: `${name} arrived at ${active.destinationName}`,
     });
   }
@@ -174,7 +201,14 @@ export async function subscribeTrip(
     if (!key) { captureFromHistory(); return; }
     const ping = openJSON<TripPing>(key, e.blob);
     if (ping && typeof ping.remainingM === 'number') {
-      onEvent({ userId: String(e.userId), ping: { ...ping, userId: String(e.userId) } });
+      const from = String(e.userId);
+      // Adopt the leader's route, and ONLY the leader's. Taking a route from
+      // any sender would let one member off on a detour silently redefine
+      // "on route" for the whole group.
+      if (ping.route && active && active.leaderId === from && from !== meId) {
+        routeShape = ping.route;
+      }
+      onEvent({ userId: from, ping: { ...ping, userId: from } });
     }
   };
   const onEnd = (e: any) => {

@@ -59,25 +59,32 @@ same thing, and this file is the only place that distinction survives.
 
 ## G4 — Shared resources
 - [x] 4.1 Tasks on the E2EE message spine
-- [ ] 4.2 Task reminders via the local-notification scheduler — NOT BUILT. Tasks carry a due date and nothing schedules anything from it
+- [x] 4.2 Task reminders via the local-notification scheduler — a RECONCILER, not schedule-on-save: the task list is a fold, so a due date moved on another device arrives as a rebuild rather than a tap. Idempotent, so it is safe on every screen focus
 - [x] 4.3 Calendar: encrypted event table, date-range queries, recurrence, reminders — 068
 - [x] 4.4 Album: group-scoped encrypted media index
 - [x] 4.5 Notes — group encryption, NOT `lib/notesCrypto.ts` as written: that key is device-local, so "shared" notes would have been unreadable by everyone else in the group
 - [x] 4.6 Announcements: pinned, permission-gated on the SERVER, surfaced on the dashboard
 
 ## G5 — Group navigation
+**These four were marked done on a previous pass and were not.** The client had
+emitted `trip_update` since G5 shipped and NEITHER socket server listened for
+it — Socket.IO drops unknown events silently, so every ping went into a void and
+no member ever saw another member's ETA. The earlier pass checked that the
+client code existed and never checked that anything received it. Relay added to
+both Node and Go, sharing live location's membership check.
+
 - [x] 5.1 Share a destination to the group
-- [x] 5.2 Group trip: start/join/leave over a socket topic
-- [x] 5.3 ETA fan-out, computed on-device and shared as a sealed field
-- [ ] 5.4 Follow-the-leader mode — PARTIAL. `Trip.leaderId` exists and is plumbed through `startTrip`, but nothing sets it and nothing reads it to drive navigation. The model supports it; the feature does not exist
+- [x] 5.2 Group trip: start/join/leave over a socket topic — the relay now exists
+- [x] 5.3 ETA fan-out, computed on-device and shared as a sealed field — reached nobody until the relay landed
+- [x] 5.4 Follow-the-leader mode — the leader broadcasts a bounded, sampled route on its ping; followers adopt it and measure deviation against the agreed road. Opt-in at trip start: silently making the starter the leader would quietly redefine "off-route" for everyone
 - [x] 5.5 Deviation alerts reusing the off-route detection
 - [x] 5.6 Arrival notifications per member
-- [ ] 5.7 Active-trip card on the group dashboard — NOT BUILT. The trip screen exists but the dashboard does not surface a running trip
+- [x] 5.7 Active-trip card on the group dashboard
 
 ## G6 — Analytics
 - [x] 6.1 Per-member activity and distance from local history
 - [x] 6.2 Attendance from safe-zone entry/exit events
-- [ ] 6.3 Shared trip history — NOT BUILT. Analytics counts route deviations but keeps no history of trips themselves
+- [x] 6.3 Shared trip history — derived, not stored: a fold over the group thread's own trip announcements plus the local alert inbox. Attribution is by `tripId` on the alert, never by parsing its text, which is rendered for humans and changes with the copy
 - [x] 6.4 Weekly summary computed and rendered ON DEVICE; nothing is uploaded, not even a total
 
 ## G7 — Group calling (BLOCKED — infrastructure, not code)
@@ -110,6 +117,9 @@ Beyond the unticked boxes above:
 
 - **Nothing has run on a device.** Every claim here is from tests, self-checks
   and queries verified against a real Postgres 16 — not from the app running.
+  The missing trip relay is what that limitation looks like in practice: the
+  client code was right, the server had no listener, and nothing short of two
+  devices in a room would have shown it.
 - **Migrations 066–071 need renumbering (+1 each)** once the `vc_redeem_invite`
   hotfix merges ahead of them.
 - **`/internal/notify` push path is unexercised** — syntax-checked only; it
