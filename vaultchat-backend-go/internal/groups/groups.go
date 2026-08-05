@@ -211,6 +211,23 @@ func CanTransferOwnership(actorRole, targetRole string) bool {
 	return false
 }
 
+// CanRemoveMember reports whether actor may remove target from the group.
+//
+// Holding remove_members is NOT sufficient on its own. The 069 presets give a
+// moderator that permission, so without a rank check a moderator could remove
+// the owner and orphan the group — and two admins could remove each other in a
+// race. Rank must strictly exceed the target's, which also makes the owner
+// unremovable by anyone: nothing outranks an owner.
+//
+// Leaving is not covered here. Walking out is always your own right, and no
+// rank can take it away — the route handles self-removal before ever asking.
+func CanRemoveMember(actorRole, targetRole string) bool {
+	if !IsValidRole(actorRole) || !IsValidRole(targetRole) {
+		return false
+	}
+	return rank(actorRole) > rank(targetRole)
+}
+
 // SeatsRemaining reports how many seats a group has left. It is advisory only:
 // the authoritative check is the database trigger in migration 066, which
 // serialises on the chat row. Use this for UI and early rejection, never as the

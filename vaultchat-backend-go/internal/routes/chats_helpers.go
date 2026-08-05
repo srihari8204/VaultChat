@@ -1080,12 +1080,14 @@ func chatsMemberRole(w http.ResponseWriter, r *http.Request) {
 	var b map[string]any
 	_ = httpx.Body(r, &b)
 	role := fmt.Sprintf("%v", orEmpty(b["role"]))
-	// 'guest' joins the accepted set for typed groups only: an untyped legacy
-	// group has no guest semantics and must keep its original two-role world.
-	validRole := role == "admin" || role == "member" || (role == "guest" && mem.isTypedGroup())
+	// 'guest' and 'moderator' join the accepted set for typed groups only: an
+	// untyped legacy group has no semantics for either and must keep its
+	// original two-role world.
+	validRole := role == "admin" || role == "member" ||
+		((role == "guest" || role == groups.RoleModerator) && mem.isTypedGroup())
 	if !validRole {
 		if mem.isTypedGroup() {
-			httpx.Err(w, 400, "role must be 'admin', 'member' or 'guest'")
+			httpx.Err(w, 400, "role must be 'admin', 'moderator', 'member' or 'guest'")
 		} else {
 			httpx.Err(w, 400, "role must be 'admin' or 'member'")
 		}
@@ -1633,11 +1635,37 @@ func chatsMemberRemove(w http.ResponseWriter, r *http.Request) {
 	}
 	target := r.PathValue("userId")
 	isSelf := target == user.ID
-	// Leaving is always your own right; removing someone else is a permission.
-	if !isSelf && !mem.can(groups.PermRemoveMembers) {
-		httpx.Err(w, 403, "You do not have permission to remove members")
-		return
+
+	// Leaving is always your own right; removing someone else needs both the
+	// permission AND the rank.
+	if !isSelf {
+		if !mem.can(groups.PermRemoveMembers) {
+			httpx.Err(w, 403, "You do not have permission to remove members")
+			return
+		}
+		var targetRole string
+		var leftAt *time.Time
+		err := chatsQRow(ctx, user.ID,
+			`SELECT role, left_at FROM chat_members WHERE chat_id = $1 AND user_id = $2`,
+			[]any{chatID, target}, &targetRole, &leftAt)
+		if db.NoRows(err) || (err == nil && leftAt != nil) {
+			httpx.Err(w, 404, "They are not in this group")
+			return
+		}
+		if err != nil {
+			log.Printf("[members DELETE] role: %v", err)
+			httpx.Err(w, 500, "Failed to remove member")
+			return
+		}
+		// The permission alone is not enough. Migration 069 gives moderators
+		// remove_members, so without this a moderator could remove the OWNER and
+		// orphan the group, and two admins could remove each other in a race.
+		if !groups.CanRemoveMember(mem.Role, targetRole) {
+			httpx.Err(w, 403, "You cannot remove someone at or above your own role")
+			return
+		}
 	}
+
 	if err := chatsExecU(ctx, user.ID,
 		`UPDATE chat_members SET left_at = NOW()
 		 WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL`,
@@ -1646,6 +1674,17 @@ func chatsMemberRemove(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 500, "Failed to remove member")
 		return
 	}
+
+	// A REMOVAL starts a cooldown; leaving does not. Without this, being removed
+	// only stops someone until anyone with invite rights taps once — which makes
+	// the removal a formality rather than a decision. Recorded after the fact and
+	// best-effort: a member who cannot be removed because the cooldown write
+	// hiccuped is worse than a cooldown that was not applied.
+	var cooldownUntil *time.Time
+	if !isSelf {
+		cooldownUntil = chatsRecordRemoval(ctx, user.ID, chatID, target)
+	}
+
 	realtime.InvalidateChatMembers(ctx, chatID) // P2.2: fresh roster before the fan-out
 	event := "member_removed"
 	if isSelf {
@@ -1653,7 +1692,44 @@ func chatsMemberRemove(w http.ResponseWriter, r *http.Request) {
 	}
 	chatsAudit(ctx, user.ID, chatID, event, &target, nil)
 	emitx.ChatEvent(chatID, event, map[string]any{"userId": target, "by": user.ID})
-	httpx.JSON(w, 200, map[string]any{"ok": true})
+	out := map[string]any{"ok": true}
+	if cooldownUntil != nil {
+		out["cooldownUntil"] = httpx.JSTime(*cooldownUntil)
+	}
+	httpx.JSON(w, 200, out)
+}
+
+// chatsRecordRemoval writes the group_removals row that gates re-invitation,
+// returning when the removed member may return (nil = immediately).
+//
+// The WINDOW comes from group_type_config.removal_cooldown_hours (migration
+// 070), not from a constant here, so it can be tuned per kind of group without
+// a release. Zero — the default for every existing type — means no cooldown, so
+// this changes nothing until somebody sets one.
+//
+// Best-effort by design, like the audit log: it runs after the member is
+// already out, and a failure is logged rather than surfaced.
+func chatsRecordRemoval(ctx context.Context, actorID, chatID, target string) *time.Time {
+	var until *time.Time
+	err := chatsQRow(ctx, actorID,
+		`INSERT INTO group_removals (chat_id, user_id, removed_by, removed_at, cooldown_until)
+		 SELECT $1, $2, $3, NOW(),
+		        CASE WHEN COALESCE(g.removal_cooldown_hours, 0) > 0
+		             THEN NOW() + make_interval(hours => g.removal_cooldown_hours)
+		             ELSE NULL END
+		   FROM chats c
+		   LEFT JOIN group_type_config g ON g.group_type = c.group_type
+		  WHERE c.id = $1
+		 ON CONFLICT (chat_id, user_id) DO UPDATE
+		    SET removed_by = EXCLUDED.removed_by,
+		        removed_at = EXCLUDED.removed_at,
+		        cooldown_until = EXCLUDED.cooldown_until
+		 RETURNING cooldown_until`,
+		[]any{chatID, target, actorID}, &until)
+	if err != nil && !db.NoRows(err) {
+		log.Printf("[members DELETE] cooldown record on %s: %v", chatID, err)
+	}
+	return until
 }
 
 // ─── Polls ─────────────────────────────────────────────────────────────

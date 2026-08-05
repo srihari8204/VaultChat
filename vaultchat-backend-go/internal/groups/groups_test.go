@@ -282,3 +282,47 @@ func TestModeratorResolvesFromItsOwnPreset(t *testing.T) {
 		t.Fatalf("an absent moderator preset must deny, got %v", bare.List())
 	}
 }
+
+// ── removal is gated by RANK, not just by the permission ──
+
+func TestCanRemoveMember(t *testing.T) {
+	cases := []struct {
+		actor, target string
+		want          bool
+		why           string
+	}{
+		{RoleOwner, RoleAdmin, true, "an owner may remove an admin"},
+		{RoleAdmin, RoleModerator, true, "an admin outranks a moderator"},
+		{RoleModerator, RoleMember, true, "a moderator may remove a member"},
+		{RoleMember, RoleGuest, true, "rank is what decides, not the role name"},
+
+		// The whole reason this function exists: migration 069 grants
+		// moderators remove_members, so the permission check alone would let
+		// one remove the owner and orphan the group.
+		{RoleModerator, RoleOwner, false, "a moderator must not remove the owner"},
+		{RoleAdmin, RoleOwner, false, "an admin must not remove the owner"},
+		{RoleOwner, RoleOwner, false, "nothing outranks an owner, including an owner"},
+
+		{RoleAdmin, RoleAdmin, false, "two admins removing each other is a race, not a policy"},
+		{RoleModerator, RoleModerator, false, "peers cannot remove peers"},
+		{RoleMember, RoleAdmin, false, "you cannot remove upwards"},
+		{"bogus", RoleMember, false, "an unknown actor role denies"},
+		{RoleAdmin, "bogus", false, "an unknown target role denies"},
+	}
+	for _, c := range cases {
+		if got := CanRemoveMember(c.actor, c.target); got != c.want {
+			t.Errorf("%s: CanRemoveMember(%q,%q) = %v, want %v", c.why, c.actor, c.target, got, c.want)
+		}
+	}
+}
+
+// Every role that holds remove_members by default must still be unable to
+// remove an owner. This is the pairing the route depends on: permission AND
+// rank, never permission alone.
+func TestRemovePermissionNeverReachesTheOwner(t *testing.T) {
+	for _, r := range SortedRoles() {
+		if CanRemoveMember(r, RoleOwner) {
+			t.Errorf("%s must not be able to remove the owner", r)
+		}
+	}
+}

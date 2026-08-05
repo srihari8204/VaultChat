@@ -19,9 +19,18 @@ export type Permission =
   | 'edit_settings'
   | 'view_history'
   | 'start_navigation'
-  | 'send_announcements';
+  | 'send_announcements'
+  | 'create_tasks'
+  | 'manage_calendar'
+  | 'manage_album';
 
-/** Complete set, in a stable display order. Mirrors groups.All in Go. */
+/**
+ * Complete set, in a stable display order. Mirrors groups.All in Go, and the
+ * mirroring is load-bearing in a direction that is easy to miss:
+ * resolvePermissions DROPS names this list does not know, so a permission the
+ * server grants but this file has not heard of is silently withheld from the
+ * UI. Drift here hides features from the people entitled to them.
+ */
 export const ALL_PERMISSIONS: Permission[] = [
   'invite_members',
   'remove_members',
@@ -30,11 +39,20 @@ export const ALL_PERMISSIONS: Permission[] = [
   'view_history',
   'start_navigation',
   'send_announcements',
+  'create_tasks',
+  'manage_calendar',
+  'manage_album',
 ];
 
-export type GroupRole = 'guest' | 'member' | 'admin' | 'owner';
+export type GroupRole = 'guest' | 'member' | 'moderator' | 'admin' | 'owner';
 
-export const ROLES: GroupRole[] = ['owner', 'admin', 'member', 'guest'];
+/** Most privileged first. Mirrors groups.SortedRoles in Go. */
+export const ROLES: GroupRole[] = ['owner', 'admin', 'moderator', 'member', 'guest'];
+
+/** Rank, for "may I act on this person?". Mirrors rank() in Go. */
+const RANK: Record<GroupRole, number> = {
+  owner: 4, admin: 3, moderator: 2, member: 1, guest: 0,
+};
 
 /** Human labels for the permission list in group settings. */
 export const PERMISSION_LABELS: Record<Permission, string> = {
@@ -45,6 +63,21 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   view_history: 'View location history',
   start_navigation: 'Start group navigation',
   send_announcements: 'Send announcements',
+  create_tasks: 'Create shared tasks',
+  manage_calendar: 'Manage the calendar',
+  manage_album: 'Manage the shared album',
+};
+
+export const ROLE_LABELS: Record<GroupRole, string> = {
+  owner: 'Owner', admin: 'Admin', moderator: 'Moderator', member: 'Member', guest: 'Guest',
+};
+
+export const ROLE_BLURBS: Record<GroupRole, string> = {
+  owner: 'Runs the group. One person, and only they can hand it over.',
+  admin: 'Everything except giving the group away.',
+  moderator: 'Manages people and content, but not the group settings.',
+  member: 'Takes part in the group.',
+  guest: 'Can see the group, but takes no actions.',
 };
 
 /**
@@ -108,8 +141,36 @@ export function canManageRole(actorRole: string, targetRole: string, newRole: st
   if (!isRole(actorRole) || !isRole(targetRole) || !isRole(newRole)) return false;
   if (newRole === 'owner' || targetRole === 'owner') return false;
   if (actorRole === 'owner') return true;
-  if (actorRole === 'admin') return targetRole === 'member' || targetRole === 'guest';
+  if (actorRole === 'admin') {
+    return targetRole === 'moderator' || targetRole === 'member' || targetRole === 'guest';
+  }
+  if (actorRole === 'moderator') {
+    // A moderator who could promote someone to moderator or admin would make
+    // the rank meaningless — anyone could grant themselves company.
+    if (newRole === 'admin' || newRole === 'moderator') return false;
+    return targetRole === 'member' || targetRole === 'guest';
+  }
   return false;
+}
+
+/**
+ * Mirrors groups.CanRemoveMember in Go. Holding `remove_members` is NOT enough:
+ * moderators hold it by default, so without the rank comparison the UI would
+ * offer a Remove button against the owner that the server then refuses.
+ */
+export function canRemoveMember(actorRole: string, targetRole: string): boolean {
+  if (!isRole(actorRole) || !isRole(targetRole)) return false;
+  return RANK[actorRole] > RANK[targetRole];
+}
+
+/**
+ * Mirrors groups.CanTransferOwnership in Go. Its own door, not a role edit:
+ * handing the group away demotes you irreversibly, and an admin who may
+ * promote and demote must not be able to do it as a side effect.
+ */
+export function canTransferOwnership(actorRole: string, targetRole: string): boolean {
+  if (actorRole !== 'owner') return false;
+  return targetRole === 'admin' || targetRole === 'moderator' || targetRole === 'member';
 }
 
 /**
@@ -183,6 +244,54 @@ if (require.main === module) {
   ];
   for (const [a, t, n, want] of rm) {
     if (canManageRole(a, t, n) !== want) throw new Error(`canManageRole(${a},${t},${n}) !== ${want}`);
+  }
+
+  // moderator, same cases as the Go test
+  const mod: [string, string, string, boolean][] = [
+    ['admin', 'moderator', 'member', true],
+    ['admin', 'member', 'moderator', true],
+    ['moderator', 'member', 'guest', true],
+    ['moderator', 'guest', 'member', true],
+    ['moderator', 'member', 'moderator', false],
+    ['moderator', 'member', 'admin', false],
+    ['moderator', 'moderator', 'member', false],
+    ['moderator', 'admin', 'member', false],
+  ];
+  for (const [a, t, n, want] of mod) {
+    if (canManageRole(a, t, n) !== want) throw new Error(`canManageRole(${a},${t},${n}) !== ${want}`);
+  }
+
+  // removal is gated by RANK, not by the permission alone
+  const rem: [string, string, boolean][] = [
+    ['owner', 'admin', true],
+    ['admin', 'moderator', true],
+    ['moderator', 'member', true],
+    ['moderator', 'owner', false],
+    ['admin', 'owner', false],
+    ['owner', 'owner', false],
+    ['admin', 'admin', false],
+    ['member', 'admin', false],
+    ['bogus', 'member', false],
+  ];
+  for (const [a, t, want] of rem) {
+    if (canRemoveMember(a, t) !== want) throw new Error(`canRemoveMember(${a},${t}) !== ${want}`);
+  }
+  for (const r of ROLES) {
+    if (canRemoveMember(r, 'owner')) throw new Error(`${r} must not be able to remove the owner`);
+  }
+
+  // ownership transfer is owner-only, and never to a guest
+  if (!canTransferOwnership('owner', 'admin')) throw new Error('owner should transfer to an admin');
+  if (!canTransferOwnership('owner', 'member')) throw new Error('owner should transfer to a member');
+  if (canTransferOwnership('owner', 'guest')) throw new Error('a guest cannot be handed the group');
+  if (canTransferOwnership('admin', 'member')) throw new Error('only the owner may transfer');
+
+  // every role and permission has display text — a missing label renders blank
+  for (const r of ROLES) {
+    if (!ROLE_LABELS[r] || !ROLE_BLURBS[r]) throw new Error(`role ${r} has no display text`);
+  }
+  for (const p of ALL_PERMISSIONS) {
+    if (!PERMISSION_LABELS[p]) throw new Error(`permission ${p} has no label`);
   }
 
   // seats
