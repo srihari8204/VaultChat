@@ -1,0 +1,245 @@
+<style>
+#m-pdf .vtile { width: 34px; height: 34px; border-radius: 11px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 8.5px; font-weight: 700; letter-spacing: .5px;
+  box-shadow: var(--inner-hi), 0 2px 8px rgba(0,0,0,.35); }
+#m-pdf .vmeta { min-width: 0; display: flex; flex-direction: column; gap: 1px; flex: 1; }
+
+/* ---- search row ---- */
+#m-pdf .srow { flex: none; display: flex; align-items: center; gap: 8px; padding: 9px 12px 8px; }
+#m-pdf .srow .m-search { flex: 1; min-width: 0; height: 36px; }
+#m-pdf .srow .m-search .q { color: var(--txt-1); font-weight: 600; }
+#m-pdf .caret { display: inline-block; width: 1.5px; height: 15px; background: var(--acc-2); margin-left: 1px; box-shadow: 0 0 6px rgba(124,77,255,.8); }
+#m-pdf .srow .hits { font-size: 10.5px; color: var(--txt-3); white-space: nowrap; margin-left: auto; }
+#m-pdf .ocrchip { flex: none; height: 30px; font-size: 10.5px; padding: 0 10px; }
+#m-pdf .navbtns { display: flex; gap: 2px; flex: none; }
+#m-pdf .navbtns span { width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; color: var(--txt-2); background: rgba(235,232,255,.05); border: 1px solid var(--stroke); }
+#m-pdf .navbtns .ic { width: 14px; height: 14px; }
+
+/* ---- paper ---- */
+#m-pdf .stage { flex: 1; min-height: 0; padding: 0 12px 8px; }
+#m-pdf .paper {
+  height: 100%; border-radius: 10px; overflow: hidden;
+  background: linear-gradient(180deg, #FCFBFF 0%, #F4F2FC 100%);
+  box-shadow: 0 14px 40px rgba(0,0,0,.5), 0 0 0 1px rgba(235,232,255,.08), 0 0 60px rgba(124,77,255,.07);
+  color: #2A2735;
+  font-family: var(--font-serif);
+  font-size: 11.5px; line-height: 1.6;
+  padding: 14px 16px 10px;
+  display: flex; flex-direction: column;
+}
+#m-pdf .p-runhead {
+  flex: none; display: flex; justify-content: space-between; gap: 8px;
+  font-family: var(--font-ui);
+  font-size: 7.5px; font-weight: 750; letter-spacing: 1.4px; text-transform: uppercase;
+  color: #9B95B2;
+  padding-bottom: 7px; margin-bottom: 11px;
+  border-bottom: 1px solid rgba(42,39,53,.13);
+}
+#m-pdf .sec-h { font-family: var(--font-ui); font-size: 12.5px; font-weight: 750; letter-spacing: .5px; color: #1E1A2E; margin-bottom: 9px; }
+#m-pdf .clause { display: flex; gap: 8px; margin-bottom: 9px; }
+#m-pdf .clause .cno { flex: none; width: 22px; font-weight: 700; color: #1E1A2E; font-variant-numeric: tabular-nums; }
+#m-pdf .clause .ct b { color: #1E1A2E; }
+#m-pdf .hl-amber { background: rgba(251,191,36,.45); box-shadow: 0 1.5px 0 rgba(202,138,4,.55); border-radius: 2px; padding: 0 2px; }
+#m-pdf .oval { position: relative; white-space: nowrap; font-weight: 700; color: #1E1A2E; }
+#m-pdf .oval svg { position: absolute; left: -8px; top: -6px; pointer-events: none; }
+
+#m-pdf .sched-h { display: flex; align-items: center; gap: 8px; margin: 4px 0 9px; }
+#m-pdf .sched-h .t { font-family: var(--font-ui); font-size: 10.5px; font-weight: 750; letter-spacing: .9px; color: #1E1A2E; white-space: nowrap; }
+#m-pdf .sched-h .rule { flex: 1; height: 1px; background: rgba(42,39,53,.14); }
+#m-pdf .form-tag {
+  display: inline-flex; align-items: center; gap: 4px; flex: none;
+  font-family: var(--font-ui); font-size: 8.5px; font-weight: 750; color: #5B2FE8;
+  background: rgba(124,77,255,.10); border: 1px solid rgba(124,77,255,.35);
+  border-radius: 999px; padding: 2px 8px;
+}
+#m-pdf .frow { display: flex; gap: 10px; margin-bottom: 9px; }
+#m-pdf .fcell { flex: 1; min-width: 0; }
+#m-pdf .flabel {
+  font-family: var(--font-ui); font-size: 7.5px; font-weight: 750; letter-spacing: 1px; text-transform: uppercase;
+  color: #7A7490; margin-bottom: 3px; display: flex; align-items: center; gap: 3px;
+}
+#m-pdf .flabel .req { color: #D6373C; font-size: 9px; }
+#m-pdf .ffield {
+  display: flex; align-items: center; gap: 6px;
+  height: 30px; padding: 0 9px; border-radius: 6px;
+  background: #fff; border: 1.5px solid rgba(124,77,255,.6);
+  box-shadow: 0 0 0 3px rgba(124,77,255,.08);
+  font-family: var(--font-ui); font-size: 11px; font-weight: 600; color: #2A2735;
+  white-space: nowrap; overflow: hidden;
+}
+#m-pdf .ffield.empty {
+  border: 1.5px dashed rgba(214,55,60,.6);
+  background: rgba(214,55,60,.04); box-shadow: none;
+  color: #A79FB8; font-weight: 400; font-style: italic;
+}
+#m-pdf .req-tag {
+  margin-left: auto; font-style: normal;
+  font-size: 8px; font-weight: 750; letter-spacing: .5px; color: #D6373C;
+  background: rgba(214,55,60,.09); border: 1px solid rgba(214,55,60,.35);
+  border-radius: 999px; padding: 2px 7px;
+}
+#m-pdf .fill-chk { margin-left: auto; color: #1D9E6C; }
+#m-pdf .fill-chk .ic { width: 13px; height: 13px; }
+
+#m-pdf .sigbox {
+  height: 88px; border-radius: 8px; position: relative;
+  background: #fff; border: 1.5px solid rgba(42,39,53,.25);
+  margin-bottom: 8px;
+}
+#m-pdf .sigbox .slab {
+  position: absolute; left: 11px; top: 8px;
+  font-family: var(--font-ui); font-size: 7.5px; font-weight: 750; letter-spacing: 1.2px; color: #9B95B2;
+}
+#m-pdf .sigbox .baseline { position: absolute; left: 14px; right: 14px; bottom: 20px; border-bottom: 1.5px solid rgba(42,39,53,.22); }
+#m-pdf .sigbox .cross { position: absolute; left: 14px; bottom: 23px; font-size: 10px; color: #9B95B2; font-family: var(--font-ui); }
+#m-pdf .sigbox svg.stroke { position: absolute; left: 30px; bottom: 12px; color: #2A3690; }
+#m-pdf .sigbox .name { position: absolute; right: 12px; bottom: 5px; font-family: var(--font-ui); font-size: 8.5px; color: #857EA0; }
+#m-pdf .sigmeta { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
+#m-pdf .sig-chip {
+  display: inline-flex; align-items: center; gap: 5px; flex: none;
+  font-family: var(--font-ui); font-size: 9.5px; font-weight: 750; color: #157A54;
+  background: rgba(29,158,108,.10); border: 1px solid rgba(29,158,108,.4);
+  border-radius: 999px; padding: 4px 9px;
+}
+#m-pdf .sig-chip .ic { width: 12px; height: 12px; }
+#m-pdf .sig-hash { font-family: var(--font-mono); font-size: 8px; color: #8A84A0; line-height: 1.4; min-width: 0; }
+
+#m-pdf .p-foot {
+  margin-top: auto; flex: none; padding-top: 8px;
+  border-top: 1px solid rgba(42,39,53,.1);
+  display: flex; align-items: center; justify-content: space-between;
+  font-family: var(--font-ui); font-size: 9px; color: #9B95B2; font-variant-numeric: tabular-nums;
+}
+
+/* ---- page nav ---- */
+#m-pdf .pagerow { flex: none; display: flex; align-items: center; justify-content: center; gap: 12px; padding: 6px 12px 8px; }
+#m-pdf .pagerow .pg {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 32px; padding: 0 14px; border-radius: 11px;
+  background: rgba(235,232,255,.05); border: 1px solid var(--stroke-2);
+  font-size: 12px; font-weight: 650; color: var(--txt-1); font-variant-numeric: tabular-nums;
+}
+#m-pdf .pagerow .m-ic-btn { width: 34px; height: 34px; border-radius: 12px; }
+#m-pdf .pagerow .side { font-size: 10.5px; color: var(--txt-3); }
+</style>
+<div class="mscreen" id="m-pdf">
+  <div class="m-status">
+    <span>9:41</span>
+    <div class="sb-right">
+      <span class="m-sig"><i></i><i></i><i></i><i></i></span>
+      <span class="m-wifi"></span>
+      <span class="m-batt"><i></i></span>
+    </div>
+  </div>
+
+  <header class="m-viewerbar">
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-chev-l"/></svg></span>
+    <span class="vtile ft-pdf">PDF</span>
+    <div class="vmeta">
+      <span class="vt">Atlas-MSA-Contract.pdf</span>
+      <span class="vs">Elena Voss · 2.1 MB · 14 pages</span>
+    </div>
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-bookmark"/></svg></span>
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-more-v"/></svg></span>
+  </header>
+
+  <div class="m-secure"><svg class="ic sm"><use href="#i-lock"/></svg>Opens inside VaultChat — no external app</div>
+
+  <div class="srow">
+    <div class="m-search focus">
+      <svg class="ic sm"><use href="#i-search"/></svg>
+      <span class="q">indemnif</span><span class="caret"></span>
+      <span class="hits">4 of 11</span>
+    </div>
+    <span class="chip active ocrchip"><svg class="ic sm"><use href="#i-ocr"/></svg>incl. OCR</span>
+    <div class="navbtns">
+      <span><svg class="ic"><use href="#i-chev-u"/></svg></span>
+      <span><svg class="ic"><use href="#i-chev-d"/></svg></span>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="paper">
+      <div class="p-runhead"><span>Master Service Agreement — Atlas</span><span>Execution Copy</span></div>
+      <div class="sec-h">3.&ensp;FEES AND PAYMENT</div>
+
+      <div class="clause">
+        <span class="cno">3.1</span>
+        <span class="ct"><b>Fees.</b> Client shall pay Provider the fees set out in Schedule B. All fees are exclusive of taxes and payable in EUR within thirty (30) days of a valid invoice.</span>
+      </div>
+      <div class="clause">
+        <span class="cno">3.2</span>
+        <span class="ct"><b>Renewal Adjustment.</b> Upon each renewal term Provider may increase the recurring fees by <span class="hl-amber">no more than the lesser of (a) four and one-half percent (4.5%) or (b) the applicable CPI change</span>, on sixty (60) days' notice.</span>
+      </div>
+      <div class="clause">
+        <span class="cno">3.3</span>
+        <span class="ct"><b>Late Payment.</b> Amounts more than fifteen (15) days overdue accrue interest at 1.5% per month, and Provider may apply a reinstatement uplift of <span class="oval">4.5%<svg width="52" height="30" viewBox="0 0 52 30" fill="none"><path d="M7 15 C 5.5 7 16 3 27 3.2 C 39.5 3.4 47.5 7 47 15.5 C 46.5 23 36 27 24.5 26.6 C 13.5 26.2 8.5 22.5 7 15 Z" stroke="#E5484D" stroke-width="1.9" stroke-linecap="round"/></svg></span> to suspended accounts.</span>
+      </div>
+
+      <div class="clause">
+        <span class="cno">3.4</span>
+        <span class="ct"><b>Taxes.</b> Each party is responsible for its own taxes; withholding, if required by law, is grossed up by Client.</span>
+      </div>
+
+      <div class="sched-h">
+        <span class="t">SCHEDULE A — EXECUTION</span>
+        <span class="rule"></span>
+        <span class="form-tag"><svg class="ic sm" style="width:10px;height:10px"><use href="#i-form"/></svg>1 required left</span>
+      </div>
+
+      <div class="frow">
+        <div class="fcell">
+          <div class="flabel">Company</div>
+          <div class="ffield">Corefinite Ltd<span class="fill-chk"><svg class="ic"><use href="#i-check"/></svg></span></div>
+        </div>
+        <div class="fcell">
+          <div class="flabel">Effective date</div>
+          <div class="ffield">05 Aug 2026<span class="fill-chk"><svg class="ic"><use href="#i-check"/></svg></span></div>
+        </div>
+      </div>
+
+      <div class="frow">
+        <div class="fcell">
+          <div class="flabel">Authorized signatory<span class="req">*</span></div>
+          <div class="ffield empty">Full legal name<span class="req-tag">REQUIRED</span></div>
+        </div>
+      </div>
+
+      <div class="sigbox">
+        <span class="slab">AUTHORIZED SIGNATURE</span>
+        <span class="baseline"></span>
+        <span class="cross">×</span>
+        <svg class="stroke" width="196" height="58" viewBox="0 0 230 76" fill="none" preserveAspectRatio="none">
+          <path d="M12 58 C 20 24 32 12 36 22 C 40 32 30 52 26 58 C 34 46 48 30 56 34 C 62 37 58 50 54 56 C 62 46 74 34 82 38 C 88 41 84 52 88 52 C 96 52 104 34 112 30 C 118 27 116 42 120 46 C 126 52 138 36 146 32 C 154 28 158 40 164 44 C 172 49 186 38 196 30"
+            stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+        </svg>
+        <span class="name">Srihari Balla · Corefinite Ltd</span>
+      </div>
+
+      <div class="sigmeta">
+        <span class="sig-chip"><svg class="ic"><use href="#i-sign"/></svg>Digitally signed · SHA-256</span>
+        <span class="sig-hash">Fingerprint 9F2C 41B7 8D03 E6A1<br>VaultChat Vault CA · 05 Aug 2026</span>
+      </div>
+
+      <div class="p-foot"><span>Privileged &amp; Confidential</span><span>Page 3 of 14</span></div>
+    </div>
+  </div>
+
+  <div class="pagerow">
+    <span class="m-ic-btn framed"><svg class="ic"><use href="#i-chev-l"/></svg></span>
+    <span class="pg"><svg class="ic sm"><use href="#i-file"/></svg>3 / 14</span>
+    <span class="m-ic-btn framed"><svg class="ic"><use href="#i-chev-r"/></svg></span>
+  </div>
+
+  <div class="m-toolbar">
+    <span class="m-tool on"><svg class="ic"><use href="#i-marker"/></svg>Highlight</span>
+    <span class="m-tool"><svg class="ic"><use href="#i-pen"/></svg>Draw</span>
+    <span class="m-tool"><svg class="ic"><use href="#i-comment"/></svg>Comment</span>
+    <span class="m-tool"><svg class="ic"><use href="#i-form"/></svg>Form</span>
+    <span class="m-tool"><svg class="ic"><use href="#i-sign"/></svg>Sign</span>
+    <span class="m-tool"><svg class="ic"><use href="#i-grid"/></svg>Pages</span>
+  </div>
+
+  <div class="m-home"><i></i></div>
+</div>

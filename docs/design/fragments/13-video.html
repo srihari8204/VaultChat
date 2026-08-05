@@ -1,0 +1,304 @@
+<style>
+#s-video .work { flex: 1; min-height: 0; display: flex; align-items: stretch; position: relative; }
+
+/* ---- stage ---- */
+#s-video .stagewrap { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 22px; gap: 14px; }
+#s-video .stage {
+  flex: 1; position: relative; border-radius: var(--r-lg); overflow: hidden;
+  border: 1px solid var(--stroke-2);
+  box-shadow: var(--sh-3);
+  background:
+    radial-gradient(60% 70% at 62% 42%, rgba(146,87,255,.42), transparent 62%),
+    radial-gradient(42% 52% at 24% 74%, rgba(56,189,248,.16), transparent 68%),
+    linear-gradient(165deg, #171528 0%, #0C0B16 58%, #08070D 100%);
+}
+/* faux product scene */
+#s-video .scene { position: absolute; inset: 0; }
+#s-video .sc-slab {
+  position: absolute; border-radius: 14px;
+  background: linear-gradient(150deg, rgba(255,255,255,.11), rgba(255,255,255,.03));
+  border: 1px solid rgba(235,232,255,.14);
+  box-shadow: 0 30px 80px rgba(0,0,0,.5);
+  backdrop-filter: blur(6px);
+}
+#s-video .sc-1 { left: 30%; top: 24%; width: 30%; height: 46%; transform: rotate(-6deg); }
+#s-video .sc-2 { left: 46%; top: 32%; width: 26%; height: 38%; transform: rotate(5deg); background: linear-gradient(150deg, rgba(179,136,255,.34), rgba(124,77,255,.12)); }
+#s-video .sc-line { position: absolute; height: 6px; border-radius: 4px; background: rgba(255,255,255,.16); }
+#s-video .sc-glow {
+  position: absolute; left: 38%; top: 30%; width: 26%; height: 40%;
+  border-radius: 50%; filter: blur(60px);
+  background: rgba(146,87,255,.55);
+}
+#s-video .sc-title {
+  position: absolute; left: 7%; top: 16%;
+  font-size: 30px; font-weight: 700; letter-spacing: -.6px; line-height: 1.25;
+  color: rgba(255,255,255,.94); max-width: 300px;
+  text-shadow: 0 4px 30px rgba(0,0,0,.7);
+}
+#s-video .sc-sub { position: absolute; left: 7%; top: 42%; font-size: 13px; color: rgba(235,232,255,.6); max-width: 260px; line-height: 1.6; }
+
+#s-video .bigplay {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+  width: 88px; height: 88px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(20,18,34,.5);
+  border: 1px solid rgba(235,232,255,.22);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 12px 50px rgba(0,0,0,.55), 0 0 0 10px rgba(124,77,255,.10);
+  color: #fff; z-index: 3;
+}
+#s-video .bigplay .ic { width: 34px; height: 34px; }
+
+#s-video .cc {
+  position: absolute; left: 50%; bottom: 152px; transform: translateX(-50%);
+  padding: 11px 20px; border-radius: 10px;
+  background: rgba(8,7,13,.72);
+  border: 1px solid var(--stroke);
+  backdrop-filter: blur(10px);
+  font-size: 17px; font-weight: 500; color: #fff;
+  text-align: center; max-width: 74%;
+  box-shadow: var(--sh-2);
+  z-index: 3;
+}
+#s-video .stage-tag {
+  position: absolute; left: 16px; top: 16px; z-index: 3;
+  display: flex; gap: 8px;
+}
+
+/* ---- control deck ---- */
+#s-video .deck {
+  flex: none;
+  padding: 14px 18px 13px;
+  border-radius: var(--r-lg);
+  background: rgba(22, 20, 38, 0.72);
+  border: 1px solid var(--stroke-2);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--sh-2), var(--inner-hi);
+  position: relative;
+}
+#s-video .seek { position: relative; height: 6px; border-radius: 4px; background: rgba(235,232,255,.10); margin: 16px 0 12px; }
+#s-video .seek .buf { position: absolute; inset: 0 auto 0 0; width: 78%; border-radius: 4px; background: rgba(235,232,255,.14); }
+#s-video .seek .fill { position: absolute; inset: 0 auto 0 0; width: 58.7%; border-radius: 4px; background: var(--grad-acc); box-shadow: 0 0 14px rgba(124,77,255,.65); }
+#s-video .seek .thumb {
+  position: absolute; left: 58.7%; top: 50%; transform: translate(-50%,-50%);
+  width: 15px; height: 15px; border-radius: 50%; background: #fff;
+  box-shadow: 0 0 0 5px rgba(124,77,255,.35), 0 2px 8px rgba(0,0,0,.6);
+  z-index: 2;
+}
+#s-video .seek .tick {
+  position: absolute; top: -3px; width: 2px; height: 12px; border-radius: 2px;
+  background: rgba(235,232,255,.45);
+}
+#s-video .seek .tick.done { background: rgba(255,255,255,.8); }
+
+#s-video .fprev {
+  position: absolute; left: 58.7%; bottom: 100%; transform: translateX(-50%);
+  margin-bottom: 12px;
+  padding: 6px; border-radius: 10px;
+  background: rgba(26,24,44,.95);
+  border: 1px solid var(--stroke-2);
+  box-shadow: var(--sh-3);
+  z-index: 6;
+}
+#s-video .fprev .fp-img {
+  width: 168px; height: 94px; border-radius: 6px;
+  background:
+    radial-gradient(60% 70% at 60% 44%, rgba(146,87,255,.5), transparent 62%),
+    linear-gradient(165deg, #1B1930, #0B0A14);
+  border: 1px solid var(--stroke);
+  position: relative; overflow: hidden;
+}
+#s-video .fprev .fp-img i {
+  position: absolute; left: 26%; top: 30%; width: 30%; height: 40%;
+  border-radius: 5px; background: rgba(255,255,255,.18); transform: rotate(-6deg);
+}
+#s-video .fprev .fp-t { text-align: center; font-family: var(--font-mono); font-size: 11px; color: var(--txt-1); padding-top: 6px; }
+#s-video .fprev::after {
+  content: ""; position: absolute; left: 50%; bottom: -5px; transform: translateX(-50%) rotate(45deg);
+  width: 9px; height: 9px; background: rgba(26,24,44,.95);
+  border-right: 1px solid var(--stroke-2); border-bottom: 1px solid var(--stroke-2);
+}
+
+#s-video .ctrls { display: flex; align-items: center; gap: 10px; }
+#s-video .pbtn {
+  width: 42px; height: 42px; border-radius: 13px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--grad-acc); color: #fff;
+  box-shadow: 0 4px 16px rgba(124,77,255,.45), var(--inner-hi);
+}
+#s-video .time { font-family: var(--font-mono); font-size: 12.5px; color: var(--txt-1); font-variant-numeric: tabular-nums; }
+#s-video .vol { width: 96px; }
+
+/* ---- chapters panel ---- */
+#s-video .side {
+  width: 322px; flex: none;
+  display: flex; flex-direction: column;
+  border-left: 1px solid var(--stroke);
+  background: rgba(13, 12, 21, 0.55);
+  backdrop-filter: var(--blur);
+}
+#s-video .chp {
+  display: flex; gap: 12px; padding: 12px 14px;
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+}
+#s-video .chp.on { background: var(--acc-soft); border-color: var(--stroke-acc); }
+#s-video .chp .th {
+  width: 82px; height: 47px; flex: none; border-radius: 7px;
+  border: 1px solid var(--stroke);
+  position: relative; overflow: hidden;
+}
+#s-video .chp .th i { position: absolute; left: 24%; top: 28%; width: 34%; height: 42%; border-radius: 4px; background: rgba(255,255,255,.2); transform: rotate(-7deg); }
+#s-video .chp .nm { font-size: 12.5px; font-weight: 600; color: var(--txt-1); }
+#s-video .chp .tm { font-family: var(--font-mono); font-size: 10.5px; color: var(--txt-3); }
+#s-video .chp.on .tm { color: var(--acc-3); }
+
+/* ---- picture in picture ---- */
+#s-video .pip {
+  position: absolute; right: 24px; bottom: 24px; z-index: 40;
+  width: 296px; border-radius: 14px; overflow: hidden;
+  border: 1px solid var(--stroke-2);
+  box-shadow: 0 26px 70px rgba(0,0,0,.72), 0 0 0 1px rgba(124,77,255,.18);
+  background: #0B0A14;
+}
+#s-video .pip .pv {
+  height: 166px; position: relative;
+  background:
+    radial-gradient(60% 70% at 62% 42%, rgba(146,87,255,.42), transparent 62%),
+    linear-gradient(165deg, #171528, #08070D);
+}
+#s-video .pip .pv i {
+  position: absolute; left: 28%; top: 26%; width: 30%; height: 44%;
+  border-radius: 8px; background: rgba(255,255,255,.14);
+  border: 1px solid rgba(235,232,255,.16); transform: rotate(-6deg);
+}
+#s-video .pip .pv .pl {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+  width: 40px; height: 40px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(20,18,34,.55); border: 1px solid rgba(235,232,255,.2);
+  backdrop-filter: blur(8px); color: #fff;
+}
+#s-video .pip .pbar { display: flex; align-items: center; gap: 9px; padding: 9px 11px; background: rgba(18,17,28,.9); }
+#s-video .pip .pbar .pg { flex: 1; height: 3px; border-radius: 3px; background: rgba(235,232,255,.12); position: relative; }
+#s-video .pip .pbar .pg i { position: absolute; inset: 0 auto 0 0; width: 58%; border-radius: 3px; background: var(--grad-acc); }
+#s-video .pip .ptag {
+  position: absolute; left: 10px; top: 10px;
+  padding: 3px 9px; border-radius: var(--r-pill);
+  background: rgba(8,7,13,.7); border: 1px solid var(--stroke-2);
+  font-size: 9.5px; font-weight: 700; letter-spacing: .7px; color: var(--txt-2);
+}
+</style>
+<div class="screen" id="s-video">
+  <header class="vc-viewerbar">
+    <span class="icon-btn framed"><svg class="ic"><use href="#i-chev-l"/></svg></span>
+    <span class="f-ic ft-vid" style="width:30px;height:30px;border-radius:9px;font-size:8.5px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700">MP4</span>
+    <div class="col" style="gap:1px">
+      <span style="font-size:13.5px;font-weight:600">Atlas-Demo-v3.mp4</span>
+      <span style="font-size:11px;color:var(--txt-3)">Shared by Maya Chen · 148 MB · 04:36 · 1920×1080 · in Atlas Launch</span>
+    </div>
+    <span class="secure-pill"><svg class="ic sm"><use href="#i-lock"/></svg>Rendered inside VaultChat — no external apps, nothing leaves the vault</span>
+    <div class="grow"></div>
+    <span class="chip">MP4</span><span class="chip">MOV</span><span class="chip">MKV</span>
+    <span class="btn sm"><svg class="ic sm"><use href="#i-download"/></svg>Download</span>
+    <span class="icon-btn"><svg class="ic"><use href="#i-more-v"/></svg></span>
+    <div class="vc-win"><span>─</span><span>▢</span><span class="close">✕</span></div>
+  </header>
+
+  <div class="work">
+    <div class="stagewrap">
+      <div class="stage">
+        <div class="scene">
+          <div class="sc-glow"></div>
+          <div class="sc-slab sc-1"></div>
+          <div class="sc-slab sc-2"></div>
+          <div class="sc-line" style="left:33%;top:31%;width:14%"></div>
+          <div class="sc-line" style="left:33%;top:36%;width:20%;opacity:.6"></div>
+          <div class="sc-line" style="left:33%;top:41%;width:11%;opacity:.4"></div>
+          <div class="sc-title">Every file opens right where the conversation is.</div>
+          <div class="sc-sub">Atlas product demo · chapter 3 — the Universal File Viewer</div>
+        </div>
+        <div class="stage-tag">
+          <span class="chip" style="background:rgba(8,7,13,.6)"><span class="dot acc"></span>Playing · chapter 3</span>
+          <span class="chip" style="background:rgba(8,7,13,.6)">1080p</span>
+        </div>
+        <div class="bigplay"><svg class="ic"><use href="#i-pause"/></svg></div>
+        <div class="cc">“Every file opens right where the conversation is.”</div>
+      </div>
+
+      <div class="deck">
+        <div class="fprev">
+          <div class="fp-img"><i></i></div>
+          <div class="fp-t">02:41</div>
+        </div>
+        <div class="seek">
+          <div class="buf"></div>
+          <div class="fill"></div>
+          <div class="tick done" style="left:0%"></div>
+          <div class="tick done" style="left:17.4%"></div>
+          <div class="tick done" style="left:47.1%"></div>
+          <div class="tick" style="left:73.9%"></div>
+          <div class="thumb"></div>
+        </div>
+        <div class="ctrls">
+          <span class="pbtn"><svg class="ic lg"><use href="#i-pause"/></svg></span>
+          <span class="icon-btn"><svg class="ic"><use href="#i-volume"/></svg></span>
+          <div class="vol"><div class="slider"><div class="fill" style="width:72%"></div><div class="thumb" style="left:72%"></div></div></div>
+          <span class="time">02:41 <span style="color:var(--txt-3)">/ 04:36</span></span>
+          <div class="grow"></div>
+          <span class="chip active"><svg class="ic sm"><use href="#i-subtitles"/></svg>CC · English</span>
+          <span class="chip"><svg class="ic sm"><use href="#i-speed"/></svg>1.5×</span>
+          <span class="chip active"><svg class="ic sm"><use href="#i-chapters"/></svg>Chapters</span>
+          <span class="chip"><svg class="ic sm"><use href="#i-pip"/></svg>Picture in picture</span>
+          <span class="chip"><svg class="ic sm"><use href="#i-rotate"/></svg>Landscape</span>
+          <span class="chip"><svg class="ic sm"><use href="#i-expand"/></svg>Fullscreen</span>
+        </div>
+      </div>
+    </div>
+
+    <aside class="side">
+      <div class="panel-h"><svg class="ic"><use href="#i-chapters"/></svg>Chapters<span class="grow"></span><span class="chip" style="height:22px;font-size:10.5px">4</span></div>
+      <div class="col" style="padding:10px; gap:4px">
+        <div class="chp">
+          <div class="th" style="background:linear-gradient(150deg,#241f3d,#0E0D18)"><i></i></div>
+          <div class="col grow" style="gap:3px"><span class="nm">Intro — what Atlas is</span><span class="tm">00:00 · 48s</span></div>
+        </div>
+        <div class="chp">
+          <div class="th" style="background:linear-gradient(150deg,#2A2350,#0E0D18)"><i></i></div>
+          <div class="col grow" style="gap:3px"><span class="nm">Split view in practice</span><span class="tm">00:48 · 1m 22s</span></div>
+        </div>
+        <div class="chp on">
+          <div class="th" style="background:radial-gradient(70% 80% at 60% 40%, rgba(146,87,255,.6), transparent 65%), linear-gradient(150deg,#2E2660,#0E0D18)"><i></i></div>
+          <div class="col grow" style="gap:3px"><span class="nm">The file viewer</span><span class="tm">02:10 · 1m 12s · now playing</span></div>
+        </div>
+        <div class="chp">
+          <div class="th" style="background:linear-gradient(150deg,#1F2A44,#0E0D18)"><i></i></div>
+          <div class="col grow" style="gap:3px"><span class="nm">Reading mode</span><span class="tm">03:22 · 1m 14s</span></div>
+        </div>
+      </div>
+
+      <div class="panel-h" style="border-top:1px solid var(--stroke)"><svg class="ic"><use href="#i-subtitles"/></svg>Subtitles</div>
+      <div class="col" style="padding:12px 14px; gap:8px">
+        <div class="row gap-8"><span class="chip active" style="height:24px">English</span><span class="chip" style="height:24px">Deutsch</span><span class="chip" style="height:24px">Off</span></div>
+        <div style="font-size:11.5px;color:var(--txt-3);line-height:1.5">Burned-in and sidecar tracks are both read from the container — nothing is transcoded.</div>
+        <span class="chip ok" style="width:100%;justify-content:center;margin-top:4px"><svg class="ic sm"><use href="#i-check"/></svg>Streamed from the vault, decrypted locally</span>
+      </div>
+      <div class="grow"></div>
+    </aside>
+
+    <div class="pip">
+      <div class="pv">
+        <span class="ptag">PICTURE IN PICTURE</span>
+        <i></i>
+        <span class="pl"><svg class="ic sm"><use href="#i-pause"/></svg></span>
+      </div>
+      <div class="pbar">
+        <svg class="ic sm" style="color:var(--txt-2)"><use href="#i-pause"/></svg>
+        <div class="pg"><i></i></div>
+        <span style="font-family:var(--font-mono);font-size:10px;color:var(--txt-3)">02:41</span>
+        <svg class="ic sm" style="color:var(--txt-2)"><use href="#i-expand"/></svg>
+        <svg class="ic sm" style="color:var(--txt-2)"><use href="#i-close"/></svg>
+      </div>
+    </div>
+  </div>
+</div>

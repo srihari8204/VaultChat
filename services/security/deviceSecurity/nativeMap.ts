@@ -14,9 +14,10 @@ import type { CollectorResult } from './orchestrator';
 import type { Platform } from './posture';
 import type { SecuritySignal, SecuritySignalType } from './riskEngine';
 
-// Fill from your release keystore's signing cert (SHA-256, lowercase hex, no
-// colons). Empty string = skip the re-sign check (APK_RESIGNED stays pending).
-export const EXPECTED_SIGNING_SHA256 = '';
+// Release signing cert (SHA-256, lowercase hex, no colons) — from
+// android/app/debug.keystore (androiddebugkey), which release builds sign with
+// (keytool -list -v). Rotate this constant if the signing keystore ever changes.
+export const EXPECTED_SIGNING_SHA256 = 'fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c';
 
 // Accessibility services considered legitimate (prefix match on the flattened
 // "pkg/.Service" component name). Extend for OEM assistive tools you trust.

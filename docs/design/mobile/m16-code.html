@@ -1,0 +1,184 @@
+<style>
+#m-code .who { min-width: 0; }
+#m-code .who .vs { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#m-code .who .vt { font-size: 14px; }
+#m-code .m-viewerbar { gap: 8px; }
+
+/* ---- file tabs ---- */
+#m-code .tabs-wrap { flex: none; padding: 11px 0 0 12px; position: relative; }
+#m-code .tabs-wrap::after {
+  content: ""; position: absolute; right: 0; top: 11px; bottom: 0; width: 30px;
+  background: linear-gradient(90deg, rgba(9,8,15,0), #0A0912 78%); pointer-events: none;
+}
+#m-code .tabs-wrap .m-chips { gap: 5px; }
+#m-code .tabs-wrap .m-chip { height: 30px; padding: 0 8px; font-size: 10.5px; gap: 5px; }
+#m-code .sq { width: 6px; height: 6px; border-radius: 2px; flex: none; }
+
+/* ---- find row ---- */
+#m-code .findrow { flex: none; display: flex; align-items: center; gap: 8px; padding: 11px 14px 0; }
+#m-code .findrow .m-search { flex: 1; min-width: 0; height: 34px; border-radius: 11px; font-size: 12.5px; }
+#m-code .findrow .hits { font-size: 11px; color: var(--txt-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+#m-code .findrow .ib {
+  width: 34px; height: 34px; border-radius: 11px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(235,232,255,.05); border: 1px solid var(--stroke); color: var(--txt-2);
+}
+#m-code .findrow .ib .ic { width: 16px; height: 16px; }
+
+/* ---- editor ---- */
+#m-code .editor {
+  flex: none; margin: 11px 14px 0; border-radius: 16px; overflow: hidden;
+  background: rgba(8,7,13,.55);
+  border: 1px solid var(--stroke);
+  box-shadow: var(--sh-2), var(--inner-hi);
+  display: flex;
+}
+#m-code .gutter {
+  width: 34px; flex: none; padding: 10px 0;
+  background: rgba(8,7,13,.6);
+  border-right: 1px solid var(--stroke);
+  text-align: right;
+}
+#m-code .gutter div { font-family: var(--font-mono); font-size: 10px; line-height: 22px; color: var(--txt-3); opacity: .6; padding-right: 8px; }
+#m-code .gutter div.cur { opacity: 1; color: var(--acc-3); background: rgba(124,77,255,.12); }
+#m-code .code {
+  flex: 1; min-width: 0; padding: 10px 0 10px 12px;
+  font-family: var(--font-mono); font-size: 11px; line-height: 22px;
+  white-space: pre; overflow: hidden; color: #C9C5E8;
+}
+#m-code .code .ln { display: block; }
+#m-code .code .ln.cur { background: rgba(124,77,255,.11); box-shadow: inset 2px 0 0 var(--acc); margin-left: -12px; padding-left: 12px; }
+#m-code .k  { color: #C792EA; }
+#m-code .fn { color: #82AAFF; }
+#m-code .st { color: #6ED8A0; }
+#m-code .nu { color: #F7A76C; }
+#m-code .cm { color: #5E5A78; font-style: italic; }
+#m-code .ty { color: #7FDBCA; }
+#m-code .pr { color: #A29DC0; }
+
+/* ---- log card ---- */
+#m-code .logcard { margin: 12px 14px 0; flex: none; overflow: hidden; }
+#m-code .lg-head { display: flex; align-items: center; gap: 9px; padding: 10px 13px; border-bottom: 1px solid var(--stroke); }
+#m-code .lg-head .ic { color: var(--warn); }
+#m-code .lg-head .t { font-size: 13px; font-weight: 650; font-family: var(--font-mono); }
+#m-code .lg-head .m-chip { height: 22px; font-size: 9.5px; padding: 0 8px; }
+#m-code .lrow {
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 7px 12px; border-left: 2px solid transparent;
+  font-family: var(--font-mono); font-size: 10.5px; line-height: 1.45;
+}
+#m-code .lrow + .lrow { border-top: 1px solid rgba(235,232,255,.045); }
+#m-code .lrow .ts { color: var(--txt-3); flex: none; }
+#m-code .lvl {
+  flex: none; width: 42px; text-align: center;
+  padding: 1px 0; border-radius: 4px;
+  font-size: 8.5px; font-weight: 750; letter-spacing: .4px;
+  font-family: var(--font-ui);
+}
+#m-code .lvl.i { background: rgba(52,211,153,.14); color: #4ADE9E; }
+#m-code .lvl.w { background: rgba(251,191,36,.14); color: #FCD34D; }
+#m-code .lvl.e { background: rgba(248,113,113,.16); color: #FCA5A5; }
+#m-code .lrow.err { background: rgba(248,113,113,.07); border-left-color: var(--err); }
+#m-code .lrow.wrn { background: rgba(251,191,36,.05); border-left-color: rgba(251,191,36,.5); }
+#m-code .lrow .msg { color: var(--txt-2); min-width: 0; }
+#m-code .lrow .msg b { color: var(--txt-1); font-weight: 700; }
+#m-code .lg-foot { display: flex; align-items: center; gap: 8px; padding: 9px 13px; border-top: 1px solid var(--stroke); }
+#m-code .lg-foot .lt { font-size: 11px; color: var(--txt-2); }
+#m-code .lg-foot .lc { font-size: 10.5px; color: var(--txt-3); font-family: var(--font-mono); }
+
+/* ---- status strip ---- */
+#m-code .status {
+  flex: none; height: 36px;
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 14px;
+  background: rgba(16, 15, 26, 0.8);
+  border-top: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+  font-size: 10.5px; color: var(--txt-3); white-space: nowrap;
+}
+#m-code .status > span { flex: none; }
+#m-code .status .b { color: var(--txt-2); font-weight: 600; }
+#m-code .status .sep { width: 1px; height: 12px; background: var(--stroke-2); }
+#m-code .status .secure-pill { height: 22px; font-size: 9.5px; padding: 0 9px; gap: 5px; }
+#m-code .status .secure-pill .ic { width: 11px; height: 11px; }
+</style>
+<div class="mscreen" id="m-code">
+  <div class="m-status">
+    <span>9:41</span>
+    <div class="sb-right">
+      <span class="m-sig"><i></i><i></i><i></i><i></i></span>
+      <span class="m-wifi"></span>
+      <span class="m-batt"><i></i></span>
+    </div>
+  </div>
+
+  <header class="m-viewerbar">
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-chev-l"/></svg></span>
+    <span class="m-tile sm ft-code">TS</span>
+    <div class="col grow who" style="gap:2px">
+      <span class="vt">PaymentService.ts</span>
+      <span class="vs">Ravi Patel · 14 KB · Release 1.3</span>
+    </div>
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-copy"/></svg></span>
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-more-v"/></svg></span>
+  </header>
+
+  <div class="m-secure"><svg class="ic sm"><use href="#i-lock"/></svg>Opens inside VaultChat — no external app</div>
+
+  <div class="tabs-wrap">
+    <div class="m-chips">
+      <span class="m-chip on"><span class="sq" style="background:#3178C6"></span>PaymentService.ts</span>
+      <span class="m-chip"><span class="sq" style="background:#F7A76C"></span>config.json</span>
+      <span class="m-chip"><span class="sq" style="background:#34D399"></span>metrics.csv</span>
+      <span class="m-chip"><span class="sq" style="background:#FBBF24"></span>deploy.log</span>
+    </div>
+  </div>
+
+  <div class="findrow">
+    <div class="m-search"><svg class="ic sm"><use href="#i-search"/></svg><span class="grow">Find in file</span></div>
+    <span class="hits">3 of 11</span>
+    <span class="ib"><svg class="ic"><use href="#i-chev-u"/></svg></span>
+    <span class="ib"><svg class="ic"><use href="#i-chev-d"/></svg></span>
+  </div>
+
+  <div class="editor">
+    <div class="gutter">
+      <div>18</div><div>19</div><div>20</div><div>21</div><div>22</div><div>23</div><div>24</div>
+      <div class="cur">25</div><div>26</div><div>27</div><div>28</div><div>29</div><div>30</div><div>31</div>
+      <div>32</div><div>33</div><div>34</div>
+    </div>
+    <div class="code"><span class="ln"><span class="cm">/** Charges a vault-scoped invoice. */</span></span><span class="ln"><span class="k">export class</span> <span class="ty">PaymentService</span> {</span><span class="ln">  <span class="k">private readonly</span> <span class="pr">gw</span>: <span class="ty">Gateway</span>;</span><span class="ln">  <span class="k">private readonly</span> <span class="pr">ledger</span>: <span class="ty">Ledger</span>;</span><span class="ln"> </span><span class="ln">  <span class="k">async</span> <span class="fn">charge</span>(<span class="pr">inv</span>: <span class="ty">Invoice</span>) {</span><span class="ln">    <span class="k">if</span> (<span class="pr">inv</span>.<span class="pr">amount</span> &lt;= <span class="nu">0</span>) {</span><span class="ln cur">      <span class="k">throw new</span> <span class="ty">PaymentError</span>(<span class="st">"bad_amount"</span>);</span><span class="ln">    }</span><span class="ln">    <span class="cm">// One key, one charge — ever.</span></span><span class="ln">    <span class="k">const</span> <span class="pr">prev</span> = <span class="k">await</span> <span class="k">this</span>.<span class="pr">ledger</span>.<span class="fn">find</span>(<span class="pr">inv</span>.<span class="pr">key</span>);</span><span class="ln">    <span class="k">if</span> (<span class="pr">prev</span>) <span class="k">return</span> <span class="pr">prev</span>.<span class="pr">receipt</span>;</span><span class="ln"> </span><span class="ln">    <span class="k">return</span> <span class="k">this</span>.<span class="pr">gw</span>.<span class="fn">authorize</span>(<span class="pr">inv</span>, <span class="nu">3</span>);</span><span class="ln">  }</span><span class="ln"> </span><span class="ln">  <span class="cm">// ── refunds ─────────────</span></span></div>
+  </div>
+
+  <div class="m-card logcard">
+    <div class="lg-head">
+      <svg class="ic"><use href="#i-log"/></svg>
+      <span class="t grow">deploy.log</span>
+      <span class="m-chip" style="color:var(--err);border-color:rgba(248,113,113,.34);background:rgba(248,113,113,.09)">1 error</span>
+      <span class="m-chip" style="color:var(--warn);border-color:rgba(251,191,36,.34);background:rgba(251,191,36,.09)">2 warnings</span>
+    </div>
+    <div class="lrow"><span class="ts">09:02</span><span class="lvl i">INFO</span><span class="msg grow">build <b>1842</b> uploaded · 84.2 MB</span></div>
+    <div class="lrow wrn"><span class="ts">09:03</span><span class="lvl w">WARN</span><span class="msg grow">slow query <b>1,412 ms</b> on files.by_owner</span></div>
+    <div class="lrow err"><span class="ts">09:03</span><span class="lvl e">ERROR</span><span class="msg grow"><b>charge()</b> — gateway timeout after 3 retries</span></div>
+    <div class="lrow"><span class="ts">09:04</span><span class="lvl i">INFO</span><span class="msg grow">health check green · rollout <b>100%</b></span></div>
+    <div class="lg-foot">
+      <span class="dot on"></span>
+      <span class="lt">Tail — live</span>
+      <div class="grow"></div>
+      <span class="lc">2,846 lines</span>
+      <span class="m-chip" style="height:24px;font-size:10px;padding:0 9px"><svg class="ic sm" style="width:11px;height:11px"><use href="#i-filter"/></svg>Level</span>
+    </div>
+  </div>
+
+  <div class="grow"></div>
+
+  <div class="status">
+    <span class="b">TypeScript</span><span class="sep"></span>
+    <span>UTF-8</span><span class="sep"></span>
+    <span class="b">342 lines</span>
+    <div class="grow"></div>
+    <span class="secure-pill"><svg class="ic sm"><use href="#i-lock"/></svg>Read-only vault copy</span>
+  </div>
+
+  <div class="m-home"><i></i></div>
+</div>

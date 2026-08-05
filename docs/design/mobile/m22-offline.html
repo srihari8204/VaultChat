@@ -1,0 +1,242 @@
+<style>
+#m-offline .m-largehead { padding: 2px 20px 0; }
+#m-offline .m-largehead h1 { font-size: 28px; }
+#m-offline .status {
+  flex: none;
+  display: flex; align-items: center; gap: 9px;
+  margin: 9px 16px 0; padding: 9px 13px;
+  border-radius: 13px;
+  background: rgba(251,191,36,.09); border: 1px solid rgba(251,191,36,.3);
+  color: var(--warn); font-size: 12.5px; font-weight: 600;
+}
+#m-offline .status .ic { width: 17px; height: 17px; }
+
+/* ---- KPI row ---- */
+#m-offline .kpis { display: flex; gap: 9px; padding: 10px 16px 0; flex: none; }
+#m-offline .kpi { flex: 1; min-width: 0; padding: 9px 11px; border-radius: 15px; }
+#m-offline .kpi .k-ic {
+  width: 26px; height: 26px; border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(235,232,255,.06); border: 1px solid var(--stroke); color: var(--txt-2);
+}
+#m-offline .kpi .k-ic .ic { width: 15px; height: 15px; }
+#m-offline .kpi .k-ic.acc  { background: var(--acc-soft); border-color: var(--stroke-acc); color: var(--acc-3); }
+#m-offline .kpi .k-ic.warn { background: rgba(251,191,36,.11); border-color: rgba(251,191,36,.35); color: var(--warn); }
+#m-offline .kpi .k-ic.ok   { background: rgba(52,211,153,.1); border-color: rgba(52,211,153,.35); color: var(--ok); }
+#m-offline .kpi .k-l { font-size: 8.5px; font-weight: 750; letter-spacing: .8px; text-transform: uppercase; color: var(--txt-3); margin-top: 7px; }
+#m-offline .kpi .k-v { font-size: 15.5px; font-weight: 720; letter-spacing: -.3px; margin-top: 1px; white-space: nowrap; }
+#m-offline .kpi .k-s { font-size: 9.5px; color: var(--txt-3); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+#m-offline .chips { padding: 10px 16px 0; flex: none; }
+#m-offline .m-chip { height: 30px; padding: 0 13px; font-size: 12.5px; }
+
+/* ---- File list ---- */
+#m-offline .list { margin: 9px 16px 0; overflow: hidden; flex: none; }
+#m-offline .m-row { padding: 6px 12px; gap: 11px; }
+#m-offline .m-tile { width: 34px; height: 34px; border-radius: 11px; font-size: 8px; }
+#m-offline .tick {
+  position: absolute; right: -4px; bottom: -4px; width: 15px; height: 15px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--ok); border: 2px solid #14121F; color: #06251A;
+}
+#m-offline .tick .ic { width: 7px; height: 7px; }
+#m-offline .tick.pend { background: var(--warn); color: #2E1F02; }
+#m-offline .m-row .r-nm { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#m-offline .m-row .r-mt { font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#m-offline .st {
+  flex: none; display: inline-flex; align-items: center; gap: 5px;
+  height: 23px; padding: 0 8px; border-radius: 999px;
+  font-size: 10px; font-weight: 620; white-space: nowrap;
+  border: 1px solid var(--stroke); background: rgba(235,232,255,.04); color: var(--txt-3);
+}
+#m-offline .st .ic { width: 11px; height: 11px; }
+#m-offline .st.ok { color: var(--ok); border-color: rgba(52,211,153,.32); background: rgba(52,211,153,.09); }
+#m-offline .st.warn { color: var(--warn); border-color: rgba(251,191,36,.32); background: rgba(251,191,36,.09); }
+#m-offline .ghost .r-nm, #m-offline .ghost .r-mt, #m-offline .ghost .m-tile { opacity: .6; }
+
+/* ---- Sync queue ---- */
+#m-offline .queue { margin: 9px 16px 0; overflow: hidden; flex: none; }
+#m-offline .q-h {
+  display: flex; align-items: center; gap: 9px;
+  padding: 9px 13px; border-bottom: 1px solid var(--stroke);
+  font-size: 13px; font-weight: 660;
+}
+#m-offline .q-h .ic { width: 16px; height: 16px; color: var(--txt-2); }
+#m-offline .q-h .m-chip { height: 22px; padding: 0 9px; font-size: 10px; margin-left: auto; color: var(--warn); border-color: rgba(251,191,36,.32); background: rgba(251,191,36,.09); }
+#m-offline .qrow { display: flex; flex-direction: column; gap: 6px; padding: 7px 13px; }
+#m-offline .qrow + .qrow { border-top: 1px solid rgba(235,232,255,.05); }
+#m-offline .qrow.live { background: rgba(124,77,255,.06); }
+#m-offline .q-top { display: flex; align-items: center; gap: 10px; }
+#m-offline .q-top .m-tile { width: 26px; height: 26px; border-radius: 8px; font-size: 7px; }
+#m-offline .q-nm { font-size: 12px; font-weight: 620; }
+#m-offline .q-st { font-size: 10px; color: var(--txt-3); }
+#m-offline .q-st.done { color: var(--ok); }
+#m-offline .q-pct { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--txt-2); }
+#m-offline .q-pct.done { color: var(--ok); }
+#m-offline .progress { height: 4px; }
+#m-offline .fill.done { background: rgba(52,211,153,.5); box-shadow: none; }
+#m-offline .fill.up { background-image: repeating-linear-gradient(60deg, rgba(255,255,255,.28) 0 5px, transparent 5px 10px), var(--grad-acc); }
+
+#m-offline .note {
+  flex: none;
+  display: flex; align-items: flex-start; gap: 9px;
+  margin: 7px 16px 0; padding: 10px 13px; border-radius: 13px;
+  background: rgba(52,211,153,.07); border: 1px solid rgba(52,211,153,.24);
+  font-size: 11.5px; line-height: 1.45; color: var(--txt-2);
+}
+#m-offline .note .ic { width: 15px; height: 15px; color: var(--ok); flex: none; margin-top: 1px; }
+#m-offline .note b { color: var(--ok); font-weight: 680; }
+#m-offline .spacer { flex: 1; min-height: 0; }
+</style>
+<div class="mscreen" id="m-offline">
+  <div class="m-status">
+    <span>9:31</span>
+    <div class="sb-right">
+      <span class="m-sig"><i></i><i></i><i></i><i></i></span>
+      <span class="m-wifi"></span>
+      <span class="m-batt"><i></i></span>
+    </div>
+  </div>
+
+  <div class="m-largehead">
+    <h1>Offline</h1>
+  </div>
+
+  <div class="status">
+    <svg class="ic"><use href="#i-cloud-off"/></svg>
+    You're offline — changes sync when you're back
+  </div>
+
+  <div class="kpis">
+    <div class="kpi m-card">
+      <span class="k-ic acc"><svg class="ic"><use href="#i-download"/></svg></span>
+      <div class="k-l">Downloaded</div>
+      <div class="k-v">1.2 GB</div>
+    </div>
+    <div class="kpi m-card">
+      <span class="k-ic warn"><svg class="ic"><use href="#i-sync"/></svg></span>
+      <div class="k-l">Pending</div>
+      <div class="k-v">3 items</div>
+    </div>
+    <div class="kpi m-card">
+      <span class="k-ic ok"><svg class="ic"><use href="#i-cloud-check"/></svg></span>
+      <div class="k-l">Synced</div>
+      <div class="k-v">All else</div>
+    </div>
+  </div>
+
+  <div class="chips">
+    <div class="m-chips">
+      <span class="m-chip on">All</span>
+      <span class="m-chip"><svg class="ic sm"><use href="#i-sync"/></svg>Pending</span>
+      <span class="m-chip"><svg class="ic sm"><use href="#i-cloud-off"/></svg>Cloud-only</span>
+      <span class="m-chip">Pinned</span>
+    </div>
+  </div>
+
+  <div class="list m-card">
+    <div class="m-row">
+      <span class="m-tile ft-doc">DOC<span class="tick"><svg class="ic"><use href="#i-check"/></svg></span></span>
+      <div class="col grow" style="gap:1px;min-width:0">
+        <span class="r-nm">Atlas-Proposal.docx</span>
+        <span class="r-mt">Atlas Launch · 4.2 MB · 24 pages</span>
+      </div>
+      <span class="st ok"><svg class="ic"><use href="#i-check"/></svg>Available offline</span>
+    </div>
+    <div class="m-row">
+      <span class="m-tile ft-xls">XLS<span class="tick"><svg class="ic"><use href="#i-check"/></svg></span></span>
+      <div class="col grow" style="gap:1px;min-width:0">
+        <span class="r-nm">Atlas-Financials-FY26.xlsx</span>
+        <span class="r-mt">Atlas Launch · 1.8 MB · 6 sheets</span>
+      </div>
+      <span class="st ok"><svg class="ic"><use href="#i-check"/></svg>Available offline</span>
+    </div>
+    <div class="m-row">
+      <span class="m-tile ft-img">WEBP<span class="tick pend"><svg class="ic"><use href="#i-sync"/></svg></span></span>
+      <div class="col grow" style="gap:1px;min-width:0">
+        <span class="r-nm">hero-v2.webp</span>
+        <span class="r-mt">Design Guild · 3.4 MB · edited 22m</span>
+      </div>
+      <span class="st warn"><svg class="ic"><use href="#i-sync"/></svg>Sync pending</span>
+    </div>
+    <div class="m-row">
+      <span class="m-tile ft-pdf">PDF<span class="tick pend"><svg class="ic"><use href="#i-sync"/></svg></span></span>
+      <div class="col grow" style="gap:1px;min-width:0">
+        <span class="r-nm">Atlas-MSA-Contract.pdf</span>
+        <span class="r-mt">Legal — NDA Review · 2 annotations</span>
+      </div>
+      <span class="st warn"><svg class="ic"><use href="#i-sync"/></svg>Sync pending</span>
+    </div>
+    <div class="m-row ghost">
+      <span class="m-tile ft-vid">MP4</span>
+      <div class="col grow" style="gap:1px;min-width:0">
+        <span class="r-nm">Atlas-Demo-v3.mp4</span>
+        <span class="r-mt">Atlas Launch · 148 MB · over Wi-Fi limit</span>
+      </div>
+      <span class="st"><svg class="ic"><use href="#i-cloud-off"/></svg>Cloud only</span>
+    </div>
+    <div class="m-row ghost">
+      <span class="m-tile ft-zip">ZIP</span>
+      <div class="col grow" style="gap:1px;min-width:0">
+        <span class="r-nm">Design-Assets.zip</span>
+        <span class="r-mt">Design Guild · 86 MB · 247 files</span>
+      </div>
+      <span class="st"><svg class="ic"><use href="#i-cloud-off"/></svg>Cloud only</span>
+    </div>
+  </div>
+
+  <div class="queue m-card">
+    <div class="q-h">
+      <svg class="ic"><use href="#i-sync"/></svg>Sync queue
+      <span class="m-chip">Paused — offline</span>
+    </div>
+    <div class="qrow live">
+      <div class="q-top">
+        <span class="m-tile ft-img">WEBP</span>
+        <div class="col" style="gap:1px">
+          <span class="q-nm">hero-v2.webp</span>
+          <span class="q-st">Uploading — resumes when you're back online</span>
+        </div>
+        <span class="q-pct">64%</span>
+      </div>
+      <div class="progress"><div class="fill up" style="width:64%"></div></div>
+    </div>
+    <div class="qrow">
+      <div class="q-top">
+        <span class="m-tile ft-doc">DOC</span>
+        <div class="col" style="gap:1px">
+          <span class="q-nm">Atlas-Proposal.docx</span>
+          <span class="q-st done">Synced · 09:41</span>
+        </div>
+        <span class="q-pct done"><svg class="ic sm"><use href="#i-check"/></svg></span>
+      </div>
+    </div>
+    <div class="qrow">
+      <div class="q-top">
+        <span class="m-tile ft-txt">MD</span>
+        <div class="col" style="gap:1px">
+          <span class="q-nm">release-notes.md</span>
+          <span class="q-st done">Synced · 09:12</span>
+        </div>
+        <span class="q-pct done"><svg class="ic sm"><use href="#i-check"/></svg></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    <svg class="ic"><use href="#i-check2"/></svg>
+    <span><b>Conflict-free:</b> edits merge when you reconnect. Nothing is overwritten — every offline change keeps its history.</span>
+  </div>
+
+  <div class="spacer"></div>
+
+  <nav class="m-tabbar">
+    <span class="m-tab"><svg class="ic"><use href="#i-chat"/></svg><span>Chats</span></span>
+    <span class="m-tab"><svg class="ic"><use href="#i-book"/></svg><span>Shelf</span></span>
+    <span class="m-tab"><svg class="ic"><use href="#i-search"/></svg><span>Search</span></span>
+    <span class="m-tab on"><svg class="ic"><use href="#i-cloud-off"/></svg><span>Offline</span></span>
+    <span class="m-tab"><svg class="ic"><use href="#i-shield"/></svg><span>Vault</span></span>
+  </nav>
+
+  <div class="m-home"><i></i></div>
+</div>

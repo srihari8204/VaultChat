@@ -1,0 +1,250 @@
+<style>
+#m-security .m-largehead { padding: 2px 20px 0; }
+#m-security .m-largehead h1 { font-size: 28px; }
+#m-security .m-largehead .sub { font-size: 12px; }
+#m-security .toprow { display: flex; padding: 9px 16px 0; flex: none; }
+#m-security .pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 30px; padding: 0 13px; border-radius: 999px;
+  background: rgba(52,211,153,.09); border: 1px solid rgba(52,211,153,.32);
+  color: var(--ok); font-size: 12px; font-weight: 650;
+}
+#m-security .pill .ic { width: 14px; height: 14px; }
+
+#m-security .cards { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 9px; padding: 9px 16px 0; }
+#m-security .fc { flex: none; padding: 10px 12px; border-radius: 16px; }
+#m-security .fc-h { display: flex; align-items: flex-start; gap: 11px; }
+#m-security .fc-ic {
+  width: 34px; height: 34px; border-radius: 11px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--acc-soft); border: 1px solid var(--stroke-acc); color: var(--acc-3);
+  box-shadow: var(--inner-hi);
+}
+#m-security .fc-ic .ic { width: 18px; height: 18px; }
+#m-security .fc-t { font-size: 13.5px; font-weight: 660; letter-spacing: -.1px; }
+#m-security .fc-b { font-size: 11.5px; color: var(--txt-2); line-height: 1.4; margin-top: 2px; }
+#m-security .fc-h .toggle { margin-top: 6px; }
+
+#m-security .chip {
+  height: 24px; font-size: 10.5px; padding: 0 10px;
+}
+#m-security .chip .ic { width: 11px; height: 11px; }
+#m-security .fc-f { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding-left: 45px; }
+#m-security .lbl { font-size: 10px; color: var(--txt-3); }
+
+/* blocked action glyphs */
+#m-security .bacts { display: flex; align-items: center; gap: 7px; }
+#m-security .b-act {
+  width: 26px; height: 26px; border-radius: 8px; position: relative; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(235,232,255,.04); border: 1px solid var(--stroke); color: var(--txt-3);
+}
+#m-security .b-act .ic { width: 13px; height: 13px; }
+#m-security .b-act::after {
+  content: ""; position: absolute; left: 4px; right: 4px; top: 50%;
+  height: 1.5px; background: var(--err); transform: rotate(-40deg); border-radius: 2px; opacity: .9;
+}
+
+/* expiry bar */
+#m-security .exp-bar { height: 4px; border-radius: 4px; background: rgba(235,232,255,.1); overflow: hidden; flex: 1; }
+#m-security .exp-bar i { display: block; height: 100%; width: 96%; border-radius: 4px; background: linear-gradient(90deg, #FBBF24, #FB923C); box-shadow: 0 0 10px rgba(251,191,36,.4); }
+#m-security .countdown { font-family: var(--font-mono); font-weight: 700; }
+#m-security .chip.warn .ic { color: var(--warn); }
+
+/* download-off glyph */
+#m-security .dl-glyph {
+  width: 34px; height: 34px; border-radius: 11px; flex: none; position: relative;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(248,113,113,.09); border: 1px solid rgba(248,113,113,.32); color: var(--err);
+}
+#m-security .dl-glyph .ic { width: 17px; height: 17px; }
+#m-security .dl-glyph::after {
+  content: ""; position: absolute; left: 6px; right: 6px; top: 50%;
+  height: 2px; background: var(--err); transform: rotate(-42deg); border-radius: 2px;
+  box-shadow: 0 0 8px rgba(248,113,113,.5);
+}
+#m-security .m-tile.mini { width: 24px; height: 24px; border-radius: 8px; font-size: 6.5px; }
+
+/* watermark preview */
+#m-security .wm-wrap { display: flex; align-items: center; gap: 12px; margin-top: 8px; padding-left: 45px; }
+#m-security .wm-page {
+  width: 100px; height: 56px; border-radius: 8px; flex: none; position: relative; overflow: hidden;
+  background: #F4F2FC; box-shadow: 0 5px 16px rgba(0,0,0,.45), inset 0 0 0 1px rgba(0,0,0,.06);
+  padding: 9px 10px; display: flex; flex-direction: column; gap: 5px;
+}
+#m-security .wm-line { height: 4px; border-radius: 3px; background: #D9D5EA; }
+#m-security .wm-ghost {
+  position: absolute; inset: -60% -40%; transform: rotate(-26deg);
+  display: flex; flex-direction: column; justify-content: center; gap: 14px;
+}
+#m-security .wm-ghost span {
+  font-size: 6.5px; font-weight: 800; letter-spacing: 1.1px; white-space: nowrap;
+  color: rgba(108, 61, 244, .28);
+}
+#m-security .wm-note { font-size: 10.5px; color: var(--txt-3); line-height: 1.45; }
+#m-security .wm-note b { color: var(--txt-2); font-family: var(--font-mono); font-size: 10px; letter-spacing: .5px; }
+
+/* audit strip */
+#m-security .audit {
+  flex: none; display: flex; align-items: center; gap: 11px;
+  margin: 9px 16px 0; padding: 9px 12px; border-radius: 14px;
+}
+#m-security .audit .a-ic {
+  width: 30px; height: 30px; border-radius: 10px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(235,232,255,.05); border: 1px solid var(--stroke); color: var(--txt-2);
+}
+#m-security .audit .a-ic .ic { width: 15px; height: 15px; }
+#m-security .audit .a-txt { font-size: 10.5px; color: var(--txt-3); line-height: 1.5; }
+#m-security .audit .a-txt b { color: var(--txt-2); font-weight: 650; }
+#m-security .audit .a-txt .ok { color: var(--ok); font-weight: 650; }
+</style>
+<div class="mscreen" id="m-security">
+  <div class="m-status">
+    <span>9:36</span>
+    <div class="sb-right">
+      <span class="m-sig"><i></i><i></i><i></i><i></i></span>
+      <span class="m-wifi"></span>
+      <span class="m-batt"><i></i></span>
+    </div>
+  </div>
+
+  <div class="m-largehead">
+    <h1>Security</h1>
+    <div class="sub">What protects this workspace, and what you control per file</div>
+  </div>
+
+  <div class="toprow">
+    <span class="pill"><svg class="ic"><use href="#i-check2"/></svg>All 6 protections active</span>
+  </div>
+
+  <div class="cards">
+    <!-- 1 · E2E -->
+    <div class="fc m-card">
+      <div class="fc-h">
+        <span class="fc-ic"><svg class="ic"><use href="#i-lock"/></svg></span>
+        <div class="grow">
+          <div class="fc-t">End-to-end encryption</div>
+          <div class="fc-b">Sealed on your device — keys never leave it.</div>
+        </div>
+      </div>
+      <div class="fc-f">
+        <span class="chip ok"><svg class="ic"><use href="#i-lock"/></svg>Always on · AES-256 + X25519</span>
+        <span class="lbl">verified</span>
+      </div>
+    </div>
+
+    <!-- 2 · Sandboxed viewer -->
+    <div class="fc m-card">
+      <div class="fc-h">
+        <span class="fc-ic"><svg class="ic"><use href="#i-file"/></svg></span>
+        <div class="grow">
+          <div class="fc-t">Secure file viewer</div>
+          <div class="fc-b">Every format renders inside VaultChat's sandbox.</div>
+        </div>
+      </div>
+      <div class="fc-f">
+        <span class="chip ok"><svg class="ic"><use href="#i-check"/></svg>Sandboxed · no external apps</span>
+        <span class="lbl">27 formats</span>
+      </div>
+    </div>
+
+    <!-- 3 · View-only -->
+    <div class="fc m-card">
+      <div class="fc-h">
+        <span class="fc-ic"><svg class="ic"><use href="#i-eye"/></svg></span>
+        <div class="grow">
+          <div class="fc-t">View-only sharing</div>
+          <div class="fc-b">Read only — no saving, copying or printing.</div>
+        </div>
+        <span class="toggle on"></span>
+      </div>
+      <div class="fc-f">
+        <span class="bacts">
+          <span class="b-act"><svg class="ic"><use href="#i-copy"/></svg></span>
+          <span class="b-act"><svg class="ic"><use href="#i-download"/></svg></span>
+          <span class="b-act"><svg class="ic"><use href="#i-print"/></svg></span>
+        </span>
+        <span class="lbl">On for 2 conversations</span>
+      </div>
+    </div>
+
+    <!-- 4 · Expiring -->
+    <div class="fc m-card">
+      <div class="fc-h">
+        <span class="fc-ic"><svg class="ic"><use href="#i-timer"/></svg></span>
+        <div class="grow">
+          <div class="fc-t">Expiring files</div>
+          <div class="fc-b">Access ends automatically — the key is destroyed.</div>
+        </div>
+      </div>
+      <div class="fc-f">
+        <span class="chip warn"><svg class="ic"><use href="#i-timer"/></svg>Expires in <span class="countdown">23:12:04</span></span>
+        <div class="exp-bar"><i></i></div>
+      </div>
+    </div>
+
+    <!-- 5 · Download disabled -->
+    <div class="fc m-card">
+      <div class="fc-h">
+        <span class="dl-glyph"><svg class="ic"><use href="#i-download"/></svg></span>
+        <div class="grow">
+          <div class="fc-t">Download disabled</div>
+          <div class="fc-b">Open files, yes. Save them out, no.</div>
+        </div>
+        <span class="toggle on"></span>
+      </div>
+      <div class="fc-f">
+        <span class="m-tile mini ft-doc">DOC</span>
+        <span class="m-tile mini ft-pdf">PDF</span>
+        <span class="m-tile mini ft-xls">XLS</span>
+        <span class="lbl">3 downloads blocked this week</span>
+      </div>
+    </div>
+
+    <!-- 6 · Watermark -->
+    <div class="fc m-card">
+      <div class="fc-h">
+        <span class="fc-ic"><svg class="ic"><use href="#i-droplet"/></svg></span>
+        <div class="grow">
+          <div class="fc-t">Watermark</div>
+          <div class="fc-b">Every page carries the viewer's own name.</div>
+        </div>
+        <span class="toggle on"></span>
+      </div>
+      <div class="wm-wrap">
+        <div class="wm-page">
+          <div class="wm-line" style="width:58%"></div>
+          <div class="wm-line" style="width:92%"></div>
+          <div class="wm-line" style="width:84%"></div>
+          <div class="wm-line" style="width:94%"></div>
+          <div class="wm-line" style="width:72%"></div>
+          <div class="wm-ghost">
+            <span>SRIHARI · 05 AUG 2026&nbsp;&nbsp;&nbsp;SRIHARI · 05 AUG 2026</span>
+            <span>&nbsp;&nbsp;SRIHARI · 05 AUG 2026&nbsp;&nbsp;&nbsp;SRIHARI · 05 AUG 2026</span>
+            <span>SRIHARI · 05 AUG 2026&nbsp;&nbsp;&nbsp;SRIHARI · 05 AUG 2026</span>
+          </div>
+        </div>
+        <div class="wm-note">Applied to view-only pages, exports and screenshots.<br><b>SRIHARI · 05 AUG 2026</b></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="audit m-card">
+    <span class="a-ic"><svg class="ic"><use href="#i-log"/></svg></span>
+    <div class="a-txt grow">
+      Last key rotation <b>12 days ago</b> · <span class="ok">Device verified</span> — this iPhone, 14 Jul 2026 · <b>SOC 2 Type II</b>
+    </div>
+    <svg class="ic" style="color:var(--txt-3)"><use href="#i-chev-r"/></svg>
+  </div>
+
+  <nav class="m-tabbar">
+    <span class="m-tab"><svg class="ic"><use href="#i-chat"/></svg><span>Chats</span></span>
+    <span class="m-tab"><svg class="ic"><use href="#i-book"/></svg><span>Shelf</span></span>
+    <span class="m-tab"><svg class="ic"><use href="#i-search"/></svg><span>Search</span></span>
+    <span class="m-tab"><svg class="ic"><use href="#i-cloud-off"/></svg><span>Offline</span></span>
+    <span class="m-tab on"><svg class="ic"><use href="#i-shield"/></svg><span>Vault</span></span>
+  </nav>
+
+  <div class="m-home"><i></i></div>
+</div>

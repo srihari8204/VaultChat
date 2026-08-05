@@ -1,0 +1,268 @@
+<style>
+#s-code .ftabs {
+  height: 42px; flex: none;
+  display: flex; align-items: stretch; gap: 2px;
+  padding: 0 12px;
+  background: rgba(14, 13, 22, 0.55);
+  border-bottom: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+}
+#s-code .ftab {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 0 14px;
+  font-size: 12px; color: var(--txt-3);
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+}
+#s-code .ftab .sq { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+#s-code .ftab.on {
+  color: var(--txt-1); font-weight: 600;
+  background: rgba(124,77,255,.08);
+  border-bottom-color: var(--acc);
+}
+
+#s-code .work { flex: 1; min-height: 0; display: flex; align-items: stretch; overflow: hidden; }
+
+/* ---- editor ---- */
+#s-code .editor { flex: 1; min-width: 0; min-height: 0; display: flex; position: relative; overflow: hidden; }
+#s-code .gutter, #s-code .code { overflow: hidden; }
+#s-code .gutter {
+  width: 56px; flex: none; padding: 14px 0;
+  text-align: right;
+  background: rgba(8,7,13,.35);
+  border-right: 1px solid var(--stroke);
+}
+#s-code .gutter div {
+  font-family: var(--font-mono); font-size: 12px; line-height: 24px;
+  color: var(--txt-3); opacity: .55; padding-right: 14px;
+}
+#s-code .gutter div.cur { opacity: 1; color: var(--acc-3); background: rgba(124,77,255,.10); }
+#s-code .code {
+  flex: 1; min-width: 0; padding: 14px 0 14px 18px;
+  font-family: var(--font-mono); font-size: 12.5px; line-height: 24px;
+  white-space: pre; overflow: hidden;
+  color: #C9C5E8;
+}
+#s-code .code .ln { display: block; }
+#s-code .code .ln.cur { background: rgba(124,77,255,.09); box-shadow: inset 2px 0 0 var(--acc); margin-left: -18px; padding-left: 18px; }
+#s-code .k  { color: #C792EA; }
+#s-code .fn { color: #82AAFF; }
+#s-code .st { color: #6ED8A0; }
+#s-code .nu { color: #F7A76C; }
+#s-code .cm { color: #5E5A78; font-style: italic; }
+#s-code .ty { color: #7FDBCA; }
+#s-code .pr { color: #A29DC0; }
+#s-code .fold {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 1px 8px; border-radius: 5px; margin-left: 4px;
+  background: rgba(235,232,255,.06); border: 1px solid var(--stroke);
+  font-size: 10.5px; color: var(--txt-3); font-family: var(--font-ui);
+}
+
+#s-code .minimap {
+  width: 74px; flex: none; padding: 12px 8px;
+  background: rgba(8,7,13,.3);
+  border-left: 1px solid var(--stroke);
+  display: flex; flex-direction: column; gap: 3px;
+  position: relative;
+}
+#s-code .minimap i { display: block; height: 3px; border-radius: 2px; background: rgba(235,232,255,.13); }
+#s-code .minimap i.a { background: rgba(199,146,234,.4); }
+#s-code .minimap i.b { background: rgba(130,170,255,.35); }
+#s-code .minimap i.c { background: rgba(110,216,160,.3); }
+#s-code .minimap .vp {
+  position: absolute; left: 4px; right: 4px; top: 12px; height: 200px;
+  border-radius: 6px; background: rgba(124,77,255,.10);
+  border: 1px solid var(--stroke-acc);
+}
+
+/* ---- right stack ---- */
+#s-code .side {
+  width: 520px; flex: none;
+  display: flex; flex-direction: column;
+  border-left: 1px solid var(--stroke);
+  background: rgba(12, 11, 20, 0.5);
+  backdrop-filter: var(--blur);
+}
+#s-code .spanel { display: flex; flex-direction: column; min-height: 0; }
+#s-code .spanel + .spanel { border-top: 1px solid var(--stroke); }
+#s-code .sp-h {
+  height: 42px; flex: none;
+  display: flex; align-items: center; gap: 9px;
+  padding: 0 14px;
+  font-size: 12px; font-weight: 600; color: var(--txt-1);
+  background: rgba(235,232,255,.025);
+  border-bottom: 1px solid var(--stroke);
+}
+
+/* json tree */
+#s-code .jt { padding: 12px 14px; font-family: var(--font-mono); font-size: 12px; line-height: 22px; }
+#s-code .jt .r { display: flex; align-items: center; gap: 7px; border-radius: 5px; padding: 0 4px; }
+#s-code .jt .r:hover { background: rgba(235,232,255,.035); }
+#s-code .jt .tw { width: 12px; color: var(--txt-3); flex: none; display: flex; align-items: center; }
+#s-code .jt .ky { color: #82AAFF; }
+#s-code .jt .sv { color: #6ED8A0; }
+#s-code .jt .nv { color: #F7A76C; }
+#s-code .jt .bv { color: #C792EA; }
+#s-code .jt .pn { color: var(--txt-3); }
+#s-code .jt .cnt { font-family: var(--font-ui); font-size: 10px; color: var(--txt-3); margin-left: 4px; }
+#s-code .jt .i1 { padding-left: 18px; } #s-code .jt .i2 { padding-left: 36px; }
+
+/* log */
+#s-code .log { padding: 8px 0; font-family: var(--font-mono); font-size: 11.5px; }
+#s-code .lrow {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 5px 14px;
+  border-left: 2px solid transparent;
+  line-height: 1.5;
+}
+#s-code .lrow .ts { color: var(--txt-3); flex: none; }
+#s-code .lvl {
+  flex: none; width: 50px; text-align: center;
+  padding: 1px 0; border-radius: 4px;
+  font-size: 9.5px; font-weight: 700; letter-spacing: .5px;
+  font-family: var(--font-ui);
+}
+#s-code .lvl.i { background: rgba(52,211,153,.13); color: #4ADE9E; }
+#s-code .lvl.w { background: rgba(251,191,36,.13); color: #FCD34D; }
+#s-code .lvl.e { background: rgba(248,113,113,.15); color: #FCA5A5; }
+#s-code .lrow.err { background: rgba(248,113,113,.06); border-left-color: var(--err); }
+#s-code .lrow.wrn { background: rgba(251,191,36,.045); border-left-color: rgba(251,191,36,.5); }
+#s-code .lrow .msg { color: var(--txt-2); min-width: 0; }
+#s-code .lrow .msg b { color: var(--txt-1); font-weight: 600; }
+
+/* status bar */
+#s-code .status {
+  height: 34px; flex: none;
+  display: flex; align-items: center; gap: 16px;
+  padding: 0 16px;
+  background: rgba(16, 15, 26, 0.7);
+  border-top: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+  font-size: 11px; color: var(--txt-3);
+}
+#s-code .status .b { color: var(--txt-2); }
+#s-code .status .sep { width: 1px; height: 14px; background: var(--stroke-2); }
+</style>
+<div class="screen" id="s-code">
+  <header class="vc-viewerbar">
+    <span class="icon-btn framed"><svg class="ic"><use href="#i-chev-l"/></svg></span>
+    <span class="f-ic ft-code" style="width:30px;height:30px;border-radius:9px;font-size:8.5px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700">TS</span>
+    <div class="col" style="gap:1px">
+      <span style="font-size:13.5px;font-weight:600">PaymentService.ts</span>
+      <span style="font-size:11px;color:var(--txt-3)">Shared by Ravi Patel · 14 KB · 342 lines · in Release 1.3</span>
+    </div>
+    <span class="secure-pill"><svg class="ic sm"><use href="#i-lock"/></svg>Rendered inside VaultChat — no external apps, nothing leaves the vault</span>
+    <div class="grow"></div>
+    <div class="field" style="width:210px;height:30px;flex:none"><svg class="ic sm"><use href="#i-search"/></svg><span class="grow">Find in file</span><span class="kbd">⌘F</span></div>
+    <span class="btn sm"><svg class="ic sm"><use href="#i-copy"/></svg>Copy</span>
+    <span class="icon-btn"><svg class="ic"><use href="#i-more-v"/></svg></span>
+    <div class="vc-win"><span>─</span><span>▢</span><span class="close">✕</span></div>
+  </header>
+
+  <div class="ftabs">
+    <span class="ftab on"><span class="sq" style="background:#3178C6"></span>PaymentService.ts</span>
+    <span class="ftab"><span class="sq" style="background:#F7A76C"></span>config.json</span>
+    <span class="ftab"><span class="sq" style="background:#6ED8A0"></span>schema.xml</span>
+    <span class="ftab"><span class="sq" style="background:#82AAFF"></span>release-notes.md</span>
+    <span class="ftab"><span class="sq" style="background:#34D399"></span>metrics.csv</span>
+    <span class="ftab"><span class="sq" style="background:#94A3B8"></span>index.html</span>
+    <span class="ftab"><span class="sq" style="background:#FBBF24"></span>deploy.log</span>
+    <div class="grow"></div>
+    <span class="ftab" style="color:var(--txt-3)"><svg class="ic sm"><use href="#i-eye"/></svg>Read-only</span>
+  </div>
+
+  <div class="work">
+    <div class="editor">
+      <div class="gutter">
+        <div>18</div><div>19</div><div>20</div><div>21</div><div>22</div><div>23</div><div>24</div>
+        <div>25</div><div>26</div><div>27</div><div class="cur">28</div><div>29</div><div>30</div>
+        <div>31</div><div>32</div><div>33</div><div>34</div><div>35</div><div>36</div><div>37</div>
+        <div>38</div><div>39</div><div>40</div><div>41</div><div>42</div><div>43</div><div>44</div>
+        <div>45</div><div>46</div><div>47</div><div>48</div><div>49</div><div>50</div><div>51</div>
+        <div>52</div><div>53</div><div>54</div>
+      </div>
+      <div class="code"><span class="ln"><span class="cm">/** Charges a vault-scoped invoice and records the receipt. */</span></span><span class="ln"><span class="k">export class</span> <span class="ty">PaymentService</span> {</span><span class="ln">  <span class="k">private readonly</span> <span class="pr">gateway</span>: <span class="ty">Gateway</span>;</span><span class="ln">  <span class="k">private readonly</span> <span class="pr">ledger</span>: <span class="ty">Ledger</span>;</span><span class="ln"></span><span class="ln">  <span class="k">constructor</span>(<span class="pr">deps</span>: <span class="ty">Deps</span>) {</span><span class="ln">    <span class="k">this</span>.<span class="pr">gateway</span> = <span class="pr">deps</span>.<span class="pr">gateway</span>;</span><span class="ln">    <span class="k">this</span>.<span class="pr">ledger</span>  = <span class="pr">deps</span>.<span class="pr">ledger</span>;</span><span class="ln">  }</span><span class="ln"></span><span class="ln cur">  <span class="k">async</span> <span class="fn">charge</span>(<span class="pr">invoice</span>: <span class="ty">Invoice</span>): <span class="ty">Promise</span>&lt;<span class="ty">Receipt</span>&gt; {</span><span class="ln">    <span class="k">if</span> (<span class="pr">invoice</span>.<span class="pr">amount</span> &lt;= <span class="nu">0</span>) {</span><span class="ln">      <span class="k">throw new</span> <span class="ty">PaymentError</span>(<span class="st">"amount_must_be_positive"</span>);</span><span class="ln">    }</span><span class="ln"></span><span class="ln">    <span class="cm">// Idempotency: the same key never charges twice.</span></span><span class="ln">    <span class="k">const</span> <span class="pr">existing</span> = <span class="k">await</span> <span class="k">this</span>.<span class="pr">ledger</span>.<span class="fn">find</span>(<span class="pr">invoice</span>.<span class="pr">key</span>);</span><span class="ln">    <span class="k">if</span> (<span class="pr">existing</span>) <span class="k">return</span> <span class="pr">existing</span>.<span class="pr">receipt</span>;</span><span class="ln"></span><span class="ln">    <span class="k">const</span> <span class="pr">result</span> = <span class="k">await</span> <span class="k">this</span>.<span class="pr">gateway</span>.<span class="fn">authorize</span>({</span><span class="ln">      <span class="pr">amount</span>:   <span class="pr">invoice</span>.<span class="pr">amount</span>,</span><span class="ln">      <span class="pr">currency</span>: <span class="pr">invoice</span>.<span class="pr">currency</span> ?? <span class="st">"USD"</span>,</span><span class="ln">      <span class="pr">tier</span>:     <span class="pr">invoice</span>.<span class="pr">pricingTier</span>,</span><span class="ln">      <span class="pr">retries</span>:  <span class="nu">3</span>,</span><span class="ln">    });</span><span class="ln"></span><span class="ln">    <span class="k">if</span> (!<span class="pr">result</span>.<span class="pr">approved</span>) {</span><span class="ln">      <span class="k">await</span> <span class="k">this</span>.<span class="pr">ledger</span>.<span class="fn">recordFailure</span>(<span class="pr">invoice</span>, <span class="pr">result</span>.<span class="pr">code</span>);</span><span class="ln">      <span class="k">throw new</span> <span class="ty">PaymentError</span>(<span class="pr">result</span>.<span class="pr">code</span>);</span><span class="ln">    }</span><span class="ln"></span><span class="ln">    <span class="k">return</span> <span class="k">this</span>.<span class="pr">ledger</span>.<span class="fn">commit</span>(<span class="pr">invoice</span>, <span class="pr">result</span>.<span class="pr">authId</span>);</span><span class="ln">  }</span><span class="ln"></span><span class="ln">  <span class="cm">// ── refunds ─────────────────────────────</span><span class="fold"><svg class="ic sm" style="width:10px;height:10px;display:inline-block"><use href="#i-chev-r"/></svg>42 lines folded</span></span><span class="ln"></span><span class="ln">  <span class="k">async</span> <span class="fn">reconcile</span>(<span class="pr">day</span>: <span class="ty">IsoDate</span>): <span class="ty">Promise</span>&lt;<span class="ty">Report</span>&gt; {</span><span class="ln">    <span class="k">const</span> <span class="pr">rows</span> = <span class="k">await</span> <span class="k">this</span>.<span class="pr">ledger</span>.<span class="fn">forDay</span>(<span class="pr">day</span>);</span><span class="ln">    <span class="k">return</span> <span class="fn">summarize</span>(<span class="pr">rows</span>);</span><span class="ln">  }</span><span class="ln">}</span></div>
+      <div class="minimap">
+        <div class="vp"></div>
+        <i class="c" style="width:80%"></i><i class="a" style="width:62%"></i><i style="width:48%"></i><i style="width:44%"></i>
+        <i style="width:12%"></i><i class="a" style="width:56%"></i><i style="width:52%"></i><i style="width:52%"></i>
+        <i style="width:18%"></i><i style="width:12%"></i><i class="a" style="width:72%"></i><i class="b" style="width:58%"></i>
+        <i class="c" style="width:66%"></i><i style="width:22%"></i><i style="width:12%"></i><i class="c" style="width:74%"></i>
+        <i class="b" style="width:78%"></i><i style="width:54%"></i><i style="width:12%"></i><i class="b" style="width:70%"></i>
+        <i style="width:46%"></i><i class="c" style="width:52%"></i><i style="width:40%"></i><i class="a" style="width:32%"></i>
+        <i style="width:24%"></i><i style="width:12%"></i><i class="a" style="width:48%"></i><i class="b" style="width:66%"></i>
+        <i class="c" style="width:62%"></i><i style="width:22%"></i><i style="width:12%"></i><i class="b" style="width:68%"></i>
+        <i style="width:20%"></i><i style="width:12%"></i><i class="c" style="width:70%"></i><i style="width:36%"></i>
+        <i class="a" style="width:58%"></i><i style="width:50%"></i><i style="width:26%"></i><i style="width:14%"></i>
+        <i class="b" style="width:44%"></i><i style="width:38%"></i><i style="width:18%"></i><i style="width:10%"></i>
+      </div>
+      <div class="scroll-rail" style="right:80px"><div class="thumb" style="top:14%;height:24%"></div></div>
+    </div>
+
+    <aside class="side">
+      <div class="spanel" style="flex:1.05">
+        <div class="sp-h">
+          <span class="f-ic ft-code" style="width:20px;height:20px;border-radius:6px;font-size:7px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700">{ }</span>
+          config.json
+          <span class="grow"></span>
+          <span class="chip" style="height:22px;font-size:10px">tree</span>
+          <span class="chip" style="height:22px;font-size:10px;opacity:.6">raw</span>
+        </div>
+        <div class="jt">
+          <div class="r"><span class="tw"><svg class="ic sm" style="width:11px;height:11px"><use href="#i-chev-d"/></svg></span><span class="ky">"release"</span><span class="pn">: {</span><span class="cnt">6 keys</span></div>
+          <div class="r i1"><span class="tw"></span><span class="ky">"version"</span><span class="pn">:</span> <span class="sv">"1.3.0"</span><span class="pn">,</span></div>
+          <div class="r i1"><span class="tw"></span><span class="ky">"channel"</span><span class="pn">:</span> <span class="sv">"stable"</span><span class="pn">,</span></div>
+          <div class="r i1"><span class="tw"></span><span class="ky">"buildNumber"</span><span class="pn">:</span> <span class="nv">1842</span><span class="pn">,</span></div>
+          <div class="r i1"><span class="tw"><svg class="ic sm" style="width:11px;height:11px"><use href="#i-chev-d"/></svg></span><span class="ky">"pricing"</span><span class="pn">: {</span><span class="cnt">3 keys</span></div>
+          <div class="r i2"><span class="tw"></span><span class="ky">"tiers"</span><span class="pn">:</span> <span class="nv">3</span><span class="pn">,</span></div>
+          <div class="r i2"><span class="tw"></span><span class="ky">"currency"</span><span class="pn">:</span> <span class="sv">"USD"</span><span class="pn">,</span></div>
+          <div class="r i2"><span class="tw"></span><span class="ky">"uplift"</span><span class="pn">:</span> <span class="nv">1.18</span></div>
+          <div class="r i1"><span class="tw"></span><span class="pn">},</span></div>
+          <div class="r i1"><span class="tw"><svg class="ic sm" style="width:11px;height:11px"><use href="#i-chev-r"/></svg></span><span class="ky">"featureFlags"</span><span class="pn">: { … }</span><span class="cnt">11 keys</span></div>
+          <div class="r i1"><span class="tw"></span><span class="ky">"e2eeRequired"</span><span class="pn">:</span> <span class="bv">true</span></div>
+          <div class="r"><span class="tw"></span><span class="pn">}</span></div>
+        </div>
+      </div>
+
+      <div class="spanel grow">
+        <div class="sp-h">
+          <svg class="ic sm" style="color:var(--warn)"><use href="#i-log"/></svg>
+          deploy.log
+          <span class="grow"></span>
+          <span class="chip err" style="height:22px;font-size:10px">1 error</span>
+          <span class="chip warn" style="height:22px;font-size:10px">2 warnings</span>
+        </div>
+        <div class="log">
+          <div class="lrow"><span class="ts">09:02:11</span><span class="lvl i">INFO</span><span class="msg">build <b>1842</b> uploaded to registry · 84.2 MB</span></div>
+          <div class="lrow"><span class="ts">09:02:36</span><span class="lvl i">INFO</span><span class="msg">migrating <b>vault_index</b> → schema 27</span></div>
+          <div class="lrow wrn"><span class="ts">09:03:04</span><span class="lvl w">WARN</span><span class="msg">slow query <b>1,412 ms</b> on files.by_owner — missing index</span></div>
+          <div class="lrow"><span class="ts">09:03:19</span><span class="lvl i">INFO</span><span class="msg">viewer sandbox warmed · 12 workers</span></div>
+          <div class="lrow err"><span class="ts">09:03:58</span><span class="lvl e">ERROR</span><span class="msg"><b>PaymentService.charge</b> — gateway timeout after 3 retries (invoice ATL-2261)</span></div>
+          <div class="lrow wrn"><span class="ts">09:04:02</span><span class="lvl w">WARN</span><span class="msg">retry queue depth <b>7</b> · backing off 30 s</span></div>
+          <div class="lrow"><span class="ts">09:04:33</span><span class="lvl i">INFO</span><span class="msg">health check green · rollout <b>100%</b></span></div>
+        </div>
+        <div class="row gap-8" style="padding:10px 14px;border-top:1px solid var(--stroke);margin-top:auto">
+          <span class="dot on"></span>
+          <span style="font-size:11px;color:var(--txt-2)">Tail — live</span>
+          <span class="grow"></span>
+          <span style="font-size:11px;color:var(--txt-3)">2,846 lines</span>
+          <span class="chip" style="height:22px;font-size:10px"><svg class="ic sm" style="width:11px;height:11px"><use href="#i-filter"/></svg>Level</span>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <div class="status">
+    <span class="b">TypeScript</span><span class="sep"></span>
+    <span>UTF-8</span><span class="sep"></span>
+    <span>LF</span><span class="sep"></span>
+    <span>Spaces: 2</span><span class="sep"></span>
+    <span class="b">342 lines</span><span class="sep"></span>
+    <span>Ln 28, Col 42</span>
+    <div class="grow"></div>
+    <span class="chip" style="height:22px;font-size:10px"><svg class="ic sm" style="width:11px;height:11px"><use href="#i-code"/></svg>main</span>
+    <span class="chip" style="height:22px;font-size:10px">Syntax: on</span>
+    <span class="secure-pill" style="height:24px;font-size:10px"><svg class="ic sm" style="width:11px;height:11px"><use href="#i-lock"/></svg>Read-only vault copy</span>
+  </div>
+</div>
