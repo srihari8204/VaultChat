@@ -68,10 +68,14 @@ type inviteTarget struct {
 
 // resolveInvitee turns whatever the caller addressed into a target.
 //
+// MEMBERSHIP V2: every invitation must land on a VaultChat account. A handle
+// that does not resolve is refused rather than being stored as a "pending
+// off-platform invite", because there is no longer any off-platform delivery to
+// pend for — no link, no QR, no SMS. Failing here is honest; storing a row
+// nobody can ever act on is not.
+//
 // A phone number is reduced to its lookup hash and NEVER stored in the clear,
-// matching how contact discovery already treats phone numbers. If the handle
-// maps to an existing account we bind the invitation to that user id, which is
-// what makes "already a member" and "already invited" checkable.
+// matching how contact discovery already treats phone numbers.
 func resolveInvitee(ctx context.Context, uid string, b map[string]any) (*inviteTarget, string) {
 	if s := strings.TrimSpace(chatsStrOr(b["userId"], "")); s != "" {
 		return &inviteTarget{userID: &s, kind: invites.KindUser}, ""
@@ -93,9 +97,7 @@ func resolveInvitee(ctx context.Context, uid string, b map[string]any) (*inviteT
 		if !db.NoRows(e) {
 			return nil, "Could not look up that email"
 		}
-		// Not a user yet: still a valid invitation, it just cannot be delivered
-		// in-app. The link/QR is the delivery mechanism.
-		return &inviteTarget{kind: invites.KindEmail, ref: &email}, ""
+		return nil, "That email is not on VaultChat"
 	}
 
 	if raw := strings.TrimSpace(chatsStrOr(b["phone"], "")); raw != "" {
@@ -108,17 +110,16 @@ func resolveInvitee(ctx context.Context, uid string, b map[string]any) (*inviteT
 			`SELECT id FROM users WHERE phone_lookup = $1 AND is_deleted = FALSE LIMIT 1`,
 			[]any{lookup}, &found)
 		if e == nil {
+			// Store the HASH, never the number.
 			return &inviteTarget{userID: &found, kind: invites.KindUser, ref: &lookup}, ""
 		}
 		if !db.NoRows(e) {
 			return nil, "Could not look up that number"
 		}
-		// Store the HASH, never the number.
-		return &inviteTarget{kind: invites.KindPhone, ref: &lookup}, ""
+		return nil, "That number is not on VaultChat"
 	}
 
-	// No handle at all: an identity-less invitation, i.e. a shareable link.
-	return &inviteTarget{kind: invites.KindLink}, ""
+	return nil, "Choose someone to invite"
 }
 
 // ── create ──
@@ -149,20 +150,33 @@ func invitationsCreate(w http.ResponseWriter, r *http.Request) {
 
 	// Already in the group? Inviting them again is a no-op that would only
 	// confuse the sent-invitations list.
-	if target.userID != nil {
-		var one int
-		e := chatsQRow(ctx, user.ID,
-			`SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL`,
-			[]any{chatID, *target.userID}, &one)
-		if e == nil {
-			httpx.Err(w, 409, "They are already in this group")
-			return
-		}
-		if !db.NoRows(e) {
-			log.Printf("[invitations POST] member check: %v", e)
-			httpx.Err(w, 500, "Failed to create invitation")
-			return
-		}
+	var one int
+	e := chatsQRow(ctx, user.ID,
+		`SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL`,
+		[]any{chatID, *target.userID}, &one)
+	if e == nil {
+		httpx.Err(w, 409, "They are already in this group")
+		return
+	}
+	if !db.NoRows(e) {
+		log.Printf("[invitations POST] member check: %v", e)
+		httpx.Err(w, 500, "Failed to create invitation")
+		return
+	}
+
+	// A member who was removed cannot be re-invited until their cooldown ends.
+	// Without this a removal is a formality: anyone with invite rights could
+	// undo an owner's decision in one tap, seconds later.
+	until, err := membershipCooldown(ctx, user.ID, chatID, *target.userID)
+	if err != nil {
+		log.Printf("[invitations POST] cooldown: %v", err)
+		httpx.Err(w, 500, "Failed to create invitation")
+		return
+	}
+	if until != nil {
+		httpx.Err(w, 409, "They were recently removed and cannot be re-invited yet",
+			map[string]any{"cooldownUntil": httpx.JSTime(*until)})
+		return
 	}
 
 	ttl := invites.DefaultTTL
@@ -171,37 +185,26 @@ func invitationsCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	ttl = invites.ClampTTL(ttl)
 	expiresAt := time.Now().Add(ttl)
-	channel := invites.NormalizeChannel(chatsStrOr(b["channel"], "link"))
 
-	// The door: single-use and expiring with the invitation, so a leaked link
-	// cannot outlive the invitation it belongs to.
-	code := chatsGenInviteCode()
-	var linkID int64
-	if err := chatsQRow(ctx, user.ID,
-		`INSERT INTO invite_links (code, chat_id, created_by, expires_at, max_uses)
-		 VALUES ($1, $2, $3, $4, 1) RETURNING id`,
-		[]any{code, chatID, user.ID, expiresAt}, &linkID); err != nil {
-		log.Printf("[invitations POST] link: %v", err)
-		httpx.Err(w, 500, "Failed to create invitation")
-		return
-	}
-
-	// The invitation row is inserted with a placeholder token hash: the token
-	// signs the invitation's own id, which only exists after the insert. It is
-	// updated in place immediately below.
+	// NO LINK IS MINTED and no token is returned. In membership v2 the
+	// invitation is the whole mechanism: it is acted on by being signed in as
+	// the account it names. There is nothing here to forward, and the channel
+	// is always the app because there is no other channel left.
 	var invID int64
-	err := chatsQRow(ctx, user.ID,
+	err = chatsQRow(ctx, user.ID,
 		`INSERT INTO chat_invitations
-		   (chat_id, inviter_id, invitee_user_id, invitee_kind, invitee_ref, channel, link_id, token_hash, expires_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-		[]any{chatID, user.ID, target.userID, string(target.kind), target.ref,
-			string(channel), linkID, "pending:" + code, expiresAt}, &invID)
+		   (chat_id, inviter_id, invitee_user_id, invitee_kind, invitee_ref, channel, expires_at)
+		 VALUES ($1, $2, $3, $4, $5, 'app', $6) RETURNING id`,
+		[]any{chatID, user.ID, target.userID, string(target.kind), target.ref, expiresAt}, &invID)
 	if err != nil {
-		// The partial unique indexes from migration 067 are the real duplicate
+		// The partial unique index from migration 069 is the real duplicate
 		// guard — two admins inviting the same person at once both pass an
-		// application check, but only one can win the index.
-		if strings.Contains(err.Error(), "uq_chat_invitations_pending") {
-			httpx.Err(w, 409, "They already have a pending invitation")
+		// application check, but only one can win the index. It covers
+		// 'accepted' as well as 'pending', so somebody awaiting approval cannot
+		// be invited a second time either.
+		if strings.Contains(err.Error(), "uq_chat_invitations_live") ||
+			strings.Contains(err.Error(), "uq_chat_invitations_pending") {
+			httpx.Err(w, 409, "They already have an invitation for this group")
 			return
 		}
 		log.Printf("[invitations POST] %v", err)
@@ -209,28 +212,16 @@ func invitationsCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token := invites.Mint(inviteSecret(), invID, chatID, expiresAt)
-	if err := chatsExecU(ctx, user.ID,
-		`UPDATE chat_invitations SET token_hash = $1 WHERE id = $2`,
-		invites.Hash(token), invID); err != nil {
-		log.Printf("[invitations POST] token: %v", err)
-		httpx.Err(w, 500, "Failed to create invitation")
-		return
-	}
-
 	chatsAudit(ctx, user.ID, chatID, "invitation_created", target.userID,
-		map[string]any{"kind": string(target.kind), "channel": string(channel)})
-	if target.userID != nil {
-		emitx.ChatEvent(chatID, "invitation_created", map[string]any{"userId": *target.userID, "by": user.ID})
-	}
+		map[string]any{"kind": string(target.kind)})
+	emitx.ChatEvent(chatID, "invitation_created", map[string]any{"userId": *target.userID, "by": user.ID})
 
 	httpx.JSON(w, 200, map[string]any{
-		"id":        invID,
-		"token":     token, // returned ONCE; only its hash is stored
-		"code":      code,
-		"status":    string(invites.StatusPending),
-		"expiresAt": httpx.JSTime(expiresAt),
-		"channel":   string(channel),
+		"id":            invID,
+		"inviteeUserId": *target.userID,
+		"status":        string(invites.StatusPending),
+		"expiresAt":     httpx.JSTime(expiresAt),
+		"channel":       string(invites.ChannelApp),
 	})
 }
 
@@ -323,7 +314,7 @@ func invitationsResend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	status, linkID, _, err := loadInvitation(ctx, user.ID, chatID, invID)
+	status, linkID, inviteeID, err := loadInvitation(ctx, user.ID, chatID, invID)
 	if db.NoRows(err) {
 		httpx.Err(w, 404, "Invitation not found")
 		return
@@ -341,34 +332,40 @@ func invitationsResend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	expiresAt := time.Now().Add(invites.DefaultTTL)
-	token := invites.Mint(inviteSecret(), invID, chatID, expiresAt)
 
-	// A fresh token must invalidate the previous one, so the old door is
-	// re-armed rather than a second door being opened alongside it.
-	code := chatsGenInviteCode()
+	// A legacy invitation still has a door behind it. Re-arm it rather than
+	// opening a second one alongside, so the previously issued link stops
+	// working — otherwise "resend" would multiply live credentials. New
+	// invitations have no link_id and skip this entirely.
 	if linkID != nil {
 		if err := chatsExecU(ctx, user.ID,
 			`UPDATE invite_links SET code = $1, expires_at = $2, uses = 0, revoked = FALSE WHERE id = $3`,
-			code, expiresAt, *linkID); err != nil {
+			chatsGenInviteCode(), expiresAt, *linkID); err != nil {
 			log.Printf("[invitations resend] link: %v", err)
 			httpx.Err(w, 500, "Failed to resend invitation")
 			return
 		}
 	}
+	// Nothing is re-delivered by this endpoint any more; the invitation was
+	// always visible in the invitee's inbox. Resending gives it a fresh expiry
+	// and pulls it back out of 'expired', which is the only part that was ever
+	// doing work.
 	if err := chatsExecU(ctx, user.ID,
 		`UPDATE chat_invitations
-		    SET token_hash = $1, expires_at = $2, status = 'pending', responded_at = NULL
-		  WHERE id = $3`,
-		invites.Hash(token), expiresAt, invID); err != nil {
+		    SET expires_at = $1, status = 'pending', responded_at = NULL
+		  WHERE id = $2`,
+		expiresAt, invID); err != nil {
 		log.Printf("[invitations resend] %v", err)
 		httpx.Err(w, 500, "Failed to resend invitation")
 		return
 	}
 
 	chatsAudit(ctx, user.ID, chatID, "invitation_resent", nil, map[string]any{"id": invID})
+	if inviteeID != nil {
+		emitx.ChatEvent(chatID, "invitation_created", map[string]any{"userId": *inviteeID, "by": user.ID})
+	}
 	httpx.JSON(w, 200, map[string]any{
-		"id": invID, "token": token, "code": code,
-		"status": string(invites.StatusPending), "expiresAt": httpx.JSTime(expiresAt),
+		"id": invID, "status": string(invites.StatusPending), "expiresAt": httpx.JSTime(expiresAt),
 	})
 }
 
@@ -432,15 +429,22 @@ func invitationsMine(w http.ResponseWriter, r *http.Request) {
 	user := httpx.UserFrom(r)
 
 	out := []map[string]any{}
+	// Both live states, not just pending. After accepting under strict mode the
+	// invitee is waiting on an owner — dropping the row from their inbox at that
+	// point is how someone concludes their acceptance did not register, and
+	// accepts nothing else ever again.
 	err := chatsQueryU(ctx, user.ID,
 		`SELECT ci.id, ci.chat_id, c.name, c.group_type, c.icon, c.color,
 		        vc_invitation_status(ci.status, ci.expires_at) AS status,
-		        ci.expires_at, ci.created_at, u.name AS inviter_name
+		        c.approval_mode, ci.expires_at, ci.created_at, ci.requested,
+		        u.name AS inviter_name,
+		        (SELECT COUNT(*) FROM chat_members cm
+		          WHERE cm.chat_id = ci.chat_id AND cm.left_at IS NULL) AS member_count
 		   FROM chat_invitations ci
 		   JOIN chats c ON c.id = ci.chat_id
 		   LEFT JOIN users u ON u.id = ci.inviter_id
 		  WHERE ci.invitee_user_id = $1
-		    AND vc_invitation_status(ci.status, ci.expires_at) = 'pending'
+		    AND vc_invitation_status(ci.status, ci.expires_at) IN ('pending', 'accepted')
 		  ORDER BY ci.created_at DESC
 		  LIMIT 100`,
 		[]any{user.ID}, func(rows pgx.Rows) error {
@@ -448,18 +452,31 @@ func invitationsMine(w http.ResponseWriter, r *http.Request) {
 				id                                int64
 				chatID                            string
 				name, gtype, icon, color, inviter *string
-				status                            string
+				status, mode                      string
+				requested                         bool
+				memberCount                       int64
 				expiresAt, createdAt              time.Time
 			)
 			if e := rows.Scan(&id, &chatID, &name, &gtype, &icon, &color,
-				&status, &expiresAt, &createdAt, &inviter); e != nil {
+				&status, &mode, &expiresAt, &createdAt, &requested, &inviter, &memberCount); e != nil {
 				return e
 			}
+			st := invites.Status(status)
 			out = append(out, map[string]any{
 				"id": id, "chatId": chatID, "name": name, "groupType": gtype,
 				"icon": icon, "color": color, "status": status,
 				"inviterName": inviter,
-				"expiresAt":   httpx.JSTime(expiresAt), "createdAt": httpx.JSTime(createdAt),
+				// The preview an invitee is entitled to before deciding: how big
+				// the group is and what happens when they say yes. Never the
+				// member list — that is for members.
+				"memberCount":  memberCount,
+				"approvalMode": string(invites.NormalizeMode(mode)),
+				"requested":    requested,
+				// Whether accepting admits them outright or only starts the wait.
+				"joinsOnAccept": invites.NextAfterAccept(invites.NormalizeMode(mode)) == invites.StatusJoined,
+				"canAccept":     invites.CanAccept(st),
+				"canDecline":    invites.CanDecline(st),
+				"expiresAt":     httpx.JSTime(expiresAt), "createdAt": httpx.JSTime(createdAt),
 			})
 			return nil
 		})
@@ -495,7 +512,11 @@ func invitationsReject(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 500, "Failed to decline invitation")
 		return
 	}
-	if !invites.CanTransition(invites.Status(status), invites.StatusRejected) {
+	// CanDecline, not CanTransition: an invitee may also change their mind after
+	// accepting, while an owner has yet to approve. Someone who said yes on
+	// Monday and thought better of it on Tuesday should not have to join first
+	// and then leave.
+	if !invites.CanDecline(invites.Status(status)) {
 		httpx.Err(w, 409, "This invitation can no longer be declined")
 		return
 	}
@@ -506,6 +527,10 @@ func invitationsReject(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 500, "Failed to decline invitation")
 		return
 	}
+	// The group is told, so an owner watching the pending list sees it clear
+	// rather than approving someone who has already backed out.
+	emitx.ChatEvent(chatID, "invitation_declined",
+		map[string]any{"userId": user.ID, "invitationId": invID})
 	httpx.JSON(w, 200, map[string]any{"ok": true, "id": invID, "status": "rejected"})
 }
 

@@ -88,6 +88,7 @@ func RegisterChats(mux *http.ServeMux) {
 	id.HandleFunc("POST /chats/{id}/sender-keys", httpx.RequireAuth(chatsSenderKeysPost))
 	id.HandleFunc("GET /chats/{id}/sender-keys", httpx.RequireAuth(chatsSenderKeysGet))
 	RegisterChatInvitationsOnID(id) // Groups & Circles per-invitee invitations
+	RegisterChatMembershipOnID(id)  // Groups & Circles in-app membership (v2)
 	RegisterChatCalendarOnID(id)    // Groups & Circles shared calendar
 	mux.Handle("/chats/{id}/", id)  // subtree forward; `id` re-matches the full path
 }
@@ -249,6 +250,12 @@ type chatsMem struct {
 	AntiSpamLinks     bool
 	ApproveMembers    bool
 
+	// ── membership v2 (migration 069) ──
+	// How many gates stand between an invitation and membership. Read through
+	// invites.NormalizeMode, never raw: an unrecognised value must resolve to
+	// the strictest mode rather than the loosest.
+	ApprovalModeRaw string
+
 	// ── Groups & Circles (migration 066) ──
 	// GroupType is NULL for every group created before that migration; those
 	// keep the legacy admin-or-nothing rule. See can().
@@ -299,6 +306,7 @@ func chatsLoadMem(ctx context.Context, uid, chatID string) (*chatsMem, error) {
 		        cm.hidden, cm.screenshot_mode, cm.vanish_mode,
 		        c.type AS chat_type, c.send_policy, c.slow_mode_seconds,
 		        c.media_policy, c.add_members_policy, c.anti_spam_links, c.approve_members,
+		        c.approval_mode,
 		        c.group_type, g.max_members, c.permission_overrides, cm.permission_grants,
 		        g.default_permissions
 		 FROM chat_members cm
@@ -310,6 +318,7 @@ func chatsLoadMem(ctx context.Context, uid, chatID string) (*chatsMem, error) {
 		&m.Hidden, &m.ScreenshotMode, &m.VanishMode,
 		&m.ChatType, &m.SendPolicy, &m.SlowModeSeconds,
 		&m.MediaPolicy, &m.AddMembersPolicy, &m.AntiSpamLinks, &m.ApproveMembers,
+		&m.ApprovalModeRaw,
 		&m.GroupType, &m.MaxMembers, &overridesRaw, &grantsRaw, &defaultsRaw)
 	if db.NoRows(err) {
 		return nil, nil
