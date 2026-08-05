@@ -88,6 +88,27 @@ class VaultBeamStreamModule(reactContext: ReactApplicationContext) : ReactContex
         return if (opts.hasKey("blockPlainOffset")) "legacyOffset" else "uniform"
     }
 
+    // Optional `runs` ([{start,count}, …]) selects WHICH chunks stream, for resume.
+    // Absent ⇒ the whole file, byte-identical to the pre-resume behaviour. The LAN
+    // frame format is unchanged — each frame already carries its index, so a
+    // subset needs no new framing.
+    private fun runIndices(opts: ReadableMap, chunkCount: Int): LongArray {
+        if (!opts.hasKey("runs")) return LongArray(chunkCount) { it.toLong() }
+        val arr = opts.getArray("runs") ?: return LongArray(chunkCount) { it.toLong() }
+        val out = ArrayList<Long>()
+        for (i in 0 until arr.size()) {
+            val r = arr.getMap(i) ?: continue
+            val start = r.getDouble("start").toLong()
+            val count = r.getDouble("count").toLong()
+            var g = start
+            while (g < start + count) {
+                if (g in 0 until chunkCount) out.add(g)
+                g++
+            }
+        }
+        return out.toLongArray()
+    }
+
     private fun chunkIdFor(scheme: String, firstChunk: Long, i: Int, plainOffset: Long, chunkBytes: Int): Long =
         when (scheme) {
             "canonical" -> plainOffset / chunkBytes
@@ -392,9 +413,11 @@ class VaultBeamStreamModule(reactContext: ReactApplicationContext) : ReactContex
                 val recvTok = ByteArray(token.size); ins.readFully(recvTok)
                 if (!recvTok.contentEquals(token)) { promise.reject("lan_auth", "bad token"); return@execute }
 
+                val indices = runIndices(opts, chunkCount)
+                val expected = indices.size
                 RandomAccessFile(srcPath, "r").use { raf ->
-                    var g = 0L
-                    while (g < chunkCount) {
+                    for (n in indices.indices) {
+                        val g = indices[n]
                         val plainOffset = g * chunkBytes.toLong()
                         val plainLen = minOf(chunkBytes.toLong(), totalBytes - plainOffset).toInt()
                         val plain = ByteArray(plainLen)
@@ -402,13 +425,12 @@ class VaultBeamStreamModule(reactContext: ReactApplicationContext) : ReactContex
                         val aad = "$transferId|$fileId|$g".toByteArray(Charsets.UTF_8)
                         val ct = gcm(Cipher.ENCRYPT_MODE, keyBytes, chunkNonce(transferId, g), aad).doFinal(plain)
                         out.writeInt(g.toInt()); out.writeInt(ct.size); out.write(ct)
-                        if ((g % 16L) == 0L) {
+                        if ((n % 16) == 0) {
                             out.flush()
                             val p = Arguments.createMap()
-                            p.putString("transferId", transferId); p.putInt("done", (g + 1).toInt()); p.putInt("total", chunkCount)
+                            p.putString("transferId", transferId); p.putInt("done", n + 1); p.putInt("total", expected)
                             emitEvent("vbLanProgress", p)
                         }
-                        g++
                     }
                     out.flush()
                 }
@@ -417,7 +439,7 @@ class VaultBeamStreamModule(reactContext: ReactApplicationContext) : ReactContex
                 // transfer delivered. Without this the sender could report success
                 // while the receiver's last write failed.
                 val ack = ins.read()
-                if (ack == 1) promise.resolve(chunkCount.toDouble())
+                if (ack == 1) promise.resolve(expected.toDouble())
                 else promise.reject("lan_noack", "receiver did not confirm delivery")
             } catch (e: Throwable) { promise.reject("lanServe", e) }
             finally { try { sock?.close() } catch (_: Throwable) {}; try { server?.close() } catch (_: Throwable) {} }
@@ -449,9 +471,10 @@ class VaultBeamStreamModule(reactContext: ReactApplicationContext) : ReactContex
                 val out = DataOutputStream(sock.getOutputStream())
                 out.write(token); out.flush()
 
+                val expected = runIndices(opts, chunkCount).size
                 RandomAccessFile(dstPath, "rw").use { raf ->
                     var received = 0
-                    while (received < chunkCount) {
+                    while (received < expected) {
                         val idx = ins.readInt().toLong()
                         val ctLen = ins.readInt()
                         if (ctLen < 16 || ctLen > chunkBytes + 64) throw IOException("bad frame len $ctLen")
@@ -463,7 +486,7 @@ class VaultBeamStreamModule(reactContext: ReactApplicationContext) : ReactContex
                         received++
                         if ((received % 16) == 0) {
                             val p = Arguments.createMap()
-                            p.putString("transferId", transferId); p.putInt("done", received); p.putInt("total", chunkCount)
+                            p.putString("transferId", transferId); p.putInt("done", received); p.putInt("total", expected)
                             emitEvent("vbLanProgress", p)
                         }
                     }
@@ -471,7 +494,7 @@ class VaultBeamStreamModule(reactContext: ReactApplicationContext) : ReactContex
                 // Every chunk is decrypted + on disk (the RandomAccessFile is closed)
                 // → send the 1-byte delivery ack so the sender can declare success.
                 out.write(1); out.flush()
-                promise.resolve(chunkCount.toDouble())
+                promise.resolve(expected.toDouble())
             } catch (e: Throwable) { promise.reject("lanConnect", e) }
             finally { try { sock?.close() } catch (_: Throwable) {} }
         }

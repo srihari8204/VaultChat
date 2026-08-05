@@ -45,6 +45,33 @@ fn is_site_local(a: &Ipv4Addr) -> bool {
     o[0] == 10 || (o[0] == 172 && (16..=31).contains(&o[1])) || (o[0] == 192 && o[1] == 168)
 }
 
+/// A contiguous run of logical chunks. `None` runs ⇒ the whole file, which is
+/// the pre-resume behaviour and keeps old callers byte-identical.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChunkRun {
+    pub start: u64,
+    pub count: u64,
+}
+
+/// Expand runs (or the whole file when absent) into the chunk indices to move.
+/// Order is preserved, so an ascending work-list streams ascending.
+pub fn run_indices(runs: Option<&[ChunkRun]>, chunk_count: u64) -> Vec<u64> {
+    match runs {
+        None => (0..chunk_count).collect(),
+        Some(rs) => {
+            let mut out = Vec::new();
+            for r in rs {
+                for g in r.start..r.start.saturating_add(r.count) {
+                    if g < chunk_count {
+                        out.push(g);
+                    }
+                }
+            }
+            out
+        }
+    }
+}
+
 /// SENDER params.
 pub struct ServeOpts<'a> {
     pub src_path: &'a str,
@@ -56,6 +83,8 @@ pub struct ServeOpts<'a> {
     pub chunk_count: u64,
     pub total_bytes: u64,
     pub port: Option<u16>,
+    /// Resume: stream ONLY these chunks. None ⇒ the whole file.
+    pub runs: Option<Vec<ChunkRun>>,
 }
 
 /// SENDER: bind, report the bound port via `on_bound`, accept, verify the token,
@@ -84,20 +113,24 @@ pub fn lan_serve(
         return Err(VbError("lan_auth: bad token".into()));
     }
 
+    let indices = run_indices(opts.runs.as_deref(), opts.chunk_count);
+    let expected = indices.len() as u64;
     let mut f = File::open(fs_path(opts.src_path)).map_err(io("lanServe open"))?;
-    for g in 0..opts.chunk_count {
+    for (n, &g) in indices.iter().enumerate() {
         let plain_offset = g * opts.chunk_bytes;
         let plain_len = opts.chunk_bytes.min(opts.total_bytes - plain_offset) as usize;
         f.seek(SeekFrom::Start(plain_offset)).map_err(io("lanServe seek"))?;
         let mut plain = vec![0u8; plain_len];
         f.read_exact(&mut plain).map_err(io("lanServe read"))?;
         let ct = seal_chunk(&opts.key, opts.transfer_id, opts.file_id, g, &plain);
+        // Wire is UNCHANGED: [i32_be index][i32_be ctLen][ct‖tag]. The index is
+        // already carried per frame, so streaming a subset needs no new framing.
         writer.write_all(&(g as i32).to_be_bytes()).map_err(io("lanServe frame idx"))?;
         writer.write_all(&(ct.len() as i32).to_be_bytes()).map_err(io("lanServe frame len"))?;
         writer.write_all(&ct).map_err(io("lanServe frame ct"))?;
-        if g % 16 == 0 {
+        if n % 16 == 0 {
             writer.flush().map_err(io("lanServe flush"))?;
-            on_progress(g + 1, opts.chunk_count);
+            on_progress(n as u64 + 1, expected);
         }
     }
     writer.flush().map_err(io("lanServe final flush"))?;
@@ -106,7 +139,7 @@ pub fn lan_serve(
     reader.read_exact(&mut ack).map_err(io("lanServe ack read"))?;
     stream.shutdown(Shutdown::Both).ok();
     if ack[0] == 1 {
-        Ok(opts.chunk_count)
+        Ok(expected)
     } else {
         Err(VbError("lan_noack: receiver did not confirm delivery".into()))
     }
@@ -123,6 +156,9 @@ pub struct ConnectOpts<'a> {
     pub token: Vec<u8>,
     pub chunk_bytes: u64,
     pub chunk_count: u64,
+    /// Resume: expect ONLY these chunks. None ⇒ the whole file. Must match the
+    /// sender's runs, which both sides derive from the same session work-list.
+    pub runs: Option<Vec<ChunkRun>>,
 }
 
 /// RECEIVER: connect, send the token, verify+write every streamed chunk at its
@@ -140,9 +176,10 @@ pub fn lan_connect(opts: ConnectOpts<'_>, mut on_progress: impl FnMut(u64, u64))
     writer.write_all(&opts.token).map_err(io("lanConnect token"))?;
     writer.flush().map_err(io("lanConnect token flush"))?;
 
+    let expected = run_indices(opts.runs.as_deref(), opts.chunk_count).len() as u64;
     let mut f = OpenOptions::new().write(true).read(true).open(fs_path(opts.dst_path)).map_err(io("lanConnect open"))?;
     let mut received = 0u64;
-    while received < opts.chunk_count {
+    while received < expected {
         let mut hdr = [0u8; 8];
         reader.read_exact(&mut hdr).map_err(io("lanConnect frame hdr"))?;
         let idx = i32::from_be_bytes(hdr[0..4].try_into().unwrap()) as u64;
@@ -157,13 +194,13 @@ pub fn lan_connect(opts: ConnectOpts<'_>, mut on_progress: impl FnMut(u64, u64))
         f.write_all(&plain).map_err(io("lanConnect write"))?;
         received += 1;
         if received % 16 == 0 {
-            on_progress(received, opts.chunk_count);
+            on_progress(received, expected);
         }
     }
     f.sync_all().ok();
     writer.write_all(&[1u8]).map_err(io("lanConnect ack"))?;
     writer.flush().map_err(io("lanConnect ack flush"))?;
-    Ok(opts.chunk_count)
+    Ok(expected)
 }
 
 #[cfg(test)]
@@ -197,7 +234,7 @@ mod tests {
             lan_serve(
                 ServeOpts {
                     src_path: &src2, key, transfer_id: tid, file_id: fid, token: tok2,
-                    chunk_bytes: cb, chunk_count: cc, total_bytes: total, port: None,
+                    chunk_bytes: cb, chunk_count: cc, total_bytes: total, port: None, runs: None,
                 },
                 |port| tx.send(port).unwrap(),
                 |_d, _t| {},
@@ -208,7 +245,7 @@ mod tests {
         let recv = lan_connect(
             ConnectOpts {
                 host: "127.0.0.1", port, dst_path: &dst, key, transfer_id: tid, file_id: fid,
-                token: token.clone(), chunk_bytes: cb, chunk_count: cc,
+                token: token.clone(), chunk_bytes: cb, chunk_count: cc, runs: None,
             },
             |_d, _t| {},
         )
@@ -217,6 +254,83 @@ mod tests {
         assert_eq!(recv, cc);
         assert_eq!(server.join().unwrap().unwrap(), cc, "sender got the delivery ack");
         assert_eq!(std::fs::read(&dst).unwrap(), data, "LAN-transferred file matches source");
+
+        crate::fileio::delete_file(&src);
+        crate::fileio::delete_file(&dst);
+    }
+
+    #[test]
+    fn run_indices_whole_file_and_subset() {
+        assert_eq!(run_indices(None, 5), vec![0, 1, 2, 3, 4]);
+        let runs = [ChunkRun { start: 1, count: 2 }, ChunkRun { start: 4, count: 1 }];
+        assert_eq!(run_indices(Some(&runs), 5), vec![1, 2, 4]);
+        // runs past the end are clipped, never panic
+        let over = [ChunkRun { start: 3, count: 99 }];
+        assert_eq!(run_indices(Some(&over), 5), vec![3, 4]);
+        assert!(run_indices(Some(&[]), 5).is_empty());
+    }
+
+    /// RESUME: streaming only the missing runs must land those chunks at their
+    /// correct offsets and leave every other byte of the destination untouched.
+    #[test]
+    fn lan_subset_round_trip_leaves_other_bytes_untouched() {
+        let key = [7u8; 32];
+        let (tid, fid) = ("LanSub", "LanFile");
+        let total = 100u64;
+        let cb = 16u64;
+        let cc = crate::chunk::chunk_count(total, cb);   // 7
+        let token = b"0123456789abcdef".to_vec();
+        let data: Vec<u8> = (0..total as u32).map(|o| (o.wrapping_mul(31).wrapping_add(7)) as u8).collect();
+
+        let src = tmp("sub-src.bin");
+        let dst = tmp("sub-dst.bin");
+        std::fs::write(&src, &data).unwrap();
+        // Destination pre-filled with a sentinel so untouched regions are visible.
+        crate::fileio::prealloc(&dst, total).unwrap();
+        std::fs::write(&dst, vec![0xAAu8; total as usize]).unwrap();
+
+        // Only chunks 2,3 and 6 (the tail) are missing.
+        let runs = vec![ChunkRun { start: 2, count: 2 }, ChunkRun { start: 6, count: 1 }];
+        let (tx, rx) = std::sync::mpsc::channel::<u16>();
+        let (src2, tok2, runs2) = (src.clone(), token.clone(), runs.clone());
+        let server = std::thread::spawn(move || {
+            lan_serve(
+                ServeOpts {
+                    src_path: &src2, key, transfer_id: tid, file_id: fid, token: tok2,
+                    chunk_bytes: cb, chunk_count: cc, total_bytes: total, port: None,
+                    runs: Some(runs2),
+                },
+                |port| tx.send(port).unwrap(),
+                |_d, _t| {},
+            )
+        });
+
+        let port = rx.recv().unwrap();
+        let got = lan_connect(
+            ConnectOpts {
+                host: "127.0.0.1", port, dst_path: &dst, key, transfer_id: tid, file_id: fid,
+                token: token.clone(), chunk_bytes: cb, chunk_count: cc, runs: Some(runs.clone()),
+            },
+            |_d, _t| {},
+        )
+        .unwrap();
+
+        assert_eq!(got, 3, "exactly the three requested chunks moved");
+        assert_eq!(server.join().unwrap().unwrap(), 3, "sender streamed exactly three");
+
+        let out = std::fs::read(&dst).unwrap();
+        // requested chunks now hold the real plaintext …
+        for g in [2u64, 3, 6] {
+            let off = (g * cb) as usize;
+            let len = (cb.min(total - g * cb)) as usize;
+            assert_eq!(out[off..off + len], data[off..off + len], "chunk {g} landed");
+        }
+        // … and every other byte is untouched
+        for g in [0u64, 1, 4, 5] {
+            let off = (g * cb) as usize;
+            let len = (cb.min(total - g * cb)) as usize;
+            assert!(out[off..off + len].iter().all(|&b| b == 0xAA), "chunk {g} untouched");
+        }
 
         crate::fileio::delete_file(&src);
         crate::fileio::delete_file(&dst);

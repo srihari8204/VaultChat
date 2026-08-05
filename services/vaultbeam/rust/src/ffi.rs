@@ -173,6 +173,25 @@ fn emit(cb: EventCb, ctx: *mut c_void, name: &str, payload: &Value) {
     }
 }
 
+/// Optional `runs` arg: `[{"start":n,"count":n}, …]`. Absent ⇒ the whole file,
+/// which is the pre-resume behaviour. Used to stream only the missing chunks.
+fn parse_runs(a: &Value) -> Res<Option<Vec<lan::ChunkRun>>> {
+    let Some(v) = a.get("runs") else { return Ok(None) };
+    if v.is_null() {
+        return Ok(None);
+    }
+    let arr = v.as_array().ok_or_else(|| VbError("vaultbeam: 'runs' must be an array".into()))?;
+    let mut out = Vec::with_capacity(arr.len());
+    for r in arr {
+        let start = r.get("start").and_then(Value::as_u64)
+            .ok_or_else(|| VbError("vaultbeam: run.start must be a u64".into()))?;
+        let count = r.get("count").and_then(Value::as_u64)
+            .ok_or_else(|| VbError("vaultbeam: run.count must be a u64".into()))?;
+        out.push(lan::ChunkRun { start, count });
+    }
+    Ok(Some(out))
+}
+
 fn lan_serve_inner(a: &Value, cb: EventCb, ctx: *mut c_void) -> Res<Value> {
     let key = key32(a, "keyB64")?;
     let token = b64(a, "token")?;
@@ -182,6 +201,7 @@ fn lan_serve_inner(a: &Value, cb: EventCb, ctx: *mut c_void) -> Res<Value> {
             src_path: s(a, "srcPath")?, key, transfer_id: &tid, file_id: s(a, "fileId")?, token,
             chunk_bytes: u64_(a, "chunkBytes")?, chunk_count: u64_(a, "chunkCount")?,
             total_bytes: u64_(a, "totalBytes")?, port: a.get("port").and_then(Value::as_u64).map(|p| p as u16),
+            runs: parse_runs(a)?,
         },
         |port| emit(cb, ctx, "vbLanBound", &json!({ "transferId": tid, "port": port })),
         |done, total| emit(cb, ctx, "vbLanProgress", &json!({ "transferId": tid, "done": done, "total": total })),
@@ -198,6 +218,7 @@ fn lan_connect_inner(a: &Value, cb: EventCb, ctx: *mut c_void) -> Res<Value> {
             host: s(a, "host")?, port: u64_(a, "port")? as u16, dst_path: s(a, "dstPath")?, key,
             transfer_id: &tid, file_id: s(a, "fileId")?, token,
             chunk_bytes: u64_(a, "chunkBytes")?, chunk_count: u64_(a, "chunkCount")?,
+            runs: parse_runs(a)?,
         },
         |done, total| emit(cb, ctx, "vbLanProgress", &json!({ "transferId": tid, "done": done, "total": total })),
     )?;
