@@ -17,7 +17,7 @@ protocol can be reviewed before later work depends on it:**
 | ✅ 2 | `TransferManager` + bitmaps + session core (§2) — **DONE** | 5/5 vaultBeam suites green under `tsx`; tsc 0 |
 | ✅ 3 | Transport drivers (§5) — relay, P2P, LAN + contract harness — **DONE** | driver contract + physical-unit tests green; Rust 16+6; parity green |
 | ✅ 4 | Resume engine — `recv_mask`, versioning, handshake (§4) — **backend DONE**; client wiring (§6.7) lands with stage 6 | 5 pure Go tests green, 5 DB-gated ready; Node mirrored |
-| 5 | Crash recovery (§3) | restart/reboot rows of the matrix |
+| ✅ 5 | Crash recovery (§3) — **DONE** (call-site swap + legacy cleanup ride with stage 6) | 9/9 vaultBeam suites; restart/reboot matrix rows still on-device |
 | 6 | Production hardening (§6.4–6.6, §7, §8) | full transport-switching matrix (§8.2) |
 
 Phase 1 must not merge unless every compatibility and parity test passes.
@@ -80,18 +80,23 @@ Phase 1 must not merge unless every compatibility and parity test passes.
 
 ## 3. Persistence + crash recovery
 
-- [ ] 3.1 `lib/localDb.ts` — add the `vb_chunk_state` table (see `design.md` §6, incl.
+- [x] 3.1 `lib/localDb.ts` — add the `vb_chunk_state` table (see `design.md` §6, incl.
       `session_version`, `last_transport`, `driver_state`) to the schema block at line 118; add `persistChunkState` / `loadChunkState` /
       `deleteChunkState` / prune alongside the existing `vb_transfers` helpers.
-- [ ] 3.2 `lib/vaultBeam/session.ts` — write-behind persistence: coalesce 1.5 s, flush
+- [x] 3.2 `lib/vaultBeam/session.ts` — write-behind persistence: coalesce 1.5 s, flush
       immediately on tier switch, pause, terminal, and `AppState` background.
-- [ ] 3.3 `lib/vaultBeamController.ts` — `resumePendingSends()` becomes
+- [x] 3.3 `manager.recoverAll()` implemented + tested (the `lib/vaultBeamController.ts`
+      call-site swap lands with stage 6, when the controller stops driving tiers).
+      Original: `lib/vaultBeamController.ts` — `resumePendingSends()` becomes
       `manager.recoverAll()`: rehydrate chunk state, restore `last_transport` +
       `driver_state` cooldowns, and adopt each non-terminal session into the manager. Sender
       source validation gains the size + mtime check (`design.md` §4.5 deviation 2).
-- [ ] 3.4 Delete `lib/vaultBeamRecvBitmap.ts` (superseded by `PeerHave` in op-sqlite) and
+- [ ] 3.4 **DEFERRED to stage 6** — still imported by the legacy `vaultBeamTransfer`
+      path, which is production while `VB_SEAMLESS_RESUME` is off.
+      Delete `lib/vaultBeamRecvBitmap.ts` (superseded by `PeerHave` in op-sqlite) and
       migrate any existing `vc_vb_recv_*` AsyncStorage keys on first launch, then remove.
-- [ ] 3.5 Migrate `vc_vaultbeam_sends` (AsyncStorage) into `vb_chunk_state.src_*` so all
+- [ ] 3.5 **DEFERRED to stage 6** — same reason as 3.4.
+      Migrate `vc_vaultbeam_sends` (AsyncStorage) into `vb_chunk_state.src_*` so all
       sender resume state lives in one store.
 
 ## 4. Backend: `recv_mask`, session versioning, completion handshake
