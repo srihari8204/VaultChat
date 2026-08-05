@@ -139,6 +139,25 @@ export class TransferSession {
     this._revision++;
   }
 
+  /**
+   * A chunk is now STAGED on the relay. Distinct from verified: staging means
+   * the relay holds the ciphertext, NOT that the peer has it. Conflating the two
+   * is root cause RC-4 — `uploaded_mask` means "on R2" and was being used as the
+   * completion oracle. Only `markVerified` may advance progress.
+   */
+  markStaged(chunk: number): boolean {
+    const gained = this._r2Have.set(chunk);
+    this._inflight.delete(chunk);
+    if (gained) this._revision++;
+    return gained;
+  }
+
+  markRunStaged(run: ChunkRun): number {
+    let n = 0;
+    for (let i = run.start; i < run.start + run.count; i++) if (this.markStaged(i)) n++;
+    return n;
+  }
+
   // ── in-flight bookkeeping (memory only) ──────────────────────────
   claim(runs: ReadonlyArray<ChunkRun>): void {
     for (const r of runs) for (let i = r.start; i < r.start + r.count; i++) this._inflight.add(i);
@@ -278,6 +297,15 @@ function _selfCheck(): void {
   s.claim([{ start: 1, count: 5 }]);
   A(s.progressBytes() === CHUNK_BYTES, 'in-flight chunks are not progress');
   s.releaseAll();
+
+  // staging is NOT progress (RC-4): markStaged advances R2Have, never PeerHave
+  const stg = mk();
+  stg.markStaged(0); stg.markStaged(1);
+  A(stg.r2Have.popcount() === 2, 'markStaged advances R2Have');
+  A(stg.peerHave.popcount() === 0, 'markStaged does NOT advance PeerHave');
+  A(stg.progressBytes() === 0, 'staged bytes are not progress');
+  A(stg.uploadWork()[0].start === 2, 'staged chunks drop out of the upload work-list');
+  A(!stg.isComplete(), 'a fully staged transfer is not complete until the peer verifies');
 
   // sender work excludes what is staged; receiver can only fetch what is staged
   A(s.uploadWork().length === 0, 'nothing to upload when everything is staged');

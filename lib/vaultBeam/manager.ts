@@ -15,30 +15,9 @@
 
 import { type ChunkRun } from './bitmap';
 import { TransferSession } from './session';
+import { type TransportDriver, type TransportId, type DriverOutcome } from './drivers/types';
 
-export type TransportId = string;
-
-export type DriverOutcome =
-  | { kind: 'drained' }                                        // did everything it was asked
-  | { kind: 'failed'; reason: string; retryAfterMs?: number };  // demote + cooldown
-
-export interface TransportDriver {
-  readonly id: TransportId;
-  /** Lower is preferred. LAN < P2P < relay. */
-  readonly cost: number;
-  /** Physical packing this transport wants right now, in LOGICAL chunks.
-   *  Throughput tuning only — it can never change a chunk's identity. */
-  unitChunks(session: TransferSession): number;
-  available(session: TransferSession): Promise<boolean>;
-  run(
-    session: TransferSession,
-    work: ChunkRun[],
-    onVerified: (chunk: number) => void,
-    signal: AbortSignal,
-  ): Promise<DriverOutcome>;
-  /** MUST release every listener, socket, timer. Idempotent. */
-  dispose(): void;
-}
+export { type TransportDriver, type TransportId, type DriverOutcome };
 
 export interface ManagerOptions {
   /** Sessions running at once. Auto-download used to cap this at 1 on its own. */
@@ -192,11 +171,17 @@ export class TransferManager {
     h.cooldownUntil = 0;
   }
 
-  /** Role-appropriate work. The session derives it; the manager only slices it. */
+  /**
+   * Role- and channel-appropriate work. The session derives it; the manager only
+   * slices it to the driver's physical unit. Keying off the declared CHANNEL
+   * rather than the driver id is what lets a future CDN driver ('relay') or a
+   * Bluetooth driver ('direct') drop in with no change here.
+   */
   private workFor(s: TransferSession, d: TransportDriver): ChunkRun[] {
-    const unit = Math.max(1, d.unitChunks(s) | 0);
-    if (s.role === 'sender') return d.id === 'relay' ? s.uploadWork(unit) : s.directWork(unit);
-    return d.id === 'relay' ? s.relayFetch(unit) : s.directWork(unit);
+    const raw = d.unitChunks(s);
+    const unit = Number.isFinite(raw) ? Math.max(1, Math.floor(raw)) : Infinity;
+    if (d.channel === 'direct') return s.directWork(unit);
+    return s.role === 'sender' ? s.uploadWork(unit) : s.relayFetch(unit);
   }
 
   private async runSession(s: TransferSession): Promise<RunResult> {
@@ -229,9 +214,15 @@ export class TransferManager {
       s.claim(work);
       let outcome: DriverOutcome;
       try {
-        outcome = await driver.run(s, work, (c) => {
-          s.markVerified(c);
-          if (s.revision !== lastRevision) { lastRevision = s.revision; this.opts.onChange?.(s); }
+        // Two channels, because they are two different facts (RC-4): `verified`
+        // means the PEER holds it and is the only thing that moves progress;
+        // `staged` means the RELAY holds it and moves nothing user-visible.
+        outcome = await driver.run(s, work, {
+          verified: (c) => {
+            s.markVerified(c);
+            if (s.revision !== lastRevision) { lastRevision = s.revision; this.opts.onChange?.(s); }
+          },
+          staged: (c) => { s.markStaged(c); },
         }, ac.signal);
       } catch (e: any) {
         outcome = { kind: 'failed', reason: e?.message ?? 'driver threw' };
@@ -281,27 +272,27 @@ function _selfCheck(): void {
     asked: number[] = [];
     disposals = 0;
     runs = 0;
+    readonly channel: 'direct' | 'relay';
     constructor(
       readonly id: string,
       readonly cost: number,
-      private cfg: { verifyLimit?: number; fail?: boolean; unit?: number; unavailable?: boolean } = {},
-    ) {}
+      private cfg: { verifyLimit?: number; fail?: boolean; unit?: number; unavailable?: boolean; channel?: 'direct' | 'relay' } = {},
+    ) { this.channel = cfg.channel ?? 'direct'; }
     unitChunks() { return this.cfg.unit ?? Infinity; }
     async available() { return !this.cfg.unavailable; }
-    async run(_s: TransferSession, work: ChunkRun[], onVerified: (c: number) => void): Promise<DriverOutcome> {
+    async run(_s: TransferSession, work: ChunkRun[], report: { verified: (c: number) => void }): Promise<DriverOutcome> {
       this.runs++;
       let budget = this.cfg.verifyLimit ?? Infinity;
       for (const r of work) {
         for (let i = r.start; i < r.start + r.count; i++) {
           this.asked.push(i);
           if (budget-- <= 0) break;
-          onVerified(i);
+          report.verified(i);
         }
       }
       return this.cfg.fail ? { kind: 'failed', reason: 'synthetic' } : { kind: 'drained' };
     }
     dispose() { this.disposals++; }
-    set(cfg: Partial<typeof this.cfg>) { this.cfg = { ...this.cfg, ...cfg }; }
   }
 
   const run = async () => {
@@ -396,7 +387,7 @@ function _selfCheck(): void {
 
     // 8. a receiver with nothing staged parks, then a poke resumes it
     mgr = mkMgr();
-    const relayRecv = new FakeDriver('relay', 30);
+    const relayRecv = new FakeDriver('relay', 30, { channel: 'relay' });
     mgr.registerDriver(relayRecv);
     s = mkSession(5, 'recipient');           // r2Have empty ⇒ relayFetch is empty
     res = await mgr.start(s);
@@ -419,7 +410,31 @@ function _selfCheck(): void {
     A(s.state === 'cancelled', 'cancel is terminal');
     A(s.inflightCount === 0, 'cancel releases in-flight chunks');
 
-    // 10. onChange fires on real progress and is the persistence seam
+    // 10. a relay-channel SENDER stages everything and then PARKS — staging is
+    //     not delivery, so the session must not claim completion (RC-4).
+    mgr = mkMgr();
+    class StagingDriver extends FakeDriver {
+      async run(_s: TransferSession, work: ChunkRun[], report: any): Promise<DriverOutcome> {
+        this.runs++;
+        for (const r of work) for (let i = r.start; i < r.start + r.count; i++) { this.asked.push(i); report.staged(i); }
+        return { kind: 'drained' };
+      }
+    }
+    const stager = new StagingDriver('relay', 30, { channel: 'relay' });
+    mgr.registerDriver(stager);
+    s = mkSession(6);
+    res = await mgr.start(s);
+    A(res.state === 'parked', 'a sender that only staged parks, it does not complete');
+    A(s.r2Have.popcount() === 6, 'everything staged');
+    A(s.peerHave.popcount() === 0 && s.progressBytes() === 0, 'staging moved no progress');
+    A(s.uploadWork().length === 0, 'nothing left to stage');
+    // …and once the peer confirms (stage 4 delivers this via recv_mask), it completes
+    for (let i = 0; i < 6; i++) s.markVerified(i);
+    res = await (mgr.poke(s.transferId) as Promise<RunResult>);
+    A(res.state === 'complete', 'peer confirmation completes the session');
+    A(stager.asked.length === 6, 'the sender never re-staged anything');
+
+    // 11. onChange fires on real progress and is the persistence seam
     let changes = 0;
     mgr = mkMgr({ onChange: () => { changes++; } });
     mgr.registerDriver(new FakeDriver('relay', 30));
