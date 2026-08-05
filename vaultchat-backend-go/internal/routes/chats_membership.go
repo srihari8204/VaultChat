@@ -996,3 +996,69 @@ func membershipApprovalMode(w http.ResponseWriter, r *http.Request) {
 	chatsAudit(ctx, user.ID, chatID, "approval_mode_changed", nil, map[string]any{"mode": raw})
 	httpx.JSON(w, 200, map[string]any{"ok": true, "approvalMode": raw})
 }
+
+// ── sharing a group into a chat ─────────────────────────────────────
+
+// chatsValidateGroupRef checks that the caller may post a card pointing at the
+// group in meta, returning "" when they may. It also NORMALISES meta so the
+// name, icon and colour on the card come from the database rather than from
+// whatever the client typed — otherwise the card is a place to write anything
+// you like next to a real group id.
+//
+// Two rules, and they are what keep this from being an invite link again:
+//
+//  1. The group must be in admin_approval mode. That is a group which has
+//     explicitly opted into hearing from people it did not invite. Sharing a
+//     strict-mode group would route a request at a group with no queue to put
+//     it in.
+//  2. The sharer must hold invite_members THERE. It is the same authority that
+//     could have invited the person directly, so the card grants nothing they
+//     could not already have done — it only makes it possible at a distance.
+//
+// What the card can never do, however it is forwarded, is admit anybody. It
+// carries no token. Admission still runs through membershipRequest and an
+// admin's approval.
+func chatsValidateGroupRef(ctx context.Context, uid string, meta map[string]any) string {
+	if meta == nil {
+		return "A group reference needs a group"
+	}
+	groupID := strings.TrimSpace(chatsStrOr(meta["groupId"], ""))
+	if groupID == "" {
+		return "A group reference needs a group"
+	}
+
+	// Loaded as the CALLER, so a group they are not in is simply not found —
+	// this endpoint must not become a way to test whether a group id exists.
+	mem, err := chatsLoadMem(ctx, uid, groupID)
+	if err != nil {
+		log.Printf("[group_ref] load: %v", err)
+		return "Could not check that group"
+	}
+	if mem == nil || mem.LeftAt != nil {
+		return "You are not in that group"
+	}
+	if !mem.can(groups.PermInviteMembers) {
+		return "You do not have permission to share that group"
+	}
+	if invites.NormalizeMode(mem.ApprovalModeRaw) != invites.ModeAdminApproval {
+		// Said plainly rather than as a bare 403: the owner can change this, and
+		// a message that reads like a permissions bug will not tell them so.
+		return "That group does not accept requests to join. An owner can change that in Members."
+	}
+
+	var name, gtype, icon, color *string
+	if err := chatsQRow(ctx, uid,
+		`SELECT name, group_type, icon, color FROM chats WHERE id = $1`,
+		[]any{groupID}, &name, &gtype, &icon, &color); err != nil {
+		log.Printf("[group_ref] meta: %v", err)
+		return "Could not check that group"
+	}
+	// Overwrite, never merge: a client-supplied name sitting next to a real
+	// group id is a way to make a card say whatever the sender wants.
+	meta["groupId"] = groupID
+	meta["name"] = name
+	meta["groupType"] = gtype
+	meta["icon"] = icon
+	meta["color"] = color
+	return ""
+}

@@ -211,7 +211,7 @@ func chatsGet(w http.ResponseWriter, r *http.Request) {
 var (
 	chatsMsgTypes = map[string]bool{"text": true, "image": true, "video": true, "audio": true,
 		"file": true, "location": true, "system": true, "sticker": true, "poll": true,
-		"reaction": true, "vaultbeam": true}
+		"reaction": true, "vaultbeam": true, "group_ref": true}
 	chatsGifURLRe = regexp.MustCompile(`^https://\S+$`)
 	chatsLinkRe   = regexp.MustCompile(`(?i)https?://`)
 )
@@ -308,6 +308,16 @@ func chatsMessagePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Groups & Circles: a group_ref card is the in-app replacement for an invite
+	// link, and the two guarantees that make it not-a-link are enforced HERE.
+	// Validating it client-side would leave both to a modified client.
+	if msgType == "group_ref" {
+		if msg := chatsValidateGroupRef(ctx, user.ID, meta); msg != "" {
+			httpx.Err(w, 403, msg)
+			return
+		}
+	}
+
 	var replyTo *int64
 	if chatsTruthy(b["replyToId"]) {
 		if n, ok := chatsParseInt(b["replyToId"]); ok {
@@ -342,6 +352,14 @@ func chatsMessagePost(w http.ResponseWriter, r *http.Request) {
 		}
 		if len([]rune(contentRaw)) > 64 {
 			httpx.Err(w, 400, "sticker id too long")
+			return
+		}
+	case msgType == "group_ref":
+		// The card lives entirely in meta, which the server can read and has
+		// already validated. There is no body to encrypt: everything it says is
+		// something the recipient is about to be shown anyway.
+		if meta == nil || strings.TrimSpace(chatsStrOr(meta["groupId"], "")) == "" {
+			httpx.Err(w, 400, "meta.groupId required for a group reference")
 			return
 		}
 	case msgType == "reaction":

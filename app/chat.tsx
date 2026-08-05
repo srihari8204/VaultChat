@@ -125,7 +125,9 @@ import {
   type ChatSummary,
   type Message,
   type ReactionSummary,
+  groupRefOf,
 } from '../lib/chatService';
+import { groupTypeInfo } from '../lib/groups/catalog';
 import { markReadDurable, markDeliveredDurable } from '../lib/receipts';
 import { type MediaType } from '../lib/sendMedia';
 import { enqueueMedia, cancelMedia, retryMedia, pendingForChat as mediaPendingForChat, on as onMediaOutbox } from '../lib/mediaOutbox';
@@ -3850,6 +3852,11 @@ function MessageBubble({
   const isAudio = msg.type === 'audio' && msg.meta?.attachmentId;
   const isFile  = msg.type === 'file'  && msg.meta?.attachmentId;
   const isVaultbeam = msg.type === 'vaultbeam';
+  // A shared group card. Everything it shows was written by the SERVER, which
+  // overwrites the name and presentation from the database — the sender only
+  // ever supplies a group id, so a card cannot be made to say something the
+  // group does not.
+  const groupRef = msg.type === 'group_ref' ? groupRefOf(msg.meta) : null;
 
   // Open image/video full-screen (WhatsApp-style). Navigate INSTANTLY and let
   // the viewer resolve a local file — so taps are reliable and never stack.
@@ -4065,7 +4072,46 @@ function MessageBubble({
             thumb={typeof msg.meta?.thumb === 'string' ? msg.meta.thumb : undefined}
             encrypted={isEncMedia}
           />
-        ) : isVaultbeam ? (
+        ) : groupRef ? (() => {
+          const gt = groupTypeInfo(groupRef.groupType);
+          const accent = groupRef.color || gt.color;
+          return (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => bubbleRouter.push({
+                pathname: '/group-join' as any,
+                params: {
+                  groupId: groupRef.groupId,
+                  name: groupRef.name ?? '',
+                  groupType: groupRef.groupType ?? '',
+                  icon: groupRef.icon ?? '',
+                  color: groupRef.color ?? '',
+                },
+              })}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 200 }}>
+                <View style={{
+                  width: 40, height: 40, borderRadius: 20, backgroundColor: accent + '2E',
+                  alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <Ionicons name={(groupRef.icon || gt.icon) as any} size={21} color={accent} />
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, { fontWeight: '700' }]} numberOfLines={1}>
+                    {groupRef.name || 'A group'}
+                  </Text>
+                  <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, { fontSize: 12, opacity: 0.85 }]}>
+                    {gt.label}
+                  </Text>
+                  {/* "Ask", not "Join" — tapping this admits nobody. */}
+                  <Text style={{ color: accent, fontSize: 12, fontWeight: '700', marginTop: 2 }}>
+                    Ask to join ›
+                  </Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+          );
+        })() : isVaultbeam ? (
           <VaultBeamBubble msg={msg} isMine={isMine} plain={plain} />
         ) : isSticker ? (
           <Text style={S.stickerEmoji}>{msg.content}</Text>

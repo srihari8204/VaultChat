@@ -82,3 +82,34 @@ func TestPushTextNamesNoGroup(t *testing.T) {
 		}
 	}
 }
+
+// ── group_ref: the in-app replacement for an invite link ──
+
+// The card must be storable as a message type, and — more importantly — must
+// NOT be schedulable. A group reference asserts the group is open to requests,
+// and that can stop being true between scheduling and sending; a card arriving
+// for a group that has since closed is worse than no card, because the
+// recipient taps it and is refused with no explanation. Migration 071 leaves
+// scheduled_messages_type_check alone on purpose.
+func TestGroupRefIsAKnownMessageType(t *testing.T) {
+	if !chatsMsgTypes["group_ref"] {
+		t.Fatal("group_ref must be an accepted message type")
+	}
+}
+
+// The card carries a pointer, never a credential. If any of these ever appear
+// in the meta a group_ref is built from, it has become a link again — which is
+// the exact thing membership v2 removed.
+func TestGroupRefMetaCarriesNoCredential(t *testing.T) {
+	forbidden := []string{"token", "code", "sig", "signature", "secret", "inviteToken", "url", "link"}
+	// The keys chatsValidateGroupRef writes. Kept as a literal so ADDING a key
+	// to that function without thinking about it fails here.
+	written := []string{"groupId", "name", "groupType", "icon", "color"}
+	for _, w := range written {
+		for _, f := range forbidden {
+			if strings.EqualFold(w, f) {
+				t.Errorf("group_ref meta writes %q, which is a credential — the card must only point", w)
+			}
+		}
+	}
+}

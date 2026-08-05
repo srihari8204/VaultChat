@@ -30,7 +30,8 @@ import { useTheme } from '../lib/theme';
 import { brandAlpha } from '../constants/theme';
 import {
   getChat, setMemberRole, removeChatMember, transferOwnership, setApprovalMode,
-  type ChatMember, type ApprovalMode,
+  listChats, shareGroup,
+  type ChatMember, type ApprovalMode, type ChatSummary,
 } from '../lib/chatService';
 import {
   canManageRole, canRemoveMember, canTransferOwnership,
@@ -69,6 +70,8 @@ export default function GroupMembersScreen() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [sheet, setSheet] = useState<ChatMember | null>(null);
+  const [sharing, setSharing] = useState(false);
+  const [chats, setChats] = useState<ChatSummary[]>([]);
 
   const load = useCallback(async () => {
     if (!groupId) { setLoading(false); return; }
@@ -140,6 +143,30 @@ export default function GroupMembersScreen() {
         { text: 'Hand over', style: 'destructive', onPress: () => act('transfer ownership', async () => {
           await transferOwnership(groupId, m.userId);
         }, m.userId) },
+      ],
+    );
+  };
+
+  // Sharing is only offered for a group that accepts requests. Anywhere else
+  // the card would point at a group with no queue to put the request in, and
+  // the recipient would tap it only to be told no.
+  const openShare = async () => {
+    setSharing(true);
+    try { setChats((await listChats()).filter((c) => c.id !== groupId)); }
+    catch { setChats([]); }
+  };
+
+  const doShare = (to: ChatSummary) => {
+    Alert.alert(
+      `Share ${groupName}?`,
+      `${to.name ?? 'They'} will see a card saying the group exists and can ask to join. It does not let anyone in — you still approve every request.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Share', onPress: async () => {
+          setSharing(false);
+          try { await shareGroup(to.id, groupId); Alert.alert('Shared', `The card is in your chat with ${to.name ?? 'them'}.`); }
+          catch (e: any) { Alert.alert('Could not share', e?.message ?? 'Try again.'); }
+        } },
       ],
     );
   };
@@ -266,10 +293,61 @@ export default function GroupMembersScreen() {
                 Only you can change this. Nobody is ever added to {groupName} without agreeing to
                 join, whichever setting is on.
               </Text>
+
+              {mode === 'admin_approval' && (
+                <>
+                  <TouchableOpacity onPress={openShare}
+                    style={[st.addBtn, { borderColor: colors.border, marginTop: 18 }]}>
+                    <Ionicons name="share-outline" size={18} color={colors.primary} />
+                    <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 14 }}>
+                      Share this group in a chat
+                    </Text>
+                  </TouchableOpacity>
+                  <Text style={{ color: colors.textFaint, fontSize: 11.5, marginTop: 8, lineHeight: 16 }}>
+                    Posts a card they can tap to ask to join. It carries no code and lets nobody
+                    in — every request still comes to you.
+                  </Text>
+                </>
+              )}
             </>
           )}
         </ScrollView>
       )}
+
+      {/* ── share picker ── */}
+      <Modal visible={sharing} transparent animationType="slide" onRequestClose={() => setSharing(false)}>
+        <View style={st.backdrop}>
+          <Pressable style={{ flex: 1 }} onPress={() => setSharing(false)} />
+          <View style={[st.sheet, { backgroundColor: colors.card, borderColor: colors.border, maxHeight: '70%' }]}>
+            <Text style={{ color: colors.text, fontWeight: '800', fontSize: 16, marginBottom: 4 }}>
+              Share with
+            </Text>
+            <Text style={{ color: colors.textDim, fontSize: 12.5, marginBottom: 12 }}>
+              They can ask to join. You still approve.
+            </Text>
+            <ScrollView>
+              {chats.length === 0 && (
+                <Text style={{ color: colors.textDim, fontSize: 13.5, paddingVertical: 12 }}>
+                  No other chats to share into yet.
+                </Text>
+              )}
+              {chats.map((c) => (
+                <TouchableOpacity key={c.id} onPress={() => doShare(c)}
+                  style={[st.opt, { borderColor: colors.border }]}>
+                  <Ionicons name={c.type === 'group' ? 'people' : 'person'} size={18} color={colors.primary} />
+                  <Text style={{ color: colors.text, fontSize: 14, fontWeight: '600', flex: 1 }} numberOfLines={1}>
+                    {c.name ?? c.peerName ?? 'Chat'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity onPress={() => setSharing(false)}
+              style={[st.close, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Text style={{ color: colors.text, fontWeight: '700', fontSize: 14.5 }}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {/* ── per-member actions ── */}
       <Modal visible={!!sheet} transparent animationType="slide" onRequestClose={() => setSheet(null)}>

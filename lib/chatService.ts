@@ -146,7 +146,7 @@ export interface Message {
   id:        number;
   chatId:    string;
   senderId:  string;
-  type:      'text' | 'image' | 'video' | 'audio' | 'file' | 'location' | 'system' | 'sticker' | 'poll' | 'reaction' | 'vaultbeam';
+  type:      'text' | 'image' | 'video' | 'audio' | 'file' | 'location' | 'system' | 'sticker' | 'poll' | 'reaction' | 'vaultbeam' | 'group_ref';
   content:   string | null;        // opaque ciphertext (currently plaintext during Phase 3a)
   meta?:     any;
   replyToId: number | null;
@@ -1452,6 +1452,48 @@ export async function inviteCandidates(chatId: string, q: string): Promise<Invit
 /** Ask to join a group that admits people by request. */
 export async function requestToJoin(chatId: string): Promise<{ id: number; chatId: string; pending: boolean }> {
   return api(`/chats/${encodeURIComponent(chatId)}/membership/request`, { method: 'POST' });
+}
+
+/** The card a group_ref message carries. Server-written — see below. */
+export interface GroupRef {
+  groupId:    string;
+  name:       string | null;
+  groupType:  GroupType | null;
+  icon:       string | null;
+  color:      string | null;
+}
+
+/**
+ * Post a card into `toChatId` saying a group exists and may be asked to join.
+ *
+ * The in-app replacement for an invite link, and deliberately much weaker than
+ * one: the card carries NO token and admits nobody. Tapping it opens a request
+ * that an admin still has to approve.
+ *
+ * The server refuses this unless the group is in `admin_approval` mode and you
+ * hold `invite_members` there — the same authority that could have invited the
+ * person directly. It also OVERWRITES the name and presentation from the
+ * database, so a card cannot be made to say something the group does not.
+ * Nothing passed here beyond the id is trusted.
+ */
+export async function shareGroup(toChatId: string, groupId: string): Promise<void> {
+  await sendMessage(toChatId, '', 'group_ref', { meta: { groupId } });
+}
+
+/** Read the card off a message, or null when it is malformed. */
+export function groupRefOf(meta: unknown): GroupRef | null {
+  if (!meta || typeof meta !== 'object') return null;
+  const m = meta as Record<string, unknown>;
+  const groupId = typeof m.groupId === 'string' ? m.groupId : '';
+  if (!groupId) return null;
+  const str = (v: unknown) => (typeof v === 'string' && v ? v : null);
+  return {
+    groupId,
+    name: str(m.name),
+    groupType: str(m.groupType) as GroupType | null,
+    icon: str(m.icon),
+    color: str(m.color),
+  };
 }
 
 /**
