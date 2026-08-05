@@ -27,6 +27,7 @@ export interface ActiveLock {
   snap: ZoneSnapshot;             // last zone snapshot (state, window, …)
   alerts: LockAlertSettings;      // frozen copy so the bg task needs no other read
   zone?: ZoneConfig;              // mode-derived sensitivity (absent = walking default)
+  placeName?: string | null;      // saved place this lock was armed from (any surface)
   lastPos: LatLng | null;         // last accepted position (distance-traveled acc.)
   graceUntil: number | null;      // exit grace deadline (headless alarm timing)
   alarmStartedAt: number | null;  // non-null while the alarm is sounding
@@ -78,7 +79,8 @@ export function lockDb(): Promise<LocalDb> {
           distance_traveled REAL NOT NULL DEFAULT 0,
           acc_sum         REAL NOT NULL DEFAULT 0,
           acc_n           INTEGER NOT NULL DEFAULT 0,
-          notes           TEXT
+          notes           TEXT,
+          place_name      TEXT
         );
         CREATE TABLE IF NOT EXISTS lock_events (
           id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -91,7 +93,7 @@ export function lockDb(): Promise<LocalDb> {
       `);
       // v2/v2.1 additive migrations for installs that created the table before
       // these columns existed (ADD COLUMN throws if present — that's fine).
-      for (const col of ['acc_sum REAL NOT NULL DEFAULT 0', 'acc_n INTEGER NOT NULL DEFAULT 0', 'notes TEXT']) {
+      for (const col of ['acc_sum REAL NOT NULL DEFAULT 0', 'acc_n INTEGER NOT NULL DEFAULT 0', 'notes TEXT', 'place_name TEXT']) {
         try { await db.execAsync(`ALTER TABLE lock_sessions ADD COLUMN ${col}`); } catch {}
       }
       return db;
@@ -119,17 +121,18 @@ export interface LockSessionRow {
   acc_sum: number;
   acc_n: number;
   notes: string | null;
+  place_name: string | null;
 }
 
 export interface LockEventRow { id: number; session_id: number; type: LockEventType; t: number; distance: number | null }
 
 // ── session lifecycle ────────────────────────────────────────────────────────
 
-export async function createSession(center: LatLng, radius: number, t: number): Promise<number> {
+export async function createSession(center: LatLng, radius: number, t: number, placeName?: string | null): Promise<number> {
   const db = await lockDb();
   const r = await db.runAsync(
-    `INSERT INTO lock_sessions (started_at, center_lat, center_lng, radius) VALUES (?,?,?,?)`,
-    [t, center.lat, center.lng, radius],
+    `INSERT INTO lock_sessions (started_at, center_lat, center_lng, radius, place_name) VALUES (?,?,?,?,?)`,
+    [t, center.lat, center.lng, radius, placeName ?? null],
   );
   await db.runAsync(`INSERT INTO lock_events (session_id, type, t, distance) VALUES (?,?,?,0)`, [r.lastInsertRowId, 'armed', t]);
   return r.lastInsertRowId;
@@ -300,6 +303,28 @@ export async function exportHistoryCSV(): Promise<string> {
     s.exits, s.returns, Math.round(s.max_distance * 10) / 10, s.alarm_ms, Math.round(s.distance_traveled),
   ].join(','));
   return [head, ...lines].join('\n');
+}
+
+/** Per-place rollup from tagged sessions (v3: place cards on any surface).
+ *  "Visits" = completed sessions locked on the place. */
+export interface PlaceLockStats { visits: number; timeInsideMs: number; alarms: number; lastAt: number | null }
+export async function statsForPlace(placeName: string): Promise<PlaceLockStats> {
+  const db = await lockDb();
+  const r: any = await db.getFirstAsync(
+    `SELECT COUNT(*) AS visits,
+            COALESCE(SUM(time_inside_ms),0) AS inside_ms,
+            MAX(started_at) AS last_at
+       FROM lock_sessions WHERE place_name = ?`, [placeName]);
+  const a: any = await db.getFirstAsync(
+    `SELECT COUNT(*) AS n FROM lock_events e
+       JOIN lock_sessions s ON s.id = e.session_id
+      WHERE e.type = 'alarm_start' AND s.place_name = ?`, [placeName]);
+  return {
+    visits: Number(r?.visits ?? 0),
+    timeInsideMs: Number(r?.inside_ms ?? 0),
+    alarms: Number(a?.n ?? 0),
+    lastAt: r?.last_at ? Number(r.last_at) : null,
+  };
 }
 
 /** Optional per-session note (v2.1) — set empty/null to clear. */

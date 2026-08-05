@@ -162,6 +162,19 @@ export function stepZone(
   };
 }
 
+/**
+ * Stateless banding: one distance + radius → zone state, using the SAME bands
+ * stepZone applies. This is the shared classifier for surfaces that only have
+ * a point-in-time distance (e.g. Family Space rendering a member's last sealed
+ * ping against a place) — no window/hysteresis, display only, never alarms.
+ */
+export function classifyDistance(distance: number, radius: number, cfg: ZoneConfig = DEFAULT_ZONE_CONFIG): ZoneState {
+  if (distance > radius) return 'outside';
+  if (distance > radius - cfg.atLimitBand) return 'atLimit';
+  if (distance > radius - cfg.warningBand) return 'warning';
+  return 'safe';
+}
+
 /** Zone → UI color key (the map circle + status card read this). */
 export function zoneColor(state: ZoneState): '#22C55E' | '#EAB308' | '#F97316' | '#EF4444' {
   switch (state) {
@@ -245,6 +258,10 @@ function _selfCheck(): void {
 
   A(clampRadius(3) === 10 && clampRadius(5000) === 1000 && clampRadius(250) === 250, 'radius clamp');
   A(zoneColor('safe') === '#22C55E' && zoneColor('outside') === '#EF4444', 'zone colors');
+
+  // Stateless classifier matches stepZone's bands (r=30: safe<25, warn<28, limit≤30, out>30).
+  A(classifyDistance(10, 30) === 'safe' && classifyDistance(26, 30) === 'warning', 'classify inner bands');
+  A(classifyDistance(29, 30) === 'atLimit' && classifyDistance(31, 30) === 'outside', 'classify edge bands');
 
   // Mode envelopes widen with speed and never shrink below walking.
   A(MODE_CONFIGS.driving.warningBand > MODE_CONFIGS.cycling.warningBand

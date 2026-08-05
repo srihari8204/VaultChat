@@ -87,3 +87,14 @@
 - [x] 13.9 Accessibility pass: roles + labels on primary lock controls
 - [ ] 13.10 Map rotation / 3D tilt / camera modes beyond follow+explore+overview — deferred to the MapLibre upgrade (user: "if we want we will update maplibre")
 - [ ] 13.11 Language setting, screen-reader field audit, device matrix — app-level / physical-device work
+
+## 14. One engine, two experiences — family-aware extensions (no Family core changes)
+
+- [x] 14.1 Engine stays generic: `classifyDistance` pure shared classifier (self-checked), `onLockEvent` observer hook, `armLock` place tagging (`place_name` additive column), `statsForPlace` rollup — zero family knowledge in lib/lock/*
+- [x] 14.2 `lib/family/lockBridge.ts`: the ONLY family↔engine glue — arming a Family Place runs the shared engine and translates engine events into the existing family alerts feed ("left Home", "returned to Home", ALARM); radius clamped to the engine's 10 m–1 km with user-visible note
+- [x] 14.3 Family Places extensions (existing screen, existing workflows kept): Navigate + Lock here/Unlock actions in the edit sheet, live zone-colored LOCKED chip on the place row, per-place lock visits from shared history
+- [x] 14.4 Member profile extensions: per-place zone chips (INSIDE/NEAR EDGE/AT LIMIT/OUTSIDE) via the shared classifier on the member's last sealed ping, speed/updated/battery diagnostics line via shared formatters
+- [x] 14.5 Do-not-modify honored: family dashboard, groups, invites, chat, live location, and settings untouched; no duplicate GPS/geofence/alarm/nav/history services (one engine instance app-wide)
+- [ ] 14.6 Shared lock DISTRIBUTION (owner pushes a place lock to members' devices with per-member permissions) — requires cross-device place sync over E2EE system messages; tracked with the `family-circle` change (F4), not duplicated here
+- [ ] 14.7 Family statistics beyond lock sessions (time-at-place from presence, average arrival) — builds on family history tracks; follow-up
+- [ ] 14.8 Member GPS accuracy/quality chip — needs `acc` added to the sealed FamilyPing payload (family-circle presence task); until then quality is shown only for the local device

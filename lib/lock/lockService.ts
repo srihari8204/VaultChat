@@ -55,14 +55,39 @@ export interface LockView {
   navBack: boolean;          // navigate-back session started by the lock
   lastFixAt: number;         // t of the last accepted fix ("updated Ns ago")
   gpsDegraded: boolean;      // sustained poor accuracy (indoors / canyon)
+  placeName: string | null;  // saved place this lock is armed on (null = ad-hoc)
 }
 
 const IDLE: LockView = {
   active: false, center: null, radius: 30, armedAt: 0, state: null,
   distance: 0, accuracy: 0, quality: 'good', speedKmh: 0, battery: null, charging: false,
   alarmPhase: 'idle', heading: 0, killSafe: false, navBack: false,
-  lastFixAt: 0, gpsDegraded: false,
+  lastFixAt: 0, gpsDegraded: false, placeName: null,
 };
+
+// ── engine event hook (v3): any surface can observe lock transitions without
+// the engine knowing about it. Family Space's bridge turns these into family-
+// styled alerts; the engine stays generic.
+export type LockEventKind = 'warning' | 'exit' | 'return' | 'alarm_start' | 'alarm_stop' | 'armed' | 'unlocked';
+export interface LockEvent {
+  kind: LockEventKind;
+  placeName: string | null;
+  distance: number;      // m from center at the event
+  radius: number;
+  at: number;
+}
+const evSubs = new Set<(e: LockEvent) => void>();
+export function onLockEvent(cb: (e: LockEvent) => void): () => void {
+  evSubs.add(cb);
+  return () => { evSubs.delete(cb); };
+}
+function emitLockEvent(kind: LockEventKind, a: ActiveLock): void {
+  const e: LockEvent = {
+    kind, placeName: a.placeName ?? null,
+    distance: Math.round(a.snap.rawDistance * 10) / 10, radius: a.radius, at: Date.now(),
+  };
+  evSubs.forEach((cb) => { try { cb(e); } catch {} });
+}
 
 let view: LockView = IDLE;
 const subs = new Set<() => void>();
@@ -157,6 +182,7 @@ function onPhase(p: AlarmPhase): void {
         active = { ...a, alarmStartedAt: Date.now() };
         await saveActiveLock(active);
         await addEvent(a.sessionId, 'alarm_start', Date.now(), a.snap.rawDistance);
+        emitLockEvent('alarm_start', active);
       }
       await showLockAlarm(Math.max(0, a.snap.rawDistance - a.radius));
     })().catch(() => {});
@@ -176,6 +202,7 @@ function onPhase(p: AlarmPhase): void {
         await addEvent(active.sessionId, 'alarm_stop', Date.now(), active.snap.rawDistance);
         active = { ...active, alarmStartedAt: null };
         await saveActiveLock(active);
+        emitLockEvent('alarm_stop', active);
       }
       await cancelLockAlarm();
     })().catch(() => {});
@@ -228,6 +255,7 @@ async function onFix(loc: Location.LocationObject): Promise<void> {
 
   for (const ev of r.events) {
     controller?.onZoneEvent(ev);
+    emitLockEvent(ev === 'enterWarning' ? 'warning' : ev, active);
     if (ev === 'return') {
       if (navStartedByLock) { navStartedByLock = false; setView({ navBack: false }); stopNavigation().catch(() => {}); }
       await showBackInside();
@@ -248,8 +276,9 @@ async function onFix(loc: Location.LocationObject): Promise<void> {
 
 export interface ArmResult { ok: boolean; killSafe: boolean; reason?: string }
 
-/** Arm a lock at `center` with `radius` metres. Resolves once monitoring runs. */
-export async function armLock(center: LatLng, radius: number): Promise<ArmResult> {
+/** Arm a lock at `center` with `radius` metres. Resolves once monitoring runs.
+ *  `opts.placeName` tags the session with a saved place (any surface). */
+export async function armLock(center: LatLng, radius: number, opts?: { placeName?: string }): Promise<ArmResult> {
   await unlockInternal(false);             // safety: never two sessions
   await loadLockSettings();
 
@@ -266,12 +295,13 @@ export async function armLock(center: LatLng, radius: number): Promise<ArmResult
   const fix = toZoneFix(cur);
   const s = getLockSettings();
   const alerts = { ...s.alerts };
-  const sessionId = await createSession(center, radius, fix.t);
+  const placeName = opts?.placeName ?? null;
+  const sessionId = await createSession(center, radius, fix.t, placeName);
 
   active = {
     sessionId, center, radius, armedAt: fix.t,
     snap: initialSnapshot(fix, { center, radius }),
-    alerts, zone: zoneConfigFor(s),
+    alerts, zone: zoneConfigFor(s), placeName,
     lastPos: fix.pos, graceUntil: null, alarmStartedAt: null, alarmSilenced: false,
   };
   await saveActiveLock(active);
@@ -284,8 +314,9 @@ export async function armLock(center: LatLng, radius: number): Promise<ArmResult
     active: true, center, radius, armedAt: fix.t,
     state: active.snap.state, distance: Math.round(active.snap.distance * 10) / 10,
     accuracy: Math.round(fix.accuracy * 10) / 10,
-    alarmPhase: 'idle', killSafe, navBack: false,
+    alarmPhase: 'idle', killSafe, navBack: false, placeName,
   });
+  emitLockEvent('armed', active);
 
   if (!killSafe) await showLockStatus(radius, active.snap.state, active.snap.distance);
   await startWatcher(profileFor(active));
@@ -309,7 +340,7 @@ export async function restoreLock(): Promise<boolean> {
     active: true, center: a.center, radius: a.radius, armedAt: a.armedAt,
     state: a.snap.state, distance: Math.round(a.snap.distance * 10) / 10,
     accuracy: Math.round(a.snap.accuracy * 10) / 10,
-    alarmPhase: 'idle', killSafe, navBack: false,
+    alarmPhase: 'idle', killSafe, navBack: false, placeName: a.placeName ?? null,
   });
 
   // The alarm was live (or due) when the process died → resume it. The
@@ -413,6 +444,7 @@ async function unlockInternal(record: boolean): Promise<void> {
       await addEvent(a.sessionId, 'alarm_stop', Date.now(), a.snap.rawDistance);
     }
     await endSession(a.sessionId, Date.now());
+    emitLockEvent('unlocked', a);
   }
   if (a) await clearActiveLock();
   view = IDLE;

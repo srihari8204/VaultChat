@@ -24,6 +24,9 @@ import { createDirectChat } from '../lib/chatService';
 import { navigateTo } from '../lib/nav/openNavigation';
 import { haversine } from '../lib/nav/geo';
 import { STALE_MS } from '../lib/family/types';
+// v3 — shared Location Lock engine classifiers/formatters (same bands as Navigate)
+import { classifyDistance, zoneColor } from '../lib/lock/zoneMachine';
+import { fmtSpeed } from '../lib/lock/format';
 
 const REFRESH_MS = 15_000;
 const AVATAR_COLORS = ['#4A9FFF', '#EC4899', '#22C55E', '#F59E0B', '#A855F7', '#EF4444', '#14B8A6', '#F97316'];
@@ -215,7 +218,21 @@ export default function FamilyMemberScreen() {
           </View>
         ))}
 
-        {/* places */}
+        {/* location diagnostics (v3) — same data language as the lock engine */}
+        {last && (
+          <View style={[st.evt, { borderColor: colors.border }]}>
+            <View style={[st.evtIcon, { backgroundColor: brandAlpha(0.1) }]}>
+              <Ionicons name="speedometer" size={15} color={colors.primary} />
+            </View>
+            <Text style={{ color: colors.text, fontSize: 13.5, flex: 1 }}>
+              {fmtSpeed((last.spd ?? 0) * 3.6)} · updated {ago(last.ts)}
+              {last.bat != null ? ` · battery ${Math.round(last.bat)}%` : ''}
+            </Text>
+          </View>
+        )}
+
+        {/* places — zone status per place from the SHARED classifier, so a
+            member's chip means exactly what Navigate's lock states mean */}
         <Text style={[st.h, { color: colors.text, marginTop: 22 }]}>Safe Zones</Text>
         {places.length === 0 ? (
           <Text style={{ color: colors.textDim, fontSize: 13.5 }}>
@@ -223,6 +240,10 @@ export default function FamilyMemberScreen() {
           </Text>
         ) : places.map((p) => {
           const here = currentPlace?.id === p.id;
+          const d = last ? haversine(p.center, { lat: last.lat, lng: last.lng }) : null;
+          const zone = d != null && fresh ? classifyDistance(d, p.radiusM) : null;
+          const zc = zone ? zoneColor(zone) : colors.textFaint;
+          const zoneLabel = zone === 'safe' ? 'INSIDE' : zone === 'warning' ? 'NEAR EDGE' : zone === 'atLimit' ? 'AT LIMIT' : zone === 'outside' ? 'OUTSIDE' : null;
           return (
             <View key={p.id} style={[st.evt, { borderColor: colors.border }]}>
               <View style={[st.evtIcon, { backgroundColor: (here ? colors.success : colors.textFaint) + '22' }]}>
@@ -232,9 +253,14 @@ export default function FamilyMemberScreen() {
                 <Text style={{ color: colors.text, fontSize: 14, fontWeight: '600' }}>{p.name}</Text>
                 <Text style={{ color: colors.textDim, fontSize: 11.5 }}>
                   {p.enabled === false ? 'Alerts off' : `${p.radiusM} m radius`}
+                  {d != null ? ` · ${dist(d)} away` : ''}
                 </Text>
               </View>
-              {here && <Text style={{ color: colors.success, fontSize: 12, fontWeight: '700' }}>Here now</Text>}
+              {zoneLabel && (
+                <View style={{ borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, backgroundColor: zc + '22' }}>
+                  <Text style={{ color: zc, fontSize: 10.5, fontWeight: '800' }}>{zoneLabel}</Text>
+                </View>
+              )}
             </View>
           );
         })}
