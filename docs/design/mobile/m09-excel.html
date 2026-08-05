@@ -1,0 +1,228 @@
+<style>
+#m-excel .vtile { width: 34px; height: 34px; border-radius: 11px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 8.5px; font-weight: 700; letter-spacing: .5px;
+  box-shadow: var(--inner-hi), 0 2px 8px rgba(0,0,0,.35); }
+#m-excel .vmeta { min-width: 0; display: flex; flex-direction: column; gap: 1px; flex: 1; }
+
+/* ---- formula bar ---- */
+#m-excel .fbar {
+  flex: none; height: 44px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 12px;
+  background: rgba(16, 15, 26, 0.62);
+  border-bottom: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+}
+#m-excel .cellref {
+  width: 66px; height: 30px; flex: none;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 8px; border-radius: 9px;
+  background: rgba(235,232,255,.05);
+  border: 1px solid var(--stroke-acc);
+  font-family: var(--font-mono); font-size: 12px; color: var(--txt-1);
+}
+#m-excel .cellref .ic { width: 11px; height: 11px; color: var(--txt-3); }
+#m-excel .fxbtn { width: 26px; height: 26px; flex: none; display: flex; align-items: center; justify-content: center; color: var(--acc-2); }
+#m-excel .fxbtn .ic { width: 17px; height: 17px; }
+#m-excel .fx-in {
+  flex: 1; min-width: 0; height: 30px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 10px; border-radius: 9px;
+  background: rgba(8,7,13,.45); border: 1px solid var(--stroke);
+  font-family: var(--font-mono); font-size: 12px; color: var(--txt-1);
+  white-space: nowrap; overflow: hidden;
+}
+#m-excel .tok-fn { color: var(--acc-3); }
+#m-excel .tok-ref { color: #60A5FA; }
+#m-excel .tok-num { color: var(--ok); }
+
+/* ---- grid ---- */
+#m-excel .gridwrap { flex: 1; min-height: 0; position: relative; overflow: hidden; }
+#m-excel .gtable { border-collapse: collapse; table-layout: fixed; width: 430px; }
+#m-excel .gtable td, #m-excel .gtable th {
+  height: 29px; padding: 0 7px;
+  border-right: 1px solid rgba(235,232,255,.055);
+  border-bottom: 1px solid rgba(235,232,255,.055);
+  font-size: 11.5px; color: var(--txt-1);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+#m-excel .colh, #m-excel .rowh {
+  background: rgba(235,232,255,.05);
+  color: var(--txt-3); font-size: 10px; font-weight: 700;
+  text-align: center; padding: 0;
+}
+#m-excel .colh { height: 22px; }
+#m-excel .colh.on, #m-excel .rowh.on { background: var(--acc-soft-2); color: var(--acc-3); }
+#m-excel .colh.on { box-shadow: inset 0 -2px 0 var(--acc); }
+#m-excel .rowh.on { box-shadow: inset -2px 0 0 var(--acc); }
+#m-excel .hdrow td {
+  background: rgba(124,77,255,.13);
+  font-weight: 700; color: var(--txt-1); font-size: 10.5px;
+  border-bottom: 2px solid var(--stroke-acc);
+  letter-spacing: .2px;
+}
+#m-excel .hdrow td .ic { width: 10px; height: 10px; display: inline-block; vertical-align: -1px; margin-left: 4px; color: var(--acc-3); }
+#m-excel .frozencol { border-right: 2px solid var(--stroke-acc) !important; background: rgba(124,77,255,.06); font-weight: 550; }
+#m-excel .num { text-align: right; }
+#m-excel .zebra td { background: rgba(235,232,255,.015); }
+#m-excel .totrow td { background: rgba(124,77,255,.10); font-weight: 700; border-top: 1px solid var(--stroke-acc); }
+#m-excel .ghost { color: var(--txt-3); }
+
+#m-excel .sel {
+  outline: 2px solid var(--acc); outline-offset: -2px;
+  background: rgba(124,77,255,.20) !important;
+  box-shadow: inset 0 0 18px rgba(124,77,255,.35);
+  position: relative;
+}
+#m-excel .sel::after {
+  content: ""; position: absolute; right: -3px; bottom: -3px;
+  width: 7px; height: 7px; border-radius: 2px;
+  background: var(--acc); border: 1.5px solid var(--bg-1);
+}
+#m-excel .cf {
+  display: inline-flex; align-items: center; justify-content: flex-end;
+  min-width: 54px; padding: 2px 7px; border-radius: 6px;
+  font-size: 11px; font-weight: 650; font-variant-numeric: tabular-nums;
+}
+#m-excel .cf-g { background: rgba(52,211,153,.16); color: #4ADE9E; }
+#m-excel .cf-a { background: rgba(251,191,36,.15); color: #FCD34D; }
+#m-excel .cf-r { background: rgba(248,113,113,.15); color: #FCA5A5; }
+
+#m-excel .cmtcell { position: relative; }
+#m-excel .cmtcell::before {
+  content: ""; position: absolute; right: 0; top: 0;
+  border-width: 0 7px 7px 0; border-style: solid;
+  border-color: transparent var(--err) transparent transparent;
+}
+#m-excel .cmt-pop {
+  position: absolute; z-index: 20; left: 96px; top: 236px; width: 214px;
+  padding: 9px 11px; border-radius: 13px;
+  background: rgba(30, 27, 48, .95);
+  border: 1px solid var(--stroke-2);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--sh-3);
+}
+#m-excel .cmt-pop::before {
+  content: ""; position: absolute; left: -6px; top: 14px;
+  width: 10px; height: 10px; transform: rotate(45deg);
+  background: rgba(30, 27, 48, .95);
+  border-left: 1px solid var(--stroke-2); border-bottom: 1px solid var(--stroke-2);
+}
+#m-excel .cmt-pop .hd { display: flex; align-items: center; gap: 7px; }
+#m-excel .cmt-pop .hd .avatar { width: 20px; height: 20px; border-radius: 7px; font-size: 8px; }
+#m-excel .cmt-pop .hd b { font-size: 11px; font-weight: 650; }
+#m-excel .cmt-pop .hd span { margin-left: auto; font-size: 9.5px; color: var(--txt-3); }
+#m-excel .cmt-pop .tx { font-size: 10.5px; line-height: 1.45; color: var(--txt-2); margin-top: 5px; }
+
+#m-excel .m-tip { position: absolute; left: 50%; transform: translateX(-50%); bottom: 10px; z-index: 15; font-size: 11px; padding: 7px 12px; }
+#m-excel .m-tip .ic { width: 13px; height: 13px; color: var(--acc-3); }
+
+/* ---- sheet tabs ---- */
+#m-excel .tabsrow { flex: none; padding: 8px 12px; border-top: 1px solid var(--stroke); background: rgba(16,15,26,.55); }
+#m-excel .tabsrow .m-chip { height: 28px; padding: 0 12px; font-size: 12px; }
+#m-excel .tabsrow .sq { width: 7px; height: 7px; border-radius: 2px; flex: none; }
+</style>
+<div class="mscreen" id="m-excel">
+  <div class="m-status">
+    <span>9:41</span>
+    <div class="sb-right">
+      <span class="m-sig"><i></i><i></i><i></i><i></i></span>
+      <span class="m-wifi"></span>
+      <span class="m-batt"><i></i></span>
+    </div>
+  </div>
+
+  <header class="m-viewerbar">
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-chev-l"/></svg></span>
+    <span class="vtile ft-xls">XLS</span>
+    <div class="vmeta">
+      <span class="vt">Atlas-Financials-FY26.xlsx</span>
+      <span class="vs">Ravi Patel · 1.8 MB · 6 sheets</span>
+    </div>
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-search"/></svg></span>
+    <span class="m-ic-btn"><svg class="ic"><use href="#i-more-v"/></svg></span>
+  </header>
+
+  <div class="m-secure"><svg class="ic sm"><use href="#i-lock"/></svg>Opens inside VaultChat — no external app</div>
+
+  <div class="fbar">
+    <span class="cellref">D14<svg class="ic"><use href="#i-chev-d"/></svg></span>
+    <span class="fxbtn"><svg class="ic"><use href="#i-fx"/></svg></span>
+    <div class="fx-in"><span class="tok-fn">=SUM</span>(<span class="tok-ref">D2:D13</span>)*<span class="tok-num">1.18</span></div>
+  </div>
+
+  <div class="gridwrap">
+    <table class="gtable">
+      <tr>
+        <th class="colh" style="width:26px"></th>
+        <th class="colh" style="width:100px">A</th>
+        <th class="colh" style="width:58px">B</th>
+        <th class="colh" style="width:98px">C</th>
+        <th class="colh on" style="width:86px">D</th>
+        <th class="colh">E</th>
+      </tr>
+      <tr class="hdrow">
+        <td class="rowh">1</td>
+        <td class="frozencol">Region<svg class="ic"><use href="#i-freeze"/></svg></td>
+        <td>Month<svg class="ic"><use href="#i-filter"/></svg></td>
+        <td class="num">Revenue</td>
+        <td class="num">Margin</td>
+        <td>Owner</td>
+      </tr>
+      <tr><td class="rowh">2</td><td class="frozencol">North America</td><td>Jan 26</td><td class="num">412,800</td><td class="num"><span class="cf cf-g">59.3%</span></td><td>Maya Chen</td></tr>
+      <tr class="zebra"><td class="rowh">3</td><td class="frozencol">North America</td><td>Feb 26</td><td class="num">438,150</td><td class="num"><span class="cf cf-g">60.1%</span></td><td>Maya Chen</td></tr>
+      <tr><td class="rowh">4</td><td class="frozencol">North America</td><td>Mar 26</td><td class="num">289,400</td><td class="num"><span class="cf cf-a">50.7%</span></td><td>Maya Chen</td></tr>
+      <tr class="zebra"><td class="rowh">5</td><td class="frozencol">EMEA</td><td>Jan 26</td><td class="num">356,900</td><td class="num"><span class="cf cf-g">57.6%</span></td><td>Elena Voss</td></tr>
+      <tr><td class="rowh">6</td><td class="frozencol">EMEA</td><td>Feb 26</td><td class="num">361,240</td><td class="num"><span class="cf cf-a">55.8%</span></td><td>Elena Voss</td></tr>
+      <tr class="zebra"><td class="rowh">7</td><td class="frozencol">EMEA</td><td>Mar 26</td><td class="num cmtcell">198,600</td><td class="num"><span class="cf cf-r">40.4%</span></td><td>Elena Voss</td></tr>
+      <tr><td class="rowh">8</td><td class="frozencol">APAC</td><td>Jan 26</td><td class="num">248,300</td><td class="num"><span class="cf cf-g">57.8%</span></td><td>Ravi Patel</td></tr>
+      <tr class="zebra"><td class="rowh">9</td><td class="frozencol">APAC</td><td>Feb 26</td><td class="num">276,950</td><td class="num"><span class="cf cf-g">59.5%</span></td><td>Ravi Patel</td></tr>
+      <tr><td class="rowh">10</td><td class="frozencol">APAC</td><td>Mar 26</td><td class="num">164,720</td><td class="num"><span class="cf cf-a">47.2%</span></td><td>Ravi Patel</td></tr>
+      <tr class="zebra"><td class="rowh">11</td><td class="frozencol">LATAM</td><td>Jan 26</td><td class="num">112,400</td><td class="num"><span class="cf cf-a">48.1%</span></td><td>Marcus Webb</td></tr>
+      <tr><td class="rowh">12</td><td class="frozencol">LATAM</td><td>Feb 26</td><td class="num">118,950</td><td class="num"><span class="cf cf-a">48.1%</span></td><td>Marcus Webb</td></tr>
+      <tr class="zebra"><td class="rowh">13</td><td class="frozencol">LATAM</td><td>Mar 26</td><td class="num">66,180</td><td class="num"><span class="cf cf-r">40.5%</span></td><td>Marcus Webb</td></tr>
+      <tr class="totrow"><td class="rowh on">14</td><td class="frozencol">Total Q1</td><td>—</td><td class="num">3,044,590</td><td class="num sel"><span class="cf cf-g">54.8%</span></td><td>Srihari</td></tr>
+      <tr><td class="rowh">15</td><td class="frozencol ghost">Forecast Q2</td><td class="ghost">Apr–Jun</td><td class="num ghost">1,642,000</td><td class="num"><span class="cf cf-g">60.1%</span></td><td class="ghost">Srihari</td></tr>
+      <tr class="zebra"><td class="rowh">16</td><td class="frozencol ghost">Forecast Q2</td><td class="ghost">Apr–Jun</td><td class="num ghost">742,500</td><td class="num"><span class="cf cf-a">50.3%</span></td><td class="ghost">Srihari</td></tr>
+      <tr><td class="rowh">17</td><td class="frozencol ghost">Forecast Q2</td><td class="ghost">Apr–Jun</td><td class="num ghost">986,300</td><td class="num"><span class="cf cf-g">64.3%</span></td><td class="ghost">Maya Chen</td></tr>
+      <tr class="zebra"><td class="rowh">18</td><td class="frozencol"></td><td></td><td></td><td></td><td></td></tr>
+      <tr><td class="rowh">19</td><td class="frozencol"></td><td></td><td></td><td></td><td></td></tr>
+      <tr class="zebra"><td class="rowh">20</td><td class="frozencol"></td><td></td><td></td><td></td><td></td></tr>
+      <tr><td class="rowh">21</td><td class="frozencol"></td><td></td><td></td><td></td><td></td></tr>
+    </table>
+
+    <div class="cmt-pop">
+      <div class="hd">
+        <span class="avatar av-4">RP</span>
+        <b>Ravi Patel</b>
+        <span>C7 · 2d</span>
+      </div>
+      <div class="tx">COGS restated after the vendor credit — margin drops below the 45% floor, flagged red by the rule.</div>
+    </div>
+
+    <span class="m-tip"><svg class="ic"><use href="#i-zoom-in"/></svg>Pinch to zoom · swipe for more columns</span>
+  </div>
+
+  <div class="tabsrow">
+    <div class="m-chips">
+      <span class="m-chip"><span class="sq" style="background:#60A5FA"></span>Summary</span>
+      <span class="m-chip on"><span class="sq" style="background:var(--acc-2)"></span>Revenue</span>
+      <span class="m-chip"><span class="sq" style="background:#34D399"></span>Forecast</span>
+      <span class="m-chip"><span class="sq" style="background:#FBBF24"></span>Pivot</span>
+      <span class="m-chip"><span class="sq" style="background:#F472B6"></span>Charts</span>
+      <span class="m-chip"><svg class="ic sm"><use href="#i-eye-off"/></svg>2 hidden</span>
+    </div>
+  </div>
+
+  <div class="m-toolbar">
+    <span class="m-tool on"><svg class="ic"><use href="#i-filter"/></svg>Filter</span>
+    <span class="m-tool"><svg class="ic"><use href="#i-sort"/></svg>Sort</span>
+    <span class="m-tool on"><svg class="ic"><use href="#i-freeze"/></svg>Freeze</span>
+    <span class="m-tool"><svg class="ic"><use href="#i-pivot"/></svg>Pivot</span>
+    <span class="m-tool"><svg class="ic"><use href="#i-chart"/></svg>Chart</span>
+  </div>
+
+  <div class="m-home"><i></i></div>
+</div>
