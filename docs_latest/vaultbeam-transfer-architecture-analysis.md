@@ -15,7 +15,7 @@ R2 relay) that all carry the *same* AES-256-GCM chunk format.
 | Component | Concrete code | Responsibility |
 |---|---|---|
 | **React Native (TS)** | `lib/vaultBeamController.ts`, `vaultBeamTransfer.ts`, `vaultBeamDirect.ts`, `vaultBeamSegments.ts`, `vaultbeamRelay.ts`, `components/VaultBeamBubble.tsx` | Orchestration only. Holds transfer IDs, block indices, presigned URLs, the segment plan, the progress store, tier selection, WebRTC signaling. **Never holds a file byte** (except one ≤512 KiB chunk base64 during P2P). |
-| **Rust** | `services/vaultbeam/rust/src/{chunk,fileio,lan,ffi}.rs`, exposed as `VaultBeamStreamRust` via `plugins/vaultbeam-core-android` (JNI) and `plugins/vaultbeam-core-ios` (Swift) | Optional second native backend. Same wire format, proven by golden vectors (`services/crypto/__vectors__/vaultbeam.json`). Owns chunk crypto, positional file I/O, LAN TCP sockets. The only iOS-capable backend. |
+| **Rust** | `services/vaultbeam/rust/src/{chunk,fileio,lan,ffi}.rs` (crate `vaultbeam-core`), exposed as `VaultBeamStreamRust` via `plugins/vaultbeam-core-android` (JNI/CMake) and `plugins/vaultbeam-core-ios` (Swift + xcframework) | Second, interchangeable native backend. Owns chunk crypto (delegating GCM to the Phase-1 `crypto_core::aead`), block layout, positional file I/O, sha256, and blocking LAN TCP. Explicitly does **not** own WebRTC, signaling, negotiation, or op-sqlite state. The only iOS-capable backend. See §10. |
 | **Kotlin** | `plugins/android/VaultBeamStreamModule.kt` (`VaultBeamStream`) | Default native backend (Android). Same surface: `prealloc`, `uploadBlock`, `downloadBlock`, `sha256`, `deleteFile`, `readCipherChunk`, `writeCipherChunk`, `lanIp`, `lanServe`, `lanConnect`. All work on a 4-thread `Executors` pool. |
 | **Go** | `vaultchat-backend-go/internal/routes/vaultbeam.go` + `internal/realtime/handlers.go` | The live backend (Caddy routes `/` → `go-api:4000`, `caddy/Caddyfile:49`). Serves the 7 relay control-plane endpoints and relays the `vaultbeam_*` socket events. Signs R2 presigned URLs with hand-rolled stdlib SigV4. |
 | **Node (legacy/rollback)** | `vaultchat-backend/routes/vaultbeam.js`, `server.js:1005-1016` | Byte-compatible original of the same control plane; kept as the documented rollback target. |
@@ -774,3 +774,99 @@ can never both drive one transferId.
    `kotlin` (default, Android) or `rust` (Android + iOS); capability-checked at module
    load with a Kotlin fallback and Sentry breadcrumbs. Absent entirely (Expo Go) ⇒
    `isNativeStreamAvailable() === false` and the whole feature is refused at the UI.
+
+---
+
+## 10. The native backend boundary and the frozen wire contract
+
+### 10.1 Backend selection
+`lib/vaultBeamStreamNative.ts` resolves the backend **once at module load**:
+
+```
+want = EXPO_PUBLIC_VAULTBEAM_NATIVE_BACKEND ?? 'kotlin'
+REQUIRED = [prealloc, uploadBlock, downloadBlock, sha256, deleteFile,
+            readCipherChunk, writeCipherChunk, lanIp, lanServe, lanConnect]
+```
+`hasSurface(mod)` structurally checks that every one of those ten is a function, so a
+half-linked module is rejected rather than failing at the first call. Resolution order:
+`want==='rust'` → Rust if usable, else Kotlin (warning breadcrumb), else none; otherwise
+Kotlin → Rust (covers iOS, where only the Rust module is built) → none. Every branch
+leaves a Sentry breadcrumb, so field selection and fallback are observable.
+
+### 10.2 The FFI boundary (Rust backend)
+Four `#[no_mangle] extern "C"` symbols, JSON-in / JSON-out, bytes as base64 to match the
+existing JS field names (`keyB64`, `ctB64`):
+
+| Symbol | Use |
+|---|---|
+| `vb_call(op, args_json)` | request/response ops: `sealChunk`, `openChunk`, `prealloc`, `readCipherChunk`, `writeCipherChunk`, `sealBlockFromFile`, `writeBlockFromBody`, `sha256`, `deleteFile`, `lanIp` |
+| `vb_lan_serve(args, cb, ctx)` | long-running LAN serve; `cb` is a C event callback emitting `vbLanBound` / `vbLanProgress` |
+| `vb_lan_connect(args, cb, ctx)` | long-running LAN connect; same callback |
+| `vb_free(ptr)` | releases every string the above return |
+
+Response envelope is always `{"ok":true,"result":…}` or `{"ok":false,"error":"…"}`.
+Every entrypoint wraps its work in `std::panic::catch_unwind`, so a Rust panic becomes a
+structured error string rather than unwinding across the FFI boundary.
+
+**What crosses the boundary.** Whole-file bytes never do — Rust does positional I/O by
+path. The two exceptions are deliberate and bounded, and follow from *"Design A′"*
+(crypto + layout + file I/O in shared Rust; the trivial HTTPS transport stays
+platform-native so no Rust TLS stack is needed):
+- `sealBlockFromFile` returns one block's ciphertext as base64 for the platform layer to
+  PUT;
+- `writeBlockFromBody` takes the GET body as base64 (`bodyB64`) and writes the decrypted
+  chunks at their offsets.
+
+So the block ciphertext (≤8 MiB) transits the bridge on the Rust backend, whereas the
+Kotlin backend keeps it entirely inside the module. Both are bounded — neither ever holds
+the file.
+
+### 10.3 Platform shims
+- **Android** (`VaultBeamStreamRustModule.kt`): `uploadBlock` calls `sealBlockFromFile`
+  then does the PUT with `HttpURLConnection` (`setFixedLengthStreamingMode`,
+  `Content-Type: application/octet-stream`, 30 s connect / 120 s read) — byte-identical
+  HTTP semantics to the classic Kotlin module. `downloadBlock` GETs first, then hands the
+  body to `writeBlockFromBody`.
+- **iOS** (`VaultBeamStreamRust.swift`): an `RCTEventEmitter` (`supportedEvents:
+  vbLanBound, vbLanProgress`) on a concurrent `DispatchQueue(qos: .userInitiated)`.
+  `URLSession` mirrors the same 30 s/120 s timeouts and content type. `jsonArgs`
+  normalizes whole-number `NSNumber`s to integers, because Rust's `serde_json::as_u64`
+  rejects `512.0`. LAN events come back through a global C trampoline that unwraps the
+  emitter from `ctx` via `Unmanaged`, with the instance retained for the duration of the
+  blocking call.
+
+**Consequence:** iOS gets all three tiers (LAN, P2P, R2 relay) on the Rust backend. The
+outstanding iOS gap is only the **background** `URLSession` handoff — a foregrounded iOS
+transfer works; one that must survive backgrounding does not (deferred, `§16` of
+`vaultbeam-4tier-architecture.md`).
+
+### 10.4 The wire contract is frozen and machine-checked
+`services/crypto/__vectors__/vaultbeam.json` is the golden file — the exact chunk crypto
+and block layout the Kotlin module produces. It is consumed by three independent checkers:
+
+| Checker | Proves |
+|---|---|
+| `services/vaultbeam/rust/tests/vectors.rs` | Rust reproduces every nonce, AAD, wire, and block layout byte-for-byte |
+| `services/crypto/vaultbeam-vectors.selftest.ts` | the JS/spec oracle hasn't drifted from the frozen contract |
+| `services/crypto/vaultbeam-parity.selftest.ts` | drives the **real** `vaultbeam-core` through the `vb-cli` line-JSON REPL — the same `dispatch` the native binding calls — against an in-process `node:crypto` oracle *and* the vectors |
+
+Chain of reasoning the parity suite establishes: **Rust ≡ JS ≡ frozen vectors**, and the
+vectors are the frozen Kotlin contract, therefore **Rust ≡ Kotlin's wire**. That is what
+lets a Kotlin peer and a Rust peer interoperate on every tier, and lets a transfer switch
+backends mid-resume.
+
+Sample vector (`"uniform id=0"`), showing the identity scheme concretely:
+```
+transferId "TQF9k2mZ7pXaLdRb", fileId "file-9d3c1f", chunkId 0
+nonce  545146390000000000000000     // "TQF9" ‖ u64_be(0)
+aad    TQF9k2mZ7pXaLdRb|file-9d3c1f|0
+wire   8db4dd…751f440a              // ct ‖ 16B tag
+```
+The vectors deliberately use 16-byte chunks / 64-byte blocks: nonce, AAD, chunk identity,
+and block layout are **scale-invariant** (they depend on geometry, not on 512 KiB), so
+tiny sizes exercise the identical code path while keeping the JSON reviewable.
+
+The residual gap the suites cannot close — an actual old-Kotlin build talking to a
+new-Rust build over LAN/P2P/relay, and resume across a backend switch — is documented as
+an on-device gate in `lib/vaultbeam-rust/DESIGN.md` §9, because it needs two real builds
+and cannot run in Node CI.
