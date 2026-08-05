@@ -15,7 +15,7 @@ protocol can be reviewed before later work depends on it:**
 |---|---|---|
 | ✅ 1 | Wire protocol & logical chunk identity (§1) — **DONE**, PR #23 | vectors + Rust + parity + `tsc` all green; existing vectors verified byte-identical |
 | ✅ 2 | `TransferManager` + bitmaps + session core (§2) — **DONE** | 5/5 vaultBeam suites green under `tsx`; tsc 0 |
-| 🟡 3 | Transport drivers (§5) — relay + contract harness **DONE**; P2P/LAN next | driver contract + physical-unit tests |
+| ✅ 3 | Transport drivers (§5) — relay, P2P, LAN + contract harness — **DONE** | driver contract + physical-unit tests green; Rust 16+6; parity green |
 | 4 | Resume engine — `recv_mask`, versioning, handshake (§4, §6.7) | Go tests + Node contract parity |
 | 5 | Crash recovery (§3) | restart/reboot rows of the matrix |
 | 6 | Production hardening (§6.4–6.6, §7, §8) | full transport-switching matrix (§8.2) |
@@ -134,13 +134,13 @@ Phase 1 must not merge unless every compatibility and parity test passes.
       `receiveTransfer` from `lib/vaultBeamTransfer.ts`, converting the work-list into block
       batches via `blockMap` and reporting `onVerified` per verified chunk. Delete the
       `haveBytes` prefix logic (`vaultBeamTransfer.ts:144-147, 192-206`).
-- [ ] 5.3 `lib/vaultBeam/drivers/p2p.ts` (new) — wraps `p2pSend`/`p2pReceive` from
+- [x] 5.3 `lib/vaultBeam/drivers/p2p.ts` (new) — wraps `p2pSend`/`p2pReceive` from
       `lib/vaultBeamDirect.ts`. Change the wire so the sender sends **requested chunk runs**
       rather than `0..chunkCount-1` (`vaultBeamDirect.ts:350`), and so the receiver's
       `{t:'p',n}` carries the chunk **id** rather than a running count.
       `unitChunks()` returns 1–8 from `bufferedAmount` pressure, so one control frame can
       cover a run instead of one frame per 512 KiB (today's fixed cost).
-- [ ] 5.4 `lib/vaultBeam/drivers/lan.ts` (new) — wraps `lanServe`/`lanConnect`. Native gains
+- [x] 5.4 `lib/vaultBeam/drivers/lan.ts` (new) — wraps `lanServe`/`lanConnect`. Native gains
       an optional `runs` argument (`[{start,count}]`) so a resumed LAN attempt streams only
       the missing set **and** amortises the framing header over a run rather than one header
       per 512 KiB: `VaultBeamStreamModule.kt` (`lanServe`/`lanConnect` loops),
@@ -148,7 +148,7 @@ Phase 1 must not merge unless every compatibility and parity test passes.
       `services/vaultbeam/rust/src/ffi.rs` (arg parsing), `lib/vaultBeamStreamNative.ts`
       (types). Absent ⇒ today's full-range, one-chunk-per-frame behaviour.
       `unitChunks()` returns 1–16 from measured link speed.
-- [ ] 5.4a Physical-unit contract test: for each driver, assert that varying `unitChunks()`
+- [x] 5.4a Physical-unit contract test: for each driver, assert that varying `unitChunks()`
       changes **only** request/frame counts — never a chunk's nonce, AAD, ciphertext, ack id,
       or bitmap bit. This is the guard that keeps the logical/physical split honest.
 - [ ] 5.5 `lib/vaultBeamDirect.ts` — keep negotiation/ICE/sealing; remove all progress
