@@ -2,6 +2,7 @@
 #m-audio .who { min-width: 0; }
 #m-audio .who .vs { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #m-audio .m-viewerbar { gap: 8px; }
+#m-audio .who .vt { font-size: 13.5px; }
 #m-audio .fchips { display: flex; gap: 4px; flex: none; }
 #m-audio .fchips .m-chip { height: 20px; padding: 0 7px; font-size: 8.5px; letter-spacing: .3px; font-weight: 700; }
 
@@ -62,9 +63,9 @@
 #m-audio .ruler span:last-child { transform: translateX(-100%); }
 
 /* ---- transport ---- */
-#m-audio .ctr { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+#m-audio .ctr { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
 #m-audio .skip {
-  width: 42px; height: 42px; border-radius: 14px; flex: none; position: relative;
+  width: 40px; height: 40px; border-radius: 13px; flex: none; position: relative;
   display: flex; align-items: center; justify-content: center;
   background: rgba(235,232,255,.06); border: 1px solid var(--stroke); color: var(--txt-2);
 }
@@ -77,17 +78,17 @@
   background: var(--bg-4); border: 1px solid var(--stroke-2);
 }
 #m-audio .play {
-  width: 54px; height: 54px; border-radius: 50%; flex: none;
+  width: 52px; height: 52px; border-radius: 50%; flex: none;
   background: var(--grad-acc);
   display: flex; align-items: center; justify-content: center; color: #fff;
   box-shadow: 0 6px 22px rgba(124,77,255,.55), var(--inner-hi);
 }
 #m-audio .play .ic { width: 22px; height: 22px; }
-#m-audio .time { font-family: var(--font-mono); font-size: 12px; color: var(--txt-3); white-space: nowrap; }
+#m-audio .time { font-family: var(--font-mono); font-size: 11.5px; color: var(--txt-3); white-space: nowrap; }
 #m-audio .time b { color: var(--txt-1); font-weight: 700; }
 #m-audio .cpill {
   display: inline-flex; align-items: center; gap: 5px; flex: none;
-  height: 32px; padding: 0 10px; border-radius: 11px;
+  height: 32px; padding: 0 9px; border-radius: 11px;
   background: rgba(235,232,255,.05); border: 1px solid var(--stroke);
   color: var(--txt-2); font-size: 12px; font-weight: 620;
 }
@@ -104,7 +105,7 @@
   box-shadow: inset 0 0 0 1px var(--stroke-acc);
 }
 #m-audio .t-ic .ic { width: 15px; height: 15px; }
-#m-audio .tl { display: flex; gap: 10px; padding: 8px 12px; align-items: flex-start; }
+#m-audio .tl { display: flex; gap: 10px; padding: 10px 12px; align-items: flex-start; }
 #m-audio .tl .avatar { width: 24px; height: 24px; font-size: 9px; border-radius: 8px; margin-top: 2px; }
 #m-audio .tl .nm { font-size: 11.5px; font-weight: 680; }
 #m-audio .tl .ts { font-family: var(--font-mono); font-size: 10px; color: var(--txt-3); }
@@ -187,7 +188,7 @@
       <span class="time"><b>04:12</b> / 12:04</span>
       <div class="grow"></div>
       <span class="cpill on"><svg class="ic"><use href="#i-speed"/></svg>1.5×</span>
-      <span class="cpill"><svg class="ic"><use href="#i-bookmark"/></svg></span>
+      <span class="cpill" style="width:34px;padding:0;justify-content:center"><svg class="ic"><use href="#i-bookmark"/></svg></span>
     </div>
   </div>
 

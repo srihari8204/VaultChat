@@ -1,23 +1,60 @@
 # VaultChat — Premium UI Design Package
 
-Desktop UI/UX concept for VaultChat: end-to-end encrypted messaging with split-screen
+UI/UX concept for VaultChat: end-to-end encrypted messaging with split-screen
 conversations, a Universal File Viewer that renders every shared format natively, and a
 Reading Mode that turns long messages into pages.
 
+**Two platforms, one product:** a **desktop** set (1920×1080) and a **mobile** set
+(430×932). Same palette, same icon set, same features — only the layout differs.
+
 **Style:** dark, glassmorphism, Fluent/Linear/Figma-grade, accent `#7C4DFF`.
-Desktop only — no phones, no whiteboard, no canvas, no AI meeting screens, no analytics.
+No whiteboard, no canvas, no AI meeting screens, no analytics.
 
 ## What's here
 
+### Desktop
+
 | Path | What it is |
 |---|---|
-| `vaultchat-storyboard-4k.html` | **The infographic.** One 3840 px-wide board: all 23 screens, labelled `A1…D3`, connected by navigation arrows, plus a design-token legend and a flow map. Open in a browser — it fits to your window by default; click the pill at the top for 100%. |
-| `screens/*.html` | **23 implementation-ready screens**, each a standalone 1920×1080 desktop mockup. Open any one directly. |
-| `fragments/*.html` | Source for each screen (style block + markup, no boilerplate). Edit these. |
-| `tokens.css` | The design system: color, elevation, geometry, type, and every shared component (glass surfaces, rail, chat bubbles, composer, chips, toolbars, tables, tree, slider, toggle…). |
-| `sprite.svg` | Shared line-icon set, referenced as `<svg class="ic"><use href="#i-name"/></svg>`. |
-| `FRAGMENT-SPEC.md` | Authoring contract + the written brief behind every screen. |
-| `build.mjs` | `node build.mjs` rebuilds all screens and the infographic. `node build.mjs 09-excel.html` rebuilds one. |
+| `vaultchat-storyboard-4k.html` | **The desktop infographic.** One 3840 px-wide board: all 23 screens, labelled `A1…D3`, connected by navigation arrows, plus a design-token legend and a flow map. Open in a browser — it fits to your window by default; click the pill at the top for 100%. |
+| `screens/*.html` | **23 implementation-ready screens**, each a standalone 1920×1080 desktop mockup. |
+| `fragments/*.html` | Source for each desktop screen (style block + markup, no boilerplate). |
+| `FRAGMENT-SPEC.md` | Desktop authoring contract + the brief behind every screen. |
+| `build.mjs` | `node build.mjs` rebuilds all desktop screens and the infographic. `node build.mjs 09-excel.html` rebuilds one. |
+
+### Mobile
+
+| Path | What it is |
+|---|---|
+| `vaultchat-storyboard-mobile-4k.html` | **The mobile infographic.** All 23 phone screens, labelled `M1…M23`, connected by arrows, in device frames. |
+| `screens-mobile/*.html` | **23 implementation-ready screens**, each a standalone 430×932 phone mockup in a device frame. |
+| `mobile/*.html` | Source for each mobile screen. |
+| `tokens-mobile.css` | Mobile component system layered on `tokens.css`: status bar, app bar, bottom tabs, sheets, mobile composer, viewer chrome, stacked-split divider, touch targets. |
+| `FRAGMENT-SPEC-MOBILE.md` | Mobile authoring contract + the brief behind every phone screen. |
+| `build-mobile.mjs` | `node build-mobile.mjs` rebuilds all mobile screens and the mobile infographic. |
+
+### Shared by both
+
+| Path | What it is |
+|---|---|
+| `tokens.css` | The design system: color, elevation, geometry, type, and every shared component (glass surfaces, chat bubbles, chips, toolbars, tables, tree, slider, toggle…). |
+| `sprite.svg` | The line-icon set — **identical across desktop and mobile**, referenced as `<svg class="ic"><use href="#i-name"/></svg>`. |
+
+## Desktop → mobile translation
+
+The mobile set is the same product, not a reduced one. What changes is only the shell:
+
+| Desktop | Mobile |
+|---|---|
+| Left icon rail | Bottom tab bar — same five destinations, same icons |
+| Right-click context menu | Long-press → bottom sheet |
+| Side-by-side split view | Stacked split (top/bottom), same drag-resize, swap and close |
+| Two-page book spread (Word) | Single page, with Page / Book / Scroll modes |
+| Hover states | Pressed states, 44 px minimum touch targets |
+| Side panels | Bottom sheets and stacked cards |
+
+Every feature carries over: the Universal File Viewer across all formats, Reading Mode
+with four themes and three type families, Search Everywhere, Offline, and Security.
 
 ## The 23 screens
 

@@ -998,7 +998,7 @@
   color: var(--txt-3);
 }
 </style>
-<style>#m-search .m-largehead { padding: 2px 20px 8px; }
+<style>#m-search .m-largehead { padding: 2px 20px 6px; }
 #m-search .m-largehead h1 { font-size: 28px; }
 #m-search .pad { padding: 0 16px; flex: none; }
 #m-search .m-search {
@@ -1017,11 +1017,11 @@
 #m-search .m-chips { gap: 7px; }
 #m-search .m-chip { height: 30px; padding: 0 12px; font-size: 12.5px; }
 
-#m-search .results { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 9px; padding: 11px 16px 0; }
-#m-search .grp { overflow: hidden; }
+#m-search .results { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; padding: 9px 16px 0; }
+#m-search .grp { overflow: hidden; flex: none; }
 #m-search .grp-h {
   display: flex; align-items: center; gap: 8px;
-  padding: 8px 13px; font-size: 12px; font-weight: 680;
+  padding: 5px 13px; font-size: 11.5px; font-weight: 680;
   border-bottom: 1px solid var(--stroke);
   background: rgba(235,232,255,.025);
 }
@@ -1033,7 +1033,9 @@
   display: inline-flex; align-items: center; justify-content: center;
 }
 #m-search .grp-h .chev { margin-left: auto; color: var(--txt-3); }
-#m-search .hit { display: flex; align-items: flex-start; gap: 10px; padding: 8px 13px; }
+#m-search .hit { display: flex; align-items: flex-start; gap: 10px; padding: 6px 13px; }
+#m-search .h-snip { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#m-search .hit.sel .h-snip { white-space: normal; }
 #m-search .hit + .hit { border-top: 1px solid rgba(235,232,255,.05); }
 #m-search .hit.sel { background: var(--acc-soft); box-shadow: inset 0 0 0 1px var(--stroke-acc); }
 #m-search .hit .avatar { width: 28px; height: 28px; border-radius: 10px; font-size: 10px; }
@@ -1041,7 +1043,7 @@
 #m-search .h-meta { font-size: 10px; color: var(--txt-3); }
 #m-search .h-snip { font-size: 12px; color: var(--txt-2); line-height: 1.42; }
 #m-search .hl { color: var(--acc-3); background: var(--acc-soft-2); border-radius: 4px; padding: 0 4px; font-weight: 680; }
-#m-search .src { display: flex; align-items: center; gap: 10px; padding: 8px 13px 6px; }
+#m-search .src { display: flex; align-items: center; gap: 10px; padding: 7px 13px 4px; }
 #m-search .m-tile.sm { width: 30px; height: 30px; border-radius: 10px; font-size: 8px; }
 #m-search .loc {
   font-family: var(--font-mono); font-size: 9.5px; color: var(--txt-2);
@@ -1053,7 +1055,7 @@
 #m-search .mini { height: 20px; padding: 0 8px; font-size: 10px; margin-left: auto; }
 
 #m-search .vthumb {
-  width: 62px; height: 38px; border-radius: 8px; flex: none; position: relative; overflow: hidden;
+  width: 58px; height: 34px; border-radius: 8px; flex: none; position: relative; overflow: hidden;
   background: radial-gradient(46px 30px at 62% 38%, rgba(124,77,255,.55), transparent 70%), linear-gradient(140deg, #17142a, #0d0b18);
   border: 1px solid var(--stroke-2);
 }
@@ -1064,7 +1066,7 @@
   display: flex; align-items: center; justify-content: center; color: #fff;
 }
 #m-search .vthumb .pl .ic { width: 9px; height: 9px; }
-#m-search .wv { display: flex; align-items: center; gap: 2px; height: 26px; width: 62px; flex: none; }
+#m-search .wv { display: flex; align-items: center; gap: 2px; height: 24px; width: 58px; flex: none; }
 #m-search .wv i { flex: 1; border-radius: 2px; background: rgba(235,232,255,.2); height: 45%; }
 #m-search .wv i:nth-child(3n+1) { height: 72%; }
 #m-search .wv i:nth-child(4n+2) { height: 96%; }
@@ -1072,7 +1074,7 @@
 #m-search .wv i.p { background: var(--acc-2); box-shadow: 0 0 6px rgba(124,77,255,.5); }
 
 #m-search .foot {
-  margin: 9px 16px 8px; flex: none;
+  margin: 8px 16px 7px; flex: none;
   display: flex; align-items: center; justify-content: center; gap: 8px;
   height: 34px; border-radius: 999px;
   background: rgba(235,232,255,.04); border: 1px solid var(--stroke);
@@ -1201,7 +1203,7 @@
 
   <div class="m-largehead">
     <h1>Search</h1>
-    <div class="sub">Every chat, every file, every transcript</div>
+    <div class="sub">One query, every chat and every format</div>
   </div>
 
   <div class="pad">
@@ -1247,14 +1249,14 @@
 
     <div class="grp m-card">
       <div class="grp-h"><svg class="ic"><use href="#i-doc-lines"/></svg>Word<span class="cnt">2</span><svg class="ic chev"><use href="#i-chev-r"/></svg></div>
-      <div class="src">
+      <div class="hit">
         <span class="m-tile sm ft-doc">DOC</span>
-        <div class="col grow" style="gap:1px">
-          <span class="h-name">Atlas-Proposal.docx</span>
-          <span class="h-meta">4.2 MB · 24 pages · Maya Chen</span>
+        <div class="col grow" style="gap:3px;min-width:0">
+          <div class="row gap-8"><span class="h-name">Atlas-Proposal.docx</span><span class="h-meta">24 pages · Maya Chen</span></div>
+          <div class="row gap-8" style="min-width:0"><span class="loc">Page 12</span><span class="h-snip grow">Section 4.2 — <b class="hl">Pricing</b> strategy…</span></div>
+          <div class="row gap-8" style="min-width:0"><span class="loc">Page 21</span><span class="h-snip grow">Appendix C — <b class="hl">pricing</b> sensitivity by segment…</span></div>
         </div>
       </div>
-      <div class="hit"><span class="loc">Page 12</span><div class="h-snip grow">Section 4.2 — <b class="hl">Pricing</b> strategy: three tiers against Atlas usage bands…</div></div>
     </div>
 
     <div class="grp m-card">
