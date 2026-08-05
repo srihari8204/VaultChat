@@ -5,6 +5,8 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSyncExternalStore } from 'react';
+import { type Units } from './format';
+import { MODE_CONFIGS, type LockMode, type ZoneConfig } from './zoneMachine';
 
 export type LockTone = 'siren' | 'beep';
 export type LockVibe = 'strong' | 'medium' | 'pulse';
@@ -26,6 +28,9 @@ export interface LockAlertSettings {
 export interface LockSettings {
   alerts: LockAlertSettings;
   lastRadius: number;        // last chosen radius (m), pre-selected next time
+  units: Units;              // applies to every distance/speed readout
+  mode: LockMode;            // monitoring sensitivity + navigate-back default
+  customSensitivity: { warningBand: number; hysteresis: number };  // mode === 'custom'
 }
 
 export const DEFAULT_LOCK_ALERTS: LockAlertSettings = {
@@ -34,7 +39,10 @@ export const DEFAULT_LOCK_ALERTS: LockAlertSettings = {
   graceS: 5, repeat: true, repeatIntervalS: 10,
 };
 
-const DEFAULT: LockSettings = { alerts: DEFAULT_LOCK_ALERTS, lastRadius: 30 };
+const DEFAULT: LockSettings = {
+  alerts: DEFAULT_LOCK_ALERTS, lastRadius: 30,
+  units: 'metric', mode: 'walking', customSensitivity: { warningBand: 5, hysteresis: 3 },
+};
 const KEY = 'vc_lock_settings_v1';
 
 let settings: LockSettings = DEFAULT;
@@ -69,6 +77,17 @@ export async function setLockSettings(patch: Partial<LockSettings>): Promise<voi
 
 export async function setLockAlerts(patch: Partial<LockAlertSettings>): Promise<void> {
   await setLockSettings({ alerts: { ...settings.alerts, ...patch } });
+}
+
+/** The zone-engine config the current mode implies (custom applies the user's sliders). */
+export function zoneConfigFor(s: LockSettings): ZoneConfig {
+  const base = MODE_CONFIGS[s.mode] ?? MODE_CONFIGS.walking;
+  if (s.mode !== 'custom') return base;
+  return {
+    ...base,
+    warningBand: Math.max(2, Math.min(30, s.customSensitivity.warningBand)),
+    hysteresis: Math.max(1, Math.min(20, s.customSensitivity.hysteresis)),
+  };
 }
 
 export function useLockSettings(): LockSettings {

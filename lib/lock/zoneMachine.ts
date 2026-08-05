@@ -40,6 +40,24 @@ export const DEFAULT_ZONE_CONFIG: ZoneConfig = {
   smoothWindow: 3,
 };
 
+/** Monitoring modes: sensitivity envelopes matched to the expected speed.
+ *  Faster movement needs a wider warning band + hysteresis (a driving fix can
+ *  move 15 m between samples) and earlier tight-cadence GPS. 'custom' starts
+ *  from walking and is overridden by the user's saved sensitivity. */
+export type LockMode = 'walking' | 'cycling' | 'driving' | 'custom';
+
+export const MODE_CONFIGS: Record<LockMode, ZoneConfig> = {
+  walking: DEFAULT_ZONE_CONFIG,
+  cycling: { ...DEFAULT_ZONE_CONFIG, warningBand: 8, atLimitBand: 3, hysteresis: 5 },
+  driving: { ...DEFAULT_ZONE_CONFIG, warningBand: 15, atLimitBand: 5, hysteresis: 10, maxAccuracy: 40 },
+  custom: DEFAULT_ZONE_CONFIG,
+};
+
+/** Navigate-back travel mode implied by the monitoring mode. */
+export const MODE_COSTING: Record<LockMode, 'pedestrian' | 'bicycle' | 'auto'> = {
+  walking: 'pedestrian', cycling: 'bicycle', driving: 'auto', custom: 'pedestrian',
+};
+
 export interface ZoneFix {
   pos: LatLng;
   accuracy: number;          // metres (GPS horizontal accuracy)
@@ -227,6 +245,12 @@ function _selfCheck(): void {
 
   A(clampRadius(3) === 10 && clampRadius(5000) === 1000 && clampRadius(250) === 250, 'radius clamp');
   A(zoneColor('safe') === '#22C55E' && zoneColor('outside') === '#EF4444', 'zone colors');
+
+  // Mode envelopes widen with speed and never shrink below walking.
+  A(MODE_CONFIGS.driving.warningBand > MODE_CONFIGS.cycling.warningBand
+    && MODE_CONFIGS.cycling.warningBand > MODE_CONFIGS.walking.warningBand, 'bands widen with speed');
+  A(MODE_CONFIGS.driving.hysteresis > MODE_CONFIGS.walking.hysteresis, 'hysteresis widens');
+  A(MODE_COSTING.driving === 'auto' && MODE_COSTING.walking === 'pedestrian', 'mode costing');
 
   console.log('zoneMachine self-check: OK');
 }

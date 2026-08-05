@@ -48,27 +48,28 @@
 
 ## 8. Pro — GPS diagnostics + map controls
 
-- [ ] 8.1 Status card extras: speed (fix + derived fallback), heading readout, battery (reuse `lib/family/battery.ts`), 4-tier GPS quality label (Excellent/Good/Fair/Poor); wire into `lockService` view + active card
-- [ ] 8.2 Units support: metric/imperial in `lockSettings` + shared `fmtDistance`/`fmtSpeed` helpers applied to status card, alert screen, history, statistics
-- [ ] 8.3 NavMap zoom in/out buttons (Leaflet `map.zoomIn/zoomOut` via the bridge) next to the existing re-center + compass controls
+- [x] 8.1 Status card extras: speed (fix + derived fallback), heading readout, battery (reuse `lib/family/battery.ts`), 4-tier GPS quality label (Excellent/Good/Fair/Poor); wired into `lockService` view + active card
+- [x] 8.2 Units support: metric/imperial in `lockSettings` + shared `lib/lock/format.ts` (`fmtDistance`/`fmtSpeed`/`fmtHeading`, self-checked) applied to status card, alert screen, history, statistics
+- [x] 8.3 NavMap zoom in/out buttons (Leaflet `setZoom` via the bridge) next to the existing re-center + compass controls
 
 ## 9. Pro — modes + route options
 
-- [ ] 9.1 Mode presets (Walking/Cycling/Driving/Custom): `ZoneConfig` + cadence preset table feeding zoneMachine/lockService; Custom exposes warning band, hysteresis, cadence; mode picker in setup + settings; persists and applies live
-- [ ] 9.2 `fetchRoute` route options: `{ shortest, avoidTolls, avoidHighways }` → Valhalla `costing_options` through the existing proxy; self-check for request mapping
-- [ ] 9.3 Navigate-back sheet: fastest/shortest chips, avoid-tolls/highways toggles, "Re-route now" button; mode pre-selects costing
+- [x] 9.1 Mode presets (Walking/Cycling/Driving/Custom): `MODE_CONFIGS`/`MODE_COSTING` in zoneMachine (self-checked), threaded via `ActiveLock.zone`; Custom exposes warning band + hysteresis in settings; mode picker in setup + settings; persists and applies live
+- [x] 9.2 `fetchRoute` route options: `{ shortest, avoidTolls, avoidHighways }` → Valhalla `costing_options` via pure `buildRouteRequest` (self-checked; pedestrian ignores toll/highway avoidance)
+- [x] 9.3 Route options chips (Fastest/Shortest, Avoid tolls/highways) in Navigate with live re-route on change, "Re-route now" button in the active sheet (`forceReroute`); mode pre-selects navigate-back costing
 
 ## 10. Pro — voice guidance
 
-- [ ] 10.1 `lib/nav/voiceGuide.ts`: observer on the NavBanner store speaking maneuvers via expo-speech ("In 120 meters, turn right" → "Turn right now"), reroute + arrival lines; announce-threshold logic self-checked
-- [ ] 10.2 Voice mode toggles in Navigate guidance settings and lock navigate-back; respects the existing DisplayMode voice variants
+- [x] 10.1 `lib/nav/voiceGuide.ts`: pure announcement core (far cue → now cue → arrival, reroute once per episode; self-checked) + expo-speech playback, fed from the nav banner publish
+- [x] 10.2 Voice modes (Voice+banner+vibration / Voice+vibration / Voice+banner) in the Navigate guidance picker; lock navigate-back follows the lock's voice alert setting
 
 ## 11. Pro — richer statistics
 
-- [ ] 11.1 Additive columns `acc_sum`/`acc_n` on `lock_sessions` bumped per accepted fix; alarms-triggered from `alarm_start` event count
-- [ ] 11.2 Stats screen: alarms count, avg GPS accuracy, avg lock duration + 7-day distance-per-day bar trend (plain Views, no chart lib)
+- [x] 11.1 Additive columns `acc_sum`/`acc_n` on `lock_sessions` (with ALTER migration for existing installs) bumped per accepted fix; alarms-triggered from `alarm_start` event count
+- [x] 11.2 Stats screen: alarms count, avg GPS accuracy, avg lock duration, avg radius + 7-day distance-per-day bar trend (plain Views, no chart lib)
 
 ## 12. Pro — settings hub
 
-- [ ] 12.1 `app/lock-hub-settings.tsx` (or extend lock-settings): General (units, mode) / Sound & Vibration (existing alert settings embedded) / Battery (background tracking toggle + optimization exemption) / About (version, privacy summary)
-- [ ] 12.2 Background-tracking toggle wires to `startLockBackground`/`stopLockBackground` with the foreground-only warning path
+- [x] 12.1 Extended `app/lock-settings.tsx` into the hub: General (units, mode + custom sensitivity) / Sound & Vibration (existing alert settings) / Battery (background toggle + optimization exemption) / About (privacy summary)
+- [x] 12.2 Background-tracking toggle wires to `enableKillSafe`/`disableKillSafe` with the foreground-only status-notification path
+- [x] 12.3 Family Space integration: Location Lock tile in the family hub; Family Places listed as one-tap lock points in setup (place sets point AND radius)

@@ -14,14 +14,17 @@ import notifee, { EventType } from '@notifee/react-native';
 import { router } from 'expo-router';
 import { type LatLng } from '../nav/geo';
 import { startNavigation, stopNavigation } from '../nav/navigationService';
+import { getNavSettings } from '../nav/navSettings';
 import { type Costing } from '../nav/routing';
-import { initialSnapshot, zoneColor, type ZoneState } from './zoneMachine';
+import { initialSnapshot, zoneColor, MODE_COSTING, type ZoneState } from './zoneMachine';
+import { gpsQuality, type GpsQuality } from './format';
+import { readBattery } from '../family/battery';
 import { advanceActiveLock, persistAdvance, toZoneFix } from './lockEngine';
 import {
   createSession, endSession, addEvent, bumpAggregates,
   saveActiveLock, readActiveLock, clearActiveLock, type ActiveLock,
 } from './lockStore';
-import { getLockSettings, loadLockSettings } from './lockSettings';
+import { getLockSettings, loadLockSettings, zoneConfigFor } from './lockSettings';
 import { createAlarmController, type AlarmController, type AlarmPhase } from './alarmController';
 import { realAlarmDrivers } from './alarmChannels';
 import {
@@ -42,6 +45,10 @@ export interface LockView {
   state: ZoneState | null;
   distance: number;          // smoothed m from center
   accuracy: number;          // m
+  quality: GpsQuality;       // accuracy tier (stands in for satellites/signal)
+  speedKmh: number;          // from the fix, derived fallback
+  battery: number | null;    // %, null when unavailable
+  charging: boolean;
   alarmPhase: AlarmPhase;
   heading: number;           // device compass heading, degrees
   killSafe: boolean;         // background task running (survives app kill)
@@ -50,7 +57,8 @@ export interface LockView {
 
 const IDLE: LockView = {
   active: false, center: null, radius: 30, armedAt: 0, state: null,
-  distance: 0, accuracy: 0, alarmPhase: 'idle', heading: 0, killSafe: false, navBack: false,
+  distance: 0, accuracy: 0, quality: 'good', speedKmh: 0, battery: null, charging: false,
+  alarmPhase: 'idle', heading: 0, killSafe: false, navBack: false,
 };
 
 let view: LockView = IDLE;
@@ -158,15 +166,28 @@ function onPhase(p: AlarmPhase): void {
 
 async function onFix(loc: Location.LocationObject): Promise<void> {
   if (!active) return;
+  const prevPos = active.lastPos;
+  const prevT = active.snap.t;
   const r = advanceActiveLock(active, toZoneFix(loc));
   if (!r.accepted) return;
   active = r.next;
   await persistAdvance(r);
 
+  // Diagnostics: sensor speed, else derive from the last accepted fix (same
+  // fallback the nav loop uses); battery reads are cached 60 s in the helper.
+  let speedMs = loc.coords.speed != null && loc.coords.speed >= 0 ? loc.coords.speed : 0;
+  const dt = (active.snap.t - prevT) / 1000;
+  if (speedMs === 0 && prevPos && dt > 0) speedMs = r.deltas.traveled / dt;
+  const bat = await readBattery();
+
   setView({
     state: active.snap.state,
     distance: Math.round(active.snap.distance * 10) / 10,
     accuracy: Math.round(active.snap.accuracy * 10) / 10,
+    quality: gpsQuality(active.snap.accuracy),
+    speedKmh: Math.round(speedMs * 3.6),
+    battery: bat.level ?? null,
+    charging: !!bat.charging,
   });
 
   for (const ev of r.events) {
@@ -201,13 +222,15 @@ export async function armLock(center: LatLng, radius: number): Promise<ArmResult
 
   const cur = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
   const fix = toZoneFix(cur);
-  const alerts = { ...getLockSettings().alerts };
+  const s = getLockSettings();
+  const alerts = { ...s.alerts };
   const sessionId = await createSession(center, radius, fix.t);
 
   active = {
     sessionId, center, radius, armedAt: fix.t,
     snap: initialSnapshot(fix, { center, radius }),
-    alerts, lastPos: fix.pos, graceUntil: null, alarmStartedAt: null, alarmSilenced: false,
+    alerts, zone: zoneConfigFor(s),
+    lastPos: fix.pos, graceUntil: null, alarmStartedAt: null, alarmSilenced: false,
   };
   await saveActiveLock(active);
 
@@ -288,25 +311,41 @@ export function testAlarm(): void {
   c.test();
 }
 
-/** Live-update alert settings on an armed lock (spec: editable while armed). */
+/** Live-update alert settings + monitoring mode on an armed lock. */
 export async function applyAlertSettings(): Promise<void> {
-  const alerts = { ...getLockSettings().alerts };
+  const s = getLockSettings();
+  const alerts = { ...s.alerts };
   controller?.configure(alerts);
   if (active) {
-    active = { ...active, alerts };
+    active = { ...active, alerts, zone: zoneConfigFor(s) };
     await saveActiveLock(active);
   }
 }
 
-/** One tap back to the locked point via the existing Valhalla navigation. */
-export async function navigateBackToLock(costing: Costing = 'pedestrian'): Promise<void> {
+/** One tap back to the locked point via the existing Valhalla navigation.
+ *  Costing defaults to the monitoring mode's travel mode; voice guidance
+ *  follows the lock's voice alert setting. */
+export async function navigateBackToLock(costing?: Costing): Promise<void> {
   if (!active) return;
+  const s = getLockSettings();
   await startNavigation({
-    to: active.center, costing,
-    profile: 'standard', mode: 'everything', timing: 'normal',
+    to: active.center,
+    costing: costing ?? MODE_COSTING[s.mode],
+    profile: 'standard',
+    mode: s.alerts.voice ? 'everything' : 'vibrationOnly',
+    timing: 'normal',
+    routeOpts: getNavSettings().routeOpts,
   });
   navStartedByLock = true;
   setView({ navBack: true });
+}
+
+/** Turn kill-safe monitoring OFF (settings hub toggle). Lock stays armed
+ *  foreground-only, with the status notification back as the visible surface. */
+export async function disableKillSafe(): Promise<void> {
+  await stopLockBackground();
+  setView({ killSafe: false });
+  if (active) await showLockStatus(active.radius, active.snap.state, active.snap.distance);
 }
 
 /** Unlock: end monitoring, finalize the session, clean every surface. */

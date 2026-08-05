@@ -14,7 +14,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getLocalDb, type LocalDb } from '../localDb';
 import { type LatLng } from '../nav/geo';
-import { type ZoneSnapshot } from './zoneMachine';
+import { type ZoneSnapshot, type ZoneConfig } from './zoneMachine';
 import { type LockAlertSettings } from './lockSettings';
 
 // ── active lock (survives kill; read by the headless task) ──────────────────
@@ -26,6 +26,7 @@ export interface ActiveLock {
   armedAt: number;                // epoch ms
   snap: ZoneSnapshot;             // last zone snapshot (state, window, …)
   alerts: LockAlertSettings;      // frozen copy so the bg task needs no other read
+  zone?: ZoneConfig;              // mode-derived sensitivity (absent = walking default)
   lastPos: LatLng | null;         // last accepted position (distance-traveled acc.)
   graceUntil: number | null;      // exit grace deadline (headless alarm timing)
   alarmStartedAt: number | null;  // non-null while the alarm is sounding
@@ -74,7 +75,9 @@ export function lockDb(): Promise<LocalDb> {
           returns         INTEGER NOT NULL DEFAULT 0,
           max_distance    REAL NOT NULL DEFAULT 0,
           alarm_ms        INTEGER NOT NULL DEFAULT 0,
-          distance_traveled REAL NOT NULL DEFAULT 0
+          distance_traveled REAL NOT NULL DEFAULT 0,
+          acc_sum         REAL NOT NULL DEFAULT 0,
+          acc_n           INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS lock_events (
           id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,6 +88,11 @@ export function lockDb(): Promise<LocalDb> {
         );
         CREATE INDEX IF NOT EXISTS idx_lock_events_session ON lock_events(session_id, t)
       `);
+      // v2 additive migration for installs that created the table before
+      // acc_sum/acc_n existed (ADD COLUMN throws if present — that's fine).
+      for (const col of ['acc_sum REAL NOT NULL DEFAULT 0', 'acc_n INTEGER NOT NULL DEFAULT 0']) {
+        try { await db.execAsync(`ALTER TABLE lock_sessions ADD COLUMN ${col}`); } catch {}
+      }
       return db;
     })();
   }
@@ -135,6 +143,7 @@ export async function addEvent(sessionId: number, type: LockEventType, t: number
 export async function bumpAggregates(sessionId: number, d: Partial<{
   insideMs: number; outsideMs: number; exits: number; returns: number;
   alarmMs: number; traveled: number; maxDistance: number;
+  accSum: number; accN: number;
 }>): Promise<void> {
   const db = await lockDb();
   await db.runAsync(
@@ -145,10 +154,13 @@ export async function bumpAggregates(sessionId: number, d: Partial<{
        returns          = returns         + ?,
        alarm_ms         = alarm_ms        + ?,
        distance_traveled = distance_traveled + ?,
-       max_distance     = MAX(max_distance, ?)
+       max_distance     = MAX(max_distance, ?),
+       acc_sum          = acc_sum + ?,
+       acc_n            = acc_n   + ?
      WHERE id = ?`,
     [d.insideMs ?? 0, d.outsideMs ?? 0, d.exits ?? 0, d.returns ?? 0,
-     d.alarmMs ?? 0, d.traveled ?? 0, d.maxDistance ?? 0, sessionId],
+     d.alarmMs ?? 0, d.traveled ?? 0, d.maxDistance ?? 0,
+     d.accSum ?? 0, d.accN ?? 0, sessionId],
   );
 }
 
@@ -187,10 +199,14 @@ export async function getEvents(sessionId: number): Promise<LockEventRow[]> {
 export interface LockStats {
   locks: number;
   exits: number;
+  alarms: number;             // alarm_start events across sessions in range
   timeOutsideMs: number;
   timeProtectedMs: number;
   distanceTraveled: number;   // metres, while locked
   avgSpeedKmh: number;        // traveled / time protected
+  avgAccuracyM: number;       // mean GPS accuracy over accepted fixes
+  avgDurationMs: number;      // mean completed-session length
+  avgRadiusM: number;
   alarmMs: number;
 }
 
@@ -203,21 +219,59 @@ export async function statsForRange(fromMs: number, toMs: number): Promise<LockS
             COALESCE(SUM(time_outside_ms),0) AS outside_ms,
             COALESCE(SUM(time_inside_ms + time_outside_ms),0) AS protected_ms,
             COALESCE(SUM(distance_traveled),0) AS traveled,
-            COALESCE(SUM(alarm_ms),0) AS alarm_ms
+            COALESCE(SUM(alarm_ms),0) AS alarm_ms,
+            COALESCE(SUM(acc_sum),0) AS acc_sum,
+            COALESCE(SUM(acc_n),0) AS acc_n,
+            COALESCE(AVG(radius),0) AS avg_radius,
+            COALESCE(AVG(CASE WHEN ended_at IS NOT NULL THEN ended_at - started_at END),0) AS avg_dur
        FROM lock_sessions WHERE started_at >= ? AND started_at < ?`,
+    [fromMs, toMs],
+  );
+  const a: any = await db.getFirstAsync(
+    `SELECT COUNT(*) AS n FROM lock_events e
+       JOIN lock_sessions s ON s.id = e.session_id
+      WHERE e.type = 'alarm_start' AND s.started_at >= ? AND s.started_at < ?`,
     [fromMs, toMs],
   );
   const protectedMs = Number(r?.protected_ms ?? 0);
   const traveled = Number(r?.traveled ?? 0);
+  const accN = Number(r?.acc_n ?? 0);
   return {
     locks: Number(r?.locks ?? 0),
     exits: Number(r?.exits ?? 0),
+    alarms: Number(a?.n ?? 0),
     timeOutsideMs: Number(r?.outside_ms ?? 0),
     timeProtectedMs: protectedMs,
     distanceTraveled: traveled,
     avgSpeedKmh: protectedMs > 0 ? (traveled / 1000) / (protectedMs / 3_600_000) : 0,
+    avgAccuracyM: accN > 0 ? Number(r?.acc_sum ?? 0) / accN : 0,
+    avgDurationMs: Number(r?.avg_dur ?? 0),
+    avgRadiusM: Number(r?.avg_radius ?? 0),
     alarmMs: Number(r?.alarm_ms ?? 0),
   };
+}
+
+/** Distance traveled per day for the trend chart, oldest→newest, `days` buckets. */
+export async function distancePerDay(days = 7): Promise<{ day: string; meters: number }[]> {
+  const db = await lockDb();
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - (days - 1));
+  const rows = await db.getAllAsync(
+    `SELECT date(started_at / 1000, 'unixepoch', 'localtime') AS d,
+            COALESCE(SUM(distance_traveled),0) AS m
+       FROM lock_sessions WHERE started_at >= ?
+      GROUP BY d`,
+    [start.getTime()],
+  ) as { d: string; m: number }[];
+  const byDay = new Map(rows.map((r) => [r.d, Number(r.m)]));
+  const out: { day: string; meters: number }[] = [];
+  for (let i = 0; i < days; i++) {
+    const dt = new Date(start.getTime() + i * 86_400_000);
+    const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+    out.push({ day: dt.toLocaleDateString([], { weekday: 'short' }), meters: byDay.get(key) ?? 0 });
+  }
+  return out;
 }
 
 // ── export + deletion ────────────────────────────────────────────────────────

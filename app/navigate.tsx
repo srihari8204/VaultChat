@@ -12,7 +12,7 @@ import { useTheme } from '../lib/theme';
 import { LOCATION_LOCK } from '../constants/flags';
 import { useLockView } from '../lib/lock/lockService';
 import { useNavSettings, setNavSettings, loadNavSettings } from '../lib/nav/navSettings';
-import { startNavigation, stopNavigation, useNavBanner, type NavGeo } from '../lib/nav/navigationService';
+import { startNavigation, stopNavigation, forceReroute, useNavBanner, type NavGeo } from '../lib/nav/navigationService';
 import { fetchRoute } from '../lib/nav/routing';
 import NavBanner from '../components/nav/NavBanner';
 import NavMap from '../components/nav/NavMap';
@@ -24,10 +24,12 @@ const PROFILES: { key: NavProfile; label: string }[] = [
   { key: 'standard', label: 'Standard' }, { key: 'strong', label: 'Strong' },
   { key: 'minimal', label: 'Minimal' }, { key: 'rider', label: 'Rider' }, { key: 'custom', label: 'Custom' },
 ];
-// Voice modes are omitted until a TTS engine ships — these three are real today.
+// Voice guidance ships with v2 (expo-speech via lib/nav/voiceGuide).
 const MODES: { key: DisplayMode; label: string }[] = [
   { key: 'vibrationOnly', label: 'Vibration only' },
-  { key: 'everything', label: 'Banner + vibration' },
+  { key: 'everything', label: 'Voice + banner + vibration' },
+  { key: 'voiceVibration', label: 'Voice + vibration' },
+  { key: 'voiceBanner', label: 'Voice + banner' },
   { key: 'bannerOnly', label: 'Banner only' },
 ];
 
@@ -92,10 +94,16 @@ export default function NavigateScreen() {
     if (!dest) return;
     setStarting(true);
     try {
-      await startNavigation({ to: dest.coords, profile: s.profile, mode: s.mode, timing: s.timing, costing: s.costing, custom: s.custom });
+      await startNavigation({ to: dest.coords, profile: s.profile, mode: s.mode, timing: s.timing, costing: s.costing, custom: s.custom, routeOpts: s.routeOpts });
     } catch (e: any) {
       Alert.alert('Could not start', e?.message ?? 'Check location permission and that the routing engine is up.');
     } finally { setStarting(false); }
+  };
+
+  const setRouteOpt = (patch: Partial<typeof s.routeOpts>) => {
+    const routeOpts = { ...s.routeOpts, ...patch };
+    setNavSettings({ routeOpts });
+    if (banner.active) forceReroute(routeOpts);   // live change → recalc now
   };
 
   const Chip = ({ active, label, onPress }: { active: boolean; label: string; onPress: () => void }) => (
@@ -124,6 +132,10 @@ export default function NavigateScreen() {
                 {banner.roadName ? banner.roadName + ' · ' : ''}{Math.round(banner.remainingM)} m to go · {s.profile}
               </Text>
             </View>
+            <TouchableOpacity onPress={() => forceReroute()} disabled={banner.rerouting}
+              style={[st.rerouteBtn, { borderColor: colors.primary, opacity: banner.rerouting ? 0.5 : 1 }]}>
+              <Ionicons name="git-branch" size={16} color={colors.primary} />
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => stopNavigation()} style={[st.endBtn, { backgroundColor: colors.danger }]}>
               <Ionicons name="stop" size={16} color="#fff" />
               <Text style={st.endTxt}>End</Text>
@@ -203,6 +215,15 @@ export default function NavigateScreen() {
             {(['auto', 'motorcycle', 'bicycle', 'pedestrian', 'truck'] as const).map((c) => <Chip key={c} active={s.costing === c} label={c === 'auto' ? 'Car' : c[0].toUpperCase() + c.slice(1)} onPress={() => setNavSettings({ costing: c })} />)}
           </View>
 
+          {/* route preferences (v2) — forwarded to Valhalla costing_options */}
+          <Text style={[st.h, { color: colors.text, marginTop: 22 }]}>Route options</Text>
+          <View style={st.chips}>
+            <Chip active={!s.routeOpts.shortest} label="Fastest" onPress={() => setRouteOpt({ shortest: false })} />
+            <Chip active={!!s.routeOpts.shortest} label="Shortest" onPress={() => setRouteOpt({ shortest: true })} />
+            <Chip active={!!s.routeOpts.avoidTolls} label="Avoid tolls" onPress={() => setRouteOpt({ avoidTolls: !s.routeOpts.avoidTolls })} />
+            <Chip active={!!s.routeOpts.avoidHighways} label="Avoid highways" onPress={() => setRouteOpt({ avoidHighways: !s.routeOpts.avoidHighways })} />
+          </View>
+
           <TouchableOpacity disabled={!dest || starting} onPress={start}
             style={[st.startBtn, { backgroundColor: dest ? colors.primary : colors.border }]}>
             {starting ? <ActivityIndicator color="#fff" />
@@ -232,5 +253,6 @@ const st = StyleSheet.create({
   sheet: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14, paddingBottom: 22, borderTopWidth: StyleSheet.hairlineWidth },
   sheetInstr: { fontSize: 17, fontWeight: '800' },
   endBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 44, paddingHorizontal: 18, borderRadius: 12 },
+  rerouteBtn: { alignItems: 'center', justifyContent: 'center', width: 44, height: 44, borderRadius: 12, borderWidth: 1.5 },
   endTxt: { color: '#fff', fontSize: 14, fontWeight: '800' },
 });

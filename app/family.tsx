@@ -515,6 +515,11 @@ export default function FamilySpaceScreen() {
             <TouchableOpacity onPress={() => router.push('/emergency-sos' as any)} style={[st.tile, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <Ionicons name="medkit" size={21} color={colors.danger} /><Text style={[st.tileTxt, { color: colors.text }]}>Emergency</Text>
             </TouchableOpacity>
+            {/* Location Lock — the Navigate geofence utility; Family Places
+                appear there as one-tap lock points (openspec: location-lock) */}
+            <TouchableOpacity onPress={() => router.push('/location-lock' as any)} style={[st.tile, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Ionicons name="lock-closed" size={21} color={colors.success} /><Text style={[st.tileTxt, { color: colors.text }]}>Location Lock</Text>
+            </TouchableOpacity>
           </View>
 
           {/* hold-to-SOS */}
