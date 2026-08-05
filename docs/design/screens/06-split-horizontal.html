@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VaultChat · A3 — Long-press another chat</title>
+<title>VaultChat · A6 — Stack, swap, or close</title>
 <style>/* ============================================================
    VaultChat Design System — tokens.css
    Dark · Glassmorphism · Fluent/Linear-grade · Accent #7C4DFF
@@ -566,97 +566,104 @@
   filter: drop-shadow(0 2px 6px rgba(0,0,0,.6));
 }
 </style>
-<style>#s-context .body { align-items: stretch; min-height: 0; }
+<style>#s-split-h .body { align-items: stretch; min-height: 0; }
 
-/* ---- Sidebar ---- */
-#s-context .sidebar {
-  width: 360px; flex: none;
-  display: flex; flex-direction: column;
+/* ---- Collapsed avatar-only sidebar strip ---- */
+#s-split-h .mini-side {
+  width: 52px; flex: none;
+  display: flex; flex-direction: column; align-items: center;
+  gap: 10px; padding: 12px 0 14px;
   background: rgba(15, 14, 24, 0.55);
   border-right: 1px solid var(--stroke);
   backdrop-filter: var(--blur);
-  position: relative;
 }
-#s-context .sidebar-head { padding: 18px 18px 12px; display: flex; align-items: center; gap: 10px; }
-#s-context .sidebar-head h1 { font-size: 19px; font-weight: 700; letter-spacing: -.2px; }
-#s-context .sidebar-search { padding: 0 14px 12px; }
-#s-context .chip-row { display: flex; gap: 8px; padding: 0 14px 14px; }
-#s-context .convo-list { display: flex; flex-direction: column; gap: 2px; padding: 0 10px; overflow: hidden; }
+#s-split-h .mini-side .avatar { width: 34px; height: 34px; font-size: 11px; border-radius: 12px; }
+#s-split-h .mini-side .avatar.open { box-shadow: 0 0 0 2px var(--bg-0), 0 0 0 3.5px var(--acc), 0 2px 10px rgba(124,77,255,.45); }
+#s-split-h .ms-expand { margin-bottom: 2px; }
+#s-split-h .ms-badge { position: absolute; top: -5px; right: -6px; min-width: 15px; height: 15px; padding: 0 4px; font-size: 8.5px; }
 
-/* ---- Chat pane ---- */
-#s-context .chat { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
-#s-context .chat-head {
-  height: 76px; flex: none;
-  display: flex; align-items: center; gap: 14px;
-  padding: 0 22px;
+/* ---- Split column ---- */
+#s-split-h .split-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+#s-split-h .splitbar {
+  height: 44px; flex: none;
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--stroke);
+  background: rgba(14, 13, 22, 0.5);
+  backdrop-filter: var(--blur);
+  z-index: 20;
+}
+#s-split-h .splitbar .sb-ic { color: var(--acc-3); }
+#s-split-h .splitbar .sb-t { font-size: 12.5px; font-weight: 650; }
+#s-split-h .splitbar .sb-dot { width: 3px; height: 3px; border-radius: 50%; background: var(--txt-3); }
+#s-split-h .splitbar .sb-s { font-size: 11.5px; color: var(--txt-3); }
+
+#s-split-h .panes { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: stretch; position: relative; }
+#s-split-h .pane { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+
+/* ---- Horizontal divider ---- */
+#s-split-h .divider {
+  height: 10px; flex: none; position: relative;
+  background: linear-gradient(90deg, rgba(235,232,255,.02), rgba(235,232,255,.06) 50%, rgba(235,232,255,.02));
+  border-top: 1px solid var(--stroke);
+  border-bottom: 1px solid var(--stroke);
+  z-index: 25;
+}
+#s-split-h .divider .grip {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+  display: flex; gap: 5px;
+}
+#s-split-h .divider .grip i { width: 3px; height: 3px; border-radius: 50%; background: var(--txt-2); display: block; opacity: .8; }
+#s-split-h .div-tip { position: absolute; left: calc(50% + 52px); top: 50%; transform: translateY(-50%); z-index: 30; }
+#s-split-h .div-tip .ic { color: var(--acc-3); }
+
+/* ---- Pane header ---- */
+#s-split-h .p-head {
+  height: 58px; flex: none;
+  display: flex; align-items: center; gap: 12px;
+  padding: 0 18px;
   border-bottom: 1px solid var(--stroke);
   background: rgba(14, 13, 22, 0.4);
   backdrop-filter: var(--blur);
 }
-#s-context .chat-head .who .nm { font-size: 15px; font-weight: 650; }
-#s-context .chat-head .who .st { font-size: 11.5px; color: var(--ok); display: flex; align-items: center; gap: 6px; }
+#s-split-h .p-head .avatar { width: 38px; height: 38px; font-size: 12.5px; border-radius: 13px; }
+#s-split-h .p-head .nm { font-size: 14.5px; font-weight: 650; }
+#s-split-h .p-head .st { font-size: 11px; color: var(--txt-3); display: flex; align-items: center; gap: 6px; }
+#s-split-h .p-head .st.on { color: var(--ok); }
+#s-split-h .ratio { height: 22px; padding: 0 9px; font-size: 10.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
 
-#s-context .msgs {
+/* ---- Messages ---- */
+#s-split-h .msgs {
   flex: 1; min-height: 0;
-  display: flex; flex-direction: column; gap: 18px;
+  display: flex; flex-direction: column; gap: 12px;
   justify-content: flex-end;
-  padding: 26px 96px 18px 32px;
+  padding: 14px 30px 10px 22px;
   position: relative;
 }
-#s-context .m-in  { display: flex; align-items: flex-end; gap: 10px; max-width: 68%; align-self: flex-start; }
-#s-context .m-in .bubble { max-width: none; }
-#s-context .m-in.cont { padding-left: 42px; }
-#s-context .m-out { align-self: flex-end; max-width: 62%; display: flex; }
+#s-split-h .day-wrap { display: flex; justify-content: center; }
+#s-split-h .m-in { display: flex; align-items: flex-end; gap: 10px; max-width: 640px; align-self: flex-start; }
+#s-split-h .m-in .bubble { max-width: none; }
+#s-split-h .m-in.cont { padding-left: 42px; }
+#s-split-h .m-out { align-self: flex-end; max-width: 620px; display: flex; }
+#s-split-h .bubble .snd { font-size: 11px; font-weight: 650; margin-bottom: 3px; letter-spacing: .1px; }
+#s-split-h .snd.c-elena { color: #F582BE; }
+#s-split-h .snd.c-marcus { color: #3FDCA4; }
 
-#s-context .typing {
+#s-split-h .typing {
   display: inline-flex; align-items: center; gap: 9px;
   align-self: flex-start; margin-left: 42px;
-  padding: 9px 14px; border-radius: 14px; border-bottom-left-radius: 5px;
+  padding: 8px 13px; border-radius: 14px; border-bottom-left-radius: 5px;
   background: var(--glass-2); border: 1px solid var(--stroke);
   backdrop-filter: var(--blur);
   font-size: 11.5px; color: var(--txt-3);
 }
-#s-context .typing i {
-  width: 5px; height: 5px; border-radius: 50%;
-  background: var(--acc-2); display: inline-block; opacity: .9;
-}
-#s-context .typing i:nth-child(2) { opacity: .55; }
-#s-context .typing i:nth-child(3) { opacity: .3; }
+#s-split-h .typing i { width: 5px; height: 5px; border-radius: 50%; background: var(--acc-2); display: inline-block; opacity: .9; }
+#s-split-h .typing i:nth-child(2) { opacity: .55; }
+#s-split-h .typing i:nth-child(3) { opacity: .3; }
 
-#s-context .composer-wrap { padding: 12px 24px 20px; flex: none; }
-#s-context .composer { width: 100%; }
-
-#s-context .day-wrap { display: flex; justify-content: center; }
-#s-context .att-open { margin-left: auto; }
-
-/* ---- Interaction layer: overlay < lifted row + menu < cursor ---- */
-#s-context .overlay {
-  position: absolute; inset: 0; z-index: 45;
-  background:
-    radial-gradient(1100px 720px at 300px 300px, rgba(8,7,13,.34), rgba(8,7,13,.6) 70%),
-    rgba(8,7,13,.28);
-}
-#s-context .lift-row {
-  position: absolute; left: 78px; top: 268px; width: 340px; z-index: 50;
-  background: rgba(34, 31, 58, 0.95);
-  border-color: var(--stroke-acc);
-  backdrop-filter: var(--blur);
-  box-shadow: var(--sh-3), 0 0 0 3px rgba(124,77,255,.18), var(--inner-hi);
-  transform: scale(1.03);
-}
-#s-context .lift-row .preview { color: var(--txt-2); }
-#s-context .ctx-menu { position: absolute; left: 442px; top: 262px; width: 292px; z-index: 50; }
-#s-context .ctx-sub  { position: absolute; left: 724px; top: 324px; width: 236px; z-index: 51; }
-#s-context .menu-item { white-space: nowrap; }
-#s-context .mi-kbd { white-space: nowrap; }
-#s-context .glyph {
-  margin-left: auto;
-  font-size: 8px; letter-spacing: 1px; color: var(--txt-3); line-height: 1;
-}
-#s-context .menu-item.hl .glyph { color: var(--acc-3); }
-#s-context .ctx-menu .mi-kbd + .ic { color: var(--txt-3); margin-left: 2px; }
-#s-context .ctx-tip { position: absolute; left: 442px; top: 588px; z-index: 50; }
-#s-context .cursor { left: 336px; top: 306px; }</style>
+#s-split-h .composer-wrap { padding: 8px 18px 12px; flex: none; }
+#s-split-h .composer { width: 100%; height: 52px; }
+#s-split-h .att-open { margin-left: auto; }</style>
 <style>
   html, body { margin: 0; background: #050409; }
   body { min-height: 100vh; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 20px 0 28px; }
@@ -764,7 +771,7 @@
   <symbol id="i-log" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 5.5h16M4 9.5h10M4 13.5h16M4 17.5h7"/><circle cx="19" cy="9.5" r="1.3" fill="currentColor" stroke="none"/></g></symbol>
 </svg>
 
-<div class="fitwrap"><div class="stage"><div class="screen" id="s-context">
+<div class="fitwrap"><div class="stage"><div class="screen" id="s-split-h">
   <header class="vc-titlebar">
     <div class="vc-brand"><span class="vc-logo"><svg class="ic"><use href="#i-shield"/></svg></span>VaultChat</div>
     <div class="vc-search"><svg class="ic sm"><use href="#i-search"/></svg><span class="grow">Search chats, people, and every file…</span><span class="kbd">Ctrl K</span></div>
@@ -787,166 +794,157 @@
       <div class="rail-btn"><svg class="ic lg"><use href="#i-settings"/></svg></div>
     </nav>
 
-    <aside class="sidebar">
-      <div class="sidebar-head">
-        <h1 class="grow">Chats</h1>
-        <span class="icon-btn framed"><svg class="ic"><use href="#i-pen"/></svg></span>
-      </div>
-      <div class="sidebar-search"><div class="field"><svg class="ic sm"><use href="#i-search"/></svg><span class="grow">Search conversations</span></div></div>
-      <div class="chip-row">
-        <span class="chip active">All</span><span class="chip">Unread</span><span class="chip">Groups</span><span class="chip">Pinned</span>
-      </div>
-      <div class="convo-list grow">
-        <div class="convo active">
-          <span class="avatar av-1">MC<span class="presence" style="background:var(--ok)"></span></span>
-          <div class="col grow" style="gap:2px"><span class="name">Maya Chen</span><span class="preview">typing…</span></div>
-          <div class="col" style="align-items:flex-end;gap:5px"><span class="when">09:16</span><svg class="ic sm" style="color:var(--acc-2)"><use href="#i-pin"/></svg></div>
-        </div>
-        <div class="convo">
-          <span class="avatar av-5">AL</span>
-          <div class="col grow" style="gap:2px"><span class="name">Atlas Launch</span><span class="preview">Ravi: uploaded Atlas-Financials-FY26.xlsx</span></div>
-          <div class="col" style="align-items:flex-end;gap:5px"><span class="when">09:02</span><span class="badge">3</span></div>
-        </div>
-        <div class="convo">
-          <span class="avatar av-3">DG</span>
-          <div class="col grow" style="gap:2px"><span class="name">Design Guild</span><span class="preview">Marcus: posted the rollout plan — long one</span></div>
-          <div class="col" style="align-items:flex-end;gap:5px"><span class="when">08:47</span></div>
-        </div>
-        <div class="convo">
-          <span class="avatar av-2">EV</span>
-          <div class="col grow" style="gap:2px"><span class="name">Elena Voss</span><span class="preview">You: signed page 14, back to you ✓</span></div>
-          <div class="col" style="align-items:flex-end;gap:5px"><span class="when">08:31</span><svg class="ic sm" style="color:var(--txt-3)"><use href="#i-pin"/></svg></div>
-        </div>
-        <div class="convo">
-          <span class="avatar av-4">R3</span>
-          <div class="col grow" style="gap:2px"><span class="name">Release 1.3</span><span class="preview">deploy.log — 2 warnings, 0 errors</span></div>
-          <div class="col" style="align-items:flex-end;gap:5px"><span class="when">Yesterday</span><span class="badge">12</span></div>
-        </div>
-        <div class="convo">
-          <span class="avatar av-4">RP<span class="presence" style="background:var(--ok)"></span></span>
-          <div class="col grow" style="gap:2px"><span class="name">Ravi Patel</span><span class="preview">pivot table looks right now, check D14</span></div>
-          <div class="col" style="align-items:flex-end;gap:5px"><span class="when">Yesterday</span></div>
-        </div>
-        <div class="convo">
-          <span class="avatar av-3">MW</span>
-          <div class="col grow" style="gap:2px"><span class="name">Marcus Webb</span><span class="preview">voice note · 0:42</span></div>
-          <div class="col" style="align-items:flex-end;gap:5px"><span class="when">Mon</span></div>
-        </div>
-        <div class="convo">
-          <span class="avatar av-2">LN</span>
-          <div class="col grow" style="gap:2px"><span class="name">Legal — NDA Review</span><span class="preview">Elena: expiring link set — 24h</span></div>
-          <div class="col" style="align-items:flex-end;gap:5px"><span class="when">Mon</span></div>
-        </div>
-      </div>
-      <div class="scroll-rail"><div class="thumb" style="top:18%"></div></div>
+    <aside class="mini-side">
+      <span class="icon-btn sm ms-expand"><svg class="ic sm"><use href="#i-chev-r"/></svg></span>
+      <span class="avatar av-1 open">MC<span class="presence" style="background:var(--ok)"></span></span>
+      <span class="avatar av-5">AL</span>
+      <span class="avatar av-3 open">DG</span>
+      <span class="avatar av-2">EV</span>
+      <span class="avatar av-4">R3<span class="badge ms-badge">12</span></span>
+      <span class="avatar av-4">RP<span class="presence" style="background:var(--ok)"></span></span>
+      <span class="avatar av-3">MW</span>
+      <span class="avatar av-2">LN</span>
+      <div class="grow"></div>
+      <span class="icon-btn sm"><svg class="ic sm"><use href="#i-pen"/></svg></span>
     </aside>
 
-    <main class="chat">
-      <div class="chat-head">
-        <span class="avatar av-1">MC<span class="presence" style="background:var(--ok)"></span></span>
-        <div class="who col grow" style="gap:2px">
-          <span class="nm">Maya Chen</span>
-          <span class="st"><span class="dot on"></span>Online</span>
-        </div>
-        <span class="chip ok"><svg class="ic sm"><use href="#i-lock"/></svg>End-to-end encrypted</span>
-        <span class="icon-btn"><svg class="ic"><use href="#i-search"/></svg></span>
-        <span class="icon-btn"><svg class="ic"><use href="#i-phone"/></svg></span>
-        <span class="icon-btn"><svg class="ic"><use href="#i-video"/></svg></span>
-        <span class="icon-btn"><svg class="ic"><use href="#i-more-v"/></svg></span>
+    <main class="split-col">
+      <div class="splitbar">
+        <svg class="ic sm sb-ic"><use href="#i-split-h"/></svg>
+        <span class="sb-t">Split view</span>
+        <span class="sb-dot"></span>
+        <span class="sb-s">Maya Chen ⇵ Design Guild</span>
+        <span class="kbd">Ctrl ⇧ H</span>
+        <div class="grow"></div>
+        <span class="chip active"><svg class="ic sm"><use href="#i-split-h"/></svg>Split view</span>
+        <span class="chip"><svg class="ic sm"><use href="#i-close"/></svg>Close split</span>
       </div>
 
-      <div class="msgs">
-        <div class="day-wrap"><span class="msg-day">Today</span></div>
-
-        <div class="m-in">
-          <span class="avatar sm av-1">MC</span>
-          <div class="bubble in">Morning! Proposal draft is done — the pricing section still needs your FY26 numbers before I send it up.
-            <div class="b-meta">09:12</div>
-          </div>
-        </div>
-
-        <div class="m-out"><div class="bubble out">Nice timing. I'll drop the financials sheet in here right after standup.
-          <div class="b-meta">09:13 <svg class="ic sm"><use href="#i-check2"/></svg></div>
-        </div></div>
-
-        <div class="m-in">
-          <span class="avatar sm av-1">MC</span>
-          <div class="bubble in" style="max-width:520px">
-            <div class="filecard">
-              <span class="f-ic ft-doc">DOC</span>
-              <div class="col grow" style="gap:2px">
-                <span class="f-name">Atlas-Proposal.docx</span>
-                <span class="f-sub">4.2 MB · 24 pages · opens in VaultChat</span>
-              </div>
-              <span class="btn sm btn-primary att-open">Open</span>
+      <div class="panes">
+        <!-- ================= TOP · Maya Chen ================= -->
+        <section class="pane">
+          <div class="p-head">
+            <span class="avatar av-1">MC<span class="presence" style="background:var(--ok)"></span></span>
+            <div class="col grow" style="gap:2px">
+              <span class="nm">Maya Chen</span>
+              <span class="st on"><span class="dot on"></span>Online</span>
             </div>
-            <div style="margin-top:9px">Full draft — section 4 is the one to read.</div>
-            <div class="b-meta">09:14</div>
-            <div class="reactions">👍 2 &nbsp;🔥 1</div>
+            <span class="chip ok"><svg class="ic sm"><use href="#i-lock"/></svg>End-to-end encrypted</span>
+            <span class="icon-btn"><svg class="ic"><use href="#i-search"/></svg></span>
+            <span class="icon-btn"><svg class="ic"><use href="#i-phone"/></svg></span>
+            <span class="icon-btn"><svg class="ic"><use href="#i-video"/></svg></span>
+            <span class="icon-btn"><svg class="ic"><use href="#i-more-v"/></svg></span>
+            <span class="chip ratio">50%</span>
           </div>
-        </div>
 
-        <div class="m-out" style="margin-top:8px"><div class="bubble out">Opening it now — book mode makes a 24-pager painless. I'll leave comments inline.
-          <div class="b-meta">09:15 <svg class="ic sm"><use href="#i-check2"/></svg></div>
-        </div></div>
+          <div class="msgs">
+            <div class="day-wrap"><span class="msg-day">Today</span></div>
 
-        <div class="m-in">
-          <span class="avatar sm av-1">MC</span>
-          <div class="bubble in">Perfect. Ping me when you hit the pricing table — I want to walk you through the tier logic before Elena sees it.
-            <div class="b-meta">09:16</div>
+            <div class="m-in">
+              <span class="avatar sm av-1">MC</span>
+              <div class="bubble in">Ping me when you hit the pricing table — I want to walk you through the tier logic before Elena sees it.
+                <div class="b-meta">09:16</div>
+              </div>
+            </div>
+
+            <div class="m-out"><div class="bubble out">Will do. I've stacked you above Design Guild — reviewing the hero art while we lock the numbers.
+              <div class="b-meta">09:21 <svg class="ic sm"><use href="#i-check2"/></svg></div>
+            </div></div>
+
+            <div class="m-in">
+              <span class="avatar sm av-1">MC</span>
+              <div class="bubble in">Perfect — pulling up section 4.2 now.
+                <div class="b-meta">09:22</div>
+              </div>
+            </div>
+
+            <div class="typing"><i></i><i></i><i></i>Maya is typing</div>
+
+            <div class="scroll-rail"><div class="thumb" style="bottom:5%; top:auto; height:34%"></div></div>
           </div>
+
+          <div class="composer-wrap">
+            <div class="composer">
+              <span class="icon-btn"><svg class="ic lg"><use href="#i-clip"/></svg></span>
+              <span class="grow placeholder">Message Maya Chen…</span>
+              <span class="icon-btn"><svg class="ic lg"><use href="#i-smile"/></svg></span>
+              <span class="icon-btn"><svg class="ic lg"><use href="#i-mic"/></svg></span>
+              <span class="send-btn"><svg class="ic lg"><use href="#i-send"/></svg></span>
+            </div>
+          </div>
+        </section>
+
+        <!-- ================= DIVIDER ================= -->
+        <div class="divider">
+          <div class="grip"><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="tip div-tip"><svg class="ic sm"><use href="#i-swap"/></svg>Swap panes</div>
         </div>
 
-        <div class="typing"><i></i><i></i><i></i>Maya is typing</div>
+        <!-- ================= BOTTOM · Design Guild ================= -->
+        <section class="pane">
+          <div class="p-head">
+            <span class="avatar av-3">DG</span>
+            <div class="col grow" style="gap:2px">
+              <span class="nm">Design Guild</span>
+              <span class="st">8 members · 3 online</span>
+            </div>
+            <span class="chip ok"><svg class="ic sm"><use href="#i-lock"/></svg>End-to-end encrypted</span>
+            <span class="icon-btn"><svg class="ic"><use href="#i-search"/></svg></span>
+            <span class="icon-btn"><svg class="ic"><use href="#i-phone"/></svg></span>
+            <span class="icon-btn"><svg class="ic"><use href="#i-video"/></svg></span>
+            <span class="icon-btn"><svg class="ic"><use href="#i-more-v"/></svg></span>
+            <span class="chip ratio">50%</span>
+          </div>
 
-        <div class="scroll-rail"><div class="thumb" style="bottom:4%; top:auto; height:32%"></div></div>
-      </div>
+          <div class="msgs">
+            <div class="day-wrap"><span class="msg-day">Today</span></div>
 
-      <div class="composer-wrap">
-        <div class="composer">
-          <span class="icon-btn"><svg class="ic lg"><use href="#i-clip"/></svg></span>
-          <span class="grow placeholder">Message Maya Chen…</span>
-          <span class="icon-btn"><svg class="ic lg"><use href="#i-smile"/></svg></span>
-          <span class="icon-btn"><svg class="ic lg"><use href="#i-mic"/></svg></span>
-          <span class="send-btn"><svg class="ic lg"><use href="#i-send"/></svg></span>
-        </div>
+            <div class="m-in">
+              <span class="avatar sm av-3">MW</span>
+              <div class="bubble in" style="max-width:470px"><div class="snd c-marcus">Marcus Webb</div>
+                <div class="filecard" style="margin-top:6px">
+                  <span class="f-ic ft-img">IMG</span>
+                  <div class="col grow" style="gap:2px">
+                    <span class="f-name">hero-shoot-042.jpg</span>
+                    <span class="f-sub">3.4 MB · 6000×4000 · opens in VaultChat</span>
+                  </div>
+                  <span class="btn sm btn-primary att-open">Open</span>
+                </div>
+                <div style="margin-top:9px">Hero picks are in — 042 with the warmer grade is my favourite.</div>
+                <div class="b-meta">09:19</div>
+                <div class="reactions">🔥 4 &nbsp;❤️ 2</div>
+              </div>
+            </div>
+
+            <div class="m-in" style="margin-top:6px">
+              <span class="avatar sm av-2">EV</span>
+              <div class="bubble in"><div class="snd c-elena">Elena Voss</div>Agreed on 042. The caption still needs the final tagline, though.
+                <div class="b-meta">09:20</div>
+              </div>
+            </div>
+
+            <div class="m-out"><div class="bubble out">Tagline locks this afternoon — I'm confirming pricing with Maya in the pane right above you.
+              <div class="b-meta">09:21 <svg class="ic sm"><use href="#i-check2"/></svg></div>
+            </div></div>
+
+            <div class="scroll-rail"><div class="thumb" style="bottom:5%; top:auto; height:34%"></div></div>
+          </div>
+
+          <div class="composer-wrap">
+            <div class="composer">
+              <span class="icon-btn"><svg class="ic lg"><use href="#i-clip"/></svg></span>
+              <span class="grow placeholder">Message Design Guild…</span>
+              <span class="icon-btn"><svg class="ic lg"><use href="#i-smile"/></svg></span>
+              <span class="icon-btn"><svg class="ic lg"><use href="#i-mic"/></svg></span>
+              <span class="send-btn"><svg class="ic lg"><use href="#i-send"/></svg></span>
+            </div>
+          </div>
+        </section>
       </div>
     </main>
   </div>
-
-  <!-- ======== interaction layer ======== -->
-  <div class="overlay"></div>
-
-  <div class="convo lift-row">
-    <span class="avatar av-5">AL</span>
-    <div class="col grow" style="gap:2px"><span class="name">Atlas Launch</span><span class="preview">Ravi: uploaded Atlas-Financials-FY26.xlsx</span></div>
-    <div class="col" style="align-items:flex-end;gap:5px"><span class="when">09:02</span><span class="badge">3</span></div>
-  </div>
-
-  <div class="menu ctx-menu">
-    <div class="menu-title">Atlas Launch</div>
-    <div class="menu-item"><svg class="ic"><use href="#i-chat"/></svg>Open</div>
-    <div class="menu-item hl"><svg class="ic"><use href="#i-split-v"/></svg>Open in Split View<span class="kbd mi-kbd">Ctrl ⇧ S</span><svg class="ic sm"><use href="#i-chev-r"/></svg></div>
-    <div class="menu-item"><svg class="ic"><use href="#i-check2"/></svg>Mark as read</div>
-    <div class="menu-item"><svg class="ic"><use href="#i-pin"/></svg>Pin conversation</div>
-    <div class="menu-item"><svg class="ic"><use href="#i-bell"/></svg>Mute notifications</div>
-    <div class="menu-sep"></div>
-    <div class="menu-item"><svg class="ic"><use href="#i-folder"/></svg>Archive</div>
-    <div class="menu-item danger"><svg class="ic"><use href="#i-close"/></svg>Delete conversation</div>
-  </div>
-
-  <div class="menu ctx-sub">
-    <div class="menu-item hl"><svg class="ic"><use href="#i-split-v"/></svg>Split vertically<span class="glyph">▍▍</span></div>
-    <div class="menu-item"><svg class="ic"><use href="#i-split-h"/></svg>Split horizontally<span class="glyph">▬▬</span></div>
-  </div>
-
-  <span class="tip ctx-tip"><svg class="ic sm" style="color:var(--acc-2)"><use href="#i-more-v"/></svg>Long-press or right-click any conversation</span>
-
-  <svg class="cursor" width="22" height="24" viewBox="0 0 22 24">
-    <path d="M5 2.2v16.4l4-3.9 2.7 6.1 3.3-1.4-2.7-6h5.7z" fill="#fff" stroke="#26233d" stroke-width="1.4" stroke-linejoin="round"/>
-  </svg>
 </div></div></div>
-<div class="metabar"><b>VaultChat</b> · A3 — Long-press another chat · 1920 × 1080 · dark / glass / #7C4DFF</div>
+<div class="metabar"><b>VaultChat</b> · A6 — Stack, swap, or close · 1920 × 1080 · dark / glass / #7C4DFF</div>
 <script>
   const fit = () => {
     const k = Math.min(1, (innerWidth - 48) / 1920);
