@@ -11,8 +11,8 @@
 }
 #m-security .pill .ic { width: 14px; height: 14px; }
 
-#m-security .cards { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px 16px 0; }
-#m-security .fc { flex: none; padding: 10px 12px; border-radius: 16px; }
+#m-security .cards { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 7px; padding: 9px 16px 0; }
+#m-security .fc { flex: none; padding: 9px 12px; border-radius: 16px; }
 #m-security .fc-h { display: flex; align-items: flex-start; gap: 11px; }
 #m-security .fc-ic {
   width: 34px; height: 34px; border-radius: 11px; flex: none;
@@ -68,7 +68,7 @@
 /* watermark preview */
 #m-security .wm-wrap { display: flex; align-items: center; gap: 12px; margin-top: 8px; padding-left: 45px; }
 #m-security .wm-page {
-  width: 104px; height: 62px; border-radius: 8px; flex: none; position: relative; overflow: hidden;
+  width: 100px; height: 56px; border-radius: 8px; flex: none; position: relative; overflow: hidden;
   background: #F4F2FC; box-shadow: 0 5px 16px rgba(0,0,0,.45), inset 0 0 0 1px rgba(0,0,0,.06);
   padding: 9px 10px; display: flex; flex-direction: column; gap: 5px;
 }
@@ -125,7 +125,7 @@
         <span class="fc-ic"><svg class="ic"><use href="#i-lock"/></svg></span>
         <div class="grow">
           <div class="fc-t">End-to-end encryption</div>
-          <div class="fc-b">Messages and files are sealed on your device. Keys never leave it.</div>
+          <div class="fc-b">Sealed on your device — keys never leave it.</div>
         </div>
       </div>
       <div class="fc-f">
@@ -140,7 +140,7 @@
         <span class="fc-ic"><svg class="ic"><use href="#i-file"/></svg></span>
         <div class="grow">
           <div class="fc-t">Secure file viewer</div>
-          <div class="fc-b">Every format renders inside VaultChat's sandbox — nothing hands off.</div>
+          <div class="fc-b">Every format renders inside VaultChat's sandbox.</div>
         </div>
       </div>
       <div class="fc-f">
@@ -155,7 +155,7 @@
         <span class="fc-ic"><svg class="ic"><use href="#i-eye"/></svg></span>
         <div class="grow">
           <div class="fc-t">View-only sharing</div>
-          <div class="fc-b">Recipients can read, but not save, copy or print.</div>
+          <div class="fc-b">Read only — no saving, copying or printing.</div>
         </div>
         <span class="toggle on"></span>
       </div>
@@ -175,13 +175,12 @@
         <span class="fc-ic"><svg class="ic"><use href="#i-timer"/></svg></span>
         <div class="grow">
           <div class="fc-t">Expiring files</div>
-          <div class="fc-b">Atlas-MSA-Contract.pdf seals itself when the clock runs out.</div>
+          <div class="fc-b">Access ends automatically — the key is destroyed.</div>
         </div>
-        <span class="chip warn"><svg class="ic"><use href="#i-timer"/></svg><span class="countdown">23:12:04</span></span>
       </div>
       <div class="fc-f">
+        <span class="chip warn"><svg class="ic"><use href="#i-timer"/></svg>Expires in <span class="countdown">23:12:04</span></span>
         <div class="exp-bar"><i></i></div>
-        <span class="lbl">Ends Thu, 06 Aug · 09:00</span>
       </div>
     </div>
 
@@ -191,7 +190,7 @@
         <span class="dl-glyph"><svg class="ic"><use href="#i-download"/></svg></span>
         <div class="grow">
           <div class="fc-t">Download disabled</div>
-          <div class="fc-b">Viewers open files, but never save them out of the vault.</div>
+          <div class="fc-b">Open files, yes. Save them out, no.</div>
         </div>
         <span class="toggle on"></span>
       </div>
@@ -209,7 +208,7 @@
         <span class="fc-ic"><svg class="ic"><use href="#i-droplet"/></svg></span>
         <div class="grow">
           <div class="fc-t">Watermark</div>
-          <div class="fc-b">Every page a viewer sees carries their own name — quietly, diagonally.</div>
+          <div class="fc-b">Every page carries the viewer's own name.</div>
         </div>
         <span class="toggle on"></span>
       </div>

@@ -1038,7 +1038,7 @@
 
 /* ---- grid ---- */
 #m-excel .gridwrap { flex: 1; min-height: 0; position: relative; overflow: hidden; }
-#m-excel .gtable { border-collapse: collapse; table-layout: fixed; width: 430px; }
+#m-excel .gtable { border-collapse: collapse; table-layout: fixed; width: 478px; }
 #m-excel .gtable td, #m-excel .gtable th {
   height: 29px; padding: 0 7px;
   border-right: 1px solid rgba(235,232,255,.055);
@@ -1047,6 +1047,7 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
 }
+#m-excel .gtable td.rowh { padding: 0 2px; }
 #m-excel .colh, #m-excel .rowh {
   background: rgba(235,232,255,.05);
   color: var(--txt-3); font-size: 10px; font-weight: 700;
@@ -1096,7 +1097,7 @@
   border-color: transparent var(--err) transparent transparent;
 }
 #m-excel .cmt-pop {
-  position: absolute; z-index: 20; left: 96px; top: 236px; width: 214px;
+  position: absolute; z-index: 20; left: 118px; top: 214px; width: 208px;
   padding: 9px 11px; border-radius: 13px;
   background: rgba(30, 27, 48, .95);
   border: 1px solid var(--stroke-2);
@@ -1260,12 +1261,12 @@
   <div class="gridwrap">
     <table class="gtable">
       <tr>
-        <th class="colh" style="width:26px"></th>
-        <th class="colh" style="width:100px">A</th>
-        <th class="colh" style="width:58px">B</th>
-        <th class="colh" style="width:98px">C</th>
+        <th class="colh" style="width:30px"></th>
+        <th class="colh" style="width:108px">A</th>
+        <th class="colh" style="width:62px">B</th>
+        <th class="colh" style="width:96px">C</th>
         <th class="colh on" style="width:86px">D</th>
-        <th class="colh">E</th>
+        <th class="colh" style="width:96px">E</th>
       </tr>
       <tr class="hdrow">
         <td class="rowh">1</td>
@@ -1303,7 +1304,7 @@
         <b>Ravi Patel</b>
         <span>C7 · 2d</span>
       </div>
-      <div class="tx">COGS restated after the vendor credit — margin drops below the 45% floor, flagged red by the rule.</div>
+      <div class="tx">COGS restated after the vendor credit — margin now below the 45% floor.</div>
     </div>
 
     <span class="m-tip"><svg class="ic"><use href="#i-zoom-in"/></svg>Pinch to zoom · swipe for more columns</span>
