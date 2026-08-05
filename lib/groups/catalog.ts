@@ -18,7 +18,8 @@ import type { Ionicons } from '@expo/vector-icons';
 
 export type GroupType =
   | 'family' | 'friends' | 'office' | 'colleagues' | 'travel' | 'school'
-  | 'college' | 'sports' | 'emergency' | 'neighborhood' | 'business' | 'custom';
+  | 'college' | 'sports' | 'emergency' | 'neighborhood' | 'business'
+  | 'pet_care' | 'riders' | 'custom';
 
 export interface GroupTypeInfo {
   type: GroupType;
@@ -46,6 +47,8 @@ export const GROUP_TYPES: GroupTypeInfo[] = [
   { type: 'emergency',    label: 'Emergency',    icon: 'medkit',         color: '#EF4444', blurb: 'Who to reach when it matters' },
   { type: 'neighborhood', label: 'Neighborhood', icon: 'business',       color: '#F97316', blurb: 'People nearby' },
   { type: 'business',     label: 'Business',     icon: 'storefront',     color: '#EC4899', blurb: 'Staff, suppliers, deliveries' },
+  { type: 'pet_care',     label: 'Pet Care',     icon: 'paw',            color: '#F59E0B', blurb: 'Walkers, sitters and the vet' },
+  { type: 'riders',       label: 'Riders',       icon: 'bicycle',        color: '#EF4444', blurb: 'People who ride together' },
   { type: 'custom',       label: 'Custom',       icon: 'ellipse',        color: '#6B7280', blurb: 'Pick your own icon and colour' },
 ];
 
@@ -92,7 +95,13 @@ export function groupIdentity(group: {
 
 // ── self-check ──
 if (require.main === module) {
-  if (GROUP_TYPES.length !== 12) throw new Error(`expected 12 types, got ${GROUP_TYPES.length}`);
+  // Pinned to the number of rows group_type_config carries (migrations 066 and
+  // 069). The point is not the number — it is that adding a type on one side
+  // and not the other trips a test instead of silently rendering as UNTYPED.
+  if (GROUP_TYPES.length !== 14) throw new Error(`expected 14 types, got ${GROUP_TYPES.length}`);
+  for (const t of ['pet_care', 'riders'] as const) {
+    if (!isGroupType(t)) throw new Error(`${t} was added in migration 069 and must be in the catalog`);
+  }
 
   // every type unique, and every colour a 6-digit hex
   const seen = new Set<string>();

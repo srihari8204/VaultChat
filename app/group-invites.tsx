@@ -1,52 +1,59 @@
-// app/group-invites.tsx — invite people to a group, and manage who you invited
-// (Groups & Circles, G1).
+// app/group-invites.tsx — add people to a group, entirely inside VaultChat
+// (Groups & Circles, membership v2).
 //
-// Two halves:
-//   Invite — address someone by VaultChat username, phone or email, or produce
-//            a QR / link to share over SMS, WhatsApp or email.
-//   Sent   — the per-invitee list with real status (Pending / Accepted /
-//            Rejected / Expired / Revoked), resend and revoke.
+// WHAT IS NOT HERE, deliberately: no QR code, no shareable link, no SMS or
+// WhatsApp hand-off, no "copy invite code". Every one of those turns an
+// invitation into something forwardable, and a forwardable invitation is a
+// credential — the wrong way to protect a group that is mostly family.
 //
-// The token comes back from the server exactly ONCE, at create or resend time —
-// only its hash is stored server-side. So the QR is rendered from the response
-// in hand; there is no "show me that invite again" fetch, by design.
+// Three sections, matching the three things an admin actually does:
+//   Add      search people and invite them
+//   Waiting  approve or turn down whoever is part-way in
+//   Sent     invitations nobody has answered yet
+//
+// "Waiting" is the section that did not exist before. Under the default strict
+// mode an acceptance is NOT a join — it is a request for the owner's blessing —
+// so without a queue to see them in, everyone who says yes simply vanishes.
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
-  ActivityIndicator, Share, Modal, Linking, Platform, KeyboardAvoidingView,
+  ActivityIndicator, Platform, KeyboardAvoidingView, Image,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import QRCode from 'react-native-qrcode-svg';
-import * as Clipboard from 'expo-clipboard';
 import { useTheme } from '../lib/theme';
 import { brandAlpha } from '../constants/theme';
 import {
   createInvitation, listInvitations, resendInvitation, revokeInvitation,
-  type Invitation, type InvitationStatus, type NewInvitation,
+  inviteCandidates, pendingMembers, approveMember, rejectMember,
+  type Invitation, type InvitationStatus, type InviteCandidate, type PendingMember,
 } from '../lib/chatService';
 
-/** Deep link the QR encodes. Mirrors the vaultchat:// scheme in app.json. */
-const inviteURL = (token: string) => `https://vaultchat.app/i/${token}`;
-
-type Mode = 'username' | 'phone' | 'email' | 'link';
-
-const MODES: { key: Mode; label: string; icon: keyof typeof Ionicons.glyphMap; placeholder: string }[] = [
-  { key: 'username', label: 'Username', icon: 'at',      placeholder: 'VaultChat username or ID' },
-  { key: 'phone',    label: 'Phone',    icon: 'call',    placeholder: 'Phone number' },
-  { key: 'email',    label: 'Email',    icon: 'mail',    placeholder: 'Email address' },
-  { key: 'link',     label: 'Link/QR',  icon: 'qr-code', placeholder: '' },
-];
-
 const STATUS_TONE: Record<InvitationStatus, 'good' | 'warn' | 'bad' | 'mute'> = {
-  accepted: 'good', pending: 'warn', rejected: 'bad', revoked: 'bad', expired: 'mute',
+  joined: 'good', accepted: 'warn', pending: 'warn',
+  rejected: 'bad', cancelled: 'bad', revoked: 'bad', expired: 'mute',
 };
 
 const STATUS_LABEL: Record<InvitationStatus, string> = {
-  pending: 'Pending', accepted: 'Accepted', rejected: 'Declined',
-  expired: 'Expired', revoked: 'Revoked',
+  pending: 'Waiting for them',
+  accepted: 'Accepted — needs approval',
+  joined: 'Joined',
+  rejected: 'Declined',
+  cancelled: 'Withdrawn',
+  expired: 'Expired',
+  revoked: 'Revoked',
 };
+
+/** Why a search result has no Invite button. Silence would read as a bug. */
+const CANDIDATE_NOTE: Record<InviteCandidate['state'], string> = {
+  invitable: '',
+  member: 'Already in this group',
+  invited: 'Already invited',
+  cooldown: 'Recently removed',
+};
+
+const SEARCH_DEBOUNCE_MS = 300;
 
 export default function GroupInvitesScreen() {
   const { colors } = useTheme();
@@ -54,242 +61,295 @@ export default function GroupInvitesScreen() {
   const chatId = String(params.chatId || '');
   const groupName = String(params.name || 'this group');
 
-  const [mode, setMode] = useState<Mode>('username');
-  const [value, setValue] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState<InviteCandidate[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searched, setSearched] = useState(false);
+  const [inviting, setInviting] = useState<string | null>(null);
+
+  const [waiting, setWaiting] = useState<PendingMember[]>([]);
   const [sent, setSent] = useState<Invitation[]>([]);
   const [loading, setLoading] = useState(true);
-  const [fresh, setFresh] = useState<NewInvitation | null>(null);
+  const [acting, setActing] = useState<number | null>(null);
 
   const refresh = useCallback(async () => {
     if (!chatId) { setLoading(false); return; }
-    try { setSent(await listInvitations(chatId)); }
-    catch { /* a permission error here just means an empty list for this user */ }
-    finally { setLoading(false); }
+    // Settled either way: a permission error on one half should not blank the
+    // other, and neither should stop the spinner from clearing.
+    const [inv, pend] = await Promise.allSettled([
+      listInvitations(chatId),
+      pendingMembers(chatId),
+    ]);
+    if (inv.status === 'fulfilled') setSent(inv.value);
+    if (pend.status === 'fulfilled') setWaiting(pend.value);
+    setLoading(false);
   }, [chatId]);
 
   useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
+
+  // Debounced search. The sequence guard makes a slow early response unable to
+  // overwrite a fast later one — otherwise typing quickly leaves you looking at
+  // results for a prefix you have already deleted.
+  const seq = useRef(0);
+  useEffect(() => {
+    const term = q.trim();
+    if (term.length < 2) { setResults([]); setSearched(false); setSearching(false); return; }
+    setSearching(true);
+    const mine = ++seq.current;
+    const t = setTimeout(async () => {
+      try {
+        const hits = await inviteCandidates(chatId, term);
+        if (mine === seq.current) { setResults(hits); setSearched(true); }
+      } catch {
+        if (mine === seq.current) { setResults([]); setSearched(true); }
+      } finally {
+        if (mine === seq.current) setSearching(false);
+      }
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [q, chatId]);
 
   const tone = (t: 'good' | 'warn' | 'bad' | 'mute') =>
     t === 'good' ? colors.success : t === 'warn' ? colors.primary
       : t === 'bad' ? colors.danger : colors.textDim;
 
-  const invite = async () => {
-    if (busy || !chatId) return;
-    const v = value.trim();
-    if (mode !== 'link' && !v) { Alert.alert('Who?', 'Enter who you want to invite.'); return; }
-    setBusy(true);
+  const invite = async (c: InviteCandidate) => {
+    if (inviting) return;
+    setInviting(c.id);
     try {
-      const who = mode === 'username' ? { userId: v }
-        : mode === 'phone' ? { phone: v }
-        : mode === 'email' ? { email: v }
-        : {};
-      const channel = mode === 'link' ? 'link' as const : 'app' as const;
-      const created = await createInvitation(chatId, who, { channel });
-      setFresh(created);      // the token is in hand exactly once — show it now
-      setValue('');
+      await createInvitation(chatId, { userId: c.id });
+      // Mark the row in place rather than dropping it — a result that vanishes
+      // on tap looks like the tap failed.
+      setResults((prev) => prev.map((r) => (r.id === c.id ? { ...r, state: 'invited' } : r)));
       refresh();
     } catch (e: any) {
       Alert.alert('Could not invite', e?.message ?? 'Try again.');
-    } finally { setBusy(false); }
+    } finally { setInviting(null); }
   };
 
-  const shareVia = async (how: 'sms' | 'whatsapp' | 'email' | 'system') => {
-    if (!fresh) return;
-    const url = inviteURL(fresh.token);
-    const msg = `Join "${groupName}" on VaultChat: ${url}`;
-    try {
-      if (how === 'system') { await Share.share({ message: msg }); return; }
-      const target =
-        how === 'sms' ? `sms:?body=${encodeURIComponent(msg)}`
-        : how === 'whatsapp' ? `whatsapp://send?text=${encodeURIComponent(msg)}`
-        : `mailto:?subject=${encodeURIComponent(`Join ${groupName}`)}&body=${encodeURIComponent(msg)}`;
-      if (await Linking.canOpenURL(target)) await Linking.openURL(target);
-      else await Share.share({ message: msg });   // app not installed → fall back
-    } catch {
-      Alert.alert('Could not share', 'Copy the link instead.');
-    }
+  const approve = async (p: PendingMember) => {
+    if (acting) return;
+    setActing(p.id);
+    try { await approveMember(chatId, p.id); await refresh(); }
+    catch (e: any) { Alert.alert('Could not approve', e?.message ?? 'Try again.'); }
+    finally { setActing(null); }
   };
 
-  const copy = async (text: string, what: string) => {
-    await Clipboard.setStringAsync(text);
-    Alert.alert('Copied', `${what} copied to your clipboard.`);
+  const decline = (p: PendingMember) => {
+    Alert.alert(
+      p.requested ? 'Turn down this request?' : 'Turn down this person?',
+      `${p.name ?? 'They'} will not join ${groupName}. You can invite them again later.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Turn down', style: 'destructive', onPress: async () => {
+          setActing(p.id);
+          try { await rejectMember(chatId, p.id); await refresh(); }
+          catch (e: any) { Alert.alert('Could not do that', e?.message ?? 'Try again.'); }
+          finally { setActing(null); }
+        } },
+      ],
+    );
   };
 
   const doResend = async (inv: Invitation) => {
-    try {
-      const again = await resendInvitation(chatId, inv.id);
-      setFresh(again);   // new token, new QR — the old one is now dead
-      refresh();
-    } catch (e: any) { Alert.alert('Could not resend', e?.message ?? 'Try again.'); }
+    try { await resendInvitation(chatId, inv.id); refresh(); }
+    catch (e: any) { Alert.alert('Could not renew', e?.message ?? 'Try again.'); }
   };
 
   const doRevoke = (inv: Invitation) => {
-    Alert.alert('Revoke invitation?', 'Their link and QR stop working immediately.', [
+    Alert.alert('Withdraw invitation?', 'It disappears from their invitations straight away.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Revoke', style: 'destructive', onPress: async () => {
+      { text: 'Withdraw', style: 'destructive', onPress: async () => {
         try { await revokeInvitation(chatId, inv.id); refresh(); }
-        catch (e: any) { Alert.alert('Could not revoke', e?.message ?? 'Try again.'); }
+        catch (e: any) { Alert.alert('Could not withdraw', e?.message ?? 'Try again.'); }
       } },
     ]);
   };
 
-  const who = (inv: Invitation) =>
-    inv.name || inv.ref || (inv.kind === 'link' ? 'Anyone with the link' : 'Invited contact');
+  // Anyone still to answer. Accepted invitations live in "Waiting" instead, so
+  // showing them here as well would ask the admin to act on the same person in
+  // two places.
+  const unanswered = useMemo(
+    () => sent.filter((s) => s.status === 'pending' || s.status === 'expired'),
+    [sent],
+  );
 
-  const active = MODES.find((m) => m.key === mode)!;
+  const avatar = (name: string | null, photoURL: string | null, size = 36) => (
+    photoURL
+      ? <Image source={{ uri: photoURL }} style={{ width: size, height: size, borderRadius: size / 2 }} />
+      : (
+        <View style={[st.avatar, { width: size, height: size, borderRadius: size / 2, backgroundColor: brandAlpha(0.18) }]}>
+          <Text style={{ color: colors.primary, fontWeight: '800', fontSize: size * 0.4 }}>
+            {(name ?? '?').trim()[0]?.toUpperCase() ?? '?'}
+          </Text>
+        </View>
+      )
+  );
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, backgroundColor: colors.bg }}>
-      <Stack.Screen options={{ title: 'Invite people', headerTitleAlign: 'center' }} />
+      <Stack.Screen options={{ title: 'Add people', headerTitleAlign: 'center' }} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
 
-        <Text style={[st.h, { color: colors.text }]}>Invite to {groupName}</Text>
+        <Text style={[st.h, { color: colors.text }]}>Add to {groupName}</Text>
 
-        <View style={st.modes}>
-          {MODES.map((m) => {
-            const on = m.key === mode;
-            return (
-              <TouchableOpacity key={m.key} onPress={() => { setMode(m.key); setValue(''); }}
-                style={[st.modeChip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? brandAlpha(0.1) : 'transparent' }]}>
-                <Ionicons name={m.icon} size={14} color={on ? colors.primary : colors.textDim} />
-                <Text style={{ color: on ? colors.primary : colors.text, fontSize: 12.5, fontWeight: on ? '700' : '500' }}>{m.label}</Text>
-              </TouchableOpacity>
-            );
-          })}
+        <View style={[st.field, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+          <Ionicons name="search" size={17} color={colors.textDim} />
+          <TextInput
+            value={q} onChangeText={setQ}
+            placeholder="Name, email or phone number"
+            placeholderTextColor={colors.textFaint}
+            style={[st.input, { color: colors.text }]}
+            autoCapitalize="none" autoCorrect={false} returnKeyType="search"
+          />
+          {searching && <ActivityIndicator size="small" color={colors.primary} />}
+          {!searching && q.length > 0 && (
+            <TouchableOpacity onPress={() => setQ('')} hitSlop={8}>
+              <Ionicons name="close-circle" size={17} color={colors.textFaint} />
+            </TouchableOpacity>
+          )}
         </View>
 
-        {mode !== 'link' && (
-          <View style={[st.field, { borderColor: colors.border, backgroundColor: colors.surface }]}>
-            <Ionicons name={active.icon} size={17} color={colors.textDim} />
-            <TextInput
-              value={value} onChangeText={setValue} placeholder={active.placeholder}
-              placeholderTextColor={colors.textFaint} style={[st.input, { color: colors.text }]}
-              autoCapitalize="none" autoCorrect={false}
-              keyboardType={mode === 'phone' ? 'phone-pad' : mode === 'email' ? 'email-address' : 'default'}
-              returnKeyType="send" onSubmitEditing={invite}
-            />
+        <Text style={{ color: colors.textFaint, fontSize: 11.5, marginTop: 8, lineHeight: 16 }}>
+          Search people you already chat with by name, or anyone on VaultChat by their exact
+          email or phone number.
+        </Text>
+
+        {searched && results.length === 0 && !searching && (
+          <View style={[st.empty, { borderColor: colors.border }]}>
+            <Ionicons name="person-outline" size={17} color={colors.textDim} />
+            <Text style={{ color: colors.textDim, fontSize: 12.5, flex: 1, lineHeight: 17 }}>
+              Nobody found. They need a VaultChat account before they can be added — there is
+              no invitation to send outside the app.
+            </Text>
           </View>
         )}
 
-        <TouchableOpacity onPress={invite} disabled={busy}
-          style={[st.btn, { backgroundColor: busy ? colors.border : colors.primary }]}>
-          {busy ? <ActivityIndicator color="#fff" />
-            : <><Ionicons name={mode === 'link' ? 'qr-code' : 'person-add'} size={17} color="#fff" />
-                <Text style={st.btnTxt}>{mode === 'link' ? 'Create link & QR' : 'Send invitation'}</Text></>}
-        </TouchableOpacity>
+        {results.map((c) => (
+          <View key={c.id} style={[st.row, { borderColor: colors.border }]}>
+            {avatar(c.name, c.photoURL)}
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14 }} numberOfLines={1}>
+                {c.name ?? 'VaultChat user'}
+              </Text>
+              {c.state !== 'invitable' && (
+                <Text style={{ color: colors.textDim, fontSize: 11.5 }}>{CANDIDATE_NOTE[c.state]}</Text>
+              )}
+            </View>
+            {c.state === 'invitable' ? (
+              <TouchableOpacity onPress={() => invite(c)} disabled={inviting === c.id}
+                style={[st.pill, { backgroundColor: colors.primary }]}>
+                {inviting === c.id ? <ActivityIndicator size="small" color="#fff" />
+                  : <Text style={st.pillTxt}>Invite</Text>}
+              </TouchableOpacity>
+            ) : (
+              <Ionicons
+                name={c.state === 'member' ? 'checkmark-circle' : c.state === 'invited' ? 'time' : 'lock-closed'}
+                size={19} color={colors.textFaint}
+              />
+            )}
+          </View>
+        ))}
 
+        {/* ── waiting on the owner ── */}
         <View style={st.sechead}>
-          <Text style={[st.h, { color: colors.text, marginBottom: 0 }]}>Sent ({sent.length})</Text>
+          <Text style={[st.h, { color: colors.text, marginBottom: 0 }]}>Waiting ({waiting.length})</Text>
           {loading && <ActivityIndicator size="small" color={colors.primary} />}
         </View>
 
-        {!loading && sent.length === 0 && (
+        {!loading && waiting.length === 0 && (
           <Text style={{ color: colors.textDim, fontSize: 13.5 }}>
-            Nobody invited yet. Invitations you send show up here with their status.
+            Nobody is waiting. People appear here once they accept an invitation or ask to join.
           </Text>
         )}
 
-        {sent.map((inv) => {
+        {waiting.map((p) => (
+          <View key={p.id} style={[st.row, { borderColor: colors.border }]}>
+            {avatar(p.name, p.photoURL)}
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14 }} numberOfLines={1}>
+                {p.name ?? 'VaultChat user'}
+              </Text>
+              <Text style={{ color: p.canApprove ? colors.primary : colors.textDim, fontSize: 11.5 }} numberOfLines={1}>
+                {p.requested ? 'Asked to join'
+                  : p.canApprove ? 'Accepted — approve to let them in'
+                  : 'Invited, has not answered'}
+              </Text>
+            </View>
+            {acting === p.id ? <ActivityIndicator size="small" color={colors.primary} /> : (
+              <>
+                {p.canApprove && (
+                  <TouchableOpacity onPress={() => approve(p)} style={[st.pill, { backgroundColor: colors.success }]}>
+                    <Text style={st.pillTxt}>Approve</Text>
+                  </TouchableOpacity>
+                )}
+                {p.canReject && (
+                  <TouchableOpacity onPress={() => decline(p)} style={st.rowBtn}>
+                    <Ionicons name="close-circle" size={19} color={colors.danger} />
+                  </TouchableOpacity>
+                )}
+              </>
+            )}
+          </View>
+        ))}
+
+        {/* ── sent but unanswered ── */}
+        <View style={st.sechead}>
+          <Text style={[st.h, { color: colors.text, marginBottom: 0 }]}>Sent ({unanswered.length})</Text>
+        </View>
+
+        {!loading && unanswered.length === 0 && (
+          <Text style={{ color: colors.textDim, fontSize: 13.5 }}>
+            No invitations outstanding.
+          </Text>
+        )}
+
+        {unanswered.map((inv) => {
           const t = tone(STATUS_TONE[inv.status]);
-          const open = inv.status === 'pending' || inv.status === 'expired';
           return (
             <View key={inv.id} style={[st.row, { borderColor: colors.border }]}>
               <View style={[st.rowIcon, { backgroundColor: t + '22' }]}>
-                <Ionicons
-                  name={inv.kind === 'link' ? 'link' : inv.kind === 'phone' ? 'call' : inv.kind === 'email' ? 'mail' : 'person'}
-                  size={16} color={t}
-                />
+                <Ionicons name={inv.status === 'expired' ? 'hourglass' : 'paper-plane'} size={16} color={t} />
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14 }} numberOfLines={1}>{who(inv)}</Text>
+                <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14 }} numberOfLines={1}>
+                  {inv.name ?? inv.ref ?? 'VaultChat user'}
+                </Text>
                 <Text style={{ color: t, fontSize: 11.5 }}>{STATUS_LABEL[inv.status]}</Text>
               </View>
-              {open && (
-                <TouchableOpacity onPress={() => doResend(inv)} style={st.rowBtn}>
-                  <Ionicons name="refresh" size={17} color={colors.primary} />
-                </TouchableOpacity>
-              )}
-              {open && (
-                <TouchableOpacity onPress={() => doRevoke(inv)} style={st.rowBtn}>
-                  <Ionicons name="close-circle" size={17} color={colors.danger} />
-                </TouchableOpacity>
-              )}
+              <TouchableOpacity onPress={() => doResend(inv)} style={st.rowBtn}>
+                <Ionicons name="refresh" size={17} color={colors.primary} />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => doRevoke(inv)} style={st.rowBtn}>
+                <Ionicons name="close-circle" size={17} color={colors.danger} />
+              </TouchableOpacity>
             </View>
           );
         })}
-      </ScrollView>
 
-      {/* The token exists in memory only until this sheet closes. */}
-      <Modal visible={!!fresh} transparent animationType="slide" onRequestClose={() => setFresh(null)}>
-        <View style={st.backdrop}>
-          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setFresh(null)} />
-          <View style={[st.sheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Text style={{ color: colors.text, fontWeight: '800', fontSize: 17, textAlign: 'center' }}>
-              Invitation ready
-            </Text>
-            <Text style={{ color: colors.textDim, fontSize: 12.5, textAlign: 'center', marginTop: 4 }}>
-              Share it now — this code is shown only once.
-            </Text>
-
-            {!!fresh && (
-              <View style={st.qrWrap}>
-                <View style={st.qrPad}>
-                  <QRCode value={inviteURL(fresh.token)} size={168} backgroundColor="#fff" color="#000" />
-                </View>
-                <TouchableOpacity onPress={() => copy(fresh.code, 'Invite code')} style={{ marginTop: 12 }}>
-                  <Text style={{ color: colors.primary, fontWeight: '800', fontSize: 16, letterSpacing: 2 }}>{fresh.code}</Text>
-                </TouchableOpacity>
-                <Text style={{ color: colors.textFaint, fontSize: 11 }}>tap the code to copy</Text>
-              </View>
-            )}
-
-            <View style={st.shareRow}>
-              {([
-                ['sms', 'chatbubble', 'SMS'],
-                ['whatsapp', 'logo-whatsapp', 'WhatsApp'],
-                ['email', 'mail', 'Email'],
-                ['system', 'share-social', 'More'],
-              ] as const).map(([how, icon, label]) => (
-                <TouchableOpacity key={how} onPress={() => shareVia(how)}
-                  style={[st.shareBtn, { borderColor: colors.border, backgroundColor: colors.surface }]}>
-                  <Ionicons name={icon} size={19} color={colors.primary} />
-                  <Text style={{ color: colors.text, fontSize: 11 }}>{label}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <TouchableOpacity onPress={() => fresh && copy(inviteURL(fresh.token), 'Invite link')}
-              style={[st.btn, { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border }]}>
-              <Ionicons name="copy" size={16} color={colors.text} />
-              <Text style={[st.btnTxt, { color: colors.text }]}>Copy link</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setFresh(null)} style={[st.btn, { backgroundColor: colors.primary, marginTop: 8 }]}>
-              <Text style={st.btnTxt}>Done</Text>
-            </TouchableOpacity>
-          </View>
+        <View style={[st.footer, { borderColor: colors.border }]}>
+          <Ionicons name="lock-closed-outline" size={15} color={colors.textDim} />
+          <Text style={{ color: colors.textDim, fontSize: 11.5, flex: 1, lineHeight: 16 }}>
+            Invitations stay inside VaultChat. There is no link or code to share, so an
+            invitation cannot be forwarded to somebody it was not meant for.
+          </Text>
         </View>
-      </Modal>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 const st = StyleSheet.create({
   h: { fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 10 },
-  modes: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
-  modeChip: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
   field: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, height: 50 },
   input: { flex: 1, fontSize: 15 },
-  btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 50, borderRadius: 13, marginTop: 14 },
-  btnTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  empty: { flexDirection: 'row', alignItems: 'center', gap: 9, padding: 12, borderWidth: 1, borderRadius: 12, marginTop: 14 },
   sechead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 30, marginBottom: 10 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 11, borderBottomWidth: StyleSheet.hairlineWidth },
   rowIcon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   rowBtn: { padding: 6 },
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' },
-  sheet: { borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, padding: 20, paddingBottom: 34 },
-  qrWrap: { alignItems: 'center', marginTop: 18 },
-  qrPad: { padding: 12, backgroundColor: '#fff', borderRadius: 14 },
-  shareRow: { flexDirection: 'row', gap: 9, marginTop: 20 },
-  shareBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 4, height: 58, borderWidth: 1, borderRadius: 13 },
+  avatar: { alignItems: 'center', justifyContent: 'center' },
+  pill: { paddingHorizontal: 14, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', minWidth: 74 },
+  pillTxt: { color: '#fff', fontSize: 12.5, fontWeight: '800' },
+  footer: { flexDirection: 'row', gap: 9, alignItems: 'flex-start', marginTop: 28, paddingTop: 14, borderTopWidth: StyleSheet.hairlineWidth },
 });

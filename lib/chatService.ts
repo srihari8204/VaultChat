@@ -1229,18 +1229,33 @@ export async function deleteGroupEvent(chatId: string, eventId: number): Promise
   await api(`/chats/${encodeURIComponent(chatId)}/events/${eventId}`, { method: 'DELETE' });
 }
 
-// ─── Per-invitee invitations (Groups & Circles) ─────────────────────
+// ─── In-app membership (Groups & Circles, membership v2) ────────────
 //
-// An invitation is a PERSON; an invite link is a DOOR. Creating one mints a
-// single-use link behind the scenes, so redeeming still goes through the same
-// server-side path that ordinary links use.
+// EVERYTHING HAPPENS INSIDE VAULTCHAT. There is no link to share, no QR to
+// scan, no SMS and no WhatsApp hand-off. An invitation names a VaultChat
+// account and is acted on by being signed in as that account.
 //
-// The `token` is returned exactly ONCE, at create/resend time — the server
-// stores only its hash. Put it in the QR / share link immediately; it cannot be
-// retrieved later.
+// Three steps, not two, and which ones apply depends on the group's mode:
+//
+//   strict (default)  invite → the invitee ACCEPTS → an owner APPROVES → joined
+//   user_approval     invite → the invitee accepts → joined
+//   admin_approval    the user REQUESTS → an owner approves → joined
+//
+// So `accepted` is NOT membership: it means the invitee said yes and is waiting
+// on an owner. `joined` is membership. Anywhere this file names both, the
+// difference is load-bearing.
 
-export type InvitationStatus = 'pending' | 'accepted' | 'rejected' | 'expired' | 'revoked';
+export type InvitationStatus =
+  | 'pending' | 'accepted' | 'joined' | 'rejected' | 'cancelled' | 'expired' | 'revoked';
+
+/**
+ * How an invitation was delivered. `app` is the only value new invitations
+ * carry; the rest exist so invitations created before membership v2 still
+ * render rather than falling off the list.
+ */
 export type InvitationChannel = 'app' | 'sms' | 'whatsapp' | 'email' | 'qr' | 'link';
+
+export type ApprovalMode = 'strict' | 'user_approval' | 'admin_approval';
 
 export interface Invitation {
   id:            number;
@@ -1256,7 +1271,7 @@ export interface Invitation {
   createdAt:     string;
 }
 
-/** An invitation waiting for ME. */
+/** An invitation waiting for ME — either unanswered, or accepted and awaiting an owner. */
 export interface MyInvitation {
   id:          number;
   chatId:      string;
@@ -1266,24 +1281,63 @@ export interface MyInvitation {
   color:       string | null;
   status:      InvitationStatus;
   inviterName: string | null;
+  /** Preview before deciding: how big the group is. Never the member list. */
+  memberCount:   number;
+  approvalMode:  ApprovalMode;
+  /** True when this row is my own request to join rather than someone's invitation. */
+  requested:     boolean;
+  /** Whether accepting admits me outright, or only starts the wait for an owner. */
+  joinsOnAccept: boolean;
+  canAccept:     boolean;
+  canDecline:    boolean;
   expiresAt:   string;
   createdAt:   string;
 }
 
-export interface NewInvitation {
-  id:        number;
-  token:     string;   // shown once — embed it now
-  code:      string;   // short code, for typing by hand
-  status:    InvitationStatus;
-  expiresAt: string;
-  channel:   InvitationChannel;
+/** Someone part-way in: they accepted an invitation, or they asked to join. */
+export interface PendingMember {
+  id:          number;
+  userId:      string | null;
+  name:        string | null;
+  photoURL:    string | null;
+  status:      InvitationStatus;
+  /** True when they asked to join; false when they were invited. */
+  requested:   boolean;
+  inviterName: string | null;
+  createdAt:   string;
+  acceptedAt:  string | null;
+  canApprove:  boolean;
+  canReject:   boolean;
 }
 
-/** Invite one person. Address them by exactly one of userId / phone / email; omit all three for a shareable link. */
+/** Somebody who could be invited, and why they can or cannot be. */
+export interface InviteCandidate {
+  id:       string;
+  name:     string | null;
+  photoURL: string | null;
+  /** `invitable`, or the reason there is no button: already in, already invited, or recently removed. */
+  state:    'invitable' | 'member' | 'invited' | 'cooldown';
+  cooldownUntil?: string;
+}
+
+export interface NewInvitation {
+  id:            number;
+  inviteeUserId: string;
+  status:        InvitationStatus;
+  expiresAt:     string;
+  channel:       InvitationChannel;
+}
+
+/**
+ * Invite one person. They must already be on VaultChat: address them by
+ * userId, or by an email/phone that resolves to an account. A handle that
+ * matches nobody is refused — there is no off-platform invitation to fall
+ * back to.
+ */
 export async function createInvitation(
   chatId: string,
   who: { userId?: string; phone?: string; email?: string },
-  opts: { channel?: InvitationChannel; expiresInHours?: number } = {},
+  opts: { expiresInHours?: number } = {},
 ): Promise<NewInvitation> {
   return api(`/chats/${encodeURIComponent(chatId)}/invitations`, {
     method: 'POST',
@@ -1295,7 +1349,7 @@ export async function listInvitations(chatId: string): Promise<Invitation[]> {
   return api(`/chats/${encodeURIComponent(chatId)}/invitations`);
 }
 
-/** Reissue with a fresh token. The previous token stops working. */
+/** Give an invitation a fresh expiry and pull it back out of `expired`. */
 export async function resendInvitation(chatId: string, invitationId: number): Promise<NewInvitation> {
   return api(`/chats/${encodeURIComponent(chatId)}/invitations/${invitationId}/resend`, { method: 'POST' });
 }
@@ -1304,18 +1358,97 @@ export async function revokeInvitation(chatId: string, invitationId: number): Pr
   await api(`/chats/${encodeURIComponent(chatId)}/invitations/${invitationId}`, { method: 'DELETE' });
 }
 
-/** Invitations addressed to me and still pending. */
+/**
+ * Withdraw an invitation you personally sent. Distinct from revoking, which is
+ * an administrative act on someone else's — they land in different statuses so
+ * the group's history still says who ended it.
+ */
+export async function cancelInvitation(chatId: string, invitationId: number): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/invitations/${invitationId}/cancel`, { method: 'POST' });
+}
+
+/** Invitations addressed to me that are still live — pending, or accepted and waiting. */
 export async function myInvitations(): Promise<MyInvitation[]> {
   return api(`/invitations`);
 }
 
-/** Accept via a signed token (from a QR scan or deep link). */
-export async function redeemInvitation(token: string): Promise<{ chatId: string; ok: boolean }> {
-  return api(`/invitations/redeem`, { method: 'POST', json: { token } });
+/**
+ * Say yes. Whether this admits you or only starts the wait is the GROUP's
+ * decision, read server-side — `joined` in the response is the answer, and
+ * `joinsOnAccept` on the invitation is the advance warning to show first.
+ */
+export async function acceptInvitation(
+  invitationId: number,
+): Promise<{ id: number; chatId: string; status: InvitationStatus; joined: boolean }> {
+  return api(`/invitations/${invitationId}/accept`, { method: 'POST' });
 }
 
 export async function rejectInvitation(invitationId: number): Promise<void> {
   await api(`/invitations/${invitationId}/reject`, { method: 'POST' });
+}
+
+/**
+ * LEGACY. Redeems a signed token from a link minted before membership v2.
+ *
+ * Nothing in the app produces one any more — kept only so that a link already
+ * sitting in somebody's messages still works. Do not build on it: an
+ * invitation reached this way is a forwardable credential, which is exactly
+ * what the in-app flow above replaced.
+ */
+export async function redeemInvitation(token: string): Promise<{ chatId: string; ok: boolean }> {
+  return api(`/invitations/redeem`, { method: 'POST', json: { token } });
+}
+
+/** The owner's queue: everyone part-way in, invited and self-requested alike. */
+export async function pendingMembers(chatId: string): Promise<PendingMember[]> {
+  return api(`/chats/${encodeURIComponent(chatId)}/membership/pending`);
+}
+
+/** Admit someone who has accepted. Only ever legal from `accepted`. */
+export async function approveMember(chatId: string, invitationId: number): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/invitations/${invitationId}/approve`, { method: 'POST' });
+}
+
+/** Turn someone down. Same terminal status as their own decline, different actor. */
+export async function rejectMember(chatId: string, invitationId: number): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/invitations/${invitationId}/reject`, { method: 'POST' });
+}
+
+/**
+ * Who can be invited. Search by exact email or phone, or by name among people
+ * you already share a chat with. Deliberately not a user directory: you cannot
+ * find a stranger here, because you cannot invite one.
+ */
+export async function inviteCandidates(chatId: string, q: string): Promise<InviteCandidate[]> {
+  if (q.trim().length < 2) return [];
+  return api(`/chats/${encodeURIComponent(chatId)}/membership/candidates?q=${encodeURIComponent(q.trim())}`);
+}
+
+/** Ask to join a group that admits people by request. */
+export async function requestToJoin(chatId: string): Promise<{ id: number; chatId: string; pending: boolean }> {
+  return api(`/chats/${encodeURIComponent(chatId)}/membership/request`, { method: 'POST' });
+}
+
+/**
+ * Hand the group to another member. Irreversible: you become an admin and they
+ * become the owner, so `confirm` is required rather than inferred from the tap.
+ */
+export async function transferOwnership(
+  chatId: string,
+  userId: string,
+): Promise<{ ownerId: string; yourRole: string }> {
+  return api(`/chats/${encodeURIComponent(chatId)}/membership/transfer`, {
+    method: 'POST',
+    json: { userId, confirm: true },
+  });
+}
+
+/** Owner-only: change how many gates stand between an invitation and membership. */
+export async function setApprovalMode(chatId: string, mode: ApprovalMode): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/membership/approval-mode`, {
+    method: 'PATCH',
+    json: { mode },
+  });
 }
 
 // Join requests (approve-members groups; admin only).

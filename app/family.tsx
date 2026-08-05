@@ -9,7 +9,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator,
-  Share, Switch, Modal, TextInput, Animated, Vibration, Pressable, KeyboardAvoidingView, Platform,
+  Switch, Modal, TextInput, Animated, Vibration, Pressable, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import * as Location from 'expo-location';
 import { Stack, useRouter, useFocusEffect } from 'expo-router';
@@ -29,7 +29,7 @@ import { listGroups, resolveActiveGroup, saveGroup, setActiveGroupId, type Group
 import { groupIdentity } from '../lib/groups/catalog';
 import { can as hasPerm, type Permission } from '../lib/groups/permissions';
 import {
-  circleMembers, circleInviteCode, renameCircle, leaveCircle, deleteCircle,
+  circleMembers, renameCircle, leaveCircle, deleteCircle,
   removeCircleMember, setGuardian,
 } from '../lib/family/circle';
 import {
@@ -298,21 +298,15 @@ export default function FamilySpaceScreen() {
     return Object.values(presences).filter((p) => now - p.ts <= STALE_MS).length;
   }, [presences]);
 
-  // Contact picker. The invite code still exists (see invite() below) but it is
-  // the fallback: /family-setup was only ever reachable at zero circles, so a
-  // recipient who already had a space of their own had NO screen on which to
-  // enter a code. Adding a contact directly needs neither screen.
+  // Contact picker: add someone straight from the phone's contacts.
+  //
+  // The shareable invite CODE that used to sit alongside this is gone. Under
+  // membership v2 everything happens inside VaultChat, and a code you could
+  // paste into a message was the last thing here that could be forwarded to
+  // somebody it was not meant for. /group-invites replaces it.
   const openAdd = () => {
     if (!active) return;
     router.push({ pathname: '/family-add' as any, params: { circleId: active.id, circleName: active.name } });
-  };
-
-  const invite = async () => {
-    if (!active) return;
-    try {
-      const code = await circleInviteCode(active.id);
-      await Share.share({ message: `Join my Family Space "${active.name}" on VaultChat.\nCode: ${code}` });
-    } catch (e: any) { Alert.alert('Invite', e?.message ?? 'Could not create an invite.'); }
   };
 
   // ── SOS: hold-to-activate ────────────────────────────────────────────
@@ -634,7 +628,11 @@ export default function FamilySpaceScreen() {
           {/* members */}
           <View style={st.secHead}>
             <Text style={[st.secTitle, { color: colors.text }]}>Family Members</Text>
-            {canInvite && <TouchableOpacity onPress={invite}><Text style={{ color: colors.primary, fontWeight: '700', fontSize: 13 }}>+ Invite</Text></TouchableOpacity>}
+            {canInvite && active && (
+              <TouchableOpacity onPress={() => router.push({ pathname: '/group-invites' as any, params: { chatId: active.id, name: active.name } })}>
+                <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 13 }}>+ Invite</Text>
+              </TouchableOpacity>
+            )}
           </View>
           <View style={[st.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
             {roster.map(memberRow)}
@@ -747,10 +745,10 @@ export default function FamilySpaceScreen() {
               <Ionicons name="person-add" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Add from contacts</Text>
             </TouchableOpacity>
             {canInvite && <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-invites' as any, params: { chatId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: colors.border }]}>
-              <Ionicons name="qr-code-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Invite by QR, phone or email</Text>
+              <Ionicons name="person-add-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Add people &amp; approve requests</Text>
             </TouchableOpacity>}
-            <TouchableOpacity onPress={() => { setManage(false); invite(); }} style={[st.mRow, { borderColor: colors.border }]}>
-              <Ionicons name="key-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Share an invite code</Text>
+            <TouchableOpacity onPress={() => { setManage(false); router.push('/group-invitations' as any); }} style={[st.mRow, { borderColor: colors.border }]}>
+              <Ionicons name="mail-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>My invitations</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => { setManage(false); router.push('/group-create' as any); }} style={[st.mRow, { borderColor: colors.border }]}>
               <Ionicons name="add-circle-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Create or join another group</Text>
