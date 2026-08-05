@@ -25,11 +25,14 @@ phase 6 flips it. Rollback at any point is one constant.
       for the canonical ids. Must stay green in `npm run test:e2ee`.
 - [ ] 1.6 `lib/vaultBeamSegments.ts` — `appendSegment` takes only `blockBytes`; `chunkBytes`
       is the module constant `CHUNK = 512 KiB`. Keep the invariant check
-      (`blockBytes % chunkBytes === 0`) and the self-check; add "chunk size is uniform
-      across every segment" to it.
-- [ ] 1.7 `lib/networkState.ts` — `BUCKETS` becomes block-size-only
-      (2/4/8/8 MiB); `geometry()` returns `{ blockBytes }`. Update the self-check
-      (the `blockBytes % chunkBytes` assertion now uses the constant).
+      (`blockBytes % CHUNK === 0`) and the self-check; add "logical chunk size is uniform
+      across every segment" to it. Segments continue to carry the adaptive **physical**
+      block size — only the logical chunk is fixed.
+- [ ] 1.7 `lib/networkState.ts` — `BUCKETS` becomes **physical-unit-only**
+      (2/4/8/8 MiB); `geometry()` returns `{ blockBytes }`. Update the self-check (the
+      divisibility assertion now uses the `CHUNK` constant). The same bucket state also
+      feeds the LAN/P2P drivers' `unitChunks()`, so one throughput brain sizes every
+      transport's physical unit.
 
 ## 2. Bitmaps + session core (pure, unit-testable, no I/O)
 
@@ -41,9 +44,12 @@ phase 6 flips it. Rollback at any point is one constant.
       `R2Have`, in-memory `inflight`, `workList()`, `progressBytes()`, `isComplete()`,
       `mergePeerHave()`, `markVerified()`. Pure w.r.t. transport; no imports from any
       driver. Self-check covers §2 rules R1–R5 of `design.md`.
-- [ ] 2.3 `lib/vaultBeam/registry.ts` (new) — `SessionRegistry`, single-flight by
-      transferId, `adopt()` / `get()` / `dispose()`. Replaces the ad-hoc `controllers` map
-      in `vaultBeamController.ts`.
+- [ ] 2.3 `lib/vaultBeam/manager.ts` (new) — `TransferManager`, the process-wide singleton:
+      session map (single-flight by transferId), admission queue, driver registry
+      (`registerDriver`), scheduling, retry/cooldown policy, and launch recovery. Absorbs
+      `lib/vaultBeamQueue.ts` and the ad-hoc `controllers` map in `vaultBeamController.ts`
+      so there is exactly one scheduler. Slices `workList()` into `ChunkRun[]` of the active
+      driver's `unitChunks()` width.
 - [ ] 2.4 `lib/vaultBeam/blockMap.ts` (new) — block ↔ canonical-chunk-run mapping, so
       `R2Have` (chunk granularity) derives from `uploaded_mask` (block granularity) ∧ plan,
       and a block is uploadable iff every chunk in its run is in the work-list.
@@ -55,9 +61,10 @@ phase 6 flips it. Rollback at any point is one constant.
       `deleteChunkState` / prune alongside the existing `vb_transfers` helpers.
 - [ ] 3.2 `lib/vaultBeam/session.ts` — write-behind persistence: coalesce 1.5 s, flush
       immediately on tier switch, pause, terminal, and `AppState` background.
-- [ ] 3.3 `lib/vaultBeamController.ts` — `resumePendingSends()` also rehydrates chunk state
-      and adopts sessions into the registry; sender source validation gains the
-      size + mtime check (`design.md` §4.5 deviation 2).
+- [ ] 3.3 `lib/vaultBeamController.ts` — `resumePendingSends()` becomes
+      `manager.recoverAll()`: rehydrate chunk state, restore `last_transport` +
+      `driver_state` cooldowns, and adopt each non-terminal session into the manager. Sender
+      source validation gains the size + mtime check (`design.md` §4.5 deviation 2).
 - [ ] 3.4 Delete `lib/vaultBeamRecvBitmap.ts` (superseded by `PeerHave` in op-sqlite) and
       migrate any existing `vc_vb_recv_*` AsyncStorage keys on first launch, then remove.
 - [ ] 3.5 Migrate `vc_vaultbeam_sends` (AsyncStorage) into `vb_chunk_state.src_*` so all
@@ -90,24 +97,35 @@ phase 6 flips it. Rollback at any point is one constant.
       batches via `blockMap` and reporting `onVerified` per verified chunk. Delete the
       `haveBytes` prefix logic (`vaultBeamTransfer.ts:144-147, 192-206`).
 - [ ] 5.3 `lib/vaultBeam/drivers/p2p.ts` (new) — wraps `p2pSend`/`p2pReceive` from
-      `lib/vaultBeamDirect.ts`. Change the wire so the sender sends a **requested chunk
-      list** rather than `0..chunkCount-1` (`vaultBeamDirect.ts:350`), and so the receiver's
+      `lib/vaultBeamDirect.ts`. Change the wire so the sender sends **requested chunk runs**
+      rather than `0..chunkCount-1` (`vaultBeamDirect.ts:350`), and so the receiver's
       `{t:'p',n}` carries the chunk **id** rather than a running count.
+      `unitChunks()` returns 1–8 from `bufferedAmount` pressure, so one control frame can
+      cover a run instead of one frame per 512 KiB (today's fixed cost).
 - [ ] 5.4 `lib/vaultBeam/drivers/lan.ts` (new) — wraps `lanServe`/`lanConnect`. Native gains
-      an optional `chunkIds` array so a resumed LAN attempt streams only the missing set:
-      `VaultBeamStreamModule.kt` (`lanServe` loop), `services/vaultbeam/rust/src/lan.rs`
-      (`ServeOpts`/`ConnectOpts`), `services/vaultbeam/rust/src/ffi.rs` (arg parsing),
-      `lib/vaultBeamStreamNative.ts` (types). Absent ⇒ today's full-range behaviour.
+      an optional `runs` argument (`[{start,count}]`) so a resumed LAN attempt streams only
+      the missing set **and** amortises the framing header over a run rather than one header
+      per 512 KiB: `VaultBeamStreamModule.kt` (`lanServe`/`lanConnect` loops),
+      `services/vaultbeam/rust/src/lan.rs` (`ServeOpts`/`ConnectOpts`),
+      `services/vaultbeam/rust/src/ffi.rs` (arg parsing), `lib/vaultBeamStreamNative.ts`
+      (types). Absent ⇒ today's full-range, one-chunk-per-frame behaviour.
+      `unitChunks()` returns 1–16 from measured link speed.
+- [ ] 5.4a Physical-unit contract test: for each driver, assert that varying `unitChunks()`
+      changes **only** request/frame counts — never a chunk's nonce, AAD, ciphertext, ack id,
+      or bitmap bit. This is the guard that keeps the logical/physical split honest.
 - [ ] 5.5 `lib/vaultBeamDirect.ts` — keep negotiation/ICE/sealing; remove all progress
       bookkeeping and the `stallGuard`-owned tier decision (the session decides now).
 
 ## 6. Session-owned orchestration + the audits
 
 - [ ] 6.1 `lib/vaultBeamController.ts` — replace the tier ladder in `startSend`/`startReceive`
-      with `session.run()`. **Delete the reset at line 354.** The controller keeps only:
-      manifest mint/parse, the UI store, and socket listener arming.
-- [ ] 6.2 `lib/vaultBeam/session.ts` — driver selection, cooldown/demotion, re-promotion
-      (relay→P2P), and the `ACTIVE` park-with-retry state from `design.md` §2 R5.
+      with `manager.start(session)`. **Delete the reset at line 354.** The controller keeps
+      only: manifest mint/parse, the UI store, and socket listener arming.
+- [ ] 6.2 `lib/vaultBeam/manager.ts` — driver selection, cooldown/demotion, re-promotion
+      (relay→P2P), and the `ACTIVE` park-with-retry state from `design.md` §2 R5. Persist
+      `last_transport` + `driver_state` so backoff survives a restart.
+- [ ] 6.2a Delete `lib/vaultBeamQueue.ts`; auto-download admission becomes
+      `manager.enqueue()`. `lib/vaultBeamIngest.ts` calls the manager instead.
 - [ ] 6.3 Signaling: add `vaultbeam_have` to `relayToPeer` in **both**
       `vaultchat-backend/server.js:1014-1016` and
       `vaultchat-backend-go/internal/realtime/handlers.go:257-259`; seal/open it with the
@@ -129,11 +147,12 @@ phase 6 flips it. Rollback at any point is one constant.
         excludes `PeerHave`.
 - [ ] 6.5 **Concurrency audit** — assert one upload worker, one download worker, one driver,
       one transport controller per transfer:
-      - `SessionRegistry` single-flight replaces the `controllers.has()` guard.
+      - `TransferManager` single-flight replaces the `controllers.has()` guard.
       - `mapPool` (`vaultBeamTransfer.ts:57`) stays the only concurrency primitive; width
         from `batteryParallelism()`.
-      - the auto-download queue (`vaultBeamQueue.ts`, concurrency 1) composes with the
-        registry rather than duplicating it.
+      - the auto-download queue is absorbed by the manager, not duplicated beside it;
+        manual transfers become admitted work too (today they bypass the queue entirely,
+        which is why test-matrix row 12 is reachable in production).
       - one `AbortController` per session, held by the session, borrowed by the driver.
 - [ ] 6.6 Fix secondary finding F-2: finalize the `vb_transfer` row (`/relay/complete` or
       `/relay/abort`) on **any** terminal state, whichever transport won.
@@ -154,15 +173,33 @@ phase 6 flips it. Rollback at any point is one constant.
 
 - [ ] 8.1 `constants/flags.ts` — add `VB_SEAMLESS_RESUME` (default off), export it in the
       default object.
-- [ ] 8.2 Device matrix (cannot be CI-tested — NAT traversal and LAN sockets are inherently
-      on-device):
-      - P2P at 90 % → kill Wi-Fi → assert relay uploads only the missing tail, bar never
-        drops.
-      - P2P at 100 % → drop the final ack → assert **zero** bytes re-uploaded and both
-        devices reach Delivered/Saved.
-      - relay at 50 % → peer comes online → assert P2P takes only `¬PeerHave ∧ ¬R2Have`.
-      - kill the app mid-transfer on each tier → relaunch → assert resume from the bitmap.
-      - old build ⇄ new build: assert a clean version reject, never a corrupt decrypt.
+- [ ] 8.2 **Transport-switching matrix — merge blocker.** Cannot be CI-tested (NAT traversal
+      and LAN sockets are inherently on-device). Every row asserts the same three invariants
+      unless stated otherwise: **(a)** progress never decreases, **(b)** no chunk in
+      `PeerHave` is transferred again, **(c)** the final file's SHA-256 equals the source's.
+
+      | # | Scenario | Additional assertion |
+      |---|---|---|
+      | 1 | Wi-Fi → Mobile mid-transfer | ICE restart keeps the datachannel, or falls to relay with the bitmap intact |
+      | 2 | Mobile → Wi-Fi mid-transfer | cheaper driver is re-promoted; work-list is the remainder |
+      | 3 | LAN → Relay | only the missing tail is uploaded |
+      | 4 | Relay → P2P | chunks already on R2 are *not* re-sent over P2P |
+      | 5 | P2P at 90 % → kill Wi-Fi | relay uploads only the tail; bar holds at 90 % |
+      | 6 | P2P at 100 % → drop the final ack | **zero** bytes re-uploaded; both devices reach Delivered/Saved |
+      | 7 | App background → foreground, each tier | FGS keeps it alive; no progress loss |
+      | 8 | App force close mid-transfer, each tier | resumes from bitmap on relaunch |
+      | 9 | Device reboot mid-transfer | same as 8, across a cold boot |
+      | 10 | Receiver offline for hours, then accepts | sender's staged blocks still valid; `recv_mask` merge correct; within the 24 h expiry |
+      | 11 | 12 GB file, end to end | peak JS heap < 64 MB; bitmap stays 3 KB; no OOM |
+      | 12 | Multiple simultaneous transfers | manager concurrency respected; no cross-session bitmap or listener bleed |
+      | 13 | Weak network + packet loss | per-chunk retry isolates failures; session does not fail; physical unit adapts down |
+      | 14 | Old build ⇄ new build | clean version reject, never a corrupt decrypt |
+
+      Note for row 12: manual transfers are **not** queued today (only auto-download is,
+      at concurrency 1), so simultaneous transfers are already reachable in production and
+      must be covered — the `TransferManager` is what makes their admission explicit.
+- [ ] 8.2a Instrument rows 1–6 with `perf.mark('vaultbeam_switch', …)` so the switch
+      count, direction, and bytes-saved are measurable in the field, not just in the lab.
 - [ ] 8.3 `docs_latest/vaultbeam-transfer-architecture-analysis.md` — update the fallback
       and state-machine sections once the flag is on by default.
 - [ ] 8.4 Flip `VB_SEAMLESS_RESUME` on; keep it as the rollback switch for one release.
@@ -176,9 +213,9 @@ phase 6 flips it. Rollback at any point is one constant.
 |---|---|
 | `lib/vaultBeam/bitmap.ts` | `ChunkBitmap` + RLE codec |
 | `lib/vaultBeam/session.ts` | `TransferSession` — the state machine owner |
-| `lib/vaultBeam/registry.ts` | single-flight `SessionRegistry` |
+| `lib/vaultBeam/manager.ts` | `TransferManager` — sessions, queue, retry, recovery, transport switching, driver registry |
 | `lib/vaultBeam/blockMap.ts` | block ↔ canonical-chunk-run mapping |
-| `lib/vaultBeam/drivers/types.ts` | `TransportDriver` + contract test |
+| `lib/vaultBeam/drivers/types.ts` | `TransportDriver` (incl. `unitChunks()`) + contract test |
 | `lib/vaultBeam/drivers/{lan,p2p,relay}.ts` | transport drivers |
 | `vaultchat-backend/migrations/070_vaultbeam_recv_mask.sql` | `recv_mask BYTEA` |
 
@@ -190,15 +227,15 @@ phase 6 flips it. Rollback at any point is one constant.
 | `lib/vaultBeamDirect.ts` | keep negotiation/ICE/sealing; remove progress bookkeeping and tier decisions; chunk-list-aware wire |
 | `lib/vaultBeamSegments.ts` | `chunkBytes` fixed at 512 KiB; segments vary `blockBytes` only |
 | `lib/networkState.ts` | `BUCKETS` → block-size-only |
-| `lib/vaultBeamStreamNative.ts` | optional `chunkIds` on `lanServe`/`lanConnect` |
+| `lib/vaultBeamStreamNative.ts` | optional `runs` on `lanServe`/`lanConnect` |
 | `lib/localDb.ts` | `vb_chunk_state` table + helpers |
 | `lib/vaultbeamRelay.ts` | `relayReceived()` client call; `recvMask` on `RelayState` |
 | `components/VaultBeamBubble.tsx` | verified-bytes headline; staged-to-relay secondary |
 | `constants/flags.ts` | `VB_SEAMLESS_RESUME` |
-| `plugins/android/VaultBeamStreamModule.kt` | canonical chunk id; `chunkIds` in `lanServe`/`lanConnect` |
+| `plugins/android/VaultBeamStreamModule.kt` | canonical chunk id; `runs` + batched framing in `lanServe`/`lanConnect` |
 | `services/vaultbeam/rust/src/chunk.rs` | canonical chunk id in `plan_block` |
-| `services/vaultbeam/rust/src/lan.rs` | `chunkIds` in `ServeOpts`/`ConnectOpts` |
-| `services/vaultbeam/rust/src/ffi.rs` | parse `chunkIds` |
+| `services/vaultbeam/rust/src/lan.rs` | `runs` in `ServeOpts`/`ConnectOpts`; batched framing |
+| `services/vaultbeam/rust/src/ffi.rs` | parse `runs` |
 | `services/crypto/__vectors__/vaultbeam.json` | + canonical-relay-id vectors (additive) |
 | `services/crypto/vaultbeam-vectors.selftest.ts` | generate/verify the new set |
 | `services/crypto/vaultbeam-parity.selftest.ts` | assert parity on canonical ids |
@@ -213,3 +250,4 @@ phase 6 flips it. Rollback at any point is one constant.
 | File | Reason |
 |---|---|
 | `lib/vaultBeamRecvBitmap.ts` | superseded by `PeerHave` in op-sqlite (with a one-release AsyncStorage migration) |
+| `lib/vaultBeamQueue.ts` | absorbed by `TransferManager` (one scheduler, not two) |

@@ -38,15 +38,23 @@ a contiguous prefix, only on the receiver, and cannot express holes.
 
 ## What Changes
 
-- **One canonical chunk grid across every transport.** Chunk size is frozen at 512 KiB and
-  chunk identity becomes `plaintextOffset / 512 KiB` on all tiers. Adaptive geometry is
-  demoted from a *chunk-identity* concern to a *block-packing* concern: a segment still
-  varies how many canonical chunks are packed into one R2 object (2/4/8 MiB), it no longer
-  varies the chunk. **BREAKING wire change on the relay tier only** — the direct tiers
-  already use `id = index`, so their ciphertext is byte-unchanged.
-- **A transport-independent `TransferSession`** owning the transfer id, file id, K_t,
-  geometry, both bitmaps, progress, and persistence. Transports become stateless drivers
-  that report `onVerified(chunkId)` and hold no counters of their own.
+- **Separate logical chunk identity from the physical transfer unit.**
+  - *Logical chunk* — 512 KiB, `chunkId = plaintextOffset / 512 KiB`. This is the unit of
+    AES-256-GCM, acknowledgement, the resume bitmap, and cross-transport equivalence. It is
+    identical on every transport and never varies.
+  - *Physical unit* — an adaptive run of contiguous logical chunks, chosen per transport
+    from measured throughput. The relay keeps its 2/4/8 MiB blocks (4/8/16 logical chunks
+    per R2 object); **LAN and P2P gain the same freedom**, where the physical unit is
+    currently pinned at 512 KiB and costs framing overhead on fast links. A future
+    Bluetooth/Nearby transport can pick a small unit without touching identity.
+
+  **BREAKING wire change on the relay tier only** — the direct tiers already use
+  `id = index`, so their ciphertext is byte-unchanged.
+- **A `TransferManager`** — one process-wide component owning session state, the transfer
+  queue, retry, resume, progress, crash recovery, and transport switching. Transports
+  register with it; none keeps independent state. Per-transfer state lives in the
+  `TransferSession` it owns. This absorbs today's `vaultBeamQueue` and the ad-hoc
+  `controllers` map so there is exactly one scheduler.
 - **Two authoritative bitmaps** replace the scalar high-water mark: `PeerHave`
   (receiver-authoritative: GCM-verified + written + durable) and `R2Have`
   (server-authoritative: staged on R2). The sender's work-list becomes

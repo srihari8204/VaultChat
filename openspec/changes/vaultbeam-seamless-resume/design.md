@@ -164,38 +164,66 @@ Zero bytes re-uploaded. The pathological case becomes the trivial case.
 
 ```
       ┌────────────────────────────────────────────────────────────┐
-      │  SessionRegistry   (Map<transferId, TransferSession>)      │
-      │  single-flight: one session per transferId, process-wide   │
+      │  TransferManager            (process-wide singleton)        │
+      │   sessions      Map<transferId, TransferSession>            │
+      │   queue         admission + concurrency (absorbs vaultBeamQueue)
+      │   scheduling    which session runs, which driver it uses     │
+      │   retry         backoff policy, driver cooldowns             │
+      │   recovery      rehydrate + adopt on launch                  │
+      │   drivers       registry — transports register HERE          │
       └────────────────────────────────────────────────────────────┘
-                                   │ owns
+                                   │ owns 1..N
                                    ▼
       ┌────────────────────────────────────────────────────────────┐
-      │  TransferSession                                            │
+      │  TransferSession            (per transfer, durable)         │
       │   identity : transferId, fileId, K_t, totalBytes, role      │
       │   grid     : CHUNK=512KiB, chunkCount                       │
       │   state    : PeerHave, R2Have (bitmaps) · inflight (memory) │
       │   derived  : workList(), progressBytes(), isComplete()      │
       │   io       : persist() → op-sqlite · publish() → peer/server│
-      │   control  : AbortController, driver registry + cooldowns   │
+      │   control  : AbortController                                │
       └────────────────────────────────────────────────────────────┘
-             │ hands a work-list to exactly one driver at a time
+             │ manager hands a work-list to exactly one driver at a time
              ▼
-      ┌──────────────┬──────────────┬──────────────┐
-      │  LanDriver   │  P2pDriver   │ RelayDriver  │   (+ future)
-      └──────────────┴──────────────┴──────────────┘
+      ┌──────────────┬──────────────┬──────────────┬──────────────┐
+      │  LanDriver   │  P2pDriver   │ RelayDriver  │  future…     │
+      └──────────────┴──────────────┴──────────────┴──────────────┘
+```
+
+**Division of responsibility.** The manager is the only scheduler: it decides *which*
+transfer runs and *on what*. The session is the only owner of a transfer's truth: identity,
+bitmaps, progress, persistence. A driver owns neither — it is handed a work-list and reports
+verified chunks back. This is what makes "every transport registers with one manager instead
+of maintaining its own state" structural rather than a convention.
+
+Registration is how a transport joins, and is the entire integration surface for a future
+CDN, Bluetooth or Nearby-Share transport:
+```ts
+manager.registerDriver(new BluetoothDriver());   // nothing else changes
 ```
 
 ```ts
 interface TransportDriver {
-  readonly id: 'lan' | 'p2p' | 'relay';
+  readonly id: TransportId;                 // 'lan' | 'p2p' | 'relay' | future
   readonly cost: number;                    // lower = preferred
+  /** Physical packing this transport wants right now, in logical chunks.
+   *  The manager batches the work-list into runs of this size. Identity is
+   *  unaffected — this is throughput tuning only. */
+  unitChunks(s: TransferSession): number;
   available(s: TransferSession): Promise<boolean>;
-  run(s: TransferSession, work: ChunkSet, onVerified: (g: number) => void,
+  run(s: TransferSession, work: ChunkRun[], onVerified: (g: number) => void,
       signal: AbortSignal): Promise<DriverOutcome>;
   dispose(): void;                          // MUST release every listener/socket/timer
 }
+type ChunkRun = { start: number; count: number };   // contiguous logical chunks
 type DriverOutcome = { kind: 'drained' } | { kind: 'failed'; reason: string; retryAfterMs?: number };
 ```
+
+`unitChunks()` is the whole of the physical/logical split at the driver boundary: the
+manager slices `workList()` into contiguous `ChunkRun`s of the driver's chosen width, and
+the driver decides how to put a run on the wire (one HTTP PUT, one framing batch, one
+control frame + fragments). A driver that wants no batching returns `1` and behaves exactly
+as today.
 
 Invariants enforced by review and by the driver contract tests:
 - A driver holds **no** byte counter, no percentage, no "done" total.
@@ -214,26 +242,54 @@ asks for.
 
 ## 4. Chunk bitmap architecture
 
-### 4.1 Canonical chunk grid
+### 4.1 Two layers: logical chunk identity, physical transfer unit
+
+The two concerns that today's code conflates are separated explicitly. **Identity is fixed;
+size is adaptive.**
+
 ```
-CHUNK        = 512 KiB                    (frozen, all transports)
+── LOGICAL (fixed, identical on every transport) ───────────────────────
+CHUNK        = 512 KiB
 chunkCount   = ceil(totalBytes / CHUNK)   ≤ 24 576 at the 12 GiB cap
 offset(g)    = g * CHUNK
 len(g)       = min(CHUNK, totalBytes - offset(g))
-chunkId      = g = offset / CHUNK         ← nonce + AAD identity, ALL tiers
+chunkId      = g = offset / CHUNK         ← AES-GCM nonce + AAD, acks, bitmap, resume
+
+── PHYSICAL (adaptive, per transport, per segment) ─────────────────────
+PhysicalUnit = a run of contiguous logical chunks [gStart, gStart+n)
+             = what one HTTP request / one socket frame batch actually carries
 ```
-Native change, offset scheme only: `id = plain_offset / chunk_bytes` (was `plain_offset`).
-Legal because `chunk_bytes` is now globally constant, making offset and index a bijection.
-The direct tiers already use `id = g`, so **their ciphertext is byte-unchanged**.
 
-Adaptive geometry survives as block packing: a segment fixes `blockBytes` ∈ {2, 4, 8 MiB},
-i.e. {4, 8, 16} canonical chunks per R2 object, chosen from measured throughput exactly as
-today. What it no longer varies is `chunkBytes`.
+A physical unit is **only** a packing decision. It never changes what a chunk *is*, so it
+can differ between transports, change mid-transfer, and differ between the two directions
+without any effect on identity, acknowledgement, or resume.
 
-> **Why dropping the 256 KiB / 8 MiB chunk sizes costs nothing:** resume granularity was
-> already the *block*, never the chunk, so a small chunk was not bounding re-send. The only
-> measurable deltas are +16 GCM tags per 8 MiB block (256 B ≈ 0.003 % overhead) and more
-> AES calls, immaterial with ARMv8 crypto extensions.
+| Transport | Physical unit | Chosen by |
+|---|---|---|
+| R2 relay | 2 / 4 / 8 MiB block = 4 / 8 / 16 chunks | `networkState` throughput bucket, per segment (as today) |
+| LAN | batch of 1–16 chunks per framing header | link speed; **new** — pinned at 1 today |
+| P2P | 1–8 chunks per control frame, then ≤16 KiB SCTP fragments | `bufferedAmount` pressure; **new** — pinned at 1 today |
+| future CDN | range request spanning N chunks | range-request efficiency |
+| future BT/Nearby | 1 chunk, or a sub-chunk fragment stream | MTU |
+
+Native change, offset scheme only: `id = plain_offset / CHUNK` (was `plain_offset`). Legal
+because the *logical* chunk size is constant, making offset and index a bijection. The
+direct tiers already use `id = g`, so **their ciphertext is byte-unchanged**.
+
+> **Why the logical chunk is 512 KiB and not adaptive:** it is the resume and
+> acknowledgement granularity, and it must be equal on both peers and across transports for
+> a shared bitmap to exist at all. Making it adaptive is precisely what makes cross-transport
+> resume impossible today (RC-2). Throughput is served by the physical unit instead, which
+> is where it belongs — a fast link sends one 8 MiB request containing 16 logical chunks, so
+> request overhead is amortised exactly as before.
+>
+> **Cost of sealing per 512 KiB rather than per block:** +16 GCM tags per 8 MiB unit
+> (256 B ≈ 0.003 % overhead) and more AES calls — immaterial with ARMv8 crypto extensions,
+> and it buys 512 KiB resume granularity instead of 8 MiB.
+>
+> **What is lost:** the old `<1 Mbps` bucket's 256 KiB chunk. Resume granularity was already
+> the *block*, never the chunk, so the small chunk was not bounding re-send; the small
+> *physical unit* (2 MiB) still is, and is retained.
 
 ### 4.2 The two bitmaps
 | | authority | meaning of bit `g` | lives |
@@ -335,16 +391,30 @@ holes, which a prefix cannot.
 ```sql
 -- client, lib/localDb.ts
 CREATE TABLE IF NOT EXISTS vb_chunk_state (
-  transfer_id TEXT PRIMARY KEY,
-  role        TEXT NOT NULL,          -- 'sender' | 'recipient'
-  chunk_count INTEGER NOT NULL,
-  peer_have   BLOB,                   -- ≤3 KB
-  r2_have     BLOB,                   -- ≤3 KB
-  src_path    TEXT,                   -- sender only
-  src_size    INTEGER, src_mtime INTEGER,
-  updated_at  INTEGER NOT NULL
+  transfer_id    TEXT PRIMARY KEY,
+  role           TEXT NOT NULL,       -- 'sender' | 'recipient'
+  chunk_count    INTEGER NOT NULL,
+  peer_have      BLOB,                -- ≤3 KB
+  r2_have        BLOB,                -- ≤3 KB
+  src_path       TEXT,                -- sender only
+  src_size       INTEGER, src_mtime INTEGER,
+  last_transport TEXT,                -- resume hint: skip probing a transport that just failed
+  driver_state   TEXT,                -- JSON: per-driver cooldown deadlines + failure counts
+  updated_at     INTEGER NOT NULL
 );
 ```
+
+**On the retry queue.** It is deliberately **not** stored as a list, because it is exactly
+`workList() = ¬PeerHave ∧ ¬R2Have` — a pure function of the two bitmaps. Persisting it
+separately would create a second source of truth that can disagree with the bitmaps after a
+crash, which is the class of bug this change exists to remove. What *is* persisted is the
+information the work-list cannot reconstruct: which transport was in use and which drivers
+are in cooldown (`last_transport`, `driver_state`), so a resume does not waste a probe cycle
+re-attempting a transport that just failed, and does not lose an exponential backoff across
+a restart.
+
+The in-flight set is likewise never persisted — after a crash nothing is in flight, and
+recording otherwise would be a lie that suppresses legitimate retries.
 The existing `vb_transfers` table keeps UI state; identity/key material stays where it is
 today (the manifest is already durable — it *is* a chat message row, which is the reason no
 key needs re-deriving after a crash).
@@ -401,8 +471,10 @@ an unbounded O(filesize) re-upload on the failure path.
   magnitude below the existing per-message write volume.
 - **Server reads**: unchanged. The recipient already polls `GET /relay/:id` at 1.5 s;
   `recvMask` rides the existing response rather than adding a call.
-- **Concurrency**: `SessionRegistry` is O(active transfers). Auto-download already caps
-  concurrency at 1 (`vaultBeamQueue.ts`); manual transfers are user-initiated and few.
+- **Concurrency**: the `TransferManager`'s session map is O(active transfers). It absorbs
+  today's auto-download queue (concurrency 1) and, for the first time, admits manual
+  transfers through the same policy — today they bypass the queue entirely, so simultaneous
+  manual transfers are already reachable in production without an admission limit.
 - **Fan-out**: none — VaultBeam is 1:1, so `vaultbeam_have` is a single addressed emit
   through the existing `relayToPeer`, with no broadcast amplification.
 - **Storage**: unchanged. Active purge on complete/abort plus the 24 h lifecycle rule
@@ -443,7 +515,7 @@ see a `recv_mask` write it cannot store.
 | R3 | `recv_mask` leaks download progress to the server | M | L | Content-free (sizes/positions only). The server already knows `total_bytes` and upload progress via `uploaded_mask`, so the marginal disclosure is the receiver's *rate*. Documented; live `vaultbeam_have` is sealed and preferred when the peer is online. |
 | R4 | Fixed 512 KiB chunk regresses very slow links | L | L | Resume granularity was always the block, which still adapts (2/4/8 MiB). Validate against the `<1 Mbps` bucket before release. |
 | R5 | Bitmap divergence — sender believes delivered, receiver disagrees | L | M | Receiver is authoritative and merge is union-only; a receiver missing a chunk simply leaves the bit clear and the sender's next work-list includes it. Convergence is monotone. |
-| R6 | Two drivers running one session concurrently (duplicate uploads) | M | M | `SessionRegistry` single-flight by transferId; exactly one driver holds the session's `AbortController` at a time; `dispose()` is mandatory and idempotent. Contract-tested. |
+| R6 | Two drivers running one session concurrently (duplicate uploads) | M | M | `TransferManager` single-flight by transferId; exactly one driver holds the session's `AbortController` at a time; `dispose()` is mandatory and idempotent. Contract-tested. |
 | R7 | The three native backends drift | M | **H** | Parity suite is CI-gated; the identity change is one line in each; vectors cover both schemes. |
 | R8 | Listener/timer/map leaks across repeated fallback cycles | M | M | Audit list in `tasks.md` §6 — `openInbox` handlers, `onLanEvent` unsubscribes, `stallGuard` timers, `meters`/`persistT`/`subs`/`controllers` map entries. `dispose()` + a leak test that runs 50 fallback cycles and asserts listener counts. |
 | R9 | op-sqlite write amplification on low-end devices | L | L | Coalesced 1.5 s, ≤6 KB, flushed only on transitions. |

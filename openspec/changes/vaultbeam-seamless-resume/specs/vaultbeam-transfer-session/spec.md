@@ -23,22 +23,47 @@ relay row, and SHALL NOT re-mint any identifier or key.
 - **WHEN** an auto-download and a manual Accept target the same `transferId` concurrently
 - **THEN** exactly one session runs, and the second call is a no-op
 
-### Requirement: Canonical chunk grid
-The system SHALL use a single chunk grid across every transport: chunk size fixed at
-512 KiB, chunk index `g = plaintextOffset / 512 KiB`, and chunk identity `g` binding the
-AES-256-GCM nonce and AAD. Adaptive geometry SHALL vary only how many canonical chunks are
-packed into one relay object, never the chunk size or identity.
+### Requirement: Logical chunk identity is fixed
+The system SHALL use a single logical chunk grid across every transport: logical chunk size
+fixed at 512 KiB, index `g = plaintextOffset / 512 KiB`, and identity `g` binding the
+AES-256-GCM nonce and AAD. The logical chunk SHALL be the unit of encryption,
+acknowledgement, the resume bitmap, and cross-transport equivalence, and SHALL NOT vary by
+transport, by segment, or over time.
 
 #### Scenario: Same chunk identity on every transport
 - **WHEN** chunk `g` is sealed for the LAN, P2P and relay transports
 - **THEN** all three use nonce `4B(transferId) ‖ u64_be(g)` and AAD
   `"<transferId>|<fileId>|<g>"`
 
-#### Scenario: Throughput change repacks blocks, not chunks
-- **WHEN** measured throughput drops mid-transfer and the next segment selects a smaller
-  block size
-- **THEN** the block holds fewer canonical chunks, and every chunk keeps its 512 KiB size
-  and its identity
+#### Scenario: A chunk verified on one transport counts on every other
+- **WHEN** chunk `g` is verified over P2P and the session later runs on the relay
+- **THEN** `g` is already set in `PeerHave` and is excluded from the relay work-list
+
+### Requirement: Physical transfer unit is adaptive
+The system SHALL let each transport choose a physical transfer unit — a run of contiguous
+logical chunks — independently, from measured conditions, and SHALL allow that unit to
+differ between transports, between directions, and over the life of a transfer. Changing the
+physical unit SHALL affect only request and frame counts, and SHALL NOT change any chunk's
+identity, ciphertext, acknowledgement, or bitmap bit.
+
+#### Scenario: Fast link uses a large physical unit
+- **WHEN** measured throughput is high on the relay transport
+- **THEN** one request carries an 8 MiB unit of 16 logical chunks, each independently
+  sealed, acknowledged and resumable
+
+#### Scenario: Physical unit shrinks under degradation
+- **WHEN** throughput collapses mid-transfer
+- **THEN** the next physical unit is smaller, and every already-verified chunk stays
+  verified with unchanged identity
+
+#### Scenario: A new transport picks its own unit
+- **WHEN** a transport with a small MTU is registered
+- **THEN** it may select a one-chunk unit without any change to the session state model,
+  the bitmaps, or the wire identity of a chunk
+
+#### Scenario: Unit size never leaks into identity
+- **WHEN** the same chunk `g` is carried by a 1-chunk unit and later by a 16-chunk unit
+- **THEN** its nonce, AAD, ciphertext, ack id and bitmap bit are identical in both cases
 
 ### Requirement: Shared progress state
 The system SHALL maintain, per session, a receiver-authoritative `PeerHave` bitmap and a
@@ -95,6 +120,25 @@ out-of-order mask can never clear a bit.
 - **WHEN** an older `PeerHave` mask arrives after a newer one
 - **THEN** the merged bitmap retains every bit set by the newer mask
 
+### Requirement: Single transfer manager
+The system SHALL have exactly one process-wide transfer manager responsible for session
+state, the transfer queue, retry policy, resume, progress, crash recovery, and transport
+switching. Every transport SHALL register with this manager, and no transport SHALL maintain
+an independent queue, scheduler, or progress store.
+
+#### Scenario: Transports register rather than self-manage
+- **WHEN** a new transport is added to the system
+- **THEN** it is registered with the manager and requires no change to session state,
+  bitmaps, persistence, or progress accounting
+
+#### Scenario: One scheduler admits all transfers
+- **WHEN** an auto-accepted transfer and a manually accepted transfer are both pending
+- **THEN** both are admitted through the manager's queue under one concurrency policy
+
+#### Scenario: Manager owns transport switching
+- **WHEN** the active transport fails
+- **THEN** the manager selects the next one; no driver chooses its successor
+
 ### Requirement: Transport driver independence
 Every transport SHALL be a driver that reports verified chunks to the session and SHALL NOT
 maintain its own progress state, byte counters, completion totals, or transport-selection
@@ -131,10 +175,21 @@ SHALL park and retry.
 - **THEN** the session stays active with a retry timer rather than failing
 
 ### Requirement: Crash and reboot recovery
-The system SHALL persist session identity, both bitmaps, and the sender's source-file
-reference to op-sqlite, flushing on every transport change, pause, terminal state and
-background transition. On launch the system SHALL restore each non-terminal session and
-continue from the last verified chunk.
+The system SHALL persist session identity, both bitmaps, the sender's source-file reference,
+the last selected transport, and per-driver retry/cooldown state to op-sqlite, flushing on
+every transport change, pause, terminal state and background transition. On launch the
+system SHALL restore each non-terminal session and continue from the last verified chunk.
+The retry queue SHALL be derived from the bitmaps rather than stored separately, so it can
+never disagree with them after a crash.
+
+#### Scenario: Retry backoff survives a restart
+- **WHEN** a transport is in exponential backoff and the app restarts
+- **THEN** the restored session honours the remaining cooldown instead of immediately
+  re-probing that transport
+
+#### Scenario: Selected transport is a hint, not a constraint
+- **WHEN** a session resumes with a recorded last transport that is no longer available
+- **THEN** the manager selects the next available transport without failing the session
 
 #### Scenario: Resume after app kill
 - **WHEN** the app is killed mid-transfer and relaunched
