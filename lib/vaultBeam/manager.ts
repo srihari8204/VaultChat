@@ -16,6 +16,7 @@
 import { type ChunkRun } from './bitmap';
 import { TransferSession } from './session';
 import { type TransportDriver, type TransportId, type DriverOutcome } from './drivers/types';
+import { type PersistedSession, type SessionStore } from './persistence';
 
 export { type TransportDriver, type TransportId, type DriverOutcome };
 
@@ -115,6 +116,69 @@ export class TransferManager {
     this.aborts.get(transferId)?.abort();
     const s = this.sessions.get(transferId);
     if (s && s.state === 'active') { s.finish('cancelled'); this.opts.onChange?.(s); }
+  }
+
+  /**
+   * Rebuild every non-terminal session from durable state on launch (design §6).
+   * There is no separate "resume mode": a restored session goes through exactly
+   * the same loop as a fresh one, because the work-list is always re-derived
+   * from the bitmaps.
+   *
+   * Returns the adopted sessions; the caller decides which to start (auto-start
+   * a sender, wait for user intent on a recipient, …).
+   */
+  async recoverAll(opts: {
+    store: SessionStore;
+    /** Per-transfer secrets, which live in the E2EE manifest message, never in
+     *  the durable row. Returning null drops the record — without the key there
+     *  is nothing the session could do. */
+    secretsFor: (rec: PersistedSession) => Promise<{ fileId: string; keyB64: string } | null>;
+    /** Sender-side source validation (exists + size/mtime match). A mismatch
+     *  means the cached file was evicted or replaced, so uploading it would
+     *  produce bytes that do not match the manifest. */
+    validateSource?: (rec: PersistedSession) => Promise<boolean>;
+    onDropped?: (rec: PersistedSession, reason: string) => void;
+  }): Promise<TransferSession[]> {
+    let rows: PersistedSession[] = [];
+    try { rows = await opts.store.loadAll(); } catch { return []; }
+    const out: TransferSession[] = [];
+
+    for (const rec of rows) {
+      if (rec.state !== 'active') { continue; }              // terminal rows are history, not work
+      if (this.sessions.has(rec.transferId)) {               // a live session always wins
+        out.push(this.sessions.get(rec.transferId)!);
+        continue;
+      }
+      const secrets = await opts.secretsFor(rec).catch(() => null);
+      if (!secrets) {
+        opts.onDropped?.(rec, 'no key material');
+        await opts.store.remove(rec.transferId).catch(() => {});
+        continue;
+      }
+      if (rec.role === 'sender' && opts.validateSource) {
+        const ok = await opts.validateSource(rec).catch(() => false);
+        if (!ok) {
+          opts.onDropped?.(rec, 'source file missing or changed');
+          await opts.store.remove(rec.transferId).catch(() => {});
+          continue;
+        }
+      }
+      let session: TransferSession;
+      try { session = TransferSession.restore(rec, secrets); }
+      catch (e: any) {
+        opts.onDropped?.(rec, e?.message ?? 'unrestorable record');
+        await opts.store.remove(rec.transferId).catch(() => {});
+        continue;
+      }
+      this.adopt(session);
+      // Restore backoff so a resume does not immediately re-probe a transport
+      // that just failed, and does not lose an exponential cooldown.
+      if (rec.driverState) {
+        try { this.restoreDriverState(rec.transferId, JSON.parse(rec.driverState)); } catch { /* ignore bad JSON */ }
+      }
+      out.push(session);
+    }
+    return out;
   }
 
   /** Resume a parked session (peer came online, a poll saw new staged blocks…). */
@@ -434,7 +498,79 @@ function _selfCheck(): void {
     A(res.state === 'complete', 'peer confirmation completes the session');
     A(stager.asked.length === 6, 'the sender never re-staged anything');
 
-    // 11. onChange fires on real progress and is the persistence seam
+    // 11. recoverAll: restore from durable state and continue, with no separate
+    //     "resume mode" — the same loop, because work is always re-derived.
+    {
+      const rows: PersistedSession[] = [];
+      const store: SessionStore = {
+        async save(r) { const i = rows.findIndex((x) => x.transferId === r.transferId); if (i >= 0) rows[i] = r; else rows.push(r); },
+        async loadAll() { return [...rows]; },
+        async remove(id) { const i = rows.findIndex((x) => x.transferId === id); if (i >= 0) rows.splice(i, 1); },
+      };
+      // a half-done recipient, a terminal row, a keyless row, and a sender whose
+      // source vanished
+      const half = mkSession(10, 'recipient');
+      for (let i = 0; i < 4; i++) half.markVerified(i);
+      await store.save({ ...half.snapshot(), driverState: '{"p2p":{"failures":2,"cooldownUntil":99}}' });
+      const finished = mkSession(4, 'recipient');
+      for (let i = 0; i < 4; i++) finished.markVerified(i);
+      finished.finish('complete');
+      await store.save(finished.snapshot());
+      const keyless = mkSession(4, 'recipient');
+      await store.save(keyless.snapshot());
+      const evicted = mkSession(4, 'sender');
+      await store.save({ ...evicted.snapshot(), srcPath: '/gone.bin' });
+
+      const dropped: string[] = [];
+      mgr = mkMgr();
+      mgr.registerDriver(new FakeDriver('relay', 30));
+      const recovered = await mgr.recoverAll({
+        store,
+        secretsFor: async (r) => (r.transferId === keyless.transferId ? null : { fileId: 'F', keyB64: 'k' }),
+        validateSource: async (r) => r.srcPath !== '/gone.bin',
+        onDropped: (r, why) => dropped.push(`${r.transferId}:${why}`),
+      });
+      const ids = recovered.map((r) => r.transferId);
+      A(ids.includes(half.transferId), 'an in-progress session is recovered');
+      A(!ids.includes(finished.transferId), 'a terminal session is NOT resurrected');
+      A(!ids.includes(keyless.transferId), 'a session with no key material is dropped');
+      A(!ids.includes(evicted.transferId), 'a sender whose source vanished is dropped');
+      A(dropped.length === 2, `two records dropped with a reason (got ${dropped.length})`);
+      A(rows.length === 2, 'dropped records are removed from the store');
+
+      const back = recovered.find((r) => r.transferId === half.transferId)!;
+      A(back.peerHave.popcount() === 4, 'the bitmap survived');
+      A(back.pendingRuns()[0].start === 4, 'resume continues from the first missing chunk');
+      A(mgr.driverState(half.transferId)['p2p'].cooldownUntil === 99, 'driver backoff survived the restart');
+
+      // …and it runs to completion WITHOUT re-transferring the first 4
+      const rd = new FakeDriver('relay', 30);
+      const mgr3 = mkMgr();
+      mgr3.registerDriver(rd);
+      mgr3.adopt(back);
+      res = await mgr3.start(back);
+      A(res.state === 'complete', 'a recovered session completes');
+      A(rd.asked.every((c) => c >= 4), 'recovery re-transferred NOTHING that was already verified');
+      A(new Set(rd.asked).size === 6, 'exactly the 6 missing chunks moved');
+    }
+
+    // 12. a live session always wins over its durable snapshot
+    {
+      const live = mkSession(8, 'recipient');
+      live.markVerified(0); live.markVerified(1); live.markVerified(2);
+      const stale = { ...live.snapshot(), peerHave: '' };   // an older, emptier row
+      const store: SessionStore = {
+        async save() {}, async remove() {},
+        async loadAll() { return [stale as PersistedSession]; },
+      };
+      mgr = mkMgr();
+      mgr.adopt(live);
+      const rec = await mgr.recoverAll({ store, secretsFor: async () => ({ fileId: 'F', keyB64: 'k' }) });
+      A(rec[0] === live, 'the live session object is returned, not a rebuilt one');
+      A(live.peerHave.popcount() === 3, 'a stale snapshot cannot roll back live progress');
+    }
+
+    // 13. onChange fires on real progress and is the persistence seam
     let changes = 0;
     mgr = mkMgr({ onChange: () => { changes++; } });
     mgr.registerDriver(new FakeDriver('relay', 30));
