@@ -1,0 +1,339 @@
+<style>
+#s-excel .body { align-items: stretch; min-height: 0; }
+
+/* ---- formula bar strip ---- */
+#s-excel .fbar {
+  height: 46px; flex: none;
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 16px;
+  background: rgba(16, 15, 26, 0.6);
+  border-bottom: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+}
+#s-excel .cellref {
+  width: 92px; height: 30px; flex: none;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: rgba(235,232,255,.05);
+  border: 1px solid var(--stroke-acc);
+  font-family: var(--font-mono); font-size: 12px; color: var(--txt-1);
+}
+#s-excel .fx-in {
+  flex: 1; height: 30px; min-width: 0;
+  display: flex; align-items: center; gap: 9px;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: rgba(8,7,13,.4);
+  border: 1px solid var(--stroke);
+  font-family: var(--font-mono); font-size: 12.5px; color: var(--txt-1);
+}
+#s-excel .fx-in .fxi { color: var(--acc-2); }
+#s-excel .fx-in .tok-fn { color: var(--acc-3); }
+#s-excel .fx-in .tok-ref { color: #60A5FA; }
+#s-excel .fx-in .tok-num { color: var(--ok); }
+
+/* ---- work area ---- */
+#s-excel .work { flex: 1; min-height: 0; display: flex; align-items: stretch; }
+#s-excel .gridwrap { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
+
+/* ---- grid ---- */
+#s-excel .gtable { border-collapse: collapse; table-layout: fixed; width: 100%; }
+#s-excel .gtable td, #s-excel .gtable th {
+  height: 30px; padding: 0 10px;
+  border-right: 1px solid rgba(235,232,255,.055);
+  border-bottom: 1px solid rgba(235,232,255,.055);
+  font-size: 12px; color: var(--txt-1);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+#s-excel .gtable .colh, #s-excel .gtable .rowh {
+  background: rgba(235,232,255,.045);
+  color: var(--txt-3); font-size: 11px; font-weight: 600;
+  text-align: center; padding: 0;
+}
+#s-excel .gtable .colh.on, #s-excel .gtable .rowh.on {
+  background: var(--acc-soft-2); color: var(--acc-3);
+  box-shadow: inset 0 -2px 0 var(--acc);
+}
+#s-excel .gtable .rowh.on { box-shadow: inset -2px 0 0 var(--acc); }
+#s-excel .corner { width: 44px; }
+#s-excel .gtable .rowh { width: 44px; }
+
+#s-excel .hdrow td {
+  background: rgba(124,77,255,.10);
+  font-weight: 650; color: var(--txt-1); font-size: 11.5px;
+  border-bottom: 2px solid var(--stroke-acc);
+}
+#s-excel .hdrow td svg { display: inline-block; vertical-align: -1px; }
+#s-excel .hdrow td .fz { color: var(--acc-3); opacity: .85; margin-left: 5px; }
+#s-excel .hdrow td .fn { color: var(--acc-3); margin-left: 5px; }
+#s-excel .cmt svg, #s-excel .gtable td svg { display: inline-block; vertical-align: -1px; }
+#s-excel .sheets { margin-top: auto; }
+#s-excel .frozencol { border-right: 2px solid var(--stroke-acc) !important; background: rgba(124,77,255,.055); font-weight: 550; }
+#s-excel .num { text-align: right; }
+#s-excel .zebra td { background: rgba(235,232,255,.014); }
+
+#s-excel .sel {
+  outline: 2px solid var(--acc);
+  outline-offset: -2px;
+  background: rgba(124,77,255,.16) !important;
+  box-shadow: 0 0 18px rgba(124,77,255,.35) inset;
+  position: relative;
+}
+#s-excel .sel::after {
+  content: ""; position: absolute; right: -3px; bottom: -3px;
+  width: 7px; height: 7px; border-radius: 2px;
+  background: var(--acc); border: 1.5px solid var(--bg-1);
+}
+
+/* conditional formatting pills */
+#s-excel .cf {
+  display: inline-flex; align-items: center; justify-content: flex-end;
+  min-width: 62px; padding: 2px 8px; border-radius: 6px;
+  font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+#s-excel .cf-g { background: rgba(52,211,153,.16); color: #4ADE9E; }
+#s-excel .cf-a { background: rgba(251,191,36,.15); color: #FCD34D; }
+#s-excel .cf-r { background: rgba(248,113,113,.15); color: #FCA5A5; }
+
+/* data bars in growth column */
+#s-excel .bar { position: relative; }
+#s-excel .bar i {
+  position: absolute; left: 6px; top: 6px; bottom: 6px;
+  border-radius: 3px; background: rgba(124,77,255,.30);
+}
+#s-excel .bar span { position: relative; display: block; text-align: right; }
+
+/* comment marker + popover */
+#s-excel .cmt { position: relative; }
+#s-excel .cmt::before {
+  content: ""; position: absolute; right: 0; top: 0;
+  border-width: 0 7px 7px 0; border-style: solid;
+  border-color: transparent var(--err) transparent transparent;
+}
+#s-excel .cmt-pop {
+  position: absolute; z-index: 30;
+  width: 260px; padding: 12px 14px;
+  border-radius: var(--r-md);
+  background: rgba(30, 27, 48, .93);
+  border: 1px solid var(--stroke-2);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--sh-3);
+}
+#s-excel .cmt-pop::before {
+  content: ""; position: absolute; left: -6px; top: 16px;
+  width: 10px; height: 10px; transform: rotate(45deg);
+  background: rgba(30, 27, 48, .93);
+  border-left: 1px solid var(--stroke-2); border-bottom: 1px solid var(--stroke-2);
+}
+
+/* ---- sheet tabs ---- */
+#s-excel .sheets {
+  height: 44px; flex: none;
+  display: flex; align-items: center; gap: 4px;
+  padding: 0 14px;
+  border-top: 1px solid var(--stroke);
+  background: rgba(16, 15, 26, 0.55);
+  backdrop-filter: var(--blur);
+}
+#s-excel .stab {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 28px; padding: 0 14px;
+  border-radius: 8px;
+  font-size: 12px; color: var(--txt-2);
+}
+#s-excel .stab.on {
+  background: var(--acc-soft); color: var(--acc-3);
+  box-shadow: inset 0 0 0 1px var(--stroke-acc);
+  font-weight: 600;
+}
+#s-excel .stab .sq { width: 7px; height: 7px; border-radius: 2px; }
+
+/* ---- right insight panel ---- */
+#s-excel .side {
+  width: 372px; flex: none;
+  display: flex; flex-direction: column; gap: 14px;
+  padding: 16px;
+  border-left: 1px solid var(--stroke);
+  background: rgba(13, 12, 21, 0.5);
+  backdrop-filter: var(--blur);
+}
+#s-excel .card { padding: 16px; }
+#s-excel .card h4 { font-size: 12.5px; font-weight: 650; margin-bottom: 3px; }
+#s-excel .card .sub { font-size: 10.5px; color: var(--txt-3); margin-bottom: 14px; }
+
+#s-excel .chart { display: flex; align-items: flex-end; gap: 14px; height: 142px; padding: 0 4px; }
+#s-excel .chart .cb { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 7px; }
+#s-excel .chart .cb i {
+  width: 100%; border-radius: 5px 5px 2px 2px;
+  background: linear-gradient(180deg, #9257FF, #6C3DF4);
+  box-shadow: 0 -2px 14px rgba(124,77,255,.35);
+}
+#s-excel .chart .cb.mut i { background: linear-gradient(180deg, rgba(146,87,255,.4), rgba(108,61,244,.28)); box-shadow: none; }
+#s-excel .chart .cb b { font-size: 10px; font-weight: 600; color: var(--txt-2); }
+#s-excel .chart .cb span { font-size: 9.5px; color: var(--txt-3); }
+
+#s-excel .side .dtable { width: 100%; }
+#s-excel .side .dtable th, #s-excel .side .dtable td { padding: 6px 9px; font-size: 11px; }
+#s-excel .side .dtable td.tot { color: var(--acc-3); font-weight: 700; background: rgba(124,77,255,.07); }
+#s-excel .side .dtable td.rl { color: var(--txt-1); font-weight: 550; }
+</style>
+<div class="screen" id="s-excel">
+  <header class="vc-viewerbar">
+    <span class="icon-btn framed"><svg class="ic"><use href="#i-chev-l"/></svg></span>
+    <span class="filecard" style="min-width:0;padding:0;border:0;background:none">
+      <span class="f-ic ft-xls" style="width:30px;height:30px;border-radius:9px;font-size:8.5px">XLS</span>
+    </span>
+    <div class="col" style="gap:1px">
+      <span style="font-size:13.5px;font-weight:600">Atlas-Financials-FY26.xlsx</span>
+      <span style="font-size:11px;color:var(--txt-3)">Shared by Ravi Patel · 1.8 MB · 6 sheets · in Atlas Launch</span>
+    </div>
+    <span class="secure-pill"><svg class="ic sm"><use href="#i-lock"/></svg>Rendered inside VaultChat — no external apps, nothing leaves the vault</span>
+    <div class="grow"></div>
+    <span class="btn sm"><svg class="ic sm"><use href="#i-download"/></svg>Download</span>
+    <span class="btn sm"><svg class="ic sm"><use href="#i-share"/></svg>Share</span>
+    <span class="icon-btn"><svg class="ic"><use href="#i-more-v"/></svg></span>
+    <div class="vc-win"><span>─</span><span>▢</span><span class="close">✕</span></div>
+  </header>
+
+  <div class="fbar">
+    <span class="cellref">D14<svg class="ic sm" style="width:12px;height:12px;color:var(--txt-3)"><use href="#i-chev-d"/></svg></span>
+    <span class="icon-btn sm"><svg class="ic"><use href="#i-fx"/></svg></span>
+    <div class="fx-in">
+      <span><span class="tok-fn">=SUM</span>(<span class="tok-ref">D2:D13</span>)*<span class="tok-num">1.18</span></span>
+      <span class="grow"></span>
+      <span style="font-size:10.5px;color:var(--txt-3);font-family:var(--font-ui)">evaluates to <b style="color:var(--ok)">$4,182,900</b></span>
+    </div>
+    <div class="field" style="width:190px;height:30px;flex:none">
+      <svg class="ic sm"><use href="#i-search"/></svg><span class="grow">Find in cells</span>
+    </div>
+    <span class="sep" style="width:1px;height:22px;background:var(--stroke-2)"></span>
+    <span class="chip active"><svg class="ic sm"><use href="#i-filter"/></svg>Filter</span>
+    <span class="chip"><svg class="ic sm"><use href="#i-sort"/></svg>Sort</span>
+    <span class="chip active"><svg class="ic sm"><use href="#i-freeze"/></svg>Freeze panes</span>
+    <span class="chip"><svg class="ic sm"><use href="#i-pivot"/></svg>Pivot</span>
+    <span class="chip"><svg class="ic sm"><use href="#i-chart"/></svg>Chart</span>
+  </div>
+
+  <div class="work">
+    <div class="gridwrap">
+      <table class="gtable">
+        <tr>
+          <th class="colh corner"></th>
+          <th class="colh" style="width:150px">A</th>
+          <th class="colh" style="width:96px">B</th>
+          <th class="colh" style="width:150px">C</th>
+          <th class="colh on" style="width:132px">D</th>
+          <th class="colh" style="width:126px">E</th>
+          <th class="colh" style="width:124px">F</th>
+          <th class="colh" style="width:112px">G</th>
+          <th class="colh">H</th>
+        </tr>
+        <tr class="hdrow">
+          <td class="rowh">1</td>
+          <td class="frozencol">Region<svg class="ic sm fz" style="width:11px;height:11px"><use href="#i-lock"/></svg></td>
+          <td>Month<svg class="ic sm fn" style="width:11px;height:11px"><use href="#i-filter"/></svg></td>
+          <td>Product<svg class="ic sm fn" style="width:11px;height:11px"><use href="#i-filter"/></svg></td>
+          <td class="num">Revenue</td>
+          <td class="num">COGS</td>
+          <td class="num">Margin</td>
+          <td class="num">Growth %</td>
+          <td>Owner</td>
+        </tr>
+        <tr><td class="rowh">2</td><td class="frozencol">North America</td><td>Jan 26</td><td>Atlas Core</td><td class="num">412,800</td><td class="num">168,200</td><td><span class="cf cf-g">59.3%</span></td><td class="num bar"><i style="width:52px"></i><span>+14.2</span></td><td>Maya Chen</td></tr>
+        <tr class="zebra"><td class="rowh">3</td><td class="frozencol">North America</td><td>Feb 26</td><td>Atlas Core</td><td class="num">438,150</td><td class="num">174,900</td><td><span class="cf cf-g">60.1%</span></td><td class="num bar"><i style="width:58px"></i><span>+16.0</span></td><td>Maya Chen</td></tr>
+        <tr><td class="rowh">4</td><td class="frozencol">North America</td><td>Mar 26</td><td>Atlas Plus</td><td class="num">289,400</td><td class="num">142,600</td><td><span class="cf cf-a">50.7%</span></td><td class="num bar"><i style="width:30px"></i><span>+6.4</span></td><td>Maya Chen</td></tr>
+        <tr class="zebra"><td class="rowh">5</td><td class="frozencol">EMEA</td><td>Jan 26</td><td>Atlas Core</td><td class="num">356,900</td><td class="num">151,300</td><td><span class="cf cf-g">57.6%</span></td><td class="num bar"><i style="width:44px"></i><span>+11.8</span></td><td>Elena Voss</td></tr>
+        <tr><td class="rowh">6</td><td class="frozencol">EMEA</td><td>Feb 26</td><td>Atlas Core</td><td class="num">361,240</td><td class="num">159,800</td><td><span class="cf cf-a">55.8%</span></td><td class="num bar"><i style="width:24px"></i><span>+4.9</span></td><td>Elena Voss</td></tr>
+        <tr class="zebra"><td class="rowh">7</td><td class="frozencol">EMEA</td><td>Mar 26</td><td>Atlas Plus</td><td class="num">198,600</td><td class="num cmt">118,400</td><td><span class="cf cf-r">40.4%</span></td><td class="num bar"><i style="width:12px"></i><span>−2.1</span></td><td>Elena Voss</td></tr>
+        <tr><td class="rowh">8</td><td class="frozencol">APAC</td><td>Jan 26</td><td>Atlas Core</td><td class="num">248,300</td><td class="num">104,700</td><td><span class="cf cf-g">57.8%</span></td><td class="num bar"><i style="width:66px"></i><span>+21.3</span></td><td>Ravi Patel</td></tr>
+        <tr class="zebra"><td class="rowh">9</td><td class="frozencol">APAC</td><td>Feb 26</td><td>Atlas Core</td><td class="num">276,950</td><td class="num">112,100</td><td><span class="cf cf-g">59.5%</span></td><td class="num bar"><i style="width:74px"></i><span>+24.0</span></td><td>Ravi Patel</td></tr>
+        <tr><td class="rowh">10</td><td class="frozencol">APAC</td><td>Mar 26</td><td>Atlas Plus</td><td class="num">164,720</td><td class="num">86,900</td><td><span class="cf cf-a">47.2%</span></td><td class="num bar"><i style="width:38px"></i><span>+9.1</span></td><td>Ravi Patel</td></tr>
+        <tr class="zebra"><td class="rowh">11</td><td class="frozencol">LATAM</td><td>Jan 26</td><td>Atlas Core</td><td class="num">112,400</td><td class="num">58,300</td><td><span class="cf cf-a">48.1%</span></td><td class="num bar"><i style="width:26px"></i><span>+5.6</span></td><td>Marcus Webb</td></tr>
+        <tr><td class="rowh">12</td><td class="frozencol">LATAM</td><td>Feb 26</td><td>Atlas Core</td><td class="num">118,950</td><td class="num">61,700</td><td><span class="cf cf-a">48.1%</span></td><td class="num bar"><i style="width:28px"></i><span>+5.8</span></td><td>Marcus Webb</td></tr>
+        <tr class="zebra"><td class="rowh">13</td><td class="frozencol">LATAM</td><td>Mar 26</td><td>Atlas Plus</td><td class="num">   66,180</td><td class="num">39,400</td><td><span class="cf cf-r">40.5%</span></td><td class="num bar"><i style="width:10px"></i><span>−1.4</span></td><td>Marcus Webb</td></tr>
+        <tr class="hdrow"><td class="rowh on">14</td><td class="frozencol">Total FY26 Q1</td><td>—</td><td>All products</td><td class="num sel">4,182,900</td><td class="num">1,378,300</td><td><span class="cf cf-g">54.8%</span></td><td class="num bar"><i style="width:48px"></i><span>+11.4</span></td><td>Srihari</td></tr>
+        <tr><td class="rowh">15</td><td class="frozencol">Forecast Q2</td><td>Apr–Jun</td><td>Atlas Core</td><td class="num">1,642,000</td><td class="num">655,400</td><td><span class="cf cf-g">60.1%</span></td><td class="num bar"><i style="width:56px"></i><span>+15.2</span></td><td>Srihari</td></tr>
+        <tr class="zebra"><td class="rowh">16</td><td class="frozencol">Forecast Q2</td><td>Apr–Jun</td><td>Atlas Plus</td><td class="num">742,500</td><td class="num">368,900</td><td><span class="cf cf-a">50.3%</span></td><td class="num bar"><i style="width:34px"></i><span>+8.0</span></td><td>Srihari</td></tr>
+        <tr><td class="rowh">17</td><td class="frozencol">Forecast Q2</td><td>Apr–Jun</td><td>Atlas Enterprise</td><td class="num">986,300</td><td class="num">352,100</td><td><span class="cf cf-g">64.3%</span></td><td class="num bar"><i style="width:82px"></i><span>+28.7</span></td><td>Maya Chen</td></tr>
+        <tr class="zebra"><td class="rowh">18</td><td class="frozencol"></td><td></td><td></td><td class="num"></td><td class="num"></td><td></td><td class="num"></td><td></td></tr>
+        <tr><td class="rowh">19</td><td class="frozencol"></td><td></td><td></td><td class="num"></td><td class="num"></td><td></td><td class="num"></td><td></td></tr>
+        <tr class="zebra"><td class="rowh">20</td><td class="frozencol"></td><td></td><td></td><td class="num"></td><td class="num"></td><td></td><td class="num"></td><td></td></tr>
+        <tr><td class="rowh">21</td><td class="frozencol"></td><td></td><td></td><td class="num"></td><td class="num"></td><td></td><td class="num"></td><td></td></tr>
+        <tr class="zebra"><td class="rowh">22</td><td class="frozencol"></td><td></td><td></td><td class="num"></td><td class="num"></td><td></td><td class="num"></td><td></td></tr>
+        <tr><td class="rowh">23</td><td class="frozencol"></td><td></td><td></td><td class="num"></td><td class="num"></td><td></td><td class="num"></td><td></td></tr>
+        <tr class="zebra"><td class="rowh">24</td><td class="frozencol"></td><td></td><td></td><td class="num"></td><td class="num"></td><td></td><td class="num"></td><td></td></tr>
+        <tr><td class="rowh">25</td><td class="frozencol"></td><td></td><td></td><td class="num"></td><td class="num"></td><td></td><td class="num"></td><td></td></tr>
+        <tr class="zebra"><td class="rowh">26</td><td class="frozencol"></td><td></td><td></td><td class="num"></td><td class="num"></td><td></td><td class="num"></td><td></td></tr>
+        <tr><td class="rowh">27</td><td class="frozencol"></td><td></td><td></td><td class="num"></td><td class="num"></td><td></td><td class="num"></td><td></td></tr>
+      </table>
+
+      <div class="cmt-pop" style="left:978px; top:196px">
+        <div class="row gap-8" style="margin-bottom:7px">
+          <span class="avatar sm av-4" style="width:22px;height:22px;font-size:9px;border-radius:7px">RP</span>
+          <span style="font-size:11.5px;font-weight:650">Ravi Patel</span>
+          <span style="font-size:10px;color:var(--txt-3);margin-left:auto">F7 · 2d ago</span>
+        </div>
+        <div style="font-size:11.5px;line-height:1.5;color:var(--txt-2)">COGS restated after the vendor credit landed — margin drops below the 45% floor here, flagged red by the rule.</div>
+      </div>
+
+      <div class="scroll-rail"><div class="thumb" style="top:6%;height:62%"></div></div>
+
+      <div class="sheets">
+        <span class="stab"><span class="sq" style="background:#60A5FA"></span>Summary</span>
+        <span class="stab on"><span class="sq" style="background:var(--acc-2)"></span>Revenue</span>
+        <span class="stab"><span class="sq" style="background:#34D399"></span>Forecast</span>
+        <span class="stab"><span class="sq" style="background:#FBBF24"></span>Pivot</span>
+        <span class="stab"><span class="sq" style="background:#F472B6"></span>Charts</span>
+        <span class="chip" style="height:24px;font-size:10.5px;margin-left:6px"><svg class="ic sm" style="width:12px;height:12px"><use href="#i-eye-off"/></svg>2 hidden sheets</span>
+        <span class="icon-btn sm" style="margin-left:2px"><svg class="ic sm"><use href="#i-plus"/></svg></span>
+        <div class="grow"></div>
+        <span style="font-size:11px;color:var(--txt-3)">1,204 rows · 6 sheets · <b style="color:var(--txt-2)">formulas preserved</b></span>
+      </div>
+    </div>
+
+    <aside class="side">
+      <div class="glass card">
+        <h4>Revenue by region</h4>
+        <div class="sub">FY26 Q1 · from the Revenue sheet</div>
+        <div class="chart">
+          <div class="cb"><i style="height:112px"></i><b>1.14M</b><span>N. America</span></div>
+          <div class="cb"><i style="height:88px"></i><b>0.92M</b><span>EMEA</span></div>
+          <div class="cb"><i style="height:66px"></i><b>0.69M</b><span>APAC</span></div>
+          <div class="cb mut"><i style="height:29px"></i><b>0.30M</b><span>LATAM</span></div>
+        </div>
+      </div>
+
+      <div class="glass card">
+        <h4>Pivot — revenue by region &amp; quarter</h4>
+        <div class="sub">Rows: Region · Columns: Quarter · Σ Revenue</div>
+        <table class="dtable">
+          <tr><th>Region</th><th style="text-align:right">Q1</th><th style="text-align:right">Q2 fc</th><th style="text-align:right">Total</th></tr>
+          <tr><td class="rl">N. America</td><td style="text-align:right">1,140,350</td><td style="text-align:right">1,284,000</td><td class="tot" style="text-align:right">2,424,350</td></tr>
+          <tr><td class="rl">EMEA</td><td style="text-align:right">916,740</td><td style="text-align:right">1,002,600</td><td class="tot" style="text-align:right">1,919,340</td></tr>
+          <tr><td class="rl">APAC</td><td style="text-align:right">689,970</td><td style="text-align:right">824,200</td><td class="tot" style="text-align:right">1,514,170</td></tr>
+          <tr><td class="rl">LATAM</td><td style="text-align:right">297,530</td><td style="text-align:right">260,000</td><td class="tot" style="text-align:right">557,530</td></tr>
+          <tr><td class="rl tot">Total</td><td class="tot" style="text-align:right">4,182,900</td><td class="tot" style="text-align:right">3,370,800</td><td class="tot" style="text-align:right">7,553,700</td></tr>
+        </table>
+      </div>
+
+      <div class="glass card">
+        <h4>Conditional formatting</h4>
+        <div class="sub">2 rules active on this sheet</div>
+        <div class="col gap-8">
+          <div class="row gap-8"><span class="cf cf-g">≥ 55%</span><span style="font-size:11.5px;color:var(--txt-2)">Margin — healthy</span></div>
+          <div class="row gap-8"><span class="cf cf-a">45–55%</span><span style="font-size:11.5px;color:var(--txt-2)">Margin — watch</span></div>
+          <div class="row gap-8"><span class="cf cf-r">&lt; 45%</span><span style="font-size:11.5px;color:var(--txt-2)">Margin — below floor</span></div>
+          <div class="row gap-8" style="margin-top:2px"><span class="chip" style="height:22px;font-size:10.5px">Data bar</span><span style="font-size:11.5px;color:var(--txt-2)">Growth % column</span></div>
+        </div>
+      </div>
+
+      <div class="grow"></div>
+      <div class="chip ok" style="height:auto;padding:10px 14px;line-height:1.45;white-space:normal;align-items:flex-start">
+        <svg class="ic sm" style="flex:none;margin-top:1px"><use href="#i-check"/></svg>
+        <span>Formulas, charts and pivots read natively — the file is never converted or re-uploaded.</span>
+      </div>
+    </aside>
+  </div>
+</div>

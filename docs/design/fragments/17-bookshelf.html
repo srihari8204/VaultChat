@@ -1,0 +1,418 @@
+<style>
+#s-shelf .body { align-items: stretch; min-height: 0; }
+
+/* ---- left nav ---- */
+#s-shelf .nav {
+  width: 262px; flex: none;
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 18px 12px 14px;
+  background: rgba(15, 14, 24, 0.55);
+  border-right: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+}
+#s-shelf .nav h1 { font-size: 19px; font-weight: 700; letter-spacing: -.2px; padding: 0 8px 12px; }
+#s-shelf .nrow {
+  display: flex; align-items: center; gap: 11px;
+  height: 36px; padding: 0 12px; border-radius: 9px;
+  font-size: 12.5px; color: var(--txt-2);
+}
+#s-shelf .nrow .ic { color: var(--txt-3); }
+#s-shelf .nrow .n { margin-left: auto; font-size: 11px; color: var(--txt-3); font-variant-numeric: tabular-nums; }
+#s-shelf .nrow.on {
+  background: var(--acc-soft); color: var(--txt-1); font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--stroke-acc);
+}
+#s-shelf .nrow.on .ic { color: var(--acc-3); }
+#s-shelf .nsec { font-size: 10px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; color: var(--txt-3); padding: 16px 12px 6px; }
+#s-shelf .coll-dot { width: 9px; height: 9px; border-radius: 3px; flex: none; }
+
+/* ---- main ---- */
+#s-shelf .main { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
+#s-shelf .mhead {
+  height: 74px; flex: none;
+  display: flex; align-items: center; gap: 12px;
+  padding: 0 26px;
+  border-bottom: 1px solid var(--stroke);
+}
+#s-shelf .mhead h2 { font-size: 20px; font-weight: 700; letter-spacing: -.3px; }
+#s-shelf .mhead .cnt { font-size: 11.5px; color: var(--txt-3); margin-top: 2px; }
+#s-shelf .vtog { display: flex; gap: 2px; padding: 3px; border-radius: 9px; background: rgba(235,232,255,.05); border: 1px solid var(--stroke); }
+#s-shelf .vtog span { width: 30px; height: 26px; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: var(--txt-3); }
+#s-shelf .vtog span.on { background: var(--acc-soft); color: var(--acc-3); box-shadow: inset 0 0 0 1px var(--stroke-acc); }
+
+#s-shelf .shelfbody { flex: 1; min-height: 0; padding: 18px 26px 10px; overflow: hidden; }
+#s-shelf .grid {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+#s-shelf .grouph {
+  display: flex; align-items: center; gap: 10px;
+  padding: 4px 2px 12px;
+}
+#s-shelf .grouph .gt { font-size: 12.5px; font-weight: 650; }
+#s-shelf .grouph .gc { font-size: 11px; color: var(--txt-3); }
+#s-shelf .grouph .rule { flex: 1; height: 1px; background: var(--stroke); margin-left: 4px; }
+#s-shelf .grouph .ic { color: var(--acc-3); }
+#s-shelf .gap-sec { height: 20px; }
+
+/* ---- file card ---- */
+#s-shelf .fcard {
+  border-radius: var(--r-lg);
+  background: var(--glass);
+  border: 1px solid var(--stroke);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--sh-2), var(--inner-hi);
+  overflow: hidden;
+  display: flex; flex-direction: column;
+  position: relative;
+}
+#s-shelf .fcard .cover {
+  height: 152px; position: relative;
+  display: flex; align-items: center; justify-content: center;
+  border-bottom: 1px solid var(--stroke);
+  overflow: hidden;
+}
+#s-shelf .fcard .ext {
+  width: 58px; height: 58px; border-radius: 16px;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 12.5px; font-weight: 700; letter-spacing: .6px;
+  box-shadow: 0 8px 26px rgba(0,0,0,.45), var(--inner-hi);
+}
+#s-shelf .fcard .meta { padding: 13px 14px 14px; display: flex; flex-direction: column; gap: 4px; }
+#s-shelf .fcard .fn { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#s-shelf .fcard .fs { font-size: 10.5px; color: var(--txt-3); }
+#s-shelf .mark {
+  position: absolute; top: 10px; right: 10px; z-index: 2;
+  width: 26px; height: 26px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(8,7,13,.6); border: 1px solid var(--stroke-2);
+  backdrop-filter: blur(8px);
+}
+#s-shelf .mark.star { color: var(--warn); }
+#s-shelf .mark.pin  { color: var(--acc-3); }
+#s-shelf .badge-tl {
+  position: absolute; top: 10px; left: 10px; z-index: 2;
+  padding: 3px 9px; border-radius: var(--r-pill);
+  background: rgba(8,7,13,.62); border: 1px solid var(--stroke-2);
+  backdrop-filter: blur(8px);
+  font-size: 9.5px; font-weight: 700; letter-spacing: .5px; color: var(--txt-2);
+}
+
+/* book-cover treatment */
+#s-shelf .bookcover {
+  width: 108px; height: 130px; border-radius: 4px 9px 9px 4px;
+  background: linear-gradient(145deg, #4C2FA8, #2A1A63);
+  border: 1px solid rgba(179,136,255,.32);
+  box-shadow: 0 14px 34px rgba(0,0,0,.55), inset 3px 0 0 rgba(255,255,255,.14);
+  padding: 14px 12px 10px 16px;
+  display: flex; flex-direction: column; gap: 7px;
+  position: relative;
+}
+#s-shelf .bookcover .bt { font-size: 12px; font-weight: 700; line-height: 1.25; color: #fff; }
+#s-shelf .bookcover .bl { height: 2px; border-radius: 2px; background: rgba(255,255,255,.22); }
+#s-shelf .bookcover .bb { margin-top: auto; font-size: 8px; letter-spacing: .8px; color: rgba(255,255,255,.55); }
+
+/* image mosaic cover */
+#s-shelf .mosaic { position: absolute; inset: 0; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 2px; }
+#s-shelf .mosaic i { display: block; }
+
+/* progress on card */
+#s-shelf .cardprog { padding: 0 14px 13px; }
+#s-shelf .cardprog .lbl { display: flex; justify-content: space-between; font-size: 10px; color: var(--txt-3); margin-bottom: 5px; }
+
+/* hover state card */
+#s-shelf .fcard.hov {
+  border-color: var(--stroke-acc);
+  box-shadow: var(--sh-3), 0 0 0 1px var(--stroke-acc), 0 0 34px rgba(124,77,255,.22);
+  transform: translateY(-2px);
+}
+#s-shelf .qa {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
+  display: flex; gap: 8px; padding: 12px 14px;
+  background: linear-gradient(180deg, rgba(12,11,20,0), rgba(12,11,20,.92) 42%);
+}
+
+/* waveform mini */
+#s-shelf .wv { display: flex; align-items: center; gap: 2px; height: 40px; }
+#s-shelf .wv i { width: 3px; border-radius: 2px; background: rgba(179,136,255,.55); }
+
+/* ---- footer strip ---- */
+#s-shelf .foot {
+  height: 58px; flex: none;
+  display: flex; align-items: center; gap: 12px;
+  padding: 0 26px;
+  border-top: 1px solid var(--stroke);
+  background: rgba(13, 12, 21, 0.55);
+  backdrop-filter: var(--blur);
+}
+#s-shelf .bar {
+  width: 220px; height: 6px; border-radius: 4px;
+  background: rgba(235,232,255,.10); overflow: hidden; display: flex;
+}
+#s-shelf .bar i { display: block; height: 100%; }
+</style>
+<div class="screen" id="s-shelf">
+  <header class="vc-titlebar">
+    <div class="vc-brand"><span class="vc-logo"><svg class="ic"><use href="#i-shield"/></svg></span>VaultChat</div>
+    <div class="vc-search"><svg class="ic sm"><use href="#i-search"/></svg><span class="grow">Search chats, people, and every file…</span><span class="kbd">Ctrl K</span></div>
+    <div class="row gap-4">
+      <span class="icon-btn sm"><svg class="ic sm"><use href="#i-cloud-check"/></svg></span>
+      <span class="icon-btn sm"><svg class="ic sm"><use href="#i-bell"/></svg></span>
+      <span class="avatar sm av-6" style="width:26px;height:26px;font-size:10px;border-radius:9px">SB</span>
+    </div>
+    <div class="vc-win"><span>─</span><span>▢</span><span class="close">✕</span></div>
+  </header>
+
+  <div class="row grow body">
+    <nav class="vc-rail">
+      <div class="rail-btn"><svg class="ic lg"><use href="#i-chat"/></svg></div><div class="rail-label">Chats</div>
+      <div class="rail-btn active"><svg class="ic lg"><use href="#i-book"/></svg></div><div class="rail-label">Shelf</div>
+      <div class="rail-btn"><svg class="ic lg"><use href="#i-search"/></svg></div><div class="rail-label">Search</div>
+      <div class="rail-btn"><svg class="ic lg"><use href="#i-cloud-off"/></svg></div><div class="rail-label">Offline</div>
+      <div class="rail-btn"><svg class="ic lg"><use href="#i-shield"/></svg></div><div class="rail-label">Vault</div>
+      <div class="rail-spacer"></div>
+      <div class="rail-btn"><svg class="ic lg"><use href="#i-settings"/></svg></div>
+    </nav>
+
+    <aside class="nav">
+      <h1>Bookshelf</h1>
+      <div class="nrow on"><svg class="ic"><use href="#i-clock"/></svg>Recent<span class="n">126</span></div>
+      <div class="nrow"><svg class="ic"><use href="#i-pin"/></svg>Pinned<span class="n">8</span></div>
+      <div class="nrow"><svg class="ic"><use href="#i-star"/></svg>Favorites<span class="n">21</span></div>
+      <div class="nrow"><svg class="ic"><use href="#i-share"/></svg>Shared with me<span class="n">64</span></div>
+      <div class="nrow"><svg class="ic"><use href="#i-download"/></svg>Downloads<span class="n">34</span></div>
+
+      <div class="nsec">Collections</div>
+      <div class="nrow"><span class="coll-dot" style="background:var(--acc-2)"></span>Atlas Launch<span class="n">12</span></div>
+      <div class="nrow"><span class="coll-dot" style="background:#F472B6"></span>Legal &amp; contracts<span class="n">5</span></div>
+      <div class="nrow"><span class="coll-dot" style="background:#34D399"></span>Brand &amp; assets<span class="n">23</span></div>
+      <div class="nrow"><span class="coll-dot" style="background:#FBBF24"></span>Release 1.3<span class="n">17</span></div>
+      <div class="nrow" style="color:var(--txt-3)"><svg class="ic"><use href="#i-plus"/></svg>New collection</div>
+
+      <div class="nsec">Folders</div>
+      <div class="nrow"><svg class="ic"><use href="#i-folder"/></svg>Contracts<span class="n">19</span></div>
+      <div class="nrow"><svg class="ic"><use href="#i-folder"/></svg>Receipts<span class="n">42</span></div>
+      <div class="nrow"><svg class="ic"><use href="#i-folder"/></svg>Screens<span class="n">88</span></div>
+
+      <div class="grow"></div>
+      <div class="glass-quiet" style="padding:12px 13px">
+        <div class="row gap-8" style="margin-bottom:8px"><svg class="ic sm" style="color:var(--acc-3)"><use href="#i-book"/></svg><span style="font-size:11.5px;font-weight:600">Continue reading</span></div>
+        <div style="font-size:11px;color:var(--txt-2);margin-bottom:7px">Atlas-MSA-Contract.pdf · page 9 of 14</div>
+        <div class="progress"><div class="fill" style="width:62%"></div></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="mhead">
+        <div class="col">
+          <h2>Recent</h2>
+          <span class="cnt">126 files · every format your team has ever shared</span>
+        </div>
+        <div class="grow"></div>
+        <div class="field" style="width:230px"><svg class="ic sm"><use href="#i-search"/></svg><span class="grow">Filter this shelf</span></div>
+        <span class="chip"><svg class="ic sm"><use href="#i-sort"/></svg>Last opened<svg class="ic sm"><use href="#i-chev-d"/></svg></span>
+        <div class="vtog">
+          <span class="on"><svg class="ic sm"><use href="#i-grid"/></svg></span>
+          <span><svg class="ic sm"><use href="#i-toc"/></svg></span>
+        </div>
+      </div>
+
+      <div class="shelfbody">
+      <div class="grouph"><svg class="ic sm"><use href="#i-pin"/></svg><span class="gt">Pinned</span><span class="gc">4 files kept at the top of the shelf</span><span class="rule"></span></div>
+      <div class="grid" style="margin-bottom:22px">
+        <!-- 1 · Word, book-cover treatment -->
+        <div class="fcard">
+          <div class="cover" style="background:linear-gradient(160deg, rgba(43,107,228,.16), rgba(8,7,13,.4))">
+            <span class="mark pin"><svg class="ic sm"><use href="#i-pin"/></svg></span>
+            <div class="bookcover">
+              <div class="bt">Atlas Proposal</div>
+              <div class="bl" style="width:70%"></div>
+              <div class="bl" style="width:52%"></div>
+              <div class="bb">24 PAGES · MAYA CHEN</div>
+            </div>
+          </div>
+          <div class="meta">
+            <span class="fn">Atlas-Proposal.docx</span>
+            <span class="fs">Opened 2h ago · Maya Chen · 4.2 MB</span>
+          </div>
+        </div>
+
+        <!-- 2 · Excel -->
+        <div class="fcard">
+          <div class="cover" style="background:linear-gradient(160deg, rgba(29,158,108,.15), rgba(8,7,13,.4))">
+            <span class="mark star"><svg class="ic sm"><use href="#i-star"/></svg></span>
+            <span class="ext ft-xls">XLSX</span>
+          </div>
+          <div class="meta">
+            <span class="fn">Atlas-Financials-FY26.xlsx</span>
+            <span class="fs">Opened 4h ago · Ravi Patel · 6 sheets</span>
+          </div>
+        </div>
+
+        <!-- 3 · PowerPoint -->
+        <div class="fcard">
+          <div class="cover" style="background:linear-gradient(160deg, rgba(214,75,39,.15), rgba(8,7,13,.4))">
+            <span class="badge-tl">18 SLIDES</span>
+            <span class="ext ft-ppt">PPTX</span>
+          </div>
+          <div class="meta">
+            <span class="fn">Atlas-Launch-Deck.pptx</span>
+            <span class="fs">Opened yesterday · Srihari · 12.6 MB</span>
+          </div>
+        </div>
+
+        <!-- 4 · PDF with reading progress -->
+        <div class="fcard">
+          <div class="cover" style="background:linear-gradient(160deg, rgba(220,53,69,.15), rgba(8,7,13,.4))">
+            <span class="mark star"><svg class="ic sm"><use href="#i-star"/></svg></span>
+            <span class="ext ft-pdf">PDF</span>
+          </div>
+          <div class="meta">
+            <span class="fn">Atlas-MSA-Contract.pdf</span>
+            <span class="fs">Signed · Elena Voss · 14 pages</span>
+          </div>
+          <div class="cardprog">
+            <div class="lbl"><span>Reading progress</span><span>62%</span></div>
+            <div class="progress"><div class="fill" style="width:62%"></div></div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="grouph"><svg class="ic sm"><use href="#i-clock"/></svg><span class="gt">Recent</span><span class="gc">everything opened in the last seven days</span><span class="rule"></span></div>
+      <div class="grid">
+        <!-- 5 · Images (mosaic) -->
+        <div class="fcard">
+          <div class="cover">
+            <div class="mosaic">
+              <i style="background:linear-gradient(140deg,#5B3FA8,#2C1E5C)"></i>
+              <i style="background:linear-gradient(140deg,#B0559A,#5B2453)"></i>
+              <i style="background:linear-gradient(140deg,#3E7FB8,#16324F)"></i>
+              <i style="background:linear-gradient(140deg,#C98A4B,#5A3A1B)"></i>
+            </div>
+            <span class="badge-tl">JPG · WEBP · SVG · GIF</span>
+          </div>
+          <div class="meta">
+            <span class="fn">Atlas hero shoot</span>
+            <span class="fs">42 images · updated 6h ago</span>
+          </div>
+        </div>
+
+        <!-- 6 · Video, hover state with quick actions -->
+        <div class="fcard hov">
+          <div class="cover" style="background:radial-gradient(70% 80% at 60% 42%, rgba(146,87,255,.5), transparent 64%), linear-gradient(160deg,#1D1A33,#0B0A14)">
+            <span class="badge-tl">04:36</span>
+            <span class="ext" style="background:rgba(8,7,13,.5);border:1px solid rgba(235,232,255,.25);backdrop-filter:blur(8px)"><svg class="ic lg"><use href="#i-play"/></svg></span>
+            <div class="qa">
+              <span class="btn sm btn-primary" style="flex:1;justify-content:center">Open</span>
+              <span class="btn sm"><svg class="ic sm"><use href="#i-share"/></svg></span>
+              <span class="btn sm"><svg class="ic sm"><use href="#i-more-h"/></svg></span>
+            </div>
+          </div>
+          <div class="meta">
+            <span class="fn">Atlas-Demo-v3.mp4</span>
+            <span class="fs">Watched to 02:41 · 148 MB</span>
+          </div>
+        </div>
+
+        <!-- 7 · Audio -->
+        <div class="fcard">
+          <div class="cover" style="background:linear-gradient(160deg, rgba(14,165,233,.14), rgba(8,7,13,.4))">
+            <span class="badge-tl">12:04</span>
+            <div class="col" style="align-items:center;gap:12px">
+              <span class="ext ft-aud">MP3</span>
+              <div class="wv">
+                <i style="height:12px"></i><i style="height:22px"></i><i style="height:34px"></i><i style="height:18px"></i><i style="height:28px"></i>
+                <i style="height:40px"></i><i style="height:24px"></i><i style="height:14px"></i><i style="height:30px"></i><i style="height:20px"></i>
+                <i style="height:36px"></i><i style="height:16px"></i><i style="height:26px"></i><i style="height:10px"></i>
+              </div>
+            </div>
+          </div>
+          <div class="meta">
+            <span class="fn">Standup-2026-08-04.mp3</span>
+            <span class="fs">3 bookmarks · transcript ready</span>
+          </div>
+        </div>
+
+        <!-- 8 · Archive -->
+        <div class="fcard">
+          <div class="cover" style="background:linear-gradient(160deg, rgba(180,83,9,.15), rgba(8,7,13,.4))">
+            <span class="badge-tl">247 FILES</span>
+            <span class="ext ft-zip">ZIP</span>
+          </div>
+          <div class="meta">
+            <span class="fn">Design-Assets.zip</span>
+            <span class="fs">Browsed without extracting · 86 MB</span>
+          </div>
+        </div>
+
+        <!-- 9 · Code -->
+        <div class="fcard">
+          <div class="cover" style="background:linear-gradient(160deg, rgba(124,77,255,.15), rgba(8,7,13,.4))">
+            <span class="badge-tl">342 LINES</span>
+            <span class="ext ft-code">TS</span>
+          </div>
+          <div class="meta">
+            <span class="fn">PaymentService.ts</span>
+            <span class="fs">Opened Mon · Ravi Patel · read-only</span>
+          </div>
+        </div>
+
+        <!-- 10 · CSV -->
+        <div class="fcard">
+          <div class="cover" style="background:linear-gradient(160deg, rgba(100,116,139,.16), rgba(8,7,13,.4))">
+            <span class="badge-tl">1,204 ROWS</span>
+            <span class="ext ft-txt">CSV</span>
+          </div>
+          <div class="meta">
+            <span class="fn">metrics.csv</span>
+            <span class="fs">Opened Mon · Release 1.3 · 64 KB</span>
+          </div>
+        </div>
+
+        <!-- 11 · Markdown -->
+        <div class="fcard">
+          <div class="cover" style="background:linear-gradient(160deg, rgba(96,165,250,.15), rgba(8,7,13,.4))">
+            <span class="badge-tl">READER READY</span>
+            <span class="ext ft-txt">MD</span>
+          </div>
+          <div class="meta">
+            <span class="fn">release-notes.md</span>
+            <span class="fs">Opened Tue · 6 min read</span>
+          </div>
+        </div>
+
+        <!-- 12 · Log -->
+        <div class="fcard">
+          <div class="cover" style="background:linear-gradient(160deg, rgba(251,191,36,.13), rgba(8,7,13,.4))">
+            <span class="badge-tl">1 ERROR</span>
+            <span class="ext" style="background:linear-gradient(135deg,#B45309,#FBBF24)">LOG</span>
+          </div>
+          <div class="meta">
+            <span class="fn">deploy.log</span>
+            <span class="fs">Tailing live · 2,846 lines</span>
+          </div>
+        </div>
+      </div>
+      </div>
+
+      <div class="scroll-rail" style="top:80px;bottom:70px"><div class="thumb" style="top:2%;height:58%"></div></div>
+
+      <div class="foot">
+        <svg class="ic" style="color:var(--acc-3)"><use href="#i-layers"/></svg>
+        <span style="font-size:12px;color:var(--txt-2)"><b style="color:var(--txt-1)">38.2 GB</b> in your vault</span>
+        <div class="bar">
+          <i style="width:34%;background:linear-gradient(90deg,#9257FF,#7C4DFF)"></i>
+          <i style="width:22%;background:#3E7FB8"></i>
+          <i style="width:16%;background:#34D399"></i>
+          <i style="width:11%;background:#FBBF24"></i>
+        </div>
+        <span style="font-size:11px;color:var(--txt-3)">Documents · Media · Data · Archives</span>
+        <div class="grow"></div>
+        <span class="chip ok"><svg class="ic sm"><use href="#i-cloud-check"/></svg>All synced</span>
+        <span class="chip"><svg class="ic sm"><use href="#i-download"/></svg>34 available offline</span>
+        <span class="secure-pill"><svg class="ic sm"><use href="#i-lock"/></svg>End-to-end encrypted at rest</span>
+      </div>
+    </main>
+  </div>
+</div>
