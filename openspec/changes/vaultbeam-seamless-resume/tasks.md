@@ -372,6 +372,80 @@ Phase 1 must not merge unless every compatibility and parity test passes.
 
 ---
 
+## 9. Rollout runbook (final approval, Phase 5)
+
+**Phase 5 is an operational act, not a code change.** What is delivered here is the
+tooling and the signals; the rollout itself cannot start until §8.2 has passed on real
+hardware. Nothing below is safe to run before then.
+
+### 9.1 The dial
+
+`node scripts/vaultbeam-rollout.js <status|floor|set|kill|revive>` (needs `DATABASE_URL`
+and the `pg` package — run it from `vaultchat-backend/`). Its guards are covered by
+`lib/vaultBeamRollout.selftest.ts`, because they are the decisions that get made under
+pressure. It refuses to: raise the percentage with no `min_build`; use a percentage off
+the ladder; or skip a rung. It never refuses `kill`, and never restricts a rollback.
+
+### 9.2 The signals
+
+Cohort attribution needs no client telemetry: a seamless sender writes a **v2** segment
+plan and a legacy sender writes **v1**, and the server already stores the plan. From
+`GET /internal/metrics`, per cohort:
+
+| Metric | Reads as |
+|---|---|
+| `vaultbeam_started_{v1,v2}` | the denominator — a falling completion count means nothing without it |
+| `vaultbeam_completed_{v1,v2}` | delivery rate per cohort |
+| `vaultbeam_aborted_{v1,v2}` | failure rate per cohort |
+| `vaultbeam_staged_blocks_{v1,v2}` ÷ `vaultbeam_total_blocks_{v1,v2}` | **the headline**: how much of the file the relay had to carry |
+| `vaultbeam_version_bump_{v1,v2}` | re-inits; a spike means clients are materially resetting transfers |
+
+The staged-block ratio is **not** a bug detector in isolation — a transfer that never
+found a direct tier legitimately stages every block. It is only meaningful as a
+comparison: v2 should be **lower** than v1 (that saving is the entire point of the
+change). If v2 is not lower, the feature is not doing its job; if v2 is **higher**,
+something is re-staging and the dial comes down.
+
+### 9.3 The ladder
+
+Set `min_build` **first** — a v2 plan must never reach a build that cannot read it —
+then `0 → 1 → 10 → 25 → 50 → 100`, holding at least 24 h at each rung (long enough for a
+12 GB transfer on a slow link to finish and for a full daily usage cycle). At each rung,
+before advancing, all of:
+
+- `completed / started` for **v2** is not below **v1** by more than 1 point
+- the staged-block ratio for **v2** is **≤** the ratio for **v1**
+- `vaultbeam_version_bump_v2` is not elevated versus v1
+- no new crash cluster in Sentry tagged `vaultbeam`
+
+### 9.4 Abort criteria — kill immediately, do not investigate first
+
+- any report of a **corrupt or truncated received file** (the durability watermark and
+  the GCM tag should make this impossible; if it happens, the model is wrong)
+- v2 abort rate more than **2×** v1
+- staged-block ratio for v2 **above** v1 (a re-upload regression — the original bug)
+- an OOM cluster on transfer screens
+- `vaultbeam_version_bump_v2` spiking (re-init churn, which is the nonce-reuse trigger)
+
+```
+node scripts/vaultbeam-rollout.js kill
+```
+
+Effective within one client TTL (≤15 min) or immediately at the next transfer start.
+**It stops new transfers only** — an in-flight transfer finishes on its own terms rather
+than abandoning a half-written file on someone's disk. `revive` clears the kill and
+deliberately does *not* restore the percentage.
+
+### 9.5 Prerequisites (all still open)
+
+- [ ] 9.5.1 §8.2 device matrix passed on real hardware
+- [ ] 9.5.2 Migration 071 applied to the server the build talks to
+- [ ] 9.5.3 A build shipped with `RUN_USER_INITIATED_JOBS` and the job service, and
+      `min_build` set to that build
+- [ ] 9.5.4 `/internal/metrics` scraped into a dashboard with both cohorts side by side
+
+---
+
 ## File-by-file change list (deliverable 8)
 
 ### New

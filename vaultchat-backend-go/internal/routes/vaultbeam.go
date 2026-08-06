@@ -557,18 +557,27 @@ func vbRelayInit(w http.ResponseWriter, r *http.Request) {
 	// the same id (client retry). ON CONFLICT keeps ownership stable.
 	var retID string
 	var expiresAt time.Time
-	sessionVersion := 1
+	var sessionVersion int
+	// PARITY FIX (was Node-only): a re-init MUST bump session_version and clear
+	// recv_mask. Without it the whole session-versioning safeguard is inert —
+	// the receiver's old in-memory session never reads as stale, so it keeps
+	// posting recv_mask bits describing the PREVIOUS file's chunk layout, which
+	// is the exact corruption 070_vaultbeam_recv_mask.sql was written to
+	// prevent. It also leaves the client free to keep sealing under the old K_t
+	// against a reset chunk grid, which is nonce reuse.
 	err = db.Pool.QueryRow(ctx,
 		`INSERT INTO vb_transfer
 		   (transfer_id, sender_id, recipient_id, chat_id, total_bytes, block_count, chunk_count, uploaded_mask, state, plan)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending',$9)
 		 ON CONFLICT (transfer_id) DO UPDATE
 		   SET total_bytes = EXCLUDED.total_bytes, block_count = EXCLUDED.block_count,
-		       chunk_count = EXCLUDED.chunk_count, plan = EXCLUDED.plan
+		       chunk_count = EXCLUDED.chunk_count, plan = EXCLUDED.plan,
+		       session_version = vb_transfer.session_version + 1,
+		       recv_mask = NULL
 		   WHERE vb_transfer.sender_id = $2 AND vb_transfer.state IN ('pending','ready')
-		 RETURNING transfer_id, expires_at`,
+		 RETURNING transfer_id, expires_at, session_version`,
 		transferID, user.ID, recipientID, chatID, tbParam, blockCount, chunkCount, mask, plan).
-		Scan(&retID, &expiresAt)
+		Scan(&retID, &expiresAt, &sessionVersion)
 	if err != nil {
 		if db.NoRows(err) {
 			httpx.Err(w, 409, "transferId already used")
@@ -577,6 +586,11 @@ func vbRelayInit(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+
+	if sessionVersion > 1 {
+		vbMetricVersionBump(&vbTransfer{Plan: plan})
+	}
+	vbMetricStarted(&vbTransfer{Plan: plan})
 
 	// Opaque doorbell — name/type arrive over E2EE, not here.
 	emitx.ToUids([]string{recipientID}, "vb_invite", map[string]any{
@@ -967,6 +981,11 @@ func vbRelayComplete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Read the staged-block count BEFORE the update zeroes the mask — it is the
+	// canary's headline signal (how much of the file the relay had to carry) and
+	// there is no second chance to observe it.
+	stagedBlocks := vbCountSet(t.UploadedMask, t.BlockCount)
+
 	vbDeletePrefix(ctx, "vault_relay/"+t.TransferID+"/")
 	if _, err := db.Pool.Exec(ctx,
 		`UPDATE vb_transfer SET state = 'complete', uploaded_mask = '\x' WHERE transfer_id = $1`,
@@ -974,6 +993,7 @@ func vbRelayComplete(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 500, "complete failed")
 		return
 	}
+	vbMetricCompleted(t, stagedBlocks)
 	emitx.ToUids([]string{t.SenderID}, "vb_complete", map[string]any{
 		"transferId": t.TransferID, "sessionVersion": t.Version,
 	})
@@ -1009,6 +1029,7 @@ func vbRelayAbort(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 500, "abort failed")
 		return
 	}
+	vbMetricAborted(t)
 	other := t.RecipientID
 	if t.SenderID != user.ID {
 		other = t.SenderID
