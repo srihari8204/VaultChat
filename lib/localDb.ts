@@ -128,6 +128,23 @@ export function getLocalDb(): Promise<LocalDb> {
           saved_path   TEXT,
           updated_at   INTEGER
         );
+        CREATE TABLE IF NOT EXISTS vb_chunk_state (
+          transfer_id     TEXT PRIMARY KEY,
+          session_version INTEGER NOT NULL DEFAULT 1,
+          role            TEXT,
+          total_bytes     INTEGER,
+          chunk_count     INTEGER,
+          peer_have       TEXT,
+          r2_have         TEXT,
+          state           TEXT,
+          last_transport  TEXT,
+          driver_state    TEXT,
+          src_path        TEXT,
+          src_size        INTEGER,
+          src_mtime       INTEGER,
+          name            TEXT,
+          updated_at      INTEGER NOT NULL
+        );
         CREATE INDEX IF NOT EXISTS idx_messages_preview
           ON messages(chat_id, id DESC)
           WHERE deleted_at IS NULL AND type <> 'reaction';
@@ -620,6 +637,66 @@ export async function deleteVbTransfer(transferId: string): Promise<void> {
   const db = await getLocalDb();
   await db.runAsync(`DELETE FROM vb_transfers WHERE transfer_id = ?`, [transferId]);
 }
+// ── VaultBeam seamless resume: durable session + chunk bitmaps ──────
+// The bitmaps are the resume truth (design §6). Content-free: bit positions,
+// sizes and a cache path — never file bytes, the key, or the filename-of-content
+// (`name` is the display name already shown in the bubble).
+//
+// NOT stored, on purpose: the retry queue (it is exactly ¬PeerHave ∧ ¬R2Have, so
+// a stored copy could disagree with the bitmaps after a crash) and the in-flight
+// set (after a crash nothing is in flight, and recording otherwise would
+// suppress legitimate retries).
+export async function persistVbChunkState(r: {
+  transferId: string; sessionVersion?: number; role?: string; totalBytes?: number;
+  chunkCount?: number; peerHave?: string; r2Have?: string; state?: string;
+  lastTransport?: string; driverState?: string; srcPath?: string; srcSize?: number;
+  srcMtime?: number; name?: string;
+}): Promise<void> {
+  const db = await getLocalDb();
+  await db.runAsync(
+    `INSERT INTO vb_chunk_state (transfer_id, session_version, role, total_bytes, chunk_count,
+                                 peer_have, r2_have, state, last_transport, driver_state,
+                                 src_path, src_size, src_mtime, name, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+     ON CONFLICT(transfer_id) DO UPDATE SET
+       session_version=excluded.session_version, role=excluded.role,
+       total_bytes=excluded.total_bytes, chunk_count=excluded.chunk_count,
+       peer_have=excluded.peer_have, r2_have=excluded.r2_have, state=excluded.state,
+       last_transport=excluded.last_transport, driver_state=excluded.driver_state,
+       src_path=excluded.src_path, src_size=excluded.src_size, src_mtime=excluded.src_mtime,
+       name=excluded.name, updated_at=excluded.updated_at`,
+    [r.transferId, r.sessionVersion ?? 1, r.role ?? null, r.totalBytes ?? 0, r.chunkCount ?? 0,
+     r.peerHave ?? '', r.r2Have ?? '', r.state ?? 'active', r.lastTransport ?? null,
+     r.driverState ?? null, r.srcPath ?? null, r.srcSize ?? null, r.srcMtime ?? null,
+     r.name ?? null, Date.now()]);
+}
+
+/** Rows in the shape lib/vaultBeam/persistence.ts expects (camelCase). */
+export async function loadVbChunkStates(limit = 200): Promise<any[]> {
+  const db = await getLocalDb();
+  const rows: any[] = await db.getAllAsync(
+    `SELECT * FROM vb_chunk_state ORDER BY updated_at DESC LIMIT ?`, [limit]);
+  return rows.map((r) => ({
+    transferId: r.transfer_id, sessionVersion: r.session_version | 0, role: r.role,
+    totalBytes: r.total_bytes | 0, chunkCount: r.chunk_count | 0,
+    peerHave: r.peer_have ?? '', r2Have: r.r2_have ?? '', state: r.state ?? 'active',
+    lastTransport: r.last_transport ?? undefined, driverState: r.driver_state ?? undefined,
+    srcPath: r.src_path ?? undefined, srcSize: r.src_size ?? undefined,
+    srcMtime: r.src_mtime ?? undefined, name: r.name ?? undefined, updatedAt: r.updated_at | 0,
+  }));
+}
+
+export async function deleteVbChunkState(transferId: string): Promise<void> {
+  const db = await getLocalDb();
+  await db.runAsync(`DELETE FROM vb_chunk_state WHERE transfer_id = ?`, [transferId]);
+}
+
+/** Reap rows whose transfer can no longer exist server-side (24 h relay TTL). */
+export async function pruneVbChunkState(maxAgeMs = 7 * 24 * 60 * 60 * 1000): Promise<void> {
+  const db = await getLocalDb();
+  await db.runAsync(`DELETE FROM vb_chunk_state WHERE updated_at < ?`, [Date.now() - maxAgeMs]);
+}
+
 /** Keep the table bounded — drop all but the most recent `keep` transfers. */
 export async function pruneVbTransfers(keep = 200): Promise<void> {
   const db = await getLocalDb();

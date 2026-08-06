@@ -122,6 +122,13 @@ export interface BlockOp {
   // native op uses offset-based chunk identity (AAD+nonce) so per-segment size
   // changes stay clean. Omitted ⇒ legacy uniform path (offset = blockIndex·blockBytes).
   blockPlainOffset?: number;
+  // Chunk-identity scheme (mirrors services/vaultbeam/rust/src/chunk.rs IdScheme).
+  // 'canonical' ⇒ id = blockPlainOffset/chunkBytes, i.e. the chunk's GLOBAL LOGICAL
+  // INDEX — identical on every transport, which is what lets one resume bitmap
+  // span LAN, P2P and the relay. Omitted ⇒ the pre-vbm3 default for the call
+  // shape ('legacyOffset' when blockPlainOffset is present, else 'uniform'), so
+  // an un-upgraded caller is byte-identical to before.
+  idScheme?: 'uniform' | 'legacyOffset' | 'canonical';
 }
 
 export interface UploadBlockOp extends BlockOp { srcPath: string }
@@ -170,9 +177,16 @@ export function writeCipherChunk(op: CipherChunkOp & { dstPath: string; ctB64: s
 export function lanIp(): Promise<string | null> {
   return requireNative().lanIp();
 }
+/** Resume: stream ONLY these logical-chunk runs. Absent ⇒ the whole file, which
+ *  is byte-identical to the pre-resume behaviour. The LAN frame format is
+ *  unchanged (each frame already carries its chunk index), so a subset needs no
+ *  new framing and the frozen LAN golden vector still applies. */
+export interface LanChunkRun { start: number; count: number }
+
 export interface LanServeOp {
   srcPath: string; keyB64: string; transferId: string; fileId: string; token: string;
   chunkBytes: number; chunkCount: number; totalBytes: number; port?: number;
+  runs?: LanChunkRun[];
 }
 // SENDER: bind + accept + stream. Resolves with chunk count. The bound port
 // arrives first via the vbLanBound event (subscribe with onLanEvent).
@@ -182,6 +196,8 @@ export function lanServe(op: LanServeOp): Promise<number> {
 export interface LanConnectOp {
   host: string; port: number; dstPath: string; keyB64: string; transferId: string; fileId: string;
   token: string; chunkBytes: number; chunkCount: number; totalBytes: number;
+  /** Must match the sender's runs; both sides derive them from one work-list. */
+  runs?: LanChunkRun[];
 }
 // RECEIVER: connect + pull + write. Resolves with chunk count.
 export function lanConnect(op: LanConnectOp): Promise<number> {

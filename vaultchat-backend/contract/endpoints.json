@@ -180,6 +180,7 @@
     "POST /vaultbeam/relay/complete",
     "POST /vaultbeam/relay/grow",
     "POST /vaultbeam/relay/init",
+    "POST /vaultbeam/relay/received",
     "POST /vaultbeam/relay/uploaded"
   ],
   "nav": [

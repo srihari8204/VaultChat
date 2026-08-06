@@ -413,6 +413,15 @@ export async function startReceive(opts: {
         signal: ac.signal,
         onProgress: (p) => setState(transferId, { status: 'receiving', done: p.done, total: p.total, bytes: p.bytes, totalBytes: p.totalBytes }),
       });
+    } else {
+      // F-2: a transfer delivered over LAN/P2P used to return here without ever
+      // finalizing the relay row, so it sat at 'pending' until the 24 h sweep and
+      // the sender never got its vb_complete nudge. Completion is a property of
+      // the TRANSFER, not of the transport that happened to win, so record it
+      // whichever tier delivered. Best-effort: the direct transfer already
+      // succeeded, and failing to finalize must not fail it.
+      const { relayComplete } = await import('./vaultbeamRelay');
+      await relayComplete(transferId).catch(() => {});
     }
     setState(transferId, { status: 'complete', savedPath: dstPath, bytes: manifest.size });
   } catch (e: any) {
