@@ -1430,57 +1430,39 @@ export async function uploadAttachment(
     if (fi?.exists && typeof fi.size === 'number') size = fi.size;
   } catch {}
 
-  // Large files → resumable chunked (multipart) upload so a mid-upload network
-  // drop resumes from the parts already stored instead of restarting (WhatsApp).
-  // Both the plaintext and the E2EE (ciphertext-temp) send paths route through
-  // here, so both get resume. Falls through to single-PUT if it can't start.
-  if (size >= 5 * 1024 * 1024) {   // MULTIPART_THRESHOLD (lib/resumableUpload)
+  // Genuinely huge files → resumable chunked (multipart) upload so a mid-upload
+  // network drop resumes from the parts already stored. Threshold is the server
+  // relay's cap (100 MB, uploads.go upMaxBytes); anything at/under it takes the
+  // reliable server-relay path below instead.
+  if (size >= 100 * 1024 * 1024) {   // > server-relay cap
     try {
       const { resumableUpload } = require('./resumableUpload');
       return await resumableUpload(uri, filename, mime, size, { viewOnce: opts.viewOnce, signal: opts.signal });
     } catch (e: any) {
       if (opts.signal?.aborted) throw e;   // user cancelled — don't silently re-upload
-      if (__DEV__) console.warn('[upload] resumable failed, falling back to single-PUT:', e?.message);
+      if (__DEV__) console.warn('[upload] resumable failed:', e?.message);
+      throw e;
     }
   }
 
-  // Object-store path: get a presigned PUT URL and upload the bytes DIRECTLY to
-  // storage (they never pass through the app server). Falls back to the multipart
-  // route below when the server has no object storage configured (503) or the
-  // presign path errors — so media never silently fails to send.
-  try {
-    const presign = await api<{ id: string; uploadUrl: string }>('/uploads/presign', {
-      method: 'POST',
-      json: { filename, mime, size, viewOnce: !!opts.viewOnce },
-    });
-    if (presign?.uploadUrl) {
-      const put = await FileSystem.uploadAsync(presign.uploadUrl, uri, {
-        httpMethod: 'PUT',
-        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-        headers: { 'Content-Type': mime },
-      });
-      if (put.status >= 200 && put.status < 300) {
-        return { id: presign.id, mime, size, filename };
-      }
-      throw new Error(`object-store upload failed (HTTP ${put.status})`);
-    }
-  } catch (e: any) {
-    if (__DEV__ && e?.status !== 503) {
-      console.warn('[upload] presign path failed, using multipart:', e?.message);
-    }
-  }
-
+  // Server-relay: POST the bytes to our API, which stores them in R2 itself
+  // (uploads.go uploadsPost). This replaced the presigned DIRECT-to-R2 PUT,
+  // which failed on some device networks — the phone got a 200-looking result
+  // but the bytes never reached R2, leaving orphan attachment rows (blank
+  // media). Here the row is written only AFTER the server confirms the object
+  // is in R2, so a sent image always has bytes behind it. The phone only ever
+  // talks to api.corefinite.com, which it can always reach.
+  // ponytail: routes media bytes through the box instead of direct-to-R2; fine
+  // at current scale. Restore presigned-direct as an optimization once the
+  // device-side PUT failure is understood.
   const form = new FormData();
-  // React Native's FormData accepts {uri, name, type} objects for files
-  form.append('file', { uri, name: filename, type: mime } as any);
-
-  // viewOnce=1 tells the backend to set attachments.view_once=TRUE so the
-  // first non-owner GET hard-blocks subsequent reads.
+  form.append('file', { uri, name: filename, type: mime } as any);   // RN FormData file object
   const qs = opts.viewOnce ? '?viewOnce=1' : '';
   const res = await fetch(`${SERVER_URL}/uploads${qs}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
     body: form,
+    signal: opts.signal,
   });
   if (!res.ok) {
     let msg = res.statusText || `HTTP ${res.status}`;
