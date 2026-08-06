@@ -317,6 +317,25 @@ export default function ChatsScreen() {
   const bulkPin     = () => bulkRun(id => { patch(id, { pinned: true });   return pinChat(id, true); });
   const bulkMute    = () => bulkRun(id => { patch(id, { muted: true });    return muteChat(id, true); });
   const bulkArchive = () => bulkRun(id => { patch(id, { archived: true }); return archiveChat(id, true); });
+  // Split view takes exactly two conversations, so it is offered only when two
+  // are selected. Titles are resolved the same way the row does it.
+  const titleOf = (c: ChatSummary) =>
+    c.type === 'direct' ? (c.peerName || c.name || 'Direct chat') : (c.name || 'Group chat');
+  const bulkSplit = () => {
+    const ids = [...selected];
+    if (ids.length !== 2) return;
+    const a = chats.find(c => c.id === ids[0]);
+    const b = chats.find(c => c.id === ids[1]);
+    if (!a || !b) return;
+    exitSelect();
+    router.push({
+      pathname: '/split-chat' as any,
+      params: {
+        topId: a.id, topName: titleOf(a),
+        bottomId: b.id, bottomName: titleOf(b),
+      },
+    });
+  };
   const bulkDelete  = () => {
     const ids = [...selected];
     Alert.alert(`Delete ${ids.length} chat${ids.length > 1 ? 's' : ''}?`, 'They stay reachable from Hidden chats.', [
@@ -367,6 +386,11 @@ export default function ChatsScreen() {
             <Text style={S.title}>{selected.size}</Text>
           </View>
           <View style={{ flexDirection: 'row', gap: 4 }}>
+            {selected.size === 2 && (
+              <TouchableOpacity onPress={bulkSplit} style={S.headerBtn} accessibilityLabel="Open both in split view">
+                <Ionicons name="git-compare-outline" size={20} color={colors.primary} />
+              </TouchableOpacity>
+            )}
             <TouchableOpacity onPress={bulkPin} style={S.headerBtn}><Ionicons name="pin" size={20} color={colors.text} /></TouchableOpacity>
             <TouchableOpacity onPress={bulkMute} style={S.headerBtn}><Ionicons name="notifications-off-outline" size={20} color={colors.text} /></TouchableOpacity>
             <TouchableOpacity onPress={bulkArchive} style={S.headerBtn}><Ionicons name="archive-outline" size={20} color={colors.text} /></TouchableOpacity>
