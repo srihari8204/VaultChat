@@ -963,7 +963,7 @@ func chatsMembersAdd(w http.ResponseWriter, r *http.Request) {
 	// A typed group's cap comes from group_type_config and is usually far below
 	// the global ceiling; untyped legacy groups keep the global one. This is an
 	// EARLY, friendly rejection only — the authoritative check is the database
-	// trigger from migration 066, which serialises on the group row. An
+	// trigger from migration 070, which serialises on the group row. An
 	// application-level count cannot be the gate: two concurrent adds both read
 	// the same `size` and both pass.
 	cap := chatsMaxGroupSize
@@ -1323,7 +1323,7 @@ func chatsPatch(w http.ResponseWriter, r *http.Request) {
 		push("description", v)
 	}
 
-	// ── Groups & Circles metadata (migration 066) ──
+	// ── Groups & Circles metadata (migration 070) ──
 	// This is also how an existing Family Space circle becomes a typed group:
 	// the client stamps groupType on first run after upgrade, because the
 	// server has no way to know which of its groups were circles.

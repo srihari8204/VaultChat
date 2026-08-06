@@ -17,7 +17,7 @@ than left looking unfinished — a dropped task and a forgotten one are not the
 same thing, and this file is the only place that distinction survives.
 
 ## G0 — Data model (server)
-- [x] 0.1 Migration: `chats` + `group_type`, `icon`, `color`, `description`, `privacy` (`private|invite_only`); all nullable so existing groups are untouched — migration 066
+- [x] 0.1 Migration: `chats` + `group_type`, `icon`, `color`, `description`, `privacy` (`private|invite_only`); all nullable so existing groups are untouched — migration 070
 - [x] 0.2 Migration: widen `chat_members.role` CHECK to include `guest` — 066; `moderator` added in 069
 - [~] 0.3 Migration: `group_permissions` (per-group overrides) + seeded per-type defaults — no separate table. Overrides live in `chats.permission_overrides` and defaults in `group_type_config.default_permissions`, both JSONB, so the three layers are read in ONE join rather than three. Now 10 permissions, not 7 (069 added tasks/calendar/album)
 - [x] 0.4 Migration: `group_audit_log` — 066

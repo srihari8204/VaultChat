@@ -45,6 +45,6 @@ END $$;
 -- and is refused with no explanation.
 
 COMMENT ON CONSTRAINT messages_type_check ON messages IS
-  'group_ref (migration 071) is a pointer to a group, never a credential: it '
+  'group_ref (migration 075) is a pointer to a group, never a credential: it '
   'carries no token and grants nothing. Admission still runs through '
   'POST /chats/{id}/membership/request and an admin''s approval.';

@@ -50,7 +50,7 @@ const (
 )
 
 // ApprovalMode decides how many gates stand between an invitation and
-// membership. Mirrors chats.approval_mode (migration 069).
+// membership. Mirrors chats.approval_mode (migration 073).
 type ApprovalMode string
 
 const (
@@ -294,7 +294,7 @@ func CanResend(s Status) bool {
 }
 
 // IsLive reports whether an invitation still occupies its invitee's slot, which
-// is what the duplicate guard in migration 069 keys on.
+// is what the duplicate guard in migration 073 keys on.
 func IsLive(s Status) bool { return s == StatusPending || s == StatusAccepted }
 
 // CanRevoke reports whether an invitation may still be withdrawn.

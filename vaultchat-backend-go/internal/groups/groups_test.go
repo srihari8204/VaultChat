@@ -296,7 +296,7 @@ func TestCanRemoveMember(t *testing.T) {
 		{RoleModerator, RoleMember, true, "a moderator may remove a member"},
 		{RoleMember, RoleGuest, true, "rank is what decides, not the role name"},
 
-		// The whole reason this function exists: migration 069 grants
+		// The whole reason this function exists: migration 073 grants
 		// moderators remove_members, so the permission check alone would let
 		// one remove the owner and orphan the group.
 		{RoleModerator, RoleOwner, false, "a moderator must not remove the owner"},

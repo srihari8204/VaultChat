@@ -250,13 +250,13 @@ type chatsMem struct {
 	AntiSpamLinks     bool
 	ApproveMembers    bool
 
-	// ── membership v2 (migration 069) ──
+	// ── membership v2 (migration 073) ──
 	// How many gates stand between an invitation and membership. Read through
 	// invites.NormalizeMode, never raw: an unrecognised value must resolve to
 	// the strictest mode rather than the loosest.
 	ApprovalModeRaw string
 
-	// ── Groups & Circles (migration 066) ──
+	// ── Groups & Circles (migration 070) ──
 	// GroupType is NULL for every group created before that migration; those
 	// keep the legacy admin-or-nothing rule. See can().
 	GroupType  *string
@@ -289,7 +289,7 @@ func (m *chatsMem) perms() groups.Set {
 // BACKWARD COMPATIBILITY, deliberately: a chat with no group_type has no
 // permission layers, so it keeps the EXACT pre-existing rule — owners and
 // admins may act, everyone else may not. Every group that existed before
-// migration 066 therefore behaves identically after it, and the new model only
+// migration 070 therefore behaves identically after it, and the new model only
 // governs groups that opted into a type.
 func (m *chatsMem) can(p groups.Permission) bool {
 	if !m.isTypedGroup() {
@@ -386,7 +386,7 @@ func chatsRequireMem(w http.ResponseWriter, r *http.Request, notMemberStatus int
 // fresh install has a legitimate reason to ask; a stolen token issues the exact
 // same request. The server cannot tell them apart from the request alone, so it
 // uses the one signal it can keep: whether this INSTALL has synced before
-// (user_sync_devices, migration 068).
+// (user_sync_devices, migration 072).
 //
 // An unrecognised device gets a bounded window of recent history rather than
 // everything. The client pages forward from that floor, so the cap bounds the
@@ -988,7 +988,7 @@ func chatsCreateGroup(w http.ResponseWriter, _ *http.Request, ctx context.Contex
 		return
 	}
 
-	// ── Groups & Circles metadata (migration 066) ──
+	// ── Groups & Circles metadata (migration 070) ──
 	// All optional: a group created without a type is an untyped group and
 	// behaves exactly as groups did before this change.
 	gType := strings.ToLower(strings.TrimSpace(chatsStrOr(b["groupType"], "")))

@@ -6,7 +6,7 @@
 // every client forever. Recurrence expansion, ordering and reminders all happen
 // on-device (lib/groups/calendar.ts).
 //
-// See migration 068 for the schema and for what the server does and does not
+// See migration 072 for the schema and for what the server does and does not
 // learn from it.
 
 package routes
@@ -26,7 +26,7 @@ import (
 	"vaultchat/backend-go/internal/httpx"
 )
 
-// Mirrors the CHECK in migration 068. Validated here too so a bad bucket gets a
+// Mirrors the CHECK in migration 072. Validated here too so a bad bucket gets a
 // 400 with a reason rather than a constraint violation surfacing as a 500.
 var calMonthKeyRe = regexp.MustCompile(`^[0-9]{4}-(0[1-9]|1[0-2])$`)
 

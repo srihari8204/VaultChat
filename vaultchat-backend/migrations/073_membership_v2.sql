@@ -1,6 +1,6 @@
 -- VaultChat: in-app membership v2 (Groups & Circles). Idempotent.
 --
--- Revises the invitation model from migration 067 for a fully in-app flow.
+-- Revises the invitation model from migration 071 for a fully in-app flow.
 -- Nothing external: no links to share, no QR, no SMS. An invitation now names a
 -- VaultChat user and travels as a notification inside the app.
 --

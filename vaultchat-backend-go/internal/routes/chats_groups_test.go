@@ -21,7 +21,7 @@ func legacyMem(role string) *chatsMem {
 
 func TestLegacyGroupKeepsAdminOnlyRule(t *testing.T) {
 	// The whole backward-compatibility promise: a group with no type must
-	// behave exactly as it did before migration 066.
+	// behave exactly as it did before migration 070.
 	for _, p := range groups.All {
 		if !legacyMem("admin").can(p) {
 			t.Errorf("legacy admin should hold %s", p)

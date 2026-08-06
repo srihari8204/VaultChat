@@ -11,7 +11,7 @@
 // it exists so a link already sitting in somebody's messages keeps working, and
 // nothing produces a new one.
 //
-// See migrations 067 and 069/070 for the schema, and internal/invites for the
+// See migrations 071 and 073/074 for the schema, and internal/invites for the
 // legal status transitions.
 
 package routes
@@ -203,7 +203,7 @@ func invitationsCreate(w http.ResponseWriter, r *http.Request) {
 		 VALUES ($1, $2, $3, $4, $5, 'app', $6) RETURNING id`,
 		[]any{chatID, user.ID, target.userID, string(target.kind), target.ref, expiresAt}, &invID)
 	if err != nil {
-		// The partial unique index from migration 069 is the real duplicate
+		// The partial unique index from migration 073 is the real duplicate
 		// guard — two admins inviting the same person at once both pass an
 		// application check, but only one can win the index. It covers
 		// 'accepted' as well as 'pending', so somebody awaiting approval cannot

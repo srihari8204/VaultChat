@@ -111,7 +111,7 @@ export interface ChatDetail extends ChatSummary {
   // W15: a chat-wide pinned message (null = none).
   pinnedMessageId?:     string | null;
 
-  // ── Groups & Circles (migration 066) ──
+  // ── Groups & Circles (migration 070) ──
   // groupType is null for every group created before that migration; such a
   // group is an "untyped group" and keeps the legacy admin-only rules.
   groupType?:           GroupType | null;
@@ -1210,7 +1210,7 @@ export function isAnnouncement(m: Pick<Message, 'meta'>): boolean {
 //
 // `payload` is CIPHERTEXT the caller seals and opens itself — title, notes,
 // location, exact time, duration and recurrence all live inside it. The server
-// only ever sees the month bucket it filters on. See migration 068.
+// only ever sees the month bucket it filters on. See migration 072.
 
 export interface GroupEventRow {
   id:          number;

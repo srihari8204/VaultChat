@@ -119,7 +119,7 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 -- or in a RETURN QUERY target list, neither of which is affected.
 --
 -- EXTENSION: the INSERT can now also raise group_member_cap_exceeded from
--- migration 066's trigger. Unhandled that is another 500 for the ordinary
+-- migration 070's trigger. Unhandled that is another 500 for the ordinary
 -- outcome "the group is full", so it is caught and reported as a status
 -- alongside the existing 'ok' | 'invalid' | 'expired' | 'used'.
 CREATE OR REPLACE FUNCTION vc_redeem_invite(p_code TEXT, p_user UUID)
@@ -144,7 +144,7 @@ BEGIN
     VALUES (l.chat_id, p_user, 'member')
     ON CONFLICT (chat_id, user_id) DO UPDATE SET left_at = NULL;
   EXCEPTION WHEN check_violation THEN
-    -- The member-cap trigger from migration 066. Not an error condition.
+    -- The member-cap trigger from migration 070. Not an error condition.
     RETURN QUERY SELECT NULL::uuid, 'full'; RETURN;
   END;
 

@@ -340,7 +340,7 @@ func TestDeclineAndCancelWindows(t *testing.T) {
 }
 
 func TestIsLiveMatchesTheDuplicateGuard(t *testing.T) {
-	// Must agree with uq_chat_invitations_live_user in migration 069, or the
+	// Must agree with uq_chat_invitations_live_user in migration 073, or the
 	// route and the database will disagree about who can be re-invited.
 	if !IsLive(StatusPending) || !IsLive(StatusAccepted) {
 		t.Fatal("pending and accepted both occupy the invitee's slot")

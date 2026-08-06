@@ -175,7 +175,7 @@ export function canTransferOwnership(actorRole: string, targetRole: string): boo
 
 /**
  * Seats left, or -1 when uncapped. ADVISORY ONLY — the authoritative check is
- * the database trigger in migration 066, which serialises on the group row.
+ * the database trigger in migration 070, which serialises on the group row.
  * A client-side check alone is racy by construction.
  */
 export function seatsRemaining(activeMembers: number, maxMembers: number): number {

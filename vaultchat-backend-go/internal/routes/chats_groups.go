@@ -1,4 +1,4 @@
-// chats_groups.go — Groups & Circles route support (migration 066).
+// chats_groups.go — Groups & Circles route support (migration 070).
 //
 // Kept separate from chats.go/chats_helpers.go so the group model is readable
 // on its own: metadata validation, the audit trail, and the JSON the client
@@ -130,7 +130,7 @@ func chatsAudit(ctx context.Context, uid, chatID, action string, targetID *strin
 
 // chatsCapExceeded reports whether an error is the member-cap trigger firing.
 // The trigger raises with SQLSTATE check_violation and a recognisable prefix
-// (see migration 066), so the route can turn a database-level race rejection
+// (see migration 070), so the route can turn a database-level race rejection
 // into a clean 409 rather than a 500.
 func chatsCapExceeded(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "group_member_cap_exceeded")

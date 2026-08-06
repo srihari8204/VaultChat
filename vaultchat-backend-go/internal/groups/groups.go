@@ -3,7 +3,7 @@
 // It is deliberately PURE: no database, no HTTP, no globals. Permission
 // resolution is the thing every mutating group endpoint must agree on, so it
 // lives in one testable place rather than being re-derived per handler. The
-// route layer loads the three JSONB layers (see migration 066) and calls
+// route layer loads the three JSONB layers (see migration 070) and calls
 // Resolve; it never reimplements the precedence rules.
 //
 // Precedence, most specific wins:
@@ -229,7 +229,7 @@ func CanRemoveMember(actorRole, targetRole string) bool {
 }
 
 // SeatsRemaining reports how many seats a group has left. It is advisory only:
-// the authoritative check is the database trigger in migration 066, which
+// the authoritative check is the database trigger in migration 070, which
 // serialises on the chat row. Use this for UI and early rejection, never as the
 // sole gate — an application-level check alone is racy by construction.
 func SeatsRemaining(activeMembers, maxMembers int) int {

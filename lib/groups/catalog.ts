@@ -8,7 +8,7 @@
 //
 // Member caps are DELIBERATELY ABSENT here. A cap is a server value read off the
 // group payload; hardcoding one in the client would mean an operator raising a
-// cap needs an app release, which is exactly what migration 066 was shaped to
+// cap needs an app release, which is exactly what migration 070 was shaped to
 // avoid. Read `maxMembers` from the group, never from this file.
 //
 // Pure — no react-native imports — so the self-check runs under tsx:
@@ -62,7 +62,7 @@ export const UNTYPED: GroupTypeInfo = {
 
 /**
  * Look up a type's presentation. Returns UNTYPED for null/unknown, because
- * groups created before migration 066 legitimately carry no type and must still
+ * groups created before migration 070 legitimately carry no type and must still
  * render.
  */
 export function groupTypeInfo(type: string | null | undefined): GroupTypeInfo {
@@ -95,12 +95,12 @@ export function groupIdentity(group: {
 
 // ── self-check ──
 if (require.main === module) {
-  // Pinned to the number of rows group_type_config carries (migrations 066 and
+  // Pinned to the number of rows group_type_config carries (migrations 070 and
   // 069). The point is not the number — it is that adding a type on one side
   // and not the other trips a test instead of silently rendering as UNTYPED.
   if (GROUP_TYPES.length !== 14) throw new Error(`expected 14 types, got ${GROUP_TYPES.length}`);
   for (const t of ['pet_care', 'riders'] as const) {
-    if (!isGroupType(t)) throw new Error(`${t} was added in migration 069 and must be in the catalog`);
+    if (!isGroupType(t)) throw new Error(`${t} was added in migration 073 and must be in the catalog`);
   }
 
   // every type unique, and every colour a 6-digit hex

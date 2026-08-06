@@ -7,7 +7,7 @@
 // can be forwarded is a credential, and a credential is exactly what a family
 // or friends group must not be protected by.
 //
-// The flow migration 069 introduced has THREE steps, not two:
+// The flow migration 073 introduced has THREE steps, not two:
 //
 //	strict (default)  owner invites -> invitee ACCEPTS -> owner APPROVES -> joined
 //	user_approval     owner invites -> invitee accepts  -> joined
@@ -105,7 +105,7 @@ func membershipLoadInv(ctx context.Context, uid, chatID string, invID int64) (*m
 // paths admit someone who is BY DEFINITION not yet a member, so the
 // chat_members insert policy could never pass. The authority is the invitation
 // row this function re-checks inside the transaction, not the caller's session.
-// The member-cap trigger from migration 066 still fires, which is what turns an
+// The member-cap trigger from migration 070 still fires, which is what turns an
 // over-subscribed group into a clean 409 instead of a silent overflow.
 func membershipGrant(ctx context.Context, invID int64, chatID, userID string, approvedBy *string) (err error) {
 	tx, err := db.Pool.Begin(ctx)
@@ -847,7 +847,7 @@ func membershipRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// inviter_id = invitee_user_id: you invited yourself. No token, because
-	// there is nothing to hand anyone (migration 070 made the column nullable
+	// there is nothing to hand anyone (migration 074 made the column nullable
 	// rather than have this path fabricate a credential to satisfy NOT NULL).
 	expiresAt := time.Now().Add(invites.DefaultTTL)
 	var invID int64
