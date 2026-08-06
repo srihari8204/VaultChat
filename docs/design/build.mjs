@@ -175,13 +175,10 @@ const infographicCss = `
   .ig-fitbar { position: sticky; top: 0; z-index: 90; display: flex; justify-content: center; padding: 10px 0; }
 `;
 
+/* No randomness here: the build must be reproducible, so the same source always
+   produces a byte-identical storyboard. (This gradient was unused anyway.) */
 const arrowSvg = `
 <svg width="86" height="60" viewBox="0 0 86 60" fill="none">
-  <defs>
-    <linearGradient id="ag${Math.floor(Math.random()*1e6)}" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#7C4DFF" stop-opacity=".25"/><stop offset="1" stop-color="#9E7BFF"/>
-    </linearGradient>
-  </defs>
   <path d="M4 30h64" stroke="#8f68ff" stroke-opacity=".85" stroke-width="2.5" stroke-linecap="round"/>
   <path d="M60 18l16 12-16 12" fill="none" stroke="#9E7BFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
   <circle cx="6" cy="30" r="3.4" fill="#7C4DFF"/>
