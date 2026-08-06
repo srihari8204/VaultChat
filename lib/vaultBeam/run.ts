@@ -101,7 +101,45 @@ async function relayIOFor(session: TransferSession, onStale: (v: number) => void
     uploadBlock: (op) => native.uploadBlock(op as any),
     downloadBlock: (op) => native.downloadBlock(op as any),
     nextBlockBytes: async () => (await store.startingGeometry(null)).blockBytes,
+    // Concurrency comes from the MEMORY budget, not the core count: a worker
+    // holds the buffer it is writing and the one it is filling next, so more
+    // cores on the same block size means more bytes resident for no more
+    // throughput. Battery still caps it — a low battery is a reason to do less
+    // work, independent of how much memory is free.
+    parallelism: async () => {
+      const { planWorkers } = await import('./memory');
+      const blockBytes = (await store.startingGeometry(null)).blockBytes;
+      const plan = planWorkers({ physicalUnitBytes: blockBytes, cores: cpuCores() });
+      return Math.max(1, Math.min(plan.workers, await batteryCap()));
+    },
   };
+}
+
+/** Logical cores, conservatively. Unknown ⇒ 4, the common phone. */
+function cpuCores(): number {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const os = require('os');
+    const n = os?.cpus?.().length;
+    if (Number.isFinite(n) && n > 0) return n;
+  } catch { /* not Node — react-native has no core count to offer */ }
+  return 4;
+}
+
+/**
+ * Battery ceiling, mirroring lib/vaultBeamTransfer's §14 rule: halve the
+ * concurrent block ops on a low, non-charging battery or in OS low-power mode.
+ * A cap, not a target — it can only ever lower the memory-derived number.
+ */
+async function batteryCap(): Promise<number> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const B = require('expo-battery');
+    const s = await B.getPowerStateAsync();
+    const charging = s?.batteryState === B.BatteryState?.CHARGING || s?.batteryState === B.BatteryState?.FULL;
+    if (s?.lowPowerMode || (typeof s?.batteryLevel === 'number' && s.batteryLevel >= 0 && s.batteryLevel < 0.2 && !charging)) return 2;
+  } catch { /* no battery module — no cap */ }
+  return Infinity;
 }
 
 const b64 = {

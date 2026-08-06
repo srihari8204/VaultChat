@@ -185,6 +185,14 @@ export class TransferSession {
 
   /** The barrier succeeded: these chunks are on stable storage. */
   commitDurable(ids: ReadonlyArray<number>): number {
+    // A barrier started before a cancel can land after it — an fsync is not
+    // interruptible. Promoting then would move progress on a transfer the user
+    // has already been told is finished with. The bytes really are on disk; the
+    // session simply no longer wants them.
+    if (this._state !== 'active') {
+      for (const c of ids) this._syncing.delete(c);
+      return 0;
+    }
     let gained = 0;
     for (const c of ids) {
       this._syncing.delete(c);
@@ -543,6 +551,19 @@ function _selfCheck(): void {
     cx.finish('cancelled');
     A(cx.heldDurableCount === 0, 'cancel abandons un-durable writes');
     A(cx.peerHave.popcount() === 0, 'cancel does not promote them on the way out');
+
+    // CANCEL DURING A BARRIER. An fsync is not interruptible, so a barrier that
+    // started before the cancel resolves after it. The bytes are genuinely on
+    // disk — but the session is finished with them, and promoting here would
+    // move progress on a transfer the user already cancelled.
+    const racer = mk(10 * CHUNK_BYTES, 'recipient');
+    racer.markWritten(0); racer.markWritten(1);
+    const midFlight = racer.beginDurable();
+    A(midFlight.length === 2, 'the barrier took both chunks');
+    racer.finish('cancelled');
+    A(racer.commitDurable(midFlight) === 0, 'a barrier landing after cancel promotes nothing');
+    A(racer.peerHave.popcount() === 0, 'and PeerHave is untouched');
+    A(racer.heldDurableCount === 0, 'and nothing stays held');
   }
 
   // session versioning (design §7)

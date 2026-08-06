@@ -15,7 +15,7 @@
 
 import { type ChunkRun } from './bitmap';
 import { TransferSession } from './session';
-import { type TransportDriver, type TransportId, type DriverOutcome } from './drivers/types';
+import { type TransportDriver, type TransportId, type DriverOutcome, type DriverReport } from './drivers/types';
 import { type PersistedSession, type SessionStore } from './persistence';
 
 export { type TransportDriver, type TransportId, type DriverOutcome };
@@ -403,6 +403,11 @@ export class TransferManager {
         // `staged` means the RELAY holds it and moves nothing user-visible.
         outcome = await driver.run(s, work, {
           verified: (c) => {
+            // A cancelled or finished session accepts nothing further. Native
+            // block ops and socket loops cannot be interrupted mid-flight, so a
+            // driver can still be reporting seconds after `cancel()` returned —
+            // and a transfer the user cancelled must not keep gaining progress.
+            if (s.state !== 'active') return;
             if (durable) {
               // The bytes are decrypted and written, but only to the page cache.
               // They become progress when a barrier says the storage layer has
@@ -414,7 +419,7 @@ export class TransferManager {
               if (s.revision !== lastRevision) { lastRevision = s.revision; this.opts.onChange?.(s); }
             }
           },
-          staged: (c) => { s.markStaged(c); },
+          staged: (c) => { if (s.state === 'active') s.markStaged(c); },
         }, ac.signal);
       } catch (e: any) {
         outcome = { kind: 'failed', reason: e?.message ?? 'driver threw' };
@@ -793,7 +798,75 @@ function _selfCheck(): void {
       A(ss.progressBytes() === ss.totalBytes, 'sender progress is unaffected');
     }
 
-    // 17. onChange fires on real progress and is the persistence seam
+    // ── cancellation (P1) ──────────────────────────────────────────
+    // 17. A cancelled session accepts NOTHING further. Native block ops and
+    //     socket loops cannot be interrupted mid-flight, so a driver keeps
+    //     reporting after cancel() returns — and a transfer the user stopped
+    //     must not keep filling its progress bar.
+    {
+      /** Reports a chunk, then cancels, then keeps reporting — the real shape. */
+      class LateReporter implements TransportDriver {
+        readonly id = 'relay'; readonly cost = 30; readonly channel = 'direct' as const;
+        lateReports = 0;
+        constructor(private onFirst: () => void) {}
+        unitChunks() { return Infinity; }
+        async available() { return true; }
+        async run(_s: TransferSession, work: ChunkRun[], report: DriverReport): Promise<DriverOutcome> {
+          const ids = work.flatMap((r) => Array.from({ length: r.count }, (_, k) => r.start + k));
+          report.verified(ids[0]);
+          this.onFirst();                       // cancel lands here
+          for (const i of ids.slice(1)) { report.verified(i); this.lateReports++; }
+          return { kind: 'drained' };
+        }
+        dispose() {}
+      }
+      const m = mkMgr();
+      let s2: TransferSession;
+      const drv = new LateReporter(() => m.cancel(s2.transferId));
+      m.registerDriver(drv);
+      s2 = mkSession(8, 'sender');
+      const res2 = await m.start(s2);
+      A(res2.state === 'cancelled', 'the run ends cancelled');
+      A(drv.lateReports > 0, 'the driver really did keep reporting after cancel');
+      A(s2.peerHave.popcount() === 1, `only the pre-cancel chunk counted (got ${s2.peerHave.popcount()})`);
+      A(s2.inflightCount === 0, 'nothing left in flight');
+      A(s2.heldDurableCount === 0, 'nothing left awaiting durability');
+    }
+
+    // 18. Cancel during a DURABLE run: the un-synced batch is abandoned, not
+    //     promoted, and no barrier result leaks into the cancelled session.
+    {
+      let syncs = 0;
+      const m = mkMgr({
+        durableBatchChunks: 64,                 // never reached: only the drain fires
+        fsync: async () => { syncs++; },
+      });
+      let s3: TransferSession;
+      class CancelMidWrite implements TransportDriver {
+        readonly id = 'relay'; readonly cost = 30; readonly channel = 'relay' as const;
+        unitChunks() { return Infinity; }
+        async available() { return true; }
+        async run(_s: TransferSession, work: ChunkRun[], report: DriverReport): Promise<DriverOutcome> {
+          const ids = work.flatMap((r) => Array.from({ length: r.count }, (_, k) => r.start + k));
+          for (const i of ids.slice(0, 3)) report.verified(i);
+          m.cancel(s3.transferId);
+          return { kind: 'drained' };
+        }
+        dispose() {}
+      }
+      m.registerDriver(new CancelMidWrite());
+      s3 = mkSession(10, 'recipient');
+      const all3 = s3.r2Have.clone();
+      for (let i = 0; i < 10; i++) all3.set(i);
+      s3.setR2Have(all3);
+      const res3 = await m.start(s3);
+      A(res3.state === 'cancelled', 'a durable run cancels');
+      A(s3.progressBytes() === 0, 'un-synced writes were abandoned, not promoted');
+      A(s3.heldDurableCount === 0, 'no chunk is left held after cancel');
+      void syncs;
+    }
+
+    // 19. onChange fires on real progress and is the persistence seam
     let changes = 0;
     mgr = mkMgr({ onChange: () => { changes++; } });
     mgr.registerDriver(new FakeDriver('relay', 30));

@@ -94,7 +94,16 @@ export class LanDriver implements TransportDriver {
     // Native reports progress as a COUNT of frames moved, in the order of the
     // run list, so map that ordinal back to the chunk id it refers to.
     let credited = 0;
+    // A native transfer cannot be interrupted from here — the socket loop lives
+    // in Rust/Kotlin and owns its own lifetime. What we CAN guarantee is that a
+    // cancelled run credits nothing: the promise and the progress events both
+    // keep arriving, and every one of them must be ignored once the caller has
+    // been told the transfer stopped.
+    let stopped = signal.aborted;
+    const onAbort = () => { stopped = true; };
+    signal.addEventListener?.('abort', onAbort);
     const creditTo = (done: number) => {
+      if (stopped) return;
       const upto = Math.min(done, wanted.length);
       for (; credited < upto; credited++) report.verified(wanted[credited]);
     };
@@ -113,13 +122,15 @@ export class LanDriver implements TransportDriver {
       // after every chunk is decrypted and on disk (receiver), so crediting the
       // remainder here is a statement about durability, not about bytes sent.
       creditTo(moved);
+      if (stopped) return { kind: 'failed', reason: 'aborted' };
       return moved >= wanted.length
         ? { kind: 'drained' }
         : { kind: 'failed', reason: `lan moved ${moved}/${wanted.length}` };
     } catch (e: any) {
-      return { kind: 'failed', reason: e?.message ?? 'lan error' };
+      return { kind: 'failed', reason: stopped ? 'aborted' : (e?.message ?? 'lan error') };
     } finally {
       try { offProgress(); } catch { /* already removed */ }
+      try { signal.removeEventListener?.('abort', onAbort); } catch { /* no-op */ }
     }
   }
 }

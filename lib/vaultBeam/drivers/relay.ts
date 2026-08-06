@@ -208,7 +208,7 @@ export class RelayDriver implements TransportDriver {
           });
           done.push(blockIndex);
         }, signal);
-        if (done.length) {
+        if (done.length && !signal.aborted) {
           await this.opts.io.markUploaded(session.transferId, done);
           // STAGED, not verified: the relay holds it; the peer does not yet.
           for (const run of chunksOfBlocks(plan, done, session.chunkCount)) {
@@ -259,6 +259,10 @@ export class RelayDriver implements TransportDriver {
           idScheme: idSchemeForPlan(plan), transferId: session.transferId,
           fileId: session.fileId, keyB64: session.keyB64, dstPath: this.opts.dstPath,
         });
+        // A native block op cannot be interrupted from here, so an abort during
+        // one still resolves — possibly seconds later. Crediting it would move
+        // progress on a transfer the caller has already been told is cancelled.
+        if (signal.aborted) return;
         // downloadBlock throws on a short/tampered body, so reaching here means
         // every chunk in the block passed its GCM tag and is written at its offset.
         for (let c = run.start; c < run.start + run.count; c++) {

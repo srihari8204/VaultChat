@@ -274,6 +274,49 @@ async function main() {
     check(mgr.activeCount() === 0, 'no sessions left running');
   }
 
+  console.log('Engine memory is bounded by budget, not by hardware:');
+  {
+    const { planWorkers, MemoryWatchdog, DEFAULT_BUDGET_BYTES } = require('./memory');
+    const MiB = 1024 * 1024;
+
+    // Across every device shape and every block size at or under the approved
+    // 4 MiB cap, the projected footprint must stay inside one budget. This is
+    // the assertion that fails loudly if anyone raises the cap again.
+    let worst = 0;
+    for (const cores of [1, 2, 4, 6, 8, 12, 16]) {
+      for (const unit of [1, 2, 4]) {
+        const p = planWorkers({ physicalUnitBytes: unit * MiB, cores });
+        worst = Math.max(worst, p.projectedBytes);
+        check(p.projectedBytes <= DEFAULT_BUDGET_BYTES,
+          `${cores} cores × ${unit} MiB blocks ⇒ ${(p.projectedBytes / MiB).toFixed(0)} MiB (budget ${(DEFAULT_BUDGET_BYTES / MiB).toFixed(0)} MiB)`);
+      }
+    }
+    check(worst <= DEFAULT_BUDGET_BYTES, `worst case across all shapes is ${(worst / MiB).toFixed(0)} MiB`);
+
+    // A 16-core flagship must not allocate more than a 4-core budget phone for
+    // the same work — the core count is not a memory input.
+    const small = planWorkers({ physicalUnitBytes: 4 * MiB, cores: 4 });
+    const big = planWorkers({ physicalUnitBytes: 4 * MiB, cores: 16 });
+    check(big.projectedBytes <= Math.max(small.projectedBytes, DEFAULT_BUDGET_BYTES),
+      'a 16-core device does not allocate more than the budget');
+
+    // The watchdog must hold its ceiling under a long, adversarial churn of
+    // reserve/release from several "drivers" at once.
+    const w = new MemoryWatchdog(8 * MiB);
+    const outstanding: number[] = [];
+    let overshoot = 0;
+    for (let i = 0; i < 5000; i++) {
+      const size = ((i * 7919) % 6 + 1) * (512 * 1024);
+      if (w.reserve(size)) outstanding.push(size);
+      if (w.heldBytes > w.budgetBytes) overshoot++;
+      if (outstanding.length && i % 3 === 0) w.release(outstanding.shift()!);
+    }
+    check(overshoot === 0, `the ceiling held across 5000 churn steps (peak ${(w.peakBytes / MiB).toFixed(1)} MiB)`);
+    check(w.refusalCount > 0, 'and the budget genuinely bit (refusals were issued)');
+    while (outstanding.length) w.release(outstanding.shift()!);
+    check(w.heldBytes === 0, 'everything reserved was released — no accounting leak');
+  }
+
   console.log('Write-behind leaves nothing behind:');
   {
     const rows = new Map<string, PersistedSession>();

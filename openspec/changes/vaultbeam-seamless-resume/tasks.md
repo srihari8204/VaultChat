@@ -276,6 +276,38 @@ Phase 1 must not merge unless every compatibility and parity test passes.
       plan reaches a build that cannot read it), then raise `rollout_pct` 1 → 10 → 25 →
       50 → 100. Lowering it removes devices in the reverse order they were added.
 
+## 7d. Backpressure, cancellation, memory watchdog (final approval, Phase 3)
+
+- [x] 7d.1 **Reader-side backpressure.** SCTP is reliable and ordered, so it never asks a
+      sender to slow down for the RECEIVER's benefit — only for the network's. The P2P
+      receiver reassembled 512 KiB buffers into an unbounded promise array and held each
+      until its write completed: ~100 MiB at 200 outstanding, with nothing stopping it at
+      200. Two layers now: cooperative (`{t:'x'}` pause/resume, hysteresis at half the
+      budget, bounded so a lost resume frame is not a hang) and unilateral (past the
+      budget the receiver allocates nothing and discards the chunk, which is re-fetched).
+      The second layer is the one that matters — a memory bound that depends on the peer
+      cooperating is not a bound. The queue is a `Set` a settled write removes itself
+      from, so its size is the live backlog rather than a tally of the whole run.
+- [x] 7d.2 **A peer-declared length is not an allocation primitive.** `new Uint8Array(c.len)`
+      from the sender's integer handed the other end an allocator. Clamped to
+      `CHUNK_BYTES + 16`; anything else fails the run.
+- [x] 7d.3 **Cancellation.** Native block ops and socket loops cannot be interrupted from
+      JS — they own their own lifetime and resolve seconds later. What is guaranteed
+      instead: a cancelled run credits NOTHING. The P2P receiver stops accepting, then
+      waits for writes already touching the file rather than abandoning them behind a
+      caller that believes everything stopped; LAN and relay drop late results; the
+      manager refuses any report into a non-active session; and `commitDurable` refuses
+      to promote a barrier that lands after a cancel.
+- [x] 7d.4 **Memory watchdog** (`lib/vaultBeam/memory.ts`). Every transport used to size
+      itself independently and nobody added the numbers up. Workers now derive from the
+      budget, not the core count: `clamp(1, floor(budget / (2 × unit)), cores − 1)`. The
+      factor of two is not padding — a worker holds the buffer it is writing and the one
+      it is filling next, and sizing for one is how a "safe" limit turns out to be half of
+      what gets allocated. Storage speed is deliberately NOT an input: nothing reports it,
+      and inferring it from write latency measures congestion as much as the medium.
+      The audit asserts ≤32 MiB across 7 core counts × 3 block sizes, so raising the
+      4 MiB cap fails a test rather than a device.
+
 ## 8. Flag flip + verification
 
 - [x] 8.1 `constants/flags.ts` — add `VB_SEAMLESS_RESUME` (default off), export it in the
