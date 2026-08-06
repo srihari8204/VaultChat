@@ -14,13 +14,22 @@
  *
  * Run: expo prebuild --clean   (the plugin runs during prebuild)
  */
-const { withDangerousMod, withMainApplication } = require('@expo/config-plugins');
+const { withDangerousMod, withMainApplication, withAndroidManifest } = require('@expo/config-plugins');
 const fs = require('fs');
 const path = require('path');
 
 const PKG = 'com.vaultchat.app';
 const VB_PKG = `${PKG}.vaultbeam`;
-const KOTLIN = ['VaultBeamStreamModule.kt', 'VaultBeamStreamPackage.kt'];
+const KOTLIN = [
+  'VaultBeamStreamModule.kt',
+  'VaultBeamStreamPackage.kt',
+  // Android 14+ user-initiated data transfer job — see the service's own
+  // comment for why transfers cannot stay on the shared dataSync service.
+  'VaultBeamTransferJobService.kt',
+  'VaultBeamJobModule.kt',
+];
+
+const JOB_SERVICE = `${VB_PKG}.VaultBeamTransferJobService`;
 
 function withKotlinSources(config) {
   return withDangerousMod(config, [
@@ -63,8 +72,45 @@ function withPackageRegistration(config) {
   });
 }
 
+/**
+ * Manifest entries for the user-initiated data transfer job.
+ *
+ * Two things are mandatory or the scheduler refuses the job at runtime:
+ *   - RUN_USER_INITIATED_JOBS (normal permission, granted at install)
+ *   - the JobService declared with BIND_JOB_SERVICE, which is what lets the
+ *     system — and only the system — start it.
+ *
+ * Both are idempotent, so re-running prebuild is safe.
+ */
+function withTransferJobManifest(config) {
+  return withAndroidManifest(config, (cfg) => {
+    const manifest = cfg.modResults.manifest;
+
+    manifest['uses-permission'] = manifest['uses-permission'] || [];
+    const perm = 'android.permission.RUN_USER_INITIATED_JOBS';
+    if (!manifest['uses-permission'].some((p) => p.$ && p.$['android:name'] === perm)) {
+      manifest['uses-permission'].push({ $: { 'android:name': perm } });
+    }
+
+    const app = manifest.application && manifest.application[0];
+    if (app) {
+      app.service = app.service || [];
+      let svc = app.service.find((s) => s.$ && s.$['android:name'] === JOB_SERVICE);
+      if (!svc) { svc = { $: { 'android:name': JOB_SERVICE } }; app.service.push(svc); }
+      svc.$['android:permission'] = 'android.permission.BIND_JOB_SERVICE';
+      svc.$['android:exported'] = 'false';
+      // Same process as the RN instance on purpose: the job's whole job is to
+      // keep THAT process alive. A separate process would be kept alive while
+      // the one doing the transfer was not.
+    }
+
+    return cfg;
+  });
+}
+
 module.exports = function withVaultBeamStream(config) {
   config = withKotlinSources(config);
   config = withPackageRegistration(config);
+  config = withTransferJobManifest(config);
   return config;
 };

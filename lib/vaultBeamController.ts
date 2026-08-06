@@ -148,9 +148,16 @@ function setState(id: string, patch: Partial<VBTransfer>) {
   // §13: mirror the set of active transfers into the Android foreground-service
   // notification so a minimized app keeps big transfers alive.
   try {
-    let count = 0, bytes = 0, totalBytes = 0;
-    for (const s of states.values()) if (ACTIVE(s.status)) { count++; bytes += s.bytes | 0; totalBytes += s.totalBytes | 0; }
-    require('./transferForeground').updateTransferForeground(count ? { count, bytes, totalBytes } : null);
+    let count = 0, bytes = 0, totalBytes = 0, sending = 0;
+    for (const s of states.values()) if (ACTIVE(s.status)) {
+      count++; bytes += s.bytes | 0; totalBytes += s.totalBytes | 0;
+      if (s.role === 'sender') sending++;
+    }
+    // `upload` picks which direction the Android job estimates its bytes in; a
+    // tie counts as upload, which is the more constrained side on mobile links.
+    require('./transferForeground').updateTransferForeground(
+      count ? { count, bytes, totalBytes, upload: sending * 2 >= count } : null,
+    );
   } catch {}
 }
 export function getTransfer(id: string): VBTransfer | undefined { return states.get(id); }

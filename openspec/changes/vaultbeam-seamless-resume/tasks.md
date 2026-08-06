@@ -308,6 +308,33 @@ Phase 1 must not merge unless every compatibility and parity test passes.
       The audit asserts ≤32 MiB across 7 core counts × 3 block sizes, so raising the
       4 MiB cap fails a test rather than a device.
 
+## 7e. Android 15 + the transition matrix (final approval, Phase 4)
+
+- [x] 7e.1 **User-initiated data transfer job.** Transfers rode the shared Notifee
+      foreground service, type `dataSync`, which Android 15 caps at six hours per 24 h
+      ACROSS THE WHOLE APP — a budget already shared with the no-GMS socket connection,
+      so a 12 GB transfer on a slow link could be cut off well short of six hours.
+      `VaultBeamTransferJobService` (Kotlin) + `VaultBeamJobModule` + `lib/vaultBeamJob.ts`
+      schedule a user-initiated data transfer job instead, which is outside that cap.
+      `setNotification()` is mandatory for such a job — the system stops one that does
+      not call it — so while the job runs it OWNS the progress notification and the
+      Notifee one is suppressed rather than duplicated. Below API 34, or when the system
+      refuses the schedule, the dataSync path is used exactly as before; a transient
+      refusal (app not visible enough) is retried, only an unsupported platform latches.
+- [x] 7e.2 **Transition matrix, automated as far as it honestly can be**
+      (`lib/vaultBeam/matrix.selftest.ts`, 92 checks). §8.2 called all 14 rows
+      device-only because NAT traversal and LAN sockets are — but that is true of the
+      RADIO, not of the state machine, and every bug found in this work so far lived in
+      the state machine. Rows 4, 6, 12 and 14 now run in full; rows 1, 2, 3, 5, 8, 10, 11
+      and 13 run at the state-machine level against the real session, manager and driver
+      contract. Each asserts all three invariants, including byte-exactness of the
+      reassembled file and a chronological ledger proving no already-DELIVERED chunk is
+      ever handed to another transport.
+- [ ] 7e.3 **Still device-only** (§8.2 remains the merge gate): row 7 (background →
+      foreground per tier), row 9 (cold boot), and the radio/OEM half of every partial
+      row — ICE restart, the 24 h relay expiry window, real peak heap over a real 12 GB
+      transfer, physical-unit adaptation on a real link, and a real old ⇄ new build pair.
+
 ## 8. Flag flip + verification
 
 - [x] 8.1 `constants/flags.ts` — add `VB_SEAMLESS_RESUME` (default off), export it in the
