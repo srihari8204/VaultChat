@@ -491,7 +491,14 @@ func invitationsMine(w http.ResponseWriter, r *http.Request) {
 				"requested":    requested,
 				// Whether accepting admits them outright or only starts the wait.
 				"joinsOnAccept": invites.NextAfterAccept(invites.NormalizeMode(mode)) == invites.StatusJoined,
-				"canAccept":     invites.CanAccept(st),
+				// Stranded-by-strict recovery (migration 077): an invitation the
+				// invitee already accepted, in a group that now joins on accept,
+				// is offerable again — otherwise it shows "waiting for an admin"
+				// forever, because the approval queue it waits on was never
+				// surfaced anywhere. membershipAccept allows exactly this case.
+				"canAccept": invites.CanAccept(st) ||
+					(st == invites.StatusAccepted &&
+						invites.NextAfterAccept(invites.NormalizeMode(mode)) == invites.StatusJoined),
 				"canDecline":    invites.CanDecline(st),
 				"expiresAt":     httpx.JSTime(expiresAt), "createdAt": httpx.JSTime(createdAt),
 			})
