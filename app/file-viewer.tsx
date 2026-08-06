@@ -25,6 +25,13 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { LinearGradient } from 'expo-linear-gradient';
 import { WebView } from 'react-native-webview';
+import SpreadsheetView from '../components/office/SpreadsheetView';
+import DocumentView from '../components/office/DocumentView';
+import DeckView from '../components/office/DeckView';
+import { parseWorkbook } from '../lib/office/xlsx';
+import { parseDocument } from '../lib/office/docx';
+import { parseDeck } from '../lib/office/pptx';
+import type { DeckData, DocumentData, WorkbookData } from '../lib/office/types';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
@@ -52,7 +59,23 @@ const EXT_MAP: Record<string, string> = {};
 ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac', 'wma'].forEach(e => (EXT_MAP[e] = 'audio'));
 ['pdf'].forEach(e => (EXT_MAP[e] = 'pdf'));
 ['ppt', 'pptx', 'doc', 'docx', 'xls', 'xlsx'].forEach(e => (EXT_MAP[e] = 'office'));
+
 ['txt', 'json', 'js', 'jsx', 'ts', 'tsx', 'py', 'md', 'csv', 'xml', 'html', 'css', 'sql', 'sh', 'yaml', 'yml', 'toml', 'ini', 'log', 'rb', 'go', 'rs', 'java', 'c', 'cpp', 'swift', 'kt', 'dart', 'php'].forEach(e => (EXT_MAP[e] = 'text'));
+// Which Office family a file belongs to — each has its own on-device renderer.
+type OfficeKind = 'sheet' | 'doc' | 'deck';
+const OFFICE_KIND: Record<string, OfficeKind> = {
+  xls: 'sheet', xlsx: 'sheet', xlsm: 'sheet',
+  doc: 'doc', docx: 'doc',
+  ppt: 'deck', pptx: 'deck',
+};
+function officeKind(filename: string, mimeType?: string): OfficeKind {
+  const ext = filename.split('.').pop()?.toLowerCase() || '';
+  if (OFFICE_KIND[ext]) return OFFICE_KIND[ext];
+  if (mimeType?.includes('spreadsheet') || mimeType?.includes('excel')) return 'sheet';
+  if (mimeType?.includes('presentation') || mimeType?.includes('powerpoint')) return 'deck';
+  return 'doc';
+}
+
 
 function detectType(filename: string, mimeType?: string): string {
   if (mimeType) {
@@ -154,6 +177,9 @@ export default function FileViewerScreen() {
   const [error, setError] = useState('');
   const [fileSize, setFileSize] = useState(0);
   const [textContent, setTextContent] = useState('');
+  const [workbook, setWorkbook] = useState<WorkbookData | null>(null);
+  const [document, setDocument] = useState<DocumentData | null>(null);
+  const [deck, setDeck] = useState<DeckData | null>(null);
 
   // Audio state
   const [sound, setSound] = useState<Audio.Sound | null>(null);
@@ -212,6 +238,26 @@ export default function FileViewerScreen() {
         setError('Could not load audio');
       }
     };
+    const loadOfficeInEffect = async () => {
+      try {
+        // Office formats are binary, so read base64 rather than utf8. Remote
+        // files are pulled into the cache first; the bytes never leave here.
+        let sourceUri = fileUri;
+        if (fileUri.startsWith('http')) {
+          const dl = await FileSystem.downloadAsync(fileUri, FileSystem.cacheDirectory + 'temp_office_' + Date.now());
+          sourceUri = dl.uri;
+        }
+        const b64 = await FileSystem.readAsStringAsync(sourceUri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        const kind = officeKind(fileName, params.mimeType as string | undefined);
+        if (kind === 'sheet') setWorkbook(parseWorkbook(b64));
+        else if (kind === 'deck') setDeck(parseDeck(b64));
+        else setDocument(parseDocument(b64));
+      } catch (e: any) {
+        setError(e?.message || 'Could not open this document');
+      }
+    };
     const loadFileMeta = async () => {
       try {
         if (fileUri.startsWith('file://') || fileUri.startsWith(FileSystem.documentDirectory || '')) {
@@ -220,6 +266,7 @@ export default function FileViewerScreen() {
         }
         if (fileType === 'text') await loadTextContentInEffect();
         if (fileType === 'audio') await loadAudioInEffect();
+        if (fileType === 'office') await loadOfficeInEffect();
         setLoading(false);
       } catch (e: any) {
         setError(e.message || 'Failed to load file');
@@ -228,7 +275,7 @@ export default function FileViewerScreen() {
     };
     loadFileMeta();
     return () => { sound?.unloadAsync(); };
-  }, [fadeIn, slideUp, fileUri, fileType, sound]);
+  }, [fadeIn, slideUp, fileUri, fileName, fileType, params.mimeType, sound]);
 
   // Redirect to dedicated video player when file type is video
   useEffect(() => {
@@ -410,12 +457,48 @@ export default function FileViewerScreen() {
   // ██  RENDER: PDF via WebView
   // ══════════════════════════════════════════════════════════════
   const renderPDF = () => {
-    const googleUrl = `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(fileUri)}`;
+    // Local/vault PDFs are rendered by the platform's own web view, so the file
+    // stays on the device. (It previously went to Google's gview, which cannot
+    // reach a local file and would have uploaded vault contents to do so.)
+    // iOS renders PDF in WKWebView natively; Android's WebView does not, so
+    // there we offer the system share sheet instead of a blank screen.
+    if (Platform.OS === 'android' && !fileUri.startsWith('http')) {
+      return (
+        <View style={[s.centered, { flex: 1, paddingHorizontal: 32 }]}>
+          <Text style={s.audioIcon}>📄</Text>
+          <Text style={[s.loadingText, { marginTop: 12, textAlign: 'center' }]}>
+            {fileName}
+          </Text>
+          <Text style={[s.errorDesc, { marginTop: 8, textAlign: 'center' }]}>
+            Inline PDF rendering on Android is not available yet.
+          </Text>
+          <TouchableOpacity
+            style={[s.retryBtn, { marginTop: 20 }]}
+            activeOpacity={0.85}
+            onPress={async () => {
+              try {
+                if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(fileUri);
+              } catch {
+                setError('Could not open this PDF');
+              }
+            }}
+          >
+            <LinearGradient colors={[C.primary, C.secondary]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.retryGradient}>
+              <Ionicons name="open-outline" size={16} color="#FFF" />
+              <Text style={s.retryText}>Open</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
+      );
+    }
     return (
       <View style={s.contentFill}>
         <WebView
-          source={{ uri: googleUrl }}
+          source={{ uri: fileUri }}
           style={s.contentFill}
+          originWhitelist={['file://', 'http://', 'https://']}
+          allowFileAccess
+          allowFileAccessFromFileURLs
           startInLoadingState
           renderLoading={() => (
             <View style={[s.centered, StyleSheet.absoluteFillObject, { backgroundColor: C.bg }]}>
@@ -434,24 +517,15 @@ export default function FileViewerScreen() {
   // ██  RENDER: Office docs via Google Docs Viewer
   // ══════════════════════════════════════════════════════════════
   const renderOffice = () => {
-    const viewerUrl = `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(fileUri)}`;
-    return (
-      <View style={s.contentFill}>
-        <WebView
-          source={{ uri: viewerUrl }}
-          style={s.contentFill}
-          startInLoadingState
-          renderLoading={() => (
-            <View style={[s.centered, StyleSheet.absoluteFillObject, { backgroundColor: C.bg }]}>
-              <SkeletonShimmer width={SW - 48} height={SH * 0.5} style={{ borderRadius: 12 }} />
-              <Text style={[s.loadingText, { marginTop: 16 }]}>Loading document...</Text>
-            </View>
-          )}
-          onError={() => setError('Could not render document')}
-          onLoadEnd={() => setLoading(false)}
-        />
-      </View>
-    );
+    // Rendered natively, on this device. The previous implementation handed the
+    // file URL to Google's document viewer, which cannot read local or vault
+    // files at all — and would have meant sending vault contents to a third
+    // party, which is exactly what VaultChat promises never happens.
+    const kind = officeKind(fileName, params.mimeType as string | undefined);
+    if (kind === 'sheet' && workbook) return <SpreadsheetView workbook={workbook} />;
+    if (kind === 'deck' && deck) return <DeckView deck={deck} />;
+    if (kind === 'doc' && document) return <DocumentView doc={document} />;
+    return renderLoading();
   };
 
   // ══════════════════════════════════════════════════════════════
@@ -609,7 +683,7 @@ export default function FileViewerScreen() {
   // ── Pick renderer ──────────────────────────────────────────────
   const renderContent = () => {
     if (error) return renderError();
-    if (loading && fileType !== 'image' && fileType !== 'pdf' && fileType !== 'office') return renderLoading();
+    if (loading && fileType !== 'image' && fileType !== 'pdf') return renderLoading();
     switch (fileType) {
       case 'image': return renderImage();
       case 'video': return renderVideo();
