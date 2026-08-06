@@ -19,6 +19,8 @@ import { brandAlpha } from '../constants/theme';
 import { getTrack, summarize, type TrackSample } from '../lib/family/history';
 import { useFamilyAlerts, loadAlerts, type FamilyAlert } from '../lib/family/alerts';
 import { getPlaces } from '../lib/family/store';
+import { getGroup } from '../lib/groups/store';
+import { can as hasPerm, type Permission } from '../lib/groups/permissions';
 import { type Geofence } from '../lib/family/geofence';
 import { createDirectChat } from '../lib/chatService';
 import { navigateTo } from '../lib/nav/openNavigation';
@@ -65,16 +67,24 @@ export default function FamilyMemberScreen() {
   const [places, setPlaces] = useState<Geofence[]>([]);
   const [loading, setLoading] = useState(true);
   const [opening, setOpening] = useState(false);
+  // Same gate as the history screen, so History cannot be reached sideways from
+  // here when the group withholds it. Starts denied.
+  const [mayViewHistory, setMayViewHistory] = useState(false);
 
   const alerts = useFamilyAlerts(circleId || null, 'all');
   useEffect(() => { loadAlerts(); }, []);
 
   const pull = useCallback(async () => {
     if (!circleId || !userId) { setLoading(false); return; }
-    const [track, ps] = await Promise.all([
+    const [track, ps, g] = await Promise.all([
       getTrack(circleId, { from: startOfToday(), userId }),
       getPlaces(circleId),
+      getGroup(circleId),
     ]);
+    // Untyped legacy groups keep their previous behaviour: any member could see
+    // the circle's history, so do not start withholding it from them now.
+    const perms = new Set((g?.permissions ?? []) as Permission[]);
+    setMayViewHistory(!g?.groupType || hasPerm(perms, 'view_history'));
     setToday(track);
     setPlaces(ps);
     setLoading(false);
@@ -174,7 +184,7 @@ export default function FamilyMemberScreen() {
           {action('chatbubble-ellipses', 'Message', () => openDirect('chat'))}
           {action('call', 'Call', () => openDirect('voicecall'))}
           {action('navigate-circle', 'Route', route)}
-          {action('time', 'History', () => router.push({
+          {mayViewHistory && action('time', 'History', () => router.push({
             pathname: '/family-history' as any,
             params: { circleId, name, userId, circleName: params.circleName ?? '' },
           }))}

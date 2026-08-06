@@ -55,6 +55,16 @@ export default function FamilySetupScreen() {
           {busy === 'create' ? <ActivityIndicator color="#fff" /> : <><Ionicons name="add" size={18} color="#fff" /><Text style={st.btnTxt}>Create circle</Text></>}
         </TouchableOpacity>
 
+        {/* Groups & Circles: the same flow, but typed — friends, office, riders,
+            travel and the rest, each with its own icon, colour and permissions. */}
+        <TouchableOpacity
+          onPress={() => router.push('/group-create' as any)}
+          style={[st.btn, { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border }]}
+        >
+          <Ionicons name="grid-outline" size={18} color={colors.primary} />
+          <Text style={[st.btnTxt, { color: colors.primary }]}>Create another kind of group</Text>
+        </TouchableOpacity>
+
         <View style={st.orRow}><View style={[st.line, { backgroundColor: colors.border }]} /><Text style={{ color: colors.textFaint, fontSize: 12 }}>OR</Text><View style={[st.line, { backgroundColor: colors.border }]} /></View>
 
         <Text style={[st.h, { color: colors.text }]}>Join with a code</Text>

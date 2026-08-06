@@ -24,7 +24,7 @@ import { useTheme } from '../lib/theme';
 import { brandAlpha } from '../constants/theme';
 import { getPlaces, setPlaces } from '../lib/family/store';
 import { reloadPlaces } from '../lib/family/presence';
-import { type Geofence } from '../lib/family/geofence';
+import { isZoneActive, type Geofence, type ZoneSchedule } from '../lib/family/geofence';
 // v3 — shared Location Lock engine (ONE engine app-wide; see lib/family/lockBridge)
 import { armFamilyPlaceLock, isFamilyLockFor } from '../lib/family/lockBridge';
 import { useLockView, unlockLock } from '../lib/lock/lockService';
@@ -37,6 +37,39 @@ const RADII = [100, 200, 500, 1000];
 const MIN_RADIUS = 50;
 const MAX_RADIUS = 5000;
 const COORD_RE = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/;
+
+const DAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+/** Windows people actually configure, so most users never touch the hours. */
+const PRESETS: { label: string; sched: ZoneSchedule | null }[] = [
+  { label: 'Always',       sched: null },
+  { label: 'School hours', sched: { days: [1, 2, 3, 4, 5], fromMin: 9 * 60,  toMin: 15 * 60 } },
+  { label: 'Work hours',   sched: { days: [1, 2, 3, 4, 5], fromMin: 9 * 60,  toMin: 17 * 60 } },
+  { label: 'Overnight',    sched: { days: [],              fromMin: 22 * 60, toMin: 6 * 60 } },
+];
+/** Temporary zones: how long before the zone stops mattering. */
+const LIFETIMES: { label: string; ms: number | null }[] = [
+  { label: 'Permanent', ms: null },
+  { label: '8 hours',   ms: 8 * 3600_000 },
+  { label: '24 hours',  ms: 24 * 3600_000 },
+  { label: '7 days',    ms: 7 * 24 * 3600_000 },
+];
+
+const hhmm = (min: number) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+
+/** One-line summary of when a zone is live, for the list row. */
+function describeZone(f: Geofence, now: Date): string {
+  if (f.enabled === false) return 'Alerts off';
+  if (f.expiresAt != null && now.getTime() >= f.expiresAt) return 'Expired';
+  const bits: string[] = [`${f.radiusM} m`];
+  if (f.schedule) {
+    const d = f.schedule.days?.length ? f.schedule.days.map((n) => DAYS[n]).join('') : 'daily';
+    bits.push(`${hhmm(f.schedule.fromMin)}–${hhmm(f.schedule.toMin)} ${d}`);
+  }
+  if (f.expiresAt != null) bits.push('temporary');
+  // Say plainly when a zone exists but is dormant right now.
+  if (!isZoneActive(f, now)) bits.push('asleep');
+  return bits.join(' · ');
+}
 
 /** Guess a sensible icon so the list reads like the mockup's. */
 function iconFor(name: string): keyof typeof Ionicons.glyphMap {
@@ -66,6 +99,8 @@ export default function FamilyPlacesScreen() {
   const [lockStats, setLockStats] = useState<Record<string, PlaceLockStats>>({});
   const router = useRouter();
   const lock = useLockView();   // shared engine's live state (chip on locked place)
+  const [editSched, setEditSched] = useState<ZoneSchedule | null>(null);
+  const [editExpiry, setEditExpiry] = useState<number | null>(null);
 
   useEffect(() => { if (cid) getPlaces(cid).then(setPlacesState).catch(() => {}); }, [cid]);
 
@@ -138,6 +173,8 @@ export default function FamilyPlacesScreen() {
     setEditing(p);
     setEditName(p.name);
     setEditRadius(String(p.radiusM));
+    setEditSched(p.schedule ?? null);
+    setEditExpiry(p.expiresAt ?? null);
   };
 
   // ── v3: family-aware actions on the SHARED engine (never a second engine) ──
@@ -176,7 +213,14 @@ export default function FamilyPlacesScreen() {
       Alert.alert('Radius', `Pick a radius between ${MIN_RADIUS} and ${MAX_RADIUS} metres.`);
       return;
     }
-    await persist(places.map((p) => (p.id === editing.id ? { ...p, name: nm, radiusM: r, icon: iconFor(nm) } : p)));
+    await persist(places.map((p) => (p.id === editing.id ? {
+      ...p, name: nm, radiusM: r, icon: iconFor(nm),
+      // Undefined rather than null, so an "always on / permanent" zone carries
+      // no schedule keys at all and reads identically to one saved before
+      // schedules existed.
+      schedule: editSched ?? undefined,
+      expiresAt: editExpiry ?? undefined,
+    } : p)));
     setEditing(null);
   };
 
@@ -236,12 +280,15 @@ export default function FamilyPlacesScreen() {
 
         {places.map((p) => {
           const on = p.enabled !== false;
+          // "On" is the user's switch; "live" also accounts for schedule and
+          // expiry, so a zone that is armed but asleep reads as asleep.
+          const live = isZoneActive(p, new Date());
           return (
             <TouchableOpacity key={p.id} activeOpacity={0.7} onPress={() => openEdit(p)}
               style={[st.row, { borderColor: colors.border }]}>
-              <View style={[st.rowIcon, { backgroundColor: on ? brandAlpha(0.12) : colors.surface }]}>
+              <View style={[st.rowIcon, { backgroundColor: live ? brandAlpha(0.12) : colors.surface }]}>
                 <Ionicons name={(p.icon as keyof typeof Ionicons.glyphMap) ?? iconFor(p.name)} size={18}
-                  color={on ? colors.primary : colors.textFaint} />
+                  color={live ? colors.primary : colors.textFaint} />
               </View>
               <View style={{ flex: 1 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -256,7 +303,7 @@ export default function FamilyPlacesScreen() {
                   )}
                 </View>
                 <Text style={{ color: colors.textDim, fontSize: 11.5 }} numberOfLines={1}>
-                  {p.radiusM} m · {p.center.lat.toFixed(4)}, {p.center.lng.toFixed(4)}
+                  {describeZone(p, new Date())}
                   {lockStats[p.name]?.visits ? ` · ${lockStats[p.name].visits} lock${lockStats[p.name].visits > 1 ? 's' : ''}` : ''}
                 </Text>
               </View>
@@ -294,6 +341,70 @@ export default function FamilyPlacesScreen() {
                 </TouchableOpacity>
               ))}
             </View>
+
+            <Text style={[st.h, { color: colors.text, marginTop: 20, marginBottom: 8 }]}>When it&apos;s active</Text>
+            <View style={st.radii}>
+              {PRESETS.map((pr) => {
+                // "Always" is the one with no schedule; the rest match on window.
+                const on = pr.sched == null
+                  ? editSched == null
+                  : !!editSched && editSched.fromMin === pr.sched.fromMin && editSched.toMin === pr.sched.toMin;
+                return (
+                  <TouchableOpacity key={pr.label} onPress={() => setEditSched(pr.sched ? { ...pr.sched } : null)}
+                    style={[st.rchip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? brandAlpha(0.1) : 'transparent' }]}>
+                    <Text style={{ color: on ? colors.primary : colors.text, fontSize: 12.5, fontWeight: on ? '700' : '500' }}>{pr.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {!!editSched && (
+              <>
+                <View style={[st.days, { marginTop: 12 }]}>
+                  {DAYS.map((d, i) => {
+                    // An empty day list means EVERY day, so render that as all-on
+                    // rather than as none-selected, which would read as broken.
+                    const all = !editSched.days || editSched.days.length === 0;
+                    const on = all || editSched.days!.includes(i);
+                    return (
+                      <TouchableOpacity key={i} onPress={() => {
+                        const cur = all ? [0, 1, 2, 3, 4, 5, 6] : [...editSched.days!];
+                        const next = cur.includes(i) ? cur.filter((x) => x !== i) : [...cur, i].sort();
+                        // Deselecting the last day would silently disable the zone;
+                        // treat "none" as "every day" instead.
+                        setEditSched({ ...editSched, days: next.length ? next : [] });
+                      }}
+                        style={[st.day, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? brandAlpha(0.12) : 'transparent' }]}>
+                        <Text style={{ color: on ? colors.primary : colors.textDim, fontSize: 12, fontWeight: '700' }}>{d}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+                <Text style={{ color: colors.textDim, fontSize: 12, marginTop: 10 }}>
+                  {hhmm(editSched.fromMin)} to {hhmm(editSched.toMin)}
+                  {editSched.fromMin > editSched.toMin ? ' (overnight)' : ''}
+                </Text>
+              </>
+            )}
+
+            <Text style={[st.h, { color: colors.text, marginTop: 20, marginBottom: 8 }]}>How long it lasts</Text>
+            <View style={st.radii}>
+              {LIFETIMES.map((lt) => {
+                const on = lt.ms == null ? editExpiry == null : false;
+                return (
+                  <TouchableOpacity key={lt.label}
+                    onPress={() => setEditExpiry(lt.ms == null ? null : Date.now() + lt.ms)}
+                    style={[st.rchip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? brandAlpha(0.1) : 'transparent' }]}>
+                    <Text style={{ color: on ? colors.primary : colors.text, fontSize: 12.5, fontWeight: on ? '700' : '500' }}>{lt.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            {editExpiry != null && (
+              <Text style={{ color: colors.textDim, fontSize: 12, marginTop: 8 }}>
+                Stops on {new Date(editExpiry).toLocaleString()}
+              </Text>
+            )}
 
             {/* v3 — actions on the shared engines (Navigate module + Lock engine) */}
             {editing && (
@@ -344,6 +455,8 @@ const st = StyleSheet.create({
   field: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, height: 50 },
   input: { flex: 1, fontSize: 15 },
   radii: { flexDirection: 'row', gap: 8, marginTop: 12, flexWrap: 'wrap' },
+  days: { flexDirection: 'row', gap: 6 },
+  day: { flex: 1, height: 36, borderWidth: 1, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   rchip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
   btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 50, borderRadius: 13, marginTop: 14 },
   btnTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },

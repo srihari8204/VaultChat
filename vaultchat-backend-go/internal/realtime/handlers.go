@@ -100,6 +100,44 @@ func (h *Hub) registerChatHandlers(s *socket.Socket) {
 		}
 	})
 
+	// Group trips (Groups & Circles, G5) — the same zero-knowledge relay as live
+	// location, reusing its cached membership check.
+	//
+	// These were missing on BOTH socket owners: the client has emitted
+	// trip_update since G5 shipped and nothing listened, so every ping went
+	// nowhere and no member ever saw another member's ETA. Socket.IO drops
+	// unknown events silently, which is why it looked like it worked.
+	//
+	// blob is sealed with the trip key the starter published in an E2EE message,
+	// so what passes through here is opaque: no destination, no ETA, no route.
+	s.On("trip_update", func(args ...any) {
+		m := argMap(args)
+		chatID := mstr(m, "chatId")
+		blob := mstr(m, "blob")
+		if chatID == "" || blob == "" {
+			return
+		}
+		if !h.liveLocAllowed(d, chatID) {
+			return
+		}
+		s.To(socket.Room("chat:"+chatID)).Emit("trip_update", map[string]any{
+			"userId": d.uid, "tripId": m["tripId"], "blob": blob,
+		})
+	})
+	s.On("trip_end", func(args ...any) {
+		m := argMap(args)
+		chatID := mstr(m, "chatId")
+		if chatID == "" {
+			return
+		}
+		if !h.liveLocAllowed(d, chatID) {
+			return
+		}
+		s.To(socket.Room("chat:"+chatID)).Emit("trip_end", map[string]any{
+			"userId": d.uid, "tripId": m["tripId"],
+		})
+	})
+
 	// Typing — routed via fanOutToChat so it reaches every member's user-room
 	// and honours hide_typing ghost-mode. uid comes from the CLIENT payload.
 	s.On("typing_start", func(args ...any) {
