@@ -25,11 +25,24 @@ import { useTheme } from '../../lib/theme';
 import { useNavGeo, type NavGeo } from '../../lib/nav/navigationService';
 import { type LatLng } from '../../lib/nav/geo';
 import { LEAFLET_JS_B64, LEAFLET_CSS_B64 } from './leafletAsset';
+import { MAPLIBRE_JS_B64, MAPLIBRE_CSS_B64 } from './maplibreAsset';
+import { NAV_MAP_3D } from '../../constants/flags';
 
 const TILES = {
   dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
   light: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
 };
+// MapLibre wants explicit subdomain URLs + no {r} retina token. Expand {s}→a..d.
+const mlTiles = (scheme: 'dark' | 'light') => {
+  const base = scheme === 'light'
+    ? 'basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png'
+    : 'basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png';
+  return ['a', 'b', 'c', 'd'].map((s) => `https://${s}.${base}`);
+};
+
+/** Camera modes for the 3D map. follow = pitched chase-cam that rotates to your
+ *  heading; north = flat, north-up follow; overview = fit the whole route. */
+export type CameraMode = 'follow' | 'north' | 'overview';
 
 export interface LockOverlay {
   center: LatLng;
@@ -113,10 +126,124 @@ if(RN)RN.postMessage('ready');
 </script></body></html>`;
 }
 
+// ── MapLibre GL engine (NAV_MAP_3D) — real 3D pitch, heading-up basemap
+// rotation, and follow/north/overview camera modes. Exposes the SAME JS
+// function names as the Leaflet html() above, so the RN side is engine-agnostic.
+function mlHtml(tiles: string[], bg: string, accent: string): string {
+  return `<!DOCTYPE html><html><head>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<link rel="stylesheet" href="data:text/css;base64,${MAPLIBRE_CSS_B64}"/>
+<style>html,body,#map{height:100%;margin:0;background:${bg}}
+.you{width:20px;height:20px;border-radius:50%;background:#2f7bff;border:3px solid #fff;box-shadow:0 0 0 6px rgba(47,123,255,.20),0 1px 4px rgba(0,0,0,.4)}
+.youwrap{width:20px;height:20px;position:relative}
+.youarrow{position:absolute;left:50%;top:-9px;margin-left:-5px;width:0;height:0;
+  border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:9px solid #2f7bff;filter:drop-shadow(0 0 1px #fff)}
+.destdot{width:16px;height:16px;border-radius:50%;background:${accent};border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)}
+#compass{position:absolute;top:12px;right:12px;z-index:2;width:42px;height:42px;border-radius:21px;
+  background:rgba(20,22,28,.82);border:1px solid rgba(255,255,255,.25);display:none;align-items:center;justify-content:center;box-shadow:0 1px 6px rgba(0,0,0,.35)}
+#needle{width:26px;height:26px;position:relative;transition:transform .15s linear}
+#needle .n{position:absolute;left:50%;top:1px;margin-left:-4px;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:11px solid #ef4444}
+#needle .s{position:absolute;left:50%;bottom:1px;margin-left:-4px;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:11px solid #e5e7eb}
+#needle .dot{position:absolute;left:50%;top:50%;width:4px;height:4px;margin:-2px 0 0 -2px;border-radius:2px;background:#fff}
+.maplibregl-ctrl-attrib{font-size:9px}</style>
+</head><body><div id="map"></div>
+<div id="compass"><div id="needle"><div class="n"></div><div class="s"></div><div class="dot"></div></div></div>
+<script src="data:text/javascript;base64,${MAPLIBRE_JS_B64}"></script>
+<script>
+var RN=window.ReactNativeWebView;
+var TILES=${JSON.stringify(tiles)};
+var map=new maplibregl.Map({container:'map',center:[78.9,20.6],zoom:3,pitch:0,bearing:0,
+  attributionControl:{compact:true},
+  style:{version:8,sources:{carto:{type:'raster',tiles:TILES,tileSize:256,attribution:'© OpenStreetMap © CARTO'}},
+    layers:[{id:'bg',type:'background',paint:{'background-color':'${bg}'}},{id:'carto',type:'raster',source:'carto'}]}});
+var youEl=document.createElement('div');youEl.className='youwrap';
+youEl.innerHTML='<div class="youarrow"></div><div class="you"></div>';
+var you=null,dest=null,pin=null,fitted=false,pinMode=0,hdg=0,cam='follow',lastTouch=0;
+var ready=false;
+// Geodesic circle polygon (metres) — MapLibre has no metric circle primitive.
+function circlePoly(la,ln,rM){var pts=[],R=6378137,d=rM/R,lat=la*Math.PI/180,lng=ln*Math.PI/180;
+  for(var i=0;i<64;i++){var b=i*2*Math.PI/64;
+    var la2=Math.asin(Math.sin(lat)*Math.cos(d)+Math.cos(lat)*Math.sin(d)*Math.cos(b));
+    var ln2=lng+Math.atan2(Math.sin(b)*Math.sin(d)*Math.cos(lat),Math.cos(d)-Math.sin(lat)*Math.sin(la2));
+    pts.push([ln2*180/Math.PI,la2*180/Math.PI]);}
+  pts.push([pts[0][0],pts[0][1]]); // close the ring EXACTLY (MapLibre requires first==last)
+  return {type:'Feature',geometry:{type:'Polygon',coordinates:[pts]}};}
+function src(id){return map.getSource(id);}
+function ensureLine(id,color,width,geo){
+  if(src(id)){src(id).setData(geo);return;}
+  map.addSource(id,{type:'geojson',data:geo});
+  map.addLayer({id:id+'-l',type:'line',source:id,paint:{'line-color':color,'line-width':width,'line-opacity':.9},layout:{'line-join':'round','line-cap':'round'}});}
+function ensureFill(id,color,geo){
+  if(src(id)){src(id).setData(geo);
+    map.setPaintProperty(id+'-f','fill-color',color);map.setPaintProperty(id+'-o','line-color',color);return;}
+  map.addSource(id,{type:'geojson',data:geo});
+  map.addLayer({id:id+'-f',type:'fill',source:id,paint:{'fill-color':color,'fill-opacity':.16}});
+  map.addLayer({id:id+'-o',type:'line',source:id,paint:{'line-color':color,'line-width':2.5,'line-opacity':.95}});}
+function rmLayer(id){['-l','-f','-o'].forEach(function(sfx){if(map.getLayer(id+sfx))map.removeLayer(id+sfx);});if(src(id))map.removeSource(id);}
+
+function setScale(imp){/* MapLibre scale control optional; heading/units handled RN-side */}
+function setRoute(cs){ if(!cs||!cs.length){rmLayer('route');return;}
+  var coords=cs.map(function(c){return [c[1],c[0]];});
+  ensureLine('route','${accent}',6,{type:'Feature',geometry:{type:'LineString',coordinates:coords}});
+  if(!fitted){var b=coords.reduce(function(bb,c){return bb.extend(c);},new maplibregl.LngLatBounds(coords[0],coords[0]));
+    map.fitBounds(b,{padding:60,duration:0});fitted=true;} }
+function setDest(la,ln){ if(!dest){var el=document.createElement('div');el.className='destdot';
+    dest=new maplibregl.Marker({element:el}).setLngLat([ln,la]).addTo(map);}else dest.setLngLat([ln,la]);
+  if(!fitted&&!src('route')){map.jumpTo({center:[ln,la],zoom:14});} }
+function applyCam(la,ln){
+  if(cam==='overview'){return;}
+  var opts={center:[ln,la],duration:600};
+  if(cam==='follow'){opts.pitch=55;opts.bearing=(isFinite(hdg)?hdg:0);opts.zoom=Math.max(map.getZoom(),16.5);}
+  else{opts.pitch=0;opts.bearing=0;opts.zoom=Math.max(map.getZoom(),16);}
+  map.easeTo(opts); }
+function setPos(la,ln,follow,acc){
+  if(!you){you=new maplibregl.Marker({element:youEl}).setLngLat([ln,la]).addTo(map);}else you.setLngLat([ln,la]);
+  if(acc&&acc>0){ensureFill('acc','#2f7bff',circlePoly(la,ln,acc));}else{rmLayer('acc');}
+  if(follow&&Date.now()-lastTouch>10000)applyCam(la,ln); }
+function setHeading(h){ hdg=h; var el=document.getElementById('needle');
+  if(el)el.style.transform='rotate('+(-(map.getBearing()))+'deg)';
+  // In follow mode the basemap rotates to heading; keep the you-arrow map-up.
+  if(youEl){var a=cam==='follow'?0:(isFinite(h)?h:0);youEl.querySelector('.youarrow').style.transform='rotate('+a+'deg)';}
+  if(cam==='follow'&&you&&Date.now()-lastTouch>10000){map.easeTo({bearing:(isFinite(h)?h:0),duration:400});} }
+function showCompass(v){ document.getElementById('compass').style.display=v?'flex':'none'; }
+function setLock(la,ln,r,color,fit){ ensureFill('lock',color,circlePoly(la,ln,r));
+  if(fit&&!fitted){var b=circlePoly(la,ln,r).geometry.coordinates[0].reduce(function(bb,c){return bb.extend(c);},new maplibregl.LngLatBounds());
+    map.fitBounds(b,{padding:70,duration:0});fitted=true;} }
+function clearLock(){ rmLayer('lock'); }
+function setPin(la,ln){ if(!pin){pin=new maplibregl.Marker({draggable:true,color:'${accent}'}).setLngLat([ln,la]).addTo(map);
+    pin.on('dragend',function(){var p=pin.getLngLat();if(RN)RN.postMessage(JSON.stringify({type:'pin',lat:p.lat,lng:p.lng}));});
+    map.easeTo({center:[ln,la],zoom:Math.max(map.getZoom(),16)});}
+  else pin.setLngLat([ln,la]); }
+function clearPin(){ if(pin){pin.remove();pin=null;} }
+function setPinMode(v){ pinMode=v; map.getCanvas().style.cursor=v?'crosshair':''; }
+function setCamera(mode){ cam=mode;
+  if(mode==='overview'){ fitAll(); return; }
+  if(you){var p=you.getLngLat();applyCam(p.lat,p.lng);} }
+function fitAll(){ var b=null;
+  if(src('route')){var c=map.getSource('route')._data.geometry.coordinates;b=c.reduce(function(bb,x){return bb.extend(x);},new maplibregl.LngLatBounds(c[0],c[0]));}
+  else if(src('lock')){var lc=map.getSource('lock')._data.geometry.coordinates[0];b=lc.reduce(function(bb,x){return bb.extend(x);},new maplibregl.LngLatBounds());}
+  if(b)map.easeTo({pitch:0,bearing:0,duration:600}),map.fitBounds(b,{padding:60,pitch:0,bearing:0});
+  else if(you)map.easeTo({center:you.getLngLat(),zoom:15,pitch:0,bearing:0,duration:600}); }
+function recenter(){ if(you){var p=you.getLngLat();if(cam==='overview')cam='follow';applyCam(p.lat,p.lng);}else fitAll(); }
+function zoomBy(d){ map.easeTo({zoom:map.getZoom()+d,duration:250}); }
+map.on('dragstart',function(){lastTouch=Date.now();});
+map.on('zoomstart',function(e){if(e.originalEvent)lastTouch=Date.now();});
+map.on('rotatestart',function(){lastTouch=Date.now();});
+map.on('rotate',function(){var el=document.getElementById('needle');if(el)el.style.transform='rotate('+(-(map.getBearing()))+'deg)';});
+map.on('click',function(e){ if(!pinMode)return; setPin(e.lngLat.lat,e.lngLat.lng);
+  if(RN)RN.postMessage(JSON.stringify({type:'pin',lat:e.lngLat.lat,lng:e.lngLat.lng})); });
+document.getElementById('compass').addEventListener('click',function(){
+  map.easeTo({bearing:0,pitch:cam==='follow'?55:0,duration:400}); if(RN)RN.postMessage(JSON.stringify({type:'compass'})); });
+map.on('load',function(){ ready=true; if(RN)RN.postMessage('ready'); });
+map.on('error',function(e){ if(RN)RN.postMessage(JSON.stringify({type:'mlerror',msg:(e&&e.error&&e.error.message)||'map error'})); });
+</script></body></html>`;
+}
+
 export default function NavMap({
   style, data, follow = true,
   lock, accuracyM, headingDeg, showCompass = false,
   pin, pinMode = false, onPinDrop, zoomControls = false, imperialScale = false,
+  cameraMode, camera3D = NAV_MAP_3D,
 }: {
   style?: any;
   data?: NavGeo;
@@ -130,12 +257,22 @@ export default function NavMap({
   onPinDrop?: (p: LatLng) => void;
   zoomControls?: boolean;
   imperialScale?: boolean;
+  /** Controlled camera mode (MapLibre engine only). Uncontrolled if omitted. */
+  cameraMode?: CameraMode;
+  /** Use the MapLibre GL 3D engine. Defaults to the NAV_MAP_3D flag; a device
+   *  that fails to init WebGL/worker auto-falls-back to the Leaflet 2D map. */
+  camera3D?: boolean;
 }) {
   const { scheme, colors } = useTheme();
   const storeGeo = useNavGeo();
   const geo = data ?? storeGeo;
   const ref = useRef<WebView>(null);
   const [ready, setReady] = useState(false);
+  // Engine: MapLibre 3D when asked, but a runtime map error before first paint
+  // downgrades to the proven Leaflet map so the nav map is never dead.
+  const [engine, setEngine] = useState<'maplibre' | 'leaflet'>(camera3D ? 'maplibre' : 'leaflet');
+  const [cam, setCam] = useState<CameraMode>(cameraMode ?? 'follow');
+  useEffect(() => { if (cameraMode) setCam(cameraMode); }, [cameraMode]);
   const seen = useRef<{ shape: LatLng[] | null; dest: LatLng | null }>({ shape: null, dest: null });
   const onPinRef = useRef(onPinDrop);
   onPinRef.current = onPinDrop;
@@ -193,8 +330,22 @@ export default function NavMap({
     else ref.current.injectJavaScript('clearPin();true;');
   }, [ready, pin?.lat, pin?.lng]);
 
+  // Camera mode → MapLibre only (no-op string on Leaflet, which lacks setCamera).
+  useEffect(() => {
+    if (!ready || !ref.current || engine !== 'maplibre') return;
+    ref.current.injectJavaScript(`setCamera(${JSON.stringify(cam)});true;`);
+  }, [ready, engine, cam]);
+
   const recenter = () => ref.current?.injectJavaScript('recenter();true;');
-  const source = { html: html(TILES[scheme === 'light' ? 'light' : 'dark'], colors.bg, colors.primary) };
+  // 3D toggle cycles the chase-cam: follow (pitched, heading-up) → north (flat) → overview.
+  const cycleCam = () => {
+    const next: CameraMode = cam === 'follow' ? 'north' : cam === 'north' ? 'overview' : 'follow';
+    setCam(next);
+  };
+  const camIcon = cam === 'follow' ? 'cube' : cam === 'north' ? 'navigate' : 'scan';
+  const source = engine === 'maplibre'
+    ? { html: mlHtml(mlTiles(scheme === 'light' ? 'light' : 'dark'), colors.bg, colors.primary) }
+    : { html: html(TILES[scheme === 'light' ? 'light' : 'dark'], colors.bg, colors.primary) };
 
   return (
     <View style={[styles.wrap, style]}>
@@ -210,6 +361,11 @@ export default function NavMap({
           try {
             const m = JSON.parse(raw);
             if (m?.type === 'pin' && onPinRef.current) onPinRef.current({ lat: m.lat, lng: m.lng });
+            // WebGL/worker failed on this device before first paint → fall back to Leaflet.
+            else if (m?.type === 'mlerror' && engine === 'maplibre' && !ready) {
+              seen.current = { shape: null, dest: null };
+              setEngine('leaflet');
+            }
           } catch {}
         }}
         style={{ backgroundColor: colors.bg }}
@@ -225,6 +381,12 @@ export default function NavMap({
             <Ionicons name="remove" size={20} color={colors.text} />
           </TouchableOpacity>
         </View>
+      )}
+      {/* 3D camera toggle — MapLibre only; uncontrolled (hidden when a parent drives cameraMode). */}
+      {engine === 'maplibre' && !cameraMode && (
+        <TouchableOpacity onPress={cycleCam} style={[styles.fab, { bottom: zoomControls ? 120 : 66, backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Ionicons name={camIcon as any} size={19} color={colors.primary} />
+        </TouchableOpacity>
       )}
       {(geo.pos || geo.dest || lock) && (
         <TouchableOpacity onPress={recenter} style={[styles.fab, { backgroundColor: colors.card, borderColor: colors.border }]}>

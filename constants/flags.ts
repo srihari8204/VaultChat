@@ -164,4 +164,12 @@ export const CALL_SESSIONS = false;
 // back → auto-stop → history correct) — flip OFF for store builds until then.
 export const LOCATION_LOCK = true;
 
+// NAV_MAP_3D swaps NavMap's Leaflet (2D) engine for MapLibre GL: real 3D pitch,
+// heading-up basemap rotation, and follow/north/overview camera modes. Reuses
+// the same Carto raster tiles (no MapTiler key, no vector tiles). Defaults ON;
+// a device that can't init WebGL/worker auto-falls-back to Leaflet at runtime,
+// so this is safe to ship on — but it wants a real-device pass (WebGL perf on
+// low-end handsets) before it's considered proven. Flip OFF to force Leaflet.
+export const NAV_MAP_3D = true;
+
 export default { E2EE_ENABLED, VAULT_SESSION_SEALED, VAULT_CACHE_ENCRYPTED, MEDIA_E2EE, STORY_E2EE, GROUP_E2EE, SCHEDULED_LOCAL, VB_AUTODOWNLOAD, VB_AUTO_MAX_BYTES, VB_RELIABILITY_FIXES, CALL_ENGINE_V2, CALL_SESSIONS, LOCATION_LOCK };
