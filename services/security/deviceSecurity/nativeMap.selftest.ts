@@ -50,8 +50,16 @@ const has = (r: { signals: { type: string }[] }, t: string) => r.signals.some((s
 
   // ── Re-sign gating ───────────────────────────────────────────────
   console.log('Re-sign check:');
-  const noBaseline = mapNativeScan({ signingSha256: 'abc123' }, 'android');
+  // "No baseline" is stated explicitly rather than inferred from the shipped
+  // EXPECTED_SIGNING_SHA256 being blank — that constant is filled in for
+  // release builds, so inferring it made this case depend on release state.
+  const noBaseline = mapNativeScan({ signingSha256: 'abc123' }, 'android', { expectedSigning: '' });
   check('no baseline → APK_RESIGNED not evaluated', !noBaseline.evaluatedTypes.includes('APK_RESIGNED') && !has(noBaseline, 'APK_RESIGNED'));
+  // The gate must actually be live in shipped builds: with the default
+  // baseline, a foreign signing cert is caught.
+  const shipped = mapNativeScan({ signingSha256: 'abc123' }, 'android');
+  check('shipped baseline is configured → foreign cert caught',
+    shipped.evaluatedTypes.includes('APK_RESIGNED') && has(shipped, 'APK_RESIGNED'));
   const match = mapNativeScan({ signingSha256: 'ABC123' }, 'android', { expectedSigning: 'abc123' });
   check('matching cert → evaluated, no signal', match.evaluatedTypes.includes('APK_RESIGNED') && !has(match, 'APK_RESIGNED'));
   const mismatch = mapNativeScan({ signingSha256: 'deadbeef' }, 'android', { expectedSigning: 'abc123' });

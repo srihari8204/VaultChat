@@ -28,8 +28,12 @@ The customer transition is deliberately narrower than the owner's (`sbOwnerNext`
 **D4 — `collected_by` column rather than inferring from the timeline.**
 The order timeline records events but its `note` is free text; deriving the actor by parsing notes would be fragile. One additive `collected_by` column (`''|customer|owner`) mirrors the existing `cancelled_by` convention, so the two "who did this" fields read the same way.
 
-**D5 — Receipt is derived client-side from the stored invoice; nothing new is transmitted.**
-`taxTotal` is already on the invoice payload, so "Inclusive of all taxes" is `taxTotal` and the tax-inclusive line prices are the stored retail prices (Shop Book prices are entered as shelf prices — the tax percent describes the portion *inside* the price, which is why `sbCreateInvoice` adds tax on top only for the owner's tax report). The receipt therefore shows `total` as the amount payable and states the included tax, while the owner's tax report continues to read `subtotal`/`taxTotal` from the same row. No API change, no migration for the receipt.
+**D5 — Tax is computed as contained within the price, fixing a live discrepancy.**
+Shop Book catalog prices are shelf prices, but `sbCreateInvoice` computed tax as `P·r/100` and stored `invoice.total = order.total + taxTotal` — tax added *on top*. The khata, meanwhile, records `order.total`. So for any shop that set a tax percent, the invoice claimed a larger amount than the customer actually owed and than the cart had shown. Restyling the invoice as a receipt with a prominent "Total paid" would have put that contradiction in front of customers, so it is fixed here rather than carried forward: included tax is `P·r/(100+r)`, `invoice.total` is the amount charged, and `invoice.subtotal` becomes the taxable ex-tax value the owner's tax report aggregates. A discount scales the included tax proportionally. The arithmetic is extracted into `sbIncludedTax`/`sbTaxBreakdown` and unit-tested (`shopbook_tax_test.go`).
+
+Issued invoices are immutable, so rows written before this fix keep their old totals; only shops that had configured a tax percent are affected, and the discrepancy stops at deploy.
+
+**D5a — The receipt needs no new API.** `taxTotal`, `total`, `discount` and the line prices are already on the invoice payload, so the receipt is purely a rendering change. Payment status is read from the existing khata endpoint rather than assumed, so the receipt never claims "paid" against an outstanding balance.
 
 **D6 — Business tax identifiers are filtered at render time, not dropped at write time.**
 `business.tax` stays in the stored snapshot (the owner needs it; compliance may need it). The customer receipt simply does not render it. Removing it from storage would break the owner's record for orders issued after the change.

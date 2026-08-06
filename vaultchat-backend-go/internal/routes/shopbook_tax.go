@@ -122,6 +122,69 @@ func sbTaxConfigured(taxConfig map[string]any) bool {
 	return false
 }
 
+// sbInvoiceLine is one priced order line as it reaches the invoice.
+type sbInvoiceLine struct {
+	Name       string  `json:"name"`
+	Brand      string  `json:"brand"`
+	Unit       string  `json:"unit"`
+	Qty        float64 `json:"qty"`
+	Price      float64 `json:"price"`
+	TaxPercent float64 `json:"taxPercent"`
+}
+
+// sbIncludedTax returns the tax CONTAINED WITHIN the amount charged, plus the
+// per-rate split. Shop Book catalog prices are shelf prices (tax-inclusive
+// retail), so a line at price P with rate r carries P·r/(100+r) of tax —
+// never P·r/100, which would add tax on top and make the receipt disagree
+// with the cart and the khata.
+//
+// `gross` is the sum of line amounts and `charged` is the order total after
+// discount; when they differ the tax is scaled by charged/gross so a discount
+// reduces the included tax proportionally.
+func sbIncludedTax(lines []sbInvoiceLine, gross, charged float64) (float64, map[float64]float64) {
+	byRate := map[float64]float64{}
+	total := 0.0
+	for _, l := range lines {
+		if l.TaxPercent > 0 {
+			inc := l.Price * l.Qty * l.TaxPercent / (100 + l.TaxPercent)
+			byRate[l.TaxPercent] += inc
+			total += inc
+		}
+	}
+	if gross > 0 && charged >= 0 && charged != gross {
+		f := charged / gross
+		total *= f
+		for rate := range byRate {
+			byRate[rate] *= f
+		}
+	}
+	return total, byRate
+}
+
+// sbTaxBreakdown renders the per-rate tax amounts as customer/owner-readable
+// lines, splitting each rate across a country's components (e.g. India's
+// CGST/SGST halves). Returns an empty slice when no tax applies.
+func sbTaxBreakdown(byRate map[float64]float64, taxType string, split []string, haveCountry bool) []map[string]any {
+	out := []map[string]any{}
+	for rate, amt := range byRate {
+		if haveCountry && len(split) > 0 {
+			n := float64(len(split))
+			for _, part := range split {
+				out = append(out, map[string]any{
+					"label":  fmt.Sprintf("%s (%.2g%%)", part, rate/n),
+					"amount": math.Round(amt/n*100) / 100,
+				})
+			}
+			continue
+		}
+		out = append(out, map[string]any{
+			"label":  fmt.Sprintf("%s (%.2g%%)", taxType, rate),
+			"amount": math.Round(amt*100) / 100,
+		})
+	}
+	return out
+}
+
 // sbCreateInvoice issues the immutable invoice for an order inside the
 // collection transaction. Idempotent per order (order_id UNIQUE) — a repeat
 // call is a no-op. Line items with availability 'unavailable' are excluded.
@@ -166,18 +229,10 @@ func sbCreateInvoice(ctx context.Context, tx pgx.Tx, orderID string) error {
 		return err
 	}
 	defer rows.Close()
-	type line struct {
-		Name       string  `json:"name"`
-		Brand      string  `json:"brand"`
-		Unit       string  `json:"unit"`
-		Qty        float64 `json:"qty"`
-		Price      float64 `json:"price"`
-		TaxPercent float64 `json:"taxPercent"`
-	}
-	lines := []line{}
+	lines := []sbInvoiceLine{}
 	subtotal := 0.0
 	for rows.Next() {
-		var l line
+		var l sbInvoiceLine
 		var avail string
 		if rows.Scan(&l.Name, &l.Brand, &l.Unit, &l.Qty, &l.Price, &l.TaxPercent, &avail) != nil {
 			continue
@@ -192,40 +247,23 @@ func sbCreateInvoice(ctx context.Context, tx pgx.Tx, orderID string) error {
 
 	// Tax applies only when the shop configured any tax detail.
 	taxType, taxTotal := "", 0.0
-	breakdown := []map[string]any{}
+	byRate := map[float64]float64{}
+	var cc sbCountry
+	okC := false
 	if sbTaxConfigured(taxCfg) {
-		cc, okC := sbLoadCountry(ctx, country)
+		cc, okC = sbLoadCountry(ctx, country)
 		if okC {
 			taxType = cc.TaxType
 		}
-		byRate := map[float64]float64{}
-		for _, l := range lines {
-			if l.TaxPercent > 0 {
-				t := l.Price * l.Qty * l.TaxPercent / 100
-				byRate[l.TaxPercent] += t
-				taxTotal += t
-			}
-		}
-		for rate, amt := range byRate {
-			if okC && len(cc.TaxSplit) > 0 {
-				// e.g. India: split each rate into equal CGST/SGST halves.
-				n := float64(len(cc.TaxSplit))
-				for _, part := range cc.TaxSplit {
-					breakdown = append(breakdown, map[string]any{
-						"label":  fmt.Sprintf("%s (%.2g%%)", part, rate/n),
-						"amount": math.Round(amt/n*100) / 100,
-					})
-				}
-			} else {
-				breakdown = append(breakdown, map[string]any{
-					"label":  fmt.Sprintf("%s (%.2g%%)", taxType, rate),
-					"amount": math.Round(amt*100) / 100,
-				})
-			}
-		}
+		taxTotal, byRate = sbIncludedTax(lines, subtotal, total)
 	}
+	breakdown := sbTaxBreakdown(byRate, taxType, cc.TaxSplit, okC)
+
 	taxTotal = math.Round(taxTotal*100) / 100
-	subtotal = math.Round(subtotal*100) / 100
+	// Tax-inclusive retail: catalog prices are shelf prices, so the amount
+	// charged already contains the tax. `subtotal` is therefore the taxable
+	// (ex-tax) value, which is what the owner's tax report aggregates.
+	subtotal = math.Round((total-taxTotal)*100) / 100
 
 	business := map[string]any{
 		"name": shopName, "address": shopAddr, "phone": shopPhone, "tax": taxCfg,
@@ -240,7 +278,7 @@ func sbCreateInvoice(ctx context.Context, tx pgx.Tx, orderID string) error {
 		   subtotal, discount, tax_total, total, business, customer_name, items, tax_breakdown)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
 		shopID, orderID, custID, seq, country, taxType, currency,
-		subtotal, discount, taxTotal, math.Round((total+taxTotal)*100)/100,
+		subtotal, discount, taxTotal, math.Round(total*100)/100,
 		bizJSON, custName, itemsJSON, bdJSON)
 	return err
 }
