@@ -137,6 +137,25 @@ pub fn write_block_from_body(
     Ok(opened.len())
 }
 
+/// Flush a destination file's written bytes to stable storage.
+///
+/// This is the DURABILITY WATERMARK primitive. `write_all` above only reaches
+/// the OS page cache: the bytes are visible to a subsequent read, so every
+/// "did it land?" check passes, and they are still lost on a power cut or a
+/// kernel-level kill. Marking a chunk verified on that basis records a bit that
+/// says "durably written" about data that is not. After the crash the resume
+/// engine correctly skips the chunk and the file is silently wrong.
+///
+/// `sync_data` (fdatasync) rather than `sync_all`: the destination is
+/// preallocated with `set_len` before the first write, so its size metadata is
+/// already stable and only the data extents need flushing. That is the cheaper
+/// of the two, and the difference is measurable at 512 KiB granularity.
+pub fn sync_file(path: &str) -> Result<bool, VbError> {
+    let f = OpenOptions::new().write(true).open(fs_path(path)).map_err(io("syncFile open"))?;
+    f.sync_data().map_err(io("syncFile sync_data"))?;
+    Ok(true)
+}
+
 /// Whole-file SHA-256 (lowercase hex), streamed — never a full read into memory.
 pub fn sha256_file(path: &str) -> Result<String, VbError> {
     let mut f = File::open(fs_path(path)).map_err(io("sha256 open"))?;
@@ -198,6 +217,25 @@ mod tests {
         assert!(delete_file(&src));
         assert!(delete_file(&dst));
         assert!(!delete_file(&src)); // second delete → false, no panic
+    }
+
+    #[test]
+    fn sync_file_flushes_and_reports_a_missing_path() {
+        let p = tmp("sync.bin");
+        assert!(prealloc(&p, 64).unwrap());
+        {
+            let mut f = OpenOptions::new().write(true).open(fs_path(&p)).unwrap();
+            f.seek(SeekFrom::Start(0)).unwrap();
+            f.write_all(&[7u8; 64]).unwrap();
+        }
+        assert!(sync_file(&p).unwrap(), "sync_data succeeds on a written file");
+        assert_eq!(std::fs::read(&p).unwrap(), vec![7u8; 64], "data survives the barrier");
+        // Repeating the barrier with nothing new to flush must stay cheap + ok.
+        assert!(sync_file(&p).unwrap(), "sync is idempotent");
+        assert!(delete_file(&p));
+        // A missing destination is an ERROR, never a silent success — the caller
+        // uses this result to decide whether a chunk may be marked verified.
+        assert!(sync_file(&p).is_err(), "sync of a missing file must not report durability");
     }
 
     #[test]

@@ -150,6 +150,32 @@ export function downloadBlock(op: DownloadBlockOp): Promise<number> {
   return requireNative().downloadBlock(op);
 }
 
+/**
+ * Is the durability barrier available on the resolved backend?
+ *
+ * Deliberately NOT part of REQUIRED above: adding it there would make an older
+ * native module fail the capability check outright and drop the whole device to
+ * relay-only, which is a far bigger behaviour change than the gap it guards.
+ * Instead the engine asks, and reports honestly when the answer is no.
+ */
+export function isDurableSyncAvailable(): boolean {
+  return typeof Native?.syncFile === 'function';
+}
+
+/**
+ * DURABILITY BARRIER: block until this file's written bytes are on stable
+ * storage. Resolves true, or REJECTS — a rejection must never be read as
+ * durable. See services/vaultbeam/rust/src/fileio.rs::sync_file for why closing
+ * a file is not enough.
+ */
+export function syncFile(path: string): Promise<boolean> {
+  const n = requireNative();
+  if (typeof n.syncFile !== 'function') {
+    throw new Error('VaultBeam native module has no syncFile — durability cannot be guaranteed on this build');
+  }
+  return n.syncFile(path);
+}
+
 // Whole-file SHA-256 (hex) for the post-assembly integrity check.
 export function sha256File(path: string): Promise<string> {
   return requireNative().sha256(path);

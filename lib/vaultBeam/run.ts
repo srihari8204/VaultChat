@@ -33,9 +33,26 @@ export async function engine(): Promise<VaultBeamEngine> {
   if (_engine) return _engine;
   const { defaultSessionStore } = await import('./persistence');
   const store = await defaultSessionStore();
+  const native = await import('../vaultBeamStreamNative');
   const mgr = new TransferManager({ concurrency: 1 });
   _manager = mgr;
-  const eng = new VaultBeamEngine({ manager: mgr, store });
+
+  // DURABILITY (P0). A recipient's chunk is not progress until its bytes are on
+  // stable storage — see manager.ts `fsync`.
+  //
+  // If the resolved native backend has no syncFile (an older module in a mixed
+  // build), we install NO barrier rather than a fake one. Installing a barrier
+  // that cannot flush would stall every recipient; pretending to flush would
+  // record durability that does not exist. Neither is acceptable, so the engine
+  // runs with the pre-watermark semantics and says so loudly — a degraded mode
+  // that is visible in telemetry, not a silent one.
+  const canSync = native.isDurableSyncAvailable();
+  const eng = new VaultBeamEngine({
+    manager: mgr, store, fsync: canSync ? (p: string) => native.syncFile(p) : undefined,
+  });
+  if (canSync) mgr.setFsync(eng.handleFsync);
+  else console.warn('[vaultbeam] native backend has no syncFile — running WITHOUT the durability watermark');
+
   // The manager's change hook IS the persistence + progress seam, so a caller
   // cannot forget to wire one of them.
   mgr.setOnChange(eng.handleChange);
@@ -46,23 +63,36 @@ export async function engine(): Promise<VaultBeamEngine> {
 export function currentManager(): TransferManager | null { return _manager; }
 
 /**
- * A relay IO binding that adopts a newer server session version instead of
- * failing. A 409 means our view is stale — the correct response is to rehydrate
- * and re-derive, never to restart the transfer (design §7).
+ * A relay IO binding that DETECTS a newer server session version and stops.
+ *
+ * It used to call `session.adoptVersion(v)`, which reset both bitmaps and kept
+ * running — under the same K_t. A version bump restarts the chunk grid at 0, and
+ * the nonce is `4B(transferId prefix) ‖ u64_be(chunkId)`, so the next round
+ * would have sealed different plaintext at nonces already used. For AES-GCM that
+ * is a total break, not a degradation.
+ *
+ * The only safe response is to stop this session. K_t lives in the E2EE manifest
+ * and is not something the receiver can derive, so continuing requires a NEW
+ * manifest carrying fresh key material — at which point a new session starts and
+ * `adoptVersion` gets the key it now demands.
  */
-async function relayIOFor(session: TransferSession): Promise<RelayIO> {
+async function relayIOFor(session: TransferSession, onStale: (v: number) => void): Promise<RelayIO> {
   const relay = await import('../vaultbeamRelay');
   const native = await import('../vaultBeamStreamNative');
   const store = await import('../networkStateStore');
 
-  const adopt = (st: { sessionVersion?: number }) => {
-    if (typeof st?.sessionVersion === 'number') session.adoptVersion(st.sessionVersion);
+  const checkVersion = (st: { sessionVersion?: number }) => {
+    const v = st?.sessionVersion;
+    if (typeof v !== 'number') return;             // pre-vbm3 server: absent ≠ stale
+    if (v <= session.sessionVersion) return;
+    onStale(v);
+    throw new Error(`stale session: server v${v} > local v${session.sessionVersion} — awaiting a manifest with fresh K_t`);
   };
 
   return {
     async state(transferId) {
       const st = (await relay.relayState(transferId)) as unknown as RelayStateLike;
-      adopt(st);
+      checkVersion(st);
       return st;
     },
     async grow(transferId, blockCount, plan) { await relay.relayGrow(transferId, blockCount, plan); },
@@ -105,6 +135,12 @@ export async function runTransfer(opts: RunOpts): Promise<TransferSession> {
   });
   // Per transfer, not per engine: the engine outlives any one transfer.
   if (opts.onChange) eng.setSink(opts.transferId, opts.onChange);
+  // Where the durability barrier flushes. Registered before any driver runs, so
+  // a recipient can never reach `commitDurable` with nothing to fsync.
+  if (opts.dstPath) eng.setDestination(opts.transferId, opts.dstPath);
+
+  /** Set once the server reports a newer session version — see relayIOFor. */
+  let staleVersion: number | null = null;
 
   const native = await import('../vaultBeamStreamNative');
   const direct = await import('../vaultBeamDirect');
@@ -140,7 +176,7 @@ export async function runTransfer(opts: RunOpts): Promise<TransferSession> {
   const lan = new LanDriver(lanOpts);
 
   const relay = new RelayDriver({
-    io: await relayIOFor(session),
+    io: await relayIOFor(session, (v) => { staleVersion = v; }),
     srcPath: opts.srcPath,
     dstPath: opts.dstPath,
   });
@@ -148,9 +184,13 @@ export async function runTransfer(opts: RunOpts): Promise<TransferSession> {
   // Scoped to THIS transfer. These drivers hold per-transfer state — a source
   // path, a datachannel, a LAN endpoint — so a process-wide registry would serve
   // the second transfer using the first one's file.
+  // Every gate also requires the session NOT to be stale. Once the server has
+  // moved on, no transport may move a byte: they all seal under the same K_t,
+  // so a stale P2P round is exactly as unsafe as a stale relay round.
+  const fresh = () => staleVersion === null;
   mgr.setDriversFor(opts.transferId, [
-    gateUntilReady(lan, () => role === 'sender' ? !!opts.srcPath : !!lanEndpoint),
-    gateUntilReady(p2p, () => !!channel),
+    gateUntilReady(lan, () => fresh() && (role === 'sender' ? !!opts.srcPath : !!lanEndpoint)),
+    gateUntilReady(p2p, () => fresh() && !!channel),
     // The relay is always reachable, so hold it back briefly or it wins every
     // first round and the direct tiers never get a chance.
     graceGate(relay, {
@@ -196,9 +236,21 @@ export async function runTransfer(opts: RunOpts): Promise<TransferSession> {
 
   try {
     await mgr.start(session);
+    // With every gate closed a stale session merely PARKS, which would look like
+    // a transient stall and silently wait forever. Make it terminal: this
+    // session can never make progress, and only a new manifest (new K_t, new
+    // session) can carry the transfer forward.
+    if (staleVersion !== null && session.state === 'active') {
+      session.finish('failed');
+      eng.handleChange(session);
+    }
   } finally {
     try { offBound(); } catch { /* already removed */ }
-    if (session.state !== 'active') { mgr.releaseTransports(opts.transferId); eng.clearSink(opts.transferId); }
+    if (session.state !== 'active') {
+      mgr.releaseTransports(opts.transferId);
+      eng.clearSink(opts.transferId);
+      eng.clearDestination(opts.transferId);
+    }
     await eng.flush();
   }
   return session;

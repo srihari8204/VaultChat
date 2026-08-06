@@ -265,6 +265,28 @@ class VaultBeamStreamModule(reactContext: ReactApplicationContext) : ReactContex
         }
     }
 
+    /**
+     * DURABILITY WATERMARK: flush this file's written bytes to stable storage.
+     *
+     * Closing a RandomAccessFile does NOT do this. The bytes reach the page
+     * cache, every read-back check passes, and they are still lost on a power
+     * cut or a kernel kill. A chunk marked verified on that basis records
+     * "durably written" about data that is not on disk, and after the crash the
+     * resume engine correctly skips it — leaving a silently wrong file.
+     *
+     * `fd.sync()` is fsync(2). The destination is preallocated with setLength
+     * before the first write, so this is a data-only flush in practice.
+     */
+    @ReactMethod
+    fun syncFile(path: String, promise: Promise) {
+        io.execute {
+            try {
+                RandomAccessFile(fsPath(path), "rw").use { it.fd.sync() }
+                promise.resolve(true)
+            } catch (e: Throwable) { promise.reject("syncFile", e) }
+        }
+    }
+
     // Whole-file SHA-256 (hex) for the recipient's post-assembly integrity check
     // against the expected hash delivered over E2EE. Streamed — no full read.
     @ReactMethod

@@ -37,6 +37,12 @@ export interface EngineOpts {
   now?: () => number;
   schedule?: (fn: () => void, ms: number) => any;
   cancel?: (h: any) => void;
+  /**
+   * The durability primitive: flush a path to stable storage, or reject.
+   * Injected so the engine stays importable (and testable) under `npx tsx`;
+   * production passes `vaultBeamStreamNative.syncFile`.
+   */
+  fsync?: (path: string) => Promise<unknown>;
 }
 
 /**
@@ -51,10 +57,14 @@ export class VaultBeamEngine {
    *  a single stored callback would belong to whichever transfer happened to
    *  build it first and every later transfer's UI would go dark. */
   private readonly sinks = new Map<string, (s: TransferSession) => void>();
+  /** Destination path per recipient transfer — what the durability barrier flushes. */
+  private readonly dstPaths = new Map<string, string>();
+  private readonly fsync?: (path: string) => Promise<unknown>;
 
   constructor(o: EngineOpts) {
     this.manager = o.manager;
     this.onChange = o.onChange;
+    this.fsync = o.fsync;
     this.wb = new WriteBehind({
       store: o.store, delayMs: o.writeDelayMs, extra: o.extra,
       now: o.now, schedule: o.schedule, cancel: o.cancel,
@@ -64,6 +74,29 @@ export class VaultBeamEngine {
   /** Route this transfer's progress to a specific sink (its chat bubble). */
   setSink(transferId: string, cb: (s: TransferSession) => void): void { this.sinks.set(transferId, cb); }
   clearSink(transferId: string): void { this.sinks.delete(transferId); }
+
+  /** Register where a recipient's bytes land, so the barrier knows what to flush. */
+  setDestination(transferId: string, dstPath: string): void { this.dstPaths.set(transferId, dstPath); }
+  clearDestination(transferId: string): void { this.dstPaths.delete(transferId); }
+
+  /**
+   * Wire this into TransferManager({ fsync }). It resolves ONLY when the bytes
+   * are on stable storage, and throws otherwise — a missing primitive or an
+   * unregistered destination is a refusal to promise durability, never a quiet
+   * success. The manager treats the throw correctly: the batch goes back to the
+   * work-list instead of being counted as progress.
+   */
+  handleFsync = async (s: TransferSession): Promise<void> => {
+    if (s.role !== 'recipient') return;
+    if (!this.fsync) {
+      throw new Error('durability barrier unavailable: no fsync primitive on this build');
+    }
+    const path = this.dstPaths.get(s.transferId);
+    if (!path) {
+      throw new Error(`durability barrier has no destination registered for ${s.transferId}`);
+    }
+    await this.fsync(path);
+  };
 
   /** Wire this into TransferManager({ onChange }) so state and disk stay in step. */
   handleChange = (s: TransferSession): void => {
@@ -311,6 +344,47 @@ function _selfCheck(): void {
       a.markVerified(1); e.handleChange(a);
       A(seen.length === 2, 'a cleared sink stops receiving');
       A(seen.filter((x) => x.startsWith('B')).length === 1, "clearing A did not disturb B's sink");
+    }
+
+    // 7c. the durability barrier REFUSES rather than lying. Every path that
+    //     cannot promise stable storage must throw, because the manager reads a
+    //     resolved promise as "these bytes survived a power cut".
+    {
+      const st = new FakeStore();
+      const m = new TransferManager({ sleep: async () => {} });
+      const synced: string[] = [];
+      const e = new VaultBeamEngine({
+        manager: m, store: st, writeDelayMs: 0,
+        fsync: async (p) => { synced.push(p); },
+      });
+      const rec = e.session({ transferId: 'Tdur000000000001', sessionVersion: 1, manifest, role: 'recipient' });
+
+      // no destination registered yet ⇒ refuse
+      let threw = false;
+      await e.handleFsync(rec).catch(() => { threw = true; });
+      A(threw, 'an unregistered destination refuses to promise durability');
+      A(synced.length === 0, 'and nothing was flushed');
+
+      e.setDestination('Tdur000000000001', '/dst/big.bin');
+      await e.handleFsync(rec);
+      A(synced.length === 1 && synced[0] === '/dst/big.bin', 'the registered destination is what gets flushed');
+
+      e.clearDestination('Tdur000000000001');
+      threw = false;
+      await e.handleFsync(rec).catch(() => { threw = true; });
+      A(threw, 'clearing the destination re-arms the refusal');
+
+      // a sender has nothing local to make durable — its bits are peer acks
+      const snd = e.session({ transferId: 'Tdur000000000002', sessionVersion: 1, manifest, role: 'sender' });
+      await e.handleFsync(snd);
+      A(synced.length === 1, 'a sender never flushes anything');
+
+      // a build with NO fsync primitive must refuse too, not silently succeed
+      const bare = new VaultBeamEngine({ manager: new TransferManager({ sleep: async () => {} }), store: st, writeDelayMs: 0 });
+      bare.setDestination('Tdur000000000001', '/dst/big.bin');
+      threw = false;
+      await bare.handleFsync(rec).catch(() => { threw = true; });
+      A(threw, 'a build without the fsync primitive refuses to promise durability');
     }
 
     // 8. flush + forget

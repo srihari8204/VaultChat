@@ -126,6 +126,16 @@ class VaultBeamStreamRustModule(reactContext: ReactApplicationContext) :
         }
     }
 
+    // Durability barrier — see fileio::sync_file. Closing a file is not fsync.
+    @ReactMethod
+    fun syncFile(path: String, promise: Promise) {
+        io.execute {
+            try {
+                promise.resolve(call("syncFile", JSONObject().put("path", path)) as? Boolean ?: false)
+            } catch (e: Throwable) { promise.reject("syncFile", e) }
+        }
+    }
+
     @ReactMethod
     fun deleteFile(path: String, promise: Promise) {
         io.execute {

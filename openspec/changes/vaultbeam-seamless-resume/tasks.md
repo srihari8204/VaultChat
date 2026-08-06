@@ -216,6 +216,29 @@ Phase 1 must not merge unless every compatibility and parity test passes.
 - [ ] 7.3 Confirm the FGS aggregate (`lib/transferForeground.ts`) reads the same verified
       bytes, so the notification cannot disagree with the bubble.
 
+## 7b. Integrity blockers (final approval, Phase 1 — must land before the flag flip)
+
+- [x] 7b.1 **Durability watermark.** `write_all` reaches the page cache, not the disk, so a
+      chunk marked verified on a returned write records durability that a power cut can
+      take — and the resume engine then correctly skips it, leaving a silently wrong file.
+      Added `fileio::sync_file` (fdatasync; the destination is preallocated so size metadata
+      is already stable) + the `syncFile` op, and mirrored it on all three native surfaces
+      (Kotlin `VaultBeamStreamModule`, `VaultBeamStreamRustModule`, iOS `VaultBeamStreamRust`).
+      `TransferSession` gained two memory-only holding tiers between "written" and
+      "verified" (`_written`, `_syncing`); `TransferManager` owns the barrier, so no driver
+      changed. A failed barrier returns its batch to the work-list — it never promotes.
+      Applies to recipients only: a sender's verified bits are the peer's ack, already
+      durable on the peer's disk.
+- [x] 7b.2 **Fresh K_t on a session-version bump.** A bump restarts chunk ids at 0 and the
+      nonce is `4B(transferId prefix) ‖ u64_be(chunkId)`, so adopting a new version under the
+      old key re-seals different plaintext at already-used nonces — a total AES-GCM break.
+      `adoptVersion(version, keyB64)` now requires fresh material and throws on reuse, and
+      `run.ts` stops a stale session (every transport gate closes, the session ends `failed`)
+      instead of resetting the bitmaps and continuing. K_t lives in the E2EE manifest, so
+      only a new manifest can carry the transfer forward.
+- [ ] 7b.3 Delete the partial plaintext when a recipient transfer is abandoned.
+- [ ] 7b.4 Direct-only fallback path (no relay) — verify the same integrity invariants.
+
 ## 8. Flag flip + verification
 
 - [x] 8.1 `constants/flags.ts` — add `VB_SEAMLESS_RESUME` (default off), export it in the

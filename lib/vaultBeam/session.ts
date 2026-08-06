@@ -64,7 +64,6 @@ function runsWhere(chunkCount: number, pred: (i: number) => boolean, maxRun: num
 export class TransferSession {
   readonly transferId: string;
   readonly fileId: string;
-  readonly keyB64: string;
   readonly role: TransferRole;
   readonly totalBytes: number;
   readonly chunkCount: number;
@@ -72,12 +71,41 @@ export class TransferSession {
 
   /** Server-held monotonic version (design §7). */
   private _sessionVersion: number;
+  /**
+   * K_t. Not readonly, because a session-version bump REQUIRES a new one: the
+   * nonce is `4B(transferId prefix) ‖ u64_be(chunkId)` and a version bump resets
+   * the chunk grid to 0, so keeping K_t would re-seal different plaintext under
+   * an already-used (key, nonce) pair. For AES-GCM that is not a weakening, it
+   * is a total break — an attacker who sees both ciphertexts recovers the XOR of
+   * the plaintexts and can forge tags for that key. Hence `adoptVersion` demands
+   * fresh material and there is no setter that does not.
+   */
+  private _keyB64: string;
   /** Receiver-authoritative: GCM-verified + written + durable. */
   private _peerHave: ChunkBitmap;
   /** Server-authoritative: staged on R2. Rebuilt from the server mask, never mutated. */
   private _r2Have: ChunkBitmap;
   /** In memory ONLY — after a crash nothing is in flight, so persisting it would be a lie. */
   private readonly _inflight = new Set<number>();
+
+  /**
+   * DURABILITY WATERMARK (P0). Two holding tiers between "the bytes decrypted
+   * and write() returned" and "PeerHave says we have it":
+   *
+   *   _written  — GCM-verified and written, but only as far as the page cache.
+   *   _syncing  — handed to an in-flight fsync barrier; not yet promoted.
+   *
+   * Both are MEMORY ONLY and never persisted, for the same reason `_inflight`
+   * is not: after a crash neither is true. A chunk that was in either tier is
+   * simply re-fetched, which is the whole point — the alternative is a bitmap
+   * bit claiming durability for bytes the power cut took, and a resume that
+   * correctly skips them, leaving a silently corrupt file.
+   *
+   * Both tiers count as HELD, so a chunk waiting on a barrier is never handed
+   * to a driver a second time.
+   */
+  private readonly _written = new Set<number>();
+  private readonly _syncing = new Set<number>();
 
   private _state: SessionState = 'active';
   private _lastTransport?: string;
@@ -89,7 +117,7 @@ export class TransferSession {
     this.transferId = init.transferId;
     this._sessionVersion = init.sessionVersion;
     this.fileId = init.fileId;
-    this.keyB64 = init.keyB64;
+    this._keyB64 = init.keyB64;
     this.role = init.role;
     this.totalBytes = init.totalBytes;
     this.name = init.name;
@@ -98,6 +126,7 @@ export class TransferSession {
     this._r2Have = new ChunkBitmap(this.chunkCount);
   }
 
+  get keyB64(): string { return this._keyB64; }
   get sessionVersion(): number { return this._sessionVersion; }
   get state(): SessionState { return this._state; }
   get revision(): number { return this._revision; }
@@ -105,14 +134,77 @@ export class TransferSession {
   get peerHave(): ChunkBitmap { return this._peerHave; }
   get r2Have(): ChunkBitmap { return this._r2Have; }
   get inflightCount(): number { return this._inflight.size; }
+  /** Written but not yet handed to a barrier — the amount a barrier would take. */
+  get pendingDurableCount(): number { return this._written.size; }
+  /** Written + in-barrier: everything decrypted that PeerHave cannot yet claim. */
+  get heldDurableCount(): number { return this._written.size + this._syncing.size; }
+
+  /** A chunk a driver must not be handed again: in flight, or awaiting durability. */
+  private held(i: number): boolean {
+    return this._inflight.has(i) || this._written.has(i) || this._syncing.has(i);
+  }
 
   // ── R1: the only way a driver mutates state ──────────────────────
   /** A chunk is verified: GCM tag ok, written at its offset, durable. */
   markVerified(chunk: number): boolean {
     const gained = this._peerHave.set(chunk);
     this._inflight.delete(chunk);
+    this._written.delete(chunk);
+    this._syncing.delete(chunk);
     if (gained) this._revision++;
     return gained;
+  }
+
+  // ── durability watermark: written → barrier → verified ───────────
+
+  /**
+   * GCM tag ok and write() returned — but the bytes are in the page cache, not
+   * on stable storage. Explicitly NOT progress: nothing here reaches PeerHave
+   * until a barrier says the storage layer has them.
+   */
+  markWritten(chunk: number): boolean {
+    if (this._peerHave.test(chunk)) { this._inflight.delete(chunk); return false; }
+    this._inflight.delete(chunk);
+    if (this._written.has(chunk) || this._syncing.has(chunk)) return false;
+    this._written.add(chunk);
+    return true;
+  }
+
+  /**
+   * Start a barrier: take everything written so far. Chunks written WHILE the
+   * fsync runs are deliberately left behind — an fsync only promises the writes
+   * that preceded it, so promoting a concurrent write on its completion would
+   * be exactly the lie this tier exists to prevent.
+   */
+  beginDurable(): number[] {
+    const ids = [...this._written];
+    this._written.clear();
+    for (const c of ids) this._syncing.add(c);
+    return ids;
+  }
+
+  /** The barrier succeeded: these chunks are on stable storage. */
+  commitDurable(ids: ReadonlyArray<number>): number {
+    let gained = 0;
+    for (const c of ids) {
+      this._syncing.delete(c);
+      if (this._peerHave.set(c)) gained++;
+    }
+    if (gained) this._revision++;
+    return gained;
+  }
+
+  /** The barrier failed: not durable, so back to the work-list to be re-fetched. */
+  releaseDurable(ids: ReadonlyArray<number>): void {
+    for (const c of ids) this._syncing.delete(c);
+  }
+
+  /** Abandon every un-durable write (cancel, teardown). They are re-fetched. */
+  dropDurable(): number {
+    const n = this._written.size + this._syncing.size;
+    this._written.clear();
+    this._syncing.clear();
+    return n;
   }
 
   markRunVerified(run: ChunkRun): number {
@@ -167,19 +259,22 @@ export class TransferSession {
     for (const r of runs) for (let i = r.start; i < r.start + r.count; i++) this._inflight.delete(i);
   }
 
-  releaseAll(): void { this._inflight.clear(); }
+  /** Abandon everything outstanding, including un-durable writes. Teardown only —
+   *  `release(runs)` is the per-round call, and it must NOT discard a batch that
+   *  is waiting on a barrier. */
+  releaseAll(): void { this._inflight.clear(); this.dropDurable(); }
 
   // ── derived work-lists (design §4.3) ─────────────────────────────
 
   /** Everything still outstanding, regardless of transport. */
   pendingRuns(maxRun = Infinity): ChunkRun[] {
-    return runsWhere(this.chunkCount, (i) => !this._peerHave.test(i) && !this._inflight.has(i), maxRun);
+    return runsWhere(this.chunkCount, (i) => !this._peerHave.test(i) && !this.held(i), maxRun);
   }
 
   /** SENDER → relay: stage only what the peer lacks AND R2 does not already hold. */
   uploadWork(maxRun = Infinity): ChunkRun[] {
     return runsWhere(this.chunkCount,
-      (i) => !this._peerHave.test(i) && !this._r2Have.test(i) && !this._inflight.has(i), maxRun);
+      (i) => !this._peerHave.test(i) && !this._r2Have.test(i) && !this.held(i), maxRun);
   }
 
   /** Either side over a direct transport: everything the peer still lacks. */
@@ -188,7 +283,7 @@ export class TransferSession {
   /** RECIPIENT ← relay: only chunks that are actually staged can be fetched. */
   relayFetch(maxRun = Infinity): ChunkRun[] {
     return runsWhere(this.chunkCount,
-      (i) => !this._peerHave.test(i) && this._r2Have.test(i) && !this._inflight.has(i), maxRun);
+      (i) => !this._peerHave.test(i) && this._r2Have.test(i) && !this.held(i), maxRun);
   }
 
   // ── progress: VERIFIED bytes only (design §4.3) ──────────────────
@@ -209,6 +304,9 @@ export class TransferSession {
     }
     this._state = state;
     this._inflight.clear();
+    // Un-durable writes die with the session: they were never progress, and a
+    // terminal session has no barrier left to promote them.
+    this.dropDurable();
     this._revision++;
   }
 
@@ -218,13 +316,28 @@ export class TransferSession {
    * *within* a version, and a bumped version means the transfer was materially
    * reset (re-init, or a replaced source file), so the old bits describe a
    * different file layout and must not be carried forward.
+   *
+   * FRESH K_t IS MANDATORY (P0). Resetting the grid restarts chunk ids at 0,
+   * which restarts the nonce sequence. Adopting under the old key would seal new
+   * plaintext at nonces already used for different plaintext — a total AES-GCM
+   * break, not a degradation. So the key is a required argument, and reusing the
+   * current one throws rather than returning false: a caller that reaches here
+   * without new material has a bug that must be loud, not silently ignored.
    */
-  adoptVersion(version: number): boolean {
+  adoptVersion(version: number, keyB64: string): boolean {
     if (version <= this._sessionVersion) return false;
+    if (!keyB64) {
+      throw new Error('adoptVersion requires fresh key material — a version bump restarts the nonce sequence');
+    }
+    if (keyB64 === this._keyB64) {
+      throw new Error('adoptVersion refused: K_t is unchanged, which would reuse (key, nonce) pairs');
+    }
     this._sessionVersion = version;
+    this._keyB64 = keyB64;
     this._peerHave = new ChunkBitmap(this.chunkCount);
     this._r2Have = new ChunkBitmap(this.chunkCount);
     this._inflight.clear();
+    this.dropDurable();
     this._state = 'active';
     this._revision++;
     return true;
@@ -368,16 +481,107 @@ function _selfCheck(): void {
   ok.finish('complete');
   A(ok.state === 'complete', 'completes when the work-list is empty');
 
+  // ── durability watermark (P0) ────────────────────────────────────
+  {
+    const d = mk(10 * CHUNK_BYTES, 'recipient');
+
+    // a write is NOT progress
+    A(d.markWritten(0) === true, 'first write is recorded');
+    A(d.markWritten(0) === false, 'markWritten is idempotent');
+    A(d.peerHave.popcount() === 0, 'a written chunk does NOT touch PeerHave');
+    A(d.progressBytes() === 0, 'a written-but-unsynced chunk is not progress');
+    A(!d.isComplete(), 'writes alone can never complete a session');
+    A(d.pendingDurableCount === 1, 'the chunk is waiting on a barrier');
+
+    // …and it is not offered to a driver again while it waits
+    A(d.pendingRuns()[0].start === 1, 'a written chunk is held out of the work-list');
+    A(d.relayFetch().length === 0 || d.relayFetch()[0].start !== 0, 'held chunks stay out of every work-list');
+
+    // the barrier is what makes it progress
+    const batch = d.beginDurable();
+    A(batch.length === 1 && batch[0] === 0, 'the barrier takes the written batch');
+    A(d.pendingDurableCount === 0 && d.heldDurableCount === 1, 'in-barrier chunks are still held');
+    A(d.pendingRuns()[0].start === 1, 'an in-barrier chunk is still not re-offered');
+    A(d.commitDurable(batch) === 1, 'commit promotes the batch');
+    A(d.peerHave.popcount() === 1 && d.progressBytes() === CHUNK_BYTES, 'progress moves only after the barrier');
+    A(d.heldDurableCount === 0, 'nothing is held after a commit');
+
+    // a FAILED barrier must return the chunks to the work-list, never promote
+    d.markWritten(1); d.markWritten(2);
+    const failed = d.beginDurable();
+    d.releaseDurable(failed);
+    A(d.peerHave.popcount() === 1, 'a failed barrier promotes NOTHING');
+    A(d.progressBytes() === CHUNK_BYTES, 'a failed barrier does not move progress');
+    A(d.pendingRuns()[0].start === 1, 'released chunks are offered again');
+
+    // writes DURING a barrier are not covered by it — an fsync only promises
+    // what preceded it, so promoting a concurrent write would be the exact lie
+    // this tier exists to prevent
+    d.markWritten(1);
+    const inflightBatch = d.beginDurable();
+    d.markWritten(2);                       // arrives while the fsync is running
+    A(d.commitDurable(inflightBatch) === 1, 'only the taken batch is promoted');
+    A(!d.peerHave.test(2), 'a write that raced the barrier is NOT promoted by it');
+    A(d.pendingDurableCount === 1, 'the racing write waits for the next barrier');
+
+    // markVerified still works and supersedes the tiers (sender path / peer ack)
+    d.markVerified(2);
+    A(d.peerHave.test(2) && d.pendingDurableCount === 0, 'markVerified clears the durability tiers');
+
+    // crash semantics: un-durable writes are NEVER persisted, so they come back
+    const crash = mk(10 * CHUNK_BYTES, 'recipient');
+    crash.markVerified(0);
+    crash.markWritten(1); crash.markWritten(2);
+    const revived = TransferSession.restore(crash.snapshot(), { fileId: 'F1', keyB64: 'k' });
+    A(revived.peerHave.popcount() === 1, 'only durable chunks survive a crash');
+    A(revived.pendingRuns()[0].start === 1, 'un-synced writes are re-fetched after a crash');
+    A(revived.heldDurableCount === 0, 'nothing is held after a restart');
+
+    // terminal + teardown abandon un-durable writes
+    const cx = mk(10 * CHUNK_BYTES, 'recipient');
+    cx.markWritten(0); cx.markWritten(1);
+    cx.finish('cancelled');
+    A(cx.heldDurableCount === 0, 'cancel abandons un-durable writes');
+    A(cx.peerHave.popcount() === 0, 'cancel does not promote them on the way out');
+  }
+
   // session versioning (design §7)
   const v = mk();
   v.markVerified(0); v.markVerified(1);
   A(v.isStaleVersion(0) === true, 'older version is stale');
   A(v.isStaleVersion(1) === false, 'equal version is current');
-  A(v.adoptVersion(1) === false, 'adopting the same version is a no-op');
+  A(v.adoptVersion(1, 'k2') === false, 'adopting the same version is a no-op');
   A(v.peerHave.popcount() === 2, 'a no-op adopt keeps state');
-  A(v.adoptVersion(2) === true, 'adopts a newer version');
+  A(v.keyB64 === 'k', 'a no-op adopt does not swap the key');
+  A(v.adoptVersion(2, 'k2') === true, 'adopts a newer version with fresh key material');
   A(v.peerHave.popcount() === 0, 'a version bump resets state (different file layout)');
   A(v.sessionVersion === 2 && v.state === 'active', 'version adopted, session re-armed');
+  A(v.keyB64 === 'k2', 'the session now seals under the NEW K_t');
+
+  // ── fresh K_t is MANDATORY on a version bump (P0) ────────────────
+  // A bump restarts chunk ids at 0, and the nonce is derived from the chunk id.
+  // Adopting under the old key would re-use (key, nonce) pairs, which is a total
+  // AES-GCM break — so this must throw, loudly, not fail soft.
+  {
+    const reuse = mk();
+    reuse.markVerified(0);
+    let threwSame = false;
+    try { reuse.adoptVersion(2, 'k'); } catch { threwSame = true; }
+    A(threwSame, 'adopting a new version under the SAME K_t throws');
+    A(reuse.sessionVersion === 1, 'the refused adopt changed nothing');
+    A(reuse.peerHave.popcount() === 1, 'the refused adopt did not drop progress');
+
+    let threwEmpty = false;
+    try { reuse.adoptVersion(2, ''); } catch { threwEmpty = true; }
+    A(threwEmpty, 'adopting with no key material throws');
+    A(reuse.sessionVersion === 1, 'the refused adopt changed nothing');
+
+    // and the bump abandons un-durable writes too — they belong to the old grid
+    const dv = mk(10 * CHUNK_BYTES, 'recipient');
+    dv.markWritten(3);
+    dv.adoptVersion(2, 'k-new');
+    A(dv.heldDurableCount === 0, 'a version bump abandons writes from the old grid');
+  }
 
   // partial tail chunk accounting
   const odd = new TransferSession({

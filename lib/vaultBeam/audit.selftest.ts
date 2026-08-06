@@ -241,6 +241,39 @@ async function main() {
     check(Object.keys(one).length <= 2, 'driver health is scoped per transfer');
   }
 
+  console.log('The durability barrier is bounded and leaves nothing held:');
+  {
+    // The watermark adds two per-session Sets between "written" and "verified".
+    // Neither may accumulate across transfers, and neither may outlive a run —
+    // a chunk stuck in one is a chunk that is never re-offered and never
+    // becomes progress, i.e. a permanent stall.
+    let syncs = 0;
+    let peakHeld = 0;
+    const mgr = new TransferManager({
+      now: () => 0, sleep: async () => {}, idlePollMs: 1, maxIdleRounds: 2, baseCooldownMs: 1,
+      durableBatchChunks: 8,
+      fsync: async (s) => { syncs++; peakHeld = Math.max(peakHeld, s.heldDurableCount); },
+    });
+    mgr.registerDriver(new AuditDriver('relay', 30));
+    const sessions: TransferSession[] = [];
+    for (let i = 0; i < 40; i++) {
+      const s = mkSession(16, `Tdur${String(i).padStart(12, '0')}`, 'recipient');
+      const all = s.r2Have.clone();
+      for (let c = 0; c < s.chunkCount; c++) all.set(c);
+      s.setR2Have(all);
+      await mgr.start(s);
+      sessions.push(s);
+    }
+    check(syncs > 0, `barriers ran (${syncs} across 40 transfers)`);
+    check(sessions.every((s) => s.isComplete()), 'every durable transfer completed');
+    check(sessions.every((s) => s.heldDurableCount === 0), 'no session ends with chunks held');
+    check(sessions.every((s) => s.pendingDurableCount === 0), 'no session ends with un-flushed writes');
+    // Held chunks are capped by the batch threshold plus at most one racing
+    // batch — never "everything decrypted so far", which is the unbounded shape.
+    check(peakHeld <= 8 * 2, `held chunks stay bounded by the batch size (peak ${peakHeld})`);
+    check(mgr.activeCount() === 0, 'no sessions left running');
+  }
+
   console.log('Write-behind leaves nothing behind:');
   {
     const rows = new Map<string, PersistedSession>();

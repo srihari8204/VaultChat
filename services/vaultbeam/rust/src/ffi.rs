@@ -98,6 +98,10 @@ pub fn dispatch(op: &str, a: &Value) -> Res<Value> {
             )?;
             Ok(json!(n))
         }
+        // Durability barrier: the manager calls this before promoting written
+        // chunks into PeerHave. Errors propagate — a failed barrier must never
+        // read as "durable".
+        "syncFile" => Ok(json!(fileio::sync_file(s(a, "path")?)?)),
         "sha256" => Ok(json!(fileio::sha256_file(s(a, "path")?)?)),
         "deleteFile" => Ok(json!(fileio::delete_file(s(a, "path")?))),
         "lanIp" => Ok(match lan::lan_ip() {

@@ -91,6 +91,15 @@ class VaultBeamStreamRust: RCTEventEmitter {
     }
   }
 
+  // Durability barrier — see fileio::sync_file. Closing a file is not fsync.
+  @objc(syncFile:resolver:rejecter:)
+  func syncFile(_ path: String, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+    workQueue.async {
+      do { resolve((try self.call("syncFile", self.jsonArgs(["path": path]))) as? Bool ?? false) }
+      catch { reject("syncFile", "\(error)", error) }
+    }
+  }
+
   @objc(deleteFile:resolver:rejecter:)
   func deleteFile(_ path: String, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
     workQueue.async {

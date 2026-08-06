@@ -33,6 +33,29 @@ export interface ManagerOptions {
   maxCooldownMs?: number;
   /** Called whenever a session's revision changes — progress + persistence seam. */
   onChange?: (session: TransferSession) => void;
+  /**
+   * DURABILITY BARRIER (P0). Must not resolve until every byte written for this
+   * session is on stable storage, and must REJECT if it cannot promise that.
+   *
+   * When supplied, a driver's `verified` callback no longer advances PeerHave
+   * directly: it records a written-but-not-durable chunk, and only a successful
+   * barrier promotes the batch. Drivers are unchanged and unaware — the barrier
+   * belongs to the manager because the manager owns state (approved: "Transfer
+   * Manager remains the only owner of state / progress / resume").
+   *
+   * Applied to RECIPIENTS only, and the manager decides that itself: a sender's
+   * `verified` bits come from the peer's acknowledgement, so the durability that
+   * matters already happened on the peer's disk before the ack was sent. Putting
+   * a sender through a barrier would buy nothing and would coarsen its progress
+   * updates to the batch size.
+   */
+  fsync?: (session: TransferSession) => Promise<void>;
+  /**
+   * Chunks to accumulate before firing a barrier. This is the ONLY knob that
+   * trades fsync cost against re-work after a crash: at 512 KiB logical chunks,
+   * 32 bounds the loss at 16 MiB and costs one fsync per 16 MiB.
+   */
+  durableBatchChunks?: number;
 }
 
 interface DriverHealth { failures: number; cooldownUntil: number }
@@ -50,7 +73,10 @@ export class TransferManager {
   private readonly aborts = new Map<string, AbortController>();
   private readonly health = new Map<string, Map<TransportId, DriverHealth>>();
   private readonly waiting: string[] = [];
-  private readonly opts: Required<Omit<ManagerOptions, 'onChange'>> & { onChange?: (s: TransferSession) => void };
+  /** One barrier in flight per transfer — concurrent fsyncs on one file buy nothing. */
+  private readonly barriers = new Map<string, Promise<void>>();
+  private readonly opts: Required<Omit<ManagerOptions, 'onChange' | 'fsync'>>
+    & { onChange?: (s: TransferSession) => void; fsync?: (s: TransferSession) => Promise<void> };
 
   constructor(options: ManagerOptions = {}) {
     this.opts = {
@@ -62,8 +88,15 @@ export class TransferManager {
       baseCooldownMs: options.baseCooldownMs ?? 3000,
       maxCooldownMs: options.maxCooldownMs ?? 120000,
       onChange: options.onChange,
+      fsync: options.fsync,
+      durableBatchChunks: Math.max(1, options.durableBatchChunks ?? 32),
     };
   }
+
+  /** Install the durability barrier after construction (the engine knows the
+   *  destination path; the manager is built before any session exists). */
+  setFsync(fn: ((s: TransferSession) => Promise<void>) | undefined): void { this.opts.fsync = fn; }
+  hasFsync(): boolean { return !!this.opts.fsync; }
 
   /** Set the progress/persistence sink after construction (the engine wires its
    *  write-behind here, so state and disk cannot drift apart). */
@@ -278,11 +311,63 @@ export class TransferManager {
     return s.role === 'sender' ? s.uploadWork(unit) : s.relayFetch(unit);
   }
 
+  // ── durability watermark ─────────────────────────────────────────
+  // A chunk becomes progress in exactly one place: `commitDurable`, after an
+  // fsync that returned. Everything else is bookkeeping around that.
+
+  /** Run one barrier. Single-flight per transfer; never rejects. */
+  private barrier(s: TransferSession): Promise<void> {
+    const live = this.barriers.get(s.transferId);
+    if (live) return live;
+    const fsync = this.opts.fsync;
+    if (!fsync || s.pendingDurableCount === 0) return Promise.resolve();
+
+    const p = (async () => {
+      const ids = s.beginDurable();
+      if (ids.length === 0) return;
+      try {
+        await fsync(s);
+        const gained = s.commitDurable(ids);
+        if (gained) this.opts.onChange?.(s);
+      } catch {
+        // Not durable. These chunks go back to the work-list and are fetched
+        // again — the one outcome that is never acceptable is promoting them.
+        s.releaseDurable(ids);
+      }
+    })().finally(() => { this.barriers.delete(s.transferId); });
+
+    this.barriers.set(s.transferId, p);
+    return p;
+  }
+
+  /** Fire a barrier once the batch threshold is reached. Non-blocking: the
+   *  driver keeps moving bytes while the previous batch is being flushed. */
+  private maybeBarrier(s: TransferSession): void {
+    if (!this.opts.fsync) return;
+    if (s.pendingDurableCount < this.opts.durableBatchChunks) return;
+    void this.barrier(s);
+  }
+
+  /** Flush everything outstanding. Bounded: the driver has stopped writing by
+   *  the time this is called, so at most one in-flight barrier plus one tail. */
+  private async drainBarriers(s: TransferSession): Promise<void> {
+    if (!this.opts.fsync) return;
+    for (let guard = 0; guard < 4; guard++) {
+      const live = this.barriers.get(s.transferId);
+      if (live) { await live; continue; }
+      if (s.pendingDurableCount === 0) return;
+      await this.barrier(s);
+    }
+  }
+
   private async runSession(s: TransferSession): Promise<RunResult> {
     const ac = new AbortController();
     this.aborts.set(s.transferId, ac);
     let idleRounds = 0;
     let lastRevision = -1;
+    // Only a recipient writes bytes to local storage; a sender's verified bits
+    // are the peer's acknowledgement, already durable on the peer's disk.
+    const durable = !!this.opts.fsync && s.role === 'recipient';
 
     while (s.state === 'active' && !ac.signal.aborted) {
       // R5: terminal only when the work is genuinely done.
@@ -318,14 +403,25 @@ export class TransferManager {
         // `staged` means the RELAY holds it and moves nothing user-visible.
         outcome = await driver.run(s, work, {
           verified: (c) => {
-            s.markVerified(c);
-            if (s.revision !== lastRevision) { lastRevision = s.revision; this.opts.onChange?.(s); }
+            if (durable) {
+              // The bytes are decrypted and written, but only to the page cache.
+              // They become progress when a barrier says the storage layer has
+              // them — never before.
+              s.markWritten(c);
+              this.maybeBarrier(s);
+            } else {
+              s.markVerified(c);
+              if (s.revision !== lastRevision) { lastRevision = s.revision; this.opts.onChange?.(s); }
+            }
           },
           staged: (c) => { s.markStaged(c); },
         }, ac.signal);
       } catch (e: any) {
         outcome = { kind: 'failed', reason: e?.message ?? 'driver threw' };
       } finally {
+        // Flush BEFORE releasing: a chunk waiting on a barrier must not re-enter
+        // the work-list, and must not be abandoned either.
+        await this.drainBarriers(s);
         s.release(work);                 // R3: nothing verified is lost by releasing
         // NOT disposed here. A driver is reused across rounds — a transport that
         // moves part of the work-list must still be available for the next one.
@@ -613,7 +709,91 @@ function _selfCheck(): void {
       A(live.peerHave.popcount() === 3, 'a stale snapshot cannot roll back live progress');
     }
 
-    // 13. onChange fires on real progress and is the persistence seam
+    // ── durability watermark (P0) ──────────────────────────────────
+    // 13. a RECIPIENT's progress must trail the fsync, not the write.
+    {
+      let syncs = 0;
+      const m = mkMgr({
+        durableBatchChunks: 4,
+        fsync: async (sess) => {
+          syncs++;
+          // The batch being flushed is held, and NONE of it is progress yet —
+          // every chunk in this barrier is still absent from PeerHave.
+          A(sess.heldDurableCount > 0, 'the batch is held while its fsync runs');
+          A(sess.peerHave.popcount() + sess.heldDurableCount <= sess.chunkCount,
+            'held chunks are disjoint from PeerHave');
+        },
+      });
+      const drv = new FakeDriver('relay', 30);
+      m.registerDriver(drv);
+      A(m.hasFsync(), 'the barrier is installed');
+      const rs = mkSession(8, 'recipient');
+      // r2Have must be populated or a relay-channel recipient has no work
+      const all = rs.r2Have.clone();
+      for (let i = 0; i < 8; i++) all.set(i);
+      rs.setR2Have(all);
+      const out = await m.start(rs);
+      A(out.state === 'complete', 'a durable recipient still completes');
+      A(syncs > 0, `the barrier actually ran (${syncs} fsyncs)`);
+      A(rs.progressBytes() === rs.totalBytes, 'every chunk was promoted');
+      A(rs.heldDurableCount === 0, 'nothing is left un-promoted');
+      A(new Set(drv.asked).size === 8, 'no chunk was fetched twice while awaiting a barrier');
+      A(drv.asked.length === 8, 'and none was offered twice either');
+    }
+
+    // 14. a FAILING barrier must never promote — and the chunks come back
+    {
+      let attempts = 0;
+      const m = mkMgr({
+        durableBatchChunks: 2, maxIdleRounds: 2,
+        // Fail the first two barriers outright, then recover.
+        fsync: async () => { attempts++; if (attempts <= 2) throw new Error('disk full'); },
+      });
+      const drv = new FakeDriver('relay', 30);
+      m.registerDriver(drv);
+      const rs = mkSession(6, 'recipient');
+      const all = rs.r2Have.clone();
+      for (let i = 0; i < 6; i++) all.set(i);
+      rs.setR2Have(all);
+      const out = await m.start(rs);
+      A(attempts >= 3, 'the barrier was retried after failing');
+      A(out.state === 'complete', 'the transfer recovers once storage does');
+      A(rs.progressBytes() === rs.totalBytes, 'everything eventually became durable');
+      // The chunks whose barrier failed had to be fetched again — that re-work
+      // is the price of never recording false durability, and it must happen.
+      A(drv.asked.length > 6, 'chunks from a failed barrier were re-fetched');
+    }
+
+    // 15. a barrier that ALWAYS fails must park with ZERO progress, never
+    //     complete. Silent corruption is the one outcome that is unacceptable.
+    {
+      const m = mkMgr({ durableBatchChunks: 2, maxIdleRounds: 2, fsync: async () => { throw new Error('read-only fs'); } });
+      m.registerDriver(new FakeDriver('relay', 30));
+      const rs = mkSession(4, 'recipient');
+      const all = rs.r2Have.clone();
+      for (let i = 0; i < 4; i++) all.set(i);
+      rs.setR2Have(all);
+      const out = await m.start(rs);
+      A(out.state === 'parked', 'a permanently failing barrier parks');
+      A(rs.progressBytes() === 0, 'NOTHING is recorded as progress');
+      A(!rs.isComplete(), 'the session never claims completion');
+      A(rs.state === 'active', 'and it stays resumable');
+    }
+
+    // 16. a SENDER is not put through the barrier: its `verified` bits are the
+    //     peer's acknowledgement, already durable on the peer's disk.
+    {
+      let syncs = 0;
+      const m = mkMgr({ fsync: async () => { syncs++; } });
+      m.registerDriver(new FakeDriver('relay', 30));
+      const ss = mkSession(6, 'sender');
+      const out = await m.start(ss);
+      A(out.state === 'complete', 'a sender completes');
+      A(syncs === 0, 'a sender never fsyncs the local source');
+      A(ss.progressBytes() === ss.totalBytes, 'sender progress is unaffected');
+    }
+
+    // 17. onChange fires on real progress and is the persistence seam
     let changes = 0;
     mgr = mkMgr({ onChange: () => { changes++; } });
     mgr.registerDriver(new FakeDriver('relay', 30));
