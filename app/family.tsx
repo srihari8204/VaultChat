@@ -699,8 +699,12 @@ export default function FamilySpaceScreen() {
           {/* members */}
           <View style={st.secHead}>
             <Text style={[st.secTitle, { color: colors.text }]}>Family Members</Text>
+            {/* "+ Invite" opens the CONTACT PICKER (it used to open the sent-
+                invitations manager, which asks you to type a name/email/phone —
+                the person you want is almost always already a contact). The
+                manager is still one tap away in the ⋯ sheet. */}
             {canInvite && active && (
-              <TouchableOpacity onPress={() => router.push({ pathname: '/group-invites' as any, params: { chatId: active.id, name: active.name } })}>
+              <TouchableOpacity onPress={openAdd}>
                 <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 13 }}>+ Invite</Text>
               </TouchableOpacity>
             )}
@@ -813,10 +817,10 @@ export default function FamilySpaceScreen() {
             )}
 
             <TouchableOpacity onPress={() => { setManage(false); openAdd(); }} style={[st.mRow, { borderColor: colors.border }]}>
-              <Ionicons name="person-add" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Add from contacts</Text>
+              <Ionicons name="person-add" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Invite from contacts</Text>
             </TouchableOpacity>
             {canInvite && <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-invites' as any, params: { chatId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: colors.border }]}>
-              <Ionicons name="person-add-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Add people &amp; approve requests</Text>
+              <Ionicons name="mail-open-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Sent invitations &amp; requests</Text>
             </TouchableOpacity>}
             <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-members' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: colors.border }]}>
               <Ionicons name="people-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Members &amp; roles</Text>

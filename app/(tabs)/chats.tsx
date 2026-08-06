@@ -19,6 +19,7 @@ import { Avatar } from '../../components/ui';
 import { getAccessToken } from '../../lib/api';
 import {
   archiveChat, attachmentUrl, listChats, listStoriesFeed, muteChat, pinChat, setHidden,
+  myInvitations,
   type ChatSummary,
 } from '../../lib/chatService';
 import { registerPushToken } from '../../lib/push';
@@ -92,6 +93,30 @@ export default function ChatsScreen() {
   const [typingChats, setTypingChats] = useState<Set<string>>(new Set());
   const typingTimers = useRef<Record<string, any>>({});
   const [menuChat, setMenuChat] = useState<ChatSummary | null>(null);   // long-press action sheet
+
+  // Pending invitations awaiting MY answer (banner above the list). Refreshed
+  // on focus and when the server pushes invitation_created, so an invite that
+  // lands while the app is open shows up without a manual pull-to-refresh.
+  const [pendingInvites, setPendingInvites] = useState(0);
+  const refreshInvites = useCallback(async () => {
+    try {
+      const inv = await myInvitations();
+      setPendingInvites(inv.filter((i: any) => i.status === 'pending').length);
+    } catch { /* offline / not signed in — leave the banner hidden */ }
+  }, []);
+  useFocusEffect(useCallback(() => { refreshInvites(); }, [refreshInvites]));
+  useEffect(() => {
+    let off: (() => void) | null = null;
+    let dead = false;
+    (async () => {
+      try {
+        const { on } = await import('../../lib/socket');
+        const unsub = await on('invitation_created', () => refreshInvites());
+        if (dead) unsub(); else off = unsub;
+      } catch {}
+    })();
+    return () => { dead = true; off?.(); };
+  }, [refreshInvites]);
 
   useEffect(() => {
     let cancel = false;
@@ -387,6 +412,25 @@ export default function ChatsScreen() {
       )}
 
       <ConnectionBanner />
+
+      {/* Pending group/Family invitations. Without this the ONLY way to reach
+          /group-invitations was the Family Space manage sheet, so anyone
+          invited to a plain group chat got a push and then had nowhere in the
+          app to accept it. Hidden entirely at zero. */}
+      {pendingInvites > 0 && (
+        <TouchableOpacity
+          onPress={() => router.push('/group-invitations' as any)}
+          activeOpacity={0.8}
+          style={S.inviteBanner}
+        >
+          <Ionicons name="mail-unread-outline" size={18} color={colors.primary} />
+          <Text style={S.inviteBannerTxt}>
+            {pendingInvites === 1 ? '1 group invitation' : `${pendingInvites} group invitations`}
+          </Text>
+          <Text style={S.inviteBannerCta}>View</Text>
+          <Ionicons name="chevron-forward" size={16} color={colors.primary} />
+        </TouchableOpacity>
+      )}
 
       {error && <View style={S.errorBar}><Text style={S.errorTxt}>{error}</Text></View>}
 
@@ -690,6 +734,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   avActionBtn:  { alignItems: 'center', gap: 4, paddingHorizontal: 6 },
   avActionTxt:  { color: c.primary, fontSize: 12, fontWeight: '600' },
   headerBtnTxt: { fontSize: 17 },
+  inviteBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: 16, paddingVertical: 11,
+    backgroundColor: brandAlpha(0.10),
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border,
+  },
+  inviteBannerTxt: { flex: 1, color: c.text, fontSize: 14, fontWeight: '600' },
+  inviteBannerCta: { color: c.primary, fontSize: 13, fontWeight: '800' },
   errorBar: { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.4)', borderWidth: 1, marginHorizontal: 16, padding: 10, borderRadius: 10 },
   errorTxt: { color: c.danger, fontSize: 12 },
 

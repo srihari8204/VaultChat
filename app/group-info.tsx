@@ -3,7 +3,8 @@
 // Shows:
 //   * group photo + name (editable by admin/owner; tap → image picker / rename)
 //   * member list with name + email + presence dot
-//   * "Add members" button (admin/owner only) — pastes a user id, picks from contacts
+//   * "Add member" (admin/owner only) — contact picker that SENDS AN INVITATION;
+//     the invitee accepts or declines in /group-invitations before joining
 //   * Per-row "Remove" (admin/owner only; owner can't be removed)
 //   * "Leave group" (any member)
 //
@@ -34,7 +35,6 @@ import { getCurrentUserAsync } from './(constants)/authService';
 import { getAccessToken } from '../lib/api';
 import { readCache, writeCache } from '../lib/localCache';
 import {
-  addChatMembers,
   attachmentUrl,
   getChat,
   removeChatMember,
@@ -212,37 +212,20 @@ export default function GroupInfoScreen() {
     ]);
   }, [chat, meId, router]);
 
-  // Add by user id — iOS-only Alert.prompt for a quick path, with a
-  // Contacts-screen fallback for Android. Adding-from-contacts is the
-  // intended primary flow.
+  // Pick from contacts → send an INVITATION (the person accepts or declines in
+  // /group-invitations before they join). Same screen and same consent path as
+  // Family Space, so "add member" behaves identically wherever you do it.
+  //
+  // This replaced a prompt that asked the ADMIN to paste the invitee's user id
+  // on iOS and, on Android, just opened /contacts — which starts a direct chat
+  // and never touched this group. Neither asked the invitee anything.
   const onAddMember = useCallback(() => {
     if (!chat || !isAdmin) return;
-    if (typeof Alert.prompt === 'function') {
-      Alert.prompt(
-        'Add member',
-        'Paste the user id (from Profile → User ID), or pick from Contacts.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Contacts', onPress: () => router.push('/contacts' as any) },
-          {
-            text: 'Add', onPress: async (uid?: string) => {
-              const id = (uid || '').trim();
-              if (!id) return;
-              try {
-                await addChatMembers(chat.id, [id]);
-                await load();
-              } catch (e: any) {
-                Alert.alert('Add failed', e?.message ?? 'Try again');
-              }
-            },
-          },
-        ],
-        'plain-text',
-      );
-    } else {
-      router.push('/contacts' as any);
-    }
-  }, [chat, isAdmin, load, router]);
+    router.push({
+      pathname: '/family-add' as any,
+      params: { chatId: chat.id, name: chat.name ?? 'Group' },
+    });
+  }, [chat, isAdmin, router]);
 
   if (loading || !chat) {
     return <View style={[S.screen, S.center]}><ActivityIndicator color={colors.primary} size="large" /></View>;

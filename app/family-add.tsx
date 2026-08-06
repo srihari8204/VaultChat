@@ -1,10 +1,22 @@
-// app/family-add.tsx — add people to a Family Space.
+// app/family-add.tsx — invite people to a Family Space or a group chat.
 //
 // Contacts first, invite code second. A Circle IS a group chat, so the people
 // you can add are the people you already have a direct chat with — the same
 // source app/create-group.tsx uses (GET /chats → direct peers). That resolves
 // straight to user IDs, needs no contact-permission round-trip, and needs no
 // code to be typed by anyone.
+//
+// CONSENT: picking someone here sends them an INVITATION (chat_invitations,
+// migration 071) — it does not drop them into the group. They see it in
+// /group-invitations and choose Accept or Decline; only an accept joins them.
+// This screen used to call addChatMembers, which added people to a family
+// circle (a live-location group) without ever asking them. Being added to a
+// group that shares your location is not something anyone should discover
+// after the fact.
+//
+// Shared by BOTH entry points — Family Space "add" and group-info "Add member"
+// — so the consent path is identical wherever you invite from. Params accept
+// circleId/circleName (family) or chatId/name (group).
 //
 // The invite code stays as the fallback for someone who is NOT yet a VaultChat
 // contact. It was previously the ONLY way in, which is why adding family was
@@ -21,7 +33,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { Avatar } from '../components/ui';
-import { listChats, addChatMembers, attachmentUrl } from '../lib/chatService';
+import { listChats, createInvitation, attachmentUrl } from '../lib/chatService';
 import { getAccessToken } from '../lib/api';
 import { circleInviteCode, circleMembers } from '../lib/family/circle';
 
@@ -31,7 +43,11 @@ export default function FamilyAddScreen() {
   const { colors } = useTheme();
   const s = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
-  const { circleId, circleName } = useLocalSearchParams<{ circleId: string; circleName: string }>();
+  // Family Space passes circleId/circleName; group-info passes chatId/name.
+  const params = useLocalSearchParams<{ circleId?: string; circleName?: string; chatId?: string; name?: string }>();
+  const circleId = params.circleId || params.chatId;
+  const circleName = params.circleName || params.name;
+  const isFamily = !!params.circleId;   // wording only — the invite path is identical
 
   const [people, setPeople] = useState<Pick[]>([]);
   const [already, setAlready] = useState<Set<string>>(new Set());
@@ -91,16 +107,37 @@ export default function FamilyAddScreen() {
     return q ? people.filter(p => p.name.toLowerCase().includes(q)) : people;
   }, [people, query]);
 
+  // Invite (never add). One invitation per person so a single failure doesn't
+  // lose the rest — the server refuses duplicates, so re-inviting someone who
+  // already has a pending invite is a no-op we report as "already invited"
+  // rather than an error.
   const add = async () => {
     if (!circleId || !selected.size || busy) return;
     setBusy(true);
-    try {
-      await addChatMembers(String(circleId), Array.from(selected));
-      router.back();
-    } catch (e: any) {
-      Alert.alert('Could not add', e?.message ?? 'Try again.');
-    } finally {
-      setBusy(false);
+    const ids = Array.from(selected);
+    let sent = 0;
+    const failed: string[] = [];
+    for (const userId of ids) {
+      try {
+        await createInvitation(String(circleId), { userId });
+        sent++;
+      } catch (e: any) {
+        const who = people.find((p) => p.userId === userId)?.name ?? 'Someone';
+        failed.push(`${who}: ${e?.message ?? 'failed'}`);
+      }
+    }
+    setBusy(false);
+    if (sent && !failed.length) {
+      Alert.alert(
+        sent === 1 ? 'Invitation sent' : `${sent} invitations sent`,
+        `They'll join ${circleName || (isFamily ? 'this space' : 'this group')} once they accept.`,
+        [{ text: 'OK', onPress: () => router.back() }],
+      );
+    } else if (sent) {
+      Alert.alert('Partly sent', `${sent} invited.\n\nCouldn't invite:\n${failed.join('\n')}`,
+        [{ text: 'OK', onPress: () => router.back() }]);
+    } else {
+      Alert.alert('Could not invite', failed.join('\n') || 'Try again.');
     }
   };
 
@@ -133,7 +170,7 @@ export default function FamilyAddScreen() {
         />
         <View style={{ flex: 1 }}>
           <Text style={s.name} numberOfLines={1}>{item.name}</Text>
-          {isMember && <Text style={s.already}>Already in this space</Text>}
+          {isMember && <Text style={s.already}>{isFamily ? 'Already in this space' : 'Already in this group'}</Text>}
         </View>
         {!isMember && (
           <View style={[s.check, sel && s.checkSel]}>
@@ -146,7 +183,7 @@ export default function FamilyAddScreen() {
 
   return (
     <View style={s.screen}>
-      <Stack.Screen options={{ title: 'Add family', headerTitleAlign: 'center' }} />
+      <Stack.Screen options={{ title: isFamily ? 'Invite to Family Space' : 'Invite to group', headerTitleAlign: 'center' }} />
 
       <View style={s.search}>
         <Ionicons name="search" size={17} color={colors.textDim} />
@@ -204,7 +241,9 @@ export default function FamilyAddScreen() {
         {busy
           ? <ActivityIndicator color="#fff" />
           : <Text style={s.ctaTxt}>
-              {selected.size ? `Add ${selected.size} to Family Space` : 'Select contacts to add'}
+              {selected.size
+                ? `Invite ${selected.size} ${selected.size === 1 ? 'person' : 'people'}`
+                : 'Select contacts to invite'}
             </Text>}
       </TouchableOpacity>
     </View>
