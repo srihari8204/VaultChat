@@ -117,6 +117,15 @@ export class RelayDriver implements TransportDriver {
       const p = deserializePlan(st.plan);
       if (p) this.plan = p;
     }
+    // A v1 plan cannot be addressed by canonical chunk ids, and blockMap
+    // correctly refuses to pretend otherwise — but the refusal used to surface
+    // as "no addressable blocks", i.e. a drained run that moved nothing and a
+    // session that parked without a reason. Say what actually happened: this
+    // engine was pointed at a legacy plan, which is a pairing mistake, not a
+    // transient stall.
+    if (this.plan && idSchemeForPlan(this.plan) !== 'canonical') {
+      throw new Error('relay plan is v1 (legacy grid) — the seamless engine cannot address it');
+    }
     if (this.plan) {
       session.setR2Have(r2HaveFromServerMask(this.plan, st.uploadedMask, st.blockCount, session.chunkCount));
     }
@@ -450,6 +459,29 @@ function _selfCheck(): void {
     A(cio.peak > 0 && cio.peak <= 2, `parallelism honoured (peak ${cio.peak} ≤ 2)`);
     A(cs.r2Have.popcount() === CHUNKS, 'bounded concurrency still stages everything');
     cd.dispose();
+
+    // 10a. a LEGACY (v1) plan must fail LOUDLY, not drain silently. The v1 grid
+    //      carries per-segment chunk sizes, so canonical ids do not address it;
+    //      blockMap returns null for every block and the old behaviour was a
+    //      run that reported success having moved nothing, then a park with no
+    //      explanation. This is the pairing a percentage rollout can produce.
+    {
+      const v1io = new FakeRelay();
+      const { newPlan: mkPlan, SEGMENT_PLAN_V1: V1, serialize: ser } = require('../../vaultBeamSegments');
+      const legacy = mkPlan(TOTAL, V1);
+      v1io.planStr = ser(legacy);
+      v1io.blockCount = 1;
+      const v1d = new RelayDriver({ io: v1io, dstPath: '/tmp/dst' });
+      const v1s = mkSession('recipient');
+      const v1out = await v1d.run(v1s, v1s.pendingRuns(), {
+        verified: () => { throw new Error('must not report against a legacy plan'); },
+        staged: () => { throw new Error('must not report against a legacy plan'); },
+      }, new AbortController().signal);
+      A(v1out.kind === 'failed', 'a v1 plan fails the run');
+      A(/v1|legacy/i.test((v1out as any).reason), `and says why (got: ${(v1out as any).reason})`);
+      A(v1s.peerHave.popcount() === 0, 'nothing was claimed against a legacy plan');
+      v1d.dispose();
+    }
 
     // 10. the shared driver contract
     const { runDriverContract } = require('./types');

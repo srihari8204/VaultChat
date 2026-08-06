@@ -89,6 +89,9 @@ redis.connect().catch(() => {});
 require('./lib/storage').ensureBucket().catch(() => {});
 
 // ── Routes ───────────────────────────────────────────────────
+// /config is unauthenticated by design (see routes/config.js) — it must stay
+// reachable during boot without a token, since it carries the kill switch.
+app.use('/config',   require('./routes/config'));
 app.use('/auth',     require('./routes/auth'));
 app.use('/user',     require('./routes/user'));
 const uploadsRouter = require('./routes/uploads');

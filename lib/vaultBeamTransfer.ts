@@ -82,6 +82,12 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export async function sendTransfer(opts: {
   srcPath: string; totalBytes: number; fileId: string; transferId: string; keyB64: string;
   linkType?: string | null; onProgress?: ProgressCb; signal?: AbortSignal;
+  /** The transfer's FROZEN VB_SEAMLESS_RESUME decision, which fixes the segment
+   *  plan version for a NEW plan. Passed in rather than read from the flag,
+   *  because the flag is server-driven and may have moved since this transfer
+   *  was created — and a v1 plan and a v2 plan are not interchangeable.
+   *  Omitted ⇒ fall back to the compiled constant (pre-channel callers). */
+  seamless?: boolean;
 }): Promise<{ blockCount: number }> {
   if (!isNativeStreamAvailable()) throw new Error('native stream unavailable');
   if (opts.totalBytes <= 0 || opts.totalBytes > MAX_BYTES) throw new Error('size out of range (0–12 GB)');
@@ -89,8 +95,11 @@ export async function sendTransfer(opts: {
   let ns = await loadState(opts.linkType);                    // live throughput brain, seeded from history
   const par = await batteryParallelism();                     // §14: 2 on low battery, else 4
   const st = await relayState(opts.transferId);               // resume: what does the server already hold?
+  // A plan the server already holds ALWAYS wins: it is what the recipient is
+  // reading against, and its version is not ours to revise mid-transfer.
+  const wantV2 = opts.seamless ?? VB_SEAMLESS_RESUME;
   let plan: SegmentPlan = (st.plan && deserializePlan(st.plan))
-    || newPlan(opts.totalBytes, VB_SEAMLESS_RESUME ? SEGMENT_PLAN_V2 : SEGMENT_PLAN_V1);
+    || newPlan(opts.totalBytes, wantV2 ? SEGMENT_PLAN_V2 : SEGMENT_PLAN_V1);
   const have = new Set(uploadedBlocks(st.uploadedMask, st.blockCount));
   let uploadedBytes = 0;
 

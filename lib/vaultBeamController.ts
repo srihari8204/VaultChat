@@ -31,7 +31,7 @@ import NetInfo from '@react-native-community/netinfo';
 import { serveDirect, receiveDirect } from './vaultBeamDirect';
 import { isNativeStreamAvailable } from './vaultBeamStreamNative';
 import { relayAbort, MAX_BYTES, CHUNK_BYTES } from './vaultbeamRelay';
-import { VB_SEAMLESS_RESUME } from '../constants/flags';
+import { seamlessResumeEnabled, seamlessForTransfer, refreshVaultBeamFlags } from './vaultBeamFlags';
 
 // vbm2 (2026-07): manifest gained the segmented-geometry `plan`. A version bump
 // (not an additive field) on purpose — an old client that ignored `plan` would
@@ -232,7 +232,16 @@ async function getLinkType(): Promise<string | null> {
 // already resumes symmetrically. Persisted only for the sender (it alone holds
 // the source file); dropped the moment the send reaches a terminal state.
 const SENDS_KEY = 'vc_vaultbeam_sends';
-interface PersistedSend { transferId: string; srcPath: string; name: string; size: number; fileId: string; keyB64: string; plan?: string; linkType?: string | null }
+interface PersistedSend {
+  transferId: string; srcPath: string; name: string; size: number; fileId: string; keyB64: string;
+  plan?: string; linkType?: string | null;
+  /** The VB_SEAMLESS_RESUME value this transfer was CREATED under. Frozen on
+   *  purpose: the flag is server-driven now, and the v1/v2 segment-plan grids
+   *  are not interchangeable, so a resume replays the original decision rather
+   *  than re-reading a dial that may have moved. Absent ⇒ created before the
+   *  field existed ⇒ legacy path. */
+  seamless?: boolean;
+}
 async function readSends(): Promise<PersistedSend[]> {
   try { const raw = await AsyncStorage.getItem(SENDS_KEY); return raw ? JSON.parse(raw) : []; } catch { return []; }
 }
@@ -264,7 +273,9 @@ export async function resumePendingSends(): Promise<void> {
       try {
         await sendTransfer({
           srcPath: r.srcPath, totalBytes: r.size, fileId: r.fileId, transferId: r.transferId, keyB64: r.keyB64,
-          linkType: r.linkType, signal: ac.signal,
+          // Replay the decision this transfer was created under, NOT the live
+          // dial — a flag moved since then must not change this plan's grid.
+          linkType: r.linkType, seamless: seamlessForTransfer(r.seamless), signal: ac.signal,
           onProgress: (p) => setState(r.transferId, { status: 'uploading', done: p.done, total: p.total, bytes: p.bytes, totalBytes: p.totalBytes }),
         });
         setState(r.transferId, { status: 'sent' });
@@ -324,6 +335,34 @@ function bridgeSession(transferId: string, role: 'sender' | 'recipient', name: s
   };
 }
 
+/**
+ * Which receive path this transfer must take.
+ *
+ * Plan-first, flag-second. If the sender has already published a segment plan,
+ * its version decides — v2 means canonical chunk identity and the seamless
+ * engine, v1 means the legacy path. That is what makes a percentage rollout
+ * safe across a mismatched pair: the legacy receiver reads a v2 plan correctly
+ * (it derives the id scheme from the plan via `idSchemeForPlan`), and a
+ * seamless receiver is never handed a v1 plan it cannot address.
+ *
+ * With no plan yet, the sender is still on a direct tier and nothing has been
+ * committed to a grid, so this device's own resolved flag is the best available
+ * answer. Any failure to ask falls back to the legacy path, which reads both.
+ */
+async function recipientUsesSeamless(transferId: string): Promise<boolean> {
+  await refreshVaultBeamFlags();
+  try {
+    const { relayState } = await import('./vaultbeamRelay');
+    const st: any = await relayState(transferId);
+    if (st?.plan) {
+      const { deserialize, SEGMENT_PLAN_V2 } = await import('./vaultBeamSegments');
+      const p = deserialize(st.plan);
+      if (p) return p.version >= SEGMENT_PLAN_V2;
+    }
+  } catch { /* no state yet, or the relay is unreachable — fall through */ }
+  return seamlessResumeEnabled();
+}
+
 async function runSeamless(opts: {
   transferId: string; manifest: VBManifest; peerId: string; role: 'sender' | 'recipient';
   srcPath?: string; dstPath?: string; signal?: AbortSignal; sessionVersion?: number;
@@ -362,6 +401,11 @@ export async function startSend(opts: {
   // reactively from live throughput; the recipient reads the growing plan from
   // relay/state. linkType seeds/tags the throughput history.
   const linkType = await getLinkType();
+  // Ask the flag channel now, before any state exists — a kill switch pulled
+  // while the app was open must reach THIS transfer, not the one after it. The
+  // answer is then frozen for the life of the transfer (see vaultBeamFlags).
+  await refreshVaultBeamFlags();
+  const seamless = seamlessResumeEnabled();
   const { relayInit } = await import('./vaultbeamRelay');
   await relayInit(transferId, opts.recipientId, opts.size, opts.chatId, 0, '');
 
@@ -374,7 +418,10 @@ export async function startSend(opts: {
   const meta = { vaultbeam: true, transferId, size: opts.size };
   const msg = await sendMessage(opts.chatId, JSON.stringify(manifest), 'vaultbeam', { meta });
   // Persist so a killed relay upload resumes on next launch (manifest already sent).
-  await persistSend({ transferId, srcPath: opts.srcPath, name: opts.name, size: opts.size, fileId, keyB64, linkType });
+  // `seamless` rides along: a resume must replay the decision this transfer was
+  // created under, not whatever the dial says days later. The two segment-plan
+  // grids are not interchangeable.
+  await persistSend({ transferId, srcPath: opts.srcPath, name: opts.name, size: opts.size, fileId, keyB64, linkType, seamless });
 
   ensureListeners();
   const ac = new AbortController();
@@ -382,7 +429,7 @@ export async function startSend(opts: {
   const chunkCount = chunkCountFor(opts.size);
   (async () => {
     try {
-      if (VB_SEAMLESS_RESUME) {
+      if (seamless) {
         // One session across every transport: a fallback re-derives the
         // work-list from the bitmaps instead of restarting the upload.
         await runSeamless({
@@ -405,7 +452,7 @@ export async function startSend(opts: {
       // Tier 3: R2 relay (guaranteed baseline — works even if the peer is offline).
       setState(transferId, { status: 'uploading', tier: 'relay', done: 0, total: 0, bytes: 0, totalBytes: opts.size });
       await sendTransfer({
-        srcPath: opts.srcPath, totalBytes: opts.size, fileId, transferId, keyB64, linkType, signal: ac.signal,
+        srcPath: opts.srcPath, totalBytes: opts.size, fileId, transferId, keyB64, linkType, seamless, signal: ac.signal,
         onProgress: (p) => setState(transferId, { status: 'uploading', done: p.done, total: p.total, bytes: p.bytes, totalBytes: p.totalBytes }),
       });
       setState(transferId, { status: 'sent' }); // on R2; peer pulls next
@@ -444,7 +491,14 @@ export async function startReceive(opts: {
   try {
     await FileSystem.makeDirectoryAsync(VB_DIR, { intermediates: true }).catch(() => {});
 
-    if (VB_SEAMLESS_RESUME) {
+    // A RECIPIENT does not get a vote. The sender created the segment plan, and
+    // the two grids are not interchangeable: lib/blockMap deliberately refuses
+    // to read a v1 plan as canonical, so a seamless receiver facing a v1 plan
+    // would find no addressable blocks and stall silently. The plan the sender
+    // published is therefore the authority, and the receiver's own flag is only
+    // consulted when there is no plan yet (the sender is still trying a direct
+    // tier, so nothing has been committed to a grid).
+    if (await recipientUsesSeamless(transferId)) {
       await runSeamless({
         transferId, manifest, peerId, role: 'recipient', dstPath, signal: ac.signal,
       });

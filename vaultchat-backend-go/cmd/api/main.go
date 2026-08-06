@@ -50,6 +50,7 @@ func main() {
 	mux.HandleFunc("GET /health", health)
 	mux.HandleFunc("GET /go-health", health)
 
+	routes.RegisterConfig(mux)
 	routes.RegisterContacts(mux)
 	routes.RegisterLink(mux)
 	routes.RegisterGif(mux)

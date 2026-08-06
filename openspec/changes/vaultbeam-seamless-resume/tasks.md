@@ -239,6 +239,43 @@ Phase 1 must not merge unless every compatibility and parity test passes.
 - [ ] 7b.3 Delete the partial plaintext when a recipient transfer is abandoned.
 - [ ] 7b.4 Direct-only fallback path (no relay) — verify the same integrity invariants.
 
+## 7c. Remote flag channel (final approval, Phase 2)
+
+- [x] 7c.1 **Migration `071_app_flags.sql`.** Three levers per key: `killed` (emergency
+      off, outranks everything), `rollout_pct` (the canary dial), `min_build` (version
+      floor). An absent row means "no opinion" and the client keeps its compiled
+      constant, so an empty table behaves exactly like today.
+- [x] 7c.2 **`GET /config/flags`** in Go (`internal/routes/config.go`), registered in
+      `cmd/api/main.go`, with a Node twin (`routes/config.js` + the dependency-free
+      `lib/flagResolve.js`) because Node is the rollback target and a rollback must not
+      take the kill switch offline. Unauthenticated by design: it is fetched at boot, and
+      `lib/api.ts` bounces a user to onboarding on a failed token refresh — a flag lookup
+      must never be able to log somebody out. Identity is the `X-Device-Id` header the
+      client already sends on every request.
+- [x] 7c.3 **Bucketing is server-side** — `sha256(key || ':' || deviceId) mod 100`. Client
+      bucketing cannot be hotfixed: if it is wrong, the only devices that could correct it
+      are the ones running the bad code. Cross-language parity is pinned by
+      `vaultchat-backend/__vectors__/flag-buckets.json` and `TestBucketParityWithNode`;
+      drift there re-shuffles every cohort on a rollback, so regenerating the fixture is a
+      decision, not a fix.
+- [x] 7c.4 **`lib/remoteFlags.ts`** — TTL + independent staleness cap. The TTL says "you
+      may serve this without asking"; the cap says "stop believing it at all", which is
+      what stops an offline device from honouring a stale `true` forever after the flag
+      was killed.
+- [x] 7c.5 **Per-transfer snapshot** (`lib/vaultBeamFlags.ts`). A dynamic flag can move
+      between a transfer's start and its resume, and the v1/v2 segment-plan grids are not
+      interchangeable. The sender freezes the decision into its `PersistedSend` record;
+      the RECIPIENT does not get a vote at all — the plan the sender published decides,
+      because a seamless receiver facing a v1 plan finds no addressable blocks. That
+      refusal now fails loudly instead of parking without a reason.
+
+      **Runbook.** Kill: `UPDATE app_flags SET killed = TRUE WHERE key = 'VB_SEAMLESS_RESUME';`
+      — takes effect within one client TTL (≤15 min) or immediately on the next transfer
+      start, and stops NEW transfers only; an in-flight transfer finishes on its own terms
+      rather than abandoning a half-written file. Dial: set `min_build` FIRST (so no v2
+      plan reaches a build that cannot read it), then raise `rollout_pct` 1 → 10 → 25 →
+      50 → 100. Lowering it removes devices in the reverse order they were added.
+
 ## 8. Flag flip + verification
 
 - [x] 8.1 `constants/flags.ts` — add `VB_SEAMLESS_RESUME` (default off), export it in the

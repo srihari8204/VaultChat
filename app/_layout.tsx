@@ -236,6 +236,11 @@ function RootLayout() {
     // error handling, so a deferred failure is still contained.
     const deferred = InteractionManager.runAfterInteractions(() => {
       perf.mark('boot_deferred_start');
+      // Remote feature flags / kill switch. Deferred because nothing on the
+      // first screen depends on it and it must never gate a render: every read
+      // falls back to the compiled constant until this lands, and a transfer
+      // start refreshes it again anyway (lib/vaultBeamFlags).
+      import('../lib/remoteFlags').then(m => m.hydrateRemoteFlags()).catch(() => {});
       // VaultBeam: resume any relay upload interrupted by an app kill (the
       // recipient resumes symmetrically via the server bitmask).
       import('../lib/vaultBeamController').then(m => m.resumePendingSends()).catch(() => {});
