@@ -137,6 +137,29 @@ export async function listGroups(): Promise<GroupRef[]> {
   return merged;
 }
 
+/**
+ * Drop groups the server no longer lists me in — left from the Chats screen,
+ * removed by an admin, or deleted. The registry is local, so without this a
+ * group you left keeps appearing in Family Space / Mini Apps forever while
+ * being gone from Chats.
+ *
+ * `myChatIds` must come from a SUCCESSFUL listChats(). An empty array is
+ * treated as "don't know" and changes nothing: reconciling from a failed or
+ * offline read would wipe every group the user has.
+ */
+export async function reconcileGroups(myChatIds: string[]): Promise<GroupRef[]> {
+  const groups = await listGroups();
+  if (!groups.length || !myChatIds.length) return groups;
+  const live = new Set(myChatIds.map(String));
+  const kept = groups.filter((g) => live.has(String(g.id)));
+  if (kept.length === groups.length) return groups;
+  await writeJSON(K_GROUPS, kept);
+  // The remembered active group may be one of the ones that just went away.
+  const active = await getActiveGroupId();
+  if (active && !live.has(String(active))) await setActiveGroupId(kept[0]?.id ?? null);
+  return kept;
+}
+
 export async function saveGroup(g: GroupRef): Promise<GroupRef[]> {
   const next = upsert(await listGroups(), g);
   await writeJSON(K_GROUPS, next);

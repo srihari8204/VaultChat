@@ -54,7 +54,10 @@ const (
 type ApprovalMode string
 
 const (
-	// ModeStrict is the default: both sides must say yes.
+	// ModeStrict makes the OWNER re-approve after the invitee accepts. It is no
+	// longer the default (migration 077): the owner named the invitee, so a
+	// second yes from that same side asks them to confirm their own decision.
+	// Still selectable for a group that deliberately wants both gates.
 	ModeStrict        ApprovalMode = "strict"
 	ModeUserApproval  ApprovalMode = "user_approval"
 	ModeAdminApproval ApprovalMode = "admin_approval"

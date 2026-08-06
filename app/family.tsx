@@ -25,7 +25,7 @@ import { getSettings, setSettings, removeCircle } from '../lib/family/store';
 // Groups & Circles: the registry is now typed groups. A Family Space circle is
 // one of them (migrated on first load by lib/groups/store), so this screen is
 // the group dashboard and no longer assumes there is exactly one family.
-import { listGroups, resolveActiveGroup, saveGroup, setActiveGroupId, type GroupRef } from '../lib/groups/store';
+import { listGroups, reconcileGroups, resolveActiveGroup, saveGroup, setActiveGroupId, type GroupRef } from '../lib/groups/store';
 import { groupIdentity } from '../lib/groups/catalog';
 import { can as hasPerm, type Permission } from '../lib/groups/permissions';
 import {
@@ -39,7 +39,7 @@ import {
 import { requestBackgroundPermission } from '../lib/family/background';
 import { loadAlerts, recordAlert, useUnreadCount } from '../lib/family/alerts';
 import { type CircleMember, type MemberPresence, STALE_MS } from '../lib/family/types';
-import { sendMessage, getMessages, decryptFromChat, getChat, sendAnnouncement, isAnnouncement } from '../lib/chatService';
+import { sendMessage, getMessages, decryptFromChat, getChat, listChats, sendAnnouncement, isAnnouncement } from '../lib/chatService';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { navigateTo } from '../lib/nav/openNavigation';
 import { subscribeTrip, currentTrip } from '../lib/groups/tripSession';
@@ -73,6 +73,19 @@ function dist(m: number): string { return m < 1000 ? `${Math.round(m / 10) * 10}
 function greeting(): string {
   const h = new Date().getHours();
   return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+}
+
+// The group registry is local, so a group you LEFT from the Chats screen would
+// otherwise linger here (and in the Mini Apps tile) forever. Reconcile against
+// the server's chat list on every load; a failed fetch changes nothing.
+async function loadGroupsReconciled(): Promise<GroupRef[]> {
+  const groups = await listGroups();
+  try {
+    const chats = await listChats();
+    return await reconcileGroups(chats.map((c: any) => String(c.id)));
+  } catch {
+    return groups;   // offline — keep what we have rather than hiding everything
+  }
 }
 
 interface Highlight { icon: string; text: string; at: number }
@@ -117,7 +130,7 @@ export default function FamilySpaceScreen() {
   useEffect(() => { (async () => {
     const u = await getCurrentUserAsync().catch(() => null);
     setMe(u ? { id: String(u.id), name: u.name || u.email || 'Me' } : null);
-    const cs = await listGroups();
+    const cs = await loadGroupsReconciled();
     setCircles(cs);
     if (!cs.length) { router.replace('/group-create' as any); return; }
     // Reopen on the group the user was last in, not blindly the first.
@@ -231,7 +244,7 @@ export default function FamilySpaceScreen() {
   useFocusEffect(React.useCallback(() => {
     let live = true;
     (async () => {
-      const cs = await listGroups();
+      const cs = await loadGroupsReconciled();
       if (!live) return;
       setCircles(cs);
       if (!cs.length) { router.replace('/group-create' as any); return; }

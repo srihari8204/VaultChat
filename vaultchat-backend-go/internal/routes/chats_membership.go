@@ -294,13 +294,20 @@ func membershipAccept(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 500, "Failed to accept invitation")
 		return
 	}
-	if !invites.CanAccept(invites.Status(st)) {
+	mode := invites.NormalizeMode(modeRaw)
+	next := invites.NextAfterAccept(mode)
+
+	// Recovery for invitations stranded by the old 'strict' default (migration
+	// 077): the invitee already consented, so the row sits in 'accepted' waiting
+	// for an owner approval that no screen ever surfaced. Now that accepting IS
+	// the join, tapping Accept again completes it instead of 409-ing forever.
+	// Only ever from Accepted, and only when the group's mode says one yes is
+	// enough — this cannot admit anyone who has not said yes themselves.
+	stranded := invites.Status(st) == invites.StatusAccepted && next == invites.StatusJoined
+	if !invites.CanAccept(invites.Status(st)) && !stranded {
 		httpx.Err(w, 409, membershipWhyNot(invites.Status(st), "accepted"))
 		return
 	}
-
-	mode := invites.NormalizeMode(modeRaw)
-	next := invites.NextAfterAccept(mode)
 
 	if next == invites.StatusJoined {
 		if err := membershipGrant(ctx, invID, chatID, user.ID, inviter); err != nil {
