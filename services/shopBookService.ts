@@ -125,6 +125,7 @@ export interface OrderDetail {
   cancelReason: string;
   cancelledBy: '' | 'customer' | 'owner';
   rejectReason: string;
+  collectedBy: '' | 'customer' | 'owner';
   hasInvoice: boolean;
 }
 
@@ -342,6 +343,14 @@ export function decideAlternative(orderId: string, itemId: string, accept: boole
 export function cancelOrder(orderId: string, reason: string) {
   return api<{ ok: boolean; status: OrderStatus }>(`/shopbook/orders/${orderId}/cancel`, {
     method: 'POST', json: { reason },
+  });
+}
+
+// Customer confirms they collected the order at the counter — allowed once
+// the shop marks it Ready. Settles the khata and issues the receipt.
+export function confirmCollected(orderId: string) {
+  return api<{ ok: boolean; status: OrderStatus }>(`/shopbook/orders/${orderId}/collected`, {
+    method: 'POST', json: {},
   });
 }
 

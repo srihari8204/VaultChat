@@ -8,7 +8,8 @@
 
 import {
   ORDER_STEPS, orderProgress, nextOrderStatus, orderStatusLabel,
-  normalizeOrderStatus, canCustomerCancel, canOwnerCancel, REJECT_REASONS,
+  normalizeOrderStatus, canCustomerCancel, canOwnerCancel,
+  canCustomerConfirmCollection, REJECT_REASONS,
   formatMoney, shopOpenState, cartTotal,
   type OrderStatus,
 } from './shopbook';
@@ -53,6 +54,16 @@ check('owner may cancel before packing',
 check('owner may not cancel once packing starts',
   (['packing', 'ready', 'collected', 'completed'] as OrderStatus[]).map(canOwnerCancel),
   [false, false, false, false]);
+
+// ── customer-confirmed collection (backend allows ready → collected) ─
+check('customer may confirm collection at Ready', canCustomerConfirmCollection('ready'), true);
+check('customer may not confirm before Ready',
+  (['pending', 'accepted', 'preparing', 'packing'] as OrderStatus[]).map(canCustomerConfirmCollection),
+  [false, false, false, false]);
+check('customer may not re-confirm after collection',
+  (['collected', 'completed'] as OrderStatus[]).map(canCustomerConfirmCollection), [false, false]);
+check('no confirmation on a dead order',
+  (['cancelled', 'rejected'] as OrderStatus[]).map(canCustomerConfirmCollection), [false, false]);
 
 // ── rejection codes: must equal the backend's sbRejectReasons keys ─
 check('the six rejection reason codes', REJECT_REASONS.map((r) => r.code),

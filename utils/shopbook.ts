@@ -150,6 +150,12 @@ export function canOwnerCancel(s: OrderStatus): boolean {
   return s === 'pending' || s === 'accepted' || s === 'preparing';
 }
 
+// The customer may confirm collection themselves once the shop says Ready
+// (spec: order-management / customer-confirmed collection).
+export function canCustomerConfirmCollection(s: OrderStatus): boolean {
+  return s === 'ready';
+}
+
 // The six rejection reason codes (must match the backend's table).
 export const REJECT_REASONS: { code: string; label: string }[] = [
   { code: 'out_of_stock',  label: 'Out of Stock' },

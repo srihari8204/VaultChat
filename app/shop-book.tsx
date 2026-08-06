@@ -27,7 +27,7 @@ import { SHOP_CATEGORIES, categoryIcon, categoryLabel } from '../constants/shopC
 import {
   formatINR, formatMoney, formatDistance, shopOpenState, orderStatusLabel, orderProgress,
   nextOrderStatus, cartTotal, clientKey, ORDER_STEPS,
-  canCustomerCancel, canOwnerCancel, REJECT_REASONS,
+  canCustomerCancel, canOwnerCancel, canCustomerConfirmCollection, REJECT_REASONS,
   couponDiscount, couponLabel, starText, loyaltyTier, parseBulkProducts,
   type CartItem, type OrderStatus, type ItemAvailability,
 } from '../utils/shopbook';
@@ -606,7 +606,7 @@ function Catalog({ shop, cart, setCart, onCart }: {
           <View style={{ flex: 1 }}>
             <Text style={s.cardTitle}>{p.name}{p.unit ? ` · ${p.unit}` : ''}</Text>
             <Text style={s.cardSub}>{[p.brand, p.category].filter(Boolean).join(' · ')}</Text>
-            <Text style={s.price}>{formatINR(p.price)}{!p.inStock ? '  ·  Out of stock' : ''}</Text>
+            <Text style={s.price}>{formatMoney(p.price, shop.currency)}{!p.inStock ? '  ·  Out of stock' : ''}</Text>
           </View>
           <TouchableOpacity style={[s.addBtn, !p.inStock && { opacity: 0.4 }]} disabled={!p.inStock}
             onPress={() => add(p.name, p.brand, 1, p.price, '', p.unit, p.taxPercent)}>
@@ -618,7 +618,7 @@ function Catalog({ shop, cart, setCart, onCart }: {
       {cart.length > 0 && (
         <TouchableOpacity style={s.stickyCart} onPress={onCart}>
           <Text style={s.stickyCartText}>View Cart ({cart.length})</Text>
-          <Text style={s.stickyCartText}>{formatINR(cartTotal(cart))}</Text>
+          <Text style={s.stickyCartText}>{formatMoney(cartTotal(cart), shop.currency)}</Text>
         </TouchableOpacity>
       )}
     </ScrollView>
@@ -647,7 +647,7 @@ function CartView({ shop, cart, setCart, onPlaced, coupons }: {
     const code = couponInput.trim().toUpperCase();
     const found = coupons.find((c2) => c2.code.toUpperCase() === code);
     if (!found) { setCouponMsg('Invalid code'); setApplied(null); return; }
-    if (subtotal < found.minOrder) { setCouponMsg(`Min order ${formatINR(found.minOrder)}`); setApplied(null); return; }
+    if (subtotal < found.minOrder) { setCouponMsg(`Min order ${formatMoney(found.minOrder, shop.currency)}`); setApplied(null); return; }
     setApplied(found); setCouponMsg(`Applied · ${couponLabel(found)}`);
   };
 
@@ -678,7 +678,7 @@ function CartView({ shop, cart, setCart, onPlaced, coupons }: {
           <View style={{ flex: 1 }}>
             <Text style={s.cardTitle}>{it.name}{it.brand ? ` (${it.brand})` : ''}</Text>
             {!!it.note && <Text style={s.cardSub}>📝 {it.note}</Text>}
-            <Text style={s.price}>{it.price > 0 ? formatINR(it.price) : 'Price on confirm'}</Text>
+            <Text style={s.price}>{it.price > 0 ? formatMoney(it.price, shop.currency) : 'Price on confirm'}</Text>
           </View>
           <View style={s.qtyRow}>
             <TouchableOpacity style={s.qtyBtn} onPress={() => setQty(it.key, -1)}><Text style={s.qtyBtnText}>−</Text></TouchableOpacity>
@@ -709,10 +709,10 @@ function CartView({ shop, cart, setCart, onPlaced, coupons }: {
 
           {/* Totals */}
           <View style={s.panel}>
-            <Row label="Subtotal" value={formatINR(subtotal)} />
-            {discount > 0 && <Row label={`Discount (${applied?.code})`} value={`− ${formatINR(discount)}`} tone={C.green} />}
+            <Row label="Subtotal" value={formatMoney(subtotal, shop.currency)} />
+            {discount > 0 && <Row label={`Discount (${applied?.code})`} value={`− ${formatMoney(discount, shop.currency)}`} tone={C.green} />}
             <View style={{ height: 1, backgroundColor: C.border, marginVertical: 6 }} />
-            <Row label="Total" value={formatINR(total)} bold />
+            <Row label={t('common.total')} value={formatMoney(total, shop.currency)} bold />
           </View>
 
           <TouchableOpacity style={[s.primaryBtn, placing && { opacity: 0.6 }]} disabled={placing} onPress={place}>
@@ -792,6 +792,23 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
     finally { setBusy(false); }
   };
 
+  // Customer confirms collection at the counter — settles the khata and
+  // issues the receipt without waiting for the owner to tap anything.
+  const confirmCollected = () => {
+    Alert.alert(t('orders.confirmCollected'), t('orders.confirmCollectedMsg'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('orders.confirmCollectedYes'),
+        onPress: async () => {
+          setBusy(true);
+          try { await SB.confirmCollected(orderId); load(); }
+          catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
+          finally { setBusy(false); }
+        },
+      },
+    ]);
+  };
+
   const submitRating = async () => {
     if (stars < 1) { Alert.alert('Tap a star to rate'); return; }
     setBusy(true);
@@ -819,7 +836,7 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
     if (!order) return;
     const lines = order.items.map((it) => `• ${it.name}${it.brand ? ` (${it.brand})` : ''} × ${it.qty}`);
     await Share.share({
-      message: `🛍️ Shop Book order ${order.id.slice(0, 8).toUpperCase()}\n${lines.join('\n')}\nTotal: ${formatINR(order.total)}`,
+      message: `🛍️ Shop Book order ${order.id.slice(0, 8).toUpperCase()}\n${lines.join('\n')}\nTotal: ${money(order.total)}`,
     }).catch(() => {});
   };
 
@@ -828,7 +845,7 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
     const rows = order.items.map((it) =>
       `<tr><td style="padding:6px 0">${it.name}${it.brand ? ` (${it.brand})` : ''}</td>
        <td style="text-align:center">${it.qty}</td>
-       <td style="text-align:right">${it.price > 0 ? formatINR(it.price * it.qty) : '—'}</td></tr>`).join('');
+       <td style="text-align:right">${it.price > 0 ? money(it.price * it.qty) : '—'}</td></tr>`).join('');
     const html = `<html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>
       <body style="font-family:-apple-system,Roboto,sans-serif;color:#111;padding:28px">
         <h2 style="color:#0B7A3B;margin:0">🛍️ Shop Book — Receipt</h2>
@@ -838,8 +855,8 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
           <tbody>${rows}</tbody>
         </table>
         <hr style="margin:16px 0;border:none;border-top:1px solid #eee"/>
-        ${order.discount > 0 ? `<p style="text-align:right;color:#0B7A3B;margin:4px 0">Discount (${order.couponCode}): − ${formatINR(order.discount)}</p>` : ''}
-        <h3 style="text-align:right;margin:8px 0">Total: ${formatINR(order.total)}</h3>
+        ${order.discount > 0 ? `<p style="text-align:right;color:#0B7A3B;margin:4px 0">Discount (${order.couponCode}): − ${money(order.discount)}</p>` : ''}
+        <h3 style="text-align:right;margin:8px 0">Total: ${money(order.total)}</h3>
         <p style="color:#888;font-size:13px">Status: ${orderStatusLabel(order.status)}</p>
       </body></html>`;
     try {
@@ -848,7 +865,12 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
     } catch (e: any) { Alert.alert('Error', e?.message ?? 'Could not create the bill'); }
   };
 
-  if (invoice) return <InvoiceView orderId={orderId} onBack={() => setInvoice(false)} />;
+  if (invoice) {
+    return (
+      <InvoiceView orderId={orderId} shopId={order?.shopId}
+        deliveryAddress={order?.address} onBack={() => setInvoice(false)} />
+    );
+  }
 
   const money = (n: number) => formatMoney(n, order?.currency || '₹');
   const failed = order && (order.status === 'cancelled' || order.status === 'rejected');
@@ -935,6 +957,17 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
               <Row label={t('common.total')} value={money(order.total)} bold />
             </View>
 
+            {/* customer confirms collection once the shop marks it Ready */}
+            {canCustomerConfirmCollection(order.status) && (
+              <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={confirmCollected}>
+                <Ionicons name="bag-check" size={18} color="#fff" />
+                <Text style={s.primaryBtnText}>{t('orders.confirmCollected')}</Text>
+              </TouchableOpacity>
+            )}
+            {order.collectedBy === 'customer' && (
+              <Text style={s.hint}>✅ {t('orders.collectedByYou')}</Text>
+            )}
+
             {/* customer may cancel only while the order is still pending */}
             {canCustomerCancel(order.status) && (
               <TouchableOpacity style={s.dangerBtn} disabled={busy} onPress={() => setCancelAsk(true)}>
@@ -1000,13 +1033,13 @@ function CustomerLedgerView({ shop, onBack }: { shop: SB.Shop; onBack: () => voi
         {ledger && (
           <>
             <View style={{ flexDirection: 'row', gap: 10 }}>
-              <StatCard label="Total Pending" value={formatINR(ledger.pending)} tone="danger" />
-              <StatCard label="Total Paid" value={formatINR(ledger.totalPaid)} tone="green" />
+              <StatCard label="Total Pending" value={formatMoney(ledger.pending, shop.currency)} tone="danger" />
+              <StatCard label="Total Paid" value={formatMoney(ledger.totalPaid, shop.currency)} tone="green" />
             </View>
             <Text style={s.sectionLabel}>Transactions</Text>
             {ledger.entries.length === 0 && <Empty icon="book-outline" text="No transactions yet." />}
             {ledger.entries.map((e) => (
-              <LedgerRow key={e.id} entry={e} />
+              <LedgerRow key={e.id} entry={e} currency={shop.currency} />
             ))}
           </>
         )}
@@ -1174,9 +1207,9 @@ function OwnerApp({ me }: { me: { id: string; name: string } | null }) {
             onCoupons={() => setSub('coupons')} onSuppliers={() => setSub('suppliers')}
             onPlans={() => setSub('plans')} onReports={() => setSub('reports')} />
         )}
-        {tab === 'orders' && <OwnerOrders />}
+        {tab === 'orders' && <OwnerOrders currency={shop.currency} />}
         {tab === 'products' && <OwnerProducts shop={shop} />}
-        {tab === 'khata' && <OwnerKhata />}
+        {tab === 'khata' && <OwnerKhata currency={shop.currency} />}
       </KeyboardAvoidingView>
       <TabBar
         tabs={[
@@ -1612,7 +1645,7 @@ const OWNER_ORDER_TABS: { id: string; label: string }[] = [
   { id: 'all', label: 'All' },
 ];
 
-function OwnerOrders() {
+function OwnerOrders({ currency }: { currency?: string }) {
   const [filter, setFilter] = useState('pending');
   const [loading, setLoading] = useState(true);
   const [orders, setOrders] = useState<SB.OrderSummary[]>([]);
@@ -1643,7 +1676,7 @@ function OwnerOrders() {
           <TouchableOpacity key={o.id} style={s.card} onPress={() => setOpen(o.id)}>
             <View style={{ flex: 1 }}>
               <Text style={s.cardTitle}>{o.customerName || 'Customer'}</Text>
-              <Text style={s.cardSub}>{o.id.slice(0, 8).toUpperCase()} · {formatINR(o.total)}</Text>
+              <Text style={s.cardSub}>{o.id.slice(0, 8).toUpperCase()} · {formatMoney(o.total, currency)}</Text>
               <StatusPill status={o.status} />
             </View>
             <Ionicons name="chevron-forward" size={20} color={C.sub} />
@@ -1831,7 +1864,7 @@ function OwnerProducts({ shop }: { shop: SB.Shop }) {
     finally { setSeeding(false); }
   };
 
-  if (edit === 'bulk') return <BulkAdd onDone={() => { setEdit(null); load(); }} />;
+  if (edit === 'bulk') return <BulkAdd currency={shop.currency} onDone={() => { setEdit(null); load(); }} />;
   if (edit) return <ProductEditor product={edit === 'new' ? null : edit} currency={shop.currency} onDone={() => { setEdit(null); load(); }} />;
 
   return (
@@ -1926,7 +1959,7 @@ function ProductEditor({ product, currency, onDone }: {
   );
 }
 
-function BulkAdd({ onDone }: { onDone: () => void }) {
+function BulkAdd({ currency, onDone }: { currency?: string; onDone: () => void }) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const parsed = useMemo(() => parseBulkProducts(text), [text]);
@@ -1964,7 +1997,7 @@ function BulkAdd({ onDone }: { onDone: () => void }) {
                   <View style={{ flex: 1 }}>
                     <Text style={s.cardTitle}>{p.name}{p.unit ? ` · ${p.unit}` : ''}{p.brand ? ` (${p.brand})` : ''}</Text>
                   </View>
-                  <Text style={s.price}>{formatINR(p.price)}</Text>
+                  <Text style={s.price}>{formatMoney(p.price, currency)}</Text>
                 </View>
               ))}
               {parsed.length > 8 && <Text style={s.hint}>…and {parsed.length - 8} more</Text>}
@@ -1979,7 +2012,7 @@ function BulkAdd({ onDone }: { onDone: () => void }) {
   );
 }
 
-function OwnerKhata() {
+function OwnerKhata({ currency }: { currency?: string }) {
   const [loading, setLoading] = useState(true);
   const [customers, setCustomers] = useState<SB.CustomerPending[]>([]);
   const [sel, setSel] = useState<SB.CustomerPending | null>(null);
@@ -1990,7 +2023,7 @@ function OwnerKhata() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  if (sel) return <KhataDetail customer={sel} onBack={() => { setSel(null); load(); }} />;
+  if (sel) return <KhataDetail customer={sel} currency={currency} onBack={() => { setSel(null); load(); }} />;
 
   return (
     <ScrollView contentContainerStyle={s.body}
@@ -2004,7 +2037,7 @@ function OwnerKhata() {
           <View style={{ flex: 1 }}>
             <Text style={s.cardTitle}>{c.customerName || 'Customer'}</Text>
             <Text style={[s.price, { color: c.pending > 0 ? C.danger : C.green }]}>
-              {c.pending > 0 ? `Pending ${formatINR(c.pending)}` : 'Settled'}
+              {c.pending > 0 ? `Pending ${formatMoney(c.pending, currency)}` : 'Settled'}
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={20} color={C.sub} />
@@ -2014,7 +2047,9 @@ function OwnerKhata() {
   );
 }
 
-function KhataDetail({ customer, onBack }: { customer: SB.CustomerPending; onBack: () => void }) {
+function KhataDetail({ customer, currency, onBack }: {
+  customer: SB.CustomerPending; currency?: string; onBack: () => void;
+}) {
   const [loading, setLoading] = useState(true);
   const [ledger, setLedger] = useState<SB.Ledger | null>(null);
   const [amount, setAmount] = useState('');
@@ -2055,8 +2090,8 @@ function KhataDetail({ customer, onBack }: { customer: SB.CustomerPending; onBac
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
         {ledger && (
           <View style={{ flexDirection: 'row', gap: 10 }}>
-            <StatCard label="Pending" value={formatINR(ledger.pending)} tone="danger" />
-            <StatCard label="Paid" value={formatINR(ledger.totalPaid)} tone="green" />
+            <StatCard label="Pending" value={formatMoney(ledger.pending, currency)} tone="danger" />
+            <StatCard label="Paid" value={formatMoney(ledger.totalPaid, currency)} tone="green" />
           </View>
         )}
         {(ledger?.pending ?? 0) > 0 && (
@@ -2067,7 +2102,7 @@ function KhataDetail({ customer, onBack }: { customer: SB.CustomerPending; onBac
         )}
         <View style={s.panel}>
           <Text style={s.panelTitle}>Add entry</Text>
-          <TextInput style={s.input} placeholder="Amount (₹)" placeholderTextColor={C.sub}
+          <TextInput style={s.input} placeholder={`Amount (${currency || '₹'})`} placeholderTextColor={C.sub}
             keyboardType="numeric" value={amount} onChangeText={setAmount} />
           <TextInput style={s.input} placeholder="Remark (optional)" placeholderTextColor={C.sub}
             value={remark} onChangeText={setRemark} />
@@ -2082,7 +2117,7 @@ function KhataDetail({ customer, onBack }: { customer: SB.CustomerPending; onBac
         </View>
         <Text style={s.sectionLabel}>History</Text>
         {ledger?.entries.length === 0 && <Empty icon="book-outline" text="No transactions yet." />}
-        {ledger?.entries.map((e) => <LedgerRow key={e.id} entry={e} />)}
+        {ledger?.entries.map((e) => <LedgerRow key={e.id} entry={e} currency={currency} />)}
       </ScrollView>
     </>
   );
@@ -2370,65 +2405,97 @@ function ReasonModal({ visible, title, codes, placeholder, onSubmit, onClose }: 
 
 // Country-rule-driven invoice (spec: invoicing). Tax lines appear only when
 // the shop configured tax details — the backend snapshot decides, not the UI.
-function InvoiceView({ orderId, onBack }: { orderId: string; onBack: () => void }) {
+// Customer-facing retail receipt (spec: invoicing / consumer retail receipt
+// format). Consumer style, not a tax document: retail prices, tax already
+// inside the total shown as one "Inclusive of all taxes" line, and NO
+// business tax identifiers. The stored invoice keeps its full tax snapshot
+// for the owner's records and tax report — only this presentation differs.
+function InvoiceView({ orderId, shopId, deliveryAddress, onBack }: {
+  orderId: string; shopId?: string; deliveryAddress?: string; onBack: () => void;
+}) {
   const [inv, setInv] = useState<SB.Invoice | null>(null);
   const [loading, setLoading] = useState(true);
+  const [due, setDue] = useState<number | null>(null);
+
   useEffect(() => { (async () => {
     try { setInv(await SB.orderInvoice(orderId)); }
-    catch (e: any) { Alert.alert('Invoice', e?.message ?? 'Not available yet'); }
+    catch (e: any) { Alert.alert(t('receipt.title'), e?.message ?? 'Not available yet'); }
     finally { setLoading(false); }
   })(); }, [orderId]);
 
+  // Payment status comes from the shared khata, so the receipt never claims
+  // "paid" for an amount still outstanding at the shop.
+  useEffect(() => { (async () => {
+    if (!shopId) return;
+    try { setDue((await SB.customerLedger(shopId)).pending); } catch {}
+  })(); }, [shopId]);
+
+  const money = (n: number) => formatMoney(n, inv?.currency ?? '₹');
+  const paidLine = due == null ? '' : due > 0 ? `${t('receipt.amountDue')}: ${money(due)}` : t('receipt.paidInFull');
+
   const sharePdf = async () => {
     if (!inv) return;
-    const money = (n: number) => formatMoney(n, inv.currency);
-    const taxRows = inv.taxBreakdown.map((b) =>
-      `<p style="text-align:right;margin:2px 0;color:#333">${b.label}: ${money(b.amount)}</p>`).join('');
-    const taxIds = Object.entries(inv.business.tax ?? {})
-      .filter(([, v]) => v && v !== true).map(([k, v]) => `${k.toUpperCase()}: ${v}`).join(' · ');
+    const esc = (v: string) => String(v ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] ?? c));
     const rows = inv.items.map((it) =>
-      `<tr><td style="padding:6px 0">${it.name}${it.brand ? ` (${it.brand})` : ''}${it.unit ? ` · ${it.unit}` : ''}</td>
-       <td style="text-align:center">${it.qty}</td>
+      `<tr><td style="padding:7px 0">${esc(it.name)}${it.brand ? ` <span style="color:#777">(${esc(it.brand)})</span>` : ''}${it.unit ? ` <span style="color:#777">· ${esc(it.unit)}</span>` : ''}</td>
+       <td style="text-align:center;color:#555">${it.qty}</td>
        <td style="text-align:right">${money(it.price * it.qty)}</td></tr>`).join('');
     const html = `<html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-      <body style="font-family:-apple-system,Roboto,sans-serif;color:#111;padding:28px">
-        <h2 style="color:#0B7A3B;margin:0">${inv.business.name}</h2>
-        <p style="color:#666;margin:4px 0">${inv.business.address}${inv.business.phone ? ` · ${inv.business.phone}` : ''}</p>
-        ${taxIds ? `<p style="color:#666;margin:2px 0;font-size:13px">${taxIds}</p>` : ''}
-        <p style="margin:12px 0 4px"><b>${inv.invoiceNo}</b> · ${new Date(inv.createdAt).toLocaleDateString('en-IN')}</p>
-        <p style="color:#666;margin:0 0 14px">Billed to: ${inv.customerName || 'Customer'}</p>
-        <table style="width:100%;border-collapse:collapse;font-size:14px">
-          <thead><tr style="border-bottom:1px solid #ddd"><th align="left">Item</th><th>Qty</th><th align="right">Amount</th></tr></thead>
+      <body style="font-family:-apple-system,Roboto,sans-serif;color:#111;padding:26px;max-width:460px;margin:0 auto">
+        <div style="text-align:center;border-bottom:2px dashed #ddd;padding-bottom:14px">
+          <h2 style="color:#0B7A3B;margin:0 0 4px">${esc(inv.business.name)}</h2>
+          ${inv.business.address ? `<p style="color:#666;margin:2px 0;font-size:13px">${esc(inv.business.address)}</p>` : ''}
+          ${inv.business.phone ? `<p style="color:#666;margin:2px 0;font-size:13px">${esc(inv.business.phone)}</p>` : ''}
+        </div>
+        <table style="width:100%;font-size:13px;color:#555;margin:12px 0">
+          <tr><td>${t('receipt.orderId')}</td><td style="text-align:right"><b style="color:#111">${esc(inv.invoiceNo)}</b></td></tr>
+          <tr><td>${t('receipt.date')}</td><td style="text-align:right">${new Date(inv.createdAt).toLocaleString('en-IN')}</td></tr>
+          <tr><td>${t('receipt.billedTo')}</td><td style="text-align:right">${esc(inv.customerName || 'Customer')}</td></tr>
+          ${deliveryAddress ? `<tr><td>${t('receipt.address')}</td><td style="text-align:right">${esc(deliveryAddress)}</td></tr>` : ''}
+        </table>
+        <table style="width:100%;border-collapse:collapse;font-size:14px;border-top:1px solid #eee">
+          <thead><tr style="border-bottom:1px solid #eee;color:#777;font-size:12px">
+            <th align="left" style="padding:6px 0">${t('receipt.item')}</th><th>${t('common.qty')}</th><th align="right">${t('receipt.amount')}</th>
+          </tr></thead>
           <tbody>${rows}</tbody>
         </table>
-        <hr style="margin:14px 0;border:none;border-top:1px solid #eee"/>
-        <p style="text-align:right;margin:2px 0">Subtotal: ${money(inv.subtotal)}</p>
-        ${inv.discount > 0 ? `<p style="text-align:right;margin:2px 0;color:#0B7A3B">Discount: − ${money(inv.discount)}</p>` : ''}
-        ${taxRows}
-        <h3 style="text-align:right;margin:8px 0">Total: ${money(inv.total)}</h3>
-        <p style="color:#888;font-size:12px;text-align:center;margin-top:22px">Thank you for shopping with us!</p>
+        <div style="border-top:2px dashed #ddd;margin-top:14px;padding-top:12px">
+          ${inv.discount > 0 ? `<p style="text-align:right;margin:3px 0;color:#0B7A3B">${t('receipt.savings')}: ${money(inv.discount)}</p>` : ''}
+          <h3 style="text-align:right;margin:6px 0">${t('receipt.total')}: ${money(inv.total)}</h3>
+          ${inv.taxTotal > 0 ? `<p style="text-align:right;margin:2px 0;color:#777;font-size:12px">${t('receipt.inclusiveTax')} (${money(inv.taxTotal)})</p>` : ''}
+          ${paidLine ? `<p style="text-align:right;margin:6px 0;color:${due && due > 0 ? '#DC2626' : '#0B7A3B'};font-size:13px"><b>${paidLine}</b></p>` : ''}
+        </div>
+        <p style="color:#888;font-size:12px;text-align:center;margin-top:22px">${t('receipt.thanks')}</p>
       </body></html>`;
     try {
       const { uri } = await Print.printToFileAsync({ html });
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: inv.invoiceNo });
-    } catch (e: any) { Alert.alert('Error', e?.message ?? 'Could not create the invoice PDF'); }
+    } catch (e: any) { Alert.alert('Error', e?.message ?? 'Could not create the receipt PDF'); }
   };
 
-  const money = (n: number) => formatMoney(n, inv?.currency ?? '₹');
   return (
     <>
-      <SubHeader title={t('orders.invoice')} onBack={onBack}
+      <SubHeader title={t('receipt.title')} onBack={onBack}
         right={inv ? { icon: 'share-social-outline', onPress: sharePdf } : undefined} />
       <ScrollView contentContainerStyle={s.body}>
         {loading && <ActivityIndicator color={C.green} style={{ marginTop: 24 }} />}
         {inv && (
           <>
-            <View style={s.panel}>
-              <Text style={s.panelTitle}>{inv.business.name}</Text>
-              {!!inv.business.address && <Text style={s.cardSub}>{inv.business.address}</Text>}
-              <Text style={s.cardSub}>{inv.invoiceNo} · {new Date(inv.createdAt).toLocaleDateString('en-IN')}</Text>
-              {!!inv.customerName && <Text style={s.cardSub}>Billed to: {inv.customerName}</Text>}
+            {/* shop header — no business tax identifiers on a customer receipt */}
+            <View style={[s.panel, { alignItems: 'center' }]}>
+              <Text style={[s.panelTitle, { fontSize: 17 }]}>{inv.business.name}</Text>
+              {!!inv.business.address && <Text style={[s.cardSub, { textAlign: 'center' }]}>{inv.business.address}</Text>}
+              {!!inv.business.phone && <Text style={s.cardSub}>{inv.business.phone}</Text>}
             </View>
+
+            <View style={s.panel}>
+              <Row label={t('receipt.orderId')} value={inv.invoiceNo} bold />
+              <Row label={t('receipt.date')} value={new Date(inv.createdAt).toLocaleString('en-IN')} />
+              <Row label={t('receipt.billedTo')} value={inv.customerName || 'Customer'} />
+              {!!deliveryAddress && <Row label={t('receipt.address')} value={deliveryAddress} />}
+            </View>
+
+            <Text style={s.sectionLabel}>{t('receipt.items')}</Text>
             {inv.items.map((it, i) => (
               <View key={`${it.name}-${i}`} style={s.card}>
                 <View style={{ flex: 1 }}>
@@ -2438,15 +2505,26 @@ function InvoiceView({ orderId, onBack }: { orderId: string; onBack: () => void 
                 <Text style={s.price}>{money(it.price * it.qty)}</Text>
               </View>
             ))}
+
             <View style={s.panel}>
-              <Row label="Subtotal" value={money(inv.subtotal)} />
-              {inv.discount > 0 && <Row label="Discount" value={`− ${money(inv.discount)}`} tone={C.green} />}
-              {inv.taxBreakdown.map((b) => <Row key={b.label} label={b.label} value={money(b.amount)} />)}
-              <Row label={t('common.total')} value={money(inv.total)} bold />
+              {inv.discount > 0 && <Row label={t('receipt.savings')} value={money(inv.discount)} tone={C.green} />}
+              <Row label={t('receipt.total')} value={money(inv.total)} bold />
+              {inv.taxTotal > 0 && (
+                <Text style={[s.hint, { textAlign: 'right', marginTop: 2 }]}>
+                  {t('receipt.inclusiveTax')} ({money(inv.taxTotal)})
+                </Text>
+              )}
+              {!!paidLine && (
+                <Text style={[s.hint, { textAlign: 'right', fontWeight: '700', color: due && due > 0 ? C.danger : C.green }]}>
+                  {paidLine}
+                </Text>
+              )}
             </View>
+
+            <Text style={[s.hint, { textAlign: 'center' }]}>{t('receipt.thanks')}</Text>
             <TouchableOpacity style={s.primaryBtn} onPress={sharePdf}>
-              <Ionicons name="download-outline" size={18} color="#fff" />
-              <Text style={s.primaryBtnText}>PDF</Text>
+              <Ionicons name="share-social-outline" size={18} color="#fff" />
+              <Text style={s.primaryBtnText}>{t('receipt.share')}</Text>
             </TouchableOpacity>
           </>
         )}
@@ -2574,7 +2652,7 @@ function AvailabilityTag({ a, altName }: { a: ItemAvailability; altName: string 
   return <Text style={[s.availTag, { color: C.amber }]}>🔁 Alternative: {altName}</Text>;
 }
 
-function LedgerRow({ entry }: { entry: SB.LedgerEntry }) {
+function LedgerRow({ entry, currency }: { entry: SB.LedgerEntry; currency?: string }) {
   const isPay = entry.type === 'payment';
   return (
     <View style={s.card}>
@@ -2583,7 +2661,7 @@ function LedgerRow({ entry }: { entry: SB.LedgerEntry }) {
         <Text style={s.cardSub}>{new Date(entry.createdAt).toLocaleDateString('en-IN')}{entry.remark ? ` · ${entry.remark}` : ''}</Text>
       </View>
       <Text style={[s.price, { color: isPay ? C.green : C.danger }]}>
-        {isPay ? '−' : '+'}{formatINR(entry.amount)}
+        {isPay ? '−' : '+'}{formatMoney(entry.amount, currency)}
       </Text>
     </View>
   );

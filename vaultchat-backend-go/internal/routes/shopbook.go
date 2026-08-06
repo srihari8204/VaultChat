@@ -89,6 +89,7 @@ func RegisterShopBook(mux *http.ServeMux) {
 	mux.HandleFunc("GET /shopbook/countries", httpx.RequireAuth(sbCountries))
 	mux.HandleFunc("GET /shopbook/starter-catalog", httpx.RequireAuth(sbStarterCatalog))
 	mux.HandleFunc("POST /shopbook/orders/{id}/cancel", httpx.RequireAuth(sbCustomerCancel))
+	mux.HandleFunc("POST /shopbook/orders/{id}/collected", httpx.RequireAuth(sbCustomerCollected))
 	mux.HandleFunc("GET /shopbook/orders/{id}/invoice", httpx.RequireAuth(sbOrderInvoice))
 	mux.HandleFunc("GET /shopbook/notifications", httpx.RequireAuth(sbNotifications))
 	mux.HandleFunc("POST /shopbook/notifications/read", httpx.RequireAuth(sbNotificationsRead))
@@ -541,18 +542,18 @@ func sbMyOrders(w http.ResponseWriter, r *http.Request) {
 // or the shop owner can read it.
 func orderWithItems(ctx context.Context, w http.ResponseWriter, orderID, userID string) {
 	var shopID, custID, status, note, couponCode, address string
-	var cancelReason, cancelledBy, rejectReason, currency string
+	var cancelReason, cancelledBy, rejectReason, collectedBy, currency string
 	var total, discount, deliveryFee float64
 	var delivery bool
 	var created time.Time
 	err := db.Pool.QueryRow(ctx,
 		`SELECT o.shop_id, o.customer_user_id, o.status, o.total, o.note, o.created_at,
 		        o.coupon_code, o.discount, o.delivery, o.delivery_fee, o.address,
-		        o.cancel_reason, o.cancelled_by, o.reject_reason, s.currency
+		        o.cancel_reason, o.cancelled_by, o.reject_reason, o.collected_by, s.currency
 		   FROM shopbook_order o JOIN shopbook_shop s ON s.id=o.shop_id
 		  WHERE o.id=$1`, orderID).Scan(&shopID, &custID, &status, &total, &note, &created,
 		&couponCode, &discount, &delivery, &deliveryFee, &address,
-		&cancelReason, &cancelledBy, &rejectReason, &currency)
+		&cancelReason, &cancelledBy, &rejectReason, &collectedBy, &currency)
 	if db.NoRows(err) {
 		httpx.Err(w, http.StatusNotFound, "Order not found")
 		return
@@ -619,7 +620,7 @@ func orderWithItems(ctx context.Context, w http.ResponseWriter, orderID, userID 
 		"couponCode": couponCode, "discount": discount, "delivery": delivery,
 		"deliveryFee": deliveryFee, "address": address, "rated": rated,
 		"cancelReason": cancelReason, "cancelledBy": cancelledBy,
-		"rejectReason": rejectReason, "currency": currency,
+		"rejectReason": rejectReason, "collectedBy": collectedBy, "currency": currency,
 		"timeline": timeline, "hasInvoice": hasInvoice,
 	})
 }
@@ -1150,6 +1151,7 @@ func sbOwnerSetStatus(w http.ResponseWriter, r *http.Request) {
 		}
 
 		finalStatus = b.Status
+		settled := false
 		events := []string{b.Status}
 		switch b.Status {
 		case "preparing":
@@ -1160,12 +1162,14 @@ func sbOwnerSetStatus(w http.ResponseWriter, r *http.Request) {
 			if err := sbSettleOrder(ctx, tx, shopID, custID, orderID, total); err != nil {
 				return err
 			}
+			settled = true
 			finalStatus = "completed"
 			events = []string{"collected", "completed"}
 		case "completed":
 			if err := sbSettleOrder(ctx, tx, shopID, custID, orderID, total); err != nil {
 				return err
 			}
+			settled = true
 			if cur == "ready" { // direct completion still records the handover
 				events = []string{"collected", "completed"}
 			}
@@ -1173,12 +1177,17 @@ func sbOwnerSetStatus(w http.ResponseWriter, r *http.Request) {
 
 		set := `status=$1, updated_at=NOW()`
 		args := []any{finalStatus, orderID, shopID}
-		if b.Status == "rejected" {
+		switch {
+		case b.Status == "rejected":
 			set = `status=$1, reject_reason=$4, updated_at=NOW()`
 			args = append(args, b.Reason)
-		} else if b.Status == "cancelled" {
+		case b.Status == "cancelled":
 			set = `status=$1, cancel_reason=$4, cancelled_by='owner', updated_at=NOW()`
 			args = append(args, b.Reason)
+		case settled:
+			// Record the owner as the confirming party (the customer can also
+			// confirm — see sbCustomerCollected).
+			set = `status=$1, collected_by=COALESCE(NULLIF(collected_by,''),'owner'), updated_at=NOW()`
 		}
 		if _, err := tx.Exec(ctx,
 			`UPDATE shopbook_order SET `+set+` WHERE id=$2 AND shop_id=$3`, args...); err != nil {
@@ -1291,6 +1300,71 @@ func sbCustomerCancel(w http.ResponseWriter, r *http.Request) {
 			map[string]any{"event": "order_cancelled", "orderId": orderID})
 	}
 	httpx.JSON(w, 200, map[string]any{"ok": true, "status": "cancelled"})
+}
+
+// Customer confirms they collected their own order — allowed only once the
+// shop marks it Ready (spec: order-management / customer-confirmed
+// collection). Settles exactly like the owner path: khata purchase, invoice,
+// auto-complete. Confirming an already-collected order is a no-op success,
+// since sbSettleOrder's guards make double settlement impossible.
+func sbCustomerCollected(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := httpx.UserFrom(r)
+	orderID := r.PathValue("id")
+
+	var shopID string
+	alreadyDone := false
+	err := db.WithUser(ctx, user.ID, func(tx pgx.Tx) error {
+		var cur string
+		var total float64
+		if err := tx.QueryRow(ctx,
+			`SELECT status, shop_id, total FROM shopbook_order
+			  WHERE id=$1 AND customer_user_id=$2 FOR UPDATE`,
+			orderID, user.ID).Scan(&cur, &shopID, &total); err != nil {
+			return err
+		}
+		if cur == "collected" || cur == "completed" {
+			alreadyDone = true
+			return nil
+		}
+		if cur != "ready" {
+			return fmt.Errorf("not ready")
+		}
+		if err := sbSettleOrder(ctx, tx, shopID, user.ID, orderID, total); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE shopbook_order SET status='completed', collected_by='customer',
+			       updated_at=NOW() WHERE id=$1`, orderID); err != nil {
+			return err
+		}
+		if err := sbOrderEvent(ctx, tx, orderID, "collected", "Confirmed by customer"); err != nil {
+			return err
+		}
+		return sbOrderEvent(ctx, tx, orderID, "completed", "")
+	})
+	if db.NoRows(err) {
+		httpx.Err(w, http.StatusNotFound, "Order not found")
+		return
+	}
+	if err != nil {
+		if err.Error() == "not ready" {
+			httpx.Err(w, http.StatusConflict,
+				"The shop hasn't marked this order ready for collection yet")
+		} else {
+			httpx.Err(w, http.StatusInternalServerError, "db error")
+		}
+		return
+	}
+	if !alreadyDone {
+		var ownerID string
+		if db.Pool.QueryRow(ctx, `SELECT owner_user_id FROM shopbook_shop WHERE id=$1`, shopID).Scan(&ownerID) == nil && ownerID != "" {
+			sbNotify(ctx, ownerID, "Order collected ✅",
+				"The customer confirmed they collected their order",
+				map[string]any{"event": "order_collected", "orderId": orderID})
+		}
+	}
+	httpx.JSON(w, 200, map[string]any{"ok": true, "status": "completed"})
 }
 
 // ── owner: dashboard ─────────────────────────────────────────────
