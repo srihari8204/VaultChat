@@ -519,7 +519,7 @@ The canonical-chunk + bitmap model generalises well:
   offsets. The bitmap survives; the *grid* becomes variable. Plan for a `ChunkGrid` abstraction
   now (fixed today, CDC later) so it is not a rewrite.
 - **Folder sync** — needs a manifest of manifests. The session model is per-file; a `TransferSet`
-  层 above it is additive.
+  layer above it is additive.
 - **Streaming / media** — needs *in-order priority*, not any-order completion. The scheduler must
   accept a priority function over chunks. Cheap to add now, expensive to retrofit.
 - **QUIC / WebTransport** — needs the byte-stream driver shape (§4 T4).
