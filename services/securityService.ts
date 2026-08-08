@@ -8,6 +8,7 @@ import { Platform } from 'react-native';
 import DeviceInfo from 'react-native-device-info';
 import { assessThreats, signal as toSignal, type ThreatSignal } from './security/threatEngine';
 import { createDuressPinTracker } from './security/duressPin';
+import * as pinStore from './security/pinStore';
 import { recordDeviceScan } from './security/auditChain';
 
 // ─────────────────────────────────────────────────────────────
@@ -309,13 +310,16 @@ export async function scanDeviceAndRecord(): Promise<SecurityReport> {
 // 8. PIN Management
 // ─────────────────────────────────────────────────────────────
 
+// Was SecureStore.setItemAsync('vault_pin', pin) — the PIN itself, in the clear,
+// under a DIFFERENT key from the one the lock screen checked, so the backup-PIN
+// screen and the lock screen held two unrelated secrets. Both now go through
+// services/security/pinStore (scrypt + salt, PIN never stored).
 export async function savePIN(pin: string): Promise<void> {
-  await SecureStore.setItemAsync('vault_pin', pin);
+  await pinStore.setPin(pin);
 }
 
 export async function verifyPIN(pin: string): Promise<boolean> {
-  const stored = await SecureStore.getItemAsync('vault_pin');
-  const ok = stored === pin;
+  const ok = await pinStore.verifyPin(pin);
   // Feed the duress-PIN tracker: consecutive failures escalate toward a
   // self-destruct on the next runSecurityCheck().
   if (ok) await duressPin.recordSuccess();

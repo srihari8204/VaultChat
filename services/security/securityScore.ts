@@ -7,6 +7,7 @@
 // `pending` and excluded from the denominator rather than assumed good.
 
 import * as SecureStore from 'expo-secure-store';
+import * as pinStore from './pinStore';
 import { E2EE_ENABLED } from '../../constants/flags';
 import { listSecurityEvents } from './auditChain';
 
@@ -27,11 +28,9 @@ export interface SecurityScore {
 }
 
 async function hasAppPin(): Promise<boolean> {
-  // Two PIN systems exist in the app; either one means the app is PIN-protected.
-  const a = await SecureStore.getItemAsync('vc_pin_hash').catch(() => null);
-  if (a) return true;
-  const b = await SecureStore.getItemAsync('vault_pin').catch(() => null);
-  return !!b;
+  // One PIN system now (services/security/pinStore), which still reports true
+  // for an install that hasn't been migrated off either legacy key yet.
+  return pinStore.hasPin();
 }
 
 export async function computeSecurityScore(): Promise<SecurityScore> {

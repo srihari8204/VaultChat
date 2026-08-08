@@ -8,6 +8,7 @@
 
 import {
   createVaultHeaders, deriveVaultKey, newSalt, open, seal, tryUnlock,
+  makePinRecord, checkPinRecord,
 } from './vaultKeys';
 
 let passed = 0;
@@ -62,6 +63,28 @@ function main(): void {
   // 8. salt matters — same PIN + different salt derives a different key.
   const k2 = deriveVaultKey(REAL, newSalt());
   assert(open(k2, env) === null, 'same PIN with a different salt cannot open the blob');
+
+  // 9. PIN credential — the replacement for the unsalted SHA-256 and the
+  //    stored-in-the-clear PIN. The record must never contain the PIN, and two
+  //    users choosing the same PIN must not produce the same record.
+  const rec = makePinRecord('4829');
+  assert(checkPinRecord(rec, '4829'), 'the right PIN verifies');
+  assert(!checkPinRecord(rec, '4828'), 'a wrong PIN does not');
+  assert(!checkPinRecord(rec, ''), 'an empty PIN does not');
+  assert(!checkPinRecord(null, '4829'), 'a missing record verifies nothing');
+  assert(!JSON.stringify(rec).includes('4829'), 'the record does not contain the PIN');
+
+  const rec2 = makePinRecord('4829');
+  assert(rec.verifier !== rec2.verifier && rec.salt !== rec2.salt,
+    'the same PIN twice yields different records (per-install salt)');
+  assert(!checkPinRecord({ ...rec, salt: rec2.salt }, '4829'),
+    'a record with a swapped salt stops verifying');
+
+  // A tampered/truncated record must fail closed, not throw.
+  assert(!checkPinRecord({ v: 1, salt: rec.salt, verifier: 'not-base64!!' } as any, '4829'),
+    'a corrupt verifier fails closed');
+  assert(!checkPinRecord({ v: 2, salt: rec.salt, verifier: rec.verifier } as any, '4829'),
+    'an unknown record version fails closed');
 
   console.log(`\nALL ${passed} VAULT-SEPARATION CHECKS PASSED`);
 }

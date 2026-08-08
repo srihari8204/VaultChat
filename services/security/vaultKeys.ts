@@ -171,3 +171,42 @@ export async function tryUnlockAsync(
 function safeParse(s: string): Record<string, any> {
   try { return JSON.parse(s); } catch { return {}; }
 }
+
+// ─── PIN credential (pure) ────────────────────────────────────────────────────
+//
+// One representation for "is this the user's PIN?", replacing the two weaker
+// ones that grew up alongside this file: an unsalted SHA-256 in authService and
+// the PIN stored verbatim in securityService. Same scrypt + AES-GCM machinery as
+// the vault headers above, so there is one KDF in the app, not three.
+//
+// A record holds a per-install salt and a sealed known constant. Verifying =
+// deriving the key and trying to open it: the GCM auth tag decides, so a wrong
+// PIN yields null and the PIN itself is never stored in any form. Persistence
+// lives in services/security/pinStore.ts — this half stays Node-testable.
+
+const PIN_PROOF = 'vc-pin-ok';
+
+export interface PinRecord { v: 1; salt: string; verifier: string }
+
+export function makePinRecord(pin: string): PinRecord {
+  const salt = newSalt();
+  return { v: 1, salt: toB64(salt), verifier: seal(deriveVaultKey(pin, salt), PIN_PROOF) };
+}
+
+export async function makePinRecordAsync(pin: string): Promise<PinRecord> {
+  const salt = newSalt();
+  const key = await deriveVaultKeyAsync(pin, salt);
+  return { v: 1, salt: toB64(salt), verifier: seal(key, PIN_PROOF) };
+}
+
+export function checkPinRecord(rec: PinRecord | null | undefined, pin: string): boolean {
+  if (!rec || rec.v !== 1 || !rec.salt || !rec.verifier) return false;
+  return open(deriveVaultKey(pin, fromB64(rec.salt)), rec.verifier) === PIN_PROOF;
+}
+
+/** Async twin — keeps the lock screen responsive during the scrypt derivation. */
+export async function checkPinRecordAsync(rec: PinRecord | null | undefined, pin: string): Promise<boolean> {
+  if (!rec || rec.v !== 1 || !rec.salt || !rec.verifier) return false;
+  const key = await deriveVaultKeyAsync(pin, fromB64(rec.salt));
+  return open(key, rec.verifier) === PIN_PROOF;
+}

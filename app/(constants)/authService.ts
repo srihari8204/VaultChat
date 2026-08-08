@@ -20,6 +20,7 @@ import {
   setTokens,
 } from '../../lib/api';
 import { lockSession } from '../../lib/sessionLock';
+import * as pinStore from '../../services/security/pinStore';
 
 // Web Client ID from Firebase Console → Auth → Sign-in method → Google.
 // (Google Sign-In SDK still talks to Google's OAuth — the resulting
@@ -220,31 +221,26 @@ export async function saveUserProfile(d: SignupData) {
   });
 }
 
-// ─── PIN (local hash + best-effort backend sync) ─────────────
-async function sha256(s: string): Promise<string> {
-  if (!s) throw new Error('Cannot hash empty string');
-  return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, s);
-}
+// ─── PIN (one store: services/security/pinStore) ─────────────
+// Was an unsalted SHA-256 under 'vc_pin_hash' — a 4-8 digit PIN is ~10^8
+// candidates, so that hash was a formality. pinStore derives with scrypt over a
+// per-install salt (the same KDF the vault headers use) and migrates the old
+// value on the next successful unlock.
 
 export async function savePIN(pin: string) {
-  if (!pin || pin.length < 4 || pin.length > 8 || !/^\d+$/.test(pin)) {
-    throw new Error('PIN must be 4-8 digits');
-  }
-  const hash = await sha256(pin);
-  await SecureStore.setItemAsync('vc_pin_hash', hash);
-  // Best-effort backend save so the user can verify PIN from any device later.
+  await pinStore.setPin(pin);              // validates 4-8 digits
+  // Best-effort backend save so the user can verify their PIN from a new device
+  // (POST /user/pin bcrypts it server-side). Note this is the one moment the PIN
+  // leaves the device — drop this call if that trade isn't wanted.
   try { await api('/user/pin', { method: 'POST', json: { pin } }); } catch {}
 }
 
 export async function verifyPIN(pin: string): Promise<boolean> {
-  const stored = await SecureStore.getItemAsync('vc_pin_hash');
-  if (!stored) return false;
-  const hash = await sha256(pin);
-  return hash === stored;
+  return pinStore.verifyPin(pin);
 }
 
 export async function hasPIN(): Promise<boolean> {
-  try { return !!(await SecureStore.getItemAsync('vc_pin_hash')); } catch { return false; }
+  return pinStore.hasPin();
 }
 
 // ─── Face enrollment (local-only, unchanged) ─────────────────
@@ -332,7 +328,7 @@ export async function logoutUser() {
   for (let i = 0; i < 3; i++) {
     await AsyncStorage.removeItem('vc_face_' + i).catch(() => {});
   }
-  await SecureStore.deleteItemAsync('vc_pin_hash').catch(() => {});
+  await pinStore.clearPin().catch(() => {});   // v1 record + both legacy keys
   await AsyncStorage.removeItem('vc_pending_signup').catch(() => {});
 
   // Cached chats/messages + the sealed cache DEK.
