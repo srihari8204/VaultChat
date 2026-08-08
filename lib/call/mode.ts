@@ -32,9 +32,78 @@ export const MESH_MAX = 5;
 /** SFU group-call ceiling — the product target. */
 export const SFU_MAX = 64;
 
-/** Broadcast audience ceiling. Audience members never publish, so this is a
- *  bandwidth and connection-count number rather than a CPU one. */
+/**
+ * WebRTC-backed audience ceiling for a broadcast.
+ *
+ * NOT the audience limit — the limit of the INTERACTIVE tier. Every WebRTC
+ * subscriber is a peer connection with its own ICE and DTLS state, so an SFU
+ * node serves low thousands, and cascading to millions is economically absurd
+ * before it is technically hard. Past this, viewers are served over HLS/CDN
+ * (see BroadcastTier below), which is how every platform at this scale works.
+ */
 export const BROADCAST_MAX = 10_000;
+
+// ── Broadcast delivery tiers ───────────────────────────────────────────
+//
+// Reaching millions is a LATENCY-FOR-SCALE trade, and it cannot be avoided by
+// engineering: WebRTC buys sub-second interactivity at a per-connection cost,
+// CDN segments buy unlimited fan-out at the price of seconds of delay.
+//
+//   publisher    sends media. WebRTC. Host, co-hosts, promoted speakers.
+//   interactive  WebRTC subscriber. ~200-400 ms. Can be promoted to speak
+//                instantly, because the connection already exists.
+//   viewer       HLS/LL-HLS segments over a CDN. 2-5 s (LL-HLS) or 10-30 s
+//                (plain HLS). UNLIMITED — the CDN absorbs it. Promotion means
+//                switching this person onto WebRTC first.
+//
+// Cost is the part that decides the product, not the tech: video at ~1.5 Mbps
+// is ~675 MB per viewer-hour, so 2M concurrent viewers is ~1.35 PB/hour of
+// CDN egress. AUDIO-ONLY at 32 kbps is ~14 MB per viewer-hour — roughly 50x
+// cheaper for the same audience. An audio-first broadcast is affordable at
+// millions; a video one is a serious infrastructure bill.
+
+export type BroadcastTier = 'publisher' | 'interactive' | 'viewer';
+export type DeliveryTransport = 'webrtc' | 'hls';
+
+/** Unlimited by design — the CDN, not the app, is the constraint. */
+export const VIEWER_MAX = Number.POSITIVE_INFINITY;
+
+/**
+ * Which tier a joiner belongs to. Publishers and promoted speakers are always
+ * WebRTC; everyone else fills the interactive tier until it is full, then
+ * spills to CDN viewing.
+ */
+export function broadcastTierFor(
+  role: CallRole,
+  interactiveCount: number,
+  interactiveMax = BROADCAST_MAX,
+): BroadcastTier {
+  if (role !== 'audience') return 'publisher';
+  return interactiveCount < interactiveMax ? 'interactive' : 'viewer';
+}
+
+export function transportFor(tier: BroadcastTier): DeliveryTransport {
+  return tier === 'viewer' ? 'hls' : 'webrtc';
+}
+
+/** Rough end-to-end latency, so the UI can be honest about what someone sees
+ *  ("you are watching ~3s behind") rather than implying everyone is live. */
+export function expectedLatencyMs(tier: BroadcastTier): number {
+  switch (tier) {
+    case 'publisher':
+    case 'interactive': return 300;
+    case 'viewer': return 3_000;   // LL-HLS; plain HLS is ~10-30s
+  }
+}
+
+/**
+ * A viewer must move to WebRTC before they can speak — you cannot publish from
+ * an HLS session. Returns whether promotion needs that switch, so the UI can
+ * warn about the reconnect instead of appearing to hang.
+ */
+export function promotionNeedsTransportSwitch(tier: BroadcastTier): boolean {
+  return tier === 'viewer';
+}
 
 /** How many people may publish in a broadcast (host + co-hosts + promoted
  *  speakers). Kept small on purpose: every extra publisher is forwarded to
@@ -73,8 +142,16 @@ export function capacityFor(t: CallTopology): number {
   switch (t) {
     case 'mesh': return MESH_MAX;
     case 'sfu': return SFU_MAX;
-    case 'broadcast': return BROADCAST_MAX;
+    // Unlimited: past the interactive tier, joiners are served by the CDN.
+    case 'broadcast': return VIEWER_MAX;
   }
+}
+
+/** Capacity of the WebRTC (interactive) tier specifically — what the SFU must
+ *  actually hold. This is the number that sizes servers; capacityFor() is the
+ *  number that answers "can this person join at all". */
+export function interactiveCapacityFor(t: CallTopology): number {
+  return t === 'broadcast' ? BROADCAST_MAX : capacityFor(t);
 }
 
 export function canJoin(t: CallTopology, current: number): boolean {

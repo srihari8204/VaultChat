@@ -12,7 +12,8 @@
 import {
   BROADCAST_MAX, BROADCAST_MAX_PUBLISHERS, MAX_RENDERED_TILES, MESH_MAX, SFU_MAX,
   canJoin, canPublish, capacityFor, publisherSlotsLeft, simulcastLayers, tilesToRender,
-  topologyFor,
+  topologyFor, VIEWER_MAX, broadcastTierFor, transportFor, expectedLatencyMs,
+  promotionNeedsTransportSwitch, interactiveCapacityFor,
 } from './mode';
 
 let failures = 0;
@@ -52,7 +53,11 @@ check('a large ORDINARY call is never silently a broadcast', topo(500) === 'sfu'
 console.log('\ncapacity:');
 eq('mesh capacity', capacityFor('mesh'), MESH_MAX);
 eq('sfu capacity is the 64 target', capacityFor('sfu'), SFU_MAX);
-eq('broadcast capacity', capacityFor('broadcast'), BROADCAST_MAX);
+eq('broadcast is UNLIMITED — the CDN absorbs the tail', capacityFor('broadcast'), VIEWER_MAX);
+eq('but its WebRTC tier is finite, and that is what sizes servers',
+  interactiveCapacityFor('broadcast'), BROADCAST_MAX);
+check('a millionth viewer can still join', canJoin('broadcast', 1_000_000));
+check('an ordinary sfu call is NOT unlimited', capacityFor('sfu') === SFU_MAX);
 check('a full mesh refuses another joiner', !canJoin('mesh', MESH_MAX));
 check('a mesh with room accepts', canJoin('mesh', MESH_MAX - 1));
 check('the 64th person can join an SFU call', canJoin('sfu', 63));
@@ -89,6 +94,34 @@ eq('a capable device publishes three', simulcastLayers('sfu', false), 3);
 eq('a low-end device publishes two, not three', simulcastLayers('sfu', true), 2);
 check('a low-end device never publishes more than a capable one',
   simulcastLayers('sfu', true) < simulcastLayers('sfu', false));
+
+// ── broadcast delivery tiers: the latency-for-scale trade ──────────────
+//
+// Millions cannot be served over WebRTC. The tier split is what makes an
+// unlimited audience possible, and it costs seconds of delay for the tail —
+// a trade no engineering removes, so it is asserted rather than assumed.
+console.log('\nbroadcast tiers:');
+eq('a host is always a publisher', broadcastTierFor('host', 0), 'publisher');
+eq('a promoted speaker publishes even when the room is enormous',
+  broadcastTierFor('speaker', 9_999_999), 'publisher');
+eq('early audience gets the interactive (WebRTC) tier', broadcastTierFor('audience', 0), 'interactive');
+eq('audience past the WebRTC tier spills to CDN viewing',
+  broadcastTierFor('audience', BROADCAST_MAX), 'viewer');
+eq('the boundary is exact', broadcastTierFor('audience', BROADCAST_MAX - 1), 'interactive');
+
+eq('publishers ride WebRTC', transportFor('publisher'), 'webrtc');
+eq('interactive rides WebRTC', transportFor('interactive'), 'webrtc');
+eq('viewers ride HLS', transportFor('viewer'), 'hls');
+
+check('a CDN viewer is measurably further behind than an interactive listener',
+  expectedLatencyMs('viewer') > expectedLatencyMs('interactive'));
+check('interactive stays inside the sub-second target',
+  expectedLatencyMs('interactive') <= 500);
+
+check('promoting a CDN viewer requires a transport switch',
+  promotionNeedsTransportSwitch('viewer'));
+check('promoting an interactive listener does not — the connection already exists',
+  !promotionNeedsTransportSwitch('interactive'));
 
 console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all topology checks passed\n');
 process.exit(failures ? 1 : 0);
