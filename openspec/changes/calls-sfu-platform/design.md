@@ -12,7 +12,31 @@ Baseline for every "today" claim: `lib/call/*`, `internal/routes/call_sessions.g
 
 These are not preferences. Each one changes what gets built.
 
-### D-1. E2EE vs SFU — the decision that defines the product
+### D-1. E2EE vs SFU — **DECIDED 2026-08-08: Option C (split)**
+
+> **1:1 calls stay end-to-end encrypted. Group calls are transport-encrypted
+> (DTLS/SRTP) through the SFU. Recording is not required for 1:1.**
+
+Consequences, now settled:
+
+- 1:1 keeps the existing mesh + `callCrypto` path, unchanged. It is never routed
+  to the SFU, so its E2EE guarantee is not weakened by any of this work.
+- Group calls, webinars, recording and RTMP streaming are all **unblocked** —
+  the server can decrypt group media, so Egress can encode it.
+- **1:1 calls are not recordable, and that is by design**, not a limitation to
+  be fixed later. Adding 1:1 recording would require breaking 1:1 E2EE.
+- **UI obligation**: the call screen must state which protection is in force.
+  A user who believes a 12-person call carries the same guarantee as their 1:1
+  has been misled by omission. The existing "End-to-end encrypted" label must
+  become conditional on call type, not shown unconditionally.
+- Frame-level E2EE for group calls (Option A) is not pursued. If it is ever
+  revisited, recording and streaming must be removed in the same change.
+
+Original analysis retained below for the record.
+
+---
+
+#### Analysis as written before the decision
 
 Mesh calls today are peer-to-peer with a per-call key ratchet-wrapped once, then
 AES-256-GCM per frame (`lib/callCrypto.ts`). **An SFU relays media through our servers.**
@@ -34,6 +58,8 @@ proven, not assumed.
 
 Recommendation: **C**, with group calls labelled in the call UI rather than in a
 support article. Deciding at Phase 4 instead of now means rebuilding Phases 1–3.
+
+**→ Adopted. See the decision recorded at the top of D-1.**
 
 ### D-2. What "1000+ voice calls" means
 

@@ -1,8 +1,21 @@
 # Implementation plan — VaultChat Calls SFU platform
 
-**Status: NOT APPROVED for implementation.** Three decisions in `design.md` §1 are open
-(D-1 E2EE model, D-2 what "1000+ voice" means, D-3 app size). D-1 in particular determines
-whether Phases 4–5 can exist, so building Phase 1 before it is answered risks rework.
+**Status: PARTIALLY APPROVED.**
+
+- **D-1 (E2EE model) — DECIDED**: Option C. 1:1 stays E2EE and is never routed to the SFU;
+  group calls are transport-encrypted; 1:1 recording is explicitly out of scope. Phases 1–5
+  are unblocked on this axis.
+- **D-2 (what "1000+ voice calls" means) — OPEN**: affects capacity planning for Phase 2,
+  not its design. Does not block Phase 1.
+- **D-3 (app size, 105 MB vs 25–40 MB target) — OPEN**: tracked separately; should be
+  answered before the LiveKit SDK is added.
+
+**Phase 0 still gates Phase 1** — the mesh engine must pass hardware before a second media
+path is introduced.
+
+- [x] **Phase 6 — voice-only / low-data mode. DONE** (commit `d3191fa`): audio-priority
+      `audioOnly` tier, low-data ceiling, Opus 16–24 kbps. Taken first because it is
+      independent of every decision above.
 
 Strangler order, behind a `CALLS_SFU` flag (`constants/flags.ts`, default **off**), matching
 the pattern used by `VB_SEAMLESS_RESUME` and `CALL_ENGINE_V2`. Phases 1+ change nothing
@@ -60,27 +73,29 @@ Cheapest phase — the permission model exists.
 - [ ] Hardware H.264 where exposed, VP8/VP9 fallback
 - [ ] Verify on a mid-range device that text stays legible at 1080p
 
-## Phase 4 — Recording *(blocked on D-1: impossible under frame E2EE)*
+## Phase 4 — Recording *(unblocked by D-1 Option C — group calls only)*
+
+- [ ] **1:1 calls are NOT recordable** — assert this in code, not just docs, so a later
+      change cannot quietly route a 1:1 through Egress
 
 - [ ] Deploy LiveKit Egress on **separate machines** (it transcodes; the SFU does not)
 - [ ] Capacity + cost model **before** building
 - [ ] Output to existing S3/MinIO; retention policy
 - [ ] Consent/notification UX — participants must know a call is recorded
 
-## Phase 5 — Live streaming (RTMP → YouTube) *(blocked on D-1)*
+## Phase 5 — Live streaming (RTMP → YouTube) *(unblocked by D-1 Option C)*
 
 - [ ] RTMP egress path
 - [ ] YouTube Live key handling (a credential — never in client storage)
 - [ ] Local stream recording
 
-## Phase 6 — Voice-only / low-data mode
+## Phase 6 — Voice-only / low-data mode — ✅ DONE (`d3191fa`)
 
-Independent of everything above; **can be pulled forward**, and has the highest value per
-unit of work for the India-focused user base.
-
-- [ ] Opus 16–24 kbps adaptive
-- [ ] Audio-priority degradation (drop video, keep audio) — partly in `lib/call/quality.ts`
-- [ ] Low-data toggle in call settings
+- [x] Opus 16–24 kbps adaptive (`audioBitrate`)
+- [x] Audio-priority degradation — `audioOnly` tier below `low`; video is suspended via
+      `track.enabled=false`, so recovery needs no renegotiation
+- [x] Low-data toggle in call settings (`lib/callPrefs.ts`, Call reliability screen)
+- [x] 14 new policy checks in `lib/call/quality.selftest.ts`
 
 ---
 
