@@ -80,7 +80,6 @@
     "expo-dev-client": "~6.0.20",
     "expo-device": "~8.0.10",
     "expo-document-picker": "~14.0.8",
-    "expo-face-detector": "^13.0.2",
     "expo-file-system": "~19.0.21",
     "expo-font": "~14.0.11",
     "expo-haptics": "~15.0.8",
@@ -158,8 +157,7 @@
     "doctor": {
       "reactNativeDirectoryCheck": {
         "exclude": [
-          "@livekit/react-native-webrtc",
-          "expo-face-detector"
+          "@livekit/react-native-webrtc"
         ]
       }
     }
