@@ -69,3 +69,8 @@ dist-export/
 
 # build logs (session artifacts)
 build_release*.log
+
+# Local build/dev-server logs (scripts/gradlew.js, expo start)
+.build.log
+.build-debug.log
+.metro.log

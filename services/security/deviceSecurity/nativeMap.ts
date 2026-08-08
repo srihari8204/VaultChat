@@ -7,8 +7,9 @@
 //
 // Honesty rule preserved: the platform's native-evaluable type set is reported
 // in `evaluatedTypes` whether or not a threat was found, so "checked & clean"
-// is distinct from "couldn't check". APK_RESIGNED is only evaluated when an
-// expected signing digest is configured (otherwise it stays pending).
+// is distinct from "couldn't check". APK_RESIGNED is evaluated whenever an
+// expected signing digest is configured — one SHIPS below, so it is evaluated by
+// default; pass `expectedSigning: ''` to leave it pending instead.
 
 import type { CollectorResult } from './orchestrator';
 import type { Platform } from './posture';

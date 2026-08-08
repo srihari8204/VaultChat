@@ -60,12 +60,18 @@ function discover() {
   return suites.sort((a, b) => a.rel.localeCompare(b.rel));
 }
 
-const tsxBin = path.join(ROOT, 'node_modules', '.bin', 'tsx');
+// Run tsx's CLI through THIS node binary rather than through node_modules/.bin.
+// On Windows the extensionless `.bin/tsx` is a POSIX shell shim CreateProcess
+// cannot execute (execFile failed instantly with no output — every suite was
+// reported FAILED while each passed when run by hand), and since Node 20 the
+// `.cmd` shim can only be spawned with shell:true, which then needs argument
+// quoting. Resolving the CLI module sidesteps both, on every platform.
+const tsxCli = require.resolve('tsx/cli');
 
 function run(suite) {
   return new Promise((resolve) => {
     const started = Date.now();
-    execFile(tsxBin, [suite.rel], { cwd: ROOT, timeout: TIMEOUT_MS, maxBuffer: 16 << 20 },
+    execFile(process.execPath, [tsxCli, suite.rel], { cwd: ROOT, timeout: TIMEOUT_MS, maxBuffer: 16 << 20 },
       (err, stdout, stderr) => {
         resolve({
           ...suite,
