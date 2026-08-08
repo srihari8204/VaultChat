@@ -27,21 +27,61 @@
 //   UP needs a genuinely clean link (<2% loss, <200 ms).
 
 export interface QualityTier {
-  name: 'high' | 'medium' | 'low';
+  name: 'audioOnly' | 'low' | 'medium' | 'high';
   /** Encoder ceiling in bits/sec, handed to RTCRtpSender.setParameters. */
   maxBitrate: number;
   maxFramerate: number;
   /** 1 = native capture resolution; 2 = half width and height. */
   scaleResolutionDownBy: number;
+  /** False = suspend the outbound video track entirely and keep the call on audio. */
+  video: boolean;
 }
 
 export const TIERS: Record<QualityTier['name'], QualityTier> = {
-  high:   { name: 'high',   maxBitrate: 1_200_000, maxFramerate: 30, scaleResolutionDownBy: 1 },
-  medium: { name: 'medium', maxBitrate:   600_000, maxFramerate: 24, scaleResolutionDownBy: 1.5 },
-  low:    { name: 'low',    maxBitrate:   250_000, maxFramerate: 15, scaleResolutionDownBy: 2 },
+  high:      { name: 'high',      maxBitrate: 1_200_000, maxFramerate: 30, scaleResolutionDownBy: 1,   video: true },
+  medium:    { name: 'medium',    maxBitrate:   600_000, maxFramerate: 24, scaleResolutionDownBy: 1.5, video: true },
+  low:       { name: 'low',       maxBitrate:   250_000, maxFramerate: 15, scaleResolutionDownBy: 2,   video: true },
+  // AUDIO-PRIORITY FLOOR. Below 'low' the honest move is not a worse picture but
+  // no picture: on a congested cell, video and audio compete for the same
+  // starved uplink, and a frozen mosaic with broken speech is a failed call
+  // while audio alone is a usable one. Dropping video is what keeps the call
+  // alive, so it is a TIER rather than an error path.
+  audioOnly: { name: 'audioOnly', maxBitrate:         0, maxFramerate:  0, scaleResolutionDownBy: 4,   video: false },
 };
 
-const ORDER: QualityTier['name'][] = ['low', 'medium', 'high'];
+const ORDER: QualityTier['name'][] = ['audioOnly', 'low', 'medium', 'high'];
+
+// ── Opus audio policy ──────────────────────────────────────────────────
+//
+// Speech, not music: Opus is transparent for voice well under 32 kbps, so the
+// product target of 16–24 kbps costs almost nothing in intelligibility and is
+// the difference between a call that works on a weak Indian cell and one that
+// does not. These are ceilings; Opus still adapts underneath them.
+export const AUDIO_BITRATE_MIN = 16_000;
+export const AUDIO_BITRATE_MAX = 24_000;
+
+/**
+ * Opus ceiling for the current conditions. Audio degrades far more gently than
+ * video — it steps between two nearby values rather than off a cliff — because
+ * losing speech is losing the call.
+ */
+export function audioBitrate(tier: QualityTier['name'], lowDataMode: boolean): number {
+  if (lowDataMode) return AUDIO_BITRATE_MIN;
+  // Once video is gone the uplink is no longer contended, so audio may use the
+  // full ceiling: the reason to hold it back has just been removed.
+  if (tier === 'audioOnly') return AUDIO_BITRATE_MAX;
+  return tier === 'low' ? AUDIO_BITRATE_MIN : AUDIO_BITRATE_MAX;
+}
+
+/**
+ * The best tier a call may use. Low-data mode caps at 'low' rather than
+ * forcing 'audioOnly': the user asked to spend less data, not to stop seeing
+ * people. Choosing audio-only stays theirs to make explicitly.
+ */
+export function ceilingFor(lowDataMode: boolean, videoRequested: boolean): QualityTier['name'] {
+  if (!videoRequested) return 'audioOnly';
+  return lowDataMode ? 'low' : 'high';
+}
 
 /** One observation, distilled from an RTCStatsReport. */
 export interface QualitySample {
@@ -75,8 +115,16 @@ export const UP_STREAK = 3;
  * "not bad" for the down-check but NOT as good for the up-check — absence of
  * evidence must not ratchet quality upward.
  */
-export function nextQuality(state: QualityState, s: QualitySample): QualityState {
-  const idx = ORDER.indexOf(state.tier);
+export function nextQuality(
+  state: QualityState,
+  s: QualitySample,
+  ceiling: QualityTier['name'] = 'high',
+): QualityState {
+  const capIdx = ORDER.indexOf(ceiling);
+  // A ceiling lowered mid-call (the user just enabled low-data, or turned their
+  // camera off) applies immediately — waiting for the next bad sample would
+  // keep spending data the user has just asked us not to spend.
+  const idx = Math.min(ORDER.indexOf(state.tier), capIdx);
 
   const bad = s.lossRatio >= DOWN_LOSS || (s.rttMs !== null && s.rttMs >= DOWN_RTT_MS);
   if (bad) {
@@ -84,11 +132,14 @@ export function nextQuality(state: QualityState, s: QualitySample): QualityState
   }
 
   const good = s.lossRatio <= UP_LOSS && s.rttMs !== null && s.rttMs <= UP_RTT_MS;
-  if (!good) return state.goodStreak === 0 ? state : { ...state, goodStreak: 0 };
+  if (!good) {
+    const tier = ORDER[idx];
+    return state.goodStreak === 0 && tier === state.tier ? state : { tier, goodStreak: 0 };
+  }
 
   const streak = state.goodStreak + 1;
-  if (streak < UP_STREAK || idx === ORDER.length - 1) {
-    return { tier: state.tier, goodStreak: streak };
+  if (streak < UP_STREAK || idx >= capIdx) {
+    return { tier: ORDER[idx], goodStreak: streak };
   }
   return { tier: ORDER[idx + 1], goodStreak: 0 };
 }

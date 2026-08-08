@@ -180,6 +180,39 @@ export class CallPeer {
     } catch { /* hint only — never fail a call over it */ }
   }
 
+  /**
+   * Suspend or resume the OUTBOUND video track (audio-priority mode).
+   *
+   * Disables the track rather than removing it: `track.enabled = false` stops
+   * frames at the source — the encoder idles and the uplink is freed — while
+   * the transceiver, its mid and the negotiated m-line all stay in place. That
+   * means resuming needs no renegotiation, so a link that recovers gets its
+   * video back in one tick instead of a fresh offer/answer round trip on a
+   * connection that is only just healthy again.
+   */
+  setVideoEnabled(enabled: boolean): void {
+    try {
+      const sender = this.videoSender();
+      if (sender?.track) sender.track.enabled = enabled;
+    } catch { /* best effort — never fail a call over a quality hint */ }
+  }
+
+  /**
+   * Apply an Opus ceiling to the outbound audio. Same best-effort contract as
+   * applyVideoQuality: setParameters is unevenly implemented across
+   * react-native-webrtc versions, and audio must keep flowing regardless.
+   */
+  async applyAudioBitrate(maxBitrate: number): Promise<void> {
+    try {
+      const sender = this.pc.getSenders?.().find((s: any) => s.track?.kind === 'audio');
+      if (!sender?.getParameters) return;
+      const params = sender.getParameters();
+      if (!params.encodings?.length) params.encodings = [{} as any];
+      for (const e of params.encodings) e.maxBitrate = maxBitrate;
+      await sender.setParameters(params);
+    } catch { /* hint only */ }
+  }
+
   /** Cumulative outbound video counters + RTT, for the quality policy. */
   async readOutboundStats(): Promise<{ packetsSent: number; packetsLost: number; rttMs: number | null } | null> {
     try {

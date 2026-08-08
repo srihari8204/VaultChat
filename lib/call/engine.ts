@@ -38,12 +38,13 @@ import { newCallCipher, openCallOffer } from '../callCrypto';
 import { nativeCall } from './native';
 import { clearActiveCall, setActiveCall, type ActiveCall } from '../callState';
 import { getIceServers } from '../iceConfig';
+import { getLowDataModeCached } from '../callPrefs';
 import * as media from './media';
 import * as signal from './signal';
 import type { WireMode } from './signal';
 import { CallPeer } from './peer';
 import { durationSeconds, shouldCancelRing, wasMissed, type CallFlag } from './machine';
-import { INITIAL_CURSOR, INITIAL_QUALITY, TIERS, nextQuality, sampleFromTotals } from './quality';
+import { INITIAL_CURSOR, INITIAL_QUALITY, TIERS, audioBitrate, ceilingFor, nextQuality, sampleFromTotals } from './quality';
 import { dispatch, getSnapshot, begin, reset } from './store';
 import type { CallChatMessage, CallKind, EndReason } from './types';
 
@@ -520,9 +521,17 @@ export async function startGroup(a: StartGroupArgs): Promise<void> {
  * enough that the polling itself is not the battery cost it is trying to avoid.
  */
 function startQualityLoop(peer: CallPeer): void {
-  let quality = INITIAL_QUALITY;
+  const isVideoCall = session?.kind === 'video';
+  // The ceiling is re-read each tick, not captured: the user can enable
+  // low-data mode or turn their camera off mid-call, and both must take effect
+  // on the next sample rather than on the next call.
+  const ceiling = () => ceilingFor(getLowDataModeCached(), isVideoCall);
+
+  let quality: typeof INITIAL_QUALITY = { tier: ceiling(), goodStreak: 0 };
   let cursor = INITIAL_CURSOR;
   peer.applyVideoQuality(TIERS[quality.tier]);
+  peer.setVideoEnabled(TIERS[quality.tier].video);
+  peer.applyAudioBitrate(audioBitrate(quality.tier, getLowDataModeCached()));
 
   const timer = setInterval(async () => {
     const totals = await peer.readOutboundStats();
@@ -532,8 +541,14 @@ function startQualityLoop(peer: CallPeer): void {
     );
     cursor = next;
     const prevTier = quality.tier;
-    quality = nextQuality(quality, sample);
-    if (quality.tier !== prevTier) peer.applyVideoQuality(TIERS[quality.tier]);
+    quality = nextQuality(quality, sample, ceiling());
+    if (quality.tier !== prevTier) {
+      peer.applyVideoQuality(TIERS[quality.tier]);
+      // Audio-priority: below 'low' the video track is suspended outright so
+      // the starved uplink carries speech instead of a frozen mosaic.
+      peer.setVideoEnabled(TIERS[quality.tier].video);
+      peer.applyAudioBitrate(audioBitrate(quality.tier, getLowDataModeCached()));
+    }
 
     // REPORT the sample, don't only act on it (H1). These three numbers are
     // already computed here every 4 s and were being thrown away the moment the
