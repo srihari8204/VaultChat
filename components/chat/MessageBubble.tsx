@@ -363,6 +363,7 @@ export function FileBubble({
 }) {
   const S = useS();
   const [busy, setBusy] = useState(false);
+  const fileRouter = useRouter();
 
   const onOpen = useCallback(async () => {
     if (busy) return;
@@ -384,6 +385,28 @@ export function FileBubble({
       // Copy into the app cache so the OS FileProvider can hand the file to
       // another app (the provider is configured over the cache dir).
       const openUri = await copyToCache(localUri, filename || `file-${attachmentId}`);
+
+      // Open IN-APP first, rather than throwing the file straight at the OS.
+      //
+      // This tap used to go directly to the system chooser, which meant the
+      // in-app viewers were unreachable from a chat: an archive could only be
+      // browsed from the Shelf, and text/code could only be read in another
+      // app. Route by type instead, and let those screens hand off to the OS
+      // when the device really is the better renderer (PDF, Office).
+      const ext = (filename || '').split('.').pop()?.toLowerCase() || '';
+      if (['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz'].includes(ext)) {
+        fileRouter.push({ pathname: '/archive-viewer', params: { uri: openUri, filename } } as any);
+        return;
+      }
+      if (['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
+           'txt', 'json', 'csv', 'md', 'log', 'xml', 'yaml', 'yml',
+           'js', 'ts', 'tsx', 'py', 'java', 'go', 'rs', 'sql', 'html', 'css'].includes(ext)) {
+        fileRouter.push({
+          pathname: '/file-viewer',
+          params: { uri: openUri, filename, mimeType: mime || '' },
+        } as any);
+        return;
+      }
 
       if (Platform.OS === 'android') {
         // WhatsApp-style: hand the file to the system "Open with" chooser so apps
