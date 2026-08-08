@@ -288,6 +288,18 @@ export default function MediaViewerScreen() {
   const GenericViewer = () => { useEffect(()=>{setLoading(false);},[]);
     return (<View style={s.audioWrap}><View style={s.audioCard}><Ionicons name="document-outline" size={48} color="#1F2937" /><Text style={s.audioName}>{fileName}</Text><Text style={s.audioMeta}>{formatSize(fileSize)}</Text>
       <TouchableOpacity style={{marginTop:20,backgroundColor:C.accent,borderRadius:14,flexDirection:'row',gap:8,alignItems:'center',paddingVertical:14,paddingHorizontal:32}} onPress={saveToDevice}><Ionicons name="download-outline" size={16} color="#000" /><Text style={{color:'#000',fontSize:14,fontWeight:'800'}}>Download & Open</Text></TouchableOpacity>
+      {/* The universal viewer (app/file-viewer.tsx) was unreachable — registered
+          as a route but never navigated to. It shows file metadata and hands
+          documents to the device's own PDF/Office app WITHOUT saving a copy to
+          shared storage, which "Download & Open" above does do. */}
+      <TouchableOpacity
+        style={{marginTop:12,borderRadius:14,borderWidth:1,borderColor:'#4A9FFF55',flexDirection:'row',gap:8,alignItems:'center',paddingVertical:12,paddingHorizontal:28}}
+        onPress={()=>router.push({pathname:'/file-viewer',params:{uri:fileUri,filename:fileName,mimeType:(mime||'')+''}})}
+        activeOpacity={0.8}
+      >
+        <Ionicons name="eye-outline" size={16} color="#4A9FFF" />
+        <Text style={{color:'#4A9FFF',fontSize:13,fontWeight:'700'}}>Open without saving</Text>
+      </TouchableOpacity>
     </View></View>);
   };
 

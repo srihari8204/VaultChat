@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { BRAND_ACCENT } from '../constants/theme';
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   Dimensions,
   Easing,
@@ -24,7 +25,7 @@ import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { LinearGradient } from 'expo-linear-gradient';
-import { WebView } from 'react-native-webview';
+import * as IntentLauncher from 'expo-intent-launcher';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
@@ -154,6 +155,7 @@ export default function FileViewerScreen() {
   const [error, setError] = useState('');
   const [fileSize, setFileSize] = useState(0);
   const [textContent, setTextContent] = useState('');
+  const [openingExternally, setOpeningExternally] = useState(false);
 
   // Audio state
   const [sound, setSound] = useState<Audio.Sound | null>(null);
@@ -304,6 +306,50 @@ export default function FileViewerScreen() {
     await sound.setPositionAsync(Math.floor(ratio * audioDuration));
   };
 
+  // ── Open a document in the device's own viewer ─────────────────
+  // Mirrors the chat file bubble (components/chat/MessageBubble.tsx): the file
+  // is copied into the app cache — the OS FileProvider is configured over that
+  // directory — then handed to ACTION_VIEW on Android, or the open-in sheet on
+  // iOS, which has no ACTION_VIEW equivalent. Nothing is uploaded anywhere.
+  const openInDeviceApp = async () => {
+    if (openingExternally) return;
+    setOpeningExternally(true);
+    try {
+      let localUri = fileUri;
+      if (fileUri.startsWith('http')) {
+        const dl = await FileSystem.downloadAsync(fileUri, (FileSystem.cacheDirectory || '') + fileName);
+        localUri = dl.uri;
+      }
+      const mime = (params.mimeType as string | undefined) || undefined;
+
+      if (Platform.OS === 'android') {
+        try {
+          const contentUri = await FileSystem.getContentUriAsync(localUri);
+          await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+            data: contentUri,
+            flags: 1,               // FLAG_GRANT_READ_URI_PERMISSION
+            type: mime,
+          });
+        } catch {
+          // Nothing installed can VIEW this type → offer share/save instead.
+          if (await Sharing.isAvailableAsync()) {
+            await Sharing.shareAsync(localUri, { mimeType: mime, dialogTitle: fileName });
+          } else {
+            setError('No app on this device can open this file type.');
+          }
+        }
+      } else if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(localUri, { mimeType: mime, dialogTitle: fileName });
+      } else {
+        setError('No app on this device can open this file type.');
+      }
+    } catch (e: any) {
+      setError(e?.message ?? 'Could not open this file');
+    } finally {
+      setOpeningExternally(false);
+    }
+  };
+
   // ── Share / open externally ────────────────────────────────────
   const handleShare = async () => {
     try {
@@ -407,52 +453,46 @@ export default function FileViewerScreen() {
   );
 
   // ══════════════════════════════════════════════════════════════
-  // ██  RENDER: PDF via WebView
+  // ██  RENDER: PDF — handed to the device's own viewer
   // ══════════════════════════════════════════════════════════════
-  const renderPDF = () => {
-    const googleUrl = `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(fileUri)}`;
-    return (
-      <View style={s.contentFill}>
-        <WebView
-          source={{ uri: googleUrl }}
-          style={s.contentFill}
-          startInLoadingState
-          renderLoading={() => (
-            <View style={[s.centered, StyleSheet.absoluteFillObject, { backgroundColor: C.bg }]}>
-              <SkeletonShimmer width={SW - 48} height={SH * 0.5} style={{ borderRadius: 12 }} />
-              <Text style={[s.loadingText, { marginTop: 16 }]}>Rendering PDF...</Text>
-            </View>
-          )}
-          onError={() => setError('Could not render PDF')}
-          onLoadEnd={() => setLoading(false)}
-        />
-      </View>
-    );
-  };
+  //
+  // This used to be `https://docs.google.com/gview?url=<fileUri>` in a WebView,
+  // which meant GOOGLE FETCHED AND READ THE DOCUMENT: for an https attachment
+  // that handed Google a working (often presigned) URL to the user's private
+  // file, and for a local file:// path Google could not reach it at all, so the
+  // viewer just span forever. Either way it defeated the point of an app whose
+  // media is E2EE and whose attachments are sealed at rest.
+  //
+  // The file now never leaves the device. Same mechanism the chat file bubble
+  // already uses (components/chat/MessageBubble.tsx): copy into the app cache
+  // so the OS FileProvider can share it, then ACTION_VIEW on Android / the
+  // share-open sheet on iOS, and let whatever PDF app the user has render it.
+  const renderDocument = (label: string) => (
+    <View style={[s.centered, s.contentFill]}>
+      <Text style={s.fileIcon}>{FILE_ICONS[fileType] ?? '📄'}</Text>
+      <Text style={s.loadingText}>{fileName}</Text>
+      <Text style={[s.loadingText, { fontSize: 12, opacity: 0.7, marginTop: 6, textAlign: 'center', paddingHorizontal: 32 }]}>
+        Opens in your {label} app. The file stays on this device.
+      </Text>
+      <TouchableOpacity
+        style={s.openBtn}
+        onPress={openInDeviceApp}
+        disabled={openingExternally}
+        activeOpacity={0.85}
+      >
+        {openingExternally
+          ? <ActivityIndicator color="#fff" />
+          : <Text style={s.openBtnTxt}>Open</Text>}
+      </TouchableOpacity>
+    </View>
+  );
+
+  const renderPDF = () => renderDocument('PDF');
 
   // ══════════════════════════════════════════════════════════════
-  // ██  RENDER: Office docs via Google Docs Viewer
+  // ██  RENDER: Office docs — same on-device path as PDF above
   // ══════════════════════════════════════════════════════════════
-  const renderOffice = () => {
-    const viewerUrl = `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(fileUri)}`;
-    return (
-      <View style={s.contentFill}>
-        <WebView
-          source={{ uri: viewerUrl }}
-          style={s.contentFill}
-          startInLoadingState
-          renderLoading={() => (
-            <View style={[s.centered, StyleSheet.absoluteFillObject, { backgroundColor: C.bg }]}>
-              <SkeletonShimmer width={SW - 48} height={SH * 0.5} style={{ borderRadius: 12 }} />
-              <Text style={[s.loadingText, { marginTop: 16 }]}>Loading document...</Text>
-            </View>
-          )}
-          onError={() => setError('Could not render document')}
-          onLoadEnd={() => setLoading(false)}
-        />
-      </View>
-    );
-  };
+  const renderOffice = () => renderDocument('documents');
 
   // ══════════════════════════════════════════════════════════════
   // ██  RENDER: Text / Code viewer
@@ -736,6 +776,13 @@ const s = StyleSheet.create({
 
   // ── Loading ─────────────────────────────────────────────────
   loadingText: { color: C.textDim, fontSize: 14 },
+  // Document (pdf/office) hand-off card — see renderDocument.
+  fileIcon: { fontSize: 64, marginBottom: 12 },
+  openBtn: {
+    marginTop: 22, minWidth: 160, paddingVertical: 14, paddingHorizontal: 28,
+    borderRadius: 14, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center',
+  },
+  openBtnTxt: { color: '#fff', fontSize: 15, fontWeight: '700' },
 
   // ── Code / Text viewer ──────────────────────────────────────
   codeContainer: { padding: 16, paddingBottom: 40 },
