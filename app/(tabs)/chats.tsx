@@ -94,9 +94,6 @@ export default function ChatsScreen() {
   const [typingChats, setTypingChats] = useState<Set<string>>(new Set());
   const typingTimers = useRef<Record<string, any>>({});
   const [menuChat, setMenuChat] = useState<ChatSummary | null>(null);   // long-press action sheet
-  // Split view is a two-step pick: the first long-press arms it, the second
-  // opens the pair. Null when nothing is armed.
-  const [splitFirst, setSplitFirst] = useState<string | null>(null);
   const { width: winW, height: winH } = useWindowDimensions();
   const splitReady = canSplit(winW, winH);
 
@@ -374,6 +371,19 @@ export default function ChatsScreen() {
             <Text style={S.title}>{selected.size}</Text>
           </View>
           <View style={{ flexDirection: 'row', gap: 4 }}>
+            {/* Split view: shown only with EXACTLY two chats picked, and only
+                when the window can fit two readable panes (lib/responsive).
+                Selection mode is the natural home — choosing two chats is the
+                gesture. The old long-press sheet this lived in is unreachable:
+                onLongPress enters selection mode and never opens it. */}
+            {splitReady && selected.size === 2 && (
+              <TouchableOpacity
+                onPress={() => { const [a, b] = [...selected]; exitSelect(); router.push({ pathname: '/split', params: { a, b } } as any); }}
+                style={S.headerBtn}
+              >
+                <Ionicons name="git-compare-outline" size={20} color={colors.primary} />
+              </TouchableOpacity>
+            )}
             <TouchableOpacity onPress={bulkPin} style={S.headerBtn}><Ionicons name="pin" size={20} color={colors.text} /></TouchableOpacity>
             <TouchableOpacity onPress={bulkMute} style={S.headerBtn}><Ionicons name="notifications-off-outline" size={20} color={colors.text} /></TouchableOpacity>
             <TouchableOpacity onPress={bulkArchive} style={S.headerBtn}><Ionicons name="archive-outline" size={20} color={colors.text} /></TouchableOpacity>
@@ -477,27 +487,6 @@ export default function ChatsScreen() {
             <SheetItem icon={menuChat?.pinned ? 'pin' : 'pin-outline'} label={menuChat?.pinned ? 'Unpin' : 'Pin'} onPress={() => { const c = menuChat!; setMenuChat(null); doPin(c); }} />
             <SheetItem icon={menuChat?.muted ? 'notifications-outline' : 'notifications-off-outline'} label={menuChat?.muted ? 'Unmute' : 'Mute'} onPress={() => { const c = menuChat!; setMenuChat(null); doMute(c); }} />
             <SheetItem icon={menuChat?.archived ? 'archive' : 'archive-outline'} label={menuChat?.archived ? 'Unarchive' : 'Archive'} onPress={() => { const c = menuChat!; setMenuChat(null); doArchive(c); }} />
-            {/* Split view (design 04-06). Offered only when the window can
-                actually fit two readable panes — lib/responsive decides, so a
-                phone gets it in landscape and a tablet always, with no device
-                list to maintain. Hidden rather than shown-and-refused. */}
-            {splitReady && (
-              <SheetItem
-                icon="git-compare-outline"
-                label={splitFirst ? 'Open in split with the other chat' : 'Open in split view'}
-                onPress={() => {
-                  const c = menuChat!;
-                  setMenuChat(null);
-                  if (splitFirst && splitFirst !== c.id) {
-                    const a = splitFirst;
-                    setSplitFirst(null);
-                    router.push({ pathname: '/split', params: { a, b: c.id } } as any);
-                  } else {
-                    setSplitFirst(c.id);
-                  }
-                }}
-              />
-            )}
             <SheetItem icon="trash-outline" label="Delete chat" danger onPress={() => { const c = menuChat!; setMenuChat(null); doDelete(c); }} />
           </Pressable>
         </Pressable>

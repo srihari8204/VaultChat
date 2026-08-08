@@ -26,6 +26,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as IntentLauncher from 'expo-intent-launcher';
+import { getAccessToken } from '../lib/api';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
@@ -317,7 +318,16 @@ export default function FileViewerScreen() {
     try {
       let localUri = fileUri;
       if (fileUri.startsWith('http')) {
-        const dl = await FileSystem.downloadAsync(fileUri, (FileSystem.cacheDirectory || '') + fileName);
+        // Attachment endpoints are authenticated: without the Bearer token this
+        // downloads a 401 body and then "opens" it as a PDF.
+        const token = await getAccessToken();
+        const safeName = (fileName || 'file').replace(/[/\\:*?"<>|]/g, '_');
+        const dl = await FileSystem.downloadAsync(
+          fileUri,
+          (FileSystem.cacheDirectory || '') + safeName,
+          token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
+        );
+        if (dl.status >= 400) throw new Error(`Download failed (${dl.status})`);
         localUri = dl.uri;
       }
       const mime = (params.mimeType as string | undefined) || undefined;

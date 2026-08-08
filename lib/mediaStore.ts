@@ -145,6 +145,12 @@ export async function getThumbUri(attachmentId: string): Promise<string | null> 
  * is configured over the cache dir. Returns the cache file:// uri.
  */
 export async function copyToCache(sourceUri: string, filename: string): Promise<string> {
+  // A remote URL is not a path. Passing one here used to reach RNFS.copyFile
+  // and surface as "ENOENT ... https://api…", which reads like a missing file
+  // rather than the type error it is. Fail with something that names the cause.
+  if (/^https?:\/\//i.test(sourceUri)) {
+    throw new Error('copyToCache needs a local file — download the attachment first (getMedia)');
+  }
   const safe = (filename || 'file').replace(/[/\\:*?"<>|]/g, '_');
   const dest = `${APP_CACHE}/${safe}`;
   const src = sourceUri.replace('file://', '');

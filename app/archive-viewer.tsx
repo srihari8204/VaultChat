@@ -27,6 +27,7 @@ import {
   totalUncompressed, type ArchiveEntry,
 } from '../lib/archive';
 import { formatSize } from '../lib/shelf';
+import { getAccessToken } from '../lib/api';
 
 export default function ArchiveViewerScreen() {
   const router = useRouter();
@@ -51,7 +52,17 @@ export default function ArchiveViewerScreen() {
       try {
         let local = fileUri;
         if (fileUri.startsWith('http')) {
-          const dl = await FileSystem.downloadAsync(fileUri, (FileSystem.cacheDirectory || '') + archiveName);
+          // Authenticated endpoint — without the token this downloads a 401
+          // body and fflate then reports "invalid zip", which points at the
+          // archive rather than at the missing credential.
+          const token = await getAccessToken();
+          const safeName = (archiveName || 'archive.zip').replace(/[/\\:*?"<>|]/g, '_');
+          const dl = await FileSystem.downloadAsync(
+            fileUri,
+            (FileSystem.cacheDirectory || '') + safeName,
+            token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
+          );
+          if (dl.status >= 400) throw new Error(`Could not download the archive (${dl.status})`);
           local = dl.uri;
         }
         const b64 = await FileSystem.readAsStringAsync(local, { encoding: FileSystem.EncodingType.Base64 });

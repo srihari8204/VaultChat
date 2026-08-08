@@ -371,7 +371,16 @@ export function FileBubble({
       // Persistent local copy (downloaded once). Survives "Clear cache" AND the
       // server's post-delivery purge. Encrypted files arrive decrypted via
       // resolvedUri; everything else resolves through the persistent media store.
-      const localUri = resolvedUri?.uri ?? await getMedia(attachmentId, { kind: 'file', isMine, mime, filename, encrypted });
+      // resolvedUri is the RENDER source and may legitimately be a REMOTE url
+      // (attachmentUrl + auth headers, used by <Image>). Handing that to the
+      // file layer below fails with "ENOENT ... https://…", because a URL is
+      // not a path. Only take it when it is genuinely local; otherwise go
+      // through getMedia, which downloads with the Authorization header and
+      // returns a file:// path.
+      const cached = resolvedUri?.uri;
+      const localUri = cached && /^(file:\/\/|\/)/.test(cached)
+        ? cached
+        : await getMedia(attachmentId, { kind: 'file', isMine, mime, filename, encrypted });
       // Copy into the app cache so the OS FileProvider can hand the file to
       // another app (the provider is configured over the cache dir).
       const openUri = await copyToCache(localUri, filename || `file-${attachmentId}`);
