@@ -134,7 +134,12 @@ export async function openCallOffer(
     }
     const cipher = gcmCipher(unb64(keyB64));
     return { cipher, offer: cipher.open(offerObj.p) };
-  } catch {
+  } catch (err) {
+    // This is the ONLY record of why a call failed to set up. Without it the
+    // user sees "Secure call setup failed" and the logs say nothing at all,
+    // which is exactly the dead end this reached in testing. No key material
+    // and no SDP is logged — only the peer and the error.
+    console.warn('[call] openCallOffer failed for peer', peerId, '—', (err as any)?.message ?? err);
     // Dead/stale session (e.g. this device reinstalled after the caller last
     // ratcheted). Drop it so the NEXT call or message re-keys via X3DH.
     try {

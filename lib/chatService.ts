@@ -194,7 +194,7 @@ export async function encryptForChat(chatId: string, plaintext: string): Promise
       const g = await import('../services/crypto/groupSession.rn');
       return await g.groupEncryptMessage(chatId, plaintext);
     } catch (err) {
-      if (__DEV__) console.warn('[e2ee] group encrypt fell back to plaintext:', (err as any)?.message);
+      console.warn('[e2ee] group encrypt fell back to plaintext:', (err as any)?.message);
       return plaintext;
     }
   }
@@ -227,7 +227,7 @@ export async function encryptForChat(chatId: string, plaintext: string): Promise
       try {
         const e2ee = await import('../services/crypto/e2eeSession.rn');
         await e2ee.e2eeResetSession(peerId);
-        if (__DEV__) console.warn('[e2ee] AUTO-RESET outbound session for peer', peerId, '— retry re-handshakes');
+        console.warn('[e2ee] AUTO-RESET outbound session for peer', peerId, '— retry re-handshakes');
       } catch {}
     }
     // STRICT: never silently send plaintext. Throwing surfaces a failed/retry
@@ -270,7 +270,7 @@ export async function decryptFromChat(
       if (!g.isGroupEnvelope(ciphertext)) return ciphertext;
       return await g.groupDecryptMessage(chatId, senderId, messageId ?? 0, ciphertext);
     } catch (err) {
-      if (__DEV__) console.warn('[e2ee] group decrypt failed:', (err as any)?.message);
+      console.warn('[e2ee] group decrypt failed:', (err as any)?.message);
       return '🔒 unable to decrypt';
     }
   }
@@ -314,13 +314,13 @@ const AUTO_RECOVER_AFTER = 2;
 async function maybeAutoRecoverSession(peerId: string, errMsg: string): Promise<void> {
   const n = (_decryptFailStreak.get(peerId) ?? 0) + 1;
   _decryptFailStreak.set(peerId, n);
-  if (__DEV__) console.warn(`[e2ee] decrypt failed (${n}/${AUTO_RECOVER_AFTER}):`, errMsg);
+  console.warn(`[e2ee] decrypt failed (${n}/${AUTO_RECOVER_AFTER}):`, errMsg);
   if (n < AUTO_RECOVER_AFTER) return;
   _decryptFailStreak.delete(peerId);
   try {
     const e2ee = await import('../services/crypto/e2eeSession.rn');
     await e2ee.e2eeResetSession(peerId);   // drop dead ratchet; MY next outbound re-keys → peer self-heals
-    if (__DEV__) console.warn('[e2ee] AUTO-RESET dead session for peer', peerId, '— re-handshakes on next message');
+    console.warn('[e2ee] AUTO-RESET dead session for peer', peerId, '— re-handshakes on next message');
     // Stage 2: I'm a PASSIVE reader that can't decrypt this peer — resetting my
     // own session only fixes my OUTbound. Ask the peer to reset too, so its next
     // message re-runs X3DH and I can finally decrypt (bidirectional heal without
@@ -350,7 +350,7 @@ export async function handleRekeyRequest(fromPeerId: string): Promise<void> {
   try {
     const e2ee = await import('../services/crypto/e2eeSession.rn');
     await e2ee.e2eeResetSession(fromPeerId);
-    if (__DEV__) console.warn('[e2ee] peer requested re-key; reset session for', fromPeerId);
+    console.warn('[e2ee] peer requested re-key; reset session for', fromPeerId);
   } catch {}
 }
 
