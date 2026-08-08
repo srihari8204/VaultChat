@@ -391,12 +391,57 @@ export async function hydrateMessages(
     }
     const cached = knownPlain?.get(m.id);
     if (cached != null && !looksEncrypted(cached)) { out[i] = finish(m, cached); continue; }
-    const plain = await decryptFromChat(chatId, (m as any).senderId ?? '', c, m.id);
+
+    // NEVER attempt to decrypt our OWN message.
+    //
+    // A Double Ratchet ciphertext cannot be opened by the party that produced
+    // it — the sending and receiving chains are different keys. So this was
+    // guaranteed to fail whenever the own-plaintext cache missed (reinstall,
+    // cleared cache, or the server echoing the message back before the cache
+    // write landed), and the sender saw "unable to decrypt" on their own text.
+    //
+    // Worse, that guaranteed failure fed the auto-recovery streak, which after
+    // two of them RESET a perfectly healthy session with the peer — so a
+    // sender-side display bug could break the receiver's decryption. Skipping
+    // is both the correct render and the fix for that cascade.
+    const senderId = (m as any).senderId ?? '';
+    if (senderId && senderId === (await myUserId())) {
+      const own = await readOwnPlaintext(chatId, m.id);
+      if (own != null) out[i] = finish(m, own);
+      // No cached copy → leave the envelope as-is. The bubble renders its
+      // "can't be shown on this device" state, which is the truth: nothing is
+      // wrong with the encryption, we simply do not hold the plaintext.
+      continue;
+    }
+
+    const plain = await decryptFromChat(chatId, senderId, c, m.id);
     if (plain && !looksEncrypted(plain) && plain !== '🔒 unable to decrypt') {
       out[i] = finish(m, plain);
     }
   }
   return out;
+}
+
+// Our own user id, cached. hydrateMessages asks per message, so this must not
+// hit storage every time; the value cannot change without a re-login, which
+// clears the module anyway.
+let _meId: string | null = null;
+async function myUserId(): Promise<string> {
+  if (_meId) return _meId;
+  try {
+    const { getCachedUser } = await import('./api');
+    _meId = String((await getCachedUser())?.id ?? '');
+  } catch { _meId = ''; }
+  return _meId;
+}
+
+/** Plaintext of an own-sent message from the local store, or null. */
+async function readOwnPlaintext(chatId: string, messageId: number): Promise<string | null> {
+  if (!E2EE_ENABLED || !messageId || messageId <= 0) return null;
+  try {
+    const e2ee = await import('../services/crypto/e2eeSession.rn');
+    return await e2ee.e2eeGetCached(chatId, messageId);
+  } catch { return null; }
 }
 
 // Cache an own-sent message's plaintext once the server assigns its id, so the
