@@ -57,8 +57,11 @@ services:
       DB_PASS: ${DB_PASS:-vaultchat_dev}
       # P2.1: REDIS_ADAPTER=1 turns on the Socket.IO Redis adapter + Redis
       # presence/rosters (cluster.go) so go-api can scale past one replica.
-      # Default off — single-node in-process fan-out, the pre-P2 behavior.
-      REDIS_ADAPTER: ${REDIS_ADAPTER:-0}
+      # On by default (SCALEOUT.md canary step 2) — single-node behavior must be
+      # identical, and it removes the flag-flip from the moment you actually
+      # need a second replica. Rollback: REDIS_ADAPTER=0 in .env, restart.
+      # Redis unreachable ⇒ every helper fails open to the local maps anyway.
+      REDIS_ADAPTER: ${REDIS_ADAPTER:-1}
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       REDIS_PASS: ""
