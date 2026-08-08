@@ -1,0 +1,94 @@
+// lib/call/mode.selftest.ts — run: npx tsx lib/call/mode.selftest.ts
+//
+// This module decides whether a call is peer-to-peer or server-routed, and that
+// decision carries a SECURITY consequence: mesh keeps 1:1 end-to-end encrypted
+// (D-1), the SFU does not. So "a small call must never silently become an SFU
+// call" is tested here as an invariant, not left as an intention.
+//
+// The other invariant worth pinning: an audience member must not be able to
+// publish. The media server enforces it, but the UI has to agree — offering a
+// mic button the SFU will refuse is a bug the user experiences as breakage.
+
+import {
+  BROADCAST_MAX, BROADCAST_MAX_PUBLISHERS, MAX_RENDERED_TILES, MESH_MAX, SFU_MAX,
+  canJoin, canPublish, capacityFor, publisherSlotsLeft, simulcastLayers, tilesToRender,
+  topologyFor,
+} from './mode';
+
+let failures = 0;
+function check(name: string, ok: boolean, detail?: string) {
+  if (!ok) failures++;
+  console.log(`  ${ok ? '✓' : '✗'} ${name}${ok || !detail ? '' : `  (${detail})`}`);
+}
+function eq(name: string, actual: unknown, expected: unknown) {
+  const ok = JSON.stringify(actual) === JSON.stringify(expected);
+  check(name, ok, ok ? undefined : `got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)}`);
+}
+const topo = (participants: number, o: Record<string, unknown> = {}) =>
+  topologyFor({ participants, ...o });
+
+console.log('\nCall topology self-test\n');
+
+// ── the security-relevant one ──────────────────────────────────────────
+console.log('small calls stay peer-to-peer (D-1: 1:1 must remain E2EE):');
+eq('a 1:1 call is mesh', topo(2), 'mesh');
+eq('3 people is mesh', topo(3), 'mesh');
+eq('exactly MESH_MAX is still mesh', topo(MESH_MAX), 'mesh');
+check('no participant count at or below the mesh cap ever yields sfu',
+  Array.from({ length: MESH_MAX }, (_, i) => topo(i + 1)).every(t => t === 'mesh'));
+
+console.log('\nbeyond the mesh cap, the SFU takes over:');
+eq('one past the cap switches to sfu', topo(MESH_MAX + 1), 'sfu');
+eq('64 is sfu', topo(64), 'sfu');
+eq('an unavailable SFU degrades to mesh rather than failing',
+  topo(20, { sfuAvailable: false }), 'mesh');
+
+console.log('\nbroadcast is chosen, never inferred:');
+eq('a 2-person broadcast is still a broadcast', topo(2, { isBroadcast: true }), 'broadcast');
+eq('a 500-person broadcast is a broadcast', topo(500, { isBroadcast: true }), 'broadcast');
+check('a large ORDINARY call is never silently a broadcast', topo(500) === 'sfu');
+
+// ── capacity ───────────────────────────────────────────────────────────
+console.log('\ncapacity:');
+eq('mesh capacity', capacityFor('mesh'), MESH_MAX);
+eq('sfu capacity is the 64 target', capacityFor('sfu'), SFU_MAX);
+eq('broadcast capacity', capacityFor('broadcast'), BROADCAST_MAX);
+check('a full mesh refuses another joiner', !canJoin('mesh', MESH_MAX));
+check('a mesh with room accepts', canJoin('mesh', MESH_MAX - 1));
+check('the 64th person can join an SFU call', canJoin('sfu', 63));
+check('the 65th cannot', !canJoin('sfu', 64));
+
+// ── publish rights ─────────────────────────────────────────────────────
+console.log('\npublish rights:');
+check('everyone may publish in mesh', (['host', 'cohost', 'speaker', 'audience'] as const).every(r => canPublish('mesh', r)));
+check('everyone may publish in an ordinary sfu call', (['host', 'cohost', 'speaker', 'audience'] as const).every(r => canPublish('sfu', r)));
+check('an AUDIENCE member may NOT publish in a broadcast', !canPublish('broadcast', 'audience'));
+check('host, cohost and speaker may', (['host', 'cohost', 'speaker'] as const).every(r => canPublish('broadcast', r)));
+
+eq('publisher slots are capped in a broadcast', publisherSlotsLeft('broadcast', 0), BROADCAST_MAX_PUBLISHERS);
+eq('and run out', publisherSlotsLeft('broadcast', BROADCAST_MAX_PUBLISHERS), 0);
+check('never negative', publisherSlotsLeft('broadcast', 99) === 0);
+check('an ordinary call has no publisher limit', publisherSlotsLeft('sfu', 50) === Infinity);
+
+// ── rendering: the device-side cost ────────────────────────────────────
+console.log('\nrendered tiles (device cost, not server cost):');
+eq('a 1:1 call renders one remote tile', tilesToRender('mesh', 2), 1);
+eq('a 5-person mesh renders four', tilesToRender('mesh', 5), 4);
+eq('a 64-person call does NOT render 63 tiles',
+  tilesToRender('sfu', 64), MAX_RENDERED_TILES);
+check('rendered tiles never exceed the cap at any size',
+  [6, 20, 64, 500].every(n => tilesToRender('sfu', n) <= MAX_RENDERED_TILES));
+eq('a broadcast renders only its publishers', tilesToRender('broadcast', 1000, 3), 3);
+eq('and never more than the publisher cap',
+  tilesToRender('broadcast', 1000, 99), BROADCAST_MAX_PUBLISHERS);
+
+// ── simulcast: the thermal decision ────────────────────────────────────
+console.log('\nsimulcast layers:');
+eq('mesh publishes one layer — nothing to select from', simulcastLayers('mesh', false), 1);
+eq('a capable device publishes three', simulcastLayers('sfu', false), 3);
+eq('a low-end device publishes two, not three', simulcastLayers('sfu', true), 2);
+check('a low-end device never publishes more than a capable one',
+  simulcastLayers('sfu', true) < simulcastLayers('sfu', false));
+
+console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all topology checks passed\n');
+process.exit(failures ? 1 : 0);
