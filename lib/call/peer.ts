@@ -31,12 +31,22 @@ export interface PeerHandlers {
   onFailed: () => void;
 }
 
+/**
+ * How long a peer may sit in `disconnected` before we treat it as dead.
+ * `disconnected` is a TRANSIENT state — a Wi-Fi→LTE handover, a lift, a tunnel,
+ * a few lost packets — and it recovers to `connected` on its own most of the
+ * time. Failing the call on it (as this file used to) drops a call on every
+ * blip. `failed` is the terminal state; this window covers the gap between them.
+ */
+export const DISCONNECT_GRACE_MS = 8_000;
+
 export class CallPeer {
   readonly uid: string;
   readonly pc: RTCPeerConnection;
   private cipher: CallCipher = plainCipher;
   private pendingIce: any[] = [];
   private closed = false;
+  private graceTimer: any = null;
 
   constructor(uid: string, iceServers: readonly IceServerLike[], h: PeerHandlers) {
     this.uid = uid;
@@ -56,8 +66,38 @@ export class CallPeer {
     (this.pc as any).onconnectionstatechange = () => {
       if (this.closed) return;
       const st = (this.pc as any).connectionState;
-      if (st === 'failed' || st === 'disconnected' || st === 'closed') h.onFailed();
+
+      // Recovered (or moved on) — cancel any pending grace timer.
+      if (st !== 'disconnected') this.clearGrace();
+
+      if (st === 'failed' || st === 'closed') { h.onFailed(); return; }
+
+      if (st === 'disconnected') {
+        // Give ICE a chance to re-establish before declaring the call dead. One
+        // ICE restart is attempted first: a path that will not recover on its
+        // own often recovers on a fresh candidate gather.
+        this.restartIce();
+        this.graceTimer = setTimeout(() => {
+          this.graceTimer = null;
+          if (this.closed) return;
+          if ((this.pc as any).connectionState === 'disconnected') h.onFailed();
+        }, DISCONNECT_GRACE_MS);
+      }
     };
+  }
+
+  private clearGrace(): void {
+    if (this.graceTimer) { clearTimeout(this.graceTimer); this.graceTimer = null; }
+  }
+
+  /**
+   * Ask ICE to gather fresh candidates on an existing connection. Best-effort:
+   * restartIce() is not present on every react-native-webrtc build, and the
+   * renegotiation it triggers is only useful for the offerer — a failure here
+   * just means we wait out the grace window instead.
+   */
+  private restartIce(): void {
+    try { (this.pc as any).restartIce?.(); } catch {}
   }
 
   setCipher(c: CallCipher): void { this.cipher = c; }
@@ -166,6 +206,7 @@ export class CallPeer {
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    this.clearGrace();
     this.pendingIce = [];
     // Drop handlers before closing so a close-triggered state change cannot
     // re-enter onFailed and end a call that is already being torn down.

@@ -31,6 +31,7 @@ import { CallControlButton } from '../components/call/CallControlButton';
 import { CallExtras } from '../components/call/CallExtras';
 import { CALL_ENGINE_V2 } from '../constants/flags';
 import * as engine from '../lib/call/engine';
+import { DISCONNECT_GRACE_MS } from '../lib/call/peer';
 import {
   useCallConnectedAt, useCallError, useCallFlag, useCallLocalUrl,
   useCallStatus, useParticipantStreamUrl,
@@ -334,6 +335,7 @@ function VideoCallLegacy() {
   const [peerSharing, setPeerSharing] = useState(false); // peer is sharing theirs
 
   const pcRef           = useRef<RTCPeerConnection | null>(null);
+  const disconnectGraceRef = useRef<any>(null);   // see onconnectionstatechange
   // E2EE signaling cipher (F6) — per-call key; plaintext passthrough for legacy peers.
   const cipherRef       = useRef<CallCipher>(plainCipher);
   const localStreamRef  = useRef<any>(null);
@@ -359,6 +361,7 @@ function VideoCallLegacy() {
     stopCallForeground();   // release the mic/camera foreground service + wake lock
     try { screenStreamRef.current?.getTracks?.().forEach((t: any) => t.stop()); } catch {}   // stop screen capture (#124)
     try { localStreamRef.current?.getTracks().forEach((t: any) => t.stop()); } catch {}
+    if (disconnectGraceRef.current) { clearTimeout(disconnectGraceRef.current); disconnectGraceRef.current = null; }
     try { pcRef.current?.close(); } catch {}
     pcRef.current = null;
     if (notify && peerUid) {
@@ -510,9 +513,22 @@ function VideoCallLegacy() {
           if (!event.candidate || !peerUid) return;
           s.emit('webrtc_ice', { to: peerUid, from: meIdRef.current, candidate: cipherRef.current.seal(event.candidate) });
         };
+        // `disconnected` is TRANSIENT and usually recovers — see the same guard
+        // in app/voicecall.tsx and lib/call/peer.ts. Only failed/closed end it.
         (pc as any).onconnectionstatechange = () => {
           const st = (pc as any).connectionState;
-          if (st === 'failed' || st === 'disconnected' || st === 'closed') endCall(true);
+          if (st !== 'disconnected' && disconnectGraceRef.current) {
+            clearTimeout(disconnectGraceRef.current);
+            disconnectGraceRef.current = null;
+          }
+          if (st === 'failed' || st === 'closed') { endCall(true); return; }
+          if (st === 'disconnected' && !disconnectGraceRef.current) {
+            try { (pc as any).restartIce?.(); } catch {}
+            disconnectGraceRef.current = setTimeout(() => {
+              disconnectGraceRef.current = null;
+              if ((pc as any).connectionState === 'disconnected') endCall(true);
+            }, DISCONNECT_GRACE_MS);
+          }
         };
 
         if (isIncoming === 'true' && initialOffer) {

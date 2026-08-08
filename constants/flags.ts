@@ -117,17 +117,21 @@ export const VB_AUTO_MAX_BYTES = 2.5 * 1024 ** 3; // 2,684,354,560 bytes
 // each re-implemented getUserMedia, TURN fetch, peer connection, offer/answer/ICE,
 // the signalling cipher, audio routing, teardown and call logging.
 //
-// DEFAULT OFF — when off, the screens run their original code path unchanged, so
-// this ships dark and rollback is this one constant. The WIRE IS IDENTICAL either
-// way (same events, same payload fields, same re-send cadences, same E2EE
-// envelope), so an engine build and a legacy build call each other correctly and
-// the flag can be flipped per-release rather than per-fleet.
+// ON as of 2026-08-08 (owner-approved). The WIRE IS IDENTICAL either way (same
+// events, same payload fields, same re-send cadences, same E2EE envelope), so an
+// engine build and a legacy build call each other correctly and this can be
+// flipped per-release rather than per-fleet.
 //
-// DO NOT enable without a two-device pass on real hardware. WebRTC cannot be
-// validated any other way, and the acceptance gate is the OEM matrix in
-// CALLS_README.md: background audio, ring while KILLED, and lock-screen ring on
-// MIUI / ColorOS / Vivo / Honor / Samsung / stock Android.
-export const CALL_ENGINE_V2 = false;
+// ROLLBACK IS THIS ONE CONSTANT: set to false and the screens run their original
+// code path unchanged. The legacy bodies stay in the tree until the OEM matrix
+// below has passed on hardware — do not delete them yet.
+//
+// ⚠️ STILL OUTSTANDING: the hardware gate in CALLS_README.md has NOT been run.
+// WebRTC cannot be validated any other way. Before shipping a release with this
+// on, do a two-device pass covering: background audio, ring while the app is
+// KILLED, and lock-screen ring on MIUI / ColorOS / Vivo / Honor / Samsung /
+// stock Android.
+export const CALL_ENGINE_V2 = true;
 
 // VB_RELIABILITY_FIXES gates the relay-receive companions (UITE): a no-progress
 // watchdog (fails a stuck "Downloading 0%" transfer cleanly instead of forever)
