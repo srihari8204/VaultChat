@@ -12,14 +12,17 @@
 // server dedups — no duplicate message. (A re-upload can orphan one attachment;
 // the R2 lifecycle rule reaps it — see [[vaultbeam-p2p-hardening]].)
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import * as Crypto from 'expo-crypto';
 import * as FileSystem from 'expo-file-system/legacy';
 import { sendMediaMessage, type MediaType } from './sendMedia';
 import { type Message } from './chatService';
+import { queueList, queueReplace, queueMigrate } from './localDb';
 
-const STORAGE_KEY = 'vc_media_outbox_v1';
+const LEGACY_KEY = 'vc_media_outbox_v1';   // pre-SQLite AsyncStorage array
+// Whole-queue reads: the cap must stay far above any real backlog, because
+// save() replaces the queue with exactly what load() returned.
+const READ_CAP   = 10_000;
 const OUTBOX_DIR = (FileSystem as any).documentDirectory + 'outbox/';
 const BACKOFF_MS = [1_000, 3_000, 8_000, 20_000, 45_000, 60_000];
 const PERIODIC_MS = 30_000;
@@ -60,10 +63,14 @@ export function on<K extends keyof Events>(e: K, fn: (d: Events[K]) => void): ()
 }
 
 // ── storage ──
+// SQLite-backed (localDb `queues`), sealed at rest with the cache DEK — the
+// caption and filename of an unsent photo no longer wait in the clear.
 async function load(): Promise<MediaOutboxItem[]> {
-  try { const raw = await AsyncStorage.getItem(STORAGE_KEY); const p = raw ? JSON.parse(raw) : []; return Array.isArray(p) ? p : []; } catch { return []; }
+  try { return await queueList<MediaOutboxItem>('media', READ_CAP); } catch { return []; }
 }
-async function save(q: MediaOutboxItem[]): Promise<void> { try { await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(q)); } catch {} }
+async function save(q: MediaOutboxItem[]): Promise<void> {
+  try { await queueReplace('media', q.map(m => ({ id: m.tempId, item: m, createdAt: m.createdAt, tag: m.chatId }))); } catch {}
+}
 
 const inFlight = new Set<string>();
 const aborters = new Map<string, AbortController>();
@@ -180,6 +187,9 @@ let online = true;   // P1.4: track connectivity so the periodic safety-net can 
 export function initMediaOutbox(): void {
   if (armed) return;
   armed = true;
+  // One-time lift of an older build's AsyncStorage queue (no-op afterwards).
+  const migrated = queueMigrate('media', LEGACY_KEY, (m: MediaOutboxItem) => m.tempId,
+    (m: MediaOutboxItem) => m.createdAt, (m: MediaOutboxItem) => m.chatId).catch(() => 0);
   NetInfo.addEventListener(s => {
     online = !!(s.isConnected && s.isInternetReachable !== false);
     if (online) flush().catch(() => {});
@@ -188,7 +198,7 @@ export function initMediaOutbox(): void {
   // we're offline (the reconnect listener above flushes as soon as we're back),
   // so a backgrounded, offline device isn't woken every PERIODIC_MS for nothing.
   setInterval(() => { if (online) flush().catch(() => {}); }, PERIODIC_MS);
-  flush().catch(() => {});
+  migrated.then(() => flush()).catch(() => {});
 }
 
 export default {};

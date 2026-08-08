@@ -6,9 +6,8 @@
 // live socket stream. All applies are idempotent (upsert by message id), so
 // running alongside live events can't dup or reorder.
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api } from './api';
-import { getGlobalSyncCursor, cacheMessages } from './localDb';
+import { getGlobalSyncCursor, cacheMessages, getMeta, setMeta } from './localDb';
 import { hydrateMessages, type Message } from './chatService';
 import { markDeliveredDurable } from './receipts';
 import { notifyBatch } from './messageNotifications';
@@ -16,7 +15,9 @@ import { onConnectionState } from './socket';
 
 // Timestamp cursor for edits/deletes (they mutate a row in place, so the id
 // cursor can't see them). Seeded on the first catch-up from the server's clock;
-// afterwards we pull only mutations newer than this.
+// afterwards we pull only mutations newer than this. Lives in localDb's kv
+// table next to the id cursor it pairs with, so wiping the cache on logout
+// can't leave a stale mutation cursor pointing past rows we no longer have.
 const MUT_KEY = 'vc_mutated_since_v1';
 
 // Re-scan the last few ids each reconnect so a message that committed just after
@@ -69,7 +70,7 @@ export async function catchUp(): Promise<number> {
   try {
     let since = Math.max(0, (await getGlobalSyncCursor()) - LOOKBACK);
     const sinceOrig = since;   // mutation pages keep the original id window
-    const mutatedSince = await AsyncStorage.getItem(MUT_KEY);   // null on first-ever sync
+    const mutatedSince = await getMeta(MUT_KEY);   // null on first-ever sync
     for (let guard = 0; guard < MAX_PAGES; guard++) {
       // Ask for mutations only on the FIRST page (they're time-, not id-paginated).
       const mutParam = (guard === 0 && mutatedSince) ? `&mutatedSince=${encodeURIComponent(mutatedSince)}` : '';
@@ -102,7 +103,7 @@ export async function catchUp(): Promise<number> {
         }
         // Advance the stored cursor to the server clock only AFTER the drain —
         // anything mutated during it is newer than serverTime and caught next run.
-        if (r?.serverTime) await AsyncStorage.setItem(MUT_KEY, r.serverTime).catch(() => {});
+        if (r?.serverTime) await setMeta(MUT_KEY, r.serverTime).catch(() => {});
       }
 
       const msgs = r?.messages ?? [];

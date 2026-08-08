@@ -11,6 +11,7 @@
 // syncChat() to fetch GET /chats/:id/messages?after=<cursor> and cacheMessages().
 
 import { open, type DB } from '@op-engineering/op-sqlite';
+import AsyncStorage from '@react-native-async-storage/async-storage';   // legacy queue migration only
 import * as SecureStore from 'expo-secure-store';
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
@@ -145,6 +146,17 @@ export function getLocalDb(): Promise<LocalDb> {
           name            TEXT,
           updated_at      INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS queues (
+          q          TEXT NOT NULL,
+          id         TEXT NOT NULL,
+          tag        TEXT,
+          data       TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (q, id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_queues_order ON queues(q, created_at, id);
+        CREATE INDEX IF NOT EXISTS idx_queues_tag ON queues(q, tag, created_at);
+        CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
         CREATE INDEX IF NOT EXISTS idx_messages_preview
           ON messages(chat_id, id DESC)
           WHERE deleted_at IS NULL AND type <> 'reaction';
@@ -705,6 +717,138 @@ export async function pruneVbTransfers(keep = 200): Promise<void> {
        (SELECT transfer_id FROM vb_transfers ORDER BY updated_at DESC LIMIT ?)`, [keep]);
 }
 
+// ═══ Durable queues + kv ═══════════════════════════════════════════════
+//
+// One table backs every "must survive offline" queue: the text/edit/delete
+// outbox (messageQueue), media sends (mediaOutbox) and scheduled messages.
+// They previously each kept a JSON array in AsyncStorage, which meant (a) the
+// pending PLAINTEXT of an unsent message sat in the clear next to a sealed
+// message cache, and (b) every enqueue and every flush rewrote the whole array.
+// Here rows are sealed with the same cache DEK as `messages`, and each item is
+// one row you can insert or delete on its own.
+//
+// Locked cache (no DEK): decField hands back the still-sealed string, JSON.parse
+// fails, and queueList SKIPS the row rather than returning ciphertext a caller
+// would cheerfully encrypt again and send. The row stays put and drains after
+// unlock — the same "keep the clock running" behavior as being offline.
+
+export type QueueName = 'msg' | 'media' | 'sched';
+
+function unseal<T>(rows: any[]): T[] {
+  const out: T[] = [];
+  for (const r of rows) {
+    try { out.push(JSON.parse(decField(r.data)!)); } catch { /* sealed (locked) or corrupt — skip, keep the row */ }
+  }
+  return out;
+}
+
+/** Insert or update one queued item. `tag` is an opaque grouping key (the chat
+ *  id, for the message outboxes) stored UNSEALED so a per-chat read is an index
+ *  hit rather than a decrypt-everything scan — the same trade `messages.chat_id`
+ *  already makes. Never put content in it. */
+export async function queuePut(q: QueueName, id: string, item: any, createdAt?: number, tag?: string | null): Promise<void> {
+  const db = await getLocalDb();
+  await db.runAsync(
+    `INSERT INTO queues (q, id, tag, data, created_at) VALUES (?,?,?,?,?)
+     ON CONFLICT(q, id) DO UPDATE SET data = excluded.data, tag = excluded.tag`,
+    [q, id, tag ?? null, encField(JSON.stringify(item))!, createdAt ?? Date.now()],
+  );
+}
+
+// Ordering is (created_at, rowid), NOT (created_at, id): ids are client-side
+// temp keys that start with a RANDOM segment, so tie-breaking on them would
+// shuffle two messages enqueued in the same millisecond — visible as a chat
+// where two quick sends land out of order. rowid is insertion order, and
+// queuePut's upsert keeps a row's original rowid across retries.
+const ORDER = 'ORDER BY created_at, rowid';
+
+/** Oldest-first items. `limit` bounds how much a single flush pass pulls into
+ *  memory — an account that spent a week offline drains over several passes
+ *  instead of materializing the whole backlog at once. `offset` lets a caller
+ *  step past a page that is wedged (see messageQueue's flush rotation). */
+export async function queueList<T = any>(q: QueueName, limit = 200, offset = 0): Promise<T[]> {
+  const db = await getLocalDb();
+  return unseal<T>(await db.getAllAsync(
+    `SELECT data FROM queues WHERE q = ? ${ORDER} LIMIT ? OFFSET ?`, [q, limit, offset]));
+}
+
+/** Oldest-first items carrying `tag`. */
+export async function queueListByTag<T = any>(q: QueueName, tag: string, limit = 500): Promise<T[]> {
+  const db = await getLocalDb();
+  return unseal<T>(await db.getAllAsync(
+    `SELECT data FROM queues WHERE q = ? AND tag = ? ${ORDER} LIMIT ?`, [q, tag, limit]));
+}
+
+/** One item by id, wherever it sits in the queue. */
+export async function queueGet<T = any>(q: QueueName, id: string): Promise<T | null> {
+  const db = await getLocalDb();
+  const r = await db.getFirstAsync(`SELECT data FROM queues WHERE q = ? AND id = ?`, [q, id]);
+  return r ? (unseal<T>([r])[0] ?? null) : null;
+}
+
+export async function queueDelete(q: QueueName, id: string): Promise<void> {
+  const db = await getLocalDb();
+  await db.runAsync(`DELETE FROM queues WHERE q = ? AND id = ?`, [q, id]);
+}
+
+export async function queueCount(q: QueueName): Promise<number> {
+  const db = await getLocalDb();
+  const r = await db.getFirstAsync(`SELECT COUNT(*) AS n FROM queues WHERE q = ?`, [q]);
+  return Number(r?.n ?? 0);
+}
+
+/** Replace a queue's whole contents in one transaction. For the low-frequency
+ *  queues whose call sites already think in whole arrays (media, scheduled).
+ *  ponytail: O(n) per write — fine at these volumes; use queuePut/queueDelete
+ *  per item if one of them ever gets hot. */
+export async function queueReplace(
+  q: QueueName, items: Array<{ id: string; item: any; createdAt?: number; tag?: string | null }>,
+): Promise<void> {
+  const db = await getLocalDb();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(`DELETE FROM queues WHERE q = ?`, [q]);
+    for (const it of items) {
+      await db.runAsync(`INSERT OR REPLACE INTO queues (q, id, tag, data, created_at) VALUES (?,?,?,?,?)`,
+        [q, it.id, it.tag ?? null, encField(JSON.stringify(it.item))!, it.createdAt ?? Date.now()]);
+    }
+  });
+}
+
+/** One-time lift of a legacy AsyncStorage JSON-array queue into SQLite. Removes
+ *  the old key only after the rows are committed, so a crash mid-migration
+ *  just replays it (queuePut is an upsert — re-running can't duplicate). */
+export async function queueMigrate(
+  q: QueueName, storageKey: string,
+  idOf: (item: any) => string, createdAtOf?: (item: any) => number, tagOf?: (item: any) => string | null,
+): Promise<number> {
+  try {
+    const raw = await AsyncStorage.getItem(storageKey);
+    if (!raw) return 0;
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr)) {
+      for (const item of arr) {
+        const id = idOf(item);
+        if (id) await queuePut(q, id, item, createdAtOf?.(item), tagOf?.(item));
+      }
+    }
+    await AsyncStorage.removeItem(storageKey);
+    return Array.isArray(arr) ? arr.length : 0;
+  } catch { return 0; }
+}
+
+/** Small named values that belong with the cache they describe (sync cursors,
+ *  etc.) rather than in AsyncStorage. Not sealed — callers store opaque
+ *  cursors here, never content. */
+export async function getMeta(k: string): Promise<string | null> {
+  const db = await getLocalDb();
+  const r = await db.getFirstAsync(`SELECT v FROM kv WHERE k = ?`, [k]);
+  return r?.v ?? null;
+}
+export async function setMeta(k: string, v: string): Promise<void> {
+  const db = await getLocalDb();
+  await db.runAsync(`INSERT INTO kv (k, v) VALUES (?,?) ON CONFLICT(k) DO UPDATE SET v = excluded.v`, [k, v]);
+}
+
 /** Dump all local rows for an encrypted backup. Sealed fields are decrypted here
  *  so the backup is portable across installs (it gets re-sealed under the backup
  *  layer's own key by backupService, and re-encrypted under the local DEK on
@@ -743,7 +887,7 @@ export async function importAll(data: { messages?: any[]; chats?: any[] }): Prom
 /** Wipe everything (e.g. on logout / account switch). */
 export async function clearLocalDb(): Promise<void> {
   const db = await getLocalDb();
-  await db.execAsync(`DELETE FROM messages; DELETE FROM chats; DELETE FROM sync_cursor;`);
+  await db.execAsync(`DELETE FROM messages; DELETE FROM chats; DELETE FROM sync_cursor; DELETE FROM queues; DELETE FROM kv;`);
   // #32 Phase B: wipe the sealed DEK envelope too, so no orphaned key survives an
   // account switch (rows are gone, so the key has nothing left to protect).
   try { await clearCacheKeyStore(); } catch {}

@@ -6,10 +6,11 @@
 // otherwise, exactly like localDb). It is encrypted for the recipient only at
 // SEND time (chatService.encryptForChat), so forward secrecy is preserved.
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { encField, decField } from './cacheCrypto';
+import { queueList, queueReplace, queueMigrate } from './localDb';
 
-const KEY = 'scheduled_queue_v1';
+const LEGACY_KEY = 'scheduled_queue_v1';   // pre-SQLite AsyncStorage array
+const READ_CAP   = 10_000;                 // writeAll replaces what readAll returned
 
 export type ScheduledItem = {
   id: string;
@@ -24,12 +25,18 @@ export type ScheduledItem = {
 
 type StoredItem = Omit<ScheduledItem, 'content'> & { content: string | null };
 
+// Rows live in localDb's `queues` table. Content is sealed twice over — once by
+// toStored/fromStored below (unchanged), once by the queue row itself — which
+// costs nothing worth measuring at these volumes and keeps one storage path.
+let migrated: Promise<unknown> | null = null;
 async function readAll(): Promise<StoredItem[]> {
-  try { const raw = await AsyncStorage.getItem(KEY); return raw ? JSON.parse(raw) : []; }
-  catch { return []; }
+  migrated ??= queueMigrate('sched', LEGACY_KEY, (s: StoredItem) => s.id,
+    (s: StoredItem) => s.createdAt, (s: StoredItem) => s.chatId).catch(() => 0);
+  await migrated;
+  try { return await queueList<StoredItem>('sched', READ_CAP); } catch { return []; }
 }
 async function writeAll(items: StoredItem[]): Promise<void> {
-  try { await AsyncStorage.setItem(KEY, JSON.stringify(items)); } catch {}
+  try { await queueReplace('sched', items.map(s => ({ id: s.id, item: s, createdAt: s.createdAt, tag: s.chatId }))); } catch {}
 }
 const toStored = (it: ScheduledItem): StoredItem => ({ ...it, content: encField(it.content) });
 const fromStored = (s: StoredItem): ScheduledItem => ({ ...s, content: decField(s.content) ?? '' });
