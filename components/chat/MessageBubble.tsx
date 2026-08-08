@@ -925,13 +925,17 @@ function MessageBubble({
   // read implies delivered, so fold read into the delivered test — a dropped
   // `message_delivered` event must not strand a since-read message at 'sent'.
   let tickState: 'pending' | 'sent' | 'delivered' | 'read' | null = null;
-  if (isMine && msg.id > 0 && !msg.deletedAt) {
+  // The pending test must come BEFORE the id check. A queued message has no
+  // server id yet (id is 0 until the POST is acked), so gating the whole block
+  // on `msg.id > 0` meant an offline message showed no status icon at all —
+  // just the "sending…" caption, which reads as stuck rather than waiting.
+  if (isMine && !msg.deletedAt && (msg._state === 'pending' || msg._state === 'failed')) {
+    tickState = msg._state === 'pending' ? 'pending' : null;
+  } else if (isMine && msg.id > 0 && !msg.deletedAt) {
     const recipients = otherMembers.filter(
       m => !m.leftAt && (!m.joinedAt || m.joinedAt <= msg.createdAt),
     );
-    if (msg._state === 'pending' || msg._state === 'failed') {
-      tickState = msg._state === 'pending' ? 'pending' : null;
-    } else if (recipients.length === 0) {
+    if (recipients.length === 0) {
       tickState = 'sent';
     } else if (recipients.every(m => (m.lastReadMessageId ?? 0) >= msg.id)) {
       tickState = 'read';
@@ -1335,7 +1339,6 @@ function MessageBubble({
         <Text style={[S.bubbleMeta, (!isMine || isImage || isVideo || isGif) && { color: colors.bubbleMetaIn }, (isImage || isVideo || isGif) && { paddingHorizontal: 4 }]}>
           {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           {msg.editedAt ? ' · edited' : ''}
-          {msg._state === 'pending' ? ' · sending…' : ''}
           {msg._state === 'failed'  ? ' · failed (tap to retry)' : ''}
           {msg.expiresAt && (
             <Text style={S.ttlBadge}> · ⏱️ {formatTtlRemaining(msg.expiresAt)}</Text>

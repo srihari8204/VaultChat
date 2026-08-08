@@ -175,7 +175,12 @@ function addPeer(s: Session, uid: string, name: string, iceServers: any[]): Call
   });
   s.peers.set(uid, peer);
   peer.addLocalTracks(s.localStream);
-  if (s.kind === 'video') startQualityLoop(peer);
+  // Runs for AUDIO calls too. It used to be video-only, which meant low-data
+  // mode did nothing on a voice call — the Opus ceiling is applied by this
+  // loop, and a voice call is exactly where a data cap matters most. On an
+  // audio call the tier pins to 'audioOnly' (no video track to shrink) and the
+  // loop only manages the audio bitrate.
+  startQualityLoop(peer);
   return peer;
 }
 
