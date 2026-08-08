@@ -37,7 +37,8 @@
     "prod:check": "npm run lint && npm run typecheck && npm test",
     "prod:precheck": "node ./scripts/prod-precheck.js",
     "gradle": "node scripts/gradlew.js",
-    "build:android:apk:arm64": "node scripts/gradlew.js assembleRelease -PreactNativeArchitectures=arm64-v8a"
+    "build:android:apk:arm64": "node scripts/gradlew.js assembleRelease -PreactNativeArchitectures=arm64-v8a",
+    "test:reader": "tsx lib/reader.selftest.ts"
   },
   "dependencies": {
     "@dr.pogodin/react-native-fs": "^2.39.0",

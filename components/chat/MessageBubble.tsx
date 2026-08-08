@@ -60,6 +60,9 @@ import { useConnectionState } from '../../lib/socket';
 
 
 import { useS, idealText, HL, type DisplayMessage } from './chatStyles';
+import { useMemo } from 'react';
+import { BRAND_ACCENT } from '../../constants/theme';
+import { readStats } from '../../lib/reader';
 
 function colorMentions(body: string): any {
   if (!body || body.indexOf('@') === -1) return body;
@@ -759,6 +762,38 @@ function dayLabel(iso: string): string {
   if (isSameCalendarDay(iso, yest.toISOString())) return 'Yesterday';
   return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
 }
+/**
+ * "This message is easier as a page" — the Reader hand-off
+ * (docs/design/mobile/m18-reader-detect).
+ *
+ * Renders NOTHING for an ordinary message: a bubble is the right shape for
+ * almost everything, and an affordance under every message would be noise. It
+ * appears only past lib/reader's word threshold, where a bubble genuinely stops
+ * working. The already-decrypted text is handed to the Reader as a param, so no
+ * plaintext is persisted and the Reader never sees ciphertext.
+ */
+function ReaderAffordance({ text, title, author, at }: {
+  text: string; title: string; author: string; at?: string;
+}) {
+  const S = useS();
+  const router = useRouter();
+  const stats = useMemo(() => readStats(text), [text]);
+  if (!stats.longRead) return null;
+  return (
+    <TouchableOpacity
+      style={S.readerChip}
+      activeOpacity={0.75}
+      onPress={() => router.push({
+        pathname: '/reader',
+        params: { text, title, author, at: at ?? '' },
+      })}
+    >
+      <Ionicons name="book-outline" size={14} color={BRAND_ACCENT} />
+      <Text style={S.readerChipTxt}>Read as page · {stats.minutes} min</Text>
+    </TouchableOpacity>
+  );
+}
+
 export function DateChip({ iso }: { iso: string }) {
   const S = useS();
   return (
@@ -1245,6 +1280,12 @@ function MessageBubble({
                 <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, bubbleTxtColor ? { color: bubbleTxtColor } : null]}>
                   {renderRichText(plain, highlight)}
                 </Text>
+                <ReaderAffordance
+                  text={plain}
+                  title={member?.name ? `${member.name}’s message` : 'Long message'}
+                  author={member?.name ?? ''}
+                  at={msg.createdAt}
+                />
                 {(() => {
                   // F5: prefer the sender-embedded E2EE preview (no fetch at
                   // all); legacy messages without one fall back to the old

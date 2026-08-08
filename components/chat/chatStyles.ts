@@ -142,6 +142,14 @@ export const makeStyles = (c: Palette) => StyleSheet.create({
   bubbleSystemTxt:{ color: c.textDim, fontSize: 11, fontStyle: 'italic' },
   senderTag:     { color: c.textDim, fontSize: 11, fontWeight: '600', marginBottom: 2 },
   bubbleTxt:     { color: c.bubbleInText, fontSize: 15, lineHeight: 20 },
+  // Chat Reader hand-off, shown only under a long message (see ReaderAffordance).
+  readerChip:    {
+    flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
+    marginTop: 8, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 9,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: brandAlpha(0.45),
+    backgroundColor: brandAlpha(0.10),
+  },
+  readerChipTxt: { color: c.text, fontSize: 12, fontWeight: '600' },
   bubbleTxtMine: { color: c.bubbleOutText },
   bubbleMeta:    { color: c.bubbleMetaOut, fontSize: 10, alignSelf: 'flex-end', marginTop: 2 },
   ttlBadge:      { color: '#FCD34D', fontSize: 10, fontWeight: '700' },
