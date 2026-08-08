@@ -39,7 +39,8 @@
     "gradle": "node scripts/gradlew.js",
     "build:android:apk:arm64": "node scripts/gradlew.js assembleRelease -PreactNativeArchitectures=arm64-v8a",
     "test:reader": "tsx lib/reader.selftest.ts",
-    "test:responsive": "tsx lib/responsive.selftest.ts"
+    "test:responsive": "tsx lib/responsive.selftest.ts",
+    "test:shelf": "tsx lib/shelf.selftest.ts"
   },
   "dependencies": {
     "@dr.pogodin/react-native-fs": "^2.39.0",

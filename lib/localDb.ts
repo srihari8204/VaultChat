@@ -539,6 +539,48 @@ export async function getAttachmentChatMap(): Promise<Record<string, string>> {
   return out;
 }
 
+/**
+ * Every attachment in the local cache, newest first — the Bookshelf's index
+ * (lib/shelf.ts, app/shelf.tsx).
+ *
+ * Derived from `messages` rather than a table of its own: an attachment IS a
+ * cached message carrying meta.attachmentId, so there is no second store to
+ * keep consistent, it works offline, and it is exactly as complete as the
+ * cache. Deleted messages are excluded — a file whose message was revoked must
+ * not reappear in a library view.
+ */
+export async function listAllAttachments(limit = 2000): Promise<Array<{
+  attachmentId: string; chatId: string; messageId: number; senderId: string | null;
+  filename: string; mime: string | null; size: number; createdAt: string;
+}>> {
+  const db = await getLocalDb();
+  const rows = await db.getAllAsync(
+    `SELECT id, chat_id, sender_id, meta, created_at FROM messages
+      WHERE meta IS NOT NULL AND deleted_at IS NULL
+      ORDER BY id DESC LIMIT ?`, [limit]);
+
+  const out: any[] = [];
+  const seen = new Set<string>();
+  for (const r of rows as any[]) {
+    let meta: any;
+    try { meta = JSON.parse(decField(r.meta) || ''); } catch { continue; }
+    const aid = meta?.attachmentId;
+    if (!aid || seen.has(String(aid))) continue;   // forwards reuse an id — list it once
+    seen.add(String(aid));
+    out.push({
+      attachmentId: String(aid),
+      chatId: r.chat_id,
+      messageId: Number(r.id),
+      senderId: r.sender_id ?? null,
+      filename: String(meta.filename ?? meta.name ?? 'file'),
+      mime: meta.mime ?? null,
+      size: Number(meta.size ?? 0),
+      createdAt: r.created_at ?? '',
+    });
+  }
+  return out;
+}
+
 /** Fetch specific cached messages by id (used to resolve reply quotes for
  *  messages that aren't in the currently-rendered page). */
 export async function getCachedMessagesByIds(chatId: string, ids: number[]): Promise<Message[]> {
