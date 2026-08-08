@@ -133,6 +133,16 @@
       "./plugins/withVaultView.js",
       "./plugins/withVaultShield.js",
       "expo-sqlite",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableProguardInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true,
+            "extraProguardRules": "# Keep the JS<->native bridge surfaces R8 cannot see through.\n-keep class com.facebook.react.bridge.** { *; }\n-keep class com.facebook.react.turbomodule.** { *; }\n-keep class com.facebook.jni.** { *; }\n-keepclassmembers class * { @com.facebook.react.bridge.ReactMethod <methods>; }\n\n# Native modules reached by reflection / JNI.\n-keep class com.swmansion.reanimated.** { *; }\n-keep class com.oney.WebRTCModule.** { *; }\n-keep class org.webrtc.** { *; }\n-keep class io.livekit.** { *; }\n-keep class com.margelo.quickcrypto.** { *; }\n-keep class com.op.sqlite.** { *; }\n-keep class expo.modules.** { *; }\n\n# Hermes + Sentry line numbers stay useful in crash reports.\n-keepattributes SourceFile,LineNumberTable,*Annotation*\n-keep class io.sentry.** { *; }"
+          }
+        }
+      ],
       "./plugins/withReleaseSigning.js"
     ],
     "extra": {
