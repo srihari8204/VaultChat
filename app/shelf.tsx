@@ -95,6 +95,7 @@ export default function ShelfScreen() {
 
   const open = useCallback((f: ShelfFile) => {
     // Reuse the viewers that already exist rather than adding a third one.
+    // media-viewer routes archives on to app/archive-viewer itself.
     router.push({
       pathname: '/media-viewer',
       params: {

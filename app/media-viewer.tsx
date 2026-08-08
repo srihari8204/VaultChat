@@ -36,6 +36,7 @@ const getFileType = (name) => {
   if (['mp3','wav','m4a','aac','ogg','flac','wma'].includes(ext)) return 'audio';
   if (['js','jsx','ts','tsx','py','java','c','cpp','go','rs','rb','php','swift','kt','dart','sh','bat','ps1','sql','html','css','json','xml','yaml','yml','md','txt','toml','ini','csv','log'].includes(ext)) return 'code';
   if (ext === 'pdf') return 'pdf';
+  if (['zip','rar','7z','tar','gz','bz2','xz'].includes(ext)) return 'archive';
   return 'unknown';
 };
 
@@ -285,6 +286,21 @@ export default function MediaViewerScreen() {
   };
 
   // PDF / UNKNOWN
+  // A zip is browsable, not just downloadable: app/archive-viewer lists its
+  // contents and extracts a single entry on tap, so reading one file out of an
+  // archive does not mean unpacking all of it onto the device.
+  const ArchiveCard = () => { useEffect(()=>{setLoading(false);},[]);
+    return (<View style={s.audioWrap}><View style={s.audioCard}><Ionicons name="file-tray-full-outline" size={48} color="#1F2937" /><Text style={s.audioName}>{fileName}</Text><Text style={s.audioMeta}>{formatSize(fileSize)}</Text>
+      <TouchableOpacity style={{marginTop:20,backgroundColor:C.accent,borderRadius:14,flexDirection:'row',gap:8,alignItems:'center',paddingVertical:14,paddingHorizontal:32}}
+        onPress={()=>router.push({pathname:'/archive-viewer',params:{uri:fileUri,filename:fileName}} as any)}>
+        <Ionicons name="folder-open-outline" size={16} color="#000" /><Text style={{color:'#000',fontSize:14,fontWeight:'800'}}>Browse contents</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={{marginTop:12,borderRadius:14,borderWidth:1,borderColor:'#4A9FFF55',paddingVertical:12,paddingHorizontal:28}} onPress={saveToDevice}>
+        <Text style={{color:'#4A9FFF',fontSize:13,fontWeight:'700'}}>Save to device</Text>
+      </TouchableOpacity>
+    </View></View>);
+  };
+
   const GenericViewer = () => { useEffect(()=>{setLoading(false);},[]);
     return (<View style={s.audioWrap}><View style={s.audioCard}><Ionicons name="document-outline" size={48} color="#1F2937" /><Text style={s.audioName}>{fileName}</Text><Text style={s.audioMeta}>{formatSize(fileSize)}</Text>
       <TouchableOpacity style={{marginTop:20,backgroundColor:C.accent,borderRadius:14,flexDirection:'row',gap:8,alignItems:'center',paddingVertical:14,paddingHorizontal:32}} onPress={saveToDevice}><Ionicons name="download-outline" size={16} color="#000" /><Text style={{color:'#000',fontSize:14,fontWeight:'800'}}>Download & Open</Text></TouchableOpacity>
@@ -339,6 +355,7 @@ export default function MediaViewerScreen() {
               {fileType === 'video' && <VideoPlayer />}
               {fileType === 'audio' && <AudioPlayer />}
               {fileType === 'code' && <CodeViewer />}
+              {fileType === 'archive' && <ArchiveCard />}
               {(fileType === 'pdf' || fileType === 'unknown') && <GenericViewer />}
             </>
           )

@@ -440,6 +440,7 @@ function RootLayout() {
         <Stack.Screen name="reader" options={{ presentation: 'modal' }} />
         <Stack.Screen name="split" />
         <Stack.Screen name="shelf" />
+        <Stack.Screen name="archive-viewer" />
         <Stack.Screen name="video-player" />
         <Stack.Screen name="voice-speed" />
         <Stack.Screen name="slideshow" />
