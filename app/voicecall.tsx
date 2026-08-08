@@ -39,6 +39,7 @@ import { newCallCipher, openCallOffer, plainCipher, type CallCipher } from '../l
 import { CallTimer, elapsedSeconds } from '../components/call/CallTimer';
 import { CallControlButton } from '../components/call/CallControlButton';
 import { CallExtras } from '../components/call/CallExtras';
+import { CallEncryptionBadge } from '../components/call/CallEncryptionBadge';
 import { CALL_ENGINE_V2 } from '../constants/flags';
 import * as engine from '../lib/call/engine';
 import { DISCONNECT_GRACE_MS } from '../lib/call/peer';
@@ -128,6 +129,8 @@ function VoiceCallEngine() {
           ? <CallTimer style={S.status} startedAt={connectedAt} />
           : <Text style={S.status}>{statusText}</Text>}
         {error && <Text style={S.errorTxt}>{error}</Text>}
+        {/* D-1: a 1:1 call is peer-to-peer, so this claim is the strong one. */}
+        <CallEncryptionBadge protection="e2ee" />
       </View>
 
       {status === 'connected' && <CallExtras bottom={insets.bottom + 116} />}

@@ -26,6 +26,7 @@ import * as engine from '../lib/call/engine';
 import { Sheet, type SheetAction } from '../components/ui/Sheet';
 import { CallTimer } from '../components/call/CallTimer';
 import { CallExtras } from '../components/call/CallExtras';
+import { CallEncryptionBadge, protectionFor } from '../components/call/CallEncryptionBadge';
 import {
   useCallConnectedAt, useCallError, useCallFlag, useCallLocalUrl,
   useCallStatus, useCanModerate, useMyHandRaised, useParticipant,
@@ -163,6 +164,9 @@ function GroupCallEngine() {
         {status === 'connected'
           ? <CallTimer style={S.sub} startedAt={connectedAt} />
           : <Text style={S.sub}>{tiles} on call</Text>}
+        {/* D-1: derived from the live participant count, so a call that grows
+            past the mesh cap stops claiming a guarantee it no longer has. */}
+        <CallEncryptionBadge protection={protectionFor(tiles)} />
       </View>
 
       {error ? <Text style={S.err}>{error}</Text> : null}
@@ -397,6 +401,7 @@ function GroupCallLegacy() {
       <View style={S.topBar}>
         <Text style={S.title} numberOfLines={1}>{name || 'Group call'}</Text>
         <Text style={S.sub}>{tiles} on call</Text>
+        <CallEncryptionBadge protection={protectionFor(tiles)} />
       </View>
 
       {error ? <Text style={S.err}>{error}</Text> : null}

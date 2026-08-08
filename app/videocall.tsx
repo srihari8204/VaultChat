@@ -29,6 +29,7 @@ import { addCallLog } from '../lib/callLog';
 import { CallTimer, elapsedSeconds } from '../components/call/CallTimer';
 import { CallControlButton } from '../components/call/CallControlButton';
 import { CallExtras } from '../components/call/CallExtras';
+import { CallEncryptionBadge } from '../components/call/CallEncryptionBadge';
 import { CALL_ENGINE_V2 } from '../constants/flags';
 import * as engine from '../lib/call/engine';
 import { DISCONNECT_GRACE_MS } from '../lib/call/peer';
@@ -252,6 +253,8 @@ function VideoCallEngine() {
           ? <CallTimer style={S.status} startedAt={connectedAt} />
           : <Text style={S.status}>{statusText}</Text>}
         {error && <Text style={S.errorTxt}>{error}</Text>}
+        {/* D-1: 1:1 video is peer-to-peer. */}
+        <CallEncryptionBadge protection="e2ee" />
       </View>
 
       {(sharing || peerSharing) && (
@@ -725,6 +728,8 @@ function VideoCallLegacy() {
           ? <CallTimer style={S.status} startedAt={connectedAtRef.current} />
           : <Text style={S.status}>{statusText}</Text>}
         {error && <Text style={S.errorTxt}>{error}</Text>}
+        {/* D-1: 1:1 video is peer-to-peer. */}
+        <CallEncryptionBadge protection="e2ee" />
       </View>
 
       {/* Screen-share banner (#124). Mine takes precedence over the peer's —
