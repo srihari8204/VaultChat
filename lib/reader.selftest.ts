@@ -5,7 +5,7 @@
 // survives the transform is tested directly, not assumed.
 
 import {
-  countWords, readStats, formatStats, toBlocks, paginate,
+  countWords, readStats, formatStats, toBlocks, paginate, couldBeLongRead,
   MIN_READER_WORDS, WORDS_PER_PAGE,
 } from './reader';
 
@@ -37,6 +37,21 @@ eq('1,412 words -> 6 pages', long.pages, Math.ceil(1412 / WORDS_PER_PAGE));
 check('subtitle matches the design shape', /^\d+ min read · \d+ pages? · [\d,]+ words$/.test(formatStats(long)),
   formatStats(long));
 eq('empty text has no minutes and no pages', [readStats('').minutes, readStats('').pages], [0, 0]);
+
+// The chat list asks this of every text bubble, so it must be cheap AND must
+// never skip a genuine long read. A word needs at least one character plus a
+// separator, so MIN_READER_WORDS*2 characters is a floor no long read can be
+// under — asserted here rather than trusted.
+check('the cheap guard never skips a real long read',
+  Array.from({ length: 60 }, (_, i) => 'w '.repeat(MIN_READER_WORDS + i))
+    .every(t => couldBeLongRead(t)));
+check('the guard rejects an obviously short message', !couldBeLongRead('hello there'));
+check('the guard is safe on empty/null', !couldBeLongRead('') && !couldBeLongRead(null));
+check('guard and full count agree on the verdict, across sizes',
+  [0, 10, 100, 219, 220, 500, 1400].every(n => {
+    const t = 'word '.repeat(n);
+    return (couldBeLongRead(t) && readStats(t).longRead) === readStats(t).longRead;
+  }));
 
 // ── structure ──────────────────────────────────────────────────────────
 const doc = [

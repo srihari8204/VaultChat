@@ -33,6 +33,20 @@ export interface ReadStats {
 
 const WORD_RE = /[^\s]+/g;
 
+/**
+ * Cheap "could this possibly be a long read?" test, for the per-bubble check in
+ * the chat list.
+ *
+ * countWords allocates an array of every word, and the chip asks the question
+ * of EVERY text message on screen. A message cannot contain MIN_READER_WORDS
+ * words in fewer than that many characters (one letter plus a separator is the
+ * theoretical floor), so a length comparison rules out the overwhelming
+ * majority without touching the regex at all.
+ */
+export function couldBeLongRead(text: string | null | undefined): boolean {
+  return !!text && text.length >= MIN_READER_WORDS * 2;
+}
+
 /** Word count of the message body. Deliberately counts any run of non-space as
  *  one word, so CJK text (no spaces) under-counts rather than over-counts — a
  *  wrong "45 min read" is worse than not offering the Reader at all. */

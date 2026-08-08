@@ -351,6 +351,28 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [newSinceUp, setNewSinceUp] = useState(0);
   const atBottomRef = useRef(true);
+
+  /**
+   * Scroll handler — fires state ONLY on a transition.
+   *
+   * This used to call setShowScrollDown on every scroll event. At
+   * scrollEventThrottle={32} that is ~31 setState calls per second while the
+   * user drags, and every one of them re-renders this screen — which is the
+   * largest component in the app. React bails out when the value is unchanged,
+   * but reaching that bail-out still costs a scheduler pass per frame, on the
+   * exact frames that need to be smooth.
+   *
+   * The ref already tracked the position, so the transition test is free.
+   * Stable identity (useCallback) so FlatList is not handed a new prop on
+   * every parent render either.
+   */
+  const onListScroll = useCallback((e: any) => {
+    const up = e.nativeEvent.contentOffset.y > 280;  // inverted: y>0 = scrolled off newest
+    if (atBottomRef.current === !up) return;         // nothing changed → no render
+    atBottomRef.current = !up;
+    setShowScrollDown(up);
+    if (!up) setNewSinceUp(n => (n ? 0 : n));        // functional: no dep on newSinceUp
+  }, []);
   const [infoMsg, setInfoMsg] = useState<DisplayMessage | null>(null); // Message Info sheet
   const [liveLoc, setLiveLoc] = useState<{ userId: string; latitude: number; longitude: number; address?: string } | null>(null);
   const readDebounce = useRef<any>(null);
@@ -2305,18 +2327,18 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         }}
         onEndReached={onEndReached}
         onEndReachedThreshold={0.4}
-        onScroll={(e) => {
-          const up = e.nativeEvent.contentOffset.y > 280; // inverted: y>0 = scrolled off newest
-          atBottomRef.current = !up;
-          setShowScrollDown(up);
-          if (!up && newSinceUp) setNewSinceUp(0);
-        }}
+        onScroll={onListScroll}
         scrollEventThrottle={32}
         ListFooterComponent={loadingOlder ? <ActivityIndicator color={colors.primary} style={{ paddingVertical: 12 }} /> : null}
         removeClippedSubviews
-        maxToRenderPerBatch={10}
-        windowSize={11}
-        initialNumToRender={15}
+        // Tuned for heavy bubbles (media, reactions, replies): windowSize 11
+        // keeps ~11 screens of rows MOUNTED, which is a lot of live components
+        // to re-render on any parent state change. 7 still covers a fast fling
+        // without blanking, and cuts mounted rows by roughly a third.
+        maxToRenderPerBatch={8}
+        updateCellsBatchingPeriod={60}
+        windowSize={7}
+        initialNumToRender={12}
       />
 
       {/* Scroll-to-bottom FAB with new-message count (WhatsApp-style) */}

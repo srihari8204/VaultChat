@@ -62,7 +62,7 @@ import { useConnectionState } from '../../lib/socket';
 import { useS, idealText, HL, type DisplayMessage } from './chatStyles';
 import { useMemo } from 'react';
 import { BRAND_ACCENT } from '../../constants/theme';
-import { readStats } from '../../lib/reader';
+import { couldBeLongRead, readStats } from '../../lib/reader';
 
 function colorMentions(body: string): any {
   if (!body || body.indexOf('@') === -1) return body;
@@ -786,8 +786,10 @@ function ReaderAffordance({ text, title, author, at }: {
 }) {
   const S = useS();
   const router = useRouter();
-  const stats = useMemo(() => readStats(text), [text]);
-  if (!stats.longRead) return null;
+  // Length guard first: rules out almost every message without running the
+  // word count, which this component asks of EVERY text bubble on screen.
+  const stats = useMemo(() => (couldBeLongRead(text) ? readStats(text) : null), [text]);
+  if (!stats?.longRead) return null;
   return (
     <TouchableOpacity
       style={S.readerChip}
