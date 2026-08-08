@@ -438,6 +438,7 @@ function RootLayout() {
         <Stack.Screen name="network-test" />
         <Stack.Screen name="file-viewer" />
         <Stack.Screen name="reader" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="split" />
         <Stack.Screen name="video-player" />
         <Stack.Screen name="voice-speed" />
         <Stack.Screen name="slideshow" />

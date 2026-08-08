@@ -11,11 +11,13 @@ import {
   ActivityIndicator, Alert, Image, Modal, Pressable, RefreshControl, ScrollView, SectionList,
   StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
+import { useWindowDimensions } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette, brandAlpha } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
 import { Avatar } from '../../components/ui';
+import { canSplit } from '../../lib/responsive';
 import { getAccessToken } from '../../lib/api';
 import {
   archiveChat, attachmentUrl, listChats, listStoriesFeed, muteChat, pinChat, setHidden,
@@ -92,6 +94,11 @@ export default function ChatsScreen() {
   const [typingChats, setTypingChats] = useState<Set<string>>(new Set());
   const typingTimers = useRef<Record<string, any>>({});
   const [menuChat, setMenuChat] = useState<ChatSummary | null>(null);   // long-press action sheet
+  // Split view is a two-step pick: the first long-press arms it, the second
+  // opens the pair. Null when nothing is armed.
+  const [splitFirst, setSplitFirst] = useState<string | null>(null);
+  const { width: winW, height: winH } = useWindowDimensions();
+  const splitReady = canSplit(winW, winH);
 
   useEffect(() => {
     let cancel = false;
@@ -470,6 +477,27 @@ export default function ChatsScreen() {
             <SheetItem icon={menuChat?.pinned ? 'pin' : 'pin-outline'} label={menuChat?.pinned ? 'Unpin' : 'Pin'} onPress={() => { const c = menuChat!; setMenuChat(null); doPin(c); }} />
             <SheetItem icon={menuChat?.muted ? 'notifications-outline' : 'notifications-off-outline'} label={menuChat?.muted ? 'Unmute' : 'Mute'} onPress={() => { const c = menuChat!; setMenuChat(null); doMute(c); }} />
             <SheetItem icon={menuChat?.archived ? 'archive' : 'archive-outline'} label={menuChat?.archived ? 'Unarchive' : 'Archive'} onPress={() => { const c = menuChat!; setMenuChat(null); doArchive(c); }} />
+            {/* Split view (design 04-06). Offered only when the window can
+                actually fit two readable panes — lib/responsive decides, so a
+                phone gets it in landscape and a tablet always, with no device
+                list to maintain. Hidden rather than shown-and-refused. */}
+            {splitReady && (
+              <SheetItem
+                icon="git-compare-outline"
+                label={splitFirst ? 'Open in split with the other chat' : 'Open in split view'}
+                onPress={() => {
+                  const c = menuChat!;
+                  setMenuChat(null);
+                  if (splitFirst && splitFirst !== c.id) {
+                    const a = splitFirst;
+                    setSplitFirst(null);
+                    router.push({ pathname: '/split', params: { a, b: c.id } } as any);
+                  } else {
+                    setSplitFirst(c.id);
+                  }
+                }}
+              />
+            )}
             <SheetItem icon="trash-outline" label="Delete chat" danger onPress={() => { const c = menuChat!; setMenuChat(null); doDelete(c); }} />
           </Pressable>
         </Pressable>

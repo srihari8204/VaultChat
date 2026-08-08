@@ -174,14 +174,26 @@ import {
   formatRecDuration, formatScreenshotMode, isSameCalendarDay, renderWithHighlight,
 } from '../components/chat/MessageBubble';
 
-export default function ChatScreen() {
+/**
+ * @param chatIdProp  When present, this screen is EMBEDDED (a split-view pane,
+ *   app/split.tsx) rather than routed to, so the chat id comes from the parent
+ *   instead of the URL. Route params still win for everything else — a pane and
+ *   a full screen are otherwise the same component, which is the point: split
+ *   view gets the real chat, not a cut-down copy of it.
+ * @param embedded  Hides the screen-level back button; the pane has its own
+ *   close/swap controls.
+ */
+export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: string; embedded?: boolean } = {}) {
   // `id` is the normal entry param; `chatId` is what the capture screens
   // (/camera, /video-notes, /image-editor) echo back when they router.replace
   // here with a freshly captured/edited file — accept either.
-  const params = useLocalSearchParams<{
+  const routeParams = useLocalSearchParams<{
     id?: string; chatId?: string;
     capturedUri?: string; capturedType?: string; capturedViewOnce?: string;
   }>();
+  // An embedded pane must ignore the route's chat id entirely, or both panes
+  // would render whatever chat the router happens to be on.
+  const params = chatIdProp ? { ...routeParams, id: chatIdProp, chatId: chatIdProp } : routeParams;
   const router = useRouter();
   const { colors } = useTheme();
   const S = useS();
