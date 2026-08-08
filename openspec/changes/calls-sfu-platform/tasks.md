@@ -73,10 +73,15 @@ Cheapest phase — the permission model exists.
 - [ ] Hardware H.264 where exposed, VP8/VP9 fallback
 - [ ] Verify on a mid-range device that text stays legible at 1080p
 
-## Phase 4 — Recording *(unblocked by D-1 Option C — group calls only)*
+## Phase 4 — Recording *(unblocked by D-1 Option C — BROADCAST ONLY)*
+
+Scope narrowed by the owner 2026-08-08: recording serves **webinars and live streams
+only**. Not 1:1, and not ordinary group calls.
 
 - [ ] **1:1 calls are NOT recordable** — assert this in code, not just docs, so a later
       change cannot quietly route a 1:1 through Egress
+- [ ] Gate Egress on the call being a BROADCAST, so an ordinary group call cannot be
+      recorded either — capacity is then "concurrent broadcasts", a much smaller number
 
 - [ ] Deploy LiveKit Egress on **separate machines** (it transcodes; the SFU does not)
 - [ ] Capacity + cost model **before** building

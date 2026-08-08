@@ -25,6 +25,11 @@ Consequences, now settled:
   the server can decrypt group media, so Egress can encode it.
 - **1:1 calls are not recordable, and that is by design**, not a limitation to
   be fixed later. Adding 1:1 recording would require breaking 1:1 E2EE.
+- **Recording is BROADCAST-ONLY** (owner, 2026-08-08). It exists to serve
+  webinars and live streaming — not ordinary group calls, and not 1:1. This
+  narrows Phase 4 considerably: Egress is provisioned for the webinar path
+  alone, so its capacity model is "concurrent broadcasts", not "concurrent
+  calls", which is a far smaller and more predictable number.
 - **UI obligation**: the call screen must state which protection is in force.
   A user who believes a 12-person call carries the same guarantee as their 1:1
   has been misled by omission. The existing "End-to-end encrypted" label must
