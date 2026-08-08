@@ -148,8 +148,19 @@ export default function MediaViewerScreen() {
   const saveToDevice = async () => {
     try {
       const ext = fileName.split('.').pop() || 'file';
-      const localPath = FileSystem.cacheDirectory + 'vc_' + Date.now() + '.' + ext;
-      await FileSystem.downloadAsync(fileUri, localPath);
+      // downloadAsync ONLY accepts http(s). fileUri is already a local path for
+      // encrypted media (decrypted to disk) and for anything opened from the
+      // Shelf, and passing that in throws:
+      //   IllegalArgumentException: Expected URL scheme 'http' or 'https' but was 'file'
+      // which surfaced as a bare red "Error" dialog on tapping Save/Download.
+      let localPath = fileUri;
+      if (/^https?:\/\//i.test(fileUri)) {
+        localPath = FileSystem.cacheDirectory + 'vc_' + Date.now() + '.' + ext;
+        const token = await getAccessToken();
+        const res = await FileSystem.downloadAsync(fileUri, localPath,
+          token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
+        if (res.status >= 400) throw new Error(`Download failed (${res.status})`);
+      }
       if (['image','video'].includes(fileType)) {
         const { status } = await MediaLibrary.requestPermissionsAsync();
         if (status === 'granted') { await MediaLibrary.saveToLibraryAsync(localPath); Alert.alert('Saved!', fileName + ' saved to gallery'); }

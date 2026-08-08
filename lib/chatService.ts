@@ -275,7 +275,19 @@ export async function decryptFromChat(
     }
   }
   const e2ee = await import('../services/crypto/e2eeSession.rn');
-  if (!e2ee.isEnvelope(ciphertext)) return ciphertext; // pre-E2EE plaintext history
+  if (!e2ee.isEnvelope(ciphertext)) {
+    // THE BLIND SPOT. If the UI thinks this is encrypted (looksEncrypted) but
+    // the decrypt gate does not recognise the envelope, we return it untouched
+    // and the bubble renders "unable to decrypt" — with NOTHING logged. That is
+    // exactly the state observed on device: lock icons everywhere and not one
+    // [e2ee] line. Name it, with just enough of the prefix to identify the
+    // format (never the payload).
+    if (looksEncrypted(ciphertext)) {
+      console.warn('[e2ee] content looks encrypted but is not a known envelope — prefix:',
+        String(ciphertext).slice(0, 12), 'chat:', chatId, 'sender:', senderId);
+    }
+    return ciphertext; // pre-E2EE plaintext history
+  }
   const peerId = directPeerOf(chatId) ?? senderId;     // peer = the other party
   try {
     const pt = await e2ee.e2eeDecrypt(chatId, peerId, messageId ?? 0, ciphertext);
@@ -407,7 +419,10 @@ export async function hydrateMessages(
     const senderId = (m as any).senderId ?? '';
     if (senderId && senderId === (await myUserId())) {
       const own = await readOwnPlaintext(chatId, m.id);
-      if (own != null) out[i] = finish(m, own);
+      if (own != null) { out[i] = finish(m, own); }
+      else {
+        console.warn('[e2ee] own message has no cached plaintext — id:', m.id, 'chat:', chatId);
+      }
       // No cached copy → leave the envelope as-is. The bubble renders its
       // "can't be shown on this device" state, which is the truth: nothing is
       // wrong with the encryption, we simply do not hold the plaintext.
