@@ -132,7 +132,8 @@
       "./plugins/withVaultBeamRust.js",
       "./plugins/withVaultView.js",
       "./plugins/withVaultShield.js",
-      "expo-sqlite"
+      "expo-sqlite",
+      "./plugins/withReleaseSigning.js"
     ],
     "extra": {
       "router": {},

@@ -74,3 +74,8 @@ build_release*.log
 .build.log
 .build-debug.log
 .metro.log
+
+# Release signing — the keystore CANNOT be regenerated after the first Play
+# upload. Back these up off this machine; never commit them.
+vaultchat-release.jks
+keystore.properties
