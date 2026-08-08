@@ -14,6 +14,7 @@ import {
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { onboarding } from '../lib/onboarding';
+import { Sheet, type SheetAction } from '../components/ui/Sheet';
 
 function ageOf(d: Date): number {
   const n = new Date();
@@ -36,6 +37,8 @@ export default function OnboardProfile() {
   const [dob, setDob] = useState<Date | null>(st.dob ? new Date(st.dob) : null);
   const [showPicker, setShowPicker] = useState(false);
   const [pic, setPic] = useState<string | null>(st.profilePicLocalUri);
+  // 4 buttons when a photo exists — over Android's 3-button ceiling.
+  const [sheet, setSheet] = useState<{ title: string; message?: string; actions: SheetAction[] } | null>(null);
 
   const pickFrom = async (source: 'camera' | 'gallery') => {
     const perm = source === 'camera'
@@ -49,12 +52,14 @@ export default function OnboardProfile() {
     setPic(uri);
     onboarding.set({ profilePicLocalUri: uri });
   };
-  const choosePhoto = () => Alert.alert('Profile photo', undefined, [
-    { text: 'Take photo', onPress: () => pickFrom('camera') },
-    { text: 'Choose from gallery', onPress: () => pickFrom('gallery') },
-    ...(pic ? [{ text: 'Remove', style: 'destructive' as const, onPress: () => { setPic(null); onboarding.set({ profilePicLocalUri: null }); } }] : []),
-    { text: 'Cancel', style: 'cancel' as const },
-  ]);
+  const choosePhoto = () => setSheet({
+    title: 'Profile photo',
+    actions: [
+      { label: 'Take photo', icon: 'camera-outline', onPress: () => pickFrom('camera') },
+      { label: 'Choose from gallery', icon: 'images-outline', onPress: () => pickFrom('gallery') },
+      ...(pic ? [{ label: 'Remove', icon: 'trash-outline' as const, destructive: true, onPress: () => { setPic(null); onboarding.set({ profilePicLocalUri: null }); } }] : []),
+    ],
+  });
 
   const ageOk = !!dob && ageOf(dob) >= 13;
   const valid = firstName.trim().length > 0 && ageOk;
@@ -134,6 +139,14 @@ export default function OnboardProfile() {
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <Sheet
+        visible={!!sheet}
+        title={sheet?.title}
+        message={sheet?.message}
+        actions={sheet?.actions ?? []}
+        onClose={() => setSheet(null)}
+      />
     </View>
   );
 }

@@ -1,9 +1,15 @@
-// app/mini-apps.tsx
-// Mini Apps Platform — built-in mini apps with working Calculator and Todo List
+// app/(tabs)/mini.tsx
+// Mini Apps Platform — a launcher for the full mini apps, plus the built-in
+// Calculator and Todo List that run inline here.
+//
+// Tiles that only raise "Coming Soon" are NOT listed: a dead tile on a primary
+// tab reads as a broken app, not as a promise. Add one back the same day its
+// screen lands.
 
 import { BRAND_ACCENT } from '../../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { encField, decField } from '../../lib/cacheCrypto';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -30,7 +36,6 @@ const MINI_APPS_MAIN = [
   { id: 'shopbook',    icon: '\uD83D\uDECD\uFE0F', name: 'Shop Book', route: '/shop-book', gradient: ['#0B7A3B', '#16A34A'] as [string, string] },
   { id: 'notes',       icon: '\uD83D\uDCDD', name: 'Notes',       route: '/encrypted-notes', gradient: ['#F59E0B', '#D97706'] as [string, string] },
   { id: 'scanner',     icon: '\uD83D\uDCC4', name: 'Scanner',     route: '/docscanner',     gradient: ['#4A9FFF', '#1D4ED8'] as [string, string] },
-  { id: 'cloud',       icon: '\u2601\uFE0F', name: 'Cloud',       route: null,              gradient: ['#6B7280', '#4B5563'] as [string, string] },
   { id: 'security',    icon: '\uD83D\uDEE1\uFE0F', name: 'Security Hub', route: '/aiguardian', gradient: ['#0E7490', '#164E63'] as [string, string] },
   { id: 'vaultid',     icon: '\uD83C\uDD94', name: 'VaultID',     route: '/decentralized-id', gradient: ['#7C3AED', '#4A9FFF'] as [string, string] },
 ];
@@ -38,8 +43,6 @@ const MINI_APPS_MAIN = [
 // ── Built-in utility mini apps ──────────────────────────────────
 const MINI_APPS_UTILS = [
   { id: 'todo',       icon: '\u2705',        name: 'Todo List',        gradient: [BRAND_ACCENT, '#059669'] as [string, string] },
-  { id: 'expense',    icon: '\uD83D\uDCB0',  name: 'Expense Tracker',  gradient: ['#7C3AED', '#EC4899'] as [string, string] },
-  { id: 'qr',         icon: '\uD83D\uDCF1',  name: 'QR Generator',     gradient: ['#06B6D4', '#0891B2'] as [string, string] },
 ];
 
 const TODO_STORAGE_KEY = 'vc_miniapp_todos';
@@ -68,16 +71,20 @@ export default function MiniAppsScreen() {
     loadTodos();
   }, []);
 
+  // Todo text is user content, so it is sealed at rest with the same cache DEK
+  // as messages and notes (encField/decField) rather than sitting in the clear.
+  // decField returns the value unchanged for rows written before this, so
+  // existing lists keep loading.
   const loadTodos = async () => {
     try {
-      const raw = await AsyncStorage.getItem(TODO_STORAGE_KEY);
+      const raw = decField(await AsyncStorage.getItem(TODO_STORAGE_KEY));
       if (raw) setTodos(JSON.parse(raw));
-    } catch {}
+    } catch { /* sealed while locked, or corrupt — start empty rather than crash */ }
   };
 
   const saveTodos = async (items: TodoItem[]) => {
     try {
-      await AsyncStorage.setItem(TODO_STORAGE_KEY, JSON.stringify(items));
+      await AsyncStorage.setItem(TODO_STORAGE_KEY, encField(JSON.stringify(items))!);
       setTodos(items);
     } catch {}
   };

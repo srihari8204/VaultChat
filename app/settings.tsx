@@ -30,6 +30,14 @@ import { getAutoDownload, setAutoDownload, type AutoDownloadPolicy } from '../li
 import { useTheme, type ThemePref } from '../lib/theme';
 import { type Palette, brandAlpha } from '../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
+import { Sheet, type SheetAction } from '../components/ui/Sheet';
+
+// Multi-choice settings are pickers, not alerts. Android's native dialog takes
+// exactly three buttons (positive/negative/neutral), so an Alert.alert with one
+// button per option SILENTLY DROPS the rest — the 5-option message timer showed
+// 3, and "7 days" / "90 days" were unreachable on Android. Sheet scrolls and
+// takes as many rows as we give it.
+type Picker = { title: string; message?: string; actions: SheetAction[] } | null;
 
 /** Memoized themed stylesheet for this screen. */
 function useS() {
@@ -62,6 +70,7 @@ export default function SettingsScreen() {
   const [authHeader, setAuthHeader] = useState<string | null>(null);
   const [profile, setProfile] = useState<{ name?: string; email?: string; status?: string; photoURL?: string } | null>(null);
   const [autoDl, setAutoDl] = useState<AutoDownloadPolicy>('always');
+  const [picker, setPicker] = useState<Picker>(null);
   useEffect(() => { getAutoDownload().then(setAutoDl); }, []);
   const autoDlLabel = (p: AutoDownloadPolicy) => p === 'never' ? 'Never' : p === 'wifi' ? 'Wi-Fi only' : 'Wi-Fi & mobile data';
 
@@ -251,12 +260,15 @@ export default function SettingsScreen() {
         <View style={S.linkCard}>
           <LinkRow icon="color-palette-outline" title="Bubble theme" sub="Color of your sent messages" onPress={() => router.push('/chat-themes' as any)} />
           <LinkRow icon="image-outline" title="Wallpaper" sub="Default chat background" onPress={() => router.push('/chat-wallpaper' as any)} />
-          <TouchableOpacity style={[S.linkRow, { borderBottomWidth: 0 }]} activeOpacity={0.7} onPress={() => Alert.alert('Media auto-download', 'When to download photos automatically.', [
-            { text: 'Wi-Fi & mobile data', onPress: () => { setAutoDl('always'); setAutoDownload('always'); } },
-            { text: 'Wi-Fi only', onPress: () => { setAutoDl('wifi'); setAutoDownload('wifi'); } },
-            { text: 'Never', onPress: () => { setAutoDl('never'); setAutoDownload('never'); } },
-            { text: 'Cancel', style: 'cancel' },
-          ])}>
+          <TouchableOpacity style={[S.linkRow, { borderBottomWidth: 0 }]} activeOpacity={0.7} onPress={() => setPicker({
+            title: 'Media auto-download',
+            message: 'When to download photos automatically.',
+            actions: [
+              { label: 'Wi-Fi & mobile data', onPress: () => { setAutoDl('always'); setAutoDownload('always'); } },
+              { label: 'Wi-Fi only', onPress: () => { setAutoDl('wifi'); setAutoDownload('wifi'); } },
+              { label: 'Never', onPress: () => { setAutoDl('never'); setAutoDownload('never'); } },
+            ],
+          })}>
             <View style={S.linkIconWrap}><Ionicons name="cloud-download-outline" size={22} color={colors.text} /></View>
             <View style={{ flex: 1 }}>
               <Text style={S.linkTitle}>Media auto-download</Text>
@@ -298,25 +310,30 @@ export default function SettingsScreen() {
           busy={saving === 'profilePhotoVisible'}
           onValueChange={() => toggle('profilePhotoVisible')}
         />
-        <TouchableOpacity style={S.prefRow} activeOpacity={0.7} onPress={() => Alert.alert('Who can add me to groups', undefined, [
-          { text: 'Everyone', onPress: () => savePref({ groupAddPolicy: 'everyone' }) },
-          { text: 'My contacts', onPress: () => savePref({ groupAddPolicy: 'contacts' }) },
-          { text: 'Nobody', onPress: () => savePref({ groupAddPolicy: 'nobody' }) },
-          { text: 'Cancel', style: 'cancel' },
-        ])}>
+        <TouchableOpacity style={S.prefRow} activeOpacity={0.7} onPress={() => setPicker({
+          title: 'Who can add me to groups',
+          actions: [
+            { label: 'Everyone', onPress: () => savePref({ groupAddPolicy: 'everyone' }) },
+            { label: 'My contacts', onPress: () => savePref({ groupAddPolicy: 'contacts' }) },
+            { label: 'Nobody', onPress: () => savePref({ groupAddPolicy: 'nobody' }) },
+          ],
+        })}>
           <View style={{ flex: 1 }}>
             <Text style={S.toggleTitle}>Add me to groups</Text>
             <Text style={S.toggleSub}>{groupAddLabel(settings.groupAddPolicy)}</Text>
           </View>
           <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
         </TouchableOpacity>
-        <TouchableOpacity style={S.prefRow} activeOpacity={0.7} onPress={() => Alert.alert('Default disappearing timer', 'Applied to new chats you start.', [
-          { text: 'Off', onPress: () => savePref({ defaultDisappearingSeconds: 0 }) },
-          { text: '24 hours', onPress: () => savePref({ defaultDisappearingSeconds: 86400 }) },
-          { text: '7 days', onPress: () => savePref({ defaultDisappearingSeconds: 604800 }) },
-          { text: '90 days', onPress: () => savePref({ defaultDisappearingSeconds: 7776000 }) },
-          { text: 'Cancel', style: 'cancel' },
-        ])}>
+        <TouchableOpacity style={S.prefRow} activeOpacity={0.7} onPress={() => setPicker({
+          title: 'Default disappearing timer',
+          message: 'Applied to new chats you start.',
+          actions: [
+            { label: 'Off', onPress: () => savePref({ defaultDisappearingSeconds: 0 }) },
+            { label: '24 hours', onPress: () => savePref({ defaultDisappearingSeconds: 86400 }) },
+            { label: '7 days', onPress: () => savePref({ defaultDisappearingSeconds: 604800 }) },
+            { label: '90 days', onPress: () => savePref({ defaultDisappearingSeconds: 7776000 }) },
+          ],
+        })}>
           <View style={{ flex: 1 }}>
             <Text style={S.toggleTitle}>Default message timer</Text>
             <Text style={S.toggleSub}>{timerLabel(settings.defaultDisappearingSeconds)}</Text>
@@ -406,6 +423,14 @@ export default function SettingsScreen() {
           ))
         )}
       </View>
+
+      <Sheet
+        visible={!!picker}
+        title={picker?.title}
+        message={picker?.message}
+        actions={picker?.actions ?? []}
+        onClose={() => setPicker(null)}
+      />
     </ScrollView>
   );
 }
