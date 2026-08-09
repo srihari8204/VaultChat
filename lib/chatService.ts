@@ -10,6 +10,10 @@ import { unwrapPreview } from './linkPreview';
 import perf from './perf';
 import { SERVER_URL } from '../constants/server';
 import { E2EE_ENABLED, GROUP_E2EE, E2EE_STRICT } from '../constants/flags';
+// Group types and permissions are defined once, in lib/groups, and mirrored
+// server-side in internal/groups. Import rather than restate them.
+import type { GroupType } from './groups/catalog';
+import type { Permission, GroupRole } from './groups/permissions';
 
 export interface ChatSummary {
   id:            string;
@@ -21,7 +25,7 @@ export interface ChatSummary {
   updatedAt:     string;
   lastMessageId: number | null;
   lastMessageAt: string | null;
-  myRole:        'member' | 'admin' | 'owner';
+  myRole:        GroupRole;
   myLastReadId:  number | null;
   muted:         boolean;
   pinned:        boolean;
@@ -72,7 +76,13 @@ export async function setVanishMode(chatId: string, enabled: boolean): Promise<v
 
 export interface ChatMember {
   userId:                 string;
-  role:                   'member' | 'admin' | 'owner';
+  /**
+   * Groups & Circles added 'guest' (066) and 'moderator' (069). Widened rather
+   * than mapped onto the old pair: collapsing them, as lib/family/circle.ts
+   * still does for the legacy Family Space view, makes a moderator
+   * indistinguishable from an admin in any screen that reads this.
+   */
+  role:                   'guest' | 'member' | 'moderator' | 'admin' | 'owner';
   joinedAt:               string;
   lastReadMessageId:      number | null;
   lastDeliveredMessageId: number | null;
@@ -100,6 +110,28 @@ export interface ChatDetail extends ChatSummary {
   approveMembers?:      boolean;
   // W15: a chat-wide pinned message (null = none).
   pinnedMessageId?:     string | null;
+
+  // ── Groups & Circles (migration 070) ──
+  // groupType is null for every group created before that migration; such a
+  // group is an "untyped group" and keeps the legacy admin-only rules.
+  groupType?:           GroupType | null;
+  icon?:                string | null;
+  color?:               string | null;
+  privacy?:             'private' | 'invite_only';
+  /** Server-owned cap for this group's type. Never hardcode a cap client-side. */
+  maxMembers?:          number | null;
+  /**
+   * How many gates stand between an invitation and membership. Server-
+   * normalised: an unrecognised stored value arrives as 'strict', so the client
+   * never draws a looser flow than the server will actually honour.
+   */
+  approvalMode?:        ApprovalMode;
+  /**
+   * THIS USER's resolved permissions in this group. Use it to decide what to
+   * DRAW — never to decide what is allowed. The server re-resolves the same
+   * layers on every mutating endpoint, and that check is the real one.
+   */
+  permissions?:         Permission[];
 }
 
 /** Pin a message chat-wide (messageId = null clears the pin). */
@@ -114,7 +146,7 @@ export interface Message {
   id:        number;
   chatId:    string;
   senderId:  string;
-  type:      'text' | 'image' | 'video' | 'audio' | 'file' | 'location' | 'system' | 'sticker' | 'poll' | 'reaction' | 'vaultbeam';
+  type:      'text' | 'image' | 'video' | 'audio' | 'file' | 'location' | 'system' | 'sticker' | 'poll' | 'reaction' | 'vaultbeam' | 'group_ref';
   content:   string | null;        // opaque ciphertext (currently plaintext during Phase 3a)
   meta?:     any;
   replyToId: number | null;
@@ -647,10 +679,19 @@ export async function createDirectChat(
   return api(`/chats`, { method: 'POST', json: body });
 }
 
+export interface GroupMeta {
+  groupType?:   GroupType;
+  icon?:        string;
+  color?:       string;
+  description?: string;
+  privacy?:     'private' | 'invite_only';
+}
+
 export async function createGroupChat(
   name: string,
   members: { ids?: string[]; emails?: string[]; allowEmpty?: boolean } = {},
-): Promise<{ id: string; type: 'group'; name: string }> {
+  meta: GroupMeta = {},
+): Promise<{ id: string; type: 'group'; name: string; groupType?: GroupType | null }> {
   return api(`/chats`, {
     method: 'POST',
     json: {
@@ -658,6 +699,8 @@ export async function createGroupChat(
       memberIds:    members.ids    ?? [],
       memberEmails: members.emails ?? [],
       allowEmpty:   members.allowEmpty === true,
+      // Omitted keys leave the group untyped, which is a valid state.
+      ...meta,
     },
   });
 }
@@ -1212,6 +1255,10 @@ export async function updateChat(
     slowModeSeconds?: number; sendPolicy?: 'everyone' | 'admins';
     mediaPolicy?: 'everyone' | 'admins'; addMembersPolicy?: 'everyone' | 'admins';
     antiSpamLinks?: boolean; approveMembers?: boolean;
+    // Groups & Circles. Stamping groupType is how an existing Family Space
+    // circle becomes a typed group — the server cannot identify circles itself.
+    groupType?: GroupType; icon?: string; color?: string;
+    privacy?: 'private' | 'invite_only';
   },
 ): Promise<void> {
   await api(`/chats/${encodeURIComponent(chatId)}`, { method: 'PATCH', json: patch });
@@ -1239,12 +1286,19 @@ export async function removeChatMember(chatId: string, userId: string): Promise<
   });
 }
 
-// Promote/demote a group member between 'admin' and 'member' (owner-gated
-// for demotions). The 'owner' role can't be set through this endpoint.
+/**
+ * Change a member's role.
+ *
+ * 'owner' is deliberately not accepted: handing the group over is a separate,
+ * irreversible operation with its own endpoint (transferOwnership), so it
+ * cannot happen as a side effect of editing somebody's role. 'moderator' and
+ * 'guest' apply to typed groups only — the server refuses them on a legacy
+ * untyped group, which has no semantics for either.
+ */
 export async function setMemberRole(
   chatId: string,
   userId: string,
-  role: 'admin' | 'member',
+  role: 'admin' | 'moderator' | 'member' | 'guest',
 ): Promise<void> {
   await api(`/chats/${encodeURIComponent(chatId)}/members/${encodeURIComponent(userId)}/role`, {
     method: 'PATCH',
@@ -1312,6 +1366,337 @@ export async function joinViaInvite(
   code: string,
 ): Promise<{ chatId: string; pending?: boolean; alreadyMember?: boolean }> {
   return api(`/chats/join/${encodeURIComponent(code)}`, { method: 'POST' });
+}
+
+// ─── Announcements (Groups & Circles) ───────────────────────────────
+//
+// An announcement is an ordinary encrypted message carrying `meta.announcement`.
+// The flag lives in meta because the SERVER must be able to enforce the
+// send_announcements permission, and meta is the only part of a message it can
+// read. It discloses that a message is an announcement, never what it says.
+
+export const ANNOUNCEMENT_META = { announcement: true } as const;
+
+/** Post an announcement. Rejected server-side without send_announcements. */
+export async function sendAnnouncement(chatId: string, text: string): Promise<Message> {
+  return sendMessage(chatId, text, 'text', { meta: { announcement: true } });
+}
+
+/** Is this message an announcement? Reads meta, so no decryption is needed. */
+export function isAnnouncement(m: Pick<Message, 'meta'>): boolean {
+  return !!m.meta && (m.meta as any).announcement === true;
+}
+
+// ─── Shared group calendar (Groups & Circles) ───────────────────────
+//
+// `payload` is CIPHERTEXT the caller seals and opens itself — title, notes,
+// location, exact time, duration and recurrence all live inside it. The server
+// only ever sees the month bucket it filters on. See migration 072.
+
+export interface GroupEventRow {
+  id:          number;
+  createdBy:   string | null;
+  /** 'YYYY-MM', or null for a recurring event (always returned). */
+  monthKey:    string | null;
+  payload:     string;
+  repeatUntil: string | null;
+  createdAt:   string;
+  updatedAt:   string;
+}
+
+/** Fetch the given month buckets plus every still-live recurring event. */
+export async function listGroupEvents(chatId: string, months: string[]): Promise<GroupEventRow[]> {
+  const qs = months.length ? `?months=${encodeURIComponent(months.join(','))}` : '';
+  return api(`/chats/${encodeURIComponent(chatId)}/events${qs}`);
+}
+
+export async function createGroupEvent(
+  chatId: string,
+  e: { payload: string; monthKey?: string | null; repeatUntil?: string | null },
+): Promise<{ id: number }> {
+  return api(`/chats/${encodeURIComponent(chatId)}/events`, { method: 'POST', json: e });
+}
+
+export async function updateGroupEvent(
+  chatId: string,
+  eventId: number,
+  e: { payload: string; monthKey?: string | null; repeatUntil?: string | null },
+): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/events/${eventId}`, { method: 'PATCH', json: e });
+}
+
+export async function deleteGroupEvent(chatId: string, eventId: number): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/events/${eventId}`, { method: 'DELETE' });
+}
+
+// ─── In-app membership (Groups & Circles, membership v2) ────────────
+//
+// EVERYTHING HAPPENS INSIDE VAULTCHAT. There is no link to share, no QR to
+// scan, no SMS and no WhatsApp hand-off. An invitation names a VaultChat
+// account and is acted on by being signed in as that account.
+//
+// Three steps, not two, and which ones apply depends on the group's mode:
+//
+//   strict (default)  invite → the invitee ACCEPTS → an owner APPROVES → joined
+//   user_approval     invite → the invitee accepts → joined
+//   admin_approval    the user REQUESTS → an owner approves → joined
+//
+// So `accepted` is NOT membership: it means the invitee said yes and is waiting
+// on an owner. `joined` is membership. Anywhere this file names both, the
+// difference is load-bearing.
+
+export type InvitationStatus =
+  | 'pending' | 'accepted' | 'joined' | 'rejected' | 'cancelled' | 'expired' | 'revoked';
+
+/**
+ * How an invitation was delivered. `app` is the only value new invitations
+ * carry; the rest exist so invitations created before membership v2 still
+ * render rather than falling off the list.
+ */
+export type InvitationChannel = 'app' | 'sms' | 'whatsapp' | 'email' | 'qr' | 'link';
+
+export type ApprovalMode = 'strict' | 'user_approval' | 'admin_approval';
+
+export interface Invitation {
+  id:            number;
+  inviteeUserId: string | null;
+  kind:          'user' | 'phone' | 'email' | 'link';
+  /** The email an invitee was addressed at. Never populated for phone — that is stored only as a hash. */
+  ref?:          string | null;
+  name:          string | null;
+  channel:       InvitationChannel;
+  status:        InvitationStatus;
+  /**
+   * True when the CALLER sent this one. Withdrawing your own invitation and
+   * revoking someone else's are different acts landing in different statuses,
+   * so the UI has to know which to offer.
+   */
+  mine:          boolean;
+  expiresAt:     string;
+  respondedAt:   string | null;
+  createdAt:     string;
+}
+
+/** An invitation waiting for ME — either unanswered, or accepted and awaiting an owner. */
+export interface MyInvitation {
+  id:          number;
+  chatId:      string;
+  name:        string | null;
+  groupType:   string | null;
+  icon:        string | null;
+  color:       string | null;
+  status:      InvitationStatus;
+  inviterName: string | null;
+  /** Preview before deciding: how big the group is. Never the member list. */
+  memberCount:   number;
+  approvalMode:  ApprovalMode;
+  /** True when this row is my own request to join rather than someone's invitation. */
+  requested:     boolean;
+  /** Whether accepting admits me outright, or only starts the wait for an owner. */
+  joinsOnAccept: boolean;
+  canAccept:     boolean;
+  canDecline:    boolean;
+  expiresAt:   string;
+  createdAt:   string;
+}
+
+/** Someone part-way in: they accepted an invitation, or they asked to join. */
+export interface PendingMember {
+  id:          number;
+  userId:      string | null;
+  name:        string | null;
+  photoURL:    string | null;
+  status:      InvitationStatus;
+  /** True when they asked to join; false when they were invited. */
+  requested:   boolean;
+  inviterName: string | null;
+  createdAt:   string;
+  acceptedAt:  string | null;
+  canApprove:  boolean;
+  canReject:   boolean;
+}
+
+/** Somebody who could be invited, and why they can or cannot be. */
+export interface InviteCandidate {
+  id:       string;
+  name:     string | null;
+  photoURL: string | null;
+  /** `invitable`, or the reason there is no button: already in, already invited, or recently removed. */
+  state:    'invitable' | 'member' | 'invited' | 'cooldown';
+  cooldownUntil?: string;
+}
+
+export interface NewInvitation {
+  id:            number;
+  inviteeUserId: string;
+  status:        InvitationStatus;
+  expiresAt:     string;
+  channel:       InvitationChannel;
+}
+
+/**
+ * Invite one person. They must already be on VaultChat: address them by
+ * userId, or by an email/phone that resolves to an account. A handle that
+ * matches nobody is refused — there is no off-platform invitation to fall
+ * back to.
+ */
+export async function createInvitation(
+  chatId: string,
+  who: { userId?: string; phone?: string; email?: string },
+  opts: { expiresInHours?: number } = {},
+): Promise<NewInvitation> {
+  return api(`/chats/${encodeURIComponent(chatId)}/invitations`, {
+    method: 'POST',
+    json: { ...who, ...opts },
+  });
+}
+
+export async function listInvitations(chatId: string): Promise<Invitation[]> {
+  return api(`/chats/${encodeURIComponent(chatId)}/invitations`);
+}
+
+/** Give an invitation a fresh expiry and pull it back out of `expired`. */
+export async function resendInvitation(chatId: string, invitationId: number): Promise<NewInvitation> {
+  return api(`/chats/${encodeURIComponent(chatId)}/invitations/${invitationId}/resend`, { method: 'POST' });
+}
+
+export async function revokeInvitation(chatId: string, invitationId: number): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/invitations/${invitationId}`, { method: 'DELETE' });
+}
+
+/**
+ * Withdraw an invitation you personally sent. Distinct from revoking, which is
+ * an administrative act on someone else's — they land in different statuses so
+ * the group's history still says who ended it.
+ */
+export async function cancelInvitation(chatId: string, invitationId: number): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/invitations/${invitationId}/cancel`, { method: 'POST' });
+}
+
+/** Invitations addressed to me that are still live — pending, or accepted and waiting. */
+export async function myInvitations(): Promise<MyInvitation[]> {
+  return api(`/invitations`);
+}
+
+/**
+ * Say yes. Whether this admits you or only starts the wait is the GROUP's
+ * decision, read server-side — `joined` in the response is the answer, and
+ * `joinsOnAccept` on the invitation is the advance warning to show first.
+ */
+export async function acceptInvitation(
+  invitationId: number,
+): Promise<{ id: number; chatId: string; status: InvitationStatus; joined: boolean }> {
+  return api(`/invitations/${invitationId}/accept`, { method: 'POST' });
+}
+
+export async function rejectInvitation(invitationId: number): Promise<void> {
+  await api(`/invitations/${invitationId}/reject`, { method: 'POST' });
+}
+
+/**
+ * LEGACY. Redeems a signed token from a link minted before membership v2.
+ *
+ * Nothing in the app produces one any more — kept only so that a link already
+ * sitting in somebody's messages still works. Do not build on it: an
+ * invitation reached this way is a forwardable credential, which is exactly
+ * what the in-app flow above replaced.
+ */
+export async function redeemInvitation(token: string): Promise<{ chatId: string; ok: boolean }> {
+  return api(`/invitations/redeem`, { method: 'POST', json: { token } });
+}
+
+/** The owner's queue: everyone part-way in, invited and self-requested alike. */
+export async function pendingMembers(chatId: string): Promise<PendingMember[]> {
+  return api(`/chats/${encodeURIComponent(chatId)}/membership/pending`);
+}
+
+/** Admit someone who has accepted. Only ever legal from `accepted`. */
+export async function approveMember(chatId: string, invitationId: number): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/invitations/${invitationId}/approve`, { method: 'POST' });
+}
+
+/** Turn someone down. Same terminal status as their own decline, different actor. */
+export async function rejectMember(chatId: string, invitationId: number): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/invitations/${invitationId}/reject`, { method: 'POST' });
+}
+
+/**
+ * Who can be invited. Search by exact email or phone, or by name among people
+ * you already share a chat with. Deliberately not a user directory: you cannot
+ * find a stranger here, because you cannot invite one.
+ */
+export async function inviteCandidates(chatId: string, q: string): Promise<InviteCandidate[]> {
+  if (q.trim().length < 2) return [];
+  return api(`/chats/${encodeURIComponent(chatId)}/membership/candidates?q=${encodeURIComponent(q.trim())}`);
+}
+
+/** Ask to join a group that admits people by request. */
+export async function requestToJoin(chatId: string): Promise<{ id: number; chatId: string; pending: boolean }> {
+  return api(`/chats/${encodeURIComponent(chatId)}/membership/request`, { method: 'POST' });
+}
+
+/** The card a group_ref message carries. Server-written — see below. */
+export interface GroupRef {
+  groupId:    string;
+  name:       string | null;
+  groupType:  GroupType | null;
+  icon:       string | null;
+  color:      string | null;
+}
+
+/**
+ * Post a card into `toChatId` saying a group exists and may be asked to join.
+ *
+ * The in-app replacement for an invite link, and deliberately much weaker than
+ * one: the card carries NO token and admits nobody. Tapping it opens a request
+ * that an admin still has to approve.
+ *
+ * The server refuses this unless the group is in `admin_approval` mode and you
+ * hold `invite_members` there — the same authority that could have invited the
+ * person directly. It also OVERWRITES the name and presentation from the
+ * database, so a card cannot be made to say something the group does not.
+ * Nothing passed here beyond the id is trusted.
+ */
+export async function shareGroup(toChatId: string, groupId: string): Promise<void> {
+  await sendMessage(toChatId, '', 'group_ref', { meta: { groupId } });
+}
+
+/** Read the card off a message, or null when it is malformed. */
+export function groupRefOf(meta: unknown): GroupRef | null {
+  if (!meta || typeof meta !== 'object') return null;
+  const m = meta as Record<string, unknown>;
+  const groupId = typeof m.groupId === 'string' ? m.groupId : '';
+  if (!groupId) return null;
+  const str = (v: unknown) => (typeof v === 'string' && v ? v : null);
+  return {
+    groupId,
+    name: str(m.name),
+    groupType: str(m.groupType) as GroupType | null,
+    icon: str(m.icon),
+    color: str(m.color),
+  };
+}
+
+/**
+ * Hand the group to another member. Irreversible: you become an admin and they
+ * become the owner, so `confirm` is required rather than inferred from the tap.
+ */
+export async function transferOwnership(
+  chatId: string,
+  userId: string,
+): Promise<{ ownerId: string; yourRole: string }> {
+  return api(`/chats/${encodeURIComponent(chatId)}/membership/transfer`, {
+    method: 'POST',
+    json: { userId, confirm: true },
+  });
+}
+
+/** Owner-only: change how many gates stand between an invitation and membership. */
+export async function setApprovalMode(chatId: string, mode: ApprovalMode): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/membership/approval-mode`, {
+    method: 'PATCH',
+    json: { mode },
+  });
 }
 
 // Join requests (approve-members groups; admin only).
@@ -1611,57 +1996,39 @@ export async function uploadAttachment(
     if (fi?.exists && typeof fi.size === 'number') size = fi.size;
   } catch {}
 
-  // Large files → resumable chunked (multipart) upload so a mid-upload network
-  // drop resumes from the parts already stored instead of restarting (WhatsApp).
-  // Both the plaintext and the E2EE (ciphertext-temp) send paths route through
-  // here, so both get resume. Falls through to single-PUT if it can't start.
-  if (size >= 5 * 1024 * 1024) {   // MULTIPART_THRESHOLD (lib/resumableUpload)
+  // Genuinely huge files → resumable chunked (multipart) upload so a mid-upload
+  // network drop resumes from the parts already stored. Threshold is the server
+  // relay's cap (100 MB, uploads.go upMaxBytes); anything at/under it takes the
+  // reliable server-relay path below instead.
+  if (size >= 100 * 1024 * 1024) {   // > server-relay cap
     try {
       const { resumableUpload } = require('./resumableUpload');
       return await resumableUpload(uri, filename, mime, size, { viewOnce: opts.viewOnce, signal: opts.signal });
     } catch (e: any) {
       if (opts.signal?.aborted) throw e;   // user cancelled — don't silently re-upload
-      if (__DEV__) console.warn('[upload] resumable failed, falling back to single-PUT:', e?.message);
+      if (__DEV__) console.warn('[upload] resumable failed:', e?.message);
+      throw e;
     }
   }
 
-  // Object-store path: get a presigned PUT URL and upload the bytes DIRECTLY to
-  // storage (they never pass through the app server). Falls back to the multipart
-  // route below when the server has no object storage configured (503) or the
-  // presign path errors — so media never silently fails to send.
-  try {
-    const presign = await api<{ id: string; uploadUrl: string }>('/uploads/presign', {
-      method: 'POST',
-      json: { filename, mime, size, viewOnce: !!opts.viewOnce },
-    });
-    if (presign?.uploadUrl) {
-      const put = await FileSystem.uploadAsync(presign.uploadUrl, uri, {
-        httpMethod: 'PUT',
-        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-        headers: { 'Content-Type': mime },
-      });
-      if (put.status >= 200 && put.status < 300) {
-        return { id: presign.id, mime, size, filename };
-      }
-      throw new Error(`object-store upload failed (HTTP ${put.status})`);
-    }
-  } catch (e: any) {
-    if (__DEV__ && e?.status !== 503) {
-      console.warn('[upload] presign path failed, using multipart:', e?.message);
-    }
-  }
-
+  // Server-relay: POST the bytes to our API, which stores them in R2 itself
+  // (uploads.go uploadsPost). This replaced the presigned DIRECT-to-R2 PUT,
+  // which failed on some device networks — the phone got a 200-looking result
+  // but the bytes never reached R2, leaving orphan attachment rows (blank
+  // media). Here the row is written only AFTER the server confirms the object
+  // is in R2, so a sent image always has bytes behind it. The phone only ever
+  // talks to api.corefinite.com, which it can always reach.
+  // ponytail: routes media bytes through the box instead of direct-to-R2; fine
+  // at current scale. Restore presigned-direct as an optimization once the
+  // device-side PUT failure is understood.
   const form = new FormData();
-  // React Native's FormData accepts {uri, name, type} objects for files
-  form.append('file', { uri, name: filename, type: mime } as any);
-
-  // viewOnce=1 tells the backend to set attachments.view_once=TRUE so the
-  // first non-owner GET hard-blocks subsequent reads.
+  form.append('file', { uri, name: filename, type: mime } as any);   // RN FormData file object
   const qs = opts.viewOnce ? '?viewOnce=1' : '';
   const res = await fetch(`${SERVER_URL}/uploads${qs}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
     body: form,
+    signal: opts.signal,
   });
   if (!res.ok) {
     let msg = res.statusText || `HTTP ${res.status}`;

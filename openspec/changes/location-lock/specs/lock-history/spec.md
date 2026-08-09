@@ -19,11 +19,15 @@ The system SHALL show past sessions newest-first with each entry's date, time, r
 - **THEN** only sessions containing at least one alarm are listed
 
 ### Requirement: Statistics rollups
-The system SHALL compute statistics for today, last 7 days, and last 30 days: number of locks, total exits, total time outside, distance traveled while locked, average speed, and total time protected; values SHALL be derived from stored sessions so they are reproducible offline.
+The system SHALL compute statistics for today, last 7 days, and last 30 days: number of locks, total exits, total alarms triggered, total time outside, distance traveled while locked, average speed, average GPS accuracy, average lock duration, and total time protected; values SHALL be derived from stored sessions so they are reproducible offline. A 7-day distance-per-day trend SHALL be rendered as a simple bar chart.
 
 #### Scenario: Daily summary
-- **WHEN** the user opens statistics for "Today" after two sessions with 7 total exits and 1 h 24 m outside
-- **THEN** the summary shows 7 exits and 1 h 24 m outside for today
+- **WHEN** the user opens statistics for "Today" after two sessions with 7 total exits, 2 alarms, and 1 h 24 m outside
+- **THEN** the summary shows 7 exits, 2 alarms, and 1 h 24 m outside for today
+
+#### Scenario: Average GPS accuracy
+- **WHEN** sessions in range recorded accuracy samples averaging ±9 m
+- **THEN** the statistics show average GPS accuracy ≈ 9 m
 
 ### Requirement: Export and deletion
 The system SHALL let the user export history to a local file (shareable via the OS share sheet) and delete individual sessions or all history; deletion SHALL be immediate and irreversible on-device.

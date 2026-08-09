@@ -24,9 +24,12 @@ const storage = () => require('@react-native-async-storage/async-storage').defau
 const crypt = () => require('../cacheCrypto') as typeof import('../cacheCrypto');
 
 export type AlertKind =
-  | 'enter' | 'leave'        // geofence crossings
-  | 'sos' | 'checkin'        // people
-  | 'battery' | 'sharing';   // device state
+  | 'enter' | 'leave'          // geofence crossings
+  | 'sos' | 'checkin'          // people
+  | 'battery' | 'sharing'      // device state
+  | 'gps' | 'offline'          // the device stopped being able to report
+  | 'deviation'                // left the expected route (group navigation)
+  | 'announcement';            // a permitted member addressed the group
 
 export type AlertSeverity = 'critical' | 'important' | 'info';
 
@@ -40,6 +43,15 @@ export interface FamilyAlert {
   text: string;              // already-rendered one-liner
   at: number;                // epoch ms
   read: boolean;
+  /**
+   * The trip this alert belongs to, for 'deviation' and trip arrivals.
+   *
+   * Present so trip history can attribute an arrival to a trip WITHOUT parsing
+   * `text` — that string is rendered for humans and changes whenever the copy
+   * is reworded, which is exactly the sort of coupling that breaks silently.
+   * Absent on every other kind, and on alerts recorded before this existed.
+   */
+  tripId?: string;
 }
 
 /** The three tabs the alerts screen shows. */
@@ -48,12 +60,18 @@ export type AlertFilter = 'all' | 'important' | 'system';
 const KEY = 'vc_family_alerts_v1';
 const MAX_ALERTS = 300;
 /** Kinds that count as "system" rather than a person doing something. */
-const SYSTEM_KINDS: AlertKind[] = ['battery', 'sharing'];
+const SYSTEM_KINDS: AlertKind[] = ['battery', 'sharing', 'gps', 'offline'];
 
 export const SEVERITY_OF: Record<AlertKind, AlertSeverity> = {
   sos: 'critical',
+  // "I can no longer tell you where they are" outranks an ordinary arrival:
+  // silence is the state a worried person most needs surfaced.
+  gps: 'important',
+  offline: 'important',
+  deviation: 'important',
   battery: 'important',
   leave: 'important',
+  announcement: 'important',
   enter: 'info',
   checkin: 'info',
   sharing: 'info',
@@ -101,6 +119,8 @@ export interface RecordAlertInput {
   actorName: string;
   text: string;
   at?: number;
+  /** Set for trip alerts so history can attribute them without parsing text. */
+  tripId?: string;
 }
 
 /** Append an alert. Returns the stored alert, or null when deduped. */
@@ -121,6 +141,7 @@ export async function recordAlert(input: RecordAlertInput): Promise<FamilyAlert 
     text: input.text,
     at,
     read: false,
+    ...(input.tripId ? { tripId: input.tripId } : {}),
   };
   alerts = [alert, ...alerts].slice(0, MAX_ALERTS);
   emit();

@@ -13,8 +13,9 @@ import { triggerDistances, type RoadClass, type NotifTiming } from './adaptiveDi
 import { newTimeline, advanceTimeline, type TimelineState } from './notificationTimeline';
 import { detectMissedTurn, offRouteFrom } from './missedTurn';
 import { playHaptic, stopHaptics, type DisplayMode } from './hapticPlayer';
-import { fetchRoute, type Route, type Costing, type Maneuver } from './routing';
+import { fetchRoute, type Route, type Costing, type Maneuver, type RouteOpts } from './routing';
 import { type NavProfile, type HapticEvent, type HapticPattern } from './hapticLanguage';
+import { startVoiceGuide, stopVoiceGuide, feedVoiceGuide } from './voiceGuide';
 
 export interface NavBanner {
   active: boolean;
@@ -23,16 +24,26 @@ export interface NavBanner {
   roadName: string;
   distanceToManeuver: number;  // m to the next maneuver
   remainingM: number;          // m to destination
+  totalM: number;              // full route length (v2.1: overall progress bar)
   etaEpochMs: number;          // arrival time
   progress: number;            // 0..1 toward the next maneuver (banner's shrinking line)
   rerouting: boolean;
 }
-const IDLE: NavBanner = { active: false, event: null, instruction: '', roadName: '', distanceToManeuver: 0, remainingM: 0, etaEpochMs: 0, progress: 0, rerouting: false };
+const IDLE: NavBanner = { active: false, event: null, instruction: '', roadName: '', distanceToManeuver: 0, remainingM: 0, totalM: 0, etaEpochMs: 0, progress: 0, rerouting: false };
 
 // ── tiny external store for the banner ──
 let banner: NavBanner = IDLE;
 const subs = new Set<() => void>();
-function setBanner(patch: Partial<NavBanner>) { banner = { ...banner, ...patch }; subs.forEach((c) => { try { c(); } catch {} }); }
+function setBanner(patch: Partial<NavBanner>) {
+  banner = { ...banner, ...patch };
+  subs.forEach((c) => { try { c(); } catch {} });
+  // v2 voice guidance: a pure observer — no-op unless a voice mode is active.
+  feedVoiceGuide({
+    active: banner.active, instruction: banner.instruction,
+    distanceToManeuver: banner.distanceToManeuver, remainingM: banner.remainingM,
+    rerouting: banner.rerouting, event: banner.event,
+  });
+}
 export function getNavBanner(): NavBanner { return banner; }
 export function useNavBanner(): NavBanner {
   return useSyncExternalStore((cb) => { subs.add(cb); return () => subs.delete(cb); }, () => banner, () => banner);
@@ -53,6 +64,7 @@ export interface StartNavOpts {
   to: LatLng; from?: LatLng; costing?: Costing;
   profile: NavProfile; mode?: DisplayMode; custom?: Partial<Record<HapticEvent, HapticPattern>>;
   timing?: NotifTiming;
+  routeOpts?: RouteOpts;      // fastest/shortest + toll/highway avoidance (v2)
 }
 
 // ── active session ──
@@ -89,11 +101,21 @@ async function reroute() {
   rerouting = true; setBanner({ rerouting: true });
   playHaptic('reroute', opts.profile, { mode: opts.mode, custom: opts.custom });
   try {
-    route = await fetchRoute(last.pos, dest, opts.costing ?? 'auto');
+    route = await fetchRoute(last.pos, dest, opts.costing ?? 'auto', opts.routeOpts);
     maneuverIdx = 0; timeline = null;
     setGeo({ shape: route.shape });
+    setBanner({ totalM: route.lengthM });
   } catch { /* keep the old route; next fix retries via missed-turn */ }
   finally { rerouting = false; setBanner({ rerouting: false }); }
+}
+
+/** Manual "Re-route now" (v2), and the hook for live route-option changes:
+ *  optionally swap the route preferences, then recalculate from the current
+ *  position. No-op when no session is active. */
+export async function forceReroute(routeOpts?: RouteOpts): Promise<void> {
+  if (!opts) return;
+  if (routeOpts) opts = { ...opts, routeOpts };
+  await reroute();
 }
 
 function onFix(loc: Location.LocationObject) {
@@ -164,9 +186,10 @@ export async function startNavigation(o: StartNavOpts): Promise<void> {
   opts = o; dest = o.to;
   const from = o.from ?? (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High })).coords;
   const fromLL: LatLng = 'lat' in (from as any) ? (from as LatLng) : { lat: (from as any).latitude, lng: (from as any).longitude };
-  route = await fetchRoute(fromLL, o.to, o.costing ?? 'auto');
+  route = await fetchRoute(fromLL, o.to, o.costing ?? 'auto', o.routeOpts);
   maneuverIdx = 0; timeline = null; last = null;
-  setBanner({ ...IDLE, active: true });
+  startVoiceGuide(o.mode ?? 'vibrationOnly');
+  setBanner({ ...IDLE, active: true, totalM: route.lengthM });
   setGeo({ shape: route.shape, dest: o.to, pos: fromLL, heading: 0 });
 
   watcher = await Location.watchPositionAsync(
@@ -180,6 +203,7 @@ export async function stopNavigation(): Promise<void> {
   try { watcher?.remove(); } catch {}
   watcher = null; route = null; timeline = null; dest = null; opts = null; last = null; rerouting = false;
   stopHaptics();
+  stopVoiceGuide();
   setBanner(IDLE);
   setGeo(GEO_IDLE);
 }

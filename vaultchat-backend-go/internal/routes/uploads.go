@@ -32,7 +32,7 @@ func upMaxBytes() int64 {
 	if v, ok := httpx.ParseIntPrefix(os.Getenv("UPLOAD_MAX_BYTES")); ok && v > 0 {
 		return v
 	}
-	return 50 * 1024 * 1024
+	return 100 * 1024 * 1024 // server-relay media cap (images/videos/docs); huge files use VaultBeam
 }
 
 func upMultipartMaxBytes() int64 {
@@ -141,12 +141,69 @@ func uploadsPost(w http.ResponseWriter, r *http.Request) {
 	}
 	defer part.Close()
 
+	origName := part.FileName()
+	viewOnce := r.URL.Query().Get("viewOnce") == "1" || r.URL.Query().Get("viewOnce") == "true"
+	mimeType := part.Header.Get("Content-Type")
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+
+	var out struct {
+		ID       string  `json:"id"`
+		Mime     string  `json:"mime"`
+		Size     int     `json:"size"`
+		Filename *string `json:"filename"`
+		ViewOnce bool    `json:"viewOnce"`
+	}
+
+	// R2/S3-backed server-relay: the client POSTs bytes to us (it can always
+	// reach api.corefinite.com) and WE put them in R2. This is the reliable
+	// path — the presigned direct-to-R2 PUT fails on some device networks,
+	// leaving orphan rows (bytes never landed). Here the bytes are confirmed in
+	// R2 before we ever write the row, so a row always has an object behind it.
+	if storage.Enabled() {
+		data, err := io.ReadAll(io.LimitReader(part, maxBytes+1))
+		if err != nil {
+			httpx.Err(w, 500, "Upload failed")
+			return
+		}
+		if int64(len(data)) > maxBytes {
+			httpx.Err(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("File too large (max %d bytes)", maxBytes))
+			return
+		}
+		id := upUUID()
+		key := "att/" + id + upSafeExt(origName)
+		if err := storage.PutObject(ctx, key, data, mimeType); err != nil {
+			httpx.Err(w, 502, "Storage upload failed")
+			return
+		}
+		if err := db.WithUser(ctx, user.ID, func(tx pgx.Tx) error {
+			var fn *string
+			var vo bool
+			e := tx.QueryRow(ctx,
+				`INSERT INTO attachments
+				   (id, owner_user_id, filename, mime_type, size_bytes, storage_path, view_once, storage_backend)
+				 VALUES ($1, $2, $3, $4, $5, $6, $7, 's3')
+				 RETURNING id, mime_type, size_bytes, filename, view_once`,
+				id, user.ID, truncRunes(origName, 255), truncRunes(mimeType, 100), len(data),
+				key, viewOnce).Scan(&out.ID, &out.Mime, &out.Size, &fn, &vo)
+			out.Filename, out.ViewOnce = fn, vo
+			return e
+		}); err != nil {
+			storage.DeleteObject(ctx, key) // don't leave an R2 object with no row
+			httpx.Err(w, 500, "Upload failed")
+			return
+		}
+		httpx.JSON(w, 200, out)
+		return
+	}
+
+	// No object store configured → local disk (dev / self-host fallback).
 	dir := filepath.Join(upDir(), upShardPath(time.Now()))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		httpx.Err(w, 500, "Upload failed")
 		return
 	}
-	origName := part.FileName()
 	diskName := upUUID() + upSafeExt(origName)
 	absPath := filepath.Join(dir, diskName)
 	f, err := os.Create(absPath)
@@ -168,19 +225,6 @@ func uploadsPost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	relPath, _ := filepath.Rel(upDir(), absPath)
-	viewOnce := r.URL.Query().Get("viewOnce") == "1" || r.URL.Query().Get("viewOnce") == "true"
-	mimeType := part.Header.Get("Content-Type")
-	if mimeType == "" {
-		mimeType = "application/octet-stream"
-	}
-
-	var out struct {
-		ID       string  `json:"id"`
-		Mime     string  `json:"mime"`
-		Size     int     `json:"size"`
-		Filename *string `json:"filename"`
-		ViewOnce bool    `json:"viewOnce"`
-	}
 	err = db.WithUser(ctx, user.ID, func(tx pgx.Tx) error {
 		var fn *string
 		var vo bool

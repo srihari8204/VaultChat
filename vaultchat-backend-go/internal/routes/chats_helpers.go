@@ -20,6 +20,7 @@ import (
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/emitx"
 	"vaultchat/backend-go/internal/fcm"
+	"vaultchat/backend-go/internal/groups"
 	"vaultchat/backend-go/internal/httpx"
 	"vaultchat/backend-go/internal/realtime"
 	"vaultchat/backend-go/internal/vault"
@@ -63,17 +64,19 @@ func chatsGet(w http.ResponseWriter, r *http.Request) {
 		cSlowMode                                    int64
 		cSendPolicy, cMediaPolicy, cAddMembersPolicy *string
 		cAntiSpamLinks, cApproveMembers              bool
+		cIcon, cColor                                *string
+		cPrivacy                                     string
 	)
 	err := chatsQRow(ctx, user.ID,
 		`SELECT id, type, name, description, photo_url, created_by, created_at, updated_at,
 		        last_message_id, last_message_at, pinned_message_id, disappearing_seconds,
 		        slow_mode_seconds, send_policy, media_policy, add_members_policy,
-		        anti_spam_links, approve_members
+		        anti_spam_links, approve_members, icon, color, privacy
 		   FROM chats WHERE id = $1`, []any{chatID},
 		&cID, &cType, &cName, &cDescription, &cPhotoURL, &cCreatedBy, &cCreatedAt, &cUpdatedAt,
 		&cLastMessageID, &cLastMessageAt, &cPinnedMessageID, &cDisappearing,
 		&cSlowMode, &cSendPolicy, &cMediaPolicy, &cAddMembersPolicy,
-		&cAntiSpamLinks, &cApproveMembers)
+		&cAntiSpamLinks, &cApproveMembers, &cIcon, &cColor, &cPrivacy)
 	if db.NoRows(err) {
 		httpx.Err(w, 404, "Chat not found")
 		return
@@ -164,6 +167,7 @@ func chatsGet(w http.ResponseWriter, r *http.Request) {
 		pubMembers = append(pubMembers, p)
 	}
 
+	gm := chatsBuildGroupMeta(mem, cIcon, cColor, cPrivacy)
 	httpx.JSON(w, 200, map[string]any{
 		"id":                  cID,
 		"type":                cType,
@@ -184,11 +188,21 @@ func chatsGet(w http.ResponseWriter, r *http.Request) {
 		"antiSpamLinks":       cAntiSpamLinks,
 		"approveMembers":      cApproveMembers,
 		"members":             pubMembers,
-		"myRole":              mem.Role,
-		"myLastReadId":        userBigStr(mem.LastReadMessageID),
-		"hidden":              mem.Hidden,
-		"screenshotMode":      chatsStrDefault(mem.ScreenshotMode, "block"),
-		"vanishMode":          mem.VanishMode,
+		// Groups & Circles: the group's identity plus THIS CALLER's resolved
+		// permission set, so the client can gate its own UI. Advisory only —
+		// every mutating endpoint re-resolves server-side.
+		"groupType":      gm.GroupType,
+		"icon":           gm.Icon,
+		"color":          gm.Color,
+		"privacy":        gm.Privacy,
+		"maxMembers":     gm.MaxMembers,
+		"approvalMode":   gm.ApprovalMode,
+		"permissions":    gm.Permissions,
+		"myRole":         mem.Role,
+		"myLastReadId":   userBigStr(mem.LastReadMessageID),
+		"hidden":         mem.Hidden,
+		"screenshotMode": chatsStrDefault(mem.ScreenshotMode, "block"),
+		"vanishMode":     mem.VanishMode,
 	})
 }
 
@@ -197,7 +211,7 @@ func chatsGet(w http.ResponseWriter, r *http.Request) {
 var (
 	chatsMsgTypes = map[string]bool{"text": true, "image": true, "video": true, "audio": true,
 		"file": true, "location": true, "system": true, "sticker": true, "poll": true,
-		"reaction": true, "vaultbeam": true}
+		"reaction": true, "vaultbeam": true, "group_ref": true}
 	chatsGifURLRe = regexp.MustCompile(`^https://\S+$`)
 	chatsLinkRe   = regexp.MustCompile(`(?i)https?://`)
 )
@@ -279,6 +293,31 @@ func chatsMessagePost(w http.ResponseWriter, r *http.Request) {
 			metaParam = string(j) // typeof [] === 'object' in JS
 		}
 	}
+
+	// Groups & Circles: an ANNOUNCEMENT is an ordinary encrypted message flagged
+	// in `meta`. The server can read meta (it is deliberately PII-free) even
+	// though the body is ciphertext, which is what makes send_announcements a
+	// REAL permission rather than a client-side decoration — gating only in the
+	// UI would let any modified client post one.
+	//
+	// The flag discloses that a message IS an announcement, never what it says.
+	// Checked here, before the per-type validation, so it applies to every
+	// message kind rather than only the one branch it happens to sit in.
+	if meta != nil && chatsTruthy(meta["announcement"]) && !mem.can(groups.PermSendAnnouncement) {
+		httpx.Err(w, 403, "You do not have permission to send announcements")
+		return
+	}
+
+	// Groups & Circles: a group_ref card is the in-app replacement for an invite
+	// link, and the two guarantees that make it not-a-link are enforced HERE.
+	// Validating it client-side would leave both to a modified client.
+	if msgType == "group_ref" {
+		if msg := chatsValidateGroupRef(ctx, user.ID, meta); msg != "" {
+			httpx.Err(w, 403, msg)
+			return
+		}
+	}
+
 	var replyTo *int64
 	if chatsTruthy(b["replyToId"]) {
 		if n, ok := chatsParseInt(b["replyToId"]); ok {
@@ -313,6 +352,14 @@ func chatsMessagePost(w http.ResponseWriter, r *http.Request) {
 		}
 		if len([]rune(contentRaw)) > 64 {
 			httpx.Err(w, 400, "sticker id too long")
+			return
+		}
+	case msgType == "group_ref":
+		// The card lives entirely in meta, which the server can read and has
+		// already validated. There is no body to encrypt: everything it says is
+		// something the recipient is about to be shown anyway.
+		if meta == nil || strings.TrimSpace(chatsStrOr(meta["groupId"], "")) == "" {
+			httpx.Err(w, 400, "meta.groupId required for a group reference")
 			return
 		}
 	case msgType == "reaction":
@@ -902,9 +949,12 @@ func chatsMembersAdd(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 400, "Only group chats support add")
 		return
 	}
-	canAdd := mem.isAdmin() || (mem.AddMembersPolicy != nil && *mem.AddMembersPolicy == "everyone")
+	// A typed group answers this from its permission matrix; an untyped legacy
+	// group keeps the old admin-or-open-policy rule exactly (see chatsMem.can).
+	canAdd := mem.can(groups.PermInviteMembers) ||
+		(mem.AddMembersPolicy != nil && *mem.AddMembersPolicy == "everyone")
 	if !canAdd {
-		httpx.Err(w, 403, "Only admins can add members")
+		httpx.Err(w, 403, "You do not have permission to add members")
 		return
 	}
 
@@ -931,8 +981,18 @@ func chatsMembersAdd(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 500, "Failed to add members")
 		return
 	}
-	if size+len(ids) > chatsMaxGroupSize {
-		httpx.Err(w, 400, fmt.Sprintf("Group would exceed cap of %d", chatsMaxGroupSize))
+	// A typed group's cap comes from group_type_config and is usually far below
+	// the global ceiling; untyped legacy groups keep the global one. This is an
+	// EARLY, friendly rejection only — the authoritative check is the database
+	// trigger from migration 070, which serialises on the group row. An
+	// application-level count cannot be the gate: two concurrent adds both read
+	// the same `size` and both pass.
+	cap := chatsMaxGroupSize
+	if mem.MaxMembers != nil && int(*mem.MaxMembers) > 0 && int(*mem.MaxMembers) < cap {
+		cap = int(*mem.MaxMembers)
+	}
+	if size+len(ids) > cap {
+		httpx.Err(w, 409, fmt.Sprintf("Group would exceed its limit of %d members", cap))
 		return
 	}
 
@@ -1005,17 +1065,33 @@ func chatsMembersAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	added := []string{}
 	for _, uid := range allowed {
 		if err := chatsExecU(ctx, user.ID,
 			`INSERT INTO chat_members (chat_id, user_id, role)
 			 VALUES ($1, $2, 'member')
 			 ON CONFLICT (chat_id, user_id) DO UPDATE SET left_at = NULL`,
 			chatID, uid); err != nil {
+			// The cap trigger firing here is not a server fault: it means
+			// another add won the race for the last seat. Report the seats,
+			// and keep whoever already went in — partial success beats
+			// rolling back members who were legitimately added.
+			if chatsCapExceeded(err) {
+				if len(added) > 0 {
+					realtime.InvalidateChatMembers(ctx, chatID)
+					emitx.ChatEvent(chatID, "members_added", map[string]any{"added": added, "by": user.ID})
+				}
+				httpx.Err(w, 409, "Group is full")
+				return
+			}
 			log.Printf("[members POST] %v", err)
 			httpx.Err(w, 500, "Failed to add members")
 			return
 		}
+		added = append(added, uid)
+		chatsAudit(ctx, user.ID, chatID, "member_added", &uid, nil)
 	}
+	allowed = added
 	// P2.2: drop the cached roster BEFORE the fan-out so members_added reaches
 	// the users just added (a stale cache would exclude them).
 	realtime.InvalidateChatMembers(ctx, chatID)
@@ -1037,15 +1113,24 @@ func chatsMemberRole(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 400, "Only group chats have roles")
 		return
 	}
-	if !mem.isAdmin() {
-		httpx.Err(w, 403, "Admin only")
+	if !mem.can(groups.PermRemoveMembers) {
+		httpx.Err(w, 403, "You do not have permission to change roles")
 		return
 	}
 	var b map[string]any
 	_ = httpx.Body(r, &b)
 	role := fmt.Sprintf("%v", orEmpty(b["role"]))
-	if role != "admin" && role != "member" {
-		httpx.Err(w, 400, "role must be 'admin' or 'member'")
+	// 'guest' and 'moderator' join the accepted set for typed groups only: an
+	// untyped legacy group has no semantics for either and must keep its
+	// original two-role world.
+	validRole := role == "admin" || role == "member" ||
+		((role == "guest" || role == groups.RoleModerator) && mem.isTypedGroup())
+	if !validRole {
+		if mem.isTypedGroup() {
+			httpx.Err(w, 400, "role must be 'admin', 'moderator', 'member' or 'guest'")
+		} else {
+			httpx.Err(w, 400, "role must be 'admin' or 'member'")
+		}
 		return
 	}
 	target := r.PathValue("userId")
@@ -1067,12 +1152,11 @@ func chatsMemberRole(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 500, "Failed to change role")
 		return
 	}
-	if targetRole == "owner" {
-		httpx.Err(w, 403, "Cannot change the owner role")
-		return
-	}
-	if targetRole == "admin" && role == "member" && mem.Role != "owner" {
-		httpx.Err(w, 403, "Only the owner can demote an admin")
+	// One rule, shared with the client mirror: nobody edits an owner, nobody is
+	// promoted TO owner through this path, and an admin cannot demote a peer
+	// admin (otherwise two admins can demote each other in a loop).
+	if !groups.CanManageRole(mem.Role, targetRole, role) {
+		httpx.Err(w, 403, "You cannot change this member's role")
 		return
 	}
 
@@ -1083,6 +1167,8 @@ func chatsMemberRole(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 500, "Failed to change role")
 		return
 	}
+	chatsAudit(ctx, user.ID, chatID, "member_role_changed", &target,
+		map[string]any{"from": targetRole, "to": role})
 	emitx.ChatEvent(chatID, "member_role_changed", map[string]any{"userId": target, "role": role, "by": user.ID})
 	httpx.JSON(w, 200, map[string]any{"ok": true, "userId": target, "role": role})
 }
@@ -1101,8 +1187,8 @@ func chatsInviteCreate(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 400, "Only group chats have invite links")
 		return
 	}
-	if !mem.isAdmin() {
-		httpx.Err(w, 403, "Admin only")
+	if !mem.can(groups.PermInviteMembers) {
+		httpx.Err(w, 403, "You do not have permission to manage invites")
 		return
 	}
 	var b map[string]any
@@ -1140,8 +1226,8 @@ func chatsInviteList(w http.ResponseWriter, r *http.Request) {
 	if mem == nil {
 		return
 	}
-	if !mem.isAdmin() {
-		httpx.Err(w, 403, "Admin only")
+	if !mem.can(groups.PermInviteMembers) {
+		httpx.Err(w, 403, "You do not have permission to manage invites")
 		return
 	}
 	out := []chatsPublicInvite{}
@@ -1170,8 +1256,8 @@ func chatsInviteRevoke(w http.ResponseWriter, r *http.Request) {
 	if mem == nil {
 		return
 	}
-	if !mem.isAdmin() {
-		httpx.Err(w, 403, "Admin only")
+	if !mem.can(groups.PermInviteMembers) {
+		httpx.Err(w, 403, "You do not have permission to manage invites")
 		return
 	}
 	linkID, ok := httpx.ParseIntPrefix(r.PathValue("linkId"))
@@ -1201,7 +1287,6 @@ func chatsPatch(w http.ResponseWriter, r *http.Request) {
 	}
 	var b map[string]any
 	_ = httpx.Body(r, &b)
-	isAdmin := mem.isAdmin()
 	isGroup := mem.ChatType == "group"
 
 	sets := []string{}
@@ -1210,13 +1295,16 @@ func chatsPatch(w http.ResponseWriter, r *http.Request) {
 		params = append(params, v)
 		sets = append(sets, fmt.Sprintf("%s = $%d", col, len(params)))
 	}
+	// Settings edits are one permission. On an untyped legacy group can() is
+	// exactly isAdmin, so nothing about existing groups changes.
+	canEdit := mem.can(groups.PermEditSettings)
 	adminGroupGate := func(directErr string) bool {
 		if !isGroup {
 			httpx.Err(w, 400, directErr)
 			return false
 		}
-		if !isAdmin {
-			httpx.Err(w, 403, "Admin only")
+		if !canEdit {
+			httpx.Err(w, 403, "You do not have permission to edit this group")
 			return false
 		}
 		return true
@@ -1254,6 +1342,57 @@ func chatsPatch(w http.ResponseWriter, r *http.Request) {
 			v = &d
 		}
 		push("description", v)
+	}
+
+	// ── Groups & Circles metadata (migration 070) ──
+	// This is also how an existing Family Space circle becomes a typed group:
+	// the client stamps groupType on first run after upgrade, because the
+	// server has no way to know which of its groups were circles.
+	if s, ok := b["groupType"].(string); ok {
+		if !adminGroupGate("Direct chats have no group type") {
+			return
+		}
+		t := strings.ToLower(strings.TrimSpace(s))
+		if t == "" {
+			httpx.Err(w, 400, "groupType cannot be empty")
+			return
+		}
+		known, err := chatsKnownGroupType(ctx, user.ID, t)
+		if err != nil {
+			log.Printf("[chats PATCH] group type lookup: %v", err)
+			httpx.Err(w, 500, "Failed to update chat")
+			return
+		}
+		if !known {
+			httpx.Err(w, 400, "Unknown group type")
+			return
+		}
+		push("group_type", t)
+	}
+	if s, ok := b["icon"].(string); ok {
+		if !adminGroupGate("Direct chats have no icon") {
+			return
+		}
+		v := truncRunes(strings.TrimSpace(s), chatsGroupIconMax)
+		push("icon", chatsNilIfEmpty(v))
+	}
+	if s, ok := b["color"].(string); ok {
+		if !adminGroupGate("Direct chats have no color") {
+			return
+		}
+		v := truncRunes(strings.TrimSpace(s), chatsGroupColorMax)
+		push("color", chatsNilIfEmpty(v))
+	}
+	if s, ok := b["privacy"].(string); ok {
+		if !adminGroupGate("Direct chats have no privacy setting") {
+			return
+		}
+		p := strings.ToLower(strings.TrimSpace(s))
+		if !chatsValidPrivacy(p) {
+			httpx.Err(w, 400, "privacy must be 'private' or 'invite_only'")
+			return
+		}
+		push("privacy", p)
 	}
 
 	// Disappearing-messages timer: any member can set/clear it.
@@ -1536,10 +1675,37 @@ func chatsMemberRemove(w http.ResponseWriter, r *http.Request) {
 	}
 	target := r.PathValue("userId")
 	isSelf := target == user.ID
-	if !isSelf && !mem.isAdmin() {
-		httpx.Err(w, 403, "Admin only")
-		return
+
+	// Leaving is always your own right; removing someone else needs both the
+	// permission AND the rank.
+	if !isSelf {
+		if !mem.can(groups.PermRemoveMembers) {
+			httpx.Err(w, 403, "You do not have permission to remove members")
+			return
+		}
+		var targetRole string
+		var leftAt *time.Time
+		err := chatsQRow(ctx, user.ID,
+			`SELECT role, left_at FROM chat_members WHERE chat_id = $1 AND user_id = $2`,
+			[]any{chatID, target}, &targetRole, &leftAt)
+		if db.NoRows(err) || (err == nil && leftAt != nil) {
+			httpx.Err(w, 404, "They are not in this group")
+			return
+		}
+		if err != nil {
+			log.Printf("[members DELETE] role: %v", err)
+			httpx.Err(w, 500, "Failed to remove member")
+			return
+		}
+		// The permission alone is not enough. Migration 069 gives moderators
+		// remove_members, so without this a moderator could remove the OWNER and
+		// orphan the group, and two admins could remove each other in a race.
+		if !groups.CanRemoveMember(mem.Role, targetRole) {
+			httpx.Err(w, 403, "You cannot remove someone at or above your own role")
+			return
+		}
 	}
+
 	if err := chatsExecU(ctx, user.ID,
 		`UPDATE chat_members SET left_at = NOW()
 		 WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL`,
@@ -1548,13 +1714,62 @@ func chatsMemberRemove(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 500, "Failed to remove member")
 		return
 	}
+
+	// A REMOVAL starts a cooldown; leaving does not. Without this, being removed
+	// only stops someone until anyone with invite rights taps once — which makes
+	// the removal a formality rather than a decision. Recorded after the fact and
+	// best-effort: a member who cannot be removed because the cooldown write
+	// hiccuped is worse than a cooldown that was not applied.
+	var cooldownUntil *time.Time
+	if !isSelf {
+		cooldownUntil = chatsRecordRemoval(ctx, user.ID, chatID, target)
+	}
+
 	realtime.InvalidateChatMembers(ctx, chatID) // P2.2: fresh roster before the fan-out
 	event := "member_removed"
 	if isSelf {
 		event = "member_left"
 	}
+	chatsAudit(ctx, user.ID, chatID, event, &target, nil)
 	emitx.ChatEvent(chatID, event, map[string]any{"userId": target, "by": user.ID})
-	httpx.JSON(w, 200, map[string]any{"ok": true})
+	out := map[string]any{"ok": true}
+	if cooldownUntil != nil {
+		out["cooldownUntil"] = httpx.JSTime(*cooldownUntil)
+	}
+	httpx.JSON(w, 200, out)
+}
+
+// chatsRecordRemoval writes the group_removals row that gates re-invitation,
+// returning when the removed member may return (nil = immediately).
+//
+// The WINDOW comes from group_type_config.removal_cooldown_hours (migration
+// 070), not from a constant here, so it can be tuned per kind of group without
+// a release. Zero — the default for every existing type — means no cooldown, so
+// this changes nothing until somebody sets one.
+//
+// Best-effort by design, like the audit log: it runs after the member is
+// already out, and a failure is logged rather than surfaced.
+func chatsRecordRemoval(ctx context.Context, actorID, chatID, target string) *time.Time {
+	var until *time.Time
+	err := chatsQRow(ctx, actorID,
+		`INSERT INTO group_removals (chat_id, user_id, removed_by, removed_at, cooldown_until)
+		 SELECT $1, $2, $3, NOW(),
+		        CASE WHEN COALESCE(g.removal_cooldown_hours, 0) > 0
+		             THEN NOW() + make_interval(hours => g.removal_cooldown_hours)
+		             ELSE NULL END
+		   FROM chats c
+		   LEFT JOIN group_type_config g ON g.group_type = c.group_type
+		  WHERE c.id = $1
+		 ON CONFLICT (chat_id, user_id) DO UPDATE
+		    SET removed_by = EXCLUDED.removed_by,
+		        removed_at = EXCLUDED.removed_at,
+		        cooldown_until = EXCLUDED.cooldown_until
+		 RETURNING cooldown_until`,
+		[]any{chatID, target, actorID}, &until)
+	if err != nil && !db.NoRows(err) {
+		log.Printf("[members DELETE] cooldown record on %s: %v", chatID, err)
+	}
+	return until
 }
 
 // ─── Polls ─────────────────────────────────────────────────────────────

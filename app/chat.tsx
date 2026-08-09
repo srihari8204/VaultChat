@@ -117,7 +117,9 @@ import {
   type ChatSummary,
   type Message,
   type ReactionSummary,
+  groupRefOf,
 } from '../lib/chatService';
+import { groupTypeInfo } from '../lib/groups/catalog';
 import { markReadDurable, markDeliveredDurable } from '../lib/receipts';
 import { type MediaType } from '../lib/sendMedia';
 import { enqueueMedia, cancelMedia, retryMedia, pendingForChat as mediaPendingForChat, on as onMediaOutbox } from '../lib/mediaOutbox';

@@ -1,4 +1,4 @@
--- 070_vaultbeam_recv_mask.sql
+-- 076_vaultbeam_recv_mask.sql (renumbered from 070 — 070_groups_circles.sql already held that slot on prod)
 -- Idempotent.
 --
 -- VaultBeam seamless resume (openspec/changes/vaultbeam-seamless-resume).

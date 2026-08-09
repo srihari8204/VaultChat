@@ -233,6 +233,74 @@ app.post('/internal/chat-event', (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Internal user notify (membership v2) ────────────────────────────────
+// Emit to specific users AND wake the ones who are not connected. Used by the
+// Go membership routes, whose audience is precisely the people chat fan-out
+// cannot reach: an invitee is not in the group's socket room — that is what
+// being invited means — and someone invited while their app is closed learns
+// nothing from an emit into the void.
+//
+// Body: { userIds:[uid], event, payload, socket?:bool, push?:{title,body,data} }
+// `socket:false` means Go already emitted in-process; only the push is wanted.
+//
+// A user with a LIVE socket gets no push, mirroring the call path: they have
+// already been told in-app, and a banner on top of that reads as a duplicate.
+// The check lives here rather than in Go because Go has no socket state while
+// Node still owns the sockets.
+app.post('/internal/notify', async (req, res) => {
+  const key = process.env.INTERNAL_EMIT_KEY || '';
+  if (!key || req.get('x-internal-key') !== key) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  const { userIds, event, payload, push, socket } = req.body || {};
+  if (!event || typeof event !== 'string') return res.status(400).json({ error: 'event required' });
+  const uids = Array.isArray(userIds) ? userIds.filter(u => typeof u === 'string') : [];
+  if (uids.length === 0) return res.json({ ok: true, users: 0 });
+
+  if (socket !== false) {
+    for (const uid of uids) io.to(`user:${uid}`).emit(event, payload);
+  }
+
+  // Best-effort from here: a failed push must never fail the membership change
+  // that triggered it. The action already happened; the notification is a
+  // courtesy on top of it.
+  let pushed = 0;
+  if (push && typeof push.title === 'string' && typeof push.body === 'string') {
+    try {
+      const offline = [];
+      for (const uid of uids) {
+        const live = await io.in(`user:${uid}`).fetchSockets();
+        if (live.length === 0) offline.push(uid);
+      }
+      if (offline.length) {
+        const r = await db.query(
+          `SELECT push_token FROM devices
+            WHERE user_id = ANY($1::uuid[]) AND push_token IS NOT NULL`,
+          [offline],
+        );
+        const tokens = r.rows.map(x => x.push_token).filter(Boolean);
+        if (tokens.length) {
+          const { dead } = await sendPushToTokens(tokens, {
+            title: push.title,
+            body: push.body,
+            data: { type: 'membership', event, ...(push.data || {}) },
+          });
+          pushed = tokens.length - (dead?.length ?? 0);
+          // Expo told us these devices are gone. Pruning them here is what stops
+          // an uninstalled device from silently eating every future send.
+          if (dead?.length) {
+            await db.query(`UPDATE devices SET push_token = NULL WHERE push_token = ANY($1::text[])`, [dead])
+              .catch(() => {});
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[internal/notify] push failed:', e.message);
+    }
+  }
+  res.json({ ok: true, users: uids.length, pushed });
+});
+
 // Expose the live runtime to the admin router (online count + socket emitter).
 adminRouter.setRuntime({ io, getOnlineCount: () => userSockets.size });
 
@@ -824,6 +892,25 @@ io.on('connection', (socket) => {
 
   // Live location — relay position updates to the chat room. The sender's
   // location screen emits; the peers' open chat screens render a live banner.
+  // Only relay into a chat the sender is actually a member of. Cached per chat
+  // for this socket so it is one query per session, not one per ping.
+  //
+  // Shared by live location AND group trips deliberately: they are the same
+  // trust decision, and two copies would eventually disagree about who may
+  // broadcast into a chat.
+  const liveRelayAllowed = async (sock, chatId) => {
+    sock.data.liveLocOk = sock.data.liveLocOk || {};
+    if (sock.data.liveLocOk[chatId] === undefined) {
+      try {
+        const r = await db.queryAs(sock.data.uid,
+          `SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL LIMIT 1`,
+          [chatId, sock.data.uid]);
+        sock.data.liveLocOk[chatId] = r.rowCount > 0;
+      } catch { sock.data.liveLocOk[chatId] = false; }
+    }
+    return sock.data.liveLocOk[chatId];
+  };
+
   // Server only RELAYS (no storage) and is ZERO-KNOWLEDGE: the position is an
   // opaque `blob` (client-side AES-256-GCM under a per-session key delivered E2E
   // in the initial 'location' message). We never see coordinates. `until` is a
@@ -831,18 +918,7 @@ io.on('connection', (socket) => {
   // cross-version rollout but new clients send only `blob`.
   socket.on('live_location_update', async ({ chatId, blob, latitude, longitude, address, until }) => {
     if (!chatId) return;
-    // Only relay into a chat the sender is actually a member of (cache the
-    // membership check per chat for this socket so it's one query per session).
-    socket.data.liveLocOk = socket.data.liveLocOk || {};
-    if (socket.data.liveLocOk[chatId] === undefined) {
-      try {
-        const r = await db.queryAs(socket.data.uid,
-          `SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL LIMIT 1`,
-          [chatId, socket.data.uid]);
-        socket.data.liveLocOk[chatId] = r.rowCount > 0;
-      } catch { socket.data.liveLocOk[chatId] = false; }
-    }
-    if (!socket.data.liveLocOk[chatId]) return;
+    if (!(await liveRelayAllowed(socket, chatId))) return;
     const out = { userId: socket.data.uid, until };
     if (blob) out.blob = blob;                                  // E2E path (preferred)
     else if (latitude != null) { out.latitude = latitude; out.longitude = longitude; out.address = address; } // legacy
@@ -851,6 +927,29 @@ io.on('connection', (socket) => {
   socket.on('live_location_stop', ({ chatId }) => {
     if (!chatId) return;
     socket.to(`chat:${chatId}`).emit('live_location_stop', { userId: socket.data.uid });
+  });
+
+  // Group trips (Groups & Circles, G5) — the SAME zero-knowledge relay shape as
+  // live location, reusing its cached membership check.
+  //
+  // These were missing entirely: the client has emitted trip_update since G5
+  // shipped and nothing on the server listened, so every ping went into a void
+  // and no member ever saw another member's ETA. Socket.IO drops unknown events
+  // silently, which is why it looked like it worked.
+  //
+  // `blob` is sealed with the trip key the starter published in an E2EE message,
+  // so the server relays an opaque payload and never learns a destination, an
+  // ETA or a route. tripId travels in the clear because it is an opaque id the
+  // client uses to ignore pings from a trip it is not on.
+  socket.on('trip_update', async ({ chatId, tripId, blob }) => {
+    if (!chatId || !blob) return;
+    if (!(await liveRelayAllowed(socket, chatId))) return;
+    socket.to(`chat:${chatId}`).emit('trip_update', { userId: socket.data.uid, tripId, blob });
+  });
+  socket.on('trip_end', async ({ chatId, tripId }) => {
+    if (!chatId) return;
+    if (!(await liveRelayAllowed(socket, chatId))) return;
+    socket.to(`chat:${chatId}`).emit('trip_end', { userId: socket.data.uid, tripId });
   });
 
   // Route via fanOutToChat so it reaches every member's user-room (the chat

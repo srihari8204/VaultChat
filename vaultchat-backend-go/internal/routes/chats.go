@@ -9,6 +9,7 @@ package routes
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/emitx"
+	"vaultchat/backend-go/internal/groups"
 	"vaultchat/backend-go/internal/httpx"
 	"vaultchat/backend-go/internal/realtime"
 	"vaultchat/backend-go/internal/vault"
@@ -85,7 +87,10 @@ func RegisterChats(mux *http.ServeMux) {
 	id.HandleFunc("POST /chats/{id}/pin-message", httpx.RequireAuth(chatsPinMessage))
 	id.HandleFunc("POST /chats/{id}/sender-keys", httpx.RequireAuth(chatsSenderKeysPost))
 	id.HandleFunc("GET /chats/{id}/sender-keys", httpx.RequireAuth(chatsSenderKeysGet))
-	mux.Handle("/chats/{id}/", id) // subtree forward; `id` re-matches the full path
+	RegisterChatInvitationsOnID(id) // Groups & Circles per-invitee invitations
+	RegisterChatMembershipOnID(id)  // Groups & Circles in-app membership (v2)
+	RegisterChatCalendarOnID(id)    // Groups & Circles shared calendar
+	mux.Handle("/chats/{id}/", id)  // subtree forward; `id` re-matches the full path
 }
 
 // ─── RLS plumbing (Node req.dbQuery = one withUser tx per query) ───────
@@ -244,32 +249,117 @@ type chatsMem struct {
 	AddMembersPolicy  *string
 	AntiSpamLinks     bool
 	ApproveMembers    bool
+
+	// ── membership v2 (migration 073) ──
+	// How many gates stand between an invitation and membership. Read through
+	// invites.NormalizeMode, never raw: an unrecognised value must resolve to
+	// the strictest mode rather than the loosest.
+	ApprovalModeRaw string
+
+	// ── Groups & Circles (migration 070) ──
+	// GroupType is NULL for every group created before that migration; those
+	// keep the legacy admin-or-nothing rule. See can().
+	GroupType  *string
+	MaxMembers *int32
+	// The three permission layers, raw as stored. Resolution lives in
+	// internal/groups so the client mirror and the server cannot drift.
+	typeDefaults   map[string][]string
+	groupOverrides map[string][]string
+	memberGrants   []string
+	memberGrantSet bool
 }
 
 func (m *chatsMem) isAdmin() bool { return m.Role == "admin" || m.Role == "owner" }
 
+// isTypedGroup reports whether this chat participates in the permission model.
+func (m *chatsMem) isTypedGroup() bool { return m.GroupType != nil && *m.GroupType != "" }
+
+// perms resolves this member's effective permission set.
+func (m *chatsMem) perms() groups.Set {
+	return groups.Resolve(m.Role, groups.Layers{
+		TypeDefault:      m.typeDefaults,
+		GroupOverride:    m.groupOverrides,
+		MemberGrant:      m.memberGrants,
+		MemberGrantIsSet: m.memberGrantSet,
+	})
+}
+
+// can reports whether this member holds p.
+//
+// BACKWARD COMPATIBILITY, deliberately: a chat with no group_type has no
+// permission layers, so it keeps the EXACT pre-existing rule — owners and
+// admins may act, everyone else may not. Every group that existed before
+// migration 070 therefore behaves identically after it, and the new model only
+// governs groups that opted into a type.
+func (m *chatsMem) can(p groups.Permission) bool {
+	if !m.isTypedGroup() {
+		return m.isAdmin()
+	}
+	return m.perms().Has(p)
+}
+
 func chatsLoadMem(ctx context.Context, uid, chatID string) (*chatsMem, error) {
 	m := &chatsMem{}
+	var overridesRaw, grantsRaw, defaultsRaw []byte
 	err := chatsQRow(ctx, uid,
 		`SELECT cm.role, cm.joined_at, cm.last_read_message_id, cm.muted, cm.left_at,
 		        cm.hidden, cm.screenshot_mode, cm.vanish_mode,
 		        c.type AS chat_type, c.send_policy, c.slow_mode_seconds,
-		        c.media_policy, c.add_members_policy, c.anti_spam_links, c.approve_members
+		        c.media_policy, c.add_members_policy, c.anti_spam_links, c.approve_members,
+		        c.approval_mode,
+		        c.group_type, g.max_members, c.permission_overrides, cm.permission_grants,
+		        g.default_permissions
 		 FROM chat_members cm
 		 JOIN chats c ON c.id = cm.chat_id
+		 LEFT JOIN group_type_config g ON g.group_type = c.group_type
 		 WHERE cm.chat_id = $1 AND cm.user_id = $2`,
 		[]any{chatID, uid},
 		&m.Role, &m.JoinedAt, &m.LastReadMessageID, &m.Muted, &m.LeftAt,
 		&m.Hidden, &m.ScreenshotMode, &m.VanishMode,
 		&m.ChatType, &m.SendPolicy, &m.SlowModeSeconds,
-		&m.MediaPolicy, &m.AddMembersPolicy, &m.AntiSpamLinks, &m.ApproveMembers)
+		&m.MediaPolicy, &m.AddMembersPolicy, &m.AntiSpamLinks, &m.ApproveMembers,
+		&m.ApprovalModeRaw,
+		&m.GroupType, &m.MaxMembers, &overridesRaw, &grantsRaw, &defaultsRaw)
 	if db.NoRows(err) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	m.typeDefaults = chatsPermMap(defaultsRaw)
+	m.groupOverrides = chatsPermMap(overridesRaw)
+	m.memberGrants, m.memberGrantSet = chatsPermList(grantsRaw)
 	return m, nil
+}
+
+// chatsPermMap decodes a role→permissions JSONB column. Malformed JSON yields
+// nil (layer absent) rather than an error: a permission layer that cannot be
+// read must fall through to the layer beneath, never grant anything.
+func chatsPermMap(raw []byte) map[string][]string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var out map[string][]string
+	if err := json.Unmarshal(raw, &out); err != nil {
+		log.Printf("[chats perms] bad permission map, ignoring layer: %v", err)
+		return nil
+	}
+	return out
+}
+
+// chatsPermList decodes a per-member grant. The bool distinguishes "no grant
+// row" (fall through) from "granted nothing" (explicit revoke) — collapsing
+// those would make it impossible to strip one member's rights.
+func chatsPermList(raw []byte) ([]string, bool) {
+	if len(raw) == 0 {
+		return nil, false
+	}
+	var out []string
+	if err := json.Unmarshal(raw, &out); err != nil {
+		log.Printf("[chats perms] bad permission grant, ignoring: %v", err)
+		return nil, false
+	}
+	return out, true
 }
 
 // chatsRequireMem loads membership and writes the route's error responses
@@ -296,7 +386,7 @@ func chatsRequireMem(w http.ResponseWriter, r *http.Request, notMemberStatus int
 // fresh install has a legitimate reason to ask; a stolen token issues the exact
 // same request. The server cannot tell them apart from the request alone, so it
 // uses the one signal it can keep: whether this INSTALL has synced before
-// (user_sync_devices, migration 068).
+// (user_sync_devices, migration 072).
 //
 // An unrecognised device gets a bounded window of recent history rather than
 // everything. The client pages forward from that floor, so the cap bounds the
@@ -898,11 +988,38 @@ func chatsCreateGroup(w http.ResponseWriter, _ *http.Request, ctx context.Contex
 		return
 	}
 
+	// ── Groups & Circles metadata (migration 070) ──
+	// All optional: a group created without a type is an untyped group and
+	// behaves exactly as groups did before this change.
+	gType := strings.ToLower(strings.TrimSpace(chatsStrOr(b["groupType"], "")))
+	if gType != "" {
+		known, e := chatsKnownGroupType(ctx, user.ID, gType)
+		if e != nil {
+			log.Printf("[chats POST] group type lookup: %v", e)
+			httpx.Err(w, 500, "Failed to create chat")
+			return
+		}
+		if !known {
+			httpx.Err(w, 400, "Unknown group type")
+			return
+		}
+	}
+	gIcon := truncRunes(strings.TrimSpace(chatsStrOr(b["icon"], "")), chatsGroupIconMax)
+	gColor := truncRunes(strings.TrimSpace(chatsStrOr(b["color"], "")), chatsGroupColorMax)
+	gDesc := truncRunes(strings.TrimSpace(chatsStrOr(b["description"], "")), chatsGroupDescMax)
+	gPrivacy := strings.ToLower(strings.TrimSpace(chatsStrOr(b["privacy"], "private")))
+	if !chatsValidPrivacy(gPrivacy) {
+		httpx.Err(w, 400, "privacy must be 'private' or 'invite_only'")
+		return
+	}
+
 	var chatID string
 	err = db.WithUser(ctx, user.ID, func(tx pgx.Tx) error {
 		if e := tx.QueryRow(ctx,
-			`INSERT INTO chats (type, name, created_by) VALUES ('group', $1, $2) RETURNING id`,
-			name, user.ID).Scan(&chatID); e != nil {
+			`INSERT INTO chats (type, name, created_by, group_type, icon, color, description, privacy)
+			 VALUES ('group', $1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+			name, user.ID, chatsNilIfEmpty(gType), chatsNilIfEmpty(gIcon),
+			chatsNilIfEmpty(gColor), chatsNilIfEmpty(gDesc), gPrivacy).Scan(&chatID); e != nil {
 			return e
 		}
 		for _, uid := range all {
@@ -924,7 +1041,10 @@ func chatsCreateGroup(w http.ResponseWriter, _ *http.Request, ctx context.Contex
 		return
 	}
 	realtime.InvalidateChatMembers(ctx, chatID) // P2.2: fresh roster before any fan-out
-	httpx.JSON(w, 200, map[string]any{"id": chatID, "type": "group", "name": name})
+	httpx.JSON(w, 200, map[string]any{
+		"id": chatID, "type": "group", "name": name,
+		"groupType": chatsNilIfEmpty(gType), "privacy": gPrivacy,
+	})
 }
 
 // ─── Invite links ──────────────────────────────────────────────────────
@@ -1055,7 +1175,7 @@ func chatsJoinByCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if db.NoRows(err) || status == nil || *status != "ok" {
-		msg := "Invalid link"
+		msg, code := "Invalid link", http.StatusGone
 		if status != nil {
 			switch *status {
 			case "invalid":
@@ -1064,9 +1184,13 @@ func chatsJoinByCode(w http.ResponseWriter, r *http.Request) {
 				msg = "Link has expired"
 			case "used":
 				msg = "Link has reached its use limit"
+			case "full":
+				// The link is fine; the group has no seats. 410 Gone would tell
+				// the user to stop trying, which is wrong — a seat may free up.
+				msg, code = "This group is full", http.StatusConflict
 			}
 		}
-		httpx.Err(w, http.StatusGone, msg)
+		httpx.Err(w, code, msg)
 		return
 	}
 	emitx.ChatEvent(*rChatID, "members_added", map[string]any{"added": []string{user.ID}, "by": user.ID})

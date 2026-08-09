@@ -4,6 +4,10 @@
 
 import { createGroupChat, getChat, createInviteLink, joinViaInvite, updateChat, removeChatMember, setMemberRole, type ChatMember } from '../chatService';
 import { addCircle, removeCircle, type CircleRef } from './store';
+// The circle registry moved to lib/groups/store (typed groups). Leaving must
+// clear BOTH: forgetting only the legacy key left the group listed in Family
+// Space and the Mini Apps tile after the user had already left it.
+import { removeGroup } from '../groups/store';
 import { type CircleMember } from './types';
 
 export async function createCircle(name: string): Promise<CircleRef> {
@@ -54,6 +58,7 @@ export async function renameCircle(circleId: string, name: string): Promise<void
 export async function leaveCircle(circleId: string, myId: string): Promise<void> {
   try { await removeChatMember(circleId, myId); } catch {}
   await removeCircle(circleId);
+  await removeGroup(circleId).catch(() => {});
 }
 
 /** Guardian-only: kick a member out of the circle. */
@@ -76,4 +81,5 @@ export async function deleteCircle(circleId: string, myId: string): Promise<void
   }
   await removeChatMember(circleId, myId).catch(() => {});
   await removeCircle(circleId);
+  await removeGroup(circleId).catch(() => {});
 }

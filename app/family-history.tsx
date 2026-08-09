@@ -17,6 +17,9 @@ import { brandAlpha } from '../constants/theme';
 import FamilyMap from '../components/family/FamilyMap';
 import { getTrack, summarize, type TrackSample } from '../lib/family/history';
 import { useFamilyAlerts, loadAlerts, type FamilyAlert } from '../lib/family/alerts';
+import { getGroup } from '../lib/groups/store';
+import { getCurrentUserAsync } from './(constants)/authService';
+import { can as hasPerm, type Permission } from '../lib/groups/permissions';
 
 type Range = 'day' | 'week' | 'month';
 
@@ -50,6 +53,11 @@ export default function FamilyHistoryScreen() {
   const [range, setRange] = useState<Range>('day');
   const [samples, setSamples] = useState<TrackSample[]>([]);
   const [loading, setLoading] = useState(true);
+  // Whether THIS user may see OTHER people's history in this group. Viewing
+  // your own is always allowed — it is your data. Starts denied: a permission
+  // that has not loaded must not reveal anything.
+  const [mayViewOthers, setMayViewOthers] = useState(false);
+  const [selfId, setSelfId] = useState<string | null>(null);
 
   const from = useMemo(() => {
     const span = RANGES.find((r) => r.key === range)!.ms;
@@ -64,6 +72,15 @@ export default function FamilyHistoryScreen() {
     (async () => {
       await loadAlerts();
       if (!circleId) { setLoading(false); return; }
+      const me = await getCurrentUserAsync().catch(() => null);
+      if (live) setSelfId(me ? String(me.id) : null);
+      const g = await getGroup(circleId);
+      const perms = new Set((g?.permissions ?? []) as Permission[]);
+      // An untyped legacy group has no matrix; the pre-existing behaviour there
+      // was that any member could see the circle's history, so preserve it.
+      const allowed = !g?.groupType || hasPerm(perms, 'view_history');
+      if (!live) return;
+      setMayViewOthers(allowed);
       const t = await getTrack(circleId, { from, userId });
       if (!live) return;
       setSamples(t);
@@ -106,6 +123,14 @@ export default function FamilyHistoryScreen() {
 
       {loading ? (
         <View style={st.center}><ActivityIndicator color={colors.primary} /></View>
+      ) : (!mayViewOthers && !!userId && userId !== selfId) ? (
+        <View style={[st.center, { padding: 32 }]}>
+          <Ionicons name="lock-closed-outline" size={30} color={colors.textFaint} />
+          <Text style={{ color: colors.text, fontWeight: '700', marginTop: 10 }}>Not shared with you</Text>
+          <Text style={{ color: colors.textDim, fontSize: 13, textAlign: 'center', marginTop: 4 }}>
+            This group does not let your role view location history.
+          </Text>
+        </View>
       ) : (
         <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 6, paddingBottom: 40 }}>
           {/* path */}

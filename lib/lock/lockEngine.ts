@@ -29,7 +29,9 @@ export interface AdvanceResult {
 
 /** Pure step: apply one fix to the active lock. No I/O. */
 export function advanceActiveLock(a: ActiveLock, fix: ZoneFix): AdvanceResult {
-  const step = stepZone(a.snap, fix, { center: a.center, radius: a.radius }, DEFAULT_ZONE_CONFIG);
+  // a.zone carries the monitoring mode's sensitivity (walking/cycling/driving/
+  // custom, frozen at arm + updatable live); absent on pre-v2 blobs → default.
+  const step = stepZone(a.snap, fix, { center: a.center, radius: a.radius }, a.zone ?? DEFAULT_ZONE_CONFIG);
   if (!step.accepted || fix.t <= a.snap.t) {
     // Rejected by the accuracy gate — or already processed (the foreground
     // watcher and the background task can both deliver the same fix).
@@ -70,6 +72,8 @@ export async function persistAdvance(r: AdvanceResult): Promise<void> {
     outsideMs: r.deltas.outsideMs,
     traveled: r.deltas.traveled,
     maxDistance: r.deltas.maxDistance,
+    accSum: a.snap.accuracy,     // one accepted fix = one accuracy sample
+    accN: 1,
   });
   for (const ev of r.events) {
     if (ev === 'exit') await bumpAggregates(a.sessionId, { exits: 1 });

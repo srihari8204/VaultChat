@@ -10,6 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { WebView } from 'react-native-webview';
 import { useTheme } from '../../lib/theme';
 import { LEAFLET_JS_B64, LEAFLET_CSS_B64 } from '../nav/leafletAsset';
+import { clusterForZoom } from '../../lib/groups/clustering';
 
 export interface FamilyMarker {
   id: string;
@@ -37,6 +38,8 @@ function html(tileUrl: string, bg: string, selfColor: string): string {
   color:#fff;font:700 12px system-ui,sans-serif;border:3px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.45)}
 .mk.self{box-shadow:0 0 0 5px ${selfColor}33,0 1px 5px rgba(0,0,0,.45)}
 .mk.stale{opacity:.55}
+.cl{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  color:#fff;font:800 14px system-ui,sans-serif;border:3px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.5)}
 .leaflet-control-attribution{font-size:9px;background:rgba(0,0,0,.35);color:#ddd}
 .leaflet-control-attribution a{color:#bbf}</style>
 </head><body><div id="map"></div>
@@ -47,11 +50,19 @@ L.tileLayer('${tileUrl}',{maxZoom:19,subdomains:'abcd',attribution:'&copy; OpenS
 var RN=window.ReactNativeWebView, markers={}, fitted=false;
 function setMembers(list){ var seen={};
   list.forEach(function(m){ seen[m.id]=1;
-    var cls='mk'+(m.self?' self':'')+(m.stale?' stale':'');
-    var ic=L.divIcon({className:'',html:'<div class="'+cls+'" style="background:'+m.color+'">'+m.ini+'</div>',iconSize:[34,34],iconAnchor:[17,17]});
+    var isCl=m.count>1;
+    var cls=isCl?'cl':('mk'+(m.self?' self':'')+(m.stale?' stale':''));
+    var body=isCl?String(m.count):m.ini;
+    var sz=isCl?42:34, anc=sz/2;
+    var ic=L.divIcon({className:'',html:'<div class="'+cls+'" style="background:'+m.color+'">'+body+'</div>',iconSize:[sz,sz],iconAnchor:[anc,anc]});
     if(markers[m.id]){ markers[m.id].setLatLng([m.lat,m.lng]).setIcon(ic); }
     else { var mk=L.marker([m.lat,m.lng],{icon:ic}).addTo(map);
-      mk.on('click',(function(id){return function(){ if(RN)RN.postMessage('sel:'+id); };})(m.id));
+      mk.on('click',(function(id,cluster,ll){return function(){
+        // A cluster has no single member to select, so tapping it zooms in
+        // until it breaks apart — the standard, non-surprising behaviour.
+        if(cluster){ map.setView(ll, Math.min(map.getZoom()+2, 19), {animate:true}); }
+        else if(RN){ RN.postMessage('sel:'+id); }
+      };})(m.id, isCl, [m.lat,m.lng]));
       markers[m.id]=mk; } });
   Object.keys(markers).forEach(function(id){ if(!seen[id]){ map.removeLayer(markers[id]); delete markers[id]; } });
   if(!fitted) fitAll();
@@ -77,7 +88,10 @@ function setPath(pts){
   map.fitBounds(pathLine.getBounds().pad(0.2));
   fitted=true;
 }
+function reportZoom(){ if(RN)RN.postMessage('zoom:'+map.getZoom()); }
+map.on('zoomend', reportZoom);
 if(RN)RN.postMessage('ready');
+reportZoom();
 </script></body></html>`;
 }
 
@@ -92,12 +106,35 @@ export default function FamilyMap({ members, onSelect, focusId, path, style }: {
   const { scheme, colors } = useTheme();
   const ref = useRef<WebView>(null);
   const [ready, setReady] = useState(false);
+  // The map owns the zoom; it reports each change so we can re-cluster here
+  // rather than duplicating the algorithm in injected JavaScript.
+  const [zoom, setZoom] = useState(13);
 
-  // Assign each member a stable colour by id order (self keeps the accent).
-  const payload = useMemo(() => members.map((m, i) => ({
-    id: m.id, lat: m.lat, lng: m.lng, self: !!m.self, stale: !!m.stale,
-    ini: initials(m.name), color: m.self ? colors.primary : COLORS[i % COLORS.length],
-  })), [members, colors.primary]);
+  // Assign each member a stable colour by id order (self keeps the accent),
+  // then merge markers that would visually collide at the current zoom.
+  const payload = useMemo(() => {
+    const coloured = members.map((m, i) => ({
+      id: m.id, lat: m.lat, lng: m.lng, self: !!m.self, stale: !!m.stale,
+      ini: initials(m.name), color: m.self ? colors.primary : COLORS[i % COLORS.length],
+    }));
+    return clusterForZoom(coloured, zoom).map((c) => {
+      const head = c.items[0];
+      // A cluster containing me keeps the accent, so "where am I" survives
+      // being merged into a bubble.
+      const mine = c.items.some((it) => it.self);
+      return {
+        id: c.key,
+        lat: c.lat, lng: c.lng,
+        count: c.items.length,
+        self: mine,
+        // A bubble is stale only when EVERY member in it is stale; one live
+        // member means the group is live.
+        stale: c.items.every((it) => it.stale),
+        ini: head.ini,
+        color: mine ? colors.primary : head.color,
+      };
+    });
+  }, [members, colors.primary, zoom]);
 
   useEffect(() => {
     if (!ready || !ref.current) return;
@@ -133,7 +170,10 @@ export default function FamilyMap({ members, onSelect, focusId, path, style }: {
         onMessage={(e) => {
           const d = e.nativeEvent.data;
           if (d === 'ready') setReady(true);
-          else if (d.startsWith('sel:')) onSelect?.(d.slice(4));
+          else if (d.startsWith('zoom:')) {
+            const z = Number(d.slice(5));
+            if (Number.isFinite(z)) setZoom(z);
+          } else if (d.startsWith('sel:')) onSelect?.(d.slice(4));
         }}
         style={{ backgroundColor: colors.bg }}
         androidLayerType="hardware"

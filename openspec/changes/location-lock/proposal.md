@@ -13,6 +13,16 @@ Users want to "lock" a spot — a parked bike, a campsite, a market stall, a chi
 - **History & statistics**: every lock session persisted locally (SQLite) — exits, returns, max distance, time inside/outside, alarm durations — with daily/weekly/monthly rollups and export. Local-only; nothing leaves the device.
 - **Search hardening**: keep the "lat, lng" fallback; add optional self-hosted Photon/Nominatim geocoding through the backend proxy so address search works on no-GMS devices (backend infra, feature-flagged).
 
+### Pro (v2) additions — Location Lock Pro blueprint
+
+- **Live GPS diagnostics**: the status card and map gain speed, heading, battery, and a GPS quality tier (Excellent/Good/Fair/Poor derived from accuracy). Raw satellite count and cellular signal strength need a native GNSS module — out of scope for the WebView/Expo stack; the quality tier is the honest replacement.
+- **Route options for navigate-back**: fastest (default) / shortest, avoid tolls, avoid highways — mapped onto Valhalla `costing_options` through the existing `/nav/route` proxy; a "Re-route now" manual trigger.
+- **Monitoring modes**: Walking / Cycling / Driving / Custom presets that tune the zone engine's sensitivity (warning band, hysteresis, GPS cadence) and pre-select the navigate-back travel mode; Custom exposes the sensitivity directly.
+- **Voice guidance**: spoken turn-by-turn during navigate-back (expo-speech reading the existing banner instructions) — the Navigate engine's first voice mode.
+- **Richer statistics**: alarms-triggered count, average GPS accuracy, average lock duration, and a 7-day distance trend chart on top of the existing rollups.
+- **Settings hub**: one screen grouping General (units metric/imperial, mode), Sound & Vibration (existing alert settings), Battery (background tracking toggle, optimization exemption), and About — matching the blueprint's Settings surface.
+- **Map controls**: zoom in/out buttons and re-center on the lock map (Leaflet), alongside the existing compass.
+
 ## Capabilities
 
 ### New Capabilities

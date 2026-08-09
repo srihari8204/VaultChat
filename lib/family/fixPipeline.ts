@@ -11,7 +11,7 @@
 // screen, so every cold start re-announced "arrived at Home" for wherever the
 // user already was. Persisting it makes a crossing a real edge, not a restart.
 
-import { evaluateFences, type Geofence } from './geofence';
+import { evaluateFences, isZoneActive, type Geofence } from './geofence';
 import { recordSample } from './history';
 import { recordAlert } from './alerts';
 import { isLowBattery } from './battery';
@@ -34,6 +34,7 @@ export interface Fix {
   speed?: number;
   battery?: number;
   charging?: boolean;
+  accuracy?: number;   // GPS accuracy m of this fix
 }
 
 export interface ProcessOpts {
@@ -57,9 +58,16 @@ async function writeInside(circleId: string, inside: Set<string>): Promise<void>
   try { await storage().setItem(kInside(circleId), JSON.stringify([...inside])); } catch {}
 }
 
-/** Only fences the user has switched on take part in evaluation. */
-export function activeFences(fences: Geofence[]): Geofence[] {
-  return fences.filter((f) => f.enabled !== false);
+/**
+ * Only zones that are switched on, unexpired and inside their schedule take
+ * part in evaluation.
+ *
+ * `at` is injected so this stays testable and so one fix evaluates every zone
+ * against a single instant — reading the clock per zone could straddle a
+ * boundary and fire a spurious crossing.
+ */
+export function activeFences(fences: Geofence[], at: Date = new Date()): Geofence[] {
+  return fences.filter((f) => isZoneActive(f, at));
 }
 
 /**
@@ -69,7 +77,7 @@ export function activeFences(fences: Geofence[]): Geofence[] {
 export async function processFix(circleId: string, fix: Fix, opts: ProcessOpts): Promise<void> {
   await recordSample(circleId, {
     u: fix.userId, lat: fix.pos.lat, lng: fix.pos.lng, ts: fix.ts,
-    bat: fix.battery, spd: fix.speed,
+    bat: fix.battery, spd: fix.speed, acc: fix.accuracy,
   });
 
   if (!opts.self) return;
@@ -82,7 +90,7 @@ export async function processFix(circleId: string, fix: Fix, opts: ProcessOpts):
     });
   }
 
-  const fences = activeFences(opts.fences ?? await placeStore().getPlaces(circleId));
+  const fences = activeFences(opts.fences ?? await placeStore().getPlaces(circleId), new Date(fix.ts));
   if (!fences.length) return;
 
   const inside = await readInside(circleId);
@@ -113,5 +121,13 @@ if (require.main === module) {
   const act = activeFences([on, off, legacy]).map((f) => f.id);
   if (act.join(',') !== 'a,c') throw new Error('disabled fence must be excluded, legacy kept: ' + act);
   if (activeFences([]).length !== 0) throw new Error('empty in, empty out');
+
+  // schedule + expiry are honoured through isZoneActive
+  const noon = new Date(2026, 7, 3, 12, 0, 0);
+  const expired: Geofence = { id: 'x', name: 'Pop-up', center: { lat: 1, lng: 1 }, radiusM: 50, expiresAt: noon.getTime() - 1 };
+  const asleep: Geofence = { id: 'y', name: 'Night', center: { lat: 1, lng: 1 }, radiusM: 50, schedule: { fromMin: 22 * 60, toMin: 23 * 60 } };
+  const awake: Geofence = { id: 'z', name: 'Day', center: { lat: 1, lng: 1 }, radiusM: 50, schedule: { fromMin: 9 * 60, toMin: 17 * 60 } };
+  const live = activeFences([on, expired, asleep, awake], noon).map((f) => f.id);
+  if (live.join(',') !== 'a,z') throw new Error('expired/out-of-schedule zones must be excluded: ' + live);
   console.log('family/fixPipeline self-check OK');
 }
