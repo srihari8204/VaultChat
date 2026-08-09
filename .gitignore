@@ -79,3 +79,8 @@ build_release*.log
 # upload. Back these up off this machine; never commit them.
 vaultchat-release.jks
 keystore.properties
+
+# adb logcat captures — large, machine-specific, never useful in git
+.device.log
+*.device.log
+.shot.png
