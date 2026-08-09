@@ -323,12 +323,37 @@ export async function decryptFromChat(
 // auto-recovery, so users never have to reset a session by hand.
 const _decryptFailStreak = new Map<string, number>();
 const AUTO_RECOVER_AFTER = 2;
+
+// A reset must not be able to destroy the session a previous reset just built.
+// Measured on device: three AUTO-RESETs for one peer inside 21ms —
+//   01:13:15.926 / .931 / .947  AUTO-RESET dead session for peer cb1caeda…
+// chat.tsx decrypts every visible bubble concurrently, so a screen of
+// undecryptable history trips the streak several times before the first reset
+// finishes. Each extra reset tears down the fresh session created moments
+// earlier, so the peer's next message can't decrypt either — the "recovery"
+// was manufacturing the very desync it exists to repair, and the peer's rekey
+// request bounced it back for another round.
+//
+// One reset per peer per window. Recovery needs a round trip to be judged;
+// anything faster is thrash, not healing.
+const _lastAutoReset = new Map<string, number>();
+const AUTO_RESET_COOLDOWN_MS = 60_000;
+
 async function maybeAutoRecoverSession(peerId: string, errMsg: string): Promise<void> {
   const n = (_decryptFailStreak.get(peerId) ?? 0) + 1;
   _decryptFailStreak.set(peerId, n);
   console.warn(`[e2ee] decrypt failed (${n}/${AUTO_RECOVER_AFTER}):`, errMsg);
   if (n < AUTO_RECOVER_AFTER) return;
   _decryptFailStreak.delete(peerId);
+
+  const now = Date.now();
+  const last = _lastAutoReset.get(peerId) ?? 0;
+  if (now - last < AUTO_RESET_COOLDOWN_MS) {
+    console.warn('[e2ee] auto-reset suppressed for', peerId, `— ${Math.round((now - last) / 1000)}s since last`);
+    return;
+  }
+  _lastAutoReset.set(peerId, now);
+
   try {
     const e2ee = await import('../services/crypto/e2eeSession.rn');
     await e2ee.e2eeResetSession(peerId);   // drop dead ratchet; MY next outbound re-keys → peer self-heals
@@ -359,6 +384,20 @@ async function requestPeerRekey(peerId: string): Promise<void> {
  *  Wired once as a persistent socket listener in app/_layout.tsx. */
 export async function handleRekeyRequest(fromPeerId: string): Promise<void> {
   if (!E2EE_ENABLED || !fromPeerId) return;
+  // Same cooldown as the local auto-reset, and deliberately sharing its map:
+  // the two halves form one loop. A peer stuck on undecryptable history sends a
+  // rekey request every time it gives up, and honouring each one destroys the
+  // session we just rebuilt — so the peer's next message fails, and it asks
+  // again. Observed on device as repeated "peer requested re-key" seconds after
+  // our own reset. Ignoring a request inside the window is safe: if the peer
+  // still cannot decrypt after it, it will ask again once the window closes.
+  const now = Date.now();
+  const last = _lastAutoReset.get(fromPeerId) ?? 0;
+  if (now - last < AUTO_RESET_COOLDOWN_MS) {
+    console.warn('[e2ee] rekey request ignored for', fromPeerId, `— reset ${Math.round((now - last) / 1000)}s ago`);
+    return;
+  }
+  _lastAutoReset.set(fromPeerId, now);
   try {
     const e2ee = await import('../services/crypto/e2eeSession.rn');
     await e2ee.e2eeResetSession(fromPeerId);
@@ -389,7 +428,15 @@ export async function hydrateMessages(
   // F5: a decrypted payload may be a wrapped {text + link preview} envelope
   // (sender-generated previews ride INSIDE the E2EE content). Unwrap so the
   // UI sees plain text + meta.linkPreview — local-only, never sent anywhere.
+  // The E2EE layer stores a TOMBSTONE under a message id to mean "permanently
+  // undecryptable, stop retrying". It is a marker, never text — but it lives in
+  // the same cache as real plaintext and reached the UI through several paths
+  // (own-message cache, knownPlain map, the NUL-prefixed straggler branch),
+  // printing "__e2ee_undecryptable__" inside the user's own bubble on device.
+  // Guarding the one funnel every render path goes through covers all of them.
+  const TOMBSTONE = '\u0000__e2ee_undecryptable__';
   const finish = (m: Message, plain: string): Message => {
+    if (plain === TOMBSTONE) return m;   // leave the envelope → bubble shows its locked state
     const { text, lp } = unwrapPreview(plain);
     return lp ? { ...m, content: text, meta: { ...(m.meta ?? {}), linkPreview: lp } }
               : { ...m, content: plain };
@@ -418,7 +465,7 @@ export async function hydrateMessages(
     // is both the correct render and the fix for that cascade.
     const senderId = (m as any).senderId ?? '';
     if (senderId && senderId === (await myUserId())) {
-      const own = await readOwnPlaintext(chatId, m.id);
+      const own = await readOwnPlaintext(chatId, m.id, m.createdAt);
       if (own != null) { out[i] = finish(m, own); }
       else {
         console.warn('[e2ee] own message has no cached plaintext — id:', m.id, 'chat:', chatId);
@@ -450,23 +497,97 @@ async function myUserId(): Promise<string> {
   return _meId;
 }
 
+// A just-sent message is READ before its plaintext is WRITTEN. Measured on
+// device, every message showing the same shape:
+//   01:52:48.063  no cached plaintext — id 214     (socket echo → hydrate)
+//   01:52:48.128  no cached plaintext — id 214
+//   01:52:48.161  cached own plaintext — id 214    (POST returned the id)
+// The server echoes the message back over the socket before the POST response
+// carrying its id has landed, so the cache cannot possibly be populated yet.
+// Whichever bubbles never re-rendered afterwards stayed stuck reading
+// "unable to decrypt" — which is why messages sent seconds apart differed.
+//
+// One short retry covers the gap. Bounded to messages sent in the last minute:
+// applying it to old history would add this delay to every genuinely-missing
+// message (83 of them on this device) and turn chat opening into a crawl.
+const OWN_PT_RETRY_MS = 300;
+const OWN_PT_RETRY_WINDOW_MS = 60_000;
+
 /** Plaintext of an own-sent message from the local store, or null. */
-async function readOwnPlaintext(chatId: string, messageId: number): Promise<string | null> {
+async function readOwnPlaintext(chatId: string, messageId: number, createdAt?: string): Promise<string | null> {
   if (!E2EE_ENABLED || !messageId || messageId <= 0) return null;
   try {
     const e2ee = await import('../services/crypto/e2eeSession.rn');
-    return await e2ee.e2eeGetCached(chatId, messageId);
+    let v = await e2ee.e2eeGetCached(chatId, messageId);
+    if (v == null && createdAt) {
+      const age = Date.now() - new Date(createdAt).getTime();
+      if (age >= 0 && age < OWN_PT_RETRY_WINDOW_MS) {
+        await new Promise(r => setTimeout(r, OWN_PT_RETRY_MS));
+        v = await e2ee.e2eeGetCached(chatId, messageId);
+      }
+    }
+    // The store also holds a TOMBSTONE ("permanently undecryptable, stop
+    // retrying") under the same key. It is a marker, not text — returning it
+    // rendered the literal string "__e2ee_undecryptable__" inside the user's
+    // own chat bubble (seen on device). Treat it as "no plaintext held", which
+    // gives the bubble's proper "can't be shown on this device" state.
+    if (v === e2ee.E2EE_UNDECRYPTABLE) return null;
+    return v;
   } catch { return null; }
 }
 
 // Cache an own-sent message's plaintext once the server assigns its id, so the
 // sender renders it from the local store (server content is ciphertext).
 export async function cacheOwnPlaintext(chatId: string, messageId: number | undefined, plaintext: string): Promise<void> {
-  if (!E2EE_ENABLED || !messageId || messageId <= 0) return;
+  // This is the ONLY copy of an own-sent message's text — a Double Ratchet
+  // ciphertext cannot be opened by the sender. Every early-return and every
+  // swallowed throw below is a message the user permanently cannot read, so
+  // each one says so rather than failing silently, which is how this went
+  // undiagnosed: bubbles sent seconds apart, some readable, some not.
+  if (!E2EE_ENABLED) return;
+  if (!messageId || messageId <= 0) {
+    console.warn('[e2ee] cacheOwnPlaintext SKIPPED — no server id yet; chat:', chatId, 'id:', messageId);
+    return;
+  }
   try {
     const e2ee = await import('../services/crypto/e2eeSession.rn');
     await e2ee.e2eeCachePlaintext(chatId, messageId, plaintext);
-  } catch {}
+    // warn, NOT log: babel.config.js strips console.log from release builds
+    // (transform-remove-console, excluding warn/error), so a console.log here
+    // is invisible in exactly the build being debugged.
+    console.warn('[e2ee] cached own plaintext — id:', messageId, 'len:', plaintext?.length ?? 0);
+  } catch (err) {
+    console.warn('[e2ee] cacheOwnPlaintext FAILED — id:', messageId, '—', (err as any)?.message ?? err);
+  }
+}
+
+/**
+ * Fill in chat-list previews for OWN messages.
+ *
+ * The messages table stores what went on the wire, which for an own message is
+ * ciphertext — so the preview builder saw an envelope, nulled it, and every row
+ * whose last message was mine read "Tap to open chat" instead of its text. Very
+ * visible offline, where no server round-trip papers over it (seen on device).
+ *
+ * The plaintext is already on disk in the own-message store, keyed by the same
+ * message id the preview carries; this just looks it up. Peer messages are left
+ * alone — theirs decrypt through the normal path.
+ */
+export async function hydrateOwnPreviews(
+  map: Map<string, { content: string | null; type: string | null; senderId: string | null; id: number }>,
+): Promise<Map<string, { content: string | null; type: string | null; senderId: string | null; id: number }>> {
+  if (!E2EE_ENABLED || !map?.size) return map;
+  try {
+    const me = await myUserId();
+    if (!me) return map;
+    for (const [chatId, row] of map) {
+      if (row.senderId !== me) continue;
+      if (row.content != null && !looksEncrypted(row.content)) continue;
+      const pt = await readOwnPlaintext(chatId, row.id);   // no retry: a list row is not worth stalling on
+      if (pt != null) map.set(chatId, { ...row, content: unwrapPreview(pt).text });
+    }
+  } catch { /* previews are best-effort — never block the chat list */ }
+  return map;
 }
 
 // ─── REST ───────────────────────────────────────────────────────────

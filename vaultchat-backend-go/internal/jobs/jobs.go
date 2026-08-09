@@ -109,6 +109,10 @@ func sweepExpiredMessages(ctx context.Context) {
 func sweepDeliveredMessages(ctx context.Context) {
 	grace := envInt("DELETE_ON_DELIVERY_GRACE_SEC", 120)
 	maxDays := envInt("DELETE_ON_DELIVERY_MAX_AGE_DAYS", 0)
+	// How long a device may be silent before the sweep stops waiting for it.
+	// Too low destroys messages for someone on holiday; too high lets one
+	// retired handset pin an account's history on the server indefinitely.
+	staleDays := envInt("DELETE_ON_DELIVERY_DEVICE_STALE_DAYS", 30)
 	// P4.1: batched like the other sweeps — the one-shot UPDATE rewrote every
 	// eligible row in a single statement (lock + WAL burst scaling with backlog).
 	var purged int64
@@ -132,7 +136,28 @@ func sweepDeliveredMessages(ctx context.Context) {
 			            AND cm.user_id <> m2.sender_id
 			            AND (cm.last_delivered_message_id IS NULL OR cm.last_delivered_message_id < m2.id)
 			       )
-			     LIMIT $2)`, strconv.Itoa(grace), sweepBatch)
+			       -- ...and no ACTIVE DEVICE of any other member is behind it.
+			       -- The account-level check above is not sufficient on a
+			       -- multi-device account: the first device to ack advances the
+			       -- shared pointer, and nulling the body here would destroy a
+			       -- message a second device never received. Devices that have
+			       -- not synced within the staleness window are ignored, or a
+			       -- lost/sold handset would pin history on the server forever.
+			       AND NOT EXISTS (
+			         SELECT 1
+			           FROM chat_members cm2
+			           JOIN user_sync_devices usd ON usd.user_id = cm2.user_id
+			           LEFT JOIN chat_device_delivery cdd
+			                  ON cdd.chat_id = m2.chat_id
+			                 AND cdd.user_id = cm2.user_id
+			                 AND cdd.device_id = usd.device_id
+			          WHERE cm2.chat_id = m2.chat_id
+			            AND cm2.left_at IS NULL
+			            AND cm2.user_id <> m2.sender_id
+			            AND usd.last_sync_at > NOW() - ($3 || ' days')::interval
+			            AND (cdd.last_delivered_message_id IS NULL OR cdd.last_delivered_message_id < m2.id)
+			       )
+			     LIMIT $2)`, strconv.Itoa(grace), sweepBatch, strconv.Itoa(staleDays))
 		if err != nil {
 			log.Printf("[delete-on-delivery] failed: %v", err)
 			return

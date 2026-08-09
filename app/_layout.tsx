@@ -23,6 +23,14 @@ import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet, Platform, AppState, InteractionManager } from 'react-native';
 import notifee, { EventType } from '@notifee/react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { enableFreeze } from 'react-native-screens';
+
+// Screens below the top of the stack stay MOUNTED by default, so every one of
+// them keeps re-rendering on each context/state change. Measured on-device:
+// native View count climbed 757 -> 1308 over 10 navigations and never came
+// back, with PSS reaching 359 MB. Freezing suspends offscreen screens without
+// unmounting them, so `back` is still instant.
+enableFreeze(true);
 import { useFonts, Sora_700Bold, Sora_800ExtraBold } from '@expo-google-fonts/sora';
 import { NunitoSans_400Regular, NunitoSans_600SemiBold, NunitoSans_700Bold } from '@expo-google-fonts/nunito-sans';
 import { FontReadyContext } from '../components/ui/Text';

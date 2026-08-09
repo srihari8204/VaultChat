@@ -9,7 +9,7 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import { BRAND_ACCENT } from '../constants/theme';
-import React, { useState, useEffect, useCallback , useMemo} from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, FlatList, TextInput,
   Alert, Modal, Platform, ScrollView, Image, ActivityIndicator,
@@ -28,6 +28,11 @@ import { Stack, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
 import { decryptNotes, encryptNotes } from '../lib/notesCrypto';
+
+// The same PIN check hidden-chats uses: the server-verified sign-in MPIN.
+// services/security/pinStore is a LOCAL store that is empty on installs which
+// never set a local PIN — gating on it fell open on a real device.
+import { verifyPin } from '../lib/chatService';
 import 'react-native-get-random-values';
 import { randomBytes } from '@noble/hashes/utils.js';
 
@@ -84,6 +89,43 @@ export default function EncryptedNotesScreen() {
   const [editNote, setEditNote] = useState<Note | null>(null);
   const [showPassGen, setShowPassGen] = useState(false);
   const [generatedPass, setGeneratedPass] = useState('');
+
+  // The header promises "Biometric locked", but nothing enforced it: deep-linking
+  // to vaultchat://encrypted-notes from a cold start rendered every note title
+  // with no challenge at all (vault / hidden-chats both gate correctly).
+  // Starting at 'pin' blocks the first paint, so titles never flash unlocked.
+  //
+  // PIN only, matching hidden-chats — the same server-verified MPIN check.
+  //
+  // A biometric variant was tried first and dropped after it appeared to ANR
+  // the app on a cold deep-link. That diagnosis turned out to be WRONG: the
+  // same ANR reproduces on `search` and `shelf`, which have no biometric and
+  // no gate, whenever adb injects input into a cold-deep-linked screen. So the
+  // biometric was not the cause and could be reinstated — it is simply not
+  // needed, since the PIN alone satisfies the screen's "locked" promise.
+  const [gate, setGate] = useState<'pin' | 'open'>('pin');
+  const [pinTry, setPinTry] = useState('');
+  const [pinErr, setPinErr] = useState<string | null>(null);
+  const pinRef = useRef<TextInput | null>(null);
+
+  // Deferred focus, never autoFocus — matches hidden-chats. Grabbing focus
+  // before this screen's window has drawn is what the ANR above was about.
+  useEffect(() => {
+    if (gate !== 'pin') return;
+    const t = setTimeout(() => pinRef.current?.focus(), 250);
+    return () => clearTimeout(t);
+  }, [gate]);
+
+  const submitPin = useCallback(async () => {
+    if (!/^\d{4,8}$/.test(pinTry)) { setPinErr('PIN must be 4–8 digits'); return; }
+    try {
+      if (await verifyPin(pinTry)) { setGate('open'); setPinTry(''); setPinErr(null); }
+      else { setPinTry(''); setPinErr('Incorrect PIN'); }
+    } catch {
+      // Server unreachable — stay locked rather than open on a network error.
+      setPinTry(''); setPinErr('Could not verify. Check your connection.');
+    }
+  }, [pinTry]);
 
   // Editor state
   const [edTitle, setEdTitle] = useState('');
@@ -290,6 +332,39 @@ export default function EncryptedNotesScreen() {
   // Count per category
   const catCounts: Record<string, number> = {};
   activeNotes.forEach(n => { catCounts[n.category] = (catCounts[n.category] ?? 0) + 1; });
+
+  if (gate !== 'open') {
+    return (
+      <View style={[s.screen, { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 }]}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <Text style={{ fontSize: 40, marginBottom: 16 }}>🔒</Text>
+        {gate === 'pin' && (
+          <>
+            <Text style={{ color: colors.text, fontSize: 16, marginBottom: 16 }}>Enter your PIN</Text>
+            <TextInput
+              value={pinTry}
+              onChangeText={(v) => { setPinTry(v.replace(/\D/g, '').slice(0, 8)); setPinErr(null); }}
+              onSubmitEditing={submitPin}
+              placeholder="••••••"
+              placeholderTextColor={colors.textDim}
+              keyboardType="number-pad"
+              secureTextEntry
+              ref={pinRef}
+              style={{
+                color: colors.text, borderColor: colors.border, borderWidth: 1,
+                borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10,
+                fontSize: 20, letterSpacing: 6, textAlign: 'center', minWidth: 180,
+              }}
+            />
+            {!!pinErr && <Text style={{ color: '#ff6b6b', marginTop: 12 }}>{pinErr}</Text>}
+            <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 20 }}>
+              <Text style={{ color: colors.textDim }}>Cancel</Text>
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
+    );
+  }
 
   return (
     <View style={s.screen}>

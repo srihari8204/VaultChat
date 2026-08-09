@@ -19,6 +19,16 @@ let ranThisSession = false;
 export async function syncChatHistory(chatId: string, maxMessages = 200): Promise<void> {
   try {
     const cached = await getCachedMessages(chatId, maxMessages);
+    // Already-received messages are never re-fetched. Once this device holds
+    // any history for a chat, that history is authoritative — it was decrypted
+    // and cached on arrival, and anything newer comes from the socket or the
+    // /chats/delta cursor. Paging BACKWARD through the server re-downloaded
+    // messages the device already had, against a backend that purges bodies
+    // after delivery, so the work was both wasteful and increasingly futile.
+    //
+    // The back-fill still runs for a chat this device knows nothing about
+    // (fresh install), which is the only case the cache cannot answer.
+    if (cached.length) return;
     let oldest = cached.length ? cached[cached.length - 1].id : undefined;
     let total = cached.length;
     let guard = 0;

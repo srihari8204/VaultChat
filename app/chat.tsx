@@ -32,7 +32,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { consumePendingJump } from '../lib/chatJump';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { E2EE_ENABLED } from '../constants/flags';
-import { getCachedMessages, cacheMessages, applyMessage, markCachedDeleted, getCachedMessagesByIds, getCachedChat } from '../lib/localDb';
+import { getCachedMessages, cacheMessages, applyMessage, markCachedDeleted, getCachedMessagesByIds, getCachedChat, clearChatMessages } from '../lib/localDb';
 import { saveDraft, getDraft, clearDraft } from '../lib/drafts';
 import { playSent, playReceived } from '../lib/sounds';
 import { NOTIF_CHANNELS } from '../lib/push';
@@ -344,6 +344,14 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   const [forwardChats, setForwardChats] = useState<ChatSummary[]>([]);
   const [forwardLoading, setForwardLoading] = useState(false);
 
+  // Composer growth is capped against THIS pane, not the window. The cap was a
+  // flat maxHeight: 120, which is fine full-screen but is a third of a stacked
+  // split pane — a few lines of typing swallowed the conversation above it.
+  // onLayout gives the real pane height whether embedded or full-screen, so one
+  // rule covers both. Floor of 72 keeps ~3 lines usable in the smallest pane.
+  const [paneH, setPaneH] = useState(0);
+  const composerMax = paneH > 0 ? Math.max(72, Math.min(120, Math.round(paneH * 0.28))) : 120;
+
   const listRef = useRef<FlatList>(null);
   const messagesRef = useRef<DisplayMessage[]>([]);
   const [flashId, setFlashId] = useState<number | null>(null);
@@ -442,7 +450,16 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   // Stable key over the visible message ids, so the reaction/poll hydration
   // effects only refire when the SET of ids changes — not on every edit,
   // optimistic update, or cache write that re-creates the array.
-  const messageIdKey = useMemo(() => messages.map(m => m.id).join(','), [messages]);
+  // Keyed on POLL ids only, not every message id. Its one consumer is the
+  // poll-vote hydration effect below, so keying on the whole page meant any
+  // incoming text message changed the key and re-fired that network request in
+  // every chat containing a poll — and built a join of the entire page to do it.
+  const pollIdKey = useMemo(
+    () => messages
+      .filter(m => m.type === 'poll' && typeof m.id === 'number' && m.id > 0)
+      .map(m => m.id).join(','),
+    [messages],
+  );
 
   // Members of this chat that aren't me — used to compute outgoing-message
   // tick state (any → delivered / any → read, MVP semantics).
@@ -528,12 +545,27 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           .then(c => { setChat(c); setPinnedId(c.pinnedMessageId ?? null); })
           .catch(() => {});
         try {
-          const msgsRaw = await getMessages(chatId, { limit: PAGE_SIZE });
-          const msgs = await hydrateMessages(chatId, msgsRaw, knownPlain);
-          setMessages([...pendingNewestFirst, ...msgs]);
-          setHasMore(msgs.length === PAGE_SIZE);
+          // Already-received messages are NOT re-fetched. The local DB owns
+          // them: they were decrypted and cached when they arrived, and new
+          // ones arrive over the socket + the /chats/delta cursor sync
+          // (lib/syncEngine). Re-pulling a page on every open re-downloaded
+          // history the device already had — pointless work against a server
+          // that purges message bodies after delivery, and slower than the
+          // cache it was overwriting.
+          //
+          // The server is used only when this device holds NOTHING for the chat
+          // (fresh install, or a chat never opened here), which is the one case
+          // the cache genuinely cannot answer.
+          if (!cachedMsgs.length) {
+            const msgsRaw = await getMessages(chatId, { limit: PAGE_SIZE });
+            const msgs = await hydrateMessages(chatId, msgsRaw, knownPlain);
+            setMessages([...pendingNewestFirst, ...msgs]);
+            setHasMore(msgs.length === PAGE_SIZE);
+            cacheMessages(chatId, msgs).catch(() => {});   // persist for next instant open
+          } else {
+            setHasMore(cachedMsgs.length >= PAGE_SIZE);
+          }
           setError(null);
-          cacheMessages(chatId, msgs).catch(() => {});   // persist for next instant open
         } catch {
           // Offline / transient — keep the painted cache silently; the connection
           // banner already tells the user. A failed background refresh is not an error.
@@ -789,9 +821,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   // page is safe.
   useEffect(() => {
     if (!chatId) return;
-    const pollIds = messages
-      .filter(m => m.type === 'poll' && typeof m.id === 'number' && m.id > 0)
-      .map(m => m.id);
+    const pollIds = pollIdKey ? pollIdKey.split(',').map(Number) : [];
     if (pollIds.length === 0) return;
     let cancel = false;
     getPollVotesBulk(chatId, pollIds).then(map => {
@@ -802,7 +832,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     }).catch(() => {});
     return () => { cancel = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chatId, messageIdKey]);
+  }, [chatId, pollIdKey]);
 
   // ── Mark-as-read (debounced) ──────────────────────────────
   useEffect(() => {
@@ -1347,6 +1377,31 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
                   await resetChatSession(chatId);
                   Alert.alert('Session reset', 'Send a message to re-establish encryption.');
                 } catch (e: any) { Alert.alert('Reset failed', e?.message ?? 'Try again'); }
+              } },
+          ],
+        ),
+      });
+      actions.push({
+        label: 'Clear chat',
+        icon: 'trash-bin-outline',
+        destructive: true,
+        onPress: () => Alert.alert(
+          'Clear this chat?',
+          'Removes the chat and all its messages from THIS device. The other person keeps their copy. This cannot be undone.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Clear', style: 'destructive', onPress: async () => {
+                try {
+                  await clearChatMessages(chatId);
+                  // Hide it server-side too. Local deletion alone is not enough:
+                  // listChats() would return the chat on the next refresh and
+                  // sync would pull the whole history back — which is exactly
+                  // what happened when this only deleted local rows. Same call
+                  // the chat list's own Delete uses, so both behave alike.
+                  try { await setHidden(chatId, true); } catch {}
+                  setMessages([]);
+                  router.back();
+                } catch (e: any) { Alert.alert('Could not clear', e?.message ?? 'Try again'); }
               } },
           ],
         ),
@@ -2052,7 +2107,10 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   }
 
   return (
-    <View style={[S.screen, { paddingBottom: kbHeight }]}>
+    <View
+      style={[S.screen, { paddingBottom: kbHeight }]}
+      onLayout={e => setPaneH(e.nativeEvent.layout.height)}
+    >
       {/* Per-chat wallpaper — painted behind the (transparent) message list */}
       {wallpaper && (
         <View style={StyleSheet.absoluteFill} pointerEvents="none">
@@ -2493,7 +2551,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
               </TouchableOpacity>
             )}
             <TextInput
-              style={S.input}
+              style={[S.input, { maxHeight: composerMax }]}
               placeholder={editingId != null ? 'Edit message…' : 'Message'}
               placeholderTextColor={colors.textDim}
               value={input}

@@ -7,8 +7,8 @@
 // running alongside live events can't dup or reorder.
 
 import { api } from './api';
-import { getGlobalSyncCursor, cacheMessages, getMeta, setMeta } from './localDb';
-import { hydrateMessages, type Message } from './chatService';
+import { getGlobalSyncCursor, noteGlobalSyncCursor, cacheMessages, getCachedMessagesByIds, getMeta, setMeta } from './localDb';
+import { hydrateMessages, looksEncrypted, type Message } from './chatService';
 import { markDeliveredDurable } from './receipts';
 import { notifyBatch } from './messageNotifications';
 import { onConnectionState } from './socket';
@@ -44,8 +44,34 @@ async function applyByChat(rows: (Message & { chatId: string })[]): Promise<Map<
   const byChat = new Map<string, Message[]>();
   for (const m of rows) { const c = (m as any).chatId; if (!c) continue; const a = byChat.get(c) ?? []; a.push(m); byChat.set(c, a); }
   for (const [chatId, list] of byChat) {
-    const hydrated = await hydrateMessages(chatId, list);
-    await cacheMessages(chatId, hydrated);   // upsert by id → edits overwrite, deletes tombstone
+    // Decrypt only what this device has NOT already stored as readable text.
+    //
+    // `since` deliberately rewinds by LOOKBACK, so every catch-up re-delivers
+    // rows that were decrypted on a previous run. Re-hydrating them repeats the
+    // full ratchet work — and for history whose keys are gone it repeats a
+    // decrypt that CANNOT succeed, every single launch. Measured on device: 72
+    // such messages re-processed at each boot, with 0.5–0.9s gaps between them,
+    // while the user watched a white screen.
+    //
+    // Rows still needing work (never seen, or cached as an unopened envelope)
+    // are hydrated exactly as before, so nothing is skipped that has a chance
+    // of becoming readable.
+    let todo = list;
+    try {
+      const ids = list.map(m => m.id).filter(id => typeof id === 'number' && id > 0);
+      if (ids.length) {
+        const known = await getCachedMessagesByIds(chatId, ids);
+        const readable = new Set(
+          known.filter(m => m.content != null && !looksEncrypted(m.content)).map(m => m.id),
+        );
+        if (readable.size) todo = list.filter(m => !readable.has(m.id));
+      }
+    } catch { /* cache unavailable → hydrate everything, as before */ }
+
+    if (todo.length) {
+      const hydrated = await hydrateMessages(chatId, todo);
+      await cacheMessages(chatId, hydrated);   // upsert by id → edits overwrite, deletes tombstone
+    }
   }
   return byChat;
 }
@@ -122,6 +148,10 @@ export async function catchUp(): Promise<number> {
       }
       applied += msgs.length;
       since = r.nextSince;
+      // Persist the high-water mark. Without this the cursor is re-derived from
+      // MAX(id) of cached rows, so deleting messages (Clear chat, cache trim)
+      // rewinds sync and re-downloads what was just removed.
+      await noteGlobalSyncCursor(r.nextSince).catch(() => {});
       if (!r.more) break;
       if (guard === MAX_PAGES - 1) console.warn(`[sync] catch-up hit ${MAX_PAGES}-page cap after ${applied} msgs — resuming next reconnect`);
     }

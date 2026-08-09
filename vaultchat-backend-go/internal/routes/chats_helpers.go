@@ -772,6 +772,27 @@ func chatsDelivered(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 400, "lastDeliveredMessageId required")
 		return
 	}
+	// Record the pointer for THIS DEVICE as well as the account.
+	//
+	// chat_members.last_delivered_message_id is per (chat, user), so on a
+	// multi-device account the first device to ack advances it for everyone —
+	// and delete-on-delivery would then null a body a second device never
+	// received. The per-device row (migration 071) is what lets the sweep wait
+	// for every active install. Best-effort and non-fatal: a missing X-Device-Id
+	// (older client) simply leaves no row, and the sweep treats an account with
+	// no device rows as "unknown", falling back to the account-level pointer.
+	if deviceID := strings.TrimSpace(r.Header.Get("X-Device-Id")); deviceID != "" {
+		if _, e := db.SysPool.Exec(ctx,
+			`INSERT INTO chat_device_delivery (chat_id, user_id, device_id, last_delivered_message_id)
+			      VALUES ($1, $2, $3, $4)
+			 ON CONFLICT (chat_id, user_id, device_id) DO UPDATE
+			    SET last_delivered_message_id = GREATEST(chat_device_delivery.last_delivered_message_id, EXCLUDED.last_delivered_message_id),
+			        updated_at = NOW()`,
+			chatID, user.ID, deviceID, id); e != nil {
+			log.Printf("[delivered POST] device pointer: %v", e)
+		}
+	}
+
 	var updated int64
 	err := chatsQRow(ctx, user.ID,
 		`UPDATE chat_members

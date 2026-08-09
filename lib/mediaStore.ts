@@ -32,7 +32,7 @@ import { attachmentUrl } from './chatService';
 import { getAccessToken } from './api';
 import { getMediaKey } from './mediaKeyStore';
 import { getDecryptedAttachmentUri } from './mediaAttachments';
-import { MEDIA_ROOT, THUMB_ROOT, APP_CACHE, ensureDir as ensureDirRoot } from './storageRoots';
+import { MEDIA_ROOT, THUMB_ROOT, APP_CACHE, ATTACHMENT_ROOT, ensureDir as ensureDirRoot } from './storageRoots';
 
 export type MediaKind = 'image' | 'video' | 'audio' | 'voice' | 'file';
 
@@ -250,7 +250,12 @@ export async function getMedia(attachmentId: string, opts: MediaOpts & { cacheOn
 export async function purgeLocalCopies(attachmentId: string): Promise<number> {
   let removed = 0;
   const id = String(attachmentId);
-  const dirs: string[] = [THUMB_DIR];
+  // ATTACHMENT_ROOT holds the decrypted copy that lib/mediaAttachments resolves
+  // for rendering (media_<id>). A revoke that skips it leaves a fully readable
+  // plaintext copy of media the sender destroyed. It was missed here because
+  // that copy used to sit in the OS cache dir, where eviction eventually hid the
+  // bug; it is persistent now, so it would have survived indefinitely.
+  const dirs: string[] = [THUMB_DIR, ATTACHMENT_ROOT];
   for (const kind of Object.keys(FOLDER) as MediaKind[]) {
     dirs.push(`${BASE}/${FOLDER[kind]}`);
     if (HAS_SENT[kind]) dirs.push(`${BASE}/${FOLDER[kind]}/Sent`);

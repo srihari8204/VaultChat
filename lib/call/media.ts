@@ -14,7 +14,20 @@
 // a replaced call left a live MediaStream holding native camera buffers.
 
 import InCallManager from 'react-native-incall-manager';
-import { mediaDevices } from '@livekit/react-native-webrtc';
+// Loaded on FIRST CALL, not at import. expo-router evaluates every route module
+// at startup to build its route tree, and videocall/voicecall/group-call-active
+// each pull in call/engine → this file → the WebRTC JS module. That made the
+// whole WebRTC layer initialise during boot on a device that may never place a
+// call: `signaling_thread`, `network_thread` and `worker_thread` were all alive
+// with the app sitting on the chat list.
+//
+// Every use below is inside a function, so nothing needs it at module scope.
+// require() is cached by Metro, so the lookup costs nothing after the first.
+let _mediaDevices: any = null;
+function md(): any {
+  if (!_mediaDevices) _mediaDevices = require('@livekit/react-native-webrtc').mediaDevices;
+  return _mediaDevices;
+}
 import type { CallKind } from './types';
 
 export interface LocalMedia {
@@ -52,7 +65,7 @@ export function resumeAudioSession(kind: CallKind, speaker: boolean): void {
 }
 
 export async function acquireLocalMedia(kind: CallKind): Promise<LocalMedia> {
-  const stream: any = await mediaDevices.getUserMedia(
+  const stream: any = await md().getUserMedia(
     kind === 'video'
       ? ({ audio: true, video: { facingMode: 'user' } } as any)
       : { audio: true, video: false },
@@ -84,11 +97,11 @@ export function stopStream(stream: any): void {
 }
 
 export const isScreenShareSupported = (): boolean =>
-  typeof (mediaDevices as any).getDisplayMedia === 'function';
+  typeof (md() as any).getDisplayMedia === 'function';
 
 /** Prompts the system capture consent dialog. Throws if denied/cancelled. */
 export async function acquireScreenStream(): Promise<any> {
-  return (mediaDevices as any).getDisplayMedia();
+  return (md() as any).getDisplayMedia();
 }
 
 export default {};

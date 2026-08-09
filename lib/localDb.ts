@@ -604,10 +604,39 @@ export async function getSyncCursor(chatId: string): Promise<number> {
 
 /** Highest message id cached across ALL chats — the global forward-catch-up
  *  cursor (messages.id is a server-global BIGSERIAL). */
+/** Highest message id this device has EVER seen. Survives deletion. */
+const GLOBAL_CURSOR_KEY = 'vc_global_sync_cursor';
+
+/**
+ * How far the global delta sync has progressed.
+ *
+ * This used to be `MAX(id) FROM messages`, which silently rewound whenever
+ * messages were deleted. "Clear chat" on the chat holding the newest ids
+ * therefore dropped the cursor to some older message, and the next catch-up
+ * happily re-downloaded everything after it — including 10 of the messages just
+ * cleared (measured on device: 56 removed, 10 returned).
+ *
+ * The high-water mark is now recorded separately and only ever moves FORWARD,
+ * so deleting local data cannot rewind sync. MAX(id) is still honoured as a
+ * floor: it seeds the value on an install that predates this key, and it keeps
+ * the cursor correct if a message somehow lands without going through
+ * noteGlobalSyncCursor.
+ */
 export async function getGlobalSyncCursor(): Promise<number> {
   const db = await getLocalDb();
   const r: any = await db.getFirstAsync(`SELECT MAX(id) AS m FROM messages`);
-  return r?.m ? Number(r.m) : 0;
+  const fromRows = r?.m ? Number(r.m) : 0;
+  const stored = Number((await getMeta(GLOBAL_CURSOR_KEY)) ?? 0) || 0;
+  const cursor = Math.max(fromRows, stored);
+  if (cursor > stored) await setMeta(GLOBAL_CURSOR_KEY, String(cursor)).catch(() => {});
+  return cursor;
+}
+
+/** Record progress. Monotonic — never moves the cursor backwards. */
+export async function noteGlobalSyncCursor(id: number): Promise<void> {
+  if (!Number.isFinite(id) || id <= 0) return;
+  const stored = Number((await getMeta(GLOBAL_CURSOR_KEY)) ?? 0) || 0;
+  if (id > stored) await setMeta(GLOBAL_CURSOR_KEY, String(id)).catch(() => {});
 }
 
 /** Apply a single incoming/edited message (from socket) to the cache. */
@@ -922,6 +951,43 @@ export async function importAll(data: { messages?: any[]; chats?: any[] }): Prom
     for (const c of data.chats || []) {
       await db.runAsync(`INSERT OR REPLACE INTO chats (id, data, last_message_at) VALUES (?,?,?)`, [c.id, encField(c.data), c.last_message_at]);
     }
+  });
+  return n;
+}
+
+/**
+ * Remove ONE chat from this device entirely — messages, search index, sync
+ * position and the chat row itself.
+ *
+ * Four deletes, not one, and each is load-bearing:
+ *   • msg_fts rows are keyed by message rowid. Left behind, the removed text
+ *     stays searchable — the one place a "cleared" chat hands its content back.
+ *   • sync_cursor must go WITH the chat row. (An earlier version deleted the
+ *     cursor while keeping the chat, which told sync "you have nothing" and
+ *     pulled the entire history straight back down — the exact bug reported.)
+ *   • the chats row goes too, so the list does not keep an empty shell.
+ *
+ * The caller is expected to also hide the chat server-side, or `listChats` will
+ * simply hand it back on the next refresh. See app/chat.tsx.
+ * Returns how many messages were removed.
+ */
+export async function clearChatMessages(chatId: string): Promise<number> {
+  const db = await getLocalDb();
+  const row: any = await db.getFirstAsync(
+    `SELECT COUNT(*) AS n FROM messages WHERE chat_id = ?`, [chatId]);
+  const n = row?.n | 0;
+
+  await db.withTransactionAsync(async () => {
+    if (_ftsOk) {
+      try {
+        await db.runAsync(
+          `DELETE FROM msg_fts WHERE rowid IN (SELECT id FROM messages WHERE chat_id = ?)`,
+          [chatId]);
+      } catch { /* index is best-effort; the messages still go */ }
+    }
+    await db.runAsync(`DELETE FROM messages WHERE chat_id = ?`, [chatId]);
+    await db.runAsync(`DELETE FROM sync_cursor WHERE chat_id = ?`, [chatId]);
+    await db.runAsync(`DELETE FROM chats WHERE id = ?`, [chatId]);
   });
   return n;
 }

@@ -15,7 +15,7 @@
 // so a phone gets split view in landscape and a tablet gets it always, from one
 // code path and with no device list to maintain.
 
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   PanResponder, Platform, StyleSheet, Text, TouchableOpacity, View,
   useWindowDimensions,
@@ -27,6 +27,10 @@ import { useTheme } from '../lib/theme';
 import { brandAlpha } from '../constants/theme';
 import { DIVIDER_DP, clampRatio, paneSizes, preferredAxis } from '../lib/responsive';
 import ChatScreen from './chat';
+
+/** Control-bar height. Shared by the style below and the pane maths, so the
+ *  two can never disagree the way they did when 40 was hard-coded in one. */
+const BAR_H = 40;
 
 export default function SplitScreen() {
   const router = useRouter();
@@ -42,9 +46,27 @@ export default function SplitScreen() {
 
   // Space actually available to the panes, excluding the system insets, so a
   // notch or gesture bar cannot push a pane under the minimum.
-  const axis = preferredAxis(width, height - insets.top - insets.bottom);
-  const total = axis === 'vertical' ? width : height - insets.top - insets.bottom;
+  //
+  // BAR_H is subtracted for a stacked split: the control bar sits ABOVE the
+  // panes and consumes real height, so sizing them against the full window
+  // handed out 40dp that did not exist and pushed the bottom pane's composer
+  // off-screen. It costs nothing side-by-side, where the bar is not on the
+  // panes' axis — hence the axis check rather than a blanket subtraction.
+  const usableH = height - insets.top - insets.bottom - BAR_H;
+  const axis = preferredAxis(width, usableH);
+  const total = axis === 'vertical' ? width : usableH;
   const sizes = useMemo(() => paneSizes(ratio, total), [ratio, total]);
+
+  // Re-clamp when the window changes (rotation, fold, multi-window resize).
+  // A ratio that was legal in landscape can put a pane under the readable
+  // minimum in portrait; without this the split silently keeps the stale split
+  // point and one pane collapses.
+  useEffect(() => {
+    setRatio(r => {
+      const next = clampRatio(r, total);
+      return next === r ? r : next;
+    });
+  }, [total, axis]);
 
   const pan = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
@@ -147,7 +169,7 @@ function Refusal({ title, body, onBack, colors }: {
 
 const st = StyleSheet.create({
   bar: {
-    height: 40, flexDirection: 'row', alignItems: 'center', gap: 8,
+    height: BAR_H, flexDirection: 'row', alignItems: 'center', gap: 8,
     paddingHorizontal: 14, borderBottomWidth: StyleSheet.hairlineWidth,
   },
   barTxt: { fontSize: 12, fontWeight: '700', letterSpacing: 0.4 },

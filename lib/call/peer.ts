@@ -50,7 +50,15 @@ export class CallPeer {
 
   constructor(uid: string, iceServers: readonly IceServerLike[], h: PeerHandlers) {
     this.uid = uid;
-    this.pc = new RTCPeerConnection({ iceServers: iceServers as any });
+    // iceCandidatePoolSize pre-gathers candidates as soon as the connection
+    // exists, instead of waiting for the offer/answer to be created. On a slow
+    // mobile link that removes a gathering round-trip from the critical path
+    // between "tap call" and "ringing", and gives ICE more time to find a
+    // working path before either side gives up.
+    this.pc = new RTCPeerConnection({
+      iceServers: iceServers as any,
+      iceCandidatePoolSize: 2,
+    } as any);
 
     (this.pc as any).onicecandidate = (e: any) => {
       if (!e?.candidate || this.closed) return;
@@ -66,6 +74,14 @@ export class CallPeer {
     (this.pc as any).onconnectionstatechange = () => {
       if (this.closed) return;
       const st = (this.pc as any).connectionState;
+
+      // A call that never connects gives the user no clue why. Recording the
+      // state transitions, and which candidate type actually won, is the
+      // difference between "sometimes calls fail" and a diagnosable fault:
+      // 'relay' means TURN carried it, 'host'/'srflx' means a direct path —
+      // and a failure with no relay candidate points at missing TURN.
+      console.warn('[call] connection state →', st, 'peer', this.uid);
+      if (st === 'connected') this.logSelectedCandidatePair();
 
       // Recovered (or moved on) — cancel any pending grace timer.
       if (st !== 'disconnected') this.clearGrace();
@@ -84,6 +100,30 @@ export class CallPeer {
         }, DISCONNECT_GRACE_MS);
       }
     };
+  }
+
+  /**
+   * Report which candidate pair carried the call. Best-effort and fully
+   * guarded: getStats shapes differ across WebRTC builds, and a diagnostic must
+   * never be able to break a working call.
+   */
+  private async logSelectedCandidatePair(): Promise<void> {
+    try {
+      const stats: any = await (this.pc as any).getStats?.();
+      if (!stats?.forEach) return;
+      const byId = new Map<string, any>();
+      stats.forEach((r: any) => byId.set(r.id, r));
+      let pair: any = null;
+      stats.forEach((r: any) => {
+        if (r.type === 'candidate-pair' && (r.selected || r.state === 'succeeded') && !pair) pair = r;
+      });
+      if (!pair) return;
+      const local = byId.get(pair.localCandidateId);
+      const remote = byId.get(pair.remoteCandidateId);
+      console.warn('[call] media path — local:', local?.candidateType ?? '?',
+                   'remote:', remote?.candidateType ?? '?',
+                   local?.candidateType === 'relay' || remote?.candidateType === 'relay' ? '(via TURN relay)' : '(direct)');
+    } catch { /* diagnostics only */ }
   }
 
   private clearGrace(): void {

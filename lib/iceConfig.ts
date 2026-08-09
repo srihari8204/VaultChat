@@ -57,11 +57,25 @@ export async function getIceServers(): Promise<IceServer[]> {
   inFlight = getTurnConfig()
     .then(cfg => {
       const servers = cfg?.iceServers?.length ? cfg.iceServers : STUN_ONLY;
+      // Whether a RELAY is available decides whether a call can connect at all
+      // between peers behind symmetric NAT (most mobile networks). With only
+      // STUN, calls succeed on a friendly network and fail elsewhere — which is
+      // indistinguishable from "sometimes calls don't connect" unless it is
+      // stated. The server returns STUN-only when TURN_SECRET is unset, so this
+      // also reveals a missing server-side config.
+      const hasTurn = servers.some(s => {
+        const u = (s as any)?.urls;
+        return Array.isArray(u) ? u.some((x: string) => /^turns?:/i.test(x)) : /^turns?:/i.test(String(u ?? ''));
+      });
+      if (!hasTurn) console.warn('[ice] NO TURN server — relay unavailable; calls will fail behind symmetric NAT');
       const until = cacheUntil(servers, Date.now());   // 0 = do not cache
       if (until) { cached = servers; cachedUntil = until; }
       return servers;
     })
-    .catch(() => cached ?? STUN_ONLY)   // last good config beats bare STUN
+    .catch(err => {
+      console.warn('[ice] TURN fetch failed —', (err as any)?.message ?? err, cached ? '(using last good config)' : '(falling back to STUN only)');
+      return cached ?? STUN_ONLY;      // last good config beats bare STUN
+    })
     .finally(() => { inFlight = null; });
 
   return inFlight;

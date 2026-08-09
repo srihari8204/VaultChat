@@ -305,6 +305,18 @@ function removePeer(s: Session, uid: string): void {
 function onPeerFailed(uid: string): void {
   const s = session;
   if (!s || s.disposed) return;
+
+  // Drop the cached ICE/TURN config so the NEXT call fetches fresh credentials.
+  //
+  // lib/iceConfig caches relay credentials for up to an hour, and its own
+  // comment describes invalidating them "for a deliberate retry after a
+  // relay-authentication failure" — but nothing ever called it except sign-out.
+  // So once credentials went stale (server-side TURN_SECRET rotation, or a
+  // clock/expiry edge), every call kept reusing the same dead credentials until
+  // the cache aged out on its own. That is indistinguishable from "calls
+  // sometimes don't connect", and it never self-healed within the window.
+  try { require('../iceConfig').invalidateIceCache(); } catch {}
+
   if (s.wire === 'direct') { hangUp('failed', true); return; }
   removePeer(s, uid);
 }
@@ -691,11 +703,35 @@ export function flipCamera(): void {
 /** Swap the outgoing camera track for the screen — no renegotiation. */
 export async function startScreenShare(): Promise<void> {
   const s = session;
-  const sender = solePeer(s!)?.videoSender();
-  if (!s || !sender || !media.isScreenShareSupported()) return;
+  // `s` must be checked BEFORE it is dereferenced. solePeer(s!) ran first and
+  // would throw on a null session — the non-null assertion hid that from the
+  // compiler rather than making it safe.
+  if (!s) throw new Error('No active call.');
+
+  if (!media.isScreenShareSupported()) throw new Error('Screen sharing is not supported on this device.');
+
+  const sender = solePeer(s)?.videoSender();
+  if (!sender) {
+    // A voice call has no outgoing VIDEO track, so there is no sender whose
+    // track can be swapped for the screen — screen share is video-only by
+    // construction. This used to `return` silently, which is why the button
+    // appeared to do nothing at all instead of explaining itself.
+    throw new Error(s.kind === 'video'
+      ? 'Screen sharing needs the video track to be ready — try again in a moment.'
+      : 'Screen sharing is only available in a video call.');
+  }
+
   const screen = await media.acquireScreenStream();
   const track = screen?.getVideoTracks?.()[0];
-  if (!track) { media.stopStream(screen); return; }
+  if (!track) {
+    media.stopStream(screen);
+    // NOT the word "cancel": the caller suppresses any message matching
+    // /cancel|denied by user|NotAllowed/ so a genuine user-cancel does not
+    // interrupt a call with an alert. Phrasing this as "cancelled" made it
+    // invisible too — the consent dialog was accepted, no track came back, and
+    // the user saw nothing at all. Observed on device.
+    throw new Error('Screen capture returned no video track. Your device or work profile may block screen recording.');
+  }
   s.cameraTrack = sender.track;          // keep the camera alive for swap-back
   s.screenStream = screen;
   await sender.replaceTrack(track);

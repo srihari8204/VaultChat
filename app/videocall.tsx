@@ -216,6 +216,10 @@ function VideoCallEngine() {
     if (sharing) engine.stopScreenShare().catch(() => {});
     else engine.startScreenShare().catch((e: any) => {
       const msg = e?.message ? String(e.message) : String(e);
+      // warn (not log): console.log is stripped from release builds, and a
+      // suppressed alert previously left NO trace anywhere — the failure was
+      // invisible in both the UI and logcat.
+      console.warn('[screenshare] failed:', msg);
       // A genuine user cancel is not an error worth interrupting a call for.
       if (!/cancel|denied by user|user.?cancel|NotAllowed/i.test(msg)) {
         Alert.alert('Screen share failed', msg || 'Unknown error');
