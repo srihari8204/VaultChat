@@ -373,23 +373,12 @@ func adminHealthDetail(w http.ResponseWriter, r *http.Request) {
 		"waiting": nil,
 	}
 
-	// Ollama reachability (local LLM, if deployed)
-	ollama := false
-	{
-		client := &http.Client{Timeout: 1500 * time.Millisecond}
-		if resp, err := client.Get("http://localhost:11434/api/tags"); err == nil {
-			ollama = resp.StatusCode >= 200 && resp.StatusCode < 300
-			resp.Body.Close()
-		}
-	}
-
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
 	httpx.JSON(w, 200, map[string]any{
 		"postgres":  map[string]any{"ok": pgOk, "pingMs": pgMs},
 		"redis":     map[string]any{"ok": redisOk, "pingMs": redisMs},
 		"pgbouncer": poolStats,
-		"ollama":    map[string]any{"reachable": ollama},
 		"system": map[string]any{
 			"uptimeSec":  int64(math.Round(time.Since(adminStart).Seconds())),
 			"loadAvg":    adminLoadAvg(),

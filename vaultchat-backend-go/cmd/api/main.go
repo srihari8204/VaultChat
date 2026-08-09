@@ -57,7 +57,6 @@ func main() {
 	routes.RegisterNav(mux)
 	routes.RegisterCommunities(mux)
 	routes.RegisterAuth(mux)
-	routes.RegisterAI(mux)
 	routes.RegisterCalls(mux)
 	routes.RegisterCallSessions(mux)
 	routes.RegisterUploads(mux)
