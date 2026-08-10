@@ -299,17 +299,32 @@ export async function decryptFromChat(
   if (!E2EE_ENABLED) return ciphertext;
   // Group chats (W5): a group envelope (GSK1:) is decrypted via the sender-key
   // session; anything else is pre-E2EE / plaintext history and passes through.
-  if (_chatPeer.get(chatId)?.type === 'group') {
+  // Routed on the ENVELOPE, not on chat metadata.
+  //
+  // This used to require `_chatPeer` to say the chat was a group. That is an
+  // in-memory cache: empty on a cold start, and empty when a chat is opened
+  // from a push before listChats/getChat has run. A GSK1 message arriving in
+  // that window fell through to the PAIRWISE path, which does not know the
+  // format — logged on device as "content looks encrypted but is not a known
+  // envelope — prefix: GSK1:" with an unreadable bubble and no decrypt ever
+  // attempted.
+  //
+  // The prefix is self-describing, so routing on it needs no lookup and cannot
+  // race the cache.
+  const g = await import('../services/crypto/groupSession.rn');
+  if (g.isGroupEnvelope(ciphertext)) {
     if (!GROUP_E2EE) return ciphertext;
     try {
-      const g = await import('../services/crypto/groupSession.rn');
-      if (!g.isGroupEnvelope(ciphertext)) return ciphertext;
       return await g.groupDecryptMessage(chatId, senderId, messageId ?? 0, ciphertext);
     } catch (err) {
       console.warn('[e2ee] group decrypt failed:', (err as any)?.message);
       return '🔒 unable to decrypt';
     }
   }
+  // A group chat whose content is NOT a group envelope is pre-E2EE history —
+  // it must never reach the pairwise path, which has no session for it.
+  if (_chatPeer.get(chatId)?.type === 'group') return ciphertext;
+
   const e2ee = await import('../services/crypto/e2eeSession.rn');
   if (!e2ee.isEnvelope(ciphertext)) {
     // THE BLIND SPOT. If the UI thinks this is encrypted (looksEncrypted) but
