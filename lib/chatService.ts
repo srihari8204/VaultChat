@@ -470,6 +470,20 @@ async function maybeAutoRecoverSession(peerId: string, errMsg: string): Promise<
   const last = _lastAutoReset.get(peerId) ?? 0;
   if (now - last < AUTO_RESET_COOLDOWN_MS) {
     console.warn('[e2ee] auto-reset suppressed for', peerId, `— ${Math.round((now - last) / 1000)}s since last`);
+    // Suppressing OUR reset must not also suppress asking the PEER to reset.
+    //
+    // Resetting our own session only fixes what we SEND. If the peer is still
+    // encrypting to a session we have already dropped, nothing improves until
+    // the peer resets too — and while this cooldown holds, we were doing
+    // neither. Measured on device: a forced reset at 16:25:48 healed nothing,
+    // and twenty seconds later the failures were still arriving with
+    // "auto-reset suppressed — 20s since last" and no request going out. Both
+    // sides sat until the user gave up, and the call was never decryptable.
+    //
+    // Asking costs nothing here: requestPeerRekey has its OWN 30s throttle, so
+    // this cannot become a request storm, and the peer resetting is enough on
+    // its own — their next message then carries an X3DH header we can adopt.
+    requestPeerRekey(peerId);
     return;
   }
   _lastAutoReset.set(peerId, now);
