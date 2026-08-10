@@ -233,8 +233,16 @@ if [ "${SKIP_5:-0}" != 1 ]; then
     if [ "$APPLY" = "1" ]; then
       sleep 3
       docker exec vaultchat-coturn-1 grep -E '^(min|max)-port' /etc/coturn/turnserver.conf </dev/null
-      echo | openssl s_client -connect turn.corefinite.com:5349 -servername turn.corefinite.com 2>/dev/null \
-        | grep -q "CN = turn" && ok "TURNS still answering after restart" || warn "TURNS DID NOT COME BACK — check: docker logs vaultchat-coturn-1"
+      # Parse the cert with x509 rather than grepping the s_client banner.
+      # The banner prints `CN=turn...` with NO spaces, so a `CN = turn` grep
+      # never matches and reports a HEALTHY server as dead — which it did, on
+      # this very step, after a restart that had in fact worked perfectly.
+      if echo | openssl s_client -connect turn.corefinite.com:5349 -servername turn.corefinite.com 2>/dev/null \
+           | openssl x509 -noout -subject 2>/dev/null | grep -qi "turn.corefinite.com"; then
+        ok "TURNS still answering after restart"
+      else
+        warn "TURNS DID NOT COME BACK — check: docker logs vaultchat-coturn-1"
+      fi
     fi
   fi
 fi
