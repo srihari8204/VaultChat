@@ -78,34 +78,58 @@ if [ "${SKIP_2:-0}" != "1" ]; then
   echo "   NOTE: keep the DOCKER-USER rules as belt-and-braces; they cost nothing."
 fi
 
-# ── 3. VAULTLENS WORKER ───────────────────────────────────────────────────
-# Unhealthy for 10+ days: its healthcheck curls localhost:3000 and nothing
-# listens. Either the process is dead or the check is wrong. Decide which —
-# an alert that is permanently red trains everyone to ignore alerts.
+# ── 3. VAULTLENS WORKER ───────────────────────── DONE 2026-08-09 20:5x ───
+# RESOLVED — kept here as the record of what was wrong, not as work to do.
+#
+# It was not merely "unhealthy", it was DEAD: `getaddrinfo EAI_AGAIN redis`
+# for 10+ days, so every VaultLens job users submitted queued and was never
+# processed. VaultLens is a live feature (app/vaultlens.tsx, lib/vaultlens/api.ts),
+# so this was user-facing breakage, not idle infrastructure.
+#
+# Two separate faults:
+#   1. the worker lost Redis and never recovered  → fixed by `docker restart`
+#   2. the image's healthcheck curls localhost:3000, but this is a QUEUE worker
+#      with NO HTTP server (confirmed: no listening sockets), so the check could
+#      never pass. It reported unhealthy whether working or not — which is
+#      precisely why nobody noticed fault 1 for ten days.
+#
+# The healthcheck is now overridden in docker-compose.yml to test the dependency
+# that actually failed:
+#     test: ["CMD","node","-e","require('net').connect(6379,'redis')..."]
+# so `unhealthy` now means "cannot reach Redis" instead of meaning nothing.
 if [ "${SKIP_3:-0}" != "1" ]; then
-  say "3. vaultlens-worker (unhealthy 10+ days)"
-  echo "   diagnose first:"
-  echo "     docker logs --tail 50 vaultchat-vaultlens-worker-1"
-  echo "     docker exec vaultchat-vaultlens-worker-1 sh -c 'ss -lnt || netstat -lnt'"
-  echo "   then EITHER fix the healthcheck port in docker-compose.yml"
-  echo "        OR remove the service if vaultlens is no longer used:"
-  echo "           $COMPOSE stop vaultlens-worker && $COMPOSE rm -f vaultlens-worker"
+  say "3. vaultlens-worker — ALREADY FIXED, verify only"
+  docker ps --filter name=vaultlens --format '   {{.Names}}  {{.Status}}'
+  echo "   expect: (healthy). If unhealthy again, Redis is genuinely unreachable."
 fi
 
 # ── 4. PIN IMAGE TAGS ─────────────────────────────────────────────────────
-# postgres:16 / redis:7 / caddy:2-alpine float. A rebuild can silently move a
-# major-minor and change behaviour with no code change to blame.
+# Five tags float. minio and valhalla are on :latest — either can cross a MAJOR
+# version on any pull, with no code change to blame it on.
+#
+# Digests below were read off the images RUNNING on 2026-08-09, so applying them
+# changes nothing about what executes — it only stops a future pull from moving.
+#
+# CORRECTION to the note that used to be here ("NO restart needed"): that is
+# wrong, and a dry-run proved it. Compose treats `redis:7` -> `redis:7@sha256:..`
+# as a changed spec even when it resolves to the identical image, and WILL
+# recreate postgres, redis, minio and valhalla. Pinning was therefore deferred
+# out of the zero-impact pass and belongs HERE, in the same restart window as
+# step 1/2 — pay the interruption once.
 if [ "${SKIP_4:-0}" != "1" ]; then
-  say "4. Pin floating image tags"
-  for c in vaultchat-postgres-1 vaultchat-redis-1 vaultchat-caddy-1 vaultchat-coturn-1; do
-    img=$(docker inspect "$c" --format '{{.Config.Image}}' 2>/dev/null)
-    dig=$(docker inspect "$c" --format '{{index .Config.Labels "org.opencontainers.image.version"}}' 2>/dev/null)
-    printf '   %-28s %s %s\n' "$c" "$img" "${dig:+(v$dig)}"
-  done
-  echo "   pin to the digest currently running, e.g.:"
-  echo "     docker inspect vaultchat-postgres-1 --format '{{.Image}}'"
-  echo "     image: postgres:16@sha256:<that digest>"
-  echo "   NO restart needed until you next pull."
+  say "4. Pin floating image tags (RECREATES containers — window only)"
+  cat <<'PINS'
+   docker-compose.yml:
+     image: caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+     image: postgres:16@sha256:081f1bc7bd5e143dbb6e487b710bbc27712cdcfaced4c071b8e47349aa1b4171
+     image: redis:7@sha256:33d7c9a245edd95e6703a0addbeaa48fe40c3b3b4783627a72085155462ebfdb
+     image: minio/minio:latest@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+     image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest@sha256:060da5b92e6024a67f65135c236d918b021d63e73d1808a0d55b7e7cbd17240c
+   verify BEFORE applying:  docker compose up -d --dry-run
+PINS
+  echo "   NOTE: minio + caddy already show pending recreates from config drift"
+  echo "         that predates this script — the running containers were deployed"
+  echo "         from a different compose revision. Expect them in the dry-run."
 fi
 
 # ── 5. DEPLOY go-api (per-device delivery pointers) ───────────────────────

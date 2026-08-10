@@ -1236,25 +1236,82 @@ func userTurn(w http.ResponseWriter, r *http.Request) {
 	if host == "" {
 		host = "turn.corefinite.com"
 	}
+
 	httpx.JSON(w, 200, map[string]any{
-		"iceServers": []map[string]any{
-			{"urls": "stun:stun.l.google.com:19302"},
-			{
-				"urls": []string{
-					fmt.Sprintf("turn:%s:3478?transport=udp", host),
-					fmt.Sprintf("turn:%s:3478?transport=tcp", host),
-				},
-				"username":   username,
-				"credential": credential,
-			},
-			{
-				"urls":       fmt.Sprintf("turns:%s:5349?transport=tcp", host),
-				"username":   username,
-				"credential": credential,
-			},
-		},
-		"ttl": ttlSec,
+		"iceServers": turnIceServers(host, strings.TrimSpace(os.Getenv("TURN_HOST6")), username, credential),
+		"ttl":        ttlSec,
 	})
+}
+
+// turnIceServers builds the ICE server list handed to clients. Split out from
+// userTurn so the URL shapes — which are easy to get subtly wrong and
+// impossible to notice until a call fails — are directly testable.
+func turnIceServers(host, host6, username, credential string) []map[string]any {
+	servers := []map[string]any{
+		{"urls": "stun:stun.l.google.com:19302"},
+		{
+			"urls": []string{
+				fmt.Sprintf("turn:%s:3478?transport=udp", host),
+				fmt.Sprintf("turn:%s:3478?transport=tcp", host),
+				// UDP 443. Corporate networks, hotel Wi-Fi and some carriers
+				// permit only 80/443, where 3478 is silently dropped and the
+				// call gathers no relay candidate at all — the "sometimes it
+				// just doesn't connect" class of failure. The host redirects
+				// UDP 443 to 3478 (TCP 443 belongs to nginx and cannot move).
+				fmt.Sprintf("turn:%s:443?transport=udp", host),
+			},
+			"username":   username,
+			"credential": credential,
+		},
+	}
+
+	// TURN over TLS. The most likely candidate to survive a restrictive network:
+	// it is TCP and it looks exactly like HTTPS on the wire.
+	//
+	// This was dark for a long time — coturn had no certificate, refused to open
+	// its TLS listener, and clients were handed a URL for a port with nothing
+	// behind it, paying a connection timeout on every call before ICE moved on.
+	// A certificate is now installed and republished on renewal by
+	// /etc/letsencrypt/renewal-hooks/deploy/coturn.sh; without that hook the
+	// listener would keep serving an expired certificate ~60 days later.
+	//
+	// Hostname, never a literal: the certificate is issued for TURN_HOST, so an
+	// IP form would fail verification.
+	servers = append(servers, map[string]any{
+		"urls":       fmt.Sprintf("turns:%s:5349?transport=tcp", host),
+		"username":   username,
+		"credential": credential,
+	})
+
+	// IPv6 relay, addressed by LITERAL so it does not depend on DNS.
+	//
+	// coturn already listens on the host's IPv6 address, but TURN_HOST has no
+	// AAAA record, so every client resolves the relay to IPv4 only and the v6
+	// listener is unreachable. Mobile networks are increasingly IPv6-first
+	// (measured on device: three global v6 addresses on Wi-Fi alone, and
+	// WhatsApp using v6), and reaching an IPv4-only relay from one costs a
+	// 464XLAT translation hop — extra latency, carrier NAT, and shorter UDP
+	// mappings, all of which hurt call media. On a genuinely IPv6-only network
+	// there is no relay at all.
+	//
+	// A literal beats publishing an AAAA record here because it needs no DNS
+	// change to take effect and cannot be broken by a stale cache. Adding the
+	// AAAA as well is still worthwhile; this does not conflict with it.
+	//
+	// turns: is deliberately NOT offered on the literal — the certificate is
+	// issued for the hostname, so a literal would fail validation.
+	if host6 != "" {
+		servers = append(servers, map[string]any{
+			"urls": []string{
+				fmt.Sprintf("turn:[%s]:3478?transport=udp", host6),
+				fmt.Sprintf("turn:[%s]:3478?transport=tcp", host6),
+			},
+			"username":   username,
+			"credential": credential,
+		})
+	}
+
+	return servers
 }
 
 // ── GET /user/export — GDPR data export ────────────────────────────────

@@ -2,6 +2,7 @@
 // Root layout — runs on every app open
 //
 // Order of operations:
+//   0. LiveKit polyfills (Hermes lacks DOMException)
 //   1. Buffer polyfill (crypto needs this)
 //   2. Sentry init — must happen BEFORE any other code that might throw
 //   3. Block screenshots app-wide (FLAG_SECURE)
@@ -10,6 +11,21 @@
 //   5. Register push notifications (physical device only)
 //   6. Wire notification tap listeners → navigate to correct chat
 //   7. Handle notification that launched app from killed state
+
+// MUST BE FIRST — installs DOMException and friends that Hermes does not have.
+//
+// livekit-client is a browser library and touches those globals at MODULE
+// SCOPE, so anything importing it before this line throws
+// `ReferenceError: Property 'DOMException' doesn't exist` — which surfaces as a
+// WHITE SCREEN with no error of ours in the log, because the module never
+// evaluated. Observed exactly that on the Go Live screen.
+//
+// Placed at the entry point rather than relying on import order inside a
+// feature module: any formatter that sorts imports would silently reintroduce
+// the crash there. Side-effect import, so it must not be merged with a named
+// one or a bundler may hoist it.
+// eslint-disable-next-line import/order, simple-import-sort/imports
+import '@livekit/react-native';
 
 import { BRAND_ACCENT } from '../constants/theme';
 import { Buffer } from 'buffer';
@@ -220,7 +236,9 @@ function RootLayout() {
     // survives socket reconnects, like the call listener).
     const cleanupRekey = addPersistentListener('e2ee_rekey', (data: any) => {
       const from = data?.from ?? data?.fromUid;
-      if (from) import('../lib/chatService').then(m => m.handleRekeyRequest(String(from))).catch(() => {});
+      // `force` marks a peer whose CALL setup failed — honoured immediately
+      // rather than being held back by the anti-thrash window.
+      if (from) import('../lib/chatService').then(m => m.handleRekeyRequest(String(from), data?.force === true)).catch(() => {});
     });
 
     // ── Boot work that the user is WAITING for ─────────────────────────

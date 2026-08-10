@@ -29,6 +29,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -40,6 +41,7 @@ import (
 	"vaultchat/backend-go/internal/httpx"
 	"vaultchat/backend-go/internal/livekit"
 	"vaultchat/backend-go/internal/metrics"
+	"vaultchat/backend-go/internal/redisx"
 )
 
 func RegisterCallSessions(mux *http.ServeMux) {
@@ -191,9 +193,34 @@ func callLoad(w http.ResponseWriter, r *http.Request) (*callSession, string, boo
 // wrong. The unique partial index on (chat_id) WHERE ended_at IS NULL is what
 // makes that safe: two simultaneous starts, one insert wins, the loser reads
 // the winner's call and joins it.
+// How many calls one account may START per minute.
+//
+// Call spam is cheap and loud: each attempt rings a device, wakes it from doze,
+// and can bypass Do Not Disturb, so it is a more effective harassment vector
+// than messaging and costs the sender nothing. There was no limit at all.
+//
+// 10/min is deliberately generous — a real user redialling a bad connection,
+// or a group host re-ringing several people, must never hit it. It exists to
+// stop automation, not to police impatience.
+const (
+	callStartLimit     = 10
+	callStartWindowSec = 60
+)
+
 func callSessionStart(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	uid := httpx.UserFrom(r).ID
+
+	// Keyed on the CALLER, not the IP: an abuser behind carrier NAT shares an
+	// address with thousands of innocent users, and an account is what actually
+	// gets banned. redisx.Consume fails OPEN, so a Redis outage degrades to
+	// today's behaviour rather than blocking every call on the platform.
+	if rl := redisx.Consume(ctx, "call:start:"+uid, callStartLimit, callStartWindowSec); !rl.Allowed {
+		metrics.Inc("call_rate_limited")
+		w.Header().Set("Retry-After", strconv.FormatInt(rl.ResetInSec, 10))
+		httpx.Err(w, 429, "Too many calls. Wait a moment and try again.")
+		return
+	}
 	var b struct {
 		ChatID string `json:"chatId"`
 		Kind   string `json:"kind"`
