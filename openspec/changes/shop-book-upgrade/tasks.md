@@ -44,3 +44,14 @@
 - [x] 7.1 `go vet`/`go build` clean; selftest for new `utils/shopbook.ts` helpers alongside existing selftest pattern
 - [x] 7.2 `npm run typecheck` clean
 - [x] 7.3 OpenSpec artifacts kept in sync with what shipped (design/specs deltas noted)
+
+## 8. Collection Handoff (added 2026-08-10 — scope change, see D5a)
+
+- [x] 8.1 Migration `083_shopbook_not_collected.sql`: add `not_collected` to the order status CHECK, `not_collected_reason` column
+- [x] 8.2 Go: `collected` transition accepted only from the customer (owner attempt → 403); owner gets `not_collected` (requires ≥24h in `ready` + reason); timeline event + notification both ways
+- [x] 8.3 Go: extend the existing daily job to sweep `ready` orders older than 7 days → `not_collected` (reason `expired`); exclude `not_collected` from dashboard/report pending counts
+- [x] 8.4 Client: customer tracking gets the "I collected this" action at Ready; owner order card gets "Not Collected" (disabled with time remaining before 24h); `utils/shopbook.ts` status label/progress + selftest for the 24h gate
+- [x] 8.5 Go: order details expose `notCollectedReason`; `shopbook_pipeline_test.go` guards the actor split (owner can never reach `collected`/`completed`)
+- [x] 8.6 Go: `SHOPBOOK_OWNER_COLLECT` rollout grace — owner-collected still settles (timeline notes `marked by the shop`) until the updated client ships; `=deny` enforces the split
+- [x] 8.7 `migrations/tests/083_not_collected_test.sql`: 24h gate, 7-day sweep and the no-revenue rule rehearsed against a copy of the production schema (throwaway DB, rolled back)
+- [ ] 8.8 Deploy: apply migration `083` (`migrate.js up`), rebuild `go-api`, ship the client, then set `SHOPBOOK_OWNER_COLLECT=deny` and delete the grace branch

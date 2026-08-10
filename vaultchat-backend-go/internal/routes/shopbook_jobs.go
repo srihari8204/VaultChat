@@ -56,6 +56,55 @@ func sbJobsTick(ctx context.Context) {
 	}
 	sbSendDailySummaries(ctx)
 	sbSendWeeklyReminders(ctx)
+	sbSweepUncollectedOrders(ctx)
+}
+
+// Orders the customer never picked up and the owner never wrote off would sit
+// in 'ready' forever, poisoning the dashboard and reports (design D5a). After
+// sbSweepUncollected they become 'not_collected' — terminal, and with no
+// ledger entry or invoice, because nothing was actually handed over.
+func sbSweepUncollectedOrders(ctx context.Context) {
+	rows, err := db.Pool.Query(ctx, `
+		UPDATE shopbook_order o
+		   SET status='not_collected', not_collected_reason='expired', updated_at=NOW()
+		 WHERE o.status='ready'
+		   AND COALESCE((SELECT MAX(at) FROM shopbook_order_event e
+		                  WHERE e.order_id=o.id AND e.status='ready'), o.updated_at)
+		       < NOW() - $1::interval
+		RETURNING o.id, o.customer_user_id,
+		          (SELECT owner_user_id FROM shopbook_shop WHERE id=o.shop_id)`,
+		fmt.Sprintf("%d hours", int(sbSweepUncollected.Hours())))
+	if err != nil {
+		log.Printf("[shopbook-jobs] uncollected sweep failed: %v", err)
+		return
+	}
+	defer rows.Close()
+	type row struct{ orderID, custID, ownerID string }
+	all := []row{}
+	for rows.Next() {
+		var x row
+		if rows.Scan(&x.orderID, &x.custID, &x.ownerID) == nil {
+			all = append(all, x)
+		}
+	}
+	rows.Close()
+	for _, x := range all {
+		_, _ = db.Pool.Exec(ctx,
+			`INSERT INTO shopbook_order_event (order_id, status, note)
+			 VALUES ($1,'not_collected','expired')`, x.orderID)
+		body := "An order was never collected and has been closed."
+		if x.custID != "" {
+			sbNotify(ctx, x.custID, "Order not collected", body,
+				map[string]any{"event": "order_status", "orderId": x.orderID, "status": "not_collected"})
+		}
+		if x.ownerID != "" {
+			sbNotify(ctx, x.ownerID, "Order not collected", body,
+				map[string]any{"event": "order_status", "orderId": x.orderID, "status": "not_collected"})
+		}
+	}
+	if len(all) > 0 {
+		log.Printf("[shopbook-jobs] swept %d uncollected order(s)", len(all))
+	}
 }
 
 // Daily summary per shop owner: today's orders, sales, pending khata total

@@ -125,6 +125,7 @@ export interface OrderDetail {
   cancelReason: string;
   cancelledBy: '' | 'customer' | 'owner';
   rejectReason: string;
+  notCollectedReason: string;   // '' unless the order expired or was written off
   hasInvoice: boolean;
 }
 
@@ -342,6 +343,14 @@ export function decideAlternative(orderId: string, itemId: string, accept: boole
 export function cancelOrder(orderId: string, reason: string) {
   return api<{ ok: boolean; status: OrderStatus }>(`/shopbook/orders/${orderId}/cancel`, {
     method: 'POST', json: { reason },
+  });
+}
+
+// Only the customer can confirm collection; the server settles the khata,
+// issues the invoice and returns the order already 'completed'.
+export function collectOrder(orderId: string) {
+  return api<{ ok: boolean; status: OrderStatus }>(`/shopbook/orders/${orderId}/collected`, {
+    method: 'POST',
   });
 }
 

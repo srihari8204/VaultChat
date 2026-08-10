@@ -4,7 +4,7 @@
 export type ShopStatus = 'open' | 'busy' | 'closed' | 'holiday' | 'vacation';
 export type OrderStatus =
   | 'pending' | 'accepted' | 'preparing' | 'packing' | 'ready'
-  | 'collected' | 'completed' | 'rejected' | 'cancelled';
+  | 'collected' | 'completed' | 'rejected' | 'cancelled' | 'not_collected';
 export type ItemAvailability =
   | 'pending' | 'available' | 'unavailable' | 'alternative';
 
@@ -117,28 +117,55 @@ export function orderStatusLabel(s: OrderStatus): string {
     case 'ready':      return 'Ready to collect';
     case 'collected':  return 'Collected';
     case 'completed':  return 'Completed';
-    case 'rejected':   return 'Rejected';
-    case 'cancelled':  return 'Cancelled';
+    case 'rejected':      return 'Rejected';
+    case 'cancelled':     return 'Cancelled';
+    case 'not_collected': return 'Not collected';
   }
+}
+
+export function isTerminalFailure(s: OrderStatus): boolean {
+  return s === 'cancelled' || s === 'rejected' || s === 'not_collected';
 }
 
 // Progress 0..1 along the happy path (terminal failures = 0).
 export function orderProgress(s: OrderStatus): number {
-  if (s === 'cancelled' || s === 'rejected') return 0;
+  if (isTerminalFailure(s)) return 0;
   const i = ORDER_STEPS.indexOf(s);
   return i < 0 ? 0 : i / (ORDER_STEPS.length - 1);
 }
 
 // The next status an owner can advance an order to (null when the next move
 // is a decision — accept/reject from pending — or the state is terminal).
+// 'ready' stops here on purpose: collection is the customer's call (D5a).
 export function nextOrderStatus(s: OrderStatus): OrderStatus | null {
   switch (s) {
     case 'accepted':  return 'preparing';
     case 'preparing': return 'packing';
     case 'packing':   return 'ready';
-    case 'ready':     return 'collected';
     default:          return null;
   }
+}
+
+// ── collection handoff (spec: order-management / uncollected orders) ──
+export function canCustomerCollect(s: OrderStatus): boolean {
+  return s === 'ready';
+}
+
+export const NOT_COLLECTED_AFTER_HOURS = 24;
+
+// When the owner may write a ready order off as Not Collected. Dated from the
+// last 'ready' timeline event; `hoursLeft` drives the disabled-button copy.
+export function notCollectedGate(
+  status: OrderStatus, timeline: TimelineEvent[], now = new Date(),
+): { allowed: boolean; hoursLeft: number } {
+  if (status !== 'ready') return { allowed: false, hoursLeft: 0 };
+  const ready = timeline.filter((e) => e.status === 'ready').pop();
+  const at = ready ? new Date(ready.at).getTime() : NaN;
+  if (!Number.isFinite(at)) return { allowed: true, hoursLeft: 0 }; // no timeline → let the server decide
+  const waited = (now.getTime() - at) / 3_600_000;
+  return waited >= NOT_COLLECTED_AFTER_HOURS
+    ? { allowed: true, hoursLeft: 0 }
+    : { allowed: false, hoursLeft: Math.ceil(NOT_COLLECTED_AFTER_HOURS - waited) };
 }
 
 // ── cancellation windows (spec: order-management / cancellation) ──

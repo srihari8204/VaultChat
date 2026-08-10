@@ -12,7 +12,9 @@ The system SHALL maintain a per-shop cart showing product, quantity, brand, unit
 - **THEN** every line shows product, quantity, brand, unit, price, and notes, with an order total for priced items
 
 ### Requirement: Order placement and status pipeline
-The system SHALL move each order through the statuses: Pending → Accepted → Preparing → Packing → Ready → Collected → Completed, with terminal alternatives Rejected and Cancelled. Every transition SHALL be timestamped and visible to the customer as an order timeline.
+The system SHALL move each order through the statuses: Pending → Accepted → Preparing → Packing → Ready → Collected → Completed, with terminal alternatives Rejected, Cancelled, and Not Collected. Every transition SHALL be timestamped and visible to the customer as an order timeline.
+
+Transitions SHALL be actor-scoped: the owner controls Pending → Accepted → Preparing → Packing → Ready; the customer controls Ready → Collected. The server SHALL reject a Collected transition requested by the owner.
 
 #### Scenario: Order placed
 - **WHEN** a customer places an order
@@ -23,8 +25,27 @@ The system SHALL move each order through the statuses: Pending → Accepted → 
 - **THEN** the customer's tracking screen updates in near-real time with each timestamped step
 
 #### Scenario: Collection and completion
-- **WHEN** the customer collects the order and the owner marks it Collected
-- **THEN** the order completes, the purchase is recorded in the digital ledger, and an invoice is generated
+- **WHEN** the customer marks a Ready order Collected
+- **THEN** the order auto-advances to Completed, the purchase is recorded in the digital ledger, and an invoice is generated
+
+#### Scenario: Owner cannot assert collection
+- **WHEN** an owner attempts to move a Ready order to Collected
+- **THEN** the transition is refused and the owner is offered the Not Collected action instead
+
+### Requirement: Uncollected orders
+The system SHALL prevent orders from resting in Ready indefinitely. The owner SHALL be able to mark a Ready order Not Collected once it has been Ready for at least 24 hours, with a reason. A server-side sweep SHALL mark any order Not Collected after 7 days in Ready. Not Collected is terminal, is excluded from pending/active order counts in the dashboard and reports, and SHALL NOT post a ledger purchase or generate an invoice.
+
+#### Scenario: Owner marks an order uncollected
+- **WHEN** an order has been Ready for 24 hours or more and the owner marks it Not Collected with a reason
+- **THEN** the order becomes Not Collected, the customer is notified, and no ledger entry or invoice is created
+
+#### Scenario: Owner acts too early
+- **WHEN** an owner attempts Not Collected on an order that has been Ready for less than 24 hours
+- **THEN** the action is refused with the time remaining
+
+#### Scenario: Automatic sweep
+- **WHEN** an order has been Ready for 7 days
+- **THEN** the daily job marks it Not Collected with reason `expired`, records the timeline event, and notifies both parties
 
 ### Requirement: Availability review with alternatives
 The system SHALL require the owner to review each order item and mark it Available, Alternative Available (with a suggested substitute), or Unavailable. The customer SHALL be notified and SHALL be able to accept the alternative, reject it, or remove the item, then continue the order.

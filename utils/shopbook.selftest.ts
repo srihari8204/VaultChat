@@ -10,7 +10,8 @@ import {
   ORDER_STEPS, orderProgress, nextOrderStatus, orderStatusLabel,
   normalizeOrderStatus, canCustomerCancel, canOwnerCancel, REJECT_REASONS,
   formatMoney, shopOpenState, cartTotal,
-  type OrderStatus,
+  canCustomerCollect, notCollectedGate, NOT_COLLECTED_AFTER_HOURS,
+  type OrderStatus, type TimelineEvent,
 } from './shopbook';
 
 let failures = 0;
@@ -29,15 +30,39 @@ check('pending has no auto-next (accept/reject is a decision)', nextOrderStatus(
 check('accepted → preparing', nextOrderStatus('accepted'), 'preparing');
 check('preparing → packing', nextOrderStatus('preparing'), 'packing');
 check('packing → ready', nextOrderStatus('packing'), 'ready');
-check('ready → collected', nextOrderStatus('ready'), 'collected');
+check('ready has no owner-next — collection is the customer\'s call', nextOrderStatus('ready'), null);
 check('collected is terminal for the owner button', nextOrderStatus('collected'), null);
 check('rejected is terminal', nextOrderStatus('rejected'), null);
+
+// ── collection handoff (spec: order-management / uncollected orders) ─
+check('customer may confirm collection when ready', canCustomerCollect('ready'), true);
+check('customer may not confirm collection before ready',
+  (['pending', 'accepted', 'preparing', 'packing', 'completed'] as OrderStatus[]).map(canCustomerCollect),
+  [false, false, false, false, false]);
+
+const NOW = new Date('2026-08-10T12:00:00Z');
+const readyAt = (hoursAgo: number): TimelineEvent[] => [
+  { status: 'ready', note: '', at: new Date(NOW.getTime() - hoursAgo * 3_600_000).toISOString() },
+];
+check('not-collected is blocked before the 24h window',
+  notCollectedGate('ready', readyAt(2), NOW), { allowed: false, hoursLeft: 22 });
+check('not-collected opens exactly at 24h',
+  notCollectedGate('ready', readyAt(NOT_COLLECTED_AFTER_HOURS), NOW), { allowed: true, hoursLeft: 0 });
+check('not-collected stays open after 24h',
+  notCollectedGate('ready', readyAt(50), NOW), { allowed: true, hoursLeft: 0 });
+check('not-collected never offered off the ready state',
+  notCollectedGate('packing', readyAt(50), NOW), { allowed: false, hoursLeft: 0 });
+check('no ready event (pre-timeline order) defers to the server',
+  notCollectedGate('ready', [], NOW), { allowed: true, hoursLeft: 0 });
+check('the latest ready event wins over an earlier one',
+  notCollectedGate('ready', [...readyAt(90), ...readyAt(1)], NOW), { allowed: false, hoursLeft: 23 });
 
 // ── progress ──────────────────────────────────────────────────────
 check('progress at pending', orderProgress('pending'), 0);
 check('progress at completed', orderProgress('completed'), 1);
 check('cancelled shows no progress', orderProgress('cancelled'), 0);
 check('rejected shows no progress', orderProgress('rejected'), 0);
+check('not_collected shows no progress', orderProgress('not_collected'), 0);
 
 // ── legacy compat: pre-064 orders used status 'new' ───────────────
 check("'new' normalizes to pending", normalizeOrderStatus('new'), 'pending');
@@ -59,7 +84,7 @@ check('the six rejection reason codes', REJECT_REASONS.map((r) => r.code),
   ['out_of_stock', 'shop_closed', 'quantity', 'outside_hours', 'technical', 'other']);
 
 // ── every status renders a label (switch exhaustiveness guard) ────
-const ALL: OrderStatus[] = [...ORDER_STEPS, 'rejected', 'cancelled'];
+const ALL: OrderStatus[] = [...ORDER_STEPS, 'rejected', 'cancelled', 'not_collected'];
 check('all statuses have labels', ALL.every((st) => !!orderStatusLabel(st)), true);
 
 // ── currency-aware money (tax engine currency symbol) ─────────────
