@@ -99,7 +99,20 @@ interface StoredSession {
 
 const IDENTITY_KEY = 'vc_e2ee_identity';
 const sessionKey = (peerId: string) => `vc_e2ee_session_${peerId}`;
-const OPK_POOL_MIN = 5;
+// Refill the one-time prekey pool well before it empties.
+//
+// The top-up only runs from provisionE2EEIdentity() — app start and opening a
+// chat — so the pool has to survive every session established BETWEEN those
+// points. At the old floor of 5 an account sat at exactly 5 and did not refill
+// (5 is not < 5), leaving room for only five incoming sessions before hitting
+// zero. Running dry is not fatal — X3DH still completes without a one-time
+// prekey — but it silently costs the forward secrecy the OTPK is there to
+// provide, and nothing surfaces that it happened.
+//
+// 10 is simply enough slack that a burst between two app starts cannot drain
+// the pool. Observed on a real account parked at exactly 5 after the
+// consumption bug in [otpkConsume.selftest.ts] burned 15 of its 20.
+const OPK_POOL_MIN = 10;
 const OPK_BATCH = 20;
 
 export interface E2EESession {
@@ -206,7 +219,11 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
   async function ensurePublished(): Promise<void> {
     const id = await getIdentity();
     // Top up the OTPK pool if it has run low.
-    if (id.opks.length < OPK_POOL_MIN) {
+    // <=, not <: the floor is the number of prekeys we want to KEEP available,
+    // so being down to it is already the trigger. With a strict < a pool that
+    // lands exactly on the floor never refills, which is how a real account
+    // ended up parked at exactly 5 with no margin at all.
+    if (id.opks.length <= OPK_POOL_MIN) {
       const fresh = newOpks(id.nextKeyId, OPK_BATCH);
       id.opks.push(...fresh);
       id.nextKeyId += OPK_BATCH;

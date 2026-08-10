@@ -157,6 +157,34 @@ function opkCount(kvDump: Map<string, string>): number {
   const w3 = await alice.encryptForPeer('bob', 'still fine');
   check('normal messaging is unaffected', await bob.decryptFromPeer('alice', w3) === 'still fine');
 
+  // ── the pool refills BEFORE it empties ────────────────────────────────
+  //
+  // The top-up runs only at app start and on opening a chat, so the pool must
+  // carry every session established between those points. The threshold is a
+  // strict `<`, so a pool sitting at exactly the floor used to refuse to
+  // refill — a real account was found parked at exactly 5 for this reason.
+  // Running dry is not fatal (X3DH proceeds with no one-time prekey) but it
+  // quietly drops the forward secrecy the prekey exists to give, so the floor
+  // is checked here rather than left to a constant nobody re-reads.
+  const floorMap = new Map<string, string>();
+  const floorKV: KVStore = {
+    async get(k) { return floorMap.has(k) ? (floorMap.get(k) as string) : null; },
+    async set(k, v) { floorMap.set(k, v); },
+    async del(k) { floorMap.delete(k); },
+  };
+  const floorUser = createE2EESession({ store: floorKV, transport: backend.transportFor('floor') });
+  await floorUser.ensurePublished();
+
+  // Park the pool at exactly the floor, then restart and publish again.
+  const fid = JSON.parse(floorMap.get('vc_e2ee_identity') as string);
+  const parked = 10;
+  fid.opks = fid.opks.slice(0, parked);
+  floorMap.set('vc_e2ee_identity', JSON.stringify(fid));
+  const restarted = createE2EESession({ store: floorKV, transport: backend.transportFor('floor') });
+  await restarted.ensurePublished();
+
+  check('a pool sitting AT the floor still refills', opkCount(floorMap) > parked);
+
   console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all prekey-consumption checks passed\n');
   process.exit(failures ? 1 : 0);
 })();
