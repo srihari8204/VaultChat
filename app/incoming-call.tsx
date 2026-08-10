@@ -6,7 +6,7 @@
 // answers the carried offer instead of creating a new one.
 
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -36,6 +36,35 @@ export default function IncomingCallScreen() {
   }>();
   const isGroup = group === '1';
   const isWaiting = waiting === '1';
+
+  // Who is calling.
+  //
+  // peerName rides on the call signal, and it arrives EMPTY often enough that
+  // an incoming call routinely announced itself as "VaultChat user" — the one
+  // thing the screen exists to tell you. The signal is not the only source of
+  // truth though: to be called at all we must already share a chat, so the name
+  // is sitting in our own chat store. Look it up rather than depending on what
+  // the caller happened to send.
+  //
+  // The param still wins when present — it is the freshest — and the lookup is
+  // best-effort, so a failure just leaves the existing fallback in place.
+  const [lookedUpName, setLookedUpName] = useState<string | null>(null);
+  useEffect(() => {
+    if (peerName || isGroup || !chatId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { getChat } = await import('../lib/chatService');
+        const c = await getChat(String(chatId));
+        const n = (c?.peerName ?? '').trim();
+        if (!cancelled && n) setLookedUpName(n);
+      } catch { /* keep the fallback */ }
+    })();
+    return () => { cancelled = true; };
+  }, [chatId, peerName, isGroup]);
+
+  /** Best name we have, in order of freshness. */
+  const displayName = (peerName || lookedUpName || 'VaultChat user');
 
   // Ring (looping ringtone + vibration, per the user's sound prefs)
   useEffect(() => {
@@ -75,7 +104,7 @@ export default function IncomingCallScreen() {
         if (data?.from === peerUid || data?.fromUid === peerUid) {
           decidedRef.current = true;
           stopRingtone();
-          addCallLog({ chatId, peerUid, peerName: peerName || 'VaultChat user', kind: type === 'video' ? 'video' : 'audio', direction: 'missed', at: Date.now(), durationSec: 0 }).catch(() => {});
+          addCallLog({ chatId, peerUid, peerName: displayName, kind: type === 'video' ? 'video' : 'audio', direction: 'missed', at: Date.now(), durationSec: 0 }).catch(() => {});
           router.back();
         }
       };
@@ -96,14 +125,14 @@ export default function IncomingCallScreen() {
     const route = type === 'video' ? '/videocall' : '/voicecall';
     router.replace({
       pathname: route as any,
-      params: { chatId, peerUid, peerName, isIncoming: 'true', initialOffer: offer || liveOfferRef.current },
+      params: { chatId, peerUid, peerName: displayName, isIncoming: 'true', initialOffer: offer || liveOfferRef.current },
     });
   };
 
   const decline = async () => {
     decidedRef.current = true;
     stopRingtone();
-    addCallLog({ chatId, peerUid, peerName: peerName || 'VaultChat user', kind: type === 'video' ? 'video' : 'audio', direction: 'missed', at: Date.now(), durationSec: 0 }).catch(() => {});
+    addCallLog({ chatId, peerUid, peerName: displayName, kind: type === 'video' ? 'video' : 'audio', direction: 'missed', at: Date.now(), durationSec: 0 }).catch(() => {});
     try {
       const s = await getSocket();
       s.emit('webrtc_end', { to: peerUid, chatId });
@@ -111,7 +140,7 @@ export default function IncomingCallScreen() {
     router.back();
   };
 
-  const initial = (peerName?.trim()[0] ?? '?').toUpperCase();
+  const initial = (displayName.trim()[0] ?? '?').toUpperCase();
 
   return (
     <View style={S.screen}>
@@ -120,7 +149,7 @@ export default function IncomingCallScreen() {
       <View style={S.body}>
         <Text style={S.label}>{isWaiting ? 'On another call' : type === 'video' ? 'Incoming video call' : 'Incoming voice call'}</Text>
         <View style={S.avatar}><Text style={S.avatarTxt}>{initial}</Text></View>
-        <Text style={S.name}>{peerName || 'VaultChat user'}</Text>
+        <Text style={S.name}>{displayName}</Text>
         {isWaiting && <Text style={S.label}>{type === 'video' ? 'Video call' : 'Voice call'} waiting…</Text>}
       </View>
 
