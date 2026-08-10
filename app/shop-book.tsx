@@ -28,6 +28,7 @@ import {
   formatINR, formatMoney, formatDistance, shopOpenState, orderStatusLabel, orderProgress,
   nextOrderStatus, cartTotal, clientKey, ORDER_STEPS,
   canCustomerCancel, canOwnerCancel, REJECT_REASONS,
+  canCustomerCollect, notCollectedGate, isTerminalFailure,
   couponDiscount, couponLabel, starText, loyaltyTier, parseBulkProducts,
   type CartItem, type OrderStatus, type ItemAvailability,
 } from '../utils/shopbook';
@@ -792,6 +793,14 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
     finally { setBusy(false); }
   };
 
+  // Only the customer can confirm collection (spec: order-management / D5a).
+  const confirmCollected = async () => {
+    setBusy(true);
+    try { await SB.collectOrder(orderId); load(); }
+    catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
+    finally { setBusy(false); }
+  };
+
   const submitRating = async () => {
     if (stars < 1) { Alert.alert('Tap a star to rate'); return; }
     setBusy(true);
@@ -851,7 +860,7 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
   if (invoice) return <InvoiceView orderId={orderId} onBack={() => setInvoice(false)} />;
 
   const money = (n: number) => formatMoney(n, order?.currency || '₹');
-  const failed = order && (order.status === 'cancelled' || order.status === 'rejected');
+  const failed = order && isTerminalFailure(order.status);
   return (
     <>
       <SubHeader title={t('orders.track')} onBack={onBack}
@@ -870,7 +879,11 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
                 <Text style={{ color: C.danger, fontWeight: '700' }}>
                   {order.status === 'rejected'
                     ? `${t('orders.rejectedByShop')}${order.rejectReason ? ` — ${REJECT_REASONS.find((r) => r.code === order.rejectReason)?.label ?? order.rejectReason}` : ''}`
-                    : `${order.cancelledBy === 'customer' ? t('orders.cancelledByYou') : t('orders.cancelledByShop')}${order.cancelReason ? ` — ${order.cancelReason}` : ''}`}
+                    : order.status === 'not_collected'
+                      ? (order.notCollectedReason === 'expired'
+                          ? 'This order was not collected in time and has been closed.'
+                          : `The shop closed this order as not collected${order.notCollectedReason ? ` — ${order.notCollectedReason}` : ''}.`)
+                      : `${order.cancelledBy === 'customer' ? t('orders.cancelledByYou') : t('orders.cancelledByShop')}${order.cancelReason ? ` — ${order.cancelReason}` : ''}`}
                 </Text>
               </View>
             ) : (
@@ -934,6 +947,15 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
               {order.discount > 0 && <Row label={`Discount (${order.couponCode})`} value={`− ${money(order.discount)}`} tone={C.green} />}
               <Row label={t('common.total')} value={money(order.total)} bold />
             </View>
+
+            {/* collection is the customer's assertion, not the shop's (D5a) */}
+            {canCustomerCollect(order.status) && (
+              <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy}
+                onPress={confirmCollected}>
+                <Ionicons name="bag-check" size={18} color="#fff" />
+                <Text style={s.primaryBtnText}>{t('orders.collected')}</Text>
+              </TouchableOpacity>
+            )}
 
             {/* customer may cancel only while the order is still pending */}
             {canCustomerCancel(order.status) && (
@@ -1660,6 +1682,7 @@ function OwnerOrderDetail({ orderId, onBack }: { orderId: string; onBack: () => 
   const [busy, setBusy] = useState(false);
   const [rejectAsk, setRejectAsk] = useState(false);
   const [cancelAsk, setCancelAsk] = useState(false);
+  const [notCollectAsk, setNotCollectAsk] = useState(false);
   const [altFor, setAltFor] = useState<string | null>(null);
   const [altName, setAltName] = useState('');
   const [altPrice, setAltPrice] = useState('');
@@ -1691,7 +1714,11 @@ function OwnerOrderDetail({ orderId, onBack }: { orderId: string; onBack: () => 
   const money = (n: number) => formatMoney(n, order?.currency || '₹');
   const next = order ? nextOrderStatus(order.status) : null;
   const reviewed = order ? order.items.every((it) => it.availability !== 'pending' && it.availability !== 'alternative') : false;
-  const terminal = order && ['completed', 'cancelled', 'rejected'].includes(order.status);
+  const terminal = order && ['completed', 'cancelled', 'rejected', 'not_collected'].includes(order.status);
+  // Ready orders wait for the customer; after 24h the owner can write one off.
+  const uncollected = order
+    ? notCollectedGate(order.status, order.timeline)
+    : { allowed: false, hoursLeft: 0 };
 
   return (
     <>
@@ -1701,6 +1728,8 @@ function OwnerOrderDetail({ orderId, onBack }: { orderId: string; onBack: () => 
         onClose={() => setRejectAsk(false)} />
       <ReasonModal visible={cancelAsk} title={t('orders.cancelReason')}
         onSubmit={(reason) => setStatus('cancelled', reason)} onClose={() => setCancelAsk(false)} />
+      <ReasonModal visible={notCollectAsk} title="Why was it not collected?"
+        onSubmit={(reason) => setStatus('not_collected', reason)} onClose={() => setNotCollectAsk(false)} />
       {/* alternative suggestion: name + price, cross-platform */}
       <Modal visible={altFor != null} transparent animationType="fade" onRequestClose={() => setAltFor(null)}>
         <View style={s.modalWrap}>
@@ -1725,12 +1754,14 @@ function OwnerOrderDetail({ orderId, onBack }: { orderId: string; onBack: () => 
           <>
             <StatusPill status={order.status} big />
             {!!order.note && <Text style={s.hint}>📝 {order.note}</Text>}
-            {(order.status === 'cancelled' || order.status === 'rejected') && (
+            {isTerminalFailure(order.status) && (
               <View style={[s.panel, { borderColor: C.danger }]}>
                 <Text style={{ color: C.danger, fontWeight: '700' }}>
                   {order.status === 'rejected'
                     ? (REJECT_REASONS.find((r) => r.code === order.rejectReason)?.label ?? order.rejectReason)
-                    : `${order.cancelledBy === 'customer' ? 'Customer cancelled' : 'Cancelled'}: ${order.cancelReason}`}
+                    : order.status === 'not_collected'
+                      ? `Not collected: ${order.notCollectedReason === 'expired' ? 'closed automatically after 7 days' : order.notCollectedReason}`
+                      : `${order.cancelledBy === 'customer' ? 'Customer cancelled' : 'Cancelled'}: ${order.cancelReason}`}
                 </Text>
               </View>
             )}
@@ -1784,10 +1815,24 @@ function OwnerOrderDetail({ orderId, onBack }: { orderId: string; onBack: () => 
                 {order.status !== 'pending' && next && (
                   <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={() => setStatus(next)}>
                     <Ionicons name="arrow-forward-circle" size={18} color="#fff" />
-                    <Text style={s.primaryBtnText}>
-                      {next === 'collected' ? t('owner.markCollected') : `Mark as ${orderStatusLabel(next)}`}
-                    </Text>
+                    <Text style={s.primaryBtnText}>{`Mark as ${orderStatusLabel(next)}`}</Text>
                   </TouchableOpacity>
+                )}
+                {/* Ready → Collected is the customer's to make; the shop can
+                    only write the order off once it has waited 24h (D5a). */}
+                {order.status === 'ready' && (
+                  <>
+                    <Text style={s.hint}>⏳ Waiting for the customer to confirm pickup.</Text>
+                    <TouchableOpacity
+                      style={[s.dangerBtn, (busy || !uncollected.allowed) && { opacity: 0.6 }]}
+                      disabled={busy || !uncollected.allowed} onPress={() => setNotCollectAsk(true)}>
+                      <Text style={s.dangerBtnText}>
+                        {uncollected.allowed
+                          ? 'Not collected'
+                          : `Not collected · available in ${uncollected.hoursLeft}h`}
+                      </Text>
+                    </TouchableOpacity>
+                  </>
                 )}
                 {canOwnerCancel(order.status) && order.status !== 'pending' && (
                   <TouchableOpacity style={s.dangerBtn} disabled={busy} onPress={() => setCancelAsk(true)}>
@@ -2557,8 +2602,7 @@ function ToggleRow({ label, value, onChange }: { label: string; value: boolean; 
 
 function StatusPill({ status, big }: { status: OrderStatus; big?: boolean }) {
   const done = status === 'completed' || status === 'collected';
-  const failed = status === 'cancelled' || status === 'rejected';
-  const color = failed ? C.danger : done ? C.green : C.blue;
+  const color = isTerminalFailure(status) ? C.danger : done ? C.green : C.blue;
   return (
     <View style={[s.pill, { backgroundColor: color + '20' }, big && { alignSelf: 'flex-start', marginBottom: 12 }]}>
       <View style={[s.pillDot, { backgroundColor: color }]} />

@@ -11,8 +11,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -89,6 +91,7 @@ func RegisterShopBook(mux *http.ServeMux) {
 	mux.HandleFunc("GET /shopbook/countries", httpx.RequireAuth(sbCountries))
 	mux.HandleFunc("GET /shopbook/starter-catalog", httpx.RequireAuth(sbStarterCatalog))
 	mux.HandleFunc("POST /shopbook/orders/{id}/cancel", httpx.RequireAuth(sbCustomerCancel))
+	mux.HandleFunc("POST /shopbook/orders/{id}/collected", httpx.RequireAuth(sbCustomerCollect))
 	mux.HandleFunc("GET /shopbook/orders/{id}/invoice", httpx.RequireAuth(sbOrderInvoice))
 	mux.HandleFunc("GET /shopbook/notifications", httpx.RequireAuth(sbNotifications))
 	mux.HandleFunc("POST /shopbook/notifications/read", httpx.RequireAuth(sbNotificationsRead))
@@ -541,18 +544,19 @@ func sbMyOrders(w http.ResponseWriter, r *http.Request) {
 // or the shop owner can read it.
 func orderWithItems(ctx context.Context, w http.ResponseWriter, orderID, userID string) {
 	var shopID, custID, status, note, couponCode, address string
-	var cancelReason, cancelledBy, rejectReason, currency string
+	var cancelReason, cancelledBy, rejectReason, notCollectedReason, currency string
 	var total, discount, deliveryFee float64
 	var delivery bool
 	var created time.Time
 	err := db.Pool.QueryRow(ctx,
 		`SELECT o.shop_id, o.customer_user_id, o.status, o.total, o.note, o.created_at,
 		        o.coupon_code, o.discount, o.delivery, o.delivery_fee, o.address,
-		        o.cancel_reason, o.cancelled_by, o.reject_reason, s.currency
+		        o.cancel_reason, o.cancelled_by, o.reject_reason, o.not_collected_reason,
+		        s.currency
 		   FROM shopbook_order o JOIN shopbook_shop s ON s.id=o.shop_id
 		  WHERE o.id=$1`, orderID).Scan(&shopID, &custID, &status, &total, &note, &created,
 		&couponCode, &discount, &delivery, &deliveryFee, &address,
-		&cancelReason, &cancelledBy, &rejectReason, &currency)
+		&cancelReason, &cancelledBy, &rejectReason, &notCollectedReason, &currency)
 	if db.NoRows(err) {
 		httpx.Err(w, http.StatusNotFound, "Order not found")
 		return
@@ -619,7 +623,8 @@ func orderWithItems(ctx context.Context, w http.ResponseWriter, orderID, userID 
 		"couponCode": couponCode, "discount": discount, "delivery": delivery,
 		"deliveryFee": deliveryFee, "address": address, "rated": rated,
 		"cancelReason": cancelReason, "cancelledBy": cancelledBy,
-		"rejectReason": rejectReason, "currency": currency,
+		"rejectReason": rejectReason, "notCollectedReason": notCollectedReason,
+		"currency": currency,
 		"timeline": timeline, "hasInvoice": hasInvoice,
 	})
 }
@@ -1027,13 +1032,37 @@ func sbOwnerSetAvailability(w http.ResponseWriter, r *http.Request) {
 // Owner-driven transitions of the order pipeline. "preparing" from "pending"
 // is a legacy path (pre-upgrade clients skip the explicit accept) and records
 // an implicit 'accepted' event so the timeline stays truthful.
+//
+// The pipeline is actor-split (spec: order-management, design D5a): the owner
+// owns pending→ready, the *customer* owns ready→collected (sbCustomerCollect).
+// The owner's only move from 'ready' is 'not_collected'.
 var sbOwnerNext = map[string][]string{
 	"pending":   {"accepted", "preparing", "rejected", "cancelled"},
 	"accepted":  {"preparing", "cancelled"},
 	"preparing": {"packing", "cancelled"},
 	"packing":   {"ready"},
-	"ready":     {"collected", "completed"},
-	"collected": {"completed"},
+	"ready":     {"not_collected"},
+}
+
+// How long an order must sit in 'ready' before the owner may write it off as
+// not collected, and after how long the daily sweep does it for them.
+const (
+	sbNotCollectedAfter = 24 * time.Hour
+	sbSweepUncollected  = 7 * 24 * time.Hour
+)
+
+// Rollout grace for the actor split. Until the client update reaches the
+// field, the *only* build owners have still completes orders by posting
+// 'collected' themselves — refusing that outright would strand every order at
+// 'ready' between the backend deploy and the app rollout. So the backend keeps
+// accepting it, marks the timeline so the record stays honest about who
+// asserted the handover, and logs it. Set SHOPBOOK_OWNER_COLLECT=deny once the
+// updated client is out to enforce the spec.
+//
+// ponytail: temporary rollout knob — delete this and the branch in
+// sbOwnerSetStatus once the old clients are gone.
+func sbOwnerCollectDenied() bool {
+	return os.Getenv("SHOPBOOK_OWNER_COLLECT") == "deny"
 }
 
 // The six rejection reason codes (spec: order-management / rejection).
@@ -1051,6 +1080,10 @@ func sbTransitionAllowed(from, to string) bool {
 		if s == to {
 			return true
 		}
+	}
+	// Grace path only — never part of the table the spec is read from.
+	if from == "ready" && (to == "collected" || to == "completed") {
+		return !sbOwnerCollectDenied()
 	}
 	return false
 }
@@ -1081,10 +1114,24 @@ func sbSettleOrder(ctx context.Context, tx pgx.Tx, shopID, custID, orderID strin
 	return sbCreateInvoice(ctx, tx, orderID)
 }
 
+// sbReadyFor returns how long an order has been sitting in 'ready', dated
+// from its last 'ready' timeline event (falling back to updated_at for rows
+// that predate the timeline table).
+func sbReadyFor(ctx context.Context, tx pgx.Tx, orderID string) (time.Duration, error) {
+	var secs float64
+	err := tx.QueryRow(ctx, `
+		SELECT EXTRACT(EPOCH FROM (NOW() - COALESCE(
+		         (SELECT MAX(at) FROM shopbook_order_event
+		           WHERE order_id=o.id AND status='ready'), o.updated_at)))
+		  FROM shopbook_order o WHERE o.id=$1`, orderID).Scan(&secs)
+	return time.Duration(secs) * time.Second, err
+}
+
 // Owner advances an order through the pipeline (pending → accepted →
-// preparing → packing → ready → collected → completed), rejects it from
-// pending with a reason code, or cancels it before packing with a reason.
-// Marking collected settles the khata + invoice and auto-completes.
+// preparing → packing → ready), rejects it from pending with a reason code,
+// or cancels it before packing with a reason. Collection is the customer's
+// call (sbCustomerCollect); the owner's only move from 'ready' is writing the
+// order off as 'not_collected' once it has waited 24h.
 func sbOwnerSetStatus(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := httpx.UserFrom(r)
@@ -1111,6 +1158,21 @@ func sbOwnerSetStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	if b.Status == "cancelled" && strings.TrimSpace(b.Reason) == "" {
 		httpx.Err(w, http.StatusBadRequest, "cancellation reason required")
+		return
+	}
+	// The owner cannot assert that the customer took the goods (design D5a) —
+	// except during the client-rollout grace window, see sbOwnerCollectDenied.
+	if b.Status == "collected" || b.Status == "completed" {
+		if sbOwnerCollectDenied() {
+			httpx.Err(w, http.StatusForbidden,
+				"Only the customer can mark an order collected — if they never picked it up, mark it Not Collected")
+			return
+		}
+		log.Printf("[shopbook] owner %s completed order %s (pre-split client; SHOPBOOK_OWNER_COLLECT=deny to enforce)",
+			user.ID, orderID)
+	}
+	if b.Status == "not_collected" && strings.TrimSpace(b.Reason) == "" {
+		httpx.Err(w, http.StatusBadRequest, "reason required")
 		return
 	}
 
@@ -1151,33 +1213,43 @@ func sbOwnerSetStatus(w http.ResponseWriter, r *http.Request) {
 
 		finalStatus = b.Status
 		events := []string{b.Status}
+		ownerAsserted := false
 		switch b.Status {
 		case "preparing":
 			if cur == "pending" { // legacy path: implicit accept
 				events = []string{"accepted", "preparing"}
 			}
-		case "collected":
+		case "not_collected":
+			// Give the customer a real window to come back for their order.
+			waited, err := sbReadyFor(ctx, tx, orderID)
+			if err != nil {
+				return err
+			}
+			if waited < sbNotCollectedAfter {
+				return fmt.Errorf("too soon:%d", int((sbNotCollectedAfter-waited)/time.Hour)+1)
+			}
+		case "collected", "completed":
+			// Grace window: the shop asserted the handover. Settle as before,
+			// but say so on the timeline — the customer never confirmed.
 			if err := sbSettleOrder(ctx, tx, shopID, custID, orderID, total); err != nil {
 				return err
 			}
 			finalStatus = "completed"
 			events = []string{"collected", "completed"}
-		case "completed":
-			if err := sbSettleOrder(ctx, tx, shopID, custID, orderID, total); err != nil {
-				return err
-			}
-			if cur == "ready" { // direct completion still records the handover
-				events = []string{"collected", "completed"}
-			}
+			ownerAsserted = true
 		}
 
 		set := `status=$1, updated_at=NOW()`
 		args := []any{finalStatus, orderID, shopID}
-		if b.Status == "rejected" {
+		switch b.Status {
+		case "rejected":
 			set = `status=$1, reject_reason=$4, updated_at=NOW()`
 			args = append(args, b.Reason)
-		} else if b.Status == "cancelled" {
+		case "cancelled":
 			set = `status=$1, cancel_reason=$4, cancelled_by='owner', updated_at=NOW()`
+			args = append(args, b.Reason)
+		case "not_collected":
+			set = `status=$1, not_collected_reason=$4, updated_at=NOW()`
 			args = append(args, b.Reason)
 		}
 		if _, err := tx.Exec(ctx,
@@ -1188,8 +1260,10 @@ func sbOwnerSetStatus(w http.ResponseWriter, r *http.Request) {
 			note := ""
 			if ev == "rejected" {
 				note = sbRejectReasons[b.Reason]
-			} else if ev == "cancelled" {
+			} else if ev == "cancelled" || ev == "not_collected" {
 				note = b.Reason
+			} else if ev == "collected" && ownerAsserted {
+				note = "marked by the shop"
 			}
 			if err := sbOrderEvent(ctx, tx, orderID, ev, note); err != nil {
 				return err
@@ -1209,7 +1283,10 @@ func sbOwnerSetStatus(w http.ResponseWriter, r *http.Request) {
 			httpx.Err(w, http.StatusBadRequest,
 				"Every item is unavailable — reject the order as Out of Stock instead")
 		default:
-			if strings.HasPrefix(err.Error(), "bad transition") {
+			if h, cut := strings.CutPrefix(err.Error(), "too soon:"); cut {
+				httpx.Err(w, http.StatusConflict,
+					"This order has not waited 24h yet — you can mark it Not Collected in "+h+"h")
+			} else if strings.HasPrefix(err.Error(), "bad transition") {
 				httpx.Err(w, http.StatusConflict, "That status change is not allowed from the order's current state")
 			} else {
 				httpx.Err(w, http.StatusInternalServerError, "db error")
@@ -1219,14 +1296,15 @@ func sbOwnerSetStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	if custID != "" {
 		msg := map[string]string{
-			"accepted":  "Your order was accepted",
-			"preparing": "Your order is being prepared",
-			"packing":   "Your order is being packed",
-			"ready":     "Your order is ready to collect 🎉",
-			"collected": "Order collected — thank you!",
-			"completed": "Order completed — thank you!",
-			"rejected":  "Your order was rejected: " + sbRejectReasons[b.Reason],
-			"cancelled": "Your order was cancelled: " + b.Reason,
+			"accepted":      "Your order was accepted",
+			"preparing":     "Your order is being prepared",
+			"packing":       "Your order is being packed",
+			"ready":         "Your order is ready to collect 🎉",
+			"collected":     "Order collected — thank you!",
+			"completed":     "Order completed — thank you!",
+			"rejected":      "Your order was rejected: " + sbRejectReasons[b.Reason],
+			"cancelled":     "Your order was cancelled: " + b.Reason,
+			"not_collected": "The shop marked your order as not collected: " + b.Reason,
 		}[b.Status]
 		sbNotify(ctx, custID, "Order update", msg,
 			map[string]any{"event": "order_status", "orderId": orderID, "status": finalStatus})
@@ -1291,6 +1369,64 @@ func sbCustomerCancel(w http.ResponseWriter, r *http.Request) {
 			map[string]any{"event": "order_cancelled", "orderId": orderID})
 	}
 	httpx.JSON(w, 200, map[string]any{"ok": true, "status": "cancelled"})
+}
+
+// Customer confirms they collected a ready order — the only path to
+// 'collected' (spec: order-management / collection and completion; D5a).
+// Settles the khata, issues the invoice and auto-advances to 'completed'.
+func sbCustomerCollect(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := httpx.UserFrom(r)
+	orderID := r.PathValue("id")
+	var shopID string
+	err := db.WithUser(ctx, user.ID, func(tx pgx.Tx) error {
+		var cur string
+		var total float64
+		if err := tx.QueryRow(ctx,
+			`SELECT status, shop_id, total FROM shopbook_order
+			  WHERE id=$1 AND customer_user_id=$2 FOR UPDATE`,
+			orderID, user.ID).Scan(&cur, &shopID, &total); err != nil {
+			return err
+		}
+		if cur == "completed" || cur == "collected" {
+			return nil // idempotent: double-tap on a slow connection
+		}
+		if cur != "ready" {
+			return fmt.Errorf("not ready")
+		}
+		if err := sbSettleOrder(ctx, tx, shopID, user.ID, orderID, total); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE shopbook_order SET status='completed', updated_at=NOW() WHERE id=$1`,
+			orderID); err != nil {
+			return err
+		}
+		for _, ev := range []string{"collected", "completed"} {
+			if err := sbOrderEvent(ctx, tx, orderID, ev, ""); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if db.NoRows(err) {
+		httpx.Err(w, http.StatusNotFound, "Order not found")
+		return
+	}
+	if err != nil {
+		if err.Error() == "not ready" {
+			httpx.Err(w, http.StatusConflict, "This order is not ready for collection yet")
+		} else {
+			httpx.Err(w, http.StatusInternalServerError, "db error")
+		}
+		return
+	}
+	var ownerID string
+	if db.Pool.QueryRow(ctx, `SELECT owner_user_id FROM shopbook_shop WHERE id=$1`, shopID).Scan(&ownerID) == nil && ownerID != "" {
+		sbNotify(ctx, ownerID, "Order collected ✅", "The customer confirmed pickup — the khata is settled.",
+			map[string]any{"event": "order_status", "orderId": orderID, "status": "completed"})
+	}
+	httpx.JSON(w, 200, map[string]any{"ok": true, "status": "completed"})
 }
 
 // ── owner: dashboard ─────────────────────────────────────────────
