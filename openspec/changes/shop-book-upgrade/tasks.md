@@ -54,4 +54,5 @@
 - [x] 8.5 Go: order details expose `notCollectedReason`; `shopbook_pipeline_test.go` guards the actor split (owner can never reach `collected`/`completed`)
 - [x] 8.6 Go: `SHOPBOOK_OWNER_COLLECT` rollout grace — owner-collected still settles (timeline notes `marked by the shop`) until the updated client ships; `=deny` enforces the split
 - [x] 8.7 `migrations/tests/083_not_collected_test.sql`: 24h gate, 7-day sweep and the no-revenue rule rehearsed against a copy of the production schema (throwaway DB, rolled back)
-- [ ] 8.8 Deploy: apply migration `083` (`migrate.js up`), rebuild `go-api`, ship the client, then set `SHOPBOOK_OWNER_COLLECT=deny` and delete the grace branch
+- [x] 8.8 Deploy (2026-08-10): migration `083` applied via `migrate.js up` (ledger at 083, 0 pending, no drift), `go-api` rebuilt and healthy, `POST /shopbook/orders/{id}/collected` live
+- [ ] 8.9 After the client update reaches the field: set `SHOPBOOK_OWNER_COLLECT=deny`, delete the grace branch in `sbOwnerSetStatus` + `sbTransitionAllowed`, and drop the `t.Setenv` from `TestOwnerCannotReachCollectedOrCompleted`
