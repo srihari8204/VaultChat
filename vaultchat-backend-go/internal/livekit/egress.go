@@ -111,7 +111,57 @@ func egressToken(cfg Config, room string) (string, error) {
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(cfg.APISecret))
 }
 
-func twirp(ctx context.Context, cfg Config, method string, body any, out any) error {
+// roomCreateToken mints a credential that may create a room and nothing else.
+//
+// Kept separate from egressToken on purpose: that one grants roomRecord ONLY,
+// and widening it so a single call can create a room would hand every recording
+// credential the power to create rooms for the rest of its ten-minute life.
+func roomCreateToken(cfg Config, room string) (string, error) {
+	if !cfg.Configured() {
+		return "", ErrNotConfigured
+	}
+	now := time.Now()
+	claims := jwt.MapClaims{
+		"iss": cfg.APIKey,
+		"sub": "egress-roomcreate",
+		"nbf": now.Add(-30 * time.Second).Unix(),
+		"exp": now.Add(1 * time.Minute).Unix(),
+		"video": map[string]any{
+			"room":       room,
+			"roomCreate": true,
+		},
+	}
+	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(cfg.APISecret))
+}
+
+// ensureRoom creates the room if it does not already exist.
+//
+// LiveKit creates rooms LAZILY, on first participant join. Egress was started
+// from POST /broadcasts — before the host connects — so the composite had
+// nothing to attach to and every broadcast died on:
+//
+//	StartRoomCompositeEgress: 404 "requested room does not exist"
+//
+// Six consecutive broadcasts failed this way on 2026-08-10, with egress_id NULL
+// on every row, so hls_url never populated and status never left 'starting'.
+//
+// CreateRoom is idempotent — an existing room is returned, not an error — so
+// this is safe when the host happens to have connected first.
+func ensureRoom(ctx context.Context, cfg Config, room string) error {
+	tok, err := roomCreateToken(cfg, room)
+	if err != nil {
+		return err
+	}
+	// empty_timeout must outlast the gap between this call and the host
+	// joining; the server's own room.empty_timeout is 60s and this matches it.
+	return twirp(ctx, cfg, "livekit.RoomService", "CreateRoom", tok,
+		map[string]any{"name": room, "empty_timeout": 60}, nil)
+}
+
+// twirp calls one LiveKit RPC. `service` is the twirp service segment
+// ("livekit.Egress", "livekit.RoomService") — parameterised because creating a
+// room is a RoomService call while everything else here is Egress.
+func twirp(ctx context.Context, cfg Config, service, method string, tok string, body any, out any) error {
 	base := strings.TrimRight(cfg.URL, "/")
 	// The token is minted for ws://; the REST API is the same host over http(s).
 	base = strings.Replace(strings.Replace(base, "wss://", "https://", 1), "ws://", "http://", 1)
@@ -120,14 +170,9 @@ func twirp(ctx context.Context, cfg Config, method string, body any, out any) er
 	if err != nil {
 		return err
 	}
-	room, _ := body.(map[string]any)["room_name"].(string)
-	tok, err := egressToken(cfg, room)
-	if err != nil {
-		return err
-	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST",
-		base+"/twirp/livekit.Egress/"+method, bytes.NewReader(raw))
+		base+"/twirp/"+service+"/"+method, bytes.NewReader(raw))
 	if err != nil {
 		return err
 	}
@@ -157,6 +202,11 @@ func StartHLS(ctx context.Context, cfg Config, room, broadcastID string) (string
 	s3 := s3FromEnv()
 	if !s3.ok() {
 		return "", ErrEgressNotConfigured
+	}
+
+	// The room must exist before anything can composite it — see ensureRoom.
+	if err := ensureRoom(ctx, cfg, room); err != nil {
+		return "", fmt.Errorf("ensure room %q: %w", room, err)
 	}
 
 	body := map[string]any{
@@ -203,7 +253,11 @@ func StartHLS(ctx context.Context, cfg Config, room, broadcastID string) (string
 	var res struct {
 		EgressID string `json:"egress_id"`
 	}
-	if err := twirp(ctx, cfg, "StartRoomCompositeEgress", body, &res); err != nil {
+	tok, err := egressToken(cfg, room)
+	if err != nil {
+		return "", err
+	}
+	if err := twirp(ctx, cfg, "livekit.Egress", "StartRoomCompositeEgress", tok, body, &res); err != nil {
 		return "", err
 	}
 	return res.EgressID, nil
@@ -236,5 +290,10 @@ func StopHLS(ctx context.Context, cfg Config, egressID string) error {
 	if strings.TrimSpace(egressID) == "" {
 		return nil
 	}
-	return twirp(ctx, cfg, "StopEgress", map[string]any{"egress_id": egressID}, nil)
+	tok, err := egressToken(cfg, "")
+	if err != nil {
+		return err
+	}
+	return twirp(ctx, cfg, "livekit.Egress", "StopEgress", tok,
+		map[string]any{"egress_id": egressID}, nil)
 }
