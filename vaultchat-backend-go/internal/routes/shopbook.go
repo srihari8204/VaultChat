@@ -26,6 +26,22 @@ import (
 	"vaultchat/backend-go/internal/httpx"
 )
 
+// sbJSON hands JSON to a jsonb parameter.
+//
+// pgx encodes a Go []byte (and json.RawMessage, which is one) as bytea. Its
+// text form starts with "\x", so Postgres rejects it with `invalid input
+// syntax for type json — Token "\" is invalid`. A string is sent as text,
+// which jsonb parses. Every jsonb write in Shop Book silently failed on this
+// for the whole life of the tax-engine upgrade: no invoice, no notification
+// and no admin-log row was ever stored, and shop save returned "db error".
+// Always wrap jsonb parameters in this.
+func sbJSON(b []byte) string {
+	if len(b) == 0 {
+		return "{}"
+	}
+	return string(b)
+}
+
 // sbMoney formats a money amount for push copy in the shop's currency,
 // e.g. "₹1,250" / "$12". Falls back to ₹ when the shop is unknown.
 func sbMoney(ctx context.Context, shopID string, n float64) string {
@@ -183,9 +199,13 @@ func sbNotify(ctx context.Context, userID, title, body string, data map[string]a
 	}
 	event, _ := data["event"].(string)
 	if dataJSON, err := json.Marshal(data); err == nil {
-		_, _ = db.Pool.Exec(ctx,
+		// Never swallow this: a silent failure here is invisible until someone
+		// notices the inbox has been empty for weeks (which is what happened).
+		if _, err := db.Pool.Exec(ctx,
 			`INSERT INTO shopbook_notification (user_id, title, body, event, data)
-			 VALUES ($1,$2,$3,$4,$5)`, userID, title, body, event, dataJSON)
+			 VALUES ($1,$2,$3,$4,$5)`, userID, title, body, event, sbJSON(dataJSON)); err != nil {
+			log.Printf("[shopbook] notification insert failed (user=%s event=%s): %v", userID, event, err)
+		}
 	}
 	rows, err := db.Pool.Query(ctx,
 		`SELECT push_token FROM devices WHERE user_id=$1 AND push_token IS NOT NULL`, userID)
@@ -839,8 +859,9 @@ func sbUpsertShop(w http.ResponseWriter, r *http.Request) {
 		RETURNING id, approved`,
 		user.ID, b.Name, b.Category, b.Address, b.Lat, b.Lng, b.Phone,
 		b.OpenTime, b.CloseTime, b.WeeklyHoliday, b.Status, pickup, prep, delivery, deliveryFee,
-		b.LunchStart, b.LunchEnd, b.Country, currency, taxCfg).Scan(&id, &approved)
+		b.LunchStart, b.LunchEnd, b.Country, currency, sbJSON(taxCfg)).Scan(&id, &approved)
 	if err != nil {
+		log.Printf("[shopbook] shop upsert failed (owner=%s country=%s): %v", user.ID, b.Country, err)
 		httpx.Err(w, http.StatusInternalServerError, "could not save shop")
 		return
 	}
@@ -1417,6 +1438,8 @@ func sbCustomerCollect(w http.ResponseWriter, r *http.Request) {
 		if err.Error() == "not ready" {
 			httpx.Err(w, http.StatusConflict, "This order is not ready for collection yet")
 		} else {
+			// Settling touches the ledger and the invoice — never fail silently.
+			log.Printf("[shopbook] collect failed (order=%s customer=%s): %v", orderID, user.ID, err)
 			httpx.Err(w, http.StatusInternalServerError, "db error")
 		}
 		return

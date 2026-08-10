@@ -241,7 +241,7 @@ func sbCreateInvoice(ctx context.Context, tx pgx.Tx, orderID string) error {
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
 		shopID, orderID, custID, seq, country, taxType, currency,
 		subtotal, discount, taxTotal, math.Round((total+taxTotal)*100)/100,
-		bizJSON, custName, itemsJSON, bdJSON)
+		sbJSON(bizJSON), custName, sbJSON(itemsJSON), sbJSON(bdJSON))
 	return err
 }
 
