@@ -63,10 +63,18 @@ fi
 # ─────────────────────────────────────────────────────────────────────────
 # 2. TURN over UDP 443.
 #
-# This was reported as deployed earlier. It is not: turnserver.conf has only
-# listening-port=3478 / tls-listening-port=5349, the container CMD adds no
-# alternate port, UFW permits 443/tcp but not 443/udp, and nothing is bound to
-# UDP 443. Clients on networks that only allow 443 therefore have no TURN path.
+# CORRECTION: the audit first reported this as missing. It was already
+# deployed, as a nat REDIRECT on both v4 and v6, and the rule counters prove it
+# was carrying traffic (152 packets when checked). The audit looked for a
+# LISTENER — turnserver.conf, the container CMD, ufw, `ss` bindings — and a
+# REDIRECT binds nothing, so it is invisible to every one of those. Check
+# `iptables -t nat -L PREROUTING -v -n` instead.
+#
+# What was genuinely missing is persistence: those rules lived only in the
+# kernel table, like everything else in step 3, so a reboot would have removed
+# TURN-over-443 on both families. This step is therefore now a no-op on a live
+# box (the -C check finds the rule) and its real value is that step 3 re-adds
+# it at boot.
 #
 # WHY A REDIRECT RATHER THAN A SECOND LISTENER
 # coturn's `alt-listening-port` is for RFC 5780 CHANGE-REQUEST probing, not for
@@ -114,12 +122,27 @@ add() {  # add <table> <chain> <rule...>
   local t=$1 c=$2; shift 2
   iptables -t "$t" -C "$c" "$@" 2>/dev/null || iptables -t "$t" -I "$c" "$@"
 }
+add6() { # same, for ip6tables
+  local t=$1 c=$2; shift 2
+  ip6tables -t "$t" -C "$c" "$@" 2>/dev/null || ip6tables -t "$t" -I "$c" "$@"
+}
 # Container ports that must never be reachable from the internet.
 for p in 8090 14000 19000 19001 19092 15432 16379; do
   add filter DOCKER-USER -i "$IFACE" -p tcp -m conntrack --ctorigdstport "$p" -j DROP
 done
 # TURN over UDP 443 for restrictive networks.
-add nat PREROUTING -i "$IFACE" -p udp --dport 443 -j REDIRECT --to-ports 3478
+#
+# This is a REDIRECT, not a listener — coturn binds only 3478/5349, so nothing
+# shows up in `ss` and turnserver.conf says nothing about 443. That invisibility
+# is exactly why the 2026-08-10 audit wrongly reported the feature as missing:
+# every check looked for a listener. The rule counters are the evidence that it
+# works, so check those (`iptables -t nat -L PREROUTING -v -n`) and not `ss`.
+#
+# BOTH families are required. coturn serves IPv6 (--external-ip carries the v6
+# literal) and the original deployment redirected v6 as well; re-adding only the
+# v4 rule here would have quietly dropped IPv6 TURN-over-443 at the next reboot.
+add  nat PREROUTING -i "$IFACE" -p udp --dport 443 -j REDIRECT --to-ports 3478
+add6 nat PREROUTING -i "$IFACE" -p udp --dport 443 -j REDIRECT --to-ports 3478
 SCRIPT
     sudo chmod 755 /usr/local/sbin/vaultchat-firewall.sh
 
