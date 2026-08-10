@@ -76,6 +76,29 @@ function VoiceCallEngine() {
       isIncoming?: string; initialOffer?: string;
     }>();
 
+  // Who we are talking to.
+  //
+  // peerName is a route param and arrives EMPTY on several paths — an incoming
+  // call whose signal carried no name, or an outgoing one started from a list
+  // whose title had not loaded — so the screen showed "VaultChat user" during
+  // the call. To be in a call at all we already share a chat, so the name is in
+  // our own store; look it up rather than trusting what was passed in.
+  //
+  // Display only: nothing here touches the call, and a failed lookup simply
+  // leaves the previous fallback in place.
+  const [lookedUpName, setLookedUpName] = useState<string | null>(null);
+  useEffect(() => {
+    if (peerName || !chatId) return;
+    let cancelled = false;
+    (async () => {
+      const { getChat } = await import('../lib/chatService');
+      const n = (await getChat(String(chatId)))?.peerName?.trim();
+      if (!cancelled && n) setLookedUpName(n);
+    })().catch(() => { /* keep the fallback */ });
+    return () => { cancelled = true; };
+  }, [chatId, peerName]);
+  const displayName = peerName || lookedUpName || 'VaultChat user';
+
   const status      = useCallStatus();
   const connectedAt = useCallConnectedAt();
   const error       = useCallError();
@@ -115,7 +138,7 @@ function VoiceCallEngine() {
   const statusText = status === 'connecting' ? 'Connecting…'
     : status === 'ringing' ? 'Ringing…'
     : 'Call ended';
-  const initial = (peerName?.trim()[0] ?? '?').toUpperCase();
+  const initial = (displayName.trim()[0] ?? '?').toUpperCase();
 
   return (
     <View style={S.screen}>
@@ -124,7 +147,7 @@ function VoiceCallEngine() {
         <View style={S.avatarWrap}>
           <View style={S.avatar}><Text style={S.avatarTxt}>{initial}</Text></View>
         </View>
-        <Text style={S.name}>{peerName || 'VaultChat user'}</Text>
+        <Text style={S.name}>{displayName}</Text>
         {status === 'connected'
           ? <CallTimer style={S.status} startedAt={connectedAt} />
           : <Text style={S.status}>{statusText}</Text>}

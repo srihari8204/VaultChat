@@ -174,6 +174,25 @@ function VideoCallEngine() {
       isIncoming?: string; initialOffer?: string;
     }>();
 
+  // Who we are talking to. peerName is a route param and arrives EMPTY on
+  // several paths — an incoming call whose signal carried no name, or an
+  // outgoing one started from a list whose title had not loaded — so the call
+  // screen showed "VaultChat user". To be in a call we already share a chat, so
+  // the name is in our own store. Display only: nothing here touches the call,
+  // and a failed lookup leaves the previous fallback in place.
+  const [lookedUpName, setLookedUpName] = useState<string | null>(null);
+  useEffect(() => {
+    if (peerName || !chatId) return;
+    let cancelled = false;
+    (async () => {
+      const { getChat } = await import('../lib/chatService');
+      const n = (await getChat(String(chatId)))?.peerName?.trim();
+      if (!cancelled && n) setLookedUpName(n);
+    })().catch(() => { /* keep the fallback */ });
+    return () => { cancelled = true; };
+  }, [chatId, peerName]);
+  const displayName = peerName || lookedUpName || 'VaultChat user';
+
   const status      = useCallStatus();
   const connectedAt = useCallConnectedAt();
   const error       = useCallError();
@@ -243,7 +262,7 @@ function VideoCallEngine() {
           <RTCView style={S.remoteVid} streamURL={remoteUrl} objectFit="cover" />
         ) : (
           <View style={[S.remoteVid, S.remotePlaceholder]}>
-            <Text style={S.placeholderInitial}>{(peerName?.trim()[0] ?? '?').toUpperCase()}</Text>
+            <Text style={S.placeholderInitial}>{(displayName.trim()[0] ?? '?').toUpperCase()}</Text>
           </View>
         )}
         {overlay.tint && (
@@ -252,7 +271,7 @@ function VideoCallEngine() {
       </View>
 
       <View style={[S.topBar, { top: insets.top + 8 }]} pointerEvents="none">
-        <Text style={S.name} numberOfLines={1}>{peerName || 'VaultChat user'}</Text>
+        <Text style={S.name} numberOfLines={1}>{displayName}</Text>
         {status === 'connected'
           ? <CallTimer style={S.status} startedAt={connectedAt} />
           : <Text style={S.status}>{statusText}</Text>}
