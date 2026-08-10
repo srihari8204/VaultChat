@@ -47,6 +47,7 @@ import { durationSeconds, shouldCancelRing, wasMissed, type CallFlag } from './m
 import { topologyFor } from './mode';
 import { attachAudioFocus } from './audioFocus';
 import { INITIAL_CURSOR, INITIAL_QUALITY, TIERS, audioBitrate, ceilingFor, nextQuality, sampleFromTotals } from './quality';
+import { netKey, shouldRestartIce } from './netChange';
 import { dispatch, getSnapshot, begin, reset } from './store';
 import type { CallChatMessage, CallKind, EndReason } from './types';
 
@@ -483,13 +484,41 @@ async function bootstrap(a: StartArgs, direction: 'outgoing' | 'incoming', wire:
     const NetInfo = require('@react-native-community/netinfo').default;
     let lastKey = '';
     const unsub = NetInfo.addEventListener((st: any) => {
-      const key = `${st?.type}:${!!st?.isConnected}`;
+      const key = netKey(st);
       if (key === lastKey) return;
       const prev = lastKey;
-      lastKey = key;
+      lastKey = key;                           // advance even when we skip, so
+                                               // the NEXT event is a change
       if (!prev) return;                       // first callback = current state
       if (!session || session.disposed) return;
       console.warn('[call] network changed', prev, '->', key);
+
+      // Do NOT restart onto a network that is gone.
+      //
+      // A handover arrives as TWO events: `wifi:true -> none:false`, then
+      // `none:false -> cellular:true` a few seconds later. Restarting on the
+      // first one gathers candidates with no interface to gather from and
+      // sends an offer with no path to deliver it, so the offer goes
+      // unanswered and the real restart — the one onto cellular — has to roll
+      // it back before it can proceed. Captured on device at 12:28:13:
+      //
+      //   network changed wifi:true -> none:false
+      //   sending ICE-restart offer            <- wasted, nothing to send it on
+      //   network changed none:false -> cellular:true
+      //   rolled back an unanswered offer      <- cleaning up the wasted one
+      //
+      // Skipping the dead-network event removes the wasted offer and the
+      // rollback it forces. Recovery is NOT delayed: the restart still fires
+      // the instant a usable network appears, which is the earliest moment it
+      // could have succeeded anyway.
+      //
+      // Deliberately not a blanket debounce. A timer that swallowed restarts
+      // within N seconds of the last one would have swallowed the cellular
+      // restart above — the one that actually reconnected the call.
+      if (!shouldRestartIce(prev, st)) {
+        console.warn('[call] no network yet — deferring ICE restart until one appears');
+        return;
+      }
       for (const p of session.peers.values()) { p.onNetworkChanged(); void renegotiate(p); }
     });
     onDispose(() => { try { unsub(); } catch {} });
