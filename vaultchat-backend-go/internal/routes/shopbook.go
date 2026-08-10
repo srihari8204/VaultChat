@@ -565,6 +565,9 @@ func sbMyOrders(w http.ResponseWriter, r *http.Request) {
 func orderWithItems(ctx context.Context, w http.ResponseWriter, orderID, userID string) {
 	var shopID, custID, status, note, couponCode, address string
 	var cancelReason, cancelledBy, rejectReason, notCollectedReason, currency string
+	// Shop identity for the bill header (spec: invoicing / shop profile).
+	var shopName, shopAddress, shopPhone, shopCountry, ownerName string
+	var shopTaxCfg []byte
 	var total, discount, deliveryFee float64
 	var delivery bool
 	var created time.Time
@@ -572,11 +575,15 @@ func orderWithItems(ctx context.Context, w http.ResponseWriter, orderID, userID 
 		`SELECT o.shop_id, o.customer_user_id, o.status, o.total, o.note, o.created_at,
 		        o.coupon_code, o.discount, o.delivery, o.delivery_fee, o.address,
 		        o.cancel_reason, o.cancelled_by, o.reject_reason, o.not_collected_reason,
-		        s.currency
-		   FROM shopbook_order o JOIN shopbook_shop s ON s.id=o.shop_id
+		        s.currency, s.name, s.address, s.phone, s.country, s.tax_config,
+		        COALESCE(u.name,'')
+		   FROM shopbook_order o
+		   JOIN shopbook_shop s ON s.id=o.shop_id
+		   LEFT JOIN users u ON u.id=s.owner_user_id
 		  WHERE o.id=$1`, orderID).Scan(&shopID, &custID, &status, &total, &note, &created,
 		&couponCode, &discount, &delivery, &deliveryFee, &address,
-		&cancelReason, &cancelledBy, &rejectReason, &notCollectedReason, &currency)
+		&cancelReason, &cancelledBy, &rejectReason, &notCollectedReason, &currency,
+		&shopName, &shopAddress, &shopPhone, &shopCountry, &shopTaxCfg, &ownerName)
 	if db.NoRows(err) {
 		httpx.Err(w, http.StatusNotFound, "Order not found")
 		return
@@ -645,6 +652,12 @@ func orderWithItems(ctx context.Context, w http.ResponseWriter, orderID, userID 
 		"cancelReason": cancelReason, "cancelledBy": cancelledBy,
 		"rejectReason": rejectReason, "notCollectedReason": notCollectedReason,
 		"currency": currency,
+		// Shop identity — the bill is worthless without who issued it.
+		"shop": map[string]any{
+			"name": shopName, "address": shopAddress, "phone": shopPhone,
+			"country": shopCountry, "ownerName": ownerName,
+			"taxConfig": json.RawMessage(sbJSON(shopTaxCfg)),
+		},
 		"timeline": timeline, "hasInvoice": hasInvoice,
 	})
 }

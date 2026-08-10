@@ -13,6 +13,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet,
   Alert, ActivityIndicator, RefreshControl, Switch, Platform, KeyboardAvoidingView, Share, Modal,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
@@ -766,6 +767,110 @@ function MyOrders({ onOpen }: { onOpen: (id: string) => void }) {
   );
 }
 
+// Shop names, addresses and product names are free text — escape before they
+// go anywhere near the bill markup, or one apostrophe-heavy shop name breaks
+// the layout.
+const esc = (s: string) =>
+  String(s ?? '').replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+
+// The printable bill. Carries the shop's identity (name, owner, address,
+// phone, tax id) — a receipt that cannot say who issued it is not a receipt —
+// and prices in the shop's own currency, not a hardcoded ₹.
+function buildBillHtml(order: SB.OrderDetail): string {
+  const shop = order.shop ?? { name: '', address: '', phone: '', ownerName: '', taxConfig: {} } as SB.OrderDetail['shop'];
+  const cur = order.currency || '₹';
+  const m = (n: number) => esc(formatMoney(n, cur));
+  const placed = new Date(order.createdAt);
+
+  // Tax identifiers are country-driven (GSTIN / VAT no. / EIN / ABN …), so
+  // render whatever the shop actually configured rather than assuming GST.
+  const taxLines = Object.entries(shop.taxConfig ?? {})
+    .filter(([, v]) => String(v ?? '').trim() !== '')
+    .map(([k, v]) => `<div>${esc(k.toUpperCase())}: <b>${esc(String(v))}</b></div>`)
+    .join('');
+
+  const rows = order.items.map((it) => {
+    const unavailable = it.availability === 'unavailable';
+    const name = `${esc(it.name)}${it.brand ? ` <span class="muted">(${esc(it.brand)})</span>` : ''}`
+      + `${it.unit ? ` <span class="muted">· ${esc(it.unit)}</span>` : ''}`;
+    return `<tr${unavailable ? ' class="struck"' : ''}>
+      <td>${name}${unavailable ? ' <span class="muted">— not available</span>' : ''}</td>
+      <td class="num">${esc(String(it.qty))}</td>
+      <td class="num">${it.price > 0 ? m(it.price) : '—'}</td>
+      <td class="num">${it.price > 0 ? m(it.price * it.qty) : '—'}</td>
+    </tr>`;
+  }).join('');
+
+  const subtotal = order.items.reduce((s, it) => s + (it.price || 0) * (it.qty || 0), 0);
+
+  return `<html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    *{box-sizing:border-box}
+    body{font-family:-apple-system,'Segoe UI',Roboto,sans-serif;color:#111;margin:0;padding:32px 28px;font-size:14px}
+    .head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;
+          border-bottom:2px solid #0B7A3B;padding-bottom:14px}
+    .shop{font-size:21px;font-weight:700;color:#0B7A3B;margin:0 0 4px}
+    .muted{color:#6B7280}
+    .meta{text-align:right;font-size:12px;color:#4B5563;line-height:1.7;white-space:nowrap}
+    .tag{display:inline-block;padding:3px 10px;border-radius:999px;font-size:11px;
+         font-weight:700;background:#E8F5EE;color:#0B7A3B;letter-spacing:.3px}
+    table{width:100%;border-collapse:collapse;margin-top:22px}
+    th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.6px;
+       color:#4B5563;border-bottom:1px solid #D1D5DB;padding:0 0 8px}
+    td{padding:9px 0;border-bottom:1px solid #F3F4F6;vertical-align:top;line-height:1.5}
+    th.num,td.num{text-align:right}
+    .struck td{color:#9CA3AF;text-decoration:line-through}
+    .totals{margin-left:auto;margin-top:14px;width:62%}
+    .totals td{border:none;padding:5px 0}
+    .totals .lbl{color:#4B5563}
+    .grand td{border-top:2px solid #111;padding-top:11px;font-size:17px;font-weight:700}
+    .foot{margin-top:30px;padding-top:14px;border-top:1px solid #F3F4F6;
+          font-size:11px;color:#6B7280;line-height:1.7}
+  </style></head>
+  <body>
+    <div class="head">
+      <div>
+        <p class="shop">${esc(shop.name) || 'Shop Book'}</p>
+        ${shop.ownerName ? `<div class="muted">${esc(shop.ownerName)}</div>` : ''}
+        ${shop.address ? `<div class="muted">${esc(shop.address)}</div>` : ''}
+        ${shop.phone ? `<div class="muted">☎ ${esc(shop.phone)}</div>` : ''}
+        ${taxLines ? `<div style="margin-top:6px;font-size:12px">${taxLines}</div>` : ''}
+      </div>
+      <div class="meta">
+        <span class="tag">${esc(orderStatusLabel(order.status))}</span>
+        <div style="margin-top:8px">Order <b>${esc(order.id.slice(0, 8).toUpperCase())}</b></div>
+        <div>${esc(placed.toLocaleDateString())}</div>
+        <div>${esc(placed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}</div>
+      </div>
+    </div>
+
+    <table>
+      <thead><tr>
+        <th>Item</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Amount</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+
+    <table class="totals">
+      <tr><td class="lbl">Subtotal</td><td class="num">${m(subtotal)}</td></tr>
+      ${order.discount > 0
+        ? `<tr><td class="lbl">Discount${order.couponCode ? ` (${esc(order.couponCode)})` : ''}</td>
+             <td class="num" style="color:#0B7A3B">− ${m(order.discount)}</td></tr>` : ''}
+      ${order.delivery && order.deliveryFee > 0
+        ? `<tr><td class="lbl">Delivery</td><td class="num">${m(order.deliveryFee)}</td></tr>` : ''}
+      <tr class="grand"><td>Total</td><td class="num">${m(order.total)}</td></tr>
+    </table>
+
+    ${order.note ? `<div class="foot">Note: ${esc(order.note)}</div>` : ''}
+    <div class="foot">
+      This is a pickup order receipt${shop.name ? ` from ${esc(shop.name)}` : ''}.
+      ${taxLines ? '' : 'Not a tax invoice.'}
+      <div>Generated by Shop Book</div>
+    </div>
+  </body></html>`;
+}
+
 function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }) {
   const [loading, setLoading] = useState(true);
   const [order, setOrder] = useState<SB.OrderDetail | null>(null);
@@ -834,23 +939,7 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
 
   const bill = async () => {
     if (!order) return;
-    const rows = order.items.map((it) =>
-      `<tr><td style="padding:6px 0">${it.name}${it.brand ? ` (${it.brand})` : ''}</td>
-       <td style="text-align:center">${it.qty}</td>
-       <td style="text-align:right">${it.price > 0 ? formatINR(it.price * it.qty) : '—'}</td></tr>`).join('');
-    const html = `<html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-      <body style="font-family:-apple-system,Roboto,sans-serif;color:#111;padding:28px">
-        <h2 style="color:#0B7A3B;margin:0">🛍️ Shop Book — Receipt</h2>
-        <p style="color:#666;margin:6px 0 18px">Order ${order.id.slice(0, 8).toUpperCase()} · ${new Date(order.createdAt).toLocaleString('en-IN')}</p>
-        <table style="width:100%;border-collapse:collapse;font-size:14px">
-          <thead><tr style="border-bottom:1px solid #ddd"><th align="left">Item</th><th>Qty</th><th align="right">Amount</th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
-        <hr style="margin:16px 0;border:none;border-top:1px solid #eee"/>
-        ${order.discount > 0 ? `<p style="text-align:right;color:#0B7A3B;margin:4px 0">Discount (${order.couponCode}): − ${formatINR(order.discount)}</p>` : ''}
-        <h3 style="text-align:right;margin:8px 0">Total: ${formatINR(order.total)}</h3>
-        <p style="color:#888;font-size:13px">Status: ${orderStatusLabel(order.status)}</p>
-      </body></html>`;
+    const html = buildBillHtml(order);
     try {
       const { uri } = await Print.printToFileAsync({ html });
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: 'Order receipt' });
@@ -916,6 +1005,25 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
                     </Text>
                   </View>
                 ))}
+              </View>
+            )}
+
+            {/* who the order is with — previously the tracking screen never said */}
+            {!!order.shop?.name && (
+              <View style={s.panel}>
+                <Text style={s.panelTitle}>{order.shop.name}</Text>
+                {!!order.shop.ownerName && <Text style={s.cardSub}>{order.shop.ownerName}</Text>}
+                {!!order.shop.address && <Text style={s.cardSub}>📍 {order.shop.address}</Text>}
+                {!!order.shop.phone && (
+                  <TouchableOpacity onPress={() => Linking.openURL(`tel:${order.shop.phone}`)}>
+                    <Text style={[s.cardSub, { color: C.green }]}>☎ {order.shop.phone}</Text>
+                  </TouchableOpacity>
+                )}
+                {Object.entries(order.shop.taxConfig ?? {})
+                  .filter(([, v]) => String(v ?? '').trim() !== '')
+                  .map(([k, v]) => (
+                    <Text key={k} style={s.cardSub}>{k.toUpperCase()}: {String(v)}</Text>
+                  ))}
               </View>
             )}
 
