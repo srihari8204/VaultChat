@@ -17,13 +17,29 @@ class Recovery {
   recovering = false;
   ended = false;
   restarts = 0;
+  stallArmed = false;
   private graceOpen = false;
+  private everConnected = false;
 
   /** Mirrors CallPeer.onconnectionstatechange. */
   onState(st: State): void {
     if (st === 'connected' || st === 'closed') this.clearGrace();
+    if (st === 'connected') this.everConnected = true;
     if (st === 'closed') { this.ended = true; return; }
     if (st === 'failed' || st === 'disconnected') this.begin();
+    // A regression to `connecting` after having been connected arms the stall
+    // watchdog rather than recovering immediately — an ICE restart passes
+    // through this state legitimately on its way back.
+    if (st === 'connecting' && this.everConnected && !this.graceOpen && !this.stallArmed) {
+      this.stallArmed = true;
+    }
+  }
+
+  /** Mirrors the CONNECTING_STALL_MS watchdog firing. */
+  stallExpires(st: State): void {
+    if (!this.stallArmed) return;
+    this.stallArmed = false;
+    if (st === 'connecting') this.begin();
   }
 
   private begin(): void {
@@ -36,7 +52,7 @@ class Recovery {
   /** Mirrors the ICE_RETRY_MS interval. */
   tick(st: State): void {
     if (!this.graceOpen) return;
-    if (st !== 'disconnected' && st !== 'failed') { this.clearGrace(); return; }
+    if (st === 'connected') { this.clearGrace(); return; }   // the only success
     this.restarts++;
   }
 
@@ -44,10 +60,12 @@ class Recovery {
   graceExpires(st: State): void {
     if (!this.graceOpen) return;
     this.graceOpen = false;
-    if (st === 'disconnected' || st === 'failed') this.ended = true;
+    if (st !== 'connected' && st !== 'closed') this.ended = true;
   }
 
-  private clearGrace(): void { this.graceOpen = false; this.recovering = false; }
+  private clearGrace(): void {
+    this.graceOpen = false; this.recovering = false; this.stallArmed = false;
+  }
 }
 
 /** Mirrors CallPeer.onNetworkChanged. */
@@ -106,6 +124,45 @@ check('`closed` ends the call immediately', e.ended);
 const f = new Recovery();
 f.onState('new'); f.onState('connecting'); f.onState('connected');
 check('a clean connect never enters recovery', !f.recovering && !f.ended && f.restarts === 0);
+
+// ── a call stuck in `connecting` after being connected ────────────────
+//
+// Captured on device: `connected` at 13:24:00, `connecting` at 13:24:16, then
+// NOTHING — no retry, no failure, no log. Recovery ran only for `disconnected`
+// and `failed`, so this call hung silently with no media until the user gave
+// up. The user reported it simply as "calls not working".
+const g = new Recovery();
+g.onState('connecting'); g.onState('connected');
+check('a healthy connect arms no watchdog', !g.stallArmed);
+g.onState('connecting');
+check('sliding BACK to connecting arms the stall watchdog', g.stallArmed);
+check('...but does not recover immediately (an ICE restart passes through here)',
+  !g.recovering && g.restarts === 0);
+g.stallExpires('connecting');
+check('...and recovers once the watchdog expires', g.recovering && g.restarts === 1);
+g.graceExpires('connecting');
+check('a call still connecting when the budget runs out ENDS, not hangs', g.ended);
+
+// ── the watchdog must not fire on a call that came back ───────────────
+const h2 = new Recovery();
+h2.onState('connected'); h2.onState('connecting');
+h2.onState('connected');                       // recovered on its own
+h2.stallExpires('connected');
+check('a recovered call is not dragged into recovery by a stale watchdog',
+  !h2.recovering && !h2.ended);
+
+// ── recovery survives its OWN restart passing through connecting ──────
+//
+// The retry loop used to treat "not disconnected and not failed" as recovered,
+// so it cancelled the budget the moment its own ICE restart moved the state to
+// `connecting` — abandoning the call mid-recovery.
+const i = new Recovery();
+i.onState('connected'); i.onState('failed');
+i.tick('connecting');
+check('a retry is not cancelled by the transient connecting of its own restart',
+  i.recovering && i.restarts === 2);
+i.onState('connected');
+check('...and stops properly once actually connected', !i.recovering);
 
 // ── network-change restarts ───────────────────────────────────────────
 check('network change restarts ICE when failed', restartsOnNetworkChange('failed'));

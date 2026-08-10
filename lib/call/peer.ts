@@ -67,6 +67,21 @@ export const DISCONNECT_GRACE_MS = 30_000;
  */
 export const ICE_RETRY_MS = 4_000;
 
+/**
+ * How long a call that was ALREADY connected may sit in `connecting` before it
+ * is treated as an outage.
+ *
+ * `connecting` after `connected` is a regression, not setup: the transport is
+ * re-establishing and no media is flowing. It used to be handled nowhere —
+ * recovery ran only for `disconnected` and `failed` — so a call that landed
+ * here hung silently with no audio, no retry, and no honest failure. Captured
+ * on device at 13:24:16: `connected → connecting`, then nothing at all.
+ *
+ * Long enough not to fight a normal ICE restart, which passes through
+ * `connecting` on its way back to `connected` in well under this.
+ */
+export const CONNECTING_STALL_MS = 8_000;
+
 export class CallPeer {
   readonly uid: string;
   readonly pc: RTCPeerConnection;
@@ -82,6 +97,9 @@ export class CallPeer {
   private remoteStream: any = null;
   /** True once recovery has run, so `connected` knows to rebind the view. */
   private recovered = false;
+  /** Have we ever reached `connected`? Distinguishes setup from a regression. */
+  private everConnected = false;
+  private stallTimer: ReturnType<typeof setTimeout> | null = null;
   /** Sealed candidates that arrived before the per-call cipher was known. */
   private undecryptedIce: any[] = [];
   /** ICE servers as given, kept so setConfiguration can re-apply them. */
@@ -193,6 +211,23 @@ export class CallPeer {
 
       // Recovered (or moved on) — cancel any pending grace timer.
       if (st === 'connected' || st === 'closed') this.clearGrace();
+      if (st === 'connected') this.everConnected = true;
+
+      // A call that WAS connected and has slid back to `connecting` is an
+      // outage, not setup. Nothing used to handle this state, so such a call
+      // hung with no media until the user gave up — no retry, no failure, no
+      // log. Give it a moment to come back on its own (an ICE restart passes
+      // through here legitimately) and escalate into the normal recovery if it
+      // does not.
+      if (st === 'connecting' && this.everConnected && !this.graceTimer && !this.stallTimer) {
+        this.stallTimer = setTimeout(() => {
+          this.stallTimer = null;
+          if (this.closed) return;
+          if ((this.pc as any).connectionState !== 'connecting') return;   // came back
+          console.warn('[call] stuck in connecting for', CONNECTING_STALL_MS / 1000, 's — recovering');
+          this.beginRecovery(h);
+        }, CONNECTING_STALL_MS);
+      }
 
       if (st === 'failed' || st === 'closed') {
         // The two numbers that separate "no network path" from "signalling
@@ -288,7 +323,12 @@ export class CallPeer {
     this.retryTimer = setInterval(() => {
       if (this.closed) return;
       const st = (this.pc as any).connectionState;
-      if (st !== 'disconnected' && st !== 'failed') { this.clearGrace(); return; }   // recovered
+      // `connected` is the ONLY success. Treating "not disconnected and not
+      // failed" as recovered cancelled the budget as soon as our own ICE
+      // restart moved the transport to `connecting` — so the retry loop
+      // stopped itself after the first attempt and a call stuck in
+      // `connecting` was abandoned mid-recovery.
+      if (st === 'connected') { this.clearGrace(); return; }
       console.warn('[call] still', st, 'after', Math.round((Date.now() - started) / 1000), 's — retrying ICE');
       // One direct attempt was already made and did not take. Everything after
       // it goes over the relay, which is reachable from whichever network the
@@ -303,8 +343,11 @@ export class CallPeer {
       this.stopRetries();
       if (this.closed) return;
       const st = (this.pc as any).connectionState;
-      if (st === 'disconnected' || st === 'failed') {
-        console.warn('[call] no recovery within', DISCONNECT_GRACE_MS / 1000, 's — ending call');
+      // Anything that is not `connected` when the budget runs out is a dead
+      // call and must END, rather than hang. `closed` is excluded only because
+      // it already reported the failure on its own branch.
+      if (st !== 'connected' && st !== 'closed') {
+        console.warn('[call] no recovery within', DISCONNECT_GRACE_MS / 1000, 's (state:', st + ') — ending call');
         h.onFailed();
       }
     }, DISCONNECT_GRACE_MS);
@@ -333,6 +376,9 @@ export class CallPeer {
   private clearGrace(): void {
     this.stopRetries();
     if (this.graceTimer) { clearTimeout(this.graceTimer); this.graceTimer = null; }
+    // The stall watchdog belongs to the same outage; leaving it armed would
+    // fire recovery on a call that already came back.
+    if (this.stallTimer) { clearTimeout(this.stallTimer); this.stallTimer = null; }
   }
 
   /**
