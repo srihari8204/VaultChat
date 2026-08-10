@@ -127,6 +127,15 @@ export interface OrderDetail {
   rejectReason: string;
   notCollectedReason: string;   // '' unless the order expired or was written off
   hasInvoice: boolean;
+  // Who issued the bill — shop identity travels with the order.
+  shop: {
+    name: string;
+    address: string;
+    phone: string;
+    country: string;
+    ownerName: string;
+    taxConfig: Record<string, string>;   // e.g. { gstin: '29ABCDE1234F1Z5' }
+  };
 }
 
 // ── invoices ──────────────────────────────────────────────────────
