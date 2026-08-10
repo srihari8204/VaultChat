@@ -288,24 +288,79 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
   // Bootstrap a fresh responder ratchet from a message's X3DH header. Consumes the
   // one-time prekey the initiator used (if any). Shared by the no-session path and
   // the re-key recovery path below.
-  async function bootstrapResponder(parsed: any, id: StoredIdentity): Promise<RatchetState> {
+  /** Raised when the sender referenced a one-time prekey we no longer hold. */
+  const MISSING_OPK = 'e2ee: missing requested one-time prekey';
+
+  /**
+   * Derive the responder side of X3DH from a message's header.
+   *
+   * DOES NOT CONSUME the one-time prekey. It returns a `commit` the caller runs
+   * only once the message has actually decrypted.
+   *
+   * WHY THAT ORDERING IS THE WHOLE POINT
+   * ------------------------------------
+   * This used to splice the OTPK out and save BEFORE the caller decrypted. When
+   * the decrypt then failed — for any reason at all — the key was gone, and the
+   * retry was doomed in a way nothing could recover:
+   *
+   *   1. an offer arrives carrying opkId 7; we consume 7 and derive a secret
+   *   2. decrypt fails
+   *   3. the ring loop resends the SAME offer, still referencing opkId 7
+   *   4. 7 is gone, findIndex returns -1, and myOpk fell back to null
+   *   5. x3dhResponder then derived a DIFFERENT secret than the sender used
+   *   6. "aes/gcm: invalid ghash tag" — forever, through any number of resets,
+   *      because the sender's stored initialHeader keeps naming the same OTPK
+   *
+   * Measured on device as resets=4, decryptFails=29 with concurrentRekeys=0,
+   * and 15 of one account's 20 prekeys burned by failed bootstraps.
+   *
+   * The silent `myOpk = null` fallback was the second half of the bug: a
+   * missing OTPK is not a reason to compute a different key, it is a reason to
+   * stop. Failing loudly turns an unrecoverable wrong-key state into an ordinary
+   * re-key request.
+   */
+  async function bootstrapResponder(
+    parsed: any, id: StoredIdentity,
+  ): Promise<{ state: RatchetState; commit: () => Promise<void> }> {
     const header: InitialHeader = {
       identityKey: unb64(parsed.x3dh.ik),
       ephemeralKey: unb64(parsed.x3dh.ek),
       oneTimePreKeyId: parsed.x3dh.opkId ?? null,
     };
     const me = identityKeyPairs(id);
+
     let myOpk: KeyPair | null = null;
+    let consumeIdx = -1;
     if (header.oneTimePreKeyId != null) {
-      const idx = id.opks.findIndex((o) => o.id === header.oneTimePreKeyId);
-      if (idx >= 0) {
-        myOpk = { priv: hexToBytes(id.opks[idx].priv), pub: hexToBytes(id.opks[idx].pub) };
-        id.opks.splice(idx, 1);     // consumed exactly once
-        await saveIdentitySerial(id);
+      consumeIdx = id.opks.findIndex((o) => o.id === header.oneTimePreKeyId);
+      if (consumeIdx < 0) {
+        // The sender used a prekey we have already spent. Any secret derived
+        // here would be wrong, so say so instead of producing one.
+        throw new Error(MISSING_OPK);
       }
+      myOpk = {
+        priv: hexToBytes(id.opks[consumeIdx].priv),
+        pub: hexToBytes(id.opks[consumeIdx].pub),
+      };
     }
+
     const sk = x3dhResponder(me.ik, me.spk, myOpk, header);
-    return ratchetInitBob(sk, me.spk);
+    const state = ratchetInitBob(sk, me.spk);
+
+    return {
+      state,
+      commit: async () => {
+        if (consumeIdx < 0) return;
+        // Re-find by id: the pool may have been mutated (an OTPK top-up, or a
+        // concurrent bootstrap) between derivation and commit, so a stale index
+        // would delete the wrong key.
+        const i = id.opks.findIndex((o) => o.id === header.oneTimePreKeyId);
+        if (i >= 0) {
+          id.opks.splice(i, 1);       // consumed exactly once, and only on success
+          await saveIdentitySerial(id);
+        }
+      },
+    };
   }
 
   async function decryptFromPeer(peerId: string, wire: string): Promise<string> {
@@ -319,8 +374,11 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
 
     if (!session) {
       if (!parsed.x3dh) throw new Error('e2ee: no session and no X3DH header to bootstrap responder');
-      const state = await bootstrapResponder(parsed, id);
+      const { state, commit } = await bootstrapResponder(parsed, id);
+      // Decrypt FIRST. If this throws, the one-time prekey is still in the pool
+      // and the sender's retry can bootstrap again with the same header.
       const plaintextBytes = ratchetDecrypt(state, envelope);
+      await commit();
       await saveSession(peerId, { state: serializeState(state), role: 'responder', includeX3DH: false,
         peerIkHex: bytesToHex(unb64(parsed.x3dh.ik)) });
       return new TextDecoder().decode(plaintextBytes);
@@ -373,8 +431,9 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
         }
       }
 
-      const fresh = await bootstrapResponder(parsed, id);
+      const { state: fresh, commit } = await bootstrapResponder(parsed, id);
       const plaintextBytes = ratchetDecrypt(fresh, envelope); // throws if genuinely undecryptable
+      await commit();                                        // only now is the OTPK spent
       await saveSession(peerId, { state: serializeState(fresh), role: 'responder', includeX3DH: false,
         peerIkHex: bytesToHex(unb64(parsed.x3dh.ik)) });
       return new TextDecoder().decode(plaintextBytes);
