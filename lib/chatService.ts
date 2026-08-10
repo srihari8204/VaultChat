@@ -405,7 +405,33 @@ const AUTO_RESET_COOLDOWN_MS = 60_000;
  */
 const FORCED_RESET_FLOOR_MS = 15_000;
 
+/**
+ * Depth of an in-progress BULK decrypt (history render, search, cold sync).
+ *
+ * A failure while replaying history says nothing about the LIVE session, and
+ * must never tear it down. Old messages are encrypted to ratchet states that
+ * have long since advanced, so they are permanently undecryptable BY DESIGN —
+ * two of them in a row is not evidence of a dead session, it is evidence that
+ * the user scrolled up.
+ *
+ * Measured on device: a `[chats/delta] cold sync` at 14:28:37 replayed history
+ * and, eight seconds later, destroyed all FOUR healthy sessions at exactly
+ * decryptFails=2 each. The incoming call thirty seconds later then arrived on
+ * a session that had just been reset and could not be decrypted — reported as
+ * "calls not working", with the real cause two layers below the call stack.
+ *
+ * A counter rather than a boolean because hydrate can nest (a chat opening
+ * while a sync is already running).
+ */
+let _bulkDecryptDepth = 0;
+
 async function maybeAutoRecoverSession(peerId: string, errMsg: string): Promise<void> {
+  // Replayed history is not evidence about the live session — see above.
+  if (_bulkDecryptDepth > 0) {
+    stat(peerId).fails++;
+    console.warn('[e2ee] decrypt failed during history replay — not counted against the live session:', errMsg);
+    return;
+  }
   // A concurrent-re-key skip is NOT a decrypt failure. Both sides re-keyed at
   // once and we are the side keeping its session; the peer is about to adopt
   // it. Counting this toward the reset streak would tear down that session and
@@ -549,6 +575,11 @@ export async function hydrateMessages(
   msgs: Message[],
   knownPlain?: Map<number, string>,
 ): Promise<Message[]> {
+  // Everything decrypted below is HISTORY. Mark it so a failure cannot be
+  // mistaken for a dead live session and trigger a reset — the fault that made
+  // an incoming call undecryptable moments after a cold sync.
+  _bulkDecryptDepth++;
+  try {
   const out = msgs.slice();
   // F5: a decrypted payload may be a wrapped {text + link preview} envelope
   // (sender-generated previews ride INSIDE the E2EE content). Unwrap so the
@@ -614,6 +645,9 @@ export async function hydrateMessages(
   }
   if (ownMisses) console.warn(`[e2ee] ${ownMisses} own message(s) predate the plaintext cache in chat ${chatId} — shown as unavailable`);
   return out;
+  } finally {
+    _bulkDecryptDepth--;
+  }
 }
 
 // Our own user id, cached. hydrateMessages asks per message, so this must not
