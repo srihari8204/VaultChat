@@ -259,6 +259,8 @@ export async function encryptForChat(chatId: string, plaintext: string): Promise
       try {
         const e2ee = await import('../services/crypto/e2eeSession.rn');
         await e2ee.e2eeResetSession(peerId);
+        (await import('./sessionEpoch')).bumpSessionEpoch(peerId);
+    stat(peerId).resets++; logSessionHealth(peerId, 'reset');
         console.warn('[e2ee] AUTO-RESET outbound session for peer', peerId, '— retry re-handshakes');
       } catch {}
     }
@@ -283,6 +285,8 @@ export async function resetChatSession(chatId: string): Promise<void> {
   if (!peerId) return;
   const e2ee = await import('../services/crypto/e2eeSession.rn');
   await e2ee.e2eeResetSession(peerId);
+  (await import('./sessionEpoch')).bumpSessionEpoch(peerId);
+    stat(peerId).resets++; logSessionHealth(peerId, 'reset');
 }
 
 export async function decryptFromChat(
@@ -369,9 +373,49 @@ const AUTO_RECOVER_AFTER = 2;
 // One reset per peer per window. Recovery needs a round trip to be judged;
 // anything faster is thrash, not healing.
 const _lastAutoReset = new Map<string, number>();
+
+// ── session diagnostics ────────────────────────────────────────────────
+//
+// Lifetime counters per peer, so a 30-minute validation call can be judged
+// from the log alone: a healthy call prints this line ZERO times.
+//
+// Deliberately NOT logged: ratchet state, key versions, or anything derived
+// from key material. A diagnostic that leaks key state is a worse bug than the
+// one it is helping to find, and the counters below are enough to locate a
+// divergence — what matters is HOW OFTEN sessions are torn down and whether
+// both sides are doing it, not what the keys are.
+const _sessionStats = new Map<string, { resets: number; fails: number; concurrent: number }>();
+
+function stat(peerId: string) {
+  let s = _sessionStats.get(peerId);
+  if (!s) { s = { resets: 0, fails: 0, concurrent: 0 }; _sessionStats.set(peerId, s); }
+  return s;
+}
+
+/** One line summarising a peer's session health. Call after any reset/failure. */
+function logSessionHealth(peerId: string, event: string): void {
+  const s = stat(peerId);
+  console.warn(`[e2ee] session ${peerId.slice(0, 8)} ${event} — resets=${s.resets} decryptFails=${s.fails} concurrentRekeys=${s.concurrent}`);
+}
 const AUTO_RESET_COOLDOWN_MS = 60_000;
+/**
+ * Floor for a CALL-triggered forced reset. Long enough that a reset survives
+ * one full ring cycle (offers repeat every 3s) and can actually be used, short
+ * enough that a user retrying a failed call is not left waiting.
+ */
+const FORCED_RESET_FLOOR_MS = 15_000;
 
 async function maybeAutoRecoverSession(peerId: string, errMsg: string): Promise<void> {
+  // A concurrent-re-key skip is NOT a decrypt failure. Both sides re-keyed at
+  // once and we are the side keeping its session; the peer is about to adopt
+  // it. Counting this toward the reset streak would tear down that session and
+  // restart the collision — the loop this whole tie-break exists to end.
+  if (errMsg.includes('concurrent re-key')) {
+    stat(peerId).concurrent++;
+    logSessionHealth(peerId, 'concurrent-rekey (held)');
+    return;
+  }
+  stat(peerId).fails++;
   const n = (_decryptFailStreak.get(peerId) ?? 0) + 1;
   _decryptFailStreak.set(peerId, n);
   console.warn(`[e2ee] decrypt failed (${n}/${AUTO_RECOVER_AFTER}):`, errMsg);
@@ -389,6 +433,8 @@ async function maybeAutoRecoverSession(peerId: string, errMsg: string): Promise<
   try {
     const e2ee = await import('../services/crypto/e2eeSession.rn');
     await e2ee.e2eeResetSession(peerId);   // drop dead ratchet; MY next outbound re-keys → peer self-heals
+    (await import('./sessionEpoch')).bumpSessionEpoch(peerId);
+    stat(peerId).resets++; logSessionHealth(peerId, 'reset');
     console.warn('[e2ee] AUTO-RESET dead session for peer', peerId, '— re-handshakes on next message');
     // Stage 2: I'm a PASSIVE reader that can't decrypt this peer — resetting my
     // own session only fixes my OUTbound. Ask the peer to reset too, so its next
@@ -400,22 +446,67 @@ async function maybeAutoRecoverSession(peerId: string, errMsg: string): Promise<
 
 // ── Stage-2 auto-recovery: peer re-key request over the socket ──────
 let _lastRekeyReq = new Map<string, number>();
-async function requestPeerRekey(peerId: string): Promise<void> {
+/**
+ * @param force Bypass both cooldowns — the local send limit and the peer's
+ *   receive limit. Reserved for CALL SETUP failure, which is a different
+ *   problem from a background decrypt failure: it is triggered by a person
+ *   tapping "call", so it cannot storm, and suppressing it does not delay a
+ *   heal — it prevents the call outright. Observed on device as four failed
+ *   attempts over 40s with the heal refused each time ("rekey request ignored
+ *   — reset 43s ago"), both phones waiting on the other.
+ */
+export async function requestPeerRekey(peerId: string, force = false): Promise<void> {
   const now = Date.now();
-  if ((now - (_lastRekeyReq.get(peerId) ?? 0)) < 30_000) return;   // at most once / 30s / peer
+  const since = now - (_lastRekeyReq.get(peerId) ?? 0);
+  // A failed call reports through more than one path (the ring repeat and the
+  // offer handler), so an unlimited forced request fires in bursts. The floor
+  // collapses a burst into one request without delaying a genuine retry.
+  if (since < (force ? FORCED_RESET_FLOOR_MS : 30_000)) return;
   _lastRekeyReq.set(peerId, now);
   try {
     const { getSocket } = await import('./socket');
     const s = await getSocket();
-    s.emit('e2ee_rekey', { to: peerId });
+    s.emit('e2ee_rekey', { to: peerId, force });
   } catch {}
 }
 
 /** Handle an inbound peer re-key request: drop my session with that peer so my
  *  next message to them re-initiates X3DH (they were stuck decrypting me).
  *  Wired once as a persistent socket listener in app/_layout.tsx. */
-export async function handleRekeyRequest(fromPeerId: string): Promise<void> {
+export async function handleRekeyRequest(fromPeerId: string, force = false): Promise<void> {
   if (!E2EE_ENABLED || !fromPeerId) return;
+  // A forced request comes from a peer whose CALL could not be set up. It jumps
+  // the 60s window below — a person who just failed to place a call will not
+  // quietly wait a minute — but it does NOT get to reset without limit.
+  //
+  // Bypassing the window entirely was worse than the problem: both sides began
+  // forcing resets at each other, each destroying the session the other had just
+  // rebuilt, so no session ever survived long enough to be used. Measured on
+  // device as EIGHT resets in 22 seconds with the call never connecting.
+  //
+  // A short floor keeps both properties: a real call failure heals in seconds,
+  // and a reset storm is impossible because each side can only act once per
+  // window no matter how many requests arrive. The peer re-requests on its next
+  // attempt if it is still broken, so nothing is lost by ignoring a duplicate —
+  // and duplicates are the norm, since both the ring and the offer path report
+  // the same failure.
+  if (force) {
+    const now = Date.now();
+    const since = now - (_lastAutoReset.get(fromPeerId) ?? 0);
+    if (since < FORCED_RESET_FLOOR_MS) {
+      console.warn('[e2ee] forced re-key ignored for', fromPeerId, `— reset ${Math.round(since / 1000)}s ago`);
+      return;
+    }
+    _lastAutoReset.set(fromPeerId, now);
+    try {
+      const e2ee = await import('../services/crypto/e2eeSession.rn');
+      await e2ee.e2eeResetSession(fromPeerId);
+      (await import('./sessionEpoch')).bumpSessionEpoch(fromPeerId);
+      stat(fromPeerId).resets++; logSessionHealth(fromPeerId, 'reset');
+      console.warn('[e2ee] FORCED re-key (peer call setup failed) — reset session for', fromPeerId);
+    } catch {}
+    return;
+  }
   // Same cooldown as the local auto-reset, and deliberately sharing its map:
   // the two halves form one loop. A peer stuck on undecryptable history sends a
   // rekey request every time it gives up, and honouring each one destroys the
@@ -433,6 +524,8 @@ export async function handleRekeyRequest(fromPeerId: string): Promise<void> {
   try {
     const e2ee = await import('../services/crypto/e2eeSession.rn');
     await e2ee.e2eeResetSession(fromPeerId);
+    (await import('./sessionEpoch')).bumpSessionEpoch(fromPeerId);
+      stat(fromPeerId).resets++; logSessionHealth(fromPeerId, 'reset');
     console.warn('[e2ee] peer requested re-key; reset session for', fromPeerId);
   } catch {}
 }
@@ -473,6 +566,12 @@ export async function hydrateMessages(
     return lp ? { ...m, content: text, meta: { ...(m.meta ?? {}), linkPreview: lp } }
               : { ...m, content: plain };
   };
+  // Own messages sent BEFORE the plaintext cache existed have no local copy and
+  // never will — a Double Ratchet ciphertext cannot be opened by its sender. It
+  // is expected, not a fault, so it is counted and reported once per batch
+  // instead of once per message. Opening a chat used to print dozens of these,
+  // which is how a genuine one-line failure goes unnoticed in a call log.
+  let ownMisses = 0;
   for (let i = out.length - 1; i >= 0; i--) {   // msgs arrive newest-first → iterate oldest-first
     const m = out[i];
     const c = m.content;
@@ -500,7 +599,7 @@ export async function hydrateMessages(
       const own = await readOwnPlaintext(chatId, m.id, m.createdAt);
       if (own != null) { out[i] = finish(m, own); }
       else {
-        console.warn('[e2ee] own message has no cached plaintext — id:', m.id, 'chat:', chatId);
+        ownMisses++;
       }
       // No cached copy → leave the envelope as-is. The bubble renders its
       // "can't be shown on this device" state, which is the truth: nothing is
@@ -513,6 +612,7 @@ export async function hydrateMessages(
       out[i] = finish(m, plain);
     }
   }
+  if (ownMisses) console.warn(`[e2ee] ${ownMisses} own message(s) predate the plaintext cache in chat ${chatId} — shown as unavailable`);
   return out;
 }
 

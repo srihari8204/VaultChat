@@ -44,6 +44,8 @@ import * as signal from './signal';
 import type { WireMode } from './signal';
 import { CallPeer } from './peer';
 import { durationSeconds, shouldCancelRing, wasMissed, type CallFlag } from './machine';
+import { topologyFor } from './mode';
+import { attachAudioFocus } from './audioFocus';
 import { INITIAL_CURSOR, INITIAL_QUALITY, TIERS, audioBitrate, ceilingFor, nextQuality, sampleFromTotals } from './quality';
 import { dispatch, getSnapshot, begin, reset } from './store';
 import type { CallChatMessage, CallKind, EndReason } from './types';
@@ -73,6 +75,18 @@ interface Session {
   disposed: boolean;
   /** calls.id once the server session opens, or '' — see openSession(). */
   serverCallId: string;
+  /**
+   * The call's SHARED media key, used only on the SFU path.
+   *
+   * Mesh mints a key per PAIR, which is right when every link is its own
+   * connection. An SFU forwards one encrypted stream to everyone, so every
+   * participant must hold the same key or nobody can decode anybody. It is
+   * distributed over the per-peer ratchet channel (signal.sendMediaKey), so the
+   * SFU changes the transport without changing the trust model.
+   */
+  mediaKey: Uint8Array | null;
+  /** Live SFU session once this call has switched topology. */
+  sfu: { leave(): Promise<void>; crypto: { setKey(k: Uint8Array): Promise<void> } | null } | null;
 }
 
 let session: Session | null = null;
@@ -172,6 +186,26 @@ function addPeer(s: Session, uid: string, name: string, iceServers: any[]): Call
     onLocalCandidate: (sealed) => { signal.sendIce(uid, s.meId, s.chatId, sealed, s.wire).catch(() => {}); },
     onRemoteStream: (url) => { dispatch({ type: 'remote_stream', uid, url, name }); },
     onFailed: () => onPeerFailed(uid),
+    onRenegotiate: () => { const p = session?.peers.get(uid); if (p) void renegotiate(p); },
+    // After a reconnect, re-attach whatever we are SENDING. The remote view is
+    // rebound by the peer itself; this is the other direction, and it is the
+    // one that breaks a screen share: its track is backed by MediaProjection
+    // through a foreground service, and a renegotiated transport can leave that
+    // pointing at a sender the connection no longer owns.
+    onReconnected: () => {
+      const s2 = session;
+      const p = s2?.peers.get(uid);
+      if (!s2 || !p) return;
+      // The screen track when sharing, else the camera — whichever is live.
+      const stream = s2.screenStream ?? s2.localStream;
+      const track = stream?.getVideoTracks?.()?.[0];
+      if (!track) return;
+      void p.rebindVideoTrack(track, stream).then(needsOffer => {
+        // remove+add changes the SDP, so the peer must be told. replaceTrack
+        // does not, which is why it is tried first.
+        if (needsOffer) void renegotiate(p);
+      });
+    },
   });
   s.peers.set(uid, peer);
   peer.addLocalTracks(s.localStream);
@@ -302,6 +336,30 @@ function removePeer(s: Session, uid: string): void {
  * back via call_peer_joined, and retrying into a black hole would burn battery
  * and mint TURN allocations for a device that has gone.
  */
+/**
+ * Send an ICE-restart offer to a peer — the half that was missing.
+ *
+ * pc.restartIce() only marks the connection as needing renegotiation; the new
+ * candidates never reach the other side unless an offer is created AND SENT.
+ * Without this, a Wi-Fi→mobile handover logged retries every 4s while no
+ * signalling happened at all, and the call died at the grace window.
+ *
+ * Uses the mesh offer/answer channel because it is the same transport for both
+ * topologies — a 1:1 call is a mesh with one peer.
+ */
+async function renegotiate(peer: CallPeer): Promise<void> {
+  const s = session;
+  if (!s || s.disposed) return;
+  try {
+    const offer = await peer.createIceRestartOffer();
+    if (!offer) return;                       // not stable / not supported
+    console.warn('[call] sending ICE-restart offer to', peer.uid);
+    await signal.sendMeshOffer(peer.uid, s.chatId, peer.getCipher().seal(offer));
+  } catch (e: any) {
+    console.warn('[call] ICE-restart offer failed —', e?.message ?? e);
+  }
+}
+
 function onPeerFailed(uid: string): void {
   const s = session;
   if (!s || s.disposed) return;
@@ -329,6 +387,7 @@ async function bootstrap(a: StartArgs, direction: 'outgoing' | 'incoming', wire:
   session = {
     ...a, meId: '', meName: '', peers: new Map(), wire, localStream: null, screenStream: null,
     cameraTrack: null, disposers: [], logged: false, disposed: false, serverCallId: '',
+    mediaKey: null, sfu: null,
   };
   const s = session;
 
@@ -355,20 +414,47 @@ async function bootstrap(a: StartArgs, direction: 'outgoing' | 'incoming', wire:
     onOffer: (from, wireSdp) => { void onMeshOffer(from, wireSdp, iceServers); },
     onAnswer: (from, wireSdp) => {
       const peer = s.peers.get(from);
-      if (!peer) return;
-      const sdp = peer.getCipher().open(wireSdp);
+      if (!peer) { console.warn('[call] answer from unknown peer', from); return; }
+      const sdp = peer.openAny(wireSdp);
+      // open() returns null for a frame this cipher cannot decrypt — the two
+      // sides disagree about the per-call key. Without the answer there is no
+      // remote description, so every candidate that follows is buffered
+      // forever and the call fails with nothing logged.
+      if (!sdp) { console.warn('[call] could NOT open answer from', from, '— call key mismatch'); return; }
       peer.applyAnswer(sdp).then(applied => { if (applied) dispatch({ type: 'answer_applied' }); });
     },
     onIce: (from, wireCand) => {
       const peer = s.peers.get(from);
-      if (!peer) return;
-      peer.addRemoteCandidate(peer.getCipher().open(wireCand)).catch(() => {});
+      if (!peer) { console.warn('[call] ICE from unknown peer', from); return; }
+      // Hand over the SEALED frame: the peer owns the cipher, so it can hold
+      // anything that arrives before the call key is known and retry it.
+      peer.addRemoteIce(wireCand).catch(() => {});
     },
     onEnd: (from) => {
       if (s.wire === 'direct') hangUp('remote_hangup', false);
       else removePeer(s, from);
     },
     onPeerScreenShare: (_from, on) => dispatch({ type: 'flag', key: 'peerSharing', value: on }),
+    // The minter handed us the call's shared media key. Opened with that peer's
+    // call cipher, so a forged one from anybody else simply does not decrypt.
+    onMediaKey: (from, sealed) => {
+      void (async () => {
+        try {
+          // Opened with the pairwise ratchet — a forged key from anyone we do
+          // not have a session with simply fails to decrypt, and the server
+          // that relayed it could not read it either.
+          const e2ee = await import('../../services/crypto/e2eeSession.rn');
+          const msg = JSON.parse(await e2ee.e2eeDecrypt('', from, 0, sealed));
+          if (msg?.v !== 'mk1' || typeof msg.k !== 'string') return;
+          const key = new Uint8Array(Buffer.from(msg.k, 'base64'));
+          if (key.length !== 32) return;
+          // A ROTATION replaces the key we hold; the frameCrypto key ring keeps
+          // in-flight frames under the old key decodable through the changeover.
+          s.mediaKey = key;
+          await s.sfu?.crypto?.setKey(key);
+        } catch { /* not for us, or a stale session — keep the current key */ }
+      })();
+    },
     onChat: (from, sealed) => {
       const text = openFromPeer(s, from, sealed);
       if (typeof text === 'string' && text) {
@@ -383,6 +469,97 @@ async function bootstrap(a: StartArgs, direction: 'outgoing' | 'incoming', wire:
     },
   });
   onDispose(detach);
+
+  // React to a Wi-Fi <-> mobile handover the moment the OS reports it, instead
+  // of waiting for WebRTC to notice the old path is dead. That notice can take
+  // several seconds, and every one of them is spent out of the 30s recovery
+  // budget with no audio. NetInfo fires as soon as the interface changes, so
+  // the fresh candidate gather starts while the new network is coming up.
+  //
+  // Only a CHANGE of transport/reachability matters — NetInfo also emits on
+  // signal-strength wobble, and restarting ICE on those would churn a perfectly
+  // healthy call.
+  try {
+    const NetInfo = require('@react-native-community/netinfo').default;
+    let lastKey = '';
+    const unsub = NetInfo.addEventListener((st: any) => {
+      const key = `${st?.type}:${!!st?.isConnected}`;
+      if (key === lastKey) return;
+      const prev = lastKey;
+      lastKey = key;
+      if (!prev) return;                       // first callback = current state
+      if (!session || session.disposed) return;
+      console.warn('[call] network changed', prev, '->', key);
+      for (const p of session.peers.values()) { p.onNetworkChanged(); void renegotiate(p); }
+    });
+    onDispose(() => { try { unsub(); } catch {} });
+  } catch { /* NetInfo unavailable — the grace-window retries still cover it */ }
+
+  // ── audio focus: a carrier call must not corrupt this one ─────────────
+  //
+  // The OS mutes us; we mute the MICROPHONE too. Without that the peer keeps
+  // hearing the room — and whatever the user says to the other caller — for the
+  // whole interruption. `autoMuted` remembers that WE did it, so a user who was
+  // already muted before the interruption is not silently unmuted afterwards.
+  {
+    let autoMuted = false;
+    const detach = attachAudioFocus((state) => {
+      const cur = session;
+      if (!cur || cur.disposed || !cur.localStream) return;
+      if (state === 'interrupted' || state === 'lost') {
+        if (getSnapshot().muted) return;               // their choice already
+        media.setMicEnabled(cur.localStream, false);
+        autoMuted = true;
+        dispatch({ type: 'flag', key: 'muted', value: true });
+        console.warn('[call] audio focus lost — mic muted for the interruption');
+      } else if (state === 'resumed' && autoMuted) {
+        autoMuted = false;
+        media.setMicEnabled(cur.localStream, true);
+        dispatch({ type: 'flag', key: 'muted', value: false });
+        console.warn('[call] audio focus regained — mic restored');
+      }
+    });
+    onDispose(detach);
+  }
+
+  // ── background: keep the audio, drop the video ────────────────────────
+  //
+  // Nothing stopped the camera when the app left the foreground, so a video
+  // call backgrounded in a pocket kept encoding and uploading frames nobody
+  // could see — the single largest avoidable drain on a long call, and pure
+  // waste of the user's data.
+  //
+  // Only 'background' is acted on, never 'inactive': iOS reports 'inactive'
+  // for transient things like the notification shade, and toggling the camera
+  // on those would flicker the peer's view for no reason.
+  //
+  // The user's OWN camera choice is authoritative. If they turned video off
+  // themselves, there is nothing to suspend; and on return we restore only
+  // what WE suspended, so backgrounding never silently switches someone's
+  // camera back on. Screen share is exempt — sharing while using another app
+  // is the entire point of it.
+  try {
+    const { AppState } = require('react-native');
+    let suspended = false;
+    const sub = AppState.addEventListener('change', (st: string) => {
+      const cur = session;
+      if (!cur || cur.disposed || !cur.localStream) return;
+      if (st === 'background') {
+        const snap = getSnapshot();
+        if (suspended || snap.cameraOff || snap.sharing) return;
+        media.setCameraEnabled(cur.localStream, false);
+        suspended = true;
+        console.warn('[call] backgrounded — video off, audio continues');
+      } else if (st === 'active' && suspended) {
+        suspended = false;
+        if (!getSnapshot().cameraOff) {
+          media.setCameraEnabled(cur.localStream, true);
+          console.warn('[call] foregrounded — video restored');
+        }
+      }
+    });
+    onDispose(() => { try { sub?.remove?.(); } catch {} });
+  } catch { /* AppState unavailable — the call still works, it just keeps encoding */ }
 
   if (s.wire === 'direct') addPeer(s, a.peerUid, a.peerName, iceServers);
 
@@ -453,7 +630,70 @@ function openSession(s: Session): void {
  */
 async function onMeshOffer(from: string, wireSdp: any, iceServers: any[]): Promise<void> {
   const s = session;
-  if (!s || s.disposed || s.wire !== 'mesh' || !from) return;
+  if (!s || s.disposed || !from) return;
+
+  // A RE-OFFER for a peer we already have is an ICE restart from the other side
+  // (they changed network). Answer it in place — do NOT tear the peer down and
+  // rebuild, which would drop the media tracks and the E2EE call cipher.
+  //
+  // This path also had to stop rejecting non-mesh calls: the guard used to be
+  // `s.wire !== 'mesh' -> return`, so a 1:1 call silently ignored every
+  // re-offer. That is half of why a handover could never recover — one side
+  // was sending nothing, and the other would have discarded it anyway.
+  // A re-offer is only possible on a peer that has ALREADY negotiated once.
+  //
+  // For a 1:1 call bootstrap() calls addPeer() up front, so `s.peers.get(from)`
+  // is non-null before the FIRST offer even arrives. Treating that as a
+  // renegotiation hijacked normal call setup — observed on device as
+  // "answered ICE-restart offer" 12ms after `connecting`, then `failed`.
+  // hasNegotiated is the real signal: it flips only once a remote description
+  // has been applied.
+  const existing = s.peers.get(from);
+  if (existing?.hasNegotiated) {
+    try {
+      // Open with the CALL cipher we already hold — never openCallOffer().
+      //
+      // renegotiate() seals a re-offer with that cipher, producing a `sig1f`
+      // frame. openCallOffer only understands the `sig1` ratchet envelope used
+      // to START a call, so a `sig1f` fell through to its legacy-plaintext path
+      // and returned `passthrough` — and `setCipher(passthrough)` then DESTROYED
+      // the live call cipher. After that nothing sealed could ever be opened
+      // again: every remote ICE candidate failed, was queued, and re-queued.
+      // On device that was a handover stuck in a loop, "re-opening 12 early
+      // candidates" every 4s while the call sat silent until it timed out.
+      //
+      // The call key does not change across an ICE restart, so there is nothing
+      // to re-derive here. A legacy peer's plaintext re-offer still passes
+      // through open() untouched.
+      const offer = existing.openAny(wireSdp);
+      if (!offer?.type) {
+        // A `sig1` envelope here is the RING LOOP repeating its original offer
+        // at a peer that has already answered — expected, and correctly ignored.
+        // It was being logged as "could NOT open re-offer", which reads as a
+        // fault during exactly the window where real faults matter; a genuine
+        // re-offer is always a `sig1f` frame.
+        if ((wireSdp as any)?.v !== 'sig1') {
+          console.warn('[call] could NOT open re-offer from', from, '— dropping');
+        }
+        return;
+      }
+      // The 1:1 ring loop re-sends the SAME offer every ~3s until answered.
+      // Re-applying one of those would tear down a working connection, so only
+      // a genuinely different SDP (fresh ice-ufrag = real ICE restart) is
+      // treated as a renegotiation.
+      if (!existing.isNewOffer(offer)) return;
+      const answer = await existing.applyReoffer(offer);
+      if (!answer) return;
+      console.warn('[call] answered ICE-restart offer from', from);
+      await signal.sendMeshAnswer(from, s.chatId, existing.getCipher().seal(answer));
+    } catch (e: any) {
+      console.warn('[call] could not handle re-offer from', from, '—', e?.message ?? e);
+    }
+    return;
+  }
+
+  // A NEW participant only makes sense in a mesh; a 1:1 call has its one peer.
+  if (s.wire !== 'mesh') return;
   const peer = addPeer(s, from, '', iceServers);
   try {
     // Either an encrypted sig1 envelope or a raw SDP from a legacy peer;
@@ -504,11 +744,65 @@ export async function startGroup(a: StartGroupArgs): Promise<void> {
       })();
     };
 
+    // ── mesh vs SFU ───────────────────────────────────────────────────
+    //
+    // topologyFor() has existed since the SFU spike and NOTHING consulted it:
+    // every group call ran on the mesh regardless of size, and MESH_MAX was
+    // enforced nowhere in the client. A 6-person call therefore attempted 5
+    // peer connections and 5 outbound encodes per phone — the exact load the
+    // cap exists to prevent, on the mid-range devices least able to absorb it.
+    //
+    // The count includes us, which is why it is peers + 1: MESH_MAX is a
+    // ceiling on PARTICIPANTS, not on connections.
+    const meshFull = (peerCount: number) => topologyFor({ participants: peerCount + 1 }) !== 'mesh';
+
+    let switched = false;
+    const switchToSfu = async (peerCount: number) => {
+      if (switched || s.disposed) return;
+      switched = true;
+      try {
+        // BEFORE teardown — distribution needs the peer ciphers that die with
+        // the mesh connections.
+        await establishMediaKey(s);
+        // Give a non-minting participant a moment for the key to arrive; the
+        // alternative is joining unencrypted, which must never happen silently.
+        for (let i = 0; i < 20 && !s.mediaKey && !s.disposed; i++) {
+          await new Promise(r => setTimeout(r, 150));
+        }
+        // Everything mesh-side goes now: N-1 encodes running alongside the SFU
+        // publish is worse than either alone, and on a phone it is what turns
+        // "the call got big" into "the call died".
+        for (const uid of Array.from(s.peers.keys())) removePeer(s, uid);
+        await joinViaSfu(s, a.kind === 'video');
+      } catch (e: any) {
+        // Degrade rather than drop: mode.ts already treats an unavailable SFU
+        // as a reason to stay on mesh, and a call that keeps working badly beats
+        // one that ends.
+        switched = false;
+        console.warn('[call] SFU unavailable, staying on mesh —', e?.message ?? e);
+        dispatch({ type: 'error', message: 'Large call quality may be reduced.' });
+      }
+    };
+
     const leaveRoom = await signal.joinCallRoom({
       chatId: a.chatId,
-      onRoster: (peers) => peers.forEach(connectTo),
-      onJoined: connectTo,
-      onLeft:   (uid) => removePeer(s, uid),
+      onRoster: (peers) => {
+        if (meshFull(peers.length)) { void switchToSfu(peers.length); return; }
+        peers.forEach(connectTo);
+      },
+      onJoined: (uid) => {
+        if (switched) return;                          // the SFU owns the media now
+        if (meshFull(s.peers.size + 1)) { void switchToSfu(s.peers.size + 1); return; }
+        connectTo(uid);
+      },
+      onLeft: (uid) => {
+        removePeer(s, uid);
+        // Forward secrecy: someone who left must not be able to decrypt what
+        // the SFU keeps forwarding. On the mesh this is automatic — their link
+        // is gone — but the SFU has no idea who can read the ciphertext it
+        // relays, so only a re-key actually removes them.
+        void rotateMediaKeyAfterLeave(s);
+      },
       onFull:   (max) => {
         // Server refused the join — the mesh is at capacity. Surface it and end
         // cleanly rather than sitting on a screen that never receives a roster.
@@ -526,6 +820,124 @@ export async function startGroup(a: StartGroupArgs): Promise<void> {
   } catch (e: any) {
     failSetup(e);
   }
+}
+
+/**
+ * Establish the call's shared media key and give it to every mesh peer.
+ *
+ * MUST run while the mesh is still up: distribution rides each peer's call
+ * cipher, and those die with the peer connections. Doing it after teardown
+ * would leave no channel to send it over.
+ *
+ * ONE participant mints, chosen deterministically by lowest uid, so N peers
+ * switching at the same moment do not each mint a different key and leave the
+ * room unable to decode itself. Everyone else adopts what arrives.
+ */
+async function distributeMediaKey(s: Session, key: Uint8Array, to: string[]): Promise<void> {
+  const e2ee = await import('../../services/crypto/e2eeSession.rn');
+  const body = JSON.stringify({ v: 'mk1', k: Buffer.from(key).toString('base64') });
+  for (const uid of to) {
+    // Sealed with the PAIRWISE RATCHET, not the per-peer call cipher.
+    //
+    // The call cipher dies with the mesh peer connections, and those are torn
+    // down the moment we switch to the SFU — so a key rotation after the switch
+    // would have no channel at all. The ratchet session is independent of the
+    // call and survives it, which is what makes rotation possible for the whole
+    // lifetime of the room. Volume is trivial (once per call, once per leave),
+    // so the "don't ratchet per frame" rule in lib/callCrypto does not apply.
+    try {
+      await signal.sendMediaKey(uid, s.chatId, await e2ee.e2eeEncrypt('', uid, body));
+    } catch { /* that participant simply keeps the old key and re-syncs later */ }
+  }
+}
+
+/** Everyone in the call except us, from the roster (mesh peers may be gone). */
+function otherParticipants(s: Session): string[] {
+  const roster = Object.keys(getSnapshot().participants ?? {});
+  const uids = new Set([...roster, ...Array.from(s.peers.keys())]);
+  uids.delete(s.meId);
+  return Array.from(uids);
+}
+
+async function establishMediaKey(s: Session): Promise<void> {
+  if (s.mediaKey) return;
+
+  const others = otherParticipants(s);
+  const minter = [s.meId, ...others].sort()[0];
+  if (minter !== s.meId) return;      // someone else mints; onMediaKey adopts it
+
+  const { randomBytes } = await import('@noble/hashes/utils.js');
+  const key = randomBytes(32);
+  s.mediaKey = key;
+  await distributeMediaKey(s, key, others);
+}
+
+/**
+ * Re-key after someone leaves — forward secrecy for the rest of the call.
+ *
+ * Without this, a participant who left (or was removed by a host) keeps a key
+ * that still decrypts every frame the SFU continues to forward. The server
+ * cannot help: it forwards ciphertext by design and has no idea who can read
+ * it. Only a re-key actually removes them.
+ *
+ * Same deterministic minter rule as the initial key, so simultaneous departures
+ * cannot leave the room split across two keys. The key ring in frameCrypto
+ * (keyRingSize 16) covers the changeover, so frames already in flight under the
+ * previous key still decode instead of producing a visible freeze.
+ */
+async function rotateMediaKeyAfterLeave(s: Session): Promise<void> {
+  if (!s.sfu || s.disposed) return;                 // mesh re-keys by tearing the link down
+
+  const others = otherParticipants(s);
+  if (others.length === 0) return;                  // nobody left to protect from
+  if ([s.meId, ...others].sort()[0] !== s.meId) return;
+
+  const { randomBytes } = await import('@noble/hashes/utils.js');
+  const key = randomBytes(32);
+  s.mediaKey = key;
+  await s.sfu.crypto?.setKey(key);
+  await distributeMediaKey(s, key, others);
+  console.warn('[call] media key rotated after a participant left');
+}
+
+/**
+ * Move this call onto the SFU, with frame-level E2EE.
+ *
+ * The encryption is the point. An SFU forwards media it would normally be able
+ * to decode, which is the usual reason "scale" and "end-to-end encrypted" are
+ * treated as alternatives. RTCFrameCryptor encrypts each frame BEFORE it leaves
+ * the device, so the server routes ciphertext — the guarantee survives the
+ * topology change, and lib/call/mode.ts's promise that only broadcast drops
+ * E2EE stays true.
+ *
+ * The media key is the per-call key this call already established over the
+ * Double Ratchet. No new key agreement is introduced: the SFU changes the
+ * TRANSPORT, not the trust model.
+ */
+async function joinViaSfu(s: Session, video: boolean): Promise<void> {
+  if (!s.serverCallId) throw new Error('no server call session');
+
+  const { getSfuToken } = await import('./sfuToken');
+  const { joinSfuRoom } = await import('./sfuRoom');
+  const cred = await getSfuToken(s.serverCallId);
+
+  const key = s.mediaKey;
+  if (!key) throw new Error('no media key for this call');
+
+  const sfu = await joinSfuRoom({
+    url: cred.url,
+    token: cred.token,
+    identity: cred.identity,
+    publish: cred.role !== 'audience',
+    video,
+    e2eeKey: key,
+    onDisconnected: () => { if (!s.disposed) hangUp('failed', false); },
+  });
+
+  s.wire = 'sfu';
+  s.sfu = sfu;
+  onDispose(() => { void sfu.leave(); });
+  console.warn('[call] switched to SFU with frame E2EE');
 }
 
 /**
@@ -593,6 +1005,25 @@ function startQualityLoop(peer: CallPeer): void {
 /** Place a call. Rejects only on setup failure; the call is torn down first. */
 export async function startOutgoing(a: StartArgs): Promise<void> {
   try {
+    // ── verify the secure session BEFORE dialling ─────────────────────
+    //
+    // The SDP offer is sealed with this peer's ratchet session. Dial with a
+    // stale one and the callee cannot open the offer, never answers, and never
+    // sends candidates — ICE then sits in `connecting` until it gives up. To
+    // the user that is "calling…" forever, indistinguishable from bad signal,
+    // so they retry and it fails identically. Observed exactly that tonight.
+    //
+    // Repair is a re-key request, not a forced re-key: text shares this session,
+    // and re-keying every call would destroy it and invite a reset storm.
+    const { checkSessionHealth, waitForSession } = await import('./sessionHealth');
+    if (await checkSessionHealth(a.peerUid) === 'repairing') {
+      dispatch({ type: 'error', message: 'Reconnecting secure session…' });
+      // Bounded: dialling late beats refusing to dial. If the repair has not
+      // landed we continue anyway — the in-call self-heal is still there — but
+      // the user has been told why it is slow.
+      await waitForSession(a.peerUid);
+    }
+
     const { s, peer, me } = await bootstrap(a, 'outgoing');
     const offer = await peer.createOffer(a.kind === 'video');
 
@@ -602,11 +1033,41 @@ export async function startOutgoing(a: StartArgs): Promise<void> {
     if (sealed) peer.setCipher(sealed.cipher);
     const offerWire = sealed ? sealed.offerWire : offer;
 
+    // If the callee cannot open our offer it resets its session and asks us to
+    // re-key. That heal is useless to the call in progress unless the ring loop
+    // stops re-sending the envelope the callee already rejected — so re-seal
+    // whenever the session epoch moves. Unchanged session → identical wire,
+    // preserving the one-ratchet-wrap-per-call property.
+    const { sessionEpoch } = await import('../sessionEpoch');
+    let sealedAt = sessionEpoch(a.peerUid);
+    let resealing = false;
+    const reseal = (): any | null => {
+      if (!sealed || resealing) return null;
+      const now = sessionEpoch(a.peerUid);
+      if (now === sealedAt) return null;          // nothing changed
+      sealedAt = now;
+      resealing = true;
+      // newCallCipher is async and the ring tick is not; kick it off and let
+      // the NEXT tick (3s) carry the fresh wire rather than blocking this one.
+      void newCallCipher(a.peerUid, offer)
+        .then(fresh => {
+          if (!fresh || isDone()) return;
+          peer.setCipher(fresh.cipher);
+          pendingReseal = fresh.offerWire;
+          console.warn('[call] session re-keyed mid-ring — re-sealed the offer');
+        })
+        .catch(() => {})
+        .finally(() => { resealing = false; });
+      return null;
+    };
+    let pendingReseal: any = null;
+
     const cancelRing = await signal.ringAndOffer({
       to: a.peerUid, from: s.meId, chatId: a.chatId,
       type: a.kind === 'video' ? 'video' : 'audio',
       callerName: me.name ?? me.email ?? 'VaultChat user',
       offer: offerWire,
+      reseal: () => { const w = pendingReseal; pendingReseal = null; return w ?? reseal(); },
     }, isDone);
     onDispose(cancelRing);
 

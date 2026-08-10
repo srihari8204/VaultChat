@@ -1151,6 +1151,27 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   //   block / block_silent → preventScreenCaptureAsync (FLAG_SECURE)
   //   *_notify (and block on iOS) → also listen + report
   const [screenshotBanner, setScreenshotBanner] = useState<{ by: string; at: string } | null>(null);
+
+  // ── security-code change ──────────────────────────────────────────────
+  //
+  // A key substitution is invisible in normal use — the padlock still shows and
+  // messages still decrypt — so it has to be surfaced unprompted rather than
+  // waiting for someone to open the verify screen on the one day it matters.
+  //
+  // 1:1 only. A group has many identities and no single "the other person",
+  // so a banner there would be noise rather than a signal.
+  const [keyChange, setKeyChange] = useState<import('../lib/keyChange').KeyChange | null>(null);
+  useEffect(() => {
+    const peers = otherMembers;
+    if (peers.length !== 1) return;
+    let cancelled = false;
+    (async () => {
+      const { checkKeyChange } = await import('../lib/keyChange');
+      const change = await checkKeyChange(peers[0].userId);
+      if (!cancelled) setKeyChange(change);
+    })();
+    return () => { cancelled = true; };
+  }, [otherMembers]);
   useEffect(() => {
     if (Platform.OS === 'web' || !chat) return;
     const mode: ScreenshotMode = (chat.screenshotMode as ScreenshotMode) || 'block';
@@ -2249,6 +2270,37 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       )}
 
       {/* Inbound screenshot alert — auto-dismisses after 4s */}
+      {/* Deliberately informative, not blocking. A key change is genuinely
+          ambiguous — a reinstall looks identical to an interception — so the
+          honest response is to say what happened and offer the check, rather
+          than throw up a scary modal people learn to tap through. */}
+      {keyChange && (
+        <View style={S.keyChangeBanner}>
+          <Text style={S.keyChangeTxt}>
+            🔑 The security code for this chat changed. This usually means they
+            reinstalled VaultChat or switched device.
+          </Text>
+          <View style={S.keyChangeRow}>
+            <TouchableOpacity
+              onPress={() => router.push({ pathname: '/verify-contact' as any,
+                params: { peerId: keyChange.peerId,
+                  peerName: otherMembers[0]?.name ?? chat?.name ?? '' } })}
+            >
+              <Text style={S.keyChangeVerify}>Verify</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={async () => {
+                const { acknowledgeKeyChange } = await import('../lib/keyChange');
+                await acknowledgeKeyChange(keyChange.peerId, keyChange.currentHex);
+                setKeyChange(null);
+              }}
+            >
+              <Text style={S.keyChangeDismiss}>Dismiss</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
       {screenshotBanner && (
         <View style={S.screenshotBanner}>
           <Text style={S.screenshotBannerTxt}>

@@ -109,6 +109,18 @@ export const makeStyles = (c: Palette) => StyleSheet.create({
   memoryBubbleDismiss: { color: c.textDim, fontSize: 10, marginTop: 6 },
   screenshotBannerTxt: { color: '#FCD34D', fontSize: 12, fontWeight: '600' },
 
+  // Security-code change. Amber, not red: a changed key usually means the peer
+  // reinstalled, and colouring an ordinary event as an attack teaches people to
+  // ignore the one time it is not.
+  keyChangeBanner: {
+    backgroundColor: 'rgba(245,158,11,0.12)', borderColor: 'rgba(245,158,11,0.35)',
+    borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 12, borderRadius: 10,
+  },
+  keyChangeTxt:     { color: '#FCD34D', fontSize: 12, lineHeight: 18 },
+  keyChangeRow:     { flexDirection: 'row', gap: 20, marginTop: 8 },
+  keyChangeVerify:  { color: '#FCD34D', fontSize: 12, fontWeight: '800' },
+  keyChangeDismiss: { color: c.textDim, fontSize: 12, fontWeight: '600' },
+
   mentionBar:    { backgroundColor: c.surfaceSolid, borderTopWidth: 1, borderTopColor: c.border, maxHeight: 220 },
   mentionRow:    { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 8 },
   mentionName:   { color: c.text, fontSize: 14, fontWeight: '600', flex: 1 },

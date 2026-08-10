@@ -28,6 +28,14 @@ import type { KeyPair, PreKeyBundle, InitialHeader, RatchetState, Envelope } fro
 
 const b64 = (b: Uint8Array): string => Buffer.from(b).toString('base64');
 const unb64 = (s: string): Uint8Array => new Uint8Array(Buffer.from(s, 'base64'));
+/**
+ * Thrown when both peers re-keyed at once and WE are the side that keeps its
+ * session. Callers must treat it as "skip this message", NOT as a decrypt
+ * failure: resetting here would destroy the very session the peer is about to
+ * adopt and restart the collision.
+ */
+export const CONCURRENT_REKEY = 'e2ee: concurrent re-key — keeping our session';
+
 function packIdentity(ikPub: Uint8Array, signPub: Uint8Array): string {
   const out = new Uint8Array(64);
   out.set(ikPub, 0);
@@ -76,6 +84,17 @@ interface StoredSession {
   role: 'initiator' | 'responder';
   includeX3DH: boolean;          // initiator keeps sending header until first reply
   initialHeader?: { ik: string; ek: string; opkId: number | null };
+  /**
+   * The peer's identity key, hex, as of the session this record describes.
+   *
+   * Recorded so a CHANGE can be detected. A peer who reinstalls legitimately
+   * gets a new identity key — and so does an attacker substituting their own.
+   * The protocol cannot tell those apart, which is precisely why the change has
+   * to be surfaced to the user instead of silently accepted. Without this field
+   * a key substitution is completely invisible: the padlock still shows and the
+   * ratchet still works, against the wrong person.
+   */
+  peerIkHex?: string;
 }
 
 const IDENTITY_KEY = 'vc_e2ee_identity';
@@ -96,6 +115,14 @@ export interface E2EESession {
   hasSession(peerId: string): Promise<boolean>;
   /** Drop the local session so the next message re-initiates X3DH ("reset secure session"). */
   resetSession(peerId: string): Promise<void>;
+  /**
+   * The peer identity key this session was built on, hex, or null.
+   *
+   * For CHANGE detection, not for display. Safety numbers already exist
+   * (services/security/safetyNumber.ts, rendered by app/verify-contact.tsx);
+   * what was missing is noticing that a key differs from the one used before.
+   */
+  peerIdentityKey(peerId: string): Promise<string | null>;
 }
 
 export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTransport }): E2EESession {
@@ -294,7 +321,8 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
       if (!parsed.x3dh) throw new Error('e2ee: no session and no X3DH header to bootstrap responder');
       const state = await bootstrapResponder(parsed, id);
       const plaintextBytes = ratchetDecrypt(state, envelope);
-      await saveSession(peerId, { state: serializeState(state), role: 'responder', includeX3DH: false });
+      await saveSession(peerId, { state: serializeState(state), role: 'responder', includeX3DH: false,
+        peerIkHex: bytesToHex(unb64(parsed.x3dh.ik)) });
       return new TextDecoder().decode(plaintextBytes);
     }
 
@@ -314,9 +342,41 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
       // and retry, so the conversation self-heals instead of being stuck on
       // "unable to decrypt" forever.
       if (!parsed.x3dh) throw err;
+
+      // SIMULTANEOUS RE-KEY (glare at the session layer).
+      //
+      // Adopting the peer's session is right when only THEY re-keyed. When both
+      // sides re-key at once — which is exactly what a mutual "reset + ask the
+      // peer to reset" recovery produces — both hold an outstanding initiator
+      // session and both receive an X3DH-headed message. If both adopt, they
+      // SWAP: each ends up on the other's session and neither can decrypt, so
+      // both fail again, reset again, and the loop never converges. Observed on
+      // device as repeated "aes/gcm: invalid ghash tag" with resets firing in
+      // pairs until the call gave up.
+      //
+      // Break the tie deterministically on the identity keys, which both sides
+      // already have: the LOWER key yields and adopts, the higher keeps its own
+      // and the peer converges onto it. Same shape as the ICE glare rule — it
+      // does not matter which session wins, only that both pick the same one.
+      //
+      // Scoped to the collision: a plain responder, or an initiator whose
+      // session is already established, still adopts exactly as before, so a
+      // genuinely reinstalled peer heals on the first message.
+      if (session.role === 'initiator' && session.includeX3DH) {
+        const mine = id.ikPub.toLowerCase();
+        const theirs = bytesToHex(unb64(parsed.x3dh.ik)).toLowerCase();
+        if (mine > theirs) {
+          // We win: keep our session untouched. Their next message arrives on
+          // it once they adopt. This ONE message is undecryptable, which is
+          // harmless — call offers repeat every 3s and text is re-sent.
+          throw new Error(CONCURRENT_REKEY);
+        }
+      }
+
       const fresh = await bootstrapResponder(parsed, id);
       const plaintextBytes = ratchetDecrypt(fresh, envelope); // throws if genuinely undecryptable
-      await saveSession(peerId, { state: serializeState(fresh), role: 'responder', includeX3DH: false });
+      await saveSession(peerId, { state: serializeState(fresh), role: 'responder', includeX3DH: false,
+        peerIkHex: bytesToHex(unb64(parsed.x3dh.ik)) });
       return new TextDecoder().decode(plaintextBytes);
     }
   }
@@ -327,5 +387,25 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
     await store.del(sessionKey(peerId));
   }
 
-  return { ensurePublished, encryptForPeer, decryptFromPeer, isEnvelope, hasSession, resetSession };
+  /**
+   * The peer identity key this session was built on, hex, or null.
+   *
+   * Deliberately NOT a safety number: services/security/safetyNumber.ts already
+   * computes those and app/verify-contact.tsx already renders them. A second
+   * construction would produce a DIFFERENT number for the same pair, and a user
+   * comparing codes across two screens would conclude their conversation was
+   * compromised.
+   *
+   * What was missing is the other half — noticing a key CHANGED. The screen
+   * shows today's number; nothing warned when yesterday's differed. A peer who
+   * reinstalls gets a new key legitimately, and so does an attacker
+   * substituting their own; the protocol cannot tell them apart, so the change
+   * must be surfaced rather than silently accepted.
+   */
+  async function peerIdentityKey(peerId: string): Promise<string | null> {
+    const sess = await loadSession(peerId);
+    return sess?.peerIkHex ?? null;
+  }
+
+  return { ensurePublished, encryptForPeer, decryptFromPeer, isEnvelope, hasSession, resetSession, peerIdentityKey };
 }

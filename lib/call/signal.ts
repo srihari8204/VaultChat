@@ -21,6 +21,13 @@ export interface RingPayload {
   type: 'audio' | 'video';
   callerName: string;
   offer: any;
+  /**
+   * Optional: return a freshly sealed offer wire, or null to keep the current
+   * one. Called before each ring repeat so a session re-key mid-ring can be
+   * picked up instead of re-sending an envelope the callee has already proven
+   * it cannot open.
+   */
+  reseal?: () => any | null;
 }
 
 type Off = () => void;
@@ -40,7 +47,7 @@ type Off = () => void;
  * therefore keeps the shapes separate and picks by mode, which is what lets an
  * engine build and a legacy build call each other in either direction.
  */
-export type WireMode = 'direct' | 'mesh';
+export type WireMode = 'direct' | 'mesh' | 'sfu';
 
 /** Read the SDP from either shape. Receivers are deliberately tolerant. */
 const readSdp = (d: any) => d?.offer ?? d?.answer ?? d?.sdp;
@@ -59,6 +66,8 @@ export async function attachCallListeners(handlers: {
   onEnd: (from: string) => void;
   onPeerScreenShare: (from: string, on: boolean) => void;
   onChat: (from: string, sealed: any) => void;
+  /** The call's shared media key, sealed for us. See sendMediaKey. */
+  onMediaKey?: (from: string, sealed: any) => void;
   onReaction: (from: string, sealed: any) => void;
 }): Promise<Off> {
   const s = await getSocket();
@@ -74,6 +83,7 @@ export async function attachCallListeners(handlers: {
   const onShare   = route((from) => handlers.onPeerScreenShare(from, true));
   const onUnshare = route((from) => handlers.onPeerScreenShare(from, false));
   const onChat    = route((from, d) => handlers.onChat(from, d?.text));
+  const onMediaKey = route((from, d) => handlers.onMediaKey?.(from, d?.key));
   const onEmoji   = route((from, d) => handlers.onReaction(from, d?.emoji));
 
   s.on('webrtc_offer', onOffer);
@@ -83,12 +93,14 @@ export async function attachCallListeners(handlers: {
   s.on('screen_share_start', onShare);
   s.on('screen_share_stop', onUnshare);
   s.on('call_chat', onChat);
+  s.on('call_media_key', onMediaKey);
   s.on('call_emoji', onEmoji);
   return () => {
     for (const [e, h] of [['webrtc_offer', onOffer], ['webrtc_answer', onAnswer],
       ['webrtc_ice', onIce], ['webrtc_end', onEnd],
       ['screen_share_start', onShare], ['screen_share_stop', onUnshare],
-      ['call_chat', onChat], ['call_emoji', onEmoji]] as const) {
+      ['call_chat', onChat], ['call_emoji', onEmoji],
+      ['call_media_key', onMediaKey]] as const) {
       try { s.off(e, h as any); } catch {}
     }
   };
@@ -245,6 +257,24 @@ export async function sendCallEmoji(to: string, chatId: string, sealed: any): Pr
 }
 
 /**
+ * Hand one peer the call's MEDIA key, sealed with that peer's call cipher.
+ *
+ * Needed because mesh and SFU want different key shapes. Mesh mints a key PER
+ * PAIR, which is exactly right when every link is its own connection — but an
+ * SFU forwards one encrypted stream to everyone, so every participant must hold
+ * the SAME key or nobody can decode anybody. This is the distribution step that
+ * closes that gap.
+ *
+ * It rides the existing per-peer sealed channel (server stamps `from`, same
+ * relay webrtc_* uses), so the media key is protected by the Double Ratchet the
+ * call already established. No new trust, no new key agreement — which is the
+ * whole reason the E2EE guarantee survives the switch to an SFU.
+ */
+export async function sendMediaKey(to: string, chatId: string, sealed: any): Promise<void> {
+  try { (await getSocket()).emit('call_media_key', { to, chatId, key: sealed }); } catch {}
+}
+
+/**
  * Ring the peer and deliver the offer, then keep re-sending BOTH on the same
  * cadence the screens use. `isDone()` stops the loop the moment the call
  * connects or tears down. Returns a canceller.
@@ -257,9 +287,12 @@ export async function ringAndOffer(
   payload: RingPayload, isDone: () => boolean,
 ): Promise<Off> {
   const s = await getSocket();
-  const offerWire = { to: payload.to, from: payload.from, offer: payload.offer };
+  let offer = payload.offer;
   const emitBoth = () => {
-    try { s.emit('call_incoming', payload); s.emit('webrtc_offer', offerWire); } catch {}
+    try {
+      s.emit('call_incoming', { ...payload, offer });
+      s.emit('webrtc_offer', { to: payload.to, from: payload.from, offer });
+    } catch {}
   };
   emitBoth();
 
@@ -267,6 +300,25 @@ export async function ringAndOffer(
   const timer = setInterval(() => {
     if (isDone() || rings >= 9) { clearInterval(timer); return; }
     rings++;
+    // RE-SEAL before re-sending, if the caller says the session changed.
+    //
+    // This loop used to capture the sealed wire once and re-emit that exact
+    // bytes 9 times over 27s. When the callee could not open it, it reset its
+    // session and asked us to re-key — but every repeat was still the OLD
+    // envelope, so all 9 failed identically and the call could never recover
+    // in place. Seen on device as four consecutive "openCallOffer failed —
+    // aes/gcm: invalid ghash tag" while the re-key itself worked perfectly.
+    // The user's only recourse was to hang up and redial.
+    //
+    // Re-sealing only when the epoch moved keeps the one-wrap-per-call
+    // property that callCrypto's header depends on: an unchanged session
+    // re-sends the identical wire, exactly as before.
+    if (payload.reseal) {
+      try {
+        const fresh = payload.reseal();
+        if (fresh) offer = fresh;
+      } catch {}
+    }
     emitBoth();
   }, 3000);
   return () => clearInterval(timer);
