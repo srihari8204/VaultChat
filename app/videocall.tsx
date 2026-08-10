@@ -653,9 +653,9 @@ function VideoCallLegacy() {
       return;
     }
     try {
-      console.log('[screenshare] calling getDisplayMedia…');
+      console.warn('[screenshare] calling getDisplayMedia…');
       const screen: any = await (mediaDevices as any).getDisplayMedia();   // → system "Start recording?" prompt
-      console.log('[screenshare] stream:', !!screen, 'tracks:', screen?.getVideoTracks?.().length);
+      console.warn('[screenshare] stream:', !!screen, 'tracks:', screen?.getVideoTracks?.().length);
       const screenTrack = screen?.getVideoTracks?.()[0];
       if (!screenTrack) { screen?.getTracks?.().forEach((t: any) => t.stop()); Alert.alert('Screen share', 'No screen track was returned by capture.'); return; }
       cameraTrackRef.current = sender.track;                      // keep the camera alive for swap-back
