@@ -43,8 +43,15 @@ const pool = new Pool({
 const listFiles = () =>
   fs.readdirSync(MIG_DIR).filter((f) => /^\d+_.*\.sql$/.test(f)).sort();
 const versionOf = (file) => file.match(/^(\d+)_/)[1]; // zero-padded, so string compare is correct
+// Line endings are normalised BEFORE hashing.
+//
+// Without this the same migration hashes differently depending on the machine:
+// git checks these files out with CRLF on Windows and LF on Linux, so a ledger
+// written by CI reports every single migration as drifted when verified from a
+// Windows checkout. Observed exactly that — 80 of 81 files "drifted", all of
+// them purely CRLF, which is enough noise to hide the one real mismatch.
 const checksum = (text) =>
-  crypto.createHash('sha256').update(text).digest('hex').slice(0, 16);
+  crypto.createHash('sha256').update(text.replace(/\r\n/g, '\n')).digest('hex').slice(0, 16);
 
 async function ledgerExists(client) {
   const r = await client.query(
@@ -67,6 +74,53 @@ async function appliedSet(client) {
   return new Set(r.rows.map((x) => x.version));
 }
 
+/**
+ * Compare every applied migration against the file on disk.
+ *
+ * The ledger recorded checksums from the start but nothing ever verified them,
+ * so an edit to an already-applied migration went unnoticed indefinitely — the
+ * exact thing the column exists to catch. A checksum nobody checks is
+ * decoration.
+ *
+ * Returns the mismatches; the caller decides whether to warn or refuse.
+ */
+async function verifyChecksums(client) {
+  if (!(await ledgerExists(client))) return [];
+  const r = await client.query('SELECT version, filename, checksum FROM schema_migrations ORDER BY version');
+  const drift = [];
+  for (const row of r.rows) {
+    const p = path.join(MIG_DIR, row.filename);
+    if (!fs.existsSync(p)) { drift.push({ ...row, actual: null }); continue; }
+    const actual = checksum(fs.readFileSync(p, 'utf8'));
+    if (actual !== row.checksum) drift.push({ ...row, actual });
+  }
+  return drift;
+}
+
+function reportDrift(drift) {
+  console.error(`\n  ${drift.length} applied migration(s) NO LONGER MATCH the file on disk:\n`);
+  for (const d of drift) {
+    console.error(d.actual === null
+      ? `   ${d.filename}  — FILE IS MISSING (recorded ${d.checksum})`
+      : `   ${d.filename}  recorded ${d.checksum}  now ${d.actual}`);
+  }
+  console.error(`
+  An applied migration must never be edited: the database already ran the old
+  text, so the file no longer describes what is deployed and a fresh environment
+  built from these files will diverge from production.
+
+  If the change was genuinely cosmetic (a comment) and the SQL is byte-identical,
+  confirm it and then re-record the checksum:
+
+     diff <(git show <commit>^:<path> | grep -vE '^\\s*--|^\\s*$') \\
+          <(grep -vE '^\\s*--|^\\s*$' <path>)
+
+     UPDATE schema_migrations SET checksum = '<new>' WHERE version = '<nnn>';
+
+  Otherwise revert the file and write a NEW migration instead.
+`);
+}
+
 async function cmdStatus() {
   const client = await pool.connect();
   try {
@@ -79,7 +133,10 @@ async function cmdStatus() {
       console.log(`   ${applied.has(versionOf(f)) ? '✓ applied' : '· pending'}  ${f}`);
     }
     const pending = files.filter((f) => !applied.has(versionOf(f)));
-    console.log(`\n  ${pending.length} pending\n`);
+    console.log(`\n  ${pending.length} pending`);
+    const drift = await verifyChecksums(client);
+    console.log(drift.length ? '' : '  checksums:     all applied migrations match their files\n');
+    if (drift.length) reportDrift(drift);
   } finally {
     client.release();
   }
@@ -110,6 +167,19 @@ async function cmdUp(upTo) {
   const client = await pool.connect();
   try {
     await ensureLedger(client);
+
+    // Refuse to apply anything on top of a ledger that no longer describes what
+    // is deployed. MIGRATE_ALLOW_DRIFT=1 is the deliberate escape hatch for the
+    // one legitimate case — a cosmetic edit already verified by hand.
+    const drift = await verifyChecksums(client);
+    if (drift.length) {
+      reportDrift(drift);
+      if (process.env.MIGRATE_ALLOW_DRIFT !== '1') {
+        throw new Error('refusing to migrate with a drifted ledger (set MIGRATE_ALLOW_DRIFT=1 to override)');
+      }
+      console.error('  MIGRATE_ALLOW_DRIFT=1 — continuing anyway\n');
+    }
+
     const applied = await appliedSet(client);
     let files = listFiles().filter((f) => !applied.has(versionOf(f)));
     if (upTo) files = files.filter((f) => versionOf(f) <= upTo);
