@@ -282,6 +282,12 @@ func (h *Hub) registerSignalHandlers(s *socket.Socket) {
 	s.On("webrtc_ice", relay("webrtc_ice"))
 	s.On("webrtc_end", relay("webrtc_end"))
 	s.On("e2ee_rekey", relay("e2ee_rekey"))
+	// The call's shared media key, sealed with the recipient's per-peer call
+	// cipher. Relayed like every other call signal: the server stamps the sender
+	// and forwards an opaque blob it cannot read — which is precisely what lets
+	// a group call stay end-to-end encrypted while an SFU the client does not
+	// have to trust forwards the media.
+	s.On("call_media_key", relay("call_media_key"))
 	s.On("screen_share_start", relay("screen_share_start"))
 	s.On("screen_share_stop", relay("screen_share_stop"))
 	// In-call chat + reactions. Addressed like any other call signal so the
