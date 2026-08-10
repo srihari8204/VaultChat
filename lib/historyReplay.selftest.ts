@@ -26,8 +26,10 @@ const AUTO_RECOVER_AFTER = 2;
 /** Mirrors the streak/reset half of chatService. */
 class Recovery {
   resets = new Map<string, number>();
+  ignoredSelf = 0;
   private streak = new Map<string, number>();
   private bulkDepth = 0;
+  readonly me = 'cb1caeda';
 
   /** Mirrors hydrateMessages: everything inside is history. */
   bulk(fn: () => void): void {
@@ -36,6 +38,7 @@ class Recovery {
   }
 
   fail(peer: string): void {
+    if (peer === this.me) { this.ignoredSelf++; return; }  // no session with yourself
     if (this.bulkDepth > 0) return;              // history says nothing about live
     const n = (this.streak.get(peer) ?? 0) + 1;
     this.streak.set(peer, n);
@@ -101,6 +104,23 @@ try { r6.bulk(() => { throw new Error('render blew up'); }); } catch { /* expect
 r6.fail('09f46de9'); r6.fail('09f46de9');
 check('a throwing hydrate does not leave resets disabled forever',
   r6.resetsFor('09f46de9') === 1);
+
+// ── our OWN messages must never reset anything ────────────────────────
+//
+// peerId is `directPeerOf(chatId) ?? senderId`, and directPeerOf is null for a
+// GROUP chat — so our own group messages resolve the "peer" to our own id.
+// There is no pairwise session with yourself, so the decrypt can only fail.
+// Measured on device 15:13:17–15:13:21: ~14 ghash failures in four seconds,
+// every one for the device's own user, reaching decryptFails=10.
+const r7 = new Recovery();
+for (let i = 0; i < 14; i++) r7.fail(r7.me);
+check('own-message failures never reset a session', r7.resetsFor(r7.me) === 0);
+check('...and are counted as ignored, not silently dropped', r7.ignoredSelf === 14);
+
+// and a real peer in the same burst still recovers normally
+r7.fail('09f46de9'); r7.fail('09f46de9');
+check('a real peer still resets while own-message failures are ignored',
+  r7.resetsFor('09f46de9') === 1);
 
 console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all history-replay checks passed\n');
 process.exit(failures ? 1 : 0);

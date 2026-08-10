@@ -426,6 +426,24 @@ const FORCED_RESET_FLOOR_MS = 15_000;
 let _bulkDecryptDepth = 0;
 
 async function maybeAutoRecoverSession(peerId: string, errMsg: string): Promise<void> {
+  // There is no pairwise session with YOURSELF, so a failure here says nothing
+  // about any peer and there is nothing to recover.
+  //
+  // `peerId` is `directPeerOf(chatId) ?? senderId`, and directPeerOf returns
+  // null for a group chat — so every one of OUR OWN group messages resolves the
+  // "peer" to our own id. Those messages are read from the plaintext cache; when
+  // the cache does not have them they are permanently unreadable (that is what
+  // "own message(s) predate the plaintext cache" reports), and the decrypt
+  // attempt that follows can only ever fail.
+  //
+  // Left uncaught, that tight failure loop reset a session against our own id
+  // and fired rekey requests at ourselves. Measured on device 15:13:17–15:13:21
+  // as ~14 ghash failures in four seconds, all for peer cb1caeda — the device's
+  // own user — reaching decryptFails=10.
+  if (peerId && peerId === (await myUserId())) {
+    console.warn('[e2ee] undecryptable own message — no session with self, ignoring:', errMsg);
+    return;
+  }
   // Replayed history is not evidence about the live session — see above.
   if (_bulkDecryptDepth > 0) {
     stat(peerId).fails++;
