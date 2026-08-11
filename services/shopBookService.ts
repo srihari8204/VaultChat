@@ -45,10 +45,133 @@ export interface Product {
   category: string;
   unit: string;
   price: number;
-  inStock: boolean;
+  inStock: boolean;    // for a tracked product this is derived: available > 0
   enabled: boolean;
   taxPercent: number;
   updatedAt: string;   // price freshness (shown in comparison)
+  // P0-B inventory. Present only on the OWNER's catalog and only when the
+  // product is tracked — on-hand and cost are the shop's business, so the
+  // customer endpoint never sends them.
+  trackStock: boolean;
+  available?: number;
+  onHand?: number;
+  reserved?: number;
+  reorderLevel?: number;
+  costPrice?: number;
+}
+
+// ── P0-C: live billing ────────────────────────────────────────────
+// Every field here is computed by the server. The client renders the bill it
+// is given and never adds anything up itself — that is the whole design.
+export interface BillLine {
+  id: string; name: string; brand: string; unit: string;
+  requestedQty: number;    // what the customer asked for — never overwritten
+  fulfilledQty: number;    // what the shop actually packed
+  weighed: boolean;        // true once the shop set an actual quantity
+  price: number; taxPercent: number;
+  discount: number; tax: number; total: number;
+  availability: ItemAvailability; removed: boolean; custom: boolean;
+}
+export interface Bill {
+  orderId: string; status: OrderStatus; currency: string;
+  lines: BillLine[];
+  subtotal: number; discount: number; billDiscount: number;
+  taxTotal: number; roundOff: number; deliveryFee: number; total: number;
+  buyerTax: { businessName?: string; taxNumber?: string; address?: string };
+  editable: boolean;
+}
+export function getBill(orderId: string) {
+  return api<Bill>(`/shopbook/my-shop/orders/${orderId}/bill`);
+}
+export interface BillUpdate {
+  lines?: { id: string; fulfilledQty?: number | null; removed?: boolean }[];
+  add?: { productId?: string; name: string; brand?: string; unit?: string; qty: number; price?: number; note?: string };
+  billDiscount?: number;
+}
+// Returns the recomputed bill — always render the response, never local state.
+export function updateBill(orderId: string, patch: BillUpdate) {
+  return api<Bill>(`/shopbook/my-shop/orders/${orderId}/bill`, { method: 'POST', json: patch });
+}
+
+// The customer declares the business they're buying for. A tax number turns
+// the document into a reclaimable tax invoice; omitting it keeps it a retail
+// bill. Must be set before the invoice is issued.
+export function setBuyerTax(orderId: string, buyer: { businessName?: string; taxNumber?: string; address?: string }) {
+  return api<{ ok: boolean; invoiceKind: 'retail' | 'tax' }>(
+    `/shopbook/orders/${orderId}/buyer-tax`, { method: 'POST', json: buyer });
+}
+
+// ── P0-E: payments ────────────────────────────────────────────────
+export type PaymentMethod = 'cash' | 'bank' | 'upi' | 'card' | 'other';
+export interface Payment {
+  id: string; customerId: string; customerName: string; orderId: string;
+  amount: number; method: PaymentMethod; status: string;
+  reference: string; note: string; currency: string; shopName: string; createdAt: string;
+}
+export interface RecordedPayment {
+  id: string; amount: number; method: PaymentMethod; duplicate?: boolean;
+  invoiceId?: string; paymentStatus?: string; paid?: number; due?: number;
+}
+export function recordPayment(p: {
+  customerId: string; orderId?: string; amount: number;
+  method: PaymentMethod; reference?: string; note?: string; idempotencyKey?: string;
+}) {
+  return api<RecordedPayment>(`/shopbook/my-shop/payments`, { method: 'POST', json: p });
+}
+export function shopPayments(customerId?: string) {
+  const qs = customerId ? `?customerId=${encodeURIComponent(customerId)}` : '';
+  return api<{ payments: Payment[] }>(`/shopbook/my-shop/payments${qs}`).then((r) => r.payments);
+}
+export function myPayments() {
+  return api<{ payments: Payment[] }>(`/shopbook/payments`).then((r) => r.payments);
+}
+export function setCreditLimit(customerId: string, creditLimit: number, note = '') {
+  return api<{ ok: boolean; creditLimit: number }>(
+    `/shopbook/my-shop/customers/${customerId}/credit-limit`,
+    { method: 'POST', json: { creditLimit, note } });
+}
+
+// ── P0-B: inventory ───────────────────────────────────────────────
+export interface StockRow {
+  productId: string; name: string; brand: string; unit: string;
+  costPrice: number; price: number;
+  onHand: number; reserved: number; available: number; reorderLevel: number;
+  low: boolean;
+}
+export function stockList() {
+  return api<{ stock: StockRow[]; lowCount: number }>(`/shopbook/my-shop/stock`);
+}
+
+export type StockMoveKind = 'opening' | 'purchase' | 'damage' | 'adjustment' | 'return';
+
+// `reason` is required by the server — stock never changes silently.
+export function adjustStock(productId: string, kind: StockMoveKind, qty: number, reason: string) {
+  return api<{ ok: boolean; onHand: number; available: number }>(
+    `/shopbook/my-shop/stock/adjust`,
+    { method: 'POST', json: { productId, kind, qty, reason } },
+  );
+}
+
+export interface StockMovement {
+  id: number; productId: string; name: string; kind: string;
+  onHandDelta: number; reservedDelta: number;
+  unit: string; reason: string; actor: string;
+  refEntity: string; refId: string; at: string;
+}
+export function stockMovements(productId?: string) {
+  const qs = productId ? `?productId=${encodeURIComponent(productId)}` : '';
+  return api<{ movements: StockMovement[] }>(`/shopbook/my-shop/stock/movements${qs}`)
+    .then((r) => r.movements);
+}
+
+// A 409 from setOrderStatus('accepted') when the shelf can't cover the order.
+export interface Shortfall {
+  productId: string; name: string; unit: string; wanted: number; available: number;
+}
+export function shortfallsFrom(err: any): Shortfall[] | null {
+  const b = err?.body;
+  if (err?.status !== 409 || b?.code !== 'insufficient_stock') return null;
+  return (b.shortfalls ?? []) as Shortfall[];
 }
 
 // ── Country Tax Engine ────────────────────────────────────────────
@@ -100,6 +223,13 @@ export interface OrderItem {
   availability: ItemAvailability;
   altName: string;
   altPrice: number;
+  // P0-A: server-computed line money. `custom` = free-typed request the owner
+  // still has to quote, so its price is 0 until they do.
+  productId: string;
+  custom: boolean;
+  lineDiscount: number;
+  lineTax: number;
+  lineTotal: number;
 }
 
 export interface TimelineEvent { status: OrderStatus; note: string; at: string }
@@ -109,6 +239,10 @@ export interface OrderDetail {
   shopId: string;
   status: OrderStatus;
   total: number;
+  // P0-A: the finalized breakdown the invoice and the khata both read.
+  subtotal: number;
+  taxTotal: number;
+  roundOff: number;
   note: string;
   createdAt: string;
   items: OrderItem[];
@@ -142,7 +276,20 @@ export interface OrderDetail {
 export interface InvoiceLine {
   name: string; brand: string; unit: string; qty: number; price: number; taxPercent: number;
 }
+export interface InvoiceBuyer { businessName?: string; taxNumber?: string; address?: string }
+
 export interface Invoice {
+  // 'tax' carries both parties' tax numbers and is reclaimable by a business
+  // buyer; 'retail' is a plain bill with no statutory fields left blank.
+  kind: 'retail' | 'tax';
+  status: 'draft' | 'issued' | 'cancelled' | 'credited';
+  buyer: InvoiceBuyer;
+  roundOff: number;
+  // Derived from the payments themselves, so it can never claim money that
+  // isn't there.
+  paymentStatus: 'unpaid' | 'partially_paid' | 'paid';
+  paid: number;
+  due: number;
   id: string;
   orderId: string;
   number: number;
@@ -272,14 +419,37 @@ export function shopProducts(id: string) {
 }
 
 export interface PlaceOrderItem {
+  productId?: string;   // catalog row the line came from — the server prices from this
   name: string; brand: string; qty: number; price: number; note: string;
   unit?: string; taxPercent?: number;
 }
 export interface PlaceOrderOpts {
   couponCode?: string; delivery?: boolean; address?: string;
+  // Same key on a retry ⇒ the same order. Generate once per attempt, reuse it
+  // for every retry of that attempt.
+  idempotencyKey?: string;
+  // Set only after the customer has SEEN the new prices and agreed.
+  confirmPricing?: boolean;
 }
+export interface PlacedOrder {
+  id: string; status: OrderStatus;
+  subtotal: number; discount: number; taxTotal: number; deliveryFee: number; total: number;
+  duplicate?: boolean;
+}
+
+// A 409 from placeOrder when the shop's prices moved since the cart rendered.
+// The customer must be shown these before the order is created.
+export interface PriceChange {
+  name: string; brand: string; unit: string; oldPrice: number; newPrice: number;
+}
+export function priceChangesFrom(err: any): { changes: PriceChange[]; total: number } | null {
+  const b = err?.body;
+  if (err?.status !== 409 || b?.code !== 'price_changed') return null;
+  return { changes: (b.changes ?? []) as PriceChange[], total: Number(b.total) || 0 };
+}
+
 export function placeOrder(shopId: string, items: PlaceOrderItem[], note: string, opts: PlaceOrderOpts = {}) {
-  return api<{ id: string; status: OrderStatus; total: number; discount: number; deliveryFee: number }>(
+  return api<PlacedOrder>(
     `/shopbook/orders`,
     { method: 'POST', json: { shopId, items, note, ...opts } },
   );
@@ -423,11 +593,15 @@ export function ownerCustomerLedger(customerId: string) {
   return api<Ledger>(`/shopbook/my-shop/ledger?customerId=${customerId}`);
 }
 
+// `idempotencyKey` makes a retried payment resolve to the one already
+// recorded instead of crediting the customer twice. Generate it once per
+// entry the owner is trying to save, and reuse it across retries.
 export function addLedgerEntry(
   customerId: string, type: 'purchase' | 'payment', amount: number, remark = '',
+  idempotencyKey?: string,
 ) {
-  return api<{ id: string }>(`/shopbook/my-shop/ledger`, {
-    method: 'POST', json: { customerId, type, amount, remark },
+  return api<{ id: string; duplicate?: boolean }>(`/shopbook/my-shop/ledger`, {
+    method: 'POST', json: { customerId, type, amount, remark, idempotencyKey },
   });
 }
 

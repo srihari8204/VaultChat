@@ -256,13 +256,19 @@ export async function api<T = any>(path: string, opts: ApiOptions = {}): Promise
 
   if (!res.ok) {
     let msg = res.statusText || `HTTP ${res.status}`;
+    let body: any;
     try {
       const j: any = await res.json();
+      body = j;
       // Old routes: { error: "msg" }. New onboarding routes: { error: { code, message } }.
       if (j?.error) msg = typeof j.error === 'string' ? j.error : (j.error.message || msg);
     } catch {}
     const err: any = new Error(msg);
     err.status = res.status;
+    // Some routes answer a failure with data the caller must act on — e.g. a
+    // 409 price change carries the new prices to show the customer. Dropping
+    // the body left them with a message and nothing to render.
+    err.body = body;
     throw err;
   }
 

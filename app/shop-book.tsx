@@ -9,7 +9,7 @@
 //   Owner    : Dashboard, Orders (mark availability / advance status),
 //              Products (add/edit/stock), Khata (per-customer ledger), Settings.
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet,
   Alert, ActivityIndicator, RefreshControl, Switch, Platform, KeyboardAvoidingView, Share, Modal,
@@ -553,8 +553,12 @@ function Catalog({ shop, cart, setCart, onCart }: {
     } catch { setListening(false); Alert.alert('Voice unavailable', 'Speech input is not available on this device/build.'); }
   };
 
-  const add = (name: string, brand: string, qty: number, price: number, note: string, unit = '', taxPercent = 0) => {
-    setCart([...cart, { key: clientKey(), name, brand, qty, price, note, unit, taxPercent }]);
+  // `price` here is what we display; the server re-prices from productId when
+  // the line came from the catalog. A free-typed line carries no productId and
+  // reaches the owner as a request to quote.
+  const add = (name: string, brand: string, qty: number, price: number, note: string,
+               unit = '', taxPercent = 0, productId?: string) => {
+    setCart([...cart, { key: clientKey(), productId, name, brand, qty, price, note, unit, taxPercent }]);
   };
 
   const filtered = products.filter(
@@ -611,7 +615,7 @@ function Catalog({ shop, cart, setCart, onCart }: {
             <Text style={s.price}>{formatINR(p.price)}{!p.inStock ? '  ·  Out of stock' : ''}</Text>
           </View>
           <TouchableOpacity style={[s.addBtn, !p.inStock && { opacity: 0.4 }]} disabled={!p.inStock}
-            onPress={() => add(p.name, p.brand, 1, p.price, '', p.unit, p.taxPercent)}>
+            onPress={() => add(p.name, p.brand, 1, p.price, '', p.unit, p.taxPercent, p.id)}>
             <Text style={s.addBtnText}>Add</Text>
           </TouchableOpacity>
         </View>
@@ -653,21 +657,44 @@ function CartView({ shop, cart, setCart, onPlaced, coupons }: {
     setApplied(found); setCouponMsg(`Applied · ${couponLabel(found)}`);
   };
 
-  const place = async () => {
+  // One key for this cart, reused by every retry — including the retry the
+  // customer triggers by confirming a price change — so a flaky connection
+  // cannot turn one order into two.
+  const idemKey = useRef(clientKey()).current;
+
+  const place = async (confirmPricing = false) => {
     if (cart.length === 0) return;
     setPlacing(true);
     try {
       const res = await SB.placeOrder(
         shop.id,
         cart.map((it) => ({
+          productId: it.productId,
           name: it.name, brand: it.brand, qty: it.qty, price: it.price, note: it.note,
           unit: it.unit, taxPercent: it.taxPercent,
         })),
         note.trim(),
-        { couponCode: applied?.code },
+        { couponCode: applied?.code, idempotencyKey: idemKey, confirmPricing },
       );
       onPlaced(res.id);
     } catch (e: any) {
+      // The shop's prices moved since this cart was built. Show the customer
+      // exactly what changed and let them decide — never re-price silently.
+      const pc = SB.priceChangesFrom(e);
+      if (pc) {
+        const lines = pc.changes
+          .map((c) => `${c.name}${c.brand ? ` (${c.brand})` : ''}: ${formatMoney(c.oldPrice, shop.currency)} → ${formatMoney(c.newPrice, shop.currency)}`)
+          .join('\n');
+        Alert.alert(
+          'Price changed at the shop',
+          `${lines}\n\nNew total: ${formatMoney(pc.total, shop.currency)}`,
+          [
+            { text: 'Back to cart', style: 'cancel' },
+            { text: 'Order at new price', onPress: () => { void place(true); } },
+          ],
+        );
+        return;
+      }
       Alert.alert('Could not place order', e?.message ?? 'Try again.');
     } finally { setPlacing(false); }
   };
@@ -717,7 +744,8 @@ function CartView({ shop, cart, setCart, onPlaced, coupons }: {
             <Row label="Total" value={formatINR(total)} bold />
           </View>
 
-          <TouchableOpacity style={[s.primaryBtn, placing && { opacity: 0.6 }]} disabled={placing} onPress={place}>
+          <TouchableOpacity style={[s.primaryBtn, placing && { opacity: 0.6 }]} disabled={placing}
+            onPress={() => { void place(); }}>
             {placing ? <ActivityIndicator color="#fff" /> : <>
               <Ionicons name="checkmark-circle" size={18} color="#fff" />
               <Text style={s.primaryBtnText}>Place Order</Text>
@@ -1791,6 +1819,7 @@ function OwnerOrderDetail({ orderId, onBack }: { orderId: string; onBack: () => 
   const [rejectAsk, setRejectAsk] = useState(false);
   const [cancelAsk, setCancelAsk] = useState(false);
   const [notCollectAsk, setNotCollectAsk] = useState(false);
+  const [billing, setBilling] = useState(false);
   const [altFor, setAltFor] = useState<string | null>(null);
   const [altName, setAltName] = useState('');
   const [altPrice, setAltPrice] = useState('');
@@ -1815,7 +1844,21 @@ function OwnerOrderDetail({ orderId, onBack }: { orderId: string; onBack: () => 
   const setStatus = async (status: OrderStatus, reason = '') => {
     setBusy(true);
     try { await SB.setOrderStatus(orderId, status, reason); load(); }
-    catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
+    catch (e: any) {
+      // Accepting reserves stock. If the shelf can't cover it the order is
+      // untouched — name the items so the owner's next move (an alternative,
+      // or rejecting as out of stock) is obvious.
+      const short = SB.shortfallsFrom(e);
+      if (short?.length) {
+        Alert.alert(
+          'Not enough stock',
+          short.map((x) => `${x.name}: you have ${x.available} ${x.unit}, the order wants ${x.wanted}`).join('\n')
+            + '\n\nSuggest an alternative, mark the item unavailable, or reject the order.',
+        );
+        return;
+      }
+      Alert.alert('Error', e?.message ?? 'Try again');
+    }
     finally { setBusy(false); }
   };
 
@@ -1827,6 +1870,9 @@ function OwnerOrderDetail({ orderId, onBack }: { orderId: string; onBack: () => 
   const uncollected = order
     ? notCollectedGate(order.status, order.timeline)
     : { allowed: false, hoursLeft: 0 };
+
+  // Billing sits between packing and Ready: weigh out, price, then hand over.
+  if (billing) return <BillScreen orderId={orderId} onBack={() => { setBilling(false); load(); }} />;
 
   return (
     <>
@@ -1920,6 +1966,14 @@ function OwnerOrderDetail({ orderId, onBack }: { orderId: string; onBack: () => 
                     </View>
                   </>
                 )}
+                {/* Weigh out and price before the customer is told it's Ready
+                    — after that the total is what they were quoted (P0-C). */}
+                {['accepted', 'preparing', 'packing'].includes(order.status) && (
+                  <TouchableOpacity style={s.outlineBtn} onPress={() => setBilling(true)}>
+                    <Ionicons name="calculator-outline" size={18} color={C.green} />
+                    <Text style={s.outlineBtnText}>Bill · {money(order.total)}</Text>
+                  </TouchableOpacity>
+                )}
                 {order.status !== 'pending' && next && (
                   <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={() => setStatus(next)}>
                     <Ionicons name="arrow-forward-circle" size={18} color="#fff" />
@@ -1959,7 +2013,7 @@ function OwnerOrderDetail({ orderId, onBack }: { orderId: string; onBack: () => 
 function OwnerProducts({ shop }: { shop: SB.Shop }) {
   const [loading, setLoading] = useState(true);
   const [products, setProducts] = useState<SB.Product[]>([]);
-  const [edit, setEdit] = useState<SB.Product | 'new' | 'bulk' | null>(null);
+  const [edit, setEdit] = useState<SB.Product | 'new' | 'bulk' | 'stock' | null>(null);
   const [seeding, setSeeding] = useState(false);
 
   const load = useCallback(async () => {
@@ -1985,6 +2039,7 @@ function OwnerProducts({ shop }: { shop: SB.Shop }) {
   };
 
   if (edit === 'bulk') return <BulkAdd onDone={() => { setEdit(null); load(); }} />;
+  if (edit === 'stock') return <StockScreen currency={shop.currency} onBack={() => { setEdit(null); load(); }} />;
   if (edit) return <ProductEditor product={edit === 'new' ? null : edit} currency={shop.currency} onDone={() => { setEdit(null); load(); }} />;
 
   return (
@@ -2004,6 +2059,12 @@ function OwnerProducts({ shop }: { shop: SB.Shop }) {
         {seeding ? <ActivityIndicator color={C.green} /> : <Ionicons name="sparkles-outline" size={18} color={C.green} />}
         <Text style={s.outlineBtnText}>{t('owner.starterCatalog')} · {categoryLabel(shop.category)}</Text>
       </TouchableOpacity>
+      {products.some((p) => p.trackStock) && (
+        <TouchableOpacity style={s.outlineBtn} onPress={() => setEdit('stock')}>
+          <Ionicons name="cube-outline" size={18} color={C.green} />
+          <Text style={s.outlineBtnText}>Stock</Text>
+        </TouchableOpacity>
+      )}
       {loading && <ActivityIndicator color={C.green} style={{ marginTop: 16 }} />}
       {!loading && products.length === 0 && <Empty icon="pricetags-outline" text="No products yet." />}
       {products.map((p) => (
@@ -2031,6 +2092,10 @@ function ProductEditor({ product, currency, onDone }: {
   const [taxPercent, setTaxPercent] = useState(product && product.taxPercent > 0 ? String(product.taxPercent) : '');
   const [inStock, setInStock] = useState(product?.inStock ?? true);
   const [enabled, setEnabled] = useState(product?.enabled ?? true);
+  // P0-B: counted stock is opt-in per product and Pro-gated server-side.
+  const [trackStock, setTrackStock] = useState(product?.trackStock ?? false);
+  const [costPrice, setCostPrice] = useState(product?.costPrice ? String(product.costPrice) : '');
+  const [reorderLevel, setReorderLevel] = useState(product?.reorderLevel ? String(product.reorderLevel) : '');
   const [busy, setBusy] = useState(false);
 
   const save = async () => {
@@ -2040,6 +2105,7 @@ function ProductEditor({ product, currency, onDone }: {
       await SB.saveProduct({
         id: product?.id, name: name.trim(), brand: brand.trim(), category: category.trim(),
         unit: unit.trim(), price: num(price), taxPercent: num(taxPercent), inStock, enabled,
+        trackStock, costPrice: num(costPrice), reorderLevel: num(reorderLevel),
       });
       onDone();
     } catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
@@ -2064,7 +2130,21 @@ function ProductEditor({ product, currency, onDone }: {
         <Field label="Unit" value={unit} onChange={setUnit} placeholder="5kg" />
         <Field label={`Price (${currency || '₹'})`} value={price} onChange={setPrice} placeholder="285" keyboardType="numeric" />
         <Field label="Tax % (optional)" value={taxPercent} onChange={setTaxPercent} placeholder="5" keyboardType="numeric" />
-        <ToggleRow label="In stock" value={inStock} onChange={setInStock} />
+        <Field label={`Cost price (${currency || '₹'}, optional)`} value={costPrice} onChange={setCostPrice}
+          placeholder="240" keyboardType="numeric" />
+        <ToggleRow label="Count stock for this product" value={trackStock} onChange={setTrackStock} />
+        {trackStock ? (
+          <>
+            <Text style={s.hint}>
+              Stock is counted, reserved when you accept an order, and consumed when the
+              customer collects. Record what you have on the Stock tab.
+            </Text>
+            <Field label="Reorder level (alert below this)" value={reorderLevel} onChange={setReorderLevel}
+              placeholder="5" keyboardType="numeric" />
+          </>
+        ) : (
+          <ToggleRow label="In stock" value={inStock} onChange={setInStock} />
+        )}
         <ToggleRow label="Enabled (visible to customers)" value={enabled} onChange={setEnabled} />
         <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={save}>
           <Text style={s.primaryBtnText}>{product ? 'Save Changes' : 'Add Product'}</Text>
@@ -2074,6 +2154,298 @@ function ProductEditor({ product, currency, onDone }: {
             <Text style={s.dangerBtnText}>Delete Product</Text>
           </TouchableOpacity>
         )}
+      </ScrollView>
+    </>
+  );
+}
+
+// Live bill (P0-C). The owner weighs out what they packed and the total moves.
+//
+// Every number on this screen came from the server's last response. The client
+// holds no arithmetic at all: it posts the change, and re-renders whatever
+// comes back. That is why a customer can never be charged a total this screen
+// invented.
+function BillScreen({ orderId, onBack }: { orderId: string; onBack: () => void }) {
+  const [bill, setBill] = useState<SB.Bill | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [qtyDraft, setQtyDraft] = useState<Record<string, string>>({});
+  const [discount, setDiscount] = useState('');
+  const [addOpen, setAddOpen] = useState(false);
+  const [addName, setAddName] = useState('');
+  const [addQty, setAddQty] = useState('1');
+  const [addPrice, setAddPrice] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const b = await SB.getBill(orderId);
+      setBill(b);
+      setDiscount(b.billDiscount > 0 ? String(b.billDiscount) : '');
+    } catch (e: any) { Alert.alert('Bill', e?.message ?? 'Could not load'); }
+    finally { setLoading(false); }
+  }, [orderId]);
+  useEffect(() => { load(); }, [load]);
+
+  // One helper for every edit: post it, take the server's bill as the truth.
+  const patch = async (p: SB.BillUpdate) => {
+    setBusy(true);
+    try { setBill(await SB.updateBill(orderId, p)); }
+    catch (e: any) { Alert.alert('Could not update the bill', e?.message ?? 'Try again'); }
+    finally { setBusy(false); }
+  };
+
+  const money = (n: number) => formatMoney(n, bill?.currency ?? '₹');
+
+  if (loading || !bill) {
+    return (
+      <>
+        <SubHeader title="Bill" onBack={onBack} />
+        <ActivityIndicator color={C.green} style={{ marginTop: 24 }} />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <SubHeader title="Bill" onBack={onBack} />
+      <Modal visible={addOpen} transparent animationType="fade" onRequestClose={() => setAddOpen(false)}>
+        <View style={s.modalWrap}>
+          <View style={s.modalCard}>
+            <Text style={s.modalTitle}>Add an item</Text>
+            <TextInput style={s.input} placeholder="Item name" placeholderTextColor={C.sub}
+              value={addName} onChangeText={setAddName} autoFocus />
+            <TextInput style={s.input} placeholder="Quantity" placeholderTextColor={C.sub}
+              keyboardType="numeric" value={addQty} onChangeText={setAddQty} />
+            <TextInput style={s.input} placeholder={`Price (${bill.currency}) — catalog items price themselves`}
+              placeholderTextColor={C.sub} keyboardType="numeric" value={addPrice} onChangeText={setAddPrice} />
+            <TouchableOpacity style={s.primaryBtn} onPress={() => {
+              const name = addName.trim();
+              if (!name) return;
+              setAddOpen(false);
+              void patch({ add: { name, qty: Math.max(0, num(addQty)) || 1, price: num(addPrice) } });
+              setAddName(''); setAddQty('1'); setAddPrice('');
+            }}>
+              <Text style={s.primaryBtnText}>Add</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={s.dangerBtn} onPress={() => setAddOpen(false)}>
+              <Text style={s.dangerBtnText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
+        {!bill.editable && (
+          <Text style={[s.hint, { color: C.danger }]}>
+            This bill is final — the order has moved past packing.
+          </Text>
+        )}
+        {bill.lines.filter((l) => l.availability !== 'unavailable').map((l) => (
+          <View key={l.id} style={[s.card, l.removed && { opacity: 0.45 }]}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.cardTitle}>{l.name}{l.brand ? ` (${l.brand})` : ''}</Text>
+              <Text style={s.cardSub}>
+                Ordered {l.requestedQty}{l.unit ? ` ${l.unit}` : ''} · {money(l.price)}
+                {l.taxPercent > 0 ? ` · ${l.taxPercent}% tax` : ''}
+              </Text>
+              {bill.editable && !l.removed && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                  <Text style={s.cardSub}>Packed</Text>
+                  <TextInput
+                    style={[s.input, { width: 90, marginBottom: 0, paddingVertical: 6 }]}
+                    keyboardType="numeric"
+                    placeholder={String(l.requestedQty)} placeholderTextColor={C.sub}
+                    value={qtyDraft[l.id] ?? (l.weighed ? String(l.fulfilledQty) : '')}
+                    onChangeText={(v) => setQtyDraft({ ...qtyDraft, [l.id]: v })}
+                    onBlur={() => {
+                      const raw = qtyDraft[l.id];
+                      if (raw == null) return;
+                      // Empty clears back to "as requested" rather than zero —
+                      // a blank box must never silently mean "packed nothing".
+                      void patch({ lines: [{ id: l.id, fulfilledQty: raw.trim() === '' ? null : num(raw) }] });
+                      setQtyDraft({ ...qtyDraft, [l.id]: undefined as any });
+                    }}
+                  />
+                  <TouchableOpacity onPress={() => patch({ lines: [{ id: l.id, removed: true }] })}>
+                    <Ionicons name="trash-outline" size={18} color={C.danger} />
+                  </TouchableOpacity>
+                </View>
+              )}
+              {l.removed && bill.editable && (
+                <TouchableOpacity onPress={() => patch({ lines: [{ id: l.id, removed: false }] })}>
+                  <Text style={[s.cardSub, { color: C.green }]}>Put back</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            <Text style={s.price}>{money(l.total)}</Text>
+          </View>
+        ))}
+
+        {bill.editable && (
+          <>
+            <TouchableOpacity style={s.outlineBtn} onPress={() => setAddOpen(true)}>
+              <Ionicons name="add" size={18} color={C.green} />
+              <Text style={s.outlineBtnText}>Add an item</Text>
+            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-end' }}>
+              <View style={{ flex: 1 }}>
+                <Field label={`Discount (${bill.currency})`} value={discount} onChange={setDiscount}
+                  placeholder="0" keyboardType="numeric" />
+              </View>
+              <TouchableOpacity style={[s.outlineBtn, { marginTop: 0, paddingHorizontal: 18 }]}
+                onPress={() => patch({ billDiscount: num(discount) })}>
+                <Text style={s.outlineBtnText}>Apply</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+
+        <View style={s.panel}>
+          <Row label="Item subtotal" value={money(bill.subtotal)} />
+          {bill.discount > 0 && <Row label="Discount" value={`− ${money(bill.discount)}`} tone={C.green} />}
+          {bill.taxTotal > 0 && <Row label="Tax" value={money(bill.taxTotal)} />}
+          {bill.deliveryFee > 0 && <Row label="Delivery" value={money(bill.deliveryFee)} />}
+          {bill.roundOff !== 0 && (
+            <Row label="Round off" value={`${bill.roundOff > 0 ? '+' : '−'} ${money(Math.abs(bill.roundOff))}`} />
+          )}
+          <View style={{ height: 1, backgroundColor: C.border, marginVertical: 6 }} />
+          <Row label="Total" value={money(bill.total)} bold />
+        </View>
+        {busy && <ActivityIndicator color={C.green} />}
+        <Text style={s.hint}>
+          Totals are calculated by the server from the quantities you record here.
+        </Text>
+      </ScrollView>
+    </>
+  );
+}
+
+// Stock (P0-B). Deliberately one screen: the position, and the one action that
+// changes it. Every change needs a reason, because the movement ledger is only
+// worth keeping if it answers "where did 8 kg go?".
+function StockScreen({ currency, onBack }: { currency?: string; onBack: () => void }) {
+  const [loading, setLoading] = useState(true);
+  const [rows, setRows] = useState<SB.StockRow[]>([]);
+  const [lowCount, setLowCount] = useState(0);
+  const [sel, setSel] = useState<SB.StockRow | null>(null);
+  const [kind, setKind] = useState<SB.StockMoveKind>('purchase');
+  const [qty, setQty] = useState('');
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [history, setHistory] = useState<SB.StockMovement[]>([]);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await SB.stockList();
+      setRows(r.stock); setLowCount(r.lowCount);
+    } catch {} finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const openItem = async (row: SB.StockRow) => {
+    setSel(row); setQty(''); setReason(''); setKind('purchase'); setHistory([]);
+    try { setHistory(await SB.stockMovements(row.productId)); } catch {}
+  };
+
+  const submit = async () => {
+    if (!sel) return;
+    const q = num(qty);
+    if (q === 0) { Alert.alert('Enter a quantity'); return; }
+    if (!reason.trim()) { Alert.alert('Reason required', 'Stock never changes silently.'); return; }
+    setBusy(true);
+    try {
+      await SB.adjustStock(sel.productId, kind, q, reason.trim());
+      setSel(null); load();
+    } catch (e: any) { Alert.alert('Could not record', e?.message ?? 'Try again'); }
+    finally { setBusy(false); }
+  };
+
+  const KINDS: { k: SB.StockMoveKind; label: string }[] = [
+    { k: 'purchase', label: 'Stock in' },
+    { k: 'opening', label: 'Opening' },
+    { k: 'damage', label: 'Damaged' },
+    { k: 'return', label: 'Returned' },
+    { k: 'adjustment', label: 'Correction' },
+  ];
+
+  if (sel) {
+    return (
+      <>
+        <SubHeader title={sel.name} onBack={() => setSel(null)} />
+        <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <StatCard label="On hand" value={String(sel.onHand)} tone="navy" />
+            <StatCard label="Reserved" value={String(sel.reserved)} tone="amber" />
+            <StatCard label="Available" value={String(sel.available)} tone={sel.low ? 'danger' : 'green'} />
+          </View>
+          <View style={s.panel}>
+            <Text style={s.panelTitle}>Record a movement</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+              {KINDS.map((k) => (
+                <Chip key={k.k} label={k.label} icon="cube-outline"
+                  active={kind === k.k} onPress={() => setKind(k.k)} />
+              ))}
+            </View>
+            <Field label={`Quantity (${sel.unit || 'units'})`} value={qty} onChange={setQty}
+              placeholder={kind === 'adjustment' ? '-2 or 5' : '10'} keyboardType="numeric" />
+            <Field label="Reason" value={reason} onChange={setReason}
+              placeholder={kind === 'damage' ? 'Dropped a crate' : 'Supplier delivery'} />
+            <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={submit}>
+              {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.primaryBtnText}>Record</Text>}
+            </TouchableOpacity>
+          </View>
+          <Text style={s.sectionLabel}>History</Text>
+          {history.length === 0 && <Empty icon="time-outline" text="No movements yet." />}
+          {history.map((m) => {
+            const d = m.onHandDelta || m.reservedDelta;
+            return (
+              <View key={m.id} style={s.card}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.cardTitle}>{m.kind.replace(/_/g, ' ')}</Text>
+                  <Text style={s.cardSub}>
+                    {[m.reason, m.actor].filter(Boolean).join(' · ')}
+                  </Text>
+                </View>
+                <Text style={[s.price, { color: d < 0 ? C.danger : C.green }]}>
+                  {d > 0 ? '+' : ''}{d}{m.reservedDelta && !m.onHandDelta ? ' held' : ''}
+                </Text>
+              </View>
+            );
+          })}
+        </ScrollView>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <SubHeader title="Stock" onBack={onBack} />
+      <ScrollView contentContainerStyle={s.body}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
+        {lowCount > 0 && (
+          <Text style={[s.hint, { color: C.danger }]}>
+            ⚠️ {lowCount} product(s) at or below their reorder level.
+          </Text>
+        )}
+        {loading && <ActivityIndicator color={C.green} style={{ marginTop: 16 }} />}
+        {!loading && rows.length === 0 && (
+          <Empty icon="cube-outline" text="No counted products. Turn on “Count stock” on a product to start." />
+        )}
+        {rows.map((row) => (
+          <TouchableOpacity key={row.productId} style={s.card} onPress={() => openItem(row)}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.cardTitle}>{row.name}{row.unit ? ` · ${row.unit}` : ''}</Text>
+              <Text style={s.cardSub}>
+                {row.available} available{row.reserved > 0 ? ` · ${row.reserved} reserved` : ''}
+                {row.costPrice > 0 ? ` · cost ${formatMoney(row.costPrice, currency)}` : ''}
+              </Text>
+            </View>
+            {row.low && <Text style={[s.price, { color: C.danger }]}>LOW</Text>}
+            <Ionicons name="chevron-forward" size={18} color={C.sub} />
+          </TouchableOpacity>
+        ))}
       </ScrollView>
     </>
   );
@@ -2173,6 +2545,7 @@ function KhataDetail({ customer, onBack }: { customer: SB.CustomerPending; onBac
   const [amount, setAmount] = useState('');
   const [remark, setRemark] = useState('');
   const [busy, setBusy] = useState(false);
+  const [method, setMethod] = useState<SB.PaymentMethod>('cash');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -2180,12 +2553,27 @@ function KhataDetail({ customer, onBack }: { customer: SB.CustomerPending; onBac
   }, [customer.customerId]);
   useEffect(() => { load(); }, [load]);
 
+  // A key per entry the owner is composing: a retry of THIS payment resolves
+  // to the row already written, but the next payment gets its own key.
+  const entryKey = useRef(clientKey());
+
   const add = async (type: 'purchase' | 'payment') => {
     const amt = num(amount);
     if (amt <= 0) { Alert.alert('Enter an amount'); return; }
     setBusy(true);
     try {
-      await SB.addLedgerEntry(customer.customerId, type, amt, remark.trim());
+      if (type === 'payment') {
+        // Money received is a payment RECORD — method and reference included,
+        // and it posts its own khata entry server-side (P0-E). Partial is
+        // normal: whatever is left simply stays pending.
+        await SB.recordPayment({
+          customerId: customer.customerId, amount: amt, method,
+          reference: remark.trim(), idempotencyKey: entryKey.current,
+        });
+      } else {
+        await SB.addLedgerEntry(customer.customerId, type, amt, remark.trim(), entryKey.current);
+      }
+      entryKey.current = clientKey();
       setAmount(''); setRemark(''); load();
     } catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
     finally { setBusy(false); }
@@ -2222,8 +2610,16 @@ function KhataDetail({ customer, onBack }: { customer: SB.CustomerPending; onBac
           <Text style={s.panelTitle}>Add entry</Text>
           <TextInput style={s.input} placeholder="Amount (₹)" placeholderTextColor={C.sub}
             keyboardType="numeric" value={amount} onChangeText={setAmount} />
-          <TextInput style={s.input} placeholder="Remark (optional)" placeholderTextColor={C.sub}
-            value={remark} onChangeText={setRemark} />
+          <TextInput style={s.input} placeholder="Reference / remark (UPI ref, cheque no…)"
+            placeholderTextColor={C.sub} value={remark} onChangeText={setRemark} />
+          {/* How the money arrived. Recorded on the payment, not guessed from
+              the remark — reconciliation later depends on it. */}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+            {(['cash', 'upi', 'bank', 'card', 'other'] as SB.PaymentMethod[]).map((m) => (
+              <Chip key={m} label={m.toUpperCase()} icon="cash-outline"
+                active={method === m} onPress={() => setMethod(m)} />
+            ))}
+          </View>
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <TouchableOpacity style={[s.primaryBtn, { flex: 1 }, busy && { opacity: 0.6 }]} disabled={busy} onPress={() => add('purchase')}>
               <Text style={s.primaryBtnText}>+ Purchase</Text>
@@ -2577,10 +2973,30 @@ function InvoiceView({ orderId, onBack }: { orderId: string; onBack: () => void 
         {inv && (
           <>
             <View style={s.panel}>
+              <Text style={[s.cardSub, { textTransform: 'uppercase', letterSpacing: 1 }]}>
+                {inv.kind === 'tax' ? 'Tax Invoice' : 'Invoice'}
+              </Text>
               <Text style={s.panelTitle}>{inv.business.name}</Text>
               {!!inv.business.address && <Text style={s.cardSub}>{inv.business.address}</Text>}
-              <Text style={s.cardSub}>{inv.invoiceNo} · {new Date(inv.createdAt).toLocaleDateString('en-IN')}</Text>
+              {/* Only the tax identifiers the shop actually filled in — a
+                  blank statutory field on a retail bill reads as an error. */}
+              {Object.entries(inv.business.tax ?? {})
+                .filter(([, v]) => v && v !== true)
+                .map(([k, v]) => (
+                  <Text key={k} style={s.cardSub}>{k.toUpperCase()}: {String(v)}</Text>
+                ))}
+              <Text style={s.cardSub}>
+                {inv.invoiceNo} · {new Date(inv.createdAt).toLocaleDateString('en-IN')}
+              </Text>
               {!!inv.customerName && <Text style={s.cardSub}>Billed to: {inv.customerName}</Text>}
+              {/* A business buyer's own details — present only on a tax invoice,
+                  which is the document they can reclaim against. */}
+              {!!inv.buyer?.businessName && <Text style={s.cardSub}>{inv.buyer.businessName}</Text>}
+              {!!inv.buyer?.taxNumber && <Text style={s.cardSub}>Buyer tax no: {inv.buyer.taxNumber}</Text>}
+              {!!inv.buyer?.address && <Text style={s.cardSub}>{inv.buyer.address}</Text>}
+              {inv.status === 'cancelled' && (
+                <Text style={[s.cardSub, { color: C.danger, fontWeight: '700' }]}>CANCELLED</Text>
+              )}
             </View>
             {inv.items.map((it, i) => (
               <View key={`${it.name}-${i}`} style={s.card}>
@@ -2592,10 +3008,24 @@ function InvoiceView({ orderId, onBack }: { orderId: string; onBack: () => void 
               </View>
             ))}
             <View style={s.panel}>
-              <Row label="Subtotal" value={money(inv.subtotal)} />
+              <Row label="Item subtotal" value={money(inv.subtotal)} />
               {inv.discount > 0 && <Row label="Discount" value={`− ${money(inv.discount)}`} tone={C.green} />}
               {inv.taxBreakdown.map((b) => <Row key={b.label} label={b.label} value={money(b.amount)} />)}
+              {inv.roundOff !== 0 && (
+                <Row label="Round off" value={`${inv.roundOff > 0 ? '+' : '−'} ${money(Math.abs(inv.roundOff))}`} />
+              )}
+              <View style={{ height: 1, backgroundColor: C.border, marginVertical: 6 }} />
               <Row label={t('common.total')} value={money(inv.total)} bold />
+            </View>
+
+            {/* What is actually still owed. Derived from the payments, so it
+                cannot claim money that never arrived. */}
+            <View style={[s.panel, inv.due > 0 && { borderColor: C.danger }]}>
+              <Row label="Paid" value={money(inv.paid)} tone={C.green} />
+              {inv.due > 0 && <Row label="Amount due" value={money(inv.due)} tone={C.danger} bold />}
+              {inv.due <= 0 && inv.paid > 0 && (
+                <Text style={[s.hint, { color: C.green, marginTop: 4 }]}>✓ Paid in full</Text>
+              )}
             </View>
             <TouchableOpacity style={s.primaryBtn} onPress={sharePdf}>
               <Ionicons name="download-outline" size={18} color="#fff" />

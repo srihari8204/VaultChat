@@ -71,6 +71,9 @@ func main() {
 	routes.RegisterChatInvitations(mux) // Groups & Circles: /invitations (invitee side)
 	routes.RegisterChatMembership(mux)  // Groups & Circles: in-app accept (invitee side)
 	routes.RegisterShopBook(mux)
+	routes.RegisterShopBookStock(mux)
+	routes.RegisterShopBookBilling(mux)
+	routes.RegisterShopBookPayments(mux)
 	routes.RegisterShopBookAdmin(mux)
 
 	// ── Realtime (Phase 2 Step 5): Go owns the Socket.IO layer ──────────

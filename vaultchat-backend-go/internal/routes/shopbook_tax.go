@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -135,13 +136,37 @@ func sbCreateInvoice(ctx context.Context, tx pgx.Tx, orderID string) error {
 		return nil
 	}
 
+	// The order's finalized snapshot IS the invoice. Recomputing it here is
+	// what let the invoice and the khata disagree: the invoice added tax on
+	// top of a total the ledger had already posted without it. Nothing below
+	// re-derives a monetary value — it copies.
 	var shopID, custID string
-	var discount, total float64
+	var subtotalC, discountC, taxTotalC, totalC int64
+	var snapRaw []byte
 	if err := tx.QueryRow(ctx,
-		`SELECT shop_id, customer_user_id, discount, total FROM shopbook_order WHERE id=$1`,
-		orderID).Scan(&shopID, &custID, &discount, &total); err != nil {
+		`SELECT shop_id, customer_user_id, `+sbCents("subtotal")+`, `+sbCents("discount")+`,
+		        `+sbCents("tax_total")+`, `+sbCents("total")+`, tax_snapshot
+		   FROM shopbook_order WHERE id=$1`,
+		orderID).Scan(&shopID, &custID, &subtotalC, &discountC, &taxTotalC, &totalC, &snapRaw); err != nil {
 		return err
 	}
+	snap := map[string]any{}
+	_ = json.Unmarshal(snapRaw, &snap)
+
+	// The buyer decides the document's shape: a tax number means a business
+	// purchase and a compliant tax invoice; nothing means a retail bill with
+	// no blank statutory fields on it (addendum B).
+	var buyerRaw []byte
+	_ = tx.QueryRow(ctx, `SELECT buyer_tax FROM shopbook_order WHERE id=$1`, orderID).Scan(&buyerRaw)
+	buyer := map[string]any{}
+	_ = json.Unmarshal(buyerRaw, &buyer)
+	invKind := "retail"
+	if s, _ := buyer["taxNumber"].(string); strings.TrimSpace(s) != "" {
+		invKind = "tax"
+	}
+	var roundOffC int64
+	_ = tx.QueryRow(ctx,
+		`SELECT `+sbCents("round_off")+` FROM shopbook_order WHERE id=$1`, orderID).Scan(&roundOffC)
 
 	var shopName, shopAddr, shopPhone, country, currency string
 	var taxCfgRaw []byte
@@ -160,7 +185,9 @@ func sbCreateInvoice(ctx context.Context, tx pgx.Tx, orderID string) error {
 	_ = tx.QueryRow(ctx, `SELECT COALESCE(name,'') FROM users WHERE id=$1`, custID).Scan(&custName)
 
 	rows, err := tx.Query(ctx,
-		`SELECT name, brand, unit, qty, price, tax_percent, availability
+		`SELECT name, brand, unit, `+sbCents("qty")+`, `+sbCents("price")+`,
+		        `+sbCents("tax_percent")+`, `+sbCents("line_discount")+`,
+		        `+sbCents("line_tax")+`, `+sbCents("line_total")+`, availability
 		   FROM shopbook_order_item WHERE order_id=$1 ORDER BY id`, orderID)
 	if err != nil {
 		return err
@@ -173,59 +200,69 @@ func sbCreateInvoice(ctx context.Context, tx pgx.Tx, orderID string) error {
 		Qty        float64 `json:"qty"`
 		Price      float64 `json:"price"`
 		TaxPercent float64 `json:"taxPercent"`
+		Discount   float64 `json:"discount"`
+		Tax        float64 `json:"tax"`
+		Total      float64 `json:"total"`
 	}
 	lines := []line{}
-	subtotal := 0.0
+	byRate := map[int64]money{} // tax rate (hundredths of a percent) → tax charged
 	for rows.Next() {
 		var l line
 		var avail string
-		if rows.Scan(&l.Name, &l.Brand, &l.Unit, &l.Qty, &l.Price, &l.TaxPercent, &avail) != nil {
+		var qty, price, taxPct, disc, tax, tot int64
+		if rows.Scan(&l.Name, &l.Brand, &l.Unit, &qty, &price, &taxPct, &disc, &tax, &tot, &avail) != nil {
 			continue
 		}
 		if avail == "unavailable" {
 			continue
 		}
+		l.Qty, l.Price = float64(qty)/100, money(price).Float()
+		l.TaxPercent = float64(taxPct) / 100
+		l.Discount, l.Tax, l.Total = money(disc).Float(), money(tax).Float(), money(tot).Float()
+		if tax > 0 {
+			byRate[taxPct] += money(tax)
+		}
 		lines = append(lines, l)
-		subtotal += l.Price * l.Qty
 	}
 	rows.Close()
 
-	// Tax applies only when the shop configured any tax detail.
-	taxType, taxTotal := "", 0.0
-	breakdown := []map[string]any{}
-	if sbTaxConfigured(taxCfg) {
-		cc, okC := sbLoadCountry(ctx, country)
-		if okC {
-			taxType = cc.TaxType
-		}
-		byRate := map[float64]float64{}
-		for _, l := range lines {
-			if l.TaxPercent > 0 {
-				t := l.Price * l.Qty * l.TaxPercent / 100
-				byRate[l.TaxPercent] += t
-				taxTotal += t
-			}
-		}
-		for rate, amt := range byRate {
-			if okC && len(cc.TaxSplit) > 0 {
-				// e.g. India: split each rate into equal CGST/SGST halves.
-				n := float64(len(cc.TaxSplit))
-				for _, part := range cc.TaxSplit {
-					breakdown = append(breakdown, map[string]any{
-						"label":  fmt.Sprintf("%s (%.2g%%)", part, rate/n),
-						"amount": math.Round(amt/n*100) / 100,
-					})
-				}
-			} else {
-				breakdown = append(breakdown, map[string]any{
-					"label":  fmt.Sprintf("%s (%.2g%%)", taxType, rate),
-					"amount": math.Round(amt*100) / 100,
-				})
+	// Tax presentation comes from the order's frozen snapshot, so a country
+	// config edited after the sale cannot restate a historical invoice.
+	taxType, _ := snap["taxType"].(string)
+	split := []string{}
+	if raw, ok := snap["taxSplit"].([]any); ok {
+		for _, p := range raw {
+			if s, ok := p.(string); ok {
+				split = append(split, s)
 			}
 		}
 	}
-	taxTotal = math.Round(taxTotal*100) / 100
-	subtotal = math.Round(subtotal*100) / 100
+	breakdown := []map[string]any{}
+	for rate, amt := range byRate {
+		if len(split) > 0 {
+			// e.g. India: split each rate into equal CGST/SGST halves. The
+			// halves are apportioned, not divided, so they add back to `amt`.
+			equal := make([]money, len(split))
+			for i := range equal {
+				equal[i] = 1
+			}
+			parts := sbAllocate(amt, equal)
+			for i, part := range split {
+				breakdown = append(breakdown, map[string]any{
+					"label":  fmt.Sprintf("%s (%.4g%%)", part, float64(rate)/100/float64(len(split))),
+					"amount": parts[i].Float(),
+				})
+			}
+		} else {
+			breakdown = append(breakdown, map[string]any{
+				"label":  fmt.Sprintf("%s (%.4g%%)", taxType, float64(rate)/100),
+				"amount": amt.Float(),
+			})
+		}
+	}
+	sort.Slice(breakdown, func(i, j int) bool {
+		return breakdown[i]["label"].(string) < breakdown[j]["label"].(string)
+	})
 
 	business := map[string]any{
 		"name": shopName, "address": shopAddr, "phone": shopPhone, "tax": taxCfg,
@@ -237,11 +274,14 @@ func sbCreateInvoice(ctx context.Context, tx pgx.Tx, orderID string) error {
 	_, err = tx.Exec(ctx, `
 		INSERT INTO shopbook_invoice
 		  (shop_id, order_id, customer_user_id, number, country, tax_type, currency,
-		   subtotal, discount, tax_total, total, business, customer_name, items, tax_breakdown)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+		   subtotal, discount, tax_total, total, business, customer_name, items, tax_breakdown,
+		   kind, status, buyer, round_off)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,`+sbAmt("$8")+`,`+sbAmt("$9")+`,`+sbAmt("$10")+`,`+sbAmt("$11")+`,
+		        $12,$13,$14,$15,$16,'issued',$17,`+sbAmt("$18")+`)`,
 		shopID, orderID, custID, seq, country, taxType, currency,
-		subtotal, discount, taxTotal, math.Round((total+taxTotal)*100)/100,
-		sbJSON(bizJSON), custName, sbJSON(itemsJSON), sbJSON(bdJSON))
+		subtotalC, discountC, taxTotalC, totalC,
+		sbJSON(bizJSON), custName, sbJSON(itemsJSON), sbJSON(bdJSON),
+		invKind, sbJSON(buyerRaw), roundOffC)
 	return err
 }
 
@@ -270,17 +310,20 @@ func sbOrderInvoice(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var id, country, taxType, currency, custName string
+	var id, country, taxType, currency, custName, kind, status string
 	var number int
-	var subtotal, discount, taxTotal, total float64
-	var business, items, breakdown []byte
+	var subtotalC, discountC, taxTotalC, roundOffC, totalC int64
+	var business, items, breakdown, buyer []byte
 	var created time.Time
 	err = db.Pool.QueryRow(ctx, `
-		SELECT id, number, country, tax_type, currency, subtotal, discount, tax_total, total,
-		       business, customer_name, items, tax_breakdown, created_at
+		SELECT id, number, country, tax_type, currency,
+		       `+sbCents("subtotal")+`, `+sbCents("discount")+`, `+sbCents("tax_total")+`,
+		       `+sbCents("round_off")+`, `+sbCents("total")+`,
+		       business, customer_name, items, tax_breakdown, kind, status, buyer, created_at
 		  FROM shopbook_invoice WHERE order_id=$1`, orderID).
-		Scan(&id, &number, &country, &taxType, &currency, &subtotal, &discount, &taxTotal, &total,
-			&business, &custName, &items, &breakdown, &created)
+		Scan(&id, &number, &country, &taxType, &currency,
+			&subtotalC, &discountC, &taxTotalC, &roundOffC, &totalC,
+			&business, &custName, &items, &breakdown, &kind, &status, &buyer, &created)
 	if db.NoRows(err) {
 		httpx.Err(w, http.StatusNotFound, "No invoice for this order yet")
 		return
@@ -289,13 +332,26 @@ func sbOrderInvoice(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, http.StatusInternalServerError, "db error")
 		return
 	}
+	// Payment state is derived from the payments themselves, so the invoice can
+	// never claim to be paid by money that is not there (P0-E).
+	payState, paid, due := "unpaid", money(0), money(totalC)
+	if st, p, d, err := sbInvoicePaymentState(ctx, db.Pool, id); err == nil {
+		payState, paid, due = st, p, d
+	}
 	httpx.JSON(w, 200, map[string]any{
 		"id": id, "orderId": orderID, "number": number,
+		// A human-facing series, never the database id (spec: invoice numbering).
 		"invoiceNo": fmt.Sprintf("INV-%04d", number),
 		"country":   country, "taxType": taxType, "currency": currency,
-		"subtotal": subtotal, "discount": discount, "taxTotal": taxTotal, "total": total,
+		"subtotal": money(subtotalC).Float(), "discount": money(discountC).Float(),
+		"taxTotal": money(taxTotalC).Float(), "roundOff": money(roundOffC).Float(),
+		"total":    money(totalC).Float(),
 		"business": json.RawMessage(business), "customerName": custName,
 		"items": json.RawMessage(items), "taxBreakdown": json.RawMessage(breakdown),
+		// 'tax' carries both parties' tax numbers and is reclaimable;
+		// 'retail' is a plain bill with no statutory fields left blank.
+		"kind": kind, "status": status, "buyer": json.RawMessage(sbJSON(buyer)),
+		"paymentStatus": payState, "paid": paid.Float(), "due": due.Float(),
 		"createdAt": httpx.JST(&created),
 	})
 }

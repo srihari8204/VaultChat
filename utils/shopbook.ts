@@ -193,6 +193,9 @@ export interface TimelineEvent { status: OrderStatus; note: string; at: string }
 // ── cart ──────────────────────────────────────────────────────────
 export interface CartItem {
   key: string;   // client id
+  productId?: string;   // catalog row, when the line came from the catalog.
+                        // The server re-prices from this; a line without one is
+                        // a free-typed request the owner quotes during review.
   name: string;
   brand: string;
   qty: number;
