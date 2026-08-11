@@ -24,6 +24,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"vaultchat/backend-go/internal/db"
+	"vaultchat/backend-go/internal/emitx"
 	"vaultchat/backend-go/internal/httpx"
 )
 
@@ -132,6 +133,14 @@ func ownerShopID(ctx context.Context, w http.ResponseWriter, userID string) (str
 	return id, true
 }
 
+// sbExistingShopID is ownerShopID without the 404 — for callers that only
+// want to know whether a shop is already there (an upsert, not a lookup).
+func sbExistingShopID(ctx context.Context, userID string) (string, bool) {
+	var id string
+	err := db.Pool.QueryRow(ctx, `SELECT id FROM shopbook_shop WHERE owner_user_id=$1`, userID).Scan(&id)
+	return id, err == nil
+}
+
 func haversineKm(lat1, lng1, lat2, lng2 float64) float64 {
 	const R = 6371.0
 	dLat := (lat2 - lat1) * math.Pi / 180
@@ -192,13 +201,30 @@ func scanShop(row shopScanner) (map[string]any, error) {
 }
 
 // sbNotify sends an Expo push (title+body, auto-rendered in fg/bg) to every
-// device the user has registered, and persists a copy to the in-app
-// notification inbox so missed pushes remain visible. Best-effort.
+// device the user has registered, persists a copy to the in-app notification
+// inbox so missed pushes remain visible, AND emits a realtime event so an open
+// app updates without waiting for a push or a manual refresh (P1-E).
+//
+// Three channels, one call, deliberately layered by reliability:
+//
+//	inbox    — durable. Survives a missed push and a closed app.
+//	realtime — instant, but only if a socket happens to be connected.
+//	push     — wakes a backgrounded app; may be dropped by the OS.
+//
+// The realtime event carries no state of its own beyond the identifiers: the
+// client re-fetches. A socket message is a hint that something changed, never
+// the record of what it changed to — the app must show the right thing after a
+// cold start, when no socket event was ever received.
 func sbNotify(ctx context.Context, userID, title, body string, data map[string]any) {
 	if data == nil {
 		data = map[string]any{}
 	}
 	event, _ := data["event"].(string)
+	// Emitted before the push so a foregrounded app reacts first and the push
+	// arrives as confirmation rather than as the news.
+	emitx.ToUids([]string{userID}, "shopbook:event", map[string]any{
+		"event": event, "title": title, "body": body, "data": data,
+	})
 	if dataJSON, err := json.Marshal(data); err == nil {
 		// Never swallow this: a silent failure here is invisible until someone
 		// notices the inbox has been empty for weeks (which is what happened).
@@ -246,6 +272,9 @@ func shopPlan(ctx context.Context, shopID string) string {
 
 func sbNearbyShops(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	if !sbRateLimit(w, r, "nearby", sbRateNearby, 60) {
+		return
+	}
 	lat, okLat := qfloat(r, "lat")
 	lng, okLng := qfloat(r, "lng")
 	cat := r.URL.Query().Get("category")
@@ -412,6 +441,9 @@ func sbPlaceOrder(w http.ResponseWriter, r *http.Request) {
 			Price     *float64 `json:"price"` // displayed price — compared, never trusted
 			Note      string   `json:"note"`
 		} `json:"items"`
+	}
+	if !sbRateLimit(w, r, "order", sbRateWrite, 60) {
+		return
 	}
 	if err := httpx.Body(r, &body); err != nil || body.ShopID == "" || len(body.Items) == 0 {
 		httpx.Err(w, http.StatusBadRequest, "shopId and at least one item required")
@@ -695,19 +727,29 @@ func sbRecomputeOrderTotal(ctx context.Context, orderID string) {
 
 func sbMyOrders(w http.ResponseWriter, r *http.Request) {
 	user := httpx.UserFrom(r)
-	rows, err := db.Pool.Query(r.Context(),
-		`SELECT o.id, o.shop_id, s.name, s.currency, o.status, o.total, o.created_at
-		   FROM shopbook_order o JOIN shopbook_shop s ON s.id=o.shop_id
-		  WHERE o.customer_user_id=$1 ORDER BY o.created_at DESC LIMIT 100`, user.ID)
+	limit := sbPageLimit(r, 50, 100)
+	args := []any{user.ID}
+	sql := `SELECT o.id, o.shop_id, s.name, s.currency, o.status,
+	               ` + sbCents("o.total") + `, o.created_at
+	          FROM shopbook_order o JOIN shopbook_shop s ON s.id=o.shop_id
+	         WHERE o.customer_user_id=$1`
+	if cur, ok := sbCursor(r); ok {
+		sql += " AND o.created_at < $2"
+		args = append(args, cur)
+	}
+	sql += " ORDER BY o.created_at DESC LIMIT $" + strconv.Itoa(len(args)+1)
+	args = append(args, limit)
+	rows, err := db.Pool.Query(r.Context(), sql, args...)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "db error")
 		return
 	}
 	defer rows.Close()
 	out := []map[string]any{}
+	var last time.Time
 	for rows.Next() {
 		var id, shopID, shopName, currency, status string
-		var total float64
+		var total int64
 		var created time.Time
 		if err := rows.Scan(&id, &shopID, &shopName, &currency, &status, &total, &created); err != nil {
 			continue
@@ -715,12 +757,15 @@ func sbMyOrders(w http.ResponseWriter, r *http.Request) {
 		if status == "new" {
 			status = "pending"
 		}
+		last = created
 		out = append(out, map[string]any{
 			"id": id, "shopId": shopID, "shopName": shopName, "currency": currency,
-			"status": status, "total": total, "createdAt": httpx.JST(&created),
+			"status": status, "total": money(total).Float(), "createdAt": httpx.JST(&created),
 		})
 	}
-	httpx.JSON(w, 200, map[string]any{"orders": out})
+	httpx.JSON(w, 200, map[string]any{
+		"orders": out, "nextCursor": sbNextCursor(len(out), limit, last),
+	})
 }
 
 // orderWithItems returns the order header + items, scoped so only the customer
@@ -982,6 +1027,14 @@ func sbUpsertShop(w http.ResponseWriter, r *http.Request) {
 		LunchEnd      string          `json:"lunchEnd"`
 		Country       string          `json:"country"`
 		TaxConfig     json.RawMessage `json:"taxConfig"`
+		// P1-D: shop identity. Photos are object keys uploaded straight to
+		// storage, never bytes through this endpoint.
+		FrontPhotoKey *string `json:"frontPhotoKey"`
+		LogoKey       *string `json:"logoKey"`
+		Email         *string `json:"email"`
+		Description   *string `json:"description"`
+		Timezone      *string `json:"timezone"`
+		RoundOff      *bool   `json:"roundOffEnabled"`
 	}
 	if err := httpx.Body(r, &b); err != nil || b.Name == "" {
 		httpx.Err(w, http.StatusBadRequest, "name required")
@@ -1038,6 +1091,17 @@ func sbUpsertShop(w http.ResponseWriter, r *http.Request) {
 	if b.DeliveryFee != nil {
 		deliveryFee = *b.DeliveryFee
 	}
+	// A verified shop's pin is fixed (P1-D). Customers walk to it, so moving
+	// it after a badge was granted goes through review, not a settings save.
+	// Small drift is a corrected GPS fix and passes silently.
+	if existing, okE := sbExistingShopID(ctx, user.ID); okE {
+		if msg, allowed := sbLocationGate(ctx, existing, b.Lat, b.Lng); !allowed {
+			httpx.Err(w, http.StatusConflict, msg,
+				map[string]any{"code": "location_locked"})
+			return
+		}
+	}
+
 	// New shops start unapproved (spec: shop-accounts / approval before
 	// public listing); shops existing before migration 064 stay approved.
 	var id string
@@ -1046,18 +1110,32 @@ func sbUpsertShop(w http.ResponseWriter, r *http.Request) {
 		INSERT INTO shopbook_shop
 		  (owner_user_id, name, category, address, lat, lng, phone,
 		   open_time, close_time, weekly_holiday, status, pickup, prep_mins, delivery, delivery_fee,
-		   lunch_start, lunch_end, country, currency, tax_config)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+		   lunch_start, lunch_end, country, currency, tax_config,
+		   front_photo_key, logo_key, email, description, timezone, round_off_enabled,
+		   origin_lat, origin_lng)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
+		        COALESCE($21,''), COALESCE($22,''), COALESCE($23,''), COALESCE($24,''),
+		        COALESCE($25,''), COALESCE($26,FALSE), $5, $6)
 		ON CONFLICT (owner_user_id) DO UPDATE SET
 		  name=$2, category=$3, address=$4, lat=$5, lng=$6, phone=$7,
 		  open_time=$8, close_time=$9, weekly_holiday=$10, status=$11,
 		  pickup=$12, prep_mins=$13, delivery=$14, delivery_fee=$15,
 		  lunch_start=$16, lunch_end=$17, country=$18, currency=$19, tax_config=$20,
+		  -- Each optional field is only overwritten when the client actually
+		  -- sent it; a settings screen that omits a field must not blank it.
+		  front_photo_key   = COALESCE($21, shopbook_shop.front_photo_key),
+		  logo_key          = COALESCE($22, shopbook_shop.logo_key),
+		  email             = COALESCE($23, shopbook_shop.email),
+		  description       = COALESCE($24, shopbook_shop.description),
+		  timezone          = COALESCE($25, shopbook_shop.timezone),
+		  round_off_enabled = COALESCE($26, shopbook_shop.round_off_enabled),
 		  updated_at=NOW()
 		RETURNING id, approved`,
 		user.ID, b.Name, b.Category, b.Address, b.Lat, b.Lng, b.Phone,
 		b.OpenTime, b.CloseTime, b.WeeklyHoliday, b.Status, pickup, prep, delivery, deliveryFee,
-		b.LunchStart, b.LunchEnd, b.Country, currency, sbJSON(taxCfg)).Scan(&id, &approved)
+		b.LunchStart, b.LunchEnd, b.Country, currency, sbJSON(taxCfg),
+		b.FrontPhotoKey, b.LogoKey, b.Email, b.Description, b.Timezone, b.RoundOff).
+		Scan(&id, &approved)
 	if err != nil {
 		log.Printf("[shopbook] shop upsert failed (owner=%s country=%s): %v", user.ID, b.Country, err)
 		httpx.Err(w, http.StatusInternalServerError, "could not save shop")
@@ -1248,15 +1326,24 @@ func sbOwnerOrders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status := r.URL.Query().Get("status")
-	sql := `SELECT o.id, o.customer_user_id, COALESCE(u.name,''), o.status, o.total, o.created_at
+	limit := sbPageLimit(r, 50, 100)
+	sql := `SELECT o.id, o.customer_user_id, COALESCE(u.name,''), o.status,
+	               ` + sbCents("o.total") + `, o.created_at
 	          FROM shopbook_order o LEFT JOIN users u ON u.id=o.customer_user_id
 	         WHERE o.shop_id=$1`
 	args := []any{shopID}
 	if status != "" && status != "all" {
-		sql += " AND o.status=$2"
+		sql += " AND o.status=$" + strconv.Itoa(len(args)+1)
 		args = append(args, status)
 	}
-	sql += " ORDER BY o.created_at DESC LIMIT 100"
+	// Keyset paging: page 40 costs the same as page 1, and a new order
+	// arriving mid-scroll cannot make a row repeat or vanish (P2).
+	if cur, ok := sbCursor(r); ok {
+		sql += " AND o.created_at < $" + strconv.Itoa(len(args)+1)
+		args = append(args, cur)
+	}
+	sql += " ORDER BY o.created_at DESC LIMIT $" + strconv.Itoa(len(args)+1)
+	args = append(args, limit)
 	rows, err := db.Pool.Query(ctx, sql, args...)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "db error")
@@ -1264,19 +1351,23 @@ func sbOwnerOrders(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 	out := []map[string]any{}
+	var last time.Time
 	for rows.Next() {
 		var id, custID, custName, st string
-		var total float64
+		var total int64
 		var created time.Time
 		if err := rows.Scan(&id, &custID, &custName, &st, &total, &created); err != nil {
 			continue
 		}
+		last = created
 		out = append(out, map[string]any{
 			"id": id, "customerId": custID, "customerName": custName, "status": st,
-			"total": total, "createdAt": httpx.JST(&created),
+			"total": money(total).Float(), "createdAt": httpx.JST(&created),
 		})
 	}
-	httpx.JSON(w, 200, map[string]any{"orders": out})
+	httpx.JSON(w, 200, map[string]any{
+		"orders": out, "nextCursor": sbNextCursor(len(out), limit, last),
+	})
 }
 
 // The window in which line items may still be reviewed or substituted. 'new'
@@ -2639,6 +2730,11 @@ func sbReports(w http.ResponseWriter, r *http.Request) {
 // to compute open-now (spec: price-comparison). sort=price|nearest.
 func sbSearchProducts(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	// The most expensive read in Shop Book: a trigram scan across every
+	// approved catalog (P2).
+	if !sbRateLimit(w, r, "search", sbRateSearch, 60) {
+		return
+	}
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	if len(q) < 2 {
 		httpx.JSON(w, 200, map[string]any{"results": []any{}})
