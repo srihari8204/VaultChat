@@ -90,6 +90,11 @@ func RegisterChats(mux *http.ServeMux) {
 	RegisterChatInvitationsOnID(id) // Groups & Circles per-invitee invitations
 	RegisterChatMembershipOnID(id)  // Groups & Circles in-app membership (v2)
 	RegisterChatCalendarOnID(id)    // Groups & Circles shared calendar
+	RegisterSpaceRosterOnID(id)     // Spaces & Operations roster + visibility links
+	RegisterSpaceRunsOnID(id)       // Spaces & Operations run engine
+	RegisterSpaceOpsOnID(id)        // Spaces & Operations incidents, passes, shifts
+	RegisterSpaceWorkforceOnID(id)  // Spaces & Operations attendance, leave, tasks, dashboard
+	RegisterSpaceDevicesOnID(id)    // Spaces & Operations devices + theft protection
 	mux.Handle("/chats/{id}/", id)  // subtree forward; `id` re-matches the full path
 }
 
@@ -106,6 +111,24 @@ func chatsExecU(ctx context.Context, uid, q string, args ...any) error {
 		_, err := tx.Exec(ctx, q, args...)
 		return err
 	})
+}
+
+// chatsExecAffected is chatsExecU for writes whose guard lives in the SQL —
+// an `INSERT ... SELECT ... WHERE EXISTS` that legitimately matches nothing.
+//
+// chatsExecU discards the command tag, so "wrote one row" and "the WHERE EXISTS
+// rejected it" are indistinguishable, and the handler answers 200 either way.
+// That turned a mistyped roster id into a link that reported success and did
+// nothing — the parent then saw no child, forever, with nothing to look at.
+// Callers that guard in SQL must use this and check the count.
+func chatsExecAffected(ctx context.Context, uid, q string, args ...any) (int64, error) {
+	var n int64
+	err := db.WithUser(ctx, uid, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, q, args...)
+		n = tag.RowsAffected()
+		return err
+	})
+	return n, err
 }
 
 func chatsQueryU(ctx context.Context, uid, q string, args []any, each func(pgx.Rows) error) error {
@@ -267,6 +290,12 @@ type chatsMem struct {
 	groupOverrides map[string][]string
 	memberGrants   []string
 	memberGrantSet bool
+
+	// ── Spaces & Operations (migration 084) ──
+	// RoleKey is the member's display role ("driver", "parent"); NULL for every
+	// member created before 084, which resolves exactly as it does today.
+	RoleKey     *string
+	roleCatalog []groups.RoleDef
 }
 
 func (m *chatsMem) isAdmin() bool { return m.Role == "admin" || m.Role == "owner" }
@@ -274,11 +303,22 @@ func (m *chatsMem) isAdmin() bool { return m.Role == "admin" || m.Role == "owner
 // isTypedGroup reports whether this chat participates in the permission model.
 func (m *chatsMem) isTypedGroup() bool { return m.GroupType != nil && *m.GroupType != "" }
 
+// roleKey returns the member's display role key, or "".
+func (m *chatsMem) roleKey() string {
+	if m.RoleKey == nil {
+		return ""
+	}
+	return *m.RoleKey
+}
+
 // perms resolves this member's effective permission set.
 func (m *chatsMem) perms() groups.Set {
+	catalog, catalogSet := groups.CatalogLayer(m.roleCatalog, m.roleKey(), m.Role)
 	return groups.Resolve(m.Role, groups.Layers{
 		TypeDefault:      m.typeDefaults,
 		GroupOverride:    m.groupOverrides,
+		RoleCatalog:      catalog,
+		RoleCatalogIsSet: catalogSet,
 		MemberGrant:      m.memberGrants,
 		MemberGrantIsSet: m.memberGrantSet,
 	})
@@ -300,7 +340,7 @@ func (m *chatsMem) can(p groups.Permission) bool {
 
 func chatsLoadMem(ctx context.Context, uid, chatID string) (*chatsMem, error) {
 	m := &chatsMem{}
-	var overridesRaw, grantsRaw, defaultsRaw []byte
+	var overridesRaw, grantsRaw, defaultsRaw, catalogRaw []byte
 	err := chatsQRow(ctx, uid,
 		`SELECT cm.role, cm.joined_at, cm.last_read_message_id, cm.muted, cm.left_at,
 		        cm.hidden, cm.screenshot_mode, cm.vanish_mode,
@@ -308,7 +348,7 @@ func chatsLoadMem(ctx context.Context, uid, chatID string) (*chatsMem, error) {
 		        c.media_policy, c.add_members_policy, c.anti_spam_links, c.approve_members,
 		        c.approval_mode,
 		        c.group_type, g.max_members, c.permission_overrides, cm.permission_grants,
-		        g.default_permissions
+		        g.default_permissions, cm.role_key, g.role_catalog
 		 FROM chat_members cm
 		 JOIN chats c ON c.id = cm.chat_id
 		 LEFT JOIN group_type_config g ON g.group_type = c.group_type
@@ -319,7 +359,8 @@ func chatsLoadMem(ctx context.Context, uid, chatID string) (*chatsMem, error) {
 		&m.ChatType, &m.SendPolicy, &m.SlowModeSeconds,
 		&m.MediaPolicy, &m.AddMembersPolicy, &m.AntiSpamLinks, &m.ApproveMembers,
 		&m.ApprovalModeRaw,
-		&m.GroupType, &m.MaxMembers, &overridesRaw, &grantsRaw, &defaultsRaw)
+		&m.GroupType, &m.MaxMembers, &overridesRaw, &grantsRaw, &defaultsRaw,
+		&m.RoleKey, &catalogRaw)
 	if db.NoRows(err) {
 		return nil, nil
 	}
@@ -329,7 +370,21 @@ func chatsLoadMem(ctx context.Context, uid, chatID string) (*chatsMem, error) {
 	m.typeDefaults = chatsPermMap(defaultsRaw)
 	m.groupOverrides = chatsPermMap(overridesRaw)
 	m.memberGrants, m.memberGrantSet = chatsPermList(grantsRaw)
+	m.roleCatalog = chatsRoleCatalog(catalogRaw)
 	return m, nil
+}
+
+// chatsRoleCatalog decodes a type's role catalog. A catalog that fails to parse
+// yields nil — the layer is absent and the rank default applies — because a
+// permission layer that cannot be READ must never be a layer that GRANTS. The
+// log line is loud because this state means someone hand-edited the config.
+func chatsRoleCatalog(raw []byte) []groups.RoleDef {
+	defs, err := groups.ParseRoleCatalog(raw)
+	if err != nil {
+		log.Printf("[chats perms] bad role catalog, ignoring layer: %v", err)
+		return nil
+	}
+	return defs
 }
 
 // chatsPermMap decodes a role→permissions JSONB column. Malformed JSON yields

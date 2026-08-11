@@ -106,7 +106,26 @@ export default function ChatsScreen() {
   const refreshInvites = useCallback(async () => {
     try {
       const inv = await myInvitations();
-      setPendingInvites(inv.filter((i: any) => i.status === 'pending').length);
+      // Count what the invitee can ACT on, not what is literally 'pending'.
+      //
+      // These are not the same set, and the difference is a real trap. An
+      // invitation stranded at 'accepted' — the invitee said yes, but the group
+      // was on the old 'strict' default and the owner approval it waits for was
+      // never surfaced anywhere (migration 077) — is offered again by the
+      // server, which sets canAccept on exactly those rows, and the inbox
+      // screen already draws an Accept button for them.
+      //
+      // Counting only 'pending' hid that banner, and for anyone not already in
+      // a space the banner is the ONLY route to the inbox. So the recovery
+      // existed on the server and in the screen, and could not be reached: the
+      // invitee saw nothing, and the inviter watched them never join.
+      //
+      // `canAccept` is the server's own answer to "is there something to do
+      // here", so use it. The status fallback keeps this correct against an
+      // older server that does not send the flag.
+      setPendingInvites(
+        inv.filter((i) => (typeof i.canAccept === 'boolean' ? i.canAccept : i.status === 'pending')).length,
+      );
     } catch { /* offline / not signed in — leave the banner hidden */ }
   }, []);
   useFocusEffect(useCallback(() => { refreshInvites(); }, [refreshInvites]));

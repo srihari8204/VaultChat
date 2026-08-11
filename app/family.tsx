@@ -10,6 +10,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator,
   Switch, Modal, TextInput, Animated, Vibration, Pressable, KeyboardAvoidingView, Platform,
+  Linking,
 } from 'react-native';
 import * as Location from 'expo-location';
 import { Stack, useRouter, useFocusEffect } from 'expo-router';
@@ -28,6 +29,9 @@ import { getSettings, setSettings, removeCircle } from '../lib/family/store';
 import { listGroups, reconcileGroups, resolveActiveGroup, saveGroup, setActiveGroupId, type GroupRef } from '../lib/groups/store';
 import { groupIdentity } from '../lib/groups/catalog';
 import { can as hasPerm, type Permission } from '../lib/groups/permissions';
+import { getRuns } from '../lib/spaces/api';
+import { familyOf, isOperational, sectionsFor, memberHeading, locationRationale } from '../lib/spaces/layout';
+import { type Run as SpaceRun } from '../lib/spaces/runs';
 import {
   circleMembers, renameCircle, leaveCircle, deleteCircle,
   removeCircleMember, setGuardian,
@@ -72,7 +76,15 @@ function ago(ts: number): string {
 function dist(m: number): string { return m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1)} km`; }
 function greeting(): string {
   const h = new Date().getHours();
-  return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+  // Local device time on purpose: a family dashboard is a local object, and
+  // "good morning" is about the light outside the window, not a server clock.
+  // The small-hours branch matters — this screen gets opened at 2am by someone
+  // checking whether a teenager got home, and "Good evening" reads as wrong.
+  if (h < 5) return 'Good night';
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  if (h < 21) return 'Good evening';
+  return 'Good night';
 }
 
 // The group registry is local, so a group you LEFT from the Chats screen would
@@ -82,7 +94,44 @@ async function loadGroupsReconciled(): Promise<GroupRef[]> {
   const groups = await listGroups();
   try {
     const chats = await listChats();
-    return await reconcileGroups(chats.map((c: any) => String(c.id)));
+    // Prune spaces we are no longer in.
+    let next = await reconcileGroups(chats.map((c: any) => String(c.id)));
+
+    // ADOPT spaces we ARE in but have never seen on this device.
+    //
+    // reconcileGroups only ever removed. The registry was written by whichever
+    // device created or joined the space, so a School or Employee space set up
+    // on another phone — or joined from an invitation — never appeared here at
+    // all: not in the switcher, not in the dashboard, nowhere. That is what
+    // "school and employee are not working" looks like from the outside, and it
+    // gets worse the more a family uses more than one space.
+    //
+    // The chat list already carries the id, name and type, so adopting is free:
+    // no extra request, and it happens on the same load that was already
+    // pruning.
+    // The chat LIST does not carry group_type — only GET /chats/:id does — so
+    // the type has to be fetched for chats we have never seen. Bounded at 8 and
+    // only for unknown GROUP chats, so the common case (nothing new) costs
+    // nothing and a user in many ordinary group chats is not punished for it.
+    // Anything that is not a typed space is skipped and simply not adopted.
+    const known = new Set(next.map((g) => String(g.id)));
+    const unknown = chats
+      .filter((c: any) => c?.type === 'group' && !known.has(String(c.id)))
+      .slice(0, 8);
+    for (const c of unknown) {
+      try {
+        const detail: any = await getChat(String(c.id));
+        if (!detail?.groupType) continue;   // an ordinary group chat, not a space
+        next = await saveGroup({
+          id: String(c.id),
+          name: detail.name || c.name || 'Space',
+          groupType: detail.groupType,
+          icon: detail.icon ?? null,
+          color: detail.color ?? null,
+        } as GroupRef);
+      } catch { /* one unreadable chat must not stop the others being adopted */ }
+    }
+    return next;
   } catch {
     return groups;   // offline — keep what we have rather than hiding everything
   }
@@ -97,8 +146,14 @@ export default function FamilySpaceScreen() {
   const [circles, setCircles] = useState<GroupRef[]>([]);
   const [active, setActive] = useState<GroupRef | null>(null);
   const [members, setMembers] = useState<CircleMember[]>([]);
+  /** False until the roster has actually come back. Distinguishes "still
+   *  loading" from "genuinely a space of one" — see `roster` below. */
+  const [membersLoaded, setMembersLoaded] = useState(false);
   const [presences, setPresences] = useState<Record<string, MemberPresence>>({});
   const [share, setShare] = useState(false);
+  // Location was refused (or never asked for). Not an error state — the space
+  // works without it; only our own dot on the map is missing.
+  const [locDenied, setLocDenied] = useState(false);
   const [loading, setLoading] = useState(true);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -106,6 +161,8 @@ export default function FamilySpaceScreen() {
   const [checkin, setCheckin] = useState(false);
   const [renameTxt, setRenameTxt] = useState('');
   const [note, setNote] = useState('');
+  /** Selected check-in status, held until Send (design screen 20). */
+  const [picked, setPicked] = useState<typeof CHECKINS[number] | null>(null);
   const [busy, setBusy] = useState(false);
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [bump, setBump] = useState(0); // re-pull highlights after we send something
@@ -123,6 +180,11 @@ export default function FamilySpaceScreen() {
   // leaving it discoverable only by opening the trip screen.
   const [trip, setTrip] = useState<Trip | null>(null);
   const [tripPings, setTripPings] = useState<TripPing[]>([]);
+  // Runs this caller may see in this space (Spaces & Operations, S3.1/S3.4).
+  // The SERVER decides what is in this list: ops sees the timetable, a driver
+  // sees their own runs, a guardian sees the runs their linked riders are on.
+  // Nothing here filters it further.
+  const [runs, setRuns] = useState<SpaceRun[]>([]);
 
   useEffect(() => { loadAlerts(); }, []);
 
@@ -172,7 +234,7 @@ export default function FamilySpaceScreen() {
   const refreshMembers = () => {
     if (!active) return;
     const id = active.id;
-    circleMembers(id).then(setMembers).catch(async (e: any) => {
+    circleMembers(id).then((m) => { setMembers(m); setMembersLoaded(true); }).catch(async (e: any) => {
       // Kicked, or the circle was deleted: the group now 403/404s forever.
       // Forget it locally instead of hammering the server from every focus
       // and highlights poll (seen live: one phone retrying a dead circle
@@ -180,10 +242,17 @@ export default function FamilySpaceScreen() {
       if (e?.status === 403 || e?.status === 404) {
         await removeCircle(id);
         await afterCircleGone();
+        return;
       }
+      // Anything else — offline, a 500, a parse failure — used to vanish here
+      // with no trace, leaving the fabricated one-person roster on screen and
+      // nothing in the log to explain it. Say so, and leave `membersLoaded`
+      // false so the UI shows "still loading" rather than asserting a roster
+      // of one.
+      console.warn('[family] could not load members:', e?.status ?? '', e?.message ?? e);
     });
   };
-  useEffect(() => { refreshMembers(); }, [active?.id]);
+  useEffect(() => { setMembersLoaded(false); refreshMembers(); }, [active?.id]);
 
   // Persist the switch so the next launch reopens here, and refresh the group's
   // server-side truth (permissions, cap, type) into the local registry.
@@ -223,14 +292,28 @@ export default function FamilySpaceScreen() {
     let unsub: (() => void) | null = null, cancelled = false;
     setPresences({});
     (async () => {
+      // SUBSCRIBE FIRST. Receiving other people's sealed positions needs no
+      // permission of ours, so it must not sit behind anything that does — a
+      // parent who declined location still has to see the bus.
       try {
-        await startPresence({ circleIds: [active.id], myId: me.id, myName: me.name, share, onSelf: (p) => setPresences((prev) => ({ ...prev, [p.userId]: p })) });
         const u = await subscribeCircle(active.id, me.id, (e: PresenceEvent) => {
           if (cancelled) return;
           setPresences((prev) => { const n = { ...prev }; if (e.presence) n[e.userId] = e.presence; else delete n[e.userId]; return n; });
         });
         if (cancelled) u(); else unsub = u;
-      } catch (err: any) { if (!cancelled) Alert.alert('Family Space', err?.message ?? 'Could not start location.'); }
+      } catch { /* the map degrades to "nobody live yet"; the space still works */ }
+
+      // Then our own position, which is optional. requestPermission is only
+      // true when sharing is already on — otherwise entering a space prompts
+      // for a permission the screen does not use.
+      try {
+        const res = await startPresence({
+          circleIds: [active.id], myId: me.id, myName: me.name, share,
+          requestPermission: share,
+          onSelf: (p) => setPresences((prev) => ({ ...prev, [p.userId]: p })),
+        });
+        if (!cancelled) setLocDenied(res.denied);
+      } catch { if (!cancelled) setLocDenied(true); }
     })();
     return () => { cancelled = true; unsub?.(); stopPresence(); };
   }, [active?.id, me?.id]);
@@ -292,10 +375,24 @@ export default function FamilySpaceScreen() {
   }, [active?.id, bump]);
 
   const toggleShare = async (v: boolean) => {
-    setShare(v);
-    await setSettings({ sharing: v });
-    try { await setSharing(v); } catch {}
-    if (v) await offerBackground();
+    // setSharing asks for location permission when turning ON — that is the
+    // moment it is genuinely needed. If it is refused, leave the switch OFF
+    // rather than showing it on while nothing is being published.
+    let ok = v;
+    try { ok = await setSharing(v); } catch { ok = false; }
+    setShare(ok);
+    setLocDenied(v && !ok);
+    await setSettings({ sharing: ok });
+    if (v && !ok) {
+      Alert.alert(
+        'Location is turned off',
+        `VaultChat needs location permission to share your position with ${active?.name ?? 'this space'}. `
+        + 'You can still use everything else here without it.',
+        [{ text: 'Not now' }, { text: 'Open settings', onPress: () => { Linking.openSettings().catch(() => {}); } }],
+      );
+      return;
+    }
+    if (ok) await offerBackground();
   };
 
   /**
@@ -331,6 +428,22 @@ export default function FamilySpaceScreen() {
     }));
   }, [presences, members, me?.id]);
 
+  // Members this device has no position for.
+  //
+  // WHY THIS EXISTS. Markers come only from `presences`, so a member who has not
+  // turned sharing on simply does not appear — and an absent marker is
+  // indistinguishable from a broken map. Sharing is opt-in PER DEVICE and
+  // defaults to off, so the common case for a new phone is an empty map with no
+  // explanation, which reads as "the app does not work".
+  //
+  // This device cannot tell "not sharing" from "sharing but no fix has reached
+  // us yet" — both look like silence — so the wording covers both rather than
+  // accusing anyone of having it switched off.
+  const notVisible = useMemo(
+    () => members.filter((m) => m.id !== me?.id && !presences[m.id]).map((m) => m.name),
+    [members, presences, me?.id],
+  );
+
   const myRole = members.find((m) => m.id === me?.id)?.role ?? active?.role ?? 'member';
   // "Guardian" is the Family type's word for admin; every other group type says
   // admin. Capability checks below use permissions, never this label.
@@ -342,6 +455,70 @@ export default function FamilySpaceScreen() {
   const canHistory = hasPerm(perms, 'view_history')     || isAdminish;
   const canAnnounce = hasPerm(perms, 'send_announcements') || isAdminish;
   const canNavigate = hasPerm(perms, 'start_navigation')    || isAdminish;
+  // Ops capabilities. NOT defaulted to isAdminish like the ones above: a
+  // "Transport Manager" is an admin who should see runs, but a Family admin is
+  // an admin who has no runs to see, and showing an empty operations card in
+  // every household group would be noise. The permission is the whole test.
+  const canDrive    = hasPerm(perms, 'drive_run');
+  const canOps      = hasPerm(perms, 'view_space_ops') || hasPerm(perms, 'manage_runs');
+
+  // Active runs for this space. Only asked for when the caller holds an ops
+  // permission — a Family group has no runs, and a 200 with an empty array on
+  // every dashboard open is a request nobody needed. Declared after the
+  // permission checks it depends on, which is why this effect sits here rather
+  // than beside the other loaders.
+  // Ask for runs in ANY operational space, not only when the caller holds an
+  // ops permission.
+  //
+  // This gate used to be `canDrive || canOps`, and it was why a school space
+  // looked completely empty. A parent is an ordinary `member`: migration 084
+  // gives school members no permissions at all, deliberately, because their
+  // access comes from space_links rather than from a permission. So the client
+  // never asked for runs — and the parent never saw their child's bus, even
+  // though the SERVER would have returned exactly that one run and nothing else.
+  //
+  // The server is the authority on what a caller may see (vc_run_visible: ops
+  // sees the timetable, a driver their own runs, a guardian the runs their
+  // linked riders are on). Deciding here that they may see nothing was the
+  // client overruling it, which is the one thing this codebase keeps proving is
+  // wrong.
+  // Space type drives the dashboard. isOperational is also the runs gate: a
+  // school parent holds NO permissions, so gating the fetch on ops rights meant
+  // they never asked for the run their own child is on.
+  const spaceFamily = familyOf(active?.groupType);
+  const opsSpace = isOperational(active?.groupType);
+  const sections = useMemo(
+    () => sectionsFor(active?.groupType, perms),
+    [active?.groupType, perms],
+  );
+  useEffect(() => {
+    if (!active?.id || !(canDrive || canOps || opsSpace)) { setRuns([]); return; }
+    let live = true;
+    getRuns(active.id, true)
+      .then((r) => { if (live) setRuns(r || []); })
+      // Silent: an operations card that failed to load must not interrupt a
+      // dashboard whose other half is working.
+      .catch(() => { if (live) setRuns([]); });
+    return () => { live = false; };
+  }, [active?.id, canDrive, canOps, opsSpace]);
+
+  // S3.4 — a driver on the road lands on their manifest, not here.
+  //
+  // Three guards, and each one is there because the alternative traps someone:
+  //   · only while a run is actually STARTED, so an off-duty driver keeps the
+  //     whole app instead of being redirected out of it every time they open it
+  //   · only for a driver who is NOT ops, because a Transport Manager who also
+  //     drives needs the dashboard they came for
+  //   · ONCE per mount (the ref), so pressing Back from the manifest returns
+  //     here and stays here rather than bouncing straight out again
+  const droveOnce = useRef(false);
+  useEffect(() => {
+    if (droveOnce.current || canOps || !canDrive || !active?.id || !me?.id) return;
+    const mine = runs.find((r) => r.driverId === me.id && r.status === 'started');
+    if (!mine) return;
+    droveOnce.current = true;
+    router.push({ pathname: '/space-run-driver' as any, params: { spaceId: active.id, runId: mine.id } });
+  }, [runs, canDrive, canOps, active?.id, me?.id, router]);
   // Identity for this group's type — icon and accent drive the whole dashboard.
   const ident = groupIdentity(active ?? {});
   const liveCount = useMemo(() => {
@@ -405,6 +582,7 @@ export default function FamilySpaceScreen() {
         actorId: me.id, actorName: me.name, text: `${me.name}: ${c.label}${suffix}`,
       });
       setNote('');
+      setPicked(null);
       setBump((b) => b + 1);
     } catch (e: any) { Alert.alert('Check-in', e?.message ?? 'Could not send.'); }
   };
@@ -476,7 +654,21 @@ export default function FamilySpaceScreen() {
   if (loading) return <View style={[st.center, { backgroundColor: colors.bg }]}><ActivityIndicator color={colors.primary} /></View>;
 
   const mine = me ? presences[me.id] : undefined;
-  const roster = members.length ? members : (me ? [{ id: me.id, name: 'You', role: 'guardian' as const, avatar: null }] : []);
+  // Only stand in for the roster once we KNOW it is empty.
+  //
+  // This used to be `members.length ? members : [me]`, which fabricated a
+  // one-person roster whenever `members` was empty — and `members` is empty for
+  // the whole time the fetch is in flight, and stays empty after any error
+  // refreshMembers swallows. The screen then stated "1 of 1 sharing live" and
+  // listed only You, as fact, for a space with three people in it. Opening
+  // Family and being told you are alone in it is what "family is not working"
+  // looks like from the outside.
+  //
+  // Same rule as everywhere else in this change: not-yet-known and known-empty
+  // are different states, and only one of them may be asserted.
+  const roster = members.length
+    ? members
+    : (membersLoaded && me ? [{ id: me.id, name: 'You', role: 'guardian' as const, avatar: null }] : []);
   const allGood = liveCount > 0;
   const firstName = (me?.name || 'there').split(/\s+/)[0];
 
@@ -524,18 +716,44 @@ export default function FamilySpaceScreen() {
   };
 
   const shareToggleRow = (
-    <View style={st.shareRow}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <Ionicons name={share ? 'navigate' : 'navigate-outline'} size={18} color={share ? colors.primary : colors.textDim} />
-        <Text style={{ color: colors.text, fontWeight: '600' }}>Share my location</Text>
+    <>
+      <View style={st.shareRow}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Ionicons name={share ? 'navigate' : 'navigate-outline'} size={18} color={share ? colors.primary : colors.textDim} />
+          <Text style={{ color: colors.text, fontWeight: '600' }}>Share my location</Text>
+        </View>
+        <Switch value={share} onValueChange={toggleShare} trackColor={{ true: colors.primary }} />
       </View>
-      <Switch value={share} onValueChange={toggleShare} trackColor={{ true: colors.primary }} />
-    </View>
+      {/* Explains itself in the SPACE'S OWN TERMS, and only where it matters.
+          The old copy said "Location permission is required for Family Circle"
+          in every space type — including a school, where a parent needs no
+          location at all — and it was an alert on entry rather than a note. */}
+      {locDenied && (
+        <Text style={{ color: colors.textDim, fontSize: 12, lineHeight: 17, marginTop: -4, marginBottom: 10 }}>
+          {locationRationale(active?.groupType)}
+        </Text>
+      )}
+    </>
   );
 
   return (
     <View style={[st.screen, { backgroundColor: colors.bg }]}>
-      <Stack.Screen options={{ title: active?.name || 'Family Space', headerTitleAlign: 'center',
+      {/* The space's own name when there is one; otherwise the module's name.
+          NOT "Family Space" — family is one type among sixteen, and a school
+          transport space titled "Family Space" reads as a bug. */}
+      <Stack.Screen options={{ title: active?.name || 'Spaces', headerTitleAlign: 'center',
+        // A way OUT. This screen is a hub people land on and then cannot leave
+        // except with the system back gesture — which is not obvious, and on a
+        // parent's phone the whole point is to move between their family and
+        // their child's school transport space.
+        headerLeft: () => (
+          <TouchableOpacity
+            onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/mini' as any))}
+            style={{ paddingHorizontal: 8 }}
+          >
+            <Ionicons name="chevron-back" size={24} color={colors.primary} />
+          </TouchableOpacity>
+        ),
         headerRight: () => (
           <View style={{ flexDirection: 'row' }}>
             {canInvite && <TouchableOpacity onPress={openAdd} style={{ paddingHorizontal: 6 }}><Ionicons name="person-add" size={20} color={colors.primary} /></TouchableOpacity>}
@@ -562,18 +780,31 @@ export default function FamilySpaceScreen() {
       ) : (
         /* ── dashboard ── */
         <ScrollView contentContainerStyle={st.dash} showsVerticalScrollIndicator={false}>
-          {/* greeting */}
+          {/* greeting (design screen 5) — the bell is the one thing the mockup
+              adds here: a standing route to the alerts centre with an unread
+              dot, so a new alert is visible without opening a tile. */}
           <View style={st.greetRow}>
-            <View style={{ flex: 1 }}>
+            <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={{ color: colors.text, fontSize: 20, fontWeight: '800' }}>{greeting()}, {firstName} 👋</Text>
-              <Text style={{ color: colors.textDim, fontSize: 12.5, marginTop: 2 }}>
-              {active?.name}{active?.groupType && ident.label !== active.name ? ` · ${ident.label}` : ''}
-            </Text>
+              <Text style={{ color: colors.textDim, fontSize: 12.5, marginTop: 2 }} numberOfLines={1}>
+                {active?.name}{active?.groupType && ident.label !== active.name ? ` · ${ident.label}` : ''}
+              </Text>
             </View>
+            <TouchableOpacity
+              onPress={() => active && router.push({ pathname: '/family-alerts' as any, params: { circleId: active.id, circleName: active.name } })}
+              style={[st.greetBell, { backgroundColor: colors.card, borderColor: colors.border }]}
+            >
+              <Ionicons name="notifications-outline" size={19} color={colors.text} />
+              {unread > 0 && <View style={[st.bellDot, { backgroundColor: colors.danger, borderColor: colors.card }]} />}
+            </TouchableOpacity>
           </View>
 
-          {/* circle switcher */}
-          {circles.length > 1 && (
+          {/* Space switcher.
+              Shown whenever there is anywhere to go — including with a single
+              space, where the "New space" chip is the only route to creating a
+              School or Employee one. Hiding it below two spaces meant a family
+              with one circle had no visible way to reach anything else. */}
+          {circles.length > 0 && (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 10 }} contentContainerStyle={{ gap: 8 }}>
               {circles.map((c) => {
                 const on = active?.id === c.id;
@@ -588,6 +819,16 @@ export default function FamilySpaceScreen() {
                   </TouchableOpacity>
                 );
               })}
+              {/* Always last: the only visible route to a School, Office or
+                  Transport space. Without it a user with one Family circle can
+                  never discover that other space types exist. */}
+              <TouchableOpacity
+                onPress={() => router.push('/group-create' as any)}
+                style={[st.chip, { flexDirection: 'row', alignItems: 'center', gap: 6, borderColor: colors.primary }]}
+              >
+                <Ionicons name="add" size={14} color={colors.primary} />
+                <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 13 }}>New space</Text>
+              </TouchableOpacity>
             </ScrollView>
           )}
 
@@ -610,19 +851,34 @@ export default function FamilySpaceScreen() {
               <Ionicons name={allGood ? 'shield-checkmark' : ident.icon} size={20} color={allGood ? colors.success : ident.color} />
             </View>
             <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.textDim, fontSize: 11.5, letterSpacing: 0.3 }}>
+                {(ident.label || 'Family').toUpperCase()} STATUS
+              </Text>
               <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15 }}>{allGood ? 'All good' : 'Nobody live yet'}</Text>
               <Text style={{ color: colors.textDim, fontSize: 12 }}>
-                {liveCount ? `${liveCount} of ${roster.length} sharing live` : share ? 'Waiting for locations…' : 'Turn on sharing to appear on the map'}
+                {/* "Loading" is its own state. Counting against a roster that
+                    has not arrived is how this line claimed "1 of 1" for a
+                    three-person space. */}
+                {!membersLoaded ? 'Loading members…'
+                  : liveCount ? `${liveCount} of ${roster.length} sharing live`
+                    : share ? 'Waiting for locations…'
+                      : 'Turn on sharing to appear on the map'}
               </Text>
             </View>
-            <View style={st.avatarRow}>
-              {roster.slice(0, 4).map((m, i) => (
-                <View key={m.id} style={[st.miniDot, { backgroundColor: colorFor(m.id), marginLeft: i ? -8 : 0, borderColor: colors.card, opacity: presences[m.id] ? 1 : 0.45 }]}>
-                  <Text style={st.miniDotTxt}>{(m.name || '?').trim()[0]?.toUpperCase()}</Text>
-                </View>
-              ))}
-              {roster.length > 4 && <View style={[st.miniDot, { backgroundColor: colors.border, marginLeft: -8, borderColor: colors.card }]}><Text style={[st.miniDotTxt, { color: colors.text }]}>+{roster.length - 4}</Text></View>}
-            </View>
+            <TouchableOpacity
+              onPress={() => active && router.push({ pathname: '/group-members' as any, params: { groupId: active.id, name: active.name } })}
+              style={{ alignItems: 'flex-end', gap: 6 }}
+            >
+              <View style={st.avatarRow}>
+                {roster.slice(0, 4).map((m, i) => (
+                  <View key={m.id} style={[st.miniDot, { backgroundColor: colorFor(m.id), marginLeft: i ? -8 : 0, borderColor: colors.card, opacity: presences[m.id] ? 1 : 0.45 }]}>
+                    <Text style={st.miniDotTxt}>{(m.name || '?').trim()[0]?.toUpperCase()}</Text>
+                  </View>
+                ))}
+                {roster.length > 4 && <View style={[st.miniDot, { backgroundColor: colors.border, marginLeft: -8, borderColor: colors.card }]}><Text style={[st.miniDotTxt, { color: colors.text }]}>+{roster.length - 4}</Text></View>}
+              </View>
+              <Text style={{ color: colors.primary, fontSize: 11.5, fontWeight: '700' }}>View All</Text>
+            </TouchableOpacity>
           </View>
 
           {/* map preview */}
@@ -633,38 +889,144 @@ export default function FamilySpaceScreen() {
             </View>
           </TouchableOpacity>
 
-          {/* quick tiles */}
-          <View style={st.tiles}>
-            <TouchableOpacity onPress={() => setCheckin(true)} style={[st.tile, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <Ionicons name="checkmark-done-circle" size={21} color={colors.success} /><Text style={[st.tileTxt, { color: colors.text }]}>Check-in</Text>
+          {/* Why the map is emptier than the member list (see notVisible).
+              Location sharing is opt-in on EACH device, so one phone sharing
+              does not make the other appear — and without this line an empty
+              map looks like a fault rather than a setting. */}
+          {notVisible.length > 0 && (
+            <View style={[st.card, { backgroundColor: colors.card, borderColor: colors.border, flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }]}>
+              <Ionicons name="location-outline" size={17} color={colors.textDim} />
+              <Text style={{ color: colors.textDim, fontSize: 12.5, flex: 1, lineHeight: 17 }}>
+                No location from {notVisible.slice(0, 3).join(', ')}
+                {notVisible.length > 3 ? ` and ${notVisible.length - 3} more` : ''}.
+                {' '}Each person turns sharing on from their own phone.
+              </Text>
+            </View>
+          )}
+
+          {/* A SCHOOL, OFFICE OR CAB SPACE GETS ITS OWN SECTIONS.
+              Not a different app — the same screen, the same header, switcher,
+              map and members, with the middle band routed by space type. A
+              school parent used to land on Safe Zones and SOS with their
+              child's bus below the fold; now transport leads and the family
+              tools are simply not there. lib/spaces/layout.ts owns the
+              decision, so it is testable without a renderer. */}
+          {spaceFamily !== 'family' && spaceFamily !== 'generic' ? (
+            <View style={st.qaGrid}>
+              {sections.map((s) => (
+                <TouchableOpacity
+                  key={s.key}
+                  onPress={() => active && router.push({
+                    pathname: s.route as any,
+                    params: {
+                      spaceId: active.id, circleId: active.id,
+                      name: active.name, circleName: active.name,
+                      groupType: active.groupType ?? '',
+                      perms: Array.from(perms).join(','),
+                    },
+                  })}
+                  style={[st.qa, { backgroundColor: colors.card, borderColor: colors.border }]}
+                >
+                  <View style={[st.qaIcon, { backgroundColor: colors.primary + '22' }]}>
+                    <Ionicons name={s.icon as any} size={19} color={colors.primary} />
+                  </View>
+                  <Text style={[st.qaTitle, { color: colors.text }]}>{s.label}</Text>
+                  <Text style={[st.qaSub, { color: colors.textDim }]} numberOfLines={1}>{s.hint}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          ) : (
+          /* Quick actions (design screen 5).
+              Icon in a tinted rounded square, title, and a subtitle saying what
+              it does — the mockup's shape. Each tile keeps its existing
+              permission gate; the restyle changes how they look, never who can
+              see them. */
+          <View style={st.qaGrid}>
+            <TouchableOpacity
+              onPress={() => setExpanded(true)}
+              style={[st.qa, { backgroundColor: colors.card, borderColor: colors.border }]}
+            >
+              <View style={[st.qaIcon, { backgroundColor: colors.primary + '22' }]}>
+                <Ionicons name="map" size={19} color={colors.primary} />
+              </View>
+              <Text style={[st.qaTitle, { color: colors.text }]}>Live Map</Text>
+              <Text style={[st.qaSub, { color: colors.textDim }]} numberOfLines={1}>
+                {liveCount ? `${liveCount} sharing` : 'See all'}
+              </Text>
             </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => router.push('/emergency-sos' as any)}
+              style={[st.qa, { backgroundColor: colors.card, borderColor: colors.border }]}
+            >
+              <View style={[st.qaIcon, { backgroundColor: colors.danger + '22' }]}>
+                <Ionicons name="medkit" size={19} color={colors.danger} />
+              </View>
+              <Text style={[st.qaTitle, { color: colors.text }]}>SOS</Text>
+              <Text style={[st.qaSub, { color: colors.textDim }]} numberOfLines={1}>Emergency</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => setCheckin(true)}
+              style={[st.qa, { backgroundColor: colors.card, borderColor: colors.border }]}
+            >
+              <View style={[st.qaIcon, { backgroundColor: colors.success + '22' }]}>
+                <Ionicons name="checkmark-done-circle" size={19} color={colors.success} />
+              </View>
+              <Text style={[st.qaTitle, { color: colors.text }]}>Check-in</Text>
+              <Text style={[st.qaSub, { color: colors.textDim }]} numberOfLines={1}>Share status</Text>
+            </TouchableOpacity>
+
             {canZones && (
-              <TouchableOpacity onPress={() => active && router.push({ pathname: '/family-places' as any, params: { circleId: active.id, name: active.name } })}
-                style={[st.tile, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                <Ionicons name="location" size={21} color={colors.primary} /><Text style={[st.tileTxt, { color: colors.text }]}>Places</Text>
+              <TouchableOpacity
+                onPress={() => active && router.push({ pathname: '/family-places' as any, params: { circleId: active.id, name: active.name } })}
+                style={[st.qa, { backgroundColor: colors.card, borderColor: colors.border }]}
+              >
+                <View style={[st.qaIcon, { backgroundColor: colors.primary + '22' }]}>
+                  <Ionicons name="location" size={19} color={colors.primary} />
+                </View>
+                <Text style={[st.qaTitle, { color: colors.text }]}>Safe Zones</Text>
+                <Text style={[st.qaSub, { color: colors.textDim }]} numberOfLines={1}>Places that matter</Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity onPress={() => active && router.push({ pathname: '/family-alerts' as any, params: { circleId: active.id, circleName: active.name } })}
-              style={[st.tile, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <Ionicons name="notifications" size={21} color={colors.primary} /><Text style={[st.tileTxt, { color: colors.text }]}>Alerts</Text>
+
+            <TouchableOpacity
+              onPress={() => active && router.push({ pathname: '/family-alerts' as any, params: { circleId: active.id, circleName: active.name } })}
+              style={[st.qa, { backgroundColor: colors.card, borderColor: colors.border }]}
+            >
+              <View style={[st.qaIcon, { backgroundColor: colors.primary + '22' }]}>
+                <Ionicons name="notifications" size={19} color={colors.primary} />
+              </View>
+              <Text style={[st.qaTitle, { color: colors.text }]}>Alerts</Text>
+              <Text style={[st.qaSub, { color: colors.textDim }]} numberOfLines={1}>
+                {unread > 0 ? `${unread > 99 ? '99+' : unread} unread` : 'All caught up'}
+              </Text>
               {unread > 0 && (
                 <View style={[st.badge, { backgroundColor: colors.danger, borderColor: colors.card }]}>
                   <Text style={st.badgeTxt}>{unread > 99 ? '99+' : unread}</Text>
                 </View>
               )}
             </TouchableOpacity>
+
             {canHistory && (
-              <TouchableOpacity onPress={() => active && router.push({ pathname: '/family-history' as any, params: { circleId: active.id, circleName: active.name } })}
-                style={[st.tile, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                <Ionicons name="time" size={21} color={colors.primary} /><Text style={[st.tileTxt, { color: colors.text }]}>History</Text>
+              <TouchableOpacity
+                onPress={() => active && router.push({ pathname: '/family-history' as any, params: { circleId: active.id, circleName: active.name } })}
+                style={[st.qa, { backgroundColor: colors.card, borderColor: colors.border }]}
+              >
+                <View style={[st.qaIcon, { backgroundColor: colors.primary + '22' }]}>
+                  <Ionicons name="time" size={19} color={colors.primary} />
+                </View>
+                <Text style={[st.qaTitle, { color: colors.text }]}>History</Text>
+                <Text style={[st.qaSub, { color: colors.textDim }]} numberOfLines={1}>Where everyone was</Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity onPress={() => router.push('/emergency-sos' as any)} style={[st.tile, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <Ionicons name="medkit" size={21} color={colors.danger} /><Text style={[st.tileTxt, { color: colors.text }]}>Emergency</Text>
-            </TouchableOpacity>
           </View>
+          )}
 
-          {/* hold-to-SOS */}
+          {/* hold-to-SOS — a family/friends affordance. A school parent holding
+              their phone down to raise an alarm to a whole school is not the
+              same gesture, and a bus space has its own incident flow. */}
+          {(spaceFamily === 'family' || spaceFamily === 'generic') && (
           <Pressable onPressIn={sosStart} onPressOut={sosEnd} style={[st.sosBig, { borderColor: colors.danger, backgroundColor: colors.danger + '14' }]}>
             <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.danger + '55', transform: [{ scaleX: sosProg }] }]} />
             <View style={[st.sosIcon, { backgroundColor: colors.danger }]}><Text style={{ fontSize: 20 }}>🆘</Text></View>
@@ -673,8 +1035,78 @@ export default function FamilySpaceScreen() {
               <Text style={{ color: colors.textDim, fontSize: 12 }}>Alerts your circle and shares your live location</Text>
             </View>
           </Pressable>
+          )}
 
           {shareToggleRow}
+
+          {/* Operations (Spaces & Operations, S3.1 / S3.4).
+              A driver's own run comes FIRST and is styled as the primary action:
+              S3.4 says a driver never lands on a dashboard, and the honest way
+              to honour that on a shared screen is to put their manifest above
+              everything else rather than to hide the rest. */}
+          {runs.filter((r) => canDrive && r.driverId === me?.id).map((r) => (
+            <TouchableOpacity
+              key={r.id}
+              onPress={() => router.push({ pathname: '/space-run-driver' as any, params: { spaceId: active!.id, runId: r.id } })}
+              style={[st.card, { backgroundColor: colors.card, borderColor: colors.primary, flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 }]}
+            >
+              <View style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary + '22' }}>
+                <Ionicons name="bus" size={20} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={{ color: colors.text, fontWeight: '700', fontSize: 14.5 }} numberOfLines={1}>
+                  {r.vehicleLabel || r.name}
+                </Text>
+                <Text style={{ color: colors.textDim, fontSize: 12 }} numberOfLines={1}>
+                  {r.status === 'started' ? 'Your run is in progress' : 'Tap to start your run'}
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
+            </TouchableOpacity>
+          ))}
+
+          {/* Everything else the caller may see. For a guardian this is the bus
+              their child is on; for ops it is the whole active timetable. */}
+          {runs.filter((r) => !(canDrive && r.driverId === me?.id)).length > 0 && (
+            <View style={[st.card, { backgroundColor: colors.card, borderColor: colors.border, marginBottom: 14 }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                <Text style={{ color: colors.text, fontWeight: '700', fontSize: 14.5, flex: 1 }}>
+                  {canOps ? 'Runs in progress' : 'Today’s run'}
+                </Text>
+                {canOps && (
+                  <TouchableOpacity
+                    onPress={() => active && router.push({ pathname: '/space-ops-map' as any, params: { spaceId: active.id, name: active.name, groupType: active.groupType ?? '' } })}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                  >
+                    <Ionicons name="map-outline" size={15} color={colors.primary} />
+                    <Text style={{ color: colors.primary, fontSize: 12.5, fontWeight: '600' }}>Map</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              {runs.filter((r) => !(canDrive && r.driverId === me?.id)).map((r) => (
+                <TouchableOpacity
+                  key={r.id}
+                  onPress={() => router.push({ pathname: '/space-run' as any, params: { spaceId: active!.id, runId: r.id } })}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 }}
+                >
+                  <Ionicons
+                    name={r.status === 'started' ? 'navigate' : 'time-outline'}
+                    size={16}
+                    color={r.stale ? colors.danger : (r.status === 'started' ? colors.success : colors.textDim)}
+                  />
+                  <Text style={{ color: colors.text, flex: 1 }} numberOfLines={1}>
+                    {r.vehicleLabel || r.name}
+                  </Text>
+                  {/* A vehicle that has stopped reporting is called out here and
+                      not left to look identical to one that is running fine. */}
+                  {r.stale && r.status === 'started' && (
+                    <Text style={{ color: colors.danger, fontSize: 12 }}>not reporting</Text>
+                  )}
+                  <Ionicons name="chevron-forward" size={16} color={colors.textDim} />
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
 
           {/* active trip (G5.7) — only when one is actually running */}
           {!!trip && (() => {
@@ -711,7 +1143,7 @@ export default function FamilySpaceScreen() {
 
           {/* members */}
           <View style={st.secHead}>
-            <Text style={[st.secTitle, { color: colors.text }]}>Family Members</Text>
+            <Text style={[st.secTitle, { color: colors.text }]}>{memberHeading(active?.groupType)}</Text>
             {/* "+ Invite" opens the CONTACT PICKER (it used to open the sent-
                 invitations manager, which asks you to type a name/email/phone —
                 the person you want is almost always already a contact). The
@@ -729,7 +1161,14 @@ export default function FamilySpaceScreen() {
           {/* today's highlights */}
           {highlights.length > 0 && (
             <>
-              <View style={st.secHead}><Text style={[st.secTitle, { color: colors.text }]}>Today&apos;s Highlights</Text></View>
+              {/* design screen 5: section header carries a View All to the
+                  alerts centre, which is where the full stream already lives. */}
+              <View style={st.secHead}>
+                <Text style={[st.secTitle, { color: colors.text, flex: 1 }]}>Today&apos;s Highlights</Text>
+                <TouchableOpacity onPress={() => active && router.push({ pathname: '/family-alerts' as any, params: { circleId: active.id, circleName: active.name } })}>
+                  <Text style={{ color: colors.primary, fontSize: 12.5, fontWeight: '700' }}>View All</Text>
+                </TouchableOpacity>
+              </View>
               <View style={[st.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 {highlights.map((h, i) => (
                   <View key={i} style={[st.row, { borderColor: colors.border }, i === 0 && { borderTopWidth: 0 }]}>
@@ -750,18 +1189,43 @@ export default function FamilySpaceScreen() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={st.modalWrap}>
           <Pressable style={{ flex: 1 }} onPress={() => setCheckin(false)} />
           <View style={[st.modal, { backgroundColor: colors.surfaceSolid, borderColor: colors.border }]}>
-            <Text style={[st.modalTitle, { color: colors.text }]}>Let your family know</Text>
+            {/* Design screen 20: choose a status, then send.
+                This also fixes a real trap in the previous flow — tapping a
+                status sent IMMEDIATELY while the note field sat below it, so
+                anyone who typed their note after choosing (the natural order,
+                since the note is underneath) had it silently dropped. */}
+            <Text style={[st.modalTitle, { color: colors.text }]}>Let your family know you&apos;re safe</Text>
             <View style={st.checkGrid}>
-              {CHECKINS.map((c) => (
-                <TouchableOpacity key={c.label} onPress={() => sendCheckin(c)}
-                  style={[st.checkBtn, { backgroundColor: c.color + '1e', borderColor: c.color + '55' }]}>
-                  <Text style={{ fontSize: 18 }}>{c.emoji}</Text>
-                  <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13.5 }}>{c.label}</Text>
-                </TouchableOpacity>
-              ))}
+              {CHECKINS.map((c) => {
+                const on = picked?.label === c.label;
+                return (
+                  <TouchableOpacity
+                    key={c.label}
+                    onPress={() => setPicked(on ? null : c)}
+                    style={[st.checkBtn, {
+                      backgroundColor: c.color + (on ? '33' : '1e'),
+                      borderColor: on ? c.color : c.color + '55',
+                      borderWidth: on ? 2 : 1,
+                    }]}
+                  >
+                    <Text style={{ fontSize: 18 }}>{c.emoji}</Text>
+                    <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13.5 }}>{c.label}</Text>
+                    {on && <Ionicons name="checkmark-circle" size={16} color={c.color} style={{ position: 'absolute', top: 8, right: 8 }} />}
+                  </TouchableOpacity>
+                );
+              })}
             </View>
             <TextInput value={note} onChangeText={setNote} placeholder="Add a note (optional)" placeholderTextColor={colors.textFaint}
               style={[st.noteInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]} />
+            <TouchableOpacity
+              onPress={() => picked && sendCheckin(picked)}
+              disabled={!picked}
+              style={[st.sendCheckin, { backgroundColor: picked ? colors.primary : colors.border }]}
+            >
+              <Text style={{ color: picked ? '#fff' : colors.textDim, fontWeight: '800', fontSize: 15 }}>
+                {picked ? `Send “${picked.label}”` : 'Choose a status'}
+              </Text>
+            </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -852,6 +1316,30 @@ export default function FamilySpaceScreen() {
             <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-calendar' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: colors.border }]}>
               <Ionicons name="calendar-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Shared calendar</Text>
             </TouchableOpacity>
+            {/* The admin console. Offered only to someone who actually runs this
+                space, and it carries their RESOLVED permissions across so the
+                console draws only what they can use — a tile that fails on tap
+                teaches people to distrust the whole screen. The permission list
+                is presentation; every endpoint behind it re-checks server-side. */}
+            {canOps && <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/space-admin' as any, params: { spaceId: active.id, name: active.name, groupType: active.groupType ?? '', perms: Array.from(perms).join(',') } }); }} style={[st.mRow, { borderColor: colors.border }]}>
+              <Ionicons name="shield-checkmark-outline" size={18} color={colors.primary} />
+              <Text style={[st.mTxt, { color: colors.primary, fontWeight: '700' }]}>Admin console</Text>
+            </TouchableOpacity>}
+            {/* Attendance is only meaningful where someone oversees others, so
+                it is offered on the same permission that shows the runs card
+                rather than to every member of every household. */}
+            {canOps && <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/space-attendance' as any, params: { spaceId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: colors.border }]}>
+              <Ionicons name="calendar-number-outline" size={18} color={colors.text} />
+              <Text style={[st.mTxt, { color: colors.text }]}>Attendance</Text>
+            </TouchableOpacity>}
+            {/* The roster is offered to EVERYONE in an ops space, not just ops:
+                a parent's "roster" is their own child, and that is the screen
+                that tells them so. The server decides what is in it. */}
+            {(canOps || hasPerm(perms, 'manage_roster') || !!active?.groupType?.includes('school') || !!active?.groupType?.includes('transport')) &&
+              <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/space-roster' as any, params: { spaceId: active.id, name: active.name, canManage: hasPerm(perms, 'manage_roster') ? '1' : '0' } }); }} style={[st.mRow, { borderColor: colors.border }]}>
+                <Ionicons name="people-outline" size={18} color={colors.text} />
+                <Text style={[st.mTxt, { color: colors.text }]}>Roster</Text>
+              </TouchableOpacity>}
             <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-insights' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: colors.border }]}>
               <Ionicons name="stats-chart-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Insights</Text>
             </TouchableOpacity>
@@ -903,7 +1391,7 @@ const st = StyleSheet.create({
   screen: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   dash: { padding: 14 },
-  greetRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  greetRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
   chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7 },
   status: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderWidth: 1, borderRadius: 16, marginBottom: 10 },
   statusIcon: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
@@ -917,6 +1405,25 @@ const st = StyleSheet.create({
   tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 10 },
   tile: { flexBasis: '30%', flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 5, height: 66, borderWidth: 1, borderRadius: 16 },
   tileTxt: { fontSize: 12.5, fontWeight: '700' },
+  // ── design screen 5: greeting + quick-action cards ──
+  greetBell: {
+    width: 40, height: 40, borderRadius: 20, borderWidth: 1,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  bellDot: {
+    position: 'absolute', top: 8, right: 9, width: 9, height: 9,
+    borderRadius: 5, borderWidth: 1.5,
+  },
+  qaGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 10 },
+  // Three across on a normal phone; wraps to two on narrow screens rather than
+  // squeezing the subtitle out of existence.
+  qa: {
+    flexBasis: '30%', flexGrow: 1, minWidth: 104,
+    borderWidth: 1, borderRadius: 16, padding: 12, gap: 7,
+  },
+  qaIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  qaTitle: { fontSize: 13.5, fontWeight: '700' },
+  qaSub: { fontSize: 11 },
   badge: { position: 'absolute', top: 6, right: 10, minWidth: 18, height: 18, borderRadius: 9, borderWidth: 1.5, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' },
   badgeTxt: { color: '#fff', fontSize: 10, fontWeight: '800' },
   announce: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderWidth: 1, borderRadius: 14, marginBottom: 10 },
@@ -937,6 +1444,7 @@ const st = StyleSheet.create({
   checkGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   checkBtn: { flexBasis: '47%', flexGrow: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 52, borderRadius: 14, borderWidth: 1 },
   noteInput: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, height: 46, marginTop: 4, fontSize: 14.5 },
+  sendCheckin: { marginTop: 10, height: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   btnWide: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 50, borderRadius: 13, marginTop: 12 },
   saveBtn: { width: 46, height: 46, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   mRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 13, borderTopWidth: StyleSheet.hairlineWidth },

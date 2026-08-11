@@ -22,7 +22,13 @@ export type Permission =
   | 'send_announcements'
   | 'create_tasks'
   | 'manage_calendar'
-  | 'manage_album';
+  | 'manage_album'
+  // ── Spaces & Operations (migration 084) ──
+  | 'manage_runs'
+  | 'drive_run'
+  | 'view_space_ops'
+  | 'manage_roster'
+  | 'report_incident';
 
 /**
  * Complete set, in a stable display order. Mirrors groups.All in Go, and the
@@ -42,6 +48,11 @@ export const ALL_PERMISSIONS: Permission[] = [
   'create_tasks',
   'manage_calendar',
   'manage_album',
+  'manage_runs',
+  'drive_run',
+  'view_space_ops',
+  'manage_roster',
+  'report_incident',
 ];
 
 export type GroupRole = 'guest' | 'member' | 'moderator' | 'admin' | 'owner';
@@ -66,6 +77,11 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   create_tasks: 'Create shared tasks',
   manage_calendar: 'Manage the calendar',
   manage_album: 'Manage the shared album',
+  manage_runs: 'Create and assign runs',
+  drive_run: 'Drive a run',
+  view_space_ops: 'See the whole space',
+  manage_roster: 'Manage the roster',
+  report_incident: 'Report incidents',
 };
 
 export const ROLE_LABELS: Record<GroupRole, string> = {
@@ -91,7 +107,69 @@ export const ROLE_BLURBS: Record<GroupRole, string> = {
 export interface PermissionLayers {
   typeDefault?: Partial<Record<GroupRole, string[]>> | null;
   groupOverride?: Partial<Record<GroupRole, string[]>> | null;
+  /** Layer 2 (migration 084) — see catalogLayer. */
+  roleCatalog?: string[] | null;
   memberGrant?: string[] | null;
+}
+
+/**
+ * One entry in a space type's role catalog: a display role mapped onto exactly
+ * one rank. Mirrors groups.RoleDef in Go.
+ *
+ * `rank` is what governs member management. A "Transport Manager" is an admin
+ * wearing a label — canRemoveMember never sees `key`.
+ */
+export interface RoleDef {
+  key: string;
+  label: string;
+  rank: GroupRole;
+  /** Absent = inherit the rank default. `[]` = holds nothing. The two differ. */
+  permissions?: string[];
+}
+
+/**
+ * Resolve the catalog layer for a member. Mirrors groups.CatalogLayer in Go.
+ *
+ * Returns null (layer absent) unless the key is known, its rank MATCHES the
+ * member's actual rank, and the entry lists permissions. The rank match is a
+ * security check: roleKey is stored independently of role, so a stale key
+ * naming a higher-ranked entry must not hand over that entry's permissions.
+ */
+export function catalogLayer(
+  defs: RoleDef[] | null | undefined,
+  roleKey: string | null | undefined,
+  role: string,
+): string[] | null {
+  if (!roleKey || !defs?.length) return null;
+  const d = defs.find((x) => x.key === roleKey);
+  if (!d || d.rank !== role || d.permissions == null) return null;
+  return d.permissions;
+}
+
+/**
+ * Validate a catalog before it is stored or trusted. Mirrors
+ * groups.ParseRoleCatalog: all-or-nothing, because a catalog with one unknown
+ * rank is a hand-edited catalog, and dropping just the bad entry silently
+ * resolves those members to their bare rank default — which for a Driver is
+ * MORE than the catalog intended, not less.
+ */
+export function validateRoleCatalog(defs: unknown): string | null {
+  if (!Array.isArray(defs)) return 'catalog must be an array';
+  const seen = new Set<string>();
+  for (const raw of defs) {
+    const d = raw as Partial<RoleDef>;
+    if (!d || typeof d.key !== 'string' || d.key === '') return 'entry with empty key';
+    if (seen.has(d.key)) return `duplicate key ${d.key}`;
+    seen.add(d.key);
+    if (typeof d.rank !== 'string' || !isRole(d.rank)) return `${d.key} has unknown rank ${String(d.rank)}`;
+    if (d.permissions != null) {
+      if (!Array.isArray(d.permissions)) return `${d.key} permissions must be an array`;
+      for (const p of d.permissions) {
+        if (!isPermission(p)) return `${d.key} lists unknown permission ${String(p)}`;
+      }
+    }
+  }
+  return null;
 }
 
 export function isPermission(name: string): name is Permission {
@@ -117,6 +195,8 @@ export function resolvePermissions(role: string, layers: PermissionLayers): Set<
     chosen = layers.memberGrant;
   } else if (layers.groupOverride && layers.groupOverride[role] != null) {
     chosen = layers.groupOverride[role];
+  } else if (layers.roleCatalog != null) {
+    chosen = layers.roleCatalog;
   } else if (layers.typeDefault && layers.typeDefault[role] != null) {
     chosen = layers.typeDefault[role];
   }
@@ -292,6 +372,64 @@ if (require.main === module) {
   }
   for (const p of ALL_PERMISSIONS) {
     if (!PERMISSION_LABELS[p]) throw new Error(`permission ${p} has no label`);
+  }
+
+  // ── role catalog (migration 084) ──
+  const catalog: RoleDef[] = [
+    { key: 'principal', label: 'Principal', rank: 'owner' },
+    { key: 'transport_manager', label: 'Transport Manager', rank: 'admin', permissions: ['manage_runs', 'view_space_ops'] },
+    { key: 'driver', label: 'Bus Driver', rank: 'member', permissions: ['drive_run', 'report_incident'] },
+    { key: 'parent', label: 'Parent', rank: 'member', permissions: [] },
+    { key: 'teacher', label: 'Teacher', rank: 'member' },
+  ];
+  const withCatalog = (roleKey: string, role: string) =>
+    resolvePermissions(role, { typeDefault: famDefaults, roleCatalog: catalogLayer(catalog, roleKey, role) });
+
+  // the catalog REPLACES the rank default — a driver does not inherit
+  // start_navigation, which is the entire point of the layer
+  if (!eq(listPermissions(withCatalog('driver', 'member')), ['drive_run', 'report_incident'])) {
+    throw new Error('catalog must replace the rank default');
+  }
+  // an entry with no permissions list inherits the rank default; an empty list revokes
+  if (!eq(listPermissions(withCatalog('teacher', 'member')), ['view_history', 'start_navigation'])) {
+    throw new Error('absent catalog permissions must inherit the rank default');
+  }
+  if (listPermissions(withCatalog('parent', 'member')).length !== 0) {
+    throw new Error('an empty catalog list must grant nothing');
+  }
+  // a key whose rank does not match the member's rank must NOT apply — this is
+  // the privilege-escalation case, not a tidiness one
+  if (!eq(listPermissions(withCatalog('transport_manager', 'member')), ['view_history', 'start_navigation'])) {
+    throw new Error('rank mismatch must fall through to the rank default');
+  }
+  // unknown key, absent key, empty catalog: all fall through
+  if (!eq(listPermissions(withCatalog('astronaut', 'member')), ['view_history', 'start_navigation'])) {
+    throw new Error('unknown role key must fall through');
+  }
+  if (catalogLayer(catalog, '', 'member') !== null) throw new Error('no key means no layer');
+  if (catalogLayer([], 'driver', 'member') !== null) throw new Error('empty catalog means no layer');
+  // group override still outranks the catalog
+  const cov = resolvePermissions('member', {
+    typeDefault: famDefaults,
+    roleCatalog: catalogLayer(catalog, 'driver', 'member'),
+    groupOverride: { member: ['view_history'] },
+  });
+  if (!cov.has('view_history') || cov.has('drive_run')) throw new Error('group override must beat the catalog');
+  // owner is still untouchable by a catalog entry
+  if (resolvePermissions('owner', { roleCatalog: [] }).size !== ALL_PERMISSIONS.length) {
+    throw new Error('owner must hold everything regardless of catalog');
+  }
+
+  // catalog validation is all-or-nothing
+  if (validateRoleCatalog(catalog) !== null) throw new Error('valid catalog rejected');
+  const bad: unknown[][] = [
+    [{ key: 'x', label: 'X', rank: 'superuser' }],
+    [{ key: 'x', label: 'X', rank: 'member', permissions: ['delete_everything'] }],
+    [{ key: '', label: 'X', rank: 'member' }],
+    [{ key: 'x', label: 'X', rank: 'member' }, { key: 'x', label: 'Y', rank: 'guest' }],
+  ];
+  for (const b of bad) {
+    if (validateRoleCatalog(b) === null) throw new Error(`invalid catalog accepted: ${JSON.stringify(b)}`);
   }
 
   // seats

@@ -198,6 +198,15 @@ func chatsGet(w http.ResponseWriter, r *http.Request) {
 		"maxMembers":     gm.MaxMembers,
 		"approvalMode":   gm.ApprovalMode,
 		"permissions":    gm.Permissions,
+		// The caller's rank and display role, and the space type's catalog.
+		//
+		// These were added to chatsGroupMeta but not to THIS map, and chatsGet
+		// serialises the map rather than the struct — so `role`, `roleKey` and
+		// `roleCatalog` never reached any client. The admin console could not
+		// show a job title and had no catalog to offer when assigning one.
+		"role":           gm.Role,
+		"roleKey":        gm.RoleKey,
+		"roleCatalog":    gm.RoleCatalog,
 		"myRole":         mem.Role,
 		"myLastReadId":   userBigStr(mem.LastReadMessageID),
 		"hidden":         mem.Hidden,
@@ -303,9 +312,23 @@ func chatsMessagePost(w http.ResponseWriter, r *http.Request) {
 	// The flag discloses that a message IS an announcement, never what it says.
 	// Checked here, before the per-type validation, so it applies to every
 	// message kind rather than only the one branch it happens to sit in.
-	if meta != nil && chatsTruthy(meta["announcement"]) && !mem.can(groups.PermSendAnnouncement) {
-		httpx.Err(w, 403, "You do not have permission to send announcements")
-		return
+	if meta != nil && chatsTruthy(meta["announcement"]) {
+		if !mem.can(groups.PermSendAnnouncement) {
+			httpx.Err(w, 403, "You do not have permission to send announcements")
+			return
+		}
+		// Spaces & Operations: an announcement may be addressed to a run, a role
+		// or a subtree. Validated HERE, beside the permission, for the same
+		// reason — a modified client that skipped the composer must not be able
+		// to attach an audience its sender is not entitled to address.
+		//
+		// The audience forms mirror the visibility rule one-for-one, so
+		// "message my department" and "see my department" resolve identically.
+		if msg := chatsAudienceAllowed(ctx, user.ID, chatID, mem,
+			strings.TrimSpace(chatsStrOr(meta["audience"], ""))); msg != "" {
+			httpx.Err(w, 403, msg)
+			return
+		}
 	}
 
 	// Groups & Circles: a group_ref card is the in-app replacement for an invite
@@ -824,7 +847,7 @@ func chatsDelivered(w http.ResponseWriter, r *http.Request) {
 	// chat_members.last_delivered_message_id is per (chat, user), so on a
 	// multi-device account the first device to ack advances it for everyone —
 	// and delete-on-delivery would then null a body a second device never
-	// received. The per-device row (migration 071) is what lets the sweep wait
+	// received. The per-device row (migration 078) is what lets the sweep wait
 	// for every active install. Best-effort and non-fatal: a missing X-Device-Id
 	// (older client) simply leaves no row, and the sweep treats an account with
 	// no device rows as "unknown", falling back to the account-level pointer.

@@ -34,8 +34,12 @@ const MINI_APPS_MAIN = [
   { id: 'live',        icon: '\ud83d\udce1', name: 'Go Live', route: '/live', gradient: ['#EF4444', '#B91C1C'] as [string, string] },
   { id: 'vaultlens',   icon: '\u2728', name: 'VaultLens', route: '/vaultlens', gradient: ['#9D6FD0', '#EC4899'] as [string, string] },
   { id: 'navigate',    icon: '\uD83E\uDDED', name: 'Navigate', route: '/navigate', gradient: ['#4A9FFF', '#1D4ED8'] as [string, string] },
-  // Family Space absorbs the old Family Circle + SOS tiles \u2014 one app, one hub.
-  { id: 'familyspace', icon: '\uD83D\uDC6A', name: 'Family Space', route: '/family', gradient: ['#7C3AED', '#2563EB'] as [string, string] },
+  // Spaces absorbed the old Family Circle + SOS tiles \u2014 one app, one hub.
+  // Renamed from "Family Space": family is one TYPE of space, alongside school
+  // transport, offices and the rest. The route stays /family so existing deep
+  // links and the tile's stored id keep working \u2014 renaming a route to match a
+  // label is churn that breaks bookmarks.
+  { id: 'familyspace', icon: '\uD83D\uDC6A', name: 'Spaces', route: '/family', gradient: ['#7C3AED', '#2563EB'] as [string, string] },
   { id: 'finance',     icon: '\uD83D\uDCB0', name: 'Vault Finance', route: '/finance', gradient: ['#6D3FA8', '#9D6FD0'] as [string, string] },
   { id: 'shopbook',    icon: '\uD83D\uDECD\uFE0F', name: 'Shop Book', route: '/shop-book', gradient: ['#0B7A3B', '#16A34A'] as [string, string] },
   { id: 'notes',       icon: '\uD83D\uDCDD', name: 'Notes',       route: '/encrypted-notes', gradient: ['#F59E0B', '#D97706'] as [string, string] },

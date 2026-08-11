@@ -146,7 +146,7 @@ export default function FamilyAddScreen() {
     try {
       const code = await circleInviteCode(String(circleId));
       await Share.share({
-        message: `Join my Family Space "${circleName || 'Family'}" on VaultChat.\nCode: ${code}`,
+        message: `Join "${circleName || 'my space'}" on VaultChat.\nCode: ${code}`,
       });
     } catch (e: any) {
       Alert.alert('Invite', e?.message ?? 'Could not create an invite.');
@@ -183,7 +183,7 @@ export default function FamilyAddScreen() {
 
   return (
     <View style={s.screen}>
-      <Stack.Screen options={{ title: isFamily ? 'Invite to Family Space' : 'Invite to group', headerTitleAlign: 'center' }} />
+      <Stack.Screen options={{ title: isFamily ? 'Invite to space' : 'Invite to group', headerTitleAlign: 'center' }} />
 
       <View style={s.search}>
         <Ionicons name="search" size={17} color={colors.textDim} />

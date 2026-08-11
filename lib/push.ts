@@ -90,6 +90,33 @@ export async function ensurePermissionAndChannel(): Promise<boolean> {
     } catch (err) {
       console.warn('[push] calls channel failed:', (err as any)?.message);
     }
+
+    // Spaces & Operations (S5.6): a driver's emergency.
+    //
+    // Its own channel because the server addresses `channelId: "sos"`, and a
+    // channel id Android has never been told about falls back to default
+    // silently — so without this the SOS wording would arrive with the same
+    // sound and the same importance as a blocked road, which is the exact
+    // failure the category was added to fix.
+    //
+    // MAX and bypassDnd, like calls: someone has pressed a panic button. It is
+    // deliberately NOT given to ordinary incidents — a breakdown is urgent, but
+    // it is not "wake the head teacher at 2am" urgent, and a channel that cries
+    // wolf gets muted, taking the real emergencies with it.
+    try {
+      await Notifications.setNotificationChannelAsync('sos', {
+        name: 'Emergency alerts',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 800, 400, 800, 400, 800],
+        lightColor: '#EF4444',
+        sound: 'default',
+        bypassDnd: true,
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+        enableVibrate: true,
+      });
+    } catch (err) {
+      console.warn('[push] sos channel failed:', (err as any)?.message);
+    }
   }
 
   // Accept / Decline action buttons on the incoming-call notification.

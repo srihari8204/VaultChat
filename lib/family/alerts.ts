@@ -29,7 +29,12 @@ export type AlertKind =
   | 'battery' | 'sharing'      // device state
   | 'gps' | 'offline'          // the device stopped being able to report
   | 'deviation'                // left the expected route (group navigation)
-  | 'announcement';            // a permitted member addressed the group
+  | 'announcement'             // a permitted member addressed the group
+  // Spaces & Operations (S5.4). Detected ON THE EMITTING DEVICE, because the
+  // server cannot read a position and is not going to be given one — see the
+  // design note in openspec/changes/spaces-operations/design.md.
+  | 'overspeed'                // sustained speed above the space's threshold
+  | 'longstop';                // a vehicle stationary mid-run for too long
 
 export type AlertSeverity = 'critical' | 'important' | 'info';
 
@@ -69,6 +74,11 @@ export const SEVERITY_OF: Record<AlertKind, AlertSeverity> = {
   gps: 'important',
   offline: 'important',
   deviation: 'important',
+  // A bus doing 90 in a 50 is not an "info" event, and a vehicle that has been
+  // stationary mid-route for ten minutes is either broken down or something
+  // worse. Both outrank an arrival.
+  overspeed: 'important',
+  longstop: 'important',
   battery: 'important',
   leave: 'important',
   announcement: 'important',

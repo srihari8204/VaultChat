@@ -560,12 +560,29 @@ func userSosPost(w http.ResponseWriter, r *http.Request) {
 	if test {
 		sosType = "test"
 	}
+	// THE POSITION IS SENT, NOT STORED.
+	//
+	// The alert above carries the location to the people who need it — that is
+	// the whole point of an SOS, and nothing about it changes. What no longer
+	// happens is writing those coordinates into this database, where they would
+	// sit permanently in the clear.
+	//
+	// Everything else in VaultChat relays positions it cannot read. SOS was the
+	// single exception, and it was the worst possible one: the exact place
+	// somebody stood at the moment they were most in danger, retained
+	// indefinitely, in the one table an attacker would look for first. The row
+	// still records THAT an alert happened, when, and how many people it
+	// reached, which is what the history screen is actually for.
+	//
+	// The columns are left in place rather than dropped: dropping them is
+	// irreversible and this is a decision worth being able to revisit. They are
+	// simply never written again.
 	var id int64
 	var createdAt time.Time
 	err = db.Pool.QueryRow(ctx,
-		`INSERT INTO sos_events (user_id, type, latitude, longitude, contacts_notified)
-	     VALUES ($1, $2, $3, $4, $5) RETURNING id, created_at`,
-		user.ID, sosType, lat, lng, notified).Scan(&id, &createdAt)
+		`INSERT INTO sos_events (user_id, type, contacts_notified)
+	     VALUES ($1, $2, $3) RETURNING id, created_at`,
+		user.ID, sosType, notified).Scan(&id, &createdAt)
 	if err != nil {
 		httpx.Err(w, 500, "Failed to send SOS")
 		return
