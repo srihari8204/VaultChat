@@ -273,6 +273,19 @@ func sbConsumeOrder(ctx context.Context, tx pgx.Tx, shopID, orderID, actor strin
 			return fmt.Errorf("stock consume refused for product %s on order %s", l.ProductID, orderID)
 		}
 	}
+	// Freeze what these goods cost, now, on the lines that sold them. Profit
+	// reported for today must not move when tomorrow's delivery arrives at a
+	// different price (096).
+	if _, err := tx.Exec(ctx, `
+		UPDATE shopbook_order_item i
+		   SET cost_at_sale = p.avg_cost
+		  FROM shopbook_product p
+		 WHERE i.product_id = p.id
+		   AND i.order_id = $1
+		   AND i.cost_at_sale IS NULL
+		   AND p.avg_cost > 0`, orderID); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -412,6 +425,10 @@ func sbStockAdjust(w http.ResponseWriter, r *http.Request) {
 
 	var applied bool
 	err := db.WithUser(ctx, user.ID, func(tx pgx.Tx) error {
+		var beforeOnHand int64
+		_ = tx.QueryRow(ctx,
+			`SELECT `+sbCents("on_hand")+` FROM shopbook_stock WHERE product_id=$1`,
+			b.ProductID).Scan(&beforeOnHand)
 		okMove, err := sbApplyMove(ctx, tx, sbMove{
 			ShopID: shopID, ProductID: b.ProductID, Kind: b.Kind,
 			OnHand: qty, Unit: unit, Reason: strings.TrimSpace(b.Reason),
@@ -424,6 +441,15 @@ func sbStockAdjust(w http.ResponseWriter, r *http.Request) {
 		if !okMove {
 			return fmt.Errorf("would go negative")
 		}
+		// Stock moving by hand is exactly the action an audit exists for
+		// (P1-F): the movement ledger says what changed, this says who and why.
+		sbAudit(ctx, tx, sbAuditEntry{
+			ShopID: shopID, Actor: user.ID, Action: "stock." + b.Kind,
+			Entity: "product", EntityID: b.ProductID,
+			Before: map[string]any{"onHand": float64(beforeOnHand) / 100},
+			After:  map[string]any{"onHand": float64(beforeOnHand+qty) / 100},
+			Reason: strings.TrimSpace(b.Reason), IP: sbClientIP(r),
+		})
 		return nil
 	})
 	if err != nil {

@@ -1143,6 +1143,16 @@ func sbSaveProduct(w http.ResponseWriter, r *http.Request) {
 	cost := int64(math.Round(b.CostPrice * 100))
 	taxPct := int64(math.Round(b.TaxPercent * 100))
 
+	// A price change is the single most consequential edit an owner makes to
+	// their catalog, so it is captured before and after (P1-F).
+	var beforePrice int64
+	var beforeName string
+	if b.ID != "" {
+		_ = db.Pool.QueryRow(ctx,
+			`SELECT `+sbCents("price")+`, name FROM shopbook_product WHERE id=$1 AND shop_id=$2`,
+			b.ID, shopID).Scan(&beforePrice, &beforeName)
+	}
+
 	var id string
 	if b.ID != "" {
 		// Update — scoped to this owner's shop. updated_at feeds the
@@ -1190,6 +1200,22 @@ func sbSaveProduct(w http.ResponseWriter, r *http.Request) {
 				log.Printf("[shopbook] reorder level update failed (product=%s): %v", id, err)
 			}
 		}
+	}
+	if b.ID == "" {
+		sbAudit(ctx, db.Pool, sbAuditEntry{
+			ShopID: shopID, Actor: httpx.UserFrom(r).ID, Action: "product.create",
+			Entity: "product", EntityID: id,
+			After: map[string]any{"name": b.Name, "price": money(price).Float()},
+			IP:    sbClientIP(r),
+		})
+	} else if beforePrice != price {
+		sbAudit(ctx, db.Pool, sbAuditEntry{
+			ShopID: shopID, Actor: httpx.UserFrom(r).ID, Action: "product.price_change",
+			Entity: "product", EntityID: id,
+			Before: map[string]any{"name": beforeName, "price": money(beforePrice).Float()},
+			After:  map[string]any{"name": b.Name, "price": money(price).Float()},
+			IP:     sbClientIP(r),
+		})
 	}
 	httpx.JSON(w, 200, map[string]any{"id": id})
 }
@@ -1836,13 +1862,57 @@ func sbDashboard(w http.ResponseWriter, r *http.Request) {
 		` ELSE -`+sbCents("amount")+` END),0)
 		  FROM shopbook_ledger WHERE shop_id=$1`, shopID).Scan(&totalPendingC)
 
-	httpx.JSON(w, 200, map[string]any{
-		"todayOrders":   todayOrders,
-		"todaySales":    money(todaySalesC).Float(),
-		"pendingOrders": pendingOrders,
-		"lowStock":      lowStock,
-		"totalPending":  money(totalPendingC).Float(),
-	})
+	// Cost of goods sold today, from the cost FROZEN ONTO EACH LINE when the
+	// goods left the shelf (096) — never from the product's cost as it stands
+	// now, or today's delivery would restate yesterday's profit.
+	//
+	// Lines with no cost basis are excluded rather than counted at zero, which
+	// would report their whole sale price as profit. The share of revenue the
+	// margin actually covers is reported alongside it, so a partial answer is
+	// never mistaken for a complete one.
+	var cogsC, coveredRevC, purchasesC int64
+	var todayCustomers, todayPurchases int
+	_ = db.Pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(`+sbCents("i.cost_at_sale * COALESCE(i.fulfilled_qty, i.qty)")+`),0),
+		       COALESCE(SUM(`+sbCents("i.line_total")+`),0)
+		  FROM shopbook_order_item i
+		  JOIN shopbook_order o ON o.id = i.order_id
+		 WHERE o.shop_id=$1 AND o.status='completed'
+		   AND o.created_at::date = NOW()::date
+		   AND i.cost_at_sale IS NOT NULL
+		   AND i.availability <> 'unavailable' AND NOT i.removed`, shopID).Scan(&cogsC, &coveredRevC)
+	_ = db.Pool.QueryRow(ctx, `
+		SELECT COUNT(*), COALESCE(SUM(`+sbCents("total")+`),0)
+		  FROM shopbook_purchase WHERE shop_id=$1 AND purchased_on = CURRENT_DATE`,
+		shopID).Scan(&todayPurchases, &purchasesC)
+	_ = db.Pool.QueryRow(ctx, `
+		SELECT COUNT(DISTINCT customer_user_id) FROM shopbook_order
+		 WHERE shop_id=$1 AND created_at::date = NOW()::date
+		   AND status NOT IN ('cancelled','rejected','not_collected')`,
+		shopID).Scan(&todayCustomers)
+
+	out := map[string]any{
+		"todayOrders":    todayOrders,
+		"todaySales":     money(todaySalesC).Float(),
+		"todayCustomers": todayCustomers,
+		"pendingOrders":  pendingOrders,
+		"lowStock":       lowStock,
+		"totalPending":   money(totalPendingC).Float(),
+		"todayPurchases": todayPurchases,
+		"purchaseSpend":  money(purchasesC).Float(),
+	}
+	// Gross profit is only shown when there is a cost basis to compute it
+	// from. An unqualified "profit" derived from a catalog with no purchase
+	// history would just be revenue wearing a different label.
+	if cogsC > 0 {
+		out["costOfGoods"] = money(cogsC).Float()
+		out["grossProfit"] = money(coveredRevC - cogsC).Float()
+		out["marginCoverage"] = map[string]any{
+			"revenueWithCost": money(coveredRevC).Float(),
+			"revenueTotal":    money(todaySalesC).Float(),
+		}
+	}
+	httpx.JSON(w, 200, out)
 }
 
 // ── owner: khata ─────────────────────────────────────────────────

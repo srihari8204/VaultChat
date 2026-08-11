@@ -191,13 +191,13 @@ func chatsGet(w http.ResponseWriter, r *http.Request) {
 		// Groups & Circles: the group's identity plus THIS CALLER's resolved
 		// permission set, so the client can gate its own UI. Advisory only —
 		// every mutating endpoint re-resolves server-side.
-		"groupType":      gm.GroupType,
-		"icon":           gm.Icon,
-		"color":          gm.Color,
-		"privacy":        gm.Privacy,
-		"maxMembers":     gm.MaxMembers,
-		"approvalMode":   gm.ApprovalMode,
-		"permissions":    gm.Permissions,
+		"groupType":    gm.GroupType,
+		"icon":         gm.Icon,
+		"color":        gm.Color,
+		"privacy":      gm.Privacy,
+		"maxMembers":   gm.MaxMembers,
+		"approvalMode": gm.ApprovalMode,
+		"permissions":  gm.Permissions,
 		// The caller's rank and display role, and the space type's catalog.
 		//
 		// These were added to chatsGroupMeta but not to THIS map, and chatsGet
