@@ -899,6 +899,33 @@ function buildBillHtml(order: SB.OrderDetail): string {
   </body></html>`;
 }
 
+// A Shop Book realtime event. Payload carries identifiers only — never the new
+// state — so a listener's only correct reaction is to re-fetch.
+interface ShopBookEvent {
+  event: string;
+  title: string;
+  body: string;
+  data: { orderId?: string; shopId?: string; status?: string; [k: string]: any };
+}
+
+// Subscribes to the socket for the life of the caller. Registration is async
+// (the socket may still be connecting), so the returned unsubscribe is safe to
+// call before it has finished attaching.
+function onShopBookEvent(handler: (ev: ShopBookEvent) => void): () => void {
+  let detach: (() => void) | null = null;
+  let cancelled = false;
+  import('../lib/socket')
+    .then((sock) => {
+      if (cancelled) return;
+      detach = sock.addPersistentListener<ShopBookEvent>('shopbook:event', handler);
+    })
+    .catch(() => {}); // no socket → push and the inbox still carry the news
+  return () => {
+    cancelled = true;
+    detach?.();
+  };
+}
+
 function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }) {
   const [loading, setLoading] = useState(true);
   const [order, setOrder] = useState<SB.OrderDetail | null>(null);
@@ -907,12 +934,29 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
   const [busy, setBusy] = useState(false);
   const [cancelAsk, setCancelAsk] = useState(false);
   const [invoice, setInvoice] = useState(false);
+  const [returning, setReturning] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try { setOrder(await SB.orderDetails(orderId)); } catch {} finally { setLoading(false); }
   }, [orderId]);
   useEffect(() => { load(); }, [load]);
+
+  // Realtime (P1-E): the shop moves the order and this screen follows, without
+  // the customer pulling to refresh while standing in the shop.
+  //
+  // The socket event is only a HINT that something changed — we re-fetch the
+  // authoritative state rather than trusting the payload. That is also why the
+  // screen is correct after a cold start, when no event was ever received.
+  useEffect(() => {
+    let alive = true;
+    const stop = onShopBookEvent((ev) => {
+      if (!alive) return;
+      if (ev?.data?.orderId && ev.data.orderId !== orderId) return;
+      load();
+    });
+    return () => { alive = false; stop(); };
+  }, [orderId, load]);
 
   const decide = async (itemId: string, accept: boolean) => {
     try { await SB.decideAlternative(orderId, itemId, accept); load(); }
@@ -975,6 +1019,9 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
   };
 
   if (invoice) return <InvoiceView orderId={orderId} onBack={() => setInvoice(false)} />;
+  if (returning && order) {
+    return <ReturnRequest order={order} onDone={() => { setReturning(false); load(); }} />;
+  }
 
   const money = (n: number) => formatMoney(n, order?.currency || '₹');
   const failed = order && isTerminalFailure(order.status);
@@ -1111,6 +1158,15 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
                 <Text style={s.outlineBtnText}>{order.hasInvoice ? t('orders.invoice') : 'Bill / Receipt'}</Text>
               </TouchableOpacity>
             </View>
+
+            {/* Returns (P1-B). Only on a completed order, and only inside the
+                window — offering it later would be an invitation to a refusal. */}
+            {order.status === 'completed' && (
+              <TouchableOpacity style={s.outlineBtn} onPress={() => setReturning(true)}>
+                <Ionicons name="arrow-undo-outline" size={18} color={C.green} />
+                <Text style={s.outlineBtnText}>Return an item</Text>
+              </TouchableOpacity>
+            )}
 
             {/* Rating */}
             {order.status === 'completed' && (
@@ -1299,7 +1355,9 @@ function OwnerApp({ me }: { me: { id: string; name: string } | null }) {
   const [loading, setLoading] = useState(true);
   const [shop, setShop] = useState<SB.Shop | null>(null);
   const [settings, setSettings] = useState(false);
-  const [sub, setSub] = useState<'coupons' | 'suppliers' | 'plans' | 'reports' | null>(null);
+  const [sub, setSub] = useState<
+    'coupons' | 'suppliers' | 'plans' | 'reports'
+    | 'purchases' | 'returns' | 'audit' | 'verify' | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1321,6 +1379,10 @@ function OwnerApp({ me }: { me: { id: string; name: string } | null }) {
 
   if (sub === 'coupons') return <OwnerCoupons onBack={() => setSub(null)} />;
   if (sub === 'suppliers') return <OwnerSuppliers onBack={() => setSub(null)} />;
+  if (sub === 'purchases') return <PurchasesScreen currency={shop.currency} onBack={() => { setSub(null); load(); }} />;
+  if (sub === 'returns') return <ReturnsScreen currency={shop.currency} onBack={() => setSub(null)} />;
+  if (sub === 'audit') return <AuditScreen onBack={() => setSub(null)} />;
+  if (sub === 'verify') return <VerificationScreen onBack={() => { setSub(null); load(); }} />;
   if (sub === 'plans') return <OwnerPlans plan={shop.plan} onBack={() => setSub(null)} onChanged={() => { setSub(null); load(); }} />;
   if (sub === 'reports') return <OwnerReports plan={shop.plan} currency={shop.currency} onBack={() => setSub(null)} onUpgrade={() => setSub('plans')} />;
 
@@ -1330,7 +1392,9 @@ function OwnerApp({ me }: { me: { id: string; name: string } | null }) {
         {tab === 'dashboard' && (
           <OwnerDashboard shop={shop} onSettings={() => setSettings(true)}
             onCoupons={() => setSub('coupons')} onSuppliers={() => setSub('suppliers')}
-            onPlans={() => setSub('plans')} onReports={() => setSub('reports')} />
+            onPlans={() => setSub('plans')} onReports={() => setSub('reports')}
+            onPurchases={() => setSub('purchases')} onReturns={() => setSub('returns')}
+            onAudit={() => setSub('audit')} onVerify={() => setSub('verify')} />
         )}
         {tab === 'orders' && <OwnerOrders />}
         {tab === 'products' && <OwnerProducts shop={shop} />}
@@ -1350,9 +1414,11 @@ function OwnerApp({ me }: { me: { id: string; name: string } | null }) {
   );
 }
 
-function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPlans, onReports }: {
+function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPlans, onReports,
+                         onPurchases, onReturns, onAudit, onVerify }: {
   shop: SB.Shop; onSettings: () => void; onCoupons: () => void; onSuppliers: () => void;
   onPlans: () => void; onReports: () => void;
+  onPurchases: () => void; onReturns: () => void; onAudit: () => void; onVerify: () => void;
 }) {
   const [loading, setLoading] = useState(true);
   const [d, setD] = useState<SB.Dashboard | null>(null);
@@ -1433,7 +1499,38 @@ function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPlans, onR
       </View>
       {(d?.lowStock ?? 0) > 0 && (
         <View style={[s.panel, { borderColor: C.amber }]}>
-          <Text style={{ color: C.amber, fontWeight: '700' }}>⚠️ {d?.lowStock} product(s) out of stock</Text>
+          <Text style={{ color: C.amber, fontWeight: '700' }}>⚠️ {d?.lowStock} product(s) need restocking</Text>
+        </View>
+      )}
+
+      {/* Margin (P1-A). Shown only when the server had a cost basis to compute
+          it from, and always alongside how much of the day's revenue that
+          covers — a partial figure presented as a whole one is worse than none. */}
+      {d?.grossProfit != null && (
+        <View style={s.panel}>
+          <Text style={s.panelTitle}>Today's margin</Text>
+          <Row label="Cost of goods" value={formatMoney(d.costOfGoods ?? 0, shop.currency)} />
+          <Row label="Gross profit" value={formatMoney(d.grossProfit, shop.currency)} bold tone={C.green} />
+          {d.marginCoverage && d.marginCoverage.revenueWithCost < d.marginCoverage.revenueTotal && (
+            <Text style={s.hint}>
+              Covers {formatMoney(d.marginCoverage.revenueWithCost, shop.currency)} of{' '}
+              {formatMoney(d.marginCoverage.revenueTotal, shop.currency)} in sales — the rest has no
+              recorded purchase cost yet.
+            </Text>
+          )}
+        </View>
+      )}
+      {d?.grossProfit == null && (d?.todaySales ?? 0) > 0 && (
+        <TouchableOpacity style={s.panel} onPress={onPurchases}>
+          <Text style={s.hint}>
+            Record what your stock costs to see profit here, not just sales.
+          </Text>
+        </TouchableOpacity>
+      )}
+      {(d?.todayPurchases ?? 0) > 0 && (
+        <View style={s.panel}>
+          <Row label={`Purchases today (${d?.todayPurchases})`}
+            value={formatMoney(d?.purchaseSpend ?? 0, shop.currency)} />
         </View>
       )}
 
@@ -1442,6 +1539,26 @@ function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPlans, onR
         <TouchableOpacity style={s.linkCard} onPress={onCoupons}>
           <Text style={{ fontSize: 24 }}>🏷️</Text>
           <Text style={s.linkCardText}>Offers & Coupons</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={s.linkCard} onPress={onPurchases}>
+          <Ionicons name="cart-outline" size={20} color={C.green} />
+          <Text style={s.linkCardText}>Purchases &amp; cost</Text>
+          <Ionicons name="chevron-forward" size={18} color={C.sub} />
+        </TouchableOpacity>
+        <TouchableOpacity style={s.linkCard} onPress={onReturns}>
+          <Ionicons name="arrow-undo-outline" size={20} color={C.green} />
+          <Text style={s.linkCardText}>Returns</Text>
+          <Ionicons name="chevron-forward" size={18} color={C.sub} />
+        </TouchableOpacity>
+        <TouchableOpacity style={s.linkCard} onPress={onVerify}>
+          <Ionicons name="shield-checkmark-outline" size={20} color={shop.verified ? C.blue : C.green} />
+          <Text style={s.linkCardText}>{shop.verified ? 'Verified shop' : 'Get verified'}</Text>
+          <Ionicons name="chevron-forward" size={18} color={C.sub} />
+        </TouchableOpacity>
+        <TouchableOpacity style={s.linkCard} onPress={onAudit}>
+          <Ionicons name="document-text-outline" size={20} color={C.green} />
+          <Text style={s.linkCardText}>Activity log</Text>
+          <Ionicons name="chevron-forward" size={18} color={C.sub} />
         </TouchableOpacity>
         <TouchableOpacity style={s.linkCard} onPress={onSuppliers}>
           <Text style={{ fontSize: 24 }}>🚚</Text>
@@ -1781,6 +1898,13 @@ function OwnerOrders() {
     try { setOrders(await SB.ownerOrders(f)); } catch {} finally { setLoading(false); }
   }, []);
   useEffect(() => { load(filter); }, [filter, load]);
+
+  // A new order should appear on the owner's list the moment it is placed —
+  // they may be standing at the counter with the app already open (P1-E).
+  useEffect(() => {
+    const stop = onShopBookEvent(() => load(filter));
+    return stop;
+  }, [filter, load]);
 
   if (open) return <OwnerOrderDetail orderId={open} onBack={() => { setOpen(null); load(filter); }} />;
 
@@ -2152,6 +2276,481 @@ function ProductEditor({ product, currency, onDone }: {
         {product && (
           <TouchableOpacity style={s.dangerBtn} disabled={busy} onPress={del}>
             <Text style={s.dangerBtnText}>Delete Product</Text>
+          </TouchableOpacity>
+        )}
+      </ScrollView>
+    </>
+  );
+}
+
+// The customer's side of a return (P1-B): pick lines and quantities, say why.
+// The refund figure comes back from the server, priced from the ORIGINAL line —
+// a price rise since the sale must not change what is owed back.
+function ReturnRequest({ order, onDone }: { order: SB.OrderDetail; onDone: () => void }) {
+  const [qty, setQty] = useState<Record<string, string>>({});
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const key = useRef(clientKey());
+  const money = (n: number) => formatMoney(n, order.currency);
+
+  const lines = order.items.filter((i) => i.availability !== 'unavailable' && !i.removed);
+
+  const submit = async () => {
+    const items = lines
+      .map((l) => ({ orderItemId: l.id, qty: num(qty[l.id] ?? '') }))
+      .filter((x) => x.qty > 0);
+    if (items.length === 0) { Alert.alert('Choose what you are returning'); return; }
+    if (!reason.trim()) { Alert.alert('Tell the shop why', 'A reason is required.'); return; }
+    setBusy(true);
+    try {
+      const r = await SB.requestReturn(order.id, reason.trim(), items, key.current);
+      key.current = clientKey();
+      Alert.alert('Return requested',
+        `The shop will review it. If approved, ${money(r.refundTotal)} will be credited to your account.`);
+      onDone();
+    } catch (e: any) {
+      Alert.alert(e?.body?.code === 'return_window_closed' ? 'Too late to return' : 'Could not request',
+        e?.message ?? 'Try again');
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <>
+      <SubHeader title="Return an item" onBack={onDone} />
+      <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
+        <Text style={s.hint}>
+          Enter how much of each item is coming back. You can return part of a line.
+        </Text>
+        {lines.map((l) => {
+          const billed = l.qty;
+          return (
+            <View key={l.id} style={s.card}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.cardTitle}>{l.name}{l.brand ? ` (${l.brand})` : ''}</Text>
+                <Text style={s.cardSub}>
+                  You were billed {billed}{l.unit ? ` ${l.unit}` : ''} · {money(l.price)} each
+                </Text>
+              </View>
+              <TextInput
+                style={[s.input, { width: 80, marginBottom: 0, paddingVertical: 6, textAlign: 'center' }]}
+                keyboardType="numeric" placeholder="0" placeholderTextColor={C.sub}
+                value={qty[l.id] ?? ''} onChangeText={(v) => setQty({ ...qty, [l.id]: v })} />
+            </View>
+          );
+        })}
+        <Field label="Why are you returning it?" value={reason} onChange={setReason}
+          placeholder="e.g. Bag was torn" />
+        <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={submit}>
+          {busy ? <ActivityIndicator color="#fff" />
+                : <Text style={s.primaryBtnText}>Request return</Text>}
+        </TouchableOpacity>
+        <Text style={s.hint}>
+          The shop reviews every return. Your original bill is never changed — an approved
+          return produces a separate credit note.
+        </Text>
+      </ScrollView>
+    </>
+  );
+}
+
+// Purchases (P1-A). Stock arriving with a price on it — the other half of a
+// sale, and the only thing that makes margin computable.
+function PurchasesScreen({ currency, onBack }: { currency?: string; onBack: () => void }) {
+  const [rows, setRows] = useState<SB.PurchaseSummary[]>([]);
+  const [spend, setSpend] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
+  const [supplier, setSupplier] = useState('');
+  const [invNo, setInvNo] = useState('');
+  const [items, setItems] = useState<SB.PurchaseItemInput[]>([]);
+  const [products, setProducts] = useState<SB.Product[]>([]);
+  const [pick, setPick] = useState<SB.Product | null>(null);
+  const [qty, setQty] = useState('');
+  const [cost, setCost] = useState('');
+  const [busy, setBusy] = useState(false);
+  const key = useRef(clientKey());
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await SB.purchases();
+      setRows(r.purchases); setSpend(r.totalSpend);
+      setProducts(await SB.ownerProducts());
+    } catch {} finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const money = (n: number) => formatMoney(n, currency);
+
+  const addLine = () => {
+    if (!pick || num(qty) <= 0) { Alert.alert('Pick a product and a quantity'); return; }
+    setItems([...items, {
+      productId: pick.id, name: pick.name, unit: pick.unit,
+      qty: num(qty), costPrice: num(cost), taxPercent: pick.taxPercent,
+    }]);
+    setPick(null); setQty(''); setCost('');
+  };
+
+  const save = async () => {
+    if (items.length === 0) { Alert.alert('Add at least one item'); return; }
+    setBusy(true);
+    try {
+      await SB.createPurchase({
+        supplierName: supplier.trim(), invoiceNumber: invNo.trim(),
+        items, idempotencyKey: key.current,
+      });
+      key.current = clientKey();
+      setAdding(false); setSupplier(''); setInvNo(''); setItems([]);
+      load();
+    } catch (e: any) {
+      // The server refuses the same supplier invoice twice — that double-count
+      // is the classic mistake when moving off paper.
+      Alert.alert(e?.body?.code === 'duplicate_supplier_invoice'
+        ? 'Already recorded' : 'Could not save', e?.message ?? 'Try again');
+    } finally { setBusy(false); }
+  };
+
+  if (adding) {
+    const draftTotal = items.reduce((s, it) => s + it.qty * it.costPrice, 0);
+    return (
+      <>
+        <SubHeader title="Record a purchase" onBack={() => setAdding(false)} />
+        <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
+          <Field label="Supplier" value={supplier} onChange={setSupplier} placeholder="Metro Wholesale" />
+          <Field label="Their invoice number" value={invNo} onChange={setInvNo} placeholder="MW-8891" />
+          <Text style={s.hint}>
+            The invoice number stops the same delivery being entered twice.
+          </Text>
+
+          <Text style={s.sectionLabel}>Items</Text>
+          {items.map((it, i) => (
+            <View key={i} style={s.card}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.cardTitle}>{it.name}{it.unit ? ` · ${it.unit}` : ''}</Text>
+                <Text style={s.cardSub}>{it.qty} × {money(it.costPrice)}</Text>
+              </View>
+              <TouchableOpacity onPress={() => setItems(items.filter((_, j) => j !== i))}>
+                <Ionicons name="trash-outline" size={18} color={C.danger} />
+              </TouchableOpacity>
+            </View>
+          ))}
+
+          <View style={s.panel}>
+            <Text style={s.panelTitle}>Add an item</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                {products.map((p) => (
+                  <Chip key={p.id} label={p.name} icon="cube-outline"
+                    active={pick?.id === p.id} onPress={() => setPick(p)} />
+                ))}
+              </View>
+            </ScrollView>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <View style={{ flex: 1 }}>
+                <Field label="Quantity" value={qty} onChange={setQty} placeholder="10" keyboardType="numeric" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Field label={`Cost each (${currency || '₹'})`} value={cost} onChange={setCost}
+                  placeholder="200" keyboardType="numeric" />
+              </View>
+            </View>
+            <TouchableOpacity style={s.outlineBtn} onPress={addLine}>
+              <Ionicons name="add" size={18} color={C.green} />
+              <Text style={s.outlineBtnText}>Add to purchase</Text>
+            </TouchableOpacity>
+          </View>
+
+          {items.length > 0 && (
+            <View style={s.panel}>
+              <Row label="Goods total (before tax)" value={money(draftTotal)} bold />
+              <Text style={s.hint}>Tax is added by the server from each product's rate.</Text>
+            </View>
+          )}
+          <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={save}>
+            {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.primaryBtnText}>Save purchase</Text>}
+          </TouchableOpacity>
+        </ScrollView>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <SubHeader title="Purchases" onBack={onBack} />
+      <ScrollView contentContainerStyle={s.body}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
+        <TouchableOpacity style={[s.primaryBtn, { marginTop: 0 }]} onPress={() => setAdding(true)}>
+          <Ionicons name="add" size={18} color="#fff" />
+          <Text style={s.primaryBtnText}>Record a purchase</Text>
+        </TouchableOpacity>
+        {rows.length > 0 && (
+          <View style={s.panel}>
+            <Row label="Total spend" value={money(spend)} bold />
+          </View>
+        )}
+        {!loading && rows.length === 0 && (
+          <Empty icon="cart-outline" text="No purchases yet. Recording what stock costs is what makes profit reporting possible." />
+        )}
+        {rows.map((p) => (
+          <View key={p.id} style={s.card}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.cardTitle}>{p.supplierName || 'Supplier'}</Text>
+              <Text style={s.cardSub}>
+                {p.purchasedOn}{p.invoiceNumber ? ` · ${p.invoiceNumber}` : ''} · {p.itemCount} item(s)
+              </Text>
+            </View>
+            <Text style={s.price}>{money(p.total)}</Text>
+          </View>
+        ))}
+      </ScrollView>
+    </>
+  );
+}
+
+// Returns (P1-B). The owner decides; approval issues a credit note and puts
+// sellable goods back. Refusing requires saying why.
+function ReturnsScreen({ currency, onBack }: { currency?: string; onBack: () => void }) {
+  const [rows, setRows] = useState<SB.ShopReturn[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [refuse, setRefuse] = useState<SB.ShopReturn | null>(null);
+  const [note, setNote] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setRows(await SB.shopReturns()); } catch {} finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const money = (n: number) => formatMoney(n, currency);
+
+  const approve = (rt: SB.ShopReturn) => {
+    Alert.alert('Approve this return?',
+      `${money(rt.refundTotal)} will be credited to ${rt.customerName || 'the customer'}, and a credit note issued against the original invoice.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Approve · goods resellable',
+          onPress: () => void decide(rt, true, true),
+        },
+        {
+          text: 'Approve · goods damaged',
+          onPress: () => void decide(rt, true, false),
+        },
+      ]);
+  };
+
+  const decide = async (rt: SB.ShopReturn, ok: boolean, restock = true, why = '') => {
+    setBusy(true);
+    try {
+      await SB.decideReturn(rt.id, ok, { restock, note: why, settlement: 'credit' });
+      setRefuse(null); setNote(''); load();
+    } catch (e: any) { Alert.alert('Could not record', e?.message ?? 'Try again'); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <>
+      <SubHeader title="Returns" onBack={onBack} />
+      <Modal visible={!!refuse} transparent animationType="fade" onRequestClose={() => setRefuse(null)}>
+        <View style={s.modalWrap}>
+          <View style={s.modalCard}>
+            <Text style={s.modalTitle}>Why are you declining?</Text>
+            <Text style={s.hint}>The customer sees this. A refusal with no reason is the most complained-about outcome of any returns process.</Text>
+            <TextInput style={s.input} placeholder="e.g. Item shows use beyond inspection"
+              placeholderTextColor={C.sub} value={note} onChangeText={setNote} autoFocus multiline />
+            <TouchableOpacity style={s.dangerBtn}
+              onPress={() => { if (note.trim() && refuse) void decide(refuse, false, true, note.trim()); }}>
+              <Text style={s.dangerBtnText}>Decline return</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={s.outlineBtn} onPress={() => setRefuse(null)}>
+              <Text style={s.outlineBtnText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <ScrollView contentContainerStyle={s.body}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
+        {!loading && rows.length === 0 && <Empty icon="arrow-undo-outline" text="No returns." />}
+        {rows.map((rt) => (
+          <View key={rt.id} style={s.card}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.cardTitle}>{rt.customerName || 'Customer'} · {money(rt.refundTotal)}</Text>
+              <Text style={s.cardSub}>📝 {rt.reason}</Text>
+              {!!rt.decisionNote && <Text style={s.cardSub}>↳ {rt.decisionNote}</Text>}
+              <Text style={[s.cardSub, {
+                color: rt.status === 'completed' ? C.green : rt.status === 'rejected' ? C.danger : C.sub,
+              }]}>
+                {rt.status === 'requested' ? 'Awaiting your decision' : rt.status}
+              </Text>
+              {rt.status === 'requested' && (
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                  <TouchableOpacity style={[s.primaryBtn, { flex: 1, marginTop: 0 }]}
+                    disabled={busy} onPress={() => approve(rt)}>
+                    <Text style={s.primaryBtnText}>Approve</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[s.dangerBtn, { flex: 1, marginTop: 0 }]}
+                    disabled={busy} onPress={() => { setRefuse(rt); setNote(''); }}>
+                    <Text style={s.dangerBtnText}>Decline</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          </View>
+        ))}
+      </ScrollView>
+    </>
+  );
+}
+
+// The shop's own audit trail (P1-F). Append-only server-side; read-only here.
+function AuditScreen({ onBack }: { onBack: () => void }) {
+  const [rows, setRows] = useState<SB.AuditEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setRows(await SB.auditLog()); } catch {} finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const describe = (e: SB.AuditEntry) => {
+    const b = e.before ?? {}, a = e.after ?? {};
+    switch (e.action) {
+      case 'product.price_change': return `${a.name ?? 'Product'}: ${b.price} → ${a.price}`;
+      case 'product.create':       return `Added ${a.name}`;
+      case 'purchase.create':      return `${a.supplier ?? 'Purchase'} · ${a.items} item(s)`;
+      case 'return.approve':       return `Return approved · refund ${a.refundTotal}`;
+      case 'return.reject':        return 'Return declined';
+      case 'document.upload':      return `Uploaded ${a.kind}`;
+      case 'verification.submit':  return 'Submitted for verification';
+      case 'location.request':     return 'Requested a location change';
+      default:
+        if (e.action.startsWith('stock.')) return `Stock ${b.onHand} → ${a.onHand}`;
+        return e.action;
+    }
+  };
+
+  return (
+    <>
+      <SubHeader title="Activity log" onBack={onBack} />
+      <ScrollView contentContainerStyle={s.body}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
+        <Text style={s.hint}>
+          Every price change, stock correction, purchase and refund. This record cannot be edited or deleted — including by you.
+        </Text>
+        {!loading && rows.length === 0 && <Empty icon="document-text-outline" text="Nothing recorded yet." />}
+        {rows.map((e) => (
+          <View key={e.id} style={s.card}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.cardTitle}>{describe(e)}</Text>
+              <Text style={s.cardSub}>
+                {e.actor || 'Owner'} · {new Date(e.at).toLocaleString('en-IN')}
+              </Text>
+              {!!e.reason && <Text style={s.cardSub}>📝 {e.reason}</Text>}
+            </View>
+          </View>
+        ))}
+      </ScrollView>
+    </>
+  );
+}
+
+// Verification (P1-D): what's missing, what's uploaded, and where it stands.
+function VerificationScreen({ onBack }: { onBack: () => void }) {
+  const [docs, setDocs] = useState<SB.ShopDocument[]>([]);
+  const [accepted, setAccepted] = useState<string[]>([]);
+  const [state, setState] = useState<SB.VerifyState>('unverified');
+  const [note, setNote] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await SB.shopDocuments();
+      setDocs(r.documents); setAccepted(r.accepted ?? []);
+      setState(r.verifyState); setNote(r.verifyNote);
+    } catch {} finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const submit = async () => {
+    setBusy(true);
+    try {
+      const r = await SB.submitVerification();
+      setState(r.verifyState);
+      Alert.alert('Submitted', 'Your shop is now queued for review.');
+    } catch (e: any) {
+      const missing = SB.missingForVerification(e);
+      Alert.alert(missing ? 'Not ready yet' : 'Could not submit',
+        missing ? `Still needed:\n• ${missing.join('\n• ')}` : (e?.message ?? 'Try again'));
+    } finally { setBusy(false); }
+  };
+
+  const view = async (d: SB.ShopDocument) => {
+    try {
+      const { url } = await SB.documentUrl(d.id);
+      Linking.openURL(url);
+    } catch (e: any) { Alert.alert('Could not open', e?.message ?? 'Try again'); }
+  };
+
+  const STATE_COPY: Record<SB.VerifyState, { label: string; tone: string; hint: string }> = {
+    unverified:     { label: 'Not verified', tone: C.sub, hint: 'Verified shops get a badge customers can see.' },
+    pending_review: { label: 'Under review', tone: C.amber, hint: 'We are looking at your shop. Nothing more is needed from you.' },
+    verified:       { label: 'Verified ✅', tone: C.green, hint: 'Your address is now fixed — moving it needs approval.' },
+    rejected:       { label: 'Not approved', tone: C.danger, hint: 'Fix what is noted below and submit again.' },
+    suspended:      { label: 'Suspended', tone: C.danger, hint: 'Your shop is not listed. Contact support.' },
+  };
+  const copy = STATE_COPY[state];
+
+  return (
+    <>
+      <SubHeader title="Verification" onBack={onBack} />
+      <ScrollView contentContainerStyle={s.body}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
+        <View style={s.panel}>
+          <Text style={[s.panelTitle, { color: copy.tone }]}>{copy.label}</Text>
+          <Text style={s.hint}>{copy.hint}</Text>
+          {!!note && <Text style={[s.cardSub, { color: C.danger, marginTop: 6 }]}>📝 {note}</Text>}
+        </View>
+
+        {accepted.length > 0 && (
+          <>
+            <Text style={s.sectionLabel}>Documents for your country</Text>
+            <Text style={s.hint}>All optional — upload whichever apply to your business.</Text>
+          </>
+        )}
+        {accepted.map((kind) => {
+          const have = docs.find((d) => d.kind === kind);
+          return (
+            <View key={kind} style={s.card}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.cardTitle}>{kind}</Text>
+                <Text style={[s.cardSub, {
+                  color: have?.status === 'accepted' ? C.green
+                       : have?.status === 'rejected' ? C.danger : C.sub,
+                }]}>
+                  {have ? (have.status === 'pending' ? 'Uploaded · awaiting review' : have.status) : 'Not uploaded'}
+                </Text>
+                {!!have?.reviewNote && <Text style={[s.cardSub, { color: C.danger }]}>{have.reviewNote}</Text>}
+              </View>
+              {have && (
+                <TouchableOpacity onPress={() => view(have)}>
+                  <Ionicons name="eye-outline" size={20} color={C.green} />
+                </TouchableOpacity>
+              )}
+            </View>
+          );
+        })}
+        <Text style={s.hint}>
+          Documents are uploaded from Shop Settings and are visible only to you and the review team.
+        </Text>
+
+        {(state === 'unverified' || state === 'rejected') && (
+          <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={submit}>
+            {busy ? <ActivityIndicator color="#fff" />
+                  : <Text style={s.primaryBtnText}>Submit for verification</Text>}
           </TouchableOpacity>
         )}
       </ScrollView>

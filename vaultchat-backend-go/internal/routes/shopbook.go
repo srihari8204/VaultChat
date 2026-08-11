@@ -817,7 +817,8 @@ func orderWithItems(ctx context.Context, w http.ResponseWriter, orderID, userID 
 		`SELECT id, name, brand, unit, `+sbCents("qty")+`, `+sbCents("price")+`,
 		        `+sbCents("tax_percent")+`, note, availability, alt_name, `+sbCents("alt_price")+`,
 		        `+sbCents("line_discount")+`, `+sbCents("line_tax")+`, `+sbCents("line_total")+`,
-		        custom, COALESCE(product_id::text,'')
+		        custom, COALESCE(product_id::text,''), removed,
+		        `+sbCents("COALESCE(fulfilled_qty, qty)")+`
 		   FROM shopbook_order_item WHERE order_id=$1 ORDER BY id`, orderID)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "db error")
@@ -827,17 +828,23 @@ func orderWithItems(ctx context.Context, w http.ResponseWriter, orderID, userID 
 	items := []map[string]any{}
 	for rows.Next() {
 		var id, name, brand, unit, inote, avail, alt, productID string
-		var custom bool
-		var qty, price, taxPercent, altPrice, lineDisc, lineTax, lineTotal int64
+		var custom, removed bool
+		var qty, price, taxPercent, altPrice, lineDisc, lineTax, lineTotal, billedQty int64
 		if err := rows.Scan(&id, &name, &brand, &unit, &qty, &price, &taxPercent, &inote, &avail,
-			&alt, &altPrice, &lineDisc, &lineTax, &lineTotal, &custom, &productID); err != nil {
+			&alt, &altPrice, &lineDisc, &lineTax, &lineTotal, &custom, &productID,
+			&removed, &billedQty); err != nil {
 			continue
 		}
 		items = append(items, map[string]any{
-			"id": id, "productId": productID, "custom": custom,
+			"id": id, "productId": productID, "custom": custom, "removed": removed,
 			"name": name, "brand": brand, "unit": unit,
-			"qty": float64(qty) / 100, "price": money(price).Float(),
-			"taxPercent": float64(taxPercent) / 100, "note": inote, "availability": avail,
+			// `qty` is what the customer is BILLED for — the quantity actually
+			// packed, where the shop weighed it out. requestedQty keeps what
+			// they originally asked for, which a return must not silently lose.
+			"qty":          float64(billedQty) / 100,
+			"requestedQty": float64(qty) / 100,
+			"price":        money(price).Float(),
+			"taxPercent":   float64(taxPercent) / 100, "note": inote, "availability": avail,
 			"altName": alt, "altPrice": money(altPrice).Float(),
 			"lineDiscount": money(lineDisc).Float(), "lineTax": money(lineTax).Float(),
 			"lineTotal": money(lineTotal).Float(),

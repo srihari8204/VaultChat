@@ -131,6 +131,145 @@ export function setCreditLimit(customerId: string, creditLimit: number, note = '
     { method: 'POST', json: { creditLimit, note } });
 }
 
+// ── P1-A: purchases ───────────────────────────────────────────────
+export interface PurchaseSummary {
+  id: string; supplierName: string; invoiceNumber: string; purchasedOn: string;
+  subtotal: number; taxTotal: number; total: number; note: string; itemCount: number;
+}
+export interface PurchaseItemInput {
+  productId?: string; name: string; unit?: string;
+  qty: number; costPrice: number; taxPercent?: number;
+}
+export interface PurchaseDetail extends Omit<PurchaseSummary, 'itemCount'> {
+  items: (PurchaseItemInput & { lineTax: number; lineTotal: number })[];
+}
+export function purchases() {
+  return api<{ purchases: PurchaseSummary[]; totalSpend: number }>(`/shopbook/my-shop/purchases`);
+}
+export function purchaseDetails(id: string) {
+  return api<PurchaseDetail>(`/shopbook/my-shop/purchases/${id}`);
+}
+export function createPurchase(p: {
+  supplierId?: string; supplierName?: string; invoiceNumber?: string;
+  purchasedOn?: string; note?: string; idempotencyKey?: string;
+  items: PurchaseItemInput[];
+}) {
+  return api<{ id: string; subtotal: number; taxTotal: number; total: number; duplicate?: boolean }>(
+    `/shopbook/my-shop/purchases`, { method: 'POST', json: p });
+}
+
+// ── P1-B: returns and credit notes ────────────────────────────────
+export type ReturnStatus = 'requested' | 'approved' | 'rejected' | 'completed';
+export interface ShopReturn {
+  id: string; orderId: string; status: ReturnStatus; reason: string;
+  decisionNote: string; settlement: 'refund' | 'credit';
+  refundTotal: number; requestedAt: string;
+  customerName: string; shopName: string; currency: string;
+  creditNoteId: string;
+}
+export function requestReturn(orderId: string, reason: string,
+  items: { orderItemId: string; qty: number }[], idempotencyKey?: string) {
+  return api<{ id: string; status: ReturnStatus; refundTotal: number }>(
+    `/shopbook/orders/${orderId}/return`,
+    { method: 'POST', json: { reason, items, idempotencyKey } });
+}
+export function myReturns() {
+  return api<{ returns: ShopReturn[] }>(`/shopbook/returns`).then((r) => r.returns);
+}
+export function shopReturns(status?: string) {
+  const qs = status && status !== 'all' ? `?status=${status}` : '';
+  return api<{ returns: ShopReturn[] }>(`/shopbook/my-shop/returns${qs}`).then((r) => r.returns);
+}
+// `note` is required when refusing — the server enforces it, and a refusal
+// with no reason is the most complained-about outcome of any returns process.
+export function decideReturn(id: string, approve: boolean,
+  opts: { note?: string; settlement?: 'refund' | 'credit'; restock?: boolean } = {}) {
+  return api<{ ok: boolean; status: string; creditNoteId?: string; refundTotal?: number }>(
+    `/shopbook/my-shop/returns/${id}/decide`, { method: 'POST', json: { approve, ...opts } });
+}
+
+export interface CreditNote {
+  id: string; kind: 'credit' | 'debit'; number: number; noteNo: string;
+  reason: string; currency: string; customerName: string;
+  subtotal: number; taxTotal: number; total: number;
+  items: { name: string; unit: string; qty: number; price: number; tax: number; total: number }[];
+  business: { name?: string; address?: string; phone?: string; tax?: Record<string, string> };
+  createdAt: string;
+}
+export function creditNote(id: string) {
+  return api<CreditNote>(`/shopbook/credit-notes/${id}`);
+}
+
+// ── P1-F: shop audit trail ────────────────────────────────────────
+export interface AuditEntry {
+  id: number; actor: string; role: string; action: string;
+  entity: string; entityId: string;
+  before: Record<string, any>; after: Record<string, any>;
+  reason: string; at: string;
+}
+export function auditLog(entity?: string) {
+  const qs = entity ? `?entity=${encodeURIComponent(entity)}` : '';
+  return api<{ entries: AuditEntry[] }>(`/shopbook/my-shop/audit${qs}`).then((r) => r.entries);
+}
+
+// ── P1-D: verification and documents ──────────────────────────────
+export type VerifyState = 'unverified' | 'pending_review' | 'verified' | 'suspended' | 'rejected';
+export interface ShopDocument {
+  id: string; kind: string; filename: string; mime: string;
+  sizeBytes: number; status: 'pending' | 'accepted' | 'rejected';
+  reviewNote: string; uploadedAt: string;
+}
+export function shopDocuments() {
+  return api<{
+    documents: ShopDocument[]; accepted: string[];
+    verifyState: VerifyState; verifyNote: string;
+  }>(`/shopbook/my-shop/documents`);
+}
+// Two steps on purpose: the file goes straight from the device to storage, so
+// it never passes through the API and never sits in a request body.
+export function presignDocument(kind: string, mime: string, size: number) {
+  return api<{ uploadUrl: string; objectKey: string; expiresIn: number }>(
+    `/shopbook/my-shop/documents/presign`, { method: 'POST', json: { kind, mime, size } });
+}
+export function saveDocument(d: {
+  kind: string; objectKey: string; filename?: string; mime?: string; size?: number;
+}) {
+  return api<{ id: string; status: string }>(`/shopbook/my-shop/documents`, { method: 'POST', json: d });
+}
+export function deleteDocument(id: string) {
+  return api<{ ok: boolean }>(`/shopbook/my-shop/documents/${id}`, { method: 'DELETE' });
+}
+// A short-lived link, re-checked every time. Never cache the URL.
+export function documentUrl(id: string) {
+  return api<{ url: string; expiresIn: number }>(`/shopbook/my-shop/documents/${id}/url`);
+}
+export function submitVerification() {
+  return api<{ ok: boolean; verifyState: VerifyState }>(
+    `/shopbook/my-shop/submit-verification`, { method: 'POST', json: {} });
+}
+// Returns the list of what's still missing on a 400, so the UI can say which.
+export function missingForVerification(err: any): string[] | null {
+  return err?.status === 400 && err?.body?.code === 'incomplete' ? (err.body.missing ?? []) : null;
+}
+
+export interface LocationRequest {
+  id: string; status: 'pending' | 'approved' | 'rejected'; reviewNote: string;
+  address: string; reason: string; lat: number; lng: number;
+  distanceKm: number; requestedAt: string;
+}
+export function requestLocationChange(lat: number, lng: number, address: string, reason: string) {
+  return api<{ id: string; status: string; distanceKm: number }>(
+    `/shopbook/my-shop/location-request`, { method: 'POST', json: { lat, lng, address, reason } });
+}
+export function myLocationRequest() {
+  return api<{ request: LocationRequest | null }>(`/shopbook/my-shop/location-request`)
+    .then((r) => r.request);
+}
+// A verified shop's pin is fixed; moving it more than ~300m needs review.
+export function locationLocked(err: any): boolean {
+  return err?.status === 409 && err?.body?.code === 'location_locked';
+}
+
 // ── P0-B: inventory ───────────────────────────────────────────────
 export interface StockRow {
   productId: string; name: string; brand: string; unit: string;
@@ -230,6 +369,12 @@ export interface OrderItem {
   lineDiscount: number;
   lineTax: number;
   lineTotal: number;
+  // P0-C: dropped at the counter during billing. Kept on the order rather than
+  // deleted, so the record still shows what was asked for.
+  removed?: boolean;
+  // What the customer originally asked for. `qty` is what they were billed —
+  // the quantity actually packed, where the shop weighed it out.
+  requestedQty?: number;
 }
 
 export interface TimelineEvent { status: OrderStatus; note: string; at: string }
@@ -390,9 +535,18 @@ export interface Ledger {
 export interface Dashboard {
   todayOrders: number;
   todaySales: number;
+  todayCustomers: number;
   pendingOrders: number;
   lowStock: number;
   totalPending: number;
+  todayPurchases: number;
+  purchaseSpend: number;
+  // Margin is only present when at least one sale had a cost basis — the
+  // server would rather omit profit than invent it. `marginCoverage` says how
+  // much of the day's revenue the figure actually accounts for.
+  costOfGoods?: number;
+  grossProfit?: number;
+  marginCoverage?: { revenueWithCost: number; revenueTotal: number };
 }
 
 export interface CustomerPending {
@@ -501,6 +655,23 @@ export function saveSupplier(sup: Supplier) {
 }
 export function deleteSupplier(id: string) {
   return api<{ ok: boolean }>(`/shopbook/my-shop/suppliers/${id}`, { method: 'DELETE' });
+}
+
+// P2: cursor paging. Pass the previous page's `nextCursor`; an empty
+// nextCursor means the end, so no extra request is needed to discover it.
+export interface Paged<T> { orders: T[]; nextCursor: string }
+export function myOrdersPage(cursor?: string, limit = 50) {
+  const q = new URLSearchParams();
+  if (cursor) q.set('cursor', cursor);
+  q.set('limit', String(limit));
+  return api<Paged<OrderSummary>>(`/shopbook/orders?${q}`);
+}
+export function ownerOrdersPage(status?: string, cursor?: string, limit = 50) {
+  const q = new URLSearchParams();
+  if (status && status !== 'all') q.set('status', status);
+  if (cursor) q.set('cursor', cursor);
+  q.set('limit', String(limit));
+  return api<Paged<OrderSummary>>(`/shopbook/my-shop/orders?${q}`);
 }
 
 export function myOrders() {
