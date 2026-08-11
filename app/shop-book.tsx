@@ -1508,7 +1508,7 @@ function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPlans, onR
           covers — a partial figure presented as a whole one is worse than none. */}
       {d?.grossProfit != null && (
         <View style={s.panel}>
-          <Text style={s.panelTitle}>Today's margin</Text>
+          <Text style={s.panelTitle}>{`Today's margin`}</Text>
           <Row label="Cost of goods" value={formatMoney(d.costOfGoods ?? 0, shop.currency)} />
           <Row label="Gross profit" value={formatMoney(d.grossProfit, shop.currency)} bold tone={C.green} />
           {d.marginCoverage && d.marginCoverage.revenueWithCost < d.marginCoverage.revenueTotal && (
@@ -2463,7 +2463,7 @@ function PurchasesScreen({ currency, onBack }: { currency?: string; onBack: () =
           {items.length > 0 && (
             <View style={s.panel}>
               <Row label="Goods total (before tax)" value={money(draftTotal)} bold />
-              <Text style={s.hint}>Tax is added by the server from each product's rate.</Text>
+              <Text style={s.hint}>{`Tax is added by the server from each product's rate.`}</Text>
             </View>
           )}
           <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={save}>
