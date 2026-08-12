@@ -134,11 +134,20 @@ type ObjectStream struct {
 // GetObjectStream — server-side relay stream (never buffers), nil on any error
 // exactly like Node's getObjectStream.
 func GetObjectStream(ctx context.Context, key string) *ObjectStream {
+	return GetObjectStreamFrom(ctx, Bucket(), key)
+}
+
+// GetObjectStreamFrom is GetObjectStream against an explicit bucket.
+//
+// Broadcast HLS segments live in BROADCAST_BUCKET, not S3_BUCKET, so the
+// default-bucket helper above cannot reach them — which is why nothing in the
+// storage layer could serve, sweep or even enumerate a segment.
+func GetObjectStreamFrom(ctx context.Context, bucket, key string) *ObjectStream {
 	cli, _, _ := clients()
-	if cli == nil {
+	if cli == nil || bucket == "" {
 		return nil
 	}
-	obj, err := cli.GetObject(ctx, Bucket(), key, minio.GetObjectOptions{})
+	obj, err := cli.GetObject(ctx, bucket, key, minio.GetObjectOptions{})
 	if err != nil {
 		return nil
 	}
@@ -183,12 +192,18 @@ func ObjectExists(ctx context.Context, key string) bool {
 
 // DeletePrefix — purge every object under a prefix (VaultBeam relay purge).
 func DeletePrefix(ctx context.Context, prefix string) {
+	DeletePrefixIn(ctx, Bucket(), prefix)
+}
+
+// DeletePrefixIn is DeletePrefix against an explicit bucket — the broadcast
+// bucket needs it for the same reason GetObjectStreamFrom does.
+func DeletePrefixIn(ctx context.Context, bucket, prefix string) {
 	cli, _, _ := clients()
-	if cli == nil {
+	if cli == nil || bucket == "" || prefix == "" {
 		return
 	}
-	objCh := cli.ListObjects(ctx, Bucket(), minio.ListObjectsOptions{Prefix: prefix, Recursive: true})
-	for rErr := range cli.RemoveObjects(ctx, Bucket(), objCh, minio.RemoveObjectsOptions{}) {
+	objCh := cli.ListObjects(ctx, bucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true})
+	for rErr := range cli.RemoveObjects(ctx, bucket, objCh, minio.RemoveObjectsOptions{}) {
 		if rErr.Err != nil {
 			log.Printf("[storage] deletePrefix: %v", rErr.Err)
 		}

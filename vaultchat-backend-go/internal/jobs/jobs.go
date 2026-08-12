@@ -70,6 +70,8 @@ func StartAll(ctx context.Context) {
 	run("sweep-expired-messages", sweepInterval, sweepExpiredMessages)
 	run("media-retention", sweepInterval, sweepDeliveredAttachments)
 	run("sweep-expired-stories", sweepInterval, sweepExpiredStories)
+	// Broadcast recordings had no lifecycle at all — see sweepEndedBroadcasts.
+	run("broadcast-retention", sweepInterval, sweepEndedBroadcasts)
 	run("scheduled-messages", schedInterval, sweepScheduledMessages)
 
 	// Keep the message_bodies partition window ahead of the clock. Creation
@@ -325,6 +327,68 @@ func sweepExpiredBodies(ctx context.Context) {
 	if purged > 0 {
 		metrics.Add("messages_expired_total", uint64(purged))
 		log.Printf("[expire-bodies] expired %d body(ies)", purged)
+	}
+}
+
+// ── broadcast recordings ───────────────────────────────────────────────
+
+// sweepEndedBroadcasts reclaims HLS segments for broadcasts that ended long
+// enough ago.
+//
+// Nothing reclaimed them before — not by oversight exactly, but because they
+// were unreachable: segments live in BROADCAST_BUCKET with no row in
+// `attachments`, and every storage-deleting job enumerates `FROM attachments`.
+// So every 4-second segment of every broadcast ever made was retained forever,
+// on the box that also runs Postgres. That is an unbounded disk leak
+// independent of the privacy problem, and it grows fastest exactly when the
+// product is working.
+//
+// Driven by ended_at, NOT by the end of the stream: deleting at broadcastEnd
+// would destroy replay the instant a host stops. The window is what decides how
+// long a recording stays watchable, so it is a product knob with a
+// conservative default rather than a constant.
+func sweepEndedBroadcasts(ctx context.Context) {
+	days := envInt("BROADCAST_RETENTION_DAYS", 30)
+	if days <= 0 {
+		return // 0 disables reclaim entirely — keep recordings forever
+	}
+	bucket := os.Getenv("BROADCAST_BUCKET")
+	if bucket == "" {
+		bucket = "vaultchat-broadcast"
+	}
+	rows, err := db.SysPool.Query(ctx,
+		`SELECT id::text FROM broadcast_sessions
+		  WHERE ended_at IS NOT NULL
+		    AND ended_at < NOW() - ($1 || ' days')::interval
+		    AND segments_purged_at IS NULL
+		  LIMIT 100`, strconv.Itoa(days))
+	if err != nil {
+		// The column arrives with migration 101; before that this is a no-op
+		// rather than a log line every five minutes.
+		return
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+
+	purged := 0
+	for _, id := range ids {
+		// Prefix delete: segments are <id>/index.m3u8 and <id>/segment*.
+		storage.DeletePrefixIn(ctx, bucket, id+"/")
+		if _, err := db.SysPool.Exec(ctx,
+			`UPDATE broadcast_sessions SET segments_purged_at = NOW() WHERE id = $1::uuid`,
+			id); err == nil {
+			purged++
+		}
+	}
+	if purged > 0 {
+		metrics.Add("broadcast_segments_purged_total", uint64(purged))
+		log.Printf("[broadcast-retention] purged segments for %d ended broadcast(s)", purged)
 	}
 }
 
