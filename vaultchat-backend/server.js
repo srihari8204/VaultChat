@@ -112,56 +112,13 @@ app.use('/nav', require('./routes/nav'));   // routing proxy → self-hosted Val
 vaultbeamRouter.setBroadcasters({ emitToUid });   // ring recipient: vb_invite / vb_ready / vb_complete / vb_abort
 setInterval(() => vaultbeamRouter.sweepExpired().catch(() => {}), 60 * 60 * 1000); // reap stale relay rows hourly
 
-// VaultLens (AI avatars). The BullMQ worker renders in its own process; here we
-// listen for job completion and emit the result to the user's socket.
-//
-// Socket ownership: while Node owns Socket.IO, emitToUid delivers directly.
-// After the Phase-2 realtime cutover Go owns sockets, so set GO_INTERNAL_URL
-// (=http://go-api:4000) and this listener POSTs the emit to Go's reverse
-// bridge instead — the BullMQ worker + this listener are the only Node pieces
-// left, and they push their results into Go's socket layer.
-const vaultlensRouter = require('./routes/vaultlens');
-app.use('/vaultlens', vaultlensRouter);
-const GO_INTERNAL_URL = (process.env.GO_INTERNAL_URL || '').replace(/\/$/, '');
-async function emitToUserSockets(uid, event, payload) {
-  if (!GO_INTERNAL_URL) return emitToUid(uid, event, payload); // Node owns sockets
-  try {
-    await fetch(`${GO_INTERNAL_URL}/internal/emit`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Internal-Key': process.env.INTERNAL_EMIT_KEY || '' },
-      body: JSON.stringify({ userIds: [uid], event, payload }),
-    });
-  } catch (e) { console.error('[emit→go]', e.message); }
-}
-// Exactly ONE listener per deployment: when GO_INTERNAL_URL is set (Go owns
-// sockets), workers/vaultlens.js hosts the QueueEvents listener and pushes
-// into Go's bridge — this API-process listener stays OFF to avoid double
-// emits. Unset (Node owns sockets) → this listener runs as always.
-if (!GO_INTERNAL_URL) try {
-  const { events: vlEvents } = require('./lib/vaultlensQueue');
-  const vlStore = require('./lib/storage');
-  const qe = vlEvents();
-  qe.on('completed', async ({ jobId, returnvalue }) => {
-    try {
-      const rv = typeof returnvalue === 'string' ? JSON.parse(returnvalue) : returnvalue;
-      if (!rv?.userId || !rv?.storageKey) return;
-      const url = await vlStore.presignGet(rv.storageKey, 3600);
-      await emitToUserSockets(rv.userId, 'vaultlens:ready', { id: rv.generationId, url, styleId: rv.styleId });
-    } catch (e) { console.error('[vaultlens completed]', e.message); }
-  });
-  qe.on('failed', async ({ jobId }) => {
-    try {
-      // Terminal failure → mark 'failed' (auto-refunds quota — excluded from the
-      // daily count) and tell the client to flip the card to a retry state.
-      const r = await db.query(
-        `UPDATE vaultlens_generation SET status = 'failed', completed_at = NOW()
-           WHERE id = $1 AND status <> 'done' RETURNING user_id`, [jobId]);
-      const uid = r.rows[0]?.user_id;
-      if (uid) await emitToUserSockets(uid, 'vaultlens:failed', { id: jobId });
-    } catch (e) { console.error('[vaultlens failed]', e.message); }
-  });
-  console.log('[vaultlens] QueueEvents listener active');
-} catch (e) { console.warn('[vaultlens] QueueEvents not started:', e.message); }
+// VaultLens (AI avatars) was mounted here, together with the BullMQ
+// QueueEvents listener that pushed render results to the user's socket and the
+// GO_INTERNAL_URL bridge helper it emitted through. The feature has been
+// removed in full — routes, worker, queue, ModelsLab client, catalog and
+// tables. Nothing else used emitToUserSockets or GO_INTERNAL_URL, so both went
+// with it; the generic /internal/emit endpoint they targeted still exists on
+// the Go side for any future out-of-process worker.
 const adminRouter = require('./routes/admin');
 app.use('/api/admin', adminRouter);
 
