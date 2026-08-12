@@ -186,15 +186,6 @@
   "nav": [
     "POST /nav/route"
   ],
-  "vaultlens": [
-    "DELETE /vaultlens/face",
-    "GET /vaultlens/catalog",
-    "GET /vaultlens/preview/:styleId",
-    "GET /vaultlens/quota",
-    "GET /vaultlens/result/:id",
-    "POST /vaultlens/face",
-    "POST /vaultlens/generate"
-  ],
   "admin": [
     "DELETE /api/admin/sessions/:id",
     "GET /api/admin/health-detail",

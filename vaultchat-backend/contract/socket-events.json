@@ -51,8 +51,6 @@
     "system:announcement",
     "typing_start",
     "typing_stop",
-    "vaultlens:failed",
-    "vaultlens:ready",
     "vb_abort",
     "vb_complete",
     "vb_have",
