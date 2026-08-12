@@ -61,7 +61,11 @@ func s3FromEnv() S3Target {
 		Secret:    firstNonEmpty(os.Getenv("S3_SECRET_KEY"), os.Getenv("MINIO_PASS")),
 		Bucket:    firstNonEmpty(os.Getenv("BROADCAST_BUCKET"), "vaultchat-broadcast"),
 		Endpoint:  firstNonEmpty(os.Getenv("S3_ENDPOINT"), "http://minio:9000"),
-		Region:    firstNonEmpty(os.Getenv("S3_REGION"), "us-east-1"),
+		// "auto" matches storage.go:50, user.go and vaultbeam.go. R2 requires
+		// it; MinIO ignores region entirely, so this is safe in both. Left at
+		// us-east-1 the two halves would sign segment writes under different
+		// SigV4 credential scopes against the same bucket.
+		Region:    firstNonEmpty(os.Getenv("S3_REGION"), "auto"),
 	}
 }
 
