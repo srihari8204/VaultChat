@@ -1471,6 +1471,11 @@ func chatsPatch(w http.ResponseWriter, r *http.Request) {
 		}
 		push("name", n)
 	}
+	// A group photo is reference-counted, not aged out. The sweep will never
+	// reclaim it (purpose='group'), so the ONLY thing that can retire a
+	// superseded one is this handler — see attachment_lifecycle.go.
+	oldGroupPhoto, newGroupPhoto := "", ""
+	changingGroupPhoto := false
 	if s, ok := b["photoURL"].(string); ok {
 		if !adminGroupGate("Direct chats use peer photo") {
 			return
@@ -1480,6 +1485,24 @@ func chatsPatch(w http.ResponseWriter, r *http.Request) {
 		if p != "" {
 			v = &p
 		}
+		// Verify BEFORE the update, and classify server-side as 'group' so an
+		// old client that sends no `purpose` still lands in the right class.
+		// A foreign or purged id is refused with the existing photo intact,
+		// which also stops a member pointing the group at someone else's object.
+		if p != "" {
+			if e := db.WithUser(ctx, user.ID, func(tx pgx.Tx) error {
+				return attVerifyOwned(ctx, tx, p, user.ID, "group")
+			}); e != nil {
+				httpx.Err(w, 400, "That photo is not available")
+				return
+			}
+		}
+		if err := chatsQRow(ctx, user.ID,
+			`SELECT COALESCE(photo_url, '') FROM chats WHERE id = $1`,
+			[]any{chatID}, &oldGroupPhoto); err != nil && !db.NoRows(err) {
+			log.Printf("[chats PATCH] read old photo: %v", err)
+		}
+		newGroupPhoto, changingGroupPhoto = p, true
 		push("photo_url", v)
 	}
 	if s, ok := b["description"].(string); ok {
@@ -1618,6 +1641,12 @@ func chatsPatch(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[chats PATCH] %v", err)
 		httpx.Err(w, 500, "Failed to update chat")
 		return
+	}
+	// Reference moved and committed — the superseded object is now unreferenced
+	// and safe to reclaim. After the update, never before: a failure above must
+	// leave the old photo both referenced and present.
+	if changingGroupPhoto && oldGroupPhoto != "" && oldGroupPhoto != newGroupPhoto {
+		attRetire(ctx, oldGroupPhoto)
 	}
 	// Node's payload literal — absent body keys serialize away (undefined).
 	payload := map[string]any{"chatId": chatID}
