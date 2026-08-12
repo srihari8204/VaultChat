@@ -421,10 +421,38 @@ func broadcastWatch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// The analytics row is written once per viewing session, not per heartbeat.
+	// One row per viewing SESSION, which is what 079 defines this table to be
+	// ("written on join and closed on leave … nothing in the hot path writes
+	// here more than twice per viewer").
+	//
+	// The comment here already said "once per viewing session"; the SQL did the
+	// opposite. This endpoint is the viewer HEARTBEAT — app/live-view.tsx calls
+	// it every 3 s to stay in the Redis liveness set — so an unconditional
+	// INSERT wrote ~1,200 rows per viewer per hour. At 10k viewers that is
+	// ~3,300 inserts/sec against a table whose purpose is watch-time
+	// reporting, and it made that reporting meaningless: every heartbeat looked
+	// like a new session, so unique-viewer and watch-time counts were inflated
+	// by the polling rate rather than measuring anything.
+	//
+	// WHERE NOT EXISTS rather than a unique index: the real rule is "at most
+	// one OPEN row per (broadcast, viewer)", and a viewer who legitimately
+	// leaves and rejoins must get a SECOND row. A UNIQUE(broadcast_id,user_id)
+	// would forbid that and destroy the rejoin history; a partial unique index
+	// on left_at IS NULL would express it, but that is a schema change to fix
+	// what is a query bug, and it would also start rejecting rows on a table
+	// that currently has legitimate duplicates from this very defect.
+	//
+	// Benign race: two heartbeats in flight together can both see no open row
+	// and both insert. That costs one extra analytics row at session start, not
+	// one every 3 s, and unwatch closes both.
 	_ = db.WithUser(ctx, uid, func(tx pgx.Tx) error {
 		_, e := tx.Exec(ctx,
-			`INSERT INTO broadcast_viewers (broadcast_id, user_id) VALUES ($1, $2)`, id, uid)
+			`INSERT INTO broadcast_viewers (broadcast_id, user_id)
+			 SELECT $1, $2
+			  WHERE NOT EXISTS (
+			        SELECT 1 FROM broadcast_viewers
+			         WHERE broadcast_id = $1 AND user_id = $2 AND left_at IS NULL)`,
+			id, uid)
 		return e
 	})
 
