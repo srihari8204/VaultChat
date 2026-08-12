@@ -68,7 +68,14 @@ export default function LiveViewScreen() {
           video: true,
           e2eeKey: null,
         });
-        if (cancelled) await session.leave();
+        if (cancelled) { await session.leave(); return; }
+        // THE HOST IS READY HERE — not when a playlist appears.
+        //
+        // Publishing to the SFU is the whole of the host's job. Egress, the
+        // segment writes, the CDN and the playlist are all DOWNSTREAM of this
+        // moment and belong to the viewer's readiness, not the host's.
+        console.warn('[broadcast] host published to', cred.room);
+        setWaiting(false);
       } catch (e: any) {
         if (!cancelled) {
           console.warn('[broadcast] could not publish —', e?.message ?? e);
@@ -87,6 +94,21 @@ export default function LiveViewScreen() {
         const initial = await getBroadcast(String(id));
         if (cancelled) return;
         setB(initial);
+
+        // VIEWERS ONLY BEYOND THIS POINT.
+        //
+        // The host used to run this too, and it was the bug that made every
+        // broadcast look broken to the person making it: a host who had
+        // connected and published perfectly still sat here waiting for a
+        // viewer-facing HLS playlist, then hit waitForPlaylist's 60s timeout
+        // and was told "The broadcast could not start. Nothing was published."
+        // — while they were, in fact, publishing.
+        //
+        // Host readiness is decided by the publish effect above. Viewer
+        // readiness is a playlist. They are different questions about
+        // different machines and must not share a state flag.
+        if (isHost) return;
+
         // A stream is created as `starting` and only becomes `live` once egress
         // has produced a playlist. Showing the player before then gives a broken
         // video element and no explanation — which reads as "the app is broken"
@@ -100,7 +122,7 @@ export default function LiveViewScreen() {
       }
     })();
     return () => { cancelled = true; };
-  }, [id]);
+  }, [id, isHost]);
 
   // ── live chat + viewer heartbeat ──────────────────────────────────────
   //
@@ -166,7 +188,7 @@ export default function LiveViewScreen() {
             {isHost ? 'Starting your broadcast…' : 'Waiting for the stream…'}
           </AppText>
         </View>
-      ) : failed || !b?.hlsUrl ? (
+      ) : failed ? (
         <View style={S.center}>
           <Ionicons name="cloud-offline-outline" size={40} color="#94A3B8" />
           <AppText style={S.centerText}>
@@ -174,6 +196,33 @@ export default function LiveViewScreen() {
               ? 'The broadcast could not start. Nothing was published.'
               : 'This stream is not available.'}
           </AppText>
+          <TouchableOpacity onPress={() => router.back()} style={S.backBtn}>
+            <AppText style={S.backText}>Go back</AppText>
+          </TouchableOpacity>
+        </View>
+      ) : isHost ? (
+        // The host is publishing. Deliberately NOT the HLS player: that is the
+        // viewer's delayed copy of this device's own camera, seconds behind,
+        // and pointing a host at it is both useless and a feedback loop.
+        //
+        // A local camera preview is the right thing here and is NOT built —
+        // it needs the LiveKit local video track rendered through the RN SDK.
+        // Until it is, this says plainly what is true rather than implying a
+        // failure, and keeps the controls the host actually needs (viewer
+        // count, chat and End) live on screen.
+        <View style={S.center}>
+          <Ionicons name="radio-outline" size={40} color="#EF4444" />
+          <AppText style={S.centerText}>You are live.</AppText>
+          <AppText style={S.centerText}>
+            {b?.status === 'live'
+              ? 'Viewers can watch now.'
+              : 'Viewers can watch once the stream is ready.'}
+          </AppText>
+        </View>
+      ) : !b?.hlsUrl ? (
+        <View style={S.center}>
+          <Ionicons name="cloud-offline-outline" size={40} color="#94A3B8" />
+          <AppText style={S.centerText}>This stream is not available.</AppText>
           <TouchableOpacity onPress={() => router.back()} style={S.backBtn}>
             <AppText style={S.backText}>Go back</AppText>
           </TouchableOpacity>
