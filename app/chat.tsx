@@ -139,6 +139,7 @@ import {
   enqueueEdit,
   enqueueDelete,
   initQueue,
+  noteDelivered as queueNoteDelivered,
   on as onQueue,
   pendingForChat,
   retry as queueRetry,
@@ -667,6 +668,13 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
               ? { ...mem, lastDeliveredMessageId: e.lastDeliveredMessageId }
               : mem),
           } : prev);
+          // Release the sender's recovery copies now that the recipient
+          // demonstrably holds these messages. The outbox keeps an accepted row
+          // (and its plaintext) precisely until this moment, because the server
+          // body may already have been reclaimed and this is the only copy that
+          // could re-deliver. Best-effort: the queue's age cap reaps anything
+          // this misses, e.g. delivery that happened while the chat was closed.
+          void queueNoteDelivered(chatId, Number(e.lastDeliveredMessageId));
         };
         const onMemberRead = (e: { userId: string; lastReadMessageId: number }) => {
           if (!e?.userId) return;
@@ -1041,7 +1049,12 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       { key: 'forward', label: 'Forward', icon: 'arrow-redo', onPress: () => openForward(msg) },
       { key: 'copy',    label: 'Copy',    icon: 'copy-outline', onPress: () => copyAndAutoClear(plain) },
       { key: 'star',    label: 'Star',    icon: 'star-outline', onPress: async () => {
-          try { await addBookmark(msg.id, null); } catch (e: any) { Alert.alert('Could not save', e?.message ?? 'Try again'); }
+          // Pass the decrypted body so the bookmark keeps a LOCAL copy. The
+          // server reclaims a bookmarked message's ciphertext like any other —
+          // exempting it would make bookmarks a permanent server archive — so
+          // this snapshot is what keeps the saved message readable afterwards.
+          try { await addBookmark(msg.id, null, plain || null); }
+          catch (e: any) { Alert.alert('Could not save', e?.message ?? 'Try again'); }
         } },
       { key: 'remind',  label: 'Remind',  icon: 'alarm-outline', onPress: () => router.push({
           pathname: '/message-reminder' as any,

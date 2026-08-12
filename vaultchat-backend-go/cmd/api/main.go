@@ -190,6 +190,11 @@ func main() {
 	// scheduled-messages worker — so a Node-less prod loses nothing.
 	jobs.StartAll(ctx)
 	routes.StartShopBookJobs(ctx)
+	// Retention observability: how many bodies exist, and how many are past
+	// their deadline. `message_bodies_overdue` should sit at ~0 — a non-zero
+	// value that persists is the signal that the expiry sweep has stopped and
+	// the three-hour guarantee is silently not being met.
+	routes.RegisterBodyGauges()
 
 	// Anything else reaching us is a proxy misconfiguration — say so loudly.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

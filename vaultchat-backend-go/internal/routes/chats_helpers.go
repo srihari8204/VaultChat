@@ -443,6 +443,21 @@ func chatsMessagePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ── ephemeral-body split (migration 099) ──────────────────────────
+	// When bodies are on, the spine row carries NO ciphertext and only the
+	// routing subset of meta; the payload and the private metadata go to
+	// message_bodies inside the same transaction. When off, both of these are
+	// the original values and the INSERT below is byte-identical to before.
+	spineContent := content
+	spineMetaParam := metaParam
+	var bodyMetaPrivate map[string]any
+	if bodiesEnabled() {
+		pub, priv := chatsSplitMeta(meta)
+		spineContent = nil
+		spineMetaParam = chatsJSONParam(pub)
+		bodyMetaPrivate = priv
+	}
+
 	var row chatsMsgRow
 	duplicate := false
 	err := db.WithUser(ctx, user.ID, func(tx pgx.Tx) error {
@@ -458,14 +473,22 @@ func chatsMessagePost(w http.ResponseWriter, r *http.Request) {
 			  WHERE c.id = $1
 			 ON CONFLICT (chat_id, sender_id, client_id) WHERE client_id IS NOT NULL DO NOTHING
 			 RETURNING `+chatsMsgCols,
-			chatID, user.ID, msgType, content, metaParam, replyTo, clientID).Scan(row.dest()...)
+			chatID, user.ID, msgType, spineContent, spineMetaParam, replyTo, clientID).Scan(row.dest()...)
 		if db.NoRows(e) {
 			if clientID == nil {
 				return errors.New("insert returned no row")
 			}
 			// Retry of the same clientId (F7) — return the ORIGINAL row.
+			//
+			// Body-aware: the retry must echo back whatever content the message
+			// actually has NOW. If the original body has already been delivered
+			// and reclaimed, this correctly returns NULL rather than resurrecting
+			// ciphertext the retention policy has removed — the retry is a
+			// duplicate-suppression path, not a recovery path. Recovery is the
+			// sender outbox's job, through re-body.
 			e2 := tx.QueryRow(ctx,
-				`SELECT `+chatsMsgCols+` FROM messages WHERE chat_id = $1 AND sender_id = $2 AND client_id = $3`,
+				`SELECT `+chatsMsgSelBody("m")+` FROM messages m`+chatsBodyJoin+`
+				  WHERE m.chat_id = $1 AND m.sender_id = $2 AND m.client_id = $3`,
 				chatID, user.ID, *clientID).Scan(row.dest()...)
 			if db.NoRows(e2) {
 				return errors.New("dedup lookup miss")
@@ -478,6 +501,15 @@ func chatsMessagePost(w http.ResponseWriter, r *http.Request) {
 		}
 		if e != nil {
 			return e
+		}
+		// The ephemeral half, in the SAME transaction. message_bodies has no FK
+		// to messages (an FK would make DROP PARTITION validate on every drop),
+		// so atomicity here is the only thing guaranteeing a spine row never
+		// exists without its body.
+		if bodiesEnabled() {
+			if e := chatsInsertBody(ctx, tx, row.ID, chatID, row.CreatedAt, content, bodyMetaPrivate); e != nil {
+				return e
+			}
 		}
 		// Reactions never become the chat's "last message" or resurface hidden chats.
 		if msgType != "reaction" {
@@ -501,6 +533,35 @@ func chatsMessagePost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	msg := row.public()
+	// Put back what the spine no longer holds.
+	//
+	// With bodies on, the INSERT ... RETURNING above reads the SPINE row, whose
+	// content is NULL and whose meta is the routing subset. Shipping that as-is
+	// would be a visible regression in two places at once:
+	//
+	//   • the POST response is what replaces the sender's optimistic bubble —
+	//     a null content blanks the message the user just sent
+	//   • emitx.ChatNewMessage is the recipient's live delivery — a null content
+	//     means every online recipient receives an empty message and only
+	//     recovers it on a later delta sync
+	//
+	// Nothing needs to be re-read to fix this: `content` and `meta` are the
+	// values this request just wrote. Echoing them keeps the wire byte-identical
+	// to the pre-split behaviour, which is what lets already-deployed clients
+	// keep working through the cutover.
+	//
+	// The duplicate path is deliberately excluded: it re-read the row through
+	// chatsMsgSelBody, which already merged body+spine, so its values are
+	// authoritative — and if that body has since been reclaimed, NULL is the
+	// honest answer rather than a resurrection.
+	if bodiesEnabled() && !duplicate {
+		if s, ok := content.(string); ok {
+			msg.Content = &s
+		}
+		if meta != nil {
+			msg.Meta = meta
+		}
+	}
 	// Re-broadcast even on a duplicate: recipients dedup by id.
 	emitx.ChatNewMessage(chatID, msg)
 	httpx.JSON(w, 200, msg)
@@ -707,23 +768,28 @@ func chatsMessagesGet(w http.ResponseWriter, r *http.Request) {
 		limit = chatsMaxPage
 	}
 
+	// Every predicate is qualified with the `m.` alias now that message_bodies
+	// is joined in. It shares three column NAMES with messages — chat_id,
+	// created_at and content — so an unqualified `chat_id = $1` is an ambiguous
+	// reference and Postgres rejects the statement outright. Qualifying is not
+	// style here; leaving one bare would 500 the chat-open path.
 	args := []any{chatID}
-	where := `chat_id = $1 AND (expires_at IS NULL OR expires_at > NOW())`
+	where := `m.chat_id = $1 AND (m.expires_at IS NULL OR m.expires_at > NOW())`
 	order := "DESC"
 	if after != 0 {
 		args = append(args, after)
-		where += fmt.Sprintf(" AND id > $%d", len(args))
+		where += fmt.Sprintf(" AND m.id > $%d", len(args))
 		order = "ASC"
 	} else if before != 0 {
 		args = append(args, before)
-		where += fmt.Sprintf(" AND id < $%d", len(args))
+		where += fmt.Sprintf(" AND m.id < $%d", len(args))
 	}
 	args = append(args, limit)
 
 	out := []chatsPublicMsg{}
 	err := chatsQueryU(ctx, user.ID,
-		`SELECT `+chatsMsgCols+` FROM messages WHERE `+where+
-			fmt.Sprintf(` ORDER BY id %s LIMIT $%d`, order, len(args)),
+		`SELECT `+chatsMsgSelBody("m")+` FROM messages m`+chatsBodyJoin+` WHERE `+where+
+			fmt.Sprintf(` ORDER BY m.id %s LIMIT $%d`, order, len(args)),
 		args, func(rows pgx.Rows) error {
 			var m chatsMsgRow
 			if e := rows.Scan(m.dest()...); e != nil {
@@ -767,14 +833,45 @@ func chatsMessagePatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The edit guard is unchanged: sender-owned, not deleted, inside the
+	// 15-minute window, enforced by the WHERE clause rather than by a check
+	// beside it. Only WHERE the new text lands changes.
+	//
+	// EDITING MUST NOT EXTEND SERVER RETENTION. It cannot, structurally: the
+	// body's deadline is derived from the message's immutable created_at, and
+	// chatsInsertBody's ON CONFLICT updates content and meta_private while
+	// deliberately leaving body_expires_at alone. A message created at 10:00 and
+	// edited at 10:10 still expires at 13:00 — there is no code path that could
+	// make it 13:10, which is stronger than remembering not to write one.
 	var row chatsMsgRow
-	err := chatsQRow(ctx, user.ID,
-		fmt.Sprintf(`UPDATE messages
-		 SET content = $1, edited_at = NOW()
-		 WHERE id = $2 AND chat_id = $3 AND sender_id = $4 AND deleted_at IS NULL
-		   AND created_at > NOW() - INTERVAL '%d milliseconds'
-		 RETURNING `, chatsEditWindowMS)+chatsMsgCols,
-		[]any{content, r.PathValue("msgId"), chatID, user.ID}, row.dest()...)
+	var err error
+	if bodiesEnabled() {
+		err = db.WithUser(ctx, user.ID, func(tx pgx.Tx) error {
+			e := tx.QueryRow(ctx,
+				fmt.Sprintf(`UPDATE messages
+				 SET edited_at = NOW()
+				 WHERE id = $1 AND chat_id = $2 AND sender_id = $3 AND deleted_at IS NULL
+				   AND created_at > NOW() - INTERVAL '%d milliseconds'
+				 RETURNING `, chatsEditWindowMS)+chatsMsgCols,
+				r.PathValue("msgId"), chatID, user.ID).Scan(row.dest()...)
+			if e != nil {
+				return e
+			}
+			// Re-body with the edited ciphertext. If the original body has
+			// already been reclaimed this INSERTs a fresh one — correct, and
+			// still bounded by the original created_at, so an edit can never buy
+			// a message a second retention window.
+			return chatsInsertBody(ctx, tx, row.ID, chatID, row.CreatedAt, content, nil)
+		})
+	} else {
+		err = chatsQRow(ctx, user.ID,
+			fmt.Sprintf(`UPDATE messages
+			 SET content = $1, edited_at = NOW()
+			 WHERE id = $2 AND chat_id = $3 AND sender_id = $4 AND deleted_at IS NULL
+			   AND created_at > NOW() - INTERVAL '%d milliseconds'
+			 RETURNING `, chatsEditWindowMS)+chatsMsgCols,
+			[]any{content, r.PathValue("msgId"), chatID, user.ID}, row.dest()...)
+	}
 	if db.NoRows(err) {
 		httpx.Err(w, 404, "Message not found, not yours, or edit window expired")
 		return
@@ -785,6 +882,13 @@ func chatsMessagePatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	msg := row.public()
+	// Same echo as the send path: the spine RETURNING carries no ciphertext, and
+	// `message_edited` is how every open client learns the new text. Without
+	// this the edit would blank the message on every device instead of changing
+	// it.
+	if bodiesEnabled() {
+		msg.Content = &content
+	}
 	emitx.ChatEvent(chatID, "message_edited", map[string]any{
 		"id": msg.ID, "content": msg.Content, "editedAt": msg.EditedAt,
 	})
@@ -801,15 +905,38 @@ func chatsMessageDelete(w http.ResponseWriter, r *http.Request) {
 	if mem == nil {
 		return
 	}
+	// Delete-for-everyone keeps its full 60-hour window — that window governs the
+	// USER ACTION and the tombstone, not how long ciphertext survives.
+	//
+	// The two are now independent, which is the point of the split: at 15:00 a
+	// user can still delete a message sent at 10:00 whose body was reclaimed at
+	// 10:01. The tombstone is written to the durable spine exactly as before,
+	// every device syncs it exactly as before, and there is simply no ciphertext
+	// left to remove. When the body IS still present, it goes now rather than
+	// waiting for the retention sweep — a user asking for deletion should not
+	// have to wait out a TTL.
 	var id int64
 	var deletedAt time.Time
+	var createdAt time.Time
 	err := chatsQRow(ctx, user.ID,
 		fmt.Sprintf(`UPDATE messages
 		 SET deleted_at = NOW(), content = NULL, meta = NULL, type = 'system'
 		 WHERE id = $1 AND chat_id = $2 AND sender_id = $3 AND deleted_at IS NULL
 		   AND created_at > NOW() - INTERVAL '%d milliseconds'
-		 RETURNING id, chat_id, deleted_at`, chatsRevokeWindowMS),
-		[]any{r.PathValue("msgId"), chatID, user.ID}, &id, &chatID, &deletedAt)
+		 RETURNING id, chat_id, deleted_at, created_at`, chatsRevokeWindowMS),
+		[]any{r.PathValue("msgId"), chatID, user.ID}, &id, &chatID, &deletedAt, &createdAt)
+	if err == nil && bodiesEnabled() {
+		// Best-effort and deliberately non-fatal: the tombstone is already
+		// committed and is what the product guarantees. A body that survives
+		// this call is still bounded by its own 3-hour ceiling, so failing the
+		// user's delete because a cleanup query errored would trade a real
+		// guarantee for a cosmetic one.
+		if e := db.WithUser(ctx, user.ID, func(tx pgx.Tx) error {
+			return chatsDeleteBody(ctx, tx, id, createdAt)
+		}); e != nil {
+			log.Printf("[messages DELETE] body cleanup id=%d: %v", id, e)
+		}
+	}
 	if db.NoRows(err) {
 		httpx.Err(w, 404, "Message not found, not yours, or the delete window has expired")
 		return
@@ -1837,8 +1964,29 @@ func chatsPollVote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	metaMap, _ := mMeta.(map[string]any)
-	options, _ := metaMap["options"].([]any)
-	if optionIndex >= int64(len(options)) {
+	// Validate the index against the option COUNT, not the option TEXT.
+	//
+	// This read hits the spine, where poll options no longer live — their text
+	// moved into the ephemeral body with the rest of the private metadata, so
+	// the server stops holding what the choices SAY. What it still needs is the
+	// single number that makes `0 <= index < n` enforceable, and chatsSplitMeta
+	// derives that at write time from whatever the client already sends.
+	//
+	// The len(options) fallback keeps every pre-split message votable: those
+	// rows still carry the full options array on the spine and have no
+	// optionCount. Both shapes work, so no backfill is required and voting on
+	// old polls is unaffected.
+	//
+	// Net effect: a poll remains votable for its whole life — the count outlives
+	// the body by design — while the option text becomes as ephemeral as any
+	// other message content.
+	optionCount := int64(0)
+	if n, ok := chatsParseInt(metaMap["optionCount"]); ok {
+		optionCount = n
+	} else if options, ok := metaMap["options"].([]any); ok {
+		optionCount = int64(len(options))
+	}
+	if optionIndex >= optionCount {
 		httpx.Err(w, 400, "optionIndex out of range")
 		return
 	}

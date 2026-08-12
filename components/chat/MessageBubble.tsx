@@ -1341,6 +1341,32 @@ function MessageBubble({
             <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, { fontStyle: 'italic', opacity: 0.7 }]}>
               🔒 unable to decrypt
             </Text>
+          ) : msg.content == null && (msg.type === 'text' || msg.type === 'poll') ? (
+            // The message EXISTS but its body does not — here, and not on the
+            // server either.
+            //
+            // The server keeps a durable spine row (id, sender, timestamp,
+            // reply/edit/delete state) and an EPHEMERAL body. Once every active
+            // device has acknowledged delivery — or the retention window passes —
+            // the body is reclaimed and the spine is all that comes back. A device
+            // that already received the message reads it from its own cache and
+            // never lands here; a device that never received it has nothing to
+            // show, and that is what this state says.
+            //
+            // It has to say something. `content` was falling through to `null`,
+            // which rendered an EMPTY BUBBLE: no text, no icon, no explanation,
+            // visually identical to a rendering bug. That path had never run in
+            // production (bodies are never reclaimed today), so it was untested
+            // rather than deliberately blank — and it is the one UI change the
+            // retention work genuinely requires, because "the body is gone" is
+            // information the user needs and the layout already implies.
+            //
+            // Scoped to text/poll on purpose. A media message legitimately has a
+            // null body when it carries no caption; its bubble is the attachment,
+            // which renders above this and must not be labelled unavailable.
+            <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, { fontStyle: 'italic', opacity: 0.7 }]}>
+              ⧗ Message no longer available
+            </Text>
           ) : null
         )}
 

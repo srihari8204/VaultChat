@@ -42,13 +42,36 @@ OUT="$BACKUP_DIR/vaultchat-$TS.sql.gz"
 
 echo "[backup] starting $OUT"
 
+# NOTE: this script is NOT the one production cron runs. The live box runs
+# /home/srihari/vaultchat-backups/backup.sh (unversioned, dumps from inside the
+# postgres container). Both were fixed together; if you change one, change both,
+# or better, version the live one and delete this.
+
 # pg_dump custom format for restorability, gzipped for size.
 # --no-owner / --no-privileges so the dump restores cleanly into a
 # differently-owned DB if needed for disaster recovery.
+#
+# --exclude-table-data on message_bodies*: message CIPHERTEXT MUST NOT ENTER A
+# BACKUP. The whole point of an ephemeral body store is that the server holds
+# the ciphertext for hours, not forever — and a nightly full dump kept for 14
+# days would quietly restore exactly the long-term archive the design removes.
+# The glob covers the hourly partitions as well as the parent; each partition is
+# its own table, so `message_bodies` alone would exclude nothing that matters.
+#
+# SCHEMA is still dumped (this excludes DATA only), so a restore rebuilds the
+# table and its partitions empty — which is the correct disaster-recovery
+# outcome: conversations resume, undelivered bodies are lost, and no historical
+# message content is resurrected.
+#
+# NOT YET COVERED: messages.content still holds ciphertext for messages written
+# before the body store existed, and that column IS in this dump. It stops being
+# true when the contract migration drops the column; until then this exclusion
+# bounds NEW content only. Said plainly rather than claimed clean.
 PGPASSWORD="$DB_PASS" pg_dump \
   --host="$DB_HOST" --port="$BACKUP_PG_PORT" \
   --username="$DB_USER" --dbname="$DB_NAME" \
   --no-owner --no-privileges \
+  --exclude-table-data='message_bodies*' \
   --format=plain \
   | gzip -9 > "$OUT"
 

@@ -21,6 +21,7 @@ import {
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import {
+  getBookmarkPlaintext,
   listBookmarks,
   removeBookmark,
   type BookmarkRow,
@@ -47,8 +48,22 @@ export default function BookmarksScreen() {
     if (cached) { setRows(cached); setLoading(false); }
     try {
       const fresh = await listBookmarks();
-      setRows(fresh);
-      writeCache('bookmarks', fresh);
+      // Fill in bodies the server no longer has.
+      //
+      // A bookmarked message's ciphertext is reclaimed on delivery like every
+      // other message — bookmarks are deliberately NOT a server-side archive —
+      // so the server returns the message row with a null content. The local
+      // snapshot taken at bookmark time is the readable copy, and preferring it
+      // is what keeps a saved message saved.
+      const hydrated = await Promise.all(fresh.map(async (b) => {
+        const id = Number(b.message?.id ?? 0);
+        if (!b.message || !id) return b;
+        if (b.message.content) return b;                 // server still has it
+        const local = await getBookmarkPlaintext(id);
+        return local ? { ...b, message: { ...b.message, content: local } } : b;
+      }));
+      setRows(hydrated);
+      writeCache('bookmarks', hydrated);
       setError(null);
     } catch (e: any) {
       // Keep cached rows for offline read; only surface if nothing painted.

@@ -26,11 +26,20 @@ import (
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/emitx"
 	"vaultchat/backend-go/internal/httpx"
+	"vaultchat/backend-go/internal/metrics"
 	"vaultchat/backend-go/internal/storage"
 )
 
 const sweepInterval = 5 * time.Minute
 const schedInterval = 30 * time.Second
+
+// Expiry runs far more often than the other sweeps. Those trim things that are
+// merely stale; this one enforces a stated retention guarantee, and the promise
+// is "three hours", not "three hours give or take the sweep interval". One
+// minute keeps the observable overshoot inside a rounding error while still
+// being a trivial query — it is an index-free scan of a table that ACK deletion
+// has usually already emptied.
+const bodySweepInterval = time.Minute
 
 func envInt(k string, def int) int {
 	if v, ok := httpx.ParseIntPrefix(os.Getenv(k)); ok {
@@ -62,10 +71,35 @@ func StartAll(ctx context.Context) {
 	run("media-retention", sweepInterval, sweepDeliveredAttachments)
 	run("sweep-expired-stories", sweepInterval, sweepExpiredStories)
 	run("scheduled-messages", schedInterval, sweepScheduledMessages)
+
+	// Keep the message_bodies partition window ahead of the clock. Creation
+	// only — see partitions.go for why dropping is not in this file yet.
+	StartPartitionMaintenance(ctx)
+	RegisterPartitionGauge()
 	if os.Getenv("DELETE_ON_DELIVERY") == "true" {
 		log.Println("[delete-on-delivery] ENABLED")
 		run("delete-on-delivery", sweepInterval, sweepDeliveredMessages)
+		// The body-store twin of the same rule. Runs under the SAME flag because
+		// it is the same policy applied to the new storage location — enabling
+		// one and not the other would leave whichever store is live unreclaimed.
+		run("delete-on-delivery-bodies", sweepInterval, sweepDeliveredBodies)
 	}
+
+	// The hard ceiling, independent of delivery and independent of the flag
+	// above. ACK deletion is an OPTIMISATION — it reclaims early. This is the
+	// GUARANTEE, and it must hold even if nothing is ever acknowledged, so it is
+	// deliberately not gated on DELETE_ON_DELIVERY.
+	//
+	// Why a bounded DELETE and not DROP PARTITION alone: an hourly partition
+	// [H, H+1) holds bodies whose deadlines are spread across that hour, so the
+	// partition only becomes wholly reclaimable at H+4h. Waiting for that would
+	// let the earliest body in each partition live up to four hours — a real
+	// breach of a three-hour promise. So expiry is enforced to the second by
+	// this sweep, and the partition drop below reclaims the space afterwards.
+	// The sweep stays cheap precisely because ACK deletion has usually emptied
+	// the rows before it arrives.
+	run("expire-bodies", bodySweepInterval, sweepExpiredBodies)
+	run("drop-body-partitions", sweepInterval, DropExpiredPartitions)
 }
 
 // ── disappearing messages ──────────────────────────────────────────────
@@ -189,6 +223,108 @@ func sweepDeliveredMessages(ctx context.Context) {
 	}
 }
 
+// ── ephemeral body reclaim (migration 099) ─────────────────────────────
+
+// sweepDeliveredBodies is delete-on-delivery for the body store.
+//
+// The multi-device safety condition is COPIED VERBATIM from
+// sweepDeliveredMessages below — same three layers, same staleness window:
+//
+//	chat_members.last_delivered_message_id   account-level pointer
+//	chat_device_delivery                     per-DEVICE pointer (migration 078)
+//	user_sync_devices.last_sync_at           ignores lost/sold handsets
+//
+// Reproducing rather than re-deriving it is deliberate. The rule is subtle and
+// was already got wrong once: on a multi-device account the first device to ack
+// advances the shared pointer, so an account-level check alone destroys a body
+// a second device never received. Any change here must be made in both places.
+//
+// The difference from the legacy sweep is only the verb: that one NULLs a
+// column and leaves the old heap tuple holding ciphertext until autovacuum;
+// this DELETEs the row, and its partition is dropped whole later. The bytes
+// actually go.
+func sweepDeliveredBodies(ctx context.Context) {
+	grace := envInt("DELETE_ON_DELIVERY_GRACE_SEC", 120)
+	staleDays := envInt("DELETE_ON_DELIVERY_DEVICE_STALE_DAYS", 30)
+	var purged int64
+	for i := 0; i < sweepMaxIters; i++ {
+		tag, err := db.SysPool.Exec(ctx,
+			`DELETE FROM message_bodies b
+			  USING messages m
+			  WHERE b.message_id = m.id
+			    AND b.created_at = m.created_at
+			    AND m.created_at < NOW() - ($1 || ' seconds')::interval
+			    AND EXISTS (
+			      SELECT 1 FROM chat_members o
+			       WHERE o.chat_id = m.chat_id AND o.left_at IS NULL AND o.user_id <> m.sender_id
+			    )
+			    AND NOT EXISTS (
+			      SELECT 1 FROM chat_members cm
+			       WHERE cm.chat_id = m.chat_id
+			         AND cm.left_at IS NULL
+			         AND cm.user_id <> m.sender_id
+			         AND (cm.last_delivered_message_id IS NULL OR cm.last_delivered_message_id < m.id)
+			    )
+			    AND NOT EXISTS (
+			      SELECT 1
+			        FROM chat_members cm2
+			        JOIN user_sync_devices usd ON usd.user_id = cm2.user_id
+			        LEFT JOIN chat_device_delivery cdd
+			               ON cdd.chat_id = m.chat_id
+			              AND cdd.user_id = cm2.user_id
+			              AND cdd.device_id = usd.device_id
+			       WHERE cm2.chat_id = m.chat_id
+			         AND cm2.left_at IS NULL
+			         AND cm2.user_id <> m.sender_id
+			         AND usd.last_sync_at > NOW() - ($3 || ' days')::interval
+			         AND (cdd.last_delivered_message_id IS NULL OR cdd.last_delivered_message_id < m.id)
+			    )
+			    AND b.ctid IN (SELECT ctid FROM message_bodies LIMIT $2)`,
+			strconv.Itoa(grace), sweepBatch, strconv.Itoa(staleDays))
+		if err != nil {
+			log.Printf("[delete-on-delivery-bodies] failed: %v", err)
+			return
+		}
+		purged += tag.RowsAffected()
+		if tag.RowsAffected() < sweepBatch {
+			break
+		}
+	}
+	if purged > 0 {
+		metrics.Add("messages_deleted_on_ack_total", uint64(purged))
+		log.Printf("[delete-on-delivery-bodies] reclaimed %d body(ies)", purged)
+	}
+}
+
+// sweepExpiredBodies enforces the hard ceiling. No delivery condition, no
+// exceptions: past body_expires_at the ciphertext goes, acknowledged or not.
+//
+// This is the statement that makes the three-hour promise true. Everything else
+// in this file reclaims EARLIER than it; nothing may reclaim later.
+func sweepExpiredBodies(ctx context.Context) {
+	var purged int64
+	for i := 0; i < sweepMaxIters; i++ {
+		tag, err := db.SysPool.Exec(ctx,
+			`DELETE FROM message_bodies
+			  WHERE ctid IN (SELECT ctid FROM message_bodies
+			                  WHERE body_expires_at <= NOW()
+			                  LIMIT $1)`, sweepBatch)
+		if err != nil {
+			metrics.Inc("message_expiration_failures_total")
+			log.Printf("[expire-bodies] failed: %v", err)
+			return
+		}
+		purged += tag.RowsAffected()
+		if tag.RowsAffected() < sweepBatch {
+			break
+		}
+	}
+	if purged > 0 {
+		metrics.Add("messages_expired_total", uint64(purged))
+		log.Printf("[expire-bodies] expired %d body(ies)", purged)
+	}
+}
+
 // ── media retention ────────────────────────────────────────────────────
 
 func uploadDir() string {
@@ -199,15 +335,57 @@ func uploadDir() string {
 	return filepath.Join(cwd, "uploads")
 }
 
+// mediaHardTTL is the ceiling on how long an encrypted media object may sit in
+// object storage.
+//
+// WHY THREE HOURS IS COHERENT HERE, NOT ARBITRARY
+// -----------------------------------------------
+// A media blob is useless without its per-file AES key, and that key does not
+// live beside it: lib/sendMedia packs it into the message CONTENT, which the
+// Double Ratchet encrypts and which now expires with message_bodies. So once a
+// message body is reclaimed, any recipient who had not already received it can
+// never decrypt the blob — the object is ciphertext nobody holds a key for.
+// Keeping it for another fourteen days protects nothing and stores everything.
+//
+// WHAT IT COSTS, SAID PLAINLY
+// ---------------------------
+// A recipient who received the message (and therefore the key) but has NOT yet
+// downloaded the bytes — auto-download off, on mobile data, a large video —
+// loses the ability to tap-to-download after the deadline. That is a real
+// behaviour change, not a free win, and it is the direct consequence of the
+// requirement that no server-side encrypted copy outlive three hours.
+//
+// The early-purge path is unchanged and still does most of the work: an object
+// whose recipients have all downloaded it is removed immediately, long before
+// this deadline is reached.
+func mediaHardTTL() time.Duration {
+	if v, ok := httpx.ParseIntPrefix(os.Getenv("MEDIA_TTL_HOURS")); ok && v > 0 {
+		if d := time.Duration(v) * time.Hour; d < 3*time.Hour {
+			return d // may only TIGHTEN, never extend — same asymmetry as bodyTTL
+		}
+	}
+	return 3 * time.Hour
+}
+
 func sweepDeliveredAttachments(ctx context.Context) {
-	ttlDays := envInt("MEDIA_TTL_DAYS", 14)
+	// Legacy window stays in force until bodies are enabled, so a deployment
+	// with the flag off behaves exactly as it does today. Turning MESSAGE_BODIES
+	// on switches media onto the same three-hour ceiling as the text it
+	// accompanies — the two must move together, or the key expires while the
+	// blob it unlocks lingers for a fortnight.
+	var cutoff string
+	if bodyStoreEnabled() {
+		cutoff = strconv.FormatInt(int64(mediaHardTTL()/time.Second), 10) + " seconds"
+	} else {
+		cutoff = strconv.Itoa(envInt("MEDIA_TTL_DAYS", 14)) + " days"
+	}
 	rows, err := db.SysPool.Query(ctx,
 		`SELECT a.id, a.storage_path, a.storage_backend
 		   FROM attachments a
 		  WHERE a.purged_at IS NULL
 		    AND a.storage_path IS NOT NULL
 		    AND (
-		      a.created_at < NOW() - ($1 || ' days')::INTERVAL
+		      a.created_at < NOW() - $1::INTERVAL
 		      OR (
 		        (SELECT COUNT(*) FROM attachment_deliveries d WHERE d.attachment_id = a.id) > 0
 		        AND (SELECT COUNT(*) FROM attachment_deliveries d WHERE d.attachment_id = a.id)
@@ -219,7 +397,7 @@ func sweepDeliveredAttachments(ctx context.Context) {
 		                 WHERE m.meta->>'attachmentId' = a.id::text)
 		      )
 		    )
-		  LIMIT 500`, strconv.Itoa(ttlDays))
+		  LIMIT 500`, cutoff)
 	if err != nil {
 		log.Printf("[media-retention] failed: %v", err)
 		return
@@ -332,7 +510,12 @@ func deliverScheduled(ctx context.Context, tx pgx.Tx, schedID int64, userID, cha
 		`SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL`,
 		chatID, userID).Scan(&one); err != nil {
 		if db.NoRows(err) {
-			_, e := tx.Exec(ctx, `UPDATE scheduled_messages SET sent_at = NOW() WHERE id = $1`, schedID)
+			// Sender left the chat after scheduling: stamp it sent, deliver
+			// nothing — and still drop the ciphertext. This branch never
+			// produces a message, so the payload has no remaining purpose and
+			// would otherwise sit here until the 30-day prune.
+			_, e := tx.Exec(ctx,
+				`UPDATE scheduled_messages SET sent_at = NOW(), content = NULL WHERE id = $1`, schedID)
 			return e
 		}
 		return err
@@ -366,8 +549,22 @@ func deliverScheduled(ctx context.Context, tx pgx.Tx, schedID int64, userID, cha
 		msgID, mCreatedAt, chatID); err != nil {
 		return err
 	}
+	// Drop the scheduled copy of the ciphertext the moment it has been handed to
+	// the messages table.
+	//
+	// It used to survive here for 30 days: the row is only pruned by the
+	// `sent_at < NOW() - 30 days` statement below, and nothing ever cleared
+	// `content`. So a scheduled message left a SECOND server-side copy of its
+	// ciphertext that outlived the message's own retention by a month, in a
+	// table nobody looks at. Verified on production — one row was holding
+	// post-delivery ciphertext when this was found.
+	//
+	// The row itself stays (sent_at, message_id are the delivery record the UI
+	// reads); only the payload goes. Pre-send retention is unchanged and is a
+	// genuine exception: a message scheduled for next week must keep its
+	// ciphertext until then, because nothing else holds it.
 	if _, err := tx.Exec(ctx,
-		`UPDATE scheduled_messages SET sent_at = NOW(), message_id = $2 WHERE id = $1`,
+		`UPDATE scheduled_messages SET sent_at = NOW(), message_id = $2, content = NULL WHERE id = $1`,
 		schedID, msgID); err != nil {
 		return err
 	}

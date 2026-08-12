@@ -63,6 +63,9 @@ func RegisterChats(mux *http.ServeMux) {
 	id.HandleFunc("GET /chats/{id}/messages", httpx.RequireAuth(chatsMessagesGet))
 	id.HandleFunc("GET /chats/{id}/messages/search", httpx.RequireAuth(chatsInChatSearch))
 	id.HandleFunc("PATCH /chats/{id}/messages/{msgId}", httpx.RequireAuth(chatsMessagePatch))
+	// Sender recovery: re-upload the body of an EXISTING message rather than
+	// sending a duplicate. See chats_bodies.go for the authorisation rules.
+	id.HandleFunc("PUT /chats/{id}/messages/{msgId}/body", httpx.RequireAuth(chatsMessageBodyPut))
 	id.HandleFunc("DELETE /chats/{id}/messages/{msgId}", httpx.RequireAuth(chatsMessageDelete))
 	id.HandleFunc("POST /chats/{id}/delivered", httpx.RequireAuth(chatsDelivered))
 	id.HandleFunc("POST /chats/{id}/read", httpx.RequireAuth(chatsRead))
@@ -548,8 +551,9 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 		limit = 500
 	}
 	rows, err := db.SysPool.Query(ctx,
-		`SELECT `+chatsMsgSel("m")+` FROM messages m
-		   JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1 AND cm.left_at IS NULL
+		`SELECT `+chatsMsgSelBody("m")+` FROM messages m
+		   JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1 AND cm.left_at IS NULL`+
+			chatsBodyJoin+`
 		  WHERE m.id > $2 AND (m.expires_at IS NULL OR m.expires_at > NOW())
 		  ORDER BY m.id ASC LIMIT $3`,
 		user.ID, since, limit)
@@ -586,8 +590,9 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 	if raw := q.Get("mutatedSince"); raw != "" {
 		if mutatedSince, ok := userParseJSDate(raw); ok {
 			mrows, err := db.SysPool.Query(ctx,
-				`SELECT `+chatsMsgSel("m")+` FROM messages m
-				   JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1 AND cm.left_at IS NULL
+				`SELECT `+chatsMsgSelBody("m")+` FROM messages m
+				   JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1 AND cm.left_at IS NULL`+
+					chatsBodyJoin+`
 				  WHERE (m.edited_at > $2 OR m.deleted_at > $2) AND m.id <= $3
 				  ORDER BY GREATEST(COALESCE(m.edited_at, 'epoch'), COALESCE(m.deleted_at, 'epoch')) ASC
 				  LIMIT 500`,
@@ -618,6 +623,67 @@ func chatsMsgSel(alias string) string {
 	cols := strings.Split(chatsMsgCols, ", ")
 	for i, c := range cols {
 		cols[i] = alias + "." + c
+	}
+	return strings.Join(cols, ", ")
+}
+
+// ─── message body read seam (migration 099) ───────────────────────────
+//
+// Ciphertext is moving out of messages.content and into the ephemeral,
+// hourly-partitioned message_bodies. The two live side by side during the
+// rollout, so every read resolves the body as:
+//
+//	COALESCE(b.content, m.content)
+//
+// READS ARE UNCONDITIONAL — there is no flag on this side, and that asymmetry
+// is the whole rollback story. Only the WRITER is gated (MESSAGE_BODIES=1). A
+// reader that always coalesces is correct in all three states:
+//
+//	table empty, nothing written yet  → b.content is NULL → old behaviour
+//	writer on                         → body wins, m.content is NULL anyway
+//	writer turned back OFF            → bodies already written STILL resolve
+//
+// Had the read been flagged too, disabling the writer would have orphaned every
+// body already stored — a rollback that loses messages is not a rollback.
+//
+// The join is on (message_id, created_at) rather than message_id alone because
+// created_at is the partition key: supplying it lets the planner prune to the
+// single hour that can contain the row instead of probing every partition.
+const chatsBodyJoin = ` LEFT JOIN message_bodies b ON b.message_id = m.id AND b.created_at = m.created_at`
+
+// chatsMsgSelBody is chatsMsgSel with the body-aware content expression.
+// Callers MUST alias messages as `m` and append chatsBodyJoin to the FROM.
+func chatsMsgSelBody(alias string) string {
+	cols := strings.Split(chatsMsgCols, ", ")
+	for i, c := range cols {
+		switch c {
+		case "content":
+			// AS content keeps the column NAME identical, so chatsMsgRow.dest()
+			// scanning is positional-and-named the same as before.
+			cols[i] = "COALESCE(b.content, " + alias + ".content) AS content"
+		case "meta":
+			// Re-assemble the metadata the client used to get in one column.
+			//
+			// Writes split it: routing metadata the server actually reads stays
+			// on the spine, everything private (thumbnail, filename, MIME, poll
+			// option text, mention detail) rides in the body and dies with it.
+			// Merging on read is what makes that split INVISIBLE to every
+			// existing client — an app that has never heard of message_bodies
+			// still receives one `meta` object with the same keys.
+			//
+			// Spine-first, body-second: `||` is right-biased, so a private key
+			// wins over a same-named public one. That only matters for legacy
+			// rows written before the split, where the full meta sits on the
+			// spine and there is no body to override it.
+			//
+			// The CASE preserves NULL. Plain concatenation would turn a message
+			// that genuinely has no metadata into `{}`, a wire change that no
+			// client asked for.
+			cols[i] = "CASE WHEN " + alias + ".meta IS NULL AND b.meta_private IS NULL THEN NULL" +
+				" ELSE COALESCE(" + alias + ".meta, '{}'::jsonb) || COALESCE(b.meta_private, '{}'::jsonb) END AS meta"
+		default:
+			cols[i] = alias + "." + c
+		}
 	}
 	return strings.Join(cols, ", ")
 }

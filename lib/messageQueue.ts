@@ -70,6 +70,67 @@ export interface QueuedMessage {
   createdAt: number;
   lastError: string | null;
   state?:    MsgState;               // QUEUED | WAITING_KEYS (clock in both cases)
+  /**
+   * Server id, set once the POST is accepted. Its presence is what marks the
+   * row as SERVER_ACCEPTED / AWAITING_DELIVERY rather than still-to-send.
+   */
+  serverId?: number;
+  /** When the server accepted it — drives the bounded-retention reap below. */
+  acceptedAt?: number;
+  /**
+   * The exact ciphertext that went to the server, kept ONLY while awaiting
+   * delivery so the message can be re-bodied without re-encrypting.
+   *
+   * This is what an accepted row holds INSTEAD of `plaintext` — see the note on
+   * AWAIT_DELIVERY_MAX_MS below. Re-upload is verbatim: a Double Ratchet
+   * ciphertext stays decryptable by the recipient whenever it arrives, so
+   * replaying the original bytes is both sufficient and cheaper than taking a
+   * fresh ratchet step.
+   */
+  ciphertext?: string;
+}
+
+// ─── SERVER_ACCEPTED vs DELIVERED ─────────────────────────────────────
+//
+// HTTP 200 means the SERVER took the message. It does NOT mean the recipient
+// received it, and the two stopped being interchangeable the moment the server
+// stopped keeping message bodies indefinitely.
+//
+// This row used to be deleted on 200. That was safe only while the server was a
+// durable archive that would hand the message over whenever the recipient
+// eventually reconnected. With an ephemeral body store it is not: if the
+// recipient is offline when the body is reclaimed, the server has nothing left
+// to deliver and — with the row already gone — neither does the sender. The
+// message would be lost with nobody able to notice.
+//
+// So an accepted row is KEPT, in state SENT, holding the plaintext that makes
+// recovery possible. It is dropped when delivery is confirmed, or when the
+// retention cap below makes recovery pointless anyway.
+//
+// The rows are inert while they wait: excluded from the flush loop (they must
+// never be re-POSTed) and from pendingForChat (they are real messages now, and
+// rendering them as pending bubbles would double every sent message on screen).
+//
+// THEY HOLD CIPHERTEXT, NOT PLAINTEXT.
+//
+// A queued row carries `plaintext` because it has not been encrypted yet —
+// encryption happens at flush, against the peer's current ratchet. That was
+// acceptable while a row lived for seconds; holding it for up to a WEEK is a
+// different proposition entirely, and would have been a plaintext-at-rest
+// regression introduced by this very feature. `encField` is a pass-through
+// whenever VAULT_CACHE_ENCRYPTED is off (the current default), so those rows
+// would sit in readable SQLite on the handset.
+//
+// So acceptance swaps the payload: the row keeps the exact ciphertext that went
+// to the server and DROPS the plaintext. Recovery needs the bytes to re-upload,
+// not the text — and the ciphertext is already sealed to the recipient, so it is
+// worth nothing to anyone reading the database. Net effect is a reduction in
+// local exposure versus the pre-change behaviour, not merely parity with it.
+const AWAIT_DELIVERY_MAX_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** True for a row that has been accepted by the server and is awaiting delivery. */
+function isAwaitingDelivery(m: QueuedMessage): boolean {
+  return typeof m.serverId === 'number' && m.serverId > 0;
 }
 
 // ─── Tiny event bus (avoids a dependency) ─────────────────────
@@ -202,8 +263,51 @@ export async function retry(tempId: string): Promise<void> {
  *  Add a re-apply pass here if that offline tail matters. */
 export async function pendingForChat(chatId: string): Promise<QueuedMessage[]> {
   const q = await queueListByTag<QueuedMessage>('msg', chatId).catch(() => []);
-  return q.filter(m => (m.op ?? 'send') === 'send')
+  // isAwaitingDelivery rows are excluded: the server has accepted them, so they
+  // already exist as real messages in the timeline. Returning them here too
+  // would render a pending bubble beside the real one — every sent message
+  // duplicated on screen until the row was reaped.
+  return q.filter(m => (m.op ?? 'send') === 'send' && !isAwaitingDelivery(m))
           .sort((a, b) => a.createdAt - b.createdAt);
+}
+
+/**
+ * Confirm delivery up to `lastDeliveredMessageId` for a chat and release the
+ * rows that were waiting on it.
+ *
+ * Called from the sender's `message_delivered` handling. Delivery is the ONLY
+ * clean release: at that point the recipient holds the message locally and the
+ * server's copy is redundant, so the sender's recovery copy is too.
+ */
+export async function noteDelivered(chatId: string, lastDeliveredMessageId: number): Promise<void> {
+  if (!(lastDeliveredMessageId > 0)) return;
+  try {
+    const q = await queueListByTag<QueuedMessage>('msg', chatId);
+    for (const m of q) {
+      if (isAwaitingDelivery(m) && (m.serverId as number) <= lastDeliveredMessageId) {
+        await drop(m.tempId);
+      }
+    }
+  } catch { /* best-effort: the age cap below reaps anything missed */ }
+}
+
+/**
+ * Drop accepted-but-unconfirmed rows past the retention cap.
+ *
+ * Without this the outbox becomes a second permanent archive — the exact thing
+ * the server-side work is removing, relocated onto the handset. A recipient who
+ * has not come back within the window is not coming back for this message, and
+ * the sender still has it in their own chat history regardless; what is dropped
+ * here is only the ability to RE-DELIVER it.
+ */
+async function reapAwaitingDelivery(): Promise<void> {
+  const cutoff = Date.now() - AWAIT_DELIVERY_MAX_MS;
+  try {
+    const q = await queueList<QueuedMessage>('msg', 500, 0);
+    for (const m of q) {
+      if (isAwaitingDelivery(m) && (m.acceptedAt ?? m.createdAt) < cutoff) await drop(m.tempId);
+    }
+  } catch { /* best-effort */ }
 }
 
 // ─── Flush loop ───────────────────────────────────────────────
@@ -217,15 +321,18 @@ function scheduleFlush(delayMs: number): void {
   flushScheduled = setTimeout(() => { flushScheduled = null; flush(); }, delayMs);
 }
 
-async function postOnce(item: QueuedMessage): Promise<Message | null> {
+/** What went on the wire, so the caller can retain the ciphertext (never the text). */
+interface PostResult { real: Message | null; wire: string | null }
+
+async function postOnce(item: QueuedMessage): Promise<PostResult> {
   // Non-'send' ops mutate an existing message by id. Reuse chatService's exact
   // encrypt+verb logic; the queue only adds durability around it.
   if (item.op === 'delete') {
     await deleteMessage(item.chatId, item.targetId!);
-    return null;
+    return { real: null, wire: null };
   }
   if (item.op === 'edit') {
-    return editMessage(item.chatId, item.targetId!, item.plaintext);
+    return { real: await editMessage(item.chatId, item.targetId!, item.plaintext), wire: null };
   }
 
   // F5 (E2EE link previews): the sender-resolved preview lives in LOCAL meta
@@ -267,7 +374,9 @@ async function postOnce(item: QueuedMessage): Promise<Message | null> {
   // Cache the WRAPPED plaintext (text + preview) so the sender's own bubble
   // keeps its preview across reloads — hydrateMessages unwraps it on read.
   if (encrypted) await cacheOwnPlaintext(item.chatId, real?.id, wire);
-  return real;
+  // Hand back the CIPHERTEXT (not `wire`, which is the pre-encryption text) so
+  // the caller can retain it for recovery and discard the plaintext.
+  return { real, wire: encrypted ? content : null };
 }
 
 /**
@@ -279,6 +388,10 @@ export async function flush(): Promise<void> {
   if (flushing) return;
   flushing = true;
   try {
+    // Reap first: accepted-but-unconfirmed rows are inert, and leaving them in
+    // place would let them fill a 200-item page and starve real sends behind
+    // them. Cheap — it only touches rows past the cap.
+    await reapAwaitingDelivery();
     const q = await load();
     if (q.length === 0) {
       // An empty page while rotated means we walked off the end — go back to the
@@ -289,9 +402,34 @@ export async function flush(): Promise<void> {
 
     const remaining: QueuedMessage[] = [];
     for (const item of q) {
+      // Already accepted and waiting on delivery — NOT a send candidate.
+      // Re-POSTing would be a no-op anyway (the server dedups on clientId) but
+      // it would burn a request per flush per row, forever.
+      if (isAwaitingDelivery(item)) continue;
       try {
-        const real = await postOnce(item);
-        await drop(item.tempId);              // acked — the row's job is done
+        const { real, wire } = await postOnce(item);
+        const serverId = Number(real?.id ?? 0);
+        if ((item.op ?? 'send') === 'send' && serverId > 0 && wire) {
+          // SERVER_ACCEPTED → hold the row until the recipient actually has the
+          // message. This is the only copy that can recover an undelivered
+          // message once the server body is reclaimed.
+          //
+          // Swap the payload: keep the CIPHERTEXT that was just sent, drop the
+          // plaintext. Recovery re-uploads bytes; it never needs the text, and
+          // leaving readable text in a row that now lives for days would be a
+          // plaintext-at-rest regression created by this feature.
+          item.ciphertext = wire;
+          item.plaintext = '';
+          item.serverId = serverId;
+          item.acceptedAt = Date.now();
+          item.state = 'SENT';
+          item.lastError = null;
+          await put(item);
+        } else {
+          // edit/delete ops mutate an existing message and carry no
+          // recoverable payload of their own — nothing to hold on to.
+          await drop(item.tempId);
+        }
         emit('sent', { tempId: item.tempId, chatId: item.chatId, real });
       } catch (err: any) {
         item.lastError = err?.message ?? 'unknown error';

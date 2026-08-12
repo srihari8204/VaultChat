@@ -1192,8 +1192,61 @@ export async function listBookmarks(): Promise<BookmarkRow[]> {
   return api<BookmarkRow[]>('/user/bookmarks');
 }
 
-export async function addBookmark(messageId: number, note?: string | null): Promise<{ id: string }> {
-  return api('/user/bookmarks', { method: 'POST', json: { messageId, note: note ?? null } });
+// A bookmark's local snapshot, keyed by message id.
+//
+// Bookmarking is the one action whose whole point is "keep this" — and the
+// server can no longer honour that: a bookmarked message's ciphertext is
+// reclaimed on delivery like any other, and exempting it would turn bookmarks
+// into exactly the permanent server archive this design removes.
+//
+// So the client keeps its own copy at bookmark time. It is stored through the
+// SAME sealed store as own-message plaintext (SQLite, sealed with the cache DEK
+// when VAULT_CACHE_ENCRYPTED is on), never in a new plaintext location.
+//
+// It is also the reason a bookmark survives cache pruning: pruneMessageCache
+// trims the `messages` table by age and per-chat count, and a message
+// bookmarked months ago would eventually be evicted from it. This copy lives in
+// the kv store, which that sweep does not touch.
+const bookmarkKey = (messageId: number) => `vc_bookmark_pt_${messageId}`;
+
+/** Snapshot a bookmarked message's plaintext locally. Best-effort. */
+export async function cacheBookmarkPlaintext(messageId: number, plaintext: string): Promise<void> {
+  if (!messageId || messageId <= 0 || !plaintext) return;
+  try {
+    const { setMeta } = await import('./localDb');
+    const { encField } = await import('./cacheCrypto');
+    const sealed = encField(plaintext);
+    if (sealed != null) await setMeta(bookmarkKey(messageId), sealed);
+  } catch (err) {
+    console.warn('[bookmark] local snapshot failed — id:', messageId, (err as any)?.message);
+  }
+}
+
+/** The local snapshot for a bookmarked message, or null. */
+export async function getBookmarkPlaintext(messageId: number): Promise<string | null> {
+  if (!messageId || messageId <= 0) return null;
+  try {
+    const { getMeta } = await import('./localDb');
+    const { decField } = await import('./cacheCrypto');
+    const hit = await getMeta(bookmarkKey(messageId));
+    return hit ? decField(hit) : null;
+  } catch { return null; }
+}
+
+/**
+ * Bookmark a message. `plaintext` is the decrypted body as currently rendered;
+ * pass it so the bookmark stays readable after the server body expires.
+ */
+export async function addBookmark(
+  messageId: number, note?: string | null, plaintext?: string | null,
+): Promise<{ id: string }> {
+  const res = await api<{ id: string }>('/user/bookmarks', {
+    method: 'POST', json: { messageId, note: note ?? null },
+  });
+  // After the server call: a failed bookmark should not leave a local snapshot
+  // of something the user did not manage to save.
+  if (plaintext) await cacheBookmarkPlaintext(messageId, plaintext);
+  return res;
 }
 
 export async function removeBookmark(id: string): Promise<void> {
