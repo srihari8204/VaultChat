@@ -24,7 +24,32 @@ services:
   postgres:
     ports: !override []      # in-network only
   redis:
-    ports: !override []      # in-network only
+    # LOOPBACK-ONLY, and it is load-bearing — not a convenience.
+    #
+    # livekit runs network_mode: host, so it is NOT on the compose network and
+    # cannot resolve the `redis` service name. Its livekit.yaml therefore dials
+    # 127.0.0.1:16379. With redis publishing no ports at all, nothing listened
+    # there, and LiveKit could not allocate a room node — so EVERY authenticated
+    # join returned HTTP 500 instead of upgrading the WebSocket:
+    #
+    #   status 500, path /rtc/v1
+    #   "could not get node for room: dial tcp 127.0.0.1:16379: connect:
+    #    connection refused"
+    #
+    # That single failure is why SFU group calls and broadcasting were both
+    # dead: RoomService.CreateRoom 500s the same way, and the egress worker's
+    # "could not clean egress info" errors are the same refused dial.
+    #
+    # Bound to 127.0.0.1 rather than 0.0.0.0: the host needs it, the internet
+    # must not have it. Redis has no password on this deployment
+    # (REDIS_PASS: ""), so a 0.0.0.0 bind would publish an unauthenticated
+    # datastore straight onto a public IP.
+    #
+    # Egress already reaches the SAME instance as `redis:6379` from inside the
+    # compose network; this makes livekit-server agree with it, which is what
+    # lets the two coordinate at all.
+    ports: !override
+      - "127.0.0.1:16379:6379"
   minio:
     ports: !override
       - "19000:9000"         # presigned URLs are signed for S3_PUBLIC_ENDPOINT
