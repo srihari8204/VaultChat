@@ -52,6 +52,106 @@ func mkClient(endpoint string) (*minio.Client, error) {
 	})
 }
 
+// ── broadcast store (a DIFFERENT object store from the media store) ────
+//
+// This deployment splits them, and the split is invisible from the compose
+// files that are in git:
+//
+//	chat media / avatars / shopbook docs → Cloudflare R2   (S3_*)
+//	broadcast HLS segments               → MinIO           (egress' own config)
+//
+// go-api's S3_* point at R2 because docker-compose.box.yml (deliberately not
+// in git) overrides them. The LiveKit egress service is not overridden there,
+// so it keeps writing segments to minio:9000. A playback relay built on the
+// default client therefore looks for segments in R2 and finds nothing —
+// every request 404s, which is exactly what happened.
+//
+// So the broadcast store gets its own client. BROADCAST_S3_* when set;
+// otherwise the same in-network MinIO defaults the egress service uses, so the
+// two halves agree without any new configuration. Point BROADCAST_S3_ENDPOINT
+// at R2 the day segments move there and this collapses back to one store.
+var (
+	bmu       sync.Mutex
+	bcastCli  *minio.Client
+	bcastInit bool
+)
+
+func broadcastEndpoint() string {
+	return envOr("BROADCAST_S3_ENDPOINT", "http://minio:9000")
+}
+
+// BroadcastBucket is where HLS segments live.
+func BroadcastBucket() string {
+	return envOr("BROADCAST_BUCKET", "vaultchat-broadcast")
+}
+
+// BroadcastClient is the object client for the broadcast store, or nil.
+func BroadcastClient() *minio.Client {
+	bmu.Lock()
+	defer bmu.Unlock()
+	if bcastInit {
+		return bcastCli
+	}
+	bcastInit = true
+	u, err := url.Parse(broadcastEndpoint())
+	if err != nil {
+		log.Printf("[storage] broadcast endpoint: %v", err)
+		return nil
+	}
+	ak := envOr("BROADCAST_S3_ACCESS_KEY", os.Getenv("MINIO_USER"))
+	sk := envOr("BROADCAST_S3_SECRET_KEY", os.Getenv("MINIO_PASS"))
+	if ak == "" || sk == "" {
+		// Fall back to the media credentials — correct when both stores are the
+		// same backend, which is the configuration this collapses to once
+		// segments move to R2.
+		ak, sk = os.Getenv("S3_ACCESS_KEY"), os.Getenv("S3_SECRET_KEY")
+	}
+	cli, err := minio.New(u.Host, &minio.Options{
+		Creds:        credentials.NewStaticV4(ak, sk, ""),
+		Secure:       u.Scheme == "https",
+		Region:       envOr("S3_REGION", "auto"),
+		BucketLookup: minio.BucketLookupPath,
+	})
+	if err != nil {
+		log.Printf("[storage] broadcast client: %v", err)
+		return nil
+	}
+	bcastCli = cli
+	return bcastCli
+}
+
+// GetBroadcastObject streams an object from the broadcast store.
+func GetBroadcastObject(ctx context.Context, key string) *ObjectStream {
+	cli := BroadcastClient()
+	if cli == nil {
+		return nil
+	}
+	obj, err := cli.GetObject(ctx, BroadcastBucket(), key, minio.GetObjectOptions{})
+	if err != nil {
+		return nil
+	}
+	st, err := obj.Stat()
+	if err != nil {
+		obj.Close()
+		return nil
+	}
+	return &ObjectStream{Body: obj, ContentLength: st.Size, ContentType: st.ContentType}
+}
+
+// DeleteBroadcastPrefix purges every segment of one broadcast.
+func DeleteBroadcastPrefix(ctx context.Context, prefix string) {
+	cli := BroadcastClient()
+	if cli == nil || prefix == "" {
+		return
+	}
+	objCh := cli.ListObjects(ctx, BroadcastBucket(), minio.ListObjectsOptions{Prefix: prefix, Recursive: true})
+	for rErr := range cli.RemoveObjects(ctx, BroadcastBucket(), objCh, minio.RemoveObjectsOptions{}) {
+		if rErr.Err != nil {
+			log.Printf("[storage] deleteBroadcastPrefix: %v", rErr.Err)
+		}
+	}
+}
+
 func clients() (*minio.Client, *minio.Core, *minio.Client) {
 	mu.Lock()
 	defer mu.Unlock()

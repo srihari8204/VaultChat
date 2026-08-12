@@ -105,13 +105,6 @@ func broadcastHLSURL(id string) string {
 	return livekit.PlaybackURL(id) + "?t=" + hlsTicket(id)
 }
 
-func broadcastBucket() string {
-	if b := os.Getenv("BROADCAST_BUCKET"); b != "" {
-		return b
-	}
-	return "vaultchat-broadcast"
-}
-
 // broadcastHLS serves the playlist and its segments from the private bucket.
 //
 // Deliberately NOT wrapped in httpx.RequireAuth, unlike every sibling route: a
@@ -137,7 +130,7 @@ func broadcastHLS(w http.ResponseWriter, r *http.Request) {
 	// this handler needing to know which one it is dealing with.
 	key := id + "/" + path.Base(file)
 
-	obj := storage.GetObjectStreamFrom(r.Context(), broadcastBucket(), key)
+	obj := storage.GetBroadcastObject(r.Context(), key)
 	if obj == nil {
 		httpx.Err(w, 404, "not found")
 		return

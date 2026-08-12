@@ -352,10 +352,6 @@ func sweepEndedBroadcasts(ctx context.Context) {
 	if days <= 0 {
 		return // 0 disables reclaim entirely — keep recordings forever
 	}
-	bucket := os.Getenv("BROADCAST_BUCKET")
-	if bucket == "" {
-		bucket = "vaultchat-broadcast"
-	}
 	rows, err := db.SysPool.Query(ctx,
 		`SELECT id::text FROM broadcast_sessions
 		  WHERE ended_at IS NOT NULL
@@ -379,7 +375,7 @@ func sweepEndedBroadcasts(ctx context.Context) {
 	purged := 0
 	for _, id := range ids {
 		// Prefix delete: segments are <id>/index.m3u8 and <id>/segment*.
-		storage.DeletePrefixIn(ctx, bucket, id+"/")
+		storage.DeleteBroadcastPrefix(ctx, id+"/")
 		if _, err := db.SysPool.Exec(ctx,
 			`UPDATE broadcast_sessions SET segments_purged_at = NOW() WHERE id = $1::uuid`,
 			id); err == nil {
