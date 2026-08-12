@@ -125,6 +125,15 @@ const isDone = () => {
   return st === 'connected' || st === 'ended' || !!session?.disposed;
 };
 
+/**
+ * How long an unanswered outgoing call rings before it ends itself.
+ *
+ * ringAndOffer sends the offer, then repeats it 9 times at 3s intervals, so the
+ * last one lands at ~27s. This is deliberately longer, giving that final offer
+ * a chance to be answered instead of racing it.
+ */
+export const RING_TIMEOUT_MS = 35_000;
+
 // ── lifecycle ─────────────────────────────────────────────────────────
 
 /** End the call. Idempotent — safe from any path, at any time. */
@@ -1122,6 +1131,31 @@ export async function startOutgoing(a: StartArgs): Promise<void> {
     }, isDone);
     onDispose(cancelRing);
 
+    // END THE CALL WHEN THE RING BUDGET RUNS OUT.
+    //
+    // ringAndOffer stops after 9 repeats (~27s) and, until now, NOTHING
+    // happened next: the interval cleared and the call sat in `ringing`
+    // forever. That is the "calling…" that never resolves — no answer, no
+    // failure, no way out but the back gesture, and the mic and foreground
+    // service stayed held the whole time.
+    //
+    // It is also what a dead E2EE session looks like from this side: the
+    // callee cannot open the sealed offer, so it never answers and never sends
+    // candidates, and we would gather host+srflx+relay perfectly and then wait
+    // for good. Captured on device as exactly that — `[call] gathered
+    // {"host":4,"srflx":8,"relay":13}` followed by silence.
+    //
+    // Slightly longer than the ring budget so the LAST offer still has time to
+    // be answered; ending at exactly 27s would race the ninth ring.
+    const noAnswer = setTimeout(() => {
+      if (isDone()) return;
+      console.warn('[call] no answer within', RING_TIMEOUT_MS / 1000, 's — ending the call');
+      // notifyPeer: true so the callee's ring stops rather than being left
+      // showing an incoming call nobody is placing any more.
+      hangUp('no_answer', true);
+    }, RING_TIMEOUT_MS);
+    onDispose(() => clearTimeout(noAnswer));
+
     // High-priority wake-up so a killed/dozing callee still rings. Doorbell
     // only — the SDP never rides in the push (it carries the DTLS-SRTP
     // fingerprint that anchors media E2EE).
@@ -1143,7 +1177,28 @@ export async function acceptIncoming(a: StartArgs & { offerWire: any }): Promise
     // plaintext SDP (legacy peer); openCallOffer handles both.
     const { cipher, offer } = await openCallOffer(a.peerUid, a.offerWire);
     peer.setCipher(cipher);
-    if (!offer?.type) throw new Error('Secure call setup failed — ask the caller to try again');
+    if (!offer?.type) {
+      // WE could not open the caller's offer, so the session between us is
+      // dead — the usual cause is one side reinstalling, which leaves the other
+      // holding a ratchet for an identity that no longer exists.
+      //
+      // Ask for a re-key BEFORE failing. Without this the callee just gave up
+      // silently, the caller rang out, and the next attempt failed identically
+      // because nothing had repaired the session — the state the two test
+      // devices were stuck in. The request is rate-limited inside
+      // requestPeerRekey, so a burst from the ring repeats collapses to one.
+      //
+      // Deliberately not awaited into the failure path: the repair is for the
+      // NEXT call, and this one is already lost.
+      void (async () => {
+        try {
+          const { requestPeerRekey } = await import('../chatService');
+          await requestPeerRekey(a.peerUid, true);
+          console.warn('[call] offer could not be opened — requested a re-key with', a.peerUid);
+        } catch {}
+      })();
+      throw new Error('Secure call setup failed — reconnecting the secure session. Try again in a moment.');
+    }
 
     const answer = await peer.answer(offer);
     const stopResend = await signal.sendAnswerWithRetry(

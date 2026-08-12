@@ -211,6 +211,24 @@ const seeded = reduce(withMe, { type: 'hand', uid: 'early', at: T0 - 1000 }, T0)
 eq('a hand can be seeded for an unseen peer', seeded.participants.early.handRaisedAt, T0 - 1000);
 eq('…without inventing a stream for them', seeded.participants.early.streamUrl, null);
 
+console.log('\nno_answer — the ring budget expiring must END the call:');
+// ringAndOffer stops after 9 repeats and used to leave the call in `ringing`
+// forever: no answer, no failure, mic and foreground service still held. The
+// engine now ends it at RING_TIMEOUT_MS; these assert the reducer half.
+const rangOut = run(out(), [{ type: 'offer_sent' }, { type: 'end', reason: 'no_answer' }]);
+eq('an unanswered outgoing call reaches ended', rangOut.status, 'ended');
+eq('…with no_answer recorded', rangOut.endReason, 'no_answer');
+eq('it never connected', rangOut.connectedAt, 0);
+check('so it logs a zero duration', durationSeconds(rangOut, T0 + 60_000) === 0);
+check('and it still cancels the callee ring', shouldCancelRing(run(out(), [{ type: 'offer_sent' }])) === true);
+// Invariant 4: a timeout firing after a real end must not rewrite the cause.
+eq('a late no_answer cannot overwrite an earlier reason',
+  run(out(), [{ type: 'offer_sent' }, { type: 'end', reason: 'local_hangup' }, { type: 'end', reason: 'no_answer' }]).endReason,
+  'local_hangup');
+// The timeout is guarded by isDone(), but the reducer must be safe regardless.
+eq('no_answer cannot end a call that already connected',
+  run(out(), [{ type: 'answer_applied' }]).status, 'connected');
+
 console.log('\nlog derivation (what addCallLog needs):');
 eq('duration of a connected call', durationSeconds(connected, T0 + 65_400), 65);
 eq('duration of a call that never connected', durationSeconds(run(out(), [{ type: 'offer_sent' }]), T0 + 9_000), 0);

@@ -49,6 +49,7 @@ export type EndReason =
   | 'remote_hangup'     // peer sent webrtc_end
   | 'failed'            // ICE/peer connection failed
   | 'setup_error'       // getUserMedia / signalling / crypto failed
+  | 'no_answer'         // the ring budget expired with no answer
   | 'replaced';         // superseded by another call
 
 export interface Participant {
