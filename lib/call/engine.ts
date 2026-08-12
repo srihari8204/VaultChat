@@ -49,7 +49,8 @@ import { attachAudioFocus } from './audioFocus';
 import { INITIAL_CURSOR, INITIAL_QUALITY, TIERS, audioBitrate, ceilingFor, nextQuality, sampleFromTotals } from './quality';
 import { netKey, shouldRestartIce } from './netChange';
 import { dispatch, getSnapshot, begin, reset } from './store';
-import { RING_TIMEOUT_MS } from './types';
+import { REKEY_WAIT_MS, RING_TIMEOUT_MS } from './types';
+import { callFail, callStage, offerTag } from './diag';
 import type { CallChatMessage, CallKind, EndReason } from './types';
 
 interface Session {
@@ -1110,7 +1111,10 @@ export async function startOutgoing(a: StartArgs): Promise<void> {
           if (!fresh || isDone()) return;
           peer.setCipher(fresh.cipher);
           pendingReseal = fresh.offerWire;
-          console.warn('[call] session re-keyed mid-ring — re-sealed the offer');
+          // Same tag the callee prints when it takes the fresher envelope, so
+          // the hand-off is greppable across both devices' logs.
+          callStage(offerTag(fresh.offerWire), 'offer_resealed',
+            `session re-keyed mid-ring, superseding ${offerTag(offerWire)}`);
         })
         .catch(() => {})
         .finally(() => { resealing = false; });
@@ -1158,6 +1162,8 @@ export async function startOutgoing(a: StartArgs): Promise<void> {
     nativeCall.ringPeer({ calleeId: a.peerUid, callId: String(a.chatId || a.peerUid), isVideo: a.kind === 'video' })
       .catch(() => {});
 
+    callStage(offerTag(offerWire), 'offer_sent',
+      `${a.kind}, sealed=${sealed ? 'sig1' : 'plaintext(legacy peer)'}`);
     dispatch({ type: 'offer_sent' });
   } catch (e: any) {
     failSetup(e);
@@ -1168,38 +1174,80 @@ export async function startOutgoing(a: StartArgs): Promise<void> {
 export async function acceptIncoming(a: StartArgs & { offerWire: any }): Promise<void> {
   try {
     const { s, peer } = await bootstrap(a, 'incoming');
+    const tag = offerTag(a.offerWire);
+    callStage(tag, 'incoming', `${a.kind} call`);
 
     // The wire is either an encrypted sig1 envelope (current build) or a raw
     // plaintext SDP (legacy peer); openCallOffer handles both.
-    const { cipher, offer } = await openCallOffer(a.peerUid, a.offerWire);
-    peer.setCipher(cipher);
+    let { cipher, offer } = await openCallOffer(a.peerUid, a.offerWire);
+
     if (!offer?.type) {
       // WE could not open the caller's offer, so the session between us is
       // dead — the usual cause is one side reinstalling, which leaves the other
       // holding a ratchet for an identity that no longer exists.
+      callFail(tag, 'OFFER_DECRYPT', 'E2EE_SESSION_STALE', { retry: 0, recoverable: true });
+
+      // Ask for a re-key BEFORE giving up. openCallOffer already does this on
+      // the path where the ratchet THROWS, but not on the one where the wrapped
+      // key opens and the GCM frame does not — and that path reaches here with
+      // offer:null and no repair requested at all. requestPeerRekey is
+      // rate-limited per peer, so asking twice costs nothing.
+      try {
+        const { requestPeerRekey } = await import('../chatService');
+        await requestPeerRekey(a.peerUid, true);
+      } catch { /* the caller may still re-seal on its own epoch bump */ }
+
+      // WAIT FOR THE REPAIR INSTEAD OF FAILING THROUGH IT.
       //
-      // Ask for a re-key BEFORE failing. Without this the callee just gave up
-      // silently, the caller rang out, and the next attempt failed identically
-      // because nothing had repaired the session — the state the two test
-      // devices were stuck in. The request is rate-limited inside
-      // requestPeerRekey, so a burst from the ring repeats collapses to one.
+      // This used to throw immediately, and that is what made a stale session
+      // unrecoverable in practice. The re-key we just requested makes the caller
+      // re-run X3DH and bump its session epoch; its ring loop notices and
+      // re-seals the offer on the next tick (lib/call/signal.ts ringAndOffer).
+      // So an openable envelope is already seconds away — and we were throwing
+      // it away, telling the user to "try again in a moment", and then failing
+      // their retry identically because they retried faster than the repair.
       //
-      // Deliberately not awaited into the failure path: the repair is for the
-      // NEXT call, and this one is already lost.
-      void (async () => {
-        try {
-          const { requestPeerRekey } = await import('../chatService');
-          await requestPeerRekey(a.peerUid, true);
-          console.warn('[call] offer could not be opened — requested a re-key with', a.peerUid);
-        } catch {}
-      })();
+      // Exactly ONE retry, on exactly ONE fresh envelope, bounded by
+      // REKEY_WAIT_MS. Not a loop: if the second envelope will not open either,
+      // the problem is not staleness and grinding on it would hold the mic and
+      // the ring for the caller's entire 35 s budget with no better outcome.
+      const fresh = await signal.waitForNewOffer(
+        a.peerUid, (w) => offerTag(w) === tag, REKEY_WAIT_MS,
+      );
+      // The user may have hung up while we waited; bootstrap's session is the
+      // authority on whether this call is still wanted.
+      if (s.disposed) return;
+
+      if (!fresh) {
+        callFail(tag, 'OFFER_REFRESH', 'E2EE_REKEY_TIMEOUT', { retry: 1, recoverable: false });
+      } else {
+        const freshTag = offerTag(fresh);
+        callStage(freshTag, 'offer_received', `re-sealed, superseding ${tag}`);
+        const second = await openCallOffer(a.peerUid, fresh);
+        cipher = second.cipher;
+        offer = second.offer;
+        if (offer?.type) callStage(freshTag, 'offer_decrypted', 'session recovered in place');
+        else callFail(freshTag, 'OFFER_DECRYPT', 'E2EE_SESSION_STALE', { retry: 1, recoverable: false });
+      }
+    } else {
+      callStage(tag, 'offer_decrypted');
+    }
+
+    // Set the FINAL cipher, once. Doing it before the retry would install the
+    // passthrough left behind by a failed open, and setCipher is what flushes
+    // the sealed candidates buffered during setup — they must be opened with the
+    // key the call actually ends up using.
+    peer.setCipher(cipher);
+    if (!offer?.type) {
       throw new Error('Secure call setup failed — reconnecting the secure session. Try again in a moment.');
     }
 
     const answer = await peer.answer(offer);
+    callStage(offerTag(a.offerWire), 'answer_created');
     const stopResend = await signal.sendAnswerWithRetry(
       a.peerUid, s.meId, cipher.seal(answer), isDone,
     );
+    callStage(offerTag(a.offerWire), 'answer_sent');
     onDispose(stopResend);
   } catch (e: any) {
     failSetup(e);

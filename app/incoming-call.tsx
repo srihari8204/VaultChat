@@ -17,6 +17,7 @@ import { addCallLog } from '../lib/callLog';
 import { holdActiveCall } from '../lib/callState';
 import { setRingingPeer } from '../lib/ringTracker';
 import { cancelIncomingCall } from '../lib/callNotification';
+import { callStage, offerTag } from '../lib/call/diag';
 
 // Call chrome is always dark (independent of app theme).
 const S = makeStyles();
@@ -75,23 +76,49 @@ export default function IncomingCallScreen() {
     return () => { stopRingtone(); setRingingPeer(null); cancelIncomingCall(); };
   }, []);
 
-  // If opened from a push (offer empty), capture the WebRTC offer the caller
-  // re-sends every few seconds, so Accept can still answer the original call.
+  // ALWAYS track the caller's latest offer — this screen answers the FRESHEST
+  // envelope, never the first one it happened to be opened with.
+  //
+  // This effect used to bail out with `if (offer) return`, on the reasoning that
+  // a route param already carried the offer so there was nothing left to listen
+  // for. That was the bug that made encrypted calls unrecoverable.
+  //
+  // The offer is SEALED with the caller's ratchet session. When that session is
+  // stale the callee cannot open it, resets, and asks the caller to re-key — and
+  // the caller's ring loop then re-seals and re-sends a NEW, openable envelope
+  // every 3 s for the rest of the ring (lib/call/signal.ts ringAndOffer, whose
+  // `reseal` hook exists for exactly this). But this screen had already pinned
+  // the stale envelope, and app/_layout.tsx de-dupes repeat `call_incoming`
+  // events by peer, so the fresh one reached nothing. Accept therefore answered
+  // the same dead envelope the callee had just proven it could not open, on
+  // every attempt, forever. Observed as four consecutive "openCallOffer failed —
+  // aes/gcm: invalid ghash tag" while the re-key itself worked perfectly.
+  //
+  // The ring loop emits `webrtc_offer` alongside every `call_incoming`, so
+  // listening here — with no early return — is all it takes to see the re-sealed
+  // envelope. The push path (offer param empty) is unchanged: it was always the
+  // path that worked, because it was the only one that reached this listener.
   const liveOfferRef = useRef(offer || '');
   useEffect(() => {
-    if (offer) return;
     let off: (() => void) | null = null;
     (async () => {
       const s = await getSocket();
       const onOffer = (d: any) => {
         const from = d?.from ?? d?.fromUid;
-        if (from === peerUid && d?.offer) liveOfferRef.current = JSON.stringify(d.offer);
+        if (from !== peerUid || !d?.offer) return;
+        const next = JSON.stringify(d.offer);
+        // The ring loop re-sends the IDENTICAL wire until the session changes,
+        // so only an actual re-seal is worth a line in the log.
+        if (next === liveOfferRef.current) return;
+        const had = liveOfferRef.current;
+        liveOfferRef.current = next;
+        if (had) callStage(offerTag(next), 'offer_resealed', `superseding ${offerTag(had)}`);
       };
       s.on('webrtc_offer', onOffer);
       off = () => s.off('webrtc_offer', onOffer);
     })();
     return () => { if (off) off(); };
-  }, [offer, peerUid]);
+  }, [peerUid]);
 
   // Listen for caller-side hangup before answer
   const decidedRef = useRef(false);
@@ -123,9 +150,14 @@ export default function IncomingCallScreen() {
       return;
     }
     const route = type === 'video' ? '/videocall' : '/voicecall';
+    // The LIVE offer wins over the route param. They are the same envelope until
+    // the caller re-seals, and after a re-seal the param is the one the callee
+    // has already proven it cannot open — see the listener above.
+    const answering = liveOfferRef.current || offer;
+    callStage(offerTag(answering), 'accepted', type === 'video' ? 'video' : 'audio');
     router.replace({
       pathname: route as any,
-      params: { chatId, peerUid, peerName: displayName, isIncoming: 'true', initialOffer: offer || liveOfferRef.current },
+      params: { chatId, peerUid, peerName: displayName, isIncoming: 'true', initialOffer: answering },
     });
   };
 

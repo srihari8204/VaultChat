@@ -135,6 +135,29 @@ export const RING_INTERVAL_MS = 3_000;
 export const RING_TIMEOUT_MS = 35_000;
 
 /**
+ * How long the CALLEE waits for a re-sealed offer after failing to open the
+ * first one.
+ *
+ * When the callee cannot decrypt the sealed offer it resets its own session and
+ * asks the caller to re-key (lib/callCrypto.ts openCallOffer). The caller's ring
+ * loop notices the epoch move and re-seals, so a fresh, openable envelope is
+ * already on its way — it simply has not arrived yet at the instant the first
+ * decrypt failed. Failing the call right there threw away a recovery that was
+ * seconds from completing, and the next redial failed identically because the
+ * user redialled before the re-key landed. That is the loop the two test devices
+ * were stuck in.
+ *
+ * Bounded by two relationships, both asserted in offerRefresh.selftest.ts:
+ *
+ *   ≥ 2 * RING_INTERVAL_MS — the re-seal is kicked off by one ring tick and
+ *     carried by the NEXT one, so anything shorter than two intervals can expire
+ *     before the fresh envelope was ever sent.
+ *   < RING_TIMEOUT_MS — the caller gives up at RING_TIMEOUT_MS. A callee still
+ *     waiting past that point is waiting on a peer that has already hung up.
+ */
+export const REKEY_WAIT_MS = 9_000;
+
+/**
  * The immutable snapshot screens render from. Replaced wholesale on every
  * change so `useSyncExternalStore` reference checks work; individual selectors
  * (hooks/useCall.ts) then narrow it so a mute toggle does not re-render video.

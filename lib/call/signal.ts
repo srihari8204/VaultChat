@@ -394,6 +394,57 @@ export async function ringAndOffer(
   return () => clearInterval(timer);
 }
 
+/**
+ * Wait for a `webrtc_offer` from `from` that is NOT the one we already have.
+ *
+ * The callee's recovery step. When the sealed offer cannot be opened, the callee
+ * resets its session and asks the caller to re-key; the caller's ring loop then
+ * re-seals and re-sends within a tick or two (see ringAndOffer's `reseal`). This
+ * is what lets the callee wait for that envelope instead of failing a call whose
+ * repair is already in flight.
+ *
+ * `isStale` rather than an equality check on the wire, because the caller
+ * re-sends the IDENTICAL bytes on every tick until the session actually moves —
+ * so "an offer arrived" is not the same as "a different offer arrived", and
+ * resolving on the former would hand back the very envelope that just failed.
+ *
+ * Resolves null on timeout. Never rejects: a failed recovery is an outcome the
+ * caller handles, not an exception.
+ */
+export async function waitForNewOffer(
+  from: string, isStale: (wire: any) => boolean, timeoutMs: number,
+): Promise<any | null> {
+  return new Promise<any | null>(resolve => {
+    let settled = false;
+    const finish = (v: any | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { off(); } catch {}
+      resolve(v);
+    };
+    const onOffer = (d: any) => {
+      if (senderOf(d) !== from) return;
+      const wire = d?.offer ?? d?.sdp;
+      if (!wire) return;
+      let stale = true;
+      // A throwing predicate must not strand the wait forever — treat it as
+      // "cannot tell", which keeps waiting rather than accepting blindly.
+      try { stale = isStale(wire); } catch {}
+      if (stale) return;
+      finish(wire);
+    };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    // addPersistentListener, not s.on: the repair we are waiting for is most
+    // likely during a rough patch of connectivity, and lib/socket.ts sometimes
+    // CONSTRUCTS a replacement Socket rather than reconnecting the existing one.
+    // A listener bound to the old instance would sit on a dead socket for the
+    // whole window and then time out, failing the call for the one reason this
+    // wait exists to survive. Same reasoning as joinCallRoom's rejoin above.
+    const off = addPersistentListener('webrtc_offer', onOffer);
+  });
+}
+
 /** Send the answer, then re-send it until connected (max 5 total). */
 export async function sendAnswerWithRetry(
   to: string, from: string, answer: any, isDone: () => boolean,
