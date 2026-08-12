@@ -1,0 +1,51 @@
+-- 098_drop_vaultlens.sql — remove the VaultLens feature's tables. Idempotent.
+--
+-- VaultLens (the AI-avatar mini-app added in 059) has been removed in full:
+-- screens, client store, Go routes, Node worker, BullMQ queue, ModelsLab
+-- client, catalog and Docker service. These two tables are the last of it.
+--
+-- 059 IS NOT EDITED. Migration history is immutable — a deployment that has
+-- already run 059 must keep the record that it did, and re-running an altered
+-- 059 on a fresh database must still produce the same intermediate state. The
+-- creation stays; this file is the deletion, and the pair reads as the honest
+-- history of a feature that existed and then did not.
+--
+-- WHAT IS BEING DROPPED, AND WHY IT IS SAFE
+-- -----------------------------------------
+-- Both tables were verified to have NO inbound foreign keys: a repository-wide
+-- search for `REFERENCES vaultlens` returns nothing, and the only code that
+-- ever named them was VaultLens' own (Go routes/vaultlens.go, Node
+-- routes/vaultlens.js + workers/vaultlens.js + server.js), all deleted in this
+-- change. They reference OUT to users(id) ON DELETE CASCADE; dropping a table
+-- that holds a foreign key does not touch the table it points at, so `users`
+-- is unaffected.
+--
+--   vaultlens_face        user_id UUID PK -> users(id), storage_key TEXT,
+--                         created_at, updated_at
+--   vaultlens_generation  id TEXT PK (client ULID), user_id -> users(id),
+--                         style_id, pack_id, status CHECK
+--                         ('queued','processing','done','failed'),
+--                         storage_key, width, error, created_at, completed_at
+--   idx_vaultlens_gen_user_created  ON vaultlens_generation(user_id, created_at DESC)
+--
+-- The index is dropped implicitly with its table; naming it here is
+-- documentation, not a second statement.
+--
+-- THIS DELETES DATA, AND THAT IS THE POINT
+-- ----------------------------------------
+-- Rows are cached-selfie storage keys and per-generation render history. There
+-- is no reversible migration for a DROP: `down` cannot restore rows, only the
+-- empty shape. Take a backup first if the history matters —
+-- vaultchat-backend/scripts/backup-postgres.sh — because this cannot be undone
+-- from inside the database.
+--
+-- NOTE ON OBJECT STORAGE. The bytes these rows pointed at (vaultlens/faces/*
+-- and vaultlens/<user>/*) live in MinIO/R2 and are NOT touched here. Dropping
+-- the tables orphans them rather than deleting them, which is the conservative
+-- order: storage cleanup is a separate, separately-reviewed operation, and
+-- doing it from a migration would put object deletion on the deploy path.
+--
+-- Order matters only for readability — neither references the other.
+
+DROP TABLE IF EXISTS vaultlens_generation;
+DROP TABLE IF EXISTS vaultlens_face;
