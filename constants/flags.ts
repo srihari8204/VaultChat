@@ -161,15 +161,31 @@ export const VB_SEAMLESS_RESUME = false;
 // entry AsyncStorage log on the handset that made it. It is also the table a
 // role — and therefore a future SFU publish grant — is read from.
 //
-// DEFAULT OFF, and it must stay off until migration 066 has actually been
-// applied to the server this build talks to. With it off, nothing calls the new
-// endpoints and call history behaves exactly as it does today.
+// It had to stay off until migration 066 was actually applied to the server
+// this build talks to. It now IS — verified against production on 2026-08-12,
+// not assumed:
+//
+//   calls + call_participants tables .. present
+//   indexes .......................... 6
+//   vc_is_call_host / vc_call_role_guard  present
+//   call_participants_role_guard trigger  present
+//   RLS policies ..................... 6
+//   existing rows .................... 0 / 0   (a clean first write)
+//
+// and LiveKit answers RoomService.CreateRoom with 200, so the SFU path this
+// unlocks has somewhere to go.
 //
 // Even when ON, the session request is fire-and-forget and never blocks media:
 // a 404 (server not migrated), a timeout or an offline device costs the call
 // nothing and simply leaves that call without a server-side id — it still logs
 // locally, exactly as before. Call setup must never depend on a REST round trip.
-export const CALL_SESSIONS = false;
+// engine.ts calls it as `void openCallSession(...).catch(() => {})`, so the
+// worst case of this flag being wrong is the behaviour we already had.
+//
+// Turning it on is what gives a call a server-side identity, and therefore what
+// lets a group larger than the mesh cap reach the SFU instead of being refused
+// with call_full.
+export const CALL_SESSIONS = true;
 
 // LOCATION_LOCK gates the Location Lock utility inside the Navigate mini-app
 // (openspec change: location-lock): lock a point + radius, on-device geofence
