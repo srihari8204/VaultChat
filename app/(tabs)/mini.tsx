@@ -32,7 +32,6 @@ const MINI_APPS_MAIN = [
   // states that before anything is published, rather than leaving someone to
   // assume their stream has the same protection as their calls.
   { id: 'live',        icon: '\ud83d\udce1', name: 'Go Live', route: '/live', gradient: ['#EF4444', '#B91C1C'] as [string, string] },
-  { id: 'vaultlens',   icon: '\u2728', name: 'VaultLens', route: '/vaultlens', gradient: ['#9D6FD0', '#EC4899'] as [string, string] },
   { id: 'navigate',    icon: '\uD83E\uDDED', name: 'Navigate', route: '/navigate', gradient: ['#4A9FFF', '#1D4ED8'] as [string, string] },
   // Spaces absorbed the old Family Circle + SOS tiles \u2014 one app, one hub.
   // Renamed from "Family Space": family is one TYPE of space, alongside school
