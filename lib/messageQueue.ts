@@ -292,6 +292,68 @@ export async function noteDelivered(chatId: string, lastDeliveredMessageId: numb
 }
 
 /**
+ * Re-upload the body of a message the recipient still has not received.
+ *
+ * THIS IS WHAT THE RETAINED CIPHERTEXT IS FOR. Without it the outbox knows a
+ * message was never delivered and does nothing about it — the row sits there
+ * until the age cap quietly drops it, and the sender is never told. Storing the
+ * ciphertext without this is dead weight.
+ *
+ * The server reclaims a message body once every active device has it, and
+ * unconditionally at the retention deadline. If a recipient reappears after
+ * that, the server has nothing left to hand over. Re-body puts the SAME
+ * ciphertext back on the SAME message id — no new clientId, no new message, no
+ * duplicate bubble.
+ *
+ * 410 is the important response, not the failure case. It means the retention
+ * window has closed and the message can never be delivered. Surfacing that as
+ * a failed send is the whole point: the alternative is a message the sender
+ * believes was delivered and which the recipient never saw.
+ */
+async function reBodyAwaiting(): Promise<void> {
+  let rows: QueuedMessage[];
+  try { rows = await queueList<QueuedMessage>('msg', 100, 0); } catch { return; }
+
+  for (const m of rows) {
+    if (!isAwaitingDelivery(m) || !m.ciphertext) continue;
+    // Give normal delivery a chance first — most messages are received in
+    // seconds, and re-bodying one that is simply in flight is pure waste.
+    if (Date.now() - (m.acceptedAt ?? m.createdAt) < RE_BODY_AFTER_MS) continue;
+    try {
+      await api(`/chats/${encodeURIComponent(m.chatId)}/messages/${m.serverId}/body`, {
+        method: 'PUT',
+        json: { content: m.ciphertext },
+      });
+      // Body restored; keep waiting for the delivery receipt that releases it.
+    } catch (err: any) {
+      const status = err?.status;
+      if (status === 410) {
+        // Retention window closed — undeliverable, permanently. Tell the user
+        // rather than dropping it silently.
+        await drop(m.tempId);
+        emit('failed', {
+          tempId: m.tempId, chatId: m.chatId,
+          error: 'Not delivered — this message expired before it reached them',
+        });
+      } else if (status === 404 || status === 403) {
+        // Deleted, or no longer ours. Nothing to recover.
+        await drop(m.tempId);
+      }
+      // Anything else (offline, 5xx) — leave it and retry on the next flush.
+    }
+  }
+}
+
+/**
+ * How long to wait after acceptance before attempting recovery.
+ *
+ * Long enough that an ordinary in-flight message is never re-bodied, short
+ * enough to act well inside the server's retention window — re-body is refused
+ * once that closes, so waiting too long turns every recovery into a 410.
+ */
+const RE_BODY_AFTER_MS = 10 * 60 * 1000;
+
+/**
  * Drop accepted-but-unconfirmed rows past the retention cap.
  *
  * Without this the outbox becomes a second permanent archive — the exact thing
@@ -392,6 +454,10 @@ export async function flush(): Promise<void> {
     // place would let them fill a 200-item page and starve real sends behind
     // them. Cheap — it only touches rows past the cap.
     await reapAwaitingDelivery();
+    // Then try to recover anything the recipient still has not received. Before
+    // the send loop, because a message that never arrived matters more than the
+    // next one queued behind it.
+    await reBodyAwaiting();
     const q = await load();
     if (q.length === 0) {
       // An empty page while rotated means we walked off the end — go back to the
