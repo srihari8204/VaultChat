@@ -35,8 +35,6 @@
 {"method":"GET","path":"/channels"}
 {"method":"GET","path":"/channels/00000000-0000-0000-0000-000000000000/posts"}
 {"method":"GET","path":"/vaultbeam/relay/00000000-0000-0000-0000-000000000000"}
-{"method":"GET","path":"/vaultlens/catalog"}
-{"method":"GET","path":"/vaultlens/quota"}
 {"method":"GET","path":"/chats"}
 {"method":"GET","path":"/chats/00000000-0000-0000-0000-000000000000"}
 {"method":"POST","path":"/chats/00000000-0000-0000-0000-000000000000/read","body":{}}

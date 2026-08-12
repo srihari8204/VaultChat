@@ -65,7 +65,6 @@ func main() {
 	routes.RegisterChannels(mux)
 	routes.RegisterVaultbeam(mux)
 	routes.RegisterUser(mux)
-	routes.RegisterVaultlens(mux)
 	routes.RegisterAdmin(mux)
 	routes.RegisterChats(mux)
 	routes.RegisterChatInvitations(mux) // Groups & Circles: /invitations (invitee side)
@@ -99,10 +98,16 @@ func main() {
 		broadcastChat(ctx, hub, chatID, event, payload, senderID)
 	}
 
-	// Reverse bridge: Go now owns sockets, so leftover Node emitters (the
-	// vaultlens QueueEvents listener) POST here to reach clients. Same
-	// key-guarded shape as Node's /internal/*; Caddy refuses /internal/*
-	// from outside, so only the in-network Node process can call these.
+	// Reverse bridge: Go owns sockets, so an in-network Node process can POST
+	// here to reach clients. Same key-guarded shape as Node's /internal/*;
+	// Caddy refuses /internal/* from outside, so only in-network callers reach
+	// these.
+	//
+	// Its only consumer was the VaultLens QueueEvents listener, which has been
+	// removed. Kept because it is generic transport, not VaultLens code: the
+	// legacy Node API still emits through it if that profile is ever started,
+	// and it is the escape hatch any future out-of-process worker would use.
+	// Retiring it is a separate decision from deleting VaultLens.
 	internalKey := os.Getenv("INTERNAL_EMIT_KEY")
 	guard := func(r *http.Request) bool {
 		return internalKey != "" && r.Header.Get("X-Internal-Key") == internalKey

@@ -150,7 +150,8 @@ func GetObjectStream(ctx context.Context, key string) *ObjectStream {
 	return &ObjectStream{Body: obj, ContentLength: st.Size, ContentType: st.ContentType}
 }
 
-// PutObject — server-side upload (VaultLens re-hosting etc.).
+// PutObject — server-side upload, for bytes the server itself produces rather
+// than proxies from a client.
 func PutObject(ctx context.Context, key string, data []byte, contentType string) error {
 	cli, _, _ := clients()
 	if cli == nil {
