@@ -5,16 +5,28 @@
 // here, and lib/call/machine.ts can therefore be unit-tested under Node.
 
 /**
- * Lifecycle. These four strings are EXACTLY the ones app/voicecall.tsx and
- * app/videocall.tsx already use, so the migrated screens render the same
- * status text from the same states and nothing user-visible shifts.
+ * Lifecycle.
  *
- *   connecting — acquiring media / applying a remote offer
- *   ringing    — outgoing only: offer sent, waiting for an answer
- *   connected  — media flowing
- *   ended      — terminal; the screen pops shortly after
+ *   connecting   — acquiring media / applying a remote offer
+ *   ringing      — outgoing only: offer sent, waiting for an answer
+ *   connected    — media flowing
+ *   reconnecting — media WAS flowing and the transport is being rebuilt
+ *   ended        — terminal; the screen pops shortly after
+ *
+ * `reconnecting` is the only addition to the four strings the call screens
+ * originally shared, and it exists because the recovery it names was already
+ * happening invisibly. lib/call/peer.ts holds a dropped call open for
+ * DISCONNECT_GRACE_MS (30 s), retrying an ICE restart every ICE_RETRY_MS and
+ * escalating to relay-only — and reported none of it. The snapshot stayed
+ * `connected` for the whole outage and then jumped straight to `ended` if the
+ * budget ran out, so a recovery that was working looked identical to a frozen
+ * call and users hung up before it completed.
+ *
+ * It is deliberately NOT a terminal or a setup state: you can only reach it
+ * FROM `connected` (see machine.ts), because a call that never had media is
+ * not reconnecting, it is still connecting.
  */
-export type CallStatus = 'connecting' | 'ringing' | 'connected' | 'ended';
+export type CallStatus = 'connecting' | 'ringing' | 'connected' | 'reconnecting' | 'ended';
 
 export type CallKind = 'audio' | 'video';
 

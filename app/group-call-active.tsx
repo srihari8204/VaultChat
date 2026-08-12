@@ -163,7 +163,10 @@ function GroupCallEngine() {
         <Text style={S.title} numberOfLines={1}>{name || 'Group call'}</Text>
         {status === 'connected'
           ? <CallTimer style={S.sub} startedAt={connectedAt} />
-          : <Text style={S.sub}>{tiles} on call</Text>}
+          // A recovering group call keeps its timer's place but says what is
+          // happening; showing the participant count would imply everything is
+          // fine while the transport is being rebuilt.
+          : <Text style={S.sub}>{status === 'reconnecting' ? 'Reconnecting…' : `${tiles} on call`}</Text>}
         {/* D-1: derived from the live participant count, so a call that grows
             past the mesh cap stops claiming a guarantee it no longer has. */}
         <CallEncryptionBadge protection={protectionFor(tiles)} />

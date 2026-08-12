@@ -46,6 +46,18 @@ export interface PeerHandlers {
    * rebinds the INCOMING view itself.
    */
   onReconnected?: () => void;
+  /**
+   * This peer's transport reached `connected` — on the first connect AND after
+   * every recovery. Distinct from onReconnected, which fires only after a
+   * recovery because its job is to re-attach outgoing tracks.
+   *
+   * The engine uses it to clear the `reconnecting` status. It needs a signal
+   * that fires on a plain reconnect because an ICE restart does NOT re-fire
+   * `ontrack` — so on a voice call there is no other event to say the media
+   * came back, and the status would stay "Reconnecting…" for a call that had
+   * already recovered.
+   */
+  onConnected?: () => void;
 }
 
 /**
@@ -189,6 +201,10 @@ export class CallPeer {
       console.warn('[call] connection state →', st, 'peer', this.uid);
       if (st === 'connected') {
         this.logSelectedCandidatePair();
+        // Before the recovery branch below: the status must clear whether or
+        // not this connect followed a recovery, and the reducer ignores it in
+        // every case that is not one.
+        h.onConnected?.();
         // Rebind the remote view after a RECOVERY.
         //
         // An ICE restart moves the transport without firing `ontrack` again, so

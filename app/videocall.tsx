@@ -247,8 +247,11 @@ function VideoCallEngine() {
   }, [sharing]);
   const toggleFilters = useCallback(() => setShowFilters(v => !v), []);
 
+  // See app/voicecall.tsx: without this branch the fall-through renders
+  // 'Call ended' over a call that is actively recovering.
   const statusText = status === 'connecting' ? 'Connecting…'
     : status === 'ringing' ? 'Ringing…'
+    : status === 'reconnecting' ? 'Reconnecting…'
     : 'Call ended';
   const f = FILTERS.find(x => x.id === filter) ?? FILTERS[0];
   const overlay = matrixToOverlay(f.matrix);

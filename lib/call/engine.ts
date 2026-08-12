@@ -156,7 +156,12 @@ export function hangUp(reason: EndReason = 'local_hangup', notifyPeer = true): v
     }
   }
 
-  if (notifyPeer && s.peerUid) signal.sendEnd(s.peerUid, s.meId, s.chatId).catch(() => {});
+  // serverCallId names WHICH call is ending, so a peer who has already started
+  // the next one ignores it. '' when there is no server session, which sendEnd
+  // omits — see its header.
+  if (notifyPeer && s.peerUid) {
+    signal.sendEnd(s.peerUid, s.meId, s.chatId, s.serverCallId).catch(() => {});
+  }
   dispatch({ type: 'end', reason });
   dispose();
   session = null;
@@ -188,6 +193,10 @@ function addPeer(s: Session, uid: string, name: string, iceServers: any[]): Call
     onRemoteStream: (url) => { dispatch({ type: 'remote_stream', uid, url, name }); },
     onFailed: () => onPeerFailed(uid),
     onRenegotiate: () => { const p = session?.peers.get(uid); if (p) void renegotiate(p); },
+    // Clears "Reconnecting…". Fires on the FIRST connect too, where the
+    // reducer's guard makes it a no-op — that is cheaper and less fragile than
+    // teaching the peer which connect is which.
+    onConnected: () => dispatch({ type: 'recovered' }),
     // After a reconnect, re-attach whatever we are SENDING. The remote view is
     // rebound by the peer itself; this is the other direction, and it is the
     // one that breaks a screen share: its track is backed by MediaProjection
@@ -351,6 +360,16 @@ function removePeer(s: Session, uid: string): void {
 async function renegotiate(peer: CallPeer): Promise<void> {
   const s = session;
   if (!s || s.disposed) return;
+  // Say so on screen. Every caller of this function is a transport that broke
+  // and is being rebuilt — the grace-window retry loop, the stall watchdog, a
+  // NetInfo handover, or a sender rebind — and until now all of it happened
+  // behind a UI that still read "connected". A user watching a frozen call
+  // with no explanation hangs up long before the 30 s budget is spent, which
+  // turned recoveries that WOULD have succeeded into dropped calls.
+  //
+  // Dispatched here rather than in each caller so there is exactly one place
+  // that can forget. The reducer ignores it unless the call was connected.
+  dispatch({ type: 'reconnecting' });
   try {
     const offer = await peer.createIceRestartOffer();
     if (!offer) return;                       // not stable / not supported
@@ -412,6 +431,9 @@ async function bootstrap(a: StartArgs, direction: 'outgoing' | 'incoming', wire:
   // has put in our call room.
   const detach = await signal.attachCallListeners({
     accept: (from) => (s.wire === 'direct' ? from === a.peerUid : true),
+    // Read lazily: the session opens after these listeners attach, and a
+    // captured '' would disable the filter for the whole call.
+    currentCallId: () => s.serverCallId,
     onOffer: (from, wireSdp) => { void onMeshOffer(from, wireSdp, iceServers); },
     onAnswer: (from, wireSdp) => {
       const peer = s.peers.get(from);

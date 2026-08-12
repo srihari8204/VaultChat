@@ -135,8 +135,12 @@ function VoiceCallEngine() {
     return () => clearTimeout(t);
   }, [status, router]);
 
+  // `reconnecting` MUST have its own branch: this chain falls through to
+  // 'Call ended', so without it a call that is recovering would announce
+  // itself as already over — the opposite of what is happening.
   const statusText = status === 'connecting' ? 'Connecting…'
     : status === 'ringing' ? 'Ringing…'
+    : status === 'reconnecting' ? 'Reconnecting…'
     : 'Call ended';
   const initial = (displayName.trim()[0] ?? '?').toUpperCase();
 

@@ -51,6 +51,36 @@ eq('connectedAt did NOT restart', later.connectedAt, T0);
 const reRing = reduce(connected, { type: 'offer_sent' }, T0 + 5_000);
 check('a re-ring tick cannot demote connected -> ringing', reRing === connected);
 
+console.log('\nreconnecting — the recovery that used to be invisible:');
+// peer.ts holds a dropped call open for 30 s, retrying an ICE restart every 4 s.
+// The engine dispatches 'reconnecting' from renegotiate() and 'recovered' from
+// the peer's onConnected, so these two events bracket every real outage.
+const recovering = reduce(connected, { type: 'reconnecting' }, T0 + 10_000);
+eq('a connected call can start reconnecting', recovering.status, 'reconnecting');
+eq('connectedAt survives the outage', recovering.connectedAt, T0);
+const back = reduce(recovering, { type: 'recovered' }, T0 + 18_000);
+eq('recovered -> connected', back.status, 'connected');
+eq('connectedAt is NOT restamped on recovery', back.connectedAt, T0);
+check('duration spans the outage', durationSeconds(back, T0 + 60_000) === 60);
+// The engine fires 'recovered' on EVERY peer connect, including the first.
+check('recovered on a healthy call is a no-op (same reference)',
+  reduce(connected, { type: 'recovered' }, T0 + 1_000) === connected);
+// A call still dialling is neither reconnecting nor recovered — saying either
+// would be a lie, and the screens render these strings directly.
+const dialling = out();
+check('recovered during setup is a no-op (same reference)',
+  reduce(dialling, { type: 'recovered' }, T0) === dialling);
+check('reconnecting during setup is a no-op (same reference)',
+  reduce(dialling, { type: 'reconnecting' }, T0) === dialling);
+eq('a ringing call cannot become reconnecting',
+  run(out(), [{ type: 'offer_sent' }, { type: 'reconnecting' }]).status, 'ringing');
+// Invariant 1 still rules: nothing resurrects a finished call.
+eq('reconnecting cannot resurrect an ended call',
+  run(out(), [{ type: 'answer_applied' }, { type: 'end', reason: 'failed' }, { type: 'reconnecting' }]).status, 'ended');
+// Real recovery paths land media again, and both routes back must clear it.
+eq('remote media clears reconnecting',
+  reduce(recovering, { type: 'remote_stream', uid: PEER, url: 'rtc://x' }, T0).status, 'connected');
+
 console.log('\nremote media also connects (the ontrack path):');
 const viaTrack = run(out(), [{ type: 'offer_sent' }, { type: 'remote_stream', uid: PEER, url: 'rtc://a' }], T0);
 eq('remote_stream -> connected', viaTrack.status, 'connected');

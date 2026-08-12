@@ -12,7 +12,7 @@
 //     socket 'transport error' blip during setup used to drop it permanently and
 //     strand the call. The caller's apply is idempotent (see CallPeer.applyAnswer).
 
-import { getSocket } from '../socket';
+import { addPersistentListener, emit, getSocket } from '../socket';
 
 export interface RingPayload {
   to: string;
@@ -60,6 +60,17 @@ const senderOf = (d: any): string => d?.from ?? d?.fromUid ?? '';
  */
 export async function attachCallListeners(handlers: {
   accept: (from: string) => boolean;
+  /**
+   * The server call id of the call being listened to, or '' when it has none.
+   * Read lazily, because the session opens AFTER the listeners attach.
+   *
+   * Used only to drop a `webrtc_end` that names a DIFFERENT call. Both sides
+   * must know an id for that to fire, so it is inert until CALL_SESSIONS is
+   * enabled — which is correct: that flag is what gives a call an identity
+   * both ends agree on. Inventing a second, client-side call id here would be
+   * a parallel source of truth for exactly the thing calls.id already is.
+   */
+  currentCallId?: () => string;
   onOffer?: (from: string, sdp: any) => void;
   onAnswer: (from: string, sdp: any) => void;
   onIce: (from: string, candidate: any) => void;
@@ -79,7 +90,19 @@ export async function attachCallListeners(handlers: {
   const onOffer   = route((from, d) => handlers.onOffer?.(from, readSdp(d)));
   const onAnswer  = route((from, d) => handlers.onAnswer(from, readSdp(d)));
   const onIce     = route((from, d) => handlers.onIce(from, d?.candidate));
-  const onEnd     = route((from) => handlers.onEnd(from));
+  const onEnd     = route((from, d) => {
+    // Drop an end that names a call we are not on. Deliberately permissive:
+    // only a MISMATCH of two known ids is ignored. A missing id on either side
+    // means "cannot tell", and hanging up is the safe answer there — refusing
+    // to end a call because the peer's build is older would strand it.
+    const mine = handlers.currentCallId?.() ?? '';
+    const theirs = typeof d?.callId === 'string' ? d.callId : '';
+    if (mine && theirs && mine !== theirs) {
+      console.warn('[call] ignoring webrtc_end for another call', theirs, '— we are on', mine);
+      return;
+    }
+    handlers.onEnd(from);
+  });
   const onShare   = route((from) => handlers.onPeerScreenShare(from, true));
   const onUnshare = route((from) => handlers.onPeerScreenShare(from, false));
   const onChat    = route((from, d) => handlers.onChat(from, d?.text));
@@ -113,8 +136,29 @@ export async function sendIce(
   try { (await getSocket()).emit('webrtc_ice', p); } catch {}
 }
 
-export async function sendEnd(to: string, from: string, chatId: string): Promise<void> {
-  try { (await getSocket()).emit('webrtc_end', { to, from, chatId }); } catch {}
+/**
+ * Hang up, naming WHICH call is ending.
+ *
+ * `callId` is additive and optional. Without it — which is every build today,
+ * because it is the server session id and CALL_SESSIONS is off — the payload
+ * and the behaviour are byte-identical to before, so a peer on any existing
+ * build is unaffected in either direction.
+ *
+ * It exists because `webrtc_end` carries no call identity at all: the payload
+ * is {to, from, chatId}, and chatId is the SAME for every call two people ever
+ * have. An end belonging to a finished call is therefore indistinguishable
+ * from one belonging to the call happening now, and the obvious way to produce
+ * that is to hang up and immediately redial. The receiver's filter is in
+ * attachCallListeners.
+ */
+export async function sendEnd(
+  to: string, from: string, chatId: string, callId?: string,
+): Promise<void> {
+  const p: Record<string, any> = { to, from, chatId };
+  // Omit rather than send '' — an empty string would read as "call number
+  // empty-string" to a future receiver instead of "not known".
+  if (callId) p.callId = callId;
+  try { (await getSocket()).emit('webrtc_end', p); } catch {}
 }
 
 /** Mesh: offer a peer, in the shape the legacy mesh screen expects. */
@@ -155,7 +199,29 @@ export async function joinCallRoom(handlers: {
   s.on('call_full', onFull);
   s.emit('join_call', { chatId: handlers.chatId });
 
+  // RE-JOIN AFTER A SOCKET RECONNECT.
+  //
+  // The emit above happens once. On the server, a disconnect removes the socket
+  // from `call:<chatId>`, announces call_peer_left to everyone else, and drops
+  // the uid from the Redis roster (internal/realtime/server.go 'disconnecting').
+  // Nothing re-joined it, so after any socket blip the participant kept a live
+  // P2P media path — media does not need the socket — while being invisible to
+  // the room: no roster events, no ICE-restart offers reaching them, and
+  // everyone else told they had left. The call looked alive and was
+  // unrecoverable the moment anything needed signalling.
+  //
+  // 1:1 does not have this problem and needs no equivalent: its signalling is
+  // addressed to the room `user:<uid>`, which the server re-joins itself on
+  // every connection, so delivery is restored automatically.
+  //
+  // addPersistentListener + emit(), rather than s.on + s.emit: lib/socket.ts
+  // sometimes CONSTRUCTS a replacement Socket, and only a persistent listener
+  // survives that — while `s` becomes the dead one an emit would vanish into.
+  const rejoin = () => { void emit('join_call', { chatId: handlers.chatId }).catch(() => {}); };
+  const offRejoin = addPersistentListener('connect', rejoin);
+
   return () => {
+    offRejoin();
     try { s.emit('leave_call', { chatId: handlers.chatId }); } catch {}
     for (const [e, h] of [['call_roster', onRoster], ['call_peer_joined', onJoined],
       ['call_peer_left', onLeft], ['call_full', onFull]] as const) {

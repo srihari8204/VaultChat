@@ -9,6 +9,7 @@ import (
 
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/metrics"
+	"vaultchat/backend-go/internal/redisx"
 	"vaultchat/backend-go/internal/workx"
 )
 
@@ -428,6 +429,26 @@ func (h *Hub) registerSignalHandlers(s *socket.Socket) {
 		if to == "" {
 			return
 		}
+		// Ringing is the one socket event that costs the RECIPIENT something:
+		// below it fires a high-priority FCM push that wakes a dozing device
+		// and can bypass Do Not Disturb. Nothing limited it. POST /calls has a
+		// limiter (call_sessions.go) but the client does not go through that
+		// path, so in practice ringing was unmetered.
+		//
+		// The budget is set by legitimate behaviour, not by what feels polite:
+		// ringAndOffer re-emits every 3 s up to 9 times per call (lib/call/
+		// signal.ts), so one call is ~10 events, and ringGroup emits once per
+		// member. 120/min therefore absorbs a full re-ring of a large group
+		// plus redials, and still stops an automated flood.
+		//
+		// Keyed on the CALLER's uid — an account is what gets banned, and a
+		// per-IP key would punish everyone behind one carrier NAT. Consume
+		// fails OPEN, so a Redis outage degrades to today's behaviour rather
+		// than silencing every call on the platform.
+		if rl := redisx.Consume(bg, "call:ring:"+d.uid, callRingLimit, callRingWindowSec); !rl.Allowed {
+			metrics.Inc("call_ring_rate_limited")
+			return
+		}
 		out := copyMap(m)
 		out["from"] = d.uid
 		out["fromUid"] = d.uid
@@ -461,6 +482,35 @@ func (h *Hub) registerSignalHandlers(s *socket.Socket) {
 	s.On("join_call", func(args ...any) {
 		chatID := mstr(argMap(args), "chatId")
 		if chatID == "" {
+			return
+		}
+		// MEMBERSHIP, not merely authentication.
+		//
+		// This checked nothing but "is chatId non-empty", so any signed-in
+		// account could join the call room of any chat it could name: it
+		// received call_roster (the uid list of everyone on a private call),
+		// was announced to every participant as call_peer_joined, and then got
+		// every in-room event for the rest of the call.
+		//
+		// liveLocAllowed is the same cached chat_members check this file
+		// already applies to live location and trips — strictly less sensitive
+		// data than the membership of a call in progress.
+		//
+		// Silent return, like every other refusal here: Socket.IO drops
+		// unknown/ignored events without a reply, and telling a prober whether
+		// a chat id exists is itself the leak.
+		//
+		// Only the group path reaches this. A 1:1 call never emits join_call —
+		// its signalling is addressed per-uid — so this cannot refuse one.
+		//
+		// ponytail: liveLocAllowed caches the NEGATIVE too, for the socket's
+		// lifetime. Someone refused before being added to the chat stays
+		// refused until they reconnect. Narrow (it needs a join attempt made
+		// before joining the group) and self-healing, and it is the behaviour
+		// the three existing relays already have. Give the call path its own
+		// positive-only cache if that window ever shows up in call_join_denied.
+		if !h.liveLocAllowed(d, chatID) {
+			metrics.Inc("call_join_denied")
 			return
 		}
 		room := socket.Room("call:" + chatID)
@@ -511,6 +561,14 @@ func (h *Hub) registerSignalHandlers(s *socket.Socket) {
 		}
 	})
 }
+
+// How many call_incoming events one account may emit per window. See the
+// handler for why the number is this large: it must never interrupt a real
+// re-ring, only automation.
+const (
+	callRingLimit     = 120
+	callRingWindowSec = 60
+)
 
 // meshMaxParticipants is the hard ceiling on a full-mesh group call,
 // including the joiner. Default 5: at 5 participants each phone already runs
