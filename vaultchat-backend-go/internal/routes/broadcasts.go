@@ -273,11 +273,24 @@ func broadcastSetHLS(w http.ResponseWriter, r *http.Request) {
 		// only live once there is something to play. Publishing a URL for an
 		// already-ended broadcast is refused by the WHERE clause.
 		var e error
+		// host_id is checked HERE, in Go, and not only by the 079 RLS policy.
+		//
+		// Publishing the playlist URL decides what every viewer of this stream
+		// plays. RLS is the intended guard, but whether it is in force depends
+		// on the deployment's database role (docs/RLS_ENFORCEMENT.md — an open
+		// question here), and if it is bypassed this handler had NO other
+		// restriction: any authenticated account could repoint any starting
+		// broadcast at a playlist of their choosing. The only validation was
+		// that the URL began with https://.
+		//
+		// Same two-gate rule call_sessions.go states and broadcastToken already
+		// follows: check it in Go as well, and the feature is correct if either
+		// gate holds.
 		b, e = scanBroadcast(tx.QueryRow(ctx,
 			`UPDATE broadcast_sessions
 			    SET hls_url = $2, status = 'live'
-			  WHERE id = $1 AND status = 'starting'
-			  RETURNING `+broadcastCols, id, url))
+			  WHERE id = $1 AND status = 'starting' AND host_id = $3
+			  RETURNING `+broadcastCols, id, url, uid))
 		return e
 	})
 	if err != nil || b == nil {
@@ -549,14 +562,25 @@ func broadcastEnd(w http.ResponseWriter, r *http.Request) {
 	var b *broadcast
 	err := db.WithUser(ctx, uid, func(tx pgx.Tx) error {
 		var e error
+		// host_id in the WHERE, for the same reason as broadcastSetHLS: without
+		// it, and with RLS bypassed, any authenticated account could end anyone
+		// else's live stream — dropping its audience and stopping its egress.
+		//
+		// A non-host falls through to the idempotent "alreadyEnded" reply
+		// below rather than a 403. That is deliberate: this endpoint cannot
+		// distinguish "not yours" from "already over" without telling a caller
+		// which broadcasts exist, and the honest 200 leaks nothing while the
+		// stream stays up. The egress_id read below is inside the same
+		// error-returning path, so a refused end also cannot stop the
+		// transcoder.
 		b, e = scanBroadcast(tx.QueryRow(ctx,
 			`UPDATE broadcast_sessions
 			    SET status = 'ended',
 			        ended_at = now(),
 			        viewer_count = $2,
 			        peak_viewers = GREATEST(peak_viewers, $3)
-			  WHERE id = $1 AND ended_at IS NULL
-			  RETURNING `+broadcastCols, id, body.ViewerCount, body.PeakViewers))
+			  WHERE id = $1 AND ended_at IS NULL AND host_id = $4
+			  RETURNING `+broadcastCols, id, body.ViewerCount, body.PeakViewers, uid))
 		if e != nil {
 			return e
 		}
