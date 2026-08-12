@@ -43,6 +43,8 @@ export default function LiveViewScreen() {
   const [b, setB] = useState<Broadcast | null>(null);
   const [waiting, setWaiting] = useState(true);
   const [failed, setFailed] = useState(false);
+  /** The host stopped, or the stream failed server-side, while we were watching. */
+  const [ended, setEnded] = useState(false);
 
   // The HOST publishes into the LiveKit room; egress transcodes that room to
   // HLS. Without this nothing reaches the SFU and egress renders an empty
@@ -138,11 +140,41 @@ export default function LiveViewScreen() {
   useEffect(() => {
     if (waiting || failed) return;
     let alive = true;
+    let n = 0;
     const tick = async () => {
       if (!alive) return;
       // The heartbeat is what keeps us in the viewer set; it expires server-side
       // so a viewer who vanishes stops being counted.
       setViewers(await watchBroadcast(String(id)));
+
+      // NOTICE WHEN THE STREAM ENDS.
+      //
+      // The broadcast was fetched once, at mount, and never again — so a viewer
+      // whose host had ended the stream sat watching a dead playlist under a
+      // banner that still read LIVE, indefinitely. There was no path to the
+      // ended state at all: `b.status` was frozen at whatever it was when the
+      // screen opened.
+      //
+      // Every 4th tick (~12s) rather than every tick: this is a read on the hot
+      // path for an unbounded audience, and 12s is well inside what "the stream
+      // stopped" needs to feel correct. The chat poll stays at 3s because that
+      // one is the interactive part.
+      if (++n % 4 === 0) {
+        try {
+          const cur = await getBroadcast(String(id));
+          if (!alive) return;
+          setB(cur);
+          if (cur.status === 'ended' || cur.status === 'failed') {
+            // Stop polling immediately — the room is gone, and continuing to
+            // heartbeat into it just keeps the viewer counted on a finished
+            // stream.
+            alive = false;
+            setEnded(true);
+            return;
+          }
+        } catch { /* transient — the next tick tries again */ }
+      }
+
       const fresh = await listBroadcastChat(String(id), lastId.current);
       if (!alive || fresh.length === 0) return;
       lastId.current = fresh[fresh.length - 1].id;
@@ -181,7 +213,17 @@ export default function LiveViewScreen() {
     <View style={S.root}>
       <Stack.Screen options={{ title: b?.title || 'Live', headerTransparent: true, headerTintColor: '#fff' }} />
 
-      {waiting ? (
+      {ended ? (
+        // A finished stream is not a failure and must not be dressed as one:
+        // the viewer saw the whole thing, it is simply over.
+        <View style={S.center}>
+          <Ionicons name="checkmark-circle-outline" size={40} color="#94A3B8" />
+          <AppText style={S.centerText}>This broadcast has ended.</AppText>
+          <TouchableOpacity onPress={() => router.back()} style={S.backBtn}>
+            <AppText style={S.backText}>Go back</AppText>
+          </TouchableOpacity>
+        </View>
+      ) : waiting ? (
         <View style={S.center}>
           <ActivityIndicator color="#fff" />
           <AppText style={S.centerText}>
@@ -257,7 +299,7 @@ export default function LiveViewScreen() {
 
       {/* Chat overlays the video rather than splitting the screen — a phone in
           portrait has no room for both, and viewers came for the stream. */}
-      {!waiting && !failed && (
+      {!waiting && !failed && !ended && (
         <View style={S.chatWrap} pointerEvents="box-none">
           <ScrollView
             style={S.chatList}
