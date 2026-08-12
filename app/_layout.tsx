@@ -56,7 +56,7 @@ import { runSecurityCheck } from '../services/securityService';
 import { attachTapHandler } from '../lib/push';
 import { notify as notifyMessage, setSelfId } from '../lib/messageNotifications';
 import { addPersistentListener, getSocket } from '../lib/socket';
-import { registerForCalls, getInitialCallIntent, drainDeclinedCall } from '../lib/CallService';
+import { registerForCalls, refreshCallRegistration, getInitialCallIntent, drainDeclinedCall } from '../lib/CallService';
 import { getActiveCall } from '../lib/callState';
 import { getRingingPeer, setRingingPeer, consumePendingCall } from '../lib/ringTracker';
 import { displayIncomingCall, cancelIncomingCall } from '../lib/callNotification';
@@ -368,6 +368,27 @@ function RootLayout() {
     runDueScheduled();
     rearmAllTriggers();
     const sub = AppState.addEventListener('change', (s) => { if (s === 'active') runDueScheduled(); });
+    return () => sub.remove();
+  }, []);
+
+  // KEEP THE CALL DOORBELL ALIVE.
+  //
+  // registerForCalls() runs once at boot, and that is not enough: FCM rotates
+  // tokens (reinstall, data clear, restore, expiry), a phone can boot before its
+  // network is up, and a user can sign in after launch. In all three the server
+  // ends up holding a token that no longer reaches this device, so it stops
+  // ringing while killed — silently, and until the next cold start.
+  //
+  // refreshCallRegistration is cheap: it reads the current token locally and
+  // returns without any network request unless the token actually changed or the
+  // last attempt did not succeed, which is the case on essentially every
+  // foreground. Registered here rather than inside the boot effect so it keeps
+  // running for the whole life of the process.
+  useEffect(() => {
+    void refreshCallRegistration().catch(() => {});
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') void refreshCallRegistration().catch(() => {});
+    });
     return () => sub.remove();
   }, []);
 

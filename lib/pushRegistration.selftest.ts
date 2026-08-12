@@ -23,7 +23,7 @@
 
 import {
   PUSH_RETRY_LIMIT, canWakeForCalls, pushRetryDelayMs, pushWarningText,
-  shouldRetryPush, type PushOutcome,
+  shouldReregister, shouldRetryPush, type PushOutcome,
 } from './pushRegistration';
 
 let failures = 0;
@@ -104,6 +104,32 @@ check('signed-out is not nagged — signing in fixes it', pushWarningText('not_s
 // inflammatory: on most of these devices it is a configuration fact, not a fault.
 check('no warning blames a phone manufacturer',
   ALL.every(o => !/huawei|honor|xiaomi|samsung|oppo|vivo/i.test(pushWarningText(o) ?? '')));
+
+console.log('\nre-registration — the token-rotation hole:');
+// FCM rotates tokens on reinstall, data clear, restore and expiry. The native
+// onNewToken handler stored the new one and NOTHING ever POSTed it, because JS
+// registered exactly once at boot. The server kept addressing a dead token and
+// the phone stopped ringing while killed, silently, until the next cold start.
+check('a rotated token forces re-registration',
+  shouldReregister({ token: 'old-token', outcome: 'ok' }, 'new-token'),
+  'this is the missed-calls-after-reinstall case');
+check('an unchanged token on a healthy device does NOT re-POST',
+  !shouldReregister({ token: 'same-token', outcome: 'ok' }, 'same-token'),
+  'would fire a request on every single foreground');
+check('a previous transient failure retries on next foreground',
+  shouldReregister({ token: 'tok', outcome: 'transient' }, 'tok'),
+  'covers "booted with no network"');
+check('a previous not_signed_in retries once signed in',
+  shouldReregister({ token: 'tok', outcome: 'not_signed_in' }, 'tok'));
+check('a never-registered device registers',
+  shouldReregister({ token: null, outcome: null }, 'first-token'));
+// A no-provider device has no token to compare, so it must not spin here either.
+check('no token at all means nothing to do',
+  !shouldReregister({ token: null, outcome: null }, null)
+  && !shouldReregister({ token: 'tok', outcome: 'ok' }, null));
+check('…even when the last outcome was a failure',
+  !shouldReregister({ token: null, outcome: 'no_provider' }, null),
+  'a device with no push provider must never loop');
 
 console.log(failures === 0
   ? '\nALL PUSH-REGISTRATION CHECKS PASSED ✓'

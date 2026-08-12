@@ -104,6 +104,41 @@ export function pushWarningText(outcome: PushOutcome | null): string | null {
   }
 }
 
+/**
+ * Should registration be POSTed again?
+ *
+ * WHY THIS IS NEEDED AT ALL
+ * -------------------------
+ * FCM rotates a device's token — on app-data clear, reinstall, restore to a new
+ * phone, and Google-initiated expiry. VaultCallMessagingService.onNewToken
+ * catches the rotation and writes the new token to SharedPreferences, and its
+ * own comment says "CallModule.getFcmToken() lets JS read + POST /call/token".
+ * But JS only ever called registerForCalls() ONCE, at app boot. So nothing
+ * POSTed it.
+ *
+ * The server therefore kept the OLD token, every wake push went to a dead
+ * address, and the phone stopped ringing for calls while killed — silently,
+ * until the next cold start. On a phone that keeps the app in memory for days,
+ * that is days of missed calls with no symptom to report beyond "it just stopped
+ * ringing sometimes".
+ *
+ * The rule:
+ *   • token changed        → POST. This is the rotation case.
+ *   • last attempt not ok  → POST. Covers network-came-back, just-signed-in, and
+ *                            a server that was briefly unhappy.
+ *   • otherwise            → skip. The server already holds this exact token, so
+ *                            re-POSTing it on every foreground would be pure
+ *                            request volume for no state change.
+ */
+export function shouldReregister(
+  prev: { token: string | null; outcome: PushOutcome | null },
+  currentToken: string | null,
+): boolean {
+  if (!currentToken) return false;         // nothing to register
+  if (currentToken !== prev.token) return true;
+  return prev.outcome !== 'ok';
+}
+
 // ── last known state ──────────────────────────────────────────────────
 //
 // Module-level rather than persisted: it describes THIS process's ability to be
@@ -114,5 +149,44 @@ let last: PushOutcome | null = null;
 
 export function setPushOutcome(o: PushOutcome): void { last = o; }
 export function getPushOutcome(): PushOutcome | null { return last; }
+
+// ── the second push provider (Huawei / no-GMS) ────────────────────────
+//
+// STATUS: NOT IMPLEMENTED. This is the seam, not the implementation, and the
+// distinction is deliberate — claiming Huawei support that has never run on a
+// Huawei device would be worse than the honest gap that exists now.
+//
+// WHAT WORKS TODAY ON A NO-GMS DEVICE
+//   Calls ring and connect normally whenever the app is running: signalling is a
+//   Socket.IO connection and media is peer-to-peer, neither of which involves
+//   Google. What does NOT work is the doorbell — waking a KILLED or DOZING app —
+//   because that is the one job FCM does. attemptRegister() classifies such a
+//   device `no_provider`, never retries it, and pushWarningText() explains the
+//   limitation in words a user can act on.
+//
+// WHAT AN HMS PROVIDER WOULD NEED, exactly:
+//   1. A Huawei Developer account with the app registered in AppGallery Connect.
+//   2. `agconnect-services.json` in android/app/ (the HMS analogue of
+//      google-services.json).
+//   3. The AGConnect Gradle plugin + `com.huawei.hms:push` dependency, added via
+//      the existing config plugin (plugins/withVaultChatCalls.js) so `expo
+//      prebuild` does not discard it.
+//   4. A native HmsMessagingService mirroring VaultCallMessagingService: same
+//      data-only payload, same CATEGORY_CALL full-screen notification.
+//   5. Server-side send support — vaultchat-backend-go currently speaks FCM
+//      HTTP v1 only (internal/realtime/delivery.go). HMS uses a different
+//      endpoint and OAuth flow, so `/call/token` would need to record WHICH
+//      provider a token belongs to.
+//   6. A physical Huawei device without GMS to verify against. There is none
+//      available, and nothing here can be trusted until there is.
+//
+// None of that can be invented, and the credentials in particular must come from
+// the account owner. Until then the honest state is the one implemented above.
+//
+// The seam itself is `attemptRegister()` in lib/CallService.ts: it is the only
+// place that turns "this device" into a token, so a provider chosen there — FCM
+// when GMS is present, HMS when it is not — needs no change anywhere else in the
+// call stack. The wire protocol, the state machine, and E2EE are all
+// provider-agnostic already, which is the property worth protecting.
 
 export default {};
