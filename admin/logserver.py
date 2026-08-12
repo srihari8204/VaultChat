@@ -47,7 +47,6 @@ SOURCES = {
     "valhalla":         {"type": "compose", "name": "valhalla"},
     "coturn":           {"type": "compose", "name": "coturn"},
     "livekit":          {"type": "compose", "name": "livekit"},
-    "vaultlens-worker": {"type": "compose", "name": "vaultlens-worker"},
     "prometheus":       {"type": "compose", "name": "prometheus"},
     "grafana":          {"type": "compose", "name": "grafana"},
     "api (node, legacy)": {"type": "compose", "name": "api"},

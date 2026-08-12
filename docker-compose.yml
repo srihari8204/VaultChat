@@ -222,9 +222,11 @@ services:
       S3_SECRET_KEY: ${MINIO_PASS:-vaultchat_dev_secret}
       VALHALLA_URL: http://valhalla:8002   # internal routing engine (POST /nav/route proxies here)
       INTERNAL_EMIT_KEY: ${INTERNAL_EMIT_KEY:-bench-internal-emit}
-      # Post-realtime-cutover: Go owns Socket.IO, so the leftover Node
-      # emitters (the vaultlens QueueEvents listener) push results into Go's
-      # sockets via its reverse bridge instead of Node's now-clientless io.
+      # Post-realtime-cutover: Go owns Socket.IO, so any out-of-process Node
+      # emitter reaches clients through Go's reverse bridge rather than this
+      # process's now-clientless io. Nothing uses it today — the last consumer
+      # was the VaultLens worker — but it costs nothing and is what a future
+      # worker would need.
       GO_INTERNAL_URL: http://go-api:4000
       # Shared with go-api so either backend can serve disk attachments.
       UPLOAD_DIR: /data/uploads
@@ -319,43 +321,11 @@ services:
       LIVEKIT_KEYS: ${LIVEKIT_KEYS:-}
     command: --config /etc/livekit.yaml
 
-  # VaultLens BullMQ worker — renders AI avatars (ModelsLab → R2) off the request
-  # path. Same image as api, different command. PROD override must also give it the
-  # R2 S3_* + MODELSLAB_API_KEY env (same as api) — it needs storage + the model key.
-  vaultlens-worker:
-    build:
-      context: ./vaultchat-backend
-    restart: unless-stopped
-    command: ["node", "workers/vaultlens.js"]
-    env_file:
-      - path: ./vaultchat-backend/.env
-        required: false
-    environment:
-      NODE_ENV: production
-      DB_HOST: postgres
-      DB_PORT: "5432"
-      DB_NAME: vaultchat
-      DB_USER: vaultchat
-      DB_PASS: ${DB_PASS:-vaultchat_dev}
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
-      REDIS_PASS: ""
-      S3_ENDPOINT: http://minio:9000
-      S3_PUBLIC_ENDPOINT: http://65.21.229.167:19000
-      S3_BUCKET: vaultchat-media
-      S3_ACCESS_KEY: ${MINIO_USER:-vaultchat}
-      S3_SECRET_KEY: ${MINIO_PASS:-vaultchat_dev_secret}
-      MODELSLAB_API_KEY: ${MODELSLAB_API_KEY:-}
-      VAULTLENS_CONCURRENCY: "2"
-      # Go-first prod: the worker hosts the QueueEvents listener and pushes
-      # vaultlens:ready/failed into go-api's internal bridge (Go owns sockets).
-      GO_INTERNAL_URL: http://go-api:4000
-      INTERNAL_EMIT_KEY: ${INTERNAL_EMIT_KEY:-bench-internal-emit}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_started
+  # The vaultlens-worker service lived here. It was the LAST running Node
+  # process in this stack; removing it makes the default service set fully
+  # Go-only (caddy + go-api + postgres + pgbouncer + redis + minio + valhalla +
+  # coturn). Its MODELSLAB_API_KEY and VAULTLENS_CONCURRENCY went with it — no
+  # other service read either.
 
   # Kafka fan-out worker — consumes message.created and delivers over the Redis
   # adapter. Same image as api, different command. Scale with: --scale fanout-worker=N
