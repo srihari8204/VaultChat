@@ -321,6 +321,78 @@ services:
       LIVEKIT_KEYS: ${LIVEKIT_KEYS:-}
     command: --config /etc/livekit.yaml
 
+  # ── egress — LiveKit room → HLS, the missing half of broadcasting ────
+  #
+  # Without this a broadcast row is created, a room exists, and no playlist is
+  # ever written: internal/livekit/egress.go asks LiveKit to start a room
+  # composite and there is nothing to answer. That was the deployment half of
+  # the "broadcast never goes live" defect; the code half (a status that only
+  # moves on a verified webhook) is in internal/routes/broadcast_webhook.go.
+  #
+  # VERSION MUST MATCH THE RUNNING SERVER. Egress has its OWN release line —
+  # its tags do NOT track livekit-server's. Pinning a guess here would be worse
+  # than leaving it unset, so the tag is a variable: read the server's version
+  # (`livekit-server --version`) and set LIVEKIT_EGRESS_VERSION to the egress
+  # release LiveKit documents as compatible with it. The default below matches
+  # the livekit-server:v1.8 pinned above, NOT the newer version the deploy
+  # notes describe — set the variable rather than trusting it.
+  #
+  # SYS_ADMIN is required, not optional: egress renders the room in headless
+  # Chrome, and Chrome's sandbox needs it. This is why egress is the only
+  # CPU-bound service in the stack and why it is profile-gated.
+  #
+  # Profile-gated with the SFU it depends on: `docker compose --profile sfu up -d egress`
+  egress:
+    image: livekit/egress:${LIVEKIT_EGRESS_VERSION:-v1.8.4}
+    restart: unless-stopped
+    profiles: ["sfu"]
+    cap_add:
+      - SYS_ADMIN
+    # livekit runs network_mode: host, so it is NOT on this compose network and
+    # cannot be reached as `livekit`. Same mapping caddy already carries.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      # Egress takes its whole configuration as one YAML document in an env
+      # var. Values are interpolated by compose from .env — no secret is
+      # written into this file.
+      #
+      # redis is REQUIRED: it is how egress and livekit-server find each other.
+      # The livekit side of that pairing must be enabled too — see the commented
+      # redis block in livekit/livekit.yaml, which is off for the single-node
+      # setup and has to come on before egress can register.
+      EGRESS_CONFIG_BODY: |
+        redis:
+          address: redis:6379
+        api_key: ${LIVEKIT_API_KEY:-}
+        api_secret: ${LIVEKIT_API_SECRET:-}
+        ws_url: ${LIVEKIT_EGRESS_WS_URL:-ws://host.docker.internal:7880}
+        insecure: ${LIVEKIT_EGRESS_INSECURE:-true}
+        log_level: info
+        # Segments (HLS) are written straight to object storage by egress; the
+        # bucket, endpoint and region MUST match what
+        # internal/livekit/egress.go signs its segment_outputs with, or the
+        # playlist lands somewhere the viewer's URL does not point at.
+        s3:
+          access_key: ${MINIO_USER:-vaultchat}
+          secret: ${MINIO_PASS:-vaultchat_dev_secret}
+          bucket: ${BROADCAST_BUCKET:-vaultchat-broadcast}
+          endpoint: ${S3_ENDPOINT:-http://minio:9000}
+          region: ${S3_REGION:-us-east-1}
+          force_path_style: true
+    depends_on:
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+    # Egress is the only CPU-bound service here and shares a box with Postgres.
+    # Unbounded, one runaway transcode starves the database.
+    deploy:
+      resources:
+        limits:
+          cpus: "${EGRESS_CPUS:-2}"
+          memory: ${EGRESS_MEMORY:-2g}
+
   # The vaultlens-worker service lived here. It was the LAST running Node
   # process in this stack; removing it makes the default service set fully
   # Go-only (caddy + go-api + postgres + pgbouncer + redis + minio + valhalla +
