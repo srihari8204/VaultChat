@@ -1222,8 +1222,21 @@ export async function startScreenShare(): Promise<void> {
 
   if (!media.isScreenShareSupported()) throw new Error('Screen sharing is not supported on this device.');
 
-  const sender = solePeer(s)?.videoSender();
-  if (!sender) {
+  // EVERY peer, not solePeer().
+  //
+  // solePeer() returns null unless there is exactly ONE remote participant, so
+  // in a group call this lookup failed and threw "Screen sharing is only
+  // available in a video call" — while the user was in a video call, looking at
+  // three other people. Sharing was impossible in any group call and the error
+  // blamed the wrong thing.
+  //
+  // A mesh holds one connection per peer, so the screen track has to be swapped
+  // onto each of them. "1:1 is a mesh with N=1" is the model this file is built
+  // on, and this is the one place that had forgotten it.
+  const senders = [...s.peers.values()]
+    .map(p => ({ uid: p.uid, sender: p.videoSender() }))
+    .filter((x): x is { uid: string; sender: any } => !!x.sender);
+  if (senders.length === 0) {
     // A voice call has no outgoing VIDEO track, so there is no sender whose
     // track can be swapped for the screen — screen share is video-only by
     // construction. This used to `return` silently, which is why the button
@@ -1244,26 +1257,45 @@ export async function startScreenShare(): Promise<void> {
     // the user saw nothing at all. Observed on device.
     throw new Error('Screen capture returned no video track. Your device or work profile may block screen recording.');
   }
-  s.cameraTrack = sender.track;          // keep the camera alive for swap-back
+  // Every peer sends the SAME local camera track, so one saved reference
+  // restores all of them.
+  s.cameraTrack = senders[0].sender.track;
   s.screenStream = screen;
-  await sender.replaceTrack(track);
+  await Promise.all(senders.map(x => x.sender.replaceTrack(track).catch((e: any) => {
+    // One peer refusing must not abort the share for everyone else — the
+    // others are already carrying the screen by the time this settles.
+    console.warn('[screenshare] could not swap track for', x.uid, '—', e?.message ?? e);
+  })));
   try { dispatch({ type: 'local_stream', url: screen.toURL() }); } catch {}
   setFlag('sharing', true);
-  signal.sendScreenShare(s.peerUid, s.chatId, true).catch(() => {});
+  // Tell each peer separately: this event is addressed per-uid (the server
+  // stamps the sender), so a group needs N of them. s.peerUid is '' in a group
+  // call, which is why the single send reached nobody.
+  for (const x of senders) signal.sendScreenShare(x.uid, s.chatId, true).catch(() => {});
   try { track.addEventListener?.('ended', () => { stopScreenShare().catch(() => {}); }); } catch {}
 }
 
 export async function stopScreenShare(): Promise<void> {
   const s = session;
   if (!s) return;
-  const sender = solePeer(s)?.videoSender();
-  try { if (sender && s.cameraTrack) await sender.replaceTrack(s.cameraTrack); } catch {}
+  // Same reason as startScreenShare: solePeer() left every peer in a group call
+  // still receiving the screen after the user stopped sharing, with no way back
+  // to the camera short of ending the call.
+  const peers = [...s.peers.values()];
+  if (s.cameraTrack) {
+    await Promise.all(peers.map(async p => {
+      const sender = p.videoSender();
+      if (!sender) return;
+      try { await sender.replaceTrack(s.cameraTrack); }
+      catch (e: any) { console.warn('[screenshare] could not restore camera for', p.uid, '—', e?.message ?? e); }
+    }));
+  }
   media.stopStream(s.screenStream);
   s.screenStream = null;
   s.cameraTrack = null;
   try { if (s.localStream) dispatch({ type: 'local_stream', url: s.localStream.toURL() }); } catch {}
   setFlag('sharing', false);
-  signal.sendScreenShare(s.peerUid, s.chatId, false).catch(() => {});
+  for (const p of peers) signal.sendScreenShare(p.uid, s.chatId, false).catch(() => {});
 }
 
 // ── call waiting ──────────────────────────────────────────────────────
