@@ -373,21 +373,60 @@ func sweepDeliveredAttachments(ctx context.Context) {
 	// on switches media onto the same three-hour ceiling as the text it
 	// accompanies — the two must move together, or the key expires while the
 	// blob it unlocks lingers for a fortnight.
-	var cutoff string
+	// TWO CUTOFFS, AND THE DIFFERENCE IS LOAD-BEARING.
+	//
+	// `attachments` is NOT a chat-only table. Profile avatars
+	// (app/(tabs)/profile.tsx, lib/onboarding.ts), story media, and every
+	// mini-app upload go through the same routes/uploads.go path and land in
+	// the same table. The only thing that makes a row "chat media" is a message
+	// somewhere referencing it via meta->>'attachmentId'.
+	//
+	// The chat-retention cutoff must therefore apply ONLY to rows that are
+	// actually chat media. Without that scoping, turning on the body store
+	// would have applied a THREE HOUR ttl to every avatar on the service —
+	// every user's profile photo deleted three hours after upload, by a job
+	// whose name says "media retention" and whose intent was chat.
+	//
+	// So:
+	//   chatCutoff  — short (3h with bodies on): only for message-referenced rows
+	//   orphanCutoff— the long legacy window: everything else, unchanged
+	//
+	// Orphan cleanup is deliberately left exactly as it was. It is what reclaims
+	// an upload that was never sent, and narrowing it here would trade a data-loss
+	// bug for a storage leak.
+	chatCutoff := strconv.Itoa(envInt("MEDIA_TTL_DAYS", 14)) + " days"
 	if bodyStoreEnabled() {
-		cutoff = strconv.FormatInt(int64(mediaHardTTL()/time.Second), 10) + " seconds"
-	} else {
-		cutoff = strconv.Itoa(envInt("MEDIA_TTL_DAYS", 14)) + " days"
+		chatCutoff = strconv.FormatInt(int64(mediaHardTTL()/time.Second), 10) + " seconds"
 	}
+	orphanCutoff := strconv.Itoa(envInt("MEDIA_TTL_DAYS", 14)) + " days"
+
 	rows, err := db.SysPool.Query(ctx,
 		`SELECT a.id, a.storage_path, a.storage_backend
 		   FROM attachments a
 		  WHERE a.purged_at IS NULL
 		    AND a.storage_path IS NOT NULL
 		    AND (
-		      a.created_at < NOW() - $1::INTERVAL
+		      -- chat media, past the chat-retention window
+		      (a.created_at < NOW() - $1::INTERVAL
+		         AND EXISTS (SELECT 1 FROM messages m
+		                      WHERE m.meta->>'attachmentId' = a.id::text))
+		      -- anything NOT referenced by a message — avatars, story media,
+		      -- mini-app content, never-sent uploads — keeps the long window.
+		      OR (a.created_at < NOW() - $2::INTERVAL
+		         AND NOT EXISTS (SELECT 1 FROM messages m
+		                          WHERE m.meta->>'attachmentId' = a.id::text))
+		      -- delivered to every chat recipient → reclaim early.
+		      --
+		      -- The EXISTS guard is NOT redundant. Without it this branch reads
+		      -- "deliveries > 0 AND deliveries >= 0" for any row no message
+		      -- references, which is trivially TRUE — so an avatar became
+		      -- eligible for deletion the moment one other user viewed it and
+		      -- recorded a delivery. Scoping the branch to chat media is what
+		      -- makes "delivered to everyone" mean anything at all.
 		      OR (
-		        (SELECT COUNT(*) FROM attachment_deliveries d WHERE d.attachment_id = a.id) > 0
+		        EXISTS (SELECT 1 FROM messages m
+		                 WHERE m.meta->>'attachmentId' = a.id::text)
+		        AND (SELECT COUNT(*) FROM attachment_deliveries d WHERE d.attachment_id = a.id) > 0
 		        AND (SELECT COUNT(*) FROM attachment_deliveries d WHERE d.attachment_id = a.id)
 		            >= (SELECT COUNT(DISTINCT cm.user_id)
 		                  FROM messages m
@@ -397,7 +436,7 @@ func sweepDeliveredAttachments(ctx context.Context) {
 		                 WHERE m.meta->>'attachmentId' = a.id::text)
 		      )
 		    )
-		  LIMIT 500`, cutoff)
+		  LIMIT 500`, chatCutoff, orphanCutoff)
 	if err != nil {
 		log.Printf("[media-retention] failed: %v", err)
 		return
