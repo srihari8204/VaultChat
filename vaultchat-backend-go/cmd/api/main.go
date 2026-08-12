@@ -61,6 +61,9 @@ func main() {
 	routes.RegisterCallSessions(mux)
 	routes.RegisterBroadcasts(mux)
 	routes.RegisterBroadcastSocial(mux)
+	// Egress lifecycle → broadcast status. Under /internal/, which Caddy 404s
+	// from outside, and signature-verified on top of that.
+	routes.RegisterBroadcastWebhook(mux)
 	routes.RegisterUploads(mux)
 	routes.RegisterChannels(mux)
 	routes.RegisterVaultbeam(mux)
