@@ -13,6 +13,10 @@
 //     strand the call. The caller's apply is idempotent (see CallPeer.applyAnswer).
 
 import { addPersistentListener, emit, getSocket } from '../socket';
+// The ring budget lives in ./types because the engine's no-answer timeout must
+// outlast it, and that relationship is asserted in ringTimeout.selftest.ts.
+// Importing them here is what stops the two drifting apart silently.
+import { RING_INTERVAL_MS, RING_REPEATS } from './types';
 
 export interface RingPayload {
   to: string;
@@ -364,7 +368,7 @@ export async function ringAndOffer(
 
   let rings = 0;
   const timer = setInterval(() => {
-    if (isDone() || rings >= 9) { clearInterval(timer); return; }
+    if (isDone() || rings >= RING_REPEATS) { clearInterval(timer); return; }
     rings++;
     // RE-SEAL before re-sending, if the caller says the session changed.
     //
@@ -386,7 +390,7 @@ export async function ringAndOffer(
       } catch {}
     }
     emitBoth();
-  }, 3000);
+  }, RING_INTERVAL_MS);
   return () => clearInterval(timer);
 }
 

@@ -49,6 +49,7 @@ import { attachAudioFocus } from './audioFocus';
 import { INITIAL_CURSOR, INITIAL_QUALITY, TIERS, audioBitrate, ceilingFor, nextQuality, sampleFromTotals } from './quality';
 import { netKey, shouldRestartIce } from './netChange';
 import { dispatch, getSnapshot, begin, reset } from './store';
+import { RING_TIMEOUT_MS } from './types';
 import type { CallChatMessage, CallKind, EndReason } from './types';
 
 interface Session {
@@ -125,14 +126,9 @@ const isDone = () => {
   return st === 'connected' || st === 'ended' || !!session?.disposed;
 };
 
-/**
- * How long an unanswered outgoing call rings before it ends itself.
- *
- * ringAndOffer sends the offer, then repeats it 9 times at 3s intervals, so the
- * last one lands at ~27s. This is deliberately longer, giving that final offer
- * a chance to be answered instead of racing it.
- */
-export const RING_TIMEOUT_MS = 35_000;
+// RING_TIMEOUT_MS now lives in ./types alongside the ring budget it must
+// exceed, so the relationship between them is unit-testable — this module
+// imports React Native and cannot be loaded under Node.
 
 // ── lifecycle ─────────────────────────────────────────────────────────
 

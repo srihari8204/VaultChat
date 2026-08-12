@@ -106,6 +106,34 @@ export interface CallReaction {
 export const MAX_CALL_CHAT = 60;
 export const MAX_CALL_REACTIONS = 8;
 
+// ── ring budget ───────────────────────────────────────────────────────
+//
+// lib/call/signal.ts sends the offer once and then repeats it RING_REPEATS
+// times at RING_INTERVAL_MS, so the LAST offer lands at
+// RING_REPEATS * RING_INTERVAL_MS. RING_TIMEOUT_MS must exceed that, or the
+// timeout races the final offer and kills a call the callee was about to
+// answer.
+//
+// These live HERE, not in engine.ts, for one reason: engine.ts imports React
+// Native and cannot be loaded under Node, so a constant defined there is
+// untestable. The relationship between them is the part that can actually be
+// got wrong, and ringTimeout.selftest.ts asserts it.
+
+/** Offer repeats after the initial send (lib/call/signal.ts ringAndOffer). */
+export const RING_REPEATS = 9;
+/** Delay between those repeats, ms. */
+export const RING_INTERVAL_MS = 3_000;
+
+/**
+ * How long an unanswered outgoing call rings before it ends itself.
+ *
+ * MUST be greater than RING_REPEATS * RING_INTERVAL_MS (27s). Without this the
+ * call sat in `ringing` forever: the repeat loop stopped and nothing ended the
+ * call, so the mic and the foreground service stayed held with no failure and
+ * no way out but the back gesture.
+ */
+export const RING_TIMEOUT_MS = 35_000;
+
 /**
  * The immutable snapshot screens render from. Replaced wholesale on every
  * change so `useSyncExternalStore` reference checks work; individual selectors
