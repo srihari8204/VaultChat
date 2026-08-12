@@ -410,11 +410,25 @@ func sweepDeliveredAttachments(ctx context.Context) {
 		      (a.created_at < NOW() - $1::INTERVAL
 		         AND EXISTS (SELECT 1 FROM messages m
 		                      WHERE m.meta->>'attachmentId' = a.id::text))
-		      -- anything NOT referenced by a message — avatars, story media,
-		      -- mini-app content, never-sent uploads — keeps the long window.
+		      -- Never-sent uploads keep the long window and are still reclaimed.
+		      --
+		      -- But "not referenced by a message" is NOT the same as "orphan".
+		      -- A profile or group avatar is referenced by users.photo_url /
+		      -- chats.photo_url and by nothing else, so the orphan branch was
+		      -- deleting every avatar on the service 14 days after upload. The
+		      -- attachments row survives with purged_at stamped while the serve
+		      -- path never checks it, so the symptom is not an error — it is a
+		      -- profile picture that silently stops loading a fortnight later.
+		      -- Verified pending on production: one avatar, due for deletion.
+		      --
+		      -- Anything a live row still points at is in use. Reclaim only what
+		      -- nothing references.
 		      OR (a.created_at < NOW() - $2::INTERVAL
 		         AND NOT EXISTS (SELECT 1 FROM messages m
-		                          WHERE m.meta->>'attachmentId' = a.id::text))
+		                          WHERE m.meta->>'attachmentId' = a.id::text)
+		         AND NOT EXISTS (SELECT 1 FROM users u  WHERE u.photo_url = a.id::text)
+		         AND NOT EXISTS (SELECT 1 FROM chats c  WHERE c.photo_url = a.id::text)
+		         AND NOT EXISTS (SELECT 1 FROM stories s WHERE s.attachment_id = a.id))
 		      -- delivered to every chat recipient → reclaim early.
 		      --
 		      -- The EXISTS guard is NOT redundant. Without it this branch reads
