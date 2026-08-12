@@ -16,23 +16,74 @@
 import { NativeModules, Platform } from 'react-native';
 import { api, getAccessToken } from './api';
 import { SERVER_URL } from '../constants/server';
+import {
+  pushRetryDelayMs, setPushOutcome, shouldRetryPush, type PushOutcome,
+} from './pushRegistration';
 
 const VaultCalls: any = NativeModules.VaultCalls ?? null;
 const has = () => Platform.OS === 'android' && !!VaultCalls;
 
-/** Register this device for call wake-ups. Call after sign-in + on app start. */
-export async function registerForCalls(): Promise<void> {
-  if (!has()) return;
+/** One registration attempt. Classifies the outcome; never throws. */
+async function attemptRegister(): Promise<PushOutcome> {
+  if (!has()) return 'no_platform';
+
+  let token: string | null = null;
   try {
-    const token = await VaultCalls.getFcmToken();
-    if (!token) return;
-    const access = await getAccessToken();
-    // Let the native FCM service fetch the caller DP for the ring notification.
-    try { VaultCalls.setApiContext(SERVER_URL, access || ''); } catch {}
-    await api('/call/token', { method: 'POST', json: { fcmToken: token, platform: 'android' } });
-  } catch (e) {
-    if (__DEV__) console.warn('[CallService] register failed:', (e as any)?.message);
+    token = await VaultCalls.getFcmToken();
+  } catch {
+    // The provider itself could not issue a token. On Android that means Play
+    // Services is missing, disabled or too old — a device with no GMS at all
+    // (Huawei post-2019) lands here on every attempt. It is a permanent fact
+    // about the install, not a transient error, so it must NOT be retried.
+    return 'no_provider';
   }
+  if (!token) return 'no_provider';
+
+  const access = await getAccessToken();
+  if (!access) return 'not_signed_in';
+
+  // Let the native FCM service fetch the caller DP for the ring notification.
+  try { VaultCalls.setApiContext(SERVER_URL, access); } catch {}
+
+  try {
+    await api('/call/token', { method: 'POST', json: { fcmToken: token, platform: 'android' } });
+    return 'ok';
+  } catch {
+    // Network still coming up at boot, or the server is briefly unhappy. Worth
+    // another try — this is the case the old one-shot silently lost.
+    return 'transient';
+  }
+}
+
+/**
+ * Register this device for call wake-ups. Call after sign-in + on app start.
+ *
+ * Retries transient failures and RECORDS the outcome, neither of which it used
+ * to do. The previous version was a one-shot whose every failure vanished behind
+ * `if (__DEV__)`, so in a release build a phone that booted without network
+ * registered no token for the whole session, rang for nothing while killed, and
+ * left no trace of why. See lib/pushRegistration.ts.
+ *
+ * Resolves with the final outcome; never rejects. The push is a DOORBELL only —
+ * signalling is a socket and media is peer-to-peer — so a failure here degrades
+ * "rings while closed" and nothing else. That is why this stays off the critical
+ * path and is safe to leave unawaited.
+ */
+export async function registerForCalls(): Promise<PushOutcome> {
+  let outcome: PushOutcome = 'transient';
+  for (let attempt = 0; ; attempt++) {
+    outcome = await attemptRegister();
+    if (!shouldRetryPush(outcome, attempt)) break;
+    await new Promise(r => setTimeout(r, pushRetryDelayMs(attempt + 1)));
+  }
+
+  setPushOutcome(outcome);
+  // Logged in RELEASE too, deliberately: this is exactly the state that was
+  // invisible before, and "calls don't ring when the app is closed" is
+  // undiagnosable without it. One line per app start — no volume concern.
+  if (outcome === 'ok') console.warn('[push] registered for call wake-ups');
+  else console.warn(`[push][FAIL] stage=REGISTER code=${outcome.toUpperCase()} wakeable=false`);
+  return outcome;
 }
 
 /** Keep audio alive while a call is connected. */

@@ -430,6 +430,11 @@ async function bootstrap(a: StartArgs, direction: 'outgoing' | 'incoming', wire:
   s.localStream = local.stream;
   dispatch({ type: 'local_stream', url: local.url });
 
+  // The microphone is now live, so the foreground service that legitimises it in
+  // the background must exist from this moment — not from `connected`, which can
+  // be 35 s away. See startCallForegroundService for what that window cost.
+  startCallForegroundService(s);
+
   const iceServers = await getIceServers();
 
   // Route by SENDER, not by a fixed peer, so the same attachment serves 1:1 and
@@ -1269,15 +1274,49 @@ function failSetup(e: any): void {
  * (lib/call/native/ios.ts). Either way the engine calls the same method.
  */
 let foregrounded = false;
-export function onConnected(): void {
-  const s = session;
-  if (!s || foregrounded) return;
+
+/**
+ * Promote to the mic/camera foreground service. Idempotent.
+ *
+ * MUST happen while the app still holds the microphone legitimately, which is
+ * why bootstrap() calls it as soon as media is acquired rather than waiting for
+ * `connected`.
+ *
+ * It used to run ONLY on connect, and that left a window of up to 35 s — the
+ * whole ring budget — in which the call held a live AudioRecord with no
+ * foreground service behind it. Android 11+ denies microphone input to a
+ * backgrounded app that has no microphone-type FGS: it does not throw, it feeds
+ * SILENCE. So the ordinary act of pressing home while a call rings produced a
+ * call that connected normally and carried no audio in one direction, with
+ * nothing in any log to say why.
+ *
+ * The AppState handler in bootstrap() documents itself as "keep the audio, drop
+ * the video" on background — a promise that was only true once this service was
+ * running, and during ringing it was not.
+ *
+ * Starting here is also the legal moment on Android 14+, where starting a
+ * microphone-type FGS requires the app to be in the foreground: call setup is
+ * user-initiated and foreground by construction, whereas `connected` can land
+ * after the user has already switched away — the exact case that would throw
+ * ForegroundServiceStartNotAllowedException. The native side catches and falls
+ * back regardless (CallForegroundService.kt).
+ */
+function startCallForegroundService(s: Session): void {
+  if (foregrounded) return;
   foregrounded = true;
   nativeCall.startCallSession({
     callId: String(s.chatId || s.peerUid || 'call'),
     peerName: s.peerName || 'VaultChat user',
     isVideo: s.kind === 'video',
   });
+}
+
+export function onConnected(): void {
+  const s = session;
+  if (!s) return;
+  // Normally already running from bootstrap; this covers a start that was
+  // refused or raced, so a connected call is never left without one.
+  startCallForegroundService(s);
   nativeCall.dismissIncomingUi();
 }
 
