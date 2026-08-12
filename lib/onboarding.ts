@@ -141,7 +141,7 @@ export async function uploadAndSetProfilePhoto(localUri: string): Promise<void> 
 
   const tmp = `${FileSystem.cacheDirectory}avatar_${Date.now()}.enc`;
   await FileSystem.writeAsStringAsync(tmp, Buffer.from(blob).toString('base64'), { encoding: FileSystem.EncodingType.Base64 });
-  const up = await uploadAttachment(tmp, 'avatar.enc', 'application/octet-stream');
+  const up = await uploadAttachment(tmp, 'avatar.enc', 'application/octet-stream', { purpose: 'profile' });
   if (up?.id) await api('/auth/profile/photo', { method: 'POST', json: { photoId: up.id, photoKey: bytesToHex(dek) } });
 }
 

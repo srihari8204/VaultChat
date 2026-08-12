@@ -296,6 +296,40 @@ func PartitionCount(ctx context.Context) int {
 	return n
 }
 
+// RegisterAttachmentPurposeGauges surfaces the classes the cleanup will not
+// touch, so "never auto-delete" does not quietly become "accumulates forever
+// and nobody looks".
+//
+// `attachments_unknown` is the one to alert on. An unknown-purpose object is
+// retained by design — it is safer kept than destroyed — but every one of them
+// is storage nobody can account for or reclaim, and a rising count means some
+// writer is not declaring its purpose. That is a bug to find, not a number to
+// watch drift upward.
+func RegisterAttachmentPurposeGauges() {
+	var (
+		last               time.Time
+		unknown, protected float64
+	)
+	sample := func() {
+		if time.Since(last) < 60*time.Second {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		var u, p int64
+		if err := db.SysPool.QueryRow(ctx,
+			`SELECT count(*) FILTER (WHERE purpose = 'unknown'),
+			        count(*) FILTER (WHERE purpose IN ('profile','group','mini_app'))
+			   FROM attachments WHERE purged_at IS NULL`).Scan(&u, &p); err != nil {
+			return
+		}
+		unknown, protected = float64(u), float64(p)
+		last = time.Now()
+	}
+	metrics.SetGauge("attachments_unknown_purpose", func() float64 { sample(); return unknown })
+	metrics.SetGauge("attachments_protected", func() float64 { sample(); return protected })
+}
+
 // RegisterPartitionGauge exposes the partition count to /internal/metrics.
 // Sampled at scrape time like the other gauges, with a short cache so a busy
 // scrape interval cannot turn a dashboard into a catalog query per second.

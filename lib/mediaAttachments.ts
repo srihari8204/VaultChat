@@ -48,7 +48,9 @@ export async function uploadEncryptedAttachment(
   let res: UploadResult;
   try {
     // Upload as opaque bytes so the server never treats it as an image/etc.
-    res = await uploadAttachment(tmp, filename, 'application/octet-stream', opts);
+    // Encrypted media is a chat attachment unless the caller says otherwise —
+    // this helper is only reached from the chat send path today.
+    res = await uploadAttachment(tmp, filename, 'application/octet-stream', { purpose: 'chat', ...opts });
   } finally {
     await FileSystem.deleteAsync(tmp, { idempotent: true }).catch(() => {});
   }

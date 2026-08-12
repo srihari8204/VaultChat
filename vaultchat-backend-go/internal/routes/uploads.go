@@ -55,6 +55,43 @@ func upDir() string {
 	return abs
 }
 
+// ─── attachment purpose (migration 100) ───────────────────────────────
+//
+// Every stored object declares what it is FOR, because retention differs by
+// class and cannot be inferred afterwards. `attachments` is shared by chat
+// media, avatars, group photos and story media; deducing purpose from whether
+// a `messages` row referenced the object failed in both directions and
+// silently deleted every avatar 14 days after upload (see migration 100).
+//
+// UNCLASSIFIED DEFAULTS TO 'unknown', NOT 'chat'.
+//
+// That is the safe direction and it is a deliberate trade. A client that does
+// not declare a purpose — every build currently in the field — produces
+// objects the cleanup will never touch, so storage grows until those clients
+// update. The alternative default, 'chat', would apply a three-hour deletion
+// timer to an avatar uploaded by an old client. Retaining bytes is recoverable;
+// deleting a user's profile photo is not.
+var upPurposes = map[string]bool{
+	"chat": true, "profile": true, "group": true,
+	"story": true, "mini_app": true, "unknown": true,
+}
+
+func upPurposeStr(s string) string {
+	s = strings.TrimSpace(strings.ToLower(s))
+	if upPurposes[s] {
+		return s
+	}
+	return "unknown"
+}
+
+// upPurpose reads the declared purpose from a multipart/query upload.
+func upPurpose(r *http.Request) string {
+	if v := r.FormValue("purpose"); v != "" {
+		return upPurposeStr(v)
+	}
+	return upPurposeStr(r.URL.Query().Get("purpose"))
+}
+
 var upExtRe = regexp.MustCompile(`^\.[a-z0-9]{1,6}$`)
 
 func upSafeExt(filename string) string {
@@ -182,11 +219,11 @@ func uploadsPost(w http.ResponseWriter, r *http.Request) {
 			var vo bool
 			e := tx.QueryRow(ctx,
 				`INSERT INTO attachments
-				   (id, owner_user_id, filename, mime_type, size_bytes, storage_path, view_once, storage_backend)
-				 VALUES ($1, $2, $3, $4, $5, $6, $7, 's3')
+				   (id, owner_user_id, filename, mime_type, size_bytes, storage_path, view_once, storage_backend, purpose)
+				 VALUES ($1, $2, $3, $4, $5, $6, $7, 's3', $8)
 				 RETURNING id, mime_type, size_bytes, filename, view_once`,
 				id, user.ID, truncRunes(origName, 255), truncRunes(mimeType, 100), len(data),
-				key, viewOnce).Scan(&out.ID, &out.Mime, &out.Size, &fn, &vo)
+				key, viewOnce, upPurpose(r)).Scan(&out.ID, &out.Mime, &out.Size, &fn, &vo)
 			out.Filename, out.ViewOnce = fn, vo
 			return e
 		}); err != nil {
@@ -229,11 +266,11 @@ func uploadsPost(w http.ResponseWriter, r *http.Request) {
 		var fn *string
 		var vo bool
 		e := tx.QueryRow(ctx,
-			`INSERT INTO attachments (owner_user_id, filename, mime_type, size_bytes, storage_path, view_once)
-			 VALUES ($1, $2, $3, $4, $5, $6)
+			`INSERT INTO attachments (owner_user_id, filename, mime_type, size_bytes, storage_path, view_once, purpose)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7)
 			 RETURNING id, mime_type, size_bytes, filename, view_once`,
 			user.ID, truncRunes(origName, 255), truncRunes(mimeType, 100), written,
-			filepath.ToSlash(relPath), viewOnce).Scan(&out.ID, &out.Mime, &out.Size, &fn, &vo)
+			filepath.ToSlash(relPath), viewOnce, upPurpose(r)).Scan(&out.ID, &out.Mime, &out.Size, &fn, &vo)
 		out.Filename, out.ViewOnce = fn, vo
 		return e
 	})
@@ -259,6 +296,9 @@ func uploadsPresign(w http.ResponseWriter, r *http.Request) {
 		Mime     any `json:"mime"`
 		Size     any `json:"size"`
 		ViewOnce any `json:"viewOnce"`
+		// What this object is FOR — see upPurposeStr. Absent ⇒ "unknown",
+		// which the cleanup never touches.
+		Purpose string `json:"purpose"`
 	}
 	_ = httpx.Body(r, &b)
 	filename := fmt.Sprintf("%v", orEmpty(b.Filename))
@@ -282,9 +322,9 @@ func uploadsPresign(w http.ResponseWriter, r *http.Request) {
 	err := db.WithUser(ctx, user.ID, func(tx pgx.Tx) error {
 		_, e := tx.Exec(ctx,
 			`INSERT INTO attachments
-			   (id, owner_user_id, filename, mime_type, size_bytes, storage_path, view_once, storage_backend)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, 's3')`,
-			id, user.ID, filename, mime, size, key, upViewOnce(b.ViewOnce))
+			   (id, owner_user_id, filename, mime_type, size_bytes, storage_path, view_once, storage_backend, purpose)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, 's3', $8)`,
+			id, user.ID, filename, mime, size, key, upViewOnce(b.ViewOnce), upPurposeStr(b.Purpose))
 		return e
 	})
 	if err != nil {
@@ -348,6 +388,9 @@ func uploadsMPInit(w http.ResponseWriter, r *http.Request) {
 		Mime     any `json:"mime"`
 		Size     any `json:"size"`
 		ViewOnce any `json:"viewOnce"`
+		// What this object is FOR — see upPurposeStr. Absent ⇒ "unknown",
+		// which the cleanup never touches.
+		Purpose string `json:"purpose"`
 	}
 	_ = httpx.Body(r, &b)
 	filename := fmt.Sprintf("%v", orEmpty(b.Filename))
@@ -380,9 +423,9 @@ func uploadsMPInit(w http.ResponseWriter, r *http.Request) {
 	err = db.WithUser(ctx, user.ID, func(tx pgx.Tx) error {
 		_, e := tx.Exec(ctx,
 			`INSERT INTO attachments
-			   (id, owner_user_id, filename, mime_type, size_bytes, storage_path, view_once, storage_backend)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, 's3')`,
-			id, user.ID, filename, mime, size, key, upViewOnce(b.ViewOnce))
+			   (id, owner_user_id, filename, mime_type, size_bytes, storage_path, view_once, storage_backend, purpose)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, 's3', $8)`,
+			id, user.ID, filename, mime, size, key, upViewOnce(b.ViewOnce), upPurposeStr(b.Purpose))
 		return e
 	})
 	if err != nil {

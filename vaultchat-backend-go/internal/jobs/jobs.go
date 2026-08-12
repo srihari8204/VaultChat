@@ -76,6 +76,9 @@ func StartAll(ctx context.Context) {
 	// only — see partitions.go for why dropping is not in this file yet.
 	StartPartitionMaintenance(ctx)
 	RegisterPartitionGauge()
+	// Unknown-purpose objects are never deleted (by design). Surface them, or
+	// "safe to retain" turns into unbounded storage nobody is looking at.
+	RegisterAttachmentPurposeGauges()
 	if os.Getenv("DELETE_ON_DELIVERY") == "true" {
 		log.Println("[delete-on-delivery] ENABLED")
 		run("delete-on-delivery", sweepInterval, sweepDeliveredMessages)
@@ -398,48 +401,31 @@ func sweepDeliveredAttachments(ctx context.Context) {
 	if bodyStoreEnabled() {
 		chatCutoff = strconv.FormatInt(int64(mediaHardTTL()/time.Second), 10) + " seconds"
 	}
-	orphanCutoff := strconv.Itoa(envInt("MEDIA_TTL_DAYS", 14)) + " days"
 
+	// PURPOSE-AWARE. The question is no longer "does a message reference this
+	// object" — that is a side effect, not a purpose, and inferring retention
+	// from it failed in BOTH directions (migration 100 documents the two live
+	// bugs). Each class now answers for itself:
+	//
+	//   chat      chat-media retention: delivered-to-everyone, else the cutoff
+	//   story     survives until the STORY expires; sweepExpiredStories deletes
+	//             the story row, and only then is the object reclaimable
+	//   profile   until the user changes or deletes it — never by age
+	//   group     until the group photo changes or is deleted — never by age
+	//   mini_app  the mini-app's own lifecycle — never here
+	//   unknown   NEVER. Kept and surfaced, never destroyed.
+	//
+	// profile/group/mini_app/unknown are absent from this statement entirely.
+	// That is deliberate: a class this job does not name cannot be deleted by
+	// it, so the failure mode of forgetting a class is retention, not loss.
 	rows, err := db.SysPool.Query(ctx,
 		`SELECT a.id, a.storage_path, a.storage_backend
 		   FROM attachments a
 		  WHERE a.purged_at IS NULL
 		    AND a.storage_path IS NOT NULL
 		    AND (
-		      -- chat media, past the chat-retention window
-		      (a.created_at < NOW() - $1::INTERVAL
-		         AND EXISTS (SELECT 1 FROM messages m
-		                      WHERE m.meta->>'attachmentId' = a.id::text))
-		      -- Never-sent uploads keep the long window and are still reclaimed.
-		      --
-		      -- But "not referenced by a message" is NOT the same as "orphan".
-		      -- A profile or group avatar is referenced by users.photo_url /
-		      -- chats.photo_url and by nothing else, so the orphan branch was
-		      -- deleting every avatar on the service 14 days after upload. The
-		      -- attachments row survives with purged_at stamped while the serve
-		      -- path never checks it, so the symptom is not an error — it is a
-		      -- profile picture that silently stops loading a fortnight later.
-		      -- Verified pending on production: one avatar, due for deletion.
-		      --
-		      -- Anything a live row still points at is in use. Reclaim only what
-		      -- nothing references.
-		      OR (a.created_at < NOW() - $2::INTERVAL
-		         AND NOT EXISTS (SELECT 1 FROM messages m
-		                          WHERE m.meta->>'attachmentId' = a.id::text)
-		         AND NOT EXISTS (SELECT 1 FROM users u  WHERE u.photo_url = a.id::text)
-		         AND NOT EXISTS (SELECT 1 FROM chats c  WHERE c.photo_url = a.id::text)
-		         AND NOT EXISTS (SELECT 1 FROM stories s WHERE s.attachment_id = a.id))
-		      -- delivered to every chat recipient → reclaim early.
-		      --
-		      -- The EXISTS guard is NOT redundant. Without it this branch reads
-		      -- "deliveries > 0 AND deliveries >= 0" for any row no message
-		      -- references, which is trivially TRUE — so an avatar became
-		      -- eligible for deletion the moment one other user viewed it and
-		      -- recorded a delivery. Scoping the branch to chat media is what
-		      -- makes "delivered to everyone" mean anything at all.
-		      OR (
-		        EXISTS (SELECT 1 FROM messages m
-		                 WHERE m.meta->>'attachmentId' = a.id::text)
+		      -- CHAT: delivered to every eligible recipient → reclaim early.
+		      (a.purpose = 'chat'
 		        AND (SELECT COUNT(*) FROM attachment_deliveries d WHERE d.attachment_id = a.id) > 0
 		        AND (SELECT COUNT(*) FROM attachment_deliveries d WHERE d.attachment_id = a.id)
 		            >= (SELECT COUNT(DISTINCT cm.user_id)
@@ -447,10 +433,17 @@ func sweepDeliveredAttachments(ctx context.Context) {
 		                  JOIN chat_members cm ON cm.chat_id = m.chat_id
 		                                      AND cm.left_at IS NULL
 		                                      AND cm.user_id <> a.owner_user_id
-		                 WHERE m.meta->>'attachmentId' = a.id::text)
-		      )
+		                 WHERE m.meta->>'attachmentId' = a.id::text))
+		      -- CHAT: past the chat-retention window regardless of delivery.
+		      OR (a.purpose = 'chat' AND a.created_at < NOW() - $1::INTERVAL)
+		      -- STORY: only once the story it belongs to is gone. The story
+		      -- row carries the authoritative expiry (24h) and is removed by
+		      -- sweepExpiredStories; until then this object must survive, which
+		      -- is why age alone can never make it eligible.
+		      OR (a.purpose = 'story'
+		        AND NOT EXISTS (SELECT 1 FROM stories s WHERE s.attachment_id = a.id))
 		    )
-		  LIMIT 500`, chatCutoff, orphanCutoff)
+		  LIMIT 500`, chatCutoff)
 	if err != nil {
 		log.Printf("[media-retention] failed: %v", err)
 		return

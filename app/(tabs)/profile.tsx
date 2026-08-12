@@ -143,7 +143,9 @@ export default function ProfileScreen() {
     try {
       const filename = asset.fileName || `avatar-${Date.now()}.jpg`;
       const mime     = asset.mimeType || 'image/jpeg';
-      const up       = await uploadAttachment(asset.uri, filename, mime);
+      // 'profile' keeps this out of chat retention entirely — an avatar is
+      // kept until the user changes or deletes it, never aged out.
+      const up       = await uploadAttachment(asset.uri, filename, mime, { purpose: 'profile' });
       const updated  = await api<UserProfile>('/user/profile', {
         method: 'PUT',
         json: { photoURL: up.id },

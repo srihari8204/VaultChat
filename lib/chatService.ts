@@ -2215,11 +2215,27 @@ export interface UploadResult {
  * `uri` is the local file URI from expo-image-picker / expo-document-picker.
  * The returned id goes into the next message's meta.attachmentId.
  */
+/**
+ * What a stored object is FOR. Retention is per class, so this is the thing
+ * that decides whether an object is reclaimed in three hours, when its story
+ * expires, or never:
+ *
+ *   chat      chat media — the 3-hour / delivered-to-everyone rules
+ *   profile   a user avatar — kept until the user changes or deletes it
+ *   group     a group photo — kept until changed or deleted
+ *   story     status media — kept until the story itself expires (24h)
+ *   mini_app  owned by a mini-app's own lifecycle
+ *
+ * Anything undeclared is stored as 'unknown' server-side and never
+ * automatically deleted.
+ */
+export type AttachmentPurpose = 'chat' | 'profile' | 'group' | 'story' | 'mini_app';
+
 export async function uploadAttachment(
   uri: string,
   filename: string,
   mime: string,
-  opts: { viewOnce?: boolean; signal?: AbortSignal } = {},
+  opts: { viewOnce?: boolean; signal?: AbortSignal; purpose?: AttachmentPurpose } = {},
 ): Promise<UploadResult> {
   const token = await getAccessToken();
   if (!token) throw new Error('Not signed in');
@@ -2257,7 +2273,16 @@ export async function uploadAttachment(
   // device-side PUT failure is understood.
   const form = new FormData();
   form.append('file', { uri, name: filename, type: mime } as any);   // RN FormData file object
-  const qs = opts.viewOnce ? '?viewOnce=1' : '';
+  // Declare what this object is FOR. The server stores it on the attachment
+  // row and every retention rule keys off it (migration 100). Omitting it is
+  // not fatal — the server defaults to 'unknown', which is never auto-deleted —
+  // but an unclassified object is one nobody can ever reclaim, so every call
+  // site should say.
+  const params = [
+    ...(opts.viewOnce ? ['viewOnce=1'] : []),
+    ...(opts.purpose ? [`purpose=${encodeURIComponent(opts.purpose)}`] : []),
+  ];
+  const qs = params.length ? `?${params.join('&')}` : '';
   const res = await fetch(`${SERVER_URL}/uploads${qs}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },

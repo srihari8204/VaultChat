@@ -1,25 +1,29 @@
-// media_scope_test.go — chat retention must not reach non-chat content.
+// media_scope_test.go — retention is per content class, and the classes that
+// must never be swept are absent from the sweep entirely.
 //
 // WHY THIS TEST EXISTS
 // --------------------
-// `attachments` is a SHARED table. Profile avatars (app/(tabs)/profile.tsx,
-// lib/onboarding.ts), story media, and every mini-app upload go through the
-// same routes/uploads.go path as chat media. The only thing that makes a row
-// "chat media" is a message referencing it via meta->>'attachmentId'.
+// `attachments` is a SHARED table: chat media, profile avatars, group photos
+// and story media all arrive through routes/uploads.go. Retention used to be
+// inferred from whether a `messages` row referenced the object, which is a
+// side effect rather than a purpose, and it failed in both directions:
 //
-// The media sweep's TTL branch originally had no such join, so shortening its
-// window for the ephemeral body store pointed a THREE HOUR deletion timer at
-// every avatar on the service. Measured against production before the fix:
+//	FALSE ORPHAN  an avatar is referenced by users.photo_url and no message,
+//	              so the sweep deleted every avatar 14 days after upload —
+//	              silently, because purged_at is stamped and the serve path
+//	              never reads it. Verified pending on production before the fix.
+//	FALSE CHAT    delete-for-everyone NULLs messages.meta, destroying the only
+//	              reference to that message's attachment.
 //
-//	live attachments  95
-//	chat-referenced    8
-//	non-chat          87
-//	old predicate @3h  would delete 95  (87 of them non-chat)
-//	new predicate      would delete  8  ( 0 of them non-chat)
+// And shortening the chat window for the ephemeral body store pointed a THREE
+// HOUR timer at all of it. Measured on production at that moment:
 //
-// 92% of live media, none of it chat content, deleted by a job named for chat
-// retention. The scoping is the whole fix, so it gets a test that fails loudly
-// if anyone widens it again.
+//	live 95 · chat-referenced 8 · non-chat 87
+//	old predicate @3h → 95 deleted (87 non-chat) · scoped → 8 (0 non-chat)
+//
+// Purpose is now a stored fact (migration 100). These tests pin the property
+// that matters: a class the sweep does not NAME cannot be deleted by it, so
+// forgetting a class fails toward retention rather than loss.
 package jobs
 
 import (
@@ -29,10 +33,6 @@ import (
 	"time"
 )
 
-// mediaSweepSQL is the predicate as it appears in sweepDeliveredAttachments.
-// Kept as a literal so the test pins the SHAPE of the query rather than
-// re-deriving it — if the real statement changes, this diverges and the
-// structural assertions below are what catch it.
 func mediaSweepSource(t *testing.T) string {
 	t.Helper()
 	b, err := os.ReadFile("jobs.go")
@@ -51,38 +51,48 @@ func mediaSweepSource(t *testing.T) string {
 	return src[i : i+j]
 }
 
-func TestMediaSweepScopesShortWindowToChatMedia(t *testing.T) {
+// The heart of it. These four classes must be unreachable by this job.
+func TestSweepCannotDeleteProtectedPurposes(t *testing.T) {
 	src := mediaSweepSource(t)
-
-	// Every branch that can delete on the SHORT window must be guarded by a
-	// message reference. Two independent guards are required: the TTL branch
-	// and the delivered-to-everyone branch.
-	if strings.Count(src, "m.meta->>'attachmentId' = a.id::text") < 4 {
-		t.Fatalf("expected the attachment-reference guard on every branch; the sweep is:\n%s", src)
-	}
-	if !strings.Contains(src, "NOT EXISTS (SELECT 1 FROM messages m") {
-		t.Fatal("no NOT EXISTS branch — non-chat attachments have no separate (longer) window, " +
-			"which means chat retention governs avatars and mini-app content")
-	}
-	if !strings.Contains(src, "chatCutoff") || !strings.Contains(src, "orphanCutoff") {
-		t.Fatal("expected two distinct cutoffs: chat media and non-chat orphans")
+	for _, p := range []string{"profile", "group", "mini_app", "unknown"} {
+		if strings.Contains(src, "'"+p+"'") {
+			t.Errorf("purpose %q appears in the media sweep — it must be absent so the job "+
+				"cannot delete it at all; retention for %q is owned elsewhere", p, p)
+		}
 	}
 }
 
-func TestMediaSweepDeliveredBranchRequiresAMessage(t *testing.T) {
+func TestSweepIsPurposeScopedNotReferenceInferred(t *testing.T) {
 	src := mediaSweepSource(t)
-	// The delivered-to-all branch compares a delivery count against the number
-	// of chat recipients. For a row no message references that recipient count
-	// is 0, so `deliveries >= 0` is trivially true and ANY downloaded avatar
-	// becomes eligible. The EXISTS guard must come first in that branch.
-	idx := strings.Index(src, "attachment_deliveries")
-	if idx < 0 {
-		t.Fatal("delivered-to-all branch not found")
+	if !strings.Contains(src, "a.purpose = 'chat'") {
+		t.Fatal("the sweep does not filter on purpose — it is still inferring class from references, " +
+			"which is what deleted avatars")
 	}
-	before := src[:idx]
-	if !strings.Contains(before, "EXISTS (SELECT 1 FROM messages m") {
-		t.Fatal("the delivered-to-all branch is not guarded by a message reference: " +
-			"deliveries >= 0 is trivially true for non-chat rows, so a viewed avatar is purgeable")
+	// Both chat branches (delivered-to-all, and past-the-window) must carry it.
+	if strings.Count(src, "a.purpose = 'chat'") < 2 {
+		t.Fatalf("every chat branch must be purpose-scoped; found %d, want >= 2",
+			strings.Count(src, "a.purpose = 'chat'"))
+	}
+}
+
+func TestStoryMediaSurvivesUntilItsStoryIsGone(t *testing.T) {
+	src := mediaSweepSource(t)
+	if !strings.Contains(src, "a.purpose = 'story'") {
+		t.Fatal("story media has no branch — it is either unreachable (fine) or swept by a chat rule (not fine)")
+	}
+	// Eligibility must depend on the STORY row disappearing, never on age. The
+	// story's own 24h expiry is authoritative and sweepExpiredStories enforces
+	// it; an age test here could delete the media out from under a live story.
+	i := strings.Index(src, "a.purpose = 'story'")
+	branch := src[i:]
+	if e := strings.Index(branch, "\n\t\t      OR"); e > 0 {
+		branch = branch[:e]
+	}
+	if !strings.Contains(branch, "NOT EXISTS (SELECT 1 FROM stories s") {
+		t.Fatal("story branch is not gated on the story row being gone")
+	}
+	if strings.Contains(branch, "created_at <") {
+		t.Fatal("story media is being aged out directly — the story's own expiry must be the only trigger")
 	}
 }
 

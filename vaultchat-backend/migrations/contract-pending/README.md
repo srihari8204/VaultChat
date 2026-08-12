@@ -23,7 +23,7 @@ makes every message they read come back empty.
 
 ## Order
 
-1. `100_drop_messages_content.sql` — drops the legacy column
+1. `900_drop_messages_content.sql` — drops the legacy column
 2. Remove the `COALESCE(b.content, m.content)` fallback in
    `internal/routes/chats.go` (`chatsMsgSelBody`) and the `bodiesEnabled()`
    branches in `chats_helpers.go`

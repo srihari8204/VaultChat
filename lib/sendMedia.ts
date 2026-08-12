@@ -135,7 +135,7 @@ export async function sendMediaMessage(
   }
 
   // Plaintext path — unchanged from the original send sites.
-  const up = await uploadAttachment(file.uri, file.filename, file.mime, { viewOnce: opts.viewOnce, signal: opts.signal });
+  const up = await uploadAttachment(file.uri, file.filename, file.mime, { viewOnce: opts.viewOnce, signal: opts.signal, purpose: 'chat' });
   const meta: Record<string, any> = {
     attachmentId: up.id,
     mime: up.mime,

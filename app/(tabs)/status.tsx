@@ -218,7 +218,9 @@ export default function StatusScreen() {
           const keys = await wrapStoryKeyForViewers(viewerIds, mediaKey);
           await addEncryptedStory(attachmentId, a.type, keys, cap);
         } else {
-          const up = await uploadAttachment(a.uri, a.filename, a.mime);
+          // 'story' media lives until the STORY expires (24h), not on any
+          // chat clock — see migration 100.
+          const up = await uploadAttachment(a.uri, a.filename, a.mime, { purpose: 'story' });
           await addStory(up.id, a.type, cap);
         }
       }
