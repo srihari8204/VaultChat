@@ -563,11 +563,19 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 			if enforce {
 				floor = coldSyncFloor(ctx, user.ID, capN)
 			}
-			if enforce && floor > 0 {
+			// Three outcomes, logged distinctly. "uncapped" previously covered
+			// both "the cap is switched off" and "the account has fewer messages
+			// than the cap, so there was nothing to bound" — operationally
+			// opposite states that read identically, and it cost real time
+			// diagnosing a fresh install that was in fact behaving correctly.
+			switch {
+			case enforce && floor > 0:
 				since = floor
 				log.Printf("[chats/delta] cold sync capped to %d msg(s) for user=%s device=%s", capN, user.ID, deviceID)
-			} else {
-				log.Printf("[chats/delta] cold sync (uncapped) user=%s device=%q warnOnly=%v", user.ID, deviceID, coldSyncWarnOnly())
+			case enforce:
+				log.Printf("[chats/delta] cold sync under cap (%d) — nothing to bound; user=%s device=%s", capN, user.ID, deviceID)
+			default:
+				log.Printf("[chats/delta] cold sync NOT ENFORCED user=%s device=%q warnOnly=%v capN=%d", user.ID, deviceID, coldSyncWarnOnly(), capN)
 			}
 		}
 	} else if deviceID := strings.TrimSpace(r.Header.Get("X-Device-Id")); deviceID != "" {
