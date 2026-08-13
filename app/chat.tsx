@@ -34,6 +34,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { E2EE_ENABLED } from '../constants/flags';
 import { getCachedMessages, getCachedMessagesBefore, cacheMessages, applyMessage, markCachedDeleted, getCachedMessagesByIds, getCachedChat, clearChatMessages } from '../lib/localDb';
 import { metric } from '../lib/syncMetrics';
+import { groupAlbums } from '../lib/albumGrouping';
 import { saveDraft, getDraft, clearDraft } from '../lib/drafts';
 import { playSent, playReceived } from '../lib/sounds';
 import { NOTIF_CHANNELS } from '../lib/push';
@@ -236,7 +237,11 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       seen.add(k);
       out.push(m);
     }
-    return out;
+    // Collapse an album into ONE row. The rule lives in lib/albumGrouping so it
+    // can be executed by a test rather than only reviewed by eye; the bubble
+    // then lays the members out in a HORIZONTAL scroller, which is the only
+    // nesting direction safe inside this vertical list.
+    return groupAlbums(out);
   }, [messages]);
   const [loading,   setLoading]   = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -1676,6 +1681,12 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     if (result.canceled || !result.assets?.length) return;
     const isVideo = kind === 'videos';
     const stamp = Date.now();
+    // One id shared by everything picked in this single action, so the timeline
+    // can render them as ONE album instead of N stacked bubbles. Purely a
+    // presentation grouping: each pick is still its own message, with its own
+    // id, its own ciphertext and its own delivery state, so nothing about
+    // sending, retrying or receipts changes. Only set for a genuine multi-pick.
+    const albumId = result.assets.length > 1 ? `alb-${stamp}` : null;
     // Stage all picks for the multi-image caption preview.
     const items = result.assets.map((asset, i) => {
       const filename = asset.fileName ||
@@ -1683,6 +1694,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       const mime = asset.mimeType || (isVideo ? 'video/mp4' : 'image/jpeg');
       const metaExtra: any = { width: asset.width, height: asset.height };
       if (isVideo && asset.duration) metaExtra.durationMs = asset.duration;
+      if (albumId) { metaExtra.albumId = albumId; metaExtra.albumIndex = i; }
       return {
         uri: asset.uri, mediaType: (isVideo ? 'video' : 'image') as 'image' | 'video',
         filename, mime, viewOnce: !!opts.viewOnce, metaExtra, caption: '',
@@ -2458,6 +2470,49 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             {showUnread && <UnreadDivider count={unreadInfo!.count} />}
             <SwipeToReply onReply={() => { if (!item.deletedAt && item.type !== 'system') setReplyTo(item); }}>
             <View style={item.id === flashId ? { backgroundColor: brandAlpha(0.18), borderRadius: 12 } : undefined}>
+            {item._album ? (
+              // Album: several media picked in one action, laid out in a
+              // HORIZONTAL scroller inside this vertical list. Horizontal is
+              // the only safe nesting direction — a vertical child would fight
+              // the list for the pan gesture.
+              //
+              // Each tile is a full MemoBubble rather than a bespoke thumbnail:
+              // encrypted media resolution, key handling, view-once, download
+              // progress and retry already live there, and each tile owning its
+              // own hooks is exactly what lets them resolve independently.
+              // Duplicating that pipeline for a grid is how view-once or a
+              // missing key quietly behaves differently in one place.
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                // The parent list keeps the vertical gesture; this keeps the
+                // horizontal one, and taps still reach the tiles.
+                directionalLockEnabled
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={{ gap: 6, paddingRight: 12 }}
+              >
+                {item._album.map((am) => (
+                  <View key={am._tempId ?? String(am.id)} style={{ maxWidth: 260 }}>
+                    <MemoBubble
+                      msg={am}
+                      meId={meId}
+                      member={membersById.get(am.senderId)}
+                      chatId={chatId}
+                      otherMembers={otherMembers}
+                      onLongPress={onLongPressMessage}
+                      onJumpTo={jumpToMessage}
+                      reactionsForMsg={mergedReactions[am.id]}
+                      onToggleReaction={(emoji) => toggleReaction(am, emoji)}
+                      replyTarget={null}
+                      highlight={null}
+                      tiltRevealed={tiltRevealed}
+                      grouped
+                      bubbleColors={bubbleColors}
+                    />
+                  </View>
+                ))}
+              </ScrollView>
+            ) : (
             <MemoBubble
               msg={item}
               meId={meId}
@@ -2480,6 +2535,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
               pollVotesForMsg={pollVotes[item.id]}
               onPollVoteChange={(next) => setPollVotes(prev => ({ ...prev, [item.id]: next }))}
             />
+            )}
             </View>
             </SwipeToReply>
           </View>
