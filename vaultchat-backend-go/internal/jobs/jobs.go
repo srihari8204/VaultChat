@@ -284,7 +284,13 @@ func sweepDeliveredBodies(ctx context.Context) {
 			         AND usd.last_sync_at > NOW() - ($3 || ' days')::interval
 			         AND (cdd.last_delivered_message_id IS NULL OR cdd.last_delivered_message_id < m.id)
 			    )
-			    AND b.ctid IN (SELECT ctid FROM message_bodies LIMIT $2)`,
+			    -- Same partition-safety fix as sweepExpiredBodies below: ctid
+			    -- collides across partitions, so it cannot be used to bound a
+			    -- batch on this table. Here the delivery predicate above still
+			    -- guarded correctness, making this a mis-batching bug rather
+			    -- than a data-loss one — but the same wrong tool either way.
+			    AND (b.message_id, b.created_at) IN (
+			          SELECT message_id, created_at FROM message_bodies LIMIT $2)`,
 			strconv.Itoa(grace), sweepBatch, strconv.Itoa(staleDays))
 		if err != nil {
 			log.Printf("[delete-on-delivery-bodies] failed: %v", err)
@@ -306,14 +312,39 @@ func sweepDeliveredBodies(ctx context.Context) {
 //
 // This is the statement that makes the three-hour promise true. Everything else
 // in this file reclaims EARLIER than it; nothing may reclaim later.
+// expireBodiesSQL is the statement that enforces the three-hour promise.
+//
+// BATCHED BY PRIMARY KEY, NOT BY ctid.
+//
+// ctid is unique within a HEAP, not within a partitioned table, and every
+// partition starts numbering at page 0 — so (0,1) exists in every hour that has
+// ever held a body. `WHERE ctid IN (SELECT ctid …)` therefore matched the
+// expired row's TID in EVERY partition, deleting bodies that had not expired.
+//
+// That is data loss inside the retention window, not a batching inefficiency: a
+// recipient who was offline lost a message the three-hour promise said would
+// still be there. Reproduced with two rows at ctid (0,1) in different
+// partitions, one past due and one due in three hours — the old statement
+// returned DELETE 2. See TestExpireBodiesSparesNonExpiredInOtherPartitions.
+//
+// (message_id, created_at) is the table's PRIMARY KEY and contains the
+// partition key, so it identifies exactly one row across the whole partition
+// set. The other ctid sweeps in this file act on `messages` and `stories`,
+// which are not partitioned, and are unaffected.
+//
+// A const rather than an inline literal so the regression test can assert
+// against the string the server actually executes, instead of scraping this
+// file for it — a source scrape is defeated by any comment that grows.
+const expireBodiesSQL = `DELETE FROM message_bodies
+	  WHERE (message_id, created_at) IN (
+	          SELECT message_id, created_at FROM message_bodies
+	           WHERE body_expires_at <= NOW()
+	           LIMIT $1)`
+
 func sweepExpiredBodies(ctx context.Context) {
 	var purged int64
 	for i := 0; i < sweepMaxIters; i++ {
-		tag, err := db.SysPool.Exec(ctx,
-			`DELETE FROM message_bodies
-			  WHERE ctid IN (SELECT ctid FROM message_bodies
-			                  WHERE body_expires_at <= NOW()
-			                  LIMIT $1)`, sweepBatch)
+		tag, err := db.SysPool.Exec(ctx, expireBodiesSQL, sweepBatch)
 		if err != nil {
 			metrics.Inc("message_expiration_failures_total")
 			log.Printf("[expire-bodies] failed: %v", err)
