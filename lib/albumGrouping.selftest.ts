@@ -4,7 +4,7 @@
 // what it must NEVER do: lose a message, reorder the conversation, or merge
 // two different albums. A grouping bug looks exactly like data loss on screen.
 
-import { groupAlbums, type AlbumRow } from './albumGrouping';
+import { groupAlbums, resetAlbumCache, type AlbumRow } from './albumGrouping';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail?: string) {
@@ -56,6 +56,29 @@ check('an empty list is fine', groupAlbums([]).length === 0);
 check('rows with no meta are fine', groupAlbums([m(1), m(2)]).length === 2);
 check('a null meta does not throw',
   groupAlbums([{ id: 1, meta: null }] as AlbumRow[]).length === 1);
+
+// The chat rebuilds its message array on every incoming message, receipt and
+// optimistic send. If grouping returns a new album object each time, the
+// bubble's memo comparator (a.msg === b.msg) fails and every album re-renders —
+// re-resolving its media — on traffic that has nothing to do with it.
+console.log('album rows must keep their identity');
+resetAlbumCache();
+const members = [m(10, 'g', 0), m(11, 'g', 1), m(12, 'g', 2)];
+// A new array with the SAME element references is exactly what
+// setMessages(prev => prev.map(... : x)) produces when an unrelated message lands.
+const row1 = groupAlbums([m(20), ...members]).find(r => r._album)!;
+const row2 = groupAlbums([m(21), ...members]).find(r => r._album)!;
+check('an unchanged album returns the SAME row object', row1 === row2,
+  'a fresh object per render re-renders every album on unrelated traffic');
+check('and the same members array', row1._album === row2._album);
+
+const changed = [members[0], { ...members[1], id: 111 }, members[2]];
+const row3 = groupAlbums([m(22), ...changed]).find(r => r._album)!;
+check('a genuinely changed album DOES produce a new row', row3 !== row1);
+
+resetAlbumCache();
+const row4 = groupAlbums([m(23), ...members]).find(r => r._album)!;
+check('resetAlbumCache drops identity, so it cannot leak across chats', row4 !== row1);
 
 console.log('purity');
 const input = [m(2, 'f', 1), m(1, 'f', 0)];

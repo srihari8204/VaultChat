@@ -44,9 +44,50 @@ export function groupAlbums<T extends AlbumRow>(rows: T[]): T[] {
 
     const ordered = [...run].sort(
       (a, b) => (a.meta?.albumIndex ?? 0) - (b.meta?.albumIndex ?? 0));
-    out.push({ ...ordered[0], _album: ordered });
+    out.push(stableRow(albumId, ordered));
   }
   return out;
 }
+
+// ─── identity, which is the whole performance story ──────────────────────
+//
+// The standing row is a NEW object (`{...first, _album}`), and this runs inside
+// a useMemo keyed on the message array — which is rebuilt on every incoming
+// message, every receipt, every optimistic send. So a naive implementation
+// hands the list a fresh album object every time anything in the chat changes,
+// and the bubble's memo comparator (which tests `a.msg === b.msg`) fails: every
+// album re-renders, re-resolving its media, on traffic that has nothing to do
+// with it.
+//
+// Everywhere else the chat already preserves identity — its state updates map
+// with `: x` so untouched messages keep their reference. This keeps albums to
+// the same standard: when every member is reference-equal to last time, the
+// previously built row is returned unchanged.
+//
+// Bounded by the number of albums on screen, and each entry holds only
+// references the caller already holds.
+const _rowCache = new Map<string, { members: readonly AlbumRow[]; row: any }>();
+
+function stableRow<T extends AlbumRow>(albumId: string, ordered: T[]): T {
+  const hit = _rowCache.get(albumId);
+  if (hit && hit.members.length === ordered.length &&
+      hit.members.every((m, i) => m === ordered[i])) {
+    return hit.row as T;
+  }
+  const row = { ...ordered[0], _album: ordered } as T;
+  _rowCache.set(albumId, { members: ordered, row });
+  // Keep the cache from growing with a long-lived session. Albums scroll out of
+  // the window and never come back; rebuilding one is a single object literal.
+  if (_rowCache.size > 64) {
+    for (const k of _rowCache.keys()) {
+      if (_rowCache.size <= 64) break;
+      if (k !== albumId) _rowCache.delete(k);
+    }
+  }
+  return row;
+}
+
+/** Drop cached rows — call when switching chats so identity cannot leak across. */
+export function resetAlbumCache(): void { _rowCache.clear(); }
 
 export default groupAlbums;

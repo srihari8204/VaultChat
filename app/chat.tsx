@@ -34,7 +34,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { E2EE_ENABLED } from '../constants/flags';
 import { getCachedMessages, getCachedMessagesBefore, cacheMessages, applyMessage, markCachedDeleted, getCachedMessagesByIds, getCachedChat, clearChatMessages } from '../lib/localDb';
 import { metric } from '../lib/syncMetrics';
-import { groupAlbums } from '../lib/albumGrouping';
+import { groupAlbums, resetAlbumCache } from '../lib/albumGrouping';
 import { saveDraft, getDraft, clearDraft } from '../lib/drafts';
 import { playSent, playReceived } from '../lib/sounds';
 import { NOTIF_CHANNELS } from '../lib/push';
@@ -1978,6 +1978,10 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     } catch {}
     finally { setLoadingOlder(false); }
   }, [chatId, hasMore, loadingOlder, messages]);
+
+  // Album row identity is cached by albumId; drop it when the chat changes so a
+  // row can never be reused across conversations.
+  useEffect(() => { resetAlbumCache(); }, [chatId]);
 
   // Keep a ref to loaded messages for the jump-to-message paging loop.
   useEffect(() => { messagesRef.current = messages; }, [messages]);
