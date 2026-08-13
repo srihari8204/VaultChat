@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
 import { Avatar } from '../../components/ui';
+import { Sheet, type SheetAction } from '../../components/ui/Sheet';
 import { getCallLog, clearCallLog, removeCallLog, callLogKey, getHiddenServerCalls, hideServerCalls, type CallLogEntry } from '../../lib/callLog';
 import { listChats, attachmentUrl } from '../../lib/chatService';
 import { getAccessToken, getCachedUser } from '../../lib/api';
@@ -58,6 +59,9 @@ export default function CallsScreen() {
   const S = useS();
   const router = useRouter();
   const [log, setLog] = useState<CallHistoryEntry[]>([]);
+  // Android's native dialog renders only 3 buttons, so a 5-action Alert menu
+  // silently dropped 'Call info' and 'Remove from log'. Sheet scrolls instead.
+  const [sheet, setSheet] = useState<{ title: string; message?: string; actions: SheetAction[] } | null>(null);
   const [photos, setPhotos] = useState<Map<string, string>>(new Map());
   const [authHeader, setAuthHeader] = useState<string | null>(null);
   const [infoGroup, setInfoGroup] = useState<CallGroup | null>(null);
@@ -140,13 +144,15 @@ export default function CallsScreen() {
 
   const onLongPress = useCallback((g: CallGroup) => {
     const latest = g.entries[0];
-    Alert.alert(g.peerName, undefined, [
-      { text: 'Voice call', onPress: () => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName, group: g.group }, 'audio') },
-      { text: 'Video call', onPress: () => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName, group: g.group }, 'video') },
-      { text: 'Call info', onPress: () => setInfoGroup(g) },
-      { text: 'Remove from log', style: 'destructive', onPress: () => removeGroup(g) },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+    setSheet({
+      title: g.peerName,
+      actions: [
+        { label: 'Voice call', icon: 'call-outline', onPress: () => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName, group: g.group }, 'audio') },
+        { label: 'Video call', icon: 'videocam-outline', onPress: () => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName, group: g.group }, 'video') },
+        { label: 'Call info', icon: 'information-circle-outline', onPress: () => setInfoGroup(g) },
+        { label: 'Remove from log', icon: 'trash-outline', destructive: true, onPress: () => removeGroup(g) },
+      ],
+    });
   }, [call, removeGroup]);
 
   const confirmClear = useCallback(() => {
@@ -274,6 +280,14 @@ export default function CallsScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <Sheet
+        visible={!!sheet}
+        title={sheet?.title}
+        message={sheet?.message}
+        actions={sheet?.actions ?? []}
+        onClose={() => setSheet(null)}
+      />
     </View>
   );
 }

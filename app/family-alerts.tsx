@@ -29,6 +29,9 @@ const FILTERS: { key: AlertFilter; label: string }[] = [
 const ICON_FOR: Record<AlertKind, keyof typeof Ionicons.glyphMap> = {
   enter: 'enter-outline',
   leave: 'exit-outline',
+  // Spaces & Operations (S5.4) — detected on the vehicle, not by the server.
+  overspeed: 'speedometer-outline',
+  longstop: 'pause-circle-outline',
   sos: 'alert-circle',
   checkin: 'checkmark-done-circle',
   battery: 'battery-dead',

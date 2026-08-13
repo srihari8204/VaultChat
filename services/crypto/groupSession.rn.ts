@@ -15,7 +15,7 @@
 import * as SecureStore from 'expo-secure-store';
 import { api, getCachedUser } from '../../lib/api';
 import { chunkedKV } from './e2eeStorage';
-import { e2eeEncrypt, e2eeDecrypt, e2eeCachePlaintext, e2eeGetCached } from './e2eeSession.rn';
+import { e2eeEncrypt, e2eeDecrypt, e2eeCachePlaintext, e2eeGetCached, E2EE_UNDECRYPTABLE } from './e2eeSession.rn';
 import {
   createSenderKey, distributionMessage, processDistribution, groupEncrypt, groupDecrypt,
   type OwnSenderKey, type PeerSenderKey, type SenderKeyDistribution,
@@ -98,7 +98,15 @@ async function ingest(chatId: string): Promise<void> {
       // Don't reset a chain we've already advanced past (same signer, >= iteration).
       if (existing && existing.signPubHex === dist.signPubHex && existing.iteration >= dist.iteration) continue;
       await savePeer(chatId, senderId, processDistribution(dist));
-    } catch { /* can't decrypt this SKDM (no session yet) → skip */ }
+    } catch (err) {
+      // A sender key arrives wrapped in the 1:1 session with its sender, so a
+      // broken/desynced pairwise ratchet silently costs us the GROUP key too —
+      // surfacing as "group: no sender key for <id>" with no clue why. Observed
+      // on device for the same peer whose 1:1 session was mid auto-reset loop.
+      // It heals once that session re-keys and this runs again; logging it makes
+      // the dependency visible instead of guesswork.
+      console.warn('[e2ee] group: could not open sender key from', senderId, '—', (err as any)?.message ?? err);
+    }
   }
 }
 
@@ -132,7 +140,10 @@ export async function groupDecryptMessage(
   chatId: string, senderId: string, messageId: number, wire: string,
 ): Promise<string> {
   const cached = await e2eeGetCached(chatId, messageId);
-  if (cached !== null) return cached;
+  // Same store holds the "permanently undecryptable" tombstone. Returning it as
+  // plaintext printed "__e2ee_undecryptable__" into group bubbles, exactly as it
+  // did for 1:1 (seen on device). Fall through so the real state is reported.
+  if (cached !== null && cached !== E2EE_UNDECRYPTABLE) return cached;
   const cipher = JSON.parse(wire.slice(PREFIX.length));
   let rec = await loadPeer(chatId, senderId);
   if (!rec) { await ingest(chatId); rec = await loadPeer(chatId, senderId); }

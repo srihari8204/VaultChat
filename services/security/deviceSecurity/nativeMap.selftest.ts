@@ -50,7 +50,15 @@ const has = (r: { signals: { type: string }[] }, t: string) => r.signals.some((s
 
   // ── Re-sign gating ───────────────────────────────────────────────
   console.log('Re-sign check:');
-  const noBaseline = mapNativeScan({ signingSha256: 'abc123' }, 'android');
+  // A baseline now SHIPS (EXPECTED_SIGNING_SHA256), so the default path evaluates
+  // the check rather than leaving it pending — this test predated that constant
+  // and was asserting the old behavior. "Not evaluated" is now reachable only by
+  // explicitly configuring no baseline, which is the case worth keeping: the
+  // honesty rule is that an unconfigured check must not report "clean".
+  const shipped = mapNativeScan({ signingSha256: 'abc123' }, 'android');
+  check('shipped baseline → APK_RESIGNED evaluated', shipped.evaluatedTypes.includes('APK_RESIGNED'));
+  check('shipped baseline + foreign cert → signal', has(shipped, 'APK_RESIGNED'));
+  const noBaseline = mapNativeScan({ signingSha256: 'abc123' }, 'android', { expectedSigning: '' });
   check('no baseline → APK_RESIGNED not evaluated', !noBaseline.evaluatedTypes.includes('APK_RESIGNED') && !has(noBaseline, 'APK_RESIGNED'));
   const match = mapNativeScan({ signingSha256: 'ABC123' }, 'android', { expectedSigning: 'abc123' });
   check('matching cert → evaluated, no signal', match.evaluatedTypes.includes('APK_RESIGNED') && !has(match, 'APK_RESIGNED'));

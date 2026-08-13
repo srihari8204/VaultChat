@@ -52,6 +52,27 @@ turn:
 # redis:
 #   address: redis:6379
 
+# Egress lifecycle → the backend, so a broadcast becomes 'live' only when there
+# is genuinely something to play.
+#
+# REQUIRED FOR BROADCASTING TO WORK AT ALL. Without it nothing ever moves a
+# session out of 'starting': the backend has no other way to learn that egress
+# produced its first segment, and every broadcast times out on the viewer side.
+# The receiver is internal/routes/broadcast_webhook.go, which verifies the
+# HS256 signature and the body hash LiveKit sends in the Authorization header.
+#
+# THE URL MUST BE REACHABLE FROM THIS CONTAINER. livekit runs with
+# network_mode: host, so it does NOT share the compose network and cannot use
+# the `go-api` service name. Point this at whatever address go-api is actually
+# published on for this deployment — commented out because guessing it would be
+# worse than leaving it off, and this file is read verbatim (no ${VAR}
+# expansion, see use_external_ip above).
+#
+# webhook:
+#   api_key: <the same key as LIVEKIT_API_KEY — selects the secret to sign with>
+#   urls:
+#     - http://127.0.0.1:14000/internal/livekit/webhook
+
 logging:
   level: info
   # JSON so Loki/Promtail can parse it if log shipping is ever added; harmless

@@ -122,10 +122,15 @@ export default function GroupInvitationsScreen() {
         <Text style={{ color: colors.textDim, fontSize: 13, marginTop: 10, lineHeight: 18 }}>
           {inv.requested
             ? 'You asked to join. An admin will decide.'
-            : waiting
-              ? `You accepted. ${inv.inviterName ?? 'The group'} is waiting on an admin to approve you.`
-              : `${inv.inviterName ?? 'Someone'} invited you.${
-                  inv.joinsOnAccept ? ' Accepting adds you straight away.' : ' An admin approves after you accept.'}`}
+            : waiting && inv.canAccept
+              // Stranded: they already said yes, but the group now joins on
+              // accept. Telling them to wait would be false — the server will
+              // admit them the moment they tap, and nothing else ever will.
+              ? `You accepted this earlier but were never added. Tap Join to finish.`
+              : waiting
+                ? `You accepted. ${inv.inviterName ?? 'The group'} is waiting on an admin to approve you.`
+                : `${inv.inviterName ?? 'Someone'} invited you.${
+                    inv.joinsOnAccept ? ' Accepting adds you straight away.' : ' An admin approves after you accept.'}`}
         </Text>
 
         <Text style={{ color: colors.textFaint, fontSize: 11.5, marginTop: 6 }}>
@@ -143,7 +148,11 @@ export default function GroupInvitationsScreen() {
                   <Text style={st.btnTxt}>{inv.joinsOnAccept ? 'Join' : 'Accept'}</Text>
                 </TouchableOpacity>
               )}
-              {waiting && (
+              {/* Only a genuine wait shows "Waiting". A stranded invitation is
+                  NOT waiting on anyone — it is waiting on this button — and
+                  showing both at once told people to sit still next to the
+                  control that would have finished the job. */}
+              {waiting && !inv.canAccept && (
                 <View style={[st.btn, { backgroundColor: 'transparent', borderWidth: 1, borderColor: accent }]}>
                   <Ionicons name="hourglass-outline" size={16} color={accent} />
                   <Text style={[st.btnTxt, { color: accent }]}>Waiting</Text>

@@ -32,7 +32,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { consumePendingJump } from '../lib/chatJump';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { E2EE_ENABLED } from '../constants/flags';
-import { getCachedMessages, cacheMessages, applyMessage, markCachedDeleted, getCachedMessagesByIds, getCachedChat } from '../lib/localDb';
+import { getCachedMessages, cacheMessages, applyMessage, markCachedDeleted, getCachedMessagesByIds, getCachedChat, clearChatMessages } from '../lib/localDb';
 import { saveDraft, getDraft, clearDraft } from '../lib/drafts';
 import { playSent, playReceived } from '../lib/sounds';
 import { NOTIF_CHANNELS } from '../lib/push';
@@ -72,14 +72,6 @@ import { getLock, verifyBiometric, verifyPin, type LockedChat } from '../lib/cha
 import { preloadViewedOnce, isViewedOnce, isViewedOnceSync, markViewedOnce } from '../lib/viewOnceStore';
 import { preloadRevoked, isRevokedSync, wipeRevokedMedia } from '../lib/protectedMedia';
 
-// Pick black or white text for legibility on an arbitrary bubble color.
-function idealText(hex: string): string {
-  const h = hex.replace('#', '');
-  if (h.length < 6) return '#fff';
-  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
-  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  return lum > 0.6 ? '#0e0e14' : '#ffffff';
-}
 import { useTheme } from '../lib/theme';
 import { type Palette, ELEVATION } from '../constants/theme';
 import { getCurrentUserAsync } from './(constants)/authService';
@@ -167,12 +159,6 @@ import {
   stop as recStop,
 } from '../lib/voiceRecorder';
 
-// Optimistic bubbles carry a few extra fields beyond a server Message.
-type DisplayMessage = Message & {
-  _tempId?: string;
-  _state?: 'pending' | 'failed';
-  _error?: string;
-};
 
 const TYPING_IDLE_MS = 2500;
 // Delete-for-everyone window — keep numerically identical to the server's
@@ -181,26 +167,35 @@ const REVOKE_WINDOW_MS = 60 * 60 * 60 * 1000;
 
 const PAGE_SIZE = 50;
 
-function useS() {
-  const { colors } = useTheme();
-  return useMemo(() => makeStyles(colors), [colors]);
-}
 
-// Fixed accent styles (theme-agnostic) used by the plain renderWithHighlight helper.
-const HL = StyleSheet.create({
-  highlight: { backgroundColor: 'rgba(252, 211, 77, 0.45)', color: '#111' },
-  link:      { color: '#7DD3FC', textDecorationLine: 'underline' },
-  mention:   { color: '#34D399', fontWeight: '700' },
-});
 
-export default function ChatScreen() {
+import { useS, idealText, HL, makeStyles, type DisplayMessage } from '../components/chat/chatStyles';
+import {
+  MemoBubble, DateChip, UnreadDivider, SwipeToReply, EmojiPanel, FileBubble,
+  DISAPPEARING_PRESETS, bumpPollVote, formatDisappearing, formatLastSeen,
+  formatRecDuration, formatScreenshotMode, isSameCalendarDay, renderWithHighlight,
+} from '../components/chat/MessageBubble';
+
+/**
+ * @param chatIdProp  When present, this screen is EMBEDDED (a split-view pane,
+ *   app/split.tsx) rather than routed to, so the chat id comes from the parent
+ *   instead of the URL. Route params still win for everything else — a pane and
+ *   a full screen are otherwise the same component, which is the point: split
+ *   view gets the real chat, not a cut-down copy of it.
+ * @param embedded  Hides the screen-level back button; the pane has its own
+ *   close/swap controls.
+ */
+export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: string; embedded?: boolean } = {}) {
   // `id` is the normal entry param; `chatId` is what the capture screens
   // (/camera, /video-notes, /image-editor) echo back when they router.replace
   // here with a freshly captured/edited file — accept either.
-  const params = useLocalSearchParams<{
+  const routeParams = useLocalSearchParams<{
     id?: string; chatId?: string;
     capturedUri?: string; capturedType?: string; capturedViewOnce?: string;
   }>();
+  // An embedded pane must ignore the route's chat id entirely, or both panes
+  // would render whatever chat the router happens to be on.
+  const params = chatIdProp ? { ...routeParams, id: chatIdProp, chatId: chatIdProp } : routeParams;
   const router = useRouter();
   const { colors } = useTheme();
   const S = useS();
@@ -351,6 +346,14 @@ export default function ChatScreen() {
   const [forwardChats, setForwardChats] = useState<ChatSummary[]>([]);
   const [forwardLoading, setForwardLoading] = useState(false);
 
+  // Composer growth is capped against THIS pane, not the window. The cap was a
+  // flat maxHeight: 120, which is fine full-screen but is a third of a stacked
+  // split pane — a few lines of typing swallowed the conversation above it.
+  // onLayout gives the real pane height whether embedded or full-screen, so one
+  // rule covers both. Floor of 72 keeps ~3 lines usable in the smallest pane.
+  const [paneH, setPaneH] = useState(0);
+  const composerMax = paneH > 0 ? Math.max(72, Math.min(120, Math.round(paneH * 0.28))) : 120;
+
   const listRef = useRef<FlatList>(null);
   const messagesRef = useRef<DisplayMessage[]>([]);
   const [flashId, setFlashId] = useState<number | null>(null);
@@ -358,6 +361,28 @@ export default function ChatScreen() {
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [newSinceUp, setNewSinceUp] = useState(0);
   const atBottomRef = useRef(true);
+
+  /**
+   * Scroll handler — fires state ONLY on a transition.
+   *
+   * This used to call setShowScrollDown on every scroll event. At
+   * scrollEventThrottle={32} that is ~31 setState calls per second while the
+   * user drags, and every one of them re-renders this screen — which is the
+   * largest component in the app. React bails out when the value is unchanged,
+   * but reaching that bail-out still costs a scheduler pass per frame, on the
+   * exact frames that need to be smooth.
+   *
+   * The ref already tracked the position, so the transition test is free.
+   * Stable identity (useCallback) so FlatList is not handed a new prop on
+   * every parent render either.
+   */
+  const onListScroll = useCallback((e: any) => {
+    const up = e.nativeEvent.contentOffset.y > 280;  // inverted: y>0 = scrolled off newest
+    if (atBottomRef.current === !up) return;         // nothing changed → no render
+    atBottomRef.current = !up;
+    setShowScrollDown(up);
+    if (!up) setNewSinceUp(n => (n ? 0 : n));        // functional: no dep on newSinceUp
+  }, []);
   const [infoMsg, setInfoMsg] = useState<DisplayMessage | null>(null); // Message Info sheet
   const [liveLoc, setLiveLoc] = useState<{ userId: string; latitude: number; longitude: number; address?: string } | null>(null);
   const readDebounce = useRef<any>(null);
@@ -427,7 +452,16 @@ export default function ChatScreen() {
   // Stable key over the visible message ids, so the reaction/poll hydration
   // effects only refire when the SET of ids changes — not on every edit,
   // optimistic update, or cache write that re-creates the array.
-  const messageIdKey = useMemo(() => messages.map(m => m.id).join(','), [messages]);
+  // Keyed on POLL ids only, not every message id. Its one consumer is the
+  // poll-vote hydration effect below, so keying on the whole page meant any
+  // incoming text message changed the key and re-fired that network request in
+  // every chat containing a poll — and built a join of the entire page to do it.
+  const pollIdKey = useMemo(
+    () => messages
+      .filter(m => m.type === 'poll' && typeof m.id === 'number' && m.id > 0)
+      .map(m => m.id).join(','),
+    [messages],
+  );
 
   // Members of this chat that aren't me — used to compute outgoing-message
   // tick state (any → delivered / any → read, MVP semantics).
@@ -513,12 +547,27 @@ export default function ChatScreen() {
           .then(c => { setChat(c); setPinnedId(c.pinnedMessageId ?? null); })
           .catch(() => {});
         try {
-          const msgsRaw = await getMessages(chatId, { limit: PAGE_SIZE });
-          const msgs = await hydrateMessages(chatId, msgsRaw, knownPlain);
-          setMessages([...pendingNewestFirst, ...msgs]);
-          setHasMore(msgs.length === PAGE_SIZE);
+          // Already-received messages are NOT re-fetched. The local DB owns
+          // them: they were decrypted and cached when they arrived, and new
+          // ones arrive over the socket + the /chats/delta cursor sync
+          // (lib/syncEngine). Re-pulling a page on every open re-downloaded
+          // history the device already had — pointless work against a server
+          // that purges message bodies after delivery, and slower than the
+          // cache it was overwriting.
+          //
+          // The server is used only when this device holds NOTHING for the chat
+          // (fresh install, or a chat never opened here), which is the one case
+          // the cache genuinely cannot answer.
+          if (!cachedMsgs.length) {
+            const msgsRaw = await getMessages(chatId, { limit: PAGE_SIZE });
+            const msgs = await hydrateMessages(chatId, msgsRaw, knownPlain);
+            setMessages([...pendingNewestFirst, ...msgs]);
+            setHasMore(msgs.length === PAGE_SIZE);
+            cacheMessages(chatId, msgs).catch(() => {});   // persist for next instant open
+          } else {
+            setHasMore(cachedMsgs.length >= PAGE_SIZE);
+          }
           setError(null);
-          cacheMessages(chatId, msgs).catch(() => {});   // persist for next instant open
         } catch {
           // Offline / transient — keep the painted cache silently; the connection
           // banner already tells the user. A failed background refresh is not an error.
@@ -774,9 +823,7 @@ export default function ChatScreen() {
   // page is safe.
   useEffect(() => {
     if (!chatId) return;
-    const pollIds = messages
-      .filter(m => m.type === 'poll' && typeof m.id === 'number' && m.id > 0)
-      .map(m => m.id);
+    const pollIds = pollIdKey ? pollIdKey.split(',').map(Number) : [];
     if (pollIds.length === 0) return;
     let cancel = false;
     getPollVotesBulk(chatId, pollIds).then(map => {
@@ -787,7 +834,7 @@ export default function ChatScreen() {
     }).catch(() => {});
     return () => { cancel = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chatId, messageIdKey]);
+  }, [chatId, pollIdKey]);
 
   // ── Mark-as-read (debounced) ──────────────────────────────
   useEffect(() => {
@@ -1104,6 +1151,27 @@ export default function ChatScreen() {
   //   block / block_silent → preventScreenCaptureAsync (FLAG_SECURE)
   //   *_notify (and block on iOS) → also listen + report
   const [screenshotBanner, setScreenshotBanner] = useState<{ by: string; at: string } | null>(null);
+
+  // ── security-code change ──────────────────────────────────────────────
+  //
+  // A key substitution is invisible in normal use — the padlock still shows and
+  // messages still decrypt — so it has to be surfaced unprompted rather than
+  // waiting for someone to open the verify screen on the one day it matters.
+  //
+  // 1:1 only. A group has many identities and no single "the other person",
+  // so a banner there would be noise rather than a signal.
+  const [keyChange, setKeyChange] = useState<import('../lib/keyChange').KeyChange | null>(null);
+  useEffect(() => {
+    const peers = otherMembers;
+    if (peers.length !== 1) return;
+    let cancelled = false;
+    (async () => {
+      const { checkKeyChange } = await import('../lib/keyChange');
+      const change = await checkKeyChange(peers[0].userId);
+      if (!cancelled) setKeyChange(change);
+    })();
+    return () => { cancelled = true; };
+  }, [otherMembers]);
   useEffect(() => {
     if (Platform.OS === 'web' || !chat) return;
     const mode: ScreenshotMode = (chat.screenshotMode as ScreenshotMode) || 'block';
@@ -1332,6 +1400,31 @@ export default function ChatScreen() {
                   await resetChatSession(chatId);
                   Alert.alert('Session reset', 'Send a message to re-establish encryption.');
                 } catch (e: any) { Alert.alert('Reset failed', e?.message ?? 'Try again'); }
+              } },
+          ],
+        ),
+      });
+      actions.push({
+        label: 'Clear chat',
+        icon: 'trash-bin-outline',
+        destructive: true,
+        onPress: () => Alert.alert(
+          'Clear this chat?',
+          'Removes the chat and all its messages from THIS device. The other person keeps their copy. This cannot be undone.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Clear', style: 'destructive', onPress: async () => {
+                try {
+                  await clearChatMessages(chatId);
+                  // Hide it server-side too. Local deletion alone is not enough:
+                  // listChats() would return the chat on the next refresh and
+                  // sync would pull the whole history back — which is exactly
+                  // what happened when this only deleted local rows. Same call
+                  // the chat list's own Delete uses, so both behave alike.
+                  try { await setHidden(chatId, true); } catch {}
+                  setMessages([]);
+                  router.back();
+                } catch (e: any) { Alert.alert('Could not clear', e?.message ?? 'Try again'); }
               } },
           ],
         ),
@@ -2037,7 +2130,10 @@ export default function ChatScreen() {
   }
 
   return (
-    <View style={[S.screen, { paddingBottom: kbHeight }]}>
+    <View
+      style={[S.screen, { paddingBottom: kbHeight }]}
+      onLayout={e => setPaneH(e.nativeEvent.layout.height)}
+    >
       {/* Per-chat wallpaper — painted behind the (transparent) message list */}
       {wallpaper && (
         <View style={StyleSheet.absoluteFill} pointerEvents="none">
@@ -2174,6 +2270,37 @@ export default function ChatScreen() {
       )}
 
       {/* Inbound screenshot alert — auto-dismisses after 4s */}
+      {/* Deliberately informative, not blocking. A key change is genuinely
+          ambiguous — a reinstall looks identical to an interception — so the
+          honest response is to say what happened and offer the check, rather
+          than throw up a scary modal people learn to tap through. */}
+      {keyChange && (
+        <View style={S.keyChangeBanner}>
+          <Text style={S.keyChangeTxt}>
+            🔑 The security code for this chat changed. This usually means they
+            reinstalled VaultChat or switched device.
+          </Text>
+          <View style={S.keyChangeRow}>
+            <TouchableOpacity
+              onPress={() => router.push({ pathname: '/verify-contact' as any,
+                params: { peerId: keyChange.peerId,
+                  peerName: otherMembers[0]?.name ?? chat?.name ?? '' } })}
+            >
+              <Text style={S.keyChangeVerify}>Verify</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={async () => {
+                const { acknowledgeKeyChange } = await import('../lib/keyChange');
+                await acknowledgeKeyChange(keyChange.peerId, keyChange.currentHex);
+                setKeyChange(null);
+              }}
+            >
+              <Text style={S.keyChangeDismiss}>Dismiss</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
       {screenshotBanner && (
         <View style={S.screenshotBanner}>
           <Text style={S.screenshotBannerTxt}>
@@ -2257,7 +2384,11 @@ export default function ChatScreen() {
         renderItem={({ item, index }) => {
           // Inverted list: the older message is at index+1. Show a date chip
           // above the first (oldest) message of each calendar day.
-          const older = messages[index + 1];
+          // Index into renderMessages, NOT messages — renderMessages drops
+          // reaction rows and duplicates, so the two diverge as soon as anyone
+          // reacts, and `messages[index+1]` then points at an unrelated message
+          // (date chips, sender grouping and the unread divider all land wrong).
+          const older = renderMessages[index + 1];
           const showDate = !older || !isSameCalendarDay(item.createdAt, older.createdAt);
           // Group with the older message when it's the same sender, same day, and
           // within 5 minutes (suppresses the repeated sender tag + tightens spacing).
@@ -2308,18 +2439,18 @@ export default function ChatScreen() {
         }}
         onEndReached={onEndReached}
         onEndReachedThreshold={0.4}
-        onScroll={(e) => {
-          const up = e.nativeEvent.contentOffset.y > 280; // inverted: y>0 = scrolled off newest
-          atBottomRef.current = !up;
-          setShowScrollDown(up);
-          if (!up && newSinceUp) setNewSinceUp(0);
-        }}
+        onScroll={onListScroll}
         scrollEventThrottle={32}
         ListFooterComponent={loadingOlder ? <ActivityIndicator color={colors.primary} style={{ paddingVertical: 12 }} /> : null}
         removeClippedSubviews
-        maxToRenderPerBatch={10}
-        windowSize={11}
-        initialNumToRender={15}
+        // Tuned for heavy bubbles (media, reactions, replies): windowSize 11
+        // keeps ~11 screens of rows MOUNTED, which is a lot of live components
+        // to re-render on any parent state change. 7 still covers a fast fling
+        // without blanking, and cuts mounted rows by roughly a third.
+        maxToRenderPerBatch={8}
+        updateCellsBatchingPeriod={60}
+        windowSize={7}
+        initialNumToRender={12}
       />
 
       {/* Scroll-to-bottom FAB with new-message count (WhatsApp-style) */}
@@ -2474,7 +2605,7 @@ export default function ChatScreen() {
               </TouchableOpacity>
             )}
             <TextInput
-              style={S.input}
+              style={[S.input, { maxHeight: composerMax }]}
               placeholder={editingId != null ? 'Edit message…' : 'Message'}
               placeholderTextColor={colors.textDim}
               value={input}
@@ -2937,1639 +3068,3 @@ const QUICK_REACTS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 // occurrence of `q` and wraps the matches in a styled <Text>. Empty
 // query returns the body unchanged.
 // Color @mention tokens (e.g. "@Alex") in a message body.
-function colorMentions(body: string): any {
-  if (!body || body.indexOf('@') === -1) return body;
-  const parts: any[] = [];
-  const re = /@\w[\w]*/g;
-  let last = 0; let m: RegExpExecArray | null;
-  while ((m = re.exec(body)) !== null) {
-    if (m.index > last) parts.push(body.slice(last, m.index));
-    parts.push(<Text key={`mn${m.index}`} style={HL.mention}>{m[0]}</Text>);
-    last = m.index + m[0].length;
-  }
-  if (last < body.length) parts.push(body.slice(last));
-  return parts.length ? parts : body;
-}
-
-function renderWithHighlight(body: string, q: string | null | undefined): any {
-  if (!body) return body;
-  if (!q) return colorMentions(body); // no active search → color @mentions
-  const needle = q.toLowerCase();
-  const hay    = body.toLowerCase();
-  if (hay.indexOf(needle) === -1) return body;
-  const parts: any[] = [];
-  let i = 0;
-  while (i < body.length) {
-    const idx = hay.indexOf(needle, i);
-    if (idx === -1) { parts.push(body.slice(i)); break; }
-    if (idx > i) parts.push(body.slice(i, idx));
-    parts.push(
-      <Text key={`h${idx}`} style={HL.highlight}>{body.slice(idx, idx + q.length)}</Text>,
-    );
-    i = idx + q.length;
-  }
-  return parts;
-}
-
-// Detect URLs in `body` and tokenise into alternating plain / link chunks.
-// Each link chunk becomes a tappable <Text> that opens the URL via Linking.
-// Trailing punctuation (.,!?;:) is excluded from the link match so a URL
-// at the end of a sentence doesn't include the trailing dot.
-// Privacy: no remote fetch — we render the URL inline, not a rich card.
-// (Server-proxied OG previews are a follow-up; opengraph.io with a sample
-// key would leak every messaged URL to a third party.)
-const URL_RE = /https?:\/\/[^\s]+?(?=[.,!?;:)]*(?:\s|$))/g;
-function renderRichText(body: string, q: string | null | undefined): any {
-  if (!body) return body;
-  // No URLs? Defer to the existing highlight renderer.
-  URL_RE.lastIndex = 0;
-  if (!URL_RE.test(body)) return renderWithHighlight(body, q);
-
-  URL_RE.lastIndex = 0;
-  const parts: any[] = [];
-  let cursor = 0;
-  let m: RegExpExecArray | null;
-  while ((m = URL_RE.exec(body)) !== null) {
-    if (m.index > cursor) {
-      parts.push(renderWithHighlight(body.slice(cursor, m.index), q));
-    }
-    const url = m[0];
-    parts.push(
-      <Text
-        key={`u${m.index}`}
-        style={HL.link}
-        onPress={() => { if (!navigateFromUrl(url)) Linking.openURL(url).catch(() => {}); }}
-      >
-        {renderWithHighlight(url, q)}
-      </Text>,
-    );
-    cursor = m.index + url.length;
-  }
-  if (cursor < body.length) parts.push(renderWithHighlight(body.slice(cursor), q));
-  return parts;
-}
-
-// Invisible Ink: replace each non-whitespace char with a bullet. Keep
-// whitespace as-is so word boundaries are preserved (otherwise the
-// obscured text reads as one long blob).
-function obscureForInk(plain: string): string {
-  return plain.replace(/\S/g, '●');
-}
-
-// Pretty-print the screenshot-mode for header-menu display.
-function formatScreenshotMode(mode: ScreenshotMode): string {
-  switch (mode) {
-    case 'allow':         return 'Allowed';
-    case 'allow_notify':  return 'Allowed + notify';
-    case 'block_silent':  return 'Blocked silently';
-    case 'block':
-    default:              return 'Blocked';
-  }
-}
-
-// Pretty-print a disappearing-messages timer (e.g. "24 h", "7 d", "90 d").
-function formatDisappearing(seconds: number | null | undefined): string {
-  if (!seconds) return 'Off';
-  if (seconds % 86400 === 0) return `${seconds / 86400} d`;
-  if (seconds % 3600  === 0) return `${seconds / 3600} h`;
-  if (seconds % 60    === 0) return `${seconds / 60} m`;
-  return `${seconds} s`;
-}
-
-const DISAPPEARING_PRESETS: { label: string; seconds: number | null }[] = [
-  { label: 'Off',      seconds: null },
-  { label: '24 hours', seconds: 86400 },
-  { label: '7 days',   seconds: 7 * 86400 },
-  { label: '90 days',  seconds: 90 * 86400 },
-];
-
-// Time-to-live remaining on an expiring message ("23h", "5d", "2m").
-// Past-due returns "expiring" so the bubble visibly indicates pending wipe.
-function formatTtlRemaining(iso: string): string {
-  try {
-    const ms = new Date(iso).getTime() - Date.now();
-    if (ms <= 0) return 'expiring';
-    if (ms < 60_000)        return `${Math.max(1, Math.floor(ms / 1000))}s`;
-    if (ms < 3600_000)      return `${Math.floor(ms / 60_000)}m`;
-    if (ms < 86400_000)     return `${Math.floor(ms / 3600_000)}h`;
-    return `${Math.floor(ms / 86400_000)}d`;
-  } catch { return ''; }
-}
-
-// Human-friendly "last seen" — same scale as the chat-list relative time.
-function formatLastSeen(iso: string): string {
-  try {
-    const t = new Date(iso).getTime();
-    const diff = Date.now() - t;
-    if (diff < 60_000)        return 'just now';
-    if (diff < 3600_000)      return `${Math.floor(diff / 60_000)}m ago`;
-    if (diff < 86400_000)     return `${Math.floor(diff / 3600_000)}h ago`;
-    if (diff < 7 * 86400_000) return `${Math.floor(diff / 86400_000)}d ago`;
-    return new Date(iso).toLocaleDateString();
-  } catch { return ''; }
-}
-
-function formatRecDuration(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
-}
-
-// Apply an optimistic ±1 to the reaction-count map. Pure — returns a new
-// Apply a ±1 patch to the per-message poll vote summary, optimistic-style.
-// Used both by the user's own tap (via PollBubble.onChange) and by inbound
-// socket events. Removes the bucket entirely when the count hits zero so
-// the UI doesn't render a "0" pill. `fromMe` updates the caller's `mine`
-// list (which drives the radio/check selected state).
-function bumpPollVote(
-  prev: Record<number, PollVoteSummary>,
-  messageId: number,
-  optionIndex: number,
-  delta: 1 | -1,
-  fromMe: boolean,
-): Record<number, PollVoteSummary> {
-  const cur = prev[messageId] ?? { counts: {}, mine: [], total: 0 };
-  const key = String(optionIndex);
-  const oldCount = cur.counts[key] || 0;
-  const newCount = Math.max(0, oldCount + delta);
-  const counts = { ...cur.counts };
-  if (newCount === 0) delete counts[key]; else counts[key] = newCount;
-  let mine = cur.mine;
-  if (fromMe) {
-    if (delta > 0) {
-      if (!mine.includes(optionIndex)) mine = [...mine, optionIndex];
-    } else {
-      mine = mine.filter(x => x !== optionIndex);
-    }
-  }
-  const total = Math.max(0, cur.total + delta);
-  return { ...prev, [messageId]: { counts, mine, total } };
-}
-
-// ─── Poll bubble (in-chat voting) ────────────────────────────
-// Renders the question + the options as horizontal rows with a fill bar
-// per option (proportional to votes/total). Tapping an option toggles
-// the caller's vote; single-vote polls auto-switch the active option.
-// The PollBubble is "dumb" — it reads `votes` from props and calls
-// `onChange` with the optimistic next state. The chat screen owns the
-// authoritative store + socket reconciliation.
-function PollBubble({
-  chatId, msg, isMine, votes, onChange,
-}: {
-  chatId:   string;
-  msg:      DisplayMessage;
-  isMine:   boolean;
-  votes?:   PollVoteSummary;
-  onChange?: (next: PollVoteSummary) => void;
-}) {
-  const S = useS();
-  const options: string[]    = Array.isArray(msg.meta?.options) ? msg.meta.options : [];
-  const allowMultiple = !!msg.meta?.allowMultiple;
-  const counts = votes?.counts ?? {};
-  const mine   = votes?.mine ?? [];
-  const total  = votes?.total ?? 0;
-
-  const [pending, setPending] = useState<number | null>(null);
-
-  const toggle = useCallback(async (idx: number) => {
-    if (pending != null) return;
-    const wasMine = mine.includes(idx);
-
-    // Optimistic patch — pivots immediately, server reconciles via
-    // 'poll_voted' / 'poll_unvoted' events on the socket.
-    let next: PollVoteSummary = { counts: { ...counts }, mine: [...mine], total };
-    if (wasMine) {
-      next = bumpPollVote({ [msg.id]: next }, msg.id, idx, -1, true)[msg.id];
-    } else {
-      // Single-vote polls: remove existing mine vote(s) first.
-      if (!allowMultiple) {
-        for (const otherIdx of mine) {
-          next = bumpPollVote({ [msg.id]: next }, msg.id, otherIdx, -1, true)[msg.id];
-        }
-      }
-      next = bumpPollVote({ [msg.id]: next }, msg.id, idx, +1, true)[msg.id];
-    }
-    onChange?.(next);
-
-    setPending(idx);
-    try {
-      if (wasMine) {
-        await unvotePoll(chatId, msg.id, idx);
-      } else {
-        await voteOnPoll(chatId, msg.id, idx);
-      }
-    } catch (e: any) {
-      // Rollback — server reject means our optimistic state is wrong.
-      Alert.alert('Vote failed', e?.message ?? 'Try again');
-      onChange?.({ counts, mine, total });
-    } finally {
-      setPending(null);
-    }
-  }, [pending, mine, counts, total, allowMultiple, chatId, msg.id, onChange]);
-
-  return (
-    <View style={S.pollWrap}>
-      <Text style={[S.pollQuestion, isMine && S.pollQuestionMine]} numberOfLines={3}>
-        {msg.content}
-      </Text>
-      {options.map((label, idx) => {
-        const c       = counts[String(idx)] || 0;
-        const pct     = total > 0 ? c / total : 0;
-        const checked = mine.includes(idx);
-        return (
-          <TouchableOpacity
-            key={idx}
-            style={S.pollOptionRow}
-            onPress={() => toggle(idx)}
-            activeOpacity={0.7}
-            disabled={pending != null}
-          >
-            <Text style={[S.pollOptionMark, checked && S.pollOptionMarkOn]}>
-              {checked ? (allowMultiple ? '☑' : '◉') : (allowMultiple ? '☐' : '○')}
-            </Text>
-            <View style={{ flex: 1 }}>
-              <View style={S.pollOptionLine}>
-                <Text style={[S.pollOptionLabel, isMine && S.pollOptionLabelMine]} numberOfLines={2}>
-                  {label}
-                </Text>
-                <Text style={[S.pollOptionCount, isMine && S.pollOptionCountMine]}>
-                  {c}
-                </Text>
-              </View>
-              <View style={S.pollBarTrack}>
-                <View
-                  style={[
-                    S.pollBarFill,
-                    isMine && S.pollBarFillMine,
-                    { width: `${Math.round(pct * 100)}%` },
-                  ]}
-                />
-              </View>
-            </View>
-          </TouchableOpacity>
-        );
-      })}
-      <Text style={[S.pollFooter, isMine && S.pollFooterMine]}>
-        {total} {total === 1 ? 'vote' : 'votes'} · {allowMultiple ? 'multiple answers' : 'single answer'}
-      </Text>
-    </View>
-  );
-}
-
-// ─── File bubble (documents) ─────────────────────────────────
-// Tap to download (FileSystem) and open with the OS share sheet
-// (Sharing.shareAsync). The /uploads route is auth-gated so we pass
-// the Bearer header on the download request.
-function FileBubble({
-  attachmentId, filename, mime, size, authHeader, resolvedUri, isMine, thumb, encrypted,
-}: {
-  attachmentId: string;
-  filename:     string;
-  mime:         string;
-  size:         number;
-  authHeader:   string | null;
-  resolvedUri?: { uri: string; headers?: Record<string, string> } | null;
-  isMine:       boolean;
-  thumb?:       string;   // PDF first-page preview (base64 jpeg)
-  encrypted?:   boolean;  // meta.encrypted — see mediaStore.MediaKeyMissingError
-}) {
-  const S = useS();
-  const [busy, setBusy] = useState(false);
-
-  const onOpen = useCallback(async () => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      // Persistent local copy (downloaded once). Survives "Clear cache" AND the
-      // server's post-delivery purge. Encrypted files arrive decrypted via
-      // resolvedUri; everything else resolves through the persistent media store.
-      const localUri = resolvedUri?.uri ?? await getMedia(attachmentId, { kind: 'file', isMine, mime, filename, encrypted });
-      // Copy into the app cache so the OS FileProvider can hand the file to
-      // another app (the provider is configured over the cache dir).
-      const openUri = await copyToCache(localUri, filename || `file-${attachmentId}`);
-
-      if (Platform.OS === 'android') {
-        // WhatsApp-style: hand the file to the system "Open with" chooser so apps
-        // that can VIEW this type open it (ACTION_VIEW), instead of a share sheet.
-        try {
-          const contentUri = await FileSystem.getContentUriAsync(openUri);
-          await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
-            data: contentUri,
-            flags: 1, // FLAG_GRANT_READ_URI_PERMISSION
-            type: mime || undefined,
-          });
-        } catch {
-          // No app can open this type → offer to share/save instead.
-          try {
-            if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(openUri, { mimeType: mime, dialogTitle: filename });
-            else Alert.alert('Can’t open file', 'No app on this device can open this file type.');
-          } catch { Alert.alert('Can’t open file', 'No app on this device can open this file type.'); }
-        }
-      } else if (await Sharing.isAvailableAsync()) {
-        // iOS has no ACTION_VIEW; its share/open-in sheet is the equivalent.
-        await Sharing.shareAsync(openUri, { mimeType: mime, dialogTitle: filename });
-      }
-    } catch (e: any) {
-      Alert.alert('Could not open file', e?.message ?? 'Try again');
-    } finally {
-      setBusy(false);
-    }
-  }, [attachmentId, filename, mime, resolvedUri, busy]);
-
-  // PDF with a page-1 preview → WhatsApp-style document card (preview on top,
-  // filename row below). Other files → the plain icon + name row.
-  if (thumb) {
-    return (
-      <TouchableOpacity style={S.fileCard} onPress={onOpen} activeOpacity={0.85} disabled={busy}>
-        <Image source={{ uri: thumbDataUri(thumb) }} style={S.filePreview} resizeMode="cover" />
-        <View style={S.fileCardRow}>
-          <View style={[S.fileIcon, isMine ? S.fileIconMine : S.fileIconTheirs]}>
-            {busy ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="document-text" size={20} color="#fff" />}
-          </View>
-          <View style={S.fileMeta}>
-            <Text style={[S.fileName, isMine && S.fileNameMine]} numberOfLines={1}>{filename}</Text>
-            <Text style={[S.fileSize, isMine && S.fileSizeMine]}>{formatBytes(size)}</Text>
-          </View>
-        </View>
-      </TouchableOpacity>
-    );
-  }
-
-  return (
-    <TouchableOpacity style={S.fileRow} onPress={onOpen} activeOpacity={0.7} disabled={busy}>
-      <View style={[S.fileIcon, isMine ? S.fileIconMine : S.fileIconTheirs]}>
-        {busy ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="document-text" size={22} color="#fff" />}
-      </View>
-      <View style={S.fileMeta}>
-        <Text style={[S.fileName, isMine && S.fileNameMine]} numberOfLines={1}>{filename}</Text>
-        <Text style={[S.fileSize, isMine && S.fileSizeMine]}>{formatBytes(size)}</Text>
-      </View>
-    </TouchableOpacity>
-  );
-}
-
-function formatBytes(n: number): string {
-  if (!n || n < 0) return '';
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
-  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
-}
-
-// ─── Audio bubble (voice messages) ───────────────────────────
-// Tap to play / pause. Shows progress + remaining time. Streams the
-// auth-gated /uploads endpoint with a Bearer header. Mono speaker icon
-// stays bold while playing, otherwise dim.
-function AudioBubble({
-  attachmentId, durationMs, waveform, authHeader, resolvedUri, isMine, mime, encrypted,
-}: {
-  attachmentId: string;
-  durationMs:   number;
-  waveform?:    number[];
-  authHeader:   string | null;
-  resolvedUri?: { uri: string; headers?: Record<string, string> } | null;
-  isMine:       boolean;
-  mime?:        string;
-  encrypted?:   boolean;  // meta.encrypted — see mediaStore.MediaKeyMissingError
-}) {
-  const S = useS();
-  const [playing,  setPlaying]  = useState(false);
-  const [position, setPosition] = useState(0);
-  const soundRef = useRef<Audio.Sound | null>(null);
-
-  // Stop+unload when the bubble unmounts
-  useEffect(() => {
-    return () => {
-      const s = soundRef.current;
-      soundRef.current = null;
-      if (s) { s.stopAsync().catch(() => {}); s.unloadAsync().catch(() => {}); }
-    };
-  }, []);
-
-  const togglePlay = useCallback(async () => {
-    try {
-      if (playing) {
-        await soundRef.current?.pauseAsync();
-        setPlaying(false);
-        return;
-      }
-      if (!soundRef.current) {
-        // Play from the PERSISTENT local copy (download once). Survives "Clear
-        // cache" and the server's post-delivery purge. Encrypted notes already
-        // arrive as a local decrypted file via resolvedUri.
-        let src: { uri: string } | null = resolvedUri ? { uri: resolvedUri.uri } : null;
-        if (!src) { try { src = { uri: await getMedia(attachmentId, { kind: 'voice', isMine, mime, encrypted }) }; } catch { return; } }
-        const { sound } = await Audio.Sound.createAsync(
-          src,
-          { shouldPlay: true, progressUpdateIntervalMillis: 150 },
-          (status: any) => {
-            if (!status?.isLoaded) return;
-            setPosition(status.positionMillis || 0);
-            if (status.didJustFinish) {
-              setPlaying(false);
-              setPosition(0);
-              soundRef.current?.setPositionAsync(0).catch(() => {});
-            }
-          },
-        );
-        soundRef.current = sound;
-        setPlaying(true);
-      } else {
-        await soundRef.current.playAsync();
-        setPlaying(true);
-      }
-    } catch (e: any) {
-      Alert.alert('Playback failed', e?.message ?? 'Try again');
-    }
-  }, [attachmentId, authHeader, resolvedUri, playing, isMine, mime, encrypted]);
-
-  const totalSec = Math.max(1, Math.round(durationMs / 1000));
-  const playedSec = Math.min(totalSec, Math.round(position / 1000));
-  const remaining = totalSec - playedSec;
-  const pct = totalSec ? Math.min(1, position / Math.max(1, durationMs)) : 0;
-
-  return (
-    <View style={S.audioRow}>
-      <TouchableOpacity
-        style={[S.audioPlayBtn, isMine ? S.audioPlayBtnMine : S.audioPlayBtnTheirs]}
-        onPress={togglePlay}
-        activeOpacity={0.7}
-      >
-        <Ionicons name={playing ? 'pause' : 'play'} size={19} color="#fff" style={playing ? undefined : { marginLeft: 2 }} />
-      </TouchableOpacity>
-      <View style={S.audioMeter}>
-        {waveform && waveform.length > 0 ? (
-          // Telegram-style bars. Each bar height is amplitude*MAX. Bars
-          // up to playback position are filled; the rest are dimmed.
-          <View style={S.waveBars}>
-            {waveform.map((amp, i) => {
-              const barPct = (i + 0.5) / waveform.length;
-              const played = barPct <= pct;
-              return (
-                <View
-                  key={i}
-                  style={[
-                    S.waveBar,
-                    { height: Math.max(3, Math.min(1, amp) * 24) },
-                    isMine
-                      ? (played ? S.waveBarPlayedMine : S.waveBarUnplayedMine)
-                      : (played ? S.waveBarPlayedTheirs : S.waveBarUnplayedTheirs),
-                  ]}
-                />
-              );
-            })}
-          </View>
-        ) : (
-          <View style={S.audioTrack}>
-            <View style={[S.audioFill, { width: `${pct * 100}%` }, isMine && S.audioFillMine]} />
-          </View>
-        )}
-        <Text style={[S.audioTime, isMine && S.audioTimeMine]}>
-          {playing
-            ? `${formatRecDuration(position)} / ${formatRecDuration(durationMs)}`
-            : `🎙️ ${formatRecDuration(durationMs)}${remaining > 0 ? '' : ''}`}
-        </Text>
-      </View>
-    </View>
-  );
-}
-
-// ─── Image bubble ────────────────────────────────────────────
-// Renders an image from the PERSISTENT on-device media folder (downloaded once
-// via getAttachmentLocalUri). Survives "Clear cache" AND the server's
-// post-delivery purge — only an uninstall removes it, like WhatsApp's media
-// folder. Encrypted media arrives as an already-decrypted local file.
-// Retry a failed media download the moment the network comes back (WhatsApp
-// auto-download-on-reconnect). Fires only on an OFFLINE/CONNECTING → ONLINE edge.
-function useRetryOnReconnect(eligible: boolean, retry: () => void) {
-  const conn = useConnectionState();
-  const prev = useRef(conn);
-  useEffect(() => {
-    if (prev.current !== 'ONLINE' && conn === 'ONLINE' && eligible) retry();
-    prev.current = conn;
-  }, [conn, eligible, retry]);
-}
-
-function ImageAttachment({ attachmentId, resolvedUri, isMine, mime, thumb, encrypted, onError }: {
-  attachmentId: string;
-  resolvedUri?: { uri: string; headers?: Record<string, string> } | null;
-  isMine?: boolean;
-  mime?: string;
-  thumb?: string;   // base64 JPEG shown instantly while the full image loads
-  encrypted?: boolean;  // meta.encrypted — lets a missing key be reported as such
-  onError?: () => void;
-}) {
-  const { colors } = useTheme();
-  const S = useS();
-  const [uri, setUri] = useState<string | null>(resolvedUri?.uri ?? null);
-  const [needTap, setNeedTap] = useState(false);    // gated by auto-download policy
-  const [progress, setProgress] = useState<number | null>(null); // null=idle, 0-1=downloading
-  // The bytes exist but this install has no key for them (typically: the media
-  // predates a reinstall, which destroys both the per-file keys and the E2EE
-  // identity). Distinct from a failed download — retrying can never fix it.
-  const [keyMissing, setKeyMissing] = useState(false);
-  const download = useCallback(() => {
-    setNeedTap(false);
-    setProgress(0);
-    getMedia(attachmentId, { kind: 'image', isMine, mime, encrypted, onProgress: setProgress })
-      .then(u => { setUri(u || null); setProgress(null); })
-      .catch((e: any) => {
-        setProgress(null);
-        if (e?.code === 'MEDIA_KEY_MISSING') { setKeyMissing(true); return; }
-        onError?.();
-      });
-  }, [attachmentId, isMine, mime, encrypted, onError]);
-  useEffect(() => {
-    if (resolvedUri?.uri) { setUri(resolvedUri.uri); return; }
-    let cancel = false;
-    (async () => {
-      // Already cached? render instantly (no gating). Own media is always local.
-      const local = await getMedia(attachmentId, { kind: 'image', isMine, mime, encrypted, cacheOnly: true }).catch(() => '');
-      if (cancel) return;
-      if (local) { setUri(local); return; }
-      // Not cached → honor the media auto-download policy.
-      const ok = !!isMine || await shouldAutoDownloadNow();
-      if (cancel) return;
-      if (ok) download();
-      else setNeedTap(true);
-    })();
-    return () => { cancel = true; };
-  }, [attachmentId, resolvedUri?.uri, isMine, mime, encrypted]);
-  // Auto-download failed offline → retry as soon as we're back online. Never for
-  // a missing key: the network was never the problem.
-  useRetryOnReconnect(!uri && !keyMissing && progress == null && !needTap && !resolvedUri?.uri, download);
-  if (!uri) {
-    // No key on this device → say so, instead of showing a broken image (and
-    // instead of writing ciphertext into the media folder under a .jpg name).
-    if (keyMissing) {
-      return (
-        <View style={[S.attachedImage, S.imageError]}>
-          <Ionicons name="lock-closed-outline" size={26} color={colors.textDim} />
-          <Text style={S.mediaUnavailableTxt}>Not available on this device</Text>
-        </View>
-      );
-    }
-    // Downloading → blurred thumb + determinate progress ring.
-    if (progress != null) {
-      return (
-        <View style={S.attachedImage}>
-          {thumb ? <Image source={{ uri: thumbDataUri(thumb) }} style={S.attachedImage} resizeMode="cover" blurRadius={2} /> : <View style={[S.attachedImage, S.imageError]} />}
-          <View style={S.dlOverlay}><ProgressRing progress={progress} /></View>
-        </View>
-      );
-    }
-    // Auto-download skipped by policy → tap-to-download over the blurred thumb.
-    if (needTap) {
-      return (
-        <TouchableOpacity activeOpacity={0.85} onPress={download} style={S.attachedImage}>
-          {thumb ? <Image source={{ uri: thumbDataUri(thumb) }} style={S.attachedImage} resizeMode="cover" blurRadius={3} /> : <View style={[S.attachedImage, S.imageError]} />}
-          <View style={S.dlOverlay}>
-            <Ionicons name="arrow-down-circle" size={40} color="#fff" />
-            <Text style={S.dlOverlayTxt}>Download</Text>
-          </View>
-        </TouchableOpacity>
-      );
-    }
-    // Instant low-res preview from the embedded thumbnail while the full image
-    // downloads (WhatsApp-style progressive load).
-    if (thumb) return <Image source={{ uri: thumbDataUri(thumb) }} style={S.attachedImage} resizeMode="cover" />;
-    return <View style={[S.attachedImage, S.imageError]}><ActivityIndicator color={colors.primary} /></View>;
-  }
-  return <Image source={{ uri }} style={S.attachedImage} resizeMode="cover" onError={onError} />;
-}
-
-// ─── Video bubble ────────────────────────────────────────────
-// Inline player using expo-av's <Video>. Tap = native controls, no
-// autoplay. Streams the auth-gated /uploads endpoint via the Bearer
-// header. onLoadError surfaces 410-Gone (view-once consumed) so the
-// MessageBubble can flip to a "Viewed" tombstone without an extra
-// HEAD round-trip.
-function VideoBubble({
-  attachmentId, durationMs, authHeader, resolvedUri, onErrorOnce, isNote, onOpen, isMine, mime, thumb, encrypted,
-}: {
-  attachmentId:  string;
-  durationMs:    number;
-  authHeader:    string | null;
-  resolvedUri?:  { uri: string; headers?: Record<string, string> } | null;
-  onErrorOnce?:  () => void;
-  isNote?:       boolean;   // round "video note" vs rectangular video
-  onOpen?:       () => void; // open full-screen player
-  isMine?:       boolean;
-  mime?:         string;
-  thumb?:        string;    // base64 JPEG poster (instant, no download)
-  encrypted?:    boolean;   // meta.encrypted — see mediaStore.MediaKeyMissingError
-}) {
-  const S = useS();
-  // WhatsApp-style: do NOT mount a <Video> (ExoPlayer) at rest — each instance
-  // buffers the file in memory, and many bubbles at once OOM'd the app. We show
-  // a lightweight placeholder + play button. Regular videos open the full-screen
-  // player on tap (one player at a time). Video notes lazily download then play
-  // inline in the round bubble — so at most ONE <Video> is ever alive.
-  const [playing, setPlaying] = useState(false);
-  const [noteUri, setNoteUri] = useState<string | null>(resolvedUri?.uri ?? null);
-  const [busy, setBusy] = useState(false);
-
-  const onTap = useCallback(async () => {
-    if (!isNote) { onOpen?.(); return; }
-    if (playing) { setPlaying(false); return; }
-    let uri = noteUri;
-    if (!uri) {
-      setBusy(true);
-      try { uri = resolvedUri?.uri ?? await getMedia(attachmentId, { kind: 'video', isMine, mime, encrypted }); setNoteUri(uri); }
-      catch { onErrorOnce?.(); setBusy(false); return; }
-      setBusy(false);
-    }
-    setPlaying(true);
-  }, [isNote, playing, noteUri, resolvedUri?.uri, attachmentId, onOpen, onErrorOnce, isMine, mime, encrypted]);
-
-  const showingVideo = isNote && playing && !!noteUri;
-  return (
-    <TouchableOpacity
-      style={isNote ? S.videoNoteWrap : S.videoWrap}
-      activeOpacity={0.9}
-      onPress={onTap}
-    >
-      {showingVideo ? (
-        <Video
-          source={{ uri: noteUri! }}
-          style={S.videoNoteView}
-          useNativeControls={false}
-          resizeMode={ResizeMode.COVER}
-          isLooping={false}
-          shouldPlay
-          onPlaybackStatusUpdate={(st: any) => { if (st?.didJustFinish) setPlaying(false); }}
-          onError={() => { setPlaying(false); onErrorOnce?.(); }}
-        />
-      ) : thumb ? (
-        <Image source={{ uri: thumbDataUri(thumb) }} style={isNote ? S.videoNoteView : S.videoView} resizeMode="cover" />
-      ) : (
-        <View style={[isNote ? S.videoNoteView : S.videoView, S.videoPlaceholder]}>
-          <Ionicons name="videocam" size={34} color="#5B6470" />
-        </View>
-      )}
-      {!showingVideo && (
-        <View style={S.videoPlayOverlay} pointerEvents="none">
-          <View style={S.videoPlayBtn}>
-            {busy ? <ActivityIndicator color="#fff" /> : <Ionicons name="play" size={26} color="#fff" style={{ marginLeft: 3 }} />}
-          </View>
-        </View>
-      )}
-      {durationMs > 0 && !showingVideo && (
-        <Text style={[S.videoDuration, isNote && S.videoNoteDuration]}>{formatRecDuration(durationMs)}</Text>
-      )}
-    </TouchableOpacity>
-  );
-}
-
-// ── Date separators (U6) ─────────────────────────────────────────────
-function isSameCalendarDay(a: string, b: string): boolean {
-  const x = new Date(a), y = new Date(b);
-  return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate();
-}
-function dayLabel(iso: string): string {
-  const d = new Date(iso);
-  const now = new Date();
-  const yest = new Date(now); yest.setDate(now.getDate() - 1);
-  if (isSameCalendarDay(iso, now.toISOString())) return 'Today';
-  if (isSameCalendarDay(iso, yest.toISOString())) return 'Yesterday';
-  return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
-}
-function DateChip({ iso }: { iso: string }) {
-  const S = useS();
-  return (
-    <View style={S.dateChipRow}>
-      <View style={S.dateChip}><Text style={S.dateChipTxt}>{dayLabel(iso)}</Text></View>
-    </View>
-  );
-}
-
-// WhatsApp-style "N unread messages" separator, shown above the first message
-// the user hasn't read yet.
-function UnreadDivider({ count }: { count: number }) {
-  const S = useS();
-  return (
-    <View style={S.unreadDivRow}>
-      <Text style={S.unreadDivTxt}>{count} unread message{count === 1 ? '' : 's'}</Text>
-    </View>
-  );
-}
-
-// Compact emoji picker for inserting into the composer (no native dep).
-const EMOJIS = (
-  '😀 😃 😄 😁 😆 😅 😂 🤣 🙂 😊 😇 🙃 😉 😌 😍 🥰 😘 😗 😙 😚 😋 😛 😝 😜 🤪 🤨 🧐 🤓 😎 🥳 🤩 ' +
-  '😏 😒 😞 😔 😟 😕 🙁 ☹️ 😣 😖 😫 😩 🥺 😢 😭 😤 😠 😡 🤬 🤯 😳 🥵 🥶 😱 😨 😰 😥 😓 🫠 🥲 ' +
-  '😶 😐 😑 😬 🙄 😯 😦 😧 😮 😲 🥱 😴 🤤 😪 😵 🤐 🥴 🤢 🤮 🤧 😷 🤒 🤕 🤑 🤠 😈 👿 👻 💀 👀 ' +
-  '👍 👎 👊 ✊ 🤛 🤜 👏 🙌 👐 🤝 🙏 ✌️ 🤞 🫶 🤟 🤘 👌 🤌 🤏 👈 👉 👆 👇 ☝️ 🖐️ ✋ 🖖 👋 🤙 💪 ' +
-  '❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎 💔 ❣️ 💕 💞 💓 💗 💖 💘 💝 💯 🔥 ✨ ⭐ 🌟 💫 ⚡ 💥 🎉 🎊 🎈 🎁'
-).split(' ').filter(Boolean);
-
-function EmojiPanel({ onPick }: { onPick: (e: string) => void }) {
-  const S = useS();
-  return (
-    <View style={S.emojiPanel}>
-      <ScrollView contentContainerStyle={S.emojiWrap} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-        {EMOJIS.map((e, i) => (
-          <TouchableOpacity key={`${e}-${i}`} style={S.emojiCell} onPress={() => onPick(e)} activeOpacity={0.6}>
-            <Text style={S.emojiGlyph}>{e}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-    </View>
-  );
-}
-
-// Swipe-right on a message to reply (WhatsApp/Signal gesture). Reveals a reply
-// arrow; crossing the threshold fires onReply once and snaps back.
-function SwipeToReply({ onReply, children }: { onReply: () => void; children: React.ReactNode }) {
-  const ref = useRef<Swipeable>(null);
-  return (
-    <Swipeable
-      ref={ref}
-      friction={2}
-      leftThreshold={44}
-      overshootLeft={false}
-      renderLeftActions={() => (
-        <View style={{ justifyContent: 'center', paddingLeft: 18 }}>
-          <Ionicons name="arrow-undo" size={22} color="#9CA3AF" />
-        </View>
-      )}
-      onSwipeableWillOpen={() => {
-        if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-        onReply();
-        requestAnimationFrame(() => ref.current?.close());
-      }}
-    >
-      {children}
-    </Swipeable>
-  );
-}
-
-function MessageBubble({
-  msg, meId, member, chatId, otherMembers, onLongPress, onJumpTo,
-  reactionsForMsg, onToggleReaction,
-  replyTarget, replyTargetMember,
-  highlight, tiltRevealed, grouped, bubbleColors,
-  pollVotesForMsg, onPollVoteChange,
-}: {
-  msg: DisplayMessage;
-  meId: string | null;
-  member?: ChatMember;
-  chatId: string;
-  otherMembers: ChatMember[];
-  onLongPress: (msg: DisplayMessage, plain: string) => void;
-  onJumpTo?: (targetId: number) => void;
-  grouped?: boolean; // true when grouped with the previous (older) same-sender msg
-  bubbleColors?: { mine: string; peer: string } | null;
-  reactionsForMsg?: ReactionSummary[];
-  onToggleReaction?: (emoji: string) => void;
-  replyTarget?: DisplayMessage | null;
-  replyTargetMember?: ChatMember;
-  highlight?: string | null;
-  // Recipient-only Invisible Ink reveal — flipped true by the chat-screen
-  // DeviceMotion subscription when phone is tilted past ~45°.
-  tiltRevealed?: boolean;
-  // Poll-bubble plumbing: vote summary for this message + a callback the
-  // bubble can call after a successful vote/unvote to patch screen state.
-  pollVotesForMsg?: PollVoteSummary;
-  onPollVoteChange?: (next: PollVoteSummary) => void;
-}) {
-  const { colors } = useTheme();
-  const S = useS();
-  const isMine = msg.senderId === meId;
-  // Per-chat bubble theme: recolors only YOUR (outgoing) bubble — received
-  // bubbles always follow the theme (WhatsApp-style). Text color auto-picked
-  // for legibility on the chosen background.
-  const bubbleBg = bubbleColors && isMine ? bubbleColors.mine : null;
-  const bubbleTxtColor = bubbleBg ? idealText(bubbleBg) : null;
-  // Init from content directly when it's already plaintext (the common case
-  // after decrypt-at-ingest) → no decryption flash on first render.
-  const [plain, setPlain] = useState<string>(() => looksEncrypted(msg.content) ? '' : (msg.content ?? ''));
-  const [replyPlain, setReplyPlain] = useState<string>('');
-  const [authHeader, setAuthHeader] = useState<string | null>(null);
-
-  // Tick state — only meaningful for own server-confirmed messages.
-  // WhatsApp group semantics: blue (read) only when EVERY current recipient has
-  // read; double-grey (delivered) only when every current recipient received.
-  // Exclude members who LEFT (leftAt) so a departed member never blocks a tick,
-  // and members who JOINED AFTER this message (they were never a recipient of it).
-  // Guard the empty set because [].every() is vacuously true (would false-blue).
-  // read implies delivered, so fold read into the delivered test — a dropped
-  // `message_delivered` event must not strand a since-read message at 'sent'.
-  let tickState: 'pending' | 'sent' | 'delivered' | 'read' | null = null;
-  if (isMine && msg.id > 0 && !msg.deletedAt) {
-    const recipients = otherMembers.filter(
-      m => !m.leftAt && (!m.joinedAt || m.joinedAt <= msg.createdAt),
-    );
-    if (msg._state === 'pending' || msg._state === 'failed') {
-      tickState = msg._state === 'pending' ? 'pending' : null;
-    } else if (recipients.length === 0) {
-      tickState = 'sent';
-    } else if (recipients.every(m => (m.lastReadMessageId ?? 0) >= msg.id)) {
-      tickState = 'read';
-    } else if (recipients.every(m => Math.max(m.lastDeliveredMessageId ?? 0, m.lastReadMessageId ?? 0) >= msg.id)) {
-      tickState = 'delivered';
-    } else {
-      tickState = 'sent';
-    }
-  }
-
-  useEffect(() => {
-    // Messages are decrypted once at ingest, so content is usually already
-    // plaintext → render directly, no async work. Only a still-encrypted
-    // envelope (rare: failed/out-of-order ingest) decrypts here as a fallback.
-    if (!looksEncrypted(msg.content)) { setPlain(msg.content ?? ''); return; }
-    let cancel = false;
-    (async () => {
-      const text = await decryptFromChat(chatId, msg.senderId, msg.content, msg.id);
-      if (!cancel) setPlain(text);
-    })();
-    return () => { cancel = true; };
-  }, [msg.content, msg.senderId, chatId]);
-
-  // A live-location message carries the per-session key (content.lk) E2E. Stash
-  // it so the socket relay's opaque blobs from this sender can be decrypted.
-  useEffect(() => {
-    if (msg.type !== 'location' || !plain) return;
-    try {
-      const L = JSON.parse(plain);
-      if (L?.live && typeof L.lk === 'string') putLiveKey(chatId, msg.senderId, L.lk);
-    } catch { /* not a JSON location payload */ }
-  }, [plain, msg.type, msg.senderId, chatId]);
-
-  useEffect(() => {
-    if (!replyTarget) { setReplyPlain(''); return; }
-    let cancel = false;
-    (async () => {
-      const t = await decryptFromChat(chatId, replyTarget.senderId, replyTarget.content, replyTarget.id);
-      if (!cancel) setReplyPlain(t);
-    })();
-    return () => { cancel = true; };
-  }, [replyTarget?.id, replyTarget?.content, chatId]);
-
-  // For image / audio / file bubbles, prepare the Authorization header so
-  // RN can fetch the auth-gated /uploads endpoint.
-  useEffect(() => {
-    if (msg.type !== 'image' && msg.type !== 'audio' && msg.type !== 'file') return;
-    let cancel = false;
-    (async () => {
-      const tok = await getAccessToken();
-      if (!cancel) setAuthHeader(tok ? `Bearer ${tok}` : null);
-    })();
-    return () => { cancel = true; };
-  }, [msg.type]);
-
-  // W6 media-at-rest: for ENCRYPTED attachments (meta.encrypted), stash the
-  // per-file key from the decrypted content, then resolve a decrypted local
-  // file:// URI to render. Plaintext media is untouched — the bubbles render the
-  // auth-gated /uploads URL directly, exactly as before.
-  const [mediaSrc, setMediaSrc] = useState<{ uri: string; headers?: Record<string, string> } | null>(null);
-  const isEncMedia = !!msg.meta?.encrypted && !!msg.meta?.attachmentId &&
-    (msg.type === 'image' || msg.type === 'video' || msg.type === 'audio' || msg.type === 'file');
-  useEffect(() => {
-    if (!isEncMedia) { setMediaSrc(null); return; }
-    let cancel = false;
-    (async () => {
-      try {
-        if (plain) await parseMediaContent(msg.meta.attachmentId, plain); // stash key
-        const r = await getDecryptedAttachmentUri(msg.meta.attachmentId);  // download + decrypt
-        if (!cancel) setMediaSrc(r);
-      } catch { if (!cancel) setMediaSrc(null); }
-    })();
-    return () => { cancel = true; };
-  }, [isEncMedia, plain, msg.meta?.attachmentId]);
-
-  // NOTE: the deleted-message early return lives BELOW all hooks (after
-  // handleRevealViewOnce) — an early return up here renders fewer hooks when a
-  // visible message transitions to deleted (delete-for-everyone / vanish /
-  // disappearing) and crashes the list with "Rendered fewer hooks than expected".
-
-  const isGif   = msg.type === 'image' && !!msg.meta?.gifUrl;
-  // `localUri` = an optimistic (still-uploading) bubble rendering the sender's
-  // own local file; treat it as image/video so it paints before it has an id.
-  const isImage = msg.type === 'image' && (msg.meta?.attachmentId || msg.meta?.localUri) && !isGif;
-  const isVideo = msg.type === 'video' && (msg.meta?.attachmentId || msg.meta?.localUri);
-  const isAudio = msg.type === 'audio' && msg.meta?.attachmentId;
-  const isFile  = msg.type === 'file'  && msg.meta?.attachmentId;
-  const isVaultbeam = msg.type === 'vaultbeam';
-  // A shared group card. Everything it shows was written by the SERVER, which
-  // overwrites the name and presentation from the database — the sender only
-  // ever supplies a group id, so a card cannot be made to say something the
-  // group does not.
-  const groupRef = msg.type === 'group_ref' ? groupRefOf(msg.meta) : null;
-
-  // Open image/video full-screen (WhatsApp-style). Navigate INSTANTLY and let
-  // the viewer resolve a local file — so taps are reliable and never stack.
-  const bubbleRouter = useRouter();
-  const openingRef = useRef(false);
-  const openFullScreen = useCallback((kind: 'image' | 'video', viewOnce = false) => {
-    if (openingRef.current) return;                      // guard against rapid double-taps
-    openingRef.current = true;
-    setTimeout(() => { openingRef.current = false; }, 700);
-    const params: any = { filename: String(msg.meta?.filename || ''), msgType: kind };
-    if (viewOnce) {
-      params.viewOnce = '1';        // viewer loads to cache + marks viewed after load
-      params.chatId = chatId;       // so the protected viewer can alert the sender on capture
-    }
-    if (msg.meta?.gifUrl) {
-      params.mediaUrl = String(msg.meta.gifUrl);                 // external GIF — no auth
-    } else if (isEncMedia && mediaSrc?.uri) {
-      params.mediaUrl = mediaSrc.uri;                            // encrypted → already-decrypted local file
-    } else if (msg.meta?.attachmentId) {
-      // The bubble already saved this to the PERSISTENT media folder, so the
-      // viewer resolves it instantly (no re-download) and it works even after
-      // the server purges its copy.
-      params.attachmentId = String(msg.meta.attachmentId);
-      params.isMine = isMine ? '1' : '';
-      params.mime = String(msg.meta?.mime || '');
-    } else { openingRef.current = false; return; }
-    bubbleRouter.push({ pathname: '/media-viewer' as any, params });
-  }, [msg.meta?.attachmentId, msg.meta?.gifUrl, msg.meta?.filename, isEncMedia, mediaSrc?.uri, isMine, bubbleRouter, chatId]);
-  const isSticker = msg.type === 'sticker' && !!msg.content;
-  const isPoll  = msg.type === 'poll' && Array.isArray(msg.meta?.options);
-  const isLocation = msg.type === 'location';
-
-  // ── View-once gate (WhatsApp-style) ──────────────────────
-  // Photo/video only. The OWNER sees their own media inline. A recipient gets a
-  // tap-to-view shield; tapping opens it full-screen ONCE, then it's permanently
-  // a "viewed" tombstone — persisted locally (lib/viewOnceStore) so it survives
-  // re-renders, scrolls, and restarts. The server also 410s after the first GET.
-  const isViewOnceMedia = !!msg.meta?.viewOnce && (isImage || isVideo);
-  const revealed = !isViewOnceMedia || isMine;   // owner sees inline; recipients use the shield
-  const [tombstoned, setTombstoned] = useState<boolean>(
-    isViewOnceMedia && !isMine && isViewedOnceSync(String(msg.id)),
-  );
-  useEffect(() => {
-    if (isViewOnceMedia && !isMine) {
-      isViewedOnce(String(msg.id)).then(v => { if (v) setTombstoned(true); });
-    }
-  }, [isViewOnceMedia, isMine, msg.id]);
-  // ── Revoked gate (VaultView) ─────────────────────────────
-  // Independent of view-once and of who sent it: once the sender revokes, the
-  // media is gone for BOTH sides. meta.revoked is set by the socket handler
-  // (recipient) or optimistically by the Revoke action (sender); the local
-  // store is the durable record so it survives a restart with no round-trip.
-  const attId = msg.meta?.attachmentId ? String(msg.meta.attachmentId) : '';
-  const isRevokedMedia = !!msg.meta?.revoked || (!!attId && isRevokedSync(attId));
-
-  const handleRevealViewOnce = useCallback(() => {
-    if (tombstoned || isRevokedMedia) return;
-    markViewedOnce(String(msg.id));   // persist locally so it never re-appears
-    setTombstoned(true);              // bubble becomes "viewed" immediately
-    // Open full-screen as view-once: the viewer downloads to CACHE (never the
-    // browsable folder) and marks the server "viewed" only AFTER the media has
-    // loaded — otherwise the POST /viewed races the GET and the GET 410s
-    // ("Failed to load media").
-    openFullScreen(isVideo ? 'video' : 'image', true);
-  }, [tombstoned, isRevokedMedia, msg.id, isVideo, openFullScreen]);
-
-  // Deleted tombstone — safe here: every hook above has already run this render.
-  if (msg.deletedAt) {
-    return (
-      <View style={[S.bubble, S.bubbleSystem]}>
-        <Text style={S.bubbleSystemTxt}>Message deleted</Text>
-      </View>
-    );
-  }
-
-  return (
-    <View style={[S.bubbleRow, isMine ? S.bubbleRowMine : S.bubbleRowTheirs, grouped && S.bubbleRowGrouped]}>
-      <TouchableOpacity
-        style={[
-          S.bubble,
-          isMine ? S.bubbleMine : S.bubbleTheirs,
-          bubbleBg ? { backgroundColor: bubbleBg } : null,
-          // Soften the tail corner on grouped (consecutive) messages.
-          grouped && (isMine ? { borderTopRightRadius: 16 } : { borderTopLeftRadius: 16 }),
-          (isImage || isVideo || isGif) && S.mediaBubble,
-          isSticker && S.stickerBubble,
-          msg._state === 'pending' && S.bubblePending,
-          msg._state === 'failed'  && S.bubbleFailed,
-        ]}
-        onPress={() => {
-          if (msg._state === 'failed') { onLongPress(msg, plain); return; }
-          // Tap an image bubble → open full screen (WhatsApp-style). Video bubbles
-          // have their own play/tap handling inside VideoBubble.
-          if (isImage && !isViewOnceMedia) openFullScreen('image');
-          else if (isGif) openFullScreen('image');
-        }}
-        onLongPress={() => onLongPress(msg, plain)}
-        delayLongPress={250}
-        activeOpacity={0.85}
-      >
-        {!isMine && member && !isSticker && !grouped && (
-          <Text style={S.senderTag}>{member.name || member.email || msg.senderId.slice(0, 8)}</Text>
-        )}
-
-        {/* Forwarded label */}
-        {msg.meta?.forwardedFrom && (
-          <Text style={S.forwardedTag}>↪ Forwarded</Text>
-        )}
-
-        {/* Inline reply preview (above the body) — tap to jump to the original.
-            Suppressed on forwarded messages: a forward carries no reply context
-            (it shows "↪ Forwarded"), so we must never render a reply quote. */}
-        {(msg.replyToId ?? 0) > 0 && !msg.meta?.forwardedFrom && (
-          <TouchableOpacity
-            style={S.replyPreview}
-            activeOpacity={0.6}
-            onPress={() => { const t = replyTarget?.id ?? msg.replyToId; if (t && t > 0) onJumpTo?.(t); }}
-          >
-            <View style={S.replyPreviewLine} />
-            <View style={{ flex: 1 }}>
-              <Text style={S.replyPreviewWho} numberOfLines={1}>
-                {replyTarget
-                  ? (replyTarget.senderId === meId ? 'You' : (replyTargetMember?.name || replyTargetMember?.email || 'Unknown'))
-                  : 'Replied message'}
-              </Text>
-              <Text style={S.replyPreviewBody} numberOfLines={1}>
-                {!replyTarget ? 'Tap to view'
-                  : replyTarget.type === 'image' ? '📷 Photo'
-                  : replyTarget.type === 'audio' ? '🎙️ Voice message'
-                  : replyTarget.type === 'video' ? '🎥 Video'
-                  : replyTarget.type === 'file'  ? '📎 File'
-                  : replyTarget.type === 'vaultbeam' ? '📦 File'
-                  : (replyPlain || '…')}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        )}
-
-        {/* Revoked tombstone — outranks every other media state, both sides */}
-        {isRevokedMedia ? (
-          <View style={S.viewOnceTombstone}>
-            <Text style={S.viewOnceTombstoneTxt}>
-              🚫 {isMine ? 'You revoked this media' : 'Media revoked by sender'}
-            </Text>
-          </View>
-        ) : /* View-once tombstone — replaces media after it's been viewed */
-        (isImage || isVideo) && tombstoned ? (
-          <View style={S.viewOnceTombstone}>
-            <Text style={S.viewOnceTombstoneTxt}>👁️ {isImage ? 'Photo' : 'Video'} viewed</Text>
-          </View>
-        ) : isViewOnceMedia && !revealed ? (
-          <TouchableOpacity
-            style={S.viewOnceShield}
-            onPress={handleRevealViewOnce}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="eye-outline" size={26} color={colors.textDim} style={{ marginBottom: 4 }} />
-            <Text style={S.viewOnceShieldTxt}>Tap to view {isImage ? 'photo' : 'video'} once</Text>
-            <Text style={S.viewOnceShieldHint}>
-              From {member?.name || member?.email || 'sender'} · disappears after one view
-            </Text>
-          </TouchableOpacity>
-        ) : isGif ? (
-          <Image
-            source={{ uri: msg.meta.gifUrl }}
-            style={S.attachedImage}
-            resizeMode="cover"
-          />
-        ) : isImage ? (
-          <ImageAttachment
-            attachmentId={msg.meta.attachmentId || ''}
-            resolvedUri={msg.meta?.localUri ? { uri: String(msg.meta.localUri) } : (isEncMedia ? mediaSrc : undefined)}
-            isMine={isMine}
-            mime={String(msg.meta?.mime || '')}
-            thumb={typeof msg.meta?.thumb === 'string' ? msg.meta.thumb : undefined}
-            encrypted={isEncMedia}
-            onError={() => { if (isViewOnceMedia && !isMine) setTombstoned(true); }}
-          />
-        ) : isVideo ? (
-          <VideoBubble
-            attachmentId={msg.meta.attachmentId || ''}
-            durationMs={Number(msg.meta?.durationMs) || 0}
-            authHeader={authHeader}
-            resolvedUri={msg.meta?.localUri ? { uri: String(msg.meta.localUri) } : (isEncMedia ? mediaSrc : undefined)}
-            isNote={!!msg.meta?.videoNote}
-            onOpen={() => openFullScreen('video')}
-            onErrorOnce={() => { if (isViewOnceMedia && !isMine) setTombstoned(true); }}
-            isMine={isMine}
-            mime={String(msg.meta?.mime || '')}
-            thumb={typeof msg.meta?.thumb === 'string' ? msg.meta.thumb : undefined}
-            encrypted={isEncMedia}
-          />
-        ) : isAudio ? (
-          <AudioBubble
-            attachmentId={msg.meta.attachmentId}
-            durationMs={Number(msg.meta?.durationMs) || 0}
-            waveform={Array.isArray(msg.meta?.waveform) ? msg.meta.waveform : undefined}
-            authHeader={authHeader}
-            resolvedUri={isEncMedia ? mediaSrc : undefined}
-            isMine={isMine}
-            mime={String(msg.meta?.mime || '')}
-            encrypted={isEncMedia}
-          />
-        ) : isFile ? (
-          <FileBubble
-            attachmentId={msg.meta.attachmentId}
-            filename={String(msg.meta?.filename || 'file')}
-            mime={String(msg.meta?.mime || 'application/octet-stream')}
-            size={Number(msg.meta?.size) || 0}
-            authHeader={authHeader}
-            resolvedUri={isEncMedia ? mediaSrc : undefined}
-            isMine={isMine}
-            thumb={typeof msg.meta?.thumb === 'string' ? msg.meta.thumb : undefined}
-            encrypted={isEncMedia}
-          />
-        ) : groupRef ? (() => {
-          const gt = groupTypeInfo(groupRef.groupType);
-          const accent = groupRef.color || gt.color;
-          return (
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={() => bubbleRouter.push({
-                pathname: '/group-join' as any,
-                params: {
-                  groupId: groupRef.groupId,
-                  name: groupRef.name ?? '',
-                  groupType: groupRef.groupType ?? '',
-                  icon: groupRef.icon ?? '',
-                  color: groupRef.color ?? '',
-                },
-              })}
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 200 }}>
-                <View style={{
-                  width: 40, height: 40, borderRadius: 20, backgroundColor: accent + '2E',
-                  alignItems: 'center', justifyContent: 'center',
-                }}>
-                  <Ionicons name={(groupRef.icon || gt.icon) as any} size={21} color={accent} />
-                </View>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, { fontWeight: '700' }]} numberOfLines={1}>
-                    {groupRef.name || 'A group'}
-                  </Text>
-                  <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, { fontSize: 12, opacity: 0.85 }]}>
-                    {gt.label}
-                  </Text>
-                  {/* "Ask", not "Join" — tapping this admits nobody. */}
-                  <Text style={{ color: accent, fontSize: 12, fontWeight: '700', marginTop: 2 }}>
-                    Ask to join ›
-                  </Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-          );
-        })() : isVaultbeam ? (
-          <VaultBeamBubble msg={msg} isMine={isMine} plain={plain} />
-        ) : isSticker ? (
-          <Text style={S.stickerEmoji}>{msg.content}</Text>
-        ) : isPoll ? (
-          <PollBubble
-            chatId={chatId}
-            msg={msg}
-            isMine={isMine}
-            votes={pollVotesForMsg}
-            onChange={onPollVoteChange}
-          />
-        ) : isLocation ? (() => {
-          // A 'location' message's (decrypted) content is JSON {lat,lng,address}.
-          let L: any = null; try { L = JSON.parse(plain || '{}'); } catch {}
-          const ok = L && typeof L.lat === 'number' && typeof L.lng === 'number';
-          return (
-            <TouchableOpacity
-              disabled={!ok}
-              activeOpacity={0.85}
-              onPress={() => { if (ok) navigateTo(L.lat, L.lng, L.address || 'Shared location'); }}
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 190 }}>
-                <View style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: 'rgba(157,111,208,0.18)', alignItems: 'center', justifyContent: 'center' }}>
-                  <Ionicons name={L?.live ? 'navigate' : 'location'} size={22} color="#9D6FD0" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, { fontWeight: '700' }]}>
-                    {L?.live ? 'Live location' : 'Location'}
-                  </Text>
-                  {ok && !!L.address && (
-                    <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, { fontSize: 12, opacity: 0.85 }]} numberOfLines={2}>
-                      {L.address}
-                    </Text>
-                  )}
-                  {ok && <Text style={{ color: '#9D6FD0', fontSize: 12, fontWeight: '700', marginTop: 2 }}>Open in Maps ›</Text>}
-                </View>
-              </View>
-            </TouchableOpacity>
-          );
-        })() : (
-          plain ? (
-            // Invisible Ink: recipient sees ●●●● until they tilt the
-            // phone past 45°. Sender (isMine) always sees plaintext —
-            // they obviously know what they sent.
-            msg.meta?.invisibleInk && !isMine && !tiltRevealed ? (
-              <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, S.invisibleInk]}>
-                {obscureForInk(plain)}
-              </Text>
-            ) : (
-              <>
-                <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, bubbleTxtColor ? { color: bubbleTxtColor } : null]}>
-                  {renderRichText(plain, highlight)}
-                </Text>
-                {(() => {
-                  // F5: prefer the sender-embedded E2EE preview (no fetch at
-                  // all); legacy messages without one fall back to the old
-                  // server-proxied lookup so old chats keep their cards.
-                  const lp = msg.meta?.linkPreview;
-                  if (lp?.t) return <LinkPreview url={lp.u} data={lp} />;
-                  const u = extractUrl(plain);
-                  return u ? <LinkPreview url={u} /> : null;
-                })()}
-              </>
-            )
-          ) : looksEncrypted(msg.content) ? (
-            // Envelope that never decrypted (desynced ratchet / E2EE off): show the
-            // standard lock indicator instead of a blank bubble or raw ciphertext.
-            <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, { fontStyle: 'italic', opacity: 0.7 }]}>
-              🔒 unable to decrypt
-            </Text>
-          ) : null
-        )}
-
-        {/* Caption under a photo/video. For plaintext media the decrypted
-            content IS the caption; for encrypted media it's {t,mk} JSON. */}
-        {(isImage || isVideo) && (() => {
-          let cap = '';
-          if (plain) {
-            if (msg.meta?.encrypted) { try { cap = JSON.parse(plain)?.t || ''; } catch { cap = ''; } }
-            else cap = plain;
-          }
-          // Media bubble is transparent (no fill) — caption sits over the chat
-          // background, so use the normal readable text color, not the on-orange white.
-          return cap ? (
-            <Text style={[S.bubbleTxt, { marginTop: 6, color: colors.text, paddingHorizontal: 4 }]}>
-              {renderRichText(cap, highlight)}
-            </Text>
-          ) : null;
-        })()}
-
-        <Text style={[S.bubbleMeta, (!isMine || isImage || isVideo || isGif) && { color: colors.bubbleMetaIn }, (isImage || isVideo || isGif) && { paddingHorizontal: 4 }]}>
-          {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          {msg.editedAt ? ' · edited' : ''}
-          {msg._state === 'pending' ? ' · sending…' : ''}
-          {msg._state === 'failed'  ? ' · failed (tap to retry)' : ''}
-          {msg.expiresAt && (
-            <Text style={S.ttlBadge}> · ⏱️ {formatTtlRemaining(msg.expiresAt)}</Text>
-          )}
-          {msg.vanishAfterRead && (
-            <Text style={S.vanishBadge}> · 💨 vanish</Text>
-          )}
-          {tickState && (
-            <Ionicons
-              name={tickState === 'pending' ? 'time-outline' : tickState === 'sent' ? 'checkmark' : 'checkmark-done'}
-              size={14}
-              color={tickState === 'read' ? '#4A9FFF' : colors.textDim}
-              style={{ marginLeft: 3 }}
-            />
-          )}
-        </Text>
-      </TouchableOpacity>
-
-      {/* Reaction chips — tap to toggle */}
-      {reactionsForMsg && reactionsForMsg.length > 0 && (
-        <View style={[S.reactionRow, isMine ? S.reactionRowMine : S.reactionRowTheirs]}>
-          {reactionsForMsg.map(r => (
-            <TouchableOpacity
-              key={r.emoji}
-              style={[S.reactionChip, r.mine && S.reactionChipMine]}
-              onPress={() => onToggleReaction?.(r.emoji)}
-              activeOpacity={0.7}
-            >
-              <Text style={S.reactionChipEmoji}>{r.emoji}</Text>
-              <Text style={[S.reactionChipCount, r.mine && S.reactionChipCountMine]}>{r.count}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
-    </View>
-  );
-}
-
-const makeStyles = (c: Palette) => StyleSheet.create({
-  screen:        { flex: 1, backgroundColor: c.chatBg },
-  lockGate:      { ...StyleSheet.absoluteFillObject, backgroundColor: c.bg, alignItems: 'center', justifyContent: 'center', padding: 32, zIndex: 50 },
-  lockGateTitle: { color: c.text, fontSize: 20, fontWeight: '800', marginTop: 16 },
-  lockGateSub:   { color: c.textDim, fontSize: 14, marginTop: 6, textAlign: 'center' },
-  lockGateBtn:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: c.primary, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 24, marginTop: 20, minWidth: 200 },
-  lockGateBtnTxt:{ color: '#fff', fontSize: 15, fontWeight: '800' },
-  lockGateInput: { backgroundColor: c.card, borderRadius: 12, borderWidth: 1, borderColor: c.border, color: c.text, fontSize: 18, textAlign: 'center', letterSpacing: 6, paddingVertical: 12 },
-  lockGateErr:   { color: c.danger, fontSize: 13, textAlign: 'center', marginTop: 8 },
-  lockGateBack:  { color: c.textDim, fontSize: 14, fontWeight: '600' },
-  center:        { justifyContent: 'center', alignItems: 'center' },
-
-  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border, gap: 8, backgroundColor: c.bg },
-  headerIconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  headerIcon:    { fontSize: 20 },
-  headerAvatarWrap:  { width: 36, height: 36 },
-  // Scroll-to-bottom FAB
-  scrollDownBtn:     { position: 'absolute', right: 14, bottom: 92, width: 44, height: 44, borderRadius: 22, backgroundColor: c.surfaceSolid, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, alignItems: 'center', justifyContent: 'center', ...ELEVATION.md, shadowColor: '#000' },
-  scrollDownBadge:   { position: 'absolute', top: -5, right: -5, minWidth: 20, height: 20, borderRadius: 10, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5, borderWidth: 2, borderColor: c.bg },
-  scrollDownBadgeTxt:{ color: '#fff', fontSize: 11, fontWeight: '800' },
-  // Message Info sheet
-  infoBackdrop:      { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  infoSheet:         { backgroundColor: c.surfaceSolid, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 18, paddingTop: 8, paddingBottom: 28 },
-  sheetGrip:         { alignSelf: 'center', width: 38, height: 4, borderRadius: 2, backgroundColor: c.border, marginBottom: 10 },
-  infoTitle:         { color: c.text, fontSize: 17, fontWeight: '800', marginBottom: 4 },
-  infoSecHdr:        { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
-  infoSecTitle:      { color: c.textDim, fontSize: 12, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase' },
-  infoRow:           { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 7 },
-  infoName:          { color: c.text, fontSize: 15, fontWeight: '600', flex: 1 },
-  infoEmpty:         { color: c.textDim, fontSize: 13, paddingVertical: 16, textAlign: 'center' },
-  // Profile-photo popup (avatar tap)
-  photoBackdrop:     { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', alignItems: 'center', justifyContent: 'center', padding: 28 },
-  photoCard:         { width: '100%', maxWidth: 360, borderRadius: 16, overflow: 'hidden', backgroundColor: c.surfaceSolid },
-  photoImgWrap:      { width: '100%', aspectRatio: 1, backgroundColor: c.primary },
-  photoImg:          { width: '100%', height: '100%' },
-  photoInitialsWrap: { alignItems: 'center', justifyContent: 'center', backgroundColor: c.primary },
-  photoInitials:     { color: '#fff', fontSize: 84, fontWeight: '800' },
-  photoNameBar:      { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: 'rgba(0,0,0,0.45)' },
-  photoNameTxt:      { color: '#fff', fontSize: 19, fontWeight: '700' },
-  photoActions:      { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 12, backgroundColor: c.surfaceSolid },
-  photoActionBtn:    { alignItems: 'center', gap: 4, paddingHorizontal: 6 },
-  photoActionTxt:    { color: c.primary, fontSize: 12, fontWeight: '600' },
-  headerAvatar:      { width: 36, height: 36, borderRadius: 18, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  headerAvatarImg:   { width: '100%', height: '100%' },
-  headerAvatarTxt:   { color: '#fff', fontWeight: '700', fontSize: 15 },
-  headerPresenceDot: { position: 'absolute', right: -1, bottom: -1, width: 10, height: 10, borderRadius: 5, backgroundColor: '#22C55E', borderWidth: 2, borderColor: c.bg },
-
-  // Day 13 — in-chat search
-  inChatSearchBar:    { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: c.surfaceSolid, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
-  inChatSearchInput:  { flex: 1, color: c.text, backgroundColor: c.surface, borderRadius: 18, paddingHorizontal: 14, paddingVertical: 8, fontSize: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
-  inChatSearchCount:  { color: c.textDim, fontSize: 11, fontWeight: '600' },
-  backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backTxt:       { color: c.text, fontSize: 24 },
-  title:         { color: c.text, fontSize: 18, fontWeight: '700' },
-  sub:           { color: c.textDim, fontSize: 12 },
-  e2eBadge:      { color: '#22C55E', fontSize: 11, fontWeight: '600' },
-
-  errorBar:      { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.4)', borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 10 },
-  errorTxt:      { color: c.danger, fontSize: 12 },
-  screenshotBanner:    { backgroundColor: 'rgba(252,211,77,0.14)', borderColor: 'rgba(252,211,77,0.5)', borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 10 },
-  // Memory Bubble — anniversary banner under the chat header. Distinct
-  // from screenshot/error banners (purple) so the user reads it as a
-  // "nostalgia" moment rather than an alert.
-  memoryBubble:        { backgroundColor: 'rgba(180,160,255,0.10)', borderColor: 'rgba(180,160,255,0.35)', borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 12, borderRadius: 10 },
-  memoryBubbleTitle:   { color: '#C4B5FD', fontSize: 12, fontWeight: '700' },
-  memoryBubbleBody:    { color: c.text, fontSize: 13, marginTop: 4, fontStyle: 'italic' },
-  memoryBubbleDismiss: { color: c.textDim, fontSize: 10, marginTop: 6 },
-  screenshotBannerTxt: { color: '#FCD34D', fontSize: 12, fontWeight: '600' },
-
-  mentionBar:    { backgroundColor: c.surfaceSolid, borderTopWidth: 1, borderTopColor: c.border, maxHeight: 220 },
-  mentionRow:    { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 8 },
-  mentionName:   { color: c.text, fontSize: 14, fontWeight: '600', flex: 1 },
-
-  pinnedBar:     { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: c.surfaceSolid, borderBottomWidth: 1, borderBottomColor: c.border },
-  pinnedBarTitle:{ color: c.primary, fontSize: 11, fontWeight: '700' },
-  pinnedBarSub:  { color: c.textDim, fontSize: 12.5, marginTop: 1 },
-
-  dateChipRow:   { alignItems: 'center', marginVertical: 10 },
-  dateChip:      { backgroundColor: c.surface, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 4 },
-  dateChipTxt:   { color: c.textDim, fontSize: 11.5, fontWeight: '700' },
-  unreadDivRow:  { alignItems: 'center', marginVertical: 8 },
-  unreadDivTxt:  { color: c.primary, fontSize: 11.5, fontWeight: '800', letterSpacing: 0.3, backgroundColor: brandAlpha(0.14), borderRadius: 999, paddingHorizontal: 14, paddingVertical: 4, overflow: 'hidden' },
-
-  // Emoji insertion panel above the composer
-  emojiPanel:    { height: 240, backgroundColor: c.surfaceSolid, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border },
-  emojiWrap:     { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 6, paddingVertical: 8 },
-  emojiCell:     { width: `${100 / 8}%`, aspectRatio: 1, alignItems: 'center', justifyContent: 'center' },
-  emojiGlyph:    { fontSize: 26 },
-
-  bubbleRow:     { marginVertical: 4, flexDirection: 'row' },
-  bubbleRowGrouped: { marginTop: 1 }, // tighter spacing for consecutive same-sender msgs
-  bubbleRowMine: { justifyContent: 'flex-end' },
-  bubbleRowTheirs:{ justifyContent: 'flex-start' },
-  bubble:        { maxWidth: '78%', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 16, gap: 2 },
-  bubbleMine:    { backgroundColor: c.bubbleOut, borderTopRightRadius: 4 },   // WhatsApp "sent"
-  bubbleTheirs:  { backgroundColor: c.bubbleIn, borderTopLeftRadius: 4 },     // WhatsApp "received"
-  bubblePending: { opacity: 0.6 },
-  bubbleFailed:  { borderWidth: 1, borderColor: c.danger, opacity: 0.85 },
-  bubbleSystem:  { alignSelf: 'center', backgroundColor: 'transparent', paddingVertical: 4 },
-  bubbleSystemTxt:{ color: c.textDim, fontSize: 11, fontStyle: 'italic' },
-  senderTag:     { color: c.textDim, fontSize: 11, fontWeight: '600', marginBottom: 2 },
-  bubbleTxt:     { color: c.bubbleInText, fontSize: 15, lineHeight: 20 },
-  bubbleTxtMine: { color: c.bubbleOutText },
-  bubbleMeta:    { color: c.bubbleMetaOut, fontSize: 10, alignSelf: 'flex-end', marginTop: 2 },
-  ttlBadge:      { color: '#FCD34D', fontSize: 10, fontWeight: '700' },
-  tick:          { color: c.bubbleMetaOut, fontSize: 11, fontWeight: '700' },
-  tickRead:      { color: c.tickRead,      fontSize: 11, fontWeight: '700' },
-
-  typingBar:     { paddingHorizontal: 16, paddingBottom: 4 },
-  typingTxt:     { color: c.textDim, fontSize: 12, fontStyle: 'italic' },
-
-  editBar:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8, backgroundColor: 'rgba(108,99,255,0.12)', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border },
-  // Vanish-Mode banner above the composer when chat.vanishMode is ON.
-  vanishBar:     { paddingHorizontal: 16, paddingVertical: 8, backgroundColor: 'rgba(252,211,77,0.10)', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(252,211,77,0.40)' },
-  vanishBarTxt:  { color: '#FCD34D', fontSize: 12, fontWeight: '600' },
-  // 💨 badge inside the bubble meta line for messages stamped vanish_after_read.
-  vanishBadge:   { color: '#FCD34D', fontSize: 10, fontWeight: '700' },
-  // Invisible Ink obscured text: bullets render slightly tighter and a
-  // touch dimmer than normal text so the bubble visibly reads as "covered".
-  invisibleInk:  { letterSpacing: 1, opacity: 0.75 },
-  // Composer banner when Invisible Ink is armed (matches vanishBar shape).
-  inkBar:        { paddingHorizontal: 16, paddingVertical: 8, backgroundColor: 'rgba(180,160,255,0.12)', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(180,160,255,0.45)' },
-  inkBarTxt:     { color: '#C4B5FD', fontSize: 12, fontWeight: '600' },
-  editTxt:       { color: c.primary, fontSize: 12, fontWeight: '600' },
-  editCancelTxt: { color: c.textDim, fontSize: 12 },
-
-  composer:      { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 8, paddingVertical: 7, gap: 7, backgroundColor: c.bg },
-  inputPill:     { flex: 1, flexDirection: 'row', alignItems: 'flex-end', backgroundColor: c.surface, borderRadius: 24, minHeight: 48, paddingLeft: 16, paddingRight: 6, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
-  pillIconBtn:   { width: 38, height: 46, alignItems: 'center', justifyContent: 'center' },
-  camWrap:       { width: 38, height: 46, alignItems: 'center', justifyContent: 'center', position: 'relative' },
-  camRing:       { position: 'absolute', width: 40, height: 40, borderRadius: 20, borderWidth: 2, borderColor: c.primary, backgroundColor: 'rgba(0,0,0,0)' },
-  camDragHint:   { position: 'absolute', bottom: 50, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: c.primary, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14, ...ELEVATION.sm, shadowColor: c.primary },
-  camDragHintTxt:{ color: '#fff', fontSize: 12, fontWeight: '800' },
-  camHintChevron:{ position: 'absolute', bottom: 42, alignSelf: 'center' },
-  sendFab:       { width: 48, height: 48, borderRadius: 24, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', elevation: 3, shadowColor: '#000', shadowOpacity: 0.25, shadowOffset: { width: 0, height: 2 }, shadowRadius: 4 },
-  attachBtn:     { width: 40, height: 40, borderRadius: 20, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' },
-  attachTxt:     { fontSize: 18 },
-
-  // Attach menu — WhatsApp-style grid
-  attachBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  attachSheet:    { backgroundColor: c.surfaceSolid, borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingTop: 10, paddingBottom: 32, paddingHorizontal: 8 },
-  attachHandle:   { width: 40, height: 4, borderRadius: 2, backgroundColor: c.border, alignSelf: 'center', marginBottom: 14 },
-  attachGrid:     { flexDirection: 'row', flexWrap: 'wrap' },
-  attachCell:     { width: '25%', alignItems: 'center', paddingVertical: 12, gap: 8 },
-  attachIcon:     { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
-  attachLabel:    { color: c.text, fontSize: 12, textAlign: 'center' },
-
-  // Recording-mode composer: pulse dot + timer + hint + cancel/send buttons
-  recordingComposer: { alignItems: 'center', gap: 8 },
-  recordingDot:    { width: 10, height: 10, borderRadius: 5, backgroundColor: c.danger },
-  recordingTimer:  { color: c.text, fontSize: 16, fontWeight: '700', minWidth: 52, textAlign: 'center' },
-  recordingHint:   { flex: 1, color: c.textDim, fontSize: 12 },
-  recCancelBtn:    { width: 40, height: 40, borderRadius: 20, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' },
-  recCancelTxt:    { color: c.danger, fontSize: 18, fontWeight: '700' },
-  recSendBtn:      { width: 40, height: 40, borderRadius: 20, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
-  recSendTxt:      { color: '#fff', fontSize: 18, fontWeight: '700' },
-
-  // Voice-message bubble (playback): play/pause button + track + duration
-  audioRow:           { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 200, maxWidth: 260 },
-  audioPlayBtn:       { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  audioPlayBtnMine:   { backgroundColor: c.primary },
-  audioPlayBtnTheirs: { backgroundColor: c.primary },
-  audioPlayIcon:      { color: '#fff', fontSize: 14, fontWeight: '700' },
-  audioMeter:         { flex: 1, gap: 4 },
-  audioTrack:         { height: 4, borderRadius: 2, backgroundColor: 'rgba(128,128,128,0.30)', overflow: 'hidden' },
-  audioFill:          { height: 4, backgroundColor: c.primary, borderRadius: 2 },
-
-  // Waveform bars (Day 7 polish): 32 vertical bars sized by amplitude.
-  // Played bars use the accent color; unplayed are dim so the playhead
-  // is implicit. flex-end alignItems so all bars sit on the baseline.
-  waveBars:               { flexDirection: 'row', alignItems: 'flex-end', height: 24, gap: 2 },
-  waveBar:                { width: 3, borderRadius: 1.5 },
-  waveBarPlayedMine:      { backgroundColor: c.bubbleOutText },
-  waveBarUnplayedMine:    { backgroundColor: c.bubbleMetaOut },
-  waveBarPlayedTheirs:    { backgroundColor: c.primary },
-  waveBarUnplayedTheirs:  { backgroundColor: 'rgba(128,128,128,0.35)' },
-  audioFillMine:      { backgroundColor: c.bubbleOutText },
-  audioTime:          { color: c.bubbleMetaIn, fontSize: 11 },
-  audioTimeMine:      { color: c.bubbleMetaOut },
-
-  input:         { flex: 1, color: c.text, paddingVertical: 11, paddingRight: 4, maxHeight: 120, fontSize: 16, lineHeight: 21 },
-  sendBtn:       { backgroundColor: c.primary, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, justifyContent: 'center' },
-  sendBtnOff:    { backgroundColor: c.textFaint, elevation: 0, shadowOpacity: 0 },
-  sendTxt:       { color: '#fff', fontWeight: '700' },
-
-  imageBubble:   { padding: 4, borderRadius: 12 },
-  // Media (image/video/gif) bubbles: no fill, just a thin frame so the media
-  // sits nearly edge-to-edge (the orange fill looked awkward around photos).
-  mediaBubble:   { backgroundColor: 'transparent', padding: 3, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
-  // Sticker: WhatsApp-style — transparent backdrop, no padding, just a
-  // big emoji glyph. The bubble component still wraps it so long-press
-  // (forward/reply/delete) works the same as any other message.
-  stickerBubble: { backgroundColor: 'transparent', padding: 0 },
-  stickerEmoji:  { fontSize: 72, lineHeight: 84 },
-
-  // Poll bubble: question on top, options as rows with a horizontal fill
-  // bar proportional to vote count, footer with totals + mode hint.
-  pollWrap:               { minWidth: 240, maxWidth: 300, gap: 8 },
-  pollQuestion:           { color: c.text, fontSize: 14, fontWeight: '700', marginBottom: 6 },
-  pollQuestionMine:       { color: c.bubbleOutText },
-  pollOptionRow:          { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 },
-  pollOptionMark:         { color: c.textDim, fontSize: 16, width: 18, textAlign: 'center' },
-  pollOptionMarkOn:       { color: c.primary },
-  pollOptionLine:         { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
-  pollOptionLabel:        { color: c.text, fontSize: 13, flex: 1 },
-  pollOptionLabelMine:    { color: c.bubbleOutText },
-  pollOptionCount:        { color: c.textDim, fontSize: 11, fontWeight: '700' },
-  pollOptionCountMine:    { color: c.bubbleMetaOut },
-  pollBarTrack:           { height: 4, backgroundColor: 'rgba(128,128,128,0.25)', borderRadius: 2, marginTop: 4, overflow: 'hidden' },
-  pollBarFill:            { height: 4, backgroundColor: c.primary, borderRadius: 2 },
-  pollBarFillMine:        { backgroundColor: c.bubbleOutText },
-  pollFooter:             { color: c.textDim, fontSize: 11, marginTop: 6 },
-  pollFooterMine:         { color: c.bubbleMetaOut },
-  attachedImage: { width: 220, height: 220, borderRadius: 8, backgroundColor: '#0F1217' },
-  dlOverlay:     { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.25)' },
-  dlOverlayTxt:  { color: '#fff', fontSize: 12, fontWeight: '700' },
-  imageError:    { width: 180, padding: 16, alignItems: 'center', gap: 4 },
-  mediaUnavailableTxt: { color: c.textDim, fontSize: 12, textAlign: 'center' },
-  imageErrorTxt: { color: c.textDim, fontSize: 12 },
-
-  // Video bubble — inline player with native controls + duration pill
-  videoWrap:     { width: 240, height: 240, borderRadius: 8, overflow: 'hidden', backgroundColor: '#000', position: 'relative' },
-  videoView:     { width: '100%', height: '100%' },
-  videoDuration: { position: 'absolute', right: 8, bottom: 8, color: '#fff', fontSize: 11, fontWeight: '700', backgroundColor: 'rgba(0,0,0,0.55)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, overflow: 'hidden' },
-  videoLoading:  { width: 240, height: 240, borderRadius: 8, backgroundColor: '#0F1217', alignItems: 'center', justifyContent: 'center' },
-  videoPlaceholder: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#10141B' },
-  // Round "video note" (Telegram/WhatsApp style) — distinct from a rectangular video.
-  videoNoteWrap: { width: 200, height: 200, borderRadius: 100, overflow: 'hidden', backgroundColor: '#000', position: 'relative', alignSelf: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.18)' },
-  videoNoteView: { width: '100%', height: '100%' },
-  videoNoteDuration: { right: undefined, bottom: 10, alignSelf: 'center', left: 0, textAlign: 'center', width: '100%', backgroundColor: 'transparent' },
-  videoPlayOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
-  videoPlayBtn:  { width: 54, height: 54, borderRadius: 27, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.85)' },
-  videoPlayIcon: { color: '#fff', fontSize: 22, marginLeft: 4 },
-
-  // View-once shield (before tap) + tombstone (after view)
-  viewOnceShield:        { width: 220, padding: 20, borderRadius: 12, alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: 'rgba(108,99,255,0.15)', borderWidth: 1, borderColor: c.primary, borderStyle: 'dashed' },
-  viewOnceShieldIcon:    { fontSize: 28 },
-  viewOnceShieldTxt:     { color: c.text, fontSize: 14, fontWeight: '700' },
-  viewOnceShieldHint:    { color: c.textDim, fontSize: 11, textAlign: 'center' },
-  viewOnceTombstone:     { width: 220, padding: 16, borderRadius: 12, alignItems: 'center', backgroundColor: '#0F1217', borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
-  viewOnceTombstoneTxt:  { color: c.textDim, fontSize: 12, fontStyle: 'italic' },
-
-  // Day 9 — file bubble (documents)
-  fileRow:        { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 220, maxWidth: 280 },
-  fileCard:       { width: 240, borderRadius: 8, overflow: 'hidden' },
-  filePreview:    { width: 240, height: 170, backgroundColor: 'rgba(0,0,0,0.06)' },
-  fileCardRow:    { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 8 },
-  fileIcon:       { width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
-  fileIconMine:   { backgroundColor: c.primary },
-  fileIconTheirs: { backgroundColor: c.primary },
-  fileIconTxt:    { fontSize: 18 },
-  fileMeta:       { flex: 1, gap: 2 },
-  fileName:       { color: c.bubbleInText, fontSize: 14, fontWeight: '600' },
-  fileNameMine:   { color: c.bubbleOutText },
-  fileSize:       { color: c.bubbleMetaIn, fontSize: 11 },
-  fileSizeMine:   { color: c.bubbleMetaOut },
-
-  // Day 8 — reply bar above composer
-  replyBar:        { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: c.surfaceSolid, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border },
-  lpBar:           { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, backgroundColor: c.surfaceSolid, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border },
-  lpBarImg:        { width: 36, height: 36, borderRadius: 6, backgroundColor: c.border },
-  lpBarTitle:      { color: c.text, fontSize: 12, fontWeight: '700' },
-  lpBarDesc:       { color: c.textDim, fontSize: 11, marginTop: 1 },
-  replyBarLine:    { width: 3, alignSelf: 'stretch', backgroundColor: c.primary, borderRadius: 1.5 },
-  replyBarTitle:   { color: c.primary, fontSize: 12, fontWeight: '700' },
-  replyBarBody:    { color: c.text, fontSize: 13 },
-
-  // Day 8 — inline reply preview inside a bubble
-  replyPreview:        { flexDirection: 'row', alignItems: 'stretch', gap: 8, marginBottom: 6, paddingVertical: 4, paddingHorizontal: 6, backgroundColor: 'rgba(0,0,0,0.16)', borderRadius: 6 },
-  replyPreviewLine:    { width: 2, backgroundColor: c.primary, borderRadius: 1 },
-  replyPreviewWho:     { color: c.primary, fontSize: 11, fontWeight: '700' },
-  replyPreviewBody:    { color: c.bubbleInText, fontSize: 12 },
-
-  // Day 8 — "↪ Forwarded" tag at top of bubble
-  forwardedTag:        { color: c.textDim, fontSize: 11, fontStyle: 'italic', marginBottom: 2 },
-
-  // Day 8 — reaction chips under a bubble
-  reactionRow:         { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: -6, marginBottom: 6, paddingHorizontal: 4 },
-  reactionRowMine:     { justifyContent: 'flex-end' },
-  reactionRowTheirs:   { justifyContent: 'flex-start' },
-  reactionChip:        { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, backgroundColor: '#1F2937', borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
-  reactionChipMine:    { backgroundColor: 'rgba(108,99,255,0.25)', borderColor: c.primary },
-  reactionChipEmoji:   { fontSize: 14 },
-  reactionChipCount:   { color: c.textDim, fontSize: 11, fontWeight: '600' },
-  reactionChipCountMine: { color: c.primary },
-
-  // Day 8 — quick-react picker
-  modalBackdrop:       { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  reactSheet:          { flexDirection: 'row', gap: 4, padding: 8, backgroundColor: '#1F2937', borderRadius: 32 },
-  reactSheetBtn:       { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
-  reactSheetEmoji:     { fontSize: 26 },
-
-  // Day 8 — forward chat picker
-  forwardSheet:        { width: '100%', maxHeight: '70%', backgroundColor: '#0F1217', borderRadius: 16, padding: 16, gap: 8 },
-  forwardTitle:        { color: c.text, fontSize: 16, fontWeight: '700', marginBottom: 8 },
-  forwardPreview:      { flexDirection: 'row', gap: 8, backgroundColor: c.card, borderRadius: 10, padding: 10, marginBottom: 8 },
-  forwardPreviewWho:   { color: c.primary, fontSize: 13, fontWeight: '700' },
-  forwardPreviewBody:  { color: c.textDim, fontSize: 13, marginTop: 2 },
-  forwardEmpty:        { color: c.textDim, textAlign: 'center', marginTop: 24 },
-  forwardRow:          { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
-  forwardRowTxt:       { color: c.text, fontSize: 15, flex: 1 },
-  forwardRowSub:       { color: c.textDim, fontSize: 11 },
-});
-
-// ── Memoized message bubble ──────────────────────────────────────────────
-// Re-render a bubble only when its DATA changes. The function props
-// (onLongPress / onToggleReaction / onPollVoteChange) are intentionally
-// excluded from the comparison: each closure is keyed to the bubble's own msg
-// (stable by id), so skipping a re-render when the data is unchanged is safe —
-// and it's what stops one incoming message from re-rendering every visible
-// bubble (the chat now scrolls/types smoothly on long threads).
-function bubblePropsEqual(a: any, b: any): boolean {
-  return (
-    a.msg === b.msg &&
-    a.meId === b.meId &&
-    a.member === b.member &&
-    a.chatId === b.chatId &&
-    a.otherMembers === b.otherMembers &&
-    a.reactionsForMsg === b.reactionsForMsg &&
-    a.pollVotesForMsg === b.pollVotesForMsg &&
-    a.replyTarget === b.replyTarget &&
-    a.replyTargetMember === b.replyTargetMember &&
-    a.highlight === b.highlight &&
-    a.tiltRevealed === b.tiltRevealed &&
-    a.grouped === b.grouped &&
-    a.bubbleColors === b.bubbleColors
-  );
-}
-const MemoBubble = memo(MessageBubble, bubblePropsEqual);

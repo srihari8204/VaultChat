@@ -562,7 +562,7 @@ func membershipPending(w http.ResponseWriter, r *http.Request) {
 		`SELECT ci.id, ci.invitee_user_id, ci.requested, ci.created_at, ci.accepted_at,
 		        vc_invitation_status(ci.status, ci.expires_at) AS status,
 		        u.name, u.first_name_cipher, u.last_name_cipher, u.email_cipher, u.photo_url,
-		        iu.name AS inviter_name
+		        iu.first_name_cipher, iu.last_name_cipher, iu.email_cipher, iu.name, iu.email
 		   FROM chat_invitations ci
 		   LEFT JOIN users u  ON u.id  = ci.invitee_user_id
 		   LEFT JOIN users iu ON iu.id = ci.inviter_id
@@ -572,20 +572,24 @@ func membershipPending(w http.ResponseWriter, r *http.Request) {
 		  LIMIT 200`,
 		[]any{chatID}, func(rows pgx.Rows) error {
 			var (
-				id                        int64
-				inviteeID                 *string
-				requested                 bool
-				createdAt                 time.Time
-				acceptedAt                *time.Time
-				status                    string
-				name, fnc, lnc, ec, photo *string
-				inviterName               *string
+				id                            int64
+				inviteeID                     *string
+				requested                     bool
+				createdAt                     time.Time
+				acceptedAt                    *time.Time
+				status                        string
+				name, fnc, lnc, ec, photo     *string
+				ifnc, ilnc, iec, ilegN, ilegE *string
 			)
 			if e := rows.Scan(&id, &inviteeID, &requested, &createdAt, &acceptedAt, &status,
-				&name, &fnc, &lnc, &ec, &photo, &inviterName); e != nil {
+				&name, &fnc, &lnc, &ec, &photo,
+				&ifnc, &ilnc, &iec, &ilegN, &ilegE); e != nil {
 				return e
 			}
 			ident := vault.IdentityFromRow(fnc, lnc, ec, nil, nil, nil, name, nil, nil, nil, nil)
+			// The invitee's name was already decrypted here; the INVITER's was
+			// not, so the approval queue said "accepted an invitation from —".
+			inviterName := spaceName(ifnc, ilnc, iec, ilegN, ilegE)
 			out = append(out, map[string]any{
 				"id": id, "userId": inviteeID, "name": ident.Name, "photoURL": photo,
 				"status": status, "requested": requested,
@@ -609,6 +613,12 @@ func membershipPending(w http.ResponseWriter, r *http.Request) {
 // ── candidate search ────────────────────────────────────────────────
 
 const membershipCandidateLimit = 20
+
+// membershipNameScanMax bounds the name search. Names are encrypted, so matching
+// costs a decrypt per candidate and cannot be done by the database; this caps how
+// many of the caller's chat-mates are opened for one query. Well above any real
+// contact list, and far below anything that could be used to grind the CPU.
+const membershipNameScanMax = 2000
 
 // membershipCandidates finds people to invite, WITHOUT being a user directory.
 //
@@ -731,27 +741,54 @@ func membershipFindUsers(ctx context.Context, uid, q string) ([]string, error) {
 	}
 
 	// Name search, confined to people the caller already shares a chat with.
-	pattern := "%" + chatsLikeEscaper.Replace(q) + "%"
+	//
+	// The match happens in Go, not in SQL, and it has to: a display name lives in
+	// first_name_cipher/last_name_cipher, and users.name is a legacy plaintext
+	// column that is NULL for every account. The old `u.name ILIKE $2` therefore
+	// matched NOBODY — searching a name in the invite picker returned an empty
+	// list every single time, which is why a member could not be invited by name
+	// at all. Encrypted columns cannot be ILIKE'd; they have to be opened first.
+	//
+	// This stays bounded the same way the SQL did: only people the caller already
+	// shares a chat with are ever considered, and the scan is capped, so it is a
+	// small set decrypted per keystroke rather than a table scan.
+	needle := strings.ToLower(strings.TrimSpace(q))
+	if needle == "" {
+		return nil, nil
+	}
 	rows, err := db.Pool.Query(ctx,
-		`SELECT DISTINCT u.id
+		`SELECT DISTINCT u.id, u.first_name_cipher, u.last_name_cipher,
+		        u.email_cipher, u.name, u.email
 		   FROM chat_members mine
 		   JOIN chat_members theirs ON theirs.chat_id = mine.chat_id AND theirs.left_at IS NULL
 		   JOIN users u ON u.id = theirs.user_id
 		  WHERE mine.user_id = $1 AND mine.left_at IS NULL
 		    AND u.id <> $1 AND u.is_deleted = FALSE
-		    AND u.name ILIKE $2 ESCAPE '\'
-		  LIMIT $3`, uid, pattern, membershipCandidateLimit)
+		  LIMIT $2`, uid, membershipNameScanMax)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	ids := []string{}
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var (
+			id                       string
+			fnc, lnc, ec, legN, legE *string
+		)
+		if err := rows.Scan(&id, &fnc, &lnc, &ec, &legN, &legE); err != nil {
 			return nil, err
 		}
+		name := spaceName(fnc, lnc, ec, legN, legE)
+		if name == nil {
+			continue
+		}
+		if !strings.Contains(strings.ToLower(*name), needle) {
+			continue
+		}
 		ids = append(ids, id)
+		if len(ids) >= membershipCandidateLimit {
+			break
+		}
 	}
 	return ids, rows.Err()
 }

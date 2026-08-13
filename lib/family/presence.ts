@@ -101,14 +101,57 @@ async function onFix(loc: Location.LocationObject) {
   }
 }
 
-export interface StartPresenceOpts { circleIds: string[]; myId: string; myName?: string; share: boolean; onSelf: (p: MemberPresence) => void; }
+export interface StartPresenceOpts {
+  circleIds: string[]; myId: string; myName?: string; share: boolean;
+  onSelf: (p: MemberPresence) => void;
+  /**
+   * Ask the OS for location permission if it is not already granted.
+   *
+   * Default FALSE, and that default is the whole point. Opening a space needs
+   * no location: a parent watching a school bus, an employee checking a task
+   * and a manager reading attendance all publish nothing. Prompting them on
+   * entry asked for a permission the screen did not use, and refusing it took
+   * the entire module down with it.
+   *
+   * Pass true only from an action that genuinely needs the device's own
+   * position — turning sharing on, or centring the map on yourself.
+   */
+  requestPermission?: boolean;
+}
 
-/** Start watching my location for the family map. Broadcasts to circles only if `share`. */
-export async function startPresence(o: StartPresenceOpts): Promise<void> {
+/** What startPresence managed to do. `denied` is normal, not a failure. */
+export interface PresenceStart { watching: boolean; denied: boolean }
+
+/**
+ * Start watching my own location. Broadcasts to circles only if `share`.
+ *
+ * NEVER THROWS ON A REFUSED PERMISSION, and callers must not treat one as an
+ * error. This used to throw, which meant the caller's whole setup path
+ * unwound — including the subscription that receives OTHER people's positions.
+ * So a parent who declined location did not merely stop publishing: they
+ * stopped receiving, and the space rendered as an empty map behind a dead-end
+ * alert. Receiving needs no permission at all; the two must not share a fate.
+ */
+export async function startPresence(o: StartPresenceOpts): Promise<PresenceStart> {
   await stopPresence();
-  const perm = await Location.requestForegroundPermissionsAsync();
-  if (perm.status !== 'granted') throw new Error('Location permission is required for Family Circle.');
-  circleIds = o.circleIds; myId = o.myId; myName = o.myName || 'A member'; selfCb = o.onSelf; sharing = o.share;
+
+  let status = (await Location.getForegroundPermissionsAsync()).status;
+  if (status !== 'granted' && o.requestPermission) {
+    status = (await Location.requestForegroundPermissionsAsync()).status;
+  }
+
+  // Circle context is recorded either way, so enabling sharing later needs no
+  // re-entry into this function.
+  circleIds = o.circleIds; myId = o.myId; myName = o.myName || 'A member'; selfCb = o.onSelf;
+  sharing = o.share && status === 'granted';
+
+  if (status !== 'granted') {
+    for (const cid of circleIds) {
+      places.set(cid, await getPlaces(cid));
+      privacy.set(cid, await getGroupPrivacy(cid));
+    }
+    return { watching: false, denied: true };
+  }
   for (const cid of circleIds) {
     places.set(cid, await getPlaces(cid));
     privacy.set(cid, await getGroupPrivacy(cid));
@@ -118,6 +161,7 @@ export async function startPresence(o: StartPresenceOpts): Promise<void> {
     { accuracy: Location.Accuracy.Balanced, timeInterval: 8000, distanceInterval: 15 },
     onFix,
   );
+  return { watching: true, denied: false };
 }
 
 /**
@@ -135,9 +179,33 @@ async function handOffToBackground(): Promise<boolean> {
 export async function isBackgroundSharing(): Promise<boolean> { return isBackgroundRunning(); }
 export async function canShareInBackground(): Promise<boolean> { return hasBackgroundPermission(); }
 
-/** Toggle broadcast without tearing down the watcher/map. */
-export async function setSharing(share: boolean): Promise<void> {
-  if (share === sharing) return;
+/**
+ * Toggle broadcast without tearing down the watcher/map.
+ *
+ * THIS is where location permission is asked for, because this is the first
+ * moment it is actually needed — the user has just said "share my location".
+ * A prompt here explains itself; the same prompt on entering a space did not.
+ *
+ * Returns false if sharing could not be enabled, so the caller can leave its
+ * switch off rather than showing a lie.
+ */
+export async function setSharing(share: boolean): Promise<boolean> {
+  if (share === sharing) return sharing;
+  if (share) {
+    let status = (await Location.getForegroundPermissionsAsync()).status;
+    if (status !== 'granted') {
+      status = (await Location.requestForegroundPermissionsAsync()).status;
+    }
+    if (status !== 'granted') return false;
+    // Entering a space no longer starts a watcher, so turning sharing on may be
+    // the first thing that needs one.
+    if (!watcher) {
+      watcher = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.Balanced, timeInterval: 8000, distanceInterval: 15 },
+        onFix,
+      );
+    }
+  }
   sharing = share;
   if (share) {
     myKey = newLiveKey();
@@ -148,6 +216,7 @@ export async function setSharing(share: boolean): Promise<void> {
     await stopBackgroundPresence();
     for (const cid of circleIds) emit('live_location_stop', { chatId: cid }).catch(() => {});
   }
+  return sharing;
 }
 
 /**
@@ -172,6 +241,20 @@ export async function stopPresence(): Promise<void> {
 }
 
 export function isSharing(): boolean { return sharing; }
+
+/**
+ * This device's current live-location sealing key, or null when not sharing.
+ *
+ * Exposed for the run relay (Spaces & Operations, S2.8), which seals a vehicle's
+ * position with the SAME key presence already delivered to the space. Reusing it
+ * means a run needs no second key exchange and posts no extra message to the
+ * thread — and it makes the audience automatically correct: anyone who can
+ * already open this driver's presence pings can open their run pings.
+ *
+ * It also means a driver who is not sharing location cannot broadcast a vehicle
+ * position, which is the right answer rather than a limitation.
+ */
+export function currentLiveKey(): string | null { return myKey; }
 
 /** Refresh a circle's geofences into the live broadcaster (call after editing Places). */
 export async function reloadPlaces(circleId: string): Promise<void> {

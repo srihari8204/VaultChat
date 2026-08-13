@@ -255,7 +255,7 @@ func invitationsList(w http.ResponseWriter, r *http.Request) {
 		`SELECT ci.id, ci.invitee_user_id, ci.inviter_id, ci.invitee_kind, ci.invitee_ref, ci.channel,
 		        vc_invitation_status(ci.status, ci.expires_at) AS status,
 		        ci.expires_at, ci.responded_at, ci.created_at,
-		        u.name, u.email
+		        `+spaceNameCols+`
 		   FROM chat_invitations ci
 		   LEFT JOIN users u ON u.id = ci.invitee_user_id
 		  WHERE ci.chat_id = $1
@@ -263,17 +263,22 @@ func invitationsList(w http.ResponseWriter, r *http.Request) {
 		  LIMIT 200`,
 		[]any{chatID}, func(rows pgx.Rows) error {
 			var (
-				id                          int64
-				inviteeID, ref, name, email *string
-				inviterID                   string
-				kind, channel, status       string
-				expiresAt, createdAt        time.Time
-				respondedAt                 *time.Time
+				id                       int64
+				inviteeID, ref           *string
+				fnc, lnc, ec, legN, legE *string
+				inviterID                string
+				kind, channel, status    string
+				expiresAt, createdAt     time.Time
+				respondedAt              *time.Time
 			)
 			if e := rows.Scan(&id, &inviteeID, &inviterID, &kind, &ref, &channel, &status,
-				&expiresAt, &respondedAt, &createdAt, &name, &email); e != nil {
+				&expiresAt, &respondedAt, &createdAt,
+				&fnc, &lnc, &ec, &legN, &legE); e != nil {
 				return e
 			}
+			// Who was invited. Same legacy-column trap: the admin's pending-invite
+			// list rendered a column of blanks.
+			name := spaceName(fnc, lnc, ec, legN, legE)
 			row := map[string]any{
 				"id": id, "inviteeUserId": inviteeID, "kind": kind, "channel": channel,
 				"status": status, "expiresAt": httpx.JSTime(expiresAt),
@@ -454,7 +459,7 @@ func invitationsMine(w http.ResponseWriter, r *http.Request) {
 		`SELECT ci.id, ci.chat_id, c.name, c.group_type, c.icon, c.color,
 		        vc_invitation_status(ci.status, ci.expires_at) AS status,
 		        c.approval_mode, ci.expires_at, ci.created_at, ci.requested,
-		        u.name AS inviter_name,
+		        `+spaceNameCols+`,
 		        (SELECT COUNT(*) FROM chat_members cm
 		          WHERE cm.chat_id = ci.chat_id AND cm.left_at IS NULL) AS member_count
 		   FROM chat_invitations ci
@@ -466,18 +471,23 @@ func invitationsMine(w http.ResponseWriter, r *http.Request) {
 		  LIMIT 100`,
 		[]any{user.ID}, func(rows pgx.Rows) error {
 			var (
-				id                                int64
-				chatID                            string
-				name, gtype, icon, color, inviter *string
-				status, mode                      string
-				requested                         bool
-				memberCount                       int64
-				expiresAt, createdAt              time.Time
+				id                       int64
+				chatID                   string
+				name, gtype, icon, color *string
+				fnc, lnc, ec, legN, legE *string
+				status, mode             string
+				requested                bool
+				memberCount              int64
+				expiresAt, createdAt     time.Time
 			)
 			if e := rows.Scan(&id, &chatID, &name, &gtype, &icon, &color,
-				&status, &mode, &expiresAt, &createdAt, &requested, &inviter, &memberCount); e != nil {
+				&status, &mode, &expiresAt, &createdAt, &requested,
+				&fnc, &lnc, &ec, &legN, &legE, &memberCount); e != nil {
 				return e
 			}
+			// Who sent it. This was reading the legacy plaintext name column, so
+			// every invitation card said "you have been invited by (nobody)".
+			inviter := spaceName(fnc, lnc, ec, legN, legE)
 			st := invites.Status(status)
 			out = append(out, map[string]any{
 				"id": id, "chatId": chatID, "name": name, "groupType": gtype,
@@ -499,8 +509,8 @@ func invitationsMine(w http.ResponseWriter, r *http.Request) {
 				"canAccept": invites.CanAccept(st) ||
 					(st == invites.StatusAccepted &&
 						invites.NextAfterAccept(invites.NormalizeMode(mode)) == invites.StatusJoined),
-				"canDecline":    invites.CanDecline(st),
-				"expiresAt":     httpx.JSTime(expiresAt), "createdAt": httpx.JSTime(createdAt),
+				"canDecline": invites.CanDecline(st),
+				"expiresAt":  httpx.JSTime(expiresAt), "createdAt": httpx.JSTime(createdAt),
 			})
 			return nil
 		})

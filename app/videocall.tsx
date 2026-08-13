@@ -29,8 +29,10 @@ import { addCallLog } from '../lib/callLog';
 import { CallTimer, elapsedSeconds } from '../components/call/CallTimer';
 import { CallControlButton } from '../components/call/CallControlButton';
 import { CallExtras } from '../components/call/CallExtras';
+import { CallEncryptionBadge } from '../components/call/CallEncryptionBadge';
 import { CALL_ENGINE_V2 } from '../constants/flags';
 import * as engine from '../lib/call/engine';
+import { DISCONNECT_GRACE_MS } from '../lib/call/peer';
 import {
   useCallConnectedAt, useCallError, useCallFlag, useCallLocalUrl,
   useCallStatus, useParticipantStreamUrl,
@@ -172,6 +174,25 @@ function VideoCallEngine() {
       isIncoming?: string; initialOffer?: string;
     }>();
 
+  // Who we are talking to. peerName is a route param and arrives EMPTY on
+  // several paths — an incoming call whose signal carried no name, or an
+  // outgoing one started from a list whose title had not loaded — so the call
+  // screen showed "VaultChat user". To be in a call we already share a chat, so
+  // the name is in our own store. Display only: nothing here touches the call,
+  // and a failed lookup leaves the previous fallback in place.
+  const [lookedUpName, setLookedUpName] = useState<string | null>(null);
+  useEffect(() => {
+    if (peerName || !chatId) return;
+    let cancelled = false;
+    (async () => {
+      const { getChat } = await import('../lib/chatService');
+      const n = (await getChat(String(chatId)))?.peerName?.trim();
+      if (!cancelled && n) setLookedUpName(n);
+    })().catch(() => { /* keep the fallback */ });
+    return () => { cancelled = true; };
+  }, [chatId, peerName]);
+  const displayName = peerName || lookedUpName || 'VaultChat user';
+
   const status      = useCallStatus();
   const connectedAt = useCallConnectedAt();
   const error       = useCallError();
@@ -214,6 +235,10 @@ function VideoCallEngine() {
     if (sharing) engine.stopScreenShare().catch(() => {});
     else engine.startScreenShare().catch((e: any) => {
       const msg = e?.message ? String(e.message) : String(e);
+      // warn (not log): console.log is stripped from release builds, and a
+      // suppressed alert previously left NO trace anywhere — the failure was
+      // invisible in both the UI and logcat.
+      console.warn('[screenshare] failed:', msg);
       // A genuine user cancel is not an error worth interrupting a call for.
       if (!/cancel|denied by user|user.?cancel|NotAllowed/i.test(msg)) {
         Alert.alert('Screen share failed', msg || 'Unknown error');
@@ -222,8 +247,11 @@ function VideoCallEngine() {
   }, [sharing]);
   const toggleFilters = useCallback(() => setShowFilters(v => !v), []);
 
+  // See app/voicecall.tsx: without this branch the fall-through renders
+  // 'Call ended' over a call that is actively recovering.
   const statusText = status === 'connecting' ? 'Connecting…'
     : status === 'ringing' ? 'Ringing…'
+    : status === 'reconnecting' ? 'Reconnecting…'
     : 'Call ended';
   const f = FILTERS.find(x => x.id === filter) ?? FILTERS[0];
   const overlay = matrixToOverlay(f.matrix);
@@ -237,7 +265,7 @@ function VideoCallEngine() {
           <RTCView style={S.remoteVid} streamURL={remoteUrl} objectFit="cover" />
         ) : (
           <View style={[S.remoteVid, S.remotePlaceholder]}>
-            <Text style={S.placeholderInitial}>{(peerName?.trim()[0] ?? '?').toUpperCase()}</Text>
+            <Text style={S.placeholderInitial}>{(displayName.trim()[0] ?? '?').toUpperCase()}</Text>
           </View>
         )}
         {overlay.tint && (
@@ -246,11 +274,13 @@ function VideoCallEngine() {
       </View>
 
       <View style={[S.topBar, { top: insets.top + 8 }]} pointerEvents="none">
-        <Text style={S.name} numberOfLines={1}>{peerName || 'VaultChat user'}</Text>
+        <Text style={S.name} numberOfLines={1}>{displayName}</Text>
         {status === 'connected'
           ? <CallTimer style={S.status} startedAt={connectedAt} />
           : <Text style={S.status}>{statusText}</Text>}
         {error && <Text style={S.errorTxt}>{error}</Text>}
+        {/* D-1: 1:1 video is peer-to-peer. */}
+        <CallEncryptionBadge protection="e2ee" />
       </View>
 
       {(sharing || peerSharing) && (
@@ -334,6 +364,7 @@ function VideoCallLegacy() {
   const [peerSharing, setPeerSharing] = useState(false); // peer is sharing theirs
 
   const pcRef           = useRef<RTCPeerConnection | null>(null);
+  const disconnectGraceRef = useRef<any>(null);   // see onconnectionstatechange
   // E2EE signaling cipher (F6) — per-call key; plaintext passthrough for legacy peers.
   const cipherRef       = useRef<CallCipher>(plainCipher);
   const localStreamRef  = useRef<any>(null);
@@ -359,6 +390,7 @@ function VideoCallLegacy() {
     stopCallForeground();   // release the mic/camera foreground service + wake lock
     try { screenStreamRef.current?.getTracks?.().forEach((t: any) => t.stop()); } catch {}   // stop screen capture (#124)
     try { localStreamRef.current?.getTracks().forEach((t: any) => t.stop()); } catch {}
+    if (disconnectGraceRef.current) { clearTimeout(disconnectGraceRef.current); disconnectGraceRef.current = null; }
     try { pcRef.current?.close(); } catch {}
     pcRef.current = null;
     if (notify && peerUid) {
@@ -510,9 +542,22 @@ function VideoCallLegacy() {
           if (!event.candidate || !peerUid) return;
           s.emit('webrtc_ice', { to: peerUid, from: meIdRef.current, candidate: cipherRef.current.seal(event.candidate) });
         };
+        // `disconnected` is TRANSIENT and usually recovers — see the same guard
+        // in app/voicecall.tsx and lib/call/peer.ts. Only failed/closed end it.
         (pc as any).onconnectionstatechange = () => {
           const st = (pc as any).connectionState;
-          if (st === 'failed' || st === 'disconnected' || st === 'closed') endCall(true);
+          if (st !== 'disconnected' && disconnectGraceRef.current) {
+            clearTimeout(disconnectGraceRef.current);
+            disconnectGraceRef.current = null;
+          }
+          if (st === 'failed' || st === 'closed') { endCall(true); return; }
+          if (st === 'disconnected' && !disconnectGraceRef.current) {
+            try { (pc as any).restartIce?.(); } catch {}
+            disconnectGraceRef.current = setTimeout(() => {
+              disconnectGraceRef.current = null;
+              if ((pc as any).connectionState === 'disconnected') endCall(true);
+            }, DISCONNECT_GRACE_MS);
+          }
         };
 
         if (isIncoming === 'true' && initialOffer) {
@@ -630,9 +675,9 @@ function VideoCallLegacy() {
       return;
     }
     try {
-      console.log('[screenshare] calling getDisplayMedia…');
+      console.warn('[screenshare] calling getDisplayMedia…');
       const screen: any = await (mediaDevices as any).getDisplayMedia();   // → system "Start recording?" prompt
-      console.log('[screenshare] stream:', !!screen, 'tracks:', screen?.getVideoTracks?.().length);
+      console.warn('[screenshare] stream:', !!screen, 'tracks:', screen?.getVideoTracks?.().length);
       const screenTrack = screen?.getVideoTracks?.()[0];
       if (!screenTrack) { screen?.getTracks?.().forEach((t: any) => t.stop()); Alert.alert('Screen share', 'No screen track was returned by capture.'); return; }
       cameraTrackRef.current = sender.track;                      // keep the camera alive for swap-back
@@ -709,6 +754,8 @@ function VideoCallLegacy() {
           ? <CallTimer style={S.status} startedAt={connectedAtRef.current} />
           : <Text style={S.status}>{statusText}</Text>}
         {error && <Text style={S.errorTxt}>{error}</Text>}
+        {/* D-1: 1:1 video is peer-to-peer. */}
+        <CallEncryptionBadge protection="e2ee" />
       </View>
 
       {/* Screen-share banner (#124). Mine takes precedence over the peer's —

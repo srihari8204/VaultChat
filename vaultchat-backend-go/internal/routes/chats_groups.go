@@ -68,6 +68,14 @@ type chatsGroupMeta struct {
 	// a corrupt stored value is reported as the STRICTEST mode rather than
 	// letting the client draw a looser one than the server will honour.
 	ApprovalMode string `json:"approvalMode"`
+
+	// ── Spaces & Operations (migration 084) ──
+	// RoleKey is the caller's display role; RoleCatalog is the type's whole list,
+	// which the client needs in order to render a member's job title and to offer
+	// the valid choices when assigning one. The catalog is CONFIG, not a secret —
+	// it says what a Driver is, never who the drivers are.
+	RoleKey     *string          `json:"roleKey"`
+	RoleCatalog []groups.RoleDef `json:"roleCatalog,omitempty"`
 }
 
 // chatsBuildGroupMeta assembles what the client needs to render a typed group
@@ -102,6 +110,8 @@ func chatsBuildGroupMeta(mem *chatsMem, icon, color *string, privacy string) cha
 		Permissions:  perms,
 		Role:         mem.Role,
 		ApprovalMode: string(invites.NormalizeMode(mem.ApprovalModeRaw)),
+		RoleKey:      mem.RoleKey,
+		RoleCatalog:  mem.roleCatalog,
 	}
 }
 
@@ -111,13 +121,23 @@ func chatsBuildGroupMeta(mem *chatsMem, icon, color *string, privacy string) cha
 // asked for. A lost audit row is bad; a member who cannot be removed because
 // logging hiccuped is worse. Failures are logged loudly instead.
 func chatsAudit(ctx context.Context, uid, chatID, action string, targetID *string, detail map[string]any) {
-	var raw []byte
+	// TEXT, not []byte. pgx encodes a []byte parameter as bytea, and Postgres
+	// then refuses it for a jsonb column with "invalid input syntax for type
+	// json" — which chatsAudit swallows, because an audit write must never fail
+	// the operation it is recording.
+	//
+	// The result was that EVERY audit entry carrying a detail payload was lost
+	// silently: 1 row in group_audit_log, 0 with detail, while the log filled up
+	// with 22P02. Found by reading the server log while chasing an unrelated
+	// report. Same trap as migration 069's jsonb params — see the shopbook fix.
+	var raw *string
 	if detail != nil {
 		b, err := json.Marshal(detail)
 		if err != nil {
 			log.Printf("[chats audit] marshal %s: %v", action, err)
 		} else {
-			raw = b
+			s := string(b)
+			raw = &s
 		}
 	}
 	if err := chatsExecU(ctx, uid,

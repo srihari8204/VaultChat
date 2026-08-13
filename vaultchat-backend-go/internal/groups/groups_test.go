@@ -248,13 +248,19 @@ func TestOwnershipTransferIsItsOwnDoor(t *testing.T) {
 }
 
 func TestNewPermissionsAreKnown(t *testing.T) {
-	for _, p := range []string{"create_tasks", "manage_calendar", "manage_album"} {
+	for _, p := range []string{
+		"create_tasks", "manage_calendar", "manage_album",
+		// migration 084
+		"manage_runs", "drive_run", "view_space_ops", "manage_roster", "report_incident",
+	} {
 		if !IsValidPermission(p) {
 			t.Errorf("%s should be a known permission", p)
 		}
 	}
-	if len(All) != 10 {
-		t.Fatalf("expected 10 permissions, got %d", len(All))
+	// The count is asserted so that adding a permission forces a look at the
+	// TypeScript mirror — that is the whole reason this line exists.
+	if len(All) != 15 {
+		t.Fatalf("expected 15 permissions, got %d", len(All))
 	}
 	// The owner still holds every one of them, including the new ones.
 	owner := Resolve(RoleOwner, Layers{})
@@ -325,4 +331,157 @@ func TestRemovePermissionNeverReachesTheOwner(t *testing.T) {
 			t.Errorf("%s must not be able to remove the owner", r)
 		}
 	}
+}
+
+// ── role catalog (migration 084) ──
+
+var testCatalog = []RoleDef{
+	{Key: "principal", Label: "Principal", Rank: RoleOwner},
+	{Key: "transport_manager", Label: "Transport Manager", Rank: RoleAdmin,
+		Permissions: []string{"manage_runs", "view_space_ops"}},
+	{Key: "driver", Label: "Bus Driver", Rank: RoleMember,
+		Permissions: []string{"drive_run", "report_incident"}},
+	{Key: "parent", Label: "Parent", Rank: RoleMember, Permissions: []string{}},
+	{Key: "teacher", Label: "Teacher", Rank: RoleMember},
+}
+
+var testTypeDefaults = map[string][]string{
+	"admin":  {"invite_members", "view_history"},
+	"member": {"view_history", "start_navigation"},
+	"guest":  {},
+}
+
+func resolveWithKey(roleKey, role string) []string {
+	cat, set := CatalogLayer(testCatalog, roleKey, role)
+	return Resolve(role, Layers{
+		TypeDefault:      testTypeDefaults,
+		RoleCatalog:      cat,
+		RoleCatalogIsSet: set,
+	}).List()
+}
+
+func TestCatalogLayerReplacesRankDefault(t *testing.T) {
+	// A driver holding start_navigation would mean the bus can be re-routed by
+	// the person driving it. The layer replaces, it does not merge.
+	got := resolveWithKey("driver", RoleMember)
+	want := []string{"drive_run", "report_incident"}
+	if !eqStrings(got, want) {
+		t.Errorf("driver = %v, want %v", got, want)
+	}
+}
+
+func TestCatalogAbsentPermissionsInheritRank(t *testing.T) {
+	// nil Permissions means "this role is just a label" — inherit the rank.
+	if got := resolveWithKey("teacher", RoleMember); !eqStrings(got, testTypeDefaults["member"]) {
+		t.Errorf("teacher = %v, want the member default", got)
+	}
+	// An EMPTY list is different: it grants nothing. A parent's access comes
+	// from space links, never from a permission.
+	if got := resolveWithKey("parent", RoleMember); len(got) != 0 {
+		t.Errorf("parent = %v, want nothing", got)
+	}
+}
+
+// The escalation case. role_key lives on chat_members independently of role, so
+// a stale or tampered key naming a higher-ranked entry must not hand over that
+// entry's permissions.
+func TestCatalogRankMismatchDoesNotEscalate(t *testing.T) {
+	got := resolveWithKey("transport_manager", RoleMember)
+	if !eqStrings(got, testTypeDefaults["member"]) {
+		t.Errorf("rank mismatch = %v, want the member default", got)
+	}
+	for _, p := range []Permission{PermManageRuns, PermViewSpaceOps} {
+		for _, g := range got {
+			if g == string(p) {
+				t.Fatalf("rank mismatch leaked %s", p)
+			}
+		}
+	}
+}
+
+func TestCatalogFallsThroughWhenAbsent(t *testing.T) {
+	cases := []struct {
+		defs []RoleDef
+		key  string
+		role string
+		why  string
+	}{
+		{testCatalog, "astronaut", RoleMember, "unknown key"},
+		{testCatalog, "", RoleMember, "no key"},
+		{nil, "driver", RoleMember, "no catalog"},
+		{[]RoleDef{}, "driver", RoleMember, "empty catalog"},
+	}
+	for _, c := range cases {
+		if _, set := CatalogLayer(c.defs, c.key, c.role); set {
+			t.Errorf("%s: layer should be absent", c.why)
+		}
+	}
+}
+
+func TestCatalogSitsBelowGroupOverride(t *testing.T) {
+	cat, set := CatalogLayer(testCatalog, "driver", RoleMember)
+	got := Resolve(RoleMember, Layers{
+		TypeDefault:      testTypeDefaults,
+		RoleCatalog:      cat,
+		RoleCatalogIsSet: set,
+		GroupOverride:    map[string][]string{"member": {"view_history"}},
+	})
+	if !got.Has(PermViewHistory) || got.Has(PermDriveRun) {
+		t.Errorf("group override must beat the catalog, got %v", got.List())
+	}
+}
+
+func TestCatalogCannotReduceTheOwner(t *testing.T) {
+	got := Resolve(RoleOwner, Layers{RoleCatalog: []string{}, RoleCatalogIsSet: true})
+	if len(got.List()) != len(All) {
+		t.Errorf("owner must hold everything, got %v", got.List())
+	}
+}
+
+// All-or-nothing: one bad entry rejects the whole catalog, because dropping just
+// the bad entry resolves those members to their bare rank default, which for a
+// Driver is MORE than the catalog intended.
+func TestParseRoleCatalogRejectsWholeCatalog(t *testing.T) {
+	bad := []struct {
+		raw string
+		why string
+	}{
+		{`[{"key":"x","rank":"superuser"}]`, "unknown rank"},
+		{`[{"key":"x","rank":"member","permissions":["delete_everything"]}]`, "unknown permission"},
+		{`[{"key":"","rank":"member"}]`, "empty key"},
+		{`[{"key":"x","rank":"member"},{"key":"x","rank":"guest"}]`, "duplicate key"},
+		{`{"not":"an array"}`, "wrong shape"},
+		{`[`, "malformed json"},
+	}
+	for _, c := range bad {
+		if _, err := ParseRoleCatalog([]byte(c.raw)); err == nil {
+			t.Errorf("%s: expected rejection", c.why)
+		}
+		if err := ValidateRoleCatalog([]byte(c.raw)); err == nil {
+			t.Errorf("%s: validate must agree with parse", c.why)
+		}
+	}
+	good := `[{"key":"driver","label":"Bus Driver","rank":"member","permissions":["drive_run"]}]`
+	defs, err := ParseRoleCatalog([]byte(good))
+	if err != nil {
+		t.Fatalf("valid catalog rejected: %v", err)
+	}
+	if len(defs) != 1 || FindRole(defs, "driver") == nil {
+		t.Errorf("parsed catalog wrong: %+v", defs)
+	}
+	if empty, err := ParseRoleCatalog(nil); err != nil || empty != nil {
+		t.Errorf("no catalog must parse to nothing, got %v %v", empty, err)
+	}
+}
+
+func eqStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

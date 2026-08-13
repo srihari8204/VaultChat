@@ -2,10 +2,11 @@
 #
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
-# Default service set (no profile) is already the Go-first shape:
-#   caddy + go-api + postgres + redis + minio + valhalla + coturn +
-#   vaultlens-worker. The Node api / kafka / fanout-worker are behind the
-#   `legacy` profile and are NOT started.
+# Default service set (no profile) is now Go-ONLY:
+#   caddy + go-api + postgres + pgbouncer + redis + minio + valhalla + coturn.
+#   The Node api / kafka / fanout-worker are behind the `legacy` profile and are
+#   NOT started. The vaultlens-worker — the last running Node process — was
+#   removed with the VaultLens feature, so no Node runtime remains.
 #
 # This override only:
 #   - binds Caddy to the public ports (80; add 443 + a site address in the
@@ -19,11 +20,36 @@ services:
       - "3000:80"            # compatibility: existing APKs point SERVER_URL at :3000
       # - "443:443"          # enable together with a TLS site in the Caddyfile
   go-api:
-    ports: !override []      # in-network only (caddy + vaultlens-worker reach it)
+    ports: !override []      # in-network only (caddy reaches it)
   postgres:
     ports: !override []      # in-network only
   redis:
-    ports: !override []      # in-network only
+    # LOOPBACK-ONLY, and it is load-bearing — not a convenience.
+    #
+    # livekit runs network_mode: host, so it is NOT on the compose network and
+    # cannot resolve the `redis` service name. Its livekit.yaml therefore dials
+    # 127.0.0.1:16379. With redis publishing no ports at all, nothing listened
+    # there, and LiveKit could not allocate a room node — so EVERY authenticated
+    # join returned HTTP 500 instead of upgrading the WebSocket:
+    #
+    #   status 500, path /rtc/v1
+    #   "could not get node for room: dial tcp 127.0.0.1:16379: connect:
+    #    connection refused"
+    #
+    # That single failure is why SFU group calls and broadcasting were both
+    # dead: RoomService.CreateRoom 500s the same way, and the egress worker's
+    # "could not clean egress info" errors are the same refused dial.
+    #
+    # Bound to 127.0.0.1 rather than 0.0.0.0: the host needs it, the internet
+    # must not have it. Redis has no password on this deployment
+    # (REDIS_PASS: ""), so a 0.0.0.0 bind would publish an unauthenticated
+    # datastore straight onto a public IP.
+    #
+    # Egress already reaches the SAME instance as `redis:6379` from inside the
+    # compose network; this makes livekit-server agree with it, which is what
+    # lets the two coordinate at all.
+    ports: !override
+      - "127.0.0.1:16379:6379"
   minio:
     ports: !override
       - "19000:9000"         # presigned URLs are signed for S3_PUBLIC_ENDPOINT

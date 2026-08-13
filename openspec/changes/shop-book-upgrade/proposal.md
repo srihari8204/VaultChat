@@ -43,3 +43,118 @@ Local shops still run on paper ledgers and phone-call orders, while customers ha
 - **Admin**: extends the existing `admin/` surface into the Shop Book admin portal (approvals, tax engine, categories, subscriptions, reports, support).
 - **Dependencies**: geolocation/geo-query support (e.g., geohashing) for discovery and price comparison; i18n library for localization; no map SDK, no payment gateway, and no image storage required in v1.
 - **Compliance/stores**: location-permission declarations for shop discovery; subscription billing for the owner app must follow store billing policies in shipped markets.
+
+---
+
+## Addendum — 2026-08-10
+
+Scope changes and risks identified after the original 26/26 completion. Recorded
+here rather than silently absorbed, because three of them are launch blockers
+that the chat product does not share.
+
+### A. Order pipeline: collection is the CUSTOMER's to assert
+
+```
+OWNER: Pending → Accepted → Preparing → Packing → Ready
+USER:  Ready → Collected → Completed
+```
+
+An owner cannot truthfully assert that a customer collected goods. Moving the
+final two transitions to the customer prevents fake completion and is what makes
+the khata trustworthy — the ledger only closes when the person who owes money
+says the goods are in their hands.
+
+**This introduces a stuck-order state that MUST be designed, not discovered.** A
+customer who collects and never reopens the app leaves the order at `Ready`
+forever, polluting the owner's dashboard, reports and pending-payment totals.
+Required: either auto-complete after N days at `Ready`, or an owner-side
+"not collected" action resolving to a DISTINCT terminal state — never
+`Completed`, which would re-introduce exactly the fake completion this change
+exists to prevent.
+
+### B. Claimable tax invoices (input tax credit)
+
+A buyer who supplies a tax number (GSTIN in India, and the equivalent elsewhere)
+is making a business purchase and can reclaim the tax — but only against a
+compliant tax invoice. The same sale to a walk-in customer needs no such
+document.
+
+One sale, therefore two invoice shapes, chosen by whether the buyer gave a tax
+number:
+
+| Buyer provides tax no. | Document | Must carry |
+|---|---|---|
+| yes | tax invoice | both parties' tax numbers, per-item HSN/SAC, tax split by rate |
+| no | retail invoice | totals only; no tax number, no reclaim |
+
+Both must look correct and complete — a retail customer should never see a
+half-filled tax invoice with blank statutory fields, which is what a single
+template produces. Extends `invoicing` and `country-tax-engine`; the buyer tax
+number joins the existing optional-field set and stays optional throughout.
+
+### C. Shop Book inherits VaultChat's infrastructure but NOT its threat model
+
+The single most important line in this addendum. Chat is end-to-end encrypted,
+so a database compromise yields ciphertext. Shop Book's khata, invoices and
+order history are **plaintext money records**. Four deferrals that are cheap for
+chat are expensive here:
+
+1. **RLS is inert and this is now a blocker, not hardening.** The DB role is
+   `rolsuper=t rolbypassrls=t`, so every policy is bypassed. One missing
+   `WHERE customer_id = …` exposes every customer's debts to every other
+   customer, and every shop's turnover to its competitors. `digital-ledger` is
+   precisely where such a bug lives. See the RLS remediation order in
+   `docs/RLS_ENFORCEMENT.md` — enabling it breaks chat creation if the policies
+   are not written first.
+2. **Push is a launch blocker.** A pickup order the shop never sees is worse
+   than having no app: the customer walks to the shop expecting a packed order.
+   FCM is unconfigured. NOTE the live trap — `android/app/google-services.json`
+   is project `vaultchatprod01` while the Firebase console shown was
+   `vaultchat-ce9e3`; a service account from the wrong project fails silently.
+3. **Backups become statutory, not just durable.** Tax invoices carry retention
+   requirements (commonly 5–7 years) in most launch countries. Every dump
+   currently sits on the same disk as the database it came from.
+4. **Shop owners are inherently multi-device** — phone in hand, tablet at the
+   counter — and Pro sells staff accounts outright. `identity_keys`,
+   `signed_prekeys` and `one_time_prekeys` are keyed by `user_id` with NO
+   `device_id`, so the last device to publish wins. Confirm early whether Shop
+   Book accounts share that key layer; if they do, "counter tablet" and "staff
+   accounts" collide with a single-device model.
+
+### D. Price comparison — decide the policy before building
+
+It is the reason a customer opens this app instead of phoning the shop, and the
+reason an owner may leave the platform after being undercut by a rupee. Two
+decisions are needed BEFORE implementation, not after the first complaint:
+whether owners may opt out, and how stale prices are presented. Surfacing
+`last-updated` is the right instinct; showing a two-week-old price as current is
+how shops are lost.
+
+### E. Capabilities with no screen in the design system
+
+Five named capabilities had no corresponding screen, plus the states every
+GPS-driven app hits constantly:
+
+- **alternatives flow** — the differentiator, and the hardest interaction here:
+  a partially-modified cart the customer must approve per item, mid-pipeline
+- **rejection reason picker** — six defined reasons, required before commit
+- **price comparison** — price / distance / stock / last-updated, three sorts
+- **country + tax onboarding** — country selection and its optional tax fields
+- **shop status** — SIX states (Open / Busy / Closing Soon / Closed / Holiday /
+  Vacation), so the badge needs six variants
+- **empty and offline states** — "no shops within range" is a routine screen in
+  a discovery app, not an edge case
+
+### F. Two design-system constraints that conflict with the spec as written
+
+- **Fixed row heights vs Indic scripts.** Rows are specified at 64/60/56 px with
+  1.4× line height. Devanagari, Telugu, Tamil and Kannada need roughly 1.5–1.6×
+  for ascenders and matras, so names will clip or descenders collide. Use
+  `min-height`, and test the tightest screen in **Telugu** — typically the
+  tallest of the six launch languages.
+- **Caption contrast.** `#6B7280` on `#F9FAFB` is ≈4.4:1, under the 4.5:1 WCAG AA
+  floor for small text. Darken to `#4B5563` or raise captions to 14px.
+
+Also: the order step indicator should render the owner-controlled and
+customer-controlled segments distinctly. A uniform progress bar hides the
+handoff that makes the flow trustworthy, which is the entire point of change A.

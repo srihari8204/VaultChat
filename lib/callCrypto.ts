@@ -134,13 +134,36 @@ export async function openCallOffer(
     }
     const cipher = gcmCipher(unb64(keyB64));
     return { cipher, offer: cipher.open(offerObj.p) };
-  } catch {
+  } catch (err) {
+    // This is the ONLY record of why a call failed to set up. Without it the
+    // user sees "Secure call setup failed" and the logs say nothing at all,
+    // which is exactly the dead end this reached in testing. No key material
+    // and no SDP is logged — only the peer and the error.
+    console.warn('[call] openCallOffer failed for peer', peerId, '—', (err as any)?.message ?? err);
     // Dead/stale session (e.g. this device reinstalled after the caller last
     // ratcheted). Drop it so the NEXT call or message re-keys via X3DH.
     try {
       const e2ee = await import('../services/crypto/e2eeSession.rn');
       await e2ee.e2eeResetSession(peerId);
+      (await import('./sessionEpoch')).bumpSessionEpoch(peerId);
     } catch {}
+
+    // ...and tell the CALLER to drop theirs. Resetting only our own side does
+    // not heal anything: the caller still believes it has a live session, so
+    // every retry arrives sealed with it and carrying NO X3DH header, which we
+    // can no longer bootstrap from. Observed on device as one
+    // "cannot skip messages" followed by "no session and no X3DH header to
+    // bootstrap responder" repeating until the call gave up — calls between
+    // those two devices could never recover on their own.
+    //
+    // The rekey request makes the caller re-run X3DH, so its NEXT offer is
+    // openable. It is rate-limited per peer inside chatService.
+    try {
+      const { requestPeerRekey } = await import('./chatService');
+      await requestPeerRekey(peerId, true);   // force: a failed call must not be rate-limited
+      console.warn('[call] asked peer to re-key — retry the call once it lands');
+    } catch {}
+
     return { cipher: passthrough, offer: null };
   }
 }

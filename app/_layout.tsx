@@ -2,6 +2,7 @@
 // Root layout — runs on every app open
 //
 // Order of operations:
+//   0. LiveKit polyfills (Hermes lacks DOMException)
 //   1. Buffer polyfill (crypto needs this)
 //   2. Sentry init — must happen BEFORE any other code that might throw
 //   3. Block screenshots app-wide (FLAG_SECURE)
@@ -10,6 +11,21 @@
 //   5. Register push notifications (physical device only)
 //   6. Wire notification tap listeners → navigate to correct chat
 //   7. Handle notification that launched app from killed state
+
+// MUST BE FIRST — installs DOMException and friends that Hermes does not have.
+//
+// livekit-client is a browser library and touches those globals at MODULE
+// SCOPE, so anything importing it before this line throws
+// `ReferenceError: Property 'DOMException' doesn't exist` — which surfaces as a
+// WHITE SCREEN with no error of ours in the log, because the module never
+// evaluated. Observed exactly that on the Go Live screen.
+//
+// Placed at the entry point rather than relying on import order inside a
+// feature module: any formatter that sorts imports would silently reintroduce
+// the crash there. Side-effect import, so it must not be merged with a named
+// one or a bundler may hoist it.
+// eslint-disable-next-line import/order, simple-import-sort/imports
+import '@livekit/react-native';
 
 import { BRAND_ACCENT } from '../constants/theme';
 import { Buffer } from 'buffer';
@@ -23,6 +39,14 @@ import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet, Platform, AppState, InteractionManager } from 'react-native';
 import notifee, { EventType } from '@notifee/react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { enableFreeze } from 'react-native-screens';
+
+// Screens below the top of the stack stay MOUNTED by default, so every one of
+// them keeps re-rendering on each context/state change. Measured on-device:
+// native View count climbed 757 -> 1308 over 10 navigations and never came
+// back, with PSS reaching 359 MB. Freezing suspends offscreen screens without
+// unmounting them, so `back` is still instant.
+enableFreeze(true);
 import { useFonts, Sora_700Bold, Sora_800ExtraBold } from '@expo-google-fonts/sora';
 import { NunitoSans_400Regular, NunitoSans_600SemiBold, NunitoSans_700Bold } from '@expo-google-fonts/nunito-sans';
 import { FontReadyContext } from '../components/ui/Text';
@@ -32,7 +56,7 @@ import { runSecurityCheck } from '../services/securityService';
 import { attachTapHandler } from '../lib/push';
 import { notify as notifyMessage, setSelfId } from '../lib/messageNotifications';
 import { addPersistentListener, getSocket } from '../lib/socket';
-import { registerForCalls, getInitialCallIntent, drainDeclinedCall } from '../lib/CallService';
+import { registerForCalls, refreshCallRegistration, getInitialCallIntent, drainDeclinedCall } from '../lib/CallService';
 import { getActiveCall } from '../lib/callState';
 import { getRingingPeer, setRingingPeer, consumePendingCall } from '../lib/ringTracker';
 import { displayIncomingCall, cancelIncomingCall } from '../lib/callNotification';
@@ -212,7 +236,9 @@ function RootLayout() {
     // survives socket reconnects, like the call listener).
     const cleanupRekey = addPersistentListener('e2ee_rekey', (data: any) => {
       const from = data?.from ?? data?.fromUid;
-      if (from) import('../lib/chatService').then(m => m.handleRekeyRequest(String(from))).catch(() => {});
+      // `force` marks a peer whose CALL setup failed — honoured immediately
+      // rather than being held back by the anti-thrash window.
+      if (from) import('../lib/chatService').then(m => m.handleRekeyRequest(String(from), data?.force === true)).catch(() => {});
     });
 
     // ── Boot work that the user is WAITING for ─────────────────────────
@@ -345,6 +371,27 @@ function RootLayout() {
     return () => sub.remove();
   }, []);
 
+  // KEEP THE CALL DOORBELL ALIVE.
+  //
+  // registerForCalls() runs once at boot, and that is not enough: FCM rotates
+  // tokens (reinstall, data clear, restore, expiry), a phone can boot before its
+  // network is up, and a user can sign in after launch. In all three the server
+  // ends up holding a token that no longer reaches this device, so it stops
+  // ringing while killed — silently, and until the next cold start.
+  //
+  // refreshCallRegistration is cheap: it reads the current token locally and
+  // returns without any network request unless the token actually changed or the
+  // last attempt did not succeed, which is the case on essentially every
+  // foreground. Registered here rather than inside the boot effect so it keeps
+  // running for the whole life of the process.
+  useEffect(() => {
+    void refreshCallRegistration().catch(() => {});
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') void refreshCallRegistration().catch(() => {});
+    });
+    return () => sub.remove();
+  }, []);
+
   // Show spinner while security check runs
   // Prevents any screen flashing before check completes
   if (!securityChecked) {
@@ -437,6 +484,10 @@ function RootLayout() {
         <Stack.Screen name="emergency-sos" />
         <Stack.Screen name="network-test" />
         <Stack.Screen name="file-viewer" />
+        <Stack.Screen name="reader" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="split" />
+        <Stack.Screen name="shelf" />
+        <Stack.Screen name="archive-viewer" />
         <Stack.Screen name="video-player" />
         <Stack.Screen name="voice-speed" />
         <Stack.Screen name="slideshow" />

@@ -26,9 +26,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zishang520/engine.io/v2/types"
 	redisadapter "github.com/zishang520/socket.io-go-redis/adapter"
 	redistypes "github.com/zishang520/socket.io-go-redis/types"
-	"github.com/zishang520/engine.io/v2/types"
 	"github.com/zishang520/socket.io/v2/socket"
 
 	"vaultchat/backend-go/internal/httpx"
@@ -54,6 +54,10 @@ type sockData struct {
 
 	mu        sync.Mutex
 	liveLocOk map[string]bool
+	// Spaces & Operations (S2.8): per-socket cache of run entitlement, keyed
+	// "view:<runId>" / "drive:<runId>". Separate from liveLocOk because a run is
+	// visible to a SUBSET of a space — being in the chat is not enough.
+	runOk map[string]bool
 }
 
 func sd(s *socket.Socket) *sockData {
@@ -136,7 +140,7 @@ func New() *Hub {
 			next(socket.NewExtendedError(err.Error(), nil))
 			return
 		}
-		s.SetData(&sockData{uid: sub, email: email, liveLocOk: map[string]bool{}})
+		s.SetData(&sockData{uid: sub, email: email, liveLocOk: map[string]bool{}, runOk: map[string]bool{}})
 		next(nil)
 	})
 

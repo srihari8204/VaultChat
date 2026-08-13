@@ -23,8 +23,10 @@ import { getSocket } from '../lib/socket';
 import { newCallCipher, openCallOffer, plainCipher, type CallCipher } from '../lib/callCrypto';
 import { getCurrentUserAsync } from './(constants)/authService';
 import * as engine from '../lib/call/engine';
+import { Sheet, type SheetAction } from '../components/ui/Sheet';
 import { CallTimer } from '../components/call/CallTimer';
 import { CallExtras } from '../components/call/CallExtras';
+import { CallEncryptionBadge, protectionFor } from '../components/call/CallEncryptionBadge';
 import {
   useCallConnectedAt, useCallError, useCallFlag, useCallLocalUrl,
   useCallStatus, useCanModerate, useMyHandRaised, useParticipant,
@@ -106,19 +108,25 @@ function GroupCallEngine() {
   const handUp      = useMyHandRaised();
   const canModerate = useCanModerate();
   const hands       = useRaisedHands();
+  const [sheet, setSheet] = useState<{ title: string; message?: string; actions: SheetAction[] } | null>(null);
 
   // Moderation is a menu rather than inline buttons: the actions are rare,
   // mutually exclusive, and destructive-ish (demoting someone mid-sentence), so
   // they belong behind a deliberate tap rather than next to a video surface
   // where a mis-tap is easy.
+  // Five actions: Android's Alert renders three, so 'Move to audience' and
+  // 'Lower hand' were unreachable there. Sheet takes as many as we give it.
   const moderate = useCallback((uid: string, name: string) => {
-    Alert.alert(name, 'Change what this person can do', [
-      { text: 'Make co-host', onPress: () => engine.setRole(uid, 'cohost') },
-      { text: 'Make speaker', onPress: () => engine.setRole(uid, 'speaker') },
-      { text: 'Move to audience', onPress: () => engine.setRole(uid, 'audience') },
-      { text: 'Lower hand', onPress: () => engine.lowerPeerHand(uid) },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+    setSheet({
+      title: name,
+      message: 'Change what this person can do',
+      actions: [
+        { label: 'Make co-host', icon: 'shield-outline', onPress: () => engine.setRole(uid, 'cohost') },
+        { label: 'Make speaker', icon: 'mic-outline', onPress: () => engine.setRole(uid, 'speaker') },
+        { label: 'Move to audience', icon: 'people-outline', onPress: () => engine.setRole(uid, 'audience') },
+        { label: 'Lower hand', icon: 'hand-left-outline', onPress: () => engine.lowerPeerHand(uid) },
+      ],
+    });
   }, []);
   const toggleHand = useCallback(() => engine.raiseHand(!handUp), [handUp]);
 
@@ -155,7 +163,13 @@ function GroupCallEngine() {
         <Text style={S.title} numberOfLines={1}>{name || 'Group call'}</Text>
         {status === 'connected'
           ? <CallTimer style={S.sub} startedAt={connectedAt} />
-          : <Text style={S.sub}>{tiles} on call</Text>}
+          // A recovering group call keeps its timer's place but says what is
+          // happening; showing the participant count would imply everything is
+          // fine while the transport is being rebuilt.
+          : <Text style={S.sub}>{status === 'reconnecting' ? 'Reconnecting…' : `${tiles} on call`}</Text>}
+        {/* D-1: derived from the live participant count, so a call that grows
+            past the mesh cap stops claiming a guarantee it no longer has. */}
+        <CallEncryptionBadge protection={protectionFor(tiles)} />
       </View>
 
       {error ? <Text style={S.err}>{error}</Text> : null}
@@ -194,6 +208,14 @@ function GroupCallEngine() {
         <CtrlBtn icon="hand-left" active={handUp} onPress={toggleHand} colors={colors} />
         <CtrlBtn icon="call" danger onPress={endGroupCall} colors={colors} />
       </View>
+
+      <Sheet
+        visible={!!sheet}
+        title={sheet?.title}
+        message={sheet?.message}
+        actions={sheet?.actions ?? []}
+        onClose={() => setSheet(null)}
+      />
     </View>
   );
 }
@@ -382,6 +404,7 @@ function GroupCallLegacy() {
       <View style={S.topBar}>
         <Text style={S.title} numberOfLines={1}>{name || 'Group call'}</Text>
         <Text style={S.sub}>{tiles} on call</Text>
+        <CallEncryptionBadge protection={protectionFor(tiles)} />
       </View>
 
       {error ? <Text style={S.err}>{error}</Text> : null}

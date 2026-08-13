@@ -128,9 +128,9 @@ async function getObjectStream(key) {
   } catch { return null; }
 }
 
-// Server-side upload of a Buffer → object store. Used by the VaultLens worker to
-// re-host ModelsLab outputs in our own private R2 (so URLs are ours + expire on
-// the bucket lifecycle), and to cache the face reference.
+// Server-side upload of a Buffer → object store, for bytes the server itself
+// produces rather than proxies from a client (so the URLs are ours and expire
+// on the bucket lifecycle).
 async function putObject(key, buffer, contentType = 'application/octet-stream') {
   const c = client();
   if (!c) return false;

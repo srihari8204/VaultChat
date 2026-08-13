@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"vaultchat/backend-go/internal/db"
 )
 
@@ -92,6 +94,21 @@ func sbSweepUncollectedOrders(ctx context.Context) {
 		_, _ = db.Pool.Exec(ctx,
 			`INSERT INTO shopbook_order_event (order_id, status, note)
 			 VALUES ($1,'not_collected','expired')`, x.orderID)
+		// Nobody came for these goods, so they go back on the shelf. Without
+		// this the reservation outlives the order and the shop slowly loses
+		// sellable stock to orders that ended weeks ago.
+		if x.ownerID != "" {
+			if err := db.WithUser(ctx, x.ownerID, func(tx pgx.Tx) error {
+				var shopID string
+				if err := tx.QueryRow(ctx,
+					`SELECT shop_id FROM shopbook_order WHERE id=$1`, x.orderID).Scan(&shopID); err != nil {
+					return err
+				}
+				return sbReleaseOrder(ctx, tx, shopID, x.orderID, x.ownerID, "expired uncollected")
+			}); err != nil {
+				log.Printf("[shopbook-jobs] stock release failed (order=%s): %v", x.orderID, err)
+			}
+		}
 		body := "An order was never collected and has been closed."
 		if x.custID != "" {
 			sbNotify(ctx, x.custID, "Order not collected", body,
@@ -122,8 +139,12 @@ func sbSendDailySummaries(ctx context.Context) {
 			SELECT SUM(CASE WHEN type='purchase' THEN amount ELSE -amount END) AS pending
 			  FROM shopbook_ledger WHERE shop_id=s.id) p ON TRUE
 		  LEFT JOIN LATERAL (
-			SELECT COUNT(*) AS low FROM shopbook_product
-			 WHERE shop_id=s.id AND enabled AND NOT in_stock) st ON TRUE
+			SELECT COUNT(*) AS low FROM shopbook_product p
+			  LEFT JOIN shopbook_stock k ON k.product_id = p.id
+			 WHERE p.shop_id=s.id AND p.enabled
+			   AND CASE WHEN p.track_stock
+			            THEN k.reorder_level > 0 AND k.available <= k.reorder_level
+			            ELSE NOT p.in_stock END) st ON TRUE
 		 WHERE s.approved
 		   AND NOT EXISTS (
 			SELECT 1 FROM shopbook_notification n

@@ -14,8 +14,8 @@
 // Reads the Go dump on stdin.
 
 import {
-  ALL_PERMISSIONS, ROLES,
-  canManageRole, canRemoveMember, canTransferOwnership,
+  ALL_PERMISSIONS, ROLES, RoleDef,
+  canManageRole, canRemoveMember, canTransferOwnership, catalogLayer,
 } from '../lib/groups/permissions';
 
 const read = () =>
@@ -59,6 +59,20 @@ const read = () =>
     checked++;
     const got = canTransferOwnership(a, t);
     if (got !== want) problems.push(`canTransferOwnership(${a}, ${t}): ts=${got} go=${want}`);
+  }
+
+  // Role catalog (migration 084). The catalog itself comes from the Go dump, so
+  // the two sides cannot be compared against different fixtures.
+  const catalog = go.catalog as RoleDef[];
+  for (const [key, role, wantSet, wantPerms] of go.catalogLayer as [string, string, boolean, string[]][]) {
+    checked++;
+    const got = catalogLayer(catalog, key, role);
+    const gotSet = got !== null;
+    if (gotSet !== wantSet) {
+      problems.push(`catalogLayer(${key || '<none>'}, ${role}) present: ts=${gotSet} go=${wantSet}`);
+    } else if (gotSet && !eq(got, wantPerms)) {
+      problems.push(`catalogLayer(${key}, ${role}): ts=[${got}] go=[${wantPerms}]`);
+    }
   }
 
   if (problems.length) {

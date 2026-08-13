@@ -45,10 +45,272 @@ export interface Product {
   category: string;
   unit: string;
   price: number;
-  inStock: boolean;
+  inStock: boolean;    // for a tracked product this is derived: available > 0
   enabled: boolean;
   taxPercent: number;
   updatedAt: string;   // price freshness (shown in comparison)
+  // P0-B inventory. Present only on the OWNER's catalog and only when the
+  // product is tracked — on-hand and cost are the shop's business, so the
+  // customer endpoint never sends them.
+  trackStock: boolean;
+  available?: number;
+  onHand?: number;
+  reserved?: number;
+  reorderLevel?: number;
+  costPrice?: number;
+}
+
+// ── P0-C: live billing ────────────────────────────────────────────
+// Every field here is computed by the server. The client renders the bill it
+// is given and never adds anything up itself — that is the whole design.
+export interface BillLine {
+  id: string; name: string; brand: string; unit: string;
+  requestedQty: number;    // what the customer asked for — never overwritten
+  fulfilledQty: number;    // what the shop actually packed
+  weighed: boolean;        // true once the shop set an actual quantity
+  price: number; taxPercent: number;
+  discount: number; tax: number; total: number;
+  availability: ItemAvailability; removed: boolean; custom: boolean;
+}
+export interface Bill {
+  orderId: string; status: OrderStatus; currency: string;
+  lines: BillLine[];
+  subtotal: number; discount: number; billDiscount: number;
+  taxTotal: number; roundOff: number; deliveryFee: number; total: number;
+  buyerTax: { businessName?: string; taxNumber?: string; address?: string };
+  editable: boolean;
+}
+export function getBill(orderId: string) {
+  return api<Bill>(`/shopbook/my-shop/orders/${orderId}/bill`);
+}
+export interface BillUpdate {
+  lines?: { id: string; fulfilledQty?: number | null; removed?: boolean }[];
+  add?: { productId?: string; name: string; brand?: string; unit?: string; qty: number; price?: number; note?: string };
+  billDiscount?: number;
+}
+// Returns the recomputed bill — always render the response, never local state.
+export function updateBill(orderId: string, patch: BillUpdate) {
+  return api<Bill>(`/shopbook/my-shop/orders/${orderId}/bill`, { method: 'POST', json: patch });
+}
+
+// The customer declares the business they're buying for. A tax number turns
+// the document into a reclaimable tax invoice; omitting it keeps it a retail
+// bill. Must be set before the invoice is issued.
+export function setBuyerTax(orderId: string, buyer: { businessName?: string; taxNumber?: string; address?: string }) {
+  return api<{ ok: boolean; invoiceKind: 'retail' | 'tax' }>(
+    `/shopbook/orders/${orderId}/buyer-tax`, { method: 'POST', json: buyer });
+}
+
+// ── P0-E: payments ────────────────────────────────────────────────
+export type PaymentMethod = 'cash' | 'bank' | 'upi' | 'card' | 'other';
+export interface Payment {
+  id: string; customerId: string; customerName: string; orderId: string;
+  amount: number; method: PaymentMethod; status: string;
+  reference: string; note: string; currency: string; shopName: string; createdAt: string;
+}
+export interface RecordedPayment {
+  id: string; amount: number; method: PaymentMethod; duplicate?: boolean;
+  invoiceId?: string; paymentStatus?: string; paid?: number; due?: number;
+}
+export function recordPayment(p: {
+  customerId: string; orderId?: string; amount: number;
+  method: PaymentMethod; reference?: string; note?: string; idempotencyKey?: string;
+}) {
+  return api<RecordedPayment>(`/shopbook/my-shop/payments`, { method: 'POST', json: p });
+}
+export function shopPayments(customerId?: string) {
+  const qs = customerId ? `?customerId=${encodeURIComponent(customerId)}` : '';
+  return api<{ payments: Payment[] }>(`/shopbook/my-shop/payments${qs}`).then((r) => r.payments);
+}
+export function myPayments() {
+  return api<{ payments: Payment[] }>(`/shopbook/payments`).then((r) => r.payments);
+}
+export function setCreditLimit(customerId: string, creditLimit: number, note = '') {
+  return api<{ ok: boolean; creditLimit: number }>(
+    `/shopbook/my-shop/customers/${customerId}/credit-limit`,
+    { method: 'POST', json: { creditLimit, note } });
+}
+
+// ── P1-A: purchases ───────────────────────────────────────────────
+export interface PurchaseSummary {
+  id: string; supplierName: string; invoiceNumber: string; purchasedOn: string;
+  subtotal: number; taxTotal: number; total: number; note: string; itemCount: number;
+}
+export interface PurchaseItemInput {
+  productId?: string; name: string; unit?: string;
+  qty: number; costPrice: number; taxPercent?: number;
+}
+export interface PurchaseDetail extends Omit<PurchaseSummary, 'itemCount'> {
+  items: (PurchaseItemInput & { lineTax: number; lineTotal: number })[];
+}
+export function purchases() {
+  return api<{ purchases: PurchaseSummary[]; totalSpend: number }>(`/shopbook/my-shop/purchases`);
+}
+export function purchaseDetails(id: string) {
+  return api<PurchaseDetail>(`/shopbook/my-shop/purchases/${id}`);
+}
+export function createPurchase(p: {
+  supplierId?: string; supplierName?: string; invoiceNumber?: string;
+  purchasedOn?: string; note?: string; idempotencyKey?: string;
+  items: PurchaseItemInput[];
+}) {
+  return api<{ id: string; subtotal: number; taxTotal: number; total: number; duplicate?: boolean }>(
+    `/shopbook/my-shop/purchases`, { method: 'POST', json: p });
+}
+
+// ── P1-B: returns and credit notes ────────────────────────────────
+export type ReturnStatus = 'requested' | 'approved' | 'rejected' | 'completed';
+export interface ShopReturn {
+  id: string; orderId: string; status: ReturnStatus; reason: string;
+  decisionNote: string; settlement: 'refund' | 'credit';
+  refundTotal: number; requestedAt: string;
+  customerName: string; shopName: string; currency: string;
+  creditNoteId: string;
+}
+export function requestReturn(orderId: string, reason: string,
+  items: { orderItemId: string; qty: number }[], idempotencyKey?: string) {
+  return api<{ id: string; status: ReturnStatus; refundTotal: number }>(
+    `/shopbook/orders/${orderId}/return`,
+    { method: 'POST', json: { reason, items, idempotencyKey } });
+}
+export function myReturns() {
+  return api<{ returns: ShopReturn[] }>(`/shopbook/returns`).then((r) => r.returns);
+}
+export function shopReturns(status?: string) {
+  const qs = status && status !== 'all' ? `?status=${status}` : '';
+  return api<{ returns: ShopReturn[] }>(`/shopbook/my-shop/returns${qs}`).then((r) => r.returns);
+}
+// `note` is required when refusing — the server enforces it, and a refusal
+// with no reason is the most complained-about outcome of any returns process.
+export function decideReturn(id: string, approve: boolean,
+  opts: { note?: string; settlement?: 'refund' | 'credit'; restock?: boolean } = {}) {
+  return api<{ ok: boolean; status: string; creditNoteId?: string; refundTotal?: number }>(
+    `/shopbook/my-shop/returns/${id}/decide`, { method: 'POST', json: { approve, ...opts } });
+}
+
+export interface CreditNote {
+  id: string; kind: 'credit' | 'debit'; number: number; noteNo: string;
+  reason: string; currency: string; customerName: string;
+  subtotal: number; taxTotal: number; total: number;
+  items: { name: string; unit: string; qty: number; price: number; tax: number; total: number }[];
+  business: { name?: string; address?: string; phone?: string; tax?: Record<string, string> };
+  createdAt: string;
+}
+export function creditNote(id: string) {
+  return api<CreditNote>(`/shopbook/credit-notes/${id}`);
+}
+
+// ── P1-F: shop audit trail ────────────────────────────────────────
+export interface AuditEntry {
+  id: number; actor: string; role: string; action: string;
+  entity: string; entityId: string;
+  before: Record<string, any>; after: Record<string, any>;
+  reason: string; at: string;
+}
+export function auditLog(entity?: string) {
+  const qs = entity ? `?entity=${encodeURIComponent(entity)}` : '';
+  return api<{ entries: AuditEntry[] }>(`/shopbook/my-shop/audit${qs}`).then((r) => r.entries);
+}
+
+// ── P1-D: verification and documents ──────────────────────────────
+export type VerifyState = 'unverified' | 'pending_review' | 'verified' | 'suspended' | 'rejected';
+export interface ShopDocument {
+  id: string; kind: string; filename: string; mime: string;
+  sizeBytes: number; status: 'pending' | 'accepted' | 'rejected';
+  reviewNote: string; uploadedAt: string;
+}
+export function shopDocuments() {
+  return api<{
+    documents: ShopDocument[]; accepted: string[];
+    verifyState: VerifyState; verifyNote: string;
+  }>(`/shopbook/my-shop/documents`);
+}
+// Two steps on purpose: the file goes straight from the device to storage, so
+// it never passes through the API and never sits in a request body.
+export function presignDocument(kind: string, mime: string, size: number) {
+  return api<{ uploadUrl: string; objectKey: string; expiresIn: number }>(
+    `/shopbook/my-shop/documents/presign`, { method: 'POST', json: { kind, mime, size } });
+}
+export function saveDocument(d: {
+  kind: string; objectKey: string; filename?: string; mime?: string; size?: number;
+}) {
+  return api<{ id: string; status: string }>(`/shopbook/my-shop/documents`, { method: 'POST', json: d });
+}
+export function deleteDocument(id: string) {
+  return api<{ ok: boolean }>(`/shopbook/my-shop/documents/${id}`, { method: 'DELETE' });
+}
+// A short-lived link, re-checked every time. Never cache the URL.
+export function documentUrl(id: string) {
+  return api<{ url: string; expiresIn: number }>(`/shopbook/my-shop/documents/${id}/url`);
+}
+export function submitVerification() {
+  return api<{ ok: boolean; verifyState: VerifyState }>(
+    `/shopbook/my-shop/submit-verification`, { method: 'POST', json: {} });
+}
+// Returns the list of what's still missing on a 400, so the UI can say which.
+export function missingForVerification(err: any): string[] | null {
+  return err?.status === 400 && err?.body?.code === 'incomplete' ? (err.body.missing ?? []) : null;
+}
+
+export interface LocationRequest {
+  id: string; status: 'pending' | 'approved' | 'rejected'; reviewNote: string;
+  address: string; reason: string; lat: number; lng: number;
+  distanceKm: number; requestedAt: string;
+}
+export function requestLocationChange(lat: number, lng: number, address: string, reason: string) {
+  return api<{ id: string; status: string; distanceKm: number }>(
+    `/shopbook/my-shop/location-request`, { method: 'POST', json: { lat, lng, address, reason } });
+}
+export function myLocationRequest() {
+  return api<{ request: LocationRequest | null }>(`/shopbook/my-shop/location-request`)
+    .then((r) => r.request);
+}
+// A verified shop's pin is fixed; moving it more than ~300m needs review.
+export function locationLocked(err: any): boolean {
+  return err?.status === 409 && err?.body?.code === 'location_locked';
+}
+
+// ── P0-B: inventory ───────────────────────────────────────────────
+export interface StockRow {
+  productId: string; name: string; brand: string; unit: string;
+  costPrice: number; price: number;
+  onHand: number; reserved: number; available: number; reorderLevel: number;
+  low: boolean;
+}
+export function stockList() {
+  return api<{ stock: StockRow[]; lowCount: number }>(`/shopbook/my-shop/stock`);
+}
+
+export type StockMoveKind = 'opening' | 'purchase' | 'damage' | 'adjustment' | 'return';
+
+// `reason` is required by the server — stock never changes silently.
+export function adjustStock(productId: string, kind: StockMoveKind, qty: number, reason: string) {
+  return api<{ ok: boolean; onHand: number; available: number }>(
+    `/shopbook/my-shop/stock/adjust`,
+    { method: 'POST', json: { productId, kind, qty, reason } },
+  );
+}
+
+export interface StockMovement {
+  id: number; productId: string; name: string; kind: string;
+  onHandDelta: number; reservedDelta: number;
+  unit: string; reason: string; actor: string;
+  refEntity: string; refId: string; at: string;
+}
+export function stockMovements(productId?: string) {
+  const qs = productId ? `?productId=${encodeURIComponent(productId)}` : '';
+  return api<{ movements: StockMovement[] }>(`/shopbook/my-shop/stock/movements${qs}`)
+    .then((r) => r.movements);
+}
+
+// A 409 from setOrderStatus('accepted') when the shelf can't cover the order.
+export interface Shortfall {
+  productId: string; name: string; unit: string; wanted: number; available: number;
+}
+export function shortfallsFrom(err: any): Shortfall[] | null {
+  const b = err?.body;
+  if (err?.status !== 409 || b?.code !== 'insufficient_stock') return null;
+  return (b.shortfalls ?? []) as Shortfall[];
 }
 
 // ── Country Tax Engine ────────────────────────────────────────────
@@ -100,6 +362,19 @@ export interface OrderItem {
   availability: ItemAvailability;
   altName: string;
   altPrice: number;
+  // P0-A: server-computed line money. `custom` = free-typed request the owner
+  // still has to quote, so its price is 0 until they do.
+  productId: string;
+  custom: boolean;
+  lineDiscount: number;
+  lineTax: number;
+  lineTotal: number;
+  // P0-C: dropped at the counter during billing. Kept on the order rather than
+  // deleted, so the record still shows what was asked for.
+  removed?: boolean;
+  // What the customer originally asked for. `qty` is what they were billed —
+  // the quantity actually packed, where the shop weighed it out.
+  requestedQty?: number;
 }
 
 export interface TimelineEvent { status: OrderStatus; note: string; at: string }
@@ -109,6 +384,10 @@ export interface OrderDetail {
   shopId: string;
   status: OrderStatus;
   total: number;
+  // P0-A: the finalized breakdown the invoice and the khata both read.
+  subtotal: number;
+  taxTotal: number;
+  roundOff: number;
   note: string;
   createdAt: string;
   items: OrderItem[];
@@ -127,13 +406,35 @@ export interface OrderDetail {
   rejectReason: string;
   notCollectedReason: string;   // '' unless the order expired or was written off
   hasInvoice: boolean;
+  // Who issued the bill — shop identity travels with the order.
+  shop: {
+    name: string;
+    address: string;
+    phone: string;
+    country: string;
+    ownerName: string;
+    taxConfig: Record<string, string>;   // e.g. { gstin: '29ABCDE1234F1Z5' }
+  };
 }
 
 // ── invoices ──────────────────────────────────────────────────────
 export interface InvoiceLine {
   name: string; brand: string; unit: string; qty: number; price: number; taxPercent: number;
 }
+export interface InvoiceBuyer { businessName?: string; taxNumber?: string; address?: string }
+
 export interface Invoice {
+  // 'tax' carries both parties' tax numbers and is reclaimable by a business
+  // buyer; 'retail' is a plain bill with no statutory fields left blank.
+  kind: 'retail' | 'tax';
+  status: 'draft' | 'issued' | 'cancelled' | 'credited';
+  buyer: InvoiceBuyer;
+  roundOff: number;
+  // Derived from the payments themselves, so it can never claim money that
+  // isn't there.
+  paymentStatus: 'unpaid' | 'partially_paid' | 'paid';
+  paid: number;
+  due: number;
   id: string;
   orderId: string;
   number: number;
@@ -234,9 +535,18 @@ export interface Ledger {
 export interface Dashboard {
   todayOrders: number;
   todaySales: number;
+  todayCustomers: number;
   pendingOrders: number;
   lowStock: number;
   totalPending: number;
+  todayPurchases: number;
+  purchaseSpend: number;
+  // Margin is only present when at least one sale had a cost basis — the
+  // server would rather omit profit than invent it. `marginCoverage` says how
+  // much of the day's revenue the figure actually accounts for.
+  costOfGoods?: number;
+  grossProfit?: number;
+  marginCoverage?: { revenueWithCost: number; revenueTotal: number };
 }
 
 export interface CustomerPending {
@@ -263,14 +573,37 @@ export function shopProducts(id: string) {
 }
 
 export interface PlaceOrderItem {
+  productId?: string;   // catalog row the line came from — the server prices from this
   name: string; brand: string; qty: number; price: number; note: string;
   unit?: string; taxPercent?: number;
 }
 export interface PlaceOrderOpts {
   couponCode?: string; delivery?: boolean; address?: string;
+  // Same key on a retry ⇒ the same order. Generate once per attempt, reuse it
+  // for every retry of that attempt.
+  idempotencyKey?: string;
+  // Set only after the customer has SEEN the new prices and agreed.
+  confirmPricing?: boolean;
 }
+export interface PlacedOrder {
+  id: string; status: OrderStatus;
+  subtotal: number; discount: number; taxTotal: number; deliveryFee: number; total: number;
+  duplicate?: boolean;
+}
+
+// A 409 from placeOrder when the shop's prices moved since the cart rendered.
+// The customer must be shown these before the order is created.
+export interface PriceChange {
+  name: string; brand: string; unit: string; oldPrice: number; newPrice: number;
+}
+export function priceChangesFrom(err: any): { changes: PriceChange[]; total: number } | null {
+  const b = err?.body;
+  if (err?.status !== 409 || b?.code !== 'price_changed') return null;
+  return { changes: (b.changes ?? []) as PriceChange[], total: Number(b.total) || 0 };
+}
+
 export function placeOrder(shopId: string, items: PlaceOrderItem[], note: string, opts: PlaceOrderOpts = {}) {
-  return api<{ id: string; status: OrderStatus; total: number; discount: number; deliveryFee: number }>(
+  return api<PlacedOrder>(
     `/shopbook/orders`,
     { method: 'POST', json: { shopId, items, note, ...opts } },
   );
@@ -322,6 +655,23 @@ export function saveSupplier(sup: Supplier) {
 }
 export function deleteSupplier(id: string) {
   return api<{ ok: boolean }>(`/shopbook/my-shop/suppliers/${id}`, { method: 'DELETE' });
+}
+
+// P2: cursor paging. Pass the previous page's `nextCursor`; an empty
+// nextCursor means the end, so no extra request is needed to discover it.
+export interface Paged<T> { orders: T[]; nextCursor: string }
+export function myOrdersPage(cursor?: string, limit = 50) {
+  const q = new URLSearchParams();
+  if (cursor) q.set('cursor', cursor);
+  q.set('limit', String(limit));
+  return api<Paged<OrderSummary>>(`/shopbook/orders?${q}`);
+}
+export function ownerOrdersPage(status?: string, cursor?: string, limit = 50) {
+  const q = new URLSearchParams();
+  if (status && status !== 'all') q.set('status', status);
+  if (cursor) q.set('cursor', cursor);
+  q.set('limit', String(limit));
+  return api<Paged<OrderSummary>>(`/shopbook/my-shop/orders?${q}`);
 }
 
 export function myOrders() {
@@ -414,11 +764,15 @@ export function ownerCustomerLedger(customerId: string) {
   return api<Ledger>(`/shopbook/my-shop/ledger?customerId=${customerId}`);
 }
 
+// `idempotencyKey` makes a retried payment resolve to the one already
+// recorded instead of crediting the customer twice. Generate it once per
+// entry the owner is trying to save, and reuse it across retries.
 export function addLedgerEntry(
   customerId: string, type: 'purchase' | 'payment', amount: number, remark = '',
+  idempotencyKey?: string,
 ) {
-  return api<{ id: string }>(`/shopbook/my-shop/ledger`, {
-    method: 'POST', json: { customerId, type, amount, remark },
+  return api<{ id: string; duplicate?: boolean }>(`/shopbook/my-shop/ledger`, {
+    method: 'POST', json: { customerId, type, amount, remark, idempotencyKey },
   });
 }
 

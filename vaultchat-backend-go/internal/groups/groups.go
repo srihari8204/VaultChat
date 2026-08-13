@@ -10,6 +10,7 @@
 //
 //	member grant  (chat_members.permission_grants)  — this one member
 //	group override(chats.permission_overrides)      — this group, per role
+//	role catalog  (group_type_config.role_catalog)  — this member's role_key
 //	type default  (group_type_config.default_permissions)
 //
 // A present layer REPLACES the layer beneath it rather than merging into it.
@@ -19,7 +20,12 @@
 // it intends, which is explicit and therefore auditable.
 package groups
 
-import "sort"
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"sort"
+)
 
 // Permission is one capability inside a group.
 type Permission string
@@ -35,6 +41,17 @@ const (
 	PermCreateTasks      Permission = "create_tasks"
 	PermManageCalendar   Permission = "manage_calendar"
 	PermManageAlbum      Permission = "manage_album"
+
+	// ── Spaces & Operations (migration 084) ──
+	// PermDriveRun is deliberately NOT implied by PermManageRuns: the person who
+	// builds the timetable and the person behind the wheel are different jobs,
+	// and a dispatcher who could silently mark riders boarded would make the
+	// manifest worthless as a record.
+	PermManageRuns     Permission = "manage_runs"
+	PermDriveRun       Permission = "drive_run"
+	PermViewSpaceOps   Permission = "view_space_ops"
+	PermManageRoster   Permission = "manage_roster"
+	PermReportIncident Permission = "report_incident"
 )
 
 // All is the complete permission set, in a stable order for display and tests.
@@ -49,6 +66,11 @@ var All = []Permission{
 	PermCreateTasks,
 	PermManageCalendar,
 	PermManageAlbum,
+	PermManageRuns,
+	PermDriveRun,
+	PermViewSpaceOps,
+	PermManageRoster,
+	PermReportIncident,
 }
 
 // Roles, ordered least to most privileged.
@@ -70,10 +92,112 @@ const (
 // is a plain slice rather than a map. A non-nil empty slice is meaningful: it
 // revokes everything for that member.
 type Layers struct {
-	TypeDefault      map[string][]string
-	GroupOverride    map[string][]string
+	TypeDefault   map[string][]string
+	GroupOverride map[string][]string
+
+	// RoleCatalog is the member's display-role entry (migration 084), sitting
+	// between the type default and the group override. Set only when the member
+	// has a role_key that the type's catalog knows AND that entry lists
+	// permissions; an entry with no list means "use the rank default", so it
+	// leaves this layer absent rather than granting nothing.
+	RoleCatalog      []string
+	RoleCatalogIsSet bool
+
 	MemberGrant      []string
 	MemberGrantIsSet bool
+}
+
+// RoleDef is one entry in a space type's role catalog: a display role mapped
+// onto exactly one rank.
+//
+// Rank is what governs member management — CanRemoveMember and CanManageRole
+// never see Key. A "Transport Manager" is an admin wearing a label, so it cannot
+// remove a "Principal" for the same reason no admin can remove an owner. Job
+// titles are presentation; the ladder is not.
+type RoleDef struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	Rank  string `json:"rank"`
+	// Permissions REPLACES the rank's type default when non-nil, matching every
+	// other layer. Nil and empty differ: nil means "inherit the rank default",
+	// empty means "this role holds nothing" — which is exactly a Parent, whose
+	// access comes from space links rather than from any permission.
+	Permissions []string `json:"permissions"`
+}
+
+// ParseRoleCatalog decodes a stored role_catalog and rejects the WHOLE catalog
+// on any bad entry, rather than skipping the bad one.
+//
+// All-or-nothing is the point. A catalog with one unknown rank is a catalog
+// someone hand-edited or half-migrated, and silently dropping the entry would
+// leave those members resolving to their bare rank default — which for a Driver
+// (rank member) is *more* than the catalog intended, not less. Failing the whole
+// layer falls back to a state the type config already describes, and the loud
+// log says why.
+func ParseRoleCatalog(raw []byte) ([]RoleDef, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var defs []RoleDef
+	if err := json.Unmarshal(raw, &defs); err != nil {
+		return nil, fmt.Errorf("role catalog: %w", err)
+	}
+	seen := make(map[string]bool, len(defs))
+	for _, d := range defs {
+		if d.Key == "" {
+			return nil, errors.New("role catalog: entry with empty key")
+		}
+		if seen[d.Key] {
+			return nil, fmt.Errorf("role catalog: duplicate key %q", d.Key)
+		}
+		seen[d.Key] = true
+		if !IsValidRole(d.Rank) {
+			return nil, fmt.Errorf("role catalog: %q has unknown rank %q", d.Key, d.Rank)
+		}
+		for _, p := range d.Permissions {
+			if !IsValidPermission(p) {
+				return nil, fmt.Errorf("role catalog: %q lists unknown permission %q", d.Key, p)
+			}
+		}
+	}
+	return defs, nil
+}
+
+// ValidateRoleCatalog reports whether a catalog is storable. Same rules as
+// ParseRoleCatalog — this is the write-side name for the same check, so a future
+// admin endpoint and the read path cannot disagree about what is valid.
+func ValidateRoleCatalog(raw []byte) error {
+	_, err := ParseRoleCatalog(raw)
+	return err
+}
+
+// FindRole returns the catalog entry for key, or nil.
+func FindRole(defs []RoleDef, key string) *RoleDef {
+	for i := range defs {
+		if defs[i].Key == key {
+			return &defs[i]
+		}
+	}
+	return nil
+}
+
+// CatalogLayer builds the role-catalog layer for a member.
+//
+// It returns "absent" (false) unless the key is known, its rank MATCHES the
+// member's actual rank, and the entry lists permissions. The rank match is a
+// security check, not a tidiness one: role_key is stored on chat_members
+// independently of role, so a stale or tampered key naming a higher-ranked
+// entry would otherwise hand a member that entry's permissions. Mismatch falls
+// through to the rank default.
+func CatalogLayer(defs []RoleDef, roleKey, role string) ([]string, bool) {
+	if roleKey == "" || len(defs) == 0 {
+		return nil, false
+	}
+	d := FindRole(defs, roleKey)
+	if d == nil || d.Rank != role || d.Permissions == nil {
+		return nil, false
+	}
+	return d.Permissions, true
 }
 
 // Set is a resolved permission set.
@@ -141,6 +265,8 @@ func Resolve(role string, l Layers) Set {
 		chosen = l.MemberGrant
 	case l.GroupOverride != nil && hasRole(l.GroupOverride, role):
 		chosen = l.GroupOverride[role]
+	case l.RoleCatalogIsSet:
+		chosen = l.RoleCatalog
 	case l.TypeDefault != nil && hasRole(l.TypeDefault, role):
 		chosen = l.TypeDefault[role]
 	default:

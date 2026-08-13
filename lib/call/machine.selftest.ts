@@ -51,6 +51,36 @@ eq('connectedAt did NOT restart', later.connectedAt, T0);
 const reRing = reduce(connected, { type: 'offer_sent' }, T0 + 5_000);
 check('a re-ring tick cannot demote connected -> ringing', reRing === connected);
 
+console.log('\nreconnecting — the recovery that used to be invisible:');
+// peer.ts holds a dropped call open for 30 s, retrying an ICE restart every 4 s.
+// The engine dispatches 'reconnecting' from renegotiate() and 'recovered' from
+// the peer's onConnected, so these two events bracket every real outage.
+const recovering = reduce(connected, { type: 'reconnecting' }, T0 + 10_000);
+eq('a connected call can start reconnecting', recovering.status, 'reconnecting');
+eq('connectedAt survives the outage', recovering.connectedAt, T0);
+const back = reduce(recovering, { type: 'recovered' }, T0 + 18_000);
+eq('recovered -> connected', back.status, 'connected');
+eq('connectedAt is NOT restamped on recovery', back.connectedAt, T0);
+check('duration spans the outage', durationSeconds(back, T0 + 60_000) === 60);
+// The engine fires 'recovered' on EVERY peer connect, including the first.
+check('recovered on a healthy call is a no-op (same reference)',
+  reduce(connected, { type: 'recovered' }, T0 + 1_000) === connected);
+// A call still dialling is neither reconnecting nor recovered — saying either
+// would be a lie, and the screens render these strings directly.
+const dialling = out();
+check('recovered during setup is a no-op (same reference)',
+  reduce(dialling, { type: 'recovered' }, T0) === dialling);
+check('reconnecting during setup is a no-op (same reference)',
+  reduce(dialling, { type: 'reconnecting' }, T0) === dialling);
+eq('a ringing call cannot become reconnecting',
+  run(out(), [{ type: 'offer_sent' }, { type: 'reconnecting' }]).status, 'ringing');
+// Invariant 1 still rules: nothing resurrects a finished call.
+eq('reconnecting cannot resurrect an ended call',
+  run(out(), [{ type: 'answer_applied' }, { type: 'end', reason: 'failed' }, { type: 'reconnecting' }]).status, 'ended');
+// Real recovery paths land media again, and both routes back must clear it.
+eq('remote media clears reconnecting',
+  reduce(recovering, { type: 'remote_stream', uid: PEER, url: 'rtc://x' }, T0).status, 'connected');
+
 console.log('\nremote media also connects (the ontrack path):');
 const viaTrack = run(out(), [{ type: 'offer_sent' }, { type: 'remote_stream', uid: PEER, url: 'rtc://a' }], T0);
 eq('remote_stream -> connected', viaTrack.status, 'connected');
@@ -180,6 +210,24 @@ check('lowering an already-lowered hand is a no-op',
 const seeded = reduce(withMe, { type: 'hand', uid: 'early', at: T0 - 1000 }, T0);
 eq('a hand can be seeded for an unseen peer', seeded.participants.early.handRaisedAt, T0 - 1000);
 eq('…without inventing a stream for them', seeded.participants.early.streamUrl, null);
+
+console.log('\nno_answer — the ring budget expiring must END the call:');
+// ringAndOffer stops after 9 repeats and used to leave the call in `ringing`
+// forever: no answer, no failure, mic and foreground service still held. The
+// engine now ends it at RING_TIMEOUT_MS; these assert the reducer half.
+const rangOut = run(out(), [{ type: 'offer_sent' }, { type: 'end', reason: 'no_answer' }]);
+eq('an unanswered outgoing call reaches ended', rangOut.status, 'ended');
+eq('…with no_answer recorded', rangOut.endReason, 'no_answer');
+eq('it never connected', rangOut.connectedAt, 0);
+check('so it logs a zero duration', durationSeconds(rangOut, T0 + 60_000) === 0);
+check('and it still cancels the callee ring', shouldCancelRing(run(out(), [{ type: 'offer_sent' }])) === true);
+// Invariant 4: a timeout firing after a real end must not rewrite the cause.
+eq('a late no_answer cannot overwrite an earlier reason',
+  run(out(), [{ type: 'offer_sent' }, { type: 'end', reason: 'local_hangup' }, { type: 'end', reason: 'no_answer' }]).endReason,
+  'local_hangup');
+// The timeout is guarded by isDone(), but the reducer must be safe regardless.
+eq('no_answer cannot end a call that already connected',
+  run(out(), [{ type: 'answer_applied' }]).status, 'connected');
 
 console.log('\nlog derivation (what addCallLog needs):');
 eq('duration of a connected call', durationSeconds(connected, T0 + 65_400), 65);

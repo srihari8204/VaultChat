@@ -42,6 +42,14 @@ export type CallEvent =
   | { type: 'remote_stream'; uid: string; url: string | null; name?: string }
   /** Remote SDP applied. Connects even before the first frame (audio calls). */
   | { type: 'answer_applied' }
+  /**
+   * The transport for a call that WAS connected is being rebuilt — a Wi-Fi↔LTE
+   * handover, an ICE failure, or a stall in `connecting` after connect. Emitted
+   * by the engine whenever it sends an ICE-restart offer.
+   */
+  | { type: 'reconnecting' }
+  /** A peer reached `connected` again. Only meaningful while reconnecting. */
+  | { type: 'recovered' }
   /** A mesh peer left. In 1:1 this ends the call; the engine decides that. */
   | { type: 'peer_left'; uid: string }
   | { type: 'peer_muted'; uid: string; muted: boolean }
@@ -156,6 +164,25 @@ export function reduce(s: CallSnapshot, e: CallEvent, now: number): CallSnapshot
     case 'answer_applied':
       if (s.status === 'connected') return s;   // invariant 2
       return { ...s, status: 'connected', connectedAt: s.connectedAt || now };
+
+    case 'reconnecting':
+      // Only a call that HAD media can lose it. During setup the status is
+      // already `connecting`/`ringing`, and an ICE restart fired then would
+      // otherwise relabel a call that is still dialling as "Reconnecting…" —
+      // which is a lie, and a worse one than saying nothing.
+      if (s.status !== 'connected') return s;
+      return { ...s, status: 'reconnecting' };
+
+    case 'recovered':
+      // Idempotent by construction: the engine dispatches this on EVERY peer
+      // reaching `connected`, including the first one of the call, and this
+      // guard makes all but a genuine recovery a no-op.
+      if (s.status !== 'reconnecting') return s;
+      // connectedAt is NOT re-stamped — invariant 2. The outage is part of the
+      // call's duration, which is what the user experienced and what the log
+      // should record; restarting the timer would also make <CallTimer> jump
+      // backwards on screen.
+      return { ...s, status: 'connected' };
 
     case 'peer_left': {
       if (!s.participants[e.uid]) return s;

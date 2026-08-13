@@ -7,6 +7,7 @@ package routes
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -27,9 +28,13 @@ func RegisterShopBookAdmin(mux *http.ServeMux) {
 
 func sbAdminLog(ctx context.Context, action, target string, detail map[string]any) {
 	dj, _ := json.Marshal(detail)
-	_, _ = db.Pool.Exec(ctx,
+	// An audit trail that fails quietly is worse than none — it reads as "no
+	// admin ever did anything". Log the failure so the gap is visible.
+	if _, err := db.Pool.Exec(ctx,
 		`INSERT INTO shopbook_admin_log (action, target, detail) VALUES ($1,$2,$3)`,
-		action, target, dj)
+		action, target, sbJSON(dj)); err != nil {
+		log.Printf("[shopbook-admin] audit log insert failed (action=%s target=%s): %v", action, target, err)
+	}
 }
 
 // Platform stats: shops by approval, orders, GMV, customers.
@@ -206,7 +211,7 @@ func sbAdminSaveCountry(w http.ResponseWriter, r *http.Request) {
 		  name=$2, currency_symbol=$3, currency_code=$4, tax_type=$5, tax_split=$6,
 		  tax_fields=$7, documents=$8, date_format=$9, sort=$10, enabled=$11, updated_at=NOW()`,
 		b.Code, b.Name, b.CurrencySymbol, b.CurrencyCode, b.TaxType,
-		b.TaxSplit, b.TaxFields, b.Documents, b.DateFormat, b.Sort, enabled)
+		sbJSON(b.TaxSplit), sbJSON(b.TaxFields), sbJSON(b.Documents), b.DateFormat, b.Sort, enabled)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "db error")
 		return

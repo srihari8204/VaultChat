@@ -78,24 +78,26 @@ async function downloadAndDecrypt(
 }
 
 // Resolve a renderable URI for an attachment, decrypting if we hold a key.
+/**
+ * Resolve an attachment to a renderable URI. Thin wrapper over
+ * getAttachmentLocalUri so every caller shares ONE persistent, cache-first path.
+ *
+ * It used to differ in two ways that both broke offline viewing:
+ *   • Plaintext attachments returned the REMOTE url, so opening a photo needed
+ *     the network every single time — nothing to show on a plane, and a
+ *     re-download on every open when there was signal.
+ *   • Encrypted attachments were decrypted into FileSystem.cacheDirectory,
+ *     which Android evicts under storage pressure and "Clear cache" wipes.
+ *     Combined with the server purging media after delivery, an eviction meant
+ *     the media was gone for good — there is no second copy to re-download.
+ *
+ * Both now resolve to the persistent media dir, so a file that has been opened
+ * once opens instantly and offline forever after.
+ */
 export async function getDecryptedAttachmentUri(
   attachmentId: string,
 ): Promise<{ uri: string; headers?: Record<string, string> }> {
-  const token = await getAccessToken();
-  const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
-
-  const mk = await getMediaKey(attachmentId);
-  if (!mk) return { uri: attachmentUrl(attachmentId), headers }; // plaintext / no key
-
-  const cached = (FileSystem as any).cacheDirectory + `dec_${attachmentId}`;
-  const info = await FileSystem.getInfoAsync(cached);
-  if (!info.exists) {
-    // P3.1: download to disk + streaming decrypt — the old fetch→arrayBuffer→
-    // base64 path held the whole ciphertext AND plaintext in the JS heap (the
-    // exact pattern the plaintext branch was rewritten to avoid).
-    await downloadAndDecrypt(attachmentId, mk, cached, headers);
-  }
-  return { uri: cached }; // local decrypted file; no auth header needed
+  return { uri: await getAttachmentLocalUri(attachmentId) };
 }
 
 // Resolve ANY attachment (plaintext or encrypted) to a local file:// URI.
@@ -123,9 +125,21 @@ export async function getAttachmentLocalUri(attachmentId: string): Promise<strin
 
   await ensureMediaDir();
   const cached = MEDIA_DIR + `media_${attachmentId}`;
-  // Migrate any file previously saved in the cache dir so existing media isn't re-downloaded.
   const info = await FileSystem.getInfoAsync(cached);
   if (info.exists && (info as any).size) return cached;
+
+  // Adopt a copy left in the cache dir by the old getDecryptedAttachmentUri.
+  // This is not just an optimisation: the server purges media after delivery,
+  // so for anything already delivered this cached file is the ONLY copy left.
+  // Re-downloading would 404 and the user would lose media they can see today.
+  try {
+    const legacy = (FileSystem as any).cacheDirectory + `dec_${attachmentId}`;
+    const li = await FileSystem.getInfoAsync(legacy);
+    if (li.exists && (li as any).size) {
+      await FileSystem.moveAsync({ from: legacy, to: cached });
+      return cached;
+    }
+  } catch { /* fall through to a normal fetch */ }
 
   if (!mk) {
     // Plaintext: STREAM the bytes straight to disk. Never load the whole file

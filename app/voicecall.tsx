@@ -39,8 +39,10 @@ import { newCallCipher, openCallOffer, plainCipher, type CallCipher } from '../l
 import { CallTimer, elapsedSeconds } from '../components/call/CallTimer';
 import { CallControlButton } from '../components/call/CallControlButton';
 import { CallExtras } from '../components/call/CallExtras';
+import { CallEncryptionBadge } from '../components/call/CallEncryptionBadge';
 import { CALL_ENGINE_V2 } from '../constants/flags';
 import * as engine from '../lib/call/engine';
+import { DISCONNECT_GRACE_MS } from '../lib/call/peer';
 import { useCallConnectedAt, useCallError, useCallFlag, useCallStatus } from '../hooks/useCall';
 
 type CallState = 'connecting' | 'ringing' | 'connected' | 'ended';
@@ -73,6 +75,29 @@ function VoiceCallEngine() {
       chatId: string; peerUid: string; peerName: string;
       isIncoming?: string; initialOffer?: string;
     }>();
+
+  // Who we are talking to.
+  //
+  // peerName is a route param and arrives EMPTY on several paths — an incoming
+  // call whose signal carried no name, or an outgoing one started from a list
+  // whose title had not loaded — so the screen showed "VaultChat user" during
+  // the call. To be in a call at all we already share a chat, so the name is in
+  // our own store; look it up rather than trusting what was passed in.
+  //
+  // Display only: nothing here touches the call, and a failed lookup simply
+  // leaves the previous fallback in place.
+  const [lookedUpName, setLookedUpName] = useState<string | null>(null);
+  useEffect(() => {
+    if (peerName || !chatId) return;
+    let cancelled = false;
+    (async () => {
+      const { getChat } = await import('../lib/chatService');
+      const n = (await getChat(String(chatId)))?.peerName?.trim();
+      if (!cancelled && n) setLookedUpName(n);
+    })().catch(() => { /* keep the fallback */ });
+    return () => { cancelled = true; };
+  }, [chatId, peerName]);
+  const displayName = peerName || lookedUpName || 'VaultChat user';
 
   const status      = useCallStatus();
   const connectedAt = useCallConnectedAt();
@@ -110,10 +135,14 @@ function VoiceCallEngine() {
     return () => clearTimeout(t);
   }, [status, router]);
 
+  // `reconnecting` MUST have its own branch: this chain falls through to
+  // 'Call ended', so without it a call that is recovering would announce
+  // itself as already over — the opposite of what is happening.
   const statusText = status === 'connecting' ? 'Connecting…'
     : status === 'ringing' ? 'Ringing…'
+    : status === 'reconnecting' ? 'Reconnecting…'
     : 'Call ended';
-  const initial = (peerName?.trim()[0] ?? '?').toUpperCase();
+  const initial = (displayName.trim()[0] ?? '?').toUpperCase();
 
   return (
     <View style={S.screen}>
@@ -122,11 +151,13 @@ function VoiceCallEngine() {
         <View style={S.avatarWrap}>
           <View style={S.avatar}><Text style={S.avatarTxt}>{initial}</Text></View>
         </View>
-        <Text style={S.name}>{peerName || 'VaultChat user'}</Text>
+        <Text style={S.name}>{displayName}</Text>
         {status === 'connected'
           ? <CallTimer style={S.status} startedAt={connectedAt} />
           : <Text style={S.status}>{statusText}</Text>}
         {error && <Text style={S.errorTxt}>{error}</Text>}
+        {/* D-1: a 1:1 call is peer-to-peer, so this claim is the strong one. */}
+        <CallEncryptionBadge protection="e2ee" />
       </View>
 
       {status === 'connected' && <CallExtras bottom={insets.bottom + 116} />}
@@ -161,6 +192,7 @@ function VoiceCallLegacy() {
   const [error,   setError]   = useState<string | null>(null);
 
   const pcRef           = useRef<RTCPeerConnection | null>(null);
+  const disconnectGraceRef = useRef<any>(null);   // see onconnectionstatechange
   // E2EE signaling cipher (F6) — per-call key; plaintext passthrough for legacy peers.
   const cipherRef       = useRef<CallCipher>(plainCipher);
   const localStreamRef  = useRef<any>(null);
@@ -185,6 +217,7 @@ function VoiceCallLegacy() {
     try { InCallManager.stop(); } catch {}
     stopCallForeground();   // release the mic foreground service + wake lock
     try { localStreamRef.current?.getTracks().forEach((t: any) => t.stop()); } catch {}
+    if (disconnectGraceRef.current) { clearTimeout(disconnectGraceRef.current); disconnectGraceRef.current = null; }
     try { pcRef.current?.close(); } catch {}
     pcRef.current = null;
     if (notify && peerUid) {
@@ -341,10 +374,23 @@ function VoiceCallLegacy() {
           s.emit('webrtc_ice', { to: peerUid, from: meIdRef.current, candidate: cipherRef.current.seal(event.candidate) });
         };
 
+        // `disconnected` is TRANSIENT — a Wi-Fi→LTE handover, a lift, a tunnel —
+        // and usually recovers on its own. Ending the call on it drops a call on
+        // every blip. Only `failed`/`closed` are terminal; `disconnected` gets an
+        // ICE restart and a grace window first. (Mirrors lib/call/peer.ts.)
         (pc as any).onconnectionstatechange = () => {
           const st = (pc as any).connectionState;
-          if (st === 'failed' || st === 'disconnected' || st === 'closed') {
-            endCall(true);
+          if (st !== 'disconnected' && disconnectGraceRef.current) {
+            clearTimeout(disconnectGraceRef.current);
+            disconnectGraceRef.current = null;
+          }
+          if (st === 'failed' || st === 'closed') { endCall(true); return; }
+          if (st === 'disconnected' && !disconnectGraceRef.current) {
+            try { (pc as any).restartIce?.(); } catch {}
+            disconnectGraceRef.current = setTimeout(() => {
+              disconnectGraceRef.current = null;
+              if ((pc as any).connectionState === 'disconnected') endCall(true);
+            }, DISCONNECT_GRACE_MS);
           }
         };
 

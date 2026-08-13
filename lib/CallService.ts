@@ -16,23 +16,134 @@
 import { NativeModules, Platform } from 'react-native';
 import { api, getAccessToken } from './api';
 import { SERVER_URL } from '../constants/server';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  pushRetryDelayMs, setPushOutcome, shouldReregister, shouldRetryPush, type PushOutcome,
+} from './pushRegistration';
 
 const VaultCalls: any = NativeModules.VaultCalls ?? null;
 const has = () => Platform.OS === 'android' && !!VaultCalls;
 
-/** Register this device for call wake-ups. Call after sign-in + on app start. */
-export async function registerForCalls(): Promise<void> {
-  if (!has()) return;
+// What we last successfully told the server, so a rotation can be spotted.
+// AsyncStorage, not SecureStore: an FCM token is a routing address, not a
+// secret — it is useless without our server's credentials — and SecureStore
+// reads are slow enough to matter on a path that runs at every foreground.
+const LAST_TOKEN_KEY = 'push:lastRegisteredToken';
+const LAST_OUTCOME_KEY = 'push:lastOutcome';
+
+async function loadLast(): Promise<{ token: string | null; outcome: PushOutcome | null }> {
   try {
-    const token = await VaultCalls.getFcmToken();
-    if (!token) return;
-    const access = await getAccessToken();
-    // Let the native FCM service fetch the caller DP for the ring notification.
-    try { VaultCalls.setApiContext(SERVER_URL, access || ''); } catch {}
-    await api('/call/token', { method: 'POST', json: { fcmToken: token, platform: 'android' } });
-  } catch (e) {
-    if (__DEV__) console.warn('[CallService] register failed:', (e as any)?.message);
+    const [token, outcome] = await Promise.all([
+      AsyncStorage.getItem(LAST_TOKEN_KEY),
+      AsyncStorage.getItem(LAST_OUTCOME_KEY),
+    ]);
+    return { token, outcome: (outcome as PushOutcome) ?? null };
+  } catch {
+    // Storage unavailable — treat as "never registered", which re-POSTs. A
+    // duplicate registration is harmless; a missed one costs the user calls.
+    return { token: null, outcome: null };
   }
+}
+
+/** One registration attempt. Classifies the outcome; never throws. */
+async function attemptRegister(): Promise<PushOutcome> {
+  if (!has()) return 'no_platform';
+
+  let token: string | null = null;
+  try {
+    token = await VaultCalls.getFcmToken();
+  } catch {
+    // The provider itself could not issue a token. On Android that means Play
+    // Services is missing, disabled or too old — a device with no GMS at all
+    // (Huawei post-2019) lands here on every attempt. It is a permanent fact
+    // about the install, not a transient error, so it must NOT be retried.
+    return 'no_provider';
+  }
+  if (!token) return 'no_provider';
+
+  const access = await getAccessToken();
+  if (!access) return 'not_signed_in';
+
+  // Let the native FCM service fetch the caller DP for the ring notification.
+  try { VaultCalls.setApiContext(SERVER_URL, access); } catch {}
+
+  try {
+    await api('/call/token', { method: 'POST', json: { fcmToken: token, platform: 'android' } });
+    // Remember WHAT was registered, so a later rotation is detectable. Written
+    // only on success: recording a token we failed to deliver would make the
+    // next foreground think the server already had it.
+    try { await AsyncStorage.setItem(LAST_TOKEN_KEY, token); } catch {}
+    return 'ok';
+  } catch {
+    // Network still coming up at boot, or the server is briefly unhappy. Worth
+    // another try — this is the case the old one-shot silently lost.
+    return 'transient';
+  }
+}
+
+/**
+ * Register this device for call wake-ups. Call after sign-in + on app start.
+ *
+ * Retries transient failures and RECORDS the outcome, neither of which it used
+ * to do. The previous version was a one-shot whose every failure vanished behind
+ * `if (__DEV__)`, so in a release build a phone that booted without network
+ * registered no token for the whole session, rang for nothing while killed, and
+ * left no trace of why. See lib/pushRegistration.ts.
+ *
+ * Resolves with the final outcome; never rejects. The push is a DOORBELL only —
+ * signalling is a socket and media is peer-to-peer — so a failure here degrades
+ * "rings while closed" and nothing else. That is why this stays off the critical
+ * path and is safe to leave unawaited.
+ */
+export async function registerForCalls(): Promise<PushOutcome> {
+  let outcome: PushOutcome = 'transient';
+  for (let attempt = 0; ; attempt++) {
+    outcome = await attemptRegister();
+    if (!shouldRetryPush(outcome, attempt)) break;
+    await new Promise(r => setTimeout(r, pushRetryDelayMs(attempt + 1)));
+  }
+
+  setPushOutcome(outcome);
+  // PERSISTED, so the decision to re-register survives a process restart. Without
+  // it, a device that failed registration would look identical on next launch to
+  // one that succeeded, and shouldReregister could not tell them apart.
+  try { await AsyncStorage.setItem(LAST_OUTCOME_KEY, outcome); } catch {}
+  // Logged in RELEASE too, deliberately: this is exactly the state that was
+  // invisible before, and "calls don't ring when the app is closed" is
+  // undiagnosable without it. One line per app start — no volume concern.
+  if (outcome === 'ok') console.warn('[push] registered for call wake-ups');
+  else console.warn(`[push][FAIL] stage=REGISTER code=${outcome.toUpperCase()} wakeable=false`);
+  return outcome;
+}
+
+/**
+ * Re-check registration cheaply. Safe to call on every app foreground.
+ *
+ * This is the half that was missing entirely. registerForCalls ran ONCE at boot,
+ * so the three ordinary ways registration goes stale all went unnoticed:
+ *
+ *   • FCM rotated the token (reinstall, data clear, restore, expiry). The native
+ *     onNewToken handler stored it and nothing ever sent it, so the server kept
+ *     addressing a dead token and the phone quietly stopped ringing while killed.
+ *   • The app booted with no network, so the initial attempt failed and nothing
+ *     ever tried again for the life of the process.
+ *   • The user signed in after launch, so the first attempt had no access token.
+ *
+ * Cheap by construction: it reads the current token (a local Firebase call) and
+ * returns without a network request when nothing has changed, which is the case
+ * on essentially every foreground.
+ */
+export async function refreshCallRegistration(): Promise<void> {
+  if (!has()) return;
+  let token: string | null = null;
+  try { token = await VaultCalls.getFcmToken(); } catch { token = null; }
+
+  const prev = await loadLast();
+  if (token && token !== prev.token && prev.token) {
+    console.warn('[push] FCM token rotated — re-registering');
+  }
+  if (!shouldReregister(prev, token)) return;
+  await registerForCalls();
 }
 
 /** Keep audio alive while a call is connected. */

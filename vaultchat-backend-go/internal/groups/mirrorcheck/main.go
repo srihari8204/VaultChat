@@ -32,9 +32,35 @@ func main() {
 			}
 		}
 	}
+	// Role catalog (migration 084). Exhaustive over every probe role against a
+	// catalog that covers each interesting shape — replace, inherit, revoke, and
+	// a rank that does not match. The rank-mismatch rows are the ones worth
+	// having: if one side forgets that check, that side silently escalates.
+	catalog := []groups.RoleDef{
+		{Key: "principal", Label: "Principal", Rank: groups.RoleOwner},
+		{Key: "manager", Label: "Manager", Rank: groups.RoleAdmin,
+			Permissions: []string{"manage_runs", "view_space_ops"}},
+		{Key: "driver", Label: "Driver", Rank: groups.RoleMember,
+			Permissions: []string{"drive_run", "report_incident"}},
+		{Key: "parent", Label: "Parent", Rank: groups.RoleMember, Permissions: []string{}},
+		{Key: "teacher", Label: "Teacher", Rank: groups.RoleMember},
+	}
+	catalogKeys := []string{"principal", "manager", "driver", "parent", "teacher", "astronaut", ""}
+	catalogCases := [][]any{}
+	for _, key := range catalogKeys {
+		for _, role := range probe {
+			perms, set := groups.CatalogLayer(catalog, key, role)
+			if perms == nil {
+				perms = []string{}
+			}
+			catalogCases = append(catalogCases, []any{key, role, set, perms})
+		}
+	}
+
 	b, err := json.Marshal(map[string]any{
 		"permissions": all, "roles": roles,
 		"manageRole": manage, "removeMember": remove, "transfer": transfer,
+		"catalog": catalog, "catalogLayer": catalogCases,
 	})
 	if err != nil {
 		panic(err)

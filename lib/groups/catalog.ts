@@ -19,7 +19,9 @@ import type { Ionicons } from '@expo/vector-icons';
 export type GroupType =
   | 'family' | 'friends' | 'office' | 'colleagues' | 'travel' | 'school'
   | 'college' | 'sports' | 'emergency' | 'neighborhood' | 'business'
-  | 'pet_care' | 'riders' | 'custom';
+  | 'pet_care' | 'riders' | 'custom'
+  // Spaces & Operations (migration 084).
+  | 'school_transport' | 'office_transport';
 
 export interface GroupTypeInfo {
   type: GroupType;
@@ -39,9 +41,11 @@ export const GROUP_TYPES: GroupTypeInfo[] = [
   { type: 'family',       label: 'Family',       icon: 'home',           color: '#9D6FD0', blurb: 'Your household' },
   { type: 'friends',      label: 'Friends',      icon: 'people',         color: '#4A9FFF', blurb: 'People you make plans with' },
   { type: 'office',       label: 'Office',       icon: 'briefcase',      color: '#14B8A6', blurb: 'Your team at work' },
+  { type: 'office_transport', label: 'Office Transport', icon: 'car',    color: '#14B8A6', blurb: 'Cabs, drivers and pickups' },
   { type: 'colleagues',   label: 'Colleagues',   icon: 'people-circle',  color: '#0EA5E9', blurb: 'Wider work circle' },
   { type: 'travel',       label: 'Travel',       icon: 'airplane',       color: '#F59E0B', blurb: 'A trip you are taking together' },
   { type: 'school',       label: 'School',       icon: 'school',         color: '#A855F7', blurb: 'Class, bus route or parents' },
+  { type: 'school_transport', label: 'School Transport', icon: 'bus',    color: '#A855F7', blurb: 'Bus routes, drivers and pickups' },
   { type: 'college',      label: 'College',      icon: 'library',        color: '#8B5CF6', blurb: 'Course mates and hostel' },
   { type: 'sports',       label: 'Sports',       icon: 'football',       color: '#22C55E', blurb: 'A team or a riding club' },
   { type: 'emergency',    label: 'Emergency',    icon: 'medkit',         color: '#EF4444', blurb: 'Who to reach when it matters' },
@@ -95,12 +99,22 @@ export function groupIdentity(group: {
 
 // ── self-check ──
 if (require.main === module) {
-  // Pinned to the number of rows group_type_config carries (migrations 070 and
-  // 069). The point is not the number — it is that adding a type on one side
-  // and not the other trips a test instead of silently rendering as UNTYPED.
-  if (GROUP_TYPES.length !== 14) throw new Error(`expected 14 types, got ${GROUP_TYPES.length}`);
-  for (const t of ['pet_care', 'riders'] as const) {
-    if (!isGroupType(t)) throw new Error(`${t} was added in migration 073 and must be in the catalog`);
+  // The client list is checked against the migrations that actually seed
+  // group_type_config — but by scripts/check-space-types.ts, NOT here.
+  //
+  // That check has to read the SQL files, and anything this file requires gets
+  // bundled into the app: Metro resolves `require('fs')` statically, even inside
+  // a branch that never runs on a device, and fails the build with "Unable to
+  // resolve module fs". This self-check therefore stays free of Node built-ins,
+  // like every other one in the codebase.
+  //
+  //   npx tsx scripts/check-space-types.ts
+  if (GROUP_TYPES.length < 16) {
+    throw new Error(`expected at least 16 types, got ${GROUP_TYPES.length} — run scripts/check-space-types.ts`);
+  }
+
+  for (const t of ['pet_care', 'riders', 'school_transport', 'office_transport'] as const) {
+    if (!isGroupType(t)) throw new Error(`${t} is seeded server-side and must be in the catalog`);
   }
 
   // every type unique, and every colour a 6-digit hex

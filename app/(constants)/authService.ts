@@ -20,6 +20,7 @@ import {
   setTokens,
 } from '../../lib/api';
 import { lockSession } from '../../lib/sessionLock';
+import * as pinStore from '../../services/security/pinStore';
 
 // Web Client ID from Firebase Console → Auth → Sign-in method → Google.
 // (Google Sign-In SDK still talks to Google's OAuth — the resulting
@@ -171,17 +172,43 @@ export interface SignupData {
   securityQ2: string; securityA2: string;
 }
 
+// SecureStore, not AsyncStorage. securityA1/A2 are ACCOUNT-RECOVERY CREDENTIALS
+// — answering them is how someone proves they are you — and they were being
+// written to AsyncStorage, which is an unencrypted SQLite file in the app
+// sandbox. They also survive an abandoned signup: the key is only cleared on
+// success, so a user who quit at the OTP step left their answers on disk
+// indefinitely.
+//
+// The whole blob moves rather than just the answers: the name/dob/email/mobile
+// beside them are the exact fields a recovery flow asks to corroborate, so
+// splitting the record would protect the answer and leak the check.
+const PENDING_SIGNUP_KEY = 'vc_pending_signup';
+
 export async function savePendingSignup(d: SignupData) {
-  await AsyncStorage.setItem('vc_pending_signup', JSON.stringify(d));
+  await SecureStore.setItemAsync(PENDING_SIGNUP_KEY, JSON.stringify(d));
 }
 
 export async function getPendingSignup(): Promise<SignupData | null> {
-  const r = await AsyncStorage.getItem('vc_pending_signup');
-  return r ? JSON.parse(r) : null;
+  try {
+    const r = await SecureStore.getItemAsync(PENDING_SIGNUP_KEY);
+    if (r) return JSON.parse(r);
+  } catch {}
+  // Migration: an install that started signup on an older build still has the
+  // cleartext copy. Read it once, re-seal it, and delete the plaintext.
+  try {
+    const legacy = await AsyncStorage.getItem(PENDING_SIGNUP_KEY);
+    if (!legacy) return null;
+    await SecureStore.setItemAsync(PENDING_SIGNUP_KEY, legacy).catch(() => {});
+    await AsyncStorage.removeItem(PENDING_SIGNUP_KEY).catch(() => {});
+    return JSON.parse(legacy);
+  } catch { return null; }
 }
 
 export async function clearPendingSignup() {
-  await AsyncStorage.removeItem('vc_pending_signup').catch(() => {});
+  await SecureStore.deleteItemAsync(PENDING_SIGNUP_KEY).catch(() => {});
+  // Clear the legacy key too, even on installs that never read it back —
+  // otherwise an abandoned signup keeps its answers in the clear forever.
+  await AsyncStorage.removeItem(PENDING_SIGNUP_KEY).catch(() => {});
 }
 
 /**
@@ -220,50 +247,70 @@ export async function saveUserProfile(d: SignupData) {
   });
 }
 
-// ─── PIN (local hash + best-effort backend sync) ─────────────
-async function sha256(s: string): Promise<string> {
-  if (!s) throw new Error('Cannot hash empty string');
-  return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, s);
-}
+// ─── PIN (one store: services/security/pinStore) ─────────────
+// Was an unsalted SHA-256 under 'vc_pin_hash' — a 4-8 digit PIN is ~10^8
+// candidates, so that hash was a formality. pinStore derives with scrypt over a
+// per-install salt (the same KDF the vault headers use) and migrates the old
+// value on the next successful unlock.
 
 export async function savePIN(pin: string) {
-  if (!pin || pin.length < 4 || pin.length > 8 || !/^\d+$/.test(pin)) {
-    throw new Error('PIN must be 4-8 digits');
-  }
-  const hash = await sha256(pin);
-  await SecureStore.setItemAsync('vc_pin_hash', hash);
-  // Best-effort backend save so the user can verify PIN from any device later.
+  await pinStore.setPin(pin);              // validates 4-8 digits
+  // Best-effort backend save so the user can verify their PIN from a new device
+  // (POST /user/pin bcrypts it server-side). Note this is the one moment the PIN
+  // leaves the device — drop this call if that trade isn't wanted.
   try { await api('/user/pin', { method: 'POST', json: { pin } }); } catch {}
 }
 
 export async function verifyPIN(pin: string): Promise<boolean> {
-  const stored = await SecureStore.getItemAsync('vc_pin_hash');
-  if (!stored) return false;
-  const hash = await sha256(pin);
-  return hash === stored;
+  return pinStore.verifyPin(pin);
 }
 
 export async function hasPIN(): Promise<boolean> {
-  try { return !!(await SecureStore.getItemAsync('vc_pin_hash')); } catch { return false; }
+  return pinStore.hasPin();
 }
 
-// ─── Face enrollment (local-only, unchanged) ─────────────────
+// ─── Face enrollment (local-only) ────────────────────────────
+// The stored value is a path to a photo of the user's face, used as an
+// authentication factor. A path is not the image, but it is a direct pointer to
+// it, and in AsyncStorage it sat in the clear alongside everything else — so
+// anything that could read the app's unencrypted store learned exactly where
+// the biometric samples live. SecureStore is where the other authentication
+// material (the PIN record, tokens) already is.
+const faceKey = (i: number) => 'vc_face_' + i;
+
 export async function enrollFace(uri: string, index: number) {
   if (index < 0 || index > 2) throw new Error('Face index must be 0-2');
   if (!uri) throw new Error('Face URI required');
-  await AsyncStorage.setItem('vc_face_' + index, uri);
+  await SecureStore.setItemAsync(faceKey(index), uri);
+  // Drop any cleartext copy this slot had from an older build.
+  await AsyncStorage.removeItem(faceKey(index)).catch(() => {});
+}
+
+/** Sealed value, falling back to a legacy cleartext one and upgrading it. */
+async function readFace(i: number): Promise<string | null> {
+  try {
+    const v = await SecureStore.getItemAsync(faceKey(i));
+    if (v) return v;
+  } catch {}
+  try {
+    const legacy = await AsyncStorage.getItem(faceKey(i));
+    if (!legacy) return null;
+    await SecureStore.setItemAsync(faceKey(i), legacy).catch(() => {});
+    await AsyncStorage.removeItem(faceKey(i)).catch(() => {});
+    return legacy;
+  } catch { return null; }
 }
 
 export async function getEnrolledFaceCount(): Promise<number> {
   let c = 0;
   for (let i = 0; i < 3; i++) {
-    if (await AsyncStorage.getItem('vc_face_' + i)) c++;
+    if (await readFace(i)) c++;
   }
   return c;
 }
 
 export async function hasFaceEnrolled(): Promise<boolean> {
-  try { return !!(await AsyncStorage.getItem('vc_face_0')); } catch { return false; }
+  try { return !!(await readFace(0)); } catch { return false; }
 }
 
 // ─── Current user / setup state ──────────────────────────────
@@ -330,10 +377,12 @@ export async function logoutUser() {
   // survive into the next account signed in on this device.
   try { require('../../lib/iceConfig').invalidateIceCache(); } catch {}
   for (let i = 0; i < 3; i++) {
-    await AsyncStorage.removeItem('vc_face_' + i).catch(() => {});
+    // Both stores: the sealed value and any legacy cleartext copy.
+    await SecureStore.deleteItemAsync(faceKey(i)).catch(() => {});
+    await AsyncStorage.removeItem(faceKey(i)).catch(() => {});
   }
-  await SecureStore.deleteItemAsync('vc_pin_hash').catch(() => {});
-  await AsyncStorage.removeItem('vc_pending_signup').catch(() => {});
+  await pinStore.clearPin().catch(() => {});   // v1 record + both legacy keys
+  await clearPendingSignup().catch(() => {});   // sealed record + legacy plaintext
 
   // Cached chats/messages + the sealed cache DEK.
   try { await require('../../lib/localDb').clearLocalDb(); } catch {}

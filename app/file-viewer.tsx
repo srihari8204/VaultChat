@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { BRAND_ACCENT } from '../constants/theme';
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   Dimensions,
   Easing,
@@ -24,7 +25,10 @@ import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { LinearGradient } from 'expo-linear-gradient';
-import { WebView } from 'react-native-webview';
+import * as IntentLauncher from 'expo-intent-launcher';
+import { getAccessToken } from '../lib/api';
+import { Buffer } from 'buffer';
+import { docKind } from '../lib/docText';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
@@ -154,6 +158,14 @@ export default function FileViewerScreen() {
   const [error, setError] = useState('');
   const [fileSize, setFileSize] = useState(0);
   const [textContent, setTextContent] = useState('');
+  // Office-document reading state. Kept separate from `textContent` so a failed
+  // extraction can fall back to the hand-off card without blanking a text file.
+  const [docText, setDocText] = useState('');
+  const [docEmpty, setDocEmpty] = useState(false);
+  const [docError, setDocError] = useState<string | null>(null);
+  const [docLoading, setDocLoading] = useState(true);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [openingExternally, setOpeningExternally] = useState(false);
 
   // Audio state
   const [sound, setSound] = useState<Audio.Sound | null>(null);
@@ -181,16 +193,42 @@ export default function FileViewerScreen() {
     ]).start();
     const loadTextContentInEffect = async () => {
       try {
-        let content: string;
+        let local = fileUri;
         if (fileUri.startsWith('http')) {
           const dl = await FileSystem.downloadAsync(fileUri, FileSystem.cacheDirectory + 'temp_view_' + Date.now());
-          content = await FileSystem.readAsStringAsync(dl.uri);
-        } else {
-          content = await FileSystem.readAsStringAsync(fileUri);
+          local = dl.uri;
         }
-        setTextContent(content);
+        setTextContent(await FileSystem.readAsStringAsync(local));
       } catch {
         setError('Could not read file contents');
+      }
+    };
+
+    // Office documents: read the TEXT out of them in-app instead of handing the
+    // file to another app. docx/xlsx/pptx are ZIPs of XML and fflate unzips them
+    // in pure JS, so this needs no native module and no page rendering — which
+    // is all a reader needs. Anything else (legacy .doc, PDF) still hands off.
+    const loadDocTextInEffect = async () => {
+      try {
+        let local = fileUri;
+        if (fileUri.startsWith('http')) {
+          const dl = await FileSystem.downloadAsync(fileUri, FileSystem.cacheDirectory + 'temp_doc_' + Date.now());
+          local = dl.uri;
+        }
+        const b64 = await FileSystem.readAsStringAsync(local, { encoding: 'base64' as any });
+        const bytes = Uint8Array.from(Buffer.from(b64, 'base64'));
+        const { extractDocText } = await import('../lib/docText');
+        const { text, empty } = extractDocText(bytes, fileName);
+        setDocText(empty ? '' : text);
+        setDocEmpty(empty);
+      } catch (e: any) {
+        // Fall back to the hand-off card rather than a dead end — but say WHY.
+        // Silently showing "open in another app" is indistinguishable from the
+        // feature not existing, which is exactly how it was reported.
+        console.warn('[docText] could not read', fileName, '—', e?.message ?? e);
+        setDocError(e?.message ?? 'Could not read this document.');
+      } finally {
+        setDocLoading(false);
       }
     };
     const loadAudioInEffect = async () => {
@@ -220,6 +258,8 @@ export default function FileViewerScreen() {
         }
         if (fileType === 'text') await loadTextContentInEffect();
         if (fileType === 'audio') await loadAudioInEffect();
+        if ((fileType === 'office' || fileType === 'pdf') && docKind(fileName) !== 'unsupported') await loadDocTextInEffect();
+        else if (fileType === 'office' || fileType === 'pdf') setDocLoading(false);
         setLoading(false);
       } catch (e: any) {
         setError(e.message || 'Failed to load file');
@@ -228,7 +268,9 @@ export default function FileViewerScreen() {
     };
     loadFileMeta();
     return () => { sound?.unloadAsync(); };
-  }, [fadeIn, slideUp, fileUri, fileType, sound]);
+    // reloadKey: Retry re-runs THIS loader (see handleRetry) instead of the
+    // component-scope duplicate, so first load and retry share one code path.
+  }, [fadeIn, slideUp, fileUri, fileType, sound, reloadKey]);
 
   // Redirect to dedicated video player when file type is video
   useEffect(() => {
@@ -304,6 +346,59 @@ export default function FileViewerScreen() {
     await sound.setPositionAsync(Math.floor(ratio * audioDuration));
   };
 
+  // ── Open a document in the device's own viewer ─────────────────
+  // Mirrors the chat file bubble (components/chat/MessageBubble.tsx): the file
+  // is copied into the app cache — the OS FileProvider is configured over that
+  // directory — then handed to ACTION_VIEW on Android, or the open-in sheet on
+  // iOS, which has no ACTION_VIEW equivalent. Nothing is uploaded anywhere.
+  const openInDeviceApp = async () => {
+    if (openingExternally) return;
+    setOpeningExternally(true);
+    try {
+      let localUri = fileUri;
+      if (fileUri.startsWith('http')) {
+        // Attachment endpoints are authenticated: without the Bearer token this
+        // downloads a 401 body and then "opens" it as a PDF.
+        const token = await getAccessToken();
+        const safeName = (fileName || 'file').replace(/[/\\:*?"<>|]/g, '_');
+        const dl = await FileSystem.downloadAsync(
+          fileUri,
+          (FileSystem.cacheDirectory || '') + safeName,
+          token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
+        );
+        if (dl.status >= 400) throw new Error(`Download failed (${dl.status})`);
+        localUri = dl.uri;
+      }
+      const mime = (params.mimeType as string | undefined) || undefined;
+
+      if (Platform.OS === 'android') {
+        try {
+          const contentUri = await FileSystem.getContentUriAsync(localUri);
+          await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+            data: contentUri,
+            flags: 1,               // FLAG_GRANT_READ_URI_PERMISSION
+            type: mime,
+          });
+        } catch {
+          // Nothing installed can VIEW this type → offer share/save instead.
+          if (await Sharing.isAvailableAsync()) {
+            await Sharing.shareAsync(localUri, { mimeType: mime, dialogTitle: fileName });
+          } else {
+            setError('No app on this device can open this file type.');
+          }
+        }
+      } else if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(localUri, { mimeType: mime, dialogTitle: fileName });
+      } else {
+        setError('No app on this device can open this file type.');
+      }
+    } catch (e: any) {
+      setError(e?.message ?? 'Could not open this file');
+    } finally {
+      setOpeningExternally(false);
+    }
+  };
+
   // ── Share / open externally ────────────────────────────────────
   const handleShare = async () => {
     try {
@@ -362,10 +457,18 @@ export default function FileViewerScreen() {
   ).current;
 
   // ── Retry handler ──────────────────────────────────────────────
+  // Bumps a key the load effect depends on, rather than calling the
+  // component-scope loadFileMeta(). That function is an older DUPLICATE of the
+  // loader inside the effect and knows nothing about documents, so retrying a
+  // failed .docx cleared the error and then loaded nothing — a Retry button
+  // that visibly did nothing. Re-running the effect uses one loader for both
+  // the first attempt and every retry, so they cannot drift again.
   const handleRetry = () => {
     setError('');
     setLoading(true);
-    loadFileMeta();
+    setDocError(null);
+    setDocLoading(true);
+    setReloadKey(k => k + 1);
   };
 
   // ── Determine background color ─────────────────────────────────
@@ -407,49 +510,103 @@ export default function FileViewerScreen() {
   );
 
   // ══════════════════════════════════════════════════════════════
-  // ██  RENDER: PDF via WebView
+  // ██  RENDER: PDF — handed to the device's own viewer
   // ══════════════════════════════════════════════════════════════
-  const renderPDF = () => {
-    const googleUrl = `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(fileUri)}`;
-    return (
-      <View style={s.contentFill}>
-        <WebView
-          source={{ uri: googleUrl }}
-          style={s.contentFill}
-          startInLoadingState
-          renderLoading={() => (
-            <View style={[s.centered, StyleSheet.absoluteFillObject, { backgroundColor: C.bg }]}>
-              <SkeletonShimmer width={SW - 48} height={SH * 0.5} style={{ borderRadius: 12 }} />
-              <Text style={[s.loadingText, { marginTop: 16 }]}>Rendering PDF...</Text>
-            </View>
-          )}
-          onError={() => setError('Could not render PDF')}
-          onLoadEnd={() => setLoading(false)}
-        />
-      </View>
-    );
-  };
+  //
+  // This used to be `https://docs.google.com/gview?url=<fileUri>` in a WebView,
+  // which meant GOOGLE FETCHED AND READ THE DOCUMENT: for an https attachment
+  // that handed Google a working (often presigned) URL to the user's private
+  // file, and for a local file:// path Google could not reach it at all, so the
+  // viewer just span forever. Either way it defeated the point of an app whose
+  // media is E2EE and whose attachments are sealed at rest.
+  //
+  // The file now never leaves the device. Same mechanism the chat file bubble
+  // already uses (components/chat/MessageBubble.tsx): copy into the app cache
+  // so the OS FileProvider can share it, then ACTION_VIEW on Android / the
+  // share-open sheet on iOS, and let whatever PDF app the user has render it.
+  const renderDocument = (label: string, reason?: string) => (
+    <View style={[s.centered, s.contentFill]}>
+      <Text style={s.fileIcon}>{FILE_ICONS[fileType] ?? '📄'}</Text>
+      <Text style={s.loadingText}>{fileName}</Text>
+      <Text style={[s.loadingText, { fontSize: 12, opacity: 0.7, marginTop: 6, textAlign: 'center', paddingHorizontal: 32 }]}>
+        {reason ? reason : `Opens in your ${label} app. The file stays on this device.`}
+      </Text>
+      <TouchableOpacity
+        style={s.openBtn}
+        onPress={openInDeviceApp}
+        disabled={openingExternally}
+        activeOpacity={0.85}
+      >
+        {openingExternally
+          ? <ActivityIndicator color="#fff" />
+          : <Text style={s.openBtnTxt}>Open</Text>}
+      </TouchableOpacity>
+    </View>
+  );
+
+  const renderPDF = () => renderDocument('PDF');
 
   // ══════════════════════════════════════════════════════════════
-  // ██  RENDER: Office docs via Google Docs Viewer
+  // ██  RENDER: Office docs — same on-device path as PDF above
   // ══════════════════════════════════════════════════════════════
+  //
+  // .docx/.xlsx/.pptx are read IN-APP as plain text (lib/docText). No page
+  // rendering, no layout, no native dependency — a reader only needs the words.
+  // Anything that cannot be read that way (legacy .doc/.xls/.ppt, a corrupt
+  // file) still falls back to the device hand-off rather than a dead end.
   const renderOffice = () => {
-    const viewerUrl = `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(fileUri)}`;
+    if (docLoading) return renderLoading();
+    if (docError || docKind(fileName) === 'unsupported') return renderDocument('documents', docError ?? undefined);
+    if (docEmpty) {
+      return (
+        <View style={[s.centered, s.contentFill]}>
+          <Text style={s.fileIcon}>📄</Text>
+          <Text style={s.loadingText}>{fileName}</Text>
+          <Text style={[s.loadingText, { fontSize: 12, opacity: 0.7, marginTop: 6, textAlign: 'center', paddingHorizontal: 32 }]}>
+            {fileType === 'pdf'
+              // The overwhelmingly common cause for a PDF: it is a scan, so there
+              // is no text layer to read — only an image of one.
+              ? 'This PDF has no text layer (it may be a scan). Open it in a PDF app to view the pages.'
+              : 'No readable text in this document.'}
+          </Text>
+          <TouchableOpacity style={s.openBtn} onPress={openInDeviceApp} activeOpacity={0.85}>
+            <Text style={s.openBtnTxt}>Open in another app</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    // Reading in-app and opening elsewhere are both offered, always. In-app is
+    // the default because it is instant and the file never leaves the device;
+    // the external app is one tap away for anything this plain-text view cannot
+    // show (formatting, images, charts, a spreadsheet's real grid).
     return (
       <View style={s.contentFill}>
-        <WebView
-          source={{ uri: viewerUrl }}
-          style={s.contentFill}
-          startInLoadingState
-          renderLoading={() => (
-            <View style={[s.centered, StyleSheet.absoluteFillObject, { backgroundColor: C.bg }]}>
-              <SkeletonShimmer width={SW - 48} height={SH * 0.5} style={{ borderRadius: 12 }} />
-              <Text style={[s.loadingText, { marginTop: 16 }]}>Loading document...</Text>
-            </View>
-          )}
-          onError={() => setError('Could not render document')}
-          onLoadEnd={() => setLoading(false)}
-        />
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ padding: 18, paddingBottom: 24 }}
+          showsVerticalScrollIndicator
+          indicatorStyle="white"
+        >
+          <Text selectable style={{ color: '#E5E7EB', fontSize: 16, lineHeight: 24 }}>
+            {docText}
+          </Text>
+        </ScrollView>
+        <View style={s.docActionBar}>
+          <Text style={s.docActionHint} numberOfLines={1}>Text only — no formatting</Text>
+          <TouchableOpacity
+            onPress={openInDeviceApp}
+            disabled={openingExternally}
+            style={s.docActionBtn}
+            activeOpacity={0.85}
+          >
+            {openingExternally
+              ? <ActivityIndicator color={C.primary} size="small" />
+              : <>
+                  <Ionicons name="open-outline" size={16} color={C.primary} />
+                  <Text style={s.docActionTxt}>Open in another app</Text>
+                </>}
+          </TouchableOpacity>
+        </View>
       </View>
     );
   };
@@ -461,8 +618,9 @@ export default function FileViewerScreen() {
     const lines = textContent.split('\n');
     const ext = fileName.split('.').pop()?.toLowerCase() || '';
     return (
+      <View style={s.contentFill}>
       <ScrollView
-        style={s.contentFill}
+        style={{ flex: 1 }}
         contentContainerStyle={s.codeContainer}
         showsVerticalScrollIndicator
         indicatorStyle="white"
@@ -480,6 +638,25 @@ export default function FileViewerScreen() {
           </View>
         ))}
       </ScrollView>
+      {/* Same choice as documents get: read here, or hand the file to whatever
+          app the user prefers. Consistent across every readable type. */}
+      <View style={s.docActionBar}>
+        <Text style={s.docActionHint} numberOfLines={1}>{lines.length} lines</Text>
+        <TouchableOpacity
+          onPress={openInDeviceApp}
+          disabled={openingExternally}
+          style={s.docActionBtn}
+          activeOpacity={0.85}
+        >
+          {openingExternally
+            ? <ActivityIndicator color={C.primary} size="small" />
+            : <>
+                <Ionicons name="open-outline" size={16} color={C.primary} />
+                <Text style={s.docActionTxt}>Open in another app</Text>
+              </>}
+        </TouchableOpacity>
+      </View>
+      </View>
     );
   };
 
@@ -613,7 +790,7 @@ export default function FileViewerScreen() {
     switch (fileType) {
       case 'image': return renderImage();
       case 'video': return renderVideo();
-      case 'pdf': return renderPDF();
+      case 'pdf': return renderOffice();   // same in-app text reader; falls back to the device app
       case 'office': return renderOffice();
       case 'text': return renderText();
       case 'audio': return renderAudio();
@@ -736,6 +913,28 @@ const s = StyleSheet.create({
 
   // ── Loading ─────────────────────────────────────────────────
   loadingText: { color: C.textDim, fontSize: 14 },
+  // Document (pdf/office) hand-off card — see renderDocument.
+  fileIcon: { fontSize: 64, marginBottom: 12 },
+  openBtn: {
+    marginTop: 22, minWidth: 160, paddingVertical: 14, paddingHorizontal: 28,
+    borderRadius: 14, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center',
+  },
+  openBtnTxt: { color: '#fff', fontSize: 15, fontWeight: '700' },
+
+  // ── Document action bar: read here, or hand off — both always available ──
+  docActionBar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingVertical: 10, gap: 12,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.glassBorder,
+    backgroundColor: C.glass,
+  },
+  docActionHint: { color: C.textDim, fontSize: 12, flexShrink: 1 },
+  docActionBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 14, paddingVertical: 9, borderRadius: 12,
+    borderWidth: 1, borderColor: C.border,
+  },
+  docActionTxt: { color: C.primary, fontSize: 13, fontWeight: '700' },
 
   // ── Code / Text viewer ──────────────────────────────────────
   codeContainer: { padding: 16, paddingBottom: 40 },

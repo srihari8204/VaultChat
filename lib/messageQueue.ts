@@ -7,7 +7,11 @@
 //   * On transient failure: retry with backoff, kept across app restarts
 //   * On permanent failure: bubble is marked "failed", user can retry / cancel
 //
-// Storage: AsyncStorage under VC_MSG_QUEUE_KEY (single JSON array).
+// Storage: SQLite (localDb `queues` table, sealed with the cache DEK). One row
+//   per queued item — enqueue/ack/retry touch a single row instead of
+//   rewriting a whole JSON array, and the pending PLAINTEXT is sealed at rest
+//   like the rest of the message cache. Items written by older builds are
+//   lifted out of AsyncStorage once, on first init.
 // Network: NetInfo subscription auto-flushes when connection returns.
 // UI: subscribe via .on('pending'|'sent'|'failed', ...) to mirror state.
 //
@@ -15,18 +19,19 @@
 //   * TEXT messages only (image/file/audio uploads still require live network
 //     because the upload step is not in the queue yet — Phase 4b polish).
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import * as Crypto from 'expo-crypto';
 import { api } from './api';
+import { queuePut, queueList, queueListByTag, queueGet, queueDelete, queueMigrate } from './localDb';
 import { encryptForChat, cacheOwnPlaintext, editMessage, deleteMessage, type Message } from './chatService';
 import { wrapWithPreview } from './linkPreview';
 import { type MsgState } from './messageState';
 import perf from './perf';
 
-const STORAGE_KEY      = 'vc_msg_queue_v1';
+const LEGACY_KEY       = 'vc_msg_queue_v1';   // pre-SQLite AsyncStorage array
 const BACKOFF_MS       = [1_000, 3_000, 8_000, 20_000, 45_000, 60_000]; // caps at 60s, then holds
 const PERIODIC_FLUSH_MS = 30_000;
+const PAGE             = 200;   // items pulled per flush pass (see load())
 
 // WhatsApp model: a message is NEVER failed for lack of network — it stays a
 // clock and retries on every reconnect/foreground/periodic flush, forever. Only
@@ -86,16 +91,20 @@ export function on<K extends keyof QueueEvents>(event: K, fn: Listener<QueueEven
 }
 
 // ─── Storage ──────────────────────────────────────────────────
+// Oldest-first, and bounded per read: a long offline stretch drains over
+// several flush passes rather than loading the whole backlog into memory.
+// pageOffset rotates past a page that drained NOTHING, so items behind a wedged
+// one still get their turn: 200 messages stuck WAITING_KEYS on one peer must not
+// starve every other chat's sends. Reset to the head as soon as anything drains.
+let pageOffset = 0;
 async function load(): Promise<QueuedMessage[]> {
-  try {
-    const raw = await AsyncStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch { return []; }
+  try { return await queueList<QueuedMessage>('msg', PAGE, pageOffset); } catch { return []; }
 }
-async function save(q: QueuedMessage[]): Promise<void> {
-  try { await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(q)); } catch {}
+async function put(m: QueuedMessage): Promise<void> {
+  try { await queuePut('msg', m.tempId, m, m.createdAt, m.chatId); } catch {}
+}
+async function drop(tempId: string): Promise<void> {
+  try { await queueDelete('msg', tempId); } catch {}
 }
 
 function newTempId(): string {
@@ -122,9 +131,7 @@ function baseItem(chatId: string): QueuedMessage {
 }
 
 async function enqueue(msg: QueuedMessage): Promise<QueuedMessage> {
-  const q = await load();
-  q.push(msg);
-  await save(q);
+  await put(msg);
   emit('pending', { msg });
   flush().catch(() => {});   // background — don't make the caller wait
   return msg;
@@ -174,18 +181,16 @@ export async function enqueueDelete(
 
 /** Cancel a pending or failed message. */
 export async function cancel(tempId: string): Promise<void> {
-  const q = await load();
-  await save(q.filter(m => m.tempId !== tempId));
+  await drop(tempId);
 }
 
 /** Force a retry on a specific tempId (e.g. user tapped Retry on a failed bubble). */
 export async function retry(tempId: string): Promise<void> {
-  const q = await load();
-  const m = q.find(x => x.tempId === tempId);
+  const m = await queueGet<QueuedMessage>('msg', tempId).catch(() => null);
   if (!m) return;
   m.attempts = 0;
   m.lastError = null;
-  await save(q);
+  await put(m);
   flush().catch(() => {});
 }
 
@@ -196,8 +201,8 @@ export async function retry(tempId: string): Promise<void> {
  *  restart while still offline (shows pre-edit text until reconnect+reload).
  *  Add a re-apply pass here if that offline tail matters. */
 export async function pendingForChat(chatId: string): Promise<QueuedMessage[]> {
-  const q = await load();
-  return q.filter(m => m.chatId === chatId && (m.op ?? 'send') === 'send')
+  const q = await queueListByTag<QueuedMessage>('msg', chatId).catch(() => []);
+  return q.filter(m => (m.op ?? 'send') === 'send')
           .sort((a, b) => a.createdAt - b.createdAt);
 }
 
@@ -205,6 +210,12 @@ export async function pendingForChat(chatId: string): Promise<QueuedMessage[]> {
 
 let flushing = false;
 let flushScheduled: any = null;
+
+/** Arm the next flush, replacing any pending one. */
+function scheduleFlush(delayMs: number): void {
+  if (flushScheduled) clearTimeout(flushScheduled);
+  flushScheduled = setTimeout(() => { flushScheduled = null; flush(); }, delayMs);
+}
 
 async function postOnce(item: QueuedMessage): Promise<Message | null> {
   // Non-'send' ops mutate an existing message by id. Reuse chatService's exact
@@ -269,12 +280,18 @@ export async function flush(): Promise<void> {
   flushing = true;
   try {
     const q = await load();
-    if (q.length === 0) return;
+    if (q.length === 0) {
+      // An empty page while rotated means we walked off the end — go back to the
+      // head and try again rather than sitting idle until the periodic tick.
+      if (pageOffset > 0) { pageOffset = 0; scheduleFlush(0); }
+      return;
+    }
 
     const remaining: QueuedMessage[] = [];
     for (const item of q) {
       try {
         const real = await postOnce(item);
+        await drop(item.tempId);              // acked — the row's job is done
         emit('sent', { tempId: item.tempId, chatId: item.chatId, real });
       } catch (err: any) {
         item.lastError = err?.message ?? 'unknown error';
@@ -282,6 +299,7 @@ export async function flush(): Promise<void> {
           // "Not sent" — the only case WhatsApp turns a message red. Drop from
           // the queue; the UI keeps a failed bubble with tap-to-retry.
           item.state = 'FAILED';
+          await drop(item.tempId);
           emit('failed', { tempId: item.tempId, chatId: item.chatId, error: item.lastError });
           continue;
         }
@@ -289,19 +307,27 @@ export async function flush(): Promise<void> {
         // retry forever. attempts only drives the backoff cadence, never a fail.
         item.state = isKeysError(item.lastError) ? 'WAITING_KEYS' : 'QUEUED';
         item.attempts++;
+        await put(item);                      // same row, updated attempt count
         emit('retry', { tempId: item.tempId, chatId: item.chatId, attempt: item.attempts });
         remaining.push(item);
       }
     }
-    await save(remaining);
+
+    // Page bookkeeping: anything that drained shrinks the queue under us, so go
+    // back to the head. A full page where NOTHING drained is wedged — step past
+    // it. Anything else means we've seen the tail, so start over next pass.
+    const drained = q.length - remaining.length;
+    if (drained > 0 || q.length < PAGE) pageOffset = 0;
+    else pageOffset += PAGE;
 
     // Backoff off the worst attempt (all remaining items have attempts ≥ 1),
     // capped at 60s then held — the periodic + reconnect flush keep it alive.
+    // A full page that ALL drained means there may be more behind it: come
+    // straight back for the next page instead of waiting for the 30 s tick.
     if (remaining.length > 0) {
-      const worstAttempts = Math.max(...remaining.map(m => m.attempts));
-      const delay = BACKOFF_MS[Math.min(worstAttempts - 1, BACKOFF_MS.length - 1)];
-      if (flushScheduled) clearTimeout(flushScheduled);
-      flushScheduled = setTimeout(() => { flushScheduled = null; flush(); }, delay);
+      scheduleFlush(BACKOFF_MS[Math.min(Math.max(...remaining.map(m => m.attempts)) - 1, BACKOFF_MS.length - 1)]);
+    } else if (q.length >= PAGE) {
+      scheduleFlush(0);
     }
   } finally {
     flushing = false;
@@ -316,6 +342,11 @@ export function initQueue() {
   if (initialized) return;
   initialized = true;
 
+  // Lift any queue an older build left in AsyncStorage into SQLite, THEN drain.
+  // No-op after the first run (the legacy key is removed once the rows commit).
+  const migrated = queueMigrate('msg', LEGACY_KEY, (m: QueuedMessage) => m.tempId,
+    (m: QueuedMessage) => m.createdAt, (m: QueuedMessage) => m.chatId).catch(() => 0);
+
   // Reconnect → flush
   NetInfo.addEventListener(state => {
     online = !!(state.isConnected && state.isInternetReachable !== false);
@@ -328,8 +359,9 @@ export function initQueue() {
   // work while known-offline so a backgrounded device isn't woken for nothing.
   setInterval(() => { if (online) flush().catch(() => {}); }, PERIODIC_FLUSH_MS);
 
-  // Initial drain on app boot
-  flush().catch(() => {});
+  // Initial drain on app boot — after the migration, so a legacy item isn't
+  // left sitting until the next reconnect.
+  migrated.then(() => flush()).catch(() => {});
 }
 
 // Default export to silence expo-router's route warning

@@ -18,7 +18,11 @@ export const androidAdapter: NativeCallAdapter = {
   // full-screen-intent notification.
   canRingWhenKilled: true,
 
-  register: () => registerForCalls(),
+  // The outcome is dropped here on purpose: the adapter interface is the
+  // platform seam, and a push-provider result is Android-shaped detail that iOS
+  // (CallKit/PushKit) will not have. Callers that want it — app/_layout.tsx —
+  // call registerForCalls() directly and read lib/pushRegistration.
+  register: async () => { await registerForCalls(); },
 
   startCallSession: ({ callId, peerName, peerPhotoUrl, isVideo }) =>
     startCallForeground(callId, peerName, peerPhotoUrl ?? '', isVideo),

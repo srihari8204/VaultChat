@@ -6,7 +6,7 @@
 // answers the carried offer instead of creating a new one.
 
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,6 +17,7 @@ import { addCallLog } from '../lib/callLog';
 import { holdActiveCall } from '../lib/callState';
 import { setRingingPeer } from '../lib/ringTracker';
 import { cancelIncomingCall } from '../lib/callNotification';
+import { callStage, offerTag } from '../lib/call/diag';
 
 // Call chrome is always dark (independent of app theme).
 const S = makeStyles();
@@ -37,6 +38,35 @@ export default function IncomingCallScreen() {
   const isGroup = group === '1';
   const isWaiting = waiting === '1';
 
+  // Who is calling.
+  //
+  // peerName rides on the call signal, and it arrives EMPTY often enough that
+  // an incoming call routinely announced itself as "VaultChat user" — the one
+  // thing the screen exists to tell you. The signal is not the only source of
+  // truth though: to be called at all we must already share a chat, so the name
+  // is sitting in our own chat store. Look it up rather than depending on what
+  // the caller happened to send.
+  //
+  // The param still wins when present — it is the freshest — and the lookup is
+  // best-effort, so a failure just leaves the existing fallback in place.
+  const [lookedUpName, setLookedUpName] = useState<string | null>(null);
+  useEffect(() => {
+    if (peerName || isGroup || !chatId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { getChat } = await import('../lib/chatService');
+        const c = await getChat(String(chatId));
+        const n = (c?.peerName ?? '').trim();
+        if (!cancelled && n) setLookedUpName(n);
+      } catch { /* keep the fallback */ }
+    })();
+    return () => { cancelled = true; };
+  }, [chatId, peerName, isGroup]);
+
+  /** Best name we have, in order of freshness. */
+  const displayName = (peerName || lookedUpName || 'VaultChat user');
+
   // Ring (looping ringtone + vibration, per the user's sound prefs)
   useEffect(() => {
     startRingtone();
@@ -46,23 +76,49 @@ export default function IncomingCallScreen() {
     return () => { stopRingtone(); setRingingPeer(null); cancelIncomingCall(); };
   }, []);
 
-  // If opened from a push (offer empty), capture the WebRTC offer the caller
-  // re-sends every few seconds, so Accept can still answer the original call.
+  // ALWAYS track the caller's latest offer — this screen answers the FRESHEST
+  // envelope, never the first one it happened to be opened with.
+  //
+  // This effect used to bail out with `if (offer) return`, on the reasoning that
+  // a route param already carried the offer so there was nothing left to listen
+  // for. That was the bug that made encrypted calls unrecoverable.
+  //
+  // The offer is SEALED with the caller's ratchet session. When that session is
+  // stale the callee cannot open it, resets, and asks the caller to re-key — and
+  // the caller's ring loop then re-seals and re-sends a NEW, openable envelope
+  // every 3 s for the rest of the ring (lib/call/signal.ts ringAndOffer, whose
+  // `reseal` hook exists for exactly this). But this screen had already pinned
+  // the stale envelope, and app/_layout.tsx de-dupes repeat `call_incoming`
+  // events by peer, so the fresh one reached nothing. Accept therefore answered
+  // the same dead envelope the callee had just proven it could not open, on
+  // every attempt, forever. Observed as four consecutive "openCallOffer failed —
+  // aes/gcm: invalid ghash tag" while the re-key itself worked perfectly.
+  //
+  // The ring loop emits `webrtc_offer` alongside every `call_incoming`, so
+  // listening here — with no early return — is all it takes to see the re-sealed
+  // envelope. The push path (offer param empty) is unchanged: it was always the
+  // path that worked, because it was the only one that reached this listener.
   const liveOfferRef = useRef(offer || '');
   useEffect(() => {
-    if (offer) return;
     let off: (() => void) | null = null;
     (async () => {
       const s = await getSocket();
       const onOffer = (d: any) => {
         const from = d?.from ?? d?.fromUid;
-        if (from === peerUid && d?.offer) liveOfferRef.current = JSON.stringify(d.offer);
+        if (from !== peerUid || !d?.offer) return;
+        const next = JSON.stringify(d.offer);
+        // The ring loop re-sends the IDENTICAL wire until the session changes,
+        // so only an actual re-seal is worth a line in the log.
+        if (next === liveOfferRef.current) return;
+        const had = liveOfferRef.current;
+        liveOfferRef.current = next;
+        if (had) callStage(offerTag(next), 'offer_resealed', `superseding ${offerTag(had)}`);
       };
       s.on('webrtc_offer', onOffer);
       off = () => s.off('webrtc_offer', onOffer);
     })();
     return () => { if (off) off(); };
-  }, [offer, peerUid]);
+  }, [peerUid]);
 
   // Listen for caller-side hangup before answer
   const decidedRef = useRef(false);
@@ -75,7 +131,7 @@ export default function IncomingCallScreen() {
         if (data?.from === peerUid || data?.fromUid === peerUid) {
           decidedRef.current = true;
           stopRingtone();
-          addCallLog({ chatId, peerUid, peerName: peerName || 'VaultChat user', kind: type === 'video' ? 'video' : 'audio', direction: 'missed', at: Date.now(), durationSec: 0 }).catch(() => {});
+          addCallLog({ chatId, peerUid, peerName: displayName, kind: type === 'video' ? 'video' : 'audio', direction: 'missed', at: Date.now(), durationSec: 0 }).catch(() => {});
           router.back();
         }
       };
@@ -94,16 +150,21 @@ export default function IncomingCallScreen() {
       return;
     }
     const route = type === 'video' ? '/videocall' : '/voicecall';
+    // The LIVE offer wins over the route param. They are the same envelope until
+    // the caller re-seals, and after a re-seal the param is the one the callee
+    // has already proven it cannot open — see the listener above.
+    const answering = liveOfferRef.current || offer;
+    callStage(offerTag(answering), 'accepted', type === 'video' ? 'video' : 'audio');
     router.replace({
       pathname: route as any,
-      params: { chatId, peerUid, peerName, isIncoming: 'true', initialOffer: offer || liveOfferRef.current },
+      params: { chatId, peerUid, peerName: displayName, isIncoming: 'true', initialOffer: answering },
     });
   };
 
   const decline = async () => {
     decidedRef.current = true;
     stopRingtone();
-    addCallLog({ chatId, peerUid, peerName: peerName || 'VaultChat user', kind: type === 'video' ? 'video' : 'audio', direction: 'missed', at: Date.now(), durationSec: 0 }).catch(() => {});
+    addCallLog({ chatId, peerUid, peerName: displayName, kind: type === 'video' ? 'video' : 'audio', direction: 'missed', at: Date.now(), durationSec: 0 }).catch(() => {});
     try {
       const s = await getSocket();
       s.emit('webrtc_end', { to: peerUid, chatId });
@@ -111,7 +172,7 @@ export default function IncomingCallScreen() {
     router.back();
   };
 
-  const initial = (peerName?.trim()[0] ?? '?').toUpperCase();
+  const initial = (displayName.trim()[0] ?? '?').toUpperCase();
 
   return (
     <View style={S.screen}>
@@ -120,7 +181,7 @@ export default function IncomingCallScreen() {
       <View style={S.body}>
         <Text style={S.label}>{isWaiting ? 'On another call' : type === 'video' ? 'Incoming video call' : 'Incoming voice call'}</Text>
         <View style={S.avatar}><Text style={S.avatarTxt}>{initial}</Text></View>
-        <Text style={S.name}>{peerName || 'VaultChat user'}</Text>
+        <Text style={S.name}>{displayName}</Text>
         {isWaiting && <Text style={S.label}>{type === 'video' ? 'Video call' : 'Voice call'} waiting…</Text>}
       </View>
 

@@ -11,6 +11,7 @@
 // syncChat() to fetch GET /chats/:id/messages?after=<cursor> and cacheMessages().
 
 import { open, type DB } from '@op-engineering/op-sqlite';
+import AsyncStorage from '@react-native-async-storage/async-storage';   // legacy queue migration only
 import * as SecureStore from 'expo-secure-store';
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
@@ -145,6 +146,17 @@ export function getLocalDb(): Promise<LocalDb> {
           name            TEXT,
           updated_at      INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS queues (
+          q          TEXT NOT NULL,
+          id         TEXT NOT NULL,
+          tag        TEXT,
+          data       TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (q, id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_queues_order ON queues(q, created_at, id);
+        CREATE INDEX IF NOT EXISTS idx_queues_tag ON queues(q, tag, created_at);
+        CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
         CREATE INDEX IF NOT EXISTS idx_messages_preview
           ON messages(chat_id, id DESC)
           WHERE deleted_at IS NULL AND type <> 'reaction';
@@ -527,6 +539,48 @@ export async function getAttachmentChatMap(): Promise<Record<string, string>> {
   return out;
 }
 
+/**
+ * Every attachment in the local cache, newest first — the Bookshelf's index
+ * (lib/shelf.ts, app/shelf.tsx).
+ *
+ * Derived from `messages` rather than a table of its own: an attachment IS a
+ * cached message carrying meta.attachmentId, so there is no second store to
+ * keep consistent, it works offline, and it is exactly as complete as the
+ * cache. Deleted messages are excluded — a file whose message was revoked must
+ * not reappear in a library view.
+ */
+export async function listAllAttachments(limit = 2000): Promise<Array<{
+  attachmentId: string; chatId: string; messageId: number; senderId: string | null;
+  filename: string; mime: string | null; size: number; createdAt: string;
+}>> {
+  const db = await getLocalDb();
+  const rows = await db.getAllAsync(
+    `SELECT id, chat_id, sender_id, meta, created_at FROM messages
+      WHERE meta IS NOT NULL AND deleted_at IS NULL
+      ORDER BY id DESC LIMIT ?`, [limit]);
+
+  const out: any[] = [];
+  const seen = new Set<string>();
+  for (const r of rows as any[]) {
+    let meta: any;
+    try { meta = JSON.parse(decField(r.meta) || ''); } catch { continue; }
+    const aid = meta?.attachmentId;
+    if (!aid || seen.has(String(aid))) continue;   // forwards reuse an id — list it once
+    seen.add(String(aid));
+    out.push({
+      attachmentId: String(aid),
+      chatId: r.chat_id,
+      messageId: Number(r.id),
+      senderId: r.sender_id ?? null,
+      filename: String(meta.filename ?? meta.name ?? 'file'),
+      mime: meta.mime ?? null,
+      size: Number(meta.size ?? 0),
+      createdAt: r.created_at ?? '',
+    });
+  }
+  return out;
+}
+
 /** Fetch specific cached messages by id (used to resolve reply quotes for
  *  messages that aren't in the currently-rendered page). */
 export async function getCachedMessagesByIds(chatId: string, ids: number[]): Promise<Message[]> {
@@ -550,10 +604,39 @@ export async function getSyncCursor(chatId: string): Promise<number> {
 
 /** Highest message id cached across ALL chats — the global forward-catch-up
  *  cursor (messages.id is a server-global BIGSERIAL). */
+/** Highest message id this device has EVER seen. Survives deletion. */
+const GLOBAL_CURSOR_KEY = 'vc_global_sync_cursor';
+
+/**
+ * How far the global delta sync has progressed.
+ *
+ * This used to be `MAX(id) FROM messages`, which silently rewound whenever
+ * messages were deleted. "Clear chat" on the chat holding the newest ids
+ * therefore dropped the cursor to some older message, and the next catch-up
+ * happily re-downloaded everything after it — including 10 of the messages just
+ * cleared (measured on device: 56 removed, 10 returned).
+ *
+ * The high-water mark is now recorded separately and only ever moves FORWARD,
+ * so deleting local data cannot rewind sync. MAX(id) is still honoured as a
+ * floor: it seeds the value on an install that predates this key, and it keeps
+ * the cursor correct if a message somehow lands without going through
+ * noteGlobalSyncCursor.
+ */
 export async function getGlobalSyncCursor(): Promise<number> {
   const db = await getLocalDb();
   const r: any = await db.getFirstAsync(`SELECT MAX(id) AS m FROM messages`);
-  return r?.m ? Number(r.m) : 0;
+  const fromRows = r?.m ? Number(r.m) : 0;
+  const stored = Number((await getMeta(GLOBAL_CURSOR_KEY)) ?? 0) || 0;
+  const cursor = Math.max(fromRows, stored);
+  if (cursor > stored) await setMeta(GLOBAL_CURSOR_KEY, String(cursor)).catch(() => {});
+  return cursor;
+}
+
+/** Record progress. Monotonic — never moves the cursor backwards. */
+export async function noteGlobalSyncCursor(id: number): Promise<void> {
+  if (!Number.isFinite(id) || id <= 0) return;
+  const stored = Number((await getMeta(GLOBAL_CURSOR_KEY)) ?? 0) || 0;
+  if (id > stored) await setMeta(GLOBAL_CURSOR_KEY, String(id)).catch(() => {});
 }
 
 /** Apply a single incoming/edited message (from socket) to the cache. */
@@ -705,6 +788,138 @@ export async function pruneVbTransfers(keep = 200): Promise<void> {
        (SELECT transfer_id FROM vb_transfers ORDER BY updated_at DESC LIMIT ?)`, [keep]);
 }
 
+// ═══ Durable queues + kv ═══════════════════════════════════════════════
+//
+// One table backs every "must survive offline" queue: the text/edit/delete
+// outbox (messageQueue), media sends (mediaOutbox) and scheduled messages.
+// They previously each kept a JSON array in AsyncStorage, which meant (a) the
+// pending PLAINTEXT of an unsent message sat in the clear next to a sealed
+// message cache, and (b) every enqueue and every flush rewrote the whole array.
+// Here rows are sealed with the same cache DEK as `messages`, and each item is
+// one row you can insert or delete on its own.
+//
+// Locked cache (no DEK): decField hands back the still-sealed string, JSON.parse
+// fails, and queueList SKIPS the row rather than returning ciphertext a caller
+// would cheerfully encrypt again and send. The row stays put and drains after
+// unlock — the same "keep the clock running" behavior as being offline.
+
+export type QueueName = 'msg' | 'media' | 'sched';
+
+function unseal<T>(rows: any[]): T[] {
+  const out: T[] = [];
+  for (const r of rows) {
+    try { out.push(JSON.parse(decField(r.data)!)); } catch { /* sealed (locked) or corrupt — skip, keep the row */ }
+  }
+  return out;
+}
+
+/** Insert or update one queued item. `tag` is an opaque grouping key (the chat
+ *  id, for the message outboxes) stored UNSEALED so a per-chat read is an index
+ *  hit rather than a decrypt-everything scan — the same trade `messages.chat_id`
+ *  already makes. Never put content in it. */
+export async function queuePut(q: QueueName, id: string, item: any, createdAt?: number, tag?: string | null): Promise<void> {
+  const db = await getLocalDb();
+  await db.runAsync(
+    `INSERT INTO queues (q, id, tag, data, created_at) VALUES (?,?,?,?,?)
+     ON CONFLICT(q, id) DO UPDATE SET data = excluded.data, tag = excluded.tag`,
+    [q, id, tag ?? null, encField(JSON.stringify(item))!, createdAt ?? Date.now()],
+  );
+}
+
+// Ordering is (created_at, rowid), NOT (created_at, id): ids are client-side
+// temp keys that start with a RANDOM segment, so tie-breaking on them would
+// shuffle two messages enqueued in the same millisecond — visible as a chat
+// where two quick sends land out of order. rowid is insertion order, and
+// queuePut's upsert keeps a row's original rowid across retries.
+const ORDER = 'ORDER BY created_at, rowid';
+
+/** Oldest-first items. `limit` bounds how much a single flush pass pulls into
+ *  memory — an account that spent a week offline drains over several passes
+ *  instead of materializing the whole backlog at once. `offset` lets a caller
+ *  step past a page that is wedged (see messageQueue's flush rotation). */
+export async function queueList<T = any>(q: QueueName, limit = 200, offset = 0): Promise<T[]> {
+  const db = await getLocalDb();
+  return unseal<T>(await db.getAllAsync(
+    `SELECT data FROM queues WHERE q = ? ${ORDER} LIMIT ? OFFSET ?`, [q, limit, offset]));
+}
+
+/** Oldest-first items carrying `tag`. */
+export async function queueListByTag<T = any>(q: QueueName, tag: string, limit = 500): Promise<T[]> {
+  const db = await getLocalDb();
+  return unseal<T>(await db.getAllAsync(
+    `SELECT data FROM queues WHERE q = ? AND tag = ? ${ORDER} LIMIT ?`, [q, tag, limit]));
+}
+
+/** One item by id, wherever it sits in the queue. */
+export async function queueGet<T = any>(q: QueueName, id: string): Promise<T | null> {
+  const db = await getLocalDb();
+  const r = await db.getFirstAsync(`SELECT data FROM queues WHERE q = ? AND id = ?`, [q, id]);
+  return r ? (unseal<T>([r])[0] ?? null) : null;
+}
+
+export async function queueDelete(q: QueueName, id: string): Promise<void> {
+  const db = await getLocalDb();
+  await db.runAsync(`DELETE FROM queues WHERE q = ? AND id = ?`, [q, id]);
+}
+
+export async function queueCount(q: QueueName): Promise<number> {
+  const db = await getLocalDb();
+  const r = await db.getFirstAsync(`SELECT COUNT(*) AS n FROM queues WHERE q = ?`, [q]);
+  return Number(r?.n ?? 0);
+}
+
+/** Replace a queue's whole contents in one transaction. For the low-frequency
+ *  queues whose call sites already think in whole arrays (media, scheduled).
+ *  ponytail: O(n) per write — fine at these volumes; use queuePut/queueDelete
+ *  per item if one of them ever gets hot. */
+export async function queueReplace(
+  q: QueueName, items: Array<{ id: string; item: any; createdAt?: number; tag?: string | null }>,
+): Promise<void> {
+  const db = await getLocalDb();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(`DELETE FROM queues WHERE q = ?`, [q]);
+    for (const it of items) {
+      await db.runAsync(`INSERT OR REPLACE INTO queues (q, id, tag, data, created_at) VALUES (?,?,?,?,?)`,
+        [q, it.id, it.tag ?? null, encField(JSON.stringify(it.item))!, it.createdAt ?? Date.now()]);
+    }
+  });
+}
+
+/** One-time lift of a legacy AsyncStorage JSON-array queue into SQLite. Removes
+ *  the old key only after the rows are committed, so a crash mid-migration
+ *  just replays it (queuePut is an upsert — re-running can't duplicate). */
+export async function queueMigrate(
+  q: QueueName, storageKey: string,
+  idOf: (item: any) => string, createdAtOf?: (item: any) => number, tagOf?: (item: any) => string | null,
+): Promise<number> {
+  try {
+    const raw = await AsyncStorage.getItem(storageKey);
+    if (!raw) return 0;
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr)) {
+      for (const item of arr) {
+        const id = idOf(item);
+        if (id) await queuePut(q, id, item, createdAtOf?.(item), tagOf?.(item));
+      }
+    }
+    await AsyncStorage.removeItem(storageKey);
+    return Array.isArray(arr) ? arr.length : 0;
+  } catch { return 0; }
+}
+
+/** Small named values that belong with the cache they describe (sync cursors,
+ *  etc.) rather than in AsyncStorage. Not sealed — callers store opaque
+ *  cursors here, never content. */
+export async function getMeta(k: string): Promise<string | null> {
+  const db = await getLocalDb();
+  const r = await db.getFirstAsync(`SELECT v FROM kv WHERE k = ?`, [k]);
+  return r?.v ?? null;
+}
+export async function setMeta(k: string, v: string): Promise<void> {
+  const db = await getLocalDb();
+  await db.runAsync(`INSERT INTO kv (k, v) VALUES (?,?) ON CONFLICT(k) DO UPDATE SET v = excluded.v`, [k, v]);
+}
+
 /** Dump all local rows for an encrypted backup. Sealed fields are decrypted here
  *  so the backup is portable across installs (it gets re-sealed under the backup
  *  layer's own key by backupService, and re-encrypted under the local DEK on
@@ -740,10 +955,47 @@ export async function importAll(data: { messages?: any[]; chats?: any[] }): Prom
   return n;
 }
 
+/**
+ * Remove ONE chat from this device entirely — messages, search index, sync
+ * position and the chat row itself.
+ *
+ * Four deletes, not one, and each is load-bearing:
+ *   • msg_fts rows are keyed by message rowid. Left behind, the removed text
+ *     stays searchable — the one place a "cleared" chat hands its content back.
+ *   • sync_cursor must go WITH the chat row. (An earlier version deleted the
+ *     cursor while keeping the chat, which told sync "you have nothing" and
+ *     pulled the entire history straight back down — the exact bug reported.)
+ *   • the chats row goes too, so the list does not keep an empty shell.
+ *
+ * The caller is expected to also hide the chat server-side, or `listChats` will
+ * simply hand it back on the next refresh. See app/chat.tsx.
+ * Returns how many messages were removed.
+ */
+export async function clearChatMessages(chatId: string): Promise<number> {
+  const db = await getLocalDb();
+  const row: any = await db.getFirstAsync(
+    `SELECT COUNT(*) AS n FROM messages WHERE chat_id = ?`, [chatId]);
+  const n = row?.n | 0;
+
+  await db.withTransactionAsync(async () => {
+    if (_ftsOk) {
+      try {
+        await db.runAsync(
+          `DELETE FROM msg_fts WHERE rowid IN (SELECT id FROM messages WHERE chat_id = ?)`,
+          [chatId]);
+      } catch { /* index is best-effort; the messages still go */ }
+    }
+    await db.runAsync(`DELETE FROM messages WHERE chat_id = ?`, [chatId]);
+    await db.runAsync(`DELETE FROM sync_cursor WHERE chat_id = ?`, [chatId]);
+    await db.runAsync(`DELETE FROM chats WHERE id = ?`, [chatId]);
+  });
+  return n;
+}
+
 /** Wipe everything (e.g. on logout / account switch). */
 export async function clearLocalDb(): Promise<void> {
   const db = await getLocalDb();
-  await db.execAsync(`DELETE FROM messages; DELETE FROM chats; DELETE FROM sync_cursor;`);
+  await db.execAsync(`DELETE FROM messages; DELETE FROM chats; DELETE FROM sync_cursor; DELETE FROM queues; DELETE FROM kv;`);
   // #32 Phase B: wipe the sealed DEK envelope too, so no orphaned key survives an
   // account switch (rows are gone, so the key has nothing left to protect).
   try { await clearCacheKeyStore(); } catch {}

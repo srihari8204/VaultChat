@@ -1,10 +1,10 @@
 # VaultChat proxy — Go-first (Phase 2 migration COMPLETE).
 #
-# go-api owns the ENTIRE client-facing surface: all 17 REST modules, /health,
+# go-api owns the ENTIRE client-facing surface: every REST module, /health,
 # and Socket.IO (incl. the websocket upgrade — reverse_proxy handles the
-# Upgrade handshake transparently). The Node API process is NOT required and
-# is not routed; only the Node vaultlens-worker container remains (background
-# renders, pushes results into go-api's internal bridge in-network).
+# Upgrade handshake transparently). The Node API process is NOT required and is
+# not routed. Since the VaultLens removal took the vaultlens-worker with it,
+# NO Node process runs at all.
 #
 # Rollback to Node for any path (requires the Node api container running):
 #   @name path /route /route/*

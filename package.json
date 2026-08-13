@@ -1,7 +1,7 @@
 {
   "name": "vaultchat",
   "main": "expo-router/entry",
-  "version": "1.2.0",
+  "version": "1.2.2",
   "scripts": {
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
@@ -9,9 +9,11 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "node scripts/check-sdk-versions.js && tsc --noEmit",
     "test": "node ./scripts/test-all.js",
     "test:e2ee": "tsx services/crypto/e2ee.selftest.ts && tsx services/crypto/senderKey.selftest.ts && tsx services/crypto/shamir.selftest.ts && tsx services/security/safetyNumber.selftest.ts && tsx services/crypto/vectors.selftest.ts && tsx services/crypto/vaultbeam-vectors.selftest.ts && tsx services/crypto/parity.selftest.ts && tsx services/crypto/vaultbeam-parity.selftest.ts",
+    "test:localdb": "tsx lib/localDb.queue.selftest.ts",
+    "bench:e2ee": "tsx services/crypto/e2ee.bench.ts",
     "test:vaultcheck": "tsx lib/vaultcheck/vaultcheck.selftest.ts",
     "test:ice": "tsx lib/iceCredentials.selftest.ts",
     "test:call": "tsx lib/call/machine.selftest.ts && tsx lib/call/quality.selftest.ts",
@@ -22,8 +24,8 @@
     "prebuild": "expo prebuild --clean",
     "prebuild:android": "expo prebuild --platform android --clean",
     "prebuild:ios": "expo prebuild --platform ios --clean",
-    "build:android:apk": "expo prebuild --platform android --clean && cd android && ./gradlew assembleRelease",
-    "build:android:aab": "expo prebuild --platform android --clean && cd android && ./gradlew bundleRelease",
+    "build:android:apk": "node scripts/check-sdk-versions.js && expo prebuild --platform android --clean && node scripts/gradlew.js assembleRelease",
+    "build:android:aab": "node scripts/check-sdk-versions.js && expo prebuild --platform android --clean && node scripts/gradlew.js bundleRelease",
     "eas:build:android:preview": "eas build --platform android --profile preview",
     "eas:build:android:prod": "eas build --platform android --profile production",
     "eas:build:ios:prod": "eas build --platform ios --profile production",
@@ -33,13 +35,22 @@
     "deploy:firestore:indexes": "firebase deploy --only firestore:indexes",
     "deploy:firestore": "firebase deploy --only firestore",
     "prod:check": "npm run lint && npm run typecheck && npm test",
-    "prod:precheck": "node ./scripts/prod-precheck.js"
+    "prod:precheck": "node ./scripts/prod-precheck.js",
+    "gradle": "node scripts/gradlew.js",
+    "build:android:apk:arm64": "node scripts/gradlew.js assembleRelease -PreactNativeArchitectures=arm64-v8a",
+    "test:reader": "tsx lib/reader.selftest.ts",
+    "test:responsive": "tsx lib/responsive.selftest.ts",
+    "test:shelf": "tsx lib/shelf.selftest.ts",
+    "test:archive": "tsx lib/archive.selftest.ts",
+    "test:callmode": "tsx lib/call/mode.selftest.ts",
+    "check:sdk": "node scripts/check-sdk-versions.js"
   },
   "dependencies": {
     "@dr.pogodin/react-native-fs": "^2.39.0",
     "@expo-google-fonts/nunito-sans": "^0.4.2",
     "@expo-google-fonts/sora": "^0.4.2",
     "@expo/vector-icons": "^15.0.3",
+    "@livekit/react-native": "^2.12.0",
     "@livekit/react-native-webrtc": "^144.1.2",
     "@noble/ciphers": "^2.2.0",
     "@noble/curves": "^2.2.0",
@@ -63,6 +74,7 @@
     "expo-av": "~16.0.8",
     "expo-battery": "~10.0.8",
     "expo-blur": "~15.0.8",
+    "expo-build-properties": "^57.0.9",
     "expo-camera": "~17.0.10",
     "expo-clipboard": "~8.0.8",
     "expo-constants": "~18.0.13",
@@ -71,7 +83,6 @@
     "expo-dev-client": "~6.0.20",
     "expo-device": "~8.0.10",
     "expo-document-picker": "~14.0.8",
-    "expo-face-detector": "^13.0.2",
     "expo-file-system": "~19.0.21",
     "expo-font": "~14.0.11",
     "expo-haptics": "~15.0.8",
@@ -102,6 +113,8 @@
     "expo-updates": "~29.0.16",
     "expo-video-thumbnails": "~10.0.8",
     "expo-web-browser": "~15.0.10",
+    "fflate": "^0.8.3",
+    "livekit-client": "2.19.2",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
@@ -128,6 +141,8 @@
   "devDependencies": {
     "@types/crypto-js": "^4.2.2",
     "@types/react": "~19.1.10",
+    "babel-plugin-transform-remove-console": "^6.9.4",
+    "better-sqlite3": "^13.0.3",
     "eslint": "^9.39.4",
     "eslint-config-expo": "~10.0.0",
     "patch-package": "^8.0.1",
@@ -146,10 +161,15 @@
     "doctor": {
       "reactNativeDirectoryCheck": {
         "exclude": [
-          "@livekit/react-native-webrtc",
-          "expo-face-detector"
+          "@livekit/react-native-webrtc"
         ]
       }
     }
+  },
+  "op-sqlite": {
+    "fts5": true
+  },
+  "overrides": {
+    "livekit-client": "2.19.2"
   }
 }

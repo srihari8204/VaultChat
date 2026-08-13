@@ -538,10 +538,9 @@ async function main() {
 
   // ── module smokes (promoted to deep fixtures at each route's cutover) ─
   console.log('module smokes:');
-  const smokes = [
-    ['vaultlens', 'GET', '/vaultlens/catalog', { token: A.jwt }, (x) => x.status === 200 && !!x.json],
-    ['vaultlens', 'GET', '/vaultlens/quota', { token: A.jwt }, (x) => x.status === 200 && !!x.json],
-  ];
+  // The two VaultLens smokes were removed with the feature — they asserted 200
+  // on /vaultlens/catalog and /vaultlens/quota, which now correctly 404.
+  const smokes = [];
   for (const [mod, method, p, opts, ok] of smokes) {
     try {
       const res = await req(method, p, opts);

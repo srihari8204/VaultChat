@@ -226,7 +226,7 @@ export async function encryptForChat(chatId: string, plaintext: string): Promise
       const g = await import('../services/crypto/groupSession.rn');
       return await g.groupEncryptMessage(chatId, plaintext);
     } catch (err) {
-      if (__DEV__) console.warn('[e2ee] group encrypt fell back to plaintext:', (err as any)?.message);
+      console.warn('[e2ee] group encrypt fell back to plaintext:', (err as any)?.message);
       return plaintext;
     }
   }
@@ -259,7 +259,9 @@ export async function encryptForChat(chatId: string, plaintext: string): Promise
       try {
         const e2ee = await import('../services/crypto/e2eeSession.rn');
         await e2ee.e2eeResetSession(peerId);
-        if (__DEV__) console.warn('[e2ee] AUTO-RESET outbound session for peer', peerId, '— retry re-handshakes');
+        (await import('./sessionEpoch')).bumpSessionEpoch(peerId);
+    stat(peerId).resets++; logSessionHealth(peerId, 'reset');
+        console.warn('[e2ee] AUTO-RESET outbound session for peer', peerId, '— retry re-handshakes');
       } catch {}
     }
     // STRICT: never silently send plaintext. Throwing surfaces a failed/retry
@@ -283,6 +285,8 @@ export async function resetChatSession(chatId: string): Promise<void> {
   if (!peerId) return;
   const e2ee = await import('../services/crypto/e2eeSession.rn');
   await e2ee.e2eeResetSession(peerId);
+  (await import('./sessionEpoch')).bumpSessionEpoch(peerId);
+    stat(peerId).resets++; logSessionHealth(peerId, 'reset');
 }
 
 export async function decryptFromChat(
@@ -295,19 +299,46 @@ export async function decryptFromChat(
   if (!E2EE_ENABLED) return ciphertext;
   // Group chats (W5): a group envelope (GSK1:) is decrypted via the sender-key
   // session; anything else is pre-E2EE / plaintext history and passes through.
-  if (_chatPeer.get(chatId)?.type === 'group') {
+  // Routed on the ENVELOPE, not on chat metadata.
+  //
+  // This used to require `_chatPeer` to say the chat was a group. That is an
+  // in-memory cache: empty on a cold start, and empty when a chat is opened
+  // from a push before listChats/getChat has run. A GSK1 message arriving in
+  // that window fell through to the PAIRWISE path, which does not know the
+  // format — logged on device as "content looks encrypted but is not a known
+  // envelope — prefix: GSK1:" with an unreadable bubble and no decrypt ever
+  // attempted.
+  //
+  // The prefix is self-describing, so routing on it needs no lookup and cannot
+  // race the cache.
+  const g = await import('../services/crypto/groupSession.rn');
+  if (g.isGroupEnvelope(ciphertext)) {
     if (!GROUP_E2EE) return ciphertext;
     try {
-      const g = await import('../services/crypto/groupSession.rn');
-      if (!g.isGroupEnvelope(ciphertext)) return ciphertext;
       return await g.groupDecryptMessage(chatId, senderId, messageId ?? 0, ciphertext);
     } catch (err) {
-      if (__DEV__) console.warn('[e2ee] group decrypt failed:', (err as any)?.message);
+      console.warn('[e2ee] group decrypt failed:', (err as any)?.message);
       return '🔒 unable to decrypt';
     }
   }
+  // A group chat whose content is NOT a group envelope is pre-E2EE history —
+  // it must never reach the pairwise path, which has no session for it.
+  if (_chatPeer.get(chatId)?.type === 'group') return ciphertext;
+
   const e2ee = await import('../services/crypto/e2eeSession.rn');
-  if (!e2ee.isEnvelope(ciphertext)) return ciphertext; // pre-E2EE plaintext history
+  if (!e2ee.isEnvelope(ciphertext)) {
+    // THE BLIND SPOT. If the UI thinks this is encrypted (looksEncrypted) but
+    // the decrypt gate does not recognise the envelope, we return it untouched
+    // and the bubble renders "unable to decrypt" — with NOTHING logged. That is
+    // exactly the state observed on device: lock icons everywhere and not one
+    // [e2ee] line. Name it, with just enough of the prefix to identify the
+    // format (never the payload).
+    if (looksEncrypted(ciphertext)) {
+      console.warn('[e2ee] content looks encrypted but is not a known envelope — prefix:',
+        String(ciphertext).slice(0, 12), 'chat:', chatId, 'sender:', senderId);
+    }
+    return ciphertext; // pre-E2EE plaintext history
+  }
   const peerId = directPeerOf(chatId) ?? senderId;     // peer = the other party
   try {
     const pt = await e2ee.e2eeDecrypt(chatId, peerId, messageId ?? 0, ciphertext);
@@ -343,16 +374,141 @@ export async function decryptFromChat(
 // auto-recovery, so users never have to reset a session by hand.
 const _decryptFailStreak = new Map<string, number>();
 const AUTO_RECOVER_AFTER = 2;
+
+// A reset must not be able to destroy the session a previous reset just built.
+// Measured on device: three AUTO-RESETs for one peer inside 21ms —
+//   01:13:15.926 / .931 / .947  AUTO-RESET dead session for peer cb1caeda…
+// chat.tsx decrypts every visible bubble concurrently, so a screen of
+// undecryptable history trips the streak several times before the first reset
+// finishes. Each extra reset tears down the fresh session created moments
+// earlier, so the peer's next message can't decrypt either — the "recovery"
+// was manufacturing the very desync it exists to repair, and the peer's rekey
+// request bounced it back for another round.
+//
+// One reset per peer per window. Recovery needs a round trip to be judged;
+// anything faster is thrash, not healing.
+const _lastAutoReset = new Map<string, number>();
+
+// ── session diagnostics ────────────────────────────────────────────────
+//
+// Lifetime counters per peer, so a 30-minute validation call can be judged
+// from the log alone: a healthy call prints this line ZERO times.
+//
+// Deliberately NOT logged: ratchet state, key versions, or anything derived
+// from key material. A diagnostic that leaks key state is a worse bug than the
+// one it is helping to find, and the counters below are enough to locate a
+// divergence — what matters is HOW OFTEN sessions are torn down and whether
+// both sides are doing it, not what the keys are.
+const _sessionStats = new Map<string, { resets: number; fails: number; concurrent: number }>();
+
+function stat(peerId: string) {
+  let s = _sessionStats.get(peerId);
+  if (!s) { s = { resets: 0, fails: 0, concurrent: 0 }; _sessionStats.set(peerId, s); }
+  return s;
+}
+
+/** One line summarising a peer's session health. Call after any reset/failure. */
+function logSessionHealth(peerId: string, event: string): void {
+  const s = stat(peerId);
+  console.warn(`[e2ee] session ${peerId.slice(0, 8)} ${event} — resets=${s.resets} decryptFails=${s.fails} concurrentRekeys=${s.concurrent}`);
+}
+const AUTO_RESET_COOLDOWN_MS = 60_000;
+/**
+ * Floor for a CALL-triggered forced reset. Long enough that a reset survives
+ * one full ring cycle (offers repeat every 3s) and can actually be used, short
+ * enough that a user retrying a failed call is not left waiting.
+ */
+const FORCED_RESET_FLOOR_MS = 15_000;
+
+/**
+ * Depth of an in-progress BULK decrypt (history render, search, cold sync).
+ *
+ * A failure while replaying history says nothing about the LIVE session, and
+ * must never tear it down. Old messages are encrypted to ratchet states that
+ * have long since advanced, so they are permanently undecryptable BY DESIGN —
+ * two of them in a row is not evidence of a dead session, it is evidence that
+ * the user scrolled up.
+ *
+ * Measured on device: a `[chats/delta] cold sync` at 14:28:37 replayed history
+ * and, eight seconds later, destroyed all FOUR healthy sessions at exactly
+ * decryptFails=2 each. The incoming call thirty seconds later then arrived on
+ * a session that had just been reset and could not be decrypted — reported as
+ * "calls not working", with the real cause two layers below the call stack.
+ *
+ * A counter rather than a boolean because hydrate can nest (a chat opening
+ * while a sync is already running).
+ */
+let _bulkDecryptDepth = 0;
+
 async function maybeAutoRecoverSession(peerId: string, errMsg: string): Promise<void> {
+  // There is no pairwise session with YOURSELF, so a failure here says nothing
+  // about any peer and there is nothing to recover.
+  //
+  // `peerId` is `directPeerOf(chatId) ?? senderId`, and directPeerOf returns
+  // null for a group chat — so every one of OUR OWN group messages resolves the
+  // "peer" to our own id. Those messages are read from the plaintext cache; when
+  // the cache does not have them they are permanently unreadable (that is what
+  // "own message(s) predate the plaintext cache" reports), and the decrypt
+  // attempt that follows can only ever fail.
+  //
+  // Left uncaught, that tight failure loop reset a session against our own id
+  // and fired rekey requests at ourselves. Measured on device 15:13:17–15:13:21
+  // as ~14 ghash failures in four seconds, all for peer cb1caeda — the device's
+  // own user — reaching decryptFails=10.
+  if (peerId && peerId === (await myUserId())) {
+    console.warn('[e2ee] undecryptable own message — no session with self, ignoring:', errMsg);
+    return;
+  }
+  // Replayed history is not evidence about the live session — see above.
+  if (_bulkDecryptDepth > 0) {
+    stat(peerId).fails++;
+    console.warn('[e2ee] decrypt failed during history replay — not counted against the live session:', errMsg);
+    return;
+  }
+  // A concurrent-re-key skip is NOT a decrypt failure. Both sides re-keyed at
+  // once and we are the side keeping its session; the peer is about to adopt
+  // it. Counting this toward the reset streak would tear down that session and
+  // restart the collision — the loop this whole tie-break exists to end.
+  if (errMsg.includes('concurrent re-key')) {
+    stat(peerId).concurrent++;
+    logSessionHealth(peerId, 'concurrent-rekey (held)');
+    return;
+  }
+  stat(peerId).fails++;
   const n = (_decryptFailStreak.get(peerId) ?? 0) + 1;
   _decryptFailStreak.set(peerId, n);
-  if (__DEV__) console.warn(`[e2ee] decrypt failed (${n}/${AUTO_RECOVER_AFTER}):`, errMsg);
+  console.warn(`[e2ee] decrypt failed (${n}/${AUTO_RECOVER_AFTER}):`, errMsg);
   if (n < AUTO_RECOVER_AFTER) return;
   _decryptFailStreak.delete(peerId);
+
+  const now = Date.now();
+  const last = _lastAutoReset.get(peerId) ?? 0;
+  if (now - last < AUTO_RESET_COOLDOWN_MS) {
+    console.warn('[e2ee] auto-reset suppressed for', peerId, `— ${Math.round((now - last) / 1000)}s since last`);
+    // Suppressing OUR reset must not also suppress asking the PEER to reset.
+    //
+    // Resetting our own session only fixes what we SEND. If the peer is still
+    // encrypting to a session we have already dropped, nothing improves until
+    // the peer resets too — and while this cooldown holds, we were doing
+    // neither. Measured on device: a forced reset at 16:25:48 healed nothing,
+    // and twenty seconds later the failures were still arriving with
+    // "auto-reset suppressed — 20s since last" and no request going out. Both
+    // sides sat until the user gave up, and the call was never decryptable.
+    //
+    // Asking costs nothing here: requestPeerRekey has its OWN 30s throttle, so
+    // this cannot become a request storm, and the peer resetting is enough on
+    // its own — their next message then carries an X3DH header we can adopt.
+    requestPeerRekey(peerId);
+    return;
+  }
+  _lastAutoReset.set(peerId, now);
+
   try {
     const e2ee = await import('../services/crypto/e2eeSession.rn');
     await e2ee.e2eeResetSession(peerId);   // drop dead ratchet; MY next outbound re-keys → peer self-heals
-    if (__DEV__) console.warn('[e2ee] AUTO-RESET dead session for peer', peerId, '— re-handshakes on next message');
+    (await import('./sessionEpoch')).bumpSessionEpoch(peerId);
+    stat(peerId).resets++; logSessionHealth(peerId, 'reset');
+    console.warn('[e2ee] AUTO-RESET dead session for peer', peerId, '— re-handshakes on next message');
     // Stage 2: I'm a PASSIVE reader that can't decrypt this peer — resetting my
     // own session only fixes my OUTbound. Ask the peer to reset too, so its next
     // message re-runs X3DH and I can finally decrypt (bidirectional heal without
@@ -363,26 +519,87 @@ async function maybeAutoRecoverSession(peerId: string, errMsg: string): Promise<
 
 // ── Stage-2 auto-recovery: peer re-key request over the socket ──────
 let _lastRekeyReq = new Map<string, number>();
-async function requestPeerRekey(peerId: string): Promise<void> {
+/**
+ * @param force Bypass both cooldowns — the local send limit and the peer's
+ *   receive limit. Reserved for CALL SETUP failure, which is a different
+ *   problem from a background decrypt failure: it is triggered by a person
+ *   tapping "call", so it cannot storm, and suppressing it does not delay a
+ *   heal — it prevents the call outright. Observed on device as four failed
+ *   attempts over 40s with the heal refused each time ("rekey request ignored
+ *   — reset 43s ago"), both phones waiting on the other.
+ */
+export async function requestPeerRekey(peerId: string, force = false): Promise<void> {
   const now = Date.now();
-  if ((now - (_lastRekeyReq.get(peerId) ?? 0)) < 30_000) return;   // at most once / 30s / peer
+  const since = now - (_lastRekeyReq.get(peerId) ?? 0);
+  // A failed call reports through more than one path (the ring repeat and the
+  // offer handler), so an unlimited forced request fires in bursts. The floor
+  // collapses a burst into one request without delaying a genuine retry.
+  if (since < (force ? FORCED_RESET_FLOOR_MS : 30_000)) return;
   _lastRekeyReq.set(peerId, now);
   try {
     const { getSocket } = await import('./socket');
     const s = await getSocket();
-    s.emit('e2ee_rekey', { to: peerId });
+    s.emit('e2ee_rekey', { to: peerId, force });
   } catch {}
 }
 
 /** Handle an inbound peer re-key request: drop my session with that peer so my
  *  next message to them re-initiates X3DH (they were stuck decrypting me).
  *  Wired once as a persistent socket listener in app/_layout.tsx. */
-export async function handleRekeyRequest(fromPeerId: string): Promise<void> {
+export async function handleRekeyRequest(fromPeerId: string, force = false): Promise<void> {
   if (!E2EE_ENABLED || !fromPeerId) return;
+  // A forced request comes from a peer whose CALL could not be set up. It jumps
+  // the 60s window below — a person who just failed to place a call will not
+  // quietly wait a minute — but it does NOT get to reset without limit.
+  //
+  // Bypassing the window entirely was worse than the problem: both sides began
+  // forcing resets at each other, each destroying the session the other had just
+  // rebuilt, so no session ever survived long enough to be used. Measured on
+  // device as EIGHT resets in 22 seconds with the call never connecting.
+  //
+  // A short floor keeps both properties: a real call failure heals in seconds,
+  // and a reset storm is impossible because each side can only act once per
+  // window no matter how many requests arrive. The peer re-requests on its next
+  // attempt if it is still broken, so nothing is lost by ignoring a duplicate —
+  // and duplicates are the norm, since both the ring and the offer path report
+  // the same failure.
+  if (force) {
+    const now = Date.now();
+    const since = now - (_lastAutoReset.get(fromPeerId) ?? 0);
+    if (since < FORCED_RESET_FLOOR_MS) {
+      console.warn('[e2ee] forced re-key ignored for', fromPeerId, `— reset ${Math.round(since / 1000)}s ago`);
+      return;
+    }
+    _lastAutoReset.set(fromPeerId, now);
+    try {
+      const e2ee = await import('../services/crypto/e2eeSession.rn');
+      await e2ee.e2eeResetSession(fromPeerId);
+      (await import('./sessionEpoch')).bumpSessionEpoch(fromPeerId);
+      stat(fromPeerId).resets++; logSessionHealth(fromPeerId, 'reset');
+      console.warn('[e2ee] FORCED re-key (peer call setup failed) — reset session for', fromPeerId);
+    } catch {}
+    return;
+  }
+  // Same cooldown as the local auto-reset, and deliberately sharing its map:
+  // the two halves form one loop. A peer stuck on undecryptable history sends a
+  // rekey request every time it gives up, and honouring each one destroys the
+  // session we just rebuilt — so the peer's next message fails, and it asks
+  // again. Observed on device as repeated "peer requested re-key" seconds after
+  // our own reset. Ignoring a request inside the window is safe: if the peer
+  // still cannot decrypt after it, it will ask again once the window closes.
+  const now = Date.now();
+  const last = _lastAutoReset.get(fromPeerId) ?? 0;
+  if (now - last < AUTO_RESET_COOLDOWN_MS) {
+    console.warn('[e2ee] rekey request ignored for', fromPeerId, `— reset ${Math.round((now - last) / 1000)}s ago`);
+    return;
+  }
+  _lastAutoReset.set(fromPeerId, now);
   try {
     const e2ee = await import('../services/crypto/e2eeSession.rn');
     await e2ee.e2eeResetSession(fromPeerId);
-    if (__DEV__) console.warn('[e2ee] peer requested re-key; reset session for', fromPeerId);
+    (await import('./sessionEpoch')).bumpSessionEpoch(fromPeerId);
+      stat(fromPeerId).resets++; logSessionHealth(fromPeerId, 'reset');
+    console.warn('[e2ee] peer requested re-key; reset session for', fromPeerId);
   } catch {}
 }
 
@@ -405,15 +622,34 @@ export async function hydrateMessages(
   msgs: Message[],
   knownPlain?: Map<number, string>,
 ): Promise<Message[]> {
+  // Everything decrypted below is HISTORY. Mark it so a failure cannot be
+  // mistaken for a dead live session and trigger a reset — the fault that made
+  // an incoming call undecryptable moments after a cold sync.
+  _bulkDecryptDepth++;
+  try {
   const out = msgs.slice();
   // F5: a decrypted payload may be a wrapped {text + link preview} envelope
   // (sender-generated previews ride INSIDE the E2EE content). Unwrap so the
   // UI sees plain text + meta.linkPreview — local-only, never sent anywhere.
+  // The E2EE layer stores a TOMBSTONE under a message id to mean "permanently
+  // undecryptable, stop retrying". It is a marker, never text — but it lives in
+  // the same cache as real plaintext and reached the UI through several paths
+  // (own-message cache, knownPlain map, the NUL-prefixed straggler branch),
+  // printing "__e2ee_undecryptable__" inside the user's own bubble on device.
+  // Guarding the one funnel every render path goes through covers all of them.
+  const TOMBSTONE = '\u0000__e2ee_undecryptable__';
   const finish = (m: Message, plain: string): Message => {
+    if (plain === TOMBSTONE) return m;   // leave the envelope → bubble shows its locked state
     const { text, lp } = unwrapPreview(plain);
     return lp ? { ...m, content: text, meta: { ...(m.meta ?? {}), linkPreview: lp } }
               : { ...m, content: plain };
   };
+  // Own messages sent BEFORE the plaintext cache existed have no local copy and
+  // never will — a Double Ratchet ciphertext cannot be opened by its sender. It
+  // is expected, not a fault, so it is counted and reported once per batch
+  // instead of once per message. Opening a chat used to print dozens of these,
+  // which is how a genuine one-line failure goes unnoticed in a call log.
+  let ownMisses = 0;
   for (let i = out.length - 1; i >= 0; i--) {   // msgs arrive newest-first → iterate oldest-first
     const m = out[i];
     const c = m.content;
@@ -423,22 +659,148 @@ export async function hydrateMessages(
     }
     const cached = knownPlain?.get(m.id);
     if (cached != null && !looksEncrypted(cached)) { out[i] = finish(m, cached); continue; }
-    const plain = await decryptFromChat(chatId, (m as any).senderId ?? '', c, m.id);
+
+    // NEVER attempt to decrypt our OWN message.
+    //
+    // A Double Ratchet ciphertext cannot be opened by the party that produced
+    // it — the sending and receiving chains are different keys. So this was
+    // guaranteed to fail whenever the own-plaintext cache missed (reinstall,
+    // cleared cache, or the server echoing the message back before the cache
+    // write landed), and the sender saw "unable to decrypt" on their own text.
+    //
+    // Worse, that guaranteed failure fed the auto-recovery streak, which after
+    // two of them RESET a perfectly healthy session with the peer — so a
+    // sender-side display bug could break the receiver's decryption. Skipping
+    // is both the correct render and the fix for that cascade.
+    const senderId = (m as any).senderId ?? '';
+    if (senderId && senderId === (await myUserId())) {
+      const own = await readOwnPlaintext(chatId, m.id, m.createdAt);
+      if (own != null) { out[i] = finish(m, own); }
+      else {
+        ownMisses++;
+      }
+      // No cached copy → leave the envelope as-is. The bubble renders its
+      // "can't be shown on this device" state, which is the truth: nothing is
+      // wrong with the encryption, we simply do not hold the plaintext.
+      continue;
+    }
+
+    const plain = await decryptFromChat(chatId, senderId, c, m.id);
     if (plain && !looksEncrypted(plain) && plain !== '🔒 unable to decrypt') {
       out[i] = finish(m, plain);
     }
   }
+  if (ownMisses) console.warn(`[e2ee] ${ownMisses} own message(s) predate the plaintext cache in chat ${chatId} — shown as unavailable`);
   return out;
+  } finally {
+    _bulkDecryptDepth--;
+  }
+}
+
+// Our own user id, cached. hydrateMessages asks per message, so this must not
+// hit storage every time; the value cannot change without a re-login, which
+// clears the module anyway.
+let _meId: string | null = null;
+async function myUserId(): Promise<string> {
+  if (_meId) return _meId;
+  try {
+    const { getCachedUser } = await import('./api');
+    _meId = String((await getCachedUser())?.id ?? '');
+  } catch { _meId = ''; }
+  return _meId;
+}
+
+// A just-sent message is READ before its plaintext is WRITTEN. Measured on
+// device, every message showing the same shape:
+//   01:52:48.063  no cached plaintext — id 214     (socket echo → hydrate)
+//   01:52:48.128  no cached plaintext — id 214
+//   01:52:48.161  cached own plaintext — id 214    (POST returned the id)
+// The server echoes the message back over the socket before the POST response
+// carrying its id has landed, so the cache cannot possibly be populated yet.
+// Whichever bubbles never re-rendered afterwards stayed stuck reading
+// "unable to decrypt" — which is why messages sent seconds apart differed.
+//
+// One short retry covers the gap. Bounded to messages sent in the last minute:
+// applying it to old history would add this delay to every genuinely-missing
+// message (83 of them on this device) and turn chat opening into a crawl.
+const OWN_PT_RETRY_MS = 300;
+const OWN_PT_RETRY_WINDOW_MS = 60_000;
+
+/** Plaintext of an own-sent message from the local store, or null. */
+async function readOwnPlaintext(chatId: string, messageId: number, createdAt?: string): Promise<string | null> {
+  if (!E2EE_ENABLED || !messageId || messageId <= 0) return null;
+  try {
+    const e2ee = await import('../services/crypto/e2eeSession.rn');
+    let v = await e2ee.e2eeGetCached(chatId, messageId);
+    if (v == null && createdAt) {
+      const age = Date.now() - new Date(createdAt).getTime();
+      if (age >= 0 && age < OWN_PT_RETRY_WINDOW_MS) {
+        await new Promise(r => setTimeout(r, OWN_PT_RETRY_MS));
+        v = await e2ee.e2eeGetCached(chatId, messageId);
+      }
+    }
+    // The store also holds a TOMBSTONE ("permanently undecryptable, stop
+    // retrying") under the same key. It is a marker, not text — returning it
+    // rendered the literal string "__e2ee_undecryptable__" inside the user's
+    // own chat bubble (seen on device). Treat it as "no plaintext held", which
+    // gives the bubble's proper "can't be shown on this device" state.
+    if (v === e2ee.E2EE_UNDECRYPTABLE) return null;
+    return v;
+  } catch { return null; }
 }
 
 // Cache an own-sent message's plaintext once the server assigns its id, so the
 // sender renders it from the local store (server content is ciphertext).
 export async function cacheOwnPlaintext(chatId: string, messageId: number | undefined, plaintext: string): Promise<void> {
-  if (!E2EE_ENABLED || !messageId || messageId <= 0) return;
+  // This is the ONLY copy of an own-sent message's text — a Double Ratchet
+  // ciphertext cannot be opened by the sender. Every early-return and every
+  // swallowed throw below is a message the user permanently cannot read, so
+  // each one says so rather than failing silently, which is how this went
+  // undiagnosed: bubbles sent seconds apart, some readable, some not.
+  if (!E2EE_ENABLED) return;
+  if (!messageId || messageId <= 0) {
+    console.warn('[e2ee] cacheOwnPlaintext SKIPPED — no server id yet; chat:', chatId, 'id:', messageId);
+    return;
+  }
   try {
     const e2ee = await import('../services/crypto/e2eeSession.rn');
     await e2ee.e2eeCachePlaintext(chatId, messageId, plaintext);
-  } catch {}
+    // warn, NOT log: babel.config.js strips console.log from release builds
+    // (transform-remove-console, excluding warn/error), so a console.log here
+    // is invisible in exactly the build being debugged.
+    console.warn('[e2ee] cached own plaintext — id:', messageId, 'len:', plaintext?.length ?? 0);
+  } catch (err) {
+    console.warn('[e2ee] cacheOwnPlaintext FAILED — id:', messageId, '—', (err as any)?.message ?? err);
+  }
+}
+
+/**
+ * Fill in chat-list previews for OWN messages.
+ *
+ * The messages table stores what went on the wire, which for an own message is
+ * ciphertext — so the preview builder saw an envelope, nulled it, and every row
+ * whose last message was mine read "Tap to open chat" instead of its text. Very
+ * visible offline, where no server round-trip papers over it (seen on device).
+ *
+ * The plaintext is already on disk in the own-message store, keyed by the same
+ * message id the preview carries; this just looks it up. Peer messages are left
+ * alone — theirs decrypt through the normal path.
+ */
+export async function hydrateOwnPreviews(
+  map: Map<string, { content: string | null; type: string | null; senderId: string | null; id: number }>,
+): Promise<Map<string, { content: string | null; type: string | null; senderId: string | null; id: number }>> {
+  if (!E2EE_ENABLED || !map?.size) return map;
+  try {
+    const me = await myUserId();
+    if (!me) return map;
+    for (const [chatId, row] of map) {
+      if (row.senderId !== me) continue;
+      if (row.content != null && !looksEncrypted(row.content)) continue;
+      const pt = await readOwnPlaintext(chatId, row.id);   // no retry: a list row is not worth stalling on
+      if (pt != null) map.set(chatId, { ...row, content: unwrapPreview(pt).text });
+    }
+  } catch { /* previews are best-effort — never block the chat list */ }
+  return map;
 }
 
 // ─── REST ───────────────────────────────────────────────────────────

@@ -20,6 +20,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
+import * as pinStore from '../services/security/pinStore';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
 import { createSyncCode } from '../lib/chatService';
 
@@ -212,9 +213,9 @@ export default function VaultFeaturesScreen() {
       Alert.alert('Error', 'PINs do not match');
       return;
     }
-    // Check it's different from real PIN
-    const realPin = await SecureStore.getItemAsync('vault_pin');
-    if (fakePin === realPin) {
+    // Must differ from the real PIN. The real PIN is no longer readable (scrypt
+    // record, not the value), so ask the store whether this one already IS it.
+    if (await pinStore.verifyPin(fakePin)) {
       Alert.alert('Error', 'Fake PIN must be different from your real PIN');
       return;
     }

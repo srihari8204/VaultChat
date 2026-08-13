@@ -11,14 +11,17 @@ import {
   ActivityIndicator, Alert, Image, Modal, Pressable, RefreshControl, ScrollView, SectionList,
   StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
+import { useWindowDimensions } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette, brandAlpha } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
 import { Avatar } from '../../components/ui';
+import { canSplit } from '../../lib/responsive';
 import { getAccessToken } from '../../lib/api';
 import {
   archiveChat, attachmentUrl, listChats, listStoriesFeed, muteChat, pinChat, setHidden,
+  hydrateOwnPreviews,
   myInvitations,
   type ChatSummary,
 } from '../../lib/chatService';
@@ -93,6 +96,8 @@ export default function ChatsScreen() {
   const [typingChats, setTypingChats] = useState<Set<string>>(new Set());
   const typingTimers = useRef<Record<string, any>>({});
   const [menuChat, setMenuChat] = useState<ChatSummary | null>(null);   // long-press action sheet
+  const { width: winW, height: winH } = useWindowDimensions();
+  const splitReady = canSplit(winW, winH);
 
   // Pending invitations awaiting MY answer (banner above the list). Refreshed
   // on focus and when the server pushes invitation_created, so an invite that
@@ -101,7 +106,26 @@ export default function ChatsScreen() {
   const refreshInvites = useCallback(async () => {
     try {
       const inv = await myInvitations();
-      setPendingInvites(inv.filter((i: any) => i.status === 'pending').length);
+      // Count what the invitee can ACT on, not what is literally 'pending'.
+      //
+      // These are not the same set, and the difference is a real trap. An
+      // invitation stranded at 'accepted' — the invitee said yes, but the group
+      // was on the old 'strict' default and the owner approval it waits for was
+      // never surfaced anywhere (migration 077) — is offered again by the
+      // server, which sets canAccept on exactly those rows, and the inbox
+      // screen already draws an Accept button for them.
+      //
+      // Counting only 'pending' hid that banner, and for anyone not already in
+      // a space the banner is the ONLY route to the inbox. So the recovery
+      // existed on the server and in the screen, and could not be reached: the
+      // invitee saw nothing, and the inviter watched them never join.
+      //
+      // `canAccept` is the server's own answer to "is there something to do
+      // here", so use it. The status fallback keeps this correct against an
+      // older server that does not send the flag.
+      setPendingInvites(
+        inv.filter((i) => (typeof i.canAccept === 'boolean' ? i.canAccept : i.status === 'pending')).length,
+      );
     } catch { /* offline / not signed in — leave the banner hidden */ }
   }, []);
   useFocusEffect(useCallback(() => { refreshInvites(); }, [refreshInvites]));
@@ -131,14 +155,19 @@ export default function ChatsScreen() {
   // pre-fetch — deliberately NOT done on the per-message socket refresh path
   // (P1.2): a busy chat used to kick syncAllHistory on every inbound message.
   const loadList = useCallback(async (withHistory: boolean) => {
+    // Previews come from the local DB and need NO network, but this used to sit
+    // below `await listChats()` — so offline, that first line threw and every
+    // row fell back to "Tap to open chat" even though the text was on disk.
+    // Measured: online showed "You: Hiiiii", the same row offline showed the
+    // placeholder. Load them first, unconditionally.
+    getLastMessagePerChat().then(hydrateOwnPreviews).then(setLastMsgs).catch(() => {});
     try {
       const list = await listChats();
       setChats(prev => mergeChats(prev, list));                 // identity-preserving → memoized rows skip re-render
       cacheChats(list).catch(() => {});                         // persist for instant next-launch paint (op-sqlite engine)
-      getLastMessagePerChat().then(setLastMsgs).catch(() => {}); // refresh row previews
       if (withHistory) {
         // Background: pre-fetch history so offline scroll-back works (once/session, Wi-Fi only).
-        syncAllHistory(list.filter(c => !c.archived).map(c => c.id)).then(() => getLastMessagePerChat().then(setLastMsgs).catch(() => {})).catch(() => {});
+        syncAllHistory(list.filter(c => !c.archived).map(c => c.id)).then(() => getLastMessagePerChat().then(hydrateOwnPreviews).then(setLastMsgs).catch(() => {})).catch(() => {});
       }
       setError(null);
       // Publish total unread (non-archived) so the Chats tab can badge it.
@@ -392,6 +421,33 @@ export default function ChatsScreen() {
             <Text style={S.title}>{selected.size}</Text>
           </View>
           <View style={{ flexDirection: 'row', gap: 4 }}>
+            {/* Split view: shown only with EXACTLY two chats picked, and only
+                when the window can fit two readable panes (lib/responsive).
+                Selection mode is the natural home — choosing two chats is the
+                gesture. The old long-press sheet this lived in is unreachable:
+                onLongPress enters selection mode and never opens it. */}
+            {splitReady && selected.size <= 2 && (
+              <TouchableOpacity
+                disabled={selected.size !== 2}
+                onPress={() => { const [a, b] = [...selected]; exitSelect(); router.push({ pathname: '/split', params: { a, b } } as any); }}
+                style={[S.headerBtn, { flexDirection: 'row', alignItems: 'center', gap: 4 }]}
+              >
+                <Ionicons
+                  name="git-compare-outline"
+                  size={20}
+                  color={selected.size === 2 ? colors.primary : colors.textDim}
+                />
+                {/* Labelled, and shown from the FIRST selection rather than only
+                    at exactly two. The icon alone, appearing only once a second
+                    chat was picked, meant the feature was reported as missing —
+                    it was rendering correctly (this device passes canSplit at
+                    820dp tall), just undiscoverable. Dimmed at one selection it
+                    advertises itself and says what it is waiting for. */}
+                <Text style={{ color: selected.size === 2 ? colors.primary : colors.textDim, fontSize: 13 }}>
+                  {selected.size === 2 ? 'Split' : 'Pick 2'}
+                </Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity onPress={bulkPin} style={S.headerBtn}><Ionicons name="pin" size={20} color={colors.text} /></TouchableOpacity>
             <TouchableOpacity onPress={bulkMute} style={S.headerBtn}><Ionicons name="notifications-off-outline" size={20} color={colors.text} /></TouchableOpacity>
             <TouchableOpacity onPress={bulkArchive} style={S.headerBtn}><Ionicons name="archive-outline" size={20} color={colors.text} /></TouchableOpacity>
@@ -402,6 +458,21 @@ export default function ChatsScreen() {
         <View style={S.header}>
           <Text style={S.title}>Chats</Text>
           <View style={{ flexDirection: 'row', gap: 4 }}>
+            {/* Split view's own entry point. It used to exist ONLY inside
+                selection mode, so reaching it meant long-pressing a chat and
+                picking a second — with nothing anywhere to suggest the feature
+                existed, which is why it was reported missing. Hidden when the
+                window is too small to show two usable panes (lib/responsive),
+                since offering it there would just fail. */}
+            {splitReady && (
+              <TouchableOpacity
+                onPress={() => { setSelectMode(true); setSelected(new Set()); }}
+                style={S.headerBtn}
+                accessibilityLabel="Split view: pick two chats"
+              >
+                <Ionicons name="git-compare-outline" size={22} color={colors.text} />
+              </TouchableOpacity>
+            )}
             <TouchableOpacity onPress={() => router.push('/search' as any)} style={S.headerBtn}><Ionicons name="search" size={22} color={colors.text} /></TouchableOpacity>
             <TouchableOpacity onPress={() => router.push('/alerts' as any)} style={S.headerBtn}><Ionicons name="notifications-outline" size={22} color={colors.text} /></TouchableOpacity>
             <TouchableOpacity onPress={() => router.push('/mini' as any)} style={S.headerBtn}><Ionicons name="grid-outline" size={22} color={colors.text} /></TouchableOpacity>

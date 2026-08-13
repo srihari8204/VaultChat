@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
+import * as pinStore from '../services/security/pinStore';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -83,8 +84,9 @@ function PinGate({ onUnlock }: { onUnlock: (pin: string) => void }) {
     setPin(next);
 
     if (next.length === 8) {
-      const saved = await SecureStore.getItemAsync('vault_pin');
-      if (next.join('') === saved) {
+      // pinStore verifies against the scrypt record (and migrates a legacy value
+      // on first success) — the PIN is no longer readable to compare against.
+      if (await pinStore.verifyPin(next.join(''))) {
         onUnlock(next.join(''));
       } else {
         Vibration.vibrate([0, 100, 100, 100]);

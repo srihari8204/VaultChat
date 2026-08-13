@@ -7,17 +7,31 @@
 //
 // Honesty rule preserved: the platform's native-evaluable type set is reported
 // in `evaluatedTypes` whether or not a threat was found, so "checked & clean"
-// is distinct from "couldn't check". APK_RESIGNED is only evaluated when an
-// expected signing digest is configured (otherwise it stays pending).
+// is distinct from "couldn't check". APK_RESIGNED is evaluated whenever an
+// expected signing digest is configured — one SHIPS below, so it is evaluated by
+// default; pass `expectedSigning: ''` to leave it pending instead.
 
 import type { CollectorResult } from './orchestrator';
 import type { Platform } from './posture';
 import type { SecuritySignal, SecuritySignalType } from './riskEngine';
 
-// Release signing cert (SHA-256, lowercase hex, no colons) — from
-// android/app/debug.keystore (androiddebugkey), which release builds sign with
-// (keytool -list -v). Rotate this constant if the signing keystore ever changes.
-export const EXPECTED_SIGNING_SHA256 = 'fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c';
+// Release signing cert (SHA-256, lowercase hex, no colons).
+//
+// This is the fingerprint of vaultchat-release.jks (alias `vaultchat`), applied
+// to release builds by plugins/withReleaseSigning.js. It was the DEBUG key's
+// fingerprint until 2026-08-08, because Expo's template signs release builds
+// with the debug keystore — which meant the "is this the official build?" check
+// was comparing against a key every developer on earth also has.
+//
+// Rotate this WHENEVER the signing keystore changes, or every install will
+// report itself as re-signed. Read the new value with:
+//   keytool -list -v -keystore <store> -alias <alias>
+// then lowercase the SHA-256 and strip the colons.
+//
+// Debug builds are signed with debug.keystore and so will NOT match this. That
+// is correct and intended: the check answers "is this the build we shipped?",
+// and a developer's local build is not.
+export const EXPECTED_SIGNING_SHA256 = '5fc197fc3f09f684c6861b7e5876be5824d4aacbbc26cc309fd64a97dc791a59';
 
 // Accessibility services considered legitimate (prefix match on the flattened
 // "pkg/.Service" component name). Extend for OEM assistive tools you trust.

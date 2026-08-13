@@ -4,7 +4,7 @@
 // page, with a per-manufacturer step list + an "I've done this" confirmation.
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Platform, Switch } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
@@ -12,6 +12,7 @@ import { type Palette } from '../constants/theme';
 import {
   requestIgnoreBatteryOptimizations, openAutoStartSettings, oemInstructions, type OemStep,
 } from '../lib/batteryOptimization';
+import { getLowDataMode, setLowDataMode } from '../lib/callPrefs';
 
 const DONE_KEY = 'vc_call_reliability_done';
 
@@ -22,6 +23,8 @@ export default function CallReliabilityScreen() {
   const [oem, setOem] = useState<OemStep | null>(null);
   const [battOk, setBattOk] = useState(false);
   const [autoOk, setAutoOk] = useState(false);
+  const [lowData, setLowData] = useState(false);
+  useEffect(() => { getLowDataMode().then(setLowData).catch(() => {}); }, []);
 
   useEffect(() => { oemInstructions().then(setOem); }, []);
 
@@ -79,6 +82,27 @@ export default function CallReliabilityScreen() {
             <Text style={S.okTxt}>You're set — calls should ring even when VaultChat is closed.</Text>
           </View>
         )}
+
+        {/* Low-data mode. Caps the encoder rather than switching anything off:
+            video still works, it just stops chasing quality the connection
+            cannot afford. Audio drops to the Opus floor (16 kbps), which is
+            still transparent for speech. */}
+        <View style={S.card}>
+          <View style={S.cardHead}>
+            <Ionicons name="cellular-outline" size={22} color={lowData ? colors.primary : colors.text} />
+            <Text style={S.cardTitle}>Low data mode</Text>
+            <Switch
+              value={lowData}
+              onValueChange={async (v) => { setLowData(v); await setLowDataMode(v); }}
+              trackColor={{ true: colors.primary }}
+            />
+          </View>
+          <Text style={S.cardBody}>
+            Uses far less mobile data on calls, and less battery. Video stays on but at a lower
+            quality ceiling; if the connection gets bad enough, video pauses so the audio keeps
+            working. Takes effect on the next sample, including during a call.
+          </Text>
+        </View>
       </ScrollView>
     </View>
   );

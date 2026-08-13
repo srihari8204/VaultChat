@@ -57,8 +57,11 @@ services:
       DB_PASS: ${DB_PASS:-vaultchat_dev}
       # P2.1: REDIS_ADAPTER=1 turns on the Socket.IO Redis adapter + Redis
       # presence/rosters (cluster.go) so go-api can scale past one replica.
-      # Default off — single-node in-process fan-out, the pre-P2 behavior.
-      REDIS_ADAPTER: ${REDIS_ADAPTER:-0}
+      # On by default (SCALEOUT.md canary step 2) — single-node behavior must be
+      # identical, and it removes the flag-flip from the moment you actually
+      # need a second replica. Rollback: REDIS_ADAPTER=0 in .env, restart.
+      # Redis unreachable ⇒ every helper fails open to the local maps anyway.
+      REDIS_ADAPTER: ${REDIS_ADAPTER:-1}
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       REDIS_PASS: ""
@@ -219,9 +222,11 @@ services:
       S3_SECRET_KEY: ${MINIO_PASS:-vaultchat_dev_secret}
       VALHALLA_URL: http://valhalla:8002   # internal routing engine (POST /nav/route proxies here)
       INTERNAL_EMIT_KEY: ${INTERNAL_EMIT_KEY:-bench-internal-emit}
-      # Post-realtime-cutover: Go owns Socket.IO, so the leftover Node
-      # emitters (the vaultlens QueueEvents listener) push results into Go's
-      # sockets via its reverse bridge instead of Node's now-clientless io.
+      # Post-realtime-cutover: Go owns Socket.IO, so any out-of-process Node
+      # emitter reaches clients through Go's reverse bridge rather than this
+      # process's now-clientless io. Nothing uses it today — the last consumer
+      # was the VaultLens worker — but it costs nothing and is what a future
+      # worker would need.
       GO_INTERNAL_URL: http://go-api:4000
       # Shared with go-api so either backend can serve disk attachments.
       UPLOAD_DIR: /data/uploads
@@ -316,43 +321,83 @@ services:
       LIVEKIT_KEYS: ${LIVEKIT_KEYS:-}
     command: --config /etc/livekit.yaml
 
-  # VaultLens BullMQ worker — renders AI avatars (ModelsLab → R2) off the request
-  # path. Same image as api, different command. PROD override must also give it the
-  # R2 S3_* + MODELSLAB_API_KEY env (same as api) — it needs storage + the model key.
-  vaultlens-worker:
-    build:
-      context: ./vaultchat-backend
+  # ── egress — LiveKit room → HLS, the missing half of broadcasting ────
+  #
+  # Without this a broadcast row is created, a room exists, and no playlist is
+  # ever written: internal/livekit/egress.go asks LiveKit to start a room
+  # composite and there is nothing to answer. That was the deployment half of
+  # the "broadcast never goes live" defect; the code half (a status that only
+  # moves on a verified webhook) is in internal/routes/broadcast_webhook.go.
+  #
+  # VERSION MUST MATCH THE RUNNING SERVER. Egress has its OWN release line —
+  # its tags do NOT track livekit-server's. Pinning a guess here would be worse
+  # than leaving it unset, so the tag is a variable: read the server's version
+  # (`livekit-server --version`) and set LIVEKIT_EGRESS_VERSION to the egress
+  # release LiveKit documents as compatible with it. The default below matches
+  # the livekit-server:v1.8 pinned above, NOT the newer version the deploy
+  # notes describe — set the variable rather than trusting it.
+  #
+  # SYS_ADMIN is required, not optional: egress renders the room in headless
+  # Chrome, and Chrome's sandbox needs it. This is why egress is the only
+  # CPU-bound service in the stack and why it is profile-gated.
+  #
+  # Profile-gated with the SFU it depends on: `docker compose --profile sfu up -d egress`
+  egress:
+    image: livekit/egress:${LIVEKIT_EGRESS_VERSION:-v1.8.4}
     restart: unless-stopped
-    command: ["node", "workers/vaultlens.js"]
-    env_file:
-      - path: ./vaultchat-backend/.env
-        required: false
+    profiles: ["sfu"]
+    cap_add:
+      - SYS_ADMIN
+    # livekit runs network_mode: host, so it is NOT on this compose network and
+    # cannot be reached as `livekit`. Same mapping caddy already carries.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
-      NODE_ENV: production
-      DB_HOST: postgres
-      DB_PORT: "5432"
-      DB_NAME: vaultchat
-      DB_USER: vaultchat
-      DB_PASS: ${DB_PASS:-vaultchat_dev}
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
-      REDIS_PASS: ""
-      S3_ENDPOINT: http://minio:9000
-      S3_PUBLIC_ENDPOINT: http://65.21.229.167:19000
-      S3_BUCKET: vaultchat-media
-      S3_ACCESS_KEY: ${MINIO_USER:-vaultchat}
-      S3_SECRET_KEY: ${MINIO_PASS:-vaultchat_dev_secret}
-      MODELSLAB_API_KEY: ${MODELSLAB_API_KEY:-}
-      VAULTLENS_CONCURRENCY: "2"
-      # Go-first prod: the worker hosts the QueueEvents listener and pushes
-      # vaultlens:ready/failed into go-api's internal bridge (Go owns sockets).
-      GO_INTERNAL_URL: http://go-api:4000
-      INTERNAL_EMIT_KEY: ${INTERNAL_EMIT_KEY:-bench-internal-emit}
+      # Egress takes its whole configuration as one YAML document in an env
+      # var. Values are interpolated by compose from .env — no secret is
+      # written into this file.
+      #
+      # redis is REQUIRED: it is how egress and livekit-server find each other.
+      # The livekit side of that pairing must be enabled too — see the commented
+      # redis block in livekit/livekit.yaml, which is off for the single-node
+      # setup and has to come on before egress can register.
+      EGRESS_CONFIG_BODY: |
+        redis:
+          address: redis:6379
+        api_key: ${LIVEKIT_API_KEY:-}
+        api_secret: ${LIVEKIT_API_SECRET:-}
+        ws_url: ${LIVEKIT_EGRESS_WS_URL:-ws://host.docker.internal:7880}
+        insecure: ${LIVEKIT_EGRESS_INSECURE:-true}
+        log_level: info
+        # Segments (HLS) are written straight to object storage by egress; the
+        # bucket, endpoint and region MUST match what
+        # internal/livekit/egress.go signs its segment_outputs with, or the
+        # playlist lands somewhere the viewer's URL does not point at.
+        s3:
+          access_key: ${MINIO_USER:-vaultchat}
+          secret: ${MINIO_PASS:-vaultchat_dev_secret}
+          bucket: ${BROADCAST_BUCKET:-vaultchat-broadcast}
+          endpoint: ${S3_ENDPOINT:-http://minio:9000}
+          region: ${S3_REGION:-us-east-1}
+          force_path_style: true
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_started
+      minio:
+        condition: service_started
+    # Egress is the only CPU-bound service here and shares a box with Postgres.
+    # Unbounded, one runaway transcode starves the database.
+    deploy:
+      resources:
+        limits:
+          cpus: "${EGRESS_CPUS:-2}"
+          memory: ${EGRESS_MEMORY:-2g}
+
+  # The vaultlens-worker service lived here. It was the LAST running Node
+  # process in this stack; removing it makes the default service set fully
+  # Go-only (caddy + go-api + postgres + pgbouncer + redis + minio + valhalla +
+  # coturn). Its MODELSLAB_API_KEY and VAULTLENS_CONCURRENCY went with it — no
+  # other service read either.
 
   # Kafka fan-out worker — consumes message.created and delivers over the Redis
   # adapter. Same image as api, different command. Scale with: --scale fanout-worker=N
