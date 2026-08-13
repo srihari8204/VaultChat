@@ -348,8 +348,23 @@ export async function decryptFromChat(
     const m = String((err as any)?.message || '');
     // ONLY retry the transient out-of-order case (a follow-up message can arrive
     // before the X3DH-bearing first message bootstraps the session).
+    // …but only when it COULD be out-of-order. The retry waits for an X3DH
+    // message still in flight, which is a live-delivery race. Replaying history
+    // has no race to wait for: every message is already on disk, so the 500ms is
+    // spent to reach the identical failure.
+    //
+    // It was the dominant cost of every launch. A device whose identity is newer
+    // than its history has no session for ANY old message, so all of them took
+    // this branch — serialized, because hydrateMessages awaits per message and
+    // e2eeDecrypt holds a per-peer lock. That is the 36–65s of white screen
+    // recorded in syncEngine.ts, and it repeated on every single boot.
+    //
+    // Live decrypts run at depth 0 and keep the full retry, unchanged. The
+    // branch itself is deliberately left in place: falling through to the
+    // else-if would hand this to maybeAutoRecoverSession, which is not what a
+    // missing session during replay means.
     if (m.includes('no session and no X3DH')) {
-      for (let i = 0; i < 2; i++) {
+      for (let i = 0; _bulkDecryptDepth === 0 && i < 2; i++) {
         await new Promise(r => setTimeout(r, 250));
         try {
           const pt = await e2ee.e2eeDecrypt(chatId, peerId, messageId ?? 0, ciphertext);

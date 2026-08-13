@@ -311,14 +311,29 @@ export async function noteDelivered(chatId: string, lastDeliveredMessageId: numb
  * believes was delivered and which the recipient never saw.
  */
 async function reBodyAwaiting(): Promise<void> {
+  // NEVER run this while offline, and never let it precede the send loop.
+  //
+  // api() puts no timeout on fetch, so a call made with no network hangs until
+  // the OS gives up — which on Android can be tens of seconds. Recovering up to
+  // a hundred rows serially in front of the send loop therefore stalled flush()
+  // completely: messages queued while offline were never attempted, because the
+  // queue was still waiting on the first doomed PUT. Sending is the job;
+  // recovery is the optimisation, and an optimisation must never block it.
+  if (!online) return;
+
   let rows: QueuedMessage[];
   try { rows = await queueList<QueuedMessage>('msg', 100, 0); } catch { return; }
 
+  let attempts = 0;
   for (const m of rows) {
     if (!isAwaitingDelivery(m) || !m.ciphertext) continue;
+    // A few per pass. Recovery is not urgent — the next flush picks up where
+    // this one stopped, and a bounded pass cannot become a long stall.
+    if (attempts >= RE_BODY_PER_FLUSH) break;
     // Give normal delivery a chance first — most messages are received in
     // seconds, and re-bodying one that is simply in flight is pure waste.
     if (Date.now() - (m.acceptedAt ?? m.createdAt) < RE_BODY_AFTER_MS) continue;
+    attempts++;
     try {
       await api(`/chats/${encodeURIComponent(m.chatId)}/messages/${m.serverId}/body`, {
         method: 'PUT',
@@ -338,11 +353,19 @@ async function reBodyAwaiting(): Promise<void> {
       } else if (status === 404 || status === 403) {
         // Deleted, or no longer ours. Nothing to recover.
         await drop(m.tempId);
+      } else if (!status) {
+        // No HTTP status = the request never reached the server (dropped
+        // connection, DNS, radio gone). Stop the whole pass: every remaining
+        // row would fail the same way, one slow timeout at a time.
+        return;
       }
-      // Anything else (offline, 5xx) — leave it and retry on the next flush.
+      // Anything else (5xx) — leave it and retry on the next flush.
     }
   }
 }
+
+/** Recovery attempts per flush. Bounded so a pass can never become a stall. */
+const RE_BODY_PER_FLUSH = 3;
 
 /**
  * How long to wait after acceptance before attempting recovery.
@@ -454,24 +477,36 @@ export async function flush(): Promise<void> {
     // place would let them fill a 200-item page and starve real sends behind
     // them. Cheap — it only touches rows past the cap.
     await reapAwaitingDelivery();
-    // Then try to recover anything the recipient still has not received. Before
-    // the send loop, because a message that never arrived matters more than the
-    // next one queued behind it.
-    await reBodyAwaiting();
     const q = await load();
     if (q.length === 0) {
-      // An empty page while rotated means we walked off the end — go back to the
-      // head and try again rather than sitting idle until the periodic tick.
-      if (pageOffset > 0) { pageOffset = 0; scheduleFlush(0); }
+      // An empty page while rotated means we walked off the end. Rewind to the
+      // head, but do NOT re-flush immediately: we just read every page and found
+      // nothing to send, so an instant retry would read the same pages again.
+      //
+      // With an inert row count that is an exact multiple of PAGE that is
+      // precisely a 0ms loop — page of inert rows advances the offset and
+      // reschedules, the next page is empty and rewinds and reschedules, round
+      // and round, re-unsealing hundreds of rows each lap and never sending
+      // anything. Whatever makes a send possible (enqueue, reconnect, retry,
+      // the periodic tick) calls flush itself, so stopping here loses nothing.
+      if (pageOffset > 0) pageOffset = 0;
       return;
     }
 
     const remaining: QueuedMessage[] = [];
+    // Accepted-but-unconfirmed rows are skipped below, but they are NOT drained
+    // — they will still be there next pass. Counting them as drained reset
+    // pageOffset to 0 on a page made entirely of them, and the immediate
+    // re-flush then re-read that same page forever: a hot loop that sent
+    // nothing, while genuinely queued messages sat behind it unreachable. They
+    // are also the OLDEST rows, so they sort to the head of the page and this
+    // was the normal case for an active user, not an edge one.
+    let inert = 0;
     for (const item of q) {
       // Already accepted and waiting on delivery — NOT a send candidate.
       // Re-POSTing would be a no-op anyway (the server dedups on clientId) but
       // it would burn a request per flush per row, forever.
-      if (isAwaitingDelivery(item)) continue;
+      if (isAwaitingDelivery(item)) { inert++; continue; }
       try {
         const { real, wire } = await postOnce(item);
         const serverId = Number(real?.id ?? 0);
@@ -520,7 +555,7 @@ export async function flush(): Promise<void> {
     // Page bookkeeping: anything that drained shrinks the queue under us, so go
     // back to the head. A full page where NOTHING drained is wedged — step past
     // it. Anything else means we've seen the tail, so start over next pass.
-    const drained = q.length - remaining.length;
+    const drained = q.length - remaining.length - inert;
     if (drained > 0 || q.length < PAGE) pageOffset = 0;
     else pageOffset += PAGE;
 
@@ -536,6 +571,10 @@ export async function flush(): Promise<void> {
   } finally {
     flushing = false;
   }
+  // Recovery runs AFTER sending, outside the flushing guard, and never blocks
+  // it. Queued messages are what the user is waiting on; re-bodying one the
+  // server already accepted is strictly less urgent.
+  await reBodyAwaiting().catch(() => {});
 }
 
 // ─── Auto-flush on reconnect + periodic safety net ────────────

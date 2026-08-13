@@ -242,12 +242,19 @@ function RootLayout() {
     });
 
     // ── Boot work that the user is WAITING for ─────────────────────────
-    // These three decide what the first screen shows, so they start now:
-    // catch-up on messages missed while offline, re-flush dropped receipts, and
-    // resume interrupted media sends.
+    // These four decide what the first screen shows, so they start now:
+    // catch-up on messages missed while offline, re-flush dropped receipts,
+    // resume interrupted media sends, and drain the text outbox.
     import('../lib/syncEngine').then(m => m.initSync()).catch(() => {});
     import('../lib/receipts').then(m => m.initReceipts()).catch(() => {});
     import('../lib/mediaOutbox').then(m => m.initMediaOutbox()).catch(() => {});
+    // The TEXT outbox belongs here for the same reason the media one does, and
+    // it was the only one missing. Its sole other caller is the chat screen's
+    // mount effect, so until some individual chat was opened there was no boot
+    // drain, no NetInfo reconnect flush and no periodic tick — queue messages
+    // offline, restart, stop at the chat list, regain network, and nothing sent.
+    // It also left `online` stale-true, since only initQueue's listener writes it.
+    import('../lib/messageQueue').then(m => m.initQueue()).catch(() => {});
 
     // ── Boot work that can wait for the first frame ────────────────────
     // Neither of these changes anything the user can see on the chat list, and

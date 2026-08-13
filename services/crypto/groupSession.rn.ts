@@ -88,6 +88,25 @@ async function ensureDistributed(chatId: string, me: string): Promise<void> {
   }
 }
 
+// Senders we have already fetched for and STILL have no key for, and how long
+// before it is worth asking again. Bounded by group membership, so it does not
+// grow with history.
+const _noSenderKeyAt = new Map<string, number>();
+const INGEST_RETRY_MS = 30_000;
+
+// Concurrent misses share one fetch. Bulk replay decrypts many messages from the
+// same chat back-to-back, and without this the first few race past the cooldown
+// check together and each issue their own GET.
+const _ingestInFlight = new Map<string, Promise<void>>();
+function ingestOnce(chatId: string): Promise<void> {
+  let p = _ingestInFlight.get(chatId);
+  if (!p) {
+    p = ingest(chatId).finally(() => _ingestInFlight.delete(chatId));
+    _ingestInFlight.set(chatId, p);
+  }
+  return p;
+}
+
 /** Pull SKDMs addressed to me and install/refresh peer records (skips stale ones). */
 async function ingest(chatId: string): Promise<void> {
   const list = await api<{ senderId: string; skdm: string }[]>(`/chats/${encodeURIComponent(chatId)}/sender-keys`);
@@ -146,7 +165,25 @@ export async function groupDecryptMessage(
   if (cached !== null && cached !== E2EE_UNDECRYPTABLE) return cached;
   const cipher = JSON.parse(wire.slice(PREFIX.length));
   let rec = await loadPeer(chatId, senderId);
-  if (!rec) { await ingest(chatId); rec = await loadPeer(chatId, senderId); }
+  if (!rec) {
+    // Fetch, but not once per message. This line runs for EVERY undecryptable
+    // group message, and ingest() is a network GET plus one pairwise decrypt per
+    // sender key returned. On a device whose identity is newer than the group's
+    // history no amount of fetching can help — the SKDMs were sealed to the old
+    // identity — so replaying that history issued a round trip per message, per
+    // launch, all of them doomed.
+    //
+    // The cooldown is keyed on senders ALREADY KNOWN to have no usable key, so a
+    // sender seen for the first time is still fetched immediately: a new member's
+    // first message decrypts as promptly as before.
+    const k = chatId + '|' + senderId;
+    if (Date.now() - (_noSenderKeyAt.get(k) ?? 0) >= INGEST_RETRY_MS) {
+      await ingestOnce(chatId);
+      rec = await loadPeer(chatId, senderId);
+      if (rec) _noSenderKeyAt.delete(k);
+      else _noSenderKeyAt.set(k, Date.now());
+    }
+  }
   if (!rec) throw new Error('group: no sender key for ' + senderId);
   const { plaintext, next } = groupDecrypt(rec, cipher);
   await savePeer(chatId, senderId, next);

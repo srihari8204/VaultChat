@@ -184,8 +184,34 @@ async function rawFetch(path: string, opts: ApiOptions): Promise<Response> {
   const url = `${SERVER_URL}${path}`;
   if (__DEV__) console.log(`[api] ${init.method || 'GET'} ${url}`);
 
-  return fetch(url, { ...init, headers, body });
+  // A request with no deadline is not "patient", it is a hang.
+  //
+  // RN Android builds OkHttp with zero (= infinite) connect/read/write timeouts.
+  // Airplane mode rejects fast, so this stays invisible until the link is
+  // CONNECTED BUT DEAD — a captive portal, Wi-Fi with no route, a black-holing
+  // server. Then fetch simply never settles. The outbox held its `flushing`
+  // mutex across an await like this one, so the finally that releases it never
+  // ran and every later flush early-returned: tapping Send did nothing, with no
+  // error and no recovery short of killing the app.
+  //
+  // Two escapes, both deliberate:
+  //   * caller passed a signal — cancellation is theirs, don't fight it
+  //   * FormData — an upload is legitimately long (chatService uploadAttachment)
+  if (init.signal || (typeof FormData !== 'undefined' && body instanceof FormData)) {
+    return fetch(url, { ...init, headers, body });
+  }
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, headers, body, signal: ctl.signal });
+  } finally {
+    clearTimeout(timer);   // response headers are in; the body streams on
+  }
 }
+
+// Generous: it is a backstop against a dead link, not a latency budget. Slow
+// networks must not trip it, so it sits well above any normal request.
+const REQUEST_TIMEOUT_MS = 30_000;
 
 // Refresh tokens ROTATE (single-use): the server revokes the presented token and
 // issues a new pair. So when a dozen requests 401 at once on app resume (access
