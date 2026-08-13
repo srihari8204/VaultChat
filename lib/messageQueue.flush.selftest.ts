@@ -1,32 +1,38 @@
 // lib/messageQueue.flush.selftest.ts — run: npx tsx lib/messageQueue.flush.selftest.ts
 //
-// Two bugs made "offline messages not working" real, and both were silent —
-// nothing threw, nothing logged, messages just never left the phone. This pins
-// the invariants that broke, because neither failure is visible in review.
+// Executes the REAL flush() from lib/messageQueue.ts.
 //
-// 1. PAGE ACCOUNTING. flush() skips accepted-but-unconfirmed rows, but they were
-//    not subtracted from the drained count, so a page made only of them looked
-//    fully drained → pageOffset reset to 0 → immediate re-flush → same page,
-//    forever. Those rows are the OLDEST, so they sort to the head of the page:
-//    an active user hit this as the NORMAL case, and real queued sends behind
-//    them were never reached.
+// "Offline messages not working" was four defects at once, and every one of them
+// was silent: nothing threw, nothing logged, messages simply never left the
+// phone. Asserting on the shape of the source would not have caught them, so
+// this runs the actual code and checks what it DOES:
 //
-// 2. ORDERING + OFFLINE GUARD. reBodyAwaiting() ran BEFORE the send loop and
-//    does one network PUT per row. api() sets no fetch timeout, so with no
-//    network each call hangs until the OS gives up. Recovering rows serially in
-//    front of the send loop stalled flush() outright.
+//   1. accepted-but-unconfirmed rows were counted as drained, so a page of them
+//      looked like progress, reset the offset and re-read the same page forever.
+//      They are the OLDEST rows, so they sort to the head of the page — the
+//      normal case for an active user, not an edge one.
+//   2. recovery (reBodyAwaiting) ran BEFORE the send loop, inside the flushing
+//      mutex, one serial PUT per accepted row.
+//   3. api() had no fetch deadline, so a connected-but-dead link never settled;
+//      the mutex was never released and the outbox died for the process.
+//   4. initQueue() was never called at boot, so the NetInfo listener that owns
+//      the `online` flag did not exist and the flag stayed stale-true.
 //
-// messageQueue.ts can't be imported in Node (react-native, expo-crypto), so the
-// rule is lifted OUT of the source and executed here — the same approach as
-// localDb.queue.selftest.ts. A change to the real line is picked up; a copy of
-// it in this file would not be.
+// Measured against the pre-fix build (189b302), this harness reports: 3 messages
+// still queued after 6 flushes, 40 doomed PUTs issued while offline, 0/2 sent,
+// and flush() permanently wedged.
+//
+// messageQueue.ts cannot be imported under Node (react-native, expo-crypto), so
+// its IMPORT BLOCK ONLY is rewritten to point at stubs and the body is used
+// verbatim — regenerated on every run, so it cannot drift from what ships. Same
+// spirit as localDb.queue.selftest.ts lifting DDL out of the source.
 
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const SRC = readFileSync(join(HERE, 'messageQueue.ts'), 'utf8');
 
 let failures = 0;
 function check(name: string, ok: boolean, detail?: string) {
@@ -34,153 +40,212 @@ function check(name: string, ok: boolean, detail?: string) {
   console.log(`  ${ok ? '✓' : '✗'} ${name}${ok || !detail ? '' : `  (${detail})`}`);
 }
 
-function bodyOf(fnDecl: string): string {
-  const start = SRC.indexOf(fnDecl);
-  if (start < 0) throw new Error(`selftest: ${fnDecl} not found — renamed?`);
-  // Brace-match from the first { after the signature.
-  let i = SRC.indexOf('{', start), depth = 0;
-  for (let j = i; j < SRC.length; j++) {
-    if (SRC[j] === '{') depth++;
-    else if (SRC[j] === '}' && --depth === 0) return SRC.slice(i, j + 1);
+// ── build a runnable copy: imports rewritten, body untouched ──────────────
+const WORK = join(tmpdir(), `vc-flush-selftest-${process.pid}`);
+mkdirSync(WORK, { recursive: true });
+writeFileSync(join(WORK, 'package.json'), '{"type":"module"}');
+
+const STUBS = `
+const H = () => globalThis.__H;
+export default { addEventListener(cb) { H().netListeners.push(cb); return () => {}; } };
+let _n = 0;
+export function randomUUID() { return 'cid-' + (++_n); }
+export async function api(path, opts) { return H().api(path, opts); }
+export function wrapWithPreview(t) { return t; }
+export const perf = { mark() {}, recordSend() {}, snapshot() { return { transport: 'test' }; } };
+export async function encryptForChat(_c, t) { return 'CT:' + t; }
+export async function cacheOwnPlaintext() {}
+export async function editMessage() { return { id: 1 }; }
+export async function deleteMessage() {}
+// Mirrors the queues table's ordering contract: ORDER BY created_at, rowid.
+// That ordering is exactly why accepted rows land at the head of the page.
+const ord = (a, b) => (a.createdAt - b.createdAt) || (a.rowid - b.rowid);
+let seq = 0;
+export async function queuePut(q, id, item, createdAt, tag) {
+  const rows = H().rows;
+  const i = rows.findIndex(r => r.q === q && r.id === id);
+  if (i >= 0) { rows[i].data = item; rows[i].tag = tag ?? null; return; }
+  rows.push({ q, id, tag: tag ?? null, data: item, createdAt: createdAt ?? Date.now(), rowid: ++seq });
+}
+export async function queueList(q, limit = 200, offset = 0) {
+  H().listCalls++;
+  return H().rows.filter(r => r.q === q).sort(ord).slice(offset, offset + limit).map(r => r.data);
+}
+export async function queueListByTag(q, tag, limit = 500) {
+  return H().rows.filter(r => r.q === q && r.tag === tag).sort(ord).slice(0, limit).map(r => r.data);
+}
+export async function queueGet(q, id) {
+  return H().rows.find(r => r.q === q && r.id === id)?.data ?? null;
+}
+export async function queueDelete(q, id) {
+  const rows = H().rows;
+  const i = rows.findIndex(r => r.q === q && r.id === id);
+  if (i >= 0) rows.splice(i, 1);
+}
+export async function queueMigrate() { return 0; }
+`;
+writeFileSync(join(WORK, 'stubs.js'), STUBS);
+
+const IMPORT_REWRITES: [RegExp, string][] = [
+  [/^import NetInfo from '@react-native-community\/netinfo';$/m, `import NetInfo from './stubs.js';`],
+  [/^import \* as Crypto from 'expo-crypto';$/m, `import * as Crypto from './stubs.js';`],
+  [/^import \{ api \} from '\.\/api';$/m, `import { api } from './stubs.js';`],
+  [/^import \{ queuePut, queueList, queueListByTag, queueGet, queueDelete, queueMigrate \} from '\.\/localDb';$/m,
+   `import { queuePut, queueList, queueListByTag, queueGet, queueDelete, queueMigrate } from './stubs.js';`],
+  [/^import \{ encryptForChat, cacheOwnPlaintext, editMessage, deleteMessage, type Message \} from '\.\/chatService';$/m,
+   `import { encryptForChat, cacheOwnPlaintext, editMessage, deleteMessage } from './stubs.js';`],
+  [/^import \{ wrapWithPreview \} from '\.\/linkPreview';$/m, `import { wrapWithPreview } from './stubs.js';`],
+  [/^import \{ type MsgState \} from '\.\/messageState';$/m, ``],
+  [/^import perf from '\.\/perf';$/m, `import { perf } from './stubs.js';`],
+];
+
+let src = readFileSync(join(HERE, 'messageQueue.ts'), 'utf8');
+for (const [re, to] of IMPORT_REWRITES) {
+  if (!re.test(src)) {
+    console.log(`  ✗ selftest could not rewrite an import — messageQueue.ts changed its import block (${re})`);
+    failures++;
   }
-  throw new Error(`selftest: unbalanced braces in ${fnDecl}`);
+  src = src.replace(re, to);
+}
+// Type positions that referenced the removed type-only imports.
+src = src.replace(/\bMessage\['type'\]/g, 'any').replace(/\bMsgState\b/g, 'any');
+
+const stray = [...src.matchAll(/^import .*from '([^']+)';$/gm)].map(m => m[1]).filter(p => p !== './stubs.js');
+check('every messageQueue import is accounted for', stray.length === 0, `unstubbed: ${stray.join(', ')}`);
+
+writeFileSync(join(WORK, 'mq.ts'), src);
+
+// ── harness state ─────────────────────────────────────────────────────────
+const H: any = {
+  rows: [], netListeners: [], listCalls: 0, online: true,
+  apiCalls: [] as string[], hangMethod: null as string | null, serverSeq: 100,
+  api: async (path: string, opts: any) => {
+    const method = opts?.method ?? 'POST';
+    H.apiCalls.push(`${method} ${path}`);
+    // A connected-but-dead link: accepted, never answered. This is the shape
+    // that wedged the outbox, and it is why api() now carries a deadline.
+    if (H.hangMethod && method === H.hangMethod) await new Promise(() => {});
+    if (!H.online) throw new Error('Network request failed');  // no .status, like a real offline fetch
+    if (method === 'PUT') return {};
+    return { id: ++H.serverSeq, chatId: 'c1', content: 'CT:x', createdAt: new Date().toISOString() };
+  },
+};
+(globalThis as any).__H = H;
+
+// Wrapped: this repo compiles as CJS under tsx, so there is no top-level await.
+async function main() {
+const Q: any = await import(pathToFileURL(join(WORK, 'mq.ts')).href);
+
+// initQueue subscribes the NetInfo listener, which is the ONLY writer of the
+// module's `online` flag — and that flag initialises to true. Skip this and the
+// offline guard silently never fires. That was the app's real defect: initQueue
+// had a single caller, the chat screen's mount effect.
+Q.initQueue();
+
+async function setOnline(v: boolean) {
+  H.online = v;
+  for (const cb of H.netListeners) cb({ isConnected: v, isInternetReachable: v });
+  await new Promise(r => setTimeout(r, 50));
+}
+const reset = () => { H.rows.length = 0; H.apiCalls.length = 0; H.listCalls = 0; H.hangMethod = null; };
+const queued = () => H.rows.filter((r: any) => !r.data.serverId).length;
+const posts = () => H.apiCalls.filter((c: string) => c.startsWith('POST')).length;
+const puts = () => H.apiCalls.filter((c: string) => c.startsWith('PUT')).length;
+
+function seed(n: number, opts: { awaiting?: boolean; base?: number } = {}) {
+  const base = opts.base ?? 0;
+  for (let i = 0; i < n; i++) {
+    const id = `${opts.awaiting ? 'a' : 'q'}${base + i}`;
+    H.rows.push({
+      q: 'msg', id, tag: 'c1', createdAt: base + i, rowid: H.rows.length + 1,
+      data: {
+        tempId: id, clientId: id, chatId: 'c1', op: 'send', type: 'text',
+        plaintext: opts.awaiting ? '' : 'hello', replyToId: null, meta: null,
+        attempts: 0, createdAt: base + i, lastError: null,
+        // Accepted 20 min ago: past RE_BODY_AFTER_MS so recovery is genuinely
+        // eligible. Seeded as "just now", the 10-minute gate skips it and the
+        // recovery checks below pass vacuously.
+        ...(opts.awaiting
+          ? { serverId: 500 + i, acceptedAt: Date.now() - 20 * 60_000, ciphertext: 'CT:old' }
+          : {}),
+      },
+    });
+  }
 }
 
-// ── 1. the real drained expression, lifted and executed ──────────────────
-console.log('page accounting');
+try {
+  console.log('offline, then reconnect');
+  reset(); await setOnline(false);
+  seed(3);
+  const t0 = Date.now();
+  await Q.flush();
+  check('flush() returns promptly while offline', Date.now() - t0 < 3000, `took ${Date.now() - t0}ms`);
+  check('queued messages are retained, not dropped', queued() === 3, `${queued()}/3`);
+  await setOnline(true);
+  await Q.flush();
+  check('all three send once back online', posts() >= 3, `${posts()} POSTs`);
+  check('the queue drains', queued() === 0, `${queued()} left`);
 
-const flushBody = bodyOf('export async function flush');
-const drainedLine = flushBody.match(/const drained = ([^;]+);/);
-check('flush() still computes `drained`', !!drainedLine);
+  console.log('inert rows must not starve real sends');
+  reset(); await setOnline(true);
+  seed(250, { awaiting: true });          // oldest → head of the page
+  seed(3, { base: 1000 });                // sendable, past PAGE=200
+  for (let i = 0; i < 6 && queued() > 0; i++) await Q.flush();
+  check('sends behind a full page of inert rows are reached',
+    queued() === 0, `${queued()} still queued after 6 flushes — starved`);
+  check('and it did not spin', H.listCalls < 40, `${H.listCalls} queue reads`);
 
-// Executing the real expression is the point: if someone drops `- inert`, this
-// evaluates differently and the simulation below wedges.
-const drainedOf = new Function(
-  'q', 'remaining', 'inert',
-  `return ${drainedLine![1]};`,
-) as (q: unknown[], remaining: unknown[], inert: number) => number;
+  console.log('accepted rows stay inert');
+  reset(); await setOnline(true);
+  seed(5, { awaiting: true });
+  await Q.flush();
+  check('no accepted row is ever re-POSTed', posts() === 0, `${posts()} duplicate sends`);
 
-check('inert rows are subtracted, not counted as drained',
-  drainedOf(new Array(200), [], 200) === 0,
-  `a full page of inert rows reported ${drainedOf(new Array(200), [], 200)} drained`);
+  console.log('recovery must never block sending');
+  reset(); await setOnline(false);
+  seed(40, { awaiting: true });
+  seed(2, { base: 1000 });
+  await Q.flush();
+  check('no recovery PUTs are issued while offline', puts() === 0, `${puts()} doomed PUTs`);
+  check('queued messages survive', queued() === 2, `${queued()}/2`);
 
-check('genuinely drained rows still count',
-  drainedOf(new Array(10), new Array(4), 0) === 6);
+  reset(); await setOnline(true); H.hangMethod = 'PUT';
+  seed(40, { awaiting: true });
+  seed(2, { base: 1000 });
+  void Q.flush();                          // deliberately not awaited
+  await new Promise(r => setTimeout(r, 1500));
+  check('sends go out even while recovery hangs', posts() === 2, `${posts()}/2 POSTed`);
+  check('the queue drains anyway', queued() === 0, `${queued()} left`);
 
-check('mixed page counts only what actually left',
-  drainedOf(new Array(10), new Array(2), 5) === 3);
+  // The mutex matters as much as the sends: held, every later flush early-returns
+  // and the outbox is dead for the rest of the process.
+  H.hangMethod = null;
+  reset(); seed(1, { base: 2000 });
+  await Q.flush();
+  check('the flush mutex was released, so later flushes still work',
+    posts() === 1, `${posts()}/1 — flush() is wedged`);
 
-// ── the rotation loop, driven by that same expression ────────────────────
-// Faithful to flush(): same page window, same empty-page rewind, same
-// drained-based offset rule. A wedged queue never terminates, so passes are
-// bounded and exceeding the bound IS the failure.
-const PAGE = 200;
-const MAX_PASSES = 20;
-
-// Lifted, not assumed: does the empty-page branch come straight back, or go
-// idle? Hardcoding "goes idle" here would make this simulation agree with
-// itself no matter what flush() actually does — which is the one way a test
-// like this fails silently.
-const emptyBranch = flushBody.slice(
-  flushBody.indexOf('if (q.length === 0)'),
-  flushBody.indexOf('return;', flushBody.indexOf('if (q.length === 0)')),
-);
-check('the empty-page branch was located in source', emptyBranch.length > 0);
-const respinsOnEmpty = /scheduleFlush\(\s*0\s*\)/.test(emptyBranch);
-
-function simulate(inertCount: number, sendable: number) {
-  let queue = [
-    ...Array.from({ length: inertCount }, () => ({ inert: true })),
-    ...Array.from({ length: sendable }, () => ({ inert: false })),
-  ];
-  let pageOffset = 0, sent = 0, passes = 0;
-
-  while (passes < MAX_PASSES) {
-    passes++;
-    const q = queue.slice(pageOffset, pageOffset + PAGE);
-    if (q.length === 0) {
-      // Walked off the end: rewind. Whether flush() then comes straight back
-      // is read from the source above — rescheduling here is what made the
-      // exact-multiple case spin forever.
-      if (pageOffset > 0) {
-        pageOffset = 0;
-        if (respinsOnEmpty) continue;
-      }
-      break;
-    }
-
-    let inert = 0;
-    const remaining: unknown[] = [];
-    const gone = new Set<unknown>();
-    for (const item of q) {
-      if (item.inert) { inert++; continue; }
-      sent++;
-      gone.add(item);   // a successful send drops out of the queue
-    }
-    queue = queue.filter(x => !gone.has(x));
-
-    const drained = drainedOf(q, remaining, inert);
-    if (drained > 0 || q.length < PAGE) pageOffset = 0;
-    else pageOffset += PAGE;
-
-    // flush() only comes straight back for a full page with nothing retrying;
-    // anything else means it went idle until the next real trigger.
-    if (remaining.length === 0 && q.length >= PAGE) continue;
-    break;
-  }
-  return { sent, passes };
+  // ── cross-file wiring the harness stubs out, so assert it directly ──────
+  console.log('boot wiring');
+  const LAYOUT = readFileSync(join(HERE, '..', 'app', '_layout.tsx'), 'utf8');
+  check('_layout.tsx starts the TEXT outbox at boot, not just the media one',
+    /initQueue\(\)/.test(LAYOUT),
+    'no boot drain, no reconnect flush, no periodic tick until a chat is opened — and `online` stays stale-true');
+  const API = readFileSync(join(HERE, 'api.ts'), 'utf8');
+  check('api() gives fetch a deadline',
+    /AbortController|AbortSignal\.timeout/.test(API),
+    'a connected-but-dead link never settles and wedges the flush mutex');
+  check('uploads are exempt from that deadline', /instanceof FormData/.test(API));
+} finally {
+  rmSync(WORK, { recursive: true, force: true });
+}
 }
 
-const past = simulate(250, 3);
-check('real sends behind a full page of inert rows are reached',
-  past.sent === 3, `sent ${past.sent}/3 after ${past.passes} passes`);
-check('rotation terminates instead of hot-looping',
-  past.passes < MAX_PASSES, `still spinning after ${past.passes} passes`);
-
-// The residual busy loop: inert count an EXACT multiple of PAGE, nothing to
-// send. Full page advances the offset, next page is empty and rewinds — that
-// cycle span forever at 0ms, re-unsealing rows on every lap.
-const spin = simulate(PAGE * 2, 0);
-check('an exact-multiple page of inert rows does not busy-loop',
-  spin.passes < MAX_PASSES, `still spinning after ${spin.passes} passes`);
-
-// ── 2. ordering and the offline guard ────────────────────────────────────
-console.log('recovery must never block sending');
-
-const reBody = bodyOf('async function reBodyAwaiting');
-const guard = reBody.indexOf('if (!online) return');
-const firstCall = reBody.indexOf('await api(');
-check('reBodyAwaiting() bails out when offline', guard >= 0);
-check('the offline guard precedes every network call',
-  guard >= 0 && firstCall > guard,
-  `guard@${guard} vs first api()@${firstCall}`);
-check('recovery is bounded per pass', /attempts >= RE_BODY_PER_FLUSH/.test(reBody));
-check('a request that never reached the server ends the pass',
-  /else if \(!status\)[\s\S]{0,300}?return;/.test(reBody));
-
-// Ordering: recovery must come after the send loop, not in front of it.
-const loadAt  = flushBody.indexOf('await load()');
-const reBodyAt = flushBody.indexOf('reBodyAwaiting()');
-check('flush() sends before it attempts recovery',
-  reBodyAt > loadAt,
-  reBodyAt < 0 ? 'flush() no longer calls reBodyAwaiting()' : `reBodyAwaiting@${reBodyAt} vs load@${loadAt}`);
-
-// ── 3. none of the above matters if the outbox never runs ────────────────
-console.log('the outbox has to be running');
-
-const LAYOUT = readFileSync(join(HERE, '..', 'app', '_layout.tsx'), 'utf8');
-check('_layout.tsx starts the TEXT outbox at boot, not just the media one',
-  /initQueue\(\)/.test(LAYOUT),
-  'only app/chat.tsx called initQueue(), so there was no boot drain, no reconnect ' +
-  'flush and no periodic tick until some individual chat was opened — and `online` stayed stale-true');
-check('the media outbox is still started too', /initMediaOutbox\(\)/.test(LAYOUT));
-
-const API = readFileSync(join(HERE, 'api.ts'), 'utf8');
-check('api() gives fetch a deadline',
-  /AbortController|AbortSignal\.timeout/.test(API),
-  'a connected-but-dead link never settles, and an unsettled await inside the flush mutex wedges the outbox for the process lifetime');
-check('uploads are exempt from that deadline', /instanceof FormData/.test(API));
-check('a caller-supplied signal still wins', /init\.signal/.test(API));
-
-console.log(failures === 0 ? '\nPASS' : `\nFAIL (${failures})`);
-process.exit(failures === 0 ? 0 : 1);
+main().then(() => {
+  console.log(failures === 0 ? '\nPASS' : `\nFAIL (${failures})`);
+  process.exit(failures === 0 ? 0 : 1);
+}).catch((err) => {
+  console.log('  ✗ harness threw:', err?.message ?? err);
+  rmSync(WORK, { recursive: true, force: true });
+  process.exit(1);
+});
