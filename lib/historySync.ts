@@ -26,9 +26,28 @@ export async function syncChatHistory(chatId: string, maxMessages = 200): Promis
     // messages the device already had, against a backend that purges bodies
     // after delivery, so the work was both wasteful and increasingly futile.
     //
-    // The back-fill still runs for a chat this device knows nothing about
-    // (fresh install), which is the only case the cache cannot answer.
     if (cached.length) return;
+
+    // …and it no longer runs for a chat this device knows NOTHING about either.
+    //
+    // That was the fresh-install case, and it quietly defeated the server-side
+    // cold-start protection. /chats/delta now returns only undelivered messages
+    // to an unrecognised device (measured 277 -> 0), but this back-fill then
+    // paged the same history straight back in through
+    // GET /chats/{id}/messages — a different endpoint, no cold-start filter,
+    // 12 x 50 per chat. Observed on a real handset: the delta returned nothing
+    // and the client still logged 35 ghash failures replaying history it had
+    // just been spared.
+    //
+    // A fresh device is supposed to start empty. The paths that still fetch
+    // history are the ones the user actually asks for — opening a chat with an
+    // empty cache, and scrolling back (onEndReached) — both of which page on
+    // demand rather than hoovering every chat in the background.
+    //
+    // ponytail: this makes syncChatHistory a no-op in both directions, so the
+    // whole module is now dead weight; delete it once the behaviour has soaked.
+    return;
+    // eslint-disable-next-line no-unreachable
     let oldest = cached.length ? cached[cached.length - 1].id : undefined;
     let total = cached.length;
     let guard = 0;
