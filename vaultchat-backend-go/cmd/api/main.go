@@ -190,6 +190,11 @@ func main() {
 	// scheduled-messages worker — so a Node-less prod loses nothing.
 	jobs.StartAll(ctx)
 	routes.StartShopBookJobs(ctx)
+	// Releases hosts locked out by a broadcast whose egress died without ever
+	// sending a terminal webhook. broadcast_one_active_per_host is a UNIQUE
+	// index over the non-terminal statuses, so a single wedged row stops that
+	// account going live again permanently — see broadcast_reaper.go.
+	routes.StartBroadcastReaper(ctx)
 
 	// Anything else reaching us is a proxy misconfiguration — say so loudly.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
