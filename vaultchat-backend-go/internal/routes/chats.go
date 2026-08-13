@@ -543,9 +543,17 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Cold start (since=0): bound an unrecognised install to recent history.
+	//
+	// coldStart also switches on the undelivered-only filter below. An empty
+	// local database is NOT a licence to re-download the account's history: a
+	// reinstall would pull back every message the account had already received,
+	// which is bandwidth nobody asked for and server-side exposure of old
+	// ciphertext to a client that has no key for it.
+	coldStart := false
 	if since == 0 {
 		deviceID := strings.TrimSpace(r.Header.Get("X-Device-Id"))
 		if !noteSyncDevice(ctx, user.ID, deviceID, true) {
+			coldStart = true
 			capN := coldSyncMaxMessages()
 			enforce := capN > 0 && deviceID != "" && !coldSyncWarnOnly()
 			// Only compute the floor when it can actually be used — it is an
@@ -572,12 +580,35 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 	if limit > 500 {
 		limit = 500
 	}
+	// On a cold start, return only what this ACCOUNT has not already received.
+	//
+	// chat_members.last_delivered_message_id is the account's per-chat delivery
+	// high-water mark, already maintained by POST /chats/{id}/delivered. Anything
+	// at or below it has been delivered once and is HISTORY; anything above it is
+	// still PENDING and must arrive, or reinstalling would silently drop messages
+	// in flight. NULL means nothing has ever been acked for that chat, so the
+	// whole chat is still pending and is returned — a genuinely new member does
+	// not lose their first messages.
+	//
+	// A per-row comparison rather than a single floor, because the delta cursor is
+	// global while the delivery mark is per chat; one number cannot express both.
+	//
+	// Deliberate consequence: a SECOND device joining an existing account starts
+	// empty rather than inheriting history. That is the requested behaviour, and
+	// the explicit history path (GET /chats/{id}/messages?before=) still fetches
+	// it on demand, page by page.
+	coldFilter := ""
+	if coldStart {
+		coldFilter = `
+		    AND (cm.last_delivered_message_id IS NULL OR m.id > cm.last_delivered_message_id)`
+	}
 	rows, err := db.SysPool.Query(ctx,
 		`SELECT `+chatsMsgSelBody("m")+` FROM messages m
 		   JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1 AND cm.left_at IS NULL
 		                       AND cm.hidden = FALSE`+
 			chatsBodyJoin+`
-		  WHERE m.id > $2 AND (m.expires_at IS NULL OR m.expires_at > NOW())
+		  WHERE m.id > $2 AND (m.expires_at IS NULL OR m.expires_at > NOW())`+
+			coldFilter+`
 		  ORDER BY m.id ASC LIMIT $3`,
 		user.ID, since, limit)
 	if err != nil {
