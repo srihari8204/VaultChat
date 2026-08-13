@@ -90,14 +90,25 @@ func TestLeaveSelfApprovalGuardIsNotCosmetic(t *testing.T) {
 	if upd < 0 {
 		t.Fatal("the space_leave UPDATE is gone — move this guard with it")
 	}
-	// Look ahead a little past the statement for the clause that qualifies it.
-	// NB: no local min() helper — this package already uses Go's builtin min
-	// with int64 arguments, and shadowing it breaks those call sites.
-	stop := upd + 1200
-	if stop > len(body) {
-		stop = len(body)
+	// Scan to the END OF THE STATEMENT, not a fixed number of bytes.
+	//
+	// This used to look ahead exactly 1200 bytes, and that made it FAIL while the
+	// guard was present and correct. The clause is appended at offset 1196, so
+	// only the first four characters of `user_id <> $4` fell inside the window
+	// and Contains never matched. All it took was someone documenting why the
+	// guard belongs in the WHERE clause: the comment pushed the code nine bytes
+	// past the horizon.
+	//
+	// A security test that fails for a bogus reason is worse than no test — it
+	// gets muted, and then it is not watching on the day the guard really does
+	// disappear. So the boundary is now the thing it actually means: the
+	// RETURNING that closes this statement, rather than a magic number that
+	// silently expires the next time a comment is added above it.
+	rel := strings.Index(body[upd:], "RETURNING id")
+	if rel < 0 {
+		t.Fatal("could not find the end of the space_leave statement — it was restructured, so move this guard with it")
 	}
-	window := body[upd:stop]
+	window := body[upd : upd+rel]
 	if !strings.Contains(window, "user_id <> $4") {
 		t.Error("the self-approval guard is not attached to the space_leave UPDATE. " +
 			"A check elsewhere can be routed around; the WHERE clause cannot.")
