@@ -653,7 +653,10 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           // Decrypt-on-arrival (WhatsApp-style): decrypt ONCE, then show + cache
           // the PLAINTEXT so re-opens never decrypt it again.
           (async () => {
-            const fin = looksEncrypted(m.content) ? (await hydrateMessages(chatId, [m]))[0] ?? m : m;
+            // `live`: this message arrived seconds ago, so a missing session is
+            // the out-of-order race worth retrying — not history whose keys are
+            // simply gone. Everything else hydrated on this screen is history.
+            const fin = looksEncrypted(m.content) ? (await hydrateMessages(chatId, [m], undefined, { live: true }))[0] ?? m : m;
             setMessages(prev => prev.some(x => x.id === fin.id) ? prev : [fin, ...prev]);
             applyMessage(chatId, fin).catch(() => {}); // persist plaintext to local cache
             // Bump the "↓ N new" counter when a message lands while scrolled up.

@@ -636,11 +636,20 @@ export async function hydrateMessages(
   chatId: string,
   msgs: Message[],
   knownPlain?: Map<number, string>,
+  opts?: { live?: boolean },
 ): Promise<Message[]> {
   // Everything decrypted below is HISTORY. Mark it so a failure cannot be
   // mistaken for a dead live session and trigger a reset — the fault that made
   // an incoming call undecryptable moments after a cold sync.
-  _bulkDecryptDepth++;
+  //
+  // …unless the caller says otherwise. The chat screen also routes a message
+  // that JUST ARRIVED through here, and that one is live by definition: it is
+  // the out-of-order case the decrypt retry exists for, so it must keep it.
+  // Left implicit, "history" and "a batch of one that just landed" are
+  // indistinguishable from in here. A live message therefore keeps BOTH the
+  // retry and its session auto-recovery, which is the behaviour it always had.
+  const bulk = !opts?.live;
+  if (bulk) _bulkDecryptDepth++;
   try {
   const out = msgs.slice();
   // F5: a decrypted payload may be a wrapped {text + link preview} envelope
@@ -708,7 +717,7 @@ export async function hydrateMessages(
   if (ownMisses) console.warn(`[e2ee] ${ownMisses} own message(s) predate the plaintext cache in chat ${chatId} — shown as unavailable`);
   return out;
   } finally {
-    _bulkDecryptDepth--;
+    if (bulk) _bulkDecryptDepth--;
   }
 }
 
