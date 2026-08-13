@@ -64,7 +64,15 @@ async function applyByChat(rows: (Message & { chatId: string })[]): Promise<Map<
         const readable = new Set(
           known.filter(m => m.content != null && !looksEncrypted(m.content)).map(m => m.id),
         );
-        if (readable.size) todo = list.filter(m => !readable.has(m.id));
+        // …but a MUTATION row must always be applied. An edited or revoked
+        // message still carries readable plaintext, so it landed in `readable`,
+        // `todo` came back empty, and cacheMessages never ran — the delete was
+        // dropped on the floor and the message came back on the next open,
+        // still in the search index and still in the chat-list preview.
+        // Re-hydrating these is cheap: they are a handful of rows, not history.
+        if (readable.size) {
+          todo = list.filter(m => !readable.has(m.id) || m.editedAt || m.deletedAt);
+        }
       }
     } catch { /* cache unavailable → hydrate everything, as before */ }
 

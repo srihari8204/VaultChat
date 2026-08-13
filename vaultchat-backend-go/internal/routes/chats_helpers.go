@@ -225,12 +225,58 @@ var (
 	chatsLinkRe   = regexp.MustCompile(`(?i)https?://`)
 )
 
+// chatsBlockedDirect reports whether this is a DIRECT chat in which either side
+// has blocked the other.
+//
+// Groups are deliberately excluded: blocking is a 1:1 relationship, and a
+// blocked member posting to a shared group is handled by the existing fan-out
+// and push filters, not by refusing the write for everyone else in the room.
+//
+// Fails CLOSED only on a positive match — any query error leaves the message
+// deliverable, because a transient database problem must not look like a block.
+func chatsBlockedDirect(ctx context.Context, chatID, senderID string) bool {
+	var one int
+	err := db.Pool.QueryRow(ctx,
+		`SELECT 1
+		   FROM chats c
+		   JOIN chat_members cm ON cm.chat_id = c.id AND cm.user_id <> $2 AND cm.left_at IS NULL
+		   JOIN user_blocks ub
+		     ON (ub.blocker_id = cm.user_id AND ub.blocked_id = $2)
+		     OR (ub.blocker_id = $2 AND ub.blocked_id = cm.user_id)
+		  WHERE c.id = $1 AND c.type = 'direct'
+		  LIMIT 1`, chatID, senderID).Scan(&one)
+	if err == nil {
+		return true
+	}
+	if !db.NoRows(err) {
+		log.Printf("[chatsBlockedDirect] %v", err)
+	}
+	return false
+}
+
 func chatsMessagePost(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := httpx.UserFrom(r)
 	chatID := r.PathValue("id")
 	mem := chatsRequireMem(w, r, 403, "Not a member of this chat", "Failed to send message")
 	if mem == nil {
+		return
+	}
+
+	// A blocked sender must not be able to write into this chat at all.
+	//
+	// Blocking was enforced everywhere EXCEPT here: creating a direct chat
+	// checked it (chats.go), push suppressed it, realtime fan-out suppressed it
+	// — but the INSERT itself did not. So a blocked person's message was still
+	// stored, and the un-hide below then dragged the chat back into the
+	// recipient's list with an unread badge and no notification to explain it.
+	// A user who blocked someone and deleted the chat watched it reappear.
+	//
+	// Suppressing the symptoms downstream could never fix that; the row should
+	// never have existed. Same both-directions test as chat creation, so the
+	// two paths cannot disagree.
+	if chatsBlockedDirect(ctx, chatID, user.ID) {
+		httpx.Err(w, 403, "Blocked")
 		return
 	}
 

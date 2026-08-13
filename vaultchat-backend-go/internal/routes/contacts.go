@@ -92,7 +92,16 @@ func contactsMatch(w http.ResponseWriter, r *http.Request) {
 		  WHERE phone_hash = ANY($1::text[])
 		    AND discoverable = TRUE
 		    AND is_deleted = FALSE
-		    AND id <> $2`,
+		    AND id <> $2
+		    -- Someone you blocked (or who blocked you) is not a suggestion.
+		    -- Address-book matching re-offered them every time the user opened
+		    -- the Contacts screen, which is one of the ways a "removed" person
+		    -- kept coming back.
+		    AND NOT EXISTS (
+		      SELECT 1 FROM user_blocks ub
+		       WHERE (ub.blocker_id = $2 AND ub.blocked_id = users.id)
+		          OR (ub.blocker_id = users.id AND ub.blocked_id = $2)
+		    )`,
 		peppered, user.ID)
 	if err != nil {
 		httpx.Err(w, 500, "Contact match failed")

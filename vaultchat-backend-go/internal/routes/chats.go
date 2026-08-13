@@ -465,10 +465,21 @@ func coldSyncMaxMessages() int64 {
 	return v
 }
 
-// coldSyncWarnOnly reports the event without capping. Defaults to TRUE so that
-// deploying this code changes no client's behaviour until it is switched off.
+// coldSyncWarnOnly reports the event without capping.
+//
+// This defaulted to TRUE as a staged-rollout guard, which made the cap purely
+// decorative: `enforce` was never true, `since = floor` was dead code, and every
+// unrecognised device pulling since=0 got the ENTIRE history — up to 100k rows
+// (MAX_PAGES 500 x PAGE 200 client-side). On a reinstall that is what dragged
+// back every old conversation the user had already dealt with.
+//
+// The rollout it was protecting is over: both the device-id header and the
+// paging client have shipped. Enforcing by default is now the safe direction —
+// the failure mode of capping is "scroll further to see more", while the
+// failure mode of not capping is the bug being fixed here. Set
+// COLD_SYNC_WARN_ONLY=true to restore the uncapped behaviour.
 func coldSyncWarnOnly() bool {
-	return os.Getenv("COLD_SYNC_WARN_ONLY") != "false"
+	return os.Getenv("COLD_SYNC_WARN_ONLY") == "true"
 }
 
 // noteSyncDevice upserts the device row and reports whether this (user, device)
@@ -504,8 +515,12 @@ func noteSyncDevice(ctx context.Context, userID, deviceID string, cold bool) (kn
 func coldSyncFloor(ctx context.Context, userID string, limit int64) int64 {
 	var floor int64
 	err := db.SysPool.QueryRow(ctx,
+		// Same visibility rule as the delta itself, hidden included: counting
+		// messages the delta will never return would hand back a floor that
+		// yields fewer than `limit` visible rows.
 		`SELECT m.id FROM messages m
 		   JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1 AND cm.left_at IS NULL
+		                       AND cm.hidden = FALSE
 		  WHERE m.expires_at IS NULL OR m.expires_at > NOW()
 		  ORDER BY m.id DESC
 		  OFFSET $2 LIMIT 1`,
@@ -533,7 +548,14 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 		if !noteSyncDevice(ctx, user.ID, deviceID, true) {
 			capN := coldSyncMaxMessages()
 			enforce := capN > 0 && deviceID != "" && !coldSyncWarnOnly()
-			if floor := coldSyncFloor(ctx, user.ID, capN); enforce && floor > 0 {
+			// Only compute the floor when it can actually be used — it is an
+			// OFFSET scan over messages JOIN chat_members, and it was running on
+			// every uncapped cold sync purely to be thrown away.
+			floor := int64(0)
+			if enforce {
+				floor = coldSyncFloor(ctx, user.ID, capN)
+			}
+			if enforce && floor > 0 {
 				since = floor
 				log.Printf("[chats/delta] cold sync capped to %d msg(s) for user=%s device=%s", capN, user.ID, deviceID)
 			} else {
@@ -552,7 +574,8 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := db.SysPool.Query(ctx,
 		`SELECT `+chatsMsgSelBody("m")+` FROM messages m
-		   JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1 AND cm.left_at IS NULL`+
+		   JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1 AND cm.left_at IS NULL
+		                       AND cm.hidden = FALSE`+
 			chatsBodyJoin+`
 		  WHERE m.id > $2 AND (m.expires_at IS NULL OR m.expires_at > NOW())
 		  ORDER BY m.id ASC LIMIT $3`,
@@ -591,7 +614,8 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 		if mutatedSince, ok := userParseJSDate(raw); ok {
 			mrows, err := db.SysPool.Query(ctx,
 				`SELECT `+chatsMsgSelBody("m")+` FROM messages m
-				   JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1 AND cm.left_at IS NULL`+
+				   JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1 AND cm.left_at IS NULL
+				                       AND cm.hidden = FALSE`+
 					chatsBodyJoin+`
 				  WHERE (m.edited_at > $2 OR m.deleted_at > $2) AND m.id <= $3
 				  ORDER BY GREATEST(COALESCE(m.edited_at, 'epoch'), COALESCE(m.deleted_at, 'epoch')) ASC

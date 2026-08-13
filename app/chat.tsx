@@ -32,7 +32,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { consumePendingJump } from '../lib/chatJump';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { E2EE_ENABLED } from '../constants/flags';
-import { getCachedMessages, cacheMessages, applyMessage, markCachedDeleted, getCachedMessagesByIds, getCachedChat, clearChatMessages } from '../lib/localDb';
+import { getCachedMessages, getCachedMessagesBefore, cacheMessages, applyMessage, markCachedDeleted, getCachedMessagesByIds, getCachedChat, clearChatMessages } from '../lib/localDb';
 import { saveDraft, getDraft, clearDraft } from '../lib/drafts';
 import { playSent, playReceived } from '../lib/sounds';
 import { NOTIF_CHANNELS } from '../lib/push';
@@ -515,12 +515,17 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         // 3. Cached messages + still-in-flight outbox bubbles, painted instantly.
         //    knownPlain reuses already-decrypted text so we never re-decrypt.
         const knownPlain = new Map<number, string>();
+        // null (not []) on failure: a locked DB, an unavailable cache DEK or an
+        // op-sqlite throw is NOT "this device holds nothing". Collapsing the two
+        // sent us down the cold path below and re-downloaded a full page from
+        // the server — which, before the sticky-tombstone fix, also resurrected
+        // every message the user had deleted locally.
         const [cachedMsgs, pendingQ, mediaQ] = await Promise.all([
-          getCachedMessages(chatId, PAGE_SIZE).catch(() => []),
+          getCachedMessages(chatId, PAGE_SIZE).catch(() => null),
           pendingForChat(chatId).catch(() => []),
           mediaPendingForChat(chatId).catch(() => []),
         ]);
-        for (const m of cachedMsgs) if (!looksEncrypted(m.content)) knownPlain.set(m.id, m.content as string);
+        for (const m of (cachedMsgs ?? [])) if (!looksEncrypted(m.content)) knownPlain.set(m.id, m.content as string);
 
         const pendingBubbles = (pendingQ as any[]).map(q => ({
           id: 0, chatId: q.chatId, senderId: myId ?? '', type: q.type, content: q.plaintext,
@@ -536,8 +541,8 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         // Inverted list = newest first. Reversed ONCE, reused for the reconcile.
         const pendingNewestFirst = [...pendingBubbles, ...mediaBubbles]
           .sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt)).reverse();
-        if (cachedMsgs.length || pendingNewestFirst.length) {
-          setMessages([...pendingNewestFirst, ...cachedMsgs]);
+        if ((cachedMsgs?.length ?? 0) || pendingNewestFirst.length) {
+          setMessages([...pendingNewestFirst, ...(cachedMsgs ?? [])]);
           setLoading(false);
         }
 
@@ -559,14 +564,18 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           // The server is used only when this device holds NOTHING for the chat
           // (fresh install, or a chat never opened here), which is the one case
           // the cache genuinely cannot answer.
-          if (!cachedMsgs.length) {
+          // `cachedMsgs === null` means the cache could not be READ, not that it
+          // is empty — going to the server there would re-download a page this
+          // device already has, so we leave it alone and let the next open (or
+          // the delta sync) reconcile.
+          if (cachedMsgs !== null && !cachedMsgs.length) {
             const msgsRaw = await getMessages(chatId, { limit: PAGE_SIZE });
             const msgs = await hydrateMessages(chatId, msgsRaw, knownPlain);
             setMessages([...pendingNewestFirst, ...msgs]);
             setHasMore(msgs.length === PAGE_SIZE);
             cacheMessages(chatId, msgs).catch(() => {});   // persist for next instant open
           } else {
-            setHasMore(cachedMsgs.length >= PAGE_SIZE);
+            setHasMore((cachedMsgs?.length ?? 0) >= PAGE_SIZE);
           }
           setError(null);
         } catch {
@@ -1922,8 +1931,16 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     if (!oldest) return;
     setLoadingOlder(true);
     try {
-      const olderRaw = await getMessages(chatId, { before: oldest, limit: PAGE_SIZE });
-      const older = await hydrateMessages(chatId, olderRaw);   // decrypt once at ingest
+      // Disk first. These rows are already plaintext, so a cached page costs no
+      // network call and no decrypt — and it works offline, which the
+      // server-only path never did. Only past the cache horizon do we ask the
+      // server, which is also the only case where hydrate/re-cache is needed.
+      let older = await getCachedMessagesBefore(chatId, Number(oldest), PAGE_SIZE);
+      if (!older.length) {
+        const olderRaw = await getMessages(chatId, { before: oldest, limit: PAGE_SIZE });
+        older = await hydrateMessages(chatId, olderRaw);        // decrypt once at ingest
+        cacheMessages(chatId, older).catch(() => {});           // persist plaintext for instant scroll-back
+      }
       // Dedupe against what's already loaded — a page boundary can overlap and
       // would otherwise inject duplicate ids (duplicate React keys).
       setMessages(prev => {
@@ -1931,7 +1948,6 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         return [...prev, ...older.filter(m => !have.has(String(m.id)))];
       });
       if (older.length < PAGE_SIZE) setHasMore(false);
-      cacheMessages(chatId, older).catch(() => {});            // persist plaintext for instant scroll-back
     } catch {}
     finally { setLoadingOlder(false); }
   }, [chatId, hasMore, loadingOlder, messages]);
@@ -1949,9 +1965,16 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       guard++;
       const oldest = messagesRef.current[messagesRef.current.length - 1]?.id;
       if (!oldest) break;
+      // Same disk-first rule as onEndReached — jumping to an old search hit
+      // used to re-download up to 40 pages it already had.
       let older;
-      try { older = await hydrateMessages(chatId, await getMessages(chatId, { before: oldest, limit: PAGE_SIZE })); }
-      catch { break; }
+      try {
+        older = await getCachedMessagesBefore(chatId, Number(oldest), PAGE_SIZE);
+        if (!older.length) {
+          older = await hydrateMessages(chatId, await getMessages(chatId, { before: oldest, limit: PAGE_SIZE }));
+          cacheMessages(chatId, older).catch(() => {});
+        }
+      } catch { break; }
       if (!older.length) { setHasMore(false); break; }
       const next = [...messagesRef.current, ...older];
       messagesRef.current = next;
