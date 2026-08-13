@@ -90,14 +90,23 @@ func TestLeaveSelfApprovalGuardIsNotCosmetic(t *testing.T) {
 	if upd < 0 {
 		t.Fatal("the space_leave UPDATE is gone — move this guard with it")
 	}
-	// Look ahead a little past the statement for the clause that qualifies it.
-	// NB: no local min() helper — this package already uses Go's builtin min
-	// with int64 arguments, and shadowing it breaks those call sites.
-	stop := upd + 1200
-	if stop > len(body) {
-		stop = len(body)
+	// Bound the search by the statement's OWN construction — from the literal to
+	// the point the finished query is handed to the database — rather than by a
+	// character count.
+	//
+	// It was 1200 characters, and that broke: the comment above the guard
+	// explaining why it lives in the WHERE clause grew past the window, so this
+	// test failed while the guard it protects was intact. A test that a comment
+	// can defeat is measuring the wrong thing.
+	//
+	// This boundary is also stricter than the old one. Everything between the
+	// literal and the execution IS the statement; nothing below the call site
+	// can satisfy the check by accident, at any distance.
+	exec := strings.Index(body[upd:], "chatsQRow(")
+	if exec < 0 {
+		t.Fatal("the space_leave UPDATE no longer runs through chatsQRow — retarget this check at whatever executes it")
 	}
-	window := body[upd:stop]
+	window := body[upd : upd+exec]
 	if !strings.Contains(window, "user_id <> $4") {
 		t.Error("the self-approval guard is not attached to the space_leave UPDATE. " +
 			"A check elsewhere can be routed around; the WHERE clause cannot.")
