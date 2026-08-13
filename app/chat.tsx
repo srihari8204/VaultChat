@@ -35,6 +35,7 @@ import { E2EE_ENABLED } from '../constants/flags';
 import { getCachedMessages, getCachedMessagesBefore, cacheMessages, applyMessage, markCachedDeleted, getCachedMessagesByIds, getCachedChat, clearChatMessages } from '../lib/localDb';
 import { metric } from '../lib/syncMetrics';
 import { groupAlbums, resetAlbumCache } from '../lib/albumGrouping';
+import { mergeReactions } from '../lib/reactionMerge';
 import { saveDraft, getDraft, clearDraft } from '../lib/drafts';
 import { playSent, playReceived } from '../lib/sounds';
 import { NOTIF_CHANNELS } from '../lib/push';
@@ -322,28 +323,18 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   // Derive the per-message map here: the LATEST reaction per (target, sender)
   // wins (one reaction per user per message), 'remove' clears it. The dedup by
   // (target, sender) also makes optimistic + server rows collapse to one.
+  // Reaction summaries, with identity preserved across unrelated updates.
+  //
+  // The fold itself lives in lib/reactionMerge so it can be tested. The ref
+  // below is what makes it cheap: it hands the previous result back in, and any
+  // message whose reaction set did not change keeps its EXACT previous array —
+  // so the memo comparator skips it instead of re-rendering because something
+  // arrived elsewhere in the conversation.
+  const prevReactionsRef = useRef<Record<number, ReactionSummary[]>>({});
   const mergedReactions = useMemo(() => {
-    const latest = new Map<string, { at: string; emoji: string | null; mine: boolean; target: number }>();
-    for (const m of messages) {
-      if (m.type !== 'reaction' || !m.content || m.deletedAt) continue;
-      let p: any; try { p = JSON.parse(m.content); } catch { continue; }
-      const target = Number(p?.reactsTo);
-      if (!Number.isFinite(target) || target <= 0) continue;
-      const key = `${target}:${m.senderId}`;
-      const at = `${m.createdAt ?? ''}#${String(m.id ?? 0).padStart(12, '0')}`;
-      const prev = latest.get(key);
-      if (prev && prev.at >= at) continue;
-      latest.set(key, { at, emoji: p.op === 'remove' ? null : String(p.emoji || ''), mine: m.senderId === meId, target });
-    }
-    const out: Record<number, ReactionSummary[]> = {};
-    for (const v of latest.values()) {
-      if (!v.emoji) continue;
-      const list = out[v.target] ?? (out[v.target] = []);
-      const hit = list.find(r => r.emoji === v.emoji);
-      if (hit) { hit.count++; hit.mine = hit.mine || v.mine; }
-      else list.push({ emoji: v.emoji, count: 1, mine: v.mine });
-    }
-    return out;
+    const next = mergeReactions(messages as any, meId, prevReactionsRef.current);
+    prevReactionsRef.current = next;
+    return next;
   }, [messages, meId]);
   const [reactPicker, setReactPicker] = useState<DisplayMessage | null>(null);
   const [actionSheet, setActionSheet] = useState<{ msg: DisplayMessage; plain: string } | null>(null);
