@@ -415,6 +415,72 @@ export async function getCachedMessagesBefore(
   return rows.map(rowToMessage);
 }
 
+/** The page of messages NEWER than `after`, oldest-first (forward paging). */
+export async function getCachedMessagesAfter(
+  chatId: string, after: number, limit = 50,
+): Promise<Message[]> {
+  const db = await getLocalDb();
+  const rows = await db.getAllAsync(
+    `SELECT * FROM messages
+      WHERE chat_id = ? AND id > ? AND deleted_at IS NULL
+      ORDER BY id ASC LIMIT ?`,
+    [chatId, after, limit],
+  );
+  return rows.map(rowToMessage);
+}
+
+/**
+ * A window centred on `around` — the message itself plus `radius` either side,
+ * newest-first like the inverted list. Lets a jump-to-message (search hit,
+ * reply target, notification tap) land from disk instead of paging the server
+ * back to it one request at a time.
+ */
+export async function getCachedMessagesAround(
+  chatId: string, around: number, radius = 25,
+): Promise<Message[]> {
+  const [older, newerAndSelf] = await Promise.all([
+    getCachedMessagesBefore(chatId, around, radius),
+    (async () => {
+      const db = await getLocalDb();
+      const rows = await db.getAllAsync(
+        `SELECT * FROM messages
+          WHERE chat_id = ? AND id >= ? AND deleted_at IS NULL
+          ORDER BY id ASC LIMIT ?`,
+        [chatId, around, radius + 1],
+      );
+      return rows.map(rowToMessage);
+    })(),
+  ]);
+  // newerAndSelf is oldest-first; the caller wants one newest-first run.
+  return [...newerAndSelf.reverse(), ...older];
+}
+
+/**
+ * Whether older messages exist on disk — so a caller can decide between the
+ * cache and the network WITHOUT paying for a page it may not use, and so
+ * `hasMore` can be answered offline instead of guessing from a page size.
+ */
+export async function hasCachedOlderMessages(chatId: string, before: number): Promise<boolean> {
+  const db = await getLocalDb();
+  const row = await db.getFirstAsync(
+    `SELECT 1 AS x FROM messages
+      WHERE chat_id = ? AND id < ? AND deleted_at IS NULL LIMIT 1`,
+    [chatId, before],
+  );
+  return !!row;
+}
+
+/** Mirror of the above, forward. */
+export async function hasCachedNewerMessages(chatId: string, after: number): Promise<boolean> {
+  const db = await getLocalDb();
+  const row = await db.getFirstAsync(
+    `SELECT 1 AS x FROM messages
+      WHERE chat_id = ? AND id > ? AND deleted_at IS NULL LIMIT 1`,
+    [chatId, after],
+  );
+  return !!row;
+}
+
 /**
  * A cached `content` string that is still an E2EE envelope rather than
  * decrypted plaintext — a 1:1 double-ratchet blob (`{"v":"dr1",…}`) or a group

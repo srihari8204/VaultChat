@@ -119,6 +119,47 @@ if (backSql) {
     !page2.some(r => r.id === 1250));
 }
 
+// ── 5b. the back-page query must use an index, not scan ──────────────────
+console.log('local history reads must be indexed');
+for (const idx of SRC.match(/CREATE INDEX IF NOT EXISTS idx_messages_chat[\s\S]*?;/g) ?? []) db.exec(idx);
+if (backSql) {
+  const plan = db.prepare(`EXPLAIN QUERY PLAN ${backSql}`).all('c2', 1251, 50) as any[];
+  const detail = plan.map(r => r.detail).join(' | ');
+  check('scroll-back uses the (chat_id, id) index rather than scanning',
+    /USING INDEX/i.test(detail) && !/SCAN messages(?! USING)/i.test(detail), detail);
+}
+
+// ── 5c. the rest of the local reader API ─────────────────────────────────
+console.log('the device can browse its own history offline');
+const readerSql = (name: string) => {
+  const fn = SRC.match(new RegExp(`export async function ${name}[\\s\\S]*?\\n}`));
+  return fn?.[0].match(/`([\s\S]*?)`/)?.[1] ?? '';
+};
+for (const [name, must] of [
+  ['getCachedMessagesAfter', /id > \?/],
+  ['hasCachedOlderMessages', /id < \?/],
+  ['hasCachedNewerMessages', /id > \?/],
+] as [string, RegExp][]) {
+  const sql = readerSql(name);
+  check(`${name} exists and is bounded`, !!sql && must.test(sql), sql.trim().slice(0, 80));
+}
+check('getCachedMessagesAround exists', /export async function getCachedMessagesAround/.test(SRC));
+
+const afterSql = readerSql('getCachedMessagesAfter');
+if (afterSql) {
+  const fwd = db.prepare(afterSql).all('c2', 1250, 50) as any[];
+  check('forward paging returns strictly newer rows, oldest-first',
+    fwd.length > 0 && fwd[0].id > 1250 && fwd[0].id < fwd[fwd.length - 1].id,
+    `${fwd[0]?.id}..${fwd[fwd.length - 1]?.id}`);
+}
+const hasOlderSql = readerSql('hasCachedOlderMessages');
+if (hasOlderSql) {
+  check('hasCachedOlderMessages is true mid-history',
+    !!db.prepare(hasOlderSql).get('c2', 1100));
+  check('…and false at the very bottom',
+    !db.prepare(hasOlderSql).get('c2', 1001));
+}
+
 // ── 6/7. the chat cache follows the server's list ────────────────────────
 console.log('deleted chats must stay gone');
 const putChat = db.prepare(`INSERT OR REPLACE INTO chats (id, data, last_message_at) VALUES (?,?,?)`);

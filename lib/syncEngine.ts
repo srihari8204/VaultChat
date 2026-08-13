@@ -8,6 +8,7 @@
 
 import { api } from './api';
 import { getGlobalSyncCursor, noteGlobalSyncCursor, cacheMessages, getCachedMessagesByIds, getMeta, setMeta } from './localDb';
+import { metric } from './syncMetrics';
 import { hydrateMessages, looksEncrypted, type Message } from './chatService';
 import { markDeliveredDurable } from './receipts';
 import { notifyBatch } from './messageNotifications';
@@ -72,11 +73,14 @@ async function applyByChat(rows: (Message & { chatId: string })[]): Promise<Map<
         // Re-hydrating these is cheap: they are a handful of rows, not history.
         if (readable.size) {
           todo = list.filter(m => !readable.has(m.id) || m.editedAt || m.deletedAt);
+          // Rows the server re-sent that this device had already decrypted.
+          metric('delta.duplicates', list.length - todo.length);
         }
       }
     } catch { /* cache unavailable → hydrate everything, as before */ }
 
     if (todo.length) {
+      metric('delta.decrypts', todo.length);
       const hydrated = await hydrateMessages(chatId, todo);
       await cacheMessages(chatId, hydrated);   // upsert by id → edits overwrite, deletes tombstone
     }
@@ -108,7 +112,9 @@ export async function catchUp(): Promise<number> {
     for (let guard = 0; guard < MAX_PAGES; guard++) {
       // Ask for mutations only on the FIRST page (they're time-, not id-paginated).
       const mutParam = (guard === 0 && mutatedSince) ? `&mutatedSince=${encodeURIComponent(mutatedSince)}` : '';
+      metric(since === 0 ? 'cold_sync.requests' : 'delta.requests');
       const r = await api<Delta>(`/chats/delta?since=${since}&limit=${PAGE}${mutParam}`);
+      metric(since === 0 ? 'cold_sync.rows' : 'delta.rows', r?.messages?.length ?? 0);
 
       if (guard === 0) {
         // Edits/deletes to old messages — apply in place (no receipt/notify).

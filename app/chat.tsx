@@ -33,6 +33,7 @@ import { consumePendingJump } from '../lib/chatJump';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { E2EE_ENABLED } from '../constants/flags';
 import { getCachedMessages, getCachedMessagesBefore, cacheMessages, applyMessage, markCachedDeleted, getCachedMessagesByIds, getCachedChat, clearChatMessages } from '../lib/localDb';
+import { metric } from '../lib/syncMetrics';
 import { saveDraft, getDraft, clearDraft } from '../lib/drafts';
 import { playSent, playReceived } from '../lib/sounds';
 import { NOTIF_CHANNELS } from '../lib/push';
@@ -1936,10 +1937,25 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       // server-only path never did. Only past the cache horizon do we ask the
       // server, which is also the only case where hydrate/re-cache is needed.
       let older = await getCachedMessagesBefore(chatId, Number(oldest), PAGE_SIZE);
-      if (!older.length) {
-        const olderRaw = await getMessages(chatId, { before: oldest, limit: PAGE_SIZE });
-        older = await hydrateMessages(chatId, olderRaw);        // decrypt once at ingest
-        cacheMessages(chatId, older).catch(() => {});           // persist plaintext for instant scroll-back
+      metric(older.length ? 'local.message_hits' : 'local.message_misses');
+
+      // A FULL page from disk answered the request: no network, no decrypt.
+      // A SHORT page means the cache horizon, not the end of history — so top
+      // up from the server rather than ending pagination on a cache boundary.
+      if (older.length < PAGE_SIZE) {
+        try {
+          const olderRaw = await getMessages(chatId, { before: oldest, limit: PAGE_SIZE });
+          const fetched = await hydrateMessages(chatId, olderRaw);  // decrypt once at ingest
+          cacheMessages(chatId, fetched).catch(() => {});           // persist for instant scroll-back
+          const seen = new Set(older.map(m => String(m.id)));
+          older = [...older, ...fetched.filter(m => !seen.has(String(m.id)))];
+          // Only the SERVER can say there is nothing older. Ending on a short
+          // cached page would strand history the device simply had not fetched.
+          if (fetched.length < PAGE_SIZE) setHasMore(false);
+        } catch {
+          // Offline. Whatever the cache gave us still renders, and hasMore is
+          // deliberately left alone so a later attempt can resume.
+        }
       }
       // Dedupe against what's already loaded — a page boundary can overlap and
       // would otherwise inject duplicate ids (duplicate React keys).
@@ -1947,7 +1963,6 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         const have = new Set(prev.map(x => String(x.id)));
         return [...prev, ...older.filter(m => !have.has(String(m.id)))];
       });
-      if (older.length < PAGE_SIZE) setHasMore(false);
     } catch {}
     finally { setLoadingOlder(false); }
   }, [chatId, hasMore, loadingOlder, messages]);
