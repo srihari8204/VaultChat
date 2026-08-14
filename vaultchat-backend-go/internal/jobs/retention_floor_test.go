@@ -15,6 +15,7 @@
 package jobs
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -23,48 +24,64 @@ const day = 86_400
 
 // ── the delivery-based sweeps ──────────────────────────────────────────
 
-// TestDeliveryGraceCannotUndercutTheFloor is the important one. Both
-// delete-on-delivery sweeps gate on `created_at < NOW() - grace`, so `grace` is
-// the whole of their earliest-reclaim boundary — a 120-second default meant a
-// body could be destroyed two minutes after ONE device acked it.
-func TestDeliveryGraceCannotUndercutTheFloor(t *testing.T) {
-	floor := MinRetentionDays * day
-
+// TestDeviceStalenessCannotUndercutTheFloor is the important one.
+//
+// The delivery predicate is what protects an undelivered message, and this is
+// the single input that can make it declare an undelivered message delivered.
+// On a multi-device account the first device to ack advances the shared
+// chat_members pointer; the per-device table protects the rest, but only while
+// a device's last_sync_at is inside this window. Set it to 7 and a handset that
+// has been off for eight days is ignored — its message is reclaimed on day
+// eight, well inside a thirty-day promise.
+func TestDeviceStalenessCannotUndercutTheFloor(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		env  string
 	}{
-		{"unset (the shipped default was 120s)", ""},
-		{"two minutes", "120"},
-		{"one day", "86400"},
-		{"29 days — just under the floor", "2505600"},
+		{"unset (default 30)", ""},
+		{"one day", "1"},
+		{"seven days", "7"},
+		{"29 days — just under the floor", "29"},
 		{"zero", "0"},
-		{"negative-ish garbage", "-1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.env == "" {
-				t.Setenv("DELETE_ON_DELIVERY_GRACE_SEC", "")
-			} else {
-				t.Setenv("DELETE_ON_DELIVERY_GRACE_SEC", tc.env)
-			}
-			if got := retentionGraceSec(); got < floor {
-				t.Fatalf(`delete-on-delivery would reclaim a body after %ds (%.1f days).
+			t.Setenv("DELETE_ON_DELIVERY_DEVICE_STALE_DAYS", tc.env)
+			if got := retentionStaleDays(); got < MinRetentionDays {
+				t.Fatalf(`a device silent for %d days stops being waited for, but the floor is %d days.
 
-The retention contract is a MINIMUM of %d days from created_at. Delivery is not
-a licence to delete: a second device, a reinstall, or an account that has not
-synced yet all still need the server copy. Early reclaim may only ever run
-LATER than the floor.`, got, float64(got)/day, MinRetentionDays)
+That lets the delivery predicate treat an UNDELIVERED message as delivered and
+reclaim it early — the exact outcome the 30-day contract forbids.`, got, MinRetentionDays)
 			}
 		})
 	}
 }
 
-// A LONGER retention already configured must survive. "Never shorten existing
-// retention" cuts both ways — the clamp raises, it must not also lower.
-func TestALongerGraceIsPreserved(t *testing.T) {
-	t.Setenv("DELETE_ON_DELIVERY_GRACE_SEC", "31536000") // one year
-	if got := retentionGraceSec(); got != 31_536_000 {
-		t.Fatalf("a 365-day grace was clamped down to %ds — the floor must raise, never lower", got)
+// A LONGER staleness window already configured must survive: the clamp raises,
+// it must never lower.
+func TestALongerStalenessIsPreserved(t *testing.T) {
+	t.Setenv("DELETE_ON_DELIVERY_DEVICE_STALE_DAYS", "365")
+	if got := retentionStaleDays(); got != 365 {
+		t.Fatalf("a 365-day staleness window was clamped down to %d — the floor must raise, never lower", got)
+	}
+}
+
+// The POST-DELIVERY grace must stay short and unclamped.
+//
+// This pins a correction. An earlier revision clamped the grace to 30 days too,
+// which made post-delivery reclaim impossible — the contract explicitly permits
+// reclaiming a body every device already holds after a short grace. Clamping
+// here adds no safety the delivery predicate does not already give.
+func TestPostDeliveryGraceIsNotClampedToTheFloor(t *testing.T) {
+	t.Setenv("DELETE_ON_DELIVERY_GRACE_SEC", "10800") // three hours
+	if got := retentionGraceSec(); got != 10_800 {
+		t.Fatalf(`a 3-hour post-delivery grace became %ds.
+
+Delivered bodies MAY be reclaimed after a short grace; only the paths that
+ignore delivery (the age purge, the staleness window) carry the floor.`, got)
+	}
+	t.Setenv("DELETE_ON_DELIVERY_GRACE_SEC", "")
+	if got := retentionGraceSec(); got != 120 {
+		t.Fatalf("the shipped 120s default changed to %ds", got)
 	}
 }
 
@@ -73,13 +90,28 @@ func TestRetentionFloorIsRaisableNotLowerable(t *testing.T) {
 	if got := MinRetentionDaysEffective(); got != 90 {
 		t.Fatalf("RETENTION_MIN_DAYS=90 gave %d days — a longer retention must be honoured", got)
 	}
-	if got := retentionGraceSec(); got < 90*day {
-		t.Fatalf("the grace floor ignored RETENTION_MIN_DAYS=90 (%ds)", got)
+	if got := retentionStaleDays(); got < 90 {
+		t.Fatalf("the staleness floor ignored RETENTION_MIN_DAYS=90 (%d days)", got)
 	}
 
 	t.Setenv("RETENTION_MIN_DAYS", "1")
 	if got := MinRetentionDaysEffective(); got != MinRetentionDays {
 		t.Fatalf("RETENTION_MIN_DAYS=1 lowered the floor to %d days — it must be ignored", got)
+	}
+}
+
+// The age purge ignores delivery entirely, so it is the other path that must
+// carry the floor. Mirrors the clamp in sweepDeliveredMessages.
+func TestAgePurgeCannotUndercutTheFloor(t *testing.T) {
+	for _, in := range []int{1, 7, 29} {
+		maxDays := in
+		if maxDays > 0 && maxDays < MinRetentionDaysEffective() {
+			maxDays = MinRetentionDaysEffective()
+		}
+		if maxDays < MinRetentionDays {
+			t.Fatalf("DELETE_ON_DELIVERY_MAX_AGE_DAYS=%d survived as %d, under the %d-day floor",
+				in, maxDays, MinRetentionDays)
+		}
 	}
 }
 
@@ -139,5 +171,49 @@ func TestBodyStoreIsAcceptedOnceItsTTLSatisfiesTheFloor(t *testing.T) {
 func TestFloorIsThirtyDays(t *testing.T) {
 	if MinRetentionDays != 30 {
 		t.Fatalf("MinRetentionDays = %d; the stated contract is a 30-day minimum", MinRetentionDays)
+	}
+}
+
+// ── the two contracts must not be conflated ────────────────────────────
+
+// TestDisappearingMessagesIgnoreTheRetentionFloor.
+//
+// A normal message has a 30-day FLOOR on how long its body is kept. An
+// explicitly disappearing message has an expires_at CEILING set from
+// chats.disappearing_seconds. The floor is a minimum on retention, never a
+// licence to keep a message the sender said should vanish in three hours.
+//
+// So the expiry sweep must key off expires_at alone — no floor, no delivery
+// state, no grace.
+func TestDisappearingMessagesIgnoreTheRetentionFloor(t *testing.T) {
+	if !strings.Contains(expiredMessagesSQL, "expires_at <= NOW()") {
+		t.Fatalf("the expiry sweep no longer fires on expires_at:\n%s", expiredMessagesSQL)
+	}
+	for _, leak := range []string{"created_at", "last_delivered_message_id", "last_sync_at", "grace"} {
+		if strings.Contains(expiredMessagesSQL, leak) {
+			t.Fatalf(`the expiry sweep now consults %q.
+
+An explicitly disappearing message must expire on its own timer. Mixing in the
+normal-message retention floor or any delivery state would keep a 3-hour
+message alive for up to %d days.
+
+statement:
+%s`, leak, MinRetentionDays, expiredMessagesSQL)
+		}
+	}
+}
+
+// An expired disappearing message must be UNREACHABLE, not merely blanked.
+// delta, cold sync and history sync all read from `messages`, so deleting the
+// spine row is what stops it being re-served after expiry (or after reinstall).
+func TestExpiredDisappearingMessagesAreDeletedNotBlanked(t *testing.T) {
+	if !strings.HasPrefix(strings.TrimSpace(expiredMessagesSQL), "DELETE FROM messages") {
+		t.Fatalf(`the expiry sweep no longer DELETEs the spine row.
+
+Nulling content would leave the row visible to delta/cold/history sync, so an
+expired disappearing message could still reappear as a tombstone.
+
+statement:
+%s`, expiredMessagesSQL)
 	}
 }

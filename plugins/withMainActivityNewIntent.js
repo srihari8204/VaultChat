@@ -1,0 +1,71 @@
+// Expo config plugin — keep getIntent() pointing at the intent that just arrived.
+//
+// MainActivity is launchMode="singleTask". When the app is already in memory —
+// the normal case — a notification tap does NOT create a new activity: the
+// PendingIntent is delivered to onNewIntent. Android does not update getIntent()
+// by itself, so without setIntent() it keeps returning the ORIGINAL launch
+// intent (the launcher's, which carries no extras).
+//
+// CallModule.getInitialCallIntent reads getCurrentActivity()?.intent and looks
+// for vc_action / vc_chat_id. With the stale intent it read null every time and
+// resolved null to JS, so _layout.tsx never navigated: tapping a message
+// notification opened VaultChat on the chat LIST instead of the chat. The
+// call-notification routes share that method and had the same fault. It only
+// ever worked from a COLD start, where the notification intent happens to BE
+// the launch intent — which is why it looked fine in casual testing.
+//
+// Verified on an Honor ELI-NX9: real FCM push → notification shown → tapped →
+// app opened, notification auto-cancelled, chat NOT opened. Fixed by the
+// override below.
+//
+// This lives in a config plugin rather than in android/ because android/ is
+// gitignored prebuild output — a direct edit there is undone by the next
+// `expo prebuild` (see withAppComponentFactoryFix.js, same reasoning).
+
+const { withMainActivity } = require('@expo/config-plugins');
+
+const IMPORT = 'import android.content.Intent';
+const MARKER = 'override fun onNewIntent(intent: Intent)';
+
+const OVERRIDE = `
+  // @vaultchat begin onNewIntent — see plugins/withMainActivityNewIntent.js
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    // Without this, getIntent() keeps returning the original launch intent and
+    // every notification deep-link (vc_action / vc_chat_id) is silently dropped.
+    setIntent(intent)
+  }
+  // @vaultchat end onNewIntent
+`;
+
+module.exports = function withMainActivityNewIntent(config) {
+  return withMainActivity(config, (cfg) => {
+    if (cfg.modResults.language !== 'kt') {
+      throw new Error(
+        'withMainActivityNewIntent: MainActivity is not Kotlin — the injected ' +
+          'override below is Kotlin. Update this plugin before shipping.',
+      );
+    }
+    let src = cfg.modResults.contents;
+
+    if (src.includes(MARKER)) return cfg; // already present, stay idempotent
+
+    if (!src.includes(IMPORT)) {
+      src = src.replace(/^import android\.os\.Build/m, `${IMPORT}\nimport android.os.Build`);
+    }
+
+    // Anchor on getMainComponentName, which stock Expo always emits. Failing
+    // loudly beats returning an unpatched activity that drops every deep link.
+    const anchor = /(\n\s*override fun getMainComponentName\(\))/;
+    if (!anchor.test(src)) {
+      throw new Error(
+        'withMainActivityNewIntent: could not find getMainComponentName in ' +
+          'MainActivity — re-anchor this plugin.',
+      );
+    }
+    src = src.replace(anchor, `\n${OVERRIDE}$1`);
+
+    cfg.modResults.contents = src;
+    return cfg;
+  });
+};

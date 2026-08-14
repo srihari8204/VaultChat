@@ -171,6 +171,16 @@ const REVOKE_WINDOW_MS = 60 * 60 * 60 * 1000;
 
 const PAGE_SIZE = 50;
 
+// MUST MATCH chatsEditWindowMS IN THE SERVER (routes/chats.go).
+//
+// The PATCH enforces this in its WHERE clause — `created_at > NOW() - INTERVAL`
+// — so past it the server returns 404 and there is nothing the client can do.
+// Offering Edit anyway is what made editing look broken: the change applied
+// optimistically, the PATCH 404'd, and the failure was swallowed (see the
+// rollback in the queue's 'failed' handler), so the text silently reverted on
+// the next sync with no error shown.
+const EDIT_WINDOW_MS = 15 * 60 * 1000;
+
 
 
 import { useS, idealText, HL, makeStyles, type DisplayMessage } from '../components/chat/chatStyles';
@@ -251,6 +261,14 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   const [sending,   setSending]   = useState(false);
   const [error,     setError]     = useState<string | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
+  // tempId → how to undo an optimistic edit the server then rejected.
+  //
+  // An edit has NO pending bubble: it is applied by message id, so the queue's
+  // 'failed' event (which the UI matches on _tempId) found nothing and the
+  // rejection was dropped on the floor. The user saw the edit stick, then
+  // watched it revert on the next sync with no explanation. This is what lets
+  // the failure handler put the original text back and say so.
+  const editRollbacks = useRef(new Map<string, { id: number; content: string | null; editedAt: string | null }>());
   const [typingUids, setTypingUids] = useState<Set<string>>(new Set());
   const [recording, setRecording] = useState(false);
   const [recElapsedMs, setRecElapsedMs] = useState(0);
@@ -592,6 +610,9 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     if (!chatId) return;
     const offSent = onQueue('sent', ({ tempId, chatId: cid, real }) => {
       if (cid !== chatId) return;
+      // The edit landed — drop its undo snapshot so the map does not grow for
+      // the life of the screen.
+      editRollbacks.current.delete(tempId);
       // delete/edit ops apply optimistically by id and carry no pending bubble —
       // a delete resolves with real=null; nothing to swap or cache here.
       if (!real) return;
@@ -608,6 +629,17 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     });
     const offFailed = onQueue('failed', ({ tempId, chatId: cid, error }) => {
       if (cid !== chatId) return;
+      // An EDIT that the server refused. It has no pending bubble to mark, so
+      // without this the rejection vanished: the optimistic text stayed on
+      // screen until the next sync quietly replaced it with the original.
+      const rb = editRollbacks.current.get(tempId);
+      if (rb) {
+        editRollbacks.current.delete(tempId);
+        setMessages(prev => prev.map(x => x.id === rb.id
+          ? { ...x, content: rb.content, editedAt: rb.editedAt } : x));
+        Alert.alert('Edit failed', error ?? 'This message can no longer be edited.');
+        return;
+      }
       setMessages(prev => prev.map(x => x._tempId === tempId
         ? { ...x, _state: 'failed', _error: error } : x));
     });
@@ -955,11 +987,19 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         // WhatsApp: the edit shows instantly and syncs when back online. Apply
         // optimistically by id, then durably enqueue (encrypt+PATCH on flush).
         const editId = editingId;
+        // Snapshot BEFORE the optimistic overwrite, so a server rejection can
+        // be undone instead of silently reverting on the next sync.
+        const before = messagesRef.current.find(x => x.id === editId);
         setMessages(prev => prev.map(x => x.id === editId
           ? { ...x, content: text, editedAt: new Date().toISOString() } : x));
         setEditingId(null);
         setInput('');
-        await enqueueEdit(chatId, editId, text);
+        const q = await enqueueEdit(chatId, editId, text);
+        editRollbacks.current.set(q.tempId, {
+          id: editId,
+          content: before?.content ?? null,
+          editedAt: before?.editedAt ?? null,
+        });
       } else {
         // Enqueue + add optimistic bubble immediately. If the one-shot
         // Invisible Ink toggle was on, stamp meta.invisibleInk and reset.
@@ -1073,7 +1113,18 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     if (isMine && msg.id > 0 && !msg.deletedAt) {
       acts.push({ key: 'info', label: 'Info', icon: 'information-circle-outline', onPress: () => setInfoMsg(msg) });
     }
-    if (isMine && !msg.deletedAt) {
+    // Offer Edit only when the server will actually accept it.
+    //
+    //   msg.id > 0    a still-pending optimistic bubble has no server row yet
+    //   plain         you cannot edit text you cannot see — for an own message
+    //                 whose local plaintext is gone (reinstall), the composer
+    //                 would open EMPTY and a stray send would overwrite the
+    //                 message with whatever was typed
+    //   EDIT_WINDOW   the PATCH's WHERE clause rejects anything older, and a
+    //                 rejected edit used to revert silently
+    const editable = isMine && !msg.deletedAt && msg.id > 0 && !!plain &&
+      Date.now() - new Date(msg.createdAt).getTime() < EDIT_WINDOW_MS;
+    if (editable) {
       acts.push({ key: 'edit', label: 'Edit', icon: 'create-outline', onPress: () => { setEditingId(msg.id); setInput(plain); } });
     }
     // VaultCheck — authenticity verification on received photos/video. Offered

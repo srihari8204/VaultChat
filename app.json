@@ -122,6 +122,7 @@
         }
       ],
       "./plugins/withAppComponentFactoryFix.js",
+      "./plugins/withMainActivityNewIntent.js",
       "./plugins/withBackupLockdown.js",
       "./plugins/withAndroidFeatures.js",
       "./plugins/withVaultChatCalls.js",

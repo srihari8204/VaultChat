@@ -79,17 +79,41 @@ func MinRetentionDaysEffective() int {
 	return MinRetentionDays
 }
 
-// retentionGraceSec is the delete-on-delivery grace period, clamped to the
-// floor. The sweeps already gate on `created_at < NOW() - grace`, so raising
-// the grace floor is all that is needed to make delivery-based reclaim
-// impossible inside the retention window — no predicate changes, and the
-// multi-device delivery conditions below keep working exactly as they did.
-func retentionGraceSec() int {
-	floor := MinRetentionDaysEffective() * 86_400
-	if g := envInt("DELETE_ON_DELIVERY_GRACE_SEC", 120); g > floor {
-		return g
+// retentionGraceSec is the post-DELIVERY grace period, and it is deliberately
+// NOT clamped to the floor.
+//
+// WHAT ACTUALLY PROTECTS AN UNDELIVERED MESSAGE
+//
+// It is the delivery predicate, not the clock. sweepDeliveredMessages and
+// sweepDeliveredBodies only touch a row when NO active member and NO active
+// device is still behind it — so an undelivered message is unreachable by them
+// at any age. The floor therefore belongs on the paths that ignore delivery,
+// not on this one.
+//
+// An earlier revision clamped this to 30 days as well. That was wrong: it made
+// post-delivery reclaim impossible, which contradicts the contract — a body
+// that every device has already received MAY be reclaimed after a short grace
+// (three hours, say). Clamping here bought no safety the predicate did not
+// already provide, and cost the storage reclaim the feature exists for.
+func retentionGraceSec() int { return envInt("DELETE_ON_DELIVERY_GRACE_SEC", 120) }
+
+// retentionStaleDays is how long a device may be silent before the delivery
+// predicate stops waiting for it — clamped to the floor, because this is the
+// one input that can make the predicate declare an UNDELIVERED message
+// delivered.
+//
+// On a multi-device account the first device to ack advances the shared
+// chat_members pointer. The per-device table is what still protects the
+// others, and a device is only counted while `last_sync_at` is inside this
+// window. Set it to 7 and a second handset that has been off for eight days is
+// simply ignored — its message is reclaimed on day eight, eight days into a
+// thirty-day promise. The default (30) already satisfies the floor; this stops
+// a lower value from quietly undercutting it.
+func retentionStaleDays() int {
+	if d := envInt("DELETE_ON_DELIVERY_DEVICE_STALE_DAYS", 30); d > MinRetentionDaysEffective() {
+		return d
 	}
-	return floor
+	return MinRetentionDaysEffective()
 }
 
 // StartAll launches every job. ctx cancellation stops them (process lifetime).
@@ -185,20 +209,40 @@ func batchedSweep(ctx context.Context, name, batchSQL string) {
 	}
 }
 
+// expiredMessagesSQL enforces the EXPLICIT disappearing-message contract, which
+// is a different thing from the normal-message retention floor and must never
+// be confused with it.
+//
+//	normal message      floor of MinRetentionDays, keyed off created_at
+//	disappearing        expires_at, set at INSERT from chats.disappearing_seconds
+//
+// The floor is a MINIMUM on how long an undelivered body is kept. It is not a
+// licence to keep a message the sender explicitly set to vanish in three hours,
+// so this statement deliberately consults neither MinRetentionDays nor any
+// delivery state — only expires_at. A three-hour message expires in three
+// hours whatever the floor says.
+//
+// It DELETEs the spine row rather than nulling content, which is what stops an
+// expired message reappearing: delta, cold sync and history sync all read from
+// `messages`, so a row that is gone cannot be re-served to anyone.
+//
+// A const so the test can assert the statement the server actually runs.
+const expiredMessagesSQL = `DELETE FROM messages
+	  WHERE ctid IN (SELECT ctid FROM messages
+	                  WHERE expires_at IS NOT NULL AND expires_at <= NOW()
+	                  LIMIT $1)`
+
 func sweepExpiredMessages(ctx context.Context) {
-	batchedSweep(ctx, "sweep",
-		`DELETE FROM messages
-		  WHERE ctid IN (SELECT ctid FROM messages
-		                  WHERE expires_at IS NOT NULL AND expires_at <= NOW()
-		                  LIMIT $1)`)
+	batchedSweep(ctx, "sweep", expiredMessagesSQL)
 }
 
 // ── delete-on-delivery (WhatsApp model; env-gated) ─────────────────────
 
 func sweepDeliveredMessages(ctx context.Context) {
-	// Clamped to the retention floor: "delivered" is never on its own a reason
-	// to drop a body inside the window. A second device, a reinstall, or an
-	// account that simply has not synced yet all still need the server copy.
+	// Post-DELIVERY grace only. The predicate below is what protects an
+	// undelivered message — it refuses to touch a row while any active member
+	// or device is still behind it — so this may stay short, and reclaiming a
+	// body every device already holds is the point of the feature.
 	grace := retentionGraceSec()
 	maxDays := envInt("DELETE_ON_DELIVERY_MAX_AGE_DAYS", 0)
 	// The age purge is unconditional — it does not consult delivery at all — so
@@ -209,7 +253,7 @@ func sweepDeliveredMessages(ctx context.Context) {
 	// How long a device may be silent before the sweep stops waiting for it.
 	// Too low destroys messages for someone on holiday; too high lets one
 	// retired handset pin an account's history on the server indefinitely.
-	staleDays := envInt("DELETE_ON_DELIVERY_DEVICE_STALE_DAYS", 30)
+	staleDays := retentionStaleDays() // clamped to the retention floor
 	// P4.1: batched like the other sweeps — the one-shot UPDATE rewrote every
 	// eligible row in a single statement (lock + WAL burst scaling with backlog).
 	var purged int64
@@ -308,7 +352,7 @@ func sweepDeliveredMessages(ctx context.Context) {
 // actually go.
 func sweepDeliveredBodies(ctx context.Context) {
 	grace := retentionGraceSec() // same floor as sweepDeliveredMessages
-	staleDays := envInt("DELETE_ON_DELIVERY_DEVICE_STALE_DAYS", 30)
+	staleDays := retentionStaleDays() // clamped to the retention floor
 	var purged int64
 	for i := 0; i < sweepMaxIters; i++ {
 		tag, err := db.SysPool.Exec(ctx,
