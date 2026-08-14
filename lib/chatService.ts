@@ -699,8 +699,22 @@ export async function hydrateMessages(
     const senderId = (m as any).senderId ?? '';
     if (senderId && senderId === (await myUserId())) {
       const own = await readOwnPlaintext(chatId, m.id, m.createdAt);
-      if (own != null) { out[i] = finish(m, own); }
-      else {
+      if (own != null) {
+        out[i] = finish(m, own);
+        // LAZY MIGRATION to the single-record model (see messageQueue.postOnce).
+        //
+        // Messages sent before that change have messages.content = NULL and
+        // their only readable copy in the old KV cache. Promote it into the
+        // canonical row the first time it is read, so the next open renders
+        // from the same path as everything else and this lookup stops being
+        // needed. Read-through, never a mass rewrite: only rows actually
+        // displayed are touched, and the old cache is left in place as the
+        // fallback until the migration has soaked.
+        try {
+          const { cacheMessages } = await import('./localDb');
+          await cacheMessages(chatId, [{ ...out[i] } as Message]);
+        } catch { /* best-effort: the message already renders from `out` */ }
+      } else {
         ownMisses++;
       }
       // No cached copy → leave the envelope as-is. The bubble renders its

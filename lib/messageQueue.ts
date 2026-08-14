@@ -459,6 +459,35 @@ async function postOnce(item: QueuedMessage): Promise<PostResult> {
   // Cache the WRAPPED plaintext (text + preview) so the sender's own bubble
   // keeps its preview across reloads — hydrateMessages unwraps it on read.
   if (encrypted) await cacheOwnPlaintext(item.chatId, real?.id, wire);
+
+  // ONE LOCAL MESSAGE RECORD, LIKE SIGNAL.
+  //
+  // Verified against the Signal build installed on the test handset
+  // (org.thoughtcrime.securesms 8.21.5): its schema is a single
+  //
+  //   CREATE TABLE message (… type INTEGER NOT NULL, body TEXT, …)
+  //
+  // with ONE plaintext `body` column for both directions — sent and received
+  // differ only by the `type` bitmask, never by where the text lives. The file
+  // is encrypted at rest by SQLCipher, which is what makes a plaintext column
+  // safe; VaultChat's encField/DEK gives the same property.
+  //
+  // The POST ack carries CIPHERTEXT, and cacheMessages nulls an envelope, so
+  // handing `real` back untouched wrote messages.content = NULL for every own
+  // message and left the only readable copy in a side KV store the render path
+  // never consults. That is what put "unable to decrypt" on the sender's own
+  // text after a restart — a split with no counterpart in Signal.
+  //
+  // So the local record carries the plaintext. `item.plaintext`, NOT `wire`:
+  // wire is the NUL-prefixed {text+preview} wrapper, and Signal keeps its
+  // preview in separate columns rather than inside body. The preview still
+  // reaches the bubble through meta.linkPreview.
+  //
+  // The server copy is untouched — it received `content`, the DR1/GSK1
+  // envelope, and never sees any of this.
+  if (real && (item.op ?? 'send') === 'send' && item.plaintext) {
+    (real as any).content = item.plaintext;
+  }
   // Hand back the CIPHERTEXT (not `wire`, which is the pre-encryption text) so
   // the caller can retain it for recovery and discard the plaintext.
   return { real, wire: encrypted ? content : null };
