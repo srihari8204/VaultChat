@@ -1057,25 +1057,30 @@ export default function FamilySpaceScreen() {
               ? { ...presences, [me.id]: { ...presences[me.id], sharingOff: true } }
               : presences;
             const b = statusBoard(roster.map((m) => m.id), forBoard, places, Date.now());
+            // TWO GROUPS, AND THEY MUST NOT LOOK LIKE ONE SUM. The first row
+            // PARTITIONS the roster — every member in exactly one bucket, so
+            // the numbers add up to the family. The second says WHERE the
+            // reachable ones are, and necessarily re-counts those same people.
+            // Rendered as one undifferentiated row, a 2-member circle showed
+            // four chips totalling 4 (seen on device).
             const chips: { icon: string; label: string; n: number }[] = [
-              // Freshness first — LIVE / RECENT / last-known — then where
-              // people are. Same derivation as the rows and map markers, so
-              // the board can never disagree with them.
               { icon: 'radio-outline', label: 'Live', n: b.live },
               { icon: 'time-outline', label: 'Recent', n: b.recent },
               { icon: 'moon-outline', label: 'Last known', n: b.stale },
               { icon: 'eye-off-outline', label: 'Location off', n: b.sharingOff },
+              { icon: 'cloud-offline-outline', label: 'No location', n: b.noLocation },
+            ].filter((c) => c.n > 0);
+            const whereChips: { icon: string; label: string; n: number }[] = [
               ...[...b.atPlace.entries()].filter(([, n]) => n > 0)
                 .map(([name, n]) => ({ icon: 'location', label: `At ${name}`, n })),
               { icon: 'car-outline', label: 'Traveling', n: b.traveling },
               { icon: 'walk-outline', label: 'Away', n: b.away },
-              { icon: 'cloud-offline-outline', label: 'No location', n: b.unavailable },
             ].filter((c) => c.n > 0);
             if (!chips.length) return null;
             return (
               <View style={[st.card, { backgroundColor: colors.card, borderColor: colors.border, marginBottom: 12 }]}>
                 <Text style={[st.secTitle, { color: colors.textDim, marginBottom: 8 }]}>
-                  {spaceFamily === 'family' ? 'FAMILY NOW' : 'RIGHT NOW'}
+                  {spaceFamily === 'family' ? 'FAMILY NOW' : 'RIGHT NOW'} · {b.total} {b.total === 1 ? 'MEMBER' : 'MEMBERS'}
                 </Text>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                   {chips.map((c) => (
@@ -1086,6 +1091,22 @@ export default function FamilySpaceScreen() {
                     </View>
                   ))}
                 </View>
+                {whereChips.length > 0 && (
+                  <>
+                    <Text style={{ color: colors.textFaint, fontSize: 11, marginTop: 10, marginBottom: 6 }}>
+                      Where they are
+                    </Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                      {whereChips.map((c) => (
+                        <View key={c.label} style={[st.chip, { borderColor: colors.border, flexDirection: 'row', alignItems: 'center', gap: 5 }]}>
+                          <Ionicons name={c.icon as any} size={13} color={colors.textDim} />
+                          <Text style={{ color: colors.textDim, fontSize: 12.5, fontWeight: '600' }}>{c.label}</Text>
+                          <Text style={{ color: colors.text, fontSize: 12.5, fontWeight: '800' }}>{c.n}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </>
+                )}
               </View>
             );
           })()}

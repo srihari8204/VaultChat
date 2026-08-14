@@ -151,14 +151,25 @@ export interface StatusBoard {
   unavailable: number;   // no usable fix: silence OR stale — "we cannot say where"
   traveling: number;
   away: number;
-  /** Freshness tallies (LIVE / RECENT / last-known). `stale` members are also
-   *  counted in `unavailable` — a last-known dot is not a usable location. */
+  /**
+   * THE FIVE FRESHNESS BUCKETS PARTITION THE ROSTER: every member falls in
+   * exactly one, and live + recent + stale + sharingOff + noLocation === total.
+   * A board whose numbers add up to more than the family has people in it is
+   * worse than no board — seen on device, where a 2-member circle showed four
+   * chips summing to 4 because one person counted as both "Location off" and
+   * "No location".
+   *
+   * `unavailable` is the UNION (stale + sharingOff + noLocation) and is kept
+   * for callers asking "how many can I not place right now"; never render it
+   * alongside its own parts.
+   */
   live: number;
   recent: number;
   stale: number;
-  /** Members who EXPLICITLY stopped sharing (last-known retained). Counted in
-   *  `unavailable` too — sharing-off is a reason, not a usable location. */
+  /** Members who EXPLICITLY stopped sharing (last-known retained). */
   sharingOff: number;
+  /** Silent for an unknown reason — no fix at all, and no stop was announced. */
+  noLocation: number;
   /** place name → member count, insertion-ordered by `places`. */
   atPlace: Map<string, number>;
 }
@@ -171,12 +182,14 @@ export function statusBoard(
 ): StatusBoard {
   const b: StatusBoard = {
     total: memberIds.length, sharing: 0, unavailable: 0,
-    traveling: 0, away: 0, live: 0, recent: 0, stale: 0, sharingOff: 0, atPlace: new Map(),
+    traveling: 0, away: 0, live: 0, recent: 0, stale: 0, sharingOff: 0,
+    noLocation: 0, atPlace: new Map(),
   };
   const at = new Date(now);
   for (const f of places) if (isZoneActive(f, at)) b.atPlace.set(f.name, 0);
   for (const id of memberIds) {
     const p = presences[id];
+    // Exactly one freshness bucket per member, in precedence order.
     // An explicit sharing-off outranks freshness: however new the retained
     // fix is, the member must never count as live/recent/sharing.
     if (p?.sharingOff) { b.sharingOff++; b.unavailable++; continue; }
@@ -184,6 +197,7 @@ export function statusBoard(
     if (tier === 'live') b.live++;
     else if (tier === 'recent') b.recent++;
     else if (tier === 'stale') b.stale++;
+    else b.noLocation++;                    // silent, no stop announced
     const s = statusOf(p, places, now);
     if (s.kind === 'unavailable') { b.unavailable++; continue; }
     b.sharing++;
@@ -375,6 +389,24 @@ if (require.main === module) {
   if (b2.sharingOff !== 1) fail('board must count sharing-off');
   if (b2.live !== 0) fail('a fresh-but-stopped fix must not count live');
   if (b2.unavailable !== 2) fail('sharing-off + absent = 2 unavailable');
+  // THE PARTITION INVARIANT. A 2-member circle once rendered four chips
+  // summing to 4, because one member counted as BOTH "Location off" and
+  // "No location". The five buckets must add up to exactly the roster.
+  const parts = (x: typeof b2) => x.live + x.recent + x.stale + x.sharingOff + x.noLocation;
+  if (parts(b2) !== b2.total) fail(`buckets must partition: ${parts(b2)} != ${b2.total}`);
+  if (b2.noLocation !== 1) fail('the absent member is the only "no location"');
+  if (b2.sharingOff + b2.noLocation !== b2.unavailable) fail('unavailable must be the union of its parts');
+  // ...and across the mixed states, for a bigger roster
+  const mixed = statusBoard(['a', 'b', 'c', 'd', 'e'], {
+    a: pres({ pos: home.center }),                        // live
+    b: pres({ ts: now - 5 * 60_000 }),                    // recent
+    c: pres({ ts: now - 20 * 60_000 }),                   // stale
+    d: { ...pres({}), sharingOff: true },                 // sharing off
+  }, [home], now);                                        // e absent
+  if (parts(mixed) !== 5) fail(`mixed buckets must partition 5: got ${parts(mixed)}`);
+  if (mixed.live !== 1 || mixed.recent !== 1 || mixed.stale !== 1 || mixed.sharingOff !== 1 || mixed.noLocation !== 1) {
+    fail('each mixed state must land in exactly one bucket');
+  }
   // a FRESH fix clears the flag (re-enable → only new GPS becomes live)
   ps = foldPresence(ps, 'a', pres({ pos: home.center, ts: now + 1000 }));
   if (ps.a.sharingOff) fail('a fresh fix must clear sharing-off');
