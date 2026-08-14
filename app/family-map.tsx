@@ -11,6 +11,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, ActivityIndicator, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../lib/theme';
 import FamilyMap, { type FamilyMarker } from '../components/family/FamilyMap';
@@ -43,7 +44,7 @@ const freshLabel = (f: Freshness, ts?: number, now?: number, sharingOff?: boolea
 
 export default function FamilyMapScreen() {
   const { colors } = useTheme();
-  const params = useLocalSearchParams<{ circleId?: string; circleName?: string }>();
+  const params = useLocalSearchParams<{ circleId?: string; circleName?: string; followId?: string }>();
   const circleId = String(params.circleId || '');
 
   const [me, setMe] = useState<string | null>(null);
@@ -51,6 +52,10 @@ export default function FamilyMapScreen() {
   const [membersLoaded, setMembersLoaded] = useState(false);
   const [presences, setPresences] = useState<Record<string, MemberPresence>>({});
   const [focusId, setFocusId] = useState<string | null>(null);
+  // Follow mode (spec: Follow member). Null = free map interaction. Seeded
+  // from the route param so "Follow" on a member's detail screen lands here
+  // already following them.
+  const [followId, setFollowId] = useState<string | null>(params.followId ? String(params.followId) : null);
   // Render tick so "LIVE" decays to "5 min ago" without a new ping arriving.
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30_000); return () => clearInterval(t); }, []);
@@ -125,7 +130,29 @@ export default function FamilyMapScreen() {
         headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text,
         headerShadowVisible: false,
       }} />
-      <FamilyMap members={markers} focusId={focusId} onSelect={(id) => setFocusId(id)} style={{ flex: 1 }} />
+      <View style={{ flex: 1 }}>
+        <FamilyMap
+          members={markers} focusId={focusId} followId={followId}
+          onSelect={(id) => setFocusId(id)} style={{ flex: 1 }}
+        />
+        {/* Following banner (spec: "Following X" + "Stop following"). Only
+            shown while a follow is active, and it is the way OUT — a map that
+            keeps recentring with no visible reason feels broken. */}
+        {followId && (
+          <View style={[st.followBar, { backgroundColor: colors.card, borderColor: colors.primary }]}>
+            <Ionicons name="navigate-circle" size={16} color={colors.primary} />
+            <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, flex: 1 }} numberOfLines={1}>
+              Following {nameOf.get(followId) || 'member'}
+            </Text>
+            <Text
+              onPress={() => setFollowId(null)}
+              style={{ color: colors.primary, fontWeight: '800', fontSize: 12.5 }}
+            >
+              STOP
+            </Text>
+          </View>
+        )}
+      </View>
       <View style={[st.sheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
         {!membersLoaded ? (
           <View style={st.center}><ActivityIndicator color={colors.primary} /></View>
@@ -135,18 +162,32 @@ export default function FamilyMapScreen() {
               const p = presences[m.id];
               const f = freshnessOf(p?.ts, now);
               const liveNow = f === 'live' && !p?.sharingOff;
+              const following = followId === m.id;
+              // Following needs a position to follow. A member with no usable
+              // fix (silent, or sharing off) cannot be followed — offering it
+              // would promise something the map cannot do.
+              const canFollow = !!p && !p.sharingOff && f !== 'unavailable' && m.id !== me;
               return (
-                <Text
-                  key={m.id}
-                  onPress={() => p && setFocusId(m.id)}
-                  style={[st.row, { color: colors.text, borderTopColor: colors.border }]}
-                >
-                  <Text style={{ color: liveNow ? colors.success : colors.textFaint }}>● </Text>
-                  {m.id === me ? 'You' : m.name}
-                  <Text style={{ color: liveNow ? colors.success : colors.textDim, fontSize: 12 }}>
-                    {'   '}{freshLabel(f, p?.ts, now, p?.sharingOff)}
+                <View key={m.id} style={[st.rowWrap, { borderTopColor: colors.border }]}>
+                  <Text
+                    onPress={() => p && setFocusId(m.id)}
+                    style={[st.row, { color: colors.text, flex: 1 }]}
+                  >
+                    <Text style={{ color: liveNow ? colors.success : colors.textFaint }}>● </Text>
+                    {m.id === me ? 'You' : m.name}
+                    <Text style={{ color: liveNow ? colors.success : colors.textDim, fontSize: 12 }}>
+                      {'   '}{freshLabel(f, p?.ts, now, p?.sharingOff)}
+                    </Text>
                   </Text>
-                </Text>
+                  {canFollow && (
+                    <Text
+                      onPress={() => { setFollowId(following ? null : m.id); setFocusId(m.id); }}
+                      style={{ color: following ? colors.primary : colors.textDim, fontWeight: '700', fontSize: 12, paddingHorizontal: 6 }}
+                    >
+                      {following ? 'FOLLOWING' : 'Follow'}
+                    </Text>
+                  )}
+                </View>
               );
             })}
             {members.length === 0 && (
@@ -167,5 +208,11 @@ const st = StyleSheet.create({
     borderTopLeftRadius: 20, borderTopRightRadius: 20, borderWidth: 1,
     paddingHorizontal: 16, paddingTop: 8, paddingBottom: 14,
   },
-  row: { paddingVertical: 10, fontSize: 14.5, fontWeight: '600', borderTopWidth: StyleSheet.hairlineWidth },
+  rowWrap: { flexDirection: 'row', alignItems: 'center', borderTopWidth: StyleSheet.hairlineWidth },
+  row: { paddingVertical: 10, fontSize: 14.5, fontWeight: '600' },
+  followBar: {
+    position: 'absolute', left: 12, right: 12, top: 12,
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9,
+  },
 });

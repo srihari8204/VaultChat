@@ -95,10 +95,17 @@ reportZoom();
 </script></body></html>`;
 }
 
-export default function FamilyMap({ members, onSelect, focusId, path, style }: {
+export default function FamilyMap({ members, onSelect, focusId, followId, path, style }: {
   members: FamilyMarker[];
   onSelect?: (id: string) => void;
   focusId?: string | null;
+  /**
+   * Keep the map centred on this member as they MOVE (spec: Follow member).
+   * `focusId` centres once when it changes; following has to re-centre on every
+   * new position, which is a different trigger — hence a separate prop rather
+   * than a flag on focusId.
+   */
+  followId?: string | null;
   /** Location-history track, oldest→newest. Start/end get green/red caps. */
   path?: { lat: number; lng: number }[];
   style?: any;
@@ -144,6 +151,16 @@ export default function FamilyMap({ members, onSelect, focusId, path, style }: {
   useEffect(() => {
     if (ready && focusId && ref.current) ref.current.injectJavaScript(`focus(${JSON.stringify(focusId)});true;`);
   }, [ready, focusId]);
+
+  // FOLLOW: re-centre whenever the followed member's POSITION changes. Keyed on
+  // their coordinates, not on `members`, so unrelated members moving (or a
+  // re-cluster at the same zoom) does not yank the camera. No polling — this
+  // rides the presence updates that already arrive.
+  const followed = followId ? members.find((m) => m.id === followId) : undefined;
+  useEffect(() => {
+    if (!ready || !followed || !ref.current) return;
+    ref.current.injectJavaScript(`focus(${JSON.stringify(followed.id)});true;`);
+  }, [ready, followed?.id, followed?.lat, followed?.lng]);
 
   // Thin the track before it crosses the bridge: a month of samples is thousands
   // of points and Leaflet gains nothing from more than a few hundred.
