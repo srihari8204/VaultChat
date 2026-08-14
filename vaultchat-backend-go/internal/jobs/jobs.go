@@ -25,6 +25,7 @@ import (
 
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/emitx"
+	"vaultchat/backend-go/internal/fcm"
 	"vaultchat/backend-go/internal/httpx"
 	"vaultchat/backend-go/internal/metrics"
 	"vaultchat/backend-go/internal/storage"
@@ -93,6 +94,12 @@ func retentionGraceSec() int {
 
 // StartAll launches every job. ctx cancellation stops them (process lifetime).
 func StartAll(ctx context.Context) {
+	// Report push state at boot rather than on the first send. Credential
+	// loading is otherwise lazy, so "is push armed?" was unanswerable until
+	// traffic arrived — and when the answer was "no", the only evidence was one
+	// line nobody was looking for. Cheap: parses a local file once.
+	fcm.Warm()
+
 	run := func(name string, every time.Duration, f func(context.Context)) {
 		go func() {
 			f(ctx) // boot kick, like Node
