@@ -134,7 +134,31 @@ export default function FamilyMemberScreen() {
 
   const route = () => {
     if (!last) { Alert.alert('No location', `${name} is not sharing a location right now.`); return; }
+    // Say WHICH position is being navigated to. A stale fix is a legitimate
+    // destination, but calling it "live" when it is 20 minutes old is exactly
+    // the lie the freshness tiers exist to prevent.
+    if (tier === 'stale') {
+      Alert.alert(
+        'Navigate to last known location?',
+        `${name}'s position is from ${ago(last.ts)}. They may have moved since.`,
+        [{ text: 'Cancel', style: 'cancel' },
+          { text: 'Navigate', onPress: () => navigateTo(last.lat, last.lng, name) }],
+      );
+      return;
+    }
     navigateTo(last.lat, last.lng, name);
+  };
+
+  /** Follow on the circle map (spec: Follow member). Needs a usable fix. */
+  const follow = () => {
+    if (!last || tier === 'unavailable') {
+      Alert.alert('Cannot follow', `${name} has no location to follow right now.`);
+      return;
+    }
+    router.push({
+      pathname: '/family-map' as any,
+      params: { circleId, circleName: params.circleName ?? '', followId: userId },
+    });
   };
 
   const action = (icon: keyof typeof Ionicons.glyphMap, label: string, onPress: () => void, tint?: string) => (
@@ -197,6 +221,7 @@ export default function FamilyMemberScreen() {
           {action('chatbubble-ellipses', 'Message', () => openDirect('chat'))}
           {action('call', 'Call', () => openDirect('voicecall'))}
           {action('navigate-circle', 'Route', route)}
+          {action('locate', 'Follow', follow)}
           {mayViewHistory && action('time', 'History', () => router.push({
             pathname: '/family-history' as any,
             params: { circleId, name, userId, circleName: params.circleName ?? '' },
