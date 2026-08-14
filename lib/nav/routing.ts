@@ -114,11 +114,33 @@ export function parseRoute(resp: any): Route {
   };
 }
 
+/**
+ * Parse the primary route PLUS any genuine alternatives (pure).
+ *
+ * Valhalla returns alternatives as `alternates: [{trip}, …]` only when
+ * distinct routes exist. Absent alternates → a one-element array; nothing is
+ * ever invented. Order: primary first, then alternates as returned.
+ */
+export function parseRoutes(resp: any): Route[] {
+  const out: Route[] = [parseRoute(resp)];
+  for (const alt of Array.isArray(resp?.alternates) ? resp.alternates : []) {
+    try { out.push(parseRoute(alt)); } catch { /* a malformed alternate is dropped, never invented */ }
+  }
+  return out;
+}
+
 /** Request a real route from the self-hosted Valhalla via the backend proxy. */
 export async function fetchRoute(from: LatLng, to: LatLng, costing: Costing = 'auto', opts?: RouteOpts): Promise<Route> {
   const { api } = require('../api');
   const resp = await api('/nav/route', { method: 'POST', json: buildRouteRequest(from, to, costing, opts) });
   return parseRoute(resp);
+}
+
+/** Like fetchRoute, but returns primary + alternatives (Google-style). */
+export async function fetchRoutes(from: LatLng, to: LatLng, costing: Costing = 'auto', opts?: RouteOpts): Promise<Route[]> {
+  const { api } = require('../api');
+  const resp = await api('/nav/route', { method: 'POST', json: buildRouteRequest(from, to, costing, opts) });
+  return parseRoutes(resp);
 }
 
 // ── self-check: `npx tsx lib/nav/routing.ts` ──
@@ -162,6 +184,18 @@ function _selfCheck(): void {
   A(!rw.costing_options, 'pedestrian ignores toll/highway avoidance');
   const rs = buildRouteRequest(p0, p0, 'pedestrian', { shortest: true });
   A(rs.costing_options.pedestrian.shortest === true, 'pedestrian shortest still applies');
+
+  // alternatives: parsed when present, never invented when absent
+  const tripFix = { legs: [{ shape: enc, maneuvers: [{ type: 4, begin_shape_index: 1, length: 0, time: 0 }] }], summary: { length: 1.2, time: 90 } };
+  const single = parseRoutes({ trip: tripFix });
+  A(single.length === 1, 'no alternates → exactly one route');
+  const multi = parseRoutes({ trip: tripFix, alternates: [
+    { trip: { ...tripFix, summary: { length: 1.5, time: 110 } } },
+    { trip: { legs: [] } },                       // malformed alternate is dropped
+  ] });
+  A(multi.length === 2, 'one genuine alternate parsed, malformed one dropped');
+  A(multi[1].timeS === 110 && multi[1].lengthM === 1500, 'alternate carries its own summary');
+  A(multi[0].timeS === 90, 'primary stays first');
 
   console.log('routing self-check: OK');
 }

@@ -14,7 +14,7 @@ import { LOCATION_LOCK } from '../constants/flags';
 import { useLockView } from '../lib/lock/lockService';
 import { useNavSettings, setNavSettings, loadNavSettings } from '../lib/nav/navSettings';
 import { startNavigation, stopNavigation, forceReroute, useNavBanner, type NavGeo } from '../lib/nav/navigationService';
-import { fetchRoute } from '../lib/nav/routing';
+import { fetchRoutes, type Route } from '../lib/nav/routing';
 import NavBanner from '../components/nav/NavBanner';
 import NavMap from '../components/nav/NavMap';
 import { type NavProfile } from '../lib/nav/hapticLanguage';
@@ -47,6 +47,10 @@ export default function NavigateScreen() {
   const [searching, setSearching] = useState(false);
   const [starting, setStarting] = useState(false);
   const [preview, setPreview] = useState<NavGeo | null>(null);
+  // Primary route + any genuine Valhalla alternatives (never invented — the
+  // chips render only when the engine actually returned more than one).
+  const [routes, setRoutes] = useState<Route[]>([]);
+  const [routeSel, setRouteSel] = useState(0);
 
   useEffect(() => { loadNavSettings(); }, []);
 
@@ -62,9 +66,13 @@ export default function NavigateScreen() {
         const cur = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
         pos = { lat: cur.coords.latitude, lng: cur.coords.longitude };
       } catch { /* no permission/fix yet — still show the destination pin */ }
-      let shape: LatLng[] = [];
-      if (pos) { try { shape = (await fetchRoute(pos, dest.coords, s.costing)).shape; } catch { /* route preview optional */ } }
-      if (!cancel) setPreview({ shape, pos, dest: dest.coords, heading: 0 });
+      let rts: Route[] = [];
+      if (pos) { try { rts = await fetchRoutes(pos, dest.coords, s.costing, s.routeOpts); } catch { /* route preview optional */ } }
+      if (!cancel) {
+        setRoutes(rts);
+        setRouteSel(0);
+        setPreview({ shape: rts[0]?.shape ?? [], pos, dest: dest.coords, heading: 0 });
+      }
     })();
     return () => { cancel = true; };
   }, [dest, s.costing]);
@@ -234,6 +242,32 @@ export default function NavigateScreen() {
               follow={false}
               style={[st.previewMap, { borderColor: colors.border }]}
             />
+          )}
+
+          {/* Route summary + alternatives (Google-style). Chips appear only
+              when Valhalla genuinely returned more than one distinct route. */}
+          {routes.length > 0 && (
+            <View style={{ marginTop: 10 }}>
+              <Text style={{ color: colors.text, fontWeight: '700', fontSize: 14.5 }}>
+                {(routes[routeSel].lengthM / 1000).toFixed(1)} km · {Math.round(routes[routeSel].timeS / 60)} min
+                {' · ETA '}{new Date(Date.now() + routes[routeSel].timeS * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </Text>
+              {routes.length > 1 && (
+                <View style={[st.chips, { marginTop: 8 }]}>
+                  {routes.map((r, i) => (
+                    <Chip
+                      key={i}
+                      active={routeSel === i}
+                      label={`${i === 0 ? 'Fastest' : `Alt ${i}`} · ${Math.round(r.timeS / 60)} min`}
+                      onPress={() => {
+                        setRouteSel(i);
+                        setPreview((p) => (p ? { ...p, shape: r.shape } : p));
+                      }}
+                    />
+                  ))}
+                </View>
+              )}
+            </View>
           )}
 
           {/* Direction Lock — locked for the trip once you start */}
