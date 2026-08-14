@@ -32,6 +32,10 @@ import { CALL_SESSIONS } from '../../constants/flags';
 import { leaveCallSession, openCallSession, setCallRole, setHandRaised, type CallRole } from '../callSession';
 import { addCallLog } from '../callLog';
 import { newCallCipher, openCallOffer } from '../callCrypto';
+// Screen share has to lift the app-wide FLAG_SECURE for the duration of the
+// share; see startScreenShare/stopScreenShare for why, and for the exit paths
+// that put it back.
+import { setSecure } from '../screenGuard';
 // The ONE platform seam (lib/call/native): Android foreground service + FCM
 // today, CallKit + PushKit when iOS lands. The engine never branches on
 // Platform.OS itself.
@@ -108,6 +112,11 @@ function dispose(): void {
   s.disposers = [];
   media.stopAudioSession();
   nativeCall.endCallSession();
+  // Re-arm the capture guard if the call died mid-share (hangup, network loss,
+  // peer left). stopScreenShare() is the tidy path and restores it too, but a
+  // call can end without ever reaching it — and leaving FLAG_SECURE off would
+  // silently disable the app-wide screenshot block for the rest of the session.
+  if (s.screenStream) setSecure(true).catch(() => {});
   media.stopStream(s.screenStream);
   media.stopStream(s.localStream);
   for (const p of s.peers.values()) { try { p.close(); } catch {} }
@@ -1384,10 +1393,38 @@ export async function startScreenShare(): Promise<void> {
       : 'Screen sharing is only available in a video call.');
   }
 
-  const screen = await media.acquireScreenStream();
+  // LIFT FLAG_SECURE, OR THERE IS NOTHING TO CAPTURE.
+  //
+  // app/_layout.tsx calls preventScreenCaptureAsync() at boot, which sets
+  // FLAG_SECURE on the app's only window app-wide. FLAG_SECURE blocks screen
+  // RECORDING as well as screenshots — MediaProjection included — so the share
+  // came back as black frames for everything VaultChat drew. Nothing else
+  // cleared it: the root layout only clears on unmount (app teardown), and
+  // chat.tsx's per-chat policy does not survive navigating to the call.
+  //
+  // So screen share was not broken in the WebRTC layer at all; the app was
+  // refusing to be captured, including by itself.
+  //
+  // This is a genuine trade-off, not an oversight being undone: while sharing,
+  // the app IS screenshot-able. That is inherent — you cannot both block
+  // capture and show your screen to someone. The window is therefore made as
+  // narrow as the operation, and re-asserted on EVERY exit path below.
+  await setSecure(false).catch(() => {});
+
+  let screen: any;
+  try {
+    screen = await media.acquireScreenStream();
+  } catch (e) {
+    // Consent dialog dismissed, or capture refused by policy. Put the guard
+    // back before rethrowing — a cancelled share must not leave the app
+    // capturable for the rest of the session.
+    await setSecure(true).catch(() => {});
+    throw e;
+  }
   const track = screen?.getVideoTracks?.()[0];
   if (!track) {
     media.stopStream(screen);
+    await setSecure(true).catch(() => {});
     // NOT the word "cancel": the caller suppresses any message matching
     // /cancel|denied by user|NotAllowed/ so a genuine user-cancel does not
     // interrupt a call with an alert. Phrasing this as "cancelled" made it
@@ -1414,6 +1451,13 @@ export async function startScreenShare(): Promise<void> {
 }
 
 export async function stopScreenShare(): Promise<void> {
+  // FIRST, and outside the session check. The guard must go back on even if the
+  // session has already gone — this function is also reached from the track's
+  // 'ended' event, which fires when the user stops the share from the system
+  // UI, and that can race a hangup. Restoring only on the happy path would
+  // leave the app-wide screenshot block off with no way for the user to know.
+  await setSecure(true).catch(() => {});
+
   const s = session;
   if (!s) return;
   // Same reason as startScreenShare: solePeer() left every peer in a group call
