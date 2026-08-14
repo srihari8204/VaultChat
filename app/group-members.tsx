@@ -237,7 +237,10 @@ export default function GroupMembersScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <Stack.Screen options={{ title: 'Members', headerTitleAlign: 'center' }} />
+      <Stack.Screen options={{
+        headerShown: true, title: 'Members', headerTitleAlign: 'center',
+        headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,
+      }} />
 
       {loading ? (
         <View style={st.center}><ActivityIndicator color={colors.primary} /></View>

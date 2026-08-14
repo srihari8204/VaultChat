@@ -96,8 +96,13 @@ export default function FamilyAlertsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
+      {/* headerShown: the root hides headers app-wide, so without opting back
+          in this screen had NO back button and its headerRight clear-button
+          never rendered at all — and the filter tabs sat in the dead strip
+          under the status bar. Same fix as the space module. */}
       <Stack.Screen options={{
-        title: 'Alerts', headerTitleAlign: 'center',
+        headerShown: true, title: 'Alerts', headerTitleAlign: 'center',
+        headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,
         headerRight: () => (
           <TouchableOpacity onPress={confirmClear} style={{ paddingHorizontal: 8 }}>
             <Ionicons name="trash-outline" size={19} color={colors.textDim} />

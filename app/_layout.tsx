@@ -297,6 +297,47 @@ function RootLayout() {
       if (m?.meta?.vaultbeam) import('../lib/vaultBeamIngest').then(v => v.onIncomingVaultbeamMessage(m)).catch(() => {});
     });
 
+    // ── native launch intent (message tap / call tap) ────────────────────
+    //
+    // MUST BE RE-READ ON RESUME, NOT ONLY AT MOUNT.
+    //
+    // MainActivity is launchMode="singleTask", so when the app is already in
+    // memory — the normal case — a notification tap is delivered to
+    // onNewIntent, which calls setIntent() so getIntent() is current. But this
+    // block used to run once inside the mount effect, and nothing read the
+    // intent again afterwards. The extras arrived and were simply never
+    // consumed: the app came to the foreground on whatever screen it was
+    // already showing, so tapping a message notification opened the chat LIST
+    // instead of the chat.
+    //
+    // Verified on the Redmi: `am start` with the notification's own extras
+    // reported "intent has been delivered to currently running top-most
+    // instance" and the screen stayed on the list. It only ever worked from a
+    // COLD start, where the notification intent happens to BE the launch
+    // intent this effect reads.
+    //
+    // So the consumer is named and also fired on AppState 'active', which is
+    // exactly when a tap brings the app forward. getInitialCallIntent clears
+    // the extras as it reads them, so an ordinary resume with no pending tap
+    // reads null and does nothing — no navigation, no visual change.
+    const consumeNativeLaunchIntent = async () => {
+      try {
+        const ci = await getInitialCallIntent();
+        if (ci?.action === 'open_chat' && ci.chatId) {
+          // Native message-notification tap (F2 content-free doorbell).
+          router.push({ pathname: '/chat', params: { id: ci.chatId } } as any);
+        } else if (ci?.callId && ci.action !== 'open_calls') {
+          routeToIncoming({
+            chatId: ci.callId, peerUid: ci.callerId || '', peerName: ci.callerName || 'VaultChat user',
+            type: ci.isVideo ? 'video' : 'audio', offer: '',
+          });
+        }
+      } catch {}
+    };
+    const launchIntentSub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') consumeNativeLaunchIntent();
+    });
+
     // ── Notifee full-screen call events (foreground) ────────────────────
     const onNotifeeAnswerOrDecline = (action: string, data: any) => {
       if (data?.type !== 'call' || !data?.fromUid) return;
@@ -328,18 +369,7 @@ function RootLayout() {
 
       // Native full-screen-intent (FCM) launch → open the in-app ringing screen.
       // The caller re-emits the offer over the socket; incoming-call captures it live.
-      try {
-        const ci = await getInitialCallIntent();
-        if (ci?.action === 'open_chat' && ci.chatId) {
-          // Native message-notification tap (F2 content-free doorbell).
-          router.push({ pathname: '/chat', params: { id: ci.chatId } } as any);
-        } else if (ci?.callId && ci.action !== 'open_calls') {
-          routeToIncoming({
-            chatId: ci.callId, peerUid: ci.callerId || '', peerName: ci.callerName || 'VaultChat user',
-            type: ci.isVideo ? 'video' : 'audio', offer: '',
-          });
-        }
-      } catch {}
+      await consumeNativeLaunchIntent();
 
       // A decline tapped on the killed lock-screen notification → stop the caller's ring.
       try {
@@ -356,6 +386,15 @@ function RootLayout() {
       cleanupListeners = attachTapHandler(
         (chatId) => { router.push({ pathname: '/chat', params: { id: chatId } } as any); },
         onCallNotification,
+        // Membership pushes: an accepted member lands in the space, an invitee
+        // lands on the invitation itself — never in a chat they cannot open.
+        (event, chatId) => {
+          if (event === 'member_approved' && chatId) {
+            router.push({ pathname: '/family', params: { groupId: chatId } } as any);
+          } else {
+            router.push('/group-invitations' as any);
+          }
+        },
       );
     }
 
@@ -364,6 +403,7 @@ function RootLayout() {
         ScreenCapture.allowScreenCaptureAsync().catch(() => {});
       }
       deferred.cancel();   // don't run deferred boot work after unmount
+      launchIntentSub.remove();
       cleanupListeners();
       cleanupCallListener();
       cleanupRekey();

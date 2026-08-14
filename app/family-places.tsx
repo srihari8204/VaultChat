@@ -228,7 +228,10 @@ export default function FamilyPlacesScreen() {
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, backgroundColor: colors.bg }}>
-      <Stack.Screen options={{ title: circleName ? `Safe Zones · ${circleName}` : 'Safe Zones', headerTitleAlign: 'center' }} />
+      <Stack.Screen options={{
+        headerShown: true, title: circleName ? `Safe Zones · ${circleName}` : 'Safe Zones', headerTitleAlign: 'center',
+        headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,
+      }} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
 
         <Text style={[st.h, { color: colors.text }]}>Add a safe zone</Text>

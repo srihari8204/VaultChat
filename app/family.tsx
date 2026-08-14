@@ -13,7 +13,7 @@ import {
   Linking,
 } from 'react-native';
 import * as Location from 'expo-location';
-import { Stack, useRouter, useFocusEffect } from 'expo-router';
+import { Stack, useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { brandAlpha } from '../constants/theme';
@@ -22,7 +22,10 @@ import FamilyMap, { type FamilyMarker } from '../components/family/FamilyMap';
 // when the server starts 403/404ing it (kicked, or deleted). That is orthogonal
 // to the group registry and must survive the switch — dropping it would bring
 // back a phone retrying a dead circle on every focus.
-import { getSettings, setSettings, removeCircle } from '../lib/family/store';
+import { getSettings, setSettings, removeCircle, getPlaces } from '../lib/family/store';
+import { freshnessOf, speedBand, statusBoard, foldPresence, markSharingOff } from '../lib/family/status';
+import { subscribeSpaceLocations, mergePresence } from '../lib/location/live';
+import { type Geofence } from '../lib/family/geofence';
 // Groups & Circles: the registry is now typed groups. A Family Space circle is
 // one of them (migrated on first load by lib/groups/store), so this screen is
 // the group dashboard and no longer assumes there is exactly one family.
@@ -42,7 +45,7 @@ import {
 } from '../lib/family/presence';
 import { requestBackgroundPermission } from '../lib/family/background';
 import { loadAlerts, recordAlert, useUnreadCount } from '../lib/family/alerts';
-import { type CircleMember, type MemberPresence, STALE_MS } from '../lib/family/types';
+import { type CircleMember, type MemberPresence, STALE_MS, SPEED_ALERT_CHOICES, DEFAULT_SPEED_ALERT_KMH } from '../lib/family/types';
 import { sendMessage, getMessages, decryptFromChat, getChat, listChats, sendAnnouncement, isAnnouncement } from '../lib/chatService';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { navigateTo } from '../lib/nav/openNavigation';
@@ -142,6 +145,13 @@ interface Highlight { icon: string; text: string; at: number }
 export default function FamilySpaceScreen() {
   const { colors } = useTheme();
   const router = useRouter();
+  // An explicit ?groupId= (membership push "You are in", deep link) selects
+  // that space. This param was ALREADY being sent by the push-tap handler and
+  // silently ignored here — an accepted invitee landed on whatever space was
+  // last open instead of the one they just joined. Applied once per value so
+  // the switcher still works afterwards.
+  const linkParams = useLocalSearchParams<{ groupId?: string }>();
+  const appliedGroupId = useRef<string | null>(null);
   const [me, setMe] = useState<{ id: string; name: string } | null>(null);
   const [circles, setCircles] = useState<GroupRef[]>([]);
   const [active, setActive] = useState<GroupRef | null>(null);
@@ -151,6 +161,17 @@ export default function FamilySpaceScreen() {
   const [membersLoaded, setMembersLoaded] = useState(false);
   const [presences, setPresences] = useState<Record<string, MemberPresence>>({});
   const [share, setShare] = useState(false);
+  // My own high-speed alert (off by default; detected on this device only).
+  const [speedAlert, setSpeedAlert] = useState<{ enabled: boolean; thresholdKmh: number }>(
+    { enabled: false, thresholdKmh: DEFAULT_SPEED_ALERT_KMH });
+  // Render tick so freshness DECAYS without new data. Presences only re-render
+  // this screen when a ping arrives — which is exactly never once the last
+  // publisher stops, so "LIVE" and "1 sharing" froze on screen for as long as
+  // the dashboard stayed open (observed on-device: 2.5 min after sharing was
+  // switched off the card still claimed live). Same load-bearing tick as
+  // space-ops-map and family-map.
+  const [tick, setTick] = useState(0);
+  useEffect(() => { const t = setInterval(() => setTick((n) => n + 1), 30_000); return () => clearInterval(t); }, []);
   // Location was refused (or never asked for). Not an error state — the space
   // works without it; only our own dot on the map is missing.
   const [locDenied, setLocDenied] = useState(false);
@@ -185,8 +206,21 @@ export default function FamilySpaceScreen() {
   // sees their own runs, a guardian sees the runs their linked riders are on.
   // Nothing here filters it further.
   const [runs, setRuns] = useState<SpaceRun[]>([]);
+  // This circle's saved Places (device-local geofences) — they name the FAMILY
+  // NOW board's "At Home / At School" rows. Statuses are derived here on the
+  // viewing device from decrypted presences: positions are E2EE, so the server
+  // cannot compute "at school", and this screen never invents one.
+  const [places, setPlacesState] = useState<Geofence[]>([]);
 
   useEffect(() => { loadAlerts(); }, []);
+
+  // Honour ?groupId= once per value, as soon as the registry knows the space.
+  useEffect(() => {
+    const want = linkParams.groupId ? String(linkParams.groupId) : '';
+    if (!want || appliedGroupId.current === want) return;
+    const g = circles.find((c) => c.id === want);
+    if (g) { appliedGroupId.current = want; setActive(g); }
+  }, [linkParams.groupId, circles]);
 
   // identity + circle list
   useEffect(() => { (async () => {
@@ -198,7 +232,9 @@ export default function FamilySpaceScreen() {
     // Reopen on the group the user was last in, not blindly the first.
     const remembered = await resolveActiveGroup();
     setActive((prev) => prev ?? remembered ?? cs[0]);
-    setShare((await getSettings()).sharing);
+    const s = await getSettings();
+    setShare(s.sharing);
+    setSpeedAlert(s.speedAlert ?? { enabled: false, thresholdKmh: DEFAULT_SPEED_ALERT_KMH });
     setLoading(false);
   })(); }, []);
 
@@ -298,10 +334,40 @@ export default function FamilySpaceScreen() {
       try {
         const u = await subscribeCircle(active.id, me.id, (e: PresenceEvent) => {
           if (cancelled) return;
-          setPresences((prev) => { const n = { ...prev }; if (e.presence) n[e.userId] = e.presence; else delete n[e.userId]; return n; });
+          // Keyed by member id via the shared fold — independence of every
+          // member's entry is proven by lib/family/visibility.selftest.ts.
+          // A relay ping may be older than a platform fix already folded in,
+          // so it merges rather than overwrites (newest fix per member wins).
+          // A stop is an explicit choice: retain the last-known fix, flagged,
+          // instead of deleting the member's dot (spec: last known location).
+          setPresences((prev) => (e.presence
+            ? mergePresence(prev, {
+              userId: e.userId, lat: e.presence.pos.lat, lng: e.presence.pos.lng,
+              ts: e.presence.ts, spd: e.presence.speed, acc: e.presence.accuracy, bat: e.presence.battery,
+            })
+            : markSharingOff(prev, e.userId)));
         });
         if (cancelled) u(); else unsub = u;
       } catch { /* the map degrades to "nobody live yet"; the space still works */ }
+
+      // The dedicated location service (all-space platform): snapshot of the
+      // newest server-stored point per authorized member + live events. This
+      // is the path with NO chat-E2EE dependency — it works even when a
+      // member pair's sender-key session is wedged — and it gives a late
+      // joiner the catch-up the sealed relay never could. Same store, same
+      // fold: whichever source is fresher per member wins.
+      try {
+        const u2 = await subscribeSpaceLocations(active.id, me.id, (e) => {
+          if (cancelled) return;
+          setPresences((prev) => (e.point
+            ? mergePresence(prev, {
+              userId: e.userId, lat: e.point.pos.lat, lng: e.point.pos.lng,
+              ts: e.point.ts, spd: e.point.speed, acc: e.point.accuracy, bat: e.point.battery,
+            })
+            : markSharingOff(prev, e.userId)));
+        });
+        if (cancelled) u2(); else { const prevUnsub = unsub; unsub = () => { prevUnsub?.(); u2(); }; }
+      } catch { /* platform absent — the sealed relay path stands alone */ }
 
       // Then our own position, which is optional. requestPermission is only
       // true when sharing is already on — otherwise entering a space prompts
@@ -316,14 +382,21 @@ export default function FamilySpaceScreen() {
       } catch { if (!cancelled) setLocDenied(true); }
     })();
     return () => { cancelled = true; unsub?.(); stopPresence(); };
-  }, [active?.id, me?.id]);
+  // `share` IS a dependency, and its absence was a real field bug: settings
+  // load async, so a cold start ran this with share=false and never re-ran —
+  // the switch showed ON, the self-dot worked (the watcher runs regardless),
+  // but startPresence never began BROADCASTING and never delivered keys.
+  // Verified server-side: a whole session with the switch on produced zero
+  // key messages. The eslint exhaustive-deps warning on this line was right.
+  }, [active?.id, me?.id, share]);
 
   // stop broadcasting when the screen loses focus (map still resumes on return)
   useFocusEffect(React.useCallback(() => () => { stopPresence(); }, []));
 
   // Refresh on focus — /family-add and /family-setup both mutate state this
   // screen already has in memory, and neither changes active.id, so nothing
-  // else would re-read it.
+  // else would re-read it. Places too: /family-places edits them and comes
+  // straight back here, where the FAMILY NOW board is derived from them.
   useFocusEffect(React.useCallback(() => {
     let live = true;
     (async () => {
@@ -335,9 +408,10 @@ export default function FamilySpaceScreen() {
       setActive(prev => (prev && cs.some(c => c.id === prev.id)) ? prev : cs[0]);
     })();
     refreshMembers();
+    if (active?.id) getPlaces(active.id).then((p) => { if (live) setPlacesState(p); }).catch(() => {});
     return () => { live = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router]));
+  }, [router, active?.id]));
 
   // today's highlights — recent check-ins / SOS decrypted from the circle chat
   useEffect(() => {
@@ -395,6 +469,18 @@ export default function FamilySpaceScreen() {
     if (ok) await offerBackground();
   };
 
+  const toggleSpeedAlert = async (on: boolean) => {
+    const next = { enabled: on, thresholdKmh: speedAlert.thresholdKmh };
+    setSpeedAlert(next);
+    await setSettings({ speedAlert: next }).catch(() => {});
+  };
+  const cycleSpeedThreshold = async () => {
+    const i = SPEED_ALERT_CHOICES.indexOf(speedAlert.thresholdKmh as typeof SPEED_ALERT_CHOICES[number]);
+    const next = { enabled: true, thresholdKmh: SPEED_ALERT_CHOICES[(i + 1) % SPEED_ALERT_CHOICES.length] };
+    setSpeedAlert(next);
+    await setSettings({ speedAlert: next }).catch(() => {});
+  };
+
   /**
    * Sharing only used to survive while this screen was in front. Ask once for
    * always-on so it keeps working in a pocket; declining is a valid answer and
@@ -424,9 +510,13 @@ export default function FamilySpaceScreen() {
     const nameById = new Map(members.map((m) => [m.id, m.name]));
     return Object.entries(presences).map(([uid, p]) => ({
       id: uid, name: uid === me?.id ? 'You' : (nameById.get(uid) || 'Member'),
-      lat: p.pos.lat, lng: p.pos.lng, battery: p.battery, self: uid === me?.id, stale: now - p.ts > STALE_MS,
+      lat: p.pos.lat, lng: p.pos.lng, battery: p.battery, self: uid === me?.id,
+      // A sharing-off member's last-known dot renders dimmed, never live.
+      stale: now - p.ts > STALE_MS || !!p.sharingOff,
     }));
-  }, [presences, members, me?.id]);
+  // `tick` keeps the stale fade honest when no new ping ever arrives.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presences, members, me?.id, tick]);
 
   // Members this device has no position for.
   //
@@ -517,14 +607,24 @@ export default function FamilySpaceScreen() {
     const mine = runs.find((r) => r.driverId === me.id && r.status === 'started');
     if (!mine) return;
     droveOnce.current = true;
-    router.push({ pathname: '/space-run-driver' as any, params: { spaceId: active.id, runId: mine.id } });
+    router.push({ pathname: '/space-run-driver' as any, params: { spaceId: active.id, runId: mine.id, groupType: active.groupType ?? '' } });
   }, [runs, canDrive, canOps, active?.id, me?.id, router]);
   // Identity for this group's type — icon and accent drive the whole dashboard.
   const ident = groupIdentity(active ?? {});
   const liveCount = useMemo(() => {
     const now = Date.now();
-    return Object.values(presences).filter((p) => now - p.ts <= STALE_MS).length;
-  }, [presences]);
+    return Object.entries(presences).filter(([uid, p]) => {
+      // An explicit sharing-off never counts as live — neither another
+      // member's stop, nor my own switch being off. Without this the map
+      // tile said "1 sharing" while the board said "Location off 1" for the
+      // same person, which is exactly the disagreement the board exists to
+      // prevent (seen on device).
+      if (p.sharingOff) return false;
+      if (uid === me?.id && !share) return false;
+      return now - p.ts <= STALE_MS;
+    }).length;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presences, tick, share, me?.id]);
 
   // Contact picker: add someone straight from the phone's contacts.
   //
@@ -676,6 +776,35 @@ export default function FamilySpaceScreen() {
     const p = presences[m.id];
     const isMe = m.id === me?.id;
     const d = p && mine && !isMe ? dist(haversine(mine.pos, p.pos)) : null;
+    // Freshness tier for the row's caption (spec: LIVE / RECENT / STALE /
+    // UNAVAILABLE). A fix past the recent window is "Last known", never live.
+    //
+    // SILENCE IS NOT A REASON. For another member, this device only ever
+    // receives sealed pings — sharing-off, app-killed, offline, permission
+    // missing and no-GPS all look identical (nothing arrives), so the caption
+    // must not assert a cause ("Location off" accused people who were merely
+    // offline). For MYSELF the device does know which it is, and says so.
+    const fresh = freshnessOf(p?.ts, Date.now());
+    const band = speedBand(p?.speed);
+    const rowCaption = (isMe && !share)
+      // MY OWN row while sharing is off. The watcher keeps running so my dot
+      // stays on my own map — but the caption must never claim I am
+      // broadcasting. Found on device: the switch read OFF while this row
+      // still said LIVE, which is the one thing a sharing control must not do.
+      ? (p ? `Location sharing off · my last fix ${ago(p.ts)}` : 'Location sharing off')
+      : p?.sharingOff
+        // An EXPLICIT stop by ANOTHER member: the one silence whose reason we
+        // truly know — they said so. Last-known retained, never shown as LIVE.
+        ? `Location sharing off · last seen ${ago(p.ts)}`
+        : !p || fresh === 'unavailable'
+        ? (isMe
+          ? (!share ? 'Location sharing off'
+            : locDenied ? 'Location permission needed'
+              : 'Waiting for GPS fix…')
+          : 'No location received')
+        : fresh === 'stale'
+          ? `Last known · ${ago(p.ts)}`
+          : `${fresh === 'live' ? 'LIVE' : ago(p.ts)}${d ? ` · ${d} away` : ''}${band && band !== 'stationary' ? ' · moving' : ''}`;
     return (
       <Pressable
         key={m.id}
@@ -694,8 +823,8 @@ export default function FamilySpaceScreen() {
             <Text style={{ color: colors.text, fontWeight: '600' }} numberOfLines={1}>{isMe ? 'You' : m.name}</Text>
             {m.role === 'guardian' && <Ionicons name="star" size={11} color={colors.primary} />}
           </View>
-          <Text style={{ color: colors.textDim, fontSize: 12 }} numberOfLines={1}>
-            {p ? `${ago(p.ts)}${d ? ` · ${d} away` : ''}${p.speed && p.speed > 3 ? ' · moving' : ''}` : 'Location off'}
+          <Text style={{ color: fresh === 'live' ? colors.success : colors.textDim, fontSize: 12 }} numberOfLines={1}>
+            {rowCaption}
           </Text>
         </View>
         {p?.battery != null && (
@@ -741,7 +870,16 @@ export default function FamilySpaceScreen() {
       {/* The space's own name when there is one; otherwise the module's name.
           NOT "Family Space" — family is one type among sixteen, and a school
           transport space titled "Family Space" reads as a bug. */}
-      <Stack.Screen options={{ title: active?.name || 'Spaces', headerTitleAlign: 'center',
+      <Stack.Screen options={{
+        // headerShown is FALSE app-wide (root layout), so without opting back
+        // in this header — and with it the back chevron, the person-add invite
+        // button and the ⋯ manage-sheet trigger — simply never rendered on a
+        // device. Everything behind the sheet (rename, invitations, calendar,
+        // albums, privacy, leave/delete) was unreachable. Same fix as the
+        // space module's spaceHeader().
+        headerShown: true,
+        headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,
+        title: active?.name || 'Spaces', headerTitleAlign: 'center',
         // A way OUT. This screen is a hub people land on and then cannot leave
         // except with the system back gesture — which is not obvious, and on a
         // parent's phone the whole point is to move between their family and
@@ -904,6 +1042,54 @@ export default function FamilySpaceScreen() {
             </View>
           )}
 
+          {/* FAMILY NOW — member statuses derived ON THIS DEVICE (spec §31):
+              decrypted presences × this device's saved Places. The server
+              cannot read positions, so it cannot compute these; and a board
+              may only assert counts once the roster is actually known. Zero
+              rows are dropped rather than shown as a wall of noise — except
+              "No location", which is the honest count that keeps the rest in
+              context. */}
+          {(spaceFamily === 'family' || spaceFamily === 'generic') && membersLoaded && roster.length > 1 && (() => {
+            // My own entry counts as sharing-off when MY switch is off, so the
+            // board agrees with my row's caption instead of counting my
+            // private dot as one of the family's live members.
+            const forBoard = (me && !share && presences[me.id])
+              ? { ...presences, [me.id]: { ...presences[me.id], sharingOff: true } }
+              : presences;
+            const b = statusBoard(roster.map((m) => m.id), forBoard, places, Date.now());
+            const chips: { icon: string; label: string; n: number }[] = [
+              // Freshness first — LIVE / RECENT / last-known — then where
+              // people are. Same derivation as the rows and map markers, so
+              // the board can never disagree with them.
+              { icon: 'radio-outline', label: 'Live', n: b.live },
+              { icon: 'time-outline', label: 'Recent', n: b.recent },
+              { icon: 'moon-outline', label: 'Last known', n: b.stale },
+              { icon: 'eye-off-outline', label: 'Location off', n: b.sharingOff },
+              ...[...b.atPlace.entries()].filter(([, n]) => n > 0)
+                .map(([name, n]) => ({ icon: 'location', label: `At ${name}`, n })),
+              { icon: 'car-outline', label: 'Traveling', n: b.traveling },
+              { icon: 'walk-outline', label: 'Away', n: b.away },
+              { icon: 'cloud-offline-outline', label: 'No location', n: b.unavailable },
+            ].filter((c) => c.n > 0);
+            if (!chips.length) return null;
+            return (
+              <View style={[st.card, { backgroundColor: colors.card, borderColor: colors.border, marginBottom: 12 }]}>
+                <Text style={[st.secTitle, { color: colors.textDim, marginBottom: 8 }]}>
+                  {spaceFamily === 'family' ? 'FAMILY NOW' : 'RIGHT NOW'}
+                </Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                  {chips.map((c) => (
+                    <View key={c.label} style={[st.chip, { borderColor: colors.border, flexDirection: 'row', alignItems: 'center', gap: 5 }]}>
+                      <Ionicons name={c.icon as any} size={13} color={colors.primary} />
+                      <Text style={{ color: colors.text, fontSize: 12.5, fontWeight: '600' }}>{c.label}</Text>
+                      <Text style={{ color: colors.primary, fontSize: 12.5, fontWeight: '800' }}>{c.n}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            );
+          })()}
+
           {/* A SCHOOL, OFFICE OR CAB SPACE GETS ITS OWN SECTIONS.
               Not a different app — the same screen, the same header, switcher,
               map and members, with the middle band routed by space type. A
@@ -1047,7 +1233,7 @@ export default function FamilySpaceScreen() {
           {runs.filter((r) => canDrive && r.driverId === me?.id).map((r) => (
             <TouchableOpacity
               key={r.id}
-              onPress={() => router.push({ pathname: '/space-run-driver' as any, params: { spaceId: active!.id, runId: r.id } })}
+              onPress={() => router.push({ pathname: '/space-run-driver' as any, params: { spaceId: active!.id, runId: r.id, groupType: active!.groupType ?? '' } })}
               style={[st.card, { backgroundColor: colors.card, borderColor: colors.primary, flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 }]}
             >
               <View style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary + '22' }}>
@@ -1086,7 +1272,7 @@ export default function FamilySpaceScreen() {
               {runs.filter((r) => !(canDrive && r.driverId === me?.id)).map((r) => (
                 <TouchableOpacity
                   key={r.id}
-                  onPress={() => router.push({ pathname: '/space-run' as any, params: { spaceId: active!.id, runId: r.id } })}
+                  onPress={() => router.push({ pathname: '/space-run' as any, params: { spaceId: active!.id, runId: r.id, groupType: active!.groupType ?? '' } })}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 }}
                 >
                   <Ionicons
@@ -1360,6 +1546,19 @@ export default function FamilySpaceScreen() {
             <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-privacy' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: colors.border }]}>
               <Ionicons name="eye-off-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>What this group can see</Text>
             </TouchableOpacity>
+            {/* High-speed alert for MY OWN device (spec: speed alerts). Tap the
+                threshold to cycle it. Off by default; detected on this phone —
+                the server never sees a speed. */}
+            <View style={[st.mRow, { borderColor: colors.border }]}>
+              <Ionicons name="speedometer-outline" size={19} color={colors.primary} />
+              <Text style={[st.mTxt, { color: colors.text, flex: 1 }]}>High-speed alert</Text>
+              {speedAlert.enabled && (
+                <TouchableOpacity onPress={cycleSpeedThreshold} style={{ paddingHorizontal: 8 }}>
+                  <Text style={{ color: colors.primary, fontWeight: '800', fontSize: 13 }}>{speedAlert.thresholdKmh} km/h</Text>
+                </TouchableOpacity>
+              )}
+              <Switch value={speedAlert.enabled} onValueChange={toggleSpeedAlert} trackColor={{ true: colors.primary }} />
+            </View>
             <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/chat', params: { id: active.id } } as any); }} style={[st.mRow, { borderColor: colors.border }]}>
               <Ionicons name="chatbubbles" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Open circle chat</Text>
             </TouchableOpacity>
