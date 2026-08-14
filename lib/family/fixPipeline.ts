@@ -15,6 +15,7 @@ import { evaluateFences, isZoneActive, type Geofence } from './geofence';
 import { recordSample } from './history';
 import { recordAlert } from './alerts';
 import { isLowBattery } from './battery';
+import { shouldSpeedAlert, KMH_PER_MS } from './status';
 import { type LatLng } from '../nav/geo';
 
 // Lazy-required so activeFences() and the self-check stay clear of the
@@ -25,6 +26,10 @@ const storage = () => require('@react-native-async-storage/async-storage').defau
 const placeStore = () => require('./store') as typeof import('./store');
 
 const kInside = (cid: string) => `vc_family_inside_${cid}`;
+// Last time a high-speed alert fired for this circle. Persisted, like the
+// inside-set: one motorway drive must be one alert, including across a
+// background-task cold start.
+const kSpeedAt = (cid: string) => `vc_family_spdalert_${cid}`;
 
 export interface Fix {
   userId: string;
@@ -89,6 +94,28 @@ export async function processFix(circleId: string, fix: Fix, opts: ProcessOpts):
       text: `${fix.name}'s phone is at ${fix.battery}%`, at: fix.ts,
     });
   }
+
+  // High-speed alert — MY OWN device only, same edge-detection philosophy as
+  // geofences: the emitting device is the only thing that can read the speed.
+  // Opt-in, and debounced through a persisted timestamp so one drive is one
+  // alert. The announce path is the circle's, so recipients follow the same
+  // permissions as every other family announcement.
+  try {
+    const sa = (await placeStore().getSettings()).speedAlert;
+    if (sa?.enabled) {
+      const rawAt = await storage().getItem(kSpeedAt(circleId));
+      const lastAt = rawAt ? Number(rawAt) || null : null;
+      if (shouldSpeedAlert(fix.speed, sa.thresholdKmh, lastAt, fix.ts)) {
+        await storage().setItem(kSpeedAt(circleId), String(fix.ts));
+        const kmh = Math.round((fix.speed ?? 0) * KMH_PER_MS);
+        const text = `${fix.name} is moving at ${kmh} km/h`;
+        await recordAlert({
+          circleId, kind: 'overspeed', actorId: fix.userId, actorName: fix.name, text, at: fix.ts,
+        });
+        opts.announce?.(text);
+      }
+    }
+  } catch { /* a failed speed check must never block the fix fold */ }
 
   const fences = activeFences(opts.fences ?? await placeStore().getPlaces(circleId), new Date(fix.ts));
   if (!fences.length) return;
