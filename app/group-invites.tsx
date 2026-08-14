@@ -199,7 +199,10 @@ export default function GroupInvitesScreen() {
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, backgroundColor: colors.bg }}>
-      <Stack.Screen options={{ title: 'Add people', headerTitleAlign: 'center' }} />
+      <Stack.Screen options={{
+        headerShown: true, title: 'Add people', headerTitleAlign: 'center',
+        headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,
+      }} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
 
         <Text style={[st.h, { color: colors.text }]}>Add to {groupName}</Text>

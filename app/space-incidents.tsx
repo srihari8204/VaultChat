@@ -22,7 +22,7 @@ import {
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '../lib/theme';
+import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { Palette } from '../constants/theme';
 import { getIncidents, setIncidentStatus, getRuns, type Incident } from '../lib/spaces/api';
 import type { Run } from '../lib/spaces/runs';
@@ -38,8 +38,8 @@ const CATEGORY: Record<string, { label: string; icon: keyof typeof Ionicons.glyp
 };
 
 export default function SpaceIncidentsScreen() {
-  const { colors } = useTheme();
-  const params = useLocalSearchParams<{ spaceId?: string; name?: string }>();
+  const params = useLocalSearchParams<{ spaceId?: string; name?: string; groupType?: string }>();
+  const colors = useSpaceColors(params.groupType);
   const spaceId = String(params.spaceId || '');
 
   const [incidents, setIncidents] = useState<Incident[]>([]);
@@ -96,7 +96,7 @@ export default function SpaceIncidentsScreen() {
   if (loading) {
     return (
       <View style={[s.screen, s.centre]}>
-        <Stack.Screen options={{ title: 'Incidents' }} />
+        <Stack.Screen options={spaceHeader(colors, 'Incidents')} />
         <ActivityIndicator color={colors.primary} />
       </View>
     );
@@ -104,7 +104,7 @@ export default function SpaceIncidentsScreen() {
 
   return (
     <ScrollView style={s.screen} contentContainerStyle={s.body}>
-      <Stack.Screen options={{ title: params.name ? `${params.name} · Incidents` : 'Incidents' }} />
+      <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · Incidents` : 'Incidents')} />
 
       {ordered.length === 0 && (
         <View style={s.card}>

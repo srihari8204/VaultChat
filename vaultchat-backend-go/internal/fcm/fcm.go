@@ -59,7 +59,13 @@ func load() bool {
 		}
 	}
 	if len(raw) == 0 {
-		log.Println("[fcm] no service account — call wake-up push disabled")
+		// Not just calls. Chat-message push for every device that registered a
+		// native fcm_token goes through SendCallMessage too
+		// (routes.chatsSendMessagePush), so an absent service account silently
+		// disables ALL FCM push, not only call wake-ups. The old wording sent
+		// people looking at the call stack for a chat-notification outage.
+		log.Println("[fcm] NO SERVICE ACCOUNT — all FCM push disabled (chat messages AND call wake-ups). " +
+			"Set FIREBASE_SERVICE_ACCOUNT (inline JSON) or FIREBASE_SERVICE_ACCOUNT_FILE.")
 		return false
 	}
 	var s serviceAccount
@@ -86,8 +92,27 @@ func load() bool {
 		s.TokenURI = "https://oauth2.googleapis.com/token"
 	}
 	sa, saKey = &s, rk
+	// SAY SO WHEN IT WORKS, not only when it fails.
+	//
+	// This outage lasted because the only signal was a single negative line at
+	// boot: with push misconfigured the server looked healthy, sends returned
+	// {OK:false, Sent:0}, and nothing anywhere said push was off. An operator
+	// had no way to answer "is push armed?" short of reading the source.
+	//
+	// project_id only. It is not a secret — it ships inside every APK in
+	// google-services.json — and it is the one field that catches the mistake
+	// worth catching: a service account for the WRONG Firebase project
+	// authenticates perfectly and then silently delivers to nobody.
+	log.Printf("[fcm] enabled=true project=%s", s.ProjectID)
 	return true
 }
+
+// Warm forces credential loading at startup instead of on the first send, so
+// the line above appears at boot. Without it the state stays unknown until
+// someone happens to send a message — which is the whole problem.
+//
+// Returns whether push is armed; callers may ignore it, the log is the point.
+func Warm() bool { return load() }
 
 func accessToken() (string, error) {
 	mu.Lock()

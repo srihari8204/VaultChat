@@ -114,6 +114,13 @@ async function connect(): Promise<Socket> {
     perf.setConnState('connected');
     perf.mark('socket_connect', { transport: tname });
     noteConnectSuccess();   // clears any "can't connect" state
+    // RE-JOIN CHAT ROOMS. The server joins a fresh socket only to user:<uid>;
+    // every chat-room membership dies with the old server-side session on
+    // reconnect, and nothing else re-establishes it — so live location,
+    // typing and every other room-fanout event silently stopped arriving
+    // after any reconnect until the screen was re-entered. Found on two
+    // physical devices that could each see themselves and never each other.
+    for (const id of joinedChatRooms) s.emit('join_chat', { chatId: id });
     try {
       (s as any).io?.engine?.on('upgrade', (t: any) => {
         perf.setTransport(t?.name ?? 'unknown');
@@ -159,6 +166,9 @@ export function disconnect(): void {
   }
   connecting = null;
   // Keep persistentListeners — they must re-arm on the next (re-login) socket.
+  // Drop the room set: a different account must not inherit this one's rooms;
+  // live screens re-join on mount.
+  joinedChatRooms.clear();
 }
 
 /**
@@ -203,11 +213,19 @@ export async function emit(event: string, data?: any): Promise<void> {
   s.emit(event, data);
 }
 
+// Rooms that must survive reconnection — the client-side twin of
+// persistentListeners. Listeners survive a socket swap because we re-attach
+// them; room membership lives on the SERVER's per-connection session and must
+// be re-requested, which the connect handler above does from this set.
+const joinedChatRooms = new Set<string>();
+
 // Convenience wrappers for the most common chat events.
 export async function joinChatRoom(chatId: string): Promise<void> {
+  joinedChatRooms.add(String(chatId));
   await emit('join_chat', { chatId });
 }
 export async function leaveChatRoom(chatId: string): Promise<void> {
+  joinedChatRooms.delete(String(chatId));
   await emit('leave_chat', { chatId });
 }
 export async function emitTypingStart(chatId: string, uid: string): Promise<void> {

@@ -72,12 +72,29 @@ export function isOperational(groupType: string | null | undefined): boolean {
   return f === 'school' || f === 'office' || f === 'transport';
 }
 
+/**
+ * Which spaces render the Business design system (blue-on-navy, dark-only).
+ *
+ * ONLY office and cab-fleet spaces. A family, school or generic space keeps the
+ * app-wide theme — a Family space rendering Business chrome is a bug, which is
+ * why this decision lives here in the pure module (self-checked below, and by
+ * scripts/check-space-identity.ts) rather than inline in a hook.
+ */
+export function usesBusinessTheme(groupType: string | null | undefined): boolean {
+  const f = familyOf(groupType);
+  return f === 'office' || f === 'transport';
+}
+
+// Routes here must be REAL screens. 'sos' and 'members' pointed at
+// /family-sos and /family-members for months — files that never existed —
+// harmlessly only because the family dashboard renders its own tiles instead
+// of these sections. The self-check now covers family/generic too.
 const FAMILY: SpaceSection[] = [
   { key: 'map', label: 'Live map', hint: 'Where everyone is, right now', icon: 'map-outline', route: '/family-map', usesLocation: true },
-  { key: 'sos', label: 'SOS', hint: 'Alert your circle immediately', icon: 'warning-outline', route: '/family-sos', usesLocation: true },
+  { key: 'sos', label: 'SOS', hint: 'Alert your circle immediately', icon: 'warning-outline', route: '/emergency-sos', usesLocation: true },
   { key: 'checkin', label: 'Check in', hint: 'Let everyone know you are safe', icon: 'hand-left-outline', route: '/space-checkin' },
   { key: 'places', label: 'Safe zones', hint: 'Places that matter', icon: 'location-outline', route: '/family-places', usesLocation: true },
-  { key: 'members', label: 'Members', hint: 'Who is in this circle', icon: 'people-outline', route: '/family-members' },
+  { key: 'members', label: 'Members', hint: 'Who is in this circle', icon: 'people-outline', route: '/group-members' },
   { key: 'alerts', label: 'Alerts', hint: 'Arrivals, departures and warnings', icon: 'notifications-outline', route: '/family-alerts' },
   { key: 'history', label: 'History', hint: 'Where everyone has been', icon: 'time-outline', route: '/family-history', usesLocation: true },
 ];
@@ -119,7 +136,7 @@ const TRANSPORT: SpaceSection[] = [
 const GENERIC: SpaceSection[] = [
   { key: 'map', label: 'Live map', hint: 'Where everyone is, right now', icon: 'map-outline', route: '/family-map', usesLocation: true },
   { key: 'checkin', label: 'Check in', hint: 'Let everyone know you are safe', icon: 'hand-left-outline', route: '/space-checkin' },
-  { key: 'members', label: 'Members', hint: 'Who is in this space', icon: 'people-outline', route: '/family-members' },
+  { key: 'members', label: 'Members', hint: 'Who is in this space', icon: 'people-outline', route: '/group-members' },
   { key: 'alerts', label: 'Alerts', hint: 'What has been happening', icon: 'notifications-outline', route: '/family-alerts' },
 ];
 
@@ -261,6 +278,26 @@ if (require.main === module) {
 
   eq(isOperational('school'), true, 'school runs vehicles');
   eq(isOperational('family'), false, 'a family does not');
+
+  // FAMILY IS NOT BUSINESS. The theme gate must never send a family, school or
+  // generic space to the Business skin, and must always send office/transport
+  // there. This is the regression that once showed a family space in Business
+  // chrome — it stays pinned.
+  for (const t of ['family', 'school', 'school_transport', 'friends', 'generic', null, undefined, 'something_new']) {
+    if (usesBusinessTheme(t)) throw new Error(`${t} must never render the Business theme`);
+  }
+  for (const t of ['office', 'business', 'colleagues', 'office_transport']) {
+    if (!usesBusinessTheme(t)) throw new Error(`${t} must render the Business theme`);
+  }
+  // ...and the family sections must never route into employee-monitoring
+  // screens, nor business sections into family ones.
+  const bizOnly = new Set(['/space-people', '/space-overview', '/space-ops-map', '/space-tasks', '/space-leave', '/space-visitors']);
+  for (const s of sectionsFor('family', all)) {
+    if (bizOnly.has(s.route)) throw new Error(`family section ${s.key} routes into a business screen`);
+  }
+  for (const s of sectionsFor('business', all)) {
+    if (s.route.startsWith('/family')) throw new Error(`business section ${s.key} routes into a family screen`);
+  }
 
   if (memberHeading('school') === memberHeading('family')) throw new Error('headings must be type-aware');
   if (!memberHeading('business').length) throw new Error('every type needs a heading');

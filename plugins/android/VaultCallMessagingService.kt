@@ -19,9 +19,12 @@ import android.media.AudioManager
 import android.media.RingtoneManager
 import android.os.Build
 import android.os.PowerManager
+import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.facebook.react.HeadlessJsTaskService
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
+import com.vaultchat.app.sync.VaultChatSyncService
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlin.concurrent.thread
@@ -68,7 +71,39 @@ class VaultCallMessagingService : FirebaseMessagingService() {
         when (data["type"]) {
             "incoming_call" -> showIncoming(data)
             "call_cancelled" -> handleCancel(data["callId"])
-            "message" -> showMessage(data)
+            "message" -> {
+                // A notification alone left the sender on ONE TICK: nothing
+                // synced and nothing was acknowledged until the user opened the
+                // app. Wake the JS sync first, then draw the notification.
+                if (!isAppForeground()) startBackgroundSync(data)
+                showMessage(data)
+            }
+        }
+    }
+
+    /**
+     * Hand the push to lib/syncBackground.ts, which drains the delta through the
+     * existing sync engine and acknowledges delivery only after the rows are on
+     * disk. This class stays out of the sync itself on purpose.
+     *
+     * Foreground is the caller's check: the app is already syncing over its
+     * socket, and HeadlessJsTaskService refuses to start in the foreground.
+     *
+     * Failure here must never cost the notification, so it is best-effort. If
+     * Android refuses the background start the user still sees the message and
+     * the next ordinary sync collects it — FCM is a wake-up, not the source of
+     * truth.
+     */
+    private fun startBackgroundSync(data: Map<String, String>) {
+        try {
+            val intent = Intent(this, VaultChatSyncService::class.java)
+            for ((k, v) in data) intent.putExtra(k, v)
+            startService(intent)
+            // Keeps the CPU up between startService() and the JS task actually
+            // taking its own wake lock; released by HeadlessJsTaskService.
+            HeadlessJsTaskService.acquireWakeLockNow(this)
+        } catch (t: Throwable) {
+            Log.w("VaultChatSync", "background sync start refused: ${t.javaClass.simpleName}")
         }
     }
 

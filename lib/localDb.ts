@@ -338,10 +338,24 @@ export async function cacheMessages(chatId: string, msgs: Message[]): Promise<vo
            meta        = COALESCE(excluded.meta, messages.meta),
            created_at  = excluded.created_at,
            edited_at   = excluded.edited_at,
-           deleted_at  = excluded.deleted_at,
+           -- A local delete is STICKY. "Delete for me" never leaves the device,
+           -- so the server keeps returning the row with deleted_at NULL — and
+           -- an unconditional assignment here un-deleted it again on the next
+           -- re-fetch (pagination, an empty-cache refetch, the delta lookback).
+           -- The message reappeared and the user had to delete it twice.
+           -- COALESCE keeps ours; a genuine remote delete still lands, because
+           -- in that case the local value is NULL and excluded's is not.
+           deleted_at  = COALESCE(messages.deleted_at, excluded.deleted_at),
            expires_at  = excluded.expires_at`,
         [
-          m.id, chatId, (m as any).senderId ?? null, m.type ?? null, encField(m.content ?? null),
+          // Never let an unopened envelope overwrite plaintext we already hold.
+          // COALESCE above only guards NULL, and a failed decrypt leaves the
+          // ciphertext in place — so re-caching a row we once read but cannot
+          // read today (rotated identity, missing sender key) replaced good
+          // plaintext with a blob, and dropped it from the search index too.
+          // Writing NULL instead keeps whatever is already on disk.
+          m.id, chatId, (m as any).senderId ?? null, m.type ?? null,
+          encField(looksLikeEnvelope(m.content) ? null : (m.content ?? null)),
           m.replyToId ?? null, encField(m.meta != null ? JSON.stringify(m.meta) : null),
           m.createdAt ?? null, m.editedAt ?? null, m.deletedAt ?? null, (m as any).expiresAt ?? null,
         ],
@@ -373,6 +387,98 @@ export async function getCachedMessages(chatId: string, limit = 50): Promise<Mes
     [chatId, limit],
   );
   return rows.map(rowToMessage);
+}
+
+/**
+ * The page of messages OLDER than `before`, newest-first.
+ *
+ * Scroll-back had no local reader at all: every page-up went to the server and
+ * re-decrypted rows this device already held in plaintext, on every visit to
+ * every chat, forever. A chat with 300 cached rows re-downloaded 250 of them
+ * per scroll — and offline it simply dead-ended, because the only path to older
+ * messages was a network call.
+ *
+ * pruneMessageCache keeps 300 rows per chat, so this answers the first several
+ * pages from disk and the caller falls through to the server only past the
+ * cache horizon.
+ */
+export async function getCachedMessagesBefore(
+  chatId: string, before: number, limit = 50,
+): Promise<Message[]> {
+  const db = await getLocalDb();
+  const rows = await db.getAllAsync(
+    `SELECT * FROM messages
+      WHERE chat_id = ? AND id < ? AND deleted_at IS NULL
+      ORDER BY id DESC LIMIT ?`,
+    [chatId, before, limit],
+  );
+  return rows.map(rowToMessage);
+}
+
+/** The page of messages NEWER than `after`, oldest-first (forward paging). */
+export async function getCachedMessagesAfter(
+  chatId: string, after: number, limit = 50,
+): Promise<Message[]> {
+  const db = await getLocalDb();
+  const rows = await db.getAllAsync(
+    `SELECT * FROM messages
+      WHERE chat_id = ? AND id > ? AND deleted_at IS NULL
+      ORDER BY id ASC LIMIT ?`,
+    [chatId, after, limit],
+  );
+  return rows.map(rowToMessage);
+}
+
+/**
+ * A window centred on `around` — the message itself plus `radius` either side,
+ * newest-first like the inverted list. Lets a jump-to-message (search hit,
+ * reply target, notification tap) land from disk instead of paging the server
+ * back to it one request at a time.
+ */
+export async function getCachedMessagesAround(
+  chatId: string, around: number, radius = 25,
+): Promise<Message[]> {
+  const [older, newerAndSelf] = await Promise.all([
+    getCachedMessagesBefore(chatId, around, radius),
+    (async () => {
+      const db = await getLocalDb();
+      const rows = await db.getAllAsync(
+        `SELECT * FROM messages
+          WHERE chat_id = ? AND id >= ? AND deleted_at IS NULL
+          ORDER BY id ASC LIMIT ?`,
+        [chatId, around, radius + 1],
+      );
+      return rows.map(rowToMessage);
+    })(),
+  ]);
+  // newerAndSelf is oldest-first; the caller wants one newest-first run.
+  return [...newerAndSelf.reverse(), ...older];
+}
+
+/**
+ * Whether older messages exist on disk — so a caller can decide between the
+ * cache and the network WITHOUT paying for a page it may not use, and so
+ * `hasMore` can be answered offline instead of guessing from a page size.
+ */
+export async function hasCachedOlderMessages(chatId: string, before: number): Promise<boolean> {
+  const db = await getLocalDb();
+  const row = await db.getFirstAsync(
+    `SELECT 1 AS x FROM messages
+      WHERE chat_id = ? AND id < ? AND deleted_at IS NULL LIMIT 1`,
+    [chatId, before],
+  );
+  return !!row;
+}
+
+/** Mirror of the above, forward. */
+export async function hasCachedNewerMessages(chatId: string, after: number): Promise<boolean> {
+  const db = await getLocalDb();
+  const row = await db.getFirstAsync(
+    `SELECT 1 AS x FROM messages
+      WHERE chat_id = ? AND id > ? AND deleted_at IS NULL LIMIT 1`,
+    [chatId, after],
+  );
+  return !!row;
 }
 
 /**
@@ -653,9 +759,25 @@ export async function markCachedDeleted(chatId: string, id: number): Promise<voi
 
 /** Cache the chat-list summaries so the chat list renders instantly too. */
 export async function cacheChats(chats: Array<{ id: string; lastMessageAt?: string | null }>): Promise<void> {
-  if (!chats?.length) return;
+  // Nullish = no answer, leave the cache alone. An EMPTY array is a real answer
+  // ("you have no visible chats") and must still prune.
+  if (!chats) return;
   const db = await getLocalDb();
   await db.withTransactionAsync(async () => {
+    // The table was append-only, so a chat the user deleted stayed cached
+    // forever and was repainted from disk on every cold start — before the
+    // network answer replaced it. The card came back, every launch.
+    //
+    // The sole caller passes the authoritative non-hidden list on its success
+    // path, so anything absent from it is genuinely gone and can be dropped.
+    // A failed fetch never reaches here, so an offline start prunes nothing.
+    const ids = chats.map(c => c.id);
+    if (ids.length) {
+      await db.runAsync(
+        `DELETE FROM chats WHERE id NOT IN (${ids.map(() => '?').join(',')})`, ids);
+    } else {
+      await db.runAsync(`DELETE FROM chats`);
+    }
     for (const c of chats) {
       await db.runAsync(
         `INSERT OR REPLACE INTO chats (id, data, last_message_at) VALUES (?, ?, ?)`,

@@ -17,6 +17,12 @@ export type DisplayMessage = Message & {
   _tempId?: string;
   _state?: 'pending' | 'failed';
   _error?: string;
+  /**
+   * Every message in this album, oldest-first, when several media were picked
+   * in one action. Present only on the row that stands in for the group; the
+   * members remain independent messages with their own ids and delivery state.
+   */
+  _album?: DisplayMessage[];
 };
 
 export function useS() {

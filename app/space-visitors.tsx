@@ -20,7 +20,7 @@ import {
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '../lib/theme';
+import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { Palette } from '../constants/theme';
 import {
   getVisitorPasses, issueVisitorPass, redeemVisitorPass, type VisitorPass,
@@ -29,8 +29,8 @@ import {
 const HOURS = [2, 4, 8, 24];
 
 export default function SpaceVisitorsScreen() {
-  const { colors } = useTheme();
-  const params = useLocalSearchParams<{ spaceId?: string; name?: string }>();
+  const params = useLocalSearchParams<{ spaceId?: string; name?: string; groupType?: string }>();
+  const colors = useSpaceColors(params.groupType);
   const spaceId = String(params.spaceId || '');
 
   const [passes, setPasses] = useState<VisitorPass[]>([]);
@@ -111,7 +111,7 @@ export default function SpaceVisitorsScreen() {
   if (loading) {
     return (
       <View style={[s.screen, s.centre]}>
-        <Stack.Screen options={{ title: 'Visitors' }} />
+        <Stack.Screen options={spaceHeader(colors, 'Visitors')} />
         <ActivityIndicator color={colors.primary} />
       </View>
     );
@@ -121,7 +121,7 @@ export default function SpaceVisitorsScreen() {
     <View style={s.screen}>
       <Stack.Screen
         options={{
-          title: params.name ? `${params.name} · Visitors` : 'Visitors',
+          ...spaceHeader(colors, params.name ? `${params.name} · Visitors` : 'Visitors'),
           headerRight: () => (
             <TouchableOpacity onPress={() => setIssuing(true)} style={{ paddingHorizontal: 8 }}>
               <Ionicons name="add" size={24} color={colors.primary} />

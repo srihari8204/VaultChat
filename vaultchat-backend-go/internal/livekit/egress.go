@@ -61,7 +61,11 @@ func s3FromEnv() S3Target {
 		Secret:    firstNonEmpty(os.Getenv("S3_SECRET_KEY"), os.Getenv("MINIO_PASS")),
 		Bucket:    firstNonEmpty(os.Getenv("BROADCAST_BUCKET"), "vaultchat-broadcast"),
 		Endpoint:  firstNonEmpty(os.Getenv("S3_ENDPOINT"), "http://minio:9000"),
-		Region:    firstNonEmpty(os.Getenv("S3_REGION"), "us-east-1"),
+		// "auto" matches storage.go:50, user.go and vaultbeam.go. R2 requires
+		// it; MinIO ignores region entirely, so this is safe in both. Left at
+		// us-east-1 the two halves would sign segment writes under different
+		// SigV4 credential scopes against the same bucket.
+		Region: firstNonEmpty(os.Getenv("S3_REGION"), "auto"),
 	}
 }
 
@@ -81,13 +85,30 @@ func (t S3Target) ok() bool { return t.AccessKey != "" && t.Secret != "" && t.Bu
 // the bucket name is hidden by the proxy so storage layout can change without
 // breaking links already given to viewers.
 func PlaybackBase() string {
-	return strings.TrimRight(firstNonEmpty(os.Getenv("BROADCAST_CDN_BASE"), "https://stream.corefinite.com"), "/")
+	// Default to this deployment's own API origin, not a CDN host.
+	//
+	// The previous default, https://stream.corefinite.com, is configured
+	// NOWHERE in this repo — not a Caddy route, not a compose service, and
+	// blank in .env.example. On a clean deploy every broadcast therefore
+	// resolved to a host nobody controls and failed at the player even when
+	// egress was perfectly healthy.
+	//
+	// The relay in routes/broadcast_hls.go serves playback from this origin, so
+	// the sane default is the origin we know exists. BROADCAST_CDN_BASE still
+	// wins when a real CDN is put in front.
+	return strings.TrimRight(firstNonEmpty(
+		os.Getenv("BROADCAST_CDN_BASE"),
+		os.Getenv("PUBLIC_BASE_URL"),
+		"https://api.corefinite.com",
+	), "/")
 }
 
 // PlaybackURL is deterministic, so it can be stored the moment egress starts
 // rather than waiting for a callback that may never arrive.
 func PlaybackURL(broadcastID string) string {
-	return fmt.Sprintf("%s/%s/index.m3u8", PlaybackBase(), broadcastID)
+	// Routed through the API relay so the bucket can stay private. The caller
+	// (routes.broadcastHLSURL) appends the access ticket.
+	return fmt.Sprintf("%s/broadcasts/%s/hls/index.m3u8", PlaybackBase(), broadcastID)
 }
 
 // egressToken mints a credential for the egress service itself.

@@ -32,7 +32,7 @@ import {
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '../lib/theme';
+import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { Palette } from '../constants/theme';
 import { getRuns, getRun } from '../lib/spaces/api';
 import type { Run, RunStop, RunRider } from '../lib/spaces/runs';
@@ -79,11 +79,11 @@ function clockOf(iso: string | null): string {
 }
 
 export default function SpaceTransportScreen() {
-  const { colors } = useTheme();
   const router = useRouter();
   const params = useLocalSearchParams<{
     spaceId?: string; name?: string; groupType?: string; perms?: string;
   }>();
+  const colors = useSpaceColors(params.groupType);
   const spaceId = String(params.spaceId || '');
   const spaceName = String(params.name || 'This space');
   const kindWord = familyOf(params.groupType) === 'school' ? 'bus' : 'vehicle';
@@ -137,7 +137,7 @@ export default function SpaceTransportScreen() {
       contentContainerStyle={s.body}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
     >
-      <Stack.Screen options={{ title: `${spaceName} · Transport` }} />
+      <Stack.Screen options={spaceHeader(colors, `${spaceName} · Transport`)} />
 
       {loaded === null && (
         <View style={s.centre}>
@@ -246,7 +246,7 @@ export default function SpaceTransportScreen() {
             <View style={s.actions}>
               {/* The live map reads the same sealed stream everyone else does. */}
               <TouchableOpacity
-                onPress={() => router.push({ pathname: '/space-run' as any, params: { spaceId, runId: run.id, name: spaceName } })}
+                onPress={() => router.push({ pathname: '/space-run' as any, params: { spaceId, runId: run.id, name: spaceName, groupType: params.groupType ?? '' } })}
                 style={[s.btn, { backgroundColor: colors.primary, flex: 1 }]}
               >
                 <Ionicons name="map-outline" size={16} color="#fff" />

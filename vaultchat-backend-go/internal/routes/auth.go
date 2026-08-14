@@ -1756,9 +1756,46 @@ func authProfilePhoto(w http.ResponseWriter, r *http.Request) {
 		}
 		keyCipher = &c
 	}
-	if _, err := db.Pool.Exec(ctx,
-		`UPDATE users SET photo_url = $1, photo_key_cipher = $2, updated_at = NOW() WHERE id = $3`,
-		photoID, keyCipher, user.ID); err != nil {
+	// Safe replacement: verify the new object, move the reference, and only
+	// then retire the old one. See attachment_lifecycle.go for why the order is
+	// the entire contract — every failure path below leaves the EXISTING photo
+	// in place rather than losing both.
+	//
+	// This also classifies the object server-side as 'profile', which is what
+	// makes an upload from a client that sends no `purpose` land in the right
+	// class instead of 'unknown'.
+	newID := ""
+	if photoID != nil {
+		newID = *photoID
+	}
+	err := attSwapRef(ctx, user.ID, newID, "profile",
+		func(c context.Context, tx pgx.Tx) (string, error) {
+			var prev *string
+			e := tx.QueryRow(c, `SELECT photo_url FROM users WHERE id = $1`, user.ID).Scan(&prev)
+			if prev == nil {
+				return "", e
+			}
+			return *prev, e
+		},
+		func(c context.Context, tx pgx.Tx, id string) error {
+			var ref any
+			if id != "" {
+				ref = id
+			}
+			_, e := tx.Exec(c,
+				`UPDATE users SET photo_url = $1, photo_key_cipher = $2, updated_at = NOW() WHERE id = $3`,
+				ref, keyCipher, user.ID)
+			return e
+		})
+	if err != nil {
+		if db.NoRows(err) {
+			// The new id is not an unpurged attachment owned by this user.
+			// Refused rather than stored, so a caller cannot point their avatar
+			// at another user's object.
+			authEnvErr(w, 400, "invalid_photo", "That photo is not available")
+			return
+		}
+		log.Printf("[profile photo] %v", err)
 		authEnvErr(w, 500, "server_error", "Could not save photo")
 		return
 	}

@@ -37,7 +37,10 @@ export default function FamilySetupScreen() {
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, backgroundColor: colors.bg }}>
-      <Stack.Screen options={{ title: 'Family Circle', headerTitleAlign: 'center' }} />
+      <Stack.Screen options={{
+        headerShown: true, title: 'Family Circle', headerTitleAlign: 'center',
+        headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,
+      }} />
       <ScrollView contentContainerStyle={st.wrap} keyboardShouldPersistTaps="handled">
         <View style={[st.hero, { backgroundColor: colors.primary + '14' }]}>
           <Ionicons name="people-circle" size={44} color={colors.primary} />

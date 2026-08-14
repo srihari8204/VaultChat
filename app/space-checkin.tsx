@@ -21,7 +21,7 @@ import {
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '../lib/theme';
+import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { Palette } from '../constants/theme';
 import {
   getAttendance, checkIn, checkOut, getLeave, requestLeave, decideLeave,
@@ -37,9 +37,17 @@ const LEAVE_KINDS: { key: string; label: string }[] = [
 ];
 
 export default function SpaceCheckinScreen() {
-  const { colors } = useTheme();
-  const params = useLocalSearchParams<{ spaceId?: string; name?: string }>();
+  const params = useLocalSearchParams<{ spaceId?: string; name?: string; groupType?: string; perms?: string }>();
+  const colors = useSpaceColors(params.groupType);
   const spaceId = String(params.spaceId || '');
+
+  // Presentation gate only — the PATCH re-checks it. Drawing Approve/Decline
+  // for someone the server will refuse teaches them to distrust the app
+  // (Business design rule: only an eligible approver sees the buttons).
+  const canDecide = useMemo(
+    () => String(params.perms || '').split(',').includes('view_space_ops'),
+    [params.perms],
+  );
 
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [leave, setLeave] = useState<LeaveRequest[]>([]);
@@ -115,7 +123,7 @@ export default function SpaceCheckinScreen() {
   if (loading) {
     return (
       <View style={[s.screen, s.centre]}>
-        <Stack.Screen options={{ title: 'Attendance' }} />
+        <Stack.Screen options={spaceHeader(colors, 'Attendance')} />
         <ActivityIndicator color={colors.primary} />
       </View>
     );
@@ -123,7 +131,7 @@ export default function SpaceCheckinScreen() {
 
   return (
     <ScrollView style={s.screen} contentContainerStyle={s.body}>
-      <Stack.Screen options={{ title: params.name ? `${params.name} · Attendance` : 'Attendance' }} />
+      <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · Attendance` : 'Attendance')} />
 
       {/* Design screen 9: the day's own state, big. */}
       <View style={[s.card, s.hero]}>
@@ -186,10 +194,10 @@ export default function SpaceCheckinScreen() {
                   <Text style={[s.link, { color: colors.textDim }]}>Withdraw</Text>
                 </TouchableOpacity>
               )}
-              {/* Approve/Reject appear for everyone, and the server refuses them
-                  for anyone who does not run the space — the buttons are drawn
-                  from the same list because the decision is the server's. */}
-              {l.status === 'pending' && l.userId !== me && (
+              {/* Only an eligible approver gets the buttons, and never on their
+                  own request — the server enforces both, this just stops the
+                  screen drawing an action that always fails. */}
+              {canDecide && l.status === 'pending' && l.userId !== me && (
                 <View style={{ flexDirection: 'row', gap: 10 }}>
                   <TouchableOpacity onPress={() => decide(l, 'rejected')} disabled={busy}>
                     <Ionicons name="close-circle-outline" size={21} color={colors.danger} />

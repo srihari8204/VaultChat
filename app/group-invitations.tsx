@@ -64,8 +64,13 @@ export default function GroupInvitationsScreen() {
       await load();
       if (res.joined) {
         // Straight in: take them there. Anything less makes the group they just
-        // joined something they have to go and find.
+        // joined something they have to go and find. The privacy sheet rides on
+        // top so the FIRST thing a new member decides is what this group may
+        // see of them — joining must never silently start location sharing
+        // (sharing is off until they flip it themselves; this makes that
+        // choice visible instead of buried in settings).
         router.push({ pathname: '/family' as any, params: { groupId: res.chatId } });
+        router.push({ pathname: '/group-privacy' as any, params: { groupId: res.chatId, name: inv.name ?? '' } });
       } else {
         Alert.alert(
           'Waiting for approval',
@@ -175,7 +180,10 @@ export default function GroupInvitationsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <Stack.Screen options={{ title: 'Invitations', headerTitleAlign: 'center' }} />
+      <Stack.Screen options={{
+        headerShown: true, title: 'Invitations', headerTitleAlign: 'center',
+        headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,
+      }} />
 
       {loading ? (
         <View style={st.center}><ActivityIndicator color={colors.primary} /></View>

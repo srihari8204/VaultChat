@@ -207,10 +207,18 @@ export async function unregisterPushToken(): Promise<void> {
 export function attachTapHandler(
   onOpenChat: (chatId: string) => void,
   onCall?: (data: any, action: string) => void,
+  onMembership?: (event: string, chatId: string) => void,
 ): () => void {
   const sub = Notifications.addNotificationResponseReceivedListener((response) => {
     const data: any = response.notification.request.content.data;
     if (data?.type === 'call') { onCall?.(data, response.actionIdentifier); return; }
+    // A membership push ("Group invitation", "You are in") must NOT fall into
+    // the chat fallback below: the invitee is not a member yet, so /chat?id=
+    // opens a group they cannot read. Route it to the invitations flow.
+    if (data?.type === 'membership') {
+      onMembership?.(String(data.event ?? ''), String(data.chatId ?? ''));
+      return;
+    }
     if (data?.chatId) onOpenChat(String(data.chatId));
   });
   return () => sub.remove();

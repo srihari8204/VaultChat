@@ -22,7 +22,7 @@ import {
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '../lib/theme';
+import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { Palette } from '../constants/theme';
 import FamilyMap, { type FamilyMarker } from '../components/family/FamilyMap';
 import { getRuns, getRun } from '../lib/spaces/api';
@@ -36,9 +36,9 @@ import { getCurrentUserAsync } from './(constants)/authService';
 const STALE_MS = 90_000;
 
 export default function SpaceOpsMapScreen() {
-  const { colors } = useTheme();
   const router = useRouter();
   const params = useLocalSearchParams<{ spaceId?: string; name?: string; groupType?: string }>();
+  const colors = useSpaceColors(params.groupType);
   const spaceId = String(params.spaceId || '');
 
   const [runs, setRuns] = useState<Run[]>([]);
@@ -194,7 +194,7 @@ export default function SpaceOpsMapScreen() {
   if (loading) {
     return (
       <View style={[s.screen, s.centre]}>
-        <Stack.Screen options={{ title: 'Operations' }} />
+        <Stack.Screen options={spaceHeader(colors, 'Operations')} />
         <ActivityIndicator color={colors.primary} />
       </View>
     );
@@ -202,7 +202,7 @@ export default function SpaceOpsMapScreen() {
 
   return (
     <View style={s.screen}>
-      <Stack.Screen options={{ title: params.name ? `${params.name} · Operations` : 'Operations' }} />
+      <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · Operations` : 'Operations')} />
 
       <FamilyMap members={markers} focusId={focus} onSelect={setFocus} style={s.map} />
 
@@ -302,7 +302,7 @@ export default function SpaceOpsMapScreen() {
               key={r.id}
               style={[s.row, focus === r.id && s.rowFocus]}
               onPress={() => setFocus(r.id)}
-              onLongPress={() => router.push({ pathname: '/space-run' as any, params: { spaceId, runId: r.id } })}
+              onLongPress={() => router.push({ pathname: '/space-run' as any, params: { spaceId, runId: r.id, groupType: params.groupType ?? '' } })}
             >
               <View style={[s.dot, { backgroundColor: dotColour(r, noFix, colors) }]} />
               <View style={{ flex: 1, minWidth: 0 }}>

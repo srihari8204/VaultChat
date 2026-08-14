@@ -82,7 +82,10 @@ export default function GroupPrivacyScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <Stack.Screen options={{ title: 'Privacy', headerTitleAlign: 'center' }} />
+      <Stack.Screen options={{
+        headerShown: true, title: 'Privacy', headerTitleAlign: 'center',
+        headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,
+      }} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
 
         {/* live summary — what this group can see right now */}

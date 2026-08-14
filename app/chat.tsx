@@ -32,7 +32,10 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { consumePendingJump } from '../lib/chatJump';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { E2EE_ENABLED } from '../constants/flags';
-import { getCachedMessages, cacheMessages, applyMessage, markCachedDeleted, getCachedMessagesByIds, getCachedChat, clearChatMessages } from '../lib/localDb';
+import { getCachedMessages, getCachedMessagesBefore, cacheMessages, applyMessage, markCachedDeleted, getCachedMessagesByIds, getCachedChat, clearChatMessages } from '../lib/localDb';
+import { metric } from '../lib/syncMetrics';
+import { groupAlbums, resetAlbumCache } from '../lib/albumGrouping';
+import { mergeReactions } from '../lib/reactionMerge';
 import { saveDraft, getDraft, clearDraft } from '../lib/drafts';
 import { playSent, playReceived } from '../lib/sounds';
 import { NOTIF_CHANNELS } from '../lib/push';
@@ -139,6 +142,7 @@ import {
   enqueueEdit,
   enqueueDelete,
   initQueue,
+  noteDelivered as queueNoteDelivered,
   on as onQueue,
   pendingForChat,
   retry as queueRetry,
@@ -166,6 +170,16 @@ const TYPING_IDLE_MS = 2500;
 const REVOKE_WINDOW_MS = 60 * 60 * 60 * 1000;
 
 const PAGE_SIZE = 50;
+
+// MUST MATCH chatsEditWindowMS IN THE SERVER (routes/chats.go).
+//
+// The PATCH enforces this in its WHERE clause — `created_at > NOW() - INTERVAL`
+// — so past it the server returns 404 and there is nothing the client can do.
+// Offering Edit anyway is what made editing look broken: the change applied
+// optimistically, the PATCH 404'd, and the failure was swallowed (see the
+// rollback in the queue's 'failed' handler), so the text silently reverted on
+// the next sync with no error shown.
+const EDIT_WINDOW_MS = 15 * 60 * 1000;
 
 
 
@@ -234,7 +248,11 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       seen.add(k);
       out.push(m);
     }
-    return out;
+    // Collapse an album into ONE row. The rule lives in lib/albumGrouping so it
+    // can be executed by a test rather than only reviewed by eye; the bubble
+    // then lays the members out in a HORIZONTAL scroller, which is the only
+    // nesting direction safe inside this vertical list.
+    return groupAlbums(out);
   }, [messages]);
   const [loading,   setLoading]   = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -243,6 +261,14 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   const [sending,   setSending]   = useState(false);
   const [error,     setError]     = useState<string | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
+  // tempId → how to undo an optimistic edit the server then rejected.
+  //
+  // An edit has NO pending bubble: it is applied by message id, so the queue's
+  // 'failed' event (which the UI matches on _tempId) found nothing and the
+  // rejection was dropped on the floor. The user saw the edit stick, then
+  // watched it revert on the next sync with no explanation. This is what lets
+  // the failure handler put the original text back and say so.
+  const editRollbacks = useRef(new Map<string, { id: number; content: string | null; editedAt: string | null }>());
   const [typingUids, setTypingUids] = useState<Set<string>>(new Set());
   const [recording, setRecording] = useState(false);
   const [recElapsedMs, setRecElapsedMs] = useState(0);
@@ -315,28 +341,18 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   // Derive the per-message map here: the LATEST reaction per (target, sender)
   // wins (one reaction per user per message), 'remove' clears it. The dedup by
   // (target, sender) also makes optimistic + server rows collapse to one.
+  // Reaction summaries, with identity preserved across unrelated updates.
+  //
+  // The fold itself lives in lib/reactionMerge so it can be tested. The ref
+  // below is what makes it cheap: it hands the previous result back in, and any
+  // message whose reaction set did not change keeps its EXACT previous array —
+  // so the memo comparator skips it instead of re-rendering because something
+  // arrived elsewhere in the conversation.
+  const prevReactionsRef = useRef<Record<number, ReactionSummary[]>>({});
   const mergedReactions = useMemo(() => {
-    const latest = new Map<string, { at: string; emoji: string | null; mine: boolean; target: number }>();
-    for (const m of messages) {
-      if (m.type !== 'reaction' || !m.content || m.deletedAt) continue;
-      let p: any; try { p = JSON.parse(m.content); } catch { continue; }
-      const target = Number(p?.reactsTo);
-      if (!Number.isFinite(target) || target <= 0) continue;
-      const key = `${target}:${m.senderId}`;
-      const at = `${m.createdAt ?? ''}#${String(m.id ?? 0).padStart(12, '0')}`;
-      const prev = latest.get(key);
-      if (prev && prev.at >= at) continue;
-      latest.set(key, { at, emoji: p.op === 'remove' ? null : String(p.emoji || ''), mine: m.senderId === meId, target });
-    }
-    const out: Record<number, ReactionSummary[]> = {};
-    for (const v of latest.values()) {
-      if (!v.emoji) continue;
-      const list = out[v.target] ?? (out[v.target] = []);
-      const hit = list.find(r => r.emoji === v.emoji);
-      if (hit) { hit.count++; hit.mine = hit.mine || v.mine; }
-      else list.push({ emoji: v.emoji, count: 1, mine: v.mine });
-    }
-    return out;
+    const next = mergeReactions(messages as any, meId, prevReactionsRef.current);
+    prevReactionsRef.current = next;
+    return next;
   }, [messages, meId]);
   const [reactPicker, setReactPicker] = useState<DisplayMessage | null>(null);
   const [actionSheet, setActionSheet] = useState<{ msg: DisplayMessage; plain: string } | null>(null);
@@ -514,12 +530,17 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         // 3. Cached messages + still-in-flight outbox bubbles, painted instantly.
         //    knownPlain reuses already-decrypted text so we never re-decrypt.
         const knownPlain = new Map<number, string>();
+        // null (not []) on failure: a locked DB, an unavailable cache DEK or an
+        // op-sqlite throw is NOT "this device holds nothing". Collapsing the two
+        // sent us down the cold path below and re-downloaded a full page from
+        // the server — which, before the sticky-tombstone fix, also resurrected
+        // every message the user had deleted locally.
         const [cachedMsgs, pendingQ, mediaQ] = await Promise.all([
-          getCachedMessages(chatId, PAGE_SIZE).catch(() => []),
+          getCachedMessages(chatId, PAGE_SIZE).catch(() => null),
           pendingForChat(chatId).catch(() => []),
           mediaPendingForChat(chatId).catch(() => []),
         ]);
-        for (const m of cachedMsgs) if (!looksEncrypted(m.content)) knownPlain.set(m.id, m.content as string);
+        for (const m of (cachedMsgs ?? [])) if (!looksEncrypted(m.content)) knownPlain.set(m.id, m.content as string);
 
         const pendingBubbles = (pendingQ as any[]).map(q => ({
           id: 0, chatId: q.chatId, senderId: myId ?? '', type: q.type, content: q.plaintext,
@@ -535,8 +556,8 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         // Inverted list = newest first. Reversed ONCE, reused for the reconcile.
         const pendingNewestFirst = [...pendingBubbles, ...mediaBubbles]
           .sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt)).reverse();
-        if (cachedMsgs.length || pendingNewestFirst.length) {
-          setMessages([...pendingNewestFirst, ...cachedMsgs]);
+        if ((cachedMsgs?.length ?? 0) || pendingNewestFirst.length) {
+          setMessages([...pendingNewestFirst, ...(cachedMsgs ?? [])]);
           setLoading(false);
         }
 
@@ -558,14 +579,18 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           // The server is used only when this device holds NOTHING for the chat
           // (fresh install, or a chat never opened here), which is the one case
           // the cache genuinely cannot answer.
-          if (!cachedMsgs.length) {
+          // `cachedMsgs === null` means the cache could not be READ, not that it
+          // is empty — going to the server there would re-download a page this
+          // device already has, so we leave it alone and let the next open (or
+          // the delta sync) reconcile.
+          if (cachedMsgs !== null && !cachedMsgs.length) {
             const msgsRaw = await getMessages(chatId, { limit: PAGE_SIZE });
             const msgs = await hydrateMessages(chatId, msgsRaw, knownPlain);
             setMessages([...pendingNewestFirst, ...msgs]);
             setHasMore(msgs.length === PAGE_SIZE);
             cacheMessages(chatId, msgs).catch(() => {});   // persist for next instant open
           } else {
-            setHasMore(cachedMsgs.length >= PAGE_SIZE);
+            setHasMore((cachedMsgs?.length ?? 0) >= PAGE_SIZE);
           }
           setError(null);
         } catch {
@@ -585,6 +610,9 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     if (!chatId) return;
     const offSent = onQueue('sent', ({ tempId, chatId: cid, real }) => {
       if (cid !== chatId) return;
+      // The edit landed — drop its undo snapshot so the map does not grow for
+      // the life of the screen.
+      editRollbacks.current.delete(tempId);
       // delete/edit ops apply optimistically by id and carry no pending bubble —
       // a delete resolves with real=null; nothing to swap or cache here.
       if (!real) return;
@@ -601,6 +629,17 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     });
     const offFailed = onQueue('failed', ({ tempId, chatId: cid, error }) => {
       if (cid !== chatId) return;
+      // An EDIT that the server refused. It has no pending bubble to mark, so
+      // without this the rejection vanished: the optimistic text stayed on
+      // screen until the next sync quietly replaced it with the original.
+      const rb = editRollbacks.current.get(tempId);
+      if (rb) {
+        editRollbacks.current.delete(tempId);
+        setMessages(prev => prev.map(x => x.id === rb.id
+          ? { ...x, content: rb.content, editedAt: rb.editedAt } : x));
+        Alert.alert('Edit failed', error ?? 'This message can no longer be edited.');
+        return;
+      }
       setMessages(prev => prev.map(x => x._tempId === tempId
         ? { ...x, _state: 'failed', _error: error } : x));
     });
@@ -652,7 +691,10 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           // Decrypt-on-arrival (WhatsApp-style): decrypt ONCE, then show + cache
           // the PLAINTEXT so re-opens never decrypt it again.
           (async () => {
-            const fin = looksEncrypted(m.content) ? (await hydrateMessages(chatId, [m]))[0] ?? m : m;
+            // `live`: this message arrived seconds ago, so a missing session is
+            // the out-of-order race worth retrying — not history whose keys are
+            // simply gone. Everything else hydrated on this screen is history.
+            const fin = looksEncrypted(m.content) ? (await hydrateMessages(chatId, [m], undefined, { live: true }))[0] ?? m : m;
             setMessages(prev => prev.some(x => x.id === fin.id) ? prev : [fin, ...prev]);
             applyMessage(chatId, fin).catch(() => {}); // persist plaintext to local cache
             // Bump the "↓ N new" counter when a message lands while scrolled up.
@@ -667,6 +709,13 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
               ? { ...mem, lastDeliveredMessageId: e.lastDeliveredMessageId }
               : mem),
           } : prev);
+          // Release the sender's recovery copies now that the recipient
+          // demonstrably holds these messages. The outbox keeps an accepted row
+          // (and its plaintext) precisely until this moment, because the server
+          // body may already have been reclaimed and this is the only copy that
+          // could re-deliver. Best-effort: the queue's age cap reaps anything
+          // this misses, e.g. delivery that happened while the chat was closed.
+          void queueNoteDelivered(chatId, Number(e.lastDeliveredMessageId));
         };
         const onMemberRead = (e: { userId: string; lastReadMessageId: number }) => {
           if (!e?.userId) return;
@@ -938,11 +987,19 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         // WhatsApp: the edit shows instantly and syncs when back online. Apply
         // optimistically by id, then durably enqueue (encrypt+PATCH on flush).
         const editId = editingId;
+        // Snapshot BEFORE the optimistic overwrite, so a server rejection can
+        // be undone instead of silently reverting on the next sync.
+        const before = messagesRef.current.find(x => x.id === editId);
         setMessages(prev => prev.map(x => x.id === editId
           ? { ...x, content: text, editedAt: new Date().toISOString() } : x));
         setEditingId(null);
         setInput('');
-        await enqueueEdit(chatId, editId, text);
+        const q = await enqueueEdit(chatId, editId, text);
+        editRollbacks.current.set(q.tempId, {
+          id: editId,
+          content: before?.content ?? null,
+          editedAt: before?.editedAt ?? null,
+        });
       } else {
         // Enqueue + add optimistic bubble immediately. If the one-shot
         // Invisible Ink toggle was on, stamp meta.invisibleInk and reset.
@@ -1041,7 +1098,12 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       { key: 'forward', label: 'Forward', icon: 'arrow-redo', onPress: () => openForward(msg) },
       { key: 'copy',    label: 'Copy',    icon: 'copy-outline', onPress: () => copyAndAutoClear(plain) },
       { key: 'star',    label: 'Star',    icon: 'star-outline', onPress: async () => {
-          try { await addBookmark(msg.id, null); } catch (e: any) { Alert.alert('Could not save', e?.message ?? 'Try again'); }
+          // Pass the decrypted body so the bookmark keeps a LOCAL copy. The
+          // server reclaims a bookmarked message's ciphertext like any other —
+          // exempting it would make bookmarks a permanent server archive — so
+          // this snapshot is what keeps the saved message readable afterwards.
+          try { await addBookmark(msg.id, null, plain || null); }
+          catch (e: any) { Alert.alert('Could not save', e?.message ?? 'Try again'); }
         } },
       { key: 'remind',  label: 'Remind',  icon: 'alarm-outline', onPress: () => router.push({
           pathname: '/message-reminder' as any,
@@ -1051,7 +1113,18 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     if (isMine && msg.id > 0 && !msg.deletedAt) {
       acts.push({ key: 'info', label: 'Info', icon: 'information-circle-outline', onPress: () => setInfoMsg(msg) });
     }
-    if (isMine && !msg.deletedAt) {
+    // Offer Edit only when the server will actually accept it.
+    //
+    //   msg.id > 0    a still-pending optimistic bubble has no server row yet
+    //   plain         you cannot edit text you cannot see — for an own message
+    //                 whose local plaintext is gone (reinstall), the composer
+    //                 would open EMPTY and a stray send would overwrite the
+    //                 message with whatever was typed
+    //   EDIT_WINDOW   the PATCH's WHERE clause rejects anything older, and a
+    //                 rejected edit used to revert silently
+    const editable = isMine && !msg.deletedAt && msg.id > 0 && !!plain &&
+      Date.now() - new Date(msg.createdAt).getTime() < EDIT_WINDOW_MS;
+    if (editable) {
       acts.push({ key: 'edit', label: 'Edit', icon: 'create-outline', onPress: () => { setEditingId(msg.id); setInput(plain); } });
     }
     // VaultCheck — authenticity verification on received photos/video. Offered
@@ -1650,6 +1723,12 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     if (result.canceled || !result.assets?.length) return;
     const isVideo = kind === 'videos';
     const stamp = Date.now();
+    // One id shared by everything picked in this single action, so the timeline
+    // can render them as ONE album instead of N stacked bubbles. Purely a
+    // presentation grouping: each pick is still its own message, with its own
+    // id, its own ciphertext and its own delivery state, so nothing about
+    // sending, retrying or receipts changes. Only set for a genuine multi-pick.
+    const albumId = result.assets.length > 1 ? `alb-${stamp}` : null;
     // Stage all picks for the multi-image caption preview.
     const items = result.assets.map((asset, i) => {
       const filename = asset.fileName ||
@@ -1657,6 +1736,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       const mime = asset.mimeType || (isVideo ? 'video/mp4' : 'image/jpeg');
       const metaExtra: any = { width: asset.width, height: asset.height };
       if (isVideo && asset.duration) metaExtra.durationMs = asset.duration;
+      if (albumId) { metaExtra.albumId = albumId; metaExtra.albumIndex = i; }
       return {
         uri: asset.uri, mediaType: (isVideo ? 'video' : 'image') as 'image' | 'video',
         filename, mime, viewOnce: !!opts.viewOnce, metaExtra, caption: '',
@@ -1906,19 +1986,44 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     if (!oldest) return;
     setLoadingOlder(true);
     try {
-      const olderRaw = await getMessages(chatId, { before: oldest, limit: PAGE_SIZE });
-      const older = await hydrateMessages(chatId, olderRaw);   // decrypt once at ingest
+      // Disk first. These rows are already plaintext, so a cached page costs no
+      // network call and no decrypt — and it works offline, which the
+      // server-only path never did. Only past the cache horizon do we ask the
+      // server, which is also the only case where hydrate/re-cache is needed.
+      let older = await getCachedMessagesBefore(chatId, Number(oldest), PAGE_SIZE);
+      metric(older.length ? 'local.message_hits' : 'local.message_misses');
+
+      // A FULL page from disk answered the request: no network, no decrypt.
+      // A SHORT page means the cache horizon, not the end of history — so top
+      // up from the server rather than ending pagination on a cache boundary.
+      if (older.length < PAGE_SIZE) {
+        try {
+          const olderRaw = await getMessages(chatId, { before: oldest, limit: PAGE_SIZE });
+          const fetched = await hydrateMessages(chatId, olderRaw);  // decrypt once at ingest
+          cacheMessages(chatId, fetched).catch(() => {});           // persist for instant scroll-back
+          const seen = new Set(older.map(m => String(m.id)));
+          older = [...older, ...fetched.filter(m => !seen.has(String(m.id)))];
+          // Only the SERVER can say there is nothing older. Ending on a short
+          // cached page would strand history the device simply had not fetched.
+          if (fetched.length < PAGE_SIZE) setHasMore(false);
+        } catch {
+          // Offline. Whatever the cache gave us still renders, and hasMore is
+          // deliberately left alone so a later attempt can resume.
+        }
+      }
       // Dedupe against what's already loaded — a page boundary can overlap and
       // would otherwise inject duplicate ids (duplicate React keys).
       setMessages(prev => {
         const have = new Set(prev.map(x => String(x.id)));
         return [...prev, ...older.filter(m => !have.has(String(m.id)))];
       });
-      if (older.length < PAGE_SIZE) setHasMore(false);
-      cacheMessages(chatId, older).catch(() => {});            // persist plaintext for instant scroll-back
     } catch {}
     finally { setLoadingOlder(false); }
   }, [chatId, hasMore, loadingOlder, messages]);
+
+  // Album row identity is cached by albumId; drop it when the chat changes so a
+  // row can never be reused across conversations.
+  useEffect(() => { resetAlbumCache(); }, [chatId]);
 
   // Keep a ref to loaded messages for the jump-to-message paging loop.
   useEffect(() => { messagesRef.current = messages; }, [messages]);
@@ -1933,9 +2038,16 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       guard++;
       const oldest = messagesRef.current[messagesRef.current.length - 1]?.id;
       if (!oldest) break;
+      // Same disk-first rule as onEndReached — jumping to an old search hit
+      // used to re-download up to 40 pages it already had.
       let older;
-      try { older = await hydrateMessages(chatId, await getMessages(chatId, { before: oldest, limit: PAGE_SIZE })); }
-      catch { break; }
+      try {
+        older = await getCachedMessagesBefore(chatId, Number(oldest), PAGE_SIZE);
+        if (!older.length) {
+          older = await hydrateMessages(chatId, await getMessages(chatId, { before: oldest, limit: PAGE_SIZE }));
+          cacheMessages(chatId, older).catch(() => {});
+        }
+      } catch { break; }
       if (!older.length) { setHasMore(false); break; }
       const next = [...messagesRef.current, ...older];
       messagesRef.current = next;
@@ -2404,6 +2516,49 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             {showUnread && <UnreadDivider count={unreadInfo!.count} />}
             <SwipeToReply onReply={() => { if (!item.deletedAt && item.type !== 'system') setReplyTo(item); }}>
             <View style={item.id === flashId ? { backgroundColor: brandAlpha(0.18), borderRadius: 12 } : undefined}>
+            {item._album ? (
+              // Album: several media picked in one action, laid out in a
+              // HORIZONTAL scroller inside this vertical list. Horizontal is
+              // the only safe nesting direction — a vertical child would fight
+              // the list for the pan gesture.
+              //
+              // Each tile is a full MemoBubble rather than a bespoke thumbnail:
+              // encrypted media resolution, key handling, view-once, download
+              // progress and retry already live there, and each tile owning its
+              // own hooks is exactly what lets them resolve independently.
+              // Duplicating that pipeline for a grid is how view-once or a
+              // missing key quietly behaves differently in one place.
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                // The parent list keeps the vertical gesture; this keeps the
+                // horizontal one, and taps still reach the tiles.
+                directionalLockEnabled
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={{ gap: 6, paddingRight: 12 }}
+              >
+                {item._album.map((am) => (
+                  <View key={am._tempId ?? String(am.id)} style={{ maxWidth: 260 }}>
+                    <MemoBubble
+                      msg={am}
+                      meId={meId}
+                      member={membersById.get(am.senderId)}
+                      chatId={chatId}
+                      otherMembers={otherMembers}
+                      onLongPress={onLongPressMessage}
+                      onJumpTo={jumpToMessage}
+                      reactionsForMsg={mergedReactions[am.id]}
+                      onToggleReaction={(emoji) => toggleReaction(am, emoji)}
+                      replyTarget={null}
+                      highlight={null}
+                      tiltRevealed={tiltRevealed}
+                      grouped
+                      bubbleColors={bubbleColors}
+                    />
+                  </View>
+                ))}
+              </ScrollView>
+            ) : (
             <MemoBubble
               msg={item}
               meId={meId}
@@ -2426,6 +2581,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
               pollVotesForMsg={pollVotes[item.id]}
               onPollVoteChange={(next) => setPollVotes(prev => ({ ...prev, [item.id]: next }))}
             />
+            )}
             </View>
             </SwipeToReply>
           </View>

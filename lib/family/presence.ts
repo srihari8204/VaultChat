@@ -13,7 +13,7 @@
 import * as Location from 'expo-location';
 import { emit, getSocket, joinChatRoom, leaveChatRoom } from '../socket';
 import { newLiveKey, sealJSON, openJSON, putLiveKey, getLiveKey, clearLiveKey } from '../liveLocationCrypto';
-import { sendMessage, getMessages, type Message } from '../chatService';
+import { sendMessage, getMessages, decryptFromChat, type Message } from '../chatService';
 import { type Geofence } from './geofence';
 import { getPlaces } from './store';
 import { getGroupPrivacy } from '../groups/store';
@@ -27,6 +27,7 @@ import {
 } from './background';
 import { type FamilyPing, type MemberPresence } from './types';
 import { type LatLng } from '../nav/geo';
+import { publishPoint, publishStart, publishStop, stopPublisher } from '../location/publisher';
 
 const LIVE_WINDOW_MS = 24 * 3600 * 1000;
 const until = () => Date.now() + LIVE_WINDOW_MS;
@@ -47,6 +48,26 @@ const privacy = new Map<string, GroupPrivacy>();
 // fixPipeline.ts, which is also what lets the background task continue the run.
 let selfCb: ((p: MemberPresence) => void) | null = null;
 
+// ── stationary keepalive ──
+// A phone that does not move gets no watcher callbacks (the fused provider
+// deduplicates identical fixes), so it publishes exactly ONE ping on entry.
+// Any member who joins the room after that ping sees nothing, forever — the
+// relay stores nothing to replay, by design. While sharing is on and the
+// watcher is alive, re-assert the latest fix on a slow pulse: "still here"
+// is a true statement, and the receiver's freshness stays honest because it
+// reflects a device that is genuinely still reporting from that position.
+let keepalive: ReturnType<typeof setInterval> | null = null;
+let lastLoc: Location.LocationObject | null = null;
+const KEEPALIVE_MS = 30_000;
+function startKeepalive() {
+  stopKeepalive();
+  keepalive = setInterval(() => {
+    if (!sharing || !myKey || !lastLoc || !watcher) return;
+    onFix({ ...lastLoc, timestamp: Date.now() });
+  }, KEEPALIVE_MS);
+}
+function stopKeepalive() { if (keepalive) { clearInterval(keepalive); keepalive = null; } }
+
 async function deliverKeys() {
   if (!myKey) return;
   let seed: Location.LocationObject | null = null;
@@ -59,6 +80,7 @@ async function deliverKeys() {
 }
 
 async function onFix(loc: Location.LocationObject) {
+  lastLoc = loc;
   const pos: LatLng = { lat: loc.coords.latitude, lng: loc.coords.longitude };
   const spd = loc.coords.speed != null && loc.coords.speed >= 0 ? loc.coords.speed : undefined;
   const acc = loc.coords.accuracy != null && loc.coords.accuracy >= 0 ? Math.round(loc.coords.accuracy) : undefined;
@@ -82,6 +104,15 @@ async function onFix(loc: Location.LocationObject) {
       if (reduced) {
         const blob = sealJSON(myKey, reduced as FamilyPing);
         if (blob) emit('live_location_update', { chatId: cid, blob, until: u }).catch(() => {});
+        // Additive server ingest (all-space location platform, migration 103):
+        // the SAME privacy-reduced point, batched with offline queue + dedupe.
+        // The server enforces per-space read authorization; uploading is the
+        // act of sharing, so this rides exactly the sealed-publish gate above.
+        const rp = reduced as FamilyPing;
+        publishPoint(cid, {
+          lat: rp.lat, lng: rp.lng, ts: rp.ts || ts, spd: rp.spd,
+          acc: rp.acc, bat: rp.bat, src: 'fused',
+        }).catch(() => {});
       }
     }
 
@@ -156,11 +187,20 @@ export async function startPresence(o: StartPresenceOpts): Promise<PresenceStart
     places.set(cid, await getPlaces(cid));
     privacy.set(cid, await getGroupPrivacy(cid));
   }
-  if (sharing) { myKey = newLiveKey(); await deliverKeys(); await handOffToBackground(); }
+  if (sharing) {
+    myKey = newLiveKey();
+    await deliverKeys();
+    await handOffToBackground();
+    // Clear any explicit server-side stop so the platform ingest admits
+    // uploads again (the guard exists so a stale publisher cannot outlive a
+    // stop — re-enabling must therefore announce itself).
+    for (const cid of circleIds) publishStart(cid).catch(() => {});
+  }
   watcher = await Location.watchPositionAsync(
     { accuracy: Location.Accuracy.Balanced, timeInterval: 8000, distanceInterval: 15 },
     onFix,
   );
+  if (sharing) startKeepalive();
   return { watching: true, denied: false };
 }
 
@@ -211,10 +251,17 @@ export async function setSharing(share: boolean): Promise<boolean> {
     myKey = newLiveKey();
     await deliverKeys();
     await handOffToBackground();
+    startKeepalive();
+    for (const cid of circleIds) publishStart(cid).catch(() => {});
   } else {
     myKey = null;
+    stopKeepalive();
     await stopBackgroundPresence();
-    for (const cid of circleIds) emit('live_location_stop', { chatId: cid }).catch(() => {});
+    for (const cid of circleIds) {
+      emit('live_location_stop', { chatId: cid }).catch(() => {});
+      publishStop(cid).catch(() => {}); // platform mirror of the stop signal
+    }
+    stopPublisher();
   }
   return sharing;
 }
@@ -231,6 +278,7 @@ export async function stopPresence(): Promise<void> {
   try { watcher?.remove(); } catch {}
   watcher = null;
   selfCb = null;
+  stopKeepalive();
 
   if (sharing && await isBackgroundRunning()) {
     await updateBackgroundKey(myKey);   // hand the live key over and let it run
@@ -269,34 +317,89 @@ export async function reloadPrivacy(groupId: string): Promise<void> {
 // ── receive others' positions for one circle ──
 export interface PresenceEvent { userId: string; presence: MemberPresence | null } // null = stopped
 
-function lkFromMessage(m: Message): string | null {
+function lkFromPlaintext(text: string | null): string | null {
+  if (!text) return null;
+  try { const c = JSON.parse(text); return (c.live && typeof c.lk === 'string') ? c.lk : null; } catch { return null; }
+}
+
+/**
+ * Extract the live key from one 'location' message — DECRYPTING IT FIRST.
+ *
+ * The old code JSON.parsed the RAW fetched content. In an E2EE circle that
+ * content is a sender-key envelope, so the parse failed silently for every
+ * key message and no key was ever harvested — meaning member-to-member live
+ * location could not have worked in any properly encrypted circle. Found on
+ * two physical phones: the server relayed blobs into the room (verified at
+ * the Redis adapter), both sides had delivered fresh key messages (verified
+ * in the DB), and the receiver still rendered nothing.
+ */
+async function lkFromMessage(circleId: string, m: Message): Promise<string | null> {
   if (m?.type !== 'location' || !m.content) return null;
-  try { const c = JSON.parse(m.content); return (c.live && typeof c.lk === 'string') ? c.lk : null; } catch { return null; }
+  // Legacy plaintext circles parse directly; E2EE circles need the decrypt.
+  const direct = lkFromPlaintext(m.content);
+  if (direct) return direct;
+  if (!m.senderId) return null;
+  try {
+    const plain = await decryptFromChat(circleId, String(m.senderId), m.content, m.id);
+    return lkFromPlaintext(plain);
+  } catch { return null; }
 }
 
 /** Subscribe to a circle's live member positions. Captures E2E keys from history + live 'location' messages. */
 export async function subscribeCircle(circleId: string, meId: string, onEvent: (e: PresenceEvent) => void): Promise<() => void> {
   await joinChatRoom(circleId);
-  let disposed = false, refreshing = false;
+  let disposed = false;
 
-  const captureFromHistory = async () => {
-    if (refreshing) return; refreshing = true;
-    try {
-      const msgs = await getMessages(circleId, { limit: 60 });
-      for (const m of msgs) { const lk = lkFromMessage(m); if (lk && m.senderId) putLiveKey(circleId, String(m.senderId), lk); }
-    } catch {} finally { refreshing = false; }
+  // One shared in-flight fetch: a second caller AWAITS the same promise
+  // rather than returning early — its `.then(flushStash)` must not fire
+  // before the keys are actually in.
+  let harvesting: Promise<void> | null = null;
+  const captureFromHistory = (): Promise<void> => {
+    if (harvesting) return harvesting;
+    harvesting = (async () => {
+      try {
+        const msgs = await getMessages(circleId, { limit: 60 });
+        // THE NEWEST KEY PER SENDER WINS — explicitly, not by iteration order.
+        // The server returns messages newest-first (ORDER BY m.id DESC), and
+        // the old `for … putLiveKey(…)` overwrote on every hit, so the OLDEST
+        // key in the window won. Every sharing toggle re-keys, so after a few
+        // sessions both sides of a circle held each other's ancient keys and
+        // every live blob failed to open — two phones on one desk, each LIVE
+        // to itself, permanently invisible to each other.
+        const newest = new Map<string, { id: number; lk: string }>();
+        for (const m of msgs) {
+          if (m?.type !== 'location' || !m.senderId) continue;
+          const uid = String(m.senderId);
+          const prev = newest.get(uid);
+          if (prev && Number(m.id) <= prev.id) continue; // an older message cannot win — skip the decrypt
+          const lk = await lkFromMessage(circleId, m);
+          if (lk) newest.set(uid, { id: Number(m.id), lk });
+        }
+        for (const [uid, v] of newest) putLiveKey(circleId, uid, v.lk);
+      } catch {} finally { harvesting = null; }
+    })();
+    return harvesting;
   };
   await captureFromHistory();
 
   const s = await getSocket();
-  const onUpd = (e: any) => {
-    if (disposed || !e?.userId || !e.blob || String(e.userId) === String(meId)) return;
-    if (e.chatId != null && String(e.chatId) !== String(circleId)) return;
-    const key = getLiveKey(circleId, String(e.userId));
-    if (!key) { captureFromHistory(); return; }         // key not captured yet → refetch; next blob decrypts
+  // Blobs that arrived before their sender's key message was harvested.
+  // A MOVING member re-pings within seconds, so dropping was harmless for
+  // them — but a STATIONARY member pings exactly once on entry, and if that
+  // one blob loses the race against the key fetch they stay invisible until
+  // they physically move. Observed on two real devices sitting on a desk.
+  // Keyed by member id; only the newest blob per member is worth keeping.
+  const stash = new Map<string, any>();
+
+  /** Decode + deliver one relayed event. False = stash it and retry after the
+   *  next key harvest — the key may be missing OR older than the blob's. */
+  const decode = (e: any): boolean => {
+    const uid = String(e.userId);
+    const key = getLiveKey(circleId, uid);
+    if (!key) return false;
     const ping = openJSON<FamilyPing>(key, e.blob);
-    if (ping && typeof ping.lat === 'number' && typeof ping.lng === 'number') {
-      const uid = String(e.userId);
+    if (!ping) return false; // wrong/old key for this blob — a harvest may fix it
+    if (typeof ping.lat === 'number' && typeof ping.lng === 'number') {
       const ts = ping.ts || Date.now();
       onEvent({ userId: uid, presence: {
         userId: uid, pos: { lat: ping.lat, lng: ping.lng }, speed: ping.spd,
@@ -307,13 +410,34 @@ export async function subscribeCircle(circleId: string, meId: string, onEvent: (
       recordSample(circleId, { u: uid, lat: ping.lat, lng: ping.lng, ts, bat: ping.bat, spd: ping.spd, acc: ping.acc })
         .catch(() => {});
     }
+    return true; // opened (or opened-but-malformed, which retrying cannot fix)
+  };
+
+  /** Retry every stashed blob; keys may have just been harvested. */
+  const flushStash = () => {
+    if (disposed) return;
+    for (const [uid, e] of [...stash]) if (decode(e)) stash.delete(uid);
+  };
+
+  const onUpd = (e: any) => {
+    if (disposed || !e?.userId || !e.blob || String(e.userId) === String(meId)) return;
+    if (e.chatId != null && String(e.chatId) !== String(circleId)) return;
+    if (!decode(e)) {
+      stash.set(String(e.userId), e);                 // keep THIS blob, not just hope for a next one
+      captureFromHistory().then(flushStash);
+    }
   };
   const onStop = (e: any) => {
     if (disposed || !e?.userId) return;
     clearLiveKey(circleId, String(e.userId));
+    stash.delete(String(e.userId));
     onEvent({ userId: String(e.userId), presence: null });
   };
-  const onNewMsg = (e: any) => { if (!disposed && e && String(e.chatId) === String(circleId) && e.type === 'location') captureFromHistory(); };
+  const onNewMsg = (e: any) => {
+    if (!disposed && e && String(e.chatId) === String(circleId) && e.type === 'location') {
+      captureFromHistory().then(flushStash);          // a fresh key may unlock a stashed blob
+    }
+  };
 
   s.on('live_location_update', onUpd);
   s.on('live_location_stop', onStop);

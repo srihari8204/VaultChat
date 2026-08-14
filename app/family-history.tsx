@@ -16,6 +16,7 @@ import { useTheme } from '../lib/theme';
 import { brandAlpha } from '../constants/theme';
 import FamilyMap from '../components/family/FamilyMap';
 import { getTrack, summarize, type TrackSample } from '../lib/family/history';
+import { segmentTrips } from '../lib/family/status';
 import { useFamilyAlerts, loadAlerts, type FamilyAlert } from '../lib/family/alerts';
 import { getGroup } from '../lib/groups/store';
 import { getCurrentUserAsync } from './(constants)/authService';
@@ -31,6 +32,10 @@ const RANGES: { key: Range; label: string; ms: number }[] = [
 
 const dist = (m: number) => (m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1)} km`);
 const clock = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const dur = (ms: number) => {
+  const m = Math.round(ms / 60_000);
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`;
+};
 const dayLabel = (ts: number) => {
   const d = new Date(ts), today = new Date();
   const same = d.toDateString() === today.toDateString();
@@ -52,6 +57,8 @@ export default function FamilyHistoryScreen() {
 
   const [range, setRange] = useState<Range>('day');
   const [samples, setSamples] = useState<TrackSample[]>([]);
+  // Selected trip index; null = the whole range's path on the map.
+  const [tripSel, setTripSel] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   // Whether THIS user may see OTHER people's history in this group. Viewing
   // your own is always allowed — it is your data. Starts denied: a permission
@@ -84,13 +91,21 @@ export default function FamilyHistoryScreen() {
       const t = await getTrack(circleId, { from, userId });
       if (!live) return;
       setSamples(t);
+      setTripSel(null); // a stale index into the previous range's trips would highlight the wrong drive
       setLoading(false);
     })();
     return () => { live = false; };
   }, [circleId, userId, from]));
 
   const stats = useMemo(() => summarize(samples), [samples]);
-  const path = useMemo(() => samples.map((s) => ({ lat: s.lat, lng: s.lng })), [samples]);
+  // Trips are re-derived from the same samples on every load — computed on
+  // read cannot be stale, and nothing is ever stored or uploaded for them.
+  const trips = useMemo(() => segmentTrips(samples), [samples]);
+  const path = useMemo(() => {
+    const sel = tripSel != null ? trips[tripSel] : null;
+    const src = sel ? samples.filter((s) => s.ts >= sel.startTs && s.ts <= sel.endTs) : samples;
+    return src.map((s) => ({ lat: s.lat, lng: s.lng }));
+  }, [samples, trips, tripSel]);
 
   // Timeline = the member's events in range, newest first, grouped by day.
   const timeline = useMemo(() => {
@@ -106,7 +121,14 @@ export default function FamilyHistoryScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <Stack.Screen options={{ title: userId ? `${who}'s history` : 'Location History', headerTitleAlign: 'center' }} />
+      {/* Native header opted back in (root hides them app-wide): it owns the
+          status-bar inset, so the range tabs sit BELOW the dead top strip —
+          without it "Week"/"Month" landed under the status bar and ate taps,
+          and the screen had no back button. Same fix as the space module. */}
+      <Stack.Screen options={{
+        headerShown: true, title: userId ? `${who}'s history` : 'Location History', headerTitleAlign: 'center',
+        headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,
+      }} />
 
       {/* range tabs */}
       <View style={[st.tabs, { borderColor: colors.border }]}>
@@ -164,6 +186,42 @@ export default function FamilyHistoryScreen() {
               <Text style={[st.statLbl, { color: colors.textDim }]}>Points</Text>
             </View>
           </View>
+
+          {/* trips — segmented from the same on-device samples (spec: travel
+              route history). Speeds show only when the trip actually carried
+              them; a trip with no speed data says nothing about speed. */}
+          {trips.length > 0 && (
+            <>
+              <Text style={[st.h, { color: colors.text }]}>Trips</Text>
+              {trips.map((t, i) => {
+                const on = tripSel === i;
+                return (
+                  <TouchableOpacity
+                    key={t.startTs}
+                    onPress={() => setTripSel(on ? null : i)}
+                    style={[st.evt, { borderColor: colors.border }]}
+                  >
+                    <View style={[st.evtIcon, { backgroundColor: on ? brandAlpha(0.22) : brandAlpha(0.1) }]}>
+                      <Ionicons name="car-outline" size={14} color={colors.primary} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: colors.text, fontSize: 13.5, fontWeight: '600' }}>
+                        {dayLabel(t.startTs)} · {clock(t.startTs)} – {clock(t.endTs)} · {dist(t.distanceM)}
+                      </Text>
+                      <Text style={{ color: colors.textDim, fontSize: 12 }} numberOfLines={1}>
+                        {dur(t.durationMs)} · avg {Math.round(t.avgKmh)} km/h
+                        {t.maxKmh != null ? ` · max ${Math.round(t.maxKmh)} km/h` : ''}
+                        {t.stops.length ? ` · ${t.stops.length} stop${t.stops.length === 1 ? '' : 's'}` : ''}
+                      </Text>
+                    </View>
+                    <Text style={{ color: on ? colors.primary : colors.textDim, fontSize: 11.5, fontWeight: '700' }}>
+                      {on ? 'On map' : 'View'}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </>
+          )}
 
           {/* timeline */}
           <Text style={[st.h, { color: colors.text }]}>Timeline</Text>

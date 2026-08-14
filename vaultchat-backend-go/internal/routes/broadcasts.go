@@ -54,6 +54,10 @@ func RegisterBroadcasts(mux *http.ServeMux) {
 	mux.HandleFunc("POST /broadcasts/{id}/unwatch", httpx.RequireAuth(broadcastUnwatch))
 	mux.HandleFunc("GET /broadcasts/{id}/chat", httpx.RequireAuth(broadcastChatList))
 	mux.HandleFunc("POST /broadcasts/{id}/chat", httpx.RequireAuth(broadcastChatPost))
+	// Playback relay. NOT RequireAuth on purpose — a video player cannot attach
+	// an Authorization header to the segment requests it generates itself, so
+	// the query ticket is the credential. See broadcast_hls.go.
+	mux.HandleFunc("GET /broadcasts/{id}/hls/{file...}", broadcastHLS)
 }
 
 type broadcast struct {
@@ -80,6 +84,18 @@ func scanBroadcast(row pgx.Row) (*broadcast, error) {
 		&b.HLSURL, &b.Room, &b.E2EE, &b.ViewerCount, &b.PeakViewers,
 		&b.StartedAt, &b.EndedAt); err != nil {
 		return nil, err
+	}
+	// Hand out a TICKETED url, derived from the id, whenever a playlist exists.
+	//
+	// Minted here because every read path funnels through this one function —
+	// start, list, get, token, set-hls and end — so one place covers all six and
+	// none can drift. Deriving it from b.ID also means the stored hls_url is no
+	// longer what a viewer fetches, which neutralises the arbitrary-URL write in
+	// broadcastSetHLS without having to remove that endpoint (its real job is
+	// the starting→live transition).
+	if b.HLSURL != nil && *b.HLSURL != "" {
+		u := broadcastHLSURL(b.ID)
+		b.HLSURL = &u
 	}
 	return &b, nil
 }

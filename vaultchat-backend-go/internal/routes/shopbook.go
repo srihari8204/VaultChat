@@ -26,6 +26,7 @@ import (
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/emitx"
 	"vaultchat/backend-go/internal/httpx"
+	"vaultchat/backend-go/internal/storage"
 )
 
 // sbJSON hands JSON to a jsonb parameter.
@@ -1106,6 +1107,40 @@ func sbUpsertShop(w http.ResponseWriter, r *http.Request) {
 			httpx.Err(w, http.StatusConflict, msg,
 				map[string]any{"code": "location_locked"})
 			return
+		}
+	}
+
+	// SHOP IDENTITY PHOTOS ARE CLIENT-SUPPLIED OBJECT KEYS — VALIDATE THEM.
+	//
+	// frontPhotoKey and logoKey arrive verbatim in the request body and were
+	// written to the shop row unchecked, so an owner could point their shop at
+	// ANY key in the bucket, including another shop's verification documents.
+	// It was inert only because nothing presigns these keys for read today —
+	// an inertness that would end the moment someone added a display endpoint.
+	//
+	// Same rule the document path already enforces (shopbook_verify.go): the
+	// key must be one WE minted for THIS shop, and the object must actually be
+	// there. Verified against the EXISTING shop id, so a new shop cannot claim
+	// a key at creation time — it has no namespace yet.
+	if b.FrontPhotoKey != nil || b.LogoKey != nil {
+		existingID, hasShop := sbExistingShopID(ctx, user.ID)
+		for _, k := range []*string{b.FrontPhotoKey, b.LogoKey} {
+			if k == nil || *k == "" {
+				continue
+			}
+			if !hasShop || !strings.HasPrefix(*k, "shopbook/"+existingID+"/") {
+				httpx.Err(w, http.StatusForbidden, "That image does not belong to your shop")
+				return
+			}
+			// No traversal out of the namespace the prefix just established.
+			if strings.Contains(*k, "..") {
+				httpx.Err(w, http.StatusForbidden, "That image does not belong to your shop")
+				return
+			}
+			if !storage.ObjectExists(ctx, *k) {
+				httpx.Err(w, http.StatusBadRequest, "The upload did not complete — try again")
+				return
+			}
 		}
 	}
 

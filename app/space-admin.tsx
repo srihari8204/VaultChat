@@ -26,7 +26,7 @@ import {
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '../lib/theme';
+import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { Palette } from '../constants/theme';
 import { getRuns, getRun, getRoster, getIncidents, type Incident } from '../lib/spaces/api';
 import { tilesForType, type RunSet } from '../lib/spaces/dashboard';
@@ -59,11 +59,11 @@ const ENTRIES: Entry[] = [
 ];
 
 export default function SpaceAdminScreen() {
-  const { colors } = useTheme();
   const router = useRouter();
   const params = useLocalSearchParams<{
     spaceId?: string; name?: string; groupType?: string; perms?: string; roleLabel?: string;
   }>();
+  const colors = useSpaceColors(params.groupType);
   const spaceId = String(params.spaceId || '');
   const spaceName = String(params.name || 'This space');
 
@@ -115,7 +115,7 @@ export default function SpaceAdminScreen() {
 
   return (
     <ScrollView style={s.screen} contentContainerStyle={s.body}>
-      <Stack.Screen options={{ title: `${spaceName} · Admin` }} />
+      <Stack.Screen options={spaceHeader(colors, `${spaceName} · Admin`)} />
 
       {/* The scope statement. An administrator should be able to SEE the limit
           of their own authority rather than having to take it on trust — and a
@@ -139,7 +139,7 @@ export default function SpaceAdminScreen() {
       {openIncidents.some((i) => i.category === 'sos') && (
         <TouchableOpacity
           style={s.sos}
-          onPress={() => router.push({ pathname: '/space-incidents' as any, params: { spaceId, name: spaceName } })}
+          onPress={() => router.push({ pathname: '/space-incidents' as any, params: { spaceId, name: spaceName, groupType: params.groupType ?? '' } })}
         >
           <Ionicons name="warning" size={20} color="#fff" />
           <Text style={s.sosText}>

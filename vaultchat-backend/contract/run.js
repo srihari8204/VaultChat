@@ -536,6 +536,34 @@ async function main() {
     check(r.status === 200 && !!r.json, 'health-detail → 200 JSON', r);
   }
 
+  // ── spaces workforce: the ops dashboard payload (migration 102) ──────
+  console.log('spaces workforce:');
+  const group = STATE.groupChatId;
+  // A owns the bench group → passes the moderator/admin/owner gate.
+  r = await req('GET', `/chats/${group}/ops/summary`, { token: A.jwt });
+  check(r.status === 200 && hasKeys(r.json, ['day', 'workforce', 'open', 'runs']),
+    'ops/summary (owner) base shape', r);
+  check(hasKeys(r.json?.tasks, ['open', 'overdue', 'doneToday']),
+    'ops/summary carries tasks breakdown (102)', r.json?.tasks);
+  check(hasKeys(r.json?.leaveMonth, ['requests', 'pending', 'approved', 'declined']),
+    'ops/summary carries leaveMonth (102)', r.json?.leaveMonth);
+  const before = { open: r.json?.tasks?.open ?? 0, req: r.json?.leaveMonth?.requests ?? 0 };
+  // Behavioral: a created task and a leave request must move the counters.
+  r = await req('POST', `/chats/${group}/tasks`, { token: A.jwt, body: { title: 'contract task' } });
+  check(r.status === 200 || r.status === 201, 'create task → 2xx', r);
+  r = await req('POST', `/chats/${group}/leave`, {
+    token: B.jwt,
+    body: { kind: 'casual', fromDay: '2099-01-01', toDay: '2099-01-01' },
+  });
+  check(r.status === 200 || r.status === 201, 'member requests leave → 2xx', r);
+  r = await req('GET', `/chats/${group}/ops/summary`, { token: A.jwt });
+  check((r.json?.tasks?.open ?? 0) > before.open, 'tasks.open counts the new task', r.json?.tasks);
+  check((r.json?.leaveMonth?.requests ?? 0) > before.req
+    && (r.json?.leaveMonth?.pending ?? 0) > 0, 'leaveMonth counts the new request', r.json?.leaveMonth);
+  // B is a plain member: refused in words, and given none of the figures.
+  r = await req('GET', `/chats/${group}/ops/summary`, { token: B.jwt });
+  check(!!r.json?.error && !r.json?.workforce, 'ops/summary (member) → refused, no figures', r);
+
   // ── module smokes (promoted to deep fixtures at each route's cutover) ─
   console.log('module smokes:');
   // The two VaultLens smokes were removed with the feature — they asserted 200

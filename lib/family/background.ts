@@ -28,6 +28,7 @@ import { sendMessage } from '../chatService';
 import { getPlaces } from './store';
 import { getGroupPrivacy } from '../groups/store';
 import { applyPrivacy, isPublishing } from '../groups/privacy';
+import { publishPoint } from '../location/publisher';
 import { readBattery } from './battery';
 import { processFix } from './fixPipeline';
 import { type FamilyPing } from './types';
@@ -89,6 +90,16 @@ TaskManager.defineTask(BG_TASK, async ({ data, error }: any) => {
         // Best-effort: in a headless start the socket may not be connected. The
         // fix is still recorded locally, so history stays complete either way.
         if (blob) emit('live_location_update', { chatId: cid, blob, until: now + LIVE_WINDOW_MS }).catch(() => {});
+        // Platform ingest rides the SAME privacy-reduced point and the same
+        // visibility gate — this is what keeps Life360-style sharing alive
+        // with the app backgrounded or the screen locked: the queue persists
+        // and uploads on the pulse, and the server refuses it anyway if the
+        // member explicitly stopped (the flag outranks a stale task).
+        const rp = reduced as FamilyPing;
+        publishPoint(cid, {
+          lat: rp.lat, lng: rp.lng, ts: rp.ts || ts, spd: rp.spd,
+          acc: rp.acc, bat: rp.bat, src: 'fused',
+        }).catch(() => {});
       }
     }
 

@@ -183,7 +183,10 @@ export default function FamilyAddScreen() {
 
   return (
     <View style={s.screen}>
-      <Stack.Screen options={{ title: isFamily ? 'Invite to space' : 'Invite to group', headerTitleAlign: 'center' }} />
+      <Stack.Screen options={{
+        headerShown: true, title: isFamily ? 'Invite to space' : 'Invite to group', headerTitleAlign: 'center',
+        headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,
+      }} />
 
       <View style={s.search}>
         <Ionicons name="search" size={17} color={colors.textDim} />

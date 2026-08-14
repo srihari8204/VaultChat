@@ -126,14 +126,32 @@ func navRoute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		From    map[string]any `json:"from"`
-		To      map[string]any `json:"to"`
-		Costing string         `json:"costing"`
+		From    map[string]any            `json:"from"`
+		To      map[string]any            `json:"to"`
+		Costing string                    `json:"costing"`
+		Options map[string]map[string]any `json:"costing_options"`
 	}
 	_ = httpx.Body(r, &body)
 	costing := "auto"
 	if navCostings[body.Costing] {
 		costing = body.Costing
+	}
+	// Route preferences (avoid tolls/highways, shortest). Whitelisted knob by
+	// knob — this proxy's job is exactly to not forward arbitrary client JSON
+	// to Valhalla. Only the validated costing's own options are read, so a
+	// body claiming truck options on a pedestrian route sends nothing.
+	opts := map[string]any{}
+	if in := body.Options[costing]; in != nil {
+		if v, ok := in["shortest"].(bool); ok && v {
+			opts["shortest"] = true
+		}
+		motor := costing == "auto" || costing == "motorcycle" || costing == "truck"
+		if v, ok := in["use_tolls"].(float64); ok && motor && v == 0 {
+			opts["use_tolls"] = 0
+		}
+		if v, ok := in["use_highways"].(float64); ok && motor && v == 0 {
+			opts["use_highways"] = 0
+		}
 	}
 	num := func(m map[string]any, k string) (float64, bool) {
 		v, ok := m[k].(float64) // JSON numbers only — strings/null fail like Node's typeof check
@@ -148,11 +166,19 @@ func navRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	payload, _ := json.Marshal(map[string]any{
+	valhalla := map[string]any{
 		"locations":          []map[string]any{{"lat": fLat, "lon": fLng}, {"lat": tLat, "lon": tLng}},
 		"costing":            costing,
 		"directions_options": map[string]any{"units": "kilometers"},
-	})
+		// Google-style alternatives: ask for up to two extra routes. Valhalla
+		// returns them as `alternates` only when genuinely distinct ones exist;
+		// the client must never invent one when this comes back absent.
+		"alternates": 2,
+	}
+	if len(opts) > 0 {
+		valhalla["costing_options"] = map[string]any{costing: opts}
+	}
+	payload, _ := json.Marshal(valhalla)
 	base := os.Getenv("VALHALLA_URL")
 	if base == "" {
 		base = "http://valhalla:8002"

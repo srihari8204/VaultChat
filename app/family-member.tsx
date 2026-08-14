@@ -25,7 +25,7 @@ import { type Geofence } from '../lib/family/geofence';
 import { createDirectChat } from '../lib/chatService';
 import { navigateTo } from '../lib/nav/openNavigation';
 import { haversine } from '../lib/nav/geo';
-import { STALE_MS } from '../lib/family/types';
+import { freshnessOf } from '../lib/family/status';
 // v3 — shared Location Lock engine classifiers/formatters (same bands as Navigate)
 import { classifyDistance, zoneColor } from '../lib/lock/zoneMachine';
 import { fmtSpeed, gpsQuality, QUALITY_LABEL, QUALITY_COLOR } from '../lib/lock/format';
@@ -100,7 +100,10 @@ export default function FamilyMemberScreen() {
   }, [pull]));
 
   const last = today.length ? today[today.length - 1] : null;
-  const fresh = !!last && Date.now() - last.ts <= STALE_MS;
+  // Freshness tier (LIVE / RECENT / STALE / UNAVAILABLE) — a fix past the
+  // recent window is "Last known", and this screen never says Online on it.
+  const tier = freshnessOf(last?.ts, Date.now());
+  const fresh = tier === 'live';
   const stats = useMemo(() => summarize(today), [today]);
 
   // Which place are they sitting in right now?
@@ -147,7 +150,12 @@ export default function FamilyMemberScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <Stack.Screen options={{ title: name, headerTitleAlign: 'center' }} />
+      {/* Native header opted back in — owns the status-bar inset and gives the
+          screen a back button; the root layout hides headers app-wide. */}
+      <Stack.Screen options={{
+        headerShown: true, title: name, headerTitleAlign: 'center',
+        headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,
+      }} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
 
         {/* identity card */}
@@ -161,8 +169,13 @@ export default function FamilyMemberScreen() {
               {isGuardian && <Ionicons name="star" size={13} color={colors.primary} />}
             </View>
             <Text style={{ color: fresh ? colors.success : colors.textDim, fontSize: 12.5, marginTop: 2 }}>
-              {last ? (fresh ? 'Online' : `Last seen ${ago(last.ts)}`) : 'Location off'}
-              {currentPlace ? ` · at ${currentPlace.name}` : ''}
+              {tier === 'live' ? 'Online'
+                : tier === 'recent' ? `Updated ${ago(last!.ts)}`
+                  : tier === 'stale' ? `Last known · ${ago(last!.ts)}`
+                    // Neutral on silence: this device cannot tell sharing-off
+                    // from offline/permission/no-GPS for another member.
+                    : 'No recent location'}
+              {currentPlace && tier !== 'unavailable' && tier !== 'stale' ? ` · at ${currentPlace.name}` : ''}
             </Text>
           </View>
           {last?.bat != null && (

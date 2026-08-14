@@ -25,7 +25,7 @@ import {
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '../lib/theme';
+import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { Palette } from '../constants/theme';
 import {
   getRun, setRiderState, setRunStatus, pingRun, fileIncident, arriveAtStop,
@@ -53,8 +53,8 @@ const INCIDENTS: { key: string; label: string; icon: any }[] = [
 ];
 
 export default function SpaceRunDriverScreen() {
-  const { colors } = useTheme();
-  const params = useLocalSearchParams<{ spaceId?: string; runId?: string }>();
+  const params = useLocalSearchParams<{ spaceId?: string; runId?: string; groupType?: string }>();
+  const colors = useSpaceColors(params.groupType);
   const spaceId = String(params.spaceId || '');
   const runId = String(params.runId || '');
 
@@ -299,7 +299,7 @@ export default function SpaceRunDriverScreen() {
   if (loading) {
     return (
       <View style={[s.screen, s.centre]}>
-        <Stack.Screen options={{ title: 'Run' }} />
+        <Stack.Screen options={spaceHeader(colors, 'Run')} />
         <ActivityIndicator color={colors.primary} />
       </View>
     );
@@ -307,7 +307,7 @@ export default function SpaceRunDriverScreen() {
   if (!run) {
     return (
       <View style={[s.screen, s.centre]}>
-        <Stack.Screen options={{ title: 'Run' }} />
+        <Stack.Screen options={spaceHeader(colors, 'Run')} />
         <Text style={s.muted}>This run is not available.</Text>
       </View>
     );
@@ -315,7 +315,7 @@ export default function SpaceRunDriverScreen() {
 
   return (
     <View style={s.screen}>
-      <Stack.Screen options={{ title: run.name }} />
+      <Stack.Screen options={spaceHeader(colors, run.name)} />
 
       <View style={s.header}>
         <View style={{ flex: 1 }}>

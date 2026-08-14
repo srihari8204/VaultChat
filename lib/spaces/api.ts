@@ -195,6 +195,10 @@ export interface OpsSummary {
     lateToday: number | null;
   };
   open: { incidents: number; sos: number; tasks: number; visitors: number };
+  /** Business dashboard cards (migration 102). Optional so the screen still
+   *  renders against a server that has not run it yet. */
+  tasks?: { open: number; overdue: number; doneToday: number };
+  leaveMonth?: { requests: number; pending: number; approved: number; declined: number };
   runs: { id: string; name: string; status: string; stale: boolean; total: number; pending: number }[];
   error?: string;
 }

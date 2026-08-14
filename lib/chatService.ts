@@ -348,8 +348,23 @@ export async function decryptFromChat(
     const m = String((err as any)?.message || '');
     // ONLY retry the transient out-of-order case (a follow-up message can arrive
     // before the X3DH-bearing first message bootstraps the session).
+    // …but only when it COULD be out-of-order. The retry waits for an X3DH
+    // message still in flight, which is a live-delivery race. Replaying history
+    // has no race to wait for: every message is already on disk, so the 500ms is
+    // spent to reach the identical failure.
+    //
+    // It was the dominant cost of every launch. A device whose identity is newer
+    // than its history has no session for ANY old message, so all of them took
+    // this branch — serialized, because hydrateMessages awaits per message and
+    // e2eeDecrypt holds a per-peer lock. That is the 36–65s of white screen
+    // recorded in syncEngine.ts, and it repeated on every single boot.
+    //
+    // Live decrypts run at depth 0 and keep the full retry, unchanged. The
+    // branch itself is deliberately left in place: falling through to the
+    // else-if would hand this to maybeAutoRecoverSession, which is not what a
+    // missing session during replay means.
     if (m.includes('no session and no X3DH')) {
-      for (let i = 0; i < 2; i++) {
+      for (let i = 0; _bulkDecryptDepth === 0 && i < 2; i++) {
         await new Promise(r => setTimeout(r, 250));
         try {
           const pt = await e2ee.e2eeDecrypt(chatId, peerId, messageId ?? 0, ciphertext);
@@ -621,11 +636,20 @@ export async function hydrateMessages(
   chatId: string,
   msgs: Message[],
   knownPlain?: Map<number, string>,
+  opts?: { live?: boolean },
 ): Promise<Message[]> {
   // Everything decrypted below is HISTORY. Mark it so a failure cannot be
   // mistaken for a dead live session and trigger a reset — the fault that made
   // an incoming call undecryptable moments after a cold sync.
-  _bulkDecryptDepth++;
+  //
+  // …unless the caller says otherwise. The chat screen also routes a message
+  // that JUST ARRIVED through here, and that one is live by definition: it is
+  // the out-of-order case the decrypt retry exists for, so it must keep it.
+  // Left implicit, "history" and "a batch of one that just landed" are
+  // indistinguishable from in here. A live message therefore keeps BOTH the
+  // retry and its session auto-recovery, which is the behaviour it always had.
+  const bulk = !opts?.live;
+  if (bulk) _bulkDecryptDepth++;
   try {
   const out = msgs.slice();
   // F5: a decrypted payload may be a wrapped {text + link preview} envelope
@@ -675,8 +699,22 @@ export async function hydrateMessages(
     const senderId = (m as any).senderId ?? '';
     if (senderId && senderId === (await myUserId())) {
       const own = await readOwnPlaintext(chatId, m.id, m.createdAt);
-      if (own != null) { out[i] = finish(m, own); }
-      else {
+      if (own != null) {
+        out[i] = finish(m, own);
+        // LAZY MIGRATION to the single-record model (see messageQueue.postOnce).
+        //
+        // Messages sent before that change have messages.content = NULL and
+        // their only readable copy in the old KV cache. Promote it into the
+        // canonical row the first time it is read, so the next open renders
+        // from the same path as everything else and this lookup stops being
+        // needed. Read-through, never a mass rewrite: only rows actually
+        // displayed are touched, and the old cache is left in place as the
+        // fallback until the migration has soaked.
+        try {
+          const { cacheMessages } = await import('./localDb');
+          await cacheMessages(chatId, [{ ...out[i] } as Message]);
+        } catch { /* best-effort: the message already renders from `out` */ }
+      } else {
         ownMisses++;
       }
       // No cached copy → leave the envelope as-is. The bubble renders its
@@ -693,7 +731,7 @@ export async function hydrateMessages(
   if (ownMisses) console.warn(`[e2ee] ${ownMisses} own message(s) predate the plaintext cache in chat ${chatId} — shown as unavailable`);
   return out;
   } finally {
-    _bulkDecryptDepth--;
+    if (bulk) _bulkDecryptDepth--;
   }
 }
 
@@ -1192,8 +1230,61 @@ export async function listBookmarks(): Promise<BookmarkRow[]> {
   return api<BookmarkRow[]>('/user/bookmarks');
 }
 
-export async function addBookmark(messageId: number, note?: string | null): Promise<{ id: string }> {
-  return api('/user/bookmarks', { method: 'POST', json: { messageId, note: note ?? null } });
+// A bookmark's local snapshot, keyed by message id.
+//
+// Bookmarking is the one action whose whole point is "keep this" — and the
+// server can no longer honour that: a bookmarked message's ciphertext is
+// reclaimed on delivery like any other, and exempting it would turn bookmarks
+// into exactly the permanent server archive this design removes.
+//
+// So the client keeps its own copy at bookmark time. It is stored through the
+// SAME sealed store as own-message plaintext (SQLite, sealed with the cache DEK
+// when VAULT_CACHE_ENCRYPTED is on), never in a new plaintext location.
+//
+// It is also the reason a bookmark survives cache pruning: pruneMessageCache
+// trims the `messages` table by age and per-chat count, and a message
+// bookmarked months ago would eventually be evicted from it. This copy lives in
+// the kv store, which that sweep does not touch.
+const bookmarkKey = (messageId: number) => `vc_bookmark_pt_${messageId}`;
+
+/** Snapshot a bookmarked message's plaintext locally. Best-effort. */
+export async function cacheBookmarkPlaintext(messageId: number, plaintext: string): Promise<void> {
+  if (!messageId || messageId <= 0 || !plaintext) return;
+  try {
+    const { setMeta } = await import('./localDb');
+    const { encField } = await import('./cacheCrypto');
+    const sealed = encField(plaintext);
+    if (sealed != null) await setMeta(bookmarkKey(messageId), sealed);
+  } catch (err) {
+    console.warn('[bookmark] local snapshot failed — id:', messageId, (err as any)?.message);
+  }
+}
+
+/** The local snapshot for a bookmarked message, or null. */
+export async function getBookmarkPlaintext(messageId: number): Promise<string | null> {
+  if (!messageId || messageId <= 0) return null;
+  try {
+    const { getMeta } = await import('./localDb');
+    const { decField } = await import('./cacheCrypto');
+    const hit = await getMeta(bookmarkKey(messageId));
+    return hit ? decField(hit) : null;
+  } catch { return null; }
+}
+
+/**
+ * Bookmark a message. `plaintext` is the decrypted body as currently rendered;
+ * pass it so the bookmark stays readable after the server body expires.
+ */
+export async function addBookmark(
+  messageId: number, note?: string | null, plaintext?: string | null,
+): Promise<{ id: string }> {
+  const res = await api<{ id: string }>('/user/bookmarks', {
+    method: 'POST', json: { messageId, note: note ?? null },
+  });
+  // After the server call: a failed bookmark should not leave a local snapshot
+  // of something the user did not manage to save.
+  if (plaintext) await cacheBookmarkPlaintext(messageId, plaintext);
+  return res;
 }
 
 export async function removeBookmark(id: string): Promise<void> {
@@ -2162,11 +2253,27 @@ export interface UploadResult {
  * `uri` is the local file URI from expo-image-picker / expo-document-picker.
  * The returned id goes into the next message's meta.attachmentId.
  */
+/**
+ * What a stored object is FOR. Retention is per class, so this is the thing
+ * that decides whether an object is reclaimed in three hours, when its story
+ * expires, or never:
+ *
+ *   chat      chat media — the 3-hour / delivered-to-everyone rules
+ *   profile   a user avatar — kept until the user changes or deletes it
+ *   group     a group photo — kept until changed or deleted
+ *   story     status media — kept until the story itself expires (24h)
+ *   mini_app  owned by a mini-app's own lifecycle
+ *
+ * Anything undeclared is stored as 'unknown' server-side and never
+ * automatically deleted.
+ */
+export type AttachmentPurpose = 'chat' | 'profile' | 'group' | 'story' | 'mini_app';
+
 export async function uploadAttachment(
   uri: string,
   filename: string,
   mime: string,
-  opts: { viewOnce?: boolean; signal?: AbortSignal } = {},
+  opts: { viewOnce?: boolean; signal?: AbortSignal; purpose?: AttachmentPurpose } = {},
 ): Promise<UploadResult> {
   const token = await getAccessToken();
   if (!token) throw new Error('Not signed in');
@@ -2204,7 +2311,16 @@ export async function uploadAttachment(
   // device-side PUT failure is understood.
   const form = new FormData();
   form.append('file', { uri, name: filename, type: mime } as any);   // RN FormData file object
-  const qs = opts.viewOnce ? '?viewOnce=1' : '';
+  // Declare what this object is FOR. The server stores it on the attachment
+  // row and every retention rule keys off it (migration 100). Omitting it is
+  // not fatal — the server defaults to 'unknown', which is never auto-deleted —
+  // but an unclassified object is one nobody can ever reclaim, so every call
+  // site should say.
+  const params = [
+    ...(opts.viewOnce ? ['viewOnce=1'] : []),
+    ...(opts.purpose ? [`purpose=${encodeURIComponent(opts.purpose)}`] : []),
+  ];
+  const qs = params.length ? `?${params.join('&')}` : '';
   const res = await fetch(`${SERVER_URL}/uploads${qs}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },

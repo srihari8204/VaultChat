@@ -63,6 +63,9 @@ func RegisterChats(mux *http.ServeMux) {
 	id.HandleFunc("GET /chats/{id}/messages", httpx.RequireAuth(chatsMessagesGet))
 	id.HandleFunc("GET /chats/{id}/messages/search", httpx.RequireAuth(chatsInChatSearch))
 	id.HandleFunc("PATCH /chats/{id}/messages/{msgId}", httpx.RequireAuth(chatsMessagePatch))
+	// Sender recovery: re-upload the body of an EXISTING message rather than
+	// sending a duplicate. See chats_bodies.go for the authorisation rules.
+	id.HandleFunc("PUT /chats/{id}/messages/{msgId}/body", httpx.RequireAuth(chatsMessageBodyPut))
 	id.HandleFunc("DELETE /chats/{id}/messages/{msgId}", httpx.RequireAuth(chatsMessageDelete))
 	id.HandleFunc("POST /chats/{id}/delivered", httpx.RequireAuth(chatsDelivered))
 	id.HandleFunc("POST /chats/{id}/read", httpx.RequireAuth(chatsRead))
@@ -95,6 +98,7 @@ func RegisterChats(mux *http.ServeMux) {
 	RegisterSpaceOpsOnID(id)        // Spaces & Operations incidents, passes, shifts
 	RegisterSpaceWorkforceOnID(id)  // Spaces & Operations attendance, leave, tasks, dashboard
 	RegisterSpaceDevicesOnID(id)    // Spaces & Operations devices + theft protection
+	RegisterSpaceLocationsOnID(id)  // All-space location platform (migration 103)
 	mux.Handle("/chats/{id}/", id)  // subtree forward; `id` re-matches the full path
 }
 
@@ -462,10 +466,21 @@ func coldSyncMaxMessages() int64 {
 	return v
 }
 
-// coldSyncWarnOnly reports the event without capping. Defaults to TRUE so that
-// deploying this code changes no client's behaviour until it is switched off.
+// coldSyncWarnOnly reports the event without capping.
+//
+// This defaulted to TRUE as a staged-rollout guard, which made the cap purely
+// decorative: `enforce` was never true, `since = floor` was dead code, and every
+// unrecognised device pulling since=0 got the ENTIRE history — up to 100k rows
+// (MAX_PAGES 500 x PAGE 200 client-side). On a reinstall that is what dragged
+// back every old conversation the user had already dealt with.
+//
+// The rollout it was protecting is over: both the device-id header and the
+// paging client have shipped. Enforcing by default is now the safe direction —
+// the failure mode of capping is "scroll further to see more", while the
+// failure mode of not capping is the bug being fixed here. Set
+// COLD_SYNC_WARN_ONLY=true to restore the uncapped behaviour.
 func coldSyncWarnOnly() bool {
-	return os.Getenv("COLD_SYNC_WARN_ONLY") != "false"
+	return os.Getenv("COLD_SYNC_WARN_ONLY") == "true"
 }
 
 // noteSyncDevice upserts the device row and reports whether this (user, device)
@@ -501,8 +516,12 @@ func noteSyncDevice(ctx context.Context, userID, deviceID string, cold bool) (kn
 func coldSyncFloor(ctx context.Context, userID string, limit int64) int64 {
 	var floor int64
 	err := db.SysPool.QueryRow(ctx,
+		// Same visibility rule as the delta itself, hidden included: counting
+		// messages the delta will never return would hand back a floor that
+		// yields fewer than `limit` visible rows.
 		`SELECT m.id FROM messages m
 		   JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1 AND cm.left_at IS NULL
+		                       AND cm.hidden = FALSE
 		  WHERE m.expires_at IS NULL OR m.expires_at > NOW()
 		  ORDER BY m.id DESC
 		  OFFSET $2 LIMIT 1`,
@@ -525,16 +544,39 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Cold start (since=0): bound an unrecognised install to recent history.
+	//
+	// coldStart also switches on the undelivered-only filter below. An empty
+	// local database is NOT a licence to re-download the account's history: a
+	// reinstall would pull back every message the account had already received,
+	// which is bandwidth nobody asked for and server-side exposure of old
+	// ciphertext to a client that has no key for it.
+	coldStart := false
 	if since == 0 {
 		deviceID := strings.TrimSpace(r.Header.Get("X-Device-Id"))
 		if !noteSyncDevice(ctx, user.ID, deviceID, true) {
+			coldStart = true
 			capN := coldSyncMaxMessages()
 			enforce := capN > 0 && deviceID != "" && !coldSyncWarnOnly()
-			if floor := coldSyncFloor(ctx, user.ID, capN); enforce && floor > 0 {
+			// Only compute the floor when it can actually be used — it is an
+			// OFFSET scan over messages JOIN chat_members, and it was running on
+			// every uncapped cold sync purely to be thrown away.
+			floor := int64(0)
+			if enforce {
+				floor = coldSyncFloor(ctx, user.ID, capN)
+			}
+			// Three outcomes, logged distinctly. "uncapped" previously covered
+			// both "the cap is switched off" and "the account has fewer messages
+			// than the cap, so there was nothing to bound" — operationally
+			// opposite states that read identically, and it cost real time
+			// diagnosing a fresh install that was in fact behaving correctly.
+			switch {
+			case enforce && floor > 0:
 				since = floor
 				log.Printf("[chats/delta] cold sync capped to %d msg(s) for user=%s device=%s", capN, user.ID, deviceID)
-			} else {
-				log.Printf("[chats/delta] cold sync (uncapped) user=%s device=%q warnOnly=%v", user.ID, deviceID, coldSyncWarnOnly())
+			case enforce:
+				log.Printf("[chats/delta] cold sync under cap (%d) — nothing to bound; user=%s device=%s", capN, user.ID, deviceID)
+			default:
+				log.Printf("[chats/delta] cold sync NOT ENFORCED user=%s device=%q warnOnly=%v capN=%d", user.ID, deviceID, coldSyncWarnOnly(), capN)
 			}
 		}
 	} else if deviceID := strings.TrimSpace(r.Header.Get("X-Device-Id")); deviceID != "" {
@@ -547,10 +589,35 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 	if limit > 500 {
 		limit = 500
 	}
+	// On a cold start, return only what this ACCOUNT has not already received.
+	//
+	// chat_members.last_delivered_message_id is the account's per-chat delivery
+	// high-water mark, already maintained by POST /chats/{id}/delivered. Anything
+	// at or below it has been delivered once and is HISTORY; anything above it is
+	// still PENDING and must arrive, or reinstalling would silently drop messages
+	// in flight. NULL means nothing has ever been acked for that chat, so the
+	// whole chat is still pending and is returned — a genuinely new member does
+	// not lose their first messages.
+	//
+	// A per-row comparison rather than a single floor, because the delta cursor is
+	// global while the delivery mark is per chat; one number cannot express both.
+	//
+	// Deliberate consequence: a SECOND device joining an existing account starts
+	// empty rather than inheriting history. That is the requested behaviour, and
+	// the explicit history path (GET /chats/{id}/messages?before=) still fetches
+	// it on demand, page by page.
+	coldFilter := ""
+	if coldStart {
+		coldFilter = `
+		    AND (cm.last_delivered_message_id IS NULL OR m.id > cm.last_delivered_message_id)`
+	}
 	rows, err := db.SysPool.Query(ctx,
-		`SELECT `+chatsMsgSel("m")+` FROM messages m
+		`SELECT `+chatsMsgSelBody("m")+` FROM messages m
 		   JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1 AND cm.left_at IS NULL
-		  WHERE m.id > $2 AND (m.expires_at IS NULL OR m.expires_at > NOW())
+		                       AND cm.hidden = FALSE`+
+			chatsBodyJoin+`
+		  WHERE m.id > $2 AND (m.expires_at IS NULL OR m.expires_at > NOW())`+
+			coldFilter+`
 		  ORDER BY m.id ASC LIMIT $3`,
 		user.ID, since, limit)
 	if err != nil {
@@ -586,8 +653,10 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 	if raw := q.Get("mutatedSince"); raw != "" {
 		if mutatedSince, ok := userParseJSDate(raw); ok {
 			mrows, err := db.SysPool.Query(ctx,
-				`SELECT `+chatsMsgSel("m")+` FROM messages m
+				`SELECT `+chatsMsgSelBody("m")+` FROM messages m
 				   JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1 AND cm.left_at IS NULL
+				                       AND cm.hidden = FALSE`+
+					chatsBodyJoin+`
 				  WHERE (m.edited_at > $2 OR m.deleted_at > $2) AND m.id <= $3
 				  ORDER BY GREATEST(COALESCE(m.edited_at, 'epoch'), COALESCE(m.deleted_at, 'epoch')) ASC
 				  LIMIT 500`,
@@ -618,6 +687,67 @@ func chatsMsgSel(alias string) string {
 	cols := strings.Split(chatsMsgCols, ", ")
 	for i, c := range cols {
 		cols[i] = alias + "." + c
+	}
+	return strings.Join(cols, ", ")
+}
+
+// ─── message body read seam (migration 099) ───────────────────────────
+//
+// Ciphertext is moving out of messages.content and into the ephemeral,
+// hourly-partitioned message_bodies. The two live side by side during the
+// rollout, so every read resolves the body as:
+//
+//	COALESCE(b.content, m.content)
+//
+// READS ARE UNCONDITIONAL — there is no flag on this side, and that asymmetry
+// is the whole rollback story. Only the WRITER is gated (MESSAGE_BODIES=1). A
+// reader that always coalesces is correct in all three states:
+//
+//	table empty, nothing written yet  → b.content is NULL → old behaviour
+//	writer on                         → body wins, m.content is NULL anyway
+//	writer turned back OFF            → bodies already written STILL resolve
+//
+// Had the read been flagged too, disabling the writer would have orphaned every
+// body already stored — a rollback that loses messages is not a rollback.
+//
+// The join is on (message_id, created_at) rather than message_id alone because
+// created_at is the partition key: supplying it lets the planner prune to the
+// single hour that can contain the row instead of probing every partition.
+const chatsBodyJoin = ` LEFT JOIN message_bodies b ON b.message_id = m.id AND b.created_at = m.created_at`
+
+// chatsMsgSelBody is chatsMsgSel with the body-aware content expression.
+// Callers MUST alias messages as `m` and append chatsBodyJoin to the FROM.
+func chatsMsgSelBody(alias string) string {
+	cols := strings.Split(chatsMsgCols, ", ")
+	for i, c := range cols {
+		switch c {
+		case "content":
+			// AS content keeps the column NAME identical, so chatsMsgRow.dest()
+			// scanning is positional-and-named the same as before.
+			cols[i] = "COALESCE(b.content, " + alias + ".content) AS content"
+		case "meta":
+			// Re-assemble the metadata the client used to get in one column.
+			//
+			// Writes split it: routing metadata the server actually reads stays
+			// on the spine, everything private (thumbnail, filename, MIME, poll
+			// option text, mention detail) rides in the body and dies with it.
+			// Merging on read is what makes that split INVISIBLE to every
+			// existing client — an app that has never heard of message_bodies
+			// still receives one `meta` object with the same keys.
+			//
+			// Spine-first, body-second: `||` is right-biased, so a private key
+			// wins over a same-named public one. That only matters for legacy
+			// rows written before the split, where the full meta sits on the
+			// spine and there is no body to override it.
+			//
+			// The CASE preserves NULL. Plain concatenation would turn a message
+			// that genuinely has no metadata into `{}`, a wire change that no
+			// client asked for.
+			cols[i] = "CASE WHEN " + alias + ".meta IS NULL AND b.meta_private IS NULL THEN NULL" +
+				" ELSE COALESCE(" + alias + ".meta, '{}'::jsonb) || COALESCE(b.meta_private, '{}'::jsonb) END AS meta"
+		default:
+			cols[i] = alias + "." + c
+		}
 	}
 	return strings.Join(cols, ", ")
 }
