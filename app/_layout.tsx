@@ -61,6 +61,11 @@ import { getActiveCall } from '../lib/callState';
 import { getRingingPeer, setRingingPeer, consumePendingCall } from '../lib/ringTracker';
 import { displayIncomingCall, cancelIncomingCall } from '../lib/callNotification';
 import '../lib/callBackground';   // registers notifee bg event + bg notification task
+// Registers the VaultChatSync headless task at JS-load time, so a chat push can
+// sync and acknowledge delivery while the app is backgrounded or killed. Same
+// side-effect-import pattern as callBackground above, for the same reason: the
+// registration must exist before any React tree does.
+import '../lib/syncBackground';
 import '../lib/family/background'; // registers the bg-location task — a headless OS
                                    // wake runs ONLY this layout's imports, so without
                                    // this line killed-app Family sharing drops fixes
