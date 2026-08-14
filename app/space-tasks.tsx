@@ -23,9 +23,14 @@ import {
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '../lib/theme';
+import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { Palette } from '../constants/theme';
 import { getWorkTasks, createWorkTask, setWorkTaskDone, type WorkTask } from '../lib/spaces/api';
+
+/** Priority always carries a WORD and its spec color, never color alone. */
+const PRIORITY_TONE: Record<WorkTask['priority'], string> = {
+  high: '#EF4444', medium: '#F59E0B', low: '#16C784',
+};
 
 const PRIORITIES: { key: 'low' | 'medium' | 'high'; label: string }[] = [
   { key: 'high', label: 'High' },
@@ -47,8 +52,8 @@ function dueWords(iso: string | null): { text: string; overdue: boolean } {
 }
 
 export default function SpaceTasksScreen() {
-  const { colors } = useTheme();
-  const params = useLocalSearchParams<{ spaceId?: string; name?: string; perms?: string }>();
+  const params = useLocalSearchParams<{ spaceId?: string; name?: string; perms?: string; groupType?: string }>();
+  const colors = useSpaceColors(params.groupType);
   const spaceId = String(params.spaceId || '');
   const spaceName = String(params.name || 'This space');
 
@@ -58,6 +63,7 @@ export default function SpaceTasksScreen() {
   );
 
   const [tasks, setTasks] = useState<WorkTask[] | null>(null);
+  const [tab, setTab] = useState<'todo' | 'overdue' | 'done'>('todo');
   const [err, setErr] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState<number | null>(null);
@@ -118,8 +124,17 @@ export default function SpaceTasksScreen() {
   };
 
   const open = (tasks ?? []).filter((t) => !t.doneAt);
+  const overdue = open.filter((t) => dueWords(t.dueAt).overdue);
+  const todo = open.filter((t) => !dueWords(t.dueAt).overdue);
   const done = (tasks ?? []).filter((t) => t.doneAt);
+  const shown = tab === 'todo' ? todo : tab === 'overdue' ? overdue : done;
   const s = styles(colors);
+
+  const TABS = [
+    { key: 'todo', label: 'To Do', count: todo.length },
+    { key: 'overdue', label: 'Overdue', count: overdue.length },
+    { key: 'done', label: 'Done', count: done.length },
+  ] as const;
 
   const row = (t: WorkTask) => {
     const due = dueWords(t.dueAt);
@@ -134,14 +149,16 @@ export default function SpaceTasksScreen() {
           <Text style={[s.title, t.doneAt && s.strike]} numberOfLines={2}>{t.title}</Text>
           <Text style={s.muted} numberOfLines={1}>
             {t.assigneeName || 'Unassigned'}
-            {due.text ? ` · ${due.text}` : ''}
+            {due.text
+              ? <Text style={due.overdue ? { color: colors.danger } : undefined}>{` · ${due.text}`}</Text>
+              : null}
           </Text>
         </View>
         {/* Priority carries a WORD, not just a colour. */}
-        {!t.doneAt && t.priority !== 'medium' && (
-          <View style={[s.pill, t.priority === 'high' && { backgroundColor: colors.danger + '22' }]}>
-            <Text style={[s.pillText, t.priority === 'high' && { color: colors.danger }]}>
-              {t.priority === 'high' ? 'High' : 'Low'}
+        {!t.doneAt && (
+          <View style={[s.pill, { backgroundColor: PRIORITY_TONE[t.priority] + '22' }]}>
+            <Text style={[s.pillText, { color: PRIORITY_TONE[t.priority] }]}>
+              {t.priority === 'high' ? 'High' : t.priority === 'medium' ? 'Medium' : 'Low'}
             </Text>
           </View>
         )}
@@ -154,7 +171,24 @@ export default function SpaceTasksScreen() {
 
   return (
     <View style={s.screen}>
-      <Stack.Screen options={{ title: `${spaceName} · Tasks` }} />
+      <Stack.Screen options={spaceHeader(colors, `${spaceName} · Tasks`)} />
+
+      {/* Tabs (Business design: Tasks screen). No "In Progress": the model has
+          no such state, and inventing one here would be a lie about the data. */}
+      <View style={s.tabs}>
+        {TABS.map((t) => (
+          <TouchableOpacity
+            key={t.key}
+            onPress={() => setTab(t.key)}
+            style={[s.tab, tab === t.key && { backgroundColor: colors.primary }]}
+          >
+            <Text style={[s.tabText, tab === t.key && { color: '#fff' }]}>
+              {t.label}{t.count > 0 ? ` (${t.count})` : ''}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
       <ScrollView
         contentContainerStyle={s.body}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
@@ -185,11 +219,10 @@ export default function SpaceTasksScreen() {
           </View>
         )}
 
-        {open.length > 0 && <Text style={s.section}>TO DO · {open.length}</Text>}
-        {open.map(row)}
-
-        {done.length > 0 && <Text style={s.section}>DONE · {done.length}</Text>}
-        {done.map(row)}
+        {shown.map(row)}
+        {tasks !== null && tasks.length > 0 && shown.length === 0 && (
+          <Text style={s.muted}>Nothing in {TABS.find((t) => t.key === tab)?.label}.</Text>
+        )}
       </ScrollView>
 
       {canAssign && (
@@ -244,11 +277,13 @@ export default function SpaceTasksScreen() {
 const styles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: c.bg },
   body: { padding: 16, gap: 8, paddingBottom: 90 },
+  tabs: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingTop: 12 },
+  tab: { flex: 1, alignItems: 'center', backgroundColor: c.card, borderRadius: 999, paddingVertical: 9 },
+  tabText: { color: c.textDim, fontWeight: '700', fontSize: 12.5 },
   centre: { alignItems: 'center', gap: 10, paddingVertical: 40 },
   card: { backgroundColor: c.card, borderRadius: 14, padding: 14, gap: 8 },
   cardTitle: { color: c.text, fontSize: 15.5, fontWeight: '700' },
   muted: { color: c.textDim, fontSize: 12.5, lineHeight: 17, flexShrink: 1 },
-  section: { color: c.textFaint, fontSize: 11.5, fontWeight: '800', marginTop: 12, marginBottom: 2 },
   row: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     backgroundColor: c.card, borderRadius: 12, padding: 14,

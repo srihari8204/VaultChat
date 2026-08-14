@@ -19,7 +19,7 @@ import {
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '../lib/theme';
+import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { Palette } from '../constants/theme';
 import { getTrack } from '../lib/family/history';
 import { getPlaces } from '../lib/family/store';
@@ -41,11 +41,11 @@ interface Row {
 }
 
 export default function SpaceAttendanceScreen() {
-  const { colors } = useTheme();
   const params = useLocalSearchParams<{
-    spaceId?: string; name?: string;
+    spaceId?: string; name?: string; groupType?: string;
     shiftStart?: string; shiftEnd?: string; shiftGrace?: string;
   }>();
+  const colors = useSpaceColors(params.groupType);
   const spaceId = String(params.spaceId || '');
 
   const [rows, setRows] = useState<Row[]>([]);
@@ -118,7 +118,7 @@ export default function SpaceAttendanceScreen() {
   if (loading) {
     return (
       <View style={[s.screen, s.centre]}>
-        <Stack.Screen options={{ title: 'Attendance' }} />
+        <Stack.Screen options={spaceHeader(colors, 'Attendance')} />
         <ActivityIndicator color={colors.primary} />
       </View>
     );
@@ -126,7 +126,7 @@ export default function SpaceAttendanceScreen() {
 
   return (
     <ScrollView style={s.screen} contentContainerStyle={s.body}>
-      <Stack.Screen options={{ title: params.name ? `${params.name} · Attendance` : 'Attendance' }} />
+      <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · Attendance` : 'Attendance')} />
 
       {!zoneName && (
         <View style={s.card}>

@@ -15,14 +15,14 @@ import {
   RefreshControl, Alert,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
-import { useTheme } from '../lib/theme';
+import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { Palette } from '../constants/theme';
 import { getPendingPickups, type PendingPickup } from '../lib/spaces/api';
 
 export default function SpacePendingScreen() {
-  const { colors } = useTheme();
   const router = useRouter();
-  const params = useLocalSearchParams<{ spaceId?: string; name?: string }>();
+  const params = useLocalSearchParams<{ spaceId?: string; name?: string; groupType?: string }>();
+  const colors = useSpaceColors(params.groupType);
   const spaceId = String(params.spaceId || '');
 
   const [rows, setRows] = useState<PendingPickup[]>([]);
@@ -58,7 +58,7 @@ export default function SpacePendingScreen() {
   if (loading) {
     return (
       <View style={[s.screen, s.centre]}>
-        <Stack.Screen options={{ title: 'Pending pickups' }} />
+        <Stack.Screen options={spaceHeader(colors, 'Pending pickups')} />
         <ActivityIndicator color={colors.primary} />
       </View>
     );
@@ -70,7 +70,7 @@ export default function SpacePendingScreen() {
       contentContainerStyle={s.body}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
     >
-      <Stack.Screen options={{ title: `Pending pickups${rows.length ? ` (${rows.length})` : ''}` }} />
+      <Stack.Screen options={spaceHeader(colors, `Pending pickups${rows.length ? ` (${rows.length})` : ''}`)} />
 
       {rows.length === 0 && (
         <View style={s.card}>
@@ -85,7 +85,7 @@ export default function SpacePendingScreen() {
         <View key={g.runId} style={s.card}>
           <TouchableOpacity
             style={s.rowBetween}
-            onPress={() => router.push({ pathname: '/space-run' as any, params: { spaceId, runId: g.runId } })}
+            onPress={() => router.push({ pathname: '/space-run' as any, params: { spaceId, runId: g.runId, groupType: params.groupType ?? '' } })}
           >
             <Text style={s.cardTitle}>{g.name}</Text>
             <Text style={s.link}>{g.items.length} waiting</Text>

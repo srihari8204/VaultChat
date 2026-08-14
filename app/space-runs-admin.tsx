@@ -24,7 +24,7 @@ import {
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '../lib/theme';
+import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { Palette } from '../constants/theme';
 import {
   getRuns, getRun, createRun, setRunStops, setRunRiders, setRunDriver, setRunStatus,
@@ -43,8 +43,8 @@ const KINDS: { key: string; label: string }[] = [
 ];
 
 export default function SpaceRunsAdminScreen() {
-  const { colors } = useTheme();
-  const params = useLocalSearchParams<{ spaceId?: string; name?: string }>();
+  const params = useLocalSearchParams<{ spaceId?: string; name?: string; groupType?: string }>();
+  const colors = useSpaceColors(params.groupType);
   const spaceId = String(params.spaceId || '');
 
   const [runs, setRuns] = useState<Run[]>([]);
@@ -193,7 +193,7 @@ export default function SpaceRunsAdminScreen() {
   if (loading) {
     return (
       <View style={[s.screen, s.centre]}>
-        <Stack.Screen options={{ title: 'Runs' }} />
+        <Stack.Screen options={spaceHeader(colors, 'Runs')} />
         <ActivityIndicator color={colors.primary} />
       </View>
     );
@@ -203,7 +203,7 @@ export default function SpaceRunsAdminScreen() {
     <View style={s.screen}>
       <Stack.Screen
         options={{
-          title: params.name ? `${params.name} · Runs` : 'Runs',
+          ...spaceHeader(colors, params.name ? `${params.name} · Runs` : 'Runs'),
           headerRight: () => (
             <TouchableOpacity onPress={() => setCreating(true)} style={{ paddingHorizontal: 8 }}>
               <Ionicons name="add" size={24} color={colors.primary} />

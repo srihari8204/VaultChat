@@ -28,7 +28,7 @@ import {
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '../lib/theme';
+import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { Palette } from '../constants/theme';
 import {
   getDevices, addDevice, getDeviceEvents, getDeviceCommands, issueDeviceCommand,
@@ -54,8 +54,8 @@ const ACTIONS: { key: string; label: string; icon: keyof typeof Ionicons.glyphMa
 ];
 
 export default function SpaceDevicesScreen() {
-  const { colors } = useTheme();
-  const params = useLocalSearchParams<{ spaceId?: string; name?: string }>();
+  const params = useLocalSearchParams<{ spaceId?: string; name?: string; groupType?: string }>();
+  const colors = useSpaceColors(params.groupType);
   const spaceId = String(params.spaceId || '');
 
   const [devices, setDevices] = useState<SpaceDevice[]>([]);
@@ -144,7 +144,7 @@ export default function SpaceDevicesScreen() {
   if (loading) {
     return (
       <View style={[s.screen, s.centre]}>
-        <Stack.Screen options={{ title: 'Devices' }} />
+        <Stack.Screen options={spaceHeader(colors, 'Devices')} />
         <ActivityIndicator color={colors.primary} />
       </View>
     );
@@ -154,7 +154,7 @@ export default function SpaceDevicesScreen() {
     <View style={s.screen}>
       <Stack.Screen
         options={{
-          title: params.name ? `${params.name} · Devices` : 'Devices',
+          ...spaceHeader(colors, params.name ? `${params.name} · Devices` : 'Devices'),
           headerRight: () => (
             <TouchableOpacity onPress={() => setAdding(true)} style={{ paddingHorizontal: 8 }}>
               <Ionicons name="add" size={24} color={colors.primary} />

@@ -19,7 +19,7 @@ import {
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '../lib/theme';
+import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { Palette } from '../constants/theme';
 import {
   getRoster, addRosterEntry, updateRosterEntry, getLinks,
@@ -27,8 +27,8 @@ import {
 } from '../lib/spaces/api';
 
 export default function SpaceRosterScreen() {
-  const { colors } = useTheme();
-  const params = useLocalSearchParams<{ spaceId?: string; name?: string; canManage?: string }>();
+  const params = useLocalSearchParams<{ spaceId?: string; name?: string; canManage?: string; groupType?: string }>();
+  const colors = useSpaceColors(params.groupType);
   const spaceId = String(params.spaceId || '');
   // Presentation only. Every write below is re-checked server-side against
   // manage_roster; this just decides whether to draw the button.
@@ -110,7 +110,7 @@ export default function SpaceRosterScreen() {
   if (loading) {
     return (
       <View style={[s.screen, s.centre]}>
-        <Stack.Screen options={{ title: 'Roster' }} />
+        <Stack.Screen options={spaceHeader(colors, 'Roster')} />
         <ActivityIndicator color={colors.primary} />
       </View>
     );
@@ -120,7 +120,7 @@ export default function SpaceRosterScreen() {
     <View style={s.screen}>
       <Stack.Screen
         options={{
-          title: params.name ? `${params.name} · Roster` : 'Roster',
+          ...spaceHeader(colors, params.name ? `${params.name} · Roster` : 'Roster'),
           headerRight: canManage
             ? () => (
               <TouchableOpacity onPress={() => setAdding(true)} style={{ paddingHorizontal: 8 }}>

@@ -24,7 +24,7 @@ import {
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '../lib/theme';
+import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { Palette } from '../constants/theme';
 import { getCurrentUserAsync } from './(constants)/authService';
 import {
@@ -48,8 +48,8 @@ function pretty(day: string): string {
 }
 
 export default function SpaceLeaveScreen() {
-  const { colors } = useTheme();
-  const params = useLocalSearchParams<{ spaceId?: string; name?: string; perms?: string }>();
+  const params = useLocalSearchParams<{ spaceId?: string; name?: string; perms?: string; groupType?: string }>();
+  const colors = useSpaceColors(params.groupType);
   const spaceId = String(params.spaceId || '');
   const spaceName = String(params.name || 'This space');
 
@@ -59,6 +59,7 @@ export default function SpaceLeaveScreen() {
   );
 
   const [rows, setRows] = useState<LeaveRequest[] | null>(null);
+  const [tab, setTab] = useState<'mine' | 'pending' | 'history'>('mine');
   const [balance, setBalance] = useState<LeaveBalance | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -129,13 +130,22 @@ export default function SpaceLeaveScreen() {
   };
 
   const s = styles(colors);
+  // Pending is orange in the design system — attention, not a verdict either way.
   const tone = (st: string) =>
-    st === 'approved' ? colors.success : st === 'pending' ? colors.textDim : colors.danger;
+    st === 'approved' ? colors.success : st === 'pending' ? '#F59E0B' : colors.danger;
   const icon = (st: string) =>
     st === 'approved' ? 'checkmark-circle' : st === 'pending' ? 'time-outline' : 'close-circle';
 
+  const mine = (rows ?? []).filter((r) => r.userId === meId);
   const pending = (rows ?? []).filter((r) => r.status === 'pending');
   const settled = (rows ?? []).filter((r) => r.status !== 'pending');
+  const shown = tab === 'mine' ? mine : tab === 'pending' ? pending : settled;
+
+  const TABS = [
+    { key: 'mine', label: 'My Leave', count: mine.length },
+    { key: 'pending', label: 'Pending', count: pending.length },
+    { key: 'history', label: 'History', count: settled.length },
+  ] as const;
 
   const row = (r: LeaveRequest) => (
     <View key={r.id} style={s.card}>
@@ -183,7 +193,25 @@ export default function SpaceLeaveScreen() {
 
   return (
     <View style={s.screen}>
-      <Stack.Screen options={{ title: `${spaceName} · Leave` }} />
+      <Stack.Screen options={spaceHeader(colors, `${spaceName} · Leave`)} />
+
+      {/* Tabs (Business design: Leave screen). For a plain employee the server
+          returns only their own requests, so Pending and History are simply
+          their pending and settled — the tabs need no role branch. */}
+      <View style={s.tabs}>
+        {TABS.map((t) => (
+          <TouchableOpacity
+            key={t.key}
+            onPress={() => setTab(t.key)}
+            style={[s.tabBtn, tab === t.key && { backgroundColor: colors.primary }]}
+          >
+            <Text style={[s.tabText, tab === t.key && { color: '#fff' }]}>
+              {t.label}{t.count > 0 ? ` (${t.count})` : ''}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
       <ScrollView
         contentContainerStyle={s.body}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
@@ -228,10 +256,10 @@ export default function SpaceLeaveScreen() {
           </View>
         )}
 
-        {pending.length > 0 && <Text style={s.section}>AWAITING DECISION · {pending.length}</Text>}
-        {pending.map(row)}
-        {settled.length > 0 && <Text style={s.section}>EARLIER</Text>}
-        {settled.map(row)}
+        {shown.map(row)}
+        {rows !== null && rows.length > 0 && shown.length === 0 && (
+          <Text style={s.muted}>Nothing in {TABS.find((t) => t.key === tab)?.label}.</Text>
+        )}
       </ScrollView>
 
       <TouchableOpacity style={[s.fab, { backgroundColor: colors.primary }]} onPress={() => setCompose(true)}>
@@ -299,7 +327,9 @@ const styles = (c: Palette) => StyleSheet.create({
   card: { backgroundColor: c.card, borderRadius: 14, padding: 14, gap: 8 },
   cardTitle: { color: c.text, fontSize: 15, fontWeight: '700' },
   muted: { color: c.textDim, fontSize: 12.5, lineHeight: 17, flexShrink: 1 },
-  section: { color: c.textFaint, fontSize: 11.5, fontWeight: '800', marginTop: 10, marginBottom: 2 },
+  tabs: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingTop: 12 },
+  tabBtn: { flex: 1, alignItems: 'center', backgroundColor: c.card, borderRadius: 999, paddingVertical: 9 },
+  tabText: { color: c.textDim, fontWeight: '700', fontSize: 12.5 },
   rowTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   status: { fontSize: 11.5, fontWeight: '800', textTransform: 'uppercase' },
   label: { color: c.textDim, fontSize: 11.5, marginBottom: 4, fontWeight: '700' },

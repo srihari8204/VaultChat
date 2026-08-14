@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
-import { useTheme } from '../lib/theme';
+import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { Palette } from '../constants/theme';
 import { getPeople, setRoleKey, type Person } from '../lib/spaces/api';
 import { getChat } from '../lib/chatService';
@@ -36,8 +36,8 @@ const LABEL: Record<Person['status'], string> = {
 };
 
 export default function SpacePeopleScreen() {
-  const { colors } = useTheme();
-  const params = useLocalSearchParams<{ spaceId?: string; name?: string }>();
+  const params = useLocalSearchParams<{ spaceId?: string; name?: string; groupType?: string }>();
+  const colors = useSpaceColors(params.groupType);
   const spaceId = String(params.spaceId || '');
 
   const [people, setPeople] = useState<Person[]>([]);
@@ -150,7 +150,7 @@ export default function SpacePeopleScreen() {
   if (loading) {
     return (
       <View style={[s.screen, s.centre]}>
-        <Stack.Screen options={{ title: 'People' }} />
+        <Stack.Screen options={spaceHeader(colors, 'People')} />
         <ActivityIndicator color={colors.primary} />
       </View>
     );
@@ -158,12 +158,12 @@ export default function SpacePeopleScreen() {
 
   return (
     <View style={s.screen}>
-      <Stack.Screen options={{ title: params.name ? `${params.name} · People` : 'People' }} />
+      <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · People` : 'People')} />
 
       <View style={s.head}>
         <View style={s.counts}>
           <Count value={counts.in} label="In" tone={colors.success} c={colors} />
-          <Count value={counts.leave} label="On leave" tone={colors.textDim} c={colors} />
+          <Count value={counts.leave} label="On leave" tone={'#F59E0B'} c={colors} />
           <Count value={counts.unknown} label="No check-in" tone={colors.textFaint} c={colors} />
         </View>
         <TextInput
@@ -210,6 +210,7 @@ export default function SpacePeopleScreen() {
               </Text>
             </View>
             <View style={[s.pill, { backgroundColor: tone(p.status, colors) + '22' }]}>
+              <View style={[s.pillDot, { backgroundColor: tone(p.status, colors) }]} />
               <Text style={{ color: tone(p.status, colors), fontSize: 11, fontWeight: '700' }}>
                 {LABEL[p.status]}
               </Text>
@@ -385,7 +386,8 @@ const styles = (c: Palette) => StyleSheet.create({
   avatar: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   name: { color: c.text, fontSize: 15, fontWeight: '600' },
   muted: { color: c.textDim, fontSize: 12.5, flexShrink: 1 },
-  pill: { borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4 },
+  pill: { borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 5 },
+  pillDot: { width: 6, height: 6, borderRadius: 3 },
   sheetWrap: { flex: 1, backgroundColor: '#0008', justifyContent: 'flex-end' },
   sheet: { backgroundColor: c.card, borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: 18, gap: 12 },
   sheetTitle: { color: c.text, fontSize: 17, fontWeight: '800' },

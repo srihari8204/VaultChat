@@ -228,6 +228,11 @@ async function cmdUp(upTo) {
       process.exitCode = 2;
     }
   } catch (err) {
+    // Say WHY. This catch used to be silent, which turned "cannot reach the
+    // database" into a bare exit 1 after the dotenv banner — indistinguishable
+    // from success in a piped shell, and exactly how a stale .env pointed a
+    // migration run at the wrong Postgres unnoticed (2026-08-14).
+    console.error(`\n  ${err.message}\n`);
     process.exitCode = 1;
   } finally {
     await pool.end();
