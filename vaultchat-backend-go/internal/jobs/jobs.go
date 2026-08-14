@@ -48,6 +48,49 @@ func envInt(k string, def int) int {
 	return def
 }
 
+// ── the retention floor ────────────────────────────────────────────────
+
+// MinRetentionDays is the FLOOR under every reclaim path that can remove a
+// normal message body. A body may not become eligible for cleanup before
+// created_at + this, whatever any other knob says.
+//
+// WHY A FLOOR AND NOT A TTL
+//
+// The server is the source of truth for offline sync. A recipient who is
+// offline, disconnected, push-less, powered off, or simply has not opened the
+// app has NOT received their message, and the only copy that can still reach
+// them is the server's. So none of those states may shorten retention — and
+// none of them do, because the floor is expressed purely in created_at.
+//
+// Delivery-based early reclaim (delete-on-delivery) is an OPTIMISATION layered
+// on top. It may only ever reclaim LATER than this line, never earlier.
+//
+// Raisable, never lowerable: RETENTION_MIN_DAYS above 30 is honoured, below 30
+// is ignored. Same asymmetry the media TTL uses — a misconfiguration must not
+// be able to destroy user data.
+const MinRetentionDays = 30
+
+// MinRetentionDaysEffective is the floor actually in force.
+func MinRetentionDaysEffective() int {
+	if v := envInt("RETENTION_MIN_DAYS", 0); v > MinRetentionDays {
+		return v
+	}
+	return MinRetentionDays
+}
+
+// retentionGraceSec is the delete-on-delivery grace period, clamped to the
+// floor. The sweeps already gate on `created_at < NOW() - grace`, so raising
+// the grace floor is all that is needed to make delivery-based reclaim
+// impossible inside the retention window — no predicate changes, and the
+// multi-device delivery conditions below keep working exactly as they did.
+func retentionGraceSec() int {
+	floor := MinRetentionDaysEffective() * 86_400
+	if g := envInt("DELETE_ON_DELIVERY_GRACE_SEC", 120); g > floor {
+		return g
+	}
+	return floor
+}
+
 // StartAll launches every job. ctx cancellation stops them (process lifetime).
 func StartAll(ctx context.Context) {
 	run := func(name string, every time.Duration, f func(context.Context)) {
@@ -146,8 +189,16 @@ func sweepExpiredMessages(ctx context.Context) {
 // ── delete-on-delivery (WhatsApp model; env-gated) ─────────────────────
 
 func sweepDeliveredMessages(ctx context.Context) {
-	grace := envInt("DELETE_ON_DELIVERY_GRACE_SEC", 120)
+	// Clamped to the retention floor: "delivered" is never on its own a reason
+	// to drop a body inside the window. A second device, a reinstall, or an
+	// account that simply has not synced yet all still need the server copy.
+	grace := retentionGraceSec()
 	maxDays := envInt("DELETE_ON_DELIVERY_MAX_AGE_DAYS", 0)
+	// The age purge is unconditional — it does not consult delivery at all — so
+	// it is the one knob that could silently undercut the floor. Clamp it up.
+	if maxDays > 0 && maxDays < MinRetentionDaysEffective() {
+		maxDays = MinRetentionDaysEffective()
+	}
 	// How long a device may be silent before the sweep stops waiting for it.
 	// Too low destroys messages for someone on holiday; too high lets one
 	// retired handset pin an account's history on the server indefinitely.
@@ -249,7 +300,7 @@ func sweepDeliveredMessages(ctx context.Context) {
 // this DELETEs the row, and its partition is dropped whole later. The bytes
 // actually go.
 func sweepDeliveredBodies(ctx context.Context) {
-	grace := envInt("DELETE_ON_DELIVERY_GRACE_SEC", 120)
+	grace := retentionGraceSec() // same floor as sweepDeliveredMessages
 	staleDays := envInt("DELETE_ON_DELIVERY_DEVICE_STALE_DAYS", 30)
 	var purged int64
 	for i := 0; i < sweepMaxIters; i++ {

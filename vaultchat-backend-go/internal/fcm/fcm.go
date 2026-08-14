@@ -59,7 +59,13 @@ func load() bool {
 		}
 	}
 	if len(raw) == 0 {
-		log.Println("[fcm] no service account — call wake-up push disabled")
+		// Not just calls. Chat-message push for every device that registered a
+		// native fcm_token goes through SendCallMessage too
+		// (routes.chatsSendMessagePush), so an absent service account silently
+		// disables ALL FCM push, not only call wake-ups. The old wording sent
+		// people looking at the call stack for a chat-notification outage.
+		log.Println("[fcm] NO SERVICE ACCOUNT — all FCM push disabled (chat messages AND call wake-ups). " +
+			"Set FIREBASE_SERVICE_ACCOUNT (inline JSON) or FIREBASE_SERVICE_ACCOUNT_FILE.")
 		return false
 	}
 	var s serviceAccount

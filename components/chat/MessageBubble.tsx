@@ -1342,30 +1342,40 @@ function MessageBubble({
               🔒 unable to decrypt
             </Text>
           ) : msg.content == null && (msg.type === 'text' || msg.type === 'poll') ? (
-            // The message EXISTS but its body does not — here, and not on the
-            // server either.
+            // The message EXISTS and THIS DEVICE HOLDS NO READABLE COPY OF IT.
+            // That is the entire claim. It is deliberately not a claim about the
+            // server, because the client cannot make one.
             //
-            // The server keeps a durable spine row (id, sender, timestamp,
-            // reply/edit/delete state) and an EPHEMERAL body. Once every active
-            // device has acknowledged delivery — or the retention window passes —
-            // the body is reclaimed and the spine is all that comes back. A device
-            // that already received the message reads it from its own cache and
-            // never lands here; a device that never received it has nothing to
-            // show, and that is what this state says.
+            // This said "Message no longer available", which asserts the server
+            // reclaimed the body. It shipped that way because the null was read
+            // as coming from one place — the ephemeral body store returning a
+            // spine row with its body gone. A null reaches here from several:
             //
-            // It has to say something. `content` was falling through to `null`,
-            // which rendered an EMPTY BUBBLE: no text, no icon, no explanation,
-            // visually identical to a rendering bug. That path had never run in
-            // production (bodies are never reclaimed today), so it was untested
-            // rather than deliberately blank — and it is the one UI change the
-            // retention work genuinely requires, because "the body is gone" is
-            // information the user needs and the layout already implies.
+            //   • the sender's OWN message. A Double Ratchet ciphertext cannot be
+            //     opened by the party that produced it, so hydrateMessages leaves
+            //     the envelope (chatService.ts) and cacheMessages then stores NULL
+            //     for it (localDb.ts) whenever the own-plaintext cache misses.
+            //   • a peer message this device never managed to decrypt.
+            //   • a body the retention sweep genuinely reclaimed.
+            //
+            // Only the third is "no longer available", and it is the one that has
+            // never happened in production: MESSAGE_BODIES is unset there, so the
+            // body store has never been written to. The first is what users were
+            // actually shown — a bubble telling them the server had dropped a
+            // message the server still held in full. Verified against production
+            // for the reported chats: every one of those messages was intact on
+            // the spine, a few hundred bytes of `dr1` each, with no body row and
+            // no retention job ever having run against it.
+            //
+            // So the wording states only what is locally true, which is also true
+            // in the retention case. A bubble must never report a server-side fact
+            // it inferred from a local absence.
             //
             // Scoped to text/poll on purpose. A media message legitimately has a
             // null body when it carries no caption; its bubble is the attachment,
             // which renders above this and must not be labelled unavailable.
             <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, { fontStyle: 'italic', opacity: 0.7 }]}>
-              ⧗ Message no longer available
+              ⧗ Message not available on this device
             </Text>
           ) : null
         )}

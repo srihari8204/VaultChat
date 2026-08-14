@@ -91,6 +91,21 @@ check('cacheMessages nulls an envelope before writing',
 insert({ id: 200, content: null });                       // what the guard produces
 check('an unopened envelope cannot replace plaintext', get(200).content === 'readable text');
 
+// …and the consequence the CHAT BUBBLE depends on, pinned here because it is
+// not obvious from either file alone: a message this device cannot read is
+// stored with content NULL, exactly like one whose server body was reclaimed.
+//
+// So a NULL in this table means "no readable copy HERE", never "gone from the
+// server" — the sender's own messages are the common case, since a Double
+// Ratchet ciphertext cannot be opened by the party that produced it. A bubble
+// that reads NULL as server-side loss tells the user their message was dropped
+// while the server still holds it in full. MessageBubble.tsx must therefore
+// keep wording this as a local absence; see the comment on its null branch.
+insert({ id: 210, content: null });                       // never-seen, undecryptable
+check('an undecryptable message is stored indistinguishably from a purged one',
+  get(210).content === null,
+  'if this ever stores the envelope instead, revisit MessageBubble’s null branch');
+
 // ── 4. idempotency ───────────────────────────────────────────────────────
 console.log('the same server message must never duplicate');
 const before = count();

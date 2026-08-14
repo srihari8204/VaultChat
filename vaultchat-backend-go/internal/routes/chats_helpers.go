@@ -763,10 +763,36 @@ func chatsSendExpoPush(ctx context.Context, tokens []string, title, body string,
 			})
 		}
 		tickets := channelPostExpoBatch(ctx, chunk)
+		// EVERY error status is acted on or REPORTED — none are read and dropped.
+		//
+		// Only DeviceNotRegistered was inspected. Expo returns per-ticket errors
+		// for MismatchSenderId, InvalidCredentials, MessageTooBig and
+		// MessageRateExceeded too, and all of those fell through this loop
+		// silently: a project-level misconfiguration delivered nothing, forever,
+		// and produced not one line to find it by. "Push notifications are not
+		// working" is exactly the report that costs, because the server's own
+		// logs said everything was fine.
+		//
+		// Note this is the ACCEPTANCE ticket, not delivery. Expo reports real
+		// delivery outcomes on its receipts endpoint, which nothing here polls,
+		// so a clean run below still does not prove a phone buzzed.
+		other := map[string]int{}
 		for idx, t := range tickets {
-			if idx < len(slice) && t.Status == "error" && t.Details.Error == "DeviceNotRegistered" {
-				dead = append(dead, slice[idx])
+			if idx >= len(slice) || t.Status != "error" {
+				continue
 			}
+			if t.Details.Error == "DeviceNotRegistered" {
+				dead = append(dead, slice[idx])
+				continue
+			}
+			reason := t.Details.Error
+			if reason == "" {
+				reason = "unspecified"
+			}
+			other[reason]++
+		}
+		for reason, n := range other {
+			log.Printf("[push] Expo rejected %d chat notification(s): %s", n, reason)
 		}
 	}
 	if len(dead) > 0 {

@@ -19,8 +19,10 @@ package jobs
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
+	"sync"
 	"time"
 
 	"vaultchat/backend-go/internal/db"
@@ -54,7 +56,65 @@ func partitionsEnabled() bool { return os.Getenv("MESSAGE_BODY_PARTITIONS") != "
 // the media key lives inside the message body, so blob lifetime and body
 // lifetime have to switch over together or the key expires while the blob it
 // unlocks lingers.
-func bodyStoreEnabled() bool { return os.Getenv("MESSAGE_BODIES") == "1" }
+func bodyStoreEnabled() bool { return BodyStoreEnabled() }
+
+// bodyStoreRefused reports the reason the ephemeral body store may not be
+// enabled, or "" when it may.
+//
+// THE 3-HOUR CEILING AND THE 30-DAY FLOOR CANNOT BOTH HOLD.
+//
+// message_bodies carries a schema-level CHECK (migration 099):
+//
+//	message_bodies_ttl_cap  body_expires_at <= created_at + INTERVAL '3 hours'
+//
+// so a body with a 30-day deadline is not merely discouraged, it is REJECTED BY
+// THE DATABASE. Every body written under this flag is therefore destroyed by
+// expire-bodies three hours after the message was created — which is precisely
+// the outcome the retention contract forbids: a recipient who was offline for
+// an afternoon loses a message the server was supposed to be holding for them.
+//
+// Reconciling the two is a redesign, not a knob. It needs the CHECK relaxed to
+// the floor, a per-message TTL so explicitly-ephemeral messages keep their
+// short life while normal ones do not, and a partition window sized for the
+// floor (720 hourly partitions at 30 days, against the 48 the maintenance job
+// keeps today). None of that is done here.
+//
+// So the flag is refused rather than honoured. It DEGRADES rather than fails:
+// with the store off, bodies stay on the durable spine (messages.content) where
+// nothing reclaims them at all, which satisfies the floor with room to spare.
+// Refusing to boot would turn an operator's mistake into an outage; refusing to
+// shorten retention turns it into a log line.
+func bodyStoreRefused() string {
+	if os.Getenv("MESSAGE_BODIES") != "1" {
+		return "" // not requested; nothing to refuse
+	}
+	if bodyTTL() < time.Duration(MinRetentionDaysEffective())*24*time.Hour {
+		return fmt.Sprintf(
+			"MESSAGE_BODIES=1 REFUSED: the body store caps retention at %s "+
+				"(schema CHECK message_bodies_ttl_cap), but normal messages must be retained "+
+				"for at least %d days. Bodies stay on messages.content, which is not reclaimed. "+
+				"See jobs.MinRetentionDays and bodyStoreRefused().",
+			bodyTTL(), MinRetentionDaysEffective())
+	}
+	return ""
+}
+
+var bodyRefusalOnce sync.Once
+
+// BodyStoreEnabled is the single gate for the ephemeral body store, used by the
+// writer in internal/routes as well as by the jobs here, so the two can never
+// disagree about whether bodies are live.
+func BodyStoreEnabled() bool {
+	if os.Getenv("MESSAGE_BODIES") != "1" {
+		return false
+	}
+	if why := bodyStoreRefused(); why != "" {
+		bodyRefusalOnce.Do(func() { log.Printf("[retention] %s", why) })
+		metrics.Inc("message_bodies_enable_refused_total")
+		return false
+	}
+	return true
+}
 
 // StartPartitionMaintenance keeps the message_bodies partition window ahead of
 // the clock. Fires once at boot, then on a ticker, like the other jobs.

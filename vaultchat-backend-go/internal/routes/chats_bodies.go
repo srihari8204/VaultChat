@@ -29,7 +29,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -43,7 +42,14 @@ import (
 
 // bodiesEnabled gates the WRITE side only. Default OFF: applying migration 099
 // and deploying this binary changes nothing until it is switched on.
-func bodiesEnabled() bool { return os.Getenv("MESSAGE_BODIES") == "1" }
+//
+// Delegates to jobs.BodyStoreEnabled rather than re-reading the env var, which
+// it used to do. Two independent readings of one flag is exactly how the writer
+// and the reclaim jobs come to disagree about whether bodies are live — and now
+// that the flag can be REFUSED (the store's 3-hour ceiling cannot satisfy the
+// 30-day retention floor; see jobs.bodyStoreRefused), a second reading would
+// have kept writing bodies that the refused jobs no longer manage.
+func bodiesEnabled() bool { return jobs.BodyStoreEnabled() }
 
 // chatsMetaPublicKeys is the allow-list that stays on the durable spine.
 //
