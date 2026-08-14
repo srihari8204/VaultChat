@@ -14,11 +14,36 @@
 // No intent-filter and not exported: it is started explicitly by
 // VaultCallMessagingService, never by anything outside the app.
 
-const { withAndroidManifest } = require('@expo/config-plugins');
+const fs = require('fs');
+const path = require('path');
+const { withAndroidManifest, withDangerousMod } = require('@expo/config-plugins');
 
 const SERVICE = 'com.vaultchat.app.sync.VaultChatSyncService';
+const KOTLIN = 'VaultChatSyncService.kt';
+
+// Place the Kotlin source. android/ is prebuild OUTPUT, so the file has to be
+// copied in from plugins/android/ on every prebuild — the same arrangement
+// withVaultChatCalls.js uses for the call classes. Registering the service in
+// the manifest without shipping its class would leave a manifest entry
+// pointing at nothing, and every chat push would fail to start it.
+function withSyncKotlin(config) {
+  return withDangerousMod(config, ['android', (cfg) => {
+    const from = path.join(cfg.modRequest.projectRoot, 'plugins', 'android', KOTLIN);
+    if (!fs.existsSync(from)) {
+      throw new Error(`withVaultChatHeadlessSync: missing plugins/android/${KOTLIN}`);
+    }
+    const destDir = path.join(
+      cfg.modRequest.platformProjectRoot,
+      'app', 'src', 'main', 'java', 'com', 'vaultchat', 'app', 'sync',
+    );
+    fs.mkdirSync(destDir, { recursive: true });
+    fs.copyFileSync(from, path.join(destDir, KOTLIN));
+    return cfg;
+  }]);
+}
 
 module.exports = function withVaultChatHeadlessSync(config) {
+  config = withSyncKotlin(config);
   return withAndroidManifest(config, (cfg) => {
     const app = cfg.modResults.manifest.application && cfg.modResults.manifest.application[0];
     if (!app) {
