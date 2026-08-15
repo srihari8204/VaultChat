@@ -597,7 +597,7 @@ export async function searchAllMessages(
  * the newest `keepPerChat` rows of every chat untouchable, then trims the
  * globally-oldest surplus above `maxTotal` in bounded batches (≤5000/run, so
  * a boot sweep can't jank). Server history is unaffected — scroll-back
- * re-fetches via historySync exactly like a fresh install.
+ * re-fetches on demand (chat.tsx onEndReached) exactly like a fresh install.
  */
 export async function pruneMessageCache(maxTotal = 200000, keepPerChat = 300): Promise<number> {
   const db = await getLocalDb();

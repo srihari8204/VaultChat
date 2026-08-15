@@ -2,8 +2,8 @@
 //
 // On every reconnect, pull everything missed while offline in ONE global ordered
 // pass (GET /chats/delta), decrypt-once, and cache — including chats the client
-// never knew existed. Complements historySync (backward scroll-back) and the
-// live socket stream. All applies are idempotent (upsert by message id), so
+// never knew existed. Complements on-demand scroll-back (chat.tsx onEndReached)
+// and the live socket stream. All applies are idempotent (upsert by message id), so
 // running alongside live events can't dup or reorder.
 
 import { api } from './api';
