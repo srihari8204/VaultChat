@@ -44,6 +44,9 @@ const MINI_APPS_MAIN = [
   { id: 'notes',       icon: '\uD83D\uDCDD', name: 'Notes',       route: '/encrypted-notes', gradient: ['#F59E0B', '#D97706'] as [string, string] },
   { id: 'scanner',     icon: '\uD83D\uDCC4', name: 'Scanner',     route: '/docscanner',     gradient: ['#4A9FFF', '#1D4ED8'] as [string, string] },
   { id: 'shelf',       icon: '\uD83D\uDCDA', name: 'Shelf',        route: '/shelf',      gradient: ['#B45309', '#D97706'] as [string, string] },
+  // Hosted at games.corefinite.com, rendered in a WebView. Auth is not wired
+  // yet by design \u2014 the site loads anonymously until it is.
+  { id: 'games',       icon: '\uD83C\uDFAE', name: 'Games',       route: '/games',      gradient: ['#DB2777', '#7C3AED'] as [string, string] },
   { id: 'security',    icon: '\uD83D\uDEE1\uFE0F', name: 'Security Hub', route: '/aiguardian', gradient: ['#0E7490', '#164E63'] as [string, string] },
   { id: 'vaultid',     icon: '\uD83C\uDD94', name: 'VaultID',     route: '/decentralized-id', gradient: ['#7C3AED', '#4A9FFF'] as [string, string] },
 ];

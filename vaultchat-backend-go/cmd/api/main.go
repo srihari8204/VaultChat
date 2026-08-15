@@ -55,6 +55,7 @@ func main() {
 	routes.RegisterGif(mux)
 	routes.RegisterStories(mux)
 	routes.RegisterNav(mux)
+	routes.RegisterGames(mux) // VaultGames mini-app launch token
 	routes.RegisterCommunities(mux)
 	routes.RegisterAuth(mux)
 	routes.RegisterCalls(mux)
