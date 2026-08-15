@@ -14,11 +14,11 @@
       },
       "oauth_client": [
         {
-          "client_id": "553821750020-k20ga1ce2v19rc18mt3hhd6t107eghhr.apps.googleusercontent.com",
+          "client_id": "553821750020-vb84l091k0nf8sek4fqiutt73useqi8p.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
             "package_name": "com.vaultchat.app",
-            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+            "certificate_hash": "8de8cbfafce2533b67dec18201e9c67d82440d82"
           }
         },
         {
