@@ -1,0 +1,1547 @@
+<title>Facet Theme Studio</title>
+
+<style>
+/* ═══════════ FACET — prototype chrome + app tokens ═══════════ */
+:root{
+  --wb-bg:#EEEDF2; --wb-panel:#FFFFFF; --wb-line:#DEDCE6; --wb-tx:#17141F; --wb-tx2:#6A6680; --wb-acc:#5B3FD6;
+  --bg:#0B0910; --surface:#17131F; --raised:#211B2C; --line:rgba(255,255,255,.09); --line2:rgba(255,255,255,.055);
+  --tx:#FFFFFF; --tx2:rgba(255,255,255,.62); --tx3:rgba(255,255,255,.36);
+  --acc:#7C93FF; --acc2:#B48CFF; --on-acc:#0B0910;
+  --ok:#4ADE80; --warn:#FBBF24; --crit:#F87171;
+  --f:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --fd:ui-rounded,"SF Pro Rounded",system-ui,-apple-system,sans-serif;
+  --fm:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-wb="light"]){--wb-bg:#0A0910;--wb-panel:#141220;--wb-line:#262135;--wb-tx:#F2F0F7;--wb-tx2:#9B96AE;--wb-acc:#9D85FF;}}
+:root[data-wb="dark"]{--wb-bg:#0A0910;--wb-panel:#141220;--wb-line:#262135;--wb-tx:#F2F0F7;--wb-tx2:#9B96AE;--wb-acc:#9D85FF;}
+body[data-app="light"]{--bg:#F5F4F8;--surface:#FFFFFF;--raised:#FFFFFF;--line:rgba(11,9,16,.10);--line2:rgba(11,9,16,.06);--tx:#14121A;--tx2:rgba(20,18,26,.62);--tx3:rgba(20,18,26,.38);--on-acc:#FFFFFF;}
+
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--wb-bg);color:var(--wb-tx);font-family:var(--f);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0;text-align:left}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-radius:6px}
+.ic{width:20px;height:20px;flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.ic.s{width:16px;height:16px}.ic.l{width:24px;height:24px}
+
+/* ═══════════ workbench ═══════════ */
+.wb{display:grid;grid-template-columns:1fr;height:100vh;overflow:hidden}
+@media(min-width:1100px){.wb{grid-template-columns:250px 1fr}}
+.idx{display:none;background:var(--wb-panel);border-right:1px solid var(--wb-line);overflow-y:auto;padding:18px 0 40px}
+@media(min-width:1100px){.idx{display:block}}
+.idx h1{font-family:var(--fd);font-size:19px;font-weight:800;letter-spacing:-.02em;margin:0 18px 2px}
+.idx .sub{font-size:11.5px;color:var(--wb-tx2);margin:0 18px 16px;font-family:var(--fm)}
+.idx h2{font-family:var(--fm);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--wb-tx2);margin:16px 18px 5px;font-weight:600}
+.idx a{display:flex;gap:8px;align-items:baseline;padding:5px 18px;font-size:13px;color:var(--wb-tx2);text-decoration:none}
+.idx a:hover{background:color-mix(in srgb,var(--wb-acc) 10%,transparent);color:var(--wb-tx)}
+.idx a.on{color:var(--wb-acc);font-weight:600}
+.idx a i{font-family:var(--fm);font-size:10px;font-style:normal;opacity:.7;width:20px;flex:none}
+.stage{display:flex;flex-direction:column;overflow:hidden}
+.bar{display:flex;gap:8px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--wb-line);background:var(--wb-panel);flex-wrap:wrap}
+.bar .t{font-family:var(--fm);font-size:11px;color:var(--wb-tx2)}
+.bar .sp{margin-left:auto}
+.bar button{border:1px solid var(--wb-line);border-radius:999px;padding:5px 11px;font-size:11.5px;font-family:var(--fm);color:var(--wb-tx2)}
+.bar button[aria-pressed="true"]{border-color:var(--wb-acc);color:var(--wb-acc);background:color-mix(in srgb,var(--wb-acc) 12%,transparent)}
+.pit{flex:1;overflow:auto;display:grid;place-items:center;padding:22px}
+body[data-mode="full"] .pit{padding:0;place-items:stretch}
+
+/* device */
+.dev{width:390px;height:790px;max-height:calc(100vh - 110px);border-radius:46px;padding:9px;background:linear-gradient(160deg,#4b4857,#181620);box-shadow:0 30px 70px rgba(0,0,0,.34)}
+body[data-mode="full"] .dev{width:100%;height:100%;max-height:none;border-radius:0;padding:0;background:none;box-shadow:none}
+.vp{width:100%;height:100%;border-radius:38px;overflow:hidden;background:var(--bg);color:var(--tx);position:relative;display:flex;flex-direction:column}
+body[data-mode="full"] .vp{border-radius:0}
+@media(max-width:1099px){.dev{width:100%;max-width:430px;height:calc(100vh - 56px);border-radius:0;padding:0;background:none;box-shadow:none}.vp{border-radius:0}.pit{padding:0}}
+
+/* ═══════════ app shell ═══════════ */
+.scr{display:none;flex-direction:column;position:absolute;inset:0;background:var(--bg)}
+.scr.on{display:flex}
+.sb{display:flex;justify-content:space-between;align-items:center;padding:12px 20px 4px;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;flex:none}
+.sb .r{display:flex;gap:4px;align-items:center}
+.sb .r b{width:3px;background:currentColor;border-radius:1px;display:block}
+.sb .r b:nth-child(1){height:5px}.sb .r b:nth-child(2){height:7px}.sb .r b:nth-child(3){height:9px}
+.sb .bat{width:20px;height:10px;border:1px solid currentColor;border-radius:3px;opacity:.8;position:relative}
+.sb .bat::after{content:"";position:absolute;inset:2px;width:64%;background:currentColor;border-radius:1px}
+.hd{display:flex;align-items:center;gap:12px;padding:6px 18px 10px;flex:none}
+.hd .ttl{font-family:var(--fd);font-size:20px;font-weight:800;letter-spacing:-.03em}
+.hd .sub{font-size:11px;color:var(--tx2)}
+.hd .sp{margin-left:auto;display:flex;gap:14px;align-items:center}
+.body{flex:1;overflow-y:auto;overflow-x:hidden;padding-bottom:14px}
+.body::-webkit-scrollbar{width:0}
+.pad{padding:0 18px}
+.tabbar{display:none;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line);background:var(--surface);padding:8px 4px 16px;flex:none;position:absolute;left:0;right:0;bottom:0;z-index:20}
+body[data-tabs="on"] .tabbar{display:grid}
+body[data-tabs="on"] .scr.on .body{padding-bottom:82px}
+.tab{display:grid;justify-items:center;gap:3px;color:var(--tx3);font-size:9.5px;font-weight:600;padding:2px 0}
+.tab.on{color:var(--acc)}
+
+/* type */
+.h1{font-family:var(--fd);font-size:27px;font-weight:800;letter-spacing:-.035em;line-height:1.1}
+.h2{font-family:var(--fd);font-size:17px;font-weight:800;letter-spacing:-.02em}
+.h3{font-size:14px;font-weight:700;letter-spacing:-.01em}
+.mut{color:var(--tx2);font-size:12.5px}
+.tiny{font-size:10.5px;color:var(--tx3)}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:46px;border-radius:999px;padding:0 20px;font-size:14.5px;font-weight:700;letter-spacing:-.01em}
+.btn.pri{background:var(--acc);color:var(--on-acc)}
+.btn.sec{background:var(--raised);color:var(--tx);border:1px solid var(--line)}
+.btn.gh{color:var(--tx2)}
+.btn.wide{width:100%}
+.btn.sm{height:36px;font-size:12.5px;padding:0 14px}
+.btn.dg{background:rgba(248,113,113,.14);color:var(--crit)}
+.iconbtn{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;background:var(--raised);border:1px solid var(--line);color:var(--tx)}
+
+/* chips + segmented */
+.chips{display:flex;gap:7px;overflow-x:auto;padding:0 18px 2px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;padding:7px 13px;border-radius:999px;background:var(--surface);border:1px solid var(--line);font-size:12.5px;font-weight:600;color:var(--tx2);white-space:nowrap}
+.chip.on{background:var(--acc);border-color:transparent;color:var(--on-acc)}
+.seg{display:flex;gap:3px;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:3px}
+.seg button{flex:1;text-align:center;padding:7px 0;border-radius:999px;font-size:12px;font-weight:700;color:var(--tx2)}
+.seg button[aria-selected="true"]{background:var(--acc);color:var(--on-acc)}
+
+/* section head */
+.sh{display:flex;align-items:baseline;justify-content:space-between;padding:20px 18px 10px}
+.sh .a{font-size:12px;color:var(--acc);font-weight:700}
+
+/* ═══════════ theme card ═══════════ */
+.rail{display:flex;gap:11px;overflow-x:auto;padding:0 18px 4px;scrollbar-width:none}
+.rail::-webkit-scrollbar{display:none}
+.card{flex:none;width:124px}
+.card .art{height:166px;border-radius:16px;position:relative;overflow:hidden;border:1px solid var(--line)}
+.card .nm{font-size:12.5px;font-weight:700;margin-top:7px;letter-spacing:-.01em}
+.card .by{font-size:10.5px;color:var(--tx2)}
+.card.w{width:100%}
+.card.w .art{height:190px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 18px}
+.grid .card{width:auto}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px;padding:0 18px}
+.grid3 .art{height:118px;border-radius:13px}
+.pb{position:absolute;top:7px;right:7px;z-index:2;font-size:8.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;padding:3px 7px;border-radius:999px;background:rgba(0,0,0,.5);color:#fff;backdrop-filter:blur(8px)}
+.pb.prem{background:var(--acc);color:var(--on-acc)}
+.pb.ai{background:rgba(180,140,255,.9);color:#0B0910}
+.fav{position:absolute;top:6px;left:6px;z-index:2;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:rgba(0,0,0,.4);color:#fff;backdrop-filter:blur(8px)}
+.fav.on{color:#FF6B8A}
+
+/* wallpaper art from tokens */
+.art{background:
+  radial-gradient(88% 55% at 78% 6%,var(--a2,#241B4B) 0%,transparent 58%),
+  radial-gradient(76% 48% at 8% 96%,var(--a3,#B48CFF) 0%,transparent 46%),
+  linear-gradient(168deg,var(--a0,#171B3A),var(--a1,#0E1130) 66%)}
+.art.t-mid{--a0:#171B3A;--a1:#0E1130;--a2:#241B4B;--a3:#7C93FF}
+.art.t-neon{--a0:#2A0620;--a1:#14020F;--a2:#3D0733;--a3:#FF3D8B}
+.art.t-paper{--a0:#FFFFFF;--a1:#EDEAE2;--a2:#DCD9CF;--a3:#1F6F5C}
+.art.t-forest{--a0:#0B2417;--a1:#06170F;--a2:#123A22;--a3:#4ADE80}
+.art.t-gold{--a0:#171410;--a1:#0B0A08;--a2:#2A2115;--a3:#D9B36A}
+.art.t-sakura{--a0:#2C0F1F;--a1:#1A0A14;--a2:#43162E;--a3:#FF8FB1}
+.art.t-mono{--a0:#1C1C1C;--a1:#0C0C0C;--a2:#2E2E2E;--a3:#9A9A9A}
+.art.t-cyber{--a0:#0F1B3D;--a1:#050A1C;--a2:#1B0B3A;--a3:#34E7E4}
+.art .mini{position:absolute;left:9px;right:9px;bottom:9px;display:grid;grid-template-columns:repeat(4,1fr);gap:5px}
+.art .mini i{aspect-ratio:1;border-radius:5px;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.14);display:block}
+.art.t-paper .mini i{background:rgba(0,0,0,.09);border-color:rgba(0,0,0,.08)}
+
+/* ═══════════ phone preview (one renderer) ═══════════ */
+.pv{--p0:#171B3A;--p1:#0E1130;--p2:#241B4B;--pa:#7C93FF;--pa2:#B48CFF;--ptx:#fff;--pdim:rgba(255,255,255,.6);
+  --psurf:rgba(255,255,255,.13);--pstroke:rgba(255,255,255,.16);--pir:12px;--pop:.13;--pf:var(--fd);--pcols:4;
+  position:relative;border-radius:26px;overflow:hidden;border:1px solid var(--pstroke);
+  background:radial-gradient(88% 55% at 78% 6%,var(--p2) 0%,transparent 58%),radial-gradient(76% 48% at 8% 96%,var(--pa2) 0%,transparent 44%),linear-gradient(168deg,var(--p0),var(--p1) 66%);
+  color:var(--ptx);display:flex;flex-direction:column;font-family:var(--pf)}
+.pv[data-light="1"]{--ptx:#16150F;--pdim:rgba(22,21,15,.56);--psurf:rgba(22,21,15,.06);--pstroke:rgba(22,21,15,.12)}
+.pv-sb{display:flex;justify-content:space-between;padding:11px 15px 0;font-size:9.5px;font-weight:700;opacity:.9}
+.pv-in{flex:1;display:flex;flex-direction:column;padding:10px 13px 13px;min-height:0}
+.pv-face{display:none;flex-direction:column;height:100%}
+.pv[data-face="home"] .f-home,.pv[data-face="lock"] .f-lock,.pv[data-face="wgt"] .f-wgt{display:flex}
+.pv-w{border-radius:15px;background:var(--psurf);border:1px solid var(--pstroke);padding:9px 11px;display:flex;align-items:center;gap:9px;backdrop-filter:blur(9px)}
+.pv-w .o{width:26px;height:26px;border-radius:50%;background:var(--pa);flex:none}
+.pv-w .l1{font-size:11px;font-weight:700}.pv-w .l2{font-size:8.5px;color:var(--pdim)}
+.pv-w .rt{margin-left:auto;font-size:16px;font-weight:800;letter-spacing:-.03em}
+.pv-apps{margin-top:auto;display:grid;grid-template-columns:repeat(var(--pcols),1fr);gap:11px 9px}
+.pv-app{display:grid;justify-items:center;gap:3px}
+.pv-app i{width:100%;aspect-ratio:1;max-width:38px;border-radius:var(--pir);background:color-mix(in srgb,var(--pa) calc(var(--pop)*100%),var(--psurf));border:1px solid var(--pstroke);display:grid;place-items:center}
+.pv-app i::after{content:"";width:36%;height:36%;border-radius:4px;background:var(--pa)}
+.pv-app:nth-child(2n) i::after{border-radius:50%;background:var(--pa2)}
+.pv-app:nth-child(3n) i::after{border-radius:2px;height:14%;width:44%}
+.pv-app span{font-size:6.5px;color:var(--pdim)}
+.pv-dock{margin-top:11px;border-radius:19px;background:var(--psurf);border:1px solid var(--pstroke);padding:8px;display:grid;grid-template-columns:repeat(4,1fr);gap:9px}
+.pv-dock i{aspect-ratio:1;border-radius:var(--pir);background:var(--pa);opacity:.9;display:block}
+.pv-dock i:nth-child(2n){background:var(--pa2)}
+.pv-clock{text-align:center;margin-top:10px}
+.pv-clock .t{font-size:44px;font-weight:800;letter-spacing:-.05em;line-height:1;font-variant-numeric:tabular-nums}
+.pv-clock .d{font-size:9px;color:var(--pdim);letter-spacing:.1em;text-transform:uppercase;margin-top:4px}
+.pv[data-clock="thin"] .pv-clock .t{font-weight:300;letter-spacing:-.02em}
+.pv[data-clock="huge"] .pv-clock .t{font-size:60px}
+.pv[data-clock="inline"] .pv-clock .t{font-size:30px}
+.pv-note{margin-top:auto;border-radius:15px;background:var(--psurf);border:1px solid var(--pstroke);padding:9px 11px}
+.pv-note b{font-size:9.5px;display:block}.pv-note span{font-size:8.5px;color:var(--pdim)}
+.pv-wg{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px}
+.pv-wg div{border-radius:15px;background:var(--psurf);border:1px solid var(--pstroke);padding:9px;height:76px;display:flex;flex-direction:column;justify-content:space-between}
+.pv-wg b{font-size:16px;font-weight:800;letter-spacing:-.03em}
+.pv-wg span{font-size:7.5px;color:var(--pdim);letter-spacing:.08em;text-transform:uppercase}
+
+/* ═══════════ sheets + modals ═══════════ */
+.scrim{position:absolute;inset:0;background:rgba(0,0,0,.55);opacity:0;pointer-events:none;transition:opacity .22s;z-index:40}
+body[data-sheet="on"] .scrim{opacity:1;pointer-events:auto}
+.sheet{position:absolute;left:0;right:0;bottom:0;z-index:50;background:var(--surface);border-top:1px solid var(--line);border-radius:26px 26px 0 0;
+  transform:translateY(102%);transition:transform .26s cubic-bezier(.2,.8,.25,1);max-height:88%;display:flex;flex-direction:column;box-shadow:0 -20px 50px rgba(0,0,0,.4)}
+.sheet.on{transform:translateY(0)}
+.sheet .grab{width:36px;height:4px;border-radius:999px;background:var(--tx3);margin:9px auto 4px;flex:none}
+.sheet .sh-h{padding:6px 18px 10px;flex:none}
+.sheet .sh-b{overflow-y:auto;padding:0 18px 22px}
+.sheet .sh-f{padding:12px 18px 22px;border-top:1px solid var(--line2);flex:none;display:flex;gap:9px}
+.row{display:flex;align-items:center;gap:12px;padding:13px 0;border-bottom:1px solid var(--line2)}
+.row:last-child{border-bottom:0}
+.row .sp{margin-left:auto;color:var(--tx2);font-size:12.5px;display:flex;align-items:center;gap:8px}
+.cb{width:22px;height:22px;border-radius:7px;border:1.6px solid var(--line);display:grid;place-items:center;flex:none;color:transparent}
+.cb.on{background:var(--acc);border-color:transparent;color:var(--on-acc)}
+.sw{width:40px;height:24px;border-radius:999px;background:var(--raised);border:1px solid var(--line);position:relative;flex:none}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:var(--tx3);transition:.18s}
+.sw.on{background:var(--acc);border-color:transparent}
+.sw.on::after{left:19px;background:var(--on-acc)}
+
+/* editor bits */
+.swatches{display:flex;gap:10px;flex-wrap:wrap;padding:4px 0 2px}
+.swatches button{width:42px;height:42px;border-radius:50%;border:2px solid transparent}
+.swatches button[aria-pressed="true"]{outline:2px solid var(--acc);outline-offset:3px}
+.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.tile{border-radius:14px;overflow:hidden;border:1px solid var(--line);position:relative;height:96px}
+.tile[aria-pressed="true"]{outline:2px solid var(--acc);outline-offset:2px}
+.tile span{position:absolute;left:7px;bottom:6px;font-size:9.5px;font-weight:700;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.6)}
+.packs{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.pack{border:1px solid var(--line);border-radius:14px;padding:11px;background:var(--raised)}
+.pack[aria-pressed="true"]{border-color:var(--acc)}
+.pack .pg{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-bottom:8px}
+.pack .pg i{aspect-ratio:1;background:var(--acc);opacity:.85;display:block}
+.pack .pg i:nth-child(2n){background:var(--acc2)}
+.pack.sq .pg i{border-radius:4px}.pack.rd .pg i{border-radius:50%}.pack.sc .pg i{border-radius:8px}
+.pack.gl .pg i{background:rgba(255,255,255,.22);border:1px solid var(--line);border-radius:8px}
+.pack b{font-size:12.5px;display:block}.pack em{font-style:normal;font-size:10.5px;color:var(--tx2)}
+.fonts{display:grid;gap:9px}
+.fontc{border:1px solid var(--line);border-radius:14px;padding:12px 14px;background:var(--raised)}
+.fontc[aria-pressed="true"]{border-color:var(--acc)}
+.fontc .p{font-size:22px;font-weight:800;letter-spacing:-.03em}
+.fontc .n{font-size:10.5px;color:var(--tx2);margin-top:2px}
+.slider{display:flex;align-items:center;gap:11px;padding:9px 0}
+.slider .tr{flex:1;height:5px;border-radius:999px;background:var(--raised);position:relative}
+.slider .tr i{position:absolute;left:0;top:0;bottom:0;border-radius:999px;background:var(--acc);display:block}
+.slider .tr b{position:absolute;top:-6px;width:17px;height:17px;border-radius:50%;background:var(--tx);border:3px solid var(--acc);display:block}
+.wgtcards{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.wgtcard{border:1px solid var(--line);border-radius:14px;padding:11px;background:var(--raised);height:82px;display:flex;flex-direction:column;justify-content:space-between}
+.wgtcard b{font-size:16px;font-weight:800;letter-spacing:-.03em}
+.wgtcard span{font-size:9px;color:var(--tx2);text-transform:uppercase;letter-spacing:.08em}
+.appicons{display:grid;grid-template-columns:repeat(4,1fr);gap:12px 9px}
+.appicon{display:grid;justify-items:center;gap:4px}
+.appicon i{width:100%;aspect-ratio:1;border-radius:14px;background:var(--raised);border:1px solid var(--line);display:grid;place-items:center}
+.appicon i::after{content:"";width:38%;height:38%;border-radius:5px;background:var(--acc)}
+.appicon[aria-pressed="true"] i{outline:2px solid var(--acc);outline-offset:2px}
+.appicon span{font-size:9px;color:var(--tx2)}
+
+/* progress / stages */
+.stages{display:grid;gap:2px;padding:4px 0}
+.stage-r{display:flex;align-items:center;gap:11px;padding:10px 0;font-size:13px;color:var(--tx2)}
+.stage-r .dot{width:18px;height:18px;border-radius:50%;border:1.6px solid var(--line);display:grid;place-items:center;flex:none;color:transparent}
+.stage-r.done{color:var(--tx)}
+.stage-r.done .dot{background:var(--ok);border-color:transparent;color:#08130C}
+.stage-r.now .dot{border-color:var(--acc);border-right-color:transparent;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.bigok{width:76px;height:76px;border-radius:50%;background:rgba(74,222,128,.16);color:var(--ok);display:grid;place-items:center;margin:0 auto 14px}
+
+/* states */
+.state{display:grid;place-items:center;text-align:center;gap:7px;padding:40px 30px;height:100%;align-content:center}
+.state .gl{width:88px;height:88px;border-radius:28px;border:1.6px dashed var(--line);display:grid;place-items:center;color:var(--tx3);margin-bottom:8px}
+.state.err .gl{border-style:solid;border-color:rgba(248,113,113,.4);color:var(--crit)}
+.state h3{font-family:var(--fd);font-size:18px;font-weight:800;letter-spacing:-.02em;margin:0}
+.state p{font-size:13px;color:var(--tx2);margin:0;max-width:26ch}
+.skel .b{border-radius:14px;background:var(--surface);border:1px solid var(--line2);position:relative;overflow:hidden}
+.skel .b::after{content:"";position:absolute;inset:0;background:linear-gradient(100deg,transparent 20%,rgba(255,255,255,.07) 50%,transparent 80%);transform:translateX(-100%);animation:sweep 1.6s ease-in-out infinite}
+@keyframes sweep{to{transform:translateX(100%)}}
+.toast{position:absolute;left:18px;right:18px;bottom:96px;z-index:70;background:var(--raised);border:1px solid var(--line);border-radius:15px;padding:12px 14px;display:flex;gap:11px;align-items:center;box-shadow:0 12px 30px rgba(0,0,0,.4);transform:translateY(140%);transition:transform .24s cubic-bezier(.2,.8,.25,1)}
+.toast.on{transform:translateY(0)}
+.toast .u{margin-left:auto;color:var(--acc);font-weight:700;font-size:12.5px}
+.banner{margin:0 18px 12px;background:var(--raised);border:1px solid var(--line);border-radius:13px;padding:10px 12px;display:flex;gap:10px;align-items:center;font-size:12px;color:var(--tx2)}
+
+/* misc */
+.hero{margin:2px 18px 0;border-radius:22px;overflow:hidden;position:relative;height:290px;border:1px solid var(--line);display:flex;flex-direction:column;justify-content:flex-end;padding:16px}
+.hero .in{position:relative;z-index:2}
+.hero h2{font-family:var(--fd);font-size:26px;font-weight:800;letter-spacing:-.035em;margin:0}
+.hero .sub{font-size:12px;color:rgba(255,255,255,.72);margin-top:3px}
+.hero .btns{display:flex;gap:9px;margin-top:13px}
+.search{display:flex;align-items:center;gap:10px;height:44px;border-radius:999px;background:var(--surface);border:1px solid var(--line);padding:0 15px;color:var(--tx3);font-size:13.5px;margin:0 18px}
+.prof-h{display:grid;justify-items:center;gap:3px;padding:10px 18px 0}
+.prof-h .av{width:78px;height:78px;border-radius:50%;background:linear-gradient(150deg,var(--acc),var(--acc2))}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--line);border-radius:16px;margin:16px 18px 0;background:var(--surface)}
+.stats div{padding:12px 0;text-align:center}
+.stats div+div{border-left:1px solid var(--line)}
+.stats b{display:block;font-family:var(--fd);font-size:19px;font-weight:800;letter-spacing:-.03em}
+.stats span{font-size:9.5px;color:var(--tx2);text-transform:uppercase;letter-spacing:.09em}
+.plan{margin:14px 18px 0;border-radius:20px;padding:16px;background:linear-gradient(140deg,var(--acc),var(--acc2));color:var(--on-acc)}
+.plan h3{font-family:var(--fd);font-size:19px;font-weight:800;margin:0;letter-spacing:-.03em}
+.plan p{font-size:12px;margin:3px 0 12px;opacity:.85}
+.list{margin:14px 18px 0;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:var(--surface)}
+.list button,.list .li{display:flex;align-items:center;gap:12px;padding:14px;width:100%;font-size:13.5px;border-bottom:1px solid var(--line2)}
+.list button:last-child,.list .li:last-child{border-bottom:0}
+.list .sp{margin-left:auto;color:var(--tx3);font-size:12px;display:flex;align-items:center;gap:8px}
+.faq{border-bottom:1px solid var(--line2)}
+.faq summary{padding:14px 0;font-size:13.5px;font-weight:600;list-style:none;display:flex;gap:10px;align-items:center;cursor:pointer}
+.faq summary::-webkit-details-marker{display:none}
+.faq[open] summary{color:var(--acc)}
+.faq p{margin:0 0 14px;font-size:12.5px;color:var(--tx2)}
+.field{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-top:10px}
+.field label{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--tx3);font-weight:700}
+.field .v{font-size:13.5px;margin-top:3px;color:var(--tx2)}
+.field .v.tall{min-height:64px}
+.meta{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--tx2);padding:12px 18px 0}
+.meta b{color:var(--tx)}
+.sticky{position:absolute;left:0;right:0;bottom:0;padding:12px 18px 22px;background:linear-gradient(to top,var(--bg) 62%,transparent);display:flex;gap:9px;z-index:15}
+.creator{display:flex;align-items:center;gap:10px;padding:12px 18px 0}
+.creator .av{width:34px;height:34px;border-radius:50%;background:linear-gradient(150deg,var(--acc2),var(--acc))}
+@media(prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-home" viewBox="0 0 24 24"><path d="M3.5 11 12 4l8.5 7M5.5 9.5V20h13V9.5M10 20v-5h4v5"/></symbol>
+<symbol id="i-wand" viewBox="0 0 24 24"><path d="m4 20 11-11M14.5 5.5 18.5 9.5M16.5 3.5 20.5 7.5M6 4v3M4.5 5.5h3M18 15v3M16.5 16.5h3"/></symbol>
+<symbol id="i-lib" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 9h18M9 9v11"/></symbol>
+<symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></symbol>
+<symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5 8 12l7 7"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+<symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20s-7.5-4.7-7.5-9.8A4.2 4.2 0 0 1 12 7.4a4.2 4.2 0 0 1 7.5 2.8C19.5 15.3 12 20 12 20Z"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7"/></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+<symbol id="i-img" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="m4 17 5-4.5 4 3.5 3-2.5 4 3.5"/></symbol>
+<symbol id="i-apps" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></symbol>
+<symbol id="i-wgt" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="2.5"/><rect x="3" y="14" width="8" height="6" rx="2"/><rect x="14" y="14" width="7" height="6" rx="2"/></symbol>
+<symbol id="i-pal" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18 2 2 0 0 0 1.6-3.2 2 2 0 0 1 1.6-3.2H18a3 3 0 0 0 3-3A9 9 0 0 0 12 3Z"/><circle cx="8" cy="10" r="1.2"/><circle cx="12" cy="7.5" r="1.2"/><circle cx="16" cy="10" r="1.2"/></symbol>
+<symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="3"/><path d="M8.5 10V7.5a3.5 3.5 0 0 1 7 0V10"/></symbol>
+<symbol id="i-type" viewBox="0 0 24 24"><path d="M5 6h14M12 6v13M9 19h6"/></symbol>
+<symbol id="i-undo" viewBox="0 0 24 24"><path d="M4 11a8 8 0 1 1 3 6.2"/><path d="M4 6v5h5"/></symbol>
+<symbol id="i-redo" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-3 6.2"/><path d="M20 6v5h-5"/></symbol>
+<symbol id="i-share" viewBox="0 0 24 24"><path d="M12 15V4M8.5 7.5 12 4l3.5 3.5"/><path d="M5 13v6a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-6"/></symbol>
+<symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/></symbol>
+<symbol id="i-dl" viewBox="0 0 24 24"><path d="M12 4v11M8 11l4 4 4-4"/><path d="M5 20h14"/></symbol>
+<symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 3.5 21 19H3l9-15.5ZM12 10v4M12 16.5v0"/></symbol>
+<symbol id="i-off" viewBox="0 0 24 24"><path d="M3 3l18 18M8.5 15.5a5 5 0 0 1 7 0M5 12a10 10 0 0 1 4-2.4M19 12a10 10 0 0 0-8-2.9M12 19v0"/></symbol>
+<symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3.5 2.6 5.4 6 .9-4.3 4.2 1 6L12 17.2 6.7 20l1-6L3.4 9.8l6-.9L12 3.5Z"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m4 7 8 6 8-6"/></symbol>
+<symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.2 2.4c-.6.2-.7.7-.7 1.3M12 16.5v0"/></symbol>
+</svg>
+
+<div class="wb">
+  <!-- ───────── screen index ───────── -->
+  <aside class="idx">
+    <h1>Facet</h1>
+    <div class="sub">Prototype · 42 surfaces</div>
+    <h2>Onboarding</h2>
+    <a href="#a1" data-go="a1"><i>A1</i>Splash</a>
+    <a href="#a2" data-go="a2"><i>A2</i>Welcome</a>
+    <a href="#a3" data-go="a3"><i>A3</i>Choose your style</a>
+    <a href="#a4" data-go="a4"><i>A4</i>Made for you</a>
+    <h2>Home</h2>
+    <a href="#b1" data-go="b1"><i>B1</i>Home</a>
+    <a href="#c1" data-go="c1"><i>C1</i>Search</a>
+    <a href="#c2" data-go="c2"><i>C2</i>Search results</a>
+    <a href="#n1" data-go="n1"><i>N1</i>Community</a>
+    <h2>Theme</h2>
+    <a href="#d1" data-go="d1"><i>D1</i>Theme preview</a>
+    <a href="#e1" data-sheet="apply"><i>E1</i>Apply sheet</a>
+    <a href="#e2" data-sheet="applyp"><i>E2</i>Apply progress</a>
+    <h2>Studio</h2>
+    <a href="#f1" data-go="f1"><i>F1</i>Theme Studio</a>
+    <a href="#g1" data-sheet="wall"><i>G1</i>Wallpaper</a>
+    <a href="#h1" data-sheet="icons"><i>H1</i>Icon style</a>
+    <a href="#h2" data-sheet="icon1"><i>H2</i>Individual icons</a>
+    <a href="#i1" data-sheet="wgts"><i>I1</i>Widget gallery</a>
+    <a href="#i2" data-sheet="wgt1"><i>I2</i>Widget settings</a>
+    <a href="#j1" data-sheet="lockg"><i>J1</i>Lock gallery</a>
+    <a href="#j2" data-sheet="locke"><i>J2</i>Lock editor</a>
+    <a href="#k1" data-sheet="color"><i>K1</i>Color Studio</a>
+    <a href="#l1" data-sheet="type"><i>L1</i>Typography</a>
+    <h2>AI</h2>
+    <a href="#m1" data-sheet="ai"><i>M1</i>AI generator</a>
+    <a href="#m2" data-sheet="aigen"><i>M2</i>Generating</a>
+    <a href="#m3" data-sheet="aires"><i>M3</i>AI result</a>
+    <a href="#m4" data-sheet="remix"><i>M4</i>Remix</a>
+    <h2>Creator</h2>
+    <a href="#n2" data-sheet="creator"><i>N2</i>Creator profile</a>
+    <a href="#n3" data-sheet="publish"><i>N3</i>Publish</a>
+    <h2>Library &amp; account</h2>
+    <a href="#o1" data-go="o1"><i>O1</i>Library</a>
+    <a href="#o2" data-go="o2"><i>O2</i>Saved theme</a>
+    <a href="#p1" data-go="p1"><i>P1</i>Profile</a>
+    <a href="#q1" data-sheet="prem"><i>Q1</i>Premium</a>
+    <a href="#r1" data-go="r1"><i>R1</i>Settings</a>
+    <a href="#s1" data-go="s1"><i>S1</i>Help center</a>
+    <a href="#s2" data-go="s2"><i>S2</i>FAQ</a>
+    <a href="#s3" data-go="s3"><i>S3</i>Contact support</a>
+    <h2>States</h2>
+    <a href="#t1" data-go="t1"><i>T1</i>Loading skeleton</a>
+    <a href="#t2" data-go="t2"><i>T2</i>Empty library</a>
+    <a href="#t3" data-go="t3"><i>T3</i>No results</a>
+    <a href="#t4" data-go="t4"><i>T4</i>Network error</a>
+    <a href="#t5" data-go="t5"><i>T5</i>Download error</a>
+    <a href="#t6" data-go="t6"><i>T6</i>Apply error</a>
+    <a href="#t7" data-sheet="locked"><i>T7</i>Premium locked</a>
+    <a href="#t8" data-go="t8"><i>T8</i>Offline</a>
+    <a href="#t9" data-go="t9"><i>T9</i>Success</a>
+  </aside>
+
+  <!-- ───────── stage ───────── -->
+  <div class="stage">
+    <div class="bar">
+      <span class="t" id="crumb">B1 · Home</span>
+      <span class="sp"></span>
+      <button id="bAppTheme" aria-pressed="false">App: dark</button>
+      <button id="bMode" aria-pressed="false">Full bleed</button>
+      <button id="bWb" aria-pressed="false">Page: light</button>
+    </div>
+    <div class="pit">
+      <div class="dev"><div class="vp" id="vp">
+
+<!-- ══════════════════ A1 SPLASH ══════════════════ -->
+<section class="scr" id="s-a1">
+  <div class="state" style="gap:14px">
+    <div style="width:96px;height:96px;border-radius:30px;background:linear-gradient(140deg,var(--acc),var(--acc2));display:grid;place-items:center">
+      <svg class="ic l" style="color:var(--on-acc);width:44px;height:44px"><use href="#i-wand"/></svg>
+    </div>
+    <h3 style="font-size:30px;letter-spacing:-.04em">Facet</h3>
+    <p>Your phone, redesigned.</p>
+    <div class="skel" style="width:120px;margin-top:12px"><div class="b" style="height:4px;border-radius:999px"></div></div>
+  </div>
+</section>
+
+<!-- ══════════════════ A2 WELCOME ══════════════════ -->
+<section class="scr" id="s-a2">
+  <div class="body" style="display:flex;flex-direction:column">
+    <div style="flex:1;display:grid;place-items:center;padding:26px 40px 0">
+      <div class="pv" data-face="home" style="width:190px;height:390px;box-shadow:0 26px 60px rgba(0,0,0,.45)">
+        <div class="pv-sb"><span>9:41</span><span>􀙇</span></div>
+        <div class="pv-in">
+          <div class="pv-face f-home">
+            <div class="pv-w"><span class="o"></span><span><span class="l1">Bengaluru</span><span class="l2">Partly cloudy</span></span><span class="rt">24°</span></div>
+            <div class="pv-apps"><span class="pv-app"><i></i></span><span class="pv-app"><i></i></span><span class="pv-app"><i></i></span><span class="pv-app"><i></i></span><span class="pv-app"><i></i></span><span class="pv-app"><i></i></span><span class="pv-app"><i></i></span><span class="pv-app"><i></i></span></div>
+            <div class="pv-dock"><i></i><i></i><i></i><i></i></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="pad" style="padding-bottom:26px">
+      <h2 class="h1" style="font-size:32px">Make your<br>phone yours.</h2>
+      <p class="mut" style="margin:9px 0 20px;max-width:30ch">Complete themes — wallpaper, icons, widgets, colours and lock screen — applied in one tap.</p>
+      <button class="btn pri wide" data-go="a3">Get started</button>
+      <button class="btn gh wide" style="margin-top:6px" data-go="a3">Continue as guest</button>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ A3 STYLE PICKER ══════════════════ -->
+<section class="scr" id="s-a3">
+  <div class="sb"><span>9:41</span><span class="r"><b></b><b></b><b></b><span class="bat"></span></span></div>
+  <div class="hd"><button class="iconbtn" data-go="a2"><svg class="ic"><use href="#i-back"/></svg></button><span><span class="ttl" style="font-size:17px">Choose your style</span><span class="sub">Pick 2 or 3 · you can change this later</span></span></div>
+  <div class="body">
+    <div class="grid3" id="styleGrid">
+      <button class="card" data-style><span class="art t-mid" style="height:104px;display:block"></span><span class="nm">Minimal</span></button>
+      <button class="card" data-style><span class="art t-mono" style="height:104px;display:block"></span><span class="nm">Dark</span></button>
+      <button class="card" data-style><span class="art t-gold" style="height:104px;display:block"></span><span class="nm">Luxury</span></button>
+      <button class="card" data-style><span class="art t-sakura" style="height:104px;display:block"></span><span class="nm">Anime</span></button>
+      <button class="card" data-style><span class="art t-forest" style="height:104px;display:block"></span><span class="nm">Nature</span></button>
+      <button class="card" data-style><span class="art t-cyber" style="height:104px;display:block"></span><span class="nm">Gaming</span></button>
+      <button class="card" data-style><span class="art t-neon" style="height:104px;display:block"></span><span class="nm">Retro</span></button>
+      <button class="card" data-style><span class="art t-paper" style="height:104px;display:block"></span><span class="nm">Pastel</span></button>
+      <button class="card" data-style><span class="art t-neon" style="height:104px;display:block"></span><span class="nm">Neon</span></button>
+      <button class="card" data-style><span class="art t-mid" style="height:104px;display:block"></span><span class="nm">Glass</span></button>
+      <button class="card" data-style><span class="art t-sakura" style="height:104px;display:block"></span><span class="nm">Cute</span></button>
+      <button class="card" data-style><span class="art t-cyber" style="height:104px;display:block"></span><span class="nm">Abstract</span></button>
+    </div>
+  </div>
+  <div class="sticky"><button class="btn pri wide" data-go="a4">Continue <span id="styleCount" class="tiny" style="color:inherit;opacity:.7">0 selected</span></button></div>
+</section>
+
+<!-- ══════════════════ A4 PERSONALIZED ══════════════════ -->
+<section class="scr" id="s-a4">
+  <div class="sb"><span>9:41</span><span class="r"><b></b><b></b><b></b><span class="bat"></span></span></div>
+  <div class="hd"><span><span class="ttl">Made for you</span><span class="sub">Based on the styles you picked</span></span></div>
+  <div class="body">
+    <div class="grid">
+      <button class="card w" data-go="d1"><span class="art t-mid" style="display:block"><span class="pb prem">Facet+</span></span><span class="nm">Midnight Glass</span><span class="by">Nocturne</span></button>
+      <button class="card w" data-go="d1"><span class="art t-gold" style="display:block"></span><span class="nm">Gold Standard</span><span class="by">Atlas Ateliér</span></button>
+      <button class="card w" data-go="d1"><span class="art t-forest" style="display:block"></span><span class="nm">Cedar</span><span class="by">Lumen Lab</span></button>
+      <button class="card w" data-go="d1"><span class="art t-sakura" style="display:block"><span class="pb prem">Facet+</span></span><span class="nm">Sakura Drift</span><span class="by">Kira Works</span></button>
+    </div>
+  </div>
+  <div class="sticky"><button class="btn pri wide" data-go="b1">Explore themes</button></div>
+</section>
+
+<!-- ══════════════════ B1 HOME ══════════════════ -->
+<section class="scr" id="s-b1">
+  <div class="sb"><span>9:41</span><span class="r"><b></b><b></b><b></b><span class="bat"></span></span></div>
+  <div class="hd">
+    <span><span class="sub">Good evening, Sri</span><span class="ttl">Find your next look.</span></span>
+    <span class="sp">
+      <button class="iconbtn" data-go="c1" aria-label="Search"><svg class="ic"><use href="#i-search"/></svg></button>
+      <button class="iconbtn" data-go="p1" aria-label="Profile" style="background:linear-gradient(150deg,var(--acc),var(--acc2));border:0"></button>
+    </span>
+  </div>
+  <div class="body">
+    <div class="hero art t-mid" data-go="d1">
+      <span class="pb prem">Facet+</span>
+      <div class="in">
+        <h2>Midnight Glass</h2>
+        <div class="sub">Wallpaper · Icons · 4 widgets · Lock screen</div>
+        <div class="btns">
+          <button class="btn pri sm" style="flex:1" data-sheet="apply">Apply theme</button>
+          <button class="btn sec sm" data-go="d1" style="background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.2);color:#fff">Preview</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="sh"><span class="h2">Popular styles</span></div>
+    <div class="chips">
+      <button class="chip on">All</button><button class="chip">Minimal</button><button class="chip">Dark</button><button class="chip">Glass</button><button class="chip">Anime</button><button class="chip">Nature</button><button class="chip">Luxury</button><button class="chip">Neon</button><button class="chip">Retro</button><button class="chip">Pastel</button><button class="chip">Gaming</button>
+    </div>
+
+    <div class="sh"><span class="h2">Trending</span><button class="a" data-go="c2">See all</button></div>
+    <div class="rail">
+      <button class="card" data-go="d1"><span class="art t-cyber" style="display:block"><span class="fav"><svg class="ic s"><use href="#i-heart"/></svg></span></span><span class="nm">Ocean Glass</span><span class="by">Nocturne</span></button>
+      <button class="card" data-go="d1"><span class="art t-sakura" style="display:block"><span class="pb prem">+</span></span><span class="nm">Sakura Drift</span><span class="by">Kira Works</span></button>
+      <button class="card" data-go="d1"><span class="art t-forest" style="display:block"></span><span class="nm">Cedar</span><span class="by">Atlas</span></button>
+      <button class="card" data-go="d1"><span class="art t-neon" style="display:block"></span><span class="nm">Neon District</span><span class="by">Grid Nine</span></button>
+    </div>
+
+    <div class="sh"><span class="h2">For you</span><button class="a" data-go="c2">See all</button></div>
+    <div class="rail">
+      <button class="card" data-go="d1"><span class="art t-gold" style="display:block"><span class="pb prem">+</span></span><span class="nm">Gold Standard</span><span class="by">Atlas Ateliér</span></button>
+      <button class="card" data-go="d1"><span class="art t-mono" style="display:block"></span><span class="nm">Ink</span><span class="by">Paperfold</span></button>
+      <button class="card" data-go="d1"><span class="art t-paper" style="display:block"></span><span class="nm">Paper Light</span><span class="by">Soft Corp</span></button>
+      <button class="card" data-go="d1"><span class="art t-mid" style="display:block"></span><span class="nm">Harbor</span><span class="by">Lumen Lab</span></button>
+    </div>
+
+    <div class="sh"><span class="h2">New this week</span></div>
+    <div class="rail">
+      <button class="card" data-go="d1"><span class="art t-cyber" style="display:block"><span class="pb">New</span></span><span class="nm">Vector One</span><span class="by">Grid Nine</span></button>
+      <button class="card" data-go="d1"><span class="art t-sakura" style="display:block"><span class="pb">New</span></span><span class="nm">Blush</span><span class="by">Soft Corp</span></button>
+      <button class="card" data-go="d1"><span class="art t-forest" style="display:block"><span class="pb">New</span></span><span class="nm">Moss</span><span class="by">Lumen Lab</span></button>
+    </div>
+
+    <div class="sh"><span class="h2">Editor's picks</span></div>
+    <div class="grid">
+      <button class="card w" data-go="d1"><span class="art t-gold" style="display:block"><span class="pb prem">Facet+</span></span><span class="nm">Velvet Rope</span><span class="by">Atlas Ateliér</span></button>
+      <button class="card w" data-go="d1"><span class="art t-mid" style="display:block"><span class="pb prem">Facet+</span></span><span class="nm">Aurora Bay</span><span class="by">Nocturne</span></button>
+    </div>
+
+    <div class="sh"><span class="h2">From the community</span><button class="a" data-go="n1">See all</button></div>
+    <div class="rail">
+      <button class="card" data-go="d1"><span class="art t-neon" style="display:block"></span><span class="nm">Arcade</span><span class="by">@pixelmaya</span></button>
+      <button class="card" data-go="d1"><span class="art t-mono" style="display:block"></span><span class="nm">Newsprint</span><span class="by">@fold</span></button>
+      <button class="card" data-go="d1"><span class="art t-forest" style="display:block"></span><span class="nm">Tide</span><span class="by">@rhea.b</span></button>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ C1 SEARCH ══════════════════ -->
+<section class="scr" id="s-c1">
+  <div class="sb"><span>9:41</span><span class="r"><b></b><b></b><b></b><span class="bat"></span></span></div>
+  <div class="hd"><button class="iconbtn" data-go="b1"><svg class="ic"><use href="#i-back"/></svg></button><span class="ttl" style="font-size:17px">Search</span></div>
+  <div class="search" style="border-color:var(--acc)"><svg class="ic s"><use href="#i-search"/></svg><span>Search themes, styles, colors…</span></div>
+  <div class="body" style="padding-top:20px">
+    <div class="pad">
+      <div class="h3" style="color:var(--tx2);margin-bottom:9px">Recent</div>
+      <div class="chips" style="padding-left:0;flex-wrap:wrap"><button class="chip">dark blue minimal</button><button class="chip">glass icons</button><button class="chip">pink anime</button></div>
+      <div class="h3" style="color:var(--tx2);margin:20px 0 9px">Trending searches</div>
+      <div class="chips" style="padding-left:0;flex-wrap:wrap"><button class="chip" data-go="c2">black luxury</button><button class="chip" data-go="c2">summer beach</button><button class="chip" data-go="c2">gaming setup</button><button class="chip" data-go="c2">minimal work</button><button class="chip" data-go="c2">neon tokyo</button></div>
+      <div class="h3" style="color:var(--tx2);margin:20px 0 9px">Popular styles</div>
+    </div>
+    <div class="grid3">
+      <button class="card" data-go="c2"><span class="art t-mid" style="height:96px;display:block"></span><span class="nm">Glass</span></button>
+      <button class="card" data-go="c2"><span class="art t-gold" style="height:96px;display:block"></span><span class="nm">Luxury</span></button>
+      <button class="card" data-go="c2"><span class="art t-forest" style="height:96px;display:block"></span><span class="nm">Nature</span></button>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ C2 RESULTS ══════════════════ -->
+<section class="scr" id="s-c2">
+  <div class="sb"><span>9:41</span><span class="r"><b></b><b></b><b></b><span class="bat"></span></span></div>
+  <div class="hd"><button class="iconbtn" data-go="c1"><svg class="ic"><use href="#i-back"/></svg></button><span><span class="ttl" style="font-size:16px">dark blue minimal</span><span class="sub">218 results · dark · blue · minimal</span></span></div>
+  <div class="chips" style="padding-bottom:10px">
+    <button class="chip on">Themes</button><button class="chip">Wallpapers</button><button class="chip">Icons</button><button class="chip">Widgets</button><button class="chip">Creators</button><button class="chip">Collections</button>
+  </div>
+  <div class="body">
+    <div class="grid">
+      <button class="card w" data-go="d1"><span class="art t-mid" style="display:block"><span class="pb prem">Facet+</span></span><span class="nm">Midnight Glass</span><span class="by">Nocturne</span></button>
+      <button class="card w" data-go="d1"><span class="art t-cyber" style="display:block"></span><span class="nm">Harbor</span><span class="by">Lumen Lab</span></button>
+      <button class="card w" data-go="d1"><span class="art t-mono" style="display:block"></span><span class="nm">Graphite</span><span class="by">Paperfold</span></button>
+      <button class="card w" data-go="d1"><span class="art t-mid" style="display:block"></span><span class="nm">Deep Space</span><span class="by">Nocturne</span></button>
+      <button class="card w" data-go="d1"><span class="art t-cyber" style="display:block"></span><span class="nm">Arctic</span><span class="by">Grid Nine</span></button>
+      <button class="card w" data-go="d1"><span class="art t-mid" style="display:block"></span><span class="nm">Steel</span><span class="by">Atlas</span></button>
+    </div>
+    <div class="grid" style="margin-top:12px">
+      <div class="skel"><div class="b" style="height:190px"></div></div>
+      <div class="skel"><div class="b" style="height:190px"></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ D1 THEME PREVIEW ══════════════════ -->
+<section class="scr" id="s-d1">
+  <div class="sb"><span>9:41</span><span class="r"><b></b><b></b><b></b><span class="bat"></span></span></div>
+  <div class="hd">
+    <button class="iconbtn" data-go="b1"><svg class="ic"><use href="#i-back"/></svg></button>
+    <span class="sp">
+      <button class="iconbtn" id="favBtn" aria-pressed="false"><svg class="ic"><use href="#i-heart"/></svg></button>
+      <button class="iconbtn"><svg class="ic"><use href="#i-share"/></svg></button>
+    </span>
+  </div>
+  <div class="body" style="padding-bottom:108px">
+    <div style="display:grid;place-items:center;padding:0 40px">
+      <div class="pv" id="pvPreview" data-face="home" style="width:216px;height:440px;box-shadow:0 24px 56px rgba(0,0,0,.45)">
+        <div class="pv-sb"><span>9:41</span><span>􀙇</span></div>
+        <div class="pv-in">
+          <div class="pv-face f-home">
+            <div class="pv-w"><span class="o"></span><span><span class="l1">Bengaluru</span><span class="l2">Partly cloudy</span></span><span class="rt">24°</span></div>
+            <div class="pv-apps"><span class="pv-app"><i></i><span>Mail</span></span><span class="pv-app"><i></i><span>Photos</span></span><span class="pv-app"><i></i><span>Notes</span></span><span class="pv-app"><i></i><span>Maps</span></span><span class="pv-app"><i></i><span>Music</span></span><span class="pv-app"><i></i><span>Health</span></span><span class="pv-app"><i></i><span>Files</span></span><span class="pv-app"><i></i><span>Camera</span></span></div>
+            <div class="pv-dock"><i></i><i></i><i></i><i></i></div>
+          </div>
+          <div class="pv-face f-lock">
+            <div class="pv-clock"><div class="t">9:41</div><div class="d">Saturday 15 August</div></div>
+            <div class="pv-note"><b>Facet</b><span>Midnight Glass is ready to apply</span></div>
+          </div>
+          <div class="pv-face f-wgt" style="gap:8px">
+            <div class="pv-w" style="margin-top:4px"><span class="o"></span><span><span class="l1">Now playing</span><span class="l2">Low Tide — Ambient</span></span><span class="rt">▸</span></div>
+            <div class="pv-wg"><div><span>Steps</span><b>8,412</b></div><div><span>Battery</span><b>68%</b></div><div><span>Next up</span><b>11:30</b></div><div><span>Countdown</span><b>12d</b></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="pad" style="margin-top:14px">
+      <div class="seg" data-seg="pvPreview"><button aria-selected="true" data-face="home">Home</button><button aria-selected="false" data-face="lock">Lock</button><button aria-selected="false" data-face="wgt">Widgets</button></div>
+    </div>
+    <div class="pad" style="margin-top:18px">
+      <h2 class="h1" style="font-size:23px">Midnight Glass</h2>
+      <div class="meta" style="padding:8px 0 0">
+        <span><b>4.8</b> ★</span><span><b>240K</b> downloads</span><span><b>48K</b> likes</span><span class="chip" style="padding:4px 10px">Glass</span><span class="chip" style="padding:4px 10px">Dark</span>
+      </div>
+    </div>
+    <button class="creator" data-sheet="creator" style="width:100%">
+      <span class="av"></span><span style="text-align:left"><span class="h3" style="display:block">Nocturne</span><span class="tiny">Verified creator · 38 themes</span></span><span class="sp" style="margin-left:auto"><svg class="ic s" style="color:var(--tx3)"><use href="#i-chev"/></svg></span>
+    </button>
+
+    <div class="sh"><span class="h2">Variations</span></div>
+    <div class="rail">
+      <button class="card" style="width:88px"><span class="art t-mid" style="height:118px;display:block"></span><span class="nm">Original</span></button>
+      <button class="card" style="width:88px"><span class="art t-cyber" style="height:118px;display:block"></span><span class="nm">Blue</span></button>
+      <button class="card" style="width:88px"><span class="art t-sakura" style="height:118px;display:block"></span><span class="nm">Sunset</span></button>
+      <button class="card" style="width:88px"><span class="art t-forest" style="height:118px;display:block"></span><span class="nm">Mint</span></button>
+      <button class="card" style="width:88px"><span class="art t-paper" style="height:118px;display:block"></span><span class="nm">Light</span></button>
+    </div>
+
+    <div class="sh"><span class="h2">Complete the look</span></div>
+    <div class="rail">
+      <button class="card" style="width:104px"><span class="art t-mid" style="height:80px;display:block"><span class="mini"><i></i><i></i><i></i><i></i></span></span><span class="nm">Glass icons</span><span class="by">Matching pack</span></button>
+      <button class="card" style="width:104px"><span class="art t-mid" style="height:80px;display:block"></span><span class="nm">Mesh wallpaper</span><span class="by">4 variants</span></button>
+      <button class="card" style="width:104px"><span class="art t-cyber" style="height:80px;display:block"></span><span class="nm">Lock screen</span><span class="by">Stacked clock</span></button>
+    </div>
+  </div>
+  <div class="sticky">
+    <button class="btn pri" style="flex:1" data-sheet="apply">Apply theme</button>
+    <button class="btn sec" data-go="f1">Customize</button>
+  </div>
+</section>
+
+<!-- ══════════════════ O2 SAVED THEME ══════════════════ -->
+<section class="scr" id="s-o2">
+  <div class="sb"><span>9:41</span><span class="r"><b></b><b></b><b></b><span class="bat"></span></span></div>
+  <div class="hd"><button class="iconbtn" data-go="o1"><svg class="ic"><use href="#i-back"/></svg></button><span><span class="ttl" style="font-size:17px">Late Harbor</span><span class="sub">Created by you · edited today</span></span></div>
+  <div class="body" style="padding-bottom:108px">
+    <div style="display:grid;place-items:center;padding:6px 44px 0">
+      <div class="pv" data-face="home" style="width:200px;height:400px">
+        <div class="pv-sb"><span>9:41</span><span>􀙇</span></div>
+        <div class="pv-in"><div class="pv-face f-home">
+          <div class="pv-w"><span class="o"></span><span><span class="l1">Bengaluru</span><span class="l2">Clear</span></span><span class="rt">21°</span></div>
+          <div class="pv-apps"><span class="pv-app"><i></i></span><span class="pv-app"><i></i></span><span class="pv-app"><i></i></span><span class="pv-app"><i></i></span><span class="pv-app"><i></i></span><span class="pv-app"><i></i></span><span class="pv-app"><i></i></span><span class="pv-app"><i></i></span></div>
+          <div class="pv-dock"><i></i><i></i><i></i><i></i></div>
+        </div></div>
+      </div>
+    </div>
+    <div class="list">
+      <button data-go="f1"><svg class="ic"><use href="#i-wand"/></svg>Customize<span class="sp"><svg class="ic s"><use href="#i-chev"/></svg></span></button>
+      <button><svg class="ic"><use href="#i-share"/></svg>Share<span class="sp"><svg class="ic s"><use href="#i-chev"/></svg></span></button>
+      <button data-sheet="publish"><svg class="ic"><use href="#i-dl"/></svg>Publish to community<span class="sp"><svg class="ic s"><use href="#i-chev"/></svg></span></button>
+      <button style="color:var(--crit)" data-toast="Theme deleted"><svg class="ic"><use href="#i-trash"/></svg>Delete</button>
+    </div>
+  </div>
+  <div class="sticky"><button class="btn pri wide" data-sheet="apply">Apply theme</button></div>
+</section>
+
+<!-- ══════════════════ F1 STUDIO ══════════════════ -->
+<section class="scr" id="s-f1">
+  <div class="sb"><span>9:41</span><span class="r"><b></b><b></b><b></b><span class="bat"></span></span></div>
+  <div class="hd" style="padding-bottom:6px">
+    <button class="iconbtn" data-sheet="unsaved"><svg class="ic"><use href="#i-back"/></svg></button>
+    <span><span class="ttl" style="font-size:16px" id="studioName">Ocean Glass</span><span class="sub" id="studioState">Edited · not saved</span></span>
+    <span class="sp">
+      <button class="iconbtn" id="undoBtn" aria-label="Undo"><svg class="ic s"><use href="#i-undo"/></svg></button>
+      <button class="iconbtn" id="redoBtn" aria-label="Redo"><svg class="ic s"><use href="#i-redo"/></svg></button>
+      <button class="btn pri sm" data-sheet="save">Save</button>
+    </span>
+  </div>
+  <div class="body" style="display:flex;flex-direction:column;padding-bottom:0">
+    <div class="pad" style="padding-bottom:10px"><div class="seg" data-seg="pvStudio"><button aria-selected="true" data-face="home">Home</button><button aria-selected="false" data-face="lock">Lock</button><button aria-selected="false" data-face="wgt">Widgets</button></div></div>
+    <div style="flex:1;display:grid;place-items:center;padding:0 48px 12px;min-height:340px">
+      <div class="pv" id="pvStudio" data-face="home" data-clock="stacked" style="width:100%;max-width:224px;height:100%;min-height:340px;max-height:430px">
+        <div class="pv-sb"><span>9:41</span><span>􀙇</span></div>
+        <div class="pv-in">
+          <div class="pv-face f-home">
+            <div class="pv-w"><span class="o"></span><span><span class="l1">Bengaluru</span><span class="l2">Partly cloudy</span></span><span class="rt">24°</span></div>
+            <div class="pv-apps"><span class="pv-app"><i></i><span>Mail</span></span><span class="pv-app"><i></i><span>Photos</span></span><span class="pv-app"><i></i><span>Notes</span></span><span class="pv-app"><i></i><span>Maps</span></span><span class="pv-app"><i></i><span>Music</span></span><span class="pv-app"><i></i><span>Health</span></span><span class="pv-app"><i></i><span>Files</span></span><span class="pv-app"><i></i><span>Camera</span></span></div>
+            <div class="pv-dock"><i></i><i></i><i></i><i></i></div>
+          </div>
+          <div class="pv-face f-lock">
+            <div class="pv-clock"><div class="t">9:41</div><div class="d">Saturday 15 August</div></div>
+            <div class="pv-note"><b>Messages</b><span>Meera · See you at 8</span></div>
+          </div>
+          <div class="pv-face f-wgt" style="gap:8px">
+            <div class="pv-w" style="margin-top:4px"><span class="o"></span><span><span class="l1">Now playing</span><span class="l2">Low Tide — Ambient</span></span><span class="rt">▸</span></div>
+            <div class="pv-wg"><div><span>Steps</span><b>8,412</b></div><div><span>Battery</span><b>68%</b></div><div><span>Next up</span><b>11:30</b></div><div><span>Countdown</span><b>12d</b></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="rail" style="padding:6px 18px 18px;gap:9px">
+      <button class="card" style="width:66px" data-sheet="wall"><span class="iconbtn" style="width:56px;height:56px;border-radius:18px;margin:0 auto"><svg class="ic"><use href="#i-img"/></svg></span><span class="nm" style="text-align:center;font-size:10.5px">Wallpaper</span></button>
+      <button class="card" style="width:66px" data-sheet="icons"><span class="iconbtn" style="width:56px;height:56px;border-radius:18px;margin:0 auto"><svg class="ic"><use href="#i-apps"/></svg></span><span class="nm" style="text-align:center;font-size:10.5px">Icons</span></button>
+      <button class="card" style="width:66px" data-sheet="wgts"><span class="iconbtn" style="width:56px;height:56px;border-radius:18px;margin:0 auto"><svg class="ic"><use href="#i-wgt"/></svg></span><span class="nm" style="text-align:center;font-size:10.5px">Widgets</span></button>
+      <button class="card" style="width:66px" data-sheet="color"><span class="iconbtn" style="width:56px;height:56px;border-radius:18px;margin:0 auto"><svg class="ic"><use href="#i-pal"/></svg></span><span class="nm" style="text-align:center;font-size:10.5px">Colors</span></button>
+      <button class="card" style="width:66px" data-sheet="layout"><span class="iconbtn" style="width:56px;height:56px;border-radius:18px;margin:0 auto"><svg class="ic"><use href="#i-grid"/></svg></span><span class="nm" style="text-align:center;font-size:10.5px">Layout</span></button>
+      <button class="card" style="width:66px" data-sheet="lockg"><span class="iconbtn" style="width:56px;height:56px;border-radius:18px;margin:0 auto"><svg class="ic"><use href="#i-lock"/></svg></span><span class="nm" style="text-align:center;font-size:10.5px">Lock</span></button>
+      <button class="card" style="width:66px" data-sheet="type"><span class="iconbtn" style="width:56px;height:56px;border-radius:18px;margin:0 auto"><svg class="ic"><use href="#i-type"/></svg></span><span class="nm" style="text-align:center;font-size:10.5px">Type</span></button>
+      <button class="card" style="width:66px" data-sheet="ai"><span class="iconbtn" style="width:56px;height:56px;border-radius:18px;margin:0 auto;background:var(--acc);color:var(--on-acc);border:0"><svg class="ic"><use href="#i-wand"/></svg></span><span class="nm" style="text-align:center;font-size:10.5px">AI</span></button>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ N1 COMMUNITY ══════════════════ -->
+<section class="scr" id="s-n1">
+  <div class="sb"><span>9:41</span><span class="r"><b></b><b></b><b></b><span class="bat"></span></span></div>
+  <div class="hd"><button class="iconbtn" data-go="b1"><svg class="ic"><use href="#i-back"/></svg></button><span><span class="ttl" style="font-size:17px">Community</span><span class="sub">Made by people using Facet</span></span></div>
+  <div class="chips" style="padding-bottom:10px"><button class="chip on">Popular</button><button class="chip">New</button><button class="chip">Following</button><button class="chip">Free</button></div>
+  <div class="body">
+    <div class="grid">
+      <button class="card w" data-go="d1"><span class="art t-neon" style="display:block"></span><span class="nm">Arcade</span><span class="by">@pixelmaya · 12K ↓</span></button>
+      <button class="card w" data-go="d1"><span class="art t-mono" style="display:block"></span><span class="nm">Newsprint</span><span class="by">@fold · 8.4K ↓</span></button>
+      <button class="card w" data-go="d1"><span class="art t-forest" style="display:block"></span><span class="nm">Tide</span><span class="by">@rhea.b · 6.1K ↓</span></button>
+      <button class="card w" data-go="d1"><span class="art t-sakura" style="display:block"></span><span class="nm">Petal</span><span class="by">@kuro · 5.9K ↓</span></button>
+      <button class="card w" data-go="d1"><span class="art t-cyber" style="display:block"></span><span class="nm">Vector</span><span class="by">@grid9 · 4.2K ↓</span></button>
+      <button class="card w" data-go="d1"><span class="art t-gold" style="display:block"></span><span class="nm">Brass</span><span class="by">@atlas · 3.8K ↓</span></button>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ O1 LIBRARY ══════════════════ -->
+<section class="scr" id="s-o1">
+  <div class="sb"><span>9:41</span><span class="r"><b></b><b></b><b></b><span class="bat"></span></span></div>
+  <div class="hd"><span class="ttl">Library</span><span class="sp"><button class="iconbtn" data-go="t2" aria-label="Empty state"><svg class="ic s"><use href="#i-search"/></svg></button></span></div>
+  <div class="chips"><button class="chip on">All</button><button class="chip">Themes</button><button class="chip">Icons</button><button class="chip">Widgets</button><button class="chip">Wallpapers</button></div>
+  <div class="body">
+    <div style="margin:14px 18px 0;border:1px solid var(--acc);border-radius:16px;padding:12px;display:flex;gap:12px;align-items:center;background:var(--surface)">
+      <span class="art t-mid" style="width:42px;height:42px;border-radius:12px;display:block;flex:none"></span>
+      <span><span class="h3" style="display:block">Midnight Glass</span><span class="tiny">Applied 2 days ago</span></span>
+      <span style="margin-left:auto;font-size:9.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--acc)">Applied</span>
+    </div>
+    <div class="sh"><span class="h2">Recently used</span><span class="tiny">12</span></div>
+    <div class="grid">
+      <button class="card w" data-go="o2"><span class="art t-cyber" style="display:block"><span class="pb">Created</span></span><span class="nm">Late Harbor</span><span class="by">You · today</span></button>
+      <button class="card w" data-go="o2"><span class="art t-gold" style="display:block"><span class="pb prem">Facet+</span></span><span class="nm">Gold Standard</span><span class="by">Atlas Ateliér</span></button>
+      <button class="card w" data-go="o2"><span class="art t-paper" style="display:block"><span class="pb">Saved</span></span><span class="nm">Paper Light</span><span class="by">Soft Corp</span></button>
+      <button class="card w" data-go="o2"><span class="art t-sakura" style="display:block"><span class="pb ai">AI</span></span><span class="nm">Violet Static</span><span class="by">Made with AI</span></button>
+      <button class="card w" data-go="o2"><span class="art t-forest" style="display:block"><span class="pb">Saved</span></span><span class="nm">Cedar</span><span class="by">Lumen Lab</span></button>
+      <button class="card w" data-go="o2"><span class="art t-mono" style="display:block"><span class="pb">Downloaded</span></span><span class="nm">Ink</span><span class="by">Paperfold</span></button>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ P1 PROFILE ══════════════════ -->
+<section class="scr" id="s-p1">
+  <div class="sb"><span>9:41</span><span class="r"><b></b><b></b><b></b><span class="bat"></span></span></div>
+  <div class="hd"><span class="ttl">You</span><span class="sp"><button class="iconbtn" data-go="r1" aria-label="Settings"><svg class="ic s"><use href="#i-grid"/></svg></button></span></div>
+  <div class="body">
+    <div class="prof-h"><span class="av"></span><b class="h2" style="margin-top:9px">Sri Balla</b><span class="tiny">@sri · Creator</span></div>
+    <div class="stats"><div><b>7</b><span>Created</span></div><div><b>34</b><span>Saved</span></div><div><b>18K</b><span>Downloads</span></div></div>
+    <div class="plan">
+      <h3>Facet+</h3>
+      <p>Unlimited AI themes, premium packs, advanced customization.</p>
+      <button class="btn sm" style="background:var(--on-acc);color:var(--acc)" data-sheet="prem">See what's included</button>
+    </div>
+    <div class="list">
+      <button data-go="o1"><svg class="ic"><use href="#i-lib"/></svg>My themes<span class="sp">7 <svg class="ic s"><use href="#i-chev"/></svg></span></button>
+      <button data-go="r1"><svg class="ic"><use href="#i-pal"/></svg>Appearance<span class="sp">System <svg class="ic s"><use href="#i-chev"/></svg></span></button>
+      <button data-go="r1"><svg class="ic"><use href="#i-dl"/></svg>Downloads<span class="sp">1.2 GB <svg class="ic s"><use href="#i-chev"/></svg></span></button>
+      <button data-go="s1"><svg class="ic"><use href="#i-help"/></svg>Help &amp; support<span class="sp"><svg class="ic s"><use href="#i-chev"/></svg></span></button>
+      <button data-go="r1"><svg class="ic"><use href="#i-lock"/></svg>Privacy<span class="sp"><svg class="ic s"><use href="#i-chev"/></svg></span></button>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ R1 SETTINGS ══════════════════ -->
+<section class="scr" id="s-r1">
+  <div class="sb"><span>9:41</span><span class="r"><b></b><b></b><b></b><span class="bat"></span></span></div>
+  <div class="hd"><button class="iconbtn" data-go="p1"><svg class="ic"><use href="#i-back"/></svg></button><span class="ttl" style="font-size:17px">Settings</span></div>
+  <div class="body">
+    <div class="list" style="margin-top:4px">
+      <div class="li"><svg class="ic"><use href="#i-user"/></svg>Account<span class="sp">sri@mail.com</span></div>
+      <div class="li"><svg class="ic"><use href="#i-pal"/></svg>Appearance<span class="sp">System</span></div>
+      <div class="li"><svg class="ic"><use href="#i-mail"/></svg>Notifications<span class="sp"><span class="sw on"></span></span></div>
+      <div class="li"><svg class="ic"><use href="#i-type"/></svg>Language<span class="sp">English</span></div>
+      <div class="li"><svg class="ic"><use href="#i-dl"/></svg>Downloads<span class="sp">Wi-Fi only</span></div>
+    </div>
+    <div class="list">
+      <div class="li"><svg class="ic"><use href="#i-lock"/></svg>Privacy<span class="sp"><svg class="ic s"><use href="#i-chev"/></svg></span></div>
+      <div class="li"><svg class="ic"><use href="#i-help"/></svg>Terms &amp; policies<span class="sp"><svg class="ic s"><use href="#i-chev"/></svg></span></div>
+      <button data-go="s1"><svg class="ic"><use href="#i-help"/></svg>Help<span class="sp"><svg class="ic s"><use href="#i-chev"/></svg></span></button>
+      <div class="li"><svg class="ic"><use href="#i-star"/></svg>About<span class="sp">v1.0</span></div>
+    </div>
+    <p class="tiny pad" style="margin-top:16px">Themes are rendered on your device. Prompts never leave your phone.</p>
+  </div>
+</section>
+
+<!-- ══════════════════ S1 HELP ══════════════════ -->
+<section class="scr" id="s-s1">
+  <div class="sb"><span>9:41</span><span class="r"><b></b><b></b><b></b><span class="bat"></span></span></div>
+  <div class="hd"><button class="iconbtn" data-go="p1"><svg class="ic"><use href="#i-back"/></svg></button><span class="ttl" style="font-size:17px">Help center</span></div>
+  <div class="search"><svg class="ic s"><use href="#i-search"/></svg><span>Search help</span></div>
+  <div class="body" style="padding-top:16px">
+    <div class="pad"><div class="h3" style="color:var(--tx2);margin-bottom:8px">Popular questions</div></div>
+    <div class="list" style="margin-top:0">
+      <button data-go="s2">Why do icons need an extra step?<span class="sp"><svg class="ic s"><use href="#i-chev"/></svg></span></button>
+      <button data-go="s2">How do I undo an applied theme?<span class="sp"><svg class="ic s"><use href="#i-chev"/></svg></span></button>
+      <button data-go="s2">What's included in Facet+?<span class="sp"><svg class="ic s"><use href="#i-chev"/></svg></span></button>
+    </div>
+    <div class="pad"><div class="h3" style="color:var(--tx2);margin:20px 0 8px">Browse topics</div></div>
+    <div class="list" style="margin-top:0">
+      <button data-go="s2">Getting started<span class="sp"><svg class="ic s"><use href="#i-chev"/></svg></span></button>
+      <button data-go="s2">Themes<span class="sp"><svg class="ic s"><use href="#i-chev"/></svg></span></button>
+      <button data-go="s2">Icons<span class="sp"><svg class="ic s"><use href="#i-chev"/></svg></span></button>
+      <button data-go="s2">Widgets<span class="sp"><svg class="ic s"><use href="#i-chev"/></svg></span></button>
+      <button data-go="s2">Subscriptions<span class="sp"><svg class="ic s"><use href="#i-chev"/></svg></span></button>
+      <button data-go="s2">Account<span class="sp"><svg class="ic s"><use href="#i-chev"/></svg></span></button>
+    </div>
+    <div class="pad" style="margin-top:16px"><button class="btn sec wide" data-go="s3">Contact support</button></div>
+  </div>
+</section>
+
+<!-- ══════════════════ S2 FAQ ══════════════════ -->
+<section class="scr" id="s-s2">
+  <div class="sb"><span>9:41</span><span class="r"><b></b><b></b><b></b><span class="bat"></span></span></div>
+  <div class="hd"><button class="iconbtn" data-go="s1"><svg class="ic"><use href="#i-back"/></svg></button><span class="ttl" style="font-size:17px">Themes</span></div>
+  <div class="body">
+    <div class="pad">
+      <details class="faq" open><summary><svg class="ic s"><use href="#i-chev"/></svg>Why do icons need an extra step?</summary><p>An app can't silently replace the icons on your home screen — the system asks you to confirm. Facet prepares every icon in your theme, then hands them to your phone's own installation step. We tell you which parts apply instantly and which need that step before you tap Apply.</p></details>
+      <details class="faq"><summary><svg class="ic s"><use href="#i-chev"/></svg>Can I undo an applied theme?</summary><p>Yes. Your previous theme stays in Library under Recently used. Applying it again restores everything Facet changed.</p></details>
+      <details class="faq"><summary><svg class="ic s"><use href="#i-chev"/></svg>Do my AI prompts leave my phone?</summary><p>No. Generation runs on your device, which is also why it works offline and returns instantly.</p></details>
+      <details class="faq"><summary><svg class="ic s"><use href="#i-chev"/></svg>What happens to themes I created if I cancel Facet+?</summary><p>They stay yours. Everything you made and saved remains in your Library; only premium content and unlimited AI generation stop.</p></details>
+    </div>
+    <div class="pad" style="margin-top:18px"><button class="btn sec wide" data-go="s3">Still need help?</button></div>
+  </div>
+</section>
+
+<!-- ══════════════════ S3 CONTACT ══════════════════ -->
+<section class="scr" id="s-s3">
+  <div class="sb"><span>9:41</span><span class="r"><b></b><b></b><b></b><span class="bat"></span></span></div>
+  <div class="hd"><button class="iconbtn" data-go="s1"><svg class="ic"><use href="#i-back"/></svg></button><span class="ttl" style="font-size:17px">Contact support</span></div>
+  <div class="body">
+    <div class="pad">
+      <p class="mut">We usually reply within a day. Your theme details are attached automatically — no screenshots needed.</p>
+      <div class="field"><label>Subject</label><div class="v">Icons didn't finish applying</div></div>
+      <div class="field"><label>Message</label><div class="v tall">Wallpaper and colours applied, but the icon step stopped halfway…</div></div>
+      <div class="field" style="display:flex;align-items:center;gap:10px"><svg class="ic" style="color:var(--tx2)"><use href="#i-img"/></svg><span class="v" style="margin:0">Add attachment</span><span class="sp" style="margin-left:auto;color:var(--tx3)">Optional</span></div>
+    </div>
+  </div>
+  <div class="sticky"><button class="btn pri wide" data-toast="Sent · reference 4C19">Send</button></div>
+</section>
+
+<!-- ══════════════════ T STATES ══════════════════ -->
+<section class="scr" id="s-t1">
+  <div class="sb"><span>9:41</span><span class="r"><b></b><b></b><b></b><span class="bat"></span></span></div>
+  <div class="hd"><span><span class="sub">Good evening</span><span class="ttl">Find your next look.</span></span></div>
+  <div class="body skel">
+    <div class="pad"><div class="b" style="height:290px;border-radius:22px"></div></div>
+    <div class="chips" style="padding-top:14px"><span class="b" style="width:64px;height:32px;border-radius:999px"></span><span class="b" style="width:78px;height:32px;border-radius:999px"></span><span class="b" style="width:70px;height:32px;border-radius:999px"></span><span class="b" style="width:84px;height:32px;border-radius:999px"></span></div>
+    <div class="sh"><span class="b" style="width:110px;height:18px;border-radius:6px"></span></div>
+    <div class="rail"><span class="b" style="width:124px;height:166px;flex:none"></span><span class="b" style="width:124px;height:166px;flex:none"></span><span class="b" style="width:124px;height:166px;flex:none"></span></div>
+    <div class="sh"><span class="b" style="width:90px;height:18px;border-radius:6px"></span></div>
+    <div class="rail"><span class="b" style="width:124px;height:166px;flex:none"></span><span class="b" style="width:124px;height:166px;flex:none"></span><span class="b" style="width:124px;height:166px;flex:none"></span></div>
+  </div>
+</section>
+
+<section class="scr" id="s-t2">
+  <div class="sb"><span>9:41</span><span class="r"><b></b><b></b><b></b><span class="bat"></span></span></div>
+  <div class="hd"><span class="ttl">Library</span></div>
+  <div class="chips"><button class="chip on">All</button><button class="chip">Themes</button><button class="chip">Icons</button><button class="chip">Widgets</button><button class="chip">Wallpapers</button></div>
+  <div class="body"><div class="state">
+    <span class="gl"><svg class="ic l" style="width:34px;height:34px"><use href="#i-lib"/></svg></span>
+    <h3>Nothing saved yet</h3><p>Your library is waiting for its first theme.</p>
+    <button class="btn pri sm" style="margin-top:10px" data-go="b1">Explore themes</button>
+  </div></div>
+</section>
+
+<section class="scr" id="s-t3">
+  <div class="sb"><span>9:41</span><span class="r"><b></b><b></b><b></b><span class="bat"></span></span></div>
+  <div class="hd"><button class="iconbtn" data-go="c1"><svg class="ic"><use href="#i-back"/></svg></button><span><span class="ttl" style="font-size:16px">black anime glass</span><span class="sub">0 results</span></span></div>
+  <div class="body"><div class="state">
+    <span class="gl"><svg class="ic l" style="width:34px;height:34px"><use href="#i-search"/></svg></span>
+    <h3>No themes match that</h3><p>Try fewer words — or start from one of these.</p>
+    <div class="chips" style="justify-content:center;flex-wrap:wrap;margin-top:12px;padding:0"><button class="chip" data-go="c2">Anime</button><button class="chip" data-go="c2">Glass</button><button class="chip" data-go="c2">Dark</button></div>
+  </div></div>
+</section>
+
+<section class="scr" id="s-t4">
+  <div class="sb"><span>9:41</span><span class="r"><b></b><b></b><b></b><span class="bat"></span></span></div>
+  <div class="hd"><span class="ttl">Find your next look.</span></div>
+  <div class="body"><div class="state err">
+    <span class="gl"><svg class="ic l" style="width:34px;height:34px"><use href="#i-warn"/></svg></span>
+    <h3>Something went wrong</h3><p>We couldn't load new themes.</p>
+    <button class="btn pri sm" style="margin-top:10px" data-go="b1">Try again</button>
+    <span class="tiny" style="margin-top:8px">Reference 4C19 · tap to copy</span>
+  </div></div>
+</section>
+
+<section class="scr" id="s-t5">
+  <div class="sb"><span>9:41</span><span class="r"><b></b><b></b><b></b><span class="bat"></span></span></div>
+  <div class="hd"><button class="iconbtn" data-go="d1"><svg class="ic"><use href="#i-back"/></svg></button><span class="ttl" style="font-size:17px">Midnight Glass</span></div>
+  <div class="body"><div class="state err">
+    <span class="gl"><svg class="ic l" style="width:34px;height:34px"><use href="#i-dl"/></svg></span>
+    <h3>Download stopped</h3><p>The icon pack didn't finish. Nothing on your phone changed.</p>
+    <button class="btn pri sm" style="margin-top:10px" data-go="d1">Retry download</button>
+    <button class="btn gh sm" data-go="d1">Not now</button>
+  </div></div>
+</section>
+
+<section class="scr" id="s-t6">
+  <div class="sb"><span>9:41</span><span class="r"><b></b><b></b><b></b><span class="bat"></span></span></div>
+  <div class="hd"><button class="iconbtn" data-go="d1"><svg class="ic"><use href="#i-back"/></svg></button><span class="ttl" style="font-size:17px">Apply</span></div>
+  <div class="body" style="padding-top:10px">
+    <div class="pad">
+      <div class="state err" style="height:auto;padding:20px 0 14px">
+        <span class="gl"><svg class="ic l" style="width:34px;height:34px"><use href="#i-warn"/></svg></span>
+        <h3>Partly applied</h3><p>Three of five parts landed. Your previous theme is intact.</p>
+      </div>
+      <div class="stages">
+        <div class="stage-r done"><span class="dot"><svg class="ic s" style="width:12px;height:12px"><use href="#i-check"/></svg></span>Wallpaper applied</div>
+        <div class="stage-r done"><span class="dot"><svg class="ic s" style="width:12px;height:12px"><use href="#i-check"/></svg></span>Colours applied</div>
+        <div class="stage-r done"><span class="dot"><svg class="ic s" style="width:12px;height:12px"><use href="#i-check"/></svg></span>Lock screen saved</div>
+        <div class="stage-r" style="color:var(--crit)"><span class="dot" style="border-color:var(--crit)"></span>Icons — installation was cancelled</div>
+        <div class="stage-r" style="color:var(--crit)"><span class="dot" style="border-color:var(--crit)"></span>Widgets — needs the icon step first</div>
+      </div>
+    </div>
+  </div>
+  <div class="sticky"><button class="btn pri" style="flex:1" data-sheet="applyp">Finish the rest</button><button class="btn sec" data-go="d1">Later</button></div>
+</section>
+
+<section class="scr" id="s-t8">
+  <div class="sb"><span>9:41</span><span class="r"><b></b><b></b><b></b><span class="bat"></span></span></div>
+  <div class="hd"><span><span class="sub">Offline</span><span class="ttl">Your library</span></span></div>
+  <div class="body">
+    <div class="banner"><svg class="ic s"><use href="#i-off"/></svg>You're offline. Showing saved themes — everything here still applies.</div>
+    <div class="grid">
+      <button class="card w" data-go="o2"><span class="art t-cyber" style="display:block"><span class="pb">Created</span></span><span class="nm">Late Harbor</span><span class="by">You</span></button>
+      <button class="card w" data-go="o2"><span class="art t-gold" style="display:block"></span><span class="nm">Gold Standard</span><span class="by">Atlas Ateliér</span></button>
+      <button class="card w" data-go="o2"><span class="art t-paper" style="display:block"></span><span class="nm">Paper Light</span><span class="by">Soft Corp</span></button>
+      <button class="card w" data-go="o2"><span class="art t-forest" style="display:block"></span><span class="nm">Cedar</span><span class="by">Lumen Lab</span></button>
+    </div>
+  </div>
+</section>
+
+<section class="scr" id="s-t9">
+  <div class="sb"><span>9:41</span><span class="r"><b></b><b></b><b></b><span class="bat"></span></span></div>
+  <div class="body"><div class="state">
+    <span class="bigok"><svg class="ic l" style="width:40px;height:40px"><use href="#i-check"/></svg></span>
+    <h3>Your new look is ready</h3><p>Midnight Glass is applied. Wallpaper, colours and lock screen changed.</p>
+    <button class="btn pri sm" style="margin-top:12px" data-go="b1">Done</button>
+    <button class="btn gh sm" data-go="f1">Keep customizing</button>
+  </div></div>
+</section>
+
+<!-- ══════════════════ TAB BAR ══════════════════ -->
+<nav class="tabbar" aria-label="Primary">
+  <button class="tab" data-go="b1" data-tab="b1"><svg class="ic"><use href="#i-home"/></svg>Home</button>
+  <button class="tab" data-go="f1" data-tab="f1"><svg class="ic"><use href="#i-wand"/></svg>Create</button>
+  <button class="tab" data-go="o1" data-tab="o1"><svg class="ic"><use href="#i-lib"/></svg>Library</button>
+  <button class="tab" data-go="p1" data-tab="p1"><svg class="ic"><use href="#i-user"/></svg>You</button>
+</nav>
+
+<!-- ══════════════════ SHEETS ══════════════════ -->
+<div class="scrim" id="scrim"></div>
+
+<!-- E1 apply -->
+<div class="sheet" id="sh-apply">
+  <div class="grab"></div>
+  <div class="sh-h"><div class="h2">Your new look</div><div class="mut">Midnight Glass · 5 parts</div></div>
+  <div class="sh-b">
+    <button class="row" data-check><span class="cb on"><svg class="ic s" style="width:13px;height:13px"><use href="#i-check"/></svg></span><span><span class="h3">Wallpaper</span><span class="tiny" style="display:block">Applies now</span></span></button>
+    <button class="row" data-check><span class="cb on"><svg class="ic s" style="width:13px;height:13px"><use href="#i-check"/></svg></span><span><span class="h3">Colours &amp; typography</span><span class="tiny" style="display:block">Applies now</span></span></button>
+    <button class="row" data-check><span class="cb on"><svg class="ic s" style="width:13px;height:13px"><use href="#i-check"/></svg></span><span><span class="h3">Icons</span><span class="tiny" style="display:block">Prepared here, your phone asks you to confirm</span></span></button>
+    <button class="row" data-check><span class="cb on"><svg class="ic s" style="width:13px;height:13px"><use href="#i-check"/></svg></span><span><span class="h3">Widgets</span><span class="tiny" style="display:block">Added to your widget gallery</span></span></button>
+    <button class="row" data-check><span class="cb on"><svg class="ic s" style="width:13px;height:13px"><use href="#i-check"/></svg></span><span><span class="h3">Lock screen</span><span class="tiny" style="display:block">Saved, then handed to your phone</span></span></button>
+    <p class="tiny" style="margin-top:14px">You can change any of this afterwards. Your current theme stays in Library.</p>
+  </div>
+  <div class="sh-f"><button class="btn pri" style="flex:1" data-sheet="applyp">Apply everything</button><button class="btn sec" data-go="f1" data-close>Customize</button></div>
+</div>
+
+<!-- E2 apply progress -->
+<div class="sheet" id="sh-applyp">
+  <div class="grab"></div>
+  <div class="sh-h"><div class="h2" id="applyTitle">Applying Midnight Glass</div><div class="mut" id="applySub">This takes a few seconds</div></div>
+  <div class="sh-b">
+    <div class="stages" id="applyStages">
+      <div class="stage-r" data-s><span class="dot"><svg class="ic s" style="width:12px;height:12px"><use href="#i-check"/></svg></span>Preparing theme</div>
+      <div class="stage-r" data-s><span class="dot"><svg class="ic s" style="width:12px;height:12px"><use href="#i-check"/></svg></span>Preparing wallpaper</div>
+      <div class="stage-r" data-s><span class="dot"><svg class="ic s" style="width:12px;height:12px"><use href="#i-check"/></svg></span>Preparing icons</div>
+      <div class="stage-r" data-s><span class="dot"><svg class="ic s" style="width:12px;height:12px"><use href="#i-check"/></svg></span>Preparing widgets</div>
+      <div class="stage-r" data-s><span class="dot"><svg class="ic s" style="width:12px;height:12px"><use href="#i-check"/></svg></span>Finishing</div>
+    </div>
+    <div id="applyDone" style="display:none;text-align:center;padding:10px 0 4px">
+      <span class="bigok"><svg class="ic l" style="width:38px;height:38px"><use href="#i-check"/></svg></span>
+      <div class="h2">Your new look is ready</div>
+      <p class="mut" style="margin-top:4px">One step left on your phone for icons.</p>
+    </div>
+  </div>
+  <div class="sh-f"><button class="btn pri wide" data-close data-go="t9">Done</button></div>
+</div>
+
+<!-- G1 wallpaper -->
+<div class="sheet" id="sh-wall">
+  <div class="grab"></div>
+  <div class="sh-h"><div class="h2">Wallpaper</div><div class="mut">Tap to apply · every change is live</div></div>
+  <div class="chips" style="padding:0 18px 12px"><button class="chip on">Trending</button><button class="chip">AI</button><button class="chip">Nature</button><button class="chip">Anime</button><button class="chip">Minimal</button><button class="chip">Abstract</button><button class="chip">Gradient</button><button class="chip">Space</button><button class="chip">Cars</button><button class="chip">Architecture</button><button class="chip">Seasonal</button><button class="chip">Live</button></div>
+  <div class="sh-b">
+    <div class="tiles">
+      <button class="tile art t-mid" data-tok="wall" data-v="mid" aria-pressed="true"><span>Mesh</span></button>
+      <button class="tile art t-cyber" data-tok="wall" data-v="cyber"><span>Aurora</span></button>
+      <button class="tile art t-forest" data-tok="wall" data-v="forest"><span>Forest</span></button>
+      <button class="tile art t-sakura" data-tok="wall" data-v="sakura"><span>Petal</span></button>
+      <button class="tile art t-gold" data-tok="wall" data-v="gold"><span>Brass</span></button>
+      <button class="tile art t-mono" data-tok="wall" data-v="mono"><span>Ink</span></button>
+      <button class="tile art t-neon" data-tok="wall" data-v="neon"><span>Neon</span></button>
+      <button class="tile art t-paper" data-tok="wall" data-v="paper"><span>Paper</span></button>
+      <button class="tile" style="display:grid;place-items:center;background:var(--raised)" data-sheet="ai"><svg class="ic"><use href="#i-wand"/></svg></button>
+    </div>
+    <div class="row" style="margin-top:8px"><span class="h3">Blur</span><span class="sp" style="flex:1"><span class="slider" style="width:100%"><span class="tr"><i style="width:22%"></i><b style="left:18%"></b></span></span></span></div>
+    <div class="row"><span class="h3">Brightness</span><span class="sp" style="flex:1"><span class="slider" style="width:100%"><span class="tr"><i style="width:58%"></i><b style="left:54%"></b></span></span></span></div>
+    <div class="row"><span class="h3">Position</span><span class="sp">Centre · fill</span></div>
+  </div>
+  <div class="sh-f"><button class="btn pri wide" data-close data-toast="Wallpaper updated">Done</button></div>
+</div>
+
+<!-- H1 icon packs -->
+<div class="sheet" id="sh-icons">
+  <div class="grab"></div>
+  <div class="sh-h"><div class="h2">Icons</div><div class="mut">Packs match your accent automatically</div></div>
+  <div class="pad" style="padding-bottom:12px"><div class="seg"><button aria-selected="true">Packs</button><button aria-selected="false" data-sheet="icon1">Individual</button><button aria-selected="false" data-sheet="ai">Generate</button></div></div>
+  <div class="sh-b">
+    <div class="packs">
+      <button class="pack sc" data-tok="icon" data-v="squircle" aria-pressed="true"><span class="pg"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><b>Minimal</b><em>Squircle · solid</em></button>
+      <button class="pack gl" data-tok="icon" data-v="glass"><span class="pg"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><b>Glass</b><em>Frosted · translucent</em></button>
+      <button class="pack rd" data-tok="icon" data-v="circle"><span class="pg"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><b>3D</b><em>Circle · gradient</em></button>
+      <button class="pack sq" data-tok="icon" data-v="square"><span class="pg"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><b>Neon</b><em>Square · outline</em></button>
+      <button class="pack sc" data-tok="icon" data-v="squircle"><span class="pg"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><b>Dark</b><em>Squircle · muted</em></button>
+      <button class="pack rd" data-tok="icon" data-v="circle"><span class="pg"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><b>Pastel</b><em>Circle · soft</em></button>
+    </div>
+    <div class="row" style="margin-top:8px"><span class="h3">Show labels</span><span class="sp"><span class="sw on" data-sw></span></span></div>
+  </div>
+  <div class="sh-f"><button class="btn pri wide" data-close data-toast="Icon pack applied">Apply pack</button></div>
+</div>
+
+<!-- H2 individual icons -->
+<div class="sheet" id="sh-icon1">
+  <div class="grab"></div>
+  <div class="sh-h"><div class="h2">Individual icons</div><div class="mut">Replace one app without changing the pack</div></div>
+  <div class="sh-b">
+    <div class="appicons">
+      <button class="appicon" aria-pressed="true"><i></i><span>Mail</span></button>
+      <button class="appicon"><i></i><span>Photos</span></button>
+      <button class="appicon"><i></i><span>Notes</span></button>
+      <button class="appicon"><i></i><span>Maps</span></button>
+      <button class="appicon"><i></i><span>Music</span></button>
+      <button class="appicon"><i></i><span>Health</span></button>
+      <button class="appicon"><i></i><span>Files</span></button>
+      <button class="appicon"><i></i><span>Camera</span></button>
+    </div>
+    <div class="list" style="margin:16px 0 0">
+      <button><svg class="ic"><use href="#i-img"/></svg>Choose an image<span class="sp"><svg class="ic s"><use href="#i-chev"/></svg></span></button>
+      <button data-sheet="ai"><svg class="ic"><use href="#i-wand"/></svg>Generate an icon<span class="sp"><svg class="ic s"><use href="#i-chev"/></svg></span></button>
+      <button data-toast="Mail icon reset"><svg class="ic"><use href="#i-undo"/></svg>Reset to pack default</button>
+    </div>
+  </div>
+  <div class="sh-f"><button class="btn pri wide" data-close data-toast="Icon replaced">Done</button></div>
+</div>
+
+<!-- I1 widget gallery -->
+<div class="sheet" id="sh-wgts">
+  <div class="grab"></div>
+  <div class="sh-h"><div class="h2">Widgets</div><div class="mut">Drag onto the preview, or tap to add</div></div>
+  <div class="sh-b">
+    <div class="wgtcards">
+      <button class="wgtcard" data-sheet="wgt1"><span>Clock</span><b>9:41</b></button>
+      <button class="wgtcard" data-sheet="wgt1"><span>Weather</span><b>24°</b></button>
+      <button class="wgtcard" data-sheet="wgt1"><span>Calendar</span><b>11:30</b></button>
+      <button class="wgtcard" data-sheet="wgt1"><span>Battery</span><b>68%</b></button>
+      <button class="wgtcard" data-sheet="wgt1"><span>Photos</span><b>▣</b></button>
+      <button class="wgtcard" data-sheet="wgt1"><span>Music</span><b>▸</b></button>
+      <button class="wgtcard" data-sheet="wgt1"><span>Quotes</span><b>“</b></button>
+      <button class="wgtcard" data-sheet="wgt1"><span>Countdown</span><b>12d</b></button>
+      <button class="wgtcard" data-sheet="wgt1"><span>Steps</span><b>8,412</b></button>
+      <button class="wgtcard" data-sheet="wgt1"><span>Health</span><b>72</b></button>
+      <button class="wgtcard" data-sheet="wgt1"><span>Notes</span><b>≡</b></button>
+      <button class="wgtcard" data-sheet="wgt1"><span>System</span><b>64%</b></button>
+    </div>
+  </div>
+  <div class="sh-f"><button class="btn pri wide" data-close>Done</button></div>
+</div>
+
+<!-- I2 widget settings -->
+<div class="sheet" id="sh-wgt1">
+  <div class="grab"></div>
+  <div class="sh-h"><div class="h2">Weather widget</div><div class="mut">Live on the preview behind</div></div>
+  <div class="sh-b">
+    <div class="row"><span class="h3">Size</span><span class="sp" style="flex:1"><span class="seg" style="width:100%"><button aria-selected="false">S</button><button aria-selected="true">M</button><button aria-selected="false">L</button></span></span></div>
+    <div class="row"><span class="h3">Shape</span><span class="sp">Rounded</span></div>
+    <div class="row"><span class="h3">Transparency</span><span class="sp" style="flex:1"><span class="slider" style="width:100%"><span class="tr"><i style="width:28%"></i><b style="left:24%"></b></span></span></span></div>
+    <div class="row"><span class="h3">Colour</span><span class="sp"><span style="width:22px;height:22px;border-radius:50%;background:var(--acc);display:block"></span>Accent</span></div>
+    <div class="row"><span class="h3">Font</span><span class="sp">Theme default</span></div>
+    <div class="row"><span class="h3">Background image</span><span class="sp"><span class="sw" data-sw></span></span></div>
+    <div class="row"><span class="h3">Layout</span><span class="sp">Icon left</span></div>
+  </div>
+  <div class="sh-f"><button class="btn pri wide" data-close data-toast="Widget saved">Save widget</button></div>
+</div>
+
+<!-- J1 lock gallery -->
+<div class="sheet" id="sh-lockg">
+  <div class="grab"></div>
+  <div class="sh-h"><div class="h2">Lock screen</div><div class="mut">The preview flips to lock while you edit</div></div>
+  <div class="chips" style="padding:0 18px 12px"><button class="chip on">Minimal</button><button class="chip">Luxury</button><button class="chip">Anime</button><button class="chip">Nature</button><button class="chip">Digital</button><button class="chip">Analog</button><button class="chip">Neon</button><button class="chip">Glass</button><button class="chip">Seasonal</button></div>
+  <div class="sh-b">
+    <div class="tiles">
+      <button class="tile art t-mid" data-tok="clock" data-v="stacked" aria-pressed="true"><span>Stacked</span></button>
+      <button class="tile art t-cyber" data-tok="clock" data-v="huge"><span>Huge</span></button>
+      <button class="tile art t-gold" data-tok="clock" data-v="thin"><span>Thin</span></button>
+      <button class="tile art t-mono" data-tok="clock" data-v="inline"><span>Inline</span></button>
+      <button class="tile art t-sakura" data-tok="clock" data-v="stacked"><span>Petal</span></button>
+      <button class="tile art t-forest" data-tok="clock" data-v="huge"><span>Moss</span></button>
+    </div>
+    <button class="btn sec wide" style="margin-top:14px" data-sheet="locke">Edit this lock screen</button>
+  </div>
+  <div class="sh-f"><button class="btn pri wide" data-close data-toast="Lock screen updated">Done</button></div>
+</div>
+
+<!-- J2 lock editor -->
+<div class="sheet" id="sh-locke">
+  <div class="grab"></div>
+  <div class="sh-h"><div class="h2">Lock editor</div><div class="mut">Every control changes the preview behind</div></div>
+  <div class="sh-b">
+    <div class="row"><span class="h3">Clock style</span><span class="sp" style="flex:1"><span class="seg" style="width:100%"><button aria-selected="true" data-tok="clock" data-v="stacked">Stacked</button><button aria-selected="false" data-tok="clock" data-v="huge">Huge</button><button aria-selected="false" data-tok="clock" data-v="thin">Thin</button></span></span></div>
+    <div class="row"><span class="h3">Font</span><span class="sp" data-sheet="type">Theme default ›</span></div>
+    <div class="row"><span class="h3">Colour</span><span class="sp"><span style="width:22px;height:22px;border-radius:50%;background:var(--acc);display:block"></span>Accent</span></div>
+    <div class="row"><span class="h3">Wallpaper</span><span class="sp" data-sheet="wall">Same as home ›</span></div>
+    <div class="row"><span class="h3">Show widgets</span><span class="sp"><span class="sw on" data-sw></span></span></div>
+    <div class="row"><span class="h3">Show date</span><span class="sp"><span class="sw on" data-sw></span></span></div>
+    <div class="row"><span class="h3">Clock position</span><span class="sp">Top</span></div>
+    <div class="row"><span class="h3">Depth effect</span><span class="sp"><span class="sw" data-sw></span></span></div>
+  </div>
+  <div class="sh-f"><button class="btn pri wide" data-close data-toast="Lock screen saved">Done</button></div>
+</div>
+
+<!-- K1 color studio -->
+<div class="sheet" id="sh-color">
+  <div class="grab"></div>
+  <div class="sh-h"><div class="h2">Colours</div><div class="mut">Contrast is checked as you choose</div></div>
+  <div class="sh-b">
+    <div class="h3" style="color:var(--tx2);margin:4px 0 6px">Accent</div>
+    <div class="swatches">
+      <button style="background:#7C93FF" data-tok="acc" data-v="#7C93FF" aria-pressed="true"></button>
+      <button style="background:#B48CFF" data-tok="acc" data-v="#B48CFF"></button>
+      <button style="background:#FF3D8B" data-tok="acc" data-v="#FF3D8B"></button>
+      <button style="background:#34E7E4" data-tok="acc" data-v="#34E7E4"></button>
+      <button style="background:#4ADE80" data-tok="acc" data-v="#4ADE80"></button>
+      <button style="background:#D9B36A" data-tok="acc" data-v="#D9B36A"></button>
+      <button style="background:#FF8FB1" data-tok="acc" data-v="#FF8FB1"></button>
+      <button style="background:#9A9A9A" data-tok="acc" data-v="#9A9A9A"></button>
+    </div>
+    <div class="h3" style="color:var(--tx2);margin:16px 0 6px">Palette</div>
+    <div class="tiles">
+      <button class="tile art t-mid" data-tok="wall" data-v="mid" aria-pressed="true"><span>Midnight</span></button>
+      <button class="tile art t-forest" data-tok="wall" data-v="forest"><span>Forest</span></button>
+      <button class="tile art t-gold" data-tok="wall" data-v="gold"><span>Brass</span></button>
+      <button class="tile art t-paper" data-tok="wall" data-v="paper"><span>Paper</span></button>
+      <button class="tile art t-neon" data-tok="wall" data-v="neon"><span>Neon</span></button>
+      <button class="tile" style="display:grid;place-items:center;background:var(--raised)" data-sheet="ai"><svg class="ic"><use href="#i-wand"/></svg></button>
+    </div>
+    <div class="row" style="margin-top:8px"><span class="h3">Surface opacity</span><span class="sp" style="flex:1"><span class="slider" style="width:100%"><span class="tr"><i style="width:32%"></i><b style="left:28%"></b></span></span></span></div>
+    <div class="banner" style="margin:12px 0 0"><svg class="ic s" style="color:var(--ok)"><use href="#i-check"/></svg>Text contrast 7.2:1 — comfortably readable.</div>
+  </div>
+  <div class="sh-f"><button class="btn pri wide" data-close data-toast="Colours updated">Done</button></div>
+</div>
+
+<!-- layout -->
+<div class="sheet" id="sh-layout">
+  <div class="grab"></div>
+  <div class="sh-h"><div class="h2">Layout</div><div class="mut">Grid, density and dock</div></div>
+  <div class="sh-b">
+    <div class="row"><span class="h3">Columns</span><span class="sp" style="flex:1"><span class="seg" style="width:100%"><button aria-selected="true" data-tok="cols" data-v="4">4</button><button aria-selected="false" data-tok="cols" data-v="5">5</button><button aria-selected="false" data-tok="cols" data-v="3">3</button></span></span></div>
+    <div class="row"><span class="h3">Icon size</span><span class="sp" style="flex:1"><span class="slider" style="width:100%"><span class="tr"><i style="width:62%"></i><b style="left:58%"></b></span></span></span></div>
+    <div class="row"><span class="h3">Show labels</span><span class="sp"><span class="sw on" data-sw></span></span></div>
+    <div class="row"><span class="h3">Dock</span><span class="sp"><span class="sw on" data-sw></span></span></div>
+  </div>
+  <div class="sh-f"><button class="btn pri wide" data-close data-toast="Layout updated">Done</button></div>
+</div>
+
+<!-- L1 typography -->
+<div class="sheet" id="sh-type">
+  <div class="grab"></div>
+  <div class="sh-h"><div class="h2">Typography</div><div class="mut">Shown in preview text, not named in a list</div></div>
+  <div class="chips" style="padding:0 18px 12px"><button class="chip on">Elegant</button><button class="chip">Modern</button><button class="chip">Minimal</button><button class="chip">Bold</button><button class="chip">Playful</button><button class="chip">Classic</button></div>
+  <div class="sh-b">
+    <div class="fonts">
+      <button class="fontc" data-tok="font" data-v="var(--fd)" aria-pressed="true"><div class="p" style="font-family:ui-rounded,system-ui">9:41 Saturday</div><div class="n">Rounded · warm and friendly</div></button>
+      <button class="fontc" data-tok="font" data-v="system-ui"><div class="p" style="font-family:system-ui">9:41 Saturday</div><div class="n">Neutral · the system face</div></button>
+      <button class="fontc" data-tok="font" data-v="ui-serif,Georgia,serif"><div class="p" style="font-family:ui-serif,Georgia,serif">9:41 Saturday</div><div class="n">Serif · editorial and quiet</div></button>
+      <button class="fontc" data-tok="font" data-v="ui-monospace,Menlo,monospace"><div class="p" style="font-family:ui-monospace,Menlo,monospace">9:41 Saturday</div><div class="n">Mono · technical and precise</div></button>
+    </div>
+  </div>
+  <div class="sh-f"><button class="btn pri wide" data-close data-toast="Typography updated">Done</button></div>
+</div>
+
+<!-- M1 AI -->
+<div class="sheet" id="sh-ai">
+  <div class="grab"></div>
+  <div class="sh-h"><div class="h2">Create anything</div><div class="mut">Runs on your phone · works offline</div></div>
+  <div class="sh-b">
+    <div class="field" style="margin-top:4px;border-color:var(--acc)"><label>Prompt</label><div class="v tall" id="aiPrompt">Describe your perfect phone theme…</div></div>
+    <div class="chips" style="padding:12px 0 0;flex-wrap:wrap">
+      <button class="chip" data-prompt>Dark futuristic glass</button>
+      <button class="chip" data-prompt>Luxury black and gold</button>
+      <button class="chip" data-prompt>Minimal ocean</button>
+      <button class="chip" data-prompt>Pink anime</button>
+      <button class="chip" data-prompt>Cyberpunk</button>
+    </div>
+    <p class="tiny" style="margin-top:14px">3 of 3 free generations left today.</p>
+  </div>
+  <div class="sh-f"><button class="btn pri wide" data-sheet="aigen">Generate theme</button></div>
+</div>
+
+<!-- M2 generating -->
+<div class="sheet" id="sh-aigen">
+  <div class="grab"></div>
+  <div class="sh-h"><div class="h2">Generating</div><div class="mut" id="aiEcho">“Dark futuristic glass”</div></div>
+  <div class="sh-b">
+    <div class="stages" id="aiStages">
+      <div class="stage-r" data-s><span class="dot"><svg class="ic s" style="width:12px;height:12px"><use href="#i-check"/></svg></span>Designing wallpaper</div>
+      <div class="stage-r" data-s><span class="dot"><svg class="ic s" style="width:12px;height:12px"><use href="#i-check"/></svg></span>Matching colours</div>
+      <div class="stage-r" data-s><span class="dot"><svg class="ic s" style="width:12px;height:12px"><use href="#i-check"/></svg></span>Creating icons</div>
+      <div class="stage-r" data-s><span class="dot"><svg class="ic s" style="width:12px;height:12px"><use href="#i-check"/></svg></span>Designing widgets</div>
+      <div class="stage-r" data-s><span class="dot"><svg class="ic s" style="width:12px;height:12px"><use href="#i-check"/></svg></span>Building layout</div>
+    </div>
+  </div>
+  <div class="sh-f"><button class="btn sec wide" data-close>Cancel</button></div>
+</div>
+
+<!-- M3 result -->
+<div class="sheet" id="sh-aires">
+  <div class="grab"></div>
+  <div class="sh-h"><div class="h2">Violet Static</div><div class="mut">“Dark futuristic glass” · generated on this device</div></div>
+  <div class="sh-b">
+    <div style="display:grid;place-items:center;padding:6px 0 14px">
+      <div class="pv" data-face="home" style="width:158px;height:320px">
+        <div class="pv-sb"><span>9:41</span><span>􀙇</span></div>
+        <div class="pv-in"><div class="pv-face f-home">
+          <div class="pv-w"><span class="o"></span><span><span class="l1">Bengaluru</span><span class="l2">Clear</span></span><span class="rt">24°</span></div>
+          <div class="pv-apps"><span class="pv-app"><i></i></span><span class="pv-app"><i></i></span><span class="pv-app"><i></i></span><span class="pv-app"><i></i></span><span class="pv-app"><i></i></span><span class="pv-app"><i></i></span><span class="pv-app"><i></i></span><span class="pv-app"><i></i></span></div>
+          <div class="pv-dock"><i></i><i></i><i></i><i></i></div>
+        </div></div>
+      </div>
+    </div>
+    <div style="display:flex;gap:9px">
+      <button class="btn sec sm" style="flex:1" data-sheet="aigen">Regenerate</button>
+      <button class="btn sec sm" style="flex:1" data-sheet="remix">Remix</button>
+      <button class="btn sec sm" style="flex:1" data-close data-toast="Saved to Library">Save</button>
+    </div>
+  </div>
+  <div class="sh-f"><button class="btn pri" style="flex:1" data-sheet="apply">Use theme</button><button class="btn sec" data-close data-go="f1">Customize</button></div>
+</div>
+
+<!-- M4 remix -->
+<div class="sheet" id="sh-remix">
+  <div class="grab"></div>
+  <div class="sh-h"><div class="h2">Remix</div><div class="mut">Same layout and widgets · new material</div></div>
+  <div class="sh-b">
+    <div class="tiles">
+      <button class="tile art t-mid" aria-pressed="true"><span>Original</span></button>
+      <button class="tile art t-cyber"><span>Glass</span></button>
+      <button class="tile art t-gold"><span>Luxury</span></button>
+      <button class="tile art t-mono"><span>Dark</span></button>
+      <button class="tile art t-neon"><span>Neon</span></button>
+      <button class="tile art t-paper"><span>Pastel</span></button>
+      <button class="tile art t-sakura"><span>Anime</span></button>
+      <button class="tile art t-forest"><span>Nature</span></button>
+      <button class="tile" style="display:grid;place-items:center;background:var(--raised)"><svg class="ic"><use href="#i-plus"/></svg></button>
+    </div>
+  </div>
+  <div class="sh-f"><button class="btn pri wide" data-close data-toast="Remix applied to canvas">Use this remix</button></div>
+</div>
+
+<!-- N2 creator -->
+<div class="sheet" id="sh-creator">
+  <div class="grab"></div>
+  <div class="sh-h" style="text-align:center">
+    <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(150deg,var(--acc),var(--acc2));margin:0 auto 8px"></div>
+    <div class="h2">Nocturne</div><div class="mut">Verified creator · dark and glass themes</div>
+  </div>
+  <div class="sh-b">
+    <div class="stats" style="margin:0 0 14px"><div><b>38</b><span>Themes</span></div><div><b>12K</b><span>Followers</span></div><div><b>840K</b><span>Downloads</span></div></div>
+    <div class="grid3" style="padding:0">
+      <span class="card"><span class="art t-mid" style="height:110px;display:block"></span><span class="nm">Midnight</span></span>
+      <span class="card"><span class="art t-cyber" style="height:110px;display:block"></span><span class="nm">Harbor</span></span>
+      <span class="card"><span class="art t-mono" style="height:110px;display:block"></span><span class="nm">Ink</span></span>
+    </div>
+  </div>
+  <div class="sh-f"><button class="btn pri" style="flex:1" data-close data-toast="Following Nocturne">Follow</button><button class="btn sec" data-close>Close</button></div>
+</div>
+
+<!-- N3 publish -->
+<div class="sheet" id="sh-publish">
+  <div class="grab"></div>
+  <div class="sh-h"><div class="h2">Publish</div><div class="mut">Free to publish · you keep your theme</div></div>
+  <div class="sh-b">
+    <div style="display:flex;gap:12px;align-items:center">
+      <span class="art t-cyber" style="width:64px;height:88px;border-radius:12px;display:block;flex:none"></span>
+      <div style="flex:1">
+        <div class="field" style="margin:0"><label>Name</label><div class="v">Late Harbor</div></div>
+      </div>
+    </div>
+    <div class="field"><label>Description</label><div class="v tall">Cold water and fog. Glass icons, quiet widgets.</div></div>
+    <div class="field"><label>Tags</label><div class="v">glass · dark · minimal</div></div>
+    <div class="row"><span class="h3">Preview surface</span><span class="sp">Home screen</span></div>
+    <div class="row"><span class="h3">Availability</span><span class="sp" style="flex:1"><span class="seg" style="width:100%"><button aria-selected="true">Free</button><button aria-selected="false">Facet+</button></span></span></div>
+  </div>
+  <div class="sh-f"><button class="btn pri wide" data-close data-toast="Published · link copied">Publish</button></div>
+</div>
+
+<!-- save -->
+<div class="sheet" id="sh-save">
+  <div class="grab"></div>
+  <div class="sh-h"><div class="h2">Save theme</div><div class="mut">Saved to your library, original untouched</div></div>
+  <div class="sh-b"><div class="field" style="margin-top:4px;border-color:var(--acc)"><label>Name</label><div class="v">Ocean Glass — my version</div></div></div>
+  <div class="sh-f"><button class="btn pri" style="flex:1" data-close data-toast="Saved to Library">Save</button><button class="btn sec" data-sheet="publish">Publish</button></div>
+</div>
+
+<!-- unsaved -->
+<div class="sheet" id="sh-unsaved">
+  <div class="grab"></div>
+  <div class="sh-h"><div class="h2">Save changes?</div><div class="mut">Ocean Glass has unsaved edits</div></div>
+  <div class="sh-b" style="padding-bottom:8px"></div>
+  <div class="sh-f" style="flex-direction:column">
+    <button class="btn pri wide" data-close data-toast="Saved to Library">Save</button>
+    <button class="btn sec wide" data-close data-go="b1">Discard</button>
+    <button class="btn gh wide" data-close>Keep editing</button>
+  </div>
+</div>
+
+<!-- Q1 premium -->
+<div class="sheet" id="sh-prem" style="max-height:94%">
+  <div class="grab"></div>
+  <div class="sh-h" style="display:flex;align-items:flex-start;gap:12px">
+    <span><span class="h2" style="font-size:22px;display:block">Unlock your ultimate setup.</span><span class="mut">Cancel any time. Everything you made stays yours.</span></span>
+    <button class="iconbtn" data-close aria-label="Close" style="margin-left:auto"><svg class="ic"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="sh-b">
+    <div class="rail" style="padding:2px 0 6px">
+      <span class="card" style="width:104px"><span class="art t-gold" style="height:140px;display:block"><span class="pb prem">+</span></span></span>
+      <span class="card" style="width:104px"><span class="art t-mid" style="height:140px;display:block"><span class="pb prem">+</span></span></span>
+      <span class="card" style="width:104px"><span class="art t-sakura" style="height:140px;display:block"><span class="pb prem">+</span></span></span>
+    </div>
+    <div class="row"><svg class="ic" style="color:var(--acc)"><use href="#i-check"/></svg><span class="h3">Unlimited themes &amp; AI generation</span></div>
+    <div class="row"><svg class="ic" style="color:var(--acc)"><use href="#i-check"/></svg><span class="h3">Premium icons, widgets &amp; wallpapers</span></div>
+    <div class="row"><svg class="ic" style="color:var(--acc)"><use href="#i-check"/></svg><span class="h3">Advanced customization</span></div>
+    <div class="row"><svg class="ic" style="color:var(--acc)"><use href="#i-check"/></svg><span class="h3">Exclusive collections &amp; creator tools</span></div>
+    <div class="row"><svg class="ic" style="color:var(--acc)"><use href="#i-check"/></svg><span class="h3">No ads</span></div>
+    <div style="display:flex;gap:9px;margin-top:14px">
+      <button class="pack" style="flex:1;border-color:var(--acc)"><b>Yearly</b><em>₹1,999 · ₹166/mo</em><span class="pb prem" style="position:static;display:inline-block;margin-top:6px">Save 45%</span></button>
+      <button class="pack" style="flex:1"><b>Monthly</b><em>₹299 / month</em></button>
+    </div>
+  </div>
+  <div class="sh-f" style="flex-direction:column">
+    <button class="btn pri wide" data-close data-toast="Facet+ active">Start Premium</button>
+    <button class="btn gh wide" data-close>Continue free</button>
+  </div>
+</div>
+
+<!-- T7 premium locked -->
+<div class="sheet" id="sh-locked">
+  <div class="grab"></div>
+  <div class="sh-h" style="display:flex;gap:12px;align-items:flex-start">
+    <span><span class="h2">Gold Standard is part of Facet+</span><span class="mut">Keep previewing it as long as you like.</span></span>
+    <button class="iconbtn" data-close aria-label="Close" style="margin-left:auto"><svg class="ic"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="sh-b">
+    <div style="display:flex;gap:12px;align-items:center">
+      <span class="art t-gold" style="width:74px;height:100px;border-radius:14px;display:block;flex:none"></span>
+      <p class="mut" style="margin:0">Unlimited premium themes, AI generation and advanced customization — from ₹166 a month.</p>
+    </div>
+  </div>
+  <div class="sh-f"><button class="btn pri" style="flex:1" data-sheet="prem">See Facet+</button><button class="btn sec" data-close>Not now</button></div>
+</div>
+
+<div class="toast" id="toast"><svg class="ic s" style="color:var(--ok)"><use href="#i-check"/></svg><span id="toastMsg">Done</span><button class="u" id="toastU">Undo</button></div>
+
+      </div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  var vp=document.getElementById('vp'), crumb=document.getElementById('crumb'), body=document.body;
+  var TABS={b1:1,f1:1,o1:1,p1:1}, NAMES={};
+  document.querySelectorAll('.idx a').forEach(function(a){
+    var k=a.getAttribute('data-go')||a.getAttribute('data-sheet');
+    NAMES[k]=a.querySelector('i').textContent+' · '+a.textContent.replace(a.querySelector('i').textContent,'').trim();
+  });
+  var cur='b1';
+  function go(id){
+    var el=document.getElementById('s-'+id); if(!el) return;
+    document.querySelectorAll('.scr').forEach(function(s){s.classList.remove('on')});
+    el.classList.add('on'); el.querySelectorAll('.body').forEach(function(b){b.scrollTop=0});
+    cur=id; body.setAttribute('data-tabs', TABS[id]?'on':'off');
+    document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('on',t.getAttribute('data-tab')===id)});
+    document.querySelectorAll('.idx a').forEach(function(a){a.classList.toggle('on',a.getAttribute('data-go')===id)});
+    if(NAMES[id]) crumb.textContent=NAMES[id];
+  }
+  function openSheet(id){
+    document.querySelectorAll('.sheet').forEach(function(s){s.classList.remove('on')});
+    var s=document.getElementById('sh-'+id); if(!s) return;
+    s.classList.add('on'); body.setAttribute('data-sheet','on');
+    if(NAMES[id]) crumb.textContent=NAMES[id];
+    if(id==='applyp') runStages('applyStages',function(){
+      document.getElementById('applyStages').style.display='none';
+      document.getElementById('applyDone').style.display='block';
+      document.getElementById('applyTitle').textContent='Applied';
+      document.getElementById('applySub').textContent='Midnight Glass is live';
+    });
+    if(id==='aigen') runStages('aiStages',function(){ openSheet('aires'); });
+  }
+  function closeSheet(){
+    document.querySelectorAll('.sheet').forEach(function(s){s.classList.remove('on')});
+    body.setAttribute('data-sheet','off');
+    var st=document.getElementById('applyStages');
+    if(st){st.style.display='';document.getElementById('applyDone').style.display='none';
+      document.getElementById('applyTitle').textContent='Applying Midnight Glass';
+      document.getElementById('applySub').textContent='This takes a few seconds';}
+    if(NAMES[cur]) crumb.textContent=NAMES[cur];
+  }
+  function runStages(id,done){
+    var rows=document.querySelectorAll('#'+id+' [data-s]'), i=0;
+    rows.forEach(function(r){r.className='stage-r'});
+    (function step(){
+      if(i>0) rows[i-1].className='stage-r done';
+      if(i>=rows.length){ if(done) setTimeout(done,300); return; }
+      rows[i].className='stage-r now'; i++; setTimeout(step,520);
+    })();
+  }
+  var tEl=document.getElementById('toast'), tMsg=document.getElementById('toastMsg'), tTimer;
+  function toast(m){ tMsg.textContent=m; tEl.classList.add('on'); clearTimeout(tTimer); tTimer=setTimeout(function(){tEl.classList.remove('on')},2600); }
+  document.getElementById('toastU').addEventListener('click',function(){tEl.classList.remove('on')});
+
+  /* live theme tokens on both previews */
+  var PAL={
+    mid:['#171B3A','#0E1130','#241B4B','#7C93FF','#B48CFF',0],
+    cyber:['#0F1B3D','#050A1C','#1B0B3A','#34E7E4','#7C93FF',0],
+    forest:['#0B2417','#06170F','#123A22','#4ADE80','#A3E635',0],
+    sakura:['#2C0F1F','#1A0A14','#43162E','#FF8FB1','#FFD1DC',0],
+    gold:['#171410','#0B0A08','#2A2115','#D9B36A','#8C6F3A',0],
+    mono:['#1C1C1C','#0C0C0C','#2E2E2E','#9A9A9A','#5C5C5C',0],
+    neon:['#2A0620','#14020F','#3D0733','#FF3D8B','#34E7E4',0],
+    paper:['#FFFFFF','#EDEAE2','#DCD9CF','#1F6F5C','#97794A',1]
+  };
+  var IR={squircle:'12px',circle:'50%',square:'4px'}, OPQ={glass:'.08',squircle:'.9',circle:'.9',square:'.2'};
+  var hist=[], future=[];
+  function previews(){ return [document.getElementById('pvStudio'),document.getElementById('pvPreview')].filter(Boolean); }
+  function snap(){ var p=previews()[0]; return p?p.getAttribute('style')+'|'+p.getAttribute('data-clock'):''; }
+  function applyTok(k,v,record){
+    if(record!==false){ hist.push(snap()); future=[]; dirty(); }
+    previews().forEach(function(p){
+      if(k==='wall'){ var c=PAL[v]; if(!c) return;
+        p.style.setProperty('--p0',c[0]); p.style.setProperty('--p1',c[1]); p.style.setProperty('--p2',c[2]);
+        p.style.setProperty('--pa',c[3]); p.style.setProperty('--pa2',c[4]); p.setAttribute('data-light',c[5]?'1':'0'); }
+      if(k==='acc'){ p.style.setProperty('--pa',v); }
+      if(k==='icon'){ p.style.setProperty('--pir',IR[v]||'12px'); p.style.setProperty('--pop',OPQ[v]||'.13'); }
+      if(k==='font'){ p.style.setProperty('--pf',v); }
+      if(k==='cols'){ p.style.setProperty('--pcols',v); }
+      if(k==='clock'){ p.setAttribute('data-clock',v); }
+    });
+  }
+  function dirty(){ var s=document.getElementById('studioState'); if(s) s.textContent='Edited · not saved'; }
+  document.getElementById('undoBtn').addEventListener('click',function(){
+    if(!hist.length) return toast('Nothing to undo');
+    var p=previews()[0]; future.push(snap()); var s=hist.pop().split('|');
+    previews().forEach(function(q){ q.setAttribute('style',s[0]); q.setAttribute('data-clock',s[1]); }); toast('Undone');
+  });
+  document.getElementById('redoBtn').addEventListener('click',function(){
+    if(!future.length) return toast('Nothing to redo');
+    hist.push(snap()); var s=future.pop().split('|');
+    previews().forEach(function(q){ q.setAttribute('style',s[0]); q.setAttribute('data-clock',s[1]); }); toast('Redone');
+  });
+
+  /* one delegated handler */
+  document.addEventListener('click',function(e){
+    var t=e.target.closest('[data-go],[data-sheet],[data-close],[data-toast],[data-tok],[data-seg] button,.chip,[data-style],[data-check],[data-sw],[data-prompt],.appicon,.fontc,.pack,.tile,.faq summary,.swatches button');
+    if(!t) return;
+    if(t.closest('.idx')) e.preventDefault();
+
+    if(t.hasAttribute('data-tok')){
+      applyTok(t.getAttribute('data-tok'),t.getAttribute('data-v'));
+      var grp=t.parentElement.querySelectorAll('[data-tok="'+t.getAttribute('data-tok')+'"]');
+      grp.forEach(function(g){g.setAttribute('aria-pressed',g===t?'true':'false');
+        if(g.parentElement.classList.contains('seg')) g.setAttribute('aria-selected',g===t?'true':'false');});
+    }
+    if(t.matches('.tile,.pack,.fontc,.appicon,.swatches button') && !t.hasAttribute('data-tok')){
+      var sib=t.parentElement.children;
+      for(var i=0;i<sib.length;i++) sib[i].setAttribute && sib[i].setAttribute('aria-pressed', sib[i]===t?'true':'false');
+    }
+    if(t.matches('[data-seg] button')){
+      var seg=t.closest('[data-seg]'), pid=seg.getAttribute('data-seg'), pv=document.getElementById(pid);
+      seg.querySelectorAll('button').forEach(function(b){b.setAttribute('aria-selected',b===t?'true':'false')});
+      if(pv&&t.getAttribute('data-face')) pv.setAttribute('data-face',t.getAttribute('data-face'));
+    }
+    if(t.matches('.seg button') && !t.closest('[data-seg]') && !t.hasAttribute('data-tok')){
+      t.parentElement.querySelectorAll('button').forEach(function(b){b.setAttribute('aria-selected',b===t?'true':'false')});
+    }
+    if(t.matches('.chip') && t.parentElement.classList.contains('chips') && !t.hasAttribute('data-prompt') && !t.hasAttribute('data-go')){
+      t.parentElement.querySelectorAll('.chip').forEach(function(c){c.classList.toggle('on',c===t)});
+    }
+    if(t.hasAttribute('data-prompt')){ document.getElementById('aiPrompt').textContent=t.textContent; document.getElementById('aiEcho').textContent='“'+t.textContent+'”'; }
+    if(t.hasAttribute('data-style')){
+      t.classList.toggle('sel'); t.style.outline=t.classList.contains('sel')?'2px solid var(--acc)':'';
+      t.style.outlineOffset='2px'; t.style.borderRadius='14px';
+      var n=document.querySelectorAll('[data-style].sel').length;
+      document.getElementById('styleCount').textContent=n+' selected';
+    }
+    if(t.hasAttribute('data-check')){ var cb=t.querySelector('.cb'); cb.classList.toggle('on'); }
+    if(t.hasAttribute('data-sw')||t.matches('.sw')){ t.classList.toggle('on'); }
+    if(t.matches('#favBtn')){ var on=t.getAttribute('aria-pressed')!=='true'; t.setAttribute('aria-pressed',on); t.style.color=on?'#FF6B8A':''; toast(on?'Saved to Library':'Removed'); }
+    if(t.hasAttribute('data-close')) closeSheet();
+    if(t.hasAttribute('data-toast')) toast(t.getAttribute('data-toast'));
+    if(t.hasAttribute('data-sheet')) openSheet(t.getAttribute('data-sheet'));
+    else if(t.hasAttribute('data-go')){ if(!t.hasAttribute('data-close')) closeSheet(); go(t.getAttribute('data-go')); }
+  });
+  document.getElementById('scrim').addEventListener('click',closeSheet);
+
+  /* workbench controls */
+  var bm=document.getElementById('bMode'), bw=document.getElementById('bWb'), ba=document.getElementById('bAppTheme');
+  bm.addEventListener('click',function(){var on=bm.getAttribute('aria-pressed')!=='true';bm.setAttribute('aria-pressed',on);body.setAttribute('data-mode',on?'full':'device');});
+  bw.addEventListener('click',function(){var on=bw.getAttribute('aria-pressed')!=='true';bw.setAttribute('aria-pressed',on);document.documentElement.setAttribute('data-wb',on?'light':'dark');bw.textContent=on?'Page: dark':'Page: light';});
+  ba.addEventListener('click',function(){var on=ba.getAttribute('aria-pressed')!=='true';ba.setAttribute('aria-pressed',on);body.setAttribute('data-app',on?'light':'dark');ba.textContent=on?'App: light':'App: dark';});
+
+  body.setAttribute('data-mode','device'); body.setAttribute('data-app','dark'); body.setAttribute('data-sheet','off');
+  go(location.hash?location.hash.slice(1):'b1');
+  window.addEventListener('hashchange',function(){var h=location.hash.slice(1); if(document.getElementById('s-'+h)) go(h); else if(document.getElementById('sh-'+h)) openSheet(h);});
+})();
+</script>
