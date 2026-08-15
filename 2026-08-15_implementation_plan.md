@@ -110,9 +110,10 @@ Your user-facing claim also gets stronger and becomes *true*:
 
 | # | Task | Detail |
 |---|---|---|
-| S1.1 | **Apply `098_drop_vaultlens`** | Back up first (`scripts/backup-postgres.sh`) — `DROP TABLE` is irreversible and `vaultlens_face` has 1 row. Use the gated pattern from `apply103-104.sh` |
-| S1.2 | **Remove the vaultlens worker** | Stop + `docker rm` `vaultchat-vaultlens-worker-1`, delete its compose service and image. Do this **explicitly, by name** — never via `--remove-orphans` (S0.2) |
-| S1.3 | Orphan the MinIO objects deliberately | `vaultlens/faces/*` and `vaultlens/<user>/*` are untouched by `098` by design. Separate, separately-reviewed cleanup. Do not put object deletion on the deploy path |
+| ~~S1.1~~ | ~~Apply `098_drop_vaultlens`~~ | **DONE 2026-08-15 14:54 IST** via `apply098.sh` (committed). Checksum `778efb8e9ac6cb46`, 2 × `DROP TABLE` + ledger insert in one transaction. Ledger 102 → **103 of 103**. `users` intact. Re-run aborts correctly |
+| ~~S1.2~~ | ~~Remove the vaultlens worker~~ | **DONE.** Stopped + `docker rm` by name |
+| **S1.2b** | **Fold `livekit-egress` into `docker-compose.prod.yml`** | **NEW, priority raised.** Egress is now the *only* orphan compose reports, so its `--remove-orphans` suggestion no longer has a legitimate target — it reads as one piece of leftover junk, and acting on it deletes broadcast. Removing the orphan status is the real fix; the warning in S0.2 is only a mitigation |
+| S1.3 | Orphan the MinIO objects deliberately | `vaultlens/faces/cb1caeda-….jpg` and `vaultlens/<user>/*` are untouched by `098` by design. Separate, separately-reviewed cleanup. Do not put object deletion on the deploy path. Optional: `docker image rm vaultchat-vaultlens-worker` to reclaim the build |
 | S1.4 | **LiveKit Go-Live verification pass** | Prod runs v1.13.5, above the ≥1.11 requirement. The old blocker is gone — this is now a *verify*, not a *build* |
 
 ### Phase S2 — Turn on delivery-driven reclaim (1 d) — the actual feature
