@@ -112,6 +112,13 @@ export async function loadSealedSession(pin: string): Promise<boolean> {
 
 // ─── Cached user profile ──────────────────────────────────────
 export async function setCachedUser(user: any | null): Promise<void> {
+  // Login and logout both land here, and both change who "I" am. chatService
+  // memoises this device's user id for the process lifetime to keep the
+  // per-message ownership check off the SecureStore path — so without this it
+  // would keep answering with the PREVIOUS account's id after a switch, and
+  // every own message would be treated as someone else's and sent to a decrypt
+  // that cannot succeed. Dynamic import: chatService imports this module.
+  try { (await import('./chatService')).resetMyUserIdCache(); } catch {}
   if (!user) {
     await SecureStore.deleteItemAsync(USER_KEY).catch(() => {});
     try { Sentry.setUser(null); } catch {}

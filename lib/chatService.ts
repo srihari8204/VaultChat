@@ -718,9 +718,22 @@ export async function hydrateMessages(
     // two of them RESET a perfectly healthy session with the peer — so a
     // sender-side display bug could break the receiver's decryption. Skipping
     // is both the correct render and the fix for that cascade.
+    // OWNERSHIP IS DECIDED BY EVIDENCE, NOT BY ID ALONE.
+    //
+    // The id comparison is the fast path, but it has two ways to answer "not
+    // mine" about our own message — a missing senderId on the payload, and a
+    // stale cached id after an account switch — and BOTH end in a decrypt that
+    // is guaranteed to fail. Holding our own plaintext for a message id is
+    // proof of authorship that needs no id at all, so consult it whenever the
+    // comparison does not already say yes. One extra cache read on the path
+    // that was about to throw anyway.
     const senderId = (m as any).senderId ?? '';
-    if (senderId && senderId === (await myUserId())) {
-      const own = await readOwnPlaintext(chatId, m.id, m.createdAt);
+    const meId = await myUserId();
+    const idSaysMine = !!senderId && senderId === meId;
+    const own = (idSaysMine || !senderId || !meId)
+      ? await readOwnPlaintext(chatId, m.id, m.createdAt)
+      : null;
+    if (idSaysMine || own != null) {
       if (own != null) {
         out[i] = finish(m, own);
         // LAZY MIGRATION to the single-record model (see messageQueue.postOnce).
@@ -738,10 +751,26 @@ export async function hydrateMessages(
         } catch { /* best-effort: the message already renders from `out` */ }
       } else {
         ownMisses++;
+        // NULL, NOT THE ENVELOPE — and this line is the whole bug.
+        //
+        // The intent below was always right: our own message with no cached
+        // plaintext should render "can't be shown on this device". But that
+        // bubble state keys off `content == null`, and MessageBubble tests
+        // `looksEncrypted(content)` FIRST. Leaving the envelope in place
+        // therefore matched the wrong branch and rendered
+        // "🔒 unable to decrypt" — telling the sender their own message failed
+        // to decrypt when no decrypt was ever attempted.
+        //
+        // Measured on the Honor: three SENT bubbles reading "unable to decrypt"
+        // with ghash failures = 0 and zero own-message decrypt attempts in the
+        // same capture. The string was pure render-side; every session-level
+        // fix before this one was aimed at a decrypt that never happened.
+        //
+        // Nulling here also matches what cacheMessages already stores for these
+        // rows, so the first render and every render after a cache round-trip
+        // finally agree.
+        out[i] = { ...m, content: null } as Message;
       }
-      // No cached copy → leave the envelope as-is. The bubble renders its
-      // "can't be shown on this device" state, which is the truth: nothing is
-      // wrong with the encryption, we simply do not hold the plaintext.
       continue;
     }
 
@@ -786,24 +815,42 @@ let _meId: string | null = null;
  * An empty result is NOT memoised — `if (_meId)` is falsy for '' — so a later
  * call retries once the cache is populated.
  */
+export function resetMyUserIdCache(): void { _meId = null; }
+
+/** The access token's `sub`, or '' — read-only decode, never a trust decision. */
+function subOfToken(tok: string | null): string {
+  try {
+    const body = tok?.split('.')[1];
+    if (!body) return '';
+    const json = JSON.parse(
+      Buffer.from(body.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'),
+    );
+    return String(json?.sub ?? '');
+  } catch { return ''; }
+}
+
 async function myUserId(): Promise<string> {
   if (_meId) return _meId;
   try {
-    const { getCachedUser } = await import('./api');
-    _meId = String((await getCachedUser())?.id ?? '');
+    // PRIMARY: the access token's subject.
+    //
+    // `senderId` on every message is stamped by the SERVER from this exact
+    // claim (`sub`, httpx.go:126). The token is therefore the only value
+    // guaranteed to equal it for the CURRENT session — which is precisely what
+    // the ownership guards compare.
+    //
+    // The cached user blob is a COPY, written at login and never re-checked. It
+    // outlives an account switch, so after signing in as someone else it still
+    // names the previous account: a non-empty, plausible, WRONG id. Every guard
+    // then answers "not mine" for our own messages, and they fall through to a
+    // decrypt that cannot succeed. That failure mode is invisible — nothing is
+    // empty, nothing throws — which is why it survived the previous fix that
+    // only handled the empty case.
+    _meId = subOfToken(await getAccessToken());
     if (!_meId) {
-      // Fall back to the JWT subject. Read-only decode of a token this device
-      // already holds — no verification needed or implied: it is being used to
-      // recognise our own messages, never to grant anything.
-      const tok = await getAccessToken();
-      const body = tok?.split('.')[1];
-      if (body) {
-        const json = JSON.parse(
-          Buffer.from(body.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'),
-        );
-        _meId = String(json?.sub ?? '');
-        if (_meId) console.warn('[e2ee] own id recovered from token — user cache was empty');
-      }
+      const { getCachedUser } = await import('./api');
+      _meId = String((await getCachedUser())?.id ?? '');
+      if (_meId) console.warn('[e2ee] own id from user cache — token had no sub');
     }
   } catch { _meId = ''; }
   return _meId;
