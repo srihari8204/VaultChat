@@ -60,11 +60,18 @@ HITS=$(zcat "$BK" | grep -c 'vaultlens_face\|vaultlens_generation' || true)
 [ "$HITS" -gt 0 ] || { echo "ABORT: newest backup $BK does not contain vaultlens — nothing executed"; exit 1; }
 echo "PRECHECK: backup $BK contains vaultlens ($HITS refs)"
 
-# Row counts recorded before the drop, so the log says what was destroyed.
-echo "DESTROYING: vaultlens_face=$($PSQL -c 'SELECT count(*) FROM vaultlens_face') vaultlens_generation=$($PSQL -c 'SELECT count(*) FROM vaultlens_generation')"
-
+# ── gate 5: the migration file itself ───────────────────────────────────
+# Checked BEFORE the DESTROYING line below. An earlier revision printed
+# "DESTROYING: …" and then aborted here, which reads as though rows were lost
+# when nothing had been touched. A log that overstates what happened is worse
+# than no log on a destructive migration.
 MIG="$RUN/migrations/098_drop_vaultlens.sql"
-test -f "$MIG" || { echo "ABORT: missing $MIG"; exit 1; }
+test -f "$MIG" || { echo "ABORT: missing $MIG — nothing executed"; exit 1; }
+echo "PRECHECK: migration file present"
+
+# Row counts recorded immediately before the drop, so the log says what was
+# destroyed. Everything above this line is a gate; nothing has been modified.
+echo "DESTROYING: vaultlens_face=$($PSQL -c 'SELECT count(*) FROM vaultlens_face') vaultlens_generation=$($PSQL -c 'SELECT count(*) FROM vaultlens_generation')"
 
 CS=$(node -e "const fs=require('fs'),c=require('crypto');console.log(c.createHash('sha256').update(fs.readFileSync('migrations/098_drop_vaultlens.sql','utf8').replace(/\r\n/g,'\n')).digest('hex').slice(0,16))")
 echo "applying 098 (098_drop_vaultlens) checksum=$CS"
