@@ -693,7 +693,24 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             // `live`: this message arrived seconds ago, so a missing session is
             // the out-of-order race worth retrying — not history whose keys are
             // simply gone. Everything else hydrated on this screen is history.
-            const fin = looksEncrypted(m.content) ? (await hydrateMessages(chatId, [m], undefined, { live: true }))[0] ?? m : m;
+            // A DECRYPT FAILURE MUST NOT COST THE ACK.
+            //
+            // hydrateMessages is try/FINALLY with no catch, so it can throw —
+            // and on a session hitting 'aes/gcm: invalid ghash tag' it does.
+            // Before the ack moved below the persist that did not matter, because
+            // the ack had already fired. Now an exception here would skip it, and
+            // the sender would sit on a single tick for a message the recipient
+            // actually holds.
+            //
+            // The contract is "this device HAS the message", not "can read it":
+            // an undecryptable blob is stashed and retried after the next key
+            // harvest, so the row on disk is what the ack is about. Keep the
+            // ciphertext and carry on.
+            let fin = m;
+            if (looksEncrypted(m.content)) {
+              try { fin = (await hydrateMessages(chatId, [m], undefined, { live: true }))[0] ?? m; }
+              catch { fin = m; }
+            }
             setMessages(prev => prev.some(x => x.id === fin.id) ? prev : [fin, ...prev]);
             // ORDERING IS THE CONTRACT — same rule as lib/syncBackground.ts.
             //
