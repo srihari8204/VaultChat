@@ -47,6 +47,8 @@ export function mergePresence(
 const apiMod = () => require('../api').api as (path: string, opts?: any) => Promise<any>;
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const socketMod = () => require('../socket') as typeof import('../socket');
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const historyMod = () => require('../family/history') as typeof import('../family/history');
 
 export interface PlatformEvent {
   userId: string;
@@ -69,6 +71,24 @@ export async function subscribeSpaceLocations(
 ): Promise<() => void> {
   let disposed = false;
 
+  /**
+   * Record a platform point into the SAME device-local history the relay path
+   * writes to (presence.ts recordSample).
+   *
+   * Without this the two paths disagree about the same person: the hub, which
+   * reads live presences, showed "2m ago" while the member-detail screen,
+   * which reads the history store, showed "Last known · 7h ago" — seen on a
+   * real phone. History, Trips and the member timeline all read that store, so
+   * a position the platform delivered would simply be missing from them.
+   * recordSample throttles internally (≥25 m / ≥2 min), so this is cheap.
+   */
+  const remember = (p: MemberPresence) => {
+    historyMod().recordSample(chatId, {
+      u: p.userId, lat: p.pos.lat, lng: p.pos.lng, ts: p.ts,
+      bat: p.battery, spd: p.speed, acc: p.accuracy,
+    }).catch(() => {});
+  };
+
   const toPresence = (m: any): MemberPresence | null => {
     const p: PlatformPoint = {
       userId: String(m?.userId ?? ''), lat: Number(m?.lat), lng: Number(m?.lng),
@@ -88,6 +108,7 @@ export async function subscribeSpaceLocations(
       const pres = toPresence(m);
       if (pres && pres.userId !== String(meId)) {
         onEvent({ userId: pres.userId, point: pres });
+        remember(pres);
         if (m?.sharingEnabled === false) onEvent({ userId: pres.userId, point: null, sharingOff: true });
       }
     }
@@ -104,7 +125,7 @@ export async function subscribeSpaceLocations(
       // Gated space families send coordinate-free "fresh data exists" events;
       // only coordinate-carrying events fold directly.
       const pres = toPresence(e);
-      if (pres) onEvent({ userId: uid, point: pres });
+      if (pres) { onEvent({ userId: uid, point: pres }); remember(pres); }
     };
     const onStop = (e: any) => {
       if (disposed || String(e?.chatId) !== String(chatId)) return;

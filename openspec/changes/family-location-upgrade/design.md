@@ -3,6 +3,29 @@
 Audit date: 2026-08-14. Four parallel audits (frontend, backend, location/routing
 infra, invitations) over the working tree at `retention/ephemeral-bodies-reconciled`.
 
+## STATUS UPDATE — 2026-08-15: the E2EE constraint below was OVERTURNED
+
+Section 1 documents why location could not be stored server-side. **The owner
+reversed that decision for SPACE LOCATION DATA on 2026-08-15**, and the
+replacement shipped and is LIVE IN PRODUCTION:
+
+- migrations **103** (`space_locations` + latest view) and **104** (explicit
+  per-member sharing flag) applied to prod; ledger 102 → 104
+- `spaces_locations.go` deployed: ingest / latest / history / start / stop,
+  with authorization — not cryptography — as the boundary, enforced in SQL on
+  every read because RLS is inert here
+- verified in production with two real phones: 87 real GPS points uploaded
+  (including a persisted offline queue draining), 0 duplicates, and one phone
+  rendering the other's live position — the direction that was permanently
+  broken under E2EE's per-pair sender-key deadlock
+
+**Chat E2EE is untouched.** Messages keep their sender-key encryption; only
+space location data moved to the authenticated, authorized store. The sealed
+relay still runs alongside it, and the client merges both sources newest-fix-wins.
+
+Everything below is the original audit and remains accurate as the record of
+what existed on 2026-08-14 and why the constraint was there.
+
 ## 1. The architecture constraint everything else follows from
 
 **The server never sees a coordinate for a person.** Positions travel as sealed
