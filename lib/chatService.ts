@@ -6,6 +6,7 @@ import { Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import * as FileSystem from 'expo-file-system/legacy';
 import { api, getAccessToken } from './api';
+import { Buffer } from 'buffer';   // not a RN global — see myUserId's token fallback
 import { unwrapPreview } from './linkPreview';
 import perf from './perf';
 import { SERVER_URL } from '../constants/server';
@@ -470,8 +471,29 @@ async function maybeAutoRecoverSession(peerId: string, errMsg: string): Promise<
   // and fired rekey requests at ourselves. Measured on device 15:13:17–15:13:21
   // as ~14 ghash failures in four seconds, all for peer cb1caeda — the device's
   // own user — reaching decryptFails=10.
-  if (peerId && peerId === (await myUserId())) {
+  const meId = await myUserId();
+  if (peerId && peerId === meId) {
     console.warn('[e2ee] undecryptable own message — no session with self, ignoring:', errMsg);
+    return;
+  }
+  // OWN ID UNKNOWN → THIS FAILURE PROVES NOTHING. Do not count it.
+  //
+  // The check above is the only thing separating "our own ciphertext, which can
+  // never be opened by us" from "a genuinely dead session". With no id it
+  // cannot make that distinction, and `peerId === ''` is false for every real
+  // peer — so without this the guard silently stops guarding and own-message
+  // failures flow straight into the reset streak.
+  //
+  // That is not a theoretical ordering: myUserId() reads SecureStore, which is
+  // empty for a window on cold start — precisely while a chat screen hydrates
+  // and decrypts. Two own-message failures inside that window were enough to
+  // reset a healthy peer and push a rekey request at it (Honor, 2026-08-15).
+  //
+  // Declining to count is strictly the safe direction: the worst case is a real
+  // dead session takes one more failure to be noticed, against a live bug where
+  // a working session is destroyed by the other side's display problem.
+  if (!meId) {
+    console.warn('[e2ee] own id unknown — not counting decrypt failure toward reset:', errMsg);
     return;
   }
   // Replayed history is not evidence about the live session — see above.
@@ -739,11 +761,50 @@ export async function hydrateMessages(
 // hit storage every time; the value cannot change without a re-login, which
 // clears the module anyway.
 let _meId: string | null = null;
+/**
+ * This device's user id — the input to EVERY "is this my own message" decision.
+ *
+ * IT MUST NOT SILENTLY RETURN EMPTY. Both ownership guards compare against it
+ * (`senderId === myUserId()` in hydrateMessages, `peerId === myUserId()` in
+ * maybeAutoRecoverSession), and `x === ''` is false for every real id — so an
+ * empty answer does not make the guards cautious, it makes them FAIL OPEN.
+ *
+ * Measured on the Honor 2026-08-15: own sent messages rendered
+ * "🔒 unable to decrypt" (the decrypt path, not the own-plaintext path), each
+ * guaranteed-failed decrypt counted toward the auto-reset streak, and at two
+ * failures the device reset a HEALTHY peer session and sent it a rekey request.
+ * The peer logged `decryptFails=0` and destroyed a working session anyway. A
+ * sender-side display bug propagating into the receiver's crypto state.
+ *
+ * SecureStore alone is not enough: `getCachedUser()` returns null whenever the
+ * user blob is absent, unparseable, or simply not written yet on a cold start,
+ * and that window is exactly when a chat screen is hydrating. The access token
+ * is present whenever the user is logged in at all, and its `sub` claim is the
+ * same id (see httpx.go:126), so it is the natural second source rather than a
+ * new one to keep in sync.
+ *
+ * An empty result is NOT memoised — `if (_meId)` is falsy for '' — so a later
+ * call retries once the cache is populated.
+ */
 async function myUserId(): Promise<string> {
   if (_meId) return _meId;
   try {
     const { getCachedUser } = await import('./api');
     _meId = String((await getCachedUser())?.id ?? '');
+    if (!_meId) {
+      // Fall back to the JWT subject. Read-only decode of a token this device
+      // already holds — no verification needed or implied: it is being used to
+      // recognise our own messages, never to grant anything.
+      const tok = await getAccessToken();
+      const body = tok?.split('.')[1];
+      if (body) {
+        const json = JSON.parse(
+          Buffer.from(body.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'),
+        );
+        _meId = String(json?.sub ?? '');
+        if (_meId) console.warn('[e2ee] own id recovered from token — user cache was empty');
+      }
+    }
   } catch { _meId = ''; }
   return _meId;
 }
