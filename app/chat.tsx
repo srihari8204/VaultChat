@@ -591,6 +591,39 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             cacheMessages(chatId, msgs).catch(() => {});   // persist for next instant open
           } else {
             setHasMore((cachedMsgs?.length ?? 0) >= PAGE_SIZE);
+            // RETRY THE ONES THAT NEVER DECRYPTED.
+            //
+            // Painting from cache skips hydrate entirely, which is right for
+            // readable rows and wrong for the rest: a message that failed to
+            // decrypt once was rendered from cache on every open afterwards,
+            // never re-attempted, so decryptFromChat was never called again and
+            // maybeAutoRecoverSession — the silent "drop the dead session so our
+            // next message re-initiates X3DH" path — could not fire. The chat
+            // stayed on "unable to decrypt" permanently, and the only way out
+            // was the manual Reset secure session, which is not something a user
+            // should ever have to find. Measured on the Nothing Phone: four
+            // undecryptable bubbles surviving a force-stop with ZERO decrypt
+            // attempts logged.
+            //
+            // Bounded to the last hour and marked `live`. Old history is
+            // undecryptable BY DESIGN (its ratchet state is long gone) and must
+            // not count toward the auto-recovery streak — that is the fault that
+            // once reset four healthy sessions after a cold sync. A message from
+            // minutes ago is different: it SHOULD have opened, so its failure is
+            // real evidence about the live session.
+            const RETRY_AGE_MS = 60 * 60 * 1000;
+            const stuck = (cachedMsgs ?? []).filter(m =>
+              looksEncrypted(m.content) &&
+              Date.now() - new Date(m.createdAt).getTime() < RETRY_AGE_MS);
+            if (stuck.length) {
+              const fixed = await hydrateMessages(chatId, stuck, knownPlain, { live: true });
+              const readable = fixed.filter(m => !looksEncrypted(m.content));
+              if (readable.length) {
+                const byId = new Map(readable.map(m => [m.id, m]));
+                setMessages(prev => prev.map(p => byId.get(p.id) ?? p));
+                cacheMessages(chatId, readable).catch(() => {});
+              }
+            }
           }
           setError(null);
         } catch {
