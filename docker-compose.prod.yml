@@ -11,8 +11,12 @@
 # This override only:
 #   - binds Caddy to the public ports (80; add 443 + a site address in the
 #     Caddyfile when a domain/TLS is configured)
-#   - drops the bench-only published ports (go-api 14000, postgres 15432 …)
-#     so nothing but Caddy is reachable from outside
+#   - narrows the bench's published ports so nothing but Caddy is reachable from
+#     outside: postgres is unpublished entirely, redis and go-api are rebound to
+#     127.0.0.1. go-api keeps 14000 on loopback ONLY because livekit runs
+#     network_mode: host and posts egress webhooks to it — same reason redis
+#     keeps 16379. Neither is a convenience; removing either breaks calls.
+#   - mounts the production-only secrets (see the go-api block)
 services:
   caddy:
     ports: !override
@@ -20,7 +24,26 @@ services:
       - "3000:80"            # compatibility: existing APKs point SERVER_URL at :3000
       # - "443:443"          # enable together with a TLS site in the Caddyfile
   go-api:
-    ports: !override []      # in-network only (caddy reaches it)
+    ports: !override
+      - "127.0.0.1:14000:4000"   # loopback only: host-networked livekit posts egress webhooks here
+    # ── Secrets mounted as FILES, not env vars holding the material ────
+    #
+    # The credential then never appears in `docker inspect`, `docker compose
+    # config`, the process environment, or a crash dump — only a path does.
+    #
+    # No permission change was needed: secrets/ stays 700 root:root and each
+    # credential stays 600, owned by uid 1000 — which is also the container's
+    # `app` user (Dockerfile: adduser -D app), so the bind mounts are readable
+    # inside without widening anything on the host.
+    #
+    # Deliberately NOT in docker-compose.yml: the bench has no secrets/ dir,
+    # and a missing bind-mount source is a hard container start failure.
+    environment:
+      FIREBASE_SERVICE_ACCOUNT_FILE: /run/secrets/firebase-sa.json
+      GAMES_SIGNING_PRIVATE_KEY_FILE: /run/secrets/games-signing.key
+    volumes:
+      - ./secrets/fcm-service-account.json:/run/secrets/firebase-sa.json:ro
+      - ./secrets/games-signing.key:/run/secrets/games-signing.key:ro
   postgres:
     ports: !override []      # in-network only
   redis:
