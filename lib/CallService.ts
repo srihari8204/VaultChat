@@ -200,6 +200,40 @@ export async function getInitialCallIntent(): Promise<InitialCallIntent | null> 
   try { return (await VaultCalls.getInitialCallIntent()) || null; } catch { return null; }
 }
 
+
+/**
+ * Shrink the call to a Picture-in-Picture window.
+ *
+ * Back on a call screen used to END the call: the navigator pops the screen and
+ * the screen's unmount hangs up. Every other calling app keeps talking in a
+ * floating window, which is what the gesture means to a user.
+ *
+ * Resolves false when the OS refuses (no PiP support, permission off, or below
+ * Android 8) so the caller can leave the call screen up instead of silently
+ * doing nothing.
+ */
+export async function enterPipMode(): Promise<boolean> {
+  if (!has()) return false;
+  try { return !!(await VaultCalls.enterPip()); } catch { return false; }
+}
+
+/**
+ * Android 14+: full-screen intents are a user-granted permission for anything
+ * that is not the default dialer. Without it the ring is a heads-up banner
+ * rather than a full-screen call UI on the lock screen — observed on device as
+ * FSI_REQUESTED_BUT_DENIED on the ring notification.
+ */
+export async function canUseFullScreenIntent(): Promise<boolean> {
+  if (!has()) return true;
+  try { return !!(await VaultCalls.canUseFullScreenIntent()); } catch { return true; }
+}
+
+/** Opens the per-app "Full screen intents" toggle so the user can grant it. */
+export async function openFullScreenIntentSettings(): Promise<boolean> {
+  if (!has()) return false;
+  try { return !!(await VaultCalls.openFullScreenIntentSettings()); } catch { return false; }
+}
+
 export default {
   registerForCalls, startCallForeground, stopCallForeground,
   dismissIncomingNotification, initiateCall, cancelCall, drainDeclinedCall, getInitialCallIntent,

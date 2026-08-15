@@ -58,8 +58,8 @@ import { notify as notifyMessage, setSelfId } from '../lib/messageNotifications'
 import { addPersistentListener, getSocket } from '../lib/socket';
 import { registerForCalls, refreshCallRegistration, getInitialCallIntent, drainDeclinedCall } from '../lib/CallService';
 import { getActiveCall } from '../lib/callState';
-import { getRingingPeer, setRingingPeer, consumePendingCall } from '../lib/ringTracker';
-import { displayIncomingCall, cancelIncomingCall } from '../lib/callNotification';
+import { getRingingPeer, setRingingPeer, getRingScreenPeer, setRingScreenPeer, consumePendingCall } from '../lib/ringTracker';
+import { cancelIncomingCall } from '../lib/callNotification';
 import '../lib/callBackground';   // registers notifee bg event + bg notification task
 // Registers the VaultChatSync headless task at JS-load time, so a chat push can
 // sync and acknowledge delivery while the app is backgrounded or killed. Same
@@ -202,8 +202,30 @@ function RootLayout() {
     // Open the in-app ringing screen for a call. `offer` may be empty (push /
     // backgrounded) — incoming-call captures the caller's re-sent offer live.
     const routeToIncoming = (p: { chatId?: string; peerUid: string; peerName: string; type: string; offer?: string; group?: boolean; groupName?: string; waiting?: boolean }) => {
+      // ONE RING SCREEN PER CALLER — the guard lives HERE, not at the call sites.
+      //
+      // This is a router.push, so every invocation stacks another
+      // /incoming-call screen. The socket listener checked getRingingPeer()
+      // before calling and was fine; the two notification paths
+      // (consumeNativeLaunchIntent and the notifee answer/decline handler) did
+      // not. Since the caller re-rings every 3s and each ring can produce a
+      // notification, tapping them piled ring screens on top of each other —
+      // reported as "so many overlays", with answering the in-app overlay
+      // directly working normally because that path only ever routes once.
+      //
+      // Re-entering for a peer we are ALREADY ringing is a no-op: the screen is
+      // up, it owns the ringtone, and it is listening for the caller's re-sealed
+      // offer. Bringing it forward is what the OS is already doing.
+      // Guard on the RING SCREEN, not on ringingPeer: the latter is already set
+      // by the time a backgrounded device shows its notification, so using it
+      // here refused to open the screen on the tap that was supposed to open it.
+      if (getRingScreenPeer() === p.peerUid) {
+        cancelIncomingCall();           // the in-app UI owns the ring; drop the OS one
+        return;
+      }
       cancelIncomingCall();             // clear any OS full-screen call once the in-app UI takes over
       setRingingPeer(p.peerUid);
+      setRingScreenPeer(p.peerUid);
       router.push({
         pathname: '/incoming-call' as any,
         params: {
@@ -223,16 +245,31 @@ function RootLayout() {
       if (active && active.peerUid === data.from && !data.group) return;   // call-waiting same peer
       if (getRingingPeer() === data.from) return;                          // de-dupe repeated rings
       setRingingPeer(data.from);
-      const name = data.group ? (data.groupName || 'Group call') : (data.callerName ?? data.fromName ?? 'VaultChat user');
+      // EMPTY, not the placeholder string, when the signal carries no name.
+      //
+      // The call screens resolve a blank peerName via getChat(chatId) — but the
+      // guard is `if (peerName || !chatId) return`, so handing them the literal
+      // 'VaultChat user' looks like a REAL name, skips the lookup, and pins the
+      // placeholder on screen for the whole call. That is the reported
+      // "usernames not getting displayed, instead getting VaultChat user": the
+      // fallback was being injected upstream as data rather than rendered
+      // downstream as a last resort.
+      const name = data.group ? (data.groupName || 'Group call') : (data.callerName ?? data.fromName ?? '');
       const type = (data.type === 'video' || data.video === '1') ? 'video' : 'audio';
       // App in the FOREGROUND (or a group call) → show the in-app screen.
       // App BACKGROUNDED with a live socket → raise the OS full-screen call UI
       // (lock screen). Answering it routes into the app via the notifee events.
       if (AppState.currentState === 'active' || data.group) {
         routeToIncoming({ chatId: data.chatId, peerUid: data.from, peerName: name, type, offer: data.offer ? JSON.stringify(data.offer) : '', group: !!data.group, groupName: data.groupName, waiting: !!active });
-      } else {
-        displayIncomingCall({ fromUid: data.from, callerName: name, callType: type, chatId: data.chatId });
       }
+      // NOT backgrounded → do NOT raise a notifee ring here.
+      //
+      // The native VaultCallMessagingService owns every OS ring (it is the only
+      // one that can ring a killed app, and it carries the caller's photo). Two
+      // owners is what produced the second, avatar-less notification on channel
+      // "calls". The server now pushes on every call rather than guessing from
+      // hasLiveSocket, and the native side stays silent while we are foreground,
+      // so exactly one of us rings in every state.
     };
     const cleanupCallListener = addPersistentListener('call_incoming', onIncoming);
 
@@ -328,7 +365,8 @@ function RootLayout() {
           router.push({ pathname: '/chat', params: { id: ci.chatId } } as any);
         } else if (ci?.callId && ci.action !== 'open_calls') {
           routeToIncoming({
-            chatId: ci.callId, peerUid: ci.callerId || '', peerName: ci.callerName || 'VaultChat user',
+            // Blank, not the placeholder — see the note on the socket ring above.
+            chatId: ci.callId, peerUid: ci.callerId || '', peerName: ci.callerName || '',
             type: ci.isVideo ? 'video' : 'audio', offer: '',
           });
         }
@@ -347,7 +385,7 @@ function RootLayout() {
         getSocket().then(s => s.emit('webrtc_end', { to: data.fromUid, chatId: data.chatId })).catch(() => {});
         return;
       }
-      routeToIncoming({ chatId: data.chatId, peerUid: data.fromUid, peerName: data.callerName || 'VaultChat user', type: data.callType, offer: '' });
+      routeToIncoming({ chatId: data.chatId, peerUid: data.fromUid, peerName: data.callerName || '', type: data.callType, offer: '' });
     };
     const notifeeFg = notifee.onForegroundEvent(({ type, detail }) => {
       // Scheduled-message trigger fired (#73) → send any due items.

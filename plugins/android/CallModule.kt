@@ -167,4 +167,58 @@ class CallModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMo
                 .edit().remove("msg_count_$chatId").apply()
         } catch (_: Throwable) {}
     }
+
+    /**
+     * Put the call into a Picture-in-Picture window instead of ending it.
+     *
+     * Back on a call screen used to tear the call down, because the React
+     * navigator's default back is "pop the screen" and the screen's unmount
+     * hangs up. Every other calling app shrinks to a floating window and keeps
+     * talking, which is what users expect from the gesture.
+     *
+     * Requires android:supportsPictureInPicture on MainActivity; without it the
+     * OS refuses and we resolve false so JS can fall back to leaving the call
+     * up rather than silently doing nothing.
+     */
+    @ReactMethod
+    fun enterPip(promise: Promise) {
+        try {
+            val act: android.app.Activity? = getCurrentActivity()
+            if (act == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) { promise.resolve(false); return }
+            val params = android.app.PictureInPictureParams.Builder()
+                .setAspectRatio(android.util.Rational(9, 16))
+                .build()
+            promise.resolve(act.enterPictureInPictureMode(params))
+        } catch (_: Throwable) { promise.resolve(false) }
+    }
+
+    /**
+     * Android 14 turned USE_FULL_SCREEN_INTENT into a user-granted permission
+     * for apps that are not the default dialer. Declaring it in the manifest is
+     * no longer enough — measured on device as FSI_REQUESTED_BUT_DENIED on the
+     * ring notification, which is why the lock screen showed a heads-up banner
+     * instead of a full-screen call UI.
+     */
+    @ReactMethod
+    fun canUseFullScreenIntent(promise: Promise) {
+        try {
+            if (Build.VERSION.SDK_INT < 34) { promise.resolve(true); return }
+            val nm = reactApplicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            promise.resolve(nm.canUseFullScreenIntent())
+        } catch (_: Throwable) { promise.resolve(true) }   // unknown → do not nag
+    }
+
+    /** Opens the per-app "Full screen intents" toggle. No-op below Android 14. */
+    @ReactMethod
+    fun openFullScreenIntentSettings(promise: Promise) {
+        try {
+            if (Build.VERSION.SDK_INT < 34) { promise.resolve(false); return }
+            val i = android.content.Intent(
+                android.provider.Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
+                android.net.Uri.parse("package:" + reactApplicationContext.packageName),
+            ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            reactApplicationContext.startActivity(i)
+            promise.resolve(true)
+        } catch (_: Throwable) { promise.resolve(false) }
+    }
 }

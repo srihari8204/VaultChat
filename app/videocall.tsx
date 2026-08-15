@@ -10,7 +10,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import InCallManager from 'react-native-incall-manager';
 import { setActiveCall, clearActiveCall, type ActiveCall } from '../lib/callState';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Platform, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, BackHandler, Platform, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CALL, CALL_TEXT_SHADOW } from '../constants/callTheme';
 import {
@@ -23,7 +23,7 @@ import {
 import { getCurrentUserAsync } from './(constants)/authService';
 import { getIceServers } from '../lib/iceConfig';
 import { getSocket } from '../lib/socket';
-import { startCallForeground, stopCallForeground, dismissIncomingNotification, initiateCall, cancelCall } from '../lib/CallService';
+import { startCallForeground, stopCallForeground, dismissIncomingNotification, initiateCall, cancelCall, enterPipMode } from '../lib/CallService';
 import { newCallCipher, openCallOffer, plainCipher, type CallCipher } from '../lib/callCrypto';
 import { addCallLog } from '../lib/callLog';
 import { CallTimer, elapsedSeconds } from '../components/call/CallTimer';
@@ -32,6 +32,7 @@ import { CallExtras } from '../components/call/CallExtras';
 import { CallEncryptionBadge } from '../components/call/CallEncryptionBadge';
 import { CALL_ENGINE_V2 } from '../constants/flags';
 import * as engine from '../lib/call/engine';
+import { callFail, offerTag } from '../lib/call/diag';
 import { DISCONNECT_GRACE_MS } from '../lib/call/peer';
 import {
   useCallConnectedAt, useCallError, useCallFlag, useCallLocalUrl,
@@ -213,15 +214,28 @@ function VideoCallEngine() {
       chatId: String(chatId ?? ''), peerUid: String(peerUid ?? ''),
       peerName: String(peerName ?? ''), kind: 'video' as const,
     };
-    if (incoming && initialOffer) {
-      let wire: any = null;
-      try { wire = JSON.parse(String(initialOffer)); } catch {}
-      engine.acceptIncoming({ ...args, offerWire: wire });
+    // AN INCOMING CALL MUST NEVER FALL THROUGH TO DIALLING — see the identical
+    // guard and the on-device evidence in voicecall.tsx. `incoming && offer`
+    // meant an accept that beat the offer ran startOutgoing and rang the caller
+    // back; acceptIncoming with a null wire is equally wrong, because it reads
+    // that as a dead ratchet and fires a re-key at a healthy session.
+    let wire: any = null;
+    if (incoming && initialOffer) { try { wire = JSON.parse(String(initialOffer)); } catch {} }
+    if (incoming) {
+      if (wire) engine.acceptIncoming({ ...args, offerWire: wire });
+      else { callFail(offerTag(null), 'ACCEPT_NO_OFFER', 'OFFER_NOT_ARRIVED', { retry: 0, recoverable: true }); router.back(); }
     } else {
       engine.startOutgoing(args);
     }
     return () => { engine.hangUp('local_hangup', true); engine.release(); };
   }, [chatId, peerUid, peerName, isIncoming, initialOffer]);
+
+  // BACK SHRINKS THE CALL, IT DOES NOT END IT — see voicecall.tsx for why.
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => { enterPipMode(); return true; });
+    return () => sub.remove();
+  }, []);
+
 
   useEffect(() => { if (status === 'connected') engine.onConnected(); }, [status]);
 

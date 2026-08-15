@@ -7,7 +7,7 @@
 import notifee, { EventType } from '@notifee/react-native';
 import * as TaskManager from 'expo-task-manager';
 import * as Notifications from 'expo-notifications';
-import { cancelIncomingCall, displayIncomingCall } from './callNotification';
+import { cancelIncomingCall } from './callNotification';
 import { setPendingCall } from './ringTracker';
 
 // 1. Notifee background events (app backgrounded or killed). Answer is handled
@@ -49,9 +49,11 @@ TaskManager.defineTask(CALL_BG_TASK, async ({ data, error }: any) => {
   try {
     const content = data?.notification?.request?.content ?? data?.notification?.data ?? data ?? {};
     const d = content?.data ?? content;
-    if (d?.type === 'call' && d?.fromUid) {
-      await displayIncomingCall({ fromUid: d.fromUid, callerName: d.callerName, callType: d.callType, chatId: d.chatId });
-    }
+    // Deliberately does NOT ring. The native VaultCallMessagingService already
+    // rings from this same FCM delivery, with the caller's photo and working
+    // Answer/Decline actions, and it can do so from a cold start. Ringing here
+    // too was the second, avatar-less notification (channel "calls").
+    if (d?.type === 'call' && d?.fromUid) { /* native owns the ring */ }
   } catch {}
 });
 Notifications.registerTaskAsync(CALL_BG_TASK).catch(() => {});

@@ -10,7 +10,6 @@ import (
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/metrics"
 	"vaultchat/backend-go/internal/redisx"
-	"vaultchat/backend-go/internal/workx"
 )
 
 // ── shared payload helpers ────────────────────────────────────────────
@@ -454,25 +453,27 @@ func (h *Hub) registerSignalHandlers(s *socket.Socket) {
 		out["fromUid"] = d.uid
 		h.EmitToUid(to, "call_incoming", out)
 
-		if h.hasLiveSocket(to) {
-			return // app running → in-app/Notifee already rings; avoid double
-		}
-		title := mstr(m, "callerName")
-		if title == "" {
-			title = "Incoming call"
-		}
-		body, callType := "📞 Voice call", "audio"
-		if mstr(m, "type") == "video" {
-			body, callType = "📹 Video call", "video"
-		}
-		data := map[string]any{
-			"type":       "call",
-			"chatId":     mstr(m, "chatId"),
-			"fromUid":    d.uid,
-			"callerName": mstr(m, "callerName"),
-			"callType":   callType,
-		}
-		workx.Submit(func() { h.sendCallWakePush(bg, to, title, body, data) }) // P2.2: bounded, not raw-spawned
+		// NO PUSH FROM HERE — /call/initiate already owns the ring.
+		//
+		// This block was a SECOND, independent ring mechanism. The caller's
+		// engine calls nativeCall.ringPeer (engine.ts:1176) on every outgoing
+		// call, which POSTs /call/initiate, and routes/calls.go pushes an FCM
+		// with type="incoming_call", the caller's id and their photo. The native
+		// VaultCallMessagingService handles exactly that type and posts the
+		// full-screen ring.
+		//
+		// This one pushed type="call" with no callerId and no photo, which the
+		// native service does not handle at all — so it was rendered by the JS
+		// notifee layer instead. That is why one call produced TWO notifications
+		// and why only one of them had an avatar: two server paths, two
+		// renderers, one call. Measured on device during a live ring as
+		// id=50193 channel=vaultchat_incoming_calls next to a notifee entry on
+		// channel=calls.
+		//
+		// Deleting this leaves one ring, with the richer payload, rendered by
+		// the one component that can also ring a killed app. The socket relay
+		// above is untouched: an app that IS running still gets call_incoming
+		// and shows its in-app screen.
 	})
 
 	// Group calls (mesh) — a call room per chat. In cluster mode the roster
@@ -569,6 +570,26 @@ const (
 	callRingLimit     = 120
 	callRingWindowSec = 60
 )
+
+// ONE WAKE-UP PUSH PER CALL, not one per ring.
+//
+// ringAndOffer re-emits call_incoming every 3s for up to 9 repeats, and the
+// push below fired on EVERY one of them that found no live socket. The callee
+// got a stream of notifications for a single call — measured on device as three
+// FCM deliveries 3s apart (19:23:53 / :56 / :59) — where every other messenger
+// shows exactly one.
+//
+// The push only has to WAKE the device; once awake the socket delivers the
+// re-rings, and the notification the native service posts uses a fixed id, so
+// the ring persists without being re-sent. Re-pushing adds noise, not
+// reachability.
+//
+// The window outlasts a full ring cycle (9 x 3s = 27s) so no repeat inside one
+// call gets through, while a genuine redial afterwards still rings. Keyed by
+// caller+callee+chat so a second caller is never suppressed. Consume fails OPEN,
+// so a Redis outage degrades to the old chatty behaviour rather than silencing
+// calls.
+const callPushDedupeSec = 40
 
 // meshMaxParticipants is the hard ceiling on a full-mesh group call,
 // including the joiner. Default 5: at 5 participants each phone already runs

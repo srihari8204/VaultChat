@@ -46,9 +46,43 @@ class CallForegroundService : Service() {
             else ctx.startService(i)
         }
 
+        /**
+         * STOPPING MUST WORK FROM THE BACKGROUND — that is the normal case.
+         *
+         * This used to be a bare `startService`, which on O+ throws
+         * IllegalStateException when the app is not in the foreground. The
+         * throw was swallowed by the empty catch below, so the intent was never
+         * delivered, the service kept running, and its ONGOING|NO_CLEAR
+         * notification stayed on the shade forever. Calls end backgrounded far
+         * more often than not (screen off, app switched, callee hung up), so
+         * these accumulated: measured on the Nothing Phone as TWO live
+         * `vaultchat_calls_ongoing` notifications with no call in progress and
+         * no CallForegroundService in `dumpsys activity services`.
+         *
+         * startForegroundService is deliverable while backgrounded. It carries a
+         * contract — the service MUST call startForeground within ~5s or the OS
+         * kills the process with "did not call startForeground" — which is why
+         * the ACTION_STOP branch promotes itself before standing down rather
+         * than calling stopSelf immediately.
+         *
+         * The notification is also cancelled directly. stopForeground(REMOVE)
+         * normally does it, but if the service is already dead (killed by the
+         * OEM, or a previous leak) nothing would ever clear a NO_CLEAR entry the
+         * user cannot swipe away.
+         */
         fun stop(ctx: Context) {
             val i = Intent(ctx, CallForegroundService::class.java).apply { action = ACTION_STOP }
-            try { ctx.startService(i) } catch (_: Throwable) {}
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ctx.startForegroundService(i)
+                else ctx.startService(i)
+            } catch (_: Throwable) {
+                // The service is not running (already stopped, or never started).
+                // Nothing to stand down — but a stale notification may still be
+                // on the shade, so fall through to the cancel below.
+            }
+            try {
+                (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIF_ID)
+            } catch (_: Throwable) {}
         }
     }
 
@@ -58,8 +92,20 @@ class CallForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            // Satisfy the startForegroundService contract before standing down.
+            //
+            // stop() now delivers this via startForegroundService so it works
+            // from the background, and that obliges us to call startForeground
+            // within ~5s even though we are about to quit — otherwise the OS
+            // kills the process with "did not call startForeground()". Promoting
+            // with the same NOTIF_ID and immediately removing it is the standard
+            // way out: the notification never becomes visible to the user.
+            try { startForeground(NOTIF_ID, buildNotification("VaultChat call", false)) } catch (_: Throwable) {}
             releaseWakeLock()
             stopForegroundCompat()
+            try {
+                (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIF_ID)
+            } catch (_: Throwable) {}
             stopSelf()
             return START_NOT_STICKY
         }

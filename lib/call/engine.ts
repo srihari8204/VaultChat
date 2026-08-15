@@ -634,7 +634,7 @@ async function bootstrap(a: StartArgs, direction: 'outgoing' | 'incoming', wire:
 
   if (s.wire === 'direct') addPeer(s, a.peerUid, a.peerName, iceServers);
 
-  registerForCallWaiting(a, me.name ?? me.email ?? 'VaultChat user');
+  registerForCallWaiting(a, me.name ?? me.email ?? '');
   openSession(s);
   const peer = solePeer(s) as CallPeer;
   return { s, peer, me, iceServers };
@@ -1139,7 +1139,13 @@ export async function startOutgoing(a: StartArgs): Promise<void> {
     const cancelRing = await signal.ringAndOffer({
       to: a.peerUid, from: s.meId, chatId: a.chatId,
       type: a.kind === 'video' ? 'video' : 'audio',
-      callerName: me.name ?? me.email ?? 'VaultChat user',
+      // BLANK, never the placeholder. This is OUR name, sent to the CALLEE —
+      // and the callee's screens only run their getChat lookup when the name
+      // arrives empty. Sending the literal 'VaultChat user' looked like a real
+      // name, disabled that lookup, and pinned the placeholder on the receiver
+      // for the whole call. That is the "VaultChat user on the receiver end"
+      // report: the fallback was travelling over the wire as data.
+      callerName: me.name ?? me.email ?? '',
       offer: offerWire,
       reseal: () => { const w = pendingReseal; pendingReseal = null; return w ?? reseal(); },
     }, isDone);

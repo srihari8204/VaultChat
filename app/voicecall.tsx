@@ -21,7 +21,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import InCallManager from 'react-native-incall-manager';
 import { setActiveCall, clearActiveCall, type ActiveCall } from '../lib/callState';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { StatusBar, StyleSheet, Text, View } from 'react-native';
+import { BackHandler, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CALL } from '../constants/callTheme';
 import {
@@ -34,7 +34,7 @@ import { getCurrentUserAsync } from './(constants)/authService';
 import { getIceServers } from '../lib/iceConfig';
 import { getSocket } from '../lib/socket';
 import { addCallLog } from '../lib/callLog';
-import { startCallForeground, stopCallForeground, dismissIncomingNotification, initiateCall, cancelCall } from '../lib/CallService';
+import { startCallForeground, stopCallForeground, dismissIncomingNotification, initiateCall, cancelCall, enterPipMode } from '../lib/CallService';
 import { newCallCipher, openCallOffer, plainCipher, type CallCipher } from '../lib/callCrypto';
 import { CallTimer, elapsedSeconds } from '../components/call/CallTimer';
 import { CallControlButton } from '../components/call/CallControlButton';
@@ -42,6 +42,7 @@ import { CallExtras } from '../components/call/CallExtras';
 import { CallEncryptionBadge } from '../components/call/CallEncryptionBadge';
 import { CALL_ENGINE_V2 } from '../constants/flags';
 import * as engine from '../lib/call/engine';
+import { callFail, offerTag } from '../lib/call/diag';
 import { DISCONNECT_GRACE_MS } from '../lib/call/peer';
 import { useCallConnectedAt, useCallError, useCallFlag, useCallStatus } from '../hooks/useCall';
 
@@ -112,10 +113,32 @@ function VoiceCallEngine() {
       chatId: String(chatId ?? ''), peerUid: String(peerUid ?? ''),
       peerName: String(peerName ?? ''), kind: 'audio' as const,
     };
-    if (incoming && initialOffer) {
-      let wire: any = null;
-      try { wire = JSON.parse(String(initialOffer)); } catch {}
-      engine.acceptIncoming({ ...args, offerWire: wire });
+    // AN INCOMING CALL MUST NEVER FALL THROUGH TO DIALLING.
+    //
+    // This used to read `if (incoming && initialOffer)`, so an accept that
+    // arrived before the offer did — every notification answer, because the
+    // intent extras never reach JS, and any fast tap — skipped the answer path
+    // and ran startOutgoing instead. The callee then DIALLED THE CALLER BACK,
+    // ringing the phone that was already ringing it. Measured on device:
+    //
+    //   [call][--------][accepted] audio     ← accepted with no offer
+    //   [call][37e8ad47][offer_sent] audio   ← now calling THEM
+    //   [call][--------][accepted] audio
+    //   [call][c33fd20c][offer_sent] audio   ← and again
+    //
+    // That is the "answering triggers so many calls" report, and the stray
+    // outgoing call is also what collides with the real one and drops it.
+    //
+    // `incoming` alone decides the branch now. Without an offer we do NOT call
+    // acceptIncoming either: it treats a null wire as a DEAD RATCHET and fires
+    // requestPeerRekey, which would reset a perfectly healthy session over a
+    // race. The caller re-emits the offer every 3s, so the honest move is to go
+    // back to the ring and let it arrive.
+    let wire: any = null;
+    if (incoming && initialOffer) { try { wire = JSON.parse(String(initialOffer)); } catch {} }
+    if (incoming) {
+      if (wire) engine.acceptIncoming({ ...args, offerWire: wire });
+      else { callFail(offerTag(null), 'ACCEPT_NO_OFFER', 'OFFER_NOT_ARRIVED', { retry: 0, recoverable: true }); router.back(); }
     } else {
       engine.startOutgoing(args);
     }
@@ -124,6 +147,18 @@ function VoiceCallEngine() {
     // registry makes this safe to call redundantly.
     return () => { engine.hangUp('local_hangup', true); engine.release(); };
   }, [chatId, peerUid, peerName, isIncoming, initialOffer]);
+
+  // BACK SHRINKS THE CALL, IT DOES NOT END IT.
+  //
+  // Default back pops this screen, and the unmount above hangs up — so the
+  // gesture every other calling app uses to keep talking in a floating window
+  // was dropping the call instead. Returning true keeps the screen mounted (the
+  // call stays alive) whether or not the OS grants PiP; if it refuses we simply
+  // stay on the call screen, which is still better than hanging up.
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => { enterPipMode(); return true; });
+    return () => sub.remove();
+  }, []);
 
   // Foreground service + clear the OS ring, once, on connect.
   useEffect(() => { if (status === 'connected') engine.onConnected(); }, [status]);

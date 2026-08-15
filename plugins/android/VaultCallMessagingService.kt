@@ -204,9 +204,41 @@ class VaultCallMessagingService : FirebaseMessagingService() {
         }
     }
 
+    /**
+     * Is our own process in the foreground right now?
+     *
+     * When it is, the JS layer already has the socket event and shows the in-app
+     * ring screen, so posting an OS notification on top produces the SECOND
+     * notification users see. Asking the OS is enough — it needs no bridge to JS
+     * and works from a cold FCM delivery, where no JS runtime exists to ask.
+     */
+    private fun appInForeground(): Boolean = try {
+        val am = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        am.runningAppProcesses?.any {
+            it.processName == packageName &&
+                it.importance == android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
+        } ?: false
+    } catch (_: Throwable) { false }   // unknown → post it; a missed ring is worse than a duplicate
+
     private fun showIncoming(data: Map<String, String>) {
         val callId = data["callId"] ?: return
         val callerId = data["callerId"] ?: ""
+
+        // ONE OWNER FOR THE OS RING.
+        //
+        // Two independent systems were ringing: this service (FCM → full-screen
+        // notification, WITH the caller's photo) and the JS/notifee layer
+        // (channel "calls", no photo). Confirmed on device during a live ring —
+        // id=50193 channel=vaultchat_incoming_calls alongside the notifee entry
+        // on channel=calls. The server tried to arbitrate by skipping the push
+        // when the callee had a live socket, but a backgrounded phone's socket
+        // drops and reconnects across the caller's 3s re-rings, so both fired.
+        //
+        // Arbitrating on the DEVICE removes the race: whoever owns the screen
+        // owns the ring. Foreground → JS shows the in-app screen and we stay
+        // out. Anything else → we ring, because JS may not even be running.
+        if (appInForeground()) return
+
         val name = data["callerName"]?.ifBlank { "VaultChat user" } ?: "VaultChat user"
         val dpUrl = data["callerDpUrl"] ?: ""
         val isVideo = data["isVideo"] == "true"
