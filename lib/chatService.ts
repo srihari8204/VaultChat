@@ -891,6 +891,25 @@ async function readOwnPlaintext(chatId: string, messageId: number, createdAt?: s
     // own chat bubble (seen on device). Treat it as "no plaintext held", which
     // gives the bubble's proper "can't be shown on this device" state.
     if (v === e2ee.E2EE_UNDECRYPTABLE) return null;
+
+    // THE OTHER STORE — and on the sender's own device usually the first one
+    // written. messageQueue.postOnce puts the plaintext straight into the
+    // canonical `messages` row (the single-record model); this KV cache is a
+    // SEPARATE write that can lag it, fail on its own, or be evicted. Reading
+    // only the KV therefore reported "not available on this device" for
+    // messages whose text was sitting in the row the whole time — measured on
+    // the Honor as three own messages sent minutes earlier, unreadable on the
+    // sender while the recipient displayed them normally.
+    //
+    // Checked only after the KV misses, so the common path costs nothing.
+    if (v == null) {
+      try {
+        const { getCachedMessagesByIds } = await import('./localDb');
+        const rows = await getCachedMessagesByIds(chatId, [messageId]);
+        const c = rows?.[0]?.content;
+        if (c != null && !looksEncrypted(c) && c !== e2ee.E2EE_UNDECRYPTABLE) return c;
+      } catch { /* cache unavailable → fall through to "not held" */ }
+    }
     return v;
   } catch { return null; }
 }

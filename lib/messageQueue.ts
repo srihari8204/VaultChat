@@ -487,6 +487,27 @@ async function postOnce(item: QueuedMessage): Promise<PostResult> {
   // envelope, and never sees any of this.
   if (real && (item.op ?? 'send') === 'send' && item.plaintext) {
     (real as any).content = item.plaintext;
+    // AND COMMIT IT HERE, rather than trusting a caller to do it.
+    //
+    // This function is the only place that holds BOTH the plaintext and the
+    // server id at once, and the id is what every local store keys on. Handing
+    // `real` back and hoping the caller persists it made the sender's own copy
+    // depend on which screen happened to be mounted: chat.tsx caches it, other
+    // send paths do not. The outbox row is then released on the delivered event
+    // (noteDelivered) on the assumption this write happened — so when it did
+    // not, the last copy of the sender's own text went with it, and the bubble
+    // read "not available on this device" for a message the RECIPIENT could
+    // display perfectly. Seen on the Honor and again on the Redmi.
+    //
+    // Awaited, not fire-and-forget: the recovery copy is dropped on the basis
+    // of this row existing, so the write must land before that can happen.
+    try {
+      const { cacheMessages } = await import('./localDb');
+      await cacheMessages(item.chatId, [real as Message]);
+    } catch (err) {
+      // Do NOT swallow this quietly — it is the sender's only readable copy.
+      console.warn('[queue] local commit FAILED — id:', (real as any)?.id, '—', (err as any)?.message ?? err);
+    }
   }
   // Hand back the CIPHERTEXT (not `wire`, which is the pre-encryption text) so
   // the caller can retain it for recovery and discard the plaintext.
