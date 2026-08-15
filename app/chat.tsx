@@ -683,9 +683,8 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           // socket echo of our own just-sent message survives alongside the ack'd
           // row and both collide on the same React key.
           if (m.id != null) (m as any).id = Number(m.id);
-          // Auto-acknowledge delivery + tone immediately (don't wait on decrypt).
+          // Tone immediately; the DELIVERY ACK deliberately does not fire here.
           if (m.senderId !== meId) {
-            markDeliveredDurable(chatId, m.id).catch(() => {});
             playReceived();   // in-app "received" tone (respects sound prefs)
           }
           // Decrypt-on-arrival (WhatsApp-style): decrypt ONCE, then show + cache
@@ -696,7 +695,23 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             // simply gone. Everything else hydrated on this screen is history.
             const fin = looksEncrypted(m.content) ? (await hydrateMessages(chatId, [m], undefined, { live: true }))[0] ?? m : m;
             setMessages(prev => prev.some(x => x.id === fin.id) ? prev : [fin, ...prev]);
-            applyMessage(chatId, fin).catch(() => {}); // persist plaintext to local cache
+            // ORDERING IS THE CONTRACT — same rule as lib/syncBackground.ts.
+            //
+            // The ack must mean "this device HAS the message", never "this device
+            // was told about a message". The server reclaims a body once every
+            // recipient has acked, so an ack that outruns the local write leaves
+            // a window where the message exists NOWHERE: not on the server, not
+            // on disk. This previously acked before the persist below, on the
+            // reasoning that the tick should not wait on decrypt — but only the
+            // TONE needs to be instant, and it still is.
+            //
+            // Persist first, and ack only if the write actually succeeded. A
+            // failed write leaves the pointer un-advanced, so the sync cursor
+            // re-fetches the message on the next reconnect.
+            try {
+              await applyMessage(chatId, fin);   // persist plaintext to local cache
+              if (fin.senderId !== meId) markDeliveredDurable(chatId, fin.id).catch(() => {});
+            } catch { /* not on disk → do NOT ack; catch-up re-delivers it */ }
             // Bump the "↓ N new" counter when a message lands while scrolled up.
             if (!atBottomRef.current && fin.senderId !== meId) setNewSinceUp(n => n + 1);
           })();

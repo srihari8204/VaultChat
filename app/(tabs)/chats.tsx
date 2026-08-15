@@ -34,7 +34,6 @@ import { getSocket } from '../../lib/socket';
 import { setUnreadTotal } from '../../lib/unreadStore';
 import { getDraftMap } from '../../lib/drafts';
 import { getLastMessagePerChat, getCachedChats, cacheChats } from '../../lib/localDb';
-import { syncAllHistory } from '../../lib/historySync';
 import { getCurrentUserAsync } from '../(constants)/authService';
 
 type LastMsg = { content: string | null; type: string | null; senderId: string | null; id: number };
@@ -151,10 +150,8 @@ export default function ChatsScreen() {
     return () => { cancel = true; };
   }, []);
 
-  // Core list load. `withHistory` runs the once/session background history
-  // pre-fetch — deliberately NOT done on the per-message socket refresh path
-  // (P1.2): a busy chat used to kick syncAllHistory on every inbound message.
-  const loadList = useCallback(async (withHistory: boolean) => {
+  // Core list load.
+  const loadList = useCallback(async () => {
     // Previews come from the local DB and need NO network, but this used to sit
     // below `await listChats()` — so offline, that first line threw and every
     // row fell back to "Tap to open chat" even though the text was on disk.
@@ -165,10 +162,6 @@ export default function ChatsScreen() {
       const list = await listChats();
       setChats(prev => mergeChats(prev, list));                 // identity-preserving → memoized rows skip re-render
       cacheChats(list).catch(() => {});                         // persist for instant next-launch paint (op-sqlite engine)
-      if (withHistory) {
-        // Background: pre-fetch history so offline scroll-back works (once/session, Wi-Fi only).
-        syncAllHistory(list.filter(c => !c.archived).map(c => c.id)).then(() => getLastMessagePerChat().then(hydrateOwnPreviews).then(setLastMsgs).catch(() => {})).catch(() => {});
-      }
       setError(null);
       // Publish total unread (non-archived) so the Chats tab can badge it.
       setUnreadTotal(list.reduce((n, c) => n + (c.archived ? 0 : (c.unreadCount > 0 ? 1 : 0)), 0));
@@ -177,16 +170,16 @@ export default function ChatsScreen() {
     }
   }, []);
 
-  const fetchList = useCallback(() => loadList(true), [loadList]);
+  const fetchList = useCallback(() => loadList(), [loadList]);
 
   // P1.2: coalesce bursts of socket events (new/edited/deleted messages) into a
-  // single lightweight refetch (no history pre-fetch), instead of one full
-  // fetchList() per event. Previously a chatty thread triggered a network
-  // listChats() + whole-list re-render + syncAllHistory on every message.
+  // single lightweight refetch, instead of one full fetchList() per event.
+  // Previously a chatty thread triggered a network listChats() + whole-list
+  // re-render on every message.
   const refreshTimer = useRef<any>(null);
   const scheduleRefresh = useCallback(() => {
     if (refreshTimer.current) return;   // already scheduled → coalesce
-    refreshTimer.current = setTimeout(() => { refreshTimer.current = null; loadList(false); }, 350);
+    refreshTimer.current = setTimeout(() => { refreshTimer.current = null; loadList(); }, 350);
   }, [loadList]);
 
   // Clear coalescing + typing timers on unmount so they can't fire on an
