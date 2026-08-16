@@ -985,6 +985,41 @@ async function rotateMediaKeyAfterLeave(s: Session): Promise<void> {
  * Double Ratchet. No new key agreement is introduced: the SFU changes the
  * TRANSPORT, not the trust model.
  */
+/**
+ * Start a call directly on the SFU — no peer offer/answer, no mesh.
+ *
+ * This is the path every call takes now (topologyFor returns 'sfu'). The mesh
+ * entry points remain only for sfuAvailable=false.
+ *
+ * Order matters and is not obvious:
+ *   1. the server call session must EXIST before we can ask for a room token,
+ *      so unlike the mesh path (which fires openSession and forgets) this one
+ *      awaits it;
+ *   2. the media key is minted and distributed over the PAIRWISE RATCHET
+ *      (distributeMediaKey), which is independent of any peer connection — so
+ *      it works with no mesh at all;
+ *   3. only then join, with the key already in hand. Joining first and keying
+ *      afterwards would publish unencrypted frames for the gap, which must
+ *      never happen.
+ */
+async function startViaSfu(s: Session, kind: CallKind): Promise<void> {
+  const res = await openCallSession(s.chatId, s.kind, 'meeting');
+  if (!res?.call?.id) throw new Error('could not open a call session');
+  s.serverCallId = res.call.id;
+  const me = res.participants?.find(p => p.userId === s.meId);
+  dispatch({ type: 'session', sessionId: res.call.id, myRole: me?.role });
+
+  await establishMediaKey(s);
+  // A non-minting participant adopts the key over the ratchet; give it a moment
+  // rather than joining unencrypted.
+  for (let i = 0; i < 20 && !s.mediaKey && !s.disposed; i++) {
+    await new Promise(r => setTimeout(r, 150));
+  }
+  if (!s.mediaKey) throw new Error('no media key — refusing to publish unencrypted');
+
+  await joinViaSfu(s, kind === 'video');
+}
+
 async function joinViaSfu(s: Session, video: boolean): Promise<void> {
   if (!s.serverCallId) throw new Error('no server call session');
 
