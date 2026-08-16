@@ -134,7 +134,25 @@ export interface TopologyInput {
 export function topologyFor({ participants, isBroadcast = false, sfuAvailable = true }: TopologyInput): CallTopology {
   if (isBroadcast) return 'broadcast';          // asymmetric by definition, even with 2 people
   if (!sfuAvailable) return 'mesh';             // degrade rather than fail
-  return participants > MESH_MAX ? 'sfu' : 'mesh';
+  // SFU FOR EVERY CALL — 1:1 included. Owner decision, 2026-08-16.
+  //
+  // This used to hand 1:1 and small calls to the mesh and only reach for the SFU
+  // past MESH_MAX. That kept TWO transports alive, and every hard call bug found
+  // on device sat where the two meet: per-pair NAT traversal (measured as 1-2
+  // minutes before audio became audible, ICE hunting across 7-14 relay
+  // candidates), a single module-wide session that made hold impossible, and
+  // teardown that differed by path.
+  //
+  // The SFU costs nothing in trust: RTCFrameCryptor encrypts each frame BEFORE
+  // it leaves the device (see joinViaSfu in engine.ts), so the server forwards
+  // ciphertext exactly as the mesh peers did. The media key is still the one
+  // this call derived over the Double Ratchet — the transport changes, the trust
+  // model does not.
+  //
+  // Mesh remains reachable ONLY through the sfuAvailable=false branch above, so
+  // an unprovisioned or failed SFU still degrades to a working call rather than
+  // no call.
+  return 'sfu';
 }
 
 /** Hard ceiling for a topology — what the server enforces on join. */

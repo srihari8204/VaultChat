@@ -232,7 +232,18 @@ function VideoCallEngine() {
 
   // BACK SHRINKS THE CALL, IT DOES NOT END IT — see voicecall.tsx for why.
   useEffect(() => {
-    const sub = BackHandler.addEventListener('hardwareBackPress', () => { enterPipMode(); return true; });
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      // PiP ONLY on a live call. Otherwise back must still LEAVE.
+      //
+      // Swallowing back unconditionally trapped the user: on a call that was
+      // connecting, silent, or already dead, the hang-up control did not end it
+      // and back only shrank it — so the only way out was killing the app from
+      // recents. A gesture that can strand someone in a broken call is worse
+      // than the problem it was added to solve.
+      if (status !== 'connected') { engine.hangUp('local_hangup', true); return false; }
+      enterPipMode();
+      return true;
+    });
     return () => sub.remove();
   }, []);
 

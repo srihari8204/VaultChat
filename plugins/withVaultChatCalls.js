@@ -58,6 +58,34 @@ function withPermissions(config) {
   });
 }
 
+/**
+ * PiP on MainActivity, applied by the plugin so a prebuild cannot lose it.
+ *
+ * Back on a call screen enters Picture-in-Picture instead of hanging up
+ * (CallModule.enterPip). That needs android:supportsPictureInPicture, and
+ * smallestScreenSize in configChanges — without the latter the PiP resize
+ * RESTARTS the activity, which tears the call down: exactly the bug PiP was
+ * added to fix, in a form that only shows up on the resize.
+ *
+ * This lived in the GENERATED AndroidManifest.xml, where the next
+ * `expo prebuild` would silently drop it and PiP would stop working with no
+ * error anywhere. Config is the only durable home for it.
+ */
+function withPipActivity(config) {
+  return withAndroidManifest(config, (cfg) => {
+    const app = AndroidConfig.Manifest.getMainApplicationOrThrow(cfg.modResults);
+    const main = (app.activity || []).find((a) => a.$['android:name'] === '.MainActivity');
+    if (main) {
+      main.$['android:supportsPictureInPicture'] = 'true';
+      const cc = main.$['android:configChanges'] || '';
+      if (!cc.includes('smallestScreenSize')) {
+        main.$['android:configChanges'] = cc ? `${cc}|smallestScreenSize` : 'smallestScreenSize';
+      }
+    }
+    return cfg;
+  });
+}
+
 function withServices(config) {
   return withAndroidManifest(config, (cfg) => {
     const app = AndroidConfig.Manifest.getMainApplicationOrThrow(cfg.modResults);
@@ -190,6 +218,7 @@ function withIosVoip(config) {
 module.exports = function withVaultChatCalls(config) {
   config = withPermissions(config);
   config = withServices(config);
+  config = withPipActivity(config);   // back → PiP, not hang-up
   config = withKotlinSources(config);
   config = withPackageRegistration(config);
   config = withFirebaseMessaging(config);

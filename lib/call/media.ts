@@ -40,7 +40,19 @@ export interface LocalMedia {
 export function startAudioSession(kind: CallKind): void {
   try {
     InCallManager.start({ media: kind === 'video' ? 'video' : 'audio', auto: true });
-    InCallManager.setForceSpeakerphoneOn(kind === 'video' ? true : false);
+    // null, NOT false — they mean different things.
+    //
+    // true forces speaker on, false FORCES IT OFF, and null releases the force
+    // so the route follows `auto: true` (earpiece by default, but switching to
+    // a wired or Bluetooth headset when one is present). setSpeaker() below
+    // already uses `on ? true : null` for exactly that reason; this line did
+    // not, so every audio call pinned the route with a hard override applied
+    // immediately after start() — and a forced route set before the session has
+    // settled is a known way to end up connected with no audible path.
+    //
+    // Video still forces speaker on: a video call held at arm's length must not
+    // come out of the earpiece.
+    InCallManager.setForceSpeakerphoneOn(kind === 'video' ? true : null);
   } catch { /* not fatal: the call still works on the default route */ }
 }
 

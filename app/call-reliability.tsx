@@ -3,9 +3,9 @@
 // Prompts for battery-optimization exemption and deep-links to the OEM auto-start
 // page, with a per-manufacturer step list + an "I've done this" confirmation.
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Platform, Switch } from 'react-native';
-import { useRouter, Stack } from 'expo-router';
+import { useRouter, Stack, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
@@ -13,6 +13,7 @@ import {
   requestIgnoreBatteryOptimizations, openAutoStartSettings, oemInstructions, type OemStep,
 } from '../lib/batteryOptimization';
 import { getLowDataMode, setLowDataMode } from '../lib/callPrefs';
+import { canUseFullScreenIntent, openFullScreenIntentSettings } from '../lib/CallService';
 
 const DONE_KEY = 'vc_call_reliability_done';
 
@@ -28,6 +29,20 @@ export default function CallReliabilityScreen() {
 
   useEffect(() => { oemInstructions().then(setOem); }, []);
 
+  // Android 14 turned USE_FULL_SCREEN_INTENT into a user-granted permission for
+  // anything that is not the default dialer. Declaring it in the manifest is no
+  // longer enough — measured on device as FSI_REQUESTED_BUT_DENIED on the ring
+  // notification, which is why an incoming call showed a heads-up banner instead
+  // of taking over the lock screen like a phone call.
+  //
+  // Re-checked on focus, not just on mount: granting it happens in Settings, so
+  // the user comes BACK to this screen having changed it, and a mount-only check
+  // would keep telling them to do something they had already done.
+  const [fsiOk, setFsiOk] = useState(true);
+  const refreshFsi = () => { canUseFullScreenIntent().then(setFsiOk).catch(() => {}); };
+  useEffect(refreshFsi, []);
+  useFocusEffect(useCallback(() => { refreshFsi(); }, []));
+
   return (
     <View style={S.screen}>
       <Stack.Screen options={{ headerShown: false }} />
@@ -41,6 +56,25 @@ export default function CallReliabilityScreen() {
           To make sure calls ring even when VaultChat is closed, allow it to run in the background. This is required on most
           Android phones.
         </Text>
+
+        {/* Step 0 — full-screen intent (Android 14+). Shown ONLY when it is
+            actually missing: a permission card that is always there teaches
+            people to ignore the list. */}
+        {Platform.OS === 'android' && !fsiOk && (
+          <View style={S.card}>
+            <View style={S.cardHead}>
+              <Ionicons name="alert-circle-outline" size={22} color={colors.danger} />
+              <Text style={S.cardTitle}>Allow full-screen calls</Text>
+            </View>
+            <Text style={S.cardBody}>
+              Without this, an incoming call shows a small banner instead of taking over the
+              screen — easy to miss when the phone is locked.
+            </Text>
+            <TouchableOpacity style={S.btn} onPress={() => { openFullScreenIntentSettings(); }}>
+              <Text style={S.btnTxt}>Open setting</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Step 1 — battery optimization */}
         <View style={S.card}>

@@ -2,8 +2,9 @@
 //
 // This module decides whether a call is peer-to-peer or server-routed, and that
 // decision carries a SECURITY consequence: mesh keeps 1:1 end-to-end encrypted
-// (D-1), the SFU does not. So "a small call must never silently become an SFU
-// call" is tested here as an invariant, not left as an intention.
+// (D-1). The SFU preserves it too, because RTCFrameCryptor encrypts each frame
+// BEFORE it leaves the device — so "every call is E2EE" is the invariant, and
+// the transport underneath it is free to change.
 //
 // The other invariant worth pinning: an audience member must not be able to
 // publish. The media server enforces it, but the UI has to agree — offering a
@@ -31,12 +32,12 @@ const topo = (participants: number, o: Record<string, unknown> = {}) =>
 console.log('\nCall topology self-test\n');
 
 // ── the security-relevant one ──────────────────────────────────────────
-console.log('small calls stay peer-to-peer (D-1: 1:1 must remain E2EE):');
-eq('a 1:1 call is mesh', topo(2), 'mesh');
-eq('3 people is mesh', topo(3), 'mesh');
-eq('exactly MESH_MAX is still mesh', topo(MESH_MAX), 'mesh');
-check('no participant count at or below the mesh cap ever yields sfu',
-  Array.from({ length: MESH_MAX }, (_, i) => topo(i + 1)).every(t => t === 'mesh'));
+console.log('EVERY call rides the SFU — frame E2EE keeps D-1 true (owner decision 2026-08-16):');
+eq('a 1:1 call is SFU', topo(2), 'sfu');
+eq('3 people is SFU', topo(3), 'sfu');
+eq('exactly MESH_MAX is SFU', topo(MESH_MAX), 'sfu');
+check('every participant count yields sfu while the SFU is available',
+  Array.from({ length: MESH_MAX }, (_, i) => topo(i + 1)).every(t => t === 'sfu'));
 
 console.log('\nbeyond the mesh cap, the SFU takes over:');
 eq('one past the cap switches to sfu', topo(MESH_MAX + 1), 'sfu');
