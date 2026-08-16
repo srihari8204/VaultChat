@@ -155,6 +155,28 @@ export function topologyFor({ participants, isBroadcast = false, sfuAvailable = 
   return 'sfu';
 }
 
+/**
+ * Who mints the call's shared media key. EXACTLY ONE side must say yes, or the
+ * room ends up split across two keys and nobody can decode anybody.
+ *
+ * GROUP: lowest uid. Everyone is already in the room and listening, so any
+ * deterministic rule works and this one needs no extra state.
+ *
+ * 1:1: the ANSWERING side, which is NOT the lowest-uid rule and must not be.
+ * The caller reaches this decision while the callee is still ringing and has
+ * not attached its socket listeners yet, so a key minted by the caller is sent
+ * to a device that cannot receive it and is lost — after which the caller joins
+ * the SFU and the callee never can. The callee mints at the moment it accepts,
+ * when the caller is provably listening. Its arrival is also how the caller
+ * learns the call was answered.
+ */
+export function mintsMediaKey(
+  a: { oneToOne: boolean; direction: 'outgoing' | 'incoming'; meId: string; others: string[] },
+): boolean {
+  if (a.oneToOne) return a.direction === 'incoming';
+  return [a.meId, ...a.others].sort()[0] === a.meId;
+}
+
 /** Hard ceiling for a topology — what the server enforces on join. */
 export function capacityFor(t: CallTopology): number {
   switch (t) {

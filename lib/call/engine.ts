@@ -48,7 +48,7 @@ import * as signal from './signal';
 import type { WireMode } from './signal';
 import { CallPeer } from './peer';
 import { durationSeconds, shouldCancelRing, wasMissed, type CallFlag } from './machine';
-import { topologyFor } from './mode';
+import { mintsMediaKey, topologyFor } from './mode';
 import { attachAudioFocus } from './audioFocus';
 import { INITIAL_CURSOR, INITIAL_QUALITY, TIERS, audioBitrate, ceilingFor, nextQuality, sampleFromTotals } from './quality';
 import { netKey, shouldRestartIce } from './netChange';
@@ -83,6 +83,16 @@ interface Session {
   /** calls.id once the server session opens, or '' — see openSession(). */
   serverCallId: string;
   /**
+   * The ONE POST /calls of this call, shared.
+   *
+   * openSession() fires it off the critical path; startViaSfu needs its result
+   * before a room token can be minted. Awaiting the same promise rather than
+   * posting again matters twice: the server rate-limits call starts per account
+   * (10/min), so a second post would halve how many calls a user may place, and
+   * two concurrent starts race the unique-per-chat index for no reason.
+   */
+  opening: Promise<Awaited<ReturnType<typeof openCallSession>>> | null;
+  /**
    * The call's SHARED media key, used only on the SFU path.
    *
    * Mesh mints a key per PAIR, which is right when every link is its own
@@ -93,7 +103,12 @@ interface Session {
    */
   mediaKey: Uint8Array | null;
   /** Live SFU session once this call has switched topology. */
-  sfu: { leave(): Promise<void>; crypto: { setKey(k: Uint8Array): Promise<void> } | null } | null;
+  sfu: {
+    leave(): Promise<void>;
+    crypto: { setKey(k: Uint8Array): Promise<void> } | null;
+    replaceVideo(track: any): Promise<boolean>;
+    setRemoteAudible(audible: boolean): void;
+  } | null;
 }
 
 let session: Session | null = null;
@@ -422,7 +437,7 @@ async function bootstrap(a: StartArgs, direction: 'outgoing' | 'incoming', wire:
   session = {
     ...a, meId: '', meName: '', peers: new Map(), wire, localStream: null, screenStream: null,
     cameraTrack: null, disposers: [], logged: false, disposed: false, serverCallId: '',
-    mediaKey: null, sfu: null,
+    opening: null, mediaKey: null, sfu: null,
   };
   const s = session;
 
@@ -655,7 +670,8 @@ async function bootstrap(a: StartArgs, direction: 'outgoing' | 'incoming', wire:
  */
 function openSession(s: Session): void {
   if (!CALL_SESSIONS) return;
-  void openCallSession(s.chatId, s.kind, 'meeting')
+  s.opening = openCallSession(s.chatId, s.kind, 'meeting');
+  void s.opening
     .then(res => {
       if (!res?.call?.id || s.disposed) return;
       s.serverCallId = res.call.id;
@@ -828,23 +844,20 @@ export async function startGroup(a: StartGroupArgs): Promise<void> {
     const meshFull = (peerCount: number) => topologyFor({ participants: peerCount + 1 }) !== 'mesh';
 
     let switched = false;
-    const switchToSfu = async (peerCount: number) => {
+    const switchToSfu = async (roster: string[]) => {
       if (switched || s.disposed) return;
       switched = true;
       try {
-        // BEFORE teardown — distribution needs the peer ciphers that die with
-        // the mesh connections.
-        await establishMediaKey(s);
-        // Give a non-minting participant a moment for the key to arrive; the
-        // alternative is joining unencrypted, which must never happen silently.
-        for (let i = 0; i < 20 && !s.mediaKey && !s.disposed; i++) {
-          await new Promise(r => setTimeout(r, 150));
-        }
-        // Everything mesh-side goes now: N-1 encodes running alongside the SFU
-        // publish is worse than either alone, and on a phone it is what turns
-        // "the call got big" into "the call died".
-        for (const uid of Array.from(s.peers.keys())) removePeer(s, uid);
-        await joinViaSfu(s, a.kind === 'video');
+        // The ROSTER decides who mints, not the peer map or the store.
+        //
+        // A call that goes to the SFU immediately (which is now every group
+        // call) switches before a single peer connection exists and often
+        // before the server roster has landed in the store — so deriving the
+        // participant list from either one yields an EMPTY list, every device
+        // then believes it is alone, and all of them mint a different key. The
+        // room splits and nobody can decode anybody. The socket roster is the
+        // one list that is authoritative at this instant.
+        await startViaSfu(s, a.kind, 3_000, roster.filter(u => u && u !== s.meId));
       } catch (e: any) {
         // Degrade rather than drop: mode.ts already treats an unavailable SFU
         // as a reason to stay on mesh, and a call that keeps working badly beats
@@ -858,12 +871,13 @@ export async function startGroup(a: StartGroupArgs): Promise<void> {
     const leaveRoom = await signal.joinCallRoom({
       chatId: a.chatId,
       onRoster: (peers) => {
-        if (meshFull(peers.length)) { void switchToSfu(peers.length); return; }
+        if (meshFull(peers.length)) { void switchToSfu(peers); return; }
         peers.forEach(connectTo);
       },
       onJoined: (uid) => {
         if (switched) return;                          // the SFU owns the media now
-        if (meshFull(s.peers.size + 1)) { void switchToSfu(s.peers.size + 1); return; }
+        const roster = Array.from(new Set([...s.peers.keys(), uid]));
+        if (meshFull(roster.length)) { void switchToSfu(roster); return; }
         connectTo(uid);
       },
       onLeft: (uid) => {
@@ -930,12 +944,22 @@ function otherParticipants(s: Session): string[] {
   return Array.from(uids);
 }
 
-async function establishMediaKey(s: Session): Promise<void> {
+async function establishMediaKey(s: Session, roster?: string[]): Promise<void> {
   if (s.mediaKey) return;
 
-  const others = otherParticipants(s);
-  const minter = [s.meId, ...others].sort()[0];
-  if (minter !== s.meId) return;      // someone else mints; onMediaKey adopts it
+  // `roster` when the caller knows who is present RIGHT NOW (the socket roster
+  // at the moment of an SFU switch); otherwise derive it. The difference
+  // matters: derived lists can be empty during setup, and an empty list makes
+  // every device think it is the minter.
+  const others = roster ?? otherParticipants(s);
+  // Exactly one side mints; everyone else adopts what arrives (onMediaKey).
+  // The rule differs for 1:1 and for a group, and mintsMediaKey says why.
+  if (!mintsMediaKey({
+    oneToOne: s.wire === 'direct',
+    direction: getSnapshot().direction === 'incoming' ? 'incoming' : 'outgoing',
+    meId: s.meId,
+    others,
+  })) return;
 
   const { randomBytes } = await import('@noble/hashes/utils.js');
   const key = randomBytes(32);
@@ -984,7 +1008,10 @@ async function rotateMediaKeyAfterLeave(s: Session): Promise<void> {
  * The media key is the per-call key this call already established over the
  * Double Ratchet. No new key agreement is introduced: the SFU changes the
  * TRANSPORT, not the trust model.
+ *
+ * (This is joinViaSfu's contract; startViaSfu below is what sequences it.)
  */
+
 /**
  * Start a call directly on the SFU — no peer offer/answer, no mesh.
  *
@@ -1001,20 +1028,26 @@ async function rotateMediaKeyAfterLeave(s: Session): Promise<void> {
  *   3. only then join, with the key already in hand. Joining first and keying
  *      afterwards would publish unencrypted frames for the gap, which must
  *      never happen.
+ *
+ * `waitForKeyMs` is how long a non-minting side waits for the key to arrive.
+ * On the CALLER of a 1:1 call that wait is the whole ring budget, and it is
+ * doing double duty: the key is minted by the callee at the moment it accepts,
+ * so its arrival is also the news that somebody answered. Joining before that
+ * would publish into an empty room for the entire ring — battery and uplink
+ * spent on nobody.
  */
-async function startViaSfu(s: Session, kind: CallKind): Promise<void> {
-  const res = await openCallSession(s.chatId, s.kind, 'meeting');
+async function startViaSfu(
+  s: Session, kind: CallKind, waitForKeyMs = 3_000, roster?: string[],
+): Promise<void> {
+  const res = await s.opening;
   if (!res?.call?.id) throw new Error('could not open a call session');
   s.serverCallId = res.call.id;
-  const me = res.participants?.find(p => p.userId === s.meId);
-  dispatch({ type: 'session', sessionId: res.call.id, myRole: me?.role });
 
-  await establishMediaKey(s);
-  // A non-minting participant adopts the key over the ratchet; give it a moment
-  // rather than joining unencrypted.
-  for (let i = 0; i < 20 && !s.mediaKey && !s.disposed; i++) {
+  await establishMediaKey(s, roster);
+  for (let i = 0; i < Math.ceil(waitForKeyMs / 150) && !s.mediaKey && !s.disposed; i++) {
     await new Promise(r => setTimeout(r, 150));
   }
+  if (s.disposed) return;
   if (!s.mediaKey) throw new Error('no media key — refusing to publish unencrypted');
 
   await joinViaSfu(s, kind === 'video');
@@ -1037,13 +1070,51 @@ async function joinViaSfu(s: Session, video: boolean): Promise<void> {
     publish: cred.role !== 'audience',
     video,
     e2eeKey: key,
+    // Publish the capture this call already owns. A second capture would fight
+    // the first for the camera and leave every mute/camera control pointing at
+    // a track nobody is sending — see JoinArgs.tracks.
+    tracks: s.localStream?.getTracks?.() ?? [],
+    // The SFU's ontrack. This is what makes the call 'connected' on this
+    // transport; without it the call would ring itself out with media flowing.
+    //
+    // A video call delivers TWO tracks per participant and the order is not
+    // guaranteed, so the audio one must never overwrite a stream URL the video
+    // one already set — that renders as a black tile on a call that is working.
+    onTrack: (uid, url, kind) => {
+      const current = getSnapshot().participants[uid]?.streamUrl ?? null;
+      dispatch({ type: 'remote_stream', uid, url: kind === 'video' ? url : (current ?? url) });
+    },
+    onParticipant: (p, joined) => {
+      if (joined || s.disposed) return;
+      // In a 1:1 call the other side leaving the room IS the end of the call.
+      if (s.wire === 'direct') { hangUp('remote_hangup', false); return; }
+      dispatch({ type: 'peer_left', uid: p.identity });
+      void rotateMediaKeyAfterLeave(s);
+    },
     onDisconnected: () => { if (!s.disposed) hangUp('failed', false); },
   });
 
-  s.wire = 'sfu';
   s.sfu = sfu;
   onDispose(() => { void sfu.leave(); });
-  console.warn('[call] switched to SFU with frame E2EE');
+
+  // THE MESH TRANSPORT GOES, THE CIPHERS STAY.
+  //
+  // A 1:1 call reaches here with a peer connection that was created by
+  // bootstrap and never answered: it is gathering ICE, holding a TURN
+  // allocation and emitting candidates at a peer that will never use them.
+  // Closing it stops all of that. The CallPeer object itself stays in the map
+  // because it owns this call's signalling cipher, which in-call chat,
+  // reactions and screen-share notices all ride — close() keeps it.
+  //
+  // s.wire is deliberately NOT changed for a 1:1 call: it selects the
+  // signalling shape and the "one peer" semantics of hangup, both of which are
+  // still exactly right. Only the media moved.
+  for (const p of s.peers.values()) { try { p.close(); } catch {} }
+  // Tagged by the SERVER call id, so both devices print the same tag: a call
+  // that connects on one phone and not the other is diagnosed by whether this
+  // line appears on both, and with the same room.
+  callStage(s.serverCallId.slice(0, 8) || '--------', 'sfu_joined',
+    `role=${cred.role} publish=${cred.role !== 'audience'} video=${video} tracks=${s.localStream?.getTracks?.().length ?? 0}`);
 }
 
 /**
@@ -1069,6 +1140,10 @@ function startQualityLoop(peer: CallPeer): void {
   peer.applyAudioBitrate(audioBitrate(quality.tier, getLowDataModeCached()));
 
   const timer = setInterval(async () => {
+    // The SFU owns the encoder once the call moves onto it (simulcast +
+    // dynacast), and this peer connection is closed. Polling a dead transport
+    // every 4s for the rest of the call is pure battery.
+    if (session?.sfu) { clearInterval(timer); return; }
     const totals = await peer.readOutboundStats();
     if (!totals) return;
     const { sample, cursor: next } = sampleFromTotals(
@@ -1220,6 +1295,24 @@ export async function startOutgoing(a: StartArgs): Promise<void> {
     callStage(offerTag(offerWire), 'offer_sent',
       `${a.kind}, sealed=${sealed ? 'sig1' : 'plaintext(legacy peer)'}`);
     dispatch({ type: 'offer_sent' });
+
+    // ── THE MEDIA RIDES THE SFU, the offer above only rings ───────────────
+    //
+    // The sealed offer stays exactly as it was, because it is not only an SDP:
+    // it is the doorbell (the callee's ring payload carries it) and it is what
+    // establishes the per-call cipher that in-call chat, reactions and the
+    // re-key repair all ride on. What it no longer does is carry the media —
+    // the mesh peer is never answered, so it never negotiates.
+    //
+    // This resolves only when the callee accepts and mints the media key, so
+    // the await here is the ring, not a stall. A failure means no SFU on this
+    // deployment: the mesh offer is already on the wire and the callee will
+    // answer it, which is exactly the degrade-don't-fail path mode.ts promises.
+    try {
+      await startViaSfu(s, a.kind, RING_TIMEOUT_MS);
+    } catch (e: any) {
+      console.warn('[call] SFU unavailable — falling back to the mesh offer already ringing:', e?.message ?? e);
+    }
   } catch (e: any) {
     failSetup(e);
   }
@@ -1295,6 +1388,25 @@ export async function acceptIncoming(a: StartArgs & { offerWire: any }): Promise
     peer.setCipher(cipher);
     if (!offer?.type) {
       throw new Error('Secure call setup failed — reconnecting the secure session. Try again in a moment.');
+    }
+
+    // ── ANSWER BY JOINING THE ROOM, not by returning an SDP ───────────────
+    //
+    // Accepting is what mints this call's media key (establishMediaKey mints on
+    // the answering side for 1:1), and sending it over the pairwise ratchet is
+    // what tells the caller — who is waiting on exactly that — to join too.
+    //
+    // No mesh answer is sent on this path, so the caller's peer connection
+    // never negotiates and the two transports never both carry media. If the
+    // SFU is unavailable we fall through to the mesh answer below, and the
+    // caller's own join will have failed for the same reason, so both sides
+    // land on the mesh together.
+    try {
+      await startViaSfu(s, a.kind);
+      return;
+    } catch (e: any) {
+      console.warn('[call] SFU unavailable — answering on the mesh instead:', e?.message ?? e);
+      if (s.disposed) return;
     }
 
     const answer = await peer.answer(offer);
@@ -1421,10 +1533,15 @@ export async function startScreenShare(): Promise<void> {
   // A mesh holds one connection per peer, so the screen track has to be swapped
   // onto each of them. "1:1 is a mesh with N=1" is the model this file is built
   // on, and this is the one place that had forgotten it.
-  const senders = [...s.peers.values()]
+  // On the SFU there are no per-peer senders — one publication reaches
+  // everyone. The mesh peers still exist (they carry the ciphers) and still
+  // report a videoSender, but that sender is attached to a CLOSED peer
+  // connection: swapping onto it would show the user "Sharing" while sending
+  // nothing at all, which is worse than an error.
+  const senders = s.sfu ? [] : [...s.peers.values()]
     .map(p => ({ uid: p.uid, sender: p.videoSender() }))
     .filter((x): x is { uid: string; sender: any } => !!x.sender);
-  if (senders.length === 0) {
+  if (!s.sfu && senders.length === 0) {
     // A voice call has no outgoing VIDEO track, so there is no sender whose
     // track can be swapped for the screen — screen share is video-only by
     // construction. This used to `return` silently, which is why the button
@@ -1474,20 +1591,34 @@ export async function startScreenShare(): Promise<void> {
     throw new Error('Screen capture returned no video track. Your device or work profile may block screen recording.');
   }
   // Every peer sends the SAME local camera track, so one saved reference
-  // restores all of them.
-  s.cameraTrack = senders[0].sender.track;
+  // restores all of them. On the SFU the published track IS the engine's own
+  // camera track, so the reference comes from the local stream.
+  s.cameraTrack = s.sfu ? (s.localStream?.getVideoTracks?.()[0] ?? null) : senders[0].sender.track;
   s.screenStream = screen;
-  await Promise.all(senders.map(x => x.sender.replaceTrack(track).catch((e: any) => {
-    // One peer refusing must not abort the share for everyone else — the
-    // others are already carrying the screen by the time this settles.
-    console.warn('[screenshare] could not swap track for', x.uid, '—', e?.message ?? e);
-  })));
+  if (s.sfu) {
+    const swapped = await s.sfu.replaceVideo(track);
+    if (!swapped) {
+      media.stopStream(screen);
+      s.screenStream = null;
+      s.cameraTrack = null;
+      await setSecure(true).catch(() => {});
+      throw new Error(s.kind === 'video'
+        ? 'Screen sharing needs the video track to be ready — try again in a moment.'
+        : 'Screen sharing is only available in a video call.');
+    }
+  } else {
+    await Promise.all(senders.map(x => x.sender.replaceTrack(track).catch((e: any) => {
+      // One peer refusing must not abort the share for everyone else — the
+      // others are already carrying the screen by the time this settles.
+      console.warn('[screenshare] could not swap track for', x.uid, '—', e?.message ?? e);
+    })));
+  }
   try { dispatch({ type: 'local_stream', url: screen.toURL() }); } catch {}
   setFlag('sharing', true);
   // Tell each peer separately: this event is addressed per-uid (the server
   // stamps the sender), so a group needs N of them. s.peerUid is '' in a group
   // call, which is why the single send reached nobody.
-  for (const x of senders) signal.sendScreenShare(x.uid, s.chatId, true).catch(() => {});
+  for (const uid of s.peers.keys()) signal.sendScreenShare(uid, s.chatId, true).catch(() => {});
   try { track.addEventListener?.('ended', () => { stopScreenShare().catch(() => {}); }); } catch {}
 }
 
@@ -1506,12 +1637,17 @@ export async function stopScreenShare(): Promise<void> {
   // to the camera short of ending the call.
   const peers = [...s.peers.values()];
   if (s.cameraTrack) {
-    await Promise.all(peers.map(async p => {
-      const sender = p.videoSender();
-      if (!sender) return;
-      try { await sender.replaceTrack(s.cameraTrack); }
-      catch (e: any) { console.warn('[screenshare] could not restore camera for', p.uid, '—', e?.message ?? e); }
-    }));
+    if (s.sfu) {
+      try { await s.sfu.replaceVideo(s.cameraTrack); }
+      catch (e: any) { console.warn('[screenshare] could not restore the camera —', e?.message ?? e); }
+    } else {
+      await Promise.all(peers.map(async p => {
+        const sender = p.videoSender();
+        if (!sender) return;
+        try { await sender.replaceTrack(s.cameraTrack); }
+        catch (e: any) { console.warn('[screenshare] could not restore camera for', p.uid, '—', e?.message ?? e); }
+      }));
+    }
   }
   media.stopStream(s.screenStream);
   s.screenStream = null;
@@ -1533,6 +1669,10 @@ function registerForCallWaiting(a: StartArgs, _myName: string): void {
       const s = session; if (!s) return;
       media.setMicEnabled(s.localStream, false);
       if (a.kind === 'video') media.setCameraEnabled(s.localStream, false);
+      // Whichever transport is carrying this call. Muting what we SEND is not
+      // enough for hold — the person on hold must also stop being audible in
+      // the room we are stepping away from.
+      if (s.sfu) s.sfu.setRemoteAudible(false);
       for (const p of s.peers.values()) p.setRemoteAudible(false);
       setFlag('held', true);
     },
@@ -1542,6 +1682,7 @@ function registerForCallWaiting(a: StartArgs, _myName: string): void {
       media.resumeAudioSession(a.kind, snap.speaker);
       media.setMicEnabled(s.localStream, !snap.muted);
       if (a.kind === 'video') media.setCameraEnabled(s.localStream, !snap.cameraOff);
+      if (s.sfu) s.sfu.setRemoteAudible(true);
       for (const p of s.peers.values()) p.setRemoteAudible(true);
       setFlag('held', false);
     },

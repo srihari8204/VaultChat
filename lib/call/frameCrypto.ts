@@ -38,24 +38,44 @@ import {
 const ALGORITHM = RTCFrameCryptorAlgorithm.kAesGcm;
 
 export interface FrameCryptoHandle {
+  /**
+   * Attach a cryptor to every sender and receiver that does not have one yet.
+   *
+   * MUST be called after each publish and each subscribe, not once at join.
+   * Senders and receivers do not exist until a track is published or
+   * subscribed, so a single attach at connect time would find nothing at all —
+   * and "nothing attached" is indistinguishable from "no encryption".
+   */
+  attach(): number;
   /** Rotate to a new key — call on join/leave so departed members go dark. */
   setKey(key: Uint8Array): Promise<void>;
   /** Advance the ratchet without a full re-key. */
   ratchet(): Promise<void>;
   /** Detach and free native resources. Safe to call twice. */
   dispose(): Promise<void>;
-  /** True once at least one cryptor is attached. */
+  /**
+   * Whether frame encryption is available AT ALL on this build — i.e. the key
+   * provider exists. Not "how many cryptors are attached": at join time the
+   * answer to that is always zero, because nothing has been published yet.
+   */
   readonly active: boolean;
 }
 
 const NOOP: FrameCryptoHandle = {
+  attach() { return 0; },
   async setKey() {}, async ratchet() {}, async dispose() {}, active: false,
 };
 
 /**
- * Encrypt every outgoing frame and decrypt every incoming one on `pc`.
+ * Encrypt every outgoing frame and decrypt every incoming one.
  *
- * @param pc            the RTCPeerConnection carrying media to/from the SFU
+ * @param pcs           returns the peer connections carrying media right now.
+ *                      A getter, and PLURAL, for two reasons: LiveKit uses a
+ *                      SEPARATE publisher and subscriber connection, so
+ *                      attaching to one of them encrypts what we send and
+ *                      leaves what we receive undecryptable; and the SDK
+ *                      rebuilds them on a reconnect, so a captured reference
+ *                      goes stale exactly when the call is trying to recover.
  * @param participantId our identity in the room (from the SFU token)
  * @param key           32-byte media key — the per-call key or group sender key
  *
@@ -64,11 +84,11 @@ const NOOP: FrameCryptoHandle = {
  * CALLER decides whether an unencrypted SFU path is acceptable — see `active`.
  */
 export async function enableFrameCrypto(
-  pc: any,
+  pcs: () => any[],
   participantId: string,
   key: Uint8Array,
 ): Promise<FrameCryptoHandle> {
-  if (!pc || !participantId || key?.length !== 32) return NOOP;
+  if (!participantId || key?.length !== 32) return NOOP;
 
   let provider: any;
   try {
@@ -96,35 +116,50 @@ export async function enableFrameCrypto(
   }
 
   const cryptors: any[] = [];
-  const attach = () => {
-    try {
-      for (const sender of pc.getSenders?.() ?? []) {
-        if (!sender?.track) continue;
-        const c = RTCFrameCryptorFactory.createFrameCryptorForRtpSender(
-          participantId, sender, ALGORITHM, provider);
-        c.setEnabled?.(true);
-        cryptors.push(c);
-      }
-      for (const receiver of pc.getReceivers?.() ?? []) {
-        if (!receiver?.track) continue;
-        const c = RTCFrameCryptorFactory.createFrameCryptorForRtpReceiver(
-          // Receivers are keyed by the SENDING participant. With sharedKey the
-          // same key covers everyone, so our own id is a valid label here.
-          participantId, receiver, ALGORITHM, provider);
-        c.setEnabled?.(true);
-        cryptors.push(c);
-      }
-    } catch (err) {
-      console.warn('[call] could not attach a frame cryptor —', (err as any)?.message ?? err);
-    }
-  };
+  // Senders and receivers already carrying a cryptor. Attach runs on every
+  // publish and every subscribe, and a second cryptor on the same transceiver
+  // would encrypt twice — the peer then decrypts once and renders noise.
+  const done = new Set<any>();
 
-  attach();
-  console.warn('[call] frame E2EE active —', cryptors.length, 'cryptors attached');
+  const attach = (): number => {
+    let added = 0;
+    for (const pc of pcs()) {
+      try {
+        for (const sender of pc?.getSenders?.() ?? []) {
+          if (!sender?.track || done.has(sender)) continue;
+          const c = RTCFrameCryptorFactory.createFrameCryptorForRtpSender(
+            participantId, sender, ALGORITHM, provider);
+          c.setEnabled?.(true);
+          cryptors.push(c);
+          done.add(sender);
+          added++;
+        }
+        for (const receiver of pc?.getReceivers?.() ?? []) {
+          if (!receiver?.track || done.has(receiver)) continue;
+          const c = RTCFrameCryptorFactory.createFrameCryptorForRtpReceiver(
+            // Receivers are keyed by the SENDING participant. With sharedKey the
+            // same key covers everyone, so our own id is a valid label here.
+            participantId, receiver, ALGORITHM, provider);
+          c.setEnabled?.(true);
+          cryptors.push(c);
+          done.add(receiver);
+          added++;
+        }
+      } catch (err) {
+        console.warn('[call] could not attach a frame cryptor —', (err as any)?.message ?? err);
+      }
+    }
+    if (added) console.warn('[call] frame E2EE —', added, 'cryptor(s) attached,', cryptors.length, 'total');
+    return added;
+  };
 
   let disposed = false;
   return {
-    get active() { return cryptors.length > 0; },
+    attach,
+    // The PROVIDER is what "available" means. Cryptor count cannot be the
+    // answer: this handle is created before anything is published, so it would
+    // report zero on every healthy call and refuse it.
+    get active() { return !disposed; },
     async setKey(next: Uint8Array) {
       if (disposed || next?.length !== 32) return;
       await provider.setSharedKey(next);

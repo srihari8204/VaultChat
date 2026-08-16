@@ -13,6 +13,7 @@ import (
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/fcm"
 	"vaultchat/backend-go/internal/httpx"
+	"vaultchat/backend-go/internal/vault"
 )
 
 func RegisterCalls(mux *http.ServeMux) {
@@ -25,14 +26,28 @@ func callerIdentity(ctx context.Context, uid string) (string, string) {
 	// users.photo_url holds the profile-photo ATTACHMENT id (see uploads.go's
 	// as-photo permission check) — "profile_photo_id" never existed; the old
 	// Node code had the same bug, silently swallowed by this fallback.
-	var name, photoID *string
+	// THE NAME LIVES IN THE CIPHERS, NOT IN users.name.
+	//
+	// users.name is the legacy plaintext column and it is NULL for every
+	// account created through the vault onboarding flow (/auth/profile/init
+	// writes first_name_cipher/last_name_cipher and nothing else). Selecting it
+	// alone compiles, runs, and returns nobody — so this function returned the
+	// literal string "VaultChat user" for every caller on this deployment, and
+	// that is what the callee's ring showed. Three rounds of display fixes on
+	// the client could not have helped: the placeholder was arriving as data.
+	//
+	// Same resolution the chat member list and the ops screens use
+	// (vault.IdentityFromRow), with users.name kept as the fallback for any
+	// legacy Google/phone account that does have it.
+	var fnc, lnc, ec, legacyName, photoID *string
 	if err := db.Pool.QueryRow(ctx,
-		`SELECT name, photo_url FROM users WHERE id = $1`, uid).Scan(&name, &photoID); err != nil {
+		`SELECT first_name_cipher, last_name_cipher, email_cipher, name, photo_url
+		   FROM users WHERE id = $1`, uid).Scan(&fnc, &lnc, &ec, &legacyName, &photoID); err != nil {
 		return "VaultChat user", ""
 	}
 	n := "VaultChat user"
-	if name != nil && *name != "" {
-		n = *name
+	if nm := vault.IdentityFromRow(fnc, lnc, ec, nil, nil, nil, legacyName, nil, nil, nil, nil).Name; nm != nil && *nm != "" {
+		n = *nm
 	}
 	dp := ""
 	if photoID != nil && *photoID != "" {

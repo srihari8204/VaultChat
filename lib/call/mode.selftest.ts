@@ -14,7 +14,7 @@ import {
   BROADCAST_MAX, BROADCAST_MAX_PUBLISHERS, MAX_RENDERED_TILES, MESH_MAX, SFU_MAX,
   canJoin, canPublish, capacityFor, publisherSlotsLeft, simulcastLayers, tilesToRender,
   topologyFor, VIEWER_MAX, broadcastTierFor, transportFor, expectedLatencyMs,
-  promotionNeedsTransportSwitch, interactiveCapacityFor,
+  promotionNeedsTransportSwitch, interactiveCapacityFor, mintsMediaKey,
 } from './mode';
 
 let failures = 0;
@@ -123,6 +123,33 @@ check('promoting a CDN viewer requires a transport switch',
   promotionNeedsTransportSwitch('viewer'));
 check('promoting an interactive listener does not — the connection already exists',
   !promotionNeedsTransportSwitch('interactive'));
+
+// ── who mints the media key ────────────────────────────────────────────
+//
+// EXACTLY ONE side may say yes. Two minters splits the room across two keys;
+// zero minters means nobody joins, because the SFU path refuses to publish
+// unencrypted. Both failures look identical on device — a call that connects
+// and carries nothing — so the rule is pinned here.
+console.log('\nmedia key minting:');
+const oneToOne = (direction: 'outgoing' | 'incoming') =>
+  mintsMediaKey({ oneToOne: true, direction, meId: 'zzz', others: ['aaa'] });
+check('1:1 — the answering side mints', oneToOne('incoming'));
+check('1:1 — the caller does NOT, however low its uid', !oneToOne('outgoing'));
+check('1:1 — exactly one side of the same call mints',
+  [oneToOne('incoming'), oneToOne('outgoing')].filter(Boolean).length === 1);
+// The caller's uid is irrelevant on this path — that is the whole point.
+check('1:1 — a high-uid callee still mints',
+  mintsMediaKey({ oneToOne: true, direction: 'incoming', meId: 'zzz', others: ['aaa'] }));
+
+const group = (meId: string) =>
+  mintsMediaKey({ oneToOne: false, direction: 'outgoing', meId, others: ['a', 'b', 'c'].filter(u => u !== meId) });
+check('group — the lowest uid mints', group('a'));
+check('group — nobody else does', !group('b') && !group('c'));
+check('group — exactly one of the room mints',
+  ['a', 'b', 'c'].filter(u => mintsMediaKey({ oneToOne: false, direction: 'outgoing', meId: u, others: ['a', 'b', 'c'].filter(o => o !== u) })).length === 1);
+check('group — direction is irrelevant, unlike 1:1',
+  mintsMediaKey({ oneToOne: false, direction: 'incoming', meId: 'a', others: ['b'] })
+  === mintsMediaKey({ oneToOne: false, direction: 'outgoing', meId: 'a', others: ['b'] }));
 
 console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all topology checks passed\n');
 process.exit(failures ? 1 : 0);

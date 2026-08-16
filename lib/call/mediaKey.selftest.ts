@@ -16,9 +16,15 @@
 //
 // Mirrors establishMediaKey / rotateMediaKeyAfterLeave. Pure, runs in Node.
 
-/** Mirrors the deterministic minter rule: lowest uid of everyone present. */
+// The GROUP rule: lowest uid of everyone present. Imported rather than
+// re-implemented, because a copy of a rule is a copy that can drift — and this
+// one drifted the moment 1:1 moved onto the SFU and started using the
+// answering side instead (mode.ts, mintsMediaKey; covered by mode.selftest).
+import { mintsMediaKey } from './mode';
+
 const minterOf = (me: string, others: string[]): string => [me, ...others].sort()[0];
-const iMint = (me: string, others: string[]): boolean => minterOf(me, others) === me;
+const iMint = (me: string, others: string[]): boolean =>
+  mintsMediaKey({ oneToOne: false, direction: 'outgoing', meId: me, others });
 
 /** Mirrors rotateMediaKeyAfterLeave's guards. */
 function shouldRotate(opts: { onSfu: boolean; me: string; others: string[]; disposed?: boolean }): boolean {

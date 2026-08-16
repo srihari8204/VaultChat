@@ -59,6 +59,41 @@ no new trust, no new key agreement.
 
 ---
 
+## Status — 2026-08-16, second session
+
+**Step 2 is written and compiles; it has NOT been on a device yet.** Every call —
+1:1 and group — now joins a LiveKit room instead of negotiating peer-to-peer:
+
+- `startOutgoing` / `acceptIncoming` join the room. The sealed offer still rings
+  (it is the doorbell and it establishes the signalling cipher); no mesh answer
+  is ever sent, so the peer connection never negotiates and is closed once the
+  room is up. Its cipher stays — in-call chat, reactions and screen-share
+  notices ride it.
+- **1:1 media key is minted by the ANSWERING side.** The lowest-uid rule was
+  wrong here: the caller mints while the callee is still ringing and not yet
+  listening, so the key was sent to a device that could not receive it. The
+  caller now waits for that key, and its arrival doubles as "they answered" —
+  so nobody publishes into an empty room during the ring.
+- **Frame E2EE was inert.** `enableFrameCrypto` attached cryptors by walking
+  `getSenders()` at join time, before anything was published, and only on the
+  publisher connection. Zero cryptors attached → `active` false → every SFU
+  call would have been refused; and remote frames, which arrive on LiveKit's
+  SEPARATE subscriber connection, were never covered at all. It now attaches on
+  every publish and every subscribe, across both transports, and refuses to
+  publish if nothing attached.
+- Tracks are published from the capture the engine already owns — a second
+  capture fails on Android and would leave the mute/camera controls pointing at
+  a track nobody is sending. Screen share swaps the published track; hold
+  silences the room.
+- **`callerIdentity` was the "VaultChat user" bug.** It read `users.name`, which
+  is NULL for every vault-onboarded account, so the FCM ring and the LiveKit
+  token both carried the literal fallback. Names now resolve through
+  `vault.IdentityFromRow`, like every other screen. Same for the call roster.
+  The `namecols_test.go` guard now covers both call files.
+
+Still open: ConnectionService/CallKit (step 3), server-authoritative ring state
+(step 1), and retiring the mesh entry points (step 4).
+
 ## Work, in dependency order
 
 ### 1. Server-authoritative call state — ~2 days

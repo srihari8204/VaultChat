@@ -42,6 +42,7 @@ import (
 	"vaultchat/backend-go/internal/livekit"
 	"vaultchat/backend-go/internal/metrics"
 	"vaultchat/backend-go/internal/redisx"
+	"vaultchat/backend-go/internal/vault"
 )
 
 func RegisterCallSessions(mux *http.ServeMux) {
@@ -111,9 +112,13 @@ func scanCall(row pgx.Row) (*callSession, error) {
 func roster(ctx context.Context, uid, callID string) ([]callParticipant, error) {
 	out := []callParticipant{}
 	err := db.WithUser(ctx, uid, func(tx pgx.Tx) error {
+		// Names come from the CIPHERS — u.name is NULL for every vault-onboarded
+		// account, which is what made a call roster a list of blanks. Same
+		// resolution as callerIdentity and the chat member list.
 		rows, err := tx.Query(ctx,
-			`SELECT p.user_id::text, COALESCE(u.name, ''), u.photo_url,
-			        p.role, p.joined_at, p.left_at, p.hand_raised_at
+			`SELECT p.user_id::text,
+			        u.first_name_cipher, u.last_name_cipher, u.email_cipher, u.name,
+			        u.photo_url, p.role, p.joined_at, p.left_at, p.hand_raised_at
 			   FROM call_participants p
 			   JOIN users u ON u.id = p.user_id
 			  WHERE p.call_id = $1
@@ -126,8 +131,13 @@ func roster(ctx context.Context, uid, callID string) ([]callParticipant, error) 
 			var p callParticipant
 			var joined time.Time
 			var left, hand *time.Time
-			if err := rows.Scan(&p.UserID, &p.Name, &p.PhotoURL, &p.Role, &joined, &left, &hand); err != nil {
+			var fnc, lnc, ec, legacyName *string
+			if err := rows.Scan(&p.UserID, &fnc, &lnc, &ec, &legacyName, &p.PhotoURL,
+				&p.Role, &joined, &left, &hand); err != nil {
 				return err
+			}
+			if nm := vault.IdentityFromRow(fnc, lnc, ec, nil, nil, nil, legacyName, nil, nil, nil, nil).Name; nm != nil {
+				p.Name = *nm
 			}
 			p.JoinedAt = httpx.JSTime(joined)
 			p.LeftAt = httpx.JST(left)

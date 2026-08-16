@@ -39,6 +39,13 @@ func TestNoLegacyNameColumnInSpaceQueries(t *testing.T) {
 		"spaces_ops.go",
 		"chats_invitations.go",
 		"chats_membership.go",
+		// Calls joined this list on 2026-08-16, for the same bug with a louder
+		// symptom: callerIdentity() selected users.name alone, so the FCM ring
+		// and the LiveKit token both carried the literal fallback and every
+		// incoming call announced "VaultChat user". The call roster named every
+		// participant tile the same way.
+		"calls.go",
+		"call_sessions.go",
 	}
 
 	// Only aliases that refer to the USERS table. Other tables have genuinely
