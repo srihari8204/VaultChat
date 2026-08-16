@@ -123,7 +123,12 @@ export async function enableFrameCrypto(
 
   const attach = (): number => {
     let added = 0;
-    for (const pc of pcs()) {
+    // pcs() reaches into the SDK's internals, so it is inside the guard too —
+    // this runs from inside an SDK event handler, where a throw would unwind
+    // into the SDK's own subscription handling rather than just failing here.
+    let live: any[] = [];
+    try { live = pcs() ?? []; } catch { return 0; }
+    for (const pc of live) {
       try {
         for (const sender of pc?.getSenders?.() ?? []) {
           if (!sender?.track || done.has(sender)) continue;

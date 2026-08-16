@@ -100,7 +100,17 @@ function withServices(config) {
         $: {
           'android:name': `${CALLS_PKG}.CallForegroundService`,
           'android:exported': 'false',
-          'android:foregroundServiceType': 'microphone|camera',
+          // mediaProjection is REQUIRED for screen share on Android 14+.
+          //
+          // createVirtualDisplay() is refused unless a foreground service of
+          // that type is running, and on device the capture then produced
+          // nothing at all — `dumpsys` showed our service at types=0x000000C0
+          // (camera|microphone, no 0x20) while the screen track reported
+          // encoded=0 size=0x0. Declaring it here is the half that must exist
+          // before the service can ever ADD the type at runtime, which it does
+          // only after the user has granted the projection (Android forbids
+          // starting this type without a live projection token).
+          'android:foregroundServiceType': 'microphone|camera|mediaProjection',
         },
       });
     }

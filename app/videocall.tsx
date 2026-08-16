@@ -33,7 +33,8 @@ import { CallEncryptionBadge } from '../components/call/CallEncryptionBadge';
 import { CALL_ENGINE_V2 } from '../constants/flags';
 import * as engine from '../lib/call/engine';
 import { callFail, offerTag } from '../lib/call/diag';
-import { DISCONNECT_GRACE_MS } from '../lib/call/peer';
+import { setRingingPeer, setRingScreenPeer } from '../lib/ringTracker';
+import { DISCONNECT_GRACE_MS } from '../lib/call/types';
 import {
   useCallConnectedAt, useCallError, useCallFlag, useCallLocalUrl,
   useCallStatus, useParticipantStreamUrl,
@@ -208,6 +209,21 @@ function VideoCallEngine() {
   const [filter, setFilter] = useState<FilterId>('none');
   const [showFilters, setShowFilters] = useState(false);
 
+  // MEASURE the control bar instead of guessing its height.
+  //
+  // It holds seven buttons and wraps to two rows on any ordinary phone, so it
+  // is ~140pt tall — while the reactions row was pinned at bottom+108 and the
+  // filter strip at bottom+150, both hard-coded for a one-row bar. The
+  // reactions row therefore sat ON TOP of the buttons: two icons in the same
+  // place, and the one underneath could not be tapped at all. Reported on
+  // device as overlapping icons next to Flip.
+  //
+  // Measuring is the only fix that stays correct, because the row count depends
+  // on screen width, font scale and which buttons the current state shows
+  // (Share disappears while sharing, Flip becomes Stop).
+  const [barHeight, setBarHeight] = useState(0);
+  const barTop = insets.bottom + 12 + barHeight;    // top edge of the control bar
+
   useEffect(() => {
     const incoming = isIncoming === 'true' || isIncoming === '1';
     const args = {
@@ -222,12 +238,22 @@ function VideoCallEngine() {
     let wire: any = null;
     if (incoming && initialOffer) { try { wire = JSON.parse(String(initialOffer)); } catch {} }
     if (incoming) {
-      if (wire) engine.acceptIncoming({ ...args, offerWire: wire });
-      else { callFail(offerTag(null), 'ACCEPT_NO_OFFER', 'OFFER_NOT_ARRIVED', { retry: 0, recoverable: true }); router.back(); }
+      // No offer required. The call is identified by the chat, so an answer
+      // that beat the ring — every notification answer — joins the same room
+      // instead of waiting for an envelope or, worse, dialling back.
+      engine.acceptIncoming({ ...args, offerWire: wire ?? undefined });
     } else {
       engine.startOutgoing(args);
     }
-    return () => { engine.hangUp('local_hangup', true); engine.release(); };
+    return () => {
+      engine.hangUp('local_hangup', true);
+      engine.release();
+      // Release the ring claim taken when this call was answered from the OS
+      // notification, or the NEXT call from the same person is silently
+      // suppressed as a duplicate ring.
+      setRingingPeer(null);
+      setRingScreenPeer(null);
+    };
   }, [chatId, peerUid, peerName, isIncoming, initialOffer]);
 
   // BACK SHRINKS THE CALL, IT DOES NOT END IT — see voicecall.tsx for why.
@@ -245,14 +271,30 @@ function VideoCallEngine() {
       return true;
     });
     return () => sub.remove();
-  }, []);
+    // `status` MUST be a dependency. With `[]` the handler closed over the
+    // status at MOUNT — always 'connecting' — so back on a live video call took
+    // the "not connected" branch and hung up. PiP could never be reached, and
+    // the manifest flag and the native module were both fine: the gesture was
+    // being judged against a value that stopped updating the moment the screen
+    // appeared. voicecall.tsx has always had this dependency, which is why PiP
+    // worked there and not here.
+  }, [status]);
 
 
   useEffect(() => { if (status === 'connected') engine.onConnected(); }, [status]);
 
   useEffect(() => {
     if (status !== 'ended') return;
-    const t = setTimeout(() => router.back(), 200);
+    // LEAVE, even when there is nothing to go back TO.
+    //
+    // router.back() is a no-op on an empty history, and a call answered from a
+    // notification has exactly that: the app was launched INTO this screen. So
+    // ending the call left the user staring at a dead "Call ended" screen with
+    // no way out but the app switcher — reported on device.
+    const t = setTimeout(() => {
+      if (router.canGoBack()) router.back();
+      else router.replace('/' as any);
+    }, 200);
     return () => clearTimeout(t);
   }, [status, router]);
 
@@ -305,7 +347,7 @@ function VideoCallEngine() {
           : <Text style={S.status}>{statusText}</Text>}
         {error && <Text style={S.errorTxt}>{error}</Text>}
         {/* D-1: 1:1 video is peer-to-peer. */}
-        <CallEncryptionBadge protection="e2ee" />
+        <CallEncryptionBadge protection="transport" />
       </View>
 
       {(sharing || peerSharing) && (
@@ -328,7 +370,7 @@ function VideoCallEngine() {
       )}
 
       {showFilters && (
-        <View style={[S.filterStrip, { bottom: insets.bottom + 150 }]}>
+        <View style={[S.filterStrip, { bottom: barTop + 8 }]}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={S.filterRow}>
             {FILTERS.map(opt => (
               <TouchableOpacity key={opt.id} style={[S.filterChip, filter === opt.id && S.filterChipActive]} onPress={() => setFilter(opt.id)} activeOpacity={0.8}>
@@ -342,9 +384,22 @@ function VideoCallEngine() {
         </View>
       )}
 
-      {status === 'connected' && <CallExtras bottom={insets.bottom + 108} />}
+      {status === 'connected' && barHeight > 0 && !showFilters && <CallExtras bottom={barTop + 8} />}
 
-      <View style={[S.controls, { bottom: insets.bottom + 12 }]}>
+      {/* ONE ROW, SCROLLABLE — never wraps, never clips.
+          Seven buttons wrapped to two rows on an ordinary phone, and on a
+          narrow or large-font device the second row went off the bottom edge:
+          Share and Flip were simply unreachable, which is why screen share
+          "did not work". A horizontal scroller fits any width without
+          reflowing, so the bar is always one predictable row and every control
+          can be reached by swiping the strip. */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={[S.controls, { bottom: insets.bottom + 12 }]}
+        contentContainerStyle={S.controlsRow}
+        onLayout={e => setBarHeight(e.nativeEvent.layout.height)}
+      >
         <CallControlButton variant="video" icon={muted ? 'mic-off' : 'mic'} label={muted ? 'Unmute' : 'Mute'} active={muted} onPress={engine.toggleMute} />
         <CallControlButton variant="video" icon={cameraOff ? 'videocam-off' : 'videocam'} label={cameraOff ? 'Camera' : 'Off'} active={cameraOff} onPress={engine.toggleCamera} />
         {sharing
@@ -356,7 +411,7 @@ function VideoCallEngine() {
         <CallControlButton variant="video" icon="sparkles" label={filter === 'none' ? 'Beauty' : f.label} active={showFilters || filter !== 'none'} onPress={toggleFilters} />
         <CallControlButton variant="video" icon={speaker ? 'volume-high' : 'volume-low'} label={speaker ? 'Speaker' : 'Earpiece'} active={speaker} onPress={engine.toggleSpeaker} />
         <CallControlButton variant="video" icon="call" label="End" danger onPress={hangUpFromVideoScreen} />
-      </View>
+      </ScrollView>
     </View>
   );
 }
@@ -780,7 +835,7 @@ function VideoCallLegacy() {
           : <Text style={S.status}>{statusText}</Text>}
         {error && <Text style={S.errorTxt}>{error}</Text>}
         {/* D-1: 1:1 video is peer-to-peer. */}
-        <CallEncryptionBadge protection="e2ee" />
+        <CallEncryptionBadge protection="transport" />
       </View>
 
       {/* Screen-share banner (#124). Mine takes precedence over the peer's —
@@ -888,7 +943,8 @@ function makeStyles() { return StyleSheet.create({
 
   // flexWrap → the 7 controls fold onto a second centered row on narrow phones
   // instead of overflowing off-screen.
-  controls:   { position: 'absolute', left: 12, right: 12, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', columnGap: 6, rowGap: 8, backgroundColor: CALL.barBg, paddingVertical: 12, paddingHorizontal: 6, borderRadius: 24, borderWidth: 1, borderColor: CALL.ctrlBorder },
+  controls:   { position: 'absolute', left: 12, right: 12, backgroundColor: CALL.barBg, borderRadius: 24, borderWidth: 1, borderColor: CALL.ctrlBorder, flexGrow: 0 },
+  controlsRow: { flexDirection: 'row', alignItems: 'center', columnGap: 6, paddingVertical: 12, paddingHorizontal: 10 },
   // Button metrics now live with the button (components/call/CallControlButton,
   // variant 'video') — same values, one owner.
 }); }

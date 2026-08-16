@@ -24,14 +24,21 @@ import { Ionicons } from '@expo/vector-icons';
 export type CallProtection = 'e2ee' | 'transport';
 
 /**
- * A 1:1 call is peer-to-peer with a per-call key (lib/callCrypto), so it is
- * end-to-end encrypted. Anything that fans out through the SFU is not.
+ * EVERY call is 'transport' now — owner decision, 2026-08-16.
  *
- * Derived from participant count rather than from a flag the UI passes in, so
- * a call that grows past the mesh cap mid-call cannot keep claiming E2EE.
+ * Calls used to be end-to-end encrypted at 1:1 (a per-call key, media never
+ * leaving the two devices) and this returned 'e2ee' for two participants. That
+ * is no longer true: all media goes through the SFU and the frame encryption
+ * was removed to get calling working (see lib/call/room.ts for the reasoning).
+ *
+ * The count argument stays so call sites do not churn, and because a future
+ * build that restores frame encryption will need exactly this decision back.
+ * What must never happen is this function returning 'e2ee' while the media
+ * path cannot honour it — a privacy claim the product cannot keep is worse
+ * than no badge at all.
  */
-export function protectionFor(participantCount: number): CallProtection {
-  return participantCount <= 2 ? 'e2ee' : 'transport';
+export function protectionFor(_participantCount: number): CallProtection {
+  return 'transport';
 }
 
 const COPY: Record<CallProtection, { icon: any; label: string }> = {

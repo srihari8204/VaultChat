@@ -364,7 +364,8 @@ function RootLayout() {
           // Native message-notification tap (F2 content-free doorbell).
           router.push({ pathname: '/chat', params: { id: ci.chatId } } as any);
         } else if (ci?.callId && ci.action !== 'open_calls') {
-          routeToIncoming({
+          const to = ci.action === 'answer' ? routeToCall : routeToIncoming;
+          to({
             // Blank, not the placeholder — see the note on the socket ring above.
             chatId: ci.callId, peerUid: ci.callerId || '', peerName: ci.callerName || '',
             type: ci.isVideo ? 'video' : 'audio', offer: '',
@@ -377,6 +378,40 @@ function RootLayout() {
     });
 
     // ── Notifee full-screen call events (foreground) ────────────────────
+    // ANSWERED FROM THE OS — go straight into the call.
+    //
+    // The OS ring IS the ring. Routing an explicit Answer through the in-app
+    // ring screen made the user accept twice: the notification's Answer, then
+    // a second full-screen overlay that appeared on top of it. Reported on
+    // device exactly that way.
+    //
+    // Safe now because the call screen no longer needs the caller's envelope to
+    // answer — the chat identifies the call (see engine.acceptIncoming).
+    const routeToCall = (p: { chatId?: string; peerUid: string; peerName: string; type: string; group?: boolean; groupName?: string }) => {
+      cancelIncomingCall();
+      // CLAIM the ring, do not release it.
+      //
+      // Clearing these was a bug I introduced with this route: the caller keeps
+      // re-ringing every 3s until the call connects, and routeToIncoming's
+      // guard is exactly `getRingScreenPeer() === peerUid`. With it cleared,
+      // the next ring opened the in-app ring screen ON TOP of the call the user
+      // had just answered — the overlay that survived the first fix.
+      //
+      // Claiming it means "this peer's ring is already being handled here". The
+      // call screens release it when they unmount.
+      setRingingPeer(p.peerUid);
+      setRingScreenPeer(p.peerUid);
+      if (p.group) {
+        router.push({ pathname: '/group-call-active' as any,
+          params: { chatId: p.chatId || '', video: p.type === 'video' ? '1' : '0', name: p.groupName || p.peerName } });
+        return;
+      }
+      router.push({
+        pathname: (p.type === 'video' ? '/videocall' : '/voicecall') as any,
+        params: { chatId: p.chatId || '', peerUid: p.peerUid, peerName: p.peerName, isIncoming: 'true' },
+      });
+    };
+
     const onNotifeeAnswerOrDecline = (action: string, data: any) => {
       if (data?.type !== 'call' || !data?.fromUid) return;
       cancelIncomingCall();
@@ -385,7 +420,7 @@ function RootLayout() {
         getSocket().then(s => s.emit('webrtc_end', { to: data.fromUid, chatId: data.chatId })).catch(() => {});
         return;
       }
-      routeToIncoming({ chatId: data.chatId, peerUid: data.fromUid, peerName: data.callerName || '', type: data.callType, offer: '' });
+      routeToCall({ chatId: data.chatId, peerUid: data.fromUid, peerName: data.callerName || '', type: data.callType });
     };
     const notifeeFg = notifee.onForegroundEvent(({ type, detail }) => {
       // Scheduled-message trigger fired (#73) → send any due items.

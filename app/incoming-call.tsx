@@ -171,42 +171,17 @@ export default function IncomingCallScreen() {
     // has already proven it cannot open — see the listener above.
     const answering = liveOfferRef.current || offer;
 
-    // DO NOT NAVIGATE WITHOUT AN OFFER.
+    // ANSWER IMMEDIATELY, offer or no offer.
     //
-    // Answering can beat the offer: the ring arrives over its own event, and a
-    // notification answer carries no offer at all. Handing the call screen an
-    // empty one used to make it dial the caller BACK (see the guard there), so
-    // one tap produced a second call and the two collided.
+    // This used to block until the caller's sealed envelope arrived, showing a
+    // "Connecting…" state and, when the answer came from a notification (which
+    // carries no envelope), a second screen on top of the ring — reported on
+    // device as "another overlay after accepting". The envelope carried the SDP
+    // and later the media key, so waiting was genuinely required.
     //
-    // Waiting is safe and short — the caller re-emits the sealed offer every 3s
-    // for the life of the ring — and it is what the user already expects from
-    // the moment between tapping Accept and hearing audio. If it never comes,
-    // we say so instead of dialling.
-    if (!answering) {
-      callStage(offerTag(null), 'accept_waiting', 'offer not arrived yet');
-      setWaitingForOffer(true);
-      const started = Date.now();
-      const t = setInterval(() => {
-        const live = liveOfferRef.current;
-        if (live) {
-          clearInterval(t);
-          callStage(offerTag(live), 'accepted', type === 'video' ? 'video' : 'audio');
-          router.replace({
-            pathname: route as any,
-            params: { chatId, peerUid, peerName: routableName, isIncoming: 'true', initialOffer: live },
-          });
-        } else if (Date.now() - started > ACCEPT_OFFER_WAIT_MS) {
-          clearInterval(t);
-          setWaitingForOffer(false);
-          decidedRef.current = false;   // let them try again — nothing was torn down
-          Alert.alert('Could not connect', 'The call did not come through. Ask them to call again.');
-          router.back();
-        }
-      }, 250);
-      acceptWaitRef.current = t;
-      return;
-    }
-
+    // It carries neither now. One live call per chat is a database constraint,
+    // so the call screen joins the caller's room from the chat id alone, and an
+    // answer that beats the ring is simply an answer.
     callStage(offerTag(answering), 'accepted', type === 'video' ? 'video' : 'audio');
     router.replace({
       pathname: route as any,

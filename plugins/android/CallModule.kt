@@ -193,6 +193,56 @@ class CallModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMo
     }
 
     /**
+     * Set or clear FLAG_SECURE on the activity window, directly.
+     *
+     * WHY THIS EXISTS RATHER THAN USING expo-screen-capture
+     * ----------------------------------------------------
+     * A window with FLAG_SECURE cannot be captured — MediaProjection runs, the
+     * consent is granted, the VirtualDisplay is created, and the encoder
+     * receives NOTHING. Measured on device as `encoded: 0  sent: 0  size: ?x?`
+     * on both handsets, with `dumpsys window` showing
+     * `fl=LAYOUT_IN_SCREEN SECURE` on MainActivity at that exact moment.
+     *
+     * expo-screen-capture could not clear it: its prevent/allow pairs are keyed,
+     * so releasing the default key leaves a prevention taken under any other key
+     * in force. Screen share needs the flag GONE, not reference-counted down.
+     *
+     * The window flag is therefore set here, on the UI thread, where it is
+     * unambiguous. The caller is responsible for putting it back — the engine
+     * re-asserts it on every exit path from a share, including a share that ends
+     * because the call died.
+     */
+    /**
+     * Let the live call service carry mediaProjection, so screen capture is
+     * legal. Called around the share; safe to call twice.
+     */
+    @ReactMethod
+    fun allowScreenCapture(promise: Promise) {
+        try {
+            CallForegroundService.allowProjection(reactApplicationContext)
+            promise.resolve(true)
+        } catch (_: Throwable) { promise.resolve(false) }
+    }
+
+    @ReactMethod
+    fun setWindowSecure(secure: Boolean, promise: Promise) {
+        try {
+            val act: android.app.Activity? = getCurrentActivity()
+            if (act == null) { promise.resolve(false); return }
+            act.runOnUiThread {
+                try {
+                    if (secure) {
+                        act.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+                    } else {
+                        act.window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+                    }
+                } catch (_: Throwable) { }
+            }
+            promise.resolve(true)
+        } catch (_: Throwable) { promise.resolve(false) }
+    }
+
+    /**
      * Android 14 turned USE_FULL_SCREEN_INTENT into a user-granted permission
      * for apps that are not the default dialer. Declaring it in the manifest is
      * no longer enough — measured on device as FSI_REQUESTED_BUT_DENIED on the

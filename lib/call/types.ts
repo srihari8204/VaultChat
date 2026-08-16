@@ -245,4 +245,15 @@ export const IDLE_SNAPSHOT: CallSnapshot = Object.freeze({
   meId: '',
 });
 
+/**
+ * How long a call may stay in `reconnecting` before the screens stop promising
+ * it is coming back.
+ *
+ * It used to live in the hand-rolled peer connection (lib/call/peer.ts) as its
+ * ICE grace window. That file is gone — the SDK owns reconnection now — but the
+ * number is still the UI's contract with the user, so it lives here with the
+ * other call constants rather than being re-invented per screen.
+ */
+export const DISCONNECT_GRACE_MS = 30_000;
+
 export default {};

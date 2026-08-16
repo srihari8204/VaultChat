@@ -43,7 +43,8 @@ import { CallEncryptionBadge } from '../components/call/CallEncryptionBadge';
 import { CALL_ENGINE_V2 } from '../constants/flags';
 import * as engine from '../lib/call/engine';
 import { callFail, offerTag } from '../lib/call/diag';
-import { DISCONNECT_GRACE_MS } from '../lib/call/peer';
+import { setRingingPeer, setRingScreenPeer } from '../lib/ringTracker';
+import { DISCONNECT_GRACE_MS } from '../lib/call/types';
 import { useCallConnectedAt, useCallError, useCallFlag, useCallStatus } from '../hooks/useCall';
 
 type CallState = 'connecting' | 'ringing' | 'connected' | 'ended';
@@ -137,15 +138,25 @@ function VoiceCallEngine() {
     let wire: any = null;
     if (incoming && initialOffer) { try { wire = JSON.parse(String(initialOffer)); } catch {} }
     if (incoming) {
-      if (wire) engine.acceptIncoming({ ...args, offerWire: wire });
-      else { callFail(offerTag(null), 'ACCEPT_NO_OFFER', 'OFFER_NOT_ARRIVED', { retry: 0, recoverable: true }); router.back(); }
+      // No offer required. The call is identified by the chat, so an answer
+      // that beat the ring — every notification answer — joins the same room
+      // instead of waiting for an envelope or, worse, dialling back.
+      engine.acceptIncoming({ ...args, offerWire: wire ?? undefined });
     } else {
       engine.startOutgoing(args);
     }
     // Unmount for any reason (back gesture, replacement, crash recovery) must
     // release the mic and the foreground service — the engine's disposal
     // registry makes this safe to call redundantly.
-    return () => { engine.hangUp('local_hangup', true); engine.release(); };
+    return () => {
+      engine.hangUp('local_hangup', true);
+      engine.release();
+      // Release the ring claim taken when this call was answered from the OS
+      // notification, or the NEXT call from the same person is silently
+      // suppressed as a duplicate ring.
+      setRingingPeer(null);
+      setRingScreenPeer(null);
+    };
   }, [chatId, peerUid, peerName, isIncoming, initialOffer]);
 
   // BACK SHRINKS THE CALL, IT DOES NOT END IT.
@@ -177,7 +188,16 @@ function VoiceCallEngine() {
   // Leave when the call is over, matching the legacy 200 ms settle.
   useEffect(() => {
     if (status !== 'ended') return;
-    const t = setTimeout(() => router.back(), 200);
+    // LEAVE, even when there is nothing to go back TO.
+    //
+    // router.back() is a no-op on an empty history, and a call answered from a
+    // notification has exactly that: the app was launched INTO this screen. So
+    // ending the call left the user staring at a dead "Call ended" screen with
+    // no way out but the app switcher — reported on device.
+    const t = setTimeout(() => {
+      if (router.canGoBack()) router.back();
+      else router.replace('/' as any);
+    }, 200);
     return () => clearTimeout(t);
   }, [status, router]);
 
@@ -203,7 +223,7 @@ function VoiceCallEngine() {
           : <Text style={S.status}>{statusText}</Text>}
         {error && <Text style={S.errorTxt}>{error}</Text>}
         {/* D-1: a 1:1 call is peer-to-peer, so this claim is the strong one. */}
-        <CallEncryptionBadge protection="e2ee" />
+        <CallEncryptionBadge protection="transport" />
       </View>
 
       {status === 'connected' && <CallExtras bottom={insets.bottom + 116} />}

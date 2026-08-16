@@ -34,6 +34,18 @@ class CallForegroundService : Service() {
 
         const val ACTION_START = "com.vaultchat.app.CALL_FG_START"
         const val ACTION_STOP = "com.vaultchat.app.CALL_FG_STOP"
+        /** Promote the live call service to also carry mediaProjection. */
+        const val ACTION_PROJECTION = "com.vaultchat.app.CALL_FG_PROJECTION"
+
+        /** Ask the running call service to add the mediaProjection type. */
+        @JvmStatic
+        fun allowProjection(ctx: Context) {
+            try {
+                val i = Intent(ctx, CallForegroundService::class.java).setAction(ACTION_PROJECTION)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ctx.startForegroundService(i)
+                else ctx.startService(i)
+            } catch (_: Throwable) {}
+        }
 
         fun start(ctx: Context, callId: String, callerName: String, isVideo: Boolean) {
             val i = Intent(ctx, CallForegroundService::class.java).apply {
@@ -87,6 +99,9 @@ class CallForegroundService : Service() {
     }
 
     private var wakeLock: PowerManager.WakeLock? = null
+    /** Last call's chrome, so the projection promotion can reuse it. */
+    private var lastName: String = "VaultChat call"
+    private var lastVideo: Boolean = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -110,9 +125,45 @@ class CallForegroundService : Service() {
             return START_NOT_STICKY
         }
 
+        // ── ADD THE mediaProjection TYPE ──────────────────────────────
+        //
+        // Android 10+ refuses MediaProjection.createVirtualDisplay() unless a
+        // foreground service of type mediaProjection is running. Measured on
+        // device: our service sat at types=0x000000C0 (camera|microphone) and
+        // the screen track produced `encoded=0 size=0x0` — not a black frame, no
+        // frame at all, because the VirtualDisplay had nowhere legal to write.
+        //
+        // The type is ADDED to the live call service rather than given its own
+        // service: the call already owns the notification and the mic, and two
+        // foreground services for one call is how OEM battery managers start
+        // killing things.
+        //
+        // Ordering matters and differs by version. Android 14+ only permits this
+        // type once the user has granted a projection, so this is invoked both
+        // before capture (where 10-13 needs it) and again after consent (where
+        // 14+ accepts it). Both calls are idempotent, and a refusal is caught:
+        // a failure here must never take the CALL down with it.
+        if (intent?.action == ACTION_PROJECTION) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    ensureChannel()
+                    startForeground(
+                        NOTIF_ID,
+                        buildNotification(lastName, lastVideo),
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                            or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+                            or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION,
+                    )
+                }
+            } catch (_: Throwable) { /* 14+ before consent — retried after it */ }
+            return START_STICKY
+        }
+
         val callId = intent?.getStringExtra(EXTRA_CALL_ID) ?: ""
         val name = intent?.getStringExtra(EXTRA_NAME) ?: "VaultChat call"
         val isVideo = intent?.getBooleanExtra(EXTRA_VIDEO, false) ?: false
+        lastName = name
+        lastVideo = isVideo
 
         ensureChannel()
         val notification = buildNotification(name, isVideo)

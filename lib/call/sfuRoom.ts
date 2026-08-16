@@ -103,10 +103,26 @@ export async function joinSfuRoom(a: JoinArgs): Promise<SfuSession> {
     dynacast: true,
   });
 
-  if (a.onParticipant) {
-    room.on(RoomEvent.ParticipantConnected, p => a.onParticipant!(p, true));
-    room.on(RoomEvent.ParticipantDisconnected, p => a.onParticipant!(p, false));
-  }
+  // Same rule as TrackSubscribed: never throw back into the SDK, and log, since
+  // "did the other side actually arrive in the room?" is the first question of
+  // every call that does not connect.
+  const participant = (p: RemoteParticipant, joined: boolean) => {
+    console.warn('[call] sfu participant', joined ? 'joined' : 'left', p.identity,
+      'room now', room.remoteParticipants.size + 1);
+    try { a.onParticipant?.(p, joined); } catch (err) {
+      console.warn('[call] onParticipant handler threw —', (err as any)?.message ?? err);
+    }
+  };
+  room.on(RoomEvent.ParticipantConnected, p => participant(p, true));
+  room.on(RoomEvent.ParticipantDisconnected, p => participant(p, false));
+  room.on(RoomEvent.ConnectionStateChanged, st => console.warn('[call] sfu room state →', st));
+  // These two split the one question that matters when a call joins and stays
+  // silent: did we never HEAR about the other side's track (signalling), or did
+  // we hear about it and never receive it (the subscriber transport)?
+  room.on(RoomEvent.TrackPublished, (pub, p) =>
+    console.warn('[call] sfu remote published', pub.kind, 'by', p.identity, '— awaiting subscribe'));
+  room.on(RoomEvent.TrackSubscriptionFailed, (sid, p, reason) =>
+    console.warn('[call] sfu SUBSCRIBE FAILED', sid, 'from', p.identity, '—', String(reason)));
   if (a.onDisconnected) room.on(RoomEvent.Disconnected, a.onDisconnected);
   // The SFU's equivalent of `ontrack`, and the only signal that says a call on
   // this transport is actually up. Without it a call joins a room, publishes,
@@ -114,14 +130,28 @@ export async function joinSfuRoom(a: JoinArgs): Promise<SfuSession> {
   let crypto: FrameCryptoHandle | null = null;
 
   room.on(RoomEvent.TrackSubscribed, (track: RemoteTrack, _pub, p: RemoteParticipant) => {
-    // A receiver exists only once its track is subscribed, so THIS is the
-    // moment its cryptor can be created. Without it every incoming frame stays
-    // ciphertext and the remote video is noise or nothing at all.
-    crypto?.attach();
-    if (!a.onTrack) return;
+    // NOTHING in here may throw. This handler is invoked from inside the SDK's
+    // event emitter, so an exception does not just skip the rest of this
+    // function — it unwinds into livekit-client's own subscription handling.
+    // The call then has a remote track the app never hears about, sits in
+    // "ringing" with media flowing underneath, and dies on the ring timeout.
     let url: string | null = null;
+    try {
+      // A receiver exists only once its track is subscribed, so THIS is the
+      // moment its cryptor can be created. Without it every incoming frame
+      // stays ciphertext and the remote video is noise or nothing at all.
+      crypto?.attach();
+    } catch (err) {
+      console.warn('[call] frame cryptor attach failed on subscribe —', (err as any)?.message ?? err);
+    }
     try { url = (track.mediaStream as any)?.toURL?.() ?? null; } catch {}
-    a.onTrack(p.identity, url, track.kind === Track.Kind.Video ? 'video' : 'audio');
+    const kind = track.kind === Track.Kind.Video ? 'video' : 'audio';
+    // Logged because this is the event that decides whether a call is
+    // "connected". Its absence was indistinguishable from a dead SFU.
+    console.warn('[call] sfu track subscribed —', kind, 'from', p.identity, url ? 'with stream' : 'NO STREAM URL');
+    try { a.onTrack?.(p.identity, url, kind); } catch (err) {
+      console.warn('[call] onTrack handler threw —', (err as any)?.message ?? err);
+    }
   });
   // A reconnect rebuilds the transports, and the new senders/receivers come up
   // bare. Re-attaching is idempotent — the handle skips what it already covers.
@@ -170,11 +200,28 @@ export async function joinSfuRoom(a: JoinArgs): Promise<SfuSession> {
       for (const t of own) { try { t.enabled = false; } catch {} }
       try {
         for (const t of own) {
+          // THE SOURCE MUST BE DECLARED, or the SDK refuses before the server
+          // is ever asked.
+          //
+          // A LocalTrack built from a MediaStreamTrack we captured ourselves has
+          // source = Unknown, and livekit-client checks
+          // `canPublishSources.includes(track.source)` locally — our grant lists
+          // camera/microphone/screen_share, so Unknown is not in it and
+          // publishTrack throws "failed to publish track, insufficient
+          // permissions" with nothing at all in the server log. Measured on
+          // device: every call fell back to the mesh for this one reason.
+          //
+          // Widening the grant to an empty (= allow-all) source list would also
+          // "fix" it, and would quietly destroy the audience guarantee the grant
+          // exists for. Declaring the source is the honest half.
           if (t.kind === 'audio') {
-            await room.localParticipant.publishTrack(new LocalAudioTrack(t));
+            const audio = new LocalAudioTrack(t);
+            audio.source = Track.Source.Microphone;
+            await room.localParticipant.publishTrack(audio, { source: Track.Source.Microphone });
           } else {
             published = new LocalVideoTrack(t);
-            await room.localParticipant.publishTrack(published);
+            published.source = Track.Source.Camera;
+            await room.localParticipant.publishTrack(published, { source: Track.Source.Camera });
           }
         }
         attached = crypto?.attach() ?? 0;
