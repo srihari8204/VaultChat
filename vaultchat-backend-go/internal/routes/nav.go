@@ -20,7 +20,13 @@ var navCostings = map[string]bool{"auto": true, "motorcycle": true, "bicycle": t
 func RegisterNav(mux *http.ServeMux) {
 	mux.HandleFunc("POST /nav/route", httpx.RequireAuth(navRoute))
 	mux.HandleFunc("GET /nav/geocode", httpx.RequireAuth(navGeocode))
+	mux.HandleFunc("POST /nav/matrix", httpx.RequireAuth(navMatrix))
 }
+
+// Most sources one matrix call may carry. Ten family members plus a little
+// headroom — the cap exists so this cannot be turned into a bulk isochrone
+// engine by a modified client.
+const maxMatrixSources = 12
 
 // ─── GET /nav/geocode?q=&lat=&lon= — address → candidate list ──────────
 //
@@ -113,6 +119,179 @@ func joinMax(parts []string, n int) string {
 		out += ", " + p
 	}
 	return out
+}
+
+// ─── POST /nav/matrix — many origins → one destination, in ONE call ─────
+//
+// The batch primitive behind Meet Here: ten family members each need a road
+// distance and an ETA to the same place, and ten separate /nav/route calls
+// would be ten Valhalla routings, ten round-trips and ten rate-limit tokens
+// for one screen. Valhalla's sources_to_targets does it as a single matrix.
+//
+// WHAT THIS SERVER LEARNS, AND WHAT IT DOES NOT. Road distance is a property
+// of the road network, so a routing engine cannot compute one without the
+// coordinates — there is no version of ETA that keeps them on the device. So
+// the contract is drawn as tightly as it can be: the caller sends a bare
+// ORDERED LIST of coordinates and gets results back by index. No member ids, no
+// names, no family id, no circle id are accepted or logged, nothing is
+// persisted, and the response is normalised here so the client never parses
+// engine internals. The server is told "how far are these twelve points from
+// that one", never "where is this person".
+//
+// Distances come back in METRES and durations in SECONDS — never kilometres —
+// because every consumer formats from metres and a mixed unit at the boundary
+// is how a road distance ends up rendered as a straight-line one.
+func navMatrix(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := httpx.UserFrom(r)
+
+	// One matrix call is one Valhalla job regardless of how many sources it
+	// carries, so it is budgeted like a route, not like a search.
+	rl := redisx.Consume(ctx, "navmatrix:"+user.ID, 30, 60)
+	if !rl.Allowed {
+		httpx.Err(w, 429, "Too many distance requests", map[string]any{"retryAfter": rl.ResetInSec})
+		return
+	}
+
+	var body struct {
+		Sources []struct {
+			Lat *float64 `json:"lat"`
+			Lng *float64 `json:"lng"`
+		} `json:"sources"`
+		Target struct {
+			Lat *float64 `json:"lat"`
+			Lng *float64 `json:"lng"`
+		} `json:"target"`
+		Costing string `json:"costing"`
+	}
+	_ = httpx.Body(r, &body)
+
+	if body.Target.Lat == nil || body.Target.Lng == nil {
+		httpx.Err(w, 400, "target{lat,lng} required")
+		return
+	}
+	if len(body.Sources) == 0 {
+		httpx.Err(w, 400, "at least one source required")
+		return
+	}
+	if len(body.Sources) > maxMatrixSources {
+		httpx.Err(w, 400, "too many sources", map[string]any{"max": maxMatrixSources})
+		return
+	}
+
+	// Build the source list, remembering each one's ORIGINAL index. A member
+	// with an unusable coordinate is skipped rather than sent as (0,0) — the
+	// Gulf of Guinea is a real place and Valhalla would happily route to it,
+	// producing a confident 5000 km ETA for someone standing next door.
+	srcIdx := make([]int, 0, len(body.Sources))
+	locs := make([]map[string]any, 0, len(body.Sources)+1)
+	for i, s := range body.Sources {
+		if s.Lat == nil || s.Lng == nil || !validLatLng(*s.Lat, *s.Lng) {
+			continue
+		}
+		srcIdx = append(srcIdx, i)
+		locs = append(locs, map[string]any{"lat": *s.Lat, "lon": *s.Lng})
+	}
+	if len(locs) == 0 {
+		httpx.Err(w, 400, "no source had a usable coordinate")
+		return
+	}
+	if !validLatLng(*body.Target.Lat, *body.Target.Lng) {
+		httpx.Err(w, 400, "target coordinate out of range")
+		return
+	}
+
+	costing := "auto"
+	if navCostings[body.Costing] {
+		costing = body.Costing
+	}
+
+	payload, _ := json.Marshal(map[string]any{
+		"sources":            locs,
+		"targets":            []map[string]any{{"lat": *body.Target.Lat, "lon": *body.Target.Lng}},
+		"costing":            costing,
+		"directions_options": map[string]any{"units": "kilometers"},
+	})
+	base := os.Getenv("VALHALLA_URL")
+	if base == "" {
+		base = "http://valhalla:8002"
+	}
+	req, _ := http.NewRequestWithContext(ctx, "POST", base+"/sources_to_targets", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	// A matrix is more work than one route, but the caller is a screen someone
+	// is looking at — fail rather than hang past a sane wait.
+	resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
+	if err != nil {
+		httpx.Err(w, 503, "routing engine unavailable")
+		return
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		detail := string(data)
+		if len(detail) > 200 {
+			detail = detail[:200]
+		}
+		httpx.Err(w, 502, "routing engine error", map[string]any{"detail": detail})
+		return
+	}
+
+	var vres valhallaMatrix
+	if err := json.Unmarshal(data, &vres); err != nil {
+		httpx.Err(w, 502, "routing engine returned an unreadable matrix")
+		return
+	}
+	httpx.JSON(w, 200, map[string]any{
+		"costing": costing,
+		"results": normalizeMatrix(srcIdx, vres),
+	})
+}
+
+// The slice of Valhalla's sources_to_targets response we actually read.
+type valhallaMatrix struct {
+	SourcesToTargets [][]struct {
+		Distance *float64 `json:"distance"` // kilometres, per directions_options
+		Time     *float64 `json:"time"`     // seconds
+	} `json:"sources_to_targets"`
+}
+
+// Map Valhalla's rows back onto the CALLER's original source indexes, in
+// metres and seconds.
+//
+// The index mapping is the whole point: sources with unusable coordinates were
+// dropped before the request, so Valhalla's row N is not the caller's source N.
+// Getting this wrong silently attributes one member's ETA to another, which
+// looks entirely plausible on screen and is impossible to notice.
+//
+// An unreachable pair (Valhalla sends nulls) is OMITTED, never emitted as zero.
+// "0 km away" is the one answer that must never be invented for someone the
+// road network cannot reach.
+func normalizeMatrix(srcIdx []int, vres valhallaMatrix) []map[string]any {
+	out := make([]map[string]any, 0, len(srcIdx))
+	for row, cells := range vres.SourcesToTargets {
+		if row >= len(srcIdx) || len(cells) == 0 {
+			continue
+		}
+		c := cells[0]
+		if c.Distance == nil || c.Time == nil || *c.Distance < 0 || *c.Time < 0 {
+			continue
+		}
+		out = append(out, map[string]any{
+			"index":     srcIdx[row],
+			"distanceM": int(*c.Distance*1000 + 0.5),
+			"durationS": int(*c.Time + 0.5),
+		})
+	}
+	return out
+}
+
+// A coordinate that is merely present is not usable. Rejects out-of-range
+// values and the (0,0) null island a missing fix serialises to.
+func validLatLng(lat, lng float64) bool {
+	if lat < -90 || lat > 90 || lng < -180 || lng > 180 {
+		return false
+	}
+	return !(lat == 0 && lng == 0)
 }
 
 func navRoute(w http.ResponseWriter, r *http.Request) {

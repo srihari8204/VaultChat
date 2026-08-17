@@ -99,6 +99,7 @@ func RegisterChats(mux *http.ServeMux) {
 	RegisterSpaceWorkforceOnID(id)  // Spaces & Operations attendance, leave, tasks, dashboard
 	RegisterSpaceDevicesOnID(id)    // Spaces & Operations devices + theft protection
 	RegisterSpaceLocationsOnID(id)  // All-space location platform (migration 103)
+	RegisterFamilyRelationsOnID(id) // Who each member is to you (migration 109)
 	mux.Handle("/chats/{id}/", id)  // subtree forward; `id` re-matches the full path
 }
 
