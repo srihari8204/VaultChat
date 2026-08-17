@@ -73,9 +73,110 @@ func hlsSign(id string, exp int64) string {
 }
 
 // hlsTicket mints "<exp>.<sig>" for one broadcast.
+//
+// THE EXPIRY IS BUCKETED, AND THAT IS WHAT MAKES WORLDWIDE STREAMING POSSIBLE.
+//
+// Minting `now + 24h` gave every viewer — and every playlist refresh — a
+// DIFFERENT `exp`, so the same segment had a different URL for every person
+// watching. A CDN in front of this would have cached each of them separately and
+// missed on all of them: a hundred thousand viewers meant a hundred thousand
+// origin fetches of identical bytes, which is precisely the shape that makes
+// "all video bytes transit go-api" (see the header) unfixable by adding a CDN.
+//
+// Rounding the deadline UP to a fixed boundary means every viewer in the same
+// window derives the SAME url for the same segment. One origin fetch per segment
+// globally; every other viewer is served from the edge. The change is four
+// lines and it is the difference between a few thousand concurrent viewers and
+// an unbounded audience.
+//
+// Security is unchanged in kind: the signature still covers the expiry, so the
+// deadline cannot be edited, and the ticket is still unguessable without
+// JWT_SECRET. What changes is that two people watching the same broadcast now
+// share a URL — which is fine, because they are both entitled to those bytes.
+// The bucket does mean a ticket outlives its window by up to one full period,
+// which is why the period is a fraction of the TTL rather than equal to it.
 func hlsTicket(id string) string {
-	exp := time.Now().Add(hlsTicketTTL).Unix()
+	exp := hlsBucketExp(time.Now())
 	return strconv.FormatInt(exp, 10) + "." + hlsSign(id, exp)
+}
+
+// hlsBucketWindow is how long one ticket value is reused for.
+//
+// Chosen against the two failure modes it sits between. Too short and a long
+// broadcast rolls the ticket often, and every roll is a full cache miss on every
+// segment still in the playlist window. Too long and a revoked viewer keeps
+// access for that much longer, and the CDN holds keys well past their usefulness.
+//
+// An hour is comfortably longer than the ~30s of segments an HLS player keeps in
+// its window, so a roll costs almost nothing, and it is short enough that a
+// ticket is never valid for more than the 24h TTL plus one window.
+const hlsBucketWindow = time.Hour
+
+// hlsStartOffset is where a joining player is told to begin, as seconds back
+// from the live edge.
+//
+// WHY THIS EXISTS
+// ---------------
+// Without an explicit instruction, an HLS player picks its own start point, and
+// the rule it uses — from the spec, and what ExoPlayer and AVPlayer both do — is
+// to begin THREE TARGET DURATIONS from the end. At 2s segments that is 6s of
+// latency the player chose on its own, on top of encode, upload and CDN, and no
+// amount of shortening segments removes it: cutting to 1s segments would only
+// take it to 3s while quadrupling request volume.
+//
+// #EXT-X-START overrides that choice directly, and it is free — the playlist is
+// already being rewritten here to re-mint segment tickets, so this is one more
+// line in a response that was being generated anyway. No client change, no new
+// dependency, and it applies to every player including a browser.
+//
+// WHY -4 AND NOT SMALLER
+// ----------------------
+// This is a BUFFER, not just a target: it is how much video the player holds
+// before it has to have the next segment. Two segments' worth is the smallest
+// honest figure at 2s — one segment of margin plus the one being played. Asking
+// for less does not make the stream arrive sooner, it makes a phone on a weak
+// network rebuffer, and a stall costs the viewer far more than the second it
+// was trying to save.
+//
+// PRECISE=YES so the player starts exactly here rather than snapping back to
+// the preceding segment boundary, which would hand back most of the gain.
+const hlsStartOffset = "-4"
+
+// injectStartOffset adds #EXT-X-START to a live playlist.
+//
+// Inserted directly after #EXTM3U because the tag must appear before the first
+// media segment; anywhere in the header is legal, and right at the top is the
+// one position that cannot drift as the playlist grows.
+//
+// Left ALONE if the encoder ever starts emitting its own — a second
+// #EXT-X-START is invalid and players disagree about which wins, so the safe
+// reading of "already present" is that someone upstream meant it.
+func injectStartOffset(playlist string) string {
+	if strings.Contains(playlist, "#EXT-X-START") {
+		return playlist
+	}
+	const head = "#EXTM3U"
+	i := strings.Index(playlist, head)
+	if i < 0 {
+		// Not a playlist we recognise. Returning it untouched is strictly better
+		// than corrupting a response that was working.
+		return playlist
+	}
+	cut := i + len(head)
+	return playlist[:cut] +
+		"\n#EXT-X-START:TIME-OFFSET=" + hlsStartOffset + ",PRECISE=YES" +
+		playlist[cut:]
+}
+
+// hlsBucketExp rounds the deadline up to the next window boundary.
+//
+// Rounding UP rather than truncating matters: truncating would hand out a
+// deadline in the past for anyone minting near a boundary, and every one of
+// those tickets would fail verification immediately.
+func hlsBucketExp(now time.Time) int64 {
+	exp := now.Add(hlsTicketTTL).Unix()
+	w := int64(hlsBucketWindow / time.Second)
+	return ((exp + w - 1) / w) * w
 }
 
 // hlsTicketOK verifies a ticket against a broadcast id.
@@ -159,9 +260,14 @@ func broadcastHLS(w http.ResponseWriter, r *http.Request) {
 			}
 			lines[i] = t + sep + "t=" + fresh
 		}
-		out := strings.Join(lines, "\n")
+		out := injectStartOffset(strings.Join(lines, "\n"))
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-		w.Header().Set("Cache-Control", "no-cache")
+		// A live playlist gains a segment every ~4s, so it is the one thing here
+		// that must not be cached for long. Two seconds is enough for the
+		// thundering herd of a viral moment — ten thousand players refreshing in
+		// the same second collapse to a single origin fetch — while staying well
+		// inside the segment duration, so no viewer sees a stale live edge.
+		w.Header().Set("Cache-Control", "public, max-age=2")
 		w.Header().Set("Content-Length", strconv.Itoa(len(out)))
 		w.WriteHeader(200)
 		_, _ = io.WriteString(w, out)
@@ -176,9 +282,25 @@ func broadcastHLS(w http.ResponseWriter, r *http.Request) {
 	if obj.ContentLength >= 0 {
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", obj.ContentLength))
 	}
-	// Segments are immutable once written; the ticket, not the cache, is what
-	// bounds access. `private` keeps them out of shared caches.
-	w.Header().Set("Cache-Control", "private, max-age=31536000")
+	// PUBLIC, not private — this is the header that decides whether worldwide
+	// streaming is possible at all.
+	//
+	// `private` forbids every SHARED cache, so a CDN placed in front of this
+	// origin would refuse to store a single segment and every viewer on earth
+	// would pull their bytes through go-api. It was not protecting anything: the
+	// URL already carries its own capability (the ticket), the bucket is still
+	// private, and a segment is meaningless without the signed query string.
+	//
+	// With `public` and a bucketed ticket (hlsTicket) every viewer of a given
+	// broadcast requests the SAME url for a given segment, so the edge serves all
+	// of them from one origin fetch. `immutable` stops players revalidating
+	// content that can never change — a segment is written once and never
+	// rewritten.
+	//
+	// Access control does not weaken: an unticketed or forged request is still
+	// refused here, and the CDN only ever caches a response it was allowed to
+	// fetch in the first place.
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	w.WriteHeader(200)
 	_, _ = io.Copy(w, obj.Body)
 }

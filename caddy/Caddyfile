@@ -44,6 +44,39 @@
 		reverse_proxy host.docker.internal:7880
 	}
 
+	# ── Go Live signalling → the SEPARATE broadcasting SFU ───────────
+	# A DIFFERENT PATH TO A DIFFERENT PORT. /livekit above is calling's SFU on
+	# 7880; this is the Go Live deployment on 7890 (livekit/golive.yaml). Two
+	# isolated media servers need two routes — sharing one would mean sharing a
+	# server, which is exactly what the split exists to prevent.
+	#
+	# Same rule as above: ONLY signalling comes through Caddy, so the client
+	# gets TLS from the API's certificate and the Go Live SFU needs no hostname
+	# of its own. MEDIA does not — Go Live RTC is UDP 7892 / TCP 7891 straight
+	# to the host, and those ports must be open alongside calling's 7882/7881.
+	#
+	# GOLIVE_LIVEKIT_URL is what this serves: wss://<host>/golive-livekit
+	@golive path /golive-livekit /golive-livekit/*
+	handle @golive {
+		uri strip_prefix /golive-livekit
+		reverse_proxy host.docker.internal:7890
+	}
+
+	# ── Android App Links: /live/join/<code> opens the app, not a browser ──
+	#
+	# Android's verifier fetches this over https and compares the release signing
+	# cert against app.json's autoVerify intent filter. Without it the Private
+	# Live invitation link opens a browser tab that nothing serves — exactly the
+	# dead end this closes.
+	#
+	# Served inline rather than from a bind-mounted file: it is 200 bytes that
+	# must never 404, and a mounted file is one more thing to go stale.
+	@assetlinks path /.well-known/assetlinks.json
+	handle @assetlinks {
+		header Content-Type application/json
+		respond `[{"relation":["delegate_permission/common.handle_all_urls"],"target":{"namespace":"android_app","package_name":"com.vaultchat.app","sha256_cert_fingerprints":["5F:C1:97:FC:3F:09:F6:84:C6:86:1B:7E:58:76:BE:58:24:D4:AA:CB:BC:26:CC:30:9F:D6:4A:97:DC:79:1A:59"]}}]` 200
+	}
+
 	# ── everything else → Go ─────────────────────────────────────────
 	handle {
 		reverse_proxy go-api:4000

@@ -239,10 +239,30 @@ func StartHLS(ctx context.Context, cfg Config, room, broadcastID string) (string
 		"segment_outputs": []map[string]any{{
 			"filename_prefix": broadcastID + "/segment",
 			"playlist_name":   broadcastID + "/index.m3u8",
-			// 4s balances latency against request volume: shorter means more
-			// requests through the CDN for the same minute of video, and HLS
-			// players buffer ~3 segments before starting either way.
-			"segment_duration": 4,
+			// 2s, because this number IS the latency.
+			//
+			// An HLS player buffers roughly three segments before it starts, so
+			// segment duration multiplies by ~3 straight into how far behind a
+			// viewer is: 4s put them ~12s back before encode, upload and CDN
+			// were even counted, for a measured ~14-16s end to end.
+			//
+			// WHY 2 AND NOT 1
+			// ---------------
+			// Halving again would halve the buffer again, but request volume is
+			// the other side of this trade and it scales inversely: 1s segments
+			// mean 60 object fetches per viewer per minute, and at the audience
+			// sizes this is built for that is the CDN bill and the origin's
+			// request rate, not a rounding error. 1s segments also stall more
+			// readily on weak mobile networks, where a late fetch has a third of
+			// the time to recover.
+			//
+			// 2s halves the latency for double the requests. Going to 1s would
+			// halve it again for quadruple — the point where the trade stops
+			// paying, so this is where it stops.
+			//
+			// Sub-second needs WebRTC playback rather than HLS; segment tuning
+			// cannot get there at any duration.
+			"segment_duration": 2,
 			"s3": map[string]any{
 				"access_key":       s3.AccessKey,
 				"secret":           s3.Secret,

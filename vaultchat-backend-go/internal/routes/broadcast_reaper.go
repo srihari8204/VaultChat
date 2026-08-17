@@ -55,6 +55,7 @@ import (
 	"time"
 
 	"vaultchat/backend-go/internal/db"
+	"vaultchat/backend-go/internal/golive"
 	"vaultchat/backend-go/internal/livekit"
 	"vaultchat/backend-go/internal/metrics"
 )
@@ -162,10 +163,20 @@ func reapStuckBroadcasts(ctx context.Context) {
 		// why we are here), and a failure to stop something that no longer
 		// exists must not stop us reaping the rest. Same reasoning, and the
 		// same call, as the normal broadcastEnd path.
+		//
+		// The GO LIVE project, not livekit.ConfigFromEnv(). Broadcast egress now
+		// runs on the separate Go Live deployment (internal/golive), and the
+		// CALLING cluster has never heard of these egress ids — stopping against
+		// it would return "not found" for every one, leaving the transcoder
+		// running while the row reads 'ended'. That is the exact leak this call
+		// exists to prevent, and it would have been invisible: the reaper's job
+		// is done either way, only the CPU keeps burning.
 		if s.egress != "" {
-			if e := livekit.StopHLS(ctx, livekit.ConfigFromEnv(), s.egress); e != nil {
-				log.Printf("[broadcast-reaper] egress %s did not stop cleanly: %v", s.egress, e)
-				metrics.Inc("broadcast_egress_stop_failed")
+			if cfg := golive.ConfigFromEnv(); cfg.Usable() {
+				if e := livekit.StopHLS(ctx, cfg.Config, s.egress); e != nil {
+					log.Printf("[broadcast-reaper] egress %s did not stop cleanly: %v", s.egress, e)
+					metrics.Inc("broadcast_egress_stop_failed")
+				}
 			}
 		}
 	}

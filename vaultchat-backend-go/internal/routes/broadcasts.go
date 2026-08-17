@@ -22,7 +22,6 @@
 package routes
 
 import (
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -30,11 +29,12 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/crypto/bcrypt"
 
 	"vaultchat/backend-go/internal/db"
+	"vaultchat/backend-go/internal/golive"
 	"vaultchat/backend-go/internal/httpx"
 	"vaultchat/backend-go/internal/livekit"
-	"vaultchat/backend-go/internal/metrics"
 	"vaultchat/backend-go/internal/redisx"
 )
 
@@ -61,11 +61,22 @@ func RegisterBroadcasts(mux *http.ServeMux) {
 }
 
 type broadcast struct {
-	ID          string     `json:"id"`
-	HostID      string     `json:"hostId"`
-	ChatID      *string    `json:"chatId,omitempty"`
-	Title       string     `json:"title"`
-	Status      string     `json:"status"`
+	ID     string  `json:"id"`
+	HostID string  `json:"hostId"`
+	ChatID *string `json:"chatId,omitempty"`
+	Title  string  `json:"title"`
+	Status string  `json:"status"`
+	// Optional, shown under the title. Separate from title because a title is a
+	// headline and this is not: the listing renders one, the player renders both.
+	Description string `json:"description"`
+	// 'public' or 'private' (migration 105). Sent to the client so the UI renders
+	// the audience rule from data rather than from what it thinks it requested.
+	Visibility string `json:"visibility"`
+	// The CALLER's own stage role: host | speaker | audience. Computed per
+	// request, never stored — it is a fact about who is asking, not about the
+	// broadcast. Only GET /broadcasts/{id} populates it; omitted elsewhere so a
+	// listing does not run an invite lookup per row.
+	MyRole      string     `json:"myRole,omitempty"`
 	HLSURL      *string    `json:"hlsUrl,omitempty"`
 	Room        string     `json:"room"`
 	E2EE        bool       `json:"e2ee"`
@@ -75,12 +86,12 @@ type broadcast struct {
 	EndedAt     *time.Time `json:"endedAt,omitempty"`
 }
 
-const broadcastCols = `id::text, host_id::text, chat_id::text, title, status,
+const broadcastCols = `id::text, host_id::text, chat_id::text, title, description, status, visibility,
 	                   hls_url, room, e2ee, viewer_count, peak_viewers, started_at, ended_at`
 
 func scanBroadcast(row pgx.Row) (*broadcast, error) {
 	var b broadcast
-	if err := row.Scan(&b.ID, &b.HostID, &b.ChatID, &b.Title, &b.Status,
+	if err := row.Scan(&b.ID, &b.HostID, &b.ChatID, &b.Title, &b.Description, &b.Status, &b.Visibility,
 		&b.HLSURL, &b.Room, &b.E2EE, &b.ViewerCount, &b.PeakViewers,
 		&b.StartedAt, &b.EndedAt); err != nil {
 		return nil, err
@@ -105,8 +116,13 @@ func broadcastStart(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	uid := httpx.UserFrom(r).ID
 	var body struct {
-		Title  string `json:"title"`
-		ChatID string `json:"chatId"`
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		ChatID      string `json:"chatId"`
+		Visibility  string `json:"visibility"`
+		// Optional Zoom-style passcode for a Private Live. Plaintext on the way
+		// in and hashed before it is stored; never returned by any handler.
+		Passcode string `json:"passcode"`
 	}
 	_ = httpx.Body(r, &body)
 
@@ -114,9 +130,65 @@ func broadcastStart(w http.ResponseWriter, r *http.Request) {
 	if len(title) > 200 {
 		title = title[:200]
 	}
+	desc := strings.TrimSpace(body.Description)
+	if len(desc) > 1000 {
+		desc = desc[:1000]
+	}
 	var chatID *string
 	if c := strings.TrimSpace(body.ChatID); c != "" {
 		chatID = &c
+	}
+	// Anything that is not exactly "private" is public. Whitelisting rather than
+	// rejecting unknown values keeps an older client — which sends no visibility
+	// at all — on the behaviour it was written for, while a typo can only ever
+	// make a stream MORE open than intended, never less. The reverse default
+	// would silently hide streams whose hosts meant them to be seen.
+	visibility := "public"
+	if strings.TrimSpace(strings.ToLower(body.Visibility)) == "private" {
+		visibility = "private"
+	}
+
+	// A passcode only means anything on a PRIVATE live. On a public one the
+	// stream is in everyone's listing by definition, so accepting a passcode
+	// there would imply a protection that does not exist. Dropped, not rejected:
+	// the host's intent was "private", and the fix is the visibility toggle.
+	//
+	// Hashed here, before the row is written, so the plaintext never reaches the
+	// database layer at all.
+	var passcodeHash *string
+	if pc := strings.TrimSpace(body.Passcode); pc != "" && visibility == "private" {
+		if len(pc) > 64 {
+			pc = pc[:64]
+		}
+		h, herr := bcrypt.GenerateFromPassword([]byte(pc), bcrypt.DefaultCost)
+		if herr != nil {
+			// Refuse rather than fall through to an unprotected stream: the host
+			// asked for a passcode, and starting without one silently would hand
+			// them a false expectation about who can watch.
+			goliveLog("START_REFUSED", "", "", uid, "reason=passcode_hash_failed")
+			httpx.Err(w, 500, "Could not set the passcode")
+			return
+		}
+		s := string(h)
+		passcodeHash = &s
+	}
+
+	// FAIL EXPLICITLY rather than falling back to the calling cluster.
+	//
+	// Go Live has its own LiveKit project (internal/golive). If GOLIVE_LIVEKIT_*
+	// is absent — or has been pointed at the CALLING project by copy-paste, which
+	// Usable() also catches — this refuses to start a broadcast at all. The
+	// alternative is the coupling the separate deployment exists to remove,
+	// reintroduced silently and reported by nothing.
+	//
+	// Checked BEFORE the row is written so a misconfigured server does not leave
+	// 'starting' rows behind that the reaper then has to clean up.
+	gocfg := golive.ConfigFromEnv()
+	if !gocfg.Usable() {
+		goliveLog("START_REFUSED", "", "", uid, "reason=golive_livekit_not_configured")
+		goliveMetric("start_refused_unconfigured")
+		httpx.Err(w, 503, "Go Live is not configured on this server")
+		return
 	}
 
 	var b *broadcast
@@ -151,12 +223,54 @@ func broadcastStart(w http.ResponseWriter, r *http.Request) {
 			return errAlreadyLive
 		}
 
+		// The room name is derived from the BROADCAST id, in the Go Live
+		// namespace — "golive_<uuid>", never "call-<id>" and never the old
+		// "bc_<host-id>".
+		//
+		// Two defects went with that old scheme. It reused ONE room name for
+		// every stream a host ever ran, so a viewer holding a stale token could
+		// join their next broadcast and egress could attach to the wrong session;
+		// and it shared a namespace with calling, which is exactly what the
+		// separate Go Live deployment exists to prevent.
+		//
+		// TWO STATEMENTS, AND IT MUST BE TWO.
+		//
+		// The obvious single-statement form — a data-modifying CTE that inserts
+		// and then updates the row it just inserted — is silently wrong in
+		// PostgreSQL. Sub-statements in WITH run against the SAME SNAPSHOT as the
+		// main query and cannot see one another's effects on the target table, so
+		//
+		//	WITH ins AS (INSERT … RETURNING id)
+		//	UPDATE broadcast_sessions s SET room = … FROM ins WHERE s.id = ins.id
+		//
+		// matches ZERO rows. Measured on the bench: `UPDATE 0`, the row landing
+		// with room = '' and RETURNING yielding nothing — so every single "Go
+		// Live" answered 500 and left an orphan behind. It reads correct, it
+		// passes a naive test, and it never works.
+		//
+		// Inside one transaction the second statement sees the first, which is
+		// the whole difference.
+		var newID string
+		if e := tx.QueryRow(ctx,
+			`INSERT INTO broadcast_sessions (host_id, chat_id, title, description, status, visibility, room, passcode_hash)
+			 VALUES ($1, $2, $3, $4, 'starting', $5, '', $6)
+			 RETURNING id::text`,
+			uid, chatID, title, desc, visibility, passcodeHash).Scan(&newID); e != nil {
+			// Migration 081's partial unique index fires HERE — this is the
+			// insert it guards — so the double-tap race is caught below.
+			if isUniqueViolation(e) {
+				return errAlreadyLive
+			}
+			return e
+		}
+
 		var err2 error
 		b, err2 = scanBroadcast(tx.QueryRow(ctx,
-			`INSERT INTO broadcast_sessions (host_id, chat_id, title, status, room)
-			 VALUES ($1, $2, $3, 'starting', $4)
+			`UPDATE broadcast_sessions
+			    SET room = $2
+			  WHERE id = $1
 			 RETURNING `+broadcastCols,
-			uid, chatID, title, "bc_"+uid))
+			newID, gocfg.RoomName(newID)))
 		// The SELECT above and this INSERT are two statements, so two requests
 		// arriving together both read "not live" and both insert — a double-tap
 		// on Go Live is enough. Migration 081 adds a partial unique index so the
@@ -172,6 +286,12 @@ func broadcastStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
+		// LOG THE CAUSE. This branch answered a bare 500 with nothing written
+		// anywhere, so when every go-live started failing the server logs were
+		// completely silent and the only way to find it was to replay the SQL by
+		// hand. A 500 nobody can diagnose is barely better than a crash.
+		goliveLog("START_FAILED", "", "", uid, "error="+err.Error())
+		goliveMetric("start_failed")
 		httpx.Err(w, 500, "Could not start the broadcast")
 		return
 	}
@@ -184,12 +304,16 @@ func broadcastStart(w http.ResponseWriter, r *http.Request) {
 	// broadcast the host can still end, retry, and see an honest status for; a
 	// 500 here would leave an orphaned 'starting' row that nothing can clear.
 	// The status stays 'starting' and the client's poll reports the truth.
-	cfg := livekit.ConfigFromEnv()
-	if cfg.Configured() {
-		egressID, e := livekit.StartHLS(ctx, cfg, b.Room, b.ID)
+	//
+	// gocfg.Config is the GO LIVE project — checked Usable() above, so this can
+	// never reach the calling cluster. livekit.StartHLS is reused unchanged: it
+	// signs and calls whatever Config it is handed, which is what makes sharing
+	// it reuse rather than coupling.
+	{
+		egressID, e := livekit.StartHLS(ctx, gocfg.Config, b.Room, b.ID)
 		if e != nil {
-			metrics.Inc("broadcast_egress_failed")
-			log.Printf("[broadcast] egress did not start for %s: %v", b.ID, e)
+			goliveMetric("egress_failed")
+			goliveLog("EGRESS_START_FAILED", b.ID, b.Room, uid, "error="+e.Error())
 		} else {
 			// The playback URL is DETERMINISTIC from the broadcast id, so it can
 			// be stored now rather than waiting for a callback that may never
@@ -202,12 +326,18 @@ func broadcastStart(w http.ResponseWriter, r *http.Request) {
 					b.ID, egressID, url)
 				return err
 			})
-			b.HLSURL = &url
-			metrics.Inc("broadcast_egress_started")
+			// TICKETED in the response, raw in the column — same split every
+			// other read path uses (see scanBroadcast). This one built the
+			// response from `url` directly and so returned a playback link with
+			// no access ticket on it, which broadcastHLS answers 404 for.
+			ticketed := broadcastHLSURL(b.ID)
+			b.HLSURL = &ticketed
+			goliveMetric("egress_started")
 		}
 	}
 
-	metrics.Inc("broadcast_started")
+	goliveMetric("started")
+	goliveLog("BROADCAST_CREATED", b.ID, b.Room, uid, "visibility="+b.Visibility)
 	httpx.JSON(w, 200, b)
 }
 
@@ -223,12 +353,26 @@ func broadcastListLive(w http.ResponseWriter, r *http.Request) {
 	uid := httpx.UserFrom(r).ID
 	out := []*broadcast{}
 	_ = db.WithUser(ctx, uid, func(tx pgx.Tx) error {
+		// Private streams are reachable only through an invitation, so discovery
+		// shows a private broadcast to its host and its invitees and to nobody
+		// else. Filtered in SQL rather than after the scan: sending 100 rows to
+		// Go so it can drop most of them is work the partial index already avoids
+		// (broadcast_sessions_public_live_idx, migration 105).
+		//
+		// The 105 RLS policy expresses the same rule. This is the Go half of the
+		// two-gate pattern — see routes/golive.go on why one gate is not enough
+		// on this deployment.
 		rows, err := tx.Query(ctx,
 			`SELECT `+broadcastCols+`
 			   FROM broadcast_sessions
 			  WHERE status = 'live'
+			    AND (visibility = 'public'
+			         OR host_id = $1
+			         OR EXISTS (SELECT 1 FROM broadcast_invites i
+			                     WHERE i.broadcast_id = broadcast_sessions.id
+			                       AND i.invitee_id = $1))
 			  ORDER BY started_at DESC
-			  LIMIT 100`)
+			  LIMIT 100`, uid)
 		if err != nil {
 			return err
 		}
@@ -262,6 +406,29 @@ func broadcastGet(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 404, "Broadcast not found")
 		return
 	}
+	// Strips the playback ticket for anyone not entitled to watch. The ticket is
+	// the capability broadcast_hls.go actually accepts, so removing it is what
+	// enforces a private stream here — see goliveRedact on why this redacts
+	// rather than 404s.
+	goliveRedact(ctx, uid, b)
+
+	// TELL THE CALLER WHICH SIDE OF THE STAGE THEY ARE ON.
+	//
+	// Without this the client had no way to know, so app/live-view.tsx joined the
+	// room only when a `host=1` URL PARAM was present — a value the client made
+	// up about itself. An invited co-host was therefore handed a perfectly good
+	// publish token by /token and never used it: they sat in HLS like any viewer,
+	// and the 20-seat stage could only ever hold one person.
+	//
+	// Advertised, never trusted. The token endpoint recomputes it, so a client
+	// that lies about myRole gains nothing — it would still be minted an audience
+	// grant, and LiveKit would refuse its camera.
+	//
+	// ponytail: one indexed EXISTS per read for non-hosts, and this read is polled
+	// every 12s per viewer. Fine into the thousands; at millions cache it per
+	// (broadcast, user) in Redis with the invite write busting the key. Not worth
+	// building until viewer counts ask for it.
+	b.MyRole = string(goliveStageRole(ctx, uid, id, b.HostID))
 	httpx.JSON(w, 200, b)
 }
 
@@ -313,7 +480,7 @@ func broadcastSetHLS(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 409, "Broadcast is not waiting to go live")
 		return
 	}
-	metrics.Inc("broadcast_live")
+	goliveMetric("live")
 	httpx.JSON(w, 200, b)
 }
 
@@ -348,9 +515,29 @@ func broadcastToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg := livekit.ConfigFromEnv()
-	if !cfg.Configured() {
-		httpx.Err(w, 503, "Live streaming is not configured on this server")
+	// AUDIENCE AUTHORIZATION HAPPENS BEFORE THE TOKEN IS MINTED.
+	//
+	// This is the gate the brief calls for on Private Live: a stranger asking for
+	// a credential to someone's private stream is refused here, so no LiveKit
+	// token for that room is ever created — not a subscribe-only one either.
+	// Refused outright rather than redacted (unlike the metadata reads) because
+	// this endpoint GRANTS media access; there is nothing to hand back safely.
+	if !goliveMayWatch(ctx, uid, b) {
+		goliveLog("TOKEN_DENIED", b.ID, b.Room, uid, "visibility="+b.Visibility)
+		goliveMetric("token_denied")
+		// 404, matching the not-found reply above: a 403 would confirm that a
+		// private broadcast with this id exists.
+		httpx.Err(w, 404, "Broadcast not found")
+		return
+	}
+
+	// The GO LIVE project, never the calling one. Usable() also refuses a config
+	// that has been pointed at the calling cluster's credentials — an overlap
+	// must fail, not work.
+	gocfg := golive.ConfigFromEnv()
+	if !gocfg.Usable() {
+		goliveMetric("token_unconfigured")
+		httpx.Err(w, 503, "Go Live is not configured on this server")
 		return
 	}
 
@@ -362,24 +549,16 @@ func broadcastToken(w http.ResponseWriter, r *http.Request) {
 	// immediate in effect: the next token they mint is audience again, and
 	// LiveKit refuses their camera at the media server rather than the UI
 	// hiding a button.
-	role := livekit.Role("audience")
-	switch {
-	case b.HostID == uid:
-		role = livekit.Role("host")
-	default:
-		var accepted bool
-		_ = db.WithUser(ctx, uid, func(tx pgx.Tx) error {
-			return tx.QueryRow(ctx,
-				`SELECT TRUE FROM broadcast_invites
-				  WHERE broadcast_id = $1 AND invitee_id = $2 AND seen_at IS NOT NULL`,
-				id, uid).Scan(&accepted)
-		})
-		if accepted {
-			role = livekit.Role("speaker")
-		}
-	}
+	// Shared with GET /broadcasts/{id}, which advertises the same role so the
+	// client knows whether to join the room at all. One function, so the role a
+	// client is TOLD it has and the role its token GRANTS cannot drift apart.
+	role := goliveStageRole(ctx, uid, id, b.HostID)
 
-	token, err := livekit.Mint(cfg, livekit.MintArgs{
+	// gocfg.Config — the Go Live signing key. An audience grant from GrantFor has
+	// canPublish=false and an EMPTY publish-source list, so a viewer cannot send
+	// camera, microphone or screen even if the client asks: the media server
+	// refuses the track. Nothing the client sends influences `role`.
+	token, err := livekit.Mint(gocfg.Config, livekit.MintArgs{
 		Identity: uid,
 		Room:     b.Room,
 		Role:     role,
@@ -389,10 +568,11 @@ func broadcastToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	metrics.Inc("broadcast_token_" + string(role))
+	goliveMetric("token_" + string(role))
+	goliveLog("TOKEN_ISSUED", b.ID, b.Room, uid, "role="+string(role), "visibility="+b.Visibility)
 	httpx.JSON(w, 200, map[string]any{
 		"token":    token,
-		"url":      cfg.URL,
+		"url":      gocfg.URL,
 		"room":     b.Room,
 		"identity": uid,
 		"role":     string(role),
@@ -422,6 +602,20 @@ func broadcastWatch(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	uid := httpx.UserFrom(r).ID
 	id := r.PathValue("id")
+
+	// A private stream's viewer set and analytics must not be writable by someone
+	// who may not watch it. Without this an uninvited account could heartbeat
+	// into a private broadcast, inflate the host's live count and appear in
+	// broadcast_viewers — with no media, but the metrics are the host's and the
+	// presence is a leak.
+	//
+	// One indexed query, before the Redis write, on the hot path by design — see
+	// goliveMayWatchID.
+	if !goliveMayWatchID(ctx, uid, id) {
+		goliveMetric("watch_denied")
+		httpx.Err(w, 404, "Broadcast not found")
+		return
+	}
 
 	count := 0
 	if redisx.Client != nil {
@@ -516,10 +710,22 @@ func broadcastChatList(w http.ResponseWriter, r *http.Request) {
 	out := []broadcastMessage{}
 	_ = db.WithUser(ctx, uid, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx,
+			// The EXISTS is the private-stream gate, folded into the query the
+			// handler already runs rather than added as a second round trip: this
+			// is polled every 3 s by every viewer. A stranger gets an empty list,
+			// which is also what they would see if the stream had no messages —
+			// no existence is confirmed.
 			`SELECT c.id, c.user_id::text, COALESCE(u.name, ''), c.message, c.created_at
 			   FROM broadcast_chat c JOIN users u ON u.id = c.user_id
 			  WHERE c.broadcast_id = $1 AND c.id > $2
-			  ORDER BY c.id DESC LIMIT 100`, id, after)
+			    AND EXISTS (SELECT 1 FROM broadcast_sessions b
+			                 WHERE b.id = c.broadcast_id
+			                   AND (b.visibility = 'public'
+			                        OR b.host_id = $3
+			                        OR EXISTS (SELECT 1 FROM broadcast_invites i
+			                                    WHERE i.broadcast_id = b.id
+			                                      AND i.invitee_id = $3)))
+			  ORDER BY c.id DESC LIMIT 100`, id, after, uid)
 		if err != nil {
 			return err
 		}
@@ -574,9 +780,21 @@ func broadcastChatPost(w http.ResponseWriter, r *http.Request) {
 		// The RLS policy in 079 refuses an insert once the broadcast is not
 		// 'live', so an ended stream stops accepting messages at the database
 		// rather than by convention here.
+		// INSERT ... SELECT so the live-and-authorized test is part of the write
+		// itself: a row appears only if the broadcast is live AND this user may
+		// watch it. Zero rows returns pgx.ErrNoRows, which the caller already
+		// turns into the same 409 it used for "not accepting chat" — a stranger
+		// cannot distinguish a private stream from an ended one.
 		return tx.QueryRow(ctx,
 			`INSERT INTO broadcast_chat (broadcast_id, user_id, message)
-			 VALUES ($1, $2, $3) RETURNING id, created_at`, id, uid, msg).
+			 SELECT $1, $2, $3
+			   FROM broadcast_sessions b
+			  WHERE b.id = $1 AND b.status = 'live'
+			    AND (b.visibility = 'public'
+			         OR b.host_id = $2
+			         OR EXISTS (SELECT 1 FROM broadcast_invites i
+			                     WHERE i.broadcast_id = b.id AND i.invitee_id = $2))
+			 RETURNING id, created_at`, id, uid, msg).
 			Scan(&m.ID, &m.CreatedAt)
 	})
 	if err != nil {
@@ -585,7 +803,7 @@ func broadcastChatPost(w http.ResponseWriter, r *http.Request) {
 	}
 	m.UserID = uid
 	m.Message = msg
-	metrics.Inc("broadcast_chat_sent")
+	goliveMetric("chat_sent")
 	httpx.JSON(w, 200, m)
 }
 
@@ -637,10 +855,15 @@ func broadcastEnd(w http.ResponseWriter, r *http.Request) {
 	// expensive leak in this stack, since egress is the only CPU-bound service.
 	// Best-effort: the row is already ended, and a failure here must not turn a
 	// successful stop into an error the host sees.
+	//
+	// Stopped against the GO LIVE project. Using livekit.ConfigFromEnv() here
+	// would address the CALLING cluster, which does not know this egress id — so
+	// every broadcast would end in the database while its transcoder kept running
+	// and kept writing segments.
 	if egressID != "" {
-		if e := livekit.StopHLS(ctx, livekit.ConfigFromEnv(), egressID); e != nil {
-			log.Printf("[broadcast] egress %s did not stop cleanly: %v", egressID, e)
-			metrics.Inc("broadcast_egress_stop_failed")
+		if e := livekit.StopHLS(ctx, golive.ConfigFromEnv().Config, egressID); e != nil {
+			goliveLog("EGRESS_STOP_FAILED", id, "", uid, "egress_id="+egressID, "error="+e.Error())
+			goliveMetric("egress_stop_failed")
 		}
 	}
 	if err != nil || b == nil {
@@ -650,6 +873,6 @@ func broadcastEnd(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, 200, map[string]any{"ok": true, "alreadyEnded": true})
 		return
 	}
-	metrics.Inc("broadcast_ended")
+	goliveMetric("ended")
 	httpx.JSON(w, 200, b)
 }

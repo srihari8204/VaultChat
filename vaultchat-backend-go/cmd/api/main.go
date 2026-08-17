@@ -65,6 +65,22 @@ func main() {
 	// Egress lifecycle → broadcast status. Under /internal/, which Caddy 404s
 	// from outside, and signature-verified on top of that.
 	routes.RegisterBroadcastWebhook(mux)
+	// Go Live runs its OWN LiveKit deployment (internal/golive), so it needs its
+	// own receiver — deliveries are signed with a different project's secret and
+	// the calling receiver above would reject them, correctly. Also carries the
+	// host-presence events the calling one has no reason to handle.
+	routes.RegisterGoLiveWebhook(mux)
+	// GET /golive/health — Go Live's own liveness. Reports the Go Live LiveKit
+	// only; a failure here can never mark the calling LiveKit unhealthy.
+	routes.RegisterGoLive(mux)
+	// Polls: the one thing the UNBOUNDED audience writes to. Live tallies come
+	// from Redis sets, the durable record from Postgres — same split the viewer
+	// and like counts already use.
+	routes.RegisterGoLivePolls(mux)
+	// Shareable Private Live invitations. The link IS the access mechanism —
+	// the host does not pick invitees up front. Redeeming writes an ordinary
+	// broadcast_invites row, so every existing gate applies unchanged.
+	routes.RegisterGoLiveInvites(mux)
 	routes.RegisterUploads(mux)
 	routes.RegisterChannels(mux)
 	routes.RegisterVaultbeam(mux)
@@ -196,6 +212,11 @@ func main() {
 	// index over the non-terminal statuses, so a single wedged row stops that
 	// account going live again permanently — see broadcast_reaper.go.
 	routes.StartBroadcastReaper(ctx)
+	// Host-disconnect grace period. Separate from the reaper above because it
+	// acts on a signal that one does not have — host_left_at, written by the Go
+	// Live webhook — which is what makes a 90-second verdict safe where the
+	// reaper could only justify twelve hours.
+	routes.StartGoLiveHostSweep(ctx)
 	// Retention observability: how many bodies exist, and how many are past
 	// their deadline. `message_bodies_overdue` should sit at ~0 — a non-zero
 	// value that persists is the signal that the expiry sweep has stopped and

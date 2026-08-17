@@ -127,6 +127,56 @@ services:
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-}
       LIVEKIT_URL: ${LIVEKIT_URL:-}
+      # ── GO LIVE — a SEPARATE LiveKit project, never these credentials ──
+      #
+      # Broadcasting used to mint tokens from LIVEKIT_* above: same key, same
+      # secret, same server as 1:1 and group calling. One blast radius for two
+      # products with opposite risk profiles — a viral stream that exhausted the
+      # SFU would have taken calling down with it.
+      #
+      # THERE IS NO FALLBACK. If these are unset, POST /broadcasts answers 503
+      # and says so; it does NOT quietly use LIVEKIT_* (internal/golive/config.go
+      # ConfigFromEnv). Setting them to the SAME key or secret as LIVEKIT_* is
+      # also refused — Usable() treats an overlap as a misconfiguration, because
+      # a copy-paste that silently re-couples the two tiers is the realistic way
+      # this isolation gets undone and it must fail rather than work.
+      #
+      # GOLIVE_LIVEKIT_URL is what the CLIENT dials, so it must be the public
+      # wss:// address of the Go Live SFU (port 7890 — see livekit/golive.yaml),
+      # not the in-network one and not calling's 7880.
+      GOLIVE_LIVEKIT_API_KEY: ${GOLIVE_LIVEKIT_API_KEY:-}
+      GOLIVE_LIVEKIT_API_SECRET: ${GOLIVE_LIVEKIT_API_SECRET:-}
+      GOLIVE_LIVEKIT_URL: ${GOLIVE_LIVEKIT_URL:-}
+      # Room namespace. Default "golive_" — set only to migrate an existing
+      # deployment, since changing it strands rooms already in flight.
+      GOLIVE_ROOM_PREFIX: ${GOLIVE_ROOM_PREFIX:-}
+      # Host-disconnect grace period (Go duration, e.g. "90s"). How long a host
+      # may be gone from the room before the broadcast is ended and its egress
+      # stopped — internal/routes/golive_reaper.go. GOLIVE_HOST_REAPER=off
+      # disables the sweep entirely if a bad value ever needs neutralising
+      # without a rollback.
+      GOLIVE_HOST_GRACE: ${GOLIVE_HOST_GRACE:-}
+      GOLIVE_HOST_REAPER: ${GOLIVE_HOST_REAPER:-}
+      # ── playback origin ──────────────────────────────────────────────
+      #
+      # NEITHER OF THESE WAS PASSED THROUGH, and that quietly defeated both.
+      #
+      # livekit.PlaybackBase() reads BROADCAST_CDN_BASE, then PUBLIC_BASE_URL,
+      # then falls back to the literal https://api.corefinite.com. With the
+      # compose file forwarding neither, the fallback was the ONLY reachable
+      # branch: every playback URL on every deployment was hardcoded to that one
+      # hostname, and setting BROADCAST_CDN_BASE in .env — the documented way to
+      # put a CDN in front of broadcasting — did nothing at all.
+      #
+      # Found on the bench, where broadcast_sessions.hls_url came back as
+      # https://api.corefinite.com/... on a machine that has never been near
+      # production. A phone on that LAN would have fetched PRODUCTION segments.
+      #
+      # BROADCAST_CDN_BASE is the CDN hostname once one is in front (see
+      # docs/GOLIVE_DEPLOY.md); PUBLIC_BASE_URL is this deployment's own origin
+      # and is the right answer when there is no CDN yet.
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      BROADCAST_CDN_BASE: ${BROADCAST_CDN_BASE:-}
       # Disk-stored attachments MUST be shared with Node while both backends
       # can serve /uploads (strangler period) — same dir, both processes.
       UPLOAD_DIR: /data/uploads
@@ -447,6 +497,129 @@ services:
         limits:
           cpus: "${EGRESS_CPUS:-2}"
           memory: ${EGRESS_MEMORY:-2g}
+
+  # ══════════════════════════════════════════════════════════════════════
+  #  GO LIVE BROADCASTING — a SEPARATE LiveKit deployment
+  # ══════════════════════════════════════════════════════════════════════
+  #
+  # Everything below is Go Live's. Nothing above it changes, and neither half
+  # needs the other to run:
+  #
+  #   docker compose --profile sfu    up -d livekit egress          # calling
+  #   docker compose --profile golive up -d golive-livekit golive-egress
+  #
+  # Bring Go Live down and calling is untouched; bring calling down and a
+  # broadcast in flight keeps streaming. That independence is the requirement,
+  # and the profiles are how it is enforced rather than promised.
+  #
+  #   component      calling                   Go Live
+  #   ─────────────────────────────────────────────────────────────────
+  #   SFU service    livekit                   golive-livekit
+  #   egress service egress                    golive-egress
+  #   config file    livekit/livekit.yaml      livekit/golive.yaml
+  #   ports          7880 / 7881 / 7882        7890 / 7891 / 7892
+  #   credentials    LIVEKIT_*                 GOLIVE_LIVEKIT_*
+  #   rooms          call-<id>                 golive_<broadcast-id>
+  #   redis keyspace db 0                      db 3
+  #   webhook        /internal/livekit/webhook /internal/golive/webhook
+  #   health         GET /health               GET /golive/health
+  #   profile        sfu                       golive
+  #
+  # PROD SAFETY: bring these up BY NAME. `--remove-orphans` against this stack
+  # deletes services that are running but not in the composed set, and the live
+  # egress container is one of them.
+  golive-livekit:
+    image: livekit/livekit-server:v1.8
+    restart: unless-stopped
+    profiles: ["golive"]
+    # Host networking for the same reason as the calling SFU: RTC needs its
+    # ports reachable at the host's real address, and NAT-ing media through the
+    # Docker bridge both costs throughput and breaks the ICE candidates clients
+    # are handed. The two host-networked SFUs coexist because livekit/golive.yaml
+    # binds a different port triple — a collision would fail to bind loudly, not
+    # corrupt anything quietly.
+    network_mode: host
+    volumes:
+      - ./livekit/golive.yaml:/etc/livekit.yaml:ro
+    environment:
+      # A DIFFERENT "key: secret" pair from LIVEKIT_KEYS. Generate its own:
+      #   docker run --rm livekit/livekit-server generate-keys
+      # The same key and secret go to go-api as GOLIVE_LIVEKIT_API_KEY/SECRET.
+      # Reusing the calling pair here is refused by the backend (golive.Usable)
+      # and defeats the entire point of this block.
+      LIVEKIT_KEYS: ${GOLIVE_LIVEKIT_KEYS:-}
+    command: --config /etc/livekit.yaml
+
+  # Go Live's own transcoder: room -> HLS. Separate from `egress` above so a
+  # broadcast render that pins the CPU cannot starve anything the calling SFU
+  # might one day record, and so the two can be restarted independently.
+  golive-egress:
+    image: livekit/egress:${LIVEKIT_EGRESS_VERSION:-v1.8.4}
+    restart: unless-stopped
+    profiles: ["golive"]
+    # Egress renders the room in headless Chrome and Chrome's sandbox needs it.
+    cap_add:
+      - SYS_ADMIN
+    # golive-livekit runs network_mode: host, so it is NOT on this compose
+    # network and cannot be reached by service name.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      EGRESS_CONFIG_BODY: |
+        # db 3 — the SAME keyspace livekit/golive.yaml uses, and NOT db 0 where
+        # the calling SFU's egress registers. Egress and its server find each
+        # other through these keys; pointed at different databases they never
+        # meet and every broadcast dies in 'starting' with no visible error.
+        redis:
+          address: redis:6379
+          db: 3
+        api_key: ${GOLIVE_LIVEKIT_API_KEY:-}
+        api_secret: ${GOLIVE_LIVEKIT_API_SECRET:-}
+        # Port 7890 — the Go Live SFU. 7880 would be the calling one.
+        ws_url: ${GOLIVE_EGRESS_WS_URL:-ws://host.docker.internal:7890}
+        insecure: ${GOLIVE_EGRESS_INSECURE:-true}
+        log_level: info
+        # Object storage is deliberately SHARED with the rest of the stack: a
+        # bucket is not a media server, and the segment layout must match what
+        # internal/livekit/egress.go signs its segment_outputs with or the
+        # playlist lands somewhere the viewer's URL does not point at. Isolation
+        # here is the media SERVER, not the CDN tier.
+        s3:
+          access_key: ${S3_ACCESS_KEY:-${MINIO_USER:-vaultchat}}
+          secret: ${S3_SECRET_KEY:-${MINIO_PASS:-vaultchat_dev_secret}}
+          bucket: ${BROADCAST_BUCKET:-vaultchat-broadcast}
+          endpoint: ${S3_ENDPOINT:-http://minio:9000}
+          region: ${S3_REGION:-auto}
+          force_path_style: true
+    depends_on:
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+    # Its own budget, separate from the calling egress's. This is the service
+    # that actually burns CPU on a box that also runs Postgres — unbounded, one
+    # runaway broadcast transcode starves the database.
+    #
+    # FOUR IS A FLOOR, NOT A PREFERENCE. Room-composite egress — the mode every
+    # broadcast uses — refuses to run below it, and the refusal is a startup log
+    # line rather than an error at request time:
+    #
+    #   ERROR egress not enough cpu for some egress types
+    #         {"minimumCpu": 4, "recommended": 4, "available": 2}
+    #
+    # The service then reports "service ready" and accepts the RPC, so nothing
+    # upstream looks broken: StartRoomCompositeEgress simply never produces a
+    # playlist and every broadcast dies in 'starting'. Measured on this bench
+    # with the previous default of 2 — the container saw 2 cores on an 8-core
+    # host purely because of this limit.
+    #
+    # Raise it, never lower it. On a box with fewer than 4 usable cores, Go Live
+    # broadcasting cannot work at all and the honest answer is a bigger box.
+    deploy:
+      resources:
+        limits:
+          cpus: "${GOLIVE_EGRESS_CPUS:-4}"
+          memory: ${GOLIVE_EGRESS_MEMORY:-2g}
 
   # The vaultlens-worker service lived here. It was the LAST running Node
   # process in this stack; removing it makes the default service set fully

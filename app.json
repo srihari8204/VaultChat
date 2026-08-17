@@ -45,6 +45,16 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            { "scheme": "https", "host": "api.corefinite.com", "pathPrefix": "/live/join" }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ],
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
@@ -127,6 +137,7 @@
       "./plugins/withBackupLockdown.js",
       "./plugins/withAndroidFeatures.js",
       "./plugins/withVaultChatCalls.js",
+      "./plugins/withVaultChatGoLive.js",
       "./plugins/withVaultBeamStream.js",
       "./plugins/withVaultChatSync.js",
       "./plugins/withGradleMemory.js",

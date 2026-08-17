@@ -1,0 +1,43 @@
+# docker-compose.golive-local.yml — run the Go Live tier on a DEV MACHINE.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.golive-local.yml \
+#     --profile golive up -d golive-livekit golive-egress
+#
+# WHAT THIS OVERRIDES AND WHY
+# ---------------------------
+# Exactly one thing, in three places: production runs golive-livekit with
+# network_mode: host, and Docker Desktop for Windows/macOS cannot. A
+# host-networked container there binds inside the Linux VM — unreachable from
+# the host browser and from a phone on the LAN — so a bench run would sit at
+# "connecting" forever with no error worth reading.
+#
+# So on a dev machine it joins the compose bridge and PUBLISHES its ports
+# instead. Ports, credentials, room namespace, Redis keyspace and webhook path
+# are all unchanged, which is what keeps a bench result meaningful.
+#
+# NOT for production. docker-compose.prod.yml is the production overlay and does
+# not include this file.
+services:
+  golive-livekit:
+    # !reset rather than an empty string: compose has no way to "unset" a scalar
+    # from a later file otherwise, and network_mode: "" is a parse error.
+    network_mode: !reset null
+    ports:
+      - "7890:7890"          # signalling / REST
+      - "7891:7891/tcp"      # RTC over TCP
+      - "7892:7892/udp"      # RTC over UDP — the one media actually uses
+    volumes: !override
+      - ./livekit/golive.local.yaml:/etc/livekit.yaml:ro
+
+  # golive-egress needs NO override here, and that is worth stating because the
+  # obvious one does not work.
+  #
+  # Its ws_url lives inside EGRESS_CONFIG_BODY, which compose interpolates from
+  # `.env` and the shell WHEN IT PARSES THE FILE. Setting GOLIVE_EGRESS_WS_URL
+  # as a service environment variable in this override is therefore useless —
+  # the value was already substituted, and the container just receives an extra
+  # variable nothing reads. `docker compose config` shows the old ws_url still
+  # baked in, which is the only way to catch it.
+  #
+  # So the bench sets GOLIVE_EGRESS_WS_URL in the ROOT .env instead, where
+  # interpolation can see it.

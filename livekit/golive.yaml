@@ -1,0 +1,150 @@
+# LiveKit SFU — GO LIVE BROADCASTING ONLY.
+#
+# ┌───────────────────────────────────────────────────────────────────────────┐
+# │ NEVER COPY THIS FILE ONTO PROD. PATCH THE ONE LINE YOU MEAN, IN PLACE.    │
+# │                                                                           │
+# │ The deployed copy carries a REAL api_key under `webhook:`; the version    │
+# │ here carries a placeholder, because secrets do not live in the repo.      │
+# │ Copying this over it on 2026-08-17 crash-looped the SFU with              │
+# │ "api_key is required to use webhooks" and took /golive/health to 503.     │
+# │                                                                           │
+# │ The deployed copy also has CRLF line endings, so an anchored              │
+# │ `sed 's/^  x: 20$/…/'` matches NOTHING — the $ sits before the \r. Target │
+# │ the line number, then grep the api_key back to prove it survived.         │
+# └───────────────────────────────────────────────────────────────────────────┘
+#
+# THIS IS NOT THE CALLING SFU. livekit/livekit.yaml is, it runs on 7880/7881/7882
+# with the LIVEKIT_* credentials, and NOTHING here may be applied to it. The two
+# processes share a box and share nothing else: different ports, different keys,
+# different room namespace, different Redis keyspace, different webhook target,
+# different logs, independent restart.
+#
+# WHY THE SPLIT EXISTS
+# --------------------
+# Broadcasting and calling have opposite risk profiles on one machine. A
+# broadcast is unbounded, unencrypted, and drags egress — headless Chrome plus
+# ffmpeg, the only CPU-bound thing in the stack — along with it. A call is small,
+# frame-encrypted, and must not go down. Sharing one SFU meant a viral stream
+# could take calling with it and a leaked broadcast key was also a calling key.
+#
+# PORTS — every one differs from livekit.yaml, deliberately
+#   7890  signalling / REST     (calling: 7880)
+#   7891  RTC over TCP fallback (calling: 7881)
+#   7892  RTC over UDP          (calling: 7882)
+#
+# Both run network_mode: host, so a collision here would not be a subtle bug —
+# the second process to start would simply fail to bind. Changing any of these
+# means changing GOLIVE_LIVEKIT_URL and the firewall together.
+
+port: 7890
+
+rtc:
+  # Single UDP port, same reasoning as the calling SFU: one firewall rule rather
+  # than a fifty-thousand-port range on a box that also serves Postgres. LiveKit
+  # multiplexes every participant over it.
+  udp_port: 7892
+  # TCP fallback for networks that block UDP outright. Without it, corporate
+  # wifi and some mobile carriers simply cannot go live, and the failure looks
+  # like "the broadcast never starts" with no clue why.
+  tcp_port: 7891
+  # STUN-detected public address, as on the calling SFU. Note that LiveKit reads
+  # this file as PLAIN YAML and does NOT expand ${VAR} — a variable reference
+  # here is delivered as literal characters to a field expecting an IP. If a
+  # future deploy sits behind NAT where STUN resolves wrongly, put a literal
+  # address here, never a variable.
+  use_external_ip: true
+
+# Reuse the coturn already running on this host, exactly as calling does. One
+# relay, one credential, one thing to monitor — and TURN is stateless with
+# respect to which SFU is being relayed to, so this shares nothing that could
+# couple the two deployments.
+turn:
+  enabled: false
+
+# REQUIRED, unlike the calling SFU's commented-out block.
+#
+# Egress and livekit-server find each other THROUGH REDIS. Broadcasting is
+# entirely dependent on egress (it is what writes the HLS playlist), so without
+# this the Go Live server has no egress to talk to and every broadcast dies in
+# 'starting'. Calling needs no egress and so needs no Redis, which is why that
+# file leaves it off.
+#
+# 127.0.0.1:16379 because this container runs network_mode: host and therefore
+# cannot resolve the `redis` compose service name. That published loopback port
+# already exists for the calling SFU (docker-compose.prod.yml) — this reuses the
+# same datastore, not the same keyspace.
+#
+# db: 3 is the isolation. LiveKit stores room and participant state under fixed
+# key names; two servers sharing db 0 would read each other's rooms and each
+# other's egress registrations, which is precisely the coupling the separate
+# deployment exists to remove. The calling SFU uses the default db when it is
+# enabled at all, and golive-egress must be pointed at db 3 too or it registers
+# somewhere its server cannot see it.
+redis:
+  address: 127.0.0.1:16379
+  db: 3
+
+# Egress lifecycle -> the Go Live backend.
+#
+# REQUIRED FOR BROADCASTING TO WORK AT ALL. A session leaves 'starting' only when
+# EGRESS_ACTIVE arrives; nothing polls, so without this every broadcast times out
+# on the viewer side. Participant events on this same channel drive the
+# host-disconnect grace period (internal/routes/golive_webhook.go).
+#
+# A DIFFERENT PATH FROM CALLING'S. /internal/livekit/webhook verifies against the
+# LIVEKIT_* secret and would correctly reject everything signed here; this
+# deployment posts to /internal/golive/webhook, which verifies against
+# GOLIVE_LIVEKIT_API_SECRET. Two isolated media servers, two receivers.
+#
+# api_key selects which secret to sign with and MUST equal
+# GOLIVE_LIVEKIT_API_KEY. Replace the placeholder below on deploy — this file is
+# read verbatim, with no ${VAR} expansion (see use_external_ip above).
+#
+# The URL must be reachable FROM THIS CONTAINER. It runs network_mode: host, so
+# it cannot use the `go-api` service name; 127.0.0.1:14000 is where go-api is
+# published on loopback for exactly this reason (docker-compose.prod.yml).
+webhook:
+  api_key: REPLACE_WITH_GOLIVE_LIVEKIT_API_KEY
+  urls:
+    - http://127.0.0.1:14000/internal/golive/webhook
+
+logging:
+  level: info
+  # JSON so a shipper can separate this process's stream from the calling SFU's
+  # without a per-message regex. Go Live logs stay Go Live logs.
+  json: true
+
+room:
+  # Longer than calling's 60s. Egress is asked to start BEFORE the host connects
+  # (internal/livekit/egress.go ensureRoom explains why), so the room has to
+  # outlive the gap between "broadcast created" and "host published" — on a cold
+  # app start over a slow network that is comfortably more than a minute, and a
+  # room reaped in between is a broadcast that dies with no playlist.
+  empty_timeout: 300
+  departure_timeout: 20
+  # THE STAGE: 20 people who may send camera, microphone or screen.
+  #
+  # The AUDIENCE is unbounded and is not counted here, because it never joins
+  # this room at all — viewers watch HLS from object storage. That split is the
+  # whole architecture: unlimited people watching, at most 20 on the stage.
+  #
+  # 20 MEANS 20 HUMANS. Measured, not assumed — egress joins the room and does
+  # appear in `room participants list` (EG_…), so it looks like it should consume
+  # a seat. It does not: it joins HIDDEN, and LiveKit excludes hidden
+  # participants from both `num_participants` and this limit. Verified on the
+  # bench against a live egress: subscribers 0-19 connected and the 21st was
+  # refused with "could not establish signal connection", with the room reporting
+  # num_participants: 20 throughout.
+  #
+  # So do NOT raise this to 21 to "leave room for egress" — that would silently
+  # allow a 21st member onto a stage specified to hold 20.
+  # 70 = the 20-person stage (enforced in Go, routes/golive.go goliveMaxStage)
+  # plus headroom for low-latency WebRTC viewers on a private live.
+  #
+  # THIS IS A BACKSTOP, NOT THE PRODUCT RULE. It counts every member of the
+  # room and cannot tell a publisher from a spectator, so while it was 20 it
+  # doubled as the stage limit only because the audience watched HLS and never
+  # joined. The moment viewers join for low latency, 20 viewers could lock a
+  # co-host out of an otherwise empty stage. The real cap is on PUBLISHERS and
+  # lives on the token, which is the thing that actually grants publishing.
+  max_participants: 70

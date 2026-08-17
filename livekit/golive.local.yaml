@@ -1,0 +1,68 @@
+# Go Live SFU — LOCAL BENCH ONLY. Production uses livekit/golive.yaml.
+#
+# WHY A SECOND FILE INSTEAD OF PARAMETERISING THE FIRST
+# ----------------------------------------------------
+# LiveKit reads its config as PLAIN YAML and does not expand ${VAR}, so nothing
+# in golive.yaml can be varied per environment. Three things genuinely differ on
+# a developer machine, and every one of them is a hard failure if left at the
+# production value:
+#
+#   1. network_mode: host does not work on Docker Desktop for Windows/macOS —
+#      the container would bind inside the Linux VM, unreachable from the host
+#      and from a phone on the LAN. The bench runs on the compose bridge with
+#      published ports instead, which means...
+#   2. ...redis is reachable as `redis:6379`, the service name, rather than the
+#      127.0.0.1:16379 loopback the host-networked production container needs.
+#   3. the webhook can address `go-api:4000` directly for the same reason,
+#      instead of the published loopback port.
+#
+# Everything that matters for what is being TESTED is identical: the ports, the
+# room namespace, the separate credentials, the Redis keyspace (db 3), and the
+# webhook path. A bug found here is a bug in production.
+
+port: 7890
+
+rtc:
+  udp_port: 7892
+  tcp_port: 7891
+  # FALSE, unlike production. On a bench the box has no public IP, and STUN
+  # would resolve the household's WAN address — which is NOT where the phone
+  # should send media. node_ip below pins it to the LAN address instead.
+  use_external_ip: false
+  # The host's LAN address, advertised in ICE candidates so a phone on the same
+  # Wi-Fi can actually reach the media ports. Without it LiveKit advertises the
+  # container's bridge IP (172.x), which no phone can route to, and every join
+  # connects to signalling then times out with no media — the failure that looks
+  # exactly like "the SFU is broken".
+  node_ip: 192.168.1.15
+
+turn:
+  enabled: false
+
+# db 3 — the same keyspace production uses, and NOT db 0 where the calling
+# stack's egress registers. golive-egress must agree or the two never meet.
+redis:
+  address: redis:6379
+  db: 3
+
+# Same path as production, different host: on the bridge network the API is
+# reachable by service name. api_key selects the secret to sign with and MUST
+# equal GOLIVE_LIVEKIT_API_KEY.
+webhook:
+  api_key: APIq4iJZKvUzyvy
+  urls:
+    - http://go-api:4000/internal/golive/webhook
+
+logging:
+  level: debug
+  # Plain text on the bench: these logs are read by a human at a terminal, not
+  # shipped to Loki.
+  json: false
+
+room:
+  empty_timeout: 300
+  departure_timeout: 20
+  # 20 HUMANS on the stage; the audience is unbounded and never joins this room.
+  # Egress joins hidden and does NOT consume a seat — verified here (subs 0-19
+  # connected alongside a live egress, the 21st was refused). See golive.yaml.
+  max_participants: 20

@@ -547,6 +547,9 @@ function RootLayout() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="chat" />
         <Stack.Screen name="join/[code]" options={{ headerShown: false }} />
+        {/* Private Live invitation redeem — the /live/join/<code> link the host
+            copies, and vaultchat://live/join/<code>. */}
+        <Stack.Screen name="live/join/[code]" options={{ headerShown: false }} />
         <Stack.Screen name="videocall" />
         <Stack.Screen name="voicecall" />
         <Stack.Screen name="qr-contact" />
